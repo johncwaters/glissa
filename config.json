@@ -1,0 +1,9 @@
+{
+  "port": 3000,
+  "attentionTimeoutSeconds": 60,
+  "waitingEscalationSeconds": 300,
+  "startingWatchdogSeconds": 10,
+  "projects": [
+    { "name": "glissa", "path": "C:/Users/john.c.waters/source/repos/glissa" }
+  ]
+}
