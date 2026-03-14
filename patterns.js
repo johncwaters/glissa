@@ -167,7 +167,7 @@ class PatternDetector extends EventEmitter {
 // Exports
 // ---------------------------------------------------------------------------
 
-module.exports = { PatternDetector, stripAnsi };
+module.exports = { PatternDetector };
 
 // ---------------------------------------------------------------------------
 // Self-test (run with: node patterns.js)

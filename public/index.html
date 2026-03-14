@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Glissa</title>
+  <link rel="stylesheet" href="/xterm/xterm.css">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="header">
+    <div class="header-inner">
+      <h1 class="header-title">Glissa</h1>
+      <div class="header-right">
+        <button class="btn-settings" id="btn-settings" title="Settings">&#9881; Settings</button>
+        <button class="btn-add-session" id="btn-add-session" title="Add a new session">+ Add Session</button>
+        <span class="header-aggregate" id="aggregate-status"></span>
+        <span class="header-connection" id="connection-status">
+          <span class="connection-dot"></span>
+          <span class="connection-label">Connecting</span>
+        </span>
+      </div>
+    </div>
+  </header>
+  <main class="sessions" id="sessions-container">
+    <!-- Session cards injected here by app.js -->
+  </main>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

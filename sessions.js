@@ -4,16 +4,7 @@ const { EventEmitter } = require('events');
 const { execSync } = require('child_process');
 const { PatternDetector } = require('./patterns');
 const { notify } = require('./notify');
-
-const STATES = Object.freeze({
-  INITIALIZING: 'INITIALIZING',
-  STARTING:     'STARTING',
-  RUNNING:      'RUNNING',
-  WAITING:      'WAITING',
-  IDLE:         'IDLE',
-  DONE:         'DONE',
-  FAILED:       'FAILED'
-});
+const { STATES } = require('./shared/states');
 
 const TRANSITIONS = Object.freeze({
   [STATES.INITIALIZING]: {
@@ -30,14 +21,14 @@ const TRANSITIONS = Object.freeze({
     silence_timeout:  STATES.IDLE,
     process_exit_ok:  STATES.DONE,
     process_exit_fail:STATES.FAILED,
-    user_kill:        STATES.FAILED
+    user_kill:        STATES.DONE
   },
   [STATES.WAITING]: {
-    user_input:       STATES.RUNNING,
-    user_skip:        STATES.RUNNING,
+    user_input:       STATES.RUNNING,  // reserved — no UI yet, but valid state machine path
+    user_skip:        STATES.RUNNING,  // reserved — no UI yet, but valid state machine path
     user_dismiss:     STATES.RUNNING,
     auto_recover:     STATES.RUNNING,
-    user_kill:        STATES.FAILED,
+    user_kill:        STATES.DONE,
     process_exit_ok:  STATES.DONE,
     process_exit_fail:STATES.FAILED
   },
@@ -46,7 +37,7 @@ const TRANSITIONS = Object.freeze({
     prompt_detected:  STATES.WAITING,
     process_exit_ok:  STATES.DONE,
     process_exit_fail:STATES.FAILED,
-    user_kill:        STATES.FAILED
+    user_kill:        STATES.DONE
   },
   [STATES.DONE]: {
     user_restart:     STATES.INITIALIZING
@@ -139,6 +130,14 @@ class Session extends EventEmitter {
 
   get pid() {
     return this.ptyProcess ? this.ptyProcess.pid : null;
+  }
+
+  toSnapshot() {
+    return {
+      name: this.name,
+      state: this.state,
+      auditLog: this.auditLog.slice(-100)
+    };
   }
 
   transition(event, detail) {
@@ -363,20 +362,6 @@ class Session extends EventEmitter {
     setTimeout(poll, interval);
   }
 
-  // -- User action methods (called from server.js) --
-
-  respond(text) {
-    if (this.state !== STATES.WAITING) return false;
-    this.write(text);
-    return this.transition('user_input');
-  }
-
-  skip() {
-    if (this.state !== STATES.WAITING) return false;
-    this.write('\n');
-    return this.transition('user_skip');
-  }
-
   dismiss() {
     if (this.state !== STATES.WAITING) return false;
     return this.transition('user_dismiss');
@@ -394,6 +379,13 @@ class Session extends EventEmitter {
     this.transition('user_restart');
     this.start();
     return true;
+  }
+
+  updateSettings(cfg) {
+    if (cfg.startingWatchdogSeconds != null) this.startingWatchdogMs = cfg.startingWatchdogSeconds * 1000;
+    if (cfg.attentionTimeoutSeconds != null) this.attentionTimeoutMs = cfg.attentionTimeoutSeconds * 1000;
+    if (cfg.waitingEscalationSeconds != null) this.waitingEscalationMs = cfg.waitingEscalationSeconds * 1000;
+    if (cfg.autoRecoverSeconds != null) this._autoRecoverMs = cfg.autoRecoverSeconds * 1000;
   }
 
   destroy() {
@@ -466,4 +458,4 @@ class Session extends EventEmitter {
   }
 }
 
-module.exports = { Session, STATES, TRANSITIONS };
+module.exports = { Session };

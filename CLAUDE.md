@@ -27,8 +27,16 @@ config.json        # Runtime configuration
 
 - `express` — HTTP server and static file serving
 - `ws` — WebSocket server
+- `node-pty` — Pseudo-terminal for spawning Claude Code with real PTY support
+- `@xterm/xterm` — Terminal emulator (loaded in browser via ES modules, not in Node.js)
+- `@xterm/addon-fit` — xterm.js addon for fitting terminal to container (browser only)
+- `@xterm/addon-webgl` — xterm.js addon for WebGL rendering (browser only)
 
-That is the complete list. Do NOT add dependencies without explicit instruction.
+**Notes:**
+- `node-pty` requires C++ build tools (Visual Studio Build Tools on Windows)
+- `@xterm/*` packages are loaded in the browser via ES modules, not in Node.js
+
+Do NOT add dependencies without explicit instruction.
 
 ## Hard Constraints
 
@@ -56,6 +64,25 @@ INITIALIZING → STARTING → RUNNING → WAITING → IDLE → DONE
 ```
 
 States are string constants. Transitions are explicit — no implicit state mutation.
+
+### Session Spawning (node-pty)
+Sessions spawn `claude` via `pty.spawn()` from node-pty (NOT `child_process.spawn`).
+- Claude CLI produces zero output with piped stdio — a real PTY is required.
+- Must unset env vars before spawn: `CLAUDECODE`, `CLAUDE_CODE_SSE_PORT`, `CLAUDE_CODE_ENTRYPOINT`
+- Do NOT use `shell: true` — pass args as array
+- Terminal name: `xterm-256color`, default 80x24
+
+### Dual WebSocket Architecture
+- **Data WebSocket** (`/terminals/:sessionName`): Raw PTY bytes bidirectional. One per session per client.
+- **Control WebSocket** (`/control`): JSON messages for state-change, snapshot, kill, restart.
+- xterm.js in the browser connects to data WebSocket; control panel uses control WebSocket.
+
+### Dashboard Rendering (xterm.js)
+- Each session card contains an xterm.js Terminal instance
+- xterm.js handles ALL ANSI rendering — server is a dumb pipe
+- `@xterm/addon-fit` for resize, `@xterm/addon-webgl` for GPU rendering
+- Browser loads @xterm/* via ES modules (`<script type="module">`)
+- Pattern detection uses ANSI-stripped tap of PTY output (parallel to raw stream)
 
 ### WebSocket Transport
 Use the `ws` package directly. Do NOT use Socket.IO or any abstraction over WebSockets.

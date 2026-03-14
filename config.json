@@ -2,8 +2,23 @@
   "port": 3000,
   "attentionTimeoutSeconds": 60,
   "waitingEscalationSeconds": 300,
-  "startingWatchdogSeconds": 10,
+  "startingWatchdogSeconds": 30,
+  "autoRecoverSeconds": 3,
+  "repoRoots": [
+    "C:\\Users\\john.c.waters\\source\\repos"
+  ],
   "projects": [
-    { "name": "glissa", "path": "C:/Users/john.c.waters/source/repos/glissa" }
+    {
+      "name": "myr",
+      "path": "C:\\Users\\john.c.waters\\source\\repos\\myr"
+    },
+    {
+      "name": "glissa",
+      "path": "C:/Users/john.c.waters/source/repos/glissa"
+    },
+    {
+      "name": "LaunchPoint",
+      "path": "C:\\Users\\john.c.waters\\source\\repos\\LaunchPoint"
+    }
   ]
 }
