@@ -250,9 +250,7 @@ html, body {
 }
 
 /* Disable pointer events on terminal during ANY drag so the full card is a drop target */
-.sessions.drag-active .terminal-wrap,
-.sessions.drag-active .audit-toggle,
-.sessions.drag-active .audit-timeline {
+.sessions.drag-active .terminal-wrap {
   pointer-events: none;
 }
 
@@ -387,10 +385,7 @@ html, body {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
 }
 
-.session-card.minimized .terminal-wrap,
-.session-card.minimized .audit-toggle,
-.session-card.minimized .audit-timeline,
-.session-card.minimized .quick-reply-bar {
+.session-card.minimized .terminal-wrap {
   display: none;
 }
 
@@ -414,9 +409,6 @@ html, body {
   display: none;
 }
 
-.session-card.minimized .session-idle-label {
-  font-size: 10px;
-}
 
 .session-card.minimized .session-actions {
   gap: 4px;
@@ -509,18 +501,6 @@ html, body {
 
 .session-header-spacer {
   flex: 1;
-}
-
-.session-idle-label {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--state-idle);
-  opacity: 0.8;
-  display: none;
-}
-
-.session-idle-label.visible {
-  display: inline;
 }
 
 /* ── State badge ──────────────────────────────────────────── */
@@ -633,84 +613,6 @@ html, body {
 
 .terminal-wrap .xterm-viewport {
   border-radius: 4px;
-}
-
-/* ── Audit timeline ──────────────────────────────────────── */
-.audit-toggle {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 16px;
-  background: var(--bg-surface);
-  border-top: 1px solid var(--border-dim);
-  cursor: pointer;
-  user-select: none;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--text-dim);
-  transition: color var(--transition-fast);
-}
-
-.audit-toggle:hover {
-  color: var(--text);
-}
-
-.audit-toggle-arrow {
-  display: inline-block;
-  transition: transform var(--transition-fast);
-  font-size: 9px;
-}
-
-.audit-toggle.open .audit-toggle-arrow {
-  transform: rotate(90deg);
-}
-
-.audit-timeline {
-  display: none;
-  max-height: 200px;
-  overflow-y: auto;
-  padding: 8px 16px;
-  background: var(--bg-surface);
-  border-top: 1px solid var(--border-dim);
-}
-
-.audit-timeline.open {
-  display: block;
-}
-
-.audit-entry {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  padding: 2px 0;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  line-height: 1.6;
-  color: var(--text-dim);
-}
-
-.audit-time {
-  color: var(--text-muted);
-  flex-shrink: 0;
-  min-width: 70px;
-}
-
-.audit-arrow {
-  color: var(--text-muted);
-  flex-shrink: 0;
-}
-
-.audit-from {
-  color: var(--text-dim);
-}
-
-.audit-to {
-  color: var(--text);
-}
-
-.audit-event {
-  color: var(--text-muted);
-  font-size: 10px;
 }
 
 /* ── Empty state ──────────────────────────────────────────── */
@@ -1181,77 +1083,6 @@ html, body {
 
 .session-card:not(.minimized) .session-name {
   cursor: pointer;
-}
-
-/* ── Quick-reply bar ─────────────────────────────────────── */
-.quick-reply-bar {
-  display: none;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 6px;
-  padding: 8px 12px;
-  background: var(--bg-surface);
-  border-top: 1px solid var(--border-dim);
-}
-
-.session-card[data-state="WAITING"] .quick-reply-bar {
-  display: flex;
-}
-
-.quick-reply-btn {
-  padding: 4px 14px;
-  border: 1px solid var(--border-hover);
-  border-radius: 99px;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  color: var(--text);
-  background: transparent;
-  cursor: pointer;
-  transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
-}
-
-.quick-reply-btn:hover {
-  background: rgba(245, 158, 11, 0.1);
-  border-color: var(--state-waiting);
-  color: var(--state-waiting);
-}
-
-.quick-reply-btn:active {
-  transform: scale(0.97);
-}
-
-.quick-reply-input {
-  flex: 1;
-  min-width: 120px;
-  padding: 4px 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--bg-card);
-  color: var(--text-head);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  outline: none;
-  transition: border-color var(--transition-fast);
-}
-
-.quick-reply-input:focus {
-  border-color: var(--accent);
-}
-
-.quick-reply-input::placeholder {
-  color: var(--text-muted);
-}
-
-.quick-reply-send {
-  border-color: var(--accent-dim);
-  color: var(--accent);
-}
-
-.quick-reply-send:hover {
-  background: rgba(79, 110, 247, 0.12);
-  border-color: var(--accent);
 }
 
 /* ── Guide tooltip ───────────────────────────────────────── */

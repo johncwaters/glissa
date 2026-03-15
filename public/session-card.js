@@ -52,10 +52,6 @@ let _focusedSession = null;
 
 // ── Helpers (private) ────────────────────────────────────────
 
-function formatTime(ts) {
-  return new Date(ts).toLocaleTimeString('en-GB', { hour12: false });
-}
-
 function makeBadge(state) {
   const badge = el('span', 'state-badge');
   badge.dataset.state = state;
@@ -87,29 +83,6 @@ function tryLoadWebGL(ui) {
 function updateButtonVisibility(ui) {
   const state = ui.currentState;
   ui.btnRestart.classList.toggle('visible', KILLABLE_STATES.includes(state) || RESTARTABLE_STATES.includes(state));
-}
-
-function startIdleCounter(ui) {
-  ui.idleLabel.textContent = 'Idle';
-  ui.idleLabel.classList.add('visible');
-}
-
-function stopIdleCounter(ui) {
-  ui.idleLabel.classList.remove('visible');
-  ui.idleLabel.textContent = '';
-}
-
-function appendAuditEntry(ui, entry) {
-  ui.auditLog.push(entry);
-
-  const row = el('div', 'audit-entry');
-  row.appendChild(el('span', 'audit-time', formatTime(entry.timestamp)));
-  row.appendChild(el('span', 'audit-from', entry.from));
-  row.appendChild(el('span', 'audit-arrow', '\u2192'));
-  row.appendChild(el('span', 'audit-to', entry.to));
-  row.appendChild(el('span', 'audit-event', `(${entry.event})`));
-  ui.auditContainer.appendChild(row);
-  ui.auditContainer.scrollTop = ui.auditContainer.scrollHeight;
 }
 
 function connectDataWs(sessionName, ui, term) {
@@ -162,7 +135,6 @@ function buildCardDOM(sessionName, initialState) {
   const badge = makeBadge(state);
   badge.classList.add('session-badge');
   const spacer = el('span', 'session-header-spacer');
-  const idleLabel = el('span', 'session-idle-label');
 
   // Action buttons
   const actions = el('div', 'session-actions');
@@ -174,33 +146,13 @@ function buildCardDOM(sessionName, initialState) {
   btnRemove.title = 'Remove this session';
 
   actions.append(btnRestart, btnRemove);
-  header.append(btnMinimize, nameEl, badge, spacer, idleLabel, actions);
+  header.append(btnMinimize, nameEl, badge, spacer, actions);
 
-  // Terminal + quick-reply + audit
   const termWrap = el('div', 'terminal-wrap');
 
-  // Quick-reply bar (visible only when WAITING)
-  const quickReplyBar = el('div', 'quick-reply-bar');
-  for (const label of ['yes', 'no', 'continue']) {
-    const btn = el('button', 'quick-reply-btn', label);
-    btn.dataset.reply = label;
-    quickReplyBar.appendChild(btn);
-  }
-  const quickReplyInput = document.createElement('input');
-  quickReplyInput.type = 'text';
-  quickReplyInput.className = 'quick-reply-input';
-  quickReplyInput.placeholder = 'Type a reply...';
-  const quickReplySend = el('button', 'quick-reply-btn quick-reply-send', 'Send');
-  quickReplyBar.append(quickReplyInput, quickReplySend);
+  card.append(header, termWrap);
 
-  const auditToggle = el('div', 'audit-toggle');
-  auditToggle.innerHTML = '<span class="audit-toggle-arrow">\u25b6</span> Audit log';
-
-  const auditContainer = el('div', 'audit-timeline');
-
-  card.append(header, termWrap, quickReplyBar, auditToggle, auditContainer);
-
-  return { card, header, badge, idleLabel, nameEl, btnRestart, btnRemove, btnMinimize, termWrap, quickReplyBar, quickReplyInput, quickReplySend, auditToggle, auditContainer };
+  return { card, header, badge, nameEl, btnRestart, btnRemove, btnMinimize, termWrap };
 }
 
 // ── Minimize toggle ──────────────────────────────────────────
@@ -516,41 +468,6 @@ function wireCardEvents(ui, sessionName) {
     toggleFocus(sessionName);
   });
 
-  // Quick-reply buttons
-  ui.quickReplyBar.addEventListener('click', (e) => {
-    const btn = e.target.closest('.quick-reply-btn');
-    if (!btn || btn.classList.contains('quick-reply-send')) return;
-    const text = btn.dataset.reply;
-    if (text && ui.dataWs?.readyState === WebSocket.OPEN) {
-      ui.dataWs.send(JSON.stringify({ type: 'input', data: text + '\r' }));
-    }
-    ui.term.focus();
-  });
-
-  // Quick-reply send button + enter in input
-  function sendQuickReply() {
-    const text = ui.quickReplyInput.value.trim();
-    if (!text) return;
-    if (ui.dataWs?.readyState === WebSocket.OPEN) {
-      ui.dataWs.send(JSON.stringify({ type: 'input', data: text + '\r' }));
-    }
-    ui.quickReplyInput.value = '';
-    ui.term.focus();
-  }
-
-  ui.quickReplySend.addEventListener('click', sendQuickReply);
-  ui.quickReplyInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      sendQuickReply();
-    }
-  });
-
-  ui.auditToggle.addEventListener('click', () => {
-    const isOpen = ui.auditToggle.classList.toggle('open');
-    ui.auditContainer.classList.toggle('open', isOpen);
-    requestAnimationFrame(() => ui.fitAddon.fit());
-  });
 }
 
 function wireTerminalIO(ui, sessionName) {
@@ -611,7 +528,7 @@ export function updateAggregateStatus() {
   document.title = alertCount > 0 ? `(${alertCount}) Glissa` : 'Glissa';
 }
 
-export function createSessionCard(sessionName, initialState, auditLog) {
+export function createSessionCard(sessionName, initialState) {
   const dom = buildCardDOM(sessionName, initialState);
   setupDragAndDrop(dom.card, dom.header, dom.btnMinimize, sessionName);
   container.appendChild(dom.card);
@@ -629,13 +546,6 @@ export function createSessionCard(sessionName, initialState, auditLog) {
     termWrap: dom.termWrap,
     btnRestart: dom.btnRestart,
     btnRemove: dom.btnRemove,
-    idleLabel: dom.idleLabel,
-    quickReplyBar: dom.quickReplyBar,
-    quickReplyInput: dom.quickReplyInput,
-    quickReplySend: dom.quickReplySend,
-    auditLog: [],
-    auditContainer: dom.auditContainer,
-    auditToggle: dom.auditToggle,
     currentState: initialState || STATES.INITIALIZING,
   };
   sessionUIs.set(sessionName, ui);
@@ -644,10 +554,6 @@ export function createSessionCard(sessionName, initialState, auditLog) {
 
   wireCardEvents(ui, sessionName);
   updateButtonVisibility(ui);
-
-  if (auditLog?.length > 0) {
-    for (const entry of auditLog) appendAuditEntry(ui, entry);
-  }
 
   wireTerminalIO(ui, sessionName);
 
@@ -690,13 +596,6 @@ export function applyState(sessionName, state) {
     if (isSoundEnabled()) playAlertSound(getSoundId());
   }
 
-  // Idle counter
-  if (state === STATES.IDLE && prevState !== STATES.IDLE) {
-    startIdleCounter(ui);
-  } else if (state !== STATES.IDLE && prevState === STATES.IDLE) {
-    stopIdleCounter(ui);
-  }
-
   // Clear terminal and show placeholder when session ends
   const ended = state === STATES.DONE || state === STATES.FAILED;
   const wasActive = prevState !== STATES.DONE && prevState !== STATES.FAILED && prevState !== STATES.INITIALIZING;
@@ -716,8 +615,6 @@ export function applyState(sessionName, state) {
 
   updateAggregateStatus();
 }
-
-export { appendAuditEntry };
 
 export function handleSessionsReordered(order) {
   if (_localReorderPending) {

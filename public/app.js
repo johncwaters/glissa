@@ -9,7 +9,7 @@ import { connectControl, setConnectionStateCallback, onControlMessage, sendContr
 import {
   createSessionCard, removeSessionCard, applyState,
   getSessionUIs, updateAggregateStatus, showErrorToast,
-  appendAuditEntry, handleSessionsReordered,
+  handleSessionsReordered,
   exitFocusMode, isFocusActive,
 } from './session-card.js';
 import { createAddSessionDialog, createSettingsDialog } from './dialogs.js';
@@ -131,7 +131,7 @@ function handleSnapshot(sessions) {
   const sessionUIs = getSessionUIs();
   for (const s of sessions) {
     if (!sessionUIs.has(s.name)) {
-      createSessionCard(s.name, s.state, s.auditLog);
+      createSessionCard(s.name, s.state);
     } else {
       applyState(s.name, s.state);
     }
@@ -153,28 +153,11 @@ function handleStateChange(msg) {
 
   // If card doesn't exist yet, create it
   if (!ui) {
-    createSessionCard(msg.session, msg.to, []);
-    const newUi = sessionUIs.get(msg.session);
-    if (newUi) {
-      appendAuditEntry(newUi, {
-        from: msg.from,
-        to: msg.to,
-        event: msg.event,
-        timestamp: msg.timestamp,
-      });
-    }
+    createSessionCard(msg.session, msg.to);
     return;
   }
 
   applyState(msg.session, msg.to);
-
-  // Add to audit log
-  appendAuditEntry(ui, {
-    from: msg.from,
-    to: msg.to,
-    event: msg.event,
-    timestamp: msg.timestamp,
-  });
 
   // On restart (INITIALIZING after DONE/FAILED), reconnect data WS for fresh PTY
   if (msg.to === STATES.INITIALIZING && (msg.from === STATES.DONE || msg.from === STATES.FAILED)) {
@@ -188,9 +171,9 @@ function handleStateChange(msg) {
 const messageHandlers = {
   'snapshot':           (msg) => handleSnapshot(msg.sessions),
   'state-change':       (msg) => handleStateChange(msg),
-  'session-added':      (msg) => { if (!getSessionUIs().has(msg.session)) createSessionCard(msg.session, msg.state, []); },
+  'session-added':      (msg) => { if (!getSessionUIs().has(msg.session)) createSessionCard(msg.session, msg.state); },
   'session-removed':    (msg) => removeSessionCard(msg.session),
-  'session-modified':   (msg) => { removeSessionCard(msg.session); createSessionCard(msg.session, msg.state, []); },
+  'session-modified':   (msg) => { removeSessionCard(msg.session); createSessionCard(msg.session, msg.state); },
   'sessions-reordered': (msg) => handleSessionsReordered(msg.order),
   'error':              (msg) => showErrorToast(msg.message),
   'settings-updated':   () => {},
