@@ -137,27 +137,35 @@
       <div class="header-inner flex items-center justify-between gap-4 px-6 py-2.5 max-w-[1920px] mx-auto">
         <h1 class="header-title font-mono text-base font-bold tracking-wider text-text-head uppercase">Glissa</h1>
         <div class="header-right flex items-center gap-5">
-          <button class="btn-add-session inline-flex items-center gap-1 px-3.5 py-1.5 border border-accent-dim rounded font-mono text-[11px] font-semibold tracking-wide text-accent bg-transparent cursor-pointer transition-colors hover:bg-accent/10 hover:border-accent focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-1 focus-visible:ring-offset-bg" id="btn-add-session" title="Add a new session">+ Add Session</button>
+          <div class="status-indicator" id="status-indicator">
+            <span class="header-connection inline-flex items-center gap-1.5 text-[11px] font-mono text-text-dim" id="connection-status">
+              <span class="connection-dot w-[7px] h-[7px] rounded-full bg-text-dim transition-colors"></span>
+              <span class="connection-label">Connecting</span>
+            </span>
+            <div class="status-tooltip" id="status-tooltip">
+              <span class="header-aggregate" id="aggregate-status"></span>
+            </div>
+          </div>
           <div class="header-menu" id="header-menu">
             <button class="btn-menu" id="btn-menu" title="Menu">&#9776;</button>
             <div class="header-menu-dropdown" id="header-menu-dropdown">
+              <button class="menu-item" id="btn-mute">&#128266; Mute Alerts</button>
               <button class="menu-item" id="btn-settings">&#9881; Settings</button>
               <button class="menu-item menu-item-warning" id="btn-restart">&#8635; Restart Server</button>
               <div class="menu-divider"></div>
               <button class="menu-item menu-item-danger" id="btn-shutdown">Shut Down</button>
             </div>
           </div>
-          <button class="btn-mute" id="btn-mute" title="Mute alerts">&#128266;</button>
-          <span class="header-aggregate text-xs font-mono text-text-dim tracking-tight" id="aggregate-status"></span>
-          <span class="header-connection inline-flex items-center gap-1.5 text-[11px] font-mono text-text-dim" id="connection-status">
-            <span class="connection-dot w-[7px] h-[7px] rounded-full bg-text-dim transition-colors"></span>
-            <span class="connection-label">Connecting</span>
-          </span>
         </div>
       </div>
     </header>
     <div class="minimized-bar" id="minimized-bar">
-      <!-- Minimized session cards move here -->
+      <!-- Minimized session cards injected here -->
+      <div class="session-card minimized ghost-card" id="btn-add-session" role="button" tabindex="0" title="Create a new session">
+        <div class="session-card-header">
+          <span class="session-name">+ New Session</span>
+        </div>
+      </div>
     </div>
     <main class="sessions grid grid-cols-[repeat(auto-fill,minmax(min(100%,720px),1fr))] gap-4 p-5 px-6 max-w-[1920px] mx-auto" id="sessions-container">
       <!-- Session cards injected here by app.js -->

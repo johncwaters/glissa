@@ -6,7 +6,9 @@ import { WebglAddon } from '@xterm/addon-webgl';
 import { Terminal } from '@xterm/xterm';
 import { sendControlMsg } from './control-ws.js';
 // Vite alias — resolves to shared/states.esm.js
-import { STATES, BADGE_LABELS, KILLABLE_STATES, RESTARTABLE_STATES, DISMISSABLE_STATES } from '/shared/states.mjs';
+import { STATES, BADGE_LABELS, KILLABLE_STATES, RESTARTABLE_STATES } from '/shared/states.mjs';
+import { isMinimized, setMinimized, isSoundEnabled, getSoundId } from './ui-prefs.js';
+import { playAlertSound } from './alert-sound.js';
 
 // ── Constants ────────────────────────────────────────────────
 
@@ -42,7 +44,10 @@ const sessionUIs = new Map();
 // ── DOM refs ─────────────────────────────────────────────────
 
 const container = document.getElementById('sessions-container');
+const minimizedBar = document.getElementById('minimized-bar');
 const aggregateEl = document.getElementById('aggregate-status');
+
+let _focusedSession = null;
 
 // ── Helpers (private) ────────────────────────────────────────
 
@@ -94,7 +99,6 @@ function tryLoadWebGL(ui) {
 
 function updateButtonVisibility(ui) {
   const state = ui.currentState;
-  ui.btnDismiss.classList.toggle('visible', DISMISSABLE_STATES.includes(state));
   ui.btnRestart.classList.toggle('visible', KILLABLE_STATES.includes(state) || RESTARTABLE_STATES.includes(state));
 }
 
@@ -159,9 +163,9 @@ let _localReorderPending = false;
 
 function sendReorder() {
   _localReorderPending = true;
-  const order = [...container.querySelectorAll('.session-card')]
-    .map(c => c.dataset.session)
-    .filter(Boolean);
+  const gridCards = [...container.querySelectorAll('.session-card')].map(c => c.dataset.session);
+  const minCards = [...minimizedBar.querySelectorAll('.session-card')].map(c => c.dataset.session);
+  const order = [...gridCards, ...minCards].filter(Boolean);
   sendControlMsg({ type: 'reorder-sessions', order });
 }
 
@@ -176,8 +180,8 @@ function buildCardDOM(sessionName, initialState) {
   // Header
   const header = el('div', 'session-card-header');
 
-  const dragHandle = el('span', 'drag-handle', '\u25bc');
-  dragHandle.title = 'Minimize / Expand';
+  const btnMinimize = el('span', 'btn-minimize', '\u25bc');
+  btnMinimize.title = 'Minimize / Expand';
 
   const nameEl = el('span', 'session-name', sessionName);
   const badge = makeBadge(state);
@@ -188,29 +192,40 @@ function buildCardDOM(sessionName, initialState) {
   // Action buttons
   const actions = el('div', 'session-actions');
 
-  const btnDismiss = el('button', 'btn-action btn-dismiss', 'Dismiss');
-  btnDismiss.title = 'Dismiss false waiting detection';
-
   const btnRestart = el('button', 'btn-action btn-restart', 'Restart');
   btnRestart.title = 'Restart this session';
 
   const btnRemove = el('button', 'btn-action btn-remove visible', 'Remove');
   btnRemove.title = 'Remove this session';
 
-  actions.append(btnDismiss, btnRestart, btnRemove);
-  header.append(dragHandle, nameEl, badge, spacer, idleLabel, actions);
+  actions.append(btnRestart, btnRemove);
+  header.append(btnMinimize, nameEl, badge, spacer, idleLabel, actions);
 
-  // Terminal + audit
+  // Terminal + quick-reply + audit
   const termWrap = el('div', 'terminal-wrap');
+
+  // Quick-reply bar (visible only when WAITING)
+  const quickReplyBar = el('div', 'quick-reply-bar');
+  for (const label of ['yes', 'no', 'continue']) {
+    const btn = el('button', 'quick-reply-btn', label);
+    btn.dataset.reply = label;
+    quickReplyBar.appendChild(btn);
+  }
+  const quickReplyInput = document.createElement('input');
+  quickReplyInput.type = 'text';
+  quickReplyInput.className = 'quick-reply-input';
+  quickReplyInput.placeholder = 'Type a reply...';
+  const quickReplySend = el('button', 'quick-reply-btn quick-reply-send', 'Send');
+  quickReplyBar.append(quickReplyInput, quickReplySend);
 
   const auditToggle = el('div', 'audit-toggle');
   auditToggle.innerHTML = '<span class="audit-toggle-arrow">\u25b6</span> Audit log';
 
   const auditContainer = el('div', 'audit-timeline');
 
-  card.append(header, termWrap, auditToggle, auditContainer);
+  card.append(header, termWrap, quickReplyBar, auditToggle, auditContainer);
 
-  return { card, header, badge, idleLabel, btnDismiss, btnRestart, btnRemove, dragHandle, termWrap, auditToggle, auditContainer };
+  return { card, header, badge, idleLabel, nameEl, btnRestart, btnRemove, btnMinimize, termWrap, quickReplyBar, quickReplyInput, quickReplySend, auditToggle, auditContainer };
 }
 
 // ── Minimize toggle ──────────────────────────────────────────
@@ -218,13 +233,54 @@ function buildCardDOM(sessionName, initialState) {
 function toggleMinimize(sessionName) {
   const ui = sessionUIs.get(sessionName);
   if (!ui) return;
-  const isMinimized = ui.card.classList.toggle('minimized');
-  ui.dragHandle.textContent = isMinimized ? '\u25b6' : '\u25bc';
-  ui.dragHandle.title = isMinimized ? 'Expand' : 'Minimize';
-  if (!isMinimized) {
+  const nowMinimized = ui.card.classList.toggle('minimized');
+  ui.btnMinimize.textContent = nowMinimized ? '\u25b6' : '\u25bc';
+  ui.btnMinimize.title = nowMinimized ? 'Expand' : 'Minimize';
+  if (nowMinimized) {
+    minimizedBar.appendChild(ui.card);
+  } else {
+    container.appendChild(ui.card);
     if (ui.needsWebGLReload) tryLoadWebGL(ui);
     requestAnimationFrame(() => ui.fitAddon.fit());
   }
+  setMinimized(sessionName, nowMinimized);
+}
+
+// ── Focus mode ──────────────────────────────────────────────
+
+function toggleFocus(sessionName) {
+  if (_focusedSession === sessionName) {
+    exitFocusMode();
+    return;
+  }
+  // Exit any existing focus first
+  if (_focusedSession) exitFocusMode();
+
+  const ui = sessionUIs.get(sessionName);
+  if (!ui) return;
+
+  _focusedSession = sessionName;
+  container.dataset.focus = sessionName;
+  ui.card.classList.add('focused');
+  requestAnimationFrame(() => ui.fitAddon.fit());
+}
+
+export function exitFocusMode() {
+  if (!_focusedSession) return;
+  const ui = sessionUIs.get(_focusedSession);
+  _focusedSession = null;
+  delete container.dataset.focus;
+  if (ui) ui.card.classList.remove('focused');
+  // Refit all visible terminals
+  for (const [, u] of sessionUIs) {
+    if (!u.card.classList.contains('minimized')) {
+      requestAnimationFrame(() => { try { u.fitAddon.fit(); } catch {} });
+    }
+  }
+}
+
+export function isFocusActive() {
+  return _focusedSession !== null;
 }
 
 // ── Container-level drag-and-drop ────────────────────────────
@@ -239,7 +295,7 @@ function findDropTarget(x, y) {
   let closestDist = Infinity;
 
   for (const card of allCards) {
-    if (card === sourceCard) continue;
+    if (card === sourceCard || card === _dropZone) continue;
     const rect = card.getBoundingClientRect();
     const cx = rect.left + rect.width / 2;
     const cy = rect.top + rect.height / 2;
@@ -266,34 +322,113 @@ function clearDropIndicators() {
   }
 }
 
+// Drop-zone placeholder shown at the end of the grid when dragging from minimized bar
+const _dropZone = document.createElement('div');
+_dropZone.className = 'session-card drop-zone-placeholder';
+_dropZone.innerHTML = '<div class="drop-zone-label">Drop here to expand</div>';
+let _droppedOnZone = false;
+
+function isFromMinimizedBar() {
+  return _dragSource && _dragSource.card.classList.contains('minimized');
+}
+
+function showDropZone() {
+  if (!_dropZone.parentNode) container.appendChild(_dropZone);
+}
+
+function hideDropZone() {
+  if (_dropZone.parentNode) _dropZone.remove();
+}
+
+// Track when hovering over the drop zone itself
+_dropZone.addEventListener('dragover', (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  e.dataTransfer.dropEffect = 'move';
+  clearDropIndicators();
+  _dropZone.classList.add('drop-zone-active');
+});
+
+_dropZone.addEventListener('dragleave', () => {
+  _dropZone.classList.remove('drop-zone-active');
+});
+
+_dropZone.addEventListener('drop', (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  _dropZone.classList.remove('drop-zone-active');
+  _droppedOnZone = true;
+  clearDropIndicators();
+  hideDropZone();
+  if (!_dragSource) return;
+
+  const sessionName = _dragSource.card.dataset.session;
+  _dragSource.card.classList.remove('minimized');
+  _dragSource.btnMinimize.textContent = '\u25bc';
+  _dragSource.btnMinimize.title = 'Minimize';
+  container.appendChild(_dragSource.card);
+  setMinimized(sessionName, false);
+  if (_dragSource.needsWebGLReload) tryLoadWebGL(_dragSource);
+  requestAnimationFrame(() => _dragSource.fitAddon.fit());
+  sendReorder();
+});
+
 container.addEventListener('dragover', (e) => {
   e.preventDefault();
   e.dataTransfer.dropEffect = 'move';
   clearDropIndicators();
+  if (isFromMinimizedBar()) showDropZone();
+  _dropZone.classList.remove('drop-zone-active');
   const { card, before } = findDropTarget(e.clientX, e.clientY);
   if (card) card.classList.add(before ? 'drop-above' : 'drop-below');
 });
 
 container.addEventListener('dragleave', (e) => {
-  if (!container.contains(e.relatedTarget)) clearDropIndicators();
+  if (!container.contains(e.relatedTarget)) {
+    clearDropIndicators();
+    hideDropZone();
+  }
 });
 
 container.addEventListener('drop', (e) => {
   e.preventDefault();
   clearDropIndicators();
-  if (!_dragSource) return;
+  hideDropZone();
+  if (!_dragSource || _droppedOnZone) { _droppedOnZone = false; return; }
+
+  const fromMinBar = isFromMinimizedBar();
   const { card, before } = findDropTarget(e.clientX, e.clientY);
-  if (!card || card === _dragSource.card) return;
-  container.insertBefore(_dragSource.card, before ? card : card.nextSibling);
+
+  if (fromMinBar) {
+    const sessionName = _dragSource.card.dataset.session;
+    _dragSource.card.classList.remove('minimized');
+    _dragSource.btnMinimize.textContent = '\u25bc';
+    _dragSource.btnMinimize.title = 'Minimize';
+
+    if (card && card !== _dragSource.card) {
+      container.insertBefore(_dragSource.card, before ? card : card.nextSibling);
+    } else {
+      container.appendChild(_dragSource.card);
+    }
+
+    setMinimized(sessionName, false);
+    if (_dragSource.needsWebGLReload) tryLoadWebGL(_dragSource);
+    requestAnimationFrame(() => _dragSource.fitAddon.fit());
+  } else {
+    if (!card || card === _dragSource.card) return;
+    container.insertBefore(_dragSource.card, before ? card : card.nextSibling);
+  }
+
   sendReorder();
 });
 
-function setupDragAndDrop(card, header, dragHandle, sessionName) {
+function setupDragAndDrop(card, header, btnMinimize, sessionName) {
   card.draggable = false;
   let didDrag = false;
 
   header.addEventListener('mousedown', (e) => {
     if (e.target.closest('.session-actions')) return;
+    if (_focusedSession) return; // Disable drag during focus mode
     didDrag = false;
     card.draggable = true;
   });
@@ -302,17 +437,20 @@ function setupDragAndDrop(card, header, dragHandle, sessionName) {
     if (!didDrag) card.draggable = false;
   });
 
-  dragHandle.addEventListener('click', () => {
+  btnMinimize.addEventListener('click', () => {
     if (!didDrag) toggleMinimize(sessionName);
   });
 
   card.addEventListener('dragstart', (e) => {
     didDrag = true;
+    _droppedOnZone = false;
     _dragSource = sessionUIs.get(sessionName);
     e.dataTransfer.effectAllowed = 'move';
     e.dataTransfer.setData('text/plain', sessionName);
     card.classList.add('dragging');
     container.classList.add('drag-active');
+    // Show drop zone immediately when dragging from minimized bar
+    if (card.classList.contains('minimized')) showDropZone();
   });
 
   card.addEventListener('dragend', () => {
@@ -320,6 +458,7 @@ function setupDragAndDrop(card, header, dragHandle, sessionName) {
     card.classList.remove('dragging');
     container.classList.remove('drag-active');
     clearDropIndicators();
+    hideDropZone();
     _dragSource = null;
     for (const [, ui] of sessionUIs) {
       if (!ui.card.classList.contains('minimized')) {
@@ -353,6 +492,26 @@ function setupTerminal(termWrap, ui) {
   // Try WebGL — fall back to canvas silently
   tryLoadWebGL(ui);
 
+  // Clipboard: Ctrl+C (copy selection) / Ctrl+V (paste)
+  term.attachCustomKeyEventHandler((ev) => {
+    if (ev.type !== 'keydown') return true;
+    const ctrl = ev.ctrlKey || ev.metaKey;
+    if (ctrl && ev.key === 'c' && term.hasSelection()) {
+      navigator.clipboard.writeText(term.getSelection()).catch(() => {});
+      term.clearSelection();
+      return false;
+    }
+    if (ctrl && ev.key === 'v') {
+      navigator.clipboard.readText().then((text) => {
+        if (text && ui.dataWs?.readyState === WebSocket.OPEN) {
+          ui.dataWs.send(JSON.stringify({ type: 'input', data: text }));
+        }
+      }).catch(() => {});
+      return false;
+    }
+    return true;
+  });
+
   requestAnimationFrame(() => fitAddon.fit());
 }
 
@@ -364,13 +523,52 @@ function wireCardEvents(ui, sessionName) {
     sendControlMsg({ type, session: sessionName });
   });
 
-  ui.btnDismiss.addEventListener('click', () => {
-    sendControlMsg({ type: 'dismiss', session: sessionName });
-  });
-
   ui.btnRemove.addEventListener('click', () => {
     if (!confirm(`Remove session "${sessionName}"?`)) return;
     sendControlMsg({ type: 'remove-session', session: sessionName });
+  });
+
+  // Click inside terminal clears notification status when WAITING
+  ui.termWrap.addEventListener('mousedown', () => {
+    if (ui.currentState === STATES.WAITING) {
+      sendControlMsg({ type: 'dismiss', session: sessionName });
+    }
+  });
+
+  // Focus mode: double-click session name
+  ui.nameEl.addEventListener('dblclick', (e) => {
+    e.stopPropagation();
+    toggleFocus(sessionName);
+  });
+
+  // Quick-reply buttons
+  ui.quickReplyBar.addEventListener('click', (e) => {
+    const btn = e.target.closest('.quick-reply-btn');
+    if (!btn || btn.classList.contains('quick-reply-send')) return;
+    const text = btn.dataset.reply;
+    if (text && ui.dataWs?.readyState === WebSocket.OPEN) {
+      ui.dataWs.send(JSON.stringify({ type: 'input', data: text + '\r' }));
+    }
+    ui.term.focus();
+  });
+
+  // Quick-reply send button + enter in input
+  function sendQuickReply() {
+    const text = ui.quickReplyInput.value.trim();
+    if (!text) return;
+    if (ui.dataWs?.readyState === WebSocket.OPEN) {
+      ui.dataWs.send(JSON.stringify({ type: 'input', data: text + '\r' }));
+    }
+    ui.quickReplyInput.value = '';
+    ui.term.focus();
+  }
+
+  ui.quickReplySend.addEventListener('click', sendQuickReply);
+  ui.quickReplyInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      sendQuickReply();
+    }
   });
 
   ui.auditToggle.addEventListener('click', () => {
@@ -440,7 +638,7 @@ export function updateAggregateStatus() {
 
 export function createSessionCard(sessionName, initialState, auditLog) {
   const dom = buildCardDOM(sessionName, initialState);
-  setupDragAndDrop(dom.card, dom.header, dom.dragHandle, sessionName);
+  setupDragAndDrop(dom.card, dom.header, dom.btnMinimize, sessionName);
   container.appendChild(dom.card);
 
   const ui = {
@@ -451,11 +649,15 @@ export function createSessionCard(sessionName, initialState, auditLog) {
     dataWs: null,
     card: dom.card,
     badge: dom.badge,
-    dragHandle: dom.dragHandle,
-    btnDismiss: dom.btnDismiss,
+    nameEl: dom.nameEl,
+    btnMinimize: dom.btnMinimize,
+    termWrap: dom.termWrap,
     btnRestart: dom.btnRestart,
     btnRemove: dom.btnRemove,
     idleLabel: dom.idleLabel,
+    quickReplyBar: dom.quickReplyBar,
+    quickReplyInput: dom.quickReplyInput,
+    quickReplySend: dom.quickReplySend,
     auditLog: [],
     auditContainer: dom.auditContainer,
     auditToggle: dom.auditToggle,
@@ -475,6 +677,10 @@ export function createSessionCard(sessionName, initialState, auditLog) {
   }
 
   wireTerminalIO(ui, sessionName);
+
+  // Restore minimized state from localStorage
+  if (isMinimized(sessionName)) toggleMinimize(sessionName);
+
   updateAggregateStatus();
   return ui;
 }
@@ -484,6 +690,9 @@ export function removeSessionCard(sessionName) {
   if (!ui) return;
 
   sessionUIs.delete(sessionName);
+  // Clear focus if this session was focused
+  if (_focusedSession === sessionName) exitFocusMode();
+
   if (ui.dataWs?.readyState <= WebSocket.OPEN) ui.dataWs.close();
   if (ui.term) ui.term.dispose();
   if (ui.idleInterval) clearInterval(ui.idleInterval);
@@ -503,6 +712,11 @@ export function applyState(sessionName, state) {
   ui.card.dataset.state = state;
 
   updateButtonVisibility(ui);
+
+  // Sound alert on WAITING transition
+  if (state === STATES.WAITING && prevState !== STATES.WAITING) {
+    if (isSoundEnabled()) playAlertSound(getSoundId());
+  }
 
   // Idle counter
   if (state === STATES.IDLE && prevState !== STATES.IDLE) {
@@ -541,7 +755,13 @@ export function handleSessionsReordered(order) {
 
   for (const name of order) {
     const ui = sessionUIs.get(name);
-    if (ui?.card) container.appendChild(ui.card);
+    if (!ui?.card) continue;
+    // Keep minimized cards in the minimized bar
+    if (ui.card.classList.contains('minimized')) {
+      minimizedBar.appendChild(ui.card);
+    } else {
+      container.appendChild(ui.card);
+    }
   }
   for (const [, ui] of sessionUIs) {
     if (ui.card.classList.contains('minimized')) {
