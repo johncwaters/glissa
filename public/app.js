@@ -14,6 +14,53 @@ import {
 } from './session-card.js';
 import { createAddSessionDialog, createSettingsDialog } from './dialogs.js';
 import { pruneStale, isSoundEnabled, setSoundEnabled } from './ui-prefs.js';
+import { registerGuide, checkAndStartGuides, isFirstOpen } from './guide.js';
+
+// ── Guided tutorials ──────────────────────────────────────────
+
+registerGuide('welcome', {
+  condition: isFirstOpen,
+  steps: [
+    {
+      target: '#btn-add-session',
+      title: 'Create a Session',
+      body: 'Click here to add a new Claude Code session. Pick a project or enter a path manually.',
+      position: 'top',
+    },
+    {
+      target: '#btn-menu',
+      title: 'Settings & Controls',
+      body: 'Open the menu to configure timeouts, alert sounds, repository roots, or restart the server.',
+      position: 'bottom',
+    },
+    {
+      target: '#connection-status',
+      title: 'Connection Status',
+      body: 'This indicator shows whether the dashboard is connected to the backend server.',
+      position: 'bottom',
+    },
+    {
+      target: '#sessions-container .session-card .session-card-header',
+      title: 'Drag to Reorder',
+      body: 'Grab a session card by its header and drag it to rearrange the dashboard layout.',
+      position: 'bottom',
+    },
+    {
+      target: '#sessions-container .session-card .btn-minimize',
+      title: 'Minimize Sessions',
+      body: 'Click the arrow to collapse a session into the bottom bar. Click again to expand it back.',
+      position: 'right',
+    },
+    {
+      target: '#sessions-container .session-card .session-name',
+      title: 'Focus Mode',
+      body: 'Double-click a session name to enter full-screen focus mode. Press ESC to exit.',
+      position: 'bottom',
+    },
+  ],
+});
+
+let _guidesChecked = false;
 
 // ── Connection status UI ─────────────────────────────────────
 
@@ -92,6 +139,12 @@ function handleSnapshot(sessions) {
 
   pruneStale(sessions.map(s => s.name));
   updateAggregateStatus();
+
+  if (!_guidesChecked) {
+    _guidesChecked = true;
+    // Delay briefly so DOM is settled before positioning tooltips
+    requestAnimationFrame(() => checkAndStartGuides());
+  }
 }
 
 function handleStateChange(msg) {

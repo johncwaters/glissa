@@ -9,6 +9,7 @@ import { sendControlMsg } from './control-ws.js';
 import { STATES, BADGE_LABELS, KILLABLE_STATES, RESTARTABLE_STATES } from '/shared/states.mjs';
 import { isMinimized, setMinimized, isSoundEnabled, getSoundId } from './ui-prefs.js';
 import { playAlertSound } from './alert-sound.js';
+import { el } from './dom-helpers.js';
 
 // ── Constants ────────────────────────────────────────────────
 
@@ -53,13 +54,6 @@ let _focusedSession = null;
 
 function formatTime(ts) {
   return new Date(ts).toLocaleTimeString('en-GB', { hour12: false });
-}
-
-function el(tag, className, text) {
-  const e = document.createElement(tag);
-  if (className) e.className = className;
-  if (text != null) e.textContent = text;
-  return e;
 }
 
 function makeBadge(state) {
