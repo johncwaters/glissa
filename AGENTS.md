@@ -1,4 +1,4 @@
-<!-- Generated: 2026-03-11 -->
+<!-- Generated: 2026-03-11 | Updated: 2026-03-15 -->
 
 # AGENTS.md — Glissa Project Map
 
@@ -8,51 +8,37 @@ Glissa is a lightweight Node.js background process that spawns and manages Claud
 
 ## Root-Level Files
 
-### Core Server & Sessions
+### Core Server & Backend
 
-| File | Lines | Purpose | Key Exports |
-|------|-------|---------|-------------|
-| **server.js** | ~601 | Express HTTP server, dual WebSocket architecture (control + data), session lifecycle, config hot-reload, settings management, graceful shutdown | `app`, `server`, `wss`, `sessionMap`, `controlWss` |
-| **sessions.js** | ~455 | Session class with 7-state machine (INITIALIZING → STARTING → RUNNING → WAITING → IDLE → DONE/FAILED). Spawns Claude CLI via node-pty, PTY lifecycle, pattern detection integration, replay buffer, watchdog/idle/escalation/auto-recover timers | `Session`, `STATES`, `TRANSITIONS`, `GUARDS` |
-| **patterns.js** | ~316 | PatternDetector class (EventEmitter) with 3-layer prompt detection: Layer 1 (exact string matches), Layer 2 (regex patterns), Layer 3 (silence heuristic). ANSI stripping, self-test harness | `PatternDetector`, `stripAnsi()`, self-test via `node patterns.js` |
-| **notify.js** | ~55 | Windows toast notifications via BurntToast PowerShell module with `msg *` fallback. Lazy-detects BurntToast availability on first use | `notify(title, message)` |
+| File | Purpose | Key Exports |
+|------|---------|-------------|
+| **server.js** | Production entry point — creates HTTP server, wires backend, handles SIGINT | `(none — top-level script)` |
+| **backend.js** | Express + WebSocket server factory. Wires control/data WebSocket servers, session lifecycle, config hot-reload, static serving, and graceful shutdown onto a provided HTTP server | `createBackend(httpServer, options)` |
+| **sessions.js** | Session class with 7-state machine (INITIALIZING → STARTING → RUNNING → WAITING → IDLE → DONE/FAILED). Spawns Claude CLI via node-pty, PTY lifecycle, pattern detection integration, replay buffer, watchdog/idle/escalation/auto-recover timers | `Session` |
+| **patterns.js** | PatternDetector class (EventEmitter) with 3-layer prompt detection: Layer 1 (exact string matches), Layer 2 (regex patterns), Layer 3 (silence heuristic). ANSI stripping, self-test harness | `PatternDetector` |
+| **control-handlers.js** | Control WebSocket message handler registry. Handler-map dispatch pattern for all control messages (add/remove/reorder sessions, settings, kill/restart/dismiss, shutdown/restart-server, repo scanning) | `registerControlHandlers(controlWss, deps)` |
+| **config-store.js** | Configuration storage with resolution order (--config flag → ~/.glissa/config.json → ./config.json → auto-seed). Atomic read-modify-write, fs.watch hot-reload with self-write filtering | `createConfigStore()`, `TIMEOUT_KEYS`, `DEFAULT_CONFIG` |
+| **notify.js** | Windows toast notifications via BurntToast PowerShell module with `msg *` fallback. Lazy-detects BurntToast across standard and OneDrive-redirected module paths | `notify(title, message)` |
 
-### Configuration & Manifests
+### Configuration & Build
 
 | File | Purpose |
 |------|---------|
-| **config.json** | Runtime configuration: port, timeout settings (watchdog, silence, idle, escalation, autoRecoverSeconds), repo roots, project definitions. Hot-reloaded by server.js via fs.watch |
-| **package.json** | Project manifest with CommonJS scripts. Dependencies: express, ws, node-pty, @xterm/xterm, @xterm/addon-fit, @xterm/addon-webgl |
+| **config.json** | Runtime configuration: port, timeout settings, repo roots, project definitions. Hot-reloaded by backend.js via config-store.js |
+| **package.json** | Project manifest (CommonJS). Dependencies: express, ws, node-pty, @xterm/*. CLI entry: `bin/glissa.js` |
+| **vite.config.js** | Vite frontend build config (ESM). Tailwind CSS plugin, backend plugin that attaches Express/WS to Vite's dev server, alias for shared/states.esm.js |
 | **CLAUDE.md** | Hard constraints and design decisions for agents working in this codebase |
-
 
 ---
 
 ## Subdirectories
 
-### `public/` — Browser Dashboard
-
-| File | Purpose |
-|------|---------|
-| **index.html** | HTML shell. Loads xterm.js and app.js via ES modules. Contains session card container |
-| **app.js** | Browser-side WebSocket client. Manages xterm.js Terminal instances per session. Handles control messages, input/resize, settings panel, repo scanner, session reordering. ~1158 lines |
-| **style.css** | Dashboard styling: session cards, terminal containers, control panel, responsive layout. ~880 lines |
-
-See `public/AGENTS.md` for detailed documentation of browser-side modules.
-
-### `spike/` — Exploration & Testing
-
-Throwaway scripts for testing and prototyping:
-- `test-piped-stdio.js` — Testing Claude CLI with piped stdio (validates need for real PTY)
-- `test-json-output.js` — Testing JSON output handling
-- `test-stream-json.js` — Testing streaming JSON responses
-- `test-permissions.js` — Testing file/directory permissions
-- `test-interactive.js`, `test-interactive2.js`, `test-interactive3.js`, `test-interactive4.js` — Testing interactive mode prompt detection
-- `run-all-tests.js` — Runner for all test scripts
-- `run-remaining-tests.js` — Runner for failed tests
-- `results.txt`, `results2.txt`, `interactive-results.txt`, `interactive-results2.txt` — Test output logs
-
-See `spike/AGENTS.md` for detailed spike documentation.
+| Directory | Purpose |
+|-----------|---------|
+| `bin/` | CLI entry point for `npx glissa` / global install (see `bin/AGENTS.md`) |
+| `public/` | Browser dashboard — xterm.js terminals, session cards, dialogs (see `public/AGENTS.md`) |
+| `shared/` | Shared state constants (CJS + ESM dual format) (see `shared/AGENTS.md`) |
+| `docs/` | Publishing and CLI testing guides (see `docs/AGENTS.md`) |
 
 ---
 
@@ -67,22 +53,27 @@ See `spike/AGENTS.md` for detailed spike documentation.
   - `{ type: 'session-added', session, state }` — New session created (broadcast)
   - `{ type: 'session-removed', session }` — Session deleted (broadcast)
   - `{ type: 'session-modified', session, state }` — Session state updated (broadcast)
-  - `{ type: 'sessions-reordered', order: [sessionName, ...] }` — Session list reordered (broadcast)
+  - `{ type: 'sessions-reordered', order: [...] }` — Session list reordered (broadcast)
   - `{ type: 'settings', requestId, settings }` — Settings response (unicast)
   - `{ type: 'settings-error', requestId, message }` — Settings error (unicast)
   - `{ type: 'settings-updated', settings }` — Settings broadcast (multicast)
   - `{ type: 'repo-roots-scanned', requestId, directories }` — Repo scan result (unicast)
+  - `{ type: 'shutting-down' }` — Server shutdown initiated
+  - `{ type: 'restarting' }` — Server restart initiated
   - `{ type: 'error', message }` — Generic error (unicast)
 - **Client → Server:**
   - `{ type: 'kill', session }` — Terminate session
-  - `{ type: 'restart', session }` — Restart session
-  - `{ type: 'dismiss', session }` — Dismiss waiting state (return to RUNNING)
+  - `{ type: 'restart', session }` — Restart completed/failed session
+  - `{ type: 'force-restart', session }` — Kill + restart active session
+  - `{ type: 'dismiss', session }` — Dismiss false waiting detection
   - `{ type: 'add-session', name, path }` — Create new session
   - `{ type: 'remove-session', session }` — Delete session
-  - `{ type: 'reorder-sessions', order: [sessionName, ...] }` — Reorder session list
+  - `{ type: 'reorder-sessions', order: [...] }` — Reorder session list
   - `{ type: 'get-settings', requestId }` — Fetch current settings
   - `{ type: 'update-settings', requestId, settings }` — Modify settings
   - `{ type: 'scan-repo-roots', requestId }` — Scan configured repo roots
+  - `{ type: 'shutdown' }` — Request server shutdown
+  - `{ type: 'restart-server' }` — Request server restart
 
 **Data WebSocket** (`ws://localhost:PORT/terminals/:sessionName`)
 - **Server → Client:** Raw PTY output (string)
@@ -97,49 +88,49 @@ INITIALIZING → STARTING → RUNNING → WAITING → IDLE → DONE
                                                     ↘ FAILED
 ```
 
-**States (from sessions.js STATES constant):**
+**States (from shared/states.js):**
 - **INITIALIZING** — Session object created, env prepared, ready to spawn
-- **STARTING** — PTY spawned, awaiting first output (watchdog_timeout = 30s by default)
+- **STARTING** — PTY spawned, awaiting first output (watchdog timer active)
 - **RUNNING** — Claude CLI producing output, pattern detector active
-- **WAITING** — Prompt detected (via PatternDetector), awaiting user input/skip/dismiss. Auto-recover available if ≥2 PTY data chunks arrive after N seconds
-- **IDLE** — Silence timeout reached, no activity for N seconds
-- **DONE** — Process exited cleanly (code 0)
-- **FAILED** — Process exited with error or killed by user
+- **WAITING** — Prompt detected (via PatternDetector), awaiting user input/dismiss. Auto-recover fires if ≥2 PTY data chunks arrive after autoRecoverSeconds
+- **IDLE** — Silence timeout reached, no activity for attentionTimeoutSeconds
+- **DONE** — Process exited cleanly (code 0) or user killed
+- **FAILED** — Process exited with error, watchdog timeout, or spawn failure
 
 **Transitions** governed by explicit event mapping (TRANSITIONS constant) and guards (GUARDS object).
 
-**Auto-Recovery Transition:**
-From WAITING state, if `autoRecoverSeconds` expires (default 3s) AND ≥2 data chunks arrive, transition WAITING → RUNNING via `auto_recover` event. Resets when exiting WAITING or on new prompt detection.
-
 ### Pattern Detection (3 Layers)
 
-**Layer 1: Exact String Matches**
-- `'Do you want to proceed?'`, `'Allow this action?'`, `'Press Enter to confirm'`, `'(y/n)'`, `'[yes/no]'`, etc.
-- Checked first for high confidence
+**Layer 1: Exact String Matches** — `'Do you want to proceed?'`, `'(y/n)'`, etc. Checked first for high confidence.
 
-**Layer 2: Regex Patterns**
-- Matches common prompt formats (e.g., patterns ending with `?` or containing `[yes/no]`)
-- Fallback when exact match fails
+**Layer 2: Regex Patterns** — Common prompt formats. Blacklist filters false positives (e.g., "Terminate batch job").
 
-**Layer 3: Silence Heuristic**
-- If no output for N seconds, infer session is waiting for input or idle
-- Differentiates between "user interacting" and "session paused"
+**Layer 3: Silence Heuristic** — If incomplete line (no newline) ends with `?` or `:` and no output arrives within silenceTimeoutMs, infer prompt.
 
 All detection runs on ANSI-stripped PTY output (parallel stream, raw output untouched).
 
 ### Inter-Module Communication
 
 Uses Node.js `EventEmitter`:
-- **Session** emits: `'state-change'`, `'output'`, `'error'`, `'exit'`
-- **PatternDetector** emits: `'prompt-detected'`, `'silence'`
+- **Session** emits: `'state-change'`, `'data'`, `'error'`, `'exit'`, `'needs-attention'`, `'session-failed'`, `'session-done'`
+- **PatternDetector** emits: `'prompt-detected'`
 - No global variables, no direct coupling
+
+### Backend Factory Pattern
+
+`createBackend(httpServer, options)` is the core wiring function used by both:
+- `server.js` — Production: standalone HTTP server
+- `vite.config.js` — Dev: attached to Vite's internal HTTP server via plugin
+
+Dependencies are injected into control handlers via a deps object.
 
 ### Config Hot-Reload
 
-`server.js` watches `config.json` with debounced read-modify-apply:
+`config-store.js` watches config.json with debounced read-modify-apply:
 1. `fs.watch()` on config file
-2. Debounce 500ms to coalesce rapid changes
-3. Read fresh, validate, apply changes to sessionMap and timers
+2. Debounce 500ms, ignore self-writes (within 500ms of last save)
+3. Read fresh, validate (must have `projects` array), apply changes
+4. `diffProjects()` computes added/removed/modified sessions, applies incrementally
 
 ---
 
@@ -151,15 +142,13 @@ Must use **node-pty** (`pty.spawn()`) NOT `child_process.spawn()` because Claude
 
 **Requirements:**
 - Real PTY with `cols=80, rows=24` (xterm-256color)
-- Unset env vars before spawn: `CLAUDECODE`, `CLAUDE_CODE_SSE_PORT`, `CLAUDE_CODE_ENTRYPOINT`
+- Unset env vars before spawn: `CLAUDECODE`, `CLAUDE_CODE_SSE_PORT`, `CLAUDE_CODE_ENTRYPOINT`, `GLISSA_PORT`, `GLISSA_CONFIG`
+- On Windows: spawn via `cmd.exe /c claude` (node-pty can't resolve .cmd shims directly)
 - Pass args as array, NOT `shell: true`
 
 ### Replay Buffer
 
-Sessions maintain a ring buffer of PTY output for:
-- Dashboard reconnections (resend recent output to new clients)
-- Pattern re-detection after client reconnect
-- Debugging/introspection
+Sessions maintain a ring buffer (~100KB cap) of PTY output for dashboard reconnections.
 
 ### Timers & Cleanup
 
@@ -169,35 +158,40 @@ Sessions use explicit setTimeout/setInterval with cleanup on state transitions:
 - **escalation_timer** (WAITING state: repeated notifications every `waitingEscalationSeconds`)
 - **auto_recover_timer** (WAITING state: triggers `auto_recover` → RUNNING if ≥2 data chunks arrive after `autoRecoverSeconds`)
 
-All timers cleared on exit to prevent leaks.
+All timers cleared on `destroy()` to prevent leaks.
+
+### Graceful Shutdown
+
+`shutdown()` destroys all sessions, closes WebSocket servers. On Windows, `kill()` uses non-blocking poll with `taskkill /T /F` fallback after 3 seconds.
 
 ---
 
 ## Hard Constraints (from CLAUDE.md)
 
 **DO NOT introduce:**
-- TypeScript
-- React or any frontend framework
-- Bundlers (Webpack, Vite, esbuild, etc.)
-- Additional server frameworks (only express)
-- ESM (`import`/`export`) in Node.js code
+- TypeScript, React, or any frontend framework
+- Additional server frameworks (only Express)
+- ESM (`import`/`export`) in Node.js code (server-side is CommonJS only)
 - XState or formal state machine libraries
 - Global variables
+- New dependencies without explicit instruction
 
 **DO use:**
-- CommonJS (`require`/`module.exports`)
+- CommonJS (`require`/`module.exports`) for server code
+- ES modules for browser code (bundled by Vite)
 - Node.js `EventEmitter` for inter-module communication
 - Explicit state transitions with guards
-- Plain JS (no frameworks, no abstractions)
-- Error handling via EventEmitter `error` events, not thrown exceptions
+- Tailwind utility classes for HTML, semantic classes in style.css for JS-created DOM
+- `ws` package directly (no Socket.IO)
 
 ---
 
 ## Platform & Runtime
 
 - **OS:** Windows 11
-- **Node:** v24+
-- **Module System:** CommonJS only
+- **Node:** v18+ (engines field), v24+ in development
+- **Module System:** CommonJS (server), ES modules (browser/Vite)
+- **Build:** Vite + Tailwind CSS v4
 - **Build Tools:** Visual Studio Build Tools (required for node-pty C++ module)
 
 ---
@@ -209,11 +203,12 @@ All timers cleared on exit to prevent leaks.
 | `express` | ^4.18.2 | HTTP server, static file serving |
 | `ws` | ^8.16.0 | WebSocket server (direct, no Socket.IO) |
 | `node-pty` | ^1.1.0 | PTY spawning for Claude CLI |
-| `@xterm/xterm` | ^6.0.0 | Terminal emulator (browser ES modules only) |
+| `@xterm/xterm` | ^6.0.0 | Terminal emulator (browser only) |
 | `@xterm/addon-fit` | ^0.11.0 | Terminal resize (browser only) |
 | `@xterm/addon-webgl` | ^0.19.0 | GPU-accelerated rendering (browser only) |
-
-**Note:** `@xterm/*` packages are NOT required in Node.js — they load in the browser via ES modules.
+| `vite` | ^7.3.1 | Dev server with HMR, production bundling (dev only) |
+| `tailwindcss` | ^4.2.1 | Utility-first CSS framework (dev only) |
+| `@tailwindcss/vite` | ^4.2.1 | Tailwind CSS Vite plugin (dev only) |
 
 ---
 
@@ -225,42 +220,11 @@ node patterns.js
 ```
 Runs PatternDetector self-test on hardcoded prompt examples.
 
-### Spike Scripts
-See `spike/AGENTS.md` for exploration and manual testing scripts.
+### CLI Testing
+See `docs/testing-cli.md` for comprehensive manual test scenarios.
 
 ### No Formal Test Framework
 Project uses manual testing and spike scripts. No Jest, Mocha, or similar.
-
----
-
-## Common Patterns & Anti-Patterns
-
-### Good Patterns
-- **EventEmitter for communication** — Session emits state changes, server subscribes
-- **Explicit state machine** — TRANSITIONS map guards behavior, no implicit state
-- **Config read-modify-write** — Fresh read, validate, write back
-- **Timer cleanup** — Explicitly clear timers on state exit
-- **ANSI stripping in parallel** — Keep raw PTY untouched, strip copy for pattern detection
-
-### Anti-Patterns to Avoid
-- Throwing exceptions in async error paths (use EventEmitter `error` events)
-- Direct module coupling (use EventEmitter)
-- Implicit state mutations (use explicit transitions)
-- Global variables (use module scope + exports)
-- Bundlers or transpilers (keep it plain Node.js)
-
----
-
-## File Sizes (Lines of Code)
-
-```
-server.js      ~601 lines
-sessions.js    ~455 lines
-patterns.js    ~316 lines
-notify.js       ~55 lines
-public/app.js ~1158 lines
-public/style.css ~880 lines
-```
 
 ---
 
@@ -269,25 +233,17 @@ public/style.css ~880 lines
 | Task Type | Start Here | Key Files |
 |-----------|-----------|-----------|
 | Add session feature | `sessions.js` (Session class) | STATES, TRANSITIONS, GUARDS, entry/exit hooks |
-| Add/remove/reorder sessions | `server.js` (handleControl) | add-session, remove-session, reorder-sessions messages |
-| Add WebSocket message | `server.js` (handleControl, handleData) | Control/Data WS server setup |
+| Add/remove/reorder sessions | `control-handlers.js` | handler map, config-store save |
+| Add WebSocket message | `control-handlers.js` (handler map) | backend.js (broadcastControl) |
 | Improve prompt detection | `patterns.js` (PatternDetector) | EXACT_MATCHES, REGEX_PATTERNS, silence heuristic |
-| Fix dashboard UI | `public/app.js` | xterm.js setup, session card rendering, drag-reorder |
+| Fix dashboard UI | `public/session-card.js`, `public/app.js` | xterm.js setup, session card lifecycle |
 | Add notification | `notify.js` (notify function) | BurntToast detection, msg fallback |
 | Debug state transitions | `sessions.js` (transition guards) | GUARDS object, entry/exit hooks |
-| Hot-reload config | `server.js` (config watcher) | fs.watch, debounce logic, apply changes |
-| Tune auto-recovery | `sessions.js` (constructor, _handleAutoRecoverTimer) | autoRecoverSeconds param, data chunk counting |
-
----
-
-## Next Steps for New Agents
-
-1. **Read CLAUDE.md** — Understand hard constraints and design philosophy
-2. **Review the state machine** in `sessions.js` (STATES, TRANSITIONS, GUARDS)
-3. **Understand dual WebSocket architecture** — Control WS for JSON, Data WS for raw PTY bytes
-4. **Use EventEmitter** for inter-module communication
-5. **Keep it plain Node.js** — No TS, no frameworks, no bundlers
-6. **Test thoroughly** — Use spike scripts for exploration, run `node patterns.js` for pattern testing
+| Hot-reload config | `config-store.js` | watchForChanges, save, load |
+| Tune auto-recovery | `sessions.js` (_resetAutoRecoverTimer) | autoRecoverSeconds, data chunk counting |
+| Change settings UI | `public/dialogs.js` | createSettingsDialog, sendControlRequest |
+| CLI flags/options | `bin/glissa.js` | arg parsing, env bridge |
+| Build/bundling | `vite.config.js` | glissaBackendPlugin, Tailwind, aliases |
 
 ---
 
@@ -295,4 +251,8 @@ public/style.css ~880 lines
 
 - `CLAUDE.md` — Project constraints and coding style
 - `public/AGENTS.md` — Browser-side module documentation
-- `spike/AGENTS.md` — Exploration and testing script documentation
+- `shared/AGENTS.md` — Shared state constants
+- `bin/AGENTS.md` — CLI entry point documentation
+- `docs/AGENTS.md` — Publishing and testing guides
+
+<!-- MANUAL: -->

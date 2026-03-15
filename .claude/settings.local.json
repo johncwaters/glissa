@@ -39,7 +39,9 @@
       "Bash(npm install:*)",
       "Bash(npm run:*)",
       "Bash(timeout:*)",
-      "Bash(npx vite:*)"
+      "Bash(npx vite:*)",
+      "Bash(find:*)",
+      "mcp__plugin_oh-my-claudecode_t__state_get_status"
     ]
   }
 }

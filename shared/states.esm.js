@@ -23,4 +23,3 @@ export const BADGE_LABELS = Object.freeze({
 
 export const KILLABLE_STATES    = Object.freeze([STATES.RUNNING, STATES.WAITING, STATES.IDLE]);
 export const RESTARTABLE_STATES = Object.freeze([STATES.DONE, STATES.FAILED]);
-export const DISMISSABLE_STATES = Object.freeze([STATES.WAITING]);

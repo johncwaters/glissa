@@ -237,13 +237,12 @@ const btnMute = document.getElementById('btn-mute');
 
 function updateMuteButton() {
   const muted = !isSoundEnabled();
-  btnMute.textContent = muted ? '\uD83D\uDD07' : '\uD83D\uDD0A';
-  btnMute.title = muted ? 'Unmute alerts' : 'Mute alerts';
-  btnMute.classList.toggle('muted', muted);
+  btnMute.textContent = muted ? '\uD83D\uDD07 Unmute Alerts' : '\uD83D\uDD0A Mute Alerts';
 }
 updateMuteButton();
 
-btnMute.addEventListener('click', () => {
+btnMute.addEventListener('click', (e) => {
+  e.stopPropagation();
   setSoundEnabled(!isSoundEnabled());
   updateMuteButton();
 });
