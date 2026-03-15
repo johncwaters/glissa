@@ -55,13 +55,6 @@ function formatTime(ts) {
   return new Date(ts).toLocaleTimeString('en-GB', { hour12: false });
 }
 
-function formatIdleDuration(ms) {
-  const totalSec = Math.floor(ms / 1000);
-  const m = Math.floor(totalSec / 60);
-  const s = totalSec % 60;
-  return m > 0 ? `${m}m ${s}s` : `${s}s`;
-}
-
 function el(tag, className, text) {
   const e = document.createElement(tag);
   if (className) e.className = className;
@@ -103,25 +96,13 @@ function updateButtonVisibility(ui) {
 }
 
 function startIdleCounter(ui) {
-  ui.idleStart = Date.now();
+  ui.idleLabel.textContent = 'Idle';
   ui.idleLabel.classList.add('visible');
-  updateIdleLabel(ui);
-  ui.idleInterval = setInterval(() => updateIdleLabel(ui), 1000);
 }
 
 function stopIdleCounter(ui) {
-  ui.idleStart = null;
   ui.idleLabel.classList.remove('visible');
   ui.idleLabel.textContent = '';
-  if (ui.idleInterval) {
-    clearInterval(ui.idleInterval);
-    ui.idleInterval = null;
-  }
-}
-
-function updateIdleLabel(ui) {
-  if (ui.idleStart === null) return;
-  ui.idleLabel.textContent = `Idle ${formatIdleDuration(Date.now() - ui.idleStart)}`;
 }
 
 function appendAuditEntry(ui, entry) {
@@ -661,8 +642,6 @@ export function createSessionCard(sessionName, initialState, auditLog) {
     auditLog: [],
     auditContainer: dom.auditContainer,
     auditToggle: dom.auditToggle,
-    idleStart: null,
-    idleInterval: null,
     currentState: initialState || STATES.INITIALIZING,
   };
   sessionUIs.set(sessionName, ui);
@@ -695,7 +674,6 @@ export function removeSessionCard(sessionName) {
 
   if (ui.dataWs?.readyState <= WebSocket.OPEN) ui.dataWs.close();
   if (ui.term) ui.term.dispose();
-  if (ui.idleInterval) clearInterval(ui.idleInterval);
   if (ui.card) ui.card.remove();
   updateAggregateStatus();
 }

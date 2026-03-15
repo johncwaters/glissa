@@ -5,6 +5,8 @@ import { getSessionUIs } from './session-card.js';
 import { sendControlRequest, sendControlMsg } from './control-ws.js';
 import { SOUND_OPTIONS, playAlertSound } from './alert-sound.js';
 import { getSoundId, setSoundId } from './ui-prefs.js';
+import addSessionHTML from './components/add-session-dialog.html?raw';
+import settingsHTML from './components/settings-dialog.html?raw';
 
 // ── Add Session dialog ────────────────────────────────────────
 
@@ -15,28 +17,7 @@ export function createAddSessionDialog() {
   const dialog = document.createElement('div');
   dialog.className = 'dialog';
 
-  dialog.innerHTML = String.raw`
-    <div class="dialog-title">Add Session</div>
-    <label class="dialog-label">
-      Name
-      <input type="text" class="dialog-input" id="add-session-name" placeholder="my-project" autocomplete="off" spellcheck="false">
-    </label>
-    <label class="dialog-label">
-      Path
-      <input type="text" class="dialog-input" id="add-session-path" placeholder="C:\Users\...\my-project" autocomplete="off" spellcheck="false">
-    </label>
-    <label class="dialog-label">
-      Or pick from discovered projects:
-      <select class="dialog-input project-picker" id="add-session-picker">
-        <option value="" disabled selected>Scanning...</option>
-      </select>
-    </label>
-    <div class="dialog-error" id="add-session-error"></div>
-    <div class="dialog-actions">
-      <button class="btn-dialog btn-dialog-cancel" id="add-session-cancel">Cancel</button>
-      <button class="btn-dialog btn-dialog-confirm" id="add-session-confirm">Add</button>
-    </div>
-  `;
+  dialog.innerHTML = addSessionHTML;
 
   overlay.appendChild(dialog);
   document.body.appendChild(overlay);
@@ -157,50 +138,7 @@ export function createSettingsDialog() {
   const dialog = document.createElement('div');
   dialog.className = 'dialog dialog-settings';
 
-  dialog.innerHTML = String.raw`
-    <div class="dialog-title">Settings</div>
-    <div class="settings-section">
-      <div class="settings-section-title">Timeouts (seconds)</div>
-      <div class="settings-timeout-grid">
-        <label class="dialog-label">
-          Attention
-          <input type="number" class="dialog-input" id="settings-attention" min="1" autocomplete="off">
-          <span class="dialog-hint">Time before alert on WAITING</span>
-        </label>
-        <label class="dialog-label">
-          Escalation
-          <input type="number" class="dialog-input" id="settings-escalation" min="1" autocomplete="off">
-          <span class="dialog-hint">Re-alert interval</span>
-        </label>
-        <label class="dialog-label">
-          Watchdog
-          <input type="number" class="dialog-input" id="settings-watchdog" min="1" autocomplete="off">
-          <span class="dialog-hint">Starting state timeout</span>
-        </label>
-      </div>
-      <div class="dialog-field-error" id="settings-timeout-error"></div>
-    </div>
-    <label class="dialog-label">
-      Alert Sound
-      <select class="dialog-input" id="settings-sound"></select>
-      <span class="dialog-hint">Sound played when a session needs attention</span>
-    </label>
-    <div class="settings-section">
-      <div class="settings-section-title">Repository Roots</div>
-      <span class="dialog-hint">Directories scanned for projects when adding sessions</span>
-      <div class="settings-root-list" id="settings-root-list"></div>
-      <div class="settings-add-row">
-        <input type="text" class="dialog-input settings-root-input" id="settings-root-input" placeholder="C:\Users\...\repos" autocomplete="off" spellcheck="false">
-        <button class="btn-dialog btn-dialog-confirm btn-settings-add" id="settings-root-add">Add</button>
-      </div>
-      <div class="dialog-field-error" id="settings-root-error"></div>
-    </div>
-    <div class="dialog-error" id="settings-error"></div>
-    <div class="dialog-actions settings-actions">
-      <button class="btn-dialog btn-dialog-cancel" id="settings-cancel">Cancel</button>
-      <button class="btn-dialog btn-dialog-confirm" id="settings-save">Save</button>
-    </div>
-  `;
+  dialog.innerHTML = settingsHTML;
 
   overlay.appendChild(dialog);
   document.body.appendChild(overlay);
