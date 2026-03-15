@@ -4,7 +4,8 @@
 import { getSessionUIs } from './session-card.js';
 import { sendControlRequest, sendControlMsg } from './control-ws.js';
 import { SOUND_OPTIONS, playAlertSound } from './alert-sound.js';
-import { getSoundId, setSoundId } from './ui-prefs.js';
+import { getSoundId, setSoundId, getThemeId, setThemeId } from './ui-prefs.js';
+import { applyTheme, getThemeList } from './theme.js';
 import addSessionHTML from './components/add-session-dialog.html?raw';
 import settingsHTML from './components/settings-dialog.html?raw';
 
@@ -151,6 +152,7 @@ export function createSettingsDialog() {
   const rootAddBtn = dialog.querySelector('#settings-root-add');
   const rootErrorEl = dialog.querySelector('#settings-root-error');
   const soundSelect = dialog.querySelector('#settings-sound');
+  const themeSelect = dialog.querySelector('#settings-theme');
   const errorEl = dialog.querySelector('#settings-error');
   const btnCancel = dialog.querySelector('#settings-cancel');
   const btnSave = dialog.querySelector('#settings-save');
@@ -167,6 +169,26 @@ export function createSettingsDialog() {
   soundSelect.addEventListener('change', () => {
     setSoundId(soundSelect.value);
     playAlertSound(soundSelect.value);
+  });
+
+  // Populate theme picker
+  for (const theme of getThemeList()) {
+    const option = document.createElement('option');
+    option.value = theme.id;
+    option.textContent = theme.label;
+    themeSelect.appendChild(option);
+  }
+  themeSelect.value = getThemeId();
+
+  const themeWarning = dialog.querySelector('#settings-theme-warning');
+  const initialTheme = getThemeId();
+
+  themeSelect.addEventListener('change', () => {
+    setThemeId(themeSelect.value);
+    applyTheme(themeSelect.value);
+    themeWarning.textContent = themeSelect.value !== initialTheme
+      ? 'Restart the server for terminal colors to fully update.'
+      : '';
   });
 
   let repoRoots = [];

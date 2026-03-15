@@ -6,35 +6,35 @@
 }
 
 :root {
-  --bg:          #080816;
-  --bg-card:     #0e0e20;
-  --bg-header:   #0b0b1a;
-  --bg-surface:  #131328;
-  --border:      #1c1c38;
-  --border-dim:  #141430;
-  --border-hover:#2a2a50;
-  --text:        #b8b8d4;
-  --text-dim:    #4a4a70;
-  --text-head:   #dcdcf0;
-  --text-muted:  #3a3a5e;
-  --accent:      #4f6ef7;
-  --accent-dim:  #3a54c0;
-
-  /* state colours */
+  /* Colors are set by theme.js via applyTheme().
+     Defaults here act as fallbacks before JS loads. */
+  --bg:          #0a0810;
+  --bg-card:     #100e18;
+  --bg-header:   #0c0a14;
+  --bg-surface:  #16122a;
+  --border:      #2a2440;
+  --border-dim:  #1e1a32;
+  --border-hover:#3e3660;
+  --text:        #c8c0e0;
+  --text-dim:    #6a5e90;
+  --text-head:   #e8e0ff;
+  --text-muted:  #4a4268;
+  --accent:      #c084fc;
+  --accent-dim:  #9656d6;
   --state-running:      #22c55e;
   --state-running-bg:   rgba(34, 197, 94, 0.06);
   --state-waiting:      #f59e0b;
   --state-waiting-bg:   rgba(245, 158, 11, 0.08);
   --state-failed:       #ef4444;
   --state-failed-bg:    rgba(239, 68, 68, 0.06);
-  --state-done:         #3b82f6;
-  --state-done-bg:      rgba(59, 130, 246, 0.06);
+  --state-done:         #67e8f9;
+  --state-done-bg:      rgba(103, 232, 249, 0.06);
   --state-initializing: #6b7280;
   --state-initializing-bg: rgba(107, 114, 128, 0.06);
   --state-idle:         #eab308;
   --state-idle-bg:      rgba(234, 179, 8, 0.06);
-  --state-starting:     #a855f7;
-  --state-starting-bg:  rgba(168, 85, 247, 0.06);
+  --state-starting:     #f472b6;
+  --state-starting-bg:  rgba(244, 114, 182, 0.06);
 
   --radius: 6px;
   --radius-lg: 10px;
@@ -246,7 +246,7 @@ html, body {
 
 .session-card.dragging .session-card-header {
   cursor: grabbing;
-  background: rgba(79, 110, 247, 0.06);
+  background: rgba(192, 132, 252, 0.06);
 }
 
 /* Disable pointer events on terminal during ANY drag so the full card is a drop target */
@@ -257,19 +257,19 @@ html, body {
 .session-card.drop-above {
   border-color: var(--accent);
   border-top-width: 3px;
-  box-shadow: 0 -4px 12px rgba(79, 110, 247, 0.25), 0 0 0 1px rgba(79, 110, 247, 0.15);
+  box-shadow: 0 -4px 12px rgba(192, 132, 252, 0.25), 0 0 0 1px rgba(192, 132, 252, 0.15);
 }
 
 .session-card.drop-below {
   border-color: var(--accent);
   border-bottom-width: 3px;
-  box-shadow: 0 4px 12px rgba(79, 110, 247, 0.25), 0 0 0 1px rgba(79, 110, 247, 0.15);
+  box-shadow: 0 4px 12px rgba(192, 132, 252, 0.25), 0 0 0 1px rgba(192, 132, 252, 0.15);
 }
 
 .drop-zone-placeholder {
   border: 2px dashed var(--accent);
   border-radius: var(--radius-lg);
-  background: rgba(79, 110, 247, 0.04);
+  background: rgba(192, 132, 252, 0.04);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -287,7 +287,7 @@ html, body {
 
 .drop-zone-placeholder.drop-zone-active {
   border-color: var(--accent);
-  background: rgba(79, 110, 247, 0.12);
+  background: rgba(192, 132, 252, 0.12);
   animation: none;
 }
 
@@ -296,8 +296,8 @@ html, body {
 }
 
 @keyframes drop-zone-pulse {
-  0%, 100% { border-color: var(--accent-dim); background: rgba(79, 110, 247, 0.03); }
-  50% { border-color: var(--accent); background: rgba(79, 110, 247, 0.08); }
+  0%, 100% { border-color: var(--accent-dim); background: rgba(192, 132, 252, 0.03); }
+  50% { border-color: var(--accent); background: rgba(192, 132, 252, 0.08); }
 }
 
 /* ── Minimized bar ───────────────────────────────────────── */
@@ -337,9 +337,9 @@ html, body {
   opacity: 1;
   border-style: solid;
   border-color: var(--accent-dim);
-  background: rgba(79, 110, 247, 0.06);
+  background: rgba(192, 132, 252, 0.06);
   transform: none;
-  box-shadow: 0 0 0 1px rgba(79, 110, 247, 0.15);
+  box-shadow: 0 0 0 1px rgba(192, 132, 252, 0.15);
 }
 
 .session-card.ghost-card .session-card-header {
@@ -441,11 +441,11 @@ html, body {
 }
 
 .session-card[data-state="DONE"] {
-  border-color: rgba(59, 130, 246, 0.2);
+  border-color: rgba(192, 132, 252, 0.2);
 }
 
 .session-card[data-state="STARTING"] {
-  border-color: rgba(168, 85, 247, 0.2);
+  border-color: rgba(244, 114, 182, 0.2);
 }
 
 .session-card[data-state="IDLE"] {
@@ -589,12 +589,12 @@ html, body {
 }
 
 .btn-restart {
-  color: var(--state-done);
-  border-color: rgba(59, 130, 246, 0.4);
+  color: var(--accent);
+  border-color: rgba(192, 132, 252, 0.4);
 }
 
 .btn-restart:hover {
-  background: rgba(59, 130, 246, 0.12);
+  background: rgba(192, 132, 252, 0.12);
 }
 
 .btn-action.visible {
@@ -774,11 +774,11 @@ html, body {
 .btn-dialog-confirm {
   color: var(--accent);
   border-color: var(--accent-dim);
-  background: rgba(79, 110, 247, 0.08);
+  background: rgba(192, 132, 252, 0.08);
 }
 
 .btn-dialog-confirm:hover {
-  background: rgba(79, 110, 247, 0.18);
+  background: rgba(192, 132, 252, 0.18);
 }
 
 /* ── Error toast ─────────────────────────────────────────── */
@@ -911,6 +911,23 @@ html, body {
   color: var(--text-muted);
   letter-spacing: 0.02em;
   line-height: 1.3;
+}
+
+.dialog-hint-warning {
+  display: block;
+  padding: 6px 10px;
+  margin-top: 4px;
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  border-radius: var(--radius);
+  color: var(--state-waiting);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.dialog-hint-warning:empty {
+  display: none;
 }
 
 .settings-actions {
@@ -1126,7 +1143,7 @@ html, body {
   background: var(--bg-card);
   border: 1px solid var(--accent-dim);
   border-radius: var(--radius-lg);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(79, 110, 247, 0.1);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(192, 132, 252, 0.1);
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -1219,11 +1236,11 @@ html, body {
 .guide-btn-next {
   color: var(--accent);
   border-color: var(--accent-dim);
-  background: rgba(79, 110, 247, 0.08);
+  background: rgba(192, 132, 252, 0.08);
 }
 
 .guide-btn-next:hover {
-  background: rgba(79, 110, 247, 0.18);
+  background: rgba(192, 132, 252, 0.18);
 }
 
 /* Arrow pointing at target */

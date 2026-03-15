@@ -10,8 +10,8 @@
       margin: 0;
       padding: 0;
       height: 100%;
-      background: #080816;
-      color: #b8b8d4;
+      background: #0a0810;
+      color: #c8c0e0;
       font-family: 'Segoe UI', system-ui, sans-serif;
     }
 
@@ -29,7 +29,7 @@
       align-items: center;
       justify-content: center;
       gap: 20px;
-      background: #080816;
+      background: #0a0810;
       transition: opacity 300ms ease;
     }
 
@@ -43,27 +43,27 @@
       font-size: 20px;
       font-weight: 700;
       letter-spacing: 0.1em;
-      color: #dcdcf0;
+      color: #e8e0ff;
       text-transform: uppercase;
     }
 
     .loading-title::before {
       content: '\25b8 ';
-      color: #4f6ef7;
+      color: #c084fc;
     }
 
     .loading-status {
       font-family: 'Cascadia Code', 'Fira Code', 'Consolas', 'Menlo', monospace;
       font-size: 12px;
-      color: #4a4a70;
+      color: #6a5e90;
       letter-spacing: 0.04em;
     }
 
     .loading-spinner {
       width: 28px;
       height: 28px;
-      border: 2px solid #1c1c38;
-      border-top-color: #4f6ef7;
+      border: 2px solid #2a2440;
+      border-top-color: #c084fc;
       border-radius: 50%;
       animation: spin 0.8s linear infinite;
     }
@@ -82,7 +82,7 @@
       align-items: center;
       justify-content: center;
       gap: 20px;
-      background: rgba(8, 8, 22, 0);
+      background: rgba(10, 8, 16, 0);
       backdrop-filter: blur(0px);
       pointer-events: none;
       opacity: 0;
@@ -90,7 +90,7 @@
     }
 
     .shutdown-screen.active {
-      background: rgba(8, 8, 22, 0.92);
+      background: rgba(10, 8, 16, 0.92);
       backdrop-filter: blur(8px);
       pointer-events: auto;
       opacity: 1;
@@ -99,20 +99,20 @@
     .shutdown-status {
       font-family: 'Cascadia Code', 'Fira Code', 'Consolas', 'Menlo', monospace;
       font-size: 12px;
-      color: #4a4a70;
+      color: #6a5e90;
       letter-spacing: 0.04em;
       transition: color 300ms ease;
     }
 
     .shutdown-screen.done .loading-spinner {
       animation: none;
-      border-color: #1c1c38;
-      border-top-color: #1c1c38;
+      border-color: #2a2440;
+      border-top-color: #2a2440;
       opacity: 0.3;
     }
 
     .shutdown-screen.done .shutdown-status {
-      color: #3a3a5e;
+      color: #4a4268;
     }
   </style>
 </head>

@@ -10,33 +10,11 @@ import { STATES, BADGE_LABELS, KILLABLE_STATES, RESTARTABLE_STATES } from '/shar
 import { isMinimized, setMinimized, isSoundEnabled, getSoundId } from './ui-prefs.js';
 import { playAlertSound } from './alert-sound.js';
 import { el } from './dom-helpers.js';
+import { getTerminalTheme } from './theme.js';
 
 // ── Constants ────────────────────────────────────────────────
 
 const RECONNECT_DELAY_MS = 3000;
-
-const TERM_THEME = {
-  background:  '#0a0a1a',
-  foreground:  '#c8c8e0',
-  cursor:      '#4f6ef7',
-  cursorAccent:'#0a0a1a',
-  black:       '#1a1a2e',
-  brightBlack: '#3a3a5c',
-  red:         '#ef4444',
-  brightRed:   '#f87171',
-  green:       '#22c55e',
-  brightGreen: '#4ade80',
-  yellow:      '#eab308',
-  brightYellow:'#facc15',
-  blue:        '#3b82f6',
-  brightBlue:  '#60a5fa',
-  magenta:     '#a855f7',
-  brightMagenta:'#c084fc',
-  cyan:        '#06b6d4',
-  brightCyan:  '#22d3ee',
-  white:       '#c8c8e0',
-  brightWhite: '#e8e8ff',
-};
 
 // ── State ────────────────────────────────────────────────────
 
@@ -402,7 +380,7 @@ function setupTerminal(termWrap, ui) {
     cursorBlink: true,
     fontSize: 14,
     fontFamily: "'Cascadia Code', 'Fira Code', 'Consolas', 'Menlo', monospace",
-    theme: TERM_THEME,
+    theme: getTerminalTheme(),
     scrollback: 5000,
     allowProposedApi: true,
   });

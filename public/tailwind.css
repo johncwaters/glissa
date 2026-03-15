@@ -7,26 +7,29 @@
 
 @layer tailwind {
   @theme {
-    --color-bg: #080816;
-    --color-bg-card: #0e0e20;
-    --color-bg-header: #0b0b1a;
-    --color-bg-surface: #131328;
-    --color-border: #1c1c38;
-    --color-border-dim: #141430;
-    --color-border-hover: #2a2a50;
-    --color-text: #b8b8d4;
-    --color-text-dim: #4a4a70;
-    --color-text-head: #dcdcf0;
-    --color-text-muted: #3a3a5e;
-    --color-accent: #4f6ef7;
-    --color-accent-dim: #3a54c0;
-    --color-state-running: #22c55e;
-    --color-state-waiting: #f59e0b;
-    --color-state-failed: #ef4444;
-    --color-state-done: #3b82f6;
-    --color-state-idle: #eab308;
-    --color-state-starting: #a855f7;
-    --color-state-initializing: #6b7280;
+    /* Colors reference CSS variables set by theme.js on :root.
+       This ensures Tailwind utilities (bg-bg, text-text-head, etc.)
+       resolve to whatever theme is currently active. */
+    --color-bg: var(--bg);
+    --color-bg-card: var(--bg-card);
+    --color-bg-header: var(--bg-header);
+    --color-bg-surface: var(--bg-surface);
+    --color-border: var(--border);
+    --color-border-dim: var(--border-dim);
+    --color-border-hover: var(--border-hover);
+    --color-text: var(--text);
+    --color-text-dim: var(--text-dim);
+    --color-text-head: var(--text-head);
+    --color-text-muted: var(--text-muted);
+    --color-accent: var(--accent);
+    --color-accent-dim: var(--accent-dim);
+    --color-state-running: var(--state-running);
+    --color-state-waiting: var(--state-waiting);
+    --color-state-failed: var(--state-failed);
+    --color-state-done: var(--state-done);
+    --color-state-idle: var(--state-idle);
+    --color-state-starting: var(--state-starting);
+    --color-state-initializing: var(--state-initializing);
     --font-family-mono: 'Cascadia Code', 'Fira Code', 'Consolas', 'Menlo', monospace;
     --font-family-ui: 'Segoe UI', system-ui, sans-serif;
     --radius: 6px;

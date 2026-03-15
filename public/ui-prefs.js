@@ -1,11 +1,11 @@
 // ── UI preferences ───────────────────────────────────────────
 // Persists browser-side UI state to localStorage.
-// Schema: { minimized: string[], soundEnabled: boolean, soundId: string, completedGuides: string[] }
+// Schema: { minimized: string[], soundEnabled: boolean, soundId: string, completedGuides: string[], themeId: string }
 
 import { getJSON, setJSON } from './local-store.js';
 
 const STORAGE_KEY = 'glissa-ui-prefs';
-const DEFAULT_PREFS = { minimized: [], soundEnabled: true, soundId: 'coins', completedGuides: [] };
+const DEFAULT_PREFS = { minimized: [], soundEnabled: true, soundId: 'coins', completedGuides: [], themeId: 'phyrexian' };
 
 function load() {
   const prefs = getJSON(STORAGE_KEY, DEFAULT_PREFS);
@@ -13,6 +13,7 @@ function load() {
   if (typeof prefs.soundEnabled !== 'boolean') prefs.soundEnabled = true;
   if (typeof prefs.soundId !== 'string') prefs.soundId = 'coins';
   if (!Array.isArray(prefs.completedGuides)) prefs.completedGuides = [];
+  if (typeof prefs.themeId !== 'string') prefs.themeId = 'golgari';
   return prefs;
 }
 
@@ -52,6 +53,16 @@ export function getSoundId() {
 export function setSoundId(id) {
   const prefs = load();
   prefs.soundId = id;
+  save(prefs);
+}
+
+export function getThemeId() {
+  return load().themeId;
+}
+
+export function setThemeId(id) {
+  const prefs = load();
+  prefs.themeId = id;
   save(prefs);
 }
 

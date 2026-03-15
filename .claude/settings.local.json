@@ -41,7 +41,8 @@
       "Bash(timeout:*)",
       "Bash(npx vite:*)",
       "Bash(find:*)",
-      "mcp__plugin_oh-my-claudecode_t__state_get_status"
+      "mcp__plugin_oh-my-claudecode_t__state_get_status",
+      "WebFetch(domain:tcgplayer-cdn.tcgplayer.com)"
     ]
   }
 }

@@ -13,8 +13,13 @@ import {
   exitFocusMode, isFocusActive,
 } from './session-card.js';
 import { createAddSessionDialog, createSettingsDialog } from './dialogs.js';
-import { pruneStale, isSoundEnabled, setSoundEnabled } from './ui-prefs.js';
+import { pruneStale, isSoundEnabled, setSoundEnabled, getThemeId } from './ui-prefs.js';
+import { applyTheme } from './theme.js';
 import { registerGuide, checkAndStartGuides, isFirstOpen } from './guide.js';
+
+// ── Apply saved theme ─────────────────────────────────────────
+
+applyTheme(getThemeId());
 
 // ── Guided tutorials ──────────────────────────────────────────
 
