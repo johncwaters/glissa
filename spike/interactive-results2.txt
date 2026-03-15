@@ -1,8 +1,0 @@
-Test: interactive claude with stdin prompt...
-
-
---- Sending prompt via stdin ---
-
---- 30s timeout: killing ---
-
-Exited: code=null signal=SIGTERM chunks=0
