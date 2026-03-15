@@ -10,8 +10,10 @@ import {
   createSessionCard, removeSessionCard, applyState,
   getSessionUIs, updateAggregateStatus, showErrorToast,
   appendAuditEntry, handleSessionsReordered,
+  exitFocusMode, isFocusActive,
 } from './session-card.js';
 import { createAddSessionDialog, createSettingsDialog } from './dialogs.js';
+import { pruneStale, isSoundEnabled, setSoundEnabled } from './ui-prefs.js';
 
 // ── Connection status UI ─────────────────────────────────────
 
@@ -88,6 +90,7 @@ function handleSnapshot(sessions) {
     }
   }
 
+  pruneStale(sessions.map(s => s.name));
   updateAggregateStatus();
 }
 
@@ -217,6 +220,32 @@ document.getElementById('btn-shutdown').addEventListener('click', () => {
     : 'Shut down the server?';
   if (!confirm(msg)) return;
   sendControlMsg({ type: 'shutdown' });
+});
+
+// ── Focus mode: ESC to exit ──────────────────────────────────
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && isFocusActive()) {
+    if (document.querySelector('.dialog-overlay')) return;
+    exitFocusMode();
+  }
+});
+
+// ── Sound controls ──────────────────────────────────────────
+
+const btnMute = document.getElementById('btn-mute');
+
+function updateMuteButton() {
+  const muted = !isSoundEnabled();
+  btnMute.textContent = muted ? '\uD83D\uDD07' : '\uD83D\uDD0A';
+  btnMute.title = muted ? 'Unmute alerts' : 'Mute alerts';
+  btnMute.classList.toggle('muted', muted);
+}
+updateMuteButton();
+
+btnMute.addEventListener('click', () => {
+  setSoundEnabled(!isSoundEnabled());
+  updateMuteButton();
 });
 
 // ── Boot ─────────────────────────────────────────────────────

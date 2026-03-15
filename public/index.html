@@ -147,6 +147,7 @@
               <button class="menu-item menu-item-danger" id="btn-shutdown">Shut Down</button>
             </div>
           </div>
+          <button class="btn-mute" id="btn-mute" title="Mute alerts">&#128266;</button>
           <span class="header-aggregate text-xs font-mono text-text-dim tracking-tight" id="aggregate-status"></span>
           <span class="header-connection inline-flex items-center gap-1.5 text-[11px] font-mono text-text-dim" id="connection-status">
             <span class="connection-dot w-[7px] h-[7px] rounded-full bg-text-dim transition-colors"></span>
@@ -155,6 +156,9 @@
         </div>
       </div>
     </header>
+    <div class="minimized-bar" id="minimized-bar">
+      <!-- Minimized session cards move here -->
+    </div>
     <main class="sessions grid grid-cols-[repeat(auto-fill,minmax(min(100%,720px),1fr))] gap-4 p-5 px-6 max-w-[1920px] mx-auto" id="sessions-container">
       <!-- Session cards injected here by app.js -->
     </main>

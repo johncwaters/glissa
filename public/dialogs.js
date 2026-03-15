@@ -3,6 +3,8 @@
 
 import { getSessionUIs } from './session-card.js';
 import { sendControlRequest, sendControlMsg } from './control-ws.js';
+import { SOUND_OPTIONS, playAlertSound } from './alert-sound.js';
+import { getSoundId, setSoundId } from './ui-prefs.js';
 
 // ── Add Session dialog ────────────────────────────────────────
 
@@ -157,23 +159,35 @@ export function createSettingsDialog() {
 
   dialog.innerHTML = String.raw`
     <div class="dialog-title">Settings</div>
+    <div class="settings-section">
+      <div class="settings-section-title">Timeouts (seconds)</div>
+      <div class="settings-timeout-grid">
+        <label class="dialog-label">
+          Attention
+          <input type="number" class="dialog-input" id="settings-attention" min="1" autocomplete="off">
+          <span class="dialog-hint">Time before alert on WAITING</span>
+        </label>
+        <label class="dialog-label">
+          Escalation
+          <input type="number" class="dialog-input" id="settings-escalation" min="1" autocomplete="off">
+          <span class="dialog-hint">Re-alert interval</span>
+        </label>
+        <label class="dialog-label">
+          Watchdog
+          <input type="number" class="dialog-input" id="settings-watchdog" min="1" autocomplete="off">
+          <span class="dialog-hint">Starting state timeout</span>
+        </label>
+      </div>
+      <div class="dialog-field-error" id="settings-timeout-error"></div>
+    </div>
     <label class="dialog-label">
-      Attention Timeout (seconds)
-      <input type="number" class="dialog-input" id="settings-attention" min="1" autocomplete="off">
-      <span class="dialog-field-error" id="settings-attention-error"></span>
-    </label>
-    <label class="dialog-label">
-      Waiting Escalation (seconds)
-      <input type="number" class="dialog-input" id="settings-escalation" min="1" autocomplete="off">
-      <span class="dialog-field-error" id="settings-escalation-error"></span>
-    </label>
-    <label class="dialog-label">
-      Starting Watchdog (seconds)
-      <input type="number" class="dialog-input" id="settings-watchdog" min="1" autocomplete="off">
-      <span class="dialog-field-error" id="settings-watchdog-error"></span>
+      Alert Sound
+      <select class="dialog-input" id="settings-sound"></select>
+      <span class="dialog-hint">Sound played when a session needs attention</span>
     </label>
     <div class="settings-section">
       <div class="settings-section-title">Repository Roots</div>
+      <span class="dialog-hint">Directories scanned for projects when adding sessions</span>
       <div class="settings-root-list" id="settings-root-list"></div>
       <div class="settings-add-row">
         <input type="text" class="dialog-input settings-root-input" id="settings-root-input" placeholder="C:\Users\...\repos" autocomplete="off" spellcheck="false">
@@ -182,7 +196,7 @@ export function createSettingsDialog() {
       <div class="dialog-field-error" id="settings-root-error"></div>
     </div>
     <div class="dialog-error" id="settings-error"></div>
-    <div class="dialog-actions">
+    <div class="dialog-actions settings-actions">
       <button class="btn-dialog btn-dialog-cancel" id="settings-cancel">Cancel</button>
       <button class="btn-dialog btn-dialog-confirm" id="settings-save">Save</button>
     </div>
@@ -198,9 +212,24 @@ export function createSettingsDialog() {
   const rootInput = dialog.querySelector('#settings-root-input');
   const rootAddBtn = dialog.querySelector('#settings-root-add');
   const rootErrorEl = dialog.querySelector('#settings-root-error');
+  const soundSelect = dialog.querySelector('#settings-sound');
   const errorEl = dialog.querySelector('#settings-error');
   const btnCancel = dialog.querySelector('#settings-cancel');
   const btnSave = dialog.querySelector('#settings-save');
+
+  // Populate sound picker
+  for (const opt of SOUND_OPTIONS) {
+    const option = document.createElement('option');
+    option.value = opt.id;
+    option.textContent = opt.label;
+    soundSelect.appendChild(option);
+  }
+  soundSelect.value = getSoundId();
+
+  soundSelect.addEventListener('change', () => {
+    setSoundId(soundSelect.value);
+    playAlertSound(soundSelect.value);
+  });
 
   let repoRoots = [];
 
@@ -251,22 +280,18 @@ export function createSettingsDialog() {
     renderRootList();
   }
 
+  const timeoutErrorEl = dialog.querySelector('#settings-timeout-error');
+
   function validateTimeouts() {
-    let valid = true;
-    const fields = [
-      { input: attentionInput, errorEl: dialog.querySelector('#settings-attention-error') },
-      { input: escalationInput, errorEl: dialog.querySelector('#settings-escalation-error') },
-      { input: watchdogInput, errorEl: dialog.querySelector('#settings-watchdog-error') },
-    ];
-    for (const f of fields) {
-      const v = Number(f.input.value);
-      f.errorEl.textContent = '';
-      if (!f.input.value || Number.isNaN(v) || v <= 0 || !Number.isInteger(v)) {
-        f.errorEl.textContent = 'Must be a positive integer';
-        valid = false;
+    timeoutErrorEl.textContent = '';
+    for (const input of [attentionInput, escalationInput, watchdogInput]) {
+      const v = Number(input.value);
+      if (!input.value || Number.isNaN(v) || v <= 0 || !Number.isInteger(v)) {
+        timeoutErrorEl.textContent = 'All timeouts must be positive integers';
+        return false;
       }
     }
-    return valid;
+    return true;
   }
 
   function save() {

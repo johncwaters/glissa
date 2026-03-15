@@ -194,10 +194,10 @@ html, body {
 }
 
 /* ── Drag-and-drop reorder ───────────────────────────────── */
-.drag-handle {
+.btn-minimize {
   cursor: pointer;
   opacity: 0.5;
-  padding: 2px 6px;
+  padding: 6px 10px;
   font-size: 12px;
   user-select: none;
   transition: opacity var(--transition-fast), color var(--transition-fast);
@@ -206,7 +206,7 @@ html, body {
   border-radius: 3px;
 }
 
-.drag-handle:hover {
+.btn-minimize:hover {
   opacity: 0.9;
   background: rgba(255, 255, 255, 0.04);
 }
@@ -241,20 +241,78 @@ html, body {
   box-shadow: 0 4px 12px rgba(79, 110, 247, 0.25), 0 0 0 1px rgba(79, 110, 247, 0.15);
 }
 
-/* ── Minimize/collapse ───────────────────────────────────── */
-.session-card.minimized .terminal-wrap,
-.session-card.minimized .audit-toggle,
-.session-card.minimized .audit-timeline {
+/* ── Minimized bar ───────────────────────────────────────── */
+.minimized-bar {
   display: none;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 24px;
+  max-width: 1920px;
+  margin: 0 auto;
+  border-bottom: 1px solid var(--border-dim);
+  background: var(--bg-header);
 }
 
+.minimized-bar:has(.session-card) {
+  display: flex;
+}
+
+/* ── Minimize/collapse ───────────────────────────────────── */
 .session-card.minimized {
-  opacity: 0.75;
-  align-self: start;
+  border-radius: var(--radius);
+  opacity: 0.85;
+  flex: none;
+  transition: opacity var(--transition-fast), border-color var(--transition-med);
+}
+
+.session-card.minimized:hover {
+  opacity: 1;
+  transform: none;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.session-card.minimized .terminal-wrap,
+.session-card.minimized .audit-toggle,
+.session-card.minimized .audit-timeline,
+.session-card.minimized .quick-reply-bar {
+  display: none;
 }
 
 .session-card.minimized .session-card-header {
   border-bottom: none;
+  padding: 4px 10px;
+  min-height: unset;
+  gap: 8px;
+}
+
+.session-card.minimized .session-name {
+  font-size: 11px;
+}
+
+.session-card.minimized .state-badge {
+  font-size: 9px;
+  padding: 1px 8px;
+}
+
+.session-card.minimized .session-header-spacer {
+  display: none;
+}
+
+.session-card.minimized .session-idle-label {
+  font-size: 10px;
+}
+
+.session-card.minimized .session-actions {
+  gap: 4px;
+}
+
+.session-card.minimized .btn-action {
+  padding: 2px 8px;
+  font-size: 9px;
+}
+
+.session-card.minimized[data-state="WAITING"] {
+  animation: none;
 }
 
 /* btn-minimize removed — drag handle now toggles minimize */
@@ -441,15 +499,6 @@ html, body {
 
 .btn-restart:hover {
   background: rgba(59, 130, 246, 0.12);
-}
-
-.btn-dismiss {
-  color: var(--state-waiting);
-  border-color: rgba(245, 158, 11, 0.4);
-}
-
-.btn-dismiss:hover {
-  background: rgba(245, 158, 11, 0.12);
 }
 
 .btn-action.visible {
@@ -696,7 +745,10 @@ html, body {
   font-family: var(--font-mono);
   font-size: 11px;
   color: var(--state-failed);
-  min-height: 16px;
+}
+
+.dialog-error:empty {
+  display: none;
 }
 
 .dialog-actions {
@@ -858,14 +910,39 @@ html, body {
 
 /* ── Settings dialog ────────────────────────────────────── */
 .dialog-settings {
-  width: 480px;
+  width: 520px;
+}
+
+.dialog-hint {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--text-muted);
+  letter-spacing: 0.02em;
+  line-height: 1.3;
+}
+
+.settings-actions {
+  margin-top: 8px;
 }
 
 .dialog-field-error {
   font-family: var(--font-mono);
   font-size: 10px;
   color: var(--state-failed);
-  min-height: 14px;
+}
+
+.dialog-field-error:empty {
+  display: none;
+}
+
+.settings-timeout-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+  gap: 8px;
+}
+
+.settings-timeout-grid .dialog-input {
+  min-width: 0;
 }
 
 .settings-section {
@@ -991,6 +1068,126 @@ html, body {
   font-size: 11px;
 }
 
+/* ── Focus mode ──────────────────────────────────────────── */
+.sessions[data-focus] {
+  grid-template-columns: 1fr;
+}
+
+.sessions[data-focus] .session-card:not(.focused) {
+  display: none;
+}
+
+.sessions[data-focus] .session-card.focused {
+  width: 100%;
+}
+
+.sessions[data-focus] .session-card.focused .terminal-wrap .xterm {
+  height: calc(100vh - 200px);
+}
+
+.session-name {
+  cursor: default;
+}
+
+.session-card:not(.minimized) .session-name {
+  cursor: pointer;
+}
+
+/* ── Quick-reply bar ─────────────────────────────────────── */
+.quick-reply-bar {
+  display: none;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 12px;
+  background: var(--bg-surface);
+  border-top: 1px solid var(--border-dim);
+}
+
+.session-card[data-state="WAITING"] .quick-reply-bar {
+  display: flex;
+}
+
+.quick-reply-btn {
+  padding: 4px 14px;
+  border: 1px solid var(--border-hover);
+  border-radius: 99px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--text);
+  background: transparent;
+  cursor: pointer;
+  transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
+}
+
+.quick-reply-btn:hover {
+  background: rgba(245, 158, 11, 0.1);
+  border-color: var(--state-waiting);
+  color: var(--state-waiting);
+}
+
+.quick-reply-btn:active {
+  transform: scale(0.97);
+}
+
+.quick-reply-input {
+  flex: 1;
+  min-width: 120px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+  color: var(--text-head);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  outline: none;
+  transition: border-color var(--transition-fast);
+}
+
+.quick-reply-input:focus {
+  border-color: var(--accent);
+}
+
+.quick-reply-input::placeholder {
+  color: var(--text-muted);
+}
+
+.quick-reply-send {
+  border-color: var(--accent-dim);
+  color: var(--accent);
+}
+
+.quick-reply-send:hover {
+  background: rgba(79, 110, 247, 0.12);
+  border-color: var(--accent);
+}
+
+/* ── Mute button ─────────────────────────────────────────── */
+.btn-mute {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--border-hover);
+  border-radius: 4px;
+  font-size: 14px;
+  color: var(--text);
+  background: transparent;
+  cursor: pointer;
+  transition: background var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast);
+}
+
+.btn-mute:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.btn-mute.muted {
+  opacity: 0.5;
+}
+
 /* ── Responsive ──────────────────────────────────────────── */
 @media (max-width: 1280px) {
   .sessions {
@@ -1001,5 +1198,9 @@ html, body {
 
   .header-inner {
     padding: 10px 16px;
+  }
+
+  .minimized-bar {
+    padding: 8px 16px;
   }
 }
