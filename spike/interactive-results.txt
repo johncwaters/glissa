@@ -1,0 +1,10 @@
+Spawning claude interactively (NO -p flag, shell: true)...
+Capturing output for 25 seconds...
+
+
+--- 25s timeout: killing ---
+
+Process exited: code=null signal=SIGTERM
+Total stdout chunks: 0
+Total stdout bytes: 0
+Has ANSI anywhere: false
