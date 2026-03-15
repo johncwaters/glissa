@@ -41,6 +41,8 @@ function registerControlHandlers(controlWss, deps) {
     closeSessionDataClients,
     applyConfigReload,
     applySettingsReload,
+    requestShutdown,
+    requestRestart,
   } = deps;
 
   function buildSnapshot() {
@@ -201,12 +203,29 @@ function registerControlHandlers(controlWss, deps) {
     }));
   }
 
+  function handleShutdown() {
+    console.log('[control] Shutdown requested via UI');
+    broadcastControl({ type: 'shutting-down' });
+    setTimeout(() => {
+      if (requestShutdown) requestShutdown();
+    }, 200);
+  }
+
+  function handleRestart() {
+    console.log('[control] Restart requested via UI');
+    broadcastControl({ type: 'restarting' });
+    setTimeout(() => {
+      if (requestRestart) requestRestart();
+    }, 200);
+  }
+
   function handleSessionAction(msg) {
     const sess = sessions.get(msg.session);
     if (!sess) return;
 
     if (msg.type === 'kill') sess.killSession();
     else if (msg.type === 'restart') sess.restart();
+    else if (msg.type === 'force-restart') sess.forceRestart();
     else if (msg.type === 'dismiss') sess.dismiss();
   }
 
@@ -220,7 +239,10 @@ function registerControlHandlers(controlWss, deps) {
     'scan-repo-roots':  handleScanRepoRoots,
     'kill':             handleSessionAction,
     'restart':          handleSessionAction,
+    'force-restart':    handleSessionAction,
     'dismiss':          handleSessionAction,
+    'shutdown':         handleShutdown,
+    'restart-server':   handleRestart,
   };
 
   controlWss.on('connection', (ws) => {

@@ -1,8 +1,8 @@
 // ── Dialogs module ────────────────────────────────────────────
 // Owns Add Session and Settings dialog factory functions.
 
-import { sendControlRequest, sendControlMsg } from './control-ws.js';
 import { getSessionUIs } from './session-card.js';
+import { sendControlRequest, sendControlMsg } from './control-ws.js';
 
 // ── Add Session dialog ────────────────────────────────────────
 
@@ -13,7 +13,7 @@ export function createAddSessionDialog() {
   const dialog = document.createElement('div');
   dialog.className = 'dialog';
 
-  dialog.innerHTML = `
+  dialog.innerHTML = String.raw`
     <div class="dialog-title">Add Session</div>
     <label class="dialog-label">
       Name
@@ -21,7 +21,7 @@ export function createAddSessionDialog() {
     </label>
     <label class="dialog-label">
       Path
-      <input type="text" class="dialog-input" id="add-session-path" placeholder="C:\\Users\\...\\my-project" autocomplete="off" spellcheck="false">
+      <input type="text" class="dialog-input" id="add-session-path" placeholder="C:\Users\...\my-project" autocomplete="off" spellcheck="false">
     </label>
     <label class="dialog-label">
       Or pick from discovered projects:
@@ -98,7 +98,7 @@ export function createAddSessionDialog() {
       const proj = JSON.parse(pickerEl.value);
       nameInput.value = proj.name;
       pathInput.value = proj.path;
-    } catch (_) { /* no-op */ }
+    } catch { /* picker value not valid JSON — ignore */ }
   });
 
   // Reset picker when user types manually
@@ -155,7 +155,7 @@ export function createSettingsDialog() {
   const dialog = document.createElement('div');
   dialog.className = 'dialog dialog-settings';
 
-  dialog.innerHTML = `
+  dialog.innerHTML = String.raw`
     <div class="dialog-title">Settings</div>
     <label class="dialog-label">
       Attention Timeout (seconds)
@@ -176,7 +176,7 @@ export function createSettingsDialog() {
       <div class="settings-section-title">Repository Roots</div>
       <div class="settings-root-list" id="settings-root-list"></div>
       <div class="settings-add-row">
-        <input type="text" class="dialog-input settings-root-input" id="settings-root-input" placeholder="C:\\Users\\...\\repos" autocomplete="off" spellcheck="false">
+        <input type="text" class="dialog-input settings-root-input" id="settings-root-input" placeholder="C:\Users\...\repos" autocomplete="off" spellcheck="false">
         <button class="btn-dialog btn-dialog-confirm btn-settings-add" id="settings-root-add">Add</button>
       </div>
       <div class="dialog-field-error" id="settings-root-error"></div>
@@ -261,7 +261,7 @@ export function createSettingsDialog() {
     for (const f of fields) {
       const v = Number(f.input.value);
       f.errorEl.textContent = '';
-      if (!f.input.value || isNaN(v) || v <= 0 || !Number.isInteger(v)) {
+      if (!f.input.value || Number.isNaN(v) || v <= 0 || !Number.isInteger(v)) {
         f.errorEl.textContent = 'Must be a positive integer';
         valid = false;
       }

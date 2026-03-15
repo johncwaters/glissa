@@ -1,11 +1,12 @@
 // ── Session card module ───────────────────────────────────────
 // Owns session card DOM lifecycle, terminal setup, and per-session state.
 
-import { Terminal } from '/xterm/xterm.mjs';
-import { FitAddon } from '/xterm/addon-fit.mjs';
-import { WebglAddon } from '/xterm/addon-webgl.mjs';
-import { STATES, BADGE_LABELS, KILLABLE_STATES, RESTARTABLE_STATES, DISMISSABLE_STATES } from '/shared/states.mjs';
+import { FitAddon } from '@xterm/addon-fit';
+import { WebglAddon } from '@xterm/addon-webgl';
+import { Terminal } from '@xterm/xterm';
 import { sendControlMsg } from './control-ws.js';
+// Vite alias — resolves to shared/states.esm.js
+import { STATES, BADGE_LABELS, KILLABLE_STATES, RESTARTABLE_STATES, DISMISSABLE_STATES } from '/shared/states.mjs';
 
 // ── Constants ────────────────────────────────────────────────
 
@@ -36,7 +37,6 @@ const TERM_THEME = {
 
 // ── State ────────────────────────────────────────────────────
 
-// Map<sessionName, { term, fitAddon, dataWs, card, badge, btnKill, btnRestart, idleLabel, auditLog, auditContainer, auditToggle, idleStart, idleInterval }>
 const sessionUIs = new Map();
 
 // ── DOM refs ─────────────────────────────────────────────────
@@ -47,30 +47,31 @@ const aggregateEl = document.getElementById('aggregate-status');
 // ── Helpers (private) ────────────────────────────────────────
 
 function formatTime(ts) {
-  const d = new Date(ts);
-  const hh = String(d.getHours()).padStart(2, '0');
-  const mm = String(d.getMinutes()).padStart(2, '0');
-  const ss = String(d.getSeconds()).padStart(2, '0');
-  return hh + ':' + mm + ':' + ss;
+  return new Date(ts).toLocaleTimeString('en-GB', { hour12: false });
 }
 
 function formatIdleDuration(ms) {
   const totalSec = Math.floor(ms / 1000);
   const m = Math.floor(totalSec / 60);
   const s = totalSec % 60;
-  if (m > 0) return m + 'm ' + s + 's';
-  return s + 's';
+  return m > 0 ? `${m}m ${s}s` : `${s}s`;
+}
+
+function el(tag, className, text) {
+  const e = document.createElement(tag);
+  if (className) e.className = className;
+  if (text != null) e.textContent = text;
+  return e;
 }
 
 function makeBadge(state) {
-  const el = document.createElement('span');
-  el.className = 'state-badge';
-  el.dataset.state = state;
-  el.textContent = BADGE_LABELS[state] || state;
-  return el;
+  const badge = el('span', 'state-badge');
+  badge.dataset.state = state;
+  badge.textContent = BADGE_LABELS[state] || state;
+  return badge;
 }
 
-function reloadWebGL(ui) {
+function tryLoadWebGL(ui) {
   try {
     if (ui.webglAddon) {
       ui.webglAddon.dispose();
@@ -85,8 +86,7 @@ function reloadWebGL(ui) {
     ui.term.loadAddon(addon);
     ui.webglAddon = addon;
     ui.needsWebGLReload = false;
-  } catch (_) {
-    // canvas renderer fallback is fine
+  } catch {
     ui.webglAddon = null;
     ui.needsWebGLReload = false;
   }
@@ -94,13 +94,8 @@ function reloadWebGL(ui) {
 
 function updateButtonVisibility(ui) {
   const state = ui.currentState;
-  const showKill = KILLABLE_STATES.includes(state);
-  const showRestart = RESTARTABLE_STATES.includes(state);
-  const showDismiss = DISMISSABLE_STATES.includes(state);
-
-  ui.btnKill.classList.toggle('visible', showKill);
-  ui.btnDismiss.classList.toggle('visible', showDismiss);
-  ui.btnRestart.classList.toggle('visible', showRestart);
+  ui.btnDismiss.classList.toggle('visible', DISMISSABLE_STATES.includes(state));
+  ui.btnRestart.classList.toggle('visible', KILLABLE_STATES.includes(state) || RESTARTABLE_STATES.includes(state));
 }
 
 function startIdleCounter(ui) {
@@ -122,45 +117,19 @@ function stopIdleCounter(ui) {
 
 function updateIdleLabel(ui) {
   if (ui.idleStart === null) return;
-  const elapsed = Date.now() - ui.idleStart;
-  ui.idleLabel.textContent = 'Idle ' + formatIdleDuration(elapsed);
+  ui.idleLabel.textContent = `Idle ${formatIdleDuration(Date.now() - ui.idleStart)}`;
 }
 
 function appendAuditEntry(ui, entry) {
   ui.auditLog.push(entry);
 
-  const el = document.createElement('div');
-  el.className = 'audit-entry';
-
-  const time = document.createElement('span');
-  time.className = 'audit-time';
-  time.textContent = formatTime(entry.timestamp);
-
-  const from = document.createElement('span');
-  from.className = 'audit-from';
-  from.textContent = entry.from;
-
-  const arrow = document.createElement('span');
-  arrow.className = 'audit-arrow';
-  arrow.textContent = '\u2192';
-
-  const to = document.createElement('span');
-  to.className = 'audit-to';
-  to.textContent = entry.to;
-
-  const evt = document.createElement('span');
-  evt.className = 'audit-event';
-  evt.textContent = '(' + entry.event + ')';
-
-  el.appendChild(time);
-  el.appendChild(from);
-  el.appendChild(arrow);
-  el.appendChild(to);
-  el.appendChild(evt);
-
-  ui.auditContainer.appendChild(el);
-
-  // Auto-scroll to bottom
+  const row = el('div', 'audit-entry');
+  row.appendChild(el('span', 'audit-time', formatTime(entry.timestamp)));
+  row.appendChild(el('span', 'audit-from', entry.from));
+  row.appendChild(el('span', 'audit-arrow', '\u2192'));
+  row.appendChild(el('span', 'audit-to', entry.to));
+  row.appendChild(el('span', 'audit-event', `(${entry.event})`));
+  ui.auditContainer.appendChild(row);
   ui.auditContainer.scrollTop = ui.auditContainer.scrollHeight;
 }
 
@@ -169,13 +138,10 @@ function connectDataWs(sessionName, ui, term) {
   const ws = new WebSocket(url);
   ui.dataWs = ws;
 
-  ws.addEventListener('message', (event) => {
-    term.write(event.data);
-  });
+  ws.addEventListener('message', (event) => term.write(event.data));
 
   ws.addEventListener('close', () => {
     ui.dataWs = null;
-    // Retry after delay
     setTimeout(() => {
       if (sessionUIs.has(sessionName)) {
         connectDataWs(sessionName, ui, term);
@@ -183,185 +149,189 @@ function connectDataWs(sessionName, ui, term) {
     }, RECONNECT_DELAY_MS);
   });
 
-  ws.addEventListener('error', () => {
-    // close event will fire next and trigger retry
-  });
-
   ws.addEventListener('open', () => {
-    // Send initial resize so PTY matches what xterm rendered
     const { cols, rows } = term;
     ws.send(JSON.stringify({ type: 'resize', cols, rows }));
   });
 }
 
+let _localReorderPending = false;
+
 function sendReorder() {
+  _localReorderPending = true;
   const order = [...container.querySelectorAll('.session-card')]
-    .map(el => el.dataset.session)
+    .map(c => c.dataset.session)
     .filter(Boolean);
   sendControlMsg({ type: 'reorder-sessions', order });
 }
 
-// ── createSessionCard internal helpers ────────────────────────
+// ── Card DOM builder ─────────────────────────────────────────
 
 function buildCardDOM(sessionName, initialState) {
-  const card = document.createElement('div');
-  card.className = 'session-card';
+  const state = initialState || STATES.INITIALIZING;
+  const card = el('div', 'session-card');
   card.dataset.session = sessionName;
-  card.dataset.state = initialState || STATES.INITIALIZING;
+  card.dataset.state = state;
 
-  // Header row
-  const header = document.createElement('div');
-  header.className = 'session-card-header';
+  // Header
+  const header = el('div', 'session-card-header');
 
-  const nameEl = document.createElement('span');
-  nameEl.className = 'session-name';
-  nameEl.textContent = sessionName;
+  const dragHandle = el('span', 'drag-handle', '\u25bc');
+  dragHandle.title = 'Minimize / Expand';
 
-  const badge = makeBadge(initialState || STATES.INITIALIZING);
+  const nameEl = el('span', 'session-name', sessionName);
+  const badge = makeBadge(state);
   badge.classList.add('session-badge');
-
-  const spacer = document.createElement('span');
-  spacer.className = 'session-header-spacer';
-
-  const idleLabel = document.createElement('span');
-  idleLabel.className = 'session-idle-label';
+  const spacer = el('span', 'session-header-spacer');
+  const idleLabel = el('span', 'session-idle-label');
 
   // Action buttons
-  const actions = document.createElement('div');
-  actions.className = 'session-actions';
+  const actions = el('div', 'session-actions');
 
-  const btnKill = document.createElement('button');
-  btnKill.className = 'btn-action btn-kill';
-  btnKill.textContent = 'Kill';
-  btnKill.title = 'Kill this session';
-
-  const btnDismiss = document.createElement('button');
-  btnDismiss.className = 'btn-action btn-dismiss';
-  btnDismiss.textContent = 'Dismiss';
+  const btnDismiss = el('button', 'btn-action btn-dismiss', 'Dismiss');
   btnDismiss.title = 'Dismiss false waiting detection';
 
-  const btnRestart = document.createElement('button');
-  btnRestart.className = 'btn-action btn-restart';
-  btnRestart.textContent = 'Restart';
+  const btnRestart = el('button', 'btn-action btn-restart', 'Restart');
   btnRestart.title = 'Restart this session';
 
-  const btnRemove = document.createElement('button');
-  btnRemove.className = 'btn-action btn-remove visible';
-  btnRemove.textContent = 'Remove';
+  const btnRemove = el('button', 'btn-action btn-remove visible', 'Remove');
   btnRemove.title = 'Remove this session';
 
-  const btnMinimize = document.createElement('button');
-  btnMinimize.className = 'btn-action btn-minimize visible';
-  btnMinimize.textContent = 'Min';
-  btnMinimize.title = 'Minimize this session';
+  actions.append(btnDismiss, btnRestart, btnRemove);
+  header.append(dragHandle, nameEl, badge, spacer, idleLabel, actions);
 
-  actions.appendChild(btnMinimize);
-  actions.appendChild(btnKill);
-  actions.appendChild(btnDismiss);
-  actions.appendChild(btnRestart);
-  actions.appendChild(btnRemove);
+  // Terminal + audit
+  const termWrap = el('div', 'terminal-wrap');
 
-  // Drag handle
-  const dragHandle = document.createElement('span');
-  dragHandle.className = 'drag-handle';
-  dragHandle.textContent = '\u2630'; // hamburger icon
-  dragHandle.title = 'Drag to reorder';
-  header.appendChild(dragHandle);
-
-  header.appendChild(nameEl);
-  header.appendChild(badge);
-  header.appendChild(spacer);
-  header.appendChild(idleLabel);
-  header.appendChild(actions);
-
-  // Terminal
-  const termWrap = document.createElement('div');
-  termWrap.className = 'terminal-wrap';
-
-  // Audit toggle
-  const auditToggle = document.createElement('div');
-  auditToggle.className = 'audit-toggle';
+  const auditToggle = el('div', 'audit-toggle');
   auditToggle.innerHTML = '<span class="audit-toggle-arrow">\u25b6</span> Audit log';
 
-  // Audit timeline container
-  const auditContainer = document.createElement('div');
-  auditContainer.className = 'audit-timeline';
+  const auditContainer = el('div', 'audit-timeline');
 
-  card.appendChild(header);
-  card.appendChild(termWrap);
-  card.appendChild(auditToggle);
-  card.appendChild(auditContainer);
+  card.append(header, termWrap, auditToggle, auditContainer);
 
-  return { card, badge, idleLabel, btnKill, btnDismiss, btnRestart, btnRemove, btnMinimize, dragHandle, termWrap, auditToggle, auditContainer };
+  return { card, header, badge, idleLabel, btnDismiss, btnRestart, btnRemove, dragHandle, termWrap, auditToggle, auditContainer };
 }
 
-function setupDragAndDrop(card, dragHandle, sessionName) {
+// ── Minimize toggle ──────────────────────────────────────────
+
+function toggleMinimize(sessionName) {
+  const ui = sessionUIs.get(sessionName);
+  if (!ui) return;
+  const isMinimized = ui.card.classList.toggle('minimized');
+  ui.dragHandle.textContent = isMinimized ? '\u25b6' : '\u25bc';
+  ui.dragHandle.title = isMinimized ? 'Expand' : 'Minimize';
+  if (!isMinimized) {
+    if (ui.needsWebGLReload) tryLoadWebGL(ui);
+    requestAnimationFrame(() => ui.fitAddon.fit());
+  }
+}
+
+// ── Container-level drag-and-drop ────────────────────────────
+
+let _dragSource = null;
+
+function findDropTarget(x, y) {
+  const allCards = [...container.querySelectorAll('.session-card')];
+  const sourceCard = _dragSource ? _dragSource.card : null;
+
+  let closest = null;
+  let closestDist = Infinity;
+
+  for (const card of allCards) {
+    if (card === sourceCard) continue;
+    const rect = card.getBoundingClientRect();
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+    const dist = Math.hypot(x - cx, y - cy);
+    if (dist < closestDist) {
+      closestDist = dist;
+      closest = card;
+    }
+  }
+
+  if (!closest) return { card: null, before: true };
+
+  // DOM order = visual position in CSS grid.
+  // When source is before target, removing source shifts target up,
+  // so insert after target. When source is after, insert before.
+  const sourceIdx = sourceCard ? allCards.indexOf(sourceCard) : -1;
+  const targetIdx = allCards.indexOf(closest);
+  return { card: closest, before: sourceIdx > targetIdx };
+}
+
+function clearDropIndicators() {
+  for (const [, ui] of sessionUIs) {
+    ui.card.classList.remove('drop-above', 'drop-below');
+  }
+}
+
+container.addEventListener('dragover', (e) => {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  clearDropIndicators();
+  const { card, before } = findDropTarget(e.clientX, e.clientY);
+  if (card) card.classList.add(before ? 'drop-above' : 'drop-below');
+});
+
+container.addEventListener('dragleave', (e) => {
+  if (!container.contains(e.relatedTarget)) clearDropIndicators();
+});
+
+container.addEventListener('drop', (e) => {
+  e.preventDefault();
+  clearDropIndicators();
+  if (!_dragSource) return;
+  const { card, before } = findDropTarget(e.clientX, e.clientY);
+  if (!card || card === _dragSource.card) return;
+  container.insertBefore(_dragSource.card, before ? card : card.nextSibling);
+  sendReorder();
+});
+
+function setupDragAndDrop(card, header, dragHandle, sessionName) {
   card.draggable = false;
-  dragHandle.addEventListener('mousedown', () => { card.draggable = true; });
-  card.addEventListener('dragend', () => { card.draggable = false; });
+  let didDrag = false;
+
+  header.addEventListener('mousedown', (e) => {
+    if (e.target.closest('.session-actions')) return;
+    didDrag = false;
+    card.draggable = true;
+  });
+
+  header.addEventListener('mouseup', () => {
+    if (!didDrag) card.draggable = false;
+  });
+
+  dragHandle.addEventListener('click', () => {
+    if (!didDrag) toggleMinimize(sessionName);
+  });
 
   card.addEventListener('dragstart', (e) => {
+    didDrag = true;
+    _dragSource = sessionUIs.get(sessionName);
     e.dataTransfer.effectAllowed = 'move';
     e.dataTransfer.setData('text/plain', sessionName);
     card.classList.add('dragging');
-  });
-
-  card.addEventListener('dragover', (e) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-    const rect = card.getBoundingClientRect();
-    const midY = rect.top + rect.height / 2;
-    card.classList.toggle('drop-above', e.clientY < midY);
-    card.classList.toggle('drop-below', e.clientY >= midY);
-  });
-
-  card.addEventListener('dragleave', () => {
-    card.classList.remove('drop-above', 'drop-below');
-  });
-
-  card.addEventListener('drop', (e) => {
-    e.preventDefault();
-    card.classList.remove('drop-above', 'drop-below');
-    const sourceName = e.dataTransfer.getData('text/plain');
-    const sourceUI = sessionUIs.get(sourceName);
-    if (!sourceUI || sourceUI.card === card) return;
-
-    const rect = card.getBoundingClientRect();
-    const midY = rect.top + rect.height / 2;
-    if (e.clientY < midY) {
-      container.insertBefore(sourceUI.card, card);
-    } else {
-      container.insertBefore(sourceUI.card, card.nextSibling);
-    }
-
-    sendReorder();
+    container.classList.add('drag-active');
   });
 
   card.addEventListener('dragend', () => {
+    card.draggable = false;
     card.classList.remove('dragging');
-    // Clean up any lingering indicators on all cards
-    for (const [, ui] of sessionUIs) {
-      ui.card.classList.remove('drop-above', 'drop-below');
-    }
-    // Recover WebGL on the dragged card (DOM move invalidates context)
-    const draggedUI = sessionUIs.get(sessionName);
-    if (draggedUI) {
-      if (draggedUI.card.classList.contains('minimized')) {
-        draggedUI.needsWebGLReload = true;
-      } else {
-        reloadWebGL(draggedUI);
-      }
-    }
-    // Defensive fit on all terminals after layout change (skip minimized)
+    container.classList.remove('drag-active');
+    clearDropIndicators();
+    _dragSource = null;
     for (const [, ui] of sessionUIs) {
       if (!ui.card.classList.contains('minimized')) {
-        try { ui.fitAddon.fit(); } catch (_) {}
+        try { ui.fitAddon.fit(); } catch {}
       }
     }
   });
 }
 
-function setupTerminal(termWrap) {
+// ── Terminal setup ───────────────────────────────────────────
+
+function setupTerminal(termWrap, ui) {
   const term = new Terminal({
     cursorBlink: true,
     fontSize: 14,
@@ -375,34 +345,23 @@ function setupTerminal(termWrap) {
   term.loadAddon(fitAddon);
   term.open(termWrap);
 
+  ui.term = term;
+  ui.fitAddon = fitAddon;
+  ui.webglAddon = null;
+  ui.needsWebGLReload = false;
+
   // Try WebGL — fall back to canvas silently
-  let webglAddon = null;
-  try {
-    webglAddon = new WebglAddon();
-    webglAddon.onContextLoss(() => {
-      webglAddon.dispose();
-      webglAddon = null;
-    });
-    term.loadAddon(webglAddon);
-  } catch (_) {
-    // canvas renderer is fine
-  }
+  tryLoadWebGL(ui);
 
-  // Fit after open — defer one tick to let layout settle
-  requestAnimationFrame(() => {
-    fitAddon.fit();
-  });
-
-  return { term, fitAddon, webglAddon };
+  requestAnimationFrame(() => fitAddon.fit());
 }
 
-function wireButtonEvents(ui, sessionName) {
-  ui.btnKill.addEventListener('click', () => {
-    sendControlMsg({ type: 'kill', session: sessionName });
-  });
+// ── Card event wiring ────────────────────────────────────────
 
+function wireCardEvents(ui, sessionName) {
   ui.btnRestart.addEventListener('click', () => {
-    sendControlMsg({ type: 'restart', session: sessionName });
+    const type = KILLABLE_STATES.includes(ui.currentState) ? 'force-restart' : 'restart';
+    sendControlMsg({ type, session: sessionName });
   });
 
   ui.btnDismiss.addEventListener('click', () => {
@@ -414,26 +373,27 @@ function wireButtonEvents(ui, sessionName) {
     sendControlMsg({ type: 'remove-session', session: sessionName });
   });
 
-  // Wire minimize toggle
-  ui.btnMinimize.addEventListener('click', () => {
-    const isMinimized = ui.card.classList.toggle('minimized');
-    ui.btnMinimize.textContent = isMinimized ? 'Max' : 'Min';
-    ui.btnMinimize.title = isMinimized ? 'Restore this session' : 'Minimize this session';
-    if (!isMinimized) {
-      if (ui.needsWebGLReload) {
-        reloadWebGL(ui);
-      }
-      requestAnimationFrame(() => ui.fitAddon.fit());
-    }
-  });
-
-  // Wire audit toggle
   ui.auditToggle.addEventListener('click', () => {
     const isOpen = ui.auditToggle.classList.toggle('open');
     ui.auditContainer.classList.toggle('open', isOpen);
-    // Refit terminal after collapse/expand
     requestAnimationFrame(() => ui.fitAddon.fit());
   });
+}
+
+function wireTerminalIO(ui, sessionName) {
+  ui.term.onData((data) => {
+    if (ui.dataWs?.readyState === WebSocket.OPEN) {
+      ui.dataWs.send(JSON.stringify({ type: 'input', data }));
+    }
+  });
+
+  ui.term.onResize(({ cols, rows }) => {
+    if (ui.dataWs?.readyState === WebSocket.OPEN) {
+      ui.dataWs.send(JSON.stringify({ type: 'resize', cols, rows }));
+    }
+  });
+
+  connectDataWs(sessionName, ui, ui.term);
 }
 
 // ── Public API ────────────────────────────────────────────────
@@ -443,11 +403,7 @@ export function getSessionUIs() {
 }
 
 export function updateAggregateStatus() {
-  let waiting = 0;
-  let failed = 0;
-  let done = 0;
-  let running = 0;
-  let total = 0;
+  let waiting = 0, failed = 0, done = 0, total = 0;
 
   for (const [, ui] of sessionUIs) {
     total++;
@@ -455,54 +411,49 @@ export function updateAggregateStatus() {
     if (state === STATES.WAITING) waiting++;
     else if (state === STATES.FAILED) failed++;
     else if (state === STATES.DONE) done++;
-    else running++;
   }
 
   let text = '';
   let severity = '';
+  const pl = (n) => n > 1 ? 's' : '';
 
   if (waiting > 0) {
-    text = waiting + ' session' + (waiting > 1 ? 's' : '') + ' need input';
+    text = `${waiting} session${pl(waiting)} need input`;
     severity = 'warning';
   } else if (failed > 0) {
-    text = failed + ' session' + (failed > 1 ? 's' : '') + ' failed';
+    text = `${failed} session${pl(failed)} failed`;
     severity = 'critical';
   } else if (total > 0 && done === total) {
     text = 'All sessions complete';
     severity = 'done';
   } else if (total > 0) {
     const active = total - done;
-    text = active + ' session' + (active > 1 ? 's' : '') + ' running';
+    text = `${active} session${pl(active)} running`;
     severity = 'success';
   }
 
   aggregateEl.textContent = text;
   aggregateEl.dataset.severity = severity;
-
-  // Tab title
   const alertCount = waiting + failed;
-  document.title = alertCount > 0 ? '(' + alertCount + ') Glissa' : 'Glissa';
+  document.title = alertCount > 0 ? `(${alertCount}) Glissa` : 'Glissa';
 }
 
 export function createSessionCard(sessionName, initialState, auditLog) {
   const dom = buildCardDOM(sessionName, initialState);
-  setupDragAndDrop(dom.card, dom.dragHandle, sessionName);
+  setupDragAndDrop(dom.card, dom.header, dom.dragHandle, sessionName);
   container.appendChild(dom.card);
 
-  const { term, fitAddon, webglAddon } = setupTerminal(dom.termWrap);
-
   const ui = {
-    term,
-    fitAddon,
-    webglAddon,
+    term: null,
+    fitAddon: null,
+    webglAddon: null,
     needsWebGLReload: false,
     dataWs: null,
     card: dom.card,
     badge: dom.badge,
-    btnKill: dom.btnKill,
+    dragHandle: dom.dragHandle,
     btnDismiss: dom.btnDismiss,
     btnRestart: dom.btnRestart,
-    btnMinimize: dom.btnMinimize,
     btnRemove: dom.btnRemove,
     idleLabel: dom.idleLabel,
     auditLog: [],
@@ -514,41 +465,17 @@ export function createSessionCard(sessionName, initialState, auditLog) {
   };
   sessionUIs.set(sessionName, ui);
 
-  // Fix WebGL context loss callback to reference the ui object
-  if (webglAddon) {
-    webglAddon.onContextLoss(() => {
-      webglAddon.dispose();
-      ui.webglAddon = null;
-      ui.needsWebGLReload = true;
-    });
-  }
+  setupTerminal(dom.termWrap, ui);
 
-  wireButtonEvents(ui, sessionName);
+  wireCardEvents(ui, sessionName);
   updateButtonVisibility(ui);
 
-  // Populate initial audit log from snapshot
-  if (auditLog && auditLog.length > 0) {
-    for (const entry of auditLog) {
-      appendAuditEntry(ui, entry);
-    }
+  if (auditLog?.length > 0) {
+    for (const entry of auditLog) appendAuditEntry(ui, entry);
   }
 
-  // Wire terminal input/resize -> data WS
-  term.onData((data) => {
-    if (ui.dataWs && ui.dataWs.readyState === WebSocket.OPEN) {
-      ui.dataWs.send(JSON.stringify({ type: 'input', data }));
-    }
-  });
-
-  term.onResize(({ cols, rows }) => {
-    if (ui.dataWs && ui.dataWs.readyState === WebSocket.OPEN) {
-      ui.dataWs.send(JSON.stringify({ type: 'resize', cols, rows }));
-    }
-  });
-
-  connectDataWs(sessionName, ui, term);
+  wireTerminalIO(ui, sessionName);
   updateAggregateStatus();
-
   return ui;
 }
 
@@ -556,30 +483,11 @@ export function removeSessionCard(sessionName) {
   const ui = sessionUIs.get(sessionName);
   if (!ui) return;
 
-  // 1. Delete from sessionUIs Map FIRST — breaks the data WS reconnect loop
   sessionUIs.delete(sessionName);
-
-  // 2. Close data WebSocket
-  if (ui.dataWs && ui.dataWs.readyState <= WebSocket.OPEN) {
-    ui.dataWs.close();
-  }
-
-  // 3. Dispose xterm Terminal to free resources
-  if (ui.term) {
-    ui.term.dispose();
-  }
-
-  // 4. Clear idle interval if running
-  if (ui.idleInterval) {
-    clearInterval(ui.idleInterval);
-  }
-
-  // 5. Remove DOM node last
-  if (ui.card) {
-    ui.card.remove();
-  }
-
-  // 6. Update aggregate status
+  if (ui.dataWs?.readyState <= WebSocket.OPEN) ui.dataWs.close();
+  if (ui.term) ui.term.dispose();
+  if (ui.idleInterval) clearInterval(ui.idleInterval);
+  if (ui.card) ui.card.remove();
   updateAggregateStatus();
 }
 
@@ -590,14 +498,10 @@ export function applyState(sessionName, state) {
   const prevState = ui.currentState;
   ui.currentState = state;
 
-  // Update badge
   ui.badge.textContent = BADGE_LABELS[state] || state;
   ui.badge.dataset.state = state;
-
-  // Update card data-state for border styling
   ui.card.dataset.state = state;
 
-  // Button visibility
   updateButtonVisibility(ui);
 
   // Idle counter
@@ -607,33 +511,50 @@ export function applyState(sessionName, state) {
     stopIdleCounter(ui);
   }
 
+  // Clear terminal and show placeholder when session ends
+  const ended = state === STATES.DONE || state === STATES.FAILED;
+  const wasActive = prevState !== STATES.DONE && prevState !== STATES.FAILED && prevState !== STATES.INITIALIZING;
+  if (ended && wasActive) {
+    ui.term.clear();
+    ui.term.reset();
+    const label = state === STATES.DONE ? 'Session complete' : 'Session failed';
+    const color = state === STATES.DONE ? '\x1b[34m' : '\x1b[31m';
+    ui.term.write(`\r\n\x1b[2m${color}  ${label}\x1b[0m\r\n\r\n\x1b[2m  Press Restart to start a new session.\x1b[0m\r\n`);
+  }
+
+  // Clear placeholder on restart
+  if (state === STATES.INITIALIZING && (prevState === STATES.DONE || prevState === STATES.FAILED)) {
+    ui.term.clear();
+    ui.term.reset();
+  }
+
   updateAggregateStatus();
 }
 
 export { appendAuditEntry };
 
 export function handleSessionsReordered(order) {
+  if (_localReorderPending) {
+    _localReorderPending = false;
+    return;
+  }
+
   for (const name of order) {
     const ui = sessionUIs.get(name);
-    if (ui && ui.card) {
-      container.appendChild(ui.card); // moves node to end, building new order
-    }
+    if (ui?.card) container.appendChild(ui.card);
   }
-  // Recover WebGL on all cards (DOM move invalidates context)
   for (const [, ui] of sessionUIs) {
     if (ui.card.classList.contains('minimized')) {
       ui.needsWebGLReload = true;
     } else {
-      reloadWebGL(ui);
-      try { ui.fitAddon.fit(); } catch (_) {}
+      tryLoadWebGL(ui);
+      try { ui.fitAddon.fit(); } catch {}
     }
   }
 }
 
 export function showErrorToast(message) {
-  const toast = document.createElement('div');
-  toast.className = 'error-toast';
-  toast.textContent = message;
+  const toast = el('div', 'error-toast', message);
   document.body.appendChild(toast);
   setTimeout(() => {
     toast.classList.add('fade-out');

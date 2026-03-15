@@ -1,8 +1,11 @@
 // ── Glissa Dashboard — Boot ───────────────────────────────────
 // Thin entry point: wires modules together and boots the app.
 
+import '@xterm/xterm/css/xterm.css';
+import './tailwind.css';
+
 import { STATES } from '/shared/states.mjs';
-import { connectControl, setConnectionStateCallback, onControlMessage } from './control-ws.js';
+import { connectControl, setConnectionStateCallback, onControlMessage, sendControlMsg, disableReconnect } from './control-ws.js';
 import {
   createSessionCard, removeSessionCard, applyState,
   getSessionUIs, updateAggregateStatus, showErrorToast,
@@ -15,9 +18,49 @@ import { createAddSessionDialog, createSettingsDialog } from './dialogs.js';
 const connectionEl = document.getElementById('connection-status');
 const connectionLabel = connectionEl.querySelector('.connection-label');
 
+const loadingScreen = document.getElementById('loading-screen');
+const loadingStatus = document.getElementById('loading-status');
+const shutdownScreen = document.getElementById('shutdown-screen');
+const shutdownStatus = document.getElementById('shutdown-status');
+let appRevealed = false;
+
+function revealApp() {
+  if (appRevealed) return;
+  appRevealed = true;
+  document.body.classList.add('app-ready');
+  loadingScreen.classList.add('fade-out');
+  loadingScreen.addEventListener('transitionend', () => loadingScreen.remove());
+}
+
+function showShutdownOverlay(message) {
+  if (message) shutdownStatus.textContent = message;
+  shutdownScreen.classList.add('active');
+}
+
 setConnectionStateCallback((state, label) => {
   connectionEl.dataset.state = state;
   connectionLabel.textContent = label;
+
+  if (state === 'connected') {
+    if (shutdownScreen.classList.contains('active')) {
+      // Reconnected after restart — reload for fresh state
+      location.reload();
+      return;
+    }
+    revealApp();
+  } else if (state === 'shutdown') {
+    if (appRevealed) {
+      shutdownStatus.textContent = 'Server shut down';
+      shutdownScreen.classList.add('done');
+    } else {
+      loadingStatus.textContent = 'Server shut down';
+    }
+  } else if (state === 'disconnected' && shutdownScreen.classList.contains('active')) {
+    // Restart: server dropped connection, waiting for it to come back
+    shutdownStatus.textContent = 'Waiting for server...';
+  } else if (!appRevealed) {
+    loadingStatus.textContent = 'Reconnecting to server...';
+  }
 });
 
 // ── Control message handlers ─────────────────────────────────
@@ -95,6 +138,19 @@ const messageHandlers = {
   'sessions-reordered': (msg) => handleSessionsReordered(msg.order),
   'error':              (msg) => showErrorToast(msg.message),
   'settings-updated':   () => {},
+  'shutting-down':      () => {
+    disableReconnect();
+    connectionEl.dataset.state = 'shutdown';
+    connectionLabel.textContent = 'Shutting down...';
+    document.getElementById('btn-menu').disabled = true;
+    showShutdownOverlay('Shutting down sessions...');
+  },
+  'restarting':         () => {
+    connectionEl.dataset.state = 'shutdown';
+    connectionLabel.textContent = 'Restarting...';
+    document.getElementById('btn-menu').disabled = true;
+    showShutdownOverlay('Restarting server...');
+  },
 };
 
 onControlMessage((msg) => {
@@ -120,7 +176,48 @@ window.addEventListener('resize', () => {
 // ── Toolbar buttons ──────────────────────────────────────────
 
 document.getElementById('btn-add-session').addEventListener('click', createAddSessionDialog);
-document.getElementById('btn-settings').addEventListener('click', createSettingsDialog);
+
+// ── Header menu ──────────────────────────────────────────────
+
+const headerMenu = document.getElementById('header-menu');
+const btnMenu = document.getElementById('btn-menu');
+
+btnMenu.addEventListener('click', (e) => {
+  e.stopPropagation();
+  headerMenu.classList.toggle('open');
+});
+
+// Close menu on outside click
+document.addEventListener('click', (e) => {
+  if (!headerMenu.contains(e.target)) {
+    headerMenu.classList.remove('open');
+  }
+});
+
+document.getElementById('btn-settings').addEventListener('click', () => {
+  headerMenu.classList.remove('open');
+  createSettingsDialog();
+});
+
+document.getElementById('btn-restart').addEventListener('click', () => {
+  headerMenu.classList.remove('open');
+  const count = getSessionUIs().size;
+  const msg = count > 0
+    ? `Kill ${count} session${count > 1 ? 's' : ''} and restart the server?`
+    : 'Restart the server?';
+  if (!confirm(msg)) return;
+  sendControlMsg({ type: 'restart-server' });
+});
+
+document.getElementById('btn-shutdown').addEventListener('click', () => {
+  headerMenu.classList.remove('open');
+  const count = getSessionUIs().size;
+  const msg = count > 0
+    ? `Kill ${count} session${count > 1 ? 's' : ''} and shut down the server?`
+    : 'Shut down the server?';
+  if (!confirm(msg)) return;
+  sendControlMsg({ type: 'shutdown' });
+});
 
 // ── Boot ─────────────────────────────────────────────────────
 

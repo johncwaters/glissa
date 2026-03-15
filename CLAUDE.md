@@ -7,21 +7,39 @@ Glissa is a lightweight Node.js background process that spawns and manages Claud
 ## File Structure
 
 ```
-server.js          # Express + WebSocket server, entry point
+server.js          # Production entry point (thin wrapper)
+backend.js         # Express + WebSocket server factory (shared by server.js and Vite plugin)
 sessions.js        # Session lifecycle and state machine
 notify.js          # Windows toast notifications
+vite.config.js     # Vite frontend build config + backend plugin (ESM)
 public/
-  index.html       # Dashboard shell
-  app.js           # Browser-side WebSocket client and UI logic
-  style.css        # Dashboard styles
+  index.html       # Dashboard shell (Tailwind utility classes)
+  app.js           # Browser-side entry point (ES module)
+  tailwind.css     # Tailwind CSS entry (theme + imports)
+  style.css        # Component styles, state-driven rules, animations
+  session-card.js  # Session card DOM lifecycle and terminal setup
+  control-ws.js    # WebSocket control channel client
+  dialogs.js       # Add Session and Settings dialog factories
+shared/
+  states.js        # Session states (CJS, server-side)
+  states.esm.js    # Session states (ESM, browser-side via Vite)
 config.json        # Runtime configuration
+dist/              # Vite production build output (gitignored)
 ```
+
+## Development Workflow
+
+- `npm run dev` — Vite dev server with HMR on port 5173, Express + WebSocket backend attached via plugin (single process)
+- `npm run dev:server-only` — Express backend only on port 3000 (for debugging backend without Vite)
+- `npm run build` — Production build to `dist/`
+- `npm start` — Production server (serves from `dist/` if it exists, otherwise `public/`)
+- `npm run preview` — Preview production build via Vite
 
 ## Platform and Runtime
 
 - **OS:** Windows 11
 - **Node:** v24+
-- **Module system:** CommonJS (`require` / `module.exports`) — no ESM
+- **Module system:** CommonJS (`require` / `module.exports`) for server — no ESM. Frontend uses ES modules bundled by Vite.
 
 ## Production Dependencies
 
@@ -32,30 +50,35 @@ config.json        # Runtime configuration
 - `@xterm/addon-fit` — xterm.js addon for fitting terminal to container (browser only)
 - `@xterm/addon-webgl` — xterm.js addon for WebGL rendering (browser only)
 
+**Dev Dependencies:**
+
+- `vite` — Frontend build tool (dev server with HMR, production bundling)
+- `tailwindcss` — Utility-first CSS framework (v4)
+- `@tailwindcss/vite` — Tailwind CSS Vite plugin
+
 **Notes:**
+
 - `node-pty` requires C++ build tools (Visual Studio Build Tools on Windows)
-- `@xterm/*` packages are loaded in the browser via ES modules, not in Node.js
+- `@xterm/*` packages are bundled by Vite for the browser, not loaded directly in Node.js
 
 Do NOT add dependencies without explicit instruction.
 
-## Hard Constraints
+### CSS Convention
 
-**Do NOT introduce:**
-- TypeScript
-- React or any frontend framework
-- Bundlers (Webpack, Vite, esbuild, etc.)
-- Additional server frameworks or libraries
-- ESM (`import`/`export`)
-- XState or any state machine library
-
-This is plain Node.js. Keep it that way.
+- **Tailwind utility classes** for static HTML markup (`index.html`)
+- **Semantic classes** in `style.css` for JS-created DOM elements (`session-card.js`, `dialogs.js`)
+- **State-driven styles** via `[data-state]` attribute selectors in `style.css`
+- **Animations** (`@keyframes`) and pseudo-elements (`::before`) in `style.css`
+- **Theme** defined in `public/tailwind.css` via `@theme` block — maps colors, fonts, radii
 
 ## Key Design Decisions
 
 ### Inter-module Communication
+
 Use Node.js `EventEmitter` for communication between modules. Do not use global variables or direct coupling.
 
 ### Session State Machine
+
 Sessions follow a 7-state machine implemented in plain JS:
 
 ```
@@ -66,25 +89,30 @@ INITIALIZING → STARTING → RUNNING → WAITING → IDLE → DONE
 States are string constants. Transitions are explicit — no implicit state mutation.
 
 ### Session Spawning (node-pty)
+
 Sessions spawn `claude` via `pty.spawn()` from node-pty (NOT `child_process.spawn`).
+
 - Claude CLI produces zero output with piped stdio — a real PTY is required.
 - Must unset env vars before spawn: `CLAUDECODE`, `CLAUDE_CODE_SSE_PORT`, `CLAUDE_CODE_ENTRYPOINT`
 - Do NOT use `shell: true` — pass args as array
 - Terminal name: `xterm-256color`, default 80x24
 
 ### Dual WebSocket Architecture
+
 - **Data WebSocket** (`/terminals/:sessionName`): Raw PTY bytes bidirectional. One per session per client.
 - **Control WebSocket** (`/control`): JSON messages for state-change, snapshot, kill, restart.
 - xterm.js in the browser connects to data WebSocket; control panel uses control WebSocket.
 
 ### Dashboard Rendering (xterm.js)
+
 - Each session card contains an xterm.js Terminal instance
 - xterm.js handles ALL ANSI rendering — server is a dumb pipe
 - `@xterm/addon-fit` for resize, `@xterm/addon-webgl` for GPU rendering
-- Browser loads @xterm/* via ES modules (`<script type="module">`)
+- Vite bundles @xterm/* for production; dev mode proxies to Express
 - Pattern detection uses ANSI-stripped tap of PTY output (parallel to raw stream)
 
 ### WebSocket Transport
+
 Use the `ws` package directly. Do NOT use Socket.IO or any abstraction over WebSockets.
 
 ## Coding Style

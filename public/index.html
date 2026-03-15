@@ -4,27 +4,161 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Glissa</title>
-  <link rel="stylesheet" href="/xterm/xterm.css">
-  <link rel="stylesheet" href="/style.css">
+  <style>
+    /* Inline critical styles — render before JS modules load */
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      background: #080816;
+      color: #b8b8d4;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+    }
+
+    /* Hide app shell until styles are ready */
+    .app-shell { display: none; }
+    .app-ready .app-shell { display: contents; }
+
+    /* Loading screen */
+    .loading-screen {
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 20px;
+      background: #080816;
+      transition: opacity 300ms ease;
+    }
+
+    .loading-screen.fade-out {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .loading-title {
+      font-family: 'Cascadia Code', 'Fira Code', 'Consolas', 'Menlo', monospace;
+      font-size: 20px;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      color: #dcdcf0;
+      text-transform: uppercase;
+    }
+
+    .loading-title::before {
+      content: '\25b8 ';
+      color: #4f6ef7;
+    }
+
+    .loading-status {
+      font-family: 'Cascadia Code', 'Fira Code', 'Consolas', 'Menlo', monospace;
+      font-size: 12px;
+      color: #4a4a70;
+      letter-spacing: 0.04em;
+    }
+
+    .loading-spinner {
+      width: 28px;
+      height: 28px;
+      border: 2px solid #1c1c38;
+      border-top-color: #4f6ef7;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* Shutdown overlay — hidden until triggered */
+    .shutdown-screen {
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 20px;
+      background: rgba(8, 8, 22, 0);
+      backdrop-filter: blur(0px);
+      pointer-events: none;
+      opacity: 0;
+      transition: background 400ms ease, backdrop-filter 400ms ease, opacity 300ms ease;
+    }
+
+    .shutdown-screen.active {
+      background: rgba(8, 8, 22, 0.92);
+      backdrop-filter: blur(8px);
+      pointer-events: auto;
+      opacity: 1;
+    }
+
+    .shutdown-status {
+      font-family: 'Cascadia Code', 'Fira Code', 'Consolas', 'Menlo', monospace;
+      font-size: 12px;
+      color: #4a4a70;
+      letter-spacing: 0.04em;
+      transition: color 300ms ease;
+    }
+
+    .shutdown-screen.done .loading-spinner {
+      animation: none;
+      border-color: #1c1c38;
+      border-top-color: #1c1c38;
+      opacity: 0.3;
+    }
+
+    .shutdown-screen.done .shutdown-status {
+      color: #3a3a5e;
+    }
+  </style>
 </head>
 <body>
-  <header class="header">
-    <div class="header-inner">
-      <h1 class="header-title">Glissa</h1>
-      <div class="header-right">
-        <button class="btn-settings" id="btn-settings" title="Settings">&#9881; Settings</button>
-        <button class="btn-add-session" id="btn-add-session" title="Add a new session">+ Add Session</button>
-        <span class="header-aggregate" id="aggregate-status"></span>
-        <span class="header-connection" id="connection-status">
-          <span class="connection-dot"></span>
-          <span class="connection-label">Connecting</span>
-        </span>
+  <!-- Loading screen — visible immediately, removed on WS connect -->
+  <div class="loading-screen" id="loading-screen">
+    <div class="loading-title">Glissa</div>
+    <div class="loading-spinner"></div>
+    <div class="loading-status" id="loading-status">Connecting to server...</div>
+  </div>
+
+  <!-- Shutdown overlay — hidden until triggered -->
+  <div class="shutdown-screen" id="shutdown-screen">
+    <div class="loading-title">Glissa</div>
+    <div class="loading-spinner"></div>
+    <div class="shutdown-status" id="shutdown-status">Shutting down sessions...</div>
+  </div>
+
+  <!-- App shell — hidden until CSS loads and WS connects -->
+  <div class="app-shell">
+    <header class="header sticky top-0 z-100 bg-bg-header border-b border-border backdrop-blur-xl">
+      <div class="header-inner flex items-center justify-between gap-4 px-6 py-2.5 max-w-[1920px] mx-auto">
+        <h1 class="header-title font-mono text-base font-bold tracking-wider text-text-head uppercase">Glissa</h1>
+        <div class="header-right flex items-center gap-5">
+          <button class="btn-add-session inline-flex items-center gap-1 px-3.5 py-1.5 border border-accent-dim rounded font-mono text-[11px] font-semibold tracking-wide text-accent bg-transparent cursor-pointer transition-colors hover:bg-accent/10 hover:border-accent focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-1 focus-visible:ring-offset-bg" id="btn-add-session" title="Add a new session">+ Add Session</button>
+          <div class="header-menu" id="header-menu">
+            <button class="btn-menu" id="btn-menu" title="Menu">&#9776;</button>
+            <div class="header-menu-dropdown" id="header-menu-dropdown">
+              <button class="menu-item" id="btn-settings">&#9881; Settings</button>
+              <button class="menu-item menu-item-warning" id="btn-restart">&#8635; Restart Server</button>
+              <div class="menu-divider"></div>
+              <button class="menu-item menu-item-danger" id="btn-shutdown">Shut Down</button>
+            </div>
+          </div>
+          <span class="header-aggregate text-xs font-mono text-text-dim tracking-tight" id="aggregate-status"></span>
+          <span class="header-connection inline-flex items-center gap-1.5 text-[11px] font-mono text-text-dim" id="connection-status">
+            <span class="connection-dot w-[7px] h-[7px] rounded-full bg-text-dim transition-colors"></span>
+            <span class="connection-label">Connecting</span>
+          </span>
+        </div>
       </div>
-    </div>
-  </header>
-  <main class="sessions" id="sessions-container">
-    <!-- Session cards injected here by app.js -->
-  </main>
+    </header>
+    <main class="sessions grid grid-cols-[repeat(auto-fill,minmax(min(100%,720px),1fr))] gap-4 p-5 px-6 max-w-[1920px] mx-auto" id="sessions-container">
+      <!-- Session cards injected here by app.js -->
+    </main>
+  </div>
   <script type="module" src="/app.js"></script>
 </body>
 </html>

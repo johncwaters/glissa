@@ -68,16 +68,20 @@ const GUARDS = {
 const ENTRY_HOOKS = {
   [STATES.WAITING](session) {
     session.emit('needs-attention', { name: session.name });
-    notify('Glissa', `${session.name} needs your input`);
-    session._escalationTimer = setInterval(() => {
-      if (session.state === STATES.WAITING) {
-        notify('Glissa', `${session.name} needs your input`);
-      }
-    }, session.waitingEscalationMs);
+    if (!session._destroying) {
+      notify('Glissa', `${session.name} needs your input`);
+      session._escalationTimer = setInterval(() => {
+        if (session.state === STATES.WAITING) {
+          notify('Glissa', `${session.name} needs your input`);
+        }
+      }, session.waitingEscalationMs);
+    }
   },
   [STATES.FAILED](session) {
     session.emit('session-failed', { name: session.name });
-    notify('Glissa', `${session.name} failed`);
+    if (!session._destroying) {
+      notify('Glissa', `${session.name} failed`);
+    }
   },
   [STATES.DONE](session) {
     session.emit('session-done', { name: session.name });
@@ -121,6 +125,7 @@ class Session extends EventEmitter {
     this._outputBufferSize = 0;
     this._outputBufferMax = 100000; // ~100KB replay cap
 
+    this._destroying = false;
     this.patternDetector = new PatternDetector();
     this.patternDetector.on('prompt-detected', (detection) => {
       console.log(`[session:${this.name}] prompt-detected: layer=${detection.layer} pattern=${detection.pattern} line=${JSON.stringify(detection.line)}`);
@@ -381,6 +386,23 @@ class Session extends EventEmitter {
     return true;
   }
 
+  forceRestart() {
+    const killable = [STATES.RUNNING, STATES.WAITING, STATES.IDLE];
+    if (killable.includes(this.state)) {
+      // Kill first, then restart once process exits
+      this.once('exit', () => {
+        if (this.state === STATES.DONE || this.state === STATES.FAILED) {
+          this.transition('user_restart');
+          this.start();
+        }
+      });
+      this.kill();
+      this.transition('user_kill');
+    } else if (this.state === STATES.DONE || this.state === STATES.FAILED) {
+      this.restart();
+    }
+  }
+
   updateSettings(cfg) {
     if (cfg.startingWatchdogSeconds != null) this.startingWatchdogMs = cfg.startingWatchdogSeconds * 1000;
     if (cfg.attentionTimeoutSeconds != null) this.attentionTimeoutMs = cfg.attentionTimeoutSeconds * 1000;
@@ -389,6 +411,7 @@ class Session extends EventEmitter {
   }
 
   destroy() {
+    this._destroying = true;
     if (this._watchdogTimer !== null) {
       clearTimeout(this._watchdogTimer);
       this._watchdogTimer = null;

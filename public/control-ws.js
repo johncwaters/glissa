@@ -5,6 +5,7 @@ const RECONNECT_DELAY_MS = 3000;
 
 let controlWs = null;
 let controlRetryTimer = null;
+let reconnectDisabled = false;
 const pendingRequests = new Map(); // requestId -> { resolve, timer }
 
 let _messageHandler = null;
@@ -18,6 +19,14 @@ export function setConnectionStateCallback(fn) {
 
 export function onControlMessage(handler) {
   _messageHandler = handler;
+}
+
+export function disableReconnect() {
+  reconnectDisabled = true;
+  if (controlRetryTimer !== null) {
+    clearTimeout(controlRetryTimer);
+    controlRetryTimer = null;
+  }
 }
 
 export function sendControlMsg(msg) {
@@ -80,6 +89,10 @@ export function connectControl() {
 
   ws.addEventListener('close', () => {
     controlWs = null;
+    if (reconnectDisabled) {
+      if (_connectionStateCallback) _connectionStateCallback('shutdown', 'Server shut down');
+      return;
+    }
     if (_connectionStateCallback) _connectionStateCallback('disconnected', 'Reconnecting');
     controlRetryTimer = setTimeout(connectControl, RECONNECT_DELAY_MS);
   });

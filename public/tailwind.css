@@ -1,0 +1,37 @@
+@import "tailwindcss" layer(tailwind);
+
+/* Disable preflight to avoid conflicts with existing reset and xterm.css */
+@layer base {
+  /* Tailwind's preflight is neutralized by the layer ordering */
+}
+
+@layer tailwind {
+  @theme {
+    --color-bg: #080816;
+    --color-bg-card: #0e0e20;
+    --color-bg-header: #0b0b1a;
+    --color-bg-surface: #131328;
+    --color-border: #1c1c38;
+    --color-border-dim: #141430;
+    --color-border-hover: #2a2a50;
+    --color-text: #b8b8d4;
+    --color-text-dim: #4a4a70;
+    --color-text-head: #dcdcf0;
+    --color-text-muted: #3a3a5e;
+    --color-accent: #4f6ef7;
+    --color-accent-dim: #3a54c0;
+    --color-state-running: #22c55e;
+    --color-state-waiting: #f59e0b;
+    --color-state-failed: #ef4444;
+    --color-state-done: #3b82f6;
+    --color-state-idle: #eab308;
+    --color-state-starting: #a855f7;
+    --color-state-initializing: #6b7280;
+    --font-family-mono: 'Cascadia Code', 'Fira Code', 'Consolas', 'Menlo', monospace;
+    --font-family-ui: 'Segoe UI', system-ui, sans-serif;
+    --radius: 6px;
+    --radius-lg: 10px;
+  }
+}
+
+@import "./style.css" layer(components);
