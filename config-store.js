@@ -79,7 +79,9 @@ function createConfigStore() {
     mutatorFn(freshConfig);
     _lastSelfWriteTs = Date.now();
     try {
-      fs.writeFileSync(configPath, JSON.stringify(freshConfig, null, 2), 'utf8');
+      const tmpPath = configPath + '.tmp.' + process.pid;
+      fs.writeFileSync(tmpPath, JSON.stringify(freshConfig, null, 2), 'utf8');
+      fs.renameSync(tmpPath, configPath);
     } catch (err) {
       console.warn('[config] Failed to write config.json:', err.code || err.message);
       return null;

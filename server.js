@@ -7,8 +7,8 @@ const server = http.createServer();
 const { shutdown, port, app } = createBackend(server, { staticDir: 'auto' });
 server.on('request', app);
 
-server.listen(port, () => {
-  console.log(`Glissa server listening on http://localhost:${port}`);
+server.listen(port, '127.0.0.1', () => {
+  console.log(`Glissa server listening on http://127.0.0.1:${port}`);
 });
 
 let shuttingDown = false;

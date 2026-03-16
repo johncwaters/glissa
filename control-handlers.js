@@ -53,6 +53,8 @@ function registerControlHandlers(controlWss, deps) {
     return { type: 'snapshot', sessions: list };
   }
 
+  const SESSION_NAME_RE = /^[a-zA-Z0-9_\-. ]{1,64}$/;
+
   function handleAddSession(msg, ws) {
     const name = (msg.name || '').trim();
     const projectPath = (msg.path || '').trim();
@@ -62,18 +64,36 @@ function registerControlHandlers(controlWss, deps) {
       return;
     }
 
+    if (!SESSION_NAME_RE.test(name)) {
+      ws.send(JSON.stringify({ type: 'error', message: 'Session name may only contain letters, numbers, spaces, dashes, dots, and underscores (max 64 chars)' }));
+      return;
+    }
+
     if (sessions.has(name)) {
       ws.send(JSON.stringify({ type: 'error', message: `Session "${name}" already exists` }));
       return;
     }
 
-    if (!fs.existsSync(projectPath)) {
+    const resolvedPath = path.resolve(projectPath);
+    if (!fs.existsSync(resolvedPath)) {
       ws.send(JSON.stringify({ type: 'error', message: `Path does not exist: ${projectPath}` }));
       return;
     }
 
+    // Validate path is within a configured repo root (if any are configured)
+    if (config.repoRoots.length > 0) {
+      const withinRoot = config.repoRoots.some(root => {
+        const resolvedRoot = path.resolve(root);
+        return resolvedPath === resolvedRoot || resolvedPath.startsWith(resolvedRoot + path.sep);
+      });
+      if (!withinRoot) {
+        ws.send(JSON.stringify({ type: 'error', message: 'Path must be within a configured repository root' }));
+        return;
+      }
+    }
+
     const freshConfig = configStore.save(cfg => {
-      cfg.projects.push({ name, path: projectPath });
+      cfg.projects.push({ name, path: resolvedPath });
     });
     if (freshConfig) applyConfigReload(freshConfig);
     console.log(`[control] Added session via UI: ${name}`);

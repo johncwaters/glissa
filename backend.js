@@ -79,8 +79,8 @@ function createBackend(httpServer, options = {}) {
 
   // --- WebSocket servers (noServer mode) ---
 
-  const controlWss = new WebSocketServer({ noServer: true });
-  const dataWss = new WebSocketServer({ noServer: true });
+  const controlWss = new WebSocketServer({ noServer: true, maxPayload: 16 * 1024 });
+  const dataWss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
 
   function broadcastControl(msg) {
     const payload = JSON.stringify(msg);
@@ -288,9 +288,18 @@ function createBackend(httpServer, options = {}) {
       }
 
       if (msg.type === 'input' && typeof msg.data === 'string') {
+        if (msg.data.length > 16384) {
+          console.warn(`[data-ws] Rejected oversized input (${msg.data.length} chars) for ${sessionName}`);
+          return;
+        }
         sess.write(msg.data);
-      } else if (msg.type === 'resize' && msg.cols && msg.rows) {
-        sess.resize(msg.cols, msg.rows);
+      } else if (msg.type === 'resize') {
+        const cols = Number(msg.cols);
+        const rows = Number(msg.rows);
+        if (Number.isInteger(cols) && Number.isInteger(rows)
+            && cols > 0 && cols <= 500 && rows > 0 && rows <= 200) {
+          sess.resize(cols, rows);
+        }
       }
     });
 
@@ -309,14 +318,27 @@ function createBackend(httpServer, options = {}) {
   // we own (/control, /terminals/*). Unrecognized paths are left alone so
   // other listeners (e.g. Vite HMR) can handle them.
 
+  function isAllowedOrigin(req) {
+    const origin = req.headers.origin;
+    if (!origin) return true; // Non-browser clients (curl, ws CLI) have no Origin
+    try {
+      const { hostname } = new URL(origin);
+      return hostname === 'localhost' || hostname === '127.0.0.1';
+    } catch {
+      return false;
+    }
+  }
+
   httpServer.on('upgrade', (req, socket, head) => {
     const { url } = req;
 
     if (url === '/control') {
+      if (!isAllowedOrigin(req)) { socket.destroy(); return; }
       controlWss.handleUpgrade(req, socket, head, (ws) => {
         controlWss.emit('connection', ws, req);
       });
     } else if (url.startsWith('/terminals/')) {
+      if (!isAllowedOrigin(req)) { socket.destroy(); return; }
       dataWss.handleUpgrade(req, socket, head, (ws) => {
         dataWss.emit('connection', ws, req);
       });

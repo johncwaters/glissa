@@ -1,6 +1,6 @@
 'use strict';
 
-const { exec } = require('child_process');
+const { execFile } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 
@@ -57,8 +57,8 @@ function notifyWithBurntToast(title, message) {
   const t = escapeForPowerShell(title);
   const m = escapeForPowerShell(message);
   const modulePath = escapeForPowerShell(burntToastModulePath);
-  const cmd = `powershell -NoProfile -Command "Import-Module '${modulePath}'; New-BurntToastNotification -Text '${t}', '${m}'"`;
-  exec(cmd, (err) => {
+  const script = `Import-Module '${modulePath}'; New-BurntToastNotification -Text '${t}', '${m}'`;
+  execFile('powershell', ['-NoProfile', '-Command', script], (err) => {
     if (err) {
       console.warn('[notify] BurntToast notification failed:', err.message);
     }
@@ -67,7 +67,7 @@ function notifyWithBurntToast(title, message) {
 
 function notifyWithMsg(title, message) {
   const text = `${title}: ${message}`;
-  exec(`msg * "${text}"`, (err) => {
+  execFile('msg', ['*', text], (err) => {
     if (err) {
       console.warn('[notify] msg fallback notification failed:', err.message);
     }
