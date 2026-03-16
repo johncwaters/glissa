@@ -4,21 +4,26 @@
   "waitingEscalationSeconds": 300,
   "startingWatchdogSeconds": 30,
   "autoRecoverSeconds": 3,
+  "notifyDebounceMs": 3000,
   "repoRoots": [
     "C:\\Users\\john.c.waters\\source\\repos"
   ],
   "projects": [
     {
+      "name": "LaunchPoint",
+      "path": "C:\\Users\\john.c.waters\\source\\repos\\LaunchPoint"
+    },
+    {
       "name": "myr",
       "path": "C:\\Users\\john.c.waters\\source\\repos\\myr"
     },
     {
-      "name": "glissa",
-      "path": "C:/Users/john.c.waters/source/repos/glissa"
+      "name": "ELM Documentation",
+      "path": "C:\\Users\\john.c.waters\\source\\repos\\ELM%20Development%20Documentation"
     },
     {
-      "name": "LaunchPoint",
-      "path": "C:\\Users\\john.c.waters\\source\\repos\\LaunchPoint"
+      "name": "glissa",
+      "path": "C:/Users/john.c.waters/source/repos/glissa"
     }
   ]
 }

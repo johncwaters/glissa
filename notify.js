@@ -6,6 +6,7 @@ const fs = require('fs');
 
 let burntToastModulePath = null; // null = unknown, false = not found, string = resolved path
 let _suppressed = false;
+const _recentCategories = new Map(); // category -> lastFireTimestamp
 
 function escapeForPowerShell(str) {
   return String(str).replace(/'/g, "''");
@@ -84,8 +85,20 @@ function setNotifySuppressed(val) {
   _suppressed = !!val;
 }
 
-function notify(title, message) {
+function notify(title, message, { category = null } = {}) {
   if (_suppressed) return;
+
+  // Category-based debounce: suppress duplicate category within the debounce window
+  if (category) {
+    const now = Date.now();
+    const lastFired = _recentCategories.get(category);
+    const debounceMs = _getDebounceMs();
+    if (lastFired && (now - lastFired) < debounceMs) {
+      console.log(`[notify] Suppressed (category '${category}' debounced): ${message}`);
+      return;
+    }
+    _recentCategories.set(category, now);
+  }
 
   // First call — detect BurntToast module path
   if (burntToastModulePath === null) {
@@ -106,4 +119,16 @@ function notify(title, message) {
   }
 }
 
-module.exports = { notify, setNotifySuppressed };
+function _getDebounceMs() {
+  try {
+    return require('./config.json').notifyDebounceMs || 3000;
+  } catch {
+    return 3000;
+  }
+}
+
+function clearNotifyHistory() {
+  _recentCategories.clear();
+}
+
+module.exports = { notify, setNotifySuppressed, clearNotifyHistory };

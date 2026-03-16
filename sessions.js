@@ -86,10 +86,10 @@ const ENTRY_HOOKS = {
   [STATES.WAITING](session) {
     session.emit('needs-attention', { name: session.name });
     if (!session._destroying) {
-      notify('Glissa', `${session.name} needs your input`);
+      notify('Glissa', `${session.name} needs your input`, { category: 'waiting' });
       session._escalationTimer = setInterval(() => {
         if (session.state === STATES.WAITING) {
-          notify('Glissa', `${session.name} needs your input`);
+          notify('Glissa', `${session.name} needs your input`, { category: 'waiting' });
         }
       }, session.waitingEscalationMs);
     }
@@ -97,7 +97,7 @@ const ENTRY_HOOKS = {
   [STATES.FAILED](session) {
     session.emit('session-failed', { name: session.name });
     if (!session._destroying) {
-      notify('Glissa', `${session.name} failed`);
+      notify('Glissa', `${session.name} failed`, { category: 'failed' });
     }
   },
   [STATES.DONE](session) {
