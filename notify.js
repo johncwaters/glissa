@@ -5,6 +5,7 @@ const path = require('path');
 const fs = require('fs');
 
 let burntToastModulePath = null; // null = unknown, false = not found, string = resolved path
+let _suppressed = false;
 
 function escapeForPowerShell(str) {
   return String(str).replace(/'/g, "''");
@@ -79,7 +80,13 @@ function notifyWithMsg(title, message) {
   });
 }
 
+function setNotifySuppressed(val) {
+  _suppressed = !!val;
+}
+
 function notify(title, message) {
+  if (_suppressed) return;
+
   // First call — detect BurntToast module path
   if (burntToastModulePath === null) {
     const found = findBurntToastModule();
@@ -99,4 +106,4 @@ function notify(title, message) {
   }
 }
 
-module.exports = { notify };
+module.exports = { notify, setNotifySuppressed };

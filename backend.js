@@ -27,6 +27,7 @@ const { WebSocketServer } = require('ws');
 const { Session } = require('./sessions');
 const { createConfigStore } = require('./config-store');
 const { registerControlHandlers } = require('./control-handlers');
+const { setNotifySuppressed } = require('./notify');
 
 function makeSession(project, cfg) {
   return new Session({
@@ -90,6 +91,31 @@ function createBackend(httpServer, options = {}) {
       }
     }
   }
+
+  // --- Client focus tracking (suppress notifications when dashboard is visible) ---
+
+  const focusedClients = new Set();
+
+  function updateNotifySuppression() {
+    setNotifySuppressed(focusedClients.size > 0);
+  }
+
+  function handleClientFocus(ws, focused) {
+    if (focused) {
+      focusedClients.add(ws);
+    } else {
+      focusedClients.delete(ws);
+    }
+    updateNotifySuppression();
+  }
+
+  // Clean up focus tracking when a control WS client disconnects
+  controlWss.on('connection', (ws) => {
+    ws.on('close', () => {
+      focusedClients.delete(ws);
+      updateNotifySuppression();
+    });
+  });
 
   // --- Session management ---
 
@@ -250,6 +276,7 @@ function createBackend(httpServer, options = {}) {
     applySettingsReload,
     requestShutdown,
     requestRestart,
+    handleClientFocus,
   });
 
   // --- Data WebSocket ---

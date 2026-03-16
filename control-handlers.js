@@ -43,6 +43,7 @@ function registerControlHandlers(controlWss, deps) {
     applySettingsReload,
     requestShutdown,
     requestRestart,
+    handleClientFocus,
   } = deps;
 
   function buildSnapshot() {
@@ -253,6 +254,7 @@ function registerControlHandlers(controlWss, deps) {
     'dismiss':          (msg) => { const s = sessions.get(msg.session); if (s) s.dismiss(); },
     'shutdown':         handleShutdown,
     'restart-server':   handleRestart,
+    'focus-change':     (msg, ws) => { if (handleClientFocus) handleClientFocus(ws, !!msg.focused); },
   };
 
   controlWss.on('connection', (ws) => {

@@ -101,6 +101,7 @@ setConnectionStateCallback((state, label) => {
       return;
     }
     revealApp();
+    sendFocusState();
   } else if (state === 'shutdown') {
     if (appRevealed) {
       shutdownStatus.textContent = 'Server shut down';
@@ -275,6 +276,16 @@ btnMute.addEventListener('click', (e) => {
   setSoundEnabled(!isSoundEnabled());
   updateMuteButton();
 });
+
+// ── Window focus tracking (suppress server notifications when dashboard is visible) ──
+
+function sendFocusState() {
+  sendControlMsg({ type: 'focus-change', focused: document.hasFocus() });
+}
+
+window.addEventListener('focus', sendFocusState);
+window.addEventListener('blur', sendFocusState);
+document.addEventListener('visibilitychange', sendFocusState);
 
 // ── Boot ─────────────────────────────────────────────────────
 
