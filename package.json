@@ -28,8 +28,16 @@
   "os": [
     "win32"
   ],
-  "author": "John C. Waters <john.c.waters@elmutility.com>",
+  "author": "John C. Waters <john@johncwaters.com>",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/johncwaters/glissa.git"
+  },
+  "homepage": "https://github.com/johncwaters/glissa#readme",
+  "bugs": {
+    "url": "https://github.com/johncwaters/glissa/issues"
+  },
   "keywords": [
     "claude",
     "claude-code",

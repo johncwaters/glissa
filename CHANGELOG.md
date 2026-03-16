@@ -23,4 +23,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Alert sounds for session attention events
 - CLI with `--port`, `--config`, `--help`, `--version` flags
 
-[0.1.0]: https://github.com/glissa/glissa/releases/tag/v0.1.0
+[0.1.0]: https://github.com/johncwaters/glissa/releases/tag/v0.1.0
