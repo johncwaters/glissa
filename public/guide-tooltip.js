@@ -51,6 +51,16 @@ function ensureDOM() {
 const MARGIN = 12;
 const ARROW_SIZE = 8;
 
+function fitPosition(positions, targetRect, tooltipRect, vw, vh) {
+  for (const pos of positions) {
+    if (pos === 'bottom' && targetRect.bottom + MARGIN + tooltipRect.height < vh) return pos;
+    if (pos === 'top' && targetRect.top - MARGIN - tooltipRect.height > 0) return pos;
+    if (pos === 'right' && targetRect.right + MARGIN + tooltipRect.width < vw) return pos;
+    if (pos === 'left' && targetRect.left - MARGIN - tooltipRect.width > 0) return pos;
+  }
+  return positions[0];
+}
+
 function positionTooltip(targetEl, preferredPosition) {
   const targetRect = targetEl.getBoundingClientRect();
   const tooltipRect = _tooltip.getBoundingClientRect();
@@ -66,14 +76,7 @@ function positionTooltip(targetEl, preferredPosition) {
 
   // Try positions in order of preference
   const positions = [preferredPosition, 'bottom', 'top', 'right', 'left'].filter(Boolean);
-  let chosen = positions[0];
-
-  for (const pos of positions) {
-    if (pos === 'bottom' && targetRect.bottom + MARGIN + tooltipRect.height < vh) { chosen = pos; break; }
-    if (pos === 'top' && targetRect.top - MARGIN - tooltipRect.height > 0) { chosen = pos; break; }
-    if (pos === 'right' && targetRect.right + MARGIN + tooltipRect.width < vw) { chosen = pos; break; }
-    if (pos === 'left' && targetRect.left - MARGIN - tooltipRect.width > 0) { chosen = pos; break; }
-  }
+  const chosen = fitPosition(positions, targetRect, tooltipRect, vw, vh);
 
   let top, left;
   const centerX = targetRect.left + targetRect.width / 2 - tooltipRect.width / 2;

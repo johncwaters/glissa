@@ -1,13 +1,13 @@
 // ── Dialogs module ────────────────────────────────────────────
 // Owns Add Session and Settings dialog factory functions.
 
-import { getSessionUIs } from './session-card.js';
-import { sendControlRequest, sendControlMsg } from './control-ws.js';
-import { SOUND_OPTIONS, playAlertSound } from './alert-sound.js';
-import { getSoundId, setSoundId, getThemeId, setThemeId } from './ui-prefs.js';
-import { applyTheme, getThemeList } from './theme.js';
+import { playAlertSound, SOUND_OPTIONS } from './alert-sound.js';
 import addSessionHTML from './components/add-session-dialog.html?raw';
 import settingsHTML from './components/settings-dialog.html?raw';
+import { sendControlMsg, sendControlRequest } from './control-ws.js';
+import { getSessionUIs } from './session-card.js';
+import { applyTheme, getThemeList } from './theme.js';
+import { getSoundId, getThemeId, setSoundId, setThemeId } from './ui-prefs.js';
 
 // ── Add Session dialog ────────────────────────────────────────
 
@@ -186,9 +186,9 @@ export function createSettingsDialog() {
   themeSelect.addEventListener('change', () => {
     setThemeId(themeSelect.value);
     applyTheme(themeSelect.value);
-    themeWarning.textContent = themeSelect.value !== initialTheme
-      ? 'Restart the server for terminal colors to fully update.'
-      : '';
+    themeWarning.textContent = themeSelect.value === initialTheme
+      ? ''
+      : 'Restart the server for terminal colors to fully update.';
   });
 
   let repoRoots = [];

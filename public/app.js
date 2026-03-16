@@ -5,17 +5,16 @@ import '@xterm/xterm/css/xterm.css';
 import './tailwind.css';
 
 import { STATES } from '/shared/states.mjs';
-import { connectControl, setConnectionStateCallback, onControlMessage, sendControlMsg, disableReconnect } from './control-ws.js';
-import {
-  createSessionCard, removeSessionCard, applyState,
-  getSessionUIs, updateAggregateStatus, showErrorToast,
-  handleSessionsReordered,
-  exitFocusMode, isFocusActive,
-} from './session-card.js';
+import { connectControl, disableReconnect, onControlMessage, sendControlMsg, setConnectionStateCallback } from './control-ws.js';
 import { createAddSessionDialog, createSettingsDialog } from './dialogs.js';
-import { pruneStale, isSoundEnabled, setSoundEnabled, getThemeId } from './ui-prefs.js';
+import { checkAndStartGuides, isFirstOpen, registerGuide } from './guide.js';
+import {
+  applyState, createSessionCard, exitFocusMode,
+  getSessionUIs, handleSessionsReordered, isFocusActive,
+  removeSessionCard, showErrorToast, updateAggregateStatus,
+} from './session-card.js';
 import { applyTheme } from './theme.js';
-import { registerGuide, checkAndStartGuides, isFirstOpen } from './guide.js';
+import { getThemeId, isSoundEnabled, pruneStale, setSoundEnabled } from './ui-prefs.js';
 
 // ── Apply saved theme ─────────────────────────────────────────
 
@@ -135,10 +134,10 @@ function handleSnapshot(sessions) {
 
   const sessionUIs = getSessionUIs();
   for (const s of sessions) {
-    if (!sessionUIs.has(s.name)) {
-      createSessionCard(s.name, s.state);
-    } else {
+    if (sessionUIs.has(s.name)) {
       applyState(s.name, s.state);
+    } else {
+      createSessionCard(s.name, s.state);
     }
   }
 
@@ -246,8 +245,9 @@ document.getElementById('btn-settings').addEventListener('click', () => {
 document.getElementById('btn-restart').addEventListener('click', () => {
   headerMenu.classList.remove('open');
   const count = getSessionUIs().size;
+  const suffix = count > 1 ? 's' : '';
   const msg = count > 0
-    ? `Kill ${count} session${count > 1 ? 's' : ''} and restart the server?`
+    ? `Kill ${count} session${suffix} and restart the server?`
     : 'Restart the server?';
   if (!confirm(msg)) return;
   sendControlMsg({ type: 'restart-server' });
@@ -256,8 +256,9 @@ document.getElementById('btn-restart').addEventListener('click', () => {
 document.getElementById('btn-shutdown').addEventListener('click', () => {
   headerMenu.classList.remove('open');
   const count = getSessionUIs().size;
+  const suffix = count > 1 ? 's' : '';
   const msg = count > 0
-    ? `Kill ${count} session${count > 1 ? 's' : ''} and shut down the server?`
+    ? `Kill ${count} session${suffix} and shut down the server?`
     : 'Shut down the server?';
   if (!confirm(msg)) return;
   sendControlMsg({ type: 'shutdown' });

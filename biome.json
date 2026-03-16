@@ -1,0 +1,21 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.3.5/schema.json",
+  "files": {
+    "includes": ["public/**"]
+  },
+  "formatter": {
+    "enabled": false
+  },
+  "css": {
+    "parser": {
+      "tailwindDirectives": true
+    }
+  },
+  "linter": {
+    "rules": {
+      "style": {
+        "noDescendingSpecificity": "off"
+      }
+    }
+  }
+}

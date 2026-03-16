@@ -2,8 +2,8 @@
 // Manages guided tutorials: registration, state tracking, step progression.
 // Completed guides are persisted via ui-prefs (localStorage).
 
-import { showTooltip, hideTooltip, repositionTooltip } from './guide-tooltip.js';
-import { getCompletedGuides, addCompletedGuide } from './ui-prefs.js';
+import { hideTooltip, repositionTooltip, showTooltip } from './guide-tooltip.js';
+import { addCompletedGuide, getCompletedGuides } from './ui-prefs.js';
 
 // ── Registry ─────────────────────────────────────────────────
 

@@ -30,20 +30,20 @@ export function disableReconnect() {
 }
 
 export function sendControlMsg(msg) {
-  if (controlWs && controlWs.readyState === WebSocket.OPEN) {
+  if (controlWs?.readyState === WebSocket.OPEN) {
     controlWs.send(JSON.stringify(msg));
   }
 }
 
 export function sendControlRequest(type, payload) {
-  const requestId = type + '-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+  const requestId = `${type}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       pendingRequests.delete(requestId);
       reject(new Error('Request timed out'));
     }, 5000);
     pendingRequests.set(requestId, { resolve, timer });
-    if (controlWs && controlWs.readyState === WebSocket.OPEN) {
+    if (controlWs?.readyState === WebSocket.OPEN) {
       controlWs.send(JSON.stringify({ type, requestId, ...payload }));
     } else {
       clearTimeout(timer);

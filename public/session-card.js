@@ -4,13 +4,13 @@
 import { FitAddon } from '@xterm/addon-fit';
 import { WebglAddon } from '@xterm/addon-webgl';
 import { Terminal } from '@xterm/xterm';
-import { sendControlMsg } from './control-ws.js';
 // Vite alias — resolves to shared/states.esm.js
-import { STATES, BADGE_LABELS, KILLABLE_STATES, RESTARTABLE_STATES } from '/shared/states.mjs';
-import { isMinimized, setMinimized, isSoundEnabled, getSoundId } from './ui-prefs.js';
+import { BADGE_LABELS, KILLABLE_STATES, RESTARTABLE_STATES, STATES } from '/shared/states.mjs';
 import { playAlertSound } from './alert-sound.js';
+import { sendControlMsg } from './control-ws.js';
 import { el } from './dom-helpers.js';
 import { getTerminalTheme } from './theme.js';
+import { getSoundId, isMinimized, isSoundEnabled, setMinimized } from './ui-prefs.js';
 
 // ── Constants ────────────────────────────────────────────────
 
@@ -234,7 +234,7 @@ _dropZone.innerHTML = '<div class="drop-zone-label">Drop here to expand</div>';
 let _droppedOnZone = false;
 
 function isFromMinimizedBar() {
-  return _dragSource && _dragSource.card.classList.contains('minimized');
+  return _dragSource?.card.classList.contains('minimized');
 }
 
 function showDropZone() {
@@ -295,30 +295,33 @@ container.addEventListener('dragleave', (e) => {
   }
 });
 
+function restoreFromMinimizedBar(target, before) {
+  const sessionName = _dragSource.card.dataset.session;
+  _dragSource.card.classList.remove('minimized');
+  _dragSource.btnMinimize.textContent = '\u25bc';
+  _dragSource.btnMinimize.title = 'Minimize';
+
+  if (target && target !== _dragSource.card) {
+    container.insertBefore(_dragSource.card, before ? target : target.nextSibling);
+  } else {
+    container.appendChild(_dragSource.card);
+  }
+
+  setMinimized(sessionName, false);
+  if (_dragSource.needsWebGLReload) tryLoadWebGL(_dragSource);
+  requestAnimationFrame(() => _dragSource.fitAddon.fit());
+}
+
 container.addEventListener('drop', (e) => {
   e.preventDefault();
   clearDropIndicators();
   hideDropZone();
   if (!_dragSource || _droppedOnZone) { _droppedOnZone = false; return; }
 
-  const fromMinBar = isFromMinimizedBar();
   const { card, before } = findDropTarget(e.clientX, e.clientY);
 
-  if (fromMinBar) {
-    const sessionName = _dragSource.card.dataset.session;
-    _dragSource.card.classList.remove('minimized');
-    _dragSource.btnMinimize.textContent = '\u25bc';
-    _dragSource.btnMinimize.title = 'Minimize';
-
-    if (card && card !== _dragSource.card) {
-      container.insertBefore(_dragSource.card, before ? card : card.nextSibling);
-    } else {
-      container.appendChild(_dragSource.card);
-    }
-
-    setMinimized(sessionName, false);
-    if (_dragSource.needsWebGLReload) tryLoadWebGL(_dragSource);
-    requestAnimationFrame(() => _dragSource.fitAddon.fit());
+  if (isFromMinimizedBar()) {
+    restoreFromMinimizedBar(card, before);
   } else {
     if (!card || card === _dragSource.card) return;
     container.insertBefore(_dragSource.card, before ? card : card.nextSibling);
