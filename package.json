@@ -1,15 +1,17 @@
 {
   "name": "glissa",
   "version": "0.1.0",
-  "description": "Spawn and manage Claude Code sessions with a browser dashboard",
+  "description": "Spawn and manage Claude Code sessions with a browser dashboard — Windows terminal manager with real-time xterm.js streaming",
+  "type": "commonjs",
   "main": "server.js",
   "bin": {
     "glissa": "bin/glissa.js"
   },
   "files": [
-    "bin/",
+    "bin/glissa.js",
     "dist/",
     "public/",
+    "!public/**/AGENTS.md",
     "server.js",
     "backend.js",
     "sessions.js",
@@ -17,17 +19,33 @@
     "patterns.js",
     "config-store.js",
     "control-handlers.js",
-    "shared/"
+    "shared/states.js",
+    "shared/states.esm.js"
   ],
   "engines": {
     "node": ">=18"
   },
+  "os": [
+    "win32"
+  ],
+  "author": "John C. Waters <john.c.waters@elmutility.com>",
+  "license": "MIT",
+  "keywords": [
+    "claude",
+    "claude-code",
+    "terminal",
+    "dashboard",
+    "session-manager",
+    "xterm",
+    "windows"
+  ],
   "scripts": {
     "start": "node server.js",
     "dev": "vite",
     "dev:server-only": "node server.js",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "prepublishOnly": "npm run build && node -e \"require('fs').statSync('dist/index.html')\""
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.11.0",

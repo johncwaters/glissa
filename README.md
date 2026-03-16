@@ -1,33 +1,73 @@
 # Glissa
 
-Spawn and manage Claude Code sessions with a browser dashboard. Real-time terminal output via xterm.js, WebSocket streaming, and Windows toast notifications.
+[![npm version](https://img.shields.io/npm/v/glissa)](https://www.npmjs.com/package/glissa)
+[![License: MIT](https://img.shields.io/npm/l/glissa)](https://opensource.org/licenses/MIT)
+[![Node.js](https://img.shields.io/node/v/glissa)](https://nodejs.org)
+[![Platform: Windows](https://img.shields.io/badge/platform-Windows-0078d4?logo=windows)](https://www.npmjs.com/package/glissa)
 
-## Quick Start
+Spawn and manage multiple Claude Code sessions from a browser dashboard. Real-time terminal output via xterm.js, WebSocket streaming, and Windows toast notifications.
 
-```bash
-npm install
-npm run build
-npm start
+> **Windows-first** — built for Windows 11 power users managing Claude Code sessions. Other platforms have alternative solutions; Glissa fills the Windows gap.
+
+## Install
+
+```
+npm install -g glissa
+```
+
+## Usage
+
+```
+glissa                      # Start on default port 3000
+glissa --port 3001          # Custom port
+glissa --config <path>      # Custom config file path
+glissa --help               # Show help
+glissa --version            # Show version
 ```
 
 Open `http://localhost:3000` to view the dashboard.
 
-## Development
+## Features
 
-```bash
-npm start          # Express server on port 3000
-npm run dev        # Vite dev server on port 5173 (HMR, proxies to Express)
-npm run build      # Production build to dist/
+- Spawn and manage multiple Claude Code sessions simultaneously
+- Real-time terminal output via xterm.js with WebGL acceleration
+- Dual WebSocket architecture (control channel + per-session PTY streaming)
+- 3-layer prompt detection (exact match, regex, silence heuristic) with auto-recovery
+- Windows toast notifications (BurntToast) for session events
+- Drag-and-drop session reordering
+- Configurable themes (Golgari, Midnight, Phyrexian, Compleated)
+- Guided onboarding tutorial
+- Hot-reloadable configuration
+
+## Configuration
+
+On first run, Glissa creates `~/.glissa/config.json` with defaults. You can also configure from the dashboard Settings button.
+
+```json
+{
+  "port": 3000,
+  "projects": [
+    { "name": "my-project", "path": "C:\\path\\to\\project" }
+  ],
+  "repoRoots": ["C:\\path\\to\\repos"],
+  "attentionTimeoutSeconds": 60,
+  "waitingEscalationSeconds": 300,
+  "startingWatchdogSeconds": 30
+}
 ```
 
-For development, run both `npm start` and `npm run dev` in separate terminals. The Vite dev server proxies API and WebSocket connections to Express.
+## Requirements
+
+- **Node.js** >= 18
+- **Windows 11**
+- **Claude Code CLI** installed and available on PATH
 
 ## Architecture
 
 - **Server:** Node.js + Express + WebSocket (`ws`), CommonJS
 - **Terminal:** `node-pty` spawns Claude Code with real PTY support
 - **Frontend:** ES modules bundled by Vite, xterm.js for terminal rendering
-- **Styling:** Tailwind CSS v4 (utilities) + vanilla CSS (state-driven rules, animations)
+- **Styling:** Tailwind CSS v4 + vanilla CSS (state-driven rules, animations)
 
 ### WebSocket Channels
 
@@ -43,27 +83,20 @@ INITIALIZING -> STARTING -> RUNNING -> WAITING -> IDLE -> DONE
                                                        -> FAILED
 ```
 
-## Configuration
+## Development
 
-Edit `config.json`:
-
-```json
-{
-  "port": 3000,
-  "projects": [
-    { "name": "my-project", "path": "C:\\path\\to\\project" }
-  ],
-  "repoRoots": ["C:\\path\\to\\repos"],
-  "attentionTimeoutSeconds": 60,
-  "waitingEscalationSeconds": 300,
-  "startingWatchdogSeconds": 30
-}
+```bash
+npm install
+npm run dev             # Vite dev server with HMR (port 5173)
+npm run dev:server-only # Express backend only (port 3000)
+npm run build           # Production build to dist/
+npm start               # Production server
 ```
 
-Settings can also be changed from the dashboard via the Settings button.
+## Changelog
 
-## Requirements
+See [CHANGELOG.md](CHANGELOG.md) for release history.
 
-- Node.js >= 18
-- Windows 11 (uses Windows toast notifications)
-- Visual Studio Build Tools (for `node-pty` native compilation)
+## License
+
+[MIT](LICENSE)

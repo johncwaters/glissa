@@ -1,4 +1,4 @@
-<!-- Generated: 2026-03-11 | Updated: 2026-03-15 -->
+<!-- Generated: 2026-03-11 | Updated: 2026-03-15T2 -->
 
 # AGENTS.md — Glissa Project Map
 
@@ -242,6 +242,7 @@ Project uses manual testing and spike scripts. No Jest, Mocha, or similar.
 | Hot-reload config | `config-store.js` | watchForChanges, save, load |
 | Tune auto-recovery | `sessions.js` (_resetAutoRecoverTimer) | autoRecoverSeconds, data chunk counting |
 | Change settings UI | `public/dialogs.js` | createSettingsDialog, sendControlRequest |
+| Add/modify themes | `public/theme.js` | THEMES object, terminal color mapping, CSS variable names |
 | CLI flags/options | `bin/glissa.js` | arg parsing, env bridge |
 | Build/bundling | `vite.config.js` | glissaBackendPlugin, Tailwind, aliases |
 
