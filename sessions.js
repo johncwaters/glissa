@@ -6,6 +6,9 @@ const { PatternDetector } = require('./patterns');
 const { notify } = require('./notify');
 const { STATES } = require('./shared/states');
 
+const KILL_POLL_INTERVAL_MS = 200;
+const KILL_MAX_WAIT_MS = 3000;
+
 const TRANSITIONS = Object.freeze({
   [STATES.INITIALIZING]: {
     spawn_success:    STATES.STARTING,
@@ -24,8 +27,6 @@ const TRANSITIONS = Object.freeze({
     user_kill:        STATES.DONE
   },
   [STATES.WAITING]: {
-    user_input:       STATES.RUNNING,  // reserved — no UI yet, but valid state machine path
-    user_skip:        STATES.RUNNING,  // reserved — no UI yet, but valid state machine path
     user_dismiss:     STATES.RUNNING,
     auto_recover:     STATES.RUNNING,
     user_kill:        STATES.DONE,
@@ -53,15 +54,31 @@ const GUARDS = {
   spawn_success(session) {
     return fs.existsSync(session.path);
   },
-  user_input(session) {
-    return session.ptyProcess !== null;
-  },
-  user_skip(session) {
-    return session.ptyProcess !== null;
-  },
   user_restart(session) {
     return session.state === STATES.DONE || session.state === STATES.FAILED;
   }
+};
+
+// Data handlers keyed by state — dispatched on each PTY data event
+const DATA_HANDLERS = {
+  [STATES.RUNNING](session, data) {
+    session.patternDetector.feed(data);
+    session._resetIdleTimer();
+  },
+  [STATES.IDLE](session, data) {
+    session.transition('new_output');
+    // After transitioning to RUNNING, feed and start idle timer
+    if (session.state === STATES.RUNNING) {
+      session.patternDetector.feed(data);
+      session._resetIdleTimer();
+    }
+  },
+  [STATES.WAITING](session) {
+    // Auto-recovery: continued PTY output suggests false positive.
+    // Require >= 2 data events before auto-recovering.
+    session._autoRecoverDataCount++;
+    session._resetAutoRecoverTimer();
+  },
 };
 
 // Entry/exit hooks keyed by state
@@ -216,12 +233,7 @@ class Session extends EventEmitter {
     this._clearIdleTimer();
     this.patternDetector.reset();
 
-    const env = Object.assign({}, process.env);
-    delete env.CLAUDECODE;
-    delete env.CLAUDE_CODE_SSE_PORT;
-    delete env.CLAUDE_CODE_ENTRYPOINT;
-    delete env.GLISSA_PORT;
-    delete env.GLISSA_CONFIG;
+    const env = this._buildSpawnEnv();
 
     // On Windows, node-pty can't resolve .cmd shims directly.
     // Spawn via cmd.exe /c which handles PATH + .cmd resolution.
@@ -253,59 +265,59 @@ class Session extends EventEmitter {
       }
     }, this.startingWatchdogMs);
 
-    this.ptyProcess.onData((data) => {
-      // State-driven logic on each data event
-      if (this.state === STATES.STARTING && !this._receivedFirstOutput) {
-        this._receivedFirstOutput = true;
-        this._clearWatchdog();
-        this.transition('first_output');
-      }
+    this.ptyProcess.onData((data) => this._handlePtyData(data));
+    this.ptyProcess.onExit(({ exitCode, signal }) => this._handlePtyExit(exitCode, signal));
+  }
 
-      if (this.state === STATES.RUNNING) {
-        this.patternDetector.feed(data);
-        this._resetIdleTimer();
-      } else if (this.state === STATES.IDLE) {
-        this.transition('new_output');
-        // After transitioning to RUNNING, feed and start idle timer
-        if (this.state === STATES.RUNNING) {
-          this.patternDetector.feed(data);
-          this._resetIdleTimer();
-        }
-      } else if (this.state === STATES.WAITING) {
-        // Auto-recovery: continued PTY output suggests false positive.
-        // Require >= 2 data events before auto-recovering.
-        this._autoRecoverDataCount++;
-        this._resetAutoRecoverTimer();
-      }
+  _buildSpawnEnv() {
+    const env = Object.assign({}, process.env);
+    delete env.CLAUDECODE;
+    delete env.CLAUDE_CODE_SSE_PORT;
+    delete env.CLAUDE_CODE_ENTRYPOINT;
+    delete env.GLISSA_PORT;
+    delete env.GLISSA_CONFIG;
+    return env;
+  }
 
-      // Buffer for late-joining data WS clients
-      this._outputBuffer.push(data);
-      this._outputBufferSize += data.length;
-      while (this._outputBufferSize > this._outputBufferMax && this._outputBuffer.length > 1) {
-        this._outputBufferSize -= this._outputBuffer.shift().length;
-      }
-
-      // Always emit raw data for WebSocket broadcasting
-      this.emit('data', data);
-    });
-
-    this.ptyProcess.onExit(({ exitCode, signal }) => {
+  _handlePtyData(data) {
+    // First-output detection (pre-dispatch, only fires once in STARTING)
+    if (this.state === STATES.STARTING && !this._receivedFirstOutput) {
+      this._receivedFirstOutput = true;
       this._clearWatchdog();
-      this._clearIdleTimer();
-      this.patternDetector.reset();
-      this.ptyProcess = null;
+      this.transition('first_output');
+    }
 
-      if (exitCode === 0) {
-        this.transition('process_exit_ok', { exitCode, signal });
-      } else if (this.state === STATES.STARTING) {
-        // STARTING only has process_exit, not process_exit_ok/fail
-        this.transition('process_exit', { exitCode, signal });
-      } else {
-        this.transition('process_exit_fail', { exitCode, signal });
-      }
+    // State-driven data handling via lookup table
+    const handler = DATA_HANDLERS[this.state];
+    if (handler) handler(this, data);
 
-      this.emit('exit', { exitCode, signal });
-    });
+    // Buffer for late-joining data WS clients
+    this._outputBuffer.push(data);
+    this._outputBufferSize += data.length;
+    while (this._outputBufferSize > this._outputBufferMax && this._outputBuffer.length > 1) {
+      this._outputBufferSize -= this._outputBuffer.shift().length;
+    }
+
+    // Always emit raw data for WebSocket broadcasting
+    this.emit('data', data);
+  }
+
+  _handlePtyExit(exitCode, signal) {
+    this._clearWatchdog();
+    this._clearIdleTimer();
+    this.patternDetector.reset();
+    this.ptyProcess = null;
+
+    if (exitCode === 0) {
+      this.transition('process_exit_ok', { exitCode, signal });
+    } else if (this.state === STATES.STARTING) {
+      // STARTING only has process_exit, not process_exit_ok/fail
+      this.transition('process_exit', { exitCode, signal });
+    } else {
+      this.transition('process_exit_fail', { exitCode, signal });
+    }
+
+    this.emit('exit', { exitCode, signal });
   }
 
   getReplayBuffer() {
@@ -335,6 +347,10 @@ class Session extends EventEmitter {
       this.emit('error', err);
     }
 
+    this._forceKillAfterTimeout(pid);
+  }
+
+  _forceKillAfterTimeout(pid) {
     const checkAlive = () => {
       try {
         process.kill(pid, 0);
@@ -344,15 +360,11 @@ class Session extends EventEmitter {
       }
     };
 
-    // Non-blocking graceful wait: check every 200ms up to 3s, then force kill
     let elapsed = 0;
-    const interval = 200;
-    const maxWait = 3000;
-
     const poll = () => {
       if (!checkAlive()) return;
-      elapsed += interval;
-      if (elapsed >= maxWait) {
+      elapsed += KILL_POLL_INTERVAL_MS;
+      if (elapsed >= KILL_MAX_WAIT_MS) {
         // Force kill (Windows: taskkill with /T to kill child tree)
         try {
           execSync(`taskkill /PID ${pid} /T /F`, { stdio: 'ignore' });
@@ -361,10 +373,10 @@ class Session extends EventEmitter {
         }
         return;
       }
-      setTimeout(poll, interval);
+      setTimeout(poll, KILL_POLL_INTERVAL_MS);
     };
 
-    setTimeout(poll, interval);
+    setTimeout(poll, KILL_POLL_INTERVAL_MS);
   }
 
   dismiss() {

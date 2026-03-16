@@ -1,5 +1,5 @@
 <!-- Parent: ../AGENTS.md -->
-<!-- Generated: 2026-03-11 | Updated: 2026-03-15 -->
+<!-- Generated: 2026-03-11 | Updated: 2026-03-15T3 -->
 
 # public/ — Browser Dashboard
 
@@ -23,6 +23,7 @@ Browser-side dashboard for Glissa. Provides real-time terminal streaming via xte
 | `guide-tooltip.js` | Floating tooltip component for guides — smart positioning with arrow, overlay cutout highlighting |
 | `local-store.js` | Generic localStorage wrapper — JSON get/set with graceful degradation for private browsing |
 | `dom-helpers.js` | Shared `el(tag, className, text)` helper for programmatic DOM creation |
+| `package.json` | Marks `public/` as ES module scope (`"type": "module"`) for Biome linter compatibility |
 | `tailwind.css` | Tailwind CSS entry with `@theme` block — color tokens reference CSS variables set by `theme.js` |
 | `style.css` | Component styles for JS-created DOM elements, `[data-state]` attribute selectors, animations (`@keyframes`), dialog/toast/guide styling |
 

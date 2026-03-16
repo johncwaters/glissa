@@ -1,4 +1,4 @@
-<!-- Generated: 2026-03-11 | Updated: 2026-03-15T2 -->
+<!-- Generated: 2026-03-11 | Updated: 2026-03-15T3 -->
 
 # AGENTS.md — Glissa Project Map
 
@@ -27,6 +27,7 @@ Glissa is a lightweight Node.js background process that spawns and manages Claud
 | **config.json** | Runtime configuration: port, timeout settings, repo roots, project definitions. Hot-reloaded by backend.js via config-store.js |
 | **package.json** | Project manifest (CommonJS). Dependencies: express, ws, node-pty, @xterm/*. CLI entry: `bin/glissa.js` |
 | **vite.config.js** | Vite frontend build config (ESM). Tailwind CSS plugin, backend plugin that attaches Express/WS to Vite's dev server, alias for shared/states.esm.js |
+| **biome.json** | Biome linter config — scoped to `public/**`, formatter disabled, Tailwind CSS directives enabled, CSS specificity rule off |
 | **CLAUDE.md** | Hard constraints and design decisions for agents working in this codebase |
 
 ---
@@ -35,6 +36,7 @@ Glissa is a lightweight Node.js background process that spawns and manages Claud
 
 | Directory | Purpose |
 |-----------|---------|
+| `assets/` | Source audio files and screenshots (see `assets/AGENTS.md`) |
 | `bin/` | CLI entry point for `npx glissa` / global install (see `bin/AGENTS.md`) |
 | `public/` | Browser dashboard — xterm.js terminals, session cards, dialogs (see `public/AGENTS.md`) |
 | `shared/` | Shared state constants (CJS + ESM dual format) (see `shared/AGENTS.md`) |

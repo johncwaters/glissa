@@ -9,9 +9,9 @@ import { connectControl, disableReconnect, onControlMessage, sendControlMsg, set
 import { createAddSessionDialog, createSettingsDialog } from './dialogs.js';
 import { checkAndStartGuides, isFirstOpen, registerGuide } from './guide.js';
 import {
-  applyState, createSessionCard, exitFocusMode,
-  getSessionUIs, handleSessionsReordered, isFocusActive,
-  removeSessionCard, showErrorToast, updateAggregateStatus,
+  applyState, createSessionCard, exitFocusMode, fitAllVisible,
+  getSessionCount, handleSessionsReordered, hasSession, isFocusActive,
+  reconnectDataWs, removeSessionCard, showErrorToast, updateAggregateStatus,
 } from './session-card.js';
 import { applyTheme } from './theme.js';
 import { getThemeId, isSoundEnabled, pruneStale, setSoundEnabled } from './ui-prefs.js';
@@ -132,9 +132,8 @@ function handleSnapshot(sessions) {
     return;
   }
 
-  const sessionUIs = getSessionUIs();
   for (const s of sessions) {
-    if (sessionUIs.has(s.name)) {
+    if (hasSession(s.name)) {
       applyState(s.name, s.state);
     } else {
       createSessionCard(s.name, s.state);
@@ -152,11 +151,8 @@ function handleSnapshot(sessions) {
 }
 
 function handleStateChange(msg) {
-  const sessionUIs = getSessionUIs();
-  const ui = sessionUIs.get(msg.session);
-
   // If card doesn't exist yet, create it
-  if (!ui) {
+  if (!hasSession(msg.session)) {
     createSessionCard(msg.session, msg.to);
     return;
   }
@@ -165,17 +161,14 @@ function handleStateChange(msg) {
 
   // On restart (INITIALIZING after DONE/FAILED), reconnect data WS for fresh PTY
   if (msg.to === STATES.INITIALIZING && (msg.from === STATES.DONE || msg.from === STATES.FAILED)) {
-    ui.term.clear();
-    if (ui.dataWs) {
-      ui.dataWs.close();
-    }
+    reconnectDataWs(msg.session);
   }
 }
 
 const messageHandlers = {
   'snapshot':           (msg) => handleSnapshot(msg.sessions),
   'state-change':       (msg) => handleStateChange(msg),
-  'session-added':      (msg) => { if (!getSessionUIs().has(msg.session)) createSessionCard(msg.session, msg.state); },
+  'session-added':      (msg) => { if (!hasSession(msg.session)) createSessionCard(msg.session, msg.state); },
   'session-removed':    (msg) => removeSessionCard(msg.session),
   'session-modified':   (msg) => { removeSessionCard(msg.session); createSessionCard(msg.session, msg.state); },
   'sessions-reordered': (msg) => handleSessionsReordered(msg.order),
@@ -207,13 +200,7 @@ let resizeTimer = null;
 
 window.addEventListener('resize', () => {
   clearTimeout(resizeTimer);
-  resizeTimer = setTimeout(() => {
-    for (const [, ui] of getSessionUIs()) {
-      if (!ui.card.classList.contains('minimized')) {
-        ui.fitAddon.fit();
-      }
-    }
-  }, 100);
+  resizeTimer = setTimeout(() => fitAllVisible(), 100);
 });
 
 // ── Toolbar buttons ──────────────────────────────────────────
@@ -244,7 +231,7 @@ document.getElementById('btn-settings').addEventListener('click', () => {
 
 document.getElementById('btn-restart').addEventListener('click', () => {
   headerMenu.classList.remove('open');
-  const count = getSessionUIs().size;
+  const count = getSessionCount();
   const suffix = count > 1 ? 's' : '';
   const msg = count > 0
     ? `Kill ${count} session${suffix} and restart the server?`
@@ -255,7 +242,7 @@ document.getElementById('btn-restart').addEventListener('click', () => {
 
 document.getElementById('btn-shutdown').addEventListener('click', () => {
   headerMenu.classList.remove('open');
-  const count = getSessionUIs().size;
+  const count = getSessionCount();
   const suffix = count > 1 ? 's' : '';
   const msg = count > 0
     ? `Kill ${count} session${suffix} and shut down the server?`

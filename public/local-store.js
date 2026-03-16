@@ -19,11 +19,3 @@ export function setJSON(key, value) {
     // Silently fail — private browsing or quota exceeded
   }
 }
-
-export function removeKey(key) {
-  try {
-    localStorage.removeItem(key);
-  } catch {
-    // Silently fail
-  }
-}

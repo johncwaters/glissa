@@ -469,8 +469,27 @@ function wireTerminalIO(ui, sessionName) {
 
 // ── Public API ────────────────────────────────────────────────
 
-export function getSessionUIs() {
-  return sessionUIs;
+export function hasSession(name) {
+  return sessionUIs.has(name);
+}
+
+export function getSessionCount() {
+  return sessionUIs.size;
+}
+
+export function reconnectDataWs(name) {
+  const ui = sessionUIs.get(name);
+  if (ui?.dataWs) {
+    ui.dataWs.close(); // close triggers auto-reconnect via the close handler
+  }
+}
+
+export function fitAllVisible() {
+  for (const [, ui] of sessionUIs) {
+    if (!ui.card.classList.contains('minimized')) {
+      ui.fitAddon.fit();
+    }
+  }
 }
 
 export function updateAggregateStatus() {
@@ -559,6 +578,23 @@ export function removeSessionCard(sessionName) {
   updateAggregateStatus();
 }
 
+function _handleEndedTransition(ui, prevState, state) {
+  const wasActive = prevState !== STATES.DONE && prevState !== STATES.FAILED && prevState !== STATES.INITIALIZING;
+  if (!wasActive) return;
+  ui.term.clear();
+  ui.term.reset();
+  const label = state === STATES.DONE ? 'Session complete' : 'Session failed';
+  const color = state === STATES.DONE ? '\x1b[34m' : '\x1b[31m';
+  ui.term.write(`\r\n\x1b[2m${color}  ${label}\x1b[0m\r\n\r\n\x1b[2m  Press Restart to start a new session.\x1b[0m\r\n`);
+}
+
+function _handleRestartTransition(ui, prevState) {
+  if (prevState === STATES.DONE || prevState === STATES.FAILED) {
+    ui.term.clear();
+    ui.term.reset();
+  }
+}
+
 export function applyState(sessionName, state) {
   const ui = sessionUIs.get(sessionName);
   if (!ui) return;
@@ -578,20 +614,13 @@ export function applyState(sessionName, state) {
   }
 
   // Clear terminal and show placeholder when session ends
-  const ended = state === STATES.DONE || state === STATES.FAILED;
-  const wasActive = prevState !== STATES.DONE && prevState !== STATES.FAILED && prevState !== STATES.INITIALIZING;
-  if (ended && wasActive) {
-    ui.term.clear();
-    ui.term.reset();
-    const label = state === STATES.DONE ? 'Session complete' : 'Session failed';
-    const color = state === STATES.DONE ? '\x1b[34m' : '\x1b[31m';
-    ui.term.write(`\r\n\x1b[2m${color}  ${label}\x1b[0m\r\n\r\n\x1b[2m  Press Restart to start a new session.\x1b[0m\r\n`);
+  if (state === STATES.DONE || state === STATES.FAILED) {
+    _handleEndedTransition(ui, prevState, state);
   }
 
   // Clear placeholder on restart
-  if (state === STATES.INITIALIZING && (prevState === STATES.DONE || prevState === STATES.FAILED)) {
-    ui.term.clear();
-    ui.term.reset();
+  if (state === STATES.INITIALIZING) {
+    _handleRestartTransition(ui, prevState);
   }
 
   updateAggregateStatus();

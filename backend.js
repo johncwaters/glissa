@@ -156,10 +156,8 @@ function createBackend(httpServer, options = {}) {
     return { added, removed, modified, unchanged };
   }
 
-  function applyConfigReload(newConfig) {
-    const diff = diffProjects(sessions, newConfig.projects);
-
-    for (const name of diff.removed) {
+  function _removeOldSessions(removed) {
+    for (const name of removed) {
       const sess = sessions.get(name);
       closeSessionDataClients(name);
       sess.destroy();
@@ -167,8 +165,10 @@ function createBackend(httpServer, options = {}) {
       broadcastControl({ type: 'session-removed', session: name });
       console.log(`[config] Removed session: ${name}`);
     }
+  }
 
-    for (const project of diff.added) {
+  function _addNewSessions(added, newConfig) {
+    for (const project of added) {
       const sess = makeSession(project, { ...config, ...newConfig });
       sessions.set(project.name, sess);
       wireSessionEvents(sess, project.name);
@@ -176,8 +176,10 @@ function createBackend(httpServer, options = {}) {
       broadcastControl({ type: 'session-added', session: project.name, state: sess.state });
       console.log(`[config] Added session: ${project.name}`);
     }
+  }
 
-    for (const project of diff.modified) {
+  function _modifyChangedSessions(modified, newConfig) {
+    for (const project of modified) {
       const oldSess = sessions.get(project.name);
       closeSessionDataClients(project.name);
       oldSess.destroy();
@@ -188,7 +190,13 @@ function createBackend(httpServer, options = {}) {
       broadcastControl({ type: 'session-modified', session: project.name, state: newSess.state });
       console.log(`[config] Modified session: ${project.name}`);
     }
+  }
 
+  function applyConfigReload(newConfig) {
+    const diff = diffProjects(sessions, newConfig.projects);
+    _removeOldSessions(diff.removed);
+    _addNewSessions(diff.added, newConfig);
+    _modifyChangedSessions(diff.modified, newConfig);
     config.projects = newConfig.projects;
     applySettingsReload(newConfig);
   }

@@ -54,16 +54,6 @@ function createConfigStore() {
 
   let _lastSelfWriteTs = 0;
 
-  /** Read and parse config.json from disk. Returns parsed object or null on error. */
-  function load() {
-    try {
-      return JSON.parse(fs.readFileSync(configPath, 'utf8'));
-    } catch (err) {
-      console.warn('[config] Failed to read config.json:', err.code || err.message);
-      return null;
-    }
-  }
-
   /**
    * Atomic read-modify-write: reads current config.json, passes it to mutatorFn
    * for in-place mutation, then writes back. Returns the mutated config or null on error.
@@ -150,7 +140,6 @@ function createConfigStore() {
   return {
     config,
     configPath,
-    load,
     save,
     getSettings,
     applySettings,

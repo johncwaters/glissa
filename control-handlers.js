@@ -239,16 +239,6 @@ function registerControlHandlers(controlWss, deps) {
     }, 200);
   }
 
-  function handleSessionAction(msg) {
-    const sess = sessions.get(msg.session);
-    if (!sess) return;
-
-    if (msg.type === 'kill') sess.killSession();
-    else if (msg.type === 'restart') sess.restart();
-    else if (msg.type === 'force-restart') sess.forceRestart();
-    else if (msg.type === 'dismiss') sess.dismiss();
-  }
-
   // Handler map — single dispatch table for all control message types
   const handlers = {
     'add-session':      handleAddSession,
@@ -257,10 +247,10 @@ function registerControlHandlers(controlWss, deps) {
     'get-settings':     handleGetSettings,
     'update-settings':  handleUpdateSettings,
     'scan-repo-roots':  handleScanRepoRoots,
-    'kill':             handleSessionAction,
-    'restart':          handleSessionAction,
-    'force-restart':    handleSessionAction,
-    'dismiss':          handleSessionAction,
+    'kill':             (msg) => { const s = sessions.get(msg.session); if (s) s.killSession(); },
+    'restart':          (msg) => { const s = sessions.get(msg.session); if (s) s.restart(); },
+    'force-restart':    (msg) => { const s = sessions.get(msg.session); if (s) s.forceRestart(); },
+    'dismiss':          (msg) => { const s = sessions.get(msg.session); if (s) s.dismiss(); },
     'shutdown':         handleShutdown,
     'restart-server':   handleRestart,
   };

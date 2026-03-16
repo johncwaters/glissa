@@ -267,19 +267,7 @@ export function getTerminalTheme() {
   return result;
 }
 
-/** @returns {string} current theme ID */
-export function getCurrentThemeId() {
-  return _currentThemeId || DEFAULT_THEME;
-}
-
-/** @returns {string} default theme ID */
-export function getDefaultThemeId() {
-  return DEFAULT_THEME;
-}
-
 /** @returns {Array<{id: string, label: string}>} available themes */
 export function getThemeList() {
   return Object.entries(THEMES).map(([id, t]) => ({ id, label: t.label }));
 }
-
-export { THEMES };

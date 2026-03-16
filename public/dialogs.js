@@ -5,7 +5,7 @@ import { playAlertSound, SOUND_OPTIONS } from './alert-sound.js';
 import addSessionHTML from './components/add-session-dialog.html?raw';
 import settingsHTML from './components/settings-dialog.html?raw';
 import { sendControlMsg, sendControlRequest } from './control-ws.js';
-import { getSessionUIs } from './session-card.js';
+import { hasSession } from './session-card.js';
 import { applyTheme, getThemeList } from './theme.js';
 import { getSoundId, getThemeId, setSoundId, setThemeId } from './ui-prefs.js';
 
@@ -30,8 +30,6 @@ export function createAddSessionDialog() {
   const btnCancel = dialog.querySelector('#add-session-cancel');
   const btnConfirm = dialog.querySelector('#add-session-confirm');
 
-  const sessionUIs = getSessionUIs();
-
   // Populate project picker from repo roots scan
   sendControlRequest('scan-repo-roots', {})
     .then((msg) => {
@@ -45,7 +43,7 @@ export function createAddSessionDialog() {
 
       let hasProjects = false;
       for (const dir of (msg.directories || [])) {
-        const projects = dir.projects.filter(p => !sessionUIs.has(p.name));
+        const projects = dir.projects.filter(p => !hasSession(p.name));
         if (projects.length === 0) continue;
         const group = document.createElement('optgroup');
         group.label = dir.root;
@@ -102,7 +100,7 @@ export function createAddSessionDialog() {
       return;
     }
 
-    if (sessionUIs.has(name)) {
+    if (hasSession(name)) {
       errorEl.textContent = `Session "${name}" already exists.`;
       return;
     }
