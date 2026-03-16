@@ -9,6 +9,8 @@ Spawn and manage multiple Claude Code sessions from a browser dashboard. Real-ti
 
 > **Windows-first** — built for Windows 11 power users managing Claude Code sessions. Other platforms have alternative solutions; Glissa fills the Windows gap.
 
+![Glissa Dashboard](assets/pictures/glissa-screenshot.png)
+
 ## Install
 
 ```
@@ -61,27 +63,6 @@ On first run, Glissa creates `~/.glissa/config.json` with defaults. You can also
 - **Node.js** >= 18
 - **Windows 11**
 - **Claude Code CLI** installed and available on PATH
-
-## Architecture
-
-- **Server:** Node.js + Express + WebSocket (`ws`), CommonJS
-- **Terminal:** `node-pty` spawns Claude Code with real PTY support
-- **Frontend:** ES modules bundled by Vite, xterm.js for terminal rendering
-- **Styling:** Tailwind CSS v4 + vanilla CSS (state-driven rules, animations)
-
-### WebSocket Channels
-
-| Channel | Path | Purpose |
-|---------|------|---------|
-| Control | `/control` | JSON messages: state changes, snapshots, commands |
-| Data | `/terminals/:name` | Raw PTY bytes, bidirectional |
-
-### Session States
-
-```
-INITIALIZING -> STARTING -> RUNNING -> WAITING -> IDLE -> DONE
-                                                       -> FAILED
-```
 
 ## Development
 
