@@ -9,8 +9,8 @@ import { connectControl, disableReconnect, onControlMessage, sendControlMsg, set
 import { createAddSessionDialog, createSettingsDialog } from './dialogs.js';
 import { checkAndStartGuides, isFirstOpen, registerGuide } from './guide.js';
 import {
-  applyState, createSessionCard, exitFocusMode, fitAllVisible,
-  getSessionCount, handleSessionsReordered, hasSession, isFocusActive,
+  applyState, createSessionCard, exitMaximizeMode, fitAllVisible,
+  getSessionCount, handleSessionsReordered, hasSession, isMaximizeActive,
   reconnectDataWs, removeSessionCard, showErrorToast, updateAggregateStatus,
 } from './session-card.js';
 import { applyTheme } from './theme.js';
@@ -57,8 +57,8 @@ registerGuide('welcome', {
     },
     {
       target: '#sessions-container .session-card .session-name',
-      title: 'Focus Mode',
-      body: 'Double-click a session name to enter full-screen focus mode. Press ESC to exit.',
+      title: 'Maximize Mode',
+      body: 'Click the \u25a1 button to maximize a session and minimize all others. Click a minimized session to switch. Press ESC to restore all.',
       position: 'bottom',
     },
   ],
@@ -252,12 +252,12 @@ document.getElementById('btn-shutdown').addEventListener('click', () => {
   sendControlMsg({ type: 'shutdown' });
 });
 
-// ── Focus mode: ESC to exit ──────────────────────────────────
+// ── Maximize mode: ESC to exit ───────────────────────────────
 
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && isFocusActive()) {
+  if (e.key === 'Escape' && isMaximizeActive()) {
     if (document.querySelector('.dialog-overlay')) return;
-    exitFocusMode();
+    exitMaximizeMode();
   }
 });
 
@@ -279,8 +279,13 @@ btnMute.addEventListener('click', (e) => {
 
 // ── Window focus tracking (suppress server notifications when dashboard is visible) ──
 
+let _focusDebounce = null;
+
 function sendFocusState() {
-  sendControlMsg({ type: 'focus-change', focused: document.hasFocus() });
+  clearTimeout(_focusDebounce);
+  _focusDebounce = setTimeout(() => {
+    sendControlMsg({ type: 'focus-change', focused: document.hasFocus() });
+  }, 150);
 }
 
 window.addEventListener('focus', sendFocusState);

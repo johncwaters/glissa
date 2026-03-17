@@ -35,6 +35,8 @@
   --state-idle-bg:      rgba(234, 179, 8, 0.06);
   --state-starting:     #f472b6;
   --state-starting-bg:  rgba(244, 114, 182, 0.06);
+  --state-complete:     #34d399;
+  --state-complete-bg:  rgba(52, 211, 153, 0.06);
 
   --radius: 6px;
   --radius-lg: 10px;
@@ -238,6 +240,15 @@ html, body {
   background: rgba(255, 255, 255, 0.04);
 }
 
+.btn-maximize {
+  color: var(--state-done);
+  border-color: rgba(103, 232, 249, 0.4);
+}
+
+.btn-maximize:hover {
+  background: rgba(103, 232, 249, 0.12);
+}
+
 .session-card.dragging {
   opacity: 0.3;
   border: 2px dashed var(--accent);
@@ -375,7 +386,7 @@ html, body {
   opacity: 0.85;
   flex: none;
   min-height: 28px;
-  min-width: 140px;
+  width: 240px;
   transition: opacity var(--transition-fast), border-color var(--transition-med);
 }
 
@@ -398,11 +409,17 @@ html, body {
 
 .session-card.minimized .session-name {
   font-size: 11px;
+  flex-shrink: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
 }
 
 .session-card.minimized .state-badge {
   font-size: 9px;
   padding: 1px 8px;
+  margin-left: auto;
 }
 
 .session-card.minimized .session-header-spacer {
@@ -411,13 +428,9 @@ html, body {
 
 
 .session-card.minimized .session-actions {
-  gap: 4px;
+  display: none;
 }
 
-.session-card.minimized .btn-action {
-  padding: 2px 8px;
-  font-size: 9px;
-}
 
 .session-card.minimized[data-state="WAITING"] {
   animation: none;
@@ -450,6 +463,11 @@ html, body {
 
 .session-card[data-state="IDLE"] {
   border-color: rgba(234, 179, 8, 0.15);
+}
+
+.session-card[data-state="COMPLETE"] {
+  border-color: rgba(52, 211, 153, 0.3);
+  box-shadow: 0 0 0 1px rgba(52, 211, 153, 0.15), 0 0 16px rgba(52, 211, 153, 0.08);
 }
 
 @keyframes waiting-pulse {
@@ -537,6 +555,7 @@ html, body {
 .state-badge[data-state="DONE"]         { color: var(--state-done); }
 .state-badge[data-state="INITIALIZING"] { color: var(--state-initializing); }
 .state-badge[data-state="IDLE"]         { color: var(--state-idle); }
+.state-badge[data-state="COMPLETE"]    { color: var(--state-complete); }
 .state-badge[data-state="STARTING"] {
   color: var(--state-starting);
   animation: pulse 1.4s ease-in-out infinite;
@@ -1077,20 +1096,12 @@ html, body {
   font-size: 11px;
 }
 
-/* ── Focus mode ──────────────────────────────────────────── */
-.sessions[data-focus] {
-  grid-template-columns: 1fr;
+/* ── Maximize mode ───────────────────────────────────────── */
+.session-card.maximized {
+  grid-column: 1 / -1;
 }
 
-.sessions[data-focus] .session-card:not(.focused) {
-  display: none;
-}
-
-.sessions[data-focus] .session-card.focused {
-  width: 100%;
-}
-
-.sessions[data-focus] .session-card.focused .terminal-wrap .xterm {
+.session-card.maximized .terminal-wrap .xterm {
   height: calc(100vh - 200px);
 }
 

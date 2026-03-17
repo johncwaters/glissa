@@ -22,6 +22,7 @@ const TRANSITIONS = Object.freeze({
   [STATES.RUNNING]: {
     prompt_detected:  STATES.WAITING,
     silence_timeout:  STATES.IDLE,
+    task_complete:    STATES.COMPLETE,
     process_exit_ok:  STATES.DONE,
     process_exit_fail:STATES.FAILED,
     user_kill:        STATES.DONE
@@ -35,6 +36,14 @@ const TRANSITIONS = Object.freeze({
   },
   [STATES.IDLE]: {
     new_output:       STATES.RUNNING,
+    prompt_detected:  STATES.WAITING,
+    process_exit_ok:  STATES.DONE,
+    process_exit_fail:STATES.FAILED,
+    user_kill:        STATES.DONE
+  },
+  [STATES.COMPLETE]: {
+    new_output:       STATES.RUNNING,
+    user_dismiss:     STATES.IDLE,
     prompt_detected:  STATES.WAITING,
     process_exit_ok:  STATES.DONE,
     process_exit_fail:STATES.FAILED,
@@ -73,6 +82,13 @@ const DATA_HANDLERS = {
       session._resetIdleTimer();
     }
   },
+  [STATES.COMPLETE](session, data) {
+    session.transition('new_output');
+    if (session.state === STATES.RUNNING) {
+      session.patternDetector.feed(data);
+      session._resetIdleTimer();
+    }
+  },
   [STATES.WAITING](session) {
     // Auto-recovery: continued PTY output suggests false positive.
     // Require >= 2 data events before auto-recovering.
@@ -83,6 +99,17 @@ const DATA_HANDLERS = {
 
 // Entry/exit hooks keyed by state
 const ENTRY_HOOKS = {
+  [STATES.RUNNING](session) {
+    if (!session._runningStartedAt) {
+      session._runningStartedAt = Date.now();
+    }
+  },
+  [STATES.COMPLETE](session) {
+    session._runningStartedAt = null;
+    if (!session._destroying) {
+      notify('Glissa', `${session.name} finished working`, { category: 'complete' });
+    }
+  },
   [STATES.WAITING](session) {
     session.emit('needs-attention', { name: session.name });
     if (!session._destroying) {
@@ -137,6 +164,8 @@ class Session extends EventEmitter {
     this._escalationTimer = null;
     this._autoRecoverTimer = null;
     this._autoRecoverDataCount = 0;
+    this._runningStartedAt = null;
+    this._completeThresholdMs = 30000;
     this._receivedFirstOutput = false;
     this._outputBuffer = [];       // ring buffer of recent PTY chunks
     this._outputBufferSize = 0;
@@ -380,8 +409,9 @@ class Session extends EventEmitter {
   }
 
   dismiss() {
-    if (this.state !== STATES.WAITING) return false;
-    return this.transition('user_dismiss');
+    if (this.state === STATES.WAITING) return this.transition('user_dismiss');
+    if (this.state === STATES.COMPLETE) return this.transition('user_dismiss');
+    return false;
   }
 
   killSession() {
@@ -466,7 +496,13 @@ class Session extends EventEmitter {
     this._idleTimer = setTimeout(() => {
       this._idleTimer = null;
       if (this.state === STATES.RUNNING) {
-        this.transition('silence_timeout');
+        const runDuration = this._runningStartedAt ? Date.now() - this._runningStartedAt : 0;
+        this._runningStartedAt = null;
+        if (runDuration >= this._completeThresholdMs) {
+          this.transition('task_complete');
+        } else {
+          this.transition('silence_timeout');
+        }
       }
     }, this.attentionTimeoutMs);
   }

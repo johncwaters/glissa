@@ -37,6 +37,8 @@ const THEMES = {
       '--state-idle-bg':      'rgba(234, 179, 8, 0.06)',
       '--state-starting':     '#a78bfa',
       '--state-starting-bg':  'rgba(167, 139, 250, 0.06)',
+      '--state-complete':     '#34d399',
+      '--state-complete-bg':  'rgba(52, 211, 153, 0.06)',
     },
     terminal: {
       background:   '--bg-card',
@@ -93,6 +95,8 @@ const THEMES = {
       '--state-idle-bg':      'rgba(234, 179, 8, 0.06)',
       '--state-starting':     '#a855f7',
       '--state-starting-bg':  'rgba(168, 85, 247, 0.06)',
+      '--state-complete':     '#60a5fa',
+      '--state-complete-bg':  'rgba(96, 165, 250, 0.06)',
     },
     terminal: {
       background:   '--bg-card',
@@ -148,6 +152,8 @@ const THEMES = {
       '--state-idle-bg':      'rgba(234, 179, 8, 0.06)',
       '--state-starting':     '#f472b6',
       '--state-starting-bg':  'rgba(244, 114, 182, 0.06)',
+      '--state-complete':     '#34d399',
+      '--state-complete-bg':  'rgba(52, 211, 153, 0.06)',
     },
     terminal: {
       background:   '--bg-card',
@@ -203,6 +209,8 @@ const THEMES = {
       '--state-idle-bg':      'rgba(161, 98, 7, 0.06)',
       '--state-starting':     '#7c3aed',
       '--state-starting-bg':  'rgba(124, 58, 237, 0.06)',
+      '--state-complete':     '#059669',
+      '--state-complete-bg':  'rgba(5, 150, 105, 0.06)',
     },
     terminal: {
       background:   '#faf8f4',

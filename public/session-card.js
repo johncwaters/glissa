@@ -26,7 +26,8 @@ const container = document.getElementById('sessions-container');
 const minimizedBar = document.getElementById('minimized-bar');
 const aggregateEl = document.getElementById('aggregate-status');
 
-let _focusedSession = null;
+let _maximizedSession = null;
+let _preMaximizeSessions = new Set(); // sessions auto-minimized by maximize
 
 // ── Helpers (private) ────────────────────────────────────────
 
@@ -117,20 +118,23 @@ function buildCardDOM(sessionName, initialState) {
   // Action buttons
   const actions = el('div', 'session-actions');
 
+  const btnMaximize = el('button', 'btn-action btn-maximize visible', 'Maximize');
+  btnMaximize.title = 'Maximize this session';
+
   const btnRestart = el('button', 'btn-action btn-restart', 'Restart');
   btnRestart.title = 'Restart this session';
 
   const btnRemove = el('button', 'btn-action btn-remove visible', 'Remove');
   btnRemove.title = 'Remove this session';
 
-  actions.append(btnRestart, btnRemove);
+  actions.append(btnMaximize, btnRestart, btnRemove);
   header.append(btnMinimize, nameEl, badge, spacer, actions);
 
   const termWrap = el('div', 'terminal-wrap');
 
   card.append(header, termWrap);
 
-  return { card, header, badge, nameEl, btnRestart, btnRemove, btnMinimize, termWrap };
+  return { card, header, badge, nameEl, btnRestart, btnRemove, btnMinimize, btnMaximize, termWrap };
 }
 
 // ── Minimize toggle ──────────────────────────────────────────
@@ -138,8 +142,23 @@ function buildCardDOM(sessionName, initialState) {
 function toggleMinimize(sessionName) {
   const ui = sessionUIs.get(sessionName);
   if (!ui) return;
+  const isCurrentlyMinimized = ui.card.classList.contains('minimized');
+
+  // In maximize mode: expanding a minimized session switches the maximized target
+  if (_maximizedSession && isCurrentlyMinimized && sessionName !== _maximizedSession) {
+    toggleMaximize(sessionName);
+    return;
+  }
+
+  // Minimizing the maximized session exits maximize mode
+  if (_maximizedSession && sessionName === _maximizedSession && !isCurrentlyMinimized) {
+    exitMaximizeMode();
+    return;
+  }
+
+  // Normal minimize/expand toggle
   const nowMinimized = ui.card.classList.toggle('minimized');
-  ui.btnMinimize.textContent = nowMinimized ? '\u25b6' : '\u25bc';
+  ui.btnMinimize.textContent = nowMinimized ? '\u25b2' : '\u25bc';
   ui.btnMinimize.title = nowMinimized ? 'Expand' : 'Minimize';
   if (nowMinimized) {
     minimizedBar.appendChild(ui.card);
@@ -151,31 +170,111 @@ function toggleMinimize(sessionName) {
   setMinimized(sessionName, nowMinimized);
 }
 
-// ── Focus mode ──────────────────────────────────────────────
+// ── Minimize helpers (no toggle, no localStorage) ───────────
 
-function toggleFocus(sessionName) {
-  if (_focusedSession === sessionName) {
-    exitFocusMode();
-    return;
-  }
-  // Exit any existing focus first
-  if (_focusedSession) exitFocusMode();
+function _performMinimize(name, ui) {
+  ui.card.classList.add('minimized');
+  ui.btnMinimize.textContent = '\u25b2';
+  ui.btnMinimize.title = 'Expand';
+  minimizedBar.appendChild(ui.card);
+  setMinimized(name, true);
+}
 
-  const ui = sessionUIs.get(sessionName);
-  if (!ui) return;
-
-  _focusedSession = sessionName;
-  container.dataset.focus = sessionName;
-  ui.card.classList.add('focused');
+function _performExpand(name, ui) {
+  ui.card.classList.remove('minimized');
+  ui.btnMinimize.textContent = '\u25bc';
+  ui.btnMinimize.title = 'Minimize';
+  container.appendChild(ui.card);
+  setMinimized(name, false);
+  if (ui.needsWebGLReload) tryLoadWebGL(ui);
   requestAnimationFrame(() => ui.fitAddon.fit());
 }
 
-export function exitFocusMode() {
-  if (!_focusedSession) return;
-  const ui = sessionUIs.get(_focusedSession);
-  _focusedSession = null;
-  delete container.dataset.focus;
-  if (ui) ui.card.classList.remove('focused');
+// ── Maximize mode ───────────────────────────────────────────
+
+function toggleMaximize(sessionName) {
+  // Toggle off if already maximized on this session
+  if (_maximizedSession === sessionName) {
+    exitMaximizeMode();
+    return;
+  }
+
+  // Swap: already maximized on a different session
+  if (_maximizedSession) {
+    const oldUi = sessionUIs.get(_maximizedSession);
+    const newUi = sessionUIs.get(sessionName);
+    if (!newUi) return;
+
+    // Minimize old maximized session
+    if (oldUi && !oldUi.card.classList.contains('minimized')) {
+      oldUi.card.classList.remove('maximized');
+      oldUi.btnMaximize.textContent = 'Maximize';
+      oldUi.btnMaximize.title = 'Maximize this session';
+      _performMinimize(_maximizedSession, oldUi);
+      _preMaximizeSessions.add(_maximizedSession);
+    }
+
+    // Expand new session
+    if (newUi.card.classList.contains('minimized')) {
+      _performExpand(sessionName, newUi);
+      _preMaximizeSessions.delete(sessionName);
+    }
+
+    newUi.card.classList.add('maximized');
+    newUi.btnMaximize.textContent = 'Restore';
+    newUi.btnMaximize.title = 'Restore all sessions';
+    _maximizedSession = sessionName;
+    requestAnimationFrame(() => newUi.fitAddon.fit());
+    return;
+  }
+
+  // Enter maximize mode
+  const ui = sessionUIs.get(sessionName);
+  if (!ui) return;
+
+  _maximizedSession = sessionName;
+  _preMaximizeSessions.clear();
+
+  // Expand the target if it's currently minimized
+  if (ui.card.classList.contains('minimized')) {
+    _performExpand(sessionName, ui);
+  }
+
+  // Minimize all other non-minimized sessions
+  for (const [name, otherUi] of sessionUIs) {
+    if (name === sessionName) continue;
+    if (!otherUi.card.classList.contains('minimized')) {
+      _performMinimize(name, otherUi);
+      _preMaximizeSessions.add(name);
+    }
+  }
+
+  ui.card.classList.add('maximized');
+  ui.btnMaximize.textContent = 'Restore';
+  ui.btnMaximize.title = 'Restore all sessions';
+  requestAnimationFrame(() => ui.fitAddon.fit());
+}
+
+export function exitMaximizeMode() {
+  if (!_maximizedSession) return;
+
+  const ui = sessionUIs.get(_maximizedSession);
+  if (ui) {
+    ui.card.classList.remove('maximized');
+    ui.btnMaximize.textContent = 'Maximize';
+    ui.btnMaximize.title = 'Maximize this session';
+  }
+  _maximizedSession = null;
+
+  // Restore all auto-minimized sessions
+  for (const name of _preMaximizeSessions) {
+    const otherUi = sessionUIs.get(name);
+    if (otherUi && otherUi.card.classList.contains('minimized')) {
+      _performExpand(name, otherUi);
+    }
+  }
+  _preMaximizeSessions.clear();
+
   // Refit all visible terminals
   for (const [, u] of sessionUIs) {
     if (!u.card.classList.contains('minimized')) {
@@ -184,8 +283,8 @@ export function exitFocusMode() {
   }
 }
 
-export function isFocusActive() {
-  return _focusedSession !== null;
+export function isMaximizeActive() {
+  return _maximizedSession !== null;
 }
 
 // ── Container-level drag-and-drop ────────────────────────────
@@ -336,7 +435,7 @@ function setupDragAndDrop(card, header, btnMinimize, sessionName) {
 
   header.addEventListener('mousedown', (e) => {
     if (e.target.closest('.session-actions')) return;
-    if (_focusedSession) return; // Disable drag during focus mode
+    if (_maximizedSession) return; // Disable drag during maximize mode
     didDrag = false;
     card.draggable = true;
   });
@@ -436,17 +535,16 @@ function wireCardEvents(ui, sessionName) {
     sendControlMsg({ type: 'remove-session', session: sessionName });
   });
 
-  // Click inside terminal clears notification status when WAITING
+  // Click inside terminal clears notification status when WAITING or COMPLETE
   ui.termWrap.addEventListener('mousedown', () => {
-    if (ui.currentState === STATES.WAITING) {
+    if (ui.currentState === STATES.WAITING || ui.currentState === STATES.COMPLETE) {
       sendControlMsg({ type: 'dismiss', session: sessionName });
     }
   });
 
-  // Focus mode: double-click session name
-  ui.nameEl.addEventListener('dblclick', (e) => {
-    e.stopPropagation();
-    toggleFocus(sessionName);
+  // Maximize button
+  ui.btnMaximize.addEventListener('click', () => {
+    toggleMaximize(sessionName);
   });
 
 }
@@ -493,7 +591,7 @@ export function fitAllVisible() {
 }
 
 export function updateAggregateStatus() {
-  let waiting = 0, failed = 0, done = 0, total = 0;
+  let waiting = 0, failed = 0, done = 0, complete = 0, total = 0;
 
   for (const [, ui] of sessionUIs) {
     total++;
@@ -501,6 +599,7 @@ export function updateAggregateStatus() {
     if (state === STATES.WAITING) waiting++;
     else if (state === STATES.FAILED) failed++;
     else if (state === STATES.DONE) done++;
+    else if (state === STATES.COMPLETE) complete++;
   }
 
   let text = '';
@@ -513,8 +612,11 @@ export function updateAggregateStatus() {
   } else if (failed > 0) {
     text = `${failed} session${pl(failed)} failed`;
     severity = 'critical';
+  } else if (complete > 0) {
+    text = `${complete} session${pl(complete)} finished`;
+    severity = 'done';
   } else if (total > 0 && done === total) {
-    text = 'All sessions complete';
+    text = 'All sessions exited';
     severity = 'done';
   } else if (total > 0) {
     const active = total - done;
@@ -524,7 +626,7 @@ export function updateAggregateStatus() {
 
   aggregateEl.textContent = text;
   aggregateEl.dataset.severity = severity;
-  const alertCount = waiting + failed;
+  const alertCount = waiting + failed + complete;
   document.title = alertCount > 0 ? `(${alertCount}) Glissa` : 'Glissa';
 }
 
@@ -543,6 +645,7 @@ export function createSessionCard(sessionName, initialState) {
     badge: dom.badge,
     nameEl: dom.nameEl,
     btnMinimize: dom.btnMinimize,
+    btnMaximize: dom.btnMaximize,
     termWrap: dom.termWrap,
     btnRestart: dom.btnRestart,
     btnRemove: dom.btnRemove,
@@ -569,8 +672,9 @@ export function removeSessionCard(sessionName) {
   if (!ui) return;
 
   sessionUIs.delete(sessionName);
-  // Clear focus if this session was focused
-  if (_focusedSession === sessionName) exitFocusMode();
+  // Clear maximize if this session was maximized
+  if (_maximizedSession === sessionName) exitMaximizeMode();
+  _preMaximizeSessions.delete(sessionName);
 
   if (ui.dataWs?.readyState <= WebSocket.OPEN) ui.dataWs.close();
   if (ui.term) ui.term.dispose();

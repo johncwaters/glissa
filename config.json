@@ -1,6 +1,6 @@
 {
   "port": 3000,
-  "attentionTimeoutSeconds": 60,
+  "attentionTimeoutSeconds": 5,
   "waitingEscalationSeconds": 300,
   "startingWatchdogSeconds": 30,
   "autoRecoverSeconds": 3,
