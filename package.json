@@ -54,7 +54,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "prepublishOnly": "npm run build && node -e \"require('fs').statSync('dist/index.html')\"",
-    "release": "bash scripts/release.sh"
+    "release": "node scripts/release.js"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.11.0",
