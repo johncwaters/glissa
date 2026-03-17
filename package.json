@@ -10,8 +10,8 @@
   "files": [
     "bin/glissa.js",
     "dist/",
-    "public/",
-    "!public/**/AGENTS.md",
+    "!dist/AGENTS.md",
+    "!dist/pictures/",
     "server.js",
     "backend.js",
     "sessions.js",
