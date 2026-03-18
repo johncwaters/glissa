@@ -11,8 +11,7 @@ import { checkAndStartGuides, isFirstOpen, registerGuide } from './guide.js';
 import {
   applyState, createSessionCard, exitMaximizeMode, fitAllVisible,
   getSessionCount, handleSessionsReordered, hasSession, isMaximizeActive,
-  reconnectDataWs, removeSessionCard, requestNotificationPermission,
-  showErrorToast, updateAggregateStatus,
+  reconnectDataWs, removeSessionCard, showErrorToast, updateAggregateStatus,
 } from './session-card.js';
 import { applyTheme } from './theme.js';
 import { getThemeId, isSoundEnabled, pruneStale, setSoundEnabled } from './ui-prefs.js';
@@ -208,9 +207,6 @@ window.addEventListener('resize', () => {
 // ── Toolbar buttons ──────────────────────────────────────────
 
 document.getElementById('btn-add-session').addEventListener('click', createAddSessionDialog);
-
-// Request notification permission on first user interaction
-document.addEventListener('click', () => requestNotificationPermission(), { once: true });
 
 // ── Header menu ──────────────────────────────────────────────
 

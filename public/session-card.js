@@ -682,24 +682,6 @@ export function removeSessionCard(sessionName) {
   updateAggregateStatus();
 }
 
-/** Request notification permission eagerly (call from a user gesture context). */
-export function requestNotificationPermission() {
-  if (!('Notification' in window)) return;
-  if (Notification.permission === 'default') Notification.requestPermission();
-}
-
-function _notifyCompletion(sessionName, state) {
-  if (document.hasFocus()) return;
-  if (!('Notification' in window)) return;
-  if (Notification.permission !== 'granted') return;
-
-  const isFailure = state === STATES.FAILED;
-  new Notification(isFailure ? 'Session Failed' : 'Session Complete', {
-    body: sessionName,
-    tag: `glissa-${sessionName}`,
-  });
-}
-
 function _handleEndedTransition(ui, wasActive, state) {
   if (!wasActive) return;
   ui.term.clear();
@@ -747,8 +729,6 @@ export function applyState(sessionName, state) {
     // Sound alert on completion
     if (isSoundEnabled()) playAlertSound(getSoundId());
 
-    // Browser notification when window/tab not focused
-    _notifyCompletion(sessionName, state);
   }
 
   // Clear terminal and show placeholder when session ends
