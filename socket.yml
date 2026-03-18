@@ -1,0 +1,25 @@
+# socket.yml — Socket.dev security policy for Glissa
+# https://docs.socket.dev/docs/socket-yml
+version: 2
+
+# Only re-scan when dependency manifests change.
+triggerPaths:
+  - "package.json"
+  - "package-lock.json"
+
+issueRules:
+  # node-pty spawns the Claude CLI via a real PTY (pty.spawn()).
+  # Shell access is the core feature of this tool, not a supply-chain risk.
+  shellAccess: false
+
+  # This project IS a network server (Express HTTP + ws WebSocket on port 3000).
+  # Network access by runtime deps is expected and intentional.
+  networkAccess: false
+
+  # node-pty requires compiled native bindings (C++ via node-gyp).
+  # This is documented and expected — not a supply-chain risk.
+  hasNativeCode: false
+
+  # Express and ws read process.env for PORT, NODE_ENV, etc.
+  # No credential exfiltration involved.
+  envVars: false
