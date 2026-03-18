@@ -31,13 +31,13 @@ function resolveConfigPath() {
     process.exit(1);
   }
 
-  // 2. User home directory (~/.glissa/config.json)
-  const homeConfig = path.join(os.homedir(), '.glissa', 'config.json');
-  if (fs.existsSync(homeConfig)) return homeConfig;
-
-  // 3. Local fallback (__dirname/config.json) — for dev use with `node server.js`
+  // 2. Local config (__dirname/config.json) — dev use with `node server.js` or `vite`
   const localConfig = path.join(__dirname, 'config.json');
   if (fs.existsSync(localConfig)) return localConfig;
+
+  // 3. User home directory (~/.glissa/config.json) — installed CLI use
+  const homeConfig = path.join(os.homedir(), '.glissa', 'config.json');
+  if (fs.existsSync(homeConfig)) return homeConfig;
 
   // 4. None found — seed default at ~/.glissa/config.json
   const dir = path.join(os.homedir(), '.glissa');
