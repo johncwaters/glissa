@@ -5,9 +5,13 @@
 [![Node.js](https://img.shields.io/node/v/glissa)](https://nodejs.org)
 [![Platform: Windows](https://img.shields.io/badge/platform-Windows-0078d4?logo=windows)](https://www.npmjs.com/package/glissa)
 
-Spawn and manage multiple Claude Code sessions from a browser dashboard. Real-time terminal output via xterm.js, WebSocket streaming, and Windows toast notifications.
+**Run dozens of Claude Code agents at once. See every session. Miss nothing.**
 
-> **Windows-first** — built for Windows 11 power users managing Claude Code sessions. Other platforms have alternative solutions; Glissa fills the Windows gap.
+Claude Code is powerful — but managing multiple sessions across terminals is chaos. You're alt-tabbing between windows, losing track of which agent is waiting for input, and missing the moment one finishes. Work piles up while you context-switch.
+
+Glissa gives you a single browser dashboard to spawn, monitor, and control all your Claude Code sessions in real time. Live terminal output streams via WebSocket. Windows toast notifications tell you exactly when a session needs attention. Every agent, every project, one screen.
+
+> **Built for Windows** — the platform where multi-session Claude Code tooling didn't exist. One `npm install -g glissa` and you're running.
 
 ![Glissa Dashboard](assets/pictures/glissa-screenshot.png)
 
