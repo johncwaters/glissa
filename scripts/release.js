@@ -30,6 +30,16 @@ const TAG = `v${VERSION}`;
 
 console.log(`==> Releasing glissa ${TAG}\n`);
 
+// 0. Verify npm auth before doing anything else
+try {
+  const npmUser = runCapture('npm whoami');
+  console.log(`==> Authenticated as npm user: ${npmUser}`);
+} catch {
+  console.error('ERROR: Not logged in to npm. Run `npm login` or check ~/.npmrc token.');
+  console.error('       Tip: Use an automation token (npm token create --type=automation) to bypass OTP.');
+  process.exit(1);
+}
+
 // 1. Ensure working tree is clean
 const status = runCapture('git status --porcelain');
 if (status) {
