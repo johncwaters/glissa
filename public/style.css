@@ -436,6 +436,35 @@ html, body {
   animation: none;
 }
 
+/* Completion flash — plays once on DONE/COMPLETE/FAILED transition */
+.session-card.completion-flash[data-state="DONE"],
+.session-card.completion-flash[data-state="COMPLETE"] {
+  animation: completion-glow 1.8s ease-out;
+}
+
+.session-card.completion-flash[data-state="FAILED"] {
+  animation: failure-glow 1.8s ease-out;
+}
+
+@keyframes completion-glow {
+  0%   { box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.6), 0 0 24px rgba(52, 211, 153, 0.3); }
+  30%  { box-shadow: 0 0 0 5px rgba(52, 211, 153, 0.4), 0 0 40px rgba(52, 211, 153, 0.2); }
+  100% { box-shadow: none; }
+}
+
+@keyframes failure-glow {
+  0%   { box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.6), 0 0 24px rgba(239, 68, 68, 0.3); }
+  30%  { box-shadow: 0 0 0 5px rgba(239, 68, 68, 0.4), 0 0 40px rgba(239, 68, 68, 0.2); }
+  100% { box-shadow: none; }
+}
+
+/* Override: allow flash animation even on minimized cards */
+.session-card.minimized.completion-flash[data-state="DONE"],
+.session-card.minimized.completion-flash[data-state="COMPLETE"],
+.session-card.minimized.completion-flash[data-state="FAILED"] {
+  opacity: 1;
+}
+
 /* btn-minimize removed — drag handle now toggles minimize */
 
 /* State-driven card borders */

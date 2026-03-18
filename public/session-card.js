@@ -682,8 +682,25 @@ export function removeSessionCard(sessionName) {
   updateAggregateStatus();
 }
 
-function _handleEndedTransition(ui, prevState, state) {
-  const wasActive = prevState !== STATES.DONE && prevState !== STATES.FAILED && prevState !== STATES.INITIALIZING;
+/** Request notification permission eagerly (call from a user gesture context). */
+export function requestNotificationPermission() {
+  if (!('Notification' in window)) return;
+  if (Notification.permission === 'default') Notification.requestPermission();
+}
+
+function _notifyCompletion(sessionName, state) {
+  if (document.hasFocus()) return;
+  if (!('Notification' in window)) return;
+  if (Notification.permission !== 'granted') return;
+
+  const isFailure = state === STATES.FAILED;
+  new Notification(isFailure ? 'Session Failed' : 'Session Complete', {
+    body: sessionName,
+    tag: `glissa-${sessionName}`,
+  });
+}
+
+function _handleEndedTransition(ui, wasActive, state) {
   if (!wasActive) return;
   ui.term.clear();
   ui.term.reset();
@@ -717,9 +734,26 @@ export function applyState(sessionName, state) {
     if (isSoundEnabled()) playAlertSound(getSoundId());
   }
 
+  // Completion: flash animation, sound, and browser notification
+  const isEnding = state === STATES.DONE || state === STATES.FAILED || state === STATES.COMPLETE;
+  const wasActive = prevState !== STATES.DONE && prevState !== STATES.FAILED && prevState !== STATES.INITIALIZING;
+  if (isEnding && wasActive) {
+    // Glow flash (CSS animation)
+    ui.card.classList.remove('completion-flash');
+    void ui.card.offsetWidth; // reflow to restart animation
+    ui.card.classList.add('completion-flash');
+    ui.card.addEventListener('animationend', () => ui.card.classList.remove('completion-flash'), { once: true });
+
+    // Sound alert on completion
+    if (isSoundEnabled()) playAlertSound(getSoundId());
+
+    // Browser notification when window/tab not focused
+    _notifyCompletion(sessionName, state);
+  }
+
   // Clear terminal and show placeholder when session ends
   if (state === STATES.DONE || state === STATES.FAILED) {
-    _handleEndedTransition(ui, prevState, state);
+    _handleEndedTransition(ui, wasActive, state);
   }
 
   // Clear placeholder on restart
