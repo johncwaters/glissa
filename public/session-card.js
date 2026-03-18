@@ -717,7 +717,7 @@ export function applyState(sessionName, state) {
   }
 
   // Completion: flash animation, sound, and browser notification
-  const isEnding = state === STATES.DONE || state === STATES.FAILED || state === STATES.COMPLETE;
+  const isEnding = state === STATES.DONE || state === STATES.FAILED;
   const wasActive = prevState !== STATES.DONE && prevState !== STATES.FAILED && prevState !== STATES.INITIALIZING;
   if (isEnding && wasActive) {
     // Glow flash (CSS animation)
@@ -728,7 +728,6 @@ export function applyState(sessionName, state) {
 
     // Sound alert on completion
     if (isSoundEnabled()) playAlertSound(getSoundId());
-
   }
 
   // Clear terminal and show placeholder when session ends

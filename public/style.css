@@ -436,9 +436,8 @@ html, body {
   animation: none;
 }
 
-/* Completion flash — plays once on DONE/COMPLETE/FAILED transition */
-.session-card.completion-flash[data-state="DONE"],
-.session-card.completion-flash[data-state="COMPLETE"] {
+/* Completion flash — plays once on DONE/FAILED transition */
+.session-card.completion-flash[data-state="DONE"] {
   animation: completion-glow 1.8s ease-out;
 }
 
@@ -458,11 +457,15 @@ html, body {
   100% { box-shadow: none; }
 }
 
-/* Override: allow flash animation even on minimized cards */
-.session-card.minimized.completion-flash[data-state="DONE"],
-.session-card.minimized.completion-flash[data-state="COMPLETE"],
+/* Override: explicit flash animation on minimized cards */
+.session-card.minimized.completion-flash[data-state="DONE"] {
+  opacity: 1;
+  animation: completion-glow 1.8s ease-out;
+}
+
 .session-card.minimized.completion-flash[data-state="FAILED"] {
   opacity: 1;
+  animation: failure-glow 1.8s ease-out;
 }
 
 /* btn-minimize removed — drag handle now toggles minimize */
