@@ -221,8 +221,8 @@ function toggleMaximize(sessionName) {
     }
 
     newUi.card.classList.add('maximized');
-    newUi.btnMaximize.textContent = 'Restore';
-    newUi.btnMaximize.title = 'Restore all sessions';
+    newUi.btnMaximize.textContent = 'Minimize';
+    newUi.btnMaximize.title = 'Minimize all sessions';
     _maximizedSession = sessionName;
     requestAnimationFrame(() => newUi.fitAddon.fit());
     return;
@@ -250,8 +250,8 @@ function toggleMaximize(sessionName) {
   }
 
   ui.card.classList.add('maximized');
-  ui.btnMaximize.textContent = 'Restore';
-  ui.btnMaximize.title = 'Restore all sessions';
+  ui.btnMaximize.textContent = 'Minimize';
+  ui.btnMaximize.title = 'Minimize all sessions';
   requestAnimationFrame(() => ui.fitAddon.fit());
 }
 

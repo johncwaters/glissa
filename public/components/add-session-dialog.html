@@ -1,18 +1,21 @@
 <div class="dialog-title">Add Session</div>
 <label class="dialog-label">
-  Name
-  <input type="text" class="dialog-input" id="add-session-name" placeholder="my-project" autocomplete="off" spellcheck="false">
-</label>
-<label class="dialog-label">
-  Path
-  <input type="text" class="dialog-input" id="add-session-path" placeholder="C:\Users\...\my-project" autocomplete="off" spellcheck="false">
-</label>
-<label class="dialog-label">
-  Or pick from discovered projects:
+  Pick a project:
   <select class="dialog-input project-picker" id="add-session-picker">
     <option value="" disabled selected>Scanning...</option>
   </select>
 </label>
+<button type="button" class="dialog-advanced-toggle" id="add-session-advanced-toggle">Advanced options</button>
+<div class="dialog-advanced-panel" id="add-session-advanced" hidden>
+  <label class="dialog-label">
+    Name
+    <input type="text" class="dialog-input" id="add-session-name" placeholder="my-project" autocomplete="off" spellcheck="false">
+  </label>
+  <label class="dialog-label">
+    Path
+    <input type="text" class="dialog-input" id="add-session-path" placeholder="C:\Users\...\my-project" autocomplete="off" spellcheck="false">
+  </label>
+</div>
 <div class="dialog-error" id="add-session-error"></div>
 <div class="dialog-actions">
   <button class="btn-dialog btn-dialog-cancel" id="add-session-cancel">Cancel</button>

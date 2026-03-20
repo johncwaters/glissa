@@ -23,12 +23,23 @@ export function createAddSessionDialog() {
   overlay.appendChild(dialog);
   document.body.appendChild(overlay);
 
+  const pickerEl = dialog.querySelector('#add-session-picker');
+  const advancedToggle = dialog.querySelector('#add-session-advanced-toggle');
+  const advancedPanel = dialog.querySelector('#add-session-advanced');
   const nameInput = dialog.querySelector('#add-session-name');
   const pathInput = dialog.querySelector('#add-session-path');
-  const pickerEl = dialog.querySelector('#add-session-picker');
   const errorEl = dialog.querySelector('#add-session-error');
   const btnCancel = dialog.querySelector('#add-session-cancel');
   const btnConfirm = dialog.querySelector('#add-session-confirm');
+
+  // Advanced options toggle
+  advancedToggle.setAttribute('aria-expanded', 'false');
+  advancedToggle.addEventListener('click', () => {
+    const expanded = advancedPanel.hidden;
+    advancedPanel.hidden = !expanded;
+    advancedToggle.setAttribute('aria-expanded', String(expanded));
+    if (expanded) requestAnimationFrame(() => nameInput.focus());
+  });
 
   // Populate project picker from repo roots scan
   sendControlRequest('scan-repo-roots', {})
@@ -83,7 +94,7 @@ export function createAddSessionDialog() {
     } catch { /* picker value not valid JSON — ignore */ }
   });
 
-  // Reset picker when user types manually
+  // Reset picker when user types manually in advanced fields
   nameInput.addEventListener('input', () => { pickerEl.selectedIndex = 0; });
   pathInput.addEventListener('input', () => { pickerEl.selectedIndex = 0; });
 
@@ -96,7 +107,7 @@ export function createAddSessionDialog() {
     const projectPath = pathInput.value.trim();
 
     if (!name || !projectPath) {
-      errorEl.textContent = 'Both fields are required.';
+      errorEl.textContent = 'Both fields are required. Select a project or use Advanced options.';
       return;
     }
 
@@ -124,8 +135,8 @@ export function createAddSessionDialog() {
     }
   });
 
-  // Focus name input after render
-  requestAnimationFrame(() => nameInput.focus());
+  // Focus picker after render
+  requestAnimationFrame(() => pickerEl.focus());
 }
 
 // ── Settings dialog ──────────────────────────────────────────

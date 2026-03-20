@@ -81,18 +81,6 @@ function registerControlHandlers(controlWss, deps) {
       return;
     }
 
-    // Validate path is within a configured repo root (if any are configured)
-    if (config.repoRoots.length > 0) {
-      const withinRoot = config.repoRoots.some(root => {
-        const resolvedRoot = path.resolve(root);
-        return resolvedPath === resolvedRoot || resolvedPath.startsWith(resolvedRoot + path.sep);
-      });
-      if (!withinRoot) {
-        ws.send(JSON.stringify({ type: 'error', message: 'Path must be within a configured repository root' }));
-        return;
-      }
-    }
-
     const freshConfig = configStore.save(cfg => {
       cfg.projects.push({ name, path: resolvedPath });
     });

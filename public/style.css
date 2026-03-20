@@ -1098,6 +1098,47 @@ html, body {
   text-align: center;
 }
 
+/* ── Advanced toggle in Add Session ─────────────────────── */
+.dialog-advanced-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-dim);
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: color var(--transition-fast);
+}
+
+.dialog-advanced-toggle::before {
+  content: '\25b8';
+  display: inline-block;
+  transition: transform var(--transition-fast);
+  font-size: 10px;
+}
+
+.dialog-advanced-toggle[aria-expanded="true"]::before {
+  transform: rotate(90deg);
+}
+
+.dialog-advanced-toggle:hover {
+  color: var(--text);
+}
+
+.dialog-advanced-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.dialog-advanced-panel[hidden] {
+  display: none;
+}
+
 /* ── Project picker in Add Session ──────────────────────── */
 .project-picker {
   padding: 8px 12px;
