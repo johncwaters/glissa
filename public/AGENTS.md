@@ -1,5 +1,5 @@
 <!-- Parent: ../AGENTS.md -->
-<!-- Generated: 2026-03-11 | Updated: 2026-03-15T3 -->
+<!-- Generated: 2026-03-11 | Updated: 2026-03-20 -->
 
 # public/ — Browser Dashboard
 
@@ -12,18 +12,17 @@ Browser-side dashboard for Glissa. Provides real-time terminal streaming via xte
 | File | Description |
 |------|-------------|
 | `index.html` | Dashboard HTML shell with inline critical CSS (loading screen, shutdown overlay), Tailwind utility classes for layout |
-| `app.js` | Boot entry point — wires modules together, applies saved theme, registers guides, control message dispatch, window resize handler, toolbar/menu event binding |
-| `session-card.js` | Session card DOM lifecycle: card creation, terminal setup (xterm.js + WebGL), data WebSocket per session, drag-and-drop, minimize toggle, state application |
+| `app.js` | Boot entry point — wires modules together, applies saved theme, registers guides, control message dispatch, window resize handler, toolbar/menu event binding, focus tracking |
+| `session-card.js` | Session card DOM lifecycle: card creation, terminal setup (xterm.js + WebGL), data WebSocket per session, drag-and-drop, minimize/maximize toggle, state application, aggregate status |
 | `control-ws.js` | Control WebSocket client — connection management, auto-reconnect (3s), request/response with requestId correlation and 5s timeout |
-| `dialogs.js` | Add Session and Settings dialog factories — repo root scanning, validation, theme picker, sound selector |
+| `dialogs.js` | Add Session and Settings dialog factories — repo root scanning, project picker, validation, theme picker, sound selector |
 | `theme.js` | Theme system — defines color palettes (Golgari, Midnight, Phyrexian, Compleated), applies CSS custom properties on `:root`, derives xterm.js terminal themes from CSS variables |
-| `ui-prefs.js` | UI preference persistence (localStorage) — minimized sessions, sound enabled/id, theme id, completed guides |
-| `alert-sound.js` | Notification sounds — audio file playback with synth beep fallback |
-| `guide.js` | Guided tutorial engine — registration, condition-based triggering, step progression, completion tracking |
-| `guide-tooltip.js` | Floating tooltip component for guides — smart positioning with arrow, overlay cutout highlighting |
+| `ui-prefs.js` | UI preference persistence (localStorage) — minimized sessions, sound enabled/id, theme id, completed guides. Prunes stale session references |
+| `alert-sound.js` | Notification sounds — audio file playback (.ogg) with synth beep fallback via Web Audio API |
+| `guide.js` | Guided tutorial engine — registration, condition-based triggering, step progression with skip support, completion tracking via ui-prefs |
+| `guide-tooltip.js` | Floating tooltip component for guides — smart positioning (bottom/top/right/left) with arrow, overlay cutout highlighting target element |
 | `local-store.js` | Generic localStorage wrapper — JSON get/set with graceful degradation for private browsing |
 | `dom-helpers.js` | Shared `el(tag, className, text)` helper for programmatic DOM creation |
-| `package.json` | Marks `public/` as ES module scope (`"type": "module"`) for Biome linter compatibility |
 | `tailwind.css` | Tailwind CSS entry with `@theme` block — color tokens reference CSS variables set by `theme.js` |
 | `style.css` | Component styles for JS-created DOM elements, `[data-state]` attribute selectors, animations (`@keyframes`), dialog/toast/guide styling |
 
@@ -51,7 +50,7 @@ This is **browser code** using ES modules, not CommonJS.
 ```
 app.js (boot)
   ├── theme.js         (theme system — applied at boot before UI renders)
-  ├── guide.js         (tutorial engine)
+  ├── guide.js         (tutorial engine — registers welcome guide)
   │     └── guide-tooltip.js  (tooltip component)
   │           └── dom-helpers.js
   ├── control-ws.js    (control WebSocket — singleton)
@@ -59,8 +58,11 @@ app.js (boot)
   │     ├── ui-prefs.js      (localStorage persistence)
   │     │     └── local-store.js
   │     ├── alert-sound.js   (notification sounds)
+  │     ├── dom-helpers.js
   │     └── /shared/states.mjs (state constants)
   └── dialogs.js       (dialogs — depends on session-card.js, control-ws.js, theme.js)
+        ├── alert-sound.js   (sound preview in settings)
+        ├── ui-prefs.js
         └── components/*.html?raw (template fragments)
 ```
 
@@ -68,8 +70,9 @@ app.js (boot)
 - `theme.js` is self-contained — defines themes, applies CSS variables, derives terminal colors
 - `ui-prefs.js` depends only on `local-store.js`
 - `control-ws.js` is the lowest-level network module (no imports from other local modules)
-- `session-card.js` imports from `control-ws.js`, `ui-prefs.js`, `alert-sound.js`, `theme.js`
-- `dialogs.js` imports from `control-ws.js`, `session-card.js`, `ui-prefs.js`, `theme.js`
+- `session-card.js` imports from `control-ws.js`, `ui-prefs.js`, `alert-sound.js`, `theme.js`, `dom-helpers.js`
+- `dialogs.js` imports from `control-ws.js`, `session-card.js`, `ui-prefs.js`, `theme.js`, `alert-sound.js`
+- `guide.js` imports from `guide-tooltip.js`, `ui-prefs.js`
 - `app.js` imports from all major modules and wires them together
 
 ### Theme System
@@ -113,11 +116,16 @@ Two WebSocket connections per browser session:
 States drive UI via `[data-state]` CSS selectors:
 - **INITIALIZING** — Gray badge
 - **STARTING** — Pink badge
-- **RUNNING** — Green border, Kill visible
-- **WAITING** — Amber pulsing border, Dismiss + Restart visible
+- **RUNNING** — Green border, Restart visible (force-restart)
+- **WAITING** — Amber pulsing border, Restart visible, click terminal to dismiss
 - **IDLE** — Yellow badge
+- **COMPLETE** — Green badge, completion flash animation, sound alert
 - **DONE** — Cyan border, Restart visible, terminal shows "Session complete"
 - **FAILED** — Red border, Restart visible, terminal shows "Session failed"
+
+### Maximize Mode
+
+Clicking Maximize on a session card minimizes all other sessions and expands the target. Click a minimized card to switch targets. Press ESC or click Maximize again to exit. Drag-and-drop is disabled during maximize mode.
 
 ### Testing Requirements
 
@@ -126,14 +134,15 @@ States drive UI via `[data-state]` CSS selectors:
 Verification checklist:
 1. Dashboard loads (loading screen -> app reveal on WS connect)
 2. Session cards render with correct state badges
-3. Terminal displays output, keyboard input works
-4. Drag-and-drop reordering persists
-5. Minimize/expand toggle works (WebGL reloads on expand)
-6. Add Session dialog: picker populates from repo roots, manual entry works
+3. Terminal displays output, keyboard input works (Ctrl+C copies selection, Ctrl+V pastes)
+4. Drag-and-drop reordering persists (grid cards and from minimized bar)
+5. Minimize/expand/maximize toggle works (WebGL reloads on expand)
+6. Add Session dialog: picker populates from repo roots, manual entry via Advanced
 7. Settings dialog: loads current values, validates, saves, theme preview works
 8. Menu: shutdown and restart work with confirmation
 9. Reconnection: auto-reconnects on disconnect, reloads on restart
 10. Theme switching applies immediately, persists across reload
+11. Welcome guide runs on first open, dismissed on completion or ESC
 
 ### Common Patterns
 

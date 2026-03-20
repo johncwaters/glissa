@@ -1,4 +1,4 @@
-<!-- Generated: 2026-03-11 | Updated: 2026-03-15T3 -->
+<!-- Generated: 2026-03-11 | Updated: 2026-03-20 -->
 
 # AGENTS.md — Glissa Project Map
 
@@ -14,20 +14,19 @@ Glissa is a lightweight Node.js background process that spawns and manages Claud
 |------|---------|-------------|
 | **server.js** | Production entry point — creates HTTP server, wires backend, handles SIGINT | `(none — top-level script)` |
 | **backend.js** | Express + WebSocket server factory. Wires control/data WebSocket servers, session lifecycle, config hot-reload, static serving, and graceful shutdown onto a provided HTTP server | `createBackend(httpServer, options)` |
-| **sessions.js** | Session class with 7-state machine (INITIALIZING → STARTING → RUNNING → WAITING → IDLE → DONE/FAILED). Spawns Claude CLI via node-pty, PTY lifecycle, pattern detection integration, replay buffer, watchdog/idle/escalation/auto-recover timers | `Session` |
-| **patterns.js** | PatternDetector class (EventEmitter) with 3-layer prompt detection: Layer 1 (exact string matches), Layer 2 (regex patterns), Layer 3 (silence heuristic). ANSI stripping, self-test harness | `PatternDetector` |
-| **control-handlers.js** | Control WebSocket message handler registry. Handler-map dispatch pattern for all control messages (add/remove/reorder sessions, settings, kill/restart/dismiss, shutdown/restart-server, repo scanning) | `registerControlHandlers(controlWss, deps)` |
-| **config-store.js** | Configuration storage with resolution order (--config flag → ~/.glissa/config.json → ./config.json → auto-seed). Atomic read-modify-write, fs.watch hot-reload with self-write filtering | `createConfigStore()`, `TIMEOUT_KEYS`, `DEFAULT_CONFIG` |
-| **notify.js** | Windows toast notifications via BurntToast PowerShell module with `msg *` fallback. Lazy-detects BurntToast across standard and OneDrive-redirected module paths | `notify(title, message)` |
+| **sessions.js** | Session class with 8-state machine (INITIALIZING -> STARTING -> RUNNING -> WAITING/IDLE/COMPLETE -> DONE/FAILED). Spawns Claude CLI via node-pty, PTY lifecycle, pattern detection integration, replay buffer, watchdog/idle/escalation/auto-recover timers | `Session` |
+| **patterns.js** | PatternDetector class (EventEmitter) with 3-layer prompt detection: Layer 1 (exact string matches), Layer 2 (regex patterns with blacklist), Layer 3 (silence heuristic). ANSI stripping, self-test harness | `PatternDetector` |
+| **control-handlers.js** | Control WebSocket message handler registry. Handler-map dispatch pattern for all control messages (add/remove/reorder sessions, settings, kill/restart/dismiss, shutdown/restart-server, focus-change, repo scanning) | `registerControlHandlers(controlWss, deps)` |
+| **config-store.js** | Configuration storage with resolution order (--config flag -> local config.json -> ~/.glissa/config.json -> auto-seed). Atomic read-modify-write, fs.watch hot-reload with self-write filtering | `createConfigStore()`, `TIMEOUT_KEYS`, `DEFAULT_CONFIG` |
+| **notify.js** | Windows toast notifications via BurntToast PowerShell module with `msg *` fallback. Lazy-detects BurntToast across standard and OneDrive-redirected module paths. Category-based debounce, suppression when dashboard is focused | `notify(title, message)`, `setNotifySuppressed(val)`, `clearNotifyHistory()` |
 
 ### Configuration & Build
 
 | File | Purpose |
 |------|---------|
-| **config.json** | Runtime configuration: port, timeout settings, repo roots, project definitions. Hot-reloaded by backend.js via config-store.js |
+| **config.json** | Runtime configuration: port, timeout settings, repo roots, project definitions. Hot-reloaded by backend.js via config-store.js. Gitignored |
 | **package.json** | Project manifest (CommonJS). Dependencies: express, ws, node-pty, @xterm/*. CLI entry: `bin/glissa.js` |
 | **vite.config.js** | Vite frontend build config (ESM). Tailwind CSS plugin, backend plugin that attaches Express/WS to Vite's dev server, alias for shared/states.esm.js |
-| **biome.json** | Biome linter config — scoped to `public/**`, formatter disabled, Tailwind CSS directives enabled, CSS specificity rule off |
 | **CLAUDE.md** | Hard constraints and design decisions for agents working in this codebase |
 
 ---
@@ -38,9 +37,10 @@ Glissa is a lightweight Node.js background process that spawns and manages Claud
 |-----------|---------|
 | `assets/` | Source audio files and screenshots (see `assets/AGENTS.md`) |
 | `bin/` | CLI entry point for `npx glissa` / global install (see `bin/AGENTS.md`) |
-| `public/` | Browser dashboard — xterm.js terminals, session cards, dialogs (see `public/AGENTS.md`) |
-| `shared/` | Shared state constants (CJS + ESM dual format) (see `shared/AGENTS.md`) |
 | `docs/` | Publishing and CLI testing guides (see `docs/AGENTS.md`) |
+| `public/` | Browser dashboard — xterm.js terminals, session cards, dialogs (see `public/AGENTS.md`) |
+| `scripts/` | Release automation scripts (see `scripts/AGENTS.md`) |
+| `shared/` | Shared state constants (CJS + ESM dual format) (see `shared/AGENTS.md`) |
 
 ---
 
@@ -49,25 +49,25 @@ Glissa is a lightweight Node.js background process that spawns and manages Claud
 ### Dual WebSocket Protocol
 
 **Control WebSocket** (`ws://localhost:PORT/control`)
-- **Server → Client:**
+- **Server -> Client:**
   - `{ type: 'snapshot', sessions: [...] }` — Initial session list
   - `{ type: 'state-change', session, from, to, event, timestamp }` — State transitions
   - `{ type: 'session-added', session, state }` — New session created (broadcast)
   - `{ type: 'session-removed', session }` — Session deleted (broadcast)
-  - `{ type: 'session-modified', session, state }` — Session state updated (broadcast)
+  - `{ type: 'session-modified', session, state }` — Session recreated after path change (broadcast)
   - `{ type: 'sessions-reordered', order: [...] }` — Session list reordered (broadcast)
   - `{ type: 'settings', requestId, settings }` — Settings response (unicast)
-  - `{ type: 'settings-error', requestId, message }` — Settings error (unicast)
-  - `{ type: 'settings-updated', settings }` — Settings broadcast (multicast)
+  - `{ type: 'settings-error', requestId, message }` — Settings validation error (unicast)
+  - `{ type: 'settings-updated', settings }` — Settings broadcast after save (multicast)
   - `{ type: 'repo-roots-scanned', requestId, directories }` — Repo scan result (unicast)
   - `{ type: 'shutting-down' }` — Server shutdown initiated
   - `{ type: 'restarting' }` — Server restart initiated
   - `{ type: 'error', message }` — Generic error (unicast)
-- **Client → Server:**
+- **Client -> Server:**
   - `{ type: 'kill', session }` — Terminate session
   - `{ type: 'restart', session }` — Restart completed/failed session
   - `{ type: 'force-restart', session }` — Kill + restart active session
-  - `{ type: 'dismiss', session }` — Dismiss false waiting detection
+  - `{ type: 'dismiss', session }` — Dismiss WAITING/COMPLETE state
   - `{ type: 'add-session', name, path }` — Create new session
   - `{ type: 'remove-session', session }` — Delete session
   - `{ type: 'reorder-sessions', order: [...] }` — Reorder session list
@@ -76,26 +76,30 @@ Glissa is a lightweight Node.js background process that spawns and manages Claud
   - `{ type: 'scan-repo-roots', requestId }` — Scan configured repo roots
   - `{ type: 'shutdown' }` — Request server shutdown
   - `{ type: 'restart-server' }` — Request server restart
+  - `{ type: 'focus-change', focused }` — Dashboard visibility (suppresses notifications)
 
 **Data WebSocket** (`ws://localhost:PORT/terminals/:sessionName`)
-- **Server → Client:** Raw PTY output (string)
-- **Client → Server:**
-  - `{ type: 'input', data }` — Keystrokes to PTY
-  - `{ type: 'resize', cols, rows }` — Terminal resize
+- **Server -> Client:** Raw PTY output (string)
+- **Client -> Server:**
+  - `{ type: 'input', data }` — Keystrokes to PTY (max 16384 chars)
+  - `{ type: 'resize', cols, rows }` — Terminal resize (validated bounds)
 
 ### Session State Machine
 
 ```
-INITIALIZING → STARTING → RUNNING → WAITING → IDLE → DONE
-                                                    ↘ FAILED
+INITIALIZING -> STARTING -> RUNNING -> WAITING -> IDLE -> DONE
+                               |          |               ^
+                               v          v               |
+                            COMPLETE ---->+----------> FAILED
 ```
 
 **States (from shared/states.js):**
 - **INITIALIZING** — Session object created, env prepared, ready to spawn
 - **STARTING** — PTY spawned, awaiting first output (watchdog timer active)
-- **RUNNING** — Claude CLI producing output, pattern detector active
-- **WAITING** — Prompt detected (via PatternDetector), awaiting user input/dismiss. Auto-recover fires if ≥2 PTY data chunks arrive after autoRecoverSeconds
+- **RUNNING** — Claude CLI producing output, pattern detector active, idle timer running
+- **WAITING** — Prompt detected (via PatternDetector), awaiting user input/dismiss. Auto-recover fires if >=2 PTY data chunks arrive after autoRecoverSeconds
 - **IDLE** — Silence timeout reached, no activity for attentionTimeoutSeconds
+- **COMPLETE** — Task finished (running duration exceeded 30s threshold before going silent). Notifications sent
 - **DONE** — Process exited cleanly (code 0) or user killed
 - **FAILED** — Process exited with error, watchdog timeout, or spawn failure
 
@@ -107,14 +111,14 @@ INITIALIZING → STARTING → RUNNING → WAITING → IDLE → DONE
 
 **Layer 2: Regex Patterns** — Common prompt formats. Blacklist filters false positives (e.g., "Terminate batch job").
 
-**Layer 3: Silence Heuristic** — If incomplete line (no newline) ends with `?` or `:` and no output arrives within silenceTimeoutMs, infer prompt.
+**Layer 3: Silence Heuristic** — If incomplete line (no newline) ends with `?` or `:` and no output arrives within silenceTimeoutMs (3s default), infer prompt.
 
-All detection runs on ANSI-stripped PTY output (parallel stream, raw output untouched).
+All detection runs on ANSI-stripped PTY output (parallel stream, raw output untouched). A 5-second startup grace period suppresses pattern detection after first output.
 
 ### Inter-Module Communication
 
 Uses Node.js `EventEmitter`:
-- **Session** emits: `'state-change'`, `'data'`, `'error'`, `'exit'`, `'needs-attention'`, `'session-failed'`, `'session-done'`
+- **Session** emits: `'state-change'`, `'data'`, `'error'`, `'exit'`, `'needs-attention'`, `'attention-cleared'`, `'session-failed'`, `'session-done'`
 - **PatternDetector** emits: `'prompt-detected'`
 - No global variables, no direct coupling
 
@@ -133,6 +137,10 @@ Dependencies are injected into control handlers via a deps object.
 2. Debounce 500ms, ignore self-writes (within 500ms of last save)
 3. Read fresh, validate (must have `projects` array), apply changes
 4. `diffProjects()` computes added/removed/modified sessions, applies incrementally
+
+### Client Focus Tracking
+
+Dashboard sends `focus-change` messages when window gains/loses focus. Server suppresses toast notifications when any dashboard client is focused (`setNotifySuppressed`).
 
 ---
 
@@ -155,10 +163,11 @@ Sessions maintain a ring buffer (~100KB cap) of PTY output for dashboard reconne
 ### Timers & Cleanup
 
 Sessions use explicit setTimeout/setInterval with cleanup on state transitions:
-- **watchdog_timeout** (STARTING → FAILED if no output within `startingWatchdogSeconds`)
-- **silence_timeout** (RUNNING → IDLE after `attentionTimeoutSeconds` of no output)
+- **watchdog_timeout** (STARTING -> FAILED if no output within `startingWatchdogSeconds`)
+- **silence_timeout** (RUNNING -> IDLE or COMPLETE after `attentionTimeoutSeconds` of no output — COMPLETE if running duration >= 30s)
 - **escalation_timer** (WAITING state: repeated notifications every `waitingEscalationSeconds`)
-- **auto_recover_timer** (WAITING state: triggers `auto_recover` → RUNNING if ≥2 data chunks arrive after `autoRecoverSeconds`)
+- **auto_recover_timer** (WAITING state: triggers `auto_recover` -> RUNNING if >=2 data chunks arrive after `autoRecoverSeconds`)
+- **startup_grace** (5s window after first output where pattern detection is suppressed)
 
 All timers cleared on `destroy()` to prevent leaks.
 
@@ -239,7 +248,7 @@ Project uses manual testing and spike scripts. No Jest, Mocha, or similar.
 | Add WebSocket message | `control-handlers.js` (handler map) | backend.js (broadcastControl) |
 | Improve prompt detection | `patterns.js` (PatternDetector) | EXACT_MATCHES, REGEX_PATTERNS, silence heuristic |
 | Fix dashboard UI | `public/session-card.js`, `public/app.js` | xterm.js setup, session card lifecycle |
-| Add notification | `notify.js` (notify function) | BurntToast detection, msg fallback |
+| Add notification | `notify.js` (notify function) | BurntToast detection, msg fallback, category debounce |
 | Debug state transitions | `sessions.js` (transition guards) | GUARDS object, entry/exit hooks |
 | Hot-reload config | `config-store.js` | watchForChanges, save, load |
 | Tune auto-recovery | `sessions.js` (_resetAutoRecoverTimer) | autoRecoverSeconds, data chunk counting |
@@ -247,6 +256,8 @@ Project uses manual testing and spike scripts. No Jest, Mocha, or similar.
 | Add/modify themes | `public/theme.js` | THEMES object, terminal color mapping, CSS variable names |
 | CLI flags/options | `bin/glissa.js` | arg parsing, env bridge |
 | Build/bundling | `vite.config.js` | glissaBackendPlugin, Tailwind, aliases |
+| Guided tutorials | `public/guide.js`, `public/guide-tooltip.js` | registerGuide, step progression, tooltip positioning |
+| Release/publish | `scripts/release.js` | npm publish, git tag, GitHub release |
 
 ---
 
@@ -257,5 +268,6 @@ Project uses manual testing and spike scripts. No Jest, Mocha, or similar.
 - `shared/AGENTS.md` — Shared state constants
 - `bin/AGENTS.md` — CLI entry point documentation
 - `docs/AGENTS.md` — Publishing and testing guides
+- `scripts/AGENTS.md` — Release automation
 
 <!-- MANUAL: -->

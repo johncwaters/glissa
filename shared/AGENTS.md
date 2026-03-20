@@ -1,5 +1,5 @@
 <!-- Parent: ../AGENTS.md -->
-<!-- Generated: 2026-03-15 -->
+<!-- Generated: 2026-03-15 | Updated: 2026-03-20 -->
 
 # shared/ — Shared State Constants
 
@@ -11,7 +11,7 @@ Single source of truth for session state definitions used by both server (Common
 
 | File | Description |
 |------|-------------|
-| `states.js` | CommonJS format — `require('./shared/states')` on server. Exports `STATES`, `BADGE_LABELS`, `KILLABLE_STATES`, `RESTARTABLE_STATES`, `DISMISSABLE_STATES` |
+| `states.js` | CommonJS format — `require('./shared/states')` on server. Exports `STATES`, `BADGE_LABELS`, `KILLABLE_STATES`, `RESTARTABLE_STATES` |
 | `states.esm.js` | ESM format — imported in browser via Vite alias (`/shared/states.mjs`). Identical constants as named exports |
 
 ## For AI Agents
@@ -30,17 +30,16 @@ The files are intentionally duplicated rather than auto-generated because:
 | File | Consumer | Import Path |
 |------|----------|-------------|
 | `states.js` | `sessions.js`, `backend.js` (server) | `require('./shared/states')` |
-| `states.esm.js` | `session-card.js` (browser) | `import { STATES } from '/shared/states.mjs'` via Vite alias in `vite.config.js` |
+| `states.esm.js` | `session-card.js`, `app.js` (browser) | `import { STATES } from '/shared/states.mjs'` via Vite alias in `vite.config.js` |
 | `states.js` | `backend.js` mountDevRoutes | Dynamically served as ESM at `GET /shared/states.mjs` (production without dist/) |
 
 ### State Constants
 
 ```javascript
-STATES: { INITIALIZING, STARTING, RUNNING, WAITING, IDLE, DONE, FAILED }
+STATES: { INITIALIZING, STARTING, RUNNING, WAITING, IDLE, COMPLETE, DONE, FAILED }
 BADGE_LABELS: { [state]: 'Human-readable label' }
-KILLABLE_STATES: [RUNNING, WAITING, IDLE]
+KILLABLE_STATES: [RUNNING, WAITING, IDLE, COMPLETE]
 RESTARTABLE_STATES: [DONE, FAILED]
-DISMISSABLE_STATES: [WAITING]
 ```
 
 ### Testing Requirements
