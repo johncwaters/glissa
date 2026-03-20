@@ -71,7 +71,9 @@ const GUARDS = {
 // Data handlers keyed by state — dispatched on each PTY data event
 const DATA_HANDLERS = {
   [STATES.RUNNING](session, data) {
-    session.patternDetector.feed(data);
+    if (!session._startupGraceActive) {
+      session.patternDetector.feed(data);
+    }
     session._resetIdleTimer();
   },
   [STATES.IDLE](session, data) {
@@ -167,6 +169,8 @@ class Session extends EventEmitter {
     this._runningStartedAt = null;
     this._completeThresholdMs = 30000;
     this._receivedFirstOutput = false;
+    this._startupGraceActive = false;
+    this._startupGraceTimer = null;
     this._outputBuffer = [];       // ring buffer of recent PTY chunks
     this._outputBufferSize = 0;
     this._outputBufferMax = 100000; // ~100KB replay cap
@@ -260,6 +264,7 @@ class Session extends EventEmitter {
     this._outputBufferSize = 0;
     this._clearWatchdog();
     this._clearIdleTimer();
+    this._clearStartupGrace();
     this.patternDetector.reset();
 
     const env = this._buildSpawnEnv();
@@ -313,6 +318,7 @@ class Session extends EventEmitter {
     if (this.state === STATES.STARTING && !this._receivedFirstOutput) {
       this._receivedFirstOutput = true;
       this._clearWatchdog();
+      this._startStartupGrace();
       this.transition('first_output');
     }
 
@@ -334,6 +340,7 @@ class Session extends EventEmitter {
   _handlePtyExit(exitCode, signal) {
     this._clearWatchdog();
     this._clearIdleTimer();
+    this._clearStartupGrace();
     this.patternDetector.reset();
     this.ptyProcess = null;
 
@@ -467,6 +474,7 @@ class Session extends EventEmitter {
       this._escalationTimer = null;
     }
     this._clearAutoRecoverTimer();
+    this._clearStartupGrace();
     this.kill();
     this.removeAllListeners();
     if (this.patternDetector) {
@@ -476,6 +484,23 @@ class Session extends EventEmitter {
   }
 
   // -- Private timer helpers --
+
+  _startStartupGrace() {
+    this._clearStartupGrace();
+    this._startupGraceActive = true;
+    this._startupGraceTimer = setTimeout(() => {
+      this._startupGraceTimer = null;
+      this._startupGraceActive = false;
+    }, 5000);
+  }
+
+  _clearStartupGrace() {
+    this._startupGraceActive = false;
+    if (this._startupGraceTimer !== null) {
+      clearTimeout(this._startupGraceTimer);
+      this._startupGraceTimer = null;
+    }
+  }
 
   _clearWatchdog() {
     if (this._watchdogTimer !== null) {
