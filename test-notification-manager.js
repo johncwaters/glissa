@@ -1,6 +1,6 @@
 'use strict';
 
-const { EventEmitter } = require('events');
+const { EventEmitter } = require('node:events');
 const { NotificationManager } = require('./notification-manager');
 const { NOTIFICATION_STATES: NS } = require('./shared/notification-states');
 
@@ -214,165 +214,152 @@ console.log('\n--- Unit Tests ---');
 
 console.log('\n--- Async Tests ---');
 
-function runAsyncTests() {
-  return new Promise((resolve) => {
-    let asyncPassed = 0;
-    let asyncFailed = 0;
+const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-    function assertAsync(label, actual, expected) {
-      if (actual === expected) {
-        console.log(`  PASS  ${label}`);
-        asyncPassed++;
-      } else {
-        console.error(`  FAIL  ${label}`);
-        console.error(`        expected: ${JSON.stringify(expected)}`);
-        console.error(`        got:      ${JSON.stringify(actual)}`);
-        asyncFailed++;
-      }
+async function runAsyncTests() {
+  let asyncPassed = 0;
+  let asyncFailed = 0;
+
+  const assertAsync = (label, actual, expected) => {
+    if (actual === expected) {
+      console.log(`  PASS  ${label}`);
+      asyncPassed++;
+    } else {
+      console.error(`  FAIL  ${label}`);
+      console.error(`        expected: ${JSON.stringify(expected)}`);
+      console.error(`        got:      ${JSON.stringify(actual)}`);
+      asyncFailed++;
     }
+  };
 
-    // Test: escalation fires for 'waiting' category
-    const nm1 = new NotificationManager({ escalationIntervalMs: 40, debounceMs: 0 });
-    const calls1 = [];
-    nm1.registerChannel('mock', (_name, _cat, _msg, ctx) => calls1.push({ ctx }));
-    nm1.trigger('s1', 'waiting', 'needs input');
+  // Test: escalation fires for 'waiting' category
+  const nm1 = new NotificationManager({ escalationIntervalMs: 40, debounceMs: 0 });
+  const calls1 = [];
+  nm1.registerChannel('mock', (_name, _cat, _msg, ctx) => calls1.push({ ctx }));
+  nm1.trigger('s1', 'waiting', 'needs input');
 
-    setTimeout(() => {
-      console.log('\nEscalation fires for waiting:');
-      assertAsync('escalated to ESCALATED', nm1.getNotificationState('s1'), NS.ESCALATED);
-      assertAsync('channel called twice (initial + escalation)', calls1.length, 2);
-      assertAsync('escalation count is 1', calls1[1].ctx.escalationCount, 1);
-      nm1.destroy();
+  await delay(60);
+  console.log('\nEscalation fires for waiting:');
+  assertAsync('escalated to ESCALATED', nm1.getNotificationState('s1'), NS.ESCALATED);
+  assertAsync('channel called twice (initial + escalation)', calls1.length, 2);
+  assertAsync('escalation count is 1', calls1[1].ctx.escalationCount, 1);
+  nm1.destroy();
 
-      // Test: COMPLETE does NOT escalate
-      const nm2 = new NotificationManager({ escalationIntervalMs: 30, debounceMs: 0 });
-      const calls2 = [];
-      nm2.registerChannel('mock', () => calls2.push(1));
-      nm2.trigger('s1', 'complete', 'finished');
+  // Test: COMPLETE does NOT escalate
+  const nm2 = new NotificationManager({ escalationIntervalMs: 30, debounceMs: 0 });
+  const calls2 = [];
+  nm2.registerChannel('mock', () => calls2.push(1));
+  nm2.trigger('s1', 'complete', 'finished');
 
-      setTimeout(() => {
-        console.log('\nCOMPLETE does NOT escalate after interval:');
-        assertAsync('still DELIVERED (no escalation)', nm2.getNotificationState('s1'), NS.DELIVERED);
-        assertAsync('channel still called once', calls2.length, 1);
-        nm2.destroy();
+  await delay(60);
+  console.log('\nCOMPLETE does NOT escalate after interval:');
+  assertAsync('still DELIVERED (no escalation)', nm2.getNotificationState('s1'), NS.DELIVERED);
+  assertAsync('channel still called once', calls2.length, 1);
+  nm2.destroy();
 
-        // Test: ping-pong cycle (DELIVERED -> ESCALATED -> DELIVERED -> ESCALATED)
-        const nm3 = new NotificationManager({ escalationIntervalMs: 25, debounceMs: 0 });
-        const calls3 = [];
-        nm3.registerChannel('mock', (_name, _cat, _msg, ctx) => calls3.push(ctx.escalationCount));
-        nm3.trigger('s1', 'waiting', 'needs input');
+  // Test: ping-pong cycle (DELIVERED -> ESCALATED -> DELIVERED -> ESCALATED)
+  const nm3 = new NotificationManager({ escalationIntervalMs: 25, debounceMs: 0 });
+  const calls3 = [];
+  nm3.registerChannel('mock', (_name, _cat, _msg, ctx) => calls3.push(ctx.escalationCount));
+  nm3.trigger('s1', 'waiting', 'needs input');
 
-        setTimeout(() => {
-          console.log('\nPing-pong escalation cycle:');
-          // Ping-pong: DELIVERED(0) -> ESCALATED(1) -> DELIVERED(1) -> ESCALATED(2) -> ...
-          // Count increments only on ESCALATED entry; DELIVERED re-entry delivers at same count
-          assertAsync('4+ channel calls (ping-pong cycle)', calls3.length >= 4, true);
-          assertAsync('first call escalationCount=0', calls3[0], 0);
-          assertAsync('second call (ESCALATED) count=1', calls3[1], 1);
-          assertAsync('third call (DELIVERED re-entry) count=1', calls3[2], 1);
-          assertAsync('fourth call (ESCALATED) count=2', calls3[3], 2);
-          nm3.destroy();
+  await delay(100);
+  console.log('\nPing-pong escalation cycle:');
+  assertAsync('4+ channel calls (ping-pong cycle)', calls3.length >= 4, true);
+  assertAsync('first call escalationCount=0', calls3[0], 0);
+  assertAsync('second call (ESCALATED) count=1', calls3[1], 1);
+  assertAsync('third call (DELIVERED re-entry) count=1', calls3[2], 1);
+  assertAsync('fourth call (ESCALATED) count=2', calls3[3], 2);
+  nm3.destroy();
 
-          // Test: acknowledge during escalation clears timers
-          const nm4 = new NotificationManager({ escalationIntervalMs: 40, debounceMs: 0 });
-          const calls4 = [];
-          nm4.registerChannel('mock', () => calls4.push(1));
-          nm4.trigger('s1', 'waiting', 'needs input');
+  // Test: acknowledge during escalation clears timers
+  const nm4 = new NotificationManager({ escalationIntervalMs: 40, debounceMs: 0 });
+  const calls4 = [];
+  nm4.registerChannel('mock', () => calls4.push(1));
+  nm4.trigger('s1', 'waiting', 'needs input');
 
-          setTimeout(() => {
-            const countBeforeAck = calls4.length;
-            nm4.acknowledge('s1');
-            assertAsync('acknowledged', nm4.getNotificationState('s1'), NS.IDLE);
+  await delay(50);
+  const countBeforeAck = calls4.length;
+  nm4.acknowledge('s1');
+  assertAsync('acknowledged', nm4.getNotificationState('s1'), NS.IDLE);
 
-            setTimeout(() => {
-              console.log('\nAcknowledge stops escalation:');
-              assertAsync('no further calls after ack', calls4.length, countBeforeAck);
-              nm4.destroy();
+  await delay(60);
+  console.log('\nAcknowledge stops escalation:');
+  assertAsync('no further calls after ack', calls4.length, countBeforeAck);
+  nm4.destroy();
 
-              // Test: focus change during DELIVERED suppresses next trigger but not current
-              const nm5 = new NotificationManager({ escalationIntervalMs: 5000, debounceMs: 0 });
-              const calls5 = [];
-              nm5.registerChannel('mock', () => calls5.push(1));
-              nm5.trigger('s1', 'waiting', 'needs input');
-              console.log('\nFocus change during DELIVERED:');
-              assertAsync('delivered (1 call)', calls5.length, 1);
-              nm5.setFocusSuppressed(true);
-              nm5.acknowledge('s1');
-              nm5.trigger('s2', 'waiting', 'other session');
-              assertAsync('second trigger suppressed', calls5.length, 1);
-              assertAsync('s2 is IDLE (suppressed)', nm5.getNotificationState('s2'), NS.IDLE);
-              nm5.destroy();
+  // Test: focus change during DELIVERED suppresses next trigger but not current
+  const nm5 = new NotificationManager({ escalationIntervalMs: 5000, debounceMs: 0 });
+  const calls5 = [];
+  nm5.registerChannel('mock', () => calls5.push(1));
+  nm5.trigger('s1', 'waiting', 'needs input');
+  console.log('\nFocus change during DELIVERED:');
+  assertAsync('delivered (1 call)', calls5.length, 1);
+  nm5.setFocusSuppressed(true);
+  nm5.acknowledge('s1');
+  nm5.trigger('s2', 'waiting', 'other session');
+  assertAsync('second trigger suppressed', calls5.length, 1);
+  assertAsync('s2 is IDLE (suppressed)', nm5.getNotificationState('s2'), NS.IDLE);
+  nm5.destroy();
 
-              // Integration: mock Session emits state-change events
-              console.log('\nIntegration: mock Session state-change events:');
-              const nm6 = new NotificationManager({ escalationIntervalMs: 5000, debounceMs: 0 });
-              const calls6 = [];
-              nm6.registerChannel('mock', (name, cat) => calls6.push({ name, cat }));
+  // Integration: mock Session emits state-change events
+  console.log('\nIntegration: mock Session state-change events:');
+  const nm6 = new NotificationManager({ escalationIntervalMs: 5000, debounceMs: 0 });
+  const calls6 = [];
+  nm6.registerChannel('mock', (name, cat) => calls6.push({ name, cat }));
 
-              const mockSession = new EventEmitter();
-              mockSession.name = 'test-session';
+  const mockSession = new EventEmitter();
+  mockSession.name = 'test-session';
 
-              // Wire like backend.js does
-              const STATES = require('./shared/states').STATES;
-              mockSession.on('state-change', ({ from, to }) => {
-                if (to === STATES.WAITING) {
-                  nm6.trigger('test-session', 'waiting', `test-session needs your input`);
-                } else if (to === STATES.COMPLETE) {
-                  nm6.trigger('test-session', 'complete', `test-session finished working`);
-                } else if (to === STATES.FAILED) {
-                  nm6.trigger('test-session', 'failed', `test-session failed`);
-                }
-                if (from === STATES.WAITING || from === STATES.COMPLETE || from === STATES.FAILED) {
-                  nm6.acknowledge('test-session');
-                }
-              });
-
-              // Simulate: RUNNING -> WAITING -> RUNNING -> DONE
-              mockSession.emit('state-change', { from: STATES.RUNNING, to: STATES.WAITING });
-              assertAsync('WAITING triggers notification', calls6.length, 1);
-              assertAsync('category is waiting', calls6[0].cat, 'waiting');
-              assertAsync('state is DELIVERED', nm6.getNotificationState('test-session'), NS.DELIVERED);
-
-              mockSession.emit('state-change', { from: STATES.WAITING, to: STATES.RUNNING });
-              assertAsync('leaving WAITING acknowledges', nm6.getNotificationState('test-session'), NS.IDLE);
-
-              mockSession.emit('state-change', { from: STATES.RUNNING, to: STATES.FAILED });
-              assertAsync('FAILED triggers notification', calls6.length, 2);
-              assertAsync('FAILED category', calls6[1].cat, 'failed');
-              nm6.destroy();
-
-              // Force-restart scenario
-              console.log('\nForce-restart scenario:');
-              const nm7 = new NotificationManager({ escalationIntervalMs: 30, debounceMs: 0 });
-              const calls7 = [];
-              nm7.registerChannel('mock', () => calls7.push(1));
-              nm7.trigger('s1', 'waiting', 'needs input');
-
-              setTimeout(() => {
-                const preAckCount = calls7.length;
-                // Simulate force-restart: WAITING -> DONE (user_kill)
-                nm7.acknowledge('s1');
-                assertAsync('acknowledged after force-restart', nm7.getNotificationState('s1'), NS.IDLE);
-
-                setTimeout(() => {
-                  assertAsync('no further escalation after force-restart ack', calls7.length, preAckCount);
-                  nm7.destroy();
-
-                  // Print results
-                  passed += asyncPassed;
-                  failed += asyncFailed;
-                  console.log(`\n${passed} passed, ${failed} failed`);
-                  resolve(failed > 0 ? 1 : 0);
-                }, 60);
-              }, 50);
-            }, 60);
-          }, 50);
-        }, 100);
-      }, 60);
-    }, 60);
+  const STATES = require('./shared/states').STATES;
+  mockSession.on('state-change', ({ from, to }) => {
+    if (to === STATES.WAITING) {
+      nm6.trigger('test-session', 'waiting', `test-session needs your input`);
+    } else if (to === STATES.COMPLETE) {
+      nm6.trigger('test-session', 'complete', `test-session finished working`);
+    } else if (to === STATES.FAILED) {
+      nm6.trigger('test-session', 'failed', `test-session failed`);
+    }
+    if (from === STATES.WAITING || from === STATES.COMPLETE || from === STATES.FAILED) {
+      nm6.acknowledge('test-session');
+    }
   });
+
+  mockSession.emit('state-change', { from: STATES.RUNNING, to: STATES.WAITING });
+  assertAsync('WAITING triggers notification', calls6.length, 1);
+  assertAsync('category is waiting', calls6[0].cat, 'waiting');
+  assertAsync('state is DELIVERED', nm6.getNotificationState('test-session'), NS.DELIVERED);
+
+  mockSession.emit('state-change', { from: STATES.WAITING, to: STATES.RUNNING });
+  assertAsync('leaving WAITING acknowledges', nm6.getNotificationState('test-session'), NS.IDLE);
+
+  mockSession.emit('state-change', { from: STATES.RUNNING, to: STATES.FAILED });
+  assertAsync('FAILED triggers notification', calls6.length, 2);
+  assertAsync('FAILED category', calls6[1].cat, 'failed');
+  nm6.destroy();
+
+  // Force-restart scenario
+  console.log('\nForce-restart scenario:');
+  const nm7 = new NotificationManager({ escalationIntervalMs: 30, debounceMs: 0 });
+  const calls7 = [];
+  nm7.registerChannel('mock', () => calls7.push(1));
+  nm7.trigger('s1', 'waiting', 'needs input');
+
+  await delay(50);
+  const preAckCount = calls7.length;
+  nm7.acknowledge('s1');
+  assertAsync('acknowledged after force-restart', nm7.getNotificationState('s1'), NS.IDLE);
+
+  await delay(60);
+  assertAsync('no further escalation after force-restart ack', calls7.length, preAckCount);
+  nm7.destroy();
+
+  passed += asyncPassed;
+  failed += asyncFailed;
+  console.log(`\n${passed} passed, ${failed} failed`);
+  return failed > 0 ? 1 : 0;
 }
 
-runAsyncTests().then((exitCode) => {
+runAsyncTests().then((exitCode) => { // NOSONAR — CJS project cannot use top-level await
   process.exit(exitCode);
 });

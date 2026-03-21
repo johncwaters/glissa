@@ -1,19 +1,26 @@
 'use strict';
 
-const { EventEmitter } = require('events');
+const { EventEmitter } = require('node:events');
 
 // ---------------------------------------------------------------------------
 // ANSI stripping
 // ---------------------------------------------------------------------------
 
+const RE_CSI     = /\u001b\[[0-9;]*[a-zA-Z]/g;            // NOSONAR — ANSI stripping requires control chars
+const RE_OSC_BEL = /\u001b\][^\u0007]*\u0007/g;           // NOSONAR
+const RE_OSC_ST  = /\u001b\][^\u001b]*\u001b\\/g;         // NOSONAR
+const RE_CHARSET = /\u001b[()][A-Z0-9]/g;                 // NOSONAR
+const RE_KEYPAD  = /\u001b[>=<]/g;                         // NOSONAR
+const RE_CTRL    = /[\u0000-\u0009\u000b-\u001f]/g;       // NOSONAR
+
 function stripAnsi(str) {
   return str
-    .replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '')      // CSI sequences (colors, cursor)
-    .replace(/\x1b\][^\x07]*\x07/g, '')           // OSC sequences (titles) with BEL
-    .replace(/\x1b\][^\x1b]*\x1b\\/g, '')         // OSC with ST terminator
-    .replace(/\x1b[()][A-Z0-9]/g, '')              // Charset sequences
-    .replace(/\x1b[>=<]/g, '')                     // Keypad/cursor modes
-    .replace(/[\x00-\x09\x0b-\x1f]/g, '');        // Control chars except \n
+    .replaceAll(RE_CSI, '')
+    .replaceAll(RE_OSC_BEL, '')
+    .replaceAll(RE_OSC_ST, '')
+    .replaceAll(RE_CHARSET, '')
+    .replaceAll(RE_KEYPAD, '')
+    .replaceAll(RE_CTRL, '');
 }
 
 // ---------------------------------------------------------------------------
@@ -124,12 +131,12 @@ class PatternDetector extends EventEmitter {
     }
 
     // Layer 2 — regex (skip if line matches blacklist)
-    const blacklisted = LAYER2_BLACKLIST.some(bl => line.includes(bl));
-    if (!blacklisted) {
-      for (const re of REGEX_PATTERNS) {
-        if (re.test(line)) {
-          return { layer: 2, pattern: re.toString(), line };
-        }
+    const isBlacklisted = LAYER2_BLACKLIST.some(bl => line.includes(bl));
+    if (isBlacklisted) return null;
+
+    for (const re of REGEX_PATTERNS) {
+      if (re.test(line)) {
+        return { layer: 2, pattern: re.toString(), line };
       }
     }
 
@@ -150,7 +157,7 @@ class PatternDetector extends EventEmitter {
       if (/^\s{2,}/.test(this._pendingLine) && line.length < 30) return; // indented short line (menu item)
 
       // Layer 3 — line ends with '?' or ':'
-      const last = line[line.length - 1];
+      const last = line.at(-1);
       if (last === '?' || last === ':') {
         this.emit('prompt-detected', {
           layer: 3,
@@ -233,7 +240,7 @@ if (require.main === module) {
   console.log('\nPatternDetector:');
 
   const makeDetector = (ms) => {
-    return new PatternDetector(ms !== undefined ? ms : 3000);
+    return new PatternDetector(ms === undefined ? 3000 : ms);
   };
 
   // Layer 1 — exact match
@@ -320,104 +327,96 @@ if (require.main === module) {
   }
 
   // Layer 3 — silence heuristic fires after timeout
-  {
-    const d = makeDetector(50); // 50 ms for fast test
+  const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+  const runLayer3Tests = async () => {
+    // Layer 3 — fires after silence
+    const d = makeDetector(50);
     let det = null;
     d.on('prompt-detected', (e) => { det = e; });
-    // Feed incomplete line (no \n) ending with '?'
     d.feed('Something unexpected?');
-    // Expect no immediate detection
     assert('layer 3 no immediate fire', det, null);
 
-    // Wait for silence timeout then check
-    setTimeout(() => {
-      assert('layer 3 fires after silence — layer',   det?.layer,   3);
-      assert('layer 3 fires after silence — pattern', det?.pattern, 'silence_heuristic');
+    await delay(100);
+    assert('layer 3 fires after silence — layer',   det?.layer,   3);
+    assert('layer 3 fires after silence — pattern', det?.pattern, 'silence_heuristic');
 
-      // Layer 3 — colon variant
-      const d2 = makeDetector(50);
-      let det2 = null;
-      d2.on('prompt-detected', (e) => { det2 = e; });
-      d2.feed('Enter your choice:');
-      setTimeout(() => {
-        assert('layer 3 colon — layer', det2?.layer, 3);
+    // Layer 3 — colon variant
+    const d2 = makeDetector(50);
+    let det2 = null;
+    d2.on('prompt-detected', (e) => { det2 = e; });
+    d2.feed('Enter your choice:');
+    await delay(100);
+    assert('layer 3 colon — layer', det2?.layer, 3);
 
-        // Layer 3 — does NOT fire when line ends with plain word
-        const d3 = makeDetector(50);
-        let det3 = null;
-        d3.on('prompt-detected', (e) => { det3 = e; });
-        d3.feed('Build succeeded.');
-        setTimeout(() => {
-          assert('layer 3 no fire for plain line', det3, null);
+    // Layer 3 — does NOT fire when line ends with plain word
+    const d3 = makeDetector(50);
+    let det3 = null;
+    d3.on('prompt-detected', (e) => { det3 = e; });
+    d3.feed('Build succeeded.');
+    await delay(100);
+    assert('layer 3 no fire for plain line', det3, null);
 
-          // reset() clears pending timer
-          const d4 = makeDetector(50);
-          let det4 = null;
-          d4.on('prompt-detected', (e) => { det4 = e; });
-          d4.feed('Something unexpected?');
-          d4.reset();
-          setTimeout(() => {
-            assert('reset() suppresses layer 3', det4, null);
+    // reset() clears pending timer
+    const d4 = makeDetector(50);
+    let det4 = null;
+    d4.on('prompt-detected', (e) => { det4 = e; });
+    d4.feed('Something unexpected?');
+    d4.reset();
+    await delay(100);
+    assert('reset() suppresses layer 3', det4, null);
 
-            // Layer 3 filter — short fragment should NOT fire
-            const d5 = makeDetector(50);
-            let det5 = null;
-            d5.on('prompt-detected', (e) => { det5 = e; });
-            d5.feed('>:');
-            setTimeout(() => {
-              assert('layer 3 filter: short fragment ">:" does not fire', det5, null);
+    // Layer 3 filter — short fragment should NOT fire
+    const d5 = makeDetector(50);
+    let det5 = null;
+    d5.on('prompt-detected', (e) => { det5 = e; });
+    d5.feed('>:');
+    await delay(100);
+    assert('layer 3 filter: short fragment ">:" does not fire', det5, null);
 
-              // Layer 3 filter — short "?" alone should NOT fire
-              const d6 = makeDetector(50);
-              let det6 = null;
-              d6.on('prompt-detected', (e) => { det6 = e; });
-              d6.feed('?');
-              setTimeout(() => {
-                assert('layer 3 filter: lone "?" does not fire', det6, null);
+    // Layer 3 filter — short "?" alone should NOT fire
+    const d6 = makeDetector(50);
+    let det6 = null;
+    d6.on('prompt-detected', (e) => { det6 = e; });
+    d6.feed('?');
+    await delay(100);
+    assert('layer 3 filter: lone "?" does not fire', det6, null);
 
-                // Layer 3 filter — trailing URL scheme should NOT fire
-                const d7 = makeDetector(50);
-                let det7 = null;
-                d7.on('prompt-detected', (e) => { det7 = e; });
-                d7.feed('Visit https://');
-                setTimeout(() => {
-                  assert('layer 3 filter: trailing "://" does not fire', det7, null);
+    // Layer 3 filter — trailing URL scheme should NOT fire
+    const d7 = makeDetector(50);
+    let det7 = null;
+    d7.on('prompt-detected', (e) => { det7 = e; });
+    d7.feed('Visit https://');
+    await delay(100);
+    assert('layer 3 filter: trailing "://" does not fire', det7, null);
 
-                  // Layer 3 filter — indented short menu item should NOT fire
-                  const d8 = makeDetector(50);
-                  let det8 = null;
-                  d8.on('prompt-detected', (e) => { det8 = e; });
-                  d8.feed('  /help    Show help:');
-                  setTimeout(() => {
-                    assert('layer 3 filter: indented short menu item does not fire', det8, null);
+    // Layer 3 filter — indented short menu item should NOT fire
+    const d8 = makeDetector(50);
+    let det8 = null;
+    d8.on('prompt-detected', (e) => { det8 = e; });
+    d8.feed('  /help    Show help:');
+    await delay(100);
+    assert('layer 3 filter: indented short menu item does not fire', det8, null);
 
-                    // Layer 3 filter — indented long prompt SHOULD fire
-                    const d9 = makeDetector(50);
-                    let det9 = null;
-                    d9.on('prompt-detected', (e) => { det9 = e; });
-                    d9.feed('  Please enter the full path to your configuration file:');
-                    setTimeout(() => {
-                      assert('layer 3 filter: indented long prompt fires — layer', det9?.layer, 3);
+    // Layer 3 filter — indented long prompt SHOULD fire
+    const d9 = makeDetector(50);
+    let det9 = null;
+    d9.on('prompt-detected', (e) => { det9 = e; });
+    d9.feed('  Please enter the full path to your configuration file:');
+    await delay(100);
+    assert('layer 3 filter: indented long prompt fires — layer', det9?.layer, 3);
 
-                      // Layer 3 — legitimate prompt "Enter your API key:" SHOULD fire
-                      const d10 = makeDetector(50);
-                      let det10 = null;
-                      d10.on('prompt-detected', (e) => { det10 = e; });
-                      d10.feed('Enter your API key:');
-                      setTimeout(() => {
-                        assert('layer 3 filter: "Enter your API key:" fires — layer', det10?.layer, 3);
+    // Layer 3 — legitimate prompt "Enter your API key:" SHOULD fire
+    const d10 = makeDetector(50);
+    let det10 = null;
+    d10.on('prompt-detected', (e) => { det10 = e; });
+    d10.feed('Enter your API key:');
+    await delay(100);
+    assert('layer 3 filter: "Enter your API key:" fires — layer', det10?.layer, 3);
 
-                        console.log(`\n${passed} passed, ${failed} failed`);
-                        process.exit(failed > 0 ? 1 : 0);
-                      }, 100);
-                    }, 100);
-                  }, 100);
-                }, 100);
-              }, 100);
-            }, 100);
-          }, 100);
-        }, 100);
-      }, 100);
-    }, 100);
-  }
+    console.log(`\n${passed} passed, ${failed} failed`);
+    process.exit(failed > 0 ? 1 : 0);
+  };
+
+  runLayer3Tests();
 }

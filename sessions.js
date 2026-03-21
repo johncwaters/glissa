@@ -1,7 +1,7 @@
-const fs = require('fs');
+const fs = require('node:fs');
 const pty = require('node-pty');
-const { EventEmitter } = require('events');
-const { execSync } = require('child_process');
+const { EventEmitter } = require('node:events');
+const { execSync } = require('node:child_process');
 const { PatternDetector } = require('./patterns');
 const { STATES } = require('./shared/states');
 
@@ -305,7 +305,7 @@ class Session extends EventEmitter {
   }
 
   _buildSpawnEnv() {
-    const env = Object.assign({}, process.env);
+    const env = { ...process.env };
     delete env.CLAUDECODE;
     delete env.CLAUDE_CODE_SSE_PORT;
     delete env.CLAUDE_CODE_ENTRYPOINT;

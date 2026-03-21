@@ -1,6 +1,6 @@
 'use strict';
 
-const http = require('http');
+const http = require('node:http');
 const { createBackend } = require('./backend');
 
 const server = http.createServer();

@@ -192,55 +192,56 @@ function _performExpand(name, ui) {
 
 // ── Maximize mode ───────────────────────────────────────────
 
+function _applyMaximized(ui, sessionName) {
+  ui.card.classList.add('maximized');
+  ui.btnMaximize.textContent = 'Minimize';
+  ui.btnMaximize.title = 'Minimize all sessions';
+  _maximizedSession = sessionName;
+  requestAnimationFrame(() => ui.fitAddon.fit());
+}
+
+function _swapMaximized(sessionName) {
+  const oldUi = sessionUIs.get(_maximizedSession);
+  const newUi = sessionUIs.get(sessionName);
+  if (!newUi) return;
+
+  if (oldUi && !oldUi.card.classList.contains('minimized')) {
+    oldUi.card.classList.remove('maximized');
+    oldUi.btnMaximize.textContent = 'Maximize';
+    oldUi.btnMaximize.title = 'Maximize this session';
+    _performMinimize(_maximizedSession, oldUi);
+    _preMaximizeSessions.add(_maximizedSession);
+  }
+
+  if (newUi.card.classList.contains('minimized')) {
+    _performExpand(sessionName, newUi);
+    _preMaximizeSessions.delete(sessionName);
+  }
+
+  _applyMaximized(newUi, sessionName);
+}
+
 function toggleMaximize(sessionName) {
-  // Toggle off if already maximized on this session
   if (_maximizedSession === sessionName) {
     exitMaximizeMode();
     return;
   }
 
-  // Swap: already maximized on a different session
   if (_maximizedSession) {
-    const oldUi = sessionUIs.get(_maximizedSession);
-    const newUi = sessionUIs.get(sessionName);
-    if (!newUi) return;
-
-    // Minimize old maximized session
-    if (oldUi && !oldUi.card.classList.contains('minimized')) {
-      oldUi.card.classList.remove('maximized');
-      oldUi.btnMaximize.textContent = 'Maximize';
-      oldUi.btnMaximize.title = 'Maximize this session';
-      _performMinimize(_maximizedSession, oldUi);
-      _preMaximizeSessions.add(_maximizedSession);
-    }
-
-    // Expand new session
-    if (newUi.card.classList.contains('minimized')) {
-      _performExpand(sessionName, newUi);
-      _preMaximizeSessions.delete(sessionName);
-    }
-
-    newUi.card.classList.add('maximized');
-    newUi.btnMaximize.textContent = 'Minimize';
-    newUi.btnMaximize.title = 'Minimize all sessions';
-    _maximizedSession = sessionName;
-    requestAnimationFrame(() => newUi.fitAddon.fit());
+    _swapMaximized(sessionName);
     return;
   }
 
-  // Enter maximize mode
   const ui = sessionUIs.get(sessionName);
   if (!ui) return;
 
   _maximizedSession = sessionName;
   _preMaximizeSessions.clear();
 
-  // Expand the target if it's currently minimized
   if (ui.card.classList.contains('minimized')) {
     _performExpand(sessionName, ui);
   }
 
-  // Minimize all other non-minimized sessions
   for (const [name, otherUi] of sessionUIs) {
     if (name === sessionName) continue;
     if (!otherUi.card.classList.contains('minimized')) {
@@ -249,10 +250,7 @@ function toggleMaximize(sessionName) {
     }
   }
 
-  ui.card.classList.add('maximized');
-  ui.btnMaximize.textContent = 'Minimize';
-  ui.btnMaximize.title = 'Minimize all sessions';
-  requestAnimationFrame(() => ui.fitAddon.fit());
+  _applyMaximized(ui, sessionName);
 }
 
 export function exitMaximizeMode() {
@@ -722,7 +720,7 @@ export function applyState(sessionName, state) {
   if (isEnding && wasActive) {
     // Glow flash (CSS animation)
     ui.card.classList.remove('completion-flash');
-    void ui.card.offsetWidth; // reflow to restart animation
+    ui.card.offsetWidth; // reflow to restart animation
     ui.card.classList.add('completion-flash');
     ui.card.addEventListener('animationend', () => ui.card.classList.remove('completion-flash'), { once: true });
 

@@ -4,8 +4,8 @@
 // Publishes to npm, pushes to GitHub, tags, and creates a release.
 // Usage: node scripts/release.js
 
-const { execSync } = require('child_process');
-const fs = require('fs');
+const { execSync } = require('node:child_process');
+const fs = require('node:fs');
 
 function run(cmd, opts = {}) {
   console.log(`  $ ${cmd}`);
@@ -76,8 +76,8 @@ run(`git push origin ${TAG}`);
 if (hasCommand('gh')) {
   console.log('\n==> Creating GitHub release...');
   const changelog = fs.readFileSync('CHANGELOG.md', 'utf8');
-  const versionEscaped = VERSION.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const pattern = new RegExp(`^## \\[${versionEscaped}\\].*$\\n([\\s\\S]*?)(?=^## \\[|$)`, 'm');
+  const versionEscaped = VERSION.replaceAll(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`);
+  const pattern = new RegExp(String.raw`^## \[${versionEscaped}\].*$\n([\s\S]*?)(?=^## \[|$)`, 'm');
   const match = changelog.match(pattern);
   const notes = match ? match[1].trim() : `Release ${TAG}`;
 

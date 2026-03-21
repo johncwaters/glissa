@@ -1,8 +1,8 @@
 'use strict';
 
-const fs = require('fs');
-const path = require('path');
-const os = require('os');
+const fs = require('node:fs');
+const path = require('node:path');
+const os = require('node:os');
 
 const DEFAULT_CONFIG = {
   port: 3000,
@@ -73,7 +73,7 @@ function createConfigStore() {
     mutatorFn(freshConfig);
     _lastSelfWriteTs = Date.now();
     try {
-      const tmpPath = configPath + '.tmp.' + process.pid;
+      const tmpPath = `${configPath}.tmp.${process.pid}`;
       fs.writeFileSync(tmpPath, JSON.stringify(freshConfig, null, 2), 'utf8');
       fs.renameSync(tmpPath, configPath);
     } catch (err) {
@@ -111,30 +111,33 @@ function createConfigStore() {
   /** Watch config.json for external changes (debounced, ignores self-writes). */
   function watchForChanges(callback) {
     let reloadTimer = null;
+
+    function handleConfigChange(err, data) {
+      if (err) {
+        console.warn('[config] Failed to read config.json:', err.code);
+        return;
+      }
+      let newConfig;
+      try {
+        newConfig = JSON.parse(data);
+      } catch (parseErr) {
+        console.warn('[config] Invalid JSON in config.json:', parseErr.message);
+        return;
+      }
+      if (!Array.isArray(newConfig.projects)) {
+        console.warn('[config] config.json missing "projects" array');
+        return;
+      }
+      callback(newConfig);
+      console.log('[config] Reloaded config.json');
+    }
+
     try {
       fs.watch(configPath, () => {
         clearTimeout(reloadTimer);
         reloadTimer = setTimeout(() => {
           if (Date.now() - _lastSelfWriteTs < 500) return;
-          fs.readFile(configPath, 'utf8', (err, data) => {
-            if (err) {
-              console.warn('[config] Failed to read config.json:', err.code);
-              return;
-            }
-            let newConfig;
-            try {
-              newConfig = JSON.parse(data);
-            } catch (parseErr) {
-              console.warn('[config] Invalid JSON in config.json:', parseErr.message);
-              return;
-            }
-            if (!Array.isArray(newConfig.projects)) {
-              console.warn('[config] config.json missing "projects" array');
-              return;
-            }
-            callback(newConfig);
-            console.log('[config] Reloaded config.json');
-          });
+          fs.readFile(configPath, 'utf8', handleConfigChange);
         }, 500);
       });
       console.log('[config] Watching config.json for changes');

@@ -1,7 +1,7 @@
 'use strict';
 
-const fs = require('fs');
-const path = require('path');
+const fs = require('node:fs');
+const path = require('node:path');
 const { TIMEOUT_KEYS } = require('./config-store');
 
 function scanRepoRoots(roots) {
@@ -136,7 +136,7 @@ function registerControlHandlers(controlWss, deps) {
         .filter(name => projectMap.has(name))
         .map(name => projectMap.get(name));
       for (const p of projectMap.values()) {
-        if (!cfg.projects.find(x => x.name === p.name)) {
+        if (!cfg.projects.some(x => x.name === p.name)) {
           cfg.projects.push(p);
         }
       }
@@ -162,7 +162,7 @@ function registerControlHandlers(controlWss, deps) {
       ws.send(JSON.stringify({
         type: 'settings-error',
         requestId: msg.requestId || null,
-        message: 'Invalid paths: ' + invalidPaths.join(', ')
+        message: `Invalid paths: ${invalidPaths.join(', ')}`
       }));
       return;
     }
@@ -172,7 +172,7 @@ function registerControlHandlers(controlWss, deps) {
         ws.send(JSON.stringify({
           type: 'settings-error',
           requestId: msg.requestId || null,
-          message: key + ' must be a positive number'
+          message: `${key} must be a positive number`
         }));
         return;
       }

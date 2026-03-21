@@ -54,6 +54,17 @@ function makeSession(project, cfg) {
  *   string  — absolute path to serve from
  * @returns {{ shutdown: () => void, port: number, app: import('express').Express }}
  */
+function isAllowedOrigin(req) {
+  const origin = req.headers.origin;
+  if (!origin) return true; // Non-browser clients (curl, ws CLI) have no Origin
+  try {
+    const { hostname } = new URL(origin);
+    return hostname === 'localhost' || hostname === '127.0.0.1';
+  } catch {
+    return false;
+  }
+}
+
 function createBackend(httpServer, options = {}) {
   const { staticDir = 'auto' } = options;
 
@@ -389,17 +400,6 @@ function createBackend(httpServer, options = {}) {
   // Node's 'upgrade' event fires for ALL listeners. We only handle paths
   // we own (/control, /terminals/*). Unrecognized paths are left alone so
   // other listeners (e.g. Vite HMR) can handle them.
-
-  function isAllowedOrigin(req) {
-    const origin = req.headers.origin;
-    if (!origin) return true; // Non-browser clients (curl, ws CLI) have no Origin
-    try {
-      const { hostname } = new URL(origin);
-      return hostname === 'localhost' || hostname === '127.0.0.1';
-    } catch {
-      return false;
-    }
-  }
 
   httpServer.on('upgrade', (req, socket, head) => {
     const { url } = req;
