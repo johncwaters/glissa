@@ -1,6 +1,6 @@
 {
   "name": "glissa",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Spawn and manage Claude Code sessions with a browser dashboard — Windows terminal manager with real-time xterm.js streaming",
   "type": "commonjs",
   "main": "server.js",
@@ -16,11 +16,14 @@
     "backend.js",
     "sessions.js",
     "notify.js",
+    "notification-manager.js",
+    "channels/toast.js",
     "patterns.js",
     "config-store.js",
     "control-handlers.js",
     "shared/states.js",
-    "shared/states.esm.js"
+    "shared/states.esm.js",
+    "shared/notification-states.js"
   ],
   "engines": {
     "node": ">=18"

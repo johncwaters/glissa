@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-03-21
+
+### Added
+
+- **NotificationManager**: Centralized notification system with state machine (IDLE→PENDING→DELIVERED→ESCALATED) replacing inline `notify()` calls in sessions.js.
+- **Channel architecture**: Pluggable notification channels via adapter pattern (`channels/toast.js` for BurntToast/msg fallback). Future channels (Slack, email) can be added without touching core logic.
+- **Input grace period**: Suppress false "needs input" prompt detections for a configurable window after user input (`inputGraceSeconds`, default 5s).
+- **Layer 3 pattern filters**: Reduce false positive prompt detections — skip short fragments, trailing URL schemes (`://`), and indented short menu items.
+- `rearmSilenceTimer()` on PatternDetector for retrying detection after grace period rejection without clearing pending line state.
+
+### Changed
+
+- Notification lifecycle (debounce, escalation, suppression) is now managed by NotificationManager in backend.js instead of being scattered across sessions.js and notify.js.
+- Biome lint scope expanded from `public/**` to `**` with exclusions for `dist/`, `node_modules/`, ESM files, and Vite config.
+- Disabled `noRedundantUseStrict` (CJS uses `'use strict'` intentionally) and `noControlCharactersInRegex` (ANSI stripping requires control chars) in biome.json.
+- Applied biome lint fixes: `&&` guard → optional chaining, `let` → `const` where appropriate, unused params prefixed with `_`.
+- `configStore.getSettings()` now exposes `inputGraceSeconds` and `notifyDebounceMs`.
+
+### Fixed
+
+- Escalation ping-pong no longer re-records category debounce, which could suppress notifications for other sessions.
+
+### Deprecated
+
+- `notify.js` — functions are now no-ops with one-time deprecation warnings. Use NotificationManager instead.
+
+### Removed
+
+- Unused imports in control-handlers.js (`makeSession`, `wireSessionEvents`, `closeSessionDataClients`).
+- `_escalationTimer` and `_destroying` flag from Session class (responsibility moved to NotificationManager).
+
+## [0.3.0] - 2026-03-19
+
+_Skipped in changelog — incremental fixes and version bump._
+
 ## [0.2.0] - 2026-03-17
 
 ### Added
@@ -60,5 +95,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Alert sounds for session attention events
 - CLI with `--port`, `--config`, `--help`, `--version` flags
 
+[0.4.0]: https://github.com/johncwaters/glissa/releases/tag/v0.4.0
+[0.3.0]: https://github.com/johncwaters/glissa/releases/tag/v0.3.0
 [0.2.0]: https://github.com/johncwaters/glissa/releases/tag/v0.2.0
 [0.1.0]: https://github.com/johncwaters/glissa/releases/tag/v0.1.0
