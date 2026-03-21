@@ -1,7 +1,13 @@
 {
   "$schema": "https://biomejs.dev/schemas/2.3.5/schema.json",
   "files": {
-    "includes": ["public/**"]
+    "includes": [
+      "**",
+      "!!**/dist",
+      "!!**/node_modules",
+      "!**/*.esm.js",
+      "!vite.config.js"
+    ]
   },
   "formatter": {
     "enabled": false
@@ -13,6 +19,10 @@
   },
   "linter": {
     "rules": {
+      "suspicious": {
+        "noRedundantUseStrict": "off",
+        "noControlCharactersInRegex": "off"
+      },
       "style": {
         "noDescendingSpecificity": "off"
       }

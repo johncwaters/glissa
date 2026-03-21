@@ -3,7 +3,6 @@ const pty = require('node-pty');
 const { EventEmitter } = require('events');
 const { execSync } = require('child_process');
 const { PatternDetector } = require('./patterns');
-const { notify } = require('./notify');
 const { STATES } = require('./shared/states');
 
 const KILL_POLL_INTERVAL_MS = 200;
@@ -28,6 +27,7 @@ const TRANSITIONS = Object.freeze({
     user_kill:        STATES.DONE
   },
   [STATES.WAITING]: {
+    user_input:       STATES.RUNNING,
     user_dismiss:     STATES.RUNNING,
     auto_recover:     STATES.RUNNING,
     user_kill:        STATES.DONE,
@@ -65,6 +65,20 @@ const GUARDS = {
   },
   user_restart(session) {
     return session.state === STATES.DONE || session.state === STATES.FAILED;
+  },
+  prompt_detected(session) {
+    if (session._lastUserInputAt === 0) return true;
+    const elapsed = Date.now() - session._lastUserInputAt;
+    if (elapsed < session._inputGraceMs) {
+      console.log(
+        `[session:${session.name}] prompt_detected suppressed (user input ${(elapsed / 1000).toFixed(1)}s ago)`
+      );
+      // Re-arm Layer 3 silence timer so it re-fires after silence timeout.
+      // Do NOT call reset() — that clears _pendingLine and kills re-detection.
+      session.patternDetector.rearmSilenceTimer();
+      return false;
+    }
+    return true;
   }
 };
 
@@ -108,26 +122,12 @@ const ENTRY_HOOKS = {
   },
   [STATES.COMPLETE](session) {
     session._runningStartedAt = null;
-    if (!session._destroying) {
-      notify('Glissa', `${session.name} finished working`, { category: 'complete' });
-    }
   },
   [STATES.WAITING](session) {
     session.emit('needs-attention', { name: session.name });
-    if (!session._destroying) {
-      notify('Glissa', `${session.name} needs your input`, { category: 'waiting' });
-      session._escalationTimer = setInterval(() => {
-        if (session.state === STATES.WAITING) {
-          notify('Glissa', `${session.name} needs your input`, { category: 'waiting' });
-        }
-      }, session.waitingEscalationMs);
-    }
   },
   [STATES.FAILED](session) {
     session.emit('session-failed', { name: session.name });
-    if (!session._destroying) {
-      notify('Glissa', `${session.name} failed`, { category: 'failed' });
-    }
   },
   [STATES.DONE](session) {
     session.emit('session-done', { name: session.name });
@@ -136,11 +136,8 @@ const ENTRY_HOOKS = {
 
 const EXIT_HOOKS = {
   [STATES.WAITING](session) {
+    session._lastUserInputAt = 0;
     session.emit('attention-cleared', { name: session.name });
-    if (session._escalationTimer !== null) {
-      clearInterval(session._escalationTimer);
-      session._escalationTimer = null;
-    }
     session._clearAutoRecoverTimer();
     session._autoRecoverDataCount = 0;
     if (session.patternDetector) {
@@ -150,7 +147,7 @@ const EXIT_HOOKS = {
 };
 
 class Session extends EventEmitter {
-  constructor({ name, path, startingWatchdogSeconds = 10, attentionTimeoutSeconds = 60, waitingEscalationSeconds = 300, autoRecoverSeconds = 3 }) {
+  constructor({ name, path, startingWatchdogSeconds = 10, attentionTimeoutSeconds = 60, waitingEscalationSeconds = 300, autoRecoverSeconds = 3, inputGraceSeconds = 5 }) {
     super();
     this.name = name;
     this.path = path;
@@ -163,7 +160,6 @@ class Session extends EventEmitter {
     this._autoRecoverMs = autoRecoverSeconds * 1000;
     this._watchdogTimer = null;
     this._idleTimer = null;
-    this._escalationTimer = null;
     this._autoRecoverTimer = null;
     this._autoRecoverDataCount = 0;
     this._runningStartedAt = null;
@@ -174,13 +170,18 @@ class Session extends EventEmitter {
     this._outputBuffer = [];       // ring buffer of recent PTY chunks
     this._outputBufferSize = 0;
     this._outputBufferMax = 100000; // ~100KB replay cap
+    this._lastUserInputAt = 0;
+    this._inputGraceMs = inputGraceSeconds * 1000;
 
-    this._destroying = false;
     this.patternDetector = new PatternDetector();
     this.patternDetector.on('prompt-detected', (detection) => {
       console.log(`[session:${this.name}] prompt-detected: layer=${detection.layer} pattern=${detection.pattern} line=${JSON.stringify(detection.line)}`);
       this.transition('prompt_detected', detection);
     });
+  }
+
+  recordUserInput() {
+    this._lastUserInputAt = Date.now();
   }
 
   get pid() {
@@ -416,7 +417,10 @@ class Session extends EventEmitter {
   }
 
   dismiss() {
-    if (this.state === STATES.WAITING) return this.transition('user_dismiss');
+    if (this.state === STATES.WAITING) {
+      this.recordUserInput();
+      return this.transition('user_dismiss');
+    }
     if (this.state === STATES.COMPLETE) return this.transition('user_dismiss');
     return false;
   }
@@ -457,10 +461,10 @@ class Session extends EventEmitter {
     if (cfg.attentionTimeoutSeconds != null) this.attentionTimeoutMs = cfg.attentionTimeoutSeconds * 1000;
     if (cfg.waitingEscalationSeconds != null) this.waitingEscalationMs = cfg.waitingEscalationSeconds * 1000;
     if (cfg.autoRecoverSeconds != null) this._autoRecoverMs = cfg.autoRecoverSeconds * 1000;
+    if (cfg.inputGraceSeconds != null) this._inputGraceMs = cfg.inputGraceSeconds * 1000;
   }
 
   destroy() {
-    this._destroying = true;
     if (this._watchdogTimer !== null) {
       clearTimeout(this._watchdogTimer);
       this._watchdogTimer = null;
@@ -468,10 +472,6 @@ class Session extends EventEmitter {
     if (this._idleTimer !== null) {
       clearTimeout(this._idleTimer);
       this._idleTimer = null;
-    }
-    if (this._escalationTimer !== null) {
-      clearInterval(this._escalationTimer);
-      this._escalationTimer = null;
     }
     this._clearAutoRecoverTimer();
     this._clearStartupGrace();

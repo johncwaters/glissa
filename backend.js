@@ -25,9 +25,11 @@ const path = require('node:path');
 const express = require('express');
 const { WebSocketServer } = require('ws');
 const { Session } = require('./sessions');
+const { STATES } = require('./shared/states');
 const { createConfigStore } = require('./config-store');
 const { registerControlHandlers } = require('./control-handlers');
-const { setNotifySuppressed } = require('./notify');
+const { NotificationManager } = require('./notification-manager');
+const { createToastChannel } = require('./channels/toast');
 
 function makeSession(project, cfg) {
   return new Session({
@@ -37,6 +39,7 @@ function makeSession(project, cfg) {
     attentionTimeoutSeconds: cfg.attentionTimeoutSeconds,
     waitingEscalationSeconds: cfg.waitingEscalationSeconds,
     autoRecoverSeconds: cfg.autoRecoverSeconds,
+    inputGraceSeconds: cfg.inputGraceSeconds,
   });
 }
 
@@ -92,12 +95,20 @@ function createBackend(httpServer, options = {}) {
     }
   }
 
+  // --- Notification manager ---
+
+  const notificationManager = new NotificationManager({
+    escalationIntervalMs: (config.waitingEscalationSeconds || 300) * 1000,
+    debounceMs: config.notifyDebounceMs || 3000,
+  });
+  notificationManager.registerChannel('toast', createToastChannel());
+
   // --- Client focus tracking (suppress notifications when dashboard is visible) ---
 
   const focusedClients = new Set();
 
   function updateNotifySuppression() {
-    setNotifySuppressed(focusedClients.size > 0);
+    notificationManager.setFocusSuppressed(focusedClients.size > 0);
   }
 
   function handleClientFocus(ws, focused) {
@@ -148,6 +159,20 @@ function createBackend(httpServer, options = {}) {
         from, to, event,
         timestamp: Date.now()
       });
+
+      // Notification triggers: session state -> notification lifecycle
+      if (to === STATES.WAITING) {
+        notificationManager.trigger(name, 'waiting', `${name} needs your input`);
+      } else if (to === STATES.COMPLETE) {
+        notificationManager.trigger(name, 'complete', `${name} finished working`);
+      } else if (to === STATES.FAILED) {
+        notificationManager.trigger(name, 'failed', `${name} failed`);
+      }
+
+      // Acknowledge when leaving a notification-triggering state
+      if (from === STATES.WAITING || from === STATES.COMPLETE || from === STATES.FAILED) {
+        notificationManager.acknowledge(name);
+      }
     });
   }
 
@@ -186,6 +211,8 @@ function createBackend(httpServer, options = {}) {
     for (const name of removed) {
       const sess = sessions.get(name);
       closeSessionDataClients(name);
+      // INVARIANT: acknowledge BEFORE destroy — destroy() calls removeAllListeners()
+      notificationManager.acknowledge(name);
       sess.destroy();
       sessions.delete(name);
       broadcastControl({ type: 'session-removed', session: name });
@@ -208,6 +235,8 @@ function createBackend(httpServer, options = {}) {
     for (const project of modified) {
       const oldSess = sessions.get(project.name);
       closeSessionDataClients(project.name);
+      // INVARIANT: acknowledge BEFORE destroy — destroy() calls removeAllListeners()
+      notificationManager.acknowledge(project.name);
       oldSess.destroy();
       const newSess = makeSession(project, { ...config, ...newConfig });
       sessions.set(project.name, newSess);
@@ -232,6 +261,10 @@ function createBackend(httpServer, options = {}) {
     for (const [, sess] of sessions) {
       sess.updateSettings(config);
     }
+    notificationManager.updateSettings({
+      escalationIntervalMs: (config.waitingEscalationSeconds || 300) * 1000,
+      debounceMs: config.notifyDebounceMs || 3000,
+    });
   }
 
   function requestShutdown() {
@@ -328,6 +361,10 @@ function createBackend(httpServer, options = {}) {
           return;
         }
         sess.write(msg.data);
+        sess.recordUserInput();
+        if (sess.state === STATES.WAITING) {
+          sess.transition('user_input');
+        }
       } else if (msg.type === 'resize') {
         const cols = Number(msg.cols);
         const rows = Number(msg.rows);
@@ -394,6 +431,8 @@ function createBackend(httpServer, options = {}) {
   function shutdown() {
     if (shuttingDown) return;
     shuttingDown = true;
+    // INVARIANT: destroy NotificationManager BEFORE sessions — clears all timers globally
+    notificationManager.destroy();
     for (const [, sess] of sessions) {
       sess.destroy();
     }

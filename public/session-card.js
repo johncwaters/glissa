@@ -27,7 +27,7 @@ const minimizedBar = document.getElementById('minimized-bar');
 const aggregateEl = document.getElementById('aggregate-status');
 
 let _maximizedSession = null;
-let _preMaximizeSessions = new Set(); // sessions auto-minimized by maximize
+const _preMaximizeSessions = new Set(); // sessions auto-minimized by maximize
 
 // ── Helpers (private) ────────────────────────────────────────
 
@@ -269,7 +269,7 @@ export function exitMaximizeMode() {
   // Restore all auto-minimized sessions
   for (const name of _preMaximizeSessions) {
     const otherUi = sessionUIs.get(name);
-    if (otherUi && otherUi.card.classList.contains('minimized')) {
+    if (otherUi?.card.classList.contains('minimized')) {
       _performExpand(name, otherUi);
     }
   }

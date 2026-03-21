@@ -10,6 +10,8 @@ const DEFAULT_CONFIG = {
   waitingEscalationSeconds: 300,
   startingWatchdogSeconds: 30,
   autoRecoverSeconds: 3,
+  inputGraceSeconds: 5,
+  notifyDebounceMs: 3000,
   repoRoots: [],
   projects: []
 };
@@ -20,6 +22,8 @@ const TIMEOUT_KEYS = [
   'waitingEscalationSeconds',
   'startingWatchdogSeconds',
   'autoRecoverSeconds',
+  'inputGraceSeconds',
+  'notifyDebounceMs',
 ];
 
 function resolveConfigPath() {
@@ -87,6 +91,8 @@ function createConfigStore() {
       waitingEscalationSeconds: config.waitingEscalationSeconds,
       startingWatchdogSeconds: config.startingWatchdogSeconds,
       autoRecoverSeconds: config.autoRecoverSeconds,
+      inputGraceSeconds: config.inputGraceSeconds,
+      notifyDebounceMs: config.notifyDebounceMs,
       repoRoots: config.repoRoots,
     };
   }

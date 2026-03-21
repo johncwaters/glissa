@@ -143,6 +143,12 @@ class PatternDetector extends EventEmitter {
       const line = this._pendingLine.trim();
       if (line.length === 0) return;
 
+      // Layer 3 filters — skip obvious non-prompt content
+      if (line.length < 10) return;                              // too short to be a real prompt
+      if (line.endsWith('://')) return;                           // trailing URL scheme fragment
+      // Check raw _pendingLine for indentation (line is already trimmed)
+      if (/^\s{2,}/.test(this._pendingLine) && line.length < 30) return; // indented short line (menu item)
+
       // Layer 3 — line ends with '?' or ':'
       const last = line[line.length - 1];
       if (last === '?' || last === ':') {
@@ -153,6 +159,12 @@ class PatternDetector extends EventEmitter {
         });
       }
     }, this._silenceTimeoutMs);
+  }
+
+  // Public API for re-arming the silence timer without clearing _pendingLine.
+  // Used by the session guard to retry detection after an input grace rejection.
+  rearmSilenceTimer() {
+    this._resetSilenceTimer();
   }
 
   _clearSilenceTimer() {
@@ -177,7 +189,7 @@ if (require.main === module) {
   let passed = 0;
   let failed = 0;
 
-  function assert(label, actual, expected) {
+  const assert = (label, actual, expected) => {
     if (actual === expected) {
       console.log(`  PASS  ${label}`);
       passed++;
@@ -187,7 +199,7 @@ if (require.main === module) {
       console.error(`        got:      ${JSON.stringify(actual)}`);
       failed++;
     }
-  }
+  };
 
   // ---- stripAnsi tests ----
   console.log('\nstripAnsi:');
@@ -220,9 +232,9 @@ if (require.main === module) {
   // ---- PatternDetector tests ----
   console.log('\nPatternDetector:');
 
-  function makeDetector(ms) {
+  const makeDetector = (ms) => {
     return new PatternDetector(ms !== undefined ? ms : 3000);
-  }
+  };
 
   // Layer 1 — exact match
   {
@@ -230,8 +242,8 @@ if (require.main === module) {
     let det = null;
     d.on('prompt-detected', (e) => { det = e; });
     d.feed('Do you want to proceed?\n');
-    assert('layer 1 exact match — layer',   det && det.layer,   1);
-    assert('layer 1 exact match — pattern', det && det.pattern, 'Do you want to proceed?');
+    assert('layer 1 exact match — layer',   det?.layer,   1);
+    assert('layer 1 exact match — pattern', det?.pattern, 'Do you want to proceed?');
   }
 
   // Layer 1 — (y/n) embedded in line
@@ -240,8 +252,8 @@ if (require.main === module) {
     let det = null;
     d.on('prompt-detected', (e) => { det = e; });
     d.feed('Allow write to config.json? (y/n)\n');
-    assert('layer 1 (y/n) — layer',   det && det.layer,   1);
-    assert('layer 1 (y/n) — pattern', det && det.pattern, '(y/n)');
+    assert('layer 1 (y/n) — layer',   det?.layer,   1);
+    assert('layer 1 (y/n) — pattern', det?.pattern, '(y/n)');
   }
 
   // Layer 2 — regex match
@@ -250,7 +262,7 @@ if (require.main === module) {
     let det = null;
     d.on('prompt-detected', (e) => { det = e; });
     d.feed('Allow node_modules to be deleted?\n');
-    assert('layer 2 regex — layer', det && det.layer, 2);
+    assert('layer 2 regex — layer', det?.layer, 2);
   }
 
   // Layer 2 — /proceed\?\s*$/i (anchored)
@@ -259,7 +271,7 @@ if (require.main === module) {
     let det = null;
     d.on('prompt-detected', (e) => { det = e; });
     d.feed('Ready to proceed?\n');
-    assert('layer 2 proceed? — layer', det && det.layer, 2);
+    assert('layer 2 proceed? — layer', det?.layer, 2);
   }
 
   // Layer 2 — blacklist: "Terminate batch job (Y/N)?" must NOT trigger
@@ -286,7 +298,7 @@ if (require.main === module) {
     let det = null;
     d.on('prompt-detected', (e) => { det = e; });
     d.feed('Do you want to proceed?\n');
-    assert('tightened do-you-want-to still matches — layer', det && det.layer, 1);
+    assert('tightened do-you-want-to still matches — layer', det?.layer, 1);
   }
 
   // Layer 2 — anchored proceed\?\s*$ does NOT match mid-sentence "proceed?"
@@ -304,7 +316,7 @@ if (require.main === module) {
     let det = null;
     d.on('prompt-detected', (e) => { det = e; });
     d.feed('\x1b[33mDo you want to proceed?\x1b[0m\n');
-    assert('ANSI stripped before layer 1 — layer', det && det.layer, 1);
+    assert('ANSI stripped before layer 1 — layer', det?.layer, 1);
   }
 
   // Layer 3 — silence heuristic fires after timeout
@@ -319,8 +331,8 @@ if (require.main === module) {
 
     // Wait for silence timeout then check
     setTimeout(() => {
-      assert('layer 3 fires after silence — layer',   det && det.layer,   3);
-      assert('layer 3 fires after silence — pattern', det && det.pattern, 'silence_heuristic');
+      assert('layer 3 fires after silence — layer',   det?.layer,   3);
+      assert('layer 3 fires after silence — pattern', det?.pattern, 'silence_heuristic');
 
       // Layer 3 — colon variant
       const d2 = makeDetector(50);
@@ -328,7 +340,7 @@ if (require.main === module) {
       d2.on('prompt-detected', (e) => { det2 = e; });
       d2.feed('Enter your choice:');
       setTimeout(() => {
-        assert('layer 3 colon — layer', det2 && det2.layer, 3);
+        assert('layer 3 colon — layer', det2?.layer, 3);
 
         // Layer 3 — does NOT fire when line ends with plain word
         const d3 = makeDetector(50);
@@ -347,8 +359,62 @@ if (require.main === module) {
           setTimeout(() => {
             assert('reset() suppresses layer 3', det4, null);
 
-            console.log(`\n${passed} passed, ${failed} failed`);
-            process.exit(failed > 0 ? 1 : 0);
+            // Layer 3 filter — short fragment should NOT fire
+            const d5 = makeDetector(50);
+            let det5 = null;
+            d5.on('prompt-detected', (e) => { det5 = e; });
+            d5.feed('>:');
+            setTimeout(() => {
+              assert('layer 3 filter: short fragment ">:" does not fire', det5, null);
+
+              // Layer 3 filter — short "?" alone should NOT fire
+              const d6 = makeDetector(50);
+              let det6 = null;
+              d6.on('prompt-detected', (e) => { det6 = e; });
+              d6.feed('?');
+              setTimeout(() => {
+                assert('layer 3 filter: lone "?" does not fire', det6, null);
+
+                // Layer 3 filter — trailing URL scheme should NOT fire
+                const d7 = makeDetector(50);
+                let det7 = null;
+                d7.on('prompt-detected', (e) => { det7 = e; });
+                d7.feed('Visit https://');
+                setTimeout(() => {
+                  assert('layer 3 filter: trailing "://" does not fire', det7, null);
+
+                  // Layer 3 filter — indented short menu item should NOT fire
+                  const d8 = makeDetector(50);
+                  let det8 = null;
+                  d8.on('prompt-detected', (e) => { det8 = e; });
+                  d8.feed('  /help    Show help:');
+                  setTimeout(() => {
+                    assert('layer 3 filter: indented short menu item does not fire', det8, null);
+
+                    // Layer 3 filter — indented long prompt SHOULD fire
+                    const d9 = makeDetector(50);
+                    let det9 = null;
+                    d9.on('prompt-detected', (e) => { det9 = e; });
+                    d9.feed('  Please enter the full path to your configuration file:');
+                    setTimeout(() => {
+                      assert('layer 3 filter: indented long prompt fires — layer', det9?.layer, 3);
+
+                      // Layer 3 — legitimate prompt "Enter your API key:" SHOULD fire
+                      const d10 = makeDetector(50);
+                      let det10 = null;
+                      d10.on('prompt-detected', (e) => { det10 = e; });
+                      d10.feed('Enter your API key:');
+                      setTimeout(() => {
+                        assert('layer 3 filter: "Enter your API key:" fires — layer', det10?.layer, 3);
+
+                        console.log(`\n${passed} passed, ${failed} failed`);
+                        process.exit(failed > 0 ? 1 : 0);
+                      }, 100);
+                    }, 100);
+                  }, 100);
+                }, 100);
+              }, 100);
+            }, 100);
           }, 100);
         }, 100);
       }, 100);
