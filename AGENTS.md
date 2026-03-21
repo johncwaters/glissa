@@ -1,4 +1,4 @@
-<!-- Generated: 2026-03-11 | Updated: 2026-03-20 -->
+<!-- Generated: 2026-03-11 | Updated: 2026-03-21 -->
 
 # AGENTS.md — Glissa Project Map
 
@@ -18,15 +18,18 @@ Glissa is a lightweight Node.js background process that spawns and manages Claud
 | **patterns.js** | PatternDetector class (EventEmitter) with 3-layer prompt detection: Layer 1 (exact string matches), Layer 2 (regex patterns with blacklist), Layer 3 (silence heuristic). ANSI stripping, self-test harness | `PatternDetector` |
 | **control-handlers.js** | Control WebSocket message handler registry. Handler-map dispatch pattern for all control messages (add/remove/reorder sessions, settings, kill/restart/dismiss, shutdown/restart-server, focus-change, repo scanning) | `registerControlHandlers(controlWss, deps)` |
 | **config-store.js** | Configuration storage with resolution order (--config flag -> local config.json -> ~/.glissa/config.json -> auto-seed). Atomic read-modify-write, fs.watch hot-reload with self-write filtering | `createConfigStore()`, `TIMEOUT_KEYS`, `DEFAULT_CONFIG` |
-| **notify.js** | Windows toast notifications via BurntToast PowerShell module with `msg *` fallback. Lazy-detects BurntToast across standard and OneDrive-redirected module paths. Category-based debounce, suppression when dashboard is focused | `notify(title, message)`, `setNotifySuppressed(val)`, `clearNotifyHistory()` |
+| **notification-manager.js** | NotificationManager class (EventEmitter). Per-session notification state machine (IDLE/PENDING/DELIVERED/ESCALATED/ACKNOWLEDGED), pluggable channel delivery, focus suppression, category debounce, escalation ping-pong for WAITING notifications | `NotificationManager` |
+| **notify.js** | **DEPRECATED** — no-op stubs kept during migration. Use `NotificationManager` + `channels/toast.js` instead | `notify()`, `setNotifySuppressed()`, `clearNotifyHistory()` (all no-ops) |
 
 ### Configuration & Build
 
 | File | Purpose |
 |------|---------|
+| **test-notification-manager.js** | Self-contained test harness for NotificationManager — sync + async tests covering happy path, suppression, debounce, escalation ping-pong, multi-channel, mock Session integration. Run with `node test-notification-manager.js` |
 | **config.json** | Runtime configuration: port, timeout settings, repo roots, project definitions. Hot-reloaded by backend.js via config-store.js. Gitignored |
 | **package.json** | Project manifest (CommonJS). Dependencies: express, ws, node-pty, @xterm/*. CLI entry: `bin/glissa.js` |
 | **vite.config.js** | Vite frontend build config (ESM). Tailwind CSS plugin, backend plugin that attaches Express/WS to Vite's dev server, alias for shared/states.esm.js |
+| **biome.json** | Biome linter config — excludes dist, node_modules, ESM files, vite.config.js. Formatter disabled. Tailwind CSS directives enabled |
 | **CLAUDE.md** | Hard constraints and design decisions for agents working in this codebase |
 
 ---
@@ -37,10 +40,11 @@ Glissa is a lightweight Node.js background process that spawns and manages Claud
 |-----------|---------|
 | `assets/` | Source audio files and screenshots (see `assets/AGENTS.md`) |
 | `bin/` | CLI entry point for `npx glissa` / global install (see `bin/AGENTS.md`) |
+| `channels/` | Pluggable notification delivery adapters for NotificationManager (see `channels/AGENTS.md`) |
 | `docs/` | Publishing and CLI testing guides (see `docs/AGENTS.md`) |
 | `public/` | Browser dashboard — xterm.js terminals, session cards, dialogs (see `public/AGENTS.md`) |
 | `scripts/` | Release automation scripts (see `scripts/AGENTS.md`) |
-| `shared/` | Shared state constants (CJS + ESM dual format) (see `shared/AGENTS.md`) |
+| `shared/` | Shared state constants and notification state machine (CJS + ESM) (see `shared/AGENTS.md`) |
 
 ---
 
@@ -115,11 +119,30 @@ INITIALIZING -> STARTING -> RUNNING -> WAITING -> IDLE -> DONE
 
 All detection runs on ANSI-stripped PTY output (parallel stream, raw output untouched). A 5-second startup grace period suppresses pattern detection after first output.
 
+### Notification System (NotificationManager + Channels)
+
+`notification-manager.js` owns a per-session notification state machine:
+
+```
+IDLE -> PENDING -> DELIVERED <-> ESCALATED -> ACKNOWLEDGED -> IDLE
+```
+
+- **PENDING** is transient — auto-resolves via suppress/debounce/deliver in entry hook
+- **DELIVERED <-> ESCALATED** ping-pong for `waiting` category (escalation timer)
+- **COMPLETE/FAILED** categories are one-shot (no escalation)
+- Focus suppression and category debounce checked in PENDING entry hook
+- Delivery delegates to registered channels (`channels/toast.js`)
+
+State machine defined in `shared/notification-states.js`, mirroring the session state pattern.
+
+The old `notify.js` is deprecated (no-op stubs).
+
 ### Inter-Module Communication
 
 Uses Node.js `EventEmitter`:
 - **Session** emits: `'state-change'`, `'data'`, `'error'`, `'exit'`, `'needs-attention'`, `'attention-cleared'`, `'session-failed'`, `'session-done'`
 - **PatternDetector** emits: `'prompt-detected'`
+- **NotificationManager** emits: `'notification-state-change'`
 - No global variables, no direct coupling
 
 ### Backend Factory Pattern
@@ -234,8 +257,14 @@ Runs PatternDetector self-test on hardcoded prompt examples.
 ### CLI Testing
 See `docs/testing-cli.md` for comprehensive manual test scenarios.
 
+### NotificationManager Tests
+```bash
+node test-notification-manager.js
+```
+Runs sync + async unit tests for NotificationManager: happy path, suppression, debounce, escalation ping-pong, multi-channel, mock Session integration.
+
 ### No Formal Test Framework
-Project uses manual testing and spike scripts. No Jest, Mocha, or similar.
+Project uses manual testing, self-test scripts, and spike scripts. No Jest, Mocha, or similar.
 
 ---
 
@@ -248,7 +277,8 @@ Project uses manual testing and spike scripts. No Jest, Mocha, or similar.
 | Add WebSocket message | `control-handlers.js` (handler map) | backend.js (broadcastControl) |
 | Improve prompt detection | `patterns.js` (PatternDetector) | EXACT_MATCHES, REGEX_PATTERNS, silence heuristic |
 | Fix dashboard UI | `public/session-card.js`, `public/app.js` | xterm.js setup, session card lifecycle |
-| Add notification | `notify.js` (notify function) | BurntToast detection, msg fallback, category debounce |
+| Add notification channel | `channels/toast.js` (pattern) | `notification-manager.js` registerChannel |
+| Notification state/logic | `notification-manager.js` (NotificationManager) | `shared/notification-states.js`, `channels/` |
 | Debug state transitions | `sessions.js` (transition guards) | GUARDS object, entry/exit hooks |
 | Hot-reload config | `config-store.js` | watchForChanges, save, load |
 | Tune auto-recovery | `sessions.js` (_resetAutoRecoverTimer) | autoRecoverSeconds, data chunk counting |
@@ -264,8 +294,9 @@ Project uses manual testing and spike scripts. No Jest, Mocha, or similar.
 ## Related Documentation
 
 - `CLAUDE.md` — Project constraints and coding style
+- `channels/AGENTS.md` — Notification delivery channels
 - `public/AGENTS.md` — Browser-side module documentation
-- `shared/AGENTS.md` — Shared state constants
+- `shared/AGENTS.md` — Shared state and notification constants
 - `bin/AGENTS.md` — CLI entry point documentation
 - `docs/AGENTS.md` — Publishing and testing guides
 - `scripts/AGENTS.md` — Release automation
