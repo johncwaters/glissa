@@ -147,7 +147,7 @@ const EXIT_HOOKS = {
 };
 
 class Session extends EventEmitter {
-  constructor({ name, path, startingWatchdogSeconds = 10, attentionTimeoutSeconds = 60, waitingEscalationSeconds = 300, autoRecoverSeconds = 3, inputGraceSeconds = 5 }) {
+  constructor({ name, path, startingWatchdogSeconds = 10, attentionTimeoutSeconds = 60, waitingEscalationSeconds = 300, autoRecoverSeconds = 3, inputGraceSeconds = 5, promptDetectionMs = 1500 }) {
     super();
     this.name = name;
     this.path = path;
@@ -173,7 +173,7 @@ class Session extends EventEmitter {
     this._lastUserInputAt = 0;
     this._inputGraceMs = inputGraceSeconds * 1000;
 
-    this.patternDetector = new PatternDetector();
+    this.patternDetector = new PatternDetector(promptDetectionMs);
     this.patternDetector.on('prompt-detected', (detection) => {
       console.log(`[session:${this.name}] prompt-detected: layer=${detection.layer} pattern=${detection.pattern} line=${JSON.stringify(detection.line)}`);
       this.transition('prompt_detected', detection);
@@ -462,6 +462,7 @@ class Session extends EventEmitter {
     if (cfg.waitingEscalationSeconds != null) this.waitingEscalationMs = cfg.waitingEscalationSeconds * 1000;
     if (cfg.autoRecoverSeconds != null) this._autoRecoverMs = cfg.autoRecoverSeconds * 1000;
     if (cfg.inputGraceSeconds != null) this._inputGraceMs = cfg.inputGraceSeconds * 1000;
+    if (cfg.promptDetectionMs != null) this.patternDetector.updateSilenceTimeout(cfg.promptDetectionMs);
   }
 
   destroy() {

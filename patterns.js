@@ -6,7 +6,7 @@ const { EventEmitter } = require('node:events');
 // ANSI stripping
 // ---------------------------------------------------------------------------
 
-const RE_CSI     = /\u001b\[[0-9;]*[a-zA-Z]/g;            // NOSONAR — ANSI stripping requires control chars
+const RE_CSI     = /\u001b\[\??[0-9;]*[a-zA-Z]/g;          // NOSONAR — ANSI stripping requires control chars (includes DEC private mode \e[?...)
 const RE_OSC_BEL = /\u001b\][^\u0007]*\u0007/g;           // NOSONAR
 const RE_OSC_ST  = /\u001b\][^\u001b]*\u001b\\/g;         // NOSONAR
 const RE_CHARSET = /\u001b[()][A-Z0-9]/g;                 // NOSONAR
@@ -42,6 +42,20 @@ const EXACT_MATCHES = [
 ];
 
 // ---------------------------------------------------------------------------
+// Prompt UI chrome — Claude Code renders these hints immediately after a
+// prompt question.  Their presence CONFIRMS an armed match rather than
+// cancelling it.
+// ---------------------------------------------------------------------------
+
+const PROMPT_CHROME = [
+  'Esc to cancel',
+  'Tab to amend',
+  'ctrl+e to explain',
+  'y to approve',
+  'Enter to run',
+];
+
+// ---------------------------------------------------------------------------
 // Layer 2 — Regex patterns
 // ---------------------------------------------------------------------------
 
@@ -65,18 +79,66 @@ const LAYER2_BLACKLIST = [
 // ---------------------------------------------------------------------------
 
 class PatternDetector extends EventEmitter {
-  constructor(silenceTimeoutMs = 3000) {
+  /**
+   * Two-stage detection: pattern match arms a short confirmation timer,
+   * silence confirms the detection. This eliminates false positives from
+   * conversational text because more output always follows (cancelling the
+   * armed match), while actual prompts are followed by silence.
+   *
+   * @param {number} silenceTimeoutMs  Layer 3 heuristic silence timeout
+   * @param {number} confirmationMs    Layer 1/2 match confirmation delay
+   */
+  constructor(silenceTimeoutMs = 1500, confirmationMs = 300) {
     super();
     this._silenceTimeoutMs = silenceTimeoutMs;
+    this._confirmationMs = confirmationMs;
     this._pendingLine = '';
     this._silenceTimer = null;
+    this._confirmTimer = null;
+    this._armedMatch = null;            // { layer, pattern, line } waiting for silence confirmation
+    this._debug = process.env.GLISSA_DEBUG_PATTERNS === '1';
   }
 
-  // Feed raw PTY data. Strips ANSI, splits on newlines, checks each complete
-  // line through layers 1 and 2 immediately. Incomplete trailing text is held
-  // in _pendingLine and checked via the layer-3 silence heuristic.
+  updateSilenceTimeout(ms) {
+    this._silenceTimeoutMs = ms;
+  }
+
+  /**
+   * Feed raw PTY data. Two-stage detection:
+   *
+   * 1. Pattern match (Layer 1/2) on complete lines or pending text → arms
+   *    a short confirmation timer (_confirmationMs, default 300ms).
+   * 2. If more output arrives before timer fires → cancel (conversational text).
+   * 3. If silence holds → fire prompt-detected.
+   * 4. Layer 3 (heuristic ?/:) uses the longer _silenceTimeoutMs timer.
+   */
   feed(rawData) {
     const stripped = stripAnsi(rawData);
+
+    // New output arrived while a match is armed.
+    // If the output is prompt UI chrome (e.g. "Esc to cancel"), it confirms
+    // the prompt — re-arm (restart confirmation timer) instead of cancelling.
+    if (this._armedMatch) {
+      if (this._isPromptChrome(stripped)) {
+        if (this._debug) {
+          console.log(`[pattern-debug] armed match preserved (prompt chrome) ts=${Date.now()}`);
+        }
+        const match = this._armedMatch;
+        this._armMatch(match);
+
+        // Still need to update pending line bookkeeping
+        const chromeCombined = this._pendingLine + stripped;
+        const chromeParts = chromeCombined.split('\n');
+        const chromePending = chromeParts.pop();
+        this._pendingLine = chromePending.length > 500 ? chromePending.slice(-500) : chromePending;
+        return;
+      }
+
+      if (this._debug) {
+        console.log(`[pattern-debug] armed match cancelled (more output): ${JSON.stringify(this._armedMatch.pattern)} ts=${Date.now()}`);
+      }
+      this._clearConfirmTimer();
+    }
 
     // Append to any previously buffered incomplete line
     const combined = this._pendingLine + stripped;
@@ -84,28 +146,41 @@ class PatternDetector extends EventEmitter {
     // Split into lines. The last element is either '' (data ended on \n) or
     // an incomplete line fragment still waiting for a newline.
     const parts = combined.split('\n');
-    this._pendingLine = parts.pop(); // may be ''
+    const pending = parts.pop(); // may be ''
+    // Cap pending line at 500 chars — ANSI cursor-rewrite UIs can accumulate
+    // several KB of garbled text between newlines.
+    this._pendingLine = pending.length > 500 ? pending.slice(-500) : pending;
 
-    // Process all complete lines immediately (layers 1 & 2)
+    // Process all complete lines (layers 1 & 2) — arm, don't fire
     for (const line of parts) {
       const trimmed = line.trim();
       if (trimmed.length === 0) continue;
 
       const result = this._checkLine(trimmed);
       if (result) {
-        this._clearSilenceTimer();
-        this.emit('prompt-detected', result);
-        return; // One detection per feed call is sufficient
+        this._armMatch(result);
+        return; // One armed match per feed call is sufficient
       }
     }
 
-    // If there is pending (incomplete) text, arm/reset the silence timer
-    // so that layer 3 fires if no further output arrives.
-    if (this._pendingLine.trim().length > 0) {
+    // Check pending (incomplete) text against all layers — arm, don't fire
+    const pendingTrimmed = this._pendingLine.trim();
+    if (pendingTrimmed.length > 0) {
+      if (this._debug) {
+        console.log(`[pattern-debug] feed() pendingLine: ${JSON.stringify(pendingTrimmed)} ts=${Date.now()}`);
+      }
+
+      const result = this._checkLine(pendingTrimmed);
+      if (result) {
+        result.pending = true;
+        this._armMatch(result);
+        return;
+      }
+
+      // No pattern match — arm Layer 3 silence timer as fallback
       this._resetSilenceTimer();
     } else {
-      // No pending line — clear any armed timer so we don't false-fire on
-      // a line that ended cleanly without a question mark or colon.
+      // No pending line — clear timers
       this._clearSilenceTimer();
     }
   }
@@ -113,7 +188,14 @@ class PatternDetector extends EventEmitter {
   // Reset all state (call when the user has responded and the session resumes)
   reset() {
     this._clearSilenceTimer();
+    this._clearConfirmTimer();
     this._pendingLine = '';
+  }
+
+  // Public API for re-arming the silence timer without clearing _pendingLine.
+  // Used by the session guard to retry detection after an input grace rejection.
+  rearmSilenceTimer() {
+    this._resetSilenceTimer();
   }
 
   // -------------------------------------------------------------------------
@@ -143,6 +225,30 @@ class PatternDetector extends EventEmitter {
     return null;
   }
 
+  // Arm a pattern match for confirmation. Starts a short timer; if no new
+  // output arrives before it fires, the detection is confirmed.
+  _armMatch(result) {
+    this._clearSilenceTimer();   // Layer 3 not needed when we have a pattern match
+    this._clearConfirmTimer();
+    this._armedMatch = result;
+
+    if (this._debug) {
+      console.log(`[pattern-debug] armed: layer=${result.layer} pattern=${JSON.stringify(result.pattern)} ts=${Date.now()}`);
+    }
+
+    this._confirmTimer = setTimeout(() => {
+      this._confirmTimer = null;
+      const match = this._armedMatch;
+      this._armedMatch = null;
+      if (match) {
+        if (this._debug) {
+          console.log(`[pattern-debug] confirmed (silence held): layer=${match.layer} pattern=${JSON.stringify(match.pattern)} ts=${Date.now()}`);
+        }
+        this.emit('prompt-detected', match);
+      }
+    }, this._confirmationMs);
+  }
+
   _resetSilenceTimer() {
     this._clearSilenceTimer();
     this._silenceTimer = setTimeout(() => {
@@ -159,6 +265,9 @@ class PatternDetector extends EventEmitter {
       // Layer 3 — line ends with '?' or ':'
       const last = line.at(-1);
       if (last === '?' || last === ':') {
+        if (this._debug) {
+          console.log(`[pattern-debug] Layer 3 fired: ${JSON.stringify(line)} ts=${Date.now()}`);
+        }
         this.emit('prompt-detected', {
           layer: 3,
           pattern: 'silence_heuristic',
@@ -168,10 +277,16 @@ class PatternDetector extends EventEmitter {
     }, this._silenceTimeoutMs);
   }
 
-  // Public API for re-arming the silence timer without clearing _pendingLine.
-  // Used by the session guard to retry detection after an input grace rejection.
-  rearmSilenceTimer() {
-    this._resetSilenceTimer();
+  _isPromptChrome(stripped) {
+    return PROMPT_CHROME.some(chrome => stripped.includes(chrome));
+  }
+
+  _clearConfirmTimer() {
+    this._armedMatch = null;
+    if (this._confirmTimer !== null) {
+      clearTimeout(this._confirmTimer);
+      this._confirmTimer = null;
+    }
   }
 
   _clearSilenceTimer() {
@@ -235,188 +350,357 @@ if (require.main === module) {
     stripAnsi('line1\nline2'),
     'line1\nline2'
   );
+  assert(
+    'strips DEC private mode sequences',
+    stripAnsi('\x1b[?2026htext\x1b[?2026l'),
+    'text'
+  );
+  assert(
+    'strips DEC cursor show/hide',
+    stripAnsi('\x1b[?25hvisible\x1b[?25l'),
+    'visible'
+  );
 
   // ---- PatternDetector tests ----
+  // All tests use short timers: silenceTimeoutMs=50, confirmationMs=30
   console.log('\nPatternDetector:');
 
-  const makeDetector = (ms) => {
-    return new PatternDetector(ms === undefined ? 3000 : ms);
+  const makeDetector = (silenceMs, confirmMs) => {
+    return new PatternDetector(
+      silenceMs === undefined ? 50 : silenceMs,
+      confirmMs === undefined ? 30 : confirmMs
+    );
   };
 
-  // Layer 1 — exact match
-  {
-    const d = makeDetector();
-    let det = null;
-    d.on('prompt-detected', (e) => { det = e; });
-    d.feed('Do you want to proceed?\n');
-    assert('layer 1 exact match — layer',   det?.layer,   1);
-    assert('layer 1 exact match — pattern', det?.pattern, 'Do you want to proceed?');
-  }
-
-  // Layer 1 — (y/n) embedded in line
-  {
-    const d = makeDetector();
-    let det = null;
-    d.on('prompt-detected', (e) => { det = e; });
-    d.feed('Allow write to config.json? (y/n)\n');
-    assert('layer 1 (y/n) — layer',   det?.layer,   1);
-    assert('layer 1 (y/n) — pattern', det?.pattern, '(y/n)');
-  }
-
-  // Layer 2 — regex match
-  {
-    const d = makeDetector();
-    let det = null;
-    d.on('prompt-detected', (e) => { det = e; });
-    d.feed('Allow node_modules to be deleted?\n');
-    assert('layer 2 regex — layer', det?.layer, 2);
-  }
-
-  // Layer 2 — /proceed\?\s*$/i (anchored)
-  {
-    const d = makeDetector();
-    let det = null;
-    d.on('prompt-detected', (e) => { det = e; });
-    d.feed('Ready to proceed?\n');
-    assert('layer 2 proceed? — layer', det?.layer, 2);
-  }
-
-  // Layer 2 — blacklist: "Terminate batch job (Y/N)?" must NOT trigger
-  {
-    const d = makeDetector();
-    let det = null;
-    d.on('prompt-detected', (e) => { det = e; });
-    d.feed('Terminate batch job (Y/N)?\n');
-    assert('blacklist suppresses "Terminate batch job (Y/N)?"', det, null);
-  }
-
-  // Layer 2 — /permission/i removed: "Default permission mode" must NOT trigger
-  {
-    const d = makeDetector();
-    let det = null;
-    d.on('prompt-detected', (e) => { det = e; });
-    d.feed('Default permission mode\n');
-    assert('no false positive on "Default permission mode"', det, null);
-  }
-
-  // Layer 2 — tightened pattern still matches intended target
-  {
-    const d = makeDetector();
-    let det = null;
-    d.on('prompt-detected', (e) => { det = e; });
-    d.feed('Do you want to proceed?\n');
-    assert('tightened do-you-want-to still matches — layer', det?.layer, 1);
-  }
-
-  // Layer 2 — anchored proceed\?\s*$ does NOT match mid-sentence "proceed?"
-  {
-    const d = makeDetector();
-    let det = null;
-    d.on('prompt-detected', (e) => { det = e; });
-    d.feed('proceed? Let me check\n');
-    assert('anchored proceed? does not match mid-sentence', det, null);
-  }
-
-  // ANSI is stripped before matching
-  {
-    const d = makeDetector();
-    let det = null;
-    d.on('prompt-detected', (e) => { det = e; });
-    d.feed('\x1b[33mDo you want to proceed?\x1b[0m\n');
-    assert('ANSI stripped before layer 1 — layer', det?.layer, 1);
-  }
-
-  // Layer 3 — silence heuristic fires after timeout
   const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-  const runLayer3Tests = async () => {
-    // Layer 3 — fires after silence
-    const d = makeDetector(50);
-    let det = null;
-    d.on('prompt-detected', (e) => { det = e; });
-    d.feed('Something unexpected?');
-    assert('layer 3 no immediate fire', det, null);
+  const runAllTests = async () => {
 
-    await delay(100);
-    assert('layer 3 fires after silence — layer',   det?.layer,   3);
-    assert('layer 3 fires after silence — pattern', det?.pattern, 'silence_heuristic');
+    // ---- Two-stage detection: pattern match + silence confirmation ----
+    console.log('\nTwo-stage detection (Layer 1/2 + silence confirmation):');
+
+    // Layer 1 — does NOT fire immediately (needs silence confirmation)
+    {
+      const d = makeDetector();
+      let det = null;
+      d.on('prompt-detected', (e) => { det = e; });
+      d.feed('Do you want to proceed?\n');
+      assert('layer 1: no immediate fire', det, null);
+      await delay(60);
+      assert('layer 1: fires after silence — layer', det?.layer, 1);
+      assert('layer 1: fires after silence — pattern', det?.pattern, 'Do you want to proceed?');
+    }
+
+    // Layer 1 — (y/n) with silence confirmation
+    {
+      const d = makeDetector();
+      let det = null;
+      d.on('prompt-detected', (e) => { det = e; });
+      d.feed('Allow write to config.json? (y/n)\n');
+      assert('layer 1 (y/n): no immediate fire', det, null);
+      await delay(60);
+      assert('layer 1 (y/n): fires after silence — layer', det?.layer, 1);
+      assert('layer 1 (y/n): fires after silence — pattern', det?.pattern, '(y/n)');
+    }
+
+    // Layer 2 — regex with silence confirmation
+    {
+      const d = makeDetector();
+      let det = null;
+      d.on('prompt-detected', (e) => { det = e; });
+      d.feed('Allow node_modules to be deleted?\n');
+      assert('layer 2: no immediate fire', det, null);
+      await delay(60);
+      assert('layer 2: fires after silence — layer', det?.layer, 2);
+    }
+
+    // Layer 2 — /proceed\?\s*$/i
+    {
+      const d = makeDetector();
+      let det = null;
+      d.on('prompt-detected', (e) => { det = e; });
+      d.feed('Ready to proceed?\n');
+      await delay(60);
+      assert('layer 2 proceed?: fires — layer', det?.layer, 2);
+    }
+
+    // ---- FALSE POSITIVE PREVENTION: conversational text cancelled by more output ----
+    console.log('\nFalse positive prevention (conversational text):');
+
+    // Pattern in conversational text: more output cancels the armed match
+    {
+      const d = makeDetector();
+      let det = null;
+      d.on('prompt-detected', (e) => { det = e; });
+      d.feed('simple text prompts ((y/n), Do you want to proceed?), not for Claude\n');
+      assert('conversational: armed after first feed', det, null);
+      // Simulate more output arriving before confirmation timer fires
+      d.feed('Code\'s rich interactive selection UI.\n');
+      await delay(60);
+      assert('conversational: cancelled by continued output', det, null);
+    }
+
+    // Pattern in pending text cancelled by continued output
+    {
+      const d = makeDetector();
+      let det = null;
+      d.on('prompt-detected', (e) => { det = e; });
+      d.feed('Also, the (y/n) pattern in pending text');  // no newline — arms
+      assert('pending conversational: armed after feed', det, null);
+      // More output arrives — cancels armed match. The complete line also
+      // contains (y/n) so it re-arms; the next feed cancels that too.
+      d.feed(' should now fire immediately.\n');
+      d.feed('Next paragraph of output continues.\n');
+      await delay(60);
+      assert('pending conversational: cancelled by continued output', det, null);
+    }
+
+    // ---- Blacklist and negative tests ----
+    console.log('\nBlacklist and negative tests:');
+
+    // Blacklist: "Terminate batch job (Y/N)?" must NOT trigger
+    {
+      const d = makeDetector();
+      let det = null;
+      d.on('prompt-detected', (e) => { det = e; });
+      d.feed('Terminate batch job (Y/N)?\n');
+      await delay(60);
+      assert('blacklist suppresses "Terminate batch job (Y/N)?"', det, null);
+    }
+
+    // "Default permission mode" must NOT trigger
+    {
+      const d = makeDetector();
+      let det = null;
+      d.on('prompt-detected', (e) => { det = e; });
+      d.feed('Default permission mode\n');
+      await delay(60);
+      assert('no false positive on "Default permission mode"', det, null);
+    }
+
+    // Anchored proceed\?\s*$ does NOT match mid-sentence
+    {
+      const d = makeDetector();
+      let det = null;
+      d.on('prompt-detected', (e) => { det = e; });
+      d.feed('proceed? Let me check\n');
+      await delay(60);
+      assert('anchored proceed? does not match mid-sentence', det, null);
+    }
+
+    // ANSI is stripped before matching
+    {
+      const d = makeDetector();
+      let det = null;
+      d.on('prompt-detected', (e) => { det = e; });
+      d.feed('\x1b[33mDo you want to proceed?\x1b[0m\n');
+      await delay(60);
+      assert('ANSI stripped before layer 1 — layer', det?.layer, 1);
+    }
+
+    // ---- Layer 3 — silence heuristic ----
+    console.log('\nLayer 3 (silence heuristic):');
+
+    // Fires after full silence timeout (no pattern match, needs longer wait)
+    {
+      const d = makeDetector(50, 30);
+      let det = null;
+      d.on('prompt-detected', (e) => { det = e; });
+      d.feed('Something unexpected?');
+      assert('layer 3: no immediate fire', det, null);
+      await delay(30);
+      assert('layer 3: not yet at 30ms (below silence timeout)', det, null);
+      await delay(40);
+      assert('layer 3: fires after silence timeout — layer', det?.layer, 3);
+      assert('layer 3: fires after silence timeout — pattern', det?.pattern, 'silence_heuristic');
+    }
 
     // Layer 3 — colon variant
-    const d2 = makeDetector(50);
-    let det2 = null;
-    d2.on('prompt-detected', (e) => { det2 = e; });
-    d2.feed('Enter your choice:');
-    await delay(100);
-    assert('layer 3 colon — layer', det2?.layer, 3);
+    {
+      const d = makeDetector();
+      let det = null;
+      d.on('prompt-detected', (e) => { det = e; });
+      d.feed('Enter your choice:');
+      await delay(100);
+      assert('layer 3 colon — layer', det?.layer, 3);
+    }
 
-    // Layer 3 — does NOT fire when line ends with plain word
-    const d3 = makeDetector(50);
-    let det3 = null;
-    d3.on('prompt-detected', (e) => { det3 = e; });
-    d3.feed('Build succeeded.');
-    await delay(100);
-    assert('layer 3 no fire for plain line', det3, null);
+    // Does NOT fire for plain endings
+    {
+      const d = makeDetector();
+      let det = null;
+      d.on('prompt-detected', (e) => { det = e; });
+      d.feed('Build succeeded.');
+      await delay(100);
+      assert('layer 3 no fire for plain line', det, null);
+    }
 
-    // reset() clears pending timer
-    const d4 = makeDetector(50);
-    let det4 = null;
-    d4.on('prompt-detected', (e) => { det4 = e; });
-    d4.feed('Something unexpected?');
-    d4.reset();
-    await delay(100);
-    assert('reset() suppresses layer 3', det4, null);
+    // reset() clears all timers
+    {
+      const d = makeDetector();
+      let det = null;
+      d.on('prompt-detected', (e) => { det = e; });
+      d.feed('Do you want to proceed?\n');
+      d.reset();
+      await delay(60);
+      assert('reset() suppresses armed match', det, null);
+    }
 
-    // Layer 3 filter — short fragment should NOT fire
-    const d5 = makeDetector(50);
-    let det5 = null;
-    d5.on('prompt-detected', (e) => { det5 = e; });
-    d5.feed('>:');
-    await delay(100);
-    assert('layer 3 filter: short fragment ">:" does not fire', det5, null);
+    // Layer 3 filters
+    {
+      const d = makeDetector();
+      let det = null;
+      d.on('prompt-detected', (e) => { det = e; });
+      d.feed('>:');
+      await delay(100);
+      assert('layer 3 filter: short fragment ">:" does not fire', det, null);
+    }
+    {
+      const d = makeDetector();
+      let det = null;
+      d.on('prompt-detected', (e) => { det = e; });
+      d.feed('?');
+      await delay(100);
+      assert('layer 3 filter: lone "?" does not fire', det, null);
+    }
+    {
+      const d = makeDetector();
+      let det = null;
+      d.on('prompt-detected', (e) => { det = e; });
+      d.feed('Visit https://');
+      await delay(100);
+      assert('layer 3 filter: trailing "://" does not fire', det, null);
+    }
+    {
+      const d = makeDetector();
+      let det = null;
+      d.on('prompt-detected', (e) => { det = e; });
+      d.feed('  /help    Show help:');
+      await delay(100);
+      assert('layer 3 filter: indented short menu item does not fire', det, null);
+    }
+    {
+      const d = makeDetector();
+      let det = null;
+      d.on('prompt-detected', (e) => { det = e; });
+      d.feed('  Please enter the full path to your configuration file:');
+      await delay(100);
+      assert('layer 3 filter: indented long prompt fires — layer', det?.layer, 3);
+    }
+    {
+      const d = makeDetector();
+      let det = null;
+      d.on('prompt-detected', (e) => { det = e; });
+      d.feed('Enter your API key:');
+      await delay(100);
+      assert('layer 3: "Enter your API key:" fires — layer', det?.layer, 3);
+    }
 
-    // Layer 3 filter — short "?" alone should NOT fire
-    const d6 = makeDetector(50);
-    let det6 = null;
-    d6.on('prompt-detected', (e) => { det6 = e; });
-    d6.feed('?');
-    await delay(100);
-    assert('layer 3 filter: lone "?" does not fire', det6, null);
+    // ---- Pending line detection with silence confirmation ----
+    console.log('\nPending line detection (with silence confirmation):');
 
-    // Layer 3 filter — trailing URL scheme should NOT fire
-    const d7 = makeDetector(50);
-    let det7 = null;
-    d7.on('prompt-detected', (e) => { det7 = e; });
-    d7.feed('Visit https://');
-    await delay(100);
-    assert('layer 3 filter: trailing "://" does not fire', det7, null);
+    // Layer 1 on pending text — needs silence confirmation
+    {
+      const d = makeDetector();
+      let det = null;
+      d.on('prompt-detected', (e) => { det = e; });
+      d.feed('Do you want to proceed?');  // no newline
+      assert('pending L1: no immediate fire', det, null);
+      await delay(60);
+      assert('pending L1: fires after silence — layer', det?.layer, 1);
+      assert('pending L1: fires after silence — pending', det?.pending, true);
+    }
 
-    // Layer 3 filter — indented short menu item should NOT fire
-    const d8 = makeDetector(50);
-    let det8 = null;
-    d8.on('prompt-detected', (e) => { det8 = e; });
-    d8.feed('  /help    Show help:');
-    await delay(100);
-    assert('layer 3 filter: indented short menu item does not fire', det8, null);
+    // (y/n) in pending text — needs silence confirmation
+    {
+      const d = makeDetector();
+      let det = null;
+      d.on('prompt-detected', (e) => { det = e; });
+      d.feed('Allow write to config.json? (y/n)');  // no newline
+      assert('pending (y/n): no immediate fire', det, null);
+      await delay(60);
+      assert('pending (y/n): fires after silence — layer', det?.layer, 1);
+      assert('pending (y/n): fires after silence — pattern', det?.pattern, '(y/n)');
+    }
 
-    // Layer 3 filter — indented long prompt SHOULD fire
-    const d9 = makeDetector(50);
-    let det9 = null;
-    d9.on('prompt-detected', (e) => { det9 = e; });
-    d9.feed('  Please enter the full path to your configuration file:');
-    await delay(100);
-    assert('layer 3 filter: indented long prompt fires — layer', det9?.layer, 3);
+    // Partial L1 pattern does NOT fire
+    {
+      const d = makeDetector();
+      let det = null;
+      d.on('prompt-detected', (e) => { det = e; });
+      d.feed('(y/');
+      await delay(100);
+      assert('pending: partial "(y/" does not fire', det, null);
+    }
 
-    // Layer 3 — legitimate prompt "Enter your API key:" SHOULD fire
-    const d10 = makeDetector(50);
-    let det10 = null;
-    d10.on('prompt-detected', (e) => { det10 = e; });
-    d10.feed('Enter your API key:');
-    await delay(100);
-    assert('layer 3 filter: "Enter your API key:" fires — layer', det10?.layer, 3);
+    // updateSilenceTimeout changes the Layer 3 timer
+    {
+      const d = makeDetector(200, 30);
+      let det = null;
+      d.on('prompt-detected', (e) => { det = e; });
+      d.updateSilenceTimeout(50);
+      d.feed('Custom timeout test?');  // no L1 match → Layer 3
+      assert('updateSilenceTimeout: no immediate fire', det, null);
+      await delay(100);
+      assert('updateSilenceTimeout: fires with new timeout — layer', det?.layer, 3);
+    }
+
+    // ---- Prompt chrome confirmation (armed match preserved) ----
+    console.log('\nPrompt chrome confirmation:');
+
+    // Chrome after armed match preserves detection
+    {
+      const d = makeDetector();
+      let det = null;
+      d.on('prompt-detected', (e) => { det = e; });
+      d.feed('Do you want to proceed?\n');
+      assert('chrome: armed after prompt', det, null);
+      d.feed('Esc to cancel \u00b7 Tab to amend \u00b7 ctrl+e to explain');
+      assert('chrome: not cancelled by prompt chrome', det, null);
+      await delay(60);
+      assert('chrome: fires after silence — layer', det?.layer, 1);
+      assert('chrome: fires after silence — pattern', det?.pattern, 'Do you want to proceed?');
+    }
+
+    // Multiple chrome chunks still preserve the match
+    {
+      const d = makeDetector();
+      let det = null;
+      d.on('prompt-detected', (e) => { det = e; });
+      d.feed('Allow this action?\n');
+      d.feed('Esc to cancel');
+      d.feed(' \u00b7 Tab to amend');
+      assert('multi-chrome: still armed', det, null);
+      await delay(60);
+      assert('multi-chrome: fires — layer', det?.layer, 1);
+    }
+
+    // Non-chrome output still cancels armed match
+    {
+      const d = makeDetector();
+      let det = null;
+      d.on('prompt-detected', (e) => { det = e; });
+      d.feed('Do you want to proceed?\n');
+      d.feed('Here is some more regular output.\n');
+      await delay(60);
+      assert('non-chrome: still cancels armed match', det, null);
+    }
+
+    // Chrome with DEC private mode escapes (realistic PTY data)
+    {
+      const d = makeDetector();
+      let det = null;
+      d.on('prompt-detected', (e) => { det = e; });
+      d.feed('Do you want to proceed?\n');
+      d.feed('\x1b[?2026hEsc to cancel\x1b[?2026l');
+      assert('chrome+DEC: not cancelled', det, null);
+      await delay(60);
+      assert('chrome+DEC: fires after silence — layer', det?.layer, 1);
+    }
 
     console.log(`\n${passed} passed, ${failed} failed`);
     process.exit(failed > 0 ? 1 : 0);
   };
 
-  runLayer3Tests();
+  runAllTests();
 }

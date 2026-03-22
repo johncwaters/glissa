@@ -11,6 +11,7 @@ const DEFAULT_CONFIG = {
   startingWatchdogSeconds: 30,
   autoRecoverSeconds: 3,
   inputGraceSeconds: 5,
+  promptDetectionMs: 1500,
   notifyDebounceMs: 3000,
   repoRoots: [],
   projects: []
@@ -23,6 +24,7 @@ const TIMEOUT_KEYS = [
   'startingWatchdogSeconds',
   'autoRecoverSeconds',
   'inputGraceSeconds',
+  'promptDetectionMs',
   'notifyDebounceMs',
 ];
 
@@ -92,6 +94,7 @@ function createConfigStore() {
       startingWatchdogSeconds: config.startingWatchdogSeconds,
       autoRecoverSeconds: config.autoRecoverSeconds,
       inputGraceSeconds: config.inputGraceSeconds,
+      promptDetectionMs: config.promptDetectionMs,
       notifyDebounceMs: config.notifyDebounceMs,
       repoRoots: config.repoRoots,
     };

@@ -40,6 +40,7 @@ function makeSession(project, cfg) {
     waitingEscalationSeconds: cfg.waitingEscalationSeconds,
     autoRecoverSeconds: cfg.autoRecoverSeconds,
     inputGraceSeconds: cfg.inputGraceSeconds,
+    promptDetectionMs: cfg.promptDetectionMs,
   });
 }
 
