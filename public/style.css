@@ -322,8 +322,7 @@ html, body {
   z-index: 100;
   display: flex;
   flex-wrap: wrap;
-  align-items: stretch;
-  min-height: 57px;
+  align-items: center;
   gap: 6px;
   padding: 8px 24px;
   max-width: 1920px;
@@ -407,6 +406,7 @@ html, body {
   padding: 4px 10px;
   min-height: unset;
   gap: 8px;
+  align-items: center;
 }
 
 .session-card.minimized .session-name {

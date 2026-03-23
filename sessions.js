@@ -529,7 +529,9 @@ class Session extends EventEmitter {
         // this strongly signals a prompt waiting for input — not completion.
         // Layers 1-3 may have missed it (e.g. short '>' prompt filtered by
         // Layer 3's length check). Treat as Layer 4 prompt detection.
-        if (this.patternDetector.hasPendingContent()) {
+        // Only applies to short runs — long runs with pending content are
+        // Claude's idle prompt after task completion, not a mid-task input request.
+        if (runDuration < this._completeThresholdMs && this.patternDetector.hasPendingContent()) {
           const pendingLine = this.patternDetector.getPendingLine();
           console.log(
             `[session:${this.name}] idle timer: pending content detected, treating as prompt: ${JSON.stringify(pendingLine)}`
