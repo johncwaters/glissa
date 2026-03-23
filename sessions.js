@@ -523,6 +523,26 @@ class Session extends EventEmitter {
       this._idleTimer = null;
       if (this.state === STATES.RUNNING) {
         const runDuration = this._runningStartedAt ? Date.now() - this._runningStartedAt : 0;
+
+        // Safety net: if the pattern detector has a non-empty pending line
+        // (last output didn't end with newline) after prolonged silence,
+        // this strongly signals a prompt waiting for input — not completion.
+        // Layers 1-3 may have missed it (e.g. short '>' prompt filtered by
+        // Layer 3's length check). Treat as Layer 4 prompt detection.
+        if (this.patternDetector.hasPendingContent()) {
+          const pendingLine = this.patternDetector.getPendingLine();
+          console.log(
+            `[session:${this.name}] idle timer: pending content detected, treating as prompt: ${JSON.stringify(pendingLine)}`
+          );
+          this._runningStartedAt = null;
+          this.transition('prompt_detected', {
+            layer: 4,
+            pattern: 'idle_pending_content',
+            line: pendingLine
+          });
+          return;
+        }
+
         this._runningStartedAt = null;
         if (runDuration >= this._completeThresholdMs) {
           this.transition('task_complete');

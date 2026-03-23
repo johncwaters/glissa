@@ -226,13 +226,15 @@ html, body {
 .btn-minimize {
   cursor: pointer;
   opacity: 0.5;
-  padding: 6px 10px;
-  font-size: 12px;
+  padding: 0 6px;
+  font-size: inherit;
   user-select: none;
   transition: opacity var(--transition-fast), color var(--transition-fast);
   color: var(--text);
   flex-shrink: 0;
   border-radius: 3px;
+  display: inline-flex;
+  align-items: center;
 }
 
 .btn-minimize:hover {
@@ -518,12 +520,12 @@ html, body {
 /* ── Card header ──────────────────────────────────────────── */
 .session-card-header {
   display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 16px;
+  align-items: stretch;
+  gap: 8px;
+  padding: 4px 12px;
   background: var(--bg-surface);
   border-bottom: 1px solid var(--border-dim);
-  min-height: 40px;
+  font-size: 11px;
   cursor: grab;
 }
 
@@ -537,16 +539,19 @@ html, body {
 
 .session-name {
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: inherit;
   font-weight: 600;
   color: var(--text-head);
   letter-spacing: 0.03em;
   flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
 }
 
 .session-name::before {
-  content: '$ ';
+  content: '$';
   color: var(--text-muted);
+  margin-right: 6px;
 }
 
 .session-header-spacer {
@@ -558,9 +563,9 @@ html, body {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 2px 12px;
+  padding: 0 10px;
   border-radius: 99px;
-  font-size: 10px;
+  font-size: inherit;
   font-family: var(--font-mono);
   font-weight: 600;
   letter-spacing: 0.06em;
@@ -601,6 +606,7 @@ html, body {
 /* ── Action buttons ──────────────────────────────────────── */
 .session-actions {
   display: flex;
+  align-items: stretch;
   gap: 6px;
   flex-shrink: 0;
 }
@@ -609,11 +615,11 @@ html, body {
   display: none;
   align-items: center;
   gap: 4px;
-  padding: 4px 12px;
+  padding: 0 10px;
   border: 1px solid;
   border-radius: 4px;
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: inherit;
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -697,15 +703,81 @@ html, body {
 ::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
 
 
-/* ── Remove button ───────────────────────────────────────── */
-.btn-remove {
-  color: var(--text);
-  border-color: var(--border-hover);
+/* ── Overflow menu ────────────────────────────────────────── */
+.session-overflow {
+  position: relative;
+  display: flex;
+  align-items: stretch;
 }
 
-.btn-remove:hover {
+.btn-overflow {
+  color: var(--text-muted);
+  border-color: var(--border);
+  font-size: inherit;
+  line-height: 1;
+  padding: 0 6px;
+}
+
+.btn-overflow:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.session-overflow-menu {
+  display: none;
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 50;
+  margin-top: 4px;
+  min-width: 140px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  padding: 4px 0;
+}
+
+.session-overflow-menu.open {
+  display: flex;
+  flex-direction: column;
+}
+
+.overflow-item {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+  text-align: left;
+  transition: background var(--transition-fast);
+}
+
+.overflow-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.overflow-item.visible {
+  display: flex;
+}
+
+.overflow-restart {
+  color: var(--accent);
+}
+
+.overflow-restart:hover {
+  background: rgba(192, 132, 252, 0.1);
+}
+
+.overflow-remove:hover {
   color: var(--state-failed);
-  border-color: rgba(239, 68, 68, 0.3);
   background: rgba(239, 68, 68, 0.1);
 }
 

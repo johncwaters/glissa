@@ -198,6 +198,17 @@ class PatternDetector extends EventEmitter {
     this._resetSilenceTimer();
   }
 
+  // Returns true if the last PTY output was an incomplete line (no trailing newline).
+  // After prolonged silence, this strongly signals a prompt waiting for input.
+  hasPendingContent() {
+    return this._pendingLine.trim().length > 0;
+  }
+
+  // Returns the current pending (incomplete) line, trimmed.
+  getPendingLine() {
+    return this._pendingLine.trim();
+  }
+
   // -------------------------------------------------------------------------
   // Private helpers
   // -------------------------------------------------------------------------
@@ -696,6 +707,48 @@ if (require.main === module) {
       assert('chrome+DEC: not cancelled', det, null);
       await delay(60);
       assert('chrome+DEC: fires after silence — layer', det?.layer, 1);
+    }
+
+    // ---- hasPendingContent / getPendingLine (Layer 4 support) ----
+    console.log('\nhasPendingContent / getPendingLine:');
+
+    // Pending content after incomplete line
+    {
+      const d = makeDetector();
+      d.feed('> ');
+      assert('hasPendingContent: true after incomplete line', d.hasPendingContent(), true);
+      assert('getPendingLine: returns trimmed pending', d.getPendingLine(), '>');
+    }
+
+    // No pending content after complete line
+    {
+      const d = makeDetector();
+      d.feed('All done.\n');
+      assert('hasPendingContent: false after newline-terminated output', d.hasPendingContent(), false);
+      assert('getPendingLine: empty after newline-terminated output', d.getPendingLine(), '');
+    }
+
+    // Pending content with short prompt character
+    {
+      const d = makeDetector();
+      d.feed('❯ ');
+      assert('hasPendingContent: true for short prompt char', d.hasPendingContent(), true);
+    }
+
+    // Reset clears pending content
+    {
+      const d = makeDetector();
+      d.feed('Enter name: ');
+      assert('hasPendingContent: true before reset', d.hasPendingContent(), true);
+      d.reset();
+      assert('hasPendingContent: false after reset', d.hasPendingContent(), false);
+    }
+
+    // Whitespace-only pending line is not considered content
+    {
+      const d = makeDetector();
+      d.feed('   ');
+      assert('hasPendingContent: false for whitespace-only', d.hasPendingContent(), false);
     }
 
     console.log(`\n${passed} passed, ${failed} failed`);

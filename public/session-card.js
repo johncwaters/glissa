@@ -61,7 +61,10 @@ function tryLoadWebGL(ui) {
 
 function updateButtonVisibility(ui) {
   const state = ui.currentState;
-  ui.btnRestart.classList.toggle('visible', KILLABLE_STATES.includes(state) || RESTARTABLE_STATES.includes(state));
+  const canRestart = KILLABLE_STATES.includes(state) || RESTARTABLE_STATES.includes(state);
+  ui.btnRestart.classList.toggle('visible', canRestart);
+  // Remove is always available
+  ui.btnRemove.classList.add('visible');
 }
 
 function connectDataWs(sessionName, ui, term) {
@@ -108,7 +111,7 @@ function buildCardDOM(sessionName, initialState) {
   const header = el('div', 'session-card-header');
 
   const btnMinimize = el('span', 'btn-minimize', '\u25bc');
-  btnMinimize.title = 'Minimize / Expand';
+  btnMinimize.title = 'Collapse';
 
   const nameEl = el('span', 'session-name', sessionName);
   const badge = makeBadge(state);
@@ -118,23 +121,28 @@ function buildCardDOM(sessionName, initialState) {
   // Action buttons
   const actions = el('div', 'session-actions');
 
-  const btnMaximize = el('button', 'btn-action btn-maximize visible', 'Maximize');
-  btnMaximize.title = 'Maximize this session';
+  const btnMaximize = el('button', 'btn-action btn-maximize visible', 'Full Screen');
+  btnMaximize.title = 'Enter full screen';
 
-  const btnRestart = el('button', 'btn-action btn-restart', 'Restart');
-  btnRestart.title = 'Restart this session';
+  // Overflow menu (Restart + Remove tucked away to prevent accidental clicks)
+  const overflow = el('div', 'session-overflow');
+  const btnOverflow = el('button', 'btn-action btn-overflow visible', '\u22ee');
+  btnOverflow.title = 'More actions';
+  const overflowMenu = el('div', 'session-overflow-menu');
 
-  const btnRemove = el('button', 'btn-action btn-remove visible', 'Remove');
-  btnRemove.title = 'Remove this session';
+  const btnRestart = el('button', 'overflow-item overflow-restart', 'Restart');
+  const btnRemove = el('button', 'overflow-item overflow-remove', 'Remove');
+  overflowMenu.append(btnRestart, btnRemove);
+  overflow.append(btnOverflow, overflowMenu);
 
-  actions.append(btnMaximize, btnRestart, btnRemove);
+  actions.append(btnMaximize, overflow);
   header.append(btnMinimize, nameEl, badge, spacer, actions);
 
   const termWrap = el('div', 'terminal-wrap');
 
   card.append(header, termWrap);
 
-  return { card, header, badge, nameEl, btnRestart, btnRemove, btnMinimize, btnMaximize, termWrap };
+  return { card, header, badge, nameEl, btnRestart, btnRemove, btnMinimize, btnMaximize, btnOverflow, overflowMenu, termWrap };
 }
 
 // ── Minimize toggle ──────────────────────────────────────────
@@ -159,7 +167,7 @@ function toggleMinimize(sessionName) {
   // Normal minimize/expand toggle
   const nowMinimized = ui.card.classList.toggle('minimized');
   ui.btnMinimize.textContent = nowMinimized ? '\u25b2' : '\u25bc';
-  ui.btnMinimize.title = nowMinimized ? 'Expand' : 'Minimize';
+  ui.btnMinimize.title = nowMinimized ? 'Expand' : 'Collapse';
   if (nowMinimized) {
     minimizedBar.appendChild(ui.card);
   } else {
@@ -183,7 +191,7 @@ function _performMinimize(name, ui) {
 function _performExpand(name, ui) {
   ui.card.classList.remove('minimized');
   ui.btnMinimize.textContent = '\u25bc';
-  ui.btnMinimize.title = 'Minimize';
+  ui.btnMinimize.title = 'Collapse';
   container.appendChild(ui.card);
   setMinimized(name, false);
   if (ui.needsWebGLReload) tryLoadWebGL(ui);
@@ -194,8 +202,8 @@ function _performExpand(name, ui) {
 
 function _applyMaximized(ui, sessionName) {
   ui.card.classList.add('maximized');
-  ui.btnMaximize.textContent = 'Minimize';
-  ui.btnMaximize.title = 'Minimize all sessions';
+  ui.btnMaximize.textContent = 'Exit Full Screen';
+  ui.btnMaximize.title = 'Exit full screen mode';
   _maximizedSession = sessionName;
   requestAnimationFrame(() => ui.fitAddon.fit());
 }
@@ -207,8 +215,8 @@ function _swapMaximized(sessionName) {
 
   if (oldUi && !oldUi.card.classList.contains('minimized')) {
     oldUi.card.classList.remove('maximized');
-    oldUi.btnMaximize.textContent = 'Maximize';
-    oldUi.btnMaximize.title = 'Maximize this session';
+    oldUi.btnMaximize.textContent = 'Full Screen';
+    oldUi.btnMaximize.title = 'Enter full screen';
     _performMinimize(_maximizedSession, oldUi);
     _preMaximizeSessions.add(_maximizedSession);
   }
@@ -259,8 +267,8 @@ export function exitMaximizeMode() {
   const ui = sessionUIs.get(_maximizedSession);
   if (ui) {
     ui.card.classList.remove('maximized');
-    ui.btnMaximize.textContent = 'Maximize';
-    ui.btnMaximize.title = 'Maximize this session';
+    ui.btnMaximize.textContent = 'Full Screen';
+    ui.btnMaximize.title = 'Enter full screen';
   }
   _maximizedSession = null;
 
@@ -367,7 +375,7 @@ _dropZone.addEventListener('drop', (e) => {
   const sessionName = _dragSource.card.dataset.session;
   _dragSource.card.classList.remove('minimized');
   _dragSource.btnMinimize.textContent = '\u25bc';
-  _dragSource.btnMinimize.title = 'Minimize';
+  _dragSource.btnMinimize.title = 'Collapse';
   container.appendChild(_dragSource.card);
   setMinimized(sessionName, false);
   if (_dragSource.needsWebGLReload) tryLoadWebGL(_dragSource);
@@ -396,7 +404,7 @@ function restoreFromMinimizedBar(target, before) {
   const sessionName = _dragSource.card.dataset.session;
   _dragSource.card.classList.remove('minimized');
   _dragSource.btnMinimize.textContent = '\u25bc';
-  _dragSource.btnMinimize.title = 'Minimize';
+  _dragSource.btnMinimize.title = 'Collapse';
 
   if (target && target !== _dragSource.card) {
     container.insertBefore(_dragSource.card, before ? target : target.nextSibling);
@@ -524,14 +532,33 @@ function setupTerminal(termWrap, ui) {
 
 function wireCardEvents(ui, sessionName) {
   ui.btnRestart.addEventListener('click', () => {
+    ui.overflowMenu.classList.remove('open');
     const type = KILLABLE_STATES.includes(ui.currentState) ? 'force-restart' : 'restart';
     sendControlMsg({ type, session: sessionName });
   });
 
   ui.btnRemove.addEventListener('click', () => {
+    ui.overflowMenu.classList.remove('open');
     if (!confirm(`Remove session "${sessionName}"?`)) return;
     sendControlMsg({ type: 'remove-session', session: sessionName });
   });
+
+  // Overflow menu toggle
+  ui.btnOverflow.addEventListener('click', (e) => {
+    e.stopPropagation();
+    // Close any other open overflow menus first
+    for (const [, other] of sessionUIs) {
+      if (other !== ui) other.overflowMenu.classList.remove('open');
+    }
+    ui.overflowMenu.classList.toggle('open');
+  });
+
+  // Close overflow menu on outside click (tied to session lifetime via AbortController)
+  document.addEventListener('click', (e) => {
+    if (!ui.overflowMenu.contains(e.target) && e.target !== ui.btnOverflow) {
+      ui.overflowMenu.classList.remove('open');
+    }
+  }, { signal: ui.abortController.signal });
 
   // Click inside terminal clears notification status when WAITING or COMPLETE
   ui.termWrap.addEventListener('mousedown', () => {
@@ -540,11 +567,10 @@ function wireCardEvents(ui, sessionName) {
     }
   });
 
-  // Maximize button
+  // Full screen button
   ui.btnMaximize.addEventListener('click', () => {
     toggleMaximize(sessionName);
   });
-
 }
 
 function wireTerminalIO(ui, sessionName) {
@@ -644,9 +670,12 @@ export function createSessionCard(sessionName, initialState) {
     nameEl: dom.nameEl,
     btnMinimize: dom.btnMinimize,
     btnMaximize: dom.btnMaximize,
+    btnOverflow: dom.btnOverflow,
+    overflowMenu: dom.overflowMenu,
     termWrap: dom.termWrap,
     btnRestart: dom.btnRestart,
     btnRemove: dom.btnRemove,
+    abortController: new AbortController(),
     currentState: initialState || STATES.INITIALIZING,
   };
   sessionUIs.set(sessionName, ui);
@@ -674,6 +703,7 @@ export function removeSessionCard(sessionName) {
   if (_maximizedSession === sessionName) exitMaximizeMode();
   _preMaximizeSessions.delete(sessionName);
 
+  if (ui.abortController) ui.abortController.abort();
   if (ui.dataWs?.readyState <= WebSocket.OPEN) ui.dataWs.close();
   if (ui.term) ui.term.dispose();
   if (ui.card) ui.card.remove();
