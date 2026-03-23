@@ -1,8 +1,8 @@
 'use strict';
 
 const { EventEmitter } = require('node:events');
-const { NotificationManager } = require('./notification-manager');
-const { NOTIFICATION_STATES: NS } = require('./shared/notification-states');
+const { NotificationManager } = require('../notification-manager');
+const { NOTIFICATION_STATES: NS } = require('../shared/notification-states');
 
 let passed = 0;
 let failed = 0;
@@ -311,7 +311,7 @@ async function runAsyncTests() {
   const mockSession = new EventEmitter();
   mockSession.name = 'test-session';
 
-  const STATES = require('./shared/states').STATES;
+  const STATES = require('../shared/states').STATES;
   mockSession.on('state-change', ({ from, to }) => {
     if (to === STATES.WAITING) {
       nm6.trigger('test-session', 'waiting', `test-session needs your input`);

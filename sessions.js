@@ -173,6 +173,16 @@ class Session extends EventEmitter {
     this._lastUserInputAt = 0;
     this._inputGraceMs = inputGraceSeconds * 1000;
 
+    this._captureStream = null;
+    if (process.env.GLISSA_CAPTURE_PTY === '1') {
+      const captureDir = require('node:path').join(__dirname, '.pty-capture');
+      fs.mkdirSync(captureDir, { recursive: true });
+      this._captureStream = fs.createWriteStream(
+        require('node:path').join(captureDir, `${name}-${Date.now()}.jsonl`),
+        { flags: 'a' }
+      );
+    }
+
     this.patternDetector = new PatternDetector(promptDetectionMs);
     this.patternDetector.on('prompt-detected', (detection) => {
       console.log(`[session:${this.name}] prompt-detected: layer=${detection.layer} pattern=${detection.pattern} line=${JSON.stringify(detection.line)}`);
@@ -315,6 +325,12 @@ class Session extends EventEmitter {
   }
 
   _handlePtyData(data) {
+    if (this._captureStream) {
+      this._captureStream.write(JSON.stringify({
+        ts: Date.now(), session: this.name, len: data.length, data
+      }) + '\n');
+    }
+
     // First-output detection (pre-dispatch, only fires once in STARTING)
     if (this.state === STATES.STARTING && !this._receivedFirstOutput) {
       this._receivedFirstOutput = true;
@@ -325,7 +341,16 @@ class Session extends EventEmitter {
 
     // State-driven data handling via lookup table
     const handler = DATA_HANDLERS[this.state];
-    if (handler) handler(this, data);
+    if (handler) {
+      try {
+        handler(this, data);
+      } catch (err) {
+        console.error(`[session:${this.name}] data handler error: ${err.message}`);
+        if (this.listenerCount('error') > 0) {
+          this.emit('error', err);
+        }
+      }
+    }
 
     // Buffer for late-joining data WS clients
     this._outputBuffer.push(data);
