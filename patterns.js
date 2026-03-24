@@ -12,6 +12,7 @@ const EXACT_MATCHES = [
   'Do you want to proceed?',
   'Allow this action?',
   'Press Enter to confirm',
+  'Enter to confirm',
   '(y/n)',
   '[yes/no]',
   // Additional known Claude Code permission prompts
