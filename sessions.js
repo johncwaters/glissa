@@ -5,8 +5,62 @@ const { execSync } = require('node:child_process');
 const { PatternDetector } = require('./patterns');
 const { STATES } = require('./shared/states');
 
+
 const KILL_POLL_INTERVAL_MS = 200;
 const KILL_MAX_WAIT_MS = 3000;
+
+// ---------------------------------------------------------------------------
+// Layer 4 filters — pending content that looks like UI chrome, not a prompt.
+// These fire only from the idle-timer safety net (idle_pending_content).
+// ---------------------------------------------------------------------------
+
+const LAYER4_CHROME_STRINGS = [
+  '⏵⏵',              // Claude Code "accept edits" hint
+  'accept edits',
+  'shift+tab to cycle',
+  'Pasting text',
+  'Hyperspacing',
+  'Galloping',        // Claude Code animated spinner phase
+  'Brewed for',       // Claude Code completion summary
+  '/effort',          // effort indicator (e.g. "◐ medium · /effort")
+  '[OMC#',            // OMC HUD status line
+];
+
+const LAYER4_SPINNER = /[◐◑◒◓⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏✻✢✶✽]/;
+
+// OMC HUD fragments that survive ANSI stripping in garbled redraws
+const LAYER4_HUD_PATTERNS = [
+  /session:\d+m/,     // e.g. "session:0m", "session:5m"
+  /ctx:\d+%/,         // e.g. "ctx:0%", "ctx:42%"
+  /wk:\d+%/,          // e.g. "wk:33%"
+];
+
+// Box-drawing characters used in Claude Code's separator/border lines
+const BOX_DRAWING = /[─│┌┐└┘├┤┬┴┼╭╮╯╰━]/g;
+
+function isLayer4Chrome(line) {
+  // Known chrome substrings
+  if (LAYER4_CHROME_STRINGS.some(s => line.includes(s))) return true;
+
+  // Spinner characters anywhere in the line
+  if (LAYER4_SPINNER.test(line)) return true;
+
+  // OMC HUD fragments in garbled redraws
+  if (LAYER4_HUD_PATTERNS.some(re => re.test(line))) return true;
+
+  // Line is mostly box-drawing characters (>50% of non-whitespace)
+  const nonWs = line.replace(/\s/g, '');
+  if (nonWs.length > 0) {
+    const boxCount = (nonWs.match(BOX_DRAWING) || []).length;
+    if (boxCount / nonWs.length > 0.5) return true;
+  }
+
+  // Garbled screen redraw: very little non-whitespace content spread across a long line
+  // e.g. "7                                      5"
+  if (line.length > 20 && nonWs.length < 10) return true;
+
+  return false;
+}
 
 const TRANSITIONS = Object.freeze({
   [STATES.INITIALIZING]: {
@@ -91,17 +145,21 @@ const DATA_HANDLERS = {
     session._resetIdleTimer();
   },
   [STATES.IDLE](session, data) {
+    session.patternDetector.reset();
     session.transition('new_output');
-    // After transitioning to RUNNING, feed and start idle timer
+    // After transitioning to RUNNING, apply a brief grace period so
+    // resize-triggered redraws (e.g. browser connect) don't immediately
+    // match Claude's idle prompt as "needs input".
     if (session.state === STATES.RUNNING) {
-      session.patternDetector.feed(data);
+      session._startStartupGrace(3000);
       session._resetIdleTimer();
     }
   },
   [STATES.COMPLETE](session, data) {
+    session.patternDetector.reset();
     session.transition('new_output');
     if (session.state === STATES.RUNNING) {
-      session.patternDetector.feed(data);
+      session._startStartupGrace(3000);
       session._resetIdleTimer();
     }
   },
@@ -173,21 +231,23 @@ class Session extends EventEmitter {
     this._lastUserInputAt = 0;
     this._inputGraceMs = inputGraceSeconds * 1000;
 
-    this._captureStream = null;
-    if (process.env.GLISSA_CAPTURE_PTY === '1') {
-      const captureDir = require('node:path').join(__dirname, '.pty-capture');
-      fs.mkdirSync(captureDir, { recursive: true });
-      this._captureStream = fs.createWriteStream(
-        require('node:path').join(captureDir, `${name}-${Date.now()}.jsonl`),
-        { flags: 'a' }
-      );
-    }
+    this._promptDetectionMs = promptDetectionMs;
+    this._confirmationMs = 300; // PatternDetector default, recorded for capture header
+    this._recorder = null; // Set via setRecorder() after construction
 
     this.patternDetector = new PatternDetector(promptDetectionMs);
     this.patternDetector.on('prompt-detected', (detection) => {
       console.log(`[session:${this.name}] prompt-detected: layer=${detection.layer} pattern=${detection.pattern} line=${JSON.stringify(detection.line)}`);
+      // Record detection BEFORE session guards (transition may suppress it)
+      if (this._recorder) {
+        this._recorder.writeDetection(detection.layer, detection.pattern, detection.line, detection.pending);
+      }
       this.transition('prompt_detected', detection);
     });
+  }
+
+  setRecorder(recorder) {
+    this._recorder = recorder;
   }
 
   recordUserInput() {
@@ -235,6 +295,9 @@ class Session extends EventEmitter {
         timestamp: Date.now(),
         selfTransition: true
       });
+      if (this._recorder) {
+        this._recorder.writeState(from, to, event, detail);
+      }
       return true;
     }
 
@@ -262,6 +325,11 @@ class Session extends EventEmitter {
       timestamp: Date.now()
     };
     this.auditLog.push(entry);
+
+    // Record state transition
+    if (this._recorder) {
+      this._recorder.writeState(from, to, event, detail);
+    }
 
     // Emit state-change event
     this.emit('state-change', { from, to, event, detail: detail || null });
@@ -302,6 +370,21 @@ class Session extends EventEmitter {
 
     this.transition('spawn_success');
 
+    // Write capture header with all timing params
+    if (this._recorder) {
+      this._recorder.writeHeader({
+        promptDetectionMs: this._promptDetectionMs,
+        confirmationMs: this._confirmationMs,
+        attentionTimeoutMs: this.attentionTimeoutMs,
+        autoRecoverMs: this._autoRecoverMs,
+        inputGraceMs: this._inputGraceMs,
+        completeThresholdMs: this._completeThresholdMs,
+        startingWatchdogMs: this.startingWatchdogMs,
+        cols: 80,
+        rows: 24,
+      });
+    }
+
     // Start watchdog timer for STARTING state
     this._watchdogTimer = setTimeout(() => {
       this._watchdogTimer = null;
@@ -325,10 +408,8 @@ class Session extends EventEmitter {
   }
 
   _handlePtyData(data) {
-    if (this._captureStream) {
-      this._captureStream.write(JSON.stringify({
-        ts: Date.now(), session: this.name, len: data.length, data
-      }) + '\n');
+    if (this._recorder) {
+      this._recorder.writeData(data);
     }
 
     // First-output detection (pre-dispatch, only fires once in STARTING)
@@ -379,6 +460,11 @@ class Session extends EventEmitter {
       this.transition('process_exit_fail', { exitCode, signal });
     }
 
+    if (this._recorder) {
+      this._recorder.writeFooter('pty_exit', exitCode);
+      this._recorder.close();
+    }
+
     this.emit('exit', { exitCode, signal });
   }
 
@@ -387,12 +473,18 @@ class Session extends EventEmitter {
   }
 
   write(text) {
+    if (this._recorder) {
+      this._recorder.writeInput(text);
+    }
     if (this.ptyProcess) {
       this.ptyProcess.write(text);
     }
   }
 
   resize(cols, rows) {
+    if (this._recorder) {
+      this._recorder.writeResize(cols, rows);
+    }
     if (this.ptyProcess) {
       this.ptyProcess.resize(cols, rows);
     }
@@ -502,6 +594,9 @@ class Session extends EventEmitter {
     this._clearAutoRecoverTimer();
     this._clearStartupGrace();
     this.kill();
+    if (this._recorder) {
+      this._recorder.close(); // Idempotent — safe if already closed by _handlePtyExit
+    }
     this.removeAllListeners();
     if (this.patternDetector) {
       this.patternDetector.reset();
@@ -511,13 +606,13 @@ class Session extends EventEmitter {
 
   // -- Private timer helpers --
 
-  _startStartupGrace() {
+  _startStartupGrace(durationMs = 5000) {
     this._clearStartupGrace();
     this._startupGraceActive = true;
     this._startupGraceTimer = setTimeout(() => {
       this._startupGraceTimer = null;
       this._startupGraceActive = false;
-    }, 5000);
+    }, durationMs);
   }
 
   _clearStartupGrace() {
@@ -558,20 +653,45 @@ class Session extends EventEmitter {
         // Claude's idle prompt after task completion, not a mid-task input request.
         if (runDuration < this._completeThresholdMs && this.patternDetector.hasPendingContent()) {
           const pendingLine = this.patternDetector.getPendingLine();
-          console.log(
-            `[session:${this.name}] idle timer: pending content detected, treating as prompt: ${JSON.stringify(pendingLine)}`
-          );
-          this._runningStartedAt = null;
-          this.transition('prompt_detected', {
-            layer: 4,
-            pattern: 'idle_pending_content',
-            line: pendingLine
-          });
-          return;
+          if (isLayer4Chrome(pendingLine)) {
+            console.log(
+              `[session:${this.name}] idle timer: Layer 4 suppressed (UI chrome): ${JSON.stringify(pendingLine)}`
+            );
+          } else {
+            console.log(
+              `[session:${this.name}] idle timer: pending content detected, treating as prompt: ${JSON.stringify(pendingLine)}`
+            );
+            this._runningStartedAt = null;
+            this.transition('prompt_detected', {
+              layer: 4,
+              pattern: 'idle_pending_content',
+              line: pendingLine
+            });
+            return;
+          }
         }
 
         this._runningStartedAt = null;
         if (runDuration >= this._completeThresholdMs) {
+          // Long run — but check if pending content matches a known prompt pattern
+          // (layers 1/2). A prompt that arrived late in a long run should still
+          // trigger WAITING, not COMPLETE.
+          if (this.patternDetector.hasPendingContent()) {
+            const pendingLine = this.patternDetector.getPendingLine();
+            const match = this.patternDetector.checkLine(pendingLine);
+            if (match) {
+              // L1/L2 are high-confidence — don't let isLayer4Chrome override them
+              console.log(
+                `[session:${this.name}] idle timer: long run but pending content matches prompt pattern: ${JSON.stringify(match.pattern)}`
+              );
+              this.transition('prompt_detected', {
+                layer: match.layer,
+                pattern: match.pattern,
+                line: pendingLine
+              });
+              return;
+            }
+          }
           this.transition('task_complete');
         } else {
           this.transition('silence_timeout');
@@ -602,4 +722,4 @@ class Session extends EventEmitter {
   }
 }
 
-module.exports = { Session };
+module.exports = { Session, isLayer4Chrome };

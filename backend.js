@@ -30,9 +30,10 @@ const { createConfigStore } = require('./config-store');
 const { registerControlHandlers } = require('./control-handlers');
 const { NotificationManager } = require('./notification-manager');
 const { createToastChannel } = require('./channels/toast');
+const { createRecorder } = require('./session-recorder');
 
 function makeSession(project, cfg) {
-  return new Session({
+  const session = new Session({
     name: project.name,
     path: project.path,
     startingWatchdogSeconds: cfg.startingWatchdogSeconds,
@@ -42,6 +43,11 @@ function makeSession(project, cfg) {
     inputGraceSeconds: cfg.inputGraceSeconds,
     promptDetectionMs: cfg.promptDetectionMs,
   });
+  const recorder = createRecorder(project.name, cfg.capture);
+  if (recorder) {
+    session.setRecorder(recorder);
+  }
+  return session;
 }
 
 /**

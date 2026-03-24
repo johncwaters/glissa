@@ -1,0 +1,6 @@
+{"type":"header","version":1,"session":"test-tp","startedAt":1000000,"config":{"promptDetectionMs":1500,"confirmationMs":300,"attentionTimeoutMs":60000,"autoRecoverMs":3000,"inputGraceMs":5000,"completeThresholdMs":30000,"startingWatchdogMs":15000,"cols":80,"rows":24}}
+{"type":"data","ts":1001000,"len":28,"data":"Processing your request...\r\n"}
+{"type":"data","ts":1002500,"len":35,"data":"Changes applied successfully.\r\n"}
+{"type":"data","ts":1003000,"len":33,"data":"Do you want to proceed? (y/n) "}
+{"type":"detection","ts":1003300,"layer":1,"pattern":"Do you want to proceed?","line":"Do you want to proceed? (y/n)","pending":false}
+{"type":"state","ts":1003300,"from":"RUNNING","to":"WAITING","event":"prompt_detected","detail":{"layer":1,"pattern":"Do you want to proceed?","line":"Do you want to proceed? (y/n)"}}

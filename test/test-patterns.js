@@ -10,6 +10,7 @@
  */
 
 const { PatternDetector } = require('../patterns');
+const { isLayer4Chrome } = require('../sessions');
 
 let passed = 0;
 let failed = 0;
@@ -165,7 +166,7 @@ async function runAllTests() {
     const d = makeDetector(50, 30);
     let det = null;
     d.on('prompt-detected', (e) => { det = e; });
-    d.feed('Something unexpected?');
+    d.feed('Something unexpected:');
     assert('layer 3: no immediate fire', det, null);
     await delay(30);
     assert('layer 3: not yet at 30ms (below silence timeout)', det, null);
@@ -298,7 +299,7 @@ async function runAllTests() {
     let det = null;
     d.on('prompt-detected', (e) => { det = e; });
     d.updateSilenceTimeout(50);
-    d.feed('Custom timeout test?');  // no L1 match → Layer 3
+    d.feed('Custom timeout test:');  // no L1 match → Layer 3
     assert('updateSilenceTimeout: no immediate fire', det, null);
     await delay(100);
     assert('updateSilenceTimeout: fires with new timeout — layer', det?.layer, 3);
@@ -355,6 +356,18 @@ async function runAllTests() {
     assert('chrome+DEC: not cancelled', det, null);
     await delay(60);
     assert('chrome+DEC: fires after silence — layer', det?.layer, 1);
+  }
+
+  // OSC-only data (e.g. title bar update) should NOT cancel armed match
+  {
+    const d = makeDetector();
+    let det = null;
+    d.on('prompt-detected', (e) => { det = e; });
+    d.feed('Do you want to proceed?\n');
+    d.feed('\x1b]0;Some window title\x07');
+    assert('OSC-only: not cancelled', det, null);
+    await delay(60);
+    assert('OSC-only: fires after silence — layer', det?.layer, 1);
   }
 
   // ---- hasPendingContent / getPendingLine (Layer 4 support) ----
@@ -467,6 +480,44 @@ async function runAllTests() {
     await delay(120);
     assert('AC10: detection fires after updated timeout — layer', det?.layer, 3);
   }
+
+  // ---- Layer 4 chrome filter (isLayer4Chrome) ----
+  console.log('\nLayer 4 chrome filter (isLayer4Chrome):');
+
+  // False positives from real captures — all should be filtered
+  assert('L4 filter: box-drawing separator',
+    isLayer4Chrome('──────────────────────────────────────────────────────────────────────────────────────────────────────────────'), true);
+
+  assert('L4 filter: separator + Pasting text + spinner',
+    isLayer4Chrome('──────────────────────────────────────────────────────────────────────────────────────────────────────────────Pasting text…                                                                           ◐ medium · /effort⏵⏵ accept edits on (shift+tab to cycle)'), true);
+
+  assert('L4 filter: spinner + effort indicator',
+    isLayer4Chrome('◐ medium · /effort'), true);
+
+  assert('L4 filter: OMC HUD + Claude Code chrome',
+    isLayer4Chrome('[OMC#4.9.0] | 5h:75%(2h22m) wk:3…  Claude Code  as switched from npm to nat…⏵⏵ accept edits on (shift+tab to…'), true);
+
+  assert('L4 filter: garbled screen redraw (sparse digits)',
+    isLayer4Chrome('7                                      5'), true);
+
+  assert('L4 filter: garbled screen redraw with session info',
+    isLayer4Chrome('8                         session:0m | ctx:0%'), true);
+
+  // True prompts — should NOT be filtered
+  assert('L4 pass: real prompt "Enter password:"',
+    isLayer4Chrome('Enter password:'), false);
+
+  assert('L4 pass: real prompt "> "',
+    isLayer4Chrome('>'), false);
+
+  assert('L4 pass: real prompt "Do you want to proceed?"',
+    isLayer4Chrome('Do you want to proceed?'), false);
+
+  assert('L4 pass: real prompt "Select an option (1-5):"',
+    isLayer4Chrome('Select an option (1-5):'), false);
+
+  assert('L4 pass: bash prompt "user@host:~$"',
+    isLayer4Chrome('user@host:~$'), false);
 
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed > 0 ? 1 : 0);

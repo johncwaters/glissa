@@ -111,6 +111,16 @@ class PatternDetector extends EventEmitter {
         .filter(t => t.type === 'text')
         .map(t => t.content)
         .join('');
+
+      // No visible text (only ANSI/OSC control sequences like title bar updates)
+      // — treat as neutral, don't cancel or confirm the armed match.
+      if (textContent.length === 0) {
+        if (this._debug) {
+          console.log(`[pattern-debug] armed match preserved (no visible text) ts=${Date.now()}`);
+        }
+        return;
+      }
+
       if (this._isPromptChrome(textContent)) {
         if (this._debug) {
           console.log(`[pattern-debug] armed match preserved (prompt chrome) ts=${Date.now()}`);
@@ -184,6 +194,12 @@ class PatternDetector extends EventEmitter {
     return this._assembler.getPendingLine();
   }
 
+  // Public API: check a line against layers 1 and 2 without arming or emitting.
+  // Returns a detection object or null.
+  checkLine(line) {
+    return this._checkLine(line);
+  }
+
   // -------------------------------------------------------------------------
   // Private helpers
   // -------------------------------------------------------------------------
@@ -249,9 +265,11 @@ class PatternDetector extends EventEmitter {
       const rawLine = this._assembler.getRawPendingLine();
       if (/^\s{2,}/.test(rawLine) && line.length < 30) return;  // indented short line (menu item)
 
-      // Layer 3 — line ends with '?' or ':'
+      // Layer 3 — line ends with ':' (input-style prompts like "Enter password:")
+      // Excludes '?' — conversational questions are too common in AI output.
+      // Layers 1 & 2 already catch specific question-based prompts.
       const last = line.at(-1);
-      if (last === '?' || last === ':') {
+      if (last === ':') {
         if (this._debug) {
           console.log(`[pattern-debug] Layer 3 fired: ${JSON.stringify(line)} ts=${Date.now()}`);
         }

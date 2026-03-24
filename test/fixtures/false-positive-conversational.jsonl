@@ -1,0 +1,6 @@
+{"type":"header","version":1,"session":"test-fp","startedAt":2000000,"config":{"promptDetectionMs":1500,"confirmationMs":300,"attentionTimeoutMs":60000,"autoRecoverMs":3000,"inputGraceMs":5000,"completeThresholdMs":30000,"startingWatchdogMs":15000,"cols":80,"rows":24}}
+{"type":"data","ts":2001000,"len":42,"data":"I'll analyze the codebase for you.\r\n"}
+{"type":"data","ts":2002000,"len":55,"data":"Want me to begin working on this story?\r\n"}
+{"type":"data","ts":2002200,"len":48,"data":"Let me start by reading the relevant files.\r\n"}
+{"type":"data","ts":2003500,"len":36,"data":"Found 3 files that need changes.\r\n"}
+{"type":"data","ts":2004000,"len":29,"data":"Working on the first file...\r\n"}

@@ -1,0 +1,5 @@
+{"type":"header","version":1,"session":"test-l3","startedAt":3000000,"config":{"promptDetectionMs":1500,"confirmationMs":300,"attentionTimeoutMs":60000,"autoRecoverMs":3000,"inputGraceMs":5000,"completeThresholdMs":30000,"startingWatchdogMs":15000,"cols":80,"rows":24}}
+{"type":"data","ts":3001000,"len":32,"data":"Setting up configuration...\r\n"}
+{"type":"data","ts":3002500,"len":22,"data":"Enter your API key: "}
+{"type":"detection","ts":3004000,"layer":3,"pattern":"silence_heuristic","line":"Enter your API key:","pending":false}
+{"type":"state","ts":3004000,"from":"RUNNING","to":"WAITING","event":"prompt_detected","detail":{"layer":3,"pattern":"silence_heuristic","line":"Enter your API key:"}}
