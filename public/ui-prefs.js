@@ -5,7 +5,7 @@
 import { getJSON, setJSON } from './local-store.js';
 
 const STORAGE_KEY = 'glissa-ui-prefs';
-const DEFAULT_PREFS = { minimized: [], soundEnabled: true, soundId: 'coins', completedGuides: [], themeId: 'phyrexian' };
+const DEFAULT_PREFS = { minimized: [], soundEnabled: true, soundId: 'coins', completedGuides: [], themeId: 'phyrexian', layout: 'default' };
 
 function load() {
   const prefs = getJSON(STORAGE_KEY, DEFAULT_PREFS);
@@ -14,6 +14,7 @@ function load() {
   if (typeof prefs.soundId !== 'string') prefs.soundId = 'coins';
   if (!Array.isArray(prefs.completedGuides)) prefs.completedGuides = [];
   if (typeof prefs.themeId !== 'string') prefs.themeId = 'golgari';
+  if (typeof prefs.layout !== 'string') prefs.layout = 'default';
   return prefs;
 }
 
@@ -76,6 +77,16 @@ export function addCompletedGuide(id) {
     prefs.completedGuides.push(id);
     save(prefs);
   }
+}
+
+export function getLayout() {
+  return load().layout;
+}
+
+export function setLayout(id) {
+  const prefs = load();
+  prefs.layout = id;
+  save(prefs);
 }
 
 export function pruneStale(validNames) {

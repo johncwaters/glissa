@@ -29,6 +29,9 @@ const aggregateEl = document.getElementById('aggregate-status');
 let _maximizedSession = null;
 const _preMaximizeSessions = new Set(); // sessions auto-minimized by maximize
 
+let _currentLayout = 'default';
+const _preSplitSessions = new Set(); // sessions auto-minimized by split layout
+
 // ── Helpers (private) ────────────────────────────────────────
 
 function makeBadge(state) {
@@ -164,6 +167,21 @@ function toggleMinimize(sessionName) {
     return;
   }
 
+  // In split mode: expanding swaps with a visible session instead of exceeding limit
+  if (_currentLayout === 'split' && isCurrentlyMinimized) {
+    const visible = _getVisibleSessions();
+    if (visible.length >= SPLIT_MAX_VISIBLE) {
+      // Minimize the last visible session to make room
+      const evictName = visible[visible.length - 1];
+      const evictUi = sessionUIs.get(evictName);
+      if (evictUi) {
+        _performMinimize(evictName, evictUi);
+        _preSplitSessions.add(evictName);
+      }
+    }
+    _preSplitSessions.delete(sessionName);
+  }
+
   // Normal minimize/expand toggle
   const nowMinimized = ui.card.classList.toggle('minimized');
   ui.btnMinimize.textContent = nowMinimized ? '\u25b2' : '\u25bc';
@@ -291,6 +309,50 @@ export function exitMaximizeMode() {
 
 export function isMaximizeActive() {
   return _maximizedSession !== null;
+}
+
+// ── Split layout enforcement ─────────────────────────────────
+
+const SPLIT_MAX_VISIBLE = 2;
+
+function _getVisibleSessions() {
+  const visible = [];
+  for (const [name, ui] of sessionUIs) {
+    if (!ui.card.classList.contains('minimized')) visible.push(name);
+  }
+  return visible;
+}
+
+function _enforceSplitLimit() {
+  if (_currentLayout !== 'split') return;
+  const visible = _getVisibleSessions();
+  for (let i = SPLIT_MAX_VISIBLE; i < visible.length; i++) {
+    const name = visible[i];
+    const ui = sessionUIs.get(name);
+    if (ui) {
+      _performMinimize(name, ui);
+      _preSplitSessions.add(name);
+    }
+  }
+}
+
+export function setLayoutMode(layout) {
+  const prev = _currentLayout;
+  _currentLayout = layout;
+
+  if (layout === 'split' && prev !== 'split') {
+    _preSplitSessions.clear();
+    _enforceSplitLimit();
+  } else if (layout !== 'split' && prev === 'split') {
+    // Restore sessions that were auto-minimized by split mode
+    for (const name of _preSplitSessions) {
+      const ui = sessionUIs.get(name);
+      if (ui?.card.classList.contains('minimized')) {
+        _performExpand(name, ui);
+      }
+    }
+    _preSplitSessions.clear();
+  }
 }
 
 // ── Container-level drag-and-drop ────────────────────────────
@@ -690,6 +752,12 @@ export function createSessionCard(sessionName, initialState) {
   // Restore minimized state from localStorage
   if (isMinimized(sessionName)) toggleMinimize(sessionName);
 
+  // In split mode, auto-minimize if already at limit
+  if (_currentLayout === 'split' && _getVisibleSessions().length > SPLIT_MAX_VISIBLE) {
+    _performMinimize(sessionName, ui);
+    _preSplitSessions.add(sessionName);
+  }
+
   updateAggregateStatus();
   return ui;
 }
@@ -702,6 +770,7 @@ export function removeSessionCard(sessionName) {
   // Clear maximize if this session was maximized
   if (_maximizedSession === sessionName) exitMaximizeMode();
   _preMaximizeSessions.delete(sessionName);
+  _preSplitSessions.delete(sessionName);
 
   if (ui.abortController) ui.abortController.abort();
   if (ui.dataWs?.readyState <= WebSocket.OPEN) ui.dataWs.close();

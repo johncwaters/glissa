@@ -11,10 +11,10 @@ import { checkAndStartGuides, isFirstOpen, registerGuide } from './guide.js';
 import {
   applyState, createSessionCard, exitMaximizeMode, fitAllVisible,
   getSessionCount, handleSessionsReordered, hasSession, isMaximizeActive,
-  reconnectDataWs, removeSessionCard, showErrorToast, updateAggregateStatus,
+  reconnectDataWs, removeSessionCard, setLayoutMode, showErrorToast, updateAggregateStatus,
 } from './session-card.js';
 import { applyTheme } from './theme.js';
-import { getThemeId, isSoundEnabled, pruneStale, setSoundEnabled } from './ui-prefs.js';
+import { getLayout, getThemeId, isSoundEnabled, pruneStale, setLayout, setSoundEnabled } from './ui-prefs.js';
 
 // ── Apply saved theme ─────────────────────────────────────────
 
@@ -275,6 +275,39 @@ btnMute.addEventListener('click', (e) => {
   e.stopPropagation();
   setSoundEnabled(!isSoundEnabled());
   updateMuteButton();
+});
+
+// ── Layout toggle ─────────────────────────────────────────
+
+const LAYOUTS = [
+  { id: 'default', label: 'Default' },
+  { id: 'split',   label: 'Split' },
+];
+
+const btnLayout = document.getElementById('btn-layout');
+const sessionsContainer = document.getElementById('sessions-container');
+
+function applyLayout(layoutId) {
+  for (const l of LAYOUTS) {
+    sessionsContainer.classList.toggle(`layout-${l.id}`, l.id === layoutId);
+  }
+  const label = LAYOUTS.find(l => l.id === layoutId)?.label || 'Default';
+  btnLayout.innerHTML = `&#9638; Layout: ${label}`;
+  setLayoutMode(layoutId);
+  // Delay fit until after CSS reflow so terminals measure new container size
+  requestAnimationFrame(() => fitAllVisible());
+}
+
+// Apply saved layout on boot
+applyLayout(getLayout());
+
+btnLayout.addEventListener('click', (e) => {
+  e.stopPropagation();
+  const current = getLayout();
+  const idx = LAYOUTS.findIndex(l => l.id === current);
+  const next = LAYOUTS[(idx + 1) % LAYOUTS.length];
+  setLayout(next.id);
+  applyLayout(next.id);
 });
 
 // ── Window focus tracking (suppress server notifications when dashboard is visible) ──
