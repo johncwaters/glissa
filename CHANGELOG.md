@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-03-24
+
+### Added
+
+- **Split layout mode**: Two side-by-side full-height terminals for focused parallel work.
+- **Trust prompt detection**: Detect "Enter to confirm" trust prompts as needs-input events.
+
+### Changed
+
+- **ANSI processing pipeline**: Replace `stripAnsi` with a proper ANSI tokenizer + line assembler pipeline for more robust pattern detection.
+
+### Fixed
+
+- Prevent OSC sequences from cancelling armed prompt matches.
+- Minimized tab sizing and Layer 4 idle prompt false positives.
+
 ## [0.4.0] - 2026-03-21
 
 ### Added
@@ -95,6 +111,7 @@ _Skipped in changelog — incremental fixes and version bump._
 - Alert sounds for session attention events
 - CLI with `--port`, `--config`, `--help`, `--version` flags
 
+[0.5.0]: https://github.com/johncwaters/glissa/releases/tag/v0.5.0
 [0.4.0]: https://github.com/johncwaters/glissa/releases/tag/v0.4.0
 [0.3.0]: https://github.com/johncwaters/glissa/releases/tag/v0.3.0
 [0.2.0]: https://github.com/johncwaters/glissa/releases/tag/v0.2.0
