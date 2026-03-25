@@ -1,4 +1,4 @@
-<!-- Generated: 2026-03-11 | Updated: 2026-03-21 -->
+<!-- Generated: 2026-03-11 | Updated: 2026-03-24 -->
 
 # AGENTS.md — Glissa Project Map
 
@@ -15,7 +15,10 @@ Glissa is a lightweight Node.js background process that spawns and manages Claud
 | **server.js** | Production entry point — creates HTTP server, wires backend, handles SIGINT | `(none — top-level script)` |
 | **backend.js** | Express + WebSocket server factory. Wires control/data WebSocket servers, session lifecycle, config hot-reload, static serving, and graceful shutdown onto a provided HTTP server | `createBackend(httpServer, options)` |
 | **sessions.js** | Session class with 8-state machine (INITIALIZING -> STARTING -> RUNNING -> WAITING/IDLE/COMPLETE -> DONE/FAILED). Spawns Claude CLI via node-pty, PTY lifecycle, pattern detection integration, replay buffer, watchdog/idle/escalation/auto-recover timers | `Session` |
-| **patterns.js** | PatternDetector class (EventEmitter) with 3-layer prompt detection: Layer 1 (exact string matches), Layer 2 (regex patterns with blacklist), Layer 3 (silence heuristic). ANSI stripping, self-test harness | `PatternDetector` |
+| **ansi-tokenizer.js** | AnsiTokenizer class — stateful single-pass ANSI tokenizer with 5-state machine (GROUND, ESCAPE, CSI_ENTRY, OSC_STRING, CHARSET). Produces typed tokens (text, csi, osc, cr, lf, control) from raw PTY chunks. Handles cross-chunk partial sequences | `AnsiTokenizer` |
+| **line-assembler.js** | LineAssembler class — consumes AnsiTokenizer output and produces clean assembled lines. Correctly interprets CR-overwrite (`"Loading...\rPrompt?"` → `"Prompt?"`), cursor movement (CSI C/D), and erase-in-line (CSI K). Sparse character array with cursor tracking | `LineAssembler` |
+| **patterns.js** | PatternDetector class (EventEmitter) with 3-layer prompt detection: Layer 1 (exact string matches), Layer 2 (regex patterns with blacklist), Layer 3 (silence heuristic). Uses AnsiTokenizer + LineAssembler pipeline for ANSI-aware line assembly | `PatternDetector` |
+| **session-recorder.js** | SessionRecorder class — always-on JSONL recorder for PTY session data. Records header, data chunks, pattern detections, state transitions, user input, resize, and footer events. Auto-rotation at 50MB, retention cleanup (7 days default). Factory: `createRecorder(name, config)` returns null if disabled | `SessionRecorder`, `createRecorder()` |
 | **control-handlers.js** | Control WebSocket message handler registry. Handler-map dispatch pattern for all control messages (add/remove/reorder sessions, settings, kill/restart/dismiss, shutdown/restart-server, focus-change, repo scanning) | `registerControlHandlers(controlWss, deps)` |
 | **config-store.js** | Configuration storage with resolution order (--config flag -> local config.json -> ~/.glissa/config.json -> auto-seed). Atomic read-modify-write, fs.watch hot-reload with self-write filtering | `createConfigStore()`, `TIMEOUT_KEYS`, `DEFAULT_CONFIG` |
 | **notification-manager.js** | NotificationManager class (EventEmitter). Per-session notification state machine (IDLE/PENDING/DELIVERED/ESCALATED/ACKNOWLEDGED), pluggable channel delivery, focus suppression, category debounce, escalation ping-pong for WAITING notifications | `NotificationManager` |
@@ -25,7 +28,6 @@ Glissa is a lightweight Node.js background process that spawns and manages Claud
 
 | File | Purpose |
 |------|---------|
-| **test-notification-manager.js** | Self-contained test harness for NotificationManager — sync + async tests covering happy path, suppression, debounce, escalation ping-pong, multi-channel, mock Session integration. Run with `node test-notification-manager.js` |
 | **config.json** | Runtime configuration: port, timeout settings, repo roots, project definitions. Hot-reloaded by backend.js via config-store.js. Gitignored |
 | **package.json** | Project manifest (CommonJS). Dependencies: express, ws, node-pty, @xterm/*. CLI entry: `bin/glissa.js` |
 | **vite.config.js** | Vite frontend build config (ESM). Tailwind CSS plugin, backend plugin that attaches Express/WS to Vite's dev server, alias for shared/states.esm.js |
@@ -117,7 +119,7 @@ INITIALIZING -> STARTING -> RUNNING -> WAITING -> IDLE -> DONE
 
 **Layer 3: Silence Heuristic** — If incomplete line (no newline) ends with `?` or `:` and no output arrives within silenceTimeoutMs (3s default), infer prompt.
 
-All detection runs on ANSI-stripped PTY output (parallel stream, raw output untouched). A 5-second startup grace period suppresses pattern detection after first output.
+All detection runs on an ANSI-aware pipeline: raw PTY chunks → `AnsiTokenizer` (produces typed tokens) → `LineAssembler` (produces clean lines with CR-overwrite handling). This replaces the old regex-based ANSI stripping. A 5-second startup grace period suppresses pattern detection after first output.
 
 ### Notification System (NotificationManager + Channels)
 
@@ -194,6 +196,14 @@ Sessions use explicit setTimeout/setInterval with cleanup on state transitions:
 
 All timers cleared on `destroy()` to prevent leaks.
 
+### Layer 4 Filters (sessions.js)
+
+When the idle timer fires and pending content exists (`idle_pending_content` event), Layer 4 filters in `sessions.js` check whether the pending line looks like UI chrome rather than a real prompt. Strings like spinner characters, OMC HUD lines, "accept edits" hints, and effort indicators are filtered out to avoid false WAITING transitions.
+
+### Session Recording (SessionRecorder)
+
+`session-recorder.js` provides an optional always-on JSONL recording of PTY sessions. Each session can have a recorder that captures data chunks, pattern detections, state transitions, user input, and resize events. Recordings are stored in `.pty-capture/` with automatic rotation at 50MB and retention cleanup after 7 days. Enabled via `capture` config block.
+
 ### Graceful Shutdown
 
 `shutdown()` destroys all sessions, closes WebSocket servers. On Windows, `kill()` uses non-blocking poll with `taskkill /T /F` fallback after 3 seconds.
@@ -257,12 +267,6 @@ Runs PatternDetector self-test on hardcoded prompt examples.
 ### CLI Testing
 See `docs/testing-cli.md` for comprehensive manual test scenarios.
 
-### NotificationManager Tests
-```bash
-node test-notification-manager.js
-```
-Runs sync + async unit tests for NotificationManager: happy path, suppression, debounce, escalation ping-pong, multi-channel, mock Session integration.
-
 ### No Formal Test Framework
 Project uses manual testing, self-test scripts, and spike scripts. No Jest, Mocha, or similar.
 
@@ -275,7 +279,9 @@ Project uses manual testing, self-test scripts, and spike scripts. No Jest, Moch
 | Add session feature | `sessions.js` (Session class) | STATES, TRANSITIONS, GUARDS, entry/exit hooks |
 | Add/remove/reorder sessions | `control-handlers.js` | handler map, config-store save |
 | Add WebSocket message | `control-handlers.js` (handler map) | backend.js (broadcastControl) |
-| Improve prompt detection | `patterns.js` (PatternDetector) | EXACT_MATCHES, REGEX_PATTERNS, silence heuristic |
+| Improve prompt detection | `patterns.js` (PatternDetector) | EXACT_MATCHES, REGEX_PATTERNS, silence heuristic, AnsiTokenizer, LineAssembler |
+| ANSI parsing / line assembly | `ansi-tokenizer.js`, `line-assembler.js` | Token types, CR-overwrite, cursor movement |
+| Session recording | `session-recorder.js` | JSONL format, rotation, retention |
 | Fix dashboard UI | `public/session-card.js`, `public/app.js` | xterm.js setup, session card lifecycle |
 | Add notification channel | `channels/toast.js` (pattern) | `notification-manager.js` registerChannel |
 | Notification state/logic | `notification-manager.js` (NotificationManager) | `shared/notification-states.js`, `channels/` |
