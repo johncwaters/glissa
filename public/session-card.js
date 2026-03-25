@@ -567,7 +567,9 @@ function setupTerminal(termWrap, ui) {
   // Try WebGL — fall back to canvas silently
   tryLoadWebGL(ui);
 
-  // Clipboard: Ctrl+C (copy selection) / Ctrl+V (paste)
+  // Clipboard: Ctrl+C copies selection; Ctrl+V lets browser paste flow through
+  // xterm's paste event → onData (returning false skips xterm's key processing
+  // so it won't emit a raw \x16, but the browser paste event still fires)
   term.attachCustomKeyEventHandler((ev) => {
     if (ev.type !== 'keydown') return true;
     const ctrl = ev.ctrlKey || ev.metaKey;
@@ -577,11 +579,13 @@ function setupTerminal(termWrap, ui) {
       return false;
     }
     if (ctrl && ev.key === 'v') {
-      navigator.clipboard.readText().then((text) => {
-        if (text && ui.dataWs?.readyState === WebSocket.OPEN) {
-          ui.dataWs.send(JSON.stringify({ type: 'input', data: text }));
-        }
-      }).catch(() => {});
+      return false;
+    }
+    // Ctrl+Backspace: send ESC+DEL so readline/bash deletes the previous word
+    if (ctrl && ev.key === 'Backspace') {
+      if (ui.dataWs?.readyState === WebSocket.OPEN) {
+        ui.dataWs.send(JSON.stringify({ type: 'input', data: '\x1b\x7f' }));
+      }
       return false;
     }
     return true;
