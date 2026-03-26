@@ -19,6 +19,8 @@
     "notification-manager.js",
     "channels/toast.js",
     "patterns.js",
+    "ansi-tokenizer.js",
+    "line-assembler.js",
     "config-store.js",
     "control-handlers.js",
     "shared/states.js",
