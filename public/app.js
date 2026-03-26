@@ -119,10 +119,14 @@ setConnectionStateCallback((state, label) => {
 
 // ── Control message handlers ─────────────────────────────────
 
+function clearEmptyPlaceholder() {
+  const empty = document.getElementById('sessions-container').querySelector('.sessions-empty');
+  if (empty) empty.remove();
+}
+
 function handleSnapshot(sessions) {
   const container = document.getElementById('sessions-container');
-  const empty = container.querySelector('.sessions-empty');
-  if (empty) empty.remove();
+  clearEmptyPlaceholder();
 
   if (!sessions || sessions.length === 0) {
     const el = document.createElement('p');
@@ -130,19 +134,18 @@ function handleSnapshot(sessions) {
     el.textContent = 'No sessions.';
     container.appendChild(el);
     updateAggregateStatus();
-    return;
-  }
-
-  for (const s of sessions) {
-    if (hasSession(s.name)) {
-      applyState(s.name, s.state);
-    } else {
-      createSessionCard(s.name, s.state);
+  } else {
+    for (const s of sessions) {
+      if (hasSession(s.name)) {
+        applyState(s.name, s.state);
+      } else {
+        createSessionCard(s.name, s.state);
+      }
     }
-  }
 
-  pruneStale(sessions.map(s => s.name));
-  updateAggregateStatus();
+    pruneStale(sessions.map(s => s.name));
+    updateAggregateStatus();
+  }
 
   if (!_guidesChecked) {
     _guidesChecked = true;
@@ -154,6 +157,7 @@ function handleSnapshot(sessions) {
 function handleStateChange(msg) {
   // If card doesn't exist yet, create it
   if (!hasSession(msg.session)) {
+    clearEmptyPlaceholder();
     createSessionCard(msg.session, msg.to);
     return;
   }
@@ -169,9 +173,9 @@ function handleStateChange(msg) {
 const messageHandlers = {
   'snapshot':           (msg) => handleSnapshot(msg.sessions),
   'state-change':       (msg) => handleStateChange(msg),
-  'session-added':      (msg) => { if (!hasSession(msg.session)) createSessionCard(msg.session, msg.state); },
+  'session-added':      (msg) => { if (!hasSession(msg.session)) { clearEmptyPlaceholder(); createSessionCard(msg.session, msg.state); } },
   'session-removed':    (msg) => removeSessionCard(msg.session),
-  'session-modified':   (msg) => { removeSessionCard(msg.session); createSessionCard(msg.session, msg.state); },
+  'session-modified':   (msg) => { removeSessionCard(msg.session); clearEmptyPlaceholder(); createSessionCard(msg.session, msg.state); },
   'sessions-reordered': (msg) => handleSessionsReordered(msg.order),
   'error':              (msg) => showErrorToast(msg.message),
   'settings-updated':   () => {},
