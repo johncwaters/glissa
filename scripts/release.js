@@ -54,25 +54,29 @@ if (existingTags.split('\n').includes(TAG)) {
   process.exit(1);
 }
 
-// 3. Build and verify dist
+// 3. Verify all required files are in package.json "files" array
+console.log('==> Checking package files...');
+run('node scripts/check-package-files.js');
+
+// 4. Build and verify dist
 console.log('==> Building...');
 run('npm run build');
 fs.statSync('dist/index.html');
 
-// 4. Publish to npm (--ignore-scripts skips prepublishOnly to avoid double build)
+// 5. Publish to npm (--ignore-scripts skips prepublishOnly to avoid double build)
 console.log('\n==> Publishing to npm...');
 run('npm publish --ignore-scripts');
 
-// 5. Push commits to GitHub
+// 6. Push commits to GitHub
 console.log('\n==> Pushing to GitHub...');
 run('git push');
 
-// 6. Tag and push tag
+// 7. Tag and push tag
 console.log(`\n==> Tagging ${TAG}...`);
 run(`git tag ${TAG}`);
 run(`git push origin ${TAG}`);
 
-// 7. Create GitHub release from CHANGELOG (optional — requires gh CLI)
+// 8. Create GitHub release from CHANGELOG (optional — requires gh CLI)
 if (hasCommand('gh')) {
   console.log('\n==> Creating GitHub release...');
   const changelog = fs.readFileSync('CHANGELOG.md', 'utf8');

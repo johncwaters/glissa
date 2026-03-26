@@ -21,6 +21,7 @@
     "patterns.js",
     "ansi-tokenizer.js",
     "line-assembler.js",
+    "session-recorder.js",
     "config-store.js",
     "control-handlers.js",
     "shared/states.js",
@@ -58,7 +59,7 @@
     "dev:server-only": "node server.js",
     "build": "vite build",
     "preview": "vite preview",
-    "prepublishOnly": "npm run build && node -e \"require('fs').statSync('dist/index.html')\"",
+    "prepublishOnly": "node scripts/check-package-files.js && npm run build && node -e \"require('fs').statSync('dist/index.html')\"",
     "release": "node scripts/release.js"
   },
   "dependencies": {
