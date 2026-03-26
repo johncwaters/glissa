@@ -1,6 +1,6 @@
 {
   "name": "glissa",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "Spawn and manage Claude Code sessions with a browser dashboard — Windows terminal manager with real-time xterm.js streaming",
   "type": "commonjs",
   "main": "server.js",
