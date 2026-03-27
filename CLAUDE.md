@@ -96,11 +96,24 @@ Sessions spawn `claude` via `pty.spawn()` from node-pty (NOT `child_process.spaw
 - Must unset env vars before spawn: `CLAUDECODE`, `CLAUDE_CODE_SSE_PORT`, `CLAUDE_CODE_ENTRYPOINT`
 - Do NOT use `shell: true` — pass args as array
 - Terminal name: `xterm-256color`, default 80x24
+- `dangerouslySkipPermissions` flag spawns Claude with `--dangerously-skip-permissions`
+
+### Security: Trust Boundary
+
+Glissa binds to `localhost` only. Both WebSocket channels (data and control) have **no authentication** — any process on the local machine can connect. This is acceptable for a single-user dev tool but means:
+
+- Do NOT expose Glissa's port to the network (no `0.0.0.0` binding)
+- The `dangerouslySkipPermissions` option is settable via the control WebSocket; any local process can create a permissionless session
+- If network exposure is ever needed, add authentication to the control WebSocket first
+
+### Session Identity
+
+Sessions are keyed by a stable UUID (`id`), not the mutable display `name`. The `id` is auto-assigned on first load (via `ensureProjectIds`) and persisted to `config.json`. All Maps, WebSocket routes, and control messages use `id` as the primary key. The `name` is display-only and can be changed via inline rename.
 
 ### Dual WebSocket Architecture
 
-- **Data WebSocket** (`/terminals/:sessionName`): Raw PTY bytes bidirectional. One per session per client.
-- **Control WebSocket** (`/control`): JSON messages for state-change, snapshot, kill, restart.
+- **Data WebSocket** (`/terminals/:sessionId`): Raw PTY bytes bidirectional. One per session per client.
+- **Control WebSocket** (`/control`): JSON messages for state-change, snapshot, kill, restart, rename.
 - xterm.js in the browser connects to data WebSocket; control panel uses control WebSocket.
 
 ### Dashboard Rendering (xterm.js)

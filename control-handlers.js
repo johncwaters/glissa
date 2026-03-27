@@ -99,6 +99,10 @@ function registerControlHandlers(controlWss, deps) {
       return;
     }
 
+    // SECURITY: This flag spawns Claude with --dangerously-skip-permissions,
+    // allowing unrestricted file writes and shell commands without confirmation.
+    // Glissa's control WebSocket has no authentication — it trusts all localhost
+    // connections. Do not expose Glissa beyond localhost without adding auth.
     const skipPerms = !!msg.dangerouslySkipPermissions;
     const project = { id: generateProjectId(), name, path: resolvedPath };
     if (skipPerms) project.dangerouslySkipPermissions = true;
