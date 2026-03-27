@@ -253,7 +253,8 @@ html, body {
 /* ── Drag-and-drop reorder ───────────────────────────────── */
 .btn-minimize {
   cursor: pointer;
-  opacity: 0.5;
+  color: var(--text);
+  opacity: 0.7;
   padding: 0 6px;
   font-size: inherit;
   user-select: none;
@@ -266,8 +267,9 @@ html, body {
 }
 
 .btn-minimize:hover {
-  opacity: 0.9;
-  background: rgba(255, 255, 255, 0.04);
+  opacity: 1;
+  color: var(--text-head);
+  background: color-mix(in srgb, var(--text) 8%, transparent);
 }
 
 .btn-maximize {
@@ -447,8 +449,8 @@ html, body {
 }
 
 .session-card.minimized .state-badge {
-  font-size: 9px;
-  padding: 1px 8px;
+  font-size: 8px;
+  padding: 0 6px;
   margin-left: auto;
 }
 
@@ -545,12 +547,39 @@ html, body {
   transform: translateY(-1px);
 }
 
+/* ── Skip-permissions indicator ──────────────────────────── */
+.session-card[data-skip-perms] {
+  border-color: rgba(245, 158, 11, 0.25);
+  box-shadow: inset 0 0 0 1px rgba(245, 158, 11, 0.06);
+}
+
+.session-card[data-skip-perms] .session-card-header {
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.05) 0%, var(--bg-surface) 40%);
+}
+
+.perms-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 8px;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  letter-spacing: 1px;
+  padding: 0 6px;
+  border-radius: 2px;
+  background: rgba(245, 158, 11, 0.12);
+  color: #d97706;
+  border-left: 2px solid #d97706;
+  flex-shrink: 0;
+  line-height: 18px;
+}
+
 /* ── Card header ──────────────────────────────────────────── */
 .session-card-header {
   display: flex;
-  align-items: stretch;
-  gap: 8px;
-  padding: 4px 12px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 4px 0 10px;
+  min-height: 28px;
   background: var(--bg-surface);
   border-bottom: 1px solid var(--border-dim);
   font-size: 11px;
@@ -570,16 +599,14 @@ html, body {
   font-size: inherit;
   font-weight: 600;
   color: var(--text-head);
-  letter-spacing: 0.03em;
-  flex-shrink: 0;
+  letter-spacing: 0.02em;
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   display: inline-flex;
   align-items: center;
-}
-
-.session-name::before {
-  content: '$';
-  color: var(--text-muted);
-  margin-right: 6px;
 }
 
 .session-header-spacer {
@@ -590,16 +617,15 @@ html, body {
 .state-badge {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 0 10px;
-  border-radius: 99px;
-  font-size: inherit;
+  gap: 5px;
+  padding: 0 8px;
+  border-radius: 2px;
+  font-size: 9px;
   font-family: var(--font-mono);
-  font-weight: 600;
-  letter-spacing: 0.06em;
+  font-weight: 700;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
-  background: rgba(255,255,255,0.03);
-  border: 1px solid currentColor;
+  background: transparent;
   flex-shrink: 0;
   transition: color var(--transition-fast);
 }
@@ -607,8 +633,8 @@ html, body {
 .state-badge::before {
   content: '';
   display: block;
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
   border-radius: 50%;
   background: currentColor;
   flex-shrink: 0;
@@ -634,52 +660,43 @@ html, body {
 /* ── Action buttons ──────────────────────────────────────── */
 .session-actions {
   display: flex;
-  align-items: stretch;
-  gap: 6px;
+  align-items: center;
+  gap: 2px;
   flex-shrink: 0;
 }
 
 .btn-action {
   display: none;
   align-items: center;
-  gap: 4px;
-  padding: 0 10px;
-  border: 1px solid;
-  border-radius: 4px;
-  font-family: var(--font-mono);
-  font-size: inherit;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  justify-content: center;
+  width: 26px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 3px;
+  font-size: 13px;
   cursor: pointer;
   background: transparent;
-  transition: background var(--transition-fast), opacity var(--transition-fast);
+  color: var(--text);
+  transition: background var(--transition-fast), color var(--transition-fast);
 }
 
 .btn-action:hover {
-  opacity: 0.9;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-head);
+}
+
+/* Light themes: use a dark overlay instead of white */
+.session-card[data-state] .btn-action:hover {
+  background: color-mix(in srgb, var(--text) 8%, transparent);
 }
 
 .btn-action:active {
-  transform: scale(0.97);
+  transform: scale(0.93);
 }
 
-.btn-kill {
-  color: var(--state-failed);
-  border-color: rgba(239, 68, 68, 0.4);
-}
-
-.btn-kill:hover {
-  background: rgba(239, 68, 68, 0.12);
-}
-
-.btn-restart {
-  color: var(--accent);
-  border-color: rgba(192, 132, 252, 0.4);
-}
-
-.btn-restart:hover {
-  background: rgba(192, 132, 252, 0.12);
+.btn-maximize {
+  font-size: 11px;
 }
 
 .btn-action.visible {
@@ -739,16 +756,8 @@ html, body {
 }
 
 .btn-overflow {
-  color: var(--text-muted);
-  border-color: var(--border);
-  font-size: inherit;
+  font-size: 15px;
   line-height: 1;
-  padding: 0 6px;
-}
-
-.btn-overflow:hover {
-  color: var(--text);
-  background: rgba(255, 255, 255, 0.06);
 }
 
 .session-overflow-menu {

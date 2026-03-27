@@ -108,12 +108,13 @@ function sendReorder() {
 
 // ── Card DOM builder ─────────────────────────────────────────
 
-function buildCardDOM(sessionId, sessionName, initialState) {
+function buildCardDOM(sessionId, sessionName, initialState, options = {}) {
   const state = initialState || STATES.INITIALIZING;
   const card = el('div', 'session-card');
   card.dataset.id = sessionId;
   card.dataset.session = sessionName;
   card.dataset.state = state;
+  if (options.skipPerms) card.dataset.skipPerms = '';
 
   // Header
   const header = el('div', 'session-card-header');
@@ -124,12 +125,14 @@ function buildCardDOM(sessionId, sessionName, initialState) {
   const nameEl = el('span', 'session-name', sessionName);
   const badge = makeBadge(state);
   badge.classList.add('session-badge');
+  const permsBadge = options.skipPerms ? el('span', 'perms-badge', 'YOLO') : null;
+  if (permsBadge) permsBadge.title = 'Running with --dangerously-skip-permissions';
   const spacer = el('span', 'session-header-spacer');
 
   // Action buttons
   const actions = el('div', 'session-actions');
 
-  const btnMaximize = el('button', 'btn-action btn-maximize visible', 'Full Screen');
+  const btnMaximize = el('button', 'btn-action btn-maximize visible', '\u26F6');
   btnMaximize.title = 'Enter full screen';
 
   // Overflow menu (Restart + Remove tucked away to prevent accidental clicks)
@@ -145,7 +148,10 @@ function buildCardDOM(sessionId, sessionName, initialState) {
   overflow.append(btnOverflow, overflowMenu);
 
   actions.append(btnMaximize, overflow);
-  header.append(btnMinimize, nameEl, badge, spacer, actions);
+  const headerChildren = [btnMinimize, nameEl, badge];
+  if (permsBadge) headerChildren.push(permsBadge);
+  headerChildren.push(spacer, actions);
+  header.append(...headerChildren);
 
   const termWrap = el('div', 'terminal-wrap');
 
@@ -225,7 +231,7 @@ function _performExpand(id, ui) {
 
 function _applyMaximized(ui, sessionId) {
   ui.card.classList.add('maximized');
-  ui.btnMaximize.textContent = 'Exit Full Screen';
+  ui.btnMaximize.textContent = '\u2716';
   ui.btnMaximize.title = 'Exit full screen mode';
   _maximizedSession = sessionId;
   requestAnimationFrame(() => ui.fitAddon.fit());
@@ -290,7 +296,7 @@ export function exitMaximizeMode() {
   const ui = sessionUIs.get(_maximizedSession);
   if (ui) {
     ui.card.classList.remove('maximized');
-    ui.btnMaximize.textContent = 'Full Screen';
+    ui.btnMaximize.textContent = '\u26F6';
     ui.btnMaximize.title = 'Enter full screen';
   }
   _maximizedSession = null;
@@ -792,8 +798,8 @@ export function updateAggregateStatus() {
   document.title = alertCount > 0 ? `(${alertCount}) Glissa` : 'Glissa';
 }
 
-export function createSessionCard(sessionId, sessionName, initialState) {
-  const dom = buildCardDOM(sessionId, sessionName, initialState);
+export function createSessionCard(sessionId, sessionName, initialState, options = {}) {
+  const dom = buildCardDOM(sessionId, sessionName, initialState, options);
   setupDragAndDrop(dom.card, dom.header, dom.btnMinimize, sessionId);
   container.appendChild(dom.card);
 

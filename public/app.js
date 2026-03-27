@@ -139,7 +139,7 @@ function handleSnapshot(sessions) {
       if (hasSession(s.id)) {
         applyState(s.id, s.state);
       } else {
-        createSessionCard(s.id, s.name, s.state);
+        createSessionCard(s.id, s.name, s.state, { skipPerms: !!s.dangerouslySkipPermissions });
       }
     }
 
@@ -157,7 +157,7 @@ function handleSnapshot(sessions) {
 function handleStateChange(msg) {
   if (!hasSession(msg.id)) {
     clearEmptyPlaceholder();
-    createSessionCard(msg.id, msg.session, msg.to);
+    createSessionCard(msg.id, msg.session, msg.to, { skipPerms: !!msg.skipPerms });
     return;
   }
 
@@ -172,10 +172,10 @@ function handleStateChange(msg) {
 const messageHandlers = {
   'snapshot':           (msg) => handleSnapshot(msg.sessions),
   'state-change':       (msg) => handleStateChange(msg),
-  'session-added':      (msg) => { if (!hasSession(msg.id)) { clearEmptyPlaceholder(); createSessionCard(msg.id, msg.session, msg.state); } },
+  'session-added':      (msg) => { if (!hasSession(msg.id)) { clearEmptyPlaceholder(); createSessionCard(msg.id, msg.session, msg.state, { skipPerms: !!msg.skipPerms }); } },
   'session-removed':    (msg) => removeSessionCard(msg.id),
   'session-renamed':    (msg) => renameSessionCard(msg.id, msg.newName),
-  'session-modified':   (msg) => { removeSessionCard(msg.id); clearEmptyPlaceholder(); createSessionCard(msg.id, msg.session, msg.state); },
+  'session-modified':   (msg) => { removeSessionCard(msg.id); clearEmptyPlaceholder(); createSessionCard(msg.id, msg.session, msg.state, { skipPerms: !!msg.skipPerms }); },
   'sessions-reordered': (msg) => handleSessionsReordered(msg.order),
   'error':              (msg) => showErrorToast(msg.message),
   'settings-updated':   () => {},

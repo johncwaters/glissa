@@ -259,7 +259,7 @@ function createBackend(httpServer, options = {}) {
       sessions.set(project.id, sess);
       wireSessionEvents(sess);
       sess.start();
-      broadcastControl({ type: 'session-added', id: project.id, session: project.name, state: sess.state });
+      broadcastControl({ type: 'session-added', id: project.id, session: project.name, state: sess.state, skipPerms: !!sess.dangerouslySkipPermissions });
       console.log(`[config] Added session: ${project.name}`);
     }
   }
@@ -275,7 +275,7 @@ function createBackend(httpServer, options = {}) {
       sessions.set(project.id, newSess);
       wireSessionEvents(newSess);
       newSess.start();
-      broadcastControl({ type: 'session-modified', id: project.id, session: project.name, state: newSess.state });
+      broadcastControl({ type: 'session-modified', id: project.id, session: project.name, state: newSess.state, skipPerms: !!newSess.dangerouslySkipPermissions });
       console.log(`[config] Modified session: ${project.name}`);
     }
   }
