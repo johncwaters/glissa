@@ -16,6 +16,11 @@
     <input type="text" class="dialog-input" id="add-session-path" placeholder="C:\Users\...\my-project" autocomplete="off" spellcheck="false">
   </label>
 </div>
+<label class="dialog-checkbox-label" id="add-session-skip-perms-label">
+  <input type="checkbox" id="add-session-skip-perms">
+  Skip permission prompts
+  <span class="dialog-hint">Launches Claude with --dangerously-skip-permissions</span>
+</label>
 <div class="dialog-error" id="add-session-error"></div>
 <div class="dialog-actions">
   <button class="btn-dialog btn-dialog-cancel" id="add-session-cancel">Cancel</button>

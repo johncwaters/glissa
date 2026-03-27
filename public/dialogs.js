@@ -5,7 +5,7 @@ import { playAlertSound, SOUND_OPTIONS } from './alert-sound.js';
 import addSessionHTML from './components/add-session-dialog.html?raw';
 import settingsHTML from './components/settings-dialog.html?raw';
 import { sendControlMsg, sendControlRequest } from './control-ws.js';
-import { hasSession } from './session-card.js';
+import { hasSessionByName } from './session-card.js';
 import { applyTheme, getThemeList } from './theme.js';
 import { getSoundId, getThemeId, setSoundId, setThemeId } from './ui-prefs.js';
 
@@ -28,6 +28,7 @@ export function createAddSessionDialog() {
   const advancedPanel = dialog.querySelector('#add-session-advanced');
   const nameInput = dialog.querySelector('#add-session-name');
   const pathInput = dialog.querySelector('#add-session-path');
+  const skipPermsCheckbox = dialog.querySelector('#add-session-skip-perms');
   const errorEl = dialog.querySelector('#add-session-error');
   const btnCancel = dialog.querySelector('#add-session-cancel');
   const btnConfirm = dialog.querySelector('#add-session-confirm');
@@ -54,7 +55,7 @@ export function createAddSessionDialog() {
 
       let hasProjects = false;
       for (const dir of (msg.directories || [])) {
-        const projects = dir.projects.filter(p => !hasSession(p.name));
+        const projects = dir.projects.filter(p => !hasSessionByName(p.name));
         if (projects.length === 0) continue;
         const group = document.createElement('optgroup');
         group.label = dir.root;
@@ -111,12 +112,14 @@ export function createAddSessionDialog() {
       return;
     }
 
-    if (hasSession(name)) {
+    if (hasSessionByName(name)) {
       errorEl.textContent = `Session "${name}" already exists.`;
       return;
     }
 
-    sendControlMsg({ type: 'add-session', name, path: projectPath });
+    const msg = { type: 'add-session', name, path: projectPath };
+    if (skipPermsCheckbox.checked) msg.dangerouslySkipPermissions = true;
+    sendControlMsg(msg);
 
     close();
   }

@@ -29,6 +29,8 @@ function scanRepoRoots(roots) {
 /**
  * Register control WebSocket handlers using a handler-map dispatch pattern.
  * Dependencies are injected via the deps object (factory pattern).
+ *
+ * Sessions are keyed by stable `id` (UUID). The mutable `name` is display-only.
  */
 function registerControlHandlers(controlWss, deps) {
   const {
@@ -36,12 +38,28 @@ function registerControlHandlers(controlWss, deps) {
     config,
     configStore,
     broadcastControl,
+    getSession,
+    generateProjectId,
+    closeSessionDataClients,
     applyConfigReload,
     applySettingsReload,
     requestShutdown,
     requestRestart,
     handleClientFocus,
   } = deps;
+
+  /** Find a session by id (primary) with name fallback for legacy clients. */
+  function findSession(msg) {
+    // Prefer msg.id (stable identifier)
+    if (msg.id && sessions.has(msg.id)) return sessions.get(msg.id);
+    // Fallback: match by name for backward compatibility
+    if (msg.session) {
+      for (const [, sess] of sessions) {
+        if (sess.name === msg.session) return sess;
+      }
+    }
+    return null;
+  }
 
   function buildSnapshot() {
     const list = [];
@@ -67,9 +85,12 @@ function registerControlHandlers(controlWss, deps) {
       return;
     }
 
-    if (sessions.has(name)) {
-      ws.send(JSON.stringify({ type: 'error', message: `Session "${name}" already exists` }));
-      return;
+    // Check for duplicate name
+    for (const [, sess] of sessions) {
+      if (sess.name === name) {
+        ws.send(JSON.stringify({ type: 'error', message: `Session "${name}" already exists` }));
+        return;
+      }
     }
 
     const resolvedPath = path.resolve(projectPath);
@@ -78,31 +99,60 @@ function registerControlHandlers(controlWss, deps) {
       return;
     }
 
+    const skipPerms = !!msg.dangerouslySkipPermissions;
+    const project = { id: generateProjectId(), name, path: resolvedPath };
+    if (skipPerms) project.dangerouslySkipPermissions = true;
+
     const freshConfig = configStore.save(cfg => {
-      cfg.projects.push({ name, path: resolvedPath });
+      cfg.projects.push(project);
     });
     if (freshConfig) applyConfigReload(freshConfig);
-    console.log(`[control] Added session via UI: ${name}`);
+    console.log(`[control] Added session via UI: ${name}${skipPerms ? ' (skip permissions)' : ''}`);
   }
 
   function handleRemoveSession(msg, ws) {
-    const name = (msg.session || '').trim();
-
-    if (!name) {
-      ws.send(JSON.stringify({ type: 'error', message: 'Session name is required' }));
-      return;
-    }
-
-    if (!sessions.has(name)) {
-      ws.send(JSON.stringify({ type: 'error', message: `Session "${name}" not found` }));
+    const sess = findSession(msg);
+    if (!sess) {
+      ws.send(JSON.stringify({ type: 'error', message: 'Session not found' }));
       return;
     }
 
     const freshConfig = configStore.save(cfg => {
-      cfg.projects = cfg.projects.filter(p => p.name !== name);
+      cfg.projects = cfg.projects.filter(p => p.id !== sess.id);
     });
     if (freshConfig) applyConfigReload(freshConfig);
-    console.log(`[control] Removed session via UI: ${name}`);
+    console.log(`[control] Removed session via UI: ${sess.name}`);
+  }
+
+  function handleRenameSession(msg, ws) {
+    const sess = findSession(msg);
+    const newName = (msg.newName || '').trim();
+
+    if (!sess || !newName) {
+      ws.send(JSON.stringify({ type: 'error', message: 'Session and new name are required' }));
+      return;
+    }
+
+    if (!SESSION_NAME_RE.test(newName)) {
+      ws.send(JSON.stringify({ type: 'error', message: 'Session name may only contain letters, numbers, spaces, dashes, dots, and underscores (max 64 chars)' }));
+      return;
+    }
+
+    // Check for duplicate name (excluding self)
+    for (const [, other] of sessions) {
+      if (other !== sess && other.name === newName) {
+        ws.send(JSON.stringify({ type: 'error', message: `Session "${newName}" already exists` }));
+        return;
+      }
+    }
+
+    if (sess.name === newName) return;
+
+    const freshConfig = configStore.save(cfg => {
+      const project = cfg.projects.find(p => p.id === sess.id);
+      if (project) project.name = newName;
+    });
+    if (freshConfig) applyConfigReload(freshConfig);
   }
 
   function handleReorderSessions(msg, ws) {
@@ -112,7 +162,8 @@ function registerControlHandlers(controlWss, deps) {
       return;
     }
 
-    const allExist = order.every(name => sessions.has(name));
+    // order is an array of session ids
+    const allExist = order.every(id => sessions.has(id));
     if (!allExist) {
       ws.send(JSON.stringify({ type: 'error', message: 'Session list changed during reorder' }));
       broadcastControl(buildSnapshot());
@@ -121,29 +172,29 @@ function registerControlHandlers(controlWss, deps) {
 
     const entries = new Map(sessions);
     sessions.clear();
-    for (const name of order) {
-      sessions.set(name, entries.get(name));
+    for (const id of order) {
+      sessions.set(id, entries.get(id));
     }
-    for (const [name, sess] of entries) {
-      if (!sessions.has(name)) {
-        sessions.set(name, sess);
+    for (const [id, sess] of entries) {
+      if (!sessions.has(id)) {
+        sessions.set(id, sess);
       }
     }
 
     configStore.save(cfg => {
-      const projectMap = new Map(cfg.projects.map(p => [p.name, p]));
+      const projectMap = new Map(cfg.projects.map(p => [p.id, p]));
       cfg.projects = order
-        .filter(name => projectMap.has(name))
-        .map(name => projectMap.get(name));
+        .filter(id => projectMap.has(id))
+        .map(id => projectMap.get(id));
       for (const p of projectMap.values()) {
-        if (!cfg.projects.some(x => x.name === p.name)) {
+        if (!cfg.projects.some(x => x.id === p.id)) {
           cfg.projects.push(p);
         }
       }
     });
 
-    broadcastControl({ type: 'sessions-reordered', order: order });
-    console.log(`[control] Sessions reordered: ${order.join(', ')}`);
+    broadcastControl({ type: 'sessions-reordered', order });
+    console.log(`[control] Sessions reordered`);
   }
 
   function handleGetSettings(msg, ws) {
@@ -226,17 +277,19 @@ function registerControlHandlers(controlWss, deps) {
   }
 
   // Handler map — single dispatch table for all control message types
+  // Session action handlers use findSession() for id-based lookup with name fallback.
   const handlers = {
     'add-session':      handleAddSession,
     'remove-session':   handleRemoveSession,
+    'rename-session':   handleRenameSession,
     'reorder-sessions': handleReorderSessions,
     'get-settings':     handleGetSettings,
     'update-settings':  handleUpdateSettings,
     'scan-repo-roots':  handleScanRepoRoots,
-    'kill':             (msg) => { const s = sessions.get(msg.session); if (s) s.killSession(); },
-    'restart':          (msg) => { const s = sessions.get(msg.session); if (s) s.restart(); },
-    'force-restart':    (msg) => { const s = sessions.get(msg.session); if (s) s.forceRestart(); },
-    'dismiss':          (msg) => { const s = sessions.get(msg.session); if (s) s.dismiss(); },
+    'kill':             (msg) => { const s = findSession(msg); if (s) s.killSession(); },
+    'restart':          (msg) => { const s = findSession(msg); if (s) s.restart(); },
+    'force-restart':    (msg) => { const s = findSession(msg); if (s) s.forceRestart(); },
+    'dismiss':          (msg) => { const s = findSession(msg); if (s) s.dismiss(); },
     'shutdown':         handleShutdown,
     'restart-server':   handleRestart,
     'focus-change':     (msg, ws) => { if (handleClientFocus) handleClientFocus(ws, !!msg.focused); },

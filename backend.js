@@ -26,7 +26,7 @@ const express = require('express');
 const { WebSocketServer } = require('ws');
 const { Session } = require('./sessions');
 const { STATES } = require('./shared/states');
-const { createConfigStore } = require('./config-store');
+const { createConfigStore, generateProjectId, ensureProjectIds } = require('./config-store');
 const { registerControlHandlers } = require('./control-handlers');
 const { NotificationManager } = require('./notification-manager');
 const { createToastChannel } = require('./channels/toast');
@@ -34,8 +34,10 @@ const { createRecorder } = require('./session-recorder');
 
 function makeSession(project, cfg) {
   const session = new Session({
+    id: project.id,
     name: project.name,
     path: project.path,
+    dangerouslySkipPermissions: !!project.dangerouslySkipPermissions,
     startingWatchdogSeconds: cfg.startingWatchdogSeconds,
     attentionTimeoutSeconds: cfg.attentionTimeoutSeconds,
     waitingEscalationSeconds: cfg.waitingEscalationSeconds,
@@ -147,129 +149,154 @@ function createBackend(httpServer, options = {}) {
   });
 
   // --- Session management ---
+  // Sessions are keyed by stable `id` (UUID), not mutable `name`.
 
   const sessions = new Map();
   const sessionDataClients = new Map();
 
-  function closeSessionDataClients(sessionName) {
-    const clients = sessionDataClients.get(sessionName);
+  function closeSessionDataClients(sessionId) {
+    const clients = sessionDataClients.get(sessionId);
     if (clients) {
       for (const ws of clients) {
         ws.close(1001, 'Session removed');
       }
-      sessionDataClients.delete(sessionName);
+      sessionDataClients.delete(sessionId);
     }
   }
 
-  function wireSessionEvents(sess, name) {
+  /** Find a session by its id. */
+  function getSession(id) {
+    return sessions.get(id) || null;
+  }
+
+  function wireSessionEvents(sess) {
+    // All closures read sess.id (stable) and sess.name (current) dynamically.
     sess.on('error', (err) => {
-      console.error(`[${name}] error: ${err.message}`);
+      console.error(`[${sess.name}] error: ${err.message}`);
     });
 
     sess.on('exit', ({ exitCode, signal }) => {
-      console.log(`[${name}] exited (code=${exitCode}, signal=${signal})`);
+      console.log(`[${sess.name}] exited (code=${exitCode}, signal=${signal})`);
     });
 
     sess.on('state-change', ({ from, to, event }) => {
       broadcastControl({
         type: 'state-change',
-        session: name,
+        id: sess.id,
+        session: sess.name,
         from, to, event,
         timestamp: Date.now()
       });
 
       // Notification triggers: session state -> notification lifecycle
       if (to === STATES.WAITING) {
-        notificationManager.trigger(name, 'waiting', `${name} needs your input`);
+        notificationManager.trigger(sess.id, 'waiting', `${sess.name} needs your input`);
       } else if (to === STATES.COMPLETE) {
-        notificationManager.trigger(name, 'complete', `${name} finished working`);
+        notificationManager.trigger(sess.id, 'complete', `${sess.name} finished working`);
       } else if (to === STATES.FAILED) {
-        notificationManager.trigger(name, 'failed', `${name} failed`);
+        notificationManager.trigger(sess.id, 'failed', `${sess.name} failed`);
       }
 
       // Acknowledge when leaving a notification-triggering state
       if (from === STATES.WAITING || from === STATES.COMPLETE || from === STATES.FAILED) {
-        notificationManager.acknowledge(name);
+        notificationManager.acknowledge(sess.id);
       }
     });
   }
 
   for (const project of config.projects) {
     const sess = makeSession(project, config);
-    sessions.set(project.name, sess);
-    wireSessionEvents(sess, project.name);
+    sessions.set(project.id, sess);
+    wireSessionEvents(sess);
     sess.start();
   }
 
   function diffProjects(currentSessions, newProjects) {
-    const newMap = new Map(newProjects.map(p => [p.name, p]));
-    const added = [], removed = [], modified = [], unchanged = [];
+    ensureProjectIds(newProjects);
+    const newMap = new Map(newProjects.map(p => [p.id, p]));
+    const added = [], removed = [], modified = [], renamed = [], unchanged = [];
 
-    for (const [name, sess] of currentSessions) {
-      if (newMap.has(name)) {
-        const newP = newMap.get(name);
-        if (newP.path === sess.path) {
-          unchanged.push(name);
-        } else {
+    for (const [id, sess] of currentSessions) {
+      if (newMap.has(id)) {
+        const newP = newMap.get(id);
+        const pathChanged = newP.path !== sess.path;
+        const permsChanged = !!newP.dangerouslySkipPermissions !== sess.dangerouslySkipPermissions;
+        if (pathChanged || permsChanged) {
           modified.push(newP);
+        } else if (newP.name !== sess.name) {
+          renamed.push(newP);
+        } else {
+          unchanged.push(id);
         }
       } else {
-        removed.push(name);
+        removed.push(id);
       }
     }
-    for (const [name, proj] of newMap) {
-      if (!currentSessions.has(name)) {
+    for (const [id, proj] of newMap) {
+      if (!currentSessions.has(id)) {
         added.push(proj);
       }
     }
-    return { added, removed, modified, unchanged };
+    return { added, removed, modified, renamed, unchanged };
   }
 
   function _removeOldSessions(removed) {
-    for (const name of removed) {
-      const sess = sessions.get(name);
-      closeSessionDataClients(name);
+    for (const id of removed) {
+      const sess = sessions.get(id);
+      closeSessionDataClients(id);
       // INVARIANT: acknowledge BEFORE destroy — destroy() calls removeAllListeners()
-      notificationManager.acknowledge(name);
+      notificationManager.acknowledge(id);
       sess.destroy();
-      sessions.delete(name);
-      broadcastControl({ type: 'session-removed', session: name });
-      console.log(`[config] Removed session: ${name}`);
+      sessions.delete(id);
+      broadcastControl({ type: 'session-removed', id, session: sess.name });
+      console.log(`[config] Removed session: ${sess.name}`);
     }
   }
 
   function _addNewSessions(added, newConfig) {
     for (const project of added) {
       const sess = makeSession(project, { ...config, ...newConfig });
-      sessions.set(project.name, sess);
-      wireSessionEvents(sess, project.name);
+      sessions.set(project.id, sess);
+      wireSessionEvents(sess);
       sess.start();
-      broadcastControl({ type: 'session-added', session: project.name, state: sess.state });
+      broadcastControl({ type: 'session-added', id: project.id, session: project.name, state: sess.state });
       console.log(`[config] Added session: ${project.name}`);
     }
   }
 
   function _modifyChangedSessions(modified, newConfig) {
     for (const project of modified) {
-      const oldSess = sessions.get(project.name);
-      closeSessionDataClients(project.name);
+      const oldSess = sessions.get(project.id);
+      closeSessionDataClients(project.id);
       // INVARIANT: acknowledge BEFORE destroy — destroy() calls removeAllListeners()
-      notificationManager.acknowledge(project.name);
+      notificationManager.acknowledge(project.id);
       oldSess.destroy();
       const newSess = makeSession(project, { ...config, ...newConfig });
-      sessions.set(project.name, newSess);
-      wireSessionEvents(newSess, project.name);
+      sessions.set(project.id, newSess);
+      wireSessionEvents(newSess);
       newSess.start();
-      broadcastControl({ type: 'session-modified', session: project.name, state: newSess.state });
+      broadcastControl({ type: 'session-modified', id: project.id, session: project.name, state: newSess.state });
       console.log(`[config] Modified session: ${project.name}`);
     }
   }
 
+  function _renameChangedSessions(renamed) {
+    for (const project of renamed) {
+      const sess = sessions.get(project.id);
+      const oldName = sess.name;
+      sess.name = project.name;
+      broadcastControl({ type: 'session-renamed', id: project.id, oldName, newName: project.name });
+      console.log(`[config] Renamed session: ${oldName} → ${project.name}`);
+    }
+  }
+
   function applyConfigReload(newConfig) {
+    ensureProjectIds(newConfig.projects);
     const diff = diffProjects(sessions, newConfig.projects);
     _removeOldSessions(diff.removed);
     _addNewSessions(diff.added, newConfig);
     _modifyChangedSessions(diff.modified, newConfig);
+    _renameChangedSessions(diff.renamed);
     config.projects = newConfig.projects;
     applySettingsReload(newConfig);
   }
@@ -320,6 +347,8 @@ function createBackend(httpServer, options = {}) {
     config,
     configStore,
     broadcastControl,
+    getSession,
+    generateProjectId,
     makeSession,
     wireSessionEvents,
     closeSessionDataClients,
@@ -334,24 +363,24 @@ function createBackend(httpServer, options = {}) {
 
   dataWss.on('connection', (ws, req) => {
     const parts = req.url.split('/');
-    let sessionName;
+    let sessionId;
     try {
-      sessionName = decodeURIComponent(parts[parts.length - 1]);
+      sessionId = decodeURIComponent(parts[parts.length - 1]);
     } catch {
-      ws.close(1008, 'Invalid session name');
+      ws.close(1008, 'Invalid session id');
       return;
     }
-    const sess = sessions.get(sessionName);
+    const sess = sessions.get(sessionId);
 
     if (!sess) {
       ws.close(1008, 'Session not found');
       return;
     }
 
-    if (!sessionDataClients.has(sessionName)) {
-      sessionDataClients.set(sessionName, new Set());
+    if (!sessionDataClients.has(sessionId)) {
+      sessionDataClients.set(sessionId, new Set());
     }
-    sessionDataClients.get(sessionName).add(ws);
+    sessionDataClients.get(sessionId).add(ws);
 
     const replay = sess.getReplayBuffer();
     if (replay) {
@@ -375,7 +404,7 @@ function createBackend(httpServer, options = {}) {
 
       if (msg.type === 'input' && typeof msg.data === 'string') {
         if (msg.data.length > 16384) {
-          console.warn(`[data-ws] Rejected oversized input (${msg.data.length} chars) for ${sessionName}`);
+          console.warn(`[data-ws] Rejected oversized input (${msg.data.length} chars) for ${sess.name}`);
           return;
         }
         sess.write(msg.data);
@@ -395,10 +424,10 @@ function createBackend(httpServer, options = {}) {
 
     ws.on('close', () => {
       sess.removeListener('data', dataListener);
-      const clients = sessionDataClients.get(sessionName);
+      const clients = sessionDataClients.get(sessionId);
       if (clients) {
         clients.delete(ws);
-        if (clients.size === 0) sessionDataClients.delete(sessionName);
+        if (clients.size === 0) sessionDataClients.delete(sessionId);
       }
     });
   });

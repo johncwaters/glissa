@@ -205,10 +205,12 @@ const EXIT_HOOKS = {
 };
 
 class Session extends EventEmitter {
-  constructor({ name, path, startingWatchdogSeconds = 10, attentionTimeoutSeconds = 60, waitingEscalationSeconds = 300, autoRecoverSeconds = 3, inputGraceSeconds = 5, promptDetectionMs = 1500 }) {
+  constructor({ id, name, path, dangerouslySkipPermissions = false, startingWatchdogSeconds = 10, attentionTimeoutSeconds = 60, waitingEscalationSeconds = 300, autoRecoverSeconds = 3, inputGraceSeconds = 5, promptDetectionMs = 1500 }) {
     super();
+    this.id = id;
     this.name = name;
     this.path = path;
+    this.dangerouslySkipPermissions = dangerouslySkipPermissions;
     this.ptyProcess = null;
     this.state = STATES.INITIALIZING;
     this.auditLog = [];
@@ -260,8 +262,10 @@ class Session extends EventEmitter {
 
   toSnapshot() {
     return {
+      id: this.id,
       name: this.name,
       state: this.state,
+      dangerouslySkipPermissions: this.dangerouslySkipPermissions,
       auditLog: this.auditLog.slice(-100)
     };
   }
@@ -351,8 +355,9 @@ class Session extends EventEmitter {
     // On Windows, node-pty can't resolve .cmd shims directly.
     // Spawn via cmd.exe /c which handles PATH + .cmd resolution.
     const isWindows = process.platform === 'win32';
+    const claudeArgs = this.dangerouslySkipPermissions ? ['--dangerously-skip-permissions'] : [];
     const shell = isWindows ? 'cmd.exe' : 'claude';
-    const args = isWindows ? ['/c', 'claude'] : [];
+    const args = isWindows ? ['/c', 'claude', ...claudeArgs] : claudeArgs;
 
     try {
       this.ptyProcess = pty.spawn(shell, args, {

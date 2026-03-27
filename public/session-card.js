@@ -66,24 +66,28 @@ function updateButtonVisibility(ui) {
   const state = ui.currentState;
   const canRestart = KILLABLE_STATES.includes(state) || RESTARTABLE_STATES.includes(state);
   ui.btnRestart.classList.toggle('visible', canRestart);
-  // Remove is always available
+  // Rename and Remove are always available
+  ui.btnRename.classList.add('visible');
   ui.btnRemove.classList.add('visible');
 }
 
-function connectDataWs(sessionName, ui, term) {
-  const url = `ws://${location.host}/terminals/${encodeURIComponent(sessionName)}`;
+function connectDataWs(sessionId, ui, term) {
+  const url = `ws://${location.host}/terminals/${encodeURIComponent(sessionId)}`;
   const ws = new WebSocket(url);
   ui.dataWs = ws;
 
   ws.addEventListener('message', (event) => term.write(event.data));
 
   ws.addEventListener('close', () => {
-    ui.dataWs = null;
-    setTimeout(() => {
-      if (sessionUIs.has(sessionName)) {
-        connectDataWs(sessionName, ui, term);
-      }
-    }, RECONNECT_DELAY_MS);
+    // Only auto-reconnect if this ws is still the current one (not replaced by rename)
+    if (ui.dataWs === ws) {
+      ui.dataWs = null;
+      setTimeout(() => {
+        if (sessionUIs.has(sessionId)) {
+          connectDataWs(sessionId, ui, term);
+        }
+      }, RECONNECT_DELAY_MS);
+    }
   });
 
   ws.addEventListener('open', () => {
@@ -96,17 +100,18 @@ let _localReorderPending = false;
 
 function sendReorder() {
   _localReorderPending = true;
-  const gridCards = [...container.querySelectorAll('.session-card')].map(c => c.dataset.session);
-  const minCards = [...minimizedBar.querySelectorAll('.session-card')].map(c => c.dataset.session);
+  const gridCards = [...container.querySelectorAll('.session-card')].map(c => c.dataset.id);
+  const minCards = [...minimizedBar.querySelectorAll('.session-card')].map(c => c.dataset.id);
   const order = [...gridCards, ...minCards].filter(Boolean);
   sendControlMsg({ type: 'reorder-sessions', order });
 }
 
 // ── Card DOM builder ─────────────────────────────────────────
 
-function buildCardDOM(sessionName, initialState) {
+function buildCardDOM(sessionId, sessionName, initialState) {
   const state = initialState || STATES.INITIALIZING;
   const card = el('div', 'session-card');
+  card.dataset.id = sessionId;
   card.dataset.session = sessionName;
   card.dataset.state = state;
 
@@ -133,9 +138,10 @@ function buildCardDOM(sessionName, initialState) {
   btnOverflow.title = 'More actions';
   const overflowMenu = el('div', 'session-overflow-menu');
 
+  const btnRename = el('button', 'overflow-item overflow-rename', 'Rename');
   const btnRestart = el('button', 'overflow-item overflow-restart', 'Restart');
   const btnRemove = el('button', 'overflow-item overflow-remove', 'Remove');
-  overflowMenu.append(btnRestart, btnRemove);
+  overflowMenu.append(btnRename, btnRestart, btnRemove);
   overflow.append(btnOverflow, overflowMenu);
 
   actions.append(btnMaximize, overflow);
@@ -145,24 +151,24 @@ function buildCardDOM(sessionName, initialState) {
 
   card.append(header, termWrap);
 
-  return { card, header, badge, nameEl, btnRestart, btnRemove, btnMinimize, btnMaximize, btnOverflow, overflowMenu, termWrap };
+  return { card, header, badge, nameEl, btnRename, btnRestart, btnRemove, btnMinimize, btnMaximize, btnOverflow, overflowMenu, termWrap };
 }
 
 // ── Minimize toggle ──────────────────────────────────────────
 
-function toggleMinimize(sessionName) {
-  const ui = sessionUIs.get(sessionName);
+function toggleMinimize(sessionId) {
+  const ui = sessionUIs.get(sessionId);
   if (!ui) return;
   const isCurrentlyMinimized = ui.card.classList.contains('minimized');
 
   // In maximize mode: expanding a minimized session switches the maximized target
-  if (_maximizedSession && isCurrentlyMinimized && sessionName !== _maximizedSession) {
-    toggleMaximize(sessionName);
+  if (_maximizedSession && isCurrentlyMinimized && sessionId !== _maximizedSession) {
+    toggleMaximize(sessionId);
     return;
   }
 
   // Minimizing the maximized session exits maximize mode
-  if (_maximizedSession && sessionName === _maximizedSession && !isCurrentlyMinimized) {
+  if (_maximizedSession && sessionId === _maximizedSession && !isCurrentlyMinimized) {
     exitMaximizeMode();
     return;
   }
@@ -171,15 +177,14 @@ function toggleMinimize(sessionName) {
   if (_currentLayout === 'split' && isCurrentlyMinimized) {
     const visible = _getVisibleSessions();
     if (visible.length >= SPLIT_MAX_VISIBLE) {
-      // Minimize the last visible session to make room
-      const evictName = visible[visible.length - 1];
-      const evictUi = sessionUIs.get(evictName);
+      const evictId = visible[visible.length - 1];
+      const evictUi = sessionUIs.get(evictId);
       if (evictUi) {
-        _performMinimize(evictName, evictUi);
-        _preSplitSessions.add(evictName);
+        _performMinimize(evictId, evictUi);
+        _preSplitSessions.add(evictId);
       }
     }
-    _preSplitSessions.delete(sessionName);
+    _preSplitSessions.delete(sessionId);
   }
 
   // Normal minimize/expand toggle
@@ -193,42 +198,42 @@ function toggleMinimize(sessionName) {
     if (ui.needsWebGLReload) tryLoadWebGL(ui);
     requestAnimationFrame(() => ui.fitAddon.fit());
   }
-  setMinimized(sessionName, nowMinimized);
+  setMinimized(sessionId, nowMinimized);
 }
 
 // ── Minimize helpers (no toggle, no localStorage) ───────────
 
-function _performMinimize(name, ui) {
+function _performMinimize(id, ui) {
   ui.card.classList.add('minimized');
   ui.btnMinimize.textContent = '\u25b2';
   ui.btnMinimize.title = 'Expand';
   minimizedBar.appendChild(ui.card);
-  setMinimized(name, true);
+  setMinimized(id, true);
 }
 
-function _performExpand(name, ui) {
+function _performExpand(id, ui) {
   ui.card.classList.remove('minimized');
   ui.btnMinimize.textContent = '\u25bc';
   ui.btnMinimize.title = 'Collapse';
   container.appendChild(ui.card);
-  setMinimized(name, false);
+  setMinimized(id, false);
   if (ui.needsWebGLReload) tryLoadWebGL(ui);
   requestAnimationFrame(() => ui.fitAddon.fit());
 }
 
 // ── Maximize mode ───────────────────────────────────────────
 
-function _applyMaximized(ui, sessionName) {
+function _applyMaximized(ui, sessionId) {
   ui.card.classList.add('maximized');
   ui.btnMaximize.textContent = 'Exit Full Screen';
   ui.btnMaximize.title = 'Exit full screen mode';
-  _maximizedSession = sessionName;
+  _maximizedSession = sessionId;
   requestAnimationFrame(() => ui.fitAddon.fit());
 }
 
-function _swapMaximized(sessionName) {
+function _swapMaximized(sessionId) {
   const oldUi = sessionUIs.get(_maximizedSession);
-  const newUi = sessionUIs.get(sessionName);
+  const newUi = sessionUIs.get(sessionId);
   if (!newUi) return;
 
   if (oldUi && !oldUi.card.classList.contains('minimized')) {
@@ -240,43 +245,43 @@ function _swapMaximized(sessionName) {
   }
 
   if (newUi.card.classList.contains('minimized')) {
-    _performExpand(sessionName, newUi);
-    _preMaximizeSessions.delete(sessionName);
+    _performExpand(sessionId, newUi);
+    _preMaximizeSessions.delete(sessionId);
   }
 
-  _applyMaximized(newUi, sessionName);
+  _applyMaximized(newUi, sessionId);
 }
 
-function toggleMaximize(sessionName) {
-  if (_maximizedSession === sessionName) {
+function toggleMaximize(sessionId) {
+  if (_maximizedSession === sessionId) {
     exitMaximizeMode();
     return;
   }
 
   if (_maximizedSession) {
-    _swapMaximized(sessionName);
+    _swapMaximized(sessionId);
     return;
   }
 
-  const ui = sessionUIs.get(sessionName);
+  const ui = sessionUIs.get(sessionId);
   if (!ui) return;
 
-  _maximizedSession = sessionName;
+  _maximizedSession = sessionId;
   _preMaximizeSessions.clear();
 
   if (ui.card.classList.contains('minimized')) {
-    _performExpand(sessionName, ui);
+    _performExpand(sessionId, ui);
   }
 
-  for (const [name, otherUi] of sessionUIs) {
-    if (name === sessionName) continue;
+  for (const [id, otherUi] of sessionUIs) {
+    if (id === sessionId) continue;
     if (!otherUi.card.classList.contains('minimized')) {
-      _performMinimize(name, otherUi);
-      _preMaximizeSessions.add(name);
+      _performMinimize(id, otherUi);
+      _preMaximizeSessions.add(id);
     }
   }
 
-  _applyMaximized(ui, sessionName);
+  _applyMaximized(ui, sessionId);
 }
 
 export function exitMaximizeMode() {
@@ -291,10 +296,10 @@ export function exitMaximizeMode() {
   _maximizedSession = null;
 
   // Restore all auto-minimized sessions
-  for (const name of _preMaximizeSessions) {
-    const otherUi = sessionUIs.get(name);
+  for (const id of _preMaximizeSessions) {
+    const otherUi = sessionUIs.get(id);
     if (otherUi?.card.classList.contains('minimized')) {
-      _performExpand(name, otherUi);
+      _performExpand(id, otherUi);
     }
   }
   _preMaximizeSessions.clear();
@@ -317,8 +322,8 @@ const SPLIT_MAX_VISIBLE = 2;
 
 function _getVisibleSessions() {
   const visible = [];
-  for (const [name, ui] of sessionUIs) {
-    if (!ui.card.classList.contains('minimized')) visible.push(name);
+  for (const [id, ui] of sessionUIs) {
+    if (!ui.card.classList.contains('minimized')) visible.push(id);
   }
   return visible;
 }
@@ -327,11 +332,11 @@ function _enforceSplitLimit() {
   if (_currentLayout !== 'split') return;
   const visible = _getVisibleSessions();
   for (let i = SPLIT_MAX_VISIBLE; i < visible.length; i++) {
-    const name = visible[i];
-    const ui = sessionUIs.get(name);
+    const id = visible[i];
+    const ui = sessionUIs.get(id);
     if (ui) {
-      _performMinimize(name, ui);
-      _preSplitSessions.add(name);
+      _performMinimize(id, ui);
+      _preSplitSessions.add(id);
     }
   }
 }
@@ -345,10 +350,10 @@ export function setLayoutMode(layout) {
     _enforceSplitLimit();
   } else if (layout !== 'split' && prev === 'split') {
     // Restore sessions that were auto-minimized by split mode
-    for (const name of _preSplitSessions) {
-      const ui = sessionUIs.get(name);
+    for (const id of _preSplitSessions) {
+      const ui = sessionUIs.get(id);
       if (ui?.card.classList.contains('minimized')) {
-        _performExpand(name, ui);
+        _performExpand(id, ui);
       }
     }
     _preSplitSessions.clear();
@@ -380,9 +385,6 @@ function findDropTarget(x, y) {
 
   if (!closest) return { card: null, before: true };
 
-  // DOM order = visual position in CSS grid.
-  // When source is before target, removing source shifts target up,
-  // so insert after target. When source is after, insert before.
   const sourceIdx = sourceCard ? allCards.indexOf(sourceCard) : -1;
   const targetIdx = allCards.indexOf(closest);
   return { card: closest, before: sourceIdx > targetIdx };
@@ -412,7 +414,6 @@ function hideDropZone() {
   if (_dropZone.parentNode) _dropZone.remove();
 }
 
-// Track when hovering over the drop zone itself
 _dropZone.addEventListener('dragover', (e) => {
   e.preventDefault();
   e.stopPropagation();
@@ -434,12 +435,12 @@ _dropZone.addEventListener('drop', (e) => {
   hideDropZone();
   if (!_dragSource) return;
 
-  const sessionName = _dragSource.card.dataset.session;
+  const sessionId = _dragSource.card.dataset.id;
   _dragSource.card.classList.remove('minimized');
   _dragSource.btnMinimize.textContent = '\u25bc';
   _dragSource.btnMinimize.title = 'Collapse';
   container.appendChild(_dragSource.card);
-  setMinimized(sessionName, false);
+  setMinimized(sessionId, false);
   if (_dragSource.needsWebGLReload) tryLoadWebGL(_dragSource);
   requestAnimationFrame(() => _dragSource.fitAddon.fit());
   sendReorder();
@@ -463,7 +464,7 @@ container.addEventListener('dragleave', (e) => {
 });
 
 function restoreFromMinimizedBar(target, before) {
-  const sessionName = _dragSource.card.dataset.session;
+  const sessionId = _dragSource.card.dataset.id;
   _dragSource.card.classList.remove('minimized');
   _dragSource.btnMinimize.textContent = '\u25bc';
   _dragSource.btnMinimize.title = 'Collapse';
@@ -474,7 +475,7 @@ function restoreFromMinimizedBar(target, before) {
     container.appendChild(_dragSource.card);
   }
 
-  setMinimized(sessionName, false);
+  setMinimized(sessionId, false);
   if (_dragSource.needsWebGLReload) tryLoadWebGL(_dragSource);
   requestAnimationFrame(() => _dragSource.fitAddon.fit());
 }
@@ -497,13 +498,13 @@ container.addEventListener('drop', (e) => {
   sendReorder();
 });
 
-function setupDragAndDrop(card, header, btnMinimize, sessionName) {
+function setupDragAndDrop(card, header, btnMinimize, sessionId) {
   card.draggable = false;
   let didDrag = false;
 
   header.addEventListener('mousedown', (e) => {
     if (e.target.closest('.session-actions')) return;
-    if (_maximizedSession) return; // Disable drag during maximize mode
+    if (_maximizedSession) return;
     didDrag = false;
     card.draggable = true;
   });
@@ -513,18 +514,17 @@ function setupDragAndDrop(card, header, btnMinimize, sessionName) {
   });
 
   btnMinimize.addEventListener('click', () => {
-    if (!didDrag) toggleMinimize(sessionName);
+    if (!didDrag) toggleMinimize(sessionId);
   });
 
   card.addEventListener('dragstart', (e) => {
     didDrag = true;
     _droppedOnZone = false;
-    _dragSource = sessionUIs.get(sessionName);
+    _dragSource = sessionUIs.get(sessionId);
     e.dataTransfer.effectAllowed = 'move';
-    e.dataTransfer.setData('text/plain', sessionName);
+    e.dataTransfer.setData('text/plain', sessionId);
     card.classList.add('dragging');
     container.classList.add('drag-active');
-    // Show drop zone immediately when dragging from minimized bar
     if (card.classList.contains('minimized')) showDropZone();
   });
 
@@ -596,50 +596,114 @@ function setupTerminal(termWrap, ui) {
 
 // ── Card event wiring ────────────────────────────────────────
 
-function wireCardEvents(ui, sessionName) {
+function startInlineRename(ui, sessionId) {
+  // Guard: prevent double-invoke
+  if (ui.nameEl.querySelector('.session-rename-input')) return;
+
+  const nameEl = ui.nameEl;
+  const oldName = nameEl.textContent;
+
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'session-rename-input';
+  input.value = oldName;
+  input.maxLength = 64;
+
+  nameEl.textContent = '';
+  nameEl.appendChild(input);
+  input.focus();
+  input.select();
+
+  function commit() {
+    const newName = input.value.trim();
+    cleanup();
+    if (!newName || newName === oldName) {
+      nameEl.textContent = oldName;
+      return;
+    }
+    // Check for duplicate name (not id — names are display labels)
+    for (const [, other] of sessionUIs) {
+      if (other !== ui && other.card.dataset.session === newName) {
+        nameEl.textContent = oldName;
+        showErrorToast(`Session "${newName}" already exists.`);
+        return;
+      }
+    }
+    sendControlMsg({ type: 'rename-session', id: sessionId, newName });
+    nameEl.textContent = oldName; // server broadcast will apply the actual rename
+  }
+
+  function cancel() {
+    cleanup();
+    nameEl.textContent = oldName;
+  }
+
+  function cleanup() {
+    input.removeEventListener('blur', commit);
+    input.removeEventListener('keydown', onKey);
+  }
+
+  function onKey(e) {
+    if (e.key === 'Enter') { e.preventDefault(); commit(); }
+    if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+    e.stopPropagation();
+  }
+
+  input.addEventListener('blur', commit);
+  input.addEventListener('keydown', onKey);
+}
+
+// All closures capture sessionId (stable UUID). For mutable display name,
+// read ui.card.dataset.session which is updated on rename.
+function wireCardEvents(ui, sessionId) {
+  ui.btnRename.addEventListener('click', () => {
+    ui.overflowMenu.classList.remove('open');
+    startInlineRename(ui, sessionId);
+  });
+
+  ui.nameEl.addEventListener('dblclick', (e) => {
+    e.preventDefault();
+    startInlineRename(ui, sessionId);
+  });
+
   ui.btnRestart.addEventListener('click', () => {
     ui.overflowMenu.classList.remove('open');
     const type = KILLABLE_STATES.includes(ui.currentState) ? 'force-restart' : 'restart';
-    sendControlMsg({ type, session: sessionName });
+    sendControlMsg({ type, id: sessionId });
   });
 
   ui.btnRemove.addEventListener('click', () => {
     ui.overflowMenu.classList.remove('open');
-    if (!confirm(`Remove session "${sessionName}"?`)) return;
-    sendControlMsg({ type: 'remove-session', session: sessionName });
+    if (!confirm(`Remove session "${ui.card.dataset.session}"?`)) return;
+    sendControlMsg({ type: 'remove-session', id: sessionId });
   });
 
-  // Overflow menu toggle
   ui.btnOverflow.addEventListener('click', (e) => {
     e.stopPropagation();
-    // Close any other open overflow menus first
     for (const [, other] of sessionUIs) {
       if (other !== ui) other.overflowMenu.classList.remove('open');
     }
     ui.overflowMenu.classList.toggle('open');
   });
 
-  // Close overflow menu on outside click (tied to session lifetime via AbortController)
   document.addEventListener('click', (e) => {
     if (!ui.overflowMenu.contains(e.target) && e.target !== ui.btnOverflow) {
       ui.overflowMenu.classList.remove('open');
     }
   }, { signal: ui.abortController.signal });
 
-  // Click inside terminal clears notification status when WAITING or COMPLETE
   ui.termWrap.addEventListener('mousedown', () => {
     if (ui.currentState === STATES.WAITING || ui.currentState === STATES.COMPLETE) {
-      sendControlMsg({ type: 'dismiss', session: sessionName });
+      sendControlMsg({ type: 'dismiss', id: sessionId });
     }
   });
 
-  // Full screen button
   ui.btnMaximize.addEventListener('click', () => {
-    toggleMaximize(sessionName);
+    toggleMaximize(sessionId);
   });
 }
 
-function wireTerminalIO(ui, sessionName) {
+function wireTerminalIO(ui, sessionId) {
   ui.term.onData((data) => {
     if (ui.dataWs?.readyState === WebSocket.OPEN) {
       ui.dataWs.send(JSON.stringify({ type: 'input', data }));
@@ -652,21 +716,29 @@ function wireTerminalIO(ui, sessionName) {
     }
   });
 
-  connectDataWs(sessionName, ui, ui.term);
+  connectDataWs(sessionId, ui, ui.term);
 }
 
 // ── Public API ────────────────────────────────────────────────
+// All public functions accept session `id` (stable UUID).
 
-export function hasSession(name) {
-  return sessionUIs.has(name);
+export function hasSession(id) {
+  return sessionUIs.has(id);
+}
+
+export function hasSessionByName(name) {
+  for (const [, ui] of sessionUIs) {
+    if (ui.card.dataset.session === name) return true;
+  }
+  return false;
 }
 
 export function getSessionCount() {
   return sessionUIs.size;
 }
 
-export function reconnectDataWs(name) {
-  const ui = sessionUIs.get(name);
+export function reconnectDataWs(id) {
+  const ui = sessionUIs.get(id);
   if (ui?.dataWs) {
     ui.dataWs.close(); // close triggers auto-reconnect via the close handler
   }
@@ -720,9 +792,9 @@ export function updateAggregateStatus() {
   document.title = alertCount > 0 ? `(${alertCount}) Glissa` : 'Glissa';
 }
 
-export function createSessionCard(sessionName, initialState) {
-  const dom = buildCardDOM(sessionName, initialState);
-  setupDragAndDrop(dom.card, dom.header, dom.btnMinimize, sessionName);
+export function createSessionCard(sessionId, sessionName, initialState) {
+  const dom = buildCardDOM(sessionId, sessionName, initialState);
+  setupDragAndDrop(dom.card, dom.header, dom.btnMinimize, sessionId);
   container.appendChild(dom.card);
 
   const ui = {
@@ -739,42 +811,50 @@ export function createSessionCard(sessionName, initialState) {
     btnOverflow: dom.btnOverflow,
     overflowMenu: dom.overflowMenu,
     termWrap: dom.termWrap,
+    btnRename: dom.btnRename,
     btnRestart: dom.btnRestart,
     btnRemove: dom.btnRemove,
     abortController: new AbortController(),
     currentState: initialState || STATES.INITIALIZING,
   };
-  sessionUIs.set(sessionName, ui);
+  sessionUIs.set(sessionId, ui);
 
   setupTerminal(dom.termWrap, ui);
 
-  wireCardEvents(ui, sessionName);
+  wireCardEvents(ui, sessionId);
   updateButtonVisibility(ui);
 
-  wireTerminalIO(ui, sessionName);
+  wireTerminalIO(ui, sessionId);
 
   // Restore minimized state from localStorage
-  if (isMinimized(sessionName)) toggleMinimize(sessionName);
+  if (isMinimized(sessionId)) toggleMinimize(sessionId);
 
   // In split mode, auto-minimize if already at limit
   if (_currentLayout === 'split' && _getVisibleSessions().length > SPLIT_MAX_VISIBLE) {
-    _performMinimize(sessionName, ui);
-    _preSplitSessions.add(sessionName);
+    _performMinimize(sessionId, ui);
+    _preSplitSessions.add(sessionId);
   }
 
   updateAggregateStatus();
   return ui;
 }
 
-export function removeSessionCard(sessionName) {
-  const ui = sessionUIs.get(sessionName);
+export function renameSessionCard(sessionId, newName) {
+  const ui = sessionUIs.get(sessionId);
+  if (!ui) return;
+  // Only update the display name — id stays the same, no re-keying needed
+  ui.card.dataset.session = newName;
+  ui.nameEl.textContent = newName;
+}
+
+export function removeSessionCard(sessionId) {
+  const ui = sessionUIs.get(sessionId);
   if (!ui) return;
 
-  sessionUIs.delete(sessionName);
-  // Clear maximize if this session was maximized
-  if (_maximizedSession === sessionName) exitMaximizeMode();
-  _preMaximizeSessions.delete(sessionName);
-  _preSplitSessions.delete(sessionName);
+  sessionUIs.delete(sessionId);
+  if (_maximizedSession === sessionId) exitMaximizeMode();
+  _preMaximizeSessions.delete(sessionId);
+  _preSplitSessions.delete(sessionId);
 
   if (ui.abortController) ui.abortController.abort();
   if (ui.dataWs?.readyState <= WebSocket.OPEN) ui.dataWs.close();
@@ -799,8 +879,8 @@ function _handleRestartTransition(ui, prevState) {
   }
 }
 
-export function applyState(sessionName, state) {
-  const ui = sessionUIs.get(sessionName);
+export function applyState(sessionId, state) {
+  const ui = sessionUIs.get(sessionId);
   if (!ui) return;
 
   const prevState = ui.currentState;
@@ -812,31 +892,24 @@ export function applyState(sessionName, state) {
 
   updateButtonVisibility(ui);
 
-  // Sound alert on WAITING transition
   if (state === STATES.WAITING && prevState !== STATES.WAITING) {
     if (isSoundEnabled()) playAlertSound(getSoundId());
   }
 
-  // Completion: flash animation, sound, and browser notification
   const isEnding = state === STATES.DONE || state === STATES.FAILED;
   const wasActive = prevState !== STATES.DONE && prevState !== STATES.FAILED && prevState !== STATES.INITIALIZING;
   if (isEnding && wasActive) {
-    // Glow flash (CSS animation)
     ui.card.classList.remove('completion-flash');
-    ui.card.offsetWidth; // reflow to restart animation
+    ui.card.offsetWidth;
     ui.card.classList.add('completion-flash');
     ui.card.addEventListener('animationend', () => ui.card.classList.remove('completion-flash'), { once: true });
-
-    // Sound alert on completion
     if (isSoundEnabled()) playAlertSound(getSoundId());
   }
 
-  // Clear terminal and show placeholder when session ends
   if (state === STATES.DONE || state === STATES.FAILED) {
     _handleEndedTransition(ui, wasActive, state);
   }
 
-  // Clear placeholder on restart
   if (state === STATES.INITIALIZING) {
     _handleRestartTransition(ui, prevState);
   }
@@ -850,10 +923,9 @@ export function handleSessionsReordered(order) {
     return;
   }
 
-  for (const name of order) {
-    const ui = sessionUIs.get(name);
+  for (const id of order) {
+    const ui = sessionUIs.get(id);
     if (!ui?.card) continue;
-    // Keep minimized cards in the minimized bar
     if (ui.card.classList.contains('minimized')) {
       minimizedBar.appendChild(ui.card);
     } else {

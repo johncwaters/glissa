@@ -1,5 +1,6 @@
 'use strict';
 
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
@@ -53,10 +54,38 @@ function resolveConfigPath() {
   return homeConfig;
 }
 
+function generateProjectId() {
+  return crypto.randomUUID();
+}
+
+/** Ensure every project in the array has a stable `id` field. */
+function ensureProjectIds(projects) {
+  let changed = false;
+  for (const p of projects) {
+    if (!p.id) {
+      p.id = generateProjectId();
+      changed = true;
+    }
+  }
+  return changed;
+}
+
 function createConfigStore() {
   const configPath = resolveConfigPath();
   const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
   config.repoRoots = config.repoRoots || [];
+
+  // Auto-assign stable IDs to any projects missing them
+  if (Array.isArray(config.projects) && ensureProjectIds(config.projects)) {
+    try {
+      const tmpPath = `${configPath}.tmp.${process.pid}`;
+      fs.writeFileSync(tmpPath, JSON.stringify(config, null, 2), 'utf8');
+      fs.renameSync(tmpPath, configPath);
+      console.log('[config] Auto-assigned IDs to projects missing them');
+    } catch (err) {
+      console.warn('[config] Failed to persist auto-assigned project IDs:', err.message);
+    }
+  }
 
   let _lastSelfWriteTs = 0;
 
@@ -161,4 +190,4 @@ function createConfigStore() {
   };
 }
 
-module.exports = { createConfigStore, TIMEOUT_KEYS, DEFAULT_CONFIG };
+module.exports = { createConfigStore, generateProjectId, ensureProjectIds, TIMEOUT_KEYS, DEFAULT_CONFIG };

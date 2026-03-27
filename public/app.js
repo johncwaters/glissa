@@ -11,7 +11,7 @@ import { checkAndStartGuides, isFirstOpen, registerGuide } from './guide.js';
 import {
   applyState, createSessionCard, exitMaximizeMode, fitAllVisible,
   getSessionCount, handleSessionsReordered, hasSession, isMaximizeActive,
-  reconnectDataWs, removeSessionCard, setLayoutMode, showErrorToast, updateAggregateStatus,
+  reconnectDataWs, removeSessionCard, renameSessionCard, setLayoutMode, showErrorToast, updateAggregateStatus,
 } from './session-card.js';
 import { applyTheme } from './theme.js';
 import { getLayout, getThemeId, isSoundEnabled, pruneStale, setLayout, setSoundEnabled } from './ui-prefs.js';
@@ -136,14 +136,14 @@ function handleSnapshot(sessions) {
     updateAggregateStatus();
   } else {
     for (const s of sessions) {
-      if (hasSession(s.name)) {
-        applyState(s.name, s.state);
+      if (hasSession(s.id)) {
+        applyState(s.id, s.state);
       } else {
-        createSessionCard(s.name, s.state);
+        createSessionCard(s.id, s.name, s.state);
       }
     }
 
-    pruneStale(sessions.map(s => s.name));
+    pruneStale(sessions.map(s => s.id));
     updateAggregateStatus();
   }
 
@@ -155,27 +155,27 @@ function handleSnapshot(sessions) {
 }
 
 function handleStateChange(msg) {
-  // If card doesn't exist yet, create it
-  if (!hasSession(msg.session)) {
+  if (!hasSession(msg.id)) {
     clearEmptyPlaceholder();
-    createSessionCard(msg.session, msg.to);
+    createSessionCard(msg.id, msg.session, msg.to);
     return;
   }
 
-  applyState(msg.session, msg.to);
+  applyState(msg.id, msg.to);
 
   // On restart (INITIALIZING after DONE/FAILED), reconnect data WS for fresh PTY
   if (msg.to === STATES.INITIALIZING && (msg.from === STATES.DONE || msg.from === STATES.FAILED)) {
-    reconnectDataWs(msg.session);
+    reconnectDataWs(msg.id);
   }
 }
 
 const messageHandlers = {
   'snapshot':           (msg) => handleSnapshot(msg.sessions),
   'state-change':       (msg) => handleStateChange(msg),
-  'session-added':      (msg) => { if (!hasSession(msg.session)) { clearEmptyPlaceholder(); createSessionCard(msg.session, msg.state); } },
-  'session-removed':    (msg) => removeSessionCard(msg.session),
-  'session-modified':   (msg) => { removeSessionCard(msg.session); clearEmptyPlaceholder(); createSessionCard(msg.session, msg.state); },
+  'session-added':      (msg) => { if (!hasSession(msg.id)) { clearEmptyPlaceholder(); createSessionCard(msg.id, msg.session, msg.state); } },
+  'session-removed':    (msg) => removeSessionCard(msg.id),
+  'session-renamed':    (msg) => renameSessionCard(msg.id, msg.newName),
+  'session-modified':   (msg) => { removeSessionCard(msg.id); clearEmptyPlaceholder(); createSessionCard(msg.id, msg.session, msg.state); },
   'sessions-reordered': (msg) => handleSessionsReordered(msg.order),
   'error':              (msg) => showErrorToast(msg.message),
   'settings-updated':   () => {},
