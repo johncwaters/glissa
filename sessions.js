@@ -201,6 +201,9 @@ const EXIT_HOOKS = {
     if (session.patternDetector) {
       session.patternDetector.reset();
     }
+    // Grace period so echoed keystrokes and the still-visible prompt
+    // don't immediately re-trigger prompt detection after user input.
+    session._startStartupGrace(3000);
   }
 };
 
