@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-03-28
+
+### Added
+
+- **Skip-permissions visual indicator**: Session cards show a shield icon when `dangerouslySkipPermissions` is enabled, with redesigned card header layout.
+- **Stable UUID session keys**: Sessions are now keyed by a stable UUID (`id`) instead of mutable display name. Includes inline rename support and skip-permissions toggle per session.
+
+### Fixed
+
+- Suppress false "needs input" notification during typing pause.
+- Trigger tutorial and clear empty placeholder on first-time setup.
+
+### Docs
+
+- Document trust boundary, session identity, and skip-permissions security model.
+
+## [0.5.2] - 2026-03-26
+
+### Added
+
+- Pre-publish validation script for package.json `files` array.
+
+### Changed
+
+- Bumped version for npm publish.
+
+## [0.5.1] - 2026-03-26
+
+### Fixed
+
+- Include `ansi-tokenizer.js` and `line-assembler.js` in npm package files.
+- Resolve doubled paste output and add Ctrl+Backspace word delete.
+
+### Docs
+
+- Update AGENTS.md with new modules and remove stale references.
+
 ## [0.5.0] - 2026-03-24
 
 ### Added
@@ -111,6 +148,9 @@ _Skipped in changelog — incremental fixes and version bump._
 - Alert sounds for session attention events
 - CLI with `--port`, `--config`, `--help`, `--version` flags
 
+[0.6.0]: https://github.com/johncwaters/glissa/releases/tag/v0.6.0
+[0.5.2]: https://github.com/johncwaters/glissa/releases/tag/v0.5.2
+[0.5.1]: https://github.com/johncwaters/glissa/releases/tag/v0.5.1
 [0.5.0]: https://github.com/johncwaters/glissa/releases/tag/v0.5.0
 [0.4.0]: https://github.com/johncwaters/glissa/releases/tag/v0.4.0
 [0.3.0]: https://github.com/johncwaters/glissa/releases/tag/v0.3.0
