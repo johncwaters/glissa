@@ -292,7 +292,6 @@ Project uses manual testing, self-test scripts, and spike scripts. No Jest, Moch
 | Add/modify themes | `public/theme.js` | THEMES object, terminal color mapping, CSS variable names |
 | CLI flags/options | `bin/glissa.js` | arg parsing, env bridge |
 | Build/bundling | `vite.config.js` | glissaBackendPlugin, Tailwind, aliases |
-| Guided tutorials | `public/guide.js`, `public/guide-tooltip.js` | registerGuide, step progression, tooltip positioning |
 | Release/publish | `scripts/release.js` | npm publish, git tag, GitHub release |
 
 ---

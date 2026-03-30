@@ -5,26 +5,24 @@
 
 ## Purpose
 
-Browser-side dashboard for Glissa. Provides real-time terminal streaming via xterm.js, session state tracking, drag-and-drop reordering, theming, guided tutorials, and interactive controls. Modular ES module architecture — no framework, no build step required (Vite optional for dev HMR + Tailwind).
+Browser-side dashboard for Glissa. Provides real-time terminal streaming via xterm.js, session state tracking, drag-and-drop reordering, theming, and interactive controls. Modular ES module architecture — no framework, no build step required (Vite optional for dev HMR + Tailwind).
 
 ## Key Files
 
 | File | Description |
 |------|-------------|
 | `index.html` | Dashboard HTML shell with inline critical CSS (loading screen, shutdown overlay), Tailwind utility classes for layout |
-| `app.js` | Boot entry point — wires modules together, applies saved theme, registers guides, control message dispatch, window resize handler, toolbar/menu event binding, focus tracking |
+| `app.js` | Boot entry point — wires modules together, applies saved theme, control message dispatch, window resize handler, toolbar/menu event binding, focus tracking |
 | `session-card.js` | Session card DOM lifecycle: card creation, terminal setup (xterm.js + WebGL), data WebSocket per session, drag-and-drop, minimize/maximize toggle, state application, aggregate status |
 | `control-ws.js` | Control WebSocket client — connection management, auto-reconnect (3s), request/response with requestId correlation and 5s timeout |
 | `dialogs.js` | Add Session and Settings dialog factories — repo root scanning, project picker, validation, theme picker, sound selector |
 | `theme.js` | Theme system — defines color palettes (Golgari, Midnight, Phyrexian, Compleated), applies CSS custom properties on `:root`, derives xterm.js terminal themes from CSS variables |
-| `ui-prefs.js` | UI preference persistence (localStorage) — minimized sessions, sound enabled/id, theme id, completed guides. Prunes stale session references |
+| `ui-prefs.js` | UI preference persistence (localStorage) — minimized sessions, sound enabled/id, theme id. Prunes stale session references |
 | `alert-sound.js` | Notification sounds — audio file playback (.ogg) with synth beep fallback via Web Audio API |
-| `guide.js` | Guided tutorial engine — registration, condition-based triggering, step progression with skip support, completion tracking via ui-prefs |
-| `guide-tooltip.js` | Floating tooltip component for guides — smart positioning (bottom/top/right/left) with arrow, overlay cutout highlighting target element |
 | `local-store.js` | Generic localStorage wrapper — JSON get/set with graceful degradation for private browsing |
 | `dom-helpers.js` | Shared `el(tag, className, text)` helper for programmatic DOM creation |
 | `tailwind.css` | Tailwind CSS entry with `@theme` block — color tokens reference CSS variables set by `theme.js` |
-| `style.css` | Component styles for JS-created DOM elements, `[data-state]` attribute selectors, animations (`@keyframes`), dialog/toast/guide styling |
+| `style.css` | Component styles for JS-created DOM elements, `[data-state]` attribute selectors, animations (`@keyframes`), dialog/toast styling |
 
 ## Subdirectories
 
@@ -50,9 +48,6 @@ This is **browser code** using ES modules, not CommonJS.
 ```
 app.js (boot)
   ├── theme.js         (theme system — applied at boot before UI renders)
-  ├── guide.js         (tutorial engine — registers welcome guide)
-  │     └── guide-tooltip.js  (tooltip component)
-  │           └── dom-helpers.js
   ├── control-ws.js    (control WebSocket — singleton)
   ├── session-card.js  (card lifecycle — depends on control-ws.js, theme.js)
   │     ├── ui-prefs.js      (localStorage persistence)
@@ -72,7 +67,6 @@ app.js (boot)
 - `control-ws.js` is the lowest-level network module (no imports from other local modules)
 - `session-card.js` imports from `control-ws.js`, `ui-prefs.js`, `alert-sound.js`, `theme.js`, `dom-helpers.js`
 - `dialogs.js` imports from `control-ws.js`, `session-card.js`, `ui-prefs.js`, `theme.js`, `alert-sound.js`
-- `guide.js` imports from `guide-tooltip.js`, `ui-prefs.js`
 - `app.js` imports from all major modules and wires them together
 
 ### Theme System
@@ -142,7 +136,6 @@ Verification checklist:
 8. Menu: shutdown and restart work with confirmation
 9. Reconnection: auto-reconnects on disconnect, reloads on restart
 10. Theme switching applies immediately, persists across reload
-11. Welcome guide runs on first open, dismissed on completion or ESC
 
 ### Common Patterns
 

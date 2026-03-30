@@ -7,7 +7,6 @@ import './tailwind.css';
 import { STATES } from '/shared/states.mjs';
 import { connectControl, disableReconnect, onControlMessage, sendControlMsg, setConnectionStateCallback } from './control-ws.js';
 import { createAddSessionDialog, createSettingsDialog } from './dialogs.js';
-import { checkAndStartGuides, isFirstOpen, registerGuide } from './guide.js';
 import {
   applyState, createSessionCard, exitMaximizeMode, fitAllVisible,
   getSessionCount, handleSessionsReordered, hasSession, isMaximizeActive,
@@ -19,52 +18,6 @@ import { getLayout, getThemeId, isSoundEnabled, pruneStale, setLayout, setSoundE
 // ── Apply saved theme ─────────────────────────────────────────
 
 applyTheme(getThemeId());
-
-// ── Guided tutorials ──────────────────────────────────────────
-
-registerGuide('welcome', {
-  condition: isFirstOpen,
-  steps: [
-    {
-      target: '#btn-add-session',
-      title: 'Create a Session',
-      body: 'Click here to add a new Claude Code session. Pick a project or enter a path manually.',
-      position: 'top',
-    },
-    {
-      target: '#btn-menu',
-      title: 'Settings & Controls',
-      body: 'Open the menu to configure timeouts, alert sounds, repository roots, or restart the server.',
-      position: 'bottom',
-    },
-    {
-      target: '#connection-status',
-      title: 'Connection Status',
-      body: 'This indicator shows whether the dashboard is connected to the backend server.',
-      position: 'bottom',
-    },
-    {
-      target: '#sessions-container .session-card .session-card-header',
-      title: 'Drag to Reorder',
-      body: 'Grab a session card by its header and drag it to rearrange the dashboard layout.',
-      position: 'bottom',
-    },
-    {
-      target: '#sessions-container .session-card .btn-minimize',
-      title: 'Minimize Sessions',
-      body: 'Click the arrow to collapse a session into the bottom bar. Click again to expand it back.',
-      position: 'right',
-    },
-    {
-      target: '#sessions-container .session-card .session-name',
-      title: 'Maximize Mode',
-      body: 'Click the \u25a1 button to maximize a session and minimize all others. Click a minimized session to switch. Press ESC to restore all.',
-      position: 'bottom',
-    },
-  ],
-});
-
-let _guidesChecked = false;
 
 // ── Connection status UI ─────────────────────────────────────
 
@@ -147,11 +100,6 @@ function handleSnapshot(sessions) {
     updateAggregateStatus();
   }
 
-  if (!_guidesChecked) {
-    _guidesChecked = true;
-    // Delay briefly so DOM is settled before positioning tooltips
-    requestAnimationFrame(() => checkAndStartGuides());
-  }
 }
 
 function handleStateChange(msg) {

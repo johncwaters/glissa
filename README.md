@@ -42,7 +42,6 @@ Open `http://localhost:3000` to view the dashboard.
 - Windows toast notifications (BurntToast) for session events
 - Drag-and-drop session reordering
 - Configurable themes (Golgari, Midnight, Phyrexian, Compleated)
-- Guided onboarding tutorial
 - Hot-reloadable configuration
 
 ## Configuration
