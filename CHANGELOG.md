@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Layer 4 false positive elimination**: Add 7 new detection categories to `isLayer4Chrome` — wide-spaced user typing, short garbled fragments, URLs, task checkbox rendering, system messages (Bypass Permissions, Pasted text), HUD counter fragments, and OMC/auto-update chrome strings. Eliminates spurious "needs input" notifications especially when sessions are idle.
+- **`killSession()` missing COMPLETE state**: Sessions in COMPLETE state could not be killed from the UI despite the transition table supporting `user_kill → DONE`. Added COMPLETE to the killable state list.
+- **Cross-platform force kill**: `_forceKillAfterTimeout` now uses `SIGKILL` on non-Windows platforms instead of the Windows-only `taskkill` command.
+- **Kill poll timer leak**: Force-kill poll timers are now tracked in `_killPollTimer` and cleaned up in `destroy()`, preventing potential unhandled exceptions on destroyed sessions.
+- **Unbounded audit log growth**: `auditLog` is now capped at 200 entries to prevent memory growth in long-running sessions with frequent state oscillation.
+
 ### Removed
 
 - **Guided onboarding tutorial**: Removed the first-install welcome tour (guide engine, tooltip component, and all related CSS/state).
