@@ -239,7 +239,7 @@ const EXIT_HOOKS = {
 };
 
 class Session extends EventEmitter {
-  constructor({ id, name, path, dangerouslySkipPermissions = false, startingWatchdogSeconds = 10, attentionTimeoutSeconds = 60, waitingEscalationSeconds = 300, autoRecoverSeconds = 3, inputGraceSeconds = 5, promptDetectionMs = 1500 }) {
+  constructor({ id, name, path, dangerouslySkipPermissions = false, startingWatchdogSeconds = 10, attentionTimeoutSeconds = 60, waitingEscalationSeconds = 300, autoRecoverSeconds = 3, inputGraceSeconds = 5, promptDetectionMs = 1500, replayBufferKB = 512 }) {
     super();
     this.id = id;
     this.name = name;
@@ -263,7 +263,7 @@ class Session extends EventEmitter {
     this._startupGraceTimer = null;
     this._outputBuffer = [];       // ring buffer of recent PTY chunks
     this._outputBufferSize = 0;
-    this._outputBufferMax = 100000; // ~100KB replay cap
+    this._outputBufferMax = replayBufferKB * 1024;
     this._lastUserInputAt = 0;
     this._inputGraceMs = inputGraceSeconds * 1000;
     this._killPollTimer = null;
@@ -629,6 +629,7 @@ class Session extends EventEmitter {
     if (cfg.autoRecoverSeconds != null) this._autoRecoverMs = cfg.autoRecoverSeconds * 1000;
     if (cfg.inputGraceSeconds != null) this._inputGraceMs = cfg.inputGraceSeconds * 1000;
     if (cfg.promptDetectionMs != null) this.patternDetector.updateSilenceTimeout(cfg.promptDetectionMs);
+    if (cfg.replayBufferKB != null) this._outputBufferMax = cfg.replayBufferKB * 1024;
   }
 
   destroy() {

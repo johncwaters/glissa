@@ -27,6 +27,7 @@ const TIMEOUT_KEYS = [
   'inputGraceSeconds',
   'promptDetectionMs',
   'notifyDebounceMs',
+  'replayBufferKB',
 ];
 
 function resolveConfigPath() {
@@ -125,6 +126,7 @@ function createConfigStore() {
       inputGraceSeconds: config.inputGraceSeconds,
       promptDetectionMs: config.promptDetectionMs,
       notifyDebounceMs: config.notifyDebounceMs,
+      replayBufferKB: config.replayBufferKB,
       repoRoots: config.repoRoots,
     };
   }
