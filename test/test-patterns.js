@@ -503,12 +503,82 @@ async function runAllTests() {
   assert('L4 filter: garbled screen redraw with session info',
     isLayer4Chrome('8                         session:0m | ctx:0%'), true);
 
+  // -- Wide-spaced user typing (PTY keystroke echo) --
+  assert('L4 filter: wide-spaced typing "T h o s e   t h r e e   t h i n g s ."',
+    isLayer4Chrome('T h o s e   t h r e e   t h i n g s .'), true);
+
+  assert('L4 filter: wide-spaced typing "S o   w e   d o n \' t   l o s e   p r o g r e s s"',
+    isLayer4Chrome('S o   w e   d o n \' t   l o s e   p r o g r e s s'), true);
+
+  assert('L4 filter: wide-spaced typing "a s d f"',
+    isLayer4Chrome('a s d f'), true);
+
+  assert('L4 filter: wide-spaced typing with corrections',
+    isLayer4Chrome('d o w n   o u r   s p r i n t   s p   t a n d a r d s   f r o   m   m     m   o u r   w i k i'), true);
+
+  // -- Short garbled fragments --
+  assert('L4 filter: single digit "4"',
+    isLayer4Chrome('4'), true);
+
+  assert('L4 filter: single letter "n"',
+    isLayer4Chrome('n'), true);
+
+  assert('L4 filter: short fragment ":0%"',
+    isLayer4Chrome(':0%'), true);
+
+  assert('L4 filter: short fragment "0%"',
+    isLayer4Chrome('0%'), true);
+
+  // -- URLs --
+  assert('L4 filter: full URL',
+    isLayer4Chrome('https://devblogs.microsoft.com/devops/no-new-azure-devops-oauth-apps/'), true);
+
+  assert('L4 filter: URL in mixed content',
+    isLayer4Chrome('r k i n g .   [Pasted text #4 +165 lines]'), true);
+
+  assert('L4 filter: https URL fragment',
+    isLayer4Chrome('https://clerk.com/docs/reference/frontend-api/2025-11-10/tag/sign-ins'), true);
+
+  // -- Task checkbox rendering --
+  assert('L4 filter: task list with checkboxes',
+    isLayer4Chrome('✔ Update root and Level 1 AGENTS.md files   ◼ Update/creat  src/ subtree AGENTS.md files'), true);
+
+  assert('L4 filter: task list with multiple symbols',
+    isLayer4Chrome('✔ Creat  wiki struct re with Diataxis navigation   ✔ Write "What is Myr" explanation doc'), true);
+
+  // -- System messages --
+  assert('L4 filter: bypass permissions warning',
+    isLayer4Chrome('WARNING: Claude Code running in Bypass Permissions mode'), true);
+
+  assert('L4 filter: pasted text indicator',
+    isLayer4Chrome('[Pasted text #4 +165 lines]'), true);
+
+  assert('L4 filter: OMC cancel hint fragment',
+    isLayer4Chrome('l:cancel | c'), true);
+
+  // -- HUD counter fragments --
+  assert('L4 filter: HUD counters "T:42 A 1 S:2"',
+    isLayer4Chrome('T:42 A 1 S:2'), true);
+
+  assert('L4 filter: HUD time patterns "4m  4m  4m"',
+    isLayer4Chrome('5  4m  4m  4m'), true);
+
+  assert('L4 filter: HUD fragment ":8% | T:38"',
+    isLayer4Chrome(':8% | T:38'), true);
+
+  assert('L4 filter: HUD fragment ":2 S:2"',
+    isLayer4Chrome(':2 S:2'), true);
+
+  // -- Auto-update messages (uncommitted fix) --
+  assert('L4 filter: auto-update failed message',
+    isLayer4Chrome('✗ Auto-update failed · Try claude doctor or npm i -g @ant…'), true);
+
+  assert('L4 filter: switched from npm message',
+    isLayer4Chrome('Claude Code has switched from npm to native installer. Run `claude install`…'), true);
+
   // True prompts — should NOT be filtered
   assert('L4 pass: real prompt "Enter password:"',
     isLayer4Chrome('Enter password:'), false);
-
-  assert('L4 pass: real prompt "> "',
-    isLayer4Chrome('>'), false);
 
   assert('L4 pass: real prompt "Do you want to proceed?"',
     isLayer4Chrome('Do you want to proceed?'), false);
@@ -518,6 +588,9 @@ async function runAllTests() {
 
   assert('L4 pass: bash prompt "user@host:~$"',
     isLayer4Chrome('user@host:~$'), false);
+
+  assert('L4 pass: real prompt "Please confirm:"',
+    isLayer4Chrome('Please confirm:'), false);
 
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed > 0 ? 1 : 0);

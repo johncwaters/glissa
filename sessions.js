@@ -24,6 +24,14 @@ const LAYER4_CHROME_STRINGS = [
   'Brewed for',       // Claude Code completion summary
   '/effort',          // effort indicator (e.g. "◐ medium · /effort")
   '[OMC#',            // OMC HUD status line
+  'Auto-update failed',   // Claude Code auto-update status bar message
+  'Auto-updating',        // Claude Code auto-update in progress
+  'claude doctor',        // Auto-update failure hint text
+  'switched from npm to native', // Claude Code installer migration notice
+  'claude install',       // Installer migration hint
+  'Bypass Permissions',   // Claude Code bypass-permissions mode warning
+  '[Pasted text',         // Pasted text indicator (e.g. "[Pasted text #4 +165 lines]")
+  'l:cancel',             // OMC cancel hint fragment in garbled redraws
 ];
 
 const LAYER4_SPINNER = /[◐◑◒◓⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏✻✢✶✽]/;
@@ -33,6 +41,8 @@ const LAYER4_HUD_PATTERNS = [
   /session:\d+m/,     // e.g. "session:0m", "session:5m"
   /ctx:\d+%/,         // e.g. "ctx:0%", "ctx:42%"
   /wk:\d+%/,          // e.g. "wk:33%"
+  /[TS]:\d+/,         // HUD task/session counters: "T:42", "S:2"
+  /\d+m\s+\d+m/,      // Repeated time patterns in garbled HUD: "4m  4m  4m"
 ];
 
 // Box-drawing characters used in Claude Code's separator/border lines
@@ -48,8 +58,14 @@ function isLayer4Chrome(line) {
   // OMC HUD fragments in garbled redraws
   if (LAYER4_HUD_PATTERNS.some(re => re.test(line))) return true;
 
-  // Line is mostly box-drawing characters (>50% of non-whitespace)
   const nonWs = line.replace(/\s/g, '');
+
+  // Very short fragments — garbled redraws, not real prompts.
+  // Real prompts caught by Layer 4 need at least a few characters
+  // (e.g. "Enter password:"). Single digits/letters are noise.
+  if (nonWs.length < 4) return true;
+
+  // Line is mostly box-drawing characters (>50% of non-whitespace)
   if (nonWs.length > 0) {
     const boxCount = (nonWs.match(BOX_DRAWING) || []).length;
     if (boxCount / nonWs.length > 0.5) return true;
@@ -58,6 +74,21 @@ function isLayer4Chrome(line) {
   // Garbled screen redraw: very little non-whitespace content spread across a long line
   // e.g. "7                                      5"
   if (line.length > 20 && nonWs.length < 10) return true;
+
+  // Wide-spaced user typing: PTY echoes keystrokes as individual characters
+  // separated by spaces. Pattern: "T h o s e   t h r e e   t h i n g s ."
+  const words = line.trim().split(/\s+/);
+  if (words.length >= 4) {
+    const singleCharCount = words.filter(w => w.length === 1).length;
+    if (singleCharCount / words.length > 0.6) return true;
+  }
+
+  // URLs — informational output, not prompts
+  if (/https?:\/\//.test(line)) return true;
+
+  // Task checkbox rendering (Claude Code task display) — multiple checkboxes
+  // in one line indicate a task list, not a prompt waiting for input
+  if ((line.match(/[✔◼◻✓✗☐☑]/g) || []).length >= 2) return true;
 
   return false;
 }
@@ -235,6 +266,7 @@ class Session extends EventEmitter {
     this._outputBufferMax = 100000; // ~100KB replay cap
     this._lastUserInputAt = 0;
     this._inputGraceMs = inputGraceSeconds * 1000;
+    this._killPollTimer = null;
 
     this._promptDetectionMs = promptDetectionMs;
     this._confirmationMs = 300; // PatternDetector default, recorded for capture header
@@ -323,7 +355,7 @@ class Session extends EventEmitter {
       entryHook(this);
     }
 
-    // Record in audit log
+    // Record in audit log (capped to prevent unbounded growth)
     const entry = {
       from,
       to,
@@ -332,6 +364,9 @@ class Session extends EventEmitter {
       timestamp: Date.now()
     };
     this.auditLog.push(entry);
+    if (this.auditLog.length > 200) {
+      this.auditLog.splice(0, this.auditLog.length - 200);
+    }
 
     // Record state transition
     if (this._recorder) {
@@ -524,21 +559,27 @@ class Session extends EventEmitter {
 
     let elapsed = 0;
     const poll = () => {
+      this._killPollTimer = null;
       if (!checkAlive()) return;
       elapsed += KILL_POLL_INTERVAL_MS;
       if (elapsed >= KILL_MAX_WAIT_MS) {
-        // Force kill (Windows: taskkill with /T to kill child tree)
         try {
-          execSync(`taskkill /PID ${pid} /T /F`, { stdio: 'ignore' });
+          if (process.platform === 'win32') {
+            execSync(`taskkill /PID ${pid} /T /F`, { stdio: 'ignore' });
+          } else {
+            process.kill(pid, 'SIGKILL');
+          }
         } catch (err) {
-          this.emit('error', err);
+          if (this.listenerCount('error') > 0) {
+            this.emit('error', err);
+          }
         }
         return;
       }
-      setTimeout(poll, KILL_POLL_INTERVAL_MS);
+      this._killPollTimer = setTimeout(poll, KILL_POLL_INTERVAL_MS);
     };
 
-    setTimeout(poll, KILL_POLL_INTERVAL_MS);
+    this._killPollTimer = setTimeout(poll, KILL_POLL_INTERVAL_MS);
   }
 
   dismiss() {
@@ -551,7 +592,7 @@ class Session extends EventEmitter {
   }
 
   killSession() {
-    const killable = [STATES.RUNNING, STATES.WAITING, STATES.IDLE];
+    const killable = [STATES.RUNNING, STATES.WAITING, STATES.IDLE, STATES.COMPLETE];
     if (!killable.includes(this.state)) return false;
     this.kill();
     return this.transition('user_kill');
@@ -601,6 +642,10 @@ class Session extends EventEmitter {
     }
     this._clearAutoRecoverTimer();
     this._clearStartupGrace();
+    if (this._killPollTimer !== null) {
+      clearTimeout(this._killPollTimer);
+      this._killPollTimer = null;
+    }
     this.kill();
     if (this._recorder) {
       this._recorder.close(); // Idempotent — safe if already closed by _handlePtyExit
