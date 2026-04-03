@@ -45,6 +45,8 @@ function makeSession(project, cfg) {
     inputGraceSeconds: cfg.inputGraceSeconds,
     promptDetectionMs: cfg.promptDetectionMs,
     replayBufferKB: cfg.replayBufferKB,
+    noFlicker: cfg.noFlicker,
+    feedDebounceMs: cfg.feedDebounceMs,
   });
   const recorder = createRecorder(project.name, cfg.capture);
   if (recorder) {

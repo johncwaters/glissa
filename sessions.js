@@ -8,7 +8,6 @@ const { STATES } = require('./shared/states');
 
 const KILL_POLL_INTERVAL_MS = 200;
 const KILL_MAX_WAIT_MS = 3000;
-const FEED_DEBOUNCE_MS = 50;
 
 // ---------------------------------------------------------------------------
 // Layer 4 filters — pending content that looks like UI chrome, not a prompt.
@@ -238,7 +237,7 @@ const EXIT_HOOKS = {
 };
 
 class Session extends EventEmitter {
-  constructor({ id, name, path, dangerouslySkipPermissions = false, startingWatchdogSeconds = 10, attentionTimeoutSeconds = 60, waitingEscalationSeconds = 300, autoRecoverSeconds = 3, inputGraceSeconds = 5, promptDetectionMs = 1500, replayBufferKB = 512 }) {
+  constructor({ id, name, path, dangerouslySkipPermissions = false, startingWatchdogSeconds = 10, attentionTimeoutSeconds = 60, waitingEscalationSeconds = 300, autoRecoverSeconds = 3, inputGraceSeconds = 5, promptDetectionMs = 1500, replayBufferKB = 512, noFlicker = true, feedDebounceMs = 50 }) {
     super();
     this.id = id;
     this.name = name;
@@ -268,6 +267,8 @@ class Session extends EventEmitter {
     this._killPollTimer = null;
     this._feedBuffer = '';
     this._feedDebounceTimer = null;
+    this._feedDebounceMs = feedDebounceMs;
+    this._noFlicker = noFlicker;
 
     this._promptDetectionMs = promptDetectionMs;
     this._confirmationMs = 300; // PatternDetector default, recorded for capture header
@@ -442,9 +443,11 @@ class Session extends EventEmitter {
     delete env.CLAUDE_CODE_ENTRYPOINT;
     delete env.GLISSA_PORT;
     delete env.GLISSA_CONFIG;
-    // Prevent Claude Code's default renderer from resetting scrollback position
-    // on every turn. Alt-screen mode lets Claude manage its own scroll.
-    env.CLAUDE_CODE_NO_FLICKER = '1';
+    // No-flicker mode prevents Claude Code from resetting scrollback position
+    // on every turn. Increases PTY output volume — mitigated by feed debounce.
+    if (this._noFlicker) {
+      env.CLAUDE_CODE_NO_FLICKER = '1';
+    }
     return env;
   }
 
@@ -629,6 +632,8 @@ class Session extends EventEmitter {
     if (cfg.inputGraceSeconds != null) this._inputGraceMs = cfg.inputGraceSeconds * 1000;
     if (cfg.promptDetectionMs != null) this.patternDetector.updateSilenceTimeout(cfg.promptDetectionMs);
     if (cfg.replayBufferKB != null) this._outputBufferMax = cfg.replayBufferKB * 1024;
+    if (cfg.feedDebounceMs != null) this._feedDebounceMs = cfg.feedDebounceMs;
+    if (cfg.noFlicker != null) this._noFlicker = !!cfg.noFlicker;
   }
 
   destroy() {
@@ -675,7 +680,7 @@ class Session extends EventEmitter {
     this._feedDebounceTimer = setTimeout(() => {
       this._feedDebounceTimer = null;
       this._flushFeedBuffer();
-    }, FEED_DEBOUNCE_MS);
+    }, this._feedDebounceMs);
   }
 
   _flushFeedBuffer() {

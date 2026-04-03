@@ -14,11 +14,15 @@ const DEFAULT_CONFIG = {
   inputGraceSeconds: 5,
   promptDetectionMs: 1500,
   notifyDebounceMs: 3000,
+  noFlicker: true,
+  scrollback: 50000,
+  cursorBlink: false,
+  feedDebounceMs: 50,
   repoRoots: [],
   projects: []
 };
 
-// Single source of truth for timeout field names
+// Single source of truth for numeric setting field names
 const TIMEOUT_KEYS = [
   'attentionTimeoutSeconds',
   'waitingEscalationSeconds',
@@ -28,6 +32,14 @@ const TIMEOUT_KEYS = [
   'promptDetectionMs',
   'notifyDebounceMs',
   'replayBufferKB',
+  'scrollback',
+  'feedDebounceMs',
+];
+
+// Boolean settings persisted to config.json
+const BOOLEAN_KEYS = [
+  'noFlicker',
+  'cursorBlink',
 ];
 
 function resolveConfigPath() {
@@ -127,6 +139,10 @@ function createConfigStore() {
       promptDetectionMs: config.promptDetectionMs,
       notifyDebounceMs: config.notifyDebounceMs,
       replayBufferKB: config.replayBufferKB,
+      noFlicker: config.noFlicker ?? DEFAULT_CONFIG.noFlicker,
+      scrollback: config.scrollback ?? DEFAULT_CONFIG.scrollback,
+      cursorBlink: config.cursorBlink ?? DEFAULT_CONFIG.cursorBlink,
+      feedDebounceMs: config.feedDebounceMs ?? DEFAULT_CONFIG.feedDebounceMs,
       repoRoots: config.repoRoots,
     };
   }
@@ -135,6 +151,9 @@ function createConfigStore() {
   function applySettings(newConfig) {
     for (const key of TIMEOUT_KEYS) {
       if (newConfig[key] != null) config[key] = newConfig[key];
+    }
+    for (const key of BOOLEAN_KEYS) {
+      if (newConfig[key] != null) config[key] = !!newConfig[key];
     }
     config.repoRoots = newConfig.repoRoots || [];
     if (newConfig.port != null && newConfig.port !== config.port) {
@@ -192,4 +211,4 @@ function createConfigStore() {
   };
 }
 
-module.exports = { createConfigStore, generateProjectId, ensureProjectIds, TIMEOUT_KEYS, DEFAULT_CONFIG };
+module.exports = { createConfigStore, generateProjectId, ensureProjectIds, TIMEOUT_KEYS, BOOLEAN_KEYS, DEFAULT_CONFIG };

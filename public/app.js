@@ -5,10 +5,10 @@ import '@xterm/xterm/css/xterm.css';
 import './tailwind.css';
 
 import { STATES } from '/shared/states.mjs';
-import { connectControl, disableReconnect, onControlMessage, sendControlMsg, setConnectionStateCallback } from './control-ws.js';
+import { connectControl, disableReconnect, onControlMessage, sendControlMsg, sendControlRequest, setConnectionStateCallback } from './control-ws.js';
 import { createAddSessionDialog, createSettingsDialog } from './dialogs.js';
 import {
-  applyState, createSessionCard, exitMaximizeMode, fitAllVisible,
+  applyState, applyTerminalSettings, createSessionCard, exitMaximizeMode, fitAllVisible,
   getSessionCount, handleSessionsReordered, hasSession, isMaximizeActive,
   reconnectDataWs, removeSessionCard, renameSessionCard, setLayoutMode, showErrorToast, updateAggregateStatus,
 } from './session-card.js';
@@ -55,6 +55,10 @@ setConnectionStateCallback((state, label) => {
     }
     revealApp();
     sendFocusState();
+    // Fetch terminal settings on initial connect to apply scrollback/cursorBlink
+    sendControlRequest('get-settings', {})
+      .then((msg) => { if (msg.settings) applyTerminalSettings(msg.settings); })
+      .catch(() => {});
   } else if (state === 'shutdown') {
     if (appRevealed) {
       shutdownStatus.textContent = 'Server shut down';
@@ -126,7 +130,7 @@ const messageHandlers = {
   'session-modified':   (msg) => { removeSessionCard(msg.id); clearEmptyPlaceholder(); createSessionCard(msg.id, msg.session, msg.state, { skipPerms: !!msg.skipPerms }); },
   'sessions-reordered': (msg) => handleSessionsReordered(msg.order),
   'error':              (msg) => showErrorToast(msg.message),
-  'settings-updated':   () => {},
+  'settings-updated':   (msg) => { if (msg.settings) applyTerminalSettings(msg.settings); },
   'shutting-down':      () => {
     disableReconnect();
     connectionEl.dataset.state = 'shutdown';

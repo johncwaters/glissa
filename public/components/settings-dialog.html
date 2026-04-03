@@ -32,6 +32,40 @@
   <span class="dialog-hint">Sound played when a session needs attention</span>
 </label>
 <div class="settings-section">
+  <div class="settings-section-title">Terminal</div>
+  <div class="settings-timeout-grid">
+    <label class="dialog-label">
+      Scrollback Lines
+      <input type="number" class="dialog-input" id="settings-scrollback" min="1000" max="200000" step="1000" autocomplete="off">
+      <span class="dialog-hint">Lines of terminal history</span>
+    </label>
+    <label class="dialog-label">
+      Replay Buffer (KB)
+      <input type="number" class="dialog-input" id="settings-replay-buffer" min="64" max="16384" step="64" autocomplete="off">
+      <span class="dialog-hint">PTY output kept for late-joining clients</span>
+    </label>
+  </div>
+  <label class="dialog-label dialog-checkbox-label">
+    <input type="checkbox" class="dialog-checkbox" id="settings-cursor-blink">
+    Cursor Blink
+    <span class="dialog-hint">Blinking cursor in terminal</span>
+  </label>
+</div>
+<div class="settings-section">
+  <div class="settings-section-title">Advanced</div>
+  <label class="dialog-label dialog-checkbox-label">
+    <input type="checkbox" class="dialog-checkbox" id="settings-no-flicker">
+    No-Flicker Mode
+    <span class="dialog-hint">Prevents scrollback reset between turns. Increases output volume.</span>
+    <span class="dialog-hint dialog-hint-warning" id="settings-noflicker-warning"></span>
+  </label>
+  <label class="dialog-label">
+    Feed Debounce (ms)
+    <input type="number" class="dialog-input" id="settings-feed-debounce" min="10" max="500" step="10" autocomplete="off">
+    <span class="dialog-hint">Batching delay for pattern detection. Higher = less CPU, slower detection.</span>
+  </label>
+</div>
+<div class="settings-section">
   <div class="settings-section-title">Repository Roots</div>
   <span class="dialog-hint">Directories scanned for projects when adding sessions</span>
   <div class="settings-root-list" id="settings-root-list"></div>

@@ -16,6 +16,10 @@ import { getSoundId, isMinimized, isSoundEnabled, setMinimized } from './ui-pref
 
 const RECONNECT_DELAY_MS = 3000;
 
+// Terminal defaults — updated from server settings on connect
+let _terminalScrollback = 50000;
+let _terminalCursorBlink = false;
+
 // ── State ────────────────────────────────────────────────────
 
 const sessionUIs = new Map();
@@ -553,11 +557,11 @@ function setupDragAndDrop(card, header, btnMinimize, sessionId) {
 
 function setupTerminal(termWrap, ui) {
   const term = new Terminal({
-    cursorBlink: false,
+    cursorBlink: _terminalCursorBlink,
     fontSize: 14,
     fontFamily: "'Cascadia Code', 'Fira Code', 'Consolas', 'Menlo', monospace",
     theme: getTerminalTheme(),
-    scrollback: 50000,
+    scrollback: _terminalScrollback,
     allowProposedApi: true,
   });
 
@@ -747,6 +751,16 @@ export function reconnectDataWs(id) {
   const ui = sessionUIs.get(id);
   if (ui?.dataWs) {
     ui.dataWs.close(); // close triggers auto-reconnect via the close handler
+  }
+}
+
+export function applyTerminalSettings(settings) {
+  if (settings.scrollback != null) _terminalScrollback = settings.scrollback;
+  if (settings.cursorBlink != null) _terminalCursorBlink = settings.cursorBlink;
+  for (const [, ui] of sessionUIs) {
+    if (!ui.term) continue;
+    if (settings.scrollback != null) ui.term.options.scrollback = settings.scrollback;
+    if (settings.cursorBlink != null) ui.term.options.cursorBlink = settings.cursorBlink;
   }
 }
 

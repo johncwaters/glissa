@@ -2,7 +2,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { TIMEOUT_KEYS } = require('./config-store');
+const { TIMEOUT_KEYS, BOOLEAN_KEYS } = require('./config-store');
 
 function scanRepoRoots(roots) {
   const results = [];
@@ -233,9 +233,23 @@ function registerControlHandlers(controlWss, deps) {
       }
     }
 
+    for (const key of BOOLEAN_KEYS) {
+      if (s[key] != null && typeof s[key] !== 'boolean') {
+        ws.send(JSON.stringify({
+          type: 'settings-error',
+          requestId: msg.requestId || null,
+          message: `${key} must be a boolean`
+        }));
+        return;
+      }
+    }
+
     const freshConfig = configStore.save(cfg => {
       for (const key of TIMEOUT_KEYS) {
         if (s[key] != null) cfg[key] = s[key];
+      }
+      for (const key of BOOLEAN_KEYS) {
+        if (s[key] != null) cfg[key] = !!s[key];
       }
       if (s.repoRoots != null) cfg.repoRoots = s.repoRoots;
     });
