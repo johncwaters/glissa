@@ -8,6 +8,7 @@ const { STATES } = require('./shared/states');
 
 const KILL_POLL_INTERVAL_MS = 200;
 const KILL_MAX_WAIT_MS = 3000;
+const FEED_DEBOUNCE_MS = 50;
 
 // ---------------------------------------------------------------------------
 // Layer 4 filters — pending content that looks like UI chrome, not a prompt.
@@ -169,7 +170,7 @@ const GUARDS = {
 const DATA_HANDLERS = {
   [STATES.RUNNING](session, data) {
     if (!session._startupGraceActive) {
-      session.patternDetector.feed(data);
+      session._debounceFeed(data);
     }
     session._resetIdleTimer();
   },
@@ -265,6 +266,8 @@ class Session extends EventEmitter {
     this._lastUserInputAt = 0;
     this._inputGraceMs = inputGraceSeconds * 1000;
     this._killPollTimer = null;
+    this._feedBuffer = '';
+    this._feedDebounceTimer = null;
 
     this._promptDetectionMs = promptDetectionMs;
     this._confirmationMs = 300; // PatternDetector default, recorded for capture header
@@ -377,6 +380,7 @@ class Session extends EventEmitter {
     this._clearWatchdog();
     this._clearIdleTimer();
     this._clearStartupGrace();
+    this._clearFeedDebounce();
     this.patternDetector.reset();
 
     const env = this._buildSpawnEnv();
@@ -438,6 +442,9 @@ class Session extends EventEmitter {
     delete env.CLAUDE_CODE_ENTRYPOINT;
     delete env.GLISSA_PORT;
     delete env.GLISSA_CONFIG;
+    // Prevent Claude Code's default renderer from resetting scrollback position
+    // on every turn. Alt-screen mode lets Claude manage its own scroll.
+    env.CLAUDE_CODE_NO_FLICKER = '1';
     return env;
   }
 
@@ -482,6 +489,7 @@ class Session extends EventEmitter {
     this._clearWatchdog();
     this._clearIdleTimer();
     this._clearStartupGrace();
+    this._clearFeedDebounce();
     this.patternDetector.reset();
     this.ptyProcess = null;
 
@@ -634,6 +642,7 @@ class Session extends EventEmitter {
     }
     this._clearAutoRecoverTimer();
     this._clearStartupGrace();
+    this._clearFeedDebounce();
     if (this._killPollTimer !== null) {
       clearTimeout(this._killPollTimer);
       this._killPollTimer = null;
@@ -649,10 +658,50 @@ class Session extends EventEmitter {
     }
   }
 
+  // -- Feed debounce (batches PTY data before pattern detection) --
+
+  _debounceFeed(data) {
+    this._feedBuffer += data;
+    // Cap buffer size to prevent unbounded growth during sustained output
+    if (this._feedBuffer.length > 65536) {
+      if (this._feedDebounceTimer !== null) clearTimeout(this._feedDebounceTimer);
+      this._feedDebounceTimer = null;
+      this._flushFeedBuffer();
+      return;
+    }
+    if (this._feedDebounceTimer !== null) {
+      clearTimeout(this._feedDebounceTimer);
+    }
+    this._feedDebounceTimer = setTimeout(() => {
+      this._feedDebounceTimer = null;
+      this._flushFeedBuffer();
+    }, FEED_DEBOUNCE_MS);
+  }
+
+  _flushFeedBuffer() {
+    if (this._feedBuffer.length === 0) return;
+    if (this._startupGraceActive) {
+      this._feedBuffer = '';
+      return;
+    }
+    const buffered = this._feedBuffer;
+    this._feedBuffer = '';
+    this.patternDetector.feed(buffered);
+  }
+
+  _clearFeedDebounce() {
+    this._feedBuffer = '';
+    if (this._feedDebounceTimer !== null) {
+      clearTimeout(this._feedDebounceTimer);
+      this._feedDebounceTimer = null;
+    }
+  }
+
   // -- Private timer helpers --
 
   _startStartupGrace(durationMs = 5000) {
     this._clearStartupGrace();
+    this._clearFeedDebounce();
     this._startupGraceActive = true;
     this._startupGraceTimer = setTimeout(() => {
       this._startupGraceTimer = null;
