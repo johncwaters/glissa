@@ -205,11 +205,18 @@ function createBackend(httpServer, options = {}) {
     });
   }
 
-  for (const project of config.projects) {
+  // Stagger session startup to avoid spawning all PTY processes at once.
+  // Each session gets a 500ms delay to reduce CPU/IO contention on boot.
+  for (let i = 0; i < config.projects.length; i++) {
+    const project = config.projects[i];
     const sess = makeSession(project, config);
     sessions.set(project.id, sess);
     wireSessionEvents(sess);
-    sess.start();
+    if (i === 0) {
+      sess.start();
+    } else {
+      setTimeout(() => sess.start(), i * 500);
+    }
   }
 
   function diffProjects(currentSessions, newProjects) {

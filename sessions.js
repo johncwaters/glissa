@@ -156,9 +156,6 @@ const GUARDS = {
     if (session._lastUserInputAt === 0) return true;
     const elapsed = Date.now() - session._lastUserInputAt;
     if (elapsed < session._inputGraceMs) {
-      console.log(
-        `[session:${session.name}] prompt_detected suppressed (user input ${(elapsed / 1000).toFixed(1)}s ago)`
-      );
       // Re-arm Layer 3 silence timer so it re-fires after silence timeout.
       // Do NOT call reset() — that clears _pendingLine and kills re-detection.
       session.patternDetector.rearmSilenceTimer();
@@ -275,7 +272,6 @@ class Session extends EventEmitter {
 
     this.patternDetector = new PatternDetector(promptDetectionMs);
     this.patternDetector.on('prompt-detected', (detection) => {
-      console.log(`[session:${this.name}] prompt-detected: layer=${detection.layer} pattern=${detection.pattern} line=${JSON.stringify(detection.line)}`);
       // Record detection BEFORE session guards (transition may suppress it)
       if (this._recorder) {
         this._recorder.writeDetection(detection.layer, detection.pattern, detection.line, detection.pending);
@@ -309,18 +305,12 @@ class Session extends EventEmitter {
   transition(event, detail) {
     const stateTransitions = TRANSITIONS[this.state];
     if (!stateTransitions || !(event in stateTransitions)) {
-      console.warn(
-        `[session:${this.name}] Invalid transition: ${this.state} + ${event} (ignored)`
-      );
       return false;
     }
 
     // Run guard if one exists for this event
     const guard = GUARDS[event];
     if (guard && !guard(this)) {
-      console.warn(
-        `[session:${this.name}] Guard rejected: ${this.state} + ${event}`
-      );
       return false;
     }
 
@@ -709,13 +699,8 @@ class Session extends EventEmitter {
         if (runDuration < this._completeThresholdMs && this.patternDetector.hasPendingContent()) {
           const pendingLine = this.patternDetector.getPendingLine();
           if (isLayer4Chrome(pendingLine)) {
-            console.log(
-              `[session:${this.name}] idle timer: Layer 4 suppressed (UI chrome): ${JSON.stringify(pendingLine)}`
-            );
+            // Layer 4 suppressed — UI chrome, not a real prompt
           } else {
-            console.log(
-              `[session:${this.name}] idle timer: pending content detected, treating as prompt: ${JSON.stringify(pendingLine)}`
-            );
             this._runningStartedAt = null;
             this.transition('prompt_detected', {
               layer: 4,
@@ -735,10 +720,6 @@ class Session extends EventEmitter {
             const pendingLine = this.patternDetector.getPendingLine();
             const match = this.patternDetector.checkLine(pendingLine);
             if (match) {
-              // L1/L2 are high-confidence — don't let isLayer4Chrome override them
-              console.log(
-                `[session:${this.name}] idle timer: long run but pending content matches prompt pattern: ${JSON.stringify(match.pattern)}`
-              );
               this.transition('prompt_detected', {
                 layer: match.layer,
                 pattern: match.pattern,
@@ -760,7 +741,6 @@ class Session extends EventEmitter {
     this._autoRecoverTimer = setTimeout(() => {
       this._autoRecoverTimer = null;
       if (this.state === STATES.WAITING && this._autoRecoverDataCount >= 2) {
-        console.log(`[session:${this.name}] Auto-recovering from WAITING (continued output detected, ${this._autoRecoverDataCount} chunks)`);
         this.transition('auto_recover');
         if (this.state === STATES.RUNNING) {
           this._resetIdleTimer();

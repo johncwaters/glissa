@@ -11,6 +11,8 @@
  *   { type: 'text', content: '...' }   — append at cursor position
  *   { type: 'lf' }                      — flush current line to completed buffer
  *   { type: 'cr' }                      — reset cursor to column 0
+ *   { type: 'csi', params, final: 'H' } — cursor position (row;col) — flush on row change
+ *   { type: 'csi', params, final: 'f' } — same as H
  *   { type: 'csi', params, final: 'K' } — erase in line (from cursor to end)
  *   { type: 'csi', params, final: 'C' } — cursor forward N columns
  *   { type: 'csi', params, final: 'D' } — cursor back N columns
@@ -24,6 +26,11 @@ class LineAssembler {
     this._line = [];
     // Cursor column position within the current line
     this._cursor = 0;
+    // Last row set by CSI H/f (absolute cursor positioning). 0 = unknown.
+    // When a CSI H targets a different row, the current line is flushed —
+    // cursor-positioned content (cactus companion, HUD, status bars) draws
+    // on multiple rows and should not accumulate into a single pending line.
+    this._currentRow = 0;
     // Logical end of line: the furthest position written since the last CR or line start.
     // Tracks how many characters are "visible" in the current line for detection purposes.
     this._logicalEnd = 0;
@@ -33,6 +40,8 @@ class LineAssembler {
     this._pendingCrReset = false;
     // Completed lines waiting to be consumed
     this._completedLines = [];
+    // Cached result of _buildLineString() — invalidated on any line mutation
+    this._cachedLineStr = null;
   }
 
   /**
@@ -40,6 +49,7 @@ class LineAssembler {
    * @param {Array} tokens — token objects from AnsiTokenizer.tokenize()
    */
   feed(tokens) {
+    this._cachedLineStr = null;
     for (const token of tokens) {
       switch (token.type) {
         case 'text':
@@ -108,9 +118,11 @@ class LineAssembler {
   reset() {
     this._line = [];
     this._cursor = 0;
+    this._currentRow = 0;
     this._logicalEnd = 0;
     this._pendingCrReset = false;
     this._completedLines = [];
+    this._cachedLineStr = null;
   }
 
   // ── Private helpers ──────────────────────────────────────────────────────
@@ -147,8 +159,10 @@ class LineAssembler {
     this._completedLines.push(this._buildLineString());
     this._line = [];
     this._cursor = 0;
+    this._currentRow = 0;
     this._logicalEnd = 0;
     this._pendingCrReset = false;
+    this._cachedLineStr = null;
   }
 
   /**
@@ -157,12 +171,14 @@ class LineAssembler {
    * Gaps (undefined entries) are rendered as spaces.
    */
   _buildLineString() {
-    if (this._logicalEnd === 0) return '';
+    if (this._cachedLineStr !== null) return this._cachedLineStr;
+    if (this._logicalEnd === 0) { this._cachedLineStr = ''; return ''; }
     const chars = [];
     for (let i = 0; i < this._logicalEnd; i++) {
       chars.push(this._line[i] !== undefined ? this._line[i] : ' ');
     }
-    return chars.join('');
+    this._cachedLineStr = chars.join('');
+    return this._cachedLineStr;
   }
 
   /**
@@ -172,6 +188,10 @@ class LineAssembler {
   _handleCsi(token) {
     const { params, final } = token;
     switch (final) {
+      case 'H': // Cursor position (row;col) — absolute
+      case 'f': // Horizontal and vertical position — same as H
+        this._handleCursorPosition(params);
+        break;
       case 'K': // Erase in line
         this._eraseInLine(params);
         break;
@@ -183,6 +203,23 @@ class LineAssembler {
         break;
       // All other CSI sequences (SGR, DEC private modes, etc.) — ignored
     }
+  }
+
+  /**
+   * Handle CSI H / CSI f — absolute cursor positioning (row;col).
+   * When the row changes, flush the current line so cursor-positioned
+   * content (companion cactus, HUD, status bars) doesn't accumulate
+   * into one giant pending line across multiple screen rows.
+   */
+  _handleCursorPosition(params) {
+    const row = params[0] || 1;
+    const col = params[1] || 1;
+    // Row change → flush current line (different screen row = different logical line)
+    if (this._currentRow !== 0 && row !== this._currentRow) {
+      this._flushLine();
+    }
+    this._currentRow = row;
+    this._cursor = Math.min(col - 1, this._maxLineLength); // CSI H is 1-based
   }
 
   /**

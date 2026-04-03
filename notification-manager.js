@@ -121,7 +121,6 @@ class NotificationManager extends EventEmitter {
           return;
         }
         if (this._isDebounced(entry.category)) {
-          console.log(`[notify:${sessionName}] suppressed (debounced category '${entry.category}')`);
           this._transition(sessionName, 'debounced');
           return;
         }
@@ -185,7 +184,6 @@ class NotificationManager extends EventEmitter {
     for (const channel of this._channels) {
       try {
         channel.fn(sessionName, entry.category, entry.message, context);
-        console.log(`[notify:${sessionName}] delivered via ${channel.name}`);
       } catch (err) {
         console.warn(`[channel:${channel.name}] delivery failed: ${err.message}`);
       }

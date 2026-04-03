@@ -553,11 +553,11 @@ function setupDragAndDrop(card, header, btnMinimize, sessionId) {
 
 function setupTerminal(termWrap, ui) {
   const term = new Terminal({
-    cursorBlink: true,
+    cursorBlink: false,
     fontSize: 14,
     fontFamily: "'Cascadia Code', 'Fira Code', 'Consolas', 'Menlo', monospace",
     theme: getTerminalTheme(),
-    scrollback: 5000,
+    scrollback: 50000,
     allowProposedApi: true,
   });
 
