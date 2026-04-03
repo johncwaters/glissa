@@ -32,6 +32,7 @@ const LAYER4_CHROME_STRINGS = [
   'Bypass Permissions',   // Claude Code bypass-permissions mode warning
   '[Pasted text',         // Pasted text indicator (e.g. "[Pasted text #4 +165 lines]")
   'l:cancel',             // OMC cancel hint fragment in garbled redraws
+  '-+-',                  // Companion cactus ASCII art (trunk pattern in garbled redraws)
 ];
 
 const LAYER4_SPINNER = /[◐◑◒◓⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏✻✢✶✽]/;
