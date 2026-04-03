@@ -7,10 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-04-03
+
+### Added
+
+- **Settings dialog for terminal and detection**: Expose terminal dimensions, replay buffer size, and pattern detection toggles in the settings UI.
+- **Configurable replay buffer size**: New `replayBufferKB` setting controls how much terminal history is retained per session.
+
+### Changed
+
+- **Debounced pattern detection feed**: Pattern detection input is now debounced to reduce CPU usage, especially in no-flicker mode.
+- **Startup performance**: Optimized initialization, reduced logging verbosity, and increased default scrollback buffer.
+
 ### Fixed
 
 - **LineAssembler CSI H handling**: Handle absolute cursor positioning (CSI `H`/`f`) in `LineAssembler` by flushing the current line on row change. Cursor-positioned content (companion cactus, HUD, status bars) no longer accumulates into a single giant pending line across multiple screen rows, eliminating the primary source of false-positive "needs input" notifications on idle sessions.
 - **Layer 4 false positive elimination**: Add 7 new detection categories to `isLayer4Chrome` — wide-spaced user typing, short garbled fragments, URLs, task checkbox rendering, system messages (Bypass Permissions, Pasted text), HUD counter fragments, and OMC/auto-update chrome strings. Eliminates spurious "needs input" notifications especially when sessions are idle.
+- **Companion cactus ASCII art false positives**: Suppress Layer 4 false positives triggered by companion cactus ASCII art output.
 - **`killSession()` missing COMPLETE state**: Sessions in COMPLETE state could not be killed from the UI despite the transition table supporting `user_kill → DONE`. Added COMPLETE to the killable state list.
 - **Cross-platform force kill**: `_forceKillAfterTimeout` now uses `SIGKILL` on non-Windows platforms instead of the Windows-only `taskkill` command.
 - **Kill poll timer leak**: Force-kill poll timers are now tracked in `_killPollTimer` and cleaned up in `destroy()`, preventing potential unhandled exceptions on destroyed sessions.
