@@ -397,9 +397,25 @@ function createBackend(httpServer, options = {}) {
       ws.send(replay);
     }
 
+    // Batch PTY data events and send as fewer, larger WS frames.
+    // Without this, each tiny PTY chunk becomes its own WS frame,
+    // flooding the browser with hundreds of messages per second.
+    let sendBuffer = '';
+    let sendScheduled = false;
+
     const dataListener = (data) => {
-      if (ws.readyState === 1) {
-        ws.send(data);
+      if (ws.readyState !== 1) return;
+      sendBuffer += data;
+      if (!sendScheduled) {
+        sendScheduled = true;
+        setImmediate(() => {
+          sendScheduled = false;
+          if (sendBuffer.length > 0 && ws.readyState === 1) {
+            const buf = sendBuffer;
+            sendBuffer = '';
+            ws.send(buf);
+          }
+        });
       }
     };
     sess.on('data', dataListener);

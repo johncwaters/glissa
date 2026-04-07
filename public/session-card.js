@@ -17,7 +17,7 @@ import { getSoundId, isMinimized, isSoundEnabled, setMinimized } from './ui-pref
 const RECONNECT_DELAY_MS = 3000;
 
 // Terminal defaults — updated from server settings on connect
-let _terminalScrollback = 50000;
+let _terminalScrollback = 5000;
 let _terminalCursorBlink = false;
 
 // ── State ────────────────────────────────────────────────────
@@ -80,9 +80,34 @@ function connectDataWs(sessionId, ui, term) {
   const ws = new WebSocket(url);
   ui.dataWs = ws;
 
-  ws.addEventListener('message', (event) => term.write(event.data));
+  // Batch incoming WS messages and flush to xterm once per animation frame.
+  // Without this, high-frequency PTY output (hundreds of small chunks/sec)
+  // triggers a separate term.write() + render pass per message, starving
+  // keyboard input processing and causing visible typing lag.
+  let pendingData = '';
+  let writeRafId = null;
+
+  function flushWrites() {
+    writeRafId = null;
+    if (pendingData.length === 0) return;
+    const data = pendingData;
+    pendingData = '';
+    term.write(data);
+  }
+
+  ws.addEventListener('message', (event) => {
+    pendingData += event.data;
+    if (writeRafId === null) {
+      writeRafId = requestAnimationFrame(flushWrites);
+    }
+  });
 
   ws.addEventListener('close', () => {
+    if (writeRafId !== null) {
+      cancelAnimationFrame(writeRafId);
+      writeRafId = null;
+    }
+    pendingData = '';
     // Only auto-reconnect if this ws is still the current one (not replaced by rename)
     if (ui.dataWs === ws) {
       ui.dataWs = null;
@@ -95,6 +120,8 @@ function connectDataWs(sessionId, ui, term) {
   });
 
   ws.addEventListener('open', () => {
+    // Clear terminal before replay to prevent duplicate content accumulation
+    term.clear();
     const { cols, rows } = term;
     ws.send(JSON.stringify({ type: 'resize', cols, rows }));
   });
