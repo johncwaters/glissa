@@ -14,7 +14,8 @@ import { getSoundId, isMinimized, isSoundEnabled, setMinimized } from './ui-pref
 
 // ── Constants ────────────────────────────────────────────────
 
-const RECONNECT_DELAY_MS = 3000;
+const RECONNECT_DELAY_MS = 500;
+const INPUT_QUEUE_MAX = 1024;
 
 // Terminal defaults — updated from server settings on connect
 let _terminalScrollback = 5000;
@@ -80,25 +81,54 @@ function connectDataWs(sessionId, ui, term) {
   const ws = new WebSocket(url);
   ui.dataWs = ws;
 
-  // Batch incoming WS messages and flush to xterm once per animation frame.
-  // Without this, high-frequency PTY output (hundreds of small chunks/sec)
-  // triggers a separate term.write() + render pass per message, starving
-  // keyboard input processing and causing visible typing lag.
+  // Flush PTY output to xterm via microtask (near-zero delay for keystroke
+  // echoes) with a write-rate circuit breaker that escalates to RAF during
+  // heavy output bursts to prevent main-thread starvation.
   let pendingData = '';
+  let flushScheduled = false;
   let writeRafId = null;
 
+  // Circuit breaker: if term.write() is called more than WRITE_RATE_LIMIT
+  // times within 16ms, escalate to RAF to coalesce writes.
+  const WRITE_RATE_LIMIT = 8;
+  const writeTimestamps = [];
+  let rateLimited = false;
+
   function flushWrites() {
+    flushScheduled = false;
     writeRafId = null;
     if (pendingData.length === 0) return;
+
     const data = pendingData;
     pendingData = '';
+
+    // Track write rate for circuit breaker
+    const now = performance.now();
+    writeTimestamps.push(now);
+    while (writeTimestamps.length > 0 && now - writeTimestamps[0] > 16) {
+      writeTimestamps.shift();
+    }
+    if (writeTimestamps.length >= WRITE_RATE_LIMIT) {
+      rateLimited = true;
+    }
+
     term.write(data);
+  }
+
+  function flushViaRaf() {
+    rateLimited = false;
+    flushWrites();
   }
 
   ws.addEventListener('message', (event) => {
     pendingData += event.data;
-    if (writeRafId === null) {
-      writeRafId = requestAnimationFrame(flushWrites);
+    if (flushScheduled || writeRafId !== null) return;
+
+    if (rateLimited) {
+      writeRafId = requestAnimationFrame(flushViaRaf);
+    } else {
+      flushScheduled = true;
+      queueMicrotask(flushWrites);
     }
   });
 
@@ -107,6 +137,9 @@ function connectDataWs(sessionId, ui, term) {
       cancelAnimationFrame(writeRafId);
       writeRafId = null;
     }
+    flushScheduled = false;
+    rateLimited = false;
+    writeTimestamps.length = 0;
     pendingData = '';
     // Only auto-reconnect if this ws is still the current one (not replaced by rename)
     if (ui.dataWs === ws) {
@@ -124,6 +157,18 @@ function connectDataWs(sessionId, ui, term) {
     term.clear();
     const { cols, rows } = term;
     ws.send(JSON.stringify({ type: 'resize', cols, rows }));
+
+    // Flush any keystrokes queued during disconnect.
+    // Delay 50ms to let the server replay buffer arrive first.
+    if (ui._inputQueue && ui._inputQueue.length > 0) {
+      setTimeout(() => {
+        if (ws.readyState !== WebSocket.OPEN) return;
+        for (const data of ui._inputQueue) {
+          ws.send(JSON.stringify({ type: 'input', data }));
+        }
+        ui._inputQueue.length = 0;
+      }, 50);
+    }
   });
 }
 
@@ -622,6 +667,8 @@ function setupTerminal(termWrap, ui) {
     if (ctrl && ev.key === 'Backspace') {
       if (ui.dataWs?.readyState === WebSocket.OPEN) {
         ui.dataWs.send(JSON.stringify({ type: 'input', data: '\x1b\x7f' }));
+      } else if (ui._inputQueue && ui._inputQueue.length < INPUT_QUEUE_MAX) {
+        ui._inputQueue.push('\x1b\x7f');
       }
       return false;
     }
@@ -741,9 +788,14 @@ function wireCardEvents(ui, sessionId) {
 }
 
 function wireTerminalIO(ui, sessionId) {
+  // Queue keystrokes during WebSocket disconnection for replay on reconnect
+  ui._inputQueue = [];
+
   ui.term.onData((data) => {
     if (ui.dataWs?.readyState === WebSocket.OPEN) {
       ui.dataWs.send(JSON.stringify({ type: 'input', data }));
+    } else if (ui._inputQueue.length < INPUT_QUEUE_MAX) {
+      ui._inputQueue.push(data);
     }
   });
 

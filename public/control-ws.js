@@ -1,7 +1,7 @@
 // ── Control WebSocket module ──────────────────────────────────
 // Owns the control WebSocket connection, reconnect logic, and request/response.
 
-const RECONNECT_DELAY_MS = 3000;
+const RECONNECT_DELAY_MS = 500;
 
 let controlWs = null;
 let controlRetryTimer = null;
