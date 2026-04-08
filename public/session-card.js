@@ -91,7 +91,8 @@ function connectDataWs(sessionId, ui, term) {
   // Circuit breaker: if term.write() is called more than WRITE_RATE_LIMIT
   // times within 16ms, escalate to RAF to coalesce writes.
   const WRITE_RATE_LIMIT = 8;
-  const writeTimestamps = [];
+  const writeTs = new Float64Array(WRITE_RATE_LIMIT);
+  let tsHead = 0, tsCount = 0;
   let rateLimited = false;
 
   function flushWrites() {
@@ -102,13 +103,15 @@ function connectDataWs(sessionId, ui, term) {
     const data = pendingData;
     pendingData = '';
 
-    // Track write rate for circuit breaker
+    // Track write rate for circuit breaker (O(1) circular buffer)
     const now = performance.now();
-    writeTimestamps.push(now);
-    while (writeTimestamps.length > 0 && now - writeTimestamps[0] > 16) {
-      writeTimestamps.shift();
+    writeTs[(tsHead + tsCount) % WRITE_RATE_LIMIT] = now;
+    if (tsCount < WRITE_RATE_LIMIT) tsCount++; else tsHead = (tsHead + 1) % WRITE_RATE_LIMIT;
+    while (tsCount > 0 && now - writeTs[tsHead] > 16) {
+      tsHead = (tsHead + 1) % WRITE_RATE_LIMIT;
+      tsCount--;
     }
-    if (writeTimestamps.length >= WRITE_RATE_LIMIT) {
+    if (tsCount >= WRITE_RATE_LIMIT) {
       rateLimited = true;
     }
 
@@ -139,7 +142,8 @@ function connectDataWs(sessionId, ui, term) {
     }
     flushScheduled = false;
     rateLimited = false;
-    writeTimestamps.length = 0;
+    tsHead = 0;
+    tsCount = 0;
     pendingData = '';
     // Only auto-reconnect if this ws is still the current one (not replaced by rename)
     if (ui.dataWs === ws) {
@@ -387,11 +391,7 @@ export function exitMaximizeMode() {
   _preMaximizeSessions.clear();
 
   // Refit all visible terminals
-  for (const [, u] of sessionUIs) {
-    if (!u.card.classList.contains('minimized')) {
-      requestAnimationFrame(() => { try { u.fitAddon.fit(); } catch {} });
-    }
-  }
+  scheduleFitAll();
 }
 
 export function isMaximizeActive() {
@@ -446,29 +446,42 @@ export function setLayoutMode(layout) {
 
 let _dragSource = null;
 
-function findDropTarget(x, y) {
+// Cached card rects for drag operations — avoids layout thrashing on every dragover
+let _dragRectCache = null;
+
+function snapshotDragRects() {
   const allCards = [...container.querySelectorAll('.session-card')];
+  _dragRectCache = allCards.map(card => ({ card, rect: card.getBoundingClientRect() }));
+}
+
+function invalidateDragRects() {
+  _dragRectCache = null;
+}
+
+function findDropTarget(x, y) {
+  if (!_dragRectCache) snapshotDragRects();
   const sourceCard = _dragSource ? _dragSource.card : null;
 
   let closest = null;
   let closestDist = Infinity;
+  let sourceIdx = -1;
+  let targetIdx = -1;
 
-  for (const card of allCards) {
-    if (card === sourceCard || card === _dropZone) continue;
-    const rect = card.getBoundingClientRect();
+  for (let i = 0; i < _dragRectCache.length; i++) {
+    const { card, rect } = _dragRectCache[i];
+    if (card === sourceCard) { sourceIdx = i; continue; }
+    if (card === _dropZone) continue;
     const cx = rect.left + rect.width / 2;
     const cy = rect.top + rect.height / 2;
     const dist = Math.hypot(x - cx, y - cy);
     if (dist < closestDist) {
       closestDist = dist;
       closest = card;
+      targetIdx = i;
     }
   }
 
   if (!closest) return { card: null, before: true };
-
-  const sourceIdx = sourceCard ? allCards.indexOf(sourceCard) : -1;
-  const targetIdx = allCards.indexOf(closest);
   return { card: closest, before: sourceIdx > targetIdx };
 }
 
@@ -489,11 +502,17 @@ function isFromMinimizedBar() {
 }
 
 function showDropZone() {
-  if (!_dropZone.parentNode) container.appendChild(_dropZone);
+  if (!_dropZone.parentNode) {
+    container.appendChild(_dropZone);
+    invalidateDragRects();
+  }
 }
 
 function hideDropZone() {
-  if (_dropZone.parentNode) _dropZone.remove();
+  if (_dropZone.parentNode) {
+    _dropZone.remove();
+    invalidateDragRects();
+  }
 }
 
 _dropZone.addEventListener('dragover', (e) => {
@@ -528,14 +547,21 @@ _dropZone.addEventListener('drop', (e) => {
   sendReorder();
 });
 
+let _dragoverRafId = null;
+
 container.addEventListener('dragover', (e) => {
   e.preventDefault();
   e.dataTransfer.dropEffect = 'move';
-  clearDropIndicators();
-  if (isFromMinimizedBar()) showDropZone();
-  _dropZone.classList.remove('drop-zone-active');
-  const { card, before } = findDropTarget(e.clientX, e.clientY);
-  if (card) card.classList.add(before ? 'drop-above' : 'drop-below');
+  if (_dragoverRafId !== null) return;
+  const cx = e.clientX, cy = e.clientY;
+  _dragoverRafId = requestAnimationFrame(() => {
+    _dragoverRafId = null;
+    clearDropIndicators();
+    if (isFromMinimizedBar()) showDropZone();
+    _dropZone.classList.remove('drop-zone-active');
+    const { card, before } = findDropTarget(cx, cy);
+    if (card) card.classList.add(before ? 'drop-above' : 'drop-below');
+  });
 });
 
 container.addEventListener('dragleave', (e) => {
@@ -607,6 +633,7 @@ function setupDragAndDrop(card, header, btnMinimize, sessionId) {
     e.dataTransfer.setData('text/plain', sessionId);
     card.classList.add('dragging');
     container.classList.add('drag-active');
+    snapshotDragRects();
     if (card.classList.contains('minimized')) showDropZone();
   });
 
@@ -617,11 +644,8 @@ function setupDragAndDrop(card, header, btnMinimize, sessionId) {
     clearDropIndicators();
     hideDropZone();
     _dragSource = null;
-    for (const [, ui] of sessionUIs) {
-      if (!ui.card.classList.contains('minimized')) {
-        try { ui.fitAddon.fit(); } catch {}
-      }
-    }
+    invalidateDragRects();
+    scheduleFitAll();
   });
 }
 
@@ -843,12 +867,22 @@ export function applyTerminalSettings(settings) {
   }
 }
 
+let _fitRafId = null;
+
 export function fitAllVisible() {
   for (const [, ui] of sessionUIs) {
     if (!ui.card.classList.contains('minimized')) {
       ui.fitAddon.fit();
     }
   }
+}
+
+export function scheduleFitAll() {
+  if (_fitRafId !== null) cancelAnimationFrame(_fitRafId);
+  _fitRafId = requestAnimationFrame(() => {
+    _fitRafId = null;
+    fitAllVisible();
+  });
 }
 
 export function updateAggregateStatus() {
@@ -999,9 +1033,12 @@ export function applyState(sessionId, state) {
   const wasActive = prevState !== STATES.DONE && prevState !== STATES.FAILED && prevState !== STATES.INITIALIZING;
   if (isEnding && wasActive) {
     ui.card.classList.remove('completion-flash');
-    ui.card.offsetWidth;
-    ui.card.classList.add('completion-flash');
-    ui.card.addEventListener('animationend', () => ui.card.classList.remove('completion-flash'), { once: true });
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        ui.card.classList.add('completion-flash');
+        ui.card.addEventListener('animationend', () => ui.card.classList.remove('completion-flash'), { once: true });
+      });
+    });
     if (isSoundEnabled()) playAlertSound(getSoundId());
   }
 

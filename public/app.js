@@ -8,7 +8,7 @@ import { STATES } from '/shared/states.mjs';
 import { connectControl, disableReconnect, onControlMessage, sendControlMsg, sendControlRequest, setConnectionStateCallback } from './control-ws.js';
 import { createAddSessionDialog, createSettingsDialog } from './dialogs.js';
 import {
-  applyState, applyTerminalSettings, createSessionCard, exitMaximizeMode, fitAllVisible,
+  applyState, applyTerminalSettings, createSessionCard, exitMaximizeMode, fitAllVisible, scheduleFitAll,
   getSessionCount, handleSessionsReordered, hasSession, isMaximizeActive,
   reconnectDataWs, removeSessionCard, renameSessionCard, setLayoutMode, showErrorToast, updateAggregateStatus,
 } from './session-card.js';
@@ -157,7 +157,7 @@ let resizeTimer = null;
 
 window.addEventListener('resize', () => {
   clearTimeout(resizeTimer);
-  resizeTimer = setTimeout(() => fitAllVisible(), 100);
+  resizeTimer = setTimeout(() => scheduleFitAll(), 100);
 });
 
 // ── Toolbar buttons ──────────────────────────────────────────
@@ -251,7 +251,7 @@ function applyLayout(layoutId) {
   btnLayout.innerHTML = `&#9638; Layout: ${label}`;
   setLayoutMode(layoutId);
   // Delay fit until after CSS reflow so terminals measure new container size
-  requestAnimationFrame(() => fitAllVisible());
+  scheduleFitAll();
 }
 
 // Apply saved layout on boot

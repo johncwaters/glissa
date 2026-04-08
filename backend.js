@@ -400,12 +400,21 @@ function createBackend(httpServer, options = {}) {
     // Batch PTY data events and send as fewer, larger WS frames.
     // Without this, each tiny PTY chunk becomes its own WS frame,
     // flooding the browser with hundreds of messages per second.
+    const MAX_SEND_BUFFER = 65536;
     let sendBuffer = '';
     let sendScheduled = false;
 
     const dataListener = (data) => {
       if (ws.readyState !== 1) return;
       sendBuffer += data;
+      // Flush immediately if buffer exceeds 64KB to prevent oversized WS frames
+      if (sendBuffer.length >= MAX_SEND_BUFFER) {
+        const buf = sendBuffer;
+        sendBuffer = '';
+        sendScheduled = false;
+        ws.send(buf);
+        return;
+      }
       if (!sendScheduled) {
         sendScheduled = true;
         setImmediate(() => {

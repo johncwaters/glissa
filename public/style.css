@@ -510,7 +510,18 @@ html, body {
 .session-card[data-state="WAITING"] {
   border-color: var(--state-waiting);
   box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.15), 0 0 20px rgba(245, 158, 11, 0.08);
+  position: relative;
+}
+
+.session-card[data-state="WAITING"]::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.35), 0 0 30px rgba(245, 158, 11, 0.15);
+  opacity: 0;
   animation: waiting-pulse 2s ease-in-out infinite;
+  pointer-events: none;
 }
 
 .session-card[data-state="FAILED"] {
@@ -536,10 +547,10 @@ html, body {
 
 @keyframes waiting-pulse {
   0%, 100% {
-    box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.15), 0 0 20px rgba(245, 158, 11, 0.08);
+    opacity: 0;
   }
   50% {
-    box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.35), 0 0 30px rgba(245, 158, 11, 0.15);
+    opacity: 1;
   }
 }
 
