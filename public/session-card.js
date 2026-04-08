@@ -82,18 +82,17 @@ function connectDataWs(sessionId, ui, term) {
   ui.dataWs = ws;
 
   // Flush PTY output to xterm via microtask (near-zero delay for keystroke
-  // echoes) with a write-rate circuit breaker that escalates to RAF during
-  // heavy output bursts to prevent main-thread starvation.
+  // echoes) with a circuit breaker that escalates to RAF during heavy
+  // output bursts to prevent main-thread starvation.
   let pendingData = '';
   let flushScheduled = false;
   let writeRafId = null;
 
-  // Circuit breaker: if term.write() is called more than WRITE_RATE_LIMIT
-  // times within 16ms, escalate to RAF to coalesce writes.
+  // Circuit breaker: after 8 writes within 16ms, escalate to RAF.
   const WRITE_RATE_LIMIT = 8;
-  const writeTs = new Float64Array(WRITE_RATE_LIMIT);
-  let tsHead = 0, tsCount = 0;
+  let writeCount = 0;
   let rateLimited = false;
+  let rateResetTimer = null;
 
   function flushWrites() {
     flushScheduled = false;
@@ -103,15 +102,11 @@ function connectDataWs(sessionId, ui, term) {
     const data = pendingData;
     pendingData = '';
 
-    // Track write rate for circuit breaker (O(1) circular buffer)
-    const now = performance.now();
-    writeTs[(tsHead + tsCount) % WRITE_RATE_LIMIT] = now;
-    if (tsCount < WRITE_RATE_LIMIT) tsCount++; else tsHead = (tsHead + 1) % WRITE_RATE_LIMIT;
-    while (tsCount > 0 && now - writeTs[tsHead] > 16) {
-      tsHead = (tsHead + 1) % WRITE_RATE_LIMIT;
-      tsCount--;
+    writeCount++;
+    if (rateResetTimer === null) {
+      rateResetTimer = setTimeout(() => { writeCount = 0; rateResetTimer = null; }, 16);
     }
-    if (tsCount >= WRITE_RATE_LIMIT) {
+    if (writeCount >= WRITE_RATE_LIMIT) {
       rateLimited = true;
     }
 
@@ -140,10 +135,13 @@ function connectDataWs(sessionId, ui, term) {
       cancelAnimationFrame(writeRafId);
       writeRafId = null;
     }
+    if (rateResetTimer !== null) {
+      clearTimeout(rateResetTimer);
+      rateResetTimer = null;
+    }
     flushScheduled = false;
     rateLimited = false;
-    tsHead = 0;
-    tsCount = 0;
+    writeCount = 0;
     pendingData = '';
     // Only auto-reconnect if this ws is still the current one (not replaced by rename)
     if (ui.dataWs === ws) {
@@ -297,14 +295,18 @@ function _performMinimize(id, ui) {
   setMinimized(id, true);
 }
 
-function _performExpand(id, ui) {
+function _applyExpandState(id, ui) {
   ui.card.classList.remove('minimized');
   ui.btnMinimize.textContent = '\u25bc';
   ui.btnMinimize.title = 'Collapse';
-  container.appendChild(ui.card);
   setMinimized(id, false);
   if (ui.needsWebGLReload) tryLoadWebGL(ui);
   requestAnimationFrame(() => ui.fitAddon.fit());
+}
+
+function _performExpand(id, ui) {
+  container.appendChild(ui.card);
+  _applyExpandState(id, ui);
 }
 
 // ── Maximize mode ───────────────────────────────────────────
@@ -537,13 +539,8 @@ _dropZone.addEventListener('drop', (e) => {
   if (!_dragSource) return;
 
   const sessionId = _dragSource.card.dataset.id;
-  _dragSource.card.classList.remove('minimized');
-  _dragSource.btnMinimize.textContent = '\u25bc';
-  _dragSource.btnMinimize.title = 'Collapse';
   container.appendChild(_dragSource.card);
-  setMinimized(sessionId, false);
-  if (_dragSource.needsWebGLReload) tryLoadWebGL(_dragSource);
-  requestAnimationFrame(() => _dragSource.fitAddon.fit());
+  _applyExpandState(sessionId, _dragSource);
   sendReorder();
 });
 
@@ -573,9 +570,6 @@ container.addEventListener('dragleave', (e) => {
 
 function restoreFromMinimizedBar(target, before) {
   const sessionId = _dragSource.card.dataset.id;
-  _dragSource.card.classList.remove('minimized');
-  _dragSource.btnMinimize.textContent = '\u25bc';
-  _dragSource.btnMinimize.title = 'Collapse';
 
   if (target && target !== _dragSource.card) {
     container.insertBefore(_dragSource.card, before ? target : target.nextSibling);
@@ -583,9 +577,7 @@ function restoreFromMinimizedBar(target, before) {
     container.appendChild(_dragSource.card);
   }
 
-  setMinimized(sessionId, false);
-  if (_dragSource.needsWebGLReload) tryLoadWebGL(_dragSource);
-  requestAnimationFrame(() => _dragSource.fitAddon.fit());
+  _applyExpandState(sessionId, _dragSource);
 }
 
 container.addEventListener('drop', (e) => {
@@ -641,6 +633,10 @@ function setupDragAndDrop(card, header, btnMinimize, sessionId) {
     card.draggable = false;
     card.classList.remove('dragging');
     container.classList.remove('drag-active');
+    if (_dragoverRafId !== null) {
+      cancelAnimationFrame(_dragoverRafId);
+      _dragoverRafId = null;
+    }
     clearDropIndicators();
     hideDropZone();
     _dragSource = null;
@@ -1073,9 +1069,9 @@ export function handleSessionsReordered(order) {
       ui.needsWebGLReload = true;
     } else {
       tryLoadWebGL(ui);
-      try { ui.fitAddon.fit(); } catch {}
     }
   }
+  scheduleFitAll();
 }
 
 export function showErrorToast(message) {
