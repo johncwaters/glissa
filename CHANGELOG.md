@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-04-13
+
+### Changed
+
+- **Microtask-based terminal flushing**: Replaced interval-based PTY output flushing with microtask scheduling, adding a circuit breaker and input queuing to eliminate UI freezes under high throughput.
+- **Batched PTY data path**: WebSocket and xterm write paths now batch PTY data, reducing per-chunk overhead.
+- **Dashboard UI polish**: Addressed design-critique findings across the dashboard for consistency and visual hierarchy.
+- **Deduplicated expand logic**: Consolidated duplicate expand/collapse code paths and simplified the circuit breaker implementation.
+
+### Fixed
+
+- **UI freeze vectors**: Eliminated remaining freeze vectors in terminal rendering and drag-and-drop interactions.
+
+### Security
+
+- **Vite 7.3.2**: Bumped Vite to patch security advisories.
+
 ## [0.7.0] - 2026-04-03
 
 ### Added
