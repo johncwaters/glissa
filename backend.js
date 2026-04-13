@@ -268,8 +268,11 @@ function createBackend(httpServer, options = {}) {
       const sess = makeSession(project, { ...config, ...newConfig });
       sessions.set(project.id, sess);
       wireSessionEvents(sess);
-      sess.start();
+      // Broadcast BEFORE start(): sess.start() emits state-change synchronously,
+      // and handleStateChange creates a card if one doesn't exist yet — without
+      // skipPerms (state-change messages don't carry it), dropping the YOLO badge.
       broadcastControl({ type: 'session-added', id: project.id, session: project.name, state: sess.state, skipPerms: !!sess.dangerouslySkipPermissions });
+      sess.start();
       console.log(`[config] Added session: ${project.name}`);
     }
   }
@@ -284,8 +287,9 @@ function createBackend(httpServer, options = {}) {
       const newSess = makeSession(project, { ...config, ...newConfig });
       sessions.set(project.id, newSess);
       wireSessionEvents(newSess);
-      newSess.start();
+      // Broadcast BEFORE start() — see _addNewSessions for rationale.
       broadcastControl({ type: 'session-modified', id: project.id, session: project.name, state: newSess.state, skipPerms: !!newSess.dangerouslySkipPermissions });
+      newSess.start();
       console.log(`[config] Modified session: ${project.name}`);
     }
   }

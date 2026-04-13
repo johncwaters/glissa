@@ -9,9 +9,39 @@ import { hasSessionByName } from './session-card.js';
 import { applyTheme, getThemeList } from './theme.js';
 import { getSoundId, getThemeId, setSoundId, setThemeId } from './ui-prefs.js';
 
+// ── Shared dialog ARIA + focus trap helpers ──────────────────
+
+function getFocusable(dialog) {
+  return [...dialog.querySelectorAll('button, input, select, textarea, [tabindex]:not([tabindex="-1"])')];
+}
+
+function attachFocusTrap(dialog) {
+  dialog.addEventListener('keydown', (e) => {
+    if (e.key !== 'Tab') return;
+    const focusable = getFocusable(dialog);
+    if (focusable.length === 0) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (e.shiftKey) {
+      if (document.activeElement === first) { e.preventDefault(); last.focus(); }
+    } else {
+      if (document.activeElement === last) { e.preventDefault(); first.focus(); }
+    }
+  });
+}
+
+function applyDialogAria(dialog, titleId) {
+  dialog.setAttribute('role', 'dialog');
+  dialog.setAttribute('aria-modal', 'true');
+  dialog.setAttribute('aria-labelledby', titleId);
+  attachFocusTrap(dialog);
+}
+
 // ── Add Session dialog ────────────────────────────────────────
 
 export function createAddSessionDialog() {
+  const opener = document.activeElement;
+
   const overlay = document.createElement('div');
   overlay.className = 'dialog-overlay';
 
@@ -22,6 +52,14 @@ export function createAddSessionDialog() {
 
   overlay.appendChild(dialog);
   document.body.appendChild(overlay);
+
+  // Ensure title id exists for aria-labelledby
+  let titleEl = dialog.querySelector('#add-session-title');
+  if (!titleEl) {
+    titleEl = dialog.querySelector('h2, h3, [class*="title"]');
+    if (titleEl && !titleEl.id) titleEl.id = 'add-session-title';
+  }
+  applyDialogAria(dialog, 'add-session-title');
 
   const pickerEl = dialog.querySelector('#add-session-picker');
   const advancedToggle = dialog.querySelector('#add-session-advanced-toggle');
@@ -99,8 +137,23 @@ export function createAddSessionDialog() {
   nameInput.addEventListener('input', () => { pickerEl.selectedIndex = 0; });
   pathInput.addEventListener('input', () => { pickerEl.selectedIndex = 0; });
 
+  // Confirm-on-check for skip-perms — forces deliberate acknowledgment
+  skipPermsCheckbox.addEventListener('change', (e) => {
+    if (!skipPermsCheckbox.checked) return;
+    // Prevent commit until confirmed
+    skipPermsCheckbox.checked = false;
+    createConfirmDialog({
+      title: 'Skip permission prompts?',
+      message: 'This launches Claude with --dangerously-skip-permissions, granting unrestricted filesystem access. Only enable for projects you fully trust.',
+      confirmLabel: 'Enable',
+      danger: true,
+      onConfirm: () => { skipPermsCheckbox.checked = true; },
+    });
+  });
+
   function close() {
     overlay.remove();
+    opener?.focus?.();
   }
 
   function submit() {
@@ -145,6 +198,8 @@ export function createAddSessionDialog() {
 // ── Settings dialog ──────────────────────────────────────────
 
 export function createSettingsDialog() {
+  const opener = document.activeElement;
+
   const overlay = document.createElement('div');
   overlay.className = 'dialog-overlay';
 
@@ -155,6 +210,40 @@ export function createSettingsDialog() {
 
   overlay.appendChild(dialog);
   document.body.appendChild(overlay);
+
+  // Ensure title id exists for aria-labelledby
+  let titleEl = dialog.querySelector('#settings-title');
+  if (!titleEl) {
+    titleEl = dialog.querySelector('h2, h3, [class*="title"]');
+    if (titleEl && !titleEl.id) titleEl.id = 'settings-title';
+  }
+  applyDialogAria(dialog, 'settings-title');
+
+  // Tab switching
+  const tabs = [...dialog.querySelectorAll('.settings-tab')];
+  const panels = [...dialog.querySelectorAll('.settings-panel')];
+  function activateTab(id) {
+    for (const t of tabs) {
+      const isActive = t.dataset.tab === id;
+      t.setAttribute('aria-selected', String(isActive));
+      t.tabIndex = isActive ? 0 : -1;
+      t.classList.toggle('active', isActive);
+    }
+    for (const p of panels) {
+      p.hidden = p.dataset.panel !== id;
+    }
+  }
+  for (const t of tabs) {
+    t.addEventListener('click', () => activateTab(t.dataset.tab));
+    t.addEventListener('keydown', (e) => {
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+      e.preventDefault();
+      const i = tabs.indexOf(t);
+      const next = e.key === 'ArrowRight' ? (i + 1) % tabs.length : (i - 1 + tabs.length) % tabs.length;
+      tabs[next].focus();
+      activateTab(tabs[next].dataset.tab);
+    });
+  }
 
   const attentionInput = dialog.querySelector('#settings-attention');
   const escalationInput = dialog.querySelector('#settings-escalation');
@@ -220,6 +309,7 @@ export function createSettingsDialog() {
 
   function close() {
     overlay.remove();
+    opener?.focus?.();
   }
 
   function renderRootList() {
@@ -340,5 +430,66 @@ export function createSettingsDialog() {
     }
   });
 
-  requestAnimationFrame(() => attentionInput.focus());
+  requestAnimationFrame(() => themeSelect.focus());
+}
+
+// ── Confirm dialog ───────────────────────────────────────────
+
+export function createConfirmDialog({ title, message, confirmLabel = 'Confirm', danger = false, onConfirm }) {
+  const opener = document.activeElement;
+
+  const overlay = document.createElement('div');
+  overlay.className = 'dialog-overlay';
+
+  const dialog = document.createElement('div');
+  dialog.className = 'dialog';
+
+  const titleId = 'confirm-dialog-title-' + Math.random().toString(36).slice(2);
+
+  const titleEl = document.createElement('h3');
+  titleEl.id = titleId;
+  titleEl.className = 'dialog-title';
+  titleEl.textContent = title;
+
+  const msgEl = document.createElement('p');
+  msgEl.className = 'dialog-message';
+  msgEl.textContent = message;
+
+  const actions = document.createElement('div');
+  actions.className = 'dialog-actions';
+
+  const btnCancel = document.createElement('button');
+  btnCancel.className = 'btn-dialog btn-dialog-cancel';
+  btnCancel.textContent = 'Cancel';
+
+  const btnConfirm = document.createElement('button');
+  btnConfirm.className = danger ? 'btn-dialog btn-dialog-confirm btn-dialog-danger' : 'btn-dialog btn-dialog-confirm';
+  btnConfirm.textContent = confirmLabel;
+
+  actions.append(btnCancel, btnConfirm);
+  dialog.append(titleEl, msgEl, actions);
+  overlay.appendChild(dialog);
+  document.body.appendChild(overlay);
+
+  applyDialogAria(dialog, titleId);
+
+  function close() {
+    overlay.remove();
+    opener?.focus?.();
+  }
+
+  btnCancel.addEventListener('click', close);
+  btnConfirm.addEventListener('click', () => {
+    close();
+    onConfirm?.();
+  });
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  document.addEventListener('keydown', function escHandler(e) {
+    if (e.key === 'Escape') {
+      close();
+      document.removeEventListener('keydown', escHandler);
+    }
+  });
+
+  requestAnimationFrame(() => btnCancel.focus());
 }

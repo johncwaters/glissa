@@ -6,7 +6,7 @@ import './tailwind.css';
 
 import { STATES } from '/shared/states.mjs';
 import { connectControl, disableReconnect, onControlMessage, sendControlMsg, sendControlRequest, setConnectionStateCallback } from './control-ws.js';
-import { createAddSessionDialog, createSettingsDialog } from './dialogs.js';
+import { createAddSessionDialog, createConfirmDialog, createSettingsDialog } from './dialogs.js';
 import {
   applyState, applyTerminalSettings, createSessionCard, exitMaximizeMode, fitAllVisible, scheduleFitAll,
   getSessionCount, handleSessionsReordered, hasSession, isMaximizeActive,
@@ -86,10 +86,22 @@ function handleSnapshot(sessions) {
   clearEmptyPlaceholder();
 
   if (!sessions || sessions.length === 0) {
-    const el = document.createElement('p');
+    const el = document.createElement('div');
     el.className = 'sessions-empty';
-    el.textContent = 'No sessions.';
+    el.innerHTML = `
+      <div class="sessions-empty-inner">
+        <div class="sessions-empty-mark">\u25b8</div>
+        <h2 class="sessions-empty-title">No sessions running</h2>
+        <p class="sessions-empty-desc">Glissa monitors Claude Code agent sessions. Add a project to begin.</p>
+        <button type="button" class="sessions-empty-cta" id="sessions-empty-cta">+ New Session</button>
+        <p class="sessions-empty-hint">Configure repository roots in <kbd>Settings</kbd> if no projects appear.</p>
+      </div>
+    `;
     container.appendChild(el);
+    const cta = el.querySelector('#sessions-empty-cta');
+    cta.addEventListener('click', () => {
+      document.getElementById('btn-add-session')?.click();
+    });
     updateAggregateStatus();
   } else {
     for (const s of sessions) {
@@ -169,43 +181,62 @@ document.getElementById('btn-add-session').addEventListener('click', createAddSe
 const headerMenu = document.getElementById('header-menu');
 const btnMenu = document.getElementById('btn-menu');
 
+function syncMenuAria() {
+  btnMenu.setAttribute('aria-expanded', headerMenu.classList.contains('open') ? 'true' : 'false');
+}
+
 btnMenu.addEventListener('click', (e) => {
   e.stopPropagation();
   headerMenu.classList.toggle('open');
+  syncMenuAria();
 });
 
 // Close menu on outside click
 document.addEventListener('click', (e) => {
   if (!headerMenu.contains(e.target)) {
     headerMenu.classList.remove('open');
+    syncMenuAria();
   }
 });
 
 document.getElementById('btn-settings').addEventListener('click', () => {
   headerMenu.classList.remove('open');
+  syncMenuAria();
   createSettingsDialog();
 });
 
 document.getElementById('btn-restart').addEventListener('click', () => {
   headerMenu.classList.remove('open');
+  syncMenuAria();
   const count = getSessionCount();
   const suffix = count > 1 ? 's' : '';
-  const msg = count > 0
+  const message = count > 0
     ? `Kill ${count} session${suffix} and restart the server?`
     : 'Restart the server?';
-  if (!confirm(msg)) return;
-  sendControlMsg({ type: 'restart-server' });
+  createConfirmDialog({
+    title: 'Restart Server',
+    message,
+    confirmLabel: 'Restart',
+    danger: false,
+    onConfirm: () => sendControlMsg({ type: 'restart-server' }),
+  });
 });
 
 document.getElementById('btn-shutdown').addEventListener('click', () => {
   headerMenu.classList.remove('open');
+  syncMenuAria();
   const count = getSessionCount();
   const suffix = count > 1 ? 's' : '';
-  const msg = count > 0
+  const message = count > 0
     ? `Kill ${count} session${suffix} and shut down the server?`
     : 'Shut down the server?';
-  if (!confirm(msg)) return;
-  sendControlMsg({ type: 'shutdown' });
+  createConfirmDialog({
+    title: 'Shut Down Server',
+    message,
+    confirmLabel: 'Shut Down',
+    danger: true,
+    onConfirm: () => sendControlMsg({ type: 'shutdown' }),
+  });
 });
 
 // ── Maximize mode: ESC to exit ───────────────────────────────
@@ -223,7 +254,9 @@ const btnMute = document.getElementById('btn-mute');
 
 function updateMuteButton() {
   const muted = !isSoundEnabled();
-  btnMute.textContent = muted ? '\uD83D\uDD07 Unmute Alerts' : '\uD83D\uDD0A Mute Alerts';
+  const label = muted ? 'Unmute Alerts' : 'Mute Alerts';
+  const glyphClass = muted ? 'menu-item-glyph menu-item-glyph-muted' : 'menu-item-glyph';
+  btnMute.innerHTML = `<span class="${glyphClass}">\u266A</span>${label}`;
 }
 updateMuteButton();
 
@@ -248,7 +281,7 @@ function applyLayout(layoutId) {
     sessionsContainer.classList.toggle(`layout-${l.id}`, l.id === layoutId);
   }
   const label = LAYOUTS.find(l => l.id === layoutId)?.label || 'Default';
-  btnLayout.innerHTML = `&#9638; Layout: ${label}`;
+  btnLayout.innerHTML = `<span class="menu-item-glyph">&#9649;</span>Layout: ${label}`;
   setLayoutMode(layoutId);
   // Delay fit until after CSS reflow so terminals measure new container size
   scheduleFitAll();

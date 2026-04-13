@@ -1,4 +1,4 @@
-<div class="dialog-title">Add Session</div>
+<h2 class="dialog-title" id="add-session-title">Add Session</h2>
 <label class="dialog-label">
   Pick a project:
   <select class="dialog-input project-picker" id="add-session-picker">
@@ -16,10 +16,11 @@
     <input type="text" class="dialog-input" id="add-session-path" placeholder="C:\Users\...\my-project" autocomplete="off" spellcheck="false">
   </label>
 </div>
-<label class="dialog-checkbox-label" id="add-session-skip-perms-label">
+<label class="dialog-checkbox-label dialog-danger-checkbox" id="add-session-skip-perms-label">
   <input type="checkbox" id="add-session-skip-perms">
-  Skip permission prompts
-  <span class="dialog-hint">Launches Claude with --dangerously-skip-permissions</span>
+  <span class="dialog-danger-icon" aria-hidden="true">&#9888;</span>
+  <span class="dialog-danger-label">Skip permission prompts</span>
+  <span class="dialog-danger-hint">Grants unrestricted filesystem access via <code>--dangerously-skip-permissions</code>. Use only in trusted projects.</span>
 </label>
 <div class="dialog-error" id="add-session-error"></div>
 <div class="dialog-actions">

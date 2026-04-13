@@ -23,5 +23,16 @@ export const BADGE_LABELS = Object.freeze({
   [STATES.FAILED]:       'Failed',
 });
 
+export const STATE_GLYPHS = Object.freeze({
+  [STATES.INITIALIZING]: '\u25cc',
+  [STATES.STARTING]:     '\u25d0',
+  [STATES.RUNNING]:      '\u25cf',
+  [STATES.WAITING]:      '\u25c6',
+  [STATES.IDLE]:         '\u25cd',
+  [STATES.FAILED]:       '\u25b2',
+  [STATES.DONE]:         '\u25a0',
+  [STATES.COMPLETE]:     '\u25c7',
+});
+
 export const KILLABLE_STATES    = Object.freeze([STATES.RUNNING, STATES.WAITING, STATES.IDLE, STATES.COMPLETE]);
 export const RESTARTABLE_STATES = Object.freeze([STATES.DONE, STATES.FAILED]);

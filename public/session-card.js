@@ -5,7 +5,7 @@ import { FitAddon } from '@xterm/addon-fit';
 import { WebglAddon } from '@xterm/addon-webgl';
 import { Terminal } from '@xterm/xterm';
 // Vite alias — resolves to shared/states.esm.js
-import { BADGE_LABELS, KILLABLE_STATES, RESTARTABLE_STATES, STATES } from '/shared/states.mjs';
+import { BADGE_LABELS, KILLABLE_STATES, RESTARTABLE_STATES, STATE_GLYPHS, STATES } from '/shared/states.mjs';
 import { playAlertSound } from './alert-sound.js';
 import { sendControlMsg } from './control-ws.js';
 import { el } from './dom-helpers.js';
@@ -39,10 +39,88 @@ const _preSplitSessions = new Set(); // sessions auto-minimized by split layout
 
 // ── Helpers (private) ────────────────────────────────────────
 
+// Inline confirm dialog — avoids circular dep with dialogs.js.
+function showConfirmDialog({ title, message, confirmLabel = 'Confirm', onConfirm }) {
+  const opener = document.activeElement;
+
+  const overlay = document.createElement('div');
+  overlay.className = 'dialog-overlay';
+
+  const dialog = document.createElement('div');
+  dialog.className = 'dialog';
+
+  const titleId = 'sc-confirm-' + Math.random().toString(36).slice(2);
+
+  const titleEl = document.createElement('h3');
+  titleEl.id = titleId;
+  titleEl.className = 'dialog-title';
+  titleEl.textContent = title;
+
+  const msgEl = document.createElement('p');
+  msgEl.className = 'dialog-message';
+  msgEl.textContent = message;
+
+  const actions = document.createElement('div');
+  actions.className = 'dialog-actions';
+
+  const btnCancel = document.createElement('button');
+  btnCancel.className = 'btn-dialog btn-dialog-cancel';
+  btnCancel.textContent = 'Cancel';
+
+  const btnConfirm = document.createElement('button');
+  btnConfirm.className = 'btn-dialog btn-dialog-confirm';
+  btnConfirm.textContent = confirmLabel;
+
+  actions.append(btnCancel, btnConfirm);
+  dialog.append(titleEl, msgEl, actions);
+  overlay.appendChild(dialog);
+  document.body.appendChild(overlay);
+
+  dialog.setAttribute('role', 'dialog');
+  dialog.setAttribute('aria-modal', 'true');
+  dialog.setAttribute('aria-labelledby', titleId);
+
+  // Focus trap
+  dialog.addEventListener('keydown', (e) => {
+    if (e.key !== 'Tab') return;
+    const focusable = [...dialog.querySelectorAll('button, input, select, textarea, [tabindex]:not([tabindex="-1"])')];
+    if (focusable.length === 0) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (e.shiftKey) {
+      if (document.activeElement === first) { e.preventDefault(); last.focus(); }
+    } else {
+      if (document.activeElement === last) { e.preventDefault(); first.focus(); }
+    }
+  });
+
+  function close() {
+    overlay.remove();
+    opener?.focus?.();
+  }
+
+  btnCancel.addEventListener('click', close);
+  btnConfirm.addEventListener('click', () => { close(); onConfirm?.(); });
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  document.addEventListener('keydown', function escHandler(e) {
+    if (e.key === 'Escape') { close(); document.removeEventListener('keydown', escHandler); }
+  });
+
+  requestAnimationFrame(() => btnCancel.focus());
+}
+
 function makeBadge(state) {
   const badge = el('span', 'state-badge');
   badge.dataset.state = state;
-  badge.textContent = BADGE_LABELS[state] || state;
+  badge.classList.add('has-glyph');
+  const glyph = STATE_GLYPHS[state] || '';
+  badge.innerHTML = '';
+  const glyphSpan = document.createElement('span');
+  glyphSpan.className = 'state-glyph';
+  glyphSpan.setAttribute('aria-hidden', 'true');
+  glyphSpan.textContent = glyph;
+  badge.appendChild(glyphSpan);
+  badge.appendChild(document.createTextNode(BADGE_LABELS[state] || state));
   return badge;
 }
 
@@ -199,6 +277,7 @@ function buildCardDOM(sessionId, sessionName, initialState, options = {}) {
 
   const btnMinimize = el('span', 'btn-minimize', '\u25bc');
   btnMinimize.title = 'Collapse';
+  btnMinimize.setAttribute('aria-label', 'Collapse');
 
   const nameEl = el('span', 'session-name', sessionName);
   const badge = makeBadge(state);
@@ -212,16 +291,24 @@ function buildCardDOM(sessionId, sessionName, initialState, options = {}) {
 
   const btnMaximize = el('button', 'btn-action btn-maximize visible', '\u26F6');
   btnMaximize.title = 'Enter full screen';
+  btnMaximize.setAttribute('aria-label', 'Enter full screen');
 
   // Overflow menu (Restart + Remove tucked away to prevent accidental clicks)
   const overflow = el('div', 'session-overflow');
   const btnOverflow = el('button', 'btn-action btn-overflow visible', '\u22ee');
   btnOverflow.title = 'More actions';
+  btnOverflow.setAttribute('aria-label', 'More actions');
+  btnOverflow.setAttribute('aria-haspopup', 'menu');
+  btnOverflow.setAttribute('aria-expanded', 'false');
   const overflowMenu = el('div', 'session-overflow-menu');
+  overflowMenu.setAttribute('role', 'menu');
 
   const btnRename = el('button', 'overflow-item overflow-rename', 'Rename');
+  btnRename.setAttribute('role', 'menuitem');
   const btnRestart = el('button', 'overflow-item overflow-restart', 'Restart');
+  btnRestart.setAttribute('role', 'menuitem');
   const btnRemove = el('button', 'overflow-item overflow-remove', 'Remove');
+  btnRemove.setAttribute('role', 'menuitem');
   overflowMenu.append(btnRename, btnRestart, btnRemove);
   overflow.append(btnOverflow, overflowMenu);
 
@@ -275,6 +362,7 @@ function toggleMinimize(sessionId) {
   const nowMinimized = ui.card.classList.toggle('minimized');
   ui.btnMinimize.textContent = nowMinimized ? '\u25b2' : '\u25bc';
   ui.btnMinimize.title = nowMinimized ? 'Expand' : 'Collapse';
+  ui.btnMinimize.setAttribute('aria-label', nowMinimized ? 'Expand' : 'Collapse');
   if (nowMinimized) {
     minimizedBar.appendChild(ui.card);
   } else {
@@ -291,6 +379,7 @@ function _performMinimize(id, ui) {
   ui.card.classList.add('minimized');
   ui.btnMinimize.textContent = '\u25b2';
   ui.btnMinimize.title = 'Expand';
+  ui.btnMinimize.setAttribute('aria-label', 'Expand');
   minimizedBar.appendChild(ui.card);
   setMinimized(id, true);
 }
@@ -299,6 +388,7 @@ function _applyExpandState(id, ui) {
   ui.card.classList.remove('minimized');
   ui.btnMinimize.textContent = '\u25bc';
   ui.btnMinimize.title = 'Collapse';
+  ui.btnMinimize.setAttribute('aria-label', 'Collapse');
   setMinimized(id, false);
   if (ui.needsWebGLReload) tryLoadWebGL(ui);
   requestAnimationFrame(() => ui.fitAddon.fit());
@@ -315,6 +405,7 @@ function _applyMaximized(ui, sessionId) {
   ui.card.classList.add('maximized');
   ui.btnMaximize.textContent = '\u2716';
   ui.btnMaximize.title = 'Exit full screen mode';
+  ui.btnMaximize.setAttribute('aria-label', 'Exit full screen');
   _maximizedSession = sessionId;
   requestAnimationFrame(() => ui.fitAddon.fit());
 }
@@ -326,8 +417,9 @@ function _swapMaximized(sessionId) {
 
   if (oldUi && !oldUi.card.classList.contains('minimized')) {
     oldUi.card.classList.remove('maximized');
-    oldUi.btnMaximize.textContent = 'Full Screen';
+    oldUi.btnMaximize.textContent = '\u26F6';
     oldUi.btnMaximize.title = 'Enter full screen';
+    oldUi.btnMaximize.setAttribute('aria-label', 'Enter full screen');
     _performMinimize(_maximizedSession, oldUi);
     _preMaximizeSessions.add(_maximizedSession);
   }
@@ -380,6 +472,7 @@ export function exitMaximizeMode() {
     ui.card.classList.remove('maximized');
     ui.btnMaximize.textContent = '\u26F6';
     ui.btnMaximize.title = 'Enter full screen';
+    ui.btnMaximize.setAttribute('aria-label', 'Enter full screen');
   }
   _maximizedSession = null;
 
@@ -778,21 +871,30 @@ function wireCardEvents(ui, sessionId) {
 
   ui.btnRemove.addEventListener('click', () => {
     ui.overflowMenu.classList.remove('open');
-    if (!confirm(`Remove session "${ui.card.dataset.session}"?`)) return;
-    sendControlMsg({ type: 'remove-session', id: sessionId });
+    showConfirmDialog({
+      title: 'Remove Session',
+      message: `Remove session "${ui.card.dataset.session}"?`,
+      confirmLabel: 'Remove',
+      onConfirm: () => sendControlMsg({ type: 'remove-session', id: sessionId }),
+    });
   });
 
   ui.btnOverflow.addEventListener('click', (e) => {
     e.stopPropagation();
     for (const [, other] of sessionUIs) {
-      if (other !== ui) other.overflowMenu.classList.remove('open');
+      if (other !== ui) {
+        other.overflowMenu.classList.remove('open');
+        other.btnOverflow.setAttribute('aria-expanded', 'false');
+      }
     }
-    ui.overflowMenu.classList.toggle('open');
+    const nowOpen = ui.overflowMenu.classList.toggle('open');
+    ui.btnOverflow.setAttribute('aria-expanded', String(nowOpen));
   });
 
   document.addEventListener('click', (e) => {
     if (!ui.overflowMenu.contains(e.target) && e.target !== ui.btnOverflow) {
       ui.overflowMenu.classList.remove('open');
+      ui.btnOverflow.setAttribute('aria-expanded', 'false');
     }
   }, { signal: ui.abortController.signal });
 
@@ -1015,8 +1117,24 @@ export function applyState(sessionId, state) {
   const prevState = ui.currentState;
   ui.currentState = state;
 
-  ui.badge.textContent = BADGE_LABELS[state] || state;
+  // Preserve the glyph span; only update its text and the sibling label text node.
   ui.badge.dataset.state = state;
+  const glyphSpan = ui.badge.querySelector('.state-glyph');
+  if (glyphSpan) {
+    glyphSpan.textContent = STATE_GLYPHS[state] || '';
+    const labelNode = glyphSpan.nextSibling;
+    if (labelNode && labelNode.nodeType === Node.TEXT_NODE) {
+      labelNode.nodeValue = BADGE_LABELS[state] || state;
+    } else {
+      ui.badge.appendChild(document.createTextNode(BADGE_LABELS[state] || state));
+    }
+  } else {
+    // Fallback: no glyph present (unexpected) — rebuild in place preserving classes
+    const fresh = makeBadge(state);
+    fresh.classList.add('session-badge');
+    ui.badge.replaceWith(fresh);
+    ui.badge = fresh;
+  }
   ui.card.dataset.state = state;
 
   updateButtonVisibility(ui);

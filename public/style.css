@@ -16,42 +16,84 @@
   --border-dim:  #1e1a32;
   --border-hover:#3e3660;
   --text:        #c8c0e0;
-  --text-dim:    #6a5e90;
+  /* [P1] Lifted from #6a5e90 (~4.1:1) to #8276b0 (≥4.5:1 on --bg).
+     NOTE: theme files that override --text-dim must also be updated. */
+  --text-dim:    #8276b0;
   --text-head:   #e8e0ff;
-  --text-muted:  #4a4268;
+  /* [P1] Lifted from #4a4268 (~3.6:1) to #7a6ea8 (≥4.5:1 on --bg).
+     NOTE: theme files that override --text-muted must also be updated. */
+  --text-muted:  #7a6ea8;
   --accent:      #c084fc;
   --accent-dim:  #9656d6;
   --state-running:      #22c55e;
-  --state-running-bg:   rgba(34, 197, 94, 0.06);
+  --state-running-bg:   color-mix(in oklab, var(--state-running) 6%, transparent);
   --state-waiting:      #f59e0b;
-  --state-waiting-bg:   rgba(245, 158, 11, 0.08);
+  --state-waiting-bg:   color-mix(in oklab, var(--state-waiting) 8%, transparent);
   --state-failed:       #ef4444;
-  --state-failed-bg:    rgba(239, 68, 68, 0.06);
+  --state-failed-bg:    color-mix(in oklab, var(--state-failed) 6%, transparent);
   --state-done:         #67e8f9;
-  --state-done-bg:      rgba(103, 232, 249, 0.06);
+  --state-done-bg:      color-mix(in oklab, var(--state-done) 6%, transparent);
   --state-initializing: #6b7280;
-  --state-initializing-bg: rgba(107, 114, 128, 0.06);
+  --state-initializing-bg: color-mix(in oklab, var(--state-initializing) 6%, transparent);
   --state-idle:         #eab308;
-  --state-idle-bg:      rgba(234, 179, 8, 0.06);
+  --state-idle-bg:      color-mix(in oklab, var(--state-idle) 6%, transparent);
   --state-starting:     #f472b6;
-  --state-starting-bg:  rgba(244, 114, 182, 0.06);
+  --state-starting-bg:  color-mix(in oklab, var(--state-starting) 6%, transparent);
   --state-complete:     #34d399;
-  --state-complete-bg:  rgba(52, 211, 153, 0.06);
+  --state-complete-bg:  color-mix(in oklab, var(--state-complete) 6%, transparent);
 
-  --radius: 6px;
-  --radius-lg: 10px;
+  /* [P1] Tokenized glow values for state colors */
+  --state-running-glow:  color-mix(in oklab, var(--state-running) 25%, transparent);
+  --state-waiting-glow:  color-mix(in oklab, var(--state-waiting) 25%, transparent);
+  --state-failed-glow:   color-mix(in oklab, var(--state-failed) 25%, transparent);
+  --state-done-glow:     color-mix(in oklab, var(--state-done) 25%, transparent);
+  --accent-glow:         color-mix(in oklab, var(--accent) 25%, transparent);
+
+  /* [P1] Permissions warning token */
+  --perms-warn: #d97706;
+
+  /* [P1] Brand-tinted shadow tokens — replace raw rgba(0,0,0,.X) shadows.
+     [P3] Uses near-black (oklch 0.06) instead of pure #000 per impeccable color-rules. */
+  --shadow-tint: color-mix(in oklab, var(--accent) 15%, oklch(0.06 0 0));
+  --shadow-sm:   0 2px 8px  color-mix(in srgb, var(--shadow-tint) 55%, transparent);
+  --shadow-md:   0 4px 12px color-mix(in srgb, var(--shadow-tint) 55%, transparent);
+  --shadow-lg:   0 8px 24px color-mix(in srgb, var(--shadow-tint) 65%, transparent);
+  --shadow-xl:   0 8px 24px color-mix(in srgb, var(--shadow-tint) 80%, transparent);
+  --scrim:       color-mix(in srgb, var(--shadow-tint) 80%, transparent);
+
+  --radius: 4px;
+  --radius-lg: 5px;
   --font-mono: 'Cascadia Code', 'Fira Code', 'Consolas', 'Menlo', monospace;
   --font-ui:   'Segoe UI', system-ui, sans-serif;
 
-  --transition-fast: 150ms ease;
-  --transition-med:  250ms ease;
+  /* [P2] Layout dimension tokens for split-layout calc */
+  --header-h:  52px;
+  --minbar-h:  52px;
+  /* [P2] Terminal-height tokens — tune globally instead of per-rule magic numbers */
+  --terminal-h:       400px;
+  --maximize-offset:  200px;
+
+  /* [P3] Easing: ease-out-quart for snappier feel */
+  --transition-fast: 150ms cubic-bezier(0.22, 1, 0.36, 1);
+  --transition-med:  250ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* [P0] Respect prefers-reduced-motion system preference */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 html, body {
   height: 100%;
   background: var(--bg);
   color: var(--text);
-  font-family: var(--font-ui);
+  /* [P3] Full mono voice — operator-console aesthetic */
+  font-family: var(--font-mono);
   font-size: 14px;
   line-height: 1.5;
 }
@@ -63,7 +105,7 @@ html, body {
   z-index: 100;
   background: var(--bg-header);
   border-bottom: 1px solid var(--border);
-  backdrop-filter: blur(12px);
+  /* [P2] backdrop-filter removed — bg-header is opaque enough */
 }
 
 .header-inner {
@@ -112,7 +154,7 @@ html, body {
   background: var(--bg-card);
   border: 1px solid var(--border-hover);
   border-radius: var(--radius);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--shadow-lg);
   z-index: 150;
   flex-direction: column;
   gap: 4px;
@@ -166,7 +208,7 @@ html, body {
 
 .header-connection[data-state="connected"] .connection-dot {
   background: var(--state-running);
-  box-shadow: 0 0 6px rgba(34, 197, 94, 0.5);
+  box-shadow: 0 0 6px var(--state-running-glow);
 }
 
 .header-connection[data-state="connected"] {
@@ -209,7 +251,8 @@ html, body {
 .sessions.layout-split {
   grid-template-columns: 1fr 1fr;
   grid-auto-rows: 1fr;
-  height: calc(100vh - 90px - 52px);
+  /* [P2] Use layout tokens instead of magic numbers */
+  height: calc(100vh - var(--header-h) - var(--minbar-h));
   padding-bottom: 0;
 }
 
@@ -241,13 +284,12 @@ html, body {
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  transition: border-color var(--transition-med), box-shadow var(--transition-med), transform var(--transition-med);
+  /* [P1] Removed box-shadow from animated properties — avoids repaint cost on hover */
+  transition: border-color var(--transition-med), transform var(--transition-med);
 }
 
 .session-card:hover {
   border-color: var(--border-hover);
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
 }
 
 /* ── Drag-and-drop reorder ───────────────────────────────── */
@@ -259,11 +301,18 @@ html, body {
   font-size: inherit;
   user-select: none;
   transition: opacity var(--transition-fast), color var(--transition-fast);
-  color: var(--text);
   flex-shrink: 0;
   border-radius: 3px;
   display: inline-flex;
   align-items: center;
+  /* [P1] Touch target extension — visual size unchanged */
+  position: relative;
+}
+
+.btn-minimize::after {
+  content: '';
+  position: absolute;
+  inset: -11px;
 }
 
 .btn-minimize:hover {
@@ -274,11 +323,11 @@ html, body {
 
 .btn-maximize {
   color: var(--state-done);
-  border-color: rgba(103, 232, 249, 0.4);
+  border-color: color-mix(in oklab, var(--state-done) 40%, transparent);
 }
 
 .btn-maximize:hover {
-  background: rgba(103, 232, 249, 0.12);
+  background: color-mix(in oklab, var(--state-done) 12%, transparent);
 }
 
 .session-card.dragging {
@@ -289,7 +338,7 @@ html, body {
 
 .session-card.dragging .session-card-header {
   cursor: grabbing;
-  background: rgba(192, 132, 252, 0.06);
+  background: color-mix(in oklab, var(--accent) 6%, transparent);
 }
 
 /* Disable pointer events on terminal during ANY drag so the full card is a drop target */
@@ -300,19 +349,19 @@ html, body {
 .session-card.drop-above {
   border-color: var(--accent);
   border-top-width: 3px;
-  box-shadow: 0 -4px 12px rgba(192, 132, 252, 0.25), 0 0 0 1px rgba(192, 132, 252, 0.15);
+  box-shadow: 0 -4px 12px var(--accent-glow), 0 0 0 1px color-mix(in oklab, var(--accent) 15%, transparent);
 }
 
 .session-card.drop-below {
   border-color: var(--accent);
   border-bottom-width: 3px;
-  box-shadow: 0 4px 12px rgba(192, 132, 252, 0.25), 0 0 0 1px rgba(192, 132, 252, 0.15);
+  box-shadow: 0 4px 12px var(--accent-glow), 0 0 0 1px color-mix(in oklab, var(--accent) 15%, transparent);
 }
 
 .drop-zone-placeholder {
   border: 2px dashed var(--accent);
   border-radius: var(--radius-lg);
-  background: rgba(192, 132, 252, 0.04);
+  background: color-mix(in oklab, var(--accent) 4%, transparent);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -330,7 +379,7 @@ html, body {
 
 .drop-zone-placeholder.drop-zone-active {
   border-color: var(--accent);
-  background: rgba(192, 132, 252, 0.12);
+  background: color-mix(in oklab, var(--accent) 12%, transparent);
   animation: none;
 }
 
@@ -339,8 +388,8 @@ html, body {
 }
 
 @keyframes drop-zone-pulse {
-  0%, 100% { border-color: var(--accent-dim); background: rgba(192, 132, 252, 0.03); }
-  50% { border-color: var(--accent); background: rgba(192, 132, 252, 0.08); }
+  0%, 100% { border-color: var(--accent-dim); background: color-mix(in oklab, var(--accent) 3%, transparent); }
+  50% { border-color: var(--accent); background: color-mix(in oklab, var(--accent) 8%, transparent); }
 }
 
 /* ── Minimized bar ───────────────────────────────────────── */
@@ -359,7 +408,7 @@ html, body {
   margin: 0 auto;
   border-top: 1px solid var(--border-dim);
   background: var(--bg-header);
-  backdrop-filter: blur(12px);
+  /* [P2] backdrop-filter removed — bg-header is opaque enough */
 }
 
 /* ── Create session ghost card ────────────────────────────── */
@@ -379,9 +428,9 @@ html, body {
   opacity: 1;
   border-style: solid;
   border-color: var(--accent-dim);
-  background: rgba(192, 132, 252, 0.06);
+  background: color-mix(in oklab, var(--accent) 6%, transparent);
   transform: none;
-  box-shadow: 0 0 0 1px rgba(192, 132, 252, 0.15);
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--accent) 15%, transparent);
 }
 
 .session-card.ghost-card .session-card-header {
@@ -423,8 +472,7 @@ html, body {
 
 .session-card.minimized:hover {
   opacity: 1;
-  transform: none;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  border-color: var(--border-hover);
 }
 
 .session-card.minimized .terminal-wrap {
@@ -449,7 +497,9 @@ html, body {
 }
 
 .session-card.minimized .state-badge {
-  font-size: 8px;
+  /* [P2] 8px → 10px — sub-10px forbidden; use letter-spacing for density */
+  font-size: 10px;
+  letter-spacing: 0.04em;
   padding: 0 6px;
   margin-left: auto;
 }
@@ -469,47 +519,50 @@ html, body {
 }
 
 /* Completion flash — plays once on DONE/FAILED transition */
+/* [P2] DONE shortened to 900ms (success = brief), FAILED to 1.4s (keeps weight) */
 .session-card.completion-flash[data-state="DONE"] {
-  animation: completion-glow 1.8s ease-out;
+  animation: completion-glow 900ms ease-out;
 }
 
 .session-card.completion-flash[data-state="FAILED"] {
-  animation: failure-glow 1.8s ease-out;
+  animation: failure-glow 1.4s ease-out;
 }
 
+/* [P1] Inset-ring register — loud moment, restrained shape. No outer neon spread. */
 @keyframes completion-glow {
-  0%   { box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.6), 0 0 24px rgba(52, 211, 153, 0.3); }
-  30%  { box-shadow: 0 0 0 5px rgba(52, 211, 153, 0.4), 0 0 40px rgba(52, 211, 153, 0.2); }
-  100% { box-shadow: none; }
+  0%   { box-shadow: inset 0 0 0 0 color-mix(in oklab, var(--state-complete) 80%, transparent); border-color: var(--state-complete); }
+  25%  { box-shadow: inset 0 0 0 2px color-mix(in oklab, var(--state-complete) 90%, transparent); border-color: var(--state-complete); }
+  100% { box-shadow: inset 0 0 0 0 color-mix(in oklab, var(--state-complete) 0%, transparent); }
 }
 
+/* Failure contracts inward — different somatic feel from success */
 @keyframes failure-glow {
-  0%   { box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.6), 0 0 24px rgba(239, 68, 68, 0.3); }
-  30%  { box-shadow: 0 0 0 5px rgba(239, 68, 68, 0.4), 0 0 40px rgba(239, 68, 68, 0.2); }
-  100% { box-shadow: none; }
+  0%   { box-shadow: inset 0 0 0 4px color-mix(in oklab, var(--state-failed) 70%, transparent); border-color: var(--state-failed); }
+  40%  { box-shadow: inset 0 0 0 2px color-mix(in oklab, var(--state-failed) 85%, transparent); border-color: var(--state-failed); }
+  100% { box-shadow: inset 0 0 0 0 color-mix(in oklab, var(--state-failed) 0%, transparent); }
 }
 
 /* Override: explicit flash animation on minimized cards */
 .session-card.minimized.completion-flash[data-state="DONE"] {
   opacity: 1;
-  animation: completion-glow 1.8s ease-out;
+  animation: completion-glow 900ms ease-out;
 }
 
 .session-card.minimized.completion-flash[data-state="FAILED"] {
   opacity: 1;
-  animation: failure-glow 1.8s ease-out;
+  animation: failure-glow 1.4s ease-out;
 }
 
 /* btn-minimize removed — drag handle now toggles minimize */
 
 /* State-driven card borders */
 .session-card[data-state="RUNNING"] {
-  border-color: rgba(34, 197, 94, 0.2);
+  border-color: color-mix(in oklab, var(--state-running) 20%, transparent);
 }
 
 .session-card[data-state="WAITING"] {
   border-color: var(--state-waiting);
-  box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.15), 0 0 20px rgba(245, 158, 11, 0.08);
+  box-shadow: 0 0 0 1px var(--state-waiting-glow), 0 0 20px color-mix(in oklab, var(--state-waiting) 8%, transparent);
   position: relative;
 }
 
@@ -518,31 +571,31 @@ html, body {
   position: absolute;
   inset: -1px;
   border-radius: inherit;
-  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.35), 0 0 30px rgba(245, 158, 11, 0.15);
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--state-waiting) 35%, transparent), 0 0 30px color-mix(in oklab, var(--state-waiting) 15%, transparent);
   opacity: 0;
   animation: waiting-pulse 2s ease-in-out infinite;
   pointer-events: none;
 }
 
 .session-card[data-state="FAILED"] {
-  border-color: rgba(239, 68, 68, 0.3);
+  border-color: color-mix(in oklab, var(--state-failed) 30%, transparent);
 }
 
 .session-card[data-state="DONE"] {
-  border-color: rgba(192, 132, 252, 0.2);
+  border-color: color-mix(in oklab, var(--accent) 20%, transparent);
 }
 
 .session-card[data-state="STARTING"] {
-  border-color: rgba(244, 114, 182, 0.2);
+  border-color: color-mix(in oklab, var(--state-starting) 20%, transparent);
 }
 
 .session-card[data-state="IDLE"] {
-  border-color: rgba(234, 179, 8, 0.15);
+  border-color: color-mix(in oklab, var(--state-idle) 15%, transparent);
 }
 
 .session-card[data-state="COMPLETE"] {
-  border-color: rgba(52, 211, 153, 0.3);
-  box-shadow: 0 0 0 1px rgba(52, 211, 153, 0.15), 0 0 16px rgba(52, 211, 153, 0.08);
+  border-color: color-mix(in oklab, var(--state-complete) 30%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--state-complete) 15%, transparent), 0 0 16px color-mix(in oklab, var(--state-complete) 8%, transparent);
 }
 
 @keyframes waiting-pulse {
@@ -555,31 +608,34 @@ html, body {
 }
 
 .session-card[data-state="WAITING"]:hover {
-  transform: translateY(-1px);
+  border-color: color-mix(in oklab, var(--state-waiting) 70%, var(--text-head));
 }
 
 /* ── Skip-permissions indicator ──────────────────────────── */
 .session-card[data-skip-perms] {
-  border-color: rgba(245, 158, 11, 0.25);
-  box-shadow: inset 0 0 0 1px rgba(245, 158, 11, 0.06);
+  border-color: color-mix(in oklab, var(--perms-warn) 25%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--perms-warn) 6%, transparent);
 }
 
 .session-card[data-skip-perms] .session-card-header {
-  background: linear-gradient(135deg, rgba(245, 158, 11, 0.05) 0%, var(--bg-surface) 40%);
+  /* [P1] Flattened 135° gradient to a flat brand-tinted surface — .perms-badge already signals the state */
+  background: color-mix(in oklab, var(--perms-warn) 6%, var(--bg-surface));
 }
 
 .perms-badge {
   display: inline-flex;
   align-items: center;
-  font-size: 8px;
+  /* [P2] 10px → 11px — improved legibility in operator-console context */
+  font-size: 11px;
   font-family: var(--font-mono);
   font-weight: 700;
-  letter-spacing: 1px;
+  letter-spacing: 0.08em;
   padding: 0 6px;
   border-radius: 2px;
-  background: rgba(245, 158, 11, 0.12);
-  color: #d97706;
-  border-left: 2px solid #d97706;
+  /* [P1] Replaced hardcoded #d97706 and border-left: 2px — use token + full 1px border */
+  color: var(--perms-warn);
+  border: 1px solid var(--perms-warn);
+  background: color-mix(in srgb, var(--perms-warn) 16%, transparent);
   flex-shrink: 0;
   line-height: 18px;
 }
@@ -631,7 +687,8 @@ html, body {
   gap: 5px;
   padding: 0 8px;
   border-radius: 2px;
-  font-size: 9px;
+  /* [P2] 10px → 11px — improved legibility on main cards; minimized bar overrides to 10px */
+  font-size: 11px;
   font-family: var(--font-mono);
   font-weight: 700;
   letter-spacing: 0.08em;
@@ -641,14 +698,11 @@ html, body {
   transition: color var(--transition-fast);
 }
 
-.state-badge::before {
-  content: '';
-  display: block;
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: currentColor;
-  flex-shrink: 0;
+/* [coordination] ::before dot removed — js-semantics adds .has-glyph + glyph span instead */
+.state-glyph {
+  font-size: 11px;
+  line-height: 1;
+  margin-right: 4px;
 }
 
 .state-badge[data-state="RUNNING"]      { color: var(--state-running); }
@@ -690,10 +744,18 @@ html, body {
   background: transparent;
   color: var(--text);
   transition: background var(--transition-fast), color var(--transition-fast);
+  /* [P1] Touch target extension — visual size unchanged */
+  position: relative;
+}
+
+.btn-action::after {
+  content: '';
+  position: absolute;
+  inset: -11px;
 }
 
 .btn-action:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: color-mix(in srgb, var(--text) 8%, transparent);
   color: var(--text-head);
 }
 
@@ -721,7 +783,7 @@ html, body {
 }
 
 .terminal-wrap .xterm {
-  height: 400px;
+  height: var(--terminal-h);
 }
 
 .terminal-wrap .xterm-viewport {
@@ -731,12 +793,87 @@ html, body {
 /* ── Empty state ──────────────────────────────────────────── */
 .sessions-empty {
   grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: calc(100vh - var(--header-h) - var(--minbar-h) - 80px);
+  padding: 48px 24px;
+}
+
+.sessions-empty-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  max-width: 440px;
   text-align: center;
-  padding: 80px 24px;
-  color: var(--text-muted);
+}
+
+.sessions-empty-mark {
   font-family: var(--font-mono);
-  font-size: 13px;
-  letter-spacing: 0.04em;
+  font-size: 28px;
+  color: var(--accent);
+  line-height: 1;
+  margin-bottom: 4px;
+}
+
+.sessions-empty-title {
+  font-family: var(--font-mono);
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-head);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin: 0;
+}
+
+.sessions-empty-desc {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-dim);
+  letter-spacing: 0.02em;
+  line-height: 1.6;
+  max-width: 36ch;
+  margin: 0;
+}
+
+.sessions-empty-cta {
+  margin-top: 8px;
+  padding: 10px 24px;
+  border: 1px solid var(--accent-dim);
+  border-radius: var(--radius);
+  background: color-mix(in oklab, var(--accent) 10%, transparent);
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+
+.sessions-empty-cta:hover {
+  background: color-mix(in oklab, var(--accent) 20%, transparent);
+  border-color: var(--accent);
+}
+
+.sessions-empty-hint {
+  margin: 4px 0 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  letter-spacing: 0.02em;
+}
+
+.sessions-empty-hint kbd {
+  font-family: inherit;
+  padding: 1px 5px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--bg-surface);
+  color: var(--text-dim);
+  font-size: 10px;
 }
 
 /* ── Focus rings ─────────────────────────────────────────── */
@@ -745,7 +882,10 @@ html, body {
 .btn-settings-remove:focus-visible,
 .ghost-card:focus-visible,
 .btn-menu:focus-visible,
+.btn-settings-add:focus-visible,
+.dialog-advanced-toggle:focus-visible,
 .menu-item:focus-visible,
+.overflow-item:focus-visible,
 .project-picker:focus-visible,
 .dialog-input:focus-visible {
   outline: none;
@@ -753,9 +893,10 @@ html, body {
 }
 
 /* ── Scrollbar ────────────────────────────────────────────── */
-::-webkit-scrollbar        { width: 5px; height: 5px; }
+/* [P2] Widened from 5px to 10px — mouse-draggable target */
+::-webkit-scrollbar        { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track  { background: transparent; }
-::-webkit-scrollbar-thumb  { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb  { background: var(--border); border-radius: 5px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
 
 
@@ -782,7 +923,7 @@ html, body {
   background: var(--bg-surface);
   border: 1px solid var(--border);
   border-radius: 6px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--shadow-xl);
   padding: 4px 0;
 }
 
@@ -809,7 +950,7 @@ html, body {
 }
 
 .overflow-item:hover {
-  background: rgba(255, 255, 255, 0.06);
+  background: color-mix(in srgb, var(--text) 6%, transparent);
 }
 
 .overflow-item.visible {
@@ -821,12 +962,12 @@ html, body {
 }
 
 .overflow-restart:hover {
-  background: rgba(192, 132, 252, 0.1);
+  background: color-mix(in oklab, var(--accent) 10%, transparent);
 }
 
 .overflow-remove:hover {
   color: var(--state-failed);
-  background: rgba(239, 68, 68, 0.1);
+  background: color-mix(in oklab, var(--state-failed) 10%, transparent);
 }
 
 /* ── Dialog animations ───────────────────────────────────── */
@@ -848,8 +989,8 @@ html, body {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.6);
-  backdrop-filter: blur(4px);
+  /* [P1] Tokenized scrim; [P2] backdrop-filter removed — black scrim alone does the job */
+  background: var(--scrim);
   animation: dialogFadeIn 150ms ease;
 }
 
@@ -882,6 +1023,15 @@ html, body {
   font-size: 11px;
   color: var(--text-dim);
   letter-spacing: 0.04em;
+}
+
+.dialog-message {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-dim);
+  letter-spacing: 0.02em;
 }
 
 .dialog-input {
@@ -939,17 +1089,91 @@ html, body {
 }
 
 .btn-dialog-cancel:hover {
-  background: rgba(255, 255, 255, 0.03);
+  background: color-mix(in srgb, var(--text) 3%, transparent);
 }
 
 .btn-dialog-confirm {
   color: var(--accent);
   border-color: var(--accent-dim);
-  background: rgba(192, 132, 252, 0.08);
+  background: color-mix(in oklab, var(--accent) 8%, transparent);
 }
 
 .btn-dialog-confirm:hover {
-  background: rgba(192, 132, 252, 0.18);
+  background: color-mix(in oklab, var(--accent) 18%, transparent);
+}
+
+.btn-dialog-danger {
+  color: var(--state-failed);
+  border-color: color-mix(in oklab, var(--state-failed) 50%, transparent);
+  background: color-mix(in oklab, var(--state-failed) 8%, transparent);
+}
+
+.btn-dialog-danger:hover {
+  background: color-mix(in oklab, var(--state-failed) 18%, transparent);
+}
+
+/* ── Danger checkbox (skip-permissions) ──────────────────── */
+.dialog-danger-checkbox {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  align-items: center;
+  column-gap: 10px;
+  row-gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in oklab, var(--perms-warn) 40%, transparent);
+  border-radius: var(--radius);
+  background: color-mix(in oklab, var(--perms-warn) 7%, transparent);
+  cursor: pointer;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+
+.dialog-danger-checkbox:hover {
+  background: color-mix(in oklab, var(--perms-warn) 12%, transparent);
+  border-color: var(--perms-warn);
+}
+
+.dialog-danger-checkbox input[type="checkbox"] {
+  accent-color: var(--perms-warn);
+  margin: 0;
+}
+
+.dialog-danger-icon {
+  color: var(--perms-warn);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.dialog-danger-label {
+  color: var(--perms-warn);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.dialog-danger-hint {
+  grid-column: 1 / -1;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-dim);
+  letter-spacing: 0.02em;
+}
+
+.dialog-danger-hint code {
+  font-family: inherit;
+  color: var(--perms-warn);
+  padding: 0 3px;
+  background: color-mix(in oklab, var(--perms-warn) 10%, transparent);
+  border-radius: 2px;
+}
+
+.dialog-danger-checkbox:has(input:checked) {
+  background: color-mix(in oklab, var(--perms-warn) 18%, transparent);
+  border-color: var(--perms-warn);
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--perms-warn) 30%, transparent);
 }
 
 /* ── Error toast ─────────────────────────────────────────── */
@@ -960,13 +1184,13 @@ html, body {
   transform: translateX(-50%);
   z-index: 300;
   padding: 10px 20px;
-  background: rgba(239, 68, 68, 0.15);
-  border: 1px solid rgba(239, 68, 68, 0.3);
+  background: color-mix(in oklab, var(--state-failed) 15%, transparent);
+  border: 1px solid color-mix(in oklab, var(--state-failed) 30%, transparent);
   border-radius: var(--radius);
   color: var(--state-failed);
   font-family: var(--font-mono);
   font-size: 12px;
-  backdrop-filter: blur(8px);
+  /* [P2] Decorative glassmorphism removed — tinted background is sufficient */
   transition: opacity 400ms ease;
 }
 
@@ -992,11 +1216,19 @@ html, body {
   background: transparent;
   cursor: pointer;
   transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
+  /* [P1] Touch target extension to ≥44×44 — visual size unchanged */
+  position: relative;
+}
+
+.btn-menu::after {
+  content: '';
+  position: absolute;
+  inset: -8px;
 }
 
 .btn-menu:hover,
 .header-menu.open .btn-menu {
-  background: rgba(255, 255, 255, 0.04);
+  background: color-mix(in srgb, var(--text) 4%, transparent);
   border-color: var(--border-hover);
   color: var(--text);
 }
@@ -1015,7 +1247,7 @@ html, body {
   background: var(--bg-card);
   border: 1px solid var(--border-hover);
   border-radius: var(--radius);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--shadow-lg);
   z-index: 150;
   animation: dialogScaleIn 100ms ease;
 }
@@ -1043,7 +1275,7 @@ html, body {
 }
 
 .menu-item:hover {
-  background: rgba(255, 255, 255, 0.06);
+  background: color-mix(in srgb, var(--text) 6%, transparent);
   color: var(--text-head);
 }
 
@@ -1052,7 +1284,7 @@ html, body {
 }
 
 .menu-item-warning:hover {
-  background: rgba(245, 158, 11, 0.1);
+  background: color-mix(in oklab, var(--state-waiting) 10%, transparent);
   color: var(--state-waiting);
 }
 
@@ -1061,7 +1293,7 @@ html, body {
 }
 
 .menu-item-danger:hover {
-  background: rgba(239, 68, 68, 0.1);
+  background: color-mix(in oklab, var(--state-failed) 10%, transparent);
   color: var(--state-failed);
 }
 
@@ -1071,9 +1303,83 @@ html, body {
   background: var(--border);
 }
 
+/* [P2] Mono-safe glyph column for menu items — keeps labels aligned */
+.menu-item-glyph {
+  display: inline-block;
+  width: 1.2em;
+  text-align: center;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: inherit;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.menu-item:hover .menu-item-glyph {
+  color: inherit;
+}
+
+.menu-item-glyph-muted {
+  color: var(--text-muted);
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+
 /* ── Settings dialog ────────────────────────────────────── */
 .dialog-settings {
-  width: 520px;
+  width: 560px;
+}
+
+/* [P2] Settings tab strip — replaces single-scroll section stack */
+.settings-tabs {
+  display: flex;
+  gap: 2px;
+  margin: -4px -4px 4px;
+  padding: 4px;
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.settings-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.settings-tab {
+  padding: 6px 12px;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  transition: color var(--transition-fast), border-color var(--transition-fast);
+  white-space: nowrap;
+}
+
+.settings-tab:hover {
+  color: var(--text);
+}
+
+.settings-tab[aria-selected="true"],
+.settings-tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+.settings-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.settings-panel[hidden] {
+  display: none;
 }
 
 .session-rename-input {
@@ -1114,7 +1420,8 @@ html, body {
 
 .dialog-hint {
   font-family: var(--font-mono);
-  font-size: 9px;
+  /* [P2] 9px → 10px — sub-10px forbidden */
+  font-size: 10px;
   color: var(--text-muted);
   letter-spacing: 0.02em;
   line-height: 1.3;
@@ -1124,8 +1431,8 @@ html, body {
   display: block;
   padding: 6px 10px;
   margin-top: 4px;
-  background: rgba(245, 158, 11, 0.12);
-  border: 1px solid rgba(245, 158, 11, 0.3);
+  background: color-mix(in oklab, var(--state-waiting) 12%, transparent);
+  border: 1px solid color-mix(in oklab, var(--state-waiting) 30%, transparent);
   border-radius: var(--radius);
   color: var(--state-waiting);
   font-size: 10px;
@@ -1194,11 +1501,11 @@ html, body {
   gap: 8px;
   padding: 4px 8px;
   border-radius: 3px;
-  background: rgba(255, 255, 255, 0.02);
+  background: color-mix(in srgb, var(--text) 2%, transparent);
 }
 
 .settings-root-item:hover {
-  background: rgba(255, 255, 255, 0.04);
+  background: color-mix(in srgb, var(--text) 4%, transparent);
 }
 
 .settings-root-path {
@@ -1225,10 +1532,18 @@ html, body {
   font-size: 16px;
   cursor: pointer;
   transition: background var(--transition-fast), color var(--transition-fast);
+  /* [P1] Touch target extension — visual size unchanged */
+  position: relative;
+}
+
+.btn-settings-remove::after {
+  content: '';
+  position: absolute;
+  inset: -11px;
 }
 
 .btn-settings-remove:hover {
-  background: rgba(239, 68, 68, 0.15);
+  background: color-mix(in oklab, var(--state-failed) 15%, transparent);
   color: var(--state-failed);
 }
 
@@ -1331,7 +1646,7 @@ html, body {
 }
 
 .session-card.maximized .terminal-wrap .xterm {
-  height: calc(100vh - 200px);
+  height: calc(100vh - var(--maximize-offset));
 }
 
 .session-name {
@@ -1356,5 +1671,32 @@ html, body {
 
   .minimized-bar {
     padding: 8px 16px;
+  }
+}
+
+/* [P3] Phone breakpoint — tighter layout, stacked header */
+@media (max-width: 640px) {
+  .sessions {
+    padding: 8px;
+    gap: 8px;
+  }
+
+  .header-inner {
+    padding: 8px;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .header-right {
+    gap: 10px;
+  }
+
+  /* Hide aggregate tooltip on phone (still hoverable on desktop) */
+  .status-tooltip {
+    display: none !important;
+  }
+
+  .minimized-bar {
+    padding: 6px 8px;
   }
 }

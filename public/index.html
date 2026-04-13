@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="dark light">
   <title>Glissa</title>
   <style>
     /* Inline critical styles — render before JS modules load */
@@ -55,7 +56,8 @@
     .loading-status {
       font-family: 'Cascadia Code', 'Fira Code', 'Consolas', 'Menlo', monospace;
       font-size: 12px;
-      color: #6a5e90;
+      /* [P3] Lifted from #6a5e90 (~4.1:1) to #8276b0 (≥4.5:1) for pre-theme paint */
+      color: #8276b0;
       letter-spacing: 0.04em;
     }
 
@@ -99,7 +101,8 @@
     .shutdown-status {
       font-family: 'Cascadia Code', 'Fira Code', 'Consolas', 'Menlo', monospace;
       font-size: 12px;
-      color: #6a5e90;
+      /* [P3] Lifted to ≥4.5:1 on pre-theme bg */
+      color: #8276b0;
       letter-spacing: 0.04em;
       transition: color 300ms ease;
     }
@@ -132,14 +135,15 @@
   </div>
 
   <!-- App shell — hidden until CSS loads and WS connects -->
+  <!-- [P3] Tailwind utility duplicates stripped — semantic classes in style.css are authoritative -->
   <div class="app-shell">
-    <header class="header sticky top-0 z-100 bg-bg-header border-b border-border backdrop-blur-xl">
-      <div class="header-inner flex items-center justify-between gap-4 px-6 py-2.5 max-w-[1920px] mx-auto">
-        <h1 class="header-title font-mono text-base font-bold tracking-wider text-text-head uppercase">Glissa</h1>
-        <div class="header-right flex items-center gap-5">
+    <header class="header">
+      <div class="header-inner">
+        <h1 class="header-title">Glissa</h1>
+        <div class="header-right">
           <div class="status-indicator" id="status-indicator">
-            <span class="header-connection inline-flex items-center gap-1.5 text-[11px] font-mono text-text-dim" id="connection-status">
-              <span class="connection-dot w-[7px] h-[7px] rounded-full bg-text-dim transition-colors"></span>
+            <span class="header-connection" id="connection-status">
+              <span class="connection-dot"></span>
               <span class="connection-label">Connecting</span>
             </span>
             <div class="status-tooltip" id="status-tooltip">
@@ -147,14 +151,14 @@
             </div>
           </div>
           <div class="header-menu" id="header-menu">
-            <button class="btn-menu" id="btn-menu" title="Menu">&#9776;</button>
-            <div class="header-menu-dropdown" id="header-menu-dropdown">
-              <button class="menu-item" id="btn-mute">&#128266; Mute Alerts</button>
-              <button class="menu-item" id="btn-layout">&#9638; Layout: Default</button>
-              <button class="menu-item" id="btn-settings">&#9881; Settings</button>
-              <button class="menu-item menu-item-warning" id="btn-restart">&#8635; Restart Server</button>
+            <button class="btn-menu" id="btn-menu" title="Menu" aria-label="Open menu" aria-haspopup="menu" aria-expanded="false" aria-controls="header-menu-dropdown">&#9776;</button>
+            <div class="header-menu-dropdown" id="header-menu-dropdown" role="menu">
+              <button class="menu-item" id="btn-mute" role="menuitem"><span class="menu-item-glyph">&#9834;</span>Mute Alerts</button>
+              <button class="menu-item" id="btn-layout" role="menuitem"><span class="menu-item-glyph">&#9649;</span>Layout: Default</button>
+              <button class="menu-item" id="btn-settings" role="menuitem"><span class="menu-item-glyph">&#9881;</span>Settings</button>
+              <button class="menu-item menu-item-warning" id="btn-restart" role="menuitem"><span class="menu-item-glyph">&#8634;</span>Restart Server</button>
               <div class="menu-divider"></div>
-              <button class="menu-item menu-item-danger" id="btn-shutdown">Shut Down</button>
+              <button class="menu-item menu-item-danger" id="btn-shutdown" role="menuitem"><span class="menu-item-glyph">&#9632;</span>Shut Down</button>
             </div>
           </div>
         </div>
@@ -168,7 +172,7 @@
         </div>
       </div>
     </div>
-    <main class="sessions grid grid-cols-[repeat(auto-fill,minmax(min(100%,720px),1fr))] gap-4 p-5 px-6 max-w-[1920px] mx-auto" id="sessions-container">
+    <main class="sessions" id="sessions-container">
       <!-- Session cards injected here by app.js -->
     </main>
   </div>

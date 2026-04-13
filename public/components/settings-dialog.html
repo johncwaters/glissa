@@ -1,38 +1,51 @@
-<div class="dialog-title">Settings</div>
-<div class="settings-section">
-  <div class="settings-section-title">Timeouts (seconds)</div>
-  <div class="settings-timeout-grid">
-    <label class="dialog-label">
-      Attention
-      <input type="number" class="dialog-input" id="settings-attention" min="1" autocomplete="off">
-      <span class="dialog-hint">Time before alert on WAITING</span>
-    </label>
-    <label class="dialog-label">
-      Escalation
-      <input type="number" class="dialog-input" id="settings-escalation" min="1" autocomplete="off">
-      <span class="dialog-hint">Re-alert interval</span>
-    </label>
-    <label class="dialog-label">
-      Watchdog
-      <input type="number" class="dialog-input" id="settings-watchdog" min="1" autocomplete="off">
-      <span class="dialog-hint">Starting state timeout</span>
-    </label>
-  </div>
-  <div class="dialog-field-error" id="settings-timeout-error"></div>
+<h2 class="dialog-title" id="settings-title">Settings</h2>
+<div class="settings-tabs" role="tablist" aria-label="Settings sections">
+  <button type="button" class="settings-tab" role="tab" id="settings-tab-general" aria-controls="settings-panel-general" aria-selected="true" data-tab="general">General</button>
+  <button type="button" class="settings-tab" role="tab" id="settings-tab-timing" aria-controls="settings-panel-timing" aria-selected="false" data-tab="timing" tabindex="-1">Timing</button>
+  <button type="button" class="settings-tab" role="tab" id="settings-tab-terminal" aria-controls="settings-panel-terminal" aria-selected="false" data-tab="terminal" tabindex="-1">Terminal</button>
+  <button type="button" class="settings-tab" role="tab" id="settings-tab-repos" aria-controls="settings-panel-repos" aria-selected="false" data-tab="repos" tabindex="-1">Repos</button>
+  <button type="button" class="settings-tab" role="tab" id="settings-tab-advanced" aria-controls="settings-panel-advanced" aria-selected="false" data-tab="advanced" tabindex="-1">Advanced</button>
 </div>
-<label class="dialog-label">
-  Theme
-  <select class="dialog-input" id="settings-theme"></select>
-  <span class="dialog-hint">Color scheme for the dashboard</span>
-  <span class="dialog-hint dialog-hint-warning" id="settings-theme-warning"></span>
-</label>
-<label class="dialog-label">
-  Alert Sound
-  <select class="dialog-input" id="settings-sound"></select>
-  <span class="dialog-hint">Sound played when a session needs attention</span>
-</label>
-<div class="settings-section">
-  <div class="settings-section-title">Terminal</div>
+
+<div class="settings-panel" id="settings-panel-general" role="tabpanel" aria-labelledby="settings-tab-general" data-panel="general">
+  <label class="dialog-label">
+    Theme
+    <select class="dialog-input" id="settings-theme"></select>
+    <span class="dialog-hint">Color scheme for the dashboard</span>
+    <span class="dialog-hint dialog-hint-warning" id="settings-theme-warning"></span>
+  </label>
+  <label class="dialog-label">
+    Alert Sound
+    <select class="dialog-input" id="settings-sound"></select>
+    <span class="dialog-hint">Sound played when a session needs attention</span>
+  </label>
+</div>
+
+<div class="settings-panel" id="settings-panel-timing" role="tabpanel" aria-labelledby="settings-tab-timing" data-panel="timing" hidden>
+  <div class="settings-section">
+    <div class="settings-section-title">Timeouts (seconds)</div>
+    <div class="settings-timeout-grid">
+      <label class="dialog-label">
+        Attention
+        <input type="number" class="dialog-input" id="settings-attention" min="1" autocomplete="off">
+        <span class="dialog-hint">Time before alert on WAITING</span>
+      </label>
+      <label class="dialog-label">
+        Escalation
+        <input type="number" class="dialog-input" id="settings-escalation" min="1" autocomplete="off">
+        <span class="dialog-hint">Re-alert interval</span>
+      </label>
+      <label class="dialog-label">
+        Watchdog
+        <input type="number" class="dialog-input" id="settings-watchdog" min="1" autocomplete="off">
+        <span class="dialog-hint">Starting state timeout</span>
+      </label>
+    </div>
+    <div class="dialog-field-error" id="settings-timeout-error"></div>
+  </div>
+</div>
+
+<div class="settings-panel" id="settings-panel-terminal" role="tabpanel" aria-labelledby="settings-tab-terminal" data-panel="terminal" hidden>
   <div class="settings-timeout-grid">
     <label class="dialog-label">
       Scrollback Lines
@@ -51,8 +64,21 @@
     <span class="dialog-hint">Blinking cursor in terminal</span>
   </label>
 </div>
-<div class="settings-section">
-  <div class="settings-section-title">Advanced</div>
+
+<div class="settings-panel" id="settings-panel-repos" role="tabpanel" aria-labelledby="settings-tab-repos" data-panel="repos" hidden>
+  <div class="settings-section">
+    <div class="settings-section-title">Repository Roots</div>
+    <span class="dialog-hint">Directories scanned for projects when adding sessions</span>
+    <div class="settings-root-list" id="settings-root-list"></div>
+    <div class="settings-add-row">
+      <input type="text" class="dialog-input settings-root-input" id="settings-root-input" placeholder="C:\Users\...\repos" autocomplete="off" spellcheck="false">
+      <button class="btn-dialog btn-dialog-confirm btn-settings-add" id="settings-root-add">Add</button>
+    </div>
+    <div class="dialog-field-error" id="settings-root-error"></div>
+  </div>
+</div>
+
+<div class="settings-panel" id="settings-panel-advanced" role="tabpanel" aria-labelledby="settings-tab-advanced" data-panel="advanced" hidden>
   <label class="dialog-label dialog-checkbox-label">
     <input type="checkbox" class="dialog-checkbox" id="settings-no-flicker">
     No-Flicker Mode
@@ -65,16 +91,7 @@
     <span class="dialog-hint">Batching delay for pattern detection. Higher = less CPU, slower detection.</span>
   </label>
 </div>
-<div class="settings-section">
-  <div class="settings-section-title">Repository Roots</div>
-  <span class="dialog-hint">Directories scanned for projects when adding sessions</span>
-  <div class="settings-root-list" id="settings-root-list"></div>
-  <div class="settings-add-row">
-    <input type="text" class="dialog-input settings-root-input" id="settings-root-input" placeholder="C:\Users\...\repos" autocomplete="off" spellcheck="false">
-    <button class="btn-dialog btn-dialog-confirm btn-settings-add" id="settings-root-add">Add</button>
-  </div>
-  <div class="dialog-field-error" id="settings-root-error"></div>
-</div>
+
 <div class="dialog-error" id="settings-error"></div>
 <div class="dialog-actions settings-actions">
   <button class="btn-dialog btn-dialog-cancel" id="settings-cancel">Cancel</button>
