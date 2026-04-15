@@ -726,7 +726,7 @@ html, body {
 .session-actions {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 6px;
   flex-shrink: 0;
 }
 
@@ -751,7 +751,8 @@ html, body {
 .btn-action::after {
   content: '';
   position: absolute;
-  inset: -11px;
+  /* Generous vertical target, minimal horizontal to prevent overlap with adjacent buttons */
+  inset: -11px -2px;
 }
 
 .btn-action:hover {
