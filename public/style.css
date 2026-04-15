@@ -1646,8 +1646,43 @@ html, body {
   grid-column: 1 / -1;
 }
 
+/* One-shot enter flourish — lives on a namespaced class so it doesn't
+   clobber continuous animations on .maximized (e.g. waiting-pulse). */
+.session-card.maximized.entering {
+  animation: maximize-in 280ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
 .session-card.maximized .terminal-wrap .xterm {
   height: calc(100vh - var(--maximize-offset));
+}
+
+@keyframes maximize-in {
+  from {
+    opacity: 0.55;
+    transform: scale(0.975);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* One-shot class toggled by JS when a card is restored from auto-minimize
+   during exitMaximizeMode. Signals "these returned" without competing with
+   the existing .minimized opacity transition. */
+.session-card.restoring {
+  animation: maximize-restore 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes maximize-restore {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .session-name {

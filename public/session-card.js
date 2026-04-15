@@ -33,6 +33,7 @@ const aggregateEl = document.getElementById('aggregate-status');
 
 let _maximizedSession = null;
 const _preMaximizeSessions = new Set(); // sessions auto-minimized by maximize
+let _preMaximizeOrder = []; // container order (session ids) before maximize entry
 
 let _currentLayout = 'default';
 const _preSplitSessions = new Set(); // sessions auto-minimized by split layout
@@ -401,8 +402,20 @@ function _performExpand(id, ui) {
 
 // ── Maximize mode ───────────────────────────────────────────
 
+function _onOneShotAnim(card, animationName, cleanup) {
+  const onEnd = (e) => {
+    if (e.animationName !== animationName) return;
+    card.removeEventListener('animationend', onEnd);
+    cleanup();
+  };
+  card.addEventListener('animationend', onEnd);
+}
+
 function _applyMaximized(ui, sessionId) {
-  ui.card.classList.add('maximized');
+  ui.card.classList.add('maximized', 'entering');
+  // Strip one-shot flourish class after it plays — keeps .maximized free of
+  // animation property so continuous states (e.g. waiting-pulse) can resume.
+  _onOneShotAnim(ui.card, 'maximize-in', () => ui.card.classList.remove('entering'));
   ui.btnMaximize.textContent = '\u2716';
   ui.btnMaximize.title = 'Exit full screen mode';
   ui.btnMaximize.setAttribute('aria-label', 'Exit full screen');
@@ -448,6 +461,7 @@ function toggleMaximize(sessionId) {
 
   _maximizedSession = sessionId;
   _preMaximizeSessions.clear();
+  _preMaximizeOrder = Array.from(container.querySelectorAll('.session-card')).map(c => c.dataset.id);
 
   if (ui.card.classList.contains('minimized')) {
     _performExpand(sessionId, ui);
@@ -481,9 +495,25 @@ export function exitMaximizeMode() {
     const otherUi = sessionUIs.get(id);
     if (otherUi?.card.classList.contains('minimized')) {
       _performExpand(id, otherUi);
+      // One-shot entry flourish — matches by animation-name so other
+      // animations (completion-flash, waiting-pulse) don't cancel it early.
+      otherUi.card.classList.add('restoring');
+      _onOneShotAnim(otherUi.card, 'maximize-restore', () =>
+        otherUi.card.classList.remove('restoring'),
+      );
     }
   }
   _preMaximizeSessions.clear();
+
+  // Restore original container order — appendChild in snapshot order
+  // moves each card to the end in sequence, preserving pre-maximize layout.
+  for (const id of _preMaximizeOrder) {
+    const otherUi = sessionUIs.get(id);
+    if (otherUi && otherUi.card.parentElement === container) {
+      container.appendChild(otherUi.card);
+    }
+  }
+  _preMaximizeOrder = [];
 
   // Refit all visible terminals
   scheduleFitAll();
