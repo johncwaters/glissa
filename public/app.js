@@ -144,6 +144,7 @@ const messageHandlers = {
   'session-modified':   (msg) => { removeSessionCard(msg.id); clearEmptyPlaceholder(); createSessionCard(msg.id, msg.session, msg.state, { skipPerms: !!msg.skipPerms }); autoLayout(); },
   'sessions-reordered': (msg) => handleSessionsReordered(msg.order),
   'error':              (msg) => showErrorToast(msg.message),
+  'session-error':      (msg) => showErrorToast(`${msg.session}: ${msg.message}`),
   'settings-updated':   (msg) => { if (msg.settings) applyTerminalSettings(msg.settings); },
   'shutting-down':      () => {
     disableReconnect();

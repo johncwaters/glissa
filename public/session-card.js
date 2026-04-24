@@ -789,6 +789,15 @@ function setupTerminal(termWrap, ui) {
   ui.webglAddon = null;
   ui.needsWebGLReload = false;
 
+  // Auto-refit terminal when its container resizes (layout switches, window resize)
+  const resizeObserver = new ResizeObserver(() => {
+    if (!ui.card.classList.contains('minimized')) {
+      fitAddon.fit();
+    }
+  });
+  resizeObserver.observe(termWrap);
+  ui.resizeObserver = resizeObserver;
+
   // Try WebGL — fall back to canvas silently
   tryLoadWebGL(ui);
 
@@ -1120,6 +1129,7 @@ export function removeSessionCard(sessionId) {
   _preMaximizeSessions.delete(sessionId);
   _preSplitSessions.delete(sessionId);
 
+  if (ui.resizeObserver) ui.resizeObserver.disconnect();
   if (ui.abortController) ui.abortController.abort();
   if (ui.dataWs?.readyState <= WebSocket.OPEN) ui.dataWs.close();
   if (ui.term) ui.term.dispose();

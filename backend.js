@@ -107,7 +107,7 @@ function createBackend(httpServer, options = {}) {
   // --- WebSocket servers (noServer mode) ---
 
   const controlWss = new WebSocketServer({ noServer: true, maxPayload: 16 * 1024 });
-  const dataWss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
+  const dataWss = new WebSocketServer({ noServer: true, maxPayload: 2 * 1024 * 1024 });
 
   function broadcastControl(msg) {
     const payload = JSON.stringify(msg);
@@ -145,6 +145,9 @@ function createBackend(httpServer, options = {}) {
 
   // Clean up focus tracking when a control WS client disconnects
   controlWss.on('connection', (ws) => {
+    ws.on('error', (err) => {
+      console.warn(`[control-ws] Error: ${err.message}`);
+    });
     ws.on('close', () => {
       focusedClients.delete(ws);
       updateNotifySuppression();
@@ -444,6 +447,13 @@ function createBackend(httpServer, options = {}) {
       if (msg.type === 'input' && typeof msg.data === 'string') {
         if (msg.data.length > 16384) {
           console.warn(`[data-ws] Rejected oversized input (${msg.data.length} chars) for ${sess.name}`);
+          broadcastControl({
+            type: 'session-error',
+            id: sess.id,
+            session: sess.name,
+            message: 'Paste too large — try pasting smaller chunks',
+            timestamp: Date.now(),
+          });
           return;
         }
         sess.write(msg.data);
@@ -459,6 +469,22 @@ function createBackend(httpServer, options = {}) {
           sess.resize(cols, rows);
         }
       }
+    });
+
+    ws.on('error', (err) => {
+      const isPayload = err.code === 'WS_ERR_UNSUPPORTED_MESSAGE_LENGTH';
+      const reason = isPayload
+        ? 'Message too large — try pasting smaller chunks'
+        : err.message;
+      console.warn(`[data-ws] Error for ${sess.name}: ${err.message}`);
+      broadcastControl({
+        type: 'session-error',
+        id: sess.id,
+        session: sess.name,
+        message: reason,
+        timestamp: Date.now(),
+      });
+      // ws 'close' fires automatically after error — no need to call ws.close()
     });
 
     ws.on('close', () => {
