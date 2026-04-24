@@ -206,6 +206,10 @@ const ENTRY_HOOKS = {
     if (!session._runningStartedAt) {
       session._runningStartedAt = Date.now();
     }
+    // Apply any resize that was deferred while the session was quiescent.
+    // The resulting redraw data is harmless in RUNNING state (handled by
+    // the RUNNING data handler which just resets the idle timer).
+    session._applyPendingResize();
   },
   [STATES.COMPLETE](session) {
     session._runningStartedAt = null;
@@ -269,6 +273,7 @@ class Session extends EventEmitter {
     this._feedDebounceTimer = null;
     this._feedDebounceMs = feedDebounceMs;
     this._noFlicker = noFlicker;
+    this._pendingResize = null;
 
     this._promptDetectionMs = promptDetectionMs;
     this._confirmationMs = 300; // PatternDetector default, recorded for capture header
@@ -382,6 +387,7 @@ class Session extends EventEmitter {
     this._clearIdleTimer();
     this._clearStartupGrace();
     this._clearFeedDebounce();
+    this._pendingResize = null;
     this.patternDetector.reset();
 
     const env = this._buildSpawnEnv();
@@ -530,6 +536,17 @@ class Session extends EventEmitter {
     if (this._recorder) {
       this._recorder.writeResize(cols, rows);
     }
+    // Defer PTY resize for quiescent states. Resizing a PTY causes the
+    // application inside (Claude CLI) to redraw, producing output that
+    // DATA_HANDLERS would interpret as genuine new work — transitioning
+    // IDLE/COMPLETE → RUNNING, or inflating WAITING's auto-recover
+    // counter into a false recovery. Store the resize and apply it when
+    // the session next enters RUNNING (via genuine output or user input).
+    if (this.state === STATES.IDLE || this.state === STATES.COMPLETE || this.state === STATES.WAITING) {
+      this._pendingResize = { cols, rows };
+      return;
+    }
+    this._pendingResize = null;
     if (this.ptyProcess) {
       this.ptyProcess.resize(cols, rows);
     }
@@ -648,6 +665,7 @@ class Session extends EventEmitter {
     this._clearAutoRecoverTimer();
     this._clearStartupGrace();
     this._clearFeedDebounce();
+    this._pendingResize = null;
     if (this._killPollTimer !== null) {
       clearTimeout(this._killPollTimer);
       this._killPollTimer = null;
@@ -660,6 +678,13 @@ class Session extends EventEmitter {
     if (this.patternDetector) {
       this.patternDetector.reset();
       this.patternDetector.removeAllListeners();
+    }
+  }
+
+  _applyPendingResize() {
+    if (this._pendingResize && this.ptyProcess) {
+      this.ptyProcess.resize(this._pendingResize.cols, this._pendingResize.rows);
+      this._pendingResize = null;
     }
   }
 
