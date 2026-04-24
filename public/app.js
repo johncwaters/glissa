@@ -13,7 +13,7 @@ import {
   reconnectDataWs, removeSessionCard, renameSessionCard, setLayoutMode, showErrorToast, updateAggregateStatus,
 } from './session-card.js';
 import { applyTheme } from './theme.js';
-import { getLayout, getThemeId, isSoundEnabled, pruneStale, setLayout, setSoundEnabled } from './ui-prefs.js';
+import { getThemeId, isSoundEnabled, pruneStale, setSoundEnabled } from './ui-prefs.js';
 
 // ── Apply saved theme ─────────────────────────────────────────
 
@@ -116,12 +116,14 @@ function handleSnapshot(sessions) {
     updateAggregateStatus();
   }
 
+  autoLayout();
 }
 
 function handleStateChange(msg) {
   if (!hasSession(msg.id)) {
     clearEmptyPlaceholder();
     createSessionCard(msg.id, msg.session, msg.to, { skipPerms: !!msg.skipPerms });
+    autoLayout();
     return;
   }
 
@@ -136,10 +138,10 @@ function handleStateChange(msg) {
 const messageHandlers = {
   'snapshot':           (msg) => handleSnapshot(msg.sessions),
   'state-change':       (msg) => handleStateChange(msg),
-  'session-added':      (msg) => { if (!hasSession(msg.id)) { clearEmptyPlaceholder(); createSessionCard(msg.id, msg.session, msg.state, { skipPerms: !!msg.skipPerms }); } },
-  'session-removed':    (msg) => removeSessionCard(msg.id),
+  'session-added':      (msg) => { if (!hasSession(msg.id)) { clearEmptyPlaceholder(); createSessionCard(msg.id, msg.session, msg.state, { skipPerms: !!msg.skipPerms }); } autoLayout(); },
+  'session-removed':    (msg) => { removeSessionCard(msg.id); autoLayout(); },
   'session-renamed':    (msg) => renameSessionCard(msg.id, msg.newName),
-  'session-modified':   (msg) => { removeSessionCard(msg.id); clearEmptyPlaceholder(); createSessionCard(msg.id, msg.session, msg.state, { skipPerms: !!msg.skipPerms }); },
+  'session-modified':   (msg) => { removeSessionCard(msg.id); clearEmptyPlaceholder(); createSessionCard(msg.id, msg.session, msg.state, { skipPerms: !!msg.skipPerms }); autoLayout(); },
   'sessions-reordered': (msg) => handleSessionsReordered(msg.order),
   'error':              (msg) => showErrorToast(msg.message),
   'settings-updated':   (msg) => { if (msg.settings) applyTerminalSettings(msg.settings); },
@@ -268,36 +270,18 @@ btnMute.addEventListener('click', (e) => {
 
 // ── Layout toggle ─────────────────────────────────────────
 
-const LAYOUTS = [
-  { id: 'default', label: 'Default' },
-  { id: 'split',   label: 'Split' },
-];
-
-const btnLayout = document.getElementById('btn-layout');
 const sessionsContainer = document.getElementById('sessions-container');
 
 function applyLayout(layoutId) {
-  for (const l of LAYOUTS) {
-    sessionsContainer.classList.toggle(`layout-${l.id}`, l.id === layoutId);
-  }
-  const label = LAYOUTS.find(l => l.id === layoutId)?.label || 'Default';
-  btnLayout.innerHTML = `<span class="menu-item-glyph">&#9649;</span>Layout: ${label}`;
+  sessionsContainer.classList.toggle('layout-split', layoutId === 'split');
   setLayoutMode(layoutId);
-  // Delay fit until after CSS reflow so terminals measure new container size
   scheduleFitAll();
 }
 
-// Apply saved layout on boot
-applyLayout(getLayout());
-
-btnLayout.addEventListener('click', (e) => {
-  e.stopPropagation();
-  const current = getLayout();
-  const idx = LAYOUTS.findIndex(l => l.id === current);
-  const next = LAYOUTS[(idx + 1) % LAYOUTS.length];
-  setLayout(next.id);
-  applyLayout(next.id);
-});
+// Auto-switch layout based on session count: split for exactly 2, default otherwise
+function autoLayout() {
+  applyLayout(getSessionCount() === 2 ? 'split' : 'default');
+}
 
 // ── Window focus tracking (suppress server notifications when dashboard is visible) ──
 

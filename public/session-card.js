@@ -1007,9 +1007,12 @@ export function fitAllVisible() {
 
 export function scheduleFitAll() {
   if (_fitRafId !== null) cancelAnimationFrame(_fitRafId);
+  // Double-RAF: first frame lets grid/flex layout settle, second frame measures
   _fitRafId = requestAnimationFrame(() => {
-    _fitRafId = null;
-    fitAllVisible();
+    _fitRafId = requestAnimationFrame(() => {
+      _fitRafId = null;
+      fitAllVisible();
+    });
   });
 }
 
