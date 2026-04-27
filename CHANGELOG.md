@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-04-27
+
+### Added
+
+- **Viewport-filling terminal grid**: Sessions fill the full viewport height with an auto-split layout that shows two sessions side-by-side when exactly two are active.
+- **Browser tab favicon**: SVG favicon matching Glissa's purple brand identity.
+
+### Changed
+
+- **Responsive layout for all screen sizes**: Dashboard fills ultrawide and 4K screens instead of capping at 1920px. Laptops (1280px) now display two columns. Fluid padding replaces hard breakpoint jumps.
+
+### Fixed
+
+- **Oversized paste notification**: Users are now notified when a paste is silently rejected for exceeding the size limit.
+- **PTY resize for inactive sessions**: Deferred PTY resize for idle, complete, and waiting sessions to avoid unnecessary processing.
+- **Session card order on full-screen exit**: Card order is now preserved when exiting full-screen mode.
+- **Action button overlap**: Prevented overlap between adjacent session action buttons.
+
 ## [0.8.0] - 2026-04-13
 
 ### Changed
