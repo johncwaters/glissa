@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <rect width="32" height="32" rx="6" fill="#0a0810"/>
+  <rect x="1" y="1" width="30" height="30" rx="5" fill="none" stroke="#2a2440" stroke-width="1"/>
+  <!-- Terminal prompt: ▸ cursor aesthetic from Glissa loading screen -->
+  <path d="M10 8 L22 16 L10 24Z" fill="#c084fc"/>
+</svg>
