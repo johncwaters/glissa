@@ -96,6 +96,11 @@ html, body {
   line-height: 1.5;
 }
 
+body {
+  display: flex;
+  flex-direction: column;
+}
+
 /* ── Header ───────────────────────────────────────────────── */
 .header {
   position: sticky;
@@ -239,12 +244,14 @@ html, body {
 .sessions {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(min(100%, 640px), 1fr));
-  grid-auto-rows: 1fr;
+  grid-auto-rows: minmax(0, 1fr);
   gap: 16px;
   padding: 12px clamp(12px, 2vw, 32px);
+  padding-bottom: var(--minbar-h);
   max-width: var(--content-max);
   margin: 0 auto;
-  height: calc(100vh - var(--header-h) - var(--minbar-h));
+  flex: 1;
+  min-height: 0;
 }
 
 /* ── Split layout mode ────────────────────────────────────── */
@@ -757,17 +764,12 @@ html, body {
 
 /* ── Terminal container ───────────────────────────────────── */
 .terminal-wrap {
-  padding: 6px;
   flex: 1;
   min-height: 0;
   overflow: hidden;
 }
 
 .terminal-wrap .xterm {
-  height: 100% !important;
-}
-
-.terminal-wrap .xterm-screen {
   height: 100% !important;
 }
 
