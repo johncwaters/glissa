@@ -348,14 +348,24 @@ function createBackend(httpServer, options = {}) {
     if (_onRestart) {
       _onRestart();
     } else {
-      // Fallback: restart by spawning a new process
-      const { spawn } = require('node:child_process');
-      spawn(process.argv[0], process.argv.slice(1), {
-        cwd: process.cwd(),
-        stdio: 'inherit',
-        detached: true,
-      }).unref();
-      process.exit(0);
+      // Fallback: restart by spawning a new process.
+      // Close the HTTP server first so the port is released cleanly,
+      // then spawn the replacement and exit.
+      let spawned = false;
+      const spawnAndExit = () => {
+        if (spawned) return;
+        spawned = true;
+        const { spawn } = require('node:child_process');
+        spawn(process.argv[0], process.argv.slice(1), {
+          cwd: process.cwd(),
+          stdio: 'ignore',
+          detached: true,
+        }).unref();
+        process.exit(0);
+      };
+      httpServer.close(spawnAndExit);
+      // Fallback: if close callback doesn't fire within 2s, force it
+      setTimeout(spawnAndExit, 2000);
     }
   }
 

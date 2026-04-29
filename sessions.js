@@ -625,7 +625,7 @@ class Session extends EventEmitter {
   }
 
   forceRestart() {
-    const killable = [STATES.RUNNING, STATES.WAITING, STATES.IDLE];
+    const killable = [STATES.RUNNING, STATES.WAITING, STATES.IDLE, STATES.COMPLETE];
     if (killable.includes(this.state)) {
       // Kill first, then restart once process exits
       this.once('exit', () => {
