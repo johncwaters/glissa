@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-04-29
+
+### Fixed
+
+- **Server restart on Windows**: Production restart fallback no longer dies on exit. Closes the HTTP server before spawning the replacement and uses detached stdio to prevent Windows `CTRL_CLOSE_EVENT` from killing the child process.
+- **Session restart from COMPLETE state**: `forceRestart()` now includes COMPLETE in its killable states, matching `killSession()` and the frontend.
+- **Terminal bottom clipping in session cards**: Prevented terminal content from being clipped at the bottom of session cards.
+
 ## [0.9.0] - 2026-04-27
 
 ### Added
