@@ -308,6 +308,8 @@ function registerControlHandlers(controlWss, deps) {
     'restart':          (msg) => { const s = findSession(msg); if (s) s.restart(); },
     'force-restart':    (msg) => { const s = findSession(msg); if (s) s.forceRestart(); },
     'dismiss':          (msg) => { const s = findSession(msg); if (s) s.dismiss(); },
+    'sleep':            (msg) => { const s = findSession(msg); if (s) s.sleep(); },
+    'wake':             (msg) => { const s = findSession(msg); if (s) s.wake(); },
     'shutdown':         handleShutdown,
     'restart-server':   handleRestart,
     'focus-change':     (msg, ws) => { if (handleClientFocus) handleClientFocus(ws, !!msg.focused); },

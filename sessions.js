@@ -274,6 +274,7 @@ class Session extends EventEmitter {
     this._feedDebounceMs = feedDebounceMs;
     this._noFlicker = noFlicker;
     this._pendingResize = null;
+    this._sleeping = false;
 
     this._promptDetectionMs = promptDetectionMs;
     this._confirmationMs = 300; // PatternDetector default, recorded for capture header
@@ -301,11 +302,16 @@ class Session extends EventEmitter {
     return this.ptyProcess ? this.ptyProcess.pid : null;
   }
 
+  get sleeping() {
+    return this._sleeping;
+  }
+
   toSnapshot() {
     return {
       id: this.id,
       name: this.name,
       state: this.state,
+      sleeping: this._sleeping,
       dangerouslySkipPermissions: this.dangerouslySkipPermissions,
       auditLog: this.auditLog.slice(-100)
     };
@@ -381,6 +387,7 @@ class Session extends EventEmitter {
 
   start() {
     this._receivedFirstOutput = false;
+    this._sleeping = false;
     this._outputBuffer = [];
     this._outputBufferSize = 0;
     this._clearWatchdog();
@@ -470,15 +477,18 @@ class Session extends EventEmitter {
       this.transition('first_output');
     }
 
-    // State-driven data handling via lookup table
-    const handler = DATA_HANDLERS[this.state];
-    if (handler) {
-      try {
-        handler(this, data);
-      } catch (err) {
-        console.error(`[session:${this.name}] data handler error: ${err.message}`);
-        if (this.listenerCount('error') > 0) {
-          this.emit('error', err);
+    // State-driven data handling via lookup table.
+    // When sleeping, skip handlers to freeze state machine. Ring buffer + emit still run.
+    if (!this._sleeping) {
+      const handler = DATA_HANDLERS[this.state];
+      if (handler) {
+        try {
+          handler(this, data);
+        } catch (err) {
+          console.error(`[session:${this.name}] data handler error: ${err.message}`);
+          if (this.listenerCount('error') > 0) {
+            this.emit('error', err);
+          }
         }
       }
     }
@@ -608,6 +618,25 @@ class Session extends EventEmitter {
     }
     if (this.state === STATES.COMPLETE) return this.transition('user_dismiss');
     return false;
+  }
+
+  sleep() {
+    if (this._sleeping) return;
+    this._sleeping = true;
+    this._clearFeedDebounce();
+    this._clearIdleTimer();
+    this._clearStartupGrace();
+    this.patternDetector.reset();
+    this.emit('sleep');
+  }
+
+  wake() {
+    if (!this._sleeping) return;
+    this._sleeping = false;
+    if (this.state === STATES.RUNNING) {
+      this._resetIdleTimer();
+    }
+    this.emit('wake');
   }
 
   killSession() {

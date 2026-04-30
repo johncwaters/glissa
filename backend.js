@@ -208,6 +208,24 @@ function createBackend(httpServer, options = {}) {
         notificationManager.acknowledge(sess.id);
       }
     });
+
+    sess.on('sleep', () => {
+      broadcastControl({
+        type: 'session-sleep',
+        id: sess.id,
+        session: sess.name,
+        timestamp: Date.now()
+      });
+    });
+
+    sess.on('wake', () => {
+      broadcastControl({
+        type: 'session-wake',
+        id: sess.id,
+        session: sess.name,
+        timestamp: Date.now()
+      });
+    });
   }
 
   // Stagger session startup to avoid spawning all PTY processes at once.

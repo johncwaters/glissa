@@ -16,6 +16,7 @@ import { getSoundId, isMinimized, isSoundEnabled, setMinimized } from './ui-pref
 
 const RECONNECT_DELAY_MS = 500;
 const INPUT_QUEUE_MAX = 1024;
+const SLEEP_ELIGIBLE = [STATES.IDLE, STATES.COMPLETE, STATES.DONE, STATES.FAILED];
 
 // Terminal defaults — updated from server settings on connect
 let _terminalScrollback = 5000;
@@ -223,13 +224,16 @@ function connectDataWs(sessionId, ui, term) {
     writeCount = 0;
     pendingData = '';
     // Only auto-reconnect if this ws is still the current one (not replaced by rename)
+    // Skip reconnect when sleeping — wakeSession() will reconnect on expand
     if (ui.dataWs === ws) {
       ui.dataWs = null;
-      setTimeout(() => {
-        if (sessionUIs.has(sessionId)) {
-          connectDataWs(sessionId, ui, term);
-        }
-      }, RECONNECT_DELAY_MS);
+      if (!ui.sleeping) {
+        setTimeout(() => {
+          if (sessionUIs.has(sessionId)) {
+            connectDataWs(sessionId, ui, term);
+          }
+        }, RECONNECT_DELAY_MS);
+      }
     }
   });
 
@@ -366,10 +370,14 @@ function toggleMinimize(sessionId) {
   ui.btnMinimize.setAttribute('aria-label', nowMinimized ? 'Expand' : 'Collapse');
   if (nowMinimized) {
     minimizedBar.appendChild(ui.card);
+    if (SLEEP_ELIGIBLE.includes(ui.currentState)) {
+      sleepSession(sessionId);
+    }
   } else {
+    if (ui.sleeping) wakeSession(sessionId);
     container.appendChild(ui.card);
     if (ui.needsWebGLReload) tryLoadWebGL(ui);
-    requestAnimationFrame(() => ui.fitAddon.fit());
+    requestAnimationFrame(() => { if (ui.fitAddon) ui.fitAddon.fit(); });
   }
   setMinimized(sessionId, nowMinimized);
 }
@@ -383,21 +391,83 @@ function _performMinimize(id, ui) {
   ui.btnMinimize.setAttribute('aria-label', 'Expand');
   minimizedBar.appendChild(ui.card);
   setMinimized(id, true);
+  if (SLEEP_ELIGIBLE.includes(ui.currentState)) {
+    sleepSession(id);
+  }
 }
 
 function _applyExpandState(id, ui) {
+  if (ui.sleeping) wakeSession(id);
   ui.card.classList.remove('minimized');
   ui.btnMinimize.textContent = '\u25bc';
   ui.btnMinimize.title = 'Collapse';
   ui.btnMinimize.setAttribute('aria-label', 'Collapse');
   setMinimized(id, false);
   if (ui.needsWebGLReload) tryLoadWebGL(ui);
-  requestAnimationFrame(() => ui.fitAddon.fit());
+  requestAnimationFrame(() => {
+    if (ui.fitAddon) ui.fitAddon.fit();
+  });
 }
 
 function _performExpand(id, ui) {
   container.appendChild(ui.card);
   _applyExpandState(id, ui);
+}
+
+// ── Sleep mode ──────────────────────────────────────────────
+
+function sleepSession(sessionId) {
+  const ui = sessionUIs.get(sessionId);
+  if (!ui || ui.sleeping) return;
+  ui.sleeping = true;
+
+  // Close data WebSocket — null ref BEFORE close so close handler skips reconnect
+  if (ui.dataWs) {
+    const ws = ui.dataWs;
+    ui.dataWs = null;
+    ws.close();
+  }
+
+  // Disconnect ResizeObserver
+  if (ui.resizeObserver) {
+    ui.resizeObserver.disconnect();
+    ui.resizeObserver = null;
+  }
+
+  // Dispose WebGL addon
+  if (ui.webglAddon) {
+    ui.webglAddon.dispose();
+    ui.webglAddon = null;
+  }
+
+  // Dispose xterm terminal
+  if (ui.term) {
+    ui.term.dispose();
+    ui.term = null;
+  }
+  ui.fitAddon = null;
+  ui.needsWebGLReload = false;
+
+  // Clear input queue
+  ui._inputQueue = [];
+
+  // Tell server to pause pattern detection
+  sendControlMsg({ type: 'sleep', id: sessionId });
+}
+
+function wakeSession(sessionId) {
+  const ui = sessionUIs.get(sessionId);
+  if (!ui || !ui.sleeping) return;
+  ui.sleeping = false;
+
+  // Tell server to resume
+  sendControlMsg({ type: 'wake', id: sessionId });
+
+  // Recreate terminal
+  setupTerminal(ui.termWrap, ui);
+
+  // Rewire terminal I/O and connect data WS (triggers ring buffer replay)
+  wireTerminalIO(ui, sessionId);
 }
 
 // ── Maximize mode ───────────────────────────────────────────
@@ -1008,7 +1078,7 @@ let _fitRafId = null;
 
 export function fitAllVisible() {
   for (const [, ui] of sessionUIs) {
-    if (!ui.card.classList.contains('minimized')) {
+    if (!ui.card.classList.contains('minimized') && ui.fitAddon) {
       ui.fitAddon.fit();
     }
   }
@@ -1089,6 +1159,7 @@ export function createSessionCard(sessionId, sessionName, initialState, options 
     btnRemove: dom.btnRemove,
     abortController: new AbortController(),
     currentState: initialState || STATES.INITIALIZING,
+    sleeping: false,
   };
   sessionUIs.set(sessionId, ui);
 
@@ -1138,7 +1209,7 @@ export function removeSessionCard(sessionId) {
 }
 
 function _handleEndedTransition(ui, wasActive, state) {
-  if (!wasActive) return;
+  if (!wasActive || !ui.term) return;
   ui.term.clear();
   ui.term.reset();
   const label = state === STATES.DONE ? 'Session complete' : 'Session failed';
@@ -1147,6 +1218,7 @@ function _handleEndedTransition(ui, wasActive, state) {
 }
 
 function _handleRestartTransition(ui, prevState) {
+  if (!ui.term) return;
   if (prevState === STATES.DONE || prevState === STATES.FAILED) {
     ui.term.clear();
     ui.term.reset();
@@ -1208,6 +1280,13 @@ export function applyState(sessionId, state) {
   }
 
   updateAggregateStatus();
+
+  // Auto-sleep: minimized session just entered a sleep-eligible state
+  if (!ui.sleeping
+      && ui.card.classList.contains('minimized')
+      && SLEEP_ELIGIBLE.includes(state)) {
+    sleepSession(sessionId);
+  }
 }
 
 export function handleSessionsReordered(order) {
