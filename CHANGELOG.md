@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-05-06
+
+### Added
+
+- **Sleep/wake mode for minimized sessions**: Minimized sessions in idle/done/failed states automatically sleep, disposing the xterm terminal, WebGL addon, ResizeObserver, and data WebSocket to free browser resources. Expanding a sleeping session recreates the terminal and replays the ring buffer. Server-side pattern detection is paused during sleep while the PTY remains alive.
+- **Failed-launch diagnostics**: Session exit now carries a `reason` field. `no_output_before_exit` is emitted when STARTING exits with zero bytes ever delivered, distinguishing silent-launch failures from normal exits in backend logs.
+- **PATH conflict probe**: Boot-time `where claude` / `which -a claude` resolution surfaces multiple `claude` matches (Bun shim shadowing risk) before runtime instead of as a stack trace.
+- **Per-session spawn log**: Each session logs its `shell`, args, and cwd at spawn time for diagnosability.
+
+### Fixed
+
+- **Sleep/wake race conditions**: Reordered DOM operations to attach the card before waking, preventing layout measurement on detached nodes. Server now refuses sleep in active states; client auto-wakes when the server rejects sleep.
+- **Grid layout on wake**: Switched grid to auto-fit and removed auto-centering margin to keep wake transitions stable.
+
+### Changed
+
+- **Biome formatting pass**: Applied consistent quoting, trailing commas, and spacing across `sessions.js`. No behavior change.
+
+### Tests
+
+- Added a session state machine test suite covering transitions, guards, and sleep/wake gating.
+
 ## [0.9.1] - 2026-04-29
 
 ### Fixed
@@ -217,6 +239,11 @@ _Skipped in changelog — incremental fixes and version bump._
 - Alert sounds for session attention events
 - CLI with `--port`, `--config`, `--help`, `--version` flags
 
+[0.10.0]: https://github.com/johncwaters/glissa/releases/tag/v0.10.0
+[0.9.1]: https://github.com/johncwaters/glissa/releases/tag/v0.9.1
+[0.9.0]: https://github.com/johncwaters/glissa/releases/tag/v0.9.0
+[0.8.0]: https://github.com/johncwaters/glissa/releases/tag/v0.8.0
+[0.7.0]: https://github.com/johncwaters/glissa/releases/tag/v0.7.0
 [0.6.0]: https://github.com/johncwaters/glissa/releases/tag/v0.6.0
 [0.5.2]: https://github.com/johncwaters/glissa/releases/tag/v0.5.2
 [0.5.1]: https://github.com/johncwaters/glissa/releases/tag/v0.5.1
