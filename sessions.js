@@ -8,6 +8,33 @@ const { STATES } = require("./shared/states");
 const KILL_POLL_INTERVAL_MS = 200;
 const KILL_MAX_WAIT_MS = 3000;
 
+// Resolve and log all `claude` matches once at module load so a Bun shim
+// shadowing claude.exe surfaces in the boot log instead of as a runtime stack trace.
+(() => {
+  let matches = [];
+  try {
+    const cmd = process.platform === "win32" ? "where claude" : "which -a claude";
+    const out = execSync(cmd, {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 2000,
+    });
+    matches = out.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+  } catch {
+    // fall through to "could not resolve" warning below
+  }
+  if (matches.length === 0) {
+    console.warn(`[glissa] could not resolve 'claude' on PATH`);
+    return;
+  }
+  console.log(`[glissa] resolved 'claude' (first match wins): ${matches[0]}`);
+  if (matches.length > 1) {
+    console.warn(
+      `[glissa] multiple 'claude' on PATH (Bun shim risk):\n  ${matches.join("\n  ")}`,
+    );
+  }
+})();
+
 // ---------------------------------------------------------------------------
 // Layer 4 filters — pending content that looks like UI chrome, not a prompt.
 // These fire only from the idle-timer safety net (idle_pending_content).
@@ -444,6 +471,10 @@ class Session extends EventEmitter {
 
     this.transition("spawn_success");
 
+    console.log(
+      `[session ${this.id}] spawn: ${shell} ${args.join(" ")} (cwd=${this.path})`,
+    );
+
     // Write capture header with all timing params
     if (this._recorder) {
       this._recorder.writeHeader({
@@ -541,7 +572,12 @@ class Session extends EventEmitter {
     this.patternDetector.reset();
     this.ptyProcess = null;
 
-    if (exitCode === 0) {
+    // STARTING + zero bytes ever delivered = failed launch (relies on node-pty flushing onData before onExit).
+    let reason = null;
+    if (this.state === STATES.STARTING && !this._receivedFirstOutput) {
+      reason = "no_output_before_exit";
+      this.transition("process_exit", { exitCode, signal, reason });
+    } else if (exitCode === 0) {
       this.transition("process_exit_ok", { exitCode, signal });
     } else if (this.state === STATES.STARTING) {
       // STARTING only has process_exit, not process_exit_ok/fail
@@ -555,7 +591,7 @@ class Session extends EventEmitter {
       this._recorder.close();
     }
 
-    this.emit("exit", { exitCode, signal });
+    this.emit("exit", { exitCode, signal, reason });
   }
 
   getReplayBuffer() {
@@ -587,8 +623,8 @@ class Session extends EventEmitter {
     if (this.ptyProcess) {
       try {
         this.ptyProcess.resize(cols, rows);
-      } catch (err) {
-        // PTY exited between our check and the resize call (Windows race).
+      } catch {
+        // PTY exited between our check and the resize call (Windows ConPTY race).
         // Safe to swallow — the process is gone, no resize needed.
       }
     }
@@ -771,7 +807,7 @@ class Session extends EventEmitter {
           this._pendingResize.cols,
           this._pendingResize.rows,
         );
-      } catch (err) {
+      } catch {
         // Same race — PTY may have exited between deferral and apply.
       }
       this._pendingResize = null;

@@ -181,8 +181,9 @@ function createBackend(httpServer, options = {}) {
       console.error(`[${sess.name}] error: ${err.message}`);
     });
 
-    sess.on('exit', ({ exitCode, signal }) => {
-      console.log(`[${sess.name}] exited (code=${exitCode}, signal=${signal})`);
+    sess.on('exit', ({ exitCode, signal, reason }) => {
+      const reasonStr = reason ? `, reason=${reason}` : '';
+      console.log(`[${sess.name}] exited (code=${exitCode}, signal=${signal}${reasonStr})`);
     });
 
     sess.on('state-change', ({ from, to, event }) => {
