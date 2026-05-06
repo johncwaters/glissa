@@ -374,8 +374,8 @@ function toggleMinimize(sessionId) {
       sleepSession(sessionId);
     }
   } else {
-    if (ui.sleeping) wakeSession(sessionId);
     container.appendChild(ui.card);
+    if (ui.sleeping) wakeSession(sessionId);
     if (ui.needsWebGLReload) tryLoadWebGL(ui);
     requestAnimationFrame(() => { if (ui.fitAddon) ui.fitAddon.fit(); });
   }
@@ -397,8 +397,8 @@ function _performMinimize(id, ui) {
 }
 
 function _applyExpandState(id, ui) {
-  if (ui.sleeping) wakeSession(id);
   ui.card.classList.remove('minimized');
+  if (ui.sleeping) wakeSession(id);
   ui.btnMinimize.textContent = '\u25bc';
   ui.btnMinimize.title = 'Collapse';
   ui.btnMinimize.setAttribute('aria-label', 'Collapse');
@@ -1280,6 +1280,13 @@ export function applyState(sessionId, state) {
   }
 
   updateAggregateStatus();
+
+  // Auto-wake: sleeping session received a non-sleep-eligible state (server
+  // rejected sleep or transitioned back to active before sleep arrived).
+  // Resync client by recreating terminal + data WS.
+  if (ui.sleeping && !SLEEP_ELIGIBLE.includes(state)) {
+    wakeSession(sessionId);
+  }
 
   // Auto-sleep: minimized session just entered a sleep-eligible state
   if (!ui.sleeping
