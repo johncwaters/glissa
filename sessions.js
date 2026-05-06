@@ -654,6 +654,10 @@ class Session extends EventEmitter {
 
   sleep() {
     if (this._sleeping) return;
+    // Only allow sleeping in quiescent states — refuse if the session has
+    // moved back to an active state (guards against client/server race).
+    const sleepable = [STATES.IDLE, STATES.COMPLETE, STATES.DONE, STATES.FAILED];
+    if (!sleepable.includes(this.state)) return;
     this._sleeping = true;
     this._clearFeedDebounce();
     this._clearIdleTimer();
