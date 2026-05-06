@@ -1,10 +1,9 @@
-const fs = require('node:fs');
-const pty = require('node-pty');
-const { EventEmitter } = require('node:events');
-const { execSync } = require('node:child_process');
-const { PatternDetector } = require('./patterns');
-const { STATES } = require('./shared/states');
-
+const fs = require("node:fs");
+const pty = require("node-pty");
+const { EventEmitter } = require("node:events");
+const { execSync } = require("node:child_process");
+const { PatternDetector } = require("./patterns");
+const { STATES } = require("./shared/states");
 
 const KILL_POLL_INTERVAL_MS = 200;
 const KILL_MAX_WAIT_MS = 3000;
@@ -15,35 +14,35 @@ const KILL_MAX_WAIT_MS = 3000;
 // ---------------------------------------------------------------------------
 
 const LAYER4_CHROME_STRINGS = [
-  '⏵⏵',              // Claude Code "accept edits" hint
-  'accept edits',
-  'shift+tab to cycle',
-  'Pasting text',
-  'Hyperspacing',
-  'Galloping',        // Claude Code animated spinner phase
-  'Brewed for',       // Claude Code completion summary
-  '/effort',          // effort indicator (e.g. "◐ medium · /effort")
-  '[OMC#',            // OMC HUD status line
-  'Auto-update failed',   // Claude Code auto-update status bar message
-  'Auto-updating',        // Claude Code auto-update in progress
-  'claude doctor',        // Auto-update failure hint text
-  'switched from npm to native', // Claude Code installer migration notice
-  'claude install',       // Installer migration hint
-  'Bypass Permissions',   // Claude Code bypass-permissions mode warning
-  '[Pasted text',         // Pasted text indicator (e.g. "[Pasted text #4 +165 lines]")
-  'l:cancel',             // OMC cancel hint fragment in garbled redraws
-  '-+-',                  // Companion cactus ASCII art (trunk pattern in garbled redraws)
+  "⏵⏵", // Claude Code "accept edits" hint
+  "accept edits",
+  "shift+tab to cycle",
+  "Pasting text",
+  "Hyperspacing",
+  "Galloping", // Claude Code animated spinner phase
+  "Brewed for", // Claude Code completion summary
+  "/effort", // effort indicator (e.g. "◐ medium · /effort")
+  "[OMC#", // OMC HUD status line
+  "Auto-update failed", // Claude Code auto-update status bar message
+  "Auto-updating", // Claude Code auto-update in progress
+  "claude doctor", // Auto-update failure hint text
+  "switched from npm to native", // Claude Code installer migration notice
+  "claude install", // Installer migration hint
+  "Bypass Permissions", // Claude Code bypass-permissions mode warning
+  "[Pasted text", // Pasted text indicator (e.g. "[Pasted text #4 +165 lines]")
+  "l:cancel", // OMC cancel hint fragment in garbled redraws
+  "-+-", // Companion cactus ASCII art (trunk pattern in garbled redraws)
 ];
 
 const LAYER4_SPINNER = /[◐◑◒◓⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏✻✢✶✽]/;
 
 // OMC HUD fragments that survive ANSI stripping in garbled redraws
 const LAYER4_HUD_PATTERNS = [
-  /session:\d+m/,     // e.g. "session:0m", "session:5m"
-  /ctx:\d+%/,         // e.g. "ctx:0%", "ctx:42%"
-  /wk:\d+%/,          // e.g. "wk:33%"
-  /[TS]:\d+/,         // HUD task/session counters: "T:42", "S:2"
-  /\d+m\s+\d+m/,      // Repeated time patterns in garbled HUD: "4m  4m  4m"
+  /session:\d+m/, // e.g. "session:0m", "session:5m"
+  /ctx:\d+%/, // e.g. "ctx:0%", "ctx:42%"
+  /wk:\d+%/, // e.g. "wk:33%"
+  /[TS]:\d+/, // HUD task/session counters: "T:42", "S:2"
+  /\d+m\s+\d+m/, // Repeated time patterns in garbled HUD: "4m  4m  4m"
 ];
 
 // Box-drawing characters used in Claude Code's separator/border lines
@@ -51,15 +50,15 @@ const BOX_DRAWING = /[─│┌┐└┘├┤┬┴┼╭╮╯╰━]/g;
 
 function isLayer4Chrome(line) {
   // Known chrome substrings
-  if (LAYER4_CHROME_STRINGS.some(s => line.includes(s))) return true;
+  if (LAYER4_CHROME_STRINGS.some((s) => line.includes(s))) return true;
 
   // Spinner characters anywhere in the line
   if (LAYER4_SPINNER.test(line)) return true;
 
   // OMC HUD fragments in garbled redraws
-  if (LAYER4_HUD_PATTERNS.some(re => re.test(line))) return true;
+  if (LAYER4_HUD_PATTERNS.some((re) => re.test(line))) return true;
 
-  const nonWs = line.replace(/\s/g, '');
+  const nonWs = line.replace(/\s/g, "");
 
   // Very short fragments — garbled redraws, not real prompts.
   // Real prompts caught by Layer 4 need at least a few characters
@@ -80,7 +79,7 @@ function isLayer4Chrome(line) {
   // separated by spaces. Pattern: "T h o s e   t h r e e   t h i n g s ."
   const words = line.trim().split(/\s+/);
   if (words.length >= 4) {
-    const singleCharCount = words.filter(w => w.length === 1).length;
+    const singleCharCount = words.filter((w) => w.length === 1).length;
     if (singleCharCount / words.length > 0.6) return true;
   }
 
@@ -96,52 +95,52 @@ function isLayer4Chrome(line) {
 
 const TRANSITIONS = Object.freeze({
   [STATES.INITIALIZING]: {
-    spawn_success:    STATES.STARTING,
-    spawn_fail:       STATES.FAILED
+    spawn_success: STATES.STARTING,
+    spawn_fail: STATES.FAILED,
   },
   [STATES.STARTING]: {
-    first_output:     STATES.RUNNING,
+    first_output: STATES.RUNNING,
     watchdog_timeout: STATES.FAILED,
-    process_exit:     STATES.FAILED
+    process_exit: STATES.FAILED,
   },
   [STATES.RUNNING]: {
-    prompt_detected:  STATES.WAITING,
-    silence_timeout:  STATES.IDLE,
-    task_complete:    STATES.COMPLETE,
-    process_exit_ok:  STATES.DONE,
-    process_exit_fail:STATES.FAILED,
-    user_kill:        STATES.DONE
+    prompt_detected: STATES.WAITING,
+    silence_timeout: STATES.IDLE,
+    task_complete: STATES.COMPLETE,
+    process_exit_ok: STATES.DONE,
+    process_exit_fail: STATES.FAILED,
+    user_kill: STATES.DONE,
   },
   [STATES.WAITING]: {
-    user_input:       STATES.RUNNING,
-    user_dismiss:     STATES.RUNNING,
-    auto_recover:     STATES.RUNNING,
-    user_kill:        STATES.DONE,
-    process_exit_ok:  STATES.DONE,
-    process_exit_fail:STATES.FAILED
+    user_input: STATES.RUNNING,
+    user_dismiss: STATES.RUNNING,
+    auto_recover: STATES.RUNNING,
+    user_kill: STATES.DONE,
+    process_exit_ok: STATES.DONE,
+    process_exit_fail: STATES.FAILED,
   },
   [STATES.IDLE]: {
-    new_output:       STATES.RUNNING,
-    prompt_detected:  STATES.WAITING,
-    process_exit_ok:  STATES.DONE,
-    process_exit_fail:STATES.FAILED,
-    user_kill:        STATES.DONE
+    new_output: STATES.RUNNING,
+    prompt_detected: STATES.WAITING,
+    process_exit_ok: STATES.DONE,
+    process_exit_fail: STATES.FAILED,
+    user_kill: STATES.DONE,
   },
   [STATES.COMPLETE]: {
-    new_output:       STATES.RUNNING,
-    user_dismiss:     STATES.IDLE,
-    prompt_detected:  STATES.WAITING,
-    process_exit_ok:  STATES.DONE,
-    process_exit_fail:STATES.FAILED,
-    user_kill:        STATES.DONE
+    new_output: STATES.RUNNING,
+    user_dismiss: STATES.IDLE,
+    prompt_detected: STATES.WAITING,
+    process_exit_ok: STATES.DONE,
+    process_exit_fail: STATES.FAILED,
+    user_kill: STATES.DONE,
   },
   [STATES.DONE]: {
-    user_restart:     STATES.INITIALIZING
+    user_restart: STATES.INITIALIZING,
   },
   [STATES.FAILED]: {
-    user_restart:      STATES.INITIALIZING,
-    process_exit_fail: STATES.FAILED
-  }
+    user_restart: STATES.INITIALIZING,
+    process_exit_fail: STATES.FAILED,
+  },
 });
 
 // Guards: return true if transition is allowed, false otherwise
@@ -162,7 +161,7 @@ const GUARDS = {
       return false;
     }
     return true;
-  }
+  },
 };
 
 // Data handlers keyed by state — dispatched on each PTY data event
@@ -175,7 +174,7 @@ const DATA_HANDLERS = {
   },
   [STATES.IDLE](session, data) {
     session.patternDetector.reset();
-    session.transition('new_output');
+    session.transition("new_output");
     // After transitioning to RUNNING, apply a brief grace period so
     // resize-triggered redraws (e.g. browser connect) don't immediately
     // match Claude's idle prompt as "needs input".
@@ -186,7 +185,7 @@ const DATA_HANDLERS = {
   },
   [STATES.COMPLETE](session, data) {
     session.patternDetector.reset();
-    session.transition('new_output');
+    session.transition("new_output");
     if (session.state === STATES.RUNNING) {
       session._startStartupGrace(3000);
       session._resetIdleTimer();
@@ -215,20 +214,20 @@ const ENTRY_HOOKS = {
     session._runningStartedAt = null;
   },
   [STATES.WAITING](session) {
-    session.emit('needs-attention', { name: session.name });
+    session.emit("needs-attention", { name: session.name });
   },
   [STATES.FAILED](session) {
-    session.emit('session-failed', { name: session.name });
+    session.emit("session-failed", { name: session.name });
   },
   [STATES.DONE](session) {
-    session.emit('session-done', { name: session.name });
-  }
+    session.emit("session-done", { name: session.name });
+  },
 };
 
 const EXIT_HOOKS = {
   [STATES.WAITING](session) {
     session._lastUserInputAt = 0;
-    session.emit('attention-cleared', { name: session.name });
+    session.emit("attention-cleared", { name: session.name });
     session._clearAutoRecoverTimer();
     session._autoRecoverDataCount = 0;
     if (session.patternDetector) {
@@ -237,11 +236,25 @@ const EXIT_HOOKS = {
     // Grace period so echoed keystrokes and the still-visible prompt
     // don't immediately re-trigger prompt detection after user input.
     session._startStartupGrace(3000);
-  }
+  },
 };
 
 class Session extends EventEmitter {
-  constructor({ id, name, path, dangerouslySkipPermissions = false, startingWatchdogSeconds = 10, attentionTimeoutSeconds = 60, waitingEscalationSeconds = 300, autoRecoverSeconds = 3, inputGraceSeconds = 5, promptDetectionMs = 1500, replayBufferKB = 512, noFlicker = true, feedDebounceMs = 50 }) {
+  constructor({
+    id,
+    name,
+    path,
+    dangerouslySkipPermissions = false,
+    startingWatchdogSeconds = 10,
+    attentionTimeoutSeconds = 60,
+    waitingEscalationSeconds = 300,
+    autoRecoverSeconds = 3,
+    inputGraceSeconds = 5,
+    promptDetectionMs = 1500,
+    replayBufferKB = 512,
+    noFlicker = true,
+    feedDebounceMs = 50,
+  }) {
     super();
     this.id = id;
     this.name = name;
@@ -263,13 +276,13 @@ class Session extends EventEmitter {
     this._receivedFirstOutput = false;
     this._startupGraceActive = false;
     this._startupGraceTimer = null;
-    this._outputBuffer = [];       // ring buffer of recent PTY chunks
+    this._outputBuffer = []; // ring buffer of recent PTY chunks
     this._outputBufferSize = 0;
     this._outputBufferMax = replayBufferKB * 1024;
     this._lastUserInputAt = 0;
     this._inputGraceMs = inputGraceSeconds * 1000;
     this._killPollTimer = null;
-    this._feedBuffer = '';
+    this._feedBuffer = "";
     this._feedDebounceTimer = null;
     this._feedDebounceMs = feedDebounceMs;
     this._noFlicker = noFlicker;
@@ -281,12 +294,17 @@ class Session extends EventEmitter {
     this._recorder = null; // Set via setRecorder() after construction
 
     this.patternDetector = new PatternDetector(promptDetectionMs);
-    this.patternDetector.on('prompt-detected', (detection) => {
+    this.patternDetector.on("prompt-detected", (detection) => {
       // Record detection BEFORE session guards (transition may suppress it)
       if (this._recorder) {
-        this._recorder.writeDetection(detection.layer, detection.pattern, detection.line, detection.pending);
+        this._recorder.writeDetection(
+          detection.layer,
+          detection.pattern,
+          detection.line,
+          detection.pending,
+        );
       }
-      this.transition('prompt_detected', detection);
+      this.transition("prompt_detected", detection);
     });
   }
 
@@ -313,7 +331,7 @@ class Session extends EventEmitter {
       state: this.state,
       sleeping: this._sleeping,
       dangerouslySkipPermissions: this.dangerouslySkipPermissions,
-      auditLog: this.auditLog.slice(-100)
+      auditLog: this.auditLog.slice(-100),
     };
   }
 
@@ -335,10 +353,12 @@ class Session extends EventEmitter {
     // Self-transition: record but skip hooks
     if (from === to) {
       this.auditLog.push({
-        from, to, event,
+        from,
+        to,
+        event,
         detail: detail || null,
         timestamp: Date.now(),
-        selfTransition: true
+        selfTransition: true,
       });
       if (this._recorder) {
         this._recorder.writeState(from, to, event, detail);
@@ -367,7 +387,7 @@ class Session extends EventEmitter {
       to,
       event,
       detail: detail || null,
-      timestamp: Date.now()
+      timestamp: Date.now(),
     };
     this.auditLog.push(entry);
     if (this.auditLog.length > 200) {
@@ -380,7 +400,7 @@ class Session extends EventEmitter {
     }
 
     // Emit state-change event
-    this.emit('state-change', { from, to, event, detail: detail || null });
+    this.emit("state-change", { from, to, event, detail: detail || null });
 
     return true;
   }
@@ -401,26 +421,28 @@ class Session extends EventEmitter {
 
     // On Windows, node-pty can't resolve .cmd shims directly.
     // Spawn via cmd.exe /c which handles PATH + .cmd resolution.
-    const isWindows = process.platform === 'win32';
-    const claudeArgs = this.dangerouslySkipPermissions ? ['--dangerously-skip-permissions'] : [];
-    const shell = isWindows ? 'cmd.exe' : 'claude';
-    const args = isWindows ? ['/c', 'claude', ...claudeArgs] : claudeArgs;
+    const isWindows = process.platform === "win32";
+    const claudeArgs = this.dangerouslySkipPermissions
+      ? ["--dangerously-skip-permissions"]
+      : [];
+    const shell = isWindows ? "cmd.exe" : "claude";
+    const args = isWindows ? ["/c", "claude", ...claudeArgs] : claudeArgs;
 
     try {
       this.ptyProcess = pty.spawn(shell, args, {
-        name: 'xterm-256color',
+        name: "xterm-256color",
         cols: 80,
         rows: 24,
         cwd: this.path,
-        env
+        env,
       });
     } catch (err) {
-      this.transition('spawn_fail', { error: err.message });
-      this.emit('error', err);
+      this.transition("spawn_fail", { error: err.message });
+      this.emit("error", err);
       return;
     }
 
-    this.transition('spawn_success');
+    this.transition("spawn_success");
 
     // Write capture header with all timing params
     if (this._recorder) {
@@ -441,12 +463,14 @@ class Session extends EventEmitter {
     this._watchdogTimer = setTimeout(() => {
       this._watchdogTimer = null;
       if (this.state === STATES.STARTING) {
-        this.transition('watchdog_timeout');
+        this.transition("watchdog_timeout");
       }
     }, this.startingWatchdogMs);
 
     this.ptyProcess.onData((data) => this._handlePtyData(data));
-    this.ptyProcess.onExit(({ exitCode, signal }) => this._handlePtyExit(exitCode, signal));
+    this.ptyProcess.onExit(({ exitCode, signal }) =>
+      this._handlePtyExit(exitCode, signal),
+    );
   }
 
   _buildSpawnEnv() {
@@ -459,7 +483,7 @@ class Session extends EventEmitter {
     // No-flicker mode prevents Claude Code from resetting scrollback position
     // on every turn. Increases PTY output volume — mitigated by feed debounce.
     if (this._noFlicker) {
-      env.CLAUDE_CODE_NO_FLICKER = '1';
+      env.CLAUDE_CODE_NO_FLICKER = "1";
     }
     return env;
   }
@@ -474,7 +498,7 @@ class Session extends EventEmitter {
       this._receivedFirstOutput = true;
       this._clearWatchdog();
       this._startStartupGrace();
-      this.transition('first_output');
+      this.transition("first_output");
     }
 
     // State-driven data handling via lookup table.
@@ -485,9 +509,11 @@ class Session extends EventEmitter {
         try {
           handler(this, data);
         } catch (err) {
-          console.error(`[session:${this.name}] data handler error: ${err.message}`);
-          if (this.listenerCount('error') > 0) {
-            this.emit('error', err);
+          console.error(
+            `[session:${this.name}] data handler error: ${err.message}`,
+          );
+          if (this.listenerCount("error") > 0) {
+            this.emit("error", err);
           }
         }
       }
@@ -496,12 +522,15 @@ class Session extends EventEmitter {
     // Buffer for late-joining data WS clients
     this._outputBuffer.push(data);
     this._outputBufferSize += data.length;
-    while (this._outputBufferSize > this._outputBufferMax && this._outputBuffer.length > 1) {
+    while (
+      this._outputBufferSize > this._outputBufferMax &&
+      this._outputBuffer.length > 1
+    ) {
       this._outputBufferSize -= this._outputBuffer.shift().length;
     }
 
     // Always emit raw data for WebSocket broadcasting
-    this.emit('data', data);
+    this.emit("data", data);
   }
 
   _handlePtyExit(exitCode, signal) {
@@ -513,24 +542,24 @@ class Session extends EventEmitter {
     this.ptyProcess = null;
 
     if (exitCode === 0) {
-      this.transition('process_exit_ok', { exitCode, signal });
+      this.transition("process_exit_ok", { exitCode, signal });
     } else if (this.state === STATES.STARTING) {
       // STARTING only has process_exit, not process_exit_ok/fail
-      this.transition('process_exit', { exitCode, signal });
+      this.transition("process_exit", { exitCode, signal });
     } else {
-      this.transition('process_exit_fail', { exitCode, signal });
+      this.transition("process_exit_fail", { exitCode, signal });
     }
 
     if (this._recorder) {
-      this._recorder.writeFooter('pty_exit', exitCode);
+      this._recorder.writeFooter("pty_exit", exitCode);
       this._recorder.close();
     }
 
-    this.emit('exit', { exitCode, signal });
+    this.emit("exit", { exitCode, signal });
   }
 
   getReplayBuffer() {
-    return this._outputBuffer.join('');
+    return this._outputBuffer.join("");
   }
 
   write(text) {
@@ -546,19 +575,22 @@ class Session extends EventEmitter {
     if (this._recorder) {
       this._recorder.writeResize(cols, rows);
     }
-    // Defer PTY resize for quiescent states. Resizing a PTY causes the
-    // application inside (Claude CLI) to redraw, producing output that
-    // DATA_HANDLERS would interpret as genuine new work — transitioning
-    // IDLE/COMPLETE → RUNNING, or inflating WAITING's auto-recover
-    // counter into a false recovery. Store the resize and apply it when
-    // the session next enters RUNNING (via genuine output or user input).
-    if (this.state === STATES.IDLE || this.state === STATES.COMPLETE || this.state === STATES.WAITING) {
+    if (
+      this.state === STATES.IDLE ||
+      this.state === STATES.COMPLETE ||
+      this.state === STATES.WAITING
+    ) {
       this._pendingResize = { cols, rows };
       return;
     }
     this._pendingResize = null;
     if (this.ptyProcess) {
-      this.ptyProcess.resize(cols, rows);
+      try {
+        this.ptyProcess.resize(cols, rows);
+      } catch (err) {
+        // PTY exited between our check and the resize call (Windows race).
+        // Safe to swallow — the process is gone, no resize needed.
+      }
     }
   }
 
@@ -570,7 +602,7 @@ class Session extends EventEmitter {
     try {
       this.ptyProcess.kill();
     } catch (err) {
-      this.emit('error', err);
+      this.emit("error", err);
     }
 
     this._forceKillAfterTimeout(pid);
@@ -593,14 +625,14 @@ class Session extends EventEmitter {
       elapsed += KILL_POLL_INTERVAL_MS;
       if (elapsed >= KILL_MAX_WAIT_MS) {
         try {
-          if (process.platform === 'win32') {
-            execSync(`taskkill /PID ${pid} /T /F`, { stdio: 'ignore' });
+          if (process.platform === "win32") {
+            execSync(`taskkill /PID ${pid} /T /F`, { stdio: "ignore" });
           } else {
-            process.kill(pid, 'SIGKILL');
+            process.kill(pid, "SIGKILL");
           }
         } catch (err) {
-          if (this.listenerCount('error') > 0) {
-            this.emit('error', err);
+          if (this.listenerCount("error") > 0) {
+            this.emit("error", err);
           }
         }
         return;
@@ -614,9 +646,9 @@ class Session extends EventEmitter {
   dismiss() {
     if (this.state === STATES.WAITING) {
       this.recordUserInput();
-      return this.transition('user_dismiss');
+      return this.transition("user_dismiss");
     }
-    if (this.state === STATES.COMPLETE) return this.transition('user_dismiss');
+    if (this.state === STATES.COMPLETE) return this.transition("user_dismiss");
     return false;
   }
 
@@ -627,7 +659,7 @@ class Session extends EventEmitter {
     this._clearIdleTimer();
     this._clearStartupGrace();
     this.patternDetector.reset();
-    this.emit('sleep');
+    this.emit("sleep");
   }
 
   wake() {
@@ -636,48 +668,66 @@ class Session extends EventEmitter {
     if (this.state === STATES.RUNNING) {
       this._resetIdleTimer();
     }
-    this.emit('wake');
+    this.emit("wake");
   }
 
   killSession() {
-    const killable = [STATES.RUNNING, STATES.WAITING, STATES.IDLE, STATES.COMPLETE];
+    const killable = [
+      STATES.RUNNING,
+      STATES.WAITING,
+      STATES.IDLE,
+      STATES.COMPLETE,
+    ];
     if (!killable.includes(this.state)) return false;
     this.kill();
-    return this.transition('user_kill');
+    return this.transition("user_kill");
   }
 
   restart() {
-    if (this.state !== STATES.DONE && this.state !== STATES.FAILED) return false;
-    this.transition('user_restart');
+    if (this.state !== STATES.DONE && this.state !== STATES.FAILED)
+      return false;
+    this.transition("user_restart");
     this.start();
     return true;
   }
 
   forceRestart() {
-    const killable = [STATES.RUNNING, STATES.WAITING, STATES.IDLE, STATES.COMPLETE];
+    const killable = [
+      STATES.RUNNING,
+      STATES.WAITING,
+      STATES.IDLE,
+      STATES.COMPLETE,
+    ];
     if (killable.includes(this.state)) {
       // Kill first, then restart once process exits
-      this.once('exit', () => {
+      this.once("exit", () => {
         if (this.state === STATES.DONE || this.state === STATES.FAILED) {
-          this.transition('user_restart');
+          this.transition("user_restart");
           this.start();
         }
       });
       this.kill();
-      this.transition('user_kill');
+      this.transition("user_kill");
     } else if (this.state === STATES.DONE || this.state === STATES.FAILED) {
       this.restart();
     }
   }
 
   updateSettings(cfg) {
-    if (cfg.startingWatchdogSeconds != null) this.startingWatchdogMs = cfg.startingWatchdogSeconds * 1000;
-    if (cfg.attentionTimeoutSeconds != null) this.attentionTimeoutMs = cfg.attentionTimeoutSeconds * 1000;
-    if (cfg.waitingEscalationSeconds != null) this.waitingEscalationMs = cfg.waitingEscalationSeconds * 1000;
-    if (cfg.autoRecoverSeconds != null) this._autoRecoverMs = cfg.autoRecoverSeconds * 1000;
-    if (cfg.inputGraceSeconds != null) this._inputGraceMs = cfg.inputGraceSeconds * 1000;
-    if (cfg.promptDetectionMs != null) this.patternDetector.updateSilenceTimeout(cfg.promptDetectionMs);
-    if (cfg.replayBufferKB != null) this._outputBufferMax = cfg.replayBufferKB * 1024;
+    if (cfg.startingWatchdogSeconds != null)
+      this.startingWatchdogMs = cfg.startingWatchdogSeconds * 1000;
+    if (cfg.attentionTimeoutSeconds != null)
+      this.attentionTimeoutMs = cfg.attentionTimeoutSeconds * 1000;
+    if (cfg.waitingEscalationSeconds != null)
+      this.waitingEscalationMs = cfg.waitingEscalationSeconds * 1000;
+    if (cfg.autoRecoverSeconds != null)
+      this._autoRecoverMs = cfg.autoRecoverSeconds * 1000;
+    if (cfg.inputGraceSeconds != null)
+      this._inputGraceMs = cfg.inputGraceSeconds * 1000;
+    if (cfg.promptDetectionMs != null)
+      this.patternDetector.updateSilenceTimeout(cfg.promptDetectionMs);
+    if (cfg.replayBufferKB != null)
+      this._outputBufferMax = cfg.replayBufferKB * 1024;
     if (cfg.feedDebounceMs != null) this._feedDebounceMs = cfg.feedDebounceMs;
     if (cfg.noFlicker != null) this._noFlicker = !!cfg.noFlicker;
   }
@@ -712,7 +762,14 @@ class Session extends EventEmitter {
 
   _applyPendingResize() {
     if (this._pendingResize && this.ptyProcess) {
-      this.ptyProcess.resize(this._pendingResize.cols, this._pendingResize.rows);
+      try {
+        this.ptyProcess.resize(
+          this._pendingResize.cols,
+          this._pendingResize.rows,
+        );
+      } catch (err) {
+        // Same race — PTY may have exited between deferral and apply.
+      }
       this._pendingResize = null;
     }
   }
@@ -723,7 +780,8 @@ class Session extends EventEmitter {
     this._feedBuffer += data;
     // Cap buffer size to prevent unbounded growth during sustained output
     if (this._feedBuffer.length > 65536) {
-      if (this._feedDebounceTimer !== null) clearTimeout(this._feedDebounceTimer);
+      if (this._feedDebounceTimer !== null)
+        clearTimeout(this._feedDebounceTimer);
       this._feedDebounceTimer = null;
       this._flushFeedBuffer();
       return;
@@ -740,16 +798,16 @@ class Session extends EventEmitter {
   _flushFeedBuffer() {
     if (this._feedBuffer.length === 0) return;
     if (this._startupGraceActive) {
-      this._feedBuffer = '';
+      this._feedBuffer = "";
       return;
     }
     const buffered = this._feedBuffer;
-    this._feedBuffer = '';
+    this._feedBuffer = "";
     this.patternDetector.feed(buffered);
   }
 
   _clearFeedDebounce() {
-    this._feedBuffer = '';
+    this._feedBuffer = "";
     if (this._feedDebounceTimer !== null) {
       clearTimeout(this._feedDebounceTimer);
       this._feedDebounceTimer = null;
@@ -795,7 +853,9 @@ class Session extends EventEmitter {
     this._idleTimer = setTimeout(() => {
       this._idleTimer = null;
       if (this.state === STATES.RUNNING) {
-        const runDuration = this._runningStartedAt ? Date.now() - this._runningStartedAt : 0;
+        const runDuration = this._runningStartedAt
+          ? Date.now() - this._runningStartedAt
+          : 0;
 
         // Safety net: if the pattern detector has a non-empty pending line
         // (last output didn't end with newline) after prolonged silence,
@@ -804,16 +864,19 @@ class Session extends EventEmitter {
         // Layer 3's length check). Treat as Layer 4 prompt detection.
         // Only applies to short runs — long runs with pending content are
         // Claude's idle prompt after task completion, not a mid-task input request.
-        if (runDuration < this._completeThresholdMs && this.patternDetector.hasPendingContent()) {
+        if (
+          runDuration < this._completeThresholdMs &&
+          this.patternDetector.hasPendingContent()
+        ) {
           const pendingLine = this.patternDetector.getPendingLine();
           if (isLayer4Chrome(pendingLine)) {
             // Layer 4 suppressed — UI chrome, not a real prompt
           } else {
             this._runningStartedAt = null;
-            this.transition('prompt_detected', {
+            this.transition("prompt_detected", {
               layer: 4,
-              pattern: 'idle_pending_content',
-              line: pendingLine
+              pattern: "idle_pending_content",
+              line: pendingLine,
             });
             return;
           }
@@ -828,17 +891,17 @@ class Session extends EventEmitter {
             const pendingLine = this.patternDetector.getPendingLine();
             const match = this.patternDetector.checkLine(pendingLine);
             if (match) {
-              this.transition('prompt_detected', {
+              this.transition("prompt_detected", {
                 layer: match.layer,
                 pattern: match.pattern,
-                line: pendingLine
+                line: pendingLine,
               });
               return;
             }
           }
-          this.transition('task_complete');
+          this.transition("task_complete");
         } else {
-          this.transition('silence_timeout');
+          this.transition("silence_timeout");
         }
       }
     }, this.attentionTimeoutMs);
@@ -849,7 +912,7 @@ class Session extends EventEmitter {
     this._autoRecoverTimer = setTimeout(() => {
       this._autoRecoverTimer = null;
       if (this.state === STATES.WAITING && this._autoRecoverDataCount >= 2) {
-        this.transition('auto_recover');
+        this.transition("auto_recover");
         if (this.state === STATES.RUNNING) {
           this._resetIdleTimer();
         }
