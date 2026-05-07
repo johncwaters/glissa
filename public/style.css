@@ -489,6 +489,17 @@ body {
   margin-left: auto;
 }
 
+/* Hide non-actionable badges when minimized — update when adding states to states.js */
+.session-card.minimized .state-badge[data-state="IDLE"],
+.session-card.minimized .state-badge[data-state="DONE"],
+.session-card.minimized .state-badge[data-state="COMPLETE"] {
+  display: none;
+}
+
+.session-card.minimized .perms-badge {
+  display: none;
+}
+
 .session-card.minimized .session-header-spacer {
   display: none;
 }
