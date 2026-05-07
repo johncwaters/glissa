@@ -21,6 +21,7 @@ const SLEEP_ELIGIBLE = [STATES.IDLE, STATES.COMPLETE, STATES.DONE, STATES.FAILED
 // Terminal defaults — updated from server settings on connect
 let _terminalScrollback = 5000;
 let _terminalCursorBlink = false;
+let _debugMode = false;
 
 // ── State ────────────────────────────────────────────────────
 
@@ -317,7 +318,11 @@ function buildCardDOM(sessionId, sessionName, initialState, options = {}) {
   overflowMenu.append(btnRename, btnRestart, btnRemove);
   overflow.append(btnOverflow, overflowMenu);
 
-  actions.append(btnMaximize, overflow);
+  const btnDebug = el('button', 'btn-action btn-debug', '\u2699');
+  btnDebug.title = 'Debug state';
+  btnDebug.setAttribute('aria-label', 'Debug session state');
+
+  actions.append(btnDebug, btnMaximize, overflow);
   const headerChildren = [btnMinimize, nameEl, badge];
   if (permsBadge) headerChildren.push(permsBadge);
   headerChildren.push(spacer, actions);
@@ -327,7 +332,7 @@ function buildCardDOM(sessionId, sessionName, initialState, options = {}) {
 
   card.append(header, termWrap);
 
-  return { card, header, badge, nameEl, btnRename, btnRestart, btnRemove, btnMinimize, btnMaximize, btnOverflow, overflowMenu, termWrap };
+  return { card, header, badge, nameEl, btnRename, btnRestart, btnRemove, btnMinimize, btnMaximize, btnDebug, btnOverflow, overflowMenu, termWrap };
 }
 
 // ── Minimize toggle ──────────────────────────────────────────
@@ -959,6 +964,101 @@ function startInlineRename(ui, sessionId) {
   input.addEventListener('keydown', onKey);
 }
 
+// ── Debug overlay ────────────────────────────────────────────
+
+function formatTimestamp(ts) {
+  if (!ts) return '—';
+  const d = new Date(ts);
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+function renderDebugOverlay(ui, payload) {
+  if (!ui.debugOverlay) return;
+  const p = payload;
+
+  let html = `<div class="debug-section"><div class="debug-section-title">State</div>`;
+  html += `<div class="debug-field"><span class="debug-label">Current:</span> <span class="debug-value">${escapeHtml(p.state)}</span></div>`;
+  html += `</div>`;
+
+  // Transitions
+  html += `<div class="debug-section"><div class="debug-section-title">Transitions (last ${p.transitions.length})</div>`;
+  if (p.transitions.length === 0) {
+    html += `<div class="debug-field debug-dim">No transitions recorded</div>`;
+  } else {
+    for (const t of p.transitions) {
+      const detail = t.detail ? ` <span class="debug-dim">${typeof t.detail === 'object' ? (t.detail.layer ? `L${t.detail.layer}` : '') : ''}</span>` : '';
+      html += `<div class="debug-field"><span class="debug-dim">${formatTimestamp(t.timestamp)}</span> ${escapeHtml(t.from)} → ${escapeHtml(t.to)} <span class="debug-label">${escapeHtml(t.event)}</span>${detail}</div>`;
+    }
+  }
+  html += `</div>`;
+
+  // Pattern detector
+  const pd = p.patternDetector;
+  html += `<div class="debug-section"><div class="debug-section-title">Pattern Detector</div>`;
+  html += `<div class="debug-field"><span class="debug-label">Last layer:</span> <span class="debug-value">${pd.lastLayer ?? 'none'}</span></div>`;
+  html += `<div class="debug-field"><span class="debug-label">Last match:</span> <span class="debug-value debug-mono">${pd.lastMatchedLine ? escapeHtml(truncate(pd.lastMatchedLine, 60)) : 'none'}</span></div>`;
+  html += `<div class="debug-field"><span class="debug-label">Armed:</span> <span class="debug-value">${pd.armed ? `L${pd.armed.layer}` : 'no'}</span></div>`;
+  html += `<div class="debug-field"><span class="debug-label">Confirm timer:</span> <span class="debug-value">${pd.confirmTimerActive ? 'active' : 'off'}</span></div>`;
+  html += `<div class="debug-field"><span class="debug-label">Silence timer:</span> <span class="debug-value">${pd.silenceTimerActive ? 'active' : 'off'}</span></div>`;
+  if (pd.pendingLine) {
+    html += `<div class="debug-field"><span class="debug-label">Pending:</span> <span class="debug-value debug-mono">${escapeHtml(truncate(pd.pendingLine, 60))}</span></div>`;
+  }
+  html += `</div>`;
+
+  // Timers
+  const tm = p.timers;
+  html += `<div class="debug-section"><div class="debug-section-title">Timers</div>`;
+  html += `<div class="debug-field"><span class="debug-label">Auto-recover count:</span> <span class="debug-value">${tm.autoRecoverDataCount}</span></div>`;
+  html += `<div class="debug-field"><span class="debug-label">Auto-recover timer:</span> <span class="debug-value">${tm.autoRecoverTimerActive ? 'active' : 'off'}</span></div>`;
+  html += `<div class="debug-field"><span class="debug-label">Idle timer:</span> <span class="debug-value">${tm.idleTimerActive ? 'active' : 'off'}</span></div>`;
+  html += `<div class="debug-field"><span class="debug-label">Startup grace:</span> <span class="debug-value">${tm.startupGraceActive ? 'active' : 'off'}</span></div>`;
+  html += `<div class="debug-field"><span class="debug-label">Sleeping:</span> <span class="debug-value">${tm.sleeping ? 'yes' : 'no'}</span></div>`;
+  html += `</div>`;
+
+  ui.debugOverlay.innerHTML = html;
+}
+
+function escapeHtml(str) {
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function truncate(str, max) {
+  return str.length > max ? str.slice(0, max) + '...' : str;
+}
+
+function openDebugOverlay(ui, sessionId) {
+  if (ui.debugOpen) { closeDebugOverlay(ui); return; }
+
+  const overlay = document.createElement('div');
+  overlay.className = 'debug-overlay';
+  overlay.innerHTML = '<div class="debug-field debug-dim">Loading...</div>';
+  ui.card.appendChild(overlay);
+  ui.debugOverlay = overlay;
+  ui.debugOpen = true;
+
+  // Click outside to close
+  overlay.addEventListener('click', (e) => e.stopPropagation());
+
+  sendControlMsg({ type: 'debug-state', id: sessionId });
+}
+
+function closeDebugOverlay(ui) {
+  if (ui.debugOverlay) {
+    ui.debugOverlay.remove();
+    ui.debugOverlay = null;
+  }
+  ui.debugOpen = false;
+}
+
+function updateDebugVisibility() {
+  for (const [, ui] of sessionUIs) {
+    ui.btnDebug.classList.toggle('visible', _debugMode);
+    if (!_debugMode && ui.debugOpen) closeDebugOverlay(ui);
+  }
+}
+
+// ── Card event wiring ────────────────────────────────────────
+
 // All closures capture sessionId (stable UUID). For mutable display name,
 // read ui.card.dataset.session which is updated on rename.
 function wireCardEvents(ui, sessionId) {
@@ -1016,6 +1116,18 @@ function wireCardEvents(ui, sessionId) {
   ui.btnMaximize.addEventListener('click', () => {
     toggleMaximize(sessionId);
   });
+
+  ui.btnDebug.addEventListener('click', (e) => {
+    e.stopPropagation();
+    openDebugOverlay(ui, sessionId);
+  });
+
+  // Close debug overlay on click outside the card
+  document.addEventListener('click', (e) => {
+    if (ui.debugOpen && !ui.card.contains(e.target)) {
+      closeDebugOverlay(ui);
+    }
+  }, { signal: ui.abortController.signal });
 }
 
 function wireTerminalIO(ui, sessionId) {
@@ -1067,11 +1179,27 @@ export function reconnectDataWs(id) {
 export function applyTerminalSettings(settings) {
   if (settings.scrollback != null) _terminalScrollback = settings.scrollback;
   if (settings.cursorBlink != null) _terminalCursorBlink = settings.cursorBlink;
+  if (settings.debugMode != null) {
+    _debugMode = !!settings.debugMode;
+    updateDebugVisibility();
+  }
   for (const [, ui] of sessionUIs) {
     if (!ui.term) continue;
     if (settings.scrollback != null) ui.term.options.scrollback = settings.scrollback;
     if (settings.cursorBlink != null) ui.term.options.cursorBlink = settings.cursorBlink;
   }
+}
+
+export function handleDebugStateResponse(msg) {
+  const ui = sessionUIs.get(msg.id);
+  if (!ui || !ui.debugOpen) return;
+  renderDebugOverlay(ui, msg.payload);
+}
+
+export function handleDebugStateRefresh(sessionId) {
+  const ui = sessionUIs.get(sessionId);
+  if (!ui || !ui.debugOpen) return;
+  sendControlMsg({ type: 'debug-state', id: sessionId });
 }
 
 let _fitRafId = null;
@@ -1154,9 +1282,12 @@ export function createSessionCard(sessionId, sessionName, initialState, options 
     btnOverflow: dom.btnOverflow,
     overflowMenu: dom.overflowMenu,
     termWrap: dom.termWrap,
+    btnDebug: dom.btnDebug,
     btnRename: dom.btnRename,
     btnRestart: dom.btnRestart,
     btnRemove: dom.btnRemove,
+    debugOverlay: null,
+    debugOpen: false,
     abortController: new AbortController(),
     currentState: initialState || STATES.INITIALIZING,
     sleeping: false,
@@ -1195,6 +1326,7 @@ export function removeSessionCard(sessionId) {
   const ui = sessionUIs.get(sessionId);
   if (!ui) return;
 
+  closeDebugOverlay(ui);
   sessionUIs.delete(sessionId);
   if (_maximizedSession === sessionId) exitMaximizeMode();
   _preMaximizeSessions.delete(sessionId);

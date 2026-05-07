@@ -9,7 +9,7 @@ import { connectControl, disableReconnect, onControlMessage, sendControlMsg, sen
 import { createAddSessionDialog, createConfirmDialog, createSettingsDialog } from './dialogs.js';
 import {
   applyState, applyTerminalSettings, createSessionCard, exitMaximizeMode, fitAllVisible, scheduleFitAll,
-  getSessionCount, handleSessionsReordered, hasSession, isMaximizeActive,
+  getSessionCount, handleDebugStateRefresh, handleDebugStateResponse, handleSessionsReordered, hasSession, isMaximizeActive,
   reconnectDataWs, removeSessionCard, renameSessionCard, setLayoutMode, showErrorToast, updateAggregateStatus,
 } from './session-card.js';
 import { applyTheme } from './theme.js';
@@ -129,6 +129,9 @@ function handleStateChange(msg) {
 
   applyState(msg.id, msg.to);
 
+  // Live-update debug overlay on state change
+  handleDebugStateRefresh(msg.id);
+
   // On restart (INITIALIZING after DONE/FAILED), reconnect data WS for fresh PTY
   if (msg.to === STATES.INITIALIZING && (msg.from === STATES.DONE || msg.from === STATES.FAILED)) {
     reconnectDataWs(msg.id);
@@ -143,6 +146,7 @@ const messageHandlers = {
   'session-renamed':    (msg) => renameSessionCard(msg.id, msg.newName),
   'session-modified':   (msg) => { removeSessionCard(msg.id); clearEmptyPlaceholder(); createSessionCard(msg.id, msg.session, msg.state, { skipPerms: !!msg.skipPerms }); autoLayout(); },
   'sessions-reordered': (msg) => handleSessionsReordered(msg.order),
+  'debug-state-response': (msg) => handleDebugStateResponse(msg),
   'error':              (msg) => showErrorToast(msg.message),
   'session-error':      (msg) => showErrorToast(`${msg.session}: ${msg.message}`),
   'settings-updated':   (msg) => { if (msg.settings) applyTerminalSettings(msg.settings); },

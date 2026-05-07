@@ -320,6 +320,8 @@ class Session extends EventEmitter {
     this._confirmationMs = 300; // PatternDetector default, recorded for capture header
     this._recorder = null; // Set via setRecorder() after construction
 
+    this._lastLayer4Line = null; // Track Layer 4 firings (fired from idle timer, not PatternDetector)
+
     this.patternDetector = new PatternDetector(promptDetectionMs);
     this.patternDetector.on("prompt-detected", (detection) => {
       // Record detection BEFORE session guards (transition may suppress it)
@@ -359,6 +361,37 @@ class Session extends EventEmitter {
       sleeping: this._sleeping,
       dangerouslySkipPermissions: this.dangerouslySkipPermissions,
       auditLog: this.auditLog.slice(-100),
+    };
+  }
+
+  getDebugState() {
+    const pdSnap = this.patternDetector.getDebugSnapshot();
+    // Merge Layer 4 info (fired from idle timer, not PatternDetector)
+    if (this._lastLayer4Line && (!pdSnap.lastLayer || pdSnap.lastLayer < 4)) {
+      // Only override if Layer 4 was the most recent detection source
+      const lastAuditPrompt = [...this.auditLog].reverse().find(e => e.event === 'prompt_detected');
+      if (lastAuditPrompt?.detail?.layer === 4) {
+        pdSnap.lastLayer = 4;
+        pdSnap.lastMatchedLine = this._lastLayer4Line;
+      }
+    }
+    return {
+      state: this.state,
+      transitions: this.auditLog.slice(-5).map(e => ({
+        from: e.from,
+        to: e.to,
+        event: e.event,
+        timestamp: e.timestamp,
+        detail: e.detail,
+      })),
+      patternDetector: pdSnap,
+      timers: {
+        autoRecoverDataCount: this._autoRecoverDataCount,
+        autoRecoverTimerActive: this._autoRecoverTimer !== null,
+        idleTimerActive: this._idleTimer !== null,
+        startupGraceActive: this._startupGraceActive,
+        sleeping: this._sleeping,
+      },
     };
   }
 
@@ -913,6 +946,7 @@ class Session extends EventEmitter {
             // Layer 4 suppressed — UI chrome, not a real prompt
           } else {
             this._runningStartedAt = null;
+            this._lastLayer4Line = pendingLine;
             this.transition("prompt_detected", {
               layer: 4,
               pattern: "idle_pending_content",

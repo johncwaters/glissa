@@ -310,6 +310,11 @@ function registerControlHandlers(controlWss, deps) {
     'dismiss':          (msg) => { const s = findSession(msg); if (s) s.dismiss(); },
     'sleep':            (msg) => { const s = findSession(msg); if (s) s.sleep(); },
     'wake':             (msg) => { const s = findSession(msg); if (s) s.wake(); },
+    'debug-state':      (msg, ws) => {
+      const s = findSession(msg);
+      if (!s) { ws.send(JSON.stringify({ type: 'error', message: 'Session not found' })); return; }
+      ws.send(JSON.stringify({ type: 'debug-state-response', id: s.id, payload: s.getDebugState() }));
+    },
     'shutdown':         handleShutdown,
     'restart-server':   handleRestart,
     'focus-change':     (msg, ws) => { if (handleClientFocus) handleClientFocus(ws, !!msg.focused); },

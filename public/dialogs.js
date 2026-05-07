@@ -258,6 +258,7 @@ export function createSettingsDialog() {
   const noFlickerCheckbox = dialog.querySelector('#settings-no-flicker');
   const noFlickerWarning = dialog.querySelector('#settings-noflicker-warning');
   const feedDebounceInput = dialog.querySelector('#settings-feed-debounce');
+  const debugModeCheckbox = dialog.querySelector('#settings-debug-mode');
   const soundSelect = dialog.querySelector('#settings-sound');
   const themeSelect = dialog.querySelector('#settings-theme');
   const errorEl = dialog.querySelector('#settings-error');
@@ -382,6 +383,7 @@ export function createSettingsDialog() {
       cursorBlink: cursorBlinkCheckbox.checked,
       noFlicker: noFlickerCheckbox.checked,
       feedDebounceMs: Number(feedDebounceInput.value),
+      debugMode: debugModeCheckbox.checked,
       repoRoots: repoRoots,
     };
 
@@ -411,6 +413,7 @@ export function createSettingsDialog() {
       noFlickerCheckbox.checked = s.noFlicker ?? true;
       initialNoFlicker = noFlickerCheckbox.checked;
       feedDebounceInput.value = s.feedDebounceMs ?? 50;
+      debugModeCheckbox.checked = !!s.debugMode;
       repoRoots = Array.isArray(s.repoRoots) ? [...s.repoRoots] : [];
       renderRootList();
     })

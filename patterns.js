@@ -79,6 +79,8 @@ class PatternDetector extends EventEmitter {
     this._silenceTimer = null;
     this._confirmTimer = null;
     this._armedMatch = null;            // { layer, pattern, line } waiting for silence confirmation
+    this._lastFiredLayer = null;         // Last layer that emitted prompt-detected
+    this._lastFiredLine = null;          // Last line text that triggered detection
     this._debug = process.env.GLISSA_DEBUG_PATTERNS === '1';
   }
 
@@ -201,6 +203,18 @@ class PatternDetector extends EventEmitter {
     return this._checkLine(line);
   }
 
+  // Read-only diagnostic snapshot for the debug overlay.
+  getDebugSnapshot() {
+    return {
+      lastLayer: this._lastFiredLayer || null,
+      lastMatchedLine: this._lastFiredLine || null,
+      armed: this._armedMatch ? { layer: this._armedMatch.layer, pattern: String(this._armedMatch.pattern), line: this._armedMatch.line } : null,
+      confirmTimerActive: this._confirmTimer !== null,
+      silenceTimerActive: this._silenceTimer !== null,
+      pendingLine: this._assembler.getPendingLine(),
+    };
+  }
+
   // -------------------------------------------------------------------------
   // Private helpers
   // -------------------------------------------------------------------------
@@ -247,6 +261,8 @@ class PatternDetector extends EventEmitter {
         if (this._debug) {
           console.log(`[pattern-debug] confirmed (silence held): layer=${match.layer} pattern=${JSON.stringify(match.pattern)} ts=${Date.now()}`);
         }
+        this._lastFiredLayer = match.layer;
+        this._lastFiredLine = match.line;
         this.emit('prompt-detected', match);
       }
     }, this._confirmationMs);
@@ -274,6 +290,8 @@ class PatternDetector extends EventEmitter {
         if (this._debug) {
           console.log(`[pattern-debug] Layer 3 fired: ${JSON.stringify(line)} ts=${Date.now()}`);
         }
+        this._lastFiredLayer = 3;
+        this._lastFiredLine = line;
         this.emit('prompt-detected', {
           layer: 3,
           pattern: 'silence_heuristic',

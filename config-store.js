@@ -18,6 +18,7 @@ const DEFAULT_CONFIG = {
   scrollback: 50000,
   cursorBlink: false,
   feedDebounceMs: 50,
+  debugMode: false,
   repoRoots: [],
   projects: []
 };
@@ -40,6 +41,7 @@ const TIMEOUT_KEYS = [
 const BOOLEAN_KEYS = [
   'noFlicker',
   'cursorBlink',
+  'debugMode',
 ];
 
 function resolveConfigPath() {
@@ -143,6 +145,7 @@ function createConfigStore() {
       scrollback: config.scrollback ?? DEFAULT_CONFIG.scrollback,
       cursorBlink: config.cursorBlink ?? DEFAULT_CONFIG.cursorBlink,
       feedDebounceMs: config.feedDebounceMs ?? DEFAULT_CONFIG.feedDebounceMs,
+      debugMode: config.debugMode ?? DEFAULT_CONFIG.debugMode,
       repoRoots: config.repoRoots,
     };
   }
