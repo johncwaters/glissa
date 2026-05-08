@@ -505,6 +505,16 @@ body {
   display: none;
 }
 
+/* Big screens have the room — restore the badges that were hidden for density */
+@media (min-width: 1200px) {
+  .session-card.minimized .state-badge[data-state="IDLE"],
+  .session-card.minimized .state-badge[data-state="DONE"],
+  .session-card.minimized .state-badge[data-state="COMPLETE"],
+  .session-card.minimized .perms-badge {
+    display: inline-flex;
+  }
+}
+
 
 .session-card.minimized .session-actions {
   display: none;
