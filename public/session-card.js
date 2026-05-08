@@ -966,6 +966,8 @@ function startInlineRename(ui, sessionId) {
 
 // ── Debug overlay ────────────────────────────────────────────
 
+const DEBUG_CLOSE_BTN = '<button type="button" class="debug-close" aria-label="Close debug overlay" title="Close">×</button>';
+
 function formatTimestamp(ts) {
   if (!ts) return '—';
   const d = new Date(ts);
@@ -976,7 +978,8 @@ function renderDebugOverlay(ui, payload) {
   if (!ui.debugOverlay) return;
   const p = payload;
 
-  let html = `<div class="debug-section"><div class="debug-section-title">State</div>`;
+  let html = DEBUG_CLOSE_BTN;
+  html += `<div class="debug-section"><div class="debug-section-title">State</div>`;
   html += `<div class="debug-field"><span class="debug-label">Current:</span> <span class="debug-value">${escapeHtml(p.state)}</span></div>`;
   html += `</div>`;
 
@@ -1031,13 +1034,15 @@ function openDebugOverlay(ui, sessionId) {
 
   const overlay = document.createElement('div');
   overlay.className = 'debug-overlay';
-  overlay.innerHTML = '<div class="debug-field debug-dim">Loading...</div>';
+  overlay.innerHTML = DEBUG_CLOSE_BTN + '<div class="debug-field debug-dim">Loading...</div>';
   ui.card.appendChild(overlay);
   ui.debugOverlay = overlay;
   ui.debugOpen = true;
 
-  // Click outside to close
-  overlay.addEventListener('click', (e) => e.stopPropagation());
+  overlay.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (e.target.closest('.debug-close')) closeDebugOverlay(ui);
+  });
 
   sendControlMsg({ type: 'debug-state', id: sessionId });
 }
