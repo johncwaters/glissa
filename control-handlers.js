@@ -69,7 +69,7 @@ function registerControlHandlers(controlWss, deps) {
     return { type: 'snapshot', sessions: list };
   }
 
-  const SESSION_NAME_RE = /^[a-zA-Z0-9_\-. ]{1,64}$/;
+  const SESSION_NAME_RE = /^[a-zA-Z0-9_\-. ()]{1,64}$/;
 
   function handleAddSession(msg, ws) {
     const name = (msg.name || '').trim();
@@ -81,7 +81,7 @@ function registerControlHandlers(controlWss, deps) {
     }
 
     if (!SESSION_NAME_RE.test(name)) {
-      ws.send(JSON.stringify({ type: 'error', message: 'Session name may only contain letters, numbers, spaces, dashes, dots, and underscores (max 64 chars)' }));
+      ws.send(JSON.stringify({ type: 'error', message: 'Session name may only contain letters, numbers, spaces, dashes, dots, underscores, and parentheses (max 64 chars)' }));
       return;
     }
 
@@ -138,7 +138,7 @@ function registerControlHandlers(controlWss, deps) {
     }
 
     if (!SESSION_NAME_RE.test(newName)) {
-      ws.send(JSON.stringify({ type: 'error', message: 'Session name may only contain letters, numbers, spaces, dashes, dots, and underscores (max 64 chars)' }));
+      ws.send(JSON.stringify({ type: 'error', message: 'Session name may only contain letters, numbers, spaces, dashes, dots, underscores, and parentheses (max 64 chars)' }));
       return;
     }
 

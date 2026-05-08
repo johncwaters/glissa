@@ -1170,6 +1170,42 @@ export function hasSessionByName(name) {
   return false;
 }
 
+/**
+ * True when `name` is exactly `baseName` or matches `baseName (N)` where N
+ * is a positive integer suffix produced by `suggestSessionName`. Excludes
+ * unrelated parenthetical names like `Foo (legacy)`.
+ */
+function isAutoNameOf(name, baseName) {
+  if (name === baseName) return true;
+  const prefix = `${baseName} (`;
+  if (!name.startsWith(prefix) || !name.endsWith(')')) return false;
+  const inner = name.slice(prefix.length, -1);
+  return /^\d+$/.test(inner);
+}
+
+/** Count sessions whose display name is `baseName` or `baseName (N)`. */
+export function countSessionsByName(baseName) {
+  let n = 0;
+  for (const [, ui] of sessionUIs) {
+    if (isAutoNameOf(ui.card.dataset.session, baseName)) n++;
+  }
+  return n;
+}
+
+/**
+ * Return the first free name in the sequence `baseName`, `baseName (2)`,
+ * `baseName (3)`, ... so users can spawn multiple terminals on one project.
+ * Bounded by 999 to keep the suffix within the 64-char server name limit.
+ */
+export function suggestSessionName(baseName) {
+  if (!hasSessionByName(baseName)) return baseName;
+  for (let i = 2; i < 1000; i++) {
+    const candidate = `${baseName} (${i})`;
+    if (!hasSessionByName(candidate)) return candidate;
+  }
+  return `${baseName} (${Date.now()})`;
+}
+
 export function getSessionCount() {
   return sessionUIs.size;
 }

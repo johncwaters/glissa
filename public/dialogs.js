@@ -5,7 +5,7 @@ import { playAlertSound, SOUND_OPTIONS } from './alert-sound.js';
 import addSessionHTML from './components/add-session-dialog.html?raw';
 import settingsHTML from './components/settings-dialog.html?raw';
 import { sendControlMsg, sendControlRequest } from './control-ws.js';
-import { hasSessionByName } from './session-card.js';
+import { countSessionsByName, suggestSessionName } from './session-card.js';
 import { applyTheme, getThemeList } from './theme.js';
 import { getSoundId, getThemeId, setSoundId, setThemeId } from './ui-prefs.js';
 
@@ -93,14 +93,16 @@ export function createAddSessionDialog() {
 
       let hasProjects = false;
       for (const dir of (msg.directories || [])) {
-        const projects = dir.projects.filter(p => !hasSessionByName(p.name));
-        if (projects.length === 0) continue;
+        if (dir.projects.length === 0) continue;
         const group = document.createElement('optgroup');
         group.label = dir.root;
-        for (const proj of projects) {
+        for (const proj of dir.projects) {
           const opt = document.createElement('option');
           opt.value = JSON.stringify({ name: proj.name, path: proj.path });
-          opt.textContent = proj.name;
+          // Show "(N open)" suffix so users see at a glance which projects
+          // already have sessions; selecting still works to spawn another.
+          const existing = countSessionsByName(proj.name);
+          opt.textContent = existing > 0 ? `${proj.name} (${existing} open)` : proj.name;
           group.appendChild(opt);
           hasProjects = true;
         }
@@ -128,7 +130,9 @@ export function createAddSessionDialog() {
   pickerEl.addEventListener('change', () => {
     try {
       const proj = JSON.parse(pickerEl.value);
-      nameInput.value = proj.name;
+      // Auto-disambiguate name when project already has sessions so the
+      // user can spawn multiple terminals on the same project path.
+      nameInput.value = suggestSessionName(proj.name);
       pathInput.value = proj.path;
     } catch { /* picker value not valid JSON — ignore */ }
   });
@@ -165,12 +169,8 @@ export function createAddSessionDialog() {
       return;
     }
 
-    if (hasSessionByName(name)) {
-      errorEl.textContent = `Session "${name}" already exists.`;
-      return;
-    }
-
-    const msg = { type: 'add-session', name, path: projectPath };
+    // Auto-disambiguate so multiple terminals can target the same project.
+    const msg = { type: 'add-session', name: suggestSessionName(name), path: projectPath };
     if (skipPermsCheckbox.checked) msg.dangerouslySkipPermissions = true;
     sendControlMsg(msg);
 

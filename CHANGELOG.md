@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Multiple terminals on the same project**: Adding a project that already has a session no longer fails with a duplicate-name error. The Add Session picker now shows every project (with a `(N open)` suffix when sessions already exist) and auto-disambiguates the name as `Foo`, `Foo (2)`, `Foo (3)`, etc. Sessions remain keyed by stable UUID, so each terminal gets its own PTY, recorder, and lifecycle while pointing at the shared `cwd`.
+
 ## [0.10.0] - 2026-05-06
 
 ### Added
