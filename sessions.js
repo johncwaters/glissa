@@ -598,12 +598,25 @@ class Session extends EventEmitter {
   }
 
   _handlePtyExit(exitCode, signal) {
+    const pid = this.ptyProcess ? this.ptyProcess.pid : null;
     this._clearWatchdog();
     this._clearIdleTimer();
     this._clearStartupGrace();
     this._clearFeedDebounce();
     this.patternDetector.reset();
     this.ptyProcess = null;
+
+    // Reap orphan grandchildren on Windows. When Claude exits cleanly but had
+    // spawned detached background processes (e.g. `astro dev`), the wrapper's
+    // process tree can survive the PTY close. tree-kill the original pid; if
+    // it's already gone, taskkill is a no-op.
+    if (pid && process.platform === "win32") {
+      try {
+        execSync(`taskkill /PID ${Number(pid)} /T /F`, { stdio: "ignore" });
+      } catch {
+        // pid already exited or taskkill unavailable — nothing to do
+      }
+    }
 
     // STARTING + zero bytes ever delivered = failed launch (relies on node-pty flushing onData before onExit).
     let reason = null;
@@ -668,10 +681,25 @@ class Session extends EventEmitter {
 
     const pid = this.ptyProcess.pid;
 
-    try {
-      this.ptyProcess.kill();
-    } catch (err) {
-      this.emit("error", err);
+    if (process.platform === "win32") {
+      // Tree-kill upfront — ptyProcess.kill() only terminates the cmd.exe
+      // wrapper, leaving grandchildren (e.g. `astro dev` spawned inside claude)
+      // orphaned. /T walks the whole process tree.
+      try {
+        execSync(`taskkill /PID ${Number(pid)} /T /F`, { stdio: "ignore" });
+      } catch (err) {
+        if (this.listenerCount("error") > 0) {
+          this.emit("error", err);
+        }
+      }
+    } else {
+      try {
+        this.ptyProcess.kill();
+      } catch (err) {
+        if (this.listenerCount("error") > 0) {
+          this.emit("error", err);
+        }
+      }
     }
 
     this._forceKillAfterTimeout(pid);
