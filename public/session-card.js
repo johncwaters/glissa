@@ -902,7 +902,14 @@ function setupTerminal(termWrap, ui) {
     return true;
   });
 
-  requestAnimationFrame(() => fitAddon.fit());
+  // Double-RAF: first frame lets grid/flex layout settle after .app-ready
+  // flips .app-shell from display:none to display:contents, second frame
+  // measures the now-correct terminal-wrap dimensions. Single RAF fires
+  // before layout completes in the same task, sizing the grid to the
+  // pre-reveal 0×0 box.
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    if (ui.fitAddon) ui.fitAddon.fit();
+  }));
 }
 
 // ── Card event wiring ────────────────────────────────────────
