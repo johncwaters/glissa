@@ -317,6 +317,7 @@ class Session extends EventEmitter {
     this._pendingResize = null;
     this._sleeping = false;
     this._sleepKillTimer = null;
+    this._autoKilled = false;
 
     this._promptDetectionMs = promptDetectionMs;
     this._confirmationMs = 300; // PatternDetector default, recorded for capture header
@@ -470,6 +471,7 @@ class Session extends EventEmitter {
   start() {
     this._receivedFirstOutput = false;
     this._sleeping = false;
+    this._autoKilled = false;
     this._outputBuffer = [];
     this._outputBufferSize = 0;
     this._clearWatchdog();
@@ -774,6 +776,12 @@ class Session extends EventEmitter {
       this._resetIdleTimer();
     }
     this.emit("wake");
+    // Sleep-kill terminated the PTY while user was away. Auto-restart on wake
+    // so opening the card brings the session back instead of stranding it as DONE.
+    if (this._autoKilled
+        && (this.state === STATES.DONE || this.state === STATES.FAILED)) {
+      this.restart();
+    }
   }
 
   _scheduleSleepKill() {
@@ -781,7 +789,18 @@ class Session extends EventEmitter {
     this._sleepKillTimer = setTimeout(() => {
       this._sleepKillTimer = null;
       if (!this._sleeping) return;
+      // Credit the auto-kill on any active→ended transition during this call,
+      // not just on killSession()'s user_kill return — a racing PTY exit can
+      // win and leave killSession() returning false despite us causing the end.
+      const wasActive = this.state === STATES.RUNNING
+        || this.state === STATES.WAITING
+        || this.state === STATES.IDLE
+        || this.state === STATES.COMPLETE;
       this.killSession();
+      if (wasActive
+          && (this.state === STATES.DONE || this.state === STATES.FAILED)) {
+        this._autoKilled = true;
+      }
     }, SLEEP_KILL_TIMEOUT_MS);
   }
 
