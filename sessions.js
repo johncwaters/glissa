@@ -7,6 +7,7 @@ const { STATES } = require("./shared/states");
 
 const KILL_POLL_INTERVAL_MS = 200;
 const KILL_MAX_WAIT_MS = 3000;
+const SLEEP_KILL_TIMEOUT_MS = 15 * 60 * 1000;
 
 // Resolve and log all `claude` matches once at module load so a Bun shim
 // shadowing claude.exe surfaces in the boot log instead of as a runtime stack trace.
@@ -315,6 +316,7 @@ class Session extends EventEmitter {
     this._noFlicker = noFlicker;
     this._pendingResize = null;
     this._sleeping = false;
+    this._sleepKillTimer = null;
 
     this._promptDetectionMs = promptDetectionMs;
     this._confirmationMs = 300; // PatternDetector default, recorded for capture header
@@ -760,16 +762,34 @@ class Session extends EventEmitter {
     this._clearIdleTimer();
     this._clearStartupGrace();
     this.patternDetector.reset();
+    this._scheduleSleepKill();
     this.emit("sleep");
   }
 
   wake() {
     if (!this._sleeping) return;
     this._sleeping = false;
+    this._clearSleepKill();
     if (this.state === STATES.RUNNING) {
       this._resetIdleTimer();
     }
     this.emit("wake");
+  }
+
+  _scheduleSleepKill() {
+    this._clearSleepKill();
+    this._sleepKillTimer = setTimeout(() => {
+      this._sleepKillTimer = null;
+      if (!this._sleeping) return;
+      this.killSession();
+    }, SLEEP_KILL_TIMEOUT_MS);
+  }
+
+  _clearSleepKill() {
+    if (this._sleepKillTimer !== null) {
+      clearTimeout(this._sleepKillTimer);
+      this._sleepKillTimer = null;
+    }
   }
 
   killSession() {
@@ -845,6 +865,7 @@ class Session extends EventEmitter {
     this._clearAutoRecoverTimer();
     this._clearStartupGrace();
     this._clearFeedDebounce();
+    this._clearSleepKill();
     this._pendingResize = null;
     if (this._killPollTimer !== null) {
       clearTimeout(this._killPollTimer);
