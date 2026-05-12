@@ -68,7 +68,6 @@
 
   /* [P2] Layout dimension tokens for split-layout calc */
   --header-h:  52px;
-  --minbar-h:  52px;
   --content-max: none;
 
   /* [P3] Easing: ease-out-quart for snappier feel */
@@ -246,8 +245,9 @@ body {
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 640px), 1fr));
   grid-auto-rows: minmax(0, 1fr);
   gap: 16px;
-  padding: 12px clamp(12px, 2vw, 32px);
-  padding-bottom: var(--minbar-h);
+  /* No bottom padding — minimized bar (in-flow below) sits flush
+     against the cards so the body bg doesn't show as a gap. */
+  padding: 12px clamp(12px, 2vw, 32px) 0;
   max-width: var(--content-max);
   margin: 0;
   flex: 1;
@@ -379,12 +379,11 @@ body {
 }
 
 /* ── Minimized bar ───────────────────────────────────────── */
+/* In-flow at the bottom of the body flex column so .sessions
+   (flex: 1) shrinks to make room as the bar grows — open terminal
+   content is never overlapped no matter how many rows the bar takes. */
 .minimized-bar {
-  position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  z-index: 100;
+  flex-shrink: 0;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -392,9 +391,9 @@ body {
   padding: 8px clamp(12px, 2vw, 32px);
   max-width: var(--content-max);
   margin: 0 auto;
+  width: 100%;
   border-top: 1px solid var(--border-dim);
   background: var(--bg-header);
-  /* [P2] backdrop-filter removed — bg-header is opaque enough */
 }
 
 /* ── Create session ghost card ────────────────────────────── */
@@ -423,7 +422,7 @@ body {
   cursor: pointer;
   background: transparent;
   justify-content: center;
-  padding: 4px 14px;
+  padding: 4px 8px;
   min-height: unset;
   border-bottom: none;
   flex: 1;
@@ -452,7 +451,7 @@ body {
   opacity: 0.85;
   flex: none;
   min-height: 28px;
-  width: 240px;
+  width: 120px;
   transition: opacity var(--transition-fast), border-color var(--transition-med);
 }
 
@@ -467,52 +466,37 @@ body {
 
 .session-card.minimized .session-card-header {
   border-bottom: none;
-  padding: 4px 10px;
+  padding: 4px 8px;
   min-height: unset;
-  gap: 8px;
+  gap: 6px;
   align-items: center;
 }
 
 .session-card.minimized .session-name {
+  flex: 1;
   font-size: 11px;
-  flex-shrink: 1;
+  text-align: center;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
 }
 
-.session-card.minimized .state-badge {
-  /* [P2] 8px → 10px — sub-10px forbidden; use letter-spacing for density */
-  font-size: 10px;
-  letter-spacing: 0.04em;
-  padding: 0 6px;
-  margin-left: auto;
+/* Invisible phantom on the right side of real cards — mirrors the
+   status dot's width so the name centers between two equal reserves
+   instead of being pushed right by the dot alone. Ghost card (which
+   has no dot) skips this and centers naturally. */
+.session-card.minimized:not(.ghost-card) .session-card-header::after {
+  content: '';
+  width: 8px;
+  flex-shrink: 0;
 }
 
-/* Hide non-actionable badges when minimized — update when adding states to states.js */
-.session-card.minimized .state-badge[data-state="IDLE"],
-.session-card.minimized .state-badge[data-state="DONE"],
-.session-card.minimized .state-badge[data-state="COMPLETE"] {
-  display: none;
-}
-
-.session-card.minimized .perms-badge {
-  display: none;
-}
-
+/* Hide all tags when minimized — state is conveyed by border color (and WAITING glow). */
+.session-card.minimized .state-badge,
+.session-card.minimized .perms-badge,
 .session-card.minimized .session-header-spacer {
   display: none;
-}
-
-/* Big screens have the room — restore the badges that were hidden for density */
-@media (min-width: 1200px) {
-  .session-card.minimized .state-badge[data-state="IDLE"],
-  .session-card.minimized .state-badge[data-state="DONE"],
-  .session-card.minimized .state-badge[data-state="COMPLETE"],
-  .session-card.minimized .perms-badge {
-    display: inline-flex;
-  }
 }
 
 
@@ -521,8 +505,85 @@ body {
 }
 
 
+/* ── Minimized state signals ─────────────────────────────────
+   Only two states matter at this size: WAITING (needs input) and
+   RUNNING (working). Everything else gets a quiet neutral dot.
+   Color-blind safe: amber + motion vs. green + steady — distinct
+   on hue, saturation, AND animation. */
+
+/* Repurpose btn-minimize as a state dot when minimized.
+   Sits in flex flow on the left; the header's ::after phantom
+   mirrors its width on the right so the name centers symmetrically. */
+.session-card.minimized .btn-minimize {
+  font-size: 0;
+  width: 8px;
+  height: 8px;
+  padding: 0;
+  border-radius: 50%;
+  background: var(--text-dim);
+  opacity: 0.45;
+  flex-shrink: 0;
+  transition: background var(--transition-fast),
+              opacity var(--transition-fast),
+              box-shadow var(--transition-fast);
+}
+
+.session-card.minimized:hover .btn-minimize {
+  opacity: 0.75;
+}
+
+/* RUNNING — alive, quiet. Saturated border, no animation. */
+.session-card.minimized[data-state="RUNNING"] {
+  opacity: 1;
+  border-color: color-mix(in oklab, var(--state-running) 55%, transparent);
+}
+
+.session-card.minimized[data-state="RUNNING"] .btn-minimize {
+  background: var(--state-running);
+  opacity: 1;
+  box-shadow: 0 0 5px var(--state-running-glow);
+}
+
+/* WAITING — needs input. Loud: full border, tint, breathing glow,
+   pulsing dot. The one place the operator should look. */
 .session-card.minimized[data-state="WAITING"] {
-  animation: none;
+  opacity: 1;
+  border-color: var(--state-waiting);
+  background: color-mix(in oklab, var(--state-waiting) 12%, var(--bg-card));
+  animation: minimized-waiting-breath 1.8s ease-in-out infinite;
+}
+
+/* The full-size ::after glow is sized for big cards — drop it here. */
+.session-card.minimized[data-state="WAITING"]::after {
+  content: none;
+}
+
+.session-card.minimized[data-state="WAITING"] .btn-minimize {
+  background: var(--state-waiting);
+  opacity: 1;
+  animation: minimized-waiting-dot 1.2s ease-in-out infinite;
+}
+
+@keyframes minimized-waiting-breath {
+  0%, 100% {
+    box-shadow: 0 0 0 1px var(--state-waiting-glow),
+                0 0 6px var(--state-waiting-glow);
+  }
+  50% {
+    box-shadow: 0 0 0 1px var(--state-waiting),
+                0 0 14px color-mix(in oklab, var(--state-waiting) 45%, transparent);
+  }
+}
+
+@keyframes minimized-waiting-dot {
+  0%, 100% {
+    transform: scale(1);
+    box-shadow: 0 0 4px var(--state-waiting-glow);
+  }
+  50% {
+    transform: scale(1.35);
+    box-shadow: 0 0 10px color-mix(in oklab, var(--state-waiting) 55%, transparent);
+  }
 }
 
 /* Completion flash — plays once on DONE/FAILED transition */
@@ -789,14 +850,21 @@ body {
   flex: 1;
   min-height: 0;
   overflow: hidden;
+  /* xterm.js fit snaps rows to integer character cells, leaving a few
+     unused pixels at the bottom. Without this, that strip shows xterm's
+     bundled `.xterm { background-color: #000 }` default and looks like
+     a black bar. Match the card bg so the gap disappears. */
+  background: var(--bg-card);
 }
 
 .terminal-wrap .xterm {
   height: 100% !important;
+  background-color: var(--bg-card) !important;
 }
 
 .terminal-wrap .xterm-viewport {
   border-radius: 4px;
+  background-color: var(--bg-card) !important;
 }
 
 /* ── Empty state ──────────────────────────────────────────── */
@@ -805,8 +873,8 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: calc(100vh - var(--header-h) - var(--minbar-h) - 80px);
   padding: 48px 24px;
+  /* Fills the grid row naturally via grid-auto-rows: minmax(0, 1fr) */
 }
 
 .sessions-empty-inner {
