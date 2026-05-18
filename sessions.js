@@ -122,6 +122,9 @@ function isLayer4Chrome(line) {
 }
 
 const TRANSITIONS = Object.freeze({
+  [STATES.DORMANT]: {
+    user_start: STATES.INITIALIZING,
+  },
   [STATES.INITIALIZING]: {
     spawn_success: STATES.STARTING,
     spawn_fail: STATES.FAILED,
@@ -289,7 +292,7 @@ class Session extends EventEmitter {
     this.path = path;
     this.dangerouslySkipPermissions = dangerouslySkipPermissions;
     this.ptyProcess = null;
-    this.state = STATES.INITIALIZING;
+    this.state = STATES.DORMANT;
     this.auditLog = [];
     this.startingWatchdogMs = startingWatchdogSeconds * 1000;
     this.attentionTimeoutMs = attentionTimeoutSeconds * 1000;
@@ -469,6 +472,9 @@ class Session extends EventEmitter {
   }
 
   start() {
+    if (this.state === STATES.DORMANT) {
+      this.transition("user_start");
+    }
     this._receivedFirstOutput = false;
     this._sleeping = false;
     this._autoKilled = false;

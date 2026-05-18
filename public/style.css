@@ -41,6 +41,8 @@
   --state-starting-bg:  color-mix(in oklab, var(--state-starting) 6%, transparent);
   --state-complete:     #34d399;
   --state-complete-bg:  color-mix(in oklab, var(--state-complete) 6%, transparent);
+  --state-dormant:      #5a527a;
+  --state-dormant-bg:   color-mix(in oklab, var(--state-dormant) 6%, transparent);
 
   /* [P1] Tokenized glow values for state colors */
   --state-running-glow:  color-mix(in oklab, var(--state-running) 25%, transparent);
@@ -422,8 +424,9 @@ body {
   cursor: pointer;
   background: transparent;
   justify-content: center;
-  padding: 4px 8px;
-  min-height: unset;
+  padding: 2px 8px;
+  min-height: 0;
+  line-height: 1.2;
   border-bottom: none;
   flex: 1;
 }
@@ -450,7 +453,9 @@ body {
   border-radius: var(--radius);
   opacity: 0.85;
   flex: none;
-  min-height: 28px;
+  align-self: center;
+  height: auto;
+  min-height: 0;
   width: 120px;
   transition: opacity var(--transition-fast), border-color var(--transition-med);
 }
@@ -466,8 +471,10 @@ body {
 
 .session-card.minimized .session-card-header {
   border-bottom: none;
-  padding: 4px 8px;
-  min-height: unset;
+  padding: 2px 8px;
+  min-height: 0;
+  height: auto;
+  line-height: 1.2;
   gap: 6px;
   align-items: center;
 }
@@ -661,6 +668,14 @@ body {
   border-color: color-mix(in oklab, var(--state-idle) 15%, transparent);
 }
 
+.session-card[data-state="DORMANT"] {
+  border-color: color-mix(in oklab, var(--state-dormant) 30%, transparent);
+}
+
+.session-card.minimized[data-state="DORMANT"] .btn-minimize {
+  background: var(--state-dormant);
+}
+
 .session-card[data-state="COMPLETE"] {
   border-color: color-mix(in oklab, var(--state-complete) 30%, transparent);
   box-shadow: 0 0 0 1px color-mix(in oklab, var(--state-complete) 15%, transparent), 0 0 16px color-mix(in oklab, var(--state-complete) 8%, transparent);
@@ -779,7 +794,8 @@ body {
 .state-badge[data-state="DONE"]         { color: var(--state-done); }
 .state-badge[data-state="INITIALIZING"] { color: var(--state-initializing); }
 .state-badge[data-state="IDLE"]         { color: var(--state-idle); }
-.state-badge[data-state="COMPLETE"]    { color: var(--state-complete); }
+.state-badge[data-state="COMPLETE"]     { color: var(--state-complete); }
+.state-badge[data-state="DORMANT"]      { color: var(--state-dormant); }
 .state-badge[data-state="STARTING"] {
   color: var(--state-starting);
   animation: pulse 1.4s ease-in-out infinite;

@@ -342,6 +342,16 @@ function toggleMinimize(sessionId) {
   if (!ui) return;
   const isCurrentlyMinimized = ui.card.classList.contains('minimized');
 
+  // Dormant card: clicking expand spawns the PTY. Optimistically set up the
+  // terminal and promote the card out of the minimized bar; the server's
+  // DORMANT -> INITIALIZING state-change will arrive moments later.
+  if (ui.currentState === STATES.DORMANT && isCurrentlyMinimized) {
+    sendControlMsg({ type: 'start-session', id: sessionId });
+    ensureTerminalSetup(ui, sessionId);
+    _performExpand(sessionId, ui);
+    return;
+  }
+
   // In maximize mode: expanding a minimized session switches the maximized target
   if (_maximizedSession && isCurrentlyMinimized && sessionId !== _maximizedSession) {
     toggleMaximize(sessionId);
@@ -1272,7 +1282,7 @@ export function scheduleFitAll() {
 }
 
 export function updateAggregateStatus() {
-  let waiting = 0, failed = 0, done = 0, complete = 0, total = 0;
+  let waiting = 0, failed = 0, done = 0, complete = 0, dormant = 0, total = 0;
 
   for (const [, ui] of sessionUIs) {
     total++;
@@ -1281,6 +1291,7 @@ export function updateAggregateStatus() {
     else if (state === STATES.FAILED) failed++;
     else if (state === STATES.DONE) done++;
     else if (state === STATES.COMPLETE) complete++;
+    else if (state === STATES.DORMANT) dormant++;
   }
 
   let text = '';
@@ -1299,8 +1310,11 @@ export function updateAggregateStatus() {
   } else if (total > 0 && done === total) {
     text = 'All sessions exited';
     severity = 'done';
+  } else if (total > 0 && dormant === total) {
+    text = `${dormant} session${pl(dormant)} dormant`;
+    severity = '';
   } else if (total > 0) {
-    const active = total - done;
+    const active = total - done - dormant;
     text = `${active} session${pl(active)} running`;
     severity = 'success';
   }
@@ -1312,9 +1326,23 @@ export function updateAggregateStatus() {
 }
 
 export function createSessionCard(sessionId, sessionName, initialState, options = {}) {
-  const dom = buildCardDOM(sessionId, sessionName, initialState, options);
+  const state = initialState || STATES.DORMANT;
+  const dom = buildCardDOM(sessionId, sessionName, state, options);
   setupDragAndDrop(dom.card, dom.header, dom.btnMinimize, sessionId);
-  container.appendChild(dom.card);
+
+  const isDormant = state === STATES.DORMANT;
+
+  // Dormant cards live in the minimized bar with no terminal and no data WS
+  // until the user expands them, which sends start-session and triggers spawn.
+  if (isDormant) {
+    dom.card.classList.add('minimized');
+    dom.btnMinimize.textContent = '▲';
+    dom.btnMinimize.title = 'Start session';
+    dom.btnMinimize.setAttribute('aria-label', 'Start session');
+    minimizedBar.appendChild(dom.card);
+  } else {
+    container.appendChild(dom.card);
+  }
 
   const ui = {
     term: null,
@@ -1337,29 +1365,37 @@ export function createSessionCard(sessionId, sessionName, initialState, options 
     debugOverlay: null,
     debugOpen: false,
     abortController: new AbortController(),
-    currentState: initialState || STATES.INITIALIZING,
+    currentState: state,
     sleeping: false,
   };
   sessionUIs.set(sessionId, ui);
 
-  setupTerminal(dom.termWrap, ui);
-
   wireCardEvents(ui, sessionId);
   updateButtonVisibility(ui);
 
-  wireTerminalIO(ui, sessionId);
+  if (!isDormant) {
+    setupTerminal(dom.termWrap, ui);
+    wireTerminalIO(ui, sessionId);
 
-  // Restore minimized state from localStorage
-  if (isMinimized(sessionId)) toggleMinimize(sessionId);
+    // Restore minimized state from localStorage
+    if (isMinimized(sessionId)) toggleMinimize(sessionId);
 
-  // In split mode, auto-minimize if already at limit
-  if (_currentLayout === 'split' && _getVisibleSessions().length > SPLIT_MAX_VISIBLE) {
-    _performMinimize(sessionId, ui);
-    _preSplitSessions.add(sessionId);
+    // In split mode, auto-minimize if already at limit
+    if (_currentLayout === 'split' && _getVisibleSessions().length > SPLIT_MAX_VISIBLE) {
+      _performMinimize(sessionId, ui);
+      _preSplitSessions.add(sessionId);
+    }
   }
 
   updateAggregateStatus();
   return ui;
+}
+
+// First-time terminal setup for cards that started life as DORMANT.
+function ensureTerminalSetup(ui, sessionId) {
+  if (ui.term) return;
+  setupTerminal(ui.termWrap, ui);
+  wireTerminalIO(ui, sessionId);
 }
 
 export function renameSessionCard(sessionId, newName) {
@@ -1411,6 +1447,15 @@ export function applyState(sessionId, state) {
 
   const prevState = ui.currentState;
   ui.currentState = state;
+
+  // Leaving DORMANT: lazy-set up the terminal and promote the card from
+  // the minimized bar to the main grid (if not already done optimistically).
+  if (prevState === STATES.DORMANT && state !== STATES.DORMANT) {
+    ensureTerminalSetup(ui, sessionId);
+    if (ui.card.classList.contains('minimized')) {
+      _performExpand(sessionId, ui);
+    }
+  }
 
   // Preserve the glyph span; only update its text and the sibling label text node.
   ui.badge.dataset.state = state;

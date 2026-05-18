@@ -47,8 +47,9 @@ function makeSession(overrides = {}) {
   });
 }
 
-// Drive a session from INITIALIZING to RUNNING via transitions
+// Drive a session from DORMANT to RUNNING via transitions
 function driveToRunning(session) {
+  session.transition('user_start');      // DORMANT -> INITIALIZING
   session.transition('spawn_success');   // INITIALIZING -> STARTING
   session.transition('first_output');    // STARTING -> RUNNING
 }
@@ -87,13 +88,27 @@ async function runAllTests() {
 
   {
     const s = makeSession();
-    assert('initial state is INITIALIZING', s.state, STATES.INITIALIZING);
+    assert('initial state is DORMANT', s.state, STATES.DORMANT);
+  }
+
+  {
+    const s = makeSession();
+    s.transition('user_start');
+    assert('DORMANT -> INITIALIZING via user_start', s.state, STATES.INITIALIZING);
   }
 
   {
     const s = makeSession();
     driveToRunning(s);
-    assert('INITIALIZING -> STARTING -> RUNNING', s.state, STATES.RUNNING);
+    assert('DORMANT -> INITIALIZING -> STARTING -> RUNNING', s.state, STATES.RUNNING);
+  }
+
+  // DORMANT only accepts user_start
+  {
+    const s = makeSession();
+    const result = s.transition('spawn_success');
+    assert('DORMANT rejects spawn_success', result, false);
+    assert('DORMANT state unchanged after invalid event', s.state, STATES.DORMANT);
   }
 
   {
@@ -193,7 +208,14 @@ async function runAllTests() {
 
   {
     const s = makeSession();
-    // INITIALIZING (default)
+    // DORMANT (default)
+    s.sleep();
+    assert('sleep refused in DORMANT — sleeping flag', s.sleeping, false);
+  }
+
+  {
+    const s = makeSession();
+    s.transition('user_start'); // -> INITIALIZING
     s.sleep();
     assert('sleep refused in INITIALIZING — sleeping flag', s.sleeping, false);
   }

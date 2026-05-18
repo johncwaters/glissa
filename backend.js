@@ -229,18 +229,13 @@ function createBackend(httpServer, options = {}) {
     });
   }
 
-  // Stagger session startup to avoid spawning all PTY processes at once.
-  // Each session gets a 500ms delay to reduce CPU/IO contention on boot.
-  for (let i = 0; i < config.projects.length; i++) {
-    const project = config.projects[i];
+  // Sessions are constructed dormant — no PTY spawns on boot. The user starts
+  // a session on demand by expanding its chip from the minimized bar, which
+  // sends a `start-session` control message.
+  for (const project of config.projects) {
     const sess = makeSession(project, config);
     sessions.set(project.id, sess);
     wireSessionEvents(sess);
-    if (i === 0) {
-      sess.start();
-    } else {
-      setTimeout(() => sess.start(), i * 500);
-    }
   }
 
   function diffProjects(currentSessions, newProjects) {

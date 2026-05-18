@@ -3,6 +3,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { TIMEOUT_KEYS, BOOLEAN_KEYS } = require('./config-store');
+const { STATES } = require('./shared/states');
 
 function scanRepoRoots(roots) {
   const results = [];
@@ -305,6 +306,10 @@ function registerControlHandlers(controlWss, deps) {
     'update-settings':  handleUpdateSettings,
     'scan-repo-roots':  handleScanRepoRoots,
     'kill':             (msg) => { const s = findSession(msg); if (s) s.killSession(); },
+    'start-session':    (msg) => {
+      const s = findSession(msg);
+      if (s && s.state === STATES.DORMANT) s.start();
+    },
     'restart':          (msg) => { const s = findSession(msg); if (s) s.restart(); },
     'force-restart':    (msg) => { const s = findSession(msg); if (s) s.forceRestart(); },
     'dismiss':          (msg) => { const s = findSession(msg); if (s) s.dismiss(); },

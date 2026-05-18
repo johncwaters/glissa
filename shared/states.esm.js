@@ -2,6 +2,7 @@
 // Server-side code uses states.js (CommonJS). Vite aliases /shared/states.mjs to this file.
 
 export const STATES = Object.freeze({
+  DORMANT:      'DORMANT',
   INITIALIZING: 'INITIALIZING',
   STARTING:     'STARTING',
   RUNNING:      'RUNNING',
@@ -13,6 +14,7 @@ export const STATES = Object.freeze({
 });
 
 export const BADGE_LABELS = Object.freeze({
+  [STATES.DORMANT]:      'Dormant',
   [STATES.INITIALIZING]: 'Preparing',
   [STATES.STARTING]:     'Starting',
   [STATES.RUNNING]:      'Working',
@@ -24,6 +26,7 @@ export const BADGE_LABELS = Object.freeze({
 });
 
 export const STATE_GLYPHS = Object.freeze({
+  [STATES.DORMANT]:      '\u25cb',
   [STATES.INITIALIZING]: '\u25cc',
   [STATES.STARTING]:     '\u25d0',
   [STATES.RUNNING]:      '\u25cf',

@@ -5,6 +5,7 @@
 // Browser-side: served dynamically as ESM via GET /shared/states.mjs
 
 const STATES = Object.freeze({
+  DORMANT:      'DORMANT',
   INITIALIZING: 'INITIALIZING',
   STARTING:     'STARTING',
   RUNNING:      'RUNNING',
@@ -16,6 +17,7 @@ const STATES = Object.freeze({
 });
 
 const BADGE_LABELS = Object.freeze({
+  [STATES.DORMANT]:      'Dormant',
   [STATES.INITIALIZING]: 'Preparing',
   [STATES.STARTING]:     'Starting',
   [STATES.RUNNING]:      'Working',
@@ -27,6 +29,7 @@ const BADGE_LABELS = Object.freeze({
 });
 
 const STATE_GLYPHS = Object.freeze({
+  [STATES.DORMANT]:      '\u25cb',
   [STATES.INITIALIZING]: '\u25cc',
   [STATES.STARTING]:     '\u25d0',
   [STATES.RUNNING]:      '\u25cf',
