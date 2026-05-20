@@ -118,6 +118,82 @@ function createBackend(httpServer, options = {}) {
     }
   }
 
+  // --- Health snapshot ---
+  // Periodic memory/leak telemetry. Sampled rather than per-event because
+  // process.memoryUsage() walks the V8 heap and shouldn't run on hot paths.
+
+  const HEALTH_SNAPSHOT_INTERVAL_MS = 10000;
+
+  function buildHealthSnapshot() {
+    const mem = process.memoryUsage();
+    const sessionStats = [];
+    let alivePtyCount = 0;
+    let sleepingCount = 0;
+    let totalDataListeners = 0;
+    let totalOutputBufferBytes = 0;
+    let listenerMismatch = false;
+    let orphanPty = false;
+    let destroyedReachable = false;
+    for (const [, sess] of sessions) {
+      const stats = sess.getHealthStats();
+      sessionStats.push(stats);
+      if (stats.hasPty) alivePtyCount++;
+      if (stats.sleeping) sleepingCount++;
+      totalDataListeners += stats.dataListenerCount;
+      totalOutputBufferBytes += stats.outputBufferBytes;
+      // Anomalies: data-WS listener count should equal registered client count
+      // for that session; PTY should only exist while session is in an active
+      // state; destroy() should remove the session from the map.
+      const clientCount = sessionDataClients.get(stats.id)?.size || 0;
+      if (stats.dataListenerCount !== clientCount) listenerMismatch = true;
+      if (stats.hasPty && (stats.state === STATES.DONE || stats.state === STATES.FAILED || stats.state === STATES.DORMANT)) {
+        orphanPty = true;
+      }
+      if (stats.destroyed) destroyedReachable = true;
+    }
+    let dataClientTotal = 0;
+    for (const set of sessionDataClients.values()) {
+      dataClientTotal += set.size;
+    }
+    let activeResources = 0;
+    try {
+      activeResources = process.getActiveResourcesInfo().length;
+    } catch {
+      // Older Node — leave 0
+    }
+    return {
+      timestamp: Date.now(),
+      uptimeSeconds: Math.round(process.uptime()),
+      process: {
+        rss: mem.rss,
+        heapUsed: mem.heapUsed,
+        heapTotal: mem.heapTotal,
+        external: mem.external,
+        arrayBuffers: mem.arrayBuffers,
+        activeResources,
+      },
+      sessions: {
+        total: sessions.size,
+        alivePty: alivePtyCount,
+        sleeping: sleepingCount,
+        totalDataListeners,
+        totalOutputBufferBytes,
+        list: sessionStats,
+      },
+      websockets: {
+        control: controlWss.clients.size,
+        data: dataWss.clients.size,
+        dataPerSessionTotal: dataClientTotal,
+      },
+      anomalies: { listenerMismatch, orphanPty, destroyedReachable },
+    };
+  }
+
+  const healthInterval = setInterval(() => {
+    broadcastControl({ type: 'health-snapshot', stats: buildHealthSnapshot() });
+  }, HEALTH_SNAPSHOT_INTERVAL_MS);
+  healthInterval.unref();
+
   // --- Notification manager ---
 
   const notificationManager = new NotificationManager({
@@ -398,6 +474,7 @@ function createBackend(httpServer, options = {}) {
     requestShutdown,
     requestRestart,
     handleClientFocus,
+    buildHealthSnapshot,
   });
 
   // --- Data WebSocket ---
@@ -556,6 +633,7 @@ function createBackend(httpServer, options = {}) {
   function shutdown() {
     if (shuttingDown) return;
     shuttingDown = true;
+    clearInterval(healthInterval);
     // INVARIANT: destroy NotificationManager BEFORE sessions — clears all timers globally
     notificationManager.destroy();
     for (const [, sess] of sessions) {

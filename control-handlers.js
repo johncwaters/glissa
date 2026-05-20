@@ -47,6 +47,7 @@ function registerControlHandlers(controlWss, deps) {
     requestShutdown,
     requestRestart,
     handleClientFocus,
+    buildHealthSnapshot,
   } = deps;
 
   /** Find a session by id (primary) with name fallback for legacy clients. */
@@ -323,10 +324,17 @@ function registerControlHandlers(controlWss, deps) {
     'shutdown':         handleShutdown,
     'restart-server':   handleRestart,
     'focus-change':     (msg, ws) => { if (handleClientFocus) handleClientFocus(ws, !!msg.focused); },
+    'request-health-snapshot': (_msg, ws) => {
+      if (!buildHealthSnapshot) return;
+      ws.send(JSON.stringify({ type: 'health-snapshot', stats: buildHealthSnapshot() }));
+    },
   };
 
   controlWss.on('connection', (ws) => {
     ws.send(JSON.stringify(buildSnapshot()));
+    if (buildHealthSnapshot) {
+      ws.send(JSON.stringify({ type: 'health-snapshot', stats: buildHealthSnapshot() }));
+    }
 
     ws.on('message', (raw) => {
       let msg;

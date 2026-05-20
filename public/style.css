@@ -1645,6 +1645,151 @@ body {
   gap: 8px;
 }
 
+/* ── Health monitor footer ───────────────────────────────── */
+/* In-flow at the bottom of the body flex column, below the minimized bar. */
+.health-footer {
+  flex-shrink: 0;
+  background: var(--bg-header);
+  border-top: 1px solid var(--border-dim);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.health-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  max-width: var(--content-max);
+  margin: 0 auto;
+  padding: 6px clamp(12px, 2vw, 32px);
+  background: transparent;
+  border: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.health-summary:hover {
+  background: color-mix(in oklab, var(--accent) 4%, transparent);
+}
+
+.health-summary:focus-visible {
+  outline: 1px solid var(--accent-dim);
+  outline-offset: -1px;
+}
+
+.health-chev {
+  color: var(--text-muted);
+  font-size: 9px;
+  width: 10px;
+  display: inline-block;
+}
+
+.health-stat {
+  white-space: nowrap;
+  color: var(--text);
+}
+
+.health-stat-label {
+  color: var(--text-muted);
+  margin-right: 4px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.health-anomaly {
+  margin-left: auto;
+  color: var(--state-waiting);
+  font-weight: 600;
+}
+
+.health-detail {
+  max-width: var(--content-max);
+  margin: 0 auto;
+  padding: 8px clamp(12px, 2vw, 32px) 14px;
+  border-top: 1px solid var(--border-dim);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.health-section {
+  border: 1px solid var(--border-dim);
+  border-radius: var(--radius);
+  padding: 8px 10px;
+  background: color-mix(in oklab, var(--bg) 60%, transparent);
+}
+
+.health-section-warn {
+  border-color: color-mix(in oklab, var(--state-waiting) 50%, var(--border-dim));
+  background: color-mix(in oklab, var(--state-waiting) 6%, transparent);
+}
+
+.health-section-title {
+  font-size: 10px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 6px;
+}
+
+.health-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 4px 16px;
+}
+
+.health-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+}
+
+.health-label {
+  color: var(--text-muted);
+}
+
+.health-mono {
+  font-family: var(--font-mono);
+  color: var(--text);
+}
+
+.health-dim {
+  color: var(--text-muted);
+}
+
+.health-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+
+.health-table th {
+  text-align: left;
+  font-weight: 500;
+  color: var(--text-muted);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--border-dim);
+}
+
+.health-table td {
+  padding: 3px 6px;
+  border-bottom: 1px solid color-mix(in oklab, var(--border-dim) 50%, transparent);
+}
+
+.health-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
 .settings-add-row .dialog-input {
   flex: 1;
 }

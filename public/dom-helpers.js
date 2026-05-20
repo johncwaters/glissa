@@ -7,3 +7,12 @@ export function el(tag, className, text) {
   if (text != null) e.textContent = text;
   return e;
 }
+
+export function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}

@@ -8,7 +8,7 @@ import { Terminal } from '@xterm/xterm';
 import { BADGE_LABELS, KILLABLE_STATES, RESTARTABLE_STATES, STATE_GLYPHS, STATES } from '/shared/states.mjs';
 import { playAlertSound } from './alert-sound.js';
 import { sendControlMsg } from './control-ws.js';
-import { el } from './dom-helpers.js';
+import { el, escapeHtml } from './dom-helpers.js';
 import { getTerminalTheme } from './theme.js';
 import { getSoundId, isMinimized, isSoundEnabled, setMinimized } from './ui-prefs.js';
 
@@ -1036,10 +1036,6 @@ function renderDebugOverlay(ui, payload) {
   html += `</div>`;
 
   ui.debugOverlay.innerHTML = html;
-}
-
-function escapeHtml(str) {
-  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
 function truncate(str, max) {

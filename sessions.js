@@ -308,6 +308,7 @@ class Session extends EventEmitter {
     this._startupGraceActive = false;
     this._startupGraceTimer = null;
     this._outputBuffer = []; // ring buffer of recent PTY chunks
+    this._outputBufferHead = 0; // index of oldest valid entry; advances instead of shift()
     this._outputBufferSize = 0;
     this._outputBufferMax = replayBufferKB * 1024;
     this._lastUserInputAt = 0;
@@ -321,6 +322,8 @@ class Session extends EventEmitter {
     this._sleeping = false;
     this._sleepKillTimer = null;
     this._autoKilled = false;
+    this._destroyed = false;
+    this._pendingRestart = false;
 
     this._promptDetectionMs = promptDetectionMs;
     this._confirmationMs = 300; // PatternDetector default, recorded for capture header
@@ -367,6 +370,33 @@ class Session extends EventEmitter {
       sleeping: this._sleeping,
       dangerouslySkipPermissions: this.dangerouslySkipPermissions,
       auditLog: this.auditLog.slice(-100),
+    };
+  }
+
+  getHealthStats() {
+    return {
+      id: this.id,
+      name: this.name,
+      state: this.state,
+      sleeping: this._sleeping,
+      autoKilled: this._autoKilled,
+      destroyed: this._destroyed,
+      pendingRestart: this._pendingRestart,
+      hasPty: this.ptyProcess !== null,
+      ptyPid: this.ptyProcess ? this.ptyProcess.pid : null,
+      outputBufferEntries: this._outputBuffer.length - this._outputBufferHead,
+      outputBufferBytes: this._outputBufferSize,
+      auditLogLength: this.auditLog.length,
+      dataListenerCount: this.listenerCount("data"),
+      timers: {
+        sleepKill: this._sleepKillTimer !== null,
+        killPoll: this._killPollTimer !== null,
+        idle: this._idleTimer !== null,
+        watchdog: this._watchdogTimer !== null,
+        feedDebounce: this._feedDebounceTimer !== null,
+        autoRecover: this._autoRecoverTimer !== null,
+        startupGrace: this._startupGraceTimer !== null,
+      },
     };
   }
 
@@ -472,6 +502,28 @@ class Session extends EventEmitter {
   }
 
   start() {
+    if (this._destroyed) return;
+    // Defensive cleanup: if a prior PTY is still alive (e.g. _handlePtyExit
+    // hasn't propagated yet after a sleep-kill race), force-kill it before
+    // respawning. Without this, ptyProcess assignment below would orphan the
+    // previous PTY's onData/onExit subscriptions and leak the process.
+    if (this.ptyProcess) {
+      console.warn(`[session:${this.name}] start() called while PTY exists — killing previous PTY first`);
+      const oldPid = this.ptyProcess.pid;
+      try {
+        if (process.platform === "win32") {
+          // 2s timeout: bounds the worst-case event-loop stall if taskkill
+          // wedges. start() is a user-action hot path, unlike the kill/exit
+          // sites which run during teardown.
+          execSync(`taskkill /PID ${Number(oldPid)} /T /F`, { stdio: "ignore", timeout: 2000 });
+        } else {
+          this.ptyProcess.kill();
+        }
+      } catch {
+        // Already dead, unkillable, or timed out — proceed
+      }
+      this.ptyProcess = null;
+    }
     if (this.state === STATES.DORMANT) {
       this.transition("user_start");
     }
@@ -479,6 +531,7 @@ class Session extends EventEmitter {
     this._sleeping = false;
     this._autoKilled = false;
     this._outputBuffer = [];
+    this._outputBufferHead = 0;
     this._outputBufferSize = 0;
     this._clearWatchdog();
     this._clearIdleTimer();
@@ -563,6 +616,7 @@ class Session extends EventEmitter {
   }
 
   _handlePtyData(data) {
+    if (this._destroyed) return;
     if (this._recorder) {
       this._recorder.writeData(data);
     }
@@ -593,14 +647,22 @@ class Session extends EventEmitter {
       }
     }
 
-    // Buffer for late-joining data WS clients
+    // Buffer for late-joining data WS clients. Uses a head-index ring instead
+    // of Array.shift() (O(n) per call) to keep the hot path O(1) amortized.
     this._outputBuffer.push(data);
     this._outputBufferSize += data.length;
     while (
       this._outputBufferSize > this._outputBufferMax &&
-      this._outputBuffer.length > 1
+      this._outputBuffer.length - this._outputBufferHead > 1
     ) {
-      this._outputBufferSize -= this._outputBuffer.shift().length;
+      this._outputBufferSize -= this._outputBuffer[this._outputBufferHead].length;
+      this._outputBuffer[this._outputBufferHead] = null;
+      this._outputBufferHead++;
+    }
+    // Compact when the unused prefix grows large to bound array growth.
+    if (this._outputBufferHead > 1024) {
+      this._outputBuffer = this._outputBuffer.slice(this._outputBufferHead);
+      this._outputBufferHead = 0;
     }
 
     // Always emit raw data for WebSocket broadcasting
@@ -651,7 +713,9 @@ class Session extends EventEmitter {
   }
 
   getReplayBuffer() {
-    return this._outputBuffer.join("");
+    return this._outputBufferHead === 0
+      ? this._outputBuffer.join("")
+      : this._outputBuffer.slice(this._outputBufferHead).join("");
   }
 
   write(text) {
@@ -728,6 +792,7 @@ class Session extends EventEmitter {
     let elapsed = 0;
     const poll = () => {
       this._killPollTimer = null;
+      if (this._destroyed) return;
       if (!checkAlive()) return;
       elapsed += KILL_POLL_INTERVAL_MS;
       if (elapsed >= KILL_MAX_WAIT_MS) {
@@ -775,6 +840,7 @@ class Session extends EventEmitter {
   }
 
   wake() {
+    if (this._destroyed) return;
     if (!this._sleeping) return;
     this._sleeping = false;
     this._clearSleepKill();
@@ -830,6 +896,7 @@ class Session extends EventEmitter {
   }
 
   restart() {
+    if (this._destroyed) return false;
     if (this.state !== STATES.DONE && this.state !== STATES.FAILED)
       return false;
     this.transition("user_restart");
@@ -838,6 +905,10 @@ class Session extends EventEmitter {
   }
 
   forceRestart() {
+    if (this._destroyed) return;
+    // Re-entry guard: a second click while the prior force-restart is still
+    // waiting on PTY exit would stack once('exit') listeners and double-spawn.
+    if (this._pendingRestart) return;
     const killable = [
       STATES.RUNNING,
       STATES.WAITING,
@@ -845,8 +916,11 @@ class Session extends EventEmitter {
       STATES.COMPLETE,
     ];
     if (killable.includes(this.state)) {
+      this._pendingRestart = true;
       // Kill first, then restart once process exits
       this.once("exit", () => {
+        this._pendingRestart = false;
+        if (this._destroyed) return;
         if (this.state === STATES.DONE || this.state === STATES.FAILED) {
           this.transition("user_restart");
           this.start();
@@ -879,6 +953,12 @@ class Session extends EventEmitter {
   }
 
   destroy() {
+    if (this._destroyed) return;
+    // Setting _destroyed first lets _forceKillAfterTimeout's poll bail before
+    // rescheduling, and gates start/wake/restart/_handlePtyData against any
+    // late deliveries that race destroy.
+    this._destroyed = true;
+
     if (this._watchdogTimer !== null) {
       clearTimeout(this._watchdogTimer);
       this._watchdogTimer = null;
@@ -892,11 +972,17 @@ class Session extends EventEmitter {
     this._clearFeedDebounce();
     this._clearSleepKill();
     this._pendingResize = null;
+
+    this.kill();
+
+    // Clear AFTER kill() since kill() schedules _killPollTimer via
+    // _forceKillAfterTimeout. The poll body also bails on _destroyed, but
+    // canceling the outstanding setTimeout here avoids the 200ms wakeup.
     if (this._killPollTimer !== null) {
       clearTimeout(this._killPollTimer);
       this._killPollTimer = null;
     }
-    this.kill();
+
     if (this._recorder) {
       this._recorder.close(); // Idempotent — safe if already closed by _handlePtyExit
     }

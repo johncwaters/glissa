@@ -7,6 +7,7 @@ import './tailwind.css';
 import { STATES } from '/shared/states.mjs';
 import { connectControl, disableReconnect, onControlMessage, sendControlMsg, sendControlRequest, setConnectionStateCallback } from './control-ws.js';
 import { createAddSessionDialog, createConfirmDialog, createSettingsDialog } from './dialogs.js';
+import { applyHealthSnapshot, mountHealthMonitor } from './health-monitor.js';
 import {
   applyState, applyTerminalSettings, createSessionCard, exitMaximizeMode, fitAllVisible, scheduleFitAll,
   getSessionCount, handleDebugStateRefresh, handleDebugStateResponse, handleSessionsReordered, hasSession, isMaximizeActive,
@@ -150,6 +151,7 @@ const messageHandlers = {
   'error':              (msg) => showErrorToast(msg.message),
   'session-error':      (msg) => showErrorToast(`${msg.session}: ${msg.message}`),
   'settings-updated':   (msg) => { if (msg.settings) applyTerminalSettings(msg.settings); },
+  'health-snapshot':    (msg) => { if (msg.stats) applyHealthSnapshot(msg.stats); },
   'shutting-down':      () => {
     disableReconnect();
     connectionEl.dataset.state = 'shutdown';
@@ -302,6 +304,10 @@ function sendFocusState() {
 window.addEventListener('focus', sendFocusState);
 window.addEventListener('blur', sendFocusState);
 document.addEventListener('visibilitychange', sendFocusState);
+
+// ── Health monitor ──────────────────────────────────────────
+
+mountHealthMonitor(document.getElementById('health-footer-mount'));
 
 // ── Boot ─────────────────────────────────────────────────────
 
