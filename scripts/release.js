@@ -81,7 +81,7 @@ if (hasCommand('gh')) {
   console.log('\n==> Creating GitHub release...');
   const changelog = fs.readFileSync('CHANGELOG.md', 'utf8');
   const versionEscaped = VERSION.replaceAll(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`);
-  const pattern = new RegExp(String.raw`^## \[${versionEscaped}\].*$\n([\s\S]*?)(?=^## \[|$)`, 'm');
+  const pattern = new RegExp(String.raw`^## \[${versionEscaped}\].*\r?\n([\s\S]*?)(?=^## \[|$(?![\r\n]))`, 'm');
   const match = changelog.match(pattern);
   const notes = match ? match[1].trim() : `Release ${TAG}`;
 

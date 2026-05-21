@@ -7,9 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-05-21
+
 ### Added
 
-- **Multiple terminals on the same project**: Adding a project that already has a session no longer fails with a duplicate-name error. The Add Session picker now shows every project (with a `(N open)` suffix when sessions already exist) and auto-disambiguates the name as `Foo`, `Foo (2)`, `Foo (3)`, etc. Sessions remain keyed by stable UUID, so each terminal gets its own PTY, recorder, and lifecycle while pointing at the shared `cwd`.
+- **Dormant boot for instant dashboard load**: Sessions now construct in a new `DORMANT` state and no PTY is spawned until the user clicks to expand the chip. Eliminates the wasted CPU/IO of auto-spawning every configured project on launch and keeps dashboard startup constant-time regardless of project count. Newly added/modified config sessions still auto-start.
+- **Auto-kill sessions minimized + sleeping for 15 minutes**: `sleep()` now schedules a 15-minute timer that calls `killSession()` if the session is still asleep, reclaiming the PTY and the `claude.exe` process tree. Previously, minimized sessions kept their PTY and `claude.exe` alive indefinitely (one user observed 6 concurrent `claude.exe` holding ~1.15 GB). Only `IDLE`/`COMPLETE` sessions actually get killed; `DONE`/`FAILED` no-op. Threshold is currently hardcoded.
+- **Health monitor footer**: Collapsible footer panel renders a 10-second backend snapshot of process memory, per-session internals (PTY status, buffer bytes, timer state, listener count), and WebSocket counts, broadcast over the control channel.
+- **Session debug overlay**: New per-card overlay (gated behind a Debug Mode toggle in Settings > Advanced) queries live server-side diagnostics over the control WebSocket: current state, last 5 transitions with trigger details, pattern-detector status (layer, matched line, armed/timer states), and session timers (auto-recover, idle, startup grace, sleep). Live-updates on every state change.
+- **Multiple terminals on the same project**: Adding a project that already has a session no longer fails with a duplicate-name error. The Add Session picker shows every project with a `(N open)` suffix when sessions already exist and auto-disambiguates the name as `Foo`, `Foo (2)`, `Foo (3)`, etc. Sessions remain keyed by stable UUID, so each terminal gets its own PTY, recorder, and lifecycle while sharing the project `cwd`.
+- **Wide-screen minimized card badges**: On screens >=1200px the 240px-wide minimized cards re-enable the Idle/Exited/Complete state badges and YOLO perms badge that were hidden on smaller viewports.
+
+### Changed
+
+- **Quieter minimized cards on narrow viewports**: Minimized cards suppress Idle, Exited, Complete, and YOLO badges to reduce visual noise. Active states (Working, Needs Input, Starting, Preparing, Failed) still display so users know when a session needs attention.
+- **Compact minimized bar layout**: Minimized cards shrunk from 240px to 120px and lost their state/perms badge text on narrow viewports, fitting far more per row. The collapse arrow is repurposed as a state-colored dot (steady green for `RUNNING`, pulsing amber for `WAITING`, dim neutral otherwise). The minimized bar moved from `position: fixed` to in-flow so the terminal grid shrinks to make room rather than being overlapped.
+- **O(1) output buffer eviction**: Per-session output buffer eviction switched from `Array.shift()` to a head-index ring with periodic compaction at 1024 entries.
+
+### Fixed
+
+- **Suppress IDLE/COMPLETE state churn from user-echo PTY data**: PTY echo arriving while the user was mid-typing in `IDLE`/`COMPLETE` was transitioning the session to `RUNNING` and could fire Layer 4 `idle_pending_content` on the user's own typed text. Mid-typing keystrokes within the input grace window are now treated as echo and skip the transition; submissions (any `\r` or `\n`) still promote the session back to `RUNNING`.
+- **Auto-restart sleep-killed sessions on wake**: Sessions auto-killed by the 15-minute sleep timer landed in `DONE` and required a manual Restart click. The kill reason is now tracked and `wake()` drives a restart for sleep-timer kills, so opening the card resumes the session.
+- **Tree-kill PTY process tree on Windows**: Background processes spawned inside Claude Code (e.g. `astro dev`) were surviving session exit because `ptyProcess.kill()` only terminates the `cmd.exe` wrapper. Both `kill()` and natural PTY exit now upfront tree-kill via `taskkill /PID <pid> /T /F`. One user had 19 stale `astro` processes holding ~1.2 GB. POSIX path unchanged.
+- **Terminals undersized on first load until refresh**: Initial fit ran in a single RAF, which fired before layout settled, so the grid measured a 0x0 box and xterm locked at the default 80x24. Switched to double-RAF to match the established `scheduleFitAll` pattern.
+- **Compact bar no longer clips terminal content**: Moving the minimized bar from `position: fixed` to in-flow means `.sessions` (flex: 1) shrinks as the bar grows, so open terminals are never overlapped no matter how many bar rows there are. Also matched `.xterm`/`.xterm-viewport` background to `--bg-card` to hide xterm.js's bundled black default as leftover row-snap pixels.
+- **Debug overlay contained to card with close button**: `.session-card` was missing `position: relative` so the absolutely-positioned overlay anchored to the viewport and covered the screen with no dismiss. Added the anchor and a top-right X close button (existing outside-click handler still closes on click outside the card).
+- **Defensive session lifecycle**: `start()` now force-kills any lingering `ptyProcess` (bounded 2s timeout) before respawn to prevent orphaned `onData`/`onExit` subscriptions. `destroy()` sets `_destroyed` first and start/wake/restart/`forceRestart`/`_handlePtyData`/kill-poll early-return on `_destroyed` so late deliveries cannot resurrect a torn-down session. `forceRestart()` guards against re-entry that would stack `once('exit')` listeners and double-spawn.
+
+### Tests
+
+- Added a node:test suite for `_isUserEchoData` and IDLE/COMPLETE handler behavior covering non-submit, submit, stale, and no-input paths plus the no-arg `recordUserInput()` compatibility used by `dismiss()`.
+- Added `DORMANT` state coverage to the session state machine suite and a new in-process smoke test verifying all sessions boot `DORMANT` and only the targeted one transitions on user start.
 
 ## [0.10.0] - 2026-05-06
 
