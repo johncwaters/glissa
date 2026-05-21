@@ -558,7 +558,7 @@ function createBackend(httpServer, options = {}) {
           return;
         }
         sess.write(msg.data);
-        sess.recordUserInput();
+        sess.recordUserInput(msg.data);
         if (sess.state === STATES.WAITING) {
           sess.transition('user_input');
         }

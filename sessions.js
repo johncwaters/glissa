@@ -204,6 +204,12 @@ const DATA_HANDLERS = {
     session._resetIdleTimer();
   },
   [STATES.IDLE](session, data) {
+    // User-echo guard: PTY data arriving while the user is mid-typing
+    // (no newline submitted, within _inputGraceMs of last keystroke) is the
+    // echo of their input, not Claude resuming work. Skipping the transition
+    // keeps the session in IDLE and avoids arming the idle timer, which would
+    // otherwise fire Layer 4 'idle_pending_content' on the user's typed text.
+    if (session._isUserEchoData()) return;
     session.patternDetector.reset();
     session.transition("new_output");
     // After transitioning to RUNNING, apply a brief grace period so
@@ -215,6 +221,7 @@ const DATA_HANDLERS = {
     }
   },
   [STATES.COMPLETE](session, data) {
+    if (session._isUserEchoData()) return;
     session.patternDetector.reset();
     session.transition("new_output");
     if (session.state === STATES.RUNNING) {
@@ -258,6 +265,7 @@ const ENTRY_HOOKS = {
 const EXIT_HOOKS = {
   [STATES.WAITING](session) {
     session._lastUserInputAt = 0;
+    session._lastInputWasSubmit = false;
     session.emit("attention-cleared", { name: session.name });
     session._clearAutoRecoverTimer();
     session._autoRecoverDataCount = 0;
@@ -312,6 +320,7 @@ class Session extends EventEmitter {
     this._outputBufferSize = 0;
     this._outputBufferMax = replayBufferKB * 1024;
     this._lastUserInputAt = 0;
+    this._lastInputWasSubmit = false;
     this._inputGraceMs = inputGraceSeconds * 1000;
     this._killPollTimer = null;
     this._feedBuffer = "";
@@ -350,8 +359,22 @@ class Session extends EventEmitter {
     this._recorder = recorder;
   }
 
-  recordUserInput() {
+  recordUserInput(data) {
     this._lastUserInputAt = Date.now();
+    if (typeof data === "string") {
+      // Submissions (Enter / Return / pasted text with a newline) should
+      // allow IDLE/COMPLETE -> RUNNING immediately when Claude's response
+      // arrives. Mid-typing keystrokes keep the session in IDLE/COMPLETE
+      // so the echoed characters don't get treated as a Claude-emitted prompt.
+      // Any '\r' or '\n' counts as submit, including bracketed-paste markers.
+      this._lastInputWasSubmit = /[\r\n]/.test(data);
+    }
+  }
+
+  _isUserEchoData() {
+    if (this._lastUserInputAt === 0) return false;
+    if (this._lastInputWasSubmit) return false;
+    return Date.now() - this._lastUserInputAt < this._inputGraceMs;
   }
 
   get pid() {
