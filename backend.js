@@ -514,8 +514,23 @@ function createBackend(httpServer, options = {}) {
 
     const dataListener = (data) => {
       if (ws.readyState !== 1) return;
+      // Fast-path: buffer empty and chunk alone fits — send without rope concat.
+      if (sendBuffer.length === 0 && data.length < MAX_SEND_BUFFER) {
+        if (!sendScheduled) {
+          sendScheduled = true;
+          setImmediate(() => {
+            sendScheduled = false;
+            if (sendBuffer.length > 0 && ws.readyState === 1) {
+              const buf = sendBuffer;
+              sendBuffer = '';
+              ws.send(buf);
+            }
+          });
+        }
+        sendBuffer = data;
+        return;
+      }
       sendBuffer += data;
-      // Flush immediately if buffer exceeds 64KB to prevent oversized WS frames
       if (sendBuffer.length >= MAX_SEND_BUFFER) {
         const buf = sendBuffer;
         sendBuffer = '';

@@ -688,8 +688,10 @@ class Session extends EventEmitter {
       this._outputBufferHead = 0;
     }
 
-    // Always emit raw data for WebSocket broadcasting
-    this.emit("data", data);
+    // Skip emit when no data WS clients are listening to avoid synchronous fan-out cost.
+    if (this.listenerCount("data") > 0) {
+      this.emit("data", data);
+    }
   }
 
   _handlePtyExit(exitCode, signal) {
@@ -1032,6 +1034,11 @@ class Session extends EventEmitter {
 
   // -- Feed debounce (batches PTY data before pattern detection) --
 
+  // How many bytes of the most-recent tail to feed to the pattern detector when
+  // the 64 KB cap fires. State transitions hinge on recent prompt markers, not
+  // middle-burst content, so dropping older bytes here is invisible to the user.
+  static get _CAP_TAIL_BYTES() { return 16384; }
+
   _debounceFeed(data) {
     this._feedBuffer += data;
     // Cap buffer size to prevent unbounded growth during sustained output
@@ -1039,7 +1046,11 @@ class Session extends EventEmitter {
       if (this._feedDebounceTimer !== null)
         clearTimeout(this._feedDebounceTimer);
       this._feedDebounceTimer = null;
-      this._flushFeedBuffer();
+      // Feed only the most-recent tail to keep event-loop block under ~2 ms;
+      // older middle-burst bytes are irrelevant to IDLE/COMPLETE detection.
+      const tail = this._feedBuffer.slice(-Session._CAP_TAIL_BYTES);
+      this._feedBuffer = "";
+      if (!this._startupGraceActive) this.patternDetector.feed(tail);
       return;
     }
     if (this._feedDebounceTimer !== null) {
