@@ -127,6 +127,21 @@ function makeBadge(state) {
   return badge;
 }
 
+// atob returns a binary string; walk the bytes through TextDecoder so
+// non-ASCII payloads survive the OSC 52 round-trip.
+function decodeOsc52Payload(b64) {
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new TextDecoder().decode(bytes);
+}
+
+function reportClipboardFailure(source, err) {
+  const msg = err?.message || String(err);
+  console.error(`[clipboard:${source}]`, err);
+  showErrorToast(`Clipboard ${source} failed: ${msg}`);
+}
+
 function tryLoadWebGL(ui) {
   try {
     if (ui.webglAddon) {
@@ -203,7 +218,9 @@ function connectDataWs(sessionId, ui, term) {
     pendingData += event.data;
     if (flushScheduled || writeRafId !== null) return;
 
-    if (rateLimited) {
+    // Small messages are likely keystroke echoes (1-3 bytes); microtask keeps echo latency low.
+    const isSmallWrite = pendingData.length <= 8;
+    if (rateLimited && !isSmallWrite) {
       writeRafId = requestAnimationFrame(flushViaRaf);
     } else {
       flushScheduled = true;
@@ -886,6 +903,29 @@ function setupTerminal(termWrap, ui) {
   // Try WebGL — fall back to canvas silently
   tryLoadWebGL(ui);
 
+  // OSC 52: programs inside the terminal (e.g. Claude CLI) request the
+  // emulator to write to the system clipboard via \x1b]52;c;<base64>\x07.
+  // xterm.js has no built-in handler, so register one here. Payload format
+  // is "<targets>;<base64>" where targets is "c" (clipboard) or "p"
+  // (primary X11 selection) etc. — we accept any target and write once.
+  term.parser.registerOscHandler(52, (data) => {
+    const semi = data.indexOf(';');
+    if (semi < 0) return true;
+    const payload = data.slice(semi + 1);
+    if (payload === '' || payload === '?') return true; // ignore read queries
+    let text;
+    try {
+      text = decodeOsc52Payload(payload);
+    } catch (err) {
+      reportClipboardFailure('osc52 decode', err);
+      return true;
+    }
+    navigator.clipboard.writeText(text).catch((err) => {
+      reportClipboardFailure('osc52 write', err);
+    });
+    return true;
+  });
+
   // Clipboard: Ctrl+C copies selection; Ctrl+V lets browser paste flow through
   // xterm's paste event → onData (returning false skips xterm's key processing
   // so it won't emit a raw \x16, but the browser paste event still fires)
@@ -893,8 +933,11 @@ function setupTerminal(termWrap, ui) {
     if (ev.type !== 'keydown') return true;
     const ctrl = ev.ctrlKey || ev.metaKey;
     if (ctrl && ev.key === 'c' && term.hasSelection()) {
-      navigator.clipboard.writeText(term.getSelection()).catch(() => {});
+      const selection = term.getSelection();
       term.clearSelection();
+      navigator.clipboard.writeText(selection).catch((err) => {
+        reportClipboardFailure('copy', err);
+      });
       return false;
     }
     if (ctrl && ev.key === 'v') {
