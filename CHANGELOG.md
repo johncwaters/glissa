@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Recognize Claude Code "`· /command`" footer chrome**: Claude's status-bar footer rows (e.g. `1 claude.ai connector needs auth · /mcp`, `MCP server disconnected · /mcp`) were not in any Layer 4 filter, so when one sat as the pending line after a brief IDLE→RUNNING redraw, the idle timer fired `prompt_detected` Layer 4 and the session transitioned to WAITING. A structural regex `/·\s*\/[a-z][a-z0-9_-]*\b/i` now covers the whole `<text> · /<slash-command>` footer family.
+
 ## [0.11.0] - 2026-05-21
 
 ### Added

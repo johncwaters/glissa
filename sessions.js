@@ -71,6 +71,9 @@ const LAYER4_HUD_PATTERNS = [
   /wk:\d+%/, // e.g. "wk:33%"
   /[TS]:\d+/, // HUD task/session counters: "T:42", "S:2"
   /\d+m\s+\d+m/, // Repeated time patterns in garbled HUD: "4m  4m  4m"
+  // Claude Code footer rows of the form '<text> · /<command>'
+  // (e.g., "1 claude.ai connector needs auth · /mcp")
+  /·\s*\/[a-z][a-z0-9_-]*\b/i,
 ];
 
 // Box-drawing characters used in Claude Code's separator/border lines

@@ -576,6 +576,33 @@ async function runAllTests() {
   assert('L4 filter: switched from npm message',
     isLayer4Chrome('Claude Code has switched from npm to native installer. Run `claude install`…'), true);
 
+  // -- Claude Code "· /command" footer chrome --
+  assert('L4 filter: MCP footer "1 claude.ai connector needs auth · /mcp"',
+    isLayer4Chrome('1 claude.ai connector needs auth · /mcp'), true);
+
+  assert('L4 filter: MCP footer "2 claude.ai connectors need auth · /mcp"',
+    isLayer4Chrome('2 claude.ai connectors need auth · /mcp'), true);
+
+  assert('L4 filter: MCP footer "claude.ai connector connected · /mcp"',
+    isLayer4Chrome('claude.ai connector connected · /mcp'), true);
+
+  assert('L4 filter: MCP footer "MCP server disconnected · /mcp"',
+    isLayer4Chrome('MCP server disconnected · /mcp'), true);
+
+  // Regression: a real Layer 1 prompt containing · must NOT be silenced at the
+  // pattern-match level. Even if Layer 4 were to see it, Layers 1/2 fire first
+  // in the normal flow. Assert that PatternDetector.checkLine still returns a
+  // Layer 1 match for the line so the defense-in-depth holds.
+  {
+    const d = makeDetector();
+    let det = null;
+    d.on('prompt-detected', (e) => { det = e; });
+    d.feed('Use which option · (y/n)');
+    await delay(60);
+    assert('L4 regression: "Use which option · (y/n)" fires Layer 1 (not silenced)',
+      det?.layer, 1);
+  }
+
   // True prompts — should NOT be filtered
   assert('L4 pass: real prompt "Enter password:"',
     isLayer4Chrome('Enter password:'), false);
