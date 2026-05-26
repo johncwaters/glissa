@@ -9,7 +9,7 @@ import { connectControl, disableReconnect, onControlMessage, sendControlMsg, sen
 import { createAddSessionDialog, createConfirmDialog, createSettingsDialog } from './dialogs.js';
 import { applyHealthSnapshot, mountHealthMonitor } from './health-monitor.js';
 import {
-  applyState, applyTerminalSettings, createSessionCard, exitMaximizeMode, fitAllVisible, scheduleFitAll,
+  applyState, applyTerminalSettings, createSessionCard, exitMaximizeMode,
   getSessionCount, handleDebugStateRefresh, handleDebugStateResponse, handleSessionsReordered, hasSession, isMaximizeActive,
   reconnectDataWs, removeSessionCard, renameSessionCard, setLayoutMode, showErrorToast, updateAggregateStatus,
 } from './session-card.js';
@@ -172,15 +172,6 @@ onControlMessage((msg) => {
   if (handler) handler(msg);
 });
 
-// ── Window resize: fit all terminals (debounced) ────────────
-
-let resizeTimer = null;
-
-window.addEventListener('resize', () => {
-  clearTimeout(resizeTimer);
-  resizeTimer = setTimeout(() => scheduleFitAll(), 100);
-});
-
 // ── Toolbar buttons ──────────────────────────────────────────
 
 document.getElementById('btn-add-session').addEventListener('click', createAddSessionDialog);
@@ -282,7 +273,6 @@ const sessionsContainer = document.getElementById('sessions-container');
 function applyLayout(layoutId) {
   sessionsContainer.classList.toggle('layout-split', layoutId === 'split');
   setLayoutMode(layoutId);
-  scheduleFitAll();
 }
 
 // Auto-switch layout based on session count: split for exactly 2, default otherwise

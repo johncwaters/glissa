@@ -34,8 +34,8 @@ const minimizedBar = document.getElementById('minimized-bar');
 const aggregateEl = document.getElementById('aggregate-status');
 
 let _maximizedSession = null;
-const _preMaximizeSessions = new Set(); // sessions auto-minimized by maximize
-let _preMaximizeOrder = []; // container order (session ids) before maximize entry
+const _preMaximizeSessions = new Set();
+let _preMaximizeOrder = [];
 
 let _currentLayout = 'default';
 const _preSplitSessions = new Set(); // sessions auto-minimized by split layout
@@ -258,8 +258,11 @@ function connectDataWs(sessionId, ui, term) {
   ws.addEventListener('open', () => {
     // Clear terminal before replay to prevent duplicate content accumulation
     term.clear();
-    const { cols, rows } = term;
-    ws.send(JSON.stringify({ type: 'resize', cols, rows }));
+    // Push the current size to the PTY on every (re)connect so it can't
+    // drift out of sync with the browser after a disconnect. Reset the cache
+    // first so the send isn't skipped when cols/rows match the last value.
+    ui._resetResizeCache?.();
+    ui._applyFit?.();
 
     // Flush any keystrokes queued during disconnect.
     // Delay 50ms to let the server replay buffer arrive first.
@@ -409,7 +412,6 @@ function toggleMinimize(sessionId) {
     container.appendChild(ui.card);
     if (ui.sleeping) wakeSession(sessionId);
     if (ui.needsWebGLReload) tryLoadWebGL(ui);
-    requestAnimationFrame(() => { if (ui.fitAddon) ui.fitAddon.fit(); });
   }
   setMinimized(sessionId, nowMinimized);
 }
@@ -436,9 +438,6 @@ function _applyExpandState(id, ui) {
   ui.btnMinimize.setAttribute('aria-label', 'Collapse');
   setMinimized(id, false);
   if (ui.needsWebGLReload) tryLoadWebGL(ui);
-  requestAnimationFrame(() => {
-    if (ui.fitAddon) ui.fitAddon.fit();
-  });
 }
 
 function _performExpand(id, ui) {
@@ -518,11 +517,14 @@ function _applyMaximized(ui, sessionId) {
   // Strip one-shot flourish class after it plays — keeps .maximized free of
   // animation property so continuous states (e.g. waiting-pulse) can resume.
   _onOneShotAnim(ui.card, 'maximize-in', () => ui.card.classList.remove('entering'));
-  ui.btnMaximize.textContent = '\u2716';
-  ui.btnMaximize.title = 'Exit full screen mode';
-  ui.btnMaximize.setAttribute('aria-label', 'Exit full screen');
+  _setMaximizeButton(ui, true);
   _maximizedSession = sessionId;
-  requestAnimationFrame(() => ui.fitAddon.fit());
+}
+
+function _setMaximizeButton(ui, maximized) {
+  ui.btnMaximize.textContent = maximized ? '\u2716' : '\u26f6';
+  ui.btnMaximize.title = maximized ? 'Exit full screen mode' : 'Enter full screen';
+  ui.btnMaximize.setAttribute('aria-label', maximized ? 'Exit full screen' : 'Enter full screen');
 }
 
 function _swapMaximized(sessionId) {
@@ -532,9 +534,7 @@ function _swapMaximized(sessionId) {
 
   if (oldUi && !oldUi.card.classList.contains('minimized')) {
     oldUi.card.classList.remove('maximized');
-    oldUi.btnMaximize.textContent = '\u26F6';
-    oldUi.btnMaximize.title = 'Enter full screen';
-    oldUi.btnMaximize.setAttribute('aria-label', 'Enter full screen');
+    _setMaximizeButton(oldUi, false);
     _performMinimize(_maximizedSession, oldUi);
     _preMaximizeSessions.add(_maximizedSession);
   }
@@ -586,19 +586,14 @@ export function exitMaximizeMode() {
   const ui = sessionUIs.get(_maximizedSession);
   if (ui) {
     ui.card.classList.remove('maximized');
-    ui.btnMaximize.textContent = '\u26F6';
-    ui.btnMaximize.title = 'Enter full screen';
-    ui.btnMaximize.setAttribute('aria-label', 'Enter full screen');
+    _setMaximizeButton(ui, false);
   }
   _maximizedSession = null;
 
-  // Restore all auto-minimized sessions
   for (const id of _preMaximizeSessions) {
     const otherUi = sessionUIs.get(id);
     if (otherUi?.card.classList.contains('minimized')) {
       _performExpand(id, otherUi);
-      // One-shot entry flourish — matches by animation-name so other
-      // animations (completion-flash, waiting-pulse) don't cancel it early.
       otherUi.card.classList.add('restoring');
       _onOneShotAnim(otherUi.card, 'maximize-restore', () =>
         otherUi.card.classList.remove('restoring'),
@@ -607,8 +602,6 @@ export function exitMaximizeMode() {
   }
   _preMaximizeSessions.clear();
 
-  // Restore original container order — appendChild in snapshot order
-  // moves each card to the end in sequence, preserving pre-maximize layout.
   for (const id of _preMaximizeOrder) {
     const otherUi = sessionUIs.get(id);
     if (otherUi && otherUi.card.parentElement === container) {
@@ -616,9 +609,6 @@ export function exitMaximizeMode() {
     }
   }
   _preMaximizeOrder = [];
-
-  // Refit all visible terminals
-  scheduleFitAll();
 }
 
 export function isMaximizeActive() {
@@ -866,7 +856,6 @@ function setupDragAndDrop(card, header, btnMinimize, sessionId) {
     hideDropZone();
     _dragSource = null;
     invalidateDragRects();
-    scheduleFitAll();
   });
 }
 
@@ -891,14 +880,47 @@ function setupTerminal(termWrap, ui) {
   ui.webglAddon = null;
   ui.needsWebGLReload = false;
 
-  // Auto-refit terminal when its container resizes (layout switches, window resize)
+  // termWrap size → fit → push resize to PTY. RAF-coalesces burst fires
+  // (window drag, maximize transition). The explicit send below the fit
+  // covers the case where fit() proposes the same cols/rows xterm already
+  // has (no onResize event) but the PTY hasn't caught up yet — most often
+  // on first connect, where term starts at the default 80x24.
+  let fitRafId = null;
+  let lastSentCols = 0;
+  let lastSentRows = 0;
+  function applyFit() {
+    fitRafId = null;
+    if (!ui.fitAddon || !ui.term) return;
+    if (ui.card.classList.contains('minimized')) return;
+    ui.fitAddon.fit();
+    const { cols, rows } = ui.term;
+    if (cols === lastSentCols && rows === lastSentRows) return;
+    if (ui.dataWs?.readyState !== WebSocket.OPEN) return;
+    ui.dataWs.send(JSON.stringify({ type: 'resize', cols, rows }));
+    lastSentCols = cols;
+    lastSentRows = rows;
+  }
   const resizeObserver = new ResizeObserver(() => {
-    if (!ui.card.classList.contains('minimized')) {
-      fitAddon.fit();
-    }
+    if (fitRafId !== null) return;
+    fitRafId = requestAnimationFrame(applyFit);
   });
   resizeObserver.observe(termWrap);
   ui.resizeObserver = resizeObserver;
+  ui._applyFit = applyFit;
+  // Reset the lastSent cache so the next _applyFit unconditionally pushes —
+  // used on data-WS (re)connect, where the server-side PTY may have just
+  // respawned and needs the current size even if the browser-side cols/rows
+  // haven't changed.
+  ui._resetResizeCache = () => { lastSentCols = 0; lastSentRows = 0; };
+
+  // First-render fit: xterm's FitAddon silently no-ops if it's called before
+  // the renderer has measured a cell, so the initial ResizeObserver fire can
+  // leave the terminal stuck at the default 80×24. Re-fit once on first
+  // render when the cell dimensions are guaranteed to be measurable.
+  const firstRender = term.onRender(() => {
+    firstRender.dispose();
+    applyFit();
+  });
 
   // Try WebGL — fall back to canvas silently
   tryLoadWebGL(ui);
@@ -955,14 +977,6 @@ function setupTerminal(termWrap, ui) {
     return true;
   });
 
-  // Double-RAF: first frame lets grid/flex layout settle after .app-ready
-  // flips .app-shell from display:none to display:contents, second frame
-  // measures the now-correct terminal-wrap dimensions. Single RAF fires
-  // before layout completes in the same task, sizing the grid to the
-  // pre-reveal 0×0 box.
-  requestAnimationFrame(() => requestAnimationFrame(() => {
-    if (ui.fitAddon) ui.fitAddon.fit();
-  }));
 }
 
 // ── Card event wiring ────────────────────────────────────────
@@ -1203,11 +1217,9 @@ function wireTerminalIO(ui, sessionId) {
     }
   });
 
-  ui.term.onResize(({ cols, rows }) => {
-    if (ui.dataWs?.readyState === WebSocket.OPEN) {
-      ui.dataWs.send(JSON.stringify({ type: 'resize', cols, rows }));
-    }
-  });
+  // Note: term.onResize is intentionally not wired — the ResizeObserver
+  // path in setupTerminal owns all "fit and notify server" duties via
+  // ui._applyFit, which both fits and pushes cols/rows to the PTY.
 
   connectDataWs(sessionId, ui, ui.term);
 }
@@ -1297,27 +1309,6 @@ export function handleDebugStateRefresh(sessionId) {
   const ui = sessionUIs.get(sessionId);
   if (!ui || !ui.debugOpen) return;
   sendControlMsg({ type: 'debug-state', id: sessionId });
-}
-
-let _fitRafId = null;
-
-export function fitAllVisible() {
-  for (const [, ui] of sessionUIs) {
-    if (!ui.card.classList.contains('minimized') && ui.fitAddon) {
-      ui.fitAddon.fit();
-    }
-  }
-}
-
-export function scheduleFitAll() {
-  if (_fitRafId !== null) cancelAnimationFrame(_fitRafId);
-  // Double-RAF: first frame lets grid/flex layout settle, second frame measures
-  _fitRafId = requestAnimationFrame(() => {
-    _fitRafId = requestAnimationFrame(() => {
-      _fitRafId = null;
-      fitAllVisible();
-    });
-  });
 }
 
 export function updateAggregateStatus() {
@@ -1582,7 +1573,6 @@ export function handleSessionsReordered(order) {
       tryLoadWebGL(ui);
     }
   }
-  scheduleFitAll();
 }
 
 export function showErrorToast(message) {
