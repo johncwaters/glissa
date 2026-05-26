@@ -888,12 +888,23 @@ function setupTerminal(termWrap, ui) {
   let fitRafId = null;
   let lastSentCols = 0;
   let lastSentRows = 0;
+  let lastFittedCols = 0;
+  let lastFittedRows = 0;
   function applyFit() {
     fitRafId = null;
     if (!ui.fitAddon || !ui.term) return;
     if (ui.card.classList.contains('minimized')) return;
     ui.fitAddon.fit();
     const { cols, rows } = ui.term;
+    // When the buffer reflows after a dimension change, the WebGL renderer
+    // can leave stale glyphs in cells that shifted (visible as ghost text
+    // fragments at the left edge after window resize). clearTextureAtlas
+    // invalidates the cached glyph atlas and triggers a full redraw.
+    if (cols !== lastFittedCols || rows !== lastFittedRows) {
+      ui.webglAddon?.clearTextureAtlas?.();
+      lastFittedCols = cols;
+      lastFittedRows = rows;
+    }
     if (cols === lastSentCols && rows === lastSentRows) return;
     if (ui.dataWs?.readyState !== WebSocket.OPEN) return;
     ui.dataWs.send(JSON.stringify({ type: 'resize', cols, rows }));
@@ -924,6 +935,18 @@ function setupTerminal(termWrap, ui) {
 
   // Try WebGL — fall back to canvas silently
   tryLoadWebGL(ui);
+
+  // Redraw all visible rows on scroll. RAF-coalesced so a burst of wheel
+  // events still costs one refresh per frame.
+  let scrollRafId = null;
+  term.onScroll(() => {
+    if (scrollRafId !== null) return;
+    scrollRafId = requestAnimationFrame(() => {
+      scrollRafId = null;
+      if (!ui.term) return;
+      ui.term.refresh(0, ui.term.rows - 1);
+    });
+  });
 
   // OSC 52: programs inside the terminal (e.g. Claude CLI) request the
   // emulator to write to the system clipboard via \x1b]52;c;<base64>\x07.
