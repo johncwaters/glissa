@@ -13,6 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Recognize Claude Code "`· /command`" footer chrome**: Claude's status-bar footer rows (e.g. `1 claude.ai connector needs auth · /mcp`, `MCP server disconnected · /mcp`) were not in any Layer 4 filter, so when one sat as the pending line after a brief IDLE→RUNNING redraw, the idle timer fired `prompt_detected` Layer 4 and the session transitioned to WAITING. A structural regex `/·\s*\/[a-z][a-z0-9_-]*\b/i` now covers the whole `<text> · /<slash-command>` footer family.
 
+- **OSC 52 clipboard writes from inside the terminal**: xterm.js drops the OSC 52 sequence by default, so every `\x1b]52;c;<base64>\x07` write from programs like Claude CLI was a silent no-op. Registered an OSC 52 parser handler that decodes the base64 payload and writes to the system clipboard via the Clipboard API. Also replaced the silent `.catch(() => {})` on the Ctrl+C copy path with `reportClipboardFailure`, which logs to console and raises a toast so Clipboard API rejections stop disappearing.
+
+### Performance
+
+- **Trim hot paths in PTY broadcast and pattern feed**: `backend.js` per-client `dataListener` now has a fast-path that skips the rope concat when the send buffer is empty and the chunk fits, letting the scheduled `setImmediate` flush the assigned chunk directly instead of paying string-build overhead on the common single-chunk case. `sessions.js` skips `emit("data")` when no listeners are subscribed (sessions with no attached WS clients no longer pay the EventEmitter fan-out cost), and caps the pattern-detector feed to the trailing 16 KB when the 64 KB buffer fires. IDLE/COMPLETE markers always render in the recent tail, and the older middle-burst bytes were costing ~2 ms of event-loop block per flush.
+
 ## [0.11.0] - 2026-05-21
 
 ### Added
