@@ -257,7 +257,6 @@ export function createSettingsDialog() {
   const cursorBlinkCheckbox = dialog.querySelector('#settings-cursor-blink');
   const noFlickerCheckbox = dialog.querySelector('#settings-no-flicker');
   const noFlickerWarning = dialog.querySelector('#settings-noflicker-warning');
-  const feedDebounceInput = dialog.querySelector('#settings-feed-debounce');
   const debugModeCheckbox = dialog.querySelector('#settings-debug-mode');
   const soundSelect = dialog.querySelector('#settings-sound');
   const themeSelect = dialog.querySelector('#settings-theme');
@@ -360,7 +359,7 @@ export function createSettingsDialog() {
 
   function validateTimeouts() {
     timeoutErrorEl.textContent = '';
-    for (const input of [attentionInput, escalationInput, watchdogInput, scrollbackInput, replayBufferInput, feedDebounceInput]) {
+    for (const input of [attentionInput, escalationInput, watchdogInput, scrollbackInput, replayBufferInput]) {
       const v = Number(input.value);
       if (!input.value || Number.isNaN(v) || v <= 0 || !Number.isInteger(v)) {
         timeoutErrorEl.textContent = 'All numeric fields must be positive integers';
@@ -382,7 +381,6 @@ export function createSettingsDialog() {
       replayBufferKB: Number(replayBufferInput.value),
       cursorBlink: cursorBlinkCheckbox.checked,
       noFlicker: noFlickerCheckbox.checked,
-      feedDebounceMs: Number(feedDebounceInput.value),
       debugMode: debugModeCheckbox.checked,
       repoRoots: repoRoots,
     };
@@ -412,7 +410,6 @@ export function createSettingsDialog() {
       cursorBlinkCheckbox.checked = !!s.cursorBlink;
       noFlickerCheckbox.checked = s.noFlicker ?? true;
       initialNoFlicker = noFlickerCheckbox.checked;
-      feedDebounceInput.value = s.feedDebounceMs ?? 50;
       debugModeCheckbox.checked = !!s.debugMode;
       repoRoots = Array.isArray(s.repoRoots) ? [...s.repoRoots] : [];
       renderRootList();

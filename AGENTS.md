@@ -281,7 +281,6 @@ See `docs/testing-cli.md` for comprehensive manual test scenarios.
 | Notification state/logic | `notification-manager.js` (NotificationManager) | `shared/notification-states.js`, `channels/` |
 | Debug state transitions | `sessions.js` (transition guards) | GUARDS object, entry/exit hooks |
 | Hot-reload config | `config-store.js` | watchForChanges, save, load |
-| Tune auto-recovery | `sessions.js` (_resetAutoRecoverTimer) | autoRecoverSeconds, data chunk counting |
 | Change settings UI | `public/dialogs.js` | createSettingsDialog, sendControlRequest |
 | Add/modify themes | `public/theme.js` | THEMES object, terminal color mapping, CSS variable names |
 | CLI flags/options | `bin/glissa.js` | arg parsing, env bridge |
