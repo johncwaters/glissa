@@ -1,0 +1,197 @@
+'use strict';
+
+// OSC-0 title source — the DEGRADED fallback status signal.
+//
+// Claude Code emits an activity glyph as the first char of its OSC-0 title:
+//   - braille family U+2800..U+28FF  => spinner ("working")
+//   - a known idle glyph (e.g. U+2733 EIGHT SPOKED ASTERISK) => idle/ready
+// See docs/postmortem-terminal-detection.md and .omc/probes/common-patterns.md.
+//
+// CONTRACT (honest fallback): this source emits ONLY `working` / `ready` / `unknown`.
+// It NEVER emits `awaiting-input` — the title cannot authoritatively tell "needs input"
+// from "finished". WAITING is the hook source's job. An unrecognized leading glyph is
+// reported as `unknown` (with a one-time warning), never silently treated as `ready`.
+
+const { EventEmitter } = require('node:events');
+
+const DEFAULT_STABILIZATION_MS = 1500;
+const BRAILLE_MIN = 0x2800;
+const BRAILLE_MAX = 0x28ff;
+
+// Known idle glyphs (extend as Step-0 probe confirms per Claude version).
+// U+2733 ✳ is the documented-by-observation idle glyph.
+const KNOWN_IDLE_CODEPOINTS = new Set([0x2733]);
+
+const OSC_START = '\x1b]0;';
+const BEL = '\x07';
+const ST = '\x1b\\';
+
+function isBrailleChar(char) {
+  if (!char) return false;
+  const code = char.codePointAt(0);
+  return code >= BRAILLE_MIN && code <= BRAILLE_MAX;
+}
+
+function isKnownIdleChar(char) {
+  if (!char) return false;
+  return KNOWN_IDLE_CODEPOINTS.has(char.codePointAt(0));
+}
+
+// Locate the next OSC-0 title in `buffer` at/after `fromIndex`.
+// Returns { start, end, next, title } or null when no complete title is present.
+function findOscTitle(buffer, fromIndex) {
+  const start = buffer.indexOf(OSC_START, fromIndex);
+  if (start === -1) return null;
+  const contentStart = start + OSC_START.length;
+  const belEnd = buffer.indexOf(BEL, contentStart);
+  const stEnd = buffer.indexOf(ST, contentStart);
+  let end;
+  let termLen;
+  if (belEnd === -1 && stEnd === -1) return null;
+  if (belEnd !== -1 && (stEnd === -1 || belEnd < stEnd)) {
+    end = belEnd;
+    termLen = 1;
+  } else {
+    end = stEnd;
+    termLen = 2;
+  }
+  return { start, end, next: end + termLen, title: buffer.slice(contentStart, end) };
+}
+
+class OscTitleSource extends EventEmitter {
+  constructor({ stabilizationMs = DEFAULT_STABILIZATION_MS } = {}) {
+    super();
+    this._stabilizationMs = stabilizationMs;
+    this._hasSeenSpinner = false;
+    this._lastKind = null; // 'working' | 'idle-pending' | 'ready' | 'unknown' | null
+    this._lastChar = null;
+    this._stabilizationTimer = null;
+    this._pending = '';
+    this._warnedUnknown = false;
+    this._destroyed = false;
+  }
+
+  feed(chunk) {
+    if (this._destroyed || !chunk) return;
+    this._pending += chunk;
+    if (this._pending.length > 8192) this._pending = this._pending.slice(-4096);
+
+    let cursor = 0;
+    while (true) {
+      const osc = findOscTitle(this._pending, cursor);
+      if (!osc) break;
+      this._processTitle(osc.title);
+      cursor = osc.next;
+    }
+    if (cursor > 0) this._pending = this._pending.slice(cursor);
+  }
+
+  _processTitle(title) {
+    const trimmed = title.replace(/^[\s\x00-\x1f]+/, '');
+    if (!trimmed) return; // cleared/empty title — ignore
+    const char = String.fromCodePoint(trimmed.codePointAt(0));
+
+    if (isBrailleChar(char)) {
+      this._hasSeenSpinner = true;
+      this._lastChar = char;
+      this._clearStabilization();
+      if (this._lastKind !== 'working') {
+        this._lastKind = 'working';
+        this._emit('working', char);
+      }
+      return;
+    }
+
+    if (isKnownIdleChar(char)) {
+      this._lastChar = char;
+      // Only arm `ready` after we have actually seen the session work. A session
+      // that opens directly on the idle glyph (never spun) must not report ready.
+      if (this._hasSeenSpinner && this._lastKind !== 'ready') {
+        this._lastKind = 'idle-pending';
+        this._armStabilization(char);
+      }
+      return;
+    }
+
+    // Unrecognized leading glyph — NEVER treat as ready. Report once.
+    this._lastChar = char;
+    if (this._lastKind !== 'unknown') {
+      this._lastKind = 'unknown';
+      this._clearStabilization();
+      if (!this._warnedUnknown) {
+        this._warnedUnknown = true;
+        console.warn(
+          `[osc-title-source] unknown leading title glyph U+${char.codePointAt(0).toString(16)} ` +
+            `(${JSON.stringify(char)}) — treating as 'unknown', not 'ready'. ` +
+            `If this is a new idle glyph, add it to KNOWN_IDLE_CODEPOINTS.`,
+        );
+      }
+      this._emit('unknown', char);
+    }
+  }
+
+  _armStabilization(char) {
+    this._clearStabilization();
+    this._stabilizationTimer = setTimeout(() => {
+      this._stabilizationTimer = null;
+      if (this._destroyed) return;
+      if (this._lastKind !== 'idle-pending') return; // a spinner re-armed since
+      this._lastKind = 'ready';
+      this._emit('ready', char);
+    }, this._stabilizationMs);
+  }
+
+  _emit(signal, char) {
+    this.emit('signal', {
+      signal,
+      char,
+      codepoint: char ? char.codePointAt(0) : null,
+      ts: Date.now(),
+      source: 'title',
+    });
+  }
+
+  _clearStabilization() {
+    if (this._stabilizationTimer !== null) {
+      clearTimeout(this._stabilizationTimer);
+      this._stabilizationTimer = null;
+    }
+  }
+
+  reset() {
+    if (this._destroyed) return;
+    this._hasSeenSpinner = false;
+    this._lastKind = null;
+    this._lastChar = null;
+    this._pending = '';
+    this._clearStabilization();
+  }
+
+  destroy() {
+    this._destroyed = true;
+    this._clearStabilization();
+    this._pending = '';
+    this.removeAllListeners();
+  }
+
+  getState() {
+    return {
+      hasSeenSpinner: this._hasSeenSpinner,
+      lastKind: this._lastKind,
+      lastChar: this._lastChar,
+    };
+  }
+}
+
+function createOscTitleSource(opts) {
+  return new OscTitleSource(opts);
+}
+
+module.exports = {
+  OscTitleSource,
+  createOscTitleSource,
+  isBrailleChar,
+  isKnownIdleChar,
+  findOscTitle,
+  KNOWN_IDLE_CODEPOINTS,
+};

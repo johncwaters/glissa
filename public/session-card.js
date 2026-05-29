@@ -1086,33 +1086,22 @@ function renderDebugOverlay(ui, payload) {
     html += `<div class="debug-field debug-dim">No transitions recorded</div>`;
   } else {
     for (const t of p.transitions) {
-      const detail = t.detail ? ` <span class="debug-dim">${typeof t.detail === 'object' ? (t.detail.layer ? `L${t.detail.layer}` : '') : ''}</span>` : '';
-      html += `<div class="debug-field"><span class="debug-dim">${formatTimestamp(t.timestamp)}</span> ${escapeHtml(t.from)} → ${escapeHtml(t.to)} <span class="debug-label">${escapeHtml(t.event)}</span>${detail}</div>`;
+      const d = t.detail && typeof t.detail === 'object' ? t.detail : null;
+      const tag = d && (d.signal || d.source) ? ` <span class="debug-dim">${escapeHtml([d.signal, d.source].filter(Boolean).join('/'))}</span>` : '';
+      html += `<div class="debug-field"><span class="debug-dim">${formatTimestamp(t.timestamp)}</span> ${escapeHtml(t.from)} → ${escapeHtml(t.to)} <span class="debug-label">${escapeHtml(t.event)}</span>${tag}</div>`;
     }
   }
   html += `</div>`;
 
-  // Pattern detector
-  const pd = p.patternDetector;
-  html += `<div class="debug-section"><div class="debug-section-title">Pattern Detector</div>`;
-  html += `<div class="debug-field"><span class="debug-label">Last layer:</span> <span class="debug-value">${pd.lastLayer ?? 'none'}</span></div>`;
-  html += `<div class="debug-field"><span class="debug-label">Last match:</span> <span class="debug-value debug-mono">${pd.lastMatchedLine ? escapeHtml(truncate(pd.lastMatchedLine, 60)) : 'none'}</span></div>`;
-  html += `<div class="debug-field"><span class="debug-label">Armed:</span> <span class="debug-value">${pd.armed ? `L${pd.armed.layer}` : 'no'}</span></div>`;
-  html += `<div class="debug-field"><span class="debug-label">Confirm timer:</span> <span class="debug-value">${pd.confirmTimerActive ? 'active' : 'off'}</span></div>`;
-  html += `<div class="debug-field"><span class="debug-label">Silence timer:</span> <span class="debug-value">${pd.silenceTimerActive ? 'active' : 'off'}</span></div>`;
-  if (pd.pendingLine) {
-    html += `<div class="debug-field"><span class="debug-label">Pending:</span> <span class="debug-value debug-mono">${escapeHtml(truncate(pd.pendingLine, 60))}</span></div>`;
-  }
-  html += `</div>`;
-
-  // Timers
-  const tm = p.timers;
-  html += `<div class="debug-section"><div class="debug-section-title">Timers</div>`;
-  html += `<div class="debug-field"><span class="debug-label">Auto-recover count:</span> <span class="debug-value">${tm.autoRecoverDataCount}</span></div>`;
-  html += `<div class="debug-field"><span class="debug-label">Auto-recover timer:</span> <span class="debug-value">${tm.autoRecoverTimerActive ? 'active' : 'off'}</span></div>`;
-  html += `<div class="debug-field"><span class="debug-label">Idle timer:</span> <span class="debug-value">${tm.idleTimerActive ? 'active' : 'off'}</span></div>`;
-  html += `<div class="debug-field"><span class="debug-label">Startup grace:</span> <span class="debug-value">${tm.startupGraceActive ? 'active' : 'off'}</span></div>`;
-  html += `<div class="debug-field"><span class="debug-label">Sleeping:</span> <span class="debug-value">${tm.sleeping ? 'yes' : 'no'}</span></div>`;
+  // Detection (structural signals)
+  const det = p.detection || {};
+  const ls = det.lastSignal;
+  const ts = det.titleState || {};
+  html += `<div class="debug-section"><div class="debug-section-title">Detection</div>`;
+  html += `<div class="debug-field"><span class="debug-label">Last signal:</span> <span class="debug-value">${ls ? `${escapeHtml(ls.signal)} (${escapeHtml(ls.source || '?')}${ls.confidence ? '/' + escapeHtml(ls.confidence) : ''})` : 'none'}</span></div>`;
+  html += `<div class="debug-field"><span class="debug-label">Hooks injected:</span> <span class="debug-value">${det.hooksInjected ? 'yes' : 'no'}</span></div>`;
+  html += `<div class="debug-field"><span class="debug-label">Hook seen:</span> <span class="debug-value">${det.hookSeen ? 'yes' : 'no (degraded → title)'}</span></div>`;
+  html += `<div class="debug-field"><span class="debug-label">Title state:</span> <span class="debug-value">${escapeHtml(ts.lastKind || 'none')}${ts.hasSeenSpinner ? ' · spun' : ''}</span></div>`;
   html += `</div>`;
 
   ui.debugOverlay.innerHTML = html;

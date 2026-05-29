@@ -2,8 +2,10 @@ const fs = require("node:fs");
 const pty = require("node-pty");
 const { EventEmitter } = require("node:events");
 const { execSync } = require("node:child_process");
-const { PatternDetector } = require("./patterns");
 const { STATES } = require("./shared/states");
+const { createOscTitleSource } = require("./detection/osc-title-source");
+const { createStatusSource } = require("./detection/status-source");
+const { writeSessionSettings } = require("./detection/settings-injector");
 
 const KILL_POLL_INTERVAL_MS = 200;
 const KILL_MAX_WAIT_MS = 3000;
@@ -37,92 +39,11 @@ const SLEEP_KILL_TIMEOUT_MS = 15 * 60 * 1000;
 })();
 
 // ---------------------------------------------------------------------------
-// Layer 4 filters — pending content that looks like UI chrome, not a prompt.
-// These fire only from the idle-timer safety net (idle_pending_content).
+// State machine. Status is driven by structural signals from StatusSource
+// (Claude Code hooks = authoritative; OSC-0 title = degraded fallback), mapped
+// to transitions in _onStatus per the signal x state matrix. There is NO
+// screen-content parsing and NO detection timer here.
 // ---------------------------------------------------------------------------
-
-const LAYER4_CHROME_STRINGS = [
-  "⏵⏵", // Claude Code "accept edits" hint
-  "accept edits",
-  "shift+tab to cycle",
-  "Pasting text",
-  "Hyperspacing",
-  "Galloping", // Claude Code animated spinner phase
-  "Brewed for", // Claude Code completion summary
-  "/effort", // effort indicator (e.g. "◐ medium · /effort")
-  "[OMC#", // OMC HUD status line
-  "Auto-update failed", // Claude Code auto-update status bar message
-  "Auto-updating", // Claude Code auto-update in progress
-  "claude doctor", // Auto-update failure hint text
-  "switched from npm to native", // Claude Code installer migration notice
-  "claude install", // Installer migration hint
-  "Bypass Permissions", // Claude Code bypass-permissions mode warning
-  "[Pasted text", // Pasted text indicator (e.g. "[Pasted text #4 +165 lines]")
-  "l:cancel", // OMC cancel hint fragment in garbled redraws
-  "-+-", // Companion cactus ASCII art (trunk pattern in garbled redraws)
-];
-
-const LAYER4_SPINNER = /[◐◑◒◓⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏✻✢✶✽]/;
-
-// OMC HUD fragments that survive ANSI stripping in garbled redraws
-const LAYER4_HUD_PATTERNS = [
-  /session:\d+m/, // e.g. "session:0m", "session:5m"
-  /ctx:\d+%/, // e.g. "ctx:0%", "ctx:42%"
-  /wk:\d+%/, // e.g. "wk:33%"
-  /[TS]:\d+/, // HUD task/session counters: "T:42", "S:2"
-  /\d+m\s+\d+m/, // Repeated time patterns in garbled HUD: "4m  4m  4m"
-  // Claude Code footer rows of the form '<text> · /<command>'
-  // (e.g., "1 claude.ai connector needs auth · /mcp")
-  /·\s*\/[a-z][a-z0-9_-]*\b/i,
-];
-
-// Box-drawing characters used in Claude Code's separator/border lines
-const BOX_DRAWING = /[─│┌┐└┘├┤┬┴┼╭╮╯╰━]/g;
-
-function isLayer4Chrome(line) {
-  // Known chrome substrings
-  if (LAYER4_CHROME_STRINGS.some((s) => line.includes(s))) return true;
-
-  // Spinner characters anywhere in the line
-  if (LAYER4_SPINNER.test(line)) return true;
-
-  // OMC HUD fragments in garbled redraws
-  if (LAYER4_HUD_PATTERNS.some((re) => re.test(line))) return true;
-
-  const nonWs = line.replace(/\s/g, "");
-
-  // Very short fragments — garbled redraws, not real prompts.
-  // Real prompts caught by Layer 4 need at least a few characters
-  // (e.g. "Enter password:"). Single digits/letters are noise.
-  if (nonWs.length < 4) return true;
-
-  // Line is mostly box-drawing characters (>50% of non-whitespace)
-  if (nonWs.length > 0) {
-    const boxCount = (nonWs.match(BOX_DRAWING) || []).length;
-    if (boxCount / nonWs.length > 0.5) return true;
-  }
-
-  // Garbled screen redraw: very little non-whitespace content spread across a long line
-  // e.g. "7                                      5"
-  if (line.length > 20 && nonWs.length < 10) return true;
-
-  // Wide-spaced user typing: PTY echoes keystrokes as individual characters
-  // separated by spaces. Pattern: "T h o s e   t h r e e   t h i n g s ."
-  const words = line.trim().split(/\s+/);
-  if (words.length >= 4) {
-    const singleCharCount = words.filter((w) => w.length === 1).length;
-    if (singleCharCount / words.length > 0.6) return true;
-  }
-
-  // URLs — informational output, not prompts
-  if (/https?:\/\//.test(line)) return true;
-
-  // Task checkbox rendering (Claude Code task display) — multiple checkboxes
-  // in one line indicate a task list, not a prompt waiting for input
-  if ((line.match(/[✔◼◻✓✗☐☑]/g) || []).length >= 2) return true;
-
-  return false;
-}
 
 const TRANSITIONS = Object.freeze({
   [STATES.DORMANT]: {
@@ -139,7 +60,6 @@ const TRANSITIONS = Object.freeze({
   },
   [STATES.RUNNING]: {
     prompt_detected: STATES.WAITING,
-    silence_timeout: STATES.IDLE,
     task_complete: STATES.COMPLETE,
     process_exit_ok: STATES.DONE,
     process_exit_fail: STATES.FAILED,
@@ -148,7 +68,8 @@ const TRANSITIONS = Object.freeze({
   [STATES.WAITING]: {
     user_input: STATES.RUNNING,
     user_dismiss: STATES.RUNNING,
-    auto_recover: STATES.RUNNING,
+    // Authoritative late `ready` (Stop/idle hook) while WAITING -> COMPLETE.
+    task_complete: STATES.COMPLETE,
     user_kill: STATES.DONE,
     process_exit_ok: STATES.DONE,
     process_exit_fail: STATES.FAILED,
@@ -156,6 +77,8 @@ const TRANSITIONS = Object.freeze({
   [STATES.IDLE]: {
     new_output: STATES.RUNNING,
     prompt_detected: STATES.WAITING,
+    // Authoritative late `ready` while IDLE -> COMPLETE.
+    task_complete: STATES.COMPLETE,
     process_exit_ok: STATES.DONE,
     process_exit_fail: STATES.FAILED,
     user_kill: STATES.DONE,
@@ -185,74 +108,15 @@ const GUARDS = {
   user_restart(session) {
     return session.state === STATES.DONE || session.state === STATES.FAILED;
   },
-  prompt_detected(session) {
-    if (session._lastUserInputAt === 0) return true;
-    const elapsed = Date.now() - session._lastUserInputAt;
-    if (elapsed < session._inputGraceMs) {
-      // Re-arm Layer 3 silence timer so it re-fires after silence timeout.
-      // Do NOT call reset() — that clears _pendingLine and kills re-detection.
-      session.patternDetector.rearmSilenceTimer();
-      return false;
-    }
-    return true;
-  },
-};
-
-// Data handlers keyed by state — dispatched on each PTY data event
-const DATA_HANDLERS = {
-  [STATES.RUNNING](session, data) {
-    if (!session._startupGraceActive) {
-      session._debounceFeed(data);
-    }
-    session._resetIdleTimer();
-  },
-  [STATES.IDLE](session, data) {
-    // User-echo guard: PTY data arriving while the user is mid-typing
-    // (no newline submitted, within _inputGraceMs of last keystroke) is the
-    // echo of their input, not Claude resuming work. Skipping the transition
-    // keeps the session in IDLE and avoids arming the idle timer, which would
-    // otherwise fire Layer 4 'idle_pending_content' on the user's typed text.
-    if (session._isUserEchoData()) return;
-    session.patternDetector.reset();
-    session.transition("new_output");
-    // After transitioning to RUNNING, apply a brief grace period so
-    // resize-triggered redraws (e.g. browser connect) don't immediately
-    // match Claude's idle prompt as "needs input".
-    if (session.state === STATES.RUNNING) {
-      session._startStartupGrace(3000);
-      session._resetIdleTimer();
-    }
-  },
-  [STATES.COMPLETE](session, data) {
-    if (session._isUserEchoData()) return;
-    session.patternDetector.reset();
-    session.transition("new_output");
-    if (session.state === STATES.RUNNING) {
-      session._startStartupGrace(3000);
-      session._resetIdleTimer();
-    }
-  },
-  [STATES.WAITING](session) {
-    // Auto-recovery: continued PTY output suggests false positive.
-    // Require >= 2 data events before auto-recovering.
-    session._autoRecoverDataCount++;
-    session._resetAutoRecoverTimer();
-  },
 };
 
 // Entry/exit hooks keyed by state
 const ENTRY_HOOKS = {
   [STATES.RUNNING](session) {
-    if (!session._runningStartedAt) {
-      session._runningStartedAt = Date.now();
-    }
     // Apply any resize that was deferred while the session was quiescent.
-    // The resulting redraw data is harmless in RUNNING state (handled by
-    // the RUNNING data handler which just resets the idle timer).
+    // The resulting redraw is harmless: the OSC-title source only reacts to the
+    // activity glyph, which a resize redraw does not change.
     session._applyPendingResize();
-  },
-  [STATES.COMPLETE](session) {
-    session._runningStartedAt = null;
   },
   [STATES.WAITING](session) {
     session.emit("needs-attention", { name: session.name });
@@ -267,17 +131,7 @@ const ENTRY_HOOKS = {
 
 const EXIT_HOOKS = {
   [STATES.WAITING](session) {
-    session._lastUserInputAt = 0;
-    session._lastInputWasSubmit = false;
     session.emit("attention-cleared", { name: session.name });
-    session._clearAutoRecoverTimer();
-    session._autoRecoverDataCount = 0;
-    if (session.patternDetector) {
-      session.patternDetector.reset();
-    }
-    // Grace period so echoed keystrokes and the still-visible prompt
-    // don't immediately re-trigger prompt detection after user input.
-    session._startStartupGrace(3000);
   },
 };
 
@@ -290,12 +144,16 @@ class Session extends EventEmitter {
     startingWatchdogSeconds = 10,
     attentionTimeoutSeconds = 60,
     waitingEscalationSeconds = 300,
-    autoRecoverSeconds = 3,
-    inputGraceSeconds = 5,
-    promptDetectionMs = 1500,
     replayBufferKB = 512,
     noFlicker = true,
-    feedDebounceMs = 50,
+    // Detection wiring (injected by backend). When absent, the session runs
+    // title-source-only (no hooks) — used by unit tests constructing a Session directly.
+    hookRouter = null,
+    getHookPort = null,
+    hooksBaseDir = undefined,
+    titleStabilizationMs = 1500,
+    statusConflictMs = undefined,
+    statusDedupMs = undefined,
   }) {
     super();
     this.id = id;
@@ -308,27 +166,13 @@ class Session extends EventEmitter {
     this.startingWatchdogMs = startingWatchdogSeconds * 1000;
     this.attentionTimeoutMs = attentionTimeoutSeconds * 1000;
     this.waitingEscalationMs = waitingEscalationSeconds * 1000;
-    this._autoRecoverMs = autoRecoverSeconds * 1000;
     this._watchdogTimer = null;
-    this._idleTimer = null;
-    this._autoRecoverTimer = null;
-    this._autoRecoverDataCount = 0;
-    this._runningStartedAt = null;
-    this._completeThresholdMs = 30000;
     this._receivedFirstOutput = false;
-    this._startupGraceActive = false;
-    this._startupGraceTimer = null;
     this._outputBuffer = []; // ring buffer of recent PTY chunks
     this._outputBufferHead = 0; // index of oldest valid entry; advances instead of shift()
     this._outputBufferSize = 0;
     this._outputBufferMax = replayBufferKB * 1024;
-    this._lastUserInputAt = 0;
-    this._lastInputWasSubmit = false;
-    this._inputGraceMs = inputGraceSeconds * 1000;
     this._killPollTimer = null;
-    this._feedBuffer = "";
-    this._feedDebounceTimer = null;
-    this._feedDebounceMs = feedDebounceMs;
     this._noFlicker = noFlicker;
     this._pendingResize = null;
     this._sleeping = false;
@@ -336,48 +180,87 @@ class Session extends EventEmitter {
     this._autoKilled = false;
     this._destroyed = false;
     this._pendingRestart = false;
-
-    this._promptDetectionMs = promptDetectionMs;
-    this._confirmationMs = 300; // PatternDetector default, recorded for capture header
     this._recorder = null; // Set via setRecorder() after construction
 
-    this._lastLayer4Line = null; // Track Layer 4 firings (fired from idle timer, not PatternDetector)
+    // -- Detection: structural signal sources --
+    this._hookRouter = hookRouter;
+    this._getHookPort = getHookPort;
+    this._hooksBaseDir = hooksBaseDir;
+    this._hookToken = null;
+    this._settingsHandle = null;
+    this._hookSeen = false;
+    this._lastSignal = null;
 
-    this.patternDetector = new PatternDetector(promptDetectionMs);
-    this.patternDetector.on("prompt-detected", (detection) => {
-      // Record detection BEFORE session guards (transition may suppress it)
-      if (this._recorder) {
-        this._recorder.writeDetection(
-          detection.layer,
-          detection.pattern,
-          detection.line,
-          detection.pending,
-        );
-      }
-      this.transition("prompt_detected", detection);
+    this._titleSource = createOscTitleSource({ stabilizationMs: titleStabilizationMs });
+    this._statusSource = createStatusSource({
+      sessionId: id,
+      ...(statusConflictMs != null ? { conflictWindowMs: statusConflictMs } : {}),
+      ...(statusDedupMs != null ? { dedupWindowMs: statusDedupMs } : {}),
     });
+    this._titleSource.on("signal", (s) => this._statusSource.ingest(s));
+    this._statusSource.on("status", (s) => this._onStatus(s));
+    this._statusSource.on("meta", (m) => this._onMeta(m));
   }
 
   setRecorder(recorder) {
     this._recorder = recorder;
   }
 
-  recordUserInput(data) {
-    this._lastUserInputAt = Date.now();
-    if (typeof data === "string") {
-      // Submissions (Enter / Return / pasted text with a newline) should
-      // allow IDLE/COMPLETE -> RUNNING immediately when Claude's response
-      // arrives. Mid-typing keystrokes keep the session in IDLE/COMPLETE
-      // so the echoed characters don't get treated as a Claude-emitted prompt.
-      // Any '\r' or '\n' counts as submit, including bracketed-paste markers.
-      this._lastInputWasSubmit = /[\r\n]/.test(data);
+  // -- Detection signal handling (replaces all content scraping) --
+
+  // Push a hook callback's normalized signal into the StatusSource. Called by the
+  // shared HookRouter the backend registers per session.
+  ingestHookSignal(raw) {
+    if (this._destroyed) return;
+    this._hookSeen = true;
+    if (this._recorder && raw && raw.event) {
+      this._recorder.writeHook(raw.event, raw.payload);
+    }
+    this._statusSource.ingest(raw);
+  }
+
+  _onStatus(s) {
+    if (this._destroyed) return;
+    this._lastSignal = { signal: s.signal, source: s.source, confidence: s.confidence, ts: s.ts };
+    const st = this.state;
+    switch (s.signal) {
+      case "working":
+      case "resume":
+        // Claude is active again — wake a quiescent card.
+        if (st === STATES.IDLE || st === STATES.COMPLETE) {
+          this.transition("new_output", { source: s.source, signal: s.signal });
+        } else if (st === STATES.WAITING) {
+          this.transition("user_input", { source: s.source, signal: s.signal });
+        }
+        break;
+      case "ready":
+        // Turn finished. Authoritative (hook) `ready` may complete from WAITING/IDLE
+        // too (a late Stop after a permission/idle prompt). The title fallback only
+        // completes from RUNNING (it only emits ready after seeing a spinner).
+        if (st === STATES.RUNNING) {
+          this.transition("task_complete", { source: s.source, signal: "ready" });
+        } else if ((st === STATES.WAITING || st === STATES.IDLE) && s.confidence === "high") {
+          this.transition("task_complete", { source: s.source, signal: "ready" });
+        }
+        break;
+      case "awaiting-input":
+        // Needs the user. Authoritative-only (title never emits this).
+        if (st === STATES.RUNNING || st === STATES.IDLE || st === STATES.COMPLETE) {
+          this.transition("prompt_detected", { source: s.source, signal: "awaiting-input" });
+        }
+        break;
+      case "session-start":
+      case "session-end":
+        // Lifecycle telemetry only — PTY first-output / exit drive these states.
+        break;
+      default:
+        break;
     }
   }
 
-  _isUserEchoData() {
-    if (this._lastUserInputAt === 0) return false;
-    if (this._lastInputWasSubmit) return false;
-    return Date.now() - this._lastUserInputAt < this._inputGraceMs;
+  _onMeta(m) {
+    // `unknown` glyph / degraded telemetry — recorded for observability, no transition.
+    this._lastSignal = { signal: m.signal, source: m.source, ts: m.ts, meta: true };
   }
 
   get pid() {
@@ -399,6 +282,15 @@ class Session extends EventEmitter {
     };
   }
 
+  getDetectionStats() {
+    return {
+      lastSignal: this._lastSignal,
+      hookSeen: this._hookSeen,
+      hooksInjected: this._settingsHandle !== null,
+      titleState: this._titleSource.getState(),
+    };
+  }
+
   getHealthStats() {
     return {
       id: this.id,
@@ -414,46 +306,26 @@ class Session extends EventEmitter {
       outputBufferBytes: this._outputBufferSize,
       auditLogLength: this.auditLog.length,
       dataListenerCount: this.listenerCount("data"),
+      hookSeen: this._hookSeen,
       timers: {
         sleepKill: this._sleepKillTimer !== null,
         killPoll: this._killPollTimer !== null,
-        idle: this._idleTimer !== null,
         watchdog: this._watchdogTimer !== null,
-        feedDebounce: this._feedDebounceTimer !== null,
-        autoRecover: this._autoRecoverTimer !== null,
-        startupGrace: this._startupGraceTimer !== null,
       },
     };
   }
 
   getDebugState() {
-    const pdSnap = this.patternDetector.getDebugSnapshot();
-    // Merge Layer 4 info (fired from idle timer, not PatternDetector)
-    if (this._lastLayer4Line && (!pdSnap.lastLayer || pdSnap.lastLayer < 4)) {
-      // Only override if Layer 4 was the most recent detection source
-      const lastAuditPrompt = [...this.auditLog].reverse().find(e => e.event === 'prompt_detected');
-      if (lastAuditPrompt?.detail?.layer === 4) {
-        pdSnap.lastLayer = 4;
-        pdSnap.lastMatchedLine = this._lastLayer4Line;
-      }
-    }
     return {
       state: this.state,
-      transitions: this.auditLog.slice(-5).map(e => ({
+      transitions: this.auditLog.slice(-5).map((e) => ({
         from: e.from,
         to: e.to,
         event: e.event,
         timestamp: e.timestamp,
         detail: e.detail,
       })),
-      patternDetector: pdSnap,
-      timers: {
-        autoRecoverDataCount: this._autoRecoverDataCount,
-        autoRecoverTimerActive: this._autoRecoverTimer !== null,
-        idleTimerActive: this._idleTimer !== null,
-        startupGraceActive: this._startupGraceActive,
-        sleeping: this._sleeping,
-      },
+      detection: this.getDetectionStats(),
     };
   }
 
@@ -538,9 +410,6 @@ class Session extends EventEmitter {
       const oldPid = this.ptyProcess.pid;
       try {
         if (process.platform === "win32") {
-          // 2s timeout: bounds the worst-case event-loop stall if taskkill
-          // wedges. start() is a user-action hot path, unlike the kill/exit
-          // sites which run during teardown.
           execSync(`taskkill /PID ${Number(oldPid)} /T /F`, { stdio: "ignore", timeout: 2000 });
         } else {
           this.ptyProcess.kill();
@@ -560,13 +429,15 @@ class Session extends EventEmitter {
     this._outputBufferHead = 0;
     this._outputBufferSize = 0;
     this._clearWatchdog();
-    this._clearIdleTimer();
-    this._clearStartupGrace();
-    this._clearFeedDebounce();
     this._pendingResize = null;
-    this.patternDetector.reset();
+    this._titleSource.reset();
+    this._statusSource.reset();
 
     const env = this._buildSpawnEnv();
+
+    // Inject Claude Code hooks via a per-session managed settings file (HTTP hooks
+    // POSTing to Glissa's localhost server). No repo modification; no shell command.
+    const settingsArgs = this._injectHooks();
 
     // On Windows, node-pty can't resolve .cmd shims directly.
     // Spawn via cmd.exe /c which handles PATH + .cmd resolution.
@@ -575,7 +446,9 @@ class Session extends EventEmitter {
       ? ["--dangerously-skip-permissions"]
       : [];
     const shell = isWindows ? "cmd.exe" : "claude";
-    const args = isWindows ? ["/c", "claude", ...claudeArgs] : claudeArgs;
+    const args = isWindows
+      ? ["/c", "claude", ...settingsArgs, ...claudeArgs]
+      : [...settingsArgs, ...claudeArgs];
 
     try {
       this.ptyProcess = pty.spawn(shell, args, {
@@ -586,6 +459,7 @@ class Session extends EventEmitter {
         env,
       });
     } catch (err) {
+      this._cleanupHooks();
       this.transition("spawn_fail", { error: err.message });
       this.emit("error", err);
       return;
@@ -597,16 +471,11 @@ class Session extends EventEmitter {
       `[session ${this.id}] spawn: ${shell} ${args.join(" ")} (cwd=${this.path})`,
     );
 
-    // Write capture header with all timing params
     if (this._recorder) {
       this._recorder.writeHeader({
-        promptDetectionMs: this._promptDetectionMs,
-        confirmationMs: this._confirmationMs,
         attentionTimeoutMs: this.attentionTimeoutMs,
-        autoRecoverMs: this._autoRecoverMs,
-        inputGraceMs: this._inputGraceMs,
-        completeThresholdMs: this._completeThresholdMs,
         startingWatchdogMs: this.startingWatchdogMs,
+        hooksInjected: this._settingsHandle !== null,
         cols: 80,
         rows: 24,
       });
@@ -626,6 +495,47 @@ class Session extends EventEmitter {
     );
   }
 
+  // Write the per-session hook settings file and register with the shared
+  // HookRouter. Returns the --settings arg array (empty when hooks unavailable).
+  _injectHooks() {
+    if (!this._hookRouter || !this._getHookPort) return [];
+    let port;
+    try {
+      port = this._getHookPort();
+    } catch {
+      port = null;
+    }
+    if (!port) return [];
+    try {
+      this._settingsHandle = writeSessionSettings({
+        port,
+        glissaId: this.id,
+        baseDir: this._hooksBaseDir,
+      });
+      this._hookToken = this._settingsHandle.token;
+      this._hookRouter.register(this.id, {
+        token: this._hookToken,
+        onSignal: (raw) => this.ingestHookSignal(raw),
+      });
+      return ["--settings", this._settingsHandle.settingsPath];
+    } catch (err) {
+      console.warn(`[session:${this.name}] hook injection failed: ${err.message} — falling back to OSC title only`);
+      this._cleanupHooks();
+      return [];
+    }
+  }
+
+  _cleanupHooks() {
+    if (this._hookRouter) {
+      try { this._hookRouter.unregister(this.id); } catch { /* ignore */ }
+    }
+    if (this._settingsHandle) {
+      try { this._settingsHandle.cleanup(); } catch { /* ignore */ }
+      this._settingsHandle = null;
+    }
+    this._hookToken = null;
+  }
+
   _buildSpawnEnv() {
     const env = { ...process.env };
     delete env.CLAUDECODE;
@@ -633,8 +543,6 @@ class Session extends EventEmitter {
     delete env.CLAUDE_CODE_ENTRYPOINT;
     delete env.GLISSA_PORT;
     delete env.GLISSA_CONFIG;
-    // No-flicker mode prevents Claude Code from resetting scrollback position
-    // on every turn. Increases PTY output volume — mitigated by feed debounce.
     if (this._noFlicker) {
       env.CLAUDE_CODE_NO_FLICKER = "1";
     }
@@ -651,25 +559,17 @@ class Session extends EventEmitter {
     if (this.state === STATES.STARTING && !this._receivedFirstOutput) {
       this._receivedFirstOutput = true;
       this._clearWatchdog();
-      this._startStartupGrace();
       this.transition("first_output");
     }
 
-    // State-driven data handling via lookup table.
-    // When sleeping, skip handlers to freeze state machine. Ring buffer + emit still run.
+    // Feed the OSC-title fallback source. Skipped while sleeping (state frozen).
+    // This is the ONLY parsing on the hot path: it scans for OSC-0 titles and
+    // ignores all other bytes — no tokenizer, no line assembly, no body scraping.
     if (!this._sleeping) {
-      const handler = DATA_HANDLERS[this.state];
-      if (handler) {
-        try {
-          handler(this, data);
-        } catch (err) {
-          console.error(
-            `[session:${this.name}] data handler error: ${err.message}`,
-          );
-          if (this.listenerCount("error") > 0) {
-            this.emit("error", err);
-          }
-        }
+      try {
+        this._titleSource.feed(data);
+      } catch (err) {
+        console.error(`[session:${this.name}] title source error: ${err.message}`);
       }
     }
 
@@ -685,13 +585,11 @@ class Session extends EventEmitter {
       this._outputBuffer[this._outputBufferHead] = null;
       this._outputBufferHead++;
     }
-    // Compact when the unused prefix grows large to bound array growth.
     if (this._outputBufferHead > 1024) {
       this._outputBuffer = this._outputBuffer.slice(this._outputBufferHead);
       this._outputBufferHead = 0;
     }
 
-    // Skip emit when no data WS clients are listening to avoid synchronous fan-out cost.
     if (this.listenerCount("data") > 0) {
       this.emit("data", data);
     }
@@ -700,16 +598,12 @@ class Session extends EventEmitter {
   _handlePtyExit(exitCode, signal) {
     const pid = this.ptyProcess ? this.ptyProcess.pid : null;
     this._clearWatchdog();
-    this._clearIdleTimer();
-    this._clearStartupGrace();
-    this._clearFeedDebounce();
-    this.patternDetector.reset();
+    this._titleSource.reset();
+    this._statusSource.reset();
+    this._cleanupHooks();
     this.ptyProcess = null;
 
-    // Reap orphan grandchildren on Windows. When Claude exits cleanly but had
-    // spawned detached background processes (e.g. `astro dev`), the wrapper's
-    // process tree can survive the PTY close. tree-kill the original pid; if
-    // it's already gone, taskkill is a no-op.
+    // Reap orphan grandchildren on Windows.
     if (pid && process.platform === "win32") {
       try {
         execSync(`taskkill /PID ${Number(pid)} /T /F`, { stdio: "ignore" });
@@ -718,7 +612,6 @@ class Session extends EventEmitter {
       }
     }
 
-    // STARTING + zero bytes ever delivered = failed launch (relies on node-pty flushing onData before onExit).
     let reason = null;
     if (this.state === STATES.STARTING && !this._receivedFirstOutput) {
       reason = "no_output_before_exit";
@@ -726,7 +619,6 @@ class Session extends EventEmitter {
     } else if (exitCode === 0) {
       this.transition("process_exit_ok", { exitCode, signal });
     } else if (this.state === STATES.STARTING) {
-      // STARTING only has process_exit, not process_exit_ok/fail
       this.transition("process_exit", { exitCode, signal });
     } else {
       this.transition("process_exit_fail", { exitCode, signal });
@@ -773,7 +665,6 @@ class Session extends EventEmitter {
         this.ptyProcess.resize(cols, rows);
       } catch {
         // PTY exited between our check and the resize call (Windows ConPTY race).
-        // Safe to swallow — the process is gone, no resize needed.
       }
     }
   }
@@ -784,9 +675,6 @@ class Session extends EventEmitter {
     const pid = this.ptyProcess.pid;
 
     if (process.platform === "win32") {
-      // Tree-kill upfront — ptyProcess.kill() only terminates the cmd.exe
-      // wrapper, leaving grandchildren (e.g. `astro dev` spawned inside claude)
-      // orphaned. /T walks the whole process tree.
       try {
         execSync(`taskkill /PID ${Number(pid)} /T /F`, { stdio: "ignore" });
       } catch (err) {
@@ -845,7 +733,6 @@ class Session extends EventEmitter {
 
   dismiss() {
     if (this.state === STATES.WAITING) {
-      this.recordUserInput();
       return this.transition("user_dismiss");
     }
     if (this.state === STATES.COMPLETE) return this.transition("user_dismiss");
@@ -854,15 +741,11 @@ class Session extends EventEmitter {
 
   sleep() {
     if (this._sleeping) return;
-    // Only allow sleeping in quiescent states — refuse if the session has
-    // moved back to an active state (guards against client/server race).
     const sleepable = [STATES.IDLE, STATES.COMPLETE, STATES.DONE, STATES.FAILED];
     if (!sleepable.includes(this.state)) return;
     this._sleeping = true;
-    this._clearFeedDebounce();
-    this._clearIdleTimer();
-    this._clearStartupGrace();
-    this.patternDetector.reset();
+    this._titleSource.reset();
+    this._statusSource.reset();
     this._scheduleSleepKill();
     this.emit("sleep");
   }
@@ -872,9 +755,6 @@ class Session extends EventEmitter {
     if (!this._sleeping) return;
     this._sleeping = false;
     this._clearSleepKill();
-    if (this.state === STATES.RUNNING) {
-      this._resetIdleTimer();
-    }
     this.emit("wake");
     // Sleep-kill terminated the PTY while user was away. Auto-restart on wake
     // so opening the card brings the session back instead of stranding it as DONE.
@@ -889,9 +769,6 @@ class Session extends EventEmitter {
     this._sleepKillTimer = setTimeout(() => {
       this._sleepKillTimer = null;
       if (!this._sleeping) return;
-      // Credit the auto-kill on any active→ended transition during this call,
-      // not just on killSession()'s user_kill return — a racing PTY exit can
-      // win and leave killSession() returning false despite us causing the end.
       const wasActive = this.state === STATES.RUNNING
         || this.state === STATES.WAITING
         || this.state === STATES.IDLE
@@ -934,8 +811,6 @@ class Session extends EventEmitter {
 
   forceRestart() {
     if (this._destroyed) return;
-    // Re-entry guard: a second click while the prior force-restart is still
-    // waiting on PTY exit would stack once('exit') listeners and double-spawn.
     if (this._pendingRestart) return;
     const killable = [
       STATES.RUNNING,
@@ -945,7 +820,6 @@ class Session extends EventEmitter {
     ];
     if (killable.includes(this.state)) {
       this._pendingRestart = true;
-      // Kill first, then restart once process exits
       this.once("exit", () => {
         this._pendingRestart = false;
         if (this._destroyed) return;
@@ -968,44 +842,23 @@ class Session extends EventEmitter {
       this.attentionTimeoutMs = cfg.attentionTimeoutSeconds * 1000;
     if (cfg.waitingEscalationSeconds != null)
       this.waitingEscalationMs = cfg.waitingEscalationSeconds * 1000;
-    if (cfg.autoRecoverSeconds != null)
-      this._autoRecoverMs = cfg.autoRecoverSeconds * 1000;
-    if (cfg.inputGraceSeconds != null)
-      this._inputGraceMs = cfg.inputGraceSeconds * 1000;
-    if (cfg.promptDetectionMs != null)
-      this.patternDetector.updateSilenceTimeout(cfg.promptDetectionMs);
     if (cfg.replayBufferKB != null)
       this._outputBufferMax = cfg.replayBufferKB * 1024;
-    if (cfg.feedDebounceMs != null) this._feedDebounceMs = cfg.feedDebounceMs;
     if (cfg.noFlicker != null) this._noFlicker = !!cfg.noFlicker;
   }
 
   destroy() {
     if (this._destroyed) return;
-    // Setting _destroyed first lets _forceKillAfterTimeout's poll bail before
-    // rescheduling, and gates start/wake/restart/_handlePtyData against any
-    // late deliveries that race destroy.
     this._destroyed = true;
 
-    if (this._watchdogTimer !== null) {
-      clearTimeout(this._watchdogTimer);
-      this._watchdogTimer = null;
-    }
-    if (this._idleTimer !== null) {
-      clearTimeout(this._idleTimer);
-      this._idleTimer = null;
-    }
-    this._clearAutoRecoverTimer();
-    this._clearStartupGrace();
-    this._clearFeedDebounce();
+    this._clearWatchdog();
     this._clearSleepKill();
     this._pendingResize = null;
 
+    this._cleanupHooks();
+
     this.kill();
 
-    // Clear AFTER kill() since kill() schedules _killPollTimer via
-    // _forceKillAfterTimeout. The poll body also bails on _destroyed, but
-    // canceling the outstanding setTimeout here avoids the 200ms wakeup.
     if (this._killPollTimer !== null) {
       clearTimeout(this._killPollTimer);
       this._killPollTimer = null;
@@ -1014,11 +867,9 @@ class Session extends EventEmitter {
     if (this._recorder) {
       this._recorder.close(); // Idempotent — safe if already closed by _handlePtyExit
     }
+    this._titleSource.destroy();
+    this._statusSource.destroy();
     this.removeAllListeners();
-    if (this.patternDetector) {
-      this.patternDetector.reset();
-      this.patternDetector.removeAllListeners();
-    }
   }
 
   _applyPendingResize() {
@@ -1035,168 +886,12 @@ class Session extends EventEmitter {
     }
   }
 
-  // -- Feed debounce (batches PTY data before pattern detection) --
-
-  // How many bytes of the most-recent tail to feed to the pattern detector when
-  // the 64 KB cap fires. State transitions hinge on recent prompt markers, not
-  // middle-burst content, so dropping older bytes here is invisible to the user.
-  static get _CAP_TAIL_BYTES() { return 16384; }
-
-  _debounceFeed(data) {
-    this._feedBuffer += data;
-    // Cap buffer size to prevent unbounded growth during sustained output
-    if (this._feedBuffer.length > 65536) {
-      if (this._feedDebounceTimer !== null)
-        clearTimeout(this._feedDebounceTimer);
-      this._feedDebounceTimer = null;
-      // Feed only the most-recent tail to keep event-loop block under ~2 ms;
-      // older middle-burst bytes are irrelevant to IDLE/COMPLETE detection.
-      const tail = this._feedBuffer.slice(-Session._CAP_TAIL_BYTES);
-      this._feedBuffer = "";
-      if (!this._startupGraceActive) this.patternDetector.feed(tail);
-      return;
-    }
-    if (this._feedDebounceTimer !== null) {
-      clearTimeout(this._feedDebounceTimer);
-    }
-    this._feedDebounceTimer = setTimeout(() => {
-      this._feedDebounceTimer = null;
-      this._flushFeedBuffer();
-    }, this._feedDebounceMs);
-  }
-
-  _flushFeedBuffer() {
-    if (this._feedBuffer.length === 0) return;
-    if (this._startupGraceActive) {
-      this._feedBuffer = "";
-      return;
-    }
-    const buffered = this._feedBuffer;
-    this._feedBuffer = "";
-    this.patternDetector.feed(buffered);
-  }
-
-  _clearFeedDebounce() {
-    this._feedBuffer = "";
-    if (this._feedDebounceTimer !== null) {
-      clearTimeout(this._feedDebounceTimer);
-      this._feedDebounceTimer = null;
-    }
-  }
-
-  // -- Private timer helpers --
-
-  _startStartupGrace(durationMs = 5000) {
-    this._clearStartupGrace();
-    this._clearFeedDebounce();
-    this._startupGraceActive = true;
-    this._startupGraceTimer = setTimeout(() => {
-      this._startupGraceTimer = null;
-      this._startupGraceActive = false;
-    }, durationMs);
-  }
-
-  _clearStartupGrace() {
-    this._startupGraceActive = false;
-    if (this._startupGraceTimer !== null) {
-      clearTimeout(this._startupGraceTimer);
-      this._startupGraceTimer = null;
-    }
-  }
-
   _clearWatchdog() {
     if (this._watchdogTimer !== null) {
       clearTimeout(this._watchdogTimer);
       this._watchdogTimer = null;
     }
   }
-
-  _clearIdleTimer() {
-    if (this._idleTimer !== null) {
-      clearTimeout(this._idleTimer);
-      this._idleTimer = null;
-    }
-  }
-
-  _resetIdleTimer() {
-    this._clearIdleTimer();
-    this._idleTimer = setTimeout(() => {
-      this._idleTimer = null;
-      if (this.state === STATES.RUNNING) {
-        const runDuration = this._runningStartedAt
-          ? Date.now() - this._runningStartedAt
-          : 0;
-
-        // Safety net: if the pattern detector has a non-empty pending line
-        // (last output didn't end with newline) after prolonged silence,
-        // this strongly signals a prompt waiting for input — not completion.
-        // Layers 1-3 may have missed it (e.g. short '>' prompt filtered by
-        // Layer 3's length check). Treat as Layer 4 prompt detection.
-        // Only applies to short runs — long runs with pending content are
-        // Claude's idle prompt after task completion, not a mid-task input request.
-        if (
-          runDuration < this._completeThresholdMs &&
-          this.patternDetector.hasPendingContent()
-        ) {
-          const pendingLine = this.patternDetector.getPendingLine();
-          if (isLayer4Chrome(pendingLine)) {
-            // Layer 4 suppressed — UI chrome, not a real prompt
-          } else {
-            this._runningStartedAt = null;
-            this._lastLayer4Line = pendingLine;
-            this.transition("prompt_detected", {
-              layer: 4,
-              pattern: "idle_pending_content",
-              line: pendingLine,
-            });
-            return;
-          }
-        }
-
-        this._runningStartedAt = null;
-        if (runDuration >= this._completeThresholdMs) {
-          // Long run — but check if pending content matches a known prompt pattern
-          // (layers 1/2). A prompt that arrived late in a long run should still
-          // trigger WAITING, not COMPLETE.
-          if (this.patternDetector.hasPendingContent()) {
-            const pendingLine = this.patternDetector.getPendingLine();
-            const match = this.patternDetector.checkLine(pendingLine);
-            if (match) {
-              this.transition("prompt_detected", {
-                layer: match.layer,
-                pattern: match.pattern,
-                line: pendingLine,
-              });
-              return;
-            }
-          }
-          this.transition("task_complete");
-        } else {
-          this.transition("silence_timeout");
-        }
-      }
-    }, this.attentionTimeoutMs);
-  }
-
-  _resetAutoRecoverTimer() {
-    this._clearAutoRecoverTimer();
-    this._autoRecoverTimer = setTimeout(() => {
-      this._autoRecoverTimer = null;
-      if (this.state === STATES.WAITING && this._autoRecoverDataCount >= 2) {
-        this.transition("auto_recover");
-        if (this.state === STATES.RUNNING) {
-          this._resetIdleTimer();
-        }
-      }
-    }, this._autoRecoverMs);
-  }
-
-  _clearAutoRecoverTimer() {
-    if (this._autoRecoverTimer !== null) {
-      clearTimeout(this._autoRecoverTimer);
-      this._autoRecoverTimer = null;
-    }
-  }
 }
 
-module.exports = { Session, isLayer4Chrome };
+module.exports = { Session };

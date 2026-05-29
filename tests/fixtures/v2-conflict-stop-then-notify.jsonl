@@ -1,0 +1,4 @@
+{"type":"header","version":2,"session":"fixture-conflict","startedAt":0,"config":{},"cols":80,"rows":24}
+{"type":"data","ts":1,"data":"\u001b]0;⠂ Claude Code\u0007working...\r\n"}
+{"type":"hook","ts":2,"event":"Stop","payload":{"hook_event_name":"Stop"}}
+{"type":"hook","ts":3,"event":"Notification","payload":{"notification_type":"permission_prompt"}}

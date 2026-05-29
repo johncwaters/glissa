@@ -5,14 +5,20 @@
  *
  * Recording format (JSONL, one record per line):
  *
+ * Format versions:
+ *   v1 — legacy content-scraping era. Had a `detection` record
+ *        ({"type":"detection","layer","pattern","line","pending"}) from the old
+ *        PatternDetector. No `hook` records. (Read-only for the replay harness.)
+ *   v2 — structural-signal era (current). Adds a `hook` record; no `detection` record.
+ *
  *   Header (first line):
- *     {"type":"header","version":1,"session":"name","startedAt":ts,"config":{...},"cols":80,"rows":24}
+ *     {"type":"header","version":2,"session":"name","startedAt":ts,"config":{...},"cols":80,"rows":24}
  *
  *   Data (each PTY chunk):
  *     {"type":"data","ts":epoch,"len":N,"data":"raw pty string"}
  *
- *   Detection (PatternDetector emission, before session guards):
- *     {"type":"detection","ts":epoch,"layer":N,"pattern":"...","line":"...","pending":bool}
+ *   Hook (v2; each Claude Code hook callback received for this session):
+ *     {"type":"hook","ts":epoch,"event":"Stop","payload":{...}}
  *
  *   State (each successful state transition):
  *     {"type":"state","ts":epoch,"from":"STATE","to":"STATE","event":"...","detail":{...}}
@@ -71,7 +77,7 @@ class SessionRecorder {
   writeHeader(config) {
     this._write({
       type: 'header',
-      version: 1,
+      version: 2,
       session: this._name,
       startedAt: Date.now(),
       config,
@@ -84,8 +90,8 @@ class SessionRecorder {
     this._write({ type: 'data', ts: Date.now(), len: data.length, data });
   }
 
-  writeDetection(layer, pattern, line, pending) {
-    this._write({ type: 'detection', ts: Date.now(), layer, pattern, line, pending: !!pending });
+  writeHook(event, payload) {
+    this._write({ type: 'hook', ts: Date.now(), event, payload: payload || null });
   }
 
   writeState(from, to, event, detail) {

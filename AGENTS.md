@@ -14,15 +14,16 @@ Glissa is a lightweight Node.js background process that spawns and manages Claud
 |------|---------|-------------|
 | **server.js** | Production entry point — creates HTTP server, wires backend, handles SIGINT | `(none — top-level script)` |
 | **backend.js** | Express + WebSocket server factory. Wires control/data WebSocket servers, session lifecycle, config hot-reload, static serving, and graceful shutdown onto a provided HTTP server | `createBackend(httpServer, options)` |
-| **sessions.js** | Session class with 8-state machine (INITIALIZING -> STARTING -> RUNNING -> WAITING/IDLE/COMPLETE -> DONE/FAILED). Spawns Claude CLI via node-pty, PTY lifecycle, pattern detection integration, replay buffer, watchdog/idle/escalation/auto-recover timers | `Session` |
-| **ansi-tokenizer.js** | AnsiTokenizer class — stateful single-pass ANSI tokenizer with 5-state machine (GROUND, ESCAPE, CSI_ENTRY, OSC_STRING, CHARSET). Produces typed tokens (text, csi, osc, cr, lf, control) from raw PTY chunks. Handles cross-chunk partial sequences | `AnsiTokenizer` |
-| **line-assembler.js** | LineAssembler class — consumes AnsiTokenizer output and produces clean assembled lines. Correctly interprets CR-overwrite (`"Loading...\rPrompt?"` → `"Prompt?"`), cursor movement (CSI C/D), and erase-in-line (CSI K). Sparse character array with cursor tracking | `LineAssembler` |
-| **patterns.js** | PatternDetector class (EventEmitter) with 3-layer prompt detection: Layer 1 (exact string matches), Layer 2 (regex patterns with blacklist), Layer 3 (silence heuristic). Uses AnsiTokenizer + LineAssembler pipeline for ANSI-aware line assembly | `PatternDetector` |
-| **session-recorder.js** | SessionRecorder class — always-on JSONL recorder for PTY session data. Records header, data chunks, pattern detections, state transitions, user input, resize, and footer events. Auto-rotation at 50MB, retention cleanup (7 days default). Factory: `createRecorder(name, config)` returns null if disabled | `SessionRecorder`, `createRecorder()` |
+| **sessions.js** | Session class with the state machine (DORMANT -> INITIALIZING -> STARTING -> RUNNING -> WAITING/IDLE/COMPLETE -> DONE/FAILED). Spawns Claude CLI via node-pty, PTY lifecycle, StatusSource-driven detection (`_onStatus` maps signals to transitions), replay buffer, watchdog. NO screen scraping. | `Session` |
+| **detection/status-source.js** | StatusSource (EventEmitter). Merges hook + title signals: precedence hook>title, conflict window (`awaiting-input` dominates `ready`), dedup. Emits normalized `working/ready/awaiting-input/resume/session-start/session-end`. | `StatusSource`, `createStatusSource()` |
+| **detection/osc-title-source.js** | OSC-0 title fallback source. Braille spinner = `working`, idle glyph = `ready`, unknown glyph = `unknown`; NEVER emits `awaiting-input`. Ports `findOscTitle`/`isBrailleChar`. | `OscTitleSource`, `createOscTitleSource()`, `findOscTitle`, `isBrailleChar` |
+| **detection/hook-source.js** | HookRouter: per-session bearer-token validation + `mapHookToSignal` (Claude Code hook event -> normalized signal). Backed by `POST /hook/:glissaId/:event`. | `HookRouter`, `mapHookToSignal` |
+| **detection/settings-injector.js** | Writes per-session `--settings` file with HTTP hooks (URL carries glissaId+token), under a per-session %TEMP% subdir; `sweepOrphans` clears stale dirs. | `writeSessionSettings`, `buildHookSettings`, `sweepOrphans`, `generateToken` |
+| **detection/replay.js** | Version-aware replay harness — drives recordings (v1 data-only, v2 data+hook) back through the real detection pipeline for ground-truth tests. | `parseRecording`, `replayDetection`, `summarize` |
+| **session-recorder.js** | SessionRecorder class — always-on JSONL recorder (format v2). Records header, data chunks, hook callbacks, state transitions, user input, resize, footer. Auto-rotation at 50MB, retention cleanup. Factory: `createRecorder(name, config)` returns null if disabled | `SessionRecorder`, `createRecorder()` |
 | **control-handlers.js** | Control WebSocket message handler registry. Handler-map dispatch pattern for all control messages (add/remove/reorder sessions, settings, kill/restart/dismiss, shutdown/restart-server, focus-change, repo scanning) | `registerControlHandlers(controlWss, deps)` |
 | **config-store.js** | Configuration storage with resolution order (--config flag -> local config.json -> ~/.glissa/config.json -> auto-seed). Atomic read-modify-write, fs.watch hot-reload with self-write filtering | `createConfigStore()`, `TIMEOUT_KEYS`, `DEFAULT_CONFIG` |
 | **notification-manager.js** | NotificationManager class (EventEmitter). Per-session notification state machine (IDLE/PENDING/DELIVERED/ESCALATED/ACKNOWLEDGED), pluggable channel delivery, focus suppression, category debounce, escalation ping-pong for WAITING notifications | `NotificationManager` |
-| **notify.js** | **DEPRECATED** — no-op stubs kept during migration. Use `NotificationManager` + `channels/toast.js` instead | `notify()`, `setNotifySuppressed()`, `clearNotifyHistory()` (all no-ops) |
 
 ### Configuration & Build
 
@@ -102,24 +103,23 @@ INITIALIZING -> STARTING -> RUNNING -> WAITING -> IDLE -> DONE
 **States (from shared/states.js):**
 - **INITIALIZING** — Session object created, env prepared, ready to spawn
 - **STARTING** — PTY spawned, awaiting first output (watchdog timer active)
-- **RUNNING** — Claude CLI producing output, pattern detector active, idle timer running
-- **WAITING** — Prompt detected (via PatternDetector), awaiting user input/dismiss. Auto-recover fires if >=2 PTY data chunks arrive after autoRecoverSeconds
-- **IDLE** — Silence timeout reached, no activity for attentionTimeoutSeconds
-- **COMPLETE** — Task finished (running duration exceeded 30s threshold before going silent). Notifications sent
+- **RUNNING** — Claude CLI producing output; StatusSource active
+- **WAITING** — `awaiting-input` signal (authoritative hook: `Notification`/`PermissionRequest`), awaiting user input/dismiss
+- **IDLE** — quiescent post-turn state (rarely entered now; resume via `working`/`resume`)
+- **COMPLETE** — turn finished via authoritative `ready` (`Stop` hook) or title `working`->`ready`. Notifications sent
 - **DONE** — Process exited cleanly (code 0) or user killed
 - **FAILED** — Process exited with error, watchdog timeout, or spawn failure
 
 **Transitions** governed by explicit event mapping (TRANSITIONS constant) and guards (GUARDS object).
 
-### Pattern Detection (3 Layers)
+### Status Detection (structural signals)
 
-**Layer 1: Exact String Matches** — `'Do you want to proceed?'`, `'(y/n)'`, etc. Checked first for high confidence.
+Two sources feed `StatusSource`, which maps a normalized signal to a transition in `sessions.js._onStatus`:
 
-**Layer 2: Regex Patterns** — Common prompt formats. Blacklist filters false positives (e.g., "Terminate batch job").
+- **Authoritative — Claude Code hooks** (`detection/hook-source.js` + `detection/settings-injector.js`): `Stop`/`Notification(idle_prompt)` -> `ready`; `Notification(permission_prompt)`/`PermissionRequest` -> `awaiting-input`; `UserPromptSubmit` -> `resume`; `SessionStart`/`SessionEnd` -> lifecycle. Injected via `claude --settings <file>` HTTP hooks POSTing to `POST /hook/:glissaId/:event` (per-session bearer token).
+- **Fallback — OSC-0 title** (`detection/osc-title-source.js`): braille spinner -> `working`; idle glyph (stabilized) -> `ready`; unknown glyph -> `unknown`. Never emits `awaiting-input`.
 
-**Layer 3: Silence Heuristic** — If incomplete line (no newline) ends with `?` or `:` and no output arrives within silenceTimeoutMs (3s default), infer prompt.
-
-All detection runs on an ANSI-aware pipeline: raw PTY chunks → `AnsiTokenizer` (produces typed tokens) → `LineAssembler` (produces clean lines with CR-overwrite handling). This replaces the old regex-based ANSI stripping. A 5-second startup grace period suppresses pattern detection after first output.
+`StatusSource` applies precedence (hook > title), a conflict window (`awaiting-input` dominates a racing `ready`), and dedup (absorbs `Stop` double-fire). There is NO body/line content scraping. See the signal x state matrix in `.omc/plans/rewrite-terminal-detection.md` §4a and `docs/postmortem-terminal-detection.md`.
 
 ### Notification System (NotificationManager + Channels)
 
@@ -143,7 +143,7 @@ The old `notify.js` is deprecated (no-op stubs).
 
 Uses Node.js `EventEmitter`:
 - **Session** emits: `'state-change'`, `'data'`, `'error'`, `'exit'`, `'needs-attention'`, `'attention-cleared'`, `'session-failed'`, `'session-done'`
-- **PatternDetector** emits: `'prompt-detected'`
+- **OscTitleSource** emits: `'signal'` ({signal,char,...}); **StatusSource** emits: `'status'`, `'meta'`
 - **NotificationManager** emits: `'notification-state-change'`
 - No global variables, no direct coupling
 
@@ -187,22 +187,16 @@ Sessions maintain a ring buffer (~100KB cap) of PTY output for dashboard reconne
 
 ### Timers & Cleanup
 
-Sessions use explicit setTimeout/setInterval with cleanup on state transitions:
+Sessions use explicit setTimeout with cleanup on transition/exit/destroy:
 - **watchdog_timeout** (STARTING -> FAILED if no output within `startingWatchdogSeconds`)
-- **silence_timeout** (RUNNING -> IDLE or COMPLETE after `attentionTimeoutSeconds` of no output — COMPLETE if running duration >= 30s)
-- **escalation_timer** (WAITING state: repeated notifications every `waitingEscalationSeconds`)
-- **auto_recover_timer** (WAITING state: triggers `auto_recover` -> RUNNING if >=2 data chunks arrive after `autoRecoverSeconds`)
-- **startup_grace** (5s window after first output where pattern detection is suppressed)
+- **sleep-kill** (auto-kill a sleeping session after 15 min)
+- **kill-poll** (force-kill escalation after a graceful kill)
 
-All timers cleared on `destroy()` to prevent leaks.
-
-### Layer 4 Filters (sessions.js)
-
-When the idle timer fires and pending content exists (`idle_pending_content` event), Layer 4 filters in `sessions.js` check whether the pending line looks like UI chrome rather than a real prompt. Strings like spinner characters, OMC HUD lines, "accept edits" hints, and effort indicators are filtered out to avoid false WAITING transitions.
+Status no longer uses idle/silence/auto-recover/startup-grace timers — those were part of the deleted content-scraping detector. Turn-end and needs-input now come from hooks (or the OSC-title fallback). Notification escalation lives entirely in `NotificationManager`. All timers and both detection sources are cleared on `destroy()` to prevent leaks.
 
 ### Session Recording (SessionRecorder)
 
-`session-recorder.js` provides an optional always-on JSONL recording of PTY sessions. Each session can have a recorder that captures data chunks, pattern detections, state transitions, user input, and resize events. Recordings are stored in `.pty-capture/` with automatic rotation at 50MB and retention cleanup after 7 days. Enabled via `capture` config block.
+`session-recorder.js` provides an optional always-on JSONL recording of PTY sessions (format v2). Each session can have a recorder that captures data chunks, hook callbacks, state transitions, user input, and resize events. Recordings are stored in `.pty-capture/` with automatic rotation at 50MB and retention cleanup after 7 days. Enabled via `capture` config block. `detection/replay.js` replays recordings (v1 + v2) back through the detection pipeline.
 
 ### Graceful Shutdown
 
@@ -258,17 +252,16 @@ When the idle timer fires and pending content exists (`idle_pending_content` eve
 
 ## Testing & Validation
 
-### Built-in Self-Test
+### Unit / integration tests
 ```bash
-node patterns.js
+npm test            # node --test "tests/**/*.test.js"
 ```
-Runs PatternDetector self-test on hardcoded prompt examples.
+Covers `detection/*` (osc-title, status-source, hook-source, settings-injector), the §4a
+signal x state matrix (`tests/sessions-detection.test.js`), and the replay harness over
+recorded fixtures (`tests/replay-harness.test.js`, fixtures in `tests/fixtures/`).
 
 ### CLI Testing
 See `docs/testing-cli.md` for comprehensive manual test scenarios.
-
-### No Formal Test Framework
-Project uses manual testing, self-test scripts, and spike scripts. No Jest, Mocha, or similar.
 
 ---
 
@@ -279,9 +272,10 @@ Project uses manual testing, self-test scripts, and spike scripts. No Jest, Moch
 | Add session feature | `sessions.js` (Session class) | STATES, TRANSITIONS, GUARDS, entry/exit hooks |
 | Add/remove/reorder sessions | `control-handlers.js` | handler map, config-store save |
 | Add WebSocket message | `control-handlers.js` (handler map) | backend.js (broadcastControl) |
-| Improve prompt detection | `patterns.js` (PatternDetector) | EXACT_MATCHES, REGEX_PATTERNS, silence heuristic, AnsiTokenizer, LineAssembler |
-| ANSI parsing / line assembly | `ansi-tokenizer.js`, `line-assembler.js` | Token types, CR-overwrite, cursor movement |
-| Session recording | `session-recorder.js` | JSONL format, rotation, retention |
+| Improve status detection | `detection/status-source.js`, `detection/hook-source.js` | signal x state matrix (`_onStatus`), hook mapping, conflict window |
+| Hook injection / settings | `detection/settings-injector.js` | per-session `--settings`, bearer token, HTTP hooks |
+| OSC title fallback | `detection/osc-title-source.js` | braille spinner, idle glyph, KNOWN_IDLE_CODEPOINTS |
+| Session recording / replay | `session-recorder.js` (v2), `detection/replay.js` | JSONL format, hook records, replay harness |
 | Fix dashboard UI | `public/session-card.js`, `public/app.js` | xterm.js setup, session card lifecycle |
 | Add notification channel | `channels/toast.js` (pattern) | `notification-manager.js` registerChannel |
 | Notification state/logic | `notification-manager.js` (NotificationManager) | `shared/notification-states.js`, `channels/` |

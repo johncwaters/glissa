@@ -9,8 +9,15 @@ Glissa is a lightweight Node.js background process that spawns and manages Claud
 ```
 server.js          # Production entry point (thin wrapper)
 backend.js         # Express + WebSocket server factory (shared by server.js and Vite plugin)
-sessions.js        # Session lifecycle and state machine
-notify.js          # Windows toast notifications
+sessions.js        # Session lifecycle and state machine (consumes StatusSource)
+detection/
+  status-source.js     # Merges hook + title signals (precedence, conflict window, dedup)
+  osc-title-source.js  # OSC-0 title fallback signal (working/ready/unknown only)
+  hook-source.js       # HookRouter: validates per-session token, maps Claude Code hooks -> signals
+  settings-injector.js # Per-session `--settings` file with HTTP hooks (token in URL)
+  replay.js            # Version-aware replay harness (drives recordings through detection)
+notification-manager.js  # Notification lifecycle state machine
+channels/toast.js  # Windows toast (BurntToast) delivery
 vite.config.js     # Vite frontend build config + backend plugin (ESM)
 public/
   index.html       # Dashboard shell (Tailwind utility classes)
@@ -88,6 +95,15 @@ INITIALIZING → STARTING → RUNNING → WAITING → IDLE → DONE
 
 States are string constants. Transitions are explicit — no implicit state mutation.
 
+### Status Detection (structural signals — NOT screen scraping)
+
+Status is derived from machine-emitted signals, never from parsing the rendered TUI:
+
+- **Authoritative: Claude Code hooks.** At spawn, `sessions.js` appends `--settings <file>` (written by `detection/settings-injector.js`) injecting HTTP hooks (`Stop`, `Notification`, `UserPromptSubmit`, `SessionStart`/`End`) that POST to `POST /hook/:glissaId/:event` on the existing Express server. A per-session bearer token (in the hook URL) is validated by `detection/hook-source.js` `HookRouter`. No target-repo modification; HTTP hooks need no shell.
+- **Fallback: OSC-0 title** (`detection/osc-title-source.js`) — braille spinner = `working`, idle glyph = `ready`; an unknown glyph is `unknown`, never a guess. It NEVER emits `awaiting-input`.
+- `detection/status-source.js` merges both (precedence hook > title), holds `ready` for a conflict window so a racing `awaiting-input` wins, and dedups. `sessions.js._onStatus` maps the normalized signal to a transition per the signal x state matrix (see `.omc/plans/rewrite-terminal-detection.md` §4a and `docs/postmortem-terminal-detection.md`).
+- The PTY data path does NO content parsing beyond scanning for OSC-0 titles. Do not reintroduce body/line scraping.
+
 ### Session Spawning (node-pty)
 
 Sessions spawn `claude` via `pty.spawn()` from node-pty (NOT `child_process.spawn`).
@@ -104,6 +120,7 @@ Glissa binds to `localhost` only. Both WebSocket channels (data and control) hav
 
 - Do NOT expose Glissa's port to the network (no `0.0.0.0` binding)
 - The `dangerouslySkipPermissions` option is settable via the control WebSocket; any local process can create a permissionless session
+- There is ONE HTTP write ingress, `POST /hook/:glissaId/:event` (Claude Code hook callbacks). It is localhost-only and gated by a per-session bearer token (unguessable, written into that session's managed settings file), so the trust level is "can read this session's settings file" = same as reading the PTY. Keep that token check if you touch the route.
 - If network exposure is ever needed, add authentication to the control WebSocket first
 
 ### Session Identity
@@ -122,7 +139,7 @@ Sessions are keyed by a stable UUID (`id`), not the mutable display `name`. The 
 - xterm.js handles ALL ANSI rendering — server is a dumb pipe
 - `@xterm/addon-fit` for resize, `@xterm/addon-webgl` for GPU rendering
 - Vite bundles @xterm/* for production; dev mode proxies to Express
-- Pattern detection uses ANSI-stripped tap of PTY output (parallel to raw stream)
+- Status detection does NOT tap the rendered body; it scans only OSC-0 titles (fallback) and consumes Claude Code hooks (authoritative). See "Status Detection" above.
 
 ### WebSocket Transport
 

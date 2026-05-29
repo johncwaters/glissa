@@ -31,29 +31,8 @@ const { registerControlHandlers } = require('./control-handlers');
 const { NotificationManager } = require('./notification-manager');
 const { createToastChannel } = require('./channels/toast');
 const { createRecorder } = require('./session-recorder');
-
-function makeSession(project, cfg) {
-  const session = new Session({
-    id: project.id,
-    name: project.name,
-    path: project.path,
-    dangerouslySkipPermissions: !!project.dangerouslySkipPermissions,
-    startingWatchdogSeconds: cfg.startingWatchdogSeconds,
-    attentionTimeoutSeconds: cfg.attentionTimeoutSeconds,
-    waitingEscalationSeconds: cfg.waitingEscalationSeconds,
-    autoRecoverSeconds: cfg.autoRecoverSeconds,
-    inputGraceSeconds: cfg.inputGraceSeconds,
-    promptDetectionMs: cfg.promptDetectionMs,
-    replayBufferKB: cfg.replayBufferKB,
-    noFlicker: cfg.noFlicker,
-    feedDebounceMs: cfg.feedDebounceMs,
-  });
-  const recorder = createRecorder(project.name, cfg.capture);
-  if (recorder) {
-    session.setRecorder(recorder);
-  }
-  return session;
-}
+const { HookRouter } = require('./detection/hook-source');
+const { sweepOrphans } = require('./detection/settings-injector');
 
 /**
  * Create and wire the Glissa backend onto an existing HTTP server.
@@ -86,9 +65,77 @@ function createBackend(httpServer, options = {}) {
     ? Number.parseInt(process.env.GLISSA_PORT, 10)
     : (config.port || 3000);
 
+  // --- Detection: shared hook router + per-session settings injection ---
+  // The hook port MUST come from the actually-bound server, not config.port:
+  // in dev the backend rides Vite's httpServer (e.g. 5173), and createBackend
+  // never calls .listen itself, so config.port is fiction there.
+  const hookRouter = new HookRouter();
+  // Sessions only spawn on user action, long after the server is listening, so
+  // the bound address is always available here. Returns null only if (unexpectedly)
+  // not listening, in which case the session runs OSC-title-only.
+  const getHookPort = () => {
+    const addr = httpServer && httpServer.address();
+    return addr && typeof addr === 'object' && addr.port ? addr.port : null;
+  };
+  // Clear settings dirs orphaned by prior crashes (best-effort).
+  try { sweepOrphans(); } catch { /* ignore */ }
+
+  function makeSession(project, cfg) {
+    const session = new Session({
+      id: project.id,
+      name: project.name,
+      path: project.path,
+      dangerouslySkipPermissions: !!project.dangerouslySkipPermissions,
+      startingWatchdogSeconds: cfg.startingWatchdogSeconds,
+      attentionTimeoutSeconds: cfg.attentionTimeoutSeconds,
+      waitingEscalationSeconds: cfg.waitingEscalationSeconds,
+      replayBufferKB: cfg.replayBufferKB,
+      noFlicker: cfg.noFlicker,
+      hookRouter,
+      getHookPort,
+    });
+    const recorder = createRecorder(project.name, cfg.capture);
+    if (recorder) {
+      session.setRecorder(recorder);
+    }
+    return session;
+  }
+
   // --- Express setup ---
 
   const app = express();
+
+  // Hook ingress: Claude Code HTTP hooks POST here (injected via --settings at
+  // spawn). Localhost-only + per-session bearer token (validated in HookRouter).
+  app.post('/hook/:glissaId/:event', (req, res) => {
+    const ip = req.socket.remoteAddress || '';
+    if (!(ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1')) {
+      res.status(403).end();
+      return;
+    }
+    let body = '';
+    let aborted = false;
+    req.on('data', (c) => {
+      body += c;
+      if (body.length > 65536) { aborted = true; req.destroy(); }
+    });
+    req.on('end', () => {
+      if (aborted) return;
+      let payload = {};
+      try { payload = body ? JSON.parse(body) : {}; } catch { /* tolerate */ }
+      const token =
+        (req.query && req.query.t) ||
+        (req.headers.authorization || '').replace(/^Bearer\s+/i, '') ||
+        null;
+      const out = hookRouter.handle({
+        glissaId: req.params.glissaId,
+        event: req.params.event,
+        token,
+        payload,
+      });
+      res.status(out.status).json({ ok: out.status === 200, reason: out.reason });
+    });
+  });
 
   if (staticDir === 'auto') {
     const distPath = path.join(__dirname, 'dist');
@@ -136,6 +183,7 @@ function createBackend(httpServer, options = {}) {
     let destroyedReachable = false;
     for (const [, sess] of sessions) {
       const stats = sess.getHealthStats();
+      stats.detection = sess.getDetectionStats();
       sessionStats.push(stats);
       if (stats.hasPty) alivePtyCount++;
       if (stats.sleeping) sleepingCount++;
@@ -573,7 +621,6 @@ function createBackend(httpServer, options = {}) {
           return;
         }
         sess.write(msg.data);
-        sess.recordUserInput(msg.data);
         if (sess.state === STATES.WAITING) {
           sess.transition('user_input');
         }
