@@ -54,6 +54,11 @@ export default defineConfig({
   },
 
   server: {
+    // Bind IPv4 loopback explicitly. Vite's default `localhost` resolves to ::1
+    // (IPv6) on Windows, but settings-injector writes hook URLs as http://127.0.0.1
+    // (IPv4) and server.js binds 127.0.0.1 in production. Without this, Glissa's
+    // injected HTTP hooks hit IPv4 loopback with nothing listening -> ECONNREFUSED.
+    host: '127.0.0.1',
     port: 5173,
   },
 });
