@@ -113,6 +113,7 @@ Sessions spawn `claude` via `pty.spawn()` from node-pty (NOT `child_process.spaw
 - Do NOT use `shell: true` — pass args as array
 - Terminal name: `xterm-256color`, default 80x24
 - `dangerouslySkipPermissions` flag spawns Claude with `--dangerously-skip-permissions`
+- **Resolve-then-branch spawn (Windows):** `claude` is resolved once at module load (`resolveClaudeCommand` -> `{ path, kind }`, `kind` from `classifyClaudeKind`). The pure `buildSpawnCommand` then picks the spawn form: a real PE image (`.exe`/`.com`) is spawned directly via `pty.spawn(<abs path>, args)`; `.cmd`/`.bat`/`.ps1` shim installs (or a failed resolution) fall back to `cmd.exe /c claude`. Spawning the `.exe` directly avoids cmd's double command-line parse and its console-title write. The `cmd.exe /c` path is now a shim-only fallback, not the default. Tests inject the resolved command via the `spawnCommand` constructor option.
 
 ### Security: Trust Boundary
 

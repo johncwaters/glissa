@@ -141,14 +141,27 @@ test('destroy prevents subsequent emissions', async () => {
   assert.equal(signals.length, 0);
 });
 
-test('unknown leading glyph emits unknown, never ready', async () => {
+test('unknown NON-ASCII glyph emits unknown, never ready', async () => {
   const src = createOscTitleSource({ stabilizationMs: 50 });
   const signals = collect(src);
   src.feed(bulletTitle('⠂')); // working first
-  src.feed('\x1b]0;Z weird title\x07'); // unknown glyph after spinning
+  src.feed(bulletTitle('★')); // unrecognized symbol (U+2605) — candidate new glyph
   await sleep(120);
   assert.equal(signals.filter((s) => s.signal === 'unknown').length, 1);
   assert.equal(signals.filter((s) => s.signal === 'ready').length, 0);
+  src.destroy();
+});
+
+test('ASCII window title (cmd.exe /c claude) emits NO signal', async () => {
+  // On Windows, Glissa spawns `cmd.exe /c claude`, and cmd sets the console title
+  // to its command line ("C:\...\cmd.exe"). The leading 'C' is a generic window
+  // title, not a Claude activity glyph — it must be dropped silently, never `unknown`.
+  const src = createOscTitleSource({ stabilizationMs: 50 });
+  const signals = collect(src);
+  src.feed('\x1b]0;C:\\WINDOWS\\system32\\cmd.exe\x07');
+  src.feed('\x1b]0;~/work — bash\x07');
+  await sleep(120);
+  assert.equal(signals.length, 0, 'ASCII window titles produce no signals at all');
   src.destroy();
 });
 

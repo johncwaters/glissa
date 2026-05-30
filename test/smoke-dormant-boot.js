@@ -6,9 +6,15 @@
 const http = require('node:http');
 const WebSocket = require('ws');
 const { createBackend } = require('../backend');
+const { CLAUDE_CMD } = require('../sessions');
 
 const PORT = 3098;
 process.env.GLISSA_PORT = String(PORT);
+
+// Tee console.log so we can assert on the per-session spawn line emitted by sessions.js.
+const logLines = [];
+const origConsoleLog = console.log.bind(console);
+console.log = (...a) => { logLines.push(a.map(String).join(' ')); origConsoleLog(...a); };
 
 let passed = 0;
 let failed = 0;
@@ -65,6 +71,20 @@ async function main() {
       e.type === 'state-change' && e.id !== target.id,
     );
     assert('other sessions remain dormant (no spurious state-changes)', otherChanges.length === 0);
+
+    // Best-effort: when claude resolves to a real .exe, the spawn must go direct
+    // (no cmd.exe /c shim layer). Skips on hosts where claude is a .cmd/.ps1 shim.
+    console.log('\nSpawn strategy:');
+    if (process.platform === 'win32' && CLAUDE_CMD && CLAUDE_CMD.kind === 'exe') {
+      const spawnLine = logLines.find(
+        (l) => l.includes(`[session ${target.id}]`) && l.includes('spawn:'),
+      );
+      assert('spawn log line captured for target session', !!spawnLine);
+      assert('direct exe spawn (resolved .exe present, no cmd.exe /c)',
+        !!spawnLine && spawnLine.includes(CLAUDE_CMD.path) && !spawnLine.includes('cmd.exe /c'));
+    } else {
+      origConsoleLog('  SKIP  direct-exe spawn assertion (claude is not a .exe on this host)');
+    }
   }
 
   // Cleanup

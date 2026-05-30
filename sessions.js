@@ -11,9 +11,20 @@ const KILL_POLL_INTERVAL_MS = 200;
 const KILL_MAX_WAIT_MS = 3000;
 const SLEEP_KILL_TIMEOUT_MS = 15 * 60 * 1000;
 
-// Resolve and log all `claude` matches once at module load so a Bun shim
-// shadowing claude.exe surfaces in the boot log instead of as a runtime stack trace.
-(() => {
+// Classify a resolved `claude` path by extension. Only real PE images (.exe/.com)
+// can be handed straight to node-pty (CreateProcess); .cmd/.bat/.ps1 are shims that
+// must go through a shell, so they (and anything unrecognized) fall back to cmd.exe.
+function classifyClaudeKind(resolvedPath) {
+  if (!resolvedPath) return "unresolved";
+  const ext = (resolvedPath.match(/\.[^.\\/]+$/) || [""])[0].toLowerCase();
+  return ext === ".exe" || ext === ".com" ? "exe" : "shim";
+}
+
+// Resolve `claude` once at module load. On Windows we prefer spawning the resolved
+// .exe directly (node-pty -> CreateProcess), falling back to `cmd.exe /c claude` only
+// for .cmd/.bat/.ps1 shim installs or when resolution fails. Resolving here also
+// surfaces a Bun shim shadowing claude.exe in the boot log instead of at runtime.
+function resolveClaudeCommand() {
   let matches = [];
   try {
     const cmd = process.platform === "win32" ? "where claude" : "which -a claude";
@@ -28,15 +39,41 @@ const SLEEP_KILL_TIMEOUT_MS = 15 * 60 * 1000;
   }
   if (matches.length === 0) {
     console.warn(`[glissa] could not resolve 'claude' on PATH`);
-    return;
+    return { path: null, kind: "unresolved" };
   }
-  console.log(`[glissa] resolved 'claude' (first match wins): ${matches[0]}`);
+  const resolvedPath = matches[0];
+  console.log(`[glissa] resolved 'claude' (first match wins): ${resolvedPath}`);
   if (matches.length > 1) {
     console.warn(
       `[glissa] multiple 'claude' on PATH (Bun shim risk):\n  ${matches.join("\n  ")}`,
     );
   }
-})();
+  const kind = classifyClaudeKind(resolvedPath);
+  if (process.platform === "win32") {
+    console.log(
+      `[glissa] claude spawn strategy: ${kind === "exe" ? "direct exe" : "cmd.exe shim fallback"}`,
+    );
+  }
+  return { path: resolvedPath, kind };
+}
+
+// Cached resolution used by every Session unless overridden via the constructor.
+const CLAUDE_CMD = resolveClaudeCommand();
+
+// Pure spawn-command builder (the unit-test seam). Decides whether to spawn the
+// resolved claude .exe directly or route through `cmd.exe /c claude`. Keeps the
+// shell path byte-identical to the historical behavior for shim/unresolved installs.
+function buildSpawnCommand({ platform, resolved, settingsArgs = [], claudeArgs = [] }) {
+  const childArgs = [...settingsArgs, ...claudeArgs];
+  if (platform !== "win32") {
+    return { file: "claude", args: childArgs };
+  }
+  if (resolved && resolved.kind === "exe" && resolved.path) {
+    return { file: resolved.path, args: childArgs };
+  }
+  // .cmd/.bat/.ps1 shim or unresolved -> let cmd.exe resolve PATH+PATHEXT at spawn time.
+  return { file: "cmd.exe", args: ["/c", "claude", ...childArgs] };
+}
 
 // ---------------------------------------------------------------------------
 // State machine. Status is driven by structural signals from StatusSource
@@ -154,6 +191,12 @@ class Session extends EventEmitter {
     titleStabilizationMs = 1500,
     statusConflictMs = undefined,
     statusDedupMs = undefined,
+    // Resolved claude command ({ path, kind }). Defaults to the module-load
+    // resolution; tests inject a stub to exercise the spawn branches deterministically.
+    spawnCommand = CLAUDE_CMD,
+    // PTY spawner seam. Defaults to node-pty; tests inject a fake to assert the
+    // spawn wiring (file/args) without launching a real process.
+    ptySpawn = null,
   }) {
     super();
     this.id = id;
@@ -190,6 +233,8 @@ class Session extends EventEmitter {
     this._settingsHandle = null;
     this._hookSeen = false;
     this._lastSignal = null;
+    this._spawnCommand = spawnCommand;
+    this._ptySpawn = ptySpawn || ((file, args, opts) => pty.spawn(file, args, opts));
 
     this._titleSource = createOscTitleSource({ stabilizationMs: titleStabilizationMs });
     this._statusSource = createStatusSource({
@@ -439,19 +484,21 @@ class Session extends EventEmitter {
     // POSTing to Glissa's localhost server). No repo modification; no shell command.
     const settingsArgs = this._injectHooks();
 
-    // On Windows, node-pty can't resolve .cmd shims directly.
-    // Spawn via cmd.exe /c which handles PATH + .cmd resolution.
-    const isWindows = process.platform === "win32";
+    // Prefer spawning the resolved claude .exe directly (node-pty -> CreateProcess).
+    // Fall back to `cmd.exe /c claude` only for .cmd/.bat/.ps1 shim installs or when
+    // resolution failed (see resolveClaudeCommand / buildSpawnCommand at module top).
     const claudeArgs = this.dangerouslySkipPermissions
       ? ["--dangerously-skip-permissions"]
       : [];
-    const shell = isWindows ? "cmd.exe" : "claude";
-    const args = isWindows
-      ? ["/c", "claude", ...settingsArgs, ...claudeArgs]
-      : [...settingsArgs, ...claudeArgs];
+    const { file, args } = buildSpawnCommand({
+      platform: process.platform,
+      resolved: this._spawnCommand,
+      settingsArgs,
+      claudeArgs,
+    });
 
     try {
-      this.ptyProcess = pty.spawn(shell, args, {
+      this.ptyProcess = this._ptySpawn(file, args, {
         name: "xterm-256color",
         cols: 80,
         rows: 24,
@@ -468,7 +515,7 @@ class Session extends EventEmitter {
     this.transition("spawn_success");
 
     console.log(
-      `[session ${this.id}] spawn: ${shell} ${args.join(" ")} (cwd=${this.path})`,
+      `[session ${this.id}] spawn: ${file} ${args.join(" ")} (cwd=${this.path})`,
     );
 
     if (this._recorder) {
@@ -894,4 +941,10 @@ class Session extends EventEmitter {
   }
 }
 
-module.exports = { Session };
+module.exports = {
+  Session,
+  buildSpawnCommand,
+  resolveClaudeCommand,
+  classifyClaudeKind,
+  CLAUDE_CMD,
+};
