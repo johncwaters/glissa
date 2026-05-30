@@ -1,4 +1,4 @@
-<!-- Generated: 2026-03-11 | Updated: 2026-03-24 -->
+<!-- Generated: 2026-03-11 | Updated: 2026-05-30 -->
 
 # AGENTS.md — Glissa Project Map
 
@@ -44,10 +44,13 @@ Glissa is a lightweight Node.js background process that spawns and manages Claud
 | `assets/` | Source audio files and screenshots (see `assets/AGENTS.md`) |
 | `bin/` | CLI entry point for `npx glissa` / global install (see `bin/AGENTS.md`) |
 | `channels/` | Pluggable notification delivery adapters for NotificationManager (see `channels/AGENTS.md`) |
-| `docs/` | Publishing and CLI testing guides (see `docs/AGENTS.md`) |
+| `detection/` | Structural status detection — hook (authoritative) + OSC title (fallback) sources, merge layer, settings injector, replay harness (see `detection/AGENTS.md`) |
+| `docs/` | Publishing, CLI testing, and the terminal-detection postmortem (see `docs/AGENTS.md`) |
 | `public/` | Browser dashboard — xterm.js terminals, session cards, dialogs (see `public/AGENTS.md`) |
 | `scripts/` | Release automation scripts (see `scripts/AGENTS.md`) |
 | `shared/` | Shared state constants and notification state machine (CJS + ESM) (see `shared/AGENTS.md`) |
+| `test/` | Hand-run console-harness scripts (notification manager, dormant-boot smoke) (see `test/AGENTS.md`) |
+| `tests/` | Automated `node:test` suite run by `npm test` + replay fixtures (see `tests/AGENTS.md`) |
 
 ---
 
@@ -178,7 +181,7 @@ Must use **node-pty** (`pty.spawn()`) NOT `child_process.spawn()` because Claude
 **Requirements:**
 - Real PTY with `cols=80, rows=24` (xterm-256color)
 - Unset env vars before spawn: `CLAUDECODE`, `CLAUDE_CODE_SSE_PORT`, `CLAUDE_CODE_ENTRYPOINT`, `GLISSA_PORT`, `GLISSA_CONFIG`
-- On Windows: spawn via `cmd.exe /c claude` (node-pty can't resolve .cmd shims directly)
+- **Resolve-then-branch spawn (Windows):** `claude` is resolved once at module load (`resolveClaudeCommand` -> `{ path, kind }`). The pure `buildSpawnCommand` then picks the form: a real PE image (`.exe`/`.com`) is spawned directly via `pty.spawn(<abs path>, args)`; `.cmd`/`.bat`/`.ps1` shims (or a failed resolution) fall back to `cmd.exe /c claude`. Spawning the `.exe` directly avoids cmd's double command-line parse and its console-title write. Tests inject the resolved command via the `spawnCommand` option. See `tests/spawn-command.test.js`
 - Pass args as array, NOT `shell: true`
 
 ### Replay Buffer
@@ -293,11 +296,14 @@ See `docs/testing-cli.md` for comprehensive manual test scenarios.
 ## Related Documentation
 
 - `CLAUDE.md` — Project constraints and coding style
+- `detection/AGENTS.md` — Structural status detection (hook + OSC title sources, merge, replay)
 - `channels/AGENTS.md` — Notification delivery channels
 - `public/AGENTS.md` — Browser-side module documentation
 - `shared/AGENTS.md` — Shared state and notification constants
 - `bin/AGENTS.md` — CLI entry point documentation
 - `docs/AGENTS.md` — Publishing and testing guides
 - `scripts/AGENTS.md` — Release automation
+- `tests/AGENTS.md` — Automated `node:test` suite and fixtures
+- `test/AGENTS.md` — Hand-run console-harness scripts
 
 <!-- MANUAL: -->

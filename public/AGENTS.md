@@ -1,5 +1,5 @@
 <!-- Parent: ../AGENTS.md -->
-<!-- Generated: 2026-03-11 | Updated: 2026-03-20 -->
+<!-- Generated: 2026-03-11 | Updated: 2026-05-30 -->
 
 # public/ — Browser Dashboard
 
@@ -20,7 +20,8 @@ Browser-side dashboard for Glissa. Provides real-time terminal streaming via xte
 | `ui-prefs.js` | UI preference persistence (localStorage) — minimized sessions, sound enabled/id, theme id. Prunes stale session references |
 | `alert-sound.js` | Notification sounds — audio file playback (.ogg) with synth beep fallback via Web Audio API |
 | `local-store.js` | Generic localStorage wrapper — JSON get/set with graceful degradation for private browsing |
-| `dom-helpers.js` | Shared `el(tag, className, text)` helper for programmatic DOM creation |
+| `dom-helpers.js` | Shared `el(tag, className, text)` and `escapeHtml()` helpers for programmatic DOM creation |
+| `health-monitor.js` | Footer panel rendering memory + leak telemetry from server `health-snapshot` messages — compact summary, click to expand into a detailed panel |
 | `tailwind.css` | Tailwind CSS entry with `@theme` block — color tokens reference CSS variables set by `theme.js` |
 | `style.css` | Component styles for JS-created DOM elements, `[data-state]` attribute selectors, animations (`@keyframes`), dialog/toast styling |
 
@@ -55,10 +56,11 @@ app.js (boot)
   │     ├── alert-sound.js   (notification sounds)
   │     ├── dom-helpers.js
   │     └── /shared/states.mjs (state constants)
-  └── dialogs.js       (dialogs — depends on session-card.js, control-ws.js, theme.js)
-        ├── alert-sound.js   (sound preview in settings)
-        ├── ui-prefs.js
-        └── components/*.html?raw (template fragments)
+  ├── dialogs.js       (dialogs — depends on session-card.js, control-ws.js, theme.js)
+  │     ├── alert-sound.js   (sound preview in settings)
+  │     ├── ui-prefs.js
+  │     └── components/*.html?raw (template fragments)
+  └── health-monitor.js (footer telemetry panel — depends on dom-helpers.js, control-ws.js)
 ```
 
 - `local-store.js` and `dom-helpers.js` are leaf utilities (no local imports)

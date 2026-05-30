@@ -1,0 +1,51 @@
+# Ralph progress — direct .exe spawn
+
+Task: Spawn the resolved claude.exe directly instead of `cmd.exe /c claude` on Windows.
+Plan: .omc/plans/direct-exe-spawn.md
+
+## Implemented (all 5 stories pass)
+
+US-001 Resolver + builder (sessions.js, module top):
+- classifyClaudeKind(path) -> 'exe' (.exe/.com) | 'shim' (.cmd/.bat/.ps1/other) | 'unresolved' (null).
+- resolveClaudeCommand() -> { path, kind } using existing `where claude` first-match; preserves
+  boot logs (resolved / could-not-resolve / multi-match Bun warning); adds a win32-only
+  "claude spawn strategy: direct exe | cmd.exe shim fallback" log.
+- CLAUDE_CMD = resolveClaudeCommand() cached at module load.
+- buildSpawnCommand({platform, resolved, settingsArgs, claudeArgs}) -> {file, args}: posix->claude;
+  win+exe->direct abs path; win+shim/unresolved->cmd.exe /c claude (byte-identical to old behavior).
+- Exports: Session, buildSpawnCommand, resolveClaudeCommand, classifyClaudeKind, CLAUDE_CMD.
+
+US-002 Wiring:
+- Constructor seam `spawnCommand = CLAUDE_CMD` -> this._spawnCommand.
+- Constructor seam `ptySpawn` (defaults to node-pty) -> this._ptySpawn; start() calls
+  this._ptySpawn(file, args, opts). Added for deterministic integration testing.
+- start() builds {file,args} via buildSpawnCommand; spawn log uses file/args.
+- Removed unused shell/isWindows vars. cmd.exe now only in the fallback branch + comments
+  (taskkill teardown unchanged).
+
+US-003 tests/spawn-command.test.js: all builder branches + spaced-path-stays-single-arg + arg
+order + danger flag passthrough + classifyClaudeKind matrix.
+
+US-004 tests/spawn-integration.test.js: injects a FAKE ptySpawn (no real process) to assert
+start()->spawner wiring for exe (direct) and shim (cmd.exe /c claude) forms. win32-gated.
+
+US-005:
+- test/smoke-dormant-boot.js: tees console.log, asserts (when CLAUDE_CMD.kind==='exe') the spawn
+  log shows the resolved .exe and not 'cmd.exe /c'.
+- CHANGELOG.md [Unreleased] Changed entry; CLAUDE.md "Session Spawning" updated.
+
+## LEARNING (important)
+- DO NOT write integration tests that call start() with a real spawnCommand pointing at a live
+  binary: spawning a real `node` REPL or (worse) `cmd.exe /c claude` launches an actual Claude
+  session and the live PTY keeps node --test's event loop open -> the runner HANGS with no summary
+  line. Use the injected `ptySpawn` fake instead. This was caught mid-run (suite stalled after the
+  spawn-command file) and fixed by adding the ptySpawn seam.
+- On this host `where claude` -> C:\Users\johnw\.local\bin\claude.exe (native installer, real .exe),
+  so the direct path is live here; the cmd.exe path is shim-only fallback.
+- This complements (does not replace) the OSC-title fix: ConPTY/claude can still set an initial
+  title, which osc-title-source already ignores for ASCII-leading titles.
+
+## Verification
+- node --test "tests/**/*.test.js": 69 pass / 0 fail / 0 skip, exit 0.
+- node test/smoke-dormant-boot.js: 8 passed / 0 failed, exit 0; spawn log = direct .exe, and the
+  "unknown leading title glyph" warning no longer appears on the direct path.
