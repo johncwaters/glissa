@@ -149,12 +149,6 @@ const GUARDS = {
 
 // Entry/exit hooks keyed by state
 const ENTRY_HOOKS = {
-  [STATES.RUNNING](session) {
-    // Apply any resize that was deferred while the session was quiescent.
-    // The resulting redraw is harmless: the OSC-title source only reacts to the
-    // activity glyph, which a resize redraw does not change.
-    session._applyPendingResize();
-  },
   [STATES.WAITING](session) {
     session.emit("needs-attention", { name: session.name });
   },
@@ -217,7 +211,6 @@ class Session extends EventEmitter {
     this._outputBufferMax = replayBufferKB * 1024;
     this._killPollTimer = null;
     this._noFlicker = noFlicker;
-    this._pendingResize = null;
     this._sleeping = false;
     this._sleepKillTimer = null;
     this._autoKilled = false;
@@ -474,7 +467,6 @@ class Session extends EventEmitter {
     this._outputBufferHead = 0;
     this._outputBufferSize = 0;
     this._clearWatchdog();
-    this._pendingResize = null;
     this._titleSource.reset();
     this._statusSource.reset();
 
@@ -698,15 +690,10 @@ class Session extends EventEmitter {
     if (this._recorder) {
       this._recorder.writeResize(cols, rows);
     }
-    if (
-      this.state === STATES.IDLE ||
-      this.state === STATES.COMPLETE ||
-      this.state === STATES.WAITING
-    ) {
-      this._pendingResize = { cols, rows };
-      return;
-    }
-    this._pendingResize = null;
+    // Apply immediately, even when quiescent (IDLE/COMPLETE/WAITING), so Claude
+    // gets SIGWINCH and reflows to fit. The redraw is harmless under structural
+    // detection: the OSC-title source only reacts to the activity glyph (which a
+    // reflow does not change) and hooks are event-based, not output-based.
     if (this.ptyProcess) {
       try {
         this.ptyProcess.resize(cols, rows);
@@ -900,7 +887,6 @@ class Session extends EventEmitter {
 
     this._clearWatchdog();
     this._clearSleepKill();
-    this._pendingResize = null;
 
     this._cleanupHooks();
 
@@ -917,20 +903,6 @@ class Session extends EventEmitter {
     this._titleSource.destroy();
     this._statusSource.destroy();
     this.removeAllListeners();
-  }
-
-  _applyPendingResize() {
-    if (this._pendingResize && this.ptyProcess) {
-      try {
-        this.ptyProcess.resize(
-          this._pendingResize.cols,
-          this._pendingResize.rows,
-        );
-      } catch {
-        // Same race — PTY may have exited between deferral and apply.
-      }
-      this._pendingResize = null;
-    }
   }
 
   _clearWatchdog() {
