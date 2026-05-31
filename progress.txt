@@ -57,35 +57,3 @@ team.json + 5 agent prompts; team-registry, team-output, team-prompt, team-black
 A separate uncommitted work stream (ws-sender backpressure refactor in backend.js + perf harness in
 public/) coexists in the tree; user approved intermingling. This task's files are listed in the prior
 "whose-is-whose" handoff. backend.js/public/session-card.js/public/style.css carry both streams.
-
-## CONPTY FOCUS-STEAL FIX (ralph session, 2026-05-30)
-Bug: pressing Enter in a glissa-managed Claude session raised/flashed the host VS Code
-window on every send. Root cause: Claude Code fires UserPromptSubmit -> user's GLOBAL OMC
-plugin command hooks (keyword-detector, skill-injector) spawn node.exe grandchildren ->
-under node-pty's headless OS ConPTY those console spawns allocate a fresh console window
-=> focus-steal raising the host terminal. Constraint (user): fix ENTIRELY in glissa's spawn
-path; NEVER modify user settings or disable user plugins.
-
-Fix (sessions.js only):
-- buildPtyBackendOpts({platform, conptyMode}) pure helper. win32: 'dll'->{useConptyDll:true},
-  'os-conpty'->{}, 'winpty'->{useConpty:false}, unknown->{}. non-win32-> {} always.
-- conptyMode='dll' constructor option (this._conptyMode). Default 'dll' = node-pty's bundled,
-  newer ConPTY (the same lever VS Code shipped for microsoft/vscode#136999), full fidelity.
-- _spawnWithBackendFallback(): if the bundled dll fails to LOAD (node-pty throws), retry once
-  with OS ConPTY (no flag). Guard keyed on backendOpts.useConptyDll so winpty/os-conpty real
-  spawn errors are NOT masked -> still hit spawn_fail -> FAILED.
-- Kill/restart unaffected: glissa tree-kills via `taskkill /PID <pid> /T /F` (kill(), start()
-  pre-kill, _forceKillAfterTimeout, _handlePtyExit), independent of node-pty internal teardown,
-  so the dll backend's different internal kill path cannot orphan the tree.
-
-Tests: tests/conpty-backend.test.js (11) - pure-helper mapping (all modes + non-win32) +
-Session integration (default useConptyDll, dll-load fallback, both-fail->FAILED, winpty no-retry).
-Verify: full suite 165/165 pass; biome clean on sessions.js + new test; npm run build exit 0;
-runtime smoke `pty.spawn('cmd.exe',[...],{useConptyDll:true})` LOADED + exited 0 on this Win11
-box (primary path de-risked). Architect (Sonnet, STANDARD) verification: APPROVED, all static ACs pass.
-
-USER-PENDING (cannot verify headlessly):
-- AC1: the VS Code flash actually disappearing on Enter (observe a live glissa session, 5+ sends).
-- Root-cause confirm: with OMC hooks off for one throwaway session, the flash stops (proves trigger).
-- Kill/restart orphan check on a live session under the dll backend.
-If the flash persists under 'dll', flip conptyMode to 'winpty' (structurally flash-proof) and re-test.
