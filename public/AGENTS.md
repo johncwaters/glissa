@@ -13,7 +13,7 @@ Browser-side dashboard for Glissa. Provides real-time terminal streaming via xte
 |------|-------------|
 | `index.html` | Dashboard HTML shell with inline critical CSS (loading screen, shutdown overlay), Tailwind utility classes for layout |
 | `app.js` | Boot entry point — wires modules together, applies saved theme, control message dispatch, window resize handler, toolbar/menu event binding, focus tracking |
-| `session-card.js` | Session card DOM lifecycle: card creation, terminal setup (xterm.js + WebGL), data WebSocket per session, drag-and-drop, minimize/maximize toggle, state application, aggregate status |
+| `session-card/` | Session card modules — decomposed from the former `session-card.js` god-module. See table below for the focused sub-modules. `app.js` and `dialogs.js` import directly from the owning module (no barrel). |
 | `control-ws.js` | Control WebSocket client — connection management, auto-reconnect (3s), request/response with requestId correlation and 5s timeout |
 | `dialogs.js` | Add Session and Settings dialog factories — repo root scanning, project picker, validation, theme picker, sound selector |
 | `theme.js` | Theme system — defines color palettes (Golgari, Midnight, Phyrexian, Compleated), applies CSS custom properties on `:root`, derives xterm.js terminal themes from CSS variables |
@@ -31,6 +31,25 @@ Browser-side dashboard for Glissa. Provides real-time terminal streaming via xte
 |-----------|---------|
 | `components/` | HTML dialog template fragments loaded via Vite `?raw` imports (see `components/AGENTS.md`) |
 | `audio/` | Alert sound audio files (`.ogg`) served as static assets |
+| `session-card/` | Focused ES modules decomposed from the former `session-card.js` god-module (see below) |
+
+### session-card/ modules
+
+The former `session-card.js` (~1600 lines) was decomposed into cohesion-sized modules. `app.js` and `dialogs.js` import directly from the owning module — there is no barrel re-exporter.
+
+| Module | Exports / purpose |
+|--------|-------------------|
+| `card-registry.js` | `sessionUIs` Map, 3 DOM singletons (`container`, `minimizedBar`, `aggregateEl`), reorder-echo dedup |
+| `toast.js` | `showErrorToast` — leaf, depends only on `dom-helpers.js` |
+| `naming.js` + `naming-core.mjs` | `countSessionsByName`, `suggestSessionName`; pure name-sequence logic in `.mjs` |
+| `webgl-pool.js` + `webgl-core.mjs` | `tryLoadWebGL`, `releaseWebgl`; LRU eviction policy in pure `.mjs` |
+| `card-dom.js` | `buildCardDOM`, `makeBadge`, inline confirm dialog, inline rename, debug overlay, `handleDebugState*` |
+| `terminal.js` | `setupTerminal`, `wireTerminalIO`, `ensureTerminalSetup`, `reconnectDataWs`, OSC-52 clipboard, terminal-settings setters |
+| `layout.js` | Minimize/maximize/split/sleep cluster (mutually recursive); owns 5 layout-private lets; exports `isMaximizeActive`, `getMaximizedSession`, `enforceSplitOnCreate`, `forgetSessionLayout` |
+| `drag-drop.js` | Container-level drag listeners (top-level side effects), `setupDragAndDrop`; importing this module installs the listeners |
+| `geometry-core.mjs` | Pure: `closestCardByCenter` (used by drag-drop) |
+| `lifecycle.js` | `createSessionCard`, `removeSessionCard`, `applyState`, `applyTerminalSettings`, `updateAggregateStatus`, etc. — the integration layer |
+| `aggregate-core.mjs` | Pure: `computeAggregate(counts)` (used by lifecycle) |
 
 ## For AI Agents
 
@@ -48,27 +67,31 @@ This is **browser code** using ES modules, not CommonJS.
 
 ```
 app.js (boot)
-  ├── theme.js         (theme system — applied at boot before UI renders)
-  ├── control-ws.js    (control WebSocket — singleton)
-  ├── session-card.js  (card lifecycle — depends on control-ws.js, theme.js)
+  ├── theme.js           (theme system — applied at boot before UI renders)
+  ├── control-ws.js      (control WebSocket — singleton)
+  ├── session-card/lifecycle.js  (card lifecycle — the integration layer)
+  │     ├── session-card/layout.js      (minimize/maximize/split/sleep)
+  │     ├── session-card/drag-drop.js   (drag handlers, top-level side effects)
+  │     ├── session-card/card-dom.js    (card builder, debug overlay)
+  │     ├── session-card/terminal.js    (xterm.js, data WebSocket)
+  │     ├── session-card/card-registry.js  (sessionUIs Map, DOM singletons)
   │     ├── ui-prefs.js      (localStorage persistence)
-  │     │     └── local-store.js
   │     ├── alert-sound.js   (notification sounds)
   │     ├── dom-helpers.js
   │     └── /shared/states.mjs (state constants)
-  ├── dialogs.js       (dialogs — depends on session-card.js, control-ws.js, theme.js)
+  ├── dialogs.js         (dialogs — imports naming helpers from session-card/naming.js)
   │     ├── alert-sound.js   (sound preview in settings)
   │     ├── ui-prefs.js
   │     └── components/*.html?raw (template fragments)
-  └── health-monitor.js (footer telemetry panel — depends on dom-helpers.js, control-ws.js)
+  └── health-monitor.js  (footer telemetry panel — depends on dom-helpers.js, control-ws.js)
 ```
 
 - `local-store.js` and `dom-helpers.js` are leaf utilities (no local imports)
 - `theme.js` is self-contained — defines themes, applies CSS variables, derives terminal colors
 - `ui-prefs.js` depends only on `local-store.js`
 - `control-ws.js` is the lowest-level network module (no imports from other local modules)
-- `session-card.js` imports from `control-ws.js`, `ui-prefs.js`, `alert-sound.js`, `theme.js`, `dom-helpers.js`
-- `dialogs.js` imports from `control-ws.js`, `session-card.js`, `ui-prefs.js`, `theme.js`, `alert-sound.js`
+- `session-card/card-registry.js` is the deepest dependency in the session-card graph — ESM evaluates it first so the DOM singletons resolve before any card is created
+- `dialogs.js` imports `countSessionsByName`/`suggestSessionName` from `session-card/naming.js` (not from a barrel)
 - `app.js` imports from all major modules and wires them together
 
 ### Theme System

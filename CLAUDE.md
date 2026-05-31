@@ -24,9 +24,22 @@ public/
   app.js           # Browser-side entry point (ES module)
   tailwind.css     # Tailwind CSS entry (theme + imports)
   style.css        # Component styles, state-driven rules, animations
-  session-card.js  # Session card DOM lifecycle and terminal setup
   control-ws.js    # WebSocket control channel client
   dialogs.js       # Add Session and Settings dialog factories
+  session-card/    # Session card modules (decomposed from session-card.js)
+    card-registry.js   # Shared state owner: sessionUIs Map + 3 DOM singletons
+    toast.js           # showErrorToast — leaf, no local deps
+    naming.js          # countSessionsByName, suggestSessionName (wraps naming-core.mjs)
+    naming-core.mjs    # Pure: nextSuggestedName, countAutoNames, isAutoNameOf
+    webgl-pool.js      # WebGL context pool with LRU cap (wraps webgl-core.mjs)
+    webgl-core.mjs     # Pure: pickEvictionVictims
+    card-dom.js        # Card builder, badge, inline rename, confirm dialog, debug overlay
+    terminal.js        # xterm.js setup, data WebSocket, OSC-52 clipboard
+    layout.js          # Minimize/maximize/split/sleep cluster (mutually recursive)
+    drag-drop.js       # Container-level drag-and-drop, setupDragAndDrop
+    geometry-core.mjs  # Pure: closestCardByCenter (used by drag-drop)
+    lifecycle.js       # createSessionCard, removeSessionCard, applyState, etc.
+    aggregate-core.mjs # Pure: computeAggregate (used by lifecycle)
 shared/
   states.js        # Session states (CJS, server-side)
   states.esm.js    # Session states (ESM, browser-side via Vite)
@@ -34,12 +47,15 @@ teams/             # Glissa-owned team definitions (agents + pack scaffold templ
   <id>/team.json        # roster: stages, schedule, permissions.deny, pack.required, outputPath
   <id>/agents/*.md      # generic, brand-neutral role prompts
   <id>/pack-templates/  # files copied into a project's pack on first run
-team-registry.js   # load/validate team.json (+ pack.required, pack-templates)
-team-orchestrator.js  # run engine: scaffold+halt gate, worktree-isolated stage pipeline
-team-output.js     # .glissa/teams/<id>/ paths, pack scaffold/status, run log + summaries
-team-git.js        # per-run git worktree isolation + fast-forward merge back
-team-prompt.js     # stage prompt builder (embeds pack + run paths)
-team-setup.js      # guided pack setup: interview prompt + interactive setup-session helpers
+teamlib/           # Team runtime server modules
+  team-registry.js   # load/validate team.json (+ pack.required, pack-templates)
+  team-orchestrator.js  # run engine: scaffold+halt gate, worktree-isolated stage pipeline
+  team-output.js     # .glissa/teams/<id>/ paths, pack scaffold/status, run log + summaries
+  team-git.js        # per-run git worktree isolation + fast-forward merge back
+  team-prompt.js     # stage prompt builder (embeds pack + run paths)
+  team-setup.js      # guided pack setup: interview prompt + interactive setup-session helpers
+  team-settings.js   # per-stage spawn options and permission config
+  team-blacklist.js  # glob deny-list enforcement (test-only, not published)
 config.json        # Runtime configuration
 dist/              # Vite production build output (gitignored)
 ```
@@ -83,7 +99,7 @@ Do NOT add dependencies without explicit instruction.
 ### CSS Convention
 
 - **Tailwind utility classes** for static HTML markup (`index.html`)
-- **Semantic classes** in `style.css` for JS-created DOM elements (`session-card.js`, `dialogs.js`)
+- **Semantic classes** in `style.css` for JS-created DOM elements (`session-card/lifecycle.js`, `session-card/card-dom.js`, `dialogs.js`)
 - **State-driven styles** via `[data-state]` attribute selectors in `style.css`
 - **Animations** (`@keyframes`) and pseudo-elements (`::before`) in `style.css`
 - **Theme** defined in `public/tailwind.css` via `@theme` block — maps colors, fonts, radii
