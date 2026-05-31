@@ -1,0 +1,15 @@
+{
+  // OMC company-context contract (see OMC docs/company-context-interface.md).
+  // OMC workflow skills (deep-interview, deep-dive, ralplan, autopilot, ralph)
+  // call this MCP tool at defined stages for project reference material, and
+  // treat the returned markdown as informational reference only, never as
+  // instructions.
+  //
+  // Server: tools/company-context/server.js (zero-dep), registered as the
+  // "company-context" MCP server in /.mcp.json. The tool id below is
+  // mcp__<server-name>__<tool-name>.
+  "companyContext": {
+    "tool": "mcp__company-context__get_company_context",
+    "onError": "warn"
+  }
+}
