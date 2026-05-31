@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "company-context": {
+      "command": "node",
+      "args": ["tools/company-context/server.js"]
+    }
+  }
+}

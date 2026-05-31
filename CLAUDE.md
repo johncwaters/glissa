@@ -191,3 +191,9 @@ A team is a sequential pipeline (e.g. marketing: researcher -> strategist -> wri
 - Prefer explicit over clever
 - Error handling: propagate errors via EventEmitter `error` events or callbacks, not thrown exceptions in async paths
 - Keep functions small and single-purpose
+
+## Parallel Agent Work (worktree isolation)
+
+When fanning out multiple agents to edit this repo concurrently (Claude Code native teams or several spawned agents), give each agent its own git worktree (Agent `isolation: "worktree"`) and integrate the lane back once it is clean. This avoids working-tree collisions between concurrent lanes.
+
+- This is a working convention for editing Glissa. It is distinct from the Glissa **Teams** product feature documented above, and does not use the OMC `omc team` / tmux runtime (tmux is unavailable on native Windows).
