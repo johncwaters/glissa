@@ -35,15 +35,15 @@ const { createWsSender } = require('./ws-sender');
 const { HookRouter } = require('./detection/hook-source');
 const { sweepOrphans } = require('./detection/settings-injector');
 const { spawn } = require('node:child_process');
-const { loadTeam, listTeams } = require('./team-registry');
-const { createOrchestrator } = require('./team-orchestrator');
+const { loadTeam, listTeams } = require('./teamlib/team-registry');
+const { createOrchestrator } = require('./teamlib/team-orchestrator');
 const { createScheduler } = require('./scheduler');
 const { createSpawnGate } = require('./spawn-gate');
-const { createGitWorkspace } = require('./team-git');
-const { buildStageSpawnOptions, teamPermissions } = require('./team-settings');
-const { buildStagePrompt } = require('./team-prompt');
-const { buildSetupPrompt, setupSessionId, setupSessionName, packPaths } = require('./team-setup');
-const teamOutput = require('./team-output');
+const { createGitWorkspace } = require('./teamlib/team-git');
+const { buildStageSpawnOptions, teamPermissions } = require('./teamlib/team-settings');
+const { buildStagePrompt } = require('./teamlib/team-prompt');
+const { buildSetupPrompt, setupSessionId, setupSessionName, packPaths } = require('./teamlib/team-setup');
+const teamOutput = require('./teamlib/team-output');
 
 /**
  * Create and wire the Glissa backend onto an existing HTTP server.

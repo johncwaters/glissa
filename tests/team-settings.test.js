@@ -4,9 +4,9 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('node:path');
 
-const { buildStageSpawnOptions, teamPermissions, stageModel } = require('../team-settings');
+const { buildStageSpawnOptions, teamPermissions, stageModel } = require('../teamlib/team-settings');
 const { buildHookSettings } = require('../detection/settings-injector');
-const { loadTeam } = require('../team-registry');
+const { loadTeam } = require('../teamlib/team-registry');
 
 const TEAM = loadTeam('marketing', path.join(__dirname, '..', 'teams'));
 const byId = (id) => TEAM.stages.find((s) => s.id === id);

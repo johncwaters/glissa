@@ -6,8 +6,8 @@ const path = require('node:path');
 
 const {
   buildSetupPrompt, setupSessionId, setupSessionName, packPaths,
-} = require('../team-setup');
-const { PACK_SENTINEL } = require('../team-output');
+} = require('../teamlib/team-setup');
+const { PACK_SENTINEL } = require('../teamlib/team-output');
 
 const TEAM = {
   id: 'marketing',

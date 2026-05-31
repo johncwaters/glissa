@@ -11,7 +11,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 
-const { createGitWorkspace } = require('../team-git');
+const { createGitWorkspace } = require('../teamlib/team-git');
 
 function hasGit() {
   try { execFileSync('git', ['--version'], { stdio: 'ignore' }); return true; } catch { return false; }

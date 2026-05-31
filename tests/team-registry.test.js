@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { loadTeam, listTeams, validateAndNormalize } = require('../team-registry');
+const { loadTeam, listTeams, validateAndNormalize } = require('../teamlib/team-registry');
 
 const REPO_TEAMS = path.join(__dirname, '..', 'teams');
 const MKT_DIR = path.join(REPO_TEAMS, 'marketing');

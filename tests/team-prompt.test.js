@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { buildStagePrompt, writePromptFile } = require('../team-prompt');
+const { buildStagePrompt, writePromptFile } = require('../teamlib/team-prompt');
 
 test('buildStagePrompt embeds agent text and every run-context path', () => {
   const runDir = 'C:/proj/.glissa/teams/marketing/runs/2026-06-02-tuesday';

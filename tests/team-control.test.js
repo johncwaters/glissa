@@ -12,7 +12,7 @@ const path = require('node:path');
 const { EventEmitter } = require('node:events');
 
 const { registerControlHandlers } = require('../control-handlers');
-const { loadTeam } = require('../team-registry');
+const { loadTeam } = require('../teamlib/team-registry');
 
 const REPO_TEAMS = path.join(__dirname, '..', 'teams');
 

@@ -4,8 +4,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('node:path');
 
-const { isDenied, globToRegExp } = require('../team-blacklist');
-const { loadTeam } = require('../team-registry');
+const { isDenied, globToRegExp } = require('../teamlib/team-blacklist');
+const { loadTeam } = require('../teamlib/team-registry');
 
 // Apply the REAL marketing deny-list to representative tool calls.
 const DENY = loadTeam('marketing', path.join(__dirname, '..', 'teams')).permissions.deny;

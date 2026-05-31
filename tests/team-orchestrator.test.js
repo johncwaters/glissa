@@ -7,11 +7,11 @@ const os = require('node:os');
 const path = require('node:path');
 const { EventEmitter } = require('node:events');
 
-const { createOrchestrator } = require('../team-orchestrator');
-const { loadTeam } = require('../team-registry');
-const teamOutput = require('../team-output');
-const { buildStagePrompt } = require('../team-prompt');
-const { buildStageSpawnOptions, teamPermissions } = require('../team-settings');
+const { createOrchestrator } = require('../teamlib/team-orchestrator');
+const { loadTeam } = require('../teamlib/team-registry');
+const teamOutput = require('../teamlib/team-output');
+const { buildStagePrompt } = require('../teamlib/team-prompt');
+const { buildStageSpawnOptions, teamPermissions } = require('../teamlib/team-settings');
 const { createSpawnGate } = require('../spawn-gate');
 
 const REPO_TEAMS = path.join(__dirname, '..', 'teams');

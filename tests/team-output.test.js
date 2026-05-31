@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const out = require('../team-output');
+const out = require('../teamlib/team-output');
 
 const OUT = '.glissa/teams/marketing';
 const TEMPLATES = path.join(__dirname, '..', 'teams', 'marketing', 'pack-templates');
