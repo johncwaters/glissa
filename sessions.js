@@ -75,6 +75,31 @@ function buildSpawnCommand({ platform, resolved, settingsArgs = [], claudeArgs =
   return { file: "cmd.exe", args: ["/c", "claude", ...childArgs] };
 }
 
+// Pure: map the requested Windows console backend to node-pty spawn options.
+// Non-Windows always returns {} (these flags are Windows-only and ignored elsewhere).
+//
+// Why this exists: on Win11 node-pty defaults to the OS ConPTY, whose *headless*
+// pseudoconsole makes a grandchild console process (e.g. Claude Code's
+// UserPromptSubmit command hooks spawning node.exe) allocate a brand-new console
+// window -> a focus-steal that raises the host terminal on every prompt send.
+// 'dll' selects node-pty's bundled, newer ConPTY (useConptyDll), which fixes that
+// behavior -- the same lever VS Code shipped for the identical bug -- while keeping
+// full ConPTY fidelity. 'os-conpty' is the historical default (no flag); it is also
+// the automatic fallback when the bundled dll fails to load. 'winpty' is the legacy
+// last-rung backend (real-but-hidden console) selectable only by explicit override.
+function buildPtyBackendOpts({ platform, conptyMode = "dll" }) {
+  if (platform !== "win32") return {};
+  switch (conptyMode) {
+    case "dll":
+      return { useConptyDll: true };
+    case "winpty":
+      return { useConpty: false };
+    case "os-conpty":
+    default:
+      return {};
+  }
+}
+
 // ---------------------------------------------------------------------------
 // State machine. Status is driven by structural signals from StatusSource
 // (Claude Code hooks = authoritative; OSC-0 title = degraded fallback), mapped
@@ -191,6 +216,11 @@ class Session extends EventEmitter {
     // PTY spawner seam. Defaults to node-pty; tests inject a fake to assert the
     // spawn wiring (file/args) without launching a real process.
     ptySpawn = null,
+    // Windows console backend: 'dll' (bundled ConPTY, default — fixes the
+    // grandchild-console focus-steal on prompt send), 'os-conpty' (historical OS
+    // ConPTY, also the auto-fallback if the bundled dll fails to load), or 'winpty'
+    // (legacy). Ignored on non-Windows. See buildPtyBackendOpts.
+    conptyMode = "dll",
   }) {
     super();
     this.id = id;
@@ -227,6 +257,7 @@ class Session extends EventEmitter {
     this._hookSeen = false;
     this._lastSignal = null;
     this._spawnCommand = spawnCommand;
+    this._conptyMode = conptyMode;
     this._ptySpawn = ptySpawn || ((file, args, opts) => pty.spawn(file, args, opts));
 
     this._titleSource = createOscTitleSource({ stabilizationMs: titleStabilizationMs });
@@ -489,14 +520,19 @@ class Session extends EventEmitter {
       claudeArgs,
     });
 
+    const baseOpts = {
+      name: "xterm-256color",
+      cols: 80,
+      rows: 24,
+      cwd: this.path,
+      env,
+    };
+    const backendOpts = buildPtyBackendOpts({
+      platform: process.platform,
+      conptyMode: this._conptyMode,
+    });
     try {
-      this.ptyProcess = this._ptySpawn(file, args, {
-        name: "xterm-256color",
-        cols: 80,
-        rows: 24,
-        cwd: this.path,
-        env,
-      });
+      this.ptyProcess = this._spawnWithBackendFallback(file, args, baseOpts, backendOpts);
     } catch (err) {
       this._cleanupHooks();
       this.transition("spawn_fail", { error: err.message });
@@ -532,6 +568,25 @@ class Session extends EventEmitter {
     this.ptyProcess.onExit(({ exitCode, signal }) =>
       this._handlePtyExit(exitCode, signal),
     );
+  }
+
+  // Spawn the PTY, tolerating a bundled-ConPTY load failure. Only the 'dll' backend
+  // can fail to LOAD (node-pty throws when conpty.dll can't be loaded); in that one
+  // case we retry once with the OS ConPTY (no backend flag) so a missing/unloadable
+  // dll never regresses spawning. Any other failure (or a failure of the fallback
+  // itself) propagates to start()'s spawn_fail handler.
+  _spawnWithBackendFallback(file, args, baseOpts, backendOpts) {
+    try {
+      return this._ptySpawn(file, args, { ...baseOpts, ...backendOpts });
+    } catch (err) {
+      if (backendOpts && backendOpts.useConptyDll) {
+        console.warn(
+          `[session ${this.id}] useConptyDll spawn failed (${err.message}); falling back to OS ConPTY`,
+        );
+        return this._ptySpawn(file, args, { ...baseOpts });
+      }
+      throw err;
+    }
   }
 
   // Write the per-session hook settings file and register with the shared
@@ -916,6 +971,7 @@ class Session extends EventEmitter {
 module.exports = {
   Session,
   buildSpawnCommand,
+  buildPtyBackendOpts,
   resolveClaudeCommand,
   classifyClaudeKind,
   CLAUDE_CMD,
