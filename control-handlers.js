@@ -384,7 +384,7 @@ function registerControlHandlers(controlWss, deps) {
     const { teamId, projectId } = msg;
     const out = {
       type: 'team-runs', requestId: msg.requestId || null, teamId, projectId,
-      runs: [], active: false, nextFire: null, enabled: false, schedule: null,
+      runs: [], active: false, live: null, nextFire: null, enabled: false, schedule: null,
     };
     try {
       let team = null;
@@ -397,7 +397,14 @@ function registerControlHandlers(controlWss, deps) {
       out.enabled = !!activation?.enabled;
       out.schedule = activation?.schedule || team?.schedule || null;
       if (out.schedule?.days) out.nextFire = computeNextFire(out.schedule);
-      if (orchestrator) out.active = orchestrator.isActive(teamId, projectId);
+      if (orchestrator) {
+        out.active = orchestrator.isActive(teamId, projectId);
+        // Live snapshot so a re-mounting/second client rehydrates the active stage, a continuous
+        // elapsed timer, and any in-flight cancel, instead of a blank rail + a zeroed clock.
+        if (out.active && typeof orchestrator.getRunState === 'function') {
+          out.live = orchestrator.getRunState(teamId, projectId);
+        }
+      }
     } catch (err) {
       ws.send(JSON.stringify({ type: 'error', requestId: msg.requestId || null, message: err.message }));
       return;

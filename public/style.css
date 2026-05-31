@@ -2262,6 +2262,15 @@ body[data-active-view="teams"] #minimized-bar { display: none; }
 .team-sched-edit:focus-visible,
 .team-remove-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
+/* While a run is active the schedule option is hidden (not actionable mid-run, confusing next to
+   Cancel). Driven by .run-active on the panel, mirroring the .collapsed idiom. Remove is intentionally
+   NOT listed: it stays visible-but-disabled. A state class is used rather than the .hidden property
+   because .team-sched-toggle has display:inline-flex, which would override the UA [hidden] rule. */
+.team-panel.run-active .team-sched-toggle,
+.team-panel.run-active .team-sched-summary,
+.team-panel.run-active .team-sched-edit,
+.team-panel.run-active .team-sched-editor { display: none; }
+
 /* Schedule editor (revealed by Edit) */
 .team-sched-editor {
   margin: 0 0 16px;

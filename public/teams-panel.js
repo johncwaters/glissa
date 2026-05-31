@@ -190,28 +190,53 @@ function setRunning(refs, on) {
   refs.running = on;
   if (on) setCollapsed(refs, false); // a running team always shows its pipeline
   refs.runGroup.classList.toggle('running', on);
+  // The schedule option is not actionable mid-run and reads as confusing next to Cancel, so hide it via
+  // the .run-active state class (CSS). We use a class rather than the .hidden property because the
+  // schedule toggle has display:inline-flex, which would override the UA [hidden] rule. Remove stays
+  // visible-but-disabled.
+  refs.panel.classList.toggle('run-active', on);
   refs.runBtn.hidden = on;
   refs.cancelBtn.hidden = !on;
-  refs.schedCb.disabled = on;
-  refs.editBtn.disabled = on;
   refs.removeBtn.disabled = on;
   if (on) {
+    refs.editor.wrap.hidden = true; // force-close a possibly-open editor so it cannot reappear post-run
+    refs.editBtn.setAttribute('aria-expanded', 'false');
     if (!refs.timer) {
       if (!refs.stageStartMs) refs.stageStartMs = Date.now();
       refs.timer = setInterval(() => tickElapsed(refs), 1000);
       tickElapsed(refs);
     }
-  } else if (refs.timer) {
-    clearInterval(refs.timer);
-    refs.timer = null;
-    refs.elapsedEl.textContent = '';
-    refs.stageStartMs = 0;
+  } else {
+    refs.schedCb.checked = refs.enabled; // re-sync on un-hide (covers team-run-skipped, no refreshInstance)
+    if (refs.timer) {
+      clearInterval(refs.timer);
+      refs.timer = null;
+      refs.elapsedEl.textContent = '';
+      refs.stageStartMs = 0;
+    }
   }
+}
+
+// Rehydrate a freshly-mounted panel from the server's live snapshot so a tab switch (or a second
+// client) restores the active stage, a continuous elapsed timer, and any in-flight cancel, instead
+// of a blank rail, a zeroed clock, and a generic "Running…". The timer continues from the server's
+// stageStartedAtMs (the Glissa client and server share one machine, so Date.now() is a common clock).
+function rehydrateLive(refs, live) {
+  if (live && live.stageStartedAtMs) refs.stageStartMs = live.stageStartedAtMs;
+  setRunning(refs, true); // setRunning keeps the stageStartMs we set above, so elapsed is true wall-clock
+  if (live && live.currentStage) {
+    markStage(refs.stageNodes, live.currentStage, 'active');
+    setStatus(refs, `${labelFor(live.currentStage)} · ${stageIndexLabel(refs, live.currentStage)}`, 'run');
+  } else {
+    setStatus(refs, 'Running…', 'run');
+  }
+  if (live && live.cancelling) setStatus(refs, 'Cancelling…', '');
 }
 
 function failText(msg) {
   if (msg.reason === 'halt') return 'No topic available, the content calendar had nothing to cover.';
   const at = msg.stage ? ` @ ${labelFor(msg.stage)}` : '';
+  if (msg.reason === 'cancelled') return `Cancelled${at}`; // user-initiated stop reads as cancelled, not failed
   const why = msg.reason ? ` · ${msg.reason}` : '';
   return `Failed${at}${why}`;
 }
@@ -327,8 +352,7 @@ function refreshInstance(refs) {
       applyScheduleSummary(refs, msg.nextFire);
       renderRuns(refs, msg.runs || []);
       if (msg.active && !refs.running) {
-        setRunning(refs, true);
-        setStatus(refs, 'Running…', 'run');
+        rehydrateLive(refs, msg.live);
         runningKeys.add(key(refs.teamId, refs.projectId));
         setTabActivity();
       }
@@ -825,6 +849,9 @@ export function handleTeamMessage(msg) {
       break;
     case 'team-stage-complete':
       markStage(refs.stageNodes, msg.stage, 'done');
+      break;
+    case 'team-run-cancelling':
+      setStatus(refs, 'Cancelling…', '');
       break;
     case 'team-run-complete':
       settleActive(refs.stageNodes);

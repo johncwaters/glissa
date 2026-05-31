@@ -169,6 +169,7 @@ const messageHandlers = {
   'team-run-started':   (msg) => handleTeamMessage(msg),
   'team-stage-started': (msg) => handleTeamMessage(msg),
   'team-stage-complete': (msg) => handleTeamMessage(msg),
+  'team-run-cancelling': (msg) => handleTeamMessage(msg),
   'team-run-complete':  (msg) => handleTeamMessage(msg),
   'team-run-failed':    (msg) => handleTeamMessage(msg),
   'team-run-skipped':   (msg) => handleTeamMessage(msg),

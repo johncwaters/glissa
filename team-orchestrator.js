@@ -67,10 +67,17 @@ function createOrchestrator(deps) {
     clearTimeoutFn = clearTimeout,
     readFile = (p) => fs.readFileSync(p, 'utf8'),
     runLabel = defaultRunLabel,
+    // Lifecycle logging. Default writes a `[team] ...` line to the server console (matching the
+    // `[control]`/`[session]` prefixes elsewhere); injectable so tests can silence it.
+    log = (msg) => console.log(`[team] ${msg}`),
   } = deps;
 
   const emitter = new EventEmitter();
-  const active = new Map(); // lockKey -> { cancelled, session }
+  // lockKey -> live run state. `cancelled` drives the loop's exit; `cancelling` drives the UI state
+  // and survives a dashboard tab re-mount via getRunState(). currentStage/stageStartedAtMs let a
+  // re-mounting (or second) client rehydrate the live pipeline and a continuous elapsed timer instead
+  // of resetting to a blank rail and a zeroed clock.
+  const active = new Map();
 
   function readText(p) {
     try {
@@ -133,10 +140,15 @@ function createOrchestrator(deps) {
     if (active.has(lockKey)) {
       output.ensureStructure(projectPath, team.outputPath);
       output.appendLog(projectPath, team.outputPath, `${dateStr} | (skipped) | - | SKIPPED (active run)`);
+      log(`run skipped (already active): ${lockKey}`);
       emitter.emit('team-run-skipped', { teamId, projectId });
       return { skipped: true };
     }
-    active.set(lockKey, { cancelled: false, session: null });
+    active.set(lockKey, {
+      cancelled: false, cancelling: false, session: null,
+      runId: '', runStartedAtMs: 0, currentStage: null, stageStartedAtMs: 0,
+    });
+    log(`run requested: ${lockKey} (trigger=${trigger})`);
 
     let workspace = { cwd: projectPath, isGit: false };
     let runId = '';
@@ -172,6 +184,7 @@ function createOrchestrator(deps) {
       const pack = output.packStatus(projectPath, team.outputPath, team.packRequired);
       if (!pack.configured) {
         output.appendLog(projectPath, team.outputPath, `${dateStr} | (setup) | - | NEEDS_SETUP (${pack.unfilled.join(', ')})`);
+        log(`run halted: ${lockKey} needs pack setup (${pack.unfilled.join(', ')})`);
         emitter.emit('team-run-needs-setup', {
           teamId, projectId, packDir: pack.packDir, unfilled: pack.unfilled,
         });
@@ -193,6 +206,9 @@ function createOrchestrator(deps) {
       runId = path.basename(runDir);
       const packDir = path.join(cwd, team.outputPath, 'pack');
       const packFiles = (team.packRequired || []).map((name) => ({ name, path: path.join(packDir, name) }));
+      const runEntry = active.get(lockKey);
+      if (runEntry) { runEntry.runId = runId; runEntry.runStartedAtMs = now().getTime(); }
+      log(`run started: ${lockKey} runId=${runId}${workspace.branch ? ` branch=${workspace.branch}` : ''}`);
       emitter.emit('team-run-started', { teamId, projectId, runId, runDir, trigger, branch: workspace.branch || null });
 
       let topic = '';
@@ -203,6 +219,7 @@ function createOrchestrator(deps) {
         if (stage.runIfVerdict && verdict !== stage.runIfVerdict) continue;
         if (active.get(lockKey).cancelled) {
           output.appendLog(cwd, team.outputPath, `${dateStr} | ${topic || '(topic)'} | ${platforms || '-'} | CANCELLED`);
+          log(`run cancelled: ${lockKey} before stage ${stage.id}`);
           finalize('discard');
           emitter.emit('team-run-failed', { teamId, projectId, reason: 'cancelled', stage: stage.id });
           return { cancelled: true, stage: stage.id };
@@ -213,17 +230,22 @@ function createOrchestrator(deps) {
         const prompt = buildStagePrompt(readText(stage.agentPath), {
           runDir, packDir, packFiles, reads, produces,
         });
+        const stageEntry = active.get(lockKey);
+        if (stageEntry) { stageEntry.currentStage = stage.id; stageEntry.stageStartedAtMs = now().getTime(); }
+        log(`stage start: ${lockKey} ${stage.id} (${stage.model || 'sonnet'})`);
         emitter.emit('team-stage-started', { teamId, projectId, runId, stage: stage.id });
 
         const result = await runStage({ team, stage, runId, projectPath: cwd, prompt, lockKey });
         if (active.get(lockKey).cancelled) {
           output.appendLog(cwd, team.outputPath, `${dateStr} | ${topic || '(topic)'} | ${platforms || '-'} | CANCELLED`);
+          log(`run cancelled: ${lockKey} at stage ${stage.id}`);
           finalize('discard');
           emitter.emit('team-run-failed', { teamId, projectId, reason: 'cancelled', stage: stage.id });
           return { cancelled: true, stage: stage.id };
         }
         if (!result.ok) {
           output.appendLog(cwd, team.outputPath, `${dateStr} | ${topic || '(topic)'} | ${platforms || '-'} | FAILED @${stage.id} (${result.reason})`);
+          log(`run failed: ${lockKey} at stage ${stage.id} (${result.reason})`);
           emitter.emit('team-run-failed', { teamId, projectId, reason: result.reason, stage: stage.id });
           return { failedStage: stage.id, reason: result.reason };
         }
@@ -233,6 +255,7 @@ function createOrchestrator(deps) {
         // a halt brief legitimately omits the normal sections.
         if (stage.haltSignal && produced.includes(stage.haltSignal)) {
           output.appendLog(cwd, team.outputPath, `${dateStr} | (none) | - | HALT (${stage.haltSignal})`);
+          log(`run halted: ${lockKey} at stage ${stage.id} (${stage.haltSignal})`);
           emitter.emit('team-run-failed', { teamId, projectId, reason: 'halt', stage: stage.id, signal: stage.haltSignal });
           return { halted: stage.haltSignal, stage: stage.id };
         }
@@ -241,6 +264,7 @@ function createOrchestrator(deps) {
         const check = output.verifyHandoff(produces.path, stage.requiredSections || []);
         if (!check.ok) {
           output.appendLog(cwd, team.outputPath, `${dateStr} | ${topic || '(topic)'} | ${platforms || '-'} | FAILED @${stage.id} (missing: ${check.missing.join(', ')})`);
+          log(`run failed: ${lockKey} at stage ${stage.id} (incomplete handoff, missing: ${check.missing.join(', ')})`);
           emitter.emit('team-run-failed', { teamId, projectId, reason: 'incomplete-handoff', stage: stage.id, missing: check.missing });
           return { failedStage: stage.id, missing: check.missing };
         }
@@ -248,11 +272,13 @@ function createOrchestrator(deps) {
         if (stage.id === 'strategist') platforms = clip(sectionFirstLine(produced, 'Platforms')) || platforms;
         if (stage.verdict) verdict = parseVerdict(produced, stage.verdict);
 
+        log(`stage complete: ${lockKey} ${stage.id}${verdict ? ` verdict=${verdict}` : ''}`);
         emitter.emit('team-stage-complete', { teamId, projectId, runId, stage: stage.id, verdict });
       }
 
       output.appendLog(cwd, team.outputPath, `${dateStr} | ${topic || '(topic)'} | ${platforms || '-'} | ${verdict || 'DONE'}`);
       const integ = finalize('integrate');
+      log(`run complete: ${lockKey} runId=${runId} verdict=${verdict || 'DONE'}${integ.merged ? ' (merged)' : ''}`);
       emitter.emit('team-run-complete', { teamId, projectId, runId, runDir, verdict, branch: integ.branch, base: integ.base, merged: integ.merged });
       return { ok: true, verdict, runDir, branch: integ.branch, merged: integ.merged };
     } finally {
@@ -268,8 +294,17 @@ function createOrchestrator(deps) {
     const entry = active.get(lockKey);
     if (!entry) return false;
     entry.cancelled = true;
+    entry.cancelling = true;
+    log(`cancel requested: ${lockKey}${entry.currentStage ? ` (stage ${entry.currentStage})` : ''}`);
+    // Signal every client (and a re-mounting tab, via getRunState) to show "Cancelling…".
+    emitter.emit('team-run-cancelling', { teamId, projectId, stage: entry.currentStage || null });
     if (entry.session) {
-      try { entry.session.destroy(); } catch { /* best-effort */ }
+      // Use kill() (process-tree teardown that KEEPS listeners), NOT destroy(): destroy() calls
+      // removeAllListeners(), which strips the 'exit' handler runStage installed to resolve the stage.
+      // With kill(), the PTY 'exit' still reaches that handler, so the stage settles and the run ends
+      // promptly as cancelled instead of hanging until the stage timeout. runStage's finish() then
+      // calls destroy() for full cleanup once the stage has settled.
+      try { entry.session.kill(); } catch { /* best-effort */ }
     }
     return true;
   }
@@ -278,9 +313,25 @@ function createOrchestrator(deps) {
     return active.has(`${teamId}:${projectId}`);
   }
 
+  // Live snapshot for a re-mounting or second dashboard client: which stage is active and when the
+  // run + current stage started (so the elapsed timer stays continuous instead of resetting to 0),
+  // plus whether a cancel is in flight. Returns null when no run is active.
+  function getRunState(teamId, projectId) {
+    const entry = active.get(`${teamId}:${projectId}`);
+    if (!entry) return null;
+    return {
+      runId: entry.runId || null,
+      currentStage: entry.currentStage || null,
+      runStartedAtMs: entry.runStartedAtMs || 0,
+      stageStartedAtMs: entry.stageStartedAtMs || 0,
+      cancelling: !!entry.cancelling,
+    };
+  }
+
   emitter.runTeam = runTeam;
   emitter.cancelRun = cancelRun;
   emitter.isActive = isActive;
+  emitter.getRunState = getRunState;
   emitter.activeCount = () => active.size;
   return emitter;
 }

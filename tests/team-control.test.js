@@ -104,6 +104,38 @@ test('get-team-runs returns run summaries + active flag', () => {
   assert.equal(msg.runs[0].verdict, 'SHIP');
 });
 
+test('get-team-runs includes a live snapshot (current stage + timestamps) while active', () => {
+  const h = harness({
+    registry: realRegistry,
+    teamOutput: { listRunSummaries: () => [] },
+    getProjectPathById: () => 'C:/proj',
+    orchestrator: {
+      isActive: () => true,
+      getRunState: () => ({ runId: '2026-06-02-tuesday', currentStage: 'writer', runStartedAtMs: 1000, stageStartedAtMs: 2000, cancelling: false }),
+    },
+  });
+  h.send({ type: 'get-team-runs', teamId: 'marketing', projectId: 'p1', requestId: 'g4' });
+  const msg = h.sent.find((m) => m.type === 'team-runs');
+  assert.equal(msg.active, true);
+  assert.ok(msg.live, 'includes a live snapshot so a re-mounting client can rehydrate');
+  assert.equal(msg.live.currentStage, 'writer');
+  assert.equal(msg.live.stageStartedAtMs, 2000);
+  assert.equal(msg.live.cancelling, false);
+});
+
+test('get-team-runs omits the live snapshot when no run is active', () => {
+  const h = harness({
+    registry: realRegistry,
+    teamOutput: { listRunSummaries: () => [] },
+    getProjectPathById: () => 'C:/proj',
+    orchestrator: { isActive: () => false, getRunState: () => assert.fail('must not query run state when inactive') },
+  });
+  h.send({ type: 'get-team-runs', teamId: 'marketing', projectId: 'p1', requestId: 'g5' });
+  const msg = h.sent.find((m) => m.type === 'team-runs');
+  assert.equal(msg.active, false);
+  assert.equal(msg.live, null);
+});
+
 test('set-team-schedule persists an activation and reloads the scheduler', () => {
   let reloaded = null;
   const h = harness({ scheduler: { reload: (teams) => { reloaded = teams; } } });

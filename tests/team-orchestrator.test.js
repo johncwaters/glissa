@@ -42,7 +42,7 @@ function fakeFactory(behaviors) {
     const ee = new EventEmitter();
     ee.start = () => {
       const b = behaviors[stageId] || { exitCode: 0 };
-      if (b.hang) return; // never completes until destroy()
+      if (b.hang) return; // never completes on its own; only a kill() ends it
       const m = /Write your single output file to: (.+)/.exec(sessionOpts.initialPrompt || '');
       const producesPath = m ? m[1].trim() : null;
       setImmediate(() => {
@@ -50,7 +50,13 @@ function fakeFactory(behaviors) {
         ee.emit('exit', { exitCode: b.exitCode == null ? 0 : b.exitCode });
       });
     };
-    ee.destroy = () => { setImmediate(() => ee.emit('exit', { exitCode: 137 })); };
+    // Real Session.kill() tears down the process tree but KEEPS its listeners, so the pending 'exit'
+    // still reaches runStage's handler, which is what lets a cancel resolve the in-flight stage.
+    ee.kill = () => { setImmediate(() => ee.emit('exit', { exitCode: 137 })); };
+    // Real Session.destroy() calls removeAllListeners(). Model that faithfully: a regression that
+    // cancels via destroy() instead of kill() would strip the 'exit' listener before it fires and
+    // strand the run until the stage timeout, which would hang the cancel tests below.
+    ee.destroy = () => { ee.removeAllListeners(); };
     return ee;
   };
 }
@@ -68,9 +74,10 @@ function makeOrch(tmpProj, behaviors, opts = {}) {
     makeStageSession: fakeFactory(behaviors),
     gitWorkspace: opts.gitWorkspace || null,
     now: () => new Date(Date.UTC(2026, 5, 2, 18, 0, 0)),
+    log: () => {}, // keep lifecycle logging out of the test output (it pipes through `tail`)
   });
   for (const name of ['team-run-started', 'team-stage-started', 'team-stage-complete',
-    'team-run-complete', 'team-run-failed', 'team-run-skipped', 'team-run-needs-setup']) {
+    'team-run-cancelling', 'team-run-complete', 'team-run-failed', 'team-run-skipped', 'team-run-needs-setup']) {
     orch.on(name, (p) => events.push({ name, ...p }));
   }
   return { orch, events };
@@ -296,6 +303,51 @@ test('a second concurrent run is skipped; cancelRun releases the first', async (
     assert.equal(orch.cancelRun('marketing', 'p1'), true);
     const firstRes = await first;
     assert.equal(firstRes.cancelled, true);
+  } finally {
+    fs.rmSync(proj, { recursive: true, force: true });
+  }
+});
+
+test('cancel resolves the in-flight stage promptly (kill, not destroy) and ends as cancelled', async () => {
+  const proj = tmpProject();
+  try {
+    seedPack(proj);
+    const { orch, events } = makeOrch(proj, { researcher: { hang: true } });
+    const run = orch.runTeam({ teamId: 'marketing', projectId: 'p1' });
+    await new Promise((r) => setImmediate(r)); // acquire the lock + spawn the hanging stage
+    assert.equal(orch.isActive('marketing', 'p1'), true);
+    assert.equal(orch.cancelRun('marketing', 'p1'), true);
+    // If cancelRun regressed to session.destroy(), the fake strips its 'exit' listener and this await
+    // would never resolve (the real bug: hang until the stage timeout). kill() keeps the listener.
+    const res = await run;
+    assert.equal(res.cancelled, true);
+    assert.ok(events.some((e) => e.name === 'team-run-cancelling'), 'emitted a cancelling signal for clients');
+    const failed = events.find((e) => e.name === 'team-run-failed');
+    assert.ok(failed && failed.reason === 'cancelled', 'ended as cancelled via the stage exit');
+    assert.equal(orch.isActive('marketing', 'p1'), false, 'released the lock');
+  } finally {
+    fs.rmSync(proj, { recursive: true, force: true });
+  }
+});
+
+test('getRunState exposes the live stage + timestamps while active, cancelling on cancel, null otherwise', async () => {
+  const proj = tmpProject();
+  try {
+    seedPack(proj);
+    const { orch } = makeOrch(proj, { researcher: { hang: true } });
+    assert.equal(orch.getRunState('marketing', 'p1'), null, 'null before any run');
+    const run = orch.runTeam({ teamId: 'marketing', projectId: 'p1' });
+    await new Promise((r) => setImmediate(r));
+    const live = orch.getRunState('marketing', 'p1');
+    assert.ok(live, 'a snapshot while active');
+    assert.equal(live.currentStage, 'researcher');
+    assert.ok(live.stageStartedAtMs > 0, 'records when the current stage started');
+    assert.equal(live.cancelling, false);
+    orch.cancelRun('marketing', 'p1'); // synchronous: flips cancelling before the stage unwinds
+    const mid = orch.getRunState('marketing', 'p1');
+    assert.ok(mid && mid.cancelling === true, 'cancelling flag visible to a re-mounting client');
+    await run;
+    assert.equal(orch.getRunState('marketing', 'p1'), null, 'null after the run ends');
   } finally {
     fs.rmSync(proj, { recursive: true, force: true });
   }
