@@ -57,3 +57,36 @@ for (const state of [STATES.WAITING, STATES.IDLE, STATES.COMPLETE, STATES.RUNNIN
     }
   });
 }
+
+// Regression: a restarted PTY must respawn at the last browser-pushed size, not
+// the 80x24 default. Otherwise Claude initializes its TUI at 80x24 and renders
+// cramped, since the lone post-reconnect resize races startup and is never
+// retried once the browser-side fit cache matches.
+test('restart respawns the PTY at the last resized dimensions', () => {
+  const spawnOpts = [];
+  const s = new Session({
+    id: 'respawn-size-test',
+    name: 'respawn-size-test',
+    path: process.cwd(),
+    spawnCommand: { path: process.execPath, kind: 'exe' },
+    ptySpawn: (_file, _args, opts) => {
+      spawnOpts.push({ cols: opts.cols, rows: opts.rows });
+      return fakePty([]);
+    },
+  });
+  try {
+    s.start(); // first spawn: no size known yet -> 80x24 default
+    assert.deepEqual(spawnOpts.at(-1), { cols: 80, rows: 24 },
+      'first spawn should use the 80x24 default');
+
+    s.resize(120, 40);
+
+    // restart() only fires from DONE/FAILED.
+    s.state = STATES.DONE;
+    s.restart();
+    assert.deepEqual(spawnOpts.at(-1), { cols: 120, rows: 40 },
+      'restart should respawn at the last resized size, not 80x24');
+  } finally {
+    s.destroy();
+  }
+});

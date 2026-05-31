@@ -256,6 +256,15 @@ class Session extends EventEmitter {
     this._autoKilled = false;
     this._destroyed = false;
     this._pendingRestart = false;
+    // True only between a successful spawn and the kill/exit that follows. Gates
+    // write() so we never push input into a pty whose console pipe is already
+    // dead (see write() and the conin-socket guard in start()).
+    this._ptyAlive = false;
+    // Last cols/rows pushed from the browser. A restarted PTY respawns at these
+    // (not the 80x24 default) so Claude initializes its TUI at the correct size
+    // instead of relying on a single post-reconnect resize that races startup.
+    this._lastCols = null;
+    this._lastRows = null;
     this._recorder = null; // Set via setRecorder() after construction
 
     // -- Detection: structural signal sources --
@@ -544,10 +553,14 @@ class Session extends EventEmitter {
       claudeArgs,
     });
 
+    // Reuse the last browser-pushed size so a restart spawns at the card's real
+    // dimensions; fall back to 80x24 on the very first spawn (no size known yet).
+    const spawnCols = this._lastCols ?? 80;
+    const spawnRows = this._lastRows ?? 24;
     const baseOpts = {
       name: "xterm-256color",
-      cols: 80,
-      rows: 24,
+      cols: spawnCols,
+      rows: spawnRows,
       cwd: this.path,
       env,
     };
@@ -563,6 +576,8 @@ class Session extends EventEmitter {
       this.emit("error", err);
       return;
     }
+    this._ptyAlive = true;
+    this._guardPtyInputSocket();
 
     this.transition("spawn_success");
 
@@ -580,8 +595,8 @@ class Session extends EventEmitter {
         attentionTimeoutMs: this.attentionTimeoutMs,
         startingWatchdogMs: this.startingWatchdogMs,
         hooksInjected: this._settingsHandle !== null,
-        cols: 80,
-        rows: 24,
+        cols: spawnCols,
+        rows: spawnRows,
       });
     }
 
@@ -622,6 +637,25 @@ class Session extends EventEmitter {
         return proc;
       }
       throw err;
+    }
+  }
+
+  // node-pty 1.1.0 attaches an 'error' handler to the conout socket only, never
+  // to the conin (input) socket it writes to in _doWrite. A write that lands
+  // after the child's console pipe has died (e.g. our taskkill on restart, in
+  // the gap before node-pty's exit callback fires) surfaces asynchronously as
+  // `write EAGAIN`/EPIPE on that unguarded socket and crashes the whole process
+  // (it cannot be caught by try/catch around .write()). Attach our own handler
+  // so it is logged, not fatal. Remove if node-pty starts guarding inSocket.
+  // Windows-conpty internal; optional chaining keeps the test fake-pty and any
+  // non-conpty backend safe.
+  _guardPtyInputSocket() {
+    try {
+      this.ptyProcess?._agent?.inSocket?.on("error", (err) => {
+        console.warn(`[session ${this.id}] pty input socket error (ignored): ${err.message}`);
+      });
+    } catch {
+      // node-pty internal shape differs (version/backend): non-fatal.
     }
   }
 
@@ -745,6 +779,7 @@ class Session extends EventEmitter {
     this._titleSource.reset();
     this._statusSource.reset();
     this._cleanupHooks();
+    this._ptyAlive = false;
     this.ptyProcess = null;
 
     // Reap orphan grandchildren on Windows.
@@ -786,12 +821,19 @@ class Session extends EventEmitter {
     if (this._recorder) {
       this._recorder.writeInput(text);
     }
-    if (this.ptyProcess) {
+    // Only write to a live pty. After kill()/exit the conin pipe peer is gone,
+    // so writing would fail async with EAGAIN/EPIPE on node-pty's unguarded
+    // input socket (see _guardPtyInputSocket); this closes the common window.
+    if (this.ptyProcess && this._ptyAlive) {
       this.ptyProcess.write(text);
     }
   }
 
   resize(cols, rows) {
+    // Remember the latest size so a restart respawns the PTY at this dimension
+    // (see start()), rather than the 80x24 default that leaves Claude cramped.
+    this._lastCols = cols;
+    this._lastRows = rows;
     if (this._recorder) {
       this._recorder.writeResize(cols, rows);
     }
@@ -811,6 +853,9 @@ class Session extends EventEmitter {
   kill() {
     if (!this.ptyProcess) return;
 
+    // Stop writing the instant we kill: the conin pipe peer dies with the child,
+    // so any further write() would hit the dead pipe (see _guardPtyInputSocket).
+    this._ptyAlive = false;
     const pid = this.ptyProcess.pid;
 
     if (process.platform === "win32") {
