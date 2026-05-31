@@ -12,7 +12,7 @@ import { aggregateEl, consumeLocalReorderPending, container, minimizedBar, sessi
 // Load-bearing import: evaluating drag-drop.js installs the container-level
 // dragover/dragleave/drop listeners and the _dropZone side effects at module load.
 import { setupDragAndDrop } from './session-card/drag-drop.js';
-import { _performExpand, enforceSplitOnCreate, exitMaximizeMode, forgetSessionLayout, getMaximizedSession, isMaximizeActive, SLEEP_ELIGIBLE, sleepSession, toggleMinimize, wakeSession } from './session-card/layout.js';
+import { _performExpand, enforceSplitOnCreate, exitMaximizeMode, forgetSessionLayout, getMaximizedSession, isMaximizeActive, SLEEP_ELIGIBLE, sleepSession, toggleMaximize, toggleMinimize, wakeSession } from './session-card/layout.js';
 import { ensureTerminalSetup, setTerminalCursorBlink, setTerminalScrollback, setupTerminal, wireTerminalIO } from './session-card/terminal.js';
 import { showErrorToast } from './session-card/toast.js';
 import { releaseWebgl, tryLoadWebGL } from './session-card/webgl-pool.js';
