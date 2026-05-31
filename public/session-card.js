@@ -2,7 +2,6 @@
 // Owns session card DOM lifecycle, terminal setup, and per-session state.
 
 import { FitAddon } from '@xterm/addon-fit';
-import { WebglAddon } from '@xterm/addon-webgl';
 import { Terminal } from '@xterm/xterm';
 // Vite alias — resolves to shared/states.esm.js
 import { BADGE_LABELS, KILLABLE_STATES, RESTARTABLE_STATES, STATE_GLYPHS, STATES } from '/shared/states.mjs';
@@ -13,9 +12,8 @@ import { renderScheduler } from './render-scheduler.mjs';
 import { computeAggregate } from './session-card/aggregate-core.mjs';
 import { aggregateEl, consumeLocalReorderPending, container, markLocalReorderPending, minimizedBar, sessionUIs } from './session-card/card-registry.js';
 import { closestCardByCenter } from './session-card/geometry-core.mjs';
-import { countAutoNames, nextSuggestedName } from './session-card/naming-core.mjs';
 import { showErrorToast } from './session-card/toast.js';
-import { pickEvictionVictims } from './session-card/webgl-core.mjs';
+import { releaseWebgl, tryLoadWebGL } from './session-card/webgl-pool.js';
 import { getTerminalTheme } from './theme.js';
 import { getSoundId, isMinimized, isSoundEnabled, setMinimized } from './ui-prefs.js';
 
@@ -162,63 +160,8 @@ function reportClipboardFailure(source, err) {
   showErrorToast(`Clipboard ${source} failed: ${msg}`);
 }
 
-// Cap simultaneously-live WebGL contexts. Browsers drop the oldest context at
-// ~16 and silently fall EVERY terminal back to canvas under that pressure; we
-// evict our own least-recently-used context first so the cap is predictable and
-// the evicted card (not an arbitrary one) is the one that degrades to canvas.
-const MAX_WEBGL_CONTEXTS = 12;
-const _webglLru = new Map(); // ui -> true; insertion order = LRU, oldest first
-
-function _releaseWebgl(ui) {
-  _webglLru.delete(ui);
-  if (ui.webglAddon) {
-    try { ui.webglAddon.dispose(); } catch { /* already gone */ }
-    ui.webglAddon = null;
-  }
-}
-
-function _evictWebglIfNeeded(exceptUi) {
-  for (const victim of pickEvictionVictims([..._webglLru.keys()], MAX_WEBGL_CONTEXTS, exceptUi)) {
-    _releaseWebgl(victim);
-    victim.needsWebGLReload = true; // recreated when it next becomes visible
-  }
-}
-
-function tryLoadWebGL(ui) {
-  try {
-    // Already have a healthy context — just refresh LRU recency and return.
-    // Don't tear down and rebuild a live GL context on a no-op call (e.g. every
-    // visible card on reorder): context creation is expensive and rebuilding a
-    // healthy one works against the GPU-pressure goal this cap exists for.
-    if (ui.webglAddon && !ui.needsWebGLReload) {
-      _webglLru.delete(ui);
-      _webglLru.set(ui, true); // move to most-recently-used
-      return;
-    }
-    if (ui.webglAddon) {
-      ui.webglAddon.dispose();
-      ui.webglAddon = null;
-      _webglLru.delete(ui);
-    }
-    // Evict the least-recently-used context before claiming a new one.
-    _evictWebglIfNeeded(ui);
-    const addon = new WebglAddon();
-    addon.onContextLoss(() => {
-      addon.dispose();
-      ui.webglAddon = null;
-      _webglLru.delete(ui);
-      ui.needsWebGLReload = true;
-    });
-    ui.term.loadAddon(addon);
-    ui.webglAddon = addon;
-    ui.needsWebGLReload = false;
-    _webglLru.set(ui, true); // mark most-recently-used (inserts at end)
-  } catch {
-    ui.webglAddon = null;
-    ui.needsWebGLReload = false;
-    _webglLru.delete(ui);
-  }
-}
+// WebGL context pool (releaseWebgl, tryLoadWebGL, the LRU cap) moved to
+// ./session-card/webgl-pool.js.
 
 function updateButtonVisibility(ui) {
   const state = ui.currentState;
@@ -467,7 +410,7 @@ function sleepSession(sessionId) {
   }
 
   // Dispose WebGL addon (and drop it from the LRU so the cap frees a slot)
-  _releaseWebgl(ui);
+  releaseWebgl(ui);
 
   // Dispose xterm terminal
   if (ui.term) {
@@ -1220,33 +1163,10 @@ export function hasSession(id) {
   return sessionUIs.has(id);
 }
 
-export function hasSessionByName(name) {
-  for (const [, ui] of sessionUIs) {
-    if (ui.card.dataset.session === name) return true;
-  }
-  return false;
-}
-
-// Gather current display names for the pure naming-core helpers.
-function _currentSessionNames() {
-  const names = [];
-  for (const [, ui] of sessionUIs) names.push(ui.card.dataset.session);
-  return names;
-}
-
-/** Count sessions whose display name is `baseName` or `baseName (N)`. */
-export function countSessionsByName(baseName) {
-  return countAutoNames(baseName, _currentSessionNames());
-}
-
-/**
- * Return the first free name in the sequence `baseName`, `baseName (2)`,
- * `baseName (3)`, ... so users can spawn multiple terminals on one project.
- * Bounded by 999 to keep the suffix within the 64-char server name limit.
- */
-export function suggestSessionName(baseName) {
-  return nextSuggestedName(baseName, _currentSessionNames());
-}
+// Naming helpers (countSessionsByName, suggestSessionName) moved to
+// ./session-card/naming.js; re-exported for dialogs.js until the Phase 4 repoint.
+// hasSessionByName was dropped (no remaining callers after the Phase 1 rewire).
+export { countSessionsByName, suggestSessionName } from './session-card/naming.js';
 
 export function getSessionCount() {
   return sessionUIs.size;
@@ -1442,7 +1362,7 @@ export function removeSessionCard(sessionId) {
   if (ui.resizeObserver) ui.resizeObserver.disconnect();
   if (ui.abortController) ui.abortController.abort();
   if (ui.dataWs?.readyState <= WebSocket.OPEN) ui.dataWs.close();
-  _releaseWebgl(ui);
+  releaseWebgl(ui);
   if (ui.term) ui.term.dispose();
   if (ui.card) ui.card.remove();
   updateAggregateStatus();
