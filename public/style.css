@@ -2063,6 +2063,33 @@ body[data-active-view="teams"] #minimized-bar { display: none; }
   color: var(--text-muted);
   white-space: nowrap;
 }
+.team-head-right { display: flex; align-items: flex-start; gap: 12px; flex-shrink: 0; }
+.team-collapse {
+  appearance: none;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: var(--radius);
+  transition: transform var(--transition-med), color var(--transition-med);
+}
+.team-collapse:hover { color: var(--text-head); }
+.team-collapse:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.team-panel:not(.collapsed) .team-collapse { transform: rotate(90deg); }
+
+/* Compact resting state: hide the lower bands so an idle team is header + Run; expand on the
+   chevron, when a run starts, or when the pack needs setup. */
+.team-panel.collapsed .team-desc,
+.team-panel.collapsed .team-pipeline,
+.team-panel.collapsed .team-sched-editor,
+.team-panel.collapsed .team-guardrails,
+.team-panel.collapsed .team-runs,
+.team-panel.collapsed .team-sched-group { display: none; }
+.team-panel.collapsed .team-panel-head { margin-bottom: 14px; }
+.team-panel.collapsed .team-control-row { margin-bottom: 0; }
 .team-desc {
   font-family: var(--font-mono);
   font-size: 12px;
@@ -2186,6 +2213,7 @@ body[data-active-view="teams"] #minimized-bar { display: none; }
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
 }
+.team-elapsed.over-budget { color: var(--state-waiting); }
 .team-sched-toggle {
   display: inline-flex;
   align-items: center;
@@ -2314,25 +2342,40 @@ body[data-active-view="teams"] #minimized-bar { display: none; }
   font-size: 12px;
   letter-spacing: 0.02em;
   color: var(--text-dim);
-  margin: 0 0 10px;
+  margin: 0 0 6px;
+}
+.team-setup-sub {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  margin: 0 0 12px;
+  max-width: 70ch;
 }
 .team-setup-files {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
 }
 .team-setup-file {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
   font-family: var(--font-mono);
   font-size: 12px;
-  padding: 4px 11px;
-  color: var(--text-dim);
+  padding: 5px 11px;
+  text-align: left;
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   cursor: pointer;
-  transition: border-color var(--transition-med), color var(--transition-med);
+  transition: border-color var(--transition-med);
 }
-.team-setup-file:hover { border-color: var(--accent); color: var(--accent); }
+.team-setup-file-name { color: var(--text-head); }
+.team-setup-file-purpose { color: var(--text-muted); font-size: 11px; }
+.team-setup-file:hover { border-color: var(--accent); }
+.team-setup-file:hover .team-setup-file-name { color: var(--accent); }
 .team-setup-file:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 /* Primary "Set up automatically" action: launches the guided interview session. The hand-edit file
    buttons sit below it as the fallback. */
@@ -2359,16 +2402,38 @@ body[data-active-view="teams"] #minimized-bar { display: none; }
   margin: 0 0 8px;
 }
 
-/* Guardrails line: the trust posture, derived from the team deny-list. */
+/* Guardrails: the trust posture as scannable chips, derived from the team deny-list. */
 .team-guardrails {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--text-muted);
-  letter-spacing: 0.02em;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
   margin: 0 0 18px;
   padding-bottom: 16px;
   border-bottom: 1px solid var(--border-dim);
-  overflow-wrap: anywhere;
+}
+.guardrail-chip {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  padding: 2px 8px;
+  border-radius: 2px;
+  color: var(--text-muted);
+  border: 1px solid var(--border-dim);
+  white-space: nowrap;
+}
+.guardrail-mode {
+  color: var(--perms-warn);
+  border-color: color-mix(in oklab, var(--perms-warn) 35%, var(--border));
+}
+.guardrail-block { color: var(--text-dim); }
+.guardrail-blocks-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  margin-left: 2px;
 }
 
 /* Band 4: recent runs — each row expands to its summary + artifact-open buttons. */
