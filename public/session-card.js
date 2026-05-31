@@ -11,8 +11,10 @@ import { sendControlMsg } from './control-ws.js';
 import { el, escapeHtml } from './dom-helpers.js';
 import { renderScheduler } from './render-scheduler.mjs';
 import { computeAggregate } from './session-card/aggregate-core.mjs';
+import { aggregateEl, consumeLocalReorderPending, container, markLocalReorderPending, minimizedBar, sessionUIs } from './session-card/card-registry.js';
 import { closestCardByCenter } from './session-card/geometry-core.mjs';
 import { countAutoNames, nextSuggestedName } from './session-card/naming-core.mjs';
+import { showErrorToast } from './session-card/toast.js';
 import { pickEvictionVictims } from './session-card/webgl-core.mjs';
 import { getTerminalTheme } from './theme.js';
 import { getSoundId, isMinimized, isSoundEnabled, setMinimized } from './ui-prefs.js';
@@ -23,6 +25,21 @@ const RECONNECT_DELAY_MS = 500;
 const INPUT_QUEUE_MAX = 1024;
 const SLEEP_ELIGIBLE = [STATES.IDLE, STATES.COMPLETE, STATES.DONE, STATES.FAILED];
 
+// Aggregate roll-up glyphs keyed by severity. Shape varies per severity so the
+// header summary stays legible without relying on hue (color-blind safe); the
+// text spells it out regardless. Neutral/running use the brand forward-marker.
+const AGGREGATE_GLYPHS = {
+  critical: '✕', // failed
+  warning:  '▲', // needs input
+  done:     '✓', // finished / exited
+  success:  '▸', // running
+  '':       '▸', // neutral / dormant
+};
+
+// Last rendered aggregate summary — gates DOM writes + the aria-live re-announce.
+let _lastAggregateText = null;
+let _lastAggregateSeverity = null;
+
 // Terminal defaults — updated from server settings on connect
 let _terminalScrollback = 5000;
 let _terminalCursorBlink = false;
@@ -30,13 +47,11 @@ let _debugMode = false;
 
 // ── State ────────────────────────────────────────────────────
 
-const sessionUIs = new Map();
+// sessionUIs now lives in ./session-card/card-registry.js (imported above).
 
 // ── DOM refs ─────────────────────────────────────────────────
 
-const container = document.getElementById('sessions-container');
-const minimizedBar = document.getElementById('minimized-bar');
-const aggregateEl = document.getElementById('aggregate-status');
+// container, minimizedBar and aggregateEl now live in ./session-card/card-registry.js.
 
 let _maximizedSession = null;
 const _preMaximizeSessions = new Set();
@@ -266,10 +281,8 @@ function connectDataWs(sessionId, ui, term) {
   });
 }
 
-let _localReorderPending = false;
-
 function sendReorder() {
-  _localReorderPending = true;
+  markLocalReorderPending();
   const gridCards = [...container.querySelectorAll('.session-card')].map(c => c.dataset.id);
   const minCards = [...minimizedBar.querySelectorAll('.session-card')].map(c => c.dataset.id);
   const order = [...gridCards, ...minCards].filter(Boolean);
@@ -1286,8 +1299,21 @@ export function updateAggregateStatus() {
   }
 
   const { text, severity, alertCount } = computeAggregate({ waiting, failed, done, complete, dormant, total });
-  aggregateEl.textContent = text;
-  aggregateEl.dataset.severity = severity;
+
+  // Only rewrite the DOM (and re-announce via aria-live) when the summary
+  // actually changed — avoids spamming assistive tech on every state tick.
+  if (text !== _lastAggregateText || severity !== _lastAggregateSeverity) {
+    _lastAggregateText = text;
+    _lastAggregateSeverity = severity;
+    aggregateEl.dataset.severity = severity;
+    aggregateEl.textContent = '';
+    if (text) {
+      const glyph = el('span', 'aggregate-glyph', AGGREGATE_GLYPHS[severity] ?? AGGREGATE_GLYPHS['']);
+      glyph.setAttribute('aria-hidden', 'true');
+      aggregateEl.append(glyph, document.createTextNode(text));
+    }
+  }
+
   document.title = alertCount > 0 ? `(${alertCount}) Glissa` : 'Glissa';
 }
 
@@ -1520,8 +1546,7 @@ export function applyState(sessionId, state) {
 }
 
 export function handleSessionsReordered(order) {
-  if (_localReorderPending) {
-    _localReorderPending = false;
+  if (consumeLocalReorderPending()) {
     return;
   }
 
@@ -1543,11 +1568,6 @@ export function handleSessionsReordered(order) {
   }
 }
 
-export function showErrorToast(message) {
-  const toast = el('div', 'error-toast', message);
-  document.body.appendChild(toast);
-  setTimeout(() => {
-    toast.classList.add('fade-out');
-    toast.addEventListener('transitionend', () => toast.remove());
-  }, 4000);
-}
+// showErrorToast moved to ./session-card/toast.js; re-exported here for app.js
+// until the Option B consumer repoint in Phase 4.
+export { showErrorToast };
