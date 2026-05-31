@@ -19,6 +19,7 @@ const DEFAULT_CONFIG = {
   cursorBlink: false,
   feedDebounceMs: 50,
   debugMode: false,
+  editorCommand: '',
   repoRoots: [],
   projects: []
 };
@@ -42,6 +43,11 @@ const BOOLEAN_KEYS = [
   'noFlicker',
   'cursorBlink',
   'debugMode',
+];
+
+// Free-text settings persisted to config.json
+const STRING_KEYS = [
+  'editorCommand',
 ];
 
 function resolveConfigPath() {
@@ -146,6 +152,7 @@ function createConfigStore() {
       cursorBlink: config.cursorBlink ?? DEFAULT_CONFIG.cursorBlink,
       feedDebounceMs: config.feedDebounceMs ?? DEFAULT_CONFIG.feedDebounceMs,
       debugMode: config.debugMode ?? DEFAULT_CONFIG.debugMode,
+      editorCommand: config.editorCommand ?? DEFAULT_CONFIG.editorCommand,
       repoRoots: config.repoRoots,
     };
   }
@@ -157,6 +164,9 @@ function createConfigStore() {
     }
     for (const key of BOOLEAN_KEYS) {
       if (newConfig[key] != null) config[key] = !!newConfig[key];
+    }
+    for (const key of STRING_KEYS) {
+      if (newConfig[key] != null) config[key] = String(newConfig[key]);
     }
     config.repoRoots = newConfig.repoRoots || [];
     if (newConfig.port != null && newConfig.port !== config.port) {
@@ -214,4 +224,4 @@ function createConfigStore() {
   };
 }
 
-module.exports = { createConfigStore, generateProjectId, ensureProjectIds, TIMEOUT_KEYS, BOOLEAN_KEYS, DEFAULT_CONFIG };
+module.exports = { createConfigStore, generateProjectId, ensureProjectIds, TIMEOUT_KEYS, BOOLEAN_KEYS, STRING_KEYS, DEFAULT_CONFIG };

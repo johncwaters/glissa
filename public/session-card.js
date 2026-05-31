@@ -9,6 +9,7 @@ import { BADGE_LABELS, KILLABLE_STATES, RESTARTABLE_STATES, STATE_GLYPHS, STATES
 import { playAlertSound } from './alert-sound.js';
 import { sendControlMsg } from './control-ws.js';
 import { el, escapeHtml } from './dom-helpers.js';
+import { renderScheduler } from './render-scheduler.mjs';
 import { getTerminalTheme } from './theme.js';
 import { getSoundId, isMinimized, isSoundEnabled, setMinimized } from './ui-prefs.js';
 
@@ -142,24 +143,66 @@ function reportClipboardFailure(source, err) {
   showErrorToast(`Clipboard ${source} failed: ${msg}`);
 }
 
+// Cap simultaneously-live WebGL contexts. Browsers drop the oldest context at
+// ~16 and silently fall EVERY terminal back to canvas under that pressure; we
+// evict our own least-recently-used context first so the cap is predictable and
+// the evicted card (not an arbitrary one) is the one that degrades to canvas.
+const MAX_WEBGL_CONTEXTS = 12;
+const _webglLru = new Map(); // ui -> true; insertion order = LRU, oldest first
+
+function _releaseWebgl(ui) {
+  _webglLru.delete(ui);
+  if (ui.webglAddon) {
+    try { ui.webglAddon.dispose(); } catch { /* already gone */ }
+    ui.webglAddon = null;
+  }
+}
+
+function _evictWebglIfNeeded(exceptUi) {
+  while (_webglLru.size >= MAX_WEBGL_CONTEXTS) {
+    let victim = null;
+    for (const ui of _webglLru.keys()) {
+      if (ui !== exceptUi) { victim = ui; break; }
+    }
+    if (!victim) break;
+    _releaseWebgl(victim);
+    victim.needsWebGLReload = true; // recreated when it next becomes visible
+  }
+}
+
 function tryLoadWebGL(ui) {
   try {
+    // Already have a healthy context — just refresh LRU recency and return.
+    // Don't tear down and rebuild a live GL context on a no-op call (e.g. every
+    // visible card on reorder): context creation is expensive and rebuilding a
+    // healthy one works against the GPU-pressure goal this cap exists for.
+    if (ui.webglAddon && !ui.needsWebGLReload) {
+      _webglLru.delete(ui);
+      _webglLru.set(ui, true); // move to most-recently-used
+      return;
+    }
     if (ui.webglAddon) {
       ui.webglAddon.dispose();
       ui.webglAddon = null;
+      _webglLru.delete(ui);
     }
+    // Evict the least-recently-used context before claiming a new one.
+    _evictWebglIfNeeded(ui);
     const addon = new WebglAddon();
     addon.onContextLoss(() => {
       addon.dispose();
       ui.webglAddon = null;
+      _webglLru.delete(ui);
       ui.needsWebGLReload = true;
     });
     ui.term.loadAddon(addon);
     ui.webglAddon = addon;
     ui.needsWebGLReload = false;
+    _webglLru.set(ui, true); // mark most-recently-used (inserts at end)
   } catch {
     ui.webglAddon = null;
     ui.needsWebGLReload = false;
+    _webglLru.delete(ui);
   }
 }
 
@@ -177,70 +220,16 @@ function connectDataWs(sessionId, ui, term) {
   const ws = new WebSocket(url);
   ui.dataWs = ws;
 
-  // Flush PTY output to xterm via microtask (near-zero delay for keystroke
-  // echoes) with a circuit breaker that escalates to RAF during heavy
-  // output bursts to prevent main-thread starvation.
-  let pendingData = '';
-  let flushScheduled = false;
-  let writeRafId = null;
-
-  // Circuit breaker: after 8 writes within 16ms, escalate to RAF.
-  const WRITE_RATE_LIMIT = 8;
-  let writeCount = 0;
-  let rateLimited = false;
-  let rateResetTimer = null;
-
-  function flushWrites() {
-    flushScheduled = false;
-    writeRafId = null;
-    if (pendingData.length === 0) return;
-
-    const data = pendingData;
-    pendingData = '';
-
-    writeCount++;
-    if (rateResetTimer === null) {
-      rateResetTimer = setTimeout(() => { writeCount = 0; rateResetTimer = null; }, 16);
-    }
-    if (writeCount >= WRITE_RATE_LIMIT) {
-      rateLimited = true;
-    }
-
-    term.write(data);
-  }
-
-  function flushViaRaf() {
-    rateLimited = false;
-    flushWrites();
-  }
+  // Inbound PTY bytes go through the global render scheduler (Option A:
+  // callback-gated round-robin) so heavy multi-session output can't starve typing.
+  renderScheduler.register(sessionId, (data, cb) => term.write(data, cb));
 
   ws.addEventListener('message', (event) => {
-    pendingData += event.data;
-    if (flushScheduled || writeRafId !== null) return;
-
-    // Small messages are likely keystroke echoes (1-3 bytes); microtask keeps echo latency low.
-    const isSmallWrite = pendingData.length <= 8;
-    if (rateLimited && !isSmallWrite) {
-      writeRafId = requestAnimationFrame(flushViaRaf);
-    } else {
-      flushScheduled = true;
-      queueMicrotask(flushWrites);
-    }
+    renderScheduler.enqueue(sessionId, event.data);
   });
 
   ws.addEventListener('close', () => {
-    if (writeRafId !== null) {
-      cancelAnimationFrame(writeRafId);
-      writeRafId = null;
-    }
-    if (rateResetTimer !== null) {
-      clearTimeout(rateResetTimer);
-      rateResetTimer = null;
-    }
-    flushScheduled = false;
-    rateLimited = false;
-    writeCount = 0;
-    pendingData = '';
+    renderScheduler.unregister(sessionId);
     // Only auto-reconnect if this ws is still the current one (not replaced by rename)
     // Skip reconnect when sleeping — wakeSession() will reconnect on expand
     if (ui.dataWs === ws) {
@@ -465,11 +454,8 @@ function sleepSession(sessionId) {
     ui.resizeObserver = null;
   }
 
-  // Dispose WebGL addon
-  if (ui.webglAddon) {
-    ui.webglAddon.dispose();
-    ui.webglAddon = null;
-  }
+  // Dispose WebGL addon (and drop it from the LRU so the cap frees a slot)
+  _releaseWebgl(ui);
 
   // Dispose xterm terminal
   if (ui.term) {
@@ -1461,6 +1447,7 @@ export function removeSessionCard(sessionId) {
   if (ui.resizeObserver) ui.resizeObserver.disconnect();
   if (ui.abortController) ui.abortController.abort();
   if (ui.dataWs?.readyState <= WebSocket.OPEN) ui.dataWs.close();
+  _releaseWebgl(ui);
   if (ui.term) ui.term.dispose();
   if (ui.card) ui.card.remove();
   updateAggregateStatus();

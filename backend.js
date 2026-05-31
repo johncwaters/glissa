@@ -31,8 +31,19 @@ const { registerControlHandlers } = require('./control-handlers');
 const { NotificationManager } = require('./notification-manager');
 const { createToastChannel } = require('./channels/toast');
 const { createRecorder } = require('./session-recorder');
+const { createWsSender } = require('./ws-sender');
 const { HookRouter } = require('./detection/hook-source');
 const { sweepOrphans } = require('./detection/settings-injector');
+const { spawn } = require('node:child_process');
+const { loadTeam, listTeams } = require('./team-registry');
+const { createOrchestrator } = require('./team-orchestrator');
+const { createScheduler } = require('./scheduler');
+const { createSpawnGate } = require('./spawn-gate');
+const { createGitWorkspace } = require('./team-git');
+const { buildStageSpawnOptions, teamPermissions } = require('./team-settings');
+const { buildStagePrompt } = require('./team-prompt');
+const { buildSetupPrompt, setupSessionId, setupSessionName, packPaths } = require('./team-setup');
+const teamOutput = require('./team-output');
 
 /**
  * Create and wire the Glissa backend onto an existing HTTP server.
@@ -181,21 +192,24 @@ function createBackend(httpServer, options = {}) {
     let listenerMismatch = false;
     let orphanPty = false;
     let destroyedReachable = false;
-    for (const [, sess] of sessions) {
+    for (const sess of [...sessions.values(), ...teamSessions.values()]) {
       const stats = sess.getHealthStats();
       stats.detection = sess.getDetectionStats();
+      stats.ephemeral = !!sess.ephemeral;
       sessionStats.push(stats);
       if (stats.hasPty) alivePtyCount++;
       if (stats.sleeping) sleepingCount++;
       totalDataListeners += stats.dataListenerCount;
       totalOutputBufferBytes += stats.outputBufferBytes;
-      // Anomalies: data-WS listener count should equal registered client count
-      // for that session; PTY should only exist while session is in an active
-      // state; destroy() should remove the session from the map.
-      const clientCount = sessionDataClients.get(stats.id)?.size || 0;
-      if (stats.dataListenerCount !== clientCount) listenerMismatch = true;
-      if (stats.hasPty && (stats.state === STATES.DONE || stats.state === STATES.FAILED || stats.state === STATES.DORMANT)) {
-        orphanPty = true;
+      // Anomaly checks assume a persisted session with tracked data-WS clients and a stable
+      // lifecycle. Ephemeral team-stage sessions stream transiently and tear down fast, so they are
+      // excluded to avoid false-positive listenerMismatch/orphanPty during a run.
+      if (!sess.ephemeral) {
+        const clientCount = sessionDataClients.get(stats.id)?.size || 0;
+        if (stats.dataListenerCount !== clientCount) listenerMismatch = true;
+        if (stats.hasPty && (stats.state === STATES.DONE || stats.state === STATES.FAILED || stats.state === STATES.DORMANT)) {
+          orphanPty = true;
+        }
       }
       if (stats.destroyed) destroyedReachable = true;
     }
@@ -226,6 +240,8 @@ function createBackend(httpServer, options = {}) {
         sleeping: sleepingCount,
         totalDataListeners,
         totalOutputBufferBytes,
+        ephemeralTeamSessions: teamSessions.size,
+        activeTeamRuns: orchestrator.activeCount(),
         list: sessionStats,
       },
       websockets: {
@@ -283,6 +299,9 @@ function createBackend(httpServer, options = {}) {
 
   const sessions = new Map();
   const sessionDataClients = new Map();
+  // Team-stage sessions live in a SEPARATE map so config hot-reload diffing (diffProjects) never
+  // destroys a live stage, and so they are not persisted to config.json. See plan 3.5.
+  const teamSessions = new Map();
 
   function closeSessionDataClients(sessionId) {
     const clients = sessionDataClients.get(sessionId);
@@ -294,10 +313,203 @@ function createBackend(httpServer, options = {}) {
     }
   }
 
-  /** Find a session by its id. */
-  function getSession(id) {
-    return sessions.get(id) || null;
+  // --- Teams: registry + orchestrator + scheduler ---
+
+  const TEAMS_DIR = path.join(__dirname, 'teams');
+  const registry = {
+    listTeams: () => listTeams(TEAMS_DIR),
+    loadTeam: (id) => loadTeam(id, TEAMS_DIR),
+  };
+  const spawnGate = createSpawnGate();
+  // Each team run executes in an isolated git worktree on a dedicated branch, fast-forwarded back on
+  // success (see team-git.js), so a run never dirties the user's working tree.
+  const gitWorkspace = createGitWorkspace();
+
+  /** Look up either a persisted session or an ephemeral team-stage session. */
+  function getSessionAny(id) {
+    return sessions.get(id) || teamSessions.get(id) || null;
   }
+  function getProjectPathById(projectId) {
+    const p = config.projects.find((x) => x.id === projectId);
+    return p ? p.path : null;
+  }
+  // Open a run artifact in the user's configured editor (Settings > General > Editor command). The
+  // command is user-authored and runs on the user's own machine, the same trust level as reading the
+  // PTY, so it runs through the shell — `.cmd`/`.bat` shims like `code` resolve. The path is validated
+  // and confined to the team's runs/ directory by handleOpenArtifact before it reaches here.
+  function openInEditor(absPath) {
+    const cmd = (config.editorCommand || '').trim();
+    try {
+      if (cmd) {
+        const quoted = `"${absPath}"`;
+        const full = cmd.includes('{file}') ? cmd.replace(/\{file\}/g, quoted) : `${cmd} ${quoted}`;
+        spawn(full, { detached: true, stdio: 'ignore', shell: true, windowsHide: true }).unref();
+      } else if (process.platform === 'win32') {
+        // `start` is a cmd builtin; the empty "" is its window-title arg so a quoted path isn't taken as the title.
+        spawn('cmd', ['/c', 'start', '', absPath], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
+      } else if (process.platform === 'darwin') {
+        spawn('open', [absPath], { detached: true, stdio: 'ignore' }).unref();
+      } else {
+        spawn('xdg-open', [absPath], { detached: true, stdio: 'ignore' }).unref();
+      }
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  }
+
+  // Build a real Session for one team stage, registered in teamSessions and auto-removed on end.
+  function makeStageSession({ id, name, path: projectPath, initialPrompt, spawnOptions, permissions }) {
+    const sess = new Session({
+      id,
+      name,
+      path: projectPath,
+      dangerouslySkipPermissions: !!spawnOptions?.dangerouslySkipPermissions,
+      extraClaudeArgs: spawnOptions?.extraClaudeArgs || [],
+      initialPrompt,
+      ephemeral: true,
+      settingsPermissions: permissions || null,
+      startingWatchdogSeconds: config.startingWatchdogSeconds,
+      replayBufferKB: config.replayBufferKB,
+      noFlicker: config.noFlicker,
+      hookRouter,
+      getHookPort,
+    });
+    teamSessions.set(id, sess);
+    sess.on('error', (err) => console.error(`[team ${name}] error: ${err.message}`));
+    // Stage sessions run headless (claude -p) and produce no watchable TUI, so they are NOT surfaced
+    // as terminal cards (that just shows an empty terminal). Run progress lives in the Teams view
+    // pipeline; these sessions stay out of the session-card broadcast stream entirely.
+    const removeFromMap = () => {
+      if (teamSessions.get(id) === sess) {
+        teamSessions.delete(id);
+        closeSessionDataClients(id);
+      }
+    };
+    sess.on('exit', removeFromMap);
+    // destroy() runs in every orchestrator finish path (success/timeout/cancel) and removeAllListeners
+    // there can pre-empt the 'exit' cleanup, so wrap destroy to guarantee map removal.
+    const origDestroy = sess.destroy.bind(sess);
+    sess.destroy = () => { origDestroy(); removeFromMap(); };
+    return sess;
+  }
+
+  // Guided pack setup. Spawn ONE interactive Claude session (a normal PTY session, surfaced as a
+  // terminal card) seeded with a prompt that interviews the operator and fills this project's pack.
+  // Unlike a team stage it is NOT headless (the interview needs back-and-forth) and IS shown as a
+  // card so the operator can answer in the terminal. It lives in the regular `sessions` map but is
+  // flagged ephemeral (skips config-reload diffing and health anomaly checks) and is never persisted
+  // to config.json. On exit we re-check the pack and broadcast team-pack-status so the Teams view
+  // drops its setup banner. Returns { ok, sessionId, already?, error? }.
+  function startPackSetup({ teamId, projectId }) {
+    let team;
+    try { team = registry.loadTeam(teamId); } catch { return { ok: false, error: `Unknown team "${teamId}"` }; }
+    const projectPath = getProjectPathById(projectId);
+    if (!projectPath) return { ok: false, error: 'Unknown project' };
+
+    const id = setupSessionId(teamId, projectId);
+    if (sessions.has(id)) return { ok: true, already: true, sessionId: id };
+
+    // Make sure the pack files exist (idempotent) so the agent has templates to fill in place.
+    teamOutput.ensureStructure(projectPath, team.outputPath);
+    teamOutput.scaffoldPack(projectPath, team.outputPath, team.packTemplatesDir, team.packRequired);
+    const { packDir, packFiles } = packPaths(projectPath, team);
+    const prompt = buildSetupPrompt(team, { packDir, packFiles, projectPath });
+
+    const projectDisplayName = (config.projects.find((p) => p.id === projectId) || {}).name || '';
+    const name = setupSessionName(team, projectDisplayName);
+
+    const sess = new Session({
+      id,
+      name,
+      path: projectPath,
+      // Interactive (no -p): the prompt is submitted as the first message and the operator keeps
+      // typing. Writes to the pack are approved in the terminal; the team deny-list is applied as a
+      // belt-and-suspenders guard via the injected settings file.
+      dangerouslySkipPermissions: false,
+      initialPrompt: prompt,
+      ephemeral: true,
+      settingsPermissions: teamPermissions(team),
+      startingWatchdogSeconds: config.startingWatchdogSeconds,
+      attentionTimeoutSeconds: config.attentionTimeoutSeconds,
+      waitingEscalationSeconds: config.waitingEscalationSeconds,
+      replayBufferKB: config.replayBufferKB,
+      noFlicker: config.noFlicker,
+      hookRouter,
+      getHookPort,
+    });
+    sessions.set(id, sess);
+    wireSessionEvents(sess);
+    // Surface as a card (same shape the config-reload add path broadcasts).
+    broadcastControl({ type: 'session-added', id, session: name, state: sess.state, skipPerms: false, ephemeral: true });
+
+    sess.on('exit', () => {
+      let st = null;
+      try { st = teamOutput.packStatus(projectPath, team.outputPath, team.packRequired); } catch { /* report nothing */ }
+      if (st) {
+        // Distinct from the team-pack-status request REPLY so it never collides with a get-team-pack-
+        // status round-trip; the Teams view routes this broadcast to refresh the setup banner.
+        broadcastControl({
+          type: 'team-pack-updated', teamId, projectId,
+          configured: st.configured, unfilled: st.unfilled, packDir: st.packDir,
+          timestamp: Date.now(),
+        });
+      }
+      if (sessions.get(id) === sess) {
+        sessions.delete(id);
+        closeSessionDataClients(id);
+      }
+      broadcastControl({ type: 'session-removed', id, session: name });
+    });
+    sess.start();
+    return { ok: true, sessionId: id };
+  }
+
+  const orchestrator = createOrchestrator({
+    loadTeam: registry.loadTeam,
+    getProjectPath: getProjectPathById,
+    output: teamOutput,
+    buildStagePrompt,
+    buildStageSpawnOptions,
+    teamPermissions,
+    spawnGate,
+    makeStageSession,
+    gitWorkspace,
+    now: () => new Date(),
+  });
+  for (const ev of ['team-run-started', 'team-stage-started', 'team-stage-complete', 'team-run-complete', 'team-run-failed', 'team-run-skipped', 'team-run-needs-setup']) {
+    orchestrator.on(ev, (payload) => broadcastControl({ type: ev, ...payload, timestamp: Date.now() }));
+  }
+  orchestrator.on('team-run-complete', ({ teamId, verdict }) => {
+    notificationManager.trigger(`team:${teamId}`, 'complete', `Team ${teamId} finished: ${verdict || 'done'}`);
+  });
+  orchestrator.on('team-run-failed', ({ teamId, reason }) => {
+    notificationManager.trigger(`team:${teamId}`, 'failed', `Team ${teamId} failed${reason ? `: ${reason}` : ''}`);
+  });
+
+  // One scheduler per enabled activation in config.teams; re-armed on set-team-schedule.
+  const teamSchedulers = new Map();
+  function armTeamSchedules(teamsCfg) {
+    for (const [, s] of teamSchedulers) s.disarm();
+    teamSchedulers.clear();
+    for (const a of (teamsCfg || [])) {
+      if (!a || !a.enabled || !a.teamId || !a.projectId) continue;
+      let schedule = a.schedule;
+      if (!schedule) {
+        try { schedule = registry.loadTeam(a.teamId).schedule; } catch { continue; }
+      }
+      if (!schedule || !schedule.days) continue;
+      const key = `${a.teamId}:${a.projectId}`;
+      const sched = createScheduler({
+        onFire: () => Promise.resolve(
+          orchestrator.runTeam({ teamId: a.teamId, projectId: a.projectId, trigger: 'scheduled' }),
+        ).catch((err) => console.warn(`[team-scheduler] ${key} run failed: ${err.message}`)),
+      });
+      sched.arm(schedule, key);
+      teamSchedulers.set(key, sched);
+    }
+  }
+  armTeamSchedules(config.teams);
 
   function wireSessionEvents(sess) {
     // All closures read sess.id (stable) and sess.name (current) dynamically.
@@ -368,6 +580,8 @@ function createBackend(httpServer, options = {}) {
     const added = [], removed = [], modified = [], renamed = [], unchanged = [];
 
     for (const [id, sess] of currentSessions) {
+      // Ephemeral setup sessions are not config-backed; never add/remove/rename them on a reload.
+      if (sess.ephemeral) continue;
       if (newMap.has(id)) {
         const newP = newMap.get(id);
         const pathChanged = newP.path !== sess.path;
@@ -512,17 +726,22 @@ function createBackend(httpServer, options = {}) {
     config,
     configStore,
     broadcastControl,
-    getSession,
     generateProjectId,
     makeSession,
     wireSessionEvents,
-    closeSessionDataClients,
     applyConfigReload,
     applySettingsReload,
     requestShutdown,
     requestRestart,
     handleClientFocus,
     buildHealthSnapshot,
+    registry,
+    orchestrator,
+    scheduler: { reload: armTeamSchedules },
+    teamOutput,
+    getProjectPathById,
+    openInEditor,
+    startPackSetup,
   });
 
   // --- Data WebSocket ---
@@ -536,7 +755,7 @@ function createBackend(httpServer, options = {}) {
       ws.close(1008, 'Invalid session id');
       return;
     }
-    const sess = sessions.get(sessionId);
+    const sess = getSessionAny(sessionId);
 
     if (!sess) {
       ws.close(1008, 'Session not found');
@@ -548,56 +767,20 @@ function createBackend(httpServer, options = {}) {
     }
     sessionDataClients.get(sessionId).add(ws);
 
+    // Backpressure-aware, echo-prioritizing sender (see ws-sender.js): coalesces
+    // PTY frames into fewer/larger WS frames, SKIPS sends when the socket is
+    // backed up (the bytes stay in the session ring buffer and replay on
+    // reconnect, so RSS is bounded by construction), closes a wedged client past
+    // a stall timeout, and flushes the echo frame immediately after user input.
+    // Created before the replay send so the replay shares the same high-water guard.
+    const sender = createWsSender(ws);
+
     const replay = sess.getReplayBuffer();
     if (replay) {
-      ws.send(replay);
+      sender.sendImmediate(replay);
     }
 
-    // Batch PTY data events and send as fewer, larger WS frames.
-    // Without this, each tiny PTY chunk becomes its own WS frame,
-    // flooding the browser with hundreds of messages per second.
-    const MAX_SEND_BUFFER = 65536;
-    let sendBuffer = '';
-    let sendScheduled = false;
-
-    const dataListener = (data) => {
-      if (ws.readyState !== 1) return;
-      // Fast-path: buffer empty and chunk alone fits — send without rope concat.
-      if (sendBuffer.length === 0 && data.length < MAX_SEND_BUFFER) {
-        if (!sendScheduled) {
-          sendScheduled = true;
-          setImmediate(() => {
-            sendScheduled = false;
-            if (sendBuffer.length > 0 && ws.readyState === 1) {
-              const buf = sendBuffer;
-              sendBuffer = '';
-              ws.send(buf);
-            }
-          });
-        }
-        sendBuffer = data;
-        return;
-      }
-      sendBuffer += data;
-      if (sendBuffer.length >= MAX_SEND_BUFFER) {
-        const buf = sendBuffer;
-        sendBuffer = '';
-        sendScheduled = false;
-        ws.send(buf);
-        return;
-      }
-      if (!sendScheduled) {
-        sendScheduled = true;
-        setImmediate(() => {
-          sendScheduled = false;
-          if (sendBuffer.length > 0 && ws.readyState === 1) {
-            const buf = sendBuffer;
-            sendBuffer = '';
-            ws.send(buf);
-          }
-        });
-      }
-    };
+    const dataListener = (data) => sender.onData(data);
     sess.on('data', dataListener);
 
     ws.on('message', (raw) => {
@@ -621,6 +804,10 @@ function createBackend(httpServer, options = {}) {
           return;
         }
         sess.write(msg.data);
+        // Flush the next PTY frame after input (the echo) immediately instead of
+        // holding it a tick behind coalesced bulk — still gated by the sender's
+        // backpressure guard.
+        sender.markInputFlush();
         if (sess.state === STATES.WAITING) {
           sess.transition('user_input');
         }
@@ -652,6 +839,7 @@ function createBackend(httpServer, options = {}) {
 
     ws.on('close', () => {
       sess.removeListener('data', dataListener);
+      sender.destroy();
       const clients = sessionDataClients.get(sessionId);
       if (clients) {
         clients.delete(ws);
@@ -698,7 +886,11 @@ function createBackend(httpServer, options = {}) {
     clearInterval(healthInterval);
     // INVARIANT: destroy NotificationManager BEFORE sessions — clears all timers globally
     notificationManager.destroy();
+    for (const [, s] of teamSchedulers) s.disarm();
     for (const [, sess] of sessions) {
+      sess.destroy();
+    }
+    for (const [, sess] of teamSessions) {
       sess.destroy();
     }
     controlWss.close();

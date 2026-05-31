@@ -1,51 +1,91 @@
-# Ralph progress — direct .exe spawn
+# Ralph progress — marketing-team pipeline
 
-Task: Spawn the resolved claude.exe directly instead of `cmd.exe /c claude` on Windows.
-Plan: .omc/plans/direct-exe-spawn.md
+Plan: .omc/plans/marketing-team-pipeline.md (deliberate consensus, APPROVE-WITH-CHANGES)
+PRD: .omc/state/sessions/509e2267-df93-4584-8431-3aae8c18668f/prd.json
 
-## Implemented (all 5 stories pass)
+## STATUS: feature complete (Phases 0a/1/2/3/4/5/6 wired + verified). v1 caveats documented below.
 
-US-001 Resolver + builder (sessions.js, module top):
-- classifyClaudeKind(path) -> 'exe' (.exe/.com) | 'shim' (.cmd/.bat/.ps1/other) | 'unresolved' (null).
-- resolveClaudeCommand() -> { path, kind } using existing `where claude` first-match; preserves
-  boot logs (resolved / could-not-resolve / multi-match Bun warning); adds a win32-only
-  "claude spawn strategy: direct exe | cmd.exe shim fallback" log.
-- CLAUDE_CMD = resolveClaudeCommand() cached at module load.
-- buildSpawnCommand({platform, resolved, settingsArgs, claudeArgs}) -> {file, args}: posix->claude;
-  win+exe->direct abs path; win+shim/unresolved->cmd.exe /c claude (byte-identical to old behavior).
-- Exports: Session, buildSpawnCommand, resolveClaudeCommand, classifyClaudeKind, CLAUDE_CMD.
+## Phase 2 (foundation) — DONE
+team.json + 5 agent prompts; team-registry, team-output, team-prompt, team-blacklist (+ tests).
 
-US-002 Wiring:
-- Constructor seam `spawnCommand = CLAUDE_CMD` -> this._spawnCommand.
-- Constructor seam `ptySpawn` (defaults to node-pty) -> this._ptySpawn; start() calls
-  this._ptySpawn(file, args, opts). Added for deterministic integration testing.
-- start() builds {file,args} via buildSpawnCommand; spawn log uses file/args.
-- Removed unused shell/isWindows vars. cmd.exe now only in the fallback branch + comments
-  (taskkill teardown unchanged).
+## Phases 0a/1/3/5 + settings (engine) — DONE
+- US-101 Phase-0(a) PROBE CONFIRMED: `claude -p` in node-pty wrote a file and EXITED 0 (~11.5s).
+  Completion = process exit (DONE). (node-pty conpty_console_list_agent throws "AttachConsole failed"
+  on TEARDOWN only — harmless.) Phase-0(b) enforcement-under-skip-permissions still unprobed.
+- US-102 spawn-gate.js; US-103 scheduler.js (DST offset-solve, verified across both 2026 transitions);
+  US-104 sessions.js (-p/--model/initialPrompt[final positional, proven]/ephemeral/settingsPermissions);
+  US-105 team-orchestrator.js (fake-spawner seam); US-106 team-settings.js + settings-injector perms.
 
-US-003 tests/spawn-command.test.js: all builder branches + spaced-path-stays-single-arg + arg
-order + danger flag passthrough + classifyClaudeKind matrix.
-
-US-004 tests/spawn-integration.test.js: injects a FAKE ptySpawn (no real process) to assert
-start()->spawner wiring for exe (direct) and shim (cmd.exe /c claude) forms. win32-gated.
-
-US-005:
-- test/smoke-dormant-boot.js: tees console.log, asserts (when CLAUDE_CMD.kind==='exe') the spawn
-  log shows the resolved .exe and not 'cmd.exe /c'.
-- CHANGELOG.md [Unreleased] Changed entry; CLAUDE.md "Session Spawning" updated.
-
-## LEARNING (important)
-- DO NOT write integration tests that call start() with a real spawnCommand pointing at a live
-  binary: spawning a real `node` REPL or (worse) `cmd.exe /c claude` launches an actual Claude
-  session and the live PTY keeps node --test's event loop open -> the runner HANGS with no summary
-  line. Use the injected `ptySpawn` fake instead. This was caught mid-run (suite stalled after the
-  spawn-command file) and fixed by adding the ptySpawn seam.
-- On this host `where claude` -> C:\Users\johnw\.local\bin\claude.exe (native installer, real .exe),
-  so the direct path is live here; the cmd.exe path is shim-only fallback.
-- This complements (does not replace) the OSC-title fix: ConPTY/claude can still set an initial
-  title, which osc-title-source already ignores for ASCII-leading titles.
+## Phases 4/6 (backend + control + dashboard) — DONE this run
+- backend.js: teamSessions (separate map — config-reload immune), getSessionAny (data-WS + snapshots),
+  getProjectPathById, isGitClean (git status --porcelain), makeStageSession (real Session + deny via
+  settingsPermissions; destroy-wrapper + exit listener + closeSessionDataClients guarantee teamSessions
+  cleanup, single broadcast), createOrchestrator instance + events->broadcast + complete/failed toast,
+  armTeamSchedules(config.teams), buildHealthSnapshot iterates both maps & excludes ephemeral from
+  anomalies (+ ephemeralTeamSessions/activeTeamRuns), shutdown disarms schedulers + destroys teamSessions.
+- control-handlers.js: 5 handlers (list-teams/run-team/cancel-team-run/get-team-runs/set-team-schedule),
+  default-safe when deps absent; buildSnapshot includes teamSessions.
+- public/: teams-panel.js (dialog, reuses dialog/btn classes), app.js (knownProjects + team broadcasts +
+  btn-teams), index.html (Teams menu item), style.css (appended Teams block).
+- tests/team-control.test.js (7).
 
 ## Verification
-- node --test "tests/**/*.test.js": 69 pass / 0 fail / 0 skip, exit 0.
-- node test/smoke-dormant-boot.js: 8 passed / 0 failed, exit 0; spawn log = direct .exe, and the
-  "unknown leading title glyph" warning no longer appears on the direct path.
+- node -e require('./backend.js') OK; node test/smoke-dormant-boot.js 8/8.
+- My 10 team test files: 58 pass / 0 fail. Full suite: 0 fail (count fluctuates with a concurrent
+  ws-sender/perf work stream's test files — not ours).
+- npm run build: exit 0 (dist built, Teams menu in index.html).
+- biome clean on ALL new files. Pre-existing-only warnings remain in backend.js:86/136 +
+  control-handlers.js:42/44 (getHookPort / hook route / unused getSession+closeSessionDataClients
+  destructures) — NOT introduced by this task.
+- Architect (Opus, THOROUGH) verification: APPROVED, all 7 acceptance criteria PASS, no BLOCKING.
+
+## v1 CAVEATS / FOLLOW-UPS (documented, not silent gaps)
+1. SPAWN-GATE SCOPE (architect SHOULD-FIX a; plan 3.9 amended). The gate serializes ORCHESTRATOR
+   stage spawns (the sequential pipeline). It is NOT yet shared with user-initiated Session.start(),
+   so a scheduled stage spawn can still race a user expanding a chip (the ConPTY-wedge window).
+   Deferred because correct sharing needs (i) releasing the gate after spawn-SETTLE not after the
+   whole run (runStage currently holds it for the stage's lifetime, fine while the orchestrator is
+   the only user) and (ii) an async start() path on the hot, well-tested, concurrently-edited
+   sessions.js. Low-probability race; gate efficacy itself is Phase-0(b)-class unproven. Follow-up.
+2. PHASE-0(b) ENFORCEMENT unproven: deny-list is injected (permissions.deny in --settings) but whether
+   Claude honors it under --dangerously-skip-permissions is unverified. PRIMARY guardrail remains the
+   git-clean target repo (driver D3). Needs a benign-blacklist real-claude probe before unattended use.
+3. NON-GIT TARGETS run unguarded (isGitClean returns true for a non-git dir — nothing to recover to).
+   Operator note: keep team target projects under git, committed, for the guardrail to apply.
+
+## CONCURRENCY NOTE
+A separate uncommitted work stream (ws-sender backpressure refactor in backend.js + perf harness in
+public/) coexists in the tree; user approved intermingling. This task's files are listed in the prior
+"whose-is-whose" handoff. backend.js/public/session-card.js/public/style.css carry both streams.
+
+## CONPTY FOCUS-STEAL FIX (ralph session, 2026-05-30)
+Bug: pressing Enter in a glissa-managed Claude session raised/flashed the host VS Code
+window on every send. Root cause: Claude Code fires UserPromptSubmit -> user's GLOBAL OMC
+plugin command hooks (keyword-detector, skill-injector) spawn node.exe grandchildren ->
+under node-pty's headless OS ConPTY those console spawns allocate a fresh console window
+=> focus-steal raising the host terminal. Constraint (user): fix ENTIRELY in glissa's spawn
+path; NEVER modify user settings or disable user plugins.
+
+Fix (sessions.js only):
+- buildPtyBackendOpts({platform, conptyMode}) pure helper. win32: 'dll'->{useConptyDll:true},
+  'os-conpty'->{}, 'winpty'->{useConpty:false}, unknown->{}. non-win32-> {} always.
+- conptyMode='dll' constructor option (this._conptyMode). Default 'dll' = node-pty's bundled,
+  newer ConPTY (the same lever VS Code shipped for microsoft/vscode#136999), full fidelity.
+- _spawnWithBackendFallback(): if the bundled dll fails to LOAD (node-pty throws), retry once
+  with OS ConPTY (no flag). Guard keyed on backendOpts.useConptyDll so winpty/os-conpty real
+  spawn errors are NOT masked -> still hit spawn_fail -> FAILED.
+- Kill/restart unaffected: glissa tree-kills via `taskkill /PID <pid> /T /F` (kill(), start()
+  pre-kill, _forceKillAfterTimeout, _handlePtyExit), independent of node-pty internal teardown,
+  so the dll backend's different internal kill path cannot orphan the tree.
+
+Tests: tests/conpty-backend.test.js (11) - pure-helper mapping (all modes + non-win32) +
+Session integration (default useConptyDll, dll-load fallback, both-fail->FAILED, winpty no-retry).
+Verify: full suite 165/165 pass; biome clean on sessions.js + new test; npm run build exit 0;
+runtime smoke `pty.spawn('cmd.exe',[...],{useConptyDll:true})` LOADED + exited 0 on this Win11
+box (primary path de-risked). Architect (Sonnet, STANDARD) verification: APPROVED, all static ACs pass.
+
+USER-PENDING (cannot verify headlessly):
+- AC1: the VS Code flash actually disappearing on Enter (observe a live glissa session, 5+ sends).
+- Root-cause confirm: with OMC hooks off for one throwaway session, the flash stops (proves trigger).
+- Kill/restart orphan check on a live session under the dll backend.
+If the flash persists under 'dll', flip conptyMode to 'winpty' (structurally flash-proof) and re-test.

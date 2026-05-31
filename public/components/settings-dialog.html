@@ -19,6 +19,11 @@
     <select class="dialog-input" id="settings-sound"></select>
     <span class="dialog-hint">Sound played when a session needs attention</span>
   </label>
+  <label class="dialog-label">
+    Editor command
+    <input type="text" class="dialog-input" id="settings-editor-command" placeholder="code -g {file}" autocomplete="off" spellcheck="false">
+    <span class="dialog-hint">Opens team run artifacts. Use {file} for the path (appended if omitted). Blank uses the OS default app.</span>
+  </label>
 </div>
 
 <div class="settings-panel" id="settings-panel-timing" role="tabpanel" aria-labelledby="settings-tab-timing" data-panel="timing" hidden>

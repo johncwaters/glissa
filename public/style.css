@@ -16,13 +16,13 @@
   --border-dim:  #1e1a32;
   --border-hover:#3e3660;
   --text:        #c8c0e0;
-  /* [P1] Lifted from #6a5e90 (~4.1:1) to #8276b0 (≥4.5:1 on --bg).
-     NOTE: theme files that override --text-dim must also be updated. */
-  --text-dim:    #8276b0;
+  /* [a11y] #8276b0 cleared AA only on --bg; lifted to #8d82b9 for >=4.5:1 on
+     bg-card and bg-surface too. Theme overrides in theme.js are kept in sync. */
+  --text-dim:    #8d82b9;
   --text-head:   #e8e0ff;
-  /* [P1] Lifted from #4a4268 (~3.6:1) to #7a6ea8 (≥4.5:1 on --bg).
-     NOTE: theme files that override --text-muted must also be updated. */
-  --text-muted:  #7a6ea8;
+  /* [a11y] #7a6ea8 failed AA on every surface (4.0 to 4.38); lifted to #8579b1
+     for >=4.5:1 on bg, bg-card, and bg-surface. Theme overrides kept in sync. */
+  --text-muted:  #8579b1;
   --accent:      #c084fc;
   --accent-dim:  #9656d6;
   --state-running:      #22c55e;
@@ -241,6 +241,16 @@ body {
   50%      { opacity: 0.3; }
 }
 
+/* Single <main> landmark wrapping both tab panels. A flex column (not display:contents,
+   which can drop the landmark in some assistive tech) that fills the body below the header,
+   so the inner panels keep their flex:1 sizing. */
+.app-main {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 /* ── Sessions grid ────────────────────────────────────────── */
 .sessions {
   display: grid;
@@ -272,6 +282,11 @@ body {
   height: 100%;
   min-height: 0;
   position: relative;
+  /* Layout/style containment: an xterm reflow inside one card no longer forces
+     sibling cards to re-layout. Deliberately NO `paint` — paint containment
+     (and content-visibility:auto, which implies it) would clip the WAITING
+     ::after glow (inset:-1px) and the COMPLETE/hover outer box-shadows. */
+  contain: layout style;
   /* [P1] Removed box-shadow from animated properties — avoids repaint cost on hover */
   transition: border-color var(--transition-med), transform var(--transition-med);
 }
@@ -557,6 +572,20 @@ body {
   opacity: 1;
   border-color: var(--state-waiting);
   background: color-mix(in oklab, var(--state-waiting) 12%, var(--bg-card));
+}
+
+/* Breathing glow as a composited opacity pulse (was an infinite box-shadow
+   keyframe that re-rastered every frame). The inset shadow stays inside the
+   card's overflow:hidden box; only `opacity` animates, so the compositor
+   handles it with zero per-frame raster. */
+.session-card.minimized[data-state="WAITING"]::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow: inset 0 0 0 1px var(--state-waiting),
+              inset 0 0 12px color-mix(in oklab, var(--state-waiting) 45%, transparent);
   animation: minimized-waiting-breath 1.8s ease-in-out infinite;
 }
 
@@ -568,29 +597,39 @@ body {
 .session-card.minimized[data-state="WAITING"] .btn-minimize {
   background: var(--state-waiting);
   opacity: 1;
+  /* Transform-only now (composited); the glow moved to ::before below. */
   animation: minimized-waiting-dot 1.2s ease-in-out infinite;
 }
 
-@keyframes minimized-waiting-breath {
-  0%, 100% {
-    box-shadow: 0 0 0 1px var(--state-waiting-glow),
-                0 0 6px var(--state-waiting-glow);
-  }
-  50% {
-    box-shadow: 0 0 0 1px var(--state-waiting),
-                0 0 14px color-mix(in oklab, var(--state-waiting) 45%, transparent);
-  }
+/* Dot glow as a composited opacity pulse (was a box-shadow keyframe). Scales
+   with the dot since it is a child of the transformed button. */
+.session-card.minimized[data-state="WAITING"] .btn-minimize::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow: 0 0 10px color-mix(in oklab, var(--state-waiting) 55%, transparent);
+  animation: minimized-waiting-dot-glow 1.2s ease-in-out infinite;
 }
 
+/* Composited: only opacity animates here, so the breathing glow never
+   re-rasters. */
+@keyframes minimized-waiting-breath {
+  0%, 100% { opacity: 0.4; }
+  50%      { opacity: 1; }
+}
+
+/* Composited: transform only. */
 @keyframes minimized-waiting-dot {
-  0%, 100% {
-    transform: scale(1);
-    box-shadow: 0 0 4px var(--state-waiting-glow);
-  }
-  50% {
-    transform: scale(1.35);
-    box-shadow: 0 0 10px color-mix(in oklab, var(--state-waiting) 55%, transparent);
-  }
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(1.35); }
+}
+
+/* Composited: opacity only — the dot's glow pulse. */
+@keyframes minimized-waiting-dot-glow {
+  0%, 100% { opacity: 0.55; }
+  50%      { opacity: 1; }
 }
 
 /* Completion flash — plays once on DONE/FAILED transition */
@@ -1764,6 +1803,656 @@ body {
   color: var(--text-muted);
 }
 
+/* ── Primary view tabs (Sessions / Teams) ────────────────────── */
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: clamp(16px, 3vw, 40px);
+  min-width: 0;
+}
+.header-tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.header-tab {
+  position: relative;
+  appearance: none;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  padding: 6px 10px 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  transition: color var(--transition-med);
+}
+.header-tab:hover { color: var(--text-dim); }
+.header-tab[aria-selected="true"] { color: var(--text-head); }
+.header-tab::after {
+  content: '';
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: 0;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--accent);
+  transform: scaleX(0);
+  transform-origin: center;
+  transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.header-tab[aria-selected="true"]::after { transform: scaleX(1); }
+.header-tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius);
+}
+.tab-activity {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: transparent;
+  transition: background var(--transition-med);
+}
+.tab-activity.active {
+  background: var(--accent);
+  box-shadow: 0 0 6px var(--accent);
+  animation: tab-pulse 1.4s ease-in-out infinite;
+}
+@keyframes tab-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.35; }
+}
+
+/* View toggle: only one primary view occupies the main area at a time. */
+body[data-active-view="teams"] #sessions-container,
+body[data-active-view="teams"] #minimized-bar { display: none; }
+
+/* ── Teams view ──────────────────────────────────────────────── */
+.teams-view {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  width: 100%;
+  max-width: var(--content-max);
+  margin: 0 auto;
+  padding: clamp(16px, 2.5vw, 36px) clamp(12px, 2vw, 32px) 48px;
+}
+/* Centered console column: bound the field so the surface doesn't stretch across an ultrawide
+   monitor (header status floating to the edge, control row spread thin). Width lives on this inner
+   wrapper, not .teams-view, so the scrollbar stays at the viewport edge. */
+.teams-content {
+  max-width: 1080px;
+  margin: 0 auto;
+}
+.teams-intro {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-muted);
+  letter-spacing: 0.02em;
+  line-height: 1.55;
+  margin: 0 0 18px;
+  max-width: 78ch;
+}
+.teams-loading,
+.teams-empty {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+/* Add-team bar: an inline, expanding form (roster + project), never a modal. */
+.teams-add { margin: 0 0 24px; }
+.teams-add-toggle {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.03em;
+  padding: 7px 14px;
+  color: var(--accent);
+  background: transparent;
+  border: 1px dashed var(--border-hover);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: border-color var(--transition-med), color var(--transition-med);
+}
+.teams-add-toggle:hover { border-color: var(--accent); }
+.teams-add-toggle[aria-expanded="true"] { color: var(--text-muted); }
+.teams-add-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.teams-add-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px 16px;
+  margin-top: 14px;
+  padding: 16px 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-card);
+}
+.teams-add-field { display: flex; flex-direction: column; gap: 5px; }
+.teams-add-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+.teams-add-roster,
+.teams-add-project {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  min-width: 200px;
+  padding: 7px 10px;
+  color: var(--text-head);
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.teams-add-roster:focus-visible,
+.teams-add-project:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.teams-add-confirm {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  padding: 8px 18px;
+  color: var(--accent);
+  background: transparent;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: background var(--transition-med);
+}
+.teams-add-confirm:hover:not(:disabled) { background: color-mix(in oklab, var(--accent) 14%, transparent); }
+.teams-add-confirm:disabled { opacity: 0.4; cursor: not-allowed; }
+.teams-add-confirm:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.teams-add-cancel {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  padding: 8px 12px;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+.teams-add-cancel:hover { color: var(--text-dim); }
+.teams-add-err { font-family: var(--font-mono); font-size: 11px; color: var(--state-failed); flex-basis: 100%; }
+
+/* First-run empty state: teach what an instance is, point at Add team. */
+.teams-empty-state {
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-lg);
+  padding: 32px clamp(18px, 3vw, 40px);
+  background: color-mix(in oklab, var(--bg-card) 60%, transparent);
+}
+.teams-empty-title {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-head);
+  margin: 0 0 8px;
+}
+.teams-empty-desc {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-muted);
+  margin: 0;
+  max-width: 64ch;
+}
+
+/* Instance stack: one full-width panel per (roster, project), separated by space. */
+.teams-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+.team-panel {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-card);
+  padding: 20px clamp(16px, 2vw, 28px) 22px;
+}
+
+/* Band 1: header (scan line) — roster -> target, live status, next run. */
+.team-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.team-headline { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; min-width: 0; }
+.team-panel-name {
+  font-family: var(--font-mono);
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: var(--text-head);
+  margin: 0;
+}
+.team-target { display: inline-flex; align-items: baseline; gap: 5px; min-width: 0; }
+.team-target-arrow { color: var(--text-muted); }
+.team-target-name {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--accent);
+  letter-spacing: 0.02em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.team-status-group { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; text-align: right; flex-shrink: 0; }
+.team-status {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+.team-status[data-kind="run"] { color: var(--accent); }
+.team-status[data-kind="ok"] { color: var(--state-done); }
+.team-status[data-kind="fail"] { color: var(--state-failed); }
+.team-next {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.team-desc {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-dim);
+  margin: 0 0 16px;
+  max-width: 80ch;
+}
+
+/* Band 2: pipeline rail */
+.team-pipeline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 4px;
+  list-style: none;
+  margin: 0 0 18px;
+  padding: 0;
+}
+.pipeline-arrow {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  padding: 0 2px;
+  user-select: none;
+}
+.pipeline-stage {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 11px;
+  border: 1px solid var(--border-dim);
+  border-radius: var(--radius);
+  background: var(--bg-surface);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  transition: border-color var(--transition-med), background var(--transition-med);
+}
+.pipeline-stage[data-optional="true"] { border-style: dashed; }
+.pipeline-stage .stage-glyph { color: var(--text-muted); font-size: 11px; }
+.pipeline-stage .stage-name { color: var(--text-dim); }
+.pipeline-stage .stage-model {
+  color: var(--text-muted);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 1px 5px;
+  border: 1px solid var(--border-dim);
+  border-radius: 4px;
+}
+.pipeline-stage[data-state="active"] {
+  border-color: var(--accent);
+  background: color-mix(in oklab, var(--accent) 12%, var(--bg-surface));
+}
+.pipeline-stage[data-state="active"] .stage-glyph {
+  color: var(--accent);
+  animation: tab-pulse 1.2s ease-in-out infinite;
+}
+.pipeline-stage[data-state="active"] .stage-name { color: var(--text-head); }
+.pipeline-stage[data-state="done"] .stage-glyph { color: var(--state-done); }
+.pipeline-stage[data-state="done"] .stage-name { color: var(--text-dim); }
+.pipeline-stage[data-state="failed"] { border-color: var(--state-failed); }
+.pipeline-stage[data-state="failed"] .stage-glyph { color: var(--state-failed); }
+
+/* Band 3: control row */
+.team-control-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 22px;
+  margin-bottom: 16px;
+}
+.team-run-group { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.team-sched-group { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+/* Destructive action trails the schedule cluster with a touch more air, so it never sits flush
+   against Edit. */
+.team-remove-btn { margin-left: 4px; }
+.team-run-btn {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  letter-spacing: 0.03em;
+  padding: 8px 18px;
+  color: var(--accent);
+  background: transparent;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: background var(--transition-med);
+}
+.team-run-btn:hover:not(:disabled) { background: color-mix(in oklab, var(--accent) 14%, transparent); }
+.team-run-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.team-run-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.team-cancel-btn {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  letter-spacing: 0.03em;
+  padding: 8px 16px;
+  color: var(--state-failed);
+  background: transparent;
+  border: 1px solid var(--state-failed);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: background var(--transition-med);
+}
+.team-cancel-btn:hover { background: color-mix(in oklab, var(--state-failed) 14%, transparent); }
+.team-cancel-btn:focus-visible { outline: 2px solid var(--state-failed); outline-offset: 2px; }
+.team-spinner {
+  width: 11px;
+  height: 11px;
+  flex-shrink: 0;
+  border: 2px solid var(--border-hover);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  display: none;
+  animation: spin 0.8s linear infinite;
+}
+.team-run-group.running .team-spinner { display: inline-block; }
+.team-elapsed {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.team-sched-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.team-sched-toggle input { accent-color: var(--accent); cursor: pointer; }
+.team-sched-summary {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  letter-spacing: 0.02em;
+}
+.team-sched-edit,
+.team-remove-btn {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 6px 12px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: border-color var(--transition-med), color var(--transition-med);
+}
+.team-sched-edit { color: var(--text-dim); }
+.team-sched-edit:hover { border-color: var(--border-hover); color: var(--text-head); }
+.team-remove-btn { color: var(--text-muted); }
+.team-remove-btn:hover { border-color: var(--state-failed); color: var(--state-failed); }
+.team-sched-edit:disabled,
+.team-remove-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.team-sched-edit:focus-visible,
+.team-remove-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Schedule editor (revealed by Edit) */
+.team-sched-editor {
+  margin: 0 0 16px;
+  padding: 16px;
+  border: 1px solid var(--border-dim);
+  border-radius: var(--radius);
+  background: var(--bg-surface);
+}
+.sched-days { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
+.sched-day {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  min-width: 44px;
+  padding: 6px 10px;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: border-color var(--transition-med), color var(--transition-med), background var(--transition-med);
+}
+.sched-day:hover { border-color: var(--border-hover); }
+.sched-day[aria-pressed="true"] {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: color-mix(in oklab, var(--accent) 12%, transparent);
+}
+.sched-day:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.sched-fields { display: flex; flex-wrap: wrap; gap: 12px 18px; margin-bottom: 14px; }
+.sched-field { display: flex; flex-direction: column; gap: 5px; }
+.sched-field-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+.sched-time,
+.sched-tz {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  padding: 7px 10px;
+  color: var(--text-head);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.sched-tz { min-width: 200px; }
+.sched-time:focus-visible,
+.sched-tz:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.sched-editor-actions { display: flex; align-items: center; gap: 12px; }
+.sched-save {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  padding: 7px 16px;
+  color: var(--accent);
+  background: transparent;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: background var(--transition-med);
+}
+.sched-save:hover { background: color-mix(in oklab, var(--accent) 14%, transparent); }
+.sched-save:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.sched-cancel {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  padding: 7px 12px;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+.sched-cancel:hover { color: var(--text-dim); }
+.sched-err { font-family: var(--font-mono); font-size: 11px; color: var(--state-failed); }
+
+/* Setup callout: shown until the project's pack is filled. An amber attention block (a genuine
+   blocker — the team can't run yet), with each unfilled file as an open-in-editor button matching
+   the .run-artifact vocabulary. */
+.team-setup {
+  margin: 0 0 16px;
+  padding: 13px 15px;
+  border: 1px solid color-mix(in oklab, var(--state-waiting) 32%, var(--border));
+  border-radius: var(--radius);
+  background: color-mix(in oklab, var(--state-waiting) 7%, var(--bg-surface));
+}
+.team-setup-head {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  color: var(--text-dim);
+  margin: 0 0 10px;
+}
+.team-setup-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.team-setup-file {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 4px 11px;
+  color: var(--text-dim);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: border-color var(--transition-med), color var(--transition-med);
+}
+.team-setup-file:hover { border-color: var(--accent); color: var(--accent); }
+.team-setup-file:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* Primary "Set up automatically" action: launches the guided interview session. The hand-edit file
+   buttons sit below it as the fallback. */
+.team-setup-auto {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 7px 15px;
+  margin: 0 0 12px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  background: color-mix(in oklab, var(--accent) 16%, var(--bg-surface));
+  color: var(--accent);
+  cursor: pointer;
+  transition: background var(--transition-med), border-color var(--transition-med);
+}
+.team-setup-auto:hover { background: color-mix(in oklab, var(--accent) 26%, var(--bg-surface)); }
+.team-setup-auto:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.team-setup-auto:disabled { opacity: 0.55; cursor: default; }
+.team-setup-or {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  margin: 0 0 8px;
+}
+
+/* Guardrails line: the trust posture, derived from the team deny-list. */
+.team-guardrails {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  letter-spacing: 0.02em;
+  margin: 0 0 18px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border-dim);
+  overflow-wrap: anywhere;
+}
+
+/* Band 4: recent runs — each row expands to its summary + artifact-open buttons. */
+.team-runs-title {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-muted);
+  margin: 0 0 6px;
+}
+.team-runs-list { list-style: none; margin: 0; padding: 0; }
+.run-item { border-bottom: 1px solid var(--border-dim); }
+.run-item:last-child { border-bottom: none; }
+.run-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 2px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+.run-row:hover { background: color-mix(in oklab, var(--accent) 5%, transparent); }
+.run-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.run-verdict { font-weight: 600; letter-spacing: 0.04em; white-space: nowrap; }
+.run-verdict[data-verdict="ship"] { color: var(--state-done); }
+.run-verdict[data-verdict="fix"] { color: var(--state-waiting); }
+.run-verdict[data-verdict="block"],
+.run-verdict[data-verdict="failed"] { color: var(--state-failed); }
+.run-verdict[data-verdict="skipped"],
+.run-verdict[data-verdict="done"],
+.run-verdict[data-verdict="incomplete"] { color: var(--text-muted); }
+.run-topic { flex: 1; min-width: 0; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.run-date { color: var(--text-muted); font-size: 11px; white-space: nowrap; }
+.run-chevron { color: var(--text-muted); font-size: 10px; transition: transform var(--transition-med); }
+.run-item.open .run-chevron { transform: rotate(90deg); }
+.run-empty { color: var(--text-muted); padding: 9px 2px; font-family: var(--font-mono); font-size: 12px; }
+.run-detail {
+  padding: 2px 2px 14px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.run-summary { color: var(--text-dim); font-size: 12px; line-height: 1.55; margin: 0; max-width: 80ch; }
+.run-platforms { color: var(--text-muted); font-size: 11px; margin: 0; }
+.run-reached { color: var(--text-muted); font-size: 10px; letter-spacing: 0.04em; margin: 0; }
+.run-noartifacts { color: var(--text-muted); font-size: 11px; font-style: italic; margin: 0; }
+.run-artifacts { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 2px; }
+.run-artifacts-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+.run-artifact {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 4px 11px;
+  color: var(--text-dim);
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: border-color var(--transition-med), color var(--transition-med);
+}
+.run-artifact:hover { border-color: var(--accent); color: var(--accent); }
+.run-artifact:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .tab-activity.active,
+  .pipeline-stage[data-state="active"] .stage-glyph,
+  .team-spinner { animation: none; }
+  .header-tab::after,
+  .run-chevron,
+  .sched-day { transition: none; }
+}
+
 .health-table {
   width: 100%;
   border-collapse: collapse;
@@ -1974,7 +2663,6 @@ body {
   bottom: 0;
   z-index: 20;
   background: color-mix(in srgb, var(--bg-card) 94%, transparent);
-  backdrop-filter: blur(4px);
   border-top: 1px solid var(--border);
   overflow-y: auto;
   padding: 10px 14px;

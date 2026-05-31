@@ -213,6 +213,16 @@ class Session extends EventEmitter {
     // Resolved claude command ({ path, kind }). Defaults to the module-load
     // resolution; tests inject a stub to exercise the spawn branches deterministically.
     spawnCommand = CLAUDE_CMD,
+    // Team-stage spawn options. initialPrompt is appended as the FINAL positional arg (proven safe
+    // as a single argv element on the direct-exe path by the Phase-0 probe); extraClaudeArgs carries
+    // e.g. ["-p", "--model", "sonnet"]; ephemeral marks orchestrator-owned stage sessions that live
+    // in a separate map and must never be persisted to config.json.
+    initialPrompt = null,
+    extraClaudeArgs = [],
+    ephemeral = false,
+    // Optional Claude Code permissions ({ deny: [...] }) merged into the injected --settings file
+    // (team-stage deny blacklist, mechanism M2). Null for ordinary user sessions.
+    settingsPermissions = null,
     // PTY spawner seam. Defaults to node-pty; tests inject a fake to assert the
     // spawn wiring (file/args) without launching a real process.
     ptySpawn = null,
@@ -257,6 +267,10 @@ class Session extends EventEmitter {
     this._hookSeen = false;
     this._lastSignal = null;
     this._spawnCommand = spawnCommand;
+    this._initialPrompt = initialPrompt;
+    this._extraClaudeArgs = Array.isArray(extraClaudeArgs) ? extraClaudeArgs : [];
+    this.ephemeral = !!ephemeral;
+    this._settingsPermissions = settingsPermissions;
     this._conptyMode = conptyMode;
     this._ptySpawn = ptySpawn || ((file, args, opts) => pty.spawn(file, args, opts));
 
@@ -347,6 +361,7 @@ class Session extends EventEmitter {
       state: this.state,
       sleeping: this._sleeping,
       dangerouslySkipPermissions: this.dangerouslySkipPermissions,
+      ephemeral: this.ephemeral,
       auditLog: this.auditLog.slice(-100),
     };
   }
@@ -513,6 +528,15 @@ class Session extends EventEmitter {
     const claudeArgs = this.dangerouslySkipPermissions
       ? ["--dangerously-skip-permissions"]
       : [];
+    // Team stages pass extra flags (e.g. -p, --model <m>) then the prompt as the final positional.
+    // The positional is a single argv element on the direct-exe path (proven by the Phase-0 probe);
+    // on the cmd.exe shim fallback a very large/multiline prompt is subject to cmd parsing.
+    if (this._extraClaudeArgs.length > 0) {
+      claudeArgs.push(...this._extraClaudeArgs);
+    }
+    if (this._initialPrompt != null) {
+      claudeArgs.push(this._initialPrompt);
+    }
     const { file, args } = buildSpawnCommand({
       platform: process.platform,
       resolved: this._spawnCommand,
@@ -542,8 +566,13 @@ class Session extends EventEmitter {
 
     this.transition("spawn_success");
 
+    // Redact a positional initialPrompt (team stages) from the spawn log — it can be a multi-KB
+    // RUN CONTEXT block that does not belong in the console. Run detail lives in the Teams view.
+    const argsForLog = this._initialPrompt
+      ? args.map((a) => (a === this._initialPrompt ? `<prompt:${this._initialPrompt.length}c>` : a)).join(" ")
+      : args.join(" ");
     console.log(
-      `[session ${this.id}] spawn: ${file} ${args.join(" ")} (cwd=${this.path})`,
+      `[session ${this.id}] spawn: ${file} ${argsForLog} (cwd=${this.path})`,
     );
 
     if (this._recorder) {
@@ -605,6 +634,7 @@ class Session extends EventEmitter {
         port,
         glissaId: this.id,
         baseDir: this._hooksBaseDir,
+        permissions: this._settingsPermissions,
       });
       this._hookToken = this._settingsHandle.token;
       this._hookRouter.register(this.id, {

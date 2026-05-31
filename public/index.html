@@ -7,7 +7,9 @@
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <title>Glissa</title>
   <style>
-    /* Inline critical styles — render before JS modules load */
+    /* Inline critical styles render before JS modules load. Colors here are the Phyrexian
+       (default theme) values; theme.js repaints to the saved theme on connect. A brief flash
+       for users on a non-default theme is an accepted fast-first-paint tradeoff. */
     html, body {
       margin: 0;
       padding: 0;
@@ -140,7 +142,13 @@
   <div class="app-shell">
     <header class="header">
       <div class="header-inner">
-        <h1 class="header-title">Glissa</h1>
+        <div class="header-left">
+          <h1 class="header-title">Glissa</h1>
+          <nav class="header-tabs" id="header-tabs" role="tablist" aria-label="Primary views">
+            <button class="header-tab" id="tab-sessions" role="tab" aria-selected="true" aria-controls="sessions-container" tabindex="0">Sessions</button>
+            <button class="header-tab" id="tab-teams" role="tab" aria-selected="false" aria-controls="view-teams" tabindex="-1">Teams<span class="tab-activity" id="tab-teams-activity" aria-hidden="true"></span></button>
+          </nav>
+        </div>
         <div class="header-right">
           <div class="status-indicator" id="status-indicator">
             <span class="header-connection" id="connection-status">
@@ -164,17 +172,21 @@
         </div>
       </div>
     </header>
-    <main class="sessions" id="sessions-container">
-      <!-- Session cards injected here by app.js -->
-    </main>
-    <div class="minimized-bar" id="minimized-bar">
-      <!-- Minimized session cards injected here -->
-      <div class="session-card minimized ghost-card" id="btn-add-session" role="button" tabindex="0" title="Create a new session">
-        <div class="session-card-header">
-          <span class="session-name">+ New Session</span>
+    <main class="app-main" id="app-main">
+      <section class="sessions" id="sessions-container" role="tabpanel" aria-labelledby="tab-sessions">
+        <!-- Session cards injected here by app.js -->
+      </section>
+      <div class="minimized-bar" id="minimized-bar">
+        <!-- Minimized session cards injected here -->
+        <div class="session-card minimized ghost-card" id="btn-add-session" role="button" tabindex="0" title="Create a new session">
+          <div class="session-card-header">
+            <span class="session-name">+ New Session</span>
+          </div>
         </div>
       </div>
-    </div>
+      <!-- Teams view: dedicated tab space, mounted by teams-panel.js -->
+      <section class="teams-view" id="view-teams" role="tabpanel" aria-labelledby="tab-teams" hidden></section>
+    </main>
     <!-- Health monitor footer injected by health-monitor.js -->
     <div id="health-footer-mount"></div>
   </div>
