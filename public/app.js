@@ -345,16 +345,78 @@ btnMute.addEventListener('click', (e) => {
 // ── Layout toggle ─────────────────────────────────────────
 
 const sessionsContainer = document.getElementById('sessions-container');
+const layoutToggle = document.getElementById('layout-toggle');
+const layoutOpts = [...layoutToggle.querySelectorAll('.layout-opt')];
+
+// null = auto (count-based); 'default' | 'split' = operator-pinned.
+let _manualLayout = null;
 
 function applyLayout(layoutId) {
   sessionsContainer.classList.toggle('layout-split', layoutId === 'split');
   setLayoutMode(layoutId);
 }
 
-// Auto-switch layout based on session count: split for exactly 2, default otherwise
+// An operator's explicit choice wins and is held across session add/remove (no
+// silent collapse); otherwise fall back to count-based (split for exactly two).
+// A pinned split with <2 sessions renders as grid but keeps the pin, so it
+// returns to split once a second session exists.
 function autoLayout() {
-  applyLayout(getSessionCount() === 2 ? 'split' : 'default');
+  const count = getSessionCount();
+  let target;
+  if (_manualLayout === 'split') target = count >= 2 ? 'split' : 'default';
+  else if (_manualLayout === 'default') target = 'default';
+  else target = count === 2 ? 'split' : 'default';
+  applyLayout(target);
+  updateLayoutToggleUI();
 }
+
+function updateLayoutToggleUI() {
+  // The toggle only earns its space once there are enough sessions to arrange.
+  layoutToggle.classList.toggle('hidden', getSessionCount() < 2);
+  const current = _manualLayout || 'auto';
+  for (const btn of layoutOpts) {
+    btn.setAttribute('aria-pressed', String(btn.dataset.layout === current));
+  }
+}
+
+for (const btn of layoutOpts) {
+  btn.addEventListener('click', () => {
+    _manualLayout = btn.dataset.layout === 'auto' ? null : btn.dataset.layout;
+    autoLayout();
+  });
+}
+
+// ── Keyboard shortcuts (chrome-level) ─────────────────────────
+// Alt+0 opens a new session; Alt+1..9 jumps to the Nth session card. Guarded so
+// they never reach a focused xterm — its key handling lives in session-card.js
+// and forwards most keys to the PTY — so these fire only when the operator is on
+// the dashboard chrome, not typing into a session.
+function isTypingContext() {
+  const a = document.activeElement;
+  if (!a) return false;
+  if (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.isContentEditable) return true;
+  return !!(a.closest && a.closest('.terminal-wrap'));
+}
+
+document.addEventListener('keydown', (e) => {
+  if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+  if (isTypingContext()) return;
+
+  if (e.key === '0') {
+    e.preventDefault();
+    document.getElementById('btn-add-session-header')?.click();
+    return;
+  }
+  if (e.key >= '1' && e.key <= '9') {
+    const cards = [...sessionsContainer.querySelectorAll('.session-card')]
+      .filter((c) => !c.classList.contains('drop-zone-placeholder'));
+    const card = cards[Number(e.key) - 1];
+    if (card) {
+      e.preventDefault();
+      focusSessionCard(card.dataset.id);
+    }
+  }
+});
 
 // ── Window focus tracking (suppress server notifications when dashboard is visible) ──
 

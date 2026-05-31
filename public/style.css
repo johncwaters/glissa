@@ -139,41 +139,73 @@ body {
 .header-right {
   display: flex;
   align-items: center;
-  gap: 20px;
+  gap: 16px;
 }
 
-/* ── Status indicator with hover tooltip ─────────────────── */
+/* Persistent primary action — accent-outline language, matches team-run / dialog
+   Confirm. The minimized-bar ghost card stays as the secondary inline path. */
+.btn-add-header {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  padding: 6px 14px;
+  color: var(--accent);
+  background: transparent;
+  border: 1px solid var(--accent-dim);
+  border-radius: var(--radius);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+
+.btn-add-header:hover {
+  background: color-mix(in oklab, var(--accent) 14%, transparent);
+  border-color: var(--accent);
+}
+
+.btn-add-header:active {
+  transform: scale(0.97);
+}
+
+.btn-add-header:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
+}
+
+/* ── Status indicator ─────────────────────────────────────── */
 .status-indicator {
   position: relative;
   cursor: default;
 }
 
-.status-tooltip {
-  display: none;
-  position: absolute;
-  top: calc(100% + 8px);
-  right: 0;
-  min-width: 160px;
-  padding: 8px 12px;
-  background: var(--bg-card);
-  border: 1px solid var(--border-hover);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow-lg);
-  z-index: 150;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.status-indicator:hover .status-tooltip:has(.header-aggregate:not(:empty)) {
-  display: flex;
-}
-
+/* Aggregate roll-up: persistent in the header (was a hover-only tooltip — the
+   page's headline signal should never hide). Quiet by default (text-dim) so the
+   steady "N running" state recedes; only the attention severities take a state
+   color. Shape varies with severity via .aggregate-glyph, so the signal survives
+   without hue (color-blind safe). The element carries role="status" for aria-live. */
 .header-aggregate {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   font-size: 11px;
   font-family: var(--font-mono);
   color: var(--text-dim);
   letter-spacing: 0.02em;
   white-space: nowrap;
+  min-width: 0;
+}
+
+.header-aggregate:empty {
+  display: none;
+}
+
+.aggregate-glyph {
+  font-size: 10px;
+  line-height: 1;
+  flex-shrink: 0;
 }
 
 .header-aggregate[data-severity="critical"] {
@@ -182,10 +214,6 @@ body {
 
 .header-aggregate[data-severity="warning"] {
   color: var(--state-waiting);
-}
-
-.header-aggregate[data-severity="success"] {
-  color: var(--state-running);
 }
 
 .header-aggregate[data-severity="done"] {
@@ -324,14 +352,8 @@ body {
   background: color-mix(in srgb, var(--text) 8%, transparent);
 }
 
-.btn-maximize {
-  color: var(--state-done);
-  border-color: color-mix(in oklab, var(--state-done) 40%, transparent);
-}
-
-.btn-maximize:hover {
-  background: color-mix(in oklab, var(--state-done) 12%, transparent);
-}
+/* Maximize inherits the neutral .btn-action treatment — cyan (the DONE state
+   color) is reserved for real state changes, never spent on a control. */
 
 .session-card.dragging {
   opacity: 0.3;
@@ -411,6 +433,10 @@ body {
   width: 100%;
   border-top: 1px solid var(--border-dim);
   background: var(--bg-header);
+  /* Cap growth so a long row of minimized chips can't squeeze the live
+     terminals; scroll within the bar past the cap instead. */
+  max-height: 30vh;
+  overflow-y: auto;
 }
 
 /* ── Create session ghost card ────────────────────────────── */
@@ -703,8 +729,13 @@ body {
   pointer-events: none;
 }
 
+/* FAILED keeps a steady (non-animated) tinted ring at rest so an outcome that
+   landed while the operator was on another tab stays legible across a wall of
+   cards — louder than the quiet states, quieter than WAITING's pulse. */
 .session-card[data-state="FAILED"] {
-  border-color: color-mix(in oklab, var(--state-failed) 30%, transparent);
+  border-color: color-mix(in oklab, var(--state-failed) 50%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--state-failed) 18%, transparent),
+              0 0 16px color-mix(in oklab, var(--state-failed) 7%, transparent);
 }
 
 .session-card[data-state="DONE"] {
@@ -986,7 +1017,9 @@ body {
   padding: 10px 24px;
   border: 1px solid var(--accent-dim);
   border-radius: var(--radius);
-  background: color-mix(in oklab, var(--accent) 10%, transparent);
+  /* Accent-outline at rest (was a 10% fill) — one primary-button rest treatment
+     across the app: header +Session, dialog Confirm, team Run, this CTA. */
+  background: transparent;
   color: var(--accent);
   font-family: var(--font-mono);
   font-size: 12px;
@@ -998,7 +1031,7 @@ body {
 }
 
 .sessions-empty-cta:hover {
-  background: color-mix(in oklab, var(--accent) 20%, transparent);
+  background: color-mix(in oklab, var(--accent) 14%, transparent);
   border-color: var(--accent);
 }
 
@@ -1239,11 +1272,12 @@ body {
 .btn-dialog-confirm {
   color: var(--accent);
   border-color: var(--accent-dim);
-  background: color-mix(in oklab, var(--accent) 8%, transparent);
+  /* Accent-outline at rest (was an 8% fill) — see .sessions-empty-cta note. */
+  background: transparent;
 }
 
 .btn-dialog-confirm:hover {
-  background: color-mix(in oklab, var(--accent) 18%, transparent);
+  background: color-mix(in oklab, var(--accent) 14%, transparent);
 }
 
 .btn-dialog-danger {
@@ -1819,13 +1853,17 @@ body {
 .header-left {
   display: flex;
   align-items: center;
-  gap: clamp(16px, 3vw, 40px);
+  gap: clamp(12px, 2vw, 20px);
   min-width: 0;
 }
 .header-tabs {
   display: flex;
   align-items: center;
   gap: 2px;
+  /* 1px structural divider clusters the nav and separates it from the wordmark
+     so the tabs read as primary navigation, not logo metadata. */
+  padding-left: clamp(12px, 2vw, 20px);
+  border-left: 1px solid var(--border-dim);
 }
 .header-tab {
   position: relative;
@@ -1835,21 +1873,63 @@ body {
   cursor: pointer;
   font-family: var(--font-mono);
   font-size: 13px;
+  font-weight: 500;
   letter-spacing: 0.04em;
-  color: var(--text-muted);
-  padding: 6px 10px 8px;
+  color: var(--text-dim);
+  padding: 7px 12px 9px;
   display: inline-flex;
   align-items: center;
   gap: 7px;
   transition: color var(--transition-med);
 }
-.header-tab:hover { color: var(--text-dim); }
-.header-tab[aria-selected="true"] { color: var(--text-head); }
+.header-tab:hover { color: var(--text); }
+.header-tab[aria-selected="true"] { color: var(--text-head); font-weight: 700; }
+
+/* ── Layout toggle (Auto / Grid / Split) ─────────────────────
+   Operator-pinned session arrangement. Shown only in the Sessions view and only
+   with >=2 sessions; a quiet segmented control, accent-filled on the active option. */
+.layout-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  padding: 2px;
+  border: 1px solid var(--border-dim);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--text) 2%, transparent);
+}
+.layout-toggle.hidden,
+body[data-active-view="teams"] .layout-toggle {
+  display: none;
+}
+.layout-opt {
+  appearance: none;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding: 3px 8px;
+  border-radius: 2px;
+  transition: color var(--transition-fast), background var(--transition-fast);
+}
+.layout-opt:hover { color: var(--text); }
+.layout-opt[aria-pressed="true"] {
+  color: var(--accent);
+  background: color-mix(in oklab, var(--accent) 12%, transparent);
+}
+.layout-opt:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
+}
 .header-tab::after {
   content: '';
   position: absolute;
-  left: 10px;
-  right: 10px;
+  left: 12px;
+  right: 12px;
   bottom: 0;
   height: 2px;
   border-radius: 2px;
@@ -2695,10 +2775,6 @@ body[data-active-view="teams"] #minimized-bar { display: none; }
 
   .header-right {
     gap: 10px;
-  }
-
-  .status-tooltip {
-    display: none !important;
   }
 }
 

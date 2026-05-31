@@ -150,15 +150,19 @@
           </nav>
         </div>
         <div class="header-right">
+          <div class="layout-toggle hidden" id="layout-toggle" role="group" aria-label="Session layout">
+            <button class="layout-opt" id="layout-auto" data-layout="auto" aria-pressed="true" title="Auto layout (default)">Auto</button>
+            <button class="layout-opt" id="layout-grid" data-layout="default" aria-pressed="false" title="Grid layout">Grid</button>
+            <button class="layout-opt" id="layout-split" data-layout="split" aria-pressed="false" title="Split layout (two side by side)">Split</button>
+          </div>
           <div class="status-indicator" id="status-indicator">
             <span class="header-connection" id="connection-status">
               <span class="connection-dot"></span>
               <span class="connection-label">Connecting</span>
             </span>
-            <div class="status-tooltip" id="status-tooltip">
-              <span class="header-aggregate" id="aggregate-status"></span>
-            </div>
           </div>
+          <span class="header-aggregate" id="aggregate-status" role="status" aria-live="polite"></span>
+          <button class="btn-add-header" id="btn-add-session-header" type="button" title="Add a new session">+ Session</button>
           <div class="header-menu" id="header-menu">
             <button class="btn-menu" id="btn-menu" title="Menu" aria-label="Open menu" aria-haspopup="menu" aria-expanded="false" aria-controls="header-menu-dropdown">&#9776;</button>
             <div class="header-menu-dropdown" id="header-menu-dropdown" role="menu">
