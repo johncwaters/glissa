@@ -219,6 +219,10 @@ class Session extends EventEmitter {
     this._outputBufferHead = 0; // index of oldest valid entry; advances instead of shift()
     this._outputBufferSize = 0;
     this._outputBufferMax = replayBufferKB * 1024;
+    // Monotonic count of total bytes ever produced (never decremented by eviction).
+    // This is the "end" offset for getBufferSince(); per-client ws-senders track how
+    // far they have durably sent against it so a backpressure drop can be backfilled.
+    this._outputBufferTotal = 0;
     this._killPollTimer = null;
     this._noFlicker = noFlicker;
     this._sleeping = false;
@@ -366,6 +370,7 @@ class Session extends EventEmitter {
       ptyPid: this.ptyProcess ? this.ptyProcess.pid : null,
       outputBufferEntries: this._outputBuffer.length - this._outputBufferHead,
       outputBufferBytes: this._outputBufferSize,
+      outputBufferTotal: this._outputBufferTotal,
       auditLogLength: this.auditLog.length,
       dataListenerCount: this.listenerCount("data"),
       hookSeen: this._hookSeen,
@@ -490,6 +495,14 @@ class Session extends EventEmitter {
     this._outputBuffer = [];
     this._outputBufferHead = 0;
     this._outputBufferSize = 0;
+    this._outputBufferTotal = 0;
+    // A restarted PTY re-bases its monotonic output offset at 0. Signal the backend so
+    // it force-closes any LIVE data-WS client (whose ws-sender.sentOffset is now
+    // stale-high relative to the reset total) and lets it reconnect + re-baseline.
+    // Covers restart(), forceRestart(), and sleep-kill auto-restart (all funnel through
+    // start()); harmless no-op on the first start() (no data clients attached yet).
+    // See backend.js wireSessionEvents -> closeSessionDataClients.
+    this.emit("rebaseline");
     this._clearWatchdog();
     this._titleSource.reset();
     this._statusSource.reset();
@@ -678,8 +691,15 @@ class Session extends EventEmitter {
 
     // Buffer for late-joining data WS clients. Uses a head-index ring instead
     // of Array.shift() (O(n) per call) to keep the hot path O(1) amortized.
+    //
+    // ORDER CONTRACT: the ring push + _outputBufferTotal increment MUST stay BEFORE
+    // emit("data") below. ws-sender.maybeBackfill() reads getBufferSince() from inside
+    // the "data" listener and relies on the just-arrived chunk already being
+    // retained and counted (see ws-sender.js maybeBackfill). Reordering would make a
+    // backfill miss the in-flight chunk.
     this._outputBuffer.push(data);
     this._outputBufferSize += data.length;
+    this._outputBufferTotal += data.length;
     while (
       this._outputBufferSize > this._outputBufferMax &&
       this._outputBuffer.length - this._outputBufferHead > 1
@@ -693,6 +713,9 @@ class Session extends EventEmitter {
       this._outputBufferHead = 0;
     }
 
+    // ORDER CONTRACT (see the ring-push block above): emit AFTER the push +
+    // _outputBufferTotal increment so a backfill triggered from this listener sees
+    // the in-flight chunk already in the ring.
     if (this.listenerCount("data") > 0) {
       this.emit("data", data);
     }
@@ -740,6 +763,49 @@ class Session extends EventEmitter {
     return this._outputBufferHead === 0
       ? this._outputBuffer.join("")
       : this._outputBuffer.slice(this._outputBufferHead).join("");
+  }
+
+  // Current monotonic output offset (== total bytes ever produced). A data-WS client
+  // captures this at connect as its live baseline (startOffset).
+  getOutputOffset() {
+    return this._outputBufferTotal;
+  }
+
+  // Return the slice of output produced at or after `offset`. Offsets are monotonic
+  // byte counts in JS string .length units (UTF-16 code units), consistent with the
+  // ring's sizing. Returns { data, base, end, evicted }:
+  //   - end  = current total (the offset the caller should adopt after consuming).
+  //   - base = oldest retained offset = end - retained bytes.
+  //   - offset >= end  -> nothing new ({ data: "" }).
+  //   - offset <  base -> the missed range was evicted from the ring; `data` is the
+  //                       full current replay and `evicted` is true (caller must
+  //                       screen-clear before writing it).
+  //   - otherwise      -> the exact tail from `offset`, slicing the boundary chunk.
+  // `offset` is always a previous cumulative .length (a chunk-append boundary), never an
+  // arbitrary mid-chunk index, so the boundary slice never splits a UTF-16 surrogate pair.
+  getBufferSince(offset) {
+    const end = this._outputBufferTotal;
+    const base = end - this._outputBufferSize; // oldest retained offset (bytes evicted)
+    if (offset >= end) {
+      return { data: "", base, end, evicted: false };
+    }
+    if (offset < base) {
+      return { data: this.getReplayBuffer(), base, end, evicted: true };
+    }
+    let pos = base;
+    let out = "";
+    for (let i = this._outputBufferHead; i < this._outputBuffer.length; i++) {
+      const chunk = this._outputBuffer[i];
+      if (chunk == null) continue; // eviction nulls entries before head compaction
+      const len = chunk.length;
+      if (pos + len <= offset) {
+        pos += len;
+        continue;
+      }
+      out += offset > pos ? chunk.slice(offset - pos) : chunk;
+      pos += len;
+    }
+    return { data: out, base, end, evicted: false };
   }
 
   write(text) {

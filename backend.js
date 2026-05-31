@@ -563,6 +563,15 @@ function createBackend(httpServer, options = {}) {
         timestamp: Date.now()
       });
     });
+
+    // On an in-place restart (restart()/forceRestart()/sleep-kill auto-restart) the
+    // session's monotonic output offset resets to 0 (sessions.js start()). Any LIVE
+    // data-WS client's ws-sender.sentOffset is now stale-high, which would silently
+    // disable its in-place backfill until the client happens to reconnect. Force-close
+    // those clients so they auto-reconnect (terminal.js) and re-baseline startOffset
+    // through the connect path above. Server-only; the client is unchanged. Harmless
+    // no-op when no data clients are attached (e.g. the first start()).
+    sess.on('rebaseline', () => closeSessionDataClients(sess.id));
   }
 
   // Sessions are constructed dormant — no PTY spawns on boot. The user starts
@@ -773,9 +782,17 @@ function createBackend(httpServer, options = {}) {
     // reconnect, so RSS is bounded by construction), closes a wedged client past
     // a stall timeout, and flushes the echo frame immediately after user input.
     // Created before the replay send so the replay shares the same high-water guard.
-    const sender = createWsSender(ws);
-
+    // Capture the replay snapshot and the live baseline offset atomically — same
+    // synchronous tick, before 'data' is wired below, so no 'data' event can slip in
+    // between. The replay covers [base, total); startOffset = total; live onData resumes
+    // exactly at total (no overlap, no gap). The injected source lets the sender recover
+    // bytes dropped under backpressure in place, without a reconnect (ws-sender.js).
     const replay = sess.getReplayBuffer();
+    const startOffset = sess.getOutputOffset();
+    const sender = createWsSender(ws, {
+      source: { getBufferSince: (off) => sess.getBufferSince(off) },
+      startOffset,
+    });
     if (replay) {
       sender.sendImmediate(replay);
     }
