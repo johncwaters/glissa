@@ -10,6 +10,10 @@ import { playAlertSound } from './alert-sound.js';
 import { sendControlMsg } from './control-ws.js';
 import { el, escapeHtml } from './dom-helpers.js';
 import { renderScheduler } from './render-scheduler.mjs';
+import { computeAggregate } from './session-card/aggregate-core.mjs';
+import { closestCardByCenter } from './session-card/geometry-core.mjs';
+import { countAutoNames, nextSuggestedName } from './session-card/naming-core.mjs';
+import { pickEvictionVictims } from './session-card/webgl-core.mjs';
 import { getTerminalTheme } from './theme.js';
 import { getSoundId, isMinimized, isSoundEnabled, setMinimized } from './ui-prefs.js';
 
@@ -159,12 +163,7 @@ function _releaseWebgl(ui) {
 }
 
 function _evictWebglIfNeeded(exceptUi) {
-  while (_webglLru.size >= MAX_WEBGL_CONTEXTS) {
-    let victim = null;
-    for (const ui of _webglLru.keys()) {
-      if (ui !== exceptUi) { victim = ui; break; }
-    }
-    if (!victim) break;
+  for (const victim of pickEvictionVictims([..._webglLru.keys()], MAX_WEBGL_CONTEXTS, exceptUi)) {
     _releaseWebgl(victim);
     victim.needsWebGLReload = true; // recreated when it next becomes visible
   }
@@ -664,28 +663,7 @@ function invalidateDragRects() {
 function findDropTarget(x, y) {
   if (!_dragRectCache) snapshotDragRects();
   const sourceCard = _dragSource ? _dragSource.card : null;
-
-  let closest = null;
-  let closestDist = Infinity;
-  let sourceIdx = -1;
-  let targetIdx = -1;
-
-  for (let i = 0; i < _dragRectCache.length; i++) {
-    const { card, rect } = _dragRectCache[i];
-    if (card === sourceCard) { sourceIdx = i; continue; }
-    if (card === _dropZone) continue;
-    const cx = rect.left + rect.width / 2;
-    const cy = rect.top + rect.height / 2;
-    const dist = Math.hypot(x - cx, y - cy);
-    if (dist < closestDist) {
-      closestDist = dist;
-      closest = card;
-      targetIdx = i;
-    }
-  }
-
-  if (!closest) return { card: null, before: true };
-  return { card: closest, before: sourceIdx > targetIdx };
+  return closestCardByCenter(x, y, _dragRectCache, sourceCard, _dropZone);
 }
 
 function clearDropIndicators() {
@@ -1236,26 +1214,16 @@ export function hasSessionByName(name) {
   return false;
 }
 
-/**
- * True when `name` is exactly `baseName` or matches `baseName (N)` where N
- * is a positive integer suffix produced by `suggestSessionName`. Excludes
- * unrelated parenthetical names like `Foo (legacy)`.
- */
-function isAutoNameOf(name, baseName) {
-  if (name === baseName) return true;
-  const prefix = `${baseName} (`;
-  if (!name.startsWith(prefix) || !name.endsWith(')')) return false;
-  const inner = name.slice(prefix.length, -1);
-  return /^\d+$/.test(inner);
+// Gather current display names for the pure naming-core helpers.
+function _currentSessionNames() {
+  const names = [];
+  for (const [, ui] of sessionUIs) names.push(ui.card.dataset.session);
+  return names;
 }
 
 /** Count sessions whose display name is `baseName` or `baseName (N)`. */
 export function countSessionsByName(baseName) {
-  let n = 0;
-  for (const [, ui] of sessionUIs) {
-    if (isAutoNameOf(ui.card.dataset.session, baseName)) n++;
-  }
-  return n;
+  return countAutoNames(baseName, _currentSessionNames());
 }
 
 /**
@@ -1264,12 +1232,7 @@ export function countSessionsByName(baseName) {
  * Bounded by 999 to keep the suffix within the 64-char server name limit.
  */
 export function suggestSessionName(baseName) {
-  if (!hasSessionByName(baseName)) return baseName;
-  for (let i = 2; i < 1000; i++) {
-    const candidate = `${baseName} (${i})`;
-    if (!hasSessionByName(candidate)) return candidate;
-  }
-  return `${baseName} (${Date.now()})`;
+  return nextSuggestedName(baseName, _currentSessionNames());
 }
 
 export function getSessionCount() {
@@ -1322,34 +1285,9 @@ export function updateAggregateStatus() {
     else if (state === STATES.DORMANT) dormant++;
   }
 
-  let text = '';
-  let severity = '';
-  const pl = (n) => n > 1 ? 's' : '';
-
-  if (waiting > 0) {
-    text = `${waiting} session${pl(waiting)} need input`;
-    severity = 'warning';
-  } else if (failed > 0) {
-    text = `${failed} session${pl(failed)} failed`;
-    severity = 'critical';
-  } else if (complete > 0) {
-    text = `${complete} session${pl(complete)} finished`;
-    severity = 'done';
-  } else if (total > 0 && done === total) {
-    text = 'All sessions exited';
-    severity = 'done';
-  } else if (total > 0 && dormant === total) {
-    text = `${dormant} session${pl(dormant)} dormant`;
-    severity = '';
-  } else if (total > 0) {
-    const active = total - done - dormant;
-    text = `${active} session${pl(active)} running`;
-    severity = 'success';
-  }
-
+  const { text, severity, alertCount } = computeAggregate({ waiting, failed, done, complete, dormant, total });
   aggregateEl.textContent = text;
   aggregateEl.dataset.severity = severity;
-  const alertCount = waiting + failed + complete;
   document.title = alertCount > 0 ? `(${alertCount}) Glissa` : 'Glissa';
 }
 
