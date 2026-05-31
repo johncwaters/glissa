@@ -203,7 +203,7 @@ Every interactive element ships default, hover, focus-visible, active, and disab
 - **Shape:** nearly square (4px radius). Tight corners reinforce the instrument feel.
 - **Primary (accent-outline):** transparent fill, Iridescent Orchid text and 1px orchid border, padding 8px 18px, uppercase-ish mono with light tracking. Used for Run, Add, Save, the empty-state CTA. Hover fills with a ~14% orchid wash; disabled drops to 0.4 opacity.
 - **Ghost / secondary:** transparent fill, Muted Lavender text, 1px base border, padding 6px 12px. Used for Edit, Remove, Cancel. Hover lifts the border (Remove hovers to Signal Red). 
-- **Icon action button:** 26x22 transparent square, glyph only, revealed on card hover; an invisible inset pseudo-element extends the touch target without changing the visual size. Active scales to 0.93 for tactile feedback.
+- **Icon action button:** 26x22 transparent square, glyph only. Maximize and the overflow (kebab) sit persistently in the card header; the kebab holds the secondary actions (rename, restart, remove), and the debug button appears only when debug mode is on. An invisible inset pseudo-element extends the touch target without changing the visual size. Active scales to 0.93 for tactile feedback.
 
 ### Inputs / Fields
 - **Style:** Deep Violet Slate fill, 1px Violet Border, 4px radius, padding 8px 12px, Bright Lavender White text, mono 13px.
@@ -228,7 +228,7 @@ Every interactive element ships default, hover, focus-visible, active, and disab
 - An xterm.js surface filling each card on the Ink Violet background. The server is a dumb pipe; xterm renders all ANSI. The terminal theme is derived from the active CSS-variable palette at runtime, so it stays in lockstep with the chrome. Chrome around it must never compete with it for contrast or color.
 
 ### Minimized Session Bar
-The collapsed dock at the bottom of the screen. It sits in-flow below the sessions grid (which shrinks to make room) so open terminals are never overlapped. The bar is Shadow Violet with a 1px dim top border, 8px padding, and a 6px gap, and it wraps.
+The collapsed dock at the bottom of the screen. It sits in-flow below the sessions grid (which shrinks to make room) so open terminals are never overlapped. The bar is Shadow Violet with a 1px dim top border, 8px padding, and a 6px gap, and it wraps; it caps at 30vh and scrolls past that so a long dock never squeezes the live terminals.
 - **Minimized card:** a 120px chip at 4px radius and 0.85 opacity (1 on hover). The terminal is hidden; the header collapses to a centered name flanked by a single state dot.
 - **State at a glance:** badges are dropped; state rides the border color and the dot. Only two states get a loud treatment, RUNNING (saturated green border, a steady green dot with a soft glow) and WAITING (full amber border, amber-tinted fill, a breathing inset glow and a pulsing dot). Everything else is a quiet neutral dot at 0.45 opacity.
 - **Color-blind safe by construction:** amber-plus-motion versus green-plus-steady differ on hue, saturation, and animation at once. This is the Earned Signal and Flat-By-Default rules at miniature scale.
@@ -273,7 +273,7 @@ A 560px dialog that replaces a long scroll with a horizontal tab strip.
 - **Don't** use a children's or toy aesthetic: no cartoonish rounded-everything, no primary-color palette.
 - **Don't** fall back to safe corporate enterprise design (IBM-blue committee look).
 - **Don't** use gradient text (`background-clip: text` over a gradient). Emphasis comes from weight and color.
-- **Don't** use glassmorphism or decorative blur. Surfaces are opaque; backdrop-filter was deliberately removed.
+- **Don't** use glassmorphism or decorative blur. Chrome surfaces are opaque; backdrop-filter was deliberately removed from them. The one sanctioned exception is the full-screen loading / shutdown overlay (a true overlay moment, not chrome), which may blur its scrim.
 - **Don't** apply a side-stripe accent (`border-left`/`border-right` > 1px as a colored stripe). Use full borders, background tints, or a leading glyph.
 - **Don't** give resting surfaces a drop shadow, and never a raw rgba(0,0,0) shadow. Shadows are violet-tinted and state- or overlay-driven only.
 - **Don't** add a second decorative accent hue, or spend a state color on anything that is not that state.
