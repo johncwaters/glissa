@@ -5,7 +5,7 @@ import { playAlertSound, SOUND_OPTIONS } from './alert-sound.js';
 import addSessionHTML from './components/add-session-dialog.html?raw';
 import settingsHTML from './components/settings-dialog.html?raw';
 import { sendControlMsg, sendControlRequest } from './control-ws.js';
-import { countSessionsByName, suggestSessionName } from './session-card.js';
+import { countSessionsByName, suggestSessionName } from './session-card/naming.js';
 import { applyTheme, getThemeList } from './theme.js';
 import { getSoundId, getThemeId, setSoundId, setThemeId } from './ui-prefs.js';
 

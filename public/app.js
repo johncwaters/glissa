@@ -8,11 +8,11 @@ import { STATES } from '/shared/states.mjs';
 import { connectControl, disableReconnect, onControlMessage, sendControlMsg, sendControlRequest, setConnectionStateCallback } from './control-ws.js';
 import { createAddSessionDialog, createConfirmDialog, createSettingsDialog } from './dialogs.js';
 import { applyHealthSnapshot, mountHealthMonitor } from './health-monitor.js';
-import {
-  applyState, applyTerminalSettings, createSessionCard, exitMaximizeMode, focusSessionCard,
-  getSessionCount, handleDebugStateRefresh, handleDebugStateResponse, handleSessionsReordered, hasSession, isMaximizeActive,
-  reconnectDataWs, removeSessionCard, renameSessionCard, setLayoutMode, showErrorToast, updateAggregateStatus,
-} from './session-card.js';
+import { handleDebugStateRefresh, handleDebugStateResponse } from './session-card/card-dom.js';
+import { exitMaximizeMode, isMaximizeActive, setLayoutMode } from './session-card/layout.js';
+import { applyState, applyTerminalSettings, createSessionCard, focusSessionCard, getSessionCount, handleSessionsReordered, hasSession, removeSessionCard, renameSessionCard, updateAggregateStatus } from './session-card/lifecycle.js';
+import { reconnectDataWs } from './session-card/terminal.js';
+import { showErrorToast } from './session-card/toast.js';
 import { handleTeamMessage, mountTeamsView, setTabActivityCallback } from './teams-panel.js';
 import { applyTheme } from './theme.js';
 import { getThemeId, isSoundEnabled, pruneStale, setSoundEnabled } from './ui-prefs.js';
@@ -211,6 +211,7 @@ onControlMessage((msg) => {
 // ── Toolbar buttons ──────────────────────────────────────────
 
 document.getElementById('btn-add-session').addEventListener('click', createAddSessionDialog);
+document.getElementById('btn-add-session-header').addEventListener('click', createAddSessionDialog);
 
 // ── Header menu ──────────────────────────────────────────────
 
