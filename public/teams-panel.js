@@ -27,6 +27,15 @@ const STAGE_LABEL = {
   editor: 'Editor',
   publisher: 'Publisher',
 };
+// One-line purpose per pack file, shown beside each unfilled file in the setup callout. Mirrors the
+// descriptions in teams/marketing/pack-templates/README.md. Unknown files render without a purpose.
+const PACK_FILE_PURPOSE = {
+  'voice-guide.md': 'how the brand sounds',
+  'avoid-list.md': 'words the brand never uses',
+  'brand.md': 'product facts, audience, approved URLs',
+  'content-calendar.md': 'topics the researcher draws from',
+  'channels.md': 'platforms and Postiz mapping',
+};
 const STAGE_GLYPH = { idle: '○', active: '●', done: '■', failed: '▲' };
 const VERDICT_GLYPH = { ship: '■', fix: '◆', block: '▲', failed: '▲', skipped: '○', done: '●', incomplete: '○' };
 const DAYS = [['mon', 'Mon'], ['tue', 'Tue'], ['wed', 'Wed'], ['thu', 'Thu'], ['fri', 'Fri'], ['sat', 'Sat'], ['sun', 'Sun']];
@@ -99,21 +108,26 @@ function artifactLabel(file) {
   return base.charAt(0).toUpperCase() + base.slice(1);
 }
 
-// Plain-language trust line, derived from the team's permission deny-list so it stays data-driven.
-function guardrailSummary(perm, outputPath) {
+// Trust posture as scannable chips, derived from the team's permission deny-list so it stays
+// data-driven. The mode chip (skip-permissions) is the one to notice, so it carries the warning tint.
+function renderGuardrails(perm, outputPath) {
+  const wrap = el('div', 'team-guardrails');
   const mode = (perm?.mode) || 'interactive';
   const deny = (perm?.deny) || [];
   const has = (re) => deny.some((d) => re.test(d));
-  const cats = [];
-  if (has(/\b(rm|rmdir|del|rd)\b/i)) cats.push('file deletes');
-  if (has(/git\s+(push|reset|clean)/i)) cats.push('git push/reset');
-  if (has(/npm\s+(publish|version)/i)) cats.push('npm publish');
-  if (has(/curl|wget|invoke-webrequest|iwr/i)) cats.push('network');
-  if (has(/secret|\.env/i)) cats.push('secrets');
-  const modeLabel = mode === 'yolo' ? 'Runs with skip-permissions' : `Runs in ${mode} mode`;
-  const parts = [modeLabel, `writes only under ${outputPath}/`];
-  if (cats.length) parts.push(`blocks ${cats.join(', ')}`);
-  return parts.join(' · ');
+  wrap.append(el('span', 'guardrail-chip guardrail-mode', mode === 'yolo' ? 'skip-permissions' : `${mode} mode`));
+  wrap.append(el('span', 'guardrail-chip', `writes only ${outputPath}/`));
+  const blocks = [];
+  if (has(/\b(rm|rmdir|del|rd)\b/i)) blocks.push('file deletes');
+  if (has(/git\s+(push|reset|clean)/i)) blocks.push('git push/reset');
+  if (has(/npm\s+(publish|version)/i)) blocks.push('npm publish');
+  if (has(/curl|wget|invoke-webrequest|iwr/i)) blocks.push('network');
+  if (has(/secret|\.env/i)) blocks.push('secrets');
+  if (blocks.length) {
+    wrap.append(el('span', 'guardrail-blocks-label', 'blocks'));
+    for (const b of blocks) wrap.append(el('span', 'guardrail-chip guardrail-block', b));
+  }
+  return wrap;
 }
 
 function mmss(totalSec) {
@@ -163,13 +177,27 @@ function setStatus(refs, text, kind) {
   refs.status.textContent = text;
   refs.status.dataset.kind = kind || '';
 }
+// Compact resting state: idle, configured panels collapse to header + Run. They expand on the chevron,
+// when a run starts, or when setup is needed. Elements stay in the DOM (live handlers keep updating
+// them); CSS just hides the lower bands while collapsed.
+function setCollapsed(refs, collapsed) {
+  refs.collapsed = collapsed;
+  refs.panel.classList.toggle('collapsed', collapsed);
+  if (refs.collapseBtn) {
+    refs.collapseBtn.setAttribute('aria-expanded', String(!collapsed));
+    refs.collapseBtn.setAttribute('aria-label', collapsed ? 'Expand team details' : 'Collapse team details');
+  }
+}
 function tickElapsed(refs) {
   const sec = refs.stageStartMs ? Math.round((Date.now() - refs.stageStartMs) / 1000) : 0;
   refs.elapsedEl.textContent = `${mmss(sec)} / ${mmss(refs.budget)}`;
+  // Tint the timer once a stage runs past its budget, so a stuck stage reads at a glance.
+  refs.elapsedEl.classList.toggle('over-budget', refs.budget > 0 && sec > refs.budget);
 }
 function startStageClock(refs) { refs.stageStartMs = Date.now(); if (refs.timer) tickElapsed(refs); }
 function setRunning(refs, on) {
   refs.running = on;
+  if (on) setCollapsed(refs, false); // a running team always shows its pipeline
   refs.runGroup.classList.toggle('running', on);
   refs.runBtn.hidden = on;
   refs.cancelBtn.hidden = !on;
@@ -278,7 +306,9 @@ function renderSetup(refs, ps) {
   if (!refs.setupEl) return;
   if (!ps || ps.configured) { refs.setupEl.hidden = true; refs.setupEl.replaceChildren(); return; }
   refs.setupEl.hidden = false;
-  const head = el('p', 'team-setup-head', 'Setup needed: fill this project’s pack before running.');
+  setCollapsed(refs, false); // an unfilled pack is a blocker; never hide it behind the collapsed state
+  const head = el('p', 'team-setup-head', 'Set up this project’s pack before the first run.');
+  const sub = el('p', 'team-setup-sub', 'The pack is this project’s specifics (voice, brand, channels) that the agents read on every run.');
 
   // Primary path: a guided interview agent reads the project, asks for the subjective bits, and writes
   // the pack for you. It opens as its own terminal session card you answer in.
@@ -290,18 +320,21 @@ function renderSetup(refs, ps) {
     sendControlMsg({ type: 'setup-team-pack', teamId: refs.teamId, projectId: refs.projectId });
   });
 
-  // Fallback: edit each unfilled file by hand.
+  // Fallback: edit each unfilled file by hand. Each row names the file and what belongs in it.
   const orLine = el('p', 'team-setup-or', 'or fill them in yourself:');
   const files = el('div', 'team-setup-files');
   for (const f of (ps.unfilled || [])) {
-    const b = el('button', 'team-setup-file', f);
+    const b = el('button', 'team-setup-file');
     b.type = 'button';
+    b.append(el('span', 'team-setup-file-name', f));
+    const purpose = PACK_FILE_PURPOSE[f];
+    if (purpose) b.append(el('span', 'team-setup-file-purpose', purpose));
     b.addEventListener('click', () => sendControlMsg({
       type: 'open-pack-file', teamId: refs.teamId, projectId: refs.projectId, file: f,
     }));
     files.append(b);
   }
-  refs.setupEl.replaceChildren(head, auto, orLine, files);
+  refs.setupEl.replaceChildren(head, sub, auto, orLine, files);
 }
 
 // Pull a single instance's full state in one request: runs, active flag, schedule + next fire.
@@ -412,7 +445,7 @@ function buildScheduleEditor() {
 function renderInstancePanel(team, activation) {
   const projectId = activation.projectId;
   const k = key(team.id, projectId);
-  const panel = el('section', 'team-panel');
+  const panel = el('section', 'team-panel collapsed'); // resting state; expands on chevron, run, or setup
   panel.dataset.key = k;
 
   // Band 1: header (scan line)
@@ -424,13 +457,19 @@ function renderInstancePanel(team, activation) {
   target.append(el('span', 'team-target-name', projectName(projectId) || '(project removed)'));
   headline.append(target);
   head.append(headline);
+  const headRight = el('div', 'team-head-right');
   const statusGroup = el('div', 'team-status-group');
   const status = el('span', 'team-status', 'Idle');
   status.setAttribute('role', 'status');
   const next = el('span', 'team-next');
   next.hidden = true;
   statusGroup.append(status, next);
-  head.append(statusGroup);
+  const collapseBtn = el('button', 'team-collapse', '▸');
+  collapseBtn.type = 'button';
+  collapseBtn.setAttribute('aria-expanded', 'false');
+  collapseBtn.setAttribute('aria-label', 'Expand team details');
+  headRight.append(statusGroup, collapseBtn);
+  head.append(headRight);
   panel.append(head);
 
   if (team.description) panel.append(el('p', 'team-desc', team.description));
@@ -499,7 +538,7 @@ function renderInstancePanel(team, activation) {
   panel.append(setupEl);
 
   // guardrails
-  panel.append(el('p', 'team-guardrails', guardrailSummary(team.permissions, team.outputPath)));
+  panel.append(renderGuardrails(team.permissions, team.outputPath));
 
   // Band 4: recent runs
   const runsWrap = el('div', 'team-runs');
@@ -511,10 +550,12 @@ function renderInstancePanel(team, activation) {
   const refs = {
     teamId: team.id, projectId, team, panel,
     stageNodes, status, next, runGroup, runBtn, cancelBtn, elapsedEl,
-    schedCb, schedSummary, editBtn, removeBtn, editor, runsList, setupEl,
+    schedCb, schedSummary, editBtn, removeBtn, editor, runsList, setupEl, collapseBtn,
     schedule: activation.schedule || team.schedule || null, enabled: !!activation.enabled,
-    timer: null, stageStartMs: 0, budget: team.stageTimeoutSeconds || 900, running: false,
+    timer: null, stageStartMs: 0, budget: team.stageTimeoutSeconds || 900, running: false, collapsed: true,
   };
+
+  collapseBtn.addEventListener('click', () => setCollapsed(refs, !refs.collapsed));
 
   // The run executes in an isolated git worktree (see team-git.js), so it never touches the working
   // tree and needs no clean-repo preflight.
@@ -719,7 +760,7 @@ export function mountTeamsView(container, projects = []) {
   runningKeys.clear();
   mounted = { container, stackEl: null, addBar: null, teams: new Map(), instances: new Map(), projects, activations: [] };
 
-  const intro = el('p', 'teams-intro', 'Premade agent pipelines. Bind a roster to a project, run it on demand or on a schedule, then open what each run produced.');
+  const intro = el('p', 'teams-intro', 'Premade agent pipelines. Bind a roster to a project, run it on demand or on a schedule, then open what each run produced. Each team reads its specifics from the project’s pack: the voice, brand, and channels you fill in once.');
   const add = buildAddBar();
   mounted.addBar = add;
   const stack = el('div', 'teams-stack');
