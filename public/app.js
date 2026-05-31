@@ -179,7 +179,6 @@ const messageHandlers = {
   'setup-team-pack-started': (msg) => handleTeamMessage(msg),
   'team-pack-updated':     (msg) => handleTeamMessage(msg),
   'artifact-opened':    (msg) => { if (!msg.ok) showErrorToast(`Could not open ${msg.artifact || 'artifact'}${msg.error ? `: ${msg.error}` : ''}`); },
-  'pack-file-opened':   (msg) => { if (!msg.ok) showErrorToast(`Could not open ${msg.file || 'pack file'}${msg.error ? `: ${msg.error}` : ''}`); },
   'shutting-down':      () => {
     disableReconnect();
     connectionEl.dataset.state = 'shutdown';

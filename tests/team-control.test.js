@@ -225,31 +225,6 @@ test('get-team-pack-status reports configured + unfilled from the pack', () => {
   }
 });
 
-test('open-pack-file opens a known pack file and rejects unknown ones', () => {
-  const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-packopen-'));
-  const packDir = path.join(proj, '.glissa', 'teams', 'marketing', 'pack');
-  fs.mkdirSync(packDir, { recursive: true });
-  fs.writeFileSync(path.join(packDir, 'voice-guide.md'), '# Voice\n', 'utf8');
-  const opened = [];
-  try {
-    const h = harness({
-      registry: realRegistry,
-      getProjectPathById: () => proj,
-      openInEditor: (p) => { opened.push(p); return { ok: true }; },
-    });
-    h.send({ type: 'open-pack-file', teamId: 'marketing', projectId: 'p1', file: 'voice-guide.md' });
-    assert.equal(opened.length, 1, 'opened the valid pack file');
-    assert.ok(opened[0].endsWith('voice-guide.md'));
-    assert.ok(h.sent.some((m) => m.type === 'pack-file-opened' && m.ok === true));
-
-    h.send({ type: 'open-pack-file', teamId: 'marketing', projectId: 'p1', file: 'secrets.txt' });
-    assert.ok(h.sent.some((m) => m.type === 'error' && /pack file/i.test(m.message)));
-    assert.equal(opened.length, 1, 'no editor spawn for an unknown pack file');
-  } finally {
-    fs.rmSync(proj, { recursive: true, force: true });
-  }
-});
-
 test('setup-team-pack starts the guided interview and acks with the session id', () => {
   const calls = [];
   const h = harness({

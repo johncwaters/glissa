@@ -27,15 +27,6 @@ const STAGE_LABEL = {
   editor: 'Editor',
   publisher: 'Publisher',
 };
-// One-line purpose per pack file, shown beside each unfilled file in the setup callout. Mirrors the
-// descriptions in teams/marketing/pack-templates/README.md. Unknown files render without a purpose.
-const PACK_FILE_PURPOSE = {
-  'voice-guide.md': 'how the brand sounds',
-  'avoid-list.md': 'words the brand never uses',
-  'brand.md': 'product facts, audience, approved URLs',
-  'content-calendar.md': 'topics the researcher draws from',
-  'channels.md': 'platforms and Postiz mapping',
-};
 const STAGE_GLYPH = { idle: '○', active: '●', done: '■', failed: '▲' };
 const VERDICT_GLYPH = { ship: '■', fix: '◆', block: '▲', failed: '▲', skipped: '○', done: '●', incomplete: '○' };
 const DAYS = [['mon', 'Mon'], ['tue', 'Tue'], ['wed', 'Wed'], ['thu', 'Thu'], ['fri', 'Fri'], ['sat', 'Sat'], ['sun', 'Sun']];
@@ -299,9 +290,8 @@ function renderRuns(refs, runs) {
   refs.runsList.replaceChildren(...runs.map((r) => renderRunRow(refs, r)));
 }
 
-// Show or hide the "fill the pack" banner for this instance. Each unfilled file is a button that opens
-// it in the user's editor (open-pack-file). Driven by get-team-pack-status so the operator sees what to
-// fill BEFORE running, not only after a halted run.
+// Show or hide the "fill the pack" banner for this instance. Driven by get-team-pack-status so the
+// operator sees the setup callout BEFORE running, not only after a halted run.
 function renderSetup(refs, ps) {
   if (!refs.setupEl) return;
   if (!ps || ps.configured) { refs.setupEl.hidden = true; refs.setupEl.replaceChildren(); return; }
@@ -310,8 +300,8 @@ function renderSetup(refs, ps) {
   const head = el('p', 'team-setup-head', 'Set up this project’s pack before the first run.');
   const sub = el('p', 'team-setup-sub', 'The pack is this project’s specifics (voice, brand, channels) that the agents read on every run.');
 
-  // Primary path: a guided interview agent reads the project, asks for the subjective bits, and writes
-  // the pack for you. It opens as its own terminal session card you answer in.
+  // A guided interview agent reads the project, asks for the subjective bits, and writes the pack for
+  // you. It opens as its own terminal session card you answer in.
   const auto = el('button', 'team-setup-auto', 'Set up automatically');
   auto.type = 'button';
   auto.addEventListener('click', () => {
@@ -320,21 +310,7 @@ function renderSetup(refs, ps) {
     sendControlMsg({ type: 'setup-team-pack', teamId: refs.teamId, projectId: refs.projectId });
   });
 
-  // Fallback: edit each unfilled file by hand. Each row names the file and what belongs in it.
-  const orLine = el('p', 'team-setup-or', 'or fill them in yourself:');
-  const files = el('div', 'team-setup-files');
-  for (const f of (ps.unfilled || [])) {
-    const b = el('button', 'team-setup-file');
-    b.type = 'button';
-    b.append(el('span', 'team-setup-file-name', f));
-    const purpose = PACK_FILE_PURPOSE[f];
-    if (purpose) b.append(el('span', 'team-setup-file-purpose', purpose));
-    b.addEventListener('click', () => sendControlMsg({
-      type: 'open-pack-file', teamId: refs.teamId, projectId: refs.projectId, file: f,
-    }));
-    files.append(b);
-  }
-  refs.setupEl.replaceChildren(head, sub, auto, orLine, files);
+  refs.setupEl.replaceChildren(head, sub, auto);
 }
 
 // Pull a single instance's full state in one request: runs, active flag, schedule + next fire.

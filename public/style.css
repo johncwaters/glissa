@@ -2328,8 +2328,7 @@ body[data-active-view="teams"] #minimized-bar { display: none; }
 .sched-err { font-family: var(--font-mono); font-size: 11px; color: var(--state-failed); }
 
 /* Setup callout: shown until the project's pack is filled. An amber attention block (a genuine
-   blocker — the team can't run yet), with each unfilled file as an open-in-editor button matching
-   the .run-artifact vocabulary. */
+   blocker, the team can't run yet) holding the "Set up automatically" action. */
 .team-setup {
   margin: 0 0 16px;
   padding: 13px 15px;
@@ -2352,39 +2351,13 @@ body[data-active-view="teams"] #minimized-bar { display: none; }
   margin: 0 0 12px;
   max-width: 70ch;
 }
-.team-setup-files {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 6px;
-}
-.team-setup-file {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  font-family: var(--font-mono);
-  font-size: 12px;
-  padding: 5px 11px;
-  text-align: left;
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  cursor: pointer;
-  transition: border-color var(--transition-med);
-}
-.team-setup-file-name { color: var(--text-head); }
-.team-setup-file-purpose { color: var(--text-muted); font-size: 11px; }
-.team-setup-file:hover { border-color: var(--accent); }
-.team-setup-file:hover .team-setup-file-name { color: var(--accent); }
-.team-setup-file:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-/* Primary "Set up automatically" action: launches the guided interview session. The hand-edit file
-   buttons sit below it as the fallback. */
+/* "Set up automatically" action: launches the guided interview session. */
 .team-setup-auto {
   font-family: var(--font-mono);
   font-size: 12px;
   font-weight: 600;
   padding: 7px 15px;
-  margin: 0 0 12px;
+  margin: 0;
   border: 1px solid var(--accent);
   border-radius: var(--radius);
   background: color-mix(in oklab, var(--accent) 16%, var(--bg-surface));
@@ -2395,12 +2368,6 @@ body[data-active-view="teams"] #minimized-bar { display: none; }
 .team-setup-auto:hover { background: color-mix(in oklab, var(--accent) 26%, var(--bg-surface)); }
 .team-setup-auto:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .team-setup-auto:disabled { opacity: 0.55; cursor: default; }
-.team-setup-or {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--text-muted);
-  margin: 0 0 8px;
-}
 
 /* Guardrails: the trust posture as scannable chips, derived from the team deny-list. */
 .team-guardrails {

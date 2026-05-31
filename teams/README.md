@@ -32,8 +32,9 @@ On the first run in a repo, glissa copies `pack-templates/` into
   an interactive Claude session (a terminal card) that reads the repo, interviews you for the
   subjective fields, and writes every pack file, removing the `GLISSA:NEEDS-INPUT` markers. When the
   session exits, glissa re-checks the pack (`team-pack-updated`) and the banner clears.
-- **By hand:** open each unfilled file from the banner and replace its `GLISSA:NEEDS-INPUT` markers
-  with that project's real content.
+- **By hand:** open each scaffolded file under `<repo>/<outputPath>/pack/` in your editor and replace
+  its `GLISSA:NEEDS-INPUT` markers with that project's real content. The banner's status (the list of
+  unfilled files) reflects your edits on the next check.
 
 Then run again. Commit the filled pack with the repo. Runs execute in an isolated git worktree and are
 committed back to the run history; the pack is copied into the worktree so the agents can read it.

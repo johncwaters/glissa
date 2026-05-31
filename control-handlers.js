@@ -509,26 +509,6 @@ function registerControlHandlers(controlWss, deps) {
     ws.send(JSON.stringify(out));
   }
 
-  // Open one pack file in the user's configured editor. Confined to this team's pack/ directory and to
-  // the team's known pack files (same path-traversal guard shape as handleOpenArtifact).
-  function handleOpenPackFile(msg, ws) {
-    if (!openInEditor) { ws.send(JSON.stringify({ type: 'error', message: 'Opening pack files is not available' })); return; }
-    const { teamId, projectId, file } = msg;
-    let team = null;
-    try { if (registry) team = registry.loadTeam(teamId); } catch { /* reported below */ }
-    if (!team) { ws.send(JSON.stringify({ type: 'error', message: `Unknown team "${teamId}"` })); return; }
-    const projectPath = getProjectPathById ? getProjectPathById(projectId) : null;
-    if (!projectPath) { ws.send(JSON.stringify({ type: 'error', message: 'Unknown project' })); return; }
-    const allowed = new Set(team.packRequired || []);
-    if (!allowed.has(file)) { ws.send(JSON.stringify({ type: 'error', message: 'Unknown pack file' })); return; }
-    const packDir = path.join(projectPath, team.outputPath, 'pack');
-    const abs = confinePath(packDir, file);
-    if (!abs) { ws.send(JSON.stringify({ type: 'error', message: 'Invalid pack file path' })); return; }
-    if (!fs.existsSync(abs)) { ws.send(JSON.stringify({ type: 'error', message: 'Pack file not found' })); return; }
-    const r = openInEditor(abs);
-    ws.send(JSON.stringify({ type: 'pack-file-opened', teamId, projectId, file, ok: !!r.ok, error: r.error || null }));
-  }
-
   // Start the guided pack-setup interview: an interactive Claude session (surfaced as a terminal
   // card) that reads the project, interviews the operator, and fills the pack. The session is spawned
   // by the backend (startPackSetup); on its exit the backend broadcasts an updated team-pack-status.
@@ -556,7 +536,6 @@ function registerControlHandlers(controlWss, deps) {
     'remove-team-instance': handleRemoveTeamInstance,
     'open-artifact':        handleOpenArtifact,
     'get-team-pack-status': handleGetTeamPackStatus,
-    'open-pack-file':       handleOpenPackFile,
     'setup-team-pack':      handleSetupTeamPack,
     'add-session':      handleAddSession,
     'remove-session':   handleRemoveSession,
