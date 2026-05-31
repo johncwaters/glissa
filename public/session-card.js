@@ -1434,6 +1434,37 @@ export function renameSessionCard(sessionId, newName) {
   ui.nameEl.textContent = newName;
 }
 
+// Bring a session's card into view and put the cursor in its terminal. Used when an action taken
+// elsewhere (e.g. starting guided team setup from the Teams view) spawns a session the operator is
+// expected to answer in, so focus lands on it instead of nothing visibly happening. Focus is
+// best-effort: a card with no live terminal (dormant/never-started) is revealed but not typed into.
+export function focusSessionCard(sessionId) {
+  const ui = sessionUIs.get(sessionId);
+  if (!ui) return false;
+
+  // Maximize mode hides every other card, so a different maximized session would keep the target
+  // invisible — exit it so focus actually reveals the target.
+  if (_maximizedSession && _maximizedSession !== sessionId) exitMaximizeMode();
+
+  // Restore a minimized card with the non-toggling primitive: unlike toggleMinimize it never spawns
+  // a dormant PTY or evicts a split pane as a side effect of focusing.
+  if (ui.card.classList.contains('minimized')) _performExpand(sessionId, ui);
+
+  // Scroll + one-shot accent flash + cursor, deferred via the same double-rAF restart idiom as
+  // completion-flash: a repeat focus replays the animation, and layout settles after any expand
+  // before we measure the scroll target or grab the cursor.
+  ui.card.classList.remove('focus-flash');
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      ui.card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      ui.card.classList.add('focus-flash');
+      ui.card.addEventListener('animationend', () => ui.card.classList.remove('focus-flash'), { once: true });
+      if (ui.term) ui.term.focus();
+    });
+  });
+  return true;
+}
+
 export function removeSessionCard(sessionId) {
   const ui = sessionUIs.get(sessionId);
   if (!ui) return;

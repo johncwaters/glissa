@@ -606,16 +606,36 @@ class Session extends EventEmitter {
   // itself) propagates to start()'s spawn_fail handler.
   _spawnWithBackendFallback(file, args, baseOpts, backendOpts) {
     try {
-      return this._ptySpawn(file, args, { ...baseOpts, ...backendOpts });
+      const proc = this._ptySpawn(file, args, { ...baseOpts, ...backendOpts });
+      // Success with useConptyDll means the bundled dll actually loaded (node-pty
+      // throws on load failure, caught below), so this line confirms the
+      // focus-steal fix is live for this spawn.
+      this._logPtyBackend(backendOpts);
+      return proc;
     } catch (err) {
       if (backendOpts && backendOpts.useConptyDll) {
         console.warn(
           `[session ${this.id}] useConptyDll spawn failed (${err.message}); falling back to OS ConPTY`,
         );
-        return this._ptySpawn(file, args, { ...baseOpts });
+        const proc = this._ptySpawn(file, args, { ...baseOpts });
+        this._logPtyBackend({}); // fell back to OS ConPTY (focus-steal can return)
+        return proc;
       }
       throw err;
     }
+  }
+
+  // Log which Windows console backend actually engaged for this spawn. Makes a
+  // stale backend (Vite HMR doesn't reload sessions.js -> still OS ConPTY) or a
+  // silent dll-load fallback visible without adding a success path to node-pty.
+  // Windows-only: the backend flags are no-ops on other platforms.
+  _logPtyBackend(opts) {
+    if (process.platform !== "win32") return;
+    let backend;
+    if (opts.useConptyDll) backend = "bundled ConPTY (useConptyDll) [focus-steal fix active]";
+    else if (opts.useConpty === false) backend = "winpty";
+    else backend = "OS ConPTY [focus-steal possible]";
+    console.log(`[session ${this.id}] PTY backend: ${backend}`);
   }
 
   // Write the per-session hook settings file and register with the shared

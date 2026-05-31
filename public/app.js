@@ -9,7 +9,7 @@ import { connectControl, disableReconnect, onControlMessage, sendControlMsg, sen
 import { createAddSessionDialog, createConfirmDialog, createSettingsDialog } from './dialogs.js';
 import { applyHealthSnapshot, mountHealthMonitor } from './health-monitor.js';
 import {
-  applyState, applyTerminalSettings, createSessionCard, exitMaximizeMode,
+  applyState, applyTerminalSettings, createSessionCard, exitMaximizeMode, focusSessionCard,
   getSessionCount, handleDebugStateRefresh, handleDebugStateResponse, handleSessionsReordered, hasSession, isMaximizeActive,
   reconnectDataWs, removeSessionCard, renameSessionCard, setLayoutMode, showErrorToast, updateAggregateStatus,
 } from './session-card.js';
@@ -176,7 +176,15 @@ const messageHandlers = {
   'team-instance-added':   (msg) => handleTeamMessage(msg),
   'team-instance-removed': (msg) => handleTeamMessage(msg),
   'team-schedule-updated': (msg) => handleTeamMessage(msg),
-  'setup-team-pack-started': (msg) => handleTeamMessage(msg),
+  'setup-team-pack-started': (msg) => {
+    handleTeamMessage(msg);
+    // The guided-setup session is an interactive terminal under the Sessions view; jump there and
+    // focus it so the operator can answer the interview instead of the click appearing to do nothing.
+    if (msg.sessionId) {
+      activateView('sessions'); // synchronous; focusSessionCard's own double-rAF lets it settle
+      focusSessionCard(msg.sessionId);
+    }
+  },
   'team-pack-updated':     (msg) => handleTeamMessage(msg),
   'artifact-opened':    (msg) => { if (!msg.ok) showErrorToast(`Could not open ${msg.artifact || 'artifact'}${msg.error ? `: ${msg.error}` : ''}`); },
   'shutting-down':      () => {
