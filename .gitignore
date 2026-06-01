@@ -6,6 +6,7 @@ node_modules/
 coverage/
 dist/
 .vscode/
-.claude/
+.claude/*
+!.claude/omc.jsonc
 config.json
 .pty-capture/

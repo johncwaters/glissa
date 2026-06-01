@@ -5,7 +5,7 @@
 import { getJSON, setJSON } from './local-store.js';
 
 const STORAGE_KEY = 'glissa-ui-prefs';
-const DEFAULT_PREFS = { minimized: [], soundEnabled: true, soundId: 'coins', themeId: 'phyrexian', layout: 'default' };
+const DEFAULT_PREFS = { minimized: [], soundEnabled: true, soundId: 'coins', themeId: 'phyrexian' };
 
 function load() {
   const prefs = getJSON(STORAGE_KEY, DEFAULT_PREFS);
@@ -13,7 +13,6 @@ function load() {
   if (typeof prefs.soundEnabled !== 'boolean') prefs.soundEnabled = true;
   if (typeof prefs.soundId !== 'string') prefs.soundId = 'coins';
   if (typeof prefs.themeId !== 'string') prefs.themeId = 'golgari';
-  if (typeof prefs.layout !== 'string') prefs.layout = 'default';
   return prefs;
 }
 
@@ -63,16 +62,6 @@ export function getThemeId() {
 export function setThemeId(id) {
   const prefs = load();
   prefs.themeId = id;
-  save(prefs);
-}
-
-export function getLayout() {
-  return load().layout;
-}
-
-export function setLayout(id) {
-  const prefs = load();
-  prefs.layout = id;
   save(prefs);
 }
 

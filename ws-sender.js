@@ -1,0 +1,225 @@
+'use strict';
+
+/*
+ * Data-WebSocket sender — backpressure-aware, echo-prioritizing.
+ *
+ * Extracted from backend.js so the batching, the bufferedAmount backpressure,
+ * and the echo fast-flush are unit-testable without a real socket. One sender
+ * is bound to one ws (one data-WS client of one session).
+ *
+ * Backpressure (bounds server RSS by construction): above `highWaterMark`
+ * bytes queued in the socket, we STOP sending and drop the local coalesce
+ * buffer — the bytes are NOT lost, they stay in the session's ring buffer and
+ * are replayed when the client reconnects. If the socket stays pinned above
+ * water past `stallCloseMs`, we close it; the browser's auto-reconnect + replay
+ * resync it cleanly. "Coalesce harder" would only relocate the unbounded growth
+ * into this buffer, so we skip instead.
+ *
+ * Echo (keeps typing responsive): when the session just received user input,
+ * the next PTY frame (the echo) is flushed immediately instead of waiting a
+ * setImmediate tick behind coalesced bulk. The flush still honors backpressure.
+ *
+ * All scheduling seams (`setImmediate`, `setTimeout`) are injectable so tests
+ * run deterministically.
+ */
+
+const OPEN = 1;
+
+// Clear screen + clear scrollback + cursor home. Emitted ONLY on the evicted-fallback
+// backfill (when the missed range scrolled out of the ring), never on an exact resend,
+// so good scrollback is preserved on the common recovery.
+const CLEAR = '\x1b[2J\x1b[3J\x1b[H';
+
+const DEFAULTS = Object.freeze({
+  maxSendBuffer: 65536, // coalesce target and hard per-frame cap (bytes)
+  highWaterMark: 1 << 20, // 1 MiB queued in socket -> skip sends
+  lowWaterMark: 1 << 18, // 256 KiB -> backlog considered cleared
+  stallCloseMs: 10000, // close a client pinned above water this long
+});
+
+function createWsSender(ws, opts = {}) {
+  const cfg = {
+    maxSendBuffer: opts.maxSendBuffer ?? DEFAULTS.maxSendBuffer,
+    highWaterMark: opts.highWaterMark ?? DEFAULTS.highWaterMark,
+    lowWaterMark: opts.lowWaterMark ?? DEFAULTS.lowWaterMark,
+    stallCloseMs: opts.stallCloseMs ?? DEFAULTS.stallCloseMs,
+  };
+  const scheduleImmediate = opts.setImmediateFn || setImmediate;
+  const setTimer = opts.setTimeoutFn || setTimeout;
+  const clearTimer = opts.clearTimeoutFn || clearTimeout;
+
+  // Optional backfill source ({ getBufferSince(offset) }). When present, a drop under
+  // backpressure is recoverable IN PLACE (no reconnect) by re-pulling the exact missed
+  // range from the session ring. Absent => behaves exactly as before (drop-and-forget,
+  // recovered only when the client reconnects).
+  const source = opts.source || null;
+
+  let sendBuffer = '';
+  let sendScheduled = false;
+  let flushNextData = false;
+  let stallTimer = null;
+  let destroyed = false;
+  // sentOffset = LIVE bytes (offset >= startOffset) durably handed to ws.send for this
+  // client. Advanced ONLY by live flushSend sends and by maybeBackfill — NOT by
+  // sendImmediate, whose replay frame carries historical bytes BEFORE startOffset.
+  let sentOffset = opts.startOffset || 0;
+  // desynced = a drop happened and a backfill is owed once the socket drains.
+  let desynced = false;
+
+  const bufferedAmount = () => ws.bufferedAmount || 0;
+  const isOpen = () => ws.readyState === OPEN;
+  const overHighWater = () => bufferedAmount() > cfg.highWaterMark;
+
+  function armStallClose() {
+    if (stallTimer !== null || destroyed) return;
+    stallTimer = setTimer(() => {
+      stallTimer = null;
+      if (destroyed) return;
+      // Quiet-drain re-check (third backfill trigger): if the socket drained since the
+      // drop but output then went silent, neither onData/flushSend nor the close below
+      // (which fires only while STILL pinned) would recover the missed tail. Run the
+      // backfill here first. No new timer is introduced — this reuses the stall timer.
+      maybeBackfill();
+      // Still backed up after the grace period -> drop the wedged client.
+      // Recent output is safe in the session ring buffer; auto-reconnect replays it.
+      if (isOpen() && bufferedAmount() > cfg.lowWaterMark) {
+        try { ws.close(1013, 'backpressure'); } catch { /* already closing */ }
+      }
+    }, cfg.stallCloseMs);
+    if (stallTimer && typeof stallTimer.unref === 'function') stallTimer.unref();
+  }
+
+  function clearStall() {
+    if (stallTimer !== null) {
+      clearTimer(stallTimer);
+      stallTimer = null;
+    }
+  }
+
+  // Recover bytes dropped under backpressure, IN PLACE (no reconnect), by re-pulling the
+  // exact missed range [sentOffset, end) from the session ring once the socket has
+  // drained. Guarded by `desynced` so it runs at most once per drop episode; a no-op
+  // when no source is wired. Three call sites trigger it: the top of flushSend, the
+  // onData short-circuit, and the stall-close timer (the quiet-drain re-check).
+  function maybeBackfill() {
+    if (!desynced || !source || destroyed || !isOpen()) return;
+    if (overHighWater()) return; // still pinned; a later trigger will retry
+    // ORDER CONTRACT (mirror of sessions._handlePtyData): the session pushes a chunk
+    // into the ring BEFORE it emits 'data', so when this runs from inside the 'data'
+    // listener the just-arrived chunk is already included in getBufferSince.
+    const { data, end, evicted } = source.getBufferSince(sentOffset);
+    if (evicted) {
+      // Missed range scrolled out of the ring: converge via clear + full replay.
+      ws.send(CLEAR + data);
+    } else if (data) {
+      ws.send(data);
+    }
+    sentOffset = end;
+    desynced = false;
+    // The backfill just covered [oldSentOffset, end), which already includes any bytes
+    // still queued in sendBuffer: every queued byte was pushed to the ring before onData
+    // saw it (push-before-emit), so its offset is < end. Discard the now-covered local
+    // slice so a pending scheduled flush — or the flushSend fall-through below the
+    // top-of-function maybeBackfill call — cannot re-send it (double-send + overshoot).
+    sendBuffer = '';
+    clearStall();
+  }
+
+  // Send the coalesced buffer now, unless the socket is backed up.
+  function flushSend() {
+    sendScheduled = false;
+    // Drain trigger: emit any owed backfill ([sentOffset, end)) before fresh bytes so
+    // ordering holds (the send below is at offsets >= end). No-op unless desynced.
+    maybeBackfill();
+    if (destroyed || sendBuffer.length === 0 || !isOpen()) return;
+    if (overHighWater()) {
+      // Drop the local slice (recoverable from the ring via sentOffset) and let the
+      // socket drain. PAIRING REQUIREMENT: setting `desynced` MUST be paired with
+      // armStallClose() here — the stall timer doubles as the quiet-drain backfill
+      // re-check, so a drop that armed no timer could strand the tail if output then
+      // goes silent. armStallClose is idempotent, so this never re-arms per frame.
+      // `desynced` is only meaningful with a source; without one the sender keeps its
+      // original drop-and-forget behavior (recovered only on reconnect).
+      sendBuffer = '';
+      if (source) desynced = true;
+      armStallClose();
+      return;
+    }
+    clearStall();
+    const buf = sendBuffer;
+    sendBuffer = '';
+    ws.send(buf);
+    sentOffset += buf.length; // live bytes durably sent
+  }
+
+  function scheduleFlush() {
+    if (sendScheduled) return;
+    sendScheduled = true;
+    scheduleImmediate(flushSend);
+  }
+
+  // PTY output for this session's client.
+  function onData(data) {
+    if (destroyed || !isOpen()) return;
+    // Backfill short-circuit: if a backfill is owed and the socket has drained, recover
+    // the missed range and RETURN without appending. `data` is already in the ring
+    // (push-before-emit, see sessions.js ORDER CONTRACT), so getBufferSince covers it;
+    // appending here too would double-send / overshoot. While still pinned we fall
+    // through and drop as usual — the chunk stays in the ring for a later backfill.
+    if (desynced && !overHighWater()) {
+      maybeBackfill();
+      return;
+    }
+    sendBuffer += data;
+    // Echo fast path: flush this frame now (appended in order, no reordering)
+    // so the echo isn't held a tick behind bulk. Still skips under backpressure.
+    if (flushNextData) {
+      flushNextData = false;
+      flushSend();
+      return;
+    }
+    if (sendBuffer.length >= cfg.maxSendBuffer) {
+      flushSend();
+      return;
+    }
+    scheduleFlush();
+  }
+
+  // Mark that this session just received user input, so the next PTY frame
+  // (the echo) flushes immediately.
+  function markInputFlush() {
+    flushNextData = true;
+  }
+
+  // Guarded one-shot send for the reconnect replay frame (sent before onData
+  // wiring). Skips and arms the stall close if the socket is already backed up.
+  function sendImmediate(payload) {
+    if (destroyed || !payload || !isOpen()) return false;
+    if (overHighWater()) {
+      // Same PAIRING REQUIREMENT as flushSend: mark desynced AND arm the stall timer so
+      // a connect whose replay frame is dropped (then goes quiet) still re-checks.
+      // Only meaningful with a source; otherwise unchanged (drop-and-forget).
+      if (source) desynced = true;
+      armStallClose();
+      return false;
+    }
+    clearStall();
+    ws.send(payload);
+    // NOTE: deliberately does NOT advance sentOffset. The replay frame is historical
+    // output [base, startOffset) that precedes the live baseline; advancing here would
+    // push sentOffset past `end` and make a later backfill skip real live bytes.
+    return true;
+  }
+
+  function destroy() {
+    destroyed = true;
+    clearStall();
+    sendBuffer = '';
+    sendScheduled = false;
+    flushNextData = false;
+  }
+
+  return { onData, markInputFlush, sendImmediate, destroy };
+}
+
+module.exports = { createWsSender, DEFAULTS };

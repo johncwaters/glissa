@@ -1,0 +1,247 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-05-31T00:00:00Z",
+  "title": "Design System: Glissa",
+  "extensions": {
+    "colorMeta": {
+      "accent": {
+        "role": "primary",
+        "displayName": "Iridescent Orchid",
+        "canonical": "oklch(0.74 0.15 305)",
+        "tonalRamp": ["oklch(0.18 0.06 305)", "oklch(0.28 0.09 305)", "oklch(0.40 0.12 305)", "oklch(0.52 0.14 305)", "oklch(0.64 0.15 305)", "oklch(0.74 0.15 305)", "oklch(0.84 0.11 305)", "oklch(0.94 0.05 305)"]
+      },
+      "accent-dim": {
+        "role": "primary",
+        "displayName": "Deep Orchid",
+        "canonical": "oklch(0.55 0.18 300)"
+      },
+      "bg": {
+        "role": "neutral",
+        "displayName": "Near-Black Violet",
+        "canonical": "oklch(0.12 0.02 297)",
+        "tonalRamp": ["oklch(0.12 0.02 297)", "oklch(0.18 0.03 297)", "oklch(0.26 0.04 297)", "oklch(0.36 0.05 297)", "oklch(0.48 0.05 297)", "oklch(0.60 0.05 297)", "oklch(0.74 0.05 297)", "oklch(0.90 0.04 297)"]
+      },
+      "bg-card": {
+        "role": "neutral",
+        "displayName": "Ink Violet",
+        "canonical": "oklch(0.15 0.02 295)"
+      },
+      "bg-header": {
+        "role": "neutral",
+        "displayName": "Shadow Violet",
+        "canonical": "oklch(0.13 0.02 298)"
+      },
+      "bg-surface": {
+        "role": "neutral",
+        "displayName": "Deep Violet Slate",
+        "canonical": "oklch(0.19 0.04 295)"
+      },
+      "border": {
+        "role": "neutral",
+        "displayName": "Violet Border",
+        "canonical": "oklch(0.28 0.05 295)"
+      },
+      "border-dim": {
+        "role": "neutral",
+        "displayName": "Dim Violet Border",
+        "canonical": "oklch(0.22 0.04 295)"
+      },
+      "border-hover": {
+        "role": "neutral",
+        "displayName": "Lifted Violet Border",
+        "canonical": "oklch(0.36 0.06 295)"
+      },
+      "text": {
+        "role": "neutral",
+        "displayName": "Soft Lavender Grey",
+        "canonical": "oklch(0.81 0.04 300)"
+      },
+      "text-dim": {
+        "role": "neutral",
+        "displayName": "Muted Lavender",
+        "canonical": "oklch(0.61 0.07 298)"
+      },
+      "text-head": {
+        "role": "neutral",
+        "displayName": "Bright Lavender White",
+        "canonical": "oklch(0.90 0.04 300)"
+      },
+      "text-muted": {
+        "role": "neutral",
+        "displayName": "Faint Lavender",
+        "canonical": "oklch(0.58 0.08 300)"
+      },
+      "state-running": { "role": "tertiary", "displayName": "Signal Green", "canonical": "oklch(0.74 0.18 150)" },
+      "state-waiting": { "role": "tertiary", "displayName": "Signal Amber", "canonical": "oklch(0.77 0.16 70)" },
+      "state-failed": { "role": "tertiary", "displayName": "Signal Red", "canonical": "oklch(0.64 0.22 27)" },
+      "state-done": { "role": "tertiary", "displayName": "Signal Cyan", "canonical": "oklch(0.85 0.10 200)" },
+      "state-idle": { "role": "tertiary", "displayName": "Signal Gold", "canonical": "oklch(0.79 0.16 90)" },
+      "state-starting": { "role": "tertiary", "displayName": "Signal Pink", "canonical": "oklch(0.72 0.17 350)" },
+      "state-complete": { "role": "tertiary", "displayName": "Signal Emerald", "canonical": "oklch(0.78 0.15 165)" },
+      "state-initializing": { "role": "tertiary", "displayName": "Signal Slate", "canonical": "oklch(0.52 0.02 270)" }
+    },
+    "typographyMeta": {
+      "headline": { "displayName": "Headline", "purpose": "GLISSA wordmark and top bar titles. Widest tracking in the system." },
+      "title": { "displayName": "Title", "purpose": "Dialog titles, panel names, empty-state titles." },
+      "body": { "displayName": "Body", "purpose": "Base reading size, the document default." },
+      "caption": { "displayName": "Caption", "purpose": "Descriptions, summaries, secondary metadata in dense panels." },
+      "label": { "displayName": "Label", "purpose": "Field labels, section eyebrows, state badges. Small, uppercase, tracked." }
+    },
+    "shadows": [
+      { "name": "shadow-sm", "value": "0 2px 8px color-mix(in srgb, color-mix(in oklab, #c084fc 15%, oklch(0.06 0 0)) 55%, transparent)", "purpose": "Subtle lift for small popovers." },
+      { "name": "shadow-md", "value": "0 4px 12px color-mix(in srgb, color-mix(in oklab, #c084fc 15%, oklch(0.06 0 0)) 55%, transparent)", "purpose": "Raised controls." },
+      { "name": "shadow-lg", "value": "0 8px 24px color-mix(in srgb, color-mix(in oklab, #c084fc 15%, oklch(0.06 0 0)) 65%, transparent)", "purpose": "Menus, tooltips, status popovers." },
+      { "name": "shadow-xl", "value": "0 8px 24px color-mix(in srgb, color-mix(in oklab, #c084fc 15%, oklch(0.06 0 0)) 80%, transparent)", "purpose": "Modal dialogs." },
+      { "name": "state-glow-waiting", "value": "0 0 0 1px var(--state-waiting), 0 0 10px color-mix(in oklab, var(--state-waiting) 55%, transparent)", "purpose": "Amber attention ring/bloom on a WAITING card. State response only, never decoration." }
+    ],
+    "motion": [
+      { "name": "transition-fast", "value": "150ms cubic-bezier(0.22, 1, 0.36, 1)", "purpose": "Hover/focus feedback, color and border shifts. Ease-out-quart." },
+      { "name": "transition-med", "value": "250ms cubic-bezier(0.22, 1, 0.36, 1)", "purpose": "Default state transitions on cards, buttons, the tab underline." }
+    ],
+    "breakpoints": [
+      { "name": "card-wrap", "value": "640px", "purpose": "Session grid reflows: cards are minmax(min(100%, 640px), 1fr). Below this a card spans full width. The product is desktop-first; there is no mobile layout." }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Accent-outline action: Run, Add, Save, primary CTA.",
+      "html": "<button class=\"ds-btn-primary\">Run now</button>",
+      "css": ".ds-btn-primary { font-family: 'Cascadia Code', monospace; font-size: 13px; letter-spacing: 0.03em; padding: 8px 18px; color: var(--accent); background: transparent; border: 1px solid var(--accent); border-radius: 4px; cursor: pointer; transition: background 250ms cubic-bezier(0.22,1,0.36,1); } .ds-btn-primary:hover { background: color-mix(in oklab, var(--accent) 14%, transparent); } .ds-btn-primary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; } .ds-btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }"
+    },
+    {
+      "name": "Ghost Button",
+      "kind": "button",
+      "refersTo": "button-ghost",
+      "description": "Secondary/quiet action: Edit, Remove, Cancel. Remove hovers to Signal Red.",
+      "html": "<button class=\"ds-btn-ghost\">Edit</button>",
+      "css": ".ds-btn-ghost { font-family: 'Cascadia Code', monospace; font-size: 12px; padding: 6px 12px; color: var(--text-dim); background: transparent; border: 1px solid var(--border); border-radius: 4px; cursor: pointer; transition: border-color 250ms cubic-bezier(0.22,1,0.36,1), color 250ms cubic-bezier(0.22,1,0.36,1); } .ds-btn-ghost:hover { border-color: var(--border-hover); color: var(--text-head); } .ds-btn-ghost:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }"
+    },
+    {
+      "name": "Text Input",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Single-line field. Focus shifts the border to orchid, no glow.",
+      "html": "<input class=\"ds-input\" placeholder=\"Session name\" />",
+      "css": ".ds-input { font-family: 'Cascadia Code', monospace; font-size: 13px; padding: 8px 12px; color: var(--text-head); background: var(--bg-surface); border: 1px solid var(--border); border-radius: 4px; outline: none; transition: border-color 150ms cubic-bezier(0.22,1,0.36,1); } .ds-input::placeholder { color: var(--text-muted); } .ds-input:focus { border-color: var(--accent); }"
+    },
+    {
+      "name": "Card",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "Flat container on the canvas. Border lifts on hover; no resting shadow. Never nest cards.",
+      "html": "<div class=\"ds-card\"><div class=\"ds-card-title\">Marketing Pipeline</div><p class=\"ds-card-body\">A reusable content pipeline bound to one project.</p></div>",
+      "css": ".ds-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 5px; padding: 20px 28px; color: var(--text); transition: border-color 250ms cubic-bezier(0.22,1,0.36,1); } .ds-card:hover { border-color: var(--border-hover); } .ds-card-title { font-family: 'Cascadia Code', monospace; font-size: 16px; font-weight: 700; letter-spacing: 0.03em; color: var(--text-head); } .ds-card-body { font-family: 'Cascadia Code', monospace; font-size: 12px; line-height: 1.55; color: var(--text-dim); margin: 8px 0 0; }"
+    },
+    {
+      "name": "State Badge",
+      "kind": "chip",
+      "refersTo": "badge",
+      "description": "Session state. Color plus glyph plus shape, so state never relies on hue alone.",
+      "html": "<span class=\"ds-badge\"><span class=\"ds-badge-glyph\">●</span>Running</span>",
+      "css": ".ds-badge { display: inline-flex; align-items: center; gap: 5px; padding: 0 8px; border-radius: 2px; font-family: 'Cascadia Code', monospace; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--state-running); background: transparent; } .ds-badge .ds-badge-glyph { font-size: 11px; line-height: 1; }"
+    },
+    {
+      "name": "Nav Tab",
+      "kind": "nav",
+      "refersTo": null,
+      "description": "Primary view tab. Active tab draws an orchid underline that scales in, never a layout shift.",
+      "html": "<button class=\"ds-tab\" aria-selected=\"true\">Teams</button>",
+      "css": ".ds-tab { position: relative; appearance: none; background: none; border: none; cursor: pointer; font-family: 'Cascadia Code', monospace; font-size: 13px; letter-spacing: 0.04em; color: var(--text-head); padding: 6px 10px 8px; } .ds-tab[aria-selected=\"false\"] { color: var(--text-muted); } .ds-tab::after { content: ''; position: absolute; left: 10px; right: 10px; bottom: 0; height: 2px; border-radius: 2px; background: var(--accent); transform: scaleX(1); transform-origin: center; transition: transform 180ms cubic-bezier(0.22,1,0.36,1); } .ds-tab[aria-selected=\"false\"]::after { transform: scaleX(0); } .ds-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }"
+    },
+    {
+      "name": "Attention Callout",
+      "kind": "custom",
+      "refersTo": null,
+      "description": "Amber attention block for a real blocker (setup needed). Each file is an open-in-editor button. Full border plus tinted fill, never a side-stripe.",
+      "html": "<div class=\"ds-callout\"><p class=\"ds-callout-head\">Setup needed: fill this project's pack, then run.</p><div class=\"ds-callout-files\"><button class=\"ds-callout-file\">voice-guide.md</button><button class=\"ds-callout-file\">brand.md</button></div></div>",
+      "css": ".ds-callout { padding: 13px 15px; border: 1px solid color-mix(in oklab, var(--state-waiting) 32%, var(--border)); border-radius: 4px; background: color-mix(in oklab, var(--state-waiting) 7%, var(--bg-surface)); font-family: 'Cascadia Code', monospace; } .ds-callout-head { font-size: 12px; letter-spacing: 0.02em; color: var(--text-dim); margin: 0 0 10px; } .ds-callout-files { display: flex; flex-wrap: wrap; gap: 8px; } .ds-callout-file { font-size: 12px; padding: 4px 11px; color: var(--text-dim); background: var(--bg-card); border: 1px solid var(--border); border-radius: 4px; cursor: pointer; transition: border-color 250ms cubic-bezier(0.22,1,0.36,1), color 250ms cubic-bezier(0.22,1,0.36,1); } .ds-callout-file:hover { border-color: var(--accent); color: var(--accent); }"
+    },
+    {
+      "name": "Minimized Session Cards",
+      "kind": "custom",
+      "refersTo": null,
+      "description": "Collapsed dock chips. State rides border color plus a dot, not badges. RUNNING is steady green; WAITING is loud amber. Color-blind safe by hue, saturation, and motion.",
+      "html": "<div class=\"ds-mini-row\"><span class=\"ds-mini\" data-state=\"running\"><span class=\"ds-mini-dot\"></span><span class=\"ds-mini-name\">api-server</span></span><span class=\"ds-mini\" data-state=\"waiting\"><span class=\"ds-mini-dot\"></span><span class=\"ds-mini-name\">db-migrate</span></span><span class=\"ds-mini\"><span class=\"ds-mini-dot\"></span><span class=\"ds-mini-name\">worker</span></span></div>",
+      "css": ".ds-mini-row { display: flex; flex-wrap: wrap; gap: 6px; } .ds-mini { display: flex; align-items: center; gap: 6px; width: 120px; padding: 2px 8px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 4px; opacity: 0.85; font-family: 'Cascadia Code', monospace; font-size: 11px; } .ds-mini:hover { opacity: 1; border-color: var(--border-hover); } .ds-mini-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-dim); opacity: 0.45; flex-shrink: 0; } .ds-mini-name { flex: 1; text-align: center; color: var(--text-head); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .ds-mini[data-state=\"running\"] { opacity: 1; border-color: color-mix(in oklab, var(--state-running) 55%, transparent); } .ds-mini[data-state=\"running\"] .ds-mini-dot { background: var(--state-running); opacity: 1; box-shadow: 0 0 5px color-mix(in oklab, var(--state-running) 25%, transparent); } .ds-mini[data-state=\"waiting\"] { opacity: 1; border-color: var(--state-waiting); background: color-mix(in oklab, var(--state-waiting) 12%, var(--bg-card)); } .ds-mini[data-state=\"waiting\"] .ds-mini-dot { background: var(--state-waiting); }"
+    },
+    {
+      "name": "Schedule Editor",
+      "kind": "custom",
+      "refersTo": null,
+      "description": "Inline (never modal) day/time/timezone editor revealed by Edit on a team panel. Selected days fill an orchid wash.",
+      "html": "<div class=\"ds-sched\"><div class=\"ds-sched-days\"><button class=\"ds-sched-day\" aria-pressed=\"true\">Mon</button><button class=\"ds-sched-day\" aria-pressed=\"false\">Tue</button><button class=\"ds-sched-day\" aria-pressed=\"true\">Wed</button><button class=\"ds-sched-day\" aria-pressed=\"false\">Thu</button><button class=\"ds-sched-day\" aria-pressed=\"true\">Fri</button></div></div>",
+      "css": ".ds-sched { padding: 16px; border: 1px solid var(--border-dim); border-radius: 4px; background: var(--bg-surface); font-family: 'Cascadia Code', monospace; } .ds-sched-days { display: flex; flex-wrap: wrap; gap: 6px; } .ds-sched-day { font-family: inherit; font-size: 12px; min-width: 44px; padding: 6px 10px; color: var(--text-muted); background: transparent; border: 1px solid var(--border); border-radius: 4px; cursor: pointer; transition: border-color 250ms cubic-bezier(0.22,1,0.36,1), color 250ms cubic-bezier(0.22,1,0.36,1), background 250ms cubic-bezier(0.22,1,0.36,1); } .ds-sched-day:hover { border-color: var(--border-hover); } .ds-sched-day[aria-pressed=\"true\"] { color: var(--accent); border-color: var(--accent); background: color-mix(in oklab, var(--accent) 12%, transparent); } .ds-sched-day:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }"
+    },
+    {
+      "name": "Permissions Badge",
+      "kind": "chip",
+      "refersTo": null,
+      "description": "Skip-permissions warning chip. Full 1px border (it replaced a border-left stripe), amber-orange, tinted fill.",
+      "html": "<span class=\"ds-perms\">skip-perms</span>",
+      "css": ".ds-perms { display: inline-flex; align-items: center; font-family: 'Cascadia Code', monospace; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; padding: 0 6px; line-height: 18px; border-radius: 2px; color: var(--perms-warn); border: 1px solid var(--perms-warn); background: color-mix(in srgb, var(--perms-warn) 16%, transparent); }"
+    },
+    {
+      "name": "Dropdown Menu",
+      "kind": "nav",
+      "refersTo": null,
+      "description": "Header overflow menu. Lifted off the plane with shadow-lg. Items have a mono-safe glyph column; danger variant recolors to Signal Red.",
+      "html": "<div class=\"ds-menu\"><button class=\"ds-menu-item\"><span class=\"ds-menu-glyph\">+</span>New session</button><button class=\"ds-menu-item\"><span class=\"ds-menu-glyph\">@</span>Settings</button><div class=\"ds-menu-divider\"></div><button class=\"ds-menu-item ds-menu-item-danger\"><span class=\"ds-menu-glyph\">x</span>Kill all</button></div>",
+      "css": ".ds-menu { min-width: 180px; padding: 4px 0; background: var(--bg-card); border: 1px solid var(--border-hover); border-radius: 4px; box-shadow: 0 8px 24px color-mix(in srgb, color-mix(in oklab, #c084fc 15%, oklch(0.06 0 0)) 65%, transparent); font-family: 'Cascadia Code', monospace; } .ds-menu-item { display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 14px; border: none; background: transparent; font-family: inherit; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; color: var(--text); cursor: pointer; text-align: left; transition: background 150ms cubic-bezier(0.22,1,0.36,1), color 150ms cubic-bezier(0.22,1,0.36,1); } .ds-menu-item:hover { background: color-mix(in srgb, var(--text) 6%, transparent); color: var(--text-head); } .ds-menu-item-danger { color: var(--state-failed); } .ds-menu-item-danger:hover { background: color-mix(in oklab, var(--state-failed) 10%, transparent); color: var(--state-failed); } .ds-menu-glyph { display: inline-block; width: 1.2em; text-align: center; color: var(--text-dim); flex-shrink: 0; } .ds-menu-item:hover .ds-menu-glyph { color: inherit; } .ds-menu-divider { height: 1px; margin: 4px 8px; background: var(--border); }"
+    },
+    {
+      "name": "Settings Tabs",
+      "kind": "nav",
+      "refersTo": null,
+      "description": "Tab strip inside the settings dialog. Active tab takes orchid text plus a 2px orchid bottom border riding the strip divider. Distinct from the primary view tabs (uppercase, no animated underline).",
+      "html": "<div class=\"ds-tabs\"><button class=\"ds-tab-pill\" aria-selected=\"true\">General</button><button class=\"ds-tab-pill\" aria-selected=\"false\">Permissions</button><button class=\"ds-tab-pill\" aria-selected=\"false\">Timeouts</button></div>",
+      "css": ".ds-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); font-family: 'Cascadia Code', monospace; } .ds-tab-pill { padding: 6px 12px; border: none; background: transparent; color: var(--text-dim); font-family: inherit; font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; transition: color 150ms cubic-bezier(0.22,1,0.36,1), border-color 150ms cubic-bezier(0.22,1,0.36,1); } .ds-tab-pill:hover { color: var(--text); } .ds-tab-pill[aria-selected=\"true\"] { color: var(--accent); border-bottom-color: var(--accent); } .ds-tab-pill:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Phyrexian Console",
+    "overview": "Glissa is a machine intelligence watching its constructs through the night. The surface is deep oil-black tinted toward violet; a single iridescent orchid accent is the only chromatic voice in the chrome. State surfaces as cold, exact glints, only when something actually changes. The console is precise, unsentimental, and a little uncanny: it never blinks and never raises its voice. Everything is monospace, density is welcome where it pays for itself, and chrome recedes so the terminal output (the real product) holds the eye. It rejects the generic AI-SaaS dashboard, the IDE clone, the toy aesthetic, and the corporate committee look.",
+    "keyCharacteristics": [
+      "Mono-forward: one typeface family carries headings, labels, data, and body.",
+      "Oil-black violet surfaces with one iridescent accent used sparingly.",
+      "Flat by default; depth comes from tonal layering and 1px borders, never resting shadows.",
+      "Color and motion are reserved for genuine state signals.",
+      "Compressed type scale (10px to 16px); hierarchy from weight, tracking, color, and case, not size.",
+      "Four shipping themes (Phyrexian default); colors read from CSS variables so the system is theme-agnostic."
+    ],
+    "rules": [
+      { "name": "The One Voice Rule", "body": "Iridescent Orchid is the only accent, used on roughly 10% of any screen or less. Its rarity is the point. Never introduce a second decorative hue.", "section": "colors" },
+      { "name": "The Earned Signal Rule", "body": "A state color that means nothing teaches the operator to ignore it. State color appears only on a real state change, never as decoration.", "section": "colors" },
+      { "name": "The Tinted Neutral Rule", "body": "No pure black, no pure white. Every neutral is tinted toward the brand violet.", "section": "colors" },
+      { "name": "The Weight-Not-Size Rule", "body": "The type scale is deliberately compressed (10px to 16px). Build hierarchy with weight, tracking, color, and case, not larger sizes.", "section": "typography" },
+      { "name": "The Monospace Voice Rule", "body": "UI text is monospace. Do not introduce a sans or serif for body, labels, or data.", "section": "typography" },
+      { "name": "The Flat-By-Default Rule", "body": "Surfaces are flat at rest. A shadow or glow appears only as a response to state (hover, focus, elevation off the plane, or a live status).", "section": "elevation" },
+      { "name": "The Tinted Shadow Rule", "body": "Shadows are violet-tinted near-black, never raw rgba black.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do keep Iridescent Orchid (#c084fc) to ~10% of any screen. One voice, used rarely.",
+      "Do carry state with a glyph plus shape plus color, never hue alone.",
+      "Do speak in monospace (Cascadia Code) for all UI text, and build hierarchy from weight, tracking, color, and case rather than size.",
+      "Do keep surfaces flat at rest; convey depth with the canvas/card/surface tonal ramp and 1px borders.",
+      "Do reserve glow and motion for genuine state changes.",
+      "Do tint every neutral toward violet; use Bright Lavender White (#e8e0ff), never #fff, and Near-Black Violet (#0a0810), never #000.",
+      "Do give every interactive element a visible 2px orchid focus ring with offset; the tool is keyboard-first.",
+      "Do honor prefers-reduced-motion strictly.",
+      "Do let the terminal output be the loudest thing on screen; chrome recedes."
+    ],
+    "donts": [
+      "Don't build the generic AI-SaaS dashboard: no gradient hero, no rounded glass cards, no purple-to-blue gradient, no Inter.",
+      "Don't make it look like a VS Code or IDE clone. Glissa is a monitor, not an editor.",
+      "Don't use a children's or toy aesthetic: no cartoonish rounded-everything, no primary-color palette.",
+      "Don't fall back to safe corporate enterprise design (IBM-blue committee look).",
+      "Don't use gradient text. Emphasis comes from weight and color.",
+      "Don't use glassmorphism or decorative blur. Surfaces are opaque.",
+      "Don't apply a side-stripe accent (border-left/border-right > 1px as a colored stripe). Use full borders, background tints, or a leading glyph.",
+      "Don't give resting surfaces a drop shadow, and never a raw rgba(0,0,0) shadow.",
+      "Don't add a second decorative accent hue, or spend a state color on anything that is not that state.",
+      "Don't reach for a modal when an inline or progressive disclosure will do."
+    ]
+  }
+}

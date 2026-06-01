@@ -8,11 +8,12 @@ import { STATES } from '/shared/states.mjs';
 import { connectControl, disableReconnect, onControlMessage, sendControlMsg, sendControlRequest, setConnectionStateCallback } from './control-ws.js';
 import { createAddSessionDialog, createConfirmDialog, createSettingsDialog } from './dialogs.js';
 import { applyHealthSnapshot, mountHealthMonitor } from './health-monitor.js';
-import {
-  applyState, applyTerminalSettings, createSessionCard, exitMaximizeMode,
-  getSessionCount, handleDebugStateRefresh, handleDebugStateResponse, handleSessionsReordered, hasSession, isMaximizeActive,
-  reconnectDataWs, removeSessionCard, renameSessionCard, setLayoutMode, showErrorToast, updateAggregateStatus,
-} from './session-card.js';
+import { handleDebugStateRefresh, handleDebugStateResponse } from './session-card/card-dom.js';
+import { exitMaximizeMode, isMaximizeActive, setLayoutMode } from './session-card/layout.js';
+import { applyState, applyTerminalSettings, createSessionCard, focusSessionCard, getSessionCount, handleSessionsReordered, hasSession, removeSessionCard, renameSessionCard, setSessionWorktree, updateAggregateStatus } from './session-card/lifecycle.js';
+import { reconnectDataWs } from './session-card/terminal.js';
+import { showErrorToast } from './session-card/toast.js';
+import { handleTeamMessage, mountTeamsView, setTabActivityCallback } from './teams-panel.js';
 import { applyTheme } from './theme.js';
 import { getThemeId, isSoundEnabled, pruneStale, setSoundEnabled } from './ui-prefs.js';
 
@@ -56,7 +57,7 @@ setConnectionStateCallback((state, label) => {
     }
     revealApp();
     sendFocusState();
-    // Fetch terminal settings on initial connect to apply scrollback/cursorBlink
+    // Fetch terminal settings on initial connect to apply cursorBlink/debugMode
     sendControlRequest('get-settings', {})
       .then((msg) => { if (msg.settings) applyTerminalSettings(msg.settings); })
       .catch(() => {});
@@ -82,9 +83,21 @@ function clearEmptyPlaceholder() {
   if (empty) empty.remove();
 }
 
+// Real projects (id -> name) for the Teams panel project picker. Ephemeral team-stage sessions
+// (id like "team:<run>:<stage>") are excluded — they are transient run cards, not run targets.
+const knownProjects = new Map();
+function getKnownProjects() {
+  return [...knownProjects].map(([id, name]) => ({ id, name }));
+}
+
 function handleSnapshot(sessions) {
   const container = document.getElementById('sessions-container');
   clearEmptyPlaceholder();
+
+  knownProjects.clear();
+  for (const s of (sessions || [])) {
+    if (!s.ephemeral) knownProjects.set(s.id, s.name);
+  }
 
   if (!sessions || sessions.length === 0) {
     const el = document.createElement('div');
@@ -101,7 +114,7 @@ function handleSnapshot(sessions) {
     container.appendChild(el);
     const cta = el.querySelector('#sessions-empty-cta');
     cta.addEventListener('click', () => {
-      document.getElementById('btn-add-session')?.click();
+      document.getElementById('btn-add-session-header')?.click();
     });
     updateAggregateStatus();
   } else {
@@ -109,7 +122,7 @@ function handleSnapshot(sessions) {
       if (hasSession(s.id)) {
         applyState(s.id, s.state);
       } else {
-        createSessionCard(s.id, s.name, s.state, { skipPerms: !!s.dangerouslySkipPermissions });
+        createSessionCard(s.id, s.name, s.state, { skipPerms: !!s.dangerouslySkipPermissions, worktree: !!s.isWorktree });
       }
     }
 
@@ -142,16 +155,40 @@ function handleStateChange(msg) {
 const messageHandlers = {
   'snapshot':           (msg) => handleSnapshot(msg.sessions),
   'state-change':       (msg) => handleStateChange(msg),
-  'session-added':      (msg) => { if (!hasSession(msg.id)) { clearEmptyPlaceholder(); createSessionCard(msg.id, msg.session, msg.state, { skipPerms: !!msg.skipPerms }); } autoLayout(); },
-  'session-removed':    (msg) => { removeSessionCard(msg.id); autoLayout(); },
-  'session-renamed':    (msg) => renameSessionCard(msg.id, msg.newName),
-  'session-modified':   (msg) => { removeSessionCard(msg.id); clearEmptyPlaceholder(); createSessionCard(msg.id, msg.session, msg.state, { skipPerms: !!msg.skipPerms }); autoLayout(); },
+  'session-added':      (msg) => { if (!msg.ephemeral) knownProjects.set(msg.id, msg.session); if (!hasSession(msg.id)) { clearEmptyPlaceholder(); createSessionCard(msg.id, msg.session, msg.state, { skipPerms: !!msg.skipPerms, worktree: !!msg.worktree }); } autoLayout(); },
+  'session-removed':    (msg) => { knownProjects.delete(msg.id); removeSessionCard(msg.id); autoLayout(); },
+  'session-renamed':    (msg) => { if (knownProjects.has(msg.id)) knownProjects.set(msg.id, msg.newName); renameSessionCard(msg.id, msg.newName); },
+  'session-modified':   (msg) => { if (!msg.ephemeral) knownProjects.set(msg.id, msg.session); removeSessionCard(msg.id); clearEmptyPlaceholder(); createSessionCard(msg.id, msg.session, msg.state, { skipPerms: !!msg.skipPerms, worktree: !!msg.worktree }); autoLayout(); },
+  'session-git':        (msg) => setSessionWorktree(msg.id, !!msg.worktree),
   'sessions-reordered': (msg) => handleSessionsReordered(msg.order),
   'debug-state-response': (msg) => handleDebugStateResponse(msg),
   'error':              (msg) => showErrorToast(msg.message),
   'session-error':      (msg) => showErrorToast(`${msg.session}: ${msg.message}`),
   'settings-updated':   (msg) => { if (msg.settings) applyTerminalSettings(msg.settings); },
   'health-snapshot':    (msg) => { if (msg.stats) applyHealthSnapshot(msg.stats); },
+  'team-run-accepted':  (msg) => handleTeamMessage(msg),
+  'team-run-started':   (msg) => handleTeamMessage(msg),
+  'team-stage-started': (msg) => handleTeamMessage(msg),
+  'team-stage-complete': (msg) => handleTeamMessage(msg),
+  'team-run-cancelling': (msg) => handleTeamMessage(msg),
+  'team-run-complete':  (msg) => handleTeamMessage(msg),
+  'team-run-failed':    (msg) => handleTeamMessage(msg),
+  'team-run-skipped':   (msg) => handleTeamMessage(msg),
+  'team-run-needs-setup': (msg) => handleTeamMessage(msg),
+  'team-instance-added':   (msg) => handleTeamMessage(msg),
+  'team-instance-removed': (msg) => handleTeamMessage(msg),
+  'team-schedule-updated': (msg) => handleTeamMessage(msg),
+  'setup-team-pack-started': (msg) => {
+    handleTeamMessage(msg);
+    // The guided-setup session is an interactive terminal under the Sessions view; jump there and
+    // focus it so the operator can answer the interview instead of the click appearing to do nothing.
+    if (msg.sessionId) {
+      activateView('sessions'); // synchronous; focusSessionCard's own double-rAF lets it settle
+      focusSessionCard(msg.sessionId);
+    }
+  },
+  'team-pack-updated':     (msg) => handleTeamMessage(msg),
+  'artifact-opened':    (msg) => { if (!msg.ok) showErrorToast(`Could not open ${msg.artifact || 'artifact'}${msg.error ? `: ${msg.error}` : ''}`); },
   'shutting-down':      () => {
     disableReconnect();
     connectionEl.dataset.state = 'shutdown';
@@ -174,7 +211,7 @@ onControlMessage((msg) => {
 
 // ── Toolbar buttons ──────────────────────────────────────────
 
-document.getElementById('btn-add-session').addEventListener('click', createAddSessionDialog);
+document.getElementById('btn-add-session-header').addEventListener('click', createAddSessionDialog);
 
 // ── Header menu ──────────────────────────────────────────────
 
@@ -204,6 +241,45 @@ document.getElementById('btn-settings').addEventListener('click', () => {
   syncMenuAria();
   createSettingsDialog();
 });
+
+// ── Primary view tabs (Sessions / Teams) ─────────────────────
+
+const viewTeamsEl = document.getElementById('view-teams');
+const tabSessions = document.getElementById('tab-sessions');
+const tabTeams = document.getElementById('tab-teams');
+const tabActivityEl = document.getElementById('tab-teams-activity');
+
+setTabActivityCallback((active) => { tabActivityEl.classList.toggle('active', active); });
+
+function activateView(view) {
+  const teams = view === 'teams';
+  document.body.dataset.activeView = view;
+  viewTeamsEl.hidden = !teams;
+  tabSessions.setAttribute('aria-selected', String(!teams));
+  tabSessions.tabIndex = teams ? -1 : 0;
+  tabTeams.setAttribute('aria-selected', String(teams));
+  tabTeams.tabIndex = teams ? 0 : -1;
+  if (teams) {
+    mountTeamsView(viewTeamsEl, getKnownProjects());
+  } else {
+    // Session terminals were display:none under the Teams tab — re-fit on return.
+    autoLayout();
+  }
+}
+
+tabSessions.addEventListener('click', () => activateView('sessions'));
+tabTeams.addEventListener('click', () => activateView('teams'));
+for (const tab of [tabSessions, tabTeams]) {
+  tab.addEventListener('keydown', (e) => {
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    e.preventDefault();
+    const toTeams = tab === tabSessions;
+    activateView(toTeams ? 'teams' : 'sessions');
+    (toTeams ? tabTeams : tabSessions).focus();
+  });
+}
+
+document.body.dataset.activeView = 'sessions';
 
 document.getElementById('btn-restart').addEventListener('click', () => {
   headerMenu.classList.remove('open');
@@ -266,7 +342,9 @@ btnMute.addEventListener('click', (e) => {
   updateMuteButton();
 });
 
-// ── Layout toggle ─────────────────────────────────────────
+// ── Layout (always auto) ──────────────────────────────────
+// The arrangement always follows the live session count: exactly two sessions
+// sit side-by-side (split), any other count is a grid. No operator toggle.
 
 const sessionsContainer = document.getElementById('sessions-container');
 
@@ -275,10 +353,41 @@ function applyLayout(layoutId) {
   setLayoutMode(layoutId);
 }
 
-// Auto-switch layout based on session count: split for exactly 2, default otherwise
 function autoLayout() {
   applyLayout(getSessionCount() === 2 ? 'split' : 'default');
 }
+
+// ── Keyboard shortcuts (chrome-level) ─────────────────────────
+// Alt+0 opens a new session; Alt+1..9 jumps to the Nth session card. Guarded so
+// they never reach a focused xterm — its key handling lives in session-card.js
+// and forwards most keys to the PTY — so these fire only when the operator is on
+// the dashboard chrome, not typing into a session.
+function isTypingContext() {
+  const a = document.activeElement;
+  if (!a) return false;
+  if (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.isContentEditable) return true;
+  return !!(a.closest && a.closest('.terminal-wrap'));
+}
+
+document.addEventListener('keydown', (e) => {
+  if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+  if (isTypingContext()) return;
+
+  if (e.key === '0') {
+    e.preventDefault();
+    document.getElementById('btn-add-session-header')?.click();
+    return;
+  }
+  if (e.key >= '1' && e.key <= '9') {
+    const cards = [...sessionsContainer.querySelectorAll('.session-card')]
+      .filter((c) => !c.classList.contains('drop-zone-placeholder'));
+    const card = cards[Number(e.key) - 1];
+    if (card) {
+      e.preventDefault();
+      focusSessionCard(card.dataset.id);
+    }
+  }
+});
 
 // ── Window focus tracking (suppress server notifications when dashboard is visible) ──
 

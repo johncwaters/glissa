@@ -1,0 +1,84 @@
+{
+  "id": "marketing",
+  "name": "Marketing Pipeline",
+  "description": "A reusable content pipeline: pick a topic from the project's content calendar, plan the platform mix, draft every variant in the project's brand voice, audit voice and trust, then optionally queue approved drafts to Postiz as drafts. All project specifics (voice, brand, audience, calendar, channels) come from this project's pack under .glissa/teams/marketing/pack/.",
+  "schemaVersion": 1,
+  "outputPath": ".glissa/teams/marketing",
+  "schedule": {
+    "days": ["tue", "thu", "sat"],
+    "time": "05:00",
+    "tz": "America/Denver",
+    "enabled": true
+  },
+  "permissions": {
+    "mode": "yolo",
+    "deny": [
+      "Bash(rm *)",
+      "Bash(rmdir *)",
+      "Bash(del *)",
+      "Bash(rd *)",
+      "Bash(git push*)",
+      "Bash(git reset --hard*)",
+      "Bash(git clean*)",
+      "Bash(npm publish*)",
+      "Bash(npm version*)",
+      "Bash(curl *)",
+      "Bash(wget *)",
+      "Bash(Invoke-WebRequest*)",
+      "Bash(iwr *)",
+      "Write(**/.env)",
+      "Write(**/.env.*)",
+      "Write(**/*secret*)",
+      "Read(**/.env)"
+    ]
+  },
+  "pack": {
+    "required": ["voice-guide.md", "avoid-list.md", "brand.md", "content-calendar.md", "channels.md"]
+  },
+  "stageTimeoutSeconds": 900,
+  "stages": [
+    {
+      "id": "researcher",
+      "model": "opus",
+      "summary": "Picks the topic and angle from the project's content calendar and recent runs; writes brief.md.",
+      "produces": "brief.md",
+      "requiredSections": ["Topic", "Angle", "Audience", "Differentiator", "Sources", "Sensitivities"],
+      "haltSignal": "INSUFFICIENT_TOPICS"
+    },
+    {
+      "id": "strategist",
+      "model": "sonnet",
+      "summary": "Chooses platforms, per-platform angle, CTA, length, and posting time; writes plan.md.",
+      "reads": ["brief.md"],
+      "produces": "plan.md",
+      "requiredSections": ["Platforms", "Per-platform angle", "CTA", "Length", "Posting time"]
+    },
+    {
+      "id": "writer",
+      "model": "sonnet",
+      "summary": "Drafts every platform variant directly in the project's brand voice; writes drafts.md.",
+      "reads": ["brief.md", "plan.md"],
+      "reviseReads": ["review.md", "drafts.md"],
+      "produces": "drafts.md"
+    },
+    {
+      "id": "editor",
+      "model": "opus",
+      "summary": "Audits voice and trust against the project's voice guide and avoid list; writes review.md ending in a SHIP / FIX / BLOCK verdict.",
+      "reads": ["brief.md", "plan.md", "drafts.md"],
+      "reviseReads": ["review.md"],
+      "produces": "review.md",
+      "verdict": { "marker": "VERDICT:", "values": ["SHIP", "FIX", "BLOCK"] },
+      "revise": { "onVerdict": "FIX", "stages": ["writer"], "maxRounds": 2 }
+    },
+    {
+      "id": "publisher",
+      "model": "sonnet",
+      "summary": "On a SHIP verdict, queues the approved drafts to Postiz as drafts (never scheduled); writes published.md.",
+      "reads": ["plan.md", "drafts.md", "review.md"],
+      "produces": "published.md",
+      "runIfVerdict": "SHIP",
+      "optional": true
+    }
+  ]
+}

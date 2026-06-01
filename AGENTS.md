@@ -1,4 +1,4 @@
-<!-- Generated: 2026-03-11 | Updated: 2026-03-24 -->
+<!-- Generated: 2026-03-11 | Updated: 2026-05-31 -->
 
 # AGENTS.md — Glissa Project Map
 
@@ -14,7 +14,7 @@ Glissa is a lightweight Node.js background process that spawns and manages Claud
 |------|---------|-------------|
 | **server.js** | Production entry point — creates HTTP server, wires backend, handles SIGINT | `(none — top-level script)` |
 | **backend.js** | Express + WebSocket server factory. Wires control/data WebSocket servers, session lifecycle, config hot-reload, static serving, and graceful shutdown onto a provided HTTP server | `createBackend(httpServer, options)` |
-| **sessions.js** | Session class with the state machine (DORMANT -> INITIALIZING -> STARTING -> RUNNING -> WAITING/IDLE/COMPLETE -> DONE/FAILED). Spawns Claude CLI via node-pty, PTY lifecycle, StatusSource-driven detection (`_onStatus` maps signals to transitions), replay buffer, watchdog. NO screen scraping. | `Session` |
+| **sessions.js** | Session class with the state machine (DORMANT -> INITIALIZING -> STARTING -> RUNNING -> WAITING/IDLE/COMPLETE -> DONE/FAILED). Spawns Claude CLI via node-pty, PTY lifecycle, StatusSource-driven detection (`_onStatus` maps signals to transitions), replay buffer. NO screen scraping. | `Session` |
 | **detection/status-source.js** | StatusSource (EventEmitter). Merges hook + title signals: precedence hook>title, conflict window (`awaiting-input` dominates `ready`), dedup. Emits normalized `working/ready/awaiting-input/resume/session-start/session-end`. | `StatusSource`, `createStatusSource()` |
 | **detection/osc-title-source.js** | OSC-0 title fallback source. Braille spinner = `working`, idle glyph = `ready`, unknown glyph = `unknown`; NEVER emits `awaiting-input`. Ports `findOscTitle`/`isBrailleChar`. | `OscTitleSource`, `createOscTitleSource()`, `findOscTitle`, `isBrailleChar` |
 | **detection/hook-source.js** | HookRouter: per-session bearer-token validation + `mapHookToSignal` (Claude Code hook event -> normalized signal). Backed by `POST /hook/:glissaId/:event`. | `HookRouter`, `mapHookToSignal` |
@@ -44,10 +44,13 @@ Glissa is a lightweight Node.js background process that spawns and manages Claud
 | `assets/` | Source audio files and screenshots (see `assets/AGENTS.md`) |
 | `bin/` | CLI entry point for `npx glissa` / global install (see `bin/AGENTS.md`) |
 | `channels/` | Pluggable notification delivery adapters for NotificationManager (see `channels/AGENTS.md`) |
-| `docs/` | Publishing and CLI testing guides (see `docs/AGENTS.md`) |
+| `detection/` | Structural status detection — hook (authoritative) + OSC title (fallback) sources, merge layer, settings injector, replay harness (see `detection/AGENTS.md`) |
+| `docs/` | Publishing, CLI testing, and the terminal-detection postmortem (see `docs/AGENTS.md`) |
 | `public/` | Browser dashboard — xterm.js terminals, session cards, dialogs (see `public/AGENTS.md`) |
 | `scripts/` | Release automation scripts (see `scripts/AGENTS.md`) |
 | `shared/` | Shared state constants and notification state machine (CJS + ESM) (see `shared/AGENTS.md`) |
+| `test/` | Hand-run console-harness scripts (notification manager, dormant-boot smoke) (see `test/AGENTS.md`) |
+| `tests/` | Automated `node:test` suite run by `npm test` + replay fixtures (see `tests/AGENTS.md`) |
 
 ---
 
@@ -102,13 +105,13 @@ INITIALIZING -> STARTING -> RUNNING -> WAITING -> IDLE -> DONE
 
 **States (from shared/states.js):**
 - **INITIALIZING** — Session object created, env prepared, ready to spawn
-- **STARTING** — PTY spawned, awaiting first output (watchdog timer active)
+- **STARTING** — PTY spawned, awaiting first output or hook signal
 - **RUNNING** — Claude CLI producing output; StatusSource active
 - **WAITING** — `awaiting-input` signal (authoritative hook: `Notification`/`PermissionRequest`), awaiting user input/dismiss
 - **IDLE** — quiescent post-turn state (rarely entered now; resume via `working`/`resume`)
 - **COMPLETE** — turn finished via authoritative `ready` (`Stop` hook) or title `working`->`ready`. Notifications sent
 - **DONE** — Process exited cleanly (code 0) or user killed
-- **FAILED** — Process exited with error, watchdog timeout, or spawn failure
+- **FAILED** — Process exited with error or spawn failure
 
 **Transitions** governed by explicit event mapping (TRANSITIONS constant) and guards (GUARDS object).
 
@@ -178,7 +181,7 @@ Must use **node-pty** (`pty.spawn()`) NOT `child_process.spawn()` because Claude
 **Requirements:**
 - Real PTY with `cols=80, rows=24` (xterm-256color)
 - Unset env vars before spawn: `CLAUDECODE`, `CLAUDE_CODE_SSE_PORT`, `CLAUDE_CODE_ENTRYPOINT`, `GLISSA_PORT`, `GLISSA_CONFIG`
-- On Windows: spawn via `cmd.exe /c claude` (node-pty can't resolve .cmd shims directly)
+- **Resolve-then-branch spawn (Windows):** `claude` is resolved once at module load (`resolveClaudeCommand` -> `{ path, kind }`). The pure `buildSpawnCommand` then picks the form: a real PE image (`.exe`/`.com`) is spawned directly via `pty.spawn(<abs path>, args)`; `.cmd`/`.bat`/`.ps1` shims (or a failed resolution) fall back to `cmd.exe /c claude`. Spawning the `.exe` directly avoids cmd's double command-line parse and its console-title write. Tests inject the resolved command via the `spawnCommand` option. See `tests/spawn-command.test.js`
 - Pass args as array, NOT `shell: true`
 
 ### Replay Buffer
@@ -188,7 +191,6 @@ Sessions maintain a ring buffer (~100KB cap) of PTY output for dashboard reconne
 ### Timers & Cleanup
 
 Sessions use explicit setTimeout with cleanup on transition/exit/destroy:
-- **watchdog_timeout** (STARTING -> FAILED if no output within `startingWatchdogSeconds`)
 - **sleep-kill** (auto-kill a sleeping session after 15 min)
 - **kill-poll** (force-kill escalation after a graceful kill)
 
@@ -292,11 +294,36 @@ See `docs/testing-cli.md` for comprehensive manual test scenarios.
 ## Related Documentation
 
 - `CLAUDE.md` — Project constraints and coding style
+- `detection/AGENTS.md` — Structural status detection (hook + OSC title sources, merge, replay)
 - `channels/AGENTS.md` — Notification delivery channels
 - `public/AGENTS.md` — Browser-side module documentation
 - `shared/AGENTS.md` — Shared state and notification constants
 - `bin/AGENTS.md` — CLI entry point documentation
 - `docs/AGENTS.md` — Publishing and testing guides
 - `scripts/AGENTS.md` — Release automation
+- `tests/AGENTS.md` — Automated `node:test` suite and fixtures
+- `test/AGENTS.md` — Hand-run console-harness scripts
+
+---
+
+## Design Context
+
+Glissa's design system has two source-of-truth files at the project root. Read them before any UI work.
+
+- **`PRODUCT.md`** (strategic — who/what/why): register, users, purpose, brand personality, anti-references, design principles, accessibility.
+- **`DESIGN.md`** (visual — how it looks): the "Phyrexian Console" system — colors, typography, elevation, components, do's and don'ts.
+
+**Register:** `product` (the design serves the tool; the operator console is the primary surface).
+
+**Felt goal:** "I trust the board." Every signal is earned, so the operator can act on what they see without re-checking.
+
+**Five principles** (full text in PRODUCT.md):
+1. **Earned signal** — color/motion only on a real state change.
+2. **The terminal is the product** — chrome recedes; cut any pixel that doesn't route attention to data.
+3. **Quiet by default, loud only on change** — calm at rest, raises its voice only when a session needs a human.
+4. **State is structural, never guessed** — hooks + OSC-0 title; show unknown as unknown.
+5. **One voice** — single accent, single mono family; hierarchy from weight, tracking, color, and case.
+
+These are maintained via the `impeccable` skill (`$impeccable teach` / `document`).
 
 <!-- MANUAL: -->

@@ -1,4 +1,5 @@
 const fs = require("node:fs");
+const path = require("node:path");
 const pty = require("node-pty");
 const { EventEmitter } = require("node:events");
 const { execSync } = require("node:child_process");
@@ -6,134 +7,56 @@ const { STATES } = require("./shared/states");
 const { createOscTitleSource } = require("./detection/osc-title-source");
 const { createStatusSource } = require("./detection/status-source");
 const { writeSessionSettings } = require("./detection/settings-injector");
+const {
+  classifyClaudeKind,
+  resolveClaudeCommand,
+  buildSpawnCommand,
+  CLAUDE_CMD,
+} = require("./session-core/spawn-command");
+const { buildSpawnEnv } = require("./session-core/spawn-env");
+const {
+  TRANSITIONS,
+  GUARDS,
+  ENTRY_HOOKS,
+  EXIT_HOOKS,
+} = require("./session-core/state-machine");
+const { mapSignalToEvent } = require("./session-core/status-mapper");
 
 const KILL_POLL_INTERVAL_MS = 200;
 const KILL_MAX_WAIT_MS = 3000;
 const SLEEP_KILL_TIMEOUT_MS = 15 * 60 * 1000;
 
-// Resolve and log all `claude` matches once at module load so a Bun shim
-// shadowing claude.exe surfaces in the boot log instead of as a runtime stack trace.
-(() => {
-  let matches = [];
-  try {
-    const cmd = process.platform === "win32" ? "where claude" : "which -a claude";
-    const out = execSync(cmd, {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-      timeout: 2000,
-    });
-    matches = out.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
-  } catch {
-    // fall through to "could not resolve" warning below
-  }
-  if (matches.length === 0) {
-    console.warn(`[glissa] could not resolve 'claude' on PATH`);
-    return;
-  }
-  console.log(`[glissa] resolved 'claude' (first match wins): ${matches[0]}`);
-  if (matches.length > 1) {
-    console.warn(
-      `[glissa] multiple 'claude' on PATH (Bun shim risk):\n  ${matches.join("\n  ")}`,
-    );
-  }
-})();
-
 // ---------------------------------------------------------------------------
 // State machine. Status is driven by structural signals from StatusSource
 // (Claude Code hooks = authoritative; OSC-0 title = degraded fallback), mapped
 // to transitions in _onStatus per the signal x state matrix. There is NO
-// screen-content parsing and NO detection timer here.
+// screen-content parsing and NO detection timer here. The transition tables
+// (TRANSITIONS, GUARDS, ENTRY_HOOKS, EXIT_HOOKS) live in
+// session-core/state-machine.js; the transition() engine below consumes them.
 // ---------------------------------------------------------------------------
 
-const TRANSITIONS = Object.freeze({
-  [STATES.DORMANT]: {
-    user_start: STATES.INITIALIZING,
-  },
-  [STATES.INITIALIZING]: {
-    spawn_success: STATES.STARTING,
-    spawn_fail: STATES.FAILED,
-  },
-  [STATES.STARTING]: {
-    first_output: STATES.RUNNING,
-    watchdog_timeout: STATES.FAILED,
-    process_exit: STATES.FAILED,
-  },
-  [STATES.RUNNING]: {
-    prompt_detected: STATES.WAITING,
-    task_complete: STATES.COMPLETE,
-    process_exit_ok: STATES.DONE,
-    process_exit_fail: STATES.FAILED,
-    user_kill: STATES.DONE,
-  },
-  [STATES.WAITING]: {
-    user_input: STATES.RUNNING,
-    user_dismiss: STATES.RUNNING,
-    // Authoritative late `ready` (Stop/idle hook) while WAITING -> COMPLETE.
-    task_complete: STATES.COMPLETE,
-    user_kill: STATES.DONE,
-    process_exit_ok: STATES.DONE,
-    process_exit_fail: STATES.FAILED,
-  },
-  [STATES.IDLE]: {
-    new_output: STATES.RUNNING,
-    prompt_detected: STATES.WAITING,
-    // Authoritative late `ready` while IDLE -> COMPLETE.
-    task_complete: STATES.COMPLETE,
-    process_exit_ok: STATES.DONE,
-    process_exit_fail: STATES.FAILED,
-    user_kill: STATES.DONE,
-  },
-  [STATES.COMPLETE]: {
-    new_output: STATES.RUNNING,
-    user_dismiss: STATES.IDLE,
-    prompt_detected: STATES.WAITING,
-    process_exit_ok: STATES.DONE,
-    process_exit_fail: STATES.FAILED,
-    user_kill: STATES.DONE,
-  },
-  [STATES.DONE]: {
-    user_restart: STATES.INITIALIZING,
-  },
-  [STATES.FAILED]: {
-    user_restart: STATES.INITIALIZING,
-    process_exit_fail: STATES.FAILED,
-  },
-});
-
-// Guards: return true if transition is allowed, false otherwise
-const GUARDS = {
-  spawn_success(session) {
-    return fs.existsSync(session.path);
-  },
-  user_restart(session) {
-    return session.state === STATES.DONE || session.state === STATES.FAILED;
-  },
-};
-
-// Entry/exit hooks keyed by state
-const ENTRY_HOOKS = {
-  [STATES.RUNNING](session) {
-    // Apply any resize that was deferred while the session was quiescent.
-    // The resulting redraw is harmless: the OSC-title source only reacts to the
-    // activity glyph, which a resize redraw does not change.
-    session._applyPendingResize();
-  },
-  [STATES.WAITING](session) {
-    session.emit("needs-attention", { name: session.name });
-  },
-  [STATES.FAILED](session) {
-    session.emit("session-failed", { name: session.name });
-  },
-  [STATES.DONE](session) {
-    session.emit("session-done", { name: session.name });
-  },
-};
-
-const EXIT_HOOKS = {
-  [STATES.WAITING](session) {
-    session.emit("attention-cleared", { name: session.name });
-  },
-};
+// A linked git worktree marks its working dir with a `.git` FILE containing
+// `gitdir: .../.git/worktrees/<name>`, whereas a normal checkout has a `.git`
+// DIRECTORY. A submodule also uses a `.git` file, but it points at
+// `.../.git/modules/<name>`, so we require a `worktrees/` path segment to avoid
+// flagging submodules as worktrees. The `(^|/)` anchor also catches relative
+// pointers (Git 2.48+ `--relative-paths`, e.g. `../.git/worktrees/x` or a bare
+// `worktrees/x`). fs-only: no subprocess, no dependency, in keeping with the
+// "structural signals, no scraping" rule.
+function detectLinkedWorktree(dir) {
+  if (!dir) return false;
+  try {
+    const dotGit = path.join(dir, ".git");
+    if (!fs.statSync(dotGit).isFile()) return false;
+    const m = /^gitdir:\s*(.+)$/m.exec(fs.readFileSync(dotGit, "utf8"));
+    // .trim() drops the trailing CR from a CRLF `.git` file (the form git writes
+    // on Windows); .replace normalizes Windows backslash gitdir paths to forward
+    // slashes so the `worktrees/` segment test is separator-agnostic.
+    return !!m && /(^|\/)worktrees\//.test(m[1].trim().replace(/\\/g, "/"));
+  } catch {
+    return false;
+  }
+}
 
 class Session extends EventEmitter {
   constructor({
@@ -141,11 +64,7 @@ class Session extends EventEmitter {
     name,
     path,
     dangerouslySkipPermissions = false,
-    startingWatchdogSeconds = 10,
-    attentionTimeoutSeconds = 60,
-    waitingEscalationSeconds = 300,
     replayBufferKB = 512,
-    noFlicker = true,
     // Detection wiring (injected by backend). When absent, the session runs
     // title-source-only (no hooks) — used by unit tests constructing a Session directly.
     hookRouter = null,
@@ -154,32 +73,58 @@ class Session extends EventEmitter {
     titleStabilizationMs = 1500,
     statusConflictMs = undefined,
     statusDedupMs = undefined,
+    // Resolved claude command ({ path, kind }). Defaults to the module-load
+    // resolution; tests inject a stub to exercise the spawn branches deterministically.
+    spawnCommand = CLAUDE_CMD,
+    // Team-stage spawn options. initialPrompt is appended as the FINAL positional arg (proven safe
+    // as a single argv element on the direct-exe path by the Phase-0 probe); extraClaudeArgs carries
+    // e.g. ["-p", "--model", "sonnet"]; ephemeral marks orchestrator-owned stage sessions that live
+    // in a separate map and must never be persisted to config.json.
+    initialPrompt = null,
+    extraClaudeArgs = [],
+    ephemeral = false,
+    // Optional Claude Code permissions ({ deny: [...] }) merged into the injected --settings file
+    // (team-stage deny blacklist, mechanism M2). Null for ordinary user sessions.
+    settingsPermissions = null,
+    // PTY spawner seam. Defaults to node-pty; tests inject a fake to assert the
+    // spawn wiring (file/args) without launching a real process.
+    ptySpawn = null,
   }) {
     super();
     this.id = id;
     this.name = name;
     this.path = path;
+    // Whether this session's cwd is a linked git worktree (vs a normal checkout).
+    // Surfaced to the dashboard as a small card marker; refreshed on the health tick.
+    this.isWorktree = detectLinkedWorktree(this.path);
     this.dangerouslySkipPermissions = dangerouslySkipPermissions;
     this.ptyProcess = null;
     this.state = STATES.DORMANT;
     this.auditLog = [];
-    this.startingWatchdogMs = startingWatchdogSeconds * 1000;
-    this.attentionTimeoutMs = attentionTimeoutSeconds * 1000;
-    this.waitingEscalationMs = waitingEscalationSeconds * 1000;
-    this._watchdogTimer = null;
     this._receivedFirstOutput = false;
     this._outputBuffer = []; // ring buffer of recent PTY chunks
     this._outputBufferHead = 0; // index of oldest valid entry; advances instead of shift()
     this._outputBufferSize = 0;
     this._outputBufferMax = replayBufferKB * 1024;
+    // Monotonic count of total bytes ever produced (never decremented by eviction).
+    // This is the "end" offset for getBufferSince(); per-client ws-senders track how
+    // far they have durably sent against it so a backpressure drop can be backfilled.
+    this._outputBufferTotal = 0;
     this._killPollTimer = null;
-    this._noFlicker = noFlicker;
-    this._pendingResize = null;
     this._sleeping = false;
     this._sleepKillTimer = null;
     this._autoKilled = false;
     this._destroyed = false;
     this._pendingRestart = false;
+    // True only between a successful spawn and the kill/exit that follows. Gates
+    // write() so we never push input into a pty whose console pipe is already
+    // dead (see write() and the conin-socket guard in start()).
+    this._ptyAlive = false;
+    // Last cols/rows pushed from the browser. A restarted PTY respawns at these
+    // (not the 80x24 default) so Claude initializes its TUI at the correct size
+    // instead of relying on a single post-reconnect resize that races startup.
+    this._lastCols = null;
+    this._lastRows = null;
     this._recorder = null; // Set via setRecorder() after construction
 
     // -- Detection: structural signal sources --
@@ -190,6 +135,12 @@ class Session extends EventEmitter {
     this._settingsHandle = null;
     this._hookSeen = false;
     this._lastSignal = null;
+    this._spawnCommand = spawnCommand;
+    this._initialPrompt = initialPrompt;
+    this._extraClaudeArgs = Array.isArray(extraClaudeArgs) ? extraClaudeArgs : [];
+    this.ephemeral = !!ephemeral;
+    this._settingsPermissions = settingsPermissions;
+    this._ptySpawn = ptySpawn || ((file, args, opts) => pty.spawn(file, args, opts));
 
     this._titleSource = createOscTitleSource({ stabilizationMs: titleStabilizationMs });
     this._statusSource = createStatusSource({
@@ -222,39 +173,13 @@ class Session extends EventEmitter {
   _onStatus(s) {
     if (this._destroyed) return;
     this._lastSignal = { signal: s.signal, source: s.source, confidence: s.confidence, ts: s.ts };
-    const st = this.state;
-    switch (s.signal) {
-      case "working":
-      case "resume":
-        // Claude is active again — wake a quiescent card.
-        if (st === STATES.IDLE || st === STATES.COMPLETE) {
-          this.transition("new_output", { source: s.source, signal: s.signal });
-        } else if (st === STATES.WAITING) {
-          this.transition("user_input", { source: s.source, signal: s.signal });
-        }
-        break;
-      case "ready":
-        // Turn finished. Authoritative (hook) `ready` may complete from WAITING/IDLE
-        // too (a late Stop after a permission/idle prompt). The title fallback only
-        // completes from RUNNING (it only emits ready after seeing a spinner).
-        if (st === STATES.RUNNING) {
-          this.transition("task_complete", { source: s.source, signal: "ready" });
-        } else if ((st === STATES.WAITING || st === STATES.IDLE) && s.confidence === "high") {
-          this.transition("task_complete", { source: s.source, signal: "ready" });
-        }
-        break;
-      case "awaiting-input":
-        // Needs the user. Authoritative-only (title never emits this).
-        if (st === STATES.RUNNING || st === STATES.IDLE || st === STATES.COMPLETE) {
-          this.transition("prompt_detected", { source: s.source, signal: "awaiting-input" });
-        }
-        break;
-      case "session-start":
-      case "session-end":
-        // Lifecycle telemetry only — PTY first-output / exit drive these states.
-        break;
-      default:
-        break;
+    // Pure decision in session-core/status-mapper.js; this wrapper owns the side effects:
+    // the _destroyed guard + _lastSignal write above, and the transition below. The detail
+    // { source, signal } is uniform across every firing case (byte-identical to the prior
+    // per-branch details), so it is assembled here rather than in the pure mapper.
+    const event = mapSignalToEvent(s.signal, this.state, s.confidence);
+    if (event) {
+      this.transition(event, { source: s.source, signal: s.signal });
     }
   }
 
@@ -278,8 +203,20 @@ class Session extends EventEmitter {
       state: this.state,
       sleeping: this._sleeping,
       dangerouslySkipPermissions: this.dangerouslySkipPermissions,
+      ephemeral: this.ephemeral,
+      isWorktree: this.isWorktree,
       auditLog: this.auditLog.slice(-100),
     };
+  }
+
+  // Recompute worktree status (a cwd can be turned into, or removed as, a linked
+  // worktree mid-session). Returns true when the value changed so the caller can
+  // rebroadcast just the delta instead of recreating the card.
+  refreshGitContext() {
+    const next = detectLinkedWorktree(this.path);
+    if (next === this.isWorktree) return false;
+    this.isWorktree = next;
+    return true;
   }
 
   getDetectionStats() {
@@ -304,13 +241,13 @@ class Session extends EventEmitter {
       ptyPid: this.ptyProcess ? this.ptyProcess.pid : null,
       outputBufferEntries: this._outputBuffer.length - this._outputBufferHead,
       outputBufferBytes: this._outputBufferSize,
+      outputBufferTotal: this._outputBufferTotal,
       auditLogLength: this.auditLog.length,
       dataListenerCount: this.listenerCount("data"),
       hookSeen: this._hookSeen,
       timers: {
         sleepKill: this._sleepKillTimer !== null,
         killPoll: this._killPollTimer !== null,
-        watchdog: this._watchdogTimer !== null,
       },
     };
   }
@@ -428,8 +365,14 @@ class Session extends EventEmitter {
     this._outputBuffer = [];
     this._outputBufferHead = 0;
     this._outputBufferSize = 0;
-    this._clearWatchdog();
-    this._pendingResize = null;
+    this._outputBufferTotal = 0;
+    // A restarted PTY re-bases its monotonic output offset at 0. Signal the backend so
+    // it force-closes any LIVE data-WS client (whose ws-sender.sentOffset is now
+    // stale-high relative to the reset total) and lets it reconnect + re-baseline.
+    // Covers restart(), forceRestart(), and sleep-kill auto-restart (all funnel through
+    // start()); harmless no-op on the first start() (no data clients attached yet).
+    // See backend.js wireSessionEvents -> closeSessionDataClients.
+    this.emit("rebaseline");
     this._titleSource.reset();
     this._statusSource.reset();
 
@@ -439,22 +382,37 @@ class Session extends EventEmitter {
     // POSTing to Glissa's localhost server). No repo modification; no shell command.
     const settingsArgs = this._injectHooks();
 
-    // On Windows, node-pty can't resolve .cmd shims directly.
-    // Spawn via cmd.exe /c which handles PATH + .cmd resolution.
-    const isWindows = process.platform === "win32";
+    // Prefer spawning the resolved claude .exe directly (node-pty -> CreateProcess).
+    // Fall back to `cmd.exe /c claude` only for .cmd/.bat/.ps1 shim installs or when
+    // resolution failed (see resolveClaudeCommand / buildSpawnCommand at module top).
     const claudeArgs = this.dangerouslySkipPermissions
       ? ["--dangerously-skip-permissions"]
       : [];
-    const shell = isWindows ? "cmd.exe" : "claude";
-    const args = isWindows
-      ? ["/c", "claude", ...settingsArgs, ...claudeArgs]
-      : [...settingsArgs, ...claudeArgs];
+    // Team stages pass extra flags (e.g. -p, --model <m>) then the prompt as the final positional.
+    // The positional is a single argv element on the direct-exe path (proven by the Phase-0 probe);
+    // on the cmd.exe shim fallback a very large/multiline prompt is subject to cmd parsing.
+    if (this._extraClaudeArgs.length > 0) {
+      claudeArgs.push(...this._extraClaudeArgs);
+    }
+    if (this._initialPrompt != null) {
+      claudeArgs.push(this._initialPrompt);
+    }
+    const { file, args } = buildSpawnCommand({
+      platform: process.platform,
+      resolved: this._spawnCommand,
+      settingsArgs,
+      claudeArgs,
+    });
 
+    // Reuse the last browser-pushed size so a restart spawns at the card's real
+    // dimensions; fall back to 80x24 on the very first spawn (no size known yet).
+    const spawnCols = this._lastCols ?? 80;
+    const spawnRows = this._lastRows ?? 24;
     try {
-      this.ptyProcess = pty.spawn(shell, args, {
+      this.ptyProcess = this._ptySpawn(file, args, {
         name: "xterm-256color",
-        cols: 80,
-        rows: 24,
+        cols: spawnCols,
+        rows: spawnRows,
         cwd: this.path,
         env,
       });
@@ -464,35 +422,51 @@ class Session extends EventEmitter {
       this.emit("error", err);
       return;
     }
+    this._ptyAlive = true;
+    this._guardPtyInputSocket();
 
     this.transition("spawn_success");
 
+    // Redact a positional initialPrompt (team stages) from the spawn log — it can be a multi-KB
+    // RUN CONTEXT block that does not belong in the console. Run detail lives in the Teams view.
+    const argsForLog = this._initialPrompt
+      ? args.map((a) => (a === this._initialPrompt ? `<prompt:${this._initialPrompt.length}c>` : a)).join(" ")
+      : args.join(" ");
     console.log(
-      `[session ${this.id}] spawn: ${shell} ${args.join(" ")} (cwd=${this.path})`,
+      `[session ${this.id}] spawn: ${file} ${argsForLog} (cwd=${this.path})`,
     );
 
     if (this._recorder) {
       this._recorder.writeHeader({
-        attentionTimeoutMs: this.attentionTimeoutMs,
-        startingWatchdogMs: this.startingWatchdogMs,
         hooksInjected: this._settingsHandle !== null,
-        cols: 80,
-        rows: 24,
+        cols: spawnCols,
+        rows: spawnRows,
       });
     }
-
-    // Start watchdog timer for STARTING state
-    this._watchdogTimer = setTimeout(() => {
-      this._watchdogTimer = null;
-      if (this.state === STATES.STARTING) {
-        this.transition("watchdog_timeout");
-      }
-    }, this.startingWatchdogMs);
 
     this.ptyProcess.onData((data) => this._handlePtyData(data));
     this.ptyProcess.onExit(({ exitCode, signal }) =>
       this._handlePtyExit(exitCode, signal),
     );
+  }
+
+  // node-pty 1.1.0 attaches an 'error' handler to the conout socket only, never
+  // to the conin (input) socket it writes to in _doWrite. A write that lands
+  // after the child's console pipe has died (e.g. our taskkill on restart, in
+  // the gap before node-pty's exit callback fires) surfaces asynchronously as
+  // `write EAGAIN`/EPIPE on that unguarded socket and crashes the whole process
+  // (it cannot be caught by try/catch around .write()). Attach our own handler
+  // so it is logged, not fatal. Remove if node-pty starts guarding inSocket.
+  // Windows-conpty internal; optional chaining keeps the test fake-pty and any
+  // non-conpty backend safe.
+  _guardPtyInputSocket() {
+    try {
+      this.ptyProcess?._agent?.inSocket?.on("error", (err) => {
+        console.warn(`[session ${this.id}] pty input socket error (ignored): ${err.message}`);
+      });
+    } catch {
+      // node-pty internal shape differs (version/backend): non-fatal.
+    }
   }
 
   // Write the per-session hook settings file and register with the shared
@@ -511,6 +485,7 @@ class Session extends EventEmitter {
         port,
         glissaId: this.id,
         baseDir: this._hooksBaseDir,
+        permissions: this._settingsPermissions,
       });
       this._hookToken = this._settingsHandle.token;
       this._hookRouter.register(this.id, {
@@ -537,16 +512,7 @@ class Session extends EventEmitter {
   }
 
   _buildSpawnEnv() {
-    const env = { ...process.env };
-    delete env.CLAUDECODE;
-    delete env.CLAUDE_CODE_SSE_PORT;
-    delete env.CLAUDE_CODE_ENTRYPOINT;
-    delete env.GLISSA_PORT;
-    delete env.GLISSA_CONFIG;
-    if (this._noFlicker) {
-      env.CLAUDE_CODE_NO_FLICKER = "1";
-    }
-    return env;
+    return buildSpawnEnv(process.env);
   }
 
   _handlePtyData(data) {
@@ -558,7 +524,6 @@ class Session extends EventEmitter {
     // First-output detection (pre-dispatch, only fires once in STARTING)
     if (this.state === STATES.STARTING && !this._receivedFirstOutput) {
       this._receivedFirstOutput = true;
-      this._clearWatchdog();
       this.transition("first_output");
     }
 
@@ -575,8 +540,15 @@ class Session extends EventEmitter {
 
     // Buffer for late-joining data WS clients. Uses a head-index ring instead
     // of Array.shift() (O(n) per call) to keep the hot path O(1) amortized.
+    //
+    // ORDER CONTRACT: the ring push + _outputBufferTotal increment MUST stay BEFORE
+    // emit("data") below. ws-sender.maybeBackfill() reads getBufferSince() from inside
+    // the "data" listener and relies on the just-arrived chunk already being
+    // retained and counted (see ws-sender.js maybeBackfill). Reordering would make a
+    // backfill miss the in-flight chunk.
     this._outputBuffer.push(data);
     this._outputBufferSize += data.length;
+    this._outputBufferTotal += data.length;
     while (
       this._outputBufferSize > this._outputBufferMax &&
       this._outputBuffer.length - this._outputBufferHead > 1
@@ -590,6 +562,9 @@ class Session extends EventEmitter {
       this._outputBufferHead = 0;
     }
 
+    // ORDER CONTRACT (see the ring-push block above): emit AFTER the push +
+    // _outputBufferTotal increment so a backfill triggered from this listener sees
+    // the in-flight chunk already in the ring.
     if (this.listenerCount("data") > 0) {
       this.emit("data", data);
     }
@@ -597,10 +572,10 @@ class Session extends EventEmitter {
 
   _handlePtyExit(exitCode, signal) {
     const pid = this.ptyProcess ? this.ptyProcess.pid : null;
-    this._clearWatchdog();
     this._titleSource.reset();
     this._statusSource.reset();
     this._cleanupHooks();
+    this._ptyAlive = false;
     this.ptyProcess = null;
 
     // Reap orphan grandchildren on Windows.
@@ -638,28 +613,73 @@ class Session extends EventEmitter {
       : this._outputBuffer.slice(this._outputBufferHead).join("");
   }
 
+  // Current monotonic output offset (== total bytes ever produced). A data-WS client
+  // captures this at connect as its live baseline (startOffset).
+  getOutputOffset() {
+    return this._outputBufferTotal;
+  }
+
+  // Return the slice of output produced at or after `offset`. Offsets are monotonic
+  // byte counts in JS string .length units (UTF-16 code units), consistent with the
+  // ring's sizing. Returns { data, base, end, evicted }:
+  //   - end  = current total (the offset the caller should adopt after consuming).
+  //   - base = oldest retained offset = end - retained bytes.
+  //   - offset >= end  -> nothing new ({ data: "" }).
+  //   - offset <  base -> the missed range was evicted from the ring; `data` is the
+  //                       full current replay and `evicted` is true (caller must
+  //                       screen-clear before writing it).
+  //   - otherwise      -> the exact tail from `offset`, slicing the boundary chunk.
+  // `offset` is always a previous cumulative .length (a chunk-append boundary), never an
+  // arbitrary mid-chunk index, so the boundary slice never splits a UTF-16 surrogate pair.
+  getBufferSince(offset) {
+    const end = this._outputBufferTotal;
+    const base = end - this._outputBufferSize; // oldest retained offset (bytes evicted)
+    if (offset >= end) {
+      return { data: "", base, end, evicted: false };
+    }
+    if (offset < base) {
+      return { data: this.getReplayBuffer(), base, end, evicted: true };
+    }
+    let pos = base;
+    let out = "";
+    for (let i = this._outputBufferHead; i < this._outputBuffer.length; i++) {
+      const chunk = this._outputBuffer[i];
+      if (chunk == null) continue; // eviction nulls entries before head compaction
+      const len = chunk.length;
+      if (pos + len <= offset) {
+        pos += len;
+        continue;
+      }
+      out += offset > pos ? chunk.slice(offset - pos) : chunk;
+      pos += len;
+    }
+    return { data: out, base, end, evicted: false };
+  }
+
   write(text) {
     if (this._recorder) {
       this._recorder.writeInput(text);
     }
-    if (this.ptyProcess) {
+    // Only write to a live pty. After kill()/exit the conin pipe peer is gone,
+    // so writing would fail async with EAGAIN/EPIPE on node-pty's unguarded
+    // input socket (see _guardPtyInputSocket); this closes the common window.
+    if (this.ptyProcess && this._ptyAlive) {
       this.ptyProcess.write(text);
     }
   }
 
   resize(cols, rows) {
+    // Remember the latest size so a restart respawns the PTY at this dimension
+    // (see start()), rather than the 80x24 default that leaves Claude cramped.
+    this._lastCols = cols;
+    this._lastRows = rows;
     if (this._recorder) {
       this._recorder.writeResize(cols, rows);
     }
-    if (
-      this.state === STATES.IDLE ||
-      this.state === STATES.COMPLETE ||
-      this.state === STATES.WAITING
-    ) {
-      this._pendingResize = { cols, rows };
-      return;
-    }
-    this._pendingResize = null;
+    // Apply immediately, even when quiescent (IDLE/COMPLETE/WAITING), so Claude
+    // gets SIGWINCH and reflows to fit. The redraw is harmless under structural
+    // detection: the OSC-title source only reacts to the activity glyph (which a
+    // reflow does not change) and hooks are event-based, not output-based.
     if (this.ptyProcess) {
       try {
         this.ptyProcess.resize(cols, rows);
@@ -672,6 +692,9 @@ class Session extends EventEmitter {
   kill() {
     if (!this.ptyProcess) return;
 
+    // Stop writing the instant we kill: the conin pipe peer dies with the child,
+    // so any further write() would hit the dead pipe (see _guardPtyInputSocket).
+    this._ptyAlive = false;
     const pid = this.ptyProcess.pid;
 
     if (process.platform === "win32") {
@@ -741,7 +764,10 @@ class Session extends EventEmitter {
 
   sleep() {
     if (this._sleeping) return;
-    const sleepable = [STATES.IDLE, STATES.COMPLETE, STATES.DONE, STATES.FAILED];
+    // Only sleep dead-PTY terminal states. Sleeping a live PTY (IDLE/COMPLETE)
+    // would arm the sleep-kill timer below and terminate a session whose work
+    // can still continue. Mirrors the client guard in layout.js SLEEP_ELIGIBLE.
+    const sleepable = [STATES.DONE, STATES.FAILED];
     if (!sleepable.includes(this.state)) return;
     this._sleeping = true;
     this._titleSource.reset();
@@ -836,24 +862,15 @@ class Session extends EventEmitter {
   }
 
   updateSettings(cfg) {
-    if (cfg.startingWatchdogSeconds != null)
-      this.startingWatchdogMs = cfg.startingWatchdogSeconds * 1000;
-    if (cfg.attentionTimeoutSeconds != null)
-      this.attentionTimeoutMs = cfg.attentionTimeoutSeconds * 1000;
-    if (cfg.waitingEscalationSeconds != null)
-      this.waitingEscalationMs = cfg.waitingEscalationSeconds * 1000;
     if (cfg.replayBufferKB != null)
       this._outputBufferMax = cfg.replayBufferKB * 1024;
-    if (cfg.noFlicker != null) this._noFlicker = !!cfg.noFlicker;
   }
 
   destroy() {
     if (this._destroyed) return;
     this._destroyed = true;
 
-    this._clearWatchdog();
     this._clearSleepKill();
-    this._pendingResize = null;
 
     this._cleanupHooks();
 
@@ -871,27 +888,12 @@ class Session extends EventEmitter {
     this._statusSource.destroy();
     this.removeAllListeners();
   }
-
-  _applyPendingResize() {
-    if (this._pendingResize && this.ptyProcess) {
-      try {
-        this.ptyProcess.resize(
-          this._pendingResize.cols,
-          this._pendingResize.rows,
-        );
-      } catch {
-        // Same race — PTY may have exited between deferral and apply.
-      }
-      this._pendingResize = null;
-    }
-  }
-
-  _clearWatchdog() {
-    if (this._watchdogTimer !== null) {
-      clearTimeout(this._watchdogTimer);
-      this._watchdogTimer = null;
-    }
-  }
 }
 
-module.exports = { Session };
+module.exports = {
+  Session,
+  buildSpawnCommand,
+  resolveClaudeCommand,
+  classifyClaudeKind,
+  CLAUDE_CMD,
+};

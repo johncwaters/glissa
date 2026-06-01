@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Glissa — perf harness (dev)</title>
+  <style>
+    body { margin: 0; background: #0a0810; color: #c8c0e0; font-family: system-ui, sans-serif; }
+    #bar { padding: 10px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; border-bottom: 1px solid #2a2440; }
+    label { font-size: 13px; }
+    input { width: 4em; background: #16121f; color: #c8c0e0; border: 1px solid #3a3358; border-radius: 4px; padding: 2px 4px; }
+    button { background: #6d28d9; color: #fff; border: 0; border-radius: 6px; padding: 6px 12px; cursor: pointer; }
+    button:disabled { opacity: 0.5; cursor: default; }
+    #out { padding: 10px; white-space: pre; font-family: 'Cascadia Code', monospace; font-size: 13px; }
+    .note { padding: 6px 10px; font-size: 12px; color: #8276b0; }
+  </style>
+</head>
+<body>
+  <div class="note">Dev-only synthetic load harness. Run baseline (current build), record the numbers, apply changes, re-run, compare. T8 = longestTaskMs, T9 = echoP95Ms.</div>
+  <div id="bar">
+    <label>sessions <input id="sessions" type="number" value="6" min="1" max="24"></label>
+    <label>seconds <input id="secs" type="number" value="10" min="1" max="60"></label>
+    <label>lines/frame <input id="lpt" type="number" value="8" min="1" max="80"></label>
+    <label title="Live WebGL contexts; the rest fall back to canvas. 12 = dashboard default. Set >= sessions to reproduce the uncapped freeze.">webgl cap <input id="cap" type="number" value="12" min="0" max="24"></label>
+    <label>strategy
+      <select id="strategy">
+        <option value="naive">naive (write all every frame)</option>
+        <option value="gated">gated (callback round-robin)</option>
+      </select>
+    </label>
+    <label title="gated only: terminals serviced per frame. = sessions reproduces Option B; &lt; sessions adds Option A's bounded coordination.">budget/frame <input id="budget" type="number" value="6" min="1" max="24"></label>
+    <button id="run">Run stress</button>
+    <span id="status"></span>
+  </div>
+  <div id="out"></div>
+  <div id="mount"></div>
+  <script type="module">
+    import { runStress } from './perf-harness.js';
+    const $ = (id) => document.getElementById(id);
+    $('run').addEventListener('click', async () => {
+      $('run').disabled = true;
+      $('status').textContent = 'running…';
+      $('mount').innerHTML = '';
+      try {
+        const m = await runStress({
+          sessions: Number($('sessions').value),
+          durationMs: Number($('secs').value) * 1000,
+          linesPerTick: Number($('lpt').value),
+          webglCap: Number($('cap').value),
+          strategy: $('strategy').value,
+          budgetPerFrame: Number($('budget').value),
+          container: $('mount'),
+        });
+        $('out').textContent = JSON.stringify(m, null, 2);
+        $('status').textContent = 'done';
+      } catch (err) {
+        $('out').textContent = String(err && err.stack ? err.stack : err);
+        $('status').textContent = 'error';
+      } finally {
+        $('run').disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

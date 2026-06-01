@@ -1,0 +1,41 @@
+const { STATES } = require("../shared/states");
+
+// Pure decision function extracted from Session._onStatus (behavior-preserving).
+// Maps a normalized status signal + the session's current state (+ confidence, for the
+// late-`ready` authoritative gate) to the lifecycle event to fire, or null for "no
+// transition". It is side-effect free: the _onStatus wrapper assembles the uniform
+// detail { source, signal } and performs the actual this.transition(...). There is NO
+// screen-content parsing here and NO Session import, so no require cycle.
+function mapSignalToEvent(signal, state, confidence) {
+  switch (signal) {
+    case "working":
+    case "resume":
+      // Claude is active again — wake a quiescent card.
+      if (state === STATES.IDLE || state === STATES.COMPLETE) return "new_output";
+      if (state === STATES.WAITING) return "user_input";
+      return null;
+    case "ready":
+      // Turn finished. Authoritative (hook) `ready` may complete from WAITING/IDLE
+      // too (a late Stop after a permission/idle prompt). The title fallback only
+      // completes from RUNNING (it only emits ready after seeing a spinner).
+      if (state === STATES.RUNNING) return "task_complete";
+      if ((state === STATES.WAITING || state === STATES.IDLE) && confidence === "high") {
+        return "task_complete";
+      }
+      return null;
+    case "awaiting-input":
+      // Needs the user. Authoritative-only (title never emits this).
+      if (state === STATES.RUNNING || state === STATES.IDLE || state === STATES.COMPLETE) {
+        return "prompt_detected";
+      }
+      return null;
+    case "session-start":
+    case "session-end":
+      // Lifecycle telemetry only — PTY first-output / exit drive these states.
+      return null;
+    default:
+      return null;
+  }
+}
+
+module.exports = { mapSignalToEvent };

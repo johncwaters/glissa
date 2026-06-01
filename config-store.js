@@ -7,33 +7,35 @@ const os = require('node:os');
 
 const DEFAULT_CONFIG = {
   port: 3000,
-  attentionTimeoutSeconds: 60,
-  waitingEscalationSeconds: 300,
-  startingWatchdogSeconds: 30,
+  autoRecoverSeconds: 3,
+  inputGraceSeconds: 5,
+  promptDetectionMs: 1500,
   notifyDebounceMs: 3000,
-  noFlicker: true,
-  scrollback: 50000,
   cursorBlink: false,
   debugMode: false,
+  editorCommand: '',
   repoRoots: [],
   projects: []
 };
 
 // Single source of truth for numeric setting field names
 const TIMEOUT_KEYS = [
-  'attentionTimeoutSeconds',
-  'waitingEscalationSeconds',
-  'startingWatchdogSeconds',
+  'autoRecoverSeconds',
+  'inputGraceSeconds',
+  'promptDetectionMs',
   'notifyDebounceMs',
   'replayBufferKB',
-  'scrollback',
 ];
 
 // Boolean settings persisted to config.json
 const BOOLEAN_KEYS = [
-  'noFlicker',
   'cursorBlink',
   'debugMode',
+];
+
+// Free-text settings persisted to config.json
+const STRING_KEYS = [
+  'editorCommand',
 ];
 
 function resolveConfigPath() {
@@ -125,15 +127,14 @@ function createConfigStore() {
   function getSettings() {
     return {
       port: config.port,
-      attentionTimeoutSeconds: config.attentionTimeoutSeconds,
-      waitingEscalationSeconds: config.waitingEscalationSeconds,
-      startingWatchdogSeconds: config.startingWatchdogSeconds,
+      autoRecoverSeconds: config.autoRecoverSeconds,
+      inputGraceSeconds: config.inputGraceSeconds,
+      promptDetectionMs: config.promptDetectionMs,
       notifyDebounceMs: config.notifyDebounceMs,
       replayBufferKB: config.replayBufferKB,
-      noFlicker: config.noFlicker ?? DEFAULT_CONFIG.noFlicker,
-      scrollback: config.scrollback ?? DEFAULT_CONFIG.scrollback,
       cursorBlink: config.cursorBlink ?? DEFAULT_CONFIG.cursorBlink,
       debugMode: config.debugMode ?? DEFAULT_CONFIG.debugMode,
+      editorCommand: config.editorCommand ?? DEFAULT_CONFIG.editorCommand,
       repoRoots: config.repoRoots,
     };
   }
@@ -145,6 +146,9 @@ function createConfigStore() {
     }
     for (const key of BOOLEAN_KEYS) {
       if (newConfig[key] != null) config[key] = !!newConfig[key];
+    }
+    for (const key of STRING_KEYS) {
+      if (newConfig[key] != null) config[key] = String(newConfig[key]);
     }
     config.repoRoots = newConfig.repoRoots || [];
     if (newConfig.port != null && newConfig.port !== config.port) {
@@ -202,4 +206,4 @@ function createConfigStore() {
   };
 }
 
-module.exports = { createConfigStore, generateProjectId, ensureProjectIds, TIMEOUT_KEYS, BOOLEAN_KEYS, DEFAULT_CONFIG };
+module.exports = { createConfigStore, generateProjectId, ensureProjectIds, TIMEOUT_KEYS, BOOLEAN_KEYS, STRING_KEYS, DEFAULT_CONFIG };

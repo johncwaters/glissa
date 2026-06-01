@@ -11,6 +11,14 @@
 // It NEVER emits `awaiting-input` — the title cannot authoritatively tell "needs input"
 // from "finished". WAITING is the hook source's job. An unrecognized leading glyph is
 // reported as `unknown` (with a one-time warning), never silently treated as `ready`.
+//
+// Generic window titles are ignored. Claude ALWAYS leads its activity title with a
+// pictographic glyph (braille spinner or a symbol, all > U+007F). A title that leads
+// with a plain ASCII / text character is therefore NOT a Claude activity title — it is
+// a window title set by the spawn shell or OS (e.g. on Windows, Glissa spawns
+// `cmd.exe /c claude`, and cmd.exe sets the console title to "C:\...\cmd.exe"). Such
+// titles carry no Claude status and are dropped silently — never flagged as `unknown`,
+// since `unknown` is reserved for genuine new-glyph candidates worth triaging.
 
 const { EventEmitter } = require('node:events');
 
@@ -113,7 +121,16 @@ class OscTitleSource extends EventEmitter {
       return;
     }
 
-    // Unrecognized leading glyph — NEVER treat as ready. Report once.
+    // Plain ASCII / text leading char => generic shell-or-OS window title, not a
+    // Claude activity glyph (those are all > U+007F). Drop it silently: it has no
+    // Claude status and must not be mistaken for a new idle glyph. This is the
+    // common `cmd.exe /c claude` case where cmd sets the title to "C:\...\cmd.exe".
+    if (char.codePointAt(0) <= 0x7f) {
+      return;
+    }
+
+    // Unrecognized non-ASCII glyph — could be a NEW Claude idle/activity glyph from
+    // a future version. NEVER treat as ready. Report once so it can be triaged.
     this._lastChar = char;
     if (this._lastKind !== 'unknown') {
       this._lastKind = 'unknown';

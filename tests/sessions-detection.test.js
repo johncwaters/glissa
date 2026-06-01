@@ -163,25 +163,47 @@ test('state-change chain: COMPLETE and WAITING emit state-change (backend notifi
   s.destroy();
 });
 
-test('COMPLETE is reached ONLY via task_complete fired from _onStatus (no time/content rule)', () => {
-  const fs = require('node:fs');
-  const src = fs.readFileSync(require.resolve('../sessions.js'), 'utf8');
-  const calls = [...src.matchAll(/transition\("task_complete"/g)];
-  // Exactly the two _onStatus call sites (RUNNING; WAITING/IDLE authoritative).
-  assert.equal(calls.length, 2, `expected 2 task_complete call sites, found ${calls.length}`);
-  // Both must be within the _onStatus method body (anchor on the definition,
-  // not the constructor's `this._onStatus(s)` / `this._onMeta(m)` wiring refs).
-  const onStatusIdx = src.indexOf('_onStatus(s) {');
-  const nextMethodIdx = src.indexOf('_onMeta(m) {');
-  for (const c of calls) {
-    assert.ok(c.index > onStatusIdx && c.index < nextMethodIdx, 'task_complete must be fired from _onStatus');
-  }
-  // No idle/silence timer or content scraping remains.
-  assert.equal(/_resetIdleTimer|isLayer4Chrome|patternDetector|hasPendingContent/.test(src), false);
+// Post-extraction (P4): the task_complete decision lives in the pure mapper, so the literal
+// `transition("task_complete"` no longer appears in sessions.js. Assert the COMPLETE invariant
+// at the new boundary: task_complete -> COMPLETE is the ONLY matrix edge into COMPLETE, and the
+// mapper is its sole producer. Strictly >= the old bar (the behavioral tests above still prove
+// the live path reaches COMPLETE only here).
+test('COMPLETE is reached ONLY via the mapper task_complete (RUNNING; high-confidence WAITING/IDLE)', () => {
+  const { mapSignalToEvent } = require('../session-core/status-mapper');
+  // ready@RUNNING completes at any confidence; ready@WAITING/IDLE completes ONLY when authoritative (high).
+  assert.equal(mapSignalToEvent('ready', STATES.RUNNING, 'low'), 'task_complete');
+  assert.equal(mapSignalToEvent('ready', STATES.RUNNING, 'high'), 'task_complete');
+  assert.equal(mapSignalToEvent('ready', STATES.WAITING, 'high'), 'task_complete');
+  assert.equal(mapSignalToEvent('ready', STATES.IDLE, 'high'), 'task_complete');
+  // Never from low-confidence WAITING/IDLE (the title fallback must not complete a prompt), nor elsewhere.
+  assert.equal(mapSignalToEvent('ready', STATES.WAITING, 'low'), null);
+  assert.equal(mapSignalToEvent('ready', STATES.IDLE, 'low'), null);
+  assert.equal(mapSignalToEvent('ready', STATES.COMPLETE, 'high'), null);
+  assert.equal(mapSignalToEvent('ready', STATES.DORMANT, 'high'), null);
 });
 
-test('no require of deleted detection modules remains', () => {
+test('no idle/silence timer or content scraping remains — sessions.js AND the mapper (fail-closed)', () => {
+  const fs = require('node:fs');
+  const scrape = /_resetIdleTimer|isLayer4Chrome|patternDetector|hasPendingContent/;
+  // require.resolve throws on a bad path, so a moved/renamed target FAILS CLOSED (never silently passes).
+  for (const rel of ['../sessions.js', '../session-core/status-mapper.js']) {
+    const src = fs.readFileSync(require.resolve(rel), 'utf8');
+    assert.equal(scrape.test(src), false, `scrape pattern found in ${rel}`);
+  }
+});
+
+test('no require of deleted detection modules remains in sessions.js', () => {
   const fs = require('node:fs');
   const src = fs.readFileSync(require.resolve('../sessions.js'), 'utf8');
   assert.equal(/require\(["']\.\/(patterns|ansi-tokenizer|line-assembler|notify|completion-detector)["']\)/.test(src), false);
+});
+
+test('getDetectionStats().lastSignal carries meta:true after a meta signal', () => {
+  const s = makeSession(STATES.RUNNING);
+  s._onMeta({ signal: 'unknown', source: 'title', ts: Date.now() });
+  const last = s.getDetectionStats().lastSignal;
+  assert.equal(last.meta, true);
+  assert.equal(last.signal, 'unknown');
+  assert.equal(last.source, 'title');
+  s.destroy();
 });

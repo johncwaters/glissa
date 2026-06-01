@@ -2,8 +2,9 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { TIMEOUT_KEYS, BOOLEAN_KEYS } = require('./config-store');
+const { TIMEOUT_KEYS, BOOLEAN_KEYS, STRING_KEYS } = require('./config-store');
 const { STATES } = require('./shared/states');
+const { computeNextFire } = require('./scheduler');
 
 function scanRepoRoots(roots) {
   const results = [];
@@ -27,6 +28,14 @@ function scanRepoRoots(roots) {
   return results;
 }
 
+// Resolve `segments` under `baseDir` and confirm the result stays inside it (path-traversal guard).
+// Returns the absolute path, or null when the resolved path escapes baseDir.
+function confinePath(baseDir, ...segments) {
+  const abs = path.resolve(baseDir, ...segments);
+  const rel = path.relative(baseDir, abs);
+  return rel.startsWith('..') || path.isAbsolute(rel) ? null : abs;
+}
+
 /**
  * Register control WebSocket handlers using a handler-map dispatch pattern.
  * Dependencies are injected via the deps object (factory pattern).
@@ -39,15 +48,22 @@ function registerControlHandlers(controlWss, deps) {
     config,
     configStore,
     broadcastControl,
-    getSession,
     generateProjectId,
-    closeSessionDataClients,
     applyConfigReload,
     applySettingsReload,
     requestShutdown,
     requestRestart,
     handleClientFocus,
     buildHealthSnapshot,
+    // Teams (optional — undefined in older callers/tests).
+    registry = null,
+    orchestrator = null,
+    scheduler = null,
+    teamOutput = null,
+    getProjectPathById = null,
+    openInEditor = null,
+    startPackSetup = null,
+    removeEphemeralSession = null,
   } = deps;
 
   /** Find a session by id (primary) with name fallback for legacy clients. */
@@ -120,6 +136,22 @@ function registerControlHandlers(controlWss, deps) {
     const sess = findSession(msg);
     if (!sess) {
       ws.send(JSON.stringify({ type: 'error', message: 'Session not found' }));
+      return;
+    }
+
+    // Ephemeral sessions (e.g. guided team-pack setup) were never persisted to config.projects, so
+    // the filter below is a no-op and the config-reload diff explicitly skips them — making the UI
+    // remove button a dead click. Tear them down directly instead: kill the PTY, drop the card.
+    if (sess.ephemeral) {
+      if (removeEphemeralSession) {
+        removeEphemeralSession(sess.id);
+      } else {
+        // Minimal fallback when backend teardown isn't injected (older callers/tests).
+        sess.destroy();
+        sessions.delete(sess.id);
+        broadcastControl({ type: 'session-removed', id: sess.id, session: sess.name });
+        console.log(`[control] Removed session via UI: ${sess.name}`);
+      }
       return;
     }
 
@@ -246,12 +278,26 @@ function registerControlHandlers(controlWss, deps) {
       }
     }
 
+    for (const key of STRING_KEYS) {
+      if (s[key] != null && typeof s[key] !== 'string') {
+        ws.send(JSON.stringify({
+          type: 'settings-error',
+          requestId: msg.requestId || null,
+          message: `${key} must be a string`
+        }));
+        return;
+      }
+    }
+
     const freshConfig = configStore.save(cfg => {
       for (const key of TIMEOUT_KEYS) {
         if (s[key] != null) cfg[key] = s[key];
       }
       for (const key of BOOLEAN_KEYS) {
         if (s[key] != null) cfg[key] = !!s[key];
+      }
+      for (const key of STRING_KEYS) {
+        if (s[key] != null) cfg[key] = String(s[key]);
       }
       if (s.repoRoots != null) cfg.repoRoots = s.repoRoots;
     });
@@ -296,9 +342,225 @@ function registerControlHandlers(controlWss, deps) {
     }, 200);
   }
 
+  // --- Teams ---
+
+  function handleListTeams(msg, ws) {
+    const teams = [];
+    if (registry) {
+      for (const id of registry.listTeams()) {
+        try {
+          const t = registry.loadTeam(id);
+          teams.push({
+            id: t.id,
+            name: t.name,
+            description: t.description || '',
+            outputPath: t.outputPath,
+            schedule: t.schedule,
+            stageTimeoutSeconds: t.stageTimeoutSeconds || 900,
+            permissions: { mode: t.permissions?.mode || 'interactive', deny: t.permissions?.deny || [] },
+            stages: t.stages.map((s) => s.id),
+            stageDetail: t.stages.map((s) => ({
+              id: s.id,
+              model: s.model || 'sonnet',
+              summary: s.summary || '',
+              produces: s.produces,
+              optional: !!s.optional,
+            })),
+          });
+        } catch { /* skip an invalid team definition */ }
+      }
+    }
+    ws.send(JSON.stringify({ type: 'teams', requestId: msg.requestId || null, teams, activations: config.teams || [] }));
+  }
+
+  function handleRunTeam(msg, ws) {
+    if (!orchestrator) { ws.send(JSON.stringify({ type: 'error', message: 'Teams are not available' })); return; }
+    const { teamId, projectId } = msg;
+    if (!teamId || !projectId) { ws.send(JSON.stringify({ type: 'error', message: 'teamId and projectId are required' })); return; }
+    if (orchestrator.isActive(teamId, projectId)) {
+      ws.send(JSON.stringify({ type: 'team-run-skipped', teamId, projectId, reason: 'already-active' }));
+      return;
+    }
+    ws.send(JSON.stringify({ type: 'team-run-accepted', teamId, projectId }));
+    // Long-running; do not await. Failures are broadcast by the orchestrator's own events, with a
+    // catch here as a backstop for synchronous setup errors (e.g. missing project).
+    Promise.resolve(orchestrator.runTeam({ teamId, projectId, trigger: 'manual' }))
+      .catch((err) => broadcastControl({ type: 'team-run-failed', teamId, projectId, reason: err.message }));
+  }
+
+  function handleCancelTeamRun(msg, ws) {
+    if (!orchestrator) return;
+    const cancelled = orchestrator.cancelRun(msg.teamId, msg.projectId);
+    ws.send(JSON.stringify({ type: 'team-run-cancel-ack', teamId: msg.teamId, projectId: msg.projectId, cancelled }));
+  }
+
+  // Everything one instance panel needs in a single round-trip: its run history (newest-first),
+  // whether a run is active, and the effective schedule + next fire time (activation override, else
+  // the team default). Runs are isolated in a git worktree, so the working-tree state is irrelevant.
+  function handleGetTeamRuns(msg, ws) {
+    const { teamId, projectId } = msg;
+    const out = {
+      type: 'team-runs', requestId: msg.requestId || null, teamId, projectId,
+      runs: [], active: false, live: null, nextFire: null, enabled: false, schedule: null,
+    };
+    try {
+      let team = null;
+      if (registry) team = registry.loadTeam(teamId);
+      const projectPath = getProjectPathById ? getProjectPathById(projectId) : null;
+      if (team && teamOutput && projectPath) {
+        out.runs = teamOutput.listRunSummaries(projectPath, team.outputPath, team.stages, 10);
+      }
+      const activation = (config.teams || []).find((e) => e.teamId === teamId && e.projectId === projectId);
+      out.enabled = !!activation?.enabled;
+      out.schedule = activation?.schedule || team?.schedule || null;
+      if (out.schedule?.days) out.nextFire = computeNextFire(out.schedule);
+      if (orchestrator) {
+        out.active = orchestrator.isActive(teamId, projectId);
+        // Live snapshot so a re-mounting/second client rehydrates the active stage, a continuous
+        // elapsed timer, and any in-flight cancel, instead of a blank rail + a zeroed clock.
+        if (out.active && typeof orchestrator.getRunState === 'function') {
+          out.live = orchestrator.getRunState(teamId, projectId);
+        }
+      }
+    } catch (err) {
+      ws.send(JSON.stringify({ type: 'error', requestId: msg.requestId || null, message: err.message }));
+      return;
+    }
+    ws.send(JSON.stringify(out));
+  }
+
+  function handleSetTeamSchedule(msg, ws) {
+    const { teamId, projectId } = msg;
+    if (!teamId || !projectId) { ws.send(JSON.stringify({ type: 'error', message: 'teamId and projectId are required' })); return; }
+    const fresh = configStore.save((cfg) => {
+      cfg.teams = Array.isArray(cfg.teams) ? cfg.teams : [];
+      let entry = cfg.teams.find((e) => e.teamId === teamId && e.projectId === projectId);
+      if (!entry) { entry = { teamId, projectId, enabled: false }; cfg.teams.push(entry); }
+      if (msg.schedule != null) entry.schedule = msg.schedule;
+      if (msg.enabled != null) entry.enabled = !!msg.enabled;
+    });
+    if (fresh) {
+      config.teams = fresh.teams;
+      if (scheduler && typeof scheduler.reload === 'function') scheduler.reload(fresh.teams);
+    }
+    ws.send(JSON.stringify({ type: 'team-schedule-updated', teamId, projectId, activations: fresh?.teams || config.teams || [] }));
+  }
+
+  // Create a team instance (a roster bound to a project). The same roster may target several
+  // projects; one activation per (teamId, projectId) pair. Created disabled (manual-only) until the
+  // user turns its schedule on. Broadcast so every connected tab reflects the new instance.
+  function handleAddTeamInstance(msg, ws) {
+    const { teamId, projectId } = msg;
+    if (!teamId || !projectId) { ws.send(JSON.stringify({ type: 'error', message: 'teamId and projectId are required' })); return; }
+    if (registry) {
+      try { registry.loadTeam(teamId); } catch { ws.send(JSON.stringify({ type: 'error', message: `Unknown team "${teamId}"` })); return; }
+    }
+    if (getProjectPathById && !getProjectPathById(projectId)) { ws.send(JSON.stringify({ type: 'error', message: 'Unknown project' })); return; }
+    const fresh = configStore.save((cfg) => {
+      cfg.teams = Array.isArray(cfg.teams) ? cfg.teams : [];
+      if (!cfg.teams.some((e) => e.teamId === teamId && e.projectId === projectId)) {
+        cfg.teams.push({ teamId, projectId, enabled: false });
+      }
+    });
+    if (fresh) {
+      config.teams = fresh.teams;
+      if (scheduler && typeof scheduler.reload === 'function') scheduler.reload(fresh.teams);
+    }
+    broadcastControl({ type: 'team-instance-added', teamId, projectId, activations: fresh?.teams || config.teams || [] });
+  }
+
+  // Remove a team instance. Drops the activation only — the on-disk run history under the project is
+  // intentionally preserved (removing an instance never deletes the work it produced).
+  function handleRemoveTeamInstance(msg, ws) {
+    const { teamId, projectId } = msg;
+    if (!teamId || !projectId) { ws.send(JSON.stringify({ type: 'error', message: 'teamId and projectId are required' })); return; }
+    const fresh = configStore.save((cfg) => {
+      cfg.teams = (Array.isArray(cfg.teams) ? cfg.teams : []).filter(
+        (e) => !(e.teamId === teamId && e.projectId === projectId),
+      );
+    });
+    if (fresh) {
+      config.teams = fresh.teams;
+      if (scheduler && typeof scheduler.reload === 'function') scheduler.reload(fresh.teams);
+    }
+    broadcastControl({ type: 'team-instance-removed', teamId, projectId, activations: fresh?.teams || config.teams || [] });
+  }
+
+  // Open one run artifact in the user's configured editor. Path-traversal guards: runId is a single
+  // safe segment, artifact must be one of the team's known produced files, and the resolved path must
+  // stay inside this team's runs/ directory. The spawn itself lives in backend (openInEditor).
+  function handleOpenArtifact(msg, ws) {
+    if (!openInEditor) { ws.send(JSON.stringify({ type: 'error', message: 'Opening artifacts is not available' })); return; }
+    const { teamId, projectId, runId, artifact } = msg;
+    let team = null;
+    try { if (registry) team = registry.loadTeam(teamId); } catch { /* reported below */ }
+    if (!team) { ws.send(JSON.stringify({ type: 'error', message: `Unknown team "${teamId}"` })); return; }
+    const projectPath = getProjectPathById ? getProjectPathById(projectId) : null;
+    if (!projectPath) { ws.send(JSON.stringify({ type: 'error', message: 'Unknown project' })); return; }
+    if (!/^[\w.-]+$/.test(String(runId || ''))) { ws.send(JSON.stringify({ type: 'error', message: 'Invalid run id' })); return; }
+    const allowed = new Set(team.stages.map((s) => s.produces));
+    if (!allowed.has(artifact)) { ws.send(JSON.stringify({ type: 'error', message: 'Unknown artifact' })); return; }
+    const runsDir = path.join(projectPath, team.outputPath, 'runs');
+    const abs = confinePath(runsDir, runId, artifact);
+    if (!abs) { ws.send(JSON.stringify({ type: 'error', message: 'Invalid artifact path' })); return; }
+    if (!fs.existsSync(abs)) { ws.send(JSON.stringify({ type: 'error', message: 'Artifact not found' })); return; }
+    const r = openInEditor(abs);
+    ws.send(JSON.stringify({ type: 'artifact-opened', teamId, projectId, runId, artifact, ok: !!r.ok, error: r.error || null }));
+  }
+
+  // Report whether this project's pack for a team is filled in. Drives the dashboard's "set up" state
+  // so the operator knows to fill the pack before the first run.
+  function handleGetTeamPackStatus(msg, ws) {
+    const { teamId, projectId } = msg;
+    const out = {
+      type: 'team-pack-status', requestId: msg.requestId || null, teamId, projectId,
+      configured: false, unfilled: [], packDir: null,
+    };
+    try {
+      let team = null;
+      if (registry) team = registry.loadTeam(teamId);
+      const projectPath = getProjectPathById ? getProjectPathById(projectId) : null;
+      if (team && teamOutput && projectPath && typeof teamOutput.packStatus === 'function') {
+        const st = teamOutput.packStatus(projectPath, team.outputPath, team.packRequired);
+        out.configured = st.configured;
+        out.unfilled = st.unfilled;
+        out.packDir = st.packDir;
+      }
+    } catch (err) {
+      ws.send(JSON.stringify({ type: 'error', requestId: msg.requestId || null, message: err.message }));
+      return;
+    }
+    ws.send(JSON.stringify(out));
+  }
+
+  // Start the guided pack-setup interview: an interactive Claude session (surfaced as a terminal
+  // card) that reads the project, interviews the operator, and fills the pack. The session is spawned
+  // by the backend (startPackSetup); on its exit the backend broadcasts an updated team-pack-status.
+  function handleSetupTeamPack(msg, ws) {
+    if (!startPackSetup) { ws.send(JSON.stringify({ type: 'error', message: 'Guided setup is not available' })); return; }
+    const { teamId, projectId } = msg;
+    if (!teamId || !projectId) { ws.send(JSON.stringify({ type: 'error', message: 'teamId and projectId are required' })); return; }
+    const r = startPackSetup({ teamId, projectId });
+    if (!r.ok) { ws.send(JSON.stringify({ type: 'error', message: r.error || 'Could not start setup' })); return; }
+    ws.send(JSON.stringify({
+      type: 'setup-team-pack-started', teamId, projectId,
+      sessionId: r.sessionId, already: !!r.already,
+    }));
+  }
+
   // Handler map — single dispatch table for all control message types
   // Session action handlers use findSession() for id-based lookup with name fallback.
   const handlers = {
+    'list-teams':       handleListTeams,
+    'run-team':         handleRunTeam,
+    'cancel-team-run':  handleCancelTeamRun,
+    'get-team-runs':    handleGetTeamRuns,
+    'set-team-schedule': handleSetTeamSchedule,
+    'add-team-instance':    handleAddTeamInstance,
+    'remove-team-instance': handleRemoveTeamInstance,
+    'open-artifact':        handleOpenArtifact,
+    'get-team-pack-status': handleGetTeamPackStatus,
+    'setup-team-pack':      handleSetupTeamPack,
     'add-session':      handleAddSession,
     'remove-session':   handleRemoveSession,
     'rename-session':   handleRenameSession,
