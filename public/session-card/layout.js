@@ -29,7 +29,12 @@ const _preSplitSessions = new Set(); // sessions auto-minimized by split layout
 
 // ── Constants ────────────────────────────────────────────────
 
-export const SLEEP_ELIGIBLE = [STATES.IDLE, STATES.COMPLETE, STATES.DONE, STATES.FAILED];
+// Only the dead-PTY terminal states are sleep-eligible. Sleeping a live-PTY
+// session (IDLE or COMPLETE) would arm the server's 15-min sleep-kill timer and
+// destroy a session whose work can still continue, so a minimized live session
+// is never auto-slept; its GPU resources are reclaimed by the WebGL LRU cap.
+// Mirrors the server guard in sessions.js sleep().
+export const SLEEP_ELIGIBLE = [STATES.DONE, STATES.FAILED];
 
 const SPLIT_MAX_VISIBLE = 2;
 

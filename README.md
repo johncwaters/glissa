@@ -41,7 +41,7 @@ Open `http://localhost:3000` to view the dashboard.
 - Structural status detection: authoritative Claude Code hooks (injected per session, no repo changes) with an OSC-0 title fallback, never screen scraping
 - Windows toast notifications (BurntToast) when a session needs input, finishes, or fails
 - Teams: project-portable agent pipelines that run against any project you manage
-- Dormant boot and sleep/wake so idle sessions reclaim their PTY and memory
+- Dormant boot and sleep/wake so finished sessions reclaim their PTY and memory
 - Drag-and-drop session reordering
 - Configurable themes (Golgari, Midnight, Phyrexian, Compleated)
 - Hot-reloadable configuration
