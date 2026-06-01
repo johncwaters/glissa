@@ -5,10 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.13.0] - 2026-05-31
+
+### Added
+
+- **Linked-worktree marker on session cards**: A session whose terminal `cwd` is a linked git worktree now shows a small `worktree` chip on its card. Detection is fs-only (a linked worktree has a `.git` *file* pointing at `worktrees/<name>`, vs a `.git` *directory* for a normal checkout; submodule `modules/` pointers are excluded), so it adds no dependency, no subprocess, and no TUI scraping. Status is refreshed on the existing 10s health tick and rebroadcast as a minimal `session-git` delta, so the card toggles its marker without a recreate (which would tear down the terminal). The `.git`-file parse is hardened for Windows: the captured gitdir is `.trim()`-ed before slash normalization so a trailing CR (CRLF) and backslash separators no longer defeat the `worktrees/` segment test.
+- **Keyboard navigation for sessions**: `Alt+0` opens a new session and `Alt+1`..`Alt+9` jump to the Nth session card. The handlers are guarded (no modifier mix, not in a typing context) so the keys never leak into a focused xterm, which forwards most keys straight to the PTY.
+
+### Changed
+
+- **Sessions view visual hardening**: An impeccable-critique pass on the Sessions/Teams tabs and terminal cards: the tabs read as primary navigation (lifted resting color, bold active tab, 1px divider from the wordmark), the Maximize button drops its cyan decoration so the DONE-state color stays reserved for real state changes, and FAILED cards keep a steady at-rest ring so a failure stays legible across the grid even when it landed on another tab.
+- **Health/stat footer gated behind Debug Mode**: The bottom health/stat footer (process memory, per-session internals, WebSocket counts) was always visible. Its visibility now follows the existing `debugMode` setting, driven through the one `applyTerminalSettings` funnel alongside `setDebugMode` so initial load and live Settings toggles both update it. The footer defaults to hidden, so there is no flash before settings load.
+- **Internal restructuring (no behavior change)**: Decomposed the monolithic `public/session-card.js` into focused `public/session-card/` modules (shared state/registry, toast, naming, webgl-pool, card-dom, terminal, layout, drag-drop, lifecycle) with pure logic split into `*-core.mjs` files behind characterization tests, then deleted the barrel and repointed consumers directly. Extracted the pure cores of `sessions.js` into `session-core/` (`spawn-command`, `spawn-env`, `state-machine`, `status-mapper`), leaving the stateful `Session` class at root. Moved the team server modules into `teamlib/`.
+
+### Fixed
+
+- **Recover dropped terminal output in place after backpressure**: Terminals dropped characters and scrambled into "alien" output, usually after a reconnect. The data-WS sender discarded its coalesce buffer when the socket went over high-water and only re-sent those bytes when the client *reconnected*, so a client that drained in place kept a permanent gap, and a dropped frame carrying cursor/clear escapes desynced the xterm grid into garbage. Added a monotonic per-session output offset plus a per-client cursor and a drain-triggered backfill that re-pulls the exact missed range in place (exact tail, evicted clear+replay, or no-op), with three triggers (flush, on-data short-circuit, stall-timer quiet drain). An in-place restart now re-baselines live clients via a `rebaseline` event (a brief ~500ms data-WS reconnect + clear, consistent with the existing restart-clear).
+- **Persist team-run live state across tab switches; Cancel now stops the run**: Returning to the Teams tab mid-run rebuilt the view from a bare active flag, so the live phase, the elapsed timer, and the Cancelling state were lost (timer reset to 0, pipeline blank). Separately, Cancel called `session.destroy()`, whose `removeAllListeners()` stripped the exit listener the stage runner needs to resolve, so a cancelled run hung until the 900s stage timeout. The orchestrator now tracks per-run live state (`getRunState()`) and the client rehydrates the active stage, a continuous timer, and the cancelling state on mount (and for second clients); Cancel uses `session.kill()` so listeners survive and the stage exit resolves promptly. New `team-run-cancelling` event.
+- **Stop session-card header reflow on status change**: The variable-width status badge sat upstream of the YOLO/worktree tags, so every status change reflowed them sideways (the "moving YOLO tag"). The header is now dimensionally rigid: a constant-width status-label slot (sized to "Needs Input" including its letter-spacing) plus a repositioned spacer that absorbs the badge's width change. The minimized bar is unaffected (it hides those elements by `display`, which is order-independent).
+- **Guided team-pack setup focuses the interview terminal**: Clicking "Set up automatically" now jumps to the Sessions view and focuses the spawned interview session, so the click no longer appears to do nothing.
+- **Guard PTY writes after kill and respawn at the last resized size**: Writes arriving after a kill no longer hit a dead PTY, and a respawn restores the last resized dimensions instead of reverting to the default geometry.
 
 ### Removed
 
+- **Redundant bottom "+ New Session" ghost card**: The minimized-bar ghost card duplicated the top-bar "+ Session" button, so it was removed; the minimized bar is now an empty `<div>` hidden via `.minimized-bar:empty`, and the remaining open paths (the dead `btn-add-session` listener and the empty-state CTA) route to the header button.
 - **No-Flicker Mode setting removed**: `CLAUDE_CODE_NO_FLICKER` is now always set to `"1"` at spawn; the per-session toggle and `noFlicker` spawn option have been dropped.
 - **Scrollback Lines setting removed**: Terminal scrollback is now fixed at 50,000 lines; the configurable `scrollbackLines` setting has been removed.
 - **Timing settings removed**: The startup watchdog (`startingWatchdogSeconds`) has been dropped entirely; WAITING-notification escalation is now fixed at 5 minutes (previously `waitingEscalationSeconds`); the attention timeout (`attentionTimeoutSeconds`, already inert) has been removed.
@@ -315,6 +335,9 @@ _Skipped in changelog — incremental fixes and version bump._
 - Alert sounds for session attention events
 - CLI with `--port`, `--config`, `--help`, `--version` flags
 
+[0.13.0]: https://github.com/johncwaters/glissa/releases/tag/v0.13.0
+[0.12.0]: https://github.com/johncwaters/glissa/releases/tag/v0.12.0
+[0.11.0]: https://github.com/johncwaters/glissa/releases/tag/v0.11.0
 [0.10.0]: https://github.com/johncwaters/glissa/releases/tag/v0.10.0
 [0.9.1]: https://github.com/johncwaters/glissa/releases/tag/v0.9.1
 [0.9.0]: https://github.com/johncwaters/glissa/releases/tag/v0.9.0
