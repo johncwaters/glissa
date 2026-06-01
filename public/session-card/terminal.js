@@ -271,3 +271,20 @@ export function ensureTerminalSetup(ui, sessionId) {
   setupTerminal(ui.termWrap, ui);
   wireTerminalIO(ui, sessionId);
 }
+
+// Force a full-viewport repaint after a transition that re-parents the card DOM
+// (expand/un-minimize, maximize, split restore). xterm only repaints rows it
+// marks dirty, so after a re-parent the WebGL canvas can keep stale glyphs in
+// quiescent rows (ghosts). Deferred one rAF so the card is on-screen when the
+// refresh runs — a refresh issued while still off-screen is suppressed by
+// xterm's _isPaused. Single in-flight rAF per card, mirroring the fit/scroll
+// coalescing in setupTerminal.
+export function forceTerminalRepaint(ui) {
+  if (!ui || ui._repaintRafId != null) return;
+  ui._repaintRafId = requestAnimationFrame(() => {
+    ui._repaintRafId = null;
+    if (!ui.term) return;
+    ui.webglAddon?.clearTextureAtlas?.();
+    ui.term.refresh(0, ui.term.rows - 1);
+  });
+}

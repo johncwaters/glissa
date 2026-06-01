@@ -15,7 +15,7 @@ import { STATES } from '/shared/states.mjs';
 import { sendControlMsg } from '../control-ws.js';
 import { setMinimized } from '../ui-prefs.js';
 import { container, minimizedBar, sessionUIs } from './card-registry.js';
-import { ensureTerminalSetup, setupTerminal, wireTerminalIO } from './terminal.js';
+import { ensureTerminalSetup, forceTerminalRepaint, setupTerminal, wireTerminalIO } from './terminal.js';
 import { releaseWebgl, tryLoadWebGL } from './webgl-pool.js';
 
 // ── Layout-private state ─────────────────────────────────────
@@ -131,6 +131,9 @@ export function _applyExpandState(id, ui) {
   ui.btnMinimize.setAttribute('aria-label', 'Collapse');
   setMinimized(id, false);
   if (ui.needsWebGLReload) tryLoadWebGL(ui);
+  // Re-parenting the card out of the minimized bar leaves stale glyphs on the
+  // WebGL canvas until something dirties the rows; force a full redraw.
+  forceTerminalRepaint(ui);
 }
 
 export function _performExpand(id, ui) {
@@ -209,6 +212,9 @@ function _applyMaximized(ui, sessionId) {
   _onOneShotAnim(ui.card, 'maximize-in', () => ui.card.classList.remove('entering'));
   _setMaximizeButton(ui, true);
   _maximizedSession = sessionId;
+  // Maximize re-parents + resizes the card; force a full redraw so the larger
+  // viewport doesn't keep stale glyphs from the pre-maximize frame.
+  forceTerminalRepaint(ui);
 }
 
 function _setMaximizeButton(ui, maximized) {

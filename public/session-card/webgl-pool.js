@@ -54,6 +54,16 @@ export function tryLoadWebGL(ui) {
     ui.webglAddon = addon;
     ui.needsWebGLReload = false;
     _webglLru.set(ui, true); // mark most-recently-used (inserts at end)
+    // A freshly attached GL context starts on a blank canvas; xterm's
+    // setRenderer -> _fullRefresh is suppressed when the card was just
+    // re-parented and isn't observed visible yet (_isPaused), so only the
+    // rows the next write dirties get painted — quiescent rows stay as ghosts.
+    // Defer one frame (card now on-screen) then force atlas clear + full redraw.
+    requestAnimationFrame(() => {
+      if (ui.webglAddon !== addon || !ui.term) return;
+      addon.clearTextureAtlas?.();
+      ui.term.refresh(0, ui.term.rows - 1);
+    });
   } catch {
     ui.webglAddon = null;
     ui.needsWebGLReload = false;
