@@ -35,6 +35,9 @@ function formatUptime(s) {
 function buildPanel() {
   const root = el('div', 'health-footer');
   root.dataset.expanded = 'false';
+  // Hidden until debug mode turns it on (see setHealthMonitorVisible). Default
+  // matches config debugMode: false, so it stays hidden through initial load.
+  root.hidden = true;
 
   const summary = el('button', 'health-summary');
   summary.type = 'button';
@@ -169,6 +172,10 @@ function renderDetail() {
       </table>
     </div>
   `;
+}
+
+export function setHealthMonitorVisible(on) {
+  if (_root) _root.hidden = !on;
 }
 
 export function mountHealthMonitor(parent) {
