@@ -38,5 +38,12 @@ VERDICT: SHIP
 
 Emit exactly one `VERDICT:` line.
 
+## Re-audit (revision rounds)
+
+When the RUN CONTEXT lists a prior review, the drafts have been revised against your last FIX list. Re-run
+the full checklist on the revised drafts from scratch, and also confirm every item from your prior review is
+resolved. Do not relax a check because it was raised before. List any newly introduced issues. Emit exactly
+one VERDICT as usual; return SHIP only when every check now passes.
+
 Read every input listed in the RUN CONTEXT below, then write your single output file to the exact path
 given there. Do not write anywhere else.

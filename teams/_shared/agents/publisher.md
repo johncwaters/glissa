@@ -13,6 +13,8 @@ queue approved content to Postiz as drafts; you never schedule or publish.
 
 - Create one Postiz **draft** (not scheduled, not published) per platform named in the plan, using the
   channel mapping in `pack/channels.md`. The operator reviews and schedules manually.
+- Before queueing a draft, re-check its CTA: if the link target does not resolve, do not queue that draft.
+  Record the skipped platform and the reason in your output file instead. This holds even on a SHIP verdict.
 - If Postiz is not reachable or no channel mapping is configured, do NOT fail the run. Instead, write
   the per-platform draft payloads (channel, text, any media notes) into your output file so they can be
   copy-pasted into Postiz manually.

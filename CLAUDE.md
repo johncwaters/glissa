@@ -43,10 +43,12 @@ public/
 shared/
   states.js        # Session states (CJS, server-side)
   states.esm.js    # Session states (ESM, browser-side via Vite)
-teams/             # Glissa-owned team definitions (agents + pack scaffold templates)
-  <id>/team.json        # roster: stages, schedule, permissions.deny, pack.required, outputPath
-  <id>/agents/*.md      # generic, brand-neutral role prompts
-  <id>/pack-templates/  # files copied into a project's pack on first run
+teams/             # Glissa-owned team definitions (reusable blocks + per-team config)
+  _shared/agents/*.md      # reusable brand-neutral role prompts (referenced by any team)
+  _shared/pack-templates/  # reusable pack scaffolds (fallback for any team)
+  <id>/team.json        # roster: stages (+ agent/reviseReads/revise), schedule, permissions.deny, pack.required, outputPath
+  <id>/agents/*.md      # OPTIONAL per-team role override (else the shared role is used)
+  <id>/pack-templates/  # OPTIONAL per-team pack scaffolds (else _shared is used)
 teamlib/           # Team runtime server modules
   team-registry.js   # load/validate team.json (+ pack.required, pack-templates)
   team-orchestrator.js  # run engine: scaffold+halt gate, worktree-isolated stage pipeline
@@ -176,13 +178,14 @@ Use the `ws` package directly. Do NOT use Socket.IO or any abstraction over WebS
 
 A team is a sequential pipeline (e.g. marketing: researcher -> strategist -> writer -> editor -> publisher) that runs against ANY project Glissa manages. Ownership is split:
 
-- **Glissa owns the agents.** `teams/<id>/` holds `team.json`, generic brand-neutral `agents/*.md`, and `pack-templates/*.md`. Agent prompts never contain a specific project's brand/voice/URLs.
+- **Glissa owns the agents, as reusable blocks.** Generic brand-neutral role prompts live in `teams/_shared/agents/*.md` and pack scaffolds in `teams/_shared/pack-templates/*.md`; a team's `teams/<id>/` holds its `team.json` and optionally its own `agents/`/`pack-templates/` overrides. A stage resolves its prompt by explicit `stage.agent` (a shared role by name, path-traversal rejected) > team-local `agents/<id>.md` > shared `_shared/agents/<id>.md`, so a new team composes from the shared blocks instead of copying. Agent prompts never contain a specific project's brand/voice/URLs.
 - **The project owns the pack.** Each run reads project specifics (voice-guide, avoid-list, brand, content-calendar, channels) from `<project>/.glissa/teams/<id>/pack/`. Everything Glissa writes into a target repo lives under `.glissa/` (the team's `outputPath`).
 - **First-run setup gate.** When the pack is missing or still holds a `GLISSA:NEEDS-INPUT` sentinel, the orchestrator scaffolds it from `pack-templates/`, emits `team-run-needs-setup`, and halts (zero stages). The operator fills the pack either by hand or through guided setup (next bullet), then re-runs.
 - **Guided setup.** The dashboard's "Set up automatically" button sends `setup-team-pack`, which spawns ONE interactive Claude session (a normal PTY card, NOT a headless `-p` stage, because the interview needs back-and-forth). Seeded by `team-setup.js`, it reads the target repo, interviews the operator for the subjective pack fields (voice, avoid-list, audience), writes each pack file with the `GLISSA:NEEDS-INPUT` sentinel removed, and on exit broadcasts `team-pack-updated` so the dashboard drops the setup banner. The session is ephemeral: it lives in the `sessions` map, is never persisted to config.json, and is skipped by config-reload diffing.
 - **Worktree isolation.** Each run executes in a throwaway git worktree from HEAD (`team-git.js`); the pack is copied in, the run is committed and fast-forwarded back to the base branch, so the working tree is never dirtied mid-run. A non-git target runs in place.
 - **Stack assumption (v1):** Postiz + a content calendar. The publisher pushes Postiz drafts using the pack's `channels.md`.
 - Each stage is a headless `claude -p` session; completion = process exit 0; the editor emits a `SHIP` / `FIX` / `BLOCK` verdict (the publisher runs only on `SHIP`). Stage gating is by required markdown sections in the handoff file.
+- **Bounded FIX revision loop.** A verdict stage may declare `revise: { onVerdict, stages, maxRounds }` (and re-run stages declare `reviseReads`). On a matching verdict (e.g. `FIX`) the orchestrator re-runs the named earlier stages with their `reviseReads` (the writer gets the editor's `review.md` + its prior `drafts.md`) then re-audits, up to `maxRounds` (default 2), archiving each round's pair under `runs/<id>/rounds/r<n>-*` (`team-output.archiveRoundArtifacts`). It stops on `SHIP`, `BLOCK`, a byte-identical no-progress bail, or the budget. The `runIfVerdict` publisher gate is unchanged: publish happens ONLY on a final `SHIP`. New event `team-revise-round`, plus `round` on the stage events and `rounds` on `team-run-complete`.
 
 ## Coding Style
 

@@ -35,13 +35,28 @@ function seedPack(proj) {
 }
 
 // Fake session factory: writes the produces file (path parsed from the real built prompt) then
-// emits `exit`, mirroring `claude -p` exit-based completion. behaviors[stageId] = {write, exitCode, hang}.
+// emits `exit`, mirroring `claude -p` exit-based completion.
+//   behaviors[stageId] = {write, exitCode, hang}  -- a single behavior reused for every spawn, OR
+//   behaviors[stageId] = [{...}, {...}]            -- a sequence consumed in order across successive
+//                                                     spawns of that stage, with the LAST entry sticky
+//                                                     (reused for any further spawns of the stage).
+// A per-stageId call counter selects which behavior a given spawn uses, so a stage can return FIX then
+// SHIP across revise rounds, or distinct drafts per round.
 function fakeFactory(behaviors) {
+  const calls = {}; // stageId -> number of spawns so far
   return (sessionOpts) => {
     const stageId = String(sessionOpts.id).split(':').pop();
     const ee = new EventEmitter();
     ee.start = () => {
-      const b = behaviors[stageId] || { exitCode: 0 };
+      const spec = behaviors[stageId];
+      const n = calls[stageId] || 0;
+      calls[stageId] = n + 1;
+      let b;
+      if (Array.isArray(spec)) {
+        b = spec.length ? (spec[n] || spec[spec.length - 1]) : { exitCode: 0 };
+      } else {
+        b = spec || { exitCode: 0 };
+      }
       if (b.hang) return; // never completes on its own; only a kill() ends it
       const m = /Write your single output file to: (.+)/.exec(sessionOpts.initialPrompt || '');
       const producesPath = m ? m[1].trim() : null;
@@ -114,6 +129,14 @@ function logLines(proj) {
   const p = path.join(proj, OUT, 'log.md');
   return fs.readFileSync(p, 'utf8').split(/\r?\n/).filter(Boolean);
 }
+function runDirOf(proj) {
+  return path.join(proj, OUT, 'runs', runsOf(proj)[0]);
+}
+function startedCount(events, stage) {
+  return events.filter((e) => e.name === 'team-stage-started' && e.stage === stage).length;
+}
+// Distinct DRAFTS bodies so the no-progress guard does NOT bail (each revise round produces new bytes).
+const DRAFTS_N = (n) => `## X\nA calm post about boondocking, revision ${n}.\n`;
 
 test('first run with no pack scaffolds + halts (needs-setup), runs zero stages', async () => {
   const proj = tmpProject();
@@ -349,6 +372,224 @@ test('getRunState exposes the live stage + timestamps while active, cancelling o
     await run;
     assert.equal(orch.getRunState('marketing', 'p1'), null, 'null after the run ends');
   } finally {
+    fs.rmSync(proj, { recursive: true, force: true });
+  }
+});
+
+// --- Phase B: bounded FIX revision loop (acceptance criteria 1-8) ---
+
+// 1. Converges: editor FIX then SHIP. Writer drafts differ across rounds so the no-progress guard does
+//    not bail. Writer re-runs once, published.md exists, verdict SHIP, rounds 1, log "FIX->SHIP (1 round".
+test('loop 1: FIX then SHIP converges, writer re-runs once, publisher runs (rounds=1)', async () => {
+  const proj = tmpProject();
+  try {
+    seedPack(proj);
+    const { orch, events } = makeOrch(proj, {
+      researcher: { write: BRIEF },
+      strategist: { write: PLAN },
+      writer: [{ write: DRAFTS_N(0) }, { write: DRAFTS_N(1) }],
+      editor: [{ write: REVIEW('FIX') }, { write: REVIEW('SHIP') }],
+      publisher: { write: PUBLISHED },
+    });
+    const res = await orch.runTeam({ teamId: 'marketing', projectId: 'p1', trigger: 'manual' });
+    assert.equal(res.verdict, 'SHIP');
+    assert.equal(res.rounds, 1);
+    assert.equal(startedCount(events, 'writer'), 2, 'writer ran on the linear pass + one revise round');
+    assert.equal(startedCount(events, 'editor'), 2, 'editor audited twice');
+    assert.ok(fs.existsSync(path.join(runDirOf(proj), 'published.md')), 'publisher ran on the final SHIP');
+    assert.ok(logLines(proj).some((l) => l.includes('FIX->SHIP (1 round')), 'log records the converged verdict');
+  } finally {
+    fs.rmSync(proj, { recursive: true, force: true });
+  }
+});
+
+// 2. Budget exhaustion: editor always FIX, maxRounds 2, writer drafts DISTINCT each round (no-progress
+//    guard never trips). Writer started 3x, editor started 3x, no publisher, verdict FIX, rounds 2,
+//    log "maxRounds 2".
+test('loop 2: always FIX exhausts maxRounds 2, publisher skipped (rounds=2)', async () => {
+  const proj = tmpProject();
+  try {
+    seedPack(proj);
+    const { orch, events } = makeOrch(proj, {
+      researcher: { write: BRIEF },
+      strategist: { write: PLAN },
+      writer: [{ write: DRAFTS_N(0) }, { write: DRAFTS_N(1) }, { write: DRAFTS_N(2) }],
+      editor: { write: REVIEW('FIX') }, // sticky FIX across all spawns
+      publisher: { write: PUBLISHED },
+    });
+    const res = await orch.runTeam({ teamId: 'marketing', projectId: 'p1' });
+    assert.equal(res.verdict, 'FIX');
+    assert.equal(res.rounds, 2);
+    assert.equal(startedCount(events, 'writer'), 3, 'writer: linear + 2 revise rounds');
+    assert.equal(startedCount(events, 'editor'), 3, 'editor: linear + 2 re-audits');
+    assert.ok(!fs.existsSync(path.join(runDirOf(proj), 'published.md')), 'publisher skipped on FIX');
+    assert.ok(logLines(proj).some((l) => l.includes('maxRounds 2')), 'log records budget exhaustion');
+  } finally {
+    fs.rmSync(proj, { recursive: true, force: true });
+  }
+});
+
+// 3. Archive trail after the exhausted run in #2: rounds/ holds r0/r1 of both files; canonical files
+//    hold the final round's content.
+test('loop 3: archive trail captures each round; canonical files hold the final round', async () => {
+  const proj = tmpProject();
+  try {
+    seedPack(proj);
+    const { orch } = makeOrch(proj, {
+      researcher: { write: BRIEF },
+      strategist: { write: PLAN },
+      writer: [{ write: DRAFTS_N(0) }, { write: DRAFTS_N(1) }, { write: DRAFTS_N(2) }],
+      editor: { write: REVIEW('FIX') },
+      publisher: { write: PUBLISHED },
+    });
+    await orch.runTeam({ teamId: 'marketing', projectId: 'p1' });
+    const runDir = runDirOf(proj);
+    const roundsDir = path.join(runDir, 'rounds');
+    for (const f of ['r0-drafts.md', 'r0-review.md', 'r1-drafts.md', 'r1-review.md']) {
+      assert.ok(fs.existsSync(path.join(roundsDir, f)), `${f} archived`);
+    }
+    assert.equal(fs.readFileSync(path.join(runDir, 'drafts.md'), 'utf8'), DRAFTS_N(2), 'canonical drafts.md is the final round');
+    assert.equal(fs.readFileSync(path.join(roundsDir, 'r0-drafts.md'), 'utf8'), DRAFTS_N(0), 'r0 archive is the first draft');
+    assert.equal(fs.readFileSync(path.join(roundsDir, 'r1-drafts.md'), 'utf8'), DRAFTS_N(1), 'r1 archive is the second draft');
+  } finally {
+    fs.rmSync(proj, { recursive: true, force: true });
+  }
+});
+
+// 4. BLOCK on the first pass: zero revise rounds, writer started exactly once, no publisher, rounds 0.
+test('loop 4: BLOCK first pass short-circuits, no revise rounds (rounds=0)', async () => {
+  const proj = tmpProject();
+  try {
+    seedPack(proj);
+    const { orch, events } = makeOrch(proj, {
+      researcher: { write: BRIEF },
+      strategist: { write: PLAN },
+      writer: { write: DRAFTS },
+      editor: { write: REVIEW('BLOCK') },
+      publisher: { write: PUBLISHED },
+    });
+    const res = await orch.runTeam({ teamId: 'marketing', projectId: 'p1' });
+    assert.equal(res.verdict, 'BLOCK');
+    assert.equal(res.rounds, 0);
+    assert.equal(startedCount(events, 'writer'), 1, 'writer ran exactly once (no revise)');
+    assert.ok(!fs.existsSync(path.join(runDirOf(proj), 'published.md')), 'publisher skipped on BLOCK');
+  } finally {
+    fs.rmSync(proj, { recursive: true, force: true });
+  }
+});
+
+// 5. No-progress guard: editor sticky FIX, writer outputs IDENTICAL bytes every spawn. In revise round 1
+//    the writer produces the same drafts, so the editor is NOT re-spawned (editor started once total),
+//    writer started twice, verdict FIX, log "no-progress".
+test('loop 5: no-progress guard bails before re-auditing identical drafts', async () => {
+  const proj = tmpProject();
+  try {
+    seedPack(proj);
+    const { orch, events } = makeOrch(proj, {
+      researcher: { write: BRIEF },
+      strategist: { write: PLAN },
+      writer: { write: DRAFTS }, // identical bytes on every spawn
+      editor: { write: REVIEW('FIX') },
+      publisher: { write: PUBLISHED },
+    });
+    const res = await orch.runTeam({ teamId: 'marketing', projectId: 'p1' });
+    assert.equal(res.verdict, 'FIX');
+    assert.equal(startedCount(events, 'writer'), 2, 'writer: linear + one revise attempt');
+    assert.equal(startedCount(events, 'editor'), 1, 'editor NOT re-spawned once the draft did not change');
+    assert.ok(!fs.existsSync(path.join(runDirOf(proj), 'published.md')), 'publisher skipped');
+    assert.ok(logLines(proj).some((l) => l.includes('no-progress')), 'log records the no-progress bail');
+  } finally {
+    fs.rmSync(proj, { recursive: true, force: true });
+  }
+});
+
+// 6. First-pass SHIP regression: rounds 0 and the log line carries NO round suffix.
+test('loop 6: first-pass SHIP has rounds=0 and no log round suffix', async () => {
+  const proj = tmpProject();
+  try {
+    seedPack(proj);
+    const { orch } = makeOrch(proj, {
+      researcher: { write: BRIEF },
+      strategist: { write: PLAN },
+      writer: { write: DRAFTS },
+      editor: { write: REVIEW('SHIP') },
+      publisher: { write: PUBLISHED },
+    });
+    const res = await orch.runTeam({ teamId: 'marketing', projectId: 'p1' });
+    assert.equal(res.verdict, 'SHIP');
+    assert.equal(res.rounds, 0);
+    const runLine = logLines(proj).find((l) => l.includes('SHIP'));
+    assert.ok(runLine, 'a SHIP run line exists');
+    assert.ok(!/round|->/.test(runLine), 'no round suffix on a first-pass SHIP');
+  } finally {
+    fs.rmSync(proj, { recursive: true, force: true });
+  }
+});
+
+// 7. Events: team-revise-round fires once per executed round with the right round; re-run stage events
+//    carry round > 0; team-run-complete carries rounds.
+test('loop 7: events carry round/rounds across the revise loop', async () => {
+  const proj = tmpProject();
+  try {
+    seedPack(proj);
+    const { orch, events } = makeOrch(proj, {
+      researcher: { write: BRIEF },
+      strategist: { write: PLAN },
+      writer: [{ write: DRAFTS_N(0) }, { write: DRAFTS_N(1) }],
+      editor: [{ write: REVIEW('FIX') }, { write: REVIEW('SHIP') }],
+      publisher: { write: PUBLISHED },
+    });
+    orch.on('team-revise-round', (p) => events.push({ name: 'team-revise-round', ...p }));
+    const res = await orch.runTeam({ teamId: 'marketing', projectId: 'p1' });
+    assert.equal(res.rounds, 1);
+    const reviseEvents = events.filter((e) => e.name === 'team-revise-round');
+    assert.equal(reviseEvents.length, 1, 'one revise-round event for one executed round');
+    assert.equal(reviseEvents[0].round, 1);
+    assert.equal(reviseEvents[0].fromVerdict, 'FIX');
+    const writerRound1 = events.find((e) => e.name === 'team-stage-started' && e.stage === 'writer' && e.round === 1);
+    assert.ok(writerRound1, 'the re-run writer event carries round 1');
+    const editorRound1 = events.find((e) => e.name === 'team-stage-started' && e.stage === 'editor' && e.round === 1);
+    assert.ok(editorRound1, 'the re-audit editor event carries round 1');
+    const complete = events.find((e) => e.name === 'team-run-complete');
+    assert.equal(complete.rounds, 1, 'team-run-complete carries rounds');
+    const linearWriter = events.find((e) => e.name === 'team-stage-started' && e.stage === 'writer' && e.round === 0);
+    assert.ok(linearWriter, 'the linear-pass writer event carries round 0');
+  } finally {
+    fs.rmSync(proj, { recursive: true, force: true });
+  }
+});
+
+// 8. Cancel during revise: the writer's SECOND spawn hangs; let the first FIX happen, then cancel during
+//    the hanging revise writer. The run ends cancelled and the worktree is discarded (no integrate).
+test('loop 8: cancel during a revise round discards the worktree', async () => {
+  const proj = tmpProject();
+  const gw = fakeWorkspace();
+  try {
+    seedPack(proj);
+    const { orch, events } = makeOrch(proj, {
+      researcher: { write: BRIEF },
+      strategist: { write: PLAN },
+      writer: [{ write: DRAFTS_N(0) }, { hang: true }], // 2nd spawn (revise round 1) hangs
+      editor: { write: REVIEW('FIX') },
+      publisher: { write: PUBLISHED },
+    }, { gitWorkspace: gw });
+    const run = orch.runTeam({ teamId: 'marketing', projectId: 'p1' });
+    // Wait until the hanging revise writer has started (its round-1 stage-started event fired).
+    await new Promise((resolve) => {
+      const tick = () => {
+        if (events.some((e) => e.name === 'team-stage-started' && e.stage === 'writer' && e.round === 1)) {
+          resolve();
+        } else { setImmediate(tick); }
+      };
+      tick();
+    });
+    assert.equal(orch.cancelRun('marketing', 'p1'), true);
+    const res = await run;
+    assert.equal(res.cancelled, true);
+    assert.equal(gw.calls.discard, 1, 'cancelled revise discards the worktree');
+    assert.equal(gw.calls.integrate, 0, 'no integrate on a cancelled revise');
+  } finally {
+    gw.cleanup();
     fs.rmSync(proj, { recursive: true, force: true });
   }
 });

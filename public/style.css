@@ -2270,6 +2270,17 @@ body[data-active-view="teams"] #minimized-bar { display: none; }
 .pipeline-stage[data-state="done"] .stage-name { color: var(--text-dim); }
 .pipeline-stage[data-state="failed"] { border-color: var(--state-failed); }
 .pipeline-stage[data-state="failed"] .stage-glyph { color: var(--state-failed); }
+/* FIX revision re-run badge (e.g. "r1", "r2") on a stage that ran again this round. */
+.pipeline-stage[data-round]::after {
+  content: "r" attr(data-round);
+  color: var(--accent);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: color-mix(in oklab, var(--accent) 16%, transparent);
+}
 
 /* Band 3: control row */
 .team-control-row {

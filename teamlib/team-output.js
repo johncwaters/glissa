@@ -46,19 +46,29 @@ function ensureStructure(projectPath, outputPath) {
   return p;
 }
 
+// Pick a template source for `name`: the team's own templatesDir if it has the file, else the shared
+// fallbackTemplatesDir if set and it has the file, else null (caller writes a sentinel stub).
+function pickTemplate(name, templatesDir, fallbackTemplatesDir) {
+  const local = templatesDir ? path.join(templatesDir, name) : null;
+  if (local && fs.existsSync(local)) return local;
+  const shared = fallbackTemplatesDir ? path.join(fallbackTemplatesDir, name) : null;
+  if (shared && fs.existsSync(shared)) return shared;
+  return null;
+}
+
 // Copy each required pack file from the glissa-owned templatesDir into the project's pack/ folder, but
-// only when the destination does not already exist (so an edited pack is never clobbered). Also seeds a
-// pack README. Run outputs are committed by team-git, so the pack is NOT gitignored. Returns
-// { created, packDir }.
-function scaffoldPack(projectPath, outputPath, templatesDir, requiredFiles = DEFAULT_PACK_FILES) {
+// only when the destination does not already exist (so an edited pack is never clobbered). A file absent
+// from templatesDir falls back to fallbackTemplatesDir (the shared library) when set. Also seeds a pack
+// README. Run outputs are committed by team-git, so the pack is NOT gitignored. Returns { created, packDir }.
+function scaffoldPack(projectPath, outputPath, templatesDir, requiredFiles = DEFAULT_PACK_FILES, fallbackTemplatesDir = null) {
   const { packDir } = teamPaths(projectPath, outputPath);
   fs.mkdirSync(packDir, { recursive: true });
   const created = [];
   for (const name of requiredFiles) {
     const dest = path.join(packDir, name);
     if (fs.existsSync(dest)) continue;
-    const src = templatesDir ? path.join(templatesDir, name) : null;
-    if (src && fs.existsSync(src)) {
+    const src = pickTemplate(name, templatesDir, fallbackTemplatesDir);
+    if (src) {
       fs.copyFileSync(src, dest);
     } else {
       // Defensive fallback: a required file with no shipped template still gets a fillable stub.
@@ -68,8 +78,8 @@ function scaffoldPack(projectPath, outputPath, templatesDir, requiredFiles = DEF
   }
   const readmeDest = path.join(packDir, 'README.md');
   if (!fs.existsSync(readmeDest)) {
-    const readmeSrc = templatesDir ? path.join(templatesDir, 'README.md') : null;
-    if (readmeSrc && fs.existsSync(readmeSrc)) {
+    const readmeSrc = pickTemplate('README.md', templatesDir, fallbackTemplatesDir);
+    if (readmeSrc) {
       fs.copyFileSync(readmeSrc, readmeDest);
     } else {
       fs.writeFileSync(
@@ -127,6 +137,26 @@ function createRunFolder(projectPath, outputPath, label) {
   const full = path.join(runsDir, candidate);
   fs.mkdirSync(full);
   return full;
+}
+
+// Archive a round's handoff artifacts before the next revise round overwrites the canonical files.
+// For each name in `files`, if runDir/<name> exists, copy it to runDir/rounds/r<round>-<name>. The
+// rounds/ dir is created recursively. NON-destructive: an existing archive copy is never overwritten
+// (it is skipped). Returns the array of archive dest paths actually written.
+function archiveRoundArtifacts(runDir, round, files = []) {
+  const roundsDir = path.join(runDir, 'rounds');
+  const archived = [];
+  for (const name of files) {
+    if (!name) continue;
+    const src = path.join(runDir, name);
+    if (!fs.existsSync(src)) continue;
+    const dest = path.join(roundsDir, `r${round}-${name}`);
+    if (fs.existsSync(dest)) continue; // never clobber a prior archive
+    fs.mkdirSync(roundsDir, { recursive: true });
+    fs.copyFileSync(src, dest);
+    archived.push(dest);
+  }
+  return archived;
 }
 
 // Verify a handoff file exists and contains every required section as a markdown heading.
@@ -250,6 +280,7 @@ module.exports = {
   packStatus,
   runFolderLabel,
   createRunFolder,
+  archiveRoundArtifacts,
   verifyHandoff,
   appendLog,
   parseRecentTopics,

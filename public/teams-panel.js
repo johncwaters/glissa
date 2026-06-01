@@ -142,7 +142,7 @@ function setNode(node, state) {
   const glyph = node.querySelector('.stage-glyph');
   if (glyph) glyph.textContent = STAGE_GLYPH[state] || STAGE_GLYPH.idle;
 }
-function resetPipeline(stageNodes) { for (const n of stageNodes.values()) setNode(n, 'idle'); }
+function resetPipeline(stageNodes) { for (const n of stageNodes.values()) { setNode(n, 'idle'); delete n.dataset.round; } }
 // Activating a stage implies every earlier stage is done.
 function markStage(stageNodes, stageId, state) {
   if (state !== 'active') { setNode(stageNodes.get(stageId), state); return; }
@@ -841,11 +841,22 @@ export function handleTeamMessage(msg) {
       resetPipeline(refs.stageNodes);
       setStatus(refs, 'Running…', 'run');
       break;
-    case 'team-stage-started':
+    case 'team-stage-started': {
       setRunning(refs, true);
       markStage(refs.stageNodes, msg.stage, 'active');
       startStageClock(refs);
-      setStatus(refs, `${labelFor(msg.stage)} · ${stageIndexLabel(refs, msg.stage)}`, 'run');
+      // round > 0 means a FIX revision re-run: badge the stage with its revision number and say so.
+      const node = refs.stageNodes.get(msg.stage);
+      if (msg.round > 0) {
+        if (node) node.dataset.round = String(msg.round);
+        setStatus(refs, `${labelFor(msg.stage)} · revision ${msg.round}`, 'run');
+      } else {
+        setStatus(refs, `${labelFor(msg.stage)} · ${stageIndexLabel(refs, msg.stage)}`, 'run');
+      }
+      break;
+    }
+    case 'team-revise-round':
+      setStatus(refs, `Revising · round ${msg.round}`, 'run');
       break;
     case 'team-stage-complete':
       markStage(refs.stageNodes, msg.stage, 'done');
@@ -853,12 +864,14 @@ export function handleTeamMessage(msg) {
     case 'team-run-cancelling':
       setStatus(refs, 'Cancelling…', '');
       break;
-    case 'team-run-complete':
+    case 'team-run-complete': {
       settleActive(refs.stageNodes);
       setRunning(refs, false);
-      setStatus(refs, `Complete · ${msg.verdict || 'done'}${mergeNote(msg)}`, 'ok');
+      const roundsNote = msg.rounds > 0 ? ` (${msg.rounds} round${msg.rounds > 1 ? 's' : ''})` : '';
+      setStatus(refs, `Complete · ${msg.verdict || 'done'}${roundsNote}${mergeNote(msg)}`, 'ok');
       refreshInstance(refs);
       break;
+    }
     case 'team-run-failed':
       if (msg.stage) markStage(refs.stageNodes, msg.stage, 'failed');
       setRunning(refs, false);

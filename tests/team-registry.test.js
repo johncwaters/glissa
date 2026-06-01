@@ -7,9 +7,11 @@ const os = require('node:os');
 const path = require('node:path');
 
 const { loadTeam, listTeams, validateAndNormalize } = require('../teamlib/team-registry');
+const teamOutput = require('../teamlib/team-output');
 
 const REPO_TEAMS = path.join(__dirname, '..', 'teams');
 const MKT_DIR = path.join(REPO_TEAMS, 'marketing');
+const SHARED_ROLES = ['researcher', 'strategist', 'writer', 'editor', 'publisher'];
 
 test('loadTeam("marketing") loads 5 ordered stages with resolved agent paths', () => {
   const team = loadTeam('marketing', REPO_TEAMS);
@@ -77,4 +79,251 @@ test('a fully valid in-memory definition normalizes (defaults applied)', () => {
   assert.equal(norm.stageTimeoutSeconds, 900);
   assert.equal(norm.permissions.mode, 'interactive'); // default when omitted
   assert.ok(norm.stages[0].agentPath.endsWith(path.join('agents', 'researcher.md')));
+});
+
+// --- Phase A: reusable shared agent + pack-template blocks (loadTeam over a temp teams dir) ---
+
+// A minimal valid team.json whose stages are named after the shared roles, so each agent prompt
+// resolves from teams/_shared/agents/<id>.md unless overridden by a local block.
+function teamDef(id, stages) {
+  return {
+    id,
+    name: id,
+    outputPath: `.glissa/teams/${id}`,
+    pack: { required: ['voice-guide.md'] },
+    stages,
+  };
+}
+
+function defaultStages() {
+  return SHARED_ROLES.map((role) => ({ id: role, produces: `${role}.md` }));
+}
+
+// Build a temp teams dir with a populated teams/_shared library and one team under it. Returns the
+// teams base dir to pass as loadTeam's second argument.
+function makeTmpTeams({
+  teamId = 't', stages = defaultStages(), localAgents = {}, def,
+  sharedAgents = SHARED_ROLES, sharedPackTemplates = ['voice-guide.md'],
+} = {}) {
+  const baseDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-reg-'));
+  const sharedAgentsDir = path.join(baseDir, '_shared', 'agents');
+  const sharedPackDir = path.join(baseDir, '_shared', 'pack-templates');
+  fs.mkdirSync(sharedAgentsDir, { recursive: true });
+  fs.mkdirSync(sharedPackDir, { recursive: true });
+  for (const role of sharedAgents) {
+    fs.writeFileSync(path.join(sharedAgentsDir, `${role}.md`), `# shared ${role}\n`, 'utf8');
+  }
+  for (const name of sharedPackTemplates) {
+    fs.writeFileSync(path.join(sharedPackDir, name), `# shared template ${name}\n`, 'utf8');
+  }
+
+  const teamDir = path.join(baseDir, teamId);
+  fs.mkdirSync(teamDir, { recursive: true });
+  fs.writeFileSync(path.join(teamDir, 'team.json'), JSON.stringify(def || teamDef(teamId, stages)), 'utf8');
+
+  const localNames = Object.keys(localAgents);
+  if (localNames.length > 0) {
+    const localAgentsDir = path.join(teamDir, 'agents');
+    fs.mkdirSync(localAgentsDir, { recursive: true });
+    for (const [name, body] of Object.entries(localAgents)) {
+      fs.writeFileSync(path.join(localAgentsDir, `${name}.md`), body, 'utf8');
+    }
+  }
+  return baseDir;
+}
+
+function withTmp(baseDir, fn) {
+  try {
+    return fn();
+  } finally {
+    fs.rmSync(baseDir, { recursive: true, force: true });
+  }
+}
+
+// A1: a team that ships NO local agents/ resolves every stage prompt from teams/_shared/agents/<id>.md.
+test('A1: stages with no local agents resolve from _shared/agents by stage id', () => {
+  const baseDir = makeTmpTeams({ teamId: 't' });
+  withTmp(baseDir, () => {
+    const team = loadTeam('t', baseDir);
+    const sharedAgentsDir = path.join(baseDir, '_shared', 'agents');
+    for (const stage of team.stages) {
+      assert.equal(stage.agentPath, path.join(sharedAgentsDir, `${stage.id}.md`),
+        `${stage.id} resolves to the shared block`);
+      assert.ok(fs.existsSync(stage.agentPath), `${stage.id} agent file exists`);
+    }
+    assert.ok(!fs.existsSync(path.join(baseDir, 't', 'agents')), 'team ships no local agents/');
+  });
+});
+
+// A2: explicit stage.agent: "writer" resolves teams/_shared/agents/writer.md.
+test('A2: explicit stage.agent resolves the named shared role', () => {
+  const stages = [{ id: 'critic', produces: 'critic.md', agent: 'writer' }];
+  const baseDir = makeTmpTeams({ teamId: 't', stages });
+  withTmp(baseDir, () => {
+    const team = loadTeam('t', baseDir);
+    const expected = path.join(baseDir, '_shared', 'agents', 'writer.md');
+    assert.equal(team.stages[0].agentPath, expected, 'critic uses the shared writer block via stage.agent');
+  });
+});
+
+// A2: a team-local teams/<id>/agents/<id>.md OVERRIDES the shared role.
+test('A2: a team-local agent overrides the shared role', () => {
+  const baseDir = makeTmpTeams({ teamId: 't', localAgents: { writer: '# local writer override\n' } });
+  withTmp(baseDir, () => {
+    const team = loadTeam('t', baseDir);
+    const writerStage = team.stages.find((s) => s.id === 'writer');
+    const localPath = path.join(baseDir, 't', 'agents', 'writer.md');
+    assert.equal(writerStage.agentPath, localPath, 'local writer wins over the shared block');
+    const editorStage = team.stages.find((s) => s.id === 'editor');
+    assert.equal(editorStage.agentPath, path.join(baseDir, '_shared', 'agents', 'editor.md'),
+      'unoverridden stages still come from _shared');
+  });
+});
+
+// A2: an unresolvable agent fails with a message naming the tried locations.
+test('A2: an unresolvable stage agent fails naming the locations tried', () => {
+  const stages = [{ id: 'nope', produces: 'nope.md' }];
+  const baseDir = makeTmpTeams({ teamId: 't', stages });
+  withTmp(baseDir, () => {
+    assert.throws(
+      () => loadTeam('t', baseDir),
+      (err) => {
+        assert.ok(/stages\.nope/.test(err.message), 'names the stage field');
+        assert.ok(/looked in/.test(err.message), 'names that locations were tried');
+        assert.ok(err.message.includes(path.join('t', 'agents', 'nope.md')), 'names the team-local path');
+        assert.ok(err.message.includes(path.join('_shared', 'agents', 'nope.md')), 'names the shared path');
+        return true;
+      },
+    );
+  });
+});
+
+// A2: a stage.agent containing a path separator or ".." is rejected.
+test('A2: stage.agent with a path separator or ".." is rejected', () => {
+  for (const bad of ['../writer', 'sub/writer', 'sub\\writer', '..']) {
+    const stages = [{ id: 's', produces: 's.md', agent: bad }];
+    const baseDir = makeTmpTeams({ teamId: 't', stages });
+    withTmp(baseDir, () => {
+      assert.throws(
+        () => loadTeam('t', baseDir),
+        (err) => {
+          assert.ok(/stages\.s\.agent/.test(err.message), `names the agent field for "${bad}"`);
+          return true;
+        },
+        `rejects stage.agent "${bad}"`,
+      );
+    });
+  }
+});
+
+// A4: listTeams() over the real repo teams dir returns only ['marketing']; _shared is not a team.
+test('A4: listTeams ignores _shared (no team.json) and returns only the real teams', () => {
+  const teams = listTeams(REPO_TEAMS);
+  assert.deepEqual(teams, ['marketing'], 'only marketing is a team; _shared is skipped');
+  assert.ok(!teams.includes('_shared'), '_shared is not listed as a team');
+});
+
+// --- Phase B / criterion 9: revise + reviseReads validation (field-naming errors) ---
+
+// A two-stage team (writer then editor) whose editor carries a verdict spec and the given revise block.
+// Stages are named after shared roles so the agent prompts resolve from the temp _shared library.
+function reviseTeamDef(revise, extra = {}) {
+  return teamDef('t', [
+    { id: 'writer', produces: 'drafts.md' },
+    {
+      id: 'editor',
+      produces: 'review.md',
+      verdict: { marker: 'VERDICT:', values: ['SHIP', 'FIX', 'BLOCK'] },
+      revise,
+      ...extra,
+    },
+  ]);
+}
+
+test('9a: revise.onVerdict outside verdict.values is rejected', () => {
+  const def = reviseTeamDef({ onVerdict: 'NOPE', stages: ['writer'], maxRounds: 2 });
+  const baseDir = makeTmpTeams({ teamId: 't', def });
+  withTmp(baseDir, () => {
+    assert.throws(() => loadTeam('t', baseDir), /stages\.editor\.revise\.onVerdict/);
+  });
+});
+
+test('9b: revise.maxRounds < 1 is rejected', () => {
+  const def = reviseTeamDef({ onVerdict: 'FIX', stages: ['writer'], maxRounds: 0 });
+  const baseDir = makeTmpTeams({ teamId: 't', def });
+  withTmp(baseDir, () => {
+    assert.throws(() => loadTeam('t', baseDir), /stages\.editor\.revise\.maxRounds/);
+  });
+});
+
+test('9c: revise.stages referencing an unknown stage id is rejected', () => {
+  const def = reviseTeamDef({ onVerdict: 'FIX', stages: ['ghost'], maxRounds: 2 });
+  const baseDir = makeTmpTeams({ teamId: 't', def });
+  withTmp(baseDir, () => {
+    assert.throws(() => loadTeam('t', baseDir), /stages\.editor\.revise\.stages/);
+  });
+});
+
+test('9c: revise.stages referencing a non-earlier (self/forward) stage id is rejected', () => {
+  // editor references itself: not an EARLIER stage, so rejected.
+  const def = reviseTeamDef({ onVerdict: 'FIX', stages: ['editor'], maxRounds: 2 });
+  const baseDir = makeTmpTeams({ teamId: 't', def });
+  withTmp(baseDir, () => {
+    assert.throws(() => loadTeam('t', baseDir), /stages\.editor\.revise\.stages/);
+  });
+});
+
+test('9: a stage.reviseReads that is not an array of strings is rejected', () => {
+  const def = reviseTeamDef({ onVerdict: 'FIX', stages: ['writer'], maxRounds: 2 }, { reviseReads: 'review.md' });
+  const baseDir = makeTmpTeams({ teamId: 't', def });
+  withTmp(baseDir, () => {
+    assert.throws(() => loadTeam('t', baseDir), /stages\.editor\.reviseReads/);
+  });
+});
+
+test('9: revise without a verdict spec on the same stage is rejected', () => {
+  const def = teamDef('t', [
+    { id: 'writer', produces: 'drafts.md' },
+    { id: 'editor', produces: 'review.md', revise: { onVerdict: 'FIX', stages: ['writer'] } },
+  ]);
+  const baseDir = makeTmpTeams({ teamId: 't', def });
+  withTmp(baseDir, () => {
+    assert.throws(() => loadTeam('t', baseDir), /stages\.editor\.revise/);
+  });
+});
+
+test('9: a valid revise + reviseReads team loads', () => {
+  const def = reviseTeamDef({ onVerdict: 'FIX', stages: ['writer'], maxRounds: 2 }, { reviseReads: ['review.md'] });
+  const baseDir = makeTmpTeams({ teamId: 't', def });
+  withTmp(baseDir, () => {
+    const team = loadTeam('t', baseDir);
+    const editor = team.stages.find((s) => s.id === 'editor');
+    assert.deepEqual(editor.revise, { onVerdict: 'FIX', stages: ['writer'], maxRounds: 2 });
+    assert.deepEqual(editor.reviseReads, ['review.md']);
+  });
+});
+
+// A5: scaffoldPack copies a required pack file from the fallback (_shared) dir when the team dir lacks it.
+test('A5: scaffoldPack copies a required file from the fallback templates dir', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-pack-'));
+  try {
+    const teamTemplatesDir = path.join(tmp, 'team-templates');
+    const fallbackTemplatesDir = path.join(tmp, 'shared-templates');
+    fs.mkdirSync(teamTemplatesDir, { recursive: true });
+    fs.mkdirSync(fallbackTemplatesDir, { recursive: true });
+    // Only the fallback has voice-guide.md; the team dir does not.
+    const fallbackBody = '# voice-guide\nfrom the shared fallback\n';
+    fs.writeFileSync(path.join(fallbackTemplatesDir, 'voice-guide.md'), fallbackBody, 'utf8');
+
+    const proj = path.join(tmp, 'proj');
+    fs.mkdirSync(proj, { recursive: true });
+    const outputPath = '.glissa/teams/t';
+
+    const res = teamOutput.scaffoldPack(proj, outputPath, teamTemplatesDir, ['voice-guide.md'], fallbackTemplatesDir);
+    assert.ok(res.created.includes('voice-guide.md'), 'voice-guide.md was created');
+    const dest = path.join(res.packDir, 'voice-guide.md');
+    assert.equal(fs.readFileSync(dest, 'utf8'), fallbackBody, 'content came from the fallback dir');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });

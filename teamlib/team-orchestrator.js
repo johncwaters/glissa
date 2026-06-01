@@ -51,6 +51,22 @@ function clip(value, max = 100) {
   return t.length > max ? `${t.slice(0, max - 1).trimEnd()}…` : t;
 }
 
+// Format the run-log verdict field to reflect the revise-loop outcome. Pure.
+//   - first pass (rounds 0): the bare verdict, no suffix ("SHIP" / "BLOCK" / "FIX").
+//   - converged after N rounds: "FIX->SHIP (1 round)" / "FIX->SHIP (2 rounds)".
+//   - no-progress early bail: "FIX (no-progress, round 1)".
+//   - budget exhausted: "FIX (maxRounds 2)".
+function formatRunVerdict({
+  verdict, initialVerdict, rounds = 0, noProgress = false, maxRounds = 0,
+} = {}) {
+  if (!rounds) return verdict || 'DONE';
+  const plural = rounds === 1 ? 'round' : 'rounds';
+  if (noProgress) return `${verdict} (no-progress, round ${rounds})`;
+  if (verdict !== initialVerdict) return `${initialVerdict}->${verdict} (${rounds} ${plural})`;
+  // Still the trigger verdict after spending the budget.
+  return `${verdict} (maxRounds ${maxRounds || rounds})`;
+}
+
 function createOrchestrator(deps) {
   const {
     loadTeam,
@@ -180,7 +196,7 @@ function createOrchestrator(deps) {
       // filled, so a run never produces output from empty voice rules. team-git copies the pack into the
       // worktree at run time. This runs before any worktree is created.
       output.ensureStructure(projectPath, team.outputPath);
-      output.scaffoldPack(projectPath, team.outputPath, team.packTemplatesDir, team.packRequired);
+      output.scaffoldPack(projectPath, team.outputPath, team.packTemplatesDir, team.packRequired, team.packTemplatesFallbackDir);
       const pack = output.packStatus(projectPath, team.outputPath, team.packRequired);
       if (!pack.configured) {
         output.appendLog(projectPath, team.outputPath, `${dateStr} | (setup) | - | NEEDS_SETUP (${pack.unfilled.join(', ')})`);
@@ -211,43 +227,54 @@ function createOrchestrator(deps) {
       log(`run started: ${lockKey} runId=${runId}${workspace.branch ? ` branch=${workspace.branch}` : ''}`);
       emitter.emit('team-run-started', { teamId, projectId, runId, runDir, trigger, branch: workspace.branch || null });
 
-      let topic = '';
-      let platforms = '';
+      const topicRef = { value: '' };
+      const platformsRef = { value: '' };
 
-      for (const stage of team.stages) {
-        // Publisher (and any conditional stage) runs only when the editor verdict matches.
-        if (stage.runIfVerdict && verdict !== stage.runIfVerdict) continue;
+      // One stage attempt (linear pass uses round 0; the revise loop uses round N >= 1). Round-0
+      // behavior is byte-identical to the original inline body; only the reads union and the round
+      // field on the events differ for N >= 1. Returns { terminal } when the run must early-return
+      // (the caller returns that value verbatim) or { ok: true, verdict, produced } on success.
+      const runOneStage = async ({ stage, round = 0 }) => {
+        const topic = () => topicRef.value;
+        const platforms = () => platformsRef.value;
         if (active.get(lockKey).cancelled) {
-          output.appendLog(cwd, team.outputPath, `${dateStr} | ${topic || '(topic)'} | ${platforms || '-'} | CANCELLED`);
+          output.appendLog(cwd, team.outputPath, `${dateStr} | ${topic() || '(topic)'} | ${platforms() || '-'} | CANCELLED`);
           log(`run cancelled: ${lockKey} before stage ${stage.id}`);
           finalize('discard');
           emitter.emit('team-run-failed', { teamId, projectId, reason: 'cancelled', stage: stage.id });
-          return { cancelled: true, stage: stage.id };
+          return { terminal: { cancelled: true, stage: stage.id } };
         }
 
-        const reads = (stage.reads || []).map((name) => ({ name, path: path.join(runDir, name) }));
+        // Reads = stage.reads UNION (round > 0 ? stage.reviseReads : []), de-duplicated by name.
+        const readNames = [...(stage.reads || [])];
+        if (round > 0) {
+          for (const name of (stage.reviseReads || [])) {
+            if (!readNames.includes(name)) readNames.push(name);
+          }
+        }
+        const reads = readNames.map((name) => ({ name, path: path.join(runDir, name) }));
         const produces = { name: stage.produces, path: path.join(runDir, stage.produces) };
         const prompt = buildStagePrompt(readText(stage.agentPath), {
           runDir, packDir, packFiles, reads, produces,
         });
         const stageEntry = active.get(lockKey);
         if (stageEntry) { stageEntry.currentStage = stage.id; stageEntry.stageStartedAtMs = now().getTime(); }
-        log(`stage start: ${lockKey} ${stage.id} (${stage.model || 'sonnet'})`);
-        emitter.emit('team-stage-started', { teamId, projectId, runId, stage: stage.id });
+        log(`stage start: ${lockKey} ${stage.id} (${stage.model || 'sonnet'})${round ? ` round=${round}` : ''}`);
+        emitter.emit('team-stage-started', { teamId, projectId, runId, stage: stage.id, round });
 
         const result = await runStage({ team, stage, runId, projectPath: cwd, prompt, lockKey });
         if (active.get(lockKey).cancelled) {
-          output.appendLog(cwd, team.outputPath, `${dateStr} | ${topic || '(topic)'} | ${platforms || '-'} | CANCELLED`);
+          output.appendLog(cwd, team.outputPath, `${dateStr} | ${topic() || '(topic)'} | ${platforms() || '-'} | CANCELLED`);
           log(`run cancelled: ${lockKey} at stage ${stage.id}`);
           finalize('discard');
           emitter.emit('team-run-failed', { teamId, projectId, reason: 'cancelled', stage: stage.id });
-          return { cancelled: true, stage: stage.id };
+          return { terminal: { cancelled: true, stage: stage.id } };
         }
         if (!result.ok) {
-          output.appendLog(cwd, team.outputPath, `${dateStr} | ${topic || '(topic)'} | ${platforms || '-'} | FAILED @${stage.id} (${result.reason})`);
+          output.appendLog(cwd, team.outputPath, `${dateStr} | ${topic() || '(topic)'} | ${platforms() || '-'} | FAILED @${stage.id} (${result.reason})`);
           log(`run failed: ${lockKey} at stage ${stage.id} (${result.reason})`);
           emitter.emit('team-run-failed', { teamId, projectId, reason: result.reason, stage: stage.id });
-          return { failedStage: stage.id, reason: result.reason };
+          return { terminal: { failedStage: stage.id, reason: result.reason } };
         }
 
         const produced = readText(produces.path);
@@ -257,30 +284,107 @@ function createOrchestrator(deps) {
           output.appendLog(cwd, team.outputPath, `${dateStr} | (none) | - | HALT (${stage.haltSignal})`);
           log(`run halted: ${lockKey} at stage ${stage.id} (${stage.haltSignal})`);
           emitter.emit('team-run-failed', { teamId, projectId, reason: 'halt', stage: stage.id, signal: stage.haltSignal });
-          return { halted: stage.haltSignal, stage: stage.id };
+          return { terminal: { halted: stage.haltSignal, stage: stage.id } };
         }
 
         // Gate on the handoff file: it must exist with its required sections.
         const check = output.verifyHandoff(produces.path, stage.requiredSections || []);
         if (!check.ok) {
-          output.appendLog(cwd, team.outputPath, `${dateStr} | ${topic || '(topic)'} | ${platforms || '-'} | FAILED @${stage.id} (missing: ${check.missing.join(', ')})`);
+          output.appendLog(cwd, team.outputPath, `${dateStr} | ${topic() || '(topic)'} | ${platforms() || '-'} | FAILED @${stage.id} (missing: ${check.missing.join(', ')})`);
           log(`run failed: ${lockKey} at stage ${stage.id} (incomplete handoff, missing: ${check.missing.join(', ')})`);
           emitter.emit('team-run-failed', { teamId, projectId, reason: 'incomplete-handoff', stage: stage.id, missing: check.missing });
-          return { failedStage: stage.id, missing: check.missing };
+          return { terminal: { failedStage: stage.id, missing: check.missing } };
         }
-        if (stage.id === 'researcher') topic = clip(sectionFirstLine(produced, 'Topic')) || topic;
-        if (stage.id === 'strategist') platforms = clip(sectionFirstLine(produced, 'Platforms')) || platforms;
-        if (stage.verdict) verdict = parseVerdict(produced, stage.verdict);
+        if (stage.id === 'researcher') topicRef.value = clip(sectionFirstLine(produced, 'Topic')) || topicRef.value;
+        if (stage.id === 'strategist') platformsRef.value = clip(sectionFirstLine(produced, 'Platforms')) || platformsRef.value;
+        let stageVerdict = null;
+        if (stage.verdict) { stageVerdict = parseVerdict(produced, stage.verdict); verdict = stageVerdict; }
 
-        log(`stage complete: ${lockKey} ${stage.id}${verdict ? ` verdict=${verdict}` : ''}`);
-        emitter.emit('team-stage-complete', { teamId, projectId, runId, stage: stage.id, verdict });
+        log(`stage complete: ${lockKey} ${stage.id}${stageVerdict ? ` verdict=${stageVerdict}` : ''}${round ? ` round=${round}` : ''}`);
+        emitter.emit('team-stage-complete', {
+          teamId, projectId, runId, stage: stage.id, verdict: stageVerdict, round,
+        });
+        return { ok: true, verdict: stageVerdict, produced };
+      };
+
+      let rounds = 0;
+      let reviseLogVerdict = null;
+
+      for (const stage of team.stages) {
+        // Publisher (and any conditional stage) runs only when the editor verdict matches.
+        if (stage.runIfVerdict && verdict !== stage.runIfVerdict) continue;
+
+        const linear = await runOneStage({ stage, round: 0 });
+        if (linear.terminal) return linear.terminal;
+
+        // Bounded FIX revision loop: after a verdict stage whose verdict triggers revise, re-run the
+        // earlier revise.stages then re-audit, bounded by maxRounds, with a byte-identical no-progress
+        // guard. The publisher still reads the final post-loop `verdict` through the :219 gate above.
+        if (stage.revise && verdict === stage.revise.onVerdict) {
+          const initialVerdict = verdict;
+          const maxRounds = stage.revise.maxRounds || 2;
+          const reviseStages = stage.revise.stages
+            .map((id) => team.stages.find((s) => s.id === id))
+            .filter(Boolean);
+          let noProgress = false;
+
+          for (let n = 1; n <= maxRounds; n += 1) {
+            emitter.emit('team-revise-round', {
+              teamId, projectId, runId, round: n, fromVerdict: verdict,
+            });
+            // Archive the round we are about to overwrite (the revise stages' outputs + the verdict
+            // stage's output) into rounds/r{n-1}-<name> before re-running.
+            const archiveNames = [...reviseStages.map((s) => s.produces), stage.produces];
+            output.archiveRoundArtifacts(runDir, n - 1, archiveNames);
+            const archivedBefore = reviseStages.map((s) => ({
+              produces: s.produces,
+              prior: readText(path.join(runDir, 'rounds', `r${n - 1}-${s.produces}`)),
+            }));
+
+            // Re-run each revise stage (in order) at round n.
+            let reviseTerminal = null;
+            for (const reviseStage of reviseStages) {
+              const r = await runOneStage({ stage: reviseStage, round: n });
+              if (r.terminal) { reviseTerminal = r.terminal; break; }
+            }
+            if (reviseTerminal) return reviseTerminal;
+
+            // No-progress guard: if EVERY revise stage's new output is byte-identical to its just
+            // archived prior copy, the loop cannot converge by re-running, so skip the re-audit, exit
+            // with the verdict unchanged, and record the reason.
+            const allIdentical = archivedBefore.every(
+              (a) => readText(path.join(runDir, a.produces)) === a.prior,
+            );
+            if (allIdentical) {
+              noProgress = true;
+              rounds = n;
+              break;
+            }
+
+            // Re-audit: re-run the verdict stage at round n and recompute the verdict.
+            const audit = await runOneStage({ stage, round: n });
+            if (audit.terminal) return audit.terminal;
+            verdict = parseVerdict(audit.produced, stage.verdict);
+            rounds = n;
+
+            if (verdict !== stage.revise.onVerdict) break; // SHIP / BLOCK: converged or hard stop.
+            // Still the trigger verdict: continue if budget remains, else break (maxRounds reached).
+          }
+
+          // Reflect the loop outcome in the log line written after the stage loop completes.
+          reviseLogVerdict = formatRunVerdict({
+            verdict, initialVerdict, rounds, noProgress, maxRounds,
+          });
+        }
       }
 
-      output.appendLog(cwd, team.outputPath, `${dateStr} | ${topic || '(topic)'} | ${platforms || '-'} | ${verdict || 'DONE'}`);
+      const topic = topicRef.value;
+      const platforms = platformsRef.value;
+      output.appendLog(cwd, team.outputPath, `${dateStr} | ${topic || '(topic)'} | ${platforms || '-'} | ${reviseLogVerdict || verdict || 'DONE'}`);
       const integ = finalize('integrate');
       log(`run complete: ${lockKey} runId=${runId} verdict=${verdict || 'DONE'}${integ.merged ? ' (merged)' : ''}`);
-      emitter.emit('team-run-complete', { teamId, projectId, runId, runDir, verdict, branch: integ.branch, base: integ.base, merged: integ.merged });
-      return { ok: true, verdict, runDir, branch: integ.branch, merged: integ.merged };
+      emitter.emit('team-run-complete', { teamId, projectId, runId, runDir, verdict, rounds, branch: integ.branch, base: integ.base, merged: integ.merged });
+      return { ok: true, verdict, runDir, rounds, branch: integ.branch, merged: integ.merged };
     } finally {
       active.delete(lockKey);
       // Failure / halt paths fall through here: commit + fast-forward them too, so the run is captured
@@ -336,4 +440,6 @@ function createOrchestrator(deps) {
   return emitter;
 }
 
-module.exports = { createOrchestrator, parseVerdict, sectionFirstLine, defaultRunLabel };
+module.exports = {
+  createOrchestrator, parseVerdict, sectionFirstLine, formatRunVerdict, defaultRunLabel,
+};

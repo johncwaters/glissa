@@ -55,9 +55,67 @@ function validatePack(pack, teamId) {
   }
 }
 
+// Resolve a stage's agent prompt file. First match wins:
+//   a. explicit `stage.agent` (a bare role name, rejected if it has a path separator or ".."):
+//      <baseDir>/_shared/agents/<stage.agent>.md
+//   b. team-local: <teamDir>/agents/<stage.id>.md (a team can override one shared block)
+//   c. shared-by-name: <baseDir>/_shared/agents/<stage.id>.md (a stage named after a shared role)
+//   d. else fail, naming the locations tried.
+// `baseDir` is path.dirname(teamDir), so the shared library lives at teams/_shared/.
+function resolveAgentPath(stage, teamDir, baseDir, teamId) {
+  const sharedAgentsDir = path.join(baseDir, '_shared', 'agents');
+  if (stage.agent != null) {
+    const agent = String(stage.agent);
+    if (agent.includes('/') || agent.includes('\\') || agent.includes('..')) {
+      fail(`stages.${stage.id}.agent`, 'must be a bare role name (no path separators or "..")', teamId);
+    }
+    return path.join(sharedAgentsDir, `${agent}.md`);
+  }
+  const localPath = path.join(teamDir, 'agents', `${stage.id}.md`);
+  if (fs.existsSync(localPath)) return localPath;
+  const sharedPath = path.join(sharedAgentsDir, `${stage.id}.md`);
+  if (fs.existsSync(sharedPath)) return sharedPath;
+  fail(`stages.${stage.id}`, `is missing its agent prompt file (looked in ${localPath}, ${sharedPath})`, teamId);
+  return null; // unreachable; fail() throws
+}
+
+// Validate a stage's optional revise loop config (the generic FIX-revision mechanism). `priorIds` is
+// the set of stage ids that appear BEFORE this stage, so revise.stages can only point at earlier stages
+// (a forward or self reference is rejected). A field-naming error is thrown on any violation.
+function validateStageRevise(stage, priorIds, teamId) {
+  if (stage.reviseReads != null) {
+    if (!Array.isArray(stage.reviseReads) || stage.reviseReads.some((f) => typeof f !== 'string')) {
+      fail(`stages.${stage.id}.reviseReads`, 'must be an array of handoff file names', teamId);
+    }
+  }
+  if (stage.revise == null) return;
+  if (typeof stage.revise !== 'object' || Array.isArray(stage.revise)) {
+    fail(`stages.${stage.id}.revise`, 'must be an object', teamId);
+  }
+  const verdictValues = (stage.verdict && Array.isArray(stage.verdict.values)) ? stage.verdict.values : null;
+  if (!verdictValues) {
+    fail(`stages.${stage.id}.revise`, 'requires a verdict spec on the same stage', teamId);
+  }
+  if (typeof stage.revise.onVerdict !== 'string' || !verdictValues.includes(stage.revise.onVerdict)) {
+    fail(`stages.${stage.id}.revise.onVerdict`, `must be one of this stage's verdict values (${verdictValues.join(', ')})`, teamId);
+  }
+  if (stage.revise.maxRounds != null
+    && (!Number.isInteger(stage.revise.maxRounds) || stage.revise.maxRounds < 1)) {
+    fail(`stages.${stage.id}.revise.maxRounds`, 'must be an integer >= 1', teamId);
+  }
+  if (!Array.isArray(stage.revise.stages) || stage.revise.stages.length === 0) {
+    fail(`stages.${stage.id}.revise.stages`, 'must be a non-empty array of earlier stage ids', teamId);
+  }
+  for (const id of stage.revise.stages) {
+    if (typeof id !== 'string' || !priorIds.includes(id)) {
+      fail(`stages.${stage.id}.revise.stages`, `references "${id}", which is not the id of an earlier stage`, teamId);
+    }
+  }
+}
+
 // Validate a parsed definition and return a normalized roster. `teamDir` is needed to confirm each
-// stage's agent prompt file (agents/<stage.id>.md) and each pack template (pack-templates/<file>) exist;
-// `teamId` is used for clear error text.
+// stage's agent prompt file (resolved local-then-shared, see resolveAgentPath) and each pack template
+// (pack-templates/<file>, team dir or _shared fallback) exist; `teamId` is used for clear error text.
 function validateAndNormalize(def, teamId, teamDir) {
   if (!def || typeof def !== 'object') fail('team.json', 'is not an object', teamId);
   if (!def.id) fail('id', 'is required', teamId);
@@ -69,26 +127,31 @@ function validateAndNormalize(def, teamId, teamDir) {
   validatePermissions(def.permissions, teamId);
   validatePack(def.pack, teamId);
 
+  const baseDir = path.dirname(teamDir);
+
+  const priorIds = [];
   const stages = def.stages.map((stage, i) => {
     if (!stage || typeof stage !== 'object') fail(`stages[${i}]`, 'is not an object', teamId);
     if (!stage.id) fail(`stages[${i}].id`, 'is required', teamId);
     if (!stage.produces) fail(`stages[${stage.id}].produces`, 'is required', teamId);
-    const relAgent = path.join('agents', `${stage.id}.md`);
-    const agentPath = path.join(teamDir, relAgent);
-    if (!fs.existsSync(agentPath)) {
-      fail(`stages.${stage.id}`, `is missing its agent prompt file (expected ${relAgent})`, teamId);
-    }
+    const agentPath = resolveAgentPath(stage, teamDir, baseDir, teamId);
+    validateStageRevise(stage, priorIds, teamId);
+    priorIds.push(stage.id);
     return { ...stage, agentPath };
   });
 
   // The project pack the team needs, plus the glissa-owned templates used to scaffold it on first run.
+  // A required template resolves from the team dir first, then the shared _shared/pack-templates fallback.
   const packRequired = (def.pack && Array.isArray(def.pack.required) && def.pack.required.length > 0)
     ? def.pack.required.slice()
     : DEFAULT_PACK_FILES.slice();
   const packTemplatesDir = path.join(teamDir, 'pack-templates');
+  const packTemplatesFallbackDir = path.join(baseDir, '_shared', 'pack-templates');
   for (const name of packRequired) {
-    if (!fs.existsSync(path.join(packTemplatesDir, name))) {
-      fail('pack', `is missing its scaffold template (expected pack-templates/${name})`, teamId);
+    const local = path.join(packTemplatesDir, name);
+    const shared = path.join(packTemplatesFallbackDir, name);
+    if (!fs.existsSync(local) && !fs.existsSync(shared)) {
+      fail('pack', `is missing its scaffold template (looked in ${local}, ${shared})`, teamId);
     }
   }
 
@@ -105,6 +168,7 @@ function validateAndNormalize(def, teamId, teamDir) {
     teamDir,
     packRequired,
     packTemplatesDir,
+    packTemplatesFallbackDir,
   };
 }
 

@@ -63,6 +63,8 @@ Researcher -> Strategist -> Writer -> Editor -> (optional) Postiz queueing
 
 Each agent reads the previous agent's output file from `./team/marketing/runs/<date>/` and writes the next. Glissa's orchestrator runs the chain. Approved output lands in Postiz as drafts for morning review, not auto-published.
 
+A `FIX` verdict is not a dead end: the orchestrator runs a bounded revision loop (default two rounds). On `FIX` the Writer is re-run with the Editor's FIX list plus its prior drafts, then the Editor re-audits, until the verdict is `SHIP` (the publisher then runs), `BLOCK`, the drafts stop changing, or the round budget is spent. The publisher still runs only on a final `SHIP`.
+
 ---
 
 ### Why this shape

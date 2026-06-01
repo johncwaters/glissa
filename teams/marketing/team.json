@@ -58,6 +58,7 @@
       "model": "sonnet",
       "summary": "Drafts every platform variant directly in the project's brand voice; writes drafts.md.",
       "reads": ["brief.md", "plan.md"],
+      "reviseReads": ["review.md", "drafts.md"],
       "produces": "drafts.md"
     },
     {
@@ -65,8 +66,10 @@
       "model": "opus",
       "summary": "Audits voice and trust against the project's voice guide and avoid list; writes review.md ending in a SHIP / FIX / BLOCK verdict.",
       "reads": ["brief.md", "plan.md", "drafts.md"],
+      "reviseReads": ["review.md"],
       "produces": "review.md",
-      "verdict": { "marker": "VERDICT:", "values": ["SHIP", "FIX", "BLOCK"] }
+      "verdict": { "marker": "VERDICT:", "values": ["SHIP", "FIX", "BLOCK"] },
+      "revise": { "onVerdict": "FIX", "stages": ["writer"], "maxRounds": 2 }
     },
     {
       "id": "publisher",
