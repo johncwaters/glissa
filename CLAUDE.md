@@ -9,7 +9,12 @@ Glissa is a lightweight Node.js background process that spawns and manages Claud
 ```
 server.js          # Production entry point (thin wrapper)
 backend.js         # Express + WebSocket server factory (shared by server.js and Vite plugin)
-sessions.js        # Session lifecycle and state machine (consumes StatusSource)
+sessions.js        # Session class: lifecycle, PTY spawn/kill, timers, hooks; consumes StatusSource; delegates pure logic to session-core/
+session-core/      # Pure cores of a SEAM EXTRACTION from sessions.js — the stateful Session class stays at root by design (moving it in = deferred follow-up)
+  spawn-command.js # classifyClaudeKind, resolveClaudeCommand, buildSpawnCommand, CLAUDE_CMD (resolve-then-branch spawn)
+  spawn-env.js     # Pure buildSpawnEnv(baseEnv, {noFlicker}) — the 5-var scrub + NO_FLICKER, returns a copy
+  state-machine.js # TRANSITIONS, GUARDS, ENTRY_HOOKS, EXIT_HOOKS (lifecycle tables, relocated verbatim)
+  status-mapper.js # Pure mapSignalToEvent(signal, state, confidence) -> event|null (the _onStatus decision)
 detection/
   status-source.js     # Merges hook + title signals (precedence, conflict window, dedup)
   osc-title-source.js  # OSC-0 title fallback signal (working/ready/unknown only)

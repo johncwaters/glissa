@@ -1,4 +1,5 @@
 const fs = require("node:fs");
+const path = require("node:path");
 const pty = require("node-pty");
 const { EventEmitter } = require("node:events");
 const { execSync } = require("node:child_process");
@@ -6,165 +7,33 @@ const { STATES } = require("./shared/states");
 const { createOscTitleSource } = require("./detection/osc-title-source");
 const { createStatusSource } = require("./detection/status-source");
 const { writeSessionSettings } = require("./detection/settings-injector");
+const {
+  classifyClaudeKind,
+  resolveClaudeCommand,
+  buildSpawnCommand,
+  CLAUDE_CMD,
+} = require("./session-core/spawn-command");
+const { buildSpawnEnv } = require("./session-core/spawn-env");
+const {
+  TRANSITIONS,
+  GUARDS,
+  ENTRY_HOOKS,
+  EXIT_HOOKS,
+} = require("./session-core/state-machine");
+const { mapSignalToEvent } = require("./session-core/status-mapper");
 
 const KILL_POLL_INTERVAL_MS = 200;
 const KILL_MAX_WAIT_MS = 3000;
 const SLEEP_KILL_TIMEOUT_MS = 15 * 60 * 1000;
 
-// Classify a resolved `claude` path by extension. Only real PE images (.exe/.com)
-// can be handed straight to node-pty (CreateProcess); .cmd/.bat/.ps1 are shims that
-// must go through a shell, so they (and anything unrecognized) fall back to cmd.exe.
-function classifyClaudeKind(resolvedPath) {
-  if (!resolvedPath) return "unresolved";
-  const ext = (resolvedPath.match(/\.[^.\\/]+$/) || [""])[0].toLowerCase();
-  return ext === ".exe" || ext === ".com" ? "exe" : "shim";
-}
-
-// Resolve `claude` once at module load. On Windows we prefer spawning the resolved
-// .exe directly (node-pty -> CreateProcess), falling back to `cmd.exe /c claude` only
-// for .cmd/.bat/.ps1 shim installs or when resolution fails. Resolving here also
-// surfaces a Bun shim shadowing claude.exe in the boot log instead of at runtime.
-function resolveClaudeCommand() {
-  let matches = [];
-  try {
-    const cmd = process.platform === "win32" ? "where claude" : "which -a claude";
-    const out = execSync(cmd, {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-      timeout: 2000,
-    });
-    matches = out.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
-  } catch {
-    // fall through to "could not resolve" warning below
-  }
-  if (matches.length === 0) {
-    console.warn(`[glissa] could not resolve 'claude' on PATH`);
-    return { path: null, kind: "unresolved" };
-  }
-  const resolvedPath = matches[0];
-  console.log(`[glissa] resolved 'claude' (first match wins): ${resolvedPath}`);
-  if (matches.length > 1) {
-    console.warn(
-      `[glissa] multiple 'claude' on PATH (Bun shim risk):\n  ${matches.join("\n  ")}`,
-    );
-  }
-  const kind = classifyClaudeKind(resolvedPath);
-  if (process.platform === "win32") {
-    console.log(
-      `[glissa] claude spawn strategy: ${kind === "exe" ? "direct exe" : "cmd.exe shim fallback"}`,
-    );
-  }
-  return { path: resolvedPath, kind };
-}
-
-// Cached resolution used by every Session unless overridden via the constructor.
-const CLAUDE_CMD = resolveClaudeCommand();
-
-// Pure spawn-command builder (the unit-test seam). Decides whether to spawn the
-// resolved claude .exe directly or route through `cmd.exe /c claude`. Keeps the
-// shell path byte-identical to the historical behavior for shim/unresolved installs.
-function buildSpawnCommand({ platform, resolved, settingsArgs = [], claudeArgs = [] }) {
-  const childArgs = [...settingsArgs, ...claudeArgs];
-  if (platform !== "win32") {
-    return { file: "claude", args: childArgs };
-  }
-  if (resolved && resolved.kind === "exe" && resolved.path) {
-    return { file: resolved.path, args: childArgs };
-  }
-  // .cmd/.bat/.ps1 shim or unresolved -> let cmd.exe resolve PATH+PATHEXT at spawn time.
-  return { file: "cmd.exe", args: ["/c", "claude", ...childArgs] };
-}
-
 // ---------------------------------------------------------------------------
 // State machine. Status is driven by structural signals from StatusSource
 // (Claude Code hooks = authoritative; OSC-0 title = degraded fallback), mapped
 // to transitions in _onStatus per the signal x state matrix. There is NO
-// screen-content parsing and NO detection timer here.
+// screen-content parsing and NO detection timer here. The transition tables
+// (TRANSITIONS, GUARDS, ENTRY_HOOKS, EXIT_HOOKS) live in
+// session-core/state-machine.js; the transition() engine below consumes them.
 // ---------------------------------------------------------------------------
-
-const TRANSITIONS = Object.freeze({
-  [STATES.DORMANT]: {
-    user_start: STATES.INITIALIZING,
-  },
-  [STATES.INITIALIZING]: {
-    spawn_success: STATES.STARTING,
-    spawn_fail: STATES.FAILED,
-  },
-  [STATES.STARTING]: {
-    first_output: STATES.RUNNING,
-    watchdog_timeout: STATES.FAILED,
-    process_exit: STATES.FAILED,
-  },
-  [STATES.RUNNING]: {
-    prompt_detected: STATES.WAITING,
-    task_complete: STATES.COMPLETE,
-    process_exit_ok: STATES.DONE,
-    process_exit_fail: STATES.FAILED,
-    user_kill: STATES.DONE,
-  },
-  [STATES.WAITING]: {
-    user_input: STATES.RUNNING,
-    user_dismiss: STATES.RUNNING,
-    // Authoritative late `ready` (Stop/idle hook) while WAITING -> COMPLETE.
-    task_complete: STATES.COMPLETE,
-    user_kill: STATES.DONE,
-    process_exit_ok: STATES.DONE,
-    process_exit_fail: STATES.FAILED,
-  },
-  [STATES.IDLE]: {
-    new_output: STATES.RUNNING,
-    prompt_detected: STATES.WAITING,
-    // Authoritative late `ready` while IDLE -> COMPLETE.
-    task_complete: STATES.COMPLETE,
-    process_exit_ok: STATES.DONE,
-    process_exit_fail: STATES.FAILED,
-    user_kill: STATES.DONE,
-  },
-  [STATES.COMPLETE]: {
-    new_output: STATES.RUNNING,
-    user_dismiss: STATES.IDLE,
-    prompt_detected: STATES.WAITING,
-    process_exit_ok: STATES.DONE,
-    process_exit_fail: STATES.FAILED,
-    user_kill: STATES.DONE,
-  },
-  [STATES.DONE]: {
-    user_restart: STATES.INITIALIZING,
-  },
-  [STATES.FAILED]: {
-    user_restart: STATES.INITIALIZING,
-    process_exit_fail: STATES.FAILED,
-  },
-});
-
-// Guards: return true if transition is allowed, false otherwise
-const GUARDS = {
-  spawn_success(session) {
-    return fs.existsSync(session.path);
-  },
-  user_restart(session) {
-    return session.state === STATES.DONE || session.state === STATES.FAILED;
-  },
-};
-
-// Entry/exit hooks keyed by state
-const ENTRY_HOOKS = {
-  [STATES.WAITING](session) {
-    session.emit("needs-attention", { name: session.name });
-  },
-  [STATES.FAILED](session) {
-    session.emit("session-failed", { name: session.name });
-  },
-  [STATES.DONE](session) {
-    session.emit("session-done", { name: session.name });
-  },
-};
-
-const EXIT_HOOKS = {
-  [STATES.WAITING](session) {
-    session.emit("attention-cleared", { name: session.name });
-  },
-};
 
 // A linked git worktree marks its working dir with a `.git` FILE containing
 // `gitdir: .../.git/worktrees/<name>`, whereas a normal checkout has a `.git`
@@ -310,39 +179,13 @@ class Session extends EventEmitter {
   _onStatus(s) {
     if (this._destroyed) return;
     this._lastSignal = { signal: s.signal, source: s.source, confidence: s.confidence, ts: s.ts };
-    const st = this.state;
-    switch (s.signal) {
-      case "working":
-      case "resume":
-        // Claude is active again — wake a quiescent card.
-        if (st === STATES.IDLE || st === STATES.COMPLETE) {
-          this.transition("new_output", { source: s.source, signal: s.signal });
-        } else if (st === STATES.WAITING) {
-          this.transition("user_input", { source: s.source, signal: s.signal });
-        }
-        break;
-      case "ready":
-        // Turn finished. Authoritative (hook) `ready` may complete from WAITING/IDLE
-        // too (a late Stop after a permission/idle prompt). The title fallback only
-        // completes from RUNNING (it only emits ready after seeing a spinner).
-        if (st === STATES.RUNNING) {
-          this.transition("task_complete", { source: s.source, signal: "ready" });
-        } else if ((st === STATES.WAITING || st === STATES.IDLE) && s.confidence === "high") {
-          this.transition("task_complete", { source: s.source, signal: "ready" });
-        }
-        break;
-      case "awaiting-input":
-        // Needs the user. Authoritative-only (title never emits this).
-        if (st === STATES.RUNNING || st === STATES.IDLE || st === STATES.COMPLETE) {
-          this.transition("prompt_detected", { source: s.source, signal: "awaiting-input" });
-        }
-        break;
-      case "session-start":
-      case "session-end":
-        // Lifecycle telemetry only — PTY first-output / exit drive these states.
-        break;
-      default:
-        break;
+    // Pure decision in session-core/status-mapper.js; this wrapper owns the side effects:
+    // the _destroyed guard + _lastSignal write above, and the transition below. The detail
+    // { source, signal } is uniform across every firing case (byte-identical to the prior
+    // per-branch details), so it is assembled here rather than in the pure mapper.
+    const event = mapSignalToEvent(s.signal, this.state, s.confidence);
+    if (event) {
+      this.transition(event, { source: s.source, signal: s.signal });
     }
   }
 
@@ -687,16 +530,7 @@ class Session extends EventEmitter {
   }
 
   _buildSpawnEnv() {
-    const env = { ...process.env };
-    delete env.CLAUDECODE;
-    delete env.CLAUDE_CODE_SSE_PORT;
-    delete env.CLAUDE_CODE_ENTRYPOINT;
-    delete env.GLISSA_PORT;
-    delete env.GLISSA_CONFIG;
-    if (this._noFlicker) {
-      env.CLAUDE_CODE_NO_FLICKER = "1";
-    }
-    return env;
+    return buildSpawnEnv(process.env, { noFlicker: this._noFlicker });
   }
 
   _handlePtyData(data) {

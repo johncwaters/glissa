@@ -1,0 +1,94 @@
+const fs = require("node:fs");
+const { STATES } = require("../shared/states");
+
+// Pure state-machine tables for the Session lifecycle, extracted from sessions.js
+// (relocated verbatim, behavior-preserving). The transition() engine in sessions.js
+// consumes these. Guards/hooks receive the `session` instance as a parameter and call
+// session.emit / read session.path|state|name; they never import Session, so there is
+// no require cycle.
+
+const TRANSITIONS = Object.freeze({
+  [STATES.DORMANT]: {
+    user_start: STATES.INITIALIZING,
+  },
+  [STATES.INITIALIZING]: {
+    spawn_success: STATES.STARTING,
+    spawn_fail: STATES.FAILED,
+  },
+  [STATES.STARTING]: {
+    first_output: STATES.RUNNING,
+    watchdog_timeout: STATES.FAILED,
+    process_exit: STATES.FAILED,
+  },
+  [STATES.RUNNING]: {
+    prompt_detected: STATES.WAITING,
+    task_complete: STATES.COMPLETE,
+    process_exit_ok: STATES.DONE,
+    process_exit_fail: STATES.FAILED,
+    user_kill: STATES.DONE,
+  },
+  [STATES.WAITING]: {
+    user_input: STATES.RUNNING,
+    user_dismiss: STATES.RUNNING,
+    // Authoritative late `ready` (Stop/idle hook) while WAITING -> COMPLETE.
+    task_complete: STATES.COMPLETE,
+    user_kill: STATES.DONE,
+    process_exit_ok: STATES.DONE,
+    process_exit_fail: STATES.FAILED,
+  },
+  [STATES.IDLE]: {
+    new_output: STATES.RUNNING,
+    prompt_detected: STATES.WAITING,
+    // Authoritative late `ready` while IDLE -> COMPLETE.
+    task_complete: STATES.COMPLETE,
+    process_exit_ok: STATES.DONE,
+    process_exit_fail: STATES.FAILED,
+    user_kill: STATES.DONE,
+  },
+  [STATES.COMPLETE]: {
+    new_output: STATES.RUNNING,
+    user_dismiss: STATES.IDLE,
+    prompt_detected: STATES.WAITING,
+    process_exit_ok: STATES.DONE,
+    process_exit_fail: STATES.FAILED,
+    user_kill: STATES.DONE,
+  },
+  [STATES.DONE]: {
+    user_restart: STATES.INITIALIZING,
+  },
+  [STATES.FAILED]: {
+    user_restart: STATES.INITIALIZING,
+    process_exit_fail: STATES.FAILED,
+  },
+});
+
+// Guards: return true if transition is allowed, false otherwise
+const GUARDS = {
+  spawn_success(session) {
+    return fs.existsSync(session.path);
+  },
+  user_restart(session) {
+    return session.state === STATES.DONE || session.state === STATES.FAILED;
+  },
+};
+
+// Entry/exit hooks keyed by state
+const ENTRY_HOOKS = {
+  [STATES.WAITING](session) {
+    session.emit("needs-attention", { name: session.name });
+  },
+  [STATES.FAILED](session) {
+    session.emit("session-failed", { name: session.name });
+  },
+  [STATES.DONE](session) {
+    session.emit("session-done", { name: session.name });
+  },
+};
+
+const EXIT_HOOKS = {
+  [STATES.WAITING](session) {
+    session.emit("attention-cleared", { name: session.name });
+  },
+};
+
+module.exports = { TRANSITIONS, GUARDS, ENTRY_HOOKS, EXIT_HOOKS };
