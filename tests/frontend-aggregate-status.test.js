@@ -8,12 +8,12 @@ const importCore = () => import('../public/session-card/aggregate-core.mjs');
 
 const C = (o) => ({ waiting: 0, failed: 0, done: 0, complete: 0, dormant: 0, total: 0, ...o });
 
-test('computeAggregate: waiting dominates the ladder; alertCount = waiting+failed+complete', async () => {
+test('computeAggregate: waiting dominates the ladder; alertCount = waiting+failed (complete never alerts)', async () => {
   const { computeAggregate } = await importCore();
   const r = computeAggregate(C({ waiting: 2, failed: 1, complete: 1, total: 4 }));
   assert.equal(r.text, '2 sessions need input');
   assert.equal(r.severity, 'warning');
-  assert.equal(r.alertCount, 4);
+  assert.equal(r.alertCount, 3);
 });
 
 test('computeAggregate: failed outranks complete', async () => {
@@ -23,16 +23,17 @@ test('computeAggregate: failed outranks complete', async () => {
   assert.equal(r.severity, 'critical');
 });
 
-test('computeAggregate: complete -> finished', async () => {
+test('computeAggregate: complete raises no banner — counts toward exited, not running', async () => {
   const { computeAggregate } = await importCore();
   const r = computeAggregate(C({ complete: 3, total: 5 }));
-  assert.equal(r.text, '3 sessions finished');
-  assert.equal(r.severity, 'done');
+  assert.equal(r.text, '2 sessions running');
+  assert.equal(r.severity, 'success');
+  assert.equal(r.alertCount, 0);
 });
 
-test('computeAggregate: all exited when done === total', async () => {
+test('computeAggregate: all exited when done+complete === total', async () => {
   const { computeAggregate } = await importCore();
-  const r = computeAggregate(C({ done: 3, total: 3 }));
+  const r = computeAggregate(C({ done: 2, complete: 1, total: 3 }));
   assert.equal(r.text, 'All sessions exited');
   assert.equal(r.severity, 'done');
 });
