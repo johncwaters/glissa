@@ -49,7 +49,10 @@ function detectLinkedWorktree(dir) {
     const dotGit = path.join(dir, ".git");
     if (!fs.statSync(dotGit).isFile()) return false;
     const m = /^gitdir:\s*(.+)$/m.exec(fs.readFileSync(dotGit, "utf8"));
-    return !!m && /(^|\/)worktrees\//.test(m[1].replace(/\\/g, "/"));
+    // .trim() drops the trailing CR from a CRLF `.git` file (the form git writes
+    // on Windows); .replace normalizes Windows backslash gitdir paths to forward
+    // slashes so the `worktrees/` segment test is separator-agnostic.
+    return !!m && /(^|\/)worktrees\//.test(m[1].trim().replace(/\\/g, "/"));
   } catch {
     return false;
   }

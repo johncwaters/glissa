@@ -57,6 +57,20 @@ test('a relative worktree pointer (Git 2.48+ --relative-paths) is a worktree', (
   }
 });
 
+test('a Windows backslash + CRLF gitdir is a worktree (path normalization)', () => {
+  const { dir, cleanup } = tmpDir();
+  // The form git actually writes on Windows: backslash separators, CRLF line end.
+  // Locks both the .replace(/\\/g,'/') and the .trim() in detectLinkedWorktree.
+  fs.writeFileSync(path.join(dir, '.git'), 'gitdir: C:\\repo\\.git\\worktrees\\feature\r\n');
+  const s = sessionFor(dir);
+  try {
+    assert.equal(s.isWorktree, true);
+  } finally {
+    s.destroy();
+    cleanup();
+  }
+});
+
 test('a submodule (.git file pointing at /modules/) is not flagged as a worktree', () => {
   const { dir, cleanup } = tmpDir();
   fs.writeFileSync(path.join(dir, '.git'), 'gitdir: /repo/.git/modules/sub\n');
