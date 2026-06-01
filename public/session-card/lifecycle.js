@@ -6,6 +6,7 @@ import { BADGE_LABELS, KILLABLE_STATES, RESTARTABLE_STATES, STATE_GLYPHS, STATES
 import { playAlertSound } from '../alert-sound.js';
 import { sendControlMsg } from '../control-ws.js';
 import { el } from '../dom-helpers.js';
+import { setHealthMonitorVisible } from '../health-monitor.js';
 import { getSoundId, isMinimized, isSoundEnabled } from '../ui-prefs.js';
 import { computeAggregate } from './aggregate-core.mjs';
 import { buildCardDOM, closeDebugOverlay, makeBadge, openDebugOverlay, setDebugMode, showConfirmDialog, startInlineRename } from './card-dom.js';
@@ -147,6 +148,7 @@ export function applyTerminalSettings(settings) {
   if (settings.cursorBlink != null) setTerminalCursorBlink(settings.cursorBlink);
   if (settings.debugMode != null) {
     setDebugMode(settings.debugMode);
+    setHealthMonitorVisible(settings.debugMode);
   }
   for (const [, ui] of sessionUIs) {
     if (!ui.term) continue;

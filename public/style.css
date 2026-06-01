@@ -439,54 +439,11 @@ body {
   overflow-y: auto;
 }
 
-/* ── Create session ghost card ────────────────────────────── */
-/* ── Ghost card (new-session trigger in minimized bar) ──── */
-/* Inherits .session-card.minimized sizing so it matches real
-   minimized cards exactly — only overrides appearance. */
-.session-card.ghost-card {
-  border-style: dashed;
-  border-color: var(--border-hover);
-  background: transparent;
-  cursor: pointer;
-  order: 999;
-  opacity: 0.85;
-}
-
-.session-card.ghost-card:hover {
-  opacity: 1;
-  border-style: solid;
-  border-color: var(--accent-dim);
-  background: color-mix(in oklab, var(--accent) 6%, transparent);
-  transform: none;
-  box-shadow: 0 0 0 1px color-mix(in oklab, var(--accent) 15%, transparent);
-}
-
-.session-card.ghost-card .session-card-header {
-  cursor: pointer;
-  background: transparent;
-  justify-content: center;
-  padding: 2px 8px;
-  min-height: 0;
-  line-height: 1.2;
-  border-bottom: none;
-  flex: 1;
-}
-
-.session-card.ghost-card .session-name {
-  color: var(--text);
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.05em;
-  white-space: nowrap;
-}
-
-.session-card.ghost-card:hover .session-name {
-  color: var(--text-head);
-}
-
-.session-card.ghost-card:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
+/* Hide the minimized bar's chrome (border/background/padding) when nothing
+   is minimized. The bar is truly empty then (cards move in and out as element
+   nodes and the HTML carries no inner whitespace), so :empty holds. */
+.minimized-bar:empty {
+  display: none;
 }
 
 /* ── Minimize/collapse ───────────────────────────────────── */
@@ -530,11 +487,10 @@ body {
   min-width: 0;
 }
 
-/* Invisible phantom on the right side of real cards — mirrors the
+/* Invisible phantom on the right side of minimized cards: mirrors the
    status dot's width so the name centers between two equal reserves
-   instead of being pushed right by the dot alone. Ghost card (which
-   has no dot) skips this and centers naturally. */
-.session-card.minimized:not(.ghost-card) .session-card-header::after {
+   instead of being pushed right by the dot alone. */
+.session-card.minimized .session-card-header::after {
   content: '';
   width: 8px;
   flex-shrink: 0;
@@ -1100,7 +1056,6 @@ body {
 .btn-action:focus-visible,
 .btn-dialog:focus-visible,
 .btn-settings-remove:focus-visible,
-.ghost-card:focus-visible,
 .btn-menu:focus-visible,
 .btn-settings-add:focus-visible,
 .dialog-advanced-toggle:focus-visible,

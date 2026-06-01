@@ -114,7 +114,7 @@ function handleSnapshot(sessions) {
     container.appendChild(el);
     const cta = el.querySelector('#sessions-empty-cta');
     cta.addEventListener('click', () => {
-      document.getElementById('btn-add-session')?.click();
+      document.getElementById('btn-add-session-header')?.click();
     });
     updateAggregateStatus();
   } else {
@@ -211,7 +211,6 @@ onControlMessage((msg) => {
 
 // ── Toolbar buttons ──────────────────────────────────────────
 
-document.getElementById('btn-add-session').addEventListener('click', createAddSessionDialog);
 document.getElementById('btn-add-session-header').addEventListener('click', createAddSessionDialog);
 
 // ── Header menu ──────────────────────────────────────────────
