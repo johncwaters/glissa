@@ -251,6 +251,15 @@ export function createSessionCard(sessionId, sessionName, initialState, options 
   return ui;
 }
 
+// Toggle the linked-worktree marker on an existing card without recreating it
+// (driven by the server's session-git delta on the health tick).
+export function setSessionWorktree(sessionId, worktree) {
+  const ui = sessionUIs.get(sessionId);
+  if (!ui) return;
+  if (worktree) ui.card.dataset.worktree = '';
+  else delete ui.card.dataset.worktree;
+}
+
 export function renameSessionCard(sessionId, newName) {
   const ui = sessionUIs.get(sessionId);
   if (!ui) return;

@@ -166,6 +166,26 @@ const EXIT_HOOKS = {
   },
 };
 
+// A linked git worktree marks its working dir with a `.git` FILE containing
+// `gitdir: .../.git/worktrees/<name>`, whereas a normal checkout has a `.git`
+// DIRECTORY. A submodule also uses a `.git` file, but it points at
+// `.../.git/modules/<name>`, so we require a `worktrees/` path segment to avoid
+// flagging submodules as worktrees. The `(^|/)` anchor also catches relative
+// pointers (Git 2.48+ `--relative-paths`, e.g. `../.git/worktrees/x` or a bare
+// `worktrees/x`). fs-only: no subprocess, no dependency, in keeping with the
+// "structural signals, no scraping" rule.
+function detectLinkedWorktree(dir) {
+  if (!dir) return false;
+  try {
+    const dotGit = path.join(dir, ".git");
+    if (!fs.statSync(dotGit).isFile()) return false;
+    const m = /^gitdir:\s*(.+)$/m.exec(fs.readFileSync(dotGit, "utf8"));
+    return !!m && /(^|\/)worktrees\//.test(m[1].replace(/\\/g, "/"));
+  } catch {
+    return false;
+  }
+}
+
 class Session extends EventEmitter {
   constructor({
     id,
@@ -206,6 +226,9 @@ class Session extends EventEmitter {
     this.id = id;
     this.name = name;
     this.path = path;
+    // Whether this session's cwd is a linked git worktree (vs a normal checkout).
+    // Surfaced to the dashboard as a small card marker; refreshed on the health tick.
+    this.isWorktree = detectLinkedWorktree(this.path);
     this.dangerouslySkipPermissions = dangerouslySkipPermissions;
     this.ptyProcess = null;
     this.state = STATES.DORMANT;
@@ -344,8 +367,19 @@ class Session extends EventEmitter {
       sleeping: this._sleeping,
       dangerouslySkipPermissions: this.dangerouslySkipPermissions,
       ephemeral: this.ephemeral,
+      isWorktree: this.isWorktree,
       auditLog: this.auditLog.slice(-100),
     };
+  }
+
+  // Recompute worktree status (a cwd can be turned into, or removed as, a linked
+  // worktree mid-session). Returns true when the value changed so the caller can
+  // rebroadcast just the delta instead of recreating the card.
+  refreshGitContext() {
+    const next = detectLinkedWorktree(this.path);
+    if (next === this.isWorktree) return false;
+    this.isWorktree = next;
+    return true;
   }
 
   getDetectionStats() {

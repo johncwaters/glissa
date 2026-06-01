@@ -118,6 +118,7 @@ export function buildCardDOM(sessionId, sessionName, initialState, options = {})
   card.dataset.session = sessionName;
   card.dataset.state = state;
   if (options.skipPerms) card.dataset.skipPerms = '';
+  if (options.worktree) card.dataset.worktree = '';
 
   // Header
   const header = el('div', 'session-card-header');
@@ -131,6 +132,11 @@ export function buildCardDOM(sessionId, sessionName, initialState, options = {})
   badge.classList.add('session-badge');
   const permsBadge = options.skipPerms ? el('span', 'perms-badge', 'YOLO') : null;
   if (permsBadge) permsBadge.title = 'Running with --dangerously-skip-permissions';
+  // Always built; shown only when the card carries data-worktree (toggled live by
+  // setSessionWorktree on the session-git delta), so the badge needs no rebuild.
+  const worktreeBadge = el('span', 'worktree-badge', 'worktree');
+  worktreeBadge.title = 'Running in a linked git worktree';
+  worktreeBadge.setAttribute('aria-label', 'Linked git worktree');
   const spacer = el('span', 'session-header-spacer');
 
   // Action buttons
@@ -164,7 +170,7 @@ export function buildCardDOM(sessionId, sessionName, initialState, options = {})
   btnDebug.setAttribute('aria-label', 'Debug session state');
 
   actions.append(btnDebug, btnMaximize, overflow);
-  const headerChildren = [btnMinimize, nameEl, badge];
+  const headerChildren = [btnMinimize, nameEl, badge, worktreeBadge];
   if (permsBadge) headerChildren.push(permsBadge);
   headerChildren.push(spacer, actions);
   header.append(...headerChildren);

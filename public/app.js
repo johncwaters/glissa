@@ -10,7 +10,7 @@ import { createAddSessionDialog, createConfirmDialog, createSettingsDialog } fro
 import { applyHealthSnapshot, mountHealthMonitor } from './health-monitor.js';
 import { handleDebugStateRefresh, handleDebugStateResponse } from './session-card/card-dom.js';
 import { exitMaximizeMode, isMaximizeActive, setLayoutMode } from './session-card/layout.js';
-import { applyState, applyTerminalSettings, createSessionCard, focusSessionCard, getSessionCount, handleSessionsReordered, hasSession, removeSessionCard, renameSessionCard, updateAggregateStatus } from './session-card/lifecycle.js';
+import { applyState, applyTerminalSettings, createSessionCard, focusSessionCard, getSessionCount, handleSessionsReordered, hasSession, removeSessionCard, renameSessionCard, setSessionWorktree, updateAggregateStatus } from './session-card/lifecycle.js';
 import { reconnectDataWs } from './session-card/terminal.js';
 import { showErrorToast } from './session-card/toast.js';
 import { handleTeamMessage, mountTeamsView, setTabActivityCallback } from './teams-panel.js';
@@ -122,7 +122,7 @@ function handleSnapshot(sessions) {
       if (hasSession(s.id)) {
         applyState(s.id, s.state);
       } else {
-        createSessionCard(s.id, s.name, s.state, { skipPerms: !!s.dangerouslySkipPermissions });
+        createSessionCard(s.id, s.name, s.state, { skipPerms: !!s.dangerouslySkipPermissions, worktree: !!s.isWorktree });
       }
     }
 
@@ -155,10 +155,11 @@ function handleStateChange(msg) {
 const messageHandlers = {
   'snapshot':           (msg) => handleSnapshot(msg.sessions),
   'state-change':       (msg) => handleStateChange(msg),
-  'session-added':      (msg) => { if (!msg.ephemeral) knownProjects.set(msg.id, msg.session); if (!hasSession(msg.id)) { clearEmptyPlaceholder(); createSessionCard(msg.id, msg.session, msg.state, { skipPerms: !!msg.skipPerms }); } autoLayout(); },
+  'session-added':      (msg) => { if (!msg.ephemeral) knownProjects.set(msg.id, msg.session); if (!hasSession(msg.id)) { clearEmptyPlaceholder(); createSessionCard(msg.id, msg.session, msg.state, { skipPerms: !!msg.skipPerms, worktree: !!msg.worktree }); } autoLayout(); },
   'session-removed':    (msg) => { knownProjects.delete(msg.id); removeSessionCard(msg.id); autoLayout(); },
   'session-renamed':    (msg) => { if (knownProjects.has(msg.id)) knownProjects.set(msg.id, msg.newName); renameSessionCard(msg.id, msg.newName); },
-  'session-modified':   (msg) => { if (!msg.ephemeral) knownProjects.set(msg.id, msg.session); removeSessionCard(msg.id); clearEmptyPlaceholder(); createSessionCard(msg.id, msg.session, msg.state, { skipPerms: !!msg.skipPerms }); autoLayout(); },
+  'session-modified':   (msg) => { if (!msg.ephemeral) knownProjects.set(msg.id, msg.session); removeSessionCard(msg.id); clearEmptyPlaceholder(); createSessionCard(msg.id, msg.session, msg.state, { skipPerms: !!msg.skipPerms, worktree: !!msg.worktree }); autoLayout(); },
+  'session-git':        (msg) => setSessionWorktree(msg.id, !!msg.worktree),
   'sessions-reordered': (msg) => handleSessionsReordered(msg.order),
   'debug-state-response': (msg) => handleDebugStateResponse(msg),
   'error':              (msg) => showErrorToast(msg.message),

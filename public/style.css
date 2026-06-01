@@ -543,6 +543,7 @@ body {
 /* Hide all tags when minimized — state is conveyed by border color (and WAITING glow). */
 .session-card.minimized .state-badge,
 .session-card.minimized .perms-badge,
+.session-card.minimized .worktree-badge,
 .session-card.minimized .session-header-spacer {
   display: none;
 }
@@ -803,6 +804,30 @@ body {
   background: color-mix(in srgb, var(--perms-warn) 16%, transparent);
   flex-shrink: 0;
   line-height: 18px;
+}
+
+/* Linked-worktree marker. Hidden by default; shown only when the card carries
+   data-worktree (set at build time, toggled live by setSessionWorktree on the
+   session-git delta). Mirrors .perms-badge but in the accent tone — it is
+   informational, not a warning. */
+.worktree-badge {
+  display: none;
+  align-items: center;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  padding: 0 6px;
+  border-radius: 2px;
+  color: var(--color-accent, #7c9eff);
+  border: 1px solid color-mix(in srgb, var(--color-accent, #7c9eff) 55%, transparent);
+  background: color-mix(in srgb, var(--color-accent, #7c9eff) 14%, transparent);
+  flex-shrink: 0;
+  line-height: 18px;
+}
+
+.session-card[data-worktree] .worktree-badge {
+  display: inline-flex;
 }
 
 /* ── Card header ──────────────────────────────────────────── */
