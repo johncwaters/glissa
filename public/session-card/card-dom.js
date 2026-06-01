@@ -104,8 +104,15 @@ export function makeBadge(state) {
   glyphSpan.className = 'state-glyph';
   glyphSpan.setAttribute('aria-hidden', 'true');
   glyphSpan.textContent = glyph;
+  // Label sits in its own span so CSS can reserve a fixed slot (min-width sized
+  // to the widest label). A constant-width badge is what stops status changes
+  // from reflowing the YOLO/worktree tags downstream of it. applyState() updates
+  // this span's text in place (see lifecycle.applyState).
+  const labelSpan = document.createElement('span');
+  labelSpan.className = 'state-label';
+  labelSpan.textContent = BADGE_LABELS[state] || state;
   badge.appendChild(glyphSpan);
-  badge.appendChild(document.createTextNode(BADGE_LABELS[state] || state));
+  badge.appendChild(labelSpan);
   return badge;
 }
 
@@ -170,9 +177,14 @@ export function buildCardDOM(sessionId, sessionName, initialState, options = {})
   btnDebug.setAttribute('aria-label', 'Debug session state');
 
   actions.append(btnDebug, btnMaximize, overflow);
-  const headerChildren = [btnMinimize, nameEl, badge, worktreeBadge];
+  // Order matters for layout stability. The variable-width status badge sits in
+  // the LEFT zone (with the name); the spacer then absorbs its width changes, so
+  // the persistent tags + actions in the RIGHT zone never reflow when status
+  // changes. Combined with the reserved-width badge slot (see .state-label), the
+  // header is dimensionally rigid across all states.
+  const headerChildren = [btnMinimize, nameEl, badge, spacer, worktreeBadge];
   if (permsBadge) headerChildren.push(permsBadge);
-  headerChildren.push(spacer, actions);
+  headerChildren.push(actions);
   header.append(...headerChildren);
 
   const termWrap = el('div', 'terminal-wrap');

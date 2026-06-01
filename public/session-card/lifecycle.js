@@ -348,17 +348,14 @@ export function applyState(sessionId, state) {
     }
   }
 
-  // Preserve the glyph span; only update its text and the sibling label text node.
+  // Preserve the glyph + label spans; update their text in place so the badge's
+  // reserved-width slot (.state-label min-width) holds steady and nothing reflows.
   ui.badge.dataset.state = state;
   const glyphSpan = ui.badge.querySelector('.state-glyph');
-  if (glyphSpan) {
+  const labelSpan = ui.badge.querySelector('.state-label');
+  if (glyphSpan && labelSpan) {
     glyphSpan.textContent = STATE_GLYPHS[state] || '';
-    const labelNode = glyphSpan.nextSibling;
-    if (labelNode && labelNode.nodeType === Node.TEXT_NODE) {
-      labelNode.nodeValue = BADGE_LABELS[state] || state;
-    } else {
-      ui.badge.appendChild(document.createTextNode(BADGE_LABELS[state] || state));
-    }
+    labelSpan.textContent = BADGE_LABELS[state] || state;
   } else {
     // Fallback: no glyph present (unexpected) — rebuild in place preserving classes
     const fresh = makeBadge(state);
