@@ -183,7 +183,14 @@ function createOrchestrator(deps) {
           return { branch: null, base: workspace.base || null, merged: false };
         }
         const message = `${team.id}: ${runId}${verdict ? ` (${verdict})` : ''}`;
-        const addPaths = [`${team.outputPath}/runs/${runId}`, `${team.outputPath}/log.md`];
+        // SHIP-gate the auto-merge boundary: only a final SHIP stages the team's writeScope (source);
+        // a FIX/BLOCK/failed/halt run (and the finally integrate) stages ONLY the run folder + log, so
+        // no partial or red source merges. Marketing's writeScope is [] -> byte-identical addPaths.
+        const addPaths = [
+          `${team.outputPath}/runs/${runId}`,
+          `${team.outputPath}/log.md`,
+          ...(verdict === 'SHIP' ? (team.writeScope || []) : []),
+        ];
         return gitWorkspace.integrate({ projectPath, workspace, message, addPaths }) || fallback;
       } catch (err) {
         return { ...fallback, reason: err.message };
@@ -237,6 +244,16 @@ function createOrchestrator(deps) {
       const runOneStage = async ({ stage, round = 0 }) => {
         const topic = () => topicRef.value;
         const platforms = () => platformsRef.value;
+        // Restore-before-audit: before EVERY auditor invocation (the linear pass AND each re-audit in the
+        // revise loop), restore the tests in the worktree to the run's base SHA, so the auditor grades the
+        // SOURCE against the unedited oracle. A fixer that "greened" the suite by editing/adding a test has
+        // that edit reverted, so the suite is red again here and the verdict is FIX/BLOCK (nothing merges).
+        // Gated on the stage being the verdict stage AND the team opting in via writeScope + testGlobs, so
+        // marketing (writeScope []) and any non-verdict stage never trigger it: byte-identical behavior.
+        if (stage.verdict && gitWorkspace && workspace.isGit
+          && team.writeScope.length && team.testGlobs.length) {
+          gitWorkspace.restoreTests({ workspace, testGlobs: team.testGlobs });
+        }
         if (active.get(lockKey).cancelled) {
           output.appendLog(cwd, team.outputPath, `${dateStr} | ${topic() || '(topic)'} | ${platforms() || '-'} | CANCELLED`);
           log(`run cancelled: ${lockKey} before stage ${stage.id}`);

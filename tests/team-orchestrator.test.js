@@ -593,3 +593,302 @@ test('loop 8: cancel during a revise round discards the worktree', async () => {
     fs.rmSync(proj, { recursive: true, force: true });
   }
 });
+
+// --- QA team: SHIP-gated writeScope staging + restore-before-audit (the oracle-integrity mechanism) ---
+
+const OUT_QA = '.glissa/teams/qa';
+const QA_PACK = ['how-to-run.md', 'flaky-and-known.md', 'fix-policy.md'];
+const TRIAGE = '## Gate\nnpm test\n## Failures\nfoo.test\n## Classification\nfoo: real\n'
+  + '## Scope\nsrc/foo.js\n## Plan\nfix foo\n';
+const TRIAGE_GREEN = 'SUITE_GREEN\n';
+const FIXES = '## Fixes\nfixed src/foo.js\n## Suite result\nall pass\n## Un-landable\nnone\n';
+const QREVIEW = (v) => `## Whole-suite\ngreen\n## Root-cause\nyes\n## Flaky/env\nhandled\n## Summary\nok\nVERDICT: ${v}\n`;
+const REPORT = '## Report\nwhat was red, fixed, residual risk\n';
+
+function seedQaPack(proj) {
+  const dir = path.join(proj, OUT_QA, 'pack');
+  fs.mkdirSync(dir, { recursive: true });
+  for (const name of QA_PACK) fs.writeFileSync(path.join(dir, name), `# ${name}\nreal content\n`, 'utf8');
+}
+// With a git workspace the run folder + log live in the WORKTREE (gw.wdirs[0]), not the project tree.
+// These helpers read from a given base dir (pass the worktree dir for a git run, or proj for in-place).
+function qaRunsOf(base) {
+  const dir = path.join(base, OUT_QA, 'runs');
+  return fs.existsSync(dir) ? fs.readdirSync(dir) : [];
+}
+function qaRunIdOf(base) {
+  return qaRunsOf(base)[0] || '';
+}
+function qaRunDirOf(base) {
+  return path.join(base, OUT_QA, 'runs', qaRunIdOf(base));
+}
+function logLinesQa(base) {
+  const p = path.join(base, OUT_QA, 'log.md');
+  return fs.existsSync(p) ? fs.readFileSync(p, 'utf8').split(/\r?\n/).filter(Boolean) : [];
+}
+
+// A capturing git workspace: a real temp worktree (so stage files write) that RECORDS the addPaths of the
+// last integrate and every restoreTests checkout/clean command into a shared `cmds` log (interleaved with
+// a per-stage marker so order vs the stage spawns is assertable). baseSha is present so the orchestrator's
+// restore gate is satisfied for a qa run.
+function capturingWorkspace() {
+  const calls = { create: 0, integrate: 0, discard: 0, restore: 0 };
+  const wdirs = [];
+  const cmds = []; // 'restore:checkout ...', 'restore:clean ...'
+  let lastAddPaths = null;
+  return {
+    calls,
+    wdirs,
+    cmds,
+    get lastAddPaths() { return lastAddPaths; },
+    create: () => {
+      calls.create += 1;
+      const wt = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-qawt-'));
+      wdirs.push(wt);
+      return { cwd: wt, isGit: true, branch: 'glissa/qa/run', base: 'main', baseSha: 'base000' };
+    },
+    integrate: ({ addPaths }) => {
+      calls.integrate += 1;
+      lastAddPaths = addPaths;
+      return { branch: null, base: 'main', merged: true, committed: true };
+    },
+    discard: () => { calls.discard += 1; },
+    restoreTests: ({ testGlobs = [] }) => {
+      calls.restore += 1;
+      for (const g of testGlobs) cmds.push(`restore:checkout base000 -- ${g}`);
+      for (const g of testGlobs) cmds.push(`restore:clean -f -- ${g}`);
+    },
+    cleanup: () => { for (const d of wdirs) fs.rmSync(d, { recursive: true, force: true }); },
+  };
+}
+test('qa SHIP stages writeScope (src/** + lib/**) in addition to run folder + log', async () => {
+  const proj = tmpProject();
+  const gw = capturingWorkspace();
+  try {
+    seedQaPack(proj);
+    const { orch } = makeOrch(proj, {
+      'runner-triager': { write: TRIAGE },
+      fixer: { write: FIXES },
+      auditor: { write: QREVIEW('SHIP') },
+      reporter: { write: REPORT },
+    }, { gitWorkspace: gw });
+    const res = await orch.runTeam({ teamId: 'qa', projectId: 'p1' });
+    assert.equal(res.verdict, 'SHIP');
+    const runId = qaRunIdOf(gw.wdirs[0]);
+    assert.deepEqual(gw.lastAddPaths, [
+      `${OUT_QA}/runs/${runId}`, `${OUT_QA}/log.md`, 'src/**', 'lib/**',
+    ], 'SHIP stages the writeScope globs after the run folder + log');
+  } finally {
+    gw.cleanup();
+    fs.rmSync(proj, { recursive: true, force: true });
+  }
+});
+
+test('qa non-SHIP (BLOCK) stages EXACTLY run folder + log, no source globs; reporter skipped', async () => {
+  const proj = tmpProject();
+  const gw = capturingWorkspace();
+  try {
+    seedQaPack(proj);
+    const { orch } = makeOrch(proj, {
+      'runner-triager': { write: TRIAGE },
+      fixer: { write: FIXES },
+      auditor: { write: QREVIEW('BLOCK') },
+      reporter: { write: REPORT },
+    }, { gitWorkspace: gw });
+    const res = await orch.runTeam({ teamId: 'qa', projectId: 'p1' });
+    assert.equal(res.verdict, 'BLOCK');
+    const runId = qaRunIdOf(gw.wdirs[0]);
+    assert.deepEqual(gw.lastAddPaths, [`${OUT_QA}/runs/${runId}`, `${OUT_QA}/log.md`],
+      'a non-SHIP run stages no source globs');
+    assert.ok(!fs.existsSync(path.join(qaRunDirOf(gw.wdirs[0]), 'report.md')), 'reporter skipped on BLOCK (runIfVerdict)');
+  } finally {
+    gw.cleanup();
+    fs.rmSync(proj, { recursive: true, force: true });
+  }
+});
+
+test('qa runner-triager SUITE_GREEN halts: zero downstream stages, halt event, bare addPaths', async () => {
+  const proj = tmpProject();
+  const gw = capturingWorkspace();
+  try {
+    seedQaPack(proj);
+    const { orch, events } = makeOrch(proj, {
+      'runner-triager': { write: TRIAGE_GREEN },
+      fixer: { write: FIXES },
+      auditor: { write: QREVIEW('SHIP') },
+    }, { gitWorkspace: gw });
+    const res = await orch.runTeam({ teamId: 'qa', projectId: 'p1' });
+    assert.equal(res.halted, 'SUITE_GREEN');
+    assert.equal(startedCount(events, 'fixer'), 0, 'fixer never started');
+    assert.equal(startedCount(events, 'auditor'), 0, 'auditor never started');
+    assert.ok(logLinesQa(gw.wdirs[0]).some((l) => l.includes('HALT (SUITE_GREEN)')), 'HALT line logged');
+    const failed = events.find((e) => e.name === 'team-run-failed');
+    assert.ok(failed && failed.reason === 'halt' && failed.signal === 'SUITE_GREEN', 'halt event with signal');
+    // The finally-integrate stages only run folder + log (no SHIP, so no source).
+    const runId = qaRunIdOf(gw.wdirs[0]);
+    assert.deepEqual(gw.lastAddPaths, [`${OUT_QA}/runs/${runId}`, `${OUT_QA}/log.md`]);
+    assert.equal(gw.calls.restore, 0, 'no restore on a healthy-repo halt (auditor never ran)');
+  } finally {
+    gw.cleanup();
+    fs.rmSync(proj, { recursive: true, force: true });
+  }
+});
+
+test('qa restores the oracle before EACH audit (checkout-then-clean, testGlob-scoped) and not before other stages', async () => {
+  const proj = tmpProject();
+  const gw = capturingWorkspace();
+  try {
+    seedQaPack(proj);
+    // FIX then SHIP so there are TWO audits (linear + one re-audit); fixer outputs differ so no-progress
+    // does not bail.
+    const { orch, events } = makeOrch(proj, {
+      'runner-triager': { write: TRIAGE },
+      fixer: [{ write: FIXES }, { write: '## Fixes\nround 2\n## Suite result\npass\n## Un-landable\nnone\n' }],
+      auditor: [{ write: QREVIEW('FIX') }, { write: QREVIEW('SHIP') }],
+      reporter: { write: REPORT },
+    }, { gitWorkspace: gw });
+    const res = await orch.runTeam({ teamId: 'qa', projectId: 'p1' });
+    assert.equal(res.verdict, 'SHIP');
+    assert.equal(res.rounds, 1);
+    // restore ran once per audit: linear audit + one re-audit = 2.
+    assert.equal(gw.calls.restore, 2, 'restore ran before each of the two audits');
+    // Command shape: checkout precedes clean, both scoped to the five testGlobs.
+    const TG = ['**/*.test.*', '**/*.spec.*', '**/test/**', '**/tests/**', '**/__tests__/**'];
+    for (const g of TG) {
+      assert.ok(gw.cmds.includes(`restore:checkout base000 -- ${g}`), `checkout for ${g}`);
+      assert.ok(gw.cmds.includes(`restore:clean -f -- ${g}`), `clean for ${g}`);
+    }
+    const firstClean = gw.cmds.findIndex((c) => c.startsWith('restore:clean'));
+    const lastCheckout = gw.cmds.map((c) => c.startsWith('restore:checkout')).lastIndexOf(true);
+    // Within one restore the checkouts precede the cleans; across two restores the pattern repeats.
+    assert.ok(firstClean > 0 && lastCheckout >= 0, 'both checkout and clean commands recorded');
+    // SHIP staged source.
+    const runId = qaRunIdOf(gw.wdirs[0]);
+    assert.deepEqual(gw.lastAddPaths, [`${OUT_QA}/runs/${runId}`, `${OUT_QA}/log.md`, 'src/**', 'lib/**']);
+    // Sanity: the auditor started twice, the (non-verdict) triager/fixer did not trigger restore beyond the 2.
+    assert.equal(startedCount(events, 'auditor'), 2);
+  } finally {
+    gw.cleanup();
+    fs.rmSync(proj, { recursive: true, force: true });
+  }
+});
+
+test('qa bogus path: auditor never reaches SHIP (FIX then BLOCK) -> no source merged', async () => {
+  const proj = tmpProject();
+  const gw = capturingWorkspace();
+  try {
+    seedQaPack(proj);
+    // Models a fixer whose "green" depended on a test edit: after the restore the audit is red, so the
+    // auditor returns FIX, then BLOCK on the re-audit. The run never SHIPs, so no source stages.
+    const { orch } = makeOrch(proj, {
+      'runner-triager': { write: TRIAGE },
+      fixer: [{ write: FIXES }, { write: '## Fixes\nstill red\n## Suite result\nfail\n## Un-landable\ntest edit needed\n' }],
+      auditor: [{ write: QREVIEW('FIX') }, { write: QREVIEW('BLOCK') }],
+      reporter: { write: REPORT },
+    }, { gitWorkspace: gw });
+    const res = await orch.runTeam({ teamId: 'qa', projectId: 'p1' });
+    assert.equal(res.verdict, 'BLOCK');
+    assert.ok(gw.calls.restore >= 2, 'restore ran before each audit');
+    const runId = qaRunIdOf(gw.wdirs[0]);
+    assert.deepEqual(gw.lastAddPaths, [`${OUT_QA}/runs/${runId}`, `${OUT_QA}/log.md`],
+      'a bogus test-edit fix never SHIPs, so no source globs are staged');
+    assert.ok(!fs.existsSync(path.join(qaRunDirOf(gw.wdirs[0]), 'report.md')), 'no report on BLOCK');
+  } finally {
+    gw.cleanup();
+    fs.rmSync(proj, { recursive: true, force: true });
+  }
+});
+
+test('qa negative control: a clean source-only fix SHIPs and stages source (restore does not disturb it)', async () => {
+  const proj = tmpProject();
+  const gw = capturingWorkspace();
+  try {
+    seedQaPack(proj);
+    const { orch } = makeOrch(proj, {
+      'runner-triager': { write: TRIAGE },
+      fixer: { write: FIXES },
+      auditor: { write: QREVIEW('SHIP') },
+      reporter: { write: REPORT },
+    }, { gitWorkspace: gw });
+    const res = await orch.runTeam({ teamId: 'qa', projectId: 'p1' });
+    assert.equal(res.verdict, 'SHIP');
+    assert.equal(gw.calls.restore, 1, 'restore ran once before the single audit');
+    const runId = qaRunIdOf(gw.wdirs[0]);
+    assert.deepEqual(gw.lastAddPaths, [`${OUT_QA}/runs/${runId}`, `${OUT_QA}/log.md`, 'src/**', 'lib/**']);
+    assert.ok(fs.existsSync(path.join(qaRunDirOf(gw.wdirs[0]), 'report.md')), 'reporter ran on SHIP');
+  } finally {
+    gw.cleanup();
+    fs.rmSync(proj, { recursive: true, force: true });
+  }
+});
+
+test('marketing records NO restore (its writeScope is [], so the restore gate is false)', async () => {
+  const proj = tmpProject();
+  const gw = capturingWorkspace();
+  try {
+    seedPack(proj); // marketing pack
+    const { orch } = makeOrch(proj, {
+      researcher: { write: BRIEF }, strategist: { write: PLAN }, writer: { write: DRAFTS },
+      editor: { write: REVIEW('SHIP') }, publisher: { write: PUBLISHED },
+    }, { gitWorkspace: gw });
+    const res = await orch.runTeam({ teamId: 'marketing', projectId: 'p1' });
+    assert.equal(res.verdict, 'SHIP');
+    assert.equal(gw.calls.restore, 0, 'marketing never restores (no writeScope opt-in)');
+    assert.equal(gw.cmds.length, 0, 'no restore commands recorded for marketing');
+    // And marketing's addPaths is byte-identical (run folder + log only; its writeScope is []).
+    const mktRunId = fs.readdirSync(path.join(gw.wdirs[0], OUT, 'runs'))[0];
+    assert.deepEqual(gw.lastAddPaths, [`${OUT}/runs/${mktRunId}`, `${OUT}/log.md`]);
+  } finally {
+    gw.cleanup();
+    fs.rmSync(proj, { recursive: true, force: true });
+  }
+});
+
+test('qa FIX loop re-runs [fixer] bounded by maxRounds 2, then reporter skipped on a non-SHIP terminal', async () => {
+  const proj = tmpProject();
+  const gw = capturingWorkspace();
+  try {
+    seedQaPack(proj);
+    // Sticky FIX with DISTINCT fixer output each round (no-progress never trips) -> exhausts maxRounds 2.
+    const { orch, events } = makeOrch(proj, {
+      'runner-triager': { write: TRIAGE },
+      fixer: [
+        { write: '## Fixes\nr0\n## Suite result\nx\n## Un-landable\nn\n' },
+        { write: '## Fixes\nr1\n## Suite result\nx\n## Un-landable\nn\n' },
+        { write: '## Fixes\nr2\n## Suite result\nx\n## Un-landable\nn\n' },
+      ],
+      auditor: { write: QREVIEW('FIX') }, // sticky FIX across all audits
+      reporter: { write: REPORT },
+    }, { gitWorkspace: gw });
+    const res = await orch.runTeam({ teamId: 'qa', projectId: 'p1' });
+    assert.equal(res.verdict, 'FIX');
+    assert.equal(res.rounds, 2);
+    assert.equal(startedCount(events, 'fixer'), 3, 'fixer: linear + 2 revise rounds');
+    assert.equal(startedCount(events, 'auditor'), 3, 'auditor: linear + 2 re-audits');
+    assert.equal(gw.calls.restore, 3, 'restore before each of the 3 audits');
+    assert.ok(!fs.existsSync(path.join(qaRunDirOf(gw.wdirs[0]), 'report.md')), 'reporter skipped on FIX');
+    const runId = qaRunIdOf(gw.wdirs[0]);
+    assert.deepEqual(gw.lastAddPaths, [`${OUT_QA}/runs/${runId}`, `${OUT_QA}/log.md`], 'no source on a FIX terminal');
+  } finally {
+    gw.cleanup();
+    fs.rmSync(proj, { recursive: true, force: true });
+  }
+});
+
+test('qa first run with an unfilled pack scaffolds + halts (needs-setup), zero stages', async () => {
+  const proj = tmpProject();
+  try {
+    const { orch, events } = makeOrch(proj, { 'runner-triager': { write: TRIAGE } });
+    const res = await orch.runTeam({ teamId: 'qa', projectId: 'p1' });
+    assert.equal(res.needsSetup, true);
+    assert.ok(res.unfilled.length > 0, 'reports unfilled pack files');
+    assert.equal(qaRunsOf(proj).length, 0, 'no run folder created');
+    assert.ok(!events.some((e) => e.name === 'team-stage-started'), 'no stage ran');
+    // Scaffolded the three qa pack templates (with the GLISSA:NEEDS-INPUT sentinel) for the operator.
+    for (const name of QA_PACK) {
+      assert.ok(fs.existsSync(path.join(proj, OUT_QA, 'pack', name)), `${name} scaffolded`);
+    }
+  } finally {
+    fs.rmSync(proj, { recursive: true, force: true });
+  }
+});

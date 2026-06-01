@@ -61,6 +61,10 @@ function createGitWorkspace(opts = {}) {
   function integrate({ projectPath, workspace, message, addPaths = [] }) {
     if (!workspace || !workspace.isGit) return { branch: null, base: null, merged: false, committed: false, reason: 'not-git' };
     const wt = workspace.cwd;
+    // addPaths are git pathspecs run verbatim (no shell). A matching glob stages its subtree; a NO-MATCH
+    // pathspec makes 'git add' exit non-zero (e.g. 128), which run() swallows to {ok:false}. The run folder
+    // + log always match and are staged first, so by 'diff --cached --quiet' there is staged content and we
+    // commit. ':(glob)' is the escape hatch only if a future git config breaks '**'.
     for (const p of addPaths) run(['add', '--', p], wt);
     const committed = run(['diff', '--cached', '--quiet'], wt).ok === false
       ? run(['commit', '-m', message || 'glissa team run'], wt).ok
@@ -92,7 +96,32 @@ function createGitWorkspace(opts = {}) {
     run(['worktree', 'prune'], projectPath);
   }
 
-  return { create, integrate, discard };
+  // Restore the oracle (tests) in the worktree to the run's base SHA before an audit, so the auditor
+  // grades the SOURCE against the unedited tests: any test the fixer edited/deleted is reverted, and any
+  // untracked NEW test the fixer added is removed. Combined with tests being EXCLUDED from writeScope
+  // (a test edit can never merge), the oracle is protected at both the audit and the merge.
+  //
+  // Issued through the SAME swallowing run() as everything else, ONE call per glob. Per-glob is
+  // load-bearing: a SINGLE `git checkout <sha> -- <glob...>` is ATOMIC and ABORTS the whole restore if
+  // ANY pathspec matches nothing (verified on git 2.44.0.windows.1: exit 1, nothing restored), which is
+  // the common case (a repo with *.test.* files but no tests/ dir). Per-glob isolates each no-match
+  // (swallowed) so the matching globs still restore.
+  //   - checkout reverts TRACKED tests; a no-match glob exits non-zero, harmlessly swallowed.
+  //   - clean removes UNTRACKED NEW tests; testGlob-SCOPED so the run folder under .glissa/ and any new
+  //     in-scope SOURCE survive. `-f` (no `-d`) is sufficient: a scoped pathspec like '**/__tests__/**'
+  //     removes files inside a new untracked test dir and the now-empty dir (verified, same git); an
+  //     unscoped clean would delete the run folder + new source, so the scope is mandatory.
+  // No-op unless the project is a git repo with a captured baseSha and a non-empty testGlobs.
+  function restoreTests({ workspace, testGlobs = [] }) {
+    if (!workspace || !workspace.isGit || !testGlobs.length || !workspace.baseSha) return;
+    const wt = workspace.cwd;
+    for (const glob of testGlobs) run(['checkout', workspace.baseSha, '--', glob], wt);
+    for (const glob of testGlobs) run(['clean', '-f', '--', glob], wt);
+  }
+
+  return {
+    create, integrate, discard, restoreTests,
+  };
 }
 
 function defaultCopyPack(projectPath, wtDir, outputPath) {

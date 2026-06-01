@@ -13,6 +13,11 @@ const DEFAULT_TEAMS_DIR = path.join(__dirname, 'teams');
 const WEEKDAY_TOKENS = new Set(['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']);
 const PERMISSION_MODES = new Set(['yolo', 'scoped', 'interactive']);
 
+// Project-agnostic default for which paths a verdict stage's oracle (the tests) lives at. Used by the
+// orchestrator's restore-before-audit (team-git restoreTests) when a team declares writeScope but omits
+// its own testGlobs. A team with an unusual layout overrides `testGlobs` in team.json.
+const DEFAULT_TEST_GLOBS = ['**/*.test.*', '**/*.spec.*', '**/test/**', '**/tests/**', '**/__tests__/**'];
+
 function fail(field, message, teamId) {
   const who = teamId ? ` (${teamId})` : '';
   throw new Error(`Invalid team definition${who}: ${field} ${message}`);
@@ -52,6 +57,25 @@ function validatePack(pack, teamId) {
     if (!Array.isArray(pack.required) || pack.required.some((f) => typeof f !== 'string')) {
       fail('pack.required', 'must be an array of pack file names', teamId);
     }
+  }
+}
+
+// The repo-relative globs a run may stage back to the base branch on a final SHIP (the auto-merge
+// boundary, applied SHIP-gated in team-orchestrator). Optional; normalizes to [] (stage nothing extra).
+function validateWriteScope(writeScope, teamId) {
+  if (writeScope == null) return; // optional
+  if (!Array.isArray(writeScope) || writeScope.some((g) => typeof g !== 'string')) {
+    fail('writeScope', 'must be an array of repo-relative path globs', teamId);
+  }
+}
+
+// The repo-relative globs identifying the oracle (the tests) that the orchestrator restores to the run's
+// base SHA before each audit (restore-before-audit, team-git restoreTests). Optional; normalizes to
+// DEFAULT_TEST_GLOBS.
+function validateTestGlobs(testGlobs, teamId) {
+  if (testGlobs == null) return; // optional
+  if (!Array.isArray(testGlobs) || testGlobs.some((g) => typeof g !== 'string')) {
+    fail('testGlobs', 'must be an array of repo-relative path globs', teamId);
   }
 }
 
@@ -126,6 +150,8 @@ function validateAndNormalize(def, teamId, teamDir) {
   validateSchedule(def.schedule, teamId);
   validatePermissions(def.permissions, teamId);
   validatePack(def.pack, teamId);
+  validateWriteScope(def.writeScope, teamId);
+  validateTestGlobs(def.testGlobs, teamId);
 
   const baseDir = path.dirname(teamDir);
 
@@ -164,6 +190,12 @@ function validateAndNormalize(def, teamId, teamDir) {
     schedule: def.schedule || null,
     permissions: def.permissions || { mode: 'interactive', deny: [] },
     stageTimeoutSeconds: def.stageTimeoutSeconds || 900,
+    // The SHIP-gated auto-merge boundary; default [] (a team stages only the run folder + log, so
+    // marketing's addPaths stays byte-identical and nothing extra merges).
+    writeScope: (def.writeScope && def.writeScope.length) ? def.writeScope.slice() : [],
+    // The restore-before-audit oracle pathspec; default DEFAULT_TEST_GLOBS so the guard always has a
+    // sane project-agnostic test matcher even when a team omits it. (Inert unless writeScope is set.)
+    testGlobs: (def.testGlobs && def.testGlobs.length) ? def.testGlobs.slice() : DEFAULT_TEST_GLOBS.slice(),
     stages,
     teamDir,
     packRequired,

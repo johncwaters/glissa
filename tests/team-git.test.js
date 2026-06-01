@@ -134,3 +134,200 @@ test('integrate (injected git) commits, ff-merges, removes the worktree, deletes
   assert.ok(cmds.includes('worktree remove --force /wt'));
   assert.ok(cmds.includes('branch -D glissa/marketing/r'));
 });
+
+// --- writeScope staging via integrate (the SHIP-gated auto-merge boundary), falsifiable injected git ---
+
+// A recording fake git that mirrors real git's two relevant exit behaviors: `diff --cached --quiet`
+// throws when there ARE staged changes, and a DESIGNATED no-match `add -- <noMatchGlob>` throws
+// {status:128} (a glob that matches nothing). Everything else returns ''.
+function recordingGit(cmds, { noMatchGlob = null } = {}) {
+  return (args) => {
+    cmds.push(args.join(' '));
+    if (args[0] === 'diff' && args.includes('--cached')) { const e = new Error('staged'); e.status = 1; throw e; }
+    if (noMatchGlob && args[0] === 'add' && args[args.length - 1] === noMatchGlob) {
+      const e = new Error(`pathspec '${noMatchGlob}' did not match any files`); e.status = 128; throw e;
+    }
+    return '';
+  };
+}
+
+test('integrate stages a matching writeScope glob and the commit fires', () => {
+  const cmds = [];
+  const gw = createGitWorkspace({ git: recordingGit(cmds) });
+  const ws = { cwd: '/wt', isGit: true, branch: 'glissa/qa/r', base: 'main' };
+  const r = gw.integrate({
+    projectPath: '/repo', workspace: ws, message: 'qa: r (SHIP)',
+    addPaths: ['.glissa/teams/qa/runs/r', '.glissa/teams/qa/log.md', 'src/**'],
+  });
+  assert.ok(cmds.includes('add -- src/**'), 'the writeScope glob is passed verbatim to git add');
+  assert.equal(r.committed, true);
+  assert.ok(cmds.some((c) => c.startsWith('commit -m')), 'a commit was issued');
+  assert.equal(r.merged, true);
+  assert.ok(cmds.includes('merge --ff-only glissa/qa/r'));
+});
+
+test('integrate: a no-match writeScope add throws {status:128} but the commit STILL fires from run folder + log', () => {
+  const cmds = [];
+  const gw = createGitWorkspace({ git: recordingGit(cmds, { noMatchGlob: 'src/**' }) });
+  const ws = { cwd: '/wt', isGit: true, branch: 'glissa/qa/r', base: 'main' };
+  const r = gw.integrate({
+    projectPath: '/repo', workspace: ws, message: 'qa: r (SHIP)',
+    addPaths: ['.glissa/teams/qa/runs/r', '.glissa/teams/qa/log.md', 'src/**'],
+  });
+  assert.ok(cmds.includes('add -- src/**'), 'the no-match glob was still attempted');
+  assert.equal(r.committed, true, 'run folder + log carried staged content despite the throw');
+  assert.ok(cmds.some((c) => c.startsWith('commit -m')));
+  assert.equal(r.merged, true);
+});
+
+test('integrate: order-independence, a no-match glob FIRST still commits', () => {
+  const cmds = [];
+  const gw = createGitWorkspace({ git: recordingGit(cmds, { noMatchGlob: 'src/**' }) });
+  const ws = { cwd: '/wt', isGit: true, branch: 'glissa/qa/r', base: 'main' };
+  const r = gw.integrate({
+    projectPath: '/repo', workspace: ws, message: 'qa: r (SHIP)',
+    addPaths: ['src/**', '.glissa/teams/qa/runs/r', '.glissa/teams/qa/log.md'],
+  });
+  assert.equal(r.committed, true, 'a leading no-match glob does not abort the commit');
+  assert.equal(r.merged, true);
+});
+
+// --- restoreTests: the restore-before-audit oracle reset (command shape via injected git) ---
+
+test('restoreTests issues a per-glob checkout <baseSha> then a per-glob clean -f (testGlob-scoped, in order)', () => {
+  const cmds = [];
+  const gw = createGitWorkspace({ git: (args) => { cmds.push(args.join(' ')); return ''; } });
+  const testGlobs = ['**/*.test.*', '**/test/**'];
+  gw.restoreTests({ workspace: { cwd: '/wt', isGit: true, baseSha: 'base123' }, testGlobs });
+
+  // Every glob is checked out at baseSha, then every glob is cleaned; checkout precedes clean.
+  for (const g of testGlobs) {
+    assert.ok(cmds.includes(`checkout base123 -- ${g}`), `checkout for ${g}`);
+    assert.ok(cmds.includes(`clean -f -- ${g}`), `clean for ${g}`);
+  }
+  const firstClean = cmds.findIndex((c) => c.startsWith('clean'));
+  const lastCheckout = cmds.map((c) => c.startsWith('checkout')).lastIndexOf(true);
+  assert.ok(lastCheckout < firstClean, 'all checkouts precede the first clean');
+  // No combined call: each pathspec is its own argv (per-glob, so a no-match cannot abort the batch).
+  assert.ok(!cmds.some((c) => c.includes('**/*.test.* **/test/**')), 'globs are not batched into one call');
+});
+
+test('restoreTests is a no-op when not git, no baseSha, or empty testGlobs', () => {
+  const cmds = [];
+  const gw = createGitWorkspace({ git: (args) => { cmds.push(args.join(' ')); return ''; } });
+  gw.restoreTests({ workspace: { cwd: '/wt', isGit: false, baseSha: 'b' }, testGlobs: ['**/*.test.*'] });
+  gw.restoreTests({ workspace: { cwd: '/wt', isGit: true }, testGlobs: ['**/*.test.*'] }); // no baseSha
+  gw.restoreTests({ workspace: { cwd: '/wt', isGit: true, baseSha: 'b' }, testGlobs: [] });
+  assert.equal(cmds.length, 0, 'no git command issued in any no-op case');
+});
+
+test('restoreTests swallows a no-match checkout (no throw propagates)', () => {
+  const gw = createGitWorkspace({
+    git: (args) => {
+      if (args[0] === 'checkout') { const e = new Error('did not match'); e.status = 128; throw e; }
+      return '';
+    },
+  });
+  // Must not throw even though every checkout throws 128 (no-match), mirroring real git.
+  assert.doesNotThrow(() => gw.restoreTests({
+    workspace: { cwd: '/wt', isGit: true, baseSha: 'b' }, testGlobs: ['nope/**'],
+  }));
+});
+
+// Real-git restore-before-audit end to end: a fixer that edits a tracked test, adds an untracked NEW test
+// under a new dir, AND writes a source file + a run folder. After restoreTests the tracked test is back to
+// base, the untracked new test is gone, and the source file + the run folder survive (clean is scoped).
+test('restoreTests (real git) restores tracked tests, removes untracked new tests, keeps source + run folder', { skip: !GIT }, () => {
+  const repo = initRepo();
+  try {
+    const gw = createGitWorkspace();
+    const ws = gw.create({ projectPath: repo, teamId: 'qa', label: 'r', outputPath: '.glissa/teams/qa' });
+    assert.equal(ws.isGit, true);
+
+    // Seed a tracked test in the worktree and commit it so it is part of the base the run branched from.
+    const trackedTest = path.join(ws.cwd, 'tests', 'keep.test.js');
+    fs.mkdirSync(path.dirname(trackedTest), { recursive: true });
+    fs.writeFileSync(trackedTest, 'ORIGINAL\n', 'utf8');
+    git(['add', '-A'], ws.cwd);
+    git(['commit', '-m', 'tracked test'], ws.cwd);
+    const baseSha = git(['rev-parse', 'HEAD'], ws.cwd).trim();
+    const workspace = { ...ws, baseSha };
+
+    // Fixer tampers: edit the tracked test, add an untracked NEW test in a new dir, write source, write a run folder.
+    fs.writeFileSync(trackedTest, 'TAMPERED\n', 'utf8');
+    const newTest = path.join(ws.cwd, 'tests', '__tests__', 'fresh.test.js');
+    fs.mkdirSync(path.dirname(newTest), { recursive: true });
+    fs.writeFileSync(newTest, 'trivially passes\n', 'utf8');
+    const srcFile = path.join(ws.cwd, 'src', 'app.js');
+    fs.mkdirSync(path.dirname(srcFile), { recursive: true });
+    fs.writeFileSync(srcFile, 'real source fix\n', 'utf8');
+    const runArtifact = path.join(ws.cwd, '.glissa', 'teams', 'qa', 'runs', 'r0', 'review.md');
+    fs.mkdirSync(path.dirname(runArtifact), { recursive: true });
+    fs.writeFileSync(runArtifact, 'run artifact\n', 'utf8');
+
+    const testGlobs = ['**/*.test.*', '**/*.spec.*', '**/test/**', '**/tests/**', '**/__tests__/**'];
+    gw.restoreTests({ workspace, testGlobs });
+
+    // Normalize CRLF: git autocrlf may rewrite line endings on checkout (Windows); the restore reverting
+    // the TAMPERED content to base is what matters here, not the platform line ending.
+    const norm = (p) => fs.readFileSync(p, 'utf8').replace(/\r\n/g, '\n');
+    assert.equal(norm(trackedTest), 'ORIGINAL\n', 'tracked test restored to base');
+    assert.ok(!fs.existsSync(newTest), 'untracked new test removed by the scoped clean');
+    assert.ok(fs.existsSync(srcFile), 'out-of-scope source survives');
+    assert.equal(norm(srcFile), 'real source fix\n', 'source content untouched');
+    assert.ok(fs.existsSync(runArtifact), 'run folder under .glissa/ survives the scoped clean');
+
+    gw.discard({ projectPath: repo, workspace: ws });
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+// Real-git writeScope e2e: a source file under src/ merges into the base working tree on integrate; and a
+// companion where src/** matches nothing yet the run folder still merges (no-match add is harmless).
+test('integrate (real git) lands a src/** file in the base working tree and merges cleanly', { skip: !GIT }, () => {
+  const repo = initRepo();
+  try {
+    const gw = createGitWorkspace();
+    const ws = gw.create({ projectPath: repo, teamId: 'qa', label: 'r', outputPath: '.glissa/teams/qa' });
+
+    const runRel = '.glissa/teams/qa/runs/r';
+    fs.mkdirSync(path.join(ws.cwd, runRel), { recursive: true });
+    fs.writeFileSync(path.join(ws.cwd, runRel, 'review.md'), '## Summary\nx\n', 'utf8');
+    const srcRel = path.join('src', 'fix.js');
+    fs.mkdirSync(path.join(ws.cwd, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(ws.cwd, srcRel), 'module.exports = 1;\n', 'utf8');
+
+    const r = gw.integrate({
+      projectPath: repo, workspace: ws, message: 'qa: r (SHIP)', addPaths: [runRel, 'src/**'],
+    });
+    assert.equal(r.committed, true);
+    assert.equal(r.merged, true);
+    assert.ok(fs.existsSync(path.join(repo, srcRel)), 'the src fix landed in the base working tree');
+    assert.equal(git(['status', '--porcelain'], repo).trim(), '', 'working tree clean after merge');
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test('integrate (real git) with a no-match src/** still merges the run folder', { skip: !GIT }, () => {
+  const repo = initRepo();
+  try {
+    const gw = createGitWorkspace();
+    const ws = gw.create({ projectPath: repo, teamId: 'qa', label: 'r2', outputPath: '.glissa/teams/qa' });
+
+    const runRel = '.glissa/teams/qa/runs/r2';
+    fs.mkdirSync(path.join(ws.cwd, runRel), { recursive: true });
+    fs.writeFileSync(path.join(ws.cwd, runRel, 'review.md'), '## Summary\nx\n', 'utf8');
+
+    // No file under src/, so 'add -- src/**' matches nothing (throws 128, swallowed).
+    const r = gw.integrate({
+      projectPath: repo, workspace: ws, message: 'qa: r2 (BLOCK)', addPaths: [runRel, 'src/**'],
+    });
+    assert.equal(r.committed, true, 'run folder carried the commit despite the no-match glob');
+    assert.equal(r.merged, true);
+    assert.ok(fs.existsSync(path.join(repo, runRel, 'review.md')), 'run folder merged into the base tree');
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});

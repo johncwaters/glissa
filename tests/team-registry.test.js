@@ -50,6 +50,10 @@ const invalidCases = [
   ['bad schedule.time', { id: 'x', outputPath: 'y', schedule: { time: '5am' }, stages: [okStage] }, /schedule\.time/],
   ['bad permissions.mode', { id: 'x', outputPath: 'y', permissions: { mode: 'bogus' }, stages: [okStage] }, /permissions\.mode/],
   ['non-array permissions.deny', { id: 'x', outputPath: 'y', permissions: { deny: 'no' }, stages: [okStage] }, /permissions\.deny/],
+  ['non-array writeScope', { id: 'x', outputPath: 'y', writeScope: 'src/**', stages: [okStage] }, /writeScope/],
+  ['non-string writeScope element', { id: 'x', outputPath: 'y', writeScope: ['src/**', 5], stages: [okStage] }, /writeScope/],
+  ['non-array testGlobs', { id: 'x', outputPath: 'y', testGlobs: '**/*.test.*', stages: [okStage] }, /testGlobs/],
+  ['non-string testGlobs element', { id: 'x', outputPath: 'y', testGlobs: ['**/*.test.*', 5], stages: [okStage] }, /testGlobs/],
 ];
 
 for (const [label, def, re] of invalidCases) {
@@ -216,10 +220,11 @@ test('A2: stage.agent with a path separator or ".." is rejected', () => {
   }
 });
 
-// A4: listTeams() over the real repo teams dir returns only ['marketing']; _shared is not a team.
+// A4: listTeams() over the real repo teams dir returns the real teams (sorted); _shared is not a team.
+// Intentionally widened from exactly ['marketing'] to also include 'qa' now that the qa team ships.
 test('A4: listTeams ignores _shared (no team.json) and returns only the real teams', () => {
   const teams = listTeams(REPO_TEAMS);
-  assert.deepEqual(teams, ['marketing'], 'only marketing is a team; _shared is skipped');
+  assert.deepEqual(teams, ['marketing', 'qa'], 'marketing and qa are teams; _shared is skipped');
   assert.ok(!teams.includes('_shared'), '_shared is not listed as a team');
 });
 
@@ -326,4 +331,55 @@ test('A5: scaffoldPack copies a required file from the fallback templates dir', 
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
+});
+
+// --- writeScope + testGlobs validation and normalization (the SHIP-gated auto-merge boundary) ---
+
+const DEFAULT_TEST_GLOBS = ['**/*.test.*', '**/*.spec.*', '**/test/**', '**/tests/**', '**/__tests__/**'];
+
+test('writeScope omitted normalizes to [] and testGlobs omitted normalizes to DEFAULT_TEST_GLOBS', () => {
+  const def = teamDef('t', defaultStages());
+  const baseDir = makeTmpTeams({ teamId: 't', def });
+  withTmp(baseDir, () => {
+    const team = loadTeam('t', baseDir);
+    assert.deepEqual(team.writeScope, [], 'writeScope defaults to []');
+    assert.deepEqual(team.testGlobs, DEFAULT_TEST_GLOBS, 'testGlobs defaults to the project-agnostic set');
+  });
+});
+
+test('a real writeScope + testGlobs are normalized (slice-copied) onto the team', () => {
+  const def = { ...teamDef('t', defaultStages()), writeScope: ['src/**', 'lib/**'], testGlobs: ['**/*.test.*'] };
+  const baseDir = makeTmpTeams({ teamId: 't', def });
+  withTmp(baseDir, () => {
+    const team = loadTeam('t', baseDir);
+    assert.deepEqual(team.writeScope, ['src/**', 'lib/**']);
+    assert.deepEqual(team.testGlobs, ['**/*.test.*']);
+    assert.notEqual(team.writeScope, def.writeScope, 'writeScope is copied, not the same array');
+    assert.notEqual(team.testGlobs, def.testGlobs, 'testGlobs is copied, not the same array');
+  });
+});
+
+// Backward-compat lock: marketing declares neither field, so writeScope stays [] (its addPaths is
+// byte-identical and nothing extra ever merges).
+test('loadTeam("marketing").writeScope deep-equals [] (backward-compat lock)', () => {
+  const team = loadTeam('marketing', REPO_TEAMS);
+  assert.deepEqual(team.writeScope, []);
+});
+
+// The real qa team loads with the expected roster, writeScope, testGlobs, schedule, and revise config.
+test('loadTeam("qa") loads the 4-stage roster with writeScope/testGlobs and a fixer revise loop', () => {
+  const team = loadTeam('qa', REPO_TEAMS);
+  assert.equal(team.id, 'qa');
+  assert.equal(team.outputPath, '.glissa/teams/qa');
+  assert.deepEqual(team.stages.map((s) => s.id), ['runner-triager', 'fixer', 'auditor', 'reporter']);
+  for (const s of team.stages) {
+    assert.ok(s.produces, `${s.id} declares produces`);
+    assert.ok(fs.existsSync(s.agentPath), `agent file exists for ${s.id}`);
+  }
+  assert.deepEqual(team.writeScope, ['src/**', 'lib/**'], 'tests are excluded from writeScope');
+  assert.deepEqual(team.testGlobs, DEFAULT_TEST_GLOBS, 'qa uses the default testGlobs set');
+  assert.equal(team.schedule.enabled, false, 'schedule ships disabled');
+  assert.deepEqual(team.packRequired, ['how-to-run.md', 'flaky-and-known.md', 'fix-policy.md']);
+  const auditor = team.stages.find((s) => s.id === 'auditor');
+  assert.deepEqual(auditor.revise.stages, ['fixer'], 'auditor revises the earlier fixer stage');
 });
