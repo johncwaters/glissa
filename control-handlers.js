@@ -63,6 +63,7 @@ function registerControlHandlers(controlWss, deps) {
     getProjectPathById = null,
     openInEditor = null,
     startPackSetup = null,
+    removeEphemeralSession = null,
   } = deps;
 
   /** Find a session by id (primary) with name fallback for legacy clients. */
@@ -135,6 +136,22 @@ function registerControlHandlers(controlWss, deps) {
     const sess = findSession(msg);
     if (!sess) {
       ws.send(JSON.stringify({ type: 'error', message: 'Session not found' }));
+      return;
+    }
+
+    // Ephemeral sessions (e.g. guided team-pack setup) were never persisted to config.projects, so
+    // the filter below is a no-op and the config-reload diff explicitly skips them — making the UI
+    // remove button a dead click. Tear them down directly instead: kill the PTY, drop the card.
+    if (sess.ephemeral) {
+      if (removeEphemeralSession) {
+        removeEphemeralSession(sess.id);
+      } else {
+        // Minimal fallback when backend teardown isn't injected (older callers/tests).
+        sess.destroy();
+        sessions.delete(sess.id);
+        broadcastControl({ type: 'session-removed', id: sess.id, session: sess.name });
+        console.log(`[control] Removed session via UI: ${sess.name}`);
+      }
       return;
     }
 

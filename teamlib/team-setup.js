@@ -14,15 +14,21 @@ const { PACK_SENTINEL } = require('./team-output');
 // (the agent reads them on disk), so this prompt stays small and never duplicates that content.
 
 // Build the initial prompt for the interactive setup session. `packFiles` is
-// [{ name, path }] (absolute paths to the already-scaffolded pack files). Pure and brand-neutral so
-// it works for any team against any project.
-function buildSetupPrompt(team, { packDir, packFiles = [], projectPath } = {}) {
+// [{ name, path }] (absolute paths to the already-scaffolded pack files). `projectContext` is an optional
+// pre-rendered markdown block of deterministic starting facts (from project-context.js); when present it is
+// injected as advisory context and PASS 1 becomes verify-not-rediscover. Pure (no fs) and brand-neutral so
+// it works for any team against any project. With no (or empty) projectContext the output is byte-identical
+// to the original prompt.
+function buildSetupPrompt(team, {
+  packDir, packFiles = [], projectPath, projectContext,
+} = {}) {
   const teamName = (team && (team.name || team.id)) || 'this team';
   const fileLines = packFiles
     .map((f) => `  - ${f.path}`)
     .join('\n');
+  const hasContext = !!(projectContext && String(projectContext).trim());
 
-  return [
+  const lines = [
     `You are setting up the "${teamName}" content pipeline for the project at ${projectPath}.`,
     '',
     'Your one job in this session: fill in this project\'s "pack" so the pipeline can run. The pack is',
@@ -30,13 +36,38 @@ function buildSetupPrompt(team, { packDir, packFiles = [], projectPath } = {}) {
     'calendar, and channels) that every run of the pipeline reads. They live here:',
     `  ${packDir}`,
     '',
-    'Work in two passes.',
-    '',
-    'PASS 1, LEARN THE PROJECT. Explore this repository to infer what you can on your own: the',
-    'product or brand name and what it does, who the audience is, the content and posting cadence, and',
-    'which social channels it targets. Good places to look: README, package.json, any docs or content',
-    'directories, marketing or site config, and any social or scheduling configuration. Do not open',
-    'secrets or .env files.',
+  ];
+
+  if (hasContext) {
+    lines.push(
+      '## STARTING FACTS (gathered automatically from this project\'s non-secret files; confirm before trusting)',
+      String(projectContext).trim(),
+      '',
+    );
+  }
+
+  lines.push('Work in two passes.', '');
+
+  if (hasContext) {
+    lines.push(
+      'PASS 1, LEARN THE PROJECT. The starting facts above were pulled deterministically from this',
+      'project\'s README, package.json, and git config. Treat them as a starting point to confirm, not as',
+      'authoritative. Verify and extend them by exploring the repository: confirm the product or brand name',
+      'and what it does, who the audience is, the content and posting cadence, and which social channels it',
+      'targets. Good places to look: README, package.json, any docs or content directories, marketing or',
+      'site config, and any social or scheduling configuration. Do not open secrets or .env files.',
+    );
+  } else {
+    lines.push(
+      'PASS 1, LEARN THE PROJECT. Explore this repository to infer what you can on your own: the',
+      'product or brand name and what it does, who the audience is, the content and posting cadence, and',
+      'which social channels it targets. Good places to look: README, package.json, any docs or content',
+      'directories, marketing or site config, and any social or scheduling configuration. Do not open',
+      'secrets or .env files.',
+    );
+  }
+
+  lines.push(
     '',
     'PASS 2, FILL THE PACK, one file at a time. Each of these files already exists with a template and',
     `a "${PACK_SENTINEL}" marker:`,
@@ -53,7 +84,9 @@ function buildSetupPrompt(team, { packDir, packFiles = [], projectPath } = {}) {
     '',
     `When every file is filled and no "${PACK_SENTINEL}" marker remains anywhere in the pack, tell me`,
     'exactly: "Pack setup complete. Go to the Teams tab and click Run." Then stop and wait.',
-  ].join('\n');
+  );
+
+  return lines.join('\n');
 }
 
 // Stable id for a (team, project) setup session, so a second "Set up" click is detected as
