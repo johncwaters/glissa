@@ -814,6 +814,9 @@ function createBackend(httpServer, options = {}) {
       startOffset,
     });
     if (replay) {
+      // sendImmediate runs here on a FRESH socket (bufferedAmount 0), so its backpressure
+      // drop branch is normally unreachable. If that assumption ever breaks, ws-sender
+      // rewinds sentOffset to the replay base and logs loudly so the regression surfaces.
       sender.sendImmediate(replay);
     }
 

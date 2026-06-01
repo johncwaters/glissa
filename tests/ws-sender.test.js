@@ -417,3 +417,86 @@ test('a sub-cap frame buffered across a drain is not double-sent (regression)', 
     assert.equal(ws.sent.join(''), 'AAAACC', 'timer backfill then pending flush: no duplicate');
   }
 });
+
+// ── sendImmediate (replay frame) dropped under backpressure ──────────────────
+// The replay frame carries HISTORICAL bytes [base, startOffset). On a drop the sender
+// rewinds sentOffset to that base so maybeBackfill re-pulls history + live, instead of
+// resuming live-only and stranding the (already client-side-cleared) history.
+
+test('sendImmediate drop rewinds sentOffset to the replay base — recovers history + live', () => {
+  const ws = fakeWs({ bufferedAmount: DEFAULTS.highWaterMark + 1 }); // pinned at connect
+  const sched = manualScheduler();
+  const ring = fakeRing();
+  ring.produce('R'.repeat(100)); // 100 historical bytes in the ring; base 0, live baseline 100
+  const s = makeSender(ws, sched, { source: ring, startOffset: 100 });
+
+  assert.equal(s.sendImmediate('R'.repeat(100)), false, 'replay dropped while pinned');
+  assert.deepEqual(ws.sent, [], 'nothing sent to the pinned socket');
+
+  ws.bufferedAmount = 0;
+  feed(ring, s, 'LIVE'); // drained -> onData short-circuit backfills from the rewound base
+
+  // THE bite: rewound to base 0, not the live baseline 100 (the pre-fix live-only bug).
+  assert.ok(ring.calls.includes(0), 'backfill queried getBufferSince(0) — rewound to replay base');
+  assert.ok(!ring.calls.includes(100), 'did NOT resume from the live baseline (pre-fix behavior)');
+  assert.equal(ws.sent.join(''), 'R'.repeat(100) + 'LIVE', 'history + live recovered, in order');
+});
+
+test('sendImmediate drop with NO source neither rewinds nor desyncs (drop-and-forget unchanged)', () => {
+  const ws = fakeWs({ bufferedAmount: DEFAULTS.highWaterMark + 1 });
+  const sched = manualScheduler();
+  const s = makeSender(ws, sched, { startOffset: 100 }); // no source
+
+  assert.equal(s.sendImmediate('R'.repeat(100)), false, 'replay dropped');
+  assert.equal(sched.pendingTimers(), 1, 'stall timer still armed (close path preserved)');
+
+  ws.bufferedAmount = 0;
+  s.onData('LIVE');
+  sched.runMicro();
+  assert.equal(ws.sent.join(''), 'LIVE', 'only live output; no historical re-pull without a source');
+});
+
+test('sendImmediate drop on a non-fresh socket logs loudly and still rewinds', () => {
+  const ws = fakeWs();
+  const sched = manualScheduler();
+  const ring = fakeRing();
+  const s = makeSender(ws, sched, { source: ring, startOffset: 0 });
+
+  // Make the socket non-fresh: a healthy live send advances sentOffset past initialOffset.
+  feed(ring, s, 'LIVE');
+  sched.runMicro();
+  assert.equal(ws.sent.join(''), 'LIVE', 'baseline live send advanced sentOffset');
+
+  ws.bufferedAmount = DEFAULTS.highWaterMark + 1;
+  const orig = console.error;
+  const errs = [];
+  console.error = (...a) => errs.push(a);
+  try {
+    assert.equal(s.sendImmediate('REPLAY'), false, 'dropped while pinned');
+  } finally {
+    console.error = orig; // MANDATORY restore — node:test runs the file in ONE process
+  }
+  assert.equal(errs.length, 1, 'loud guard fired exactly once');
+  assert.match(String(errs[0][0]), /non-fresh socket/, 'diagnostic identifies the violation');
+
+  ws.bufferedAmount = 0;
+  feed(ring, s, 'X');
+  assert.ok(ring.calls.length >= 1, 'recovery still attempted after the loud guard (rewind happened)');
+});
+
+test('sendImmediate drop then eviction recovers via CLEAR + retained replay', () => {
+  const ws = fakeWs({ bufferedAmount: DEFAULTS.highWaterMark + 1 });
+  const sched = manualScheduler();
+  const ring = fakeRing();
+  ring.produce('R'.repeat(100));
+  const s = makeSender(ws, sched, { source: ring, startOffset: 100 });
+
+  assert.equal(s.sendImmediate('R'.repeat(100)), false); // dropped -> rewind to base 0
+  ring.setBase(50);     // eviction: offsets < 50 scrolled out of the ring
+  ws.bufferedAmount = 0;
+  feed(ring, s, 'LIVE');
+
+  assert.equal(ws.sent.length, 1, 'one backfill frame');
+  assert.ok(ws.sent[0].startsWith('\x1b[2J\x1b[3J\x1b[H'), 'CLEAR prefix on evicted recovery');
+  assert.equal(ws.sent[0], '\x1b[2J\x1b[3J\x1b[H' + 'R'.repeat(50) + 'LIVE', 'CLEAR + retained tail');
+});

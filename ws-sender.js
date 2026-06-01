@@ -60,9 +60,12 @@ function createWsSender(ws, opts = {}) {
   let stallTimer = null;
   let destroyed = false;
   // sentOffset = LIVE bytes (offset >= startOffset) durably handed to ws.send for this
-  // client. Advanced ONLY by live flushSend sends and by maybeBackfill — NOT by
-  // sendImmediate, whose replay frame carries historical bytes BEFORE startOffset.
-  let sentOffset = opts.startOffset || 0;
+  // client. Advanced FORWARD only by live flushSend sends and by maybeBackfill — NOT by
+  // sendImmediate's success path, whose replay frame carries historical bytes BEFORE
+  // startOffset. The SOLE backward movement is sendImmediate's drop branch, which rewinds
+  // sentOffset to the dropped replay's base so maybeBackfill re-pulls history + live.
+  const initialOffset = opts.startOffset || 0;
+  let sentOffset = initialOffset;
   // desynced = a drop happened and a backfill is owed once the socket drains.
   let desynced = false;
 
@@ -199,7 +202,27 @@ function createWsSender(ws, opts = {}) {
       // Same PAIRING REQUIREMENT as flushSend: mark desynced AND arm the stall timer so
       // a connect whose replay frame is dropped (then goes quiet) still re-checks.
       // Only meaningful with a source; otherwise unchanged (drop-and-forget).
-      if (source) desynced = true;
+      if (source) {
+        // This runs on a FRESH socket (called once, before onData is wired), so sentOffset
+        // is still initialOffset and sendBuffer is empty — that invariant is what makes the
+        // rewind below land on the replay's exact base. If a future refactor calls
+        // sendImmediate on a non-fresh socket, the rewind base is wrong: make that loud
+        // (console.error, NOT throw — a throw here tears down the connection, against the
+        // EventEmitter/log error contract) but still recover so production self-heals.
+        if (sentOffset !== initialOffset || sendBuffer.length !== 0) {
+          console.error(
+            '[ws-sender] sendImmediate drop on a non-fresh socket: sentOffset=%d ' +
+            'initialOffset=%d sendBuffer.length=%d — rewind base may be wrong; recovering anyway.',
+            sentOffset, initialOffset, sendBuffer.length,
+          );
+        }
+        // Rewind sentOffset to the dropped replay's base. The payload IS the historical
+        // replay frame [sentOffset - payload.length, sentOffset), so the next maybeBackfill
+        // re-pulls getBufferSince(base) = [base, end) (history + any live, or CLEAR + data
+        // if evicted) instead of live-only — which would strand the cleared client's history.
+        sentOffset -= payload.length;
+        desynced = true;
+      }
       armStallClose();
       return false;
     }
