@@ -1910,46 +1910,6 @@ body {
 .header-tab:hover { color: var(--text); }
 .header-tab[aria-selected="true"] { color: var(--text-head); font-weight: 700; }
 
-/* ── Layout toggle (Auto / Grid / Split) ─────────────────────
-   Operator-pinned session arrangement. Shown only in the Sessions view and only
-   with >=2 sessions; a quiet segmented control, accent-filled on the active option. */
-.layout-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 1px;
-  padding: 2px;
-  border: 1px solid var(--border-dim);
-  border-radius: var(--radius);
-  background: color-mix(in srgb, var(--text) 2%, transparent);
-}
-.layout-toggle.hidden,
-body[data-active-view="teams"] .layout-toggle {
-  display: none;
-}
-.layout-opt {
-  appearance: none;
-  border: none;
-  background: transparent;
-  cursor: pointer;
-  font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-  padding: 3px 8px;
-  border-radius: 2px;
-  transition: color var(--transition-fast), background var(--transition-fast);
-}
-.layout-opt:hover { color: var(--text); }
-.layout-opt[aria-pressed="true"] {
-  color: var(--accent);
-  background: color-mix(in oklab, var(--accent) 12%, transparent);
-}
-.layout-opt:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
-}
 .header-tab::after {
   content: '';
   position: absolute;

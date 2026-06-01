@@ -343,48 +343,19 @@ btnMute.addEventListener('click', (e) => {
   updateMuteButton();
 });
 
-// ── Layout toggle ─────────────────────────────────────────
+// ── Layout (always auto) ──────────────────────────────────
+// The arrangement always follows the live session count: exactly two sessions
+// sit side-by-side (split), any other count is a grid. No operator toggle.
 
 const sessionsContainer = document.getElementById('sessions-container');
-const layoutToggle = document.getElementById('layout-toggle');
-const layoutOpts = [...layoutToggle.querySelectorAll('.layout-opt')];
-
-// null = auto (count-based); 'default' | 'split' = operator-pinned.
-let _manualLayout = null;
 
 function applyLayout(layoutId) {
   sessionsContainer.classList.toggle('layout-split', layoutId === 'split');
   setLayoutMode(layoutId);
 }
 
-// An operator's explicit choice wins and is held across session add/remove (no
-// silent collapse); otherwise fall back to count-based (split for exactly two).
-// A pinned split with <2 sessions renders as grid but keeps the pin, so it
-// returns to split once a second session exists.
 function autoLayout() {
-  const count = getSessionCount();
-  let target;
-  if (_manualLayout === 'split') target = count >= 2 ? 'split' : 'default';
-  else if (_manualLayout === 'default') target = 'default';
-  else target = count === 2 ? 'split' : 'default';
-  applyLayout(target);
-  updateLayoutToggleUI();
-}
-
-function updateLayoutToggleUI() {
-  // The toggle only earns its space once there are enough sessions to arrange.
-  layoutToggle.classList.toggle('hidden', getSessionCount() < 2);
-  const current = _manualLayout || 'auto';
-  for (const btn of layoutOpts) {
-    btn.setAttribute('aria-pressed', String(btn.dataset.layout === current));
-  }
-}
-
-for (const btn of layoutOpts) {
-  btn.addEventListener('click', () => {
-    _manualLayout = btn.dataset.layout === 'auto' ? null : btn.dataset.layout;
-    autoLayout();
-  });
+  applyLayout(getSessionCount() === 2 ? 'split' : 'default');
 }
 
 // ── Keyboard shortcuts (chrome-level) ─────────────────────────
