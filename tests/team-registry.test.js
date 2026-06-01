@@ -220,11 +220,14 @@ test('A2: stage.agent with a path separator or ".." is rejected', () => {
   }
 });
 
-// A4: listTeams() over the real repo teams dir returns the real teams (sorted); _shared is not a team.
-// Intentionally widened from exactly ['marketing'] to also include 'qa' now that the qa team ships.
-test('A4: listTeams ignores _shared (no team.json) and returns only the real teams', () => {
+// A4: listTeams() over the real repo teams dir lists the real teams (marketing, qa, release-notes) and
+// skips _shared (no team.json). Membership form (not an exact-array pin) so adding a future team does not
+// re-break this assertion.
+test('A4: listTeams lists the real teams and ignores _shared (no team.json)', () => {
   const teams = listTeams(REPO_TEAMS);
-  assert.deepEqual(teams, ['marketing', 'qa'], 'marketing and qa are teams; _shared is skipped');
+  assert.ok(teams.includes('marketing'), 'marketing is a team');
+  assert.ok(teams.includes('qa'), 'qa is a team');
+  assert.ok(teams.includes('release-notes'), 'release-notes is a team');
   assert.ok(!teams.includes('_shared'), '_shared is not listed as a team');
 });
 

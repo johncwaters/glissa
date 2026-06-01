@@ -295,3 +295,48 @@ test('setup-team-pack requires teamId and projectId', () => {
   h.send({ type: 'setup-team-pack', teamId: 'marketing' });
   assert.ok(h.sent.some((m) => m.type === 'error' && /required/i.test(m.message)));
 });
+
+test('remove-session tears down an ephemeral session directly, not via the config diff', () => {
+  // Regression: ephemeral setup sessions are never in config.projects, so the persisted-config
+  // filter is a no-op and the reload diff skips them — the X button was a dead click. They must be
+  // routed to the direct teardown instead.
+  const removed = [];
+  let saveCalled = false;
+  const sessions = new Map([
+    ['setup:marketing:p1', { id: 'setup:marketing:p1', name: 'Setup: Marketing → milepost', ephemeral: true, toSnapshot: () => ({}) }],
+  ]);
+  const h = harness({
+    sessions,
+    configStore: { save: () => { saveCalled = true; return null; }, getSettings: () => ({}) },
+    removeEphemeralSession: (id) => removed.push(id),
+  });
+  h.send({ type: 'remove-session', id: 'setup:marketing:p1' });
+  assert.deepEqual(removed, ['setup:marketing:p1'], 'delegated to the direct ephemeral teardown');
+  assert.equal(saveCalled, false, 'did not touch the persisted config');
+});
+
+test('remove-session ephemeral fallback destroys, drops from the map, and broadcasts removal', () => {
+  // When backend teardown isn't injected (older callers/tests), the handler still kills the session.
+  let destroyed = false;
+  const broadcasts = [];
+  const sessions = new Map([
+    ['setup:marketing:p1', { id: 'setup:marketing:p1', name: 'Setup', ephemeral: true, toSnapshot: () => ({}), destroy: () => { destroyed = true; } }],
+  ]);
+  const h = harness({ sessions, broadcastControl: (m) => broadcasts.push(m) });
+  h.send({ type: 'remove-session', id: 'setup:marketing:p1' });
+  assert.equal(destroyed, true, 'killed the PTY via destroy()');
+  assert.equal(sessions.has('setup:marketing:p1'), false, 'dropped from the live map');
+  assert.ok(broadcasts.some((m) => m.type === 'session-removed' && m.id === 'setup:marketing:p1'));
+});
+
+test('remove-session for a normal session still goes through the config filter', () => {
+  let reloaded = false;
+  let destroyed = false;
+  const sessions = new Map([
+    ['p1', { id: 'p1', name: 'milepost', ephemeral: false, toSnapshot: () => ({}), destroy: () => { destroyed = true; } }],
+  ]);
+  const h = harness({ sessions, applyConfigReload: () => { reloaded = true; } });
+  h.send({ type: 'remove-session', id: 'p1' });
+  assert.equal(reloaded, true, 'applied a config reload (persisted path)');
+  assert.equal(destroyed, false, 'normal session is not torn down via the ephemeral branch');
+});

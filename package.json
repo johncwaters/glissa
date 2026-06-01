@@ -31,6 +31,8 @@
     "teamlib/team-git.js",
     "teamlib/team-settings.js",
     "teamlib/team-setup.js",
+    "teamlib/project-context.js",
+    "teamlib/project-context-core.js",
     "teams/",
     "shared/states.js",
     "shared/states.esm.js",

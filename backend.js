@@ -43,6 +43,7 @@ const { createGitWorkspace } = require('./teamlib/team-git');
 const { buildStageSpawnOptions, teamPermissions } = require('./teamlib/team-settings');
 const { buildStagePrompt } = require('./teamlib/team-prompt');
 const { buildSetupPrompt, setupSessionId, setupSessionName, packPaths } = require('./teamlib/team-setup');
+const { scanProjectContext } = require('./teamlib/project-context');
 const teamOutput = require('./teamlib/team-output');
 
 // WAITING-state notification escalation cadence (fixed 5 minutes; previously the
@@ -420,7 +421,12 @@ function createBackend(httpServer, options = {}) {
     teamOutput.ensureStructure(projectPath, team.outputPath);
     teamOutput.scaffoldPack(projectPath, team.outputPath, team.packTemplatesDir, team.packRequired);
     const { packDir, packFiles } = packPaths(projectPath, team);
-    const prompt = buildSetupPrompt(team, { packDir, packFiles, projectPath });
+    // Deterministic project-context scan (total, never throws); an empty summary degrades to the
+    // original prompt with no STARTING FACTS block.
+    const projectContext = scanProjectContext(projectPath).summary;
+    const prompt = buildSetupPrompt(team, {
+      packDir, packFiles, projectPath, projectContext,
+    });
 
     const projectDisplayName = (config.projects.find((p) => p.id === projectId) || {}).name || '';
     const name = setupSessionName(team, projectDisplayName);
@@ -616,16 +622,25 @@ function createBackend(httpServer, options = {}) {
     return { added, removed, modified, renamed, unchanged };
   }
 
+  // Full teardown for one live session id: close its data clients, ack notifications, destroy the
+  // Session (kills the PTY + cleans hooks), drop it from the map, and tell the dashboard. Returns
+  // false if the id wasn't in the map. INVARIANT: acknowledge BEFORE destroy — destroy() calls
+  // removeAllListeners(), which would pre-empt the notification/exit cleanup.
+  function _teardownSession(id, logLabel) {
+    const sess = sessions.get(id);
+    if (!sess) return false;
+    closeSessionDataClients(id);
+    notificationManager.acknowledge(id);
+    sess.destroy();
+    sessions.delete(id);
+    broadcastControl({ type: 'session-removed', id, session: sess.name });
+    console.log(`${logLabel}: ${sess.name}`);
+    return true;
+  }
+
   function _removeOldSessions(removed) {
     for (const id of removed) {
-      const sess = sessions.get(id);
-      closeSessionDataClients(id);
-      // INVARIANT: acknowledge BEFORE destroy — destroy() calls removeAllListeners()
-      notificationManager.acknowledge(id);
-      sess.destroy();
-      sessions.delete(id);
-      broadcastControl({ type: 'session-removed', id, session: sess.name });
-      console.log(`[config] Removed session: ${sess.name}`);
+      _teardownSession(id, '[config] Removed session');
     }
   }
 
@@ -753,6 +768,9 @@ function createBackend(httpServer, options = {}) {
     getProjectPathById,
     openInEditor,
     startPackSetup,
+    // Ephemeral sessions (guided pack setup) are not config-backed, so the remove-session
+    // handler can't go through the config-reload diff path; give it a direct teardown.
+    removeEphemeralSession: (id) => _teardownSession(id, '[control] Removed session via UI'),
   });
 
   // --- Data WebSocket ---

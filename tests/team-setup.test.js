@@ -64,6 +64,31 @@ test('buildSetupPrompt tolerates a team with no name (falls back to id)', () => 
   assert.match(p, /"x"/);
 });
 
+test('buildSetupPrompt injects a STARTING FACTS block and reworded PASS 1 when projectContext is given', () => {
+  const p = promptFor({ projectContext: '- Project: demo-app\n- Repository: https://github.com/acme/demo-app' });
+  assert.match(p, /STARTING FACTS/);
+  assert.ok(p.includes('- Project: demo-app'), 'embeds the provided context block');
+  assert.match(p, /confirm before trusting/i);
+  assert.match(p, /pulled deterministically/i);
+  // The original blind-explore wording is replaced when context is present.
+  assert.equal(p.includes('Explore this repository to infer what you can on your own'), false);
+});
+
+test('buildSetupPrompt output is unchanged when projectContext is absent or empty/whitespace', () => {
+  const base = promptFor();
+  assert.equal(base.includes('STARTING FACTS'), false, 'no block without context');
+  assert.match(base, /Explore this repository to infer what you can on your own/);
+  // Empty string and whitespace are treated as absent: byte-identical to the no-context prompt.
+  assert.equal(promptFor({ projectContext: '' }), base);
+  assert.equal(promptFor({ projectContext: '   \n  ' }), base);
+});
+
+test('buildSetupPrompt with context still contains no em or en dashes', () => {
+  const p = promptFor({ projectContext: '- Project: demo\n- Description: lean and mean' });
+  assert.equal(p.includes('—'), false, 'no em dash');
+  assert.equal(p.includes('–'), false, 'no en dash');
+});
+
 test('setupSessionId is stable and namespaced', () => {
   assert.equal(setupSessionId('marketing', 'p1'), 'setup:marketing:p1');
 });

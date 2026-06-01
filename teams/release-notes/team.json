@@ -1,0 +1,61 @@
+{
+  "id": "release-notes",
+  "name": "Release Notes Pipeline",
+  "description": "On demand (optionally on a cadence), turn merged PRs and commits since the last release into user-facing release notes in this project's voice, gated by an editor SHIP/FIX/BLOCK verdict where every claim traces to a merged PR or commit, then optionally DRAFT a GitHub release / announcement (drafts only, never auto-published). All project specifics (voice, what to include/exclude, audience, release source) come from this project's pack under .glissa/teams/release-notes/pack/.",
+  "schemaVersion": 1,
+  "outputPath": ".glissa/teams/release-notes",
+  "permissions": {
+    "mode": "yolo",
+    "deny": [
+      "Bash(rm *)", "Bash(rmdir *)", "Bash(del *)", "Bash(rd *)",
+      "Bash(git push*)", "Bash(git reset --hard*)", "Bash(git clean*)", "Bash(git commit*)",
+      "Bash(git tag*)", "Bash(git rebase*)", "Bash(git merge*)", "Bash(git checkout*)",
+      "Bash(gh release create*)", "Bash(gh release edit*)", "Bash(gh release delete*)",
+      "Bash(gh api*)", "Bash(gh pr merge*)", "Bash(gh pr close*)",
+      "Bash(npm publish*)", "Bash(npm version*)",
+      "Bash(curl *)", "Bash(wget *)", "Bash(Invoke-WebRequest*)", "Bash(iwr *)",
+      "Write(**/.env)", "Write(**/.env.*)", "Write(**/*secret*)", "Read(**/.env)"
+    ]
+  },
+  "pack": {
+    "required": ["voice-guide.md", "avoid-list.md", "release-config.md"]
+  },
+  "stageTimeoutSeconds": 900,
+  "stages": [
+    {
+      "id": "researcher",
+      "model": "opus",
+      "summary": "Collects merged PRs / commits since the last release from this repo and writes brief.md (the changelog inputs), every entry traceable to a PR number or commit sha.",
+      "produces": "brief.md",
+      "requiredSections": ["Topic", "Release range", "Changes", "Sources", "Excluded"],
+      "haltSignal": "INSUFFICIENT_CHANGES"
+    },
+    {
+      "id": "writer",
+      "model": "sonnet",
+      "summary": "Drafts ONE user-facing release-notes document in the project's voice from the brief; every claim traces to a PR/commit in the brief. Writes notes.md.",
+      "reads": ["brief.md"],
+      "reviseReads": ["review.md", "notes.md"],
+      "produces": "notes.md"
+    },
+    {
+      "id": "editor",
+      "model": "opus",
+      "summary": "Audits the release notes for voice, avoid-list, no emoji/dashes, and makes 'every claim traces to a PR/commit in the brief' its top checklist item; writes review.md ending in VERDICT: SHIP | FIX | BLOCK.",
+      "reads": ["brief.md", "notes.md"],
+      "reviseReads": ["review.md"],
+      "produces": "review.md",
+      "verdict": { "marker": "VERDICT:", "values": ["SHIP", "FIX", "BLOCK"] },
+      "revise": { "onVerdict": "FIX", "stages": ["writer"], "maxRounds": 2 }
+    },
+    {
+      "id": "publisher",
+      "model": "sonnet",
+      "summary": "On a SHIP verdict, DRAFTS a GitHub release body + an announcement post into published.md (copy-paste payload only; never creates/publishes a release). Writes published.md.",
+      "reads": ["brief.md", "notes.md", "review.md"],
+      "produces": "published.md",
+      "runIfVerdict": "SHIP",
+      "optional": true
+    }
+  ]
+}

@@ -13,6 +13,7 @@ const {
   writeSessionSettings,
   sweepOrphans,
   generateToken,
+  safeDirSegment,
 } = require('../detection/settings-injector');
 
 test('mapHookToSignal maps events correctly', () => {
@@ -106,6 +107,32 @@ test('writeSessionSettings writes file and cleanup removes it', () => {
   const parsed = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
   assert.match(parsed.hooks.Stop[0].hooks[0].url, /\/hook\/sess-1\/stop\?t=/);
   assert.ok(token && token.length >= 32);
+  cleanup();
+  assert.equal(fs.existsSync(dir), false);
+  try { fs.rmSync(baseDir, { recursive: true, force: true }); } catch {}
+});
+
+test('safeDirSegment strips path-illegal chars (Windows) but keeps plain ids intact', () => {
+  // Colon-namespaced setup/team ids must not produce an illegal Windows dir name.
+  assert.equal(safeDirSegment('setup:marketing:bb78afb5'), 'setup-marketing-bb78afb5');
+  assert.equal(safeDirSegment('a<b>c:"d/e\\f|g?h*i'), 'a-b-c--d-e-f-g-h-i');
+  assert.equal(safeDirSegment('trailing.dot. '), 'trailing.dot');
+  // Plain UUID-style ids (the normal-session case) are unchanged.
+  assert.equal(safeDirSegment('bb78afb5-e527-48da-9632-580c00153a1b'), 'bb78afb5-e527-48da-9632-580c00153a1b');
+});
+
+test('writeSessionSettings handles colon-namespaced ids without ENOENT (Windows-safe dir)', () => {
+  // Regression: setup:<team>:<uuid> contains colons, illegal in a Windows path segment, which
+  // crashed mkdirSync with ENOENT. The dir name must be sanitized; the real glissaId still rides
+  // the hook URL (URL-encoded) so HookRouter lookup by the unsanitized id is unaffected.
+  const baseDir = path.join(os.tmpdir(), `glissa-colon-${Date.now()}`);
+  const glissaId = 'setup:marketing:bb78afb5-e527-48da-9632-580c00153a1b';
+  const { settingsPath, dir, cleanup } = writeSessionSettings({ port: 5173, glissaId, baseDir });
+  assert.ok(fs.existsSync(settingsPath));
+  assert.equal(path.basename(dir).includes(':'), false);
+  const parsed = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+  // URL keeps the real id, percent-encoded.
+  assert.match(parsed.hooks.Stop[0].hooks[0].url, /\/hook\/setup%3Amarketing%3Abb78afb5/);
   cleanup();
   assert.equal(fs.existsSync(dir), false);
   try { fs.rmSync(baseDir, { recursive: true, force: true }); } catch {}
