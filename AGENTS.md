@@ -1,4 +1,4 @@
-<!-- Generated: 2026-03-11 | Updated: 2026-05-30 -->
+<!-- Generated: 2026-03-11 | Updated: 2026-05-31 -->
 
 # AGENTS.md — Glissa Project Map
 
@@ -304,5 +304,27 @@ See `docs/testing-cli.md` for comprehensive manual test scenarios.
 - `scripts/AGENTS.md` — Release automation
 - `tests/AGENTS.md` — Automated `node:test` suite and fixtures
 - `test/AGENTS.md` — Hand-run console-harness scripts
+
+---
+
+## Design Context
+
+Glissa's design system has two source-of-truth files at the project root. Read them before any UI work.
+
+- **`PRODUCT.md`** (strategic — who/what/why): register, users, purpose, brand personality, anti-references, design principles, accessibility.
+- **`DESIGN.md`** (visual — how it looks): the "Phyrexian Console" system — colors, typography, elevation, components, do's and don'ts.
+
+**Register:** `product` (the design serves the tool; the operator console is the primary surface).
+
+**Felt goal:** "I trust the board." Every signal is earned, so the operator can act on what they see without re-checking.
+
+**Five principles** (full text in PRODUCT.md):
+1. **Earned signal** — color/motion only on a real state change.
+2. **The terminal is the product** — chrome recedes; cut any pixel that doesn't route attention to data.
+3. **Quiet by default, loud only on change** — calm at rest, raises its voice only when a session needs a human.
+4. **State is structural, never guessed** — hooks + OSC-0 title; show unknown as unknown.
+5. **One voice** — single accent, single mono family; hierarchy from weight, tracking, color, and case.
+
+These are maintained via the `impeccable` skill (`$impeccable teach` / `document`).
 
 <!-- MANUAL: -->
