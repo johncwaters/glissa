@@ -175,14 +175,8 @@
       <section class="sessions" id="sessions-container" role="tabpanel" aria-labelledby="tab-sessions">
         <!-- Session cards injected here by app.js -->
       </section>
-      <div class="minimized-bar" id="minimized-bar">
-        <!-- Minimized session cards injected here -->
-        <div class="session-card minimized ghost-card" id="btn-add-session" role="button" tabindex="0" title="Create a new session">
-          <div class="session-card-header">
-            <span class="session-name">+ New Session</span>
-          </div>
-        </div>
-      </div>
+      <!-- Minimized session cards injected here by app.js; bar hides via :empty when none are minimized -->
+      <div class="minimized-bar" id="minimized-bar"></div>
       <!-- Teams view: dedicated tab space, mounted by teams-panel.js -->
       <section class="teams-view" id="view-teams" role="tabpanel" aria-labelledby="tab-teams" hidden></section>
     </main>
