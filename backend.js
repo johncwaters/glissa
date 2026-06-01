@@ -45,6 +45,10 @@ const { buildStagePrompt } = require('./teamlib/team-prompt');
 const { buildSetupPrompt, setupSessionId, setupSessionName, packPaths } = require('./teamlib/team-setup');
 const teamOutput = require('./teamlib/team-output');
 
+// WAITING-state notification escalation cadence (fixed 5 minutes; previously the
+// configurable waitingEscalationSeconds setting).
+const ESCALATION_INTERVAL_MS = 300000;
+
 /**
  * Create and wire the Glissa backend onto an existing HTTP server.
  *
@@ -97,11 +101,7 @@ function createBackend(httpServer, options = {}) {
       name: project.name,
       path: project.path,
       dangerouslySkipPermissions: !!project.dangerouslySkipPermissions,
-      startingWatchdogSeconds: cfg.startingWatchdogSeconds,
-      attentionTimeoutSeconds: cfg.attentionTimeoutSeconds,
-      waitingEscalationSeconds: cfg.waitingEscalationSeconds,
       replayBufferKB: cfg.replayBufferKB,
-      noFlicker: cfg.noFlicker,
       hookRouter,
       getHookPort,
     });
@@ -269,7 +269,7 @@ function createBackend(httpServer, options = {}) {
   // --- Notification manager ---
 
   const notificationManager = new NotificationManager({
-    escalationIntervalMs: (config.waitingEscalationSeconds || 300) * 1000,
+    escalationIntervalMs: ESCALATION_INTERVAL_MS,
     debounceMs: config.notifyDebounceMs || 3000,
   });
   notificationManager.registerChannel('toast', createToastChannel());
@@ -377,9 +377,7 @@ function createBackend(httpServer, options = {}) {
       initialPrompt,
       ephemeral: true,
       settingsPermissions: permissions || null,
-      startingWatchdogSeconds: config.startingWatchdogSeconds,
       replayBufferKB: config.replayBufferKB,
-      noFlicker: config.noFlicker,
       hookRouter,
       getHookPort,
     });
@@ -438,11 +436,7 @@ function createBackend(httpServer, options = {}) {
       initialPrompt: prompt,
       ephemeral: true,
       settingsPermissions: teamPermissions(team),
-      startingWatchdogSeconds: config.startingWatchdogSeconds,
-      attentionTimeoutSeconds: config.attentionTimeoutSeconds,
-      waitingEscalationSeconds: config.waitingEscalationSeconds,
       replayBufferKB: config.replayBufferKB,
-      noFlicker: config.noFlicker,
       hookRouter,
       getHookPort,
     });
@@ -693,7 +687,7 @@ function createBackend(httpServer, options = {}) {
       sess.updateSettings(config);
     }
     notificationManager.updateSettings({
-      escalationIntervalMs: (config.waitingEscalationSeconds || 300) * 1000,
+      escalationIntervalMs: ESCALATION_INTERVAL_MS,
       debounceMs: config.notifyDebounceMs || 3000,
     });
   }

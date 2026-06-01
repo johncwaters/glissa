@@ -30,44 +30,43 @@ function fullBase() {
 }
 
 test('scrubs all 5 inherited vars', () => {
-  const env = buildSpawnEnv(fullBase(), { noFlicker: false });
+  const env = buildSpawnEnv(fullBase());
   for (const k of SCRUBBED) {
     assert.ok(!(k in env), `${k} must be deleted from the spawn env`);
   }
 });
 
 test('negative: no CLAUDECODE-exact or GLISSA_* keys survive', () => {
-  const env = buildSpawnEnv(fullBase(), { noFlicker: true });
+  const env = buildSpawnEnv(fullBase());
   const keys = Object.keys(env);
   assert.equal(keys.includes('CLAUDECODE'), false);
   assert.equal(keys.some((k) => k.startsWith('GLISSA_')), false);
   // The two CLAUDE_CODE_* spawn vars are gone; the only CLAUDE_CODE_* key allowed is the
-  // no-flicker flag we add ourselves (asserted below), never the inherited SSE_PORT/ENTRYPOINT.
+  // no-flicker flag (always set), never the inherited SSE_PORT/ENTRYPOINT.
   assert.equal(keys.includes('CLAUDE_CODE_SSE_PORT'), false);
   assert.equal(keys.includes('CLAUDE_CODE_ENTRYPOINT'), false);
 });
 
 test('preserves unrelated vars', () => {
-  const env = buildSpawnEnv(fullBase(), {});
+  const env = buildSpawnEnv(fullBase());
   assert.equal(env.PATH, '/usr/bin');
   assert.equal(env.HOME, '/home/u');
 });
 
-test('CLAUDE_CODE_NO_FLICKER present iff noFlicker is truthy', () => {
-  assert.equal(buildSpawnEnv(fullBase(), { noFlicker: true }).CLAUDE_CODE_NO_FLICKER, '1');
-  assert.ok(!('CLAUDE_CODE_NO_FLICKER' in buildSpawnEnv(fullBase(), { noFlicker: false })));
-  // omitted options object -> falsy noFlicker -> flag absent
-  assert.ok(!('CLAUDE_CODE_NO_FLICKER' in buildSpawnEnv(fullBase())));
+test('CLAUDE_CODE_NO_FLICKER is always set to "1"', () => {
+  // No-flicker mode is always on; the flag is unconditionally injected.
+  assert.equal(buildSpawnEnv(fullBase()).CLAUDE_CODE_NO_FLICKER, '1');
 });
 
 test('returns a COPY — baseEnv is never mutated', () => {
   const base = fullBase();
-  const env = buildSpawnEnv(base, { noFlicker: true });
+  const env = buildSpawnEnv(base);
   assert.notEqual(env, base, 'output must be a distinct object');
   // input retains every original key (none deleted on the source)
   assert.equal(base.CLAUDECODE, '1');
   assert.equal(base.GLISSA_PORT, '3000');
   assert.equal(base.CLAUDE_CODE_SSE_PORT, '7777');
-  // mutation to the source object does not appear in the prior output
+  // the no-flicker flag is added to the output copy, not the source
   assert.ok(!('CLAUDE_CODE_NO_FLICKER' in base), 'flag must not leak back onto the source');
+  assert.equal(env.CLAUDE_CODE_NO_FLICKER, '1', 'flag must be present on the output');
 });

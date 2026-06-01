@@ -17,7 +17,6 @@ const TRANSITIONS = Object.freeze({
   },
   [STATES.STARTING]: {
     first_output: STATES.RUNNING,
-    watchdog_timeout: STATES.FAILED,
     process_exit: STATES.FAILED,
   },
   [STATES.RUNNING]: {

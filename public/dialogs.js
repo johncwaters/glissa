@@ -245,19 +245,12 @@ export function createSettingsDialog() {
     });
   }
 
-  const attentionInput = dialog.querySelector('#settings-attention');
-  const escalationInput = dialog.querySelector('#settings-escalation');
-  const watchdogInput = dialog.querySelector('#settings-watchdog');
   const rootListEl = dialog.querySelector('#settings-root-list');
   const rootInput = dialog.querySelector('#settings-root-input');
   const rootAddBtn = dialog.querySelector('#settings-root-add');
   const rootErrorEl = dialog.querySelector('#settings-root-error');
-  const scrollbackInput = dialog.querySelector('#settings-scrollback');
   const replayBufferInput = dialog.querySelector('#settings-replay-buffer');
   const cursorBlinkCheckbox = dialog.querySelector('#settings-cursor-blink');
-  const noFlickerCheckbox = dialog.querySelector('#settings-no-flicker');
-  const noFlickerWarning = dialog.querySelector('#settings-noflicker-warning');
-  const feedDebounceInput = dialog.querySelector('#settings-feed-debounce');
   const debugModeCheckbox = dialog.querySelector('#settings-debug-mode');
   const soundSelect = dialog.querySelector('#settings-sound');
   const editorCommandInput = dialog.querySelector('#settings-editor-command');
@@ -298,13 +291,6 @@ export function createSettingsDialog() {
     themeWarning.textContent = themeSelect.value === initialTheme
       ? ''
       : 'Restart the server for terminal colors to fully update.';
-  });
-
-  let initialNoFlicker = true;
-  noFlickerCheckbox.addEventListener('change', () => {
-    noFlickerWarning.textContent = noFlickerCheckbox.checked !== initialNoFlicker
-      ? 'Restart sessions for this change to take effect.'
-      : '';
   });
 
   let repoRoots = [];
@@ -357,14 +343,12 @@ export function createSettingsDialog() {
     renderRootList();
   }
 
-  const timeoutErrorEl = dialog.querySelector('#settings-timeout-error');
-
   function validateTimeouts() {
-    timeoutErrorEl.textContent = '';
-    for (const input of [attentionInput, escalationInput, watchdogInput, scrollbackInput, replayBufferInput, feedDebounceInput]) {
+    errorEl.textContent = '';
+    for (const input of [replayBufferInput]) {
       const v = Number(input.value);
       if (!input.value || Number.isNaN(v) || v <= 0 || !Number.isInteger(v)) {
-        timeoutErrorEl.textContent = 'All numeric fields must be positive integers';
+        errorEl.textContent = 'All numeric fields must be positive integers';
         return false;
       }
     }
@@ -376,14 +360,8 @@ export function createSettingsDialog() {
     if (!validateTimeouts()) return;
 
     const settings = {
-      attentionTimeoutSeconds: Number(attentionInput.value),
-      waitingEscalationSeconds: Number(escalationInput.value),
-      startingWatchdogSeconds: Number(watchdogInput.value),
-      scrollback: Number(scrollbackInput.value),
       replayBufferKB: Number(replayBufferInput.value),
       cursorBlink: cursorBlinkCheckbox.checked,
-      noFlicker: noFlickerCheckbox.checked,
-      feedDebounceMs: Number(feedDebounceInput.value),
       debugMode: debugModeCheckbox.checked,
       editorCommand: editorCommandInput.value.trim(),
       repoRoots: repoRoots,
@@ -406,15 +384,8 @@ export function createSettingsDialog() {
   sendControlRequest('get-settings', {})
     .then((msg) => {
       const s = msg.settings;
-      attentionInput.value = s.attentionTimeoutSeconds;
-      escalationInput.value = s.waitingEscalationSeconds;
-      watchdogInput.value = s.startingWatchdogSeconds;
-      scrollbackInput.value = s.scrollback ?? 50000;
       replayBufferInput.value = s.replayBufferKB ?? 512;
       cursorBlinkCheckbox.checked = !!s.cursorBlink;
-      noFlickerCheckbox.checked = s.noFlicker ?? true;
-      initialNoFlicker = noFlickerCheckbox.checked;
-      feedDebounceInput.value = s.feedDebounceMs ?? 50;
       debugModeCheckbox.checked = !!s.debugMode;
       editorCommandInput.value = s.editorCommand ?? '';
       repoRoots = Array.isArray(s.repoRoots) ? [...s.repoRoots] : [];

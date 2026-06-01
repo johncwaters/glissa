@@ -65,10 +65,7 @@ On first run, Glissa creates `~/.glissa/config.json` with defaults. You can also
   "projects": [
     { "name": "my-project", "path": "C:\\path\\to\\project" }
   ],
-  "repoRoots": ["C:\\path\\to\\repos"],
-  "attentionTimeoutSeconds": 60,
-  "waitingEscalationSeconds": 300,
-  "startingWatchdogSeconds": 30
+  "repoRoots": ["C:\\path\\to\\repos"]
 }
 ```
 

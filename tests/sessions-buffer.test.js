@@ -116,6 +116,6 @@ test("start() resets the output total to 0 and emits 'rebaseline'", () => {
     assert.equal(rebaselined, 1, "start() emitted 'rebaseline' exactly once");
     assert.equal(s.getOutputOffset(), 0, 'monotonic total reset to 0 on (re)start');
   } finally {
-    s.destroy(); // clear the starting watchdog timer
+    s.destroy(); // release timers/PTY
   }
 });

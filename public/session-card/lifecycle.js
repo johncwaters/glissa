@@ -14,7 +14,7 @@ import { aggregateEl, consumeLocalReorderPending, container, minimizedBar, sessi
 // dragover/dragleave/drop listeners and the _dropZone side effects at module load.
 import { setupDragAndDrop } from './drag-drop.js';
 import { _performExpand, enforceSplitOnCreate, exitMaximizeMode, forgetSessionLayout, getMaximizedSession, isMaximizeActive, SLEEP_ELIGIBLE, sleepSession, toggleMaximize, toggleMinimize, wakeSession } from './layout.js';
-import { ensureTerminalSetup, setTerminalCursorBlink, setTerminalScrollback, setupTerminal, wireTerminalIO } from './terminal.js';
+import { ensureTerminalSetup, setTerminalCursorBlink, setupTerminal, wireTerminalIO } from './terminal.js';
 import { releaseWebgl, tryLoadWebGL } from './webgl-pool.js';
 
 // ── Constants ────────────────────────────────────────────────
@@ -144,14 +144,12 @@ export function getSessionCount() {
 }
 
 export function applyTerminalSettings(settings) {
-  if (settings.scrollback != null) setTerminalScrollback(settings.scrollback);
   if (settings.cursorBlink != null) setTerminalCursorBlink(settings.cursorBlink);
   if (settings.debugMode != null) {
     setDebugMode(settings.debugMode);
   }
   for (const [, ui] of sessionUIs) {
     if (!ui.term) continue;
-    if (settings.scrollback != null) ui.term.options.scrollback = settings.scrollback;
     if (settings.cursorBlink != null) ui.term.options.cursorBlink = settings.cursorBlink;
   }
 }

@@ -26,7 +26,6 @@ test('TRANSITIONS matrix is frozen and matches the lifecycle shape', () => {
     },
     [STATES.STARTING]: {
       first_output: STATES.RUNNING,
-      watchdog_timeout: STATES.FAILED,
       process_exit: STATES.FAILED,
     },
     [STATES.RUNNING]: {

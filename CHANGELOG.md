@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Removed
+
+- **No-Flicker Mode setting removed**: `CLAUDE_CODE_NO_FLICKER` is now always set to `"1"` at spawn; the per-session toggle and `noFlicker` spawn option have been dropped.
+- **Scrollback Lines setting removed**: Terminal scrollback is now fixed at 50,000 lines; the configurable `scrollbackLines` setting has been removed.
+- **Timing settings removed**: The startup watchdog (`startingWatchdogSeconds`) has been dropped entirely; WAITING-notification escalation is now fixed at 5 minutes (previously `waitingEscalationSeconds`); the attention timeout (`attentionTimeoutSeconds`, already inert) has been removed.
+- **Feed Debounce setting removed**: `feedDebounceMs` had no effect and has been removed as a dead vestige of the old content-scraping detection engine.
+
 ## [0.12.0] - 2026-05-31
 
 ### Added

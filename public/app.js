@@ -57,7 +57,7 @@ setConnectionStateCallback((state, label) => {
     }
     revealApp();
     sendFocusState();
-    // Fetch terminal settings on initial connect to apply scrollback/cursorBlink
+    // Fetch terminal settings on initial connect to apply cursorBlink/debugMode
     sendControlRequest('get-settings', {})
       .then((msg) => { if (msg.settings) applyTerminalSettings(msg.settings); })
       .catch(() => {});

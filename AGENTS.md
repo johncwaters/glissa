@@ -14,7 +14,7 @@ Glissa is a lightweight Node.js background process that spawns and manages Claud
 |------|---------|-------------|
 | **server.js** | Production entry point — creates HTTP server, wires backend, handles SIGINT | `(none — top-level script)` |
 | **backend.js** | Express + WebSocket server factory. Wires control/data WebSocket servers, session lifecycle, config hot-reload, static serving, and graceful shutdown onto a provided HTTP server | `createBackend(httpServer, options)` |
-| **sessions.js** | Session class with the state machine (DORMANT -> INITIALIZING -> STARTING -> RUNNING -> WAITING/IDLE/COMPLETE -> DONE/FAILED). Spawns Claude CLI via node-pty, PTY lifecycle, StatusSource-driven detection (`_onStatus` maps signals to transitions), replay buffer, watchdog. NO screen scraping. | `Session` |
+| **sessions.js** | Session class with the state machine (DORMANT -> INITIALIZING -> STARTING -> RUNNING -> WAITING/IDLE/COMPLETE -> DONE/FAILED). Spawns Claude CLI via node-pty, PTY lifecycle, StatusSource-driven detection (`_onStatus` maps signals to transitions), replay buffer. NO screen scraping. | `Session` |
 | **detection/status-source.js** | StatusSource (EventEmitter). Merges hook + title signals: precedence hook>title, conflict window (`awaiting-input` dominates `ready`), dedup. Emits normalized `working/ready/awaiting-input/resume/session-start/session-end`. | `StatusSource`, `createStatusSource()` |
 | **detection/osc-title-source.js** | OSC-0 title fallback source. Braille spinner = `working`, idle glyph = `ready`, unknown glyph = `unknown`; NEVER emits `awaiting-input`. Ports `findOscTitle`/`isBrailleChar`. | `OscTitleSource`, `createOscTitleSource()`, `findOscTitle`, `isBrailleChar` |
 | **detection/hook-source.js** | HookRouter: per-session bearer-token validation + `mapHookToSignal` (Claude Code hook event -> normalized signal). Backed by `POST /hook/:glissaId/:event`. | `HookRouter`, `mapHookToSignal` |
@@ -105,13 +105,13 @@ INITIALIZING -> STARTING -> RUNNING -> WAITING -> IDLE -> DONE
 
 **States (from shared/states.js):**
 - **INITIALIZING** — Session object created, env prepared, ready to spawn
-- **STARTING** — PTY spawned, awaiting first output (watchdog timer active)
+- **STARTING** — PTY spawned, awaiting first output or hook signal
 - **RUNNING** — Claude CLI producing output; StatusSource active
 - **WAITING** — `awaiting-input` signal (authoritative hook: `Notification`/`PermissionRequest`), awaiting user input/dismiss
 - **IDLE** — quiescent post-turn state (rarely entered now; resume via `working`/`resume`)
 - **COMPLETE** — turn finished via authoritative `ready` (`Stop` hook) or title `working`->`ready`. Notifications sent
 - **DONE** — Process exited cleanly (code 0) or user killed
-- **FAILED** — Process exited with error, watchdog timeout, or spawn failure
+- **FAILED** — Process exited with error or spawn failure
 
 **Transitions** governed by explicit event mapping (TRANSITIONS constant) and guards (GUARDS object).
 
@@ -191,7 +191,6 @@ Sessions maintain a ring buffer (~100KB cap) of PTY output for dashboard reconne
 ### Timers & Cleanup
 
 Sessions use explicit setTimeout with cleanup on transition/exit/destroy:
-- **watchdog_timeout** (STARTING -> FAILED if no output within `startingWatchdogSeconds`)
 - **sleep-kill** (auto-kill a sleeping session after 15 min)
 - **kill-poll** (force-kill escalation after a graceful kill)
 

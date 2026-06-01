@@ -16,14 +16,10 @@ import { tryLoadWebGL } from './webgl-pool.js';
 const RECONNECT_DELAY_MS = 500;
 const INPUT_QUEUE_MAX = 1024;
 
-// Terminal defaults — updated from server settings on connect (applyTerminalSettings
-// in session-card.js drives these through the setters below).
-let _terminalScrollback = 5000;
+// Terminal defaults — cursorBlink updated from server settings on connect
+// (applyTerminalSettings in lifecycle.js drives it through the setter below).
+const TERMINAL_SCROLLBACK = 50000;
 let _terminalCursorBlink = false;
-
-export function setTerminalScrollback(v) {
-  _terminalScrollback = v;
-}
 
 export function setTerminalCursorBlink(v) {
   _terminalCursorBlink = v;
@@ -115,7 +111,7 @@ export function setupTerminal(termWrap, ui) {
     fontSize: 14,
     fontFamily: "'Cascadia Code', 'Fira Code', 'Consolas', 'Menlo', monospace",
     theme: getTerminalTheme(),
-    scrollback: _terminalScrollback,
+    scrollback: TERMINAL_SCROLLBACK,
     allowProposedApi: true,
   });
 

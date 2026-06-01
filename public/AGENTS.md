@@ -205,6 +205,6 @@ Themes set CSS custom properties on `:root` so both Tailwind utilities and seman
 Industry standard terminal emulator. Handles ANSI rendering, keyboard events, and graceful WebGL -> canvas degradation. No need to reinvent terminal emulation.
 
 ### Why No Terminal History in Server?
-xterm.js scrollback buffer (5000 lines) handles history on the client. Server maintains ~100KB replay buffer only for late-joining clients.
+xterm.js scrollback buffer (hardcoded to 50000 lines) handles history on the client. Server maintains ~100KB replay buffer only for late-joining clients.
 
 <!-- MANUAL: -->

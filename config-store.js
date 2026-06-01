@@ -7,17 +7,11 @@ const os = require('node:os');
 
 const DEFAULT_CONFIG = {
   port: 3000,
-  attentionTimeoutSeconds: 60,
-  waitingEscalationSeconds: 300,
-  startingWatchdogSeconds: 30,
   autoRecoverSeconds: 3,
   inputGraceSeconds: 5,
   promptDetectionMs: 1500,
   notifyDebounceMs: 3000,
-  noFlicker: true,
-  scrollback: 50000,
   cursorBlink: false,
-  feedDebounceMs: 50,
   debugMode: false,
   editorCommand: '',
   repoRoots: [],
@@ -26,21 +20,15 @@ const DEFAULT_CONFIG = {
 
 // Single source of truth for numeric setting field names
 const TIMEOUT_KEYS = [
-  'attentionTimeoutSeconds',
-  'waitingEscalationSeconds',
-  'startingWatchdogSeconds',
   'autoRecoverSeconds',
   'inputGraceSeconds',
   'promptDetectionMs',
   'notifyDebounceMs',
   'replayBufferKB',
-  'scrollback',
-  'feedDebounceMs',
 ];
 
 // Boolean settings persisted to config.json
 const BOOLEAN_KEYS = [
-  'noFlicker',
   'cursorBlink',
   'debugMode',
 ];
@@ -139,18 +127,12 @@ function createConfigStore() {
   function getSettings() {
     return {
       port: config.port,
-      attentionTimeoutSeconds: config.attentionTimeoutSeconds,
-      waitingEscalationSeconds: config.waitingEscalationSeconds,
-      startingWatchdogSeconds: config.startingWatchdogSeconds,
       autoRecoverSeconds: config.autoRecoverSeconds,
       inputGraceSeconds: config.inputGraceSeconds,
       promptDetectionMs: config.promptDetectionMs,
       notifyDebounceMs: config.notifyDebounceMs,
       replayBufferKB: config.replayBufferKB,
-      noFlicker: config.noFlicker ?? DEFAULT_CONFIG.noFlicker,
-      scrollback: config.scrollback ?? DEFAULT_CONFIG.scrollback,
       cursorBlink: config.cursorBlink ?? DEFAULT_CONFIG.cursorBlink,
-      feedDebounceMs: config.feedDebounceMs ?? DEFAULT_CONFIG.feedDebounceMs,
       debugMode: config.debugMode ?? DEFAULT_CONFIG.debugMode,
       editorCommand: config.editorCommand ?? DEFAULT_CONFIG.editorCommand,
       repoRoots: config.repoRoots,

@@ -64,11 +64,7 @@ class Session extends EventEmitter {
     name,
     path,
     dangerouslySkipPermissions = false,
-    startingWatchdogSeconds = 10,
-    attentionTimeoutSeconds = 60,
-    waitingEscalationSeconds = 300,
     replayBufferKB = 512,
-    noFlicker = true,
     // Detection wiring (injected by backend). When absent, the session runs
     // title-source-only (no hooks) — used by unit tests constructing a Session directly.
     hookRouter = null,
@@ -105,10 +101,6 @@ class Session extends EventEmitter {
     this.ptyProcess = null;
     this.state = STATES.DORMANT;
     this.auditLog = [];
-    this.startingWatchdogMs = startingWatchdogSeconds * 1000;
-    this.attentionTimeoutMs = attentionTimeoutSeconds * 1000;
-    this.waitingEscalationMs = waitingEscalationSeconds * 1000;
-    this._watchdogTimer = null;
     this._receivedFirstOutput = false;
     this._outputBuffer = []; // ring buffer of recent PTY chunks
     this._outputBufferHead = 0; // index of oldest valid entry; advances instead of shift()
@@ -119,7 +111,6 @@ class Session extends EventEmitter {
     // far they have durably sent against it so a backpressure drop can be backfilled.
     this._outputBufferTotal = 0;
     this._killPollTimer = null;
-    this._noFlicker = noFlicker;
     this._sleeping = false;
     this._sleepKillTimer = null;
     this._autoKilled = false;
@@ -257,7 +248,6 @@ class Session extends EventEmitter {
       timers: {
         sleepKill: this._sleepKillTimer !== null,
         killPoll: this._killPollTimer !== null,
-        watchdog: this._watchdogTimer !== null,
       },
     };
   }
@@ -383,7 +373,6 @@ class Session extends EventEmitter {
     // start()); harmless no-op on the first start() (no data clients attached yet).
     // See backend.js wireSessionEvents -> closeSessionDataClients.
     this.emit("rebaseline");
-    this._clearWatchdog();
     this._titleSource.reset();
     this._statusSource.reset();
 
@@ -449,21 +438,11 @@ class Session extends EventEmitter {
 
     if (this._recorder) {
       this._recorder.writeHeader({
-        attentionTimeoutMs: this.attentionTimeoutMs,
-        startingWatchdogMs: this.startingWatchdogMs,
         hooksInjected: this._settingsHandle !== null,
         cols: spawnCols,
         rows: spawnRows,
       });
     }
-
-    // Start watchdog timer for STARTING state
-    this._watchdogTimer = setTimeout(() => {
-      this._watchdogTimer = null;
-      if (this.state === STATES.STARTING) {
-        this.transition("watchdog_timeout");
-      }
-    }, this.startingWatchdogMs);
 
     this.ptyProcess.onData((data) => this._handlePtyData(data));
     this.ptyProcess.onExit(({ exitCode, signal }) =>
@@ -533,7 +512,7 @@ class Session extends EventEmitter {
   }
 
   _buildSpawnEnv() {
-    return buildSpawnEnv(process.env, { noFlicker: this._noFlicker });
+    return buildSpawnEnv(process.env);
   }
 
   _handlePtyData(data) {
@@ -545,7 +524,6 @@ class Session extends EventEmitter {
     // First-output detection (pre-dispatch, only fires once in STARTING)
     if (this.state === STATES.STARTING && !this._receivedFirstOutput) {
       this._receivedFirstOutput = true;
-      this._clearWatchdog();
       this.transition("first_output");
     }
 
@@ -594,7 +572,6 @@ class Session extends EventEmitter {
 
   _handlePtyExit(exitCode, signal) {
     const pid = this.ptyProcess ? this.ptyProcess.pid : null;
-    this._clearWatchdog();
     this._titleSource.reset();
     this._statusSource.reset();
     this._cleanupHooks();
@@ -882,22 +859,14 @@ class Session extends EventEmitter {
   }
 
   updateSettings(cfg) {
-    if (cfg.startingWatchdogSeconds != null)
-      this.startingWatchdogMs = cfg.startingWatchdogSeconds * 1000;
-    if (cfg.attentionTimeoutSeconds != null)
-      this.attentionTimeoutMs = cfg.attentionTimeoutSeconds * 1000;
-    if (cfg.waitingEscalationSeconds != null)
-      this.waitingEscalationMs = cfg.waitingEscalationSeconds * 1000;
     if (cfg.replayBufferKB != null)
       this._outputBufferMax = cfg.replayBufferKB * 1024;
-    if (cfg.noFlicker != null) this._noFlicker = !!cfg.noFlicker;
   }
 
   destroy() {
     if (this._destroyed) return;
     this._destroyed = true;
 
-    this._clearWatchdog();
     this._clearSleepKill();
 
     this._cleanupHooks();
@@ -915,13 +884,6 @@ class Session extends EventEmitter {
     this._titleSource.destroy();
     this._statusSource.destroy();
     this.removeAllListeners();
-  }
-
-  _clearWatchdog() {
-    if (this._watchdogTimer !== null) {
-      clearTimeout(this._watchdogTimer);
-      this._watchdogTimer = null;
-    }
   }
 }
 
