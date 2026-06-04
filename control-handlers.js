@@ -358,6 +358,7 @@ function registerControlHandlers(controlWss, deps) {
             schedule: t.schedule,
             stageTimeoutSeconds: t.stageTimeoutSeconds || 900,
             permissions: { mode: t.permissions?.mode || 'interactive', deny: t.permissions?.deny || [] },
+            chat: { allowQuestions: t.chat?.allowQuestions !== false },
             stages: t.stages.map((s) => s.id),
             stageDetail: t.stages.map((s) => ({
               id: s.id,
@@ -499,6 +500,7 @@ function registerControlHandlers(controlWss, deps) {
     if (!projectPath) { ws.send(JSON.stringify({ type: 'error', message: 'Unknown project' })); return; }
     if (!/^[\w.-]+$/.test(String(runId || ''))) { ws.send(JSON.stringify({ type: 'error', message: 'Invalid run id' })); return; }
     const allowed = new Set(team.stages.map((s) => s.produces));
+    allowed.add('chat.md'); // the per-run operator conversation transcript is openable too
     if (!allowed.has(artifact)) { ws.send(JSON.stringify({ type: 'error', message: 'Unknown artifact' })); return; }
     const runsDir = path.join(projectPath, team.outputPath, 'runs');
     const abs = confinePath(runsDir, runId, artifact);
@@ -548,12 +550,58 @@ function registerControlHandlers(controlWss, deps) {
     }));
   }
 
+  // Post an operator message into the active run's conversation (steering note, or the answer to a
+  // pending agent QUESTION). The orchestrator records the turn and, if the run is awaiting input,
+  // resolves the pause so the stage re-runs with the answer.
+  function handlePostTeamMessage(msg, ws) {
+    if (!orchestrator || typeof orchestrator.postMessage !== 'function') {
+      ws.send(JSON.stringify({ type: 'error', message: 'Teams are not available' })); return;
+    }
+    const { teamId, projectId } = msg;
+    const text = typeof msg.text === 'string' ? msg.text : '';
+    if (!teamId || !projectId) { ws.send(JSON.stringify({ type: 'error', message: 'teamId and projectId are required' })); return; }
+    if (!text.trim()) { ws.send(JSON.stringify({ type: 'error', message: 'Message text is required' })); return; }
+    if (text.length > 8192) { ws.send(JSON.stringify({ type: 'error', message: 'Message too long (max 8192 chars)' })); return; }
+    const r = orchestrator.postMessage(teamId, projectId, text);
+    ws.send(JSON.stringify({
+      type: 'team-message-ack', teamId, projectId, ok: !!r.ok, answered: !!r.answered, error: r.ok ? null : (r.reason || 'no active run'),
+    }));
+  }
+
+  // Return the active run's conversation transcript (+ whether it is awaiting an answer) so a freshly
+  // mounted or second client rehydrates the chat pane. Reads chat.md from the active run folder.
+  function handleGetTeamChat(msg, ws) {
+    const { teamId, projectId } = msg;
+    const out = {
+      type: 'team-chat', requestId: msg.requestId || null, teamId, projectId,
+      messages: [], awaiting: false, pendingQuestion: null,
+    };
+    try {
+      const live = orchestrator?.getRunState?.(teamId, projectId) || null;
+      let team = null;
+      if (registry) team = registry.loadTeam(teamId);
+      const projectPath = getProjectPathById ? getProjectPathById(projectId) : null;
+      if (live?.runId && team && teamOutput && projectPath && typeof teamOutput.readChat === 'function') {
+        const runDir = path.join(projectPath, team.outputPath, 'runs', live.runId);
+        out.messages = teamOutput.readChat(runDir);
+        out.awaiting = !!live.awaiting;
+        out.pendingQuestion = live.pendingQuestion || null;
+      }
+    } catch (err) {
+      ws.send(JSON.stringify({ type: 'error', requestId: msg.requestId || null, message: err.message }));
+      return;
+    }
+    ws.send(JSON.stringify(out));
+  }
+
   // Handler map — single dispatch table for all control message types
   // Session action handlers use findSession() for id-based lookup with name fallback.
   const handlers = {
     'list-teams':       handleListTeams,
     'run-team':         handleRunTeam,
     'cancel-team-run':  handleCancelTeamRun,
+    'post-team-message': handlePostTeamMessage,
+    'get-team-chat':    handleGetTeamChat,
     'get-team-runs':    handleGetTeamRuns,
     'set-team-schedule': handleSetTeamSchedule,
     'add-team-instance':    handleAddTeamInstance,

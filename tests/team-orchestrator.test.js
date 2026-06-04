@@ -7,7 +7,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { EventEmitter } = require('node:events');
 
-const { createOrchestrator } = require('../teamlib/team-orchestrator');
+const { createOrchestrator, extractQuestion } = require('../teamlib/team-orchestrator');
 const { loadTeam } = require('../teamlib/team-registry');
 const teamOutput = require('../teamlib/team-output');
 const { buildStagePrompt } = require('../teamlib/team-prompt');
@@ -78,24 +78,44 @@ function fakeFactory(behaviors) {
 
 function makeOrch(tmpProj, behaviors, opts = {}) {
   const events = [];
+  const prompts = []; // { id, prompt } per stage spawn, for asserting prompt injection
+  const base = fakeFactory(behaviors);
+  const makeStageSession = (sessionOpts) => {
+    prompts.push({ id: String(sessionOpts.id).split(':').pop(), prompt: sessionOpts.initialPrompt || '' });
+    return base(sessionOpts);
+  };
   const orch = createOrchestrator({
-    loadTeam: (id) => loadTeam(id, REPO_TEAMS),
+    loadTeam: (id) => {
+      const t = loadTeam(id, REPO_TEAMS);
+      return opts.teamPatch ? opts.teamPatch(t) : t;
+    },
     getProjectPath: () => tmpProj,
     output: teamOutput,
     buildStagePrompt,
     buildStageSpawnOptions,
     teamPermissions,
     spawnGate: createSpawnGate(),
-    makeStageSession: fakeFactory(behaviors),
+    makeStageSession,
     gitWorkspace: opts.gitWorkspace || null,
     now: () => new Date(Date.UTC(2026, 5, 2, 18, 0, 0)),
     log: () => {}, // keep lifecycle logging out of the test output (it pipes through `tail`)
+    ...(opts.setTimeoutFn ? { setTimeoutFn: opts.setTimeoutFn } : {}),
+    ...(opts.clearTimeoutFn ? { clearTimeoutFn: opts.clearTimeoutFn } : {}),
   });
   for (const name of ['team-run-started', 'team-stage-started', 'team-stage-complete',
-    'team-run-cancelling', 'team-run-complete', 'team-run-failed', 'team-run-skipped', 'team-run-needs-setup']) {
+    'team-run-cancelling', 'team-run-complete', 'team-run-failed', 'team-run-skipped', 'team-run-needs-setup',
+    'team-chat-message', 'team-run-awaiting-input', 'team-run-resumed']) {
     orch.on(name, (p) => events.push({ name, ...p }));
   }
-  return { orch, events };
+  return { orch, events, prompts };
+}
+
+// Resolve once an event of `name` has been pushed (polls the microtask/macrotask queue).
+function waitForEvent(events, name) {
+  return new Promise((resolve) => {
+    const tick = () => (events.some((e) => e.name === name) ? resolve() : setImmediate(tick));
+    tick();
+  });
 }
 
 // Fake git workspace: hands the run a real temp dir as its cwd (so stage files actually write) and
@@ -888,6 +908,192 @@ test('qa first run with an unfilled pack scaffolds + halts (needs-setup), zero s
     for (const name of QA_PACK) {
       assert.ok(fs.existsSync(path.join(proj, OUT_QA, 'pack', name)), `${name} scaffolded`);
     }
+  } finally {
+    fs.rmSync(proj, { recursive: true, force: true });
+  }
+});
+
+// --- interactive chat: operator-question pause/resume (default-on for manual runs) ---
+
+test('extractQuestion matches only when the output starts with the marker', () => {
+  assert.equal(extractQuestion('QUESTION: which one?'), 'which one?');
+  assert.equal(extractQuestion('  question: lower ok '), 'lower ok');
+  assert.equal(extractQuestion('## Topic\nQUESTION: not really'), null, 'a mid-output mention is not a question');
+  assert.equal(extractQuestion('QUESTION:'), '(no question text)');
+  assert.equal(extractQuestion(''), null);
+});
+
+test('chat 1: a stage QUESTION pauses a manual run; postMessage answers and the stage re-runs to SHIP', async () => {
+  const proj = tmpProject();
+  try {
+    seedPack(proj);
+    const { orch, events } = makeOrch(proj, {
+      researcher: [{ write: 'QUESTION: which angle, A or B?' }, { write: BRIEF }],
+      strategist: { write: PLAN },
+      writer: { write: DRAFTS },
+      editor: { write: REVIEW('SHIP') },
+      publisher: { write: PUBLISHED },
+    });
+    const runP = orch.runTeam({ teamId: 'marketing', projectId: 'p1', trigger: 'manual' });
+    await waitForEvent(events, 'team-run-awaiting-input');
+    const ask = events.find((e) => e.name === 'team-run-awaiting-input');
+    assert.equal(ask.stage, 'researcher');
+    assert.match(ask.question, /which angle/);
+    assert.equal(orch.getRunState('marketing', 'p1').awaiting, true);
+    assert.equal(orch.getRunState('marketing', 'p1').pendingQuestion, ask.question);
+
+    const r = orch.postMessage('marketing', 'p1', 'Use angle B.');
+    assert.equal(r.answered, true);
+
+    const res = await runP;
+    assert.equal(res.ok, true);
+    assert.equal(res.verdict, 'SHIP');
+    assert.equal(startedCount(events, 'researcher'), 1, 'stage-started fires once even though the stage re-ran');
+    assert.ok(events.some((e) => e.name === 'team-run-resumed'), 'emitted a resumed event');
+
+    const msgs = teamOutput.readChat(runDirOf(proj));
+    assert.equal(msgs.length, 2, 'agent question + operator answer recorded');
+    assert.equal(msgs[0].role, 'agent');
+    assert.match(msgs[0].text, /which angle/);
+    assert.equal(msgs[1].role, 'operator');
+    assert.equal(msgs[1].text, 'Use angle B.');
+  } finally {
+    fs.rmSync(proj, { recursive: true, force: true });
+  }
+});
+
+test('chat 2: after an answered question, the re-run + downstream prompts read chat.md (first spawn did not)', async () => {
+  const proj = tmpProject();
+  try {
+    seedPack(proj);
+    const { orch, events, prompts } = makeOrch(proj, {
+      researcher: [{ write: 'QUESTION: angle?' }, { write: BRIEF }],
+      strategist: { write: PLAN },
+      writer: { write: DRAFTS },
+      editor: { write: REVIEW('SHIP') },
+      publisher: { write: PUBLISHED },
+    });
+    const runP = orch.runTeam({ teamId: 'marketing', projectId: 'p1', trigger: 'manual' });
+    await waitForEvent(events, 'team-run-awaiting-input');
+    orch.postMessage('marketing', 'p1', 'Angle B, mobile-first.');
+    await runP;
+
+    const researcherPrompts = prompts.filter((p) => p.id === 'researcher');
+    assert.equal(researcherPrompts.length, 2, 'researcher spawned twice (question then answer)');
+    assert.ok(!/chat\.md/.test(researcherPrompts[0].prompt), 'first spawn had no conversation yet');
+    assert.match(researcherPrompts[1].prompt, /chat\.md/, 're-run reads the answer');
+    const strat = prompts.filter((p) => p.id === 'strategist').pop();
+    assert.ok(strat, 'strategist ran');
+    assert.match(strat.prompt, /chat\.md/, 'downstream stage prompt references the conversation');
+    assert.match(strat.prompt, /operator conversation/i, 'and labels it the operator conversation');
+  } finally {
+    fs.rmSync(proj, { recursive: true, force: true });
+  }
+});
+
+test('chat 3: an unanswered question fails with answer-timeout (injected timer, no wall-clock wait)', async () => {
+  const proj = tmpProject();
+  try {
+    seedPack(proj);
+    let pendingCb = null;
+    const setTimeoutFn = (fn) => { pendingCb = fn; return { unref() {} }; };
+    const clearTimeoutFn = () => { pendingCb = null; };
+    const { orch, events } = makeOrch(proj, {
+      researcher: { write: 'QUESTION: need a decision' },
+    }, { setTimeoutFn, clearTimeoutFn });
+    const runP = orch.runTeam({ teamId: 'marketing', projectId: 'p1', trigger: 'manual' });
+    await waitForEvent(events, 'team-run-awaiting-input');
+    assert.ok(pendingCb, 'an answer timeout was armed');
+    pendingCb(); // fire the timeout instead of answering
+    const res = await runP;
+    assert.equal(res.failedStage, 'researcher');
+    assert.equal(res.reason, 'answer-timeout');
+  } finally {
+    fs.rmSync(proj, { recursive: true, force: true });
+  }
+});
+
+test('chat 4: exceeding maxQuestions fails with question-budget', async () => {
+  const proj = tmpProject();
+  try {
+    seedPack(proj);
+    const { orch, events } = makeOrch(proj, {
+      researcher: [{ write: 'QUESTION: q1' }, { write: 'QUESTION: q2' }],
+    }, { teamPatch: (t) => { t.chat = { ...t.chat, maxQuestions: 1 }; return t; } });
+    const runP = orch.runTeam({ teamId: 'marketing', projectId: 'p1', trigger: 'manual' });
+    await waitForEvent(events, 'team-run-awaiting-input');
+    orch.postMessage('marketing', 'p1', 'answer 1'); // re-run asks q2, which is over budget
+    const res = await runP;
+    assert.equal(res.reason, 'question-budget');
+    assert.equal(events.filter((e) => e.name === 'team-run-awaiting-input').length, 1, 'only the within-budget question paused');
+  } finally {
+    fs.rmSync(proj, { recursive: true, force: true });
+  }
+});
+
+test('chat 5: an identical re-asked question after an answer bails with question-no-progress', async () => {
+  const proj = tmpProject();
+  try {
+    seedPack(proj);
+    const { orch, events } = makeOrch(proj, {
+      researcher: { write: 'QUESTION: same?' }, // identical bytes on every spawn
+    });
+    const runP = orch.runTeam({ teamId: 'marketing', projectId: 'p1', trigger: 'manual' });
+    await waitForEvent(events, 'team-run-awaiting-input');
+    orch.postMessage('marketing', 'p1', 'here is the answer');
+    const res = await runP;
+    assert.equal(res.reason, 'question-no-progress');
+  } finally {
+    fs.rmSync(proj, { recursive: true, force: true });
+  }
+});
+
+test('chat 6: a scheduled run never blocks; a stray QUESTION halts as needs-operator', async () => {
+  const proj = tmpProject();
+  try {
+    seedPack(proj);
+    const { orch, events } = makeOrch(proj, {
+      researcher: { write: 'QUESTION: should not pause' },
+    });
+    const res = await orch.runTeam({ teamId: 'marketing', projectId: 'p1', trigger: 'scheduled' });
+    assert.equal(res.failedStage, 'researcher');
+    assert.equal(res.reason, 'needs-operator');
+    assert.ok(!events.some((e) => e.name === 'team-run-awaiting-input'), 'never awaited an operator');
+    assert.ok(logLines(proj).some((l) => l.includes('NEEDS_OPERATOR')), 'logged a needs-operator line');
+  } finally {
+    fs.rmSync(proj, { recursive: true, force: true });
+  }
+});
+
+test('chat 7: cancelling while awaiting an answer settles the run cancelled (no hang)', async () => {
+  const proj = tmpProject();
+  try {
+    seedPack(proj);
+    const { orch, events } = makeOrch(proj, {
+      researcher: { write: 'QUESTION: waiting on you' },
+    });
+    const runP = orch.runTeam({ teamId: 'marketing', projectId: 'p1', trigger: 'manual' });
+    await waitForEvent(events, 'team-run-awaiting-input');
+    assert.equal(orch.getRunState('marketing', 'p1').awaiting, true);
+    assert.equal(orch.cancelRun('marketing', 'p1'), true);
+    const res = await runP;
+    assert.equal(res.cancelled, true);
+    assert.equal(orch.isActive('marketing', 'p1'), false, 'released the lock');
+  } finally {
+    fs.rmSync(proj, { recursive: true, force: true });
+  }
+});
+
+test('chat 8: an opted-out team (allowQuestions:false) does not pause on a manual run', async () => {
+  const proj = tmpProject();
+  try {
+    seedPack(proj);
+    const { orch, events } = makeOrch(proj, {
+      researcher: { write: 'QUESTION: ignored' },
+    }, { teamPatch: (t) => { t.chat = { ...t.chat, allowQuestions: false }; return t; } });
+    const res = await orch.runTeam({ teamId: 'marketing', projectId: 'p1', trigger: 'manual' });
+    assert.equal(res.reason, 'needs-operator');
+    assert.ok(!events.some((e) => e.name === 'team-run-awaiting-input'), 'opted-out run never awaits');
   } finally {
     fs.rmSync(proj, { recursive: true, force: true });
   }

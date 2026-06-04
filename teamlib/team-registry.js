@@ -69,6 +69,27 @@ function validateWriteScope(writeScope, teamId) {
   }
 }
 
+// Validate the optional interactive-chat config (Teams chat + operator-question loop). All fields are
+// optional; defaults make the feature on for manual runs. A team opts out with chat.allowQuestions:false.
+function validateChat(chat, teamId) {
+  if (chat == null) return; // optional: defaults applied at normalization
+  if (typeof chat !== 'object' || Array.isArray(chat)) fail('chat', 'must be an object', teamId);
+  if (chat.allowQuestions != null && typeof chat.allowQuestions !== 'boolean') {
+    fail('chat.allowQuestions', 'must be a boolean', teamId);
+  }
+  if (chat.questionMarker != null
+    && (typeof chat.questionMarker !== 'string' || chat.questionMarker.trim() === '')) {
+    fail('chat.questionMarker', 'must be a non-empty string', teamId);
+  }
+  if (chat.maxQuestions != null && (!Number.isInteger(chat.maxQuestions) || chat.maxQuestions < 1)) {
+    fail('chat.maxQuestions', 'must be an integer >= 1', teamId);
+  }
+  if (chat.answerTimeoutSec != null
+    && (!Number.isInteger(chat.answerTimeoutSec) || chat.answerTimeoutSec < 1)) {
+    fail('chat.answerTimeoutSec', 'must be an integer >= 1', teamId);
+  }
+}
+
 // The repo-relative globs identifying the oracle (the tests) that the orchestrator restores to the run's
 // base SHA before each audit (restore-before-audit, team-git restoreTests). Optional; normalizes to
 // DEFAULT_TEST_GLOBS.
@@ -152,6 +173,7 @@ function validateAndNormalize(def, teamId, teamDir) {
   validatePack(def.pack, teamId);
   validateWriteScope(def.writeScope, teamId);
   validateTestGlobs(def.testGlobs, teamId);
+  validateChat(def.chat, teamId);
 
   const baseDir = path.dirname(teamDir);
 
@@ -196,6 +218,15 @@ function validateAndNormalize(def, teamId, teamDir) {
     // The restore-before-audit oracle pathspec; default DEFAULT_TEST_GLOBS so the guard always has a
     // sane project-agnostic test matcher even when a team omits it. (Inert unless writeScope is set.)
     testGlobs: (def.testGlobs && def.testGlobs.length) ? def.testGlobs.slice() : DEFAULT_TEST_GLOBS.slice(),
+    // Interactive Teams chat + operator-question loop. ON by default (manual runs); a team opts out with
+    // chat.allowQuestions:false. The orchestrator scopes the question pause to trigger==='manual' so
+    // scheduled/unattended runs never block.
+    chat: {
+      allowQuestions: def.chat?.allowQuestions !== false,
+      questionMarker: def.chat?.questionMarker || 'QUESTION:',
+      maxQuestions: Number.isInteger(def.chat?.maxQuestions) ? def.chat.maxQuestions : 3,
+      answerTimeoutSec: Number.isInteger(def.chat?.answerTimeoutSec) ? def.chat.answerTimeoutSec : 600,
+    },
     stages,
     teamDir,
     packRequired,

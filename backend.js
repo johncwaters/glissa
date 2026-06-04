@@ -485,7 +485,7 @@ function createBackend(httpServer, options = {}) {
     gitWorkspace,
     now: () => new Date(),
   });
-  for (const ev of ['team-run-started', 'team-stage-started', 'team-stage-complete', 'team-revise-round', 'team-run-cancelling', 'team-run-complete', 'team-run-failed', 'team-run-skipped', 'team-run-needs-setup']) {
+  for (const ev of ['team-run-started', 'team-stage-started', 'team-stage-complete', 'team-revise-round', 'team-run-cancelling', 'team-run-complete', 'team-run-failed', 'team-run-skipped', 'team-run-needs-setup', 'team-chat-message', 'team-run-awaiting-input', 'team-run-resumed']) {
     orchestrator.on(ev, (payload) => broadcastControl({ type: ev, ...payload, timestamp: Date.now() }));
   }
   orchestrator.on('team-run-complete', ({ teamId, verdict }) => {

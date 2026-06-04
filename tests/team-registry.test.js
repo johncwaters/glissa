@@ -54,6 +54,11 @@ const invalidCases = [
   ['non-string writeScope element', { id: 'x', outputPath: 'y', writeScope: ['src/**', 5], stages: [okStage] }, /writeScope/],
   ['non-array testGlobs', { id: 'x', outputPath: 'y', testGlobs: '**/*.test.*', stages: [okStage] }, /testGlobs/],
   ['non-string testGlobs element', { id: 'x', outputPath: 'y', testGlobs: ['**/*.test.*', 5], stages: [okStage] }, /testGlobs/],
+  ['non-object chat', { id: 'x', outputPath: 'y', chat: 'no', stages: [okStage] }, /\bchat\b/],
+  ['bad chat.allowQuestions', { id: 'x', outputPath: 'y', chat: { allowQuestions: 'yes' }, stages: [okStage] }, /chat\.allowQuestions/],
+  ['empty chat.questionMarker', { id: 'x', outputPath: 'y', chat: { questionMarker: '' }, stages: [okStage] }, /chat\.questionMarker/],
+  ['bad chat.maxQuestions', { id: 'x', outputPath: 'y', chat: { maxQuestions: 0 }, stages: [okStage] }, /chat\.maxQuestions/],
+  ['bad chat.answerTimeoutSec', { id: 'x', outputPath: 'y', chat: { answerTimeoutSec: -1 }, stages: [okStage] }, /chat\.answerTimeoutSec/],
 ];
 
 for (const [label, def, re] of invalidCases) {
@@ -367,6 +372,37 @@ test('a real writeScope + testGlobs are normalized (slice-copied) onto the team'
 test('loadTeam("marketing").writeScope deep-equals [] (backward-compat lock)', () => {
   const team = loadTeam('marketing', REPO_TEAMS);
   assert.deepEqual(team.writeScope, []);
+});
+
+// --- interactive chat config (default-on for manual runs) ---
+
+test('chat defaults to allowQuestions:true with standard bounds when omitted', () => {
+  const def = teamDef('t', defaultStages());
+  const baseDir = makeTmpTeams({ teamId: 't', def });
+  withTmp(baseDir, () => {
+    const team = loadTeam('t', baseDir);
+    assert.equal(team.chat.allowQuestions, true);
+    assert.equal(team.chat.questionMarker, 'QUESTION:');
+    assert.equal(team.chat.maxQuestions, 3);
+    assert.equal(team.chat.answerTimeoutSec, 600);
+  });
+});
+
+test('chat.allowQuestions:false is honored (opt-out); other fields still normalize', () => {
+  const def = { ...teamDef('t', defaultStages()), chat: { allowQuestions: false, maxQuestions: 5 } };
+  const baseDir = makeTmpTeams({ teamId: 't', def });
+  withTmp(baseDir, () => {
+    const team = loadTeam('t', baseDir);
+    assert.equal(team.chat.allowQuestions, false);
+    assert.equal(team.chat.maxQuestions, 5);
+    assert.equal(team.chat.answerTimeoutSec, 600);
+  });
+});
+
+test('marketing, qa, and release-notes all default chat on (manual interactivity)', () => {
+  for (const id of ['marketing', 'qa', 'release-notes']) {
+    assert.equal(loadTeam(id, REPO_TEAMS).chat.allowQuestions, true, `${id} chat on by default`);
+  }
 });
 
 // The real qa team loads with the expected roster, writeScope, testGlobs, schedule, and revise config.

@@ -50,6 +50,43 @@ test('buildStagePrompt tolerates a first stage with no reads', () => {
   assert.ok(!/Read these inputs first/.test(prompt));
 });
 
+test('buildStagePrompt injects the operator conversation read + honor instruction when chat is provided', () => {
+  const runDir = '/p/runs/x';
+  const prompt = buildStagePrompt('# Writer', {
+    runDir,
+    packDir: '/p/pack',
+    produces: { name: 'drafts.md', path: `${runDir}/drafts.md` },
+    chat: { name: 'chat.md', path: `${runDir}/chat.md` },
+  });
+  assert.ok(prompt.includes(`${runDir}/chat.md`), 'includes the chat path');
+  assert.ok(/operator conversation/i.test(prompt), 'labels it the operator conversation');
+  assert.ok(/operator wins/i.test(prompt), 'tells the agent the operator wins on conflict');
+});
+
+test('buildStagePrompt omits the conversation block when chat is null', () => {
+  const prompt = buildStagePrompt('# Writer', {
+    runDir: '/p/runs/x',
+    packDir: '/p/pack',
+    produces: { name: 'drafts.md', path: '/p/runs/x/drafts.md' },
+  });
+  assert.ok(!/operator conversation/i.test(prompt));
+});
+
+test('buildStagePrompt appends the QUESTION protocol only when allowQuestions is true', () => {
+  const ctx = {
+    runDir: '/p/runs/x',
+    packDir: '/p/pack',
+    produces: { name: 'drafts.md', path: '/p/runs/x/drafts.md' },
+  };
+  const off = buildStagePrompt('# Writer', ctx);
+  assert.ok(!/QUESTION:/.test(off), 'no protocol by default in this call');
+  const on = buildStagePrompt('# Writer', { ...ctx, allowQuestions: true });
+  assert.ok(/QUESTION:/.test(on), 'protocol present when allowQuestions is true');
+  assert.ok(/do not guess/i.test(on), 'tells the agent not to guess');
+  // The produces line must stay parseable by the orchestrator stage fake regardless of the additions.
+  assert.match(on, /Write your single output file to: (.+)/);
+});
+
 test('writePromptFile writes the exact content and returns a path under dir', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-prompt-'));
   try {

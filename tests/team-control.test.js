@@ -85,6 +85,93 @@ test('cancel-team-run acks the orchestrator result', () => {
   assert.equal(ack.cancelled, true);
 });
 
+test('list-teams surfaces chat.allowQuestions per team', () => {
+  const h = harness({ registry: realRegistry });
+  h.send({ type: 'list-teams', requestId: 'r2' });
+  const mkt = h.sent.find((m) => m.type === 'teams').teams.find((t) => t.id === 'marketing');
+  assert.ok(mkt.chat, 'team summary carries a chat block');
+  assert.equal(mkt.chat.allowQuestions, true, 'marketing defaults chat on');
+});
+
+test('post-team-message delegates to the orchestrator and acks', () => {
+  const calls = [];
+  const orchestrator = { postMessage: (...a) => { calls.push(a); return { ok: true, answered: true }; } };
+  const h = harness({ orchestrator });
+  h.send({ type: 'post-team-message', teamId: 'marketing', projectId: 'p1', text: 'use angle B' });
+  assert.deepEqual(calls[0], ['marketing', 'p1', 'use angle B']);
+  const ack = h.sent.find((m) => m.type === 'team-message-ack');
+  assert.ok(ack && ack.ok === true && ack.answered === true);
+});
+
+test('post-team-message rejects empty and oversized text', () => {
+  const orchestrator = { postMessage: () => assert.fail('should not be called for invalid text') };
+  const h = harness({ orchestrator });
+  h.send({ type: 'post-team-message', teamId: 'marketing', projectId: 'p1', text: '   ' });
+  assert.ok(h.sent.some((m) => m.type === 'error' && /text is required/i.test(m.message)));
+  h.sent.length = 0;
+  h.send({ type: 'post-team-message', teamId: 'marketing', projectId: 'p1', text: 'x'.repeat(9000) });
+  assert.ok(h.sent.some((m) => m.type === 'error' && /too long/i.test(m.message)));
+});
+
+test('post-team-message reports "not available" with no orchestrator', () => {
+  const h = harness({});
+  h.send({ type: 'post-team-message', teamId: 'marketing', projectId: 'p1', text: 'hi' });
+  assert.ok(h.sent.some((m) => m.type === 'error' && /not available/i.test(m.message)));
+});
+
+test('get-team-chat returns the active run transcript + awaiting flags', () => {
+  const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-chat-'));
+  try {
+    const h = harness({
+      registry: realRegistry,
+      getProjectPathById: () => proj,
+      teamOutput: { readChat: () => [{ role: 'agent', stage: 'writer', ts: 't', text: 'QUESTION: x?' }] },
+      orchestrator: { getRunState: () => ({ runId: '2026-06-02-tuesday', awaiting: true, pendingQuestion: 'x?' }) },
+    });
+    h.send({ type: 'get-team-chat', teamId: 'marketing', projectId: 'p1', requestId: 'c1' });
+    const msg = h.sent.find((m) => m.type === 'team-chat');
+    assert.equal(msg.requestId, 'c1');
+    assert.equal(msg.messages.length, 1);
+    assert.equal(msg.awaiting, true);
+    assert.equal(msg.pendingQuestion, 'x?');
+  } finally {
+    fs.rmSync(proj, { recursive: true, force: true });
+  }
+});
+
+test('get-team-chat returns an empty transcript when no run is active', () => {
+  const h = harness({
+    registry: realRegistry,
+    getProjectPathById: () => 'C:/proj',
+    teamOutput: { readChat: () => assert.fail('must not read chat when inactive') },
+    orchestrator: { getRunState: () => null },
+  });
+  h.send({ type: 'get-team-chat', teamId: 'marketing', projectId: 'p1', requestId: 'c2' });
+  const msg = h.sent.find((m) => m.type === 'team-chat');
+  assert.deepEqual(msg.messages, []);
+  assert.equal(msg.awaiting, false);
+});
+
+test('open-artifact allows opening the run conversation transcript (chat.md)', () => {
+  const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-art2-'));
+  const runDir = path.join(proj, '.glissa', 'teams', 'marketing', 'runs', '2026-06-02-tuesday');
+  fs.mkdirSync(runDir, { recursive: true });
+  fs.writeFileSync(path.join(runDir, 'chat.md'), '# Team conversation\n', 'utf8');
+  const opened = [];
+  try {
+    const h = harness({
+      registry: realRegistry,
+      getProjectPathById: () => proj,
+      openInEditor: (p) => { opened.push(p); return { ok: true }; },
+    });
+    h.send({ type: 'open-artifact', teamId: 'marketing', projectId: 'p1', runId: '2026-06-02-tuesday', artifact: 'chat.md' });
+    assert.equal(opened.length, 1, 'chat.md is an allowed artifact');
+    assert.ok(opened[0].endsWith('chat.md'));
+  } finally {
+    fs.rmSync(proj, { recursive: true, force: true });
+  }
+});
+
 test('get-team-runs returns run summaries + active flag', () => {
   const h = harness({
     registry: realRegistry,

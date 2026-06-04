@@ -99,25 +99,29 @@ function artifactLabel(file) {
   return base.charAt(0).toUpperCase() + base.slice(1);
 }
 
-// Trust posture as scannable chips, derived from the team's permission deny-list so it stays
-// data-driven. The mode chip (skip-permissions) is the one to notice, so it carries the warning tint.
+// Trust posture, slimmed. The dangerous mode (skip-permissions) keeps a loud boxed chip because it is
+// the one real "notice me"; the routine write-scope and deny-list fold into a single quiet caption so
+// the panel is not a wall of boxes. Still derived from the team's permission deny-list, so it stays
+// data-driven.
 function renderGuardrails(perm, outputPath) {
   const wrap = el('div', 'team-guardrails');
   const mode = (perm?.mode) || 'interactive';
   const deny = (perm?.deny) || [];
   const has = (re) => deny.some((d) => re.test(d));
-  wrap.append(el('span', 'guardrail-chip guardrail-mode', mode === 'yolo' ? 'skip-permissions' : `${mode} mode`));
-  wrap.append(el('span', 'guardrail-chip', `writes only ${outputPath}/`));
+  // skip-permissions is the one real hazard, so it keeps a loud boxed chip; every other mode is routine
+  // posture and rides quietly in the caption.
+  const parts = [];
+  if (mode === 'yolo') wrap.append(el('span', 'guardrail-chip guardrail-mode', 'skip-permissions'));
+  else parts.push(`${mode} mode`);
   const blocks = [];
   if (has(/\b(rm|rmdir|del|rd)\b/i)) blocks.push('file deletes');
   if (has(/git\s+(push|reset|clean)/i)) blocks.push('git push/reset');
   if (has(/npm\s+(publish|version)/i)) blocks.push('npm publish');
   if (has(/curl|wget|invoke-webrequest|iwr/i)) blocks.push('network');
   if (has(/secret|\.env/i)) blocks.push('secrets');
-  if (blocks.length) {
-    wrap.append(el('span', 'guardrail-blocks-label', 'blocks'));
-    for (const b of blocks) wrap.append(el('span', 'guardrail-chip guardrail-block', b));
-  }
+  parts.push(`writes ${outputPath} only`);
+  if (blocks.length) parts.push(`blocks ${blocks.join(', ')}`);
+  wrap.append(el('span', 'guardrail-summary', parts.join(' · ')));
   return wrap;
 }
 
@@ -132,6 +136,69 @@ function ensureTzDatalist() {
   dl.id = 'tz-presets';
   for (const z of TZ_PRESETS) { const o = document.createElement('option'); o.value = z; dl.append(o); }
   document.body.append(dl);
+}
+
+// ── conversation pane ─────────────────────────────────────────
+// A small, non-terminal chat surface per instance: a live feed (lifecycle system lines + the agents'
+// questions) plus an input the operator uses to steer between stages or answer a paused stage's
+// question. Talks to the backend via post-team-message / get-team-chat and the team-chat-message,
+// team-run-awaiting-input, and team-run-resumed broadcasts.
+
+function autosizeChat(field) {
+  field.style.height = 'auto';
+  field.style.height = `${Math.min(field.scrollHeight, 120)}px`;
+}
+
+function chatRoleLabel(role) {
+  if (role === 'operator') return 'You';
+  if (role === 'agent') return 'Team';
+  return '';
+}
+
+// Append one message bubble. role operator|agent renders with a who/stage meta line; anything else
+// renders as a terse system line (lifecycle narration). Auto-scrolls to the newest.
+function appendChatMsg(refs, m) {
+  if (!refs || !refs.chatLog) return;
+  const role = m.role === 'operator' ? 'operator' : (m.role === 'agent' ? 'agent' : 'system');
+  const row = el('div', 'chat-msg');
+  row.dataset.role = role;
+  if (role !== 'system') {
+    const who = chatRoleLabel(role);
+    const meta = el('span', 'chat-msg-meta', m.stage ? `${who} · ${labelFor(m.stage)}` : who);
+    row.append(meta);
+  }
+  row.append(el('div', 'chat-msg-text', String(m.text == null ? '' : m.text)));
+  refs.chatLog.append(row);
+  refs.chatLog.scrollTop = refs.chatLog.scrollHeight;
+}
+
+function appendSystemLine(refs, text) {
+  appendChatMsg(refs, { role: 'system', text });
+}
+
+function setChatAwaiting(refs, question) {
+  if (!refs) return;
+  refs.chatAwaiting = true;
+  if (refs.chatPending) {
+    refs.chatPending.hidden = false;
+    refs.chatPending.replaceChildren(
+      el('span', 'chat-pending-label', 'Waiting on you'),
+      el('span', 'chat-pending-text', question || 'The team asked a question.'),
+    );
+  }
+  if (refs.chatSend) refs.chatSend.textContent = 'Answer';
+  if (refs.chatField) {
+    refs.chatField.classList.add('awaiting');
+    requestAnimationFrame(() => refs.chatField.focus());
+  }
+}
+
+function clearChatAwaiting(refs) {
+  if (!refs) return;
+  refs.chatAwaiting = false;
+  if (refs.chatPending) { refs.chatPending.hidden = true; refs.chatPending.replaceChildren(); }
+  if (refs.chatSend) refs.chatSend.textContent = 'Send';
+  if (refs.chatField) refs.chatField.classList.remove('awaiting');
 }
 
 // ── pipeline rail ─────────────────────────────────────────────
@@ -198,6 +265,14 @@ function setRunning(refs, on) {
   refs.runBtn.hidden = on;
   refs.cancelBtn.hidden = !on;
   refs.removeBtn.disabled = on;
+  // The conversation input is only actionable during a run (postMessage needs an active run).
+  if (refs.chatField) {
+    refs.chatField.disabled = !on;
+    refs.chatField.placeholder = on
+      ? 'Message the team: steer it, or answer a question'
+      : 'Run the team to chat with it';
+  }
+  if (!on) clearChatAwaiting(refs);
   if (on) {
     refs.editor.wrap.hidden = true; // force-close a possibly-open editor so it cannot reappear post-run
     refs.editBtn.setAttribute('aria-expanded', 'false');
@@ -253,7 +328,7 @@ function mergeNote(msg) {
 function artifactButtons(refs, r) {
   const detail = refs.team.stageDetail || [];
   const avail = (r.reached || []).map((id) => detail.find((s) => s.id === id)).filter((s) => s?.produces);
-  if (!avail.length) return null;
+  if (!avail.length && !r.chat) return null;
   const wrap = el('div', 'run-artifacts');
   wrap.append(el('span', 'run-artifacts-label', 'Open'));
   for (const s of avail) {
@@ -261,6 +336,15 @@ function artifactButtons(refs, r) {
     b.type = 'button';
     b.addEventListener('click', () => {
       sendControlMsg({ type: 'open-artifact', teamId: refs.teamId, projectId: refs.projectId, runId: r.runId, artifact: s.produces });
+    });
+    wrap.append(b);
+  }
+  // The operator conversation transcript, when this run recorded one.
+  if (r.chat) {
+    const b = el('button', 'run-artifact', 'Conversation');
+    b.type = 'button';
+    b.addEventListener('click', () => {
+      sendControlMsg({ type: 'open-artifact', teamId: refs.teamId, projectId: refs.projectId, runId: r.runId, artifact: 'chat.md' });
     });
     wrap.append(b);
   }
@@ -323,7 +407,7 @@ function renderSetup(refs, ps) {
   refs.setupEl.hidden = false;
   setCollapsed(refs, false); // an unfilled pack is a blocker; never hide it behind the collapsed state
   const head = el('p', 'team-setup-head', 'Set up this project’s pack before the first run.');
-  const sub = el('p', 'team-setup-sub', 'The pack is this project’s specifics (voice, brand, channels) that the agents read on every run.');
+  const sub = el('p', 'team-setup-sub', 'Agents read this project’s voice, brand, and channels from it on every run.');
 
   // A guided interview agent reads the project, asks for the subjective bits, and writes the pack for
   // you. It opens as its own terminal session card you answer in.
@@ -355,6 +439,18 @@ function refreshInstance(refs) {
         rehydrateLive(refs, msg.live);
         runningKeys.add(key(refs.teamId, refs.projectId));
         setTabActivity();
+      }
+      // Rehydrate the conversation only while a run is active (so a completion refresh never wipes the
+      // just-finished live transcript already in the DOM).
+      if (msg.active) {
+        sendControlRequest('get-team-chat', { teamId: refs.teamId, projectId: refs.projectId })
+          .then((c) => {
+            refs.chatLog.replaceChildren();
+            for (const m of (c.messages || [])) appendChatMsg(refs, m);
+            if (c.awaiting) setChatAwaiting(refs, c.pendingQuestion);
+            else clearChatAwaiting(refs);
+          })
+          .catch(() => {});
       }
     })
     .catch(() => { refs.runsList.replaceChildren(el('li', 'run-item run-empty', 'Could not load run history.')); });
@@ -472,7 +568,11 @@ function renderInstancePanel(team, activation) {
   head.append(headRight);
   panel.append(head);
 
-  if (team.description) panel.append(el('p', 'team-desc', team.description));
+  if (team.description) {
+    const desc = el('p', 'team-desc', team.description);
+    desc.title = team.description; // clamped to 2 lines in CSS; full text on hover
+    panel.append(desc);
+  }
 
   // Band 2: pipeline rail
   const stages = (team.stageDetail?.length) ? team.stageDetail : (team.stages || []).map((id) => ({ id }));
@@ -497,6 +597,27 @@ function renderInstancePanel(team, activation) {
     stageNodes.set(s.id, node);
   });
   panel.append(pipeline);
+
+  // Band 2.5: conversation (live feed + operator steering + answering a paused agent question)
+  const chatWrap = el('div', 'team-chat');
+  const chatLog = el('div', 'team-chat-log');
+  chatLog.setAttribute('role', 'log');
+  chatLog.setAttribute('aria-live', 'polite');
+  chatLog.setAttribute('aria-label', 'Team conversation');
+  const chatPending = el('div', 'chat-pending-question');
+  chatPending.hidden = true;
+  const chatForm = el('form', 'team-chat-input');
+  const chatField = document.createElement('textarea');
+  chatField.className = 'chat-input-field';
+  chatField.rows = 1;
+  chatField.disabled = true;
+  chatField.placeholder = 'Run the team to chat with it';
+  chatField.setAttribute('aria-label', 'Message the team');
+  const chatSend = el('button', 'chat-send', 'Send');
+  chatSend.type = 'submit';
+  chatForm.append(chatField, chatSend);
+  chatWrap.append(chatLog, chatPending, chatForm);
+  panel.append(chatWrap);
 
   // Band 3: controls
   const controls = el('div', 'team-control-row');
@@ -551,11 +672,27 @@ function renderInstancePanel(team, activation) {
     teamId: team.id, projectId, team, panel,
     stageNodes, status, next, runGroup, runBtn, cancelBtn, elapsedEl,
     schedCb, schedSummary, editBtn, removeBtn, editor, runsList, setupEl, collapseBtn,
+    chatWrap, chatLog, chatPending, chatField, chatSend, chatAwaiting: false,
     schedule: activation.schedule || team.schedule || null, enabled: !!activation.enabled,
     timer: null, stageStartMs: 0, budget: team.stageTimeoutSeconds || 900, running: false, collapsed: true,
   };
 
   collapseBtn.addEventListener('click', () => setCollapsed(refs, !refs.collapsed));
+
+  // Post an operator message (steering note, or the answer to a paused stage's question). Enter sends,
+  // Shift+Enter inserts a newline. The backend rejects a post when no run is active.
+  chatForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const text = chatField.value.trim();
+    if (!text) return;
+    sendControlMsg({ type: 'post-team-message', teamId: team.id, projectId, text });
+    chatField.value = '';
+    autosizeChat(chatField);
+  });
+  chatField.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); chatForm.requestSubmit(); }
+  });
+  chatField.addEventListener('input', () => autosizeChat(chatField));
 
   // The run executes in an isolated git worktree (see team-git.js), so it never touches the working
   // tree and needs no clean-repo preflight.
@@ -839,6 +976,8 @@ export function handleTeamMessage(msg) {
     case 'team-run-started':
       setRunning(refs, true);
       resetPipeline(refs.stageNodes);
+      refs.chatLog.replaceChildren(); // fresh run, fresh conversation
+      clearChatAwaiting(refs);
       setStatus(refs, 'Running…', 'run');
       break;
     case 'team-stage-started': {
@@ -850,8 +989,10 @@ export function handleTeamMessage(msg) {
       if (msg.round > 0) {
         if (node) node.dataset.round = String(msg.round);
         setStatus(refs, `${labelFor(msg.stage)} · revision ${msg.round}`, 'run');
+        appendSystemLine(refs, `${labelFor(msg.stage)} revising (round ${msg.round})`);
       } else {
         setStatus(refs, `${labelFor(msg.stage)} · ${stageIndexLabel(refs, msg.stage)}`, 'run');
+        appendSystemLine(refs, `${labelFor(msg.stage)} started`);
       }
       break;
     }
@@ -860,6 +1001,7 @@ export function handleTeamMessage(msg) {
       break;
     case 'team-stage-complete':
       markStage(refs.stageNodes, msg.stage, 'done');
+      appendSystemLine(refs, `${labelFor(msg.stage)} finished${msg.verdict ? `: ${msg.verdict}` : ''}`);
       break;
     case 'team-run-cancelling':
       setStatus(refs, 'Cancelling…', '');
@@ -869,6 +1011,7 @@ export function handleTeamMessage(msg) {
       setRunning(refs, false);
       const roundsNote = msg.rounds > 0 ? ` (${msg.rounds} round${msg.rounds > 1 ? 's' : ''})` : '';
       setStatus(refs, `Complete · ${msg.verdict || 'done'}${roundsNote}${mergeNote(msg)}`, 'ok');
+      appendSystemLine(refs, `Run complete: ${msg.verdict || 'done'}${roundsNote}`);
       refreshInstance(refs);
       break;
     }
@@ -876,6 +1019,7 @@ export function handleTeamMessage(msg) {
       if (msg.stage) markStage(refs.stageNodes, msg.stage, 'failed');
       setRunning(refs, false);
       setStatus(refs, failText(msg), 'fail');
+      appendSystemLine(refs, failText(msg));
       refreshInstance(refs);
       break;
     case 'team-run-skipped':
@@ -901,6 +1045,18 @@ export function handleTeamMessage(msg) {
         const remaining = (msg.unfilled || []).join(', ');
         setStatus(refs, `Pack still needs: ${remaining || 'more input'}`, 'fail');
       }
+      break;
+    case 'team-chat-message':
+      appendChatMsg(refs, msg);
+      break;
+    case 'team-run-awaiting-input':
+      setRunning(refs, true);
+      setChatAwaiting(refs, msg.question);
+      setStatus(refs, 'Awaiting your answer', 'run');
+      break;
+    case 'team-run-resumed':
+      clearChatAwaiting(refs);
+      setStatus(refs, 'Running…', 'run');
       break;
     default:
       break;

@@ -29,6 +29,18 @@ function parseVerdict(text, verdictSpec) {
   return values.includes(found) ? found : null;
 }
 
+// Detect an operator-question sentinel: the agent wrote the marker as the ENTIRE output (the QUESTION
+// protocol in team-prompt) instead of a normal handoff. Returns the trimmed question text, or null.
+// Matching at the START of the output (not as a substring) avoids a false positive from a handoff that
+// merely mentions the word.
+function extractQuestion(text, marker = 'QUESTION:') {
+  const t = String(text || '').trim();
+  const m = String(marker || 'QUESTION:');
+  if (t.length < m.length) return null;
+  if (t.slice(0, m.length).toUpperCase() !== m.toUpperCase()) return null;
+  return t.slice(m.length).trim() || '(no question text)';
+}
+
 // First non-empty content line under a markdown heading (used for the log line's topic/platforms).
 function sectionFirstLine(text, heading) {
   if (!text) return '';
@@ -103,6 +115,20 @@ function createOrchestrator(deps) {
     }
   }
 
+  // Append one conversation turn to the run's chat.md and broadcast it. `entry` is the live run state
+  // (for runDir); role is 'operator' or 'agent'. Best-effort: a transcript write failure never breaks a
+  // run. Returns the stored entry.
+  function recordChat(entry, teamId, projectId, role, stage, text) {
+    let stored = {
+      role, stage: stage || null, ts: now().toISOString(), text: String(text == null ? '' : text),
+    };
+    if (entry?.runDir) {
+      try { stored = output.appendChat(entry.runDir, stored); } catch { /* best-effort transcript */ }
+    }
+    emitter.emit('team-chat-message', { teamId, projectId, ...stored });
+    return stored;
+  }
+
   // Spawn one stage and resolve when its process exits (exit 0 = success) or the stage times out.
   function runStage({ team, stage, runId, projectPath, prompt, lockKey }) {
     return spawnGate.run(() => new Promise((resolve) => {
@@ -160,9 +186,17 @@ function createOrchestrator(deps) {
       emitter.emit('team-run-skipped', { teamId, projectId });
       return { skipped: true };
     }
+    // Interactive chat is scoped to manual runs: a scheduled/unattended run never injects the QUESTION
+    // protocol and never blocks for an operator (see the QUESTION handling in runOneStage).
+    const chatCfg = team.chat || {
+      allowQuestions: false, questionMarker: 'QUESTION:', maxQuestions: 3, answerTimeoutSec: 600,
+    };
+    const interactive = !!chatCfg.allowQuestions && trigger === 'manual';
     active.set(lockKey, {
       cancelled: false, cancelling: false, session: null,
       runId: '', runStartedAtMs: 0, currentStage: null, stageStartedAtMs: 0,
+      interactive, chatCfg, runDir: '',
+      awaiting: false, pendingQuestion: null, awaitResolve: null, awaitTimer: null, questionsAsked: 0,
     });
     log(`run requested: ${lockKey} (trigger=${trigger})`);
 
@@ -230,7 +264,7 @@ function createOrchestrator(deps) {
       const packDir = path.join(cwd, team.outputPath, 'pack');
       const packFiles = (team.packRequired || []).map((name) => ({ name, path: path.join(packDir, name) }));
       const runEntry = active.get(lockKey);
-      if (runEntry) { runEntry.runId = runId; runEntry.runStartedAtMs = now().getTime(); }
+      if (runEntry) { runEntry.runId = runId; runEntry.runStartedAtMs = now().getTime(); runEntry.runDir = runDir; }
       log(`run started: ${lockKey} runId=${runId}${workspace.branch ? ` branch=${workspace.branch}` : ''}`);
       emitter.emit('team-run-started', { teamId, projectId, runId, runDir, trigger, branch: workspace.branch || null });
 
@@ -269,32 +303,94 @@ function createOrchestrator(deps) {
             if (!readNames.includes(name)) readNames.push(name);
           }
         }
-        const reads = readNames.map((name) => ({ name, path: path.join(runDir, name) }));
         const produces = { name: stage.produces, path: path.join(runDir, stage.produces) };
-        const prompt = buildStagePrompt(readText(stage.agentPath), {
-          runDir, packDir, packFiles, reads, produces,
-        });
         const stageEntry = active.get(lockKey);
-        if (stageEntry) { stageEntry.currentStage = stage.id; stageEntry.stageStartedAtMs = now().getTime(); }
-        log(`stage start: ${lockKey} ${stage.id} (${stage.model || 'sonnet'})${round ? ` round=${round}` : ''}`);
-        emitter.emit('team-stage-started', { teamId, projectId, runId, stage: stage.id, round });
+        const interactive = !!stageEntry?.interactive;
+        const chatCfg = stageEntry?.chatCfg || {};
+        const marker = chatCfg.questionMarker || 'QUESTION:';
 
-        const result = await runStage({ team, stage, runId, projectPath: cwd, prompt, lockKey });
-        if (active.get(lockKey).cancelled) {
+        // CANCELLED terminal, shared by the cancel checks after a spawn or after an awaited question.
+        const cancelledTerminal = () => {
           output.appendLog(cwd, team.outputPath, `${dateStr} | ${topic() || '(topic)'} | ${platforms() || '-'} | CANCELLED`);
           log(`run cancelled: ${lockKey} at stage ${stage.id}`);
           finalize('discard');
           emitter.emit('team-run-failed', { teamId, projectId, reason: 'cancelled', stage: stage.id });
           return { terminal: { cancelled: true, stage: stage.id } };
-        }
-        if (!result.ok) {
-          output.appendLog(cwd, team.outputPath, `${dateStr} | ${topic() || '(topic)'} | ${platforms() || '-'} | FAILED @${stage.id} (${result.reason})`);
-          log(`run failed: ${lockKey} at stage ${stage.id} (${result.reason})`);
-          emitter.emit('team-run-failed', { teamId, projectId, reason: result.reason, stage: stage.id });
-          return { terminal: { failedStage: stage.id, reason: result.reason } };
-        }
+        };
+        // FAILED terminal, shared by the spawn-failure and question-loop bailouts. The canonical run-log
+        // tag is `FAILED @stage (reason)`; needs-operator overrides the tag and the debug verb.
+        const failTerminal = (reason, logTag = `FAILED @${stage.id} (${reason})`, verb = 'failed') => {
+          output.appendLog(cwd, team.outputPath, `${dateStr} | ${topic() || '(topic)'} | ${platforms() || '-'} | ${logTag}`);
+          log(`run ${verb}: ${lockKey} at stage ${stage.id} (${reason})`);
+          emitter.emit('team-run-failed', { teamId, projectId, reason, stage: stage.id });
+          return { terminal: { failedStage: stage.id, reason } };
+        };
 
-        const produced = readText(produces.path);
+        if (stageEntry) { stageEntry.currentStage = stage.id; stageEntry.stageStartedAtMs = now().getTime(); }
+        log(`stage start: ${lockKey} ${stage.id} (${stage.model || 'sonnet'})${round ? ` round=${round}` : ''}`);
+        emitter.emit('team-stage-started', { teamId, projectId, runId, stage: stage.id, round });
+
+        // Spawn the stage, then (interactive runs only) pause if it emitted the QUESTION marker and re-run
+        // with the operator's answer once it lands in chat.md. A normal stage runs the body exactly once.
+        let produced = '';
+        let lastQuestionOutput = null;
+        for (;;) {
+          const reads = readNames.map((name) => ({ name, path: path.join(runDir, name) }));
+          // Inject the operator conversation when it exists and is non-empty, so a run nobody has spoken in
+          // produces byte-identical prompts to before this feature (and scheduled runs never see it).
+          let chatRead = null;
+          const cp = output.chatPath(runDir);
+          if (fs.existsSync(cp) && readText(cp).trim()) chatRead = { name: 'chat.md', path: cp };
+          const prompt = buildStagePrompt(readText(stage.agentPath), {
+            runDir, packDir, packFiles, reads, produces, chat: chatRead, allowQuestions: interactive,
+          });
+
+          const result = await runStage({ team, stage, runId, projectPath: cwd, prompt, lockKey });
+          if (active.get(lockKey).cancelled) return cancelledTerminal();
+          if (!result.ok) return failTerminal(result.reason);
+
+          produced = readText(produces.path);
+          const question = extractQuestion(produced, marker);
+          if (!question) break; // normal handoff: fall through to the halt/section gates below
+
+          if (!interactive) {
+            // Scheduled / opt-out: never block on a human. A stray question becomes a needs-operator halt.
+            return failTerminal('needs-operator', `NEEDS_OPERATOR @${stage.id}`, 'halted');
+          }
+          // No-progress guard: the agent re-asked an identical question after being answered.
+          if (lastQuestionOutput !== null && produced === lastQuestionOutput) return failTerminal('question-no-progress');
+          const entry = active.get(lockKey);
+          // questionsAsked is a RUN-WIDE budget (not reset between stages), so a multi-stage run cannot
+          // pepper the operator with maxQuestions per stage.
+          entry.questionsAsked += 1;
+          if (entry.questionsAsked > (chatCfg.maxQuestions || 3)) return failTerminal('question-budget');
+
+          // Surface the question and wait for the operator (postMessage), a timeout, or a cancel.
+          recordChat(entry, teamId, projectId, 'agent', stage.id, question);
+          entry.awaiting = true;
+          entry.pendingQuestion = question;
+          emitter.emit('team-run-awaiting-input', { teamId, projectId, runId, stage: stage.id, question });
+          log(`run awaiting operator: ${lockKey} at stage ${stage.id}`);
+
+          const outcome = await new Promise((resolve) => {
+            entry.awaitResolve = resolve;
+            const t = setTimeoutFn(() => resolve({ timedOut: true }), (chatCfg.answerTimeoutSec || 600) * 1000);
+            if (t && typeof t.unref === 'function') t.unref();
+            entry.awaitTimer = t;
+          });
+          clearTimeoutFn(entry.awaitTimer);
+          entry.awaitTimer = null;
+          entry.awaitResolve = null;
+          entry.awaiting = false;
+          entry.pendingQuestion = null;
+
+          if (active.get(lockKey).cancelled || outcome.cancelled) return cancelledTerminal();
+          if (outcome.timedOut) return failTerminal('answer-timeout');
+          // Answered: re-run this stage with the answer now present in chat.md.
+          emitter.emit('team-run-resumed', { teamId, projectId, runId, stage: stage.id });
+          log(`run resumed: ${lockKey} at stage ${stage.id}`);
+          lastQuestionOutput = produced;
+        }
         // Researcher halt signal (e.g. INSUFFICIENT_TOPICS) is checked BEFORE section verification:
         // a halt brief legitimately omits the normal sections.
         if (stage.haltSignal && produced.includes(stage.haltSignal)) {
@@ -419,6 +515,13 @@ function createOrchestrator(deps) {
     log(`cancel requested: ${lockKey}${entry.currentStage ? ` (stage ${entry.currentStage})` : ''}`);
     // Signal every client (and a re-mounting tab, via getRunState) to show "Cancelling…".
     emitter.emit('team-run-cancelling', { teamId, projectId, stage: entry.currentStage || null });
+    // If the run is paused awaiting an operator answer (no live stage process), unblock the await so the
+    // cancel settles the run promptly instead of hanging until the answer timeout.
+    if (entry.awaitResolve) {
+      const resolve = entry.awaitResolve;
+      entry.awaitResolve = null;
+      resolve({ cancelled: true });
+    }
     if (entry.session) {
       // Use kill() (process-tree teardown that KEEPS listeners), NOT destroy(): destroy() calls
       // removeAllListeners(), which strips the 'exit' handler runStage installed to resolve the stage.
@@ -428,6 +531,21 @@ function createOrchestrator(deps) {
       try { entry.session.kill(); } catch { /* best-effort */ }
     }
     return true;
+  }
+
+  // Post an operator message into the active run's conversation. Always records the turn (steering note);
+  // when the run is paused awaiting an answer, the message resolves the wait and the paused stage re-runs.
+  function postMessage(teamId, projectId, text) {
+    const entry = active.get(`${teamId}:${projectId}`);
+    if (!entry) return { ok: false, reason: 'no-active-run' };
+    recordChat(entry, teamId, projectId, 'operator', entry.currentStage, text);
+    if (entry.awaiting && entry.awaitResolve) {
+      const resolve = entry.awaitResolve;
+      entry.awaitResolve = null;
+      resolve({ answer: String(text == null ? '' : text) });
+      return { ok: true, answered: true };
+    }
+    return { ok: true, answered: false };
   }
 
   function isActive(teamId, projectId) {
@@ -446,11 +564,14 @@ function createOrchestrator(deps) {
       runStartedAtMs: entry.runStartedAtMs || 0,
       stageStartedAtMs: entry.stageStartedAtMs || 0,
       cancelling: !!entry.cancelling,
+      awaiting: !!entry.awaiting,
+      pendingQuestion: entry.pendingQuestion || null,
     };
   }
 
   emitter.runTeam = runTeam;
   emitter.cancelRun = cancelRun;
+  emitter.postMessage = postMessage;
   emitter.isActive = isActive;
   emitter.getRunState = getRunState;
   emitter.activeCount = () => active.size;
@@ -458,5 +579,5 @@ function createOrchestrator(deps) {
 }
 
 module.exports = {
-  createOrchestrator, parseVerdict, sectionFirstLine, formatRunVerdict, defaultRunLabel,
+  createOrchestrator, parseVerdict, extractQuestion, sectionFirstLine, formatRunVerdict, defaultRunLabel,
 };

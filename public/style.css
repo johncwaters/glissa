@@ -2147,6 +2147,11 @@ body[data-active-view="teams"] #minimized-bar { display: none; }
   color: var(--text-dim);
   margin: 0 0 16px;
   max-width: 80ch;
+  /* Roster identity, not an essay: clamp to two lines (full text on hover via title). */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
 }
 
 /* Band 2: pipeline rail */
@@ -2463,17 +2468,140 @@ body[data-active-view="teams"] #minimized-bar { display: none; }
   color: var(--perms-warn);
   border-color: color-mix(in oklab, var(--perms-warn) 35%, var(--border));
 }
-.guardrail-block { color: var(--text-dim); }
-.guardrail-blocks-label {
+/* The routine write-scope + deny-list as one quiet caption, not a row of boxes. */
+.guardrail-summary {
   font-family: var(--font-mono);
   font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.02em;
   color: var(--text-muted);
-  margin-left: 2px;
 }
 
 /* Band 4: recent runs — each row expands to its summary + artifact-open buttons. */
+/* Conversation pane: live feed (system lines + agent questions) + operator input. Non-terminal: a small
+   message log, not an xterm. */
+/* The conversation is part of a run, so it stays hidden on an idle panel (no dead, disabled input);
+   it appears when a run goes active. Finished transcripts open from a run's "Conversation" button. */
+.team-chat {
+  margin: 0 0 18px;
+  display: none;
+  flex-direction: column;
+  gap: 8px;
+}
+.team-panel.run-active .team-chat { display: flex; }
+.team-chat-log {
+  max-height: 220px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid var(--border-dim);
+  border-radius: var(--radius);
+  background: var(--bg-surface);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.team-chat-log:empty { display: none; }
+.chat-msg {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-width: 85%;
+}
+.chat-msg-meta {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+.chat-msg-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding: 6px 9px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border-dim);
+  background: var(--bg-card);
+  color: var(--text);
+  line-height: 1.45;
+}
+.chat-msg[data-role="operator"] { align-self: flex-end; align-items: flex-end; }
+.chat-msg[data-role="operator"] .chat-msg-text {
+  background: color-mix(in oklab, var(--accent) 14%, var(--bg-card));
+  border-color: var(--accent-dim);
+}
+.chat-msg[data-role="agent"] { align-self: flex-start; }
+.chat-msg[data-role="system"] {
+  align-self: center;
+  max-width: 100%;
+}
+.chat-msg[data-role="system"] .chat-msg-text {
+  background: transparent;
+  border: none;
+  padding: 1px 0;
+  color: var(--text-muted);
+  font-size: 11px;
+  text-align: center;
+}
+.chat-pending-question {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in oklab, var(--state-waiting) 45%, var(--border));
+  border-radius: var(--radius);
+  background: color-mix(in oklab, var(--state-waiting) 10%, var(--bg-card));
+}
+.chat-pending-label {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--state-waiting);
+}
+.chat-pending-text {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.team-chat-input {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
+.chat-input-field {
+  flex: 1;
+  resize: none;
+  min-height: 34px;
+  max-height: 120px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-surface);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.4;
+  transition: border-color var(--transition-fast);
+}
+.chat-input-field:focus { outline: none; border-color: var(--accent); }
+.chat-input-field.awaiting { border-color: color-mix(in oklab, var(--state-waiting) 55%, var(--border)); }
+.chat-input-field:disabled { opacity: 0.5; cursor: not-allowed; }
+.chat-send {
+  flex: none;
+  padding: 8px 14px;
+  border: 1px solid var(--accent-dim);
+  border-radius: var(--radius);
+  background: color-mix(in oklab, var(--accent) 12%, transparent);
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+.chat-send:hover { background: color-mix(in oklab, var(--accent) 18%, transparent); border-color: var(--accent); }
+
 .team-runs-title {
   font-family: var(--font-mono);
   font-size: 10px;

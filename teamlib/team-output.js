@@ -19,6 +19,8 @@ const PACK_SENTINEL = 'GLISSA:NEEDS-INPUT';
 const DEFAULT_PACK_FILES = ['voice-guide.md', 'avoid-list.md', 'brand.md', 'content-calendar.md', 'channels.md'];
 
 const LOG_HEADER = '# Team run log\n';
+// First line of a run's chat.md. Not a chat marker, so readChat ignores it.
+const CHAT_HEADER = '# Team conversation\n\n';
 const WEEKDAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
 
 // Escape a string for literal use inside a RegExp (shared by the markdown-section matchers below and
@@ -137,6 +139,61 @@ function createRunFolder(projectPath, outputPath, label) {
   const full = path.join(runsDir, candidate);
   fs.mkdirSync(full);
   return full;
+}
+
+// ── Run conversation transcript (chat.md) ─────────────────────
+// The per-run operator/agent transcript. It is simultaneously the durable record (committed back with
+// the run folder), the rehydration source for the Teams chat pane, and the context injected into later
+// stages. Only operator + agent turns are stored here; UI-only lifecycle lines are NOT persisted.
+
+function chatPath(runDir) {
+  return path.join(runDir, 'chat.md');
+}
+
+// Append one conversation turn and return the stored entry (with ts filled). role is normalized to
+// 'operator' or 'agent'. The record is delimited by an HTML comment so it stays human-readable for the
+// agents that read the file AND machine-parseable by readChat.
+function appendChat(runDir, entry = {}) {
+  const role = entry.role === 'agent' ? 'agent' : 'operator';
+  const stage = entry.stage ? String(entry.stage) : '';
+  const ts = entry.ts || new Date().toISOString();
+  const text = String(entry.text == null ? '' : entry.text);
+  const file = chatPath(runDir);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  if (!fs.existsSync(file)) fs.writeFileSync(file, CHAT_HEADER, 'utf8');
+  const marker = `<!-- glissa-chat role=${role} stage=${stage} ts=${ts} -->`;
+  // Neutralize any body line that would collide with a record marker (indent it one space), so readChat
+  // never mis-splits a multi-line turn into forged turns. The anchored regex below then cannot match it.
+  const safeText = text.trimEnd().replace(/^(<!-- glissa-chat )/gm, ' $1');
+  fs.appendFileSync(file, `${marker}\n${safeText}\n\n`, 'utf8');
+  return {
+    role, stage: stage || null, ts, text,
+  };
+}
+
+// Parse chat.md into [{role, stage, ts, text}] (oldest first). Tolerant: a missing/unreadable file or a
+// file with no markers yields []. Lines before the first marker (the header) are ignored.
+function readChat(runDir) {
+  const file = chatPath(runDir);
+  if (!fs.existsSync(file)) return [];
+  let raw = '';
+  try { raw = fs.readFileSync(file, 'utf8'); } catch { return []; }
+  const markerRe = /^<!-- glissa-chat role=(\w+) stage=([^\s]*) ts=(\S+) -->$/;
+  const out = [];
+  let cur = null;
+  for (const line of raw.split(/\r?\n/)) {
+    const m = markerRe.exec(line);
+    if (m) {
+      if (cur) { cur.text = cur.text.join('\n').trim(); out.push(cur); }
+      cur = {
+        role: m[1], stage: m[2] || null, ts: m[3], text: [],
+      };
+    } else if (cur) {
+      cur.text.push(line);
+    }
+  }
+  if (cur) { cur.text = cur.text.join('\n').trim(); out.push(cur); }
+  return out;
 }
 
 // Archive a round's handoff artifacts before the next revise round overwrites the canonical files.
@@ -268,7 +325,7 @@ function listRunSummaries(projectPath, outputPath, stages = [], limit = 10) {
       }
     }
     return {
-      runId, topic, platforms, verdict, summary, reached,
+      runId, topic, platforms, verdict, summary, reached, chat: fs.existsSync(path.join(dir, 'chat.md')),
     };
   });
 }
@@ -280,6 +337,9 @@ module.exports = {
   packStatus,
   runFolderLabel,
   createRunFolder,
+  chatPath,
+  appendChat,
+  readChat,
   archiveRoundArtifacts,
   verifyHandoff,
   appendLog,
