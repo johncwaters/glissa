@@ -1,0 +1,67 @@
+{
+  "id": "changelog",
+  "name": "Changelog Curator",
+  "description": "On demand, reconcile this project's changelog with its git history: the analyst reads the existing changelog and the commits in the configured range and writes a sourced analysis (what is missing, inaccurate, mis-categorized, mis-ordered, or correctly excluded); the curator edits the changelog file IN PLACE to add, correct, move, merge, and reorder entries so every one traces to a commit; the auditor re-derives the commit list from git and gates on accuracy, format, and style with a SHIP/FIX/BLOCK verdict and a bounded FIX loop. On a final SHIP the edited changelog auto-merges back, bounded by writeScope to changelog files only; a FIX/BLOCK run discards the edit and keeps only the run record. All project specifics (which file, its format, the range, what counts as user-facing) come from this project's pack under .glissa/teams/changelog/pack/.",
+  "schemaVersion": 1,
+  "outputPath": ".glissa/teams/changelog",
+  "permissions": {
+    "mode": "yolo",
+    "deny": [
+      "Bash(rm *)", "Bash(rmdir *)", "Bash(del *)", "Bash(rd *)",
+      "Bash(git push*)", "Bash(git reset --hard*)", "Bash(git clean*)", "Bash(git commit*)",
+      "Bash(git tag*)", "Bash(git rebase*)", "Bash(git merge*)", "Bash(git checkout*)",
+      "Bash(gh release create*)", "Bash(gh release edit*)", "Bash(gh release delete*)",
+      "Bash(gh api*)", "Bash(gh pr merge*)", "Bash(gh pr close*)",
+      "Bash(npm publish*)", "Bash(npm version*)",
+      "Bash(curl *)", "Bash(wget *)", "Bash(Invoke-WebRequest*)", "Bash(iwr *)",
+      "Write(**/.env)", "Write(**/.env.*)", "Write(**/*secret*)", "Read(**/.env)"
+    ]
+  },
+  "writeScope": [
+    "CHANGELOG.md", "CHANGELOG.*", "**/CHANGELOG.md", "**/CHANGELOG.*",
+    "CHANGES.md", "HISTORY.md", "NEWS.md", "docs/**/CHANGELOG*"
+  ],
+  "pack": {
+    "required": ["changelog-config.md", "style-guide.md"]
+  },
+  "stageTimeoutSeconds": 900,
+  "stages": [
+    {
+      "id": "analyst",
+      "model": "opus",
+      "summary": "Reads the existing changelog and the commits in the configured range, maps every commit to its changelog state (missing / inaccurate / mis-categorized / mis-ordered / correctly excluded), and writes analysis.md with sourced proposed edits. Halts CHANGELOG_ACCURATE when the changelog already reflects the history.",
+      "produces": "analysis.md",
+      "requiredSections": ["Topic", "Range", "Current state", "Discrepancies", "Proposed changes", "Sources"],
+      "haltSignal": "CHANGELOG_ACCURATE"
+    },
+    {
+      "id": "curator",
+      "model": "opus",
+      "summary": "Applies the analyst's proposed changes by editing the changelog file IN PLACE (within writeScope): adds missing entries, rewords inaccurate ones, moves mis-placed entries, merges duplicates, and fixes ordering; every edit traces to a commit in the analysis. Writes revision.md (the handoff summary, not the changelog).",
+      "reads": ["analysis.md"],
+      "reviseReads": ["review.md", "revision.md"],
+      "produces": "revision.md",
+      "requiredSections": ["Edited", "Changes applied", "Unresolved"]
+    },
+    {
+      "id": "auditor",
+      "model": "opus",
+      "summary": "Re-derives the commit list from read-only git and grades the edited changelog on accuracy (every entry traces to a commit and every user-facing commit is represented), format, and style; writes review.md ending in a SHIP/FIX/BLOCK verdict.",
+      "reads": ["analysis.md", "revision.md"],
+      "reviseReads": ["review.md"],
+      "produces": "review.md",
+      "requiredSections": ["Accuracy", "Format", "Style", "Summary"],
+      "verdict": { "marker": "VERDICT:", "values": ["SHIP", "FIX", "BLOCK"] },
+      "revise": { "onVerdict": "FIX", "stages": ["curator"], "maxRounds": 2 }
+    },
+    {
+      "id": "reporter",
+      "model": "sonnet",
+      "summary": "On a final SHIP, writes report.md: a short human-facing summary of what the run reconciled, suitable to drop into a pull request or commit body.",
+      "reads": ["analysis.md", "revision.md", "review.md"],
+      "produces": "report.md",
+      "runIfVerdict": "SHIP",
+      "optional": true
+    }
+  ]
+}
