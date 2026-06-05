@@ -225,14 +225,15 @@ test('A2: stage.agent with a path separator or ".." is rejected', () => {
   }
 });
 
-// A4: listTeams() over the real repo teams dir lists the real teams (marketing, qa, release-notes) and
+// A4: listTeams() over the real repo teams dir lists the real teams (marketing, qa, changelog) and
 // skips _shared (no team.json). Membership form (not an exact-array pin) so adding a future team does not
 // re-break this assertion.
 test('A4: listTeams lists the real teams and ignores _shared (no team.json)', () => {
   const teams = listTeams(REPO_TEAMS);
   assert.ok(teams.includes('marketing'), 'marketing is a team');
   assert.ok(teams.includes('qa'), 'qa is a team');
-  assert.ok(teams.includes('release-notes'), 'release-notes is a team');
+  assert.ok(teams.includes('changelog'), 'changelog is a team');
+  assert.ok(!teams.includes('release-notes'), 'release-notes is retired');
   assert.ok(!teams.includes('_shared'), '_shared is not listed as a team');
 });
 
@@ -411,11 +412,10 @@ test('R6: no team ships a team-local template for a file it declares shared', ()
   }
 });
 
-// R4: the real teams declare the expected shared sets (marketing + release-notes share voice/avoid; only
-// marketing shares brand; changelog/qa share nothing).
+// R4: the real teams declare the expected shared sets (only marketing shares voice/avoid/brand;
+// changelog/qa share nothing).
 test('R4: real teams declare the expected packShared', () => {
   assert.deepEqual(loadTeam('marketing', REPO_TEAMS).packShared, ['voice-guide.md', 'avoid-list.md', 'brand.md']);
-  assert.deepEqual(loadTeam('release-notes', REPO_TEAMS).packShared, ['voice-guide.md', 'avoid-list.md']);
   assert.deepEqual(loadTeam('changelog', REPO_TEAMS).packShared, []);
   assert.deepEqual(loadTeam('qa', REPO_TEAMS).packShared, []);
 });
@@ -478,8 +478,8 @@ test('chat.allowQuestions:false is honored (opt-out); other fields still normali
   });
 });
 
-test('marketing, qa, and release-notes all default chat on (manual interactivity)', () => {
-  for (const id of ['marketing', 'qa', 'release-notes']) {
+test('marketing, qa, and changelog all default chat on (manual interactivity)', () => {
+  for (const id of ['marketing', 'qa', 'changelog']) {
     assert.equal(loadTeam(id, REPO_TEAMS).chat.allowQuestions, true, `${id} chat on by default`);
   }
 });

@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **Teams: the `changelog` team now also drafts release announcements**: The changelog team gained an `announcer` final stage (replacing `reporter`) that, on a final `SHIP`, reads the just-curated changelog and drafts a human summary plus a release announcement in the project's voice (drafts only, never posted). The team's pack gains a required `announce-config.md` (release title and tag convention, announcement channel, voice, and avoid-list). Release notes are now derived from the audited changelog instead of re-scraped from git, and `scripts/release.js` already cuts the GitHub release body from that changelog. The auditor stays the single verdict gate, so the announcement can never block a correct changelog edit from merging.
+
+### Removed
+
+- **Teams: the standalone `release-notes` team**: Its researcher re-derived the same git range the changelog team already reconciles, and its publisher's GitHub release draft duplicated what `scripts/release.js` cuts from `CHANGELOG.md`. The one non-redundant piece, a voiced release announcement, is now the changelog team's `announcer`. Existing `release-notes` run history under `.glissa/teams/release-notes/` is kept as a record; any saved team activation for it is ignored.
+
 ## [0.13.0] - 2026-06-01
 
 ### Added

@@ -1,7 +1,7 @@
 {
   "id": "changelog",
-  "name": "Changelog Curator",
-  "description": "On demand, reconcile this project's changelog with its git history: the analyst reads the existing changelog and the commits in the configured range and writes a sourced analysis (what is missing, inaccurate, mis-categorized, mis-ordered, or correctly excluded); the curator edits the changelog file IN PLACE to add, correct, move, merge, and reorder entries so every one traces to a commit; the auditor re-derives the commit list from git and gates on accuracy, format, and style with a SHIP/FIX/BLOCK verdict and a bounded FIX loop. On a final SHIP the edited changelog auto-merges back, bounded by writeScope to changelog files only; a FIX/BLOCK run discards the edit and keeps only the run record. All project specifics (which file, its format, the range, what counts as user-facing) come from this project's pack under .glissa/teams/changelog/pack/.",
+  "name": "Changelog and Release Notes",
+  "description": "On demand, reconcile this project's changelog with its git history, then draft a release announcement from it: the analyst reads the existing changelog and the commits in the configured range and writes a sourced analysis (what is missing, inaccurate, mis-categorized, mis-ordered, or correctly excluded); the curator edits the changelog file IN PLACE to add, correct, move, merge, and reorder entries so every one traces to a commit; the auditor re-derives the commit list from git and gates on accuracy, format, and style with a SHIP/FIX/BLOCK verdict and a bounded FIX loop; on a final SHIP the announcer reads the curated changelog and drafts a human summary plus a release announcement in the project's voice (drafts only, never posted). On a final SHIP the edited changelog auto-merges back, bounded by writeScope to changelog files only; a FIX/BLOCK run discards the edit and keeps only the run record. All project specifics (which file, its format, the range, what counts as user-facing, and the release-announcement voice and channel) come from this project's pack under .glissa/teams/changelog/pack/.",
   "schemaVersion": 1,
   "outputPath": ".glissa/teams/changelog",
   "permissions": {
@@ -22,7 +22,7 @@
     "CHANGES.md", "HISTORY.md", "NEWS.md", "docs/**/CHANGELOG*"
   ],
   "pack": {
-    "required": ["changelog-config.md", "style-guide.md"]
+    "required": ["changelog-config.md", "style-guide.md", "announce-config.md"]
   },
   "stageTimeoutSeconds": 900,
   "stages": [
@@ -55,11 +55,12 @@
       "revise": { "onVerdict": "FIX", "stages": ["curator"], "maxRounds": 2 }
     },
     {
-      "id": "reporter",
+      "id": "announcer",
       "model": "sonnet",
-      "summary": "On a final SHIP, writes report.md: a short human-facing summary of what the run reconciled, suitable to drop into a pull request or commit body.",
+      "summary": "On a final SHIP, reads the curated changelog and writes published.md: a short human-facing summary of what the run reconciled (for a pull request or commit body) plus a release announcement draft in the project's voice. Drafts only; never posts, tags, or cuts a release.",
       "reads": ["analysis.md", "revision.md", "review.md"],
-      "produces": "report.md",
+      "produces": "published.md",
+      "requiredSections": ["Summary", "Announcement draft"],
       "runIfVerdict": "SHIP",
       "optional": true
     }

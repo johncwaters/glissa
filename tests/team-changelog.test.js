@@ -1,6 +1,6 @@
 'use strict';
 
-// Acceptance tests for the changelog team. Like marketing / release-notes / qa, the team is data + role
+// Acceptance tests for the changelog team. Like marketing / qa, the team is data + role
 // markdown + pack templates with ZERO engine changes, so these tests drive the REAL engine (loadTeam over
 // the repo teams dir; the orchestrator with a fake stage spawner) the same way the other team tests do.
 //
@@ -9,7 +9,7 @@
 // changelog auto-merges back, bounded to changelog files; tests excluded. The orchestrator's
 // restore-before-audit only touches testGlobs paths, so a CHANGELOG edit is never reverted by it. The
 // in-place edit + merge path needs a real git harness (see tests/team-git.test.js); these tests cover the
-// definition, the stage gating, the halt, and the revise loop with a fake spawner, matching release-notes.
+// definition, the stage gating, the halt, and the revise loop with a fake spawner.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -28,8 +28,8 @@ const { createSpawnGate } = require('../spawn-gate');
 const REPO_TEAMS = path.join(__dirname, '..', 'teams');
 const TEAM_DIR = path.join(REPO_TEAMS, 'changelog');
 const OUT = '.glissa/teams/changelog';
-const REQUIRED = ['changelog-config.md', 'style-guide.md'];
-const STAGE_IDS = ['analyst', 'curator', 'auditor', 'reporter'];
+const REQUIRED = ['changelog-config.md', 'style-guide.md', 'announce-config.md'];
+const STAGE_IDS = ['analyst', 'curator', 'auditor', 'announcer'];
 const ROLE_FILES = STAGE_IDS.map((id) => path.join(TEAM_DIR, 'agents', `${id}.md`));
 const DEFAULT_TEST_GLOBS = ['**/*.test.*', '**/*.spec.*', '**/test/**', '**/tests/**', '**/__tests__/**'];
 const WRITE_SCOPE = [
@@ -50,13 +50,13 @@ const REVISION = '## Edited\nCHANGELOG.md (Keep a Changelog)\n'
 const REVIEW = (v) => '## Accuracy\nEvery entry traces to a commit; nothing missing.\n'
   + '## Format\nSections and ordering match the convention.\n## Style\nNo banned terms, no emoji, no dashes.\n'
   + `## Summary\nReconciled cleanly.\nVERDICT: ${v}\n`;
-const REPORT = '## Summary\nReconciled the Unreleased section against 3 commits.\n'
-  + '## Changelog edits\n- added: Fixed login redirect (abc123)\n## Follow-ups\nNone.\n';
+const PUBLISHED = '## Summary\nReconciled the Unreleased section against 3 commits; no follow-ups.\n'
+  + '## Announcement draft\nTag v1.4.0. Fixed a login redirect bug (abc123).\n';
 // Distinct revision per round so the no-progress guard does not bail.
 const REVISION_N = (n) => '## Edited\nCHANGELOG.md\n'
   + `## Changes applied\n- added: Fixed login redirect (abc123). Pass ${n}.\n## Unresolved\nNone.\n`;
 
-// --- Fake stage spawner + orchestrator wiring (mirrors tests/team-release-notes.test.js) ---
+// --- Fake stage spawner + orchestrator wiring (mirrors the other team tests) ---
 
 function fakeFactory(behaviors) {
   const calls = {};
@@ -197,11 +197,21 @@ test('AC6b: teamPermissions yields a non-empty deny-list with the state-change b
   }
 });
 
-test('AC15: reporter carries the engine-honored runIfVerdict/optional gate', () => {
+test('AC15: announcer carries the engine-honored runIfVerdict/optional gate and produces published.md', () => {
   const team = loadTeam('changelog', REPO_TEAMS);
-  const reporter = team.stages.find((s) => s.id === 'reporter');
-  assert.equal(reporter.runIfVerdict, 'SHIP');
-  assert.equal(reporter.optional, true);
+  const announcer = team.stages.find((s) => s.id === 'announcer');
+  assert.equal(announcer.runIfVerdict, 'SHIP');
+  assert.equal(announcer.optional, true);
+  assert.equal(announcer.produces, 'published.md');
+  assert.deepEqual(announcer.requiredSections, ['Summary', 'Announcement draft']);
+});
+
+// AC16: exactly one verdict stage (the auditor). The announcer is a post-SHIP draft stage, NOT a second
+// verdict pipeline, so the CHANGELOG writeScope merge stays gated on the single auditor verdict.
+test('AC16: the auditor is the only verdict stage', () => {
+  const team = loadTeam('changelog', REPO_TEAMS);
+  const verdictStages = team.stages.filter((s) => s.verdict);
+  assert.deepEqual(verdictStages.map((s) => s.id), ['auditor']);
 });
 
 // --- Behavioral / content guard (lint-style, no spawning) ---
@@ -249,15 +259,18 @@ test('AC9: happy path reaches all four stages on SHIP', async () => {
       analyst: { write: ANALYSIS },
       curator: { write: REVISION },
       auditor: { write: REVIEW('SHIP') },
-      reporter: { write: REPORT },
+      announcer: { write: PUBLISHED },
     });
     const res = await orch.runTeam({ teamId: 'changelog', projectId: 'p1', trigger: 'manual' });
     assert.equal(res.ok, true);
     assert.equal(res.verdict, 'SHIP');
     const runDir = runDirOf(proj);
-    for (const f of ['analysis.md', 'revision.md', 'review.md', 'report.md']) {
+    for (const f of ['analysis.md', 'revision.md', 'review.md', 'published.md']) {
       assert.ok(fs.existsSync(path.join(runDir, f)), `${f} written`);
     }
+    const published = fs.readFileSync(path.join(runDir, 'published.md'), 'utf8');
+    assert.ok(/^##\s*Summary\b/m.test(published), 'published.md has a Summary section');
+    assert.ok(/^##\s*Announcement draft\b/m.test(published), 'published.md has an Announcement draft section');
     assert.equal(events.filter((e) => e.name === 'team-stage-complete').length, 4);
     assert.ok(logLines(proj).some((l) => l.includes('SHIP')), 'run log records the verdict');
   } finally {
@@ -296,7 +309,7 @@ test('AC11: analyst CHANGELOG_ACCURATE halts the run', async () => {
   }
 });
 
-test('AC12: FIX then SHIP revises once, archives the round, reporter runs on the final SHIP', async () => {
+test('AC12: FIX then SHIP revises once, archives the round, announcer runs on the final SHIP', async () => {
   const proj = tmpProject();
   try {
     seedPack(proj);
@@ -304,7 +317,7 @@ test('AC12: FIX then SHIP revises once, archives the round, reporter runs on the
       analyst: { write: ANALYSIS },
       curator: [{ write: REVISION_N(0) }, { write: REVISION_N(1) }],
       auditor: [{ write: REVIEW('FIX') }, { write: REVIEW('SHIP') }],
-      reporter: { write: REPORT },
+      announcer: { write: PUBLISHED },
     });
     orch.on('team-revise-round', (p) => events.push({ name: 'team-revise-round', ...p }));
     const res = await orch.runTeam({ teamId: 'changelog', projectId: 'p1' });
@@ -316,7 +329,7 @@ test('AC12: FIX then SHIP revises once, archives the round, reporter runs on the
     assert.equal(startedCount(events, 'curator'), 2, 'curator ran on the linear pass + one revise round');
     assert.equal(startedCount(events, 'auditor'), 2, 'auditor audited twice');
     const runDir = runDirOf(proj);
-    assert.ok(fs.existsSync(path.join(runDir, 'report.md')), 'reporter ran on the final SHIP');
+    assert.ok(fs.existsSync(path.join(runDir, 'published.md')), 'announcer ran on the final SHIP');
     assert.ok(fs.existsSync(path.join(runDir, 'rounds', 'r0-revision.md')), 'round 0 revision archived');
     assert.ok(fs.existsSync(path.join(runDir, 'rounds', 'r0-review.md')), 'round 0 review archived');
   } finally {
@@ -324,7 +337,7 @@ test('AC12: FIX then SHIP revises once, archives the round, reporter runs on the
   }
 });
 
-test('AC13: auditor BLOCK completes the run but skips the reporter', async () => {
+test('AC13: auditor BLOCK completes the run but skips the announcer', async () => {
   const proj = tmpProject();
   try {
     seedPack(proj);
@@ -332,13 +345,13 @@ test('AC13: auditor BLOCK completes the run but skips the reporter', async () =>
       analyst: { write: ANALYSIS },
       curator: { write: REVISION },
       auditor: { write: REVIEW('BLOCK') },
-      reporter: { write: REPORT },
+      announcer: { write: PUBLISHED },
     });
     const res = await orch.runTeam({ teamId: 'changelog', projectId: 'p1' });
     assert.equal(res.ok, true);
     assert.equal(res.verdict, 'BLOCK');
-    assert.ok(!fs.existsSync(path.join(runDirOf(proj), 'report.md')), 'reporter skipped on non-SHIP');
-    assert.ok(!events.some((e) => e.name === 'team-stage-started' && e.stage === 'reporter'), 'reporter never started');
+    assert.ok(!fs.existsSync(path.join(runDirOf(proj), 'published.md')), 'announcer skipped on non-SHIP');
+    assert.ok(!events.some((e) => e.name === 'team-stage-started' && e.stage === 'announcer'), 'announcer never started');
   } finally {
     fs.rmSync(proj, { recursive: true, force: true });
   }

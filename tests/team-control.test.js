@@ -344,26 +344,28 @@ test('get-team-pack-status reports configured + unfilled from the pack', () => {
   }
 });
 
-// I2: with the REAL teamOutput, release-notes (which shares voice-guide/avoid-list) reports configured
-// when those files are filled ONLY in the project shared pack, with no team-local copy.
+// I2: with the REAL teamOutput, marketing (which shares voice-guide/avoid-list/brand) reports configured
+// when those shared files are filled ONLY in the project shared pack, with no team-local copy.
 test('I2: get-team-pack-status (real teamOutput) reports configured via the shared pack', () => {
   const realTeamOutput = require('../teamlib/team-output');
   const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-pack-shared-'));
   try {
     const sharedDir = path.join(proj, '.glissa', 'pack');
-    const localDir = path.join(proj, '.glissa', 'teams', 'release-notes', 'pack');
+    const localDir = path.join(proj, '.glissa', 'teams', 'marketing', 'pack');
     fs.mkdirSync(sharedDir, { recursive: true });
     fs.mkdirSync(localDir, { recursive: true });
     fs.writeFileSync(path.join(sharedDir, 'voice-guide.md'), '# voice\nreal\n', 'utf8');
     fs.writeFileSync(path.join(sharedDir, 'avoid-list.md'), '# avoid\nreal\n', 'utf8');
-    fs.writeFileSync(path.join(localDir, 'release-config.md'), '# cfg\nreal\n', 'utf8');
+    fs.writeFileSync(path.join(sharedDir, 'brand.md'), '# brand\nreal\n', 'utf8');
+    fs.writeFileSync(path.join(localDir, 'content-calendar.md'), '# calendar\nreal\n', 'utf8');
+    fs.writeFileSync(path.join(localDir, 'channels.md'), '# channels\nreal\n', 'utf8');
     const h = harness({ registry: realRegistry, getProjectPathById: () => proj, teamOutput: realTeamOutput });
     h.send({
-      type: 'get-team-pack-status', teamId: 'release-notes', projectId: 'p1', requestId: 'ps2',
+      type: 'get-team-pack-status', teamId: 'marketing', projectId: 'p1', requestId: 'ps2',
     });
     const msg = h.sent.find((m) => m.type === 'team-pack-status');
     assert.equal(msg.requestId, 'ps2');
-    assert.equal(msg.configured, true, 'configured from the shared pack without a team-local voice-guide');
+    assert.equal(msg.configured, true, 'configured from the shared pack without team-local shared files');
     assert.deepEqual(msg.unfilled, []);
   } finally {
     fs.rmSync(proj, { recursive: true, force: true });
