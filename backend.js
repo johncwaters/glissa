@@ -417,15 +417,26 @@ function createBackend(httpServer, options = {}) {
     const id = setupSessionId(teamId, projectId);
     if (sessions.has(id)) return { ok: true, already: true, sessionId: id };
 
-    // Make sure the pack files exist (idempotent) so the agent has templates to fill in place.
+    // Make sure the pack files exist (idempotent) so the agent has templates to fill in place. Shared
+    // files (team.packShared) scaffold into the project-level .glissa/pack/ from the _shared fallback
+    // templates; a pre-filled team-local copy of a now-shared file is promoted up here too.
     teamOutput.ensureStructure(projectPath, team.outputPath);
-    teamOutput.scaffoldPack(projectPath, team.outputPath, team.packTemplatesDir, team.packRequired);
-    const { packDir, packFiles } = packPaths(projectPath, team);
+    teamOutput.scaffoldPack(
+      projectPath, team.outputPath, team.packTemplatesDir, team.packRequired,
+      team.packTemplatesFallbackDir, team.packShared,
+    );
+    const { packDir, sharedPackDir, packFiles } = packPaths(projectPath, team);
+    // Interview ONLY the files that still need filling, so an already-filled shared file (filled by an
+    // earlier team's setup) is skipped instead of re-asked. A fresh project has every file unfilled, so
+    // toFill == packFiles and the prompt is unchanged from before this feature.
+    const status = teamOutput.packStatus(projectPath, team.outputPath, team.packRequired, team.packShared);
+    const unfilled = new Set(status.unfilled);
+    const toFill = packFiles.filter((f) => unfilled.has(f.name));
     // Deterministic project-context scan (total, never throws); an empty summary degrades to the
     // original prompt with no STARTING FACTS block.
     const projectContext = scanProjectContext(projectPath).summary;
     const prompt = buildSetupPrompt(team, {
-      packDir, packFiles, projectPath, projectContext,
+      packDir, sharedPackDir, packFiles: toFill, projectPath, projectContext,
     });
 
     const projectDisplayName = (config.projects.find((p) => p.id === projectId) || {}).name || '';
@@ -453,7 +464,7 @@ function createBackend(httpServer, options = {}) {
 
     sess.on('exit', () => {
       let st = null;
-      try { st = teamOutput.packStatus(projectPath, team.outputPath, team.packRequired); } catch { /* report nothing */ }
+      try { st = teamOutput.packStatus(projectPath, team.outputPath, team.packRequired, team.packShared); } catch { /* report nothing */ }
       if (st) {
         // Distinct from the team-pack-status request REPLY so it never collides with a get-team-pack-
         // status round-trip; the Teams view routes this broadcast to refresh the setup banner.

@@ -237,8 +237,17 @@ function createOrchestrator(deps) {
       // filled, so a run never produces output from empty voice rules. team-git copies the pack into the
       // worktree at run time. This runs before any worktree is created.
       output.ensureStructure(projectPath, team.outputPath);
-      output.scaffoldPack(projectPath, team.outputPath, team.packTemplatesDir, team.packRequired, team.packTemplatesFallbackDir);
-      const pack = output.packStatus(projectPath, team.outputPath, team.packRequired);
+      const scaffolded = output.scaffoldPack(
+        projectPath, team.outputPath, team.packTemplatesDir, team.packRequired,
+        team.packTemplatesFallbackDir, team.packShared,
+      );
+      // Surface shared-pack migration so a promotion (and especially an abandoned divergent copy) is
+      // discoverable in the run log rather than silent.
+      for (const p of (scaffolded.promoted || [])) log(`pack promote: ${p.name} (from ${p.from})`);
+      for (const d of (scaffolded.divergent || [])) {
+        log(`pack divergent: ${d.name} (team-local copy at ${d.teamLocalPath} differs from shared, left for manual reconcile)`);
+      }
+      const pack = output.packStatus(projectPath, team.outputPath, team.packRequired, team.packShared);
       if (!pack.configured) {
         output.appendLog(projectPath, team.outputPath, `${dateStr} | (setup) | - | NEEDS_SETUP (${pack.unfilled.join(', ')})`);
         log(`run halted: ${lockKey} needs pack setup (${pack.unfilled.join(', ')})`);
@@ -261,8 +270,11 @@ function createOrchestrator(deps) {
       output.ensureStructure(cwd, team.outputPath);
       const runDir = output.createRunFolder(cwd, team.outputPath, runLabel(now()));
       runId = path.basename(runDir);
-      const packDir = path.join(cwd, team.outputPath, 'pack');
-      const packFiles = (team.packRequired || []).map((name) => ({ name, path: path.join(packDir, name) }));
+      // Shared-aware pack list for the worktree: shared files resolve under <cwd>/.glissa/pack/ (copied in
+      // by team-git), the rest under the team-local pack. buildStagePrompt consumes the flat {name,path} list.
+      const { packDir, files: packFiles } = output.resolvePackLayout(
+        cwd, team.outputPath, team.packRequired, team.packShared,
+      );
       const runEntry = active.get(lockKey);
       if (runEntry) { runEntry.runId = runId; runEntry.runStartedAtMs = now().getTime(); runEntry.runDir = runDir; }
       log(`run started: ${lockKey} runId=${runId}${workspace.branch ? ` branch=${workspace.branch}` : ''}`);

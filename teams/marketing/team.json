@@ -33,7 +33,8 @@
     ]
   },
   "pack": {
-    "required": ["voice-guide.md", "avoid-list.md", "brand.md", "content-calendar.md", "channels.md"]
+    "required": ["voice-guide.md", "avoid-list.md", "brand.md", "content-calendar.md", "channels.md"],
+    "shared": ["voice-guide.md", "avoid-list.md", "brand.md"]
   },
   "stageTimeoutSeconds": 900,
   "stages": [

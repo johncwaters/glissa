@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
+const { SHARED_PACK_DIRNAME } = require('./team-output');
 
 // Run each team run inside a throwaway git worktree on a dedicated branch, so the team's writes never
 // touch the user's working tree or current branch during the (multi-minute) run. On a terminal
@@ -150,13 +151,20 @@ function createGitWorkspace(opts = {}) {
   };
 }
 
-function defaultCopyPack(projectPath, wtDir, outputPath) {
-  if (!outputPath) return;
-  const src = path.join(projectPath, outputPath, 'pack');
+function copyDirInto(src, dest) {
   if (!fs.existsSync(src)) return;
-  const dest = path.join(wtDir, outputPath, 'pack');
   fs.mkdirSync(path.dirname(dest), { recursive: true });
   fs.cpSync(src, dest, { recursive: true });
+}
+
+function defaultCopyPack(projectPath, wtDir, outputPath) {
+  // The project-level shared pack (.glissa/pack/) holds cross-team files (voice/avoid/brand) used by any
+  // team that declares them shared. It lives OUTSIDE outputPath, so copy it in independently of the
+  // team-local pack. Both copies stay UNSTAGED (integrate adds only the run folder + log + SHIP writeScope),
+  // so neither is committed back and both vanish with the worktree. Guarded so an absent dir is a no-op.
+  copyDirInto(path.join(projectPath, SHARED_PACK_DIRNAME), path.join(wtDir, SHARED_PACK_DIRNAME));
+  if (!outputPath) return;
+  copyDirInto(path.join(projectPath, outputPath, 'pack'), path.join(wtDir, outputPath, 'pack'));
 }
 
 module.exports = { createGitWorkspace };

@@ -341,6 +341,85 @@ test('A5: scaffoldPack copies a required file from the fallback templates dir', 
   }
 });
 
+// --- pack.shared: the project-level shared-pack declaration ---
+
+// R1: pack.shared must be an array of strings.
+test('R1: a non-array pack.shared is rejected naming pack.shared', () => {
+  const def = teamDef('t', defaultStages());
+  def.pack = { required: ['voice-guide.md'], shared: 'voice-guide.md' };
+  const baseDir = makeTmpTeams({ teamId: 't', def });
+  withTmp(baseDir, () => {
+    assert.throws(() => loadTeam('t', baseDir), /pack\.shared/);
+  });
+});
+
+// R2: every pack.shared entry must also be in pack.required.
+test('R2: a pack.shared entry not in pack.required is rejected naming the entry', () => {
+  const def = teamDef('t', defaultStages());
+  def.pack = { required: ['voice-guide.md'], shared: ['brand.md'] };
+  const baseDir = makeTmpTeams({ teamId: 't', def });
+  withTmp(baseDir, () => {
+    assert.throws(() => loadTeam('t', baseDir), /pack\.shared.*brand\.md/);
+  });
+});
+
+// R3a: a shared file with no _shared template is rejected.
+test('R3a: a shared file missing its _shared template is rejected', () => {
+  const def = teamDef('t', defaultStages());
+  def.pack = { required: ['voice-guide.md', 'brand.md'], shared: ['brand.md'] };
+  // _shared ships voice-guide.md but NOT brand.md, so the shared brand.md has no template.
+  const baseDir = makeTmpTeams({ teamId: 't', def, sharedPackTemplates: ['voice-guide.md'] });
+  withTmp(baseDir, () => {
+    assert.throws(() => loadTeam('t', baseDir), /shared file "brand\.md" is missing its template/);
+  });
+});
+
+// R3b: a STRAY team-local template for a shared file does NOT throw (no hard-fail coupling).
+test('R3b: a stray team-local template for a shared file does not throw loadTeam', () => {
+  const def = teamDef('t', defaultStages());
+  def.pack = { required: ['voice-guide.md'], shared: ['voice-guide.md'] };
+  const baseDir = makeTmpTeams({ teamId: 't', def, sharedPackTemplates: ['voice-guide.md'] });
+  withTmp(baseDir, () => {
+    // Leftover team-local template for the shared file: it must be tolerated (just never read).
+    const localTpl = path.join(baseDir, 't', 'pack-templates');
+    fs.mkdirSync(localTpl, { recursive: true });
+    fs.writeFileSync(path.join(localTpl, 'voice-guide.md'), '# stray local override\n', 'utf8');
+    const team = loadTeam('t', baseDir);
+    assert.deepEqual(team.packShared, ['voice-guide.md']);
+  });
+});
+
+// R5: a team with no pack.shared normalizes packShared to [].
+test('R5: no pack.shared normalizes to packShared []', () => {
+  const baseDir = makeTmpTeams({ teamId: 't' });
+  withTmp(baseDir, () => {
+    assert.deepEqual(loadTeam('t', baseDir).packShared, []);
+  });
+});
+
+// R6 (invariant guard): no real team ships a team-local template for a file it declares shared. A shared
+// file templates ONLY from _shared, so a leftover team-local template would be dead and misleading.
+test('R6: no team ships a team-local template for a file it declares shared', () => {
+  for (const id of listTeams(REPO_TEAMS)) {
+    const team = loadTeam(id, REPO_TEAMS);
+    for (const name of team.packShared) {
+      const localTpl = path.join(team.teamDir, 'pack-templates', name);
+      assert.ok(!fs.existsSync(localTpl), `${id} must NOT ship a team-local template for shared file ${name}`);
+      const sharedTpl = path.join(REPO_TEAMS, '_shared', 'pack-templates', name);
+      assert.ok(fs.existsSync(sharedTpl), `${id} shared file ${name} must template from _shared`);
+    }
+  }
+});
+
+// R4: the real teams declare the expected shared sets (marketing + release-notes share voice/avoid; only
+// marketing shares brand; changelog/qa share nothing).
+test('R4: real teams declare the expected packShared', () => {
+  assert.deepEqual(loadTeam('marketing', REPO_TEAMS).packShared, ['voice-guide.md', 'avoid-list.md', 'brand.md']);
+  assert.deepEqual(loadTeam('release-notes', REPO_TEAMS).packShared, ['voice-guide.md', 'avoid-list.md']);
+  assert.deepEqual(loadTeam('changelog', REPO_TEAMS).packShared, []);
+  assert.deepEqual(loadTeam('qa', REPO_TEAMS).packShared, []);
+});
+
 // --- writeScope + testGlobs validation and normalization (the SHIP-gated auto-merge boundary) ---
 
 const DEFAULT_TEST_GLOBS = ['**/*.test.*', '**/*.spec.*', '**/test/**', '**/tests/**', '**/__tests__/**'];

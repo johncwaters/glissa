@@ -1,7 +1,7 @@
 'use strict';
 
 const path = require('node:path');
-const { PACK_SENTINEL } = require('./team-output');
+const { PACK_SENTINEL, resolvePackLayout } = require('./team-output');
 
 // Guided pack setup. The setup phase fills a project's pack (voice, brand, audience, calendar,
 // channels) so a team can run. Rather than make the operator hand-edit five template files, Glissa
@@ -72,6 +72,22 @@ function buildSetupPrompt(team, {
     'PASS 2, FILL THE PACK, one file at a time. Each of these files already exists with a template and',
     `a "${PACK_SENTINEL}" marker:`,
     fileLines,
+  );
+
+  // When any file is part of the project-level shared pack (.glissa/pack/), tell the agent so it knows
+  // it is filling a value reused by every team, not a team-private one. Gated on a shared-scope file
+  // being present, so a prompt with only team-local files is byte-identical to before this feature.
+  const sharedNames = packFiles.filter((f) => f && f.scope === 'shared').map((f) => f.name);
+  if (sharedNames.length > 0) {
+    const verb = sharedNames.length === 1 ? 'is' : 'are';
+    lines.push(
+      '',
+      `Note: ${sharedNames.join(', ')} ${verb} part of this project's shared pack (under .glissa/pack/),`,
+      'reused by every team that needs them, so fill each once here.',
+    );
+  }
+
+  lines.push(
     '',
     'For each file: read its template first (it explains exactly what belongs there), draft strong',
     'content using what you learned in pass 1, and for anything subjective you cannot reasonably infer',
@@ -101,12 +117,14 @@ function setupSessionName(team, projectDisplayName) {
   return `Setup: ${teamName} ${'→'} ${projectDisplayName || 'project'}`;
 }
 
-// Absolute pack dir + per-file { name, path } for a team in a project. Mirrors the layout
-// team-output/team-orchestrator use, kept here so backend wiring has one helper to call.
+// Absolute pack dir + per-file { name, path, scope } for a team in a project, via the one shared-aware
+// resolver so shared files (team.packShared) resolve under the project-level .glissa/pack/ and the rest
+// stay team-local. Returns the team-local packDir, the project sharedPackDir, and the flat packFiles list.
 function packPaths(projectPath, team) {
-  const packDir = path.join(projectPath, team.outputPath, 'pack');
-  const packFiles = (team.packRequired || []).map((name) => ({ name, path: path.join(packDir, name) }));
-  return { packDir, packFiles };
+  const { packDir, sharedPackDir, files } = resolvePackLayout(
+    projectPath, team.outputPath, team.packRequired || [], team.packShared || [],
+  );
+  return { packDir, sharedPackDir, packFiles: files };
 }
 
 module.exports = {

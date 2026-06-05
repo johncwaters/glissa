@@ -18,6 +18,11 @@ const PACK_SENTINEL = 'GLISSA:NEEDS-INPUT';
 // The pack files a content team needs by default; a team may override via team.json `pack.required`.
 const DEFAULT_PACK_FILES = ['voice-guide.md', 'avoid-list.md', 'brand.md', 'content-calendar.md', 'channels.md'];
 
+// The project-level shared pack: cross-team setup files (voice-guide, avoid-list, brand) live here once
+// per project and are reused by every team that declares the file in team.json `pack.shared`, instead of
+// being re-filled in each team's own pack. Sibling of `.glissa/teams/`.
+const SHARED_PACK_DIRNAME = path.join('.glissa', 'pack');
+
 const LOG_HEADER = '# Team run log\n';
 // First line of a run's chat.md. Not a chat marker, so readChat ignores it.
 const CHAT_HEADER = '# Team conversation\n\n';
@@ -58,26 +63,98 @@ function pickTemplate(name, templatesDir, fallbackTemplatesDir) {
   return null;
 }
 
-// Copy each required pack file from the glissa-owned templatesDir into the project's pack/ folder, but
-// only when the destination does not already exist (so an edited pack is never clobbered). A file absent
-// from templatesDir falls back to fallbackTemplatesDir (the shared library) when set. Also seeds a pack
-// README. Run outputs are committed by team-git, so the pack is NOT gitignored. Returns { created, packDir }.
-function scaffoldPack(projectPath, outputPath, templatesDir, requiredFiles = DEFAULT_PACK_FILES, fallbackTemplatesDir = null) {
+// A file is "filled" when it exists, is non-empty, and no longer carries the setup sentinel. Used by the
+// pack status check AND by the shared-pack promotion (a filled team-local copy is promotable; a sentinel
+// stub is not). Unreadable or missing counts as not filled.
+function isFilled(filePath) {
+  try {
+    const text = fs.readFileSync(filePath, 'utf8');
+    return !!text && !text.includes(PACK_SENTINEL);
+  } catch {
+    return false;
+  }
+}
+
+// Resolve where each required pack file physically lives for a (project, team). This is the ONE source of
+// truth every consumer (scaffold, status, setup, orchestrator, backend, git) uses, so the team-local pack
+// dir is defined once (reusing teamPaths) and the shared-vs-local decision is a single set-membership test.
+//   sharedPackDir = <projectPath>/.glissa/pack            (project-level, reused across teams)
+//   packDir       = teamPaths(projectPath, outputPath).packDir   (team-local, unchanged)
+//   files: one entry per requiredFiles name, IN ORDER, { name, path, scope } where a shared file resolves
+//          under sharedPackDir and everything else under packDir. With sharedFiles=[] every file is local,
+//          so the result is byte-identical to the pre-shared-pack behavior.
+function resolvePackLayout(projectPath, outputPath, requiredFiles = DEFAULT_PACK_FILES, sharedFiles = []) {
+  const sharedSet = new Set(sharedFiles || []);
+  const sharedPackDir = path.join(projectPath, SHARED_PACK_DIRNAME);
   const { packDir } = teamPaths(projectPath, outputPath);
+  const files = (requiredFiles || []).map((name) => {
+    const scope = sharedSet.has(name) ? 'shared' : 'local';
+    const dir = scope === 'shared' ? sharedPackDir : packDir;
+    return { name, path: path.join(dir, name), scope };
+  });
+  return { sharedPackDir, packDir, files };
+}
+
+// Copy each required pack file into its resolved location (shared files into <project>/.glissa/pack/, the
+// rest into the team-local pack/), but only when the destination does not already exist (so an edited pack
+// is never clobbered). A local file resolves its template templatesDir -> fallbackTemplatesDir -> stub; a
+// SHARED file templates ONLY from fallbackTemplatesDir (it is project-level, not team-flavored). Also seeds
+// a team-local pack README. Run outputs are committed by team-git, so the pack is NOT gitignored.
+//
+// Migration (B1, non-destructive): when a shared file is absent in the shared dir but a FILLED team-local
+// copy exists, that copy is PROMOTED up to the shared dir (recorded in `promoted`) instead of writing a
+// stub, so an operator who already filled a now-shared file is never re-prompted. If the shared copy
+// already exists and a filled team-local copy DIFFERS from it, the divergence is recorded in `divergent`
+// (first-write wins, the loser is left on disk for manual reconcile, nothing is deleted or auto-merged).
+// Returns { created, promoted, divergent, packDir, sharedPackDir }.
+function scaffoldPack(
+  projectPath, outputPath, templatesDir,
+  requiredFiles = DEFAULT_PACK_FILES, fallbackTemplatesDir = null, sharedFiles = [],
+) {
+  const { packDir, sharedPackDir, files } = resolvePackLayout(projectPath, outputPath, requiredFiles, sharedFiles);
   fs.mkdirSync(packDir, { recursive: true });
   const created = [];
-  for (const name of requiredFiles) {
-    const dest = path.join(packDir, name);
-    if (fs.existsSync(dest)) continue;
-    const src = pickTemplate(name, templatesDir, fallbackTemplatesDir);
-    if (src) {
-      fs.copyFileSync(src, dest);
-    } else {
-      // Defensive fallback: a required file with no shipped template still gets a fillable stub.
-      fs.writeFileSync(dest, `# ${name}\n\n<!-- ${PACK_SENTINEL}: fill this in. -->\n`, 'utf8');
+  const promoted = [];
+  const divergent = [];
+  const stub = (dest, name) => fs.writeFileSync(dest, `# ${name}\n\n<!-- ${PACK_SENTINEL}: fill this in. -->\n`, 'utf8');
+
+  for (const file of files) {
+    const dest = file.path;
+    const teamLocalPath = path.join(packDir, file.name);
+    if (fs.existsSync(dest)) {
+      // Already present: never clobber. For a shared file, flag a filled team-local copy that diverges
+      // from the canonical shared copy so the abandoned version is discoverable, not silently lost.
+      if (file.scope === 'shared' && teamLocalPath !== dest && isFilled(teamLocalPath)) {
+        try {
+          if (fs.readFileSync(dest, 'utf8') !== fs.readFileSync(teamLocalPath, 'utf8')) {
+            divergent.push({ name: file.name, teamLocalPath });
+          }
+        } catch { /* unreadable -> not reported */ }
+      }
+      continue;
     }
-    created.push(name);
+    if (file.scope === 'shared') {
+      fs.mkdirSync(sharedPackDir, { recursive: true });
+      // Promote a pre-existing filled team-local copy rather than overwriting it with a fresh stub.
+      if (teamLocalPath !== dest && isFilled(teamLocalPath)) {
+        fs.copyFileSync(teamLocalPath, dest);
+        promoted.push({ name: file.name, from: teamLocalPath });
+        created.push(file.name);
+        continue;
+      }
+      const src = fallbackTemplatesDir ? path.join(fallbackTemplatesDir, file.name) : null;
+      if (src && fs.existsSync(src)) fs.copyFileSync(src, dest);
+      else stub(dest, file.name);
+      created.push(file.name);
+      continue;
+    }
+    // Local file: unchanged behavior (team templatesDir -> shared fallback -> stub).
+    const src = pickTemplate(file.name, templatesDir, fallbackTemplatesDir);
+    if (src) fs.copyFileSync(src, dest);
+    else stub(dest, file.name);
+    created.push(file.name);
   }
+
   const readmeDest = path.join(packDir, 'README.md');
   if (!fs.existsSync(readmeDest)) {
     const readmeSrc = pickTemplate('README.md', templatesDir, fallbackTemplatesDir);
@@ -93,27 +170,30 @@ function scaffoldPack(projectPath, outputPath, templatesDir, requiredFiles = DEF
     }
     created.push('README.md');
   }
-  return { created, packDir };
+  return {
+    created, promoted, divergent, packDir, sharedPackDir,
+  };
 }
 
 // Whether the project pack is ready: every required file exists and none still carries the sentinel.
-function packStatus(projectPath, outputPath, requiredFiles = DEFAULT_PACK_FILES) {
-  const { packDir } = teamPaths(projectPath, outputPath);
+// A shared file (in sharedFiles) is checked in <project>/.glissa/pack/, so once it is filled once every
+// team that shares it reports configured. With sharedFiles=[] this is byte-identical to the team-local check.
+function packStatus(projectPath, outputPath, requiredFiles = DEFAULT_PACK_FILES, sharedFiles = []) {
+  const { files, packDir, sharedPackDir } = resolvePackLayout(projectPath, outputPath, requiredFiles, sharedFiles);
   const missing = [];
   const unfilled = [];
-  for (const name of requiredFiles) {
-    const fp = path.join(packDir, name);
-    if (!fs.existsSync(fp)) {
-      missing.push(name);
-      unfilled.push(name);
+  for (const file of files) {
+    if (!fs.existsSync(file.path)) {
+      missing.push(file.name);
+      unfilled.push(file.name);
       continue;
     }
     let text = '';
-    try { text = fs.readFileSync(fp, 'utf8'); } catch { /* unreadable counts as unfilled */ }
-    if (!text || text.includes(PACK_SENTINEL)) unfilled.push(name);
+    try { text = fs.readFileSync(file.path, 'utf8'); } catch { /* unreadable counts as unfilled */ }
+    if (!text || text.includes(PACK_SENTINEL)) unfilled.push(file.name);
   }
   return {
-    configured: unfilled.length === 0, missing, unfilled, packDir,
+    configured: unfilled.length === 0, missing, unfilled, packDir, sharedPackDir,
   };
 }
 
@@ -333,8 +413,10 @@ function listRunSummaries(projectPath, outputPath, stages = [], limit = 10) {
 module.exports = {
   teamPaths,
   ensureStructure,
+  resolvePackLayout,
   scaffoldPack,
   packStatus,
+  isFilled,
   runFolderLabel,
   createRunFolder,
   chatPath,
@@ -350,4 +432,5 @@ module.exports = {
   escapeRegExp,
   PACK_SENTINEL,
   DEFAULT_PACK_FILES,
+  SHARED_PACK_DIRNAME,
 };

@@ -58,6 +58,14 @@ function validatePack(pack, teamId) {
       fail('pack.required', 'must be an array of pack file names', teamId);
     }
   }
+  // pack.shared: the subset of required files that live in the PROJECT-LEVEL shared pack (.glissa/pack/)
+  // and are reused across teams. Shape-validated here; the "shared subset of required" and the
+  // "shared template ships in _shared" checks happen in validateAndNormalize (where packRequired exists).
+  if (pack.shared != null) {
+    if (!Array.isArray(pack.shared) || pack.shared.some((f) => typeof f !== 'string')) {
+      fail('pack.shared', 'must be an array of pack file names', teamId);
+    }
+  }
 }
 
 // The repo-relative globs a run may stage back to the base branch on a final SHIP (the auto-merge
@@ -193,11 +201,30 @@ function validateAndNormalize(def, teamId, teamDir) {
   const packRequired = (def.pack && Array.isArray(def.pack.required) && def.pack.required.length > 0)
     ? def.pack.required.slice()
     : DEFAULT_PACK_FILES.slice();
+  // pack.shared: the subset of required files filled once in the project-level shared pack (.glissa/pack/)
+  // and reused by every team that declares them. Each must be a required file, and each templates ONLY
+  // from the shared library (a shared file is project-level, not team-flavored).
+  const packShared = (def.pack && Array.isArray(def.pack.shared)) ? def.pack.shared.slice() : [];
   const packTemplatesDir = path.join(teamDir, 'pack-templates');
   const packTemplatesFallbackDir = path.join(baseDir, '_shared', 'pack-templates');
+  for (const name of packShared) {
+    if (!packRequired.includes(name)) {
+      fail('pack.shared', `entry "${name}" is not in pack.required`, teamId);
+    }
+  }
   for (const name of packRequired) {
     const local = path.join(packTemplatesDir, name);
     const shared = path.join(packTemplatesFallbackDir, name);
+    if (packShared.includes(name)) {
+      // A shared file's template must live in the shared library. A stray team-local template (if any) is
+      // simply never read for a shared file (the scaffold templates shared files from _shared only); it is
+      // NOT a hard failure here, so a half-applied change cannot crash loadTeam in a managed project. The
+      // "no team ships a local template for a shared file" invariant is enforced by a CI guard test.
+      if (!fs.existsSync(shared)) {
+        fail('pack', `shared file "${name}" is missing its template in ${shared}`, teamId);
+      }
+      continue;
+    }
     if (!fs.existsSync(local) && !fs.existsSync(shared)) {
       fail('pack', `is missing its scaffold template (looked in ${local}, ${shared})`, teamId);
     }
@@ -230,6 +257,7 @@ function validateAndNormalize(def, teamId, teamDir) {
     stages,
     teamDir,
     packRequired,
+    packShared,
     packTemplatesDir,
     packTemplatesFallbackDir,
   };

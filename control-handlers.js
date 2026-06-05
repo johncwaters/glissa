@@ -523,7 +523,7 @@ function registerControlHandlers(controlWss, deps) {
       if (registry) team = registry.loadTeam(teamId);
       const projectPath = getProjectPathById ? getProjectPathById(projectId) : null;
       if (team && teamOutput && projectPath && typeof teamOutput.packStatus === 'function') {
-        const st = teamOutput.packStatus(projectPath, team.outputPath, team.packRequired);
+        const st = teamOutput.packStatus(projectPath, team.outputPath, team.packRequired, team.packShared);
         out.configured = st.configured;
         out.unfilled = st.unfilled;
         out.packDir = st.packDir;

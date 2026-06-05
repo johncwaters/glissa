@@ -28,10 +28,18 @@ const PUBLISHED = '## X\nPostiz draft created: https://postiz.example/d/1\n';
 
 // Write a filled pack (no sentinel) so the orchestrator's first-run setup gate passes and the run
 // proceeds. The orchestrator uses the REAL team-output, which reads the pack from the project path.
+// Marketing declares voice-guide/avoid-list/brand as pack.shared, so those resolve under the project
+// shared pack (.glissa/pack/). Seed BOTH locations so the gate is satisfied regardless of a file's scope.
 function seedPack(proj) {
   const dir = path.join(proj, OUT, 'pack');
+  const sharedDir = path.join(proj, '.glissa', 'pack');
   fs.mkdirSync(dir, { recursive: true });
-  for (const name of REQUIRED) fs.writeFileSync(path.join(dir, name), `# ${name}\nreal content\n`, 'utf8');
+  fs.mkdirSync(sharedDir, { recursive: true });
+  for (const name of REQUIRED) {
+    const body = `# ${name}\nreal content\n`;
+    fs.writeFileSync(path.join(dir, name), body, 'utf8');
+    fs.writeFileSync(path.join(sharedDir, name), body, 'utf8');
+  }
 }
 
 // Fake session factory: writes the produces file (path parsed from the real built prompt) then
@@ -169,8 +177,10 @@ test('first run with no pack scaffolds + halts (needs-setup), runs zero stages',
     assert.ok(logLines(proj).some((l) => l.includes('NEEDS_SETUP')), 'logged a NEEDS_SETUP line');
     assert.ok(events.some((e) => e.name === 'team-run-needs-setup'));
     assert.ok(!events.some((e) => e.name === 'team-stage-started'), 'no stage ran');
-    // The pack was scaffolded for the operator to fill.
-    assert.ok(fs.existsSync(path.join(proj, OUT, 'pack', 'voice-guide.md')));
+    // The pack was scaffolded for the operator to fill. voice-guide is a SHARED file, so it scaffolds into
+    // the project-level shared pack (.glissa/pack/); the team-local content-calendar scaffolds team-locally.
+    assert.ok(fs.existsSync(path.join(proj, '.glissa', 'pack', 'voice-guide.md')), 'shared file scaffolded into .glissa/pack/');
+    assert.ok(fs.existsSync(path.join(proj, OUT, 'pack', 'content-calendar.md')), 'local file scaffolded team-locally');
   } finally {
     fs.rmSync(proj, { recursive: true, force: true });
   }
@@ -197,6 +207,41 @@ test('happy path: all stages run, SHIP -> publisher, one success log line', asyn
     assert.equal(logLines(proj).length, 2, 'header + exactly one run line');
     assert.equal(events.filter((e) => e.name === 'team-stage-complete').length, 5);
     assert.ok(events.some((e) => e.name === 'team-run-complete'));
+  } finally {
+    fs.rmSync(proj, { recursive: true, force: true });
+  }
+});
+
+test('I1: marketing is configured from the shared pack alone; stage prompts point at .glissa/pack', async () => {
+  const proj = tmpProject();
+  try {
+    // Seed shared files ONLY in the project shared pack and local files in the team pack. There is NO
+    // team-local copy of the shared files, so the run can only be configured by reading .glissa/pack/.
+    const sharedDir = path.join(proj, '.glissa', 'pack');
+    const localDir = path.join(proj, OUT, 'pack');
+    fs.mkdirSync(sharedDir, { recursive: true });
+    fs.mkdirSync(localDir, { recursive: true });
+    for (const name of ['voice-guide.md', 'avoid-list.md', 'brand.md']) {
+      fs.writeFileSync(path.join(sharedDir, name), `# ${name}\nshared real\n`, 'utf8');
+    }
+    for (const name of ['content-calendar.md', 'channels.md']) {
+      fs.writeFileSync(path.join(localDir, name), `# ${name}\nlocal real\n`, 'utf8');
+    }
+    const { orch, events, prompts } = makeOrch(proj, {
+      researcher: { write: BRIEF },
+      strategist: { write: PLAN },
+      writer: { write: DRAFTS },
+      editor: { write: REVIEW('SHIP') },
+      publisher: { write: PUBLISHED },
+    });
+    const res = await orch.runTeam({ teamId: 'marketing', projectId: 'p1', trigger: 'manual' });
+    assert.equal(res.ok, true, 'configured from the shared pack alone, no needs-setup');
+    assert.ok(!events.some((e) => e.name === 'team-run-needs-setup'), 'no needs-setup emitted');
+    // Stage prompts reference the SHARED voice-guide path, never a team-local one.
+    const sharedVoice = path.join(sharedDir, 'voice-guide.md');
+    const localVoice = path.join(localDir, 'voice-guide.md');
+    assert.ok(prompts.some((p) => p.prompt.includes(sharedVoice)), 'a stage prompt points at the shared voice-guide');
+    assert.ok(!prompts.some((p) => p.prompt.includes(localVoice)), 'no stage prompt points at a team-local voice-guide');
   } finally {
     fs.rmSync(proj, { recursive: true, force: true });
   }

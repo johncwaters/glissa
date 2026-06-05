@@ -114,3 +114,43 @@ test('packPaths handles a team with no packRequired', () => {
   const { packFiles } = packPaths('/proj', { outputPath: 'o' });
   assert.deepEqual(packFiles, []);
 });
+
+// --- shared pack: packPaths resolves shared files under .glissa/pack/; the interview skips filled ones ---
+
+test('S1: packPaths resolves shared files under .glissa/pack/ and returns sharedPackDir', () => {
+  const team = {
+    id: 'marketing',
+    name: 'Marketing',
+    outputPath: '.glissa/teams/marketing',
+    packRequired: ['voice-guide.md', 'avoid-list.md', 'content-calendar.md'],
+    packShared: ['voice-guide.md', 'avoid-list.md'],
+  };
+  const { packDir, sharedPackDir, packFiles } = packPaths('/proj', team);
+  assert.equal(packDir, path.join('/proj', team.outputPath, 'pack'));
+  assert.equal(sharedPackDir, path.join('/proj', '.glissa', 'pack'));
+  const byName = Object.fromEntries(packFiles.map((f) => [f.name, f]));
+  assert.equal(byName['voice-guide.md'].scope, 'shared');
+  assert.equal(byName['voice-guide.md'].path, path.join('/proj', '.glissa', 'pack', 'voice-guide.md'));
+  assert.equal(byName['content-calendar.md'].scope, 'local');
+  assert.equal(byName['content-calendar.md'].path, path.join(packDir, 'content-calendar.md'));
+});
+
+test('S2: buildSetupPrompt lists only the files it is given (a filled shared file is skipped)', () => {
+  const projectPath = '/proj';
+  const sharedDir = path.join(projectPath, '.glissa', 'pack');
+  const localDir = path.join(projectPath, TEAM.outputPath, 'pack');
+  // The backend passes ONLY the unfilled subset; voice-guide.md (already filled in the shared pack) is omitted.
+  const packFiles = [
+    { name: 'avoid-list.md', path: path.join(sharedDir, 'avoid-list.md'), scope: 'shared' },
+    { name: 'content-calendar.md', path: path.join(localDir, 'content-calendar.md'), scope: 'local' },
+  ];
+  const p = buildSetupPrompt(TEAM, {
+    packDir: localDir, sharedPackDir: sharedDir, packFiles, projectPath,
+  });
+  assert.ok(p.includes(path.join(sharedDir, 'avoid-list.md')), 'lists the unfilled shared file');
+  assert.ok(p.includes(path.join(localDir, 'content-calendar.md')), 'lists the unfilled local file');
+  assert.equal(p.includes('voice-guide.md'), false, 'the already-filled shared file is NOT in the prompt');
+  assert.match(p, /shared pack \(under \.glissa\/pack\/\)/, 'advisory names the project shared pack');
+  assert.equal(p.includes('—'), false, 'no em dash');
+  assert.equal(p.includes('–'), false, 'no en dash');
+});

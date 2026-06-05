@@ -145,6 +145,51 @@ test('discard removes the worktree and the branch', { skip: !GIT }, () => {
   }
 });
 
+// G1: create() copies BOTH the team-local pack and the project-level shared pack (.glissa/pack/) into the
+// worktree so stages can read shared-scope files (voice/brand). Both are untracked in the project and are
+// never staged by integrate, so they vanish with the worktree.
+test('G1: create copies the team-local pack AND the shared .glissa/pack into the worktree', { skip: !GIT }, () => {
+  const repo = initRepo();
+  try {
+    const outputPath = '.glissa/teams/marketing';
+    fs.mkdirSync(path.join(repo, outputPath, 'pack'), { recursive: true });
+    fs.writeFileSync(path.join(repo, outputPath, 'pack', 'content-calendar.md'), 'cal\n', 'utf8');
+    fs.mkdirSync(path.join(repo, '.glissa', 'pack'), { recursive: true });
+    fs.writeFileSync(path.join(repo, '.glissa', 'pack', 'voice-guide.md'), 'shared voice\n', 'utf8');
+
+    const gw = createGitWorkspace();
+    const ws = gw.create({
+      projectPath: repo, teamId: 'marketing', label: 'r', outputPath,
+    });
+    assert.equal(ws.isGit, true);
+    assert.ok(fs.existsSync(path.join(ws.cwd, outputPath, 'pack', 'content-calendar.md')), 'team-local pack copied in');
+    assert.ok(fs.existsSync(path.join(ws.cwd, '.glissa', 'pack', 'voice-guide.md')), 'shared pack copied in');
+    gw.discard({ projectPath: repo, workspace: ws });
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+// G1b: an absent shared pack is a no-op (no throw); the team-local pack still copies.
+test('G1b: create does not throw when .glissa/pack is absent', { skip: !GIT }, () => {
+  const repo = initRepo();
+  try {
+    const outputPath = '.glissa/teams/qa';
+    fs.mkdirSync(path.join(repo, outputPath, 'pack'), { recursive: true });
+    fs.writeFileSync(path.join(repo, outputPath, 'pack', 'how-to-run.md'), 'run\n', 'utf8');
+    const gw = createGitWorkspace();
+    const ws = gw.create({
+      projectPath: repo, teamId: 'qa', label: 'r', outputPath,
+    });
+    assert.equal(ws.isGit, true);
+    assert.ok(!fs.existsSync(path.join(ws.cwd, '.glissa', 'pack')), 'no shared pack created when absent');
+    assert.ok(fs.existsSync(path.join(ws.cwd, outputPath, 'pack', 'how-to-run.md')), 'team-local pack still copied');
+    gw.discard({ projectPath: repo, workspace: ws });
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
 test('create falls back to in-place for a non-git directory', { skip: !GIT }, () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-nongit-'));
   try {
