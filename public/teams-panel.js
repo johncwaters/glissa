@@ -228,6 +228,12 @@ function stageIndexLabel(refs, stageId) {
   const i = ids.indexOf(stageId);
   return i >= 0 ? `${i + 1} of ${ids.length}` : '';
 }
+// The stage that runs after `stageId` in pipeline order, or null if it is the last one.
+function nextStageId(refs, stageId) {
+  const ids = [...refs.stageNodes.keys()];
+  const i = ids.indexOf(stageId);
+  return i >= 0 && i + 1 < ids.length ? ids[i + 1] : null;
+}
 
 // ── running indicator ─────────────────────────────────────────
 
@@ -999,10 +1005,19 @@ export function handleTeamMessage(msg) {
     case 'team-revise-round':
       setStatus(refs, `Revising · round ${msg.round}`, 'run');
       break;
-    case 'team-stage-complete':
+    case 'team-stage-complete': {
       markStage(refs.stageNodes, msg.stage, 'done');
       appendSystemLine(refs, `${labelFor(msg.stage)} finished${msg.verdict ? `: ${msg.verdict}` : ''}`);
+      // Bridge the inter-stage gap: spawning the next `claude -p` can take many seconds, during which
+      // the header would otherwise sit on the just-finished stage as if it were still active. Naming the
+      // handoff keeps the run reading as live. A verdict stage (the editor) is left without a "next"
+      // hint because a FIX re-runs an earlier stage instead — the team-revise-round / next
+      // team-stage-started event resolves that within the same gap.
+      const done = `${labelFor(msg.stage)} done${msg.verdict ? ` · ${msg.verdict}` : ''}`;
+      const next = msg.verdict ? null : nextStageId(refs, msg.stage);
+      setStatus(refs, next ? `${done} · starting ${labelFor(next)}…` : done, 'run');
       break;
+    }
     case 'team-run-cancelling':
       setStatus(refs, 'Cancelling…', '');
       break;

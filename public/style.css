@@ -2105,8 +2105,16 @@ body[data-active-view="teams"] #minimized-bar { display: none; }
   white-space: nowrap;
 }
 .team-status[data-kind="run"] { color: var(--accent); }
-.team-status[data-kind="ok"] { color: var(--state-done); }
+.team-status[data-kind="ok"] { color: var(--state-done); animation: team-status-done 1s ease-out; }
 .team-status[data-kind="fail"] { color: var(--state-failed); }
+/* One-shot "it landed" acknowledgement, scoped to the status word itself (not the panel or screen):
+   a brief brighten + glow that settles. Plays once on the run -> ok transition; the global
+   prefers-reduced-motion block collapses it to a no-op. */
+@keyframes team-status-done {
+  0%   { opacity: 0.45; text-shadow: 0 0 0 transparent; }
+  25%  { opacity: 1; text-shadow: 0 0 10px color-mix(in oklab, var(--state-done) 65%, transparent); }
+  100% { opacity: 1; text-shadow: 0 0 0 transparent; }
+}
 .team-next {
   font-family: var(--font-mono);
   font-size: 11px;

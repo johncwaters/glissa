@@ -87,6 +87,50 @@ test('integrate keeps the run on its branch when the base moved (not a fast-forw
   }
 });
 
+// Regression: the pre-worktree setup gate writes an untracked log.md (and a crashed prior run can
+// leave an untracked run folder) into the PROJECT tree. The branch tracks those same paths, so a naive
+// `merge --ff-only` aborts ("untracked working tree files would be overwritten") and strands the whole
+// run on its branch. integrate must clear those scoped untracked collisions and complete the merge.
+test('integrate clears an untracked log.md collision in the project tree and still fast-forwards', { skip: !GIT }, () => {
+  const repo = initRepo();
+  try {
+    const gw = createGitWorkspace();
+    const outputPath = '.glissa/teams/release-notes';
+    const ws = gw.create({ projectPath: repo, teamId: 'release-notes', label: '2026-06-04-thursday', outputPath });
+
+    // Simulate the pre-worktree gate: a header-only log.md is left UNTRACKED in the project tree.
+    const logRel = `${outputPath}/log.md`;
+    fs.mkdirSync(path.join(repo, outputPath), { recursive: true });
+    fs.writeFileSync(path.join(repo, logRel), '# Team run log\n', 'utf8');
+    // A user file that also sits untracked under the output path must NOT be removed (not on the branch).
+    const packRel = `${outputPath}/pack/voice-guide.md`;
+    fs.mkdirSync(path.join(repo, outputPath, 'pack'), { recursive: true });
+    fs.writeFileSync(path.join(repo, packRel), 'voice\n', 'utf8');
+
+    // The run, built in the worktree: a fuller log.md (header + run line) + the dated run folder.
+    const runRel = `${outputPath}/runs/2026-06-04-thursday`;
+    fs.mkdirSync(path.join(ws.cwd, runRel), { recursive: true });
+    fs.writeFileSync(path.join(ws.cwd, runRel, 'notes.md'), '## Release\nx\n', 'utf8');
+    fs.writeFileSync(path.join(ws.cwd, logRel), '# Team run log\n2026-06-04 | v0.14.0 | - | SHIP\n', 'utf8');
+
+    const r = gw.integrate({ projectPath: repo, workspace: ws, message: 'release-notes run', addPaths: [runRel, logRel] });
+    assert.equal(r.committed, true);
+    assert.equal(r.merged, true, 'the untracked log.md no longer blocks the fast-forward');
+    assert.equal(r.branch, null, 'branch deleted after a successful merge');
+
+    assert.ok(fs.existsSync(path.join(repo, runRel, 'notes.md')), 'run folder merged into the working tree');
+    assert.equal(
+      fs.readFileSync(path.join(repo, logRel), 'utf8').replace(/\r\n/g, '\n'),
+      '# Team run log\n2026-06-04 | v0.14.0 | - | SHIP\n',
+      'log.md is now the branch (tracked) version',
+    );
+    assert.ok(fs.existsSync(path.join(repo, packRel)), 'the untracked pack file (not on the branch) is left untouched');
+    assert.equal(git(['status', '--porcelain', '--', outputPath], repo).trim(), '?? .glissa/teams/release-notes/pack/', 'only the pack stays untracked; the run + log are committed');
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
 test('discard removes the worktree and the branch', { skip: !GIT }, () => {
   const repo = initRepo();
   try {

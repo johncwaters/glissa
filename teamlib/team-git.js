@@ -27,6 +27,31 @@ function createGitWorkspace(opts = {}) {
   }
   function sanitize(s) { return String(s || '').replace(/[^\w.-]+/g, '-').replace(/^-+|-+$/g, ''); }
 
+  // A fast-forward refuses to overwrite UNTRACKED working-tree files (git aborts to avoid clobbering
+  // content it does not know about). The team writes its run log + run folder into the project tree
+  // BEFORE the worktree exists (the pre-worktree setup/skip gates call ensureStructure/appendLog on
+  // projectPath), and a prior run that failed to merge can leave its run folder there too. Those land
+  // as untracked files; the branch then tracks the same paths, so the merge-back aborts and the whole
+  // run is stranded on its branch. The branch is the authority for everything it commits under the run
+  // paths, so remove exactly those untracked collisions before the FF. Conservative on three axes so
+  // the project-owned pack and the user's own files are never touched:
+  //   (1) only paths under addPaths (the run folder + log + the team's writeScope) are considered,
+  //   (2) only files the branch actually tracks are removed (the merge would bring them in regardless),
+  //   (3) --exclude-standard skips ignored files (which never block a FF anyway).
+  function clearFfCollisions(projectPath, branch, addPaths) {
+    if (!branch || !addPaths.length) return;
+    const lines = (s) => s.split(/\r?\n/).map((t) => t.trim()).filter(Boolean);
+    const tracked = run(['ls-tree', '-r', '--name-only', branch], projectPath);
+    if (!tracked.ok) return;
+    const trackedSet = new Set(lines(tracked.out));
+    const others = run(['ls-files', '--others', '--exclude-standard', '--', ...addPaths], projectPath);
+    if (!others.ok) return;
+    for (const rel of lines(others.out)) {
+      if (!trackedSet.has(rel)) continue; // leave an untracked file the merge would NOT touch
+      try { fs.rmSync(path.join(projectPath, rel), { force: true }); } catch { /* best-effort */ }
+    }
+  }
+
   // Create an isolated worktree on `glissa/<teamId>/<label>`. Returns
   // { cwd, isGit, branch, base, baseSha }; falls back to { cwd: projectPath, isGit: false }.
   function create({ projectPath, teamId, label, outputPath }) {
@@ -73,6 +98,7 @@ function createGitWorkspace(opts = {}) {
     let merged = false;
     let reason = null;
     if (committed && workspace.branch && workspace.base && workspace.base !== 'HEAD') {
+      clearFfCollisions(projectPath, workspace.branch, addPaths);
       merged = run(['merge', '--ff-only', workspace.branch], projectPath).ok;
       if (!merged) reason = 'not-fast-forward';
     } else if (!committed) {
