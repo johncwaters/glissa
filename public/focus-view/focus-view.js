@@ -8,10 +8,11 @@
 // State lives here (view-local); it reads sessions from the shared card registry and never mutates the
 // Sessions-tab minimize/maximize state. The card is returned to its exact home slot on leave/swap.
 
-import { STATES, BADGE_LABELS, STATE_GLYPHS } from '/shared/states.mjs';
-import { sessionUIs, container } from '../session-card/card-registry.js';
-import { ensureTerminalSetup, forceTerminalRepaint } from '../session-card/terminal.js';
+import { BADGE_LABELS, STATE_GLYPHS, STATES } from '/shared/states.mjs';
+import { sendControlMsg } from '../control-ws.js';
+import { container, sessionUIs } from '../session-card/card-registry.js';
 import { wakeSession } from '../session-card/layout.js';
+import { ensureTerminalSetup, forceTerminalRepaint } from '../session-card/terminal.js';
 
 let railEl = null;
 let centerEl = null;
@@ -89,8 +90,18 @@ function buildPill(id) {
   pill.innerHTML = '<span class="focus-pill-badge">'
     + '<span class="focus-pill-glyph"></span><span class="focus-pill-label"></span></span>'
     + '<span class="focus-pill-name"></span><span class="focus-pill-merge"></span>';
-  pill.addEventListener('click', () => focusSession(id));
+  pill.addEventListener('click', () => onPillActivate(id));
   return pill;
+}
+
+// Clicking a pill focuses its session into the center. A DORMANT session is also STARTED (mirrors the
+// Sessions-view minimized-pill expand): borrowToCenter has already wired the data WS via
+// ensureTerminalSetup, so the spawning PTY's output flows into the centered card.
+function onPillActivate(id) {
+  const ui = sessionUIs.get(id);
+  if (!ui) return;
+  if (ui.currentState === STATES.DORMANT) sendControlMsg({ type: 'start-session', id });
+  focusSession(id);
 }
 
 function paintPill(pill, id, ui) {
