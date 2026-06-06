@@ -14,6 +14,9 @@ const DEFAULT_CONFIG = {
   cursorBlink: false,
   debugMode: false,
   editorCommand: '',
+  // Integration branch every worktree-backed session forks from and merges back into. Glissa never
+  // creates it; if it is absent a session stays DORMANT with a notice (it never runs in the real tree).
+  integrationBranch: 'develop',
   repoRoots: [],
   // Deterministic post-turn auto-fix checks (see post-turn-checker.js). ON by
   // default: the runner's own DEFAULTS govern behavior even when this key is
@@ -45,6 +48,7 @@ const BOOLEAN_KEYS = [
 // Free-text settings persisted to config.json
 const STRING_KEYS = [
   'editorCommand',
+  'integrationBranch',
 ];
 
 function resolveConfigPath() {
@@ -144,6 +148,7 @@ function createConfigStore() {
       cursorBlink: config.cursorBlink ?? DEFAULT_CONFIG.cursorBlink,
       debugMode: config.debugMode ?? DEFAULT_CONFIG.debugMode,
       editorCommand: config.editorCommand ?? DEFAULT_CONFIG.editorCommand,
+      integrationBranch: config.integrationBranch ?? DEFAULT_CONFIG.integrationBranch,
       repoRoots: config.repoRoots,
     };
   }
