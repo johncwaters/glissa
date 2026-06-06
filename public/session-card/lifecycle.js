@@ -227,6 +227,10 @@ export function createSessionCard(sessionId, sessionName, initialState, options 
     btnOverflow: dom.btnOverflow,
     overflowMenu: dom.overflowMenu,
     termWrap: dom.termWrap,
+    reviewBar: dom.reviewBar,
+    reviewLabel: dom.reviewLabel,
+    reviewActions: dom.reviewActions,
+    reviewDiff: dom.reviewDiff,
     btnDebug: dom.btnDebug,
     btnRename: dom.btnRename,
     btnRestart: dom.btnRestart,
@@ -301,6 +305,54 @@ export function setSessionPostTurn(sessionId, report) {
   const detail = Object.keys(perRule).map((k) => `${k}: ${perRule[k]}`).join(', ');
   const verb = kind === 'fixed' ? 'auto-fixed' : 'flagged';
   badge.title = `Post-turn ${verb} ${count} file(s)${detail ? ` (${detail})` : ''}`;
+}
+
+// Reflect the worktree merge lifecycle on the card. `mergeStatus` is the server's session-merge-status
+// (none|pending-review|merging|parked|merged). Shows a review banner with Merge / Discard / View-diff
+// (the same control messages the Focus view uses) when there is something to review; hidden otherwise.
+// The banner is on the card, so it appears in the Sessions grid AND in the borrowed Focus center.
+export function setSessionMergeStatus(sessionId, mergeStatus) {
+  const ui = sessionUIs.get(sessionId);
+  if (!ui || !ui.reviewBar) return;
+  const ms = mergeStatus || 'none';
+  const reviewable = ms === 'pending-review' || ms === 'parked' || ms === 'merging';
+  if (!reviewable) {
+    delete ui.card.dataset.merge;
+    ui.reviewActions.replaceChildren();
+    ui.reviewDiff.hidden = true;
+    ui.reviewDiff.textContent = '';
+    return;
+  }
+  ui.card.dataset.merge = ms;
+  ui.reviewLabel.textContent = ms === 'parked' ? 'Needs manual merge'
+    : ms === 'merging' ? 'Merging…'
+    : 'Changes ready to review';
+  ui.reviewActions.replaceChildren();
+  if (ms === 'merging') return;
+  const mk = (text, kind, type) => {
+    const b = el('button', `card-review-btn card-review-btn-${kind}`, text);
+    b.type = 'button';
+    b.addEventListener('click', () => {
+      sendControlMsg({ type, id: sessionId });
+      if (type !== 'request-session-diff') ui.reviewDiff.hidden = true;
+    });
+    return b;
+  };
+  ui.reviewActions.append(mk('View diff', 'ghost', 'request-session-diff'));
+  if (ms === 'pending-review') {
+    ui.reviewActions.append(
+      mk('Merge to develop', 'primary', 'merge-session'),
+      mk('Discard', 'danger', 'discard-session-worktree'),
+    );
+  }
+}
+
+// Fill the card's review diff panel (reply to request-session-diff).
+export function setSessionDiff(sessionId, stat, diff) {
+  const ui = sessionUIs.get(sessionId);
+  if (!ui || !ui.reviewDiff) return;
+  ui.reviewDiff.textContent = (stat ? `${stat}\n\n` : '') + (diff || '(no changes)');
+  ui.reviewDiff.hidden = false;
 }
 
 export function renameSessionCard(sessionId, newName) {

@@ -9,16 +9,13 @@
 // Sessions-tab minimize/maximize state. The card is returned to its exact home slot on leave/swap.
 
 import { STATES, BADGE_LABELS, STATE_GLYPHS } from '/shared/states.mjs';
-import { sendControlMsg } from '../control-ws.js';
 import { sessionUIs, container } from '../session-card/card-registry.js';
 import { ensureTerminalSetup, forceTerminalRepaint } from '../session-card/terminal.js';
 import { wakeSession } from '../session-card/layout.js';
 
 let railEl = null;
 let centerEl = null;
-let reviewBarEl = null;
 let cardSlotEl = null;
-let diffEl = null;
 let emptyEl = null;
 
 let active = false;
@@ -37,18 +34,12 @@ export function mountFocusView({ rail, center }) {
   emptyEl.innerHTML = '<p class="focus-empty-title">Nothing to focus</p>'
     + '<p class="focus-empty-desc">Spawn a session to start watching.</p>';
 
-  reviewBarEl = document.createElement('div');
-  reviewBarEl.className = 'focus-review-bar';
-  reviewBarEl.hidden = true;
-
   cardSlotEl = document.createElement('div');
   cardSlotEl.className = 'focus-card-slot';
 
-  diffEl = document.createElement('pre');
-  diffEl.className = 'focus-diff';
-  diffEl.hidden = true;
-
-  centerEl.append(emptyEl, reviewBarEl, cardSlotEl, diffEl);
+  // The review gate lives on the card itself (card-review-bar), so the borrowed card brings it into
+  // the center — no separate Focus review UI needed.
+  centerEl.append(emptyEl, cardSlotEl);
 
   railEl.addEventListener('keydown', onRailKeydown);
 }
@@ -194,61 +185,21 @@ function focusSession(id) {
   releaseCenter();
   focusedId = id;
   borrowToCenter(sessionUIs.get(id), id);
-  diffEl.hidden = true; diffEl.textContent = '';
   refreshFocusRoster();
 }
 
 function updateCenter() {
   const has = !!(focusedId && sessionUIs.has(focusedId));
   emptyEl.hidden = has || sessionUIs.size > 0;
-  reviewBarEl.hidden = true;
-  if (!has) return;
-  const ms = mergeStatusById.get(focusedId) || 'none';
-  if (ms === 'pending-review' || ms === 'parked' || ms === 'merging') {
-    renderReviewBar(focusedId, ms);
-    reviewBarEl.hidden = false;
-  }
-}
-
-function renderReviewBar(id, ms) {
-  const name = sessionName(sessionUIs.get(id));
-  reviewBarEl.dataset.merge = ms;
-  const label = ms === 'parked' ? 'Needs manual merge'
-    : ms === 'merging' ? 'Merging...'
-    : 'Changes ready to review';
-  reviewBarEl.innerHTML = `<span class="focus-review-label">${label}</span>`;
-  if (ms === 'pending-review') {
-    const view = btn('View diff', 'ghost', () => { sendControlMsg({ type: 'request-session-diff', id }); });
-    const merge = btn('Merge to develop', 'primary', () => { sendControlMsg({ type: 'merge-session', id }); });
-    const discard = btn('Discard', 'danger', () => { sendControlMsg({ type: 'discard-session-worktree', id }); diffEl.hidden = true; });
-    reviewBarEl.append(view, merge, discard);
-  } else if (ms === 'parked') {
-    const view = btn('View diff', 'ghost', () => { sendControlMsg({ type: 'request-session-diff', id }); });
-    reviewBarEl.append(view);
-  }
-}
-
-function btn(text, kind, onClick) {
-  const b = document.createElement('button');
-  b.type = 'button';
-  b.className = `focus-review-btn focus-review-btn-${kind}`;
-  b.textContent = text;
-  b.addEventListener('click', onClick);
-  return b;
 }
 
 // ── External hooks (called from app.js) ──
 
+// Track merge status for the rail (sort + the pill's REVIEW/PARKED tag). The actual review controls
+// live on the card (card-review-bar), which the borrowed card carries into the center.
 export function setFocusMergeStatus(id, mergeStatus) {
   mergeStatusById.set(id, mergeStatus || 'none');
-  if (mergeStatus === 'merged') diffEl.hidden = true;
   if (active) refreshFocusRoster();
-}
-
-export function setFocusDiff(id, stat, diff) {
-  if (!active || id !== focusedId) return;
-  diffEl.textContent = (stat ? `${stat}\n\n` : '') + (diff || '(no changes)');
-  diffEl.hidden = false;
 }
 
 export function activateFocusView() {

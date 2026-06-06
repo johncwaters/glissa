@@ -11,11 +11,11 @@ import { applyHealthSnapshot, mountHealthMonitor } from './health-monitor.js';
 import { initNotifications, showDesktopNotification } from './notifications.js';
 import { handleDebugStateRefresh, handleDebugStateResponse } from './session-card/card-dom.js';
 import { exitMaximizeMode, isMaximizeActive, setLayoutMode } from './session-card/layout.js';
-import { applyState, applyTerminalSettings, createSessionCard, focusNextWaiting, focusSessionCard, getSessionCount, handleSessionsReordered, hasSession, removeSessionCard, renameSessionCard, setSessionPostTurn, setSessionWorktree, updateAggregateStatus } from './session-card/lifecycle.js';
+import { applyState, applyTerminalSettings, createSessionCard, focusNextWaiting, focusSessionCard, getSessionCount, handleSessionsReordered, hasSession, removeSessionCard, renameSessionCard, setSessionDiff, setSessionMergeStatus, setSessionPostTurn, setSessionWorktree, updateAggregateStatus } from './session-card/lifecycle.js';
 import { reconnectDataWs } from './session-card/terminal.js';
 import { showErrorToast } from './session-card/toast.js';
 import { handleTeamMessage, mountTeamsView, setTabActivityCallback } from './teams-panel.js';
-import { activateFocusView, deactivateFocusView, isFocusActive, mountFocusView, refreshFocusRoster, setFocusDiff, setFocusMergeStatus } from './focus-view/focus-view.js';
+import { activateFocusView, deactivateFocusView, isFocusActive, mountFocusView, refreshFocusRoster, setFocusMergeStatus } from './focus-view/focus-view.js';
 import { applyTheme } from './theme.js';
 import { getThemeId, isSoundEnabled, pruneStale, setSoundEnabled } from './ui-prefs.js';
 
@@ -163,10 +163,10 @@ const messageHandlers = {
   'session-renamed':    (msg) => { if (knownProjects.has(msg.id)) knownProjects.set(msg.id, msg.newName); renameSessionCard(msg.id, msg.newName); },
   'session-modified':   (msg) => { if (!msg.ephemeral) knownProjects.set(msg.id, msg.session); removeSessionCard(msg.id); clearEmptyPlaceholder(); createSessionCard(msg.id, msg.session, msg.state, { skipPerms: !!msg.skipPerms, worktree: !!msg.worktree }); autoLayout(); if (isFocusActive()) refreshFocusRoster(); },
   'session-git':        (msg) => setSessionWorktree(msg.id, !!msg.worktree),
-  'session-merge-status': (msg) => { setFocusMergeStatus(msg.id, msg.mergeStatus); },
+  'session-merge-status': (msg) => { setSessionMergeStatus(msg.id, msg.mergeStatus); setFocusMergeStatus(msg.id, msg.mergeStatus); },
   'session-worktree-blocked': (msg) => { showErrorToast(`${msg.session}: ${msg.notice || 'integration branch not found'}`); },
   'session-worktree-ready': () => {},
-  'session-diff':       (msg) => { setFocusDiff(msg.id, msg.stat, msg.diff); },
+  'session-diff':       (msg) => { setSessionDiff(msg.id, msg.stat, msg.diff); },
   'post-turn-result':   (msg) => setSessionPostTurn(msg.id, msg),
   'sessions-reordered': (msg) => handleSessionsReordered(msg.order),
   'debug-state-response': (msg) => handleDebugStateResponse(msg),
