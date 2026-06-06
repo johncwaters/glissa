@@ -356,6 +356,21 @@ function createBackend(httpServer, options = {}) {
   // success (see team-git.js), so a run never dirties the user's working tree.
   const gitWorkspace = createGitWorkspace();
 
+  // Clean up orphaned SESSION worktrees (glissa/session/*) left by a crashed prior run. At boot no
+  // session is active, so any such worktree is an orphan; the sweep is scoped to the session namespace,
+  // so a live team worktree is never touched. Best-effort, once per distinct repo root.
+  try {
+    const sweptRoots = new Set();
+    for (const project of config.projects) {
+      if (!project.path || sweptRoots.has(project.path)) continue;
+      sweptRoots.add(project.path);
+      const removed = gitWorkspace.sweepSessionWorktrees({ projectPath: project.path });
+      if (removed.length) console.log(`[worktree] swept ${removed.length} orphan session worktree(s) under ${project.path}`);
+    }
+  } catch (err) {
+    console.warn(`[worktree] session worktree sweep failed: ${err.message}`);
+  }
+
   /** Look up either a persisted session or an ephemeral team-stage session. */
   function getSessionAny(id) {
     return sessions.get(id) || teamSessions.get(id) || null;

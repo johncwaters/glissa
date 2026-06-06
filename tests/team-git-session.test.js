@@ -313,3 +313,35 @@ test('create (baseBranch): a missing integration branch returns reason:no-base-b
     fs.rmSync(repo, { recursive: true, force: true });
   }
 });
+
+// --- sweepSessionWorktrees: crash-orphan cleanup scoped to the session namespace ---
+
+test('sweepSessionWorktrees removes orphaned glissa/session/* worktrees but spares live team worktrees', { skip: !GIT }, () => {
+  const repo = initRepoOnDevelop();
+  try {
+    const gw = createGitWorkspace();
+    const sess = gw.create({ projectPath: repo, teamId: 'session', label: 'orphan1', outputPath: '' });
+    const team = gw.create({ projectPath: repo, teamId: 'marketing', label: 'live-run', outputPath: '' });
+    assert.ok(fs.existsSync(sess.cwd) && fs.existsSync(team.cwd));
+
+    const removed = gw.sweepSessionWorktrees({ projectPath: repo });
+    assert.deepEqual(removed, ['glissa/session/orphan1']);
+    assert.ok(!fs.existsSync(sess.cwd), 'orphan session worktree removed');
+    assert.equal(git(['branch', '--list', sess.branch], repo).trim(), '', 'session branch deleted');
+    assert.ok(fs.existsSync(team.cwd), 'live team worktree spared');
+    assert.ok(git(['branch', '--list', team.branch], repo).trim(), 'team branch spared');
+    gw.discard({ projectPath: repo, workspace: team });
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test('sweepSessionWorktrees is a no-op on a non-git directory', { skip: !GIT }, () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-nongit-'));
+  try {
+    const gw = createGitWorkspace();
+    assert.deepEqual(gw.sweepSessionWorktrees({ projectPath: dir }), []);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

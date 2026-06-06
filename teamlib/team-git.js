@@ -220,8 +220,39 @@ function createGitWorkspace(opts = {}) {
     for (const glob of testGlobs) run(['clean', '-f', '--', glob], wt);
   }
 
+  // Sweep orphaned SESSION worktrees (branch `glissa/session/*`) left by a crashed prior run. Scoped to
+  // the session namespace ONLY, so a live TEAM worktree (`glissa/<teamId>/*`, teamId != session) is never
+  // touched. Junction-safe. Intended to run at boot, when no session is active, so any such worktree is an
+  // orphan. Returns the removed branch names. A non-git project is a no-op.
+  function sweepSessionWorktrees({ projectPath }) {
+    const removed = [];
+    const inside = run(['rev-parse', '--is-inside-work-tree'], projectPath);
+    if (!inside.ok || inside.out !== 'true') return removed;
+    const listed = run(['worktree', 'list', '--porcelain'], projectPath);
+    if (!listed.ok) return removed;
+    let curWt = null;
+    for (const line of listed.out.split(/\r?\n/)) {
+      if (line.startsWith('worktree ')) {
+        curWt = line.slice('worktree '.length).trim();
+      } else if (line.startsWith('branch ')) {
+        const name = line.slice('branch '.length).trim().replace(/^refs\/heads\//, '');
+        if (curWt && name.startsWith('glissa/session/')) {
+          removeNodeModulesJunction(curWt);
+          run(['worktree', 'remove', '--force', curWt], projectPath);
+          run(['branch', '-D', name], projectPath);
+          removed.push(name);
+        }
+        curWt = null;
+      } else if (line === '') {
+        curWt = null;
+      }
+    }
+    run(['worktree', 'prune'], projectPath);
+    return removed;
+  }
+
   return {
-    create, integrate, discard, restoreTests, mergeBack,
+    create, integrate, discard, restoreTests, mergeBack, sweepSessionWorktrees,
   };
 }
 
