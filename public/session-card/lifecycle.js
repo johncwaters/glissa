@@ -15,6 +15,9 @@ import { aggregateEl, consumeLocalReorderPending, container, minimizedBar, sessi
 // dragover/dragleave/drop listeners and the _dropZone side effects at module load.
 import { setupDragAndDrop } from './drag-drop.js';
 import { _performExpand, enforceSplitOnCreate, exitMaximizeMode, forgetSessionLayout, getMaximizedSession, isMaximizeActive, SLEEP_ELIGIBLE, sleepSession, toggleMaximize, toggleMinimize, wakeSession } from './layout.js';
+// Load-bearing import: evaluating rail.js installs the minimized-bar MutationObserver,
+// the elapsed-tick interval, and the rail's click/keyboard listeners at module load.
+import { closePeekFor, refreshPill } from './rail.js';
 import { ensureTerminalSetup, setTerminalCursorBlink, setupTerminal, wireTerminalIO } from './terminal.js';
 import { releaseWebgl, tryLoadWebGL } from './webgl-pool.js';
 
@@ -216,6 +219,9 @@ export function createSessionCard(sessionId, sessionName, initialState, options 
     card: dom.card,
     badge: dom.badge,
     nameEl: dom.nameEl,
+    railElapsed: dom.railElapsed,
+    // Wall-clock of the latest state entry; rail.js renders "time in this state".
+    stateSince: Date.now(),
     btnMinimize: dom.btnMinimize,
     btnMaximize: dom.btnMaximize,
     btnOverflow: dom.btnOverflow,
@@ -260,6 +266,43 @@ export function setSessionWorktree(sessionId, worktree) {
   else delete ui.card.dataset.worktree;
 }
 
+// Reflect a post-turn-check result on the card. `report` is the server broadcast
+// (filesFixed, mode, findings[], skipped). Shows a count badge when files were
+// fixed (mode 'fix') or flagged (mode 'report'); hidden otherwise. The card's
+// data-pt attribute drives the CSS, mirroring data-worktree.
+export function setSessionPostTurn(sessionId, report) {
+  const ui = sessionUIs.get(sessionId);
+  if (!ui) return;
+  const badge = ui.card.querySelector('.post-turn-badge');
+  if (!badge) return;
+  const r = report || {};
+  const findings = Array.isArray(r.findings) ? r.findings : [];
+  const fixed = r.filesFixed || 0;
+  let kind = null;
+  let count = 0;
+  if (!r.skipped && r.mode === 'fix' && fixed > 0) {
+    kind = 'fixed';
+    count = fixed;
+  } else if (!r.skipped && r.mode === 'report' && findings.length > 0) {
+    kind = 'flagged';
+    count = new Set(findings.map((f) => f.file)).size;
+  }
+  if (!kind) {
+    delete ui.card.dataset.pt;
+    badge.textContent = '';
+    badge.removeAttribute('title');
+    return;
+  }
+  ui.card.dataset.pt = kind;
+  const glyph = kind === 'fixed' ? '✓' : '⚠'; // check mark / warning sign
+  badge.textContent = `${glyph} ${count}`;
+  const perRule = {};
+  for (const f of findings) perRule[f.rule] = (perRule[f.rule] || 0) + (f.count || 0);
+  const detail = Object.keys(perRule).map((k) => `${k}: ${perRule[k]}`).join(', ');
+  const verb = kind === 'fixed' ? 'auto-fixed' : 'flagged';
+  badge.title = `Post-turn ${verb} ${count} file(s)${detail ? ` (${detail})` : ''}`;
+}
+
 export function renameSessionCard(sessionId, newName) {
   const ui = sessionUIs.get(sessionId);
   if (!ui) return;
@@ -299,11 +342,31 @@ export function focusSessionCard(sessionId) {
   return true;
 }
 
+// Triage jump (Alt+W): cycle focus to the next session that needs input. Walks
+// cards in visual order (grid, then rail), so repeated presses round-robin through
+// every WAITING session. focusSessionCard restores a minimized target and grabs its
+// cursor, so one keystroke takes the operator from anywhere to the session asking
+// for them. Returns false when nothing is waiting.
+let _waitingCursor = -1;
+
+export function focusNextWaiting() {
+  const ordered = [
+    ...container.querySelectorAll('.session-card'),
+    ...minimizedBar.querySelectorAll('.session-card'),
+  ].filter((c) => c.dataset.state === STATES.WAITING && !c.classList.contains('drop-zone-placeholder'));
+  if (ordered.length === 0) return false;
+
+  _waitingCursor = (_waitingCursor + 1) % ordered.length;
+  const target = ordered[_waitingCursor];
+  return focusSessionCard(target.dataset.id);
+}
+
 export function removeSessionCard(sessionId) {
   const ui = sessionUIs.get(sessionId);
   if (!ui) return;
 
   closeDebugOverlay(ui);
+  closePeekFor(sessionId);
   sessionUIs.delete(sessionId);
   if (getMaximizedSession() === sessionId) exitMaximizeMode();
   forgetSessionLayout(sessionId);
@@ -340,6 +403,9 @@ export function applyState(sessionId, state) {
 
   const prevState = ui.currentState;
   ui.currentState = state;
+  // Reset the time-in-state clock on a real transition so the rail pill's elapsed
+  // readout measures the current state, not the whole session age.
+  if (state !== prevState) ui.stateSince = Date.now();
 
   // Leaving DORMANT: lazy-set up the terminal and promote the card from
   // the minimized bar to the main grid (if not already done optimistically).
@@ -366,6 +432,17 @@ export function applyState(sessionId, state) {
     ui.badge = fresh;
   }
   ui.card.dataset.state = state;
+
+  // Recently-completed pill: if a session reaches a notable terminal / turn-complete
+  // state while collapsed in the rail, mark it unseen so the pill keeps a gentle
+  // attention pulse until the operator looks. Peeking or restoring it clears the
+  // mark (rail.js). Only set it for a card that is currently minimized: a session
+  // that finishes on the grid was already seen.
+  if (state !== prevState
+      && (state === STATES.DONE || state === STATES.FAILED || state === STATES.COMPLETE)
+      && ui.card.classList.contains('minimized')) {
+    ui.card.dataset.unseen = '';
+  }
 
   updateButtonVisibility(ui);
 
@@ -396,6 +473,10 @@ export function applyState(sessionId, state) {
 
   updateAggregateStatus();
 
+  // Keep the minimized rail pill (badge text, colour, aria-label, elapsed) in sync
+  // with the new state. No-op when the card is on the grid.
+  refreshPill(ui);
+
   // Auto-wake: sleeping session received a non-sleep-eligible state (server
   // rejected sleep or transitioned back to active before sleep arrived).
   // Resync client by recreating terminal + data WS.
@@ -408,6 +489,10 @@ export function applyState(sessionId, state) {
       && ui.card.classList.contains('minimized')
       && SLEEP_ELIGIBLE.includes(state)) {
     sleepSession(sessionId);
+    // If this session was being peeked, sleeping just disposed its live terminal;
+    // close the peek so the (now empty) terminal element is returned to its card
+    // before the tray is removed.
+    closePeekFor(sessionId);
   }
 }
 

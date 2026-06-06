@@ -446,15 +446,25 @@ body {
   display: none;
 }
 
-/* ── Minimize/collapse ───────────────────────────────────── */
+/* ── Minimize / rail pill ─────────────────────────────────────
+   A minimized card becomes a status pill on the bottom rail. The old treatment
+   collapsed seven states into one grey dot; the pill now states its status
+   outright: [state badge] name [time-in-state]. State reads through the badge
+   glyph + UPPERCASE label + colour (never hue alone), so RUNNING vs IDLE vs
+   EXITED are all distinct at a glance. Escalation stays earned (WAITING breathes,
+   FAILED holds the generic ring, the rest are quiet). The whole pill is a button
+   that flies up a peek tray (rail.js). */
 .session-card.minimized {
   border-radius: var(--radius);
-  opacity: 0.85;
+  opacity: 0.9;
   flex: none;
   align-self: center;
   height: auto;
   min-height: 0;
-  width: 120px;
+  width: auto;
+  min-width: 152px;
+  max-width: 240px;
+  cursor: pointer;
   transition: opacity var(--transition-fast), border-color var(--transition-med);
 }
 
@@ -463,104 +473,106 @@ body {
   border-color: var(--border-hover);
 }
 
+/* Keyboard-first: the pill is focusable (roving tabindex, rail.js). Same 2px
+   accent ring with offset the rest of the app uses. */
+.session-card.minimized:focus-visible {
+  outline: none;
+  opacity: 1;
+  box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
+}
+
 .session-card.minimized .terminal-wrap {
   display: none;
 }
 
 .session-card.minimized .session-card-header {
   border-bottom: none;
-  padding: 2px 8px;
+  padding: 5px 9px;
   min-height: 0;
   height: auto;
   line-height: 1.2;
-  gap: 6px;
+  gap: 7px;
   align-items: center;
 }
 
+/* Pill order: state first (triage), then name, then elapsed. */
+.session-card.minimized .session-badge { order: -1; }
+.session-card.minimized .session-name  { order: 0; }
+.session-card.minimized .rail-elapsed  { order: 1; }
+
+/* Name: the middle, truncating element. */
 .session-card.minimized .session-name {
-  flex: 1;
+  flex: 1 1 auto;
   font-size: 11px;
-  text-align: center;
+  text-align: left;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
+  color: var(--text);
 }
 
-/* Invisible phantom on the right side of minimized cards: mirrors the
-   status dot's width so the name centers between two equal reserves
-   instead of being pushed right by the dot alone. */
-.session-card.minimized .session-card-header::after {
-  content: '';
-  width: 8px;
+/* Show the badge on the pill (the legibility fix). Compact: drop the 11ch reserve
+   the header badge carries so the pill sizes to its content. */
+.session-card.minimized .state-badge {
+  display: inline-flex;
+  padding: 0;
+  font-size: 10px;
   flex-shrink: 0;
 }
+.session-card.minimized .state-glyph { font-size: 10px; }
+.session-card.minimized .session-badge .state-label { min-width: 0; }
 
-/* Hide all tags when minimized — state is conveyed by border color (and WAITING glow). */
-.session-card.minimized .state-badge,
-.session-card.minimized .perms-badge,
-.session-card.minimized .worktree-badge,
-.session-card.minimized .session-header-spacer {
+/* The elapsed readout exists only on the rail; on the grid the header shows the
+   full badge, so keep this span out of the grid header entirely (it would
+   otherwise display stale text after a card is expanded). */
+.session-card:not(.minimized) .rail-elapsed {
   display: none;
 }
 
+/* Time-in-state: trailing, muted, tabular so the digits don't jitter as they tick. */
+.session-card.minimized .rail-elapsed {
+  display: inline-block;
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+/* Settled states (IDLE/COMPLETE/etc.) clear the elapsed text, so drop the empty
+   span so it leaves no trailing gap in the pill. */
+.session-card.minimized .rail-elapsed:empty {
+  display: none;
+}
 
+/* Everything else collapses on the pill. The drag handle is gone (drag still works
+   from the pill body via the header mousedown); restore lives in the peek tray. */
+.session-card.minimized .btn-minimize,
+.session-card.minimized .perms-badge,
+.session-card.minimized .worktree-badge,
+.session-card.minimized .session-header-spacer,
 .session-card.minimized .session-actions {
   display: none;
 }
 
-
-/* ── Minimized state signals ─────────────────────────────────
-   Only two states matter at this size: WAITING (needs input) and
-   RUNNING (working). Everything else gets a quiet neutral dot.
-   Color-blind safe: amber + motion vs. green + steady — distinct
-   on hue, saturation, AND animation. */
-
-/* Repurpose btn-minimize as a state dot when minimized.
-   Sits in flex flow on the left; the header's ::after phantom
-   mirrors its width on the right so the name centers symmetrically. */
-.session-card.minimized .btn-minimize {
-  font-size: 0;
-  width: 8px;
-  height: 8px;
-  padding: 0;
-  border-radius: 50%;
-  background: var(--text-dim);
-  opacity: 0.45;
-  flex-shrink: 0;
-  transition: background var(--transition-fast),
-              opacity var(--transition-fast),
-              box-shadow var(--transition-fast);
-}
-
-.session-card.minimized:hover .btn-minimize {
-  opacity: 0.75;
-}
-
-/* RUNNING — alive, quiet. Saturated border, no animation. */
+/* ── Minimized state escalation ───────────────────────────────
+   Quiet by default; loud only on change. RUNNING takes a steady saturated border
+   (its badge glyph is already green); WAITING breathes; FAILED rides the generic
+   steady ring. Color-blind safe: glyph + label + colour, and for WAITING colour
+   and motion together. */
 .session-card.minimized[data-state="RUNNING"] {
   opacity: 1;
-  border-color: color-mix(in oklab, var(--state-running) 55%, transparent);
+  border-color: color-mix(in oklab, var(--state-running) 45%, transparent);
 }
 
-.session-card.minimized[data-state="RUNNING"] .btn-minimize {
-  background: var(--state-running);
-  opacity: 1;
-  box-shadow: 0 0 5px var(--state-running-glow);
-}
-
-/* WAITING — needs input. Loud: full border, tint, breathing glow,
-   pulsing dot. The one place the operator should look. */
 .session-card.minimized[data-state="WAITING"] {
   opacity: 1;
   border-color: var(--state-waiting);
   background: color-mix(in oklab, var(--state-waiting) 12%, var(--bg-card));
 }
 
-/* Breathing glow as a composited opacity pulse (was an infinite box-shadow
-   keyframe that re-rastered every frame). The inset shadow stays inside the
-   card's overflow:hidden box; only `opacity` animates, so the compositor
-   handles it with zero per-frame raster. */
+/* Breathing glow: composited opacity pulse (only opacity animates, zero per-frame
+   raster). The global prefers-reduced-motion block neutralizes it. */
 .session-card.minimized[data-state="WAITING"]::before {
   content: '';
   position: absolute;
@@ -572,47 +584,161 @@ body {
   animation: minimized-waiting-breath 1.8s ease-in-out infinite;
 }
 
-/* The full-size ::after glow is sized for big cards — drop it here. */
+/* The full-size ::after glow is sized for big cards, so drop it on the pill. */
 .session-card.minimized[data-state="WAITING"]::after {
   content: none;
 }
 
-.session-card.minimized[data-state="WAITING"] .btn-minimize {
-  background: var(--state-waiting);
-  opacity: 1;
-  /* Transform-only now (composited); the glow moved to ::before below. */
-  animation: minimized-waiting-dot 1.2s ease-in-out infinite;
-}
-
-/* Dot glow as a composited opacity pulse (was a box-shadow keyframe). Scales
-   with the dot since it is a child of the transformed button. */
-.session-card.minimized[data-state="WAITING"] .btn-minimize::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  pointer-events: none;
-  box-shadow: 0 0 10px color-mix(in oklab, var(--state-waiting) 55%, transparent);
-  animation: minimized-waiting-dot-glow 1.2s ease-in-out infinite;
-}
-
-/* Composited: only opacity animates here, so the breathing glow never
-   re-rasters. */
+/* Composited: only opacity animates, so the breathing glow never re-rasters. */
 @keyframes minimized-waiting-breath {
   0%, 100% { opacity: 0.4; }
   50%      { opacity: 1; }
 }
 
-/* Composited: transform only. */
-@keyframes minimized-waiting-dot {
-  0%, 100% { transform: scale(1); }
-  50%      { transform: scale(1.35); }
+/* ── Recently completed, unseen ───────────────────────────────
+   A session that finished (DONE / FAILED) or completed a turn (COMPLETE) while
+   collapsed keeps a gentle attention pulse on its pill until the operator peeks
+   or restores it (rail.js clears data-unseen). Colour follows the result. The
+   ::after base opacity stays visible so prefers-reduced-motion shows a steady ring
+   instead of nothing. This is the earned-signal rule: it stops the moment it is
+   acknowledged, so the glow always means "a result you have not looked at". */
+.session-card.minimized[data-unseen] { opacity: 1; }
+.session-card.minimized[data-unseen][data-state="DONE"]     { --unseen: var(--state-done); }
+.session-card.minimized[data-unseen][data-state="COMPLETE"] { --unseen: var(--state-complete); }
+.session-card.minimized[data-unseen][data-state="FAILED"]   { --unseen: var(--state-failed); }
+.session-card.minimized[data-unseen] {
+  border-color: color-mix(in oklab, var(--unseen, var(--accent)) 60%, transparent);
+}
+.session-card.minimized[data-unseen]::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  /* Inset ring (stays inside the card's clip, like the completion flash and the
+     WAITING breath) so it is never clipped and keeps the flat, no-outer-neon feel. */
+  box-shadow: inset 0 0 0 1px var(--unseen, var(--accent)),
+              inset 0 0 12px color-mix(in oklab, var(--unseen, var(--accent)) 40%, transparent);
+  opacity: 0.7;
+  animation: rail-unseen-pulse 2.2s ease-in-out infinite;
+}
+@keyframes rail-unseen-pulse {
+  0%, 100% { opacity: 0.3; }
+  50%      { opacity: 1; }
 }
 
-/* Composited: opacity only — the dot's glow pulse. */
-@keyframes minimized-waiting-dot-glow {
-  0%, 100% { opacity: 0.55; }
-  50%      { opacity: 1; }
+/* ── Rail peek tray ───────────────────────────────────────────
+   Flies up off a minimized pill (rail.js positions it, position:fixed). A true
+   overlay off the plane, so it earns the violet-tinted shadow-lg; chrome stays
+   flat at rest elsewhere. Live sessions get their real terminal reparented into
+   .rail-peek-term; finished/dormant ones get a status line instead. */
+.rail-peek {
+  position: fixed;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 240px;
+  /* Sizes to the (real, unresized) terminal width up to the viewport. */
+  max-width: 92vw;
+  padding: 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-hover);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  animation: rail-peek-in 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes rail-peek-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.rail-peek-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.rail-peek-head .state-badge { padding: 0; flex-shrink: 0; }
+.rail-peek-head .state-label { min-width: 0; }
+
+.rail-peek-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-head);
+  letter-spacing: 0.02em;
+}
+
+.rail-peek-time {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The live terminal is shown at its real (grid) size, never resized. The slot
+   caps the height (set inline from the room above the pill) and pins the terminal
+   to the bottom, so the live input row is always visible and only old scrollback
+   clips at the top. Not resizing is what keeps a restored session from corrupting. */
+.rail-peek-term {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  overflow: hidden;
+  border: 1px solid var(--border-dim);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+}
+.rail-peek-term .terminal-wrap {
+  display: block;
+  flex: 0 0 auto;
+}
+
+.rail-peek-status {
+  font-size: 12px;
+  color: var(--text-dim);
+  padding: 2px 0 4px;
+}
+
+.rail-peek-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.rail-peek-actions button {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--accent);
+  background: transparent;
+  border: 1px solid color-mix(in oklab, var(--accent) 45%, transparent);
+  border-radius: var(--radius);
+  padding: 6px 14px;
+  cursor: pointer;
+  transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
+}
+.rail-peek-actions button:hover {
+  background: color-mix(in oklab, var(--accent) 14%, transparent);
+}
+.rail-peek-actions button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
+}
+.rail-peek-actions .rail-peek-danger {
+  color: var(--text-dim);
+  border-color: var(--border);
+}
+.rail-peek-actions .rail-peek-danger:hover {
+  color: var(--state-failed);
+  border-color: color-mix(in oklab, var(--state-failed) 55%, var(--border));
+  background: color-mix(in oklab, var(--state-failed) 12%, transparent);
 }
 
 /* Completion flash — plays once on DONE/FAILED transition */
@@ -711,10 +837,6 @@ body {
   border-color: color-mix(in oklab, var(--state-dormant) 30%, transparent);
 }
 
-.session-card.minimized[data-state="DORMANT"] .btn-minimize {
-  background: var(--state-dormant);
-}
-
 .session-card[data-state="COMPLETE"] {
   border-color: color-mix(in oklab, var(--state-complete) 30%, transparent);
   box-shadow: 0 0 0 1px color-mix(in oklab, var(--state-complete) 15%, transparent), 0 0 16px color-mix(in oklab, var(--state-complete) 8%, transparent);
@@ -784,6 +906,44 @@ body {
 
 .session-card[data-worktree] .worktree-badge {
   display: inline-flex;
+}
+
+/* Post-turn auto-fix marker. Hidden until the card carries data-pt (toggled live
+   by setSessionPostTurn on a post-turn-result delta). "fixed" = files were
+   auto-fixed (success tone); "flagged" = report-mode findings (warning tone).
+   Reserved-height inline-flex keeps the header dimensionally stable on flip. */
+.post-turn-badge {
+  display: none;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 0 6px;
+  border-radius: 2px;
+  flex-shrink: 0;
+  line-height: 18px;
+}
+
+.session-card[data-pt] .post-turn-badge {
+  display: inline-flex;
+}
+
+.session-card[data-pt="fixed"] .post-turn-badge {
+  color: var(--color-success, #57c98b);
+  border: 1px solid color-mix(in srgb, var(--color-success, #57c98b) 55%, transparent);
+  background: color-mix(in srgb, var(--color-success, #57c98b) 14%, transparent);
+}
+
+.session-card[data-pt="flagged"] .post-turn-badge {
+  color: var(--color-warning, #e3b341);
+  border: 1px solid color-mix(in srgb, var(--color-warning, #e3b341) 55%, transparent);
+  background: color-mix(in srgb, var(--color-warning, #e3b341) 14%, transparent);
+}
+
+.session-card.minimized .post-turn-badge {
+  display: none;
 }
 
 /* ── Card header ──────────────────────────────────────────── */

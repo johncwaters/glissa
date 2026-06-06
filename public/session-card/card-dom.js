@@ -144,7 +144,18 @@ export function buildCardDOM(sessionId, sessionName, initialState, options = {})
   const worktreeBadge = el('span', 'worktree-badge', 'worktree');
   worktreeBadge.title = 'Running in a linked git worktree';
   worktreeBadge.setAttribute('aria-label', 'Linked git worktree');
+  // Post-turn auto-fix marker. Hidden unless the card carries data-pt (set live by
+  // setSessionPostTurn on a post-turn-result delta). Text/title are filled there.
+  const postTurnBadge = el('span', 'post-turn-badge', '');
+  postTurnBadge.setAttribute('aria-hidden', 'true');
   const spacer = el('span', 'session-header-spacer');
+
+  // Time-in-current-state readout. Hidden in the grid (CSS); shown only on the
+  // minimized rail pill, where it answers "how long has this been waiting / working".
+  // Ticked by rail.js. aria-hidden so a per-second text change never spams a screen
+  // reader (the pill's aria-label carries the state name instead).
+  const railElapsed = el('span', 'rail-elapsed');
+  railElapsed.setAttribute('aria-hidden', 'true');
 
   // Action buttons
   const actions = el('div', 'session-actions');
@@ -182,16 +193,16 @@ export function buildCardDOM(sessionId, sessionName, initialState, options = {})
   // the persistent tags + actions in the RIGHT zone never reflow when status
   // changes. Combined with the reserved-width badge slot (see .state-label), the
   // header is dimensionally rigid across all states.
-  const headerChildren = [btnMinimize, nameEl, badge, spacer, worktreeBadge];
+  const headerChildren = [btnMinimize, nameEl, badge, spacer, worktreeBadge, postTurnBadge];
   if (permsBadge) headerChildren.push(permsBadge);
-  headerChildren.push(actions);
+  headerChildren.push(railElapsed, actions);
   header.append(...headerChildren);
 
   const termWrap = el('div', 'terminal-wrap');
 
   card.append(header, termWrap);
 
-  return { card, header, badge, nameEl, btnRename, btnRestart, btnRemove, btnMinimize, btnMaximize, btnDebug, btnOverflow, overflowMenu, termWrap };
+  return { card, header, badge, nameEl, railElapsed, btnRename, btnRestart, btnRemove, btnMinimize, btnMaximize, btnDebug, btnOverflow, overflowMenu, termWrap };
 }
 
 // ── Inline rename ────────────────────────────────────────────

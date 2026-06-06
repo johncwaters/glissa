@@ -11,7 +11,7 @@ import { applyHealthSnapshot, mountHealthMonitor } from './health-monitor.js';
 import { initNotifications, showDesktopNotification } from './notifications.js';
 import { handleDebugStateRefresh, handleDebugStateResponse } from './session-card/card-dom.js';
 import { exitMaximizeMode, isMaximizeActive, setLayoutMode } from './session-card/layout.js';
-import { applyState, applyTerminalSettings, createSessionCard, focusSessionCard, getSessionCount, handleSessionsReordered, hasSession, removeSessionCard, renameSessionCard, setSessionWorktree, updateAggregateStatus } from './session-card/lifecycle.js';
+import { applyState, applyTerminalSettings, createSessionCard, focusNextWaiting, focusSessionCard, getSessionCount, handleSessionsReordered, hasSession, removeSessionCard, renameSessionCard, setSessionPostTurn, setSessionWorktree, updateAggregateStatus } from './session-card/lifecycle.js';
 import { reconnectDataWs } from './session-card/terminal.js';
 import { showErrorToast } from './session-card/toast.js';
 import { handleTeamMessage, mountTeamsView, setTabActivityCallback } from './teams-panel.js';
@@ -161,6 +161,7 @@ const messageHandlers = {
   'session-renamed':    (msg) => { if (knownProjects.has(msg.id)) knownProjects.set(msg.id, msg.newName); renameSessionCard(msg.id, msg.newName); },
   'session-modified':   (msg) => { if (!msg.ephemeral) knownProjects.set(msg.id, msg.session); removeSessionCard(msg.id); clearEmptyPlaceholder(); createSessionCard(msg.id, msg.session, msg.state, { skipPerms: !!msg.skipPerms, worktree: !!msg.worktree }); autoLayout(); },
   'session-git':        (msg) => setSessionWorktree(msg.id, !!msg.worktree),
+  'post-turn-result':   (msg) => setSessionPostTurn(msg.id, msg),
   'sessions-reordered': (msg) => handleSessionsReordered(msg.order),
   'debug-state-response': (msg) => handleDebugStateResponse(msg),
   'notify':             (msg) => showDesktopNotification(msg),
@@ -363,10 +364,13 @@ function autoLayout() {
 }
 
 // ── Keyboard shortcuts (chrome-level) ─────────────────────────
-// Alt+0 opens a new session; Alt+1..9 jumps to the Nth session card. Guarded so
-// they never reach a focused xterm — its key handling lives in session-card.js
-// and forwards most keys to the PTY — so these fire only when the operator is on
-// the dashboard chrome, not typing into a session.
+// Alt+0 opens a new session; Alt+1..9 jumps to the Nth session card; Alt+W jumps
+// to the next session that needs input (triage). The Alt+<key> namespace is used
+// on purpose: it collides with neither browser shortcuts (which switch tabs on
+// Ctrl+digit, not Alt) nor VS Code defaults (which are Ctrl / Ctrl+Shift / F-key /
+// chord based, and use Ctrl+1..3 for editor groups). Guarded so they never reach a
+// focused xterm — its key handling lives in terminal.js and forwards most keys to
+// the PTY — so these fire only when the operator is on the dashboard chrome.
 function isTypingContext() {
   const a = document.activeElement;
   if (!a) return false;
@@ -381,6 +385,11 @@ document.addEventListener('keydown', (e) => {
   if (e.key === '0') {
     e.preventDefault();
     document.getElementById('btn-add-session-header')?.click();
+    return;
+  }
+  if (e.key === 'w' || e.key === 'W') {
+    e.preventDefault();
+    focusNextWaiting();
     return;
   }
   if (e.key >= '1' && e.key <= '9') {
