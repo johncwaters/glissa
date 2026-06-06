@@ -22,7 +22,8 @@ detection/
   settings-injector.js # Per-session `--settings` file with HTTP hooks (token in URL)
   replay.js            # Version-aware replay harness (drives recordings through detection)
 notification-manager.js  # Notification lifecycle state machine
-channels/toast.js  # Windows toast (BurntToast) delivery
+channels/web-notification.js  # PRIMARY: broadcasts `notify` over control WS; browser raises native Notification (Windows Action Center)
+channels/toast.js  # Opt-in fallback (config.osToast): Windows OS toast via BurntToast/msg; off by default (unreliable across machines)
 vite.config.js     # Vite frontend build config + backend plugin (ESM)
 public/
   index.html       # Dashboard shell (Tailwind utility classes)

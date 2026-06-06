@@ -1,11 +1,11 @@
 // ── UI preferences ───────────────────────────────────────────
 // Persists browser-side UI state to localStorage.
-// Schema: { minimized: string[], soundEnabled: boolean, soundId: string, themeId: string }
+// Schema: { minimized: string[], soundEnabled: boolean, soundId: string, themeId: string, notificationsEnabled: boolean }
 
 import { getJSON, setJSON } from './local-store.js';
 
 const STORAGE_KEY = 'glissa-ui-prefs';
-const DEFAULT_PREFS = { minimized: [], soundEnabled: true, soundId: 'coins', themeId: 'phyrexian' };
+const DEFAULT_PREFS = { minimized: [], soundEnabled: true, soundId: 'coins', themeId: 'phyrexian', notificationsEnabled: true };
 
 function load() {
   const prefs = getJSON(STORAGE_KEY, DEFAULT_PREFS);
@@ -13,6 +13,7 @@ function load() {
   if (typeof prefs.soundEnabled !== 'boolean') prefs.soundEnabled = true;
   if (typeof prefs.soundId !== 'string') prefs.soundId = 'coins';
   if (typeof prefs.themeId !== 'string') prefs.themeId = 'golgari';
+  if (typeof prefs.notificationsEnabled !== 'boolean') prefs.notificationsEnabled = true;
   return prefs;
 }
 
@@ -52,6 +53,16 @@ export function getSoundId() {
 export function setSoundId(id) {
   const prefs = load();
   prefs.soundId = id;
+  save(prefs);
+}
+
+export function isNotificationsEnabled() {
+  return load().notificationsEnabled;
+}
+
+export function setNotificationsEnabled(enabled) {
+  const prefs = load();
+  prefs.notificationsEnabled = enabled;
   save(prefs);
 }
 

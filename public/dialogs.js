@@ -5,9 +5,10 @@ import { playAlertSound, SOUND_OPTIONS } from './alert-sound.js';
 import addSessionHTML from './components/add-session-dialog.html?raw';
 import settingsHTML from './components/settings-dialog.html?raw';
 import { sendControlMsg, sendControlRequest } from './control-ws.js';
+import { ensureNotificationPermission, notificationsSupported } from './notifications.js';
 import { countSessionsByName, suggestSessionName } from './session-card/naming.js';
 import { applyTheme, getThemeList } from './theme.js';
-import { getSoundId, getThemeId, setSoundId, setThemeId } from './ui-prefs.js';
+import { getSoundId, getThemeId, isNotificationsEnabled, setNotificationsEnabled, setSoundId, setThemeId } from './ui-prefs.js';
 
 // ── Shared dialog ARIA + focus trap helpers ──────────────────
 
@@ -243,6 +244,8 @@ export function createSettingsDialog() {
   const cursorBlinkCheckbox = dialog.querySelector('#settings-cursor-blink');
   const debugModeCheckbox = dialog.querySelector('#settings-debug-mode');
   const soundSelect = dialog.querySelector('#settings-sound');
+  const notificationsCheckbox = dialog.querySelector('#settings-notifications');
+  const notificationsHint = dialog.querySelector('#settings-notifications-hint');
   const editorCommandInput = dialog.querySelector('#settings-editor-command');
   const themeSelect = dialog.querySelector('#settings-theme');
   const errorEl = dialog.querySelector('#settings-error');
@@ -261,6 +264,29 @@ export function createSettingsDialog() {
   soundSelect.addEventListener('change', () => {
     setSoundId(soundSelect.value);
     playAlertSound(soundSelect.value);
+  });
+
+  // Desktop notifications (client-side pref, applied immediately like sound/theme)
+  const DEFAULT_NOTIF_HINT = 'Native browser notification when a session needs attention while the dashboard is in the background';
+  function refreshNotificationsHint() {
+    if (!notificationsSupported()) {
+      notificationsHint.textContent = 'This browser does not support desktop notifications.';
+    } else if (notificationsCheckbox.checked && Notification.permission === 'denied') {
+      notificationsHint.textContent = 'Blocked by the browser. Allow notifications for this site to enable them.';
+    } else {
+      notificationsHint.textContent = DEFAULT_NOTIF_HINT;
+    }
+  }
+  notificationsCheckbox.checked = isNotificationsEnabled() && notificationsSupported();
+  notificationsCheckbox.disabled = !notificationsSupported();
+  refreshNotificationsHint();
+
+  notificationsCheckbox.addEventListener('change', async () => {
+    setNotificationsEnabled(notificationsCheckbox.checked);
+    if (notificationsCheckbox.checked) {
+      await ensureNotificationPermission(); // real user gesture: reliable prompt
+    }
+    refreshNotificationsHint();
   });
 
   // Populate theme picker

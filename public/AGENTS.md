@@ -17,8 +17,9 @@ Browser-side dashboard for Glissa. Provides real-time terminal streaming via xte
 | `control-ws.js` | Control WebSocket client — connection management, auto-reconnect (3s), request/response with requestId correlation and 5s timeout |
 | `dialogs.js` | Add Session and Settings dialog factories — repo root scanning, project picker, validation, theme picker, sound selector |
 | `theme.js` | Theme system — defines color palettes (Golgari, Midnight, Phyrexian, Compleated), applies CSS custom properties on `:root`, derives xterm.js terminal themes from CSS variables |
-| `ui-prefs.js` | UI preference persistence (localStorage) — minimized sessions, sound enabled/id, theme id. Prunes stale session references |
+| `ui-prefs.js` | UI preference persistence (localStorage) — minimized sessions, sound enabled/id, theme id, notifications enabled. Prunes stale session references |
 | `alert-sound.js` | Notification sounds — audio file playback (.ogg) with synth beep fallback via Web Audio API |
+| `notifications.js` | Desktop notifications via the browser Notifications API. Handles `notify` control messages (raises a native Notification routed to the Windows Action Center), permission flow, and the `notificationsEnabled` pref. Replaces the server-side BurntToast toast path |
 | `local-store.js` | Generic localStorage wrapper — JSON get/set with graceful degradation for private browsing |
 | `dom-helpers.js` | Shared `el(tag, className, text)` and `escapeHtml()` helpers for programmatic DOM creation |
 | `health-monitor.js` | Footer panel rendering memory + leak telemetry from server `health-snapshot` messages — compact summary, click to expand into a detailed panel |

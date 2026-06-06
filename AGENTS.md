@@ -136,7 +136,7 @@ IDLE -> PENDING -> DELIVERED <-> ESCALATED -> ACKNOWLEDGED -> IDLE
 - **DELIVERED <-> ESCALATED** ping-pong for `waiting` category (escalation timer)
 - **COMPLETE/FAILED** categories are one-shot (no escalation)
 - Focus suppression and category debounce checked in PENDING entry hook
-- Delivery delegates to registered channels (`channels/toast.js`)
+- Delivery delegates to registered channels. Default: `channels/web-notification.js` (broadcasts a `notify` control message; the dashboard raises a native browser Notification routed to the Windows Action Center). `channels/toast.js` (BurntToast/`msg` OS toast) is opt-in via `config.osToast` and off by default because it was unreliable across machines.
 
 State machine defined in `shared/notification-states.js`, mirroring the session state pattern.
 

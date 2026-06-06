@@ -30,6 +30,7 @@ const { createConfigStore, generateProjectId, ensureProjectIds } = require('./co
 const { registerControlHandlers } = require('./control-handlers');
 const { NotificationManager } = require('./notification-manager');
 const { createToastChannel } = require('./channels/toast');
+const { createWebNotificationChannel } = require('./channels/web-notification');
 const { createRecorder } = require('./session-recorder');
 const { createWsSender } = require('./ws-sender');
 const { HookRouter } = require('./detection/hook-source');
@@ -278,7 +279,17 @@ function createBackend(httpServer, options = {}) {
     escalationIntervalMs: ESCALATION_INTERVAL_MS,
     debounceMs: config.notifyDebounceMs || 3000,
   });
-  notificationManager.registerChannel('toast', createToastChannel());
+  // Primary channel: native browser notifications over the existing control WS.
+  // No external deps, no PowerShell, works on every machine that can open the
+  // dashboard (the prerequisite for using Glissa at all).
+  notificationManager.registerChannel('web', createWebNotificationChannel(broadcastControl));
+  // Best-effort OS toast (BurntToast/msg). Off by default: it depends on an
+  // unbundled PowerShell module and a flaky `msg *` fallback, so it failed
+  // silently on most machines. Opt in via config.osToast for the edge case
+  // where no dashboard tab is open.
+  if (config.osToast) {
+    notificationManager.registerChannel('toast', createToastChannel());
+  }
 
   // --- Client focus tracking (suppress notifications when dashboard is visible) ---
 

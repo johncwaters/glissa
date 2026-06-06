@@ -8,6 +8,7 @@ import { STATES } from '/shared/states.mjs';
 import { connectControl, disableReconnect, onControlMessage, sendControlMsg, sendControlRequest, setConnectionStateCallback } from './control-ws.js';
 import { createAddSessionDialog, createConfirmDialog, createSettingsDialog } from './dialogs.js';
 import { applyHealthSnapshot, mountHealthMonitor } from './health-monitor.js';
+import { initNotifications, showDesktopNotification } from './notifications.js';
 import { handleDebugStateRefresh, handleDebugStateResponse } from './session-card/card-dom.js';
 import { exitMaximizeMode, isMaximizeActive, setLayoutMode } from './session-card/layout.js';
 import { applyState, applyTerminalSettings, createSessionCard, focusSessionCard, getSessionCount, handleSessionsReordered, hasSession, removeSessionCard, renameSessionCard, setSessionWorktree, updateAggregateStatus } from './session-card/lifecycle.js';
@@ -162,6 +163,7 @@ const messageHandlers = {
   'session-git':        (msg) => setSessionWorktree(msg.id, !!msg.worktree),
   'sessions-reordered': (msg) => handleSessionsReordered(msg.order),
   'debug-state-response': (msg) => handleDebugStateResponse(msg),
+  'notify':             (msg) => showDesktopNotification(msg),
   'error':              (msg) => showErrorToast(msg.message),
   'session-error':      (msg) => showErrorToast(`${msg.session}: ${msg.message}`),
   'settings-updated':   (msg) => { if (msg.settings) applyTerminalSettings(msg.settings); },
@@ -410,6 +412,10 @@ document.addEventListener('visibilitychange', sendFocusState);
 // ── Health monitor ──────────────────────────────────────────
 
 mountHealthMonitor(document.getElementById('health-footer-mount'));
+
+// ── Desktop notifications ────────────────────────────────────
+
+initNotifications();
 
 // ── Boot ─────────────────────────────────────────────────────
 

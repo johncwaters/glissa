@@ -17,6 +17,7 @@
     "sessions.js",
     "notification-manager.js",
     "channels/toast.js",
+    "channels/web-notification.js",
     "detection/",
     "session-recorder.js",
     "config-store.js",
