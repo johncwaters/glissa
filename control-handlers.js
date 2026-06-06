@@ -117,19 +117,20 @@ function registerControlHandlers(controlWss, deps) {
       return;
     }
 
-    // SECURITY: This flag spawns Claude with --dangerously-skip-permissions,
-    // allowing unrestricted file writes and shell commands without confirmation.
-    // Glissa's control WebSocket has no authentication — it trusts all localhost
-    // connections. Do not expose Glissa beyond localhost without adding auth.
-    const skipPerms = !!msg.dangerouslySkipPermissions;
+    // SECURITY: sessions run with --dangerously-skip-permissions BY DEFAULT (the product default),
+    // allowing unrestricted file writes and shell commands without confirmation. The dialog sends
+    // dangerouslySkipPermissions:false only when the operator opts into prompts. Glissa's control
+    // WebSocket has no authentication (it trusts all localhost connections), so do not expose Glissa
+    // beyond localhost without adding auth.
+    const skipPerms = msg.dangerouslySkipPermissions !== false; // default YOLO; false === opt-in to prompts
     const project = { id: generateProjectId(), name, path: resolvedPath };
-    if (skipPerms) project.dangerouslySkipPermissions = true;
+    if (!skipPerms) project.dangerouslySkipPermissions = false; // persist the opt-out so reloads keep it
 
     const freshConfig = configStore.save(cfg => {
       cfg.projects.push(project);
     });
     if (freshConfig) applyConfigReload(freshConfig);
-    console.log(`[control] Added session via UI: ${name}${skipPerms ? ' (skip permissions)' : ''}`);
+    console.log(`[control] Added session via UI: ${name}${skipPerms ? ' (skip permissions)' : ' (permission prompts)'}`);
   }
 
   function handleRemoveSession(msg, ws) {

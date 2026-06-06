@@ -96,12 +96,17 @@ function createBackend(httpServer, options = {}) {
   // Clear settings dirs orphaned by prior crashes (best-effort).
   try { sweepOrphans(); } catch { /* ignore */ }
 
+  // Product default: sessions run YOLO (--dangerously-skip-permissions) unless a project record
+  // explicitly opts out with `dangerouslySkipPermissions: false`. Absence means YOLO. This is the one
+  // place the default is decided; diffProjects() reuses it so a reload sees no phantom perms change.
+  const projectSkipPerms = (project) => project.dangerouslySkipPermissions !== false;
+
   function makeSession(project, cfg) {
     const session = new Session({
       id: project.id,
       name: project.name,
       path: project.path,
-      dangerouslySkipPermissions: !!project.dangerouslySkipPermissions,
+      dangerouslySkipPermissions: projectSkipPerms(project),
       replayBufferKB: cfg.replayBufferKB,
       hookRouter,
       getHookPort,
@@ -613,7 +618,7 @@ function createBackend(httpServer, options = {}) {
       if (newMap.has(id)) {
         const newP = newMap.get(id);
         const pathChanged = newP.path !== sess.path;
-        const permsChanged = !!newP.dangerouslySkipPermissions !== sess.dangerouslySkipPermissions;
+        const permsChanged = projectSkipPerms(newP) !== sess.dangerouslySkipPermissions;
         if (pathChanged || permsChanged) {
           modified.push(newP);
         } else if (newP.name !== sess.name) {

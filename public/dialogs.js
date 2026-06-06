@@ -66,7 +66,7 @@ export function createAddSessionDialog() {
   const advancedPanel = dialog.querySelector('#add-session-advanced');
   const nameInput = dialog.querySelector('#add-session-name');
   const pathInput = dialog.querySelector('#add-session-path');
-  const skipPermsCheckbox = dialog.querySelector('#add-session-skip-perms');
+  const requirePermsCheckbox = dialog.querySelector('#add-session-require-perms');
   const errorEl = dialog.querySelector('#add-session-error');
   const btnCancel = dialog.querySelector('#add-session-cancel');
   const btnConfirm = dialog.querySelector('#add-session-confirm');
@@ -141,19 +141,8 @@ export function createAddSessionDialog() {
   nameInput.addEventListener('input', () => { pickerEl.selectedIndex = 0; });
   pathInput.addEventListener('input', () => { pickerEl.selectedIndex = 0; });
 
-  // Confirm-on-check for skip-perms — forces deliberate acknowledgment
-  skipPermsCheckbox.addEventListener('change', (e) => {
-    if (!skipPermsCheckbox.checked) return;
-    // Prevent commit until confirmed
-    skipPermsCheckbox.checked = false;
-    createConfirmDialog({
-      title: 'Skip permission prompts?',
-      message: 'This launches Claude with --dangerously-skip-permissions, granting unrestricted filesystem access. Only enable for projects you fully trust.',
-      confirmLabel: 'Enable',
-      danger: true,
-      onConfirm: () => { skipPermsCheckbox.checked = true; },
-    });
-  });
+  // No confirm gate: YOLO is the default, so checking this box is the SAFE direction
+  // (it asks Claude for permission prompts). Nothing dangerous to acknowledge here.
 
   function close() {
     overlay.remove();
@@ -171,7 +160,8 @@ export function createAddSessionDialog() {
 
     // Auto-disambiguate so multiple terminals can target the same project.
     const msg = { type: 'add-session', name: suggestSessionName(name), path: projectPath };
-    if (skipPermsCheckbox.checked) msg.dangerouslySkipPermissions = true;
+    // Default is YOLO; only send the opt-out flag when the operator wants permission prompts.
+    if (requirePermsCheckbox.checked) msg.dangerouslySkipPermissions = false;
     sendControlMsg(msg);
 
     close();

@@ -16,11 +16,10 @@
     <input type="text" class="dialog-input" id="add-session-path" placeholder="C:\Users\...\my-project" autocomplete="off" spellcheck="false">
   </label>
 </div>
-<label class="dialog-checkbox-label dialog-danger-checkbox" id="add-session-skip-perms-label">
-  <input type="checkbox" id="add-session-skip-perms">
-  <span class="dialog-danger-icon" aria-hidden="true">&#9888;</span>
-  <span class="dialog-danger-label">Skip permission prompts</span>
-  <span class="dialog-danger-hint">Grants unrestricted filesystem access via <code>--dangerously-skip-permissions</code>. Use only in trusted projects.</span>
+<label class="dialog-label dialog-checkbox-label" id="add-session-require-perms-label">
+  <input type="checkbox" class="dialog-checkbox" id="add-session-require-perms">
+  <span>Require permission prompts</span>
+  <span class="dialog-hint">Sessions run with <code>--dangerously-skip-permissions</code> by default. Check this to make Claude ask before file writes and shell commands.</span>
 </label>
 <div class="dialog-error" id="add-session-error"></div>
 <div class="dialog-actions">
