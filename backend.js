@@ -22,7 +22,6 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const os = require('node:os');
 const express = require('express');
 const { WebSocketServer } = require('ws');
 const { Session } = require('./sessions');
@@ -118,9 +117,11 @@ function createBackend(httpServer, options = {}) {
       // they never receive this and run as they did before.
       gitWorkspace,
       integrationBranch: cfg.integrationBranch || 'develop',
-      // Stable, project-associated worktree root (empty -> ~/.glissa/worktrees) + the gitignored local
-      // context to bring in, so the spawned agent sees a complete, recognizable project (not Temp).
-      worktreeRoot: cfg.worktreeRoot || path.join(os.homedir(), '.glissa', 'worktrees'),
+      // Worktree root: a `.glissa-worktrees` sibling of THIS repo by default (attached to the repo,
+      // outside its tree — no nested biome/eslint config, clean main git status). A configured
+      // worktreeRoot overrides. Plus the gitignored local context to bring in, so the spawned agent
+      // sees a complete, recognizable project rather than a bare Temp checkout.
+      worktreeRoot: cfg.worktreeRoot || path.join(path.dirname(path.resolve(project.path)), '.glissa-worktrees'),
       worktreeShare: cfg.worktreeShare || DEFAULT_CONFIG.worktreeShare,
     });
     const recorder = createRecorder(project.name, cfg.capture);

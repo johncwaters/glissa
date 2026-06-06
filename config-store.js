@@ -18,7 +18,7 @@ const DEFAULT_CONFIG = {
   // creates it; if it is absent a session stays DORMANT with a notice (it never runs in the real tree).
   integrationBranch: 'develop',
   // Where session worktrees live: a stable, project-associated root (NOT system-temp), kept outside the
-  // repo working tree. Empty -> ~/.glissa/worktrees (resolved in backend).
+  // repo working tree. Empty -> a `.glissa-worktrees` sibling of each repo (resolved in backend).
   worktreeRoot: '',
   // Gitignored local context brought into each session worktree so the agent sees a complete, recognizable
   // project. Dirs are junctioned (shared, never merged); files are copied; committed/absent entries skipped.

@@ -76,8 +76,9 @@ function createGitWorkspace(opts = {}) {
     run(['worktree', 'prune'], projectPath);
     run(['branch', '-D', branch], projectPath); // drop a stale branch left by a crashed prior run
 
-    // A SESSION worktree lives under a stable, project-associated root (worktreeBase, e.g.
-    // ~/.glissa/worktrees) rather than system-temp, so its path is recognizable and persistent. It stays
+    // A SESSION worktree lives under a stable, project-associated root (worktreeBase, e.g. a
+    // `.glissa-worktrees` sibling of the repo) rather than system-temp, so its path is recognizable and
+    // persistent. It stays
     // OUTSIDE the repo working tree (no nested biome/eslint config; the main checkout's git status stays
     // clean). Teams pass no worktreeBase and keep the temp-dir default.
     let wtParent = os.tmpdir();
