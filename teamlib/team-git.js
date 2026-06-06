@@ -108,6 +108,7 @@ function createGitWorkspace(opts = {}) {
       reason = 'detached-head';
     }
 
+    removeNodeModulesJunction(wt);
     run(['worktree', 'remove', '--force', wt], projectPath);
     run(['worktree', 'prune'], projectPath);
     if (merged && workspace.branch) run(['branch', '-D', workspace.branch], projectPath);
@@ -115,10 +116,74 @@ function createGitWorkspace(opts = {}) {
     return { branch: merged ? null : (workspace.branch || null), base: workspace.base || null, merged, committed, reason };
   }
 
+  // Session worktree merge-back into the integration branch (e.g. `develop`). Rebases the session
+  // branch onto the target so a moved target still lands, then fast-forwards the target to it, then
+  // tears the worktree down JUNCTION-SAFELY (the node_modules junction is removed BEFORE
+  // `worktree remove` so git can never follow it into the operator's real node_modules). Synchronous,
+  // so two merge-backs in one process never interleave (the first advances the target before the
+  // second reads it) — that is the whole serialization; no async mutex is needed and a cross-session
+  // FF race cannot occur. A rebase conflict ABORTS and PARKS the branch (worktree + branch preserved)
+  // for a manual merge; nothing is ever auto-resolved. Returns { merged, committed, branch, base,
+  // reason, parked? }; `branch` is null once merged (deleted) or discarded, else the parked branch.
+  function mergeBack({ projectPath, workspace, targetBranch, addPaths = [], message }) {
+    if (!workspace || !workspace.isGit) return { merged: false, committed: false, branch: null, reason: 'not-git' };
+    const wt = workspace.cwd;
+    const branch = workspace.branch;
+    if (!branch) return { merged: false, committed: false, branch: null, reason: 'no-branch' };
+    const target = targetBranch || workspace.base;
+    if (!target || target === 'HEAD') return { merged: false, committed: false, branch, reason: 'no-target', parked: true };
+    // The integration branch must already exist — Glissa never creates it (AC-16).
+    if (!run(['rev-parse', '--verify', '--quiet', `refs/heads/${target}`], projectPath).ok) {
+      return { merged: false, committed: false, branch, base: target, reason: 'no-target-branch', parked: true };
+    }
+
+    // Stage the WHOLE session diff (a session edits arbitrary files) and commit if anything is staged.
+    run(['add', '-A'], wt);
+    const committed = run(['diff', '--cached', '--quiet'], wt).ok === false
+      ? run(['commit', '-m', message || 'glissa session'], wt).ok
+      : false;
+    if (!committed) {
+      // Nothing to merge — discard the worktree (junction-safe) and branch.
+      removeNodeModulesJunction(wt);
+      run(['worktree', 'remove', '--force', wt], projectPath);
+      run(['worktree', 'prune'], projectPath);
+      run(['branch', '-D', branch], projectPath);
+      return { merged: false, committed: false, branch: null, base: target, reason: 'nothing-to-commit' };
+    }
+
+    // Rebase onto the integration branch; a conflict aborts and PARKS (keep worktree + branch).
+    if (!run(['rebase', target], wt).ok) {
+      run(['rebase', '--abort'], wt);
+      return { merged: false, committed: true, branch, base: target, reason: 'rebase-conflict', parked: true };
+    }
+
+    // Fast-forward the integration branch to the rebased session branch. If it is checked out in
+    // projectPath, an ff-only merge advances it + its working tree; otherwise update the ref directly
+    // via an ff-only `fetch . <branch>:<target>` (no checkout of the target required).
+    const head = run(['rev-parse', '--abbrev-ref', 'HEAD'], projectPath).out;
+    let merged;
+    if (head === target) {
+      clearFfCollisions(projectPath, branch, addPaths);
+      merged = run(['merge', '--ff-only', branch], projectPath).ok;
+    } else {
+      merged = run(['fetch', '.', `refs/heads/${branch}:refs/heads/${target}`], projectPath).ok;
+    }
+    if (!merged) return { merged: false, committed: true, branch, base: target, reason: 'not-fast-forward', parked: true };
+
+    removeNodeModulesJunction(wt);
+    run(['worktree', 'remove', '--force', wt], projectPath);
+    run(['worktree', 'prune'], projectPath);
+    run(['branch', '-D', branch], projectPath);
+    return { merged: true, committed: true, branch: null, base: target, reason: null };
+  }
+
   // Throw away a worktree and its branch (cancelled runs): nothing is committed or merged.
   function discard({ projectPath, workspace }) {
     if (!workspace || !workspace.isGit) return;
-    if (workspace.cwd) run(['worktree', 'remove', '--force', workspace.cwd], projectPath);
+    if (workspace.cwd) {
+      removeNodeModulesJunction(workspace.cwd);
+      run(['worktree', 'remove', '--force', workspace.cwd], projectPath);
+    }
     if (workspace.branch) run(['branch', '-D', workspace.branch], projectPath);
     run(['worktree', 'prune'], projectPath);
   }
@@ -147,8 +212,38 @@ function createGitWorkspace(opts = {}) {
   }
 
   return {
-    create, integrate, discard, restoreTests,
+    create, integrate, discard, restoreTests, mergeBack,
   };
+}
+
+// Remove a node_modules JUNCTION/symlink reparse point from a worktree WITHOUT touching its target.
+// Critical safety step before `git worktree remove --force`: if a junction is left in place, git can
+// follow it and delete the operator's REAL node_modules. A real (non-symlink) node_modules directory
+// — the in-place fallback case — is never removed here. Best-effort and idempotent.
+function removeNodeModulesJunction(wtDir) {
+  if (!wtDir) return;
+  const nm = path.join(wtDir, 'node_modules');
+  let st;
+  try { st = fs.lstatSync(nm); } catch { return; }   // absent — nothing to do
+  if (!st.isSymbolicLink()) return;                   // a REAL dir (in-place fallback) — never delete it
+  try { fs.rmSync(nm, { recursive: false, force: true }); }
+  catch { try { fs.rmdirSync(nm); } catch { /* best-effort */ } }
+}
+
+// Create a Windows directory junction <wtDir>/node_modules -> <projectPath>/node_modules so a session
+// worktree can run the project's tooling (build/lint/test) without a reinstall. A junction (mklink /J)
+// needs no admin rights, unlike a symlink. Best-effort: the session simply runs without node_modules
+// on any failure (absent target, link already present, non-Windows). Returns true only when it linked.
+function linkNodeModules(projectPath, wtDir) {
+  if (!projectPath || !wtDir) return false;
+  const target = path.join(projectPath, 'node_modules');
+  const link = path.join(wtDir, 'node_modules');
+  try {
+    if (!fs.existsSync(target)) return false;
+    if (fs.existsSync(link)) return false;
+    execFileSync('cmd', ['/c', 'mklink', '/J', link, target], { stdio: 'ignore' });
+    return true;
+  } catch { return false; }
 }
 
 function copyDirInto(src, dest) {
@@ -167,4 +262,4 @@ function defaultCopyPack(projectPath, wtDir, outputPath) {
   copyDirInto(path.join(projectPath, outputPath, 'pack'), path.join(wtDir, outputPath, 'pack'));
 }
 
-module.exports = { createGitWorkspace };
+module.exports = { createGitWorkspace, linkNodeModules };
