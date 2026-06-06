@@ -86,10 +86,17 @@ function wireCardEvents(ui, sessionId) {
 
   ui.btnRemove.addEventListener('click', () => {
     ui.overflowMenu.classList.remove('open');
+    const name = ui.card.dataset.session;
+    // Warn before discarding a worktree that still holds unmerged work (pending-review / parked):
+    // removing the session throws it away, so give the operator a chance to merge/review first.
+    const merge = ui.card.dataset.merge;
+    const unmerged = merge === 'pending-review' || merge === 'parked';
     showConfirmDialog({
       title: 'Remove Session',
-      message: `Remove session "${ui.card.dataset.session}"?`,
-      confirmLabel: 'Remove',
+      message: unmerged
+        ? `"${name}" has unmerged worktree changes that will be permanently discarded if you remove it. Merge or review them first to keep them. Remove anyway?`
+        : `Remove session "${name}"?`,
+      confirmLabel: unmerged ? 'Discard & Remove' : 'Remove',
       onConfirm: () => sendControlMsg({ type: 'remove-session', id: sessionId }),
     });
   });
