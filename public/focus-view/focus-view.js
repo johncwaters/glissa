@@ -48,6 +48,22 @@ export function mountFocusView({ rail, center }) {
   diffEl.hidden = true;
 
   centerEl.append(emptyEl, reviewBarEl, cardSlotEl, diffEl);
+
+  railEl.addEventListener('keydown', onRailKeydown);
+}
+
+// Roving-tabindex list nav: Up/Down move focus between pills; Enter/click (native button) focuses the
+// session into the center. Lives on the rail only, so it never intercepts keystrokes meant for the
+// centered terminal.
+function onRailKeydown(e) {
+  if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+  const pills = [...railEl.querySelectorAll('.focus-pill')];
+  if (!pills.length) return;
+  e.preventDefault();
+  const dir = e.key === 'ArrowDown' ? 1 : -1;
+  const cur = pills.indexOf(document.activeElement);
+  const start = cur === -1 ? (dir === 1 ? -1 : 0) : cur;
+  pills[(start + dir + pills.length) % pills.length].focus();
 }
 
 // ── Roster ordering: WAITING first, then needs-review, then RUNNING, then the rest (stable) ──
