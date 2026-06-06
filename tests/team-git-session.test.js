@@ -383,3 +383,50 @@ test('sweepSessionWorktrees is a no-op on a non-git directory', { skip: !GIT }, 
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// --- Restart safety: the sweep PRESERVES unmerged work (no data loss across a restart) ---
+
+test('listSessionWorktrees flags uncommitted work; sweep preserves it and removes only the clean orphan', { skip: !GIT }, () => {
+  const repo = initRepoOnDevelop();
+  try {
+    const gw = createGitWorkspace();
+    const clean = gw.create({ projectPath: repo, teamId: 'session', label: 'clean', outputPath: '' });
+    const dirty = gw.create({ projectPath: repo, teamId: 'session', label: 'dirty', outputPath: '' });
+    fs.writeFileSync(path.join(dirty.cwd, 'wip.js'), 'work in progress\n', 'utf8'); // a pending-review session
+
+    const byId = Object.fromEntries(
+      gw.listSessionWorktrees({ projectPath: repo, integrationBranch: 'develop' }).map((w) => [w.id, w]),
+    );
+    assert.equal(byId.clean.hasWork, false, 'a clean worktree has no work');
+    assert.equal(byId.dirty.hasWork, true, 'uncommitted changes count as work');
+
+    const removed = gw.sweepSessionWorktrees({ projectPath: repo, integrationBranch: 'develop' });
+    assert.deepEqual(removed, ['glissa/session/clean'], 'only the clean orphan is swept');
+    assert.ok(!fs.existsSync(clean.cwd), 'clean orphan removed');
+    assert.ok(fs.existsSync(path.join(dirty.cwd, 'wip.js')), 'the unmerged change survives the sweep');
+
+    gw.removeWorktreeByPath({ projectPath: repo, cwd: dirty.cwd, branch: dirty.branch });
+    assert.ok(!fs.existsSync(dirty.cwd), 'removeWorktreeByPath removes a specific worktree');
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test('sweep preserves a parked (committed-ahead) worktree even when its working tree is clean', { skip: !GIT }, () => {
+  const repo = initRepoOnDevelop();
+  try {
+    const gw = createGitWorkspace();
+    const ws = gw.create({ projectPath: repo, teamId: 'session', label: 'parked', outputPath: '' });
+    fs.writeFileSync(path.join(ws.cwd, 'feature.js'), 'done\n', 'utf8');
+    git(['add', '-A'], ws.cwd);
+    git(['commit', '-m', 'session work'], ws.cwd);
+    assert.equal(git(['status', '--porcelain'], ws.cwd).trim(), '', 'working tree is clean');
+
+    const listed = gw.listSessionWorktrees({ projectPath: repo, integrationBranch: 'develop' });
+    assert.equal(listed[0].hasWork, true, 'commits ahead of develop count as work');
+    assert.deepEqual(gw.sweepSessionWorktrees({ projectPath: repo, integrationBranch: 'develop' }), [], 'a parked worktree is never swept');
+    gw.removeWorktreeByPath({ projectPath: repo, cwd: ws.cwd, branch: ws.branch });
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});

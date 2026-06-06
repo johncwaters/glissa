@@ -171,6 +171,28 @@ test('mergeWorktree parks on a conflict (worktree preserved)', { skip: !WIN }, (
   }
 });
 
+test('adoptWorktree re-attaches an on-disk worktree as pending-review (restart re-adoption)', { skip: !WIN }, () => {
+  const wt = realWorktreeDir();
+  const gw = fakeGitWorkspace({ worktreeDir: wt, mergeResult: { merged: true, branch: null } });
+  const statuses = [];
+  const s = makeSession({ gitWorkspace: gw, integrationBranch: 'develop', ptySpawn: () => fakePty() });
+  s.on('merge-status', (e) => statuses.push(e.mergeStatus));
+  try {
+    s.adoptWorktree({ worktreeDir: wt, branch: 'glissa/session/wt-sess', base: 'develop' });
+    assert.equal(s.worktreeDir, wt);
+    assert.equal(s.isWorktree, true);
+    assert.equal(s.mergeStatus, 'pending-review');
+    assert.equal(s.toSnapshot().mergeStatus, 'pending-review');
+    // An adopted worktree can still be merged: it delegates to the engine with the reconstructed workspace.
+    s.mergeWorktree();
+    assert.equal(gw.calls.mergeBack.length, 1);
+    assert.equal(gw.calls.mergeBack[0].targetBranch, 'develop');
+  } finally {
+    s.destroy();
+    fs.rmSync(wt, { recursive: true, force: true });
+  }
+});
+
 test('_settleWorktreeOnExit: a changed worktree -> pending-review; an unchanged one -> silent discard', { skip: !WIN }, () => {
   { // changed
     const wt = realWorktreeDir();

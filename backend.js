@@ -362,20 +362,9 @@ function createBackend(httpServer, options = {}) {
   // success (see team-git.js), so a run never dirties the user's working tree.
   const gitWorkspace = createGitWorkspace();
 
-  // Clean up orphaned SESSION worktrees (glissa/session/*) left by a crashed prior run. At boot no
-  // session is active, so any such worktree is an orphan; the sweep is scoped to the session namespace,
-  // so a live team worktree is never touched. Best-effort, once per distinct repo root.
-  try {
-    const sweptRoots = new Set();
-    for (const project of config.projects) {
-      if (!project.path || sweptRoots.has(project.path)) continue;
-      sweptRoots.add(project.path);
-      const removed = gitWorkspace.sweepSessionWorktrees({ projectPath: project.path });
-      if (removed.length) console.log(`[worktree] swept ${removed.length} orphan session worktree(s) under ${project.path}`);
-    }
-  } catch (err) {
-    console.warn(`[worktree] session worktree sweep failed: ${err.message}`);
-  }
+  // On-disk session worktrees from a prior run are reconciled AFTER the boot session loop below, so a
+  // worktree holding unmerged work can be re-adopted onto its session instead of swept (see the
+  // reconcile after `for (const project of config.projects)`).
 
   /** Look up either a persisted session or an ephemeral team-stage session. */
   function getSessionAny(id) {
@@ -700,6 +689,31 @@ function createBackend(httpServer, options = {}) {
     wireSessionEvents(sess);
   }
 
+  // Reconcile on-disk session worktrees left by a prior run/crash: a worktree whose session still exists
+  // and holds UNMERGED work is re-adopted (resurfaced as pending-review, so the operator can still
+  // review/merge or resume it); anything else (a clean orphan, or a worktree for a since-deleted session)
+  // is removed junction-safe. This is what makes cleanup correct regardless of how a session ended: no
+  // data loss, no leaked worktrees. Once per distinct repo root, best-effort.
+  try {
+    const reconciledRoots = new Set();
+    const integrationBranch = config.integrationBranch || 'develop';
+    for (const project of config.projects) {
+      if (!project.path || reconciledRoots.has(project.path)) continue;
+      reconciledRoots.add(project.path);
+      for (const wt of gitWorkspace.listSessionWorktrees({ projectPath: project.path, integrationBranch })) {
+        const sess = sessions.get(wt.id);
+        if (sess && wt.hasWork) {
+          sess.adoptWorktree({ worktreeDir: wt.cwd, branch: wt.branch, base: integrationBranch });
+          console.log(`[worktree] re-adopted pending-review worktree for ${sess.name} (${wt.branch})`);
+        } else {
+          gitWorkspace.removeWorktreeByPath({ projectPath: project.path, cwd: wt.cwd, branch: wt.branch });
+        }
+      }
+    }
+  } catch (err) {
+    console.warn(`[worktree] worktree reconcile failed: ${err.message}`);
+  }
+
   function diffProjects(currentSessions, newProjects) {
     ensureProjectIds(newProjects);
     const newMap = new Map(newProjects.map(p => [p.id, p]));
@@ -740,6 +754,9 @@ function createBackend(httpServer, options = {}) {
     if (!sess) return false;
     closeSessionDataClients(id);
     notificationManager.acknowledge(id);
+    // Explicit removal -> throw the worktree away (junction-safe). Shutdown/restart go through destroy()
+    // directly and do NOT discard, so a pending-review worktree survives for the next-boot reconcile.
+    try { sess.discardWorktree?.(); } catch { /* best-effort */ }
     sess.destroy();
     sessions.delete(id);
     broadcastControl({ type: 'session-removed', id, session: sess.name });

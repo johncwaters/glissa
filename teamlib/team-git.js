@@ -243,16 +243,27 @@ function createGitWorkspace(opts = {}) {
     for (const glob of testGlobs) run(['clean', '-f', '--', glob], wt);
   }
 
-  // Sweep orphaned SESSION worktrees (branch `glissa/session/*`) left by a crashed prior run. Scoped to
-  // the session namespace ONLY, so a live TEAM worktree (`glissa/<teamId>/*`, teamId != session) is never
-  // touched. Junction-safe. Intended to run at boot, when no session is active, so any such worktree is an
-  // orphan. Returns the removed branch names. A non-git project is a no-op.
-  function sweepSessionWorktrees({ projectPath }) {
-    const removed = [];
+  // True when a session worktree holds UNMERGED work that must NOT be destroyed on a restart: uncommitted
+  // changes in the worktree, or commits on its branch not yet on the integration branch (a parked/
+  // conflicted merge). Gitignored junctions/files never show in `status --porcelain`.
+  function worktreeHasWork(cwd, branch, projectPath, integrationBranch) {
+    const dirty = run(['status', '--porcelain'], cwd);
+    if (dirty.ok && dirty.out !== '') return true;
+    if (integrationBranch && branch) {
+      const ahead = run(['rev-list', '--count', `${integrationBranch}..${branch}`], projectPath);
+      if (ahead.ok && ahead.out && ahead.out !== '0') return true;
+    }
+    return false;
+  }
+
+  // List the SESSION worktrees (branch `glissa/session/<id>`) of a repo, each with its extracted session
+  // id and whether it holds unmerged work. Team worktrees (`glissa/<teamId>/*`) are excluded by namespace.
+  function listSessionWorktrees({ projectPath, integrationBranch }) {
+    const out = [];
     const inside = run(['rev-parse', '--is-inside-work-tree'], projectPath);
-    if (!inside.ok || inside.out !== 'true') return removed;
+    if (!inside.ok || inside.out !== 'true') return out;
     const listed = run(['worktree', 'list', '--porcelain'], projectPath);
-    if (!listed.ok) return removed;
+    if (!listed.ok) return out;
     let curWt = null;
     for (const line of listed.out.split(/\r?\n/)) {
       if (line.startsWith('worktree ')) {
@@ -260,22 +271,45 @@ function createGitWorkspace(opts = {}) {
       } else if (line.startsWith('branch ')) {
         const name = line.slice('branch '.length).trim().replace(/^refs\/heads\//, '');
         if (curWt && name.startsWith('glissa/session/')) {
-          removeWorktreeLinks(curWt);
-          run(['worktree', 'remove', '--force', curWt], projectPath);
-          run(['branch', '-D', name], projectPath);
-          removed.push(name);
+          out.push({
+            cwd: curWt, branch: name, id: name.slice('glissa/session/'.length),
+            hasWork: worktreeHasWork(curWt, name, projectPath, integrationBranch),
+          });
         }
         curWt = null;
       } else if (line === '') {
         curWt = null;
       }
     }
+    return out;
+  }
+
+  // Junction-safe removal of a single worktree by path (+ its branch), then prune.
+  function removeWorktreeByPath({ projectPath, cwd, branch }) {
+    if (cwd) {
+      removeWorktreeLinks(cwd);
+      run(['worktree', 'remove', '--force', cwd], projectPath);
+    }
+    if (branch) run(['branch', '-D', branch], projectPath);
     run(['worktree', 'prune'], projectPath);
+  }
+
+  // Remove orphaned SESSION worktrees, PRESERVING any that hold unmerged work, so a restart can never
+  // destroy a pending-review/parked session's changes. Scoped to `glissa/session/*` (team worktrees are
+  // never touched). Returns the removed branch names.
+  function sweepSessionWorktrees({ projectPath, integrationBranch }) {
+    const removed = [];
+    for (const wt of listSessionWorktrees({ projectPath, integrationBranch })) {
+      if (wt.hasWork) continue; // preserve unmerged work
+      removeWorktreeByPath({ projectPath, cwd: wt.cwd, branch: wt.branch });
+      removed.push(wt.branch);
+    }
     return removed;
   }
 
   return {
-    create, integrate, discard, restoreTests, mergeBack, sweepSessionWorktrees,
+    create, integrate, discard, restoreTests, mergeBack,
+    sweepSessionWorktrees, listSessionWorktrees, removeWorktreeByPath,
   };
 }
 

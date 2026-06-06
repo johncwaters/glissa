@@ -364,6 +364,18 @@ class Session extends EventEmitter {
     return r;
   }
 
+  // Re-adopt an existing on-disk session worktree at boot (e.g. a pending-review/parked session that
+  // survived a server restart), so its unreviewed work is resurfaced as pending-review instead of
+  // stranded. The session stays DORMANT; the operator can then review/merge it, or starting it reuses
+  // this same worktree (_provisionWorktree early-returns on an existing worktreeDir).
+  adoptWorktree({ worktreeDir, branch, base }) {
+    if (!worktreeDir) return;
+    this._workspace = { cwd: worktreeDir, isGit: true, branch, base: base || this._integrationBranch };
+    this.worktreeDir = worktreeDir;
+    this.isWorktree = true;
+    this._setMergeStatus("pending-review");
+  }
+
   // Operator action: throw the worktree away unmerged (junction-safe), reset to no-worktree.
   discardWorktree() {
     if (this._gitWorkspace && this._workspace) {
