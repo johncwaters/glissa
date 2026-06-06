@@ -1,7 +1,7 @@
 // ── Session card module ───────────────────────────────────────
 // Owns session card DOM lifecycle, terminal setup, and per-session state.
 
-// Vite alias — resolves to shared/states.esm.js
+// Vite alias - resolves to shared/states.esm.js
 import { BADGE_LABELS, KILLABLE_STATES, RESTARTABLE_STATES, STATE_GLYPHS, STATES } from '/shared/states.mjs';
 import { playAlertSound } from '../alert-sound.js';
 import { sendControlMsg } from '../control-ws.js';
@@ -17,7 +17,7 @@ import { setupDragAndDrop } from './drag-drop.js';
 import { _performExpand, enforceSplitOnCreate, exitMaximizeMode, forgetSessionLayout, getMaximizedSession, isMaximizeActive, SLEEP_ELIGIBLE, sleepSession, toggleMaximize, toggleMinimize, wakeSession } from './layout.js';
 // Load-bearing import: evaluating rail.js installs the minimized-bar MutationObserver,
 // the elapsed-tick interval, and the rail's click/keyboard listeners at module load.
-import { closePeekFor, refreshPill } from './rail.js';
+import { refreshPill } from './rail.js';
 import { ensureTerminalSetup, setTerminalCursorBlink, setupTerminal, wireTerminalIO } from './terminal.js';
 import { releaseWebgl, tryLoadWebGL } from './webgl-pool.js';
 
@@ -35,7 +35,7 @@ const AGGREGATE_GLYPHS = {
   '':       '▸', // neutral / dormant
 };
 
-// Last rendered aggregate summary — gates DOM writes + the aria-live re-announce.
+// Last rendered aggregate summary - gates DOM writes + the aria-live re-announce.
 let _lastAggregateText = null;
 let _lastAggregateSeverity = null;
 
@@ -182,7 +182,7 @@ export function updateAggregateStatus() {
   const { text, severity, alertCount } = computeAggregate({ waiting, failed, done, complete, dormant, total });
 
   // Only rewrite the DOM (and re-announce via aria-live) when the summary
-  // actually changed — avoids spamming assistive tech on every state tick.
+  // actually changed - avoids spamming assistive tech on every state tick.
   if (text !== _lastAggregateText || severity !== _lastAggregateSeverity) {
     _lastAggregateText = text;
     _lastAggregateSeverity = severity;
@@ -332,7 +332,7 @@ export function setSessionMergeStatus(sessionId, mergeStatus) {
   }
   ui.card.dataset.merge = ms;
   ui.reviewLabel.textContent = ms === 'parked' ? 'Needs manual merge'
-    : ms === 'merging' ? 'Merging…'
+    : ms === 'merging' ? 'Merging...'
     : 'Changes ready to review';
   ui.reviewActions.replaceChildren();
   if (ms === 'merging') return;
@@ -365,7 +365,7 @@ export function setSessionDiff(sessionId, stat, diff) {
 export function renameSessionCard(sessionId, newName) {
   const ui = sessionUIs.get(sessionId);
   if (!ui) return;
-  // Only update the display name — id stays the same, no re-keying needed
+  // Only update the display name - id stays the same, no re-keying needed
   ui.card.dataset.session = newName;
   ui.nameEl.textContent = newName;
 }
@@ -379,7 +379,7 @@ export function focusSessionCard(sessionId) {
   if (!ui) return false;
 
   // Maximize mode hides every other card, so a different maximized session would keep the target
-  // invisible — exit it so focus actually reveals the target.
+  // invisible - exit it so focus actually reveals the target.
   if (isMaximizeActive() && getMaximizedSession() !== sessionId) exitMaximizeMode();
 
   // Restore a minimized card with the non-toggling primitive: unlike toggleMinimize it never spawns
@@ -425,7 +425,6 @@ export function removeSessionCard(sessionId) {
   if (!ui) return;
 
   closeDebugOverlay(ui);
-  closePeekFor(sessionId);
   sessionUIs.delete(sessionId);
   if (getMaximizedSession() === sessionId) exitMaximizeMode();
   forgetSessionLayout(sessionId);
@@ -484,7 +483,7 @@ export function applyState(sessionId, state) {
     glyphSpan.textContent = STATE_GLYPHS[state] || '';
     labelSpan.textContent = BADGE_LABELS[state] || state;
   } else {
-    // Fallback: no glyph present (unexpected) — rebuild in place preserving classes
+    // Fallback: no glyph present (unexpected) - rebuild in place preserving classes
     const fresh = makeBadge(state);
     fresh.classList.add('session-badge');
     ui.badge.replaceWith(fresh);
@@ -494,7 +493,7 @@ export function applyState(sessionId, state) {
 
   // Recently-completed pill: if a session reaches a notable terminal / turn-complete
   // state while collapsed in the rail, mark it unseen so the pill keeps a gentle
-  // attention pulse until the operator looks. Peeking or restoring it clears the
+  // attention pulse until the operator looks. Restoring it clears the
   // mark (rail.js). Only set it for a card that is currently minimized: a session
   // that finishes on the grid was already seen.
   if (state !== prevState
@@ -548,10 +547,6 @@ export function applyState(sessionId, state) {
       && ui.card.classList.contains('minimized')
       && SLEEP_ELIGIBLE.includes(state)) {
     sleepSession(sessionId);
-    // If this session was being peeked, sleeping just disposed its live terminal;
-    // close the peek so the (now empty) terminal element is returned to its card
-    // before the tray is removed.
-    closePeekFor(sessionId);
   }
 }
 

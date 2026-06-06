@@ -1,4 +1,4 @@
-// ── Glissa Dashboard — Boot ───────────────────────────────────
+// ── Glissa Dashboard - Boot ───────────────────────────────────
 // Thin entry point: wires modules together and boots the app.
 
 import '@xterm/xterm/css/xterm.css';
@@ -53,7 +53,7 @@ setConnectionStateCallback((state, label) => {
 
   if (state === 'connected') {
     if (shutdownScreen.classList.contains('active')) {
-      // Reconnected after restart — reload for fresh state
+      // Reconnected after restart - reload for fresh state
       location.reload();
       return;
     }
@@ -86,7 +86,7 @@ function clearEmptyPlaceholder() {
 }
 
 // Real projects (id -> name) for the Teams panel project picker. Ephemeral team-stage sessions
-// (id like "team:<run>:<stage>") are excluded — they are transient run cards, not run targets.
+// (id like "team:<run>:<stage>") are excluded - they are transient run cards, not run targets.
 const knownProjects = new Map();
 function getKnownProjects() {
   return [...knownProjects].map(([id, name]) => ({ id, name }));
@@ -133,6 +133,8 @@ function handleSnapshot(sessions) {
   }
 
   autoLayout();
+  // Focus can be the active view when the initial snapshot lands; rebuild its rail from the new cards.
+  if (isFocusActive()) refreshFocusRoster();
 }
 
 function handleStateChange(msg) {
@@ -254,7 +256,7 @@ document.getElementById('btn-settings').addEventListener('click', () => {
   createSettingsDialog();
 });
 
-// ── Primary view tabs (Sessions / Teams) ─────────────────────
+// ── Primary view tabs (Focus / Teams / Sessions) ─────────────────────
 
 const viewTeamsEl = document.getElementById('view-teams');
 const viewFocusEl = document.getElementById('view-focus');
@@ -271,13 +273,14 @@ mountFocusView({
 });
 
 // Primary views in tab-strip order. Adding a view = adding an entry here (N-way, not a boolean).
+// Focus leads as the default landing view; the Sessions grid stays mounted (Focus borrows its cards).
 const VIEW_TABS = [
-  { view: 'sessions', tab: tabSessions, el: null },
-  { view: 'teams',    tab: tabTeams,    el: viewTeamsEl },
   { view: 'focus',    tab: tabFocus,    el: viewFocusEl },
+  { view: 'teams',    tab: tabTeams,    el: viewTeamsEl },
+  { view: 'sessions', tab: tabSessions, el: null },
 ];
 
-let _activeView = 'sessions';
+let _activeView = 'focus';
 
 function activateView(view) {
   const prev = _activeView;
@@ -299,7 +302,7 @@ function activateView(view) {
     exitMaximizeMode();
     activateFocusView();
   } else {
-    // Session terminals were display:none under another tab — re-fit on return.
+    // Session terminals were display:none under another tab - re-fit on return.
     autoLayout();
   }
 }
@@ -317,7 +320,9 @@ for (let i = 0; i < VIEW_TABS.length; i++) {
   });
 }
 
-document.body.dataset.activeView = 'sessions';
+// Land on Focus by default. Call activateView (not a bare dataset set) so the Focus module activates
+// and builds its roster; the snapshot that arrives later refreshes it (see handleSnapshot).
+activateView('focus');
 
 document.getElementById('btn-restart').addEventListener('click', () => {
   headerMenu.classList.remove('open');
@@ -401,8 +406,8 @@ function autoLayout() {
 // on purpose: it collides with neither browser shortcuts (which switch tabs on
 // Ctrl+digit, not Alt) nor VS Code defaults (which are Ctrl / Ctrl+Shift / F-key /
 // chord based, and use Ctrl+1..3 for editor groups). Guarded so they never reach a
-// focused xterm — its key handling lives in terminal.js and forwards most keys to
-// the PTY — so these fire only when the operator is on the dashboard chrome.
+// focused xterm - its key handling lives in terminal.js and forwards most keys to
+// the PTY - so these fire only when the operator is on the dashboard chrome.
 function isTypingContext() {
   const a = document.activeElement;
   if (!a) return false;

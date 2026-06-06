@@ -453,7 +453,7 @@ body {
    glyph + UPPERCASE label + colour (never hue alone), so RUNNING vs IDLE vs
    EXITED are all distinct at a glance. Escalation stays earned (WAITING breathes,
    FAILED holds the generic ring, the rest are quiet). The whole pill is a button
-   that flies up a peek tray (rail.js). */
+   that restores its session to the grid (rail.js). */
 .session-card.minimized {
   border-radius: var(--radius);
   opacity: 0.9;
@@ -546,7 +546,7 @@ body {
 }
 
 /* Everything else collapses on the pill. The drag handle is gone (drag still works
-   from the pill body via the header mousedown); restore lives in the peek tray. */
+   from the pill body via the header mousedown); restore is a click on the pill. */
 .session-card.minimized .btn-minimize,
 .session-card.minimized .perms-badge,
 .session-card.minimized .worktree-badge,
@@ -597,8 +597,8 @@ body {
 
 /* ── Recently completed, unseen ───────────────────────────────
    A session that finished (DONE / FAILED) or completed a turn (COMPLETE) while
-   collapsed keeps a gentle attention pulse on its pill until the operator peeks
-   or restores it (rail.js clears data-unseen). Colour follows the result. The
+   collapsed keeps a gentle attention pulse on its pill until the operator
+   restores it (rail.js clears data-unseen). Colour follows the result. The
    ::after base opacity stays visible so prefers-reduced-motion shows a steady ring
    instead of nothing. This is the earned-signal rule: it stops the moment it is
    acknowledged, so the glow always means "a result you have not looked at". */
@@ -625,120 +625,6 @@ body {
 @keyframes rail-unseen-pulse {
   0%, 100% { opacity: 0.3; }
   50%      { opacity: 1; }
-}
-
-/* ── Rail peek tray ───────────────────────────────────────────
-   Flies up off a minimized pill (rail.js positions it, position:fixed). A true
-   overlay off the plane, so it earns the violet-tinted shadow-lg; chrome stays
-   flat at rest elsewhere. Live sessions get their real terminal reparented into
-   .rail-peek-term; finished/dormant ones get a status line instead. */
-.rail-peek {
-  position: fixed;
-  z-index: 60;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  min-width: 240px;
-  /* Sizes to the (real, unresized) terminal width up to the viewport. */
-  max-width: 92vw;
-  padding: 12px;
-  background: var(--bg-card);
-  border: 1px solid var(--border-hover);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-lg);
-  animation: rail-peek-in 180ms cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-@keyframes rail-peek-in {
-  from { opacity: 0; transform: translateY(8px); }
-  to   { opacity: 1; transform: translateY(0); }
-}
-
-.rail-peek-head {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-}
-.rail-peek-head .state-badge { padding: 0; flex-shrink: 0; }
-.rail-peek-head .state-label { min-width: 0; }
-
-.rail-peek-name {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--text-head);
-  letter-spacing: 0.02em;
-}
-
-.rail-peek-time {
-  flex-shrink: 0;
-  font-size: 11px;
-  color: var(--text-muted);
-  font-variant-numeric: tabular-nums;
-}
-
-/* The live terminal is shown at its real (grid) size, never resized. The slot
-   caps the height (set inline from the room above the pill) and pins the terminal
-   to the bottom, so the live input row is always visible and only old scrollback
-   clips at the top. Not resizing is what keeps a restored session from corrupting. */
-.rail-peek-term {
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-end;
-  overflow: hidden;
-  border: 1px solid var(--border-dim);
-  border-radius: var(--radius);
-  background: var(--bg-card);
-}
-.rail-peek-term .terminal-wrap {
-  display: block;
-  flex: 0 0 auto;
-}
-
-.rail-peek-status {
-  font-size: 12px;
-  color: var(--text-dim);
-  padding: 2px 0 4px;
-}
-
-.rail-peek-actions {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-.rail-peek-actions button {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--accent);
-  background: transparent;
-  border: 1px solid color-mix(in oklab, var(--accent) 45%, transparent);
-  border-radius: var(--radius);
-  padding: 6px 14px;
-  cursor: pointer;
-  transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
-}
-.rail-peek-actions button:hover {
-  background: color-mix(in oklab, var(--accent) 14%, transparent);
-}
-.rail-peek-actions button:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
-}
-.rail-peek-actions .rail-peek-danger {
-  color: var(--text-dim);
-  border-color: var(--border);
-}
-.rail-peek-actions .rail-peek-danger:hover {
-  color: var(--state-failed);
-  border-color: color-mix(in oklab, var(--state-failed) 55%, var(--border));
-  background: color-mix(in oklab, var(--state-failed) 12%, transparent);
 }
 
 /* Completion flash - plays once on DONE/FAILED transition */
@@ -2775,15 +2661,6 @@ body[data-active-view="focus"] #minimized-bar { display: none; }
 
 .focus-view { display: flex; flex: 1 1 auto; min-height: 0; }
 .focus-view[hidden] { display: none; }
-
-.tab-exp {
-  margin-left: 5px;
-  font-size: 8px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  color: var(--text-muted);
-  vertical-align: super;
-}
 
 /* ── Roster rail ── */
 .focus-rail {

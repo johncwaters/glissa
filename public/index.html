@@ -77,7 +77,7 @@
       to { transform: rotate(360deg); }
     }
 
-    /* Shutdown overlay — hidden until triggered */
+    /* Shutdown overlay - hidden until triggered */
     .shutdown-screen {
       position: fixed;
       inset: 0;
@@ -123,31 +123,31 @@
   </style>
 </head>
 <body>
-  <!-- Loading screen — visible immediately, removed on WS connect -->
+  <!-- Loading screen - visible immediately, removed on WS connect -->
   <div class="loading-screen" id="loading-screen">
     <div class="loading-title">Glissa</div>
     <div class="loading-spinner"></div>
     <div class="loading-status" id="loading-status">Connecting to server...</div>
   </div>
 
-  <!-- Shutdown overlay — hidden until triggered -->
+  <!-- Shutdown overlay - hidden until triggered -->
   <div class="shutdown-screen" id="shutdown-screen">
     <div class="loading-title">Glissa</div>
     <div class="loading-spinner"></div>
     <div class="shutdown-status" id="shutdown-status">Shutting down sessions...</div>
   </div>
 
-  <!-- App shell — hidden until CSS loads and WS connects -->
-  <!-- [P3] Tailwind utility duplicates stripped — semantic classes in style.css are authoritative -->
+  <!-- App shell - hidden until CSS loads and WS connects -->
+  <!-- [P3] Tailwind utility duplicates stripped - semantic classes in style.css are authoritative -->
   <div class="app-shell">
     <header class="header">
       <div class="header-inner">
         <div class="header-left">
           <h1 class="header-title">Glissa</h1>
           <nav class="header-tabs" id="header-tabs" role="tablist" aria-label="Primary views">
-            <button class="header-tab" id="tab-sessions" role="tab" aria-selected="true" aria-controls="sessions-container" tabindex="0">Sessions</button>
+            <button class="header-tab" id="tab-focus" role="tab" aria-selected="true" aria-controls="view-focus" tabindex="0">Focus</button>
             <button class="header-tab" id="tab-teams" role="tab" aria-selected="false" aria-controls="view-teams" tabindex="-1">Teams<span class="tab-activity" id="tab-teams-activity" aria-hidden="true"></span></button>
-            <button class="header-tab" id="tab-focus" role="tab" aria-selected="false" aria-controls="view-focus" tabindex="-1">Focus<span class="tab-exp" aria-hidden="true">EXP</span></button>
+            <button class="header-tab" id="tab-sessions" role="tab" aria-selected="false" aria-controls="sessions-container" tabindex="-1">Sessions</button>
           </nav>
         </div>
         <div class="header-right">
@@ -180,7 +180,7 @@
       <div class="minimized-bar" id="minimized-bar" role="toolbar" aria-label="Minimized sessions" aria-keyshortcuts="Alt+W"></div>
       <!-- Teams view: dedicated tab space, mounted by teams-panel.js -->
       <section class="teams-view" id="view-teams" role="tabpanel" aria-labelledby="tab-teams" hidden></section>
-      <!-- Focus view (experimental): roster rail + single-focus center, mounted by focus-view.js -->
+      <!-- Focus view (default): roster rail + single-focus center, mounted by focus-view.js -->
       <section class="focus-view" id="view-focus" role="tabpanel" aria-labelledby="tab-focus" hidden>
         <nav class="focus-rail" id="focus-rail" role="listbox" aria-label="Session roster" aria-keyshortcuts="ArrowUp ArrowDown"></nav>
         <div class="focus-center" id="focus-center"></div>
