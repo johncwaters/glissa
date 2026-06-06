@@ -99,8 +99,22 @@ test('ENTRY_HOOKS emit the right lifecycle events with the session name', () => 
     ['session-failed', { name: 'sess-A' }],
     ['session-done', { name: 'sess-A' }],
   ]);
-  // Only WAITING/FAILED/DONE have entry hooks.
-  assert.equal(Object.keys(ENTRY_HOOKS).length, 3);
+  // COMPLETE/WAITING/FAILED/DONE have entry hooks.
+  assert.equal(Object.keys(ENTRY_HOOKS).length, 4);
+});
+
+test('ENTRY_HOOKS[COMPLETE] emits post-turn-check (emit-only) with id/name/path', () => {
+  const captured = [];
+  const fake = {
+    id: 'id-A',
+    name: 'sess-A',
+    path: '/tmp/sess-a',
+    emit: (ev, payload) => captured.push([ev, payload]),
+  };
+  ENTRY_HOOKS[STATES.COMPLETE](fake);
+  assert.deepEqual(captured, [
+    ['post-turn-check', { id: 'id-A', name: 'sess-A', path: '/tmp/sess-a' }],
+  ]);
 });
 
 test('EXIT_HOOKS clears attention only on leaving WAITING', () => {

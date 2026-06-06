@@ -15,6 +15,15 @@ const DEFAULT_CONFIG = {
   debugMode: false,
   editorCommand: '',
   repoRoots: [],
+  // Deterministic post-turn auto-fix checks (see post-turn-checker.js). ON by
+  // default: the runner's own DEFAULTS govern behavior even when this key is
+  // absent, so a pre-existing config.json without it stays enabled. A per-project
+  // override may live on each projects[] entry as a partial `postTurnChecks`.
+  postTurnChecks: {
+    enabled: true,
+    mode: 'fix',
+    rules: { dashes: true, trailingWs: true, finalNewline: true, bom: true },
+  },
   projects: []
 };
 
@@ -151,6 +160,10 @@ function createConfigStore() {
       if (newConfig[key] != null) config[key] = String(newConfig[key]);
     }
     config.repoRoots = newConfig.repoRoots || [];
+    // Object passthrough: the scalar KEY-lists above don't cover nested objects.
+    // Preserve postTurnChecks across a settings reload (default-on still holds via
+    // the runner's DEFAULTS when the key is absent on both sides).
+    if (newConfig.postTurnChecks != null) config.postTurnChecks = newConfig.postTurnChecks;
     if (newConfig.port != null && newConfig.port !== config.port) {
       console.log(`[settings] Port changed to ${newConfig.port} — restart required to take effect`);
     }

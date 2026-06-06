@@ -73,6 +73,15 @@ const GUARDS = {
 
 // Entry/exit hooks keyed by state
 const ENTRY_HOOKS = {
+  [STATES.COMPLETE](session) {
+    // Turn ended, process still alive: the pre-/commit checkpoint. Emit-only
+    // (purity contract); the backend listener runs the async post-turn checker.
+    session.emit("post-turn-check", {
+      id: session.id,
+      name: session.name,
+      path: session.path,
+    });
+  },
   [STATES.WAITING](session) {
     session.emit("needs-attention", { name: session.name });
   },

@@ -46,6 +46,7 @@ const { buildStagePrompt } = require('./teamlib/team-prompt');
 const { buildSetupPrompt, setupSessionId, setupSessionName, packPaths } = require('./teamlib/team-setup');
 const { scanProjectContext } = require('./teamlib/project-context');
 const teamOutput = require('./teamlib/team-output');
+const { runPostTurnChecks, resolveCheckConfig } = require('./post-turn-checker');
 
 // WAITING-state notification escalation cadence (fixed 5 minutes; previously the
 // configurable waitingEscalationSeconds setting).
@@ -548,13 +549,44 @@ function createBackend(httpServer, options = {}) {
 
   function wireSessionEvents(sess) {
     // All closures read sess.id (stable) and sess.name (current) dynamically.
+    let ptDebounce = null; // post-turn-check debounce timer (per session closure)
+
     sess.on('error', (err) => {
       console.error(`[${sess.name}] error: ${err.message}`);
     });
 
     sess.on('exit', ({ exitCode, signal, reason }) => {
+      if (ptDebounce) { clearTimeout(ptDebounce); ptDebounce = null; }
       const reasonStr = reason ? `, reason=${reason}` : '';
       console.log(`[${sess.name}] exited (code=${exitCode}, signal=${signal}${reasonStr})`);
+    });
+
+    // Post-turn deterministic checks. The state machine emits `post-turn-check` on
+    // entry to COMPLETE (turn ended, process alive: the pre-/commit checkpoint).
+    // Gated to real project sessions (not team-stage or ephemeral setup sessions,
+    // which run in throwaway worktrees a team manages). Config resolved at run time
+    // because config.projects is refreshed on reload; debounced so a burst of
+    // turn-ends collapses to one run after the agent settles.
+    // Resolve config fresh each call: config.projects is refreshed on reload, and
+    // returns null for an ephemeral/team session (not a user project) so it is skipped.
+    const resolvePostTurn = () => {
+      const proj = config.projects.find((p) => p.id === sess.id);
+      return proj ? resolveCheckConfig(config.postTurnChecks, proj.postTurnChecks) : null;
+    };
+    sess.on('post-turn-check', () => {
+      const cfg = resolvePostTurn();
+      if (!cfg || !cfg.enabled) return;
+      if (ptDebounce) clearTimeout(ptDebounce);
+      ptDebounce = setTimeout(() => {
+        ptDebounce = null;
+        const runCfg = resolvePostTurn(); // re-resolve so a reload during debounce is honored
+        if (!runCfg || !runCfg.enabled) return;
+        runPostTurnChecks({ cwd: sess.path, config: runCfg, sessionId: sess.id })
+          .then((report) => {
+            broadcastControl({ type: 'post-turn-result', id: sess.id, session: sess.name, ...report, timestamp: Date.now() });
+          })
+          .catch((err) => console.warn(`[${sess.name}] post-turn checks failed: ${err.message}`));
+      }, cfg.debounceMs);
     });
 
     sess.on('state-change', ({ from, to, event }) => {
