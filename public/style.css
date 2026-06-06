@@ -54,7 +54,7 @@
   /* [P1] Permissions warning token */
   --perms-warn: #d97706;
 
-  /* [P1] Brand-tinted shadow tokens — replace raw rgba(0,0,0,.X) shadows.
+  /* [P1] Brand-tinted shadow tokens - replace raw rgba(0,0,0,.X) shadows.
      [P3] Uses near-black (oklch 0.06) instead of pure #000 per impeccable color-rules. */
   --shadow-tint: color-mix(in oklab, var(--accent) 15%, oklch(0.06 0 0));
   --shadow-sm:   0 2px 8px  color-mix(in srgb, var(--shadow-tint) 55%, transparent);
@@ -91,7 +91,7 @@ html, body {
   height: 100%;
   background: var(--bg);
   color: var(--text);
-  /* [P3] Full mono voice — operator-console aesthetic */
+  /* [P3] Full mono voice - operator-console aesthetic */
   font-family: var(--font-mono);
   font-size: 14px;
   line-height: 1.5;
@@ -109,7 +109,7 @@ body {
   z-index: 100;
   background: var(--bg-header);
   border-bottom: 1px solid var(--border);
-  /* [P2] backdrop-filter removed — bg-header is opaque enough */
+  /* [P2] backdrop-filter removed - bg-header is opaque enough */
 }
 
 .header-inner {
@@ -142,7 +142,7 @@ body {
   gap: 16px;
 }
 
-/* Persistent primary action — accent-outline language, matches team-run / dialog
+/* Persistent primary action - accent-outline language, matches team-run / dialog
    Confirm. The minimized-bar ghost card stays as the secondary inline path. */
 .btn-add-header {
   display: inline-flex;
@@ -181,7 +181,7 @@ body {
   cursor: default;
 }
 
-/* Aggregate roll-up: persistent in the header (was a hover-only tooltip — the
+/* Aggregate roll-up: persistent in the header (was a hover-only tooltip - the
    page's headline signal should never hide). Quiet by default (text-dim) so the
    steady "N running" state recedes; only the attention severities take a state
    color. Shape varies with severity via .aggregate-glyph, so the signal survives
@@ -285,7 +285,7 @@ body {
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 640px), 1fr));
   grid-auto-rows: minmax(0, 1fr);
   gap: 16px;
-  /* No bottom padding — minimized bar (in-flow below) sits flush
+  /* No bottom padding - minimized bar (in-flow below) sits flush
      against the cards so the body bg doesn't show as a gap. */
   padding: 12px clamp(12px, 2vw, 32px) 0;
   max-width: var(--content-max);
@@ -311,11 +311,11 @@ body {
   min-height: 0;
   position: relative;
   /* Layout/style containment: an xterm reflow inside one card no longer forces
-     sibling cards to re-layout. Deliberately NO `paint` — paint containment
+     sibling cards to re-layout. Deliberately NO `paint` - paint containment
      (and content-visibility:auto, which implies it) would clip the WAITING
      ::after glow (inset:-1px) and the COMPLETE/hover outer box-shadows. */
   contain: layout style;
-  /* [P1] Removed box-shadow from animated properties — avoids repaint cost on hover */
+  /* [P1] Removed box-shadow from animated properties - avoids repaint cost on hover */
   transition: border-color var(--transition-med), transform var(--transition-med);
 }
 
@@ -336,7 +336,7 @@ body {
   border-radius: 3px;
   display: inline-flex;
   align-items: center;
-  /* [P1] Touch target extension — visual size unchanged */
+  /* [P1] Touch target extension - visual size unchanged */
   position: relative;
 }
 
@@ -352,7 +352,7 @@ body {
   background: color-mix(in srgb, var(--text) 8%, transparent);
 }
 
-/* Maximize inherits the neutral .btn-action treatment — cyan (the DONE state
+/* Maximize inherits the neutral .btn-action treatment - cyan (the DONE state
    color) is reserved for real state changes, never spent on a control. */
 
 .session-card.dragging {
@@ -419,7 +419,7 @@ body {
 
 /* ── Minimized bar ───────────────────────────────────────── */
 /* In-flow at the bottom of the body flex column so .sessions
-   (flex: 1) shrinks to make room as the bar grows — open terminal
+   (flex: 1) shrinks to make room as the bar grows - open terminal
    content is never overlapped no matter how many rows the bar takes. */
 .minimized-bar {
   flex-shrink: 0;
@@ -741,7 +741,7 @@ body {
   background: color-mix(in oklab, var(--state-failed) 12%, transparent);
 }
 
-/* Completion flash — plays once on DONE/FAILED transition */
+/* Completion flash - plays once on DONE/FAILED transition */
 /* [P2] DONE shortened to 900ms (success = brief), FAILED to 1.4s (keeps weight) */
 .session-card.completion-flash[data-state="DONE"] {
   animation: completion-glow 900ms ease-out;
@@ -751,14 +751,14 @@ body {
   animation: failure-glow 1.4s ease-out;
 }
 
-/* [P1] Inset-ring register — loud moment, restrained shape. No outer neon spread. */
+/* [P1] Inset-ring register - loud moment, restrained shape. No outer neon spread. */
 @keyframes completion-glow {
   0%   { box-shadow: inset 0 0 0 0 color-mix(in oklab, var(--state-complete) 80%, transparent); border-color: var(--state-complete); }
   25%  { box-shadow: inset 0 0 0 2px color-mix(in oklab, var(--state-complete) 90%, transparent); border-color: var(--state-complete); }
   100% { box-shadow: inset 0 0 0 0 color-mix(in oklab, var(--state-complete) 0%, transparent); }
 }
 
-/* Failure contracts inward — different somatic feel from success */
+/* Failure contracts inward - different somatic feel from success */
 @keyframes failure-glow {
   0%   { box-shadow: inset 0 0 0 4px color-mix(in oklab, var(--state-failed) 70%, transparent); border-color: var(--state-failed); }
   40%  { box-shadow: inset 0 0 0 2px color-mix(in oklab, var(--state-failed) 85%, transparent); border-color: var(--state-failed); }
@@ -776,7 +776,7 @@ body {
   animation: failure-glow 1.4s ease-out;
 }
 
-/* Focus flash — plays once when a card is programmatically focused (e.g. a spawned guided-setup
+/* Focus flash - plays once when a card is programmatically focused (e.g. a spawned guided-setup
    session). Accent-tinted inset ring, same restrained register as completion-flash. */
 .session-card.focus-flash {
   animation: focus-glow 1s ease-out;
@@ -788,7 +788,7 @@ body {
   100% { box-shadow: inset 0 0 0 0 color-mix(in oklab, var(--accent) 0%, transparent); }
 }
 
-/* btn-minimize removed — drag handle now toggles minimize */
+/* btn-minimize removed - drag handle now toggles minimize */
 
 /* State-driven card borders */
 .session-card[data-state="RUNNING"] {
@@ -814,7 +814,7 @@ body {
 
 /* FAILED keeps a steady (non-animated) tinted ring at rest so an outcome that
    landed while the operator was on another tab stays legible across a wall of
-   cards — louder than the quiet states, quieter than WAITING's pulse. */
+   cards - louder than the quiet states, quieter than WAITING's pulse. */
 .session-card[data-state="FAILED"] {
   border-color: color-mix(in oklab, var(--state-failed) 50%, transparent);
   box-shadow: 0 0 0 1px color-mix(in oklab, var(--state-failed) 18%, transparent),
@@ -862,21 +862,21 @@ body {
 }
 
 .session-card[data-skip-perms] .session-card-header {
-  /* [P1] Flattened 135° gradient to a flat brand-tinted surface — .perms-badge already signals the state */
+  /* [P1] Flattened 135° gradient to a flat brand-tinted surface - .perms-badge already signals the state */
   background: color-mix(in oklab, var(--perms-warn) 6%, var(--bg-surface));
 }
 
 .perms-badge {
   display: inline-flex;
   align-items: center;
-  /* [P2] 10px → 11px — improved legibility in operator-console context */
+  /* [P2] 10px → 11px - improved legibility in operator-console context */
   font-size: 11px;
   font-family: var(--font-mono);
   font-weight: 700;
   letter-spacing: 0.08em;
   padding: 0 6px;
   border-radius: 2px;
-  /* [P1] Replaced hardcoded #d97706 and border-left: 2px — use token + full 1px border */
+  /* [P1] Replaced hardcoded #d97706 and border-left: 2px - use token + full 1px border */
   color: var(--perms-warn);
   border: 1px solid var(--perms-warn);
   background: color-mix(in srgb, var(--perms-warn) 16%, transparent);
@@ -886,7 +886,7 @@ body {
 
 /* Linked-worktree marker. Hidden by default; shown only when the card carries
    data-worktree (set at build time, toggled live by setSessionWorktree on the
-   session-git delta). Mirrors .perms-badge but in the accent tone — it is
+   session-git delta). Mirrors .perms-badge but in the accent tone - it is
    informational, not a warning. */
 .worktree-badge {
   display: none;
@@ -993,7 +993,7 @@ body {
   gap: 5px;
   padding: 0 8px;
   border-radius: 2px;
-  /* [P2] 10px → 11px — improved legibility on main cards; minimized bar overrides to 10px */
+  /* [P2] 10px → 11px - improved legibility on main cards; minimized bar overrides to 10px */
   font-size: 11px;
   font-family: var(--font-mono);
   font-weight: 700;
@@ -1004,7 +1004,7 @@ body {
   transition: color var(--transition-fast);
 }
 
-/* [coordination] ::before dot removed — js-semantics adds .has-glyph + glyph span instead */
+/* [coordination] ::before dot removed - js-semantics adds .has-glyph + glyph span instead */
 /* Fixed glyph column: differing glyph widths (●◆■▲◇○◌◐◍) never nudge the label
    start. Spacing to the label is the badge's `gap` (one rhythm, not gap+margin). */
 .state-glyph {
@@ -1018,10 +1018,10 @@ body {
 /* Reserved status slot: the label fills a constant-width box sized to the widest
    label ("Needs Input" = 11 chars). The reserve is 11ch (mono cell advance) plus
    the tracking term: .state-badge sets letter-spacing 0.08em (inherited here), so
-   11 glyphs add ~11 x 0.08em ≈ 0.88em that a bare 11ch ignores — without it a
+   11 glyphs add ~11 x 0.08em ≈ 0.88em that a bare 11ch ignores - without it a
    RUNNING -> WAITING change still nudges the row by a few px. With the variable
    badge in the header's left zone and the tags/actions right-anchored past the
-   spacer, the header is dimensionally rigid — the YOLO/worktree tags can no
+   spacer, the header is dimensionally rigid - the YOLO/worktree tags can no
    longer slide on a state change. Scoped to .session-badge so only the header
    status reserves. */
 .session-badge .state-label {
@@ -1069,7 +1069,7 @@ body {
   background: transparent;
   color: var(--text);
   transition: background var(--transition-fast), color var(--transition-fast);
-  /* [P1] Touch target extension — visual size unchanged */
+  /* [P1] Touch target extension - visual size unchanged */
   position: relative;
 }
 
@@ -1176,7 +1176,7 @@ body {
   padding: 10px 24px;
   border: 1px solid var(--accent-dim);
   border-radius: var(--radius);
-  /* Accent-outline at rest (was a 10% fill) — one primary-button rest treatment
+  /* Accent-outline at rest (was a 10% fill) - one primary-button rest treatment
      across the app: header +Session, dialog Confirm, team Run, this CTA. */
   background: transparent;
   color: var(--accent);
@@ -1228,7 +1228,7 @@ body {
 }
 
 /* ── Scrollbar ────────────────────────────────────────────── */
-/* [P2] Widened from 5px to 10px — mouse-draggable target */
+/* [P2] Widened from 5px to 10px - mouse-draggable target */
 ::-webkit-scrollbar        { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track  { background: transparent; }
 ::-webkit-scrollbar-thumb  { background: var(--border); border-radius: 5px; }
@@ -1324,7 +1324,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  /* [P1] Tokenized scrim; [P2] backdrop-filter removed — black scrim alone does the job */
+  /* [P1] Tokenized scrim; [P2] backdrop-filter removed - black scrim alone does the job */
   background: var(--scrim);
   animation: dialogFadeIn 150ms ease;
 }
@@ -1430,7 +1430,7 @@ body {
 .btn-dialog-confirm {
   color: var(--accent);
   border-color: var(--accent-dim);
-  /* Accent-outline at rest (was an 8% fill) — see .sessions-empty-cta note. */
+  /* Accent-outline at rest (was an 8% fill) - see .sessions-empty-cta note. */
   background: transparent;
 }
 
@@ -1462,7 +1462,7 @@ body {
   color: var(--state-failed);
   font-family: var(--font-mono);
   font-size: 12px;
-  /* [P2] Decorative glassmorphism removed — tinted background is sufficient */
+  /* [P2] Decorative glassmorphism removed - tinted background is sufficient */
   transition: opacity 400ms ease;
 }
 
@@ -1488,7 +1488,7 @@ body {
   background: transparent;
   cursor: pointer;
   transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
-  /* [P1] Touch target extension to ≥44×44 — visual size unchanged */
+  /* [P1] Touch target extension to ≥44×44 - visual size unchanged */
   position: relative;
 }
 
@@ -1575,7 +1575,7 @@ body {
   background: var(--border);
 }
 
-/* [P2] Mono-safe glyph column for menu items — keeps labels aligned */
+/* [P2] Mono-safe glyph column for menu items - keeps labels aligned */
 .menu-item-glyph {
   display: inline-block;
   width: 1.2em;
@@ -1602,7 +1602,7 @@ body {
   width: 560px;
 }
 
-/* [P2] Settings tab strip — replaces single-scroll section stack */
+/* [P2] Settings tab strip - replaces single-scroll section stack */
 .settings-tabs {
   display: flex;
   gap: 2px;
@@ -1692,7 +1692,7 @@ body {
 
 .dialog-hint {
   font-family: var(--font-mono);
-  /* [P2] 9px → 10px — sub-10px forbidden */
+  /* [P2] 9px → 10px - sub-10px forbidden */
   font-size: 10px;
   color: var(--text-muted);
   letter-spacing: 0.02em;
@@ -1804,7 +1804,7 @@ body {
   font-size: 16px;
   cursor: pointer;
   transition: background var(--transition-fast), color var(--transition-fast);
-  /* [P1] Touch target extension — visual size unchanged */
+  /* [P1] Touch target extension - visual size unchanged */
   position: relative;
 }
 
@@ -2164,7 +2164,7 @@ body[data-active-view="teams"] #minimized-bar { display: none; }
   padding: 20px clamp(16px, 2vw, 28px) 22px;
 }
 
-/* Band 1: header (scan line) — roster -> target, live status, next run. */
+/* Band 1: header (scan line) - roster -> target, live status, next run. */
 .team-panel-head {
   display: flex;
   align-items: flex-start;
@@ -2580,7 +2580,7 @@ body[data-active-view="teams"] #minimized-bar { display: none; }
   color: var(--text-muted);
 }
 
-/* Band 4: recent runs — each row expands to its summary + artifact-open buttons. */
+/* Band 4: recent runs - each row expands to its summary + artifact-open buttons. */
 /* Conversation pane: live feed (system lines + agent questions) + operator input. Non-terminal: a small
    message log, not an xterm. */
 /* The conversation is part of a run, so it stays hidden on an idle panel (no dead, disabled input);
@@ -2886,6 +2886,9 @@ body[data-active-view="focus"] #minimized-bar { display: none; }
   gap: 10px;
 }
 .focus-card-slot { flex: 1 1 auto; min-height: 0; display: flex; }
+/* No card borrowed in → collapse the slot so it stops grabbing the column's free space and the
+   empty-state placeholder (.focus-empty, margin:auto) centers in the middle instead of pinning top. */
+.focus-card-slot:empty { flex: 0 0 auto; }
 .focus-center .session-card.focus-centered {
   flex: 1 1 auto;
   width: 100%;
@@ -3098,7 +3101,7 @@ body[data-active-view="focus"] #minimized-bar { display: none; }
   grid-column: 1 / -1;
 }
 
-/* One-shot enter flourish — lives on a namespaced class so it doesn't
+/* One-shot enter flourish - lives on a namespaced class so it doesn't
    clobber continuous animations on .maximized (e.g. waiting-pulse). */
 .session-card.maximized.entering {
   animation: maximize-in 280ms cubic-bezier(0.22, 1, 0.36, 1) both;
@@ -3144,7 +3147,7 @@ body[data-active-view="focus"] #minimized-bar { display: none; }
 
 /* ── Responsive ──────────────────────────────────────────── */
 
-/* Narrow desktop / small laptop — tighter gaps, single-col split fallback */
+/* Narrow desktop / small laptop - tighter gaps, single-col split fallback */
 @media (max-width: 960px) {
   .sessions {
     gap: 12px;
@@ -3155,7 +3158,7 @@ body[data-active-view="focus"] #minimized-bar { display: none; }
   }
 }
 
-/* Very narrow window — wrap header, compact gaps */
+/* Very narrow window - wrap header, compact gaps */
 @media (max-width: 640px) {
   .sessions {
     gap: 8px;

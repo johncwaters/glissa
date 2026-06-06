@@ -18,6 +18,8 @@ let railEl = null;
 let centerEl = null;
 let cardSlotEl = null;
 let emptyEl = null;
+let emptyTitleEl = null;
+let emptyDescEl = null;
 
 let active = false;
 let focusedId = null;
@@ -32,14 +34,16 @@ export function mountFocusView({ rail, center }) {
 
   emptyEl = document.createElement('div');
   emptyEl.className = 'focus-empty';
-  emptyEl.innerHTML = '<p class="focus-empty-title">Nothing to focus</p>'
-    + '<p class="focus-empty-desc">Spawn a session to start watching.</p>';
+  emptyEl.innerHTML = '<p class="focus-empty-title"></p>'
+    + '<p class="focus-empty-desc"></p>';
+  emptyTitleEl = emptyEl.querySelector('.focus-empty-title');
+  emptyDescEl = emptyEl.querySelector('.focus-empty-desc');
 
   cardSlotEl = document.createElement('div');
   cardSlotEl.className = 'focus-card-slot';
 
   // The review gate lives on the card itself (card-review-bar), so the borrowed card brings it into
-  // the center — no separate Focus review UI needed.
+  // the center - no separate Focus review UI needed.
   centerEl.append(emptyEl, cardSlotEl);
 
   railEl.addEventListener('keydown', onRailKeydown);
@@ -160,7 +164,7 @@ function borrowToCenter(ui, id) {
   ui.card.classList.remove('minimized');
   ui.card.classList.add('focus-centered');
   cardSlotEl.appendChild(ui.card);
-  // The card may be slept (term disposed by minimize) or dormant (never built) — ensure a live
+  // The card may be slept (term disposed by minimize) or dormant (never built) - ensure a live
   // terminal so the center is not a blank box. ensureTerminalSetup does NOT spawn a PTY for a dormant
   // session; it only builds the xterm, so this is safe.
   if (ui.sleeping) wakeSession(id);
@@ -201,7 +205,15 @@ function focusSession(id) {
 
 function updateCenter() {
   const has = !!(focusedId && sessionUIs.has(focusedId));
-  emptyEl.hidden = has || sessionUIs.size > 0;
+  emptyEl.hidden = has;
+  if (has) return;
+  // Two empty states: sessions exist but none is selected yet (the default on every open), vs. no
+  // sessions at all. The first directs the operator to the rail; the second to spawn a session.
+  const hasSessions = sessionUIs.size > 0;
+  emptyTitleEl.textContent = hasSessions ? 'No session selected' : 'Nothing to focus';
+  emptyDescEl.textContent = hasSessions
+    ? 'Select a session from the rail on the left to focus it here.'
+    : 'Spawn a session to start watching.';
 }
 
 // ── External hooks (called from app.js) ──
@@ -216,15 +228,10 @@ export function setFocusMergeStatus(id, mergeStatus) {
 export function activateFocusView() {
   if (!railEl) return;
   active = true;
-  const order = orderedSessions();
-  const targetId = (focusedId && sessionUIs.has(focusedId))
-    ? focusedId
-    : (order[0] ? order[0].id : null);
-  focusedId = null; // releaseCenter no-op on (re)entry
-  if (targetId) {
-    focusedId = targetId;
-    borrowToCenter(sessionUIs.get(targetId), targetId);
-  }
+  // Opening Focus never auto-selects a session: it starts on the placeholder and the operator picks
+  // one from the rail. (No order[0] auto-focus - the empty center is intentional.) releaseCenter
+  // returns any stray centered card home and clears focusedId, so this is always a clean start.
+  releaseCenter();
   refreshFocusRoster();
 }
 
