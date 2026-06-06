@@ -658,6 +658,9 @@ function createBackend(httpServer, options = {}) {
         type: 'session-merge-status', id: sess.id, session: sess.name,
         mergeStatus, reason: reason || null, parked: !!parked, timestamp: Date.now(),
       });
+      // A merge/discard clears the worktree (isWorktree flips) but refreshGitContext can't see the
+      // change once worktreeDir is null, so push the badge state explicitly here.
+      broadcastControl({ type: 'session-git', id: sess.id, worktree: !!sess.isWorktree });
     });
     sess.on('worktree-blocked', ({ branch, notice }) => {
       broadcastControl({

@@ -161,7 +161,7 @@ const messageHandlers = {
   'session-added':      (msg) => { if (!msg.ephemeral) knownProjects.set(msg.id, msg.session); if (!hasSession(msg.id)) { clearEmptyPlaceholder(); createSessionCard(msg.id, msg.session, msg.state, { skipPerms: !!msg.skipPerms, worktree: !!msg.worktree }); } autoLayout(); if (isFocusActive()) refreshFocusRoster(); },
   'session-removed':    (msg) => { knownProjects.delete(msg.id); removeSessionCard(msg.id); autoLayout(); if (isFocusActive()) refreshFocusRoster(); },
   'session-renamed':    (msg) => { if (knownProjects.has(msg.id)) knownProjects.set(msg.id, msg.newName); renameSessionCard(msg.id, msg.newName); },
-  'session-modified':   (msg) => { if (!msg.ephemeral) knownProjects.set(msg.id, msg.session); removeSessionCard(msg.id); clearEmptyPlaceholder(); createSessionCard(msg.id, msg.session, msg.state, { skipPerms: !!msg.skipPerms, worktree: !!msg.worktree }); autoLayout(); },
+  'session-modified':   (msg) => { if (!msg.ephemeral) knownProjects.set(msg.id, msg.session); removeSessionCard(msg.id); clearEmptyPlaceholder(); createSessionCard(msg.id, msg.session, msg.state, { skipPerms: !!msg.skipPerms, worktree: !!msg.worktree }); autoLayout(); if (isFocusActive()) refreshFocusRoster(); },
   'session-git':        (msg) => setSessionWorktree(msg.id, !!msg.worktree),
   'session-merge-status': (msg) => { setFocusMergeStatus(msg.id, msg.mergeStatus); },
   'session-worktree-blocked': (msg) => { showErrorToast(`${msg.session}: ${msg.notice || 'integration branch not found'}`); },
@@ -294,6 +294,9 @@ function activateView(view) {
   if (view === 'teams') {
     mountTeamsView(viewTeamsEl, getKnownProjects());
   } else if (view === 'focus') {
+    // Clear any Sessions-view maximize so its module-global state doesn't dangle while Focus borrows
+    // a card into the center (otherwise the Sessions view returns in a half-maximized layout).
+    exitMaximizeMode();
     activateFocusView();
   } else {
     // Session terminals were display:none under another tab — re-fit on return.

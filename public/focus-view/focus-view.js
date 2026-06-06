@@ -11,7 +11,8 @@
 import { STATES, BADGE_LABELS, STATE_GLYPHS } from '/shared/states.mjs';
 import { sendControlMsg } from '../control-ws.js';
 import { sessionUIs, container } from '../session-card/card-registry.js';
-import { forceTerminalRepaint } from '../session-card/terminal.js';
+import { ensureTerminalSetup, forceTerminalRepaint } from '../session-card/terminal.js';
+import { wakeSession } from '../session-card/layout.js';
 
 let railEl = null;
 let centerEl = null;
@@ -83,7 +84,7 @@ function orderedSessions() {
 }
 
 function sessionName(ui) {
-  return ui.nameEl ? ui.nameEl.textContent : (ui.card ? ui.card.dataset.id : '');
+  return ui.nameEl ? ui.nameEl.textContent : (ui.card ? (ui.card.dataset.session || ui.card.dataset.id) : '');
 }
 
 // ── Rail pills ──
@@ -132,31 +133,45 @@ export function refreshFocusRoster() {
   for (const [id, pill] of pillById) {
     if (!seen.has(id)) { pill.remove(); pillById.delete(id); }
   }
-  // The focused session may have vanished (removed/merged-away).
+  // Prune merge-status for gone sessions (the rest of the module is careful not to leak).
+  for (const id of [...mergeStatusById.keys()]) {
+    if (!sessionUIs.has(id)) mergeStatusById.delete(id);
+  }
+  // Resolve the center: a vanished focus re-targets the top of the roster; a focused card that was
+  // displaced or REBUILT (e.g. a session-modified rebuild) is re-borrowed back into the center.
   if (focusedId && !sessionUIs.has(focusedId)) {
     focusedId = null;
     const next = order.find((o) => sessionUIs.has(o.id));
-    if (next) focusSession(next.id); else updateCenter();
-  } else {
-    updateCenter();
+    if (next) { focusSession(next.id); return; }
+  } else if (focusedId) {
+    const ui = sessionUIs.get(focusedId);
+    if (ui && ui.card.parentElement !== cardSlotEl) borrowToCenter(ui, focusedId);
   }
+  updateCenter();
 }
 
 // ── Center: borrow the focused card, run the review bar ──
 
-function borrowToCenter(ui) {
+function borrowToCenter(ui, id) {
   ui.card._focusHome = { parent: ui.card.parentElement, next: ui.card.nextElementSibling };
   ui.card._focusWasMinimized = ui.card.classList.contains('minimized');
   ui.card.classList.remove('minimized');
   ui.card.classList.add('focus-centered');
   cardSlotEl.appendChild(ui.card);
+  // The card may be slept (term disposed by minimize) or dormant (never built) — ensure a live
+  // terminal so the center is not a blank box. ensureTerminalSetup does NOT spawn a PTY for a dormant
+  // session; it only builds the xterm, so this is safe.
+  if (ui.sleeping) wakeSession(id);
+  else if (!ui.term) ensureTerminalSetup(ui, id);
+  // Deterministic fit to the (much larger) center rather than waiting on the ResizeObserver.
+  ui._applyFit?.();
   forceTerminalRepaint(ui);
 }
 
 function releaseCenter() {
   if (!focusedId) return;
   const ui = sessionUIs.get(focusedId);
-  if (ui && ui.card) {
+  if (ui && ui.card && ui.card.parentElement === cardSlotEl) {
     ui.card.classList.remove('focus-centered');
     if (ui.card._focusWasMinimized) ui.card.classList.add('minimized');
     const home = ui.card._focusHome;
@@ -168,6 +183,7 @@ function releaseCenter() {
     }
     delete ui.card._focusHome;
     delete ui.card._focusWasMinimized;
+    ui._applyFit?.();
     forceTerminalRepaint(ui);
   }
   focusedId = null;
@@ -177,7 +193,7 @@ function focusSession(id) {
   if (!active || !sessionUIs.has(id) || id === focusedId) return;
   releaseCenter();
   focusedId = id;
-  borrowToCenter(sessionUIs.get(id));
+  borrowToCenter(sessionUIs.get(id), id);
   diffEl.hidden = true; diffEl.textContent = '';
   refreshFocusRoster();
 }
@@ -245,7 +261,7 @@ export function activateFocusView() {
   focusedId = null; // releaseCenter no-op on (re)entry
   if (targetId) {
     focusedId = targetId;
-    borrowToCenter(sessionUIs.get(targetId));
+    borrowToCenter(sessionUIs.get(targetId), targetId);
   }
   refreshFocusRoster();
 }
