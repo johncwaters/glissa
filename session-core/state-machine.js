@@ -64,7 +64,8 @@ const TRANSITIONS = Object.freeze({
 // Guards: return true if transition is allowed, false otherwise
 const GUARDS = {
   spawn_success(session) {
-    return fs.existsSync(session.path);
+    // Verify the dir the PTY was spawned in actually exists — the worktree when isolated, else path.
+    return fs.existsSync(session.worktreeDir || session.path);
   },
   user_restart(session) {
     return session.state === STATES.DONE || session.state === STATES.FAILED;
@@ -79,7 +80,8 @@ const ENTRY_HOOKS = {
     session.emit("post-turn-check", {
       id: session.id,
       name: session.name,
-      path: session.path,
+      // The worktree when isolated, so the auto-fixer edits the worktree, never the real checkout.
+      path: session.worktreeDir || session.path,
     });
   },
   [STATES.WAITING](session) {

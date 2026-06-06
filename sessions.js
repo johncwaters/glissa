@@ -2,8 +2,9 @@ const fs = require("node:fs");
 const path = require("node:path");
 const pty = require("node-pty");
 const { EventEmitter } = require("node:events");
-const { execSync } = require("node:child_process");
+const { execSync, execFileSync } = require("node:child_process");
 const { STATES } = require("./shared/states");
+const { linkNodeModules } = require("./teamlib/team-git");
 const { createOscTitleSource } = require("./detection/osc-title-source");
 const { createStatusSource } = require("./detection/status-source");
 const { writeSessionSettings } = require("./detection/settings-injector");
@@ -89,6 +90,11 @@ class Session extends EventEmitter {
     // PTY spawner seam. Defaults to node-pty; tests inject a fake to assert the
     // spawn wiring (file/args) without launching a real process.
     ptySpawn = null,
+    // Worktree isolation (injected by backend). When gitWorkspace + integrationBranch are present and
+    // `path` is a git repo, the session runs in a throwaway worktree forked off integrationBranch and
+    // merges back on review. Absent (unit tests, no-git) -> runs in place at `path` exactly as before.
+    gitWorkspace = null,
+    integrationBranch = null,
   }) {
     super();
     this.id = id;
@@ -141,6 +147,15 @@ class Session extends EventEmitter {
     this.ephemeral = !!ephemeral;
     this._settingsPermissions = settingsPermissions;
     this._ptySpawn = ptySpawn || ((file, args, opts) => pty.spawn(file, args, opts));
+
+    // -- Worktree isolation state (see _provisionWorktree / _settleWorktreeOnExit) --
+    this._gitWorkspace = gitWorkspace;
+    this._integrationBranch = integrationBranch;
+    this.worktreeDir = null;     // active session worktree cwd (null = in-place at this.path)
+    this.baseSha = null;         // integration-branch SHA the worktree forked from
+    this._workspace = null;      // opaque team-git workspace handle for merge/discard
+    this.mergeStatus = 'none';   // none | pending-review | merging | parked | merged
+    this.worktreeNotice = null;  // operator-facing blocker (e.g. integration branch missing)
 
     this._titleSource = createOscTitleSource({ stabilizationMs: titleStabilizationMs });
     this._statusSource = createStatusSource({
@@ -205,6 +220,8 @@ class Session extends EventEmitter {
       dangerouslySkipPermissions: this.dangerouslySkipPermissions,
       ephemeral: this.ephemeral,
       isWorktree: this.isWorktree,
+      mergeStatus: this.mergeStatus,
+      worktreeNotice: this.worktreeNotice,
       auditLog: this.auditLog.slice(-100),
     };
   }
@@ -213,10 +230,144 @@ class Session extends EventEmitter {
   // worktree mid-session). Returns true when the value changed so the caller can
   // rebroadcast just the delta instead of recreating the card.
   refreshGitContext() {
-    const next = detectLinkedWorktree(this.path);
+    const next = detectLinkedWorktree(this.worktreeDir || this.path);
     if (next === this.isWorktree) return false;
     this.isWorktree = next;
     return true;
+  }
+
+  // The directory the PTY actually runs in: the isolated worktree when provisioned, else the repo
+  // root / in-place path. Single source of truth for cwd, worktree detection, and the review diff.
+  effectiveCwd() {
+    return this.worktreeDir || this.path;
+  }
+
+  // Create (or reuse) this session's isolated worktree off the integration branch. Returns false ONLY
+  // when isolation is required but BLOCKED (integration branch absent): the session then stays put with
+  // a surfaced notice and never runs in the operator's real tree. Isolation disabled (no injected
+  // gitWorkspace/integrationBranch) or a non-git path -> runs in place (returns true, worktreeDir null).
+  _provisionWorktree() {
+    if (!this._gitWorkspace || !this._integrationBranch) return true;
+    if (this.worktreeDir && fs.existsSync(this.worktreeDir)) return true; // reuse across restart/wake
+    let ws;
+    try {
+      ws = this._gitWorkspace.create({
+        projectPath: this.path,
+        teamId: "session",
+        label: this.id,
+        baseBranch: this._integrationBranch,
+        outputPath: "",
+      });
+    } catch (err) {
+      console.warn(`[session ${this.id}] worktree create failed: ${err.message} — running in place`);
+      return true;
+    }
+    if (ws && ws.reason === "no-base-branch") {
+      this.worktreeNotice = `Integration branch "${this._integrationBranch}" not found. Create it, then start this session.`;
+      this.emit("worktree-blocked", { id: this.id, branch: this._integrationBranch, notice: this.worktreeNotice });
+      return false;
+    }
+    if (!ws || !ws.isGit) { // non-git path: the ONLY in-place fallback
+      this.worktreeDir = null;
+      this.isWorktree = false;
+      return true;
+    }
+    this._workspace = ws;
+    this.worktreeDir = ws.cwd;
+    this.baseSha = ws.baseSha || null;
+    this.worktreeNotice = null;
+    this.mergeStatus = "none";
+    this.isWorktree = true;
+    try { linkNodeModules(this.path, ws.cwd); } catch { /* best-effort */ }
+    this.emit("worktree-ready", { id: this.id, worktreeDir: ws.cwd, branch: ws.branch });
+    return true;
+  }
+
+  // On a real PTY exit (DONE/FAILED) decide the review gate: a changed worktree becomes
+  // pending-review (the operator merges/discards); an unchanged one (chat/research) is discarded
+  // silently so it leaves no branch. Transient COMPLETE never reaches here (it has no PTY exit).
+  _settleWorktreeOnExit() {
+    if (!this._gitWorkspace || !this._workspace) return;
+    if (this.state !== STATES.DONE && this.state !== STATES.FAILED) return;
+    if (this.hasChanges()) {
+      this._setMergeStatus("pending-review");
+    } else {
+      try { this._gitWorkspace.discard({ projectPath: this.path, workspace: this._workspace }); } catch { /* best-effort */ }
+      this._workspace = null;
+      this.worktreeDir = null;
+      this.isWorktree = false;
+      this._setMergeStatus("none");
+    }
+  }
+
+  _setMergeStatus(status, extra = {}) {
+    this.mergeStatus = status;
+    this.emit("merge-status", { id: this.id, mergeStatus: status, ...extra });
+  }
+
+  // True when the worktree has any uncommitted change vs its base, COUNTING untracked new files
+  // (a feature session's deliverable is usually new files, which a plain `git diff` would miss).
+  hasChanges() {
+    if (!this.worktreeDir) return false;
+    try {
+      const out = execFileSync("git", ["status", "--porcelain"], {
+        cwd: this.worktreeDir, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 10000,
+      });
+      return out.trim().length > 0;
+    } catch { return false; }
+  }
+
+  // Unified diff of the worktree vs its base, with NEW files made visible via intent-to-add.
+  getDiff() {
+    if (!this.worktreeDir) return { stat: "", diff: "" };
+    const g = (args) => {
+      try {
+        return execFileSync("git", args, { cwd: this.worktreeDir, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 15000 });
+      } catch (e) { return String(e.stdout || ""); }
+    };
+    g(["add", "-N", "--", "."]); // intent-to-add so new files appear in the diff
+    return { stat: g(["diff", "--stat"]).trim(), diff: g(["diff"]) };
+  }
+
+  // Operator action: rebase-then-FF merge the session's worktree into the integration branch, then
+  // tear it down. On a conflict/lost-FF the branch PARKS (worktree preserved). Returns the engine result.
+  mergeWorktree() {
+    if (!this._gitWorkspace || !this._workspace) return { merged: false, reason: "no-worktree" };
+    this._setMergeStatus("merging");
+    let r;
+    try {
+      r = this._gitWorkspace.mergeBack({
+        projectPath: this.path,
+        workspace: this._workspace,
+        targetBranch: this._integrationBranch,
+        message: `glissa session: ${this.name}`,
+      });
+    } catch (err) {
+      this._setMergeStatus("pending-review", { reason: err.message });
+      return { merged: false, reason: err.message };
+    }
+    if (r.merged) {
+      this._workspace = null;
+      this.worktreeDir = null;
+      this.isWorktree = false;
+      this._setMergeStatus("merged");
+    } else if (r.parked) {
+      this._setMergeStatus("parked", { reason: r.reason || null });
+    } else {
+      this._setMergeStatus("pending-review", { reason: r.reason || null });
+    }
+    return r;
+  }
+
+  // Operator action: throw the worktree away unmerged (junction-safe), reset to no-worktree.
+  discardWorktree() {
+    if (this._gitWorkspace && this._workspace) {
+      try { this._gitWorkspace.discard({ projectPath: this.path, workspace: this._workspace }); } catch { /* best-effort */ }
+    }
+    this._workspace = null;
+    this.worktreeDir = null;
+    this.isWorktree = false;
+    this._setMergeStatus("none");
   }
 
   getDetectionStats() {
@@ -356,6 +507,10 @@ class Session extends EventEmitter {
       }
       this.ptyProcess = null;
     }
+    // Provision (or reuse) this session's isolated worktree before spawn. All spawn entry points
+    // funnel through start(), so each inherits isolation. A blocked provision (integration branch
+    // absent) leaves the session DORMANT with a notice and does NOT run in the operator's real tree.
+    if (!this._provisionWorktree()) return;
     if (this.state === STATES.DORMANT) {
       this.transition("user_start");
     }
@@ -413,7 +568,7 @@ class Session extends EventEmitter {
         name: "xterm-256color",
         cols: spawnCols,
         rows: spawnRows,
-        cwd: this.path,
+        cwd: this.effectiveCwd(),
         env,
       });
     } catch (err) {
@@ -433,7 +588,7 @@ class Session extends EventEmitter {
       ? args.map((a) => (a === this._initialPrompt ? `<prompt:${this._initialPrompt.length}c>` : a)).join(" ")
       : args.join(" ");
     console.log(
-      `[session ${this.id}] spawn: ${file} ${argsForLog} (cwd=${this.path})`,
+      `[session ${this.id}] spawn: ${file} ${argsForLog} (cwd=${this.effectiveCwd()})`,
     );
 
     if (this._recorder) {
@@ -598,6 +753,8 @@ class Session extends EventEmitter {
     } else {
       this.transition("process_exit_fail", { exitCode, signal });
     }
+
+    this._settleWorktreeOnExit();
 
     if (this._recorder) {
       this._recorder.writeFooter("pty_exit", exitCode);
