@@ -7,13 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Teams: `changelog` team**: A new on-demand team (analyst -> curator -> auditor -> announcer) reconciles `CHANGELOG.md` against git history and, on a final `SHIP`, drafts a release announcement in the project's voice (drafts only, never posted).
+- **Teams: operator conversation during a run**: A manual run can pause when a stage emits a `QUESTION` and resume once the operator answers in a chat pane, bounded by a question budget and timeout.
+- **Teams: project-level shared pack**: Cross-team pack files (voice-guide, avoid-list, brand) are filled once per project under `.glissa/pack/` and reused by every team that declares them as shared.
+- **Deterministic post-turn auto-fix on turn completion**: When a session completes a turn, Glissa runs text-hygiene fixes over its git-changed files (strip em and en dashes and ellipses, trim trailing whitespace, ensure a final newline, strip a UTF-8 BOM) and reports the result on the card; on by default.
+- **Jump to the next session needing input**: `Alt+W` moves focus to the next session in the `WAITING` state.
+
 ### Changed
 
-- **Teams: the `changelog` team now also drafts release announcements**: The changelog team gained an `announcer` final stage (replacing `reporter`) that, on a final `SHIP`, reads the just-curated changelog and drafts a human summary plus a release announcement in the project's voice (drafts only, never posted). The team's pack gains a required `announce-config.md` (release title and tag convention, announcement channel, voice, and avoid-list). Release notes are now derived from the audited changelog instead of re-scraped from git, and `scripts/release.js` already cuts the GitHub release body from that changelog. The auditor stays the single verdict gate, so the announcement can never block a correct changelog edit from merging.
+- **Notifications delivered via browser Web Notifications**: Notifications now raise a native browser notification by default; the BurntToast/msg path is demoted to opt-in via `osToast`, and a Desktop Notifications settings toggle gates the new channel.
+- **Skip-permissions (YOLO) is the session default**: New sessions spawn with `--dangerously-skip-permissions` unless their project opts out, and the Add Session dialog now offers an opt-out "Require permission prompts" (widening the localhost-only trust boundary).
+- **Legible minimized rail with peek tray**: Minimized cards are now status pills (glyph, label, and color) with a fly-up peek tray that shows the live terminal, replacing the single-dot 120px chip.
 
 ### Removed
 
-- **Teams: the standalone `release-notes` team**: Its researcher re-derived the same git range the changelog team already reconciles, and its publisher's GitHub release draft duplicated what `scripts/release.js` cuts from `CHANGELOG.md`. The one non-redundant piece, a voiced release announcement, is now the changelog team's `announcer`. Existing `release-notes` run history under `.glissa/teams/release-notes/` is kept as a record; any saved team activation for it is ignored.
+- **Teams: standalone `release-notes` team**: Removed; its git-range research and GitHub release draft are now covered by the `changelog` team's reconciliation and announcer.
+
+### Fixed
+
+- **Team run output stranded on its worktree branch**: An untracked header-only `log.md` blocked the fast-forward merge-back of a finished run; the merge-back now clears the blocking collisions first so the run lands in the project.
+- **Stale stage header in the Teams view**: The run header no longer sticks on the finished stage while the next stage spawns.
+- **Dropped terminal history on reconnect under backpressure**: A reconnect replay frame dropped under backpressure left scrollback history stranded; the drop now rewinds the send offset so the backfill re-pulls the missed history.
+- **WebGL glyph ghosts on expand and maximize**: Expanding or maximizing a card now forces a full repaint, so stale cached glyphs no longer linger.
 
 ## [0.13.0] - 2026-06-01
 
