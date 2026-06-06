@@ -147,6 +147,7 @@
           <nav class="header-tabs" id="header-tabs" role="tablist" aria-label="Primary views">
             <button class="header-tab" id="tab-sessions" role="tab" aria-selected="true" aria-controls="sessions-container" tabindex="0">Sessions</button>
             <button class="header-tab" id="tab-teams" role="tab" aria-selected="false" aria-controls="view-teams" tabindex="-1">Teams<span class="tab-activity" id="tab-teams-activity" aria-hidden="true"></span></button>
+            <button class="header-tab" id="tab-focus" role="tab" aria-selected="false" aria-controls="view-focus" tabindex="-1">Focus<span class="tab-exp" aria-hidden="true">EXP</span></button>
           </nav>
         </div>
         <div class="header-right">
@@ -179,6 +180,11 @@
       <div class="minimized-bar" id="minimized-bar" role="toolbar" aria-label="Minimized sessions" aria-keyshortcuts="Alt+W"></div>
       <!-- Teams view: dedicated tab space, mounted by teams-panel.js -->
       <section class="teams-view" id="view-teams" role="tabpanel" aria-labelledby="tab-teams" hidden></section>
+      <!-- Focus view (experimental): roster rail + single-focus center, mounted by focus-view.js -->
+      <section class="focus-view" id="view-focus" role="tabpanel" aria-labelledby="tab-focus" hidden>
+        <nav class="focus-rail" id="focus-rail" role="listbox" aria-label="Session roster" aria-keyshortcuts="ArrowUp ArrowDown"></nav>
+        <div class="focus-center" id="focus-center"></div>
+      </section>
     </main>
     <!-- Health monitor footer injected by health-monitor.js -->
     <div id="health-footer-mount"></div>

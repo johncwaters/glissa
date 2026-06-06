@@ -15,6 +15,7 @@ import { applyState, applyTerminalSettings, createSessionCard, focusNextWaiting,
 import { reconnectDataWs } from './session-card/terminal.js';
 import { showErrorToast } from './session-card/toast.js';
 import { handleTeamMessage, mountTeamsView, setTabActivityCallback } from './teams-panel.js';
+import { activateFocusView, deactivateFocusView, isFocusActive, mountFocusView, refreshFocusRoster, setFocusDiff, setFocusMergeStatus } from './focus-view/focus-view.js';
 import { applyTheme } from './theme.js';
 import { getThemeId, isSoundEnabled, pruneStale, setSoundEnabled } from './ui-prefs.js';
 
@@ -143,6 +144,7 @@ function handleStateChange(msg) {
   }
 
   applyState(msg.id, msg.to);
+  if (isFocusActive()) refreshFocusRoster();
 
   // Live-update debug overlay on state change
   handleDebugStateRefresh(msg.id);
@@ -156,11 +158,15 @@ function handleStateChange(msg) {
 const messageHandlers = {
   'snapshot':           (msg) => handleSnapshot(msg.sessions),
   'state-change':       (msg) => handleStateChange(msg),
-  'session-added':      (msg) => { if (!msg.ephemeral) knownProjects.set(msg.id, msg.session); if (!hasSession(msg.id)) { clearEmptyPlaceholder(); createSessionCard(msg.id, msg.session, msg.state, { skipPerms: !!msg.skipPerms, worktree: !!msg.worktree }); } autoLayout(); },
-  'session-removed':    (msg) => { knownProjects.delete(msg.id); removeSessionCard(msg.id); autoLayout(); },
+  'session-added':      (msg) => { if (!msg.ephemeral) knownProjects.set(msg.id, msg.session); if (!hasSession(msg.id)) { clearEmptyPlaceholder(); createSessionCard(msg.id, msg.session, msg.state, { skipPerms: !!msg.skipPerms, worktree: !!msg.worktree }); } autoLayout(); if (isFocusActive()) refreshFocusRoster(); },
+  'session-removed':    (msg) => { knownProjects.delete(msg.id); removeSessionCard(msg.id); autoLayout(); if (isFocusActive()) refreshFocusRoster(); },
   'session-renamed':    (msg) => { if (knownProjects.has(msg.id)) knownProjects.set(msg.id, msg.newName); renameSessionCard(msg.id, msg.newName); },
   'session-modified':   (msg) => { if (!msg.ephemeral) knownProjects.set(msg.id, msg.session); removeSessionCard(msg.id); clearEmptyPlaceholder(); createSessionCard(msg.id, msg.session, msg.state, { skipPerms: !!msg.skipPerms, worktree: !!msg.worktree }); autoLayout(); },
   'session-git':        (msg) => setSessionWorktree(msg.id, !!msg.worktree),
+  'session-merge-status': (msg) => { setFocusMergeStatus(msg.id, msg.mergeStatus); },
+  'session-worktree-blocked': (msg) => { showErrorToast(`${msg.session}: ${msg.notice || 'integration branch not found'}`); },
+  'session-worktree-ready': () => {},
+  'session-diff':       (msg) => { setFocusDiff(msg.id, msg.stat, msg.diff); },
   'post-turn-result':   (msg) => setSessionPostTurn(msg.id, msg),
   'sessions-reordered': (msg) => handleSessionsReordered(msg.order),
   'debug-state-response': (msg) => handleDebugStateResponse(msg),
@@ -251,37 +257,60 @@ document.getElementById('btn-settings').addEventListener('click', () => {
 // ── Primary view tabs (Sessions / Teams) ─────────────────────
 
 const viewTeamsEl = document.getElementById('view-teams');
+const viewFocusEl = document.getElementById('view-focus');
 const tabSessions = document.getElementById('tab-sessions');
 const tabTeams = document.getElementById('tab-teams');
+const tabFocus = document.getElementById('tab-focus');
 const tabActivityEl = document.getElementById('tab-teams-activity');
 
 setTabActivityCallback((active) => { tabActivityEl.classList.toggle('active', active); });
 
+mountFocusView({
+  rail: document.getElementById('focus-rail'),
+  center: document.getElementById('focus-center'),
+});
+
+// Primary views in tab-strip order. Adding a view = adding an entry here (N-way, not a boolean).
+const VIEW_TABS = [
+  { view: 'sessions', tab: tabSessions, el: null },
+  { view: 'teams',    tab: tabTeams,    el: viewTeamsEl },
+  { view: 'focus',    tab: tabFocus,    el: viewFocusEl },
+];
+
+let _activeView = 'sessions';
+
 function activateView(view) {
-  const teams = view === 'teams';
+  const prev = _activeView;
+  _activeView = view;
   document.body.dataset.activeView = view;
-  viewTeamsEl.hidden = !teams;
-  tabSessions.setAttribute('aria-selected', String(!teams));
-  tabSessions.tabIndex = teams ? -1 : 0;
-  tabTeams.setAttribute('aria-selected', String(teams));
-  tabTeams.tabIndex = teams ? 0 : -1;
-  if (teams) {
+  for (const v of VIEW_TABS) {
+    const selected = v.view === view;
+    if (v.el) v.el.hidden = !selected;
+    v.tab.setAttribute('aria-selected', String(selected));
+    v.tab.tabIndex = selected ? 0 : -1;
+  }
+  // Leaving Focus returns the borrowed card to the grid BEFORE we re-layout the Sessions view.
+  if (prev === 'focus' && view !== 'focus') deactivateFocusView();
+  if (view === 'teams') {
     mountTeamsView(viewTeamsEl, getKnownProjects());
+  } else if (view === 'focus') {
+    activateFocusView();
   } else {
-    // Session terminals were display:none under the Teams tab — re-fit on return.
+    // Session terminals were display:none under another tab — re-fit on return.
     autoLayout();
   }
 }
 
-tabSessions.addEventListener('click', () => activateView('sessions'));
-tabTeams.addEventListener('click', () => activateView('teams'));
-for (const tab of [tabSessions, tabTeams]) {
+for (let i = 0; i < VIEW_TABS.length; i++) {
+  const { view, tab } = VIEW_TABS[i];
+  tab.addEventListener('click', () => activateView(view));
   tab.addEventListener('keydown', (e) => {
     if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
     e.preventDefault();
-    const toTeams = tab === tabSessions;
-    activateView(toTeams ? 'teams' : 'sessions');
-    (toTeams ? tabTeams : tabSessions).focus();
+    const dir = e.key === 'ArrowRight' ? 1 : -1;
+    const next = (i + dir + VIEW_TABS.length) % VIEW_TABS.length;
+    activateView(VIEW_TABS[next].view);
+    VIEW_TABS[next].tab.focus();
   });
 }
 
