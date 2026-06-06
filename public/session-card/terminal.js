@@ -7,6 +7,7 @@ import { FitAddon } from '@xterm/addon-fit';
 import { Terminal } from '@xterm/xterm';
 import { renderScheduler } from '../render-scheduler.mjs';
 import { getTerminalTheme } from '../theme.js';
+import { noteSessionOutput } from './activity.js';
 import { sessionUIs } from './card-registry.js';
 import { showErrorToast } from './toast.js';
 import { tryLoadWebGL } from './webgl-pool.js';
@@ -16,7 +17,7 @@ import { tryLoadWebGL } from './webgl-pool.js';
 const RECONNECT_DELAY_MS = 500;
 const INPUT_QUEUE_MAX = 1024;
 
-// Terminal defaults — cursorBlink updated from server settings on connect
+// Terminal defaults - cursorBlink updated from server settings on connect
 // (applyTerminalSettings in lifecycle.js drives it through the setter below).
 const TERMINAL_SCROLLBACK = 50000;
 let _terminalCursorBlink = false;
@@ -54,13 +55,16 @@ function connectDataWs(sessionId, ui, term) {
   renderScheduler.register(sessionId, (data, cb) => term.write(data, cb));
 
   ws.addEventListener('message', (event) => {
+    // Content-blind liveness tap: time the chunk's arrival to drive the working heartbeat.
+    // Does not read event.data; the bytes still flow untouched through the render scheduler.
+    noteSessionOutput(ui);
     renderScheduler.enqueue(sessionId, event.data);
   });
 
   ws.addEventListener('close', () => {
     renderScheduler.unregister(sessionId);
     // Only auto-reconnect if this ws is still the current one (not replaced by rename)
-    // Skip reconnect when sleeping — wakeSession() will reconnect on expand
+    // Skip reconnect when sleeping - wakeSession() will reconnect on expand
     if (ui.dataWs === ws) {
       ui.dataWs = null;
       if (!ui.sleeping) {
@@ -127,7 +131,7 @@ export function setupTerminal(termWrap, ui) {
   // termWrap size → fit → push resize to PTY. RAF-coalesces burst fires
   // (window drag, maximize transition). The explicit send below the fit
   // covers the case where fit() proposes the same cols/rows xterm already
-  // has (no onResize event) but the PTY hasn't caught up yet — most often
+  // has (no onResize event) but the PTY hasn't caught up yet - most often
   // on first connect, where term starts at the default 80x24.
   let fitRafId = null;
   let lastSentCols = 0;
@@ -162,7 +166,7 @@ export function setupTerminal(termWrap, ui) {
   resizeObserver.observe(termWrap);
   ui.resizeObserver = resizeObserver;
   ui._applyFit = applyFit;
-  // Reset the lastSent cache so the next _applyFit unconditionally pushes —
+  // Reset the lastSent cache so the next _applyFit unconditionally pushes -
   // used on data-WS (re)connect, where the server-side PTY may have just
   // respawned and needs the current size even if the browser-side cols/rows
   // haven't changed.
@@ -177,7 +181,7 @@ export function setupTerminal(termWrap, ui) {
     applyFit();
   });
 
-  // Try WebGL — fall back to canvas silently
+  // Try WebGL - fall back to canvas silently
   tryLoadWebGL(ui);
 
   // Redraw all visible rows on scroll. RAF-coalesced so a burst of wheel
@@ -196,7 +200,7 @@ export function setupTerminal(termWrap, ui) {
   // emulator to write to the system clipboard via \x1b]52;c;<base64>\x07.
   // xterm.js has no built-in handler, so register one here. Payload format
   // is "<targets>;<base64>" where targets is "c" (clipboard) or "p"
-  // (primary X11 selection) etc. — we accept any target and write once.
+  // (primary X11 selection) etc. - we accept any target and write once.
   term.parser.registerOscHandler(52, (data) => {
     const semi = data.indexOf(';');
     if (semi < 0) return true;
@@ -258,7 +262,7 @@ export function wireTerminalIO(ui, sessionId) {
     }
   });
 
-  // Note: term.onResize is intentionally not wired — the ResizeObserver
+  // Note: term.onResize is intentionally not wired - the ResizeObserver
   // path in setupTerminal owns all "fit and notify server" duties via
   // ui._applyFit, which both fits and pushes cols/rows to the PTY.
 
@@ -276,7 +280,7 @@ export function ensureTerminalSetup(ui, sessionId) {
 // (expand/un-minimize, maximize, split restore). xterm only repaints rows it
 // marks dirty, so after a re-parent the WebGL canvas can keep stale glyphs in
 // quiescent rows (ghosts). Deferred one rAF so the card is on-screen when the
-// refresh runs — a refresh issued while still off-screen is suppressed by
+// refresh runs - a refresh issued while still off-screen is suppressed by
 // xterm's _isPaused. Single in-flight rAF per card, mirroring the fit/scroll
 // coalescing in setupTerminal.
 export function forceTerminalRepaint(ui) {

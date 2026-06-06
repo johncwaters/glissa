@@ -13,7 +13,7 @@ import { el, escapeHtml } from '../dom-helpers.js';
 import { sessionUIs } from './card-registry.js';
 import { showErrorToast } from './toast.js';
 
-// Debug overlay visibility — toggled by applyTerminalSettings (lifecycle) via
+// Debug overlay visibility - toggled by applyTerminalSettings (lifecycle) via
 // setDebugMode so the lets that drive terminal options can stay in terminal.js.
 let _debugMode = false;
 
@@ -24,7 +24,7 @@ export function setDebugMode(on) {
 
 // ── Helpers (private) ────────────────────────────────────────
 
-// Inline confirm dialog — avoids circular dep with dialogs.js (card-dom.js <-> dialogs.js).
+// Inline confirm dialog - avoids circular dep with dialogs.js (card-dom.js <-> dialogs.js).
 export function showConfirmDialog({ title, message, confirmLabel = 'Confirm', onConfirm }) {
   const opener = document.activeElement;
 
@@ -150,10 +150,10 @@ export function buildCardDOM(sessionId, sessionName, initialState, options = {})
   postTurnBadge.setAttribute('aria-hidden', 'true');
   const spacer = el('span', 'session-header-spacer');
 
-  // Time-in-current-state readout. Hidden in the grid (CSS); shown only on the
-  // minimized rail pill, where it answers "how long has this been waiting / working".
-  // Ticked by rail.js. aria-hidden so a per-second text change never spams a screen
-  // reader (the pill's aria-label carries the state name instead).
+  // Time-in-current-state readout, shared by the grid header (trailing the badge) and the
+  // minimized rail pill: "how long has this been working / waiting". Empty for settled states,
+  // so :empty hides it. Ticked by rail.js. aria-hidden so a per-second text change never spams
+  // a screen reader (the badge label / pill aria-label carries the state name instead).
   const railElapsed = el('span', 'rail-elapsed');
   railElapsed.setAttribute('aria-hidden', 'true');
 
@@ -188,14 +188,14 @@ export function buildCardDOM(sessionId, sessionName, initialState, options = {})
   btnDebug.setAttribute('aria-label', 'Debug session state');
 
   actions.append(btnDebug, btnMaximize, overflow);
-  // Order matters for layout stability. The variable-width status badge sits in
-  // the LEFT zone (with the name); the spacer then absorbs its width changes, so
-  // the persistent tags + actions in the RIGHT zone never reflow when status
-  // changes. Combined with the reserved-width badge slot (see .state-label), the
+  // Order matters for layout stability. The variable-width status badge and its trailing
+  // elapsed clock sit in the LEFT zone (with the name); the spacer then absorbs their width
+  // changes, so the persistent tags + actions in the RIGHT zone never reflow when status or
+  // the timer ticks. Combined with the reserved-width badge slot (see .state-label), the
   // header is dimensionally rigid across all states.
-  const headerChildren = [btnMinimize, nameEl, badge, spacer, worktreeBadge, postTurnBadge];
+  const headerChildren = [btnMinimize, nameEl, badge, railElapsed, spacer, worktreeBadge, postTurnBadge];
   if (permsBadge) headerChildren.push(permsBadge);
-  headerChildren.push(railElapsed, actions);
+  headerChildren.push(actions);
   header.append(...headerChildren);
 
   // Worktree review gate (hidden unless data-merge is set live by setSessionMergeStatus). Lives ON the
@@ -241,7 +241,7 @@ export function startInlineRename(ui, sessionId) {
       nameEl.textContent = oldName;
       return;
     }
-    // Check for duplicate name (not id — names are display labels)
+    // Check for duplicate name (not id - names are display labels)
     for (const [, other] of sessionUIs) {
       if (other !== ui && other.card.dataset.session === newName) {
         nameEl.textContent = oldName;
@@ -278,7 +278,7 @@ export function startInlineRename(ui, sessionId) {
 const DEBUG_CLOSE_BTN = '<button type="button" class="debug-close" aria-label="Close debug overlay" title="Close">×</button>';
 
 function formatTimestamp(ts) {
-  if (!ts) return '—';
+  if (!ts) return '-';
   const d = new Date(ts);
   return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }

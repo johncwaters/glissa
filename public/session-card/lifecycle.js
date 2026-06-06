@@ -5,6 +5,7 @@
 import { BADGE_LABELS, KILLABLE_STATES, RESTARTABLE_STATES, STATE_GLYPHS, STATES } from '/shared/states.mjs';
 import { playAlertSound } from '../alert-sound.js';
 import { sendControlMsg } from '../control-ws.js';
+import { clearSessionActivity, setRunningActivity } from './activity.js';
 import { el } from '../dom-helpers.js';
 import { setHealthMonitorVisible } from '../health-monitor.js';
 import { getSoundId, isMinimized, isSoundEnabled } from '../ui-prefs.js';
@@ -253,6 +254,10 @@ export function createSessionCard(sessionId, sessionName, initialState, options 
   wireCardEvents(ui, sessionId);
   updateButtonVisibility(ui);
 
+  // A card that loads already RUNNING (snapshot reconnect) arms the heartbeat now, so it goes
+  // quiet on silence even before the first replayed chunk; applyState handles later transitions.
+  if (state === STATES.RUNNING) setRunningActivity(ui, true);
+
   if (!isDormant) {
     setupTerminal(dom.termWrap, ui);
     wireTerminalIO(ui, sessionId);
@@ -425,6 +430,7 @@ export function removeSessionCard(sessionId) {
   if (!ui) return;
 
   closeDebugOverlay(ui);
+  clearSessionActivity(ui); // drop the pending quiet timer so it can't fire against a dead card
   sessionUIs.delete(sessionId);
   if (getMaximizedSession() === sessionId) exitMaximizeMode();
   forgetSessionLayout(sessionId);
@@ -461,9 +467,14 @@ export function applyState(sessionId, state) {
 
   const prevState = ui.currentState;
   ui.currentState = state;
-  // Reset the time-in-state clock on a real transition so the rail pill's elapsed
-  // readout measures the current state, not the whole session age.
-  if (state !== prevState) ui.stateSince = Date.now();
+  // Reset the time-in-state clock on a real transition so the elapsed readout measures the
+  // current state, not the whole session age. The working heartbeat arms on entry to RUNNING
+  // and tears down on exit (only real transitions, so a redundant RUNNING apply can't re-arm
+  // the quiet countdown).
+  if (state !== prevState) {
+    ui.stateSince = Date.now();
+    setRunningActivity(ui, state === STATES.RUNNING);
+  }
 
   // Leaving DORMANT: lazy-set up the terminal and promote the card from
   // the minimized bar to the main grid (if not already done optimistically).

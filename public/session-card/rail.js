@@ -3,7 +3,8 @@
 //
 //   - A MutationObserver on the minimized bar that keeps each pill's a11y chrome
 //     (role=button, roving tabindex) correct as cards enter/leave the bar.
-//   - A 1s interval that ticks each pill's "time in current state" readout.
+//   - A 1s interval that ticks each session's "time in current state" readout (the rail pill
+//     and, since the clock is shared, the grid header badge).
 //   - Click / keyboard (arrows, Home/End, Enter/Space) interaction: activating a
 //     pill RESTORES its session back to the grid.
 //
@@ -70,10 +71,12 @@ function normalizeRoving() {
 // by the interval tick for the elapsed clock.
 export function refreshPill(ui) {
   const card = ui.card;
+  // The time-in-state clock is shared by the grid header badge and the rail pill, so set it
+  // before the minimized gate; on the grid that is the only thing this refresh touches.
+  if (ui.railElapsed) ui.railElapsed.textContent = pillElapsed(ui);
   if (!card.classList.contains('minimized')) return;
   const label = BADGE_LABELS[ui.currentState] || ui.currentState;
   card.setAttribute('aria-label', `${card.dataset.session}: ${label}`);
-  if (ui.railElapsed) ui.railElapsed.textContent = pillElapsed(ui);
 }
 
 // ── Restore ──────────────────────────────────────────────────
@@ -120,11 +123,11 @@ const observer = new MutationObserver((mutations) => {
 });
 observer.observe(minimizedBar, { childList: true });
 
-// Tick the time-in-state readout. Cheap: only touches pills actually on the rail.
+// Tick the time-in-state clock for every session - grid header badge and rail pill alike.
+// Cheap: a handful of sessions, one textContent write each, '' for settled states.
 setInterval(() => {
-  for (const card of railPills()) {
-    const ui = sessionUIs.get(card.dataset.id);
-    if (ui?.railElapsed) ui.railElapsed.textContent = pillElapsed(ui);
+  for (const [, ui] of sessionUIs) {
+    if (ui.railElapsed) ui.railElapsed.textContent = pillElapsed(ui);
   }
 }, 1000);
 

@@ -91,9 +91,12 @@ function buildPill(id) {
   pill.type = 'button';
   pill.dataset.id = id;
   pill.setAttribute('role', 'option');
-  pill.innerHTML = '<span class="focus-pill-badge">'
+  // Name first so its left edge never shifts as the state label (DORMANT -> RUNNING -> ...) changes
+  // width; the badge + merge tag ride on the right where their flex is absorbed by the name's 1fr.
+  pill.innerHTML = '<span class="focus-pill-name"></span>'
+    + '<span class="focus-pill-badge">'
     + '<span class="focus-pill-glyph"></span><span class="focus-pill-label"></span></span>'
-    + '<span class="focus-pill-name"></span><span class="focus-pill-merge"></span>';
+    + '<span class="focus-pill-merge"></span>';
   pill.addEventListener('click', () => onPillActivate(id));
   return pill;
 }

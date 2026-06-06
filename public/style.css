@@ -523,12 +523,19 @@ body {
 .session-card.minimized .state-glyph { font-size: 10px; }
 .session-card.minimized .session-badge .state-label { min-width: 0; }
 
-/* The elapsed readout exists only on the rail; on the grid the header shows the
-   full badge, so keep this span out of the grid header entirely (it would
-   otherwise display stale text after a card is expanded). */
+/* The elapsed readout is shared by the rail pill and the grid header. On the grid it trails
+   the badge in the left zone as a quiet time-in-state clock ("WORKING 2:14"); the spacer
+   downstream absorbs its width so the right-zone tags never reflow as it ticks. Settled states
+   clear the text (pillElapsed -> ''); :empty then hides the span in both places. */
 .session-card:not(.minimized) .rail-elapsed {
-  display: none;
+  flex-shrink: 0;
+  margin-left: 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
 }
+.rail-elapsed:empty { display: none; }
 
 /* Time-in-state: trailing, muted, tabular so the digits don't jitter as they tick. */
 .session-card.minimized .rail-elapsed {
@@ -931,6 +938,42 @@ body {
 @keyframes pulse {
   0%, 100% { opacity: 1; }
   50%      { opacity: 0.4; }
+}
+
+/* ── Working heartbeat ─────────────────────────────────────
+   A RUNNING session is alive: the badge glyph breathes (the resting "this is working"
+   pulse), and each real PTY chunk fires a quick WAAPI scale beat on top (activity.js), so a
+   streaming agent visibly beats while a thinking one settles. The breath animates OPACITY
+   ONLY so the JS beat's transform composes on top instead of fighting it. Grid only - the
+   rail stays deliberately calm. The global prefers-reduced-motion block above neutralises the
+   breath; activity.js skips the JS beat under the same preference. Only the glyph moves, so
+   the "WORKING" label and the elapsed clock stay rock-steady and legible. */
+.session-card:not(.minimized)[data-state="RUNNING"] .session-badge .state-glyph {
+  animation: working-breathe 2.4s ease-in-out infinite;
+}
+
+@keyframes working-breathe {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.55; }
+}
+
+/* Gone quiet: output has stopped for a while. We report only what we observe (silence), never
+   an invented cause - so the treatment is calm information, not an alarm: the breath slows and
+   dims, and a muted lowercase eyebrow trails the badge. The word is real text (not motion), so
+   it carries the same tell under reduced motion and for a colour-blind operator. */
+.session-card:not(.minimized)[data-state="RUNNING"][data-activity="quiet"] .session-badge .state-glyph {
+  animation-duration: 3.8s;
+  opacity: 0.55;
+}
+
+.session-card:not(.minimized)[data-state="RUNNING"][data-activity="quiet"] .session-badge::after {
+  content: "quiet";
+  margin-left: 7px;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: lowercase;
+  color: var(--text-dim);
 }
 
 /* ── Action buttons ──────────────────────────────────────── */
@@ -2676,7 +2719,7 @@ body[data-active-view="focus"] #minimized-bar { display: none; }
 
 .focus-pill {
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: 1fr auto auto;
   align-items: center;
   gap: 8px;
   width: 100%;
@@ -2698,7 +2741,7 @@ body[data-active-view="focus"] #minimized-bar { display: none; }
   color: var(--text-head);
 }
 
-.focus-pill-badge { display: inline-flex; align-items: center; gap: 5px; grid-column: 1; }
+.focus-pill-badge { display: inline-flex; align-items: center; gap: 5px; grid-column: 2; }
 .focus-pill-glyph { font-size: 11px; line-height: 1; color: var(--st, var(--text-dim)); }
 .focus-pill-label {
   font-size: 9px;
@@ -2709,7 +2752,8 @@ body[data-active-view="focus"] #minimized-bar { display: none; }
   white-space: nowrap;
 }
 .focus-pill-name {
-  grid-column: 2;
+  grid-column: 1;
+  min-width: 0;
   font-size: 12px;
   color: var(--text);
   overflow: hidden;
