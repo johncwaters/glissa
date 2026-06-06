@@ -17,6 +17,12 @@ const DEFAULT_CONFIG = {
   // Integration branch every worktree-backed session forks from and merges back into. Glissa never
   // creates it; if it is absent a session stays DORMANT with a notice (it never runs in the real tree).
   integrationBranch: 'develop',
+  // Where session worktrees live: a stable, project-associated root (NOT system-temp), kept outside the
+  // repo working tree. Empty -> ~/.glissa/worktrees (resolved in backend).
+  worktreeRoot: '',
+  // Gitignored local context brought into each session worktree so the agent sees a complete, recognizable
+  // project. Dirs are junctioned (shared, never merged); files are copied; committed/absent entries skipped.
+  worktreeShare: ['node_modules', '.env', '.env.local', '.claude', '.omc'],
   repoRoots: [],
   // Deterministic post-turn auto-fix checks (see post-turn-checker.js). ON by
   // default: the runner's own DEFAULTS govern behavior even when this key is
@@ -49,6 +55,7 @@ const BOOLEAN_KEYS = [
 const STRING_KEYS = [
   'editorCommand',
   'integrationBranch',
+  'worktreeRoot',
 ];
 
 function resolveConfigPath() {
@@ -149,6 +156,8 @@ function createConfigStore() {
       debugMode: config.debugMode ?? DEFAULT_CONFIG.debugMode,
       editorCommand: config.editorCommand ?? DEFAULT_CONFIG.editorCommand,
       integrationBranch: config.integrationBranch ?? DEFAULT_CONFIG.integrationBranch,
+      worktreeRoot: config.worktreeRoot ?? DEFAULT_CONFIG.worktreeRoot,
+      worktreeShare: config.worktreeShare ?? DEFAULT_CONFIG.worktreeShare,
       repoRoots: config.repoRoots,
     };
   }
@@ -169,6 +178,7 @@ function createConfigStore() {
     // Preserve postTurnChecks across a settings reload (default-on still holds via
     // the runner's DEFAULTS when the key is absent on both sides).
     if (newConfig.postTurnChecks != null) config.postTurnChecks = newConfig.postTurnChecks;
+    if (newConfig.worktreeShare != null) config.worktreeShare = newConfig.worktreeShare;
     if (newConfig.port != null && newConfig.port !== config.port) {
       console.log(`[settings] Port changed to ${newConfig.port} — restart required to take effect`);
     }

@@ -22,11 +22,12 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const os = require('node:os');
 const express = require('express');
 const { WebSocketServer } = require('ws');
 const { Session } = require('./sessions');
 const { STATES } = require('./shared/states');
-const { createConfigStore, generateProjectId, ensureProjectIds } = require('./config-store');
+const { createConfigStore, generateProjectId, ensureProjectIds, DEFAULT_CONFIG } = require('./config-store');
 const { registerControlHandlers } = require('./control-handlers');
 const { NotificationManager } = require('./notification-manager');
 const { createToastChannel } = require('./channels/toast');
@@ -117,6 +118,10 @@ function createBackend(httpServer, options = {}) {
       // they never receive this and run as they did before.
       gitWorkspace,
       integrationBranch: cfg.integrationBranch || 'develop',
+      // Stable, project-associated worktree root (empty -> ~/.glissa/worktrees) + the gitignored local
+      // context to bring in, so the spawned agent sees a complete, recognizable project (not Temp).
+      worktreeRoot: cfg.worktreeRoot || path.join(os.homedir(), '.glissa', 'worktrees'),
+      worktreeShare: cfg.worktreeShare || DEFAULT_CONFIG.worktreeShare,
     });
     const recorder = createRecorder(project.name, cfg.capture);
     if (recorder) {

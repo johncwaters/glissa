@@ -4,7 +4,6 @@ const pty = require("node-pty");
 const { EventEmitter } = require("node:events");
 const { execSync, execFileSync } = require("node:child_process");
 const { STATES } = require("./shared/states");
-const { linkNodeModules } = require("./teamlib/team-git");
 const { createOscTitleSource } = require("./detection/osc-title-source");
 const { createStatusSource } = require("./detection/status-source");
 const { writeSessionSettings } = require("./detection/settings-injector");
@@ -95,6 +94,9 @@ class Session extends EventEmitter {
     // merges back on review. Absent (unit tests, no-git) -> runs in place at `path` exactly as before.
     gitWorkspace = null,
     integrationBranch = null,
+    // Session worktree location + the gitignored local context to bring in (see _provisionWorktree).
+    worktreeRoot = null,
+    worktreeShare = null,
   }) {
     super();
     this.id = id;
@@ -151,6 +153,8 @@ class Session extends EventEmitter {
     // -- Worktree isolation state (see _provisionWorktree / _settleWorktreeOnExit) --
     this._gitWorkspace = gitWorkspace;
     this._integrationBranch = integrationBranch;
+    this._worktreeRoot = worktreeRoot;
+    this._worktreeShare = worktreeShare;
     this.worktreeDir = null;     // active session worktree cwd (null = in-place at this.path)
     this.baseSha = null;         // integration-branch SHA the worktree forked from
     this._workspace = null;      // opaque team-git workspace handle for merge/discard
@@ -257,6 +261,8 @@ class Session extends EventEmitter {
         label: this.id,
         baseBranch: this._integrationBranch,
         outputPath: "",
+        worktreeBase: this._worktreeRoot,
+        shareList: this._worktreeShare,
       });
     } catch (err) {
       console.warn(`[session ${this.id}] worktree create failed: ${err.message} — running in place`);
@@ -278,7 +284,6 @@ class Session extends EventEmitter {
     this.worktreeNotice = null;
     this.mergeStatus = "none";
     this.isWorktree = true;
-    try { linkNodeModules(this.path, ws.cwd); } catch { /* best-effort */ }
     this.emit("worktree-ready", { id: this.id, worktreeDir: ws.cwd, branch: ws.branch });
     return true;
   }

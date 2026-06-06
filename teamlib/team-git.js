@@ -55,7 +55,7 @@ function createGitWorkspace(opts = {}) {
 
   // Create an isolated worktree on `glissa/<teamId>/<label>`. Returns
   // { cwd, isGit, branch, base, baseSha }; falls back to { cwd: projectPath, isGit: false }.
-  function create({ projectPath, teamId, label, outputPath, baseBranch }) {
+  function create({ projectPath, teamId, label, outputPath, baseBranch, worktreeBase, shareList }) {
     const inside = run(['rev-parse', '--is-inside-work-tree'], projectPath);
     if (!inside.ok || inside.out !== 'true') return { cwd: projectPath, isGit: false };
     const head = run(['rev-parse', 'HEAD'], projectPath);
@@ -76,7 +76,18 @@ function createGitWorkspace(opts = {}) {
     run(['worktree', 'prune'], projectPath);
     run(['branch', '-D', branch], projectPath); // drop a stale branch left by a crashed prior run
 
-    const wtDir = mkdtemp(path.join(os.tmpdir(), `glissa-wt-${sanitize(teamId)}-`));
+    // A SESSION worktree lives under a stable, project-associated root (worktreeBase, e.g.
+    // ~/.glissa/worktrees) rather than system-temp, so its path is recognizable and persistent. It stays
+    // OUTSIDE the repo working tree (no nested biome/eslint config; the main checkout's git status stays
+    // clean). Teams pass no worktreeBase and keep the temp-dir default.
+    let wtParent = os.tmpdir();
+    let prefix = `glissa-wt-${sanitize(teamId)}-`;
+    if (worktreeBase) {
+      try { fs.mkdirSync(worktreeBase, { recursive: true }); } catch { /* best-effort */ }
+      wtParent = worktreeBase;
+      prefix = `${sanitize(path.basename(projectPath)) || 'repo'}-`;
+    }
+    const wtDir = mkdtemp(path.join(wtParent, prefix));
     const add = run(['worktree', 'add', '-b', branch, wtDir, baseSha], projectPath);
     if (!add.ok) {
       try { fs.rmSync(wtDir, { recursive: true, force: true }); } catch { /* best-effort */ }
@@ -86,6 +97,17 @@ function createGitWorkspace(opts = {}) {
     // edits not yet committed to HEAD. It is never staged (integrate adds only the run folder + log), so
     // it vanishes with the worktree.
     try { copyPack(projectPath, wtDir, outputPath); } catch { /* best-effort */ }
+    // Bring the gitignored local working context (node_modules, .env, .claude, .omc, ...) into the
+    // worktree so the spawned agent sees a COMPLETE, recognizable project, not a bare checkout. Dirs are
+    // junctioned (shared with the real repo, never copied or merged, gitignored so `git add -A` skips
+    // them); files are copied. Entries already committed or absent are skipped.
+    if (shareList && shareList.length) {
+      // Only bring in entries git IGNORES, so a shared file/junction can NEVER be staged by mergeBack's
+      // `git add -A` and accidentally committed to the integration branch (e.g. leaking a .env).
+      const ignored = shareList.filter((rel) =>
+        rel && !String(rel).includes('..') && run(['check-ignore', '-q', '--', rel], projectPath).ok);
+      if (ignored.length) { try { populateWorktree(projectPath, wtDir, ignored); } catch { /* best-effort */ } }
+    }
     return { cwd: wtDir, isGit: true, branch, base, baseSha };
   }
 
@@ -117,7 +139,7 @@ function createGitWorkspace(opts = {}) {
       reason = 'detached-head';
     }
 
-    removeNodeModulesJunction(wt);
+    removeWorktreeLinks(wt);
     run(['worktree', 'remove', '--force', wt], projectPath);
     run(['worktree', 'prune'], projectPath);
     if (merged && workspace.branch) run(['branch', '-D', workspace.branch], projectPath);
@@ -153,7 +175,7 @@ function createGitWorkspace(opts = {}) {
       : false;
     if (!committed) {
       // Nothing to merge — discard the worktree (junction-safe) and branch.
-      removeNodeModulesJunction(wt);
+      removeWorktreeLinks(wt);
       run(['worktree', 'remove', '--force', wt], projectPath);
       run(['worktree', 'prune'], projectPath);
       run(['branch', '-D', branch], projectPath);
@@ -179,7 +201,7 @@ function createGitWorkspace(opts = {}) {
     }
     if (!merged) return { merged: false, committed: true, branch, base: target, reason: 'not-fast-forward', parked: true };
 
-    removeNodeModulesJunction(wt);
+    removeWorktreeLinks(wt);
     run(['worktree', 'remove', '--force', wt], projectPath);
     run(['worktree', 'prune'], projectPath);
     run(['branch', '-D', branch], projectPath);
@@ -190,7 +212,7 @@ function createGitWorkspace(opts = {}) {
   function discard({ projectPath, workspace }) {
     if (!workspace || !workspace.isGit) return;
     if (workspace.cwd) {
-      removeNodeModulesJunction(workspace.cwd);
+      removeWorktreeLinks(workspace.cwd);
       run(['worktree', 'remove', '--force', workspace.cwd], projectPath);
     }
     if (workspace.branch) run(['branch', '-D', workspace.branch], projectPath);
@@ -237,7 +259,7 @@ function createGitWorkspace(opts = {}) {
       } else if (line.startsWith('branch ')) {
         const name = line.slice('branch '.length).trim().replace(/^refs\/heads\//, '');
         if (curWt && name.startsWith('glissa/session/')) {
-          removeNodeModulesJunction(curWt);
+          removeWorktreeLinks(curWt);
           run(['worktree', 'remove', '--force', curWt], projectPath);
           run(['branch', '-D', name], projectPath);
           removed.push(name);
@@ -256,18 +278,42 @@ function createGitWorkspace(opts = {}) {
   };
 }
 
-// Remove a node_modules JUNCTION/symlink reparse point from a worktree WITHOUT touching its target.
-// Critical safety step before `git worktree remove --force`: if a junction is left in place, git can
-// follow it and delete the operator's REAL node_modules. A real (non-symlink) node_modules directory
-// — the in-place fallback case — is never removed here. Best-effort and idempotent.
-function removeNodeModulesJunction(wtDir) {
+// Remove every JUNCTION/symlink reparse point at the top level of a worktree WITHOUT touching its
+// target. Critical before `git worktree remove --force`: a left-in-place junction (node_modules, .claude,
+// .omc, ...) can be followed by git and delete the operator's REAL directory. Real (non-symlink) dirs and
+// files are left for worktree-remove to delete. Best-effort and idempotent.
+function removeWorktreeLinks(wtDir) {
   if (!wtDir) return;
-  const nm = path.join(wtDir, 'node_modules');
-  let st;
-  try { st = fs.lstatSync(nm); } catch { return; }   // absent — nothing to do
-  if (!st.isSymbolicLink()) return;                   // a REAL dir (in-place fallback) — never delete it
-  try { fs.rmSync(nm, { recursive: false, force: true }); }
-  catch { try { fs.rmdirSync(nm); } catch { /* best-effort */ } }
+  let entries;
+  try { entries = fs.readdirSync(wtDir, { withFileTypes: true }); } catch { return; }
+  for (const e of entries) {
+    if (!e.isSymbolicLink()) continue; // junctions report as symbolic links via the dirent lstat
+    const p = path.join(wtDir, e.name);
+    try { fs.rmSync(p, { recursive: false, force: true }); }
+    catch { try { fs.rmdirSync(p); } catch { /* best-effort */ } }
+  }
+}
+
+// Bring gitignored local working context into a worktree. Each share entry: a DIR is junctioned
+// (mklink /J — shared with the real repo, never copied or merged, gitignored so `git add -A` skips it);
+// a FILE is copied. Entries already present in the worktree (committed) or absent in the project are
+// skipped. Best-effort per entry so one failure never aborts the spawn. Windows junctions need no admin.
+function populateWorktree(projectPath, wtDir, shareList) {
+  for (const rel of shareList) {
+    if (!rel || String(rel).includes('..')) continue; // no path traversal
+    const src = path.join(projectPath, rel);
+    const dst = path.join(wtDir, rel);
+    try {
+      if (!fs.existsSync(src)) continue;  // nothing to share
+      if (fs.existsSync(dst)) continue;    // already in the worktree (committed) — leave it
+      fs.mkdirSync(path.dirname(dst), { recursive: true });
+      if (fs.statSync(src).isDirectory()) {
+        execFileSync('cmd', ['/c', 'mklink', '/J', dst, src], { stdio: 'ignore' });
+      } else {
+        fs.copyFileSync(src, dst);
+      }
+    } catch { /* best-effort: the session runs without that piece */ }
+  }
 }
 
 // Create a Windows directory junction <wtDir>/node_modules -> <projectPath>/node_modules so a session

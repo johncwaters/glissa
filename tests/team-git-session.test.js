@@ -336,6 +336,44 @@ test('sweepSessionWorktrees removes orphaned glissa/session/* worktrees but spar
   }
 });
 
+// --- Seamless worktrees: stable location + gitignored local context brought in (junction-safe, no leak) ---
+
+test('create (worktreeBase + shareList): worktree lives under the base and gets the gitignored context', { skip: !GIT || !WIN }, () => {
+  const repo = initRepoOnDevelop();
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-wtroot-'));
+  // Gitignore the local context so it can be brought in (and can never be staged/merged).
+  fs.writeFileSync(path.join(repo, '.gitignore'), 'node_modules/\n.omc/\n.env\n', 'utf8');
+  git(['add', '.gitignore'], repo); git(['commit', '-m', 'ignore local context'], repo);
+  fs.mkdirSync(path.join(repo, 'node_modules'), { recursive: true });
+  fs.writeFileSync(path.join(repo, 'node_modules', 'dep.txt'), 'real dep\n', 'utf8');
+  fs.mkdirSync(path.join(repo, '.omc'), { recursive: true });
+  fs.writeFileSync(path.join(repo, '.omc', 'memory.json'), '{"k":1}\n', 'utf8');
+  fs.writeFileSync(path.join(repo, '.env'), 'SECRET=1\n', 'utf8');
+  // A non-ignored entry must be REFUSED (leak guard).
+  fs.writeFileSync(path.join(repo, 'tracked.txt'), 'tracked\n', 'utf8');
+  try {
+    const gw = createGitWorkspace();
+    const ws = gw.create({
+      projectPath: repo, teamId: 'session', label: 'ctx', baseBranch: 'develop', outputPath: '',
+      worktreeBase: base, shareList: ['node_modules', '.omc', '.env', 'tracked.txt', '.absent'],
+    });
+    assert.equal(ws.isGit, true);
+    assert.ok(ws.cwd.startsWith(base), 'worktree lives under the configured base, not system-temp');
+    assert.ok(fs.existsSync(path.join(ws.cwd, 'node_modules', 'dep.txt')), 'node_modules junctioned in');
+    assert.ok(fs.existsSync(path.join(ws.cwd, '.omc', 'memory.json')), '.omc junctioned in');
+    assert.equal(fs.readFileSync(path.join(ws.cwd, '.env'), 'utf8'), 'SECRET=1\n', '.env copied in');
+    assert.ok(!fs.existsSync(path.join(ws.cwd, 'tracked.txt')), 'a NON-ignored entry is refused (no merge leak)');
+
+    gw.discard({ projectPath: repo, workspace: ws });
+    assert.ok(!fs.existsSync(ws.cwd), 'worktree removed');
+    assert.ok(fs.existsSync(path.join(repo, 'node_modules', 'dep.txt')), 'real node_modules survived (junction-safe)');
+    assert.ok(fs.existsSync(path.join(repo, '.omc', 'memory.json')), 'real .omc survived (junction-safe)');
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
 test('sweepSessionWorktrees is a no-op on a non-git directory', { skip: !GIT }, () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-nongit-'));
   try {
