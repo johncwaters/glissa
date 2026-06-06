@@ -112,6 +112,11 @@ function createBackend(httpServer, options = {}) {
       replayBufferKB: cfg.replayBufferKB,
       hookRouter,
       getHookPort,
+      // Worktree isolation for real user sessions: each forks off the integration branch and merges
+      // back on review. Ephemeral team/pack-setup sessions are built elsewhere (not makeSession), so
+      // they never receive this and run as they did before.
+      gitWorkspace,
+      integrationBranch: cfg.integrationBranch || 'develop',
     });
     const recorder = createRecorder(project.name, cfg.capture);
     if (recorder) {
@@ -581,7 +586,7 @@ function createBackend(httpServer, options = {}) {
         ptDebounce = null;
         const runCfg = resolvePostTurn(); // re-resolve so a reload during debounce is honored
         if (!runCfg || !runCfg.enabled) return;
-        runPostTurnChecks({ cwd: sess.path, config: runCfg, sessionId: sess.id })
+        runPostTurnChecks({ cwd: sess.effectiveCwd(), config: runCfg, sessionId: sess.id })
           .then((report) => {
             broadcastControl({ type: 'post-turn-result', id: sess.id, session: sess.name, ...report, timestamp: Date.now() });
           })
@@ -628,6 +633,27 @@ function createBackend(httpServer, options = {}) {
         id: sess.id,
         session: sess.name,
         timestamp: Date.now()
+      });
+    });
+
+    // Worktree lifecycle -> control WS, so the dashboard reflects the review/merge state and any
+    // blocker (e.g. the integration branch missing) without re-fetching a full snapshot.
+    sess.on('merge-status', ({ mergeStatus, reason, parked }) => {
+      broadcastControl({
+        type: 'session-merge-status', id: sess.id, session: sess.name,
+        mergeStatus, reason: reason || null, parked: !!parked, timestamp: Date.now(),
+      });
+    });
+    sess.on('worktree-blocked', ({ branch, notice }) => {
+      broadcastControl({
+        type: 'session-worktree-blocked', id: sess.id, session: sess.name,
+        branch, notice, timestamp: Date.now(),
+      });
+    });
+    sess.on('worktree-ready', ({ branch }) => {
+      broadcastControl({
+        type: 'session-worktree-ready', id: sess.id, session: sess.name,
+        branch, timestamp: Date.now(),
       });
     });
 

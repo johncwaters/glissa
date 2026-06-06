@@ -627,6 +627,17 @@ function registerControlHandlers(controlWss, deps) {
     'dismiss':          (msg) => { const s = findSession(msg); if (s) s.dismiss(); },
     'sleep':            (msg) => { const s = findSession(msg); if (s) s.sleep(); },
     'wake':             (msg) => { const s = findSession(msg); if (s) s.wake(); },
+    // Worktree review gate: merge the session's worktree into the integration branch, throw it away,
+    // or stream its diff to the requesting client. mergeWorktree/discardWorktree emit 'merge-status'
+    // which wireSessionEvents broadcasts, so no explicit reply is needed for those two.
+    'merge-session':              (msg) => { const s = findSession(msg); if (s) s.mergeWorktree(); },
+    'discard-session-worktree':   (msg) => { const s = findSession(msg); if (s) s.discardWorktree(); },
+    'request-session-diff':       (msg, ws) => {
+      const s = findSession(msg);
+      if (!s) return;
+      const { stat, diff } = s.getDiff();
+      ws.send(JSON.stringify({ type: 'session-diff', id: s.id, stat, diff }));
+    },
     'debug-state':      (msg, ws) => {
       const s = findSession(msg);
       if (!s) { ws.send(JSON.stringify({ type: 'error', message: 'Session not found' })); return; }
