@@ -42,6 +42,28 @@ function initRepoOnDevelop() {
   return dir;
 }
 
+// A repo whose main checkout sits on `main` while `develop` has an EXTRA commit, so forking off
+// develop is observably different from forking off HEAD (proves create({baseBranch}) uses the branch).
+function initRepoMainWithDevelop() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-base-'));
+  try { git(['init', '-b', 'main'], dir); } catch { git(['init'], dir); }
+  git(['config', 'user.email', 'test@example.com'], dir);
+  git(['config', 'user.name', 'Glissa Test'], dir);
+  git(['config', 'commit.gpgsign', 'false'], dir);
+  fs.writeFileSync(path.join(dir, 'README.md'), '# repo\n', 'utf8');
+  fs.writeFileSync(path.join(dir, '.gitignore'), 'node_modules/\n', 'utf8');
+  git(['add', '-A'], dir);
+  git(['commit', '-m', 'init'], dir);
+  git(['branch', 'develop'], dir);
+  git(['checkout', 'develop'], dir);
+  fs.writeFileSync(path.join(dir, 'on-develop.txt'), 'dev\n', 'utf8');
+  git(['add', '-A'], dir);
+  git(['commit', '-m', 'develop only'], dir);
+  const developSha = git(['rev-parse', 'develop'], dir).trim();
+  git(['checkout', 'main'], dir); // operator's checkout is on MAIN, not develop
+  return { dir, developSha };
+}
+
 // Recording fake git mirroring the exit behaviors mergeBack branches on:
 //   - `diff --cached --quiet` throws {status:1} when there IS staged content (opts.staged, default true)
 //   - `rev-parse --verify --quiet refs/heads/<t>` throws when the target is absent (opts.targetExists)
@@ -256,6 +278,37 @@ test('mergeBack is junction-safe: the real node_modules survives a successful me
     assert.ok(fs.existsSync(path.join(repo, 'node_modules', 'sentinel.txt')), 'real node_modules survived');
     assert.ok(fs.existsSync(path.join(repo, 'feature.js')), 'the feature landed on develop');
     assert.equal(git(['ls-files', 'node_modules'], repo).trim(), '', 'the node_modules junction was never committed (gitignored)');
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+// --- create({ baseBranch }): fork off the integration branch regardless of the operator's checkout ---
+
+test('create (baseBranch): forks off the named branch even when the main checkout is on another branch', { skip: !GIT }, () => {
+  const { dir, developSha } = initRepoMainWithDevelop();
+  try {
+    const gw = createGitWorkspace();
+    const ws = gw.create({ projectPath: dir, teamId: 'session', label: 'x1', baseBranch: 'develop', outputPath: '' });
+    assert.equal(ws.isGit, true);
+    assert.equal(ws.base, 'develop');
+    assert.equal(ws.baseSha, developSha, 'forked off develop HEAD, not main');
+    assert.ok(fs.existsSync(path.join(ws.cwd, 'on-develop.txt')), 'worktree contains the develop-only commit');
+    assert.equal(git(['rev-parse', '--abbrev-ref', 'HEAD'], dir).trim(), 'main', 'operator checkout untouched (still on main)');
+    gw.discard({ projectPath: dir, workspace: ws });
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('create (baseBranch): a missing integration branch returns reason:no-base-branch and creates no worktree', { skip: !GIT }, () => {
+  const repo = initRepoOnDevelop();
+  try {
+    const gw = createGitWorkspace();
+    const ws = gw.create({ projectPath: repo, teamId: 'session', label: 'x2', baseBranch: 'nonexistent', outputPath: '' });
+    assert.equal(ws.isGit, false);
+    assert.equal(ws.reason, 'no-base-branch');
+    assert.equal(git(['worktree', 'list'], repo).trim().split(/\r?\n/).length, 1, 'no extra worktree created');
   } finally {
     fs.rmSync(repo, { recursive: true, force: true });
   }

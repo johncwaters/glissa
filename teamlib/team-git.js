@@ -55,13 +55,22 @@ function createGitWorkspace(opts = {}) {
 
   // Create an isolated worktree on `glissa/<teamId>/<label>`. Returns
   // { cwd, isGit, branch, base, baseSha }; falls back to { cwd: projectPath, isGit: false }.
-  function create({ projectPath, teamId, label, outputPath }) {
+  function create({ projectPath, teamId, label, outputPath, baseBranch }) {
     const inside = run(['rev-parse', '--is-inside-work-tree'], projectPath);
     if (!inside.ok || inside.out !== 'true') return { cwd: projectPath, isGit: false };
     const head = run(['rev-parse', 'HEAD'], projectPath);
     if (!head.ok) return { cwd: projectPath, isGit: false }; // no commits yet — nothing to branch from
-    const baseSha = head.out;
-    const base = run(['rev-parse', '--abbrev-ref', 'HEAD'], projectPath).out || 'HEAD';
+    let baseSha = head.out;
+    let base = run(['rev-parse', '--abbrev-ref', 'HEAD'], projectPath).out || 'HEAD';
+    if (baseBranch) {
+      // Fork off a SPECIFIC branch (the session integration branch, e.g. develop) regardless of what
+      // the operator's main checkout currently has checked out. A missing branch is reported as
+      // reason:'no-base-branch' so the caller can BLOCK — Glissa never creates the integration branch.
+      const ref = run(['rev-parse', '--verify', '--quiet', `refs/heads/${baseBranch}`], projectPath);
+      if (!ref.ok) return { cwd: projectPath, isGit: false, reason: 'no-base-branch' };
+      baseSha = ref.out;
+      base = baseBranch;
+    }
     const branch = `glissa/${sanitize(teamId)}/${sanitize(label)}`;
 
     run(['worktree', 'prune'], projectPath);
