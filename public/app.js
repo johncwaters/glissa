@@ -11,14 +11,13 @@ import { activateFocusView, deactivateFocusView, focusNextWaitingInRail, focusNt
 import { applyHealthSnapshot, mountHealthMonitor } from './health-monitor.js';
 import { initNotifications, showDesktopNotification } from './notifications.js';
 import { handleDebugStateRefresh, handleDebugStateResponse } from './session-card/card-dom.js';
-import { exitMaximizeMode, isMaximizeActive, setLayoutMode } from './session-card/layout.js';
-import { applyState, applyTerminalSettings, createSessionCard, getSessionCount, handleSessionsReordered, hasSession, removeSessionCard, renameSessionCard, seedSessionMergeStatus, setSessionDiff, setSessionMergeStatus, setSessionPostTurn, setSessionWorktree, updateAggregateStatus } from './session-card/lifecycle.js';
+import { applyState, applyTerminalSettings, createSessionCard, getSessionCount, hasSession, removeSessionCard, renameSessionCard, seedSessionMergeStatus, setSessionDiff, setSessionMergeStatus, setSessionPostTurn, setSessionWorktree, updateAggregateStatus } from './session-card/lifecycle.js';
 import { reconnectDataWs } from './session-card/terminal.js';
 import { showErrorToast } from './session-card/toast.js';
 import { forgetReviewSession, mountReviewSidebar, refreshReviewSidebar } from './sidebar/review-sidebar.js';
 import { handleTeamMessage, mountTeamsView, setTabActivityCallback } from './teams-panel.js';
 import { applyTheme } from './theme.js';
-import { getThemeId, isSoundEnabled, pruneStale, setSoundEnabled } from './ui-prefs.js';
+import { getThemeId, isSoundEnabled, setSoundEnabled } from './ui-prefs.js';
 
 // ── Apply saved theme ─────────────────────────────────────────
 
@@ -81,11 +80,6 @@ setConnectionStateCallback((state, label) => {
 
 // ── Control message handlers ─────────────────────────────────
 
-function clearEmptyPlaceholder() {
-  const empty = document.getElementById('sessions-container').querySelector('.sessions-empty');
-  if (empty) empty.remove();
-}
-
 // Real projects (id -> name) for the Teams panel project picker. Ephemeral team-stage sessions
 // (id like "team:<run>:<stage>") are excluded - they are transient run cards, not run targets.
 const knownProjects = new Map();
@@ -94,70 +88,41 @@ function getKnownProjects() {
 }
 
 function handleSnapshot(sessions) {
-  const container = document.getElementById('sessions-container');
-  clearEmptyPlaceholder();
-
   knownProjects.clear();
   for (const s of (sessions || [])) {
     if (!s.ephemeral) knownProjects.set(s.id, s.name);
   }
 
-  if (!sessions || sessions.length === 0) {
-    const el = document.createElement('div');
-    el.className = 'sessions-empty';
-    el.innerHTML = `
-      <div class="sessions-empty-inner">
-        <div class="sessions-empty-mark">\u25b8</div>
-        <h2 class="sessions-empty-title">No sessions running</h2>
-        <p class="sessions-empty-desc">Glissa monitors Claude Code agent sessions. Add a project to begin.</p>
-        <button type="button" class="sessions-empty-cta" id="sessions-empty-cta">+ New Session</button>
-        <p class="sessions-empty-hint">Configure repository roots in <kbd>Settings</kbd> if no projects appear.</p>
-      </div>
-    `;
-    container.appendChild(el);
-    const cta = el.querySelector('#sessions-empty-cta');
-    cta.addEventListener('click', () => {
-      document.getElementById('btn-add-session-header')?.click();
-    });
-    updateAggregateStatus();
-  } else {
-    for (const s of sessions) {
-      if (hasSession(s.id)) {
-        applyState(s.id, s.state);
-      } else {
-        createSessionCard(s.id, s.name, s.state, { skipPerms: !!s.dangerouslySkipPermissions, worktree: !!s.isWorktree });
-      }
-      // Hydrate the review sidebar's status/count from the snapshot (quiet: no auto-open on reconnect).
-      seedSessionMergeStatus(s.id, s.mergeStatus);
+  for (const s of (sessions || [])) {
+    if (hasSession(s.id)) {
+      applyState(s.id, s.state);
+    } else {
+      createSessionCard(s.id, s.name, s.state, { skipPerms: !!s.dangerouslySkipPermissions, worktree: !!s.isWorktree });
     }
-
-    pruneStale(sessions.map(s => s.id));
-    updateAggregateStatus();
+    // Hydrate the review sidebar's status/count from the snapshot (quiet: no auto-open on reconnect).
+    seedSessionMergeStatus(s.id, s.mergeStatus);
   }
+  updateAggregateStatus();
 
-  autoLayout();
   // Focus can be the active view when the initial snapshot lands; rebuild its rail from the new cards.
+  // The empty state ("Nothing to focus") lives in the Focus view itself, so no grid placeholder here.
   if (isFocusActive()) refreshFocusRoster();
 }
 
 function handleStateChange(msg) {
   if (!hasSession(msg.id)) {
-    clearEmptyPlaceholder();
     createSessionCard(msg.id, msg.session, msg.to, { skipPerms: !!msg.skipPerms });
-    autoLayout();
     return;
   }
 
-  // Close-out reset: a finished session returning to DORMANT is rebuilt as a dormant card so it parks
-  // in the minimized bar with no live terminal, reusing the well-tested create path instead of mutating
-  // a live card. skipPerms is read off the existing card so the YOLO badge survives the rebuild.
+  // Close-out reset: a finished session returning to DORMANT is rebuilt as a dormant card (no live
+  // terminal) in the off-screen grid home, reusing the well-tested create path instead of mutating a
+  // live card. skipPerms is read off the existing card so the YOLO badge survives the rebuild.
   if (msg.to === STATES.DORMANT && msg.from !== STATES.DORMANT) {
     const card = document.querySelector(`.session-card[data-id="${CSS.escape(msg.id)}"]`);
     const skipPerms = card ? card.dataset.skipPerms !== undefined : false;
     removeSessionCard(msg.id);
-    clearEmptyPlaceholder();
     createSessionCard(msg.id, msg.session, STATES.DORMANT, { skipPerms });
-    autoLayout();
     if (isFocusActive()) refreshFocusRoster();
     refreshReviewSidebar(msg.id);
     return;
@@ -178,17 +143,16 @@ function handleStateChange(msg) {
 const messageHandlers = {
   'snapshot':           (msg) => handleSnapshot(msg.sessions),
   'state-change':       (msg) => handleStateChange(msg),
-  'session-added':      (msg) => { if (!msg.ephemeral) knownProjects.set(msg.id, msg.session); if (!hasSession(msg.id)) { clearEmptyPlaceholder(); createSessionCard(msg.id, msg.session, msg.state, { skipPerms: !!msg.skipPerms, worktree: !!msg.worktree }); } autoLayout(); if (isFocusActive()) refreshFocusRoster(); },
-  'session-removed':    (msg) => { knownProjects.delete(msg.id); removeSessionCard(msg.id); forgetReviewSession(msg.id); autoLayout(); if (isFocusActive()) refreshFocusRoster(); },
+  'session-added':      (msg) => { if (!msg.ephemeral) knownProjects.set(msg.id, msg.session); if (!hasSession(msg.id)) { createSessionCard(msg.id, msg.session, msg.state, { skipPerms: !!msg.skipPerms, worktree: !!msg.worktree }); } if (isFocusActive()) refreshFocusRoster(); },
+  'session-removed':    (msg) => { knownProjects.delete(msg.id); removeSessionCard(msg.id); forgetReviewSession(msg.id); if (isFocusActive()) refreshFocusRoster(); },
   'session-renamed':    (msg) => { if (knownProjects.has(msg.id)) knownProjects.set(msg.id, msg.newName); renameSessionCard(msg.id, msg.newName); },
-  'session-modified':   (msg) => { if (!msg.ephemeral) knownProjects.set(msg.id, msg.session); removeSessionCard(msg.id); forgetReviewSession(msg.id); clearEmptyPlaceholder(); createSessionCard(msg.id, msg.session, msg.state, { skipPerms: !!msg.skipPerms, worktree: !!msg.worktree }); autoLayout(); if (isFocusActive()) refreshFocusRoster(); },
+  'session-modified':   (msg) => { if (!msg.ephemeral) knownProjects.set(msg.id, msg.session); removeSessionCard(msg.id); forgetReviewSession(msg.id); createSessionCard(msg.id, msg.session, msg.state, { skipPerms: !!msg.skipPerms, worktree: !!msg.worktree }); if (isFocusActive()) refreshFocusRoster(); },
   'session-git':        (msg) => setSessionWorktree(msg.id, !!msg.worktree),
   'session-merge-status': (msg) => { setSessionMergeStatus(msg.id, msg.mergeStatus); setFocusMergeStatus(msg.id, msg.mergeStatus); },
   'session-worktree-blocked': (msg) => { showErrorToast(`${msg.session}: ${msg.notice || 'integration branch not found'}`); },
   'session-worktree-ready': () => {},
   'session-diff':       (msg) => { setSessionDiff(msg.id, msg.diff); },
   'post-turn-result':   (msg) => setSessionPostTurn(msg.id, msg),
-  'sessions-reordered': (msg) => handleSessionsReordered(msg.order),
   'debug-state-response': (msg) => handleDebugStateResponse(msg),
   'notify':             (msg) => showDesktopNotification(msg),
   'error':              (msg) => showErrorToast(msg.message),
@@ -316,9 +280,6 @@ function activateView(view) {
   if (view === 'teams') {
     mountTeamsView(viewTeamsEl, getKnownProjects());
   } else if (view === 'focus') {
-    // Clear any lingering grid maximize so its module-global state doesn't dangle while Focus borrows
-    // a card into the center (otherwise a returning card lands in a half-maximized layout).
-    exitMaximizeMode();
     activateFocusView();
   }
 }
@@ -374,15 +335,6 @@ document.getElementById('btn-shutdown').addEventListener('click', () => {
   });
 });
 
-// ── Maximize mode: ESC to exit ───────────────────────────────
-
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && isMaximizeActive()) {
-    if (document.querySelector('.dialog-overlay')) return;
-    exitMaximizeMode();
-  }
-});
-
 // ── Sound controls ──────────────────────────────────────────
 
 const btnMute = document.getElementById('btn-mute');
@@ -400,21 +352,6 @@ btnMute.addEventListener('click', (e) => {
   setSoundEnabled(!isSoundEnabled());
   updateMuteButton();
 });
-
-// ── Layout (always auto) ──────────────────────────────────
-// The arrangement always follows the live session count: exactly two sessions
-// sit side-by-side (split), any other count is a grid. No operator toggle.
-
-const sessionsContainer = document.getElementById('sessions-container');
-
-function applyLayout(layoutId) {
-  sessionsContainer.classList.toggle('layout-split', layoutId === 'split');
-  setLayoutMode(layoutId);
-}
-
-function autoLayout() {
-  applyLayout(getSessionCount() === 2 ? 'split' : 'default');
-}
 
 // ── Keyboard shortcuts (chrome-level) ─────────────────────────
 // Alt+0 opens a new session; Alt+1..9 focuses the Nth session in the Focus rail; Alt+W jumps

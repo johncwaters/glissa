@@ -130,10 +130,6 @@ export function buildCardDOM(sessionId, sessionName, initialState, options = {})
   // Header
   const header = el('div', 'session-card-header');
 
-  const btnMinimize = el('span', 'btn-minimize', '\u25bc');
-  btnMinimize.title = 'Collapse';
-  btnMinimize.setAttribute('aria-label', 'Collapse');
-
   const nameEl = el('span', 'session-name', sessionName);
   const badge = makeBadge(state);
   badge.classList.add('session-badge');
@@ -152,17 +148,13 @@ export function buildCardDOM(sessionId, sessionName, initialState, options = {})
 
   // Time-in-current-state readout, shared by the grid header (trailing the badge) and the
   // minimized rail pill: "how long has this been working / waiting". Empty for settled states,
-  // so :empty hides it. Ticked by rail.js. aria-hidden so a per-second text change never spams
+  // so :empty hides it. Ticked by session-tick.js. aria-hidden so a per-second text change never spams
   // a screen reader (the badge label / pill aria-label carries the state name instead).
   const railElapsed = el('span', 'rail-elapsed');
   railElapsed.setAttribute('aria-hidden', 'true');
 
   // Action buttons
   const actions = el('div', 'session-actions');
-
-  const btnMaximize = el('button', 'btn-action btn-maximize visible', '\u26F6');
-  btnMaximize.title = 'Enter full screen';
-  btnMaximize.setAttribute('aria-label', 'Enter full screen');
 
   // Overflow menu (Restart + Remove tucked away to prevent accidental clicks)
   const overflow = el('div', 'session-overflow');
@@ -187,13 +179,13 @@ export function buildCardDOM(sessionId, sessionName, initialState, options = {})
   btnDebug.title = 'Debug state';
   btnDebug.setAttribute('aria-label', 'Debug session state');
 
-  actions.append(btnDebug, btnMaximize, overflow);
+  actions.append(btnDebug, overflow);
   // Order matters for layout stability. The variable-width status badge and its trailing
   // elapsed clock sit in the LEFT zone (with the name); the spacer then absorbs their width
   // changes, so the persistent tags + actions in the RIGHT zone never reflow when status or
   // the timer ticks. Combined with the reserved-width badge slot (see .state-label), the
   // header is dimensionally rigid across all states.
-  const headerChildren = [btnMinimize, nameEl, badge, railElapsed, spacer, worktreeBadge, postTurnBadge];
+  const headerChildren = [nameEl, badge, railElapsed, spacer, worktreeBadge, postTurnBadge];
   if (permsBadge) headerChildren.push(permsBadge);
   headerChildren.push(actions);
   header.append(...headerChildren);
@@ -205,7 +197,7 @@ export function buildCardDOM(sessionId, sessionName, initialState, options = {})
 
   card.append(header, termWrap);
 
-  return { card, header, badge, nameEl, railElapsed, btnRename, btnRestart, btnRemove, btnMinimize, btnMaximize, btnDebug, btnOverflow, overflowMenu, termWrap };
+  return { card, header, badge, nameEl, railElapsed, btnRename, btnRestart, btnRemove, btnDebug, btnOverflow, overflowMenu, termWrap };
 }
 
 // ── Inline rename ────────────────────────────────────────────

@@ -14,7 +14,6 @@ import { sendControlMsg } from '../control-ws.js';
 import { setSelectedId } from '../sidebar/selection.js';
 import { setActivityRenderer } from '../session-card/activity.js';
 import { container, sessionUIs } from '../session-card/card-registry.js';
-import { wakeSession } from '../session-card/layout.js';
 import { ensureTerminalSetup, forceTerminalRepaint } from '../session-card/terminal.js';
 
 const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)');
@@ -206,15 +205,11 @@ export function refreshFocusRoster() {
 
 function borrowToCenter(ui, id) {
   ui.card._focusHome = { parent: ui.card.parentElement, next: ui.card.nextElementSibling };
-  ui.card._focusWasMinimized = ui.card.classList.contains('minimized');
-  ui.card.classList.remove('minimized');
   ui.card.classList.add('focus-centered');
   cardSlotEl.appendChild(ui.card);
-  // The card may be slept (term disposed by minimize) or dormant (never built) - ensure a live
-  // terminal so the center is not a blank box. ensureTerminalSetup does NOT spawn a PTY for a dormant
-  // session; it only builds the xterm, so this is safe.
-  if (ui.sleeping) wakeSession(id);
-  else if (!ui.term) ensureTerminalSetup(ui, id);
+  // A dormant card has no terminal yet - ensure a live xterm so the center is not a blank box.
+  // ensureTerminalSetup does NOT spawn a PTY for a dormant session; it only builds the xterm.
+  if (!ui.term) ensureTerminalSetup(ui, id);
   // Deterministic fit to the (much larger) center rather than waiting on the ResizeObserver.
   ui._applyFit?.();
   forceTerminalRepaint(ui);
@@ -225,7 +220,6 @@ function releaseCenter() {
   const ui = sessionUIs.get(focusedId);
   if (ui && ui.card && ui.card.parentElement === cardSlotEl) {
     ui.card.classList.remove('focus-centered');
-    if (ui.card._focusWasMinimized) ui.card.classList.add('minimized');
     const home = ui.card._focusHome;
     if (home && home.parent && home.parent.isConnected) {
       if (home.next && home.next.parentElement === home.parent) home.parent.insertBefore(ui.card, home.next);
@@ -234,7 +228,6 @@ function releaseCenter() {
       container.appendChild(ui.card);
     }
     delete ui.card._focusHome;
-    delete ui.card._focusWasMinimized;
     ui._applyFit?.();
     forceTerminalRepaint(ui);
   }

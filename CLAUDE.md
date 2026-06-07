@@ -33,7 +33,7 @@ public/
   control-ws.js    # WebSocket control channel client
   dialogs.js       # Add Session and Settings dialog factories
   session-card/    # Session card modules (decomposed from session-card.js)
-    card-registry.js   # Shared state owner: sessionUIs Map + 3 DOM singletons
+    card-registry.js   # Shared state owner: sessionUIs Map + 2 DOM singletons
     toast.js           # showErrorToast — leaf, no local deps
     naming.js          # countSessionsByName, suggestSessionName (wraps naming-core.mjs)
     naming-core.mjs    # Pure: nextSuggestedName, countAutoNames, isAutoNameOf
@@ -41,9 +41,7 @@ public/
     webgl-core.mjs     # Pure: pickEvictionVictims
     card-dom.js        # Card builder, badge, inline rename, confirm dialog, debug overlay
     terminal.js        # xterm.js setup, data WebSocket, OSC-52 clipboard
-    layout.js          # Minimize/maximize/split/sleep cluster (mutually recursive)
-    drag-drop.js       # Container-level drag-and-drop, setupDragAndDrop
-    geometry-core.mjs  # Pure: closestCardByCenter (used by drag-drop)
+    session-tick.js    # Shared 1s tick: elapsed clock + working-heartbeat poll (refreshElapsed)
     lifecycle.js       # createSessionCard, removeSessionCard, applyState, etc.
     aggregate-core.mjs # Pure: computeAggregate (used by lifecycle)
 shared/

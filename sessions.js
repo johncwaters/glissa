@@ -943,7 +943,7 @@ class Session extends EventEmitter {
     if (this._sleeping) return;
     // Only sleep dead-PTY terminal states. Sleeping a live PTY (IDLE/COMPLETE)
     // would arm the sleep-kill timer below and terminate a session whose work
-    // can still continue. Mirrors the client guard in layout.js SLEEP_ELIGIBLE.
+    // can still continue.
     const sleepable = [STATES.DONE, STATES.FAILED];
     if (!sleepable.includes(this.state)) return;
     this._sleeping = true;

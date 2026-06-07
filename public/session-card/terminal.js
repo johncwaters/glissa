@@ -64,16 +64,13 @@ function connectDataWs(sessionId, ui, term) {
   ws.addEventListener('close', () => {
     renderScheduler.unregister(sessionId);
     // Only auto-reconnect if this ws is still the current one (not replaced by rename)
-    // Skip reconnect when sleeping - wakeSession() will reconnect on expand
     if (ui.dataWs === ws) {
       ui.dataWs = null;
-      if (!ui.sleeping) {
-        setTimeout(() => {
-          if (sessionUIs.has(sessionId)) {
-            connectDataWs(sessionId, ui, term);
-          }
-        }, RECONNECT_DELAY_MS);
-      }
+      setTimeout(() => {
+        if (sessionUIs.has(sessionId)) {
+          connectDataWs(sessionId, ui, term);
+        }
+      }, RECONNECT_DELAY_MS);
     }
   });
 

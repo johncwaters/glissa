@@ -12,7 +12,7 @@
 //     This is the 2am triage tell - is it churning, or stalled on a long step?
 //
 // Quiet is DERIVED, not scheduled: output arrival just stamps ui._lastOutputAt, and the shared
-// 1s session tick (rail.js) calls refreshSessionActivity to compare it against now. So there is
+// 1s session tick (session-tick.js) calls refreshSessionActivity to compare it against now. So there is
 // no per-session timer to churn on every chunk or to cancel on teardown - the timestamp is the
 // single source of truth, and the flag (ui._activity) is a pure function of (now - lastOutput,
 // state). The responsive direction (silence -> output) is flipped eagerly here so resume feels
@@ -25,7 +25,7 @@
 // flag on the ui; the focus view registers a RENDERER (setActivityRenderer) that paints the rail
 // pill. So the heartbeat's DOM home lives entirely in focus-view.js and this module never touches
 // a card. Leaf module: terminal.js calls noteSessionOutput per inbound PTY chunk; lifecycle.js
-// drives setRunningActivity on transitions; rail.js's tick calls refreshSessionActivity.
+// drives setRunningActivity on transitions; session-tick.js's tick calls refreshSessionActivity.
 
 import { STATES } from '/shared/states.mjs';
 

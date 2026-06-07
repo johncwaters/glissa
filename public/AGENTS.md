@@ -17,7 +17,7 @@ Browser-side dashboard for Glissa. Provides real-time terminal streaming via xte
 | `control-ws.js` | Control WebSocket client — connection management, auto-reconnect (3s), request/response with requestId correlation and 5s timeout |
 | `dialogs.js` | Add Session and Settings dialog factories — repo root scanning, project picker, validation, theme picker, sound selector |
 | `theme.js` | Theme system — defines color palettes (Golgari, Midnight, Phyrexian, Compleated), applies CSS custom properties on `:root`, derives xterm.js terminal themes from CSS variables |
-| `ui-prefs.js` | UI preference persistence (localStorage) — minimized sessions, sound enabled/id, theme id, notifications enabled. Prunes stale session references |
+| `ui-prefs.js` | UI preference persistence (localStorage) — sound enabled/id, theme id, notifications enabled |
 | `alert-sound.js` | Notification sounds — audio file playback (.ogg) with synth beep fallback via Web Audio API |
 | `notifications.js` | Desktop notifications via the browser Notifications API. Handles `notify` control messages (raises a native Notification routed to the Windows Action Center), permission flow, and the `notificationsEnabled` pref. Replaces the server-side BurntToast toast path |
 | `local-store.js` | Generic localStorage wrapper — JSON get/set with graceful degradation for private browsing |
@@ -40,15 +40,13 @@ The former `session-card.js` (~1600 lines) was decomposed into cohesion-sized mo
 
 | Module | Exports / purpose |
 |--------|-------------------|
-| `card-registry.js` | `sessionUIs` Map, 3 DOM singletons (`container`, `minimizedBar`, `aggregateEl`), reorder-echo dedup |
+| `card-registry.js` | `sessionUIs` Map, 2 DOM singletons (`container`, `aggregateEl`) |
 | `toast.js` | `showErrorToast` — leaf, depends only on `dom-helpers.js` |
 | `naming.js` + `naming-core.mjs` | `countSessionsByName`, `suggestSessionName`; pure name-sequence logic in `.mjs` |
 | `webgl-pool.js` + `webgl-core.mjs` | `tryLoadWebGL`, `releaseWebgl`; LRU eviction policy in pure `.mjs` |
 | `card-dom.js` | `buildCardDOM`, `makeBadge`, inline confirm dialog, inline rename, debug overlay, `handleDebugState*` |
 | `terminal.js` | `setupTerminal`, `wireTerminalIO`, `ensureTerminalSetup`, `reconnectDataWs`, OSC-52 clipboard, terminal-settings setters |
-| `layout.js` | Minimize/maximize/split/sleep cluster (mutually recursive); owns 5 layout-private lets; exports `isMaximizeActive`, `getMaximizedSession`, `enforceSplitOnCreate`, `forgetSessionLayout` |
-| `drag-drop.js` | Container-level drag listeners (top-level side effects), `setupDragAndDrop`; importing this module installs the listeners |
-| `geometry-core.mjs` | Pure: `closestCardByCenter` (used by drag-drop) |
+| `session-tick.js` | Shared 1s tick (top-level side effect): advances each card's elapsed clock + polls the working-heartbeat quiet flag; exports `refreshElapsed` |
 | `lifecycle.js` | `createSessionCard`, `removeSessionCard`, `applyState`, `applyTerminalSettings`, `updateAggregateStatus`, etc. — the integration layer |
 | `aggregate-core.mjs` | Pure: `computeAggregate(counts)` (used by lifecycle) |
 
@@ -71,8 +69,7 @@ app.js (boot)
   ├── theme.js           (theme system — applied at boot before UI renders)
   ├── control-ws.js      (control WebSocket — singleton)
   ├── session-card/lifecycle.js  (card lifecycle — the integration layer)
-  │     ├── session-card/layout.js      (minimize/maximize/split/sleep)
-  │     ├── session-card/drag-drop.js   (drag handlers, top-level side effects)
+  │     ├── session-card/session-tick.js (1s tick: elapsed + heartbeat, top-level side effect)
   │     ├── session-card/card-dom.js    (card builder, debug overlay)
   │     ├── session-card/terminal.js    (xterm.js, data WebSocket)
   │     ├── session-card/card-registry.js  (sessionUIs Map, DOM singletons)
@@ -143,10 +140,6 @@ States drive UI via `[data-state]` CSS selectors:
 - **DONE** — Cyan border, Restart visible, terminal shows "Session complete"
 - **FAILED** — Red border, Restart visible, terminal shows "Session failed"
 
-### Maximize Mode
-
-Clicking Maximize on a session card minimizes all other sessions and expands the target. Click a minimized card to switch targets. Press ESC or click Maximize again to exit. Drag-and-drop is disabled during maximize mode.
-
 ### Testing Requirements
 
 **Manual browser testing only.** No automated tests.
@@ -155,8 +148,8 @@ Verification checklist:
 1. Dashboard loads (loading screen -> app reveal on WS connect)
 2. Session cards render with correct state badges
 3. Terminal displays output, keyboard input works (Ctrl+C copies selection, Ctrl+V pastes)
-4. Drag-and-drop reordering persists (grid cards and from minimized bar)
-5. Minimize/expand/maximize toggle works (WebGL reloads on expand)
+4. Focus rail lists all sessions; the pill heartbeat breathes on a RUNNING session and goes quiet on silence
+5. Clicking a rail pill focuses that session into the center; a dormant pill starts the session
 6. Add Session dialog: picker populates from repo roots, manual entry via Advanced
 7. Settings dialog: loads current values, validates, saves, theme preview works
 8. Menu: shutdown and restart work with confirmation

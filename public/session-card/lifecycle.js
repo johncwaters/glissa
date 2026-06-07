@@ -8,21 +8,17 @@ import { sendControlMsg } from '../control-ws.js';
 import { setRunningActivity } from './activity.js';
 import { el } from '../dom-helpers.js';
 import { setHealthMonitorVisible } from '../health-monitor.js';
-import { getSoundId, isMinimized, isSoundEnabled } from '../ui-prefs.js';
+import { getSoundId, isSoundEnabled } from '../ui-prefs.js';
 import { computeAggregate } from './aggregate-core.mjs';
 import { buildCardDOM, closeDebugOverlay, makeBadge, openDebugOverlay, setDebugMode, showConfirmDialog, startInlineRename } from './card-dom.js';
-import { aggregateEl, consumeLocalReorderPending, container, minimizedBar, sessionUIs } from './card-registry.js';
-// Load-bearing import: evaluating drag-drop.js installs the container-level
-// dragover/dragleave/drop listeners and the _dropZone side effects at module load.
-import { setupDragAndDrop } from './drag-drop.js';
-import { _performExpand, enforceSplitOnCreate, exitMaximizeMode, forgetSessionLayout, getMaximizedSession, SLEEP_ELIGIBLE, sleepSession, toggleMaximize, toggleMinimize, wakeSession } from './layout.js';
-// Load-bearing import: evaluating rail.js installs the minimized-bar MutationObserver,
-// the elapsed-tick interval, and the rail's click/keyboard listeners at module load.
-import { refreshPill } from './rail.js';
+import { aggregateEl, container, sessionUIs } from './card-registry.js';
+// Load-bearing import: evaluating session-tick.js installs the shared 1s tick (elapsed clock +
+// working-heartbeat poll) at module load.
+import { refreshElapsed } from './session-tick.js';
 import { seedReviewMergeStatus, setReviewDiff, setReviewMergeStatus } from '../sidebar/review-sidebar.js';
 import { setSelectedId } from '../sidebar/selection.js';
 import { ensureTerminalSetup, setTerminalCursorBlink, setupTerminal, wireTerminalIO } from './terminal.js';
-import { releaseWebgl, tryLoadWebGL } from './webgl-pool.js';
+import { releaseWebgl } from './webgl-pool.js';
 
 // ── Constants ────────────────────────────────────────────────
 
@@ -48,7 +44,7 @@ let _lastAggregateSeverity = null;
 
 // ── DOM refs ─────────────────────────────────────────────────
 
-// container, minimizedBar and aggregateEl now live in ./session-card/card-registry.js.
+// container and aggregateEl now live in ./session-card/card-registry.js.
 
 // ── Helpers (private) ────────────────────────────────────────
 
@@ -136,10 +132,6 @@ function wireCardEvents(ui, sessionId) {
     }
   });
 
-  ui.btnMaximize.addEventListener('click', () => {
-    toggleMaximize(sessionId);
-  });
-
   ui.btnDebug.addEventListener('click', (e) => {
     e.stopPropagation();
     openDebugOverlay(ui, sessionId);
@@ -211,21 +203,12 @@ export function updateAggregateStatus() {
 export function createSessionCard(sessionId, sessionName, initialState, options = {}) {
   const state = initialState || STATES.DORMANT;
   const dom = buildCardDOM(sessionId, sessionName, state, options);
-  setupDragAndDrop(dom.card, dom.header, dom.btnMinimize, sessionId);
 
   const isDormant = state === STATES.DORMANT;
 
-  // Dormant cards live in the minimized bar with no terminal and no data WS
-  // until the user expands them, which sends start-session and triggers spawn.
-  if (isDormant) {
-    dom.card.classList.add('minimized');
-    dom.btnMinimize.textContent = '▲';
-    dom.btnMinimize.title = 'Start session';
-    dom.btnMinimize.setAttribute('aria-label', 'Start session');
-    minimizedBar.appendChild(dom.card);
-  } else {
-    container.appendChild(dom.card);
-  }
+  // Dormant cards have no terminal or data WS until started (via the Focus rail pill, which sends
+  // start-session). The card lives in the off-screen grid home; Focus borrows it into the center on focus.
+  container.appendChild(dom.card);
 
   const ui = {
     term: null,
@@ -237,10 +220,8 @@ export function createSessionCard(sessionId, sessionName, initialState, options 
     badge: dom.badge,
     nameEl: dom.nameEl,
     railElapsed: dom.railElapsed,
-    // Wall-clock of the latest state entry; rail.js renders "time in this state".
+    // Wall-clock of the latest state entry; session-tick.js renders "time in this state".
     stateSince: Date.now(),
-    btnMinimize: dom.btnMinimize,
-    btnMaximize: dom.btnMaximize,
     btnOverflow: dom.btnOverflow,
     overflowMenu: dom.overflowMenu,
     termWrap: dom.termWrap,
@@ -252,7 +233,6 @@ export function createSessionCard(sessionId, sessionName, initialState, options 
     debugOpen: false,
     abortController: new AbortController(),
     currentState: state,
-    sleeping: false,
   };
   sessionUIs.set(sessionId, ui);
 
@@ -266,12 +246,6 @@ export function createSessionCard(sessionId, sessionName, initialState, options 
   if (!isDormant) {
     setupTerminal(dom.termWrap, ui);
     wireTerminalIO(ui, sessionId);
-
-    // Restore minimized state from localStorage
-    if (isMinimized(sessionId)) toggleMinimize(sessionId);
-
-    // In split mode, auto-minimize if already at limit (C2: encapsulated in layout.js)
-    enforceSplitOnCreate(sessionId, ui);
   }
 
   updateAggregateStatus();
@@ -370,8 +344,6 @@ export function removeSessionCard(sessionId) {
 
   closeDebugOverlay(ui);
   sessionUIs.delete(sessionId);
-  if (getMaximizedSession() === sessionId) exitMaximizeMode();
-  forgetSessionLayout(sessionId);
 
   if (ui.resizeObserver) ui.resizeObserver.disconnect();
   if (ui.abortController) ui.abortController.abort();
@@ -414,13 +386,9 @@ export function applyState(sessionId, state) {
     setRunningActivity(ui, state === STATES.RUNNING);
   }
 
-  // Leaving DORMANT: lazy-set up the terminal and promote the card from
-  // the minimized bar to the main grid (if not already done optimistically).
+  // Leaving DORMANT: lazy-set up the terminal (the card already lives in the off-screen grid home).
   if (prevState === STATES.DORMANT && state !== STATES.DORMANT) {
     ensureTerminalSetup(ui, sessionId);
-    if (ui.card.classList.contains('minimized')) {
-      _performExpand(sessionId, ui);
-    }
   }
 
   // Preserve the glyph + label spans; update their text in place so the badge's
@@ -439,17 +407,6 @@ export function applyState(sessionId, state) {
     ui.badge = fresh;
   }
   ui.card.dataset.state = state;
-
-  // Recently-completed pill: if a session reaches a notable terminal / turn-complete
-  // state while collapsed in the rail, mark it unseen so the pill keeps a gentle
-  // attention pulse until the operator looks. Restoring it clears the
-  // mark (rail.js). Only set it for a card that is currently minimized: a session
-  // that finishes on the grid was already seen.
-  if (state !== prevState
-      && (state === STATES.DONE || state === STATES.FAILED || state === STATES.COMPLETE)
-      && ui.card.classList.contains('minimized')) {
-    ui.card.dataset.unseen = '';
-  }
 
   updateButtonVisibility(ui);
 
@@ -484,45 +441,7 @@ export function applyState(sessionId, state) {
 
   updateAggregateStatus();
 
-  // Keep the minimized rail pill (badge text, colour, aria-label, elapsed) in sync
-  // with the new state. No-op when the card is on the grid.
-  refreshPill(ui);
-
-  // Auto-wake: sleeping session received a non-sleep-eligible state (server
-  // rejected sleep or transitioned back to active before sleep arrived).
-  // Resync client by recreating terminal + data WS.
-  if (ui.sleeping && !SLEEP_ELIGIBLE.includes(state)) {
-    wakeSession(sessionId);
-  }
-
-  // Auto-sleep: minimized session just entered a sleep-eligible state
-  if (!ui.sleeping
-      && ui.card.classList.contains('minimized')
-      && SLEEP_ELIGIBLE.includes(state)) {
-    sleepSession(sessionId);
-  }
-}
-
-export function handleSessionsReordered(order) {
-  if (consumeLocalReorderPending()) {
-    return;
-  }
-
-  for (const id of order) {
-    const ui = sessionUIs.get(id);
-    if (!ui?.card) continue;
-    if (ui.card.classList.contains('minimized')) {
-      minimizedBar.appendChild(ui.card);
-    } else {
-      container.appendChild(ui.card);
-    }
-  }
-  for (const [, ui] of sessionUIs) {
-    if (ui.card.classList.contains('minimized')) {
-      ui.needsWebGLReload = true;
-    } else {
-      tryLoadWebGL(ui);
-    }
-  }
+  // Reset the elapsed readout immediately on a state change (the tick handles the per-second advance).
+  refreshElapsed(ui);
 }
 
