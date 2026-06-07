@@ -13,12 +13,13 @@
 
 import { BADGE_LABELS, STATE_GLYPHS, STATES } from '/shared/states.mjs';
 import { sendControlMsg } from '../control-ws.js';
-import { orderRoster, pickNextAttention } from './attention-core.mjs';
-import { groupRoster, visibleOrder, NO_PATH_KEY } from './roster-groups.mjs';
-import { setSelectedId } from '../sidebar/selection.js';
 import { setActivityRenderer } from '../session-card/activity.js';
 import { container, sessionUIs } from '../session-card/card-registry.js';
 import { ensureTerminalSetup, forceTerminalRepaint } from '../session-card/terminal.js';
+import { setSelectedId } from '../sidebar/selection.js';
+import { getLastFocusedSessionId, setLastFocusedSessionId } from '../ui-prefs.js';
+import { orderRoster, pickNextAttention } from './attention-core.mjs';
+import { groupRoster, visibleOrder, NO_PATH_KEY } from './roster-groups.mjs';
 
 const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)');
 
@@ -572,6 +573,10 @@ function focusSession(id) {
   releaseCenter();
   focusedId = id;
   railTabStopId = id; // sync: the centered session is also the rail's roving option
+  // Remember the last session the operator centered so a tab switch or page reload can return to it
+  // (consumed by restoreFocusedSession). Persist ONLY here, the one place a real selection lands, so
+  // the value stays sticky across the releaseCenter/deactivate mechanics that null focusedId.
+  setLastFocusedSessionId(id);
   // Acknowledge a finished-turn pill: focusing it clears the unseen flag so it stops announcing
   // (paintPill leaves a cleared flag alone while the state stays COMPLETE).
   pillById.get(id)?.removeAttribute('data-unseen');
@@ -622,12 +627,26 @@ export function focusNthInRail(n) {
 export function activateFocusView() {
   if (!railEl) return;
   active = true;
-  // Opening Focus never auto-selects a session: it starts on the placeholder and the operator picks
-  // one from the rail. (No order[0] auto-focus - the empty center is intentional.) releaseCenter
-  // returns any stray centered card home and clears focusedId, so this is always a clean start.
+  // releaseCenter returns any stray centered card home and clears focusedId, so this is always a clean
+  // start. We then restore the last session the operator had open (restoreFocusedSession), so switching
+  // away to Teams and back returns to it. When nothing valid is saved the center stays on the
+  // intentional empty placeholder and the operator picks from the rail.
   releaseCenter();
   railTabStopId = null;
   refreshFocusRoster();
+  restoreFocusedSession();
+}
+
+// Re-center the last session the operator had open. Idempotent and safe to call on activation and on
+// every snapshot: it no-ops unless Focus is up, the center is empty, and the saved session still
+// exists in the roster. It CENTERS via focusSession (not onPillActivate), so it never auto-starts a
+// DORMANT session - a reload never spawns a Claude process; a restored dormant card just shows its
+// empty terminal. On the boot/reload race the roster is empty at activation, so the no-op here is
+// re-attempted from app.js handleSnapshot once the snapshot has populated the cards.
+export function restoreFocusedSession() {
+  if (!active || focusedId) return;
+  const id = getLastFocusedSessionId();
+  if (id && sessionUIs.has(id)) focusSession(id);
 }
 
 export function deactivateFocusView() {

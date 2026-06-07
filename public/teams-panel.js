@@ -4,10 +4,10 @@
 // project; each instance is one (teamId, projectId) activation persisted in config.teams.
 //
 // Each instance renders as a panel with four bands (the lifecycle, top to bottom):
-//   1. header   — roster name -> target, live status, next scheduled run
-//   2. pipeline — the stage sequence, live during a run (active stage, elapsed vs budget)
-//   3. controls — Run / Cancel, the schedule (on/off + inline day/time/tz editor), Remove, guardrails
-//   4. runs     — recent runs, each expandable to its summary + buttons that open artifacts in the editor
+//   1. header   - roster name -> target, live status, next scheduled run
+//   2. pipeline - the stage sequence, live during a run (active stage, elapsed vs budget)
+//   3. controls - Run / Cancel, the schedule (on/off + inline day/time/tz editor), Remove, guardrails
+//   4. runs     - recent runs, each expandable to its summary + buttons that open artifacts in the editor
 //
 // Talks to the backend over the control WebSocket (list-teams / add-team-instance /
 // remove-team-instance / run-team / cancel-team-run / set-team-schedule / get-team-runs /
@@ -18,7 +18,7 @@ import { createConfirmDialog } from './dialogs.js';
 
 let mounted = null; // { container, stackEl, addBar, teams: Map, instances: Map<key, refs>, projects, activations }
 let tabActivityCb = null;
-const runningKeys = new Set(); // instance keys with a run in flight — drives the tab activity dot
+const runningKeys = new Set(); // instance keys with a run in flight - drives the tab activity dot
 
 const STAGE_LABEL = {
   researcher: 'Researcher',
@@ -300,7 +300,7 @@ function setRunning(refs, on) {
 
 // Rehydrate a freshly-mounted panel from the server's live snapshot so a tab switch (or a second
 // client) restores the active stage, a continuous elapsed timer, and any in-flight cancel, instead
-// of a blank rail, a zeroed clock, and a generic "Running…". The timer continues from the server's
+// of a blank rail, a zeroed clock, and a generic "Running...". The timer continues from the server's
 // stageStartedAtMs (the Glissa client and server share one machine, so Date.now() is a common clock).
 function rehydrateLive(refs, live) {
   if (live && live.stageStartedAtMs) refs.stageStartMs = live.stageStartedAtMs;
@@ -309,9 +309,9 @@ function rehydrateLive(refs, live) {
     markStage(refs.stageNodes, live.currentStage, 'active');
     setStatus(refs, `${labelFor(live.currentStage)} · ${stageIndexLabel(refs, live.currentStage)}`, 'run');
   } else {
-    setStatus(refs, 'Running…', 'run');
+    setStatus(refs, 'Running...', 'run');
   }
-  if (live && live.cancelling) setStatus(refs, 'Cancelling…', '');
+  if (live && live.cancelling) setStatus(refs, 'Cancelling...', '');
 }
 
 function failText(msg) {
@@ -421,7 +421,7 @@ function renderSetup(refs, ps) {
   auto.type = 'button';
   auto.addEventListener('click', () => {
     auto.disabled = true;
-    setStatus(refs, 'Starting setup…', 'run');
+    setStatus(refs, 'Starting setup...', 'run');
     sendControlMsg({ type: 'setup-team-pack', teamId: refs.teamId, projectId: refs.projectId });
   });
 
@@ -430,7 +430,7 @@ function renderSetup(refs, ps) {
 
 // Pull a single instance's full state in one request: runs, active flag, schedule + next fire.
 function refreshInstance(refs) {
-  refs.runsList.replaceChildren(el('li', 'run-item run-empty', 'Loading…'));
+  refs.runsList.replaceChildren(el('li', 'run-item run-empty', 'Loading...'));
   sendControlRequest('get-team-pack-status', { teamId: refs.teamId, projectId: refs.projectId })
     .then((ps) => renderSetup(refs, ps))
     .catch(() => {});
@@ -658,7 +658,7 @@ function renderInstancePanel(team, activation) {
   const editor = buildScheduleEditor();
   panel.append(editor.wrap);
 
-  // setup banner — shown when this project's pack is not yet filled in (get-team-pack-status).
+  // setup banner - shown when this project's pack is not yet filled in (get-team-pack-status).
   // Sits above the guardrails divider: it's an action you take before running, not run history.
   const setupEl = el('div', 'team-setup');
   setupEl.hidden = true;
@@ -705,14 +705,14 @@ function renderInstancePanel(team, activation) {
   runBtn.addEventListener('click', () => {
     resetPipeline(stageNodes);
     setRunning(refs, true);
-    setStatus(refs, 'Starting…', 'run');
+    setStatus(refs, 'Starting...', 'run');
     runningKeys.add(k);
     setTabActivity();
     sendControlMsg({ type: 'run-team', teamId: team.id, projectId });
   });
 
   cancelBtn.addEventListener('click', () => {
-    setStatus(refs, 'Cancelling…', '');
+    setStatus(refs, 'Cancelling...', '');
     sendControlMsg({ type: 'cancel-team-run', teamId: team.id, projectId });
   });
 
@@ -812,6 +812,10 @@ function populateProjectOptions(sel) {
     if (mounted.addBar) mounted.addBar.addBtn.disabled = true;
     return;
   }
+  // Symmetric with the empty branch above: re-enable in case a prior call disabled the picker when
+  // there were no projects yet (e.g. an in-place refresh after the snapshot fills the project list).
+  sel.disabled = false;
+  if (mounted.addBar) mounted.addBar.addBtn.disabled = false;
   const def = el('option', null, 'Select a project');
   def.value = ''; def.disabled = true; def.selected = true;
   sel.append(def);
@@ -819,6 +823,21 @@ function populateProjectOptions(sel) {
     const o = el('option', null, p.name);
     o.value = p.id;
     sel.append(o);
+  }
+}
+
+// Repopulate ONLY the add-bar project picker in place (no view teardown), preserving any in-progress
+// selection. Called from app.js handleSnapshot when Teams was restored as the active view at boot: its
+// picker was seeded empty before knownProjects existed. A full mountTeamsView would wipe a mid-edit
+// add-form, reset instance timers, and re-fire list-teams (a non-restart WS reconnect re-runs
+// handleSnapshot with no page reload), so refresh the <select> in place instead.
+export function refreshTeamsProjects(projects) {
+  if (!mounted || !mounted.addBar) return;
+  const prev = mounted.addBar.projSel.value;
+  mounted.projects = projects || [];
+  populateProjectOptions(mounted.addBar.projSel);
+  if (prev && [...mounted.addBar.projSel.options].some((o) => o.value === prev)) {
+    mounted.addBar.projSel.value = prev;
   }
 }
 
@@ -908,7 +927,7 @@ export function mountTeamsView(container, projects = []) {
   mounted.addBar = add;
   const stack = el('div', 'teams-stack');
   mounted.stackEl = stack;
-  stack.append(el('p', 'teams-loading', 'Loading teams…'));
+  stack.append(el('p', 'teams-loading', 'Loading teams...'));
   // A config surface reads as a centered column, not a full-bleed wall; the view stays the
   // full-width scroll container so the scrollbar sits at the viewport edge, not mid-screen.
   const content = el('div', 'teams-content');
@@ -977,14 +996,14 @@ export function handleTeamMessage(msg) {
   switch (type) {
     case 'team-run-accepted':
       setRunning(refs, true);
-      setStatus(refs, 'Accepted…', 'run');
+      setStatus(refs, 'Accepted...', 'run');
       break;
     case 'team-run-started':
       setRunning(refs, true);
       resetPipeline(refs.stageNodes);
       refs.chatLog.replaceChildren(); // fresh run, fresh conversation
       clearChatAwaiting(refs);
-      setStatus(refs, 'Running…', 'run');
+      setStatus(refs, 'Running...', 'run');
       break;
     case 'team-stage-started': {
       setRunning(refs, true);
@@ -1011,15 +1030,15 @@ export function handleTeamMessage(msg) {
       // Bridge the inter-stage gap: spawning the next `claude -p` can take many seconds, during which
       // the header would otherwise sit on the just-finished stage as if it were still active. Naming the
       // handoff keeps the run reading as live. A verdict stage (the editor) is left without a "next"
-      // hint because a FIX re-runs an earlier stage instead — the team-revise-round / next
+      // hint because a FIX re-runs an earlier stage instead - the team-revise-round / next
       // team-stage-started event resolves that within the same gap.
       const done = `${labelFor(msg.stage)} done${msg.verdict ? ` · ${msg.verdict}` : ''}`;
       const next = msg.verdict ? null : nextStageId(refs, msg.stage);
-      setStatus(refs, next ? `${done} · starting ${labelFor(next)}…` : done, 'run');
+      setStatus(refs, next ? `${done} · starting ${labelFor(next)}...` : done, 'run');
       break;
     }
     case 'team-run-cancelling':
-      setStatus(refs, 'Cancelling…', '');
+      setStatus(refs, 'Cancelling...', '');
       break;
     case 'team-run-complete': {
       settleActive(refs.stageNodes);
@@ -1071,7 +1090,7 @@ export function handleTeamMessage(msg) {
       break;
     case 'team-run-resumed':
       clearChatAwaiting(refs);
-      setStatus(refs, 'Running…', 'run');
+      setStatus(refs, 'Running...', 'run');
       break;
     default:
       break;

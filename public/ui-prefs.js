@@ -1,11 +1,12 @@
 // ── UI preferences ───────────────────────────────────────────
 // Persists browser-side UI state to localStorage.
-// Schema: { soundEnabled: boolean, soundId: string, themeId: string, notificationsEnabled: boolean }
+// Schema: { soundEnabled: boolean, soundId: string, themeId: string, notificationsEnabled: boolean,
+//           activeView: string, lastFocusedSessionId: string|null }
 
 import { getJSON, setJSON } from './local-store.js';
 
 const STORAGE_KEY = 'glissa-ui-prefs';
-const DEFAULT_PREFS = { soundEnabled: true, soundId: 'coins', themeId: 'phyrexian', notificationsEnabled: true };
+const DEFAULT_PREFS = { soundEnabled: true, soundId: 'coins', themeId: 'phyrexian', notificationsEnabled: true, activeView: 'focus', lastFocusedSessionId: null };
 
 function load() {
   const prefs = getJSON(STORAGE_KEY, DEFAULT_PREFS);
@@ -13,6 +14,8 @@ function load() {
   if (typeof prefs.soundId !== 'string') prefs.soundId = 'coins';
   if (typeof prefs.themeId !== 'string') prefs.themeId = 'golgari';
   if (typeof prefs.notificationsEnabled !== 'boolean') prefs.notificationsEnabled = true;
+  if (typeof prefs.activeView !== 'string') prefs.activeView = 'focus';
+  if (typeof prefs.lastFocusedSessionId !== 'string' && prefs.lastFocusedSessionId !== null) prefs.lastFocusedSessionId = null;
   return prefs;
 }
 
@@ -57,6 +60,26 @@ export function getThemeId() {
 export function setThemeId(id) {
   const prefs = load();
   prefs.themeId = id;
+  save(prefs);
+}
+
+export function getActiveView() {
+  return load().activeView;
+}
+
+export function setActiveView(view) {
+  const prefs = load();
+  prefs.activeView = view;
+  save(prefs);
+}
+
+export function getLastFocusedSessionId() {
+  return load().lastFocusedSessionId;
+}
+
+export function setLastFocusedSessionId(id) {
+  const prefs = load();
+  prefs.lastFocusedSessionId = id;
   save(prefs);
 }
 

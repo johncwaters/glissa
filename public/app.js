@@ -7,7 +7,7 @@ import './tailwind.css';
 import { STATES } from '/shared/states.mjs';
 import { connectControl, disableReconnect, onControlMessage, sendControlMsg, sendControlRequest, setConnectionStateCallback } from './control-ws.js';
 import { createAddSessionDialog, createConfirmDialog, createSettingsDialog } from './dialogs.js';
-import { activateFocusView, deactivateFocusView, focusNextAttention, focusNthInRail, focusSessionInCenter, isFocusActive, mountFocusView, refreshFocusRoster, setFocusMergeStatus } from './focus-view/focus-view.js';
+import { activateFocusView, deactivateFocusView, focusNextAttention, focusNthInRail, focusSessionInCenter, isFocusActive, mountFocusView, refreshFocusRoster, restoreFocusedSession, setFocusMergeStatus } from './focus-view/focus-view.js';
 import { applyHealthSnapshot, mountHealthMonitor } from './health-monitor.js';
 import { initNotifications, showDesktopNotification } from './notifications.js';
 import { handleDebugStateRefresh, handleDebugStateResponse } from './session-card/card-dom.js';
@@ -15,9 +15,9 @@ import { applyState, applyTerminalSettings, createSessionCard, getSessionCount, 
 import { reconnectDataWs } from './session-card/terminal.js';
 import { showErrorToast } from './session-card/toast.js';
 import { forgetReviewSession, mountReviewSidebar, refreshReviewSidebar } from './sidebar/review-sidebar.js';
-import { handleTeamMessage, mountTeamsView, setTabActivityCallback } from './teams-panel.js';
+import { handleTeamMessage, mountTeamsView, refreshTeamsProjects, setTabActivityCallback } from './teams-panel.js';
 import { applyTheme } from './theme.js';
-import { getThemeId, isSoundEnabled, setSoundEnabled } from './ui-prefs.js';
+import { getActiveView, getThemeId, isSoundEnabled, setActiveView, setSoundEnabled } from './ui-prefs.js';
 
 // ── Apply saved theme ─────────────────────────────────────────
 
@@ -106,9 +106,14 @@ function handleSnapshot(sessions) {
   }
   updateAggregateStatus();
 
-  // Focus can be the active view when the initial snapshot lands; rebuild its rail from the new cards.
-  // The empty state ("Nothing to focus") lives in the Focus view itself, so no grid placeholder here.
-  if (isFocusActive()) refreshFocusRoster();
+  // Focus can be the active view when the initial snapshot lands; rebuild its rail from the new cards,
+  // then restore the session the operator had open (the boot/reload race: the saved session does not
+  // exist until this first snapshot populates the cards). The empty state ("Nothing to focus") lives
+  // in the Focus view itself, so no grid placeholder here.
+  if (isFocusActive()) { refreshFocusRoster(); restoreFocusedSession(); }
+  // Teams may have been restored as the active view at boot, before knownProjects was populated, so its
+  // project picker was seeded empty; refill it in place now that the snapshot has arrived.
+  else if (_activeView === 'teams') refreshTeamsProjects(getKnownProjects());
 }
 
 function handleStateChange(msg) {
@@ -279,6 +284,8 @@ function activateView(view) {
   // whether a focused xterm releases Alt+W to the chrome triage handler (Focus) or treats it as a real
   // keystroke. Without this write it stays undefined and xterm swallows Alt+W whenever a terminal is focused.
   document.body.dataset.activeView = view;
+  // Persist the active tab so a page reload returns to it (restored at boot below).
+  setActiveView(view);
   for (const v of VIEW_TABS) {
     const selected = v.view === view;
     if (v.el) v.el.hidden = !selected;
@@ -307,9 +314,12 @@ for (let i = 0; i < VIEW_TABS.length; i++) {
   });
 }
 
-// Land on Focus by default. Call activateView (not a bare dataset set) so the Focus module activates
-// and builds its roster; the snapshot that arrives later refreshes it (see handleSnapshot).
-activateView('focus');
+// Restore the last active view (Focus by default). Validate the saved view against VIEW_TABS so a
+// stale id (e.g. the removed "sessions" grid) falls back to Focus. Call activateView (not a bare
+// dataset set) so the view module activates; the snapshot that arrives later refreshes it and restores
+// the centered session / Teams projects (see handleSnapshot).
+const savedView = getActiveView();
+activateView(VIEW_TABS.some((v) => v.view === savedView) ? savedView : 'focus');
 
 document.getElementById('btn-restart').addEventListener('click', () => {
   headerMenu.classList.remove('open');
