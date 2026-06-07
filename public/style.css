@@ -2518,25 +2518,106 @@ body {
 .focus-pill[data-merge="parked"] { --st: var(--state-failed); border-color: var(--state-failed); }
 .focus-pill[data-merge="parked"] .focus-pill-merge { color: var(--state-failed); }
 
-/* ── Center ── */
+/* ── Center: a built-in work surface, not a floating tile ──
+   The Focus tab borrows each session's live card into this column. The card was built as a grid
+   tile (rounded border, padded float, loud state glow, a header that re-states the rail pill); the
+   grid is gone (#sessions-container is display:none) and the card is only ever shown here, so in the
+   centered context it is re-cast as THE screen: a slim status strip (the toolbar) over an
+   edge-to-edge terminal, flush to the column so the rail and review sidebar frame it with their own
+   1px column borders. Tonal layering tells the three columns apart: the side rails sit on
+   --bg-header, the terminal screen on --bg-card (one step lighter, lifted), the strip on
+   --bg-surface. State recedes: the loud card border and pulse glow are dropped, the rail pill
+   carries state, and the only state color left here is a thin toolbar accent plus the badge. */
 .focus-center {
   flex: 1 1 auto;
   min-width: 0;
   display: flex;
   flex-direction: column;
-  padding: 12px;
-  gap: 10px;
+  /* Flush: no padding box, no gap. Toolbar + terminal run edge to edge in the column. The empty
+     placeholder still centers via .focus-empty margin:auto + the :empty slot collapse below. */
+  padding: 0;
 }
 .focus-card-slot { flex: 1 1 auto; min-height: 0; display: flex; }
 /* No card borrowed in → collapse the slot so it stops grabbing the column's free space and the
    empty-state placeholder (.focus-empty, margin:auto) centers in the middle instead of pinning top. */
 .focus-card-slot:empty { flex: 0 0 auto; }
+
 .focus-center .session-card.focus-centered {
   flex: 1 1 auto;
   width: 100%;
   height: 100%;
   margin: 0;
+  /* Strip the grid-tile cues. The card is the work surface now: no rounded float, no outer border,
+     no state-colored border or glow. This (0,3,0) selector beats the [data-state] border/shadow
+     rules and wins the source-order tie against the completion-flash block above. */
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
 }
+/* Kill the WAITING pulse ring (a card-level ::after); WAITING recedes to the quiet toolbar accent. */
+.focus-center .session-card.focus-centered::after { display: none; }
+/* Drop the card-level completion glow here; the one-shot lands on the toolbar accent instead. */
+.focus-center .session-card.focus-centered.completion-flash { animation: none; }
+
+/* ── Centered toolbar: the status strip over the screen ──
+   The borrowed card header, re-cast as a work-area toolbar: thinned to essentials and height-matched
+   to the review sidebar head, so the terminal screen and the review body begin at the same y (three
+   distinct columns, one shared top line). */
+.focus-center .session-card.focus-centered .session-card-header {
+  min-height: 40px;
+  padding: 0 8px 0 14px;
+  position: relative;
+}
+/* Promote the session name to the title voice: this is the one place we know exactly what is
+   centered, so the name leads (weight + size + color), not the 11px header default. */
+.focus-center .session-card.focus-centered .session-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-head);
+  letter-spacing: 0.03em;
+}
+/* Compact the informational markers so the strip stays quiet (YOLO keeps its warning legibility). */
+.focus-center .session-card.focus-centered .worktree-badge,
+.focus-center .session-card.focus-centered .agents-badge,
+.focus-center .session-card.focus-centered .post-turn-badge {
+  font-size: 10px;
+  padding: 0 5px;
+  line-height: 16px;
+}
+
+/* Receded state accent: a thin top line on the toolbar, the only state COLOR left in the centered
+   work area. Steady for FAILED, breathing for WAITING (a real but quiet "needs you"; the loud alarm
+   stays on the rail pulse, the NEED YOU head, and the toast), a one-shot sweep on a DONE completion. */
+.focus-center .session-card.focus-centered .session-card-header::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 2px;
+  background: var(--focus-st, transparent);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 200ms ease;
+}
+.focus-centered[data-state="WAITING"] .session-card-header { --focus-st: var(--state-waiting); }
+.focus-centered[data-state="FAILED"]  .session-card-header { --focus-st: var(--state-failed); }
+.focus-centered[data-state="DONE"]    .session-card-header { --focus-st: var(--state-done); }
+.focus-centered[data-state="WAITING"] .session-card-header::after,
+.focus-centered[data-state="FAILED"]  .session-card-header::after { opacity: 1; }
+@media (prefers-reduced-motion: no-preference) {
+  .focus-centered[data-state="WAITING"] .session-card-header::after {
+    animation: focus-toolbar-breathe 2.4s ease-in-out infinite;
+  }
+  .focus-center .session-card.focus-centered.completion-flash[data-state="DONE"] .session-card-header::after {
+    animation: focus-toolbar-flash 900ms ease-out;
+  }
+}
+@keyframes focus-toolbar-breathe { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+@keyframes focus-toolbar-flash { 0% { opacity: 1; } 100% { opacity: 0; } }
+
+/* A small inset so the terminal reads as a screen set into the strip, not glyphs kissing the edges. */
+.focus-center .session-card.focus-centered .terminal-wrap { padding: 4px 6px 0; }
 
 .focus-empty { margin: auto; text-align: center; color: var(--text-dim); }
 .focus-empty-title { font-size: 14px; font-weight: 700; color: var(--text-head); margin: 0 0 4px; }
