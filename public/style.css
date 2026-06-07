@@ -2723,7 +2723,9 @@ body {
   color: var(--text-head);
   letter-spacing: 0.03em;
 }
-/* Compact the informational markers so the strip stays quiet (YOLO keeps its warning legibility). */
+/* Compact every header tag uniformly so the strip stays quiet in the centered card.
+   YOLO compacts with the rest: one size for the whole set beats singling it out. */
+.focus-center .session-card.focus-centered .perms-badge,
 .focus-center .session-card.focus-centered .worktree-badge,
 .focus-center .session-card.focus-centered .agents-badge,
 .focus-center .session-card.focus-centered .post-turn-badge {
