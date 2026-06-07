@@ -2782,7 +2782,6 @@ body {
 .review-sidebar-head {
   display: flex;
   align-items: center;
-  gap: 8px;
   flex: 0 0 auto;
   padding: 10px 14px;
   border-bottom: 1px solid var(--border-dim);
@@ -2795,21 +2794,6 @@ body {
   text-transform: uppercase;
   color: var(--text-head);
 }
-/* Count of sessions with changes ready to review, shown next to the title. */
-.review-count {
-  display: none;
-  min-width: 18px;
-  height: 18px;
-  padding: 0 5px;
-  border-radius: 9px;
-  font-size: 10px;
-  font-weight: 700;
-  line-height: 18px;
-  text-align: center;
-  color: var(--bg);
-  background: var(--accent);
-}
-.review-count.has-count { display: inline-block; }
 
 .review-sidebar-body {
   flex: 1;
@@ -2822,6 +2806,11 @@ body {
 .review-empty-title { font-size: 13px; font-weight: 700; color: var(--text-head); margin-bottom: 6px; }
 .review-empty-desc { font-size: 12px; line-height: 1.5; }
 .review-nochanges { color: var(--text-dim); font-size: 12px; padding: 12px 0; }
+/* Loading is a real transient state, so it earns a quiet pulse (the shared `pulse` keyframe; motion is
+   opt-in, and reduced-motion stills it). */
+@media (prefers-reduced-motion: no-preference) {
+  .review-loading { animation: pulse 1.4s ease-in-out infinite; }
+}
 
 .review-status-note {
   margin: 0 0 12px;
@@ -2834,10 +2823,11 @@ body {
 .review-status-note[data-merge="parked"] { color: var(--state-failed); }
 .review-status-note[data-merge="merged"] { color: var(--state-done); }
 
-/* Committed vs uncommitted sections. Each carries a colored left accent bar (committed = done, uncommitted
-   = waiting) so the two groups are told apart by color at a glance, not by re-reading the words. A single
-   header row per section names the group ONCE, its meaning, and the stats, instead of stacking title +
-   subtitle + a separate "N files changed" line. */
+/* Committed vs uncommitted sections. The two groups are told apart at a glance by the colored section
+   label plus a state-tinted FULL border on the diff box (committed = done, uncommitted = waiting), never a
+   side-stripe accent (banned by the design system) and without re-reading the words. A single header row
+   per section names the group ONCE, its meaning, and the stats, instead of stacking title + subtitle +
+   a separate count line. */
 .review-section {
   /* The +/- counts appear in two contexts: the section-total stat (.review-section-stat) and the
      per-file rows (.review-file-counts), which live in different boxes. These two custom props are the
@@ -2848,13 +2838,15 @@ body {
   --review-row-pad: 10px;
   --review-stat-gap: 8px;
   margin-bottom: 12px;
-  padding-left: 10px;
-  border-left: 2px solid var(--border);
 }
-.review-section[data-kind="committed"] { border-left-color: var(--state-done); }
-.review-section[data-kind="uncommitted"] { border-left-color: var(--state-waiting); }
 .review-section + .review-section { margin-top: 16px; }
-.review-section[data-kind="uncommitted"] .review-diff { opacity: 0.8; }
+.review-section[data-kind="committed"] .review-diff {
+  border-color: color-mix(in oklab, var(--state-done) 30%, var(--border-dim));
+}
+.review-section[data-kind="uncommitted"] .review-diff {
+  border-color: color-mix(in oklab, var(--state-waiting) 30%, var(--border-dim));
+  opacity: 0.8;
+}
 
 .review-section-head {
   display: flex;
@@ -2915,6 +2907,7 @@ body {
   background: var(--bg-surface);
   border: none;
   cursor: pointer;
+  transition: background var(--transition-fast);
 }
 .review-file-head:hover { background: var(--bg-card); }
 .review-file-head:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
@@ -2950,7 +2943,10 @@ body {
   border: none;
   border-top: 1px solid var(--border-dim);
   cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
 }
+.review-expand:hover { background: var(--bg-card); color: var(--text-head); }
+.review-expand:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 
 .review-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
 .review-btn {
@@ -2962,6 +2958,7 @@ body {
   border: 1px solid var(--border);
   background: transparent;
   color: var(--text-dim);
+  transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
 }
 .review-btn:hover:not(:disabled) { border-color: var(--border-hover); color: var(--text-head); }
 .review-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

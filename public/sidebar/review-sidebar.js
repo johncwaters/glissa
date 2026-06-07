@@ -33,12 +33,10 @@ const expanded = new Set();
 
 let panelEl = null;
 let bodyEl = null;
-let countEl = null;
 
 // ── Mount ──
 // The sidebar is always visible (no collapse): with no session selected it shows an empty state, and
-// with a selected session that has no changes it says so. The count next to the title shows how many
-// sessions have changes ready to review.
+// with a selected session that has no changes it says so.
 
 export function mountReviewSidebar({ panel }) {
   panelEl = panel;
@@ -46,10 +44,7 @@ export function mountReviewSidebar({ panel }) {
 
   const head = el('div', 'review-sidebar-head');
   const title = el('span', 'review-sidebar-title', 'Review');
-  countEl = el('span', 'review-count', '');
-  countEl.setAttribute('aria-hidden', 'true');
-  countEl.title = 'Sessions with changes ready to review';
-  head.append(title, countEl);
+  head.append(title);
 
   bodyEl = el('div', 'review-sidebar-body');
   panelEl.append(head, bodyEl);
@@ -72,7 +67,6 @@ export function mountReviewSidebar({ panel }) {
 function applyStatus(id, next) {
   statusById.set(id, next);
   if (next === 'merged' || next === 'none') diffById.delete(id);
-  updateCount();
   if (id === getSelectedId()) render();
 }
 
@@ -121,7 +115,6 @@ export function refreshReviewSidebar(id) {
 export function forgetReviewSession(id) {
   statusById.delete(id);
   diffById.delete(id);
-  updateCount();
   if (id === getSelectedId()) { setSelectedId(null); return; } // setSelectedId fires render
   render();
 }
@@ -130,19 +123,6 @@ export function forgetReviewSession(id) {
 
 function requestDiff(id) {
   sendControlMsg({ type: 'request-session-diff', id });
-}
-
-// Count the sessions whose review gate is open. The gate self-heals server-side: getDiff demotes a
-// stranded pending-review/parked status to 'none' (broadcast as a merge-status) the moment it finds an
-// empty diff, so a status still in REVIEWABLE here genuinely has something to review.
-function updateCount() {
-  if (!countEl) return;
-  let n = 0;
-  for (const [id, st] of statusById) {
-    if (REVIEWABLE.has(st) && sessionUIs.has(id)) n++;
-  }
-  countEl.textContent = n > 0 ? String(n) : '';
-  countEl.classList.toggle('has-count', n > 0);
 }
 
 function sessionName(ui, id) {
@@ -203,16 +183,17 @@ function render() {
   // Committed section first: it is what a merge moves into develop.
   if (committedFiles.length > 0) {
     bodyEl.append(renderSection('committed', 'Committed', 'merges into develop', committedFiles));
+  } else if (!fetched && reviewable) {
+    bodyEl.append(el('div', 'review-nochanges review-loading', 'Loading diff...'));
   } else {
-    const msg = (!fetched && reviewable) ? 'Loading diff...'
-      : uncommittedFiles.length > 0 ? 'Nothing committed yet. Commit in the session to make changes mergeable.'
+    const msg = uncommittedFiles.length > 0 ? 'Nothing committed yet. Commit to merge.'
       : 'No changes in this worktree.';
     bodyEl.append(el('div', 'review-nochanges', msg));
   }
 
   // Uncommitted section, clearly divided off: present but excluded from the merge.
   if (uncommittedFiles.length > 0) {
-    bodyEl.append(renderSection('uncommitted', 'Uncommitted', 'not in the merge', uncommittedFiles));
+    bodyEl.append(renderSection('uncommitted', 'Uncommitted', '', uncommittedFiles));
   }
 
   if (!reviewable && !mergeableLive && hasCommits) {
@@ -229,8 +210,9 @@ function renderEmpty(title, desc) {
 // One change group, summarized in a SINGLE header row so the two groups read as two distinct things at a
 // glance instead of two near-identical "N files changed" blocks. The git term (`label`) appears exactly
 // once, with a short plain-English `meaning` beside it and the file/line stats folded into the same row.
-// Color and a left accent bar (keyed off data-kind in CSS) carry the committed-vs-uncommitted distinction
-// so it does not have to be spelled out twice. A collapsible per-file list sits below, minimized by default.
+// The committed-vs-uncommitted distinction is carried by the colored section label plus a state-tinted full
+// border on the diff box (keyed off data-kind in CSS), not a side-stripe. A collapsible per-file list sits
+// below, minimized by default.
 function renderSection(kind, label, meaning, files) {
   const wrap = el('div', 'review-section');
   wrap.dataset.kind = kind;
