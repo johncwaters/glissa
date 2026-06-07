@@ -344,9 +344,10 @@ export function seedSessionMergeStatus(sessionId, mergeStatus) {
   seedReviewMergeStatus(sessionId, mergeStatus || 'none');
 }
 
-// Forward a session's diff (reply to request-session-diff) to the review sidebar, which renders it.
-export function setSessionDiff(sessionId, diff) {
-  setReviewDiff(sessionId, diff);
+// Forward a session's diff payload ({ committed, uncommitted, hasCommits }, reply to
+// request-session-diff) to the review sidebar, which renders it.
+export function setSessionDiff(sessionId, payload) {
+  setReviewDiff(sessionId, payload);
 }
 
 export function renameSessionCard(sessionId, newName) {

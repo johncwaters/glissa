@@ -2575,7 +2575,32 @@ body {
 .review-status-note[data-merge="parked"] { color: var(--state-failed); }
 .review-status-note[data-merge="merged"] { color: var(--state-done); }
 
-.review-files { margin-bottom: 12px; }
+/* Committed vs uncommitted sections. The second section is divided off by a clear top border: that line
+   is the boundary between what a merge moves into develop (committed) and what it leaves behind. */
+.review-section { margin-bottom: 12px; }
+.review-section + .review-section {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 2px solid var(--border);
+}
+.review-section-label {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin-bottom: 8px;
+}
+.review-section-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.review-section-sub { font-size: 11px; color: var(--text-muted); }
+.review-section[data-kind="committed"] .review-section-title { color: var(--state-done); }
+.review-section[data-kind="uncommitted"] .review-section-title { color: var(--text-muted); }
+.review-section[data-kind="uncommitted"] .review-diff { opacity: 0.8; }
+
 .review-stat-head {
   display: flex;
   align-items: center;

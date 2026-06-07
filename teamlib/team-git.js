@@ -157,23 +157,34 @@ function createGitWorkspace(opts = {}) {
     if (branch) run(['branch', '-D', branch], projectPath);
   }
 
-  // The shared merge core: commit the worktree's diff onto its branch, rebase that branch onto `target`
-  // (so a moved target still lands), then fast-forward `target` up to it. Does NOT tear anything down -
-  // the caller decides whether to keep or remove the worktree/branch. Synchronous, so two merges in one
-  // process never interleave (the first advances the target before the second reads it); no async mutex
-  // is needed and a cross-session FF race cannot occur. A rebase conflict ABORTS and reports parked;
-  // nothing is ever auto-resolved. Returns { committed, merged, reason, parked? }.
-  function commitRebaseFf({ projectPath, wt, branch, target, message, addPaths = [] }) {
-    // Stage the WHOLE session diff (a session edits arbitrary files) and commit if anything is staged.
-    run(['add', '-A'], wt);
-    const committed = run(['diff', '--cached', '--quiet'], wt).ok === false
-      ? run(['commit', '-m', message || 'glissa session'], wt).ok
-      : false;
-    if (!committed) return { committed: false, merged: false, reason: 'nothing-to-commit' };
+  // The shared merge core (COMMITTED-ONLY): merge the commits already on `branch` into `target` via
+  // rebase-then-FF, leaving UNCOMMITTED working-tree changes out of the merge. Uncommitted edits are never
+  // swept in (the operator's "commit it first" boundary, and what the review sidebar draws its committed/
+  // uncommitted line on) and never destroyed: they are stashed around the rebase (which needs a clean
+  // tree) and ALWAYS restored afterward. Callers that want to tear the worktree down (mergeBack) must do
+  // so only on a clean tree, so this function never has to drop a stash. Does NOT tear anything down - the
+  // caller decides. Synchronous, so two merges in one process never interleave (the first advances the
+  // target before the second reads it). A rebase conflict ABORTS and reports parked; nothing is ever
+  // auto-resolved. `committed` means "there were commits to merge", not that this function made one.
+  // Returns { committed, merged, reason, parked?, restoreConflict? }.
+  function rebaseFfBranch({ projectPath, wt, branch, target, addPaths = [] }) {
+    // Commits on the branch but not yet on the target = exactly what merging would bring in. None means
+    // there is nothing committed to merge (uncommitted-only work is left for the operator to commit).
+    const ahead = run(['rev-list', '--count', `${target}..${branch}`], projectPath);
+    if (!ahead.ok || ahead.out === '' || ahead.out === '0') {
+      return { committed: false, merged: false, reason: 'nothing-to-commit' };
+    }
+
+    // Stash uncommitted work (incl. untracked) so the rebase runs on a clean tree. Track whether the stash
+    // actually took: only pop when it did, so a failed push can never make a later pop grab an unrelated,
+    // pre-existing stash (which would corrupt the worktree).
+    const dirty = run(['status', '--porcelain'], wt).out !== '';
+    const stashed = dirty && run(['stash', 'push', '--include-untracked', '-m', 'glissa-merge'], wt).ok;
 
     // Rebase onto the integration branch; a conflict aborts and reports parked (caller keeps the branch).
     if (!run(['rebase', target], wt).ok) {
       run(['rebase', '--abort'], wt);
+      if (stashed) run(['stash', 'pop'], wt); // hand the operator their uncommitted work back, un-rebased
       return { committed: true, merged: false, reason: 'rebase-conflict', parked: true };
     }
 
@@ -188,8 +199,15 @@ function createGitWorkspace(opts = {}) {
     } else {
       merged = run(['fetch', '.', `refs/heads/${branch}:refs/heads/${target}`], projectPath).ok;
     }
-    if (!merged) return { committed: true, merged: false, reason: 'not-fast-forward', parked: true };
-    return { committed: true, merged: true, reason: null };
+    if (!merged) {
+      if (stashed) run(['stash', 'pop'], wt);
+      return { committed: true, merged: false, reason: 'not-fast-forward', parked: true };
+    }
+
+    // Merged. Restore the uncommitted work onto the rebased worktree. A `stash pop` that conflicts leaves
+    // markers for the operator and is reported (restoreConflict), never auto-resolved.
+    const restoreConflict = stashed ? !run(['stash', 'pop'], wt).ok : false;
+    return { committed: true, merged: true, reason: null, restoreConflict };
   }
 
   // Shared guard preamble for the merge-back paths (mergeBack/mergeKeep): validate the workspace and
@@ -209,18 +227,26 @@ function createGitWorkspace(opts = {}) {
   }
 
   // Session worktree merge-back into the integration branch (e.g. `develop`) that ENDS the session:
-  // rebase-then-FF via commitRebaseFf, then tear the worktree down junction-safely. A rebase conflict /
-  // lost FF PARKS the branch (worktree + branch preserved) for a manual merge. Returns { merged,
-  // committed, branch, base, reason, parked? }; `branch` is null once merged (deleted) or discarded,
-  // else the parked branch.
-  function mergeBack({ projectPath, workspace, targetBranch, addPaths = [], message }) {
+  // committed-only rebase-then-FF via rebaseFfBranch, then tear the worktree down junction-safely. A
+  // rebase conflict / lost FF PARKS the branch (worktree + branch preserved) for a manual merge. Returns
+  // { merged, committed, branch, base, reason, parked? }; `branch` is null once merged (deleted) or
+  // discarded, else the parked branch.
+  function mergeBack({ projectPath, workspace, targetBranch, addPaths = [] }) {
     const g = resolveMergeBack({ projectPath, workspace, targetBranch });
     if (g.error) return g.error;
     const { wt, branch, target } = g;
 
-    const r = commitRebaseFf({ projectPath, wt, branch, target, message, addPaths });
+    // Finishing tears the worktree down, which would DESTROY any uncommitted work. Never do that
+    // silently: if the worktree is dirty, refuse and PARK (worktree + branch preserved) so the operator
+    // commits or discards the uncommitted work first, then finishes. (committed-only never sweeps
+    // uncommitted work into the merge, so there is nothing to gain by merging here while dirty either.)
+    if (run(['status', '--porcelain'], wt).out !== '') {
+      return { merged: false, committed: false, branch, base: target, reason: 'uncommitted-changes', parked: true };
+    }
+
+    const r = rebaseFfBranch({ projectPath, wt, branch, target, addPaths });
     if (!r.committed) {
-      // Nothing to merge - discard the worktree (junction-safe) and branch.
+      // Clean worktree with nothing committed = a throwaway chat/research session: discard it (junction-safe).
       tearDownWorktree(projectPath, wt, branch);
       return { merged: false, committed: false, branch: null, base: target, reason: 'nothing-to-commit' };
     }
@@ -239,22 +265,23 @@ function createGitWorkspace(opts = {}) {
   // preserved); nothing-to-commit is a harmless no-op that keeps the worktree. Returns { merged,
   // committed, branch, base, baseSha?, kept, reason, parked? }; `branch` is retained (non-null) whenever
   // the worktree is kept, and baseSha is the new integration tip the worktree was rebased onto.
-  function mergeKeep({ projectPath, workspace, targetBranch, addPaths = [], message }) {
+  function mergeKeep({ projectPath, workspace, targetBranch, addPaths = [] }) {
     const g = resolveMergeBack({ projectPath, workspace, targetBranch });
     if (g.error) return g.error;
     const { wt, branch, target } = g;
 
-    const r = commitRebaseFf({ projectPath, wt, branch, target, message, addPaths });
+    const r = rebaseFfBranch({ projectPath, wt, branch, target, addPaths });
     if (!r.committed) {
-      // Nothing to merge yet - keep the worktree; the live session will produce more.
+      // Nothing committed to merge yet - keep the worktree; the live session commits more then merges.
       return { merged: false, committed: false, branch, base: target, reason: 'nothing-to-commit', kept: true };
     }
     if (!r.merged) {
       return { merged: false, committed: true, branch, base: target, reason: r.reason, parked: true };
     }
-    // Merged AND kept: record the new integration tip the worktree now sits on top of.
+    // Merged AND kept: record the new integration tip the worktree now sits on top of. restoreConflict
+    // flags that the stashed uncommitted work reapplied with conflict markers for the operator to resolve.
     const baseSha = run(['rev-parse', target], projectPath).out || workspace.baseSha || null;
-    return { merged: true, committed: true, branch, base: target, baseSha, kept: true, reason: null };
+    return { merged: true, committed: true, branch, base: target, baseSha, kept: true, reason: null, restoreConflict: r.restoreConflict || false };
   }
 
   // Throw away a worktree and its branch (cancelled runs): nothing is committed or merged.

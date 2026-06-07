@@ -202,6 +202,27 @@ test('mergeAndContinue from COMPLETE merges into develop but KEEPS the worktree 
   } finally { s.destroy(); fs.rmSync(wt, { recursive: true, force: true }); }
 });
 
+test('mergeAndContinue surfaces a stash-restore conflict as pending-review (not a silent clean none)', { skip: !WIN }, () => {
+  const wt = realWorktreeDir();
+  const gw = fakeGitWorkspace({
+    worktreeDir: wt,
+    mergeKeepResult: { merged: true, kept: true, branch: 'glissa/session/wt-sess', base: 'develop', baseSha: 'newbase', restoreConflict: true },
+  });
+  const statuses = [];
+  const s = makeSession({ gitWorkspace: gw, integrationBranch: 'develop', ptySpawn: () => fakePty() });
+  s.on('merge-status', (e) => statuses.push(e));
+  try {
+    s.start();
+    s.state = STATES.COMPLETE;
+    const r = s.mergeAndContinue();
+    assert.equal(r.merged, true);
+    assert.equal(s.baseSha, 'newbase', 'still tracks the new integration tip it was rebased onto');
+    assert.equal(s.mergeStatus, 'pending-review', 'the reapplied-with-conflicts worktree is surfaced');
+    assert.equal(statuses.at(-1).reason, 'restore-conflict');
+    assert.equal(s.worktreeDir, wt, 'worktree kept alive');
+  } finally { s.destroy(); fs.rmSync(wt, { recursive: true, force: true }); }
+});
+
 test('mergeAndContinue refuses while actively RUNNING (mid-edit; no merge)', { skip: !WIN }, () => {
   const wt = realWorktreeDir();
   const gw = fakeGitWorkspace({ worktreeDir: wt });

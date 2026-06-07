@@ -380,16 +380,32 @@ class Session extends EventEmitter {
     } catch { return false; }
   }
 
-  // Unified diff of the worktree vs its base, with NEW files made visible via intent-to-add.
+  // Two diffs the review sidebar draws a hard line between: COMMITTED changes (baseSha..HEAD, the only
+  // thing a merge moves into the integration branch) and still-UNCOMMITTED working-tree changes (vs HEAD,
+  // shown for awareness but never merged until committed). `hasCommits` is the merge gate: nothing
+  // committed means nothing to merge. NEW files are made visible in the uncommitted diff via intent-to-add.
+  // baseSha advances after a merge-and-continue, so the committed diff resets to just the new commits.
   getDiff() {
-    if (!this.worktreeDir) return { stat: "", diff: "" };
+    const empty = { stat: "", diff: "" };
+    if (!this.worktreeDir) return { committed: empty, uncommitted: empty, hasCommits: false };
     const g = (args) => {
       try {
         return execFileSync("git", args, { cwd: this.worktreeDir, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 15000 });
       } catch (e) { return String(e.stdout || ""); }
     };
-    g(["add", "-N", "--", "."]); // intent-to-add so new files appear in the diff
-    return { stat: g(["diff", "--stat"]).trim(), diff: g(["diff"]) };
+    g(["add", "-N", "--", "."]); // intent-to-add so new files appear in the uncommitted diff
+    // The fork point the session's commits sit on top of. baseSha is tracked across create/merge, but a
+    // worktree re-adopted at boot (pending-review/parked after a restart) has none - recover it from the
+    // merge-base with the integration branch so committed changes still show for those sessions.
+    let base = this.baseSha || "";
+    if (!base && this._integrationBranch) base = g(["merge-base", this._integrationBranch, "HEAD"]).trim();
+    const committed = base
+      ? { stat: g(["diff", "--stat", `${base}..HEAD`]).trim(), diff: g(["diff", `${base}..HEAD`]) }
+      : empty;
+    const uncommitted = { stat: g(["diff", "--stat", "HEAD"]).trim(), diff: g(["diff", "HEAD"]) };
+    const aheadCount = base ? g(["rev-list", "--count", `${base}..HEAD`]).trim() : "0";
+    const hasCommits = aheadCount !== "" && aheadCount !== "0";
+    return { committed, uncommitted, hasCommits };
   }
 
   // Operator action: rebase-then-FF merge the session's worktree into the integration branch, then
@@ -403,7 +419,6 @@ class Session extends EventEmitter {
         projectPath: this.path,
         workspace: this._workspace,
         targetBranch: this._integrationBranch,
-        message: `glissa session: ${this.name}`,
       });
     } catch (err) {
       this._setMergeStatus("pending-review", { reason: err.message });
@@ -441,7 +456,6 @@ class Session extends EventEmitter {
         projectPath: this.path,
         workspace: this._workspace,
         targetBranch: this._integrationBranch,
-        message: `glissa session: ${this.name}`,
       });
     } catch (err) {
       this._setMergeStatus("pending-review", { reason: err.message });
@@ -449,9 +463,12 @@ class Session extends EventEmitter {
     }
     if (r.merged) {
       // Worktree kept alive on its branch (now == the integration tip); track the new base it sits on.
-      // The worktree is clean again, so the gate returns to 'none' until the session produces more work.
       if (r.baseSha) { this.baseSha = r.baseSha; this._workspace.baseSha = r.baseSha; }
-      this._setMergeStatus("none");
+      // Committed work merged out, so the gate normally returns to 'none'. But if the stashed uncommitted
+      // work reapplied WITH conflicts, the worktree now holds conflict markers the operator must resolve -
+      // surface that as pending-review instead of silently reporting clean.
+      if (r.restoreConflict) this._setMergeStatus("pending-review", { reason: "restore-conflict" });
+      else this._setMergeStatus("none");
     } else if (r.parked) {
       this._setMergeStatus("parked", { reason: r.reason || null });
     } else if (r.reason === "nothing-to-commit") {

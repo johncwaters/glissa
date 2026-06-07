@@ -644,8 +644,8 @@ function registerControlHandlers(controlWss, deps) {
     'request-session-diff':       (msg, ws) => {
       const s = findSession(msg);
       if (!s) return;
-      const { stat, diff } = s.getDiff();
-      ws.send(JSON.stringify({ type: 'session-diff', id: s.id, stat, diff }));
+      const { committed, uncommitted, hasCommits } = s.getDiff();
+      ws.send(JSON.stringify({ type: 'session-diff', id: s.id, committed, uncommitted, hasCommits }));
     },
     'debug-state':      (msg, ws) => {
       const s = findSession(msg);

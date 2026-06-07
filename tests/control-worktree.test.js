@@ -32,7 +32,14 @@ function fakeSession(id) {
     calls: { merge: 0, discard: 0, diff: 0 },
     mergeWorktree() { this.calls.merge++; return { merged: true }; },
     discardWorktree() { this.calls.discard++; },
-    getDiff() { this.calls.diff++; return { stat: ' f.js | 1 +', diff: '+x\n' }; },
+    getDiff() {
+      this.calls.diff++;
+      return {
+        committed: { stat: ' f.js | 1 +', diff: '+x\n' },
+        uncommitted: { stat: ' g.js | 1 +', diff: '+y\n' },
+        hasCommits: true,
+      };
+    },
     toSnapshot() { return { id: this.id, name: this.name }; },
   };
 }
@@ -51,15 +58,16 @@ test('discard-session-worktree dispatches to session.discardWorktree()', () => {
   assert.equal(s.calls.discard, 1);
 });
 
-test('request-session-diff replies with the session diff (stat + diff)', () => {
+test('request-session-diff replies with the committed + uncommitted diff and the merge gate', () => {
   const s = fakeSession('p1');
   const h = harness(new Map([['p1', s]]));
   h.send({ type: 'request-session-diff', id: 'p1' });
   const msg = h.sent.find((m) => m.type === 'session-diff');
   assert.ok(msg, 'sent a session-diff message');
   assert.equal(msg.id, 'p1');
-  assert.equal(msg.stat, ' f.js | 1 +');
-  assert.equal(msg.diff, '+x\n');
+  assert.deepEqual(msg.committed, { stat: ' f.js | 1 +', diff: '+x\n' });
+  assert.deepEqual(msg.uncommitted, { stat: ' g.js | 1 +', diff: '+y\n' });
+  assert.equal(msg.hasCommits, true);
   assert.equal(s.calls.diff, 1);
 });
 

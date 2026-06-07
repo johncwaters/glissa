@@ -24,9 +24,11 @@ const REVIEWABLE = new Set(['pending-review', 'parked']);
 const MAX_FILE_LINES = 600;
 
 const statusById = new Map(); // id -> mergeStatus ('none'|'pending-review'|'merging'|'parked'|'merged')
-const diffById = new Map();   // id -> { stat, diff }
-const openFiles = new Set();  // file paths whose diff is revealed (default: every file minimized)
-const expanded = new Set();   // file paths the user expanded past the per-file line cap
+const diffById = new Map();   // id -> { committed, uncommitted, hasCommits } (null until fetched)
+// Open/expanded keys are `${section}:${path}` so the SAME file appearing in both the committed and the
+// uncommitted section collapses independently (default: every file minimized).
+const openFiles = new Set();
+const expanded = new Set();
 
 let panelEl = null;
 let bodyEl = null;
@@ -93,11 +95,11 @@ export function seedReviewMergeStatus(id, mergeStatus) {
   applyStatus(id, mergeStatus || 'none');
 }
 
-// Cache a session's diff (reply to request-session-diff) and re-render if it is the selected one. The
-// session-diff message also carries a --stat string; the sidebar derives its own exact per-file stats
-// from the diff, so only the diff is kept.
-export function setReviewDiff(id, diff) {
-  diffById.set(id, diff || '');
+// Cache a session's diff payload ({ committed, uncommitted, hasCommits }, reply to request-session-diff)
+// and re-render if it is the selected one. Each section also carries a --stat string, but the sidebar
+// derives its own exact per-file stats from the diff text, so only the diff parts are used here.
+export function setReviewDiff(id, payload) {
+  diffById.set(id, payload || null);
   if (id === getSelectedId()) render();
 }
 
@@ -165,29 +167,41 @@ function render() {
   }
 
   const fetched = diffById.has(id);
-  const files = fetched ? parseUnifiedDiff(diffById.get(id)) : [];
+  const payload = fetched ? diffById.get(id) : null;
+  // The hard line the operator asked for: COMMITTED changes are the mergeable unit; UNCOMMITTED working-
+  // tree changes are shown for awareness but are never part of a merge until the session commits them.
+  const committedFiles = payload ? parseUnifiedDiff(payload.committed?.diff || '') : [];
+  const uncommittedFiles = payload ? parseUnifiedDiff(payload.uncommitted?.diff || '') : [];
+  const hasCommits = !!(payload && payload.hasCommits);
 
   // One merge action, never a "finish". A session's PTY effectively never dies (Claude's built-in restart
   // keeps it alive; only an explicit /exit ends it, which never happens), so there is no settled/close-out
-  // state to merge from. "Merge" on a quiescent live session (COMPLETE/IDLE) with changes commits, merges
-  // into develop, and rebases this worktree onto develop, KEEPING the session running so the operator
-  // commits as they go. A session still actively working (RUNNING/WAITING) only gets a read-only preview.
+  // state to merge from. "Merge" on a quiescent live session (COMPLETE/IDLE) with COMMITTED changes merges
+  // into develop and rebases this worktree onto develop, KEEPING the session running. With nothing
+  // committed there is nothing to merge, so the action is withheld. A session still actively working
+  // (RUNNING/WAITING) only gets a read-only preview.
   const live = state !== STATES.DORMANT && state !== STATES.DONE && state !== STATES.FAILED;
-  const mergeableLive = (state === STATES.COMPLETE || state === STATES.IDLE) && files.length > 0;
+  const mergeableLive = (state === STATES.COMPLETE || state === STATES.IDLE) && hasCommits;
 
   // Actions sit at the TOP of the changes area so the merge button leads.
   bodyEl.append(renderActions(id, { status, reviewable, mergeableLive, live }));
 
-  if (files.length === 0) {
-    // No diff fetched yet for a reviewable session reads as "Loading"; otherwise there is nothing to show.
-    const msg = (!fetched && reviewable) ? 'Loading diff...' : 'No changes in this worktree.';
-    bodyEl.append(el('div', 'review-nochanges', msg));
+  // Committed section first: it is what a merge moves into develop.
+  if (committedFiles.length > 0) {
+    bodyEl.append(renderSection('committed', 'Committed', 'will merge into develop', committedFiles));
   } else {
-    // Changes show first as a collapsible list of files; each file is minimized until clicked.
-    bodyEl.append(renderFiles(files));
+    const msg = (!fetched && reviewable) ? 'Loading diff...'
+      : uncommittedFiles.length > 0 ? 'Nothing committed yet, so nothing to merge. Commit in the session first.'
+      : 'No changes in this worktree.';
+    bodyEl.append(el('div', 'review-nochanges', msg));
   }
 
-  if (!reviewable && !mergeableLive && files.length > 0) {
+  // Uncommitted section, clearly divided off: present but excluded from the merge.
+  if (uncommittedFiles.length > 0) {
+    bodyEl.append(renderSection('uncommitted', 'Uncommitted', 'not in the merge until committed', uncommittedFiles));
+  }
+
+  if (!reviewable && !mergeableLive && hasCommits) {
     bodyEl.append(el('div', 'review-hint', 'Read-only preview. The session is still active; it can be merged once it is complete or idle.'));
   }
 }
@@ -198,10 +212,17 @@ function renderEmpty(title, desc) {
   bodyEl.append(wrap);
 }
 
-// The changes view: a summary header ("N files changed +X -Y") over a collapsible per-file list. Each
-// file is a clickable row (path + counts) that is minimized by default and reveals its diff when opened.
-function renderFiles(files) {
-  const wrap = el('div', 'review-files');
+// One labeled section ("Committed - will merge into develop" / "Uncommitted - not in the merge..."), the
+// clear line between the mergeable and non-mergeable changes. A summary header ("N files changed +X -Y")
+// sits over a collapsible per-file list; each file is minimized by default and reveals its diff on click.
+function renderSection(kind, title, subtitle, files) {
+  const wrap = el('div', 'review-section');
+  wrap.dataset.kind = kind;
+
+  const label = el('div', 'review-section-label');
+  label.append(el('span', 'review-section-title', title));
+  if (subtitle) label.append(el('span', 'review-section-sub', subtitle));
+  wrap.append(label);
 
   const sum = summarizeFiles(files);
   const head = el('div', 'review-stat-head', `${sum.files} file${sum.files === 1 ? '' : 's'} changed`);
@@ -211,13 +232,14 @@ function renderFiles(files) {
   wrap.append(head);
 
   const list = el('div', 'review-diff');
-  for (const f of files) list.append(renderFile(f));
+  for (const f of files) list.append(renderFile(f, kind));
   wrap.append(list);
   return wrap;
 }
 
-function renderFile(f) {
-  const open = openFiles.has(f.path);
+function renderFile(f, kind) {
+  const key = `${kind}:${f.path}`; // per-section collapse state (same path can be in both sections)
+  const open = openFiles.has(key);
   const sec = el('div', 'review-file');
   sec.dataset.status = f.status;
   sec.dataset.open = open ? 'true' : 'false';
@@ -235,8 +257,8 @@ function renderFile(f) {
   else c.append(el('span', 'review-add', `+${f.added}`), el('span', 'review-del', `-${f.removed}`));
   head.append(c);
   head.addEventListener('click', () => {
-    if (openFiles.has(f.path)) openFiles.delete(f.path);
-    else openFiles.add(f.path);
+    if (openFiles.has(key)) openFiles.delete(key);
+    else openFiles.add(key);
     render();
   });
   sec.append(head);
@@ -254,10 +276,10 @@ function renderFile(f) {
   let rendered = 0;
   let truncated = false;
   for (const h of f.hunks) {
-    if (rendered >= MAX_FILE_LINES && !expanded.has(f.path)) { truncated = true; break; }
+    if (rendered >= MAX_FILE_LINES && !expanded.has(key)) { truncated = true; break; }
     body.append(el('div', 'review-hunk-head', h.header));
     for (const line of h.lines) {
-      if (rendered >= MAX_FILE_LINES && !expanded.has(f.path)) { truncated = true; break; }
+      if (rendered >= MAX_FILE_LINES && !expanded.has(key)) { truncated = true; break; }
       const row = el('div', `review-line review-line-${line.type}`);
       const gutter = line.type === 'add' ? '+' : line.type === 'del' ? '-' : line.type === 'meta' ? '\\' : ' ';
       row.append(el('span', 'review-line-gutter', gutter));
@@ -270,7 +292,7 @@ function renderFile(f) {
   if (truncated) {
     const more = el('button', 'review-expand', 'Show the rest of this file');
     more.type = 'button';
-    more.addEventListener('click', () => { expanded.add(f.path); render(); });
+    more.addEventListener('click', () => { expanded.add(key); render(); });
     body.append(more);
   }
   sec.append(body);
