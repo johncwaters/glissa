@@ -373,6 +373,11 @@ function isTypingContext() {
 
 document.addEventListener('keydown', (e) => {
   if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+  // Every shortcut here is a discrete action (triage-next, jump to card, open the add dialog), so
+  // honor only the initial press. Without this, holding Alt+W (or a press long enough to trip the OS
+  // auto-repeat) re-fires keydown and walks the round-robin on each repeat, so two waiting sessions
+  // flicker past instead of stopping on the first.
+  if (e.repeat) return;
 
   // Focus-tab triage (Alt+W -> next session needing you, borrowed into the center) must work even
   // while the centered terminal holds keyboard focus - that is the expected place to be while

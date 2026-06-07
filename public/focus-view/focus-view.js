@@ -240,8 +240,8 @@ export function refreshFocusRoster() {
 // "Needs you" = WAITING (agent blocked) plus COMPLETE pills not yet acknowledged (data-unseen).
 // updateRailHead surfaces the count + the shortcut; focusNextAttention walks the queue in rail
 // order, borrows each session into the center, and (since the rail never reorders) scrolls the
-// target pill into view. A WAITING target also gets the terminal cursor so the operator can answer
-// at once.
+// target pill into view. Every target also gets the terminal cursor so the operator can answer a
+// WAITING prompt or send the next turn to a COMPLETE session immediately, no click.
 
 function attentionIds() {
   return orderedSessions()
@@ -272,7 +272,16 @@ export function focusNextAttention() {
   const ui = sessionUIs.get(nextId);
   focusSession(nextId);
   pillById.get(nextId)?.scrollIntoView({ block: 'nearest' });
-  if (ui && ui.currentState === STATES.WAITING) ui.term?.focus();
+  // Drop the cursor into the centered terminal so the operator types right away. Deferred a double
+  // rAF (the same idiom as focusSessionCard): borrowToCenter just re-parented the card and may have
+  // woken or built its terminal, so the fit + repaint must settle before .focus() can land on the
+  // live xterm helper textarea. Re-check the target still holds the center, in case a later press
+  // advanced past it, so we never steal focus to a stale session.
+  if (ui) {
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      if (active && focusedId === nextId) ui.term?.focus();
+    }));
+  }
 }
 
 // ── Center: borrow the focused card, run the review bar ──
