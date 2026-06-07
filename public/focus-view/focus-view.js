@@ -2,14 +2,16 @@
 // pill per session, WAITING/needs-review bubble to the top) and a single large CENTER that holds the
 // focused session's real card (re-parented, mirroring the maximize pattern, since each session owns one
 // xterm). Signal-only: a session that needs input re-sorts in the rail and pulses, but never hijacks the
-// center while you work. The center doubles as the worktree REVIEW gate: when the focused session is
-// pending-review/parked, a bar offers Merge / Discard / view-diff.
+// center while you work. Worktree review happens in the right review sidebar: focusing a session (or
+// clicking a rail pill) selects it there; the rail pill still tags REVIEW/PARKED so the operator knows
+// which sessions have changes waiting.
 //
 // State lives here (view-local); it reads sessions from the shared card registry and never mutates the
 // Sessions-tab minimize/maximize state. The card is returned to its exact home slot on leave/swap.
 
 import { BADGE_LABELS, STATE_GLYPHS, STATES } from '/shared/states.mjs';
 import { sendControlMsg } from '../control-ws.js';
+import { setSelectedId } from '../sidebar/selection.js';
 import { container, sessionUIs } from '../session-card/card-registry.js';
 import { wakeSession } from '../session-card/layout.js';
 import { ensureTerminalSetup, forceTerminalRepaint } from '../session-card/terminal.js';
@@ -42,8 +44,8 @@ export function mountFocusView({ rail, center }) {
   cardSlotEl = document.createElement('div');
   cardSlotEl.className = 'focus-card-slot';
 
-  // The review gate lives on the card itself (card-review-bar), so the borrowed card brings it into
-  // the center - no separate Focus review UI needed.
+  // Review (diff + Merge & finish / Discard) lives in the right review sidebar, not in the center, so
+  // the borrowed card is just the live terminal; selection drives the sidebar (see focusSession).
   centerEl.append(emptyEl, cardSlotEl);
 
   railEl.addEventListener('keydown', onRailKeydown);
@@ -202,6 +204,8 @@ function focusSession(id) {
   if (!active || !sessionUIs.has(id) || id === focusedId) return;
   releaseCenter();
   focusedId = id;
+  // Drive the shared selection so the right review sidebar follows the focused session.
+  setSelectedId(id);
   borrowToCenter(sessionUIs.get(id), id);
   refreshFocusRoster();
 }
@@ -222,7 +226,7 @@ function updateCenter() {
 // ── External hooks (called from app.js) ──
 
 // Track merge status for the rail (sort + the pill's REVIEW/PARKED tag). The actual review controls
-// live on the card (card-review-bar), which the borrowed card carries into the center.
+// live in the right review sidebar; the pill tag just signals which sessions have changes waiting.
 export function setFocusMergeStatus(id, mergeStatus) {
   mergeStatusById.set(id, mergeStatus || 'none');
   if (active) refreshFocusRoster();

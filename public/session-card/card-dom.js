@@ -198,20 +198,14 @@ export function buildCardDOM(sessionId, sessionName, initialState, options = {})
   headerChildren.push(actions);
   header.append(...headerChildren);
 
-  // Worktree review gate (hidden unless data-merge is set live by setSessionMergeStatus). Lives ON the
-  // card, so it shows in the Sessions grid AND when the card is borrowed into the Focus center.
-  const reviewBar = el('div', 'card-review-bar');
-  const reviewLabel = el('span', 'card-review-label');
-  const reviewActions = el('div', 'card-review-actions');
-  reviewBar.append(reviewLabel, reviewActions);
-  const reviewDiff = el('pre', 'card-review-diff');
-  reviewDiff.hidden = true;
-
+  // The worktree review gate moved to the right review sidebar (sidebar/review-sidebar.js), the single
+  // home for diff + merge/discard. The card keeps only data-merge (set by setSessionMergeStatus) for the
+  // remove-warning; it no longer renders an inline review bar.
   const termWrap = el('div', 'terminal-wrap');
 
-  card.append(header, reviewBar, reviewDiff, termWrap);
+  card.append(header, termWrap);
 
-  return { card, header, badge, nameEl, railElapsed, btnRename, btnRestart, btnRemove, btnMinimize, btnMaximize, btnDebug, btnOverflow, overflowMenu, termWrap, reviewBar, reviewLabel, reviewActions, reviewDiff };
+  return { card, header, badge, nameEl, railElapsed, btnRename, btnRestart, btnRemove, btnMinimize, btnMaximize, btnDebug, btnOverflow, overflowMenu, termWrap };
 }
 
 // ── Inline rename ────────────────────────────────────────────

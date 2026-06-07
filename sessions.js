@@ -1009,6 +1009,18 @@ class Session extends EventEmitter {
     return true;
   }
 
+  // Close-out: return a finished, fully-settled session (PTY dead, worktree already merged/discarded)
+  // to DORMANT so its card parks for reuse. Guarded by user_reset (see state-machine.js), so it is a
+  // no-op on a live or unmerged session. mergeStatus is cleared to 'none' only on a successful reset
+  // (silently; the dashboard recreates the card as dormant from the state-change). Returns whether the
+  // reset happened.
+  resetToDormant() {
+    if (this._destroyed) return false;
+    const did = this.transition("user_reset");
+    if (did) this.mergeStatus = "none";
+    return did;
+  }
+
   forceRestart() {
     if (this._destroyed) return;
     if (this._pendingRestart) return;

@@ -59,9 +59,13 @@ test('TRANSITIONS matrix is frozen and matches the lifecycle shape', () => {
       process_exit_fail: STATES.FAILED,
       user_kill: STATES.DONE,
     },
-    [STATES.DONE]: { user_restart: STATES.INITIALIZING },
+    [STATES.DONE]: {
+      user_restart: STATES.INITIALIZING,
+      user_reset: STATES.DORMANT,
+    },
     [STATES.FAILED]: {
       user_restart: STATES.INITIALIZING,
+      user_reset: STATES.DORMANT,
       process_exit_fail: STATES.FAILED,
     },
   });
@@ -86,6 +90,19 @@ test('GUARDS.user_restart only allows from DONE or FAILED', () => {
   assert.equal(GUARDS.user_restart({ state: STATES.FAILED }), true);
   assert.equal(GUARDS.user_restart({ state: STATES.RUNNING }), false);
   assert.equal(GUARDS.user_restart({ state: STATES.WAITING }), false);
+});
+
+test('GUARDS.user_reset requires DONE/FAILED + dead PTY + no worktree', () => {
+  // Allowed: finished, PTY dead, worktree already merged/discarded.
+  assert.equal(GUARDS.user_reset({ state: STATES.DONE, ptyProcess: null, worktreeDir: null }), true);
+  assert.equal(GUARDS.user_reset({ state: STATES.FAILED, ptyProcess: null, worktreeDir: null }), true);
+  // Rejected: wrong state.
+  assert.equal(GUARDS.user_reset({ state: STATES.RUNNING, ptyProcess: null, worktreeDir: null }), false);
+  assert.equal(GUARDS.user_reset({ state: STATES.COMPLETE, ptyProcess: null, worktreeDir: null }), false);
+  // Rejected: PTY still alive.
+  assert.equal(GUARDS.user_reset({ state: STATES.DONE, ptyProcess: {}, worktreeDir: null }), false);
+  // Rejected: worktree still on disk (unmerged work).
+  assert.equal(GUARDS.user_reset({ state: STATES.DONE, ptyProcess: null, worktreeDir: '/tmp/wt' }), false);
 });
 
 test('ENTRY_HOOKS emit the right lifecycle events with the session name', () => {

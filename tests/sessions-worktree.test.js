@@ -193,6 +193,33 @@ test('adoptWorktree re-attaches an on-disk worktree as pending-review (restart r
   }
 });
 
+test('resetToDormant: returns to DORMANT only when settled (PTY dead + no worktree), else no-op', () => {
+  { // allowed: finished, PTY dead, worktree already merged/discarded
+    const s = makeSession();
+    try {
+      s.state = STATES.DONE; // simulate a finished session
+      s.mergeStatus = 'merged'; // simulate a just-completed merge
+      // ptyProcess null and worktreeDir null by construction (never started)
+      const ok = s.resetToDormant();
+      assert.equal(ok, true);
+      assert.equal(s.state, STATES.DORMANT);
+      assert.equal(s.mergeStatus, 'none', 'mergeStatus cleared on a successful reset');
+    } finally { s.destroy(); }
+  }
+  { // rejected: a worktree is still on disk (unmerged work) -> no reset, state preserved
+    const s = makeSession();
+    try {
+      s.state = STATES.DONE;
+      s.worktreeDir = '/tmp/some-worktree';
+      s.mergeStatus = 'pending-review';
+      const ok = s.resetToDormant();
+      assert.equal(ok, false);
+      assert.equal(s.state, STATES.DONE, 'state unchanged when the guard rejects');
+      assert.equal(s.mergeStatus, 'pending-review', 'mergeStatus untouched when not reset');
+    } finally { s.destroy(); }
+  }
+});
+
 test('_settleWorktreeOnExit: a changed worktree -> pending-review; an unchanged one -> silent discard', { skip: !WIN }, () => {
   { // changed
     const wt = realWorktreeDir();

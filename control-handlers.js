@@ -631,6 +631,17 @@ function registerControlHandlers(controlWss, deps) {
     // or stream its diff to the requesting client. mergeWorktree/discardWorktree emit 'merge-status'
     // which wireSessionEvents broadcasts, so no explicit reply is needed for those two.
     'merge-session':              (msg) => { const s = findSession(msg); if (s) s.mergeWorktree(); },
+    // One-click close-out: merge the worktree into the integration branch (develop) and, ONLY on a
+    // clean fast-forward merge, reset the session to DORMANT so its card parks for reuse. A parked/
+    // failed merge leaves the session pending-review/parked with its worktree intact (no data loss).
+    // Refuses while the PTY is alive (state not DONE/FAILED): a live worktree is never merged.
+    'finish-session':             (msg) => {
+      const s = findSession(msg);
+      if (!s) return;
+      if (s.state !== STATES.DONE && s.state !== STATES.FAILED) return;
+      const r = s.mergeWorktree();
+      if (r?.merged) s.resetToDormant();
+    },
     'discard-session-worktree':   (msg) => { const s = findSession(msg); if (s) s.discardWorktree(); },
     'request-session-diff':       (msg, ws) => {
       const s = findSession(msg);

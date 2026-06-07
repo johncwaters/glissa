@@ -12,9 +12,10 @@ import { applyHealthSnapshot, mountHealthMonitor } from './health-monitor.js';
 import { initNotifications, showDesktopNotification } from './notifications.js';
 import { handleDebugStateRefresh, handleDebugStateResponse } from './session-card/card-dom.js';
 import { exitMaximizeMode, isMaximizeActive, setLayoutMode } from './session-card/layout.js';
-import { applyState, applyTerminalSettings, createSessionCard, focusNextWaiting, focusSessionCard, getSessionCount, handleSessionsReordered, hasSession, removeSessionCard, renameSessionCard, setSessionDiff, setSessionMergeStatus, setSessionPostTurn, setSessionWorktree, updateAggregateStatus } from './session-card/lifecycle.js';
+import { applyState, applyTerminalSettings, createSessionCard, focusNextWaiting, focusSessionCard, getSessionCount, handleSessionsReordered, hasSession, removeSessionCard, renameSessionCard, seedSessionMergeStatus, setSessionDiff, setSessionMergeStatus, setSessionPostTurn, setSessionWorktree, updateAggregateStatus } from './session-card/lifecycle.js';
 import { reconnectDataWs } from './session-card/terminal.js';
 import { showErrorToast } from './session-card/toast.js';
+import { forgetReviewSession, mountReviewSidebar, refreshReviewSidebar } from './sidebar/review-sidebar.js';
 import { handleTeamMessage, mountTeamsView, setTabActivityCallback } from './teams-panel.js';
 import { applyTheme } from './theme.js';
 import { getThemeId, isSoundEnabled, pruneStale, setSoundEnabled } from './ui-prefs.js';
@@ -126,6 +127,8 @@ function handleSnapshot(sessions) {
       } else {
         createSessionCard(s.id, s.name, s.state, { skipPerms: !!s.dangerouslySkipPermissions, worktree: !!s.isWorktree });
       }
+      // Hydrate the review sidebar's status/count from the snapshot (quiet: no auto-open on reconnect).
+      seedSessionMergeStatus(s.id, s.mergeStatus);
     }
 
     pruneStale(sessions.map(s => s.id));
@@ -145,6 +148,21 @@ function handleStateChange(msg) {
     return;
   }
 
+  // Close-out reset: a finished session returning to DORMANT is rebuilt as a dormant card so it parks
+  // in the minimized bar with no live terminal, reusing the well-tested create path instead of mutating
+  // a live card. skipPerms is read off the existing card so the YOLO badge survives the rebuild.
+  if (msg.to === STATES.DORMANT && msg.from !== STATES.DORMANT) {
+    const card = document.querySelector(`.session-card[data-id="${CSS.escape(msg.id)}"]`);
+    const skipPerms = card ? card.dataset.skipPerms !== undefined : false;
+    removeSessionCard(msg.id);
+    clearEmptyPlaceholder();
+    createSessionCard(msg.id, msg.session, STATES.DORMANT, { skipPerms });
+    autoLayout();
+    if (isFocusActive()) refreshFocusRoster();
+    refreshReviewSidebar(msg.id);
+    return;
+  }
+
   applyState(msg.id, msg.to);
   if (isFocusActive()) refreshFocusRoster();
 
@@ -161,14 +179,14 @@ const messageHandlers = {
   'snapshot':           (msg) => handleSnapshot(msg.sessions),
   'state-change':       (msg) => handleStateChange(msg),
   'session-added':      (msg) => { if (!msg.ephemeral) knownProjects.set(msg.id, msg.session); if (!hasSession(msg.id)) { clearEmptyPlaceholder(); createSessionCard(msg.id, msg.session, msg.state, { skipPerms: !!msg.skipPerms, worktree: !!msg.worktree }); } autoLayout(); if (isFocusActive()) refreshFocusRoster(); },
-  'session-removed':    (msg) => { knownProjects.delete(msg.id); removeSessionCard(msg.id); autoLayout(); if (isFocusActive()) refreshFocusRoster(); },
+  'session-removed':    (msg) => { knownProjects.delete(msg.id); removeSessionCard(msg.id); forgetReviewSession(msg.id); autoLayout(); if (isFocusActive()) refreshFocusRoster(); },
   'session-renamed':    (msg) => { if (knownProjects.has(msg.id)) knownProjects.set(msg.id, msg.newName); renameSessionCard(msg.id, msg.newName); },
-  'session-modified':   (msg) => { if (!msg.ephemeral) knownProjects.set(msg.id, msg.session); removeSessionCard(msg.id); clearEmptyPlaceholder(); createSessionCard(msg.id, msg.session, msg.state, { skipPerms: !!msg.skipPerms, worktree: !!msg.worktree }); autoLayout(); if (isFocusActive()) refreshFocusRoster(); },
+  'session-modified':   (msg) => { if (!msg.ephemeral) knownProjects.set(msg.id, msg.session); removeSessionCard(msg.id); forgetReviewSession(msg.id); clearEmptyPlaceholder(); createSessionCard(msg.id, msg.session, msg.state, { skipPerms: !!msg.skipPerms, worktree: !!msg.worktree }); autoLayout(); if (isFocusActive()) refreshFocusRoster(); },
   'session-git':        (msg) => setSessionWorktree(msg.id, !!msg.worktree),
   'session-merge-status': (msg) => { setSessionMergeStatus(msg.id, msg.mergeStatus); setFocusMergeStatus(msg.id, msg.mergeStatus); },
   'session-worktree-blocked': (msg) => { showErrorToast(`${msg.session}: ${msg.notice || 'integration branch not found'}`); },
   'session-worktree-ready': () => {},
-  'session-diff':       (msg) => { setSessionDiff(msg.id, msg.stat, msg.diff); },
+  'session-diff':       (msg) => { setSessionDiff(msg.id, msg.diff); },
   'post-turn-result':   (msg) => setSessionPostTurn(msg.id, msg),
   'sessions-reordered': (msg) => handleSessionsReordered(msg.order),
   'debug-state-response': (msg) => handleDebugStateResponse(msg),
@@ -270,6 +288,12 @@ setTabActivityCallback((active) => { tabActivityEl.classList.toggle('active', ac
 mountFocusView({
   rail: document.getElementById('focus-rail'),
   center: document.getElementById('focus-center'),
+});
+
+mountReviewSidebar({
+  panel: document.getElementById('review-sidebar'),
+  toggle: document.getElementById('btn-review-sidebar'),
+  count: document.getElementById('review-count'),
 });
 
 // Primary views in tab-strip order. Adding a view = adding an entry here (N-way, not a boolean).

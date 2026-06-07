@@ -19,6 +19,8 @@ import { _performExpand, enforceSplitOnCreate, exitMaximizeMode, forgetSessionLa
 // Load-bearing import: evaluating rail.js installs the minimized-bar MutationObserver,
 // the elapsed-tick interval, and the rail's click/keyboard listeners at module load.
 import { refreshPill } from './rail.js';
+import { seedReviewMergeStatus, setReviewDiff, setReviewMergeStatus } from '../sidebar/review-sidebar.js';
+import { setSelectedId } from '../sidebar/selection.js';
 import { ensureTerminalSetup, setTerminalCursorBlink, setupTerminal, wireTerminalIO } from './terminal.js';
 import { releaseWebgl, tryLoadWebGL } from './webgl-pool.js';
 
@@ -77,6 +79,13 @@ function wireCardEvents(ui, sessionId) {
   ui.nameEl.addEventListener('dblclick', (e) => {
     e.preventDefault();
     startInlineRename(ui, sessionId);
+  });
+
+  // Click a session's name to select it for the review sidebar (single-click; double-click still renames).
+  // Ignored while the inline rename input is open so typing/clicking the field never re-selects.
+  ui.nameEl.addEventListener('click', () => {
+    if (ui.nameEl.querySelector('.session-rename-input')) return;
+    setSelectedId(sessionId);
   });
 
   ui.btnRestart.addEventListener('click', () => {
@@ -235,10 +244,6 @@ export function createSessionCard(sessionId, sessionName, initialState, options 
     btnOverflow: dom.btnOverflow,
     overflowMenu: dom.overflowMenu,
     termWrap: dom.termWrap,
-    reviewBar: dom.reviewBar,
-    reviewLabel: dom.reviewLabel,
-    reviewActions: dom.reviewActions,
-    reviewDiff: dom.reviewDiff,
     btnDebug: dom.btnDebug,
     btnRename: dom.btnRename,
     btnRestart: dom.btnRestart,
@@ -319,52 +324,36 @@ export function setSessionPostTurn(sessionId, report) {
   badge.title = `Post-turn ${verb} ${count} file(s)${detail ? ` (${detail})` : ''}`;
 }
 
-// Reflect the worktree merge lifecycle on the card. `mergeStatus` is the server's session-merge-status
-// (none|pending-review|merging|parked|merged). Shows a review banner with Merge / Discard / View-diff
-// (the same control messages the Focus view uses) when there is something to review; hidden otherwise.
-// The banner is on the card, so it appears in the Sessions grid AND in the borrowed Focus center.
+// Reflect the worktree merge lifecycle. `mergeStatus` is the server's session-merge-status
+// (none|pending-review|merging|parked|merged). The review UI itself (diff + Merge & finish / Discard)
+// now lives in the right review sidebar; here we only keep data-merge on the card so the remove button
+// can warn before discarding unmerged work, and forward the status to the sidebar.
 export function setSessionMergeStatus(sessionId, mergeStatus) {
   const ui = sessionUIs.get(sessionId);
-  if (!ui || !ui.reviewBar) return;
-  const ms = mergeStatus || 'none';
-  const reviewable = ms === 'pending-review' || ms === 'parked' || ms === 'merging';
-  if (!reviewable) {
-    delete ui.card.dataset.merge;
-    ui.reviewActions.replaceChildren();
-    ui.reviewDiff.hidden = true;
-    ui.reviewDiff.textContent = '';
-    return;
+  if (ui) {
+    const ms = mergeStatus || 'none';
+    if (ms === 'pending-review' || ms === 'parked' || ms === 'merging') ui.card.dataset.merge = ms;
+    else delete ui.card.dataset.merge;
   }
-  ui.card.dataset.merge = ms;
-  ui.reviewLabel.textContent = ms === 'parked' ? 'Needs manual merge'
-    : ms === 'merging' ? 'Merging...'
-    : 'Changes ready to review';
-  ui.reviewActions.replaceChildren();
-  if (ms === 'merging') return;
-  const mk = (text, kind, type) => {
-    const b = el('button', `card-review-btn card-review-btn-${kind}`, text);
-    b.type = 'button';
-    b.addEventListener('click', () => {
-      sendControlMsg({ type, id: sessionId });
-      if (type !== 'request-session-diff') ui.reviewDiff.hidden = true;
-    });
-    return b;
-  };
-  ui.reviewActions.append(mk('View diff', 'ghost', 'request-session-diff'));
-  if (ms === 'pending-review') {
-    ui.reviewActions.append(
-      mk('Merge to develop', 'primary', 'merge-session'),
-      mk('Discard', 'danger', 'discard-session-worktree'),
-    );
-  }
+  setReviewMergeStatus(sessionId, mergeStatus || 'none');
 }
 
-// Fill the card's review diff panel (reply to request-session-diff).
-export function setSessionDiff(sessionId, stat, diff) {
+// Snapshot hydration: set the card's data-merge (remove-warning) and seed the sidebar quietly (count +
+// render), WITHOUT auto-opening the panel. Used on (re)connect so a pending-review session is reflected
+// immediately instead of only after the next live broadcast.
+export function seedSessionMergeStatus(sessionId, mergeStatus) {
   const ui = sessionUIs.get(sessionId);
-  if (!ui || !ui.reviewDiff) return;
-  ui.reviewDiff.textContent = (stat ? `${stat}\n\n` : '') + (diff || '(no changes)');
-  ui.reviewDiff.hidden = false;
+  if (ui) {
+    const ms = mergeStatus || 'none';
+    if (ms === 'pending-review' || ms === 'parked' || ms === 'merging') ui.card.dataset.merge = ms;
+    else delete ui.card.dataset.merge;
+  }
+  seedReviewMergeStatus(sessionId, mergeStatus || 'none');
+}
+
+// Forward a session's diff (reply to request-session-diff) to the review sidebar, which renders it.
+export function setSessionDiff(sessionId, diff) {
+  setReviewDiff(sessionId, diff);
 }
 
 export function renameSessionCard(sessionId, newName) {

@@ -54,9 +54,14 @@ const TRANSITIONS = Object.freeze({
   },
   [STATES.DONE]: {
     user_restart: STATES.INITIALIZING,
+    // Close-out: a finished session whose worktree has been merged/discarded is reset to DORMANT so
+    // its card parks for reuse (a fresh start re-forks a worktree off the now-updated integration
+    // branch). Guarded (user_reset) so it never fires on a live PTY or unmerged work.
+    user_reset: STATES.DORMANT,
   },
   [STATES.FAILED]: {
     user_restart: STATES.INITIALIZING,
+    user_reset: STATES.DORMANT,
     process_exit_fail: STATES.FAILED,
   },
 });
@@ -69,6 +74,16 @@ const GUARDS = {
   },
   user_restart(session) {
     return session.state === STATES.DONE || session.state === STATES.FAILED;
+  },
+  user_reset(session) {
+    // Allowed only once a finished session is fully settled: the PTY is dead AND the worktree has
+    // already been merged/discarded (worktreeDir null). This prevents resetting a session whose work
+    // is still on disk or whose PTY is alive, preserving "no implicit state mutation" and no data loss.
+    return (
+      (session.state === STATES.DONE || session.state === STATES.FAILED) &&
+      session.ptyProcess == null &&
+      session.worktreeDir == null
+    );
   },
 };
 
