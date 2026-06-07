@@ -220,6 +220,58 @@ test('resetToDormant: returns to DORMANT only when settled (PTY dead + no worktr
   }
 });
 
+test('finishAndMerge refuses while actively RUNNING (mid-work, no merge)', () => {
+  const s = makeSession();
+  try {
+    s.state = STATES.RUNNING;
+    const r = s.finishAndMerge();
+    assert.equal(r.ok, false);
+    assert.equal(r.reason, 'not-finishable');
+    assert.equal(s.state, STATES.RUNNING, 'state untouched');
+  } finally { s.destroy(); }
+});
+
+test('finishAndMerge from DONE merges immediately and resets to dormant', { skip: !WIN }, () => {
+  const wt = realWorktreeDir();
+  const gw = fakeGitWorkspace({ worktreeDir: wt, mergeResult: { merged: true, branch: null } });
+  const s = makeSession({ gitWorkspace: gw, integrationBranch: 'develop', ptySpawn: () => fakePty() });
+  try {
+    s.start();              // provisions the worktree (_workspace set)
+    s.kill = () => {};       // keep destroy()'s kill from invoking a real taskkill
+    s.ptyProcess = null;     // simulate the PTY having exited
+    s.state = STATES.DONE;
+    s.mergeStatus = 'pending-review';
+    const r = s.finishAndMerge();
+    assert.equal(r.ok, true);
+    assert.equal(gw.calls.mergeBack.length, 1, 'merged once');
+    assert.equal(s.state, STATES.DORMANT, 'returned to dormant after a clean merge');
+  } finally { s.destroy(); fs.rmSync(wt, { recursive: true, force: true }); }
+});
+
+test('finishAndMerge from COMPLETE ends the session, then merges + resets on exit', { skip: !WIN }, () => {
+  const wt = realWorktreeDir();
+  const gw = fakeGitWorkspace({ worktreeDir: wt, mergeResult: { merged: true, branch: null } });
+  const s = makeSession({ gitWorkspace: gw, integrationBranch: 'develop', ptySpawn: () => fakePty() });
+  try {
+    s.start();
+    s.state = STATES.COMPLETE; // a completed turn with the PTY still alive
+    let killed = false;
+    s.kill = () => { killed = true; }; // stub real taskkill; we drive the exit by hand below
+    const r = s.finishAndMerge();
+    assert.equal(r.pending, true, 'deferred until the PTY exits');
+    assert.equal(killed, true, 'PTY ended first');
+    assert.equal(s.state, STATES.DONE, 'killSession transitioned to DONE');
+    assert.equal(gw.calls.mergeBack.length, 0, 'not merged yet (still settling)');
+    // Simulate _handlePtyExit: worktree settles to pending-review, PTY cleared, exit emitted.
+    s.hasChanges = () => true;
+    s._settleWorktreeOnExit();
+    s.ptyProcess = null;
+    s.emit('exit', { exitCode: 0 });
+    assert.equal(gw.calls.mergeBack.length, 1, 'merged after the exit settled the worktree');
+    assert.equal(s.state, STATES.DORMANT, 'returned to dormant');
+  } finally { s.destroy(); fs.rmSync(wt, { recursive: true, force: true }); }
+});
+
 test('_settleWorktreeOnExit: a changed worktree -> pending-review; an unchanged one -> silent discard', { skip: !WIN }, () => {
   { // changed
     const wt = realWorktreeDir();

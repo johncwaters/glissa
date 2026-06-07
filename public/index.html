@@ -158,7 +158,6 @@
             </span>
           </div>
           <span class="header-aggregate" id="aggregate-status" role="status" aria-live="polite"></span>
-          <button class="btn-review-toggle" id="btn-review-sidebar" type="button" title="Review changes" aria-expanded="false">Review<span class="review-count" id="review-count" aria-hidden="true"></span></button>
           <button class="btn-add-header" id="btn-add-session-header" type="button" title="Add a new session">+ Session</button>
           <div class="header-menu" id="header-menu">
             <button class="btn-menu" id="btn-menu" title="Menu" aria-label="Open menu" aria-haspopup="menu" aria-expanded="false" aria-controls="header-menu-dropdown">&#9776;</button>
@@ -189,8 +188,8 @@
           <div class="focus-center" id="focus-center"></div>
         </section>
       </main>
-      <!-- Right review sidebar: the single home for the worktree review gate; built by review-sidebar.js. -->
-      <aside class="app-sidebar collapsed" id="review-sidebar" aria-label="Session review"></aside>
+      <!-- Right review sidebar: always-visible single home for the worktree review gate; built by review-sidebar.js. -->
+      <aside class="app-sidebar" id="review-sidebar" aria-label="Session review"></aside>
     </div>
     <!-- Health monitor footer injected by health-monitor.js -->
     <div id="health-footer-mount"></div>

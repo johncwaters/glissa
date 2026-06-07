@@ -175,45 +175,6 @@ body {
   box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
 }
 
-/* Review sidebar toggle (header). Quiet by default; accent when the panel is open. The count bubble
-   shows how many sessions have changes waiting to review. */
-.btn-review-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-family: var(--font-mono);
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  padding: 6px 12px;
-  color: var(--text-dim);
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  cursor: pointer;
-  white-space: nowrap;
-  transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
-}
-.btn-review-toggle:hover { border-color: var(--border-hover); color: var(--text-head); }
-.btn-review-toggle.active { color: var(--accent); border-color: var(--accent-dim); }
-.btn-review-toggle:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
-}
-.review-count {
-  display: none;
-  min-width: 16px;
-  height: 16px;
-  padding: 0 4px;
-  border-radius: 8px;
-  font-size: 10px;
-  font-weight: 700;
-  line-height: 16px;
-  text-align: center;
-  color: var(--bg);
-  background: var(--accent);
-}
-.review-count.has-count { display: inline-block; }
 
 /* ── Status indicator ─────────────────────────────────────── */
 .status-indicator {
@@ -2873,8 +2834,7 @@ body[data-active-view="focus"] #minimized-bar { display: none; }
 
 /* ── Review sidebar (right-docked single review home) ──
    The worktree review gate (rendered diff + Merge & finish / Discard) for the SELECTED session.
-   Collapsed by default (collapsed = display:none), so the grid/split/focus layouts are unchanged until
-   the operator opens it. Built by sidebar/review-sidebar.js. */
+   Always visible: with no selection it shows an empty state. Built by sidebar/review-sidebar.js. */
 .app-sidebar {
   flex: 0 0 clamp(320px, 26vw, 460px);
   min-width: 0;
@@ -2884,12 +2844,11 @@ body[data-active-view="focus"] #minimized-bar { display: none; }
   border-left: 1px solid var(--border);
   overflow: hidden;
 }
-.app-sidebar.collapsed { display: none; }
 
 .review-sidebar-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 8px;
   flex: 0 0 auto;
   padding: 10px 14px;
   border-bottom: 1px solid var(--border-dim);
@@ -2902,16 +2861,21 @@ body[data-active-view="focus"] #minimized-bar { display: none; }
   text-transform: uppercase;
   color: var(--text-head);
 }
-.review-sidebar-collapse {
-  background: transparent;
-  border: none;
-  color: var(--text-dim);
-  font-size: 18px;
-  line-height: 1;
-  cursor: pointer;
-  padding: 0 4px;
+/* Count of sessions with changes ready to review, shown next to the title. */
+.review-count {
+  display: none;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
+  color: var(--bg);
+  background: var(--accent);
 }
-.review-sidebar-collapse:hover { color: var(--text-head); }
+.review-count.has-count { display: inline-block; }
 
 .review-sidebar-body {
   flex: 1;

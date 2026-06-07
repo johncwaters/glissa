@@ -8,12 +8,11 @@
 // the diff via setReviewDiff (reply to request-session-diff, asked on selection/refresh). Session
 // name/state are read live from the shared card registry. Pure parsing lives in diff-core.mjs.
 
-import { BADGE_LABELS, STATE_GLYPHS } from '/shared/states.mjs';
+import { BADGE_LABELS, STATE_GLYPHS, STATES } from '/shared/states.mjs';
 import { sendControlMsg } from '../control-ws.js';
 import { el } from '../dom-helpers.js';
 import { showConfirmDialog } from '../session-card/card-dom.js';
 import { sessionUIs } from '../session-card/card-registry.js';
-import { getSidebarOpen, setSidebarOpen } from '../ui-prefs.js';
 import { parseUnifiedDiff, summarizeFiles } from './diff-core.mjs';
 import { getSelectedId, onSelectionChange, setSelectedId } from './selection.js';
 
@@ -28,34 +27,26 @@ const expanded = new Set();   // file paths the user expanded past the cap (per 
 
 let panelEl = null;
 let bodyEl = null;
-let toggleBtn = null;
 let countEl = null;
-let _open = false;
 
 // ── Mount ──
+// The sidebar is always visible (no collapse): with no session selected it shows an empty state, and
+// with a selected session that has no changes it says so. The count next to the title shows how many
+// sessions have changes ready to review.
 
-export function mountReviewSidebar({ panel, toggle, count }) {
+export function mountReviewSidebar({ panel }) {
   panelEl = panel;
-  toggleBtn = toggle;
-  countEl = count;
   if (!panelEl) return;
 
   const head = el('div', 'review-sidebar-head');
   const title = el('span', 'review-sidebar-title', 'Review');
-  const btnCollapse = el('button', 'review-sidebar-collapse', '×'); // multiplication sign as a close glyph
-  btnCollapse.type = 'button';
-  btnCollapse.title = 'Hide review panel';
-  btnCollapse.setAttribute('aria-label', 'Hide review panel');
-  btnCollapse.addEventListener('click', () => setOpen(false));
-  head.append(title, btnCollapse);
+  countEl = el('span', 'review-count', '');
+  countEl.setAttribute('aria-hidden', 'true');
+  countEl.title = 'Sessions with changes ready to review';
+  head.append(title, countEl);
 
   bodyEl = el('div', 'review-sidebar-body');
   panelEl.append(head, bodyEl);
-
-  if (toggleBtn) {
-    toggleBtn.addEventListener('click', () => setOpen(!_open));
-    toggleBtn.setAttribute('aria-controls', panelEl.id);
-  }
 
   onSelectionChange((id) => {
     expanded.clear(); // per-session: don't carry one session's expanded files into the next
@@ -63,25 +54,7 @@ export function mountReviewSidebar({ panel, toggle, count }) {
     render();
   });
 
-  setOpen(getSidebarOpen());
   render();
-}
-
-// ── Open / collapse ──
-
-function setOpen(open) {
-  _open = !!open;
-  if (panelEl) panelEl.classList.toggle('collapsed', !_open);
-  document.body.classList.toggle('review-open', _open);
-  if (toggleBtn) {
-    toggleBtn.setAttribute('aria-expanded', String(_open));
-    toggleBtn.classList.toggle('active', _open);
-  }
-  setSidebarOpen(_open);
-}
-
-export function toggleReviewSidebar() {
-  setOpen(!_open);
 }
 
 // ── External updates (from app.js message handlers) ──
@@ -99,13 +72,12 @@ export function setReviewMergeStatus(id, mergeStatus) {
   const prev = statusById.get(id) || 'none';
   const next = mergeStatus || 'none';
   applyStatus(id, next);
-  // On a fresh transition INTO a reviewable state, surface it: auto-select when nothing reviewable is
-  // selected, and auto-open the panel the first time there is something to review.
+  // On a fresh transition INTO a reviewable state, auto-select it when nothing reviewable is selected,
+  // so the always-visible panel jumps to the session that just produced changes.
   if (REVIEWABLE.has(next) && !REVIEWABLE.has(prev)) {
     const sel = getSelectedId();
     const selReviewable = sel ? REVIEWABLE.has(statusById.get(sel) || 'none') : false;
     if (!sel || !sessionUIs.has(sel) || !selReviewable) setSelectedId(id);
-    if (!_open) setOpen(true);
   }
 }
 
@@ -209,12 +181,16 @@ function render() {
     bodyEl.append(diffWrap);
   }
 
-  // Actions.
-  bodyEl.append(renderActions(id, status, reviewable));
+  // "Merge & finish" is available for a settled session (pending-review/parked) AND for a quiescent live
+  // session that has changes (COMPLETE/IDLE): clicking it ends the session first, then merges. A session
+  // that is still actively working (RUNNING) or waiting for input only gets a read-only preview.
+  const finishableLive = (state === STATES.COMPLETE || state === STATES.IDLE) && files.length > 0;
+  const canFinish = reviewable || finishableLive;
 
-  // A live (not-yet-settled) session can only be previewed; merging waits until it exits.
-  if (!reviewable && files.length > 0) {
-    bodyEl.append(el('div', 'review-hint', 'Read-only preview. Let the session finish (exit) to merge it into develop.'));
+  bodyEl.append(renderActions(id, status, reviewable, canFinish));
+
+  if (!canFinish && files.length > 0) {
+    bodyEl.append(el('div', 'review-hint', 'Read-only preview. The session is still active; it can be merged once it is complete or idle.'));
   }
 }
 
@@ -290,7 +266,7 @@ function renderFile(f) {
   return sec;
 }
 
-function renderActions(id, status, reviewable) {
+function renderActions(id, status, reviewable, canFinish) {
   const actions = el('div', 'review-actions');
 
   const refresh = el('button', 'review-btn review-btn-ghost', 'Refresh diff');
@@ -298,14 +274,17 @@ function renderActions(id, status, reviewable) {
   refresh.addEventListener('click', () => requestDiff(id));
   actions.append(refresh);
 
-  if (reviewable) {
+  if (canFinish) {
     const finish = el('button', 'review-btn review-btn-primary', 'Merge & finish');
     finish.type = 'button';
-    finish.title = 'Merge into develop, clean up the worktree, and return the session to dormant';
+    finish.title = 'End the session if running, merge into develop, clean up the worktree, and return to dormant';
     finish.disabled = status === 'merging';
     finish.addEventListener('click', () => sendControlMsg({ type: 'finish-session', id }));
     actions.append(finish);
+  }
 
+  // Discard throws the worktree away; only offered once the session has settled (no live PTY in it).
+  if (reviewable) {
     const discard = el('button', 'review-btn review-btn-danger', 'Discard');
     discard.type = 'button';
     discard.disabled = status === 'merging';

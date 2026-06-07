@@ -5,7 +5,7 @@
 import { getJSON, setJSON } from './local-store.js';
 
 const STORAGE_KEY = 'glissa-ui-prefs';
-const DEFAULT_PREFS = { minimized: [], soundEnabled: true, soundId: 'coins', themeId: 'phyrexian', notificationsEnabled: true, sidebarOpen: false };
+const DEFAULT_PREFS = { minimized: [], soundEnabled: true, soundId: 'coins', themeId: 'phyrexian', notificationsEnabled: true };
 
 function load() {
   const prefs = getJSON(STORAGE_KEY, DEFAULT_PREFS);
@@ -14,7 +14,6 @@ function load() {
   if (typeof prefs.soundId !== 'string') prefs.soundId = 'coins';
   if (typeof prefs.themeId !== 'string') prefs.themeId = 'golgari';
   if (typeof prefs.notificationsEnabled !== 'boolean') prefs.notificationsEnabled = true;
-  if (typeof prefs.sidebarOpen !== 'boolean') prefs.sidebarOpen = false;
   return prefs;
 }
 
@@ -64,16 +63,6 @@ export function isNotificationsEnabled() {
 export function setNotificationsEnabled(enabled) {
   const prefs = load();
   prefs.notificationsEnabled = enabled;
-  save(prefs);
-}
-
-export function getSidebarOpen() {
-  return load().sidebarOpen;
-}
-
-export function setSidebarOpen(open) {
-  const prefs = load();
-  prefs.sidebarOpen = !!open;
   save(prefs);
 }
 

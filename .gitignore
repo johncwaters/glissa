@@ -10,3 +10,6 @@ dist/
 !.claude/omc.jsonc
 config.json
 .pty-capture/
+# Per-session post-turn checker output (runtime telemetry, written into the session worktree). Not a
+# deliverable: ignoring it keeps it out of session diffs and out of the merge into the integration branch.
+.glissa/post-turn/

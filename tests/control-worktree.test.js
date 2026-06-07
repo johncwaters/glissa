@@ -9,7 +9,6 @@ const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 
 const { registerControlHandlers } = require('../control-handlers');
-const { STATES } = require('../shared/states');
 
 function harness(sessions) {
   const controlWss = new EventEmitter();
@@ -69,48 +68,18 @@ test('merge-session on an unknown session is a no-op (no throw)', () => {
   assert.doesNotThrow(() => h.send({ type: 'merge-session', id: 'nope' }));
 });
 
-// --- finish-session: one-click close-out (merge, then reset-to-dormant ONLY on a clean merge) ---
+// --- finish-session: one-click close-out delegates to Session.finishAndMerge (logic tested there) ---
 
-function fakeFinishSession(id, { state = STATES.DONE, mergeResult = { merged: true } } = {}) {
-  return {
-    id, name: id, ephemeral: false, state,
-    calls: { merge: 0, reset: 0 },
-    mergeWorktree() { this.calls.merge++; return mergeResult; },
-    resetToDormant() { this.calls.reset++; return true; },
+test('finish-session dispatches to session.finishAndMerge()', () => {
+  let finished = 0;
+  const s = {
+    id: 'p1', name: 'p1', ephemeral: false,
+    finishAndMerge() { finished++; return { ok: true }; },
     toSnapshot() { return { id: this.id, name: this.name }; },
   };
-}
-
-test('finish-session on a DONE session with a clean merge merges then resets to dormant', () => {
-  const s = fakeFinishSession('p1', { state: STATES.DONE, mergeResult: { merged: true } });
   const h = harness(new Map([['p1', s]]));
   h.send({ type: 'finish-session', id: 'p1' });
-  assert.equal(s.calls.merge, 1, 'merged once');
-  assert.equal(s.calls.reset, 1, 'reset once after a clean merge');
-});
-
-test('finish-session does NOT reset when the merge parks (worktree preserved)', () => {
-  const s = fakeFinishSession('p1', { state: STATES.DONE, mergeResult: { merged: false, parked: true } });
-  const h = harness(new Map([['p1', s]]));
-  h.send({ type: 'finish-session', id: 'p1' });
-  assert.equal(s.calls.merge, 1, 'merge attempted');
-  assert.equal(s.calls.reset, 0, 'never reset on a parked merge');
-});
-
-test('finish-session refuses to merge while the PTY is alive (state not DONE/FAILED)', () => {
-  const s = fakeFinishSession('p1', { state: STATES.COMPLETE });
-  const h = harness(new Map([['p1', s]]));
-  h.send({ type: 'finish-session', id: 'p1' });
-  assert.equal(s.calls.merge, 0, 'no merge attempted on a live session');
-  assert.equal(s.calls.reset, 0);
-});
-
-test('finish-session merges a FAILED session too (settled, PTY dead)', () => {
-  const s = fakeFinishSession('p1', { state: STATES.FAILED, mergeResult: { merged: true } });
-  const h = harness(new Map([['p1', s]]));
-  h.send({ type: 'finish-session', id: 'p1' });
-  assert.equal(s.calls.merge, 1);
-  assert.equal(s.calls.reset, 1);
+  assert.equal(finished, 1);
 });
 
 test('finish-session on an unknown session is a no-op (no throw)', () => {

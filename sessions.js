@@ -124,6 +124,9 @@ class Session extends EventEmitter {
     this._autoKilled = false;
     this._destroyed = false;
     this._pendingRestart = false;
+    // True between a "Merge & finish" on a live session and its post-exit merge, so a double-click
+    // cannot kick off a second merge against a worktree whose PTY is still tearing down.
+    this._finishing = false;
     // True only between a successful spawn and the kill/exit that follows. Gates
     // write() so we never push input into a pty whose console pipe is already
     // dead (see write() and the conin-socket guard in start()).
@@ -1019,6 +1022,40 @@ class Session extends EventEmitter {
     const did = this.transition("user_reset");
     if (did) this.mergeStatus = "none";
     return did;
+  }
+
+  // One-click close-out behind the sidebar's "Merge & finish": merge the worktree into the integration
+  // branch and return the session to DORMANT. A settled session (DONE/FAILED) merges immediately. A
+  // quiescent live session (COMPLETE/IDLE) is ENDED first (we must not rewrite a worktree the PTY is
+  // still running in), then merged once it settles on exit. RUNNING/WAITING and the startup states are
+  // refused (mid-work, or no worktree yet). Returns { ok, pending?, reason? }.
+  finishAndMerge() {
+    if (this._destroyed || this._finishing) {
+      return { ok: false, reason: this._finishing ? "in-progress" : "destroyed" };
+    }
+    if (this.state === STATES.DONE || this.state === STATES.FAILED) {
+      this._mergeAndReset();
+      return { ok: true };
+    }
+    if (this.state === STATES.COMPLETE || this.state === STATES.IDLE) {
+      this._finishing = true;
+      this.once("exit", () => {
+        this._finishing = false;
+        if (!this._destroyed) this._mergeAndReset();
+      });
+      this.killSession(); // -> DONE now; the real PTY exit settles the worktree, then the handler merges
+      return { ok: true, pending: true };
+    }
+    return { ok: false, reason: "not-finishable" };
+  }
+
+  // Merge the worktree, then (self-guarded) return to DORMANT once the worktree is gone. A parked merge
+  // keeps its worktree, so resetToDormant no-ops and the session stays parked for manual resolution; a
+  // clean settle (nothing to merge) already cleared the worktree, so the session still finishes dormant.
+  _mergeAndReset() {
+    const r = this.mergeWorktree();
+    this.resetToDormant();
+    return r;
   }
 
   forceRestart() {

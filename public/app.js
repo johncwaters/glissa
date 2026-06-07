@@ -290,11 +290,7 @@ mountFocusView({
   center: document.getElementById('focus-center'),
 });
 
-mountReviewSidebar({
-  panel: document.getElementById('review-sidebar'),
-  toggle: document.getElementById('btn-review-sidebar'),
-  count: document.getElementById('review-count'),
-});
+mountReviewSidebar({ panel: document.getElementById('review-sidebar') });
 
 // Primary views in tab-strip order. Adding a view = adding an entry here (N-way, not a boolean).
 // Focus leads as the default landing view; the Sessions grid stays mounted (Focus borrows its cards).
