@@ -1,6 +1,6 @@
 'use strict';
 
-// Settings injector — writes a per-session Claude Code settings file containing
+// Settings injector - writes a per-session Claude Code settings file containing
 // HTTP-type hooks whose URLs carry the session's glissaId + bearer token, and returns
 // the `--settings <path>` arg appended to the claude spawn. No shell command (HTTP
 // hooks) => Windows-clean. Files live under a per-session subdir of the OS temp dir
@@ -15,15 +15,17 @@ const DEFAULT_BASE_DIR = path.join(os.tmpdir(), 'glissa-hooks');
 const DEFAULT_TIMEOUT_SEC = 5; // short: handler returns 200 immediately; never stall Claude
 
 // Hook events Glissa subscribes to. Notification covers idle_prompt (=>ready) and
-// permission_prompt (=>awaiting-input); see hook-source.mapHookToSignal.
-const HOOK_EVENTS = ['SessionStart', 'SessionEnd', 'UserPromptSubmit', 'Stop', 'Notification', 'PermissionRequest'];
+// permission_prompt (=>awaiting-input); see hook-source.mapHookToSignal. SubagentStart/
+// SubagentStop are not state transitions: they track the live background sub-agent count so a
+// main-agent Stop fired while a background sub-agent is still running does not falsely COMPLETE.
+const HOOK_EVENTS = ['SessionStart', 'SessionEnd', 'UserPromptSubmit', 'Stop', 'Notification', 'PermissionRequest', 'SubagentStart', 'SubagentStop'];
 
 function generateToken() {
   return crypto.randomBytes(32).toString('hex');
 }
 
 // Windows forbids < > : " / \ | ? * and control chars in a path segment, plus trailing dots/spaces.
-// Session ids can be namespaced with colons (e.g. setup:marketing:<uuid>) — legal as map keys and
+// Session ids can be namespaced with colons (e.g. setup:marketing:<uuid>) - legal as map keys and
 // URL-encoded in the hook URL, but illegal as an on-disk dir name. Sanitize ONLY the dir segment;
 // the real glissaId still flows verbatim into the hook URL and HookRouter registration, so routing
 // is unaffected. The uuid suffix keeps the sanitized name unique.
@@ -33,7 +35,7 @@ function safeDirSegment(id) {
 }
 
 // Build the Claude Code settings object with HTTP hooks for one session. An optional
-// `permissions` ({ deny: [...] }) is merged in for team stages — the deny blacklist (mechanism M2;
+// `permissions` ({ deny: [...] }) is merged in for team stages - the deny blacklist (mechanism M2;
 // efficacy under --dangerously-skip-permissions is the open Phase-0(b) question). Omitted for
 // ordinary user sessions, so their settings are byte-identical to before.
 function buildHookSettings({ port, glissaId, token, timeoutSec = DEFAULT_TIMEOUT_SEC, permissions = null }) {

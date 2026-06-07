@@ -1,6 +1,6 @@
 'use strict';
 
-// Hook source — the AUTHORITATIVE status signal. Claude Code posts HTTP hooks
+// Hook source - the AUTHORITATIVE status signal. Claude Code posts HTTP hooks
 // (injected via --settings at spawn) to Glissa's localhost server. A single
 // parameterized Express route `POST /hook/:glissaId/:event` dispatches here.
 //
@@ -23,8 +23,19 @@ function mapHookToSignal(event, payload) {
       return 'resume';
     case 'stop':
       // Main-agent turn end only. NOT SubagentStop: a sub-agent (Task tool)
-      // finishing mid-turn must not mark the whole session COMPLETE.
+      // finishing mid-turn must not mark the whole session COMPLETE. This `ready`
+      // is gated downstream on the live background sub-agent count (see below).
       return 'ready';
+    case 'subagentstart':
+      // A background sub-agent (Task run_in_background / Ctrl+B) began. NOT a state
+      // transition: tracked as a live-count delta so a later main-agent Stop fired while
+      // it is still running does not falsely COMPLETE the card (see Session._trackSubagent
+      // and the activeAgents gate in session-core/status-mapper.js).
+      return 'subagent-start';
+    case 'subagentstop':
+      // A sub-agent finished. Drops the live count; never completes the session itself
+      // (the main agent's own Stop does that, gated on the count).
+      return 'subagent-stop';
     case 'permissionrequest':
       return 'awaiting-input';
     case 'notification': {

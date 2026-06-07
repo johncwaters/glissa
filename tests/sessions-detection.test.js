@@ -182,7 +182,7 @@ test('COMPLETE is reached ONLY via the mapper task_complete (RUNNING; high-confi
   assert.equal(mapSignalToEvent('ready', STATES.DORMANT, 'high'), null);
 });
 
-test('no idle/silence timer or content scraping remains — sessions.js AND the mapper (fail-closed)', () => {
+test('no idle/silence timer or content scraping remains - sessions.js AND the mapper (fail-closed)', () => {
   const fs = require('node:fs');
   const scrape = /_resetIdleTimer|isLayer4Chrome|patternDetector|hasPendingContent/;
   // require.resolve throws on a bad path, so a moved/renamed target FAILS CLOSED (never silently passes).
@@ -205,5 +205,97 @@ test('getDetectionStats().lastSignal carries meta:true after a meta signal', () 
   assert.equal(last.meta, true);
   assert.equal(last.signal, 'unknown');
   assert.equal(last.source, 'title');
+  s.destroy();
+});
+
+// --- Background sub-agent gate (subagent-start/stop tracking; ready suppressed while count > 0) ---
+
+test('background sub-agent: a main Stop while a sub-agent is live does NOT complete', async () => {
+  const s = makeSession(STATES.RUNNING);
+  const seen = [];
+  s.on('state-change', (e) => seen.push(e.to));
+  hook(s, 'subagent-start', { payload: { agent_id: 'a1' } });
+  hook(s, 'ready'); // main-agent Stop, but a1 is still running
+  await sleep(40);
+  assert.equal(s.state, STATES.RUNNING, 'must stay RUNNING while a background sub-agent runs');
+  assert.equal(seen.includes(STATES.COMPLETE), false, 'must not flip through COMPLETE');
+  s.destroy();
+});
+
+test('background sub-agent: after the sub-agent stops, a later Stop completes', async () => {
+  const s = makeSession(STATES.RUNNING);
+  hook(s, 'subagent-start', { payload: { agent_id: 'a1' } });
+  hook(s, 'ready'); // suppressed (a1 live)
+  await sleep(40);
+  assert.equal(s.state, STATES.RUNNING);
+  hook(s, 'subagent-stop', { payload: { agent_id: 'a1' } }); // drains
+  hook(s, 'ready'); // the resumed turn's Stop, count 0 -> completes
+  await sleep(40);
+  assert.equal(s.state, STATES.COMPLETE);
+  s.destroy();
+});
+
+test('synchronous sub-agent: Start then Stop then a main Stop completes (no regression)', async () => {
+  const s = makeSession(STATES.RUNNING);
+  hook(s, 'subagent-start', { payload: { agent_id: 'a1' } });
+  hook(s, 'subagent-stop', { payload: { agent_id: 'a1' } }); // finishes before the main Stop
+  hook(s, 'ready');
+  await sleep(40);
+  assert.equal(s.state, STATES.COMPLETE);
+  s.destroy();
+});
+
+test('subagent-start/stop are tracking signals: no transition of their own', () => {
+  const s = makeSession(STATES.RUNNING);
+  const before = s.auditLog.length;
+  hook(s, 'subagent-start', { payload: { agent_id: 'a1' } });
+  hook(s, 'subagent-stop', { payload: { agent_id: 'a1' } });
+  assert.equal(s.state, STATES.RUNNING);
+  assert.equal(s.auditLog.length, before);
+  s.destroy();
+});
+
+test('agents-change tracks the live count and toSnapshot carries activeAgents', () => {
+  const s = makeSession(STATES.RUNNING);
+  const counts = [];
+  s.on('agents-change', (e) => counts.push(e.activeAgents));
+  hook(s, 'subagent-start', { payload: { agent_id: 'a1' } });
+  hook(s, 'subagent-start', { payload: { agent_id: 'a2' } });
+  assert.equal(s.toSnapshot().activeAgents, 2);
+  hook(s, 'subagent-stop', { payload: { agent_id: 'a1' } });
+  assert.equal(s.toSnapshot().activeAgents, 1);
+  assert.deepEqual(counts, [1, 2, 1]);
+  s.destroy();
+});
+
+test('a duplicate SubagentStart does not double-count; an unknown SubagentStop is a no-op', () => {
+  const s = makeSession(STATES.RUNNING);
+  hook(s, 'subagent-start', { payload: { agent_id: 'a1' } });
+  hook(s, 'subagent-start', { payload: { agent_id: 'a1' } }); // dup
+  assert.equal(s.toSnapshot().activeAgents, 1);
+  hook(s, 'subagent-stop', { payload: { agent_id: 'ghost' } }); // never started
+  assert.equal(s.toSnapshot().activeAgents, 1);
+  hook(s, 'subagent-stop', { payload: { agent_id: 'a1' } });
+  assert.equal(s.toSnapshot().activeAgents, 0);
+  s.destroy();
+});
+
+test('a SubagentStart with no agent_id is ignored (defensive)', async () => {
+  const s = makeSession(STATES.RUNNING);
+  hook(s, 'subagent-start', { payload: {} }); // no agent_id -> untracked
+  assert.equal(s.toSnapshot().activeAgents, 0);
+  hook(s, 'ready'); // nothing tracked -> completes normally
+  await sleep(40);
+  assert.equal(s.state, STATES.COMPLETE);
+  s.destroy();
+});
+
+test('detectBackgroundAgents=false restores prior behavior (Stop completes despite a sub-agent signal)', async () => {
+  const s = makeSession(STATES.RUNNING, { detectBackgroundAgents: false });
+  hook(s, 'subagent-start', { payload: { agent_id: 'a1' } });
+  hook(s, 'ready');
+  await sleep(40);
+  assert.equal(s.state, STATES.COMPLETE);
+  assert.equal(s.toSnapshot().activeAgents, 0);
   s.destroy();
 });

@@ -21,6 +21,7 @@ const {
   EXIT_HOOKS,
 } = require("./session-core/state-machine");
 const { mapSignalToEvent } = require("./session-core/status-mapper");
+const agentTracker = require("./session-core/agent-tracker");
 
 const KILL_POLL_INTERVAL_MS = 200;
 const KILL_MAX_WAIT_MS = 3000;
@@ -73,6 +74,12 @@ class Session extends EventEmitter {
     titleStabilizationMs = 1500,
     statusConflictMs = undefined,
     statusDedupMs = undefined,
+    // Background sub-agent detection (see session-core/agent-tracker.js). When true (default), a
+    // main-agent Stop fired while a background sub-agent is still running does NOT complete the card.
+    // The kill switch (config detectBackgroundAgents=false) makes the session ignore subagent signals
+    // so behavior is exactly as before. agentTtlMs bounds a dropped-SubagentStop leak.
+    detectBackgroundAgents = true,
+    agentTtlMs = agentTracker.DEFAULT_AGENT_TTL_MS,
     // Resolved claude command ({ path, kind }). Defaults to the module-load
     // resolution; tests inject a stub to exercise the spawn branches deterministically.
     spawnCommand = CLAUDE_CMD,
@@ -146,6 +153,12 @@ class Session extends EventEmitter {
     this._settingsHandle = null;
     this._hookSeen = false;
     this._lastSignal = null;
+    // Live background sub-agents, keyed by Claude Code agent_id -> last-seen ts. Non-empty means
+    // background work is still running after the main agent's Stop, which gates ready->task_complete
+    // (see _onStatus / mapSignalToEvent). Lazily pruned by agentTtlMs; never drives a state transition.
+    this._detectBackgroundAgents = detectBackgroundAgents;
+    this._activeAgents = new Map();
+    this._agentTtlMs = agentTtlMs;
     this._spawnCommand = spawnCommand;
     this._initialPrompt = initialPrompt;
     this._extraClaudeArgs = Array.isArray(extraClaudeArgs) ? extraClaudeArgs : [];
@@ -189,7 +202,48 @@ class Session extends EventEmitter {
     if (this._recorder && raw && raw.event) {
       this._recorder.writeHook(raw.event, raw.payload);
     }
+    // Background sub-agent lifecycle is COUNTED, not a state transition: it never reaches the
+    // StatusSource (which merges hook+title timing for the real transition signals). Tracking the
+    // live set lets a main-agent Stop fired while a background sub-agent is still running avoid a
+    // false COMPLETE (see _onStatus + the activeAgents gate in status-mapper.js).
+    if (raw && (raw.signal === "subagent-start" || raw.signal === "subagent-stop")) {
+      this._trackSubagent(raw);
+      return;
+    }
     this._statusSource.ingest(raw);
+  }
+
+  // Apply one subagent-start/stop signal to the live set. Off (kill switch) or a payload with no
+  // agent_id is ignored, so the count stays 0 and behavior is exactly as before. Emits an
+  // 'agents-change' delta only when the live count actually changed.
+  _trackSubagent(raw) {
+    if (!this._detectBackgroundAgents) return;
+    const agentId = raw.payload && raw.payload.agent_id;
+    if (!agentId) return;
+    const changed = raw.signal === "subagent-start"
+      ? agentTracker.addAgent(this._activeAgents, agentId, raw.ts || Date.now())
+      : agentTracker.removeAgent(this._activeAgents, agentId);
+    if (changed) this._emitAgentsChange();
+  }
+
+  // Pruned count of live background sub-agents. Lazy prune (no per-session timer) bounds a dropped
+  // SubagentStop. Returns 0 when detection is off so the gate is inert.
+  _activeAgentCount() {
+    if (!this._detectBackgroundAgents) return 0;
+    agentTracker.pruneAgents(this._activeAgents, Date.now(), this._agentTtlMs);
+    return this._activeAgents.size;
+  }
+
+  _emitAgentsChange() {
+    // Internal event; the backend listener already has the session (id/name), so carry only the count.
+    this.emit("agents-change", { activeAgents: this._activeAgentCount() });
+  }
+
+  // Drop all live ids (PTY exit, (re)start). Emits a clearing delta only if something was live.
+  _clearAgents() {
+    if (this._activeAgents.size === 0) return;
+    this._activeAgents.clear();
+    this._emitAgentsChange();
   }
 
   _onStatus(s) {
@@ -199,7 +253,7 @@ class Session extends EventEmitter {
     // the _destroyed guard + _lastSignal write above, and the transition below. The detail
     // { source, signal } is uniform across every firing case (byte-identical to the prior
     // per-branch details), so it is assembled here rather than in the pure mapper.
-    const event = mapSignalToEvent(s.signal, this.state, s.confidence);
+    const event = mapSignalToEvent(s.signal, this.state, s.confidence, this._activeAgentCount());
     if (event) {
       this.transition(event, { source: s.source, signal: s.signal });
     }
@@ -227,6 +281,7 @@ class Session extends EventEmitter {
       dangerouslySkipPermissions: this.dangerouslySkipPermissions,
       ephemeral: this.ephemeral,
       isWorktree: this.isWorktree,
+      activeAgents: this._activeAgentCount(),
       mergeStatus: this.mergeStatus,
       worktreeNotice: this.worktreeNotice,
       auditLog: this.auditLog.slice(-100),
@@ -576,6 +631,8 @@ class Session extends EventEmitter {
     }
     this._receivedFirstOutput = false;
     this._sleeping = false;
+    // A (re)started PTY begins with no live background sub-agents; drop any stale ids from a prior run.
+    this._clearAgents();
     this._autoKilled = false;
     this._outputBuffer = [];
     this._outputBufferHead = 0;
@@ -789,6 +846,7 @@ class Session extends EventEmitter {
     const pid = this.ptyProcess ? this.ptyProcess.pid : null;
     this._titleSource.reset();
     this._statusSource.reset();
+    this._clearAgents();
     this._cleanupHooks();
     this._ptyAlive = false;
     this.ptyProcess = null;

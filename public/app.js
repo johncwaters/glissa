@@ -12,7 +12,7 @@ import { applyHealthSnapshot, mountHealthMonitor } from './health-monitor.js';
 import { initNotifications, showDesktopNotification } from './notifications.js';
 import { handleDebugStateRefresh, handleDebugStateResponse } from './session-card/card-dom.js';
 import { exitMaximizeMode, isMaximizeActive, setLayoutMode } from './session-card/layout.js';
-import { applyState, applyTerminalSettings, createSessionCard, focusNextWaiting, focusSessionCard, getSessionCount, handleSessionsReordered, hasSession, removeSessionCard, renameSessionCard, seedSessionMergeStatus, setSessionDiff, setSessionMergeStatus, setSessionPostTurn, setSessionWorktree, updateAggregateStatus } from './session-card/lifecycle.js';
+import { applyState, applyTerminalSettings, createSessionCard, focusNextWaiting, focusSessionCard, getSessionCount, handleSessionsReordered, hasSession, removeSessionCard, renameSessionCard, seedSessionMergeStatus, setSessionAgents, setSessionDiff, setSessionMergeStatus, setSessionPostTurn, setSessionWorktree, updateAggregateStatus } from './session-card/lifecycle.js';
 import { reconnectDataWs } from './session-card/terminal.js';
 import { showErrorToast } from './session-card/toast.js';
 import { forgetReviewSession, mountReviewSidebar, refreshReviewSidebar } from './sidebar/review-sidebar.js';
@@ -129,6 +129,8 @@ function handleSnapshot(sessions) {
       }
       // Hydrate the review sidebar's status/count from the snapshot (quiet: no auto-open on reconnect).
       seedSessionMergeStatus(s.id, s.mergeStatus);
+      // Restore the live background sub-agent chip on reconnect (Glissa reloads on every restart).
+      setSessionAgents(s.id, s.activeAgents);
     }
 
     pruneStale(sessions.map(s => s.id));
@@ -183,6 +185,7 @@ const messageHandlers = {
   'session-renamed':    (msg) => { if (knownProjects.has(msg.id)) knownProjects.set(msg.id, msg.newName); renameSessionCard(msg.id, msg.newName); },
   'session-modified':   (msg) => { if (!msg.ephemeral) knownProjects.set(msg.id, msg.session); removeSessionCard(msg.id); forgetReviewSession(msg.id); clearEmptyPlaceholder(); createSessionCard(msg.id, msg.session, msg.state, { skipPerms: !!msg.skipPerms, worktree: !!msg.worktree }); autoLayout(); if (isFocusActive()) refreshFocusRoster(); },
   'session-git':        (msg) => setSessionWorktree(msg.id, !!msg.worktree),
+  'session-agents':     (msg) => setSessionAgents(msg.id, msg.activeAgents),
   'session-merge-status': (msg) => { setSessionMergeStatus(msg.id, msg.mergeStatus); setFocusMergeStatus(msg.id, msg.mergeStatus); },
   'session-worktree-blocked': (msg) => { showErrorToast(`${msg.session}: ${msg.notice || 'integration branch not found'}`); },
   'session-worktree-ready': () => {},

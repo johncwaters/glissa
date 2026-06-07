@@ -850,6 +850,34 @@ body {
   display: none;
 }
 
+/* Live background sub-agent count. Hidden until the card carries data-agents (toggled live by
+   setSessionAgents on a session-agents delta): the main turn ended but N background sub-agents are
+   still running, so the card stays Working instead of flipping to Complete. Accent tone (mirrors
+   .worktree-badge) - informational, not a warning. */
+.agents-badge {
+  display: none;
+  align-items: center;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 0 6px;
+  border-radius: 2px;
+  color: var(--color-accent, #7c9eff);
+  border: 1px solid color-mix(in srgb, var(--color-accent, #7c9eff) 55%, transparent);
+  background: color-mix(in srgb, var(--color-accent, #7c9eff) 14%, transparent);
+  flex-shrink: 0;
+  line-height: 18px;
+}
+
+.session-card[data-agents] .agents-badge {
+  display: inline-flex;
+}
+
+.session-card.minimized .agents-badge {
+  display: none;
+}
+
 /* ── Card header ──────────────────────────────────────────── */
 .session-card-header {
   display: flex;

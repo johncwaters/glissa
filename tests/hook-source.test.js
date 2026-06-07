@@ -27,9 +27,12 @@ test('mapHookToSignal maps events correctly', () => {
   assert.equal(mapHookToSignal('PreToolUse'), null);
 });
 
-test('mapHookToSignal: SubagentStop does NOT complete the session', () => {
-  // A sub-agent (Task tool) finishing mid-turn must not mark the session COMPLETE.
-  assert.equal(mapHookToSignal('SubagentStop'), null);
+test('mapHookToSignal: SubagentStart/Stop are tracking signals, never a completion', () => {
+  // A sub-agent (Task tool) finishing mid-turn must not mark the session COMPLETE: it maps to a
+  // counted tracking signal (gated downstream), not 'ready'. SubagentStart opens the count.
+  assert.equal(mapHookToSignal('SubagentStart'), 'subagent-start');
+  assert.equal(mapHookToSignal('SubagentStop'), 'subagent-stop');
+  assert.notEqual(mapHookToSignal('SubagentStop'), 'ready');
 });
 
 test('mapHookToSignal: benign/unknown Notification subtypes are ignored (no false WAITING)', () => {
