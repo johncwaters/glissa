@@ -1,14 +1,15 @@
 // Right-docked review sidebar: the single home for the worktree review gate of the SELECTED session.
 // Shows a changed-files summary over a collapsible per-file diff (each file minimized until clicked),
-// plus the actions (Merge / Refresh; Discard only for a settled worktree). "Merge" merges into develop
+// plus the actions (Merge; Discard only for a settled worktree). "Merge" merges into develop
 // and rebases the worktree onto it WITHOUT ending the session, so the operator commits as they go (the
 // PTY effectively never dies, so there is no separate finish/close-out step). It REPLACES the old inline
 // card review bar; the card now only carries data-merge for the remove-warning. The sidebar is app-level
 // (spans every view via .app-body), so it serves the Sessions grid and the Focus view alike.
 //
 // Data flow: merge status arrives via setReviewMergeStatus (from the server's session-merge-status),
-// the diff via setReviewDiff (reply to request-session-diff, asked on selection/refresh). Session
-// name/state are read live from the shared card registry. Pure parsing lives in diff-core.mjs.
+// the diff via setReviewDiff (reply to request-session-diff, asked on selection and on every server
+// `session-changed` push via notifyWorktreeChanged). Session name/state are read live from the shared
+// card registry. Pure parsing lives in diff-core.mjs.
 
 import { STATES } from '/shared/states.mjs';
 import { sendControlMsg } from '../control-ws.js';
@@ -103,6 +104,14 @@ export function setReviewDiff(id, payload) {
   if (id === getSelectedId()) render();
 }
 
+// A server `session-changed` push: this session's worktree changed (a commit/stage via the gitdir
+// watch, a turn end, or the backstop poll catching an out-of-band / cross-session move). Auto-re-fetch
+// the diff, but ONLY for the selected session, so the heavy git diff stays scoped to what the operator
+// is viewing. This push (not a manual button) is what keeps the diff live.
+export function notifyWorktreeChanged(id) {
+  if (id && id === getSelectedId()) requestDiff(id);
+}
+
 // Re-render if the given session is the selected one (e.g. its state changed: DONE -> DORMANT).
 export function refreshReviewSidebar(id) {
   if (id === getSelectedId()) render();
@@ -186,8 +195,10 @@ function render() {
   const live = state !== STATES.DORMANT && state !== STATES.DONE && state !== STATES.FAILED;
   const mergeableLive = (state === STATES.COMPLETE || state === STATES.IDLE) && hasCommits;
 
-  // Actions sit at the TOP of the changes area so the merge button leads.
-  bodyEl.append(renderActions(id, { status, reviewable, mergeableLive, live }));
+  // Actions sit at the TOP of the changes area so the merge button leads. Skipped entirely when there
+  // is nothing to act on (e.g. a still-working session), now that the always-present Refresh is gone.
+  const actions = renderActions(id, { status, reviewable, mergeableLive, live });
+  if (actions.childElementCount > 0) bodyEl.append(actions);
 
   // Committed section first: it is what a merge moves into develop.
   if (committedFiles.length > 0) {
@@ -309,10 +320,9 @@ function renderFile(f, kind) {
 function renderActions(id, { status, reviewable, mergeableLive, live }) {
   const actions = el('div', 'review-actions');
 
-  const refresh = el('button', 'review-btn review-btn-ghost', 'Refresh diff');
-  refresh.type = 'button';
-  refresh.addEventListener('click', () => requestDiff(id));
-  actions.append(refresh);
+  // No manual "Refresh diff" button: the diff is kept live by the server (it pushes `session-changed`
+  // on a turn end, a commit, or the backstop poll, and the client auto-re-fetches for the selected
+  // session - see notifyWorktreeChanged). Only real actions live here now.
 
   // Parked merge: the auto rebase-then-FF could not complete. Hand it to the agent IN the worktree by
   // pasting a context-rich prompt (why it parked + conflicting files + how to rebase/resolve) into the

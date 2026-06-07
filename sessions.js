@@ -1,11 +1,13 @@
 const fs = require("node:fs");
 const path = require("node:path");
+const crypto = require("node:crypto");
 const pty = require("node-pty");
 const { EventEmitter } = require("node:events");
 const { execSync, execFileSync } = require("node:child_process");
 const { STATES } = require("./shared/states");
 const { createOscTitleSource } = require("./detection/osc-title-source");
 const { createStatusSource } = require("./detection/status-source");
+const { createWorktreeWatcher } = require("./detection/worktree-watch");
 const { writeSessionSettings } = require("./detection/settings-injector");
 const {
   classifyClaudeKind,
@@ -27,6 +29,11 @@ const agentTracker = require("./session-core/agent-tracker");
 const KILL_POLL_INTERVAL_MS = 200;
 const KILL_MAX_WAIT_MS = 3000;
 const SLEEP_KILL_TIMEOUT_MS = 15 * 60 * 1000;
+
+// Trailing debounce for the worktree-change funnel: a single `git commit` touches
+// several gitdir files and a turn-end can race the fs.watch, so collapse a burst
+// into one signature recompute. The 10s backstop poll runs on its own cadence.
+const WORKTREE_CHECK_DEBOUNCE_MS = 400;
 
 // ---------------------------------------------------------------------------
 // State machine. Status is driven by structural signals from StatusSource
@@ -181,6 +188,12 @@ class Session extends EventEmitter {
     this.mergeReason = null;
     this.mergeConflicts = [];
     this.worktreeNotice = null;  // operator-facing blocker (e.g. integration branch missing)
+    // Live worktree-change detection (see checkWorktreeChange / _startWorktreeWatcher). The watcher
+    // is the fast fs.watch nudge; _lastWorktreeSig dedups the cheap signature so only real deltas
+    // broadcast; the debounce timer coalesces a write/turn-end burst into one recompute.
+    this._worktreeWatcher = null;
+    this._worktreeCheckTimer = null;
+    this._lastWorktreeSig = null;
 
     this._titleSource = createOscTitleSource({ stabilizationMs: titleStabilizationMs });
     this._statusSource = createStatusSource({
@@ -262,6 +275,9 @@ class Session extends EventEmitter {
     if (event) {
       this.transition(event, { source: s.source, signal: s.signal });
     }
+    // A turn end (`ready`) is the precise moment a batch of edits/commits has settled, so refresh the
+    // review diff right then (debounced). The signature dedup makes a no-change turn a cheap no-op.
+    if (s.signal === "ready") this._scheduleWorktreeCheck();
   }
 
   _onMeta(m) {
@@ -359,8 +375,10 @@ class Session extends EventEmitter {
     if (!this._gitWorkspace || !this._workspace) return;
     if (this.state !== STATES.DONE && this.state !== STATES.FAILED) return;
     if (this.hasChanges()) {
+      // Keep watching the kept-for-review worktree: a post-exit CLI merge/clean still self-heals fast.
       this._setMergeStatus("pending-review");
     } else {
+      this._stopWorktreeWatcher(); // dir about to be removed
       try { this._gitWorkspace.discard({ projectPath: this.path, workspace: this._workspace }); } catch { /* best-effort */ }
       this._workspace = null;
       this.worktreeDir = null;
@@ -463,6 +481,92 @@ class Session extends EventEmitter {
     return { committed, uncommitted, hasCommits };
   }
 
+  // A CHEAP fingerprint of the worktree's reviewable state: uncommitted+untracked (porcelain), the
+  // HEAD sha (commits), and how far HEAD is ahead of the integration branch (the merge gate, which a
+  // cross-session merge into develop can move WITHOUT touching this worktree). One `git status` + a
+  // couple of rev-parses, all timeout-bounded. Returns { sig, dirty, ahead } or null with no worktree.
+  // This is the poll/funnel's truth; the heavy getDiff() is only fetched for the selected session.
+  _computeWorktreeSignature() {
+    if (!this.worktreeDir) return null;
+    const opts = { cwd: this.worktreeDir, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 10000 };
+    // --no-optional-locks: this runs on a 10s background poll, so it must NEVER take git's index lock
+    // and contend with the session's own `git add` / `git commit` running in the same worktree.
+    const run = (args) => execFileSync("git", ["--no-optional-locks", ...args], opts);
+    let status, head, ahead = "0";
+    try {
+      status = run(["status", "--porcelain"]);
+      head = run(["rev-parse", "HEAD"]).trim();
+      // A missing integration branch is EXPECTED (this probe exits non-zero); swallow only that, so it
+      // never counts as the worktree being unreadable.
+      let baseRef = null;
+      try { if (this._integrationBranch && run(["rev-parse", "--verify", "--quiet", this._integrationBranch]).trim()) baseRef = this._integrationBranch; } catch { /* no integration branch */ }
+      if (!baseRef && this.baseSha) baseRef = this.baseSha;
+      if (baseRef) ahead = run(["rev-list", "--count", `${baseRef}..HEAD`]).trim();
+    } catch {
+      // Worktree momentarily unreadable (mid-rebase, lock contention, pruned dir). Return UNKNOWN, never
+      // a false-empty signature: that would wrongly self-heal a real pending-review gate to 'none'.
+      return null;
+    }
+    const sig = crypto.createHash("sha1").update(`${status} ${head} ${ahead}`).digest("hex");
+    return { sig, dirty: status.trim() !== "", ahead };
+  }
+
+  // The funnel every change TRIGGER converges on (turn-end hook, gitdir fs.watch, backstop poll):
+  // recompute the cheap signature and, only on a real delta, (1) live self-heal a stranded review gate
+  // over a now-empty worktree (the same demotion getDiff does, but without needing a manual fetch) and
+  // (2) emit `worktree-changed` so the dashboard auto-refreshes the SELECTED session's diff. Suppressed
+  // mid-merge (the index is being rewritten) so a transient never broadcasts.
+  checkWorktreeChange() {
+    if (this._destroyed || !this.worktreeDir) return;
+    if (this.mergeStatus === "merging") return;
+    const sig = this._computeWorktreeSignature();
+    if (!sig || sig.sig === this._lastWorktreeSig) return;
+    this._lastWorktreeSig = sig.sig;
+    if ((this.mergeStatus === "pending-review" || this.mergeStatus === "parked")
+        && !sig.dirty && (sig.ahead === "" || sig.ahead === "0")) {
+      this._setMergeStatus("none");
+    }
+    this.emit("worktree-changed", { id: this.id, sig: sig.sig });
+  }
+
+  // Debounced entry for the IMMEDIATE triggers (fs.watch onChange + the `ready` turn-end). Collapses a
+  // burst (a commit touches several gitdir files; a turn-end can race the watch) into one check. The
+  // backstop poll calls checkWorktreeChange() directly (it is already coarse).
+  _scheduleWorktreeCheck() {
+    if (this._destroyed || !this.worktreeDir || this._worktreeCheckTimer) return;
+    this._worktreeCheckTimer = setTimeout(() => {
+      this._worktreeCheckTimer = null;
+      this.checkWorktreeChange();
+    }, WORKTREE_CHECK_DEBOUNCE_MS);
+    if (this._worktreeCheckTimer.unref) this._worktreeCheckTimer.unref();
+  }
+
+  // (Re)start the fs.watch over this session's gitdir. Idempotent: a fresh watcher replaces any prior
+  // one, so it is safe to call on every provision/adopt/restart. A non-worktree (in-place) session has
+  // no gitdir, so start() declines and the poll alone covers it. _lastWorktreeSig is reset so the first
+  // post-(re)start check re-establishes the baseline.
+  _startWorktreeWatcher() {
+    this._stopWorktreeWatcher();
+    if (this._destroyed || !this.worktreeDir) return;
+    this._worktreeWatcher = createWorktreeWatcher({
+      worktreeDir: this.worktreeDir,
+      onChange: () => this._scheduleWorktreeCheck(),
+    });
+    this._worktreeWatcher.start();
+  }
+
+  _stopWorktreeWatcher() {
+    if (this._worktreeWatcher) {
+      try { this._worktreeWatcher.stop(); } catch { /* best-effort */ }
+      this._worktreeWatcher = null;
+    }
+    if (this._worktreeCheckTimer) {
+      clearTimeout(this._worktreeCheckTimer);
+      this._worktreeCheckTimer = null;
+    }
+    this._lastWorktreeSig = null;
+  }
+
   // Operator action: rebase-then-FF merge the session's worktree into the integration branch, then
   // tear it down. On a conflict/lost-FF the branch PARKS (worktree preserved). Returns the engine result.
   mergeWorktree() {
@@ -480,6 +584,7 @@ class Session extends EventEmitter {
       return { merged: false, reason: err.message };
     }
     if (r.merged) {
+      this._stopWorktreeWatcher();
       this._workspace = null;
       this.worktreeDir = null;
       this.isWorktree = false;
@@ -544,10 +649,14 @@ class Session extends EventEmitter {
     this.worktreeDir = worktreeDir;
     this.isWorktree = true;
     this._setMergeStatus("pending-review");
+    // Watch the re-adopted worktree too: an operator who merges/cleans it from the CLI then sees the
+    // stranded gate self-heal fast, without starting the session.
+    this._startWorktreeWatcher();
   }
 
   // Operator action: throw the worktree away unmerged (junction-safe), reset to no-worktree.
   discardWorktree() {
+    this._stopWorktreeWatcher(); // stop before the dir is removed (fs.watch would ENOENT)
     if (this._gitWorkspace && this._workspace) {
       try { this._gitWorkspace.discard({ projectPath: this.path, workspace: this._workspace }); } catch { /* best-effort */ }
     }
@@ -698,6 +807,9 @@ class Session extends EventEmitter {
     // funnel through start(), so each inherits isolation. A blocked provision (integration branch
     // absent) leaves the session DORMANT with a notice and does NOT run in the operator's real tree.
     if (!this._provisionWorktree()) return;
+    // Listen for changes in the (isolated) worktree so the review diff stays live without a manual
+    // refresh. Idempotent across restart-reuse; a non-git in-place session has no worktreeDir to watch.
+    if (this.worktreeDir) this._startWorktreeWatcher();
     if (this.state === STATES.DORMANT) {
       this.transition("user_start");
     }
@@ -1277,6 +1389,7 @@ class Session extends EventEmitter {
     if (this._recorder) {
       this._recorder.close(); // Idempotent - safe if already closed by _handlePtyExit
     }
+    this._stopWorktreeWatcher();
     this._titleSource.destroy();
     this._statusSource.destroy();
     this.removeAllListeners();

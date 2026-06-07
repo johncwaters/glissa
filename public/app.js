@@ -14,7 +14,7 @@ import { handleDebugStateRefresh, handleDebugStateResponse } from './session-car
 import { applyState, applyTerminalSettings, createSessionCard, getSessionCount, hasSession, removeSessionCard, renameSessionCard, seedSessionMergeStatus, setSessionAgents, setSessionDiff, setSessionMergeStatus, setSessionPostTurn, setSessionWorktree, updateAggregateStatus } from './session-card/lifecycle.js';
 import { reconnectDataWs } from './session-card/terminal.js';
 import { showErrorToast } from './session-card/toast.js';
-import { forgetReviewSession, mountReviewSidebar, refreshReviewSidebar } from './sidebar/review-sidebar.js';
+import { forgetReviewSession, mountReviewSidebar, notifyWorktreeChanged, refreshReviewSidebar } from './sidebar/review-sidebar.js';
 import { handleTeamMessage, mountTeamsView, refreshTeamsProjects, setTabActivityCallback } from './teams-panel.js';
 import { applyTheme } from './theme.js';
 import { getActiveView, getThemeId, isSoundEnabled, setActiveView, setSoundEnabled } from './ui-prefs.js';
@@ -164,6 +164,7 @@ const messageHandlers = {
   'session-worktree-blocked': (msg) => { showErrorToast(`${msg.session}: ${msg.notice || 'integration branch not found'}`); },
   'session-worktree-ready': () => {},
   'session-diff':       (msg) => { setSessionDiff(msg.id, { committed: msg.committed, uncommitted: msg.uncommitted, hasCommits: msg.hasCommits }); },
+  'session-changed':    (msg) => notifyWorktreeChanged(msg.id),
   'post-turn-result':   (msg) => setSessionPostTurn(msg.id, msg),
   'debug-state-response': (msg) => handleDebugStateResponse(msg),
   'notify':             (msg) => showDesktopNotification(msg),

@@ -278,9 +278,18 @@ function createBackend(httpServer, options = {}) {
     // Cheap fs re-check: a session's cwd can become (or stop being) a linked
     // worktree mid-run. Broadcast only the delta so the card toggles its marker
     // without a full recreate (which would tear down the terminal).
+    // Backstop poll (the reliability floor under the gitdir watch + turn-end hook): recompute each
+    // worktree session's cheap signature so any missed fs event, operator hand-edit, or cross-session
+    // merge into the integration branch still surfaces within one interval. checkWorktreeChange()
+    // broadcasts only on a real delta (see Session). Gated on having a dashboard open so we never spawn
+    // git with nobody watching.
+    const hasControlClients = controlWss.clients.size > 0;
     for (const [id, sess] of sessions) {
       if (sess.refreshGitContext()) {
         broadcastControl({ type: 'session-git', id, worktree: !!sess.isWorktree });
+      }
+      if (hasControlClients && sess.worktreeDir) {
+        try { sess.checkWorktreeChange(); } catch { /* best-effort; the watch + next poll retry */ }
       }
     }
     broadcastControl({ type: 'health-snapshot', stats: buildHealthSnapshot() });
@@ -675,6 +684,13 @@ function createBackend(httpServer, options = {}) {
       // A merge/discard clears the worktree (isWorktree flips) but refreshGitContext can't see the
       // change once worktreeDir is null, so push the badge state explicitly here.
       broadcastControl({ type: 'session-git', id: sess.id, worktree: !!sess.isWorktree });
+    });
+    // The worktree changed (a commit/stage via the gitdir watch, a turn end, or the backstop poll
+    // caught an out-of-band / cross-session move). Push a tiny delta signal; the client re-fetches the
+    // full diff only for the session it is currently viewing (request-session-diff), so the heavy
+    // `git diff` stays scoped. This is what replaces the old manual "Refresh diff" button.
+    sess.on('worktree-changed', ({ sig }) => {
+      broadcastControl({ type: 'session-changed', id: sess.id, sig });
     });
     sess.on('worktree-blocked', ({ branch, notice }) => {
       broadcastControl({
