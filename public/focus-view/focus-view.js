@@ -47,7 +47,7 @@ export function mountFocusView({ rail, center }) {
   cardSlotEl = document.createElement('div');
   cardSlotEl.className = 'focus-card-slot';
 
-  // Review (diff + Merge & finish / Discard) lives in the right review sidebar, not in the center, so
+  // Review (diff + Merge / Discard) lives in the right review sidebar, not in the center, so
   // the borrowed card is just the live terminal; selection drives the sidebar (see focusSession).
   centerEl.append(emptyEl, cardSlotEl);
 

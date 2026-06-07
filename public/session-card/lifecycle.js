@@ -325,7 +325,7 @@ export function setSessionPostTurn(sessionId, report) {
 }
 
 // Reflect the worktree merge lifecycle. `mergeStatus` is the server's session-merge-status
-// (none|pending-review|merging|parked|merged). The review UI itself (diff + Merge & finish / Discard)
+// (none|pending-review|merging|parked|merged). The review UI itself (diff + Merge / Discard)
 // now lives in the right review sidebar; here we only keep data-merge on the card so the remove button
 // can warn before discarding unmerged work, and forward the status to the sidebar.
 export function setSessionMergeStatus(sessionId, mergeStatus) {

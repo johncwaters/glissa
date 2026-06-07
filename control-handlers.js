@@ -55,7 +55,7 @@ function registerControlHandlers(controlWss, deps) {
     requestRestart,
     handleClientFocus,
     buildHealthSnapshot,
-    // Teams (optional — undefined in older callers/tests).
+    // Teams (optional - undefined in older callers/tests).
     registry = null,
     orchestrator = null,
     scheduler = null,
@@ -141,7 +141,7 @@ function registerControlHandlers(controlWss, deps) {
     }
 
     // Ephemeral sessions (e.g. guided team-pack setup) were never persisted to config.projects, so
-    // the filter below is a no-op and the config-reload diff explicitly skips them — making the UI
+    // the filter below is a no-op and the config-reload diff explicitly skips them - making the UI
     // remove button a dead click. Tear them down directly instead: kill the PTY, drop the card.
     if (sess.ephemeral) {
       if (removeEphemeralSession) {
@@ -471,7 +471,7 @@ function registerControlHandlers(controlWss, deps) {
     broadcastControl({ type: 'team-instance-added', teamId, projectId, activations: fresh?.teams || config.teams || [] });
   }
 
-  // Remove a team instance. Drops the activation only — the on-disk run history under the project is
+  // Remove a team instance. Drops the activation only - the on-disk run history under the project is
   // intentionally preserved (removing an instance never deletes the work it produced).
   function handleRemoveTeamInstance(msg, ws) {
     const { teamId, projectId } = msg;
@@ -595,7 +595,7 @@ function registerControlHandlers(controlWss, deps) {
     ws.send(JSON.stringify(out));
   }
 
-  // Handler map — single dispatch table for all control message types
+  // Handler map - single dispatch table for all control message types
   // Session action handlers use findSession() for id-based lookup with name fallback.
   const handlers = {
     'list-teams':       handleListTeams,
@@ -636,6 +636,10 @@ function registerControlHandlers(controlWss, deps) {
     // it settles; a parked/failed merge keeps its worktree (no data loss). All of that is decided in
     // Session.finishAndMerge (which self-guards the state), so the handler just delegates.
     'finish-session':             (msg) => { const s = findSession(msg); if (s) s.finishAndMerge(); },
+    // Merge-as-you-go: merge the live session's worktree into the integration branch and rebase the
+    // worktree onto it, WITHOUT ending the session, so the operator keeps working and commits as they go.
+    // Session.mergeAndContinue self-guards the state and emits 'merge-status' (broadcast), so no reply.
+    'merge-continue-session':     (msg) => { const s = findSession(msg); if (s) s.mergeAndContinue(); },
     'discard-session-worktree':   (msg) => { const s = findSession(msg); if (s) s.discardWorktree(); },
     'request-session-diff':       (msg, ws) => {
       const s = findSession(msg);

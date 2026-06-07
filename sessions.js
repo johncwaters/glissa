@@ -66,7 +66,7 @@ class Session extends EventEmitter {
     dangerouslySkipPermissions = false,
     replayBufferKB = 512,
     // Detection wiring (injected by backend). When absent, the session runs
-    // title-source-only (no hooks) — used by unit tests constructing a Session directly.
+    // title-source-only (no hooks) - used by unit tests constructing a Session directly.
     hookRouter = null,
     getHookPort = null,
     hooksBaseDir = undefined,
@@ -206,7 +206,7 @@ class Session extends EventEmitter {
   }
 
   _onMeta(m) {
-    // `unknown` glyph / degraded telemetry — recorded for observability, no transition.
+    // `unknown` glyph / degraded telemetry - recorded for observability, no transition.
     this._lastSignal = { signal: m.signal, source: m.source, ts: m.ts, meta: true };
   }
 
@@ -268,7 +268,7 @@ class Session extends EventEmitter {
         shareList: this._worktreeShare,
       });
     } catch (err) {
-      console.warn(`[session ${this.id}] worktree create failed: ${err.message} — running in place`);
+      console.warn(`[session ${this.id}] worktree create failed: ${err.message} - running in place`);
       return true;
     }
     if (ws && ws.reason === "no-base-branch") {
@@ -361,6 +361,46 @@ class Session extends EventEmitter {
       this._setMergeStatus("merged");
     } else if (r.parked) {
       this._setMergeStatus("parked", { reason: r.reason || null });
+    } else {
+      this._setMergeStatus("pending-review", { reason: r.reason || null });
+    }
+    return r;
+  }
+
+  // Operator action behind the sidebar's "Merge" on a LIVE quiescent session (COMPLETE/IDLE): commit the
+  // worktree's changes, merge them into the integration branch, and rebase this worktree onto it, KEEPING
+  // the session running on the same worktree (now on top of develop) so the operator commits as they go.
+  // Unlike finishAndMerge it never ends the session or tears the worktree down. Refused while the PTY is
+  // actively working (we must not rewrite a worktree mid-edit). A rebase conflict / lost FF PARKS
+  // (worktree preserved). Returns the engine result.
+  mergeAndContinue() {
+    if (this._destroyed) return { merged: false, reason: "destroyed" };
+    if (!this._gitWorkspace || !this._workspace) return { merged: false, reason: "no-worktree" };
+    if (this.state !== STATES.COMPLETE && this.state !== STATES.IDLE) {
+      return { merged: false, reason: "not-continuable" };
+    }
+    this._setMergeStatus("merging");
+    let r;
+    try {
+      r = this._gitWorkspace.mergeKeep({
+        projectPath: this.path,
+        workspace: this._workspace,
+        targetBranch: this._integrationBranch,
+        message: `glissa session: ${this.name}`,
+      });
+    } catch (err) {
+      this._setMergeStatus("pending-review", { reason: err.message });
+      return { merged: false, reason: err.message };
+    }
+    if (r.merged) {
+      // Worktree kept alive on its branch (now == the integration tip); track the new base it sits on.
+      // The worktree is clean again, so the gate returns to 'none' until the session produces more work.
+      if (r.baseSha) { this.baseSha = r.baseSha; this._workspace.baseSha = r.baseSha; }
+      this._setMergeStatus("none");
+    } else if (r.parked) {
+      this._setMergeStatus("parked", { reason: r.reason || null });
+    } else if (r.reason === "nothing-to-commit") {
+      this._setMergeStatus("none");
     } else {
       this._setMergeStatus("pending-review", { reason: r.reason || null });
     }
@@ -514,7 +554,7 @@ class Session extends EventEmitter {
     // respawning. Without this, ptyProcess assignment below would orphan the
     // previous PTY's onData/onExit subscriptions and leak the process.
     if (this.ptyProcess) {
-      console.warn(`[session:${this.name}] start() called while PTY exists — killing previous PTY first`);
+      console.warn(`[session:${this.name}] start() called while PTY exists - killing previous PTY first`);
       const oldPid = this.ptyProcess.pid;
       try {
         if (process.platform === "win32") {
@@ -523,7 +563,7 @@ class Session extends EventEmitter {
           this.ptyProcess.kill();
         }
       } catch {
-        // Already dead, unkillable, or timed out — proceed
+        // Already dead, unkillable, or timed out - proceed
       }
       this.ptyProcess = null;
     }
@@ -602,7 +642,7 @@ class Session extends EventEmitter {
 
     this.transition("spawn_success");
 
-    // Redact a positional initialPrompt (team stages) from the spawn log — it can be a multi-KB
+    // Redact a positional initialPrompt (team stages) from the spawn log - it can be a multi-KB
     // RUN CONTEXT block that does not belong in the console. Run detail lives in the Teams view.
     const argsForLog = this._initialPrompt
       ? args.map((a) => (a === this._initialPrompt ? `<prompt:${this._initialPrompt.length}c>` : a)).join(" ")
@@ -669,7 +709,7 @@ class Session extends EventEmitter {
       });
       return ["--settings", this._settingsHandle.settingsPath];
     } catch (err) {
-      console.warn(`[session:${this.name}] hook injection failed: ${err.message} — falling back to OSC title only`);
+      console.warn(`[session:${this.name}] hook injection failed: ${err.message} - falling back to OSC title only`);
       this._cleanupHooks();
       return [];
     }
@@ -704,7 +744,7 @@ class Session extends EventEmitter {
 
     // Feed the OSC-title fallback source. Skipped while sleeping (state frozen).
     // This is the ONLY parsing on the hot path: it scans for OSC-0 titles and
-    // ignores all other bytes — no tokenizer, no line assembly, no body scraping.
+    // ignores all other bytes - no tokenizer, no line assembly, no body scraping.
     if (!this._sleeping) {
       try {
         this._titleSource.feed(data);
@@ -758,7 +798,7 @@ class Session extends EventEmitter {
       try {
         execSync(`taskkill /PID ${Number(pid)} /T /F`, { stdio: "ignore" });
       } catch {
-        // pid already exited or taskkill unavailable — nothing to do
+        // pid already exited or taskkill unavailable - nothing to do
       }
     }
 
@@ -1105,7 +1145,7 @@ class Session extends EventEmitter {
     }
 
     if (this._recorder) {
-      this._recorder.close(); // Idempotent — safe if already closed by _handlePtyExit
+      this._recorder.close(); // Idempotent - safe if already closed by _handlePtyExit
     }
     this._titleSource.destroy();
     this._statusSource.destroy();

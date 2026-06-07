@@ -1,14 +1,16 @@
 // Right-docked review sidebar: the single home for the worktree review gate of the SELECTED session.
-// Shows a rendered, per-file diff with a changed-files stat header, and the close-out actions
-// (Merge & finish / Discard / Refresh). It REPLACES the old inline card review bar; the card now only
-// carries data-merge for the remove-warning. The sidebar is app-level (spans every view via .app-body),
-// so it serves the Sessions grid and the Focus view alike.
+// Shows a changed-files summary over a collapsible per-file diff (each file minimized until clicked),
+// plus the actions (Merge / Refresh; Discard only for a settled worktree). "Merge" merges into develop
+// and rebases the worktree onto it WITHOUT ending the session, so the operator commits as they go (the
+// PTY effectively never dies, so there is no separate finish/close-out step). It REPLACES the old inline
+// card review bar; the card now only carries data-merge for the remove-warning. The sidebar is app-level
+// (spans every view via .app-body), so it serves the Sessions grid and the Focus view alike.
 //
 // Data flow: merge status arrives via setReviewMergeStatus (from the server's session-merge-status),
 // the diff via setReviewDiff (reply to request-session-diff, asked on selection/refresh). Session
 // name/state are read live from the shared card registry. Pure parsing lives in diff-core.mjs.
 
-import { BADGE_LABELS, STATE_GLYPHS, STATES } from '/shared/states.mjs';
+import { STATES } from '/shared/states.mjs';
 import { sendControlMsg } from '../control-ws.js';
 import { el } from '../dom-helpers.js';
 import { showConfirmDialog } from '../session-card/card-dom.js';
@@ -23,7 +25,8 @@ const MAX_FILE_LINES = 600;
 
 const statusById = new Map(); // id -> mergeStatus ('none'|'pending-review'|'merging'|'parked'|'merged')
 const diffById = new Map();   // id -> { stat, diff }
-const expanded = new Set();   // file paths the user expanded past the cap (per current render pass)
+const openFiles = new Set();  // file paths whose diff is revealed (default: every file minimized)
+const expanded = new Set();   // file paths the user expanded past the per-file line cap
 
 let panelEl = null;
 let bodyEl = null;
@@ -49,7 +52,9 @@ export function mountReviewSidebar({ panel }) {
   panelEl.append(head, bodyEl);
 
   onSelectionChange((id) => {
-    expanded.clear(); // per-session: don't carry one session's expanded files into the next
+    // Per-session: don't carry one session's open/expanded files into the next (start minimized).
+    openFiles.clear();
+    expanded.clear();
     if (id) requestDiff(id);
     render();
   });
@@ -147,15 +152,8 @@ function render() {
   const state = ui.currentState;
   const reviewable = REVIEWABLE.has(status);
 
-  // Header: name + state badge + merge-status note.
-  const header = el('div', 'review-head');
-  const name = el('div', 'review-name', sessionName(ui, id));
-  const badge = el('span', 'review-badge');
-  badge.dataset.state = state;
-  const badgeGlyph = el('span', 'review-badge-glyph', STATE_GLYPHS[state] || '');
-  badgeGlyph.setAttribute('aria-hidden', 'true');
-  badge.append(badgeGlyph, el('span', 'review-badge-label', BADGE_LABELS[state] || state));
-  header.append(name, badge);
+  // Merge-status note only. The session name and state badge are intentionally NOT shown here: the
+  // session card already carries both, so repeating them in the sidebar is redundant.
   if (status && status !== 'none') {
     const note = el('div', 'review-status-note');
     note.dataset.merge = status;
@@ -163,33 +161,33 @@ function render() {
       : status === 'merging' ? 'Merging...'
       : status === 'merged' ? 'Merged'
       : 'Changes ready to review';
-    header.append(note);
+    bodyEl.append(note);
   }
-  bodyEl.append(header);
 
-  // Diff (rendered) + stat header.
   const fetched = diffById.has(id);
   const files = fetched ? parseUnifiedDiff(diffById.get(id)) : [];
+
+  // One merge action, never a "finish". A session's PTY effectively never dies (Claude's built-in restart
+  // keeps it alive; only an explicit /exit ends it, which never happens), so there is no settled/close-out
+  // state to merge from. "Merge" on a quiescent live session (COMPLETE/IDLE) with changes commits, merges
+  // into develop, and rebases this worktree onto develop, KEEPING the session running so the operator
+  // commits as they go. A session still actively working (RUNNING/WAITING) only gets a read-only preview.
+  const live = state !== STATES.DORMANT && state !== STATES.DONE && state !== STATES.FAILED;
+  const mergeableLive = (state === STATES.COMPLETE || state === STATES.IDLE) && files.length > 0;
+
+  // Actions sit at the TOP of the changes area so the merge button leads.
+  bodyEl.append(renderActions(id, { status, reviewable, mergeableLive, live }));
+
   if (files.length === 0) {
     // No diff fetched yet for a reviewable session reads as "Loading"; otherwise there is nothing to show.
     const msg = (!fetched && reviewable) ? 'Loading diff...' : 'No changes in this worktree.';
     bodyEl.append(el('div', 'review-nochanges', msg));
   } else {
-    bodyEl.append(renderStat(files));
-    const diffWrap = el('div', 'review-diff');
-    for (const f of files) diffWrap.append(renderFile(f));
-    bodyEl.append(diffWrap);
+    // Changes show first as a collapsible list of files; each file is minimized until clicked.
+    bodyEl.append(renderFiles(files));
   }
 
-  // "Merge & finish" is available for a settled session (pending-review/parked) AND for a quiescent live
-  // session that has changes (COMPLETE/IDLE): clicking it ends the session first, then merges. A session
-  // that is still actively working (RUNNING) or waiting for input only gets a read-only preview.
-  const finishableLive = (state === STATES.COMPLETE || state === STATES.IDLE) && files.length > 0;
-  const canFinish = reviewable || finishableLive;
-
-  bodyEl.append(renderActions(id, status, reviewable, canFinish));
-
-  if (!canFinish && files.length > 0) {
+  if (!reviewable && !mergeableLive && files.length > 0) {
     bodyEl.append(el('div', 'review-hint', 'Read-only preview. The session is still active; it can be merged once it is complete or idle.'));
   }
 }
@@ -200,43 +198,55 @@ function renderEmpty(title, desc) {
   bodyEl.append(wrap);
 }
 
-function renderStat(files) {
+// The changes view: a summary header ("N files changed +X -Y") over a collapsible per-file list. Each
+// file is a clickable row (path + counts) that is minimized by default and reveals its diff when opened.
+function renderFiles(files) {
+  const wrap = el('div', 'review-files');
+
   const sum = summarizeFiles(files);
-  const stat = el('div', 'review-stat');
-  const head = el('div', 'review-stat-head',
-    `${sum.files} file${sum.files === 1 ? '' : 's'} changed`);
+  const head = el('div', 'review-stat-head', `${sum.files} file${sum.files === 1 ? '' : 's'} changed`);
   const counts = el('span', 'review-stat-counts');
-  counts.append(
-    el('span', 'review-add', `+${sum.added}`),
-    el('span', 'review-del', `-${sum.removed}`),
-  );
+  counts.append(el('span', 'review-add', `+${sum.added}`), el('span', 'review-del', `-${sum.removed}`));
   head.append(counts);
-  stat.append(head);
-  const list = el('ul', 'review-stat-list');
-  for (const f of files) {
-    const li = el('li', 'review-stat-item');
-    li.dataset.status = f.status;
-    const path = el('span', 'review-stat-path', f.path);
-    const c = el('span', 'review-stat-c');
-    if (f.binary) c.append(el('span', 'review-bin', 'bin'));
-    else c.append(el('span', 'review-add', `+${f.added}`), el('span', 'review-del', `-${f.removed}`));
-    li.append(path, c);
-    list.append(li);
-  }
-  stat.append(list);
-  return stat;
+  wrap.append(head);
+
+  const list = el('div', 'review-diff');
+  for (const f of files) list.append(renderFile(f));
+  wrap.append(list);
+  return wrap;
 }
 
 function renderFile(f) {
+  const open = openFiles.has(f.path);
   const sec = el('div', 'review-file');
   sec.dataset.status = f.status;
-  const head = el('div', 'review-file-head');
-  head.append(el('span', 'review-file-path', f.path));
-  head.append(el('span', 'review-file-tag', f.status));
+  sec.dataset.open = open ? 'true' : 'false';
+
+  // Clickable header toggles this file's diff. Path + change counts always show; the diff body is built
+  // only when open, so a freshly selected session renders as a cheap list of rows (all minimized).
+  const head = el('button', 'review-file-head');
+  head.type = 'button';
+  head.setAttribute('aria-expanded', open ? 'true' : 'false');
+  const twisty = el('span', 'review-file-twisty', open ? '▾' : '▸'); // down vs right triangle
+  twisty.setAttribute('aria-hidden', 'true');
+  head.append(twisty, el('span', 'review-file-path', f.path));
+  const c = el('span', 'review-file-counts');
+  if (f.binary) c.append(el('span', 'review-bin', 'bin'));
+  else c.append(el('span', 'review-add', `+${f.added}`), el('span', 'review-del', `-${f.removed}`));
+  head.append(c);
+  head.addEventListener('click', () => {
+    if (openFiles.has(f.path)) openFiles.delete(f.path);
+    else openFiles.add(f.path);
+    render();
+  });
   sec.append(head);
 
+  if (!open) return sec; // minimized: header only
+
+  const body = el('div', 'review-file-body');
   if (f.binary) {
-    sec.append(el('div', 'review-file-binary', 'Binary file not shown'));
+    body.append(el('div', 'review-file-binary', 'Binary file not shown'));
+    sec.append(body);
     return sec;
   }
 
@@ -245,14 +255,14 @@ function renderFile(f) {
   let truncated = false;
   for (const h of f.hunks) {
     if (rendered >= MAX_FILE_LINES && !expanded.has(f.path)) { truncated = true; break; }
-    sec.append(el('div', 'review-hunk-head', h.header));
+    body.append(el('div', 'review-hunk-head', h.header));
     for (const line of h.lines) {
       if (rendered >= MAX_FILE_LINES && !expanded.has(f.path)) { truncated = true; break; }
       const row = el('div', `review-line review-line-${line.type}`);
       const gutter = line.type === 'add' ? '+' : line.type === 'del' ? '-' : line.type === 'meta' ? '\\' : ' ';
       row.append(el('span', 'review-line-gutter', gutter));
       row.append(el('span', 'review-line-text', line.text));
-      sec.append(row);
+      body.append(row);
       rendered++;
     }
     if (truncated) break;
@@ -261,12 +271,13 @@ function renderFile(f) {
     const more = el('button', 'review-expand', 'Show the rest of this file');
     more.type = 'button';
     more.addEventListener('click', () => { expanded.add(f.path); render(); });
-    sec.append(more);
+    body.append(more);
   }
+  sec.append(body);
   return sec;
 }
 
-function renderActions(id, status, reviewable, canFinish) {
+function renderActions(id, { status, reviewable, mergeableLive, live }) {
   const actions = el('div', 'review-actions');
 
   const refresh = el('button', 'review-btn review-btn-ghost', 'Refresh diff');
@@ -274,17 +285,21 @@ function renderActions(id, status, reviewable, canFinish) {
   refresh.addEventListener('click', () => requestDiff(id));
   actions.append(refresh);
 
-  if (canFinish) {
-    const finish = el('button', 'review-btn review-btn-primary', 'Merge & finish');
-    finish.type = 'button';
-    finish.title = 'End the session if running, merge into develop, clean up the worktree, and return to dormant';
-    finish.disabled = status === 'merging';
-    finish.addEventListener('click', () => sendControlMsg({ type: 'finish-session', id }));
-    actions.append(finish);
+  // The one merge action: merge into develop + rebase this worktree onto develop, then keep working in the
+  // same session (the PTY stays alive - there is no separate "finish" step). Offered on a quiescent live
+  // session with changes.
+  if (mergeableLive) {
+    const merge = el('button', 'review-btn review-btn-primary', 'Merge');
+    merge.type = 'button';
+    merge.title = 'Merge into develop and rebase this worktree onto develop, then keep working in this session';
+    merge.disabled = status === 'merging';
+    merge.addEventListener('click', () => sendControlMsg({ type: 'merge-continue-session', id }));
+    actions.append(merge);
   }
 
-  // Discard throws the worktree away; only offered once the session has settled (no live PTY in it).
-  if (reviewable) {
+  // Discard throws the worktree away unmerged. Gated on NO live PTY in the worktree (its original safety
+  // invariant): never destroy a worktree a running session is sitting in.
+  if (reviewable && !live) {
     const discard = el('button', 'review-btn review-btn-danger', 'Discard');
     discard.type = 'button';
     discard.disabled = status === 'merging';

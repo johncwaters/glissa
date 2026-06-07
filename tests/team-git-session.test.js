@@ -165,6 +165,85 @@ test('mergeBack (injected): a missing target branch PARKS (Glissa never creates 
   assert.ok(!cmds.some((c) => c.startsWith('worktree remove')), 'worktree preserved when the target is missing');
 });
 
+// --- mergeKeep (merge as you go: merge into develop but KEEP the worktree + session running) ---------
+
+test('mergeKeep (injected): clean rebase + ff, then KEEPS the worktree and branch', () => {
+  const cmds = [];
+  const gw = createGitWorkspace({ git: fakeSessionGit(cmds, { head: 'develop' }) });
+  const ws = { cwd: '/wt', isGit: true, branch: 'glissa/session/abc', base: 'develop' };
+  const r = gw.mergeKeep({ projectPath: '/repo', workspace: ws, targetBranch: 'develop', message: 'session abc' });
+
+  assert.equal(r.merged, true);
+  assert.equal(r.kept, true);
+  assert.equal(r.branch, 'glissa/session/abc', 'session branch retained so the session keeps running');
+  assert.ok(cmds.includes('rebase develop'), 'rebases the worktree onto develop');
+  assert.ok(cmds.includes('merge --ff-only glissa/session/abc'), 'ff-only merge into develop');
+  assert.ok(!cmds.some((c) => c.startsWith('worktree remove')), 'worktree is NOT torn down');
+  assert.ok(!cmds.some((c) => c.startsWith('branch -D')), 'branch is NOT deleted');
+});
+
+test('mergeKeep (injected): a rebase conflict PARKS (worktree + branch preserved)', () => {
+  const cmds = [];
+  const gw = createGitWorkspace({ git: fakeSessionGit(cmds, { rebaseFails: true }) });
+  const ws = { cwd: '/wt', isGit: true, branch: 'glissa/session/abc', base: 'develop' };
+  const r = gw.mergeKeep({ projectPath: '/repo', workspace: ws, targetBranch: 'develop' });
+
+  assert.equal(r.merged, false);
+  assert.equal(r.parked, true);
+  assert.equal(r.reason, 'rebase-conflict');
+  assert.ok(cmds.includes('rebase --abort'));
+  assert.ok(!cmds.some((c) => c.startsWith('worktree remove')), 'parked: worktree preserved');
+});
+
+test('mergeKeep (injected): nothing staged is a no-op that KEEPS the worktree (no teardown, no rebase)', () => {
+  const cmds = [];
+  const gw = createGitWorkspace({ git: fakeSessionGit(cmds, { staged: false }) });
+  const ws = { cwd: '/wt', isGit: true, branch: 'glissa/session/abc', base: 'develop' };
+  const r = gw.mergeKeep({ projectPath: '/repo', workspace: ws, targetBranch: 'develop' });
+
+  assert.equal(r.merged, false);
+  assert.equal(r.committed, false);
+  assert.equal(r.reason, 'nothing-to-commit');
+  assert.equal(r.kept, true);
+  assert.equal(r.branch, 'glissa/session/abc', 'branch retained (the live session continues)');
+  assert.ok(!cmds.some((c) => c.startsWith('rebase')), 'no rebase when there is nothing to merge');
+  assert.ok(!cmds.some((c) => c.startsWith('worktree remove')), 'worktree kept on nothing-to-commit');
+});
+
+test('mergeKeep (real git): lands on develop yet keeps the worktree alive for a second round', { skip: !GIT }, () => {
+  const repo = initRepoOnDevelop();
+  try {
+    const gw = createGitWorkspace();
+    const ws = gw.create({ projectPath: repo, teamId: 'session', label: 'cont', outputPath: '' });
+    assert.equal(ws.isGit, true);
+
+    // Round 1: a new file, merge-and-keep.
+    fs.writeFileSync(path.join(ws.cwd, 'a.js'), 'one\n', 'utf8');
+    const r1 = gw.mergeKeep({ projectPath: repo, workspace: ws, targetBranch: 'develop', message: 'round 1' });
+    assert.equal(r1.merged, true);
+    assert.equal(r1.kept, true);
+    assert.ok(fs.existsSync(path.join(repo, 'a.js')), 'round 1 landed on develop');
+    assert.ok(fs.existsSync(ws.cwd), 'worktree preserved');
+    assert.ok(git(['branch', '--list', ws.branch], repo).trim(), 'session branch preserved');
+    assert.equal(git(['status', '--porcelain'], ws.cwd).trim(), '', 'worktree clean after merge');
+    const developTip = git(['rev-parse', 'develop'], repo).trim();
+    assert.equal(git(['rev-parse', ws.branch], repo).trim(), developTip, 'develop == session branch tip');
+    assert.equal(r1.baseSha, developTip, 'baseSha reports the new develop tip the worktree sits on');
+
+    // Round 2: keep working in the SAME worktree, merge again.
+    fs.writeFileSync(path.join(ws.cwd, 'b.js'), 'two\n', 'utf8');
+    const r2 = gw.mergeKeep({ projectPath: repo, workspace: ws, targetBranch: 'develop', message: 'round 2' });
+    assert.equal(r2.merged, true);
+    assert.ok(fs.existsSync(path.join(repo, 'b.js')), 'round 2 landed on develop too');
+    assert.ok(fs.existsSync(path.join(repo, 'a.js')), 'round 1 file still present on develop');
+    assert.ok(fs.existsSync(ws.cwd), 'worktree still alive after the second merge');
+
+    gw.discard({ projectPath: repo, workspace: ws });
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
 // --- Real-git end-to-end tests ----------------------------------------------------------
 
 test('mergeBack (real git): a NEW untracked file lands on develop via rebase+ff, worktree cleaned', { skip: !GIT }, () => {
@@ -174,7 +253,7 @@ test('mergeBack (real git): a NEW untracked file lands on develop via rebase+ff,
     const ws = gw.create({ projectPath: repo, teamId: 'session', label: 'abc', outputPath: '' });
     assert.equal(ws.isGit, true);
     assert.equal(ws.base, 'develop', 'worktree forks off the integration branch');
-    // A feature session's deliverable is a brand-new (untracked) file — must survive the merge.
+    // A feature session's deliverable is a brand-new (untracked) file - must survive the merge.
     fs.writeFileSync(path.join(ws.cwd, 'feature.js'), 'module.exports = 42;\n', 'utf8');
 
     const r = gw.mergeBack({ projectPath: repo, workspace: ws, targetBranch: 'develop', message: 'add feature' });

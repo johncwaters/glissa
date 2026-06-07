@@ -59,13 +59,13 @@ function createGitWorkspace(opts = {}) {
     const inside = run(['rev-parse', '--is-inside-work-tree'], projectPath);
     if (!inside.ok || inside.out !== 'true') return { cwd: projectPath, isGit: false };
     const head = run(['rev-parse', 'HEAD'], projectPath);
-    if (!head.ok) return { cwd: projectPath, isGit: false }; // no commits yet — nothing to branch from
+    if (!head.ok) return { cwd: projectPath, isGit: false }; // no commits yet - nothing to branch from
     let baseSha = head.out;
     let base = run(['rev-parse', '--abbrev-ref', 'HEAD'], projectPath).out || 'HEAD';
     if (baseBranch) {
       // Fork off a SPECIFIC branch (the session integration branch, e.g. develop) regardless of what
       // the operator's main checkout currently has checked out. A missing branch is reported as
-      // reason:'no-base-branch' so the caller can BLOCK — Glissa never creates the integration branch.
+      // reason:'no-base-branch' so the caller can BLOCK - Glissa never creates the integration branch.
       const ref = run(['rev-parse', '--verify', '--quiet', `refs/heads/${baseBranch}`], projectPath);
       if (!ref.ok) return { cwd: projectPath, isGit: false, reason: 'no-base-branch' };
       baseSha = ref.out;
@@ -148,45 +148,33 @@ function createGitWorkspace(opts = {}) {
     return { branch: merged ? null : (workspace.branch || null), base: workspace.base || null, merged, committed, reason };
   }
 
-  // Session worktree merge-back into the integration branch (e.g. `develop`). Rebases the session
-  // branch onto the target so a moved target still lands, then fast-forwards the target to it, then
-  // tears the worktree down JUNCTION-SAFELY (the node_modules junction is removed BEFORE
-  // `worktree remove` so git can never follow it into the operator's real node_modules). Synchronous,
-  // so two merge-backs in one process never interleave (the first advances the target before the
-  // second reads it) — that is the whole serialization; no async mutex is needed and a cross-session
-  // FF race cannot occur. A rebase conflict ABORTS and PARKS the branch (worktree + branch preserved)
-  // for a manual merge; nothing is ever auto-resolved. Returns { merged, committed, branch, base,
-  // reason, parked? }; `branch` is null once merged (deleted) or discarded, else the parked branch.
-  function mergeBack({ projectPath, workspace, targetBranch, addPaths = [], message }) {
-    if (!workspace || !workspace.isGit) return { merged: false, committed: false, branch: null, reason: 'not-git' };
-    const wt = workspace.cwd;
-    const branch = workspace.branch;
-    if (!branch) return { merged: false, committed: false, branch: null, reason: 'no-branch' };
-    const target = targetBranch || workspace.base;
-    if (!target || target === 'HEAD') return { merged: false, committed: false, branch, reason: 'no-target', parked: true };
-    // The integration branch must already exist — Glissa never creates it (AC-16).
-    if (!run(['rev-parse', '--verify', '--quiet', `refs/heads/${target}`], projectPath).ok) {
-      return { merged: false, committed: false, branch, base: target, reason: 'no-target-branch', parked: true };
-    }
+  // Junction-safe teardown of a worktree (+ its branch): the node_modules junction is removed BEFORE
+  // `worktree remove` so git can never follow it into the operator's real node_modules.
+  function tearDownWorktree(projectPath, wt, branch) {
+    removeWorktreeLinks(wt);
+    run(['worktree', 'remove', '--force', wt], projectPath);
+    run(['worktree', 'prune'], projectPath);
+    if (branch) run(['branch', '-D', branch], projectPath);
+  }
 
+  // The shared merge core: commit the worktree's diff onto its branch, rebase that branch onto `target`
+  // (so a moved target still lands), then fast-forward `target` up to it. Does NOT tear anything down -
+  // the caller decides whether to keep or remove the worktree/branch. Synchronous, so two merges in one
+  // process never interleave (the first advances the target before the second reads it); no async mutex
+  // is needed and a cross-session FF race cannot occur. A rebase conflict ABORTS and reports parked;
+  // nothing is ever auto-resolved. Returns { committed, merged, reason, parked? }.
+  function commitRebaseFf({ projectPath, wt, branch, target, message, addPaths = [] }) {
     // Stage the WHOLE session diff (a session edits arbitrary files) and commit if anything is staged.
     run(['add', '-A'], wt);
     const committed = run(['diff', '--cached', '--quiet'], wt).ok === false
       ? run(['commit', '-m', message || 'glissa session'], wt).ok
       : false;
-    if (!committed) {
-      // Nothing to merge — discard the worktree (junction-safe) and branch.
-      removeWorktreeLinks(wt);
-      run(['worktree', 'remove', '--force', wt], projectPath);
-      run(['worktree', 'prune'], projectPath);
-      run(['branch', '-D', branch], projectPath);
-      return { merged: false, committed: false, branch: null, base: target, reason: 'nothing-to-commit' };
-    }
+    if (!committed) return { committed: false, merged: false, reason: 'nothing-to-commit' };
 
-    // Rebase onto the integration branch; a conflict aborts and PARKS (keep worktree + branch).
+    // Rebase onto the integration branch; a conflict aborts and reports parked (caller keeps the branch).
     if (!run(['rebase', target], wt).ok) {
       run(['rebase', '--abort'], wt);
-      return { merged: false, committed: true, branch, base: target, reason: 'rebase-conflict', parked: true };
+      return { committed: true, merged: false, reason: 'rebase-conflict', parked: true };
     }
 
     // Fast-forward the integration branch to the rebased session branch. If it is checked out in
@@ -200,13 +188,73 @@ function createGitWorkspace(opts = {}) {
     } else {
       merged = run(['fetch', '.', `refs/heads/${branch}:refs/heads/${target}`], projectPath).ok;
     }
-    if (!merged) return { merged: false, committed: true, branch, base: target, reason: 'not-fast-forward', parked: true };
+    if (!merged) return { committed: true, merged: false, reason: 'not-fast-forward', parked: true };
+    return { committed: true, merged: true, reason: null };
+  }
 
-    removeWorktreeLinks(wt);
-    run(['worktree', 'remove', '--force', wt], projectPath);
-    run(['worktree', 'prune'], projectPath);
-    run(['branch', '-D', branch], projectPath);
+  // Shared guard preamble for the merge-back paths (mergeBack/mergeKeep): validate the workspace and
+  // resolve the integration target. Returns { wt, branch, target } on success, or { error } carrying the
+  // caller's standard failure result. The integration branch must already exist - Glissa never creates it
+  // (AC-16) - so a missing target reports parked.
+  function resolveMergeBack({ projectPath, workspace, targetBranch }) {
+    if (!workspace || !workspace.isGit) return { error: { merged: false, committed: false, branch: null, reason: 'not-git' } };
+    const branch = workspace.branch;
+    if (!branch) return { error: { merged: false, committed: false, branch: null, reason: 'no-branch' } };
+    const target = targetBranch || workspace.base;
+    if (!target || target === 'HEAD') return { error: { merged: false, committed: false, branch, reason: 'no-target', parked: true } };
+    if (!run(['rev-parse', '--verify', '--quiet', `refs/heads/${target}`], projectPath).ok) {
+      return { error: { merged: false, committed: false, branch, base: target, reason: 'no-target-branch', parked: true } };
+    }
+    return { wt: workspace.cwd, branch, target };
+  }
+
+  // Session worktree merge-back into the integration branch (e.g. `develop`) that ENDS the session:
+  // rebase-then-FF via commitRebaseFf, then tear the worktree down junction-safely. A rebase conflict /
+  // lost FF PARKS the branch (worktree + branch preserved) for a manual merge. Returns { merged,
+  // committed, branch, base, reason, parked? }; `branch` is null once merged (deleted) or discarded,
+  // else the parked branch.
+  function mergeBack({ projectPath, workspace, targetBranch, addPaths = [], message }) {
+    const g = resolveMergeBack({ projectPath, workspace, targetBranch });
+    if (g.error) return g.error;
+    const { wt, branch, target } = g;
+
+    const r = commitRebaseFf({ projectPath, wt, branch, target, message, addPaths });
+    if (!r.committed) {
+      // Nothing to merge - discard the worktree (junction-safe) and branch.
+      tearDownWorktree(projectPath, wt, branch);
+      return { merged: false, committed: false, branch: null, base: target, reason: 'nothing-to-commit' };
+    }
+    if (!r.merged) {
+      // Rebase conflict / lost FF: PARK (keep worktree + branch for manual resolution).
+      return { merged: false, committed: true, branch, base: target, reason: r.reason, parked: true };
+    }
+    tearDownWorktree(projectPath, wt, branch);
     return { merged: true, committed: true, branch: null, base: target, reason: null };
+  }
+
+  // Like mergeBack, but KEEPS the worktree alive on success: after the rebase-then-FF, the worktree
+  // STAYS checked out on its branch (now sitting on top of the freshly advanced target). This is the
+  // "merge/commit as you go" path: the operator's LIVE session keeps running in the same worktree and
+  // can produce + merge more changes later. A rebase conflict / lost FF still PARKS (worktree + branch
+  // preserved); nothing-to-commit is a harmless no-op that keeps the worktree. Returns { merged,
+  // committed, branch, base, baseSha?, kept, reason, parked? }; `branch` is retained (non-null) whenever
+  // the worktree is kept, and baseSha is the new integration tip the worktree was rebased onto.
+  function mergeKeep({ projectPath, workspace, targetBranch, addPaths = [], message }) {
+    const g = resolveMergeBack({ projectPath, workspace, targetBranch });
+    if (g.error) return g.error;
+    const { wt, branch, target } = g;
+
+    const r = commitRebaseFf({ projectPath, wt, branch, target, message, addPaths });
+    if (!r.committed) {
+      // Nothing to merge yet - keep the worktree; the live session will produce more.
+      return { merged: false, committed: false, branch, base: target, reason: 'nothing-to-commit', kept: true };
+    }
+    if (!r.merged) {
+      return { merged: false, committed: true, branch, base: target, reason: r.reason, parked: true };
+    }
+    // Merged AND kept: record the new integration tip the worktree now sits on top of.
+    const baseSha = run(['rev-parse', target], projectPath).out || workspace.baseSha || null;
+    return { merged: true, committed: true, branch, base: target, baseSha, kept: true, reason: null };
   }
 
   // Throw away a worktree and its branch (cancelled runs): nothing is committed or merged.
@@ -308,7 +356,7 @@ function createGitWorkspace(opts = {}) {
   }
 
   return {
-    create, integrate, discard, restoreTests, mergeBack,
+    create, integrate, discard, restoreTests, mergeBack, mergeKeep,
     sweepSessionWorktrees, listSessionWorktrees, removeWorktreeByPath,
   };
 }
@@ -330,7 +378,7 @@ function removeWorktreeLinks(wtDir) {
 }
 
 // Bring gitignored local working context into a worktree. Each share entry: a DIR is junctioned
-// (mklink /J — shared with the real repo, never copied or merged, gitignored so `git add -A` skips it);
+// (mklink /J - shared with the real repo, never copied or merged, gitignored so `git add -A` skips it);
 // a FILE is copied. Entries already present in the worktree (committed) or absent in the project are
 // skipped. Best-effort per entry so one failure never aborts the spawn. Windows junctions need no admin.
 function populateWorktree(projectPath, wtDir, shareList) {
@@ -340,7 +388,7 @@ function populateWorktree(projectPath, wtDir, shareList) {
     const dst = path.join(wtDir, rel);
     try {
       if (!fs.existsSync(src)) continue;  // nothing to share
-      if (fs.existsSync(dst)) continue;    // already in the worktree (committed) — leave it
+      if (fs.existsSync(dst)) continue;    // already in the worktree (committed) - leave it
       fs.mkdirSync(path.dirname(dst), { recursive: true });
       if (fs.statSync(src).isDirectory()) {
         execFileSync('cmd', ['/c', 'mklink', '/J', dst, src], { stdio: 'ignore' });

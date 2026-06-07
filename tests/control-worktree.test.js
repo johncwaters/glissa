@@ -86,3 +86,22 @@ test('finish-session on an unknown session is a no-op (no throw)', () => {
   const h = harness(new Map());
   assert.doesNotThrow(() => h.send({ type: 'finish-session', id: 'nope' }));
 });
+
+// --- merge-continue-session: merge-as-you-go delegates to Session.mergeAndContinue (logic tested there) ---
+
+test('merge-continue-session dispatches to session.mergeAndContinue()', () => {
+  let merged = 0;
+  const s = {
+    id: 'p1', name: 'p1', ephemeral: false,
+    mergeAndContinue() { merged++; return { merged: true, kept: true }; },
+    toSnapshot() { return { id: this.id, name: this.name }; },
+  };
+  const h = harness(new Map([['p1', s]]));
+  h.send({ type: 'merge-continue-session', id: 'p1' });
+  assert.equal(merged, 1);
+});
+
+test('merge-continue-session on an unknown session is a no-op (no throw)', () => {
+  const h = harness(new Map());
+  assert.doesNotThrow(() => h.send({ type: 'merge-continue-session', id: 'nope' }));
+});
