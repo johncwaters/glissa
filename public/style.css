@@ -2425,10 +2425,12 @@ body {
 .focus-rail-list { display: flex; flex-direction: column; gap: 6px; }
 
 /* Sticky jump header: counts the sessions that need the operator (WAITING + unacknowledged
-   COMPLETE) and names the Alt+W shortcut. focus-view hides it whenever nothing needs you, so the
-   resting rail stays calm (loud only on change). It is a control, so it wears the one accent, not a
-   state color (state color stays reserved for the pills). Clicking it does the same as Alt+W. The
-   tinted-but-opaque background hides pills scrolling under the sticky header. */
+   COMPLETE) and names the Alt+W shortcut. focus-view keeps it in a FIXED slot at the top of the rail
+   whether or not anything needs you (the [data-empty] state below paints the resting slot as blank
+   rail), so the pill list never shifts down when "{n} NEED YOU" appears or clears. It is a control, so
+   it wears the one accent, not a state color (state color stays reserved for the pills). Clicking it
+   does the same as Alt+W. The tinted-but-opaque background hides pills scrolling under the sticky
+   header. */
 .focus-rail-head {
   position: sticky;
   top: 0;
@@ -2445,11 +2447,21 @@ body {
   cursor: pointer;
   font-family: var(--font-mono);
 }
-.focus-rail-head:hover {
+.focus-rail-head:not([data-empty]):hover {
   background: color-mix(in oklch, var(--accent) 16%, var(--bg-header));
   border-color: var(--accent);
 }
 .focus-rail-head:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* Resting (nothing needs you): the slot stays to hold the pills in place but reads as blank rail. The
+   border keeps its 1px so the reserved height is identical to the lit state (only the color changes),
+   and the opaque rail-colored fill still hides pills scrolling under the sticky slot. Its children are
+   hidden and the button is disabled + aria-hidden in JS, so there is no stray box, label, or tab stop. */
+.focus-rail-head[data-empty] {
+  background: var(--bg-header);
+  border-color: transparent;
+  cursor: default;
+}
+.focus-rail-head[data-empty] > * { visibility: hidden; }
 .focus-rail-head-count {
   font-size: 10px;
   font-weight: 700;
@@ -2457,12 +2469,8 @@ body {
   text-transform: uppercase;
   color: var(--accent);
 }
-.focus-rail-head-key {
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  color: var(--text-dim);
-}
+/* The Alt+W key uses the shared .shortcut-keys / .kbd chips (see dialogs.js). The chips read on the
+   head's accent-tinted fill as-is; no head-specific override is needed. */
 
 /* Project group header: a name-only divider above a group's pills. It is STRUCTURE, not signal, so
    it wears the quietest type (the 10px tracked eyebrow) over a 1px hairline and never a state color
@@ -2511,7 +2519,10 @@ body {
   display: grid;
   grid-template-columns: 1fr auto auto;
   align-items: center;
-  gap: 8px;
+  /* No track gap: the badge/merge gaps are carried by margins instead, so the empty merge track
+     (when a session has no review tag) leaves NO phantom gutter and the badge's right edge rests in
+     the same place whether or not a merge tag is present. */
+  gap: 0;
   width: 100%;
   padding: 8px 10px;
   text-align: left;
@@ -2531,7 +2542,7 @@ body {
   color: var(--text-head);
 }
 
-.focus-pill-badge { display: inline-flex; align-items: center; gap: 5px; grid-column: 2; }
+.focus-pill-badge { display: inline-flex; align-items: center; gap: 5px; grid-column: 2; margin-left: 8px; }
 .focus-pill-glyph { font-size: 11px; line-height: 1; color: var(--st, var(--text-dim)); }
 .focus-pill-label {
   font-size: 9px;
@@ -2552,11 +2563,15 @@ body {
 }
 .focus-pill-merge {
   grid-column: 3;
+  margin-left: 8px;
   font-size: 9px;
   font-weight: 700;
   letter-spacing: 0.06em;
   color: var(--accent);
 }
+/* No review tag: drop the element entirely (not just empty text) so it claims neither width nor its
+   left margin, keeping the badge's right edge fixed. */
+.focus-pill-merge:empty { display: none; }
 
 /* State colour drives a per-pill --st used by glyph + label. */
 .focus-pill[data-state="RUNNING"]      { --st: var(--state-running); }
@@ -2568,6 +2583,14 @@ body {
 .focus-pill[data-state="COMPLETE"]     { --st: var(--state-complete); }
 .focus-pill[data-state="INITIALIZING"] { --st: var(--state-initializing); }
 .focus-pill[data-state="DORMANT"]      { --st: var(--text-muted); }
+
+/* Name hierarchy (quiet by default). A DORMANT session has not been started, so its name recedes to
+   the dim tone; a live session keeps the body tone; the FOCUSED (centered) session's name brightens
+   to the head tone so the one being watched reads clearly. .focus-pill-name hard-sets its own color,
+   so these element-level rules are required to override it (the parent .focused color never reaches
+   the name). Ordered DORMANT then focused so a focused pill always wins the equal-specificity tie. */
+.focus-pill[data-state="DORMANT"] .focus-pill-name { color: var(--text-dim); }
+.focus-pill.focused .focus-pill-name { color: var(--text-head); }
 
 /* WAITING: amber border + tint + a breathing pulse (the one loud rail state). */
 .focus-pill[data-state="WAITING"] {

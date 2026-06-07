@@ -227,10 +227,16 @@ export function mountFocusView({ rail, center }) {
   railHeadEl = document.createElement('button');
   railHeadEl.type = 'button';
   railHeadEl.className = 'focus-rail-head';
-  railHeadEl.hidden = true;
+  // Render the shortcut as the SAME shared <kbd> chips the Shortcuts help panel uses (dialogs.js
+  // renderShortcutGroups: .shortcut-keys cluster of .kbd chips joined by a .shortcut-sep "+"), so the
+  // operator meets one consistent representation of Alt+W on both surfaces. The chips also reserve the
+  // head's height even while blank (setRailHeadActive only hides them), so the slot never shifts.
   railHeadEl.innerHTML = '<span class="focus-rail-head-count"></span>'
-    + '<span class="focus-rail-head-key">ALT+W</span>';
+    + '<span class="shortcut-keys">'
+    + '<kbd class="kbd">Alt</kbd><span class="shortcut-sep">+</span><kbd class="kbd">W</kbd>'
+    + '</span>';
   railHeadEl.addEventListener('click', focusNextAttention);
+  setRailHeadActive(false, ''); // reserve the slot from the start (blank until something needs you)
 
   railListEl = document.createElement('div');
   railListEl.className = 'focus-rail-list';
@@ -469,12 +475,24 @@ function attentionIds() {
 }
 
 function updateRailHead() {
-  if (!railHeadEl) return;
   const n = attentionIds().length;
-  railHeadEl.hidden = n === 0;
-  if (n > 0) {
-    railHeadEl.querySelector('.focus-rail-head-count').textContent =
-      n === 1 ? '1 NEEDS YOU' : `${n} NEED YOU`;
+  setRailHeadActive(n > 0, n === 1 ? '1 NEEDS YOU' : `${n} NEED YOU`);
+}
+
+// Light up or blank the jump header WITHOUT removing it from the layout. The header keeps a permanent
+// slot at the top of the rail (CSS .focus-rail-head[data-empty] paints it as blank rail), so the pill
+// list never shifts down when "{n} NEED YOU" appears or clears. When blank it is also non-interactive
+// and out of the tab/AT order (disabled + aria-hidden), so the reserved space reads as empty rail.
+function setRailHeadActive(on, label) {
+  if (!railHeadEl) return;
+  railHeadEl.querySelector('.focus-rail-head-count').textContent = on ? label : '';
+  railHeadEl.disabled = !on;
+  if (on) {
+    railHeadEl.removeAttribute('data-empty');
+    railHeadEl.removeAttribute('aria-hidden');
+  } else {
+    railHeadEl.dataset.empty = '';
+    railHeadEl.setAttribute('aria-hidden', 'true');
   }
 }
 
@@ -624,13 +642,15 @@ export function focusNthInRail(n) {
 // Backs the global Alt+Up/Down shortcut, which fires even while the centered terminal holds focus, so
 // the operator flips between sessions without leaving the keyboard. It navigates from railTabStopId
 // (the rail's roving/selected option, synced to the centered session in steady state) and centers via
-// focusSession - NOT onPillActivate - so arrowing across a DORMANT session never spawns a Claude
-// process; explicit start stays on Enter/click. Mirrors focusNextAttention's scroll + cursor handoff.
+// onPillActivate - SAME as a click - so landing on a DORMANT session spins it up (start-session) just
+// as clicking its pill would. The e.repeat guard on the chrome shortcut means each press is discrete,
+// so this only starts the one session it stops on, never a list it walks past. Mirrors
+// focusNextAttention's scroll + cursor handoff.
 export function focusAdjacentInRail(dir) {
   if (!active) return;
   const id = pickAdjacent(visibleOrder(currentGroups(), collapsedSet()), railTabStopId, dir);
   if (id == null) return;
-  focusSession(id); // no-ops if id === focusedId (e.g. a single-session roster); never auto-starts
+  onPillActivate(id); // centers; starts a DORMANT target first, exactly like a pill click
   pillById.get(id)?.scrollIntoView({ block: 'nearest' });
   // Drop the cursor into the centered terminal so the next Alt+Up/Down (or typing) lands without a
   // click. Double rAF, like focusNextAttention: borrowToCenter just re-parented and may have built the
