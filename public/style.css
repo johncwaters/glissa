@@ -583,71 +583,10 @@ body {
   flex: 1;
 }
 
-/* ── State badge ──────────────────────────────────────────── */
-.state-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 0 8px;
-  border-radius: 2px;
-  /* [P2] 10px → 11px - improved legibility on main cards; minimized bar overrides to 10px */
-  font-size: 11px;
-  font-family: var(--font-mono);
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  background: transparent;
-  flex-shrink: 0;
-  transition: color var(--transition-fast);
-}
-
-/* [coordination] ::before dot removed - js-semantics adds .has-glyph + glyph span instead */
-/* Fixed glyph column: differing glyph widths (●◆■▲◇○◌◐◍) never nudge the label
-   start. Spacing to the label is the badge's `gap` (one rhythm, not gap+margin). */
-.state-glyph {
-  display: inline-flex;
-  justify-content: center;
-  width: 1.2em;
-  font-size: 11px;
-  line-height: 1;
-}
-
-/* Reserved status slot: the label fills a constant-width box sized to the widest
-   label ("Needs Input" = 11 chars). The reserve is 11ch (mono cell advance) plus
-   the tracking term: .state-badge sets letter-spacing 0.08em (inherited here), so
-   11 glyphs add ~11 x 0.08em ≈ 0.88em that a bare 11ch ignores - without it a
-   RUNNING -> WAITING change still nudges the row by a few px. With the variable
-   badge in the header's left zone and the tags/actions right-anchored past the
-   spacer, the header is dimensionally rigid - the YOLO/worktree tags can no
-   longer slide on a state change. Scoped to .session-badge so only the header
-   status reserves. */
-.session-badge .state-label {
-  display: inline-block;
-  min-width: calc(11ch + 0.9em);
-}
-
-.state-badge[data-state="RUNNING"]      { color: var(--state-running); }
-.state-badge[data-state="WAITING"]      { color: var(--state-waiting); }
-.state-badge[data-state="FAILED"]       { color: var(--state-failed); }
-.state-badge[data-state="DONE"]         { color: var(--state-done); }
-.state-badge[data-state="INITIALIZING"] { color: var(--state-initializing); }
-.state-badge[data-state="IDLE"]         { color: var(--state-idle); }
-.state-badge[data-state="COMPLETE"]     { color: var(--state-complete); }
-.state-badge[data-state="DORMANT"]      { color: var(--state-dormant); }
-.state-badge[data-state="STARTING"] {
-  color: var(--state-starting);
-  animation: pulse 1.4s ease-in-out infinite;
-}
-
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50%      { opacity: 0.4; }
-}
-
 /* The working heartbeat (breathe + per-chunk beat + "quiet" eyebrow) renders ONLY on the focus
-   roster-rail pill now, never on the card badge - it would be redundant with the rail and the
-   centered terminal must stay calm. See the .focus-pill heartbeat block below; the shared
-   working-breathe keyframes live here (opacity-only so the JS scale beat composes on top). */
+   roster-rail pill - it would be redundant on the card and the centered terminal must stay calm.
+   See the .focus-pill heartbeat block below; the shared working-breathe keyframes live here
+   (opacity-only so the JS scale beat composes on top). */
 @keyframes working-breathe {
   0%, 100% { opacity: 1; }
   50%      { opacity: 0.55; }

@@ -7,7 +7,7 @@
 // package, so the showConfirmDialog below is an inline confirm that keeps the
 // card-dom.js <-> dialogs.js edge from becoming a cycle.
 
-import { BADGE_LABELS, STATE_GLYPHS, STATES } from '/shared/states.mjs';
+import { STATES } from '/shared/states.mjs';
 import { sendControlMsg } from '../control-ws.js';
 import { el, escapeHtml } from '../dom-helpers.js';
 import { sessionUIs } from './card-registry.js';
@@ -94,28 +94,6 @@ export function showConfirmDialog({ title, message, confirmLabel = 'Confirm', on
   requestAnimationFrame(() => btnCancel.focus());
 }
 
-export function makeBadge(state) {
-  const badge = el('span', 'state-badge');
-  badge.dataset.state = state;
-  badge.classList.add('has-glyph');
-  const glyph = STATE_GLYPHS[state] || '';
-  badge.innerHTML = '';
-  const glyphSpan = document.createElement('span');
-  glyphSpan.className = 'state-glyph';
-  glyphSpan.setAttribute('aria-hidden', 'true');
-  glyphSpan.textContent = glyph;
-  // Label sits in its own span so CSS can reserve a fixed slot (min-width sized
-  // to the widest label). A constant-width badge is what stops status changes
-  // from reflowing the YOLO/worktree tags downstream of it. applyState() updates
-  // this span's text in place (see lifecycle.applyState).
-  const labelSpan = document.createElement('span');
-  labelSpan.className = 'state-label';
-  labelSpan.textContent = BADGE_LABELS[state] || state;
-  badge.appendChild(glyphSpan);
-  badge.appendChild(labelSpan);
-  return badge;
-}
-
 // ── Card DOM builder ─────────────────────────────────────────
 
 export function buildCardDOM(sessionId, sessionName, initialState, options = {}) {
@@ -135,8 +113,6 @@ export function buildCardDOM(sessionId, sessionName, initialState, options = {})
   const header = el('div', 'session-card-header');
 
   const nameEl = el('span', 'session-name', sessionName);
-  const badge = makeBadge(state);
-  badge.classList.add('session-badge');
   const permsBadge = options.skipPerms ? el('span', 'perms-badge', 'YOLO') : null;
   if (permsBadge) permsBadge.title = 'Running with --dangerously-skip-permissions';
   // Always built; shown only when the card carries data-worktree (toggled live by
@@ -155,10 +131,10 @@ export function buildCardDOM(sessionId, sessionName, initialState, options = {})
   agentsBadge.title = 'Background sub-agents still running';
   const spacer = el('span', 'session-header-spacer');
 
-  // Time-in-current-state readout on the card header (trailing the badge), shown in the Focus center:
+  // Time-in-current-state readout on the card header (trailing the name), shown in the Focus center:
   // "how long has this been working / waiting". Empty for settled states, so :empty hides it. Ticked by
-  // session-tick.js. aria-hidden so a per-second text change never spams a screen reader (the badge
-  // label carries the state name instead).
+  // session-tick.js. aria-hidden so a per-second text change never spams a screen reader (the rail pill
+  // and the toolbar accent strip carry the state itself).
   const elapsedEl = el('span', 'card-elapsed');
   elapsedEl.setAttribute('aria-hidden', 'true');
 
@@ -189,12 +165,11 @@ export function buildCardDOM(sessionId, sessionName, initialState, options = {})
   btnDebug.setAttribute('aria-label', 'Debug session state');
 
   actions.append(btnDebug, overflow);
-  // Order matters for layout stability. The variable-width status badge and its trailing
-  // elapsed clock sit in the LEFT zone (with the name); the spacer then absorbs their width
-  // changes, so the persistent tags + actions in the RIGHT zone never reflow when status or
-  // the timer ticks. Combined with the reserved-width badge slot (see .state-label), the
-  // header is dimensionally rigid across all states.
-  const headerChildren = [nameEl, badge, elapsedEl, spacer, worktreeBadge, postTurnBadge, agentsBadge];
+  // Order matters for layout stability. The name and its trailing elapsed clock sit in the LEFT
+  // zone; the spacer then absorbs the clock's width changes, so the persistent tags + actions in
+  // the RIGHT zone never reflow when the timer ticks. (Status is not shown here: it lives on the
+  // Focus rail pill and the toolbar accent strip.)
+  const headerChildren = [nameEl, elapsedEl, spacer, worktreeBadge, postTurnBadge, agentsBadge];
   if (permsBadge) headerChildren.push(permsBadge);
   headerChildren.push(actions);
   header.append(...headerChildren);
@@ -206,7 +181,7 @@ export function buildCardDOM(sessionId, sessionName, initialState, options = {})
 
   card.append(header, termWrap);
 
-  return { card, header, badge, nameEl, elapsedEl, btnRename, btnRestart, btnRemove, btnDebug, btnOverflow, overflowMenu, termWrap };
+  return { card, header, nameEl, elapsedEl, btnRename, btnRestart, btnRemove, btnDebug, btnOverflow, overflowMenu, termWrap };
 }
 
 // ── Inline rename ────────────────────────────────────────────

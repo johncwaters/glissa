@@ -44,7 +44,7 @@ The former `session-card.js` (~1600 lines) was decomposed into cohesion-sized mo
 | `toast.js` | `showErrorToast` - leaf, depends only on `dom-helpers.js` |
 | `naming.js` + `naming-core.mjs` | `countSessionsByName`, `suggestSessionName`; pure name-sequence logic in `.mjs` |
 | `webgl-pool.js` + `webgl-core.mjs` | `tryLoadWebGL`, `releaseWebgl`; LRU eviction policy in pure `.mjs` |
-| `card-dom.js` | `buildCardDOM`, `makeBadge`, inline confirm dialog, inline rename, debug overlay, `handleDebugState*` |
+| `card-dom.js` | `buildCardDOM`, inline confirm dialog, inline rename, debug overlay, `handleDebugState*` |
 | `terminal.js` | `setupTerminal`, `wireTerminalIO`, `ensureTerminalSetup`, `reconnectDataWs`, OSC-52 clipboard, terminal-settings setters |
 | `session-tick.js` | Shared 1s tick (top-level side effect): advances each card's elapsed clock + polls the working-heartbeat quiet flag; exports `refreshElapsed` |
 | `lifecycle.js` | `createSessionCard`, `removeSessionCard`, `applyState`, `applyTerminalSettings`, `updateAggregateStatus`, etc. - the integration layer |

@@ -2,7 +2,7 @@
 // Owns session card DOM lifecycle, terminal setup, and per-session state.
 
 // Vite alias - resolves to shared/states.esm.js
-import { BADGE_LABELS, KILLABLE_STATES, RESTARTABLE_STATES, STATE_GLYPHS, STATES } from '/shared/states.mjs';
+import { KILLABLE_STATES, RESTARTABLE_STATES, STATES } from '/shared/states.mjs';
 import { playAlertSound } from '../alert-sound.js';
 import { sendControlMsg } from '../control-ws.js';
 import { setRunningActivity } from './activity.js';
@@ -10,7 +10,7 @@ import { el } from '../dom-helpers.js';
 import { setHealthMonitorVisible } from '../health-monitor.js';
 import { getSoundId, isSoundEnabled } from '../ui-prefs.js';
 import { computeAggregate } from './aggregate-core.mjs';
-import { buildCardDOM, closeDebugOverlay, makeBadge, openDebugOverlay, setDebugMode, showConfirmDialog, startInlineRename } from './card-dom.js';
+import { buildCardDOM, closeDebugOverlay, openDebugOverlay, setDebugMode, showConfirmDialog, startInlineRename } from './card-dom.js';
 import { aggregateEl, container, sessionUIs } from './card-registry.js';
 // Load-bearing import: evaluating session-tick.js installs the shared 1s tick (elapsed clock +
 // working-heartbeat poll) at module load.
@@ -216,7 +216,6 @@ export function createSessionCard(sessionId, sessionName, initialState, options 
     needsWebGLReload: false,
     dataWs: null,
     card: dom.card,
-    badge: dom.badge,
     nameEl: dom.nameEl,
     elapsedEl: dom.elapsedEl,
     // Project root (for the Focus rail's project grouping). '' when unknown -> the rail's (no path) group.
@@ -412,21 +411,8 @@ export function applyState(sessionId, state) {
     ensureTerminalSetup(ui, sessionId);
   }
 
-  // Preserve the glyph + label spans; update their text in place so the badge's
-  // reserved-width slot (.state-label min-width) holds steady and nothing reflows.
-  ui.badge.dataset.state = state;
-  const glyphSpan = ui.badge.querySelector('.state-glyph');
-  const labelSpan = ui.badge.querySelector('.state-label');
-  if (glyphSpan && labelSpan) {
-    glyphSpan.textContent = STATE_GLYPHS[state] || '';
-    labelSpan.textContent = BADGE_LABELS[state] || state;
-  } else {
-    // Fallback: no glyph present (unexpected) - rebuild in place preserving classes
-    const fresh = makeBadge(state);
-    fresh.classList.add('session-badge');
-    ui.badge.replaceWith(fresh);
-    ui.badge = fresh;
-  }
+  // The status text is no longer shown in the card header (it lives on the Focus rail pill and the
+  // toolbar accent strip); the card just carries data-state for the state-driven styling below.
   ui.card.dataset.state = state;
 
   updateButtonVisibility(ui);
