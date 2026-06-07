@@ -332,7 +332,6 @@ body {
    it ticks. Settled states clear the text (session-tick.js -> ''); :empty then hides the span. */
 .session-card .card-elapsed {
   flex-shrink: 0;
-  margin-left: 8px;
   font-size: 11px;
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
@@ -452,42 +451,42 @@ body {
   background: color-mix(in oklab, var(--perms-warn) 6%, var(--bg-surface));
 }
 
-.perms-badge {
-  display: inline-flex;
+/* Header tags (YOLO / worktree / post-turn / live-agents). One shared base so the
+   strip reads as a uniform set - same size, type, casing, and shape. Each rule
+   below adds only its tone (warning vs informational) and default visibility.
+   font-size 11px reads cleanly in the operator-console context. */
+.perms-badge,
+.worktree-badge,
+.post-turn-badge,
+.agents-badge {
   align-items: center;
-  /* [P2] 10px → 11px - improved legibility in operator-console context */
   font-size: 11px;
   font-family: var(--font-mono);
   font-weight: 700;
   letter-spacing: 0.08em;
+  text-transform: uppercase;
   padding: 0 6px;
   border-radius: 2px;
+  line-height: 18px;
+  flex-shrink: 0;
+}
+
+.perms-badge {
+  display: inline-flex;
   /* [P1] Replaced hardcoded #d97706 and border-left: 2px - use token + full 1px border */
   color: var(--perms-warn);
   border: 1px solid var(--perms-warn);
-  background: color-mix(in srgb, var(--perms-warn) 16%, transparent);
-  flex-shrink: 0;
-  line-height: 18px;
+  background: color-mix(in oklab, var(--perms-warn) 16%, transparent);
 }
 
 /* Linked-worktree marker. Hidden by default; shown only when the card carries
    data-worktree (set at build time, toggled live by setSessionWorktree on the
-   session-git delta). Mirrors .perms-badge but in the accent tone - it is
-   informational, not a warning. */
+   session-git delta). Accent tone - informational, not a warning. */
 .worktree-badge {
   display: none;
-  align-items: center;
-  font-size: 11px;
-  font-family: var(--font-mono);
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  padding: 0 6px;
-  border-radius: 2px;
-  color: var(--color-accent, #7c9eff);
-  border: 1px solid color-mix(in srgb, var(--color-accent, #7c9eff) 55%, transparent);
-  background: color-mix(in srgb, var(--color-accent, #7c9eff) 14%, transparent);
-  flex-shrink: 0;
-  line-height: 18px;
+  color: var(--accent);
+  border: 1px solid color-mix(in oklab, var(--accent) 55%, transparent);
+  background: color-mix(in oklab, var(--accent) 14%, transparent);
 }
 
 .session-card[data-worktree] .worktree-badge {
@@ -500,16 +499,7 @@ body {
    Reserved-height inline-flex keeps the header dimensionally stable on flip. */
 .post-turn-badge {
   display: none;
-  align-items: center;
   gap: 3px;
-  font-size: 11px;
-  font-family: var(--font-mono);
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  padding: 0 6px;
-  border-radius: 2px;
-  flex-shrink: 0;
-  line-height: 18px;
 }
 
 .session-card[data-pt] .post-turn-badge {
@@ -517,15 +507,15 @@ body {
 }
 
 .session-card[data-pt="fixed"] .post-turn-badge {
-  color: var(--color-success, #57c98b);
-  border: 1px solid color-mix(in srgb, var(--color-success, #57c98b) 55%, transparent);
-  background: color-mix(in srgb, var(--color-success, #57c98b) 14%, transparent);
+  color: var(--state-complete);
+  border: 1px solid color-mix(in oklab, var(--state-complete) 55%, transparent);
+  background: color-mix(in oklab, var(--state-complete) 14%, transparent);
 }
 
 .session-card[data-pt="flagged"] .post-turn-badge {
-  color: var(--color-warning, #e3b341);
-  border: 1px solid color-mix(in srgb, var(--color-warning, #e3b341) 55%, transparent);
-  background: color-mix(in srgb, var(--color-warning, #e3b341) 14%, transparent);
+  color: var(--state-waiting);
+  border: 1px solid color-mix(in oklab, var(--state-waiting) 55%, transparent);
+  background: color-mix(in oklab, var(--state-waiting) 14%, transparent);
 }
 
 /* Live background sub-agent count. Hidden until the card carries data-agents (toggled live by
@@ -534,18 +524,9 @@ body {
    .worktree-badge) - informational, not a warning. */
 .agents-badge {
   display: none;
-  align-items: center;
-  font-size: 11px;
-  font-family: var(--font-mono);
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  padding: 0 6px;
-  border-radius: 2px;
-  color: var(--color-accent, #7c9eff);
-  border: 1px solid color-mix(in srgb, var(--color-accent, #7c9eff) 55%, transparent);
-  background: color-mix(in srgb, var(--color-accent, #7c9eff) 14%, transparent);
-  flex-shrink: 0;
-  line-height: 18px;
+  color: var(--accent);
+  border: 1px solid color-mix(in oklab, var(--accent) 55%, transparent);
+  background: color-mix(in oklab, var(--accent) 14%, transparent);
 }
 
 .session-card[data-agents] .agents-badge {
