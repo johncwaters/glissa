@@ -5,11 +5,15 @@
 //
 // Keep this in lockstep with the dispatch in app.js:
 //   W                 -> next session needing you (focusNextAttention)
+//   M                 -> merge the review-sidebar selection (mergeSelectedSession)
+//   R                 -> resolve a parked merge in its session (resolveSelectedSession)
 //   ArrowUp/ArrowDown -> previous/next rail session (focusAdjacentInRail)
 //   0                 -> open Add Session
 //   1-9               -> focus the Nth rail pill (focusNthInRail)
 export function isFocusAltShortcut(key) {
   if (key === 'w' || key === 'W') return true;
+  if (key === 'm' || key === 'M') return true;
+  if (key === 'r' || key === 'R') return true;
   if (key === 'ArrowUp' || key === 'ArrowDown') return true;
   return key.length === 1 && key >= '0' && key <= '9';
 }

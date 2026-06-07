@@ -119,7 +119,52 @@ export function forgetReviewSession(id) {
   render();
 }
 
+// Fire the Merge action for the currently selected session, the keyboard-shortcut path (Alt+M) into the
+// same control message the Merge button sends. It re-checks the button's exact gate here (a quiescent
+// live session with committed changes, not already merging), so the shortcut can never merge something
+// the button itself would withhold. Returns true only when a merge was actually sent.
+export function mergeSelectedSession() {
+  const id = getSelectedId();
+  if (!id) return false;
+  const ui = sessionUIs.get(id);
+  if (!ui) return false;
+  if ((statusById.get(id) || 'none') === 'merging') return false; // a merge is already in flight
+  const payload = diffById.get(id);
+  const hasCommits = !!(payload && payload.hasCommits);
+  if (!isMergeableLive(ui.currentState, hasCommits)) return false;
+  sendControlMsg({ type: 'merge-continue-session', id });
+  return true;
+}
+
+// Fire the "Resolve in session" action for the currently selected session, the keyboard-shortcut path
+// (Alt+R) into the same control message the Resolve button sends. Gated exactly like that button: a
+// PARKED merge with a live PTY in the worktree to paste the resolve prompt into. Returns true only when
+// the message was actually sent.
+export function resolveSelectedSession() {
+  const id = getSelectedId();
+  if (!id) return false;
+  const ui = sessionUIs.get(id);
+  if (!ui) return false;
+  if ((statusById.get(id) || 'none') !== 'parked') return false;
+  if (!isLive(ui.currentState)) return false;
+  sendControlMsg({ type: 'resolve-session-merge', id });
+  return true;
+}
+
 // ── Helpers ──
+
+// The Merge action's gate in one place, shared by the rendered button and the Alt+M shortcut: a quiescent
+// live session (COMPLETE or IDLE) whose worktree has COMMITTED changes. The 'merging' in-flight check is
+// the caller's separate concern (it disables the button and short-circuits the shortcut).
+function isMergeableLive(state, hasCommits) {
+  return (state === STATES.COMPLETE || state === STATES.IDLE) && hasCommits;
+}
+
+// Whether the session still has a live PTY in its worktree (anything but a terminal/dormant state). Gates
+// the in-worktree "Resolve in session" action and the discard safety check; shared by render and Alt+R.
+function isLive(state) {
+  return state !== STATES.DORMANT && state !== STATES.DONE && state !== STATES.FAILED;
+}
 
 function requestDiff(id) {
   sendControlMsg({ type: 'request-session-diff', id });
@@ -172,8 +217,8 @@ function render() {
   // into develop and rebases this worktree onto develop, KEEPING the session running. With nothing
   // committed there is nothing to merge, so the action is withheld. A session still actively working
   // (RUNNING/WAITING) only gets a read-only preview.
-  const live = state !== STATES.DORMANT && state !== STATES.DONE && state !== STATES.FAILED;
-  const mergeableLive = (state === STATES.COMPLETE || state === STATES.IDLE) && hasCommits;
+  const live = isLive(state);
+  const mergeableLive = isMergeableLive(state, hasCommits);
 
   // Actions sit at the TOP of the changes area so the merge button leads. Skipped entirely when there
   // is nothing to act on (e.g. a still-working session), now that the always-present Refresh is gone.

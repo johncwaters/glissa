@@ -39,7 +39,7 @@ test('SHORTCUT_GROUPS: documents the core bindings', async () => {
   }
   const up = String.fromCharCode(0x2191);
   const down = String.fromCharCode(0x2193);
-  for (const expected of [`Alt+${up}`, `Alt+${down}`, 'Alt+1-9', 'Alt+W', 'Alt+0', '?', 'Esc']) {
+  for (const expected of [`Alt+${up}`, `Alt+${down}`, 'Alt+1-9', 'Alt+W', 'Alt+M', 'Alt+R', 'Alt+0', '?', 'Esc']) {
     assert.ok(chords.has(expected), `documents ${expected}`);
   }
 });

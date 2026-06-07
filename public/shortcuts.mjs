@@ -30,6 +30,13 @@ export const SHORTCUT_GROUPS = [
     ],
   },
   {
+    title: 'Review',
+    items: [
+      { combos: [['Alt', 'M']], label: 'Merge the selected session' },
+      { combos: [['Alt', 'R']], label: 'Resolve a parked merge in its session' },
+    ],
+  },
+  {
     title: 'Sessions',
     items: [
       { combos: [['Alt', '0']], label: 'Add a session' },

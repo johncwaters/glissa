@@ -14,7 +14,7 @@ import { handleDebugStateRefresh, handleDebugStateResponse } from './session-car
 import { applyState, applyTerminalSettings, createSessionCard, getSessionCount, hasSession, removeSessionCard, renameSessionCard, seedSessionMergeStatus, setSessionAgents, setSessionDiff, setSessionMergeStatus, setSessionPostTurn, setSessionWorktree, updateAggregateStatus } from './session-card/lifecycle.js';
 import { reconnectDataWs } from './session-card/terminal.js';
 import { showErrorToast } from './session-card/toast.js';
-import { forgetReviewSession, mountReviewSidebar, notifyWorktreeChanged, refreshReviewSidebar } from './sidebar/review-sidebar.js';
+import { forgetReviewSession, mergeSelectedSession, mountReviewSidebar, notifyWorktreeChanged, refreshReviewSidebar, resolveSelectedSession } from './sidebar/review-sidebar.js';
 import { handleTeamMessage, mountTeamsView, refreshTeamsProjects, setTabActivityCallback } from './teams-panel.js';
 import { applyTheme } from './theme.js';
 import { getActiveView, getThemeId, isSoundEnabled, setActiveView, setSoundEnabled } from './ui-prefs.js';
@@ -381,7 +381,9 @@ btnMute.addEventListener('click', (e) => {
 
 // ── Keyboard shortcuts (chrome-level) ─────────────────────────
 // Alt+0 opens a new session; Alt+1..9 focuses the Nth session in the Focus rail; Alt+Up/Down moves to
-// the previous/next session in the rail; Alt+W jumps to the next session that needs input (triage).
+// the previous/next session in the rail; Alt+W jumps to the next session that needs input (triage);
+// Alt+M merges the session selected in the review sidebar, Alt+R hands a parked merge to its session
+// (the keyboard paths to the sidebar's Merge / Resolve buttons).
 // All drive the Focus center, the only session destination now that the Sessions grid view was removed.
 // The Alt+<key> namespace is used on purpose: it collides with neither browser shortcuts (which switch
 // tabs on Ctrl+digit, not Alt) nor VS Code defaults (Ctrl / Ctrl+Shift / F-key / chord based, Ctrl+1..3
@@ -412,6 +414,21 @@ document.addEventListener('keydown', (e) => {
   // so every shortcut works while the operator is watching a session there.
   if (isRealInputFocused()) return;
 
+  // Alt+M: merge the session selected in the review sidebar. App-level (not gated on the Focus view, like
+  // Alt+0) since the sidebar spans every view; the gate lives in mergeSelectedSession, which no-ops when
+  // nothing is mergeable. We claim the binding either way so it never leaks an escape sequence to a PTY.
+  if (e.key === 'm' || e.key === 'M') {
+    e.preventDefault();
+    mergeSelectedSession();
+    return;
+  }
+  // Alt+R: hand a parked merge to the agent in its worktree ("Resolve in session"). Same app-level posture
+  // as Alt+M; resolveSelectedSession no-ops unless the selection is a parked, still-live session.
+  if (e.key === 'r' || e.key === 'R') {
+    e.preventDefault();
+    resolveSelectedSession();
+    return;
+  }
   if ((e.key === 'w' || e.key === 'W') && isFocusActive()) {
     e.preventDefault();
     focusNextAttention();

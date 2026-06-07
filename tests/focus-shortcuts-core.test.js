@@ -6,10 +6,14 @@ const assert = require('node:assert/strict');
 // focus-shortcuts is ESM (.mjs); dynamic-import it from this CJS test file.
 const importCore = () => import('../public/focus-view/focus-shortcuts.mjs');
 
-test('isFocusAltShortcut: matches the triage and prev/next nav keys', async () => {
+test('isFocusAltShortcut: matches the triage, merge, and prev/next nav keys', async () => {
   const { isFocusAltShortcut } = await importCore();
   assert.equal(isFocusAltShortcut('w'), true);
   assert.equal(isFocusAltShortcut('W'), true);
+  assert.equal(isFocusAltShortcut('m'), true);
+  assert.equal(isFocusAltShortcut('M'), true);
+  assert.equal(isFocusAltShortcut('r'), true);
+  assert.equal(isFocusAltShortcut('R'), true);
   assert.equal(isFocusAltShortcut('ArrowUp'), true);
   assert.equal(isFocusAltShortcut('ArrowDown'), true);
 });
