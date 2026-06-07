@@ -51,9 +51,8 @@ function armQuietTimer(ui) {
 // Called per inbound PTY chunk. O(1) and content-blind: it only times the arrival.
 export function noteSessionOutput(ui) {
   if (!ui || ui.currentState !== STATES.RUNNING) return;
+  // Throttle the DOM/animation work so an output flood can't thrash the glyph or churn the timer.
   const now = performance.now();
-  ui._lastOutputAt = now;
-  // Throttle the DOM/animation work; the bare timestamp above is enough for everything else.
   if (now - (ui._activityGate || 0) < BEAT_THROTTLE_MS) return;
   ui._activityGate = now;
   if (ui.card.dataset.activity === 'quiet') ui.card.dataset.activity = 'active';
@@ -66,8 +65,7 @@ export function noteSessionOutput(ui) {
 export function setRunningActivity(ui, running) {
   if (!ui) return;
   if (running) {
-    ui._activityGate = 0;
-    ui._lastOutputAt = performance.now();
+    ui._activityGate = 0; // let the first chunk after entry beat immediately
     delete ui.card.dataset.activity;
     armQuietTimer(ui);
   } else {
