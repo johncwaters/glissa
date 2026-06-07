@@ -5,7 +5,7 @@
 import { BADGE_LABELS, KILLABLE_STATES, RESTARTABLE_STATES, STATE_GLYPHS, STATES } from '/shared/states.mjs';
 import { playAlertSound } from '../alert-sound.js';
 import { sendControlMsg } from '../control-ws.js';
-import { clearSessionActivity, setRunningActivity } from './activity.js';
+import { setRunningActivity } from './activity.js';
 import { el } from '../dom-helpers.js';
 import { setHealthMonitorVisible } from '../health-monitor.js';
 import { getSoundId, isMinimized, isSoundEnabled } from '../ui-prefs.js';
@@ -430,7 +430,6 @@ export function removeSessionCard(sessionId) {
   if (!ui) return;
 
   closeDebugOverlay(ui);
-  clearSessionActivity(ui); // drop the pending quiet timer so it can't fire against a dead card
   sessionUIs.delete(sessionId);
   if (getMaximizedSession() === sessionId) exitMaximizeMode();
   forgetSessionLayout(sessionId);

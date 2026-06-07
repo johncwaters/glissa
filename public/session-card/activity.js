@@ -10,11 +10,18 @@
 //     data-activity="quiet"; CSS slows and dims the breath and reveals a muted "quiet" eyebrow.
 //     This is the 2am triage tell - is it churning, or stalled on a long step?
 //
+// Quiet is DERIVED, not scheduled: output arrival just stamps ui._lastOutputAt, and the shared
+// 1s session tick (rail.js) calls refreshSessionActivity to compare it against now. So there is
+// no per-session timer to churn on every chunk or to cancel on teardown - the timestamp is the
+// single source of truth, and the flag is a pure function of (now - lastOutput, state). The
+// responsive direction (silence -> output) is flipped eagerly here so resume feels instant; the
+// poll handles the only direction that can't be event-driven (output -> silence).
+//
 // Only the cadence is inferred, never the cause: we report "output stopped", not "thinking"
-// (honesty over reassurance, PRODUCT.md). Cleared on the next chunk and on any exit from RUNNING.
+// (honesty over reassurance, PRODUCT.md).
 //
 // Leaf module: terminal.js calls noteSessionOutput per inbound PTY chunk; lifecycle.js drives
-// setRunningActivity on transitions and clearSessionActivity on teardown.
+// setRunningActivity on transitions; rail.js's tick calls refreshSessionActivity.
 
 import { STATES } from '/shared/states.mjs';
 
@@ -41,41 +48,37 @@ function beat(ui) {
   );
 }
 
-function armQuietTimer(ui) {
-  clearTimeout(ui._quietTimer);
-  ui._quietTimer = setTimeout(() => {
-    if (ui.currentState === STATES.RUNNING) ui.card.dataset.activity = 'quiet';
-  }, QUIET_AFTER_MS);
-}
-
-// Called per inbound PTY chunk. O(1) and content-blind: it only times the arrival.
+// Per inbound PTY chunk: stamp the arrival (the source of truth for "is it streaming") and,
+// throttled, beat the glyph and eagerly clear a stale quiet flag so resume reads instantly.
+// Content-blind: it only times the arrival, never inspects the bytes.
 export function noteSessionOutput(ui) {
   if (!ui || ui.currentState !== STATES.RUNNING) return;
-  // Throttle the DOM/animation work so an output flood can't thrash the glyph or churn the timer.
   const now = performance.now();
+  ui._lastOutputAt = now;
   if (now - (ui._activityGate || 0) < BEAT_THROTTLE_MS) return;
   ui._activityGate = now;
   if (ui.card.dataset.activity === 'quiet') ui.card.dataset.activity = 'active';
   beat(ui);
-  armQuietTimer(ui);
 }
 
-// Enter/leave RUNNING. Arming the quiet timer on entry covers a session that starts RUNNING and
-// never emits (it correctly goes quiet); leaving RUNNING tears the whole thing down.
+// Called once per session on the shared 1s tick. Derives the quiet flag from elapsed silence -
+// no timer - and writes only on change so a steady state never churns the attribute.
+export function refreshSessionActivity(ui) {
+  if (!ui || ui.currentState !== STATES.RUNNING) return;
+  const next = performance.now() - (ui._lastOutputAt || 0) >= QUIET_AFTER_MS ? 'quiet' : 'active';
+  if (ui.card.dataset.activity !== next) ui.card.dataset.activity = next;
+}
+
+// Enter/leave RUNNING. On entry, stamp now so the silence countdown starts fresh and mark the
+// badge active; the tick takes over from there. On exit, drop the flag (no timer to cancel, so
+// teardown is just this - removeSessionCard needs nothing, the attr leaves with the DOM).
 export function setRunningActivity(ui, running) {
   if (!ui) return;
   if (running) {
+    ui._lastOutputAt = performance.now();
     ui._activityGate = 0; // let the first chunk after entry beat immediately
-    delete ui.card.dataset.activity;
-    armQuietTimer(ui);
+    ui.card.dataset.activity = 'active';
   } else {
-    clearSessionActivity(ui);
+    delete ui.card.dataset.activity;
   }
-}
-
-export function clearSessionActivity(ui) {
-  if (!ui) return;
-  clearTimeout(ui._quietTimer);
-  ui._quietTimer = null;
-  delete ui.card.dataset.activity;
 }
