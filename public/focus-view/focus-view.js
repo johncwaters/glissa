@@ -639,14 +639,20 @@ export function activateFocusView() {
 
 // Re-center the last session the operator had open. Idempotent and safe to call on activation and on
 // every snapshot: it no-ops unless Focus is up, the center is empty, and the saved session still
-// exists in the roster. It CENTERS via focusSession (not onPillActivate), so it never auto-starts a
-// DORMANT session - a reload never spawns a Claude process; a restored dormant card just shows its
-// empty terminal. On the boot/reload race the roster is empty at activation, so the no-op here is
-// re-attempted from app.js handleSnapshot once the snapshot has populated the cards.
+// exists in the roster AND is not DORMANT. The dormant guard is what makes a first-time start select
+// nothing: after the server starts (npm run dev) it holds no live PTYs, so every session loads
+// DORMANT and there is nothing worth returning to (the saved card "isn't on"); a fresh boot lands on
+// the empty placeholder. A browser reload while the server is still up keeps the session non-dormant,
+// so the restore still returns to it there. On the boot/reload race the roster is empty at
+// activation, so the no-op here is re-attempted from app.js handleSnapshot once the snapshot has
+// populated the cards (with their state).
 export function restoreFocusedSession() {
   if (!active || focusedId) return;
   const id = getLastFocusedSessionId();
-  if (id && sessionUIs.has(id)) focusSession(id);
+  const ui = id && sessionUIs.get(id);
+  if (!ui) return;
+  if ((ui.currentState || STATES.DORMANT) === STATES.DORMANT) return;
+  focusSession(id);
 }
 
 export function deactivateFocusView() {
