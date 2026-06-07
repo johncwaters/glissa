@@ -12,9 +12,12 @@
 import { BADGE_LABELS, STATE_GLYPHS, STATES } from '/shared/states.mjs';
 import { sendControlMsg } from '../control-ws.js';
 import { setSelectedId } from '../sidebar/selection.js';
+import { setActivityRenderer } from '../session-card/activity.js';
 import { container, sessionUIs } from '../session-card/card-registry.js';
 import { wakeSession } from '../session-card/layout.js';
 import { ensureTerminalSetup, forceTerminalRepaint } from '../session-card/terminal.js';
+
+const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)');
 
 let railEl = null;
 let centerEl = null;
@@ -123,11 +126,44 @@ function paintPill(pill, id, ui) {
   pill.dataset.merge = ms === 'none' ? '' : ms;
   pill.querySelector('.focus-pill-merge').textContent =
     ms === 'pending-review' ? 'REVIEW' : ms === 'parked' ? 'PARKED' : ms === 'merging' ? 'MERGING' : '';
+  // Mirror the working heartbeat flag so a re-render keeps the breathe/quiet treatment without
+  // waiting for the next signal (activity.js parks the live value on ui._activity).
+  pill.dataset.activity = ui._activity || '';
   const isFocused = id === focusedId;
   pill.classList.toggle('focused', isFocused);
   pill.setAttribute('aria-selected', String(isFocused));
   pill.tabIndex = isFocused ? 0 : -1;
 }
+
+// ── Working heartbeat (rail-only) ──
+// The heartbeat lives ONLY on the rail pill, never on the centered terminal (redundant). activity.js
+// computes the liveness/quiet signal content-blind and calls this renderer: 'beat' = one PTY-chunk
+// ping on the glyph, 'flag' = the active/quiet flag (ui._activity) changed. paintPill mirrors the
+// same flag, so a re-render keeps the breathe/quiet state without waiting for the next signal.
+function renderPillActivity(ui, kind) {
+  if (!active) return; // off-screen rail: nothing to paint or beat
+  const id = ui?.card?.dataset.id;
+  const pill = id ? pillById.get(id) : null;
+  if (!pill) return;
+  if (kind === 'flag') {
+    pill.dataset.activity = ui._activity || '';
+    return;
+  }
+  // kind === 'beat': one GPU-only ping (transform + opacity), fire-and-forget WAAPI so there is no
+  // class bookkeeping. The CSS ambient breath animates opacity only, so this scale composes on top.
+  if (reducedMotion?.matches || document.hidden) return;
+  const glyph = pill.querySelector('.focus-pill-glyph');
+  if (!glyph?.animate) return;
+  glyph.animate(
+    [
+      { transform: 'scale(1)', opacity: 0.65 },
+      { transform: 'scale(1.35)', opacity: 1, offset: 0.3 },
+      { transform: 'scale(1)', opacity: 0.9 },
+    ],
+    { duration: 300, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' },
+  );
+}
+setActivityRenderer(renderPillActivity);
 
 // Re-render the rail in sorted order; reconcile pills against the live session set.
 export function refreshFocusRoster() {

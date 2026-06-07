@@ -5,7 +5,8 @@
 //     (role=button, roving tabindex) correct as cards enter/leave the bar.
 //   - A 1s interval that ticks each session's "time in current state" readout (the rail pill
 //     and, since the clock is shared, the grid header badge) and derives each working session's
-//     heartbeat quiet flag from its last-output timestamp (so activity.js needs no own timer).
+//     heartbeat quiet flag from its last-output timestamp - the flag renders on the focus
+//     roster-rail pill (activity.js -> focus-view.js), so activity.js needs no own timer.
 //   - Click / keyboard (arrows, Home/End, Enter/Space) interaction: activating a
 //     pill RESTORES its session back to the grid.
 //
@@ -126,9 +127,9 @@ const observer = new MutationObserver((mutations) => {
 observer.observe(minimizedBar, { childList: true });
 
 // The shared 1s session tick: refresh the time-in-state clock (grid header badge and rail pill
-// alike) and derive each working session's quiet flag from its last-output timestamp - one place
-// to poll, so the heartbeat needs no per-session timer. Cheap: a handful of sessions, a couple of
-// writes each, both no-ops when nothing changed.
+// alike) and derive each working session's quiet flag from its last-output timestamp (the flag
+// renders on the focus rail pill) - one place to poll, so the heartbeat needs no per-session
+// timer. Cheap: a handful of sessions, a couple of writes each, both no-ops when nothing changed.
 setInterval(() => {
   for (const [, ui] of sessionUIs) {
     if (ui.railElapsed) ui.railElapsed.textContent = pillElapsed(ui);

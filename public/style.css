@@ -951,40 +951,13 @@ body {
   50%      { opacity: 0.4; }
 }
 
-/* ── Working heartbeat ─────────────────────────────────────
-   A RUNNING session is alive: the badge glyph breathes (the resting "this is working"
-   pulse), and each real PTY chunk fires a quick WAAPI scale beat on top (activity.js), so a
-   streaming agent visibly beats while a thinking one settles. The breath animates OPACITY
-   ONLY so the JS beat's transform composes on top instead of fighting it. Grid only - the
-   rail stays deliberately calm. The global prefers-reduced-motion block above neutralises the
-   breath; activity.js skips the JS beat under the same preference. Only the glyph moves, so
-   the "WORKING" label and the elapsed clock stay rock-steady and legible. */
-.session-card:not(.minimized)[data-state="RUNNING"] .session-badge .state-glyph {
-  animation: working-breathe 2.4s ease-in-out infinite;
-}
-
+/* The working heartbeat (breathe + per-chunk beat + "quiet" eyebrow) renders ONLY on the focus
+   roster-rail pill now, never on the card badge - it would be redundant with the rail and the
+   centered terminal must stay calm. See the .focus-pill heartbeat block below; the shared
+   working-breathe keyframes live here (opacity-only so the JS scale beat composes on top). */
 @keyframes working-breathe {
   0%, 100% { opacity: 1; }
   50%      { opacity: 0.55; }
-}
-
-/* Gone quiet: output has stopped for a while. We report only what we observe (silence), never
-   an invented cause - so the treatment is calm information, not an alarm: the breath slows and
-   dims, and a muted lowercase eyebrow trails the badge. The word is real text (not motion), so
-   it carries the same tell under reduced motion and for a colour-blind operator. */
-.session-card:not(.minimized)[data-state="RUNNING"][data-activity="quiet"] .session-badge .state-glyph {
-  animation-duration: 3.8s;
-  opacity: 0.55;
-}
-
-.session-card:not(.minimized)[data-state="RUNNING"][data-activity="quiet"] .session-badge::after {
-  content: "quiet";
-  margin-left: 7px;
-  font-size: 9px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: lowercase;
-  color: var(--text-dim);
 }
 
 /* ── Action buttons ──────────────────────────────────────── */
@@ -2801,6 +2774,37 @@ body[data-active-view="focus"] #minimized-bar { display: none; }
 @keyframes focus-pill-pulse {
   0%, 100% { box-shadow: 0 0 0 0 transparent; }
   50%      { box-shadow: 0 0 0 3px color-mix(in oklch, var(--state-waiting) 22%, transparent); }
+}
+
+/* ── Working heartbeat (rail-only) ──
+   A RUNNING session is alive: the pill glyph breathes (the resting "this is working" pulse), and
+   each real PTY chunk fires a quick WAAPI scale beat on top (focus-view.js renderPillActivity), so
+   a streaming agent visibly beats while a thinking one settles. The breath animates OPACITY ONLY so
+   the JS beat's transform composes on top instead of fighting it. This is the heartbeat's only home
+   - the card badge / centered terminal stay deliberately calm. Reduced motion drops the breath (the
+   no-preference gate) and the JS beat (renderPillActivity skips it); only the glyph moves, so the
+   name + label stay rock-steady. */
+@media (prefers-reduced-motion: no-preference) {
+  .focus-pill[data-state="RUNNING"] .focus-pill-glyph {
+    animation: working-breathe 2.4s ease-in-out infinite;
+  }
+}
+
+/* Gone quiet: output has stopped for a while. We report only what we observe (silence), never an
+   invented cause - so the treatment is calm information, not an alarm: the breath slows and dims,
+   and a muted lowercase eyebrow trails the badge. The word is real text (not motion), so it carries
+   the same tell under reduced motion and for a colour-blind operator. */
+.focus-pill[data-state="RUNNING"][data-activity="quiet"] .focus-pill-glyph {
+  animation-duration: 3.8s;
+  opacity: 0.55;
+}
+.focus-pill[data-state="RUNNING"][data-activity="quiet"] .focus-pill-badge::after {
+  content: "quiet";
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: lowercase;
+  color: var(--text-dim);
 }
 
 /* Needs-review accent (distinct from amber so it does not read as "needs input"); parked = red. */
