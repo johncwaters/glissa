@@ -2614,7 +2614,19 @@ body {
    = waiting) so the two groups are told apart by color at a glance, not by re-reading the words. A single
    header row per section names the group ONCE, its meaning, and the stats, instead of stacking title +
    subtitle + a separate "N files changed" line. */
-.review-section { margin-bottom: 12px; padding-left: 10px; border-left: 2px solid var(--border); }
+.review-section {
+  /* The +/- counts appear in two contexts: the section-total stat (.review-section-stat) and the
+     per-file rows (.review-file-counts), which live in different boxes. These two custom props are the
+     shared alignment contract that makes their +/- columns stack into ONE pair of vertical columns:
+     --review-stat-gap is the +/- column gap (identical in both), and --review-row-pad is the
+     .review-file-head horizontal padding, which the section head re-uses (plus the .review-diff border)
+     as a right inset so the total's columns land directly above the per-file columns. */
+  --review-row-pad: 10px;
+  --review-stat-gap: 8px;
+  margin-bottom: 12px;
+  padding-left: 10px;
+  border-left: 2px solid var(--border);
+}
 .review-section[data-kind="committed"] { border-left-color: var(--state-done); }
 .review-section[data-kind="uncommitted"] { border-left-color: var(--state-waiting); }
 .review-section + .review-section { margin-top: 16px; }
@@ -2626,6 +2638,9 @@ body {
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 2px 10px;
+  /* Inset the right edge by the per-file row padding plus the .review-diff border (1px), so the
+     section-total +/- cluster ends at the same x as the per-file +/- clusters inside the diff box. */
+  padding-right: calc(var(--review-row-pad) + 1px);
   margin-bottom: 8px;
 }
 .review-section-id { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 8px; min-width: 0; }
@@ -2641,7 +2656,7 @@ body {
 .review-section-stat {
   display: inline-flex;
   align-items: baseline;
-  gap: 8px;
+  gap: var(--review-stat-gap);
   font-size: 11px;
   white-space: nowrap;
 }
@@ -2668,7 +2683,7 @@ body {
   align-items: center;
   gap: 8px;
   width: 100%;
-  padding: 6px 10px;
+  padding: 6px var(--review-row-pad);
   font-family: var(--font-mono);
   font-size: 12px;
   text-align: left;
@@ -2683,7 +2698,7 @@ body {
 .review-file-path { flex: 1; min-width: 0; color: var(--text-head); font-weight: 600; word-break: break-all; }
 .review-file[data-status="added"] .review-file-path { color: var(--state-running); }
 .review-file[data-status="deleted"] .review-file-path { color: var(--state-failed); }
-.review-file-counts { flex: 0 0 auto; display: inline-flex; gap: 6px; }
+.review-file-counts { flex: 0 0 auto; display: inline-flex; gap: var(--review-stat-gap); }
 .review-file-body { border-top: 1px solid var(--border-dim); }
 .review-file-binary { padding: 8px 10px; color: var(--text-muted); }
 .review-hunk-head {
