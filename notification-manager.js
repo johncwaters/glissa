@@ -16,7 +16,7 @@ class NotificationManager extends EventEmitter {
     this._focusSuppressed = false;
     this._escalationIntervalMs = escalationIntervalMs;
     this._debounceMs = debounceMs;
-    this._recentCategories = new Map(); // category -> lastFireTimestamp (global-per-category)
+    this._recentCategories = new Map(); // `${session}\0${category}` -> lastFireTimestamp (per-session)
   }
 
   // -- Public API --
@@ -120,7 +120,7 @@ class NotificationManager extends EventEmitter {
           this._transition(sessionName, 'suppressed');
           return;
         }
-        if (this._isDebounced(entry.category)) {
+        if (this._isDebounced(sessionName, entry.category)) {
           this._transition(sessionName, 'debounced');
           return;
         }
@@ -130,7 +130,7 @@ class NotificationManager extends EventEmitter {
       case NS.DELIVERED:
         // Deliver via all channels (only record debounce on first delivery, not escalation re-entries)
         if (entry.escalationCount === 0) {
-          this._recordCategory(entry.category);
+          this._recordCategory(sessionName, entry.category);
         }
         this._deliverViaChannels(sessionName, entry);
         // Start escalation timer ONLY for 'waiting' category
@@ -190,18 +190,19 @@ class NotificationManager extends EventEmitter {
     }
   }
 
-  // -- Debounce (global-per-category, matching current notify.js behavior) --
+  // -- Debounce (per-session + category, so one session's rapid re-fire is coalesced without
+  //    cross-suppressing a different session that hits the same category within the window) --
 
-  _isDebounced(category) {
+  _isDebounced(sessionName, category) {
     if (!category) return false;
     const now = Date.now();
-    const lastFired = this._recentCategories.get(category);
+    const lastFired = this._recentCategories.get(`${sessionName}\0${category}`);
     return lastFired && (now - lastFired) < this._debounceMs;
   }
 
-  _recordCategory(category) {
+  _recordCategory(sessionName, category) {
     if (category) {
-      this._recentCategories.set(category, Date.now());
+      this._recentCategories.set(`${sessionName}\0${category}`, Date.now());
     }
   }
 

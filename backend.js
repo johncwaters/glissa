@@ -1,5 +1,5 @@
 /*
- * Glissa Backend — Express + WebSocket server factory
+ * Glissa Backend - Express + WebSocket server factory
  *
  * Control WebSocket additions:
  *   Client → Server: { type: 'shutdown' }
@@ -58,9 +58,9 @@ const ESCALATION_INTERVAL_MS = 300000;
  * @param {import('http').Server} httpServer - HTTP server to attach to
  * @param {object} options
  * @param {string|null} options.staticDir
- *   'auto'  — detect dist/ vs public/ (production behavior)
- *   null    — skip static serving entirely (Vite mode)
- *   string  — absolute path to serve from
+ *   'auto'  - detect dist/ vs public/ (production behavior)
+ *   null    - skip static serving entirely (Vite mode)
+ *   string  - absolute path to serve from
  * @returns {{ shutdown: () => void, port: number, app: import('express').Express }}
  */
 function isAllowedOrigin(req) {
@@ -118,7 +118,7 @@ function createBackend(httpServer, options = {}) {
       gitWorkspace,
       integrationBranch: cfg.integrationBranch || 'develop',
       // Worktree root: a `.glissa-worktrees` sibling of THIS repo by default (attached to the repo,
-      // outside its tree — no nested biome/eslint config, clean main git status). A configured
+      // outside its tree - no nested biome/eslint config, clean main git status). A configured
       // worktreeRoot overrides. Plus the gitignored local context to bring in, so the spawned agent
       // sees a complete, recognizable project rather than a bare Temp checkout.
       worktreeRoot: cfg.worktreeRoot || path.join(path.dirname(path.resolve(project.path)), '.glissa-worktrees'),
@@ -240,7 +240,7 @@ function createBackend(httpServer, options = {}) {
     try {
       activeResources = process.getActiveResourcesInfo().length;
     } catch {
-      // Older Node — leave 0
+      // Older Node - leave 0
     }
     return {
       timestamp: Date.now(),
@@ -376,7 +376,7 @@ function createBackend(httpServer, options = {}) {
   }
   // Open a run artifact in the user's configured editor (Settings > General > Editor command). The
   // command is user-authored and runs on the user's own machine, the same trust level as reading the
-  // PTY, so it runs through the shell — `.cmd`/`.bat` shims like `code` resolve. The path is validated
+  // PTY, so it runs through the shell - `.cmd`/`.bat` shims like `code` resolve. The path is validated
   // and confined to the team's runs/ directory by handleOpenArtifact before it reaches here.
   function openInEditor(absPath) {
     const cmd = (config.editorCommand || '').trim();
@@ -613,17 +613,21 @@ function createBackend(httpServer, options = {}) {
         timestamp: Date.now()
       });
 
-      // Notification triggers: session state -> notification lifecycle
+      // Notification triggers: session state -> notification lifecycle. Both turn-complete (COMPLETE)
+      // and process exit (DONE) notify under the 'complete' category so the two terminal "it finished"
+      // states stay consistent; the per-session debounce coalesces a COMPLETE->DONE pair into one toast.
       if (to === STATES.WAITING) {
         notificationManager.trigger(sess.id, 'waiting', `${sess.name} needs your input`);
-      } else if (to === STATES.COMPLETE) {
+      } else if (to === STATES.COMPLETE || to === STATES.DONE) {
         notificationManager.trigger(sess.id, 'complete', `${sess.name} finished working`);
       } else if (to === STATES.FAILED) {
         notificationManager.trigger(sess.id, 'failed', `${sess.name} failed`);
       }
 
-      // Acknowledge when leaving a notification-triggering state
-      if (from === STATES.WAITING || from === STATES.COMPLETE || from === STATES.FAILED) {
+      // Acknowledge when leaving a notification-triggering state. DONE is included so a restart
+      // (DONE -> INITIALIZING) clears the 'complete' entry a direct RUNNING->DONE exit left in
+      // DELIVERED; without this the restarted session's next trigger is a no-op and it goes silent.
+      if (from === STATES.WAITING || from === STATES.COMPLETE || from === STATES.DONE || from === STATES.FAILED) {
         notificationManager.acknowledge(sess.id);
       }
     });
@@ -680,7 +684,7 @@ function createBackend(httpServer, options = {}) {
     sess.on('rebaseline', () => closeSessionDataClients(sess.id));
   }
 
-  // Sessions are constructed dormant — no PTY spawns on boot. The user starts
+  // Sessions are constructed dormant - no PTY spawns on boot. The user starts
   // a session on demand by expanding its chip from the minimized bar, which
   // sends a `start-session` control message.
   for (const project of config.projects) {
@@ -747,7 +751,7 @@ function createBackend(httpServer, options = {}) {
 
   // Full teardown for one live session id: close its data clients, ack notifications, destroy the
   // Session (kills the PTY + cleans hooks), drop it from the map, and tell the dashboard. Returns
-  // false if the id wasn't in the map. INVARIANT: acknowledge BEFORE destroy — destroy() calls
+  // false if the id wasn't in the map. INVARIANT: acknowledge BEFORE destroy - destroy() calls
   // removeAllListeners(), which would pre-empt the notification/exit cleanup.
   function _teardownSession(id, logLabel) {
     const sess = sessions.get(id);
@@ -776,7 +780,7 @@ function createBackend(httpServer, options = {}) {
       sessions.set(project.id, sess);
       wireSessionEvents(sess);
       // Broadcast BEFORE start(): sess.start() emits state-change synchronously,
-      // and handleStateChange creates a card if one doesn't exist yet — without
+      // and handleStateChange creates a card if one doesn't exist yet - without
       // skipPerms (state-change messages don't carry it), dropping the YOLO badge.
       broadcastControl({ type: 'session-added', id: project.id, session: project.name, state: sess.state, skipPerms: !!sess.dangerouslySkipPermissions, worktree: !!sess.isWorktree });
       sess.start();
@@ -788,13 +792,13 @@ function createBackend(httpServer, options = {}) {
     for (const project of modified) {
       const oldSess = sessions.get(project.id);
       closeSessionDataClients(project.id);
-      // INVARIANT: acknowledge BEFORE destroy — destroy() calls removeAllListeners()
+      // INVARIANT: acknowledge BEFORE destroy - destroy() calls removeAllListeners()
       notificationManager.acknowledge(project.id);
       oldSess.destroy();
       const newSess = makeSession(project, { ...config, ...newConfig });
       sessions.set(project.id, newSess);
       wireSessionEvents(newSess);
-      // Broadcast BEFORE start() — see _addNewSessions for rationale.
+      // Broadcast BEFORE start() - see _addNewSessions for rationale.
       broadcastControl({ type: 'session-modified', id: project.id, session: project.name, state: newSess.state, skipPerms: !!newSess.dangerouslySkipPermissions, worktree: !!newSess.isWorktree });
       newSess.start();
       console.log(`[config] Modified session: ${project.name}`);
@@ -836,7 +840,7 @@ function createBackend(httpServer, options = {}) {
   function requestShutdown() {
     shutdown();
     httpServer.close(() => {
-      console.log('Server closed — exiting.');
+      console.log('Server closed - exiting.');
       process.exit(0);
     });
     // Fallback: if close callback doesn't fire within 2s, force exit
@@ -928,7 +932,7 @@ function createBackend(httpServer, options = {}) {
     // reconnect, so RSS is bounded by construction), closes a wedged client past
     // a stall timeout, and flushes the echo frame immediately after user input.
     // Created before the replay send so the replay shares the same high-water guard.
-    // Capture the replay snapshot and the live baseline offset atomically — same
+    // Capture the replay snapshot and the live baseline offset atomically - same
     // synchronous tick, before 'data' is wired below, so no 'data' event can slip in
     // between. The replay covers [base, total); startOffset = total; live onData resumes
     // exactly at total (no overlap, no gap). The injected source lets the sender recover
@@ -964,14 +968,14 @@ function createBackend(httpServer, options = {}) {
             type: 'session-error',
             id: sess.id,
             session: sess.name,
-            message: 'Paste too large — try pasting smaller chunks',
+            message: 'Paste too large - try pasting smaller chunks',
             timestamp: Date.now(),
           });
           return;
         }
         sess.write(msg.data);
         // Flush the next PTY frame after input (the echo) immediately instead of
-        // holding it a tick behind coalesced bulk — still gated by the sender's
+        // holding it a tick behind coalesced bulk - still gated by the sender's
         // backpressure guard.
         sender.markInputFlush();
         if (sess.state === STATES.WAITING) {
@@ -990,7 +994,7 @@ function createBackend(httpServer, options = {}) {
     ws.on('error', (err) => {
       const isPayload = err.code === 'WS_ERR_UNSUPPORTED_MESSAGE_LENGTH';
       const reason = isPayload
-        ? 'Message too large — try pasting smaller chunks'
+        ? 'Message too large - try pasting smaller chunks'
         : err.message;
       console.warn(`[data-ws] Error for ${sess.name}: ${err.message}`);
       broadcastControl({
@@ -1000,7 +1004,7 @@ function createBackend(httpServer, options = {}) {
         message: reason,
         timestamp: Date.now(),
       });
-      // ws 'close' fires automatically after error — no need to call ws.close()
+      // ws 'close' fires automatically after error - no need to call ws.close()
     });
 
     ws.on('close', () => {
@@ -1033,7 +1037,7 @@ function createBackend(httpServer, options = {}) {
         dataWss.emit('connection', ws, req);
       });
     }
-    // No else — let other upgrade listeners (Vite HMR) handle their paths
+    // No else - let other upgrade listeners (Vite HMR) handle their paths
   });
 
   // --- Config hot-reload ---
@@ -1050,7 +1054,7 @@ function createBackend(httpServer, options = {}) {
     if (shuttingDown) return;
     shuttingDown = true;
     clearInterval(healthInterval);
-    // INVARIANT: destroy NotificationManager BEFORE sessions — clears all timers globally
+    // INVARIANT: destroy NotificationManager BEFORE sessions - clears all timers globally
     notificationManager.destroy();
     for (const [, s] of teamSchedulers) s.disarm();
     for (const [, sess] of sessions) {

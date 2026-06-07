@@ -54,23 +54,28 @@ console.log('\n--- Unit Tests ---');
   nm.destroy();
 }
 
-// Test: trigger while debounced -> IDLE
+// Test: debounce is per-session + category. A same-session re-fire inside the window is
+// suppressed; a different session hitting the same category is NOT cross-suppressed.
 {
-  console.log('\nDebounce suppression:');
+  console.log('\nDebounce suppression (per-session):');
   const nm = new NotificationManager({ debounceMs: 60000 });
   const calls = [];
   nm.registerChannel('mock', () => calls.push(1));
   nm.trigger('s1', 'waiting', 'needs input');
   assert('first trigger delivers', calls.length, 1);
-  // Acknowledge to reset, then trigger again (should debounce)
+  // Acknowledge to reset s1, then re-trigger s1 within the window -> debounced.
   nm.acknowledge('s1');
-  nm.trigger('s2', 'waiting', 'needs input again');
-  assert('second trigger debounced', calls.length, 1);
-  assert('s2 state is IDLE (debounced)', nm.getNotificationState('s2'), NS.IDLE);
+  nm.trigger('s1', 'waiting', 'needs input again');
+  assert('same-session re-trigger debounced', calls.length, 1);
+  assert('s1 state is IDLE (debounced)', nm.getNotificationState('s1'), NS.IDLE);
+  // A different session hitting the same category still delivers (no cross-suppression).
+  nm.trigger('s2', 'waiting', 'other session needs input');
+  assert('different session not cross-suppressed', calls.length, 2);
+  assert('s2 state is DELIVERED', nm.getNotificationState('s2'), NS.DELIVERED);
   nm.destroy();
 }
 
-// Test: COMPLETE trigger — one-shot, no escalation
+// Test: COMPLETE trigger - one-shot, no escalation
 {
   console.log('\nCOMPLETE is one-shot (no escalation):');
   const nm = new NotificationManager({ escalationIntervalMs: 30, debounceMs: 0 });
@@ -82,7 +87,7 @@ console.log('\n--- Unit Tests ---');
   nm.destroy(); // destroy before timer could fire (shouldn't exist anyway)
 }
 
-// Test: FAILED trigger — one-shot, no escalation
+// Test: FAILED trigger - one-shot, no escalation
 {
   console.log('\nFAILED is one-shot (no escalation):');
   const nm = new NotificationManager({ escalationIntervalMs: 30, debounceMs: 0 });
@@ -312,15 +317,17 @@ async function runAsyncTests() {
   mockSession.name = 'test-session';
 
   const STATES = require('../shared/states').STATES;
+  // Mirrors the backend.js state-change -> notification wiring: COMPLETE and DONE both notify under
+  // 'complete', and DONE is in the acknowledge set so a restart clears the entry.
   mockSession.on('state-change', ({ from, to }) => {
     if (to === STATES.WAITING) {
       nm6.trigger('test-session', 'waiting', `test-session needs your input`);
-    } else if (to === STATES.COMPLETE) {
+    } else if (to === STATES.COMPLETE || to === STATES.DONE) {
       nm6.trigger('test-session', 'complete', `test-session finished working`);
     } else if (to === STATES.FAILED) {
       nm6.trigger('test-session', 'failed', `test-session failed`);
     }
-    if (from === STATES.WAITING || from === STATES.COMPLETE || from === STATES.FAILED) {
+    if (from === STATES.WAITING || from === STATES.COMPLETE || from === STATES.DONE || from === STATES.FAILED) {
       nm6.acknowledge('test-session');
     }
   });
@@ -336,6 +343,22 @@ async function runAsyncTests() {
   mockSession.emit('state-change', { from: STATES.RUNNING, to: STATES.FAILED });
   assertAsync('FAILED triggers notification', calls6.length, 2);
   assertAsync('FAILED category', calls6[1].cat, 'failed');
+
+  // Restart clears a delivered 'complete' so the session can notify again. A direct RUNNING->DONE
+  // exit leaves a 'complete' entry in DELIVERED; the restart (DONE->INITIALIZING) must acknowledge it,
+  // otherwise the next trigger is a silent no-op (DELIVERED has no 'trigger' transition).
+  mockSession.emit('state-change', { from: STATES.FAILED, to: STATES.INITIALIZING }); // clear FAILED entry
+  mockSession.emit('state-change', { from: STATES.RUNNING, to: STATES.DONE });
+  assertAsync('DONE triggers completion notification', calls6.length, 3);
+  assertAsync('DONE category is complete', calls6[2].cat, 'complete');
+  assertAsync('DONE state is DELIVERED', nm6.getNotificationState('test-session'), NS.DELIVERED);
+
+  mockSession.emit('state-change', { from: STATES.DONE, to: STATES.INITIALIZING });
+  assertAsync('leaving DONE acknowledges (restart clears entry)', nm6.getNotificationState('test-session'), NS.IDLE);
+
+  mockSession.emit('state-change', { from: STATES.RUNNING, to: STATES.WAITING });
+  assertAsync('restarted session still notifies (not wedged)', calls6.length, 4);
+  assertAsync('post-restart WAITING delivered', nm6.getNotificationState('test-session'), NS.DELIVERED);
   nm6.destroy();
 
   // Force-restart scenario
@@ -360,6 +383,6 @@ async function runAsyncTests() {
   return failed > 0 ? 1 : 0;
 }
 
-runAsyncTests().then((exitCode) => { // NOSONAR — CJS project cannot use top-level await
+runAsyncTests().then((exitCode) => { // NOSONAR - CJS project cannot use top-level await
   process.exit(exitCode);
 });

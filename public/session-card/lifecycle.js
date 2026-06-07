@@ -503,7 +503,11 @@ export function applyState(sessionId, state) {
 
   updateButtonVisibility(ui);
 
-  if (state === STATES.WAITING && prevState !== STATES.WAITING) {
+  // Attention sound on the turn boundaries that want the operator: needs-input and turn-complete.
+  // Process exit (DONE/FAILED) gets its own sound + completion-flash below. Without COMPLETE here a
+  // finished turn was silent (only a focus-suppressible desktop toast fired server-side).
+  if ((state === STATES.WAITING && prevState !== STATES.WAITING)
+      || (state === STATES.COMPLETE && prevState !== STATES.COMPLETE)) {
     if (isSoundEnabled()) playAlertSound(getSoundId());
   }
 
