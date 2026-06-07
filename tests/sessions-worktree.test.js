@@ -44,6 +44,11 @@ function fakePty(pid = 2147483646) {
   return { pid, onData() {}, onExit() {}, write() {}, resize() {}, kill() {} };
 }
 
+// A PTY that records what gets written to it, so the parked-merge handoff (pasteMergePrompt) can be asserted.
+function capturingPty(writes, pid = 2147483646) {
+  return { pid, onData() {}, onExit() {}, write(d) { writes.push(d); }, resize() {}, kill() {} };
+}
+
 // A real temp dir so the spawn_success guard (fs.existsSync on the worktree) passes.
 function realWorktreeDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-wt-fake-'));
@@ -277,6 +282,46 @@ test('mergeAndContinue parks on a rebase conflict (worktree preserved, session c
     assert.equal(s.mergeStatus, 'parked');
     assert.equal(s.worktreeDir, wt, 'parked worktree preserved');
     assert.equal(s.state, STATES.IDLE, 'session not ended');
+  } finally { s.destroy(); fs.rmSync(wt, { recursive: true, force: true }); }
+});
+
+test('pasteMergePrompt: a parked session pastes a context-rich merge prompt into its PTY (bracketed paste)', { skip: !WIN }, () => {
+  const wt = realWorktreeDir();
+  const gw = fakeGitWorkspace({
+    worktreeDir: wt,
+    mergeKeepResult: { merged: false, parked: true, reason: 'rebase-conflict', branch: 'glissa/session/wt-sess', conflicts: ['src/a.js', 'src/b.js'] },
+  });
+  const writes = [];
+  const s = makeSession({ gitWorkspace: gw, integrationBranch: 'develop', ptySpawn: () => capturingPty(writes) });
+  try {
+    s.start();
+    s.state = STATES.IDLE;
+    s.mergeAndContinue(); // -> parked; stores reason + conflicts for the handoff
+    assert.equal(s.mergeStatus, 'parked');
+    assert.deepEqual(s.mergeConflicts, ['src/a.js', 'src/b.js']);
+
+    const r = s.pasteMergePrompt();
+    assert.equal(r.ok, true);
+    assert.equal(writes.length, 1, 'one paste into the PTY');
+    const out = writes[0];
+    assert.ok(out.startsWith('\x1b[200~') && out.endsWith('\x1b[201~'), 'wrapped in bracketed paste (multi-line, not auto-submitted)');
+    assert.ok(out.includes('glissa/session/wt-sess'), 'names the session branch');
+    assert.ok(out.includes('develop'), 'names the integration target');
+    assert.ok(out.includes('src/a.js') && out.includes('src/b.js'), 'lists the conflicting files');
+    assert.ok(out.includes('git rebase develop'), 'gives the rebase command');
+  } finally { s.destroy(); fs.rmSync(wt, { recursive: true, force: true }); }
+});
+
+test('pasteMergePrompt: refused when not parked (no stray paste into a clean session)', { skip: !WIN }, () => {
+  const wt = realWorktreeDir();
+  const gw = fakeGitWorkspace({ worktreeDir: wt });
+  const writes = [];
+  const s = makeSession({ gitWorkspace: gw, integrationBranch: 'develop', ptySpawn: () => capturingPty(writes) });
+  try {
+    s.start();
+    s.state = STATES.IDLE; // not parked
+    assert.deepEqual(s.pasteMergePrompt(), { ok: false, reason: 'not-parked' });
+    assert.equal(writes.length, 0, 'nothing written');
   } finally { s.destroy(); fs.rmSync(wt, { recursive: true, force: true }); }
 });
 

@@ -21,6 +21,7 @@ const {
   EXIT_HOOKS,
 } = require("./session-core/state-machine");
 const { mapSignalToEvent } = require("./session-core/status-mapper");
+const { buildMergePrompt } = require("./session-core/merge-prompt");
 const agentTracker = require("./session-core/agent-tracker");
 
 const KILL_POLL_INTERVAL_MS = 200;
@@ -175,6 +176,10 @@ class Session extends EventEmitter {
     this.baseSha = null;         // integration-branch SHA the worktree forked from
     this._workspace = null;      // opaque team-git workspace handle for merge/discard
     this.mergeStatus = 'none';   // none | pending-review | merging | parked | merged
+    // Park context (set only while mergeStatus === 'parked'): why the auto-merge could not complete and
+    // which files conflict. Feeds the manual-merge handoff prompt (pasteMergePrompt); cleared otherwise.
+    this.mergeReason = null;
+    this.mergeConflicts = [];
     this.worktreeNotice = null;  // operator-facing blocker (e.g. integration branch missing)
 
     this._titleSource = createOscTitleSource({ stabilizationMs: titleStabilizationMs });
@@ -365,7 +370,35 @@ class Session extends EventEmitter {
 
   _setMergeStatus(status, extra = {}) {
     this.mergeStatus = status;
+    // Retain the park context only while parked; clear it on any other status so a stale conflict list
+    // never rides a later clean/merged state.
+    if (status === "parked") {
+      this.mergeReason = extra.reason || null;
+      this.mergeConflicts = Array.isArray(extra.conflicts) ? extra.conflicts : [];
+    } else {
+      this.mergeReason = null;
+      this.mergeConflicts = [];
+    }
     this.emit("merge-status", { id: this.id, mergeStatus: status, ...extra });
+  }
+
+  // Hand a parked merge back to the Claude agent running in this session's worktree: build a context-rich
+  // prompt (why it parked + the conflicting files + how to rebase/resolve) and PASTE it into the live PTY.
+  // Bracketed paste keeps the multi-line prompt one input (raw newlines would submit each line); no
+  // trailing CR, so the operator reviews then sends. No-op unless parked with a live PTY.
+  pasteMergePrompt() {
+    if (this._destroyed) return { ok: false, reason: "destroyed" };
+    if (this.mergeStatus !== "parked") return { ok: false, reason: "not-parked" };
+    if (!this.ptyProcess || !this._ptyAlive) return { ok: false, reason: "no-pty" };
+    const prompt = buildMergePrompt({
+      branch: this._workspace ? this._workspace.branch : null,
+      target: this._integrationBranch,
+      reason: this.mergeReason,
+      conflicts: this.mergeConflicts,
+      worktreeDir: this.worktreeDir,
+    });
+    this.write(`\x1b[200~${prompt}\x1b[201~`);
+    return { ok: true };
   }
 
   // True when the worktree has any uncommitted change vs its base, COUNTING untracked new files
@@ -440,7 +473,7 @@ class Session extends EventEmitter {
       this.isWorktree = false;
       this._setMergeStatus("merged");
     } else if (r.parked) {
-      this._setMergeStatus("parked", { reason: r.reason || null });
+      this._setMergeStatus("parked", { reason: r.reason || null, conflicts: r.conflicts || [] });
     } else {
       this._setMergeStatus("pending-review", { reason: r.reason || null });
     }
@@ -480,7 +513,7 @@ class Session extends EventEmitter {
       if (r.restoreConflict) this._setMergeStatus("pending-review", { reason: "restore-conflict" });
       else this._setMergeStatus("none");
     } else if (r.parked) {
-      this._setMergeStatus("parked", { reason: r.reason || null });
+      this._setMergeStatus("parked", { reason: r.reason || null, conflicts: r.conflicts || [] });
     } else if (r.reason === "nothing-to-commit") {
       this._setMergeStatus("none");
     } else {

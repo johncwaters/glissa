@@ -314,6 +314,17 @@ function renderActions(id, { status, reviewable, mergeableLive, live }) {
   refresh.addEventListener('click', () => requestDiff(id));
   actions.append(refresh);
 
+  // Parked merge: the auto rebase-then-FF could not complete. Hand it to the agent IN the worktree by
+  // pasting a context-rich prompt (why it parked + conflicting files + how to rebase/resolve) into the
+  // session, so it can finish the merge; the operator then re-runs Merge. Needs a live PTY to paste into.
+  if (status === 'parked' && live) {
+    const resolve = el('button', 'review-btn review-btn-primary', 'Resolve in session');
+    resolve.type = 'button';
+    resolve.title = 'Paste a prompt into this session explaining why the merge parked and how to resolve it, so the agent in the worktree can finish the merge';
+    resolve.addEventListener('click', () => sendControlMsg({ type: 'resolve-session-merge', id }));
+    actions.append(resolve);
+  }
+
   // The one merge action: merge into develop + rebase this worktree onto develop, then keep working in the
   // same session (the PTY stays alive - there is no separate "finish" step). Offered on a quiescent live
   // session with changes.

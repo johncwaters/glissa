@@ -73,12 +73,13 @@ function initRepoMainWithDevelop() {
 //   - `rev-parse --abbrev-ref HEAD` returns opts.head (the projectPath checkout); a bare `rev-parse <t>`
 //     returns the new integration tip
 function fakeSessionGit(cmds, opts = {}) {
-  const { ahead = '1', dirty = '', rebaseFails = false, ffFails = false, targetExists = true, head = 'develop' } = opts;
+  const { ahead = '1', dirty = '', rebaseFails = false, ffFails = false, targetExists = true, head = 'develop', conflicts = [] } = opts;
   const fail = (msg) => { const e = new Error(msg); e.status = 1; throw e; };
   return (args) => {
     cmds.push(args.join(' '));
     if (args[0] === 'rev-list') return ahead;       // rev-list --count target..branch
     if (args[0] === 'status') return dirty;          // status --porcelain
+    if (args[0] === 'diff') return (conflicts || []).join('\n'); // diff --name-only --diff-filter=U (conflict capture)
     if (args[0] === 'rev-parse' && args.includes('--verify')) {
       if (!targetExists) fail('no ref');
       return 'targetsha';
@@ -145,6 +146,21 @@ test('mergeBack (injected): a rebase conflict aborts and PARKS the branch (workt
   assert.ok(cmds.includes('rebase --abort'), 'the conflicted rebase is aborted');
   assert.ok(!cmds.some((c) => c.startsWith('worktree remove')), 'parked: worktree NOT removed');
   assert.ok(!cmds.some((c) => c.startsWith('branch -D')), 'parked: branch NOT deleted');
+});
+
+test('mergeBack (injected): a rebase conflict captures the conflicting files BEFORE aborting (for the handoff prompt)', () => {
+  const cmds = [];
+  const gw = createGitWorkspace({ git: fakeSessionGit(cmds, { rebaseFails: true, conflicts: ['src/a.js', 'src/b.js'] }) });
+  const ws = { cwd: '/wt', isGit: true, branch: 'glissa/session/abc', base: 'develop' };
+  const r = gw.mergeBack({ projectPath: '/repo', workspace: ws, targetBranch: 'develop' });
+
+  assert.equal(r.parked, true);
+  assert.equal(r.reason, 'rebase-conflict');
+  assert.deepEqual(r.conflicts, ['src/a.js', 'src/b.js'], 'conflicting files reported up for the prompt');
+  const diffIdx = cmds.indexOf('diff --name-only --diff-filter=U');
+  const abortIdx = cmds.indexOf('rebase --abort');
+  assert.ok(diffIdx !== -1, 'the conflicting files are captured');
+  assert.ok(diffIdx < abortIdx, 'captured BEFORE the abort restores a clean tree (which would lose them)');
 });
 
 test('mergeBack (injected): nothing committed + a clean tree -> discards the empty worktree + branch', () => {

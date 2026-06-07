@@ -183,9 +183,13 @@ function createGitWorkspace(opts = {}) {
 
     // Rebase onto the integration branch; a conflict aborts and reports parked (caller keeps the branch).
     if (!run(['rebase', target], wt).ok) {
+      // Capture the conflicting files BEFORE aborting (the abort restores a clean tree and loses them).
+      // They are reported up so the parked-merge handoff prompt can name exactly what overlaps.
+      const conflicts = run(['diff', '--name-only', '--diff-filter=U'], wt).out
+        .split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
       run(['rebase', '--abort'], wt);
       if (stashed) run(['stash', 'pop'], wt); // hand the operator their uncommitted work back, un-rebased
-      return { committed: true, merged: false, reason: 'rebase-conflict', parked: true };
+      return { committed: true, merged: false, reason: 'rebase-conflict', parked: true, conflicts };
     }
 
     // Fast-forward the integration branch to the rebased session branch. If it is checked out in
@@ -252,7 +256,7 @@ function createGitWorkspace(opts = {}) {
     }
     if (!r.merged) {
       // Rebase conflict / lost FF: PARK (keep worktree + branch for manual resolution).
-      return { merged: false, committed: true, branch, base: target, reason: r.reason, parked: true };
+      return { merged: false, committed: true, branch, base: target, reason: r.reason, parked: true, conflicts: r.conflicts || [] };
     }
     tearDownWorktree(projectPath, wt, branch);
     return { merged: true, committed: true, branch: null, base: target, reason: null };
@@ -276,7 +280,7 @@ function createGitWorkspace(opts = {}) {
       return { merged: false, committed: false, branch, base: target, reason: 'nothing-to-commit', kept: true };
     }
     if (!r.merged) {
-      return { merged: false, committed: true, branch, base: target, reason: r.reason, parked: true };
+      return { merged: false, committed: true, branch, base: target, reason: r.reason, parked: true, conflicts: r.conflicts || [] };
     }
     // Merged AND kept: record the new integration tip the worktree now sits on top of. restoreConflict
     // flags that the stashed uncommitted work reapplied with conflict markers for the operator to resolve.

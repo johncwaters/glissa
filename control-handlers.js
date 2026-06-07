@@ -641,6 +641,10 @@ function registerControlHandlers(controlWss, deps) {
     // Session.mergeAndContinue self-guards the state and emits 'merge-status' (broadcast), so no reply.
     'merge-continue-session':     (msg) => { const s = findSession(msg); if (s) s.mergeAndContinue(); },
     'discard-session-worktree':   (msg) => { const s = findSession(msg); if (s) s.discardWorktree(); },
+    // Parked-merge handoff: paste a context-rich prompt (why it parked + the conflicting files + how to
+    // rebase/resolve) into the session's live PTY so the agent in the worktree can finish the merge.
+    // Session.pasteMergePrompt self-guards (parked + live PTY), so the handler just delegates.
+    'resolve-session-merge':      (msg) => { const s = findSession(msg); if (s) s.pasteMergePrompt(); },
     'request-session-diff':       (msg, ws) => {
       const s = findSession(msg);
       if (!s) return;
