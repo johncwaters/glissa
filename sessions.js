@@ -414,11 +414,12 @@ class Session extends EventEmitter {
     } catch { return false; }
   }
 
-  // Two diffs the review sidebar draws a hard line between: COMMITTED changes (baseSha..HEAD, the only
-  // thing a merge moves into the integration branch) and still-UNCOMMITTED working-tree changes (vs HEAD,
-  // shown for awareness but never merged until committed). `hasCommits` is the merge gate: nothing
-  // committed means nothing to merge. NEW files are made visible in the uncommitted diff via intent-to-add.
-  // baseSha advances after a merge-and-continue, so the committed diff resets to just the new commits.
+  // Two diffs the review sidebar draws a hard line between: COMMITTED changes (the commits a merge would
+  // move into the integration branch) and still-UNCOMMITTED working-tree changes (vs HEAD, shown for
+  // awareness but never merged until committed). `hasCommits` is the merge gate: nothing committed means
+  // nothing to merge. NEW files are made visible in the uncommitted diff via intent-to-add. The committed
+  // range and the gate are taken from the LIVE relationship to the integration branch, so they reset
+  // themselves once the work lands on it (whether merged via Glissa or out-of-band).
   getDiff() {
     const empty = { stat: "", diff: "" };
     if (!this.worktreeDir) return { committed: empty, uncommitted: empty, hasCommits: false };
@@ -428,16 +429,26 @@ class Session extends EventEmitter {
       } catch (e) { return String(e.stdout || ""); }
     };
     g(["add", "-N", "--", "."]); // intent-to-add so new files appear in the uncommitted diff
-    // The fork point the session's commits sit on top of. baseSha is tracked across create/merge, but a
-    // worktree re-adopted at boot (pending-review/parked after a restart) has none - recover it from the
-    // merge-base with the integration branch so committed changes still show for those sessions.
-    let base = this.baseSha || "";
-    if (!base && this._integrationBranch) base = g(["merge-base", this._integrationBranch, "HEAD"]).trim();
+    // What a merge would actually move is the commits on HEAD that the integration branch does NOT already
+    // have. Derive both the committed range (merge-base..HEAD) and the gate (integrationBranch..HEAD) from
+    // the LIVE relationship to the integration branch, NOT the stored fork SHA: baseSha is captured at fork
+    // and goes stale once the integration branch advances or this branch is merged out-of-band (e.g. a CLI
+    // rebase-then-FF), which would otherwise keep phantom-showing already-merged commits as "needs merge".
+    // Fall back to baseSha (then to nothing) only when no integration branch is known - unit tests and
+    // in-place, non-isolated sessions, where baseSha (or the worktree-vs-HEAD diff) is all we have.
+    let base = "";
+    let aheadCount = "0";
+    if (this._integrationBranch && g(["rev-parse", "--verify", "--quiet", this._integrationBranch]).trim()) {
+      base = g(["merge-base", this._integrationBranch, "HEAD"]).trim();
+      aheadCount = g(["rev-list", "--count", `${this._integrationBranch}..HEAD`]).trim();
+    } else if (this.baseSha) {
+      base = this.baseSha;
+      aheadCount = g(["rev-list", "--count", `${base}..HEAD`]).trim();
+    }
     const committed = base
       ? { stat: g(["diff", "--stat", `${base}..HEAD`]).trim(), diff: g(["diff", `${base}..HEAD`]) }
       : empty;
     const uncommitted = { stat: g(["diff", "--stat", "HEAD"]).trim(), diff: g(["diff", "HEAD"]) };
-    const aheadCount = base ? g(["rev-list", "--count", `${base}..HEAD`]).trim() : "0";
     const hasCommits = aheadCount !== "" && aheadCount !== "0";
     // Self-heal a stranded review gate. mergeStatus is set at PTY exit / boot re-adoption, but the
     // operator can commit-and-merge or clean the worktree inside the still-live PTY (the design is

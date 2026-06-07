@@ -40,6 +40,21 @@ function initOneCommitRepo() {
   return dir;
 }
 
+// A repo with a `develop` integration branch and a `feat` branch one commit ahead of it, checked out as
+// HEAD - the shape getDiff sees for a session worktree. Builds on initOneCommitRepo (init/config/commit),
+// then branches develop and adds the feat commit. The caller can fast-forward develop to simulate an
+// out-of-band merge (the CLI rebase-then-FF case) and assert the gate self-corrects.
+function initRepoDevelopFeature() {
+  const dir = initOneCommitRepo();
+  git(['branch', 'develop'], dir);
+  git(['checkout', 'develop'], dir);
+  git(['checkout', '-b', 'feat'], dir);
+  fs.writeFileSync(path.join(dir, 'feature.txt'), 'work\n', 'utf8');
+  git(['add', '-A'], dir);
+  git(['commit', '-m', 'feat work'], dir);
+  return dir; // HEAD = feat, one commit ahead of develop
+}
+
 function fakePty(pid = 2147483646) {
   return { pid, onData() {}, onExit() {}, write() {}, resize() {}, kill() {} };
 }
@@ -376,6 +391,35 @@ test('getDiff keeps pending-review when the worktree still has real changes', { 
     assert.notEqual(d.uncommitted.diff.trim(), '', 'untracked change shows via intent-to-add');
     assert.equal(s.mergeStatus, 'pending-review', 'gate preserved while there is something to review');
     assert.deepEqual(statuses, [], 'no demotion broadcast');
+  } finally { s.destroy(); fs.rmSync(repo, { recursive: true, force: true }); }
+});
+
+test('getDiff: committed range + gate come from the integration branch, not a stale baseSha', { skip: !GIT }, () => {
+  const repo = initRepoDevelopFeature();
+  const s = makeSession({ integrationBranch: 'develop' });
+  try {
+    s.worktreeDir = repo;
+    s.baseSha = git(['rev-parse', 'develop'], repo).trim(); // the (correct) fork point
+    const d = s.getDiff();
+    assert.equal(d.hasCommits, true, 'a commit ahead of develop is mergeable');
+    assert.ok(d.committed.diff.includes('feature.txt'), 'committed diff shows the ahead commit');
+  } finally { s.destroy(); fs.rmSync(repo, { recursive: true, force: true }); }
+});
+
+test('getDiff: a branch already on develop shows nothing to merge despite a stale baseSha (out-of-band merge)', { skip: !GIT }, () => {
+  const repo = initRepoDevelopFeature();
+  const s = makeSession({ integrationBranch: 'develop' });
+  try {
+    const staleBase = git(['rev-parse', 'develop'], repo).trim(); // the pre-merge fork point
+    // Land the work on develop out-of-band (a CLI rebase-then-FF), leaving the session's baseSha stale.
+    git(['checkout', 'develop'], repo);
+    git(['merge', '--ff-only', 'feat'], repo);
+    git(['checkout', 'feat'], repo);
+    s.worktreeDir = repo;
+    s.baseSha = staleBase; // STALE: still the old fork, not the new develop tip
+    const d = s.getDiff();
+    assert.equal(d.hasCommits, false, 'develop already contains the work -> nothing to merge');
+    assert.equal(d.committed.diff.trim(), '', 'no phantom committed diff from the stale baseSha');
   } finally { s.destroy(); fs.rmSync(repo, { recursive: true, force: true }); }
 });
 
