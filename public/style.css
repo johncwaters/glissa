@@ -965,26 +965,100 @@ body {
   background: color-mix(in oklab, var(--state-failed) 18%, transparent);
 }
 
-/* ── Error toast ─────────────────────────────────────────── */
-.error-toast {
+/* ── Notices (stacked top-right) ──────────────────────────── */
+/* Replaces the old center-bottom toast that overlapped the dock and bled the
+   terminal text through its transparent fill. Notices stack below the header,
+   clear of the terminals and the minimized dock. */
+.notice-region {
   position: fixed;
-  bottom: 24px;
-  left: 50%;
-  transform: translateX(-50%);
+  top: calc(var(--header-h) + 12px);
+  right: 16px;
   z-index: 300;
-  padding: 10px 20px;
-  background: color-mix(in oklab, var(--state-failed) 15%, transparent);
-  border: 1px solid color-mix(in oklab, var(--state-failed) 30%, transparent);
-  border-radius: var(--radius);
-  color: var(--state-failed);
-  font-family: var(--font-mono);
-  font-size: 12px;
-  /* [P2] Decorative glassmorphism removed - tinted background is sufficient */
-  transition: opacity 400ms ease;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(360px, calc(100vw - 32px));
+  max-height: calc(100vh - var(--header-h) - 32px);
+  overflow-y: auto;
+  /* Let clicks fall through the gaps to the board; each notice re-enables. */
+  pointer-events: none;
 }
 
-.error-toast.fade-out {
-  opacity: 0;
+.notice {
+  pointer-events: auto;
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  align-items: start;
+  gap: 8px;
+  padding: 10px 12px;
+  /* Opaque base with a faint state wash: readable over anything behind it. */
+  background: color-mix(in oklab, var(--state-failed) 8%, var(--bg-card));
+  border: 1px solid color-mix(in oklab, var(--state-failed) 45%, var(--border));
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
+  color: var(--text-head);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+/* Dismiss hides instantly even without motion; the slide-out is added below. */
+.notice.is-leaving { opacity: 0; }
+
+/* Motion is opt-in, honoring prefers-reduced-motion strictly (matches focus-*). */
+@media (prefers-reduced-motion: no-preference) {
+  .notice {
+    opacity: 0;
+    transform: translateX(8px);
+    transition: opacity var(--transition-med), transform var(--transition-med);
+  }
+  .notice.is-visible { opacity: 1; transform: none; }
+  .notice.is-leaving { transform: translateX(8px); }
+}
+
+/* Real failures read a touch stronger and never auto-clear. */
+.notice.is-persistent {
+  border-color: color-mix(in oklab, var(--state-failed) 60%, var(--border));
+}
+
+.notice-glyph {
+  width: 14px;
+  text-align: center;
+  color: var(--state-failed);
+  font-weight: 700;
+}
+
+.notice-msg {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--text-head);
+}
+
+.notice-count {
+  align-self: center;
+  color: var(--state-failed);
+  font-weight: 700;
+  font-size: 11px;
+}
+
+.notice-close {
+  align-self: start;
+  appearance: none;
+  background: transparent;
+  border: none;
+  padding: 0 2px;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 14px;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.notice-close:hover { color: var(--text-head); }
+.notice-close:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 2px;
 }
 
 /* ── Header menu dropdown ────────────────────────────────── */
