@@ -68,7 +68,10 @@ function onRailKeydown(e) {
   pills[(start + dir + pills.length) % pills.length].focus();
 }
 
-// ── Roster ordering: WAITING first, then needs-review, then RUNNING, then the rest (stable) ──
+// ── Roster ordering: WAITING first, then needs-review, then RUNNING, then the rest; within a status
+// group, alphabetical by name. The alphabetical tiebreak (not Map insertion order) keeps the rail
+// stable across runtime: a rebuilt session re-enters the Map at the end, but its alphabetical slot
+// is unchanged, so pills no longer shuffle when sessions are rebuilt. ──
 
 function rosterRank(ui, id) {
   if (ui.currentState === STATES.WAITING) return 0;
@@ -80,8 +83,10 @@ function rosterRank(ui, id) {
 
 function orderedSessions() {
   return [...sessionUIs.entries()]
-    .map(([id, ui], i) => ({ id, ui, i }))
-    .sort((a, b) => rosterRank(a.ui, a.id) - rosterRank(b.ui, b.id) || a.i - b.i);
+    .map(([id, ui]) => ({ id, ui }))
+    .sort((a, b) =>
+      rosterRank(a.ui, a.id) - rosterRank(b.ui, b.id)
+      || sessionName(a.ui).localeCompare(sessionName(b.ui), undefined, { numeric: true, sensitivity: 'base' }));
 }
 
 function sessionName(ui) {
