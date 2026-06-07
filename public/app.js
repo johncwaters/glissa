@@ -7,7 +7,7 @@ import './tailwind.css';
 import { STATES } from '/shared/states.mjs';
 import { connectControl, disableReconnect, onControlMessage, sendControlMsg, sendControlRequest, setConnectionStateCallback } from './control-ws.js';
 import { createAddSessionDialog, createConfirmDialog, createSettingsDialog } from './dialogs.js';
-import { activateFocusView, deactivateFocusView, isFocusActive, mountFocusView, refreshFocusRoster, setFocusMergeStatus } from './focus-view/focus-view.js';
+import { activateFocusView, deactivateFocusView, focusNextAttention, isFocusActive, mountFocusView, refreshFocusRoster, setFocusMergeStatus } from './focus-view/focus-view.js';
 import { applyHealthSnapshot, mountHealthMonitor } from './health-monitor.js';
 import { initNotifications, showDesktopNotification } from './notifications.js';
 import { handleDebugStateRefresh, handleDebugStateResponse } from './session-card/card-dom.js';
@@ -437,6 +437,20 @@ function isTypingContext() {
 
 document.addEventListener('keydown', (e) => {
   if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+
+  // Focus-tab triage (Alt+W -> next session needing you, borrowed into the center) must work even
+  // while the centered terminal holds keyboard focus - that is the expected place to be while
+  // triaging - so it runs BEFORE the typing guard. xterm's focused element is its helper textarea;
+  // treat that as not-a-real-input so triage fires there, but a genuine text field (inline rename,
+  // a dialog) still swallows Alt+W. terminal.js returns false for this key so it reaches here.
+  if ((e.key === 'w' || e.key === 'W') && isFocusActive()) {
+    const a = document.activeElement;
+    const realInput = a && (a.isContentEditable
+      || ((a.tagName === 'INPUT' || a.tagName === 'TEXTAREA')
+          && !a.classList.contains('xterm-helper-textarea')));
+    if (!realInput) { e.preventDefault(); focusNextAttention(); return; }
+  }
+
   if (isTypingContext()) return;
 
   if (e.key === '0') {

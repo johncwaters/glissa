@@ -1,16 +1,20 @@
-// Focus view: an experimental watch-and-steer layout. A persistent left ROSTER RAIL (one lightweight
-// pill per session, WAITING/needs-review bubble to the top) and a single large CENTER that holds the
-// focused session's real card (re-parented, mirroring the maximize pattern, since each session owns one
-// xterm). Signal-only: a session that needs input re-sorts in the rail and pulses, but never hijacks the
-// center while you work. Worktree review happens in the right review sidebar: focusing a session (or
-// clicking a rail pill) selects it there; the rail pill still tags REVIEW/PARKED so the operator knows
-// which sessions have changes waiting.
+// Focus view: a watch-and-steer layout. A persistent left ROSTER RAIL (one lightweight pill per
+// session) and a single large CENTER that holds the focused session's real card (re-parented,
+// mirroring the maximize pattern, since each session owns one xterm). The rail is STABLE: pills sort
+// non-dormant-then-name and never reorder on a state change, so the operator keeps a fixed spatial
+// map. Attention is carried in place, never by floating to the top: WAITING pulses amber, a freshly
+// COMPLETE pill announces once then holds a steady emerald until focused, a sticky "{n} NEED YOU"
+// header counts what needs you, and Alt+W (or the header) jumps straight to the next such session.
+// Worktree review happens in the right review sidebar: focusing a session (or clicking a rail pill)
+// selects it there; the rail pill still tags REVIEW/PARKED so the operator knows which sessions have
+// changes waiting.
 //
 // State lives here (view-local); it reads sessions from the shared card registry and never mutates the
 // Sessions-tab minimize/maximize state. The card is returned to its exact home slot on leave/swap.
 
 import { BADGE_LABELS, STATE_GLYPHS, STATES } from '/shared/states.mjs';
 import { sendControlMsg } from '../control-ws.js';
+import { orderRoster, pickNextAttention } from './attention-core.mjs';
 import { setSelectedId } from '../sidebar/selection.js';
 import { setActivityRenderer } from '../session-card/activity.js';
 import { container, sessionUIs } from '../session-card/card-registry.js';
@@ -20,6 +24,8 @@ import { ensureTerminalSetup, forceTerminalRepaint } from '../session-card/termi
 const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)');
 
 let railEl = null;
+let railHeadEl = null;  // the "{n} NEED YOU" jump header (sticky top of the rail)
+let railListEl = null;  // inner listbox the pills live in (so the header is not a listbox child)
 let centerEl = null;
 let cardSlotEl = null;
 let emptyEl = null;
@@ -28,6 +34,7 @@ let emptyDescEl = null;
 
 let active = false;
 let focusedId = null;
+let attnCursorId = null;            // round-robin cursor for the Alt+W attention queue
 const mergeStatusById = new Map(); // id -> 'none'|'pending-review'|'merging'|'parked'|'merged'
 const pillById = new Map();        // id -> rail pill element
 
@@ -36,6 +43,28 @@ export function isFocusActive() { return active; }
 export function mountFocusView({ rail, center }) {
   railEl = rail;
   centerEl = center;
+
+  // The rail is a sticky jump header above a scrolling listbox of pills. Move the listbox
+  // semantics off the outer nav (which now also holds the header button) onto an inner list, so
+  // the header is never an invalid child of a listbox. The roving-arrow keydown listener stays on
+  // the outer nav (pill keydowns bubble up to it).
+  railEl.removeAttribute('role');
+  railEl.removeAttribute('aria-label');
+
+  railHeadEl = document.createElement('button');
+  railHeadEl.type = 'button';
+  railHeadEl.className = 'focus-rail-head';
+  railHeadEl.hidden = true;
+  railHeadEl.innerHTML = '<span class="focus-rail-head-count"></span>'
+    + '<span class="focus-rail-head-key">ALT+W</span>';
+  railHeadEl.addEventListener('click', focusNextAttention);
+
+  railListEl = document.createElement('div');
+  railListEl.className = 'focus-rail-list';
+  railListEl.setAttribute('role', 'listbox');
+  railListEl.setAttribute('aria-label', 'Session roster');
+
+  railEl.append(railHeadEl, railListEl);
 
   emptyEl = document.createElement('div');
   emptyEl.className = 'focus-empty';
@@ -68,25 +97,22 @@ function onRailKeydown(e) {
   pills[(start + dir + pills.length) % pills.length].focus();
 }
 
-// ── Roster ordering: WAITING first, then needs-review, then RUNNING, then the rest; within a status
-// group, alphabetical by name. The alphabetical tiebreak (not Map insertion order) keeps the rail
-// stable across runtime: a rebuilt session re-enters the Map at the end, but its alphabetical slot
-// is unchanged, so pills no longer shuffle when sessions are rebuilt. ──
-
-function rosterRank(ui, id) {
-  if (ui.currentState === STATES.WAITING) return 0;
-  const ms = mergeStatusById.get(id);
-  if (ms === 'pending-review' || ms === 'parked') return 1;
-  if (ui.currentState === STATES.RUNNING) return 2;
-  return 3;
-}
+// ── Roster ordering (identity-based, NOT status-based): non-dormant first, then alphabetical by
+// name; a state change never reorders a pill. The operator keeps a stable spatial map of the rail,
+// so attention is carried by the pill treatment (WAITING amber pulse, COMPLETE announce-once) and
+// the Alt+W jump, never by a pill floating to the top. The pure sort + queue cursor live in
+// attention-core.mjs. ──
 
 function orderedSessions() {
-  return [...sessionUIs.entries()]
-    .map(([id, ui]) => ({ id, ui }))
-    .sort((a, b) =>
-      rosterRank(a.ui, a.id) - rosterRank(b.ui, b.id)
-      || sessionName(a.ui).localeCompare(sessionName(b.ui), undefined, { numeric: true, sensitivity: 'base' }));
+  const rows = [...sessionUIs.entries()].map(([id, ui]) => ({
+    id,
+    ui,
+    name: sessionName(ui),
+    isDormant: (ui.currentState || STATES.DORMANT) === STATES.DORMANT,
+  }));
+  // Consumers only ever destructure { id, ui }; orderRoster preserves those fields, so return its
+  // result directly rather than re-projecting it.
+  return orderRoster(rows);
 }
 
 function sessionName(ui) {
@@ -123,6 +149,15 @@ function onPillActivate(id) {
 
 function paintPill(pill, id, ui) {
   const state = ui.currentState || STATES.DORMANT;
+  // Announce-once for a finished turn: a session that ENTERS complete while the rail is open tags
+  // its pill unseen (CSS gives a one-shot flash, then holds a steady bright emerald border) until
+  // the operator focuses it (focusSession clears it). A brand-new pill has no prior state, so an
+  // already-complete session present at snapshot/reconnect is treated as already seen and never
+  // false-announces (mirrors the minimized-rail data-unseen rule). prev===state===COMPLETE leaves
+  // the flag untouched, so a focus-acknowledge persists across later unrelated refreshes.
+  const prev = pill.dataset.state; // undefined on a freshly built pill
+  if (state !== STATES.COMPLETE) pill.removeAttribute('data-unseen');
+  else if (prev && prev !== STATES.COMPLETE) pill.dataset.unseen = '';
   pill.dataset.state = state;
   pill.querySelector('.focus-pill-glyph').textContent = STATE_GLYPHS[state] || '';
   pill.querySelector('.focus-pill-label').textContent = (BADGE_LABELS[state] || state).toUpperCase();
@@ -180,7 +215,7 @@ export function refreshFocusRoster() {
     let pill = pillById.get(id);
     if (!pill) { pill = buildPill(id); pillById.set(id, pill); }
     paintPill(pill, id, ui);
-    railEl.appendChild(pill); // re-append moves it into sorted position
+    railListEl.appendChild(pill); // re-append moves it into sorted position
   }
   for (const [id, pill] of pillById) {
     if (!seen.has(id)) { pill.remove(); pillById.delete(id); }
@@ -199,7 +234,47 @@ export function refreshFocusRoster() {
     const ui = sessionUIs.get(focusedId);
     if (ui && ui.card.parentElement !== cardSlotEl) borrowToCenter(ui, focusedId);
   }
+  updateRailHead();
   updateCenter();
+}
+
+// ── One-key triage: the attention queue (Alt+W on the Focus tab, and the rail-head click) ──
+// "Needs you" = WAITING (agent blocked) plus COMPLETE pills not yet acknowledged (data-unseen).
+// updateRailHead surfaces the count + the shortcut; focusNextAttention walks the queue in rail
+// order, borrows each session into the center, and (since the rail never reorders) scrolls the
+// target pill into view. A WAITING target also gets the terminal cursor so the operator can answer
+// at once.
+
+function attentionIds() {
+  return orderedSessions()
+    .filter(({ id, ui }) => {
+      const state = ui.currentState || STATES.DORMANT;
+      if (state === STATES.WAITING) return true;
+      return state === STATES.COMPLETE && !!pillById.get(id)?.hasAttribute('data-unseen');
+    })
+    .map(({ id }) => id);
+}
+
+function updateRailHead() {
+  if (!railHeadEl) return;
+  const n = attentionIds().length;
+  railHeadEl.hidden = n === 0;
+  if (n > 0) {
+    railHeadEl.querySelector('.focus-rail-head-count').textContent =
+      n === 1 ? '1 NEEDS YOU' : `${n} NEED YOU`;
+  }
+}
+
+export function focusNextAttention() {
+  if (!active) return;
+  const ids = attentionIds();
+  if (!ids.length) return;
+  const nextId = pickNextAttention(ids, attnCursorId);
+  attnCursorId = nextId;
+  const ui = sessionUIs.get(nextId);
+  focusSession(nextId);
+  pillById.get(nextId)?.scrollIntoView({ block: 'nearest' });
+  if (ui && ui.currentState === STATES.WAITING) ui.term?.focus();
 }
 
 // ── Center: borrow the focused card, run the review bar ──
@@ -245,6 +320,9 @@ function focusSession(id) {
   if (!active || !sessionUIs.has(id) || id === focusedId) return;
   releaseCenter();
   focusedId = id;
+  // Acknowledge a finished-turn pill: focusing it clears the unseen flag so it stops announcing
+  // (paintPill leaves a cleared flag alone while the state stays COMPLETE).
+  pillById.get(id)?.removeAttribute('data-unseen');
   // Drive the shared selection so the right review sidebar follows the focused session.
   setSelectedId(id);
   borrowToCenter(sessionUIs.get(id), id);

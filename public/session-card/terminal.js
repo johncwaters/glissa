@@ -224,6 +224,13 @@ export function setupTerminal(termWrap, ui) {
   // so it won't emit a raw \x16, but the browser paste event still fires)
   term.attachCustomKeyEventHandler((ev) => {
     if (ev.type !== 'keydown') return true;
+    // Alt+W on the Focus tab is the dashboard triage jump (handled in app.js), not a terminal
+    // keystroke. Skip it here so xterm neither writes \x1bw to the PTY nor consumes it; the keydown
+    // then bubbles to the document handler. document.body.dataset.activeView is set by activateView.
+    if (ev.altKey && !ev.ctrlKey && !ev.metaKey && (ev.key === 'w' || ev.key === 'W')
+        && document.body.dataset.activeView === 'focus') {
+      return false;
+    }
     const ctrl = ev.ctrlKey || ev.metaKey;
     if (ctrl && ev.key === 'c' && term.hasSelection()) {
       const selection = term.getSelection();

@@ -2700,6 +2700,47 @@ body[data-active-view="focus"] #minimized-bar { display: none; }
   background: var(--bg-header);
   border-right: 1px solid var(--border);
 }
+.focus-rail-list { display: flex; flex-direction: column; gap: 6px; }
+
+/* Sticky jump header: counts the sessions that need the operator (WAITING + unacknowledged
+   COMPLETE) and names the Alt+W shortcut. focus-view hides it whenever nothing needs you, so the
+   resting rail stays calm (loud only on change). It is a control, so it wears the one accent, not a
+   state color (state color stays reserved for the pills). Clicking it does the same as Alt+W. The
+   tinted-but-opaque background hides pills scrolling under the sticky header. */
+.focus-rail-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  background: color-mix(in oklch, var(--accent) 10%, var(--bg-header));
+  border: 1px solid var(--accent-dim);
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-family: var(--font-mono);
+}
+.focus-rail-head:hover {
+  background: color-mix(in oklch, var(--accent) 16%, var(--bg-header));
+  border-color: var(--accent);
+}
+.focus-rail-head:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.focus-rail-head-count {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.focus-rail-head-key {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--text-dim);
+}
 
 .focus-pill {
   display: grid;
@@ -2759,7 +2800,7 @@ body[data-active-view="focus"] #minimized-bar { display: none; }
 .focus-pill[data-state="DONE"]         { --st: var(--state-done); }
 .focus-pill[data-state="IDLE"]         { --st: var(--state-idle); }
 .focus-pill[data-state="STARTING"]     { --st: var(--state-starting); }
-.focus-pill[data-state="COMPLETE"]     { --st: var(--state-running); }
+.focus-pill[data-state="COMPLETE"]     { --st: var(--state-complete); }
 .focus-pill[data-state="INITIALIZING"] { --st: var(--state-initializing); }
 .focus-pill[data-state="DORMANT"]      { --st: var(--text-muted); }
 
@@ -2774,6 +2815,30 @@ body[data-active-view="focus"] #minimized-bar { display: none; }
 @keyframes focus-pill-pulse {
   0%, 100% { box-shadow: 0 0 0 0 transparent; }
   50%      { box-shadow: 0 0 0 3px color-mix(in oklch, var(--state-waiting) 22%, transparent); }
+}
+
+/* COMPLETE: a finished turn. An acknowledged (seen) pill carries a calm emerald border; an
+   unacknowledged pill (data-unseen, set when it ENTERS complete while the rail is open) ANNOUNCES
+   ONCE then HOLDS a steady bright emerald border + tint until the operator focuses it
+   (focusSession clears the flag). Only WAITING keeps pulsing; a second forever-pulse would cancel
+   the first out (earned-signal rule). Under reduced motion the one-shot flash is dropped and the
+   steady bright border remains, so the signal still reads. */
+.focus-pill[data-state="COMPLETE"] {
+  border-color: color-mix(in oklch, var(--state-complete) 35%, var(--border-dim));
+}
+.focus-pill[data-state="COMPLETE"][data-unseen] {
+  border-color: var(--state-complete);
+  background: color-mix(in oklch, var(--state-complete) 12%, var(--bg-card));
+}
+@media (prefers-reduced-motion: no-preference) {
+  .focus-pill[data-state="COMPLETE"][data-unseen] {
+    animation: focus-pill-complete-flash 1.2s cubic-bezier(0.22, 1, 0.36, 1) 1;
+  }
+}
+@keyframes focus-pill-complete-flash {
+  0%   { box-shadow: 0 0 0 0 transparent; }
+  30%  { box-shadow: 0 0 0 3px color-mix(in oklch, var(--state-complete) 42%, transparent); }
+  100% { box-shadow: 0 0 0 0 transparent; }
 }
 
 /* ── Working heartbeat (rail-only) ──
