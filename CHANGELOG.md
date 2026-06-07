@@ -9,20 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Isolated git worktree per session**: Every git-repo session runs in its own worktree forked from the integration branch (`integrationBranch`, default `develop`), so an agent's edits stay out of the main checkout until they are reviewed and merged back.
+- **Session worktree review sidebar**: A right-docked sidebar shows the selected session's committed changes per file and merges them into the integration branch while the session keeps running.
+- **Warn before discarding unmerged session work**: Removing a session that still holds unmerged worktree changes now warns that the changes will be lost and relabels the action "Discard & Remove".
+- **Focus view**: A new Focus view, now the default, shows a left roster rail of one pill per session beside a single-session center, replacing the multi-session grid as the navigation model.
+- **Live working heartbeat**: A working session's roster pill glyph breathes and beats on each terminal chunk and goes quiet after output stops.
+- **Name-first roster pills with a time-in-state clock**: Roster pills lead with the session name, and the focused card header shows a clock counting time in the current state.
+- **Background sub-agent completion gate**: A session with a running background sub-agent (Task `run_in_background` or Ctrl+B) stays out of Complete until the sub-agent finishes, so a background task no longer fires a false completion alert, and a live "N agents" chip shows the count. On by default via `detectBackgroundAgents`.
 - **Teams: `changelog` team**: A new on-demand team (analyst -> curator -> auditor -> announcer) reconciles `CHANGELOG.md` against git history and, on a final `SHIP`, drafts a release announcement in the project's voice (drafts only, never posted).
 - **Teams: operator conversation during a run**: A manual run can pause when a stage emits a `QUESTION` and resume once the operator answers in a chat pane, bounded by a question budget and timeout.
 - **Teams: project-level shared pack**: Cross-team pack files (voice-guide, avoid-list, brand) are filled once per project under `.glissa/pack/` and reused by every team that declares them as shared.
 - **Deterministic post-turn auto-fix on turn completion**: When a session completes a turn, Glissa runs text-hygiene fixes over its git-changed files (strip em and en dashes and ellipses, trim trailing whitespace, ensure a final newline, strip a UTF-8 BOM) and reports the result on the card; on by default.
-- **Jump to the next session needing input**: `Alt+W` moves focus to the next session in the `WAITING` state.
+- **Step through sessions needing attention**: `Alt+W` walks the Focus rail's attention queue one session per press (waiting or completed), centering each and focusing its terminal.
 
 ### Changed
 
 - **Notifications delivered via browser Web Notifications**: Notifications now raise a native browser notification by default; the BurntToast/msg path is demoted to opt-in via `osToast`, and a Desktop Notifications settings toggle gates the new channel.
 - **Skip-permissions (YOLO) is the session default**: New sessions spawn with `--dangerously-skip-permissions` unless their project opts out, and the Add Session dialog now offers an opt-out "Require permission prompts" (widening the localhost-only trust boundary).
-- **Legible minimized rail with peek tray**: Minimized cards are now status pills (glyph, label, and color) with a fly-up peek tray that shows the live terminal, replacing the single-dot 120px chip.
 
 ### Removed
 
+- **Multi-session grid and its controls**: The Sessions grid's minimize and maximize, the minimized bar, drag-and-drop reordering, the manual/split layout control, and sleep/wake are gone; sessions are now navigated through the Focus view.
 - **Teams: standalone `release-notes` team**: Removed; its git-range research and GitHub release draft are now covered by the `changelog` team's reconciliation and announcer.
 
 ### Fixed
@@ -30,7 +37,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Team run output stranded on its worktree branch**: An untracked header-only `log.md` blocked the fast-forward merge-back of a finished run; the merge-back now clears the blocking collisions first so the run lands in the project.
 - **Stale stage header in the Teams view**: The run header no longer sticks on the finished stage while the next stage spawns.
 - **Dropped terminal history on reconnect under backpressure**: A reconnect replay frame dropped under backpressure left scrollback history stranded; the drop now rewinds the send offset so the backfill re-pulls the missed history.
-- **WebGL glyph ghosts on expand and maximize**: Expanding or maximizing a card now forces a full repaint, so stale cached glyphs no longer linger.
+- **Inconsistent completion alerts**: A finished turn now plays the alert sound, completion notifications debounce per session and category so simultaneous completions stop cross-suppressing each other, and a process exit notifies like a turn completion.
+- **WebGL glyph ghosts on expand**: Expanding a card now forces a full repaint, so stale cached glyphs no longer linger.
 
 ## [0.13.0] - 2026-06-01
 
