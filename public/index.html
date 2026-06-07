@@ -147,7 +147,6 @@
           <nav class="header-tabs" id="header-tabs" role="tablist" aria-label="Primary views">
             <button class="header-tab" id="tab-focus" role="tab" aria-selected="true" aria-controls="view-focus" tabindex="0">Focus</button>
             <button class="header-tab" id="tab-teams" role="tab" aria-selected="false" aria-controls="view-teams" tabindex="-1">Teams<span class="tab-activity" id="tab-teams-activity" aria-hidden="true"></span></button>
-            <button class="header-tab" id="tab-sessions" role="tab" aria-selected="false" aria-controls="sessions-container" tabindex="-1">Sessions</button>
           </nav>
         </div>
         <div class="header-right">
@@ -175,7 +174,9 @@
     <!-- Body row: main views on the left, the review sidebar docked right (collapsed by default). -->
     <div class="app-body" id="app-body">
       <main class="app-main" id="app-main">
-        <section class="sessions" id="sessions-container" role="tabpanel" aria-labelledby="tab-sessions">
+        <!-- Off-screen card home: every session card lives here; Focus borrows cards from it into the
+             center. No longer a navigable view (the Sessions tab was removed); always hidden via CSS. -->
+        <section class="sessions" id="sessions-container">
           <!-- Session cards injected here by app.js -->
         </section>
         <!-- Minimized session cards injected here by app.js; bar hides via :empty when none are minimized -->

@@ -15,7 +15,7 @@ import { aggregateEl, consumeLocalReorderPending, container, minimizedBar, sessi
 // Load-bearing import: evaluating drag-drop.js installs the container-level
 // dragover/dragleave/drop listeners and the _dropZone side effects at module load.
 import { setupDragAndDrop } from './drag-drop.js';
-import { _performExpand, enforceSplitOnCreate, exitMaximizeMode, forgetSessionLayout, getMaximizedSession, isMaximizeActive, SLEEP_ELIGIBLE, sleepSession, toggleMaximize, toggleMinimize, wakeSession } from './layout.js';
+import { _performExpand, enforceSplitOnCreate, exitMaximizeMode, forgetSessionLayout, getMaximizedSession, SLEEP_ELIGIBLE, sleepSession, toggleMaximize, toggleMinimize, wakeSession } from './layout.js';
 // Load-bearing import: evaluating rail.js installs the minimized-bar MutationObserver,
 // the elapsed-tick interval, and the rail's click/keyboard listeners at module load.
 import { refreshPill } from './rail.js';
@@ -362,56 +362,6 @@ export function renameSessionCard(sessionId, newName) {
   // Only update the display name - id stays the same, no re-keying needed
   ui.card.dataset.session = newName;
   ui.nameEl.textContent = newName;
-}
-
-// Bring a session's card into view and put the cursor in its terminal. Used when an action taken
-// elsewhere (e.g. starting guided team setup from the Teams view) spawns a session the operator is
-// expected to answer in, so focus lands on it instead of nothing visibly happening. Focus is
-// best-effort: a card with no live terminal (dormant/never-started) is revealed but not typed into.
-export function focusSessionCard(sessionId) {
-  const ui = sessionUIs.get(sessionId);
-  if (!ui) return false;
-
-  // Maximize mode hides every other card, so a different maximized session would keep the target
-  // invisible - exit it so focus actually reveals the target.
-  if (isMaximizeActive() && getMaximizedSession() !== sessionId) exitMaximizeMode();
-
-  // Restore a minimized card with the non-toggling primitive: unlike toggleMinimize it never spawns
-  // a dormant PTY or evicts a split pane as a side effect of focusing.
-  if (ui.card.classList.contains('minimized')) _performExpand(sessionId, ui);
-
-  // Scroll + one-shot accent flash + cursor, deferred via the same double-rAF restart idiom as
-  // completion-flash: a repeat focus replays the animation, and layout settles after any expand
-  // before we measure the scroll target or grab the cursor.
-  ui.card.classList.remove('focus-flash');
-  requestAnimationFrame(() => {
-    requestAnimationFrame(() => {
-      ui.card.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      ui.card.classList.add('focus-flash');
-      ui.card.addEventListener('animationend', () => ui.card.classList.remove('focus-flash'), { once: true });
-      if (ui.term) ui.term.focus();
-    });
-  });
-  return true;
-}
-
-// Triage jump (Alt+W): cycle focus to the next session that needs input. Walks
-// cards in visual order (grid, then rail), so repeated presses round-robin through
-// every WAITING session. focusSessionCard restores a minimized target and grabs its
-// cursor, so one keystroke takes the operator from anywhere to the session asking
-// for them. Returns false when nothing is waiting.
-let _waitingCursor = -1;
-
-export function focusNextWaiting() {
-  const ordered = [
-    ...container.querySelectorAll('.session-card'),
-    ...minimizedBar.querySelectorAll('.session-card'),
-  ].filter((c) => c.dataset.state === STATES.WAITING && !c.classList.contains('drop-zone-placeholder'));
-  if (ordered.length === 0) return false;
-
-  _waitingCursor = (_waitingCursor + 1) % ordered.length;
-  const target = ordered[_waitingCursor];
-  return focusSessionCard(target.dataset.id);
 }
 
 export function removeSessionCard(sessionId) {

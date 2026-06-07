@@ -273,6 +273,31 @@ export function setFocusMergeStatus(id, mergeStatus) {
   if (active) refreshFocusRoster();
 }
 
+// Focus a specific session into the center on demand. Used by the guided-setup handler (an interactive
+// setup session the operator must answer) now that Focus is the only session destination. Delegates to
+// onPillActivate (which guards a missing id and starts a DORMANT target first); the active guard keeps a
+// hidden view from spawning a dormant session as a side effect, so the caller must switch to Focus first.
+export function focusSessionInCenter(id) {
+  if (active) onPillActivate(id);
+}
+
+// Focus the Nth session (1-based) in the current rail order. Backs the Alt+1..9 chrome shortcut.
+export function focusNthInRail(n) {
+  if (!active) return;
+  const target = orderedSessions()[n - 1];
+  if (target) onPillActivate(target.id);
+}
+
+// Triage jump (Alt+W): round-robin focus the next WAITING session in rail order into the center.
+let waitingCursor = -1;
+export function focusNextWaitingInRail() {
+  if (!active) return;
+  const waiting = orderedSessions().filter(({ ui }) => ui.currentState === STATES.WAITING);
+  if (!waiting.length) { waitingCursor = -1; return; }
+  waitingCursor = (waitingCursor + 1) % waiting.length;
+  onPillActivate(waiting[waitingCursor].id);
+}
+
 export function activateFocusView() {
   if (!railEl) return;
   active = true;

@@ -7,12 +7,12 @@ import './tailwind.css';
 import { STATES } from '/shared/states.mjs';
 import { connectControl, disableReconnect, onControlMessage, sendControlMsg, sendControlRequest, setConnectionStateCallback } from './control-ws.js';
 import { createAddSessionDialog, createConfirmDialog, createSettingsDialog } from './dialogs.js';
-import { activateFocusView, deactivateFocusView, isFocusActive, mountFocusView, refreshFocusRoster, setFocusMergeStatus } from './focus-view/focus-view.js';
+import { activateFocusView, deactivateFocusView, focusNextWaitingInRail, focusNthInRail, focusSessionInCenter, isFocusActive, mountFocusView, refreshFocusRoster, setFocusMergeStatus } from './focus-view/focus-view.js';
 import { applyHealthSnapshot, mountHealthMonitor } from './health-monitor.js';
 import { initNotifications, showDesktopNotification } from './notifications.js';
 import { handleDebugStateRefresh, handleDebugStateResponse } from './session-card/card-dom.js';
 import { exitMaximizeMode, isMaximizeActive, setLayoutMode } from './session-card/layout.js';
-import { applyState, applyTerminalSettings, createSessionCard, focusNextWaiting, focusSessionCard, getSessionCount, handleSessionsReordered, hasSession, removeSessionCard, renameSessionCard, seedSessionMergeStatus, setSessionDiff, setSessionMergeStatus, setSessionPostTurn, setSessionWorktree, updateAggregateStatus } from './session-card/lifecycle.js';
+import { applyState, applyTerminalSettings, createSessionCard, getSessionCount, handleSessionsReordered, hasSession, removeSessionCard, renameSessionCard, seedSessionMergeStatus, setSessionDiff, setSessionMergeStatus, setSessionPostTurn, setSessionWorktree, updateAggregateStatus } from './session-card/lifecycle.js';
 import { reconnectDataWs } from './session-card/terminal.js';
 import { showErrorToast } from './session-card/toast.js';
 import { forgetReviewSession, mountReviewSidebar, refreshReviewSidebar } from './sidebar/review-sidebar.js';
@@ -212,11 +212,11 @@ const messageHandlers = {
   'team-schedule-updated': (msg) => handleTeamMessage(msg),
   'setup-team-pack-started': (msg) => {
     handleTeamMessage(msg);
-    // The guided-setup session is an interactive terminal under the Sessions view; jump there and
-    // focus it so the operator can answer the interview instead of the click appearing to do nothing.
+    // The guided-setup session is an interactive terminal; jump to Focus and pull it into the center
+    // so the operator can answer the interview instead of the click appearing to do nothing.
     if (msg.sessionId) {
-      activateView('sessions'); // synchronous; focusSessionCard's own double-rAF lets it settle
-      focusSessionCard(msg.sessionId);
+      activateView('focus'); // synchronous; activates Focus so the borrow below has a live center
+      focusSessionInCenter(msg.sessionId);
     }
   },
   'team-pack-updated':     (msg) => handleTeamMessage(msg),
@@ -274,11 +274,10 @@ document.getElementById('btn-settings').addEventListener('click', () => {
   createSettingsDialog();
 });
 
-// ── Primary view tabs (Focus / Teams / Sessions) ─────────────────────
+// ── Primary view tabs (Focus / Teams) ─────────────────────
 
 const viewTeamsEl = document.getElementById('view-teams');
 const viewFocusEl = document.getElementById('view-focus');
-const tabSessions = document.getElementById('tab-sessions');
 const tabTeams = document.getElementById('tab-teams');
 const tabFocus = document.getElementById('tab-focus');
 const tabActivityEl = document.getElementById('tab-teams-activity');
@@ -293,11 +292,11 @@ mountFocusView({
 mountReviewSidebar({ panel: document.getElementById('review-sidebar') });
 
 // Primary views in tab-strip order. Adding a view = adding an entry here (N-way, not a boolean).
-// Focus leads as the default landing view; the Sessions grid stays mounted (Focus borrows its cards).
+// Focus leads as the default landing view; the session-card grid (#sessions-container) stays mounted
+// off-screen as the canonical card home Focus borrows from - it is no longer a navigable view.
 const VIEW_TABS = [
-  { view: 'focus',    tab: tabFocus,    el: viewFocusEl },
-  { view: 'teams',    tab: tabTeams,    el: viewTeamsEl },
-  { view: 'sessions', tab: tabSessions, el: null },
+  { view: 'focus', tab: tabFocus, el: viewFocusEl },
+  { view: 'teams', tab: tabTeams, el: viewTeamsEl },
 ];
 
 let _activeView = 'focus';
@@ -312,18 +311,15 @@ function activateView(view) {
     v.tab.setAttribute('aria-selected', String(selected));
     v.tab.tabIndex = selected ? 0 : -1;
   }
-  // Leaving Focus returns the borrowed card to the grid BEFORE we re-layout the Sessions view.
+  // Leaving Focus returns the borrowed card to its off-screen home grid.
   if (prev === 'focus' && view !== 'focus') deactivateFocusView();
   if (view === 'teams') {
     mountTeamsView(viewTeamsEl, getKnownProjects());
   } else if (view === 'focus') {
-    // Clear any Sessions-view maximize so its module-global state doesn't dangle while Focus borrows
-    // a card into the center (otherwise the Sessions view returns in a half-maximized layout).
+    // Clear any lingering grid maximize so its module-global state doesn't dangle while Focus borrows
+    // a card into the center (otherwise a returning card lands in a half-maximized layout).
     exitMaximizeMode();
     activateFocusView();
-  } else {
-    // Session terminals were display:none under another tab - re-fit on return.
-    autoLayout();
   }
 }
 
@@ -421,8 +417,9 @@ function autoLayout() {
 }
 
 // ── Keyboard shortcuts (chrome-level) ─────────────────────────
-// Alt+0 opens a new session; Alt+1..9 jumps to the Nth session card; Alt+W jumps
-// to the next session that needs input (triage). The Alt+<key> namespace is used
+// Alt+0 opens a new session; Alt+1..9 focuses the Nth session in the Focus rail; Alt+W jumps
+// to the next session that needs input (triage). Both drive the Focus center, the only session
+// destination now that the Sessions grid view was removed. The Alt+<key> namespace is used
 // on purpose: it collides with neither browser shortcuts (which switch tabs on
 // Ctrl+digit, not Alt) nor VS Code defaults (which are Ctrl / Ctrl+Shift / F-key /
 // chord based, and use Ctrl+1..3 for editor groups). Guarded so they never reach a
@@ -446,17 +443,13 @@ document.addEventListener('keydown', (e) => {
   }
   if (e.key === 'w' || e.key === 'W') {
     e.preventDefault();
-    focusNextWaiting();
+    if (isFocusActive()) focusNextWaitingInRail();
     return;
   }
   if (e.key >= '1' && e.key <= '9') {
-    const cards = [...sessionsContainer.querySelectorAll('.session-card')]
-      .filter((c) => !c.classList.contains('drop-zone-placeholder'));
-    const card = cards[Number(e.key) - 1];
-    if (card) {
-      e.preventDefault();
-      focusSessionCard(card.dataset.id);
-    }
+    if (!isFocusActive()) return;
+    e.preventDefault();
+    focusNthInRail(Number(e.key));
   }
 });
 
