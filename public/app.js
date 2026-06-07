@@ -7,11 +7,11 @@ import './tailwind.css';
 import { STATES } from '/shared/states.mjs';
 import { connectControl, disableReconnect, onControlMessage, sendControlMsg, sendControlRequest, setConnectionStateCallback } from './control-ws.js';
 import { createAddSessionDialog, createConfirmDialog, createSettingsDialog } from './dialogs.js';
-import { activateFocusView, deactivateFocusView, focusNextWaitingInRail, focusNthInRail, focusSessionInCenter, isFocusActive, mountFocusView, refreshFocusRoster, setFocusMergeStatus } from './focus-view/focus-view.js';
+import { activateFocusView, deactivateFocusView, focusNextAttention, focusNthInRail, focusSessionInCenter, isFocusActive, mountFocusView, refreshFocusRoster, setFocusMergeStatus } from './focus-view/focus-view.js';
 import { applyHealthSnapshot, mountHealthMonitor } from './health-monitor.js';
 import { initNotifications, showDesktopNotification } from './notifications.js';
 import { handleDebugStateRefresh, handleDebugStateResponse } from './session-card/card-dom.js';
-import { applyState, applyTerminalSettings, createSessionCard, getSessionCount, hasSession, removeSessionCard, renameSessionCard, seedSessionMergeStatus, setSessionDiff, setSessionMergeStatus, setSessionPostTurn, setSessionWorktree, updateAggregateStatus } from './session-card/lifecycle.js';
+import { applyState, applyTerminalSettings, createSessionCard, getSessionCount, hasSession, removeSessionCard, renameSessionCard, seedSessionMergeStatus, setSessionAgents, setSessionDiff, setSessionMergeStatus, setSessionPostTurn, setSessionWorktree, updateAggregateStatus } from './session-card/lifecycle.js';
 import { reconnectDataWs } from './session-card/terminal.js';
 import { showErrorToast } from './session-card/toast.js';
 import { forgetReviewSession, mountReviewSidebar, refreshReviewSidebar } from './sidebar/review-sidebar.js';
@@ -101,6 +101,8 @@ function handleSnapshot(sessions) {
     }
     // Hydrate the review sidebar's status/count from the snapshot (quiet: no auto-open on reconnect).
     seedSessionMergeStatus(s.id, s.mergeStatus);
+    // Restore the live background sub-agent chip on reconnect (Glissa reloads on every restart).
+    setSessionAgents(s.id, s.activeAgents);
   }
   updateAggregateStatus();
 
@@ -148,6 +150,7 @@ const messageHandlers = {
   'session-renamed':    (msg) => { if (knownProjects.has(msg.id)) knownProjects.set(msg.id, msg.newName); renameSessionCard(msg.id, msg.newName); },
   'session-modified':   (msg) => { if (!msg.ephemeral) knownProjects.set(msg.id, msg.session); removeSessionCard(msg.id); forgetReviewSession(msg.id); createSessionCard(msg.id, msg.session, msg.state, { skipPerms: !!msg.skipPerms, worktree: !!msg.worktree }); if (isFocusActive()) refreshFocusRoster(); },
   'session-git':        (msg) => setSessionWorktree(msg.id, !!msg.worktree),
+  'session-agents':     (msg) => setSessionAgents(msg.id, msg.activeAgents),
   'session-merge-status': (msg) => { setSessionMergeStatus(msg.id, msg.mergeStatus); setFocusMergeStatus(msg.id, msg.mergeStatus); },
   'session-worktree-blocked': (msg) => { showErrorToast(`${msg.session}: ${msg.notice || 'integration branch not found'}`); },
   'session-worktree-ready': () => {},
@@ -370,16 +373,25 @@ function isTypingContext() {
 
 document.addEventListener('keydown', (e) => {
   if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+
+  // Focus-tab triage (Alt+W -> next session needing you, borrowed into the center) must work even
+  // while the centered terminal holds keyboard focus - that is the expected place to be while
+  // triaging - so it runs BEFORE the typing guard. xterm's focused element is its helper textarea;
+  // treat that as not-a-real-input so triage fires there, but a genuine text field (inline rename,
+  // a dialog) still swallows Alt+W. terminal.js returns false for this key so it reaches here.
+  if ((e.key === 'w' || e.key === 'W') && isFocusActive()) {
+    const a = document.activeElement;
+    const realInput = a && (a.isContentEditable
+      || ((a.tagName === 'INPUT' || a.tagName === 'TEXTAREA')
+          && !a.classList.contains('xterm-helper-textarea')));
+    if (!realInput) { e.preventDefault(); focusNextAttention(); return; }
+  }
+
   if (isTypingContext()) return;
 
   if (e.key === '0') {
     e.preventDefault();
     document.getElementById('btn-add-session-header')?.click();
-    return;
-  }
-  if (e.key === 'w' || e.key === 'W') {
-    e.preventDefault();
-    if (isFocusActive()) focusNextWaitingInRail();
     return;
   }
   if (e.key >= '1' && e.key <= '9') {

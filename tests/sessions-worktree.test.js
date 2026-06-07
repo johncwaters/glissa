@@ -26,7 +26,7 @@ function realWorktreeDir() {
 }
 
 function fakeGitWorkspace(opts = {}) {
-  const calls = { create: [], mergeBack: [], discard: [] };
+  const calls = { create: [], mergeBack: [], mergeKeep: [], discard: [] };
   return {
     calls,
     create(args) {
@@ -35,6 +35,11 @@ function fakeGitWorkspace(opts = {}) {
       return { cwd: opts.worktreeDir, isGit: true, branch: `glissa/session/${args.label}`, base: args.baseBranch, baseSha: 'basesha' };
     },
     mergeBack(args) { calls.mergeBack.push(args); return opts.mergeResult || { merged: true, branch: null }; },
+    mergeKeep(args) {
+      calls.mergeKeep.push(args);
+      return opts.mergeKeepResult
+        || { merged: true, kept: true, branch: args.workspace.branch, base: args.targetBranch, baseSha: 'newbase' };
+    },
     discard(args) { calls.discard.push(args); },
   };
 }
@@ -79,7 +84,7 @@ test('start() provisions a worktree off the integration branch and spawns the PT
   }
 });
 
-test('start() BLOCKS when the integration branch is missing — stays DORMANT, no spawn, notice set', () => {
+test('start() BLOCKS when the integration branch is missing - stays DORMANT, no spawn, notice set', () => {
   const gw = fakeGitWorkspace({ createResult: { cwd: process.cwd(), isGit: false, reason: 'no-base-branch' } });
   const spawned = [];
   let blocked = null;
@@ -169,6 +174,65 @@ test('mergeWorktree parks on a conflict (worktree preserved)', { skip: !WIN }, (
     s.destroy();
     fs.rmSync(wt, { recursive: true, force: true });
   }
+});
+
+test('mergeAndContinue from COMPLETE merges into develop but KEEPS the worktree + session alive', { skip: !WIN }, () => {
+  const wt = realWorktreeDir();
+  const gw = fakeGitWorkspace({
+    worktreeDir: wt,
+    mergeKeepResult: { merged: true, kept: true, branch: 'glissa/session/wt-sess', base: 'develop', baseSha: 'newbase' },
+  });
+  const statuses = [];
+  const s = makeSession({ gitWorkspace: gw, integrationBranch: 'develop', ptySpawn: () => fakePty() });
+  s.on('merge-status', (e) => statuses.push(e.mergeStatus));
+  try {
+    s.start();
+    s.state = STATES.COMPLETE; // a completed turn, PTY still alive in the worktree
+    const r = s.mergeAndContinue();
+    assert.equal(r.merged, true);
+    assert.equal(gw.calls.mergeKeep.length, 1, 'delegated to the keep-worktree merge');
+    assert.equal(gw.calls.mergeKeep[0].targetBranch, 'develop');
+    assert.equal(gw.calls.mergeBack.length, 0, 'did NOT use the finishing merge path');
+    assert.equal(s.worktreeDir, wt, 'worktree kept alive so the session keeps working');
+    assert.equal(s.isWorktree, true);
+    assert.equal(s.baseSha, 'newbase', 'tracks the new integration tip it was rebased onto');
+    assert.equal(s.state, STATES.COMPLETE, 'session is NOT ended');
+    assert.equal(s.mergeStatus, 'none', 'clean worktree again after the merge');
+    assert.deepEqual(statuses.slice(-2), ['merging', 'none']);
+  } finally { s.destroy(); fs.rmSync(wt, { recursive: true, force: true }); }
+});
+
+test('mergeAndContinue refuses while actively RUNNING (mid-edit; no merge)', { skip: !WIN }, () => {
+  const wt = realWorktreeDir();
+  const gw = fakeGitWorkspace({ worktreeDir: wt });
+  const s = makeSession({ gitWorkspace: gw, integrationBranch: 'develop', ptySpawn: () => fakePty() });
+  try {
+    s.start();
+    s.state = STATES.RUNNING;
+    const r = s.mergeAndContinue();
+    assert.equal(r.merged, false);
+    assert.equal(r.reason, 'not-continuable');
+    assert.equal(gw.calls.mergeKeep.length, 0, 'no merge attempted mid-work');
+    assert.equal(s.worktreeDir, wt, 'worktree untouched');
+  } finally { s.destroy(); fs.rmSync(wt, { recursive: true, force: true }); }
+});
+
+test('mergeAndContinue parks on a rebase conflict (worktree preserved, session continues)', { skip: !WIN }, () => {
+  const wt = realWorktreeDir();
+  const gw = fakeGitWorkspace({
+    worktreeDir: wt,
+    mergeKeepResult: { merged: false, parked: true, reason: 'rebase-conflict', branch: 'glissa/session/wt-sess' },
+  });
+  const s = makeSession({ gitWorkspace: gw, integrationBranch: 'develop', ptySpawn: () => fakePty() });
+  try {
+    s.start();
+    s.state = STATES.IDLE;
+    const r = s.mergeAndContinue();
+    assert.equal(r.merged, false);
+    assert.equal(s.mergeStatus, 'parked');
+    assert.equal(s.worktreeDir, wt, 'parked worktree preserved');
+    assert.equal(s.state, STATES.IDLE, 'session not ended');
+  } finally { s.destroy(); fs.rmSync(wt, { recursive: true, force: true }); }
 });
 
 test('adoptWorktree re-attaches an on-disk worktree as pending-review (restart re-adoption)', { skip: !WIN }, () => {

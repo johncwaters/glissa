@@ -1,4 +1,4 @@
-# Glissa — Agent Instructions
+# Glissa - Agent Instructions
 
 ## Project Purpose
 
@@ -10,11 +10,12 @@ Glissa is a lightweight Node.js background process that spawns and manages Claud
 server.js          # Production entry point (thin wrapper)
 backend.js         # Express + WebSocket server factory (shared by server.js and Vite plugin)
 sessions.js        # Session class: lifecycle, PTY spawn/kill, timers, hooks; consumes StatusSource; delegates pure logic to session-core/
-session-core/      # Pure cores of a SEAM EXTRACTION from sessions.js — the stateful Session class stays at root by design (moving it in = deferred follow-up)
+session-core/      # Pure cores of a SEAM EXTRACTION from sessions.js - the stateful Session class stays at root by design (moving it in = deferred follow-up)
   spawn-command.js # classifyClaudeKind, resolveClaudeCommand, buildSpawnCommand, CLAUDE_CMD (resolve-then-branch spawn)
-  spawn-env.js     # Pure buildSpawnEnv(baseEnv) — the 5-var scrub + always-on NO_FLICKER, returns a copy
+  spawn-env.js     # Pure buildSpawnEnv(baseEnv) - the 5-var scrub + always-on NO_FLICKER, returns a copy
   state-machine.js # TRANSITIONS, GUARDS, ENTRY_HOOKS, EXIT_HOOKS (lifecycle tables, relocated verbatim)
-  status-mapper.js # Pure mapSignalToEvent(signal, state, confidence) -> event|null (the _onStatus decision)
+  status-mapper.js # Pure mapSignalToEvent(signal, state, confidence, activeAgents) -> event|null (the _onStatus decision; activeAgents>0 suppresses ready->task_complete)
+  agent-tracker.js # Pure live background sub-agent bookkeeping (addAgent/removeAgent/pruneAgents over a Map<agent_id, ts>)
 detection/
   status-source.js     # Merges hook + title signals (precedence, conflict window, dedup)
   osc-title-source.js  # OSC-0 title fallback signal (working/ready/unknown only)
@@ -34,7 +35,7 @@ public/
   dialogs.js       # Add Session and Settings dialog factories
   session-card/    # Session card modules (decomposed from session-card.js)
     card-registry.js   # Shared state owner: sessionUIs Map + 2 DOM singletons
-    toast.js           # showErrorToast — leaf, no local deps
+    toast.js           # showErrorToast - leaf, no local deps
     naming.js          # countSessionsByName, suggestSessionName (wraps naming-core.mjs)
     naming-core.mjs    # Pure: nextSuggestedName, countAutoNames, isAutoNameOf
     webgl-pool.js      # WebGL context pool with LRU cap (wraps webgl-core.mjs)
@@ -68,32 +69,32 @@ dist/              # Vite production build output (gitignored)
 
 ## Development Workflow
 
-- `npm run dev` — Vite dev server with HMR on port 5173, Express + WebSocket backend attached via plugin (single process)
-- `npm run dev:server-only` — Express backend only on port 3000 (for debugging backend without Vite)
-- `npm run build` — Production build to `dist/`
-- `npm start` — Production server (serves from `dist/` if it exists, otherwise `public/`)
-- `npm run preview` — Preview production build via Vite
+- `npm run dev` - Vite dev server with HMR on port 5173, Express + WebSocket backend attached via plugin (single process)
+- `npm run dev:server-only` - Express backend only on port 3000 (for debugging backend without Vite)
+- `npm run build` - Production build to `dist/`
+- `npm start` - Production server (serves from `dist/` if it exists, otherwise `public/`)
+- `npm run preview` - Preview production build via Vite
 
 ## Platform and Runtime
 
 - **OS:** Windows 11
 - **Node:** v24+
-- **Module system:** CommonJS (`require` / `module.exports`) for server — no ESM. Frontend uses ES modules bundled by Vite.
+- **Module system:** CommonJS (`require` / `module.exports`) for server - no ESM. Frontend uses ES modules bundled by Vite.
 
 ## Production Dependencies
 
-- `express` — HTTP server and static file serving
-- `ws` — WebSocket server
-- `node-pty` — Pseudo-terminal for spawning Claude Code with real PTY support
-- `@xterm/xterm` — Terminal emulator (loaded in browser via ES modules, not in Node.js)
-- `@xterm/addon-fit` — xterm.js addon for fitting terminal to container (browser only)
-- `@xterm/addon-webgl` — xterm.js addon for WebGL rendering (browser only)
+- `express` - HTTP server and static file serving
+- `ws` - WebSocket server
+- `node-pty` - Pseudo-terminal for spawning Claude Code with real PTY support
+- `@xterm/xterm` - Terminal emulator (loaded in browser via ES modules, not in Node.js)
+- `@xterm/addon-fit` - xterm.js addon for fitting terminal to container (browser only)
+- `@xterm/addon-webgl` - xterm.js addon for WebGL rendering (browser only)
 
 **Dev Dependencies:**
 
-- `vite` — Frontend build tool (dev server with HMR, production bundling)
-- `tailwindcss` — Utility-first CSS framework (v4)
-- `@tailwindcss/vite` — Tailwind CSS Vite plugin
+- `vite` - Frontend build tool (dev server with HMR, production bundling)
+- `tailwindcss` - Utility-first CSS framework (v4)
+- `@tailwindcss/vite` - Tailwind CSS Vite plugin
 
 **Notes:**
 
@@ -108,7 +109,7 @@ Do NOT add dependencies without explicit instruction.
 - **Semantic classes** in `style.css` for JS-created DOM elements (`session-card/lifecycle.js`, `session-card/card-dom.js`, `dialogs.js`)
 - **State-driven styles** via `[data-state]` attribute selectors in `style.css`
 - **Animations** (`@keyframes`) and pseudo-elements (`::before`) in `style.css`
-- **Theme** defined in `public/tailwind.css` via `@theme` block — maps colors, fonts, radii
+- **Theme** defined in `public/tailwind.css` via `@theme` block - maps colors, fonts, radii
 
 ## Key Design Decisions
 
@@ -125,31 +126,32 @@ INITIALIZING → STARTING → RUNNING → WAITING → IDLE → DONE
                                                     ↘ FAILED
 ```
 
-States are string constants. Transitions are explicit — no implicit state mutation.
+States are string constants. Transitions are explicit - no implicit state mutation.
 
-### Status Detection (structural signals — NOT screen scraping)
+### Status Detection (structural signals - NOT screen scraping)
 
 Status is derived from machine-emitted signals, never from parsing the rendered TUI:
 
-- **Authoritative: Claude Code hooks.** At spawn, `sessions.js` appends `--settings <file>` (written by `detection/settings-injector.js`) injecting HTTP hooks (`Stop`, `Notification`, `UserPromptSubmit`, `SessionStart`/`End`) that POST to `POST /hook/:glissaId/:event` on the existing Express server. A per-session bearer token (in the hook URL) is validated by `detection/hook-source.js` `HookRouter`. No target-repo modification; HTTP hooks need no shell.
-- **Fallback: OSC-0 title** (`detection/osc-title-source.js`) — braille spinner = `working`, idle glyph = `ready`; an unknown glyph is `unknown`, never a guess. It NEVER emits `awaiting-input`.
+- **Authoritative: Claude Code hooks.** At spawn, `sessions.js` appends `--settings <file>` (written by `detection/settings-injector.js`) injecting HTTP hooks (`Stop`, `Notification`, `UserPromptSubmit`, `SessionStart`/`End`, `SubagentStart`/`SubagentStop`) that POST to `POST /hook/:glissaId/:event` on the existing Express server. A per-session bearer token (in the hook URL) is validated by `detection/hook-source.js` `HookRouter`. No target-repo modification; HTTP hooks need no shell.
+- **Fallback: OSC-0 title** (`detection/osc-title-source.js`) - braille spinner = `working`, idle glyph = `ready`; an unknown glyph is `unknown`, never a guess. It NEVER emits `awaiting-input`.
 - `detection/status-source.js` merges both (precedence hook > title), holds `ready` for a conflict window so a racing `awaiting-input` wins, and dedups. `sessions.js._onStatus` maps the normalized signal to a transition per the signal x state matrix (see `.omc/plans/rewrite-terminal-detection.md` §4a and `docs/postmortem-terminal-detection.md`).
+- **Background sub-agents (completion gate).** `SubagentStart`/`SubagentStop` (each carrying `agent_id`) are NOT transitions. `sessions.js` keeps a per-session live `agent_id` set (pure bookkeeping in `session-core/agent-tracker.js`), and `mapSignalToEvent` suppresses `ready` to `task_complete` while that set is non-empty, so a main-agent `Stop` fired while a background sub-agent (Task `run_in_background` / Ctrl+B) is still running does NOT falsely COMPLETE the card. The main agent auto-resumes when the sub-agent finishes, and its later `Stop` (count back to 0) completes normally, so there is no auto-complete on drain. The live count rides `toSnapshot().activeAgents` and a `session-agents` control broadcast (rendered as an "N agents" card chip). On by default; `config.json` `detectBackgroundAgents: false` is the kill switch (signals ignored, behavior as before). A dropped `SubagentStop` is bounded by a per-id TTL prune (`agent-tracker.js`) plus a hard clear on PTY exit / restart.
 - The PTY data path does NO content parsing beyond scanning for OSC-0 titles. Do not reintroduce body/line scraping.
 
 ### Session Spawning (node-pty)
 
 Sessions spawn `claude` via `pty.spawn()` from node-pty (NOT `child_process.spawn`).
 
-- Claude CLI produces zero output with piped stdio — a real PTY is required.
+- Claude CLI produces zero output with piped stdio - a real PTY is required.
 - Must unset env vars before spawn: `CLAUDECODE`, `CLAUDE_CODE_SSE_PORT`, `CLAUDE_CODE_ENTRYPOINT`
-- Do NOT use `shell: true` — pass args as array
+- Do NOT use `shell: true` - pass args as array
 - Terminal name: `xterm-256color`, default 80x24
 - `dangerouslySkipPermissions` flag spawns Claude with `--dangerously-skip-permissions`
 - **Resolve-then-branch spawn (Windows):** `claude` is resolved once at module load (`resolveClaudeCommand` -> `{ path, kind }`, `kind` from `classifyClaudeKind`). The pure `buildSpawnCommand` then picks the spawn form: a real PE image (`.exe`/`.com`) is spawned directly via `pty.spawn(<abs path>, args)`; `.cmd`/`.bat`/`.ps1` shim installs (or a failed resolution) fall back to `cmd.exe /c claude`. Spawning the `.exe` directly avoids cmd's double command-line parse and its console-title write. The `cmd.exe /c` path is now a shim-only fallback, not the default. Tests inject the resolved command via the `spawnCommand` constructor option.
 
 ### Security: Trust Boundary
 
-Glissa binds to `localhost` only. Both WebSocket channels (data and control) have **no authentication** — any process on the local machine can connect. This is acceptable for a single-user dev tool but means:
+Glissa binds to `localhost` only. Both WebSocket channels (data and control) have **no authentication** - any process on the local machine can connect. This is acceptable for a single-user dev tool but means:
 
 - Do NOT expose Glissa's port to the network (no `0.0.0.0` binding)
 - The `dangerouslySkipPermissions` option is settable via the control WebSocket; any local process can create a permissionless session
@@ -169,7 +171,7 @@ Sessions are keyed by a stable UUID (`id`), not the mutable display `name`. The 
 ### Dashboard Rendering (xterm.js)
 
 - Each session card contains an xterm.js Terminal instance
-- xterm.js handles ALL ANSI rendering — server is a dumb pipe
+- xterm.js handles ALL ANSI rendering - server is a dumb pipe
 - `@xterm/addon-fit` for resize, `@xterm/addon-webgl` for GPU rendering
 - Vite bundles @xterm/* for production; dev mode proxies to Express
 - Status detection does NOT tap the rendered body; it scans only OSC-0 titles (fallback) and consumes Claude Code hooks (authoritative). See "Status Detection" above.

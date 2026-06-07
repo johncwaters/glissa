@@ -123,6 +123,8 @@ function createBackend(httpServer, options = {}) {
       // sees a complete, recognizable project rather than a bare Temp checkout.
       worktreeRoot: cfg.worktreeRoot || path.join(path.dirname(path.resolve(project.path)), '.glissa-worktrees'),
       worktreeShare: cfg.worktreeShare || DEFAULT_CONFIG.worktreeShare,
+      // Background sub-agent detection (config kill switch; undefined -> Session default true).
+      detectBackgroundAgents: cfg.detectBackgroundAgents,
     });
     const recorder = createRecorder(project.name, cfg.capture);
     if (recorder) {
@@ -630,6 +632,19 @@ function createBackend(httpServer, options = {}) {
       if (from === STATES.WAITING || from === STATES.COMPLETE || from === STATES.DONE || from === STATES.FAILED) {
         notificationManager.acknowledge(sess.id);
       }
+    });
+
+    // Live background sub-agent count delta -> control WS, so the card shows "N agents" while a
+    // background sub-agent keeps running after the main turn's Stop (instead of flipping to Complete).
+    // Mirrors the session-git delta: a small targeted update, no full snapshot refetch.
+    sess.on('agents-change', ({ activeAgents }) => {
+      broadcastControl({
+        type: 'session-agents',
+        id: sess.id,
+        session: sess.name,
+        activeAgents,
+        timestamp: Date.now(),
+      });
     });
 
     sess.on('sleep', () => {

@@ -21,6 +21,7 @@ const {
   EXIT_HOOKS,
 } = require("./session-core/state-machine");
 const { mapSignalToEvent } = require("./session-core/status-mapper");
+const agentTracker = require("./session-core/agent-tracker");
 
 const KILL_POLL_INTERVAL_MS = 200;
 const KILL_MAX_WAIT_MS = 3000;
@@ -66,13 +67,19 @@ class Session extends EventEmitter {
     dangerouslySkipPermissions = false,
     replayBufferKB = 512,
     // Detection wiring (injected by backend). When absent, the session runs
-    // title-source-only (no hooks) — used by unit tests constructing a Session directly.
+    // title-source-only (no hooks) - used by unit tests constructing a Session directly.
     hookRouter = null,
     getHookPort = null,
     hooksBaseDir = undefined,
     titleStabilizationMs = 1500,
     statusConflictMs = undefined,
     statusDedupMs = undefined,
+    // Background sub-agent detection (see session-core/agent-tracker.js). When true (default), a
+    // main-agent Stop fired while a background sub-agent is still running does NOT complete the card.
+    // The kill switch (config detectBackgroundAgents=false) makes the session ignore subagent signals
+    // so behavior is exactly as before. agentTtlMs bounds a dropped-SubagentStop leak.
+    detectBackgroundAgents = true,
+    agentTtlMs = agentTracker.DEFAULT_AGENT_TTL_MS,
     // Resolved claude command ({ path, kind }). Defaults to the module-load
     // resolution; tests inject a stub to exercise the spawn branches deterministically.
     spawnCommand = CLAUDE_CMD,
@@ -146,6 +153,12 @@ class Session extends EventEmitter {
     this._settingsHandle = null;
     this._hookSeen = false;
     this._lastSignal = null;
+    // Live background sub-agents, keyed by Claude Code agent_id -> last-seen ts. Non-empty means
+    // background work is still running after the main agent's Stop, which gates ready->task_complete
+    // (see _onStatus / mapSignalToEvent). Lazily pruned by agentTtlMs; never drives a state transition.
+    this._detectBackgroundAgents = detectBackgroundAgents;
+    this._activeAgents = new Map();
+    this._agentTtlMs = agentTtlMs;
     this._spawnCommand = spawnCommand;
     this._initialPrompt = initialPrompt;
     this._extraClaudeArgs = Array.isArray(extraClaudeArgs) ? extraClaudeArgs : [];
@@ -189,7 +202,48 @@ class Session extends EventEmitter {
     if (this._recorder && raw && raw.event) {
       this._recorder.writeHook(raw.event, raw.payload);
     }
+    // Background sub-agent lifecycle is COUNTED, not a state transition: it never reaches the
+    // StatusSource (which merges hook+title timing for the real transition signals). Tracking the
+    // live set lets a main-agent Stop fired while a background sub-agent is still running avoid a
+    // false COMPLETE (see _onStatus + the activeAgents gate in status-mapper.js).
+    if (raw && (raw.signal === "subagent-start" || raw.signal === "subagent-stop")) {
+      this._trackSubagent(raw);
+      return;
+    }
     this._statusSource.ingest(raw);
+  }
+
+  // Apply one subagent-start/stop signal to the live set. Off (kill switch) or a payload with no
+  // agent_id is ignored, so the count stays 0 and behavior is exactly as before. Emits an
+  // 'agents-change' delta only when the live count actually changed.
+  _trackSubagent(raw) {
+    if (!this._detectBackgroundAgents) return;
+    const agentId = raw.payload && raw.payload.agent_id;
+    if (!agentId) return;
+    const changed = raw.signal === "subagent-start"
+      ? agentTracker.addAgent(this._activeAgents, agentId, raw.ts || Date.now())
+      : agentTracker.removeAgent(this._activeAgents, agentId);
+    if (changed) this._emitAgentsChange();
+  }
+
+  // Pruned count of live background sub-agents. Lazy prune (no per-session timer) bounds a dropped
+  // SubagentStop. Returns 0 when detection is off so the gate is inert.
+  _activeAgentCount() {
+    if (!this._detectBackgroundAgents) return 0;
+    agentTracker.pruneAgents(this._activeAgents, Date.now(), this._agentTtlMs);
+    return this._activeAgents.size;
+  }
+
+  _emitAgentsChange() {
+    // Internal event; the backend listener already has the session (id/name), so carry only the count.
+    this.emit("agents-change", { activeAgents: this._activeAgentCount() });
+  }
+
+  // Drop all live ids (PTY exit, (re)start). Emits a clearing delta only if something was live.
+  _clearAgents() {
+    if (this._activeAgents.size === 0) return;
+    this._activeAgents.clear();
+    this._emitAgentsChange();
   }
 
   _onStatus(s) {
@@ -199,14 +253,14 @@ class Session extends EventEmitter {
     // the _destroyed guard + _lastSignal write above, and the transition below. The detail
     // { source, signal } is uniform across every firing case (byte-identical to the prior
     // per-branch details), so it is assembled here rather than in the pure mapper.
-    const event = mapSignalToEvent(s.signal, this.state, s.confidence);
+    const event = mapSignalToEvent(s.signal, this.state, s.confidence, this._activeAgentCount());
     if (event) {
       this.transition(event, { source: s.source, signal: s.signal });
     }
   }
 
   _onMeta(m) {
-    // `unknown` glyph / degraded telemetry — recorded for observability, no transition.
+    // `unknown` glyph / degraded telemetry - recorded for observability, no transition.
     this._lastSignal = { signal: m.signal, source: m.source, ts: m.ts, meta: true };
   }
 
@@ -227,6 +281,7 @@ class Session extends EventEmitter {
       dangerouslySkipPermissions: this.dangerouslySkipPermissions,
       ephemeral: this.ephemeral,
       isWorktree: this.isWorktree,
+      activeAgents: this._activeAgentCount(),
       mergeStatus: this.mergeStatus,
       worktreeNotice: this.worktreeNotice,
       auditLog: this.auditLog.slice(-100),
@@ -268,7 +323,7 @@ class Session extends EventEmitter {
         shareList: this._worktreeShare,
       });
     } catch (err) {
-      console.warn(`[session ${this.id}] worktree create failed: ${err.message} — running in place`);
+      console.warn(`[session ${this.id}] worktree create failed: ${err.message} - running in place`);
       return true;
     }
     if (ws && ws.reason === "no-base-branch") {
@@ -361,6 +416,46 @@ class Session extends EventEmitter {
       this._setMergeStatus("merged");
     } else if (r.parked) {
       this._setMergeStatus("parked", { reason: r.reason || null });
+    } else {
+      this._setMergeStatus("pending-review", { reason: r.reason || null });
+    }
+    return r;
+  }
+
+  // Operator action behind the sidebar's "Merge" on a LIVE quiescent session (COMPLETE/IDLE): commit the
+  // worktree's changes, merge them into the integration branch, and rebase this worktree onto it, KEEPING
+  // the session running on the same worktree (now on top of develop) so the operator commits as they go.
+  // Unlike finishAndMerge it never ends the session or tears the worktree down. Refused while the PTY is
+  // actively working (we must not rewrite a worktree mid-edit). A rebase conflict / lost FF PARKS
+  // (worktree preserved). Returns the engine result.
+  mergeAndContinue() {
+    if (this._destroyed) return { merged: false, reason: "destroyed" };
+    if (!this._gitWorkspace || !this._workspace) return { merged: false, reason: "no-worktree" };
+    if (this.state !== STATES.COMPLETE && this.state !== STATES.IDLE) {
+      return { merged: false, reason: "not-continuable" };
+    }
+    this._setMergeStatus("merging");
+    let r;
+    try {
+      r = this._gitWorkspace.mergeKeep({
+        projectPath: this.path,
+        workspace: this._workspace,
+        targetBranch: this._integrationBranch,
+        message: `glissa session: ${this.name}`,
+      });
+    } catch (err) {
+      this._setMergeStatus("pending-review", { reason: err.message });
+      return { merged: false, reason: err.message };
+    }
+    if (r.merged) {
+      // Worktree kept alive on its branch (now == the integration tip); track the new base it sits on.
+      // The worktree is clean again, so the gate returns to 'none' until the session produces more work.
+      if (r.baseSha) { this.baseSha = r.baseSha; this._workspace.baseSha = r.baseSha; }
+      this._setMergeStatus("none");
+    } else if (r.parked) {
+      this._setMergeStatus("parked", { reason: r.reason || null });
+    } else if (r.reason === "nothing-to-commit") {
+      this._setMergeStatus("none");
     } else {
       this._setMergeStatus("pending-review", { reason: r.reason || null });
     }
@@ -514,7 +609,7 @@ class Session extends EventEmitter {
     // respawning. Without this, ptyProcess assignment below would orphan the
     // previous PTY's onData/onExit subscriptions and leak the process.
     if (this.ptyProcess) {
-      console.warn(`[session:${this.name}] start() called while PTY exists — killing previous PTY first`);
+      console.warn(`[session:${this.name}] start() called while PTY exists - killing previous PTY first`);
       const oldPid = this.ptyProcess.pid;
       try {
         if (process.platform === "win32") {
@@ -523,7 +618,7 @@ class Session extends EventEmitter {
           this.ptyProcess.kill();
         }
       } catch {
-        // Already dead, unkillable, or timed out — proceed
+        // Already dead, unkillable, or timed out - proceed
       }
       this.ptyProcess = null;
     }
@@ -536,6 +631,8 @@ class Session extends EventEmitter {
     }
     this._receivedFirstOutput = false;
     this._sleeping = false;
+    // A (re)started PTY begins with no live background sub-agents; drop any stale ids from a prior run.
+    this._clearAgents();
     this._autoKilled = false;
     this._outputBuffer = [];
     this._outputBufferHead = 0;
@@ -602,7 +699,7 @@ class Session extends EventEmitter {
 
     this.transition("spawn_success");
 
-    // Redact a positional initialPrompt (team stages) from the spawn log — it can be a multi-KB
+    // Redact a positional initialPrompt (team stages) from the spawn log - it can be a multi-KB
     // RUN CONTEXT block that does not belong in the console. Run detail lives in the Teams view.
     const argsForLog = this._initialPrompt
       ? args.map((a) => (a === this._initialPrompt ? `<prompt:${this._initialPrompt.length}c>` : a)).join(" ")
@@ -669,7 +766,7 @@ class Session extends EventEmitter {
       });
       return ["--settings", this._settingsHandle.settingsPath];
     } catch (err) {
-      console.warn(`[session:${this.name}] hook injection failed: ${err.message} — falling back to OSC title only`);
+      console.warn(`[session:${this.name}] hook injection failed: ${err.message} - falling back to OSC title only`);
       this._cleanupHooks();
       return [];
     }
@@ -704,7 +801,7 @@ class Session extends EventEmitter {
 
     // Feed the OSC-title fallback source. Skipped while sleeping (state frozen).
     // This is the ONLY parsing on the hot path: it scans for OSC-0 titles and
-    // ignores all other bytes — no tokenizer, no line assembly, no body scraping.
+    // ignores all other bytes - no tokenizer, no line assembly, no body scraping.
     if (!this._sleeping) {
       try {
         this._titleSource.feed(data);
@@ -749,6 +846,7 @@ class Session extends EventEmitter {
     const pid = this.ptyProcess ? this.ptyProcess.pid : null;
     this._titleSource.reset();
     this._statusSource.reset();
+    this._clearAgents();
     this._cleanupHooks();
     this._ptyAlive = false;
     this.ptyProcess = null;
@@ -758,7 +856,7 @@ class Session extends EventEmitter {
       try {
         execSync(`taskkill /PID ${Number(pid)} /T /F`, { stdio: "ignore" });
       } catch {
-        // pid already exited or taskkill unavailable — nothing to do
+        // pid already exited or taskkill unavailable - nothing to do
       }
     }
 
@@ -1105,7 +1203,7 @@ class Session extends EventEmitter {
     }
 
     if (this._recorder) {
-      this._recorder.close(); // Idempotent — safe if already closed by _handlePtyExit
+      this._recorder.close(); // Idempotent - safe if already closed by _handlePtyExit
     }
     this._titleSource.destroy();
     this._statusSource.destroy();

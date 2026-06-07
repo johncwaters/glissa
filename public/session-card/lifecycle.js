@@ -261,6 +261,25 @@ export function setSessionWorktree(sessionId, worktree) {
   else delete ui.card.dataset.worktree;
 }
 
+// Reflect the live background sub-agent count on the card. n > 0 shows an "N agents" chip and sets
+// data-agents (drives the CSS, mirroring data-worktree); 0 hides it. This is why a card can stay
+// Working after the main turn's Stop: background sub-agents are still running (see backend
+// session-agents delta / sessions.js _trackSubagent).
+export function setSessionAgents(sessionId, activeAgents) {
+  const ui = sessionUIs.get(sessionId);
+  if (!ui) return;
+  const n = Math.max(0, Number(activeAgents) || 0);
+  ui.activeAgents = n;
+  const badge = ui.card.querySelector('.agents-badge');
+  if (n > 0) {
+    ui.card.dataset.agents = String(n);
+    if (badge) badge.textContent = n === 1 ? '1 agent' : `${n} agents`;
+  } else {
+    delete ui.card.dataset.agents;
+    if (badge) badge.textContent = '';
+  }
+}
+
 // Reflect a post-turn-check result on the card. `report` is the server broadcast
 // (filesFixed, mode, findings[], skipped). Shows a count badge when files were
 // fixed (mode 'fix') or flagged (mode 'report'); hidden otherwise. The card's
@@ -299,7 +318,7 @@ export function setSessionPostTurn(sessionId, report) {
 }
 
 // Reflect the worktree merge lifecycle. `mergeStatus` is the server's session-merge-status
-// (none|pending-review|merging|parked|merged). The review UI itself (diff + Merge & finish / Discard)
+// (none|pending-review|merging|parked|merged). The review UI itself (diff + Merge / Discard)
 // now lives in the right review sidebar; here we only keep data-merge on the card so the remove button
 // can warn before discarding unmerged work, and forward the status to the sidebar.
 export function setSessionMergeStatus(sessionId, mergeStatus) {

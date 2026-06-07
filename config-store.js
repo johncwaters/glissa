@@ -13,6 +13,10 @@ const DEFAULT_CONFIG = {
   notifyDebounceMs: 3000,
   cursorBlink: false,
   debugMode: false,
+  // Hold a session out of COMPLETE while it still has background sub-agents running (Task
+  // run_in_background / Ctrl+B). On by default; set false to fall back to "main-agent Stop completes
+  // the card" behavior (see sessions.js detectBackgroundAgents / session-core/agent-tracker.js).
+  detectBackgroundAgents: true,
   editorCommand: '',
   // Integration branch every worktree-backed session forks from and merges back into. Glissa never
   // creates it; if it is absent a session stays DORMANT with a notice (it never runs in the real tree).
@@ -49,6 +53,7 @@ const TIMEOUT_KEYS = [
 const BOOLEAN_KEYS = [
   'cursorBlink',
   'debugMode',
+  'detectBackgroundAgents',
 ];
 
 // Free-text settings persisted to config.json
@@ -67,15 +72,15 @@ function resolveConfigPath() {
     process.exit(1);
   }
 
-  // 2. Local config (__dirname/config.json) — dev use with `node server.js` or `vite`
+  // 2. Local config (__dirname/config.json) - dev use with `node server.js` or `vite`
   const localConfig = path.join(__dirname, 'config.json');
   if (fs.existsSync(localConfig)) return localConfig;
 
-  // 3. User home directory (~/.glissa/config.json) — installed CLI use
+  // 3. User home directory (~/.glissa/config.json) - installed CLI use
   const homeConfig = path.join(os.homedir(), '.glissa', 'config.json');
   if (fs.existsSync(homeConfig)) return homeConfig;
 
-  // 4. None found — seed default at ~/.glissa/config.json
+  // 4. None found - seed default at ~/.glissa/config.json
   const dir = path.join(os.homedir(), '.glissa');
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(homeConfig, JSON.stringify(DEFAULT_CONFIG, null, 2), 'utf8');
@@ -154,6 +159,7 @@ function createConfigStore() {
       replayBufferKB: config.replayBufferKB,
       cursorBlink: config.cursorBlink ?? DEFAULT_CONFIG.cursorBlink,
       debugMode: config.debugMode ?? DEFAULT_CONFIG.debugMode,
+      detectBackgroundAgents: config.detectBackgroundAgents ?? DEFAULT_CONFIG.detectBackgroundAgents,
       editorCommand: config.editorCommand ?? DEFAULT_CONFIG.editorCommand,
       integrationBranch: config.integrationBranch ?? DEFAULT_CONFIG.integrationBranch,
       worktreeRoot: config.worktreeRoot ?? DEFAULT_CONFIG.worktreeRoot,
@@ -180,7 +186,7 @@ function createConfigStore() {
     if (newConfig.postTurnChecks != null) config.postTurnChecks = newConfig.postTurnChecks;
     if (newConfig.worktreeShare != null) config.worktreeShare = newConfig.worktreeShare;
     if (newConfig.port != null && newConfig.port !== config.port) {
-      console.log(`[settings] Port changed to ${newConfig.port} — restart required to take effect`);
+      console.log(`[settings] Port changed to ${newConfig.port} - restart required to take effect`);
     }
   }
 

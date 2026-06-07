@@ -144,6 +144,11 @@ export function buildCardDOM(sessionId, sessionName, initialState, options = {})
   // setSessionPostTurn on a post-turn-result delta). Text/title are filled there.
   const postTurnBadge = el('span', 'post-turn-badge', '');
   postTurnBadge.setAttribute('aria-hidden', 'true');
+  // Live background sub-agent count. Hidden unless the card carries data-agents (set live by
+  // setSessionAgents on a session-agents delta): the main turn ended but N background sub-agents are
+  // still running, so the card stays Working rather than flipping to Complete. Text filled there.
+  const agentsBadge = el('span', 'agents-badge', '');
+  agentsBadge.title = 'Background sub-agents still running';
   const spacer = el('span', 'session-header-spacer');
 
   // Time-in-current-state readout on the card header (trailing the badge), shown in the Focus center:
@@ -185,7 +190,7 @@ export function buildCardDOM(sessionId, sessionName, initialState, options = {})
   // changes, so the persistent tags + actions in the RIGHT zone never reflow when status or
   // the timer ticks. Combined with the reserved-width badge slot (see .state-label), the
   // header is dimensionally rigid across all states.
-  const headerChildren = [nameEl, badge, elapsedEl, spacer, worktreeBadge, postTurnBadge];
+  const headerChildren = [nameEl, badge, elapsedEl, spacer, worktreeBadge, postTurnBadge, agentsBadge];
   if (permsBadge) headerChildren.push(permsBadge);
   headerChildren.push(actions);
   header.append(...headerChildren);
