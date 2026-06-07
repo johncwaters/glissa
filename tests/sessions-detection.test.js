@@ -33,9 +33,23 @@ function title(s, signal) {
   s._statusSource.ingest({ signal, source: 'title', ts: Date.now() });
 }
 
+test('fresh session: first_output lands in IDLE, not RUNNING (no false "Working")', () => {
+  const s = makeSession(STATES.STARTING);
+  s.transition('first_output');
+  assert.equal(s.state, STATES.IDLE, 'a just-spawned session must start idle, not working');
+  s.destroy();
+});
+
 test('working from IDLE -> RUNNING', () => {
   const s = makeSession(STATES.IDLE);
   title(s, 'working');
+  assert.equal(s.state, STATES.RUNNING);
+  s.destroy();
+});
+
+test('resume (hook) from IDLE -> RUNNING (first prompt submitted wakes the idle card)', () => {
+  const s = makeSession(STATES.IDLE);
+  hook(s, 'resume');
   assert.equal(s.state, STATES.RUNNING);
   s.destroy();
 });

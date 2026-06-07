@@ -23,11 +23,12 @@ test('computeAggregate: failed outranks complete', async () => {
   assert.equal(r.severity, 'critical');
 });
 
-test('computeAggregate: complete raises no banner — counts toward exited, not running', async () => {
+test('computeAggregate: an active mix raises no banner (running counter removed)', async () => {
   const { computeAggregate } = await importCore();
+  // 3 complete + 2 active, no waiting/failed: nothing actionable, so the banner is blank.
   const r = computeAggregate(C({ complete: 3, total: 5 }));
-  assert.equal(r.text, '2 sessions running');
-  assert.equal(r.severity, 'success');
+  assert.equal(r.text, '');
+  assert.equal(r.severity, '');
   assert.equal(r.alertCount, 0);
 });
 
@@ -45,11 +46,12 @@ test('computeAggregate: all dormant', async () => {
   assert.equal(r.severity, '');
 });
 
-test('computeAggregate: running = total - done - dormant', async () => {
+test('computeAggregate: a partial active mix (some done/dormant) stays blank', async () => {
   const { computeAggregate } = await importCore();
+  // 2 active out of 4 (1 done, 1 dormant): not all-exited, not all-dormant, no alerts -> blank.
   const r = computeAggregate(C({ done: 1, dormant: 1, total: 4 }));
-  assert.equal(r.text, '2 sessions running');
-  assert.equal(r.severity, 'success');
+  assert.equal(r.text, '');
+  assert.equal(r.severity, '');
 });
 
 test('computeAggregate: singular has no plural s', async () => {

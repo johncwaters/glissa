@@ -30,6 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 - **Multi-session grid and its controls**: The Sessions grid's minimize and maximize, the minimized bar, drag-and-drop reordering, the manual/split layout control, and sleep/wake are gone; sessions are now navigated through the Focus view.
+- **Dropped the "N sessions running" navbar banner**: The always-on active-session counter is gone (`computeAggregate` no longer emits a running/active state). The navbar now speaks only for `WAITING` (needs input) and `FAILED`, plus the terminal "All sessions exited" / "N dormant" roll-ups, and is hidden for a steady active mix. The counter was noise that carried no actionable signal.
 - **Teams: standalone `release-notes` team**: Removed; its git-range research and GitHub release draft are now covered by the `changelog` team's reconciliation and announcer.
 
 ### Fixed
@@ -225,7 +226,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **LineAssembler CSI H handling**: Handle absolute cursor positioning (CSI `H`/`f`) in `LineAssembler` by flushing the current line on row change. Cursor-positioned content (companion cactus, HUD, status bars) no longer accumulates into a single giant pending line across multiple screen rows, eliminating the primary source of false-positive "needs input" notifications on idle sessions.
-- **Layer 4 false positive elimination**: Add 7 new detection categories to `isLayer4Chrome` — wide-spaced user typing, short garbled fragments, URLs, task checkbox rendering, system messages (Bypass Permissions, Pasted text), HUD counter fragments, and OMC/auto-update chrome strings. Eliminates spurious "needs input" notifications especially when sessions are idle.
+- **Layer 4 false positive elimination**: Add 7 new detection categories to `isLayer4Chrome` - wide-spaced user typing, short garbled fragments, URLs, task checkbox rendering, system messages (Bypass Permissions, Pasted text), HUD counter fragments, and OMC/auto-update chrome strings. Eliminates spurious "needs input" notifications especially when sessions are idle.
 - **Companion cactus ASCII art false positives**: Suppress Layer 4 false positives triggered by companion cactus ASCII art output.
 - **`killSession()` missing COMPLETE state**: Sessions in COMPLETE state could not be killed from the UI despite the transition table supporting `user_kill → DONE`. Added COMPLETE to the killable state list.
 - **Cross-platform force kill**: `_forceKillAfterTimeout` now uses `SIGKILL` on non-Windows platforms instead of the Windows-only `taskkill` command.
@@ -296,7 +297,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **NotificationManager**: Centralized notification system with state machine (IDLE→PENDING→DELIVERED→ESCALATED) replacing inline `notify()` calls in sessions.js.
 - **Channel architecture**: Pluggable notification channels via adapter pattern (`channels/toast.js` for BurntToast/msg fallback). Future channels (Slack, email) can be added without touching core logic.
 - **Input grace period**: Suppress false "needs input" prompt detections for a configurable window after user input (`inputGraceSeconds`, default 5s).
-- **Layer 3 pattern filters**: Reduce false positive prompt detections — skip short fragments, trailing URL schemes (`://`), and indented short menu items.
+- **Layer 3 pattern filters**: Reduce false positive prompt detections - skip short fragments, trailing URL schemes (`://`), and indented short menu items.
 - `rearmSilenceTimer()` on PatternDetector for retrying detection after grace period rejection without clearing pending line state.
 
 ### Changed
@@ -313,7 +314,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Deprecated
 
-- `notify.js` — functions are now no-ops with one-time deprecation warnings. Use NotificationManager instead.
+- `notify.js` - functions are now no-ops with one-time deprecation warnings. Use NotificationManager instead.
 
 ### Removed
 
@@ -322,7 +323,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.3.0] - 2026-03-19
 
-_Skipped in changelog — incremental fixes and version bump._
+_Skipped in changelog - incremental fixes and version bump._
 
 ## [0.2.0] - 2026-03-17
 
@@ -335,9 +336,9 @@ _Skipped in changelog — incremental fixes and version bump._
 
 ### Changed
 
-- Rename "Running" badge to "Working" — reflects active agent output.
-- Rename "Done" badge to "Exited" — reserved for process exit; "Complete" now indicates finished tasks.
-- Reduce default idle timeout from 60s to 5s — terminals return to Idle quickly when output stops.
+- Rename "Running" badge to "Working" - reflects active agent output.
+- Rename "Done" badge to "Exited" - reserved for process exit; "Complete" now indicates finished tasks.
+- Reduce default idle timeout from 60s to 5s - terminals return to Idle quickly when output stops.
 - Minimized tabs are fixed-width (240px) with truncated names and right-aligned status badges.
 - Minimized sessions show an up arrow (▲) instead of right arrow to indicate they can be restored.
 - Hide Restart and Remove buttons when a session is minimized.
@@ -355,7 +356,7 @@ _Skipped in changelog — incremental fixes and version bump._
 
 ### Removed
 
-- Focus mode (CSS-only) — replaced by maximize mode which uses real minimization.
+- Focus mode (CSS-only) - replaced by maximize mode which uses real minimization.
 - Dead code: `user_input`/`user_skip` transitions and guards in sessions.js.
 - Dead exports from theme.js, local-store.js, config-store.js.
 

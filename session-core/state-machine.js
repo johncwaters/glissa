@@ -16,7 +16,13 @@ const TRANSITIONS = Object.freeze({
     spawn_fail: STATES.FAILED,
   },
   [STATES.STARTING]: {
-    first_output: STATES.RUNNING,
+    // First PTY output means Claude's TUI is up, NOT that it is working. A freshly
+    // spawned session sits at its prompt on the idle glyph with no turn submitted, so
+    // it lands in IDLE ("Idle"), not RUNNING ("Working"). It wakes to RUNNING on the
+    // first real work signal: `resume` (UserPromptSubmit hook) or the title `working`
+    // spinner, both of which map IDLE -> new_output -> RUNNING. The title source's
+    // _hasSeenSpinner guard keeps the startup idle glyph from arming a spurious `ready`.
+    first_output: STATES.IDLE,
     process_exit: STATES.FAILED,
   },
   [STATES.RUNNING]: {
@@ -69,7 +75,7 @@ const TRANSITIONS = Object.freeze({
 // Guards: return true if transition is allowed, false otherwise
 const GUARDS = {
   spawn_success(session) {
-    // Verify the dir the PTY was spawned in actually exists — the worktree when isolated, else path.
+    // Verify the dir the PTY was spawned in actually exists - the worktree when isolated, else path.
     return fs.existsSync(session.worktreeDir || session.path);
   },
   user_restart(session) {

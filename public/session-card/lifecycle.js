@@ -25,12 +25,11 @@ import { releaseWebgl } from './webgl-pool.js';
 
 // Aggregate roll-up glyphs keyed by severity. Shape varies per severity so the
 // header summary stays legible without relying on hue (color-blind safe); the
-// text spells it out regardless. Neutral/running use the brand forward-marker.
+// text spells it out regardless. Neutral/dormant use the brand forward-marker.
 const AGGREGATE_GLYPHS = {
   critical: '✕', // failed
   warning:  '▲', // needs input
   done:     '✓', // finished / exited
-  success:  '▸', // running
   '':       '▸', // neutral / dormant
 };
 

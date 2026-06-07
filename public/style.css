@@ -182,10 +182,11 @@ body {
 }
 
 /* Aggregate roll-up: persistent in the header (was a hover-only tooltip - the
-   page's headline signal should never hide). Quiet by default (text-dim) so the
-   steady "N running" state recedes; only the attention severities take a state
-   color. Shape varies with severity via .aggregate-glyph, so the signal survives
-   without hue (color-blind safe). The element carries role="status" for aria-live. */
+   page's headline signal should never hide). Quiet by default (text-dim); only
+   attention severities take a state color. A steady active mix yields blank text,
+   so the banner is hidden via :empty (rationale in aggregate-core). Shape varies
+   with severity via .aggregate-glyph, so the signal survives without hue
+   (color-blind safe). The element carries role="status" for aria-live. */
 .header-aggregate {
   display: inline-flex;
   align-items: center;
@@ -561,15 +562,6 @@ body {
   background: var(--bg-surface);
   border-bottom: 1px solid var(--border-dim);
   font-size: 11px;
-  cursor: grab;
-}
-
-.session-card-header:active {
-  cursor: grabbing;
-}
-
-.session-card-header .session-actions {
-  cursor: default;
 }
 
 .session-name {
