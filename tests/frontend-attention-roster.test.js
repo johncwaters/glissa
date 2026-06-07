@@ -72,3 +72,37 @@ test('pickNextAttention: single-element queue stays put', async () => {
   const { pickNextAttention } = await importCore();
   assert.equal(pickNextAttention(['only'], 'only'), 'only');
 });
+
+test('pickAdjacent: empty list returns null', async () => {
+  const { pickAdjacent } = await importCore();
+  assert.equal(pickAdjacent([], 'x', 1), null);
+  assert.equal(pickAdjacent([], 'x', -1), null);
+});
+
+test('pickAdjacent: steps forward and backward', async () => {
+  const { pickAdjacent } = await importCore();
+  assert.equal(pickAdjacent(['a', 'b', 'c'], 'a', 1), 'b');
+  assert.equal(pickAdjacent(['a', 'b', 'c'], 'b', 1), 'c');
+  assert.equal(pickAdjacent(['a', 'b', 'c'], 'c', -1), 'b');
+  assert.equal(pickAdjacent(['a', 'b', 'c'], 'b', -1), 'a');
+});
+
+test('pickAdjacent: wraps around both ends', async () => {
+  const { pickAdjacent } = await importCore();
+  assert.equal(pickAdjacent(['a', 'b', 'c'], 'c', 1), 'a'); // bottom -> top
+  assert.equal(pickAdjacent(['a', 'b', 'c'], 'a', -1), 'c'); // top -> bottom
+});
+
+test('pickAdjacent: absent cursor starts at the correct end per direction', async () => {
+  const { pickAdjacent } = await importCore();
+  assert.equal(pickAdjacent(['a', 'b'], 'gone', 1), 'a'); // down -> top
+  assert.equal(pickAdjacent(['a', 'b'], null, 1), 'a');
+  assert.equal(pickAdjacent(['a', 'b'], 'gone', -1), 'b'); // up -> bottom
+  assert.equal(pickAdjacent(['a', 'b'], null, -1), 'b');
+});
+
+test('pickAdjacent: single-element list stays put either direction', async () => {
+  const { pickAdjacent } = await importCore();
+  assert.equal(pickAdjacent(['only'], 'only', 1), 'only');
+  assert.equal(pickAdjacent(['only'], 'only', -1), 'only');
+});

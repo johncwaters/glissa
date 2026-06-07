@@ -4,6 +4,7 @@
   <button type="button" class="settings-tab" role="tab" id="settings-tab-terminal" aria-controls="settings-panel-terminal" aria-selected="false" data-tab="terminal" tabindex="-1">Terminal</button>
   <button type="button" class="settings-tab" role="tab" id="settings-tab-repos" aria-controls="settings-panel-repos" aria-selected="false" data-tab="repos" tabindex="-1">Repos</button>
   <button type="button" class="settings-tab" role="tab" id="settings-tab-advanced" aria-controls="settings-panel-advanced" aria-selected="false" data-tab="advanced" tabindex="-1">Advanced</button>
+  <button type="button" class="settings-tab" role="tab" id="settings-tab-shortcuts" aria-controls="settings-panel-shortcuts" aria-selected="false" data-tab="shortcuts" tabindex="-1">Shortcuts</button>
 </div>
 
 <div class="settings-panel" id="settings-panel-general" role="tabpanel" aria-labelledby="settings-tab-general" data-panel="general">
@@ -64,6 +65,17 @@
     Debug Mode
     <span class="dialog-hint">Show a debug button on session cards to inspect state, transitions, and detection signals.</span>
   </label>
+</div>
+
+<div class="settings-panel settings-shortcuts" id="settings-panel-shortcuts" role="tabpanel" aria-labelledby="settings-tab-shortcuts" data-panel="shortcuts" hidden>
+  <div class="shortcut-groups" id="settings-shortcut-groups"></div>
+  <div class="settings-about">
+    <span class="settings-about-version">GLISSA <span class="settings-about-v" id="settings-version"></span></span>
+    <span class="settings-about-links">
+      <a class="settings-about-link" id="settings-link-repo" href="https://github.com/johncwaters/glissa" target="_blank" rel="noopener">GitHub</a>
+      <a class="settings-about-link" id="settings-link-changelog" href="https://github.com/johncwaters/glissa/blob/main/CHANGELOG.md" target="_blank" rel="noopener">Changelog</a>
+    </span>
+  </div>
 </div>
 
 <div class="dialog-error" id="settings-error"></div>

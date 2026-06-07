@@ -7,7 +7,7 @@ import './tailwind.css';
 import { STATES } from '/shared/states.mjs';
 import { connectControl, disableReconnect, onControlMessage, sendControlMsg, sendControlRequest, setConnectionStateCallback } from './control-ws.js';
 import { createAddSessionDialog, createConfirmDialog, createSettingsDialog } from './dialogs.js';
-import { activateFocusView, deactivateFocusView, focusNextAttention, focusNthInRail, focusSessionInCenter, isFocusActive, mountFocusView, refreshFocusRoster, restoreFocusedSession, setFocusMergeStatus } from './focus-view/focus-view.js';
+import { activateFocusView, deactivateFocusView, focusAdjacentInRail, focusNextAttention, focusNthInRail, focusSessionInCenter, isFocusActive, mountFocusView, refreshFocusRoster, restoreFocusedSession, setFocusMergeStatus } from './focus-view/focus-view.js';
 import { applyHealthSnapshot, mountHealthMonitor } from './health-monitor.js';
 import { initNotifications, showDesktopNotification } from './notifications.js';
 import { handleDebugStateRefresh, handleDebugStateResponse } from './session-card/card-dom.js';
@@ -251,6 +251,11 @@ document.getElementById('btn-settings').addEventListener('click', () => {
   createSettingsDialog();
 });
 
+// The header ? button (next to the menu) opens Settings straight to the Shortcuts tab.
+document.getElementById('btn-help').addEventListener('click', () => {
+  createSettingsDialog('shortcuts');
+});
+
 // ── Primary view tabs (Focus / Teams) ─────────────────────
 
 const viewTeamsEl = document.getElementById('view-teams');
@@ -375,44 +380,49 @@ btnMute.addEventListener('click', (e) => {
 });
 
 // ── Keyboard shortcuts (chrome-level) ─────────────────────────
-// Alt+0 opens a new session; Alt+1..9 focuses the Nth session in the Focus rail; Alt+W jumps
-// to the next session that needs input (triage). Both drive the Focus center, the only session
-// destination now that the Sessions grid view was removed. The Alt+<key> namespace is used
-// on purpose: it collides with neither browser shortcuts (which switch tabs on
-// Ctrl+digit, not Alt) nor VS Code defaults (which are Ctrl / Ctrl+Shift / F-key /
-// chord based, and use Ctrl+1..3 for editor groups). Guarded so they never reach a
-// focused xterm - its key handling lives in terminal.js and forwards most keys to
-// the PTY - so these fire only when the operator is on the dashboard chrome.
-function isTypingContext() {
+// Alt+0 opens a new session; Alt+1..9 focuses the Nth session in the Focus rail; Alt+Up/Down moves to
+// the previous/next session in the rail; Alt+W jumps to the next session that needs input (triage).
+// All drive the Focus center, the only session destination now that the Sessions grid view was removed.
+// The Alt+<key> namespace is used on purpose: it collides with neither browser shortcuts (which switch
+// tabs on Ctrl+digit, not Alt) nor VS Code defaults (Ctrl / Ctrl+Shift / F-key / chord based, Ctrl+1..3
+// for editor groups). They must work WHILE the centered terminal holds keyboard focus - the normal
+// Focus posture - so they are gated on a real text field (inline rename, a dialog), NOT on the terminal:
+// terminal.js returns false for exactly these keys on the Focus view (see isFocusAltShortcut) so they
+// bubble here instead of going to the PTY. NOTE: when you add or remove a shortcut below, update
+// isFocusAltShortcut in focus-view/focus-shortcuts.mjs to keep the xterm skip in lockstep.
+//
+// xterm's focused element is its helper textarea; treat that as chrome (not a real input) so the
+// shortcuts fire from the terminal, while a genuine INPUT/TEXTAREA/contentEditable still swallows them.
+function isRealInputFocused() {
   const a = document.activeElement;
   if (!a) return false;
-  if (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.isContentEditable) return true;
-  return !!(a.closest && a.closest('.terminal-wrap'));
+  if (a.isContentEditable) return true;
+  return (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA')
+    && !a.classList.contains('xterm-helper-textarea');
 }
 
 document.addEventListener('keydown', (e) => {
   if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
-  // Every shortcut here is a discrete action (triage-next, jump to card, open the add dialog), so
-  // honor only the initial press. Without this, holding Alt+W (or a press long enough to trip the OS
-  // auto-repeat) re-fires keydown and walks the round-robin on each repeat, so two waiting sessions
-  // flicker past instead of stopping on the first.
+  // Every shortcut here is a discrete action (triage-next, prev/next, jump to card, open the add
+  // dialog), so honor only the initial press. Without this, holding the key (or a press long enough to
+  // trip the OS auto-repeat) re-fires keydown and walks the list on each repeat, flicking past the
+  // target instead of stopping on it.
   if (e.repeat) return;
+  // A genuine text field (inline rename, a dialog) keeps the keystroke; the centered terminal does not,
+  // so every shortcut works while the operator is watching a session there.
+  if (isRealInputFocused()) return;
 
-  // Focus-tab triage (Alt+W -> next session needing you, borrowed into the center) must work even
-  // while the centered terminal holds keyboard focus - that is the expected place to be while
-  // triaging - so it runs BEFORE the typing guard. xterm's focused element is its helper textarea;
-  // treat that as not-a-real-input so triage fires there, but a genuine text field (inline rename,
-  // a dialog) still swallows Alt+W. terminal.js returns false for this key so it reaches here.
   if ((e.key === 'w' || e.key === 'W') && isFocusActive()) {
-    const a = document.activeElement;
-    const realInput = a && (a.isContentEditable
-      || ((a.tagName === 'INPUT' || a.tagName === 'TEXTAREA')
-          && !a.classList.contains('xterm-helper-textarea')));
-    if (!realInput) { e.preventDefault(); focusNextAttention(); return; }
+    e.preventDefault();
+    focusNextAttention();
+    return;
   }
-
-  if (isTypingContext()) return;
-
+  if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+    if (!isFocusActive()) return;
+    e.preventDefault();
+    focusAdjacentInRail(e.key === 'ArrowDown' ? 1 : -1);
+    return;
+  }
   if (e.key === '0') {
     e.preventDefault();
     document.getElementById('btn-add-session-header')?.click();
@@ -423,6 +433,26 @@ document.addEventListener('keydown', (e) => {
     e.preventDefault();
     focusNthInRail(Number(e.key));
   }
+});
+
+// '?' opens the keyboard-shortcuts help (Settings -> Shortcuts), the near-universal convention. Unlike
+// the Alt shortcuts above, '?' is a literal character an operator types into a session terminal, so it
+// fires ONLY from dashboard chrome: a text field OR a focused terminal suppresses it (the header ?
+// button covers the terminal-focused case). Skip if a dialog is already open so it never stacks. The
+// shortcut list it shows is sourced from public/shortcuts.mjs.
+function isTextEntryContext() {
+  const a = document.activeElement;
+  if (!a) return false;
+  if (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.isContentEditable) return true;
+  return !!a.closest?.('.terminal-wrap');
+}
+
+document.addEventListener('keydown', (e) => {
+  if (e.key !== '?' || e.ctrlKey || e.metaKey || e.altKey || e.repeat) return;
+  if (isTextEntryContext()) return;
+  if (document.querySelector('.dialog-overlay')) return; // a dialog is already open
+  e.preventDefault();
+  createSettingsDialog('shortcuts');
 });
 
 // ── Window focus tracking (suppress server notifications when dashboard is visible) ──

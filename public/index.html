@@ -158,6 +158,7 @@
           </div>
           <span class="header-aggregate" id="aggregate-status" role="status" aria-live="polite"></span>
           <button class="btn-add-header" id="btn-add-session-header" type="button" title="Add a new session">+ Session</button>
+          <button class="btn-help" id="btn-help" type="button" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts and version">?</button>
           <div class="header-menu" id="header-menu">
             <button class="btn-menu" id="btn-menu" title="Menu" aria-label="Open menu" aria-haspopup="menu" aria-expanded="false" aria-controls="header-menu-dropdown">&#9776;</button>
             <div class="header-menu-dropdown" id="header-menu-dropdown" role="menu">
@@ -183,7 +184,7 @@
         <section class="teams-view" id="view-teams" role="tabpanel" aria-labelledby="tab-teams" hidden></section>
         <!-- Focus view (default): roster rail + single-focus center, mounted by focus-view.js -->
         <section class="focus-view" id="view-focus" role="tabpanel" aria-labelledby="tab-focus" hidden>
-          <nav class="focus-rail" id="focus-rail" role="listbox" aria-label="Session roster" aria-keyshortcuts="ArrowUp ArrowDown"></nav>
+          <nav class="focus-rail" id="focus-rail" role="listbox" aria-label="Session roster" aria-keyshortcuts="ArrowUp ArrowDown Alt+ArrowUp Alt+ArrowDown"></nav>
           <div class="focus-center" id="focus-center"></div>
         </section>
       </main>

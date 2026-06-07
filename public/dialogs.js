@@ -7,6 +7,7 @@ import settingsHTML from './components/settings-dialog.html?raw';
 import { sendControlMsg, sendControlRequest } from './control-ws.js';
 import { ensureNotificationPermission, notificationsSupported } from './notifications.js';
 import { countSessionsByName, suggestSessionName } from './session-card/naming.js';
+import { SHORTCUT_GROUPS } from './shortcuts.mjs';
 import { applyTheme, getThemeList } from './theme.js';
 import { getSoundId, getThemeId, isNotificationsEnabled, setNotificationsEnabled, setSoundId, setThemeId } from './ui-prefs.js';
 
@@ -135,7 +136,7 @@ export function createAddSessionDialog() {
       // user can spawn multiple terminals on the same project path.
       nameInput.value = suggestSessionName(proj.name);
       pathInput.value = proj.path;
-    } catch { /* picker value not valid JSON — ignore */ }
+    } catch { /* picker value not valid JSON - ignore */ }
   });
 
   // Reset picker when user types manually in advanced fields
@@ -188,7 +189,7 @@ export function createAddSessionDialog() {
 
 // ── Settings dialog ──────────────────────────────────────────
 
-export function createSettingsDialog() {
+export function createSettingsDialog(initialTab) {
   const opener = document.activeElement;
 
   const overlay = document.createElement('div');
@@ -223,6 +224,12 @@ export function createSettingsDialog() {
     for (const p of panels) {
       p.hidden = p.dataset.panel !== id;
     }
+    // Shortcuts is a read-only reference tab: there is nothing to save, so hide Save and let Cancel
+    // read as a plain Close. Every other tab restores the Save / Cancel pair. (btnSave / btnCancel are
+    // declared below; this only runs from a click handler or the post-setup initial-tab call.)
+    const readOnly = id === 'shortcuts';
+    if (btnSave) btnSave.hidden = readOnly;
+    if (btnCancel) btnCancel.textContent = readOnly ? 'Close' : 'Cancel';
   }
   for (const t of tabs) {
     t.addEventListener('click', () => activateTab(t.dataset.tab));
@@ -411,6 +418,15 @@ export function createSettingsDialog() {
       errorEl.textContent = 'Failed to load settings. Close and retry.';
     });
 
+  // Shortcuts tab: render the reference list from the shared data module and stamp the build version.
+  const versionEl = dialog.querySelector('#settings-version');
+  if (versionEl) {
+    const v = typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : '';
+    versionEl.textContent = v ? `v${v}` : 'version unknown';
+  }
+  const shortcutGroupsEl = dialog.querySelector('#settings-shortcut-groups');
+  if (shortcutGroupsEl) renderShortcutGroups(shortcutGroupsEl);
+
   overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
   btnCancel.addEventListener('click', close);
   btnSave.addEventListener('click', save);
@@ -423,7 +439,60 @@ export function createSettingsDialog() {
     }
   });
 
-  requestAnimationFrame(() => themeSelect.focus());
+  // Open on a requested tab (the header ? button / ? key open straight to Shortcuts). Focus the tab
+  // itself in that case, since the General theme picker lives in a now-hidden panel.
+  const startTab = initialTab && tabs.some((t) => t.dataset.tab === initialTab) ? initialTab : null;
+  if (startTab) activateTab(startTab);
+  requestAnimationFrame(() => {
+    const startTabEl = startTab && tabs.find((t) => t.dataset.tab === startTab);
+    (startTabEl || themeSelect).focus();
+  });
+}
+
+// Build the Shortcuts tab body from the shared SHORTCUT_GROUPS data: one labelled group per section,
+// each a <dl> of key chips (<kbd>) and their descriptions. Built with createElement (not innerHTML)
+// so the captions render as text, never markup.
+function renderShortcutGroups(container) {
+  container.textContent = '';
+  for (const group of SHORTCUT_GROUPS) {
+    const groupEl = document.createElement('div');
+    groupEl.className = 'shortcut-group';
+    const titleEl = document.createElement('div');
+    titleEl.className = 'shortcut-group-title';
+    titleEl.textContent = group.title;
+    groupEl.appendChild(titleEl);
+
+    const dl = document.createElement('dl');
+    dl.className = 'shortcut-rows';
+    for (const item of group.items) {
+      const dt = document.createElement('dt');
+      dt.className = 'shortcut-keys';
+      item.combos.forEach((chord, ci) => {
+        if (ci > 0) dt.appendChild(shortcutSep('/'));
+        chord.forEach((cap, ki) => {
+          if (ki > 0) dt.appendChild(shortcutSep('+'));
+          const kbd = document.createElement('kbd');
+          kbd.className = 'kbd';
+          kbd.textContent = cap;
+          dt.appendChild(kbd);
+        });
+      });
+      const dd = document.createElement('dd');
+      dd.className = 'shortcut-label';
+      dd.textContent = item.label;
+      dl.appendChild(dt);
+      dl.appendChild(dd);
+    }
+    groupEl.appendChild(dl);
+    container.appendChild(groupEl);
+  }
+}
+
+function shortcutSep(ch) {
+  const s = document.createElement('span');
+  s.className = 'shortcut-sep';
+  s.textContent = ch;
+  return s;
 }
 
 // ── Confirm dialog ───────────────────────────────────────────

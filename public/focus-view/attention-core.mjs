@@ -18,3 +18,15 @@ export function pickNextAttention(orderedIds, currentId) {
   const i = orderedIds.indexOf(currentId);
   return orderedIds[(i + 1) % orderedIds.length];
 }
+
+// Step one position along an ordered id list, wrapping at both ends. dir < 0 is up (previous), dir >= 0
+// is down (next). Empty list -> null; a single element stays put. An absent (or null) currentId starts
+// so the first move lands on the correct end: the top going down, the bottom going up. Pure: indices
+// only, no DOM. Backs both the rail's roving Arrow nav and the global Alt+Up/Down session jump.
+export function pickAdjacent(orderedIds, currentId, dir) {
+  if (!orderedIds.length) return null;
+  const step = dir < 0 ? -1 : 1;
+  const cur = orderedIds.indexOf(currentId);
+  const start = cur === -1 ? (step === 1 ? -1 : 0) : cur;
+  return orderedIds[(start + step + orderedIds.length) % orderedIds.length];
+}

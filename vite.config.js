@@ -6,6 +6,7 @@ import tailwindcss from '@tailwindcss/vite';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
+const pkg = require('./package.json');
 
 function glissaBackendPlugin() {
   let backend = null;
@@ -17,7 +18,7 @@ function glissaBackendPlugin() {
       backend = createBackend(server.httpServer, {
         staticDir: null,
         onRestart: () => {
-          console.log('Restart requested — restarting Vite server...');
+          console.log('Restart requested - restarting Vite server...');
           server.restart();
         },
       });
@@ -37,6 +38,12 @@ function glissaBackendPlugin() {
 
 export default defineConfig({
   plugins: [tailwindcss(), glissaBackendPlugin()],
+
+  // Bake the package version in at build time so the dashboard's help surface can show what is running.
+  // Replaced as a string literal in both dev and the dist bundle; the browser never reads package.json.
+  define: {
+    __APP_VERSION__: JSON.stringify(pkg.version),
+  },
 
   root: 'public',
 

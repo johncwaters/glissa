@@ -18,8 +18,8 @@ import { container, sessionUIs } from '../session-card/card-registry.js';
 import { ensureTerminalSetup, forceTerminalRepaint } from '../session-card/terminal.js';
 import { setSelectedId } from '../sidebar/selection.js';
 import { getLastFocusedSessionId, setLastFocusedSessionId } from '../ui-prefs.js';
-import { orderRoster, pickNextAttention } from './attention-core.mjs';
-import { groupRoster, visibleOrder, NO_PATH_KEY } from './roster-groups.mjs';
+import { orderRoster, pickAdjacent, pickNextAttention } from './attention-core.mjs';
+import { groupRoster, NO_PATH_KEY, visibleOrder } from './roster-groups.mjs';
 
 const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)');
 
@@ -262,15 +262,11 @@ export function mountFocusView({ rail, center }) {
 function onRailKeydown(e) {
   if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
   // VISIBLE navigation order comes from the pure core (collapsed groups excluded), never a DOM scan.
-  const ids = visibleOrder(currentGroups(), collapsedSet());
-  if (!ids.length) return;
+  // pickAdjacent wraps and handles an absent roving id (its group was just collapsed) by starting from
+  // the end per direction, so this only moves the highlight; centering stays on Enter/click (ARIA).
+  const id = pickAdjacent(visibleOrder(currentGroups(), collapsedSet()), railTabStopId, e.key === 'ArrowDown' ? 1 : -1);
+  if (id == null) return;
   e.preventDefault();
-  const dir = e.key === 'ArrowDown' ? 1 : -1;
-  // If the current roving id is absent (its group was just collapsed), start from the end per
-  // direction, reusing the existing cur === -1 idiom so we don't land on the wrong end.
-  const cur = ids.indexOf(railTabStopId);
-  const start = cur === -1 ? (dir === 1 ? -1 : 0) : cur;
-  const id = ids[(start + dir + ids.length) % ids.length];
   setRailTabStop(id);
   pillById.get(id)?.focus();
 }
@@ -622,6 +618,30 @@ export function focusNthInRail(n) {
   // Count VISIBLE pills only (collapsed groups excluded), resolved by the pure core.
   const id = visibleOrder(currentGroups(), collapsedSet())[n - 1];
   if (id) onPillActivate(id);
+}
+
+// Center the previous (dir < 0) / next (dir >= 0) session in VISIBLE rail order, wrapping at the ends.
+// Backs the global Alt+Up/Down shortcut, which fires even while the centered terminal holds focus, so
+// the operator flips between sessions without leaving the keyboard. It navigates from railTabStopId
+// (the rail's roving/selected option, synced to the centered session in steady state) and centers via
+// focusSession - NOT onPillActivate - so arrowing across a DORMANT session never spawns a Claude
+// process; explicit start stays on Enter/click. Mirrors focusNextAttention's scroll + cursor handoff.
+export function focusAdjacentInRail(dir) {
+  if (!active) return;
+  const id = pickAdjacent(visibleOrder(currentGroups(), collapsedSet()), railTabStopId, dir);
+  if (id == null) return;
+  focusSession(id); // no-ops if id === focusedId (e.g. a single-session roster); never auto-starts
+  pillById.get(id)?.scrollIntoView({ block: 'nearest' });
+  // Drop the cursor into the centered terminal so the next Alt+Up/Down (or typing) lands without a
+  // click. Double rAF, like focusNextAttention: borrowToCenter just re-parented and may have built the
+  // xterm, so the fit/repaint must settle before .focus() can reach the live helper textarea. Re-check
+  // the target still holds the center in case a later press advanced past it.
+  const ui = sessionUIs.get(id);
+  if (ui) {
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      if (active && focusedId === id) ui.term?.focus();
+    }));
+  }
 }
 
 export function activateFocusView() {

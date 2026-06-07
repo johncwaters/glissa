@@ -732,6 +732,8 @@ body {
 .btn-dialog:focus-visible,
 .btn-settings-remove:focus-visible,
 .btn-menu:focus-visible,
+.btn-help:focus-visible,
+.settings-about-link:focus-visible,
 .btn-settings-add:focus-visible,
 .dialog-advanced-toggle:focus-visible,
 .menu-item:focus-visible,
@@ -990,7 +992,8 @@ body {
   position: relative;
 }
 
-.btn-menu {
+.btn-menu,
+.btn-help {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1007,21 +1010,30 @@ body {
   position: relative;
 }
 
-.btn-menu::after {
+.btn-menu::after,
+.btn-help::after {
   content: '';
   position: absolute;
   inset: -8px;
 }
 
 .btn-menu:hover,
-.header-menu.open .btn-menu {
+.header-menu.open .btn-menu,
+.btn-help:hover {
   background: color-mix(in srgb, var(--text) 4%, transparent);
   border-color: var(--border-hover);
   color: var(--text);
 }
 
-.btn-menu:active {
+.btn-menu:active,
+.btn-help:active {
   transform: scale(0.97);
+}
+
+/* The ? glyph reads a touch quieter than the menu bars at rest, brightening on hover/focus. */
+.btn-help {
+  color: var(--text-dim);
+  font-weight: 700;
 }
 
 .header-menu-dropdown {
@@ -1167,6 +1179,116 @@ body {
 
 .settings-panel[hidden] {
   display: none;
+}
+
+/* ── Shortcuts tab (read-only reference) ─────────────────── */
+.shortcut-groups {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px 28px;
+  /* Cap height on a short viewport so a long list scrolls inside the panel, footer stays put below. */
+  max-height: min(56vh, 420px);
+  overflow-y: auto;
+}
+
+.shortcut-group {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.shortcut-group-title {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+/* dt = key chips, dd = description; the grid aligns the key column right and the labels left. */
+.shortcut-rows {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  column-gap: 10px;
+  row-gap: 6px;
+  margin: 0;
+}
+
+.shortcut-keys {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.shortcut-label {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-dim);
+}
+
+.shortcut-sep {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.kbd {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--text-head);
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  padding: 3px 5px;
+  white-space: nowrap;
+}
+
+.settings-about {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-dim);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+
+.settings-about-version {
+  color: var(--text-muted);
+}
+
+.settings-about-v {
+  color: var(--text-dim);
+}
+
+.settings-about-links {
+  display: inline-flex;
+  gap: 14px;
+}
+
+.settings-about-link {
+  color: var(--accent);
+  text-decoration: none;
+  border-radius: 2px;
+}
+
+.settings-about-link:hover {
+  text-decoration: underline;
+}
+
+@media (max-width: 560px) {
+  .shortcut-groups {
+    grid-template-columns: 1fr;
+  }
 }
 
 .session-rename-input {

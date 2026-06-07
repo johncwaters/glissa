@@ -5,6 +5,7 @@
 
 import { FitAddon } from '@xterm/addon-fit';
 import { Terminal } from '@xterm/xterm';
+import { isFocusAltShortcut } from '../focus-view/focus-shortcuts.mjs';
 import { renderScheduler } from '../render-scheduler.mjs';
 import { getTerminalTheme } from '../theme.js';
 import { noteSessionOutput } from './activity.js';
@@ -223,11 +224,15 @@ export function setupTerminal(termWrap, ui) {
   // so it won't emit a raw \x16, but the browser paste event still fires)
   term.attachCustomKeyEventHandler((ev) => {
     if (ev.type !== 'keydown') return true;
-    // Alt+W on the Focus tab is the dashboard triage jump (handled in app.js), not a terminal
-    // keystroke. Skip it here so xterm neither writes \x1bw to the PTY nor consumes it; the keydown
-    // then bubbles to the document handler. document.body.dataset.activeView is set by activateView.
-    if (ev.altKey && !ev.ctrlKey && !ev.metaKey && (ev.key === 'w' || ev.key === 'W')
-        && document.body.dataset.activeView === 'focus') {
+    // On the Focus tab the dashboard Alt shortcuts (Alt+W triage jump, Alt+Up/Down prev/next session,
+    // Alt+0 Add Session, Alt+1..9 focus the Nth pill) are handled by the document keydown handler in
+    // app.js, NOT the terminal. Skip them here so xterm neither writes an escape sequence to the PTY nor
+    // consumes them; the keydown then bubbles to the document handler. This is what lets the shortcuts
+    // work while the centered terminal holds focus. document.body.dataset.activeView is set by
+    // activateView; isFocusAltShortcut is the single source of truth for which keys these are.
+    if (ev.altKey && !ev.ctrlKey && !ev.metaKey && !ev.shiftKey
+        && document.body.dataset.activeView === 'focus'
+        && isFocusAltShortcut(ev.key)) {
       return false;
     }
     const ctrl = ev.ctrlKey || ev.metaKey;
