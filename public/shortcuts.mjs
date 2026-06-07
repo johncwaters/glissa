@@ -19,36 +19,36 @@ export const SHORTCUT_GROUPS = [
     items: [
       { combos: [['Alt', UP], ['Alt', DOWN]], label: 'Previous / next session' },
       { combos: [['Alt', '1-9']], label: 'Focus session by number' },
-      { combos: [[UP], [DOWN]], label: 'Move the rail highlight (when the rail is focused)' },
-      { combos: [[LEFT], [RIGHT]], label: 'Switch view tab (when a tab is focused)' },
+      { combos: [[UP], [DOWN]], label: 'Move rail highlight (rail focused)' },
+      { combos: [[LEFT], [RIGHT]], label: 'Switch view tab (tab focused)' },
     ],
   },
   {
     title: 'Triage',
     items: [
-      { combos: [['Alt', 'W']], label: 'Jump to the next session that needs you' },
+      { combos: [['Alt', 'W']], label: 'Next session that needs you' },
     ],
   },
   {
     title: 'Sessions',
     items: [
-      { combos: [['Alt', '0']], label: 'Add a new session' },
-      { combos: [['Enter']], label: 'Open the highlighted rail session' },
+      { combos: [['Alt', '0']], label: 'Add a session' },
+      { combos: [['Enter']], label: 'Open highlighted session' },
     ],
   },
   {
     title: 'Terminal',
     items: [
-      { combos: [['Ctrl', 'C']], label: 'Copy the selection' },
+      { combos: [['Ctrl', 'C']], label: 'Copy selection' },
       { combos: [['Ctrl', 'V']], label: 'Paste' },
-      { combos: [['Ctrl', 'Backspace']], label: 'Delete the previous word' },
+      { combos: [['Ctrl', 'Backspace']], label: 'Delete previous word' },
     ],
   },
   {
     title: 'General',
     items: [
-      { combos: [['?']], label: 'Open this shortcuts help' },
-      { combos: [['Esc']], label: 'Close a dialog or cancel a rename' },
+      { combos: [['?']], label: 'Open this help' },
+      { combos: [['Esc']], label: 'Close dialog / cancel rename' },
     ],
   },
 ];

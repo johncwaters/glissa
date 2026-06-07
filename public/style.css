@@ -1182,10 +1182,11 @@ body {
 }
 
 /* ── Shortcuts tab (read-only reference) ─────────────────── */
+/* Multi-column (not grid) so groups pack by height into two balanced columns instead of being
+   locked to a row partner: a tall group no longer forces empty space beside a short one. */
 .shortcut-groups {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 18px 28px;
+  columns: 2;
+  column-gap: 28px;
   /* Cap height on a short viewport so a long list scrolls inside the panel, footer stays put below. */
   max-height: min(56vh, 420px);
   overflow-y: auto;
@@ -1195,6 +1196,13 @@ body {
   display: flex;
   flex-direction: column;
   gap: 7px;
+  /* Keep each group whole within a column and space them down the column. */
+  break-inside: avoid;
+  margin-bottom: 18px;
+}
+
+.shortcut-group:last-child {
+  margin-bottom: 0;
 }
 
 .shortcut-group-title {
@@ -1287,7 +1295,7 @@ body {
 
 @media (max-width: 560px) {
   .shortcut-groups {
-    grid-template-columns: 1fr;
+    columns: 1;
   }
 }
 
