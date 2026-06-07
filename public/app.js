@@ -271,6 +271,10 @@ let _activeView = 'focus';
 function activateView(view) {
   const prev = _activeView;
   _activeView = view;
+  // Mirror the active view onto the body: terminal.js reads document.body.dataset.activeView to decide
+  // whether a focused xterm releases Alt+W to the chrome triage handler (Focus) or treats it as a real
+  // keystroke. Without this write it stays undefined and xterm swallows Alt+W whenever a terminal is focused.
+  document.body.dataset.activeView = view;
   for (const v of VIEW_TABS) {
     const selected = v.view === view;
     if (v.el) v.el.hidden = !selected;

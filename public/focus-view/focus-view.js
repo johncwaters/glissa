@@ -270,8 +270,13 @@ export function focusNextAttention() {
   const nextId = pickNextAttention(ids, attnCursorId);
   attnCursorId = nextId;
   const ui = sessionUIs.get(nextId);
+  // The round-robin can resolve to the session already in the center (it COMPLETEd while centered, so
+  // it joined the queue in place, or it is the only thing needing you). focusSession no-ops on that,
+  // which made the press feel dead; flash the pill + center so the jump always reads as a response.
+  const alreadyCentered = nextId === focusedId;
   focusSession(nextId);
   pillById.get(nextId)?.scrollIntoView({ block: 'nearest' });
+  if (alreadyCentered) flashAttention(nextId);
   // Drop the cursor into the centered terminal so the operator types right away. Deferred a double
   // rAF (the same idiom as focusSessionCard): borrowToCenter just re-parented the card and may have
   // woken or built its terminal, so the fit + repaint must settle before .focus() can land on the
@@ -281,6 +286,29 @@ export function focusNextAttention() {
     requestAnimationFrame(() => requestAnimationFrame(() => {
       if (active && focusedId === nextId) ui.term?.focus();
     }));
+  }
+}
+
+// One-shot "you are already here" pulse for an Alt+W press that resolves to the centered session, so
+// the keypress always reads as a response instead of a dead no-op. Pure GPU-only feedback (WAAPI
+// transform/opacity, fire-and-forget like renderPillActivity), skipped under reduced-motion or a
+// hidden tab; it never changes which session is focused.
+function flashAttention(id) {
+  if (reducedMotion?.matches || document.hidden) return;
+  const pill = pillById.get(id);
+  if (pill?.animate) {
+    pill.animate(
+      [
+        { transform: 'scale(1)' },
+        { transform: 'scale(1.045)', offset: 0.3 },
+        { transform: 'scale(1)' },
+      ],
+      { duration: 360, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' },
+    );
+  }
+  const card = sessionUIs.get(id)?.card;
+  if (card?.animate) {
+    card.animate([{ opacity: 0.8 }, { opacity: 1 }], { duration: 240, easing: 'ease-out' });
   }
 }
 
