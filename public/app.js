@@ -268,7 +268,6 @@ let _activeView = 'focus';
 function activateView(view) {
   const prev = _activeView;
   _activeView = view;
-  document.body.dataset.activeView = view;
   for (const v of VIEW_TABS) {
     const selected = v.view === view;
     if (v.el) v.el.hidden = !selected;

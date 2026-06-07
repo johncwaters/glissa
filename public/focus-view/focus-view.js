@@ -1,13 +1,13 @@
 // Focus view: an experimental watch-and-steer layout. A persistent left ROSTER RAIL (one lightweight
 // pill per session, WAITING/needs-review bubble to the top) and a single large CENTER that holds the
-// focused session's real card (re-parented, mirroring the maximize pattern, since each session owns one
-// xterm). Signal-only: a session that needs input re-sorts in the rail and pulses, but never hijacks the
+// focused session's real card (re-parented into the center, since each session owns one xterm).
+// Signal-only: a session that needs input re-sorts in the rail and pulses, but never hijacks the
 // center while you work. Worktree review happens in the right review sidebar: focusing a session (or
 // clicking a rail pill) selects it there; the rail pill still tags REVIEW/PARKED so the operator knows
 // which sessions have changes waiting.
 //
-// State lives here (view-local); it reads sessions from the shared card registry and never mutates the
-// Sessions-tab minimize/maximize state. The card is returned to its exact home slot on leave/swap.
+// State lives here (view-local); it reads sessions from the shared card registry. The borrowed card is
+// returned to its exact home slot in the off-screen grid on leave/swap.
 
 import { BADGE_LABELS, STATE_GLYPHS, STATES } from '/shared/states.mjs';
 import { sendControlMsg } from '../control-ws.js';
@@ -110,9 +110,9 @@ function buildPill(id) {
   return pill;
 }
 
-// Clicking a pill focuses its session into the center. A DORMANT session is also STARTED (mirrors the
-// Sessions-view minimized-pill expand): borrowToCenter has already wired the data WS via
-// ensureTerminalSetup, so the spawning PTY's output flows into the centered card.
+// Clicking a pill focuses its session into the center. A DORMANT session is also STARTED:
+// borrowToCenter has already wired the data WS via ensureTerminalSetup, so the spawning PTY's
+// output flows into the centered card.
 function onPillActivate(id) {
   const ui = sessionUIs.get(id);
   if (!ui) return;

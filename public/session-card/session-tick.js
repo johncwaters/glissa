@@ -1,7 +1,7 @@
 // Shared 1s session tick. Two load-bearing readouts ride this single interval so nothing needs a
 // per-session timer:
 //
-//   - Elapsed clock: "time in current state", rendered on each card's header readout (ui.railElapsed).
+//   - Elapsed clock: "time in current state", rendered on each card's header readout (ui.elapsedEl).
 //     Visible in the Focus center, where the focused card keeps its full header.
 //   - Working heartbeat: refreshSessionActivity derives each RUNNING session's quiet flag from its
 //     last-output timestamp; the flag paints on the Focus rail pill (activity.js -> focus-view.js).
@@ -38,7 +38,7 @@ function elapsedText(ui) {
 // Refresh a single card's elapsed readout. Called by lifecycle.applyState so a state change reflects
 // immediately, and by the interval tick for the running clock.
 export function refreshElapsed(ui) {
-  if (ui.railElapsed) ui.railElapsed.textContent = elapsedText(ui);
+  if (ui.elapsedEl) ui.elapsedEl.textContent = elapsedText(ui);
 }
 
 // The shared 1s tick: advance every card's elapsed clock and derive each working session's quiet flag.

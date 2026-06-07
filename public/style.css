@@ -329,7 +329,7 @@ body {
 /* The elapsed readout trails the badge in the header's left zone as a quiet time-in-state clock
    ("WORKING 2:14"); the spacer downstream absorbs its width so the right-zone tags never reflow as
    it ticks. Settled states clear the text (session-tick.js -> ''); :empty then hides the span. */
-.session-card .rail-elapsed {
+.session-card .card-elapsed {
   flex-shrink: 0;
   margin-left: 8px;
   font-size: 11px;
@@ -337,7 +337,7 @@ body {
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.02em;
 }
-.rail-elapsed:empty { display: none; }
+.card-elapsed:empty { display: none; }
 
 /* Completion flash - plays once on DONE/FAILED transition */
 /* [P2] DONE shortened to 900ms (success = brief), FAILED to 1.4s (keeps weight) */

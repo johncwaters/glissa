@@ -126,7 +126,7 @@ export function setupTerminal(termWrap, ui) {
   ui.needsWebGLReload = false;
 
   // termWrap size → fit → push resize to PTY. RAF-coalesces burst fires
-  // (window drag, maximize transition). The explicit send below the fit
+  // (window resize, focus borrow). The explicit send below the fit
   // covers the case where fit() proposes the same cols/rows xterm already
   // has (no onResize event) but the PTY hasn't caught up yet - most often
   // on first connect, where term starts at the default 80x24.
@@ -138,7 +138,9 @@ export function setupTerminal(termWrap, ui) {
   function applyFit() {
     fitRafId = null;
     if (!ui.fitAddon || !ui.term) return;
-    if (ui.card.classList.contains('minimized')) return;
+    // Skip fit when the card is off-screen (it lives in the hidden grid home until Focus borrows it
+    // into the center); fitting a display:none card computes garbage dims. It gets a fresh fit on borrow.
+    if (!ui.card.offsetParent) return;
     ui.fitAddon.fit();
     const { cols, rows } = ui.term;
     // When the buffer reflows after a dimension change, the WebGL renderer
@@ -274,7 +276,7 @@ export function ensureTerminalSetup(ui, sessionId) {
 }
 
 // Force a full-viewport repaint after a transition that re-parents the card DOM
-// (expand/un-minimize, maximize, split restore). xterm only repaints rows it
+// (borrow into / release out of the Focus center). xterm only repaints rows it
 // marks dirty, so after a re-parent the WebGL canvas can keep stale glyphs in
 // quiescent rows (ghosts). Deferred one rAF so the card is on-screen when the
 // refresh runs - a refresh issued while still off-screen is suppressed by

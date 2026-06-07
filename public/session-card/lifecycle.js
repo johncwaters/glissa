@@ -219,7 +219,7 @@ export function createSessionCard(sessionId, sessionName, initialState, options 
     card: dom.card,
     badge: dom.badge,
     nameEl: dom.nameEl,
-    railElapsed: dom.railElapsed,
+    elapsedEl: dom.elapsedEl,
     // Wall-clock of the latest state entry; session-tick.js renders "time in this state".
     stateSince: Date.now(),
     btnOverflow: dom.btnOverflow,
