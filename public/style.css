@@ -2575,44 +2575,42 @@ body {
 .review-status-note[data-merge="parked"] { color: var(--state-failed); }
 .review-status-note[data-merge="merged"] { color: var(--state-done); }
 
-/* Committed vs uncommitted sections. The second section is divided off by a clear top border: that line
-   is the boundary between what a merge moves into develop (committed) and what it leaves behind. */
-.review-section { margin-bottom: 12px; }
-.review-section + .review-section {
-  margin-top: 16px;
-  padding-top: 16px;
-  border-top: 2px solid var(--border);
-}
-.review-section-label {
-  display: flex;
-  align-items: baseline;
-  flex-wrap: wrap;
-  gap: 4px 8px;
-  margin-bottom: 8px;
-}
-.review-section-title {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-.review-section-sub { font-size: 11px; color: var(--text-muted); }
-.review-section[data-kind="committed"] .review-section-title { color: var(--state-done); }
-.review-section[data-kind="uncommitted"] .review-section-title { color: var(--text-muted); }
+/* Committed vs uncommitted sections. Each carries a colored left accent bar (committed = done, uncommitted
+   = waiting) so the two groups are told apart by color at a glance, not by re-reading the words. A single
+   header row per section names the group ONCE, its meaning, and the stats, instead of stacking title +
+   subtitle + a separate "N files changed" line. */
+.review-section { margin-bottom: 12px; padding-left: 10px; border-left: 2px solid var(--border); }
+.review-section[data-kind="committed"] { border-left-color: var(--state-done); }
+.review-section[data-kind="uncommitted"] { border-left-color: var(--state-waiting); }
+.review-section + .review-section { margin-top: 16px; }
 .review-section[data-kind="uncommitted"] .review-diff { opacity: 0.8; }
 
-.review-stat-head {
+.review-section-head {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+  margin-bottom: 8px;
+}
+.review-section-id { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 8px; min-width: 0; }
+.review-section-label {
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: var(--text-head);
-  margin-bottom: 8px;
 }
-.review-stat-counts { display: inline-flex; gap: 8px; }
+.review-section[data-kind="committed"] .review-section-label { color: var(--state-done); }
+.review-section[data-kind="uncommitted"] .review-section-label { color: var(--state-waiting); }
+.review-section-meaning { font-size: 11px; color: var(--text-muted); }
+.review-section-stat {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.review-stat-files { color: var(--text-muted); }
 .review-add { color: var(--state-running); }
 .review-del { color: var(--state-failed); }
 .review-bin { color: var(--text-muted); }

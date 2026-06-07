@@ -123,6 +123,9 @@ function requestDiff(id) {
   sendControlMsg({ type: 'request-session-diff', id });
 }
 
+// Count the sessions whose review gate is open. The gate self-heals server-side: getDiff demotes a
+// stranded pending-review/parked status to 'none' (broadcast as a merge-status) the moment it finds an
+// empty diff, so a status still in REVIEWABLE here genuinely has something to review.
 function updateCount() {
   if (!countEl) return;
   let n = 0;
@@ -188,17 +191,17 @@ function render() {
 
   // Committed section first: it is what a merge moves into develop.
   if (committedFiles.length > 0) {
-    bodyEl.append(renderSection('committed', 'Committed', 'will merge into develop', committedFiles));
+    bodyEl.append(renderSection('committed', 'Committed', 'merges into develop', committedFiles));
   } else {
     const msg = (!fetched && reviewable) ? 'Loading diff...'
-      : uncommittedFiles.length > 0 ? 'Nothing committed yet, so nothing to merge. Commit in the session first.'
+      : uncommittedFiles.length > 0 ? 'Nothing committed yet. Commit in the session to make changes mergeable.'
       : 'No changes in this worktree.';
     bodyEl.append(el('div', 'review-nochanges', msg));
   }
 
   // Uncommitted section, clearly divided off: present but excluded from the merge.
   if (uncommittedFiles.length > 0) {
-    bodyEl.append(renderSection('uncommitted', 'Uncommitted', 'not in the merge until committed', uncommittedFiles));
+    bodyEl.append(renderSection('uncommitted', 'Uncommitted', 'not in the merge', uncommittedFiles));
   }
 
   if (!reviewable && !mergeableLive && hasCommits) {
@@ -212,23 +215,27 @@ function renderEmpty(title, desc) {
   bodyEl.append(wrap);
 }
 
-// One labeled section ("Committed - will merge into develop" / "Uncommitted - not in the merge..."), the
-// clear line between the mergeable and non-mergeable changes. A summary header ("N files changed +X -Y")
-// sits over a collapsible per-file list; each file is minimized by default and reveals its diff on click.
-function renderSection(kind, title, subtitle, files) {
+// One change group, summarized in a SINGLE header row so the two groups read as two distinct things at a
+// glance instead of two near-identical "N files changed" blocks. The git term (`label`) appears exactly
+// once, with a short plain-English `meaning` beside it and the file/line stats folded into the same row.
+// Color and a left accent bar (keyed off data-kind in CSS) carry the committed-vs-uncommitted distinction
+// so it does not have to be spelled out twice. A collapsible per-file list sits below, minimized by default.
+function renderSection(kind, label, meaning, files) {
   const wrap = el('div', 'review-section');
   wrap.dataset.kind = kind;
 
-  const label = el('div', 'review-section-label');
-  label.append(el('span', 'review-section-title', title));
-  if (subtitle) label.append(el('span', 'review-section-sub', subtitle));
-  wrap.append(label);
-
   const sum = summarizeFiles(files);
-  const head = el('div', 'review-stat-head', `${sum.files} file${sum.files === 1 ? '' : 's'} changed`);
-  const counts = el('span', 'review-stat-counts');
-  counts.append(el('span', 'review-add', `+${sum.added}`), el('span', 'review-del', `-${sum.removed}`));
-  head.append(counts);
+  const head = el('div', 'review-section-head');
+
+  const lhs = el('div', 'review-section-id');
+  lhs.append(el('span', 'review-section-label', label));
+  if (meaning) lhs.append(el('span', 'review-section-meaning', meaning));
+  head.append(lhs);
+
+  const stat = el('div', 'review-section-stat');
+  stat.append(el('span', 'review-stat-files', `${sum.files} file${sum.files === 1 ? '' : 's'}`));
+  stat.append(el('span', 'review-add', `+${sum.added}`), el('span', 'review-del', `-${sum.removed}`));
+  head.append(stat);
   wrap.append(head);
 
   const list = el('div', 'review-diff');

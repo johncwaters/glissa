@@ -11,10 +11,34 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { execFileSync } = require('node:child_process');
 
 const { Session } = require('../sessions');
 const { STATES } = require('../shared/states');
 const WIN = process.platform === 'win32';
+
+function hasGit() {
+  try { execFileSync('git', ['--version'], { stdio: 'ignore' }); return true; } catch { return false; }
+}
+const GIT = hasGit();
+
+function git(args, cwd) {
+  return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+}
+
+// A real one-commit git repo to stand in for a session worktree, so getDiff runs against actual git
+// (the reconcile path it drives is git-truth, not mockable).
+function initOneCommitRepo() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-diff-'));
+  try { git(['init', '-b', 'main'], dir); } catch { git(['init'], dir); }
+  git(['config', 'user.email', 'test@example.com'], dir);
+  git(['config', 'user.name', 'Glissa Test'], dir);
+  git(['config', 'commit.gpgsign', 'false'], dir);
+  fs.writeFileSync(path.join(dir, 'README.md'), '# repo\n', 'utf8');
+  git(['add', '-A'], dir);
+  git(['commit', '-m', 'init'], dir);
+  return dir;
+}
 
 function fakePty(pid = 2147483646) {
   return { pid, onData() {}, onExit() {}, write() {}, resize() {}, kill() {} };
@@ -276,6 +300,38 @@ test('adoptWorktree re-attaches an on-disk worktree as pending-review (restart r
     s.destroy();
     fs.rmSync(wt, { recursive: true, force: true });
   }
+});
+
+test('getDiff self-heals a stranded pending-review gate to none when nothing is reviewable', { skip: !GIT }, () => {
+  const repo = initOneCommitRepo();
+  const s = makeSession();
+  const statuses = [];
+  s.on('merge-status', (e) => statuses.push(e.mergeStatus));
+  try {
+    s.worktreeDir = repo;          // clean one-commit repo: no committed-vs-base diff, no working changes
+    s.mergeStatus = 'pending-review'; // gate stranded after the operator merged/cleaned inside the live PTY
+    const d = s.getDiff();
+    assert.equal(d.committed.diff.trim(), '', 'no committed diff');
+    assert.equal(d.uncommitted.diff.trim(), '', 'clean working tree');
+    assert.equal(s.mergeStatus, 'none', 'gate demoted to none');
+    assert.deepEqual(statuses, ['none'], 'broadcast the demotion exactly once');
+  } finally { s.destroy(); fs.rmSync(repo, { recursive: true, force: true }); }
+});
+
+test('getDiff keeps pending-review when the worktree still has real changes', { skip: !GIT }, () => {
+  const repo = initOneCommitRepo();
+  const s = makeSession();
+  const statuses = [];
+  s.on('merge-status', (e) => statuses.push(e.mergeStatus));
+  try {
+    s.worktreeDir = repo;
+    s.mergeStatus = 'pending-review';
+    fs.writeFileSync(path.join(repo, 'work.txt'), 'new work\n', 'utf8'); // an untracked deliverable
+    const d = s.getDiff();
+    assert.notEqual(d.uncommitted.diff.trim(), '', 'untracked change shows via intent-to-add');
+    assert.equal(s.mergeStatus, 'pending-review', 'gate preserved while there is something to review');
+    assert.deepEqual(statuses, [], 'no demotion broadcast');
+  } finally { s.destroy(); fs.rmSync(repo, { recursive: true, force: true }); }
 });
 
 test('resetToDormant: returns to DORMANT only when settled (PTY dead + no worktree), else no-op', () => {

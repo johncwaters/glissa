@@ -405,6 +405,16 @@ class Session extends EventEmitter {
     const uncommitted = { stat: g(["diff", "--stat", "HEAD"]).trim(), diff: g(["diff", "HEAD"]) };
     const aheadCount = base ? g(["rev-list", "--count", `${base}..HEAD`]).trim() : "0";
     const hasCommits = aheadCount !== "" && aheadCount !== "0";
+    // Self-heal a stranded review gate. mergeStatus is set at PTY exit / boot re-adoption, but the
+    // operator can commit-and-merge or clean the worktree inside the still-live PTY (the design is
+    // "commit as you go"), which leaves the gate stuck at pending-review/parked over an empty diff - a
+    // phantom "1" on the review badge with "No changes in this worktree" below it. getDiff is the one
+    // place that re-derives what is actually reviewable, so when nothing is, drop the gate to 'none'
+    // (broadcast via the merge-status event, which clears the badge and the note).
+    if ((this.mergeStatus === "pending-review" || this.mergeStatus === "parked")
+        && committed.diff.trim() === "" && uncommitted.diff.trim() === "") {
+      this._setMergeStatus("none");
+    }
     return { committed, uncommitted, hasCommits };
   }
 
