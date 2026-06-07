@@ -126,6 +126,10 @@ export function buildCardDOM(sessionId, sessionName, initialState, options = {})
   card.dataset.state = state;
   if (options.skipPerms) card.dataset.skipPerms = '';
   if (options.worktree) card.dataset.worktree = '';
+  // The session's project root. The Focus rail groups pills by this (basename = group label).
+  // Durable on-DOM home so the DORMANT close-out rebuild can re-read it (nothing inherits through
+  // that rebuild automatically - app.js reads dataset.path back by hand, same as skipPerms).
+  if (options.path) card.dataset.path = options.path;
 
   // Header
   const header = el('div', 'session-card-header');

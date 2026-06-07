@@ -219,6 +219,8 @@ export function createSessionCard(sessionId, sessionName, initialState, options 
     badge: dom.badge,
     nameEl: dom.nameEl,
     elapsedEl: dom.elapsedEl,
+    // Project root (for the Focus rail's project grouping). '' when unknown -> the rail's (no path) group.
+    path: options.path || '',
     // Wall-clock of the latest state entry; session-tick.js renders "time in this state".
     stateSince: Date.now(),
     btnOverflow: dom.btnOverflow,

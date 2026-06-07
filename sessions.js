@@ -281,6 +281,7 @@ class Session extends EventEmitter {
     return {
       id: this.id,
       name: this.name,
+      path: this.path,
       state: this.state,
       sleeping: this._sleeping,
       dangerouslySkipPermissions: this.dangerouslySkipPermissions,

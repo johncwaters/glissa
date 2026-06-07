@@ -97,7 +97,7 @@ function handleSnapshot(sessions) {
     if (hasSession(s.id)) {
       applyState(s.id, s.state);
     } else {
-      createSessionCard(s.id, s.name, s.state, { skipPerms: !!s.dangerouslySkipPermissions, worktree: !!s.isWorktree });
+      createSessionCard(s.id, s.name, s.state, { skipPerms: !!s.dangerouslySkipPermissions, worktree: !!s.isWorktree, path: s.path });
     }
     // Hydrate the review sidebar's status/count from the snapshot (quiet: no auto-open on reconnect).
     seedSessionMergeStatus(s.id, s.mergeStatus);
@@ -123,8 +123,12 @@ function handleStateChange(msg) {
   if (msg.to === STATES.DORMANT && msg.from !== STATES.DORMANT) {
     const card = document.querySelector(`.session-card[data-id="${CSS.escape(msg.id)}"]`);
     const skipPerms = card ? card.dataset.skipPerms !== undefined : false;
+    // Read path off the old card BEFORE removeSessionCard detaches it. Nothing re-populates path
+    // after the rebuild (unlike worktree, which rides a later session-git delta), so a DORMANT
+    // round-trip would otherwise drop the session into the rail's (no path) group.
+    const path = card ? card.dataset.path : undefined;
     removeSessionCard(msg.id);
-    createSessionCard(msg.id, msg.session, STATES.DORMANT, { skipPerms });
+    createSessionCard(msg.id, msg.session, STATES.DORMANT, { skipPerms, path });
     if (isFocusActive()) refreshFocusRoster();
     refreshReviewSidebar(msg.id);
     return;
@@ -145,10 +149,10 @@ function handleStateChange(msg) {
 const messageHandlers = {
   'snapshot':           (msg) => handleSnapshot(msg.sessions),
   'state-change':       (msg) => handleStateChange(msg),
-  'session-added':      (msg) => { if (!msg.ephemeral) knownProjects.set(msg.id, msg.session); if (!hasSession(msg.id)) { createSessionCard(msg.id, msg.session, msg.state, { skipPerms: !!msg.skipPerms, worktree: !!msg.worktree }); } if (isFocusActive()) refreshFocusRoster(); },
+  'session-added':      (msg) => { if (!msg.ephemeral) knownProjects.set(msg.id, msg.session); if (!hasSession(msg.id)) { createSessionCard(msg.id, msg.session, msg.state, { skipPerms: !!msg.skipPerms, worktree: !!msg.worktree, path: msg.path }); } if (isFocusActive()) refreshFocusRoster(); },
   'session-removed':    (msg) => { knownProjects.delete(msg.id); removeSessionCard(msg.id); forgetReviewSession(msg.id); if (isFocusActive()) refreshFocusRoster(); },
   'session-renamed':    (msg) => { if (knownProjects.has(msg.id)) knownProjects.set(msg.id, msg.newName); renameSessionCard(msg.id, msg.newName); },
-  'session-modified':   (msg) => { if (!msg.ephemeral) knownProjects.set(msg.id, msg.session); removeSessionCard(msg.id); forgetReviewSession(msg.id); createSessionCard(msg.id, msg.session, msg.state, { skipPerms: !!msg.skipPerms, worktree: !!msg.worktree }); if (isFocusActive()) refreshFocusRoster(); },
+  'session-modified':   (msg) => { if (!msg.ephemeral) knownProjects.set(msg.id, msg.session); removeSessionCard(msg.id); forgetReviewSession(msg.id); createSessionCard(msg.id, msg.session, msg.state, { skipPerms: !!msg.skipPerms, worktree: !!msg.worktree, path: msg.path }); if (isFocusActive()) refreshFocusRoster(); },
   'session-git':        (msg) => setSessionWorktree(msg.id, !!msg.worktree),
   'session-agents':     (msg) => setSessionAgents(msg.id, msg.activeAgents),
   'session-merge-status': (msg) => { setSessionMergeStatus(msg.id, msg.mergeStatus); setFocusMergeStatus(msg.id, msg.mergeStatus); },
