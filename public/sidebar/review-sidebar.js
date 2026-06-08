@@ -11,7 +11,7 @@
 // `session-changed` push via notifyWorktreeChanged). Session name/state are read live from the shared
 // card registry. Pure parsing lives in diff-core.mjs.
 
-import { STATES } from '/shared/states.mjs';
+import { MERGEABLE_LIVE_STATES, STATES } from '/shared/states.mjs';
 import { sendControlMsg } from '../control-ws.js';
 import { el } from '../dom-helpers.js';
 import { showConfirmDialog } from '../session-card/card-dom.js';
@@ -154,10 +154,13 @@ export function resolveSelectedSession() {
 // ── Helpers ──
 
 // The Merge action's gate in one place, shared by the rendered button and the Alt+M shortcut: a quiescent
-// live session (COMPLETE or IDLE) whose worktree has COMMITTED changes. The 'merging' in-flight check is
-// the caller's separate concern (it disables the button and short-circuits the shortcut).
+// live session (WAITING, IDLE, or COMPLETE - see shared MERGEABLE_LIVE_STATES, the same set the server's
+// mergeAndContinue enforces) whose worktree has COMMITTED changes. RUNNING is excluded (the agent is
+// actively editing); WAITING is fine (the agent paused for the operator, so its committed work is stable).
+// The 'merging' in-flight check is the caller's separate concern (it disables the button / short-circuits
+// the shortcut).
 function isMergeableLive(state, hasCommits) {
-  return (state === STATES.COMPLETE || state === STATES.IDLE) && hasCommits;
+  return MERGEABLE_LIVE_STATES.includes(state) && hasCommits;
 }
 
 // Whether the session still has a live PTY in its worktree (anything but a terminal/dormant state). Gates
@@ -213,10 +216,10 @@ function render() {
 
   // One merge action, never a "finish". A session's PTY effectively never dies (Claude's built-in restart
   // keeps it alive; only an explicit /exit ends it, which never happens), so there is no settled/close-out
-  // state to merge from. "Merge" on a quiescent live session (COMPLETE/IDLE) with COMMITTED changes merges
-  // into develop and rebases this worktree onto develop, KEEPING the session running. With nothing
-  // committed there is nothing to merge, so the action is withheld. A session still actively working
-  // (RUNNING/WAITING) only gets a read-only preview.
+  // state to merge from. "Merge" on a quiescent live session (WAITING/IDLE/COMPLETE) with COMMITTED changes
+  // merges into develop and rebases this worktree onto develop, KEEPING the session running. With nothing
+  // committed there is nothing to merge, so the action is withheld. Only a session that is actively working
+  // (RUNNING) gets a read-only preview; a session paused awaiting the operator (WAITING) is mergeable.
   const live = isLive(state);
   const mergeableLive = isMergeableLive(state, hasCommits);
 
@@ -242,7 +245,7 @@ function render() {
   }
 
   if (!reviewable && !mergeableLive && hasCommits) {
-    bodyEl.append(el('div', 'review-hint', 'Read-only preview. The session is still active; it can be merged once it is complete or idle.'));
+    bodyEl.append(el('div', 'review-hint', 'Read-only preview. The session is working right now; it can be merged once its current turn finishes.'));
   }
 }
 

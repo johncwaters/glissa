@@ -282,6 +282,24 @@ test('mergeAndContinue refuses while actively RUNNING (mid-edit; no merge)', { s
   } finally { s.destroy(); fs.rmSync(wt, { recursive: true, force: true }); }
 });
 
+test('mergeAndContinue from WAITING merges (paused awaiting the operator is quiescent, not working)', { skip: !WIN }, () => {
+  const wt = realWorktreeDir();
+  const gw = fakeGitWorkspace({
+    worktreeDir: wt,
+    mergeKeepResult: { merged: true, kept: true, branch: 'glissa/session/wt-sess', base: 'develop', baseSha: 'newbase' },
+  });
+  const s = makeSession({ gitWorkspace: gw, integrationBranch: 'develop', ptySpawn: () => fakePty() });
+  try {
+    s.start();
+    s.state = STATES.WAITING; // turn ended on a question; the agent is parked waiting for the operator, not editing
+    const r = s.mergeAndContinue();
+    assert.equal(r.merged, true, 'a quiescent WAITING session is mergeable, same as IDLE/COMPLETE');
+    assert.equal(gw.calls.mergeKeep.length, 1, 'delegated to the keep-worktree merge');
+    assert.equal(s.worktreeDir, wt, 'worktree kept alive so the session keeps working');
+    assert.equal(s.state, STATES.WAITING, 'session is NOT ended by the merge');
+  } finally { s.destroy(); fs.rmSync(wt, { recursive: true, force: true }); }
+});
+
 test('mergeAndContinue parks on a rebase conflict (worktree preserved, session continues)', { skip: !WIN }, () => {
   const wt = realWorktreeDir();
   const gw = fakeGitWorkspace({

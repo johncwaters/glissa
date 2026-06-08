@@ -4,7 +4,7 @@ const crypto = require("node:crypto");
 const pty = require("node-pty");
 const { EventEmitter } = require("node:events");
 const { execSync, execFileSync } = require("node:child_process");
-const { STATES } = require("./shared/states");
+const { STATES, MERGEABLE_LIVE_STATES } = require("./shared/states");
 const { createOscTitleSource } = require("./detection/osc-title-source");
 const { createStatusSource } = require("./detection/status-source");
 const { createWorktreeWatcher } = require("./detection/worktree-watch");
@@ -597,16 +597,17 @@ class Session extends EventEmitter {
     return r;
   }
 
-  // Operator action behind the sidebar's "Merge" on a LIVE quiescent session (COMPLETE/IDLE): commit the
-  // worktree's changes, merge them into the integration branch, and rebase this worktree onto it, KEEPING
-  // the session running on the same worktree (now on top of develop) so the operator commits as they go.
-  // Unlike finishAndMerge it never ends the session or tears the worktree down. Refused while the PTY is
-  // actively working (we must not rewrite a worktree mid-edit). A rebase conflict / lost FF PARKS
-  // (worktree preserved). Returns the engine result.
+  // Operator action behind the sidebar's "Merge" on a LIVE quiescent session (WAITING/IDLE/COMPLETE):
+  // commit the worktree's changes, merge them into the integration branch, and rebase this worktree onto
+  // it, KEEPING the session running on the same worktree (now on top of develop) so the operator commits
+  // as they go. Unlike finishAndMerge it never ends the session or tears the worktree down. Refused only
+  // while the PTY is actively working (RUNNING: we must not rewrite a worktree mid-edit); a session that
+  // paused awaiting the operator (WAITING) is quiescent and mergeable, same as IDLE/COMPLETE. A rebase
+  // conflict / lost FF PARKS (worktree preserved). Returns the engine result.
   mergeAndContinue() {
     if (this._destroyed) return { merged: false, reason: "destroyed" };
     if (!this._gitWorkspace || !this._workspace) return { merged: false, reason: "no-worktree" };
-    if (this.state !== STATES.COMPLETE && this.state !== STATES.IDLE) {
+    if (!MERGEABLE_LIVE_STATES.includes(this.state)) {
       return { merged: false, reason: "not-continuable" };
     }
     this._setMergeStatus("merging");

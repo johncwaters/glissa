@@ -1,6 +1,6 @@
 'use strict';
 
-// Canonical state definitions — single source of truth for server and browser.
+// Canonical state definitions - single source of truth for server and browser.
 // Server-side: require('./shared/states')
 // Browser-side: served dynamically as ESM via GET /shared/states.mjs
 
@@ -42,4 +42,11 @@ const STATE_GLYPHS = Object.freeze({
 
 const KILLABLE_STATES = Object.freeze([STATES.RUNNING, STATES.WAITING, STATES.IDLE, STATES.COMPLETE]);
 const RESTARTABLE_STATES = Object.freeze([STATES.DONE, STATES.FAILED]);
-module.exports = { STATES, BADGE_LABELS, STATE_GLYPHS, KILLABLE_STATES, RESTARTABLE_STATES };
+// A live-PTY session that is quiescent (parked between turns), so merging its worktree and rebasing it
+// underneath the session is safe. The single source of truth for the merge-as-you-go gate, shared by the
+// server (Session.mergeAndContinue) and the client (review sidebar) so the two can never disagree. RUNNING
+// is excluded (the agent is actively editing mid-turn); WAITING belongs here, because "Needs Input" means
+// the agent handed control back and is waiting on the operator, NOT working. Dead-PTY states (DONE/FAILED)
+// go through the pending-review/discard gate instead.
+const MERGEABLE_LIVE_STATES = Object.freeze([STATES.WAITING, STATES.IDLE, STATES.COMPLETE]);
+module.exports = { STATES, BADGE_LABELS, STATE_GLYPHS, KILLABLE_STATES, RESTARTABLE_STATES, MERGEABLE_LIVE_STATES };

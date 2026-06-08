@@ -39,3 +39,7 @@ export const STATE_GLYPHS = Object.freeze({
 
 export const KILLABLE_STATES    = Object.freeze([STATES.RUNNING, STATES.WAITING, STATES.IDLE, STATES.COMPLETE]);
 export const RESTARTABLE_STATES = Object.freeze([STATES.DONE, STATES.FAILED]);
+// Quiescent live-PTY states where merging the worktree is safe: the merge-as-you-go gate, shared verbatim
+// with the server (see shared/states.js MERGEABLE_LIVE_STATES). RUNNING is excluded (mid-edit); WAITING is
+// included (the agent paused for the operator, not working).
+export const MERGEABLE_LIVE_STATES = Object.freeze([STATES.WAITING, STATES.IDLE, STATES.COMPLETE]);
