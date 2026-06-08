@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.14.0] - 2026-06-07
+## [0.14.0] - 2026-06-08
 
 This release replaces the multi-session grid with **Focus**, a single-session navigation model: a left roster rail of one pill per session, a center work surface, and a right review sidebar. Every git-repo session now runs in its own git worktree, and you review and merge its committed work from the dashboard while it keeps running.
 
@@ -50,6 +50,7 @@ This release replaces the multi-session grid with **Focus**, a single-session na
 - **Dropped terminal history on reconnect under backpressure**: A reconnect replay frame dropped under backpressure left scrollback history stranded; the drop now rewinds the send offset so the backfill re-pulls the missed history.
 - **Inconsistent completion alerts**: A finished turn now plays the alert sound, completion notifications debounce per session and category so simultaneous completions stop cross-suppressing each other, and a process exit notifies like a turn completion.
 - **WebGL glyph ghosts on expand**: Expanding a card now forces a full repaint, so stale cached glyphs no longer linger.
+- **Merge a session that is parked for your input**: The review sidebar allowed merging only an idle or completed session, so a session sitting in WAITING (it ended its turn awaiting your reply) could not have its committed work merged even though the agent is quiescent. WAITING now joins IDLE and COMPLETE as a mergeable state, single-sourced so the client gate and the server `mergeAndContinue` cannot drift; RUNNING stays excluded so a worktree is never rebased underneath an actively editing agent.
 
 ## [0.13.0] - 2026-06-01
 
