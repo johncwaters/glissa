@@ -280,16 +280,21 @@ function createBackend(httpServer, options = {}) {
     // without a full recreate (which would tear down the terminal).
     // Backstop poll (the reliability floor under the gitdir watch + turn-end hook): recompute each
     // worktree session's cheap signature so any missed fs event, operator hand-edit, or cross-session
-    // merge into the integration branch still surfaces within one interval. checkWorktreeChange()
-    // broadcasts only on a real delta (see Session). Gated on having a dashboard open so we never spawn
-    // git with nobody watching.
+    // merge into the integration branch still surfaces within one interval. checkWorktreeChange() is
+    // async (it shells out to git via execFile) and broadcasts only on a real delta (see Session); we
+    // fire it and forget so a slow git on one worktree never blocks the poll or the event loop. Gated on
+    // having a dashboard open so we never spawn git with nobody watching. Kill-switch: set
+    // config.liveWorktreeReview:false to drop this backstop entirely (the gitdir fs.watch + turn-end hook
+    // still keep the diff live on real activity) - useful on a slow machine where the every-10s git spawn
+    // across all worktree sessions is not worth its cost.
     const hasControlClients = controlWss.clients.size > 0;
+    const worktreePollEnabled = config.liveWorktreeReview !== false;
     for (const [id, sess] of sessions) {
       if (sess.refreshGitContext()) {
         broadcastControl({ type: 'session-git', id, worktree: !!sess.isWorktree });
       }
-      if (hasControlClients && sess.worktreeDir) {
-        try { sess.checkWorktreeChange(); } catch { /* best-effort; the watch + next poll retry */ }
+      if (hasControlClients && worktreePollEnabled && sess.worktreeDir) {
+        sess.checkWorktreeChange().catch(() => { /* best-effort; the watch + next poll retry */ });
       }
     }
     broadcastControl({ type: 'health-snapshot', stats: buildHealthSnapshot() });

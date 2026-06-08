@@ -3,7 +3,7 @@ const path = require("node:path");
 const crypto = require("node:crypto");
 const pty = require("node-pty");
 const { EventEmitter } = require("node:events");
-const { execSync, execFileSync } = require("node:child_process");
+const { execSync, execFileSync, execFile } = require("node:child_process");
 const { STATES, MERGEABLE_LIVE_STATES } = require("./shared/states");
 const { createOscTitleSource } = require("./detection/osc-title-source");
 const { createStatusSource } = require("./detection/status-source");
@@ -34,6 +34,29 @@ const SLEEP_KILL_TIMEOUT_MS = 15 * 60 * 1000;
 // several gitdir files and a turn-end can race the fs.watch, so collapse a burst
 // into one signature recompute. The 10s backstop poll runs on its own cadence.
 const WORKTREE_CHECK_DEBOUNCE_MS = 400;
+
+// Async git. The review-gate probes (signature, diff) run on hot, recurring paths
+// (every turn-end, every gitdir fs.watch nudge, and the 10s all-session backstop
+// poll). The synchronous execFileSync they used to call BLOCKS the single Node
+// event loop for the whole subprocess - on a slower machine, with several sessions,
+// that stalls every session's PTY streaming and keystroke handling at once. execFile
+// runs git in a child process while the loop keeps pumping that I/O.
+//
+// gitOut resolves stdout on success AND on a non-zero exit (git diff prints to stdout
+// even when it exits non-zero), mirroring the old getDiff helper that returned
+// e.stdout from its catch. gitStrict rejects on a non-zero exit / spawn error so a
+// caller's try/catch can treat an unreadable worktree as UNKNOWN, mirroring the old
+// signature helper whose throw was caught into a null signature.
+function gitOut(args, opts) {
+  return new Promise((resolve) => {
+    execFile("git", args, opts, (_err, stdout) => resolve(stdout != null ? String(stdout) : ""));
+  });
+}
+function gitStrict(args, opts) {
+  return new Promise((resolve, reject) => {
+    execFile("git", args, opts, (err, stdout) => (err ? reject(err) : resolve(stdout != null ? String(stdout) : "")));
+  });
+}
 
 // ---------------------------------------------------------------------------
 // State machine. Status is driven by structural signals from StatusSource
@@ -438,15 +461,14 @@ class Session extends EventEmitter {
   // nothing to merge. NEW files are made visible in the uncommitted diff via intent-to-add. The committed
   // range and the gate are taken from the LIVE relationship to the integration branch, so they reset
   // themselves once the work lands on it (whether merged via Glissa or out-of-band).
-  getDiff() {
+  async getDiff() {
     const empty = { stat: "", diff: "" };
     if (!this.worktreeDir) return { committed: empty, uncommitted: empty, hasCommits: false };
-    const g = (args) => {
-      try {
-        return execFileSync("git", args, { cwd: this.worktreeDir, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 15000 });
-      } catch (e) { return String(e.stdout || ""); }
-    };
-    g(["add", "-N", "--", "."]); // intent-to-add so new files appear in the uncommitted diff
+    // maxBuffer is generous: a review diff can be large, and unlike execFileSync (which threw on
+    // overflow and we recovered partial e.stdout) execFile would error and gitOut would yield "".
+    const opts = { cwd: this.worktreeDir, encoding: "utf8", timeout: 15000, windowsHide: true, maxBuffer: 64 * 1024 * 1024 };
+    const g = (args) => gitOut(args, opts); // awaited serially below: order matters (intent-to-add before the diffs)
+    await g(["add", "-N", "--", "."]); // intent-to-add so new files appear in the uncommitted diff
     // What a merge would actually move is the commits on HEAD that the integration branch does NOT already
     // have. Derive both the committed range (merge-base..HEAD) and the gate (integrationBranch..HEAD) from
     // the LIVE relationship to the integration branch, NOT the stored fork SHA: baseSha is captured at fork
@@ -456,17 +478,17 @@ class Session extends EventEmitter {
     // in-place, non-isolated sessions, where baseSha (or the worktree-vs-HEAD diff) is all we have.
     let base = "";
     let aheadCount = "0";
-    if (this._integrationBranch && g(["rev-parse", "--verify", "--quiet", this._integrationBranch]).trim()) {
-      base = g(["merge-base", this._integrationBranch, "HEAD"]).trim();
-      aheadCount = g(["rev-list", "--count", `${this._integrationBranch}..HEAD`]).trim();
+    if (this._integrationBranch && (await g(["rev-parse", "--verify", "--quiet", this._integrationBranch])).trim()) {
+      base = (await g(["merge-base", this._integrationBranch, "HEAD"])).trim();
+      aheadCount = (await g(["rev-list", "--count", `${this._integrationBranch}..HEAD`])).trim();
     } else if (this.baseSha) {
       base = this.baseSha;
-      aheadCount = g(["rev-list", "--count", `${base}..HEAD`]).trim();
+      aheadCount = (await g(["rev-list", "--count", `${base}..HEAD`])).trim();
     }
     const committed = base
-      ? { stat: g(["diff", "--stat", `${base}..HEAD`]).trim(), diff: g(["diff", `${base}..HEAD`]) }
+      ? { stat: (await g(["diff", "--stat", `${base}..HEAD`])).trim(), diff: await g(["diff", `${base}..HEAD`]) }
       : empty;
-    const uncommitted = { stat: g(["diff", "--stat", "HEAD"]).trim(), diff: g(["diff", "HEAD"]) };
+    const uncommitted = { stat: (await g(["diff", "--stat", "HEAD"])).trim(), diff: await g(["diff", "HEAD"]) };
     const hasCommits = aheadCount !== "" && aheadCount !== "0";
     // Self-heal a stranded review gate. mergeStatus is set at PTY exit / boot re-adoption, but the
     // operator can commit-and-merge or clean the worktree inside the still-live PTY (the design is
@@ -486,22 +508,22 @@ class Session extends EventEmitter {
   // cross-session merge into develop can move WITHOUT touching this worktree). One `git status` + a
   // couple of rev-parses, all timeout-bounded. Returns { sig, dirty, ahead } or null with no worktree.
   // This is the poll/funnel's truth; the heavy getDiff() is only fetched for the selected session.
-  _computeWorktreeSignature() {
+  async _computeWorktreeSignature() {
     if (!this.worktreeDir) return null;
-    const opts = { cwd: this.worktreeDir, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 10000 };
+    const opts = { cwd: this.worktreeDir, encoding: "utf8", timeout: 10000, windowsHide: true, maxBuffer: 16 * 1024 * 1024 };
     // --no-optional-locks: this runs on a 10s background poll, so it must NEVER take git's index lock
     // and contend with the session's own `git add` / `git commit` running in the same worktree.
-    const run = (args) => execFileSync("git", ["--no-optional-locks", ...args], opts);
+    const run = (args) => gitStrict(["--no-optional-locks", ...args], opts);
     let status, head, ahead = "0";
     try {
-      status = run(["status", "--porcelain"]);
-      head = run(["rev-parse", "HEAD"]).trim();
+      status = await run(["status", "--porcelain"]);
+      head = (await run(["rev-parse", "HEAD"])).trim();
       // A missing integration branch is EXPECTED (this probe exits non-zero); swallow only that, so it
       // never counts as the worktree being unreadable.
       let baseRef = null;
-      try { if (this._integrationBranch && run(["rev-parse", "--verify", "--quiet", this._integrationBranch]).trim()) baseRef = this._integrationBranch; } catch { /* no integration branch */ }
+      try { if (this._integrationBranch && (await run(["rev-parse", "--verify", "--quiet", this._integrationBranch])).trim()) baseRef = this._integrationBranch; } catch { /* no integration branch */ }
       if (!baseRef && this.baseSha) baseRef = this.baseSha;
-      if (baseRef) ahead = run(["rev-list", "--count", `${baseRef}..HEAD`]).trim();
+      if (baseRef) ahead = (await run(["rev-list", "--count", `${baseRef}..HEAD`])).trim();
     } catch {
       // Worktree momentarily unreadable (mid-rebase, lock contention, pruned dir). Return UNKNOWN, never
       // a false-empty signature: that would wrongly self-heal a real pending-review gate to 'none'.
@@ -516,10 +538,13 @@ class Session extends EventEmitter {
   // over a now-empty worktree (the same demotion getDiff does, but without needing a manual fetch) and
   // (2) emit `worktree-changed` so the dashboard auto-refreshes the SELECTED session's diff. Suppressed
   // mid-merge (the index is being rewritten) so a transient never broadcasts.
-  checkWorktreeChange() {
+  async checkWorktreeChange() {
     if (this._destroyed || !this.worktreeDir) return;
     if (this.mergeStatus === "merging") return;
-    const sig = this._computeWorktreeSignature();
+    const sig = await this._computeWorktreeSignature();
+    // Re-check liveness after the await: the session may have been destroyed or entered a merge while
+    // the git probe ran, in which case a stale broadcast/demotion must not fire.
+    if (this._destroyed || this.mergeStatus === "merging") return;
     if (!sig || sig.sig === this._lastWorktreeSig) return;
     this._lastWorktreeSig = sig.sig;
     if ((this.mergeStatus === "pending-review" || this.mergeStatus === "parked")
@@ -536,7 +561,9 @@ class Session extends EventEmitter {
     if (this._destroyed || !this.worktreeDir || this._worktreeCheckTimer) return;
     this._worktreeCheckTimer = setTimeout(() => {
       this._worktreeCheckTimer = null;
-      this.checkWorktreeChange();
+      // Fire-and-forget: checkWorktreeChange catches its own git errors (returns a null signature),
+      // so the only thing to guard here is an unexpected rejection becoming an unhandledRejection.
+      this.checkWorktreeChange().catch(() => { /* best-effort; the watch + next poll retry */ });
     }, WORKTREE_CHECK_DEBOUNCE_MS);
     if (this._worktreeCheckTimer.unref) this._worktreeCheckTimer.unref();
   }

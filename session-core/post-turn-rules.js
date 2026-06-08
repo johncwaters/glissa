@@ -33,29 +33,20 @@ function posAt(content, offset) {
 }
 
 // em/en dash -> ASCII hyphen; ellipsis char -> three ASCII dots.
+// Single-scan regex (mirrors fixTrailingWhitespace): a clean file is matched once
+// and returned unchanged instead of rebuilt char-by-char, so the common no-dash
+// case costs no per-character string growth. The char class is assembled from the
+// String.fromCharCode constants so this source still carries no literal dash chars
+// (MEMORY dash-literals-roundtrip).
+const DASH_RE = new RegExp('[' + EM_DASH + EN_DASH + ELLIPSIS + ']', 'g');
 function fixDashes(content) {
   const findings = [];
-  let out = '';
-  let line = 1;
-  let col = 1;
-  for (let i = 0; i < content.length; i++) {
-    const ch = content[i];
-    if (ch === EM_DASH || ch === EN_DASH) {
-      findings.push({ rule: 'dashes', line, col, before: ch, after: '-' });
-      out += '-';
-    } else if (ch === ELLIPSIS) {
-      findings.push({ rule: 'dashes', line, col, before: ch, after: '...' });
-      out += '...';
-    } else {
-      out += ch;
-    }
-    if (ch === NL) {
-      line++;
-      col = 1;
-    } else {
-      col++;
-    }
-  }
+  const out = content.replace(DASH_RE, (ch, offset) => {
+    const { line, col } = posAt(content, offset);
+    const after = ch === ELLIPSIS ? '...' : '-';
+    findings.push({ rule: 'dashes', line, col, before: ch, after });
+    return after;
+  });
   return { content: out, findings };
 }
 

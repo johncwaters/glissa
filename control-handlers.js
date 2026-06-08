@@ -645,10 +645,12 @@ function registerControlHandlers(controlWss, deps) {
     // rebase/resolve) into the session's live PTY so the agent in the worktree can finish the merge.
     // Session.pasteMergePrompt self-guards (parked + live PTY), so the handler just delegates.
     'resolve-session-merge':      (msg) => { const s = findSession(msg); if (s) s.pasteMergePrompt(); },
-    'request-session-diff':       (msg, ws) => {
+    'request-session-diff':       async (msg, ws) => {
       const s = findSession(msg);
       if (!s) return;
-      const { committed, uncommitted, hasCommits } = s.getDiff();
+      // getDiff is async (it shells out to git off the event loop). Awaiting here keeps a large diff
+      // from stalling every other session; the reply is sent when git returns.
+      const { committed, uncommitted, hasCommits } = await s.getDiff();
       ws.send(JSON.stringify({ type: 'session-diff', id: s.id, committed, uncommitted, hasCommits }));
     },
     'debug-state':      (msg, ws) => {
@@ -680,8 +682,15 @@ function registerControlHandlers(controlWss, deps) {
       }
 
       const handler = handlers[msg.type];
-      if (handler) {
-        handler(msg, ws);
+      if (!handler) return;
+      // Run synchronously so a sync handler's side effects land in this tick (the existing tests and
+      // callers rely on that). Only an async handler returns a thenable; attach a catch so its rejection
+      // can't become an unhandledRejection, and return it so a direct test caller can await completion.
+      const result = handler(msg, ws);
+      if (result && typeof result.then === 'function') {
+        return result.catch((err) => {
+          console.warn(`[control] ${msg.type} handler failed: ${err && err.message}`);
+        });
       }
     });
   });

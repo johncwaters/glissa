@@ -58,10 +58,12 @@ test('discard-session-worktree dispatches to session.discardWorktree()', () => {
   assert.equal(s.calls.discard, 1);
 });
 
-test('request-session-diff replies with the committed + uncommitted diff and the merge gate', () => {
+test('request-session-diff replies with the committed + uncommitted diff and the merge gate', async () => {
   const s = fakeSession('p1');
   const h = harness(new Map([['p1', s]]));
-  h.send({ type: 'request-session-diff', id: 'p1' });
+  // The handler is async now (getDiff shells out to git), so the reply is sent on a later tick; the
+  // dispatcher returns the handler promise through the harness so we can await it before asserting.
+  await h.send({ type: 'request-session-diff', id: 'p1' });
   const msg = h.sent.find((m) => m.type === 'session-diff');
   assert.ok(msg, 'sent a session-diff message');
   assert.equal(msg.id, 'p1');

@@ -195,7 +195,15 @@ async function runPostTurnChecks({ cwd, config, sessionId, deps = {} } = {}) {
     .filter((rel) => shouldCheckPath(rel, { include: cfg.include, exclude: cfg.exclude }))
     .slice(0, cfg.maxFiles);
 
+  let fileIndex = 0;
   for (const rel of eligible) {
+    // Yield to the event loop between files (not before the first). The per-file
+    // work below is synchronous (sync fs + the rule transforms), and this runner
+    // shares the single Node event loop that pumps every session's PTY bytes and
+    // keystrokes. Processing a large changeset in one tick stalls all of that; a
+    // setImmediate break between files lets that I/O interleave. The cap+size
+    // guards still bound total work.
+    if (fileIndex++ > 0) await new Promise((resolve) => setImmediate(resolve));
     const abs = path.join(root, rel);
     try {
       const before = _stat(abs); // snapshot BEFORE read (mtime-race guard, PM1)

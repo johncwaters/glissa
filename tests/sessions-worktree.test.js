@@ -380,7 +380,7 @@ test('adoptWorktree re-attaches an on-disk worktree as pending-review (restart r
   }
 });
 
-test('getDiff self-heals a stranded pending-review gate to none when nothing is reviewable', { skip: !GIT }, () => {
+test('getDiff self-heals a stranded pending-review gate to none when nothing is reviewable', { skip: !GIT }, async () => {
   const repo = initOneCommitRepo();
   const s = makeSession();
   const statuses = [];
@@ -388,7 +388,7 @@ test('getDiff self-heals a stranded pending-review gate to none when nothing is 
   try {
     s.worktreeDir = repo;          // clean one-commit repo: no committed-vs-base diff, no working changes
     s.mergeStatus = 'pending-review'; // gate stranded after the operator merged/cleaned inside the live PTY
-    const d = s.getDiff();
+    const d = await s.getDiff();
     assert.equal(d.committed.diff.trim(), '', 'no committed diff');
     assert.equal(d.uncommitted.diff.trim(), '', 'clean working tree');
     assert.equal(s.mergeStatus, 'none', 'gate demoted to none');
@@ -396,7 +396,7 @@ test('getDiff self-heals a stranded pending-review gate to none when nothing is 
   } finally { s.destroy(); fs.rmSync(repo, { recursive: true, force: true }); }
 });
 
-test('getDiff keeps pending-review when the worktree still has real changes', { skip: !GIT }, () => {
+test('getDiff keeps pending-review when the worktree still has real changes', { skip: !GIT }, async () => {
   const repo = initOneCommitRepo();
   const s = makeSession();
   const statuses = [];
@@ -405,26 +405,26 @@ test('getDiff keeps pending-review when the worktree still has real changes', { 
     s.worktreeDir = repo;
     s.mergeStatus = 'pending-review';
     fs.writeFileSync(path.join(repo, 'work.txt'), 'new work\n', 'utf8'); // an untracked deliverable
-    const d = s.getDiff();
+    const d = await s.getDiff();
     assert.notEqual(d.uncommitted.diff.trim(), '', 'untracked change shows via intent-to-add');
     assert.equal(s.mergeStatus, 'pending-review', 'gate preserved while there is something to review');
     assert.deepEqual(statuses, [], 'no demotion broadcast');
   } finally { s.destroy(); fs.rmSync(repo, { recursive: true, force: true }); }
 });
 
-test('getDiff: committed range + gate come from the integration branch, not a stale baseSha', { skip: !GIT }, () => {
+test('getDiff: committed range + gate come from the integration branch, not a stale baseSha', { skip: !GIT }, async () => {
   const repo = initRepoDevelopFeature();
   const s = makeSession({ integrationBranch: 'develop' });
   try {
     s.worktreeDir = repo;
     s.baseSha = git(['rev-parse', 'develop'], repo).trim(); // the (correct) fork point
-    const d = s.getDiff();
+    const d = await s.getDiff();
     assert.equal(d.hasCommits, true, 'a commit ahead of develop is mergeable');
     assert.ok(d.committed.diff.includes('feature.txt'), 'committed diff shows the ahead commit');
   } finally { s.destroy(); fs.rmSync(repo, { recursive: true, force: true }); }
 });
 
-test('getDiff: a branch already on develop shows nothing to merge despite a stale baseSha (out-of-band merge)', { skip: !GIT }, () => {
+test('getDiff: a branch already on develop shows nothing to merge despite a stale baseSha (out-of-band merge)', { skip: !GIT }, async () => {
   const repo = initRepoDevelopFeature();
   const s = makeSession({ integrationBranch: 'develop' });
   try {
@@ -435,7 +435,7 @@ test('getDiff: a branch already on develop shows nothing to merge despite a stal
     git(['checkout', 'feat'], repo);
     s.worktreeDir = repo;
     s.baseSha = staleBase; // STALE: still the old fork, not the new develop tip
-    const d = s.getDiff();
+    const d = await s.getDiff();
     assert.equal(d.hasCommits, false, 'develop already contains the work -> nothing to merge');
     assert.equal(d.committed.diff.trim(), '', 'no phantom committed diff from the stale baseSha');
   } finally { s.destroy(); fs.rmSync(repo, { recursive: true, force: true }); }
@@ -443,44 +443,44 @@ test('getDiff: a branch already on develop shows nothing to merge despite a stal
 
 // --- checkWorktreeChange: the live change funnel (turn-end hook / gitdir watch / backstop poll) ---
 
-test('checkWorktreeChange emits worktree-changed on a real delta and dedups an unchanged worktree', { skip: !GIT }, () => {
+test('checkWorktreeChange emits worktree-changed on a real delta and dedups an unchanged worktree', { skip: !GIT }, async () => {
   const repo = initOneCommitRepo();
   const s = makeSession();
   const changes = [];
   s.on('worktree-changed', (e) => changes.push(e));
   try {
     s.worktreeDir = repo;
-    s.checkWorktreeChange();                 // null -> baseline signature: one emit
+    await s.checkWorktreeChange();                 // null -> baseline signature: one emit
     assert.equal(changes.length, 1, 'baseline emit');
     assert.ok(changes[0].sig, 'carries a signature token');
-    s.checkWorktreeChange();                 // identical state: no re-emit
+    await s.checkWorktreeChange();                 // identical state: no re-emit
     assert.equal(changes.length, 1, 'no emit when nothing changed (signature dedup)');
     fs.writeFileSync(path.join(repo, 'work.txt'), 'new\n', 'utf8'); // an untracked deliverable
-    s.checkWorktreeChange();
+    await s.checkWorktreeChange();
     assert.equal(changes.length, 2, 'a working-tree change re-emits');
     assert.notEqual(changes[1].sig, changes[0].sig, 'the signature actually moved');
   } finally { s.destroy(); fs.rmSync(repo, { recursive: true, force: true }); }
 });
 
-test('checkWorktreeChange detects a COMMIT (no working-tree change) via the ahead-count/HEAD signature', { skip: !GIT }, () => {
+test('checkWorktreeChange detects a COMMIT (no working-tree change) via the ahead-count/HEAD signature', { skip: !GIT }, async () => {
   const repo = initRepoDevelopFeature(); // HEAD = feat, one commit ahead of develop
   const s = makeSession({ integrationBranch: 'develop' });
   const changes = [];
   s.on('worktree-changed', (e) => changes.push(e));
   try {
     s.worktreeDir = repo;
-    s.checkWorktreeChange();                 // baseline
+    await s.checkWorktreeChange();                 // baseline
     const baseline = changes.length;
     // Commit an already-saved file: the working tree is clean afterward, so only HEAD + ahead-count move.
     fs.writeFileSync(path.join(repo, 'feature.txt'), 'more\n', 'utf8');
     git(['add', '-A'], repo);
     git(['commit', '-m', 'second feat'], repo);
-    s.checkWorktreeChange();
+    await s.checkWorktreeChange();
     assert.equal(changes.length, baseline + 1, 'a commit moves the signature even with a clean tree');
   } finally { s.destroy(); fs.rmSync(repo, { recursive: true, force: true }); }
 });
 
-test('checkWorktreeChange is suppressed while merging (index mid-rewrite)', { skip: !GIT }, () => {
+test('checkWorktreeChange is suppressed while merging (index mid-rewrite)', { skip: !GIT }, async () => {
   const repo = initOneCommitRepo();
   const s = makeSession();
   const changes = [];
@@ -488,12 +488,12 @@ test('checkWorktreeChange is suppressed while merging (index mid-rewrite)', { sk
   try {
     s.worktreeDir = repo;
     s.mergeStatus = 'merging';
-    s.checkWorktreeChange();
+    await s.checkWorktreeChange();
     assert.equal(changes.length, 0, 'no broadcast while a merge is in flight');
   } finally { s.destroy(); fs.rmSync(repo, { recursive: true, force: true }); }
 });
 
-test('checkWorktreeChange live-self-heals a stranded pending-review to none over an empty worktree', { skip: !GIT }, () => {
+test('checkWorktreeChange live-self-heals a stranded pending-review to none over an empty worktree', { skip: !GIT }, async () => {
   const repo = initOneCommitRepo(); // clean: no working changes, no integration branch -> ahead 0
   const s = makeSession();
   const statuses = [];
@@ -503,14 +503,14 @@ test('checkWorktreeChange live-self-heals a stranded pending-review to none over
   try {
     s.worktreeDir = repo;
     s.mergeStatus = 'pending-review'; // stranded after a merge/clean inside the live PTY
-    s.checkWorktreeChange();
+    await s.checkWorktreeChange();
     assert.equal(s.mergeStatus, 'none', 'gate demoted live, no manual getDiff needed');
     assert.deepEqual(statuses, ['none'], 'demotion broadcast exactly once');
     assert.equal(changes.length, 1, 'still emits a change so the selected diff refreshes to empty');
   } finally { s.destroy(); fs.rmSync(repo, { recursive: true, force: true }); }
 });
 
-test('checkWorktreeChange keeps pending-review while the worktree still has real changes', { skip: !GIT }, () => {
+test('checkWorktreeChange keeps pending-review while the worktree still has real changes', { skip: !GIT }, async () => {
   const repo = initOneCommitRepo();
   const s = makeSession();
   const statuses = [];
@@ -519,13 +519,13 @@ test('checkWorktreeChange keeps pending-review while the worktree still has real
     s.worktreeDir = repo;
     s.mergeStatus = 'pending-review';
     fs.writeFileSync(path.join(repo, 'work.txt'), 'real work\n', 'utf8'); // something to review
-    s.checkWorktreeChange();
+    await s.checkWorktreeChange();
     assert.equal(s.mergeStatus, 'pending-review', 'gate preserved while there is something to review');
     assert.deepEqual(statuses, [], 'no demotion broadcast');
   } finally { s.destroy(); fs.rmSync(repo, { recursive: true, force: true }); }
 });
 
-test('checkWorktreeChange returns UNKNOWN (no broadcast, no demotion) when the worktree is unreadable', () => {
+test('checkWorktreeChange returns UNKNOWN (no broadcast, no demotion) when the worktree is unreadable', async () => {
   // A non-existent cwd makes every git call throw - the "momentarily unreadable" case (mid-rebase, lock
   // contention, pruned dir). The signature must report UNKNOWN, never a false-empty that demotes the gate.
   const s = makeSession();
@@ -536,20 +536,20 @@ test('checkWorktreeChange returns UNKNOWN (no broadcast, no demotion) when the w
   try {
     s.worktreeDir = path.join(os.tmpdir(), `glissa-nonexistent-${Date.now()}`);
     s.mergeStatus = 'pending-review';
-    assert.equal(s._computeWorktreeSignature(), null, 'a failed git read yields null, not a false-empty signature');
-    s.checkWorktreeChange();
+    assert.equal(await s._computeWorktreeSignature(), null, 'a failed git read yields null, not a false-empty signature');
+    await s.checkWorktreeChange();
     assert.equal(s.mergeStatus, 'pending-review', 'a git failure must NOT demote a real review gate');
     assert.deepEqual(statuses, [], 'no merge-status broadcast on a failed read');
     assert.equal(changes.length, 0, 'no worktree-changed broadcast on a failed read');
   } finally { s.destroy(); }
 });
 
-test('checkWorktreeChange is a no-op with no worktree', () => {
+test('checkWorktreeChange is a no-op with no worktree', async () => {
   const s = makeSession();
   const changes = [];
   s.on('worktree-changed', (e) => changes.push(e));
   try {
-    assert.doesNotThrow(() => s.checkWorktreeChange());
+    await assert.doesNotReject(() => s.checkWorktreeChange());
     assert.equal(changes.length, 0);
   } finally { s.destroy(); }
 });
