@@ -7,12 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-06-07
+
+This release replaces the multi-session grid with **Focus**, a single-session navigation model: a left roster rail of one pill per session, a center work surface, and a right review sidebar. Every git-repo session now runs in its own git worktree, and you review and merge its committed work from the dashboard while it keeps running.
+
 ### Added
 
-- **Isolated git worktree per session**: Every git-repo session runs in its own worktree forked from the integration branch (`integrationBranch`, default `develop`), so an agent's edits stay out of the main checkout until they are reviewed and merged back.
-- **Session worktree review sidebar**: A right-docked sidebar shows the selected session's committed changes per file and merges them into the integration branch while the session keeps running.
+- **Focus view (now the default and only navigation model)**: A three-column layout (roster rail | centered session | review sidebar) replaces the multi-session grid. The left rail carries one pill per session; the center borrows the selected session's live terminal as the work surface; the right sidebar reviews its worktree. Clicks and arrow-nav move the focus, starting a dormant session when you land on it.
+- **Isolated git worktree per session**: Every git-repo session runs in its own worktree forked from the integration branch (`integrationBranch`, default `develop`), so an agent's edits stay out of the main checkout until they are reviewed and merged back. Worktrees default to a `.glissa-worktrees` sibling of the repo, orphans are swept at boot, and every end path (merge, discard, exit) tears the worktree down without losing work.
+- **Session worktree review sidebar**: A right-docked sidebar (present on every view) shows the selected session's changes per file and merges them into the integration branch while the session keeps running. Committed history is the mergeable unit: the sidebar splits **Committed** (will merge) from **Uncommitted** (not in the merge until committed), the diff stays live with no manual refresh (a turn-end hook, an fs-watch over the worktree, and a 10s backstop push deltas), and the merge gate is derived from the live relationship to the integration branch, so work that lands on the branch out-of-band self-corrects to "nothing to merge" and a stranded gate self-heals instead of phantom-counting.
+- **Resolve a parked merge inside the session**: When a merge-back cannot fast-forward (conflicts), a "Resolve in session" action hands the conflict back to the agent that owns the worktree: it pastes a context-rich prompt (why it parked, the exact rebase-and-resolve steps, the conflicting files) into the live session. Nothing is ever auto-resolved, so no side is silently dropped.
 - **Warn before discarding unmerged session work**: Removing a session that still holds unmerged worktree changes now warns that the changes will be lost and relabels the action "Discard & Remove".
-- **Focus view**: A new Focus view, now the default, shows a left roster rail of one pill per session beside a single-session center, replacing the multi-session grid as the navigation model.
+- **Project-grouped roster rail**: Rail pills group by repo under quiet, collapsible per-project headers (a single-project roster stays flat); groups sort A->Z, never reorder on a state change, and the collapse state persists per browser.
+- **Keyboard navigation and a Shortcuts help panel**: Global `Alt` shortcuts fire even while the centered terminal holds focus: `Alt+0` opens a session, `Alt+1`..`Alt+9` jump to the Nth, `Alt+Up`/`Alt+Down` center the previous/next session (starting a dormant target), `Alt+W` steps through the attention queue (waiting or completed) one session per press, `Alt+M` merges the selected session, and `Alt+R` resolves a parked merge. A read-only Shortcuts panel in Settings, opened by the header `?` button or the `?` key, documents them all.
+- **Restore the open session and active view across reloads**: The active tab (Focus/Teams) and the centered session are remembered per browser and restored on reload or tab switch; a restored session is re-centered without auto-starting a dormant one.
+- **Top-right notice stack**: The center-bottom error toast is recast as an opaque, stacking top-right notice region: transient hiccups (clipboard, rename collision) auto-dismiss after 6s, real failures persist until dismissed, identical back-to-back messages collapse into one notice with an `xN` counter, and each notice is keyboard-dismissible with `role="alert"`.
 - **Live working heartbeat**: A working session's roster pill glyph breathes and beats on each terminal chunk and goes quiet after output stops.
 - **Name-first roster pills with a time-in-state clock**: Roster pills lead with the session name, and the focused card header shows a clock counting time in the current state.
 - **Background sub-agent completion gate**: A session with a running background sub-agent (Task `run_in_background` or Ctrl+B) stays out of Complete until the sub-agent finishes, so a background task no longer fires a false completion alert, and a live "N agents" chip shows the count. On by default via `detectBackgroundAgents`.
@@ -20,21 +29,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Teams: operator conversation during a run**: A manual run can pause when a stage emits a `QUESTION` and resume once the operator answers in a chat pane, bounded by a question budget and timeout.
 - **Teams: project-level shared pack**: Cross-team pack files (voice-guide, avoid-list, brand) are filled once per project under `.glissa/pack/` and reused by every team that declares them as shared.
 - **Deterministic post-turn auto-fix on turn completion**: When a session completes a turn, Glissa runs text-hygiene fixes over its git-changed files (strip em and en dashes and ellipses, trim trailing whitespace, ensure a final newline, strip a UTF-8 BOM) and reports the result on the card; on by default.
-- **Step through sessions needing attention**: `Alt+W` walks the Focus rail's attention queue one session per press (waiting or completed), centering each and focusing its terminal.
 
 ### Changed
 
 - **Notifications delivered via browser Web Notifications**: Notifications now raise a native browser notification by default; the BurntToast/msg path is demoted to opt-in via `osToast`, and a Desktop Notifications settings toggle gates the new channel.
 - **Skip-permissions (YOLO) is the session default**: New sessions spawn with `--dangerously-skip-permissions` unless their project opts out, and the Add Session dialog now offers an opt-out "Require permission prompts" (widening the localhost-only trust boundary).
+- **The centered session reads as a work surface, not a transplanted tile**: In the Focus center the borrowed session card drops its floating border, radius, and state glow and runs edge to edge; its header becomes a slim status toolbar (the name promoted to the title voice, the worktree/agents/post-turn markers compacted, YOLO kept as a legible warning), and state recedes to the rail pill plus one quiet 2px toolbar accent line (steady FAILED, breathing WAITING, a one-shot sweep on a DONE finish).
 
 ### Removed
 
 - **Multi-session grid and its controls**: The Sessions grid's minimize and maximize, the minimized bar, drag-and-drop reordering, the manual/split layout control, and sleep/wake are gone; sessions are now navigated through the Focus view.
-- **Dropped the "N sessions running" navbar banner**: The always-on active-session counter is gone (`computeAggregate` no longer emits a running/active state). The navbar now speaks only for `WAITING` (needs input) and `FAILED`, plus the terminal "All sessions exited" / "N dormant" roll-ups, and is hidden for a steady active mix. The counter was noise that carried no actionable signal.
+- **Dropped the "N sessions running" navbar banner**: The always-on active-session counter is gone (`computeAggregate` no longer emits a running/active state). The navbar now speaks only for `WAITING` (needs input) and `FAILED`, plus the terminal "All sessions exited" / "N dormant" roll-ups, and is hidden for a steady active mix. The counter was noise that carried no actionable signal. The leftover grab/grabbing drag cursor went with it.
 - **Teams: standalone `release-notes` team**: Removed; its git-range research and GitHub release draft are now covered by the `changelog` team's reconciliation and announcer.
 
 ### Fixed
 
+- **New sessions no longer read as "Working" before any prompt**: A just-spawned session landed in `RUNNING` on its first PTY byte (Claude painting its TUI), so it showed "Working" with nothing submitted. `first_output` now lands in `IDLE`; the card wakes to `RUNNING` on the first real work signal (the `UserPromptSubmit` resume hook or the title spinner), and the process-exit edges are unchanged.
 - **Team run output stranded on its worktree branch**: An untracked header-only `log.md` blocked the fast-forward merge-back of a finished run; the merge-back now clears the blocking collisions first so the run lands in the project.
 - **Stale stage header in the Teams view**: The run header no longer sticks on the finished stage while the next stage spawns.
 - **Dropped terminal history on reconnect under backpressure**: A reconnect replay frame dropped under backpressure left scrollback history stranded; the drop now rewinds the send offset so the backfill re-pulls the missed history.
@@ -378,6 +388,7 @@ _Skipped in changelog - incremental fixes and version bump._
 - Alert sounds for session attention events
 - CLI with `--port`, `--config`, `--help`, `--version` flags
 
+[0.14.0]: https://github.com/johncwaters/glissa/releases/tag/v0.14.0
 [0.13.0]: https://github.com/johncwaters/glissa/releases/tag/v0.13.0
 [0.12.0]: https://github.com/johncwaters/glissa/releases/tag/v0.12.0
 [0.11.0]: https://github.com/johncwaters/glissa/releases/tag/v0.11.0

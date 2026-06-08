@@ -93,9 +93,13 @@ function traceFile(filePath) {
     process.exit(1);
   }
 
-  let match;
-  while ((match = REQUIRE_RE.exec(content)) !== null) {
-    const resolved = resolveRequire(abs, match[1]);
+  // Collect this file's requires FIRST, then recurse. REQUIRE_RE is a shared
+  // global (stateful lastIndex); recursing mid-iteration would clobber it and
+  // skip the rest of this file's requires (the bug that let session-core ship
+  // missing). matchAll snapshots the matches before any recursion runs.
+  const targets = [...content.matchAll(REQUIRE_RE)].map((m) => m[1]);
+  for (const target of targets) {
+    const resolved = resolveRequire(abs, target);
     if (resolved) {
       traceFile(resolved);
     }
@@ -129,7 +133,7 @@ for (const entry of filesArray) {
 
   // Directory entry (ends with /)
   if (entry.endsWith('/')) {
-    // Mark directory — we'll do prefix matching below
+    // Mark directory - we'll do prefix matching below
     coveredFiles.add('DIR:' + entry);
   } else {
     coveredFiles.add(entry);
