@@ -99,16 +99,23 @@ export function setReviewDiff(id, payload) {
 }
 
 // A server `session-changed` push: this session's worktree changed (a commit/stage via the gitdir
-// watch, a turn end, or the backstop poll catching an out-of-band / cross-session move). Auto-re-fetch
-// the diff, but ONLY for the selected session, so the heavy git diff stays scoped to what the operator
-// is viewing. This push (not a manual button) is what keeps the diff live.
+// watch, a turn end, or the integration-ref watcher catching an out-of-band / cross-session merge into
+// the integration branch). Auto-re-fetch the diff, but ONLY for the selected session, so the heavy git
+// diff stays scoped to what the operator is viewing. This push (not a manual button) keeps the diff live.
 export function notifyWorktreeChanged(id) {
   if (id && id === getSelectedId()) requestDiff(id);
 }
 
-// Re-render if the given session is the selected one (e.g. its state changed: DONE -> DORMANT).
+// Re-render if the given session is the selected one. Called on every state transition (app.js
+// handleStateChange) because the Merge gate is STATE-dependent (isMergeableLive): a turn ending
+// RUNNING -> COMPLETE must re-evaluate the gate so the button appears without the operator poking the
+// UI. If this session's diff was never fetched, pull it so `hasCommits` exists to evaluate (the
+// reported symptom - preview visible, button missing - is fixed by the re-render alone, but this also
+// covers a selected session whose diff never loaded).
 export function refreshReviewSidebar(id) {
-  if (id === getSelectedId()) render();
+  if (id !== getSelectedId()) return;
+  if (!diffById.has(id)) requestDiff(id);
+  render();
 }
 
 // Drop a removed session's cached review state, so the maps never leak.
@@ -351,8 +358,8 @@ function renderActions(id, { status, reviewable, mergeableLive, live }) {
   const actions = el('div', 'review-actions');
 
   // No manual "Refresh diff" button: the diff is kept live by the server (it pushes `session-changed`
-  // on a turn end, a commit, or the backstop poll, and the client auto-re-fetches for the selected
-  // session - see notifyWorktreeChanged). Only real actions live here now.
+  // on a turn end, a commit, or an integration-branch move, and the client auto-re-fetches for the
+  // selected session - see notifyWorktreeChanged). Only real actions live here now.
 
   // Parked merge: the auto rebase-then-FF could not complete. Hand it to the agent IN the worktree by
   // pasting a context-rich prompt (why it parked + conflicting files + how to rebase/resolve) into the

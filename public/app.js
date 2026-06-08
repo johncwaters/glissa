@@ -140,6 +140,10 @@ function handleStateChange(msg) {
   }
 
   applyState(msg.id, msg.to);
+  // Re-evaluate the review sidebar's merge gate: it is state-dependent (isMergeableLive), so a turn
+  // ending RUNNING -> COMPLETE must surface the Merge button without the operator clicking a file, and
+  // COMPLETE -> RUNNING must withdraw it. No-op unless this session is selected.
+  refreshReviewSidebar(msg.id);
   if (isFocusActive()) refreshFocusRoster();
 
   // Live-update debug overlay on state change
