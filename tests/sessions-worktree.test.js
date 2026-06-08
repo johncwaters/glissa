@@ -441,7 +441,7 @@ test('getDiff: a branch already on develop shows nothing to merge despite a stal
   } finally { s.destroy(); fs.rmSync(repo, { recursive: true, force: true }); }
 });
 
-// --- checkWorktreeChange: the live change funnel (turn-end hook / gitdir watch / backstop poll) ---
+// --- checkWorktreeChange: the live change funnel (turn-end hook / gitdir watch / integration-ref watcher) ---
 
 test('checkWorktreeChange emits worktree-changed on a real delta and dedups an unchanged worktree', { skip: !GIT }, async () => {
   const repo = initOneCommitRepo();
@@ -552,6 +552,30 @@ test('checkWorktreeChange is a no-op with no worktree', async () => {
     await assert.doesNotReject(() => s.checkWorktreeChange());
     assert.equal(changes.length, 0);
   } finally { s.destroy(); }
+});
+
+// The signal the integration-ref watcher fans out: when the integration branch moves WITHOUT this
+// worktree changing (a sibling's merge or an out-of-band CLI merge into develop), the session's gate
+// (ahead-count vs develop) shifts, so checkWorktreeChange must move the signature and re-emit. This is
+// what replaces the old 10s poll's cross-session job; the integration-ref watcher only delivers the
+// nudge, this re-check is what notices the moved gate.
+test('checkWorktreeChange detects an out-of-band merge into the integration branch (gate clears)', { skip: !GIT }, async () => {
+  const repo = initRepoDevelopFeature(); // HEAD = feat, one commit ahead of develop
+  const s = makeSession({ integrationBranch: 'develop' });
+  const changes = [];
+  s.on('worktree-changed', (e) => changes.push(e));
+  try {
+    s.worktreeDir = repo;
+    await s.checkWorktreeChange();          // baseline: feat is 1 ahead of develop
+    const baseline = changes.length;
+    // Land feat on develop out-of-band (a CLI ff-merge), the move the integration-ref watcher would catch.
+    // The worktree itself does not change (HEAD stays feat), only develop advances under it.
+    git(['checkout', 'develop'], repo);
+    git(['merge', '--ff-only', 'feat'], repo);
+    git(['checkout', 'feat'], repo);
+    await s.checkWorktreeChange();
+    assert.equal(changes.length, baseline + 1, 'an integration-branch move (ahead 1 -> 0) moves the signature and re-emits');
+  } finally { s.destroy(); fs.rmSync(repo, { recursive: true, force: true }); }
 });
 
 test('resetToDormant: returns to DORMANT only when settled (PTY dead + no worktree), else no-op', () => {

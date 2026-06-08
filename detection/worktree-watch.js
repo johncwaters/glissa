@@ -17,13 +17,14 @@
 // over it is both precise and cheap on Windows (ReadDirectoryChangesW).
 //
 // Uncommitted working-tree edits are NOT this module's job: those are picked up by
-// the session's turn-end (Stop) hook and by the coarse backstop poll. This watcher
-// exists to make the COMMIT boundary land in the UI in well under a second.
+// the session's turn-end (Stop) hook. This watcher exists to make the COMMIT boundary
+// land in the UI in well under a second.
 //
 // fs.watch is fast but lossy (it can miss or duplicate events, and throws if the
-// watched path vanishes). That is fine here: the backstop poll in sessions.js is
-// the correctness floor, so this watcher is a best-effort accelerator that
-// self-stops on any error and never throws out of start()/stop().
+// watched path vanishes). That is fine here: the turn-end hook, the integration-ref
+// watcher (cross-session / out-of-band merges), and the selected session's diff re-fetch
+// on selection are the correctness floor, so this watcher is a best-effort accelerator
+// that self-stops on any error and never throws out of start()/stop().
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -54,7 +55,7 @@ function resolveWorktreeGitDir(dir) {
 // A one-directory, debounced fs.watch over a worktree's gitdir.
 //   createWorktreeWatcher({ worktreeDir, onChange, debounceMs? })
 // start() is a no-op (returns false) when worktreeDir is not a linked worktree, so
-// in-place / non-git sessions silently skip watching and lean on the poll instead.
+// in-place / non-git sessions silently skip watching (they have no review worktree to track).
 // onChange is called at most once per debounce window after a burst of git writes
 // (a single `git commit` touches several files); it receives no arguments.
 function createWorktreeWatcher({ worktreeDir, onChange, debounceMs = 400 }) {
@@ -81,7 +82,7 @@ function createWorktreeWatcher({ worktreeDir, onChange, debounceMs = 400 }) {
       // ORIG_HEAD, MERGE_HEAD) carry the stage/commit/reset signal we want.
       watcher = fs.watch(gitDir, { persistent: false }, () => fire());
       // The gitdir can be removed out from under us (worktree pruned). Treat any
-      // watcher error as "stop watching"; the backstop poll still covers the session.
+      // watcher error as "stop watching"; the turn-end hook + a later re-check still cover the session.
       watcher.on('error', () => stop());
     } catch {
       watcher = null;

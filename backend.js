@@ -47,6 +47,8 @@ const { buildSetupPrompt, setupSessionId, setupSessionName, packPaths } = requir
 const { scanProjectContext } = require('./teamlib/project-context');
 const teamOutput = require('./teamlib/team-output');
 const { runPostTurnChecks, resolveCheckConfig } = require('./post-turn-checker');
+const { createIntegrationRefWatcher } = require('./detection/integration-ref-watch');
+const { createIntegrationWatcherPool } = require('./detection/integration-watcher-pool');
 
 // WAITING-state notification escalation cadence (fixed 5 minutes; previously the
 // configurable waitingEscalationSeconds setting).
@@ -277,24 +279,14 @@ function createBackend(httpServer, options = {}) {
   const healthInterval = setInterval(() => {
     // Cheap fs re-check: a session's cwd can become (or stop being) a linked
     // worktree mid-run. Broadcast only the delta so the card toggles its marker
-    // without a full recreate (which would tear down the terminal).
-    // Backstop poll (the reliability floor under the gitdir watch + turn-end hook): recompute each
-    // worktree session's cheap signature so any missed fs event, operator hand-edit, or cross-session
-    // merge into the integration branch still surfaces within one interval. checkWorktreeChange() is
-    // async (it shells out to git via execFile) and broadcasts only on a real delta (see Session); we
-    // fire it and forget so a slow git on one worktree never blocks the poll or the event loop. Gated on
-    // having a dashboard open so we never spawn git with nobody watching. Kill-switch: set
-    // config.liveWorktreeReview:false to drop this backstop entirely (the gitdir fs.watch + turn-end hook
-    // still keep the diff live on real activity) - useful on a slow machine where the every-10s git spawn
-    // across all worktree sessions is not worth its cost.
-    const hasControlClients = controlWss.clients.size > 0;
-    const worktreePollEnabled = config.liveWorktreeReview !== false;
+    // without a full recreate (which would tear down the terminal). This is an fs.statSync only (no git)
+    // - the worktree-CHANGE detection it used to also poll here is now fully event-driven: the per-
+    // worktree gitdir fs.watch (local commits/stage/reset), the turn-end hook (working-tree edits), and
+    // the integration-ref watcher (cross-session / out-of-band merges into the integration branch). The
+    // selected session also re-fetches its diff on selection, which is the soft floor for a lossy watch.
     for (const [id, sess] of sessions) {
       if (sess.refreshGitContext()) {
         broadcastControl({ type: 'session-git', id, worktree: !!sess.isWorktree });
-      }
-      if (hasControlClients && worktreePollEnabled && sess.worktreeDir) {
-        sess.checkWorktreeChange().catch(() => { /* best-effort; the watch + next poll retry */ });
       }
     }
     broadcastControl({ type: 'health-snapshot', stats: buildHealthSnapshot() });
@@ -578,6 +570,21 @@ function createBackend(httpServer, options = {}) {
   }
   armTeamSchedules(config.teams);
 
+  // --- Integration-branch watchers (event-driven cross-session gate liveness) ---
+  // Replaces the old 10s poll's one unique job: noticing that a session's integration branch moved
+  // WITHOUT this session's own worktree changing (another session merged, or an out-of-band CLI merge),
+  // which shifts that session's merge gate (its ahead-count vs the branch) with no local gitdir/turn
+  // event. The pool keeps at most one reflog fs.watch per (commonGitDir, integration branch) and, on a
+  // branch move, re-checks every sibling worktree session on that repo. Unlike the poll this fires only
+  // on an actual branch move (no recurring git), and runs server-side regardless of whether a dashboard
+  // is open, so gates stay fresh across reconnects. (Ref-count/fan-out logic + tests: integration-watcher-pool.js.)
+  const integrationPool = createIntegrationWatcherPool({
+    sessions,
+    createWatcher: createIntegrationRefWatcher,
+    recheck: (s) => s.checkWorktreeChange().catch(() => { /* best-effort; the gitdir watch + turn-end retry */ }),
+    isEnabled: () => config.liveWorktreeReview !== false, // master kill-switch for live cross-session review
+  });
+
   function wireSessionEvents(sess) {
     // All closures read sess.id (stable) and sess.name (current) dynamically.
     let ptDebounce = null; // post-turn-check debounce timer (per session closure)
@@ -690,8 +697,8 @@ function createBackend(httpServer, options = {}) {
       // change once worktreeDir is null, so push the badge state explicitly here.
       broadcastControl({ type: 'session-git', id: sess.id, worktree: !!sess.isWorktree });
     });
-    // The worktree changed (a commit/stage via the gitdir watch, a turn end, or the backstop poll
-    // caught an out-of-band / cross-session move). Push a tiny delta signal; the client re-fetches the
+    // The worktree changed (a commit/stage via the gitdir watch, a turn end, or the integration-ref
+    // watcher caught an out-of-band / cross-session merge). Push a tiny delta signal; the client re-fetches the
     // full diff only for the session it is currently viewing (request-session-diff), so the heavy
     // `git diff` stays scoped. This is what replaces the old manual "Refresh diff" button.
     sess.on('worktree-changed', ({ sig }) => {
@@ -708,6 +715,10 @@ function createBackend(httpServer, options = {}) {
         type: 'session-worktree-ready', id: sess.id, session: sess.name,
         branch, timestamp: Date.now(),
       });
+      // Watch the integration branch's reflog so a cross-session / out-of-band merge into it re-checks
+      // this (and every sibling) worktree's merge gate, with no poll. commonGitDir is set on the session
+      // before this event fires (in _provisionWorktree).
+      integrationPool.ensure(sess);
     });
 
     // On an in-place restart (restart()/forceRestart()/sleep-kill auto-restart) the
@@ -744,6 +755,7 @@ function createBackend(httpServer, options = {}) {
         const sess = sessions.get(wt.id);
         if (sess && wt.hasWork) {
           sess.adoptWorktree({ worktreeDir: wt.cwd, branch: wt.branch, base: integrationBranch });
+          integrationPool.ensure(sess); // adopt sets commonGitDir; watch the branch for this re-adopted worktree too
           console.log(`[worktree] re-adopted pending-review worktree for ${sess.name} (${wt.branch})`);
         } else {
           gitWorkspace.removeWorktreeByPath({ projectPath: project.path, cwd: wt.cwd, branch: wt.branch });
@@ -797,6 +809,7 @@ function createBackend(httpServer, options = {}) {
     // Explicit removal -> throw the worktree away (junction-safe). Shutdown/restart go through destroy()
     // directly and do NOT discard, so a pending-review worktree survives for the next-boot reconcile.
     try { sess.discardWorktree?.(); } catch { /* best-effort */ }
+    integrationPool.release(sess);
     sess.destroy();
     sessions.delete(id);
     broadcastControl({ type: 'session-removed', id, session: sess.name });
@@ -830,6 +843,7 @@ function createBackend(httpServer, options = {}) {
       closeSessionDataClients(project.id);
       // INVARIANT: acknowledge BEFORE destroy - destroy() calls removeAllListeners()
       notificationManager.acknowledge(project.id);
+      integrationPool.release(oldSess);
       oldSess.destroy();
       const newSess = makeSession(project, { ...config, ...newConfig });
       sessions.set(project.id, newSess);
@@ -1093,6 +1107,7 @@ function createBackend(httpServer, options = {}) {
     // INVARIANT: destroy NotificationManager BEFORE sessions - clears all timers globally
     notificationManager.destroy();
     for (const [, s] of teamSchedulers) s.disarm();
+    integrationPool.stopAll();
     for (const [, sess] of sessions) {
       sess.destroy();
     }
