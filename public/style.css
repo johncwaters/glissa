@@ -2426,8 +2426,8 @@ body {
 
 /* Sticky jump header: counts the sessions that need the operator (WAITING + unacknowledged
    COMPLETE) and names the Alt+W shortcut. focus-view keeps it in a FIXED slot at the top of the rail
-   whether or not anything needs you (the [data-empty] state below paints the resting slot as blank
-   rail), so the pill list never shifts down when "{n} NEED YOU" appears or clears. It is a control, so
+   whether or not anything needs you (the [data-empty] state below keeps the full box as a quiet
+   Alt+W placeholder), so the pill list never shifts down when "{n} NEED YOU" appears or clears. It is a control, so
    it wears the one accent, not a state color (state color stays reserved for the pills). Clicking it
    does the same as Alt+W. The tinted-but-opaque background hides pills scrolling under the sticky
    header. */
@@ -2452,18 +2452,15 @@ body {
   border-color: var(--accent);
 }
 .focus-rail-head:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-/* Resting (nothing needs you): the slot stays to hold the pills in place but reads as quiet rail. The
-   border keeps its 1px so the reserved height is identical to the lit state (only the color changes),
-   and the opaque rail-colored fill still hides pills scrolling under the sticky slot. The Alt+W chips
-   stay VISIBLE but dimmed as a persistent discoverability hint (the count, blank here, is the only
-   thing that lights up on change); the button is disabled + aria-hidden in JS, so the hint never
-   claims an action or a tab stop while nothing needs you. */
+/* Resting (nothing needs you): keep the FULL box (tinted fill + accent-dim border + Alt+W chips) as a
+   persistent, always-discoverable placeholder; only the count stays blank until "{n} NEED YOU" lights
+   it up. The box reads a touch quieter than the lit state (chips dimmed, no hover lift) and the button
+   is disabled + aria-hidden in JS, so the placeholder never claims an action or a tab stop while
+   nothing needs you. The tinted-but-opaque fill still hides pills scrolling under the sticky slot. */
 .focus-rail-head[data-empty] {
-  background: var(--bg-header);
-  border-color: transparent;
   cursor: default;
 }
-.focus-rail-head[data-empty] .shortcut-keys { opacity: 0.4; }
+.focus-rail-head[data-empty] .shortcut-keys { opacity: 0.6; }
 .focus-rail-head-count {
   font-size: 10px;
   font-weight: 700;
