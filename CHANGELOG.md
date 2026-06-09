@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Code-slop detector**: An opt-in, report-only post-turn `slop` rule flags AI code-slop patterns (swallowed exceptions, narration-opener comments, placeholder stubs, debug leftovers, type escapes) and surfaces the count on the session card; off by default via `rules.slop`.
+- **Preventive anti-slop prompt**: An opt-in `antiSlopPrompt` appends a fixed anti-slop note to a user session's system prompt at spawn (team and pack-setup stages are excluded); off by default.
+
+### Changed
+
+- **Pinned review sidebar controls**: The review sidebar's Merge, Resolve in session, and Discard controls sit in a pinned region that stays in view as the diff scrolls, and Merge is always shown while a session is selected, disabled with a one-line reason when it cannot run.
+
+### Fixed
+
+- **Worktree badge on fresh spawn**: A session's worktree badge appears the moment its worktree is provisioned, instead of only after a page reload.
+- **Merge button on turn end**: The Merge button appears the instant a session finishes its turn, instead of only after clicking a review file to expand it.
+- **Discoverable Alt+W attention-queue placeholder**: The roster rail's attention-queue head shows a persistent resting placeholder (a dim Alt+W hint with an "ALL CLEAR" label in a neutral box) and earns its accent only when sessions need attention, so the shortcut is discoverable and the resting head no longer reads as half-finished.
+
+### Performance
+
+- **Worktree git work off the event loop**: Worktree git probes and per-turn post-turn checks run as async, non-blocking work instead of synchronous calls on the shared event loop, so a session doing git work no longer freezes or buffers the others on slower machines; a `liveWorktreeReview` kill-switch can drop the backstop entirely.
+- **Event-driven worktree detection**: The 10-second cross-session worktree liveness poll is replaced by an integration-branch reflog watcher, removing the recurring git spend and keeping merge gates fresh server-side even with no dashboard open.
+
 ## [0.14.0] - 2026-06-08
 
 This release replaces the multi-session grid with **Focus**, a single-session navigation model: a left roster rail of one pill per session, a center work surface, and a right review sidebar. Every git-repo session now runs in its own git worktree, and you review and merge its committed work from the dashboard while it keeps running.
