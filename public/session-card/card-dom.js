@@ -141,7 +141,7 @@ export function buildCardDOM(sessionId, sessionName, initialState, options = {})
   // Action buttons
   const actions = el('div', 'session-actions');
 
-  // Overflow menu (Restart + Remove tucked away to prevent accidental clicks)
+  // Overflow menu (Restart + Park + Remove tucked away to prevent accidental clicks)
   const overflow = el('div', 'session-overflow');
   const btnOverflow = el('button', 'btn-action btn-overflow visible', '\u22ee');
   btnOverflow.title = 'More actions';
@@ -155,9 +155,30 @@ export function buildCardDOM(sessionId, sessionName, initialState, options = {})
   btnRename.setAttribute('role', 'menuitem');
   const btnRestart = el('button', 'overflow-item overflow-restart', 'Restart');
   btnRestart.setAttribute('role', 'menuitem');
+
+  // Park: returns the session to DORMANT for reuse. On a session with unmerged worktree changes the
+  // click reveals an inline confirm (no modal); a clean session parks immediately. The dot marks the
+  // destructive case at rest (CSS shows it only when the card carries data-merge pending-review/parked).
+  const parkGroup = el('div', 'overflow-park-group');
+  const btnPark = el('button', 'overflow-item overflow-park', 'Park');
+  btnPark.setAttribute('role', 'menuitem');
+  btnPark.append(el('span', 'overflow-park-dot'));
+  const parkConfirm = el('div', 'overflow-confirm');
+  const parkConfirmInner = el('div', 'overflow-confirm-inner');
+  const parkMsg = el('p', 'overflow-confirm-msg', 'Discards unmerged work');
+  parkMsg.id = `park-msg-${sessionId}`;
+  const parkActions = el('div', 'overflow-confirm-actions');
+  const btnParkCancel = el('button', 'overflow-confirm-cancel', 'Cancel');
+  const btnParkGo = el('button', 'overflow-confirm-go', 'Discard & park');
+  btnParkGo.setAttribute('aria-describedby', parkMsg.id);
+  parkActions.append(btnParkCancel, btnParkGo);
+  parkConfirmInner.append(parkMsg, parkActions);
+  parkConfirm.append(parkConfirmInner);
+  parkGroup.append(btnPark, parkConfirm);
+
   const btnRemove = el('button', 'overflow-item overflow-remove', 'Remove');
   btnRemove.setAttribute('role', 'menuitem');
-  overflowMenu.append(btnRename, btnRestart, btnRemove);
+  overflowMenu.append(btnRename, btnRestart, parkGroup, btnRemove);
   overflow.append(btnOverflow, overflowMenu);
 
   const btnDebug = el('button', 'btn-action btn-debug', '\u2699');
@@ -181,7 +202,7 @@ export function buildCardDOM(sessionId, sessionName, initialState, options = {})
 
   card.append(header, termWrap);
 
-  return { card, header, nameEl, elapsedEl, btnRename, btnRestart, btnRemove, btnDebug, btnOverflow, overflowMenu, termWrap };
+  return { card, header, nameEl, elapsedEl, btnRename, btnRestart, parkGroup, btnPark, btnParkCancel, btnParkGo, btnRemove, btnDebug, btnOverflow, overflowMenu, termWrap };
 }
 
 // ── Inline rename ────────────────────────────────────────────

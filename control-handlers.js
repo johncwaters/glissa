@@ -624,6 +624,16 @@ function registerControlHandlers(controlWss, deps) {
     },
     'restart':          (msg) => { const s = findSession(msg); if (s) s.restart(); },
     'force-restart':    (msg) => { const s = findSession(msg); if (s) s.forceRestart(); },
+    // Park a session back to DORMANT (kept for reuse). DESTRUCTIVE on an unmerged worktree; the card's
+    // inline confirm gates that. parkToDormant self-guards state + the teardown mutex, so just delegate.
+    // Ephemeral sessions (never persisted) reset only their in-memory state - inert, no config side effect.
+    'park-session':     (msg) => {
+      const s = findSession(msg);
+      if (!s) return;
+      const from = s.state;
+      const r = s.parkToDormant();
+      console.log(`[control] park-session: id=${s.id} from=${from} result=${JSON.stringify(r)}`);
+    },
     'dismiss':          (msg) => { const s = findSession(msg); if (s) s.dismiss(); },
     'sleep':            (msg) => { const s = findSession(msg); if (s) s.sleep(); },
     'wake':             (msg) => { const s = findSession(msg); if (s) s.wake(); },

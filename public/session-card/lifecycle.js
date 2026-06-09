@@ -2,7 +2,7 @@
 // Owns session card DOM lifecycle, terminal setup, and per-session state.
 
 // Vite alias - resolves to shared/states.esm.js
-import { KILLABLE_STATES, RESTARTABLE_STATES, STATES } from '/shared/states.mjs';
+import { KILLABLE_STATES, MERGEABLE_LIVE_STATES, RESTARTABLE_STATES, STATES } from '/shared/states.mjs';
 import { playAlertSound } from '../alert-sound.js';
 import { sendControlMsg } from '../control-ws.js';
 import { setRunningActivity } from './activity.js';
@@ -56,9 +56,26 @@ function updateButtonVisibility(ui) {
   const state = ui.currentState;
   const canRestart = KILLABLE_STATES.includes(state) || RESTARTABLE_STATES.includes(state);
   ui.btnRestart.classList.toggle('visible', canRestart);
+  // Park is quiescent-only (NOT the Restart predicate, which includes RUNNING): a quiescent live
+  // session (WAITING/IDLE/COMPLETE) or a finished one (DONE/FAILED). Hidden in DORMANT/INITIALIZING/
+  // STARTING/RUNNING - a dormant card has nothing to park, a running one must be force-restarted first.
+  const canPark = MERGEABLE_LIVE_STATES.includes(state) || RESTARTABLE_STATES.includes(state);
+  ui.btnPark.classList.toggle('visible', canPark);
   // Rename and Remove are always available
   ui.btnRename.classList.add('visible');
   ui.btnRemove.classList.add('visible');
+}
+
+// Collapse the Park inline-confirm back to its resting "Park" row.
+function resetParkConfirm(ui) {
+  ui.parkGroup.classList.remove('confirming');
+}
+
+// Close a card's overflow menu and reset any open Park confirm together (the two must never drift).
+function closeOverflowMenu(ui) {
+  ui.overflowMenu.classList.remove('open');
+  ui.btnOverflow.setAttribute('aria-expanded', 'false');
+  resetParkConfirm(ui);
 }
 
 // ── Card event wiring ────────────────────────────────────────
@@ -106,22 +123,60 @@ function wireCardEvents(ui, sessionId) {
     });
   });
 
+  ui.btnPark.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const merge = ui.card.dataset.merge;
+    const unmerged = merge === 'pending-review' || merge === 'parked';
+    if (!unmerged) {
+      // Clean session: nothing on disk to lose, so park immediately (no confirm), like Restart.
+      closeOverflowMenu(ui);
+      sendControlMsg({ type: 'park-session', id: sessionId });
+      return;
+    }
+    // Unmerged: reveal the inline confirm in place (no modal). Focus the SAFE action so a reflexive
+    // Enter/Space cancels rather than discards irreversible work.
+    ui.parkGroup.classList.add('confirming');
+    requestAnimationFrame(() => ui.btnParkCancel.focus());
+  });
+
+  ui.btnParkCancel.addEventListener('click', (e) => {
+    e.stopPropagation();
+    resetParkConfirm(ui);
+    ui.btnPark.focus();
+  });
+
+  ui.btnParkGo.addEventListener('click', (e) => {
+    e.stopPropagation();
+    closeOverflowMenu(ui);
+    sendControlMsg({ type: 'park-session', id: sessionId });
+  });
+
+  // Escape inside the confirm collapses it back to the Park row (without closing the whole menu).
+  ui.parkGroup.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && ui.parkGroup.classList.contains('confirming')) {
+      e.stopPropagation();
+      resetParkConfirm(ui);
+      ui.btnPark.focus();
+    }
+  });
+
   ui.btnOverflow.addEventListener('click', (e) => {
     e.stopPropagation();
     for (const [, other] of sessionUIs) {
       if (other !== ui) {
         other.overflowMenu.classList.remove('open');
         other.btnOverflow.setAttribute('aria-expanded', 'false');
+        resetParkConfirm(other);
       }
     }
+    resetParkConfirm(ui); // reopen always starts at the plain Park row, never a stuck-open confirm
     const nowOpen = ui.overflowMenu.classList.toggle('open');
     ui.btnOverflow.setAttribute('aria-expanded', String(nowOpen));
   });
 
   document.addEventListener('click', (e) => {
     if (!ui.overflowMenu.contains(e.target) && e.target !== ui.btnOverflow) {
-      ui.overflowMenu.classList.remove('open');
-      ui.btnOverflow.setAttribute('aria-expanded', 'false');
+      closeOverflowMenu(ui);
     }
   }, { signal: ui.abortController.signal });
 
@@ -228,6 +283,10 @@ export function createSessionCard(sessionId, sessionName, initialState, options 
     btnDebug: dom.btnDebug,
     btnRename: dom.btnRename,
     btnRestart: dom.btnRestart,
+    parkGroup: dom.parkGroup,
+    btnPark: dom.btnPark,
+    btnParkCancel: dom.btnParkCancel,
+    btnParkGo: dom.btnParkGo,
     btnRemove: dom.btnRemove,
     debugOverlay: null,
     debugOpen: false,

@@ -115,3 +115,22 @@ test('merge-continue-session on an unknown session is a no-op (no throw)', () =>
   const h = harness(new Map());
   assert.doesNotThrow(() => h.send({ type: 'merge-continue-session', id: 'nope' }));
 });
+
+// --- park-session: return-to-DORMANT delegates to Session.parkToDormant (logic tested there) ---
+
+test('park-session dispatches to session.parkToDormant()', () => {
+  let parked = 0;
+  const s = {
+    id: 'p1', name: 'p1', ephemeral: false, state: 'COMPLETE',
+    parkToDormant() { parked++; return { ok: true, pending: true }; },
+    toSnapshot() { return { id: this.id, name: this.name }; },
+  };
+  const h = harness(new Map([['p1', s]]));
+  h.send({ type: 'park-session', id: 'p1' });
+  assert.equal(parked, 1);
+});
+
+test('park-session on an unknown session is a no-op (no throw)', () => {
+  const h = harness(new Map());
+  assert.doesNotThrow(() => h.send({ type: 'park-session', id: 'nope' }));
+});
