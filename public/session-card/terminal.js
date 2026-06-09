@@ -213,6 +213,17 @@ export function setupTerminal(termWrap, ui) {
       reportClipboardFailure('osc52 decode', err);
       return true;
     }
+    // navigator.clipboard.writeText needs transient user activation. On refresh
+    // the server replays the scrollback ring buffer, and any OSC-52 sequence still
+    // in that window re-fires this handler with no activation - a doomed write the
+    // browser rejects with "Write permission denied". Skip silently when there's no
+    // activation (replayed/automated): the write would fail anyway, and the toast is
+    // pure noise for something the user didn't do. A live OSC-52 right after the user
+    // interacts still has activation and writes normally. userActivation is absent on
+    // older engines; there we fall through and attempt the write as before.
+    const hasActivation = document.hasFocus()
+      && navigator.userActivation?.isActive !== false;
+    if (!hasActivation) return true;
     navigator.clipboard.writeText(text).catch((err) => {
       reportClipboardFailure('osc52 write', err);
     });
