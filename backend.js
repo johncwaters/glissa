@@ -717,6 +717,11 @@ function createBackend(httpServer, options = {}) {
         type: 'session-worktree-ready', id: sess.id, session: sess.name,
         branch, timestamp: Date.now(),
       });
+      // Provision flips isWorktree true directly (sessions.js _provisionWorktree), so the health-poll
+      // refreshGitContext never sees a false->true transition and never emits the badge delta. Push it
+      // here, mirroring the merge-status handler, so the worktree badge turns on for a freshly spawned
+      // worktree without waiting for a page reload.
+      broadcastControl({ type: 'session-git', id: sess.id, worktree: !!sess.isWorktree });
       // Watch the integration branch's reflog so a cross-session / out-of-band merge into it re-checks
       // this (and every sibling) worktree's merge gate, with no poll. commonGitDir is set on the session
       // before this event fires (in _provisionWorktree).
