@@ -2452,16 +2452,18 @@ body {
   border-color: var(--accent);
 }
 .focus-rail-head:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-/* Resting (nothing needs you): the slot stays to hold the pills in place but reads as blank rail. The
+/* Resting (nothing needs you): the slot stays to hold the pills in place but reads as quiet rail. The
    border keeps its 1px so the reserved height is identical to the lit state (only the color changes),
-   and the opaque rail-colored fill still hides pills scrolling under the sticky slot. Its children are
-   hidden and the button is disabled + aria-hidden in JS, so there is no stray box, label, or tab stop. */
+   and the opaque rail-colored fill still hides pills scrolling under the sticky slot. The Alt+W chips
+   stay VISIBLE but dimmed as a persistent discoverability hint (the count, blank here, is the only
+   thing that lights up on change); the button is disabled + aria-hidden in JS, so the hint never
+   claims an action or a tab stop while nothing needs you. */
 .focus-rail-head[data-empty] {
   background: var(--bg-header);
   border-color: transparent;
   cursor: default;
 }
-.focus-rail-head[data-empty] > * { visibility: hidden; }
+.focus-rail-head[data-empty] .shortcut-keys { opacity: 0.4; }
 .focus-rail-head-count {
   font-size: 10px;
   font-weight: 700;
