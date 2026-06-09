@@ -229,14 +229,15 @@ export function mountFocusView({ rail, center }) {
   railHeadEl.className = 'focus-rail-head';
   // Render the shortcut as the SAME shared <kbd> chips the Shortcuts help panel uses (dialogs.js
   // renderShortcutGroups: .shortcut-keys cluster of .kbd chips joined by a .shortcut-sep "+"), so the
-  // operator meets one consistent representation of Alt+W on both surfaces. The chips also reserve the
-  // head's height even while blank (setRailHeadActive only hides them), so the slot never shifts.
+  // operator meets one consistent representation of Alt+W on both surfaces. The head is a single
+  // readout: the count slot reports the attention queue ("ALL CLEAR" at rest, "{n} NEED YOU" lit),
+  // the keys ride on the right as the always-visible legend, so the slot is complete in both states.
   railHeadEl.innerHTML = '<span class="focus-rail-head-count"></span>'
     + '<span class="shortcut-keys">'
     + '<kbd class="kbd">Alt</kbd><span class="shortcut-sep">+</span><kbd class="kbd">W</kbd>'
     + '</span>';
   railHeadEl.addEventListener('click', focusNextAttention);
-  setRailHeadActive(false, ''); // reserve the slot from the start (blank until something needs you)
+  setRailHeadActive(false, ''); // resting from the start: quiet "ALL CLEAR" legend until something needs you
 
   railListEl = document.createElement('div');
   railListEl.className = 'focus-rail-list';
@@ -479,13 +480,14 @@ function updateRailHead() {
   setRailHeadActive(n > 0, n === 1 ? '1 NEEDS YOU' : `${n} NEED YOU`);
 }
 
-// Light up or blank the jump header WITHOUT removing it from the layout. The header keeps a permanent
-// slot at the top of the rail (CSS .focus-rail-head[data-empty] paints it as blank rail), so the pill
-// list never shifts down when "{n} NEED YOU" appears or clears. When blank it is also non-interactive
-// and out of the tab/AT order (disabled + aria-hidden), so the reserved space reads as empty rail.
+// Toggle the jump header between its quiet resting legend and the lit attention readout WITHOUT
+// changing the layout. The head keeps a permanent slot at the top of the rail; at rest it reports
+// "ALL CLEAR" in a neutral box (CSS .focus-rail-head[data-empty]), and lighting it swaps in the
+// orchid "{n} NEED YOU" count so the accent is spent only on a real signal (earned-signal). At rest
+// it is also non-interactive and out of the tab/AT order (disabled + aria-hidden): nothing to jump to.
 function setRailHeadActive(on, label) {
   if (!railHeadEl) return;
-  railHeadEl.querySelector('.focus-rail-head-count').textContent = on ? label : '';
+  railHeadEl.querySelector('.focus-rail-head-count').textContent = on ? label : 'ALL CLEAR';
   railHeadEl.disabled = !on;
   if (on) {
     railHeadEl.removeAttribute('data-empty');

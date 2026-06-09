@@ -2424,13 +2424,12 @@ body {
 }
 .focus-rail-list { display: flex; flex-direction: column; gap: 6px; }
 
-/* Sticky jump header: counts the sessions that need the operator (WAITING + unacknowledged
-   COMPLETE) and names the Alt+W shortcut. focus-view keeps it in a FIXED slot at the top of the rail
-   whether or not anything needs you (the [data-empty] state below keeps the full box as a quiet
-   Alt+W placeholder), so the pill list never shifts down when "{n} NEED YOU" appears or clears. It is a control, so
-   it wears the one accent, not a state color (state color stays reserved for the pills). Clicking it
-   does the same as Alt+W. The tinted-but-opaque background hides pills scrolling under the sticky
-   header. */
+/* Sticky jump header: a single readout for the attention queue (WAITING + unacknowledged COMPLETE)
+   that also carries the Alt+W legend. focus-view keeps it in a FIXED slot at the top of the rail in
+   both states, so the pill list never shifts when the queue fills or clears. It earns the one accent
+   only when something needs you (the lit state here): orchid tint + accent border + the "{n} NEED YOU"
+   count. At rest it drops to a neutral box reporting "ALL CLEAR" (the [data-empty] state below), so the
+   accent is never spent on a calm board. The opaque fill hides pills scrolling under the sticky slot. */
 .focus-rail-head {
   position: sticky;
   top: 0;
@@ -2452,15 +2451,19 @@ body {
   border-color: var(--accent);
 }
 .focus-rail-head:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-/* Resting (nothing needs you): keep the FULL box (tinted fill + accent-dim border + Alt+W chips) as a
-   persistent, always-discoverable placeholder; only the count stays blank until "{n} NEED YOU" lights
-   it up. The box reads a touch quieter than the lit state (chips dimmed, no hover lift) and the button
-   is disabled + aria-hidden in JS, so the placeholder never claims an action or a tab stop while
-   nothing needs you. The tinted-but-opaque fill still hides pills scrolling under the sticky slot. */
+/* Resting (nothing needs you): a COMPLETE but quiet legend, not the orchid signal box. The fill drops
+   to the opaque rail tone and the border to the neutral component edge (the accent is reserved for the
+   lit state), the "ALL CLEAR" count reads in dim lavender, and the Alt+W chips stay legible but
+   recessed. The box is fully contained (border + radius + label + keys) so it never reads half-empty,
+   yet it spends no accent and no hover lift while the board is calm. The button is disabled +
+   aria-hidden in JS, so the legend claims no action or tab stop until a session needs you. */
 .focus-rail-head[data-empty] {
+  background: var(--bg-header);
+  border-color: var(--border);
   cursor: default;
 }
-.focus-rail-head[data-empty] .shortcut-keys { opacity: 0.6; }
+.focus-rail-head[data-empty] .focus-rail-head-count { color: var(--text-dim); }
+.focus-rail-head[data-empty] .shortcut-keys { opacity: 0.7; }
 .focus-rail-head-count {
   font-size: 10px;
   font-weight: 700;
