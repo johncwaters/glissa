@@ -32,6 +32,7 @@ const openFiles = new Set();
 const expanded = new Set();
 
 let panelEl = null;
+let controlsEl = null;
 let bodyEl = null;
 
 // ── Mount ──
@@ -46,8 +47,12 @@ export function mountReviewSidebar({ panel }) {
   const title = el('span', 'review-sidebar-title', 'Review');
   head.append(title);
 
+  // Pinned control region between the title and the scrolling diff: status note + actions + a
+  // why-disabled reason line. Always present while a session is selected (collapsed via :empty
+  // otherwise), so Merge and the other controls never scroll out of reach inside a long diff.
+  controlsEl = el('div', 'review-controls');
   bodyEl = el('div', 'review-sidebar-body');
-  panelEl.append(head, bodyEl);
+  panelEl.append(head, controlsEl, bodyEl);
 
   onSelectionChange((id) => {
     // Per-session: don't carry one session's open/expanded files into the next (start minimized).
@@ -176,6 +181,19 @@ function isLive(state) {
   return state !== STATES.DORMANT && state !== STATES.DONE && state !== STATES.FAILED;
 }
 
+// Pure: the one-line reason Merge is unavailable, or null when no line is needed. Centralizes the
+// disabled-state copy so the always-visible control region can say WHY the operator cannot merge yet.
+// Only called when Merge is disabled; ordered most-specific first.
+function mergeDisabledReason({ status, fetched, hasCommits, live, hasUncommitted }) {
+  if (status === 'merging') return null;                       // the status note already says "Merging..."
+  if (status === 'parked') return 'Resolve the conflict, then merge.';
+  if (!fetched) return 'Checking for changes...';
+  if (!hasCommits && !hasUncommitted) return 'No changes to merge.';
+  if (!hasCommits) return 'Nothing committed yet. Commit to merge.';
+  if (!live) return 'Session ended.';                          // committed work, but no PTY to keep running
+  return 'Working. Mergeable when the turn ends.';             // committed work, live, but still RUNNING
+}
+
 function requestDiff(id) {
   sendControlMsg({ type: 'request-session-diff', id });
 }
@@ -187,12 +205,14 @@ function sessionName(ui, id) {
 // ── Render ──
 
 function render() {
-  if (!bodyEl) return;
+  if (!controlsEl || !bodyEl) return;
+  controlsEl.replaceChildren();
   bodyEl.replaceChildren();
 
   const id = getSelectedId();
   const ui = id ? sessionUIs.get(id) : null;
   if (!id || !ui) {
+    // No selection: the empty control region collapses (CSS :empty), the body carries the empty state.
     renderEmpty('No session selected', 'Click a session name to review its changes here.');
     return;
   }
@@ -200,18 +220,6 @@ function render() {
   const status = statusById.get(id) || 'none';
   const state = ui.currentState;
   const reviewable = REVIEWABLE.has(status);
-
-  // Merge-status note only. The session name and state badge are intentionally NOT shown here: the
-  // session card already carries both, so repeating them in the sidebar is redundant.
-  if (status && status !== 'none') {
-    const note = el('div', 'review-status-note');
-    note.dataset.merge = status;
-    note.textContent = status === 'parked' ? 'Needs manual merge'
-      : status === 'merging' ? 'Merging...'
-      : status === 'merged' ? 'Merged'
-      : 'Changes ready to review';
-    bodyEl.append(note);
-  }
 
   const fetched = diffById.has(id);
   const payload = fetched ? diffById.get(id) : null;
@@ -225,17 +233,43 @@ function render() {
   // keeps it alive; only an explicit /exit ends it, which never happens), so there is no settled/close-out
   // state to merge from. "Merge" on a quiescent live session (WAITING/IDLE/COMPLETE) with COMMITTED changes
   // merges into develop and rebases this worktree onto develop, KEEPING the session running. With nothing
-  // committed there is nothing to merge, so the action is withheld. Only a session that is actively working
-  // (RUNNING) gets a read-only preview; a session paused awaiting the operator (WAITING) is mergeable.
+  // committed there is nothing to merge, so the button is disabled (with a reason) rather than withheld.
   const live = isLive(state);
   const mergeableLive = isMergeableLive(state, hasCommits);
+  const mergeEnabled = mergeableLive && status !== 'merging';
 
-  // Actions sit at the TOP of the changes area so the merge button leads. Skipped entirely when there
-  // is nothing to act on (e.g. a still-working session), now that the always-present Refresh is gone.
-  const actions = renderActions(id, { status, reviewable, mergeableLive, live });
-  if (actions.childElementCount > 0) bodyEl.append(actions);
+  // ── Pinned control region: status note + actions + why-disabled reason. Always rendered while a
+  // session is selected so Merge (and the contextual Resolve/Discard) stay put as the diff scrolls.
+  // Merge-status note only. The session name and state badge are intentionally NOT shown here: the
+  // session card already carries both, so repeating them in the sidebar is redundant.
+  if (status && status !== 'none') {
+    const note = el('div', 'review-status-note');
+    note.dataset.merge = status;
+    note.textContent = status === 'parked' ? 'Needs manual merge'
+      : status === 'merging' ? 'Merging...'
+      : status === 'merged' ? 'Merged'
+      : 'Changes ready to review';
+    controlsEl.append(note);
+  }
 
-  // Committed section first: it is what a merge moves into develop.
+  const actions = renderActions(id, { status, reviewable, mergeEnabled, live });
+  controlsEl.append(actions);
+
+  // When Merge is unavailable, say why right under it, and tie the line to the button for assistive tech.
+  if (!mergeEnabled) {
+    const reason = mergeDisabledReason({
+      status, fetched, hasCommits, live, hasUncommitted: uncommittedFiles.length > 0,
+    });
+    if (reason) {
+      const r = el('div', 'review-control-reason', reason);
+      r.id = 'review-merge-reason';
+      controlsEl.append(r);
+      const mergeBtn = actions.querySelector('#review-merge-btn');
+      if (mergeBtn) mergeBtn.setAttribute('aria-describedby', 'review-merge-reason');
+    }
+  }
+
+  // ── Scrolling body: diff sections only. Committed section first: it is what a merge moves into develop.
   if (committedFiles.length > 0) {
     bodyEl.append(renderSection('committed', 'Committed', 'merges into develop', committedFiles));
   } else if (!fetched && reviewable) {
@@ -249,10 +283,6 @@ function render() {
   // Uncommitted section, clearly divided off: present but excluded from the merge.
   if (uncommittedFiles.length > 0) {
     bodyEl.append(renderSection('uncommitted', 'Uncommitted', '', uncommittedFiles));
-  }
-
-  if (!reviewable && !mergeableLive && hasCommits) {
-    bodyEl.append(el('div', 'review-hint', 'Read-only preview. The session is working right now; it can be merged once its current turn finishes.'));
   }
 }
 
@@ -354,12 +384,24 @@ function renderFile(f, kind) {
   return sec;
 }
 
-function renderActions(id, { status, reviewable, mergeableLive, live }) {
+function renderActions(id, { status, reviewable, mergeEnabled, live }) {
   const actions = el('div', 'review-actions');
 
   // No manual "Refresh diff" button: the diff is kept live by the server (it pushes `session-changed`
   // on a turn end, a commit, or an integration-branch move, and the client auto-re-fetches for the
   // selected session - see notifyWorktreeChanged). Only real actions live here now.
+
+  // The one merge action, ALWAYS rendered and ALWAYS leading, so the operator never loses track of where
+  // Merge lives or whether it is available (render() documents what the merge itself does). Enabled only
+  // when mergeEnabled (a quiescent live session with committed changes, no in-flight merge); otherwise
+  // disabled with a reason line beside it (see mergeDisabledReason).
+  const merge = el('button', 'review-btn review-btn-primary', 'Merge');
+  merge.type = 'button';
+  merge.id = 'review-merge-btn';
+  merge.title = 'Merge into develop and rebase this worktree onto develop, then keep working in this session';
+  merge.disabled = !mergeEnabled;
+  merge.addEventListener('click', () => sendControlMsg({ type: 'merge-continue-session', id }));
+  actions.append(merge);
 
   // Parked merge: the auto rebase-then-FF could not complete. Hand it to the agent IN the worktree by
   // pasting a context-rich prompt (why it parked + conflicting files + how to rebase/resolve) into the
@@ -370,18 +412,6 @@ function renderActions(id, { status, reviewable, mergeableLive, live }) {
     resolve.title = 'Paste a prompt into this session explaining why the merge parked and how to resolve it, so the agent in the worktree can finish the merge';
     resolve.addEventListener('click', () => sendControlMsg({ type: 'resolve-session-merge', id }));
     actions.append(resolve);
-  }
-
-  // The one merge action: merge into develop + rebase this worktree onto develop, then keep working in the
-  // same session (the PTY stays alive - there is no separate "finish" step). Offered on a quiescent live
-  // session with changes.
-  if (mergeableLive) {
-    const merge = el('button', 'review-btn review-btn-primary', 'Merge');
-    merge.type = 'button';
-    merge.title = 'Merge into develop and rebase this worktree onto develop, then keep working in this session';
-    merge.disabled = status === 'merging';
-    merge.addEventListener('click', () => sendControlMsg({ type: 'merge-continue-session', id }));
-    actions.append(merge);
   }
 
   // Discard throws the worktree away unmerged. Gated on NO live PTY in the worktree (its original safety
