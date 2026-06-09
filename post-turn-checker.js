@@ -21,7 +21,10 @@ const GIT_TIMEOUT_MS = 5000;
 const DEFAULTS = Object.freeze({
   enabled: true,
   mode: 'fix', // 'fix' | 'report'
-  rules: { dashes: true, trailingWs: true, finalNewline: true, bom: true },
+  // `slop` is the report-only code-slop detector (session-core/slop-code-patterns.js).
+  // OFF by default: opt in per project with postTurnChecks.rules.slop = true. It never
+  // rewrites content, so it is safe to enable even when mode is 'fix'.
+  rules: { dashes: true, trailingWs: true, finalNewline: true, bom: true, slop: false },
   include: ['**/*'],
   exclude: [
     '**/node_modules/**',
@@ -211,7 +214,7 @@ async function runPostTurnChecks({ cwd, config, sessionId, deps = {} } = {}) {
       const buf = _readFile(abs);
       if (looksBinary(buf)) continue;
       const content = buf.toString('utf8');
-      const res = applyRules(content, cfg.rules);
+      const res = applyRules(content, cfg.rules, { relPath: rel });
       report.filesScanned++;
       if (res.findings.length) {
         const counts = {};

@@ -127,6 +127,8 @@ function createBackend(httpServer, options = {}) {
       worktreeShare: cfg.worktreeShare || DEFAULT_CONFIG.worktreeShare,
       // Background sub-agent detection (config kill switch; undefined -> Session default true).
       detectBackgroundAgents: cfg.detectBackgroundAgents,
+      // Lever B: preventive anti-slop system prompt (user sessions only; off by default).
+      antiSlopPrompt: cfg.antiSlopPrompt,
     });
     const recorder = createRecorder(project.name, cfg.capture);
     if (recorder) {

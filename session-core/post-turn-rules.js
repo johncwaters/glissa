@@ -9,6 +9,8 @@
 // rewrites are referenced ONLY via String.fromCharCode so the no-dash policy
 // round-trips through source and tests.
 
+const { detectCodeSlop } = require('./slop-code-patterns');
+
 const EM_DASH = String.fromCharCode(0x2014);
 const EN_DASH = String.fromCharCode(0x2013);
 const ELLIPSIS = String.fromCharCode(0x2026);
@@ -48,6 +50,38 @@ function fixDashes(content) {
     return after;
   });
   return { content: out, findings };
+}
+
+// Report-only code-slop detector. Unlike the other rules it NEVER mutates: it returns
+// `content` unchanged and a finding per match, so even under mode 'fix' it can only flag,
+// never rewrite (slop is a judgement call, and these run on code files too). `ctx.relPath`
+// drives language gating in detectCodeSlop (TS-only / py-only subrules). Pure delegation:
+// the pattern matching lives in ./slop-code-patterns; here we only map offsets to line/col.
+function detectSlop(content, ctx) {
+  const relPath = ctx && ctx.relPath;
+  const matches = detectCodeSlop(content, relPath);
+  // Single linear sweep instead of per-finding posAt. detectCodeSlop returns matches in
+  // ascending offset order, so one monotonic cursor maps every offset to line/col in
+  // O(N + F). The old posAt-per-finding cost O(F * N) and froze the shared event loop on a
+  // match-heavy file (measured 421ms -> 0.5ms). Mirrors posAt: only NL (char 10) ends a line.
+  const findings = [];
+  let pos = 0;
+  let line = 1;
+  let col = 1;
+  for (const m of matches) {
+    const target = m.index < content.length ? m.index : content.length;
+    while (pos < target) {
+      if (content.charCodeAt(pos) === 10) {
+        line++;
+        col = 1;
+      } else {
+        col++;
+      }
+      pos++;
+    }
+    findings.push({ rule: 'slop', subrule: m.subrule, axis: m.axis, line, col });
+  }
+  return { content, findings };
 }
 
 // Strip [ \t]+ before a newline and at end-of-file. CRLF-safe (keeps the CR+LF).
@@ -91,10 +125,12 @@ const RULES = Object.freeze({
   dashes: { fix: fixDashes },
   trailingWs: { fix: fixTrailingWhitespace },
   finalNewline: { fix: fixFinalNewline },
+  slop: { fix: detectSlop },
 });
 
-// Fixed apply order: BOM first, newline last (so it sees post-trim content).
-const RULE_ORDER = ['bom', 'dashes', 'trailingWs', 'finalNewline'];
+// Fixed apply order: BOM first, newline last (so it sees post-trim content). `slop` is
+// report-only and order-independent; it runs last.
+const RULE_ORDER = ['bom', 'dashes', 'trailingWs', 'finalNewline', 'slop'];
 
 const EXEMPT_MARKER = 'glissa-no-fix';
 
@@ -114,7 +150,7 @@ function exemptions(content) {
 // Apply enabled rules in RULE_ORDER. `rules` is a normalized map
 // { <name>: { enabled, mode } }; mode 'fix' applies the transform, 'report' only
 // records findings. Returns { content, findings, changed }.
-function applyRules(content, rules) {
+function applyRules(content, rules, ctx) {
   const ex = exemptions(content);
   const findings = [];
   let current = content;
@@ -122,7 +158,7 @@ function applyRules(content, rules) {
     const cfg = rules && rules[name];
     if (!cfg || !cfg.enabled) continue;
     if (ex.all || ex.rules.has(name)) continue;
-    const res = RULES[name].fix(current);
+    const res = RULES[name].fix(current, ctx);
     if (res.findings.length === 0) continue;
     for (const f of res.findings) findings.push(f);
     if (cfg.mode !== 'report') current = res.content;
@@ -189,4 +225,5 @@ module.exports = {
   fixTrailingWhitespace,
   fixFinalNewline,
   stripBom,
+  detectSlop,
 };

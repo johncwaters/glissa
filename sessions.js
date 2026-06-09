@@ -16,6 +16,7 @@ const {
   CLAUDE_CMD,
 } = require("./session-core/spawn-command");
 const { buildSpawnEnv } = require("./session-core/spawn-env");
+const { buildAntiSlopArgs } = require("./session-core/anti-slop-prompt");
 const {
   TRANSITIONS,
   GUARDS,
@@ -122,6 +123,10 @@ class Session extends EventEmitter {
     initialPrompt = null,
     extraClaudeArgs = [],
     ephemeral = false,
+    // Lever B: append a fixed anti-slop note to the system prompt at spawn (user sessions,
+    // opt-in via config antiSlopPrompt). Off by default and never set for team/pack-setup
+    // stage sessions. See session-core/anti-slop-prompt.js.
+    antiSlopPrompt = false,
     // Optional Claude Code permissions ({ deny: [...] }) merged into the injected --settings file
     // (team-stage deny blacklist, mechanism M2). Null for ordinary user sessions.
     settingsPermissions = null,
@@ -194,6 +199,7 @@ class Session extends EventEmitter {
     this._spawnCommand = spawnCommand;
     this._initialPrompt = initialPrompt;
     this._extraClaudeArgs = Array.isArray(extraClaudeArgs) ? extraClaudeArgs : [];
+    this._antiSlopPrompt = !!antiSlopPrompt;
     this.ephemeral = !!ephemeral;
     this._settingsPermissions = settingsPermissions;
     this._ptySpawn = ptySpawn || ((file, args, opts) => pty.spawn(file, args, opts));
@@ -905,6 +911,12 @@ class Session extends EventEmitter {
     // on the cmd.exe shim fallback a very large/multiline prompt is subject to cmd parsing.
     if (this._extraClaudeArgs.length > 0) {
       claudeArgs.push(...this._extraClaudeArgs);
+    }
+    // Lever B: preventive anti-slop note (no-op unless antiSlopPrompt is on). Pushed before
+    // the initial-prompt positional so the prompt stays the final argv element.
+    const antiSlopArgs = buildAntiSlopArgs(this._antiSlopPrompt);
+    if (antiSlopArgs.length > 0) {
+      claudeArgs.push(...antiSlopArgs);
     }
     if (this._initialPrompt != null) {
       claudeArgs.push(this._initialPrompt);

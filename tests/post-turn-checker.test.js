@@ -130,6 +130,25 @@ test('mtime race: a file changed between read and write is skipped, not clobbere
   assert.ok(report.errors.some((e) => e.message === 'skipped-race'));
 });
 
+test('slop rule (enabled) flags a code file but never rewrites it, even in fix mode', async () => {
+  // Clean file except for slop (final newline present, no trailing ws/dash/bom), so the
+  // only possible write would come from the slop rule, which must be report-only.
+  const files = { 'a.js': `console.log(1)${NL}` };
+  const { deps, writes } = makeDeps(files);
+  const cfg = resolveCheckConfig({ mode: 'fix', rules: { slop: true } });
+  const report = await runPostTurnChecks({ cwd: '/x', config: cfg, deps });
+  assert.equal(report.filesFixed, 0);
+  assert.equal('a.js' in writes, false);
+  assert.ok(report.findings.some((f) => f.file === 'a.js' && f.rule === 'slop'));
+});
+
+test('slop rule stays off by default (not in the default rule set)', async () => {
+  const files = { 'a.js': `console.log(1)${NL}` };
+  const { deps } = makeDeps(files);
+  const report = await runPostTurnChecks({ cwd: '/x', config: fixCfg, deps });
+  assert.equal(report.findings.some((f) => f.rule === 'slop'), false);
+});
+
 test('non-git cwd: skipped no-git, nothing written', async () => {
   const { deps, writes } = makeDeps({ 'a.js': `x ${NL}` }, { nonGit: true });
   const report = await runPostTurnChecks({ cwd: '/x', config: fixCfg, deps });

@@ -17,6 +17,10 @@ const DEFAULT_CONFIG = {
   // run_in_background / Ctrl+B). On by default; set false to fall back to "main-agent Stop completes
   // the card" behavior (see sessions.js detectBackgroundAgents / session-core/agent-tracker.js).
   detectBackgroundAgents: true,
+  // Lever B: append a fixed anti-slop note to each user session's system prompt at spawn
+  // (session-core/anti-slop-prompt.js). OFF by default; user sessions only (team/pack-setup
+  // stage sessions never receive it). Takes effect on the next session start/restart.
+  antiSlopPrompt: false,
   editorCommand: '',
   // Integration branch every worktree-backed session forks from and merges back into. Glissa never
   // creates it; if it is absent a session stays DORMANT with a notice (it never runs in the real tree).
@@ -35,7 +39,8 @@ const DEFAULT_CONFIG = {
   postTurnChecks: {
     enabled: true,
     mode: 'fix',
-    rules: { dashes: true, trailingWs: true, finalNewline: true, bom: true },
+    // `slop` is the report-only code-slop detector; OFF by default (opt in per project).
+    rules: { dashes: true, trailingWs: true, finalNewline: true, bom: true, slop: false },
   },
   projects: []
 };
@@ -54,6 +59,7 @@ const BOOLEAN_KEYS = [
   'cursorBlink',
   'debugMode',
   'detectBackgroundAgents',
+  'antiSlopPrompt',
 ];
 
 // Free-text settings persisted to config.json
@@ -160,6 +166,7 @@ function createConfigStore() {
       cursorBlink: config.cursorBlink ?? DEFAULT_CONFIG.cursorBlink,
       debugMode: config.debugMode ?? DEFAULT_CONFIG.debugMode,
       detectBackgroundAgents: config.detectBackgroundAgents ?? DEFAULT_CONFIG.detectBackgroundAgents,
+      antiSlopPrompt: config.antiSlopPrompt ?? DEFAULT_CONFIG.antiSlopPrompt,
       editorCommand: config.editorCommand ?? DEFAULT_CONFIG.editorCommand,
       integrationBranch: config.integrationBranch ?? DEFAULT_CONFIG.integrationBranch,
       worktreeRoot: config.worktreeRoot ?? DEFAULT_CONFIG.worktreeRoot,

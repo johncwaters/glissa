@@ -12,11 +12,13 @@ const {
   fixTrailingWhitespace,
   fixFinalNewline,
   stripBom,
+  detectSlop,
   applyRules,
   exemptions,
   shouldCheckPath,
   looksBinary,
 } = require('../session-core/post-turn-rules');
+const { detectCodeSlop } = require('../session-core/slop-code-patterns');
 
 const EM_DASH = String.fromCharCode(0x2014);
 const EN_DASH = String.fromCharCode(0x2013);
@@ -108,6 +110,63 @@ test('stripBom removes only a single leading BOM', () => {
   assert.deepEqual(stripBom('hello'), { content: 'hello', findings: [] });
 });
 
+// --- detectSlop (report-only) ---------------------------------------------
+
+test('detectSlop returns content unchanged and maps findings to line/col', () => {
+  const input = `x()${NL}catch (e) {}`;
+  const { content, findings } = detectSlop(input, { relPath: 'a.js' });
+  assert.equal(content, input); // never mutates
+  assert.ok(findings.length >= 1);
+  assert.equal(findings[0].rule, 'slop');
+  assert.equal(typeof findings[0].subrule, 'string');
+  assert.equal(findings[0].line, 2); // catch is on line 2
+});
+
+test('detectSlop honors ctx.relPath language gating', () => {
+  const input = 'const x = y as any;';
+  assert.ok(detectSlop(input, { relPath: 'a.ts' }).findings.some((f) => f.subrule === 'type-escape'));
+  assert.equal(detectSlop(input, { relPath: 'a.js' }).findings.length, 0);
+});
+
+test('detectSlop tolerates a missing ctx', () => {
+  const { content, findings } = detectSlop('console.log(1)');
+  assert.equal(content, 'console.log(1)');
+  assert.ok(findings.some((f) => f.subrule === 'debug-leftover'));
+});
+
+// Naive O(line) reference: counts NL (char 10) up to a 0-based offset, mirroring posAt.
+function refLineCol(content, offset) {
+  let line = 1;
+  let col = 1;
+  for (let i = 0; i < Math.min(offset, content.length); i++) {
+    if (content.charCodeAt(i) === 10) {
+      line++;
+      col = 1;
+    } else {
+      col++;
+    }
+  }
+  return { line, col };
+}
+
+test('detectSlop single-pass line/col matches a naive per-finding reference (LF and CRLF)', () => {
+  const unit = 'console.log(1)|// Now we init|try{f()}catch(e){}|const y = 2 // probably fine|';
+  for (const sep of [NL, CR + NL]) {
+    const content = unit.split('|').join(sep).repeat(8);
+    // detectCodeSlop gives offsets; detectSlop maps them in the same order.
+    const matches = detectCodeSlop(content, 'a.js');
+    const { findings } = detectSlop(content, { relPath: 'a.js' });
+    assert.ok(matches.length > 0);
+    assert.equal(findings.length, matches.length);
+    for (let i = 0; i < matches.length; i++) {
+      const ref = refLineCol(content, matches[i].index);
+      assert.equal(findings[i].subrule, matches[i].subrule);
+      assert.equal(findings[i].line, ref.line, `line mismatch at finding ${i}`);
+      assert.equal(findings[i].col, ref.col, `col mismatch at finding ${i}`);
+    }
+  }
+});
+
 // --- applyRules -----------------------------------------------------------
 
 test('applyRules applies all enabled fix rules and reports changed', () => {
@@ -157,6 +216,22 @@ test('exemptions distinguishes bare marker from per-rule marker', () => {
   const perRule = exemptions('glissa-no-fix:dashes');
   assert.equal(perRule.all, false);
   assert.equal(perRule.rules.has('dashes'), true);
+});
+
+test('applyRules threads ctx to the slop rule and never mutates for it (even in fix mode)', () => {
+  const input = `console.log(1)${NL}`;
+  const rules = { slop: { enabled: true, mode: 'fix' } };
+  const { content, findings, changed } = applyRules(input, rules, { relPath: 'a.js' });
+  assert.equal(content, input); // slop is report-only: no rewrite under fix mode
+  assert.equal(changed, false);
+  assert.ok(findings.some((f) => f.rule === 'slop' && f.subrule === 'debug-leftover'));
+});
+
+test('applyRules honors a per-rule glissa-no-fix:slop marker', () => {
+  const input = `glissa-no-fix:slop${NL}console.log(1)`;
+  const rules = { slop: { enabled: true, mode: 'report' } };
+  const { findings } = applyRules(input, rules, { relPath: 'a.js' });
+  assert.equal(findings.some((f) => f.rule === 'slop'), false);
 });
 
 // --- shouldCheckPath ------------------------------------------------------
