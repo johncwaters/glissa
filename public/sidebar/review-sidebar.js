@@ -300,27 +300,24 @@ function render() {
     controlsEl.append(note);
   }
 
-  // Combined line totals placed inside the actions row (margin-left: auto pushes them right),
-  // so they sit on the same line as Merge rather than stacking above it.
-  const allFiles = [...committedFiles, ...uncommittedFiles];
+  // No combined total in the actions row: each section head right below carries its own +/- stat,
+  // and a pinned grand total only repeated those numbers one scroll-line above them.
   const actions = renderActions(id, { status, reviewable, mergeEnabled, live });
-  if (allFiles.length > 0) {
-    const tot = summarizeFiles(allFiles);
-    const overallStat = el('div', 'review-overall-stat');
-    overallStat.append(el('span', 'review-add', `+${tot.added}`), el('span', 'review-del', `-${tot.removed}`));
-    actions.append(overallStat);
-  }
   controlsEl.append(actions);
 
   // Disabled reason only when Merge is rendered (not suppressed by parked) and unavailable.
+  let reasonShown = false;
   if (!mergeEnabled && status !== 'parked') {
     const reason = mergeDisabledReason({
       status, fetched, hasCommits, live, hasUncommitted: uncommittedFiles.length > 0,
     });
     if (reason) {
-      const r = el('div', 'review-control-reason', reason);
+      // While the diff is unfetched the reason line IS the loading indicator (it replaced the body's
+      // "Loading diff..." placeholder), so it carries the loading pulse.
+      const r = el('div', !fetched ? 'review-control-reason review-loading' : 'review-control-reason', reason);
       r.id = 'review-merge-reason';
       controlsEl.append(r);
+      reasonShown = true;
       const mergeBtn = actions.querySelector('#review-merge-btn');
       if (mergeBtn) mergeBtn.setAttribute('aria-describedby', 'review-merge-reason');
     }
@@ -335,12 +332,14 @@ function render() {
   if (committedFiles.length > 0) {
     const mergeTarget = ui?.effectiveBase || 'develop';
     bodyEl.append(renderSection('committed', 'Committed', `merges into ${mergeTarget}`, committedFiles));
-  } else if (!fetched && reviewable) {
-    bodyEl.append(el('div', 'review-nochanges review-loading', 'Loading diff...'));
-  } else {
-    const msg = uncommittedFiles.length > 0 ? 'No committed changes.'
-      : 'No changes in this worktree.';
-    bodyEl.append(el('div', 'review-nochanges', msg));
+  } else if (!reasonShown) {
+    // The pinned reason line already explains an empty committed section ("No changes to merge.",
+    // "Nothing committed yet...", "Checking for changes..."), so the body adds its own placeholder
+    // only when no reason rendered, never a second wording of the same fact.
+    const placeholder = !fetched && reviewable
+      ? el('div', 'review-nochanges review-loading', 'Loading diff...')
+      : el('div', 'review-nochanges', uncommittedFiles.length > 0 ? 'No committed changes.' : 'No changes in this worktree.');
+    bodyEl.append(placeholder);
   }
 
   // Uncommitted section, clearly divided off: present but excluded from the merge.
@@ -377,8 +376,7 @@ function renderSection(kind, label, meaning, files) {
   stat.append(el('span', 'review-stat-files', `${sum.files} file${sum.files === 1 ? '' : 's'}`));
   stat.append(
     el('span', 'review-add', `+${sum.added}`),
-    el('span', 'review-del', `-${sum.removed}`),
-    el('span', 'review-total', `${sum.added + sum.removed}`)
+    el('span', 'review-del', `-${sum.removed}`)
   );
   head.append(stat);
   wrap.append(head);
@@ -408,8 +406,7 @@ function renderFile(f, kind) {
   if (f.binary) c.append(el('span', 'review-bin', 'bin'));
   else c.append(
     el('span', 'review-add', `+${f.added}`),
-    el('span', 'review-del', `-${f.removed}`),
-    el('span', 'review-total', `${f.added + f.removed}`)
+    el('span', 'review-del', `-${f.removed}`)
   );
   head.append(c);
   head.addEventListener('click', () => {

@@ -2939,13 +2939,6 @@ body {
   line-height: 1.5;
   color: var(--text-muted);
 }
-.review-overall-stat {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  margin-left: auto;
-  font-size: 11px;
-}
 @keyframes review-fadeout {
   0%, 60% { opacity: 1; }
   100% { opacity: 0; }
@@ -3045,11 +3038,10 @@ body {
 .review-add { color: var(--state-running); }
 .review-del { color: var(--state-failed); }
 .review-bin { color: var(--text-muted); }
-/* Fixed-width right-aligned numeric columns: the +/- counts stack into aligned columns across the file
-   rows and the two section totals. The stack is monospace so tabular-nums is moot; 4ch holds the widest
+/* Fixed-width right-aligned numeric columns: the +/- pair stacks into aligned columns across the file
+   rows and the two section stats. The stack is monospace so tabular-nums is moot; 4ch holds the widest
    realistic value (+155 / -141) and grows for outliers. */
 .review-add, .review-del { min-width: 4ch; text-align: right; }
-.review-total { min-width: 4ch; text-align: right; color: var(--text-muted); font-size: 10px; }
 
 .review-diff {
   font-family: var(--font-mono);
