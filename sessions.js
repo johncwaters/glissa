@@ -26,6 +26,7 @@ const {
 const { mapSignalToEvent } = require("./session-core/status-mapper");
 const { buildMergePrompt } = require("./session-core/merge-prompt");
 const agentTracker = require("./session-core/agent-tracker");
+const wakeupTracker = require("./session-core/wakeup-tracker");
 
 const KILL_POLL_INTERVAL_MS = 200;
 const KILL_MAX_WAIT_MS = 3000;
@@ -113,6 +114,12 @@ class Session extends EventEmitter {
     // so behavior is exactly as before. agentTtlMs bounds a dropped-SubagentStop leak.
     detectBackgroundAgents = true,
     agentTtlMs = agentTracker.DEFAULT_AGENT_TTL_MS,
+    // Scheduled-revival visibility (see session-core/wakeup-tracker.js). When true (default), a
+    // ScheduleWakeup / cron task seen via PostToolUse hooks rides toSnapshot().pendingWakeup as an
+    // ADVISORY card chip ("sleeping until ~HH:MM"); it never gates a transition. The kill switch
+    // (config detectScheduledWakeups=false) drops the PostToolUse hook group at the source and
+    // makes the session ignore the signals, so behavior is exactly as before.
+    detectScheduledWakeups = true,
     // Resolved claude command ({ path, kind }). Defaults to the module-load
     // resolution; tests inject a stub to exercise the spawn branches deterministically.
     spawnCommand = CLAUDE_CMD,
@@ -200,6 +207,11 @@ class Session extends EventEmitter {
     this._detectBackgroundAgents = detectBackgroundAgents;
     this._activeAgents = new Map();
     this._agentTtlMs = agentTtlMs;
+    // Pending scheduled revivals, keyed by cron task id or a synthetic one-shot key. Advisory
+    // only (see _trackWakeup); lazily pruned (fireAt + grace / cron TTL); never a transition.
+    this._detectScheduledWakeups = detectScheduledWakeups;
+    this._wakeups = new Map();
+    this._wakeupSeq = 0;
     this._spawnCommand = spawnCommand;
     this._initialPrompt = initialPrompt;
     this._extraClaudeArgs = Array.isArray(extraClaudeArgs) ? extraClaudeArgs : [];
@@ -265,6 +277,12 @@ class Session extends EventEmitter {
       this._trackSubagent(raw);
       return;
     }
+    // Scheduled-revival lifecycle is likewise tracking-only: it must never reach the
+    // StatusSource (a pending wakeup is metadata, not a state signal).
+    if (raw && (raw.signal === "wakeup-scheduled" || raw.signal === "cron-created" || raw.signal === "cron-deleted")) {
+      this._trackWakeup(raw);
+      return;
+    }
     this._statusSource.ingest(raw);
   }
 
@@ -299,6 +317,63 @@ class Session extends EventEmitter {
     if (this._activeAgents.size === 0) return;
     this._activeAgents.clear();
     this._emitAgentsChange();
+  }
+
+  // Apply one scheduled-revival signal to the pending-wakeup set. ADVISORY metadata only: a Stop
+  // with a pending wakeup IS a finished turn, so unlike activeAgents this NEVER gates a transition.
+  // Cancellation is invisible (Esc fires no hook, claude-code#58235), so entries are self-expiring
+  // via the lazy prune in _pendingWakeup. Payload field names are extracted defensively; the exact
+  // shapes are an open probe item (plan WS2 step 0) and a miss simply drops the signal.
+  _trackWakeup(raw) {
+    if (!this._detectScheduledWakeups) return;
+    const payload = raw.payload || {};
+    const ts = raw.ts || Date.now();
+    if (raw.signal === "wakeup-scheduled") {
+      const input = payload.tool_input || {};
+      const delaySec = Number(input.delaySeconds);
+      if (!Number.isFinite(delaySec) || delaySec <= 0) return;
+      const key = `w${++this._wakeupSeq}`; // collision-free synthetic key (one-shot, never re-referenced)
+      const reason = typeof input.reason === "string" && input.reason ? input.reason : null;
+      if (wakeupTracker.addWakeup(this._wakeups, key, { kind: "wakeup", fireAt: ts + delaySec * 1000, reason, ts })) {
+        this._emitWakeupChange();
+      }
+      return;
+    }
+    if (raw.signal === "cron-created") {
+      // No cron-expression parsing in v1: tracked without a fire time, bounded by the cron TTL.
+      // A synthetic-key fallback entry (id fields not yet pinned, plan WS2 step 0) can never be
+      // matched by its CronDelete; it is TTL/PTY-exit bound only. Advisory chip, acceptable.
+      const key = wakeupTracker.extractCronTaskId(payload) || `c${++this._wakeupSeq}`;
+      if (wakeupTracker.addWakeup(this._wakeups, key, { kind: "cron", fireAt: null, reason: null, ts })) {
+        this._emitWakeupChange();
+      }
+      return;
+    }
+    // cron-deleted
+    const key = wakeupTracker.extractCronTaskId(payload);
+    if (!key) return;
+    if (wakeupTracker.removeWakeup(this._wakeups, key)) this._emitWakeupChange();
+  }
+
+  // Pruned earliest pending revival, or null. Returns null when detection is off.
+  _pendingWakeup() {
+    if (!this._detectScheduledWakeups) return null;
+    wakeupTracker.pruneWakeups(this._wakeups, Date.now());
+    const e = wakeupTracker.earliestWakeup(this._wakeups);
+    if (!e) return null;
+    return { at: e.fireAt, kind: e.kind, reason: e.reason };
+  }
+
+  _emitWakeupChange() {
+    this.emit("wakeup-change", { pendingWakeup: this._pendingWakeup() });
+  }
+
+  // Drop all pending revivals (PTY exit, (re)start): scheduled tasks are session-scoped and die
+  // with the PTY. Emits a clearing delta only if something was pending.
+  _clearWakeups() {
+    if (this._wakeups.size === 0) return;
+    this._wakeups.clear();
+    this._emitWakeupChange();
   }
 
   _onStatus(s) {
@@ -341,6 +416,7 @@ class Session extends EventEmitter {
       ephemeral: this.ephemeral,
       isWorktree: this.isWorktree,
       activeAgents: this._activeAgentCount(),
+      pendingWakeup: this._pendingWakeup(),
       mergeStatus: this.mergeStatus,
       worktreeNotice: this.worktreeNotice,
       effectiveBase: (this._effectiveBase || this._integrationBranch || null)
@@ -847,6 +923,16 @@ class Session extends EventEmitter {
       entryHook(this);
     }
 
+    // Detection re-sync: entering a quiescent state while the PTY may still be spinning (a
+    // premature hook `ready`, e.g. a Stop fired mid-work) would otherwise strand the card: the
+    // title source's working-kind dedup latch swallows every later spinner frame, so no signal
+    // ever maps IDLE/COMPLETE -> new_output -> RUNNING. Re-opening the latch lets the next REAL
+    // braille frame re-wake the card (self-heal); on a genuine completion the next frame is the
+    // idle glyph, which cannot wake anything from here.
+    if (to === STATES.IDLE || to === STATES.COMPLETE) {
+      this._titleSource.resyncWorkingLatch();
+    }
+
     // Record in audit log (capped to prevent unbounded growth)
     const entry = {
       from,
@@ -905,6 +991,7 @@ class Session extends EventEmitter {
     this._sleeping = false;
     // A (re)started PTY begins with no live background sub-agents; drop any stale ids from a prior run.
     this._clearAgents();
+    this._clearWakeups();
     this._autoKilled = false;
     this._outputBuffer = [];
     this._outputBufferHead = 0;
@@ -1036,6 +1123,7 @@ class Session extends EventEmitter {
         glissaId: this.id,
         baseDir: this._hooksBaseDir,
         permissions: this._settingsPermissions,
+        detectScheduledWakeups: this._detectScheduledWakeups,
       });
       this._hookToken = this._settingsHandle.token;
       this._hookRouter.register(this.id, {
@@ -1125,6 +1213,7 @@ class Session extends EventEmitter {
     this._titleSource.reset();
     this._statusSource.reset();
     this._clearAgents();
+    this._clearWakeups();
     this._cleanupHooks();
     this._ptyAlive = false;
     this.ptyProcess = null;

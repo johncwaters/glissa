@@ -175,6 +175,19 @@ class OscTitleSource extends EventEmitter {
     }
   }
 
+  // Re-open the working-kind dedup latch so the NEXT braille frame re-emits `working`.
+  // Called by the session wrapper when the state machine enters a quiescent state
+  // (IDLE/COMPLETE): if the PTY is in fact still spinning (a premature hook `ready`),
+  // the next real frame re-wakes the card instead of being swallowed by the edge
+  // trigger in _processTitle. Strictly weaker than reset(): preserves _hasSeenSpinner
+  // and _lastChar, and touches nothing unless the latched kind is `working` (no
+  // stabilization timer can be armed in that state - every spinner frame clears it).
+  resyncWorkingLatch() {
+    if (this._destroyed) return;
+    if (this._lastKind !== 'working') return;
+    this._lastKind = null;
+  }
+
   reset() {
     if (this._destroyed) return;
     this._hasSeenSpinner = false;
