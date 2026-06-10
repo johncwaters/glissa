@@ -11,7 +11,7 @@ import { activateFocusView, deactivateFocusView, focusAdjacentInRail, focusNextA
 import { applyHealthSnapshot, mountHealthMonitor } from './health-monitor.js';
 import { initNotifications, showDesktopNotification } from './notifications.js';
 import { handleDebugStateRefresh, handleDebugStateResponse } from './session-card/card-dom.js';
-import { applyState, applyTerminalSettings, createSessionCard, getSessionCount, hasSession, removeSessionCard, renameSessionCard, seedSessionMergeStatus, setSessionAgents, setSessionDiff, setSessionMergeStatus, setSessionPostTurn, setSessionWorktree, updateAggregateStatus } from './session-card/lifecycle.js';
+import { applyState, applyTerminalSettings, createSessionCard, getSessionCount, hasSession, removeSessionCard, renameSessionCard, seedSessionMergeStatus, setSessionAgents, setSessionDiff, setSessionEffectiveBase, setSessionMergeStatus, setSessionPostTurn, setSessionWorktree, updateAggregateStatus } from './session-card/lifecycle.js';
 import { reconnectDataWs } from './session-card/terminal.js';
 import { showErrorToast } from './session-card/toast.js';
 import { forgetReviewSession, mergeSelectedSession, mountReviewSidebar, notifyWorktreeChanged, refreshReviewSidebar, resolveSelectedSession } from './sidebar/review-sidebar.js';
@@ -101,6 +101,7 @@ function handleSnapshot(sessions) {
     }
     // Hydrate the review sidebar's status/count from the snapshot (quiet: no auto-open on reconnect).
     seedSessionMergeStatus(s.id, s.mergeStatus);
+    setSessionEffectiveBase(s.id, s.effectiveBase);
     // Restore the live background sub-agent chip on reconnect (Glissa reloads on every restart).
     setSessionAgents(s.id, s.activeAgents);
   }

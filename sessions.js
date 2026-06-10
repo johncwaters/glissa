@@ -211,6 +211,7 @@ class Session extends EventEmitter {
     // -- Worktree isolation state (see _provisionWorktree / _settleWorktreeOnExit) --
     this._gitWorkspace = gitWorkspace;
     this._integrationBranch = integrationBranch;
+    this._effectiveBase = null;    // cached result of _resolveEffectiveBase(); null until first diff
     this._worktreeRoot = worktreeRoot;
     this._worktreeShare = worktreeShare;
     this.worktreeDir = null;     // active session worktree cwd (null = in-place at this.path)
@@ -342,6 +343,8 @@ class Session extends EventEmitter {
       activeAgents: this._activeAgentCount(),
       mergeStatus: this.mergeStatus,
       worktreeNotice: this.worktreeNotice,
+      effectiveBase: (this._effectiveBase || this._integrationBranch || null)
+        ?.replace(/^[^/]+\//, "") ?? null,
       auditLog: this.auditLog.slice(-100),
     };
   }
@@ -513,9 +516,10 @@ class Session extends EventEmitter {
     // in-place, non-isolated sessions, where baseSha (or the worktree-vs-HEAD diff) is all we have.
     let base = "";
     let aheadCount = "0";
-    if (this._integrationBranch && (await g(["rev-parse", "--verify", "--quiet", this._integrationBranch])).trim()) {
-      base = (await g(["merge-base", this._integrationBranch, "HEAD"])).trim();
-      aheadCount = (await g(["rev-list", "--count", `${this._integrationBranch}..HEAD`])).trim();
+    const baseRef = await this._resolveEffectiveBase(opts);
+    if (baseRef && (await g(["rev-parse", "--verify", "--quiet", baseRef])).trim()) {
+      base = (await g(["merge-base", baseRef, "HEAD"])).trim();
+      aheadCount = (await g(["rev-list", "--count", `${baseRef}..HEAD`])).trim();
     } else if (this.baseSha) {
       base = this.baseSha;
       aheadCount = (await g(["rev-list", "--count", `${base}..HEAD`])).trim();
@@ -538,6 +542,21 @@ class Session extends EventEmitter {
     return { committed, uncommitted, hasCommits };
   }
 
+  // Resolve the best git base ref for diff computation. Tries HEAD@{upstream} first so a
+  // session whose branch has an upstream (e.g. Claude Code ran `git push --set-upstream`)
+  // uses the tracked remote ref rather than the globally configured _integrationBranch. Falls
+  // back to _integrationBranch when no upstream is configured. Caches in _effectiveBase so
+  // toSnapshot() can read a display-ready value synchronously.
+  async _resolveEffectiveBase(opts) {
+    const upstream = (await gitOut(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "HEAD@{upstream}"], opts)).trim();
+    if (upstream && !upstream.includes("@{")) {
+      this._effectiveBase = upstream; // e.g. "origin/main"
+      return upstream;
+    }
+    this._effectiveBase = this._integrationBranch || null;
+    return this._integrationBranch || null;
+  }
+
   // A CHEAP fingerprint of the worktree's reviewable state: uncommitted+untracked (porcelain), the
   // HEAD sha (commits), and how far HEAD is ahead of the integration branch (the merge gate, which a
   // cross-session merge into develop can move WITHOUT touching this worktree). One `git status` + a
@@ -556,7 +575,10 @@ class Session extends EventEmitter {
       // A missing integration branch is EXPECTED (this probe exits non-zero); swallow only that, so it
       // never counts as the worktree being unreadable.
       let baseRef = null;
-      try { if (this._integrationBranch && (await run(["rev-parse", "--verify", "--quiet", this._integrationBranch])).trim()) baseRef = this._integrationBranch; } catch { /* no integration branch */ }
+      try {
+        const resolved = await this._resolveEffectiveBase(opts);
+        if (resolved && (await run(["rev-parse", "--verify", "--quiet", resolved])).trim()) baseRef = resolved;
+      } catch { /* no integration branch / upstream */ }
       if (!baseRef && this.baseSha) baseRef = this.baseSha;
       if (baseRef) ahead = (await run(["rev-list", "--count", `${baseRef}..HEAD`])).trim();
     } catch {

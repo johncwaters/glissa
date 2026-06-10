@@ -311,6 +311,14 @@ export function createSessionCard(sessionId, sessionName, initialState, options 
   return ui;
 }
 
+// Store the effective base branch name (display form, e.g. "main") on the ui object so the
+// review sidebar can read it without a separate lookup. Updated on every snapshot.
+export function setSessionEffectiveBase(sessionId, base) {
+  const ui = sessionUIs.get(sessionId);
+  if (!ui) return;
+  ui.effectiveBase = base;
+}
+
 // Toggle the linked-worktree marker on an existing card without recreating it
 // (driven by the server's session-git delta on the health tick).
 export function setSessionWorktree(sessionId, worktree) {

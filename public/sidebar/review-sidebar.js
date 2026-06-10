@@ -269,9 +269,10 @@ function render() {
     }
   }
 
-  // ── Scrolling body: diff sections only. Committed section first: it is what a merge moves into develop.
+  // ── Scrolling body: diff sections only. Committed section first: it is what a merge moves into the base.
   if (committedFiles.length > 0) {
-    bodyEl.append(renderSection('committed', 'Committed', 'merges into develop', committedFiles));
+    const mergeTarget = ui?.effectiveBase || 'develop';
+    bodyEl.append(renderSection('committed', 'Committed', `merges into ${mergeTarget}`, committedFiles));
   } else if (!fetched && reviewable) {
     bodyEl.append(el('div', 'review-nochanges review-loading', 'Loading diff...'));
   } else {
