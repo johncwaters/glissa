@@ -1,40 +1,30 @@
 <!-- Parent: ../AGENTS.md -->
-<!-- Generated: 2026-03-20 -->
+<!-- Generated: 2026-06-10 | Updated: 2026-06-10 -->
 
-# scripts/ — Automation Scripts
+# scripts
 
 ## Purpose
-
-Contains release and automation scripts for the Glissa project. These are developer tools, not included in the npm package.
+Maintainer scripts for releasing and validating the npm package. Not shipped to users.
 
 ## Key Files
 
 | File | Description |
 |------|-------------|
-| `release.js` | End-to-end release script: verifies npm auth, checks clean tree, checks tag uniqueness, builds, publishes to npm, pushes to GitHub, creates git tag, creates GitHub release from CHANGELOG.md (requires `gh` CLI) |
+| `release.js` | Release pipeline: publishes to npm, pushes to GitHub, tags, creates the release. Run as `node scripts/release.js` |
+| `check-package-files.js` | Traces string-literal `require()` calls from the package entry points (bin, main) and verifies every required file is in `package.json` `files`; dynamic requires are not detected |
 
 ## For AI Agents
 
 ### Working In This Directory
-
-- Scripts are CommonJS (`require`), matching the server-side convention
-- `release.js` reads `../package.json` for version and `../CHANGELOG.md` for release notes
-- The release script exits early on any failure (dirty tree, existing tag, npm auth issues)
-- GitHub release creation is optional — skipped if `gh` CLI is not installed
+- After adding a server module that ships, run `node scripts/check-package-files.js`; a miss means a broken npm install.
+- These are one-shot cold paths: sync `execSync`/fs is acceptable here (unlike server runtime paths).
 
 ### Testing Requirements
-
-Test by dry-running individual steps. Do not run `node scripts/release.js` without intent to publish.
+- Run the script itself; no unit tests.
 
 ## Dependencies
 
 ### Internal
-- `../package.json` — Version number
-- `../CHANGELOG.md` — Release notes extraction
+- `../package.json` - the `files` whitelist and entry points they validate/publish
 
-### External
-- `npm` CLI — Publishing
-- `git` CLI — Tagging and pushing
-- `gh` CLI (optional) — GitHub release creation
-
-<!-- MANUAL: -->
+<!-- MANUAL: Any manually added notes below this line are preserved on regeneration -->

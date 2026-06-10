@@ -1,33 +1,21 @@
 <!-- Parent: ../AGENTS.md -->
-<!-- Generated: 2026-03-15 -->
+<!-- Generated: 2026-06-10 | Updated: 2026-06-10 -->
 
-# assets/ — Source Media Files
+# assets
 
 ## Purpose
-
-Source audio files and screenshots for the project. Audio files are copied to `public/audio/` for serving. Screenshots are used in documentation (README).
+Repo-level static assets for documentation and source media. Runtime-served audio lives in `public/audio/` (these are the source copies).
 
 ## Subdirectories
 
 | Directory | Purpose |
 |-----------|---------|
-| `audio/` | Source alert sound files (`.ogg`) — copied to `public/audio/` for browser playback |
-| `pictures/` | Project screenshots for README and documentation |
-
-## Key Files
-
-| File | Description |
-|------|-------------|
-| `audio/Coins_jingle_(4).wav.ogg` | Coins notification sound |
-| `audio/Tears_of_Guthix_(minigame)_blue_tears.ogg` | Tears of Guthix notification sound |
-| `pictures/glissa-screenshot.png` | Dashboard screenshot used in README |
+| `audio/` | Source notification sound files (OGG); copies served at runtime live in `public/audio/` |
+| `pictures/` | Screenshots for README/docs (`glissa-screenshot.png`) |
 
 ## For AI Agents
 
 ### Working In This Directory
+- Adding a notification sound: place the file in BOTH `assets/audio/` and `public/audio/`, then register it in `public/alert-sound.js` `SOUND_OPTIONS`.
 
-- These are static media assets, not code
-- Audio files here are the sources; the served copies live in `public/audio/`
-- When adding new sounds, also update `public/alert-sound.js` SOUND_OPTIONS array and copy the file to `public/audio/`
-
-<!-- MANUAL: -->
+<!-- MANUAL: Any manually added notes below this line are preserved on regeneration -->

@@ -1,43 +1,30 @@
 <!-- Parent: ../AGENTS.md -->
-<!-- Generated: 2026-03-15 -->
+<!-- Generated: 2026-06-10 | Updated: 2026-06-10 -->
 
-# bin/ — CLI Entry Point
+# bin
 
 ## Purpose
-
-Contains the CLI entry point for Glissa when installed globally via npm (`npm install -g glissa`) or run via `npx glissa`. Parses command-line arguments and bridges them to the server via environment variables.
+The npm-installed CLI entry point for Glissa. Parses CLI flags and boots the production server.
 
 ## Key Files
 
 | File | Description |
 |------|-------------|
-| `glissa.js` | CLI entry point with `#!/usr/bin/env node` shebang. Parses `--help`, `--version`, `--port`, `--config` flags. Bridges `--config` and `--port` to `GLISSA_CONFIG` and `GLISSA_PORT` env vars, then requires `../server` |
+| `glissa.js` | `#!/usr/bin/env node` launcher: `--port`, `--config` (default `~/.glissa/config.json`), `--version`, `--help`; sets `GLISSA_PORT`/`GLISSA_CONFIG` env vars then `require('../server')` |
 
 ## For AI Agents
 
 ### Working In This Directory
-
-- This is a thin arg-parsing layer — business logic lives in `server.js` and `backend.js`
-- Flags are bridged to env vars (`GLISSA_CONFIG`, `GLISSA_PORT`) which `config-store.js` and `backend.js` read
-- The `require('../server')` at the end triggers the full server startup
-- Must maintain the `#!/usr/bin/env node` shebang for npm bin linking
+- Keep this a thin argv parser; real logic belongs in `backend.js` or `config-store.js`.
+- It is listed in `package.json` `bin`, so every local file it requires must be in the `files` whitelist (`scripts/check-package-files.js` enforces this).
 
 ### Testing Requirements
-
-See `docs/testing-cli.md` for comprehensive CLI test scenarios covering all flags, config resolution, and edge cases.
-
-### Common Patterns
-
-```javascript
-// Arg parsing: simple indexOf-based, no external parser
-const portArg = getArgValue('--port');
-if (portArg) process.env.GLISSA_PORT = portArg;
-```
+- `node scripts/check-package-files.js` after changing requires; `npm test` for behavior.
 
 ## Dependencies
 
 ### Internal
-- `../server.js` — Production server entry point
-- `../package.json` — For `--version` output
+- `../server.js` / `../backend.js` - the server it boots
+- `../config-store.js` - config resolution
 
-<!-- MANUAL: -->
+<!-- MANUAL: Any manually added notes below this line are preserved on regeneration -->

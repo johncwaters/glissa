@@ -1,34 +1,36 @@
 <!-- Parent: ../AGENTS.md -->
-<!-- Generated: 2026-03-15 -->
+<!-- Generated: 2026-06-10 | Updated: 2026-06-10 -->
 
-# docs/ — Documentation
+# docs
 
 ## Purpose
-
-Guides for publishing Glissa to npm and testing the CLI. These are developer-facing documents, not included in the npm package.
+Design documents, postmortems, and operator guides. Background reading for why the architecture is the way it is; not loaded by any code.
 
 ## Key Files
 
 | File | Description |
 |------|-------------|
-| `publishing.md` | Step-by-step npm publishing guide — account setup, name availability, first publish, version bumping, node-pty native dependency notes, troubleshooting |
-| `testing-cli.md` | Manual CLI test scenarios — all flags (`--help`, `--version`, `--port`, `--config`), config resolution order, auto-seeding, `npm pack` verification, `npm link` testing |
-| `glissa-plan.md` | Original project planning document — architecture decisions, feature scope, implementation roadmap |
-| `postmortem-terminal-detection.md` | Postmortem on removing content-scraping status detection in favor of structural signals (hooks + OSC title). Required reading before touching `detection/` — explains the signal x state design and what must NOT be reintroduced |
+| `postmortem-terminal-detection.md` | Postmortem of the content-scraping detection era; rationale for the structural-signal rewrite and the signal x state matrix |
+| `glissa-plan.md` | Original project plan |
+| `marketing-team-design.md` | Design doc for the Teams marketing pipeline |
+| `PRODUCT.md` | Older design-context doc; the canonical product definition is the root `PRODUCT.md` |
+| `publishing.md` | npm publishing notes |
+| `testing-cli.md` | How to test the CLI |
+| `progress.txt` | Running progress notes |
 
 ## For AI Agents
 
 ### Working In This Directory
-
-These are reference documents. Update them when CLI behavior changes (new flags, config resolution changes, new dependencies).
+- Docs are historical context: when a doc conflicts with `CLAUDE.md` or the code, the code and `CLAUDE.md` win.
+- Keep the no-dash/no-emoji house style in any new doc.
+- Detection work should cite `postmortem-terminal-detection.md` rather than restating it.
 
 ### Testing Requirements
-
-No tests — these are documentation files.
+- None; prose only.
 
 ## Dependencies
 
 ### Internal
-References `bin/glissa.js`, `config-store.js`, `server.js`, `package.json`.
+- Referenced by `CLAUDE.md` and code comments (notably detection and spawn-gate modules).
 
-<!-- MANUAL: -->
+<!-- MANUAL: Any manually added notes below this line are preserved on regeneration -->

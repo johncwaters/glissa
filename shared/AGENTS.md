@@ -1,67 +1,32 @@
 <!-- Parent: ../AGENTS.md -->
-<!-- Generated: 2026-03-15 | Updated: 2026-03-21 -->
+<!-- Generated: 2026-06-10 | Updated: 2026-06-10 -->
 
-# shared/ — Shared State Constants
+# shared
 
 ## Purpose
-
-Single source of truth for session and notification state definitions used by both server (CommonJS) and browser (ES modules). Dual-format session states avoid transpilation while keeping constants in sync.
+State constants used by BOTH the CommonJS server and the ESM browser bundle. Single source of truth for session and notification lifecycle states.
 
 ## Key Files
 
 | File | Description |
 |------|-------------|
-| `states.js` | Session state constants (CJS) — `require('./shared/states')` on server. Exports `STATES`, `BADGE_LABELS`, `KILLABLE_STATES`, `RESTARTABLE_STATES` |
-| `states.esm.js` | Session state constants (ESM) — imported in browser via Vite alias (`/shared/states.mjs`). Identical constants as named exports |
-| `notification-states.js` | Notification lifecycle state machine (CJS only). Exports `NOTIFICATION_STATES` (IDLE, PENDING, DELIVERED, ESCALATED, ACKNOWLEDGED) and `NOTIFICATION_TRANSITIONS` table |
+| `states.js` | Session states (CJS, server-side): DORMANT, INITIALIZING, STARTING, RUNNING, WAITING, IDLE, COMPLETE, DONE, FAILED; plus BADGE_LABELS, STATE_GLYPHS, and the KILLABLE / RESTARTABLE / MERGEABLE_LIVE state sets |
+| `states.esm.js` | ESM mirror of `states.js` for the browser; Vite aliases `/shared/states.mjs` to it (and `backend.js` serves the same path in production) |
+| `notification-states.js` | Notification lifecycle states (IDLE, PENDING, DELIVERED, ...) for `notification-manager.js`, table-driven like the session machine |
 
 ## For AI Agents
 
 ### Working In This Directory
-
-**`states.js` and `states.esm.js` must stay in sync.** When adding/modifying session states, update both files.
-
-The session state files are intentionally duplicated rather than auto-generated because:
-- Server requires CommonJS (`module.exports`)
-- Browser requires ESM (`export const`)
-- No build step or transpiler in the project
-
-`notification-states.js` is CJS-only (server-side consumer only: `notification-manager.js`).
-
-### How Each File Is Consumed
-
-| File | Consumer | Import Path |
-|------|----------|-------------|
-| `states.js` | `sessions.js`, `backend.js` (server) | `require('./shared/states')` |
-| `states.esm.js` | `session-card.js`, `app.js` (browser) | `import { STATES } from '/shared/states.mjs'` via Vite alias in `vite.config.js` |
-| `states.js` | `backend.js` mountDevRoutes | Dynamically served as ESM at `GET /shared/states.mjs` (production without dist/) |
-| `notification-states.js` | `notification-manager.js`, `test-notification-manager.js` | `require('./shared/notification-states')` |
-
-### Session State Constants
-
-```javascript
-STATES: { INITIALIZING, STARTING, RUNNING, WAITING, IDLE, COMPLETE, DONE, FAILED }
-BADGE_LABELS: { [state]: 'Human-readable label' }
-KILLABLE_STATES: [RUNNING, WAITING, IDLE, COMPLETE]
-RESTARTABLE_STATES: [DONE, FAILED]
-```
-
-### Notification State Constants
-
-```javascript
-NOTIFICATION_STATES: { IDLE, PENDING, DELIVERED, ESCALATED, ACKNOWLEDGED }
-NOTIFICATION_TRANSITIONS: { [state]: { [event]: nextState } }
-```
-
-PENDING is transient (auto-transitions in entry hook — never externally observable). DELIVERED and ESCALATED ping-pong via `escalation_tick` events to ensure entry/exit hooks fire each cycle.
+- `states.js` and `states.esm.js` are maintained as a synchronized pair (same constants and sets, different module syntax); change both together.
+- States are frozen string constants; transitions live in `session-core/state-machine.js` and `notification-manager.js`, never here.
+- `MERGEABLE_LIVE_STATES` is the merge-as-you-go gate shared by server and review sidebar; do not let the two copies drift.
 
 ### Testing Requirements
-
-No dedicated tests for session states. `test-notification-manager.js` in the project root exercises the notification state machine.
+- `tests/state-machine.test.js` and the notification tests exercise these constants; `npm test`.
 
 ## Dependencies
 
 ### Internal
-None — these are leaf modules with no imports.
+- Consumed by `../sessions.js`, `../notification-manager.js`, `../control-handlers.js`, and the entire `public/` frontend.
 
-<!-- MANUAL: -->
+<!-- MANUAL: Any manually added notes below this line are preserved on regeneration -->

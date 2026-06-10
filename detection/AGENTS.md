@@ -1,80 +1,46 @@
 <!-- Parent: ../AGENTS.md -->
-<!-- Generated: 2026-05-30 -->
+<!-- Generated: 2026-06-10 | Updated: 2026-06-10 -->
 
-# detection/ — Structural Status Detection
+# detection
 
 ## Purpose
-
-The status-detection subsystem. Derives a session's live status from **machine-emitted structural signals**, never from parsing the rendered TUI. Two raw sources feed one merge layer that emits a normalized signal stream; `sessions.js._onStatus` maps each normalized signal to a state-machine transition per the signal x state matrix.
-
-Authoritative path = Claude Code hooks (HTTP callbacks). Degraded fallback = OSC-0 terminal title glyphs. There is NO body/line content scraping anywhere in this directory — reintroducing it is explicitly forbidden (see `docs/postmortem-terminal-detection.md`).
+Status detection and change watching. Session status is derived from machine-emitted structural signals: authoritative Claude Code HTTP hooks plus an OSC-0 title fallback, merged with precedence and conflict handling. Also home to the event-driven git watchers that power the worktree review gate. NO screen scraping anywhere.
 
 ## Key Files
 
 | File | Description |
 |------|-------------|
-| `status-source.js` | `StatusSource` (EventEmitter). Merges hook + title signals into one normalized stream. Precedence hook > title; conflict window holds `ready` so a racing `awaiting-input` wins; dedups rapid duplicates (absorbs the `Stop` double-fire). Emits `status` (transition-driving) and `meta` (telemetry-only `unknown`). Exports `StatusSource`, `createStatusSource()` |
-| `hook-source.js` | **Authoritative.** `HookRouter` validates a per-session bearer token then invokes the session's `onSignal`. `mapHookToSignal(event, payload)` maps a Claude Code hook event to a normalized signal (`Stop`/`Notification(idle_prompt)` -> `ready`; `PermissionRequest`/`Notification(permission_prompt|elicitation*)` -> `awaiting-input`; `UserPromptSubmit` -> `resume`; `SessionStart`/`SessionEnd` -> lifecycle). Backed by `POST /hook/:glissaId/:event`. Exports `HookRouter`, `mapHookToSignal` |
-| `osc-title-source.js` | **Degraded fallback.** `OscTitleSource` scans PTY bytes for OSC-0 titles. Braille glyph (U+2800..U+28FF) -> `working`; known idle glyph (U+2733) after a spinner, stabilized -> `ready`; unrecognized non-ASCII glyph -> `unknown` (one-time warning). NEVER emits `awaiting-input`. ASCII-leading titles (shell/OS window titles) dropped silently. Exports `OscTitleSource`, `createOscTitleSource()`, `findOscTitle`, `isBrailleChar`, `isKnownIdleChar`, `KNOWN_IDLE_CODEPOINTS` |
-| `settings-injector.js` | Writes a per-session Claude Code `--settings` file containing HTTP hooks whose URLs carry `glissaId` + bearer token. Files live under a per-session subdir of the OS temp dir (`%TEMP%/glissa-hooks/<glissaId>`); `cleanup()` removes them on destroy; `sweepOrphans()` clears stale dirs at boot. Exports `buildHookSettings`, `writeSessionSettings`, `sweepOrphans`, `generateToken`, `HOOK_EVENTS`, `DEFAULT_BASE_DIR`, `DEFAULT_TIMEOUT_SEC` |
-| `replay.js` | Version-aware replay harness. Drives recorded sessions (session-recorder JSONL: v1 data-only, v2 data+hook) back through the REAL detection pipeline so reliability is measurable against ground truth. Exports `parseRecording`, `replayDetection`, `summarize` |
-
-## Normalized Signal Vocabulary
-
-`StatusSource` emits exactly these (consumed by `sessions.js._onStatus`):
-
-```
-working | ready | awaiting-input | resume | session-start | session-end
-```
-
-`unknown` is NOT a state signal — it is forwarded as a `meta` event for telemetry / degraded-badge use, never as a transition.
+| `status-source.js` | Merges hook + title signals: precedence hook > title, `ready` conflict window so a racing `awaiting-input` wins, dedup |
+| `hook-source.js` | `HookRouter`: validates the per-session bearer token, maps Claude Code hook POSTs (`Stop`, `Notification`, `UserPromptSubmit`, `SessionStart/End`, `SubagentStart/Stop`, post-tool wakeups) to signals |
+| `settings-injector.js` | Writes the per-session `--settings` file injecting HTTP hooks that POST to `POST /hook/:glissaId/:event` (token in URL) |
+| `osc-title-source.js` | OSC-0 title fallback: braille spinner = `working`, idle glyph = `ready`, unknown glyph = `unknown` (never a guess, never `awaiting-input`) |
+| `replay.js` | Version-aware replay harness: drives `session-recorder.js` JSONL recordings (v1/v2) through the detection stack |
+| `worktree-watch.js` | fs.watch on the per-worktree gitdir; nudges `sessions.js` to recompute the diff when git state moves. Watch-only, no parsing |
+| `integration-ref-watch.js` | Reflog-based listener for integration-branch movement (e.g. another session merged into develop) that no local worktree event would surface |
+| `integration-watcher-pool.js` | Ref-counted pool: at most one fs.watch per (commonGitDir, branch), fanned out to every sibling session; factory/registry/recheck injected for testability |
 
 ## For AI Agents
 
 ### Working In This Directory
-
-- **CommonJS only** (`require` / `module.exports`), matching the server convention.
-- **No content scraping.** The OSC-title source scans ONLY OSC-0 title sequences. The hook source consumes structured HTTP callbacks. Do not parse the rendered terminal body, prompt lines, or conversational text. This is the single hardest constraint here.
-- **The title source must stay honest.** It emits only `working`/`ready`/`unknown`. `awaiting-input` is exclusively the hook source's job, because a title cannot tell "needs input" from "finished". Do not add an `awaiting-input` path to `osc-title-source.js`.
-- **New idle glyph?** Add its codepoint to `KNOWN_IDLE_CODEPOINTS` in `osc-title-source.js` (it currently warns once and reports `unknown`). Do not guess-map unknown glyphs to `ready`.
-- **Token check is load-bearing.** `HookRouter.handle()` rejects `unknown-session` (404) and `bad-token` (403). Keep that validation if you touch the route or router — it is the trust boundary for the one HTTP write ingress.
-- **Precedence and the conflict window** in `status-source.js` exist to prevent a spurious COMPLETE -> WAITING flip (and its false toast) when a turn ends on an attention prompt. Changing `DEFAULT_CONFLICT_WINDOW_MS` / `DEFAULT_DEDUP_WINDOW_MS` affects that race; verify against `tests/status-source.test.js` and the replay fixtures.
-- All sources expose `reset()` and `destroy()`. `destroy()` must clear timers and remove listeners — these are created per session and leak if not torn down.
-
-### Wiring
-
-```
-PTY bytes ─────────────► OscTitleSource.feed() ──signal('title')─┐
-                                                                  ├─► StatusSource.ingest()
-POST /hook/:id/:event ─► HookRouter.handle() ──onSignal('hook')──┘        │
-                                                                  status / meta
-                                                                          ▼
-                                                          sessions.js._onStatus -> transition
-```
-
-- `settings-injector.js` runs at spawn: writes the `--settings` file, returns the `--settings <path>` arg and the token. `sessions.js` appends the arg to the `claude` spawn and registers `{ token, onSignal }` with the `HookRouter`.
-- `replay.js` rebuilds the title + status pipeline (plus `mapHookToSignal`) standalone for offline ground-truth testing — it does not touch the live server.
+- The PTY data path does NO content parsing beyond scanning for OSC-0 titles. Do not reintroduce body/line scraping.
+- Hook signals are authoritative; the title source is fallback only and must never emit `awaiting-input`.
+- Keep the bearer-token check in `hook-source.js`; it is the trust boundary of the only HTTP write ingress.
+- Watchers are listeners, not pollers: they say "look again", `sessions.js` recomputes the truth. Keep recompute work async (shared event loop).
+- The signal x state transition matrix lives in `session-core/status-mapper.js` and is documented in `docs/postmortem-terminal-detection.md`.
 
 ### Testing Requirements
+- Unit tests: `tests/status-source.test.js`, `hook-source.test.js`, `osc-title-source.test.js`, `worktree-watch.test.js`, `integration-ref-watch.test.js`, `integration-watcher-pool.test.js`.
+- Detection behavior changes must keep `tests/replay-harness.test.js` green against the `tests/fixtures/*.jsonl` recordings; add a fixture for a new signal scenario.
 
-```bash
-npm test    # node --test "tests/**/*.test.js"
-```
-
-Covered by `tests/osc-title-source.test.js`, `tests/status-source.test.js`, `tests/hook-source.test.js`, the §4a signal x state integration matrix (`tests/sessions-detection.test.js`), and the replay harness over recorded fixtures (`tests/replay-harness.test.js`, fixtures in `tests/fixtures/`). When changing detection behavior, add or update a fixture and assert on resolved signals, not on internal state.
+### Common Patterns
+- Sources emit normalized signals; `sessions.js._onStatus` + `session-core/status-mapper.js` decide transitions.
+- Injected dependencies (watcher factory, session map, recheck fn) so modules unit-test without a real fs or backend.
 
 ## Dependencies
 
 ### Internal
-- Consumed by `sessions.js` (`_onStatus` mapping), `backend.js` / `control-handlers.js` (HookRouter route + registration)
-- `replay.js` consumes `osc-title-source.js`, `status-source.js`, `hook-source.js`
-- Replays recordings produced by `session-recorder.js`
+- `../sessions.js` - consumes StatusSource, owns transitions
+- `../session-recorder.js` - produces the JSONL that `replay.js` consumes
+- `../session-core/status-mapper.js` - the pure signal-to-event decision
 
-### External
-- Node.js built-ins only: `node:events`, `node:fs`, `node:os`, `node:path`, `node:crypto`, `node:timers/promises`. No third-party packages.
-
-## Related Documentation
-- `docs/postmortem-terminal-detection.md` — why content-scraping was removed and the structural-signal design
-- `.omc/plans/rewrite-terminal-detection.md` §4a — the signal x state transition matrix
-
-<!-- MANUAL: -->
+<!-- MANUAL: Any manually added notes below this line are preserved on regeneration -->
