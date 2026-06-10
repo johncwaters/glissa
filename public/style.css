@@ -2854,8 +2854,9 @@ body {
    The worktree review gate (collapsible per-file diff + Merge / Discard) for the SELECTED session.
    Always visible: with no selection it shows an empty state. Built by sidebar/review-sidebar.js. */
 .app-sidebar {
-  flex: 0 0 clamp(320px, 26vw, 460px);
+  flex: 0 0 var(--sidebar-width, clamp(320px, 26vw, 460px));
   min-width: 0;
+  position: relative;
   display: flex;
   flex-direction: column;
   background: var(--bg-header);
@@ -2863,12 +2864,26 @@ body {
   overflow: hidden;
 }
 
+.review-resize-handle {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: col-resize;
+  z-index: 10;
+  transition: background var(--transition-fast);
+}
+.review-resize-handle:hover { background: color-mix(in oklab, var(--accent) 15%, transparent); }
+
 .review-sidebar-head {
   display: flex;
   align-items: center;
   flex: 0 0 auto;
   padding: 10px 14px;
   border-bottom: 1px solid var(--border-dim);
+  gap: 8px;
+  min-width: 0;
 }
 .review-sidebar-title {
   font-family: var(--font-mono);
@@ -2877,6 +2892,17 @@ body {
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--text-head);
+  flex: 0 0 auto;
+}
+.review-sidebar-session {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
 }
 
 /* Pinned control region between the title and the scrolling diff. Holds the status note, the action
@@ -2893,6 +2919,25 @@ body {
   font-size: 11px;
   line-height: 1.5;
   color: var(--text-muted);
+}
+.review-overall-stat {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 10px;
+  font-size: 11px;
+}
+@keyframes review-fadeout {
+  0%, 60% { opacity: 1; }
+  100% { opacity: 0; }
+}
+.review-resolve-sent {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--state-done);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .review-resolve-sent { animation: review-fadeout 3s ease-out forwards; }
 }
 
 .review-sidebar-body {
@@ -2968,7 +3013,8 @@ body {
 }
 .review-section[data-kind="committed"] .review-section-label { color: var(--state-done); }
 .review-section[data-kind="uncommitted"] .review-section-label { color: var(--state-waiting); }
-.review-section-meaning { font-size: 11px; color: var(--text-muted); }
+.review-section-meaning { font-size: 11px; color: var(--text); }
+.review-section-meaning::before { content: '\2192\0020'; color: var(--text-muted); }
 .review-section-stat {
   display: inline-flex;
   align-items: baseline;
@@ -2984,6 +3030,7 @@ body {
    rows and the two section totals. The stack is monospace so tabular-nums is moot; 4ch holds the widest
    realistic value (+155 / -141) and grows for outliers. */
 .review-add, .review-del { min-width: 4ch; text-align: right; }
+.review-total { min-width: 4ch; text-align: right; color: var(--text-muted); font-size: 10px; }
 
 .review-diff {
   font-family: var(--font-mono);
@@ -3065,7 +3112,30 @@ body {
 .review-btn:disabled { opacity: 0.5; cursor: default; }
 .review-btn-primary { color: var(--accent); border-color: var(--accent-dim); }
 .review-btn-primary:hover:not(:disabled) { background: color-mix(in oklab, var(--accent) 14%, transparent); }
+.review-btn-danger {
+  color: color-mix(in oklab, var(--state-failed) 65%, var(--text-dim));
+  border-color: color-mix(in oklab, var(--state-failed) 35%, var(--border));
+}
 .review-btn-danger:hover:not(:disabled) { color: var(--state-failed); border-color: var(--state-failed); }
+.review-shortcut {
+  display: inline-block;
+  margin-left: 6px;
+  font: inherit;
+  font-size: 9px;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 0 4px;
+  vertical-align: middle;
+  user-select: none;
+  pointer-events: none;
+}
+.review-btn-primary .review-shortcut {
+  color: color-mix(in oklab, var(--accent) 60%, var(--text-muted));
+  border-color: color-mix(in oklab, var(--accent-dim) 50%, var(--border));
+}
+.review-btn:disabled .review-shortcut { opacity: 0.6; }
 
 .run-artifact {
   font-family: var(--font-mono);

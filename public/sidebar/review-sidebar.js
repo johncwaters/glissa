@@ -20,9 +20,9 @@ import { parseUnifiedDiff, summarizeFiles } from './diff-core.mjs';
 import { getSelectedId, onSelectionChange, setSelectedId } from './selection.js';
 
 const REVIEWABLE = new Set(['pending-review', 'parked']);
-// Per-file rendered-line cap so a huge diff never stalls the DOM (R6). Beyond this, a file collapses
-// to a count with a click-to-expand.
-const MAX_FILE_LINES = 600;
+const MAX_FILE_LINES = 600; // per-file DOM line cap; beyond this a file collapses to a count with click-to-expand
+const SIDEBAR_MIN = 260;    // resize bounds (px)
+const SIDEBAR_MAX = 700;
 
 const statusById = new Map(); // id -> mergeStatus ('none'|'pending-review'|'merging'|'parked'|'merged')
 const diffById = new Map();   // id -> { committed, uncommitted, hasCommits } (null until fetched)
@@ -34,6 +34,10 @@ const expanded = new Set();
 let panelEl = null;
 let controlsEl = null;
 let bodyEl = null;
+let sessionNameEl = null;
+let resolveJustSent = false;
+let resolveJustSentFor = null;
+let resolveSentTimer = null;
 
 // ── Mount ──
 // The sidebar is always visible (no collapse): with no session selected it shows an empty state, and
@@ -45,14 +49,57 @@ export function mountReviewSidebar({ panel }) {
 
   const head = el('div', 'review-sidebar-head');
   const title = el('span', 'review-sidebar-title', 'Review');
-  head.append(title);
+  sessionNameEl = el('span', 'review-sidebar-session');
+  head.append(title, sessionNameEl);
 
   // Pinned control region between the title and the scrolling diff: status note + actions + a
   // why-disabled reason line. Always present while a session is selected (collapsed via :empty
   // otherwise), so Merge and the other controls never scroll out of reach inside a long diff.
   controlsEl = el('div', 'review-controls');
   bodyEl = el('div', 'review-sidebar-body');
-  panelEl.append(head, controlsEl, bodyEl);
+
+  // Resize handle: drag left edge to widen, right to narrow. Width persisted to localStorage.
+  const handle = el('div', 'review-resize-handle');
+  handle.setAttribute('aria-hidden', 'true');
+  panelEl.append(head, controlsEl, bodyEl, handle);
+
+  let dragStartX = 0, dragStartWidth = 0;
+
+  const onDrag = (e) => {
+    const delta = dragStartX - e.clientX; // drag left = wider (sidebar is right-docked)
+    const w = Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, dragStartWidth + delta));
+    panelEl.style.setProperty('--sidebar-width', `${w}px`);
+  };
+
+  const stopDrag = () => {
+    document.removeEventListener('mousemove', onDrag);
+    document.removeEventListener('mouseup', stopDrag);
+    window.removeEventListener('blur', stopDrag); // cancel on focus loss mid-drag
+    document.documentElement.style.cursor = '';
+    document.documentElement.style.userSelect = '';
+    const w = panelEl.style.getPropertyValue('--sidebar-width');
+    if (w) { try { localStorage.setItem('glissa:sidebar-width', parseInt(w, 10)); } catch (_) {} }
+  };
+
+  handle.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    dragStartX = e.clientX;
+    dragStartWidth = panelEl.getBoundingClientRect().width;
+    document.documentElement.style.cursor = 'col-resize';
+    document.documentElement.style.userSelect = 'none';
+    document.addEventListener('mousemove', onDrag);
+    document.addEventListener('mouseup', stopDrag);
+    window.addEventListener('blur', stopDrag, { once: true });
+  });
+
+  try {
+    const stored = localStorage.getItem('glissa:sidebar-width');
+    if (stored) {
+      const w = Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, parseInt(stored, 10)));
+      if (Number.isFinite(w)) panelEl.style.setProperty('--sidebar-width', `${w}px`);
+    }
+  } catch (_) {}
 
   onSelectionChange((id) => {
     // Per-session: don't carry one session's open/expanded files into the next (start minimized).
@@ -140,7 +187,8 @@ export function mergeSelectedSession() {
   if (!id) return false;
   const ui = sessionUIs.get(id);
   if (!ui) return false;
-  if ((statusById.get(id) || 'none') === 'merging') return false; // a merge is already in flight
+  const curStatus = statusById.get(id) || 'none';
+  if (curStatus === 'merging' || curStatus === 'parked') return false; // in-flight or conflict needs resolving
   const payload = diffById.get(id);
   const hasCommits = !!(payload && payload.hasCommits);
   if (!isMergeableLive(ui.currentState, hasCommits)) return false;
@@ -212,7 +260,7 @@ function render() {
   const id = getSelectedId();
   const ui = id ? sessionUIs.get(id) : null;
   if (!id || !ui) {
-    // No selection: the empty control region collapses (CSS :empty), the body carries the empty state.
+    if (sessionNameEl) sessionNameEl.textContent = '';
     renderEmpty('No session selected', 'Click a session name to review its changes here.');
     return;
   }
@@ -236,12 +284,12 @@ function render() {
   // committed there is nothing to merge, so the button is disabled (with a reason) rather than withheld.
   const live = isLive(state);
   const mergeableLive = isMergeableLive(state, hasCommits);
-  const mergeEnabled = mergeableLive && status !== 'merging';
+  // Parked means a conflict needs resolving first; suppress Merge entirely until it clears.
+  const mergeEnabled = mergeableLive && status !== 'merging' && status !== 'parked';
 
-  // ── Pinned control region: status note + actions + why-disabled reason. Always rendered while a
-  // session is selected so Merge (and the contextual Resolve/Discard) stay put as the diff scrolls.
-  // Merge-status note only. The session name and state badge are intentionally NOT shown here: the
-  // session card already carries both, so repeating them in the sidebar is redundant.
+  if (sessionNameEl) sessionNameEl.textContent = sessionName(ui, id);
+
+  // ── Pinned control region: status note + overall totals + actions + why-disabled reason.
   if (status && status !== 'none') {
     const note = el('div', 'review-status-note');
     note.dataset.merge = status;
@@ -252,11 +300,20 @@ function render() {
     controlsEl.append(note);
   }
 
+  // Combined line totals across all changes so the operator sees diff scope before reaching Merge.
+  const allFiles = [...committedFiles, ...uncommittedFiles];
+  if (allFiles.length > 0) {
+    const tot = summarizeFiles(allFiles);
+    const overallStat = el('div', 'review-overall-stat');
+    overallStat.append(el('span', 'review-add', `+${tot.added}`), el('span', 'review-del', `-${tot.removed}`));
+    controlsEl.append(overallStat);
+  }
+
   const actions = renderActions(id, { status, reviewable, mergeEnabled, live });
   controlsEl.append(actions);
 
-  // When Merge is unavailable, say why right under it, and tie the line to the button for assistive tech.
-  if (!mergeEnabled) {
+  // Disabled reason only when Merge is rendered (not suppressed by parked) and unavailable.
+  if (!mergeEnabled && status !== 'parked') {
     const reason = mergeDisabledReason({
       status, fetched, hasCommits, live, hasUncommitted: uncommittedFiles.length > 0,
     });
@@ -267,6 +324,11 @@ function render() {
       const mergeBtn = actions.querySelector('#review-merge-btn');
       if (mergeBtn) mergeBtn.setAttribute('aria-describedby', 'review-merge-reason');
     }
+  }
+
+  // Transient confirmation after "Resolve in session" is clicked.
+  if (resolveJustSent && resolveJustSentFor === id) {
+    controlsEl.append(el('div', 'review-resolve-sent', 'Resolve prompt sent'));
   }
 
   // ── Scrolling body: diff sections only. Committed section first: it is what a merge moves into the base.
@@ -313,7 +375,11 @@ function renderSection(kind, label, meaning, files) {
 
   const stat = el('div', 'review-section-stat');
   stat.append(el('span', 'review-stat-files', `${sum.files} file${sum.files === 1 ? '' : 's'}`));
-  stat.append(el('span', 'review-add', `+${sum.added}`), el('span', 'review-del', `-${sum.removed}`));
+  stat.append(
+    el('span', 'review-add', `+${sum.added}`),
+    el('span', 'review-del', `-${sum.removed}`),
+    el('span', 'review-total', `${sum.added + sum.removed}`)
+  );
   head.append(stat);
   wrap.append(head);
 
@@ -340,7 +406,11 @@ function renderFile(f, kind) {
   head.append(twisty, el('span', 'review-file-path', f.path));
   const c = el('span', 'review-file-counts');
   if (f.binary) c.append(el('span', 'review-bin', 'bin'));
-  else c.append(el('span', 'review-add', `+${f.added}`), el('span', 'review-del', `-${f.removed}`));
+  else c.append(
+    el('span', 'review-add', `+${f.added}`),
+    el('span', 'review-del', `-${f.removed}`),
+    el('span', 'review-total', `${f.added + f.removed}`)
+  );
   head.append(c);
   head.addEventListener('click', () => {
     if (openFiles.has(key)) openFiles.delete(key);
@@ -388,35 +458,39 @@ function renderFile(f, kind) {
 function renderActions(id, { status, reviewable, mergeEnabled, live }) {
   const actions = el('div', 'review-actions');
 
-  // No manual "Refresh diff" button: the diff is kept live by the server (it pushes `session-changed`
-  // on a turn end, a commit, or an integration-branch move, and the client auto-re-fetches for the
-  // selected session - see notifyWorktreeChanged). Only real actions live here now.
+  // Suppress Merge when parked: Resolve is the only path forward until the conflict clears.
+  // When not parked, Merge always leads so the operator knows exactly where it lives.
+  if (status !== 'parked') {
+    const merge = el('button', 'review-btn review-btn-primary');
+    merge.type = 'button';
+    merge.id = 'review-merge-btn';
+    merge.title = 'Merge into develop and rebase this worktree, then keep working (alt+m)';
+    merge.disabled = !mergeEnabled;
+    merge.innerHTML = 'Merge <kbd class="review-shortcut" aria-hidden="true">M</kbd>';
+    merge.addEventListener('click', () => sendControlMsg({ type: 'merge-continue-session', id }));
+    actions.append(merge);
+  }
 
-  // The one merge action, ALWAYS rendered and ALWAYS leading, so the operator never loses track of where
-  // Merge lives or whether it is available (render() documents what the merge itself does). Enabled only
-  // when mergeEnabled (a quiescent live session with committed changes, no in-flight merge); otherwise
-  // disabled with a reason line beside it (see mergeDisabledReason).
-  const merge = el('button', 'review-btn review-btn-primary', 'Merge');
-  merge.type = 'button';
-  merge.id = 'review-merge-btn';
-  merge.title = 'Merge into develop and rebase this worktree onto develop, then keep working in this session';
-  merge.disabled = !mergeEnabled;
-  merge.addEventListener('click', () => sendControlMsg({ type: 'merge-continue-session', id }));
-  actions.append(merge);
-
-  // Parked merge: the auto rebase-then-FF could not complete. Hand it to the agent IN the worktree by
-  // pasting a context-rich prompt (why it parked + conflicting files + how to rebase/resolve) into the
-  // session, so it can finish the merge; the operator then re-runs Merge. Needs a live PTY to paste into.
+  // Parked: the auto rebase-then-FF could not complete due to a conflict. Paste a context-rich
+  // resolve prompt into the session so the agent can finish the merge; operator re-runs Merge after.
   if (status === 'parked' && live) {
-    const resolve = el('button', 'review-btn review-btn-primary', 'Resolve in session');
+    const resolve = el('button', 'review-btn review-btn-primary');
     resolve.type = 'button';
-    resolve.title = 'Paste a prompt into this session explaining why the merge parked and how to resolve it, so the agent in the worktree can finish the merge';
-    resolve.addEventListener('click', () => sendControlMsg({ type: 'resolve-session-merge', id }));
+    resolve.title = 'Paste a resolve prompt into this session so the agent can finish the merge (alt+r)';
+    resolve.innerHTML = 'Resolve <kbd class="review-shortcut" aria-hidden="true">R</kbd>';
+    resolve.addEventListener('click', () => {
+      sendControlMsg({ type: 'resolve-session-merge', id });
+      resolveJustSent = true;
+      resolveJustSentFor = id;
+      clearTimeout(resolveSentTimer);
+      resolveSentTimer = setTimeout(() => { resolveJustSent = false; resolveJustSentFor = null; render(); }, 3000);
+      render();
+    });
     actions.append(resolve);
   }
 
-  // Discard throws the worktree away unmerged. Gated on NO live PTY in the worktree (its original safety
-  // invariant): never destroy a worktree a running session is sitting in.
+  // Discard throws the worktree away unmerged. Gated on NO live PTY (never destroy a worktree a
+  // running session is sitting in).
   if (reviewable && !live) {
     const discard = el('button', 'review-btn review-btn-danger', 'Discard');
     discard.type = 'button';
