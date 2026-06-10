@@ -63,12 +63,13 @@ function connectDataWs(sessionId, ui, term) {
   });
 
   ws.addEventListener('close', () => {
-    renderScheduler.unregister(sessionId);
-    // Only auto-reconnect if this ws is still the current one (not replaced by rename)
+    // Only act if this ws is still the active one: guards concurrent reconnect races
+    // and suppresses stale timers when the card is rebuilt under the same id (e.g. park).
     if (ui.dataWs === ws) {
+      renderScheduler.unregister(sessionId);
       ui.dataWs = null;
       setTimeout(() => {
-        if (sessionUIs.has(sessionId)) {
+        if (sessionUIs.get(sessionId) === ui) {
           connectDataWs(sessionId, ui, term);
         }
       }, RECONNECT_DELAY_MS);
