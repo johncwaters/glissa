@@ -325,7 +325,21 @@ function onPillActivate(id) {
   const ui = sessionUIs.get(id);
   if (!ui) return;
   if (ui.currentState === STATES.DORMANT) sendControlMsg({ type: 'start-session', id });
+  dismissIfComplete(id);
   focusSession(id);
+}
+
+// Acknowledge a finished turn server-side on an operator-driven switch: centering a COMPLETE
+// session (pill click/Enter, Alt+1..9, Alt+Up/Down, Alt+W; also the guided-setup auto-center via
+// onPillActivate, harmless since that session is never COMPLETE at spawn) sends the same `dismiss`
+// the terminal mousedown sends (session-card/lifecycle.js), so the session transitions COMPLETE ->
+// IDLE without requiring a click on the terminal itself. WAITING is deliberately excluded: switching
+// to a blocked prompt is looking at it, not answering it (dismiss would fake WAITING -> RUNNING).
+// Non-operator focus paths (restoreFocusedSession on reload, the vanished-focus retarget in
+// refreshFocusRoster) do NOT call this, so a COMPLETE signal survives a page reload.
+function dismissIfComplete(id) {
+  if (sessionUIs.get(id)?.currentState !== STATES.COMPLETE) return;
+  sendControlMsg({ type: 'dismiss', id });
 }
 
 function paintPill(pill, id, ui) {
@@ -509,6 +523,7 @@ export function focusNextAttention() {
   // it joined the queue in place, or it is the only thing needing you). focusSession no-ops on that,
   // which made the press feel dead; flash the pill + center so the jump always reads as a response.
   const alreadyCentered = nextId === focusedId;
+  dismissIfComplete(nextId);
   focusSession(nextId);
   pillById.get(nextId)?.scrollIntoView({ block: 'nearest' });
   if (alreadyCentered) flashAttention(nextId);
