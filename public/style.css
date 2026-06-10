@@ -231,6 +231,85 @@ body {
   color: var(--text-dim);
 }
 
+/* Headroom proxy chip (header). State-driven via [data-state] on the wrapper; visibility is
+   the [hidden] attribute (managed by headroom-chip.js). The dot is a ::before on the button. */
+.headroom-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.headroom-chip-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  padding: 4px 10px;
+  color: var(--text-dim);
+  background: transparent;
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.headroom-chip-btn:disabled {
+  cursor: default;
+}
+
+.headroom-chip-btn::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-dim);
+  transition: background var(--transition-med);
+}
+
+.headroom-chip[data-state='starting'] .headroom-chip-btn::before {
+  background: var(--state-waiting, #d9a334);
+  animation: blink 1s ease-in-out infinite;
+}
+
+.headroom-chip[data-state='running'] .headroom-chip-btn,
+.headroom-chip[data-state='running-external'] .headroom-chip-btn {
+  color: var(--state-running);
+}
+
+.headroom-chip[data-state='running'] .headroom-chip-btn::before,
+.headroom-chip[data-state='running-external'] .headroom-chip-btn::before {
+  background: var(--state-running);
+  box-shadow: 0 0 6px var(--state-running-glow);
+}
+
+.headroom-chip[data-state='failed'] .headroom-chip-btn,
+.headroom-chip[data-state='confirm-stop'] .headroom-chip-btn {
+  color: var(--state-failed);
+}
+
+.headroom-chip[data-state='failed'] .headroom-chip-btn::before,
+.headroom-chip[data-state='confirm-stop'] .headroom-chip-btn::before {
+  background: var(--state-failed);
+}
+
+.headroom-chip[data-state='not-installed'] .headroom-chip-btn {
+  opacity: 0.45;
+}
+
+.headroom-chip-route {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 3px 8px;
+  color: var(--accent);
+  background: transparent;
+  border: 1px dashed var(--accent);
+  border-radius: 999px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
 .connection-dot {
   width: 7px;
   height: 7px;

@@ -35,7 +35,9 @@ const { createRecorder } = require('./session-recorder');
 const { createWsSender } = require('./ws-sender');
 const { HookRouter } = require('./detection/hook-source');
 const { sweepOrphans } = require('./detection/settings-injector');
-const { spawn } = require('node:child_process');
+const { spawn, execFile } = require('node:child_process');
+const http = require('node:http');
+const { createHeadroomService } = require('./headroom-service');
 const { loadTeam, listTeams } = require('./teamlib/team-registry');
 const { createOrchestrator } = require('./teamlib/team-orchestrator');
 const { createScheduler } = require('./scheduler');
@@ -320,6 +322,39 @@ function createBackend(httpServer, options = {}) {
   // where no dashboard tab is open.
   if (config.osToast) {
     notificationManager.registerChannel('toast', createToastChannel());
+  }
+
+  // --- Headroom proxy supervisor (easy start) ---
+  // Supervises an EXTERNALLY INSTALLED Headroom proxy (headroom-service.js). Headroom is never
+  // a dependency: not installed parks the service in 'not-installed' and the chip degrades to a
+  // hint. Lifecycle rides 'status' events broadcast as headroom-status; start/stop arrive over
+  // the control WS (same localhost trust level as add-session). The probe asks /livez with a
+  // short timeout so a dead port resolves fast and never blocks the loop.
+  const headroomService = createHeadroomService({
+    getConfig: () => config,
+    spawn,
+    execFile,
+    probe: (port) => new Promise((resolve) => {
+      const req = http.get({ host: '127.0.0.1', port, path: '/livez', timeout: 2000 }, (res) => {
+        res.resume();
+        resolve(res.statusCode === 200);
+      });
+      req.on('error', () => resolve(false));
+      req.on('timeout', () => { req.destroy(); resolve(false); });
+    }),
+    log: console.log,
+  });
+  headroomService.on('status', (st) => {
+    broadcastControl({ type: 'headroom-status', ...st, timestamp: Date.now() });
+  });
+  // Easy start: fire-and-forget so a slow detect/cold start never blocks server boot. A detect
+  // miss parks in not-installed (inert); errors land in the status payload, never throw.
+  // The explicit detect() is deliberate even though start() self-detects: its boolean gates
+  // start() so a miss never even attempts a spawn (do not "clean up" the double-detect).
+  if (config.headroomEasyStart) {
+    headroomService.detect()
+      .then((ok) => { if (ok) return headroomService.start(); })
+      .catch(() => {});
   }
 
   // --- Client focus tracking (suppress notifications when dashboard is visible) ---
@@ -908,6 +943,9 @@ function createBackend(httpServer, options = {}) {
   }
 
   function applySettingsReload(newConfig) {
+    // Captured BEFORE applySettings so an off-to-on headroomEasyStart flip is detectable. This
+    // funnel covers BOTH the UI update-settings path and the config.json file-watch reload.
+    const prevEasyStart = config.headroomEasyStart;
     configStore.applySettings(newConfig);
     for (const [, sess] of sessions) {
       sess.updateSettings(config);
@@ -916,6 +954,14 @@ function createBackend(httpServer, options = {}) {
       escalationIntervalMs: ESCALATION_INTERVAL_MS,
       debounceMs: config.notifyDebounceMs || 3000,
     });
+    // Off-to-on starts the proxy (fire-and-forget, never blocks the reload). Flipping OFF does
+    // NOT stop a running proxy (explicit stop only); a port change while running is
+    // restart-required, mirroring the main `port` setting.
+    if (!prevEasyStart && config.headroomEasyStart) {
+      headroomService.detect()
+        .then((ok) => { if (ok) return headroomService.start(); })
+        .catch(() => {});
+    }
   }
 
   function requestShutdown() {
@@ -979,6 +1025,7 @@ function createBackend(httpServer, options = {}) {
     getProjectPathById,
     openInEditor,
     startPackSetup,
+    headroomService,
     // Ephemeral sessions (guided pack setup) are not config-backed, so the remove-session
     // handler can't go through the config-reload diff path; give it a direct teardown.
     removeEphemeralSession: (id) => _teardownSession(id, '[control] Removed session via UI'),
@@ -1137,6 +1184,9 @@ function createBackend(httpServer, options = {}) {
     clearInterval(healthInterval);
     // INVARIANT: destroy NotificationManager BEFORE sessions - clears all timers globally
     notificationManager.destroy();
+    // Owned Headroom child only; an external proxy is never ours to reap. Graceful path only:
+    // an ungraceful crash orphans the proxy and the next boot re-adopts it as running-external.
+    headroomService.dispose();
     for (const [, s] of teamSchedulers) s.disarm();
     integrationPool.stopAll();
     for (const [, sess] of sessions) {

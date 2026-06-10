@@ -70,6 +70,16 @@
     <input type="text" class="dialog-input" id="settings-proxy-base-url" placeholder="http://127.0.0.1:8787" autocomplete="off" spellcheck="false">
     <span class="dialog-hint">Sets ANTHROPIC_BASE_URL for spawned sessions so Claude Code routes API traffic through a local LLM proxy (e.g. Headroom, LiteLLM). You run the proxy yourself. Blank disables. Applies on the next session start or restart.</span>
   </label>
+  <label class="dialog-label dialog-checkbox-label">
+    <input type="checkbox" class="dialog-checkbox" id="settings-headroom-easy-start">
+    Easy start Headroom
+    <span class="dialog-hint">Requires headroom-ai installed separately: pip install 'headroom-ai[proxy]'. When enabled, Glissa starts the Headroom proxy on boot and manages it from the header chip; it never installs it. If Headroom is not installed this does nothing.</span>
+  </label>
+  <label class="dialog-label">
+    Headroom port
+    <input type="number" class="dialog-input" id="settings-headroom-port" placeholder="8787" min="1024" max="65535" autocomplete="off">
+    <span class="dialog-hint">Port for the managed Headroom proxy (1024-65535). A change while the proxy is running takes effect on its next start.</span>
+  </label>
 </div>
 
 <div class="settings-panel settings-shortcuts" id="settings-panel-shortcuts" role="tabpanel" aria-labelledby="settings-tab-shortcuts" data-panel="shortcuts" hidden>

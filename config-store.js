@@ -27,6 +27,13 @@ const DEFAULT_CONFIG = {
   // never spawns or manages the proxy; it only points sessions at it. Applies on the next
   // session start/restart. Empty (default) -> no injection.
   proxyBaseUrl: '',
+  // Easy-start supervisor for an EXTERNALLY INSTALLED Headroom proxy (headroom-service.js).
+  // true -> on boot (and on an off-to-on settings flip) Glissa detects `headroom` and spawns
+  // `headroom proxy --port <headroomPort>`, surfacing lifecycle on the header chip. Headroom is
+  // never a dependency: not installed degrades to an inert hint. false (default) -> chip-driven
+  // manual start only.
+  headroomEasyStart: false,
+  headroomPort: 8787,
   // Integration branch every worktree-backed session forks from and merges back into. Glissa never
   // creates it; if it is absent a session stays DORMANT with a notice (it never runs in the real tree).
   integrationBranch: 'develop',
@@ -65,6 +72,13 @@ const BOOLEAN_KEYS = [
   'debugMode',
   'detectBackgroundAgents',
   'antiSlopPrompt',
+  'headroomEasyStart',
+];
+
+// Integer settings with their own range semantics (NOT timeouts: the TIMEOUT_KEYS ">0" check
+// is wrong for a TCP port, which must sit in [1024, 65535]).
+const NUMBER_KEYS = [
+  'headroomPort',
 ];
 
 // Free-text settings persisted to config.json
@@ -175,6 +189,8 @@ function createConfigStore() {
       antiSlopPrompt: config.antiSlopPrompt ?? DEFAULT_CONFIG.antiSlopPrompt,
       editorCommand: config.editorCommand ?? DEFAULT_CONFIG.editorCommand,
       proxyBaseUrl: config.proxyBaseUrl ?? DEFAULT_CONFIG.proxyBaseUrl,
+      headroomEasyStart: config.headroomEasyStart ?? DEFAULT_CONFIG.headroomEasyStart,
+      headroomPort: config.headroomPort ?? DEFAULT_CONFIG.headroomPort,
       integrationBranch: config.integrationBranch ?? DEFAULT_CONFIG.integrationBranch,
       worktreeRoot: config.worktreeRoot ?? DEFAULT_CONFIG.worktreeRoot,
       worktreeShare: config.worktreeShare ?? DEFAULT_CONFIG.worktreeShare,
@@ -192,6 +208,9 @@ function createConfigStore() {
     }
     for (const key of STRING_KEYS) {
       if (newConfig[key] != null) config[key] = String(newConfig[key]);
+    }
+    for (const key of NUMBER_KEYS) {
+      if (newConfig[key] != null) config[key] = newConfig[key];
     }
     config.repoRoots = newConfig.repoRoots || [];
     // Object passthrough: the scalar KEY-lists above don't cover nested objects.
@@ -254,4 +273,4 @@ function createConfigStore() {
   };
 }
 
-module.exports = { createConfigStore, generateProjectId, ensureProjectIds, TIMEOUT_KEYS, BOOLEAN_KEYS, STRING_KEYS, DEFAULT_CONFIG };
+module.exports = { createConfigStore, generateProjectId, ensureProjectIds, TIMEOUT_KEYS, BOOLEAN_KEYS, STRING_KEYS, NUMBER_KEYS, DEFAULT_CONFIG };

@@ -255,6 +255,8 @@ export function createSettingsDialog(initialTab) {
   const notificationsHint = dialog.querySelector('#settings-notifications-hint');
   const editorCommandInput = dialog.querySelector('#settings-editor-command');
   const proxyBaseUrlInput = dialog.querySelector('#settings-proxy-base-url');
+  const headroomEasyStartCheckbox = dialog.querySelector('#settings-headroom-easy-start');
+  const headroomPortInput = dialog.querySelector('#settings-headroom-port');
   const themeSelect = dialog.querySelector('#settings-theme');
   const errorEl = dialog.querySelector('#settings-error');
   const btnCancel = dialog.querySelector('#settings-cancel');
@@ -389,8 +391,15 @@ export function createSettingsDialog(initialTab) {
       debugMode: debugModeCheckbox.checked,
       editorCommand: editorCommandInput.value.trim(),
       proxyBaseUrl: proxyBaseUrlInput.value.trim(),
+      headroomEasyStart: headroomEasyStartCheckbox.checked,
       repoRoots: repoRoots,
     };
+    // Only send the port when it parses as an integer; a blank field leaves it unchanged.
+    // Range enforcement [1024, 65535] lives server-side (settings-error shows in errorEl).
+    const portVal = Number(headroomPortInput.value);
+    if (headroomPortInput.value.trim() !== '' && Number.isInteger(portVal)) {
+      settings.headroomPort = portVal;
+    }
 
     sendControlRequest('update-settings', { settings })
       .then((msg) => {
@@ -414,6 +423,8 @@ export function createSettingsDialog(initialTab) {
       debugModeCheckbox.checked = !!s.debugMode;
       editorCommandInput.value = s.editorCommand ?? '';
       proxyBaseUrlInput.value = s.proxyBaseUrl ?? '';
+      headroomEasyStartCheckbox.checked = !!s.headroomEasyStart;
+      headroomPortInput.value = s.headroomPort ?? 8787;
       repoRoots = Array.isArray(s.repoRoots) ? [...s.repoRoots] : [];
       renderRootList();
     })
