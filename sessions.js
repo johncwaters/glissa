@@ -644,7 +644,7 @@ class Session extends EventEmitter {
     // --no-optional-locks: this runs on background event nudges (watchers / turn-end), so it must NEVER
     // take git's index lock and contend with the session's own `git add` / `git commit` in the worktree.
     const run = (args) => gitStrict(["--no-optional-locks", ...args], opts);
-    let status, head, ahead = "0";
+    let status, head, ahead = "0", behind = "0", rebaseInProgress = false;
     try {
       status = await run(["status", "--porcelain"]);
       head = (await run(["rev-parse", "HEAD"])).trim();
@@ -657,20 +657,39 @@ class Session extends EventEmitter {
       } catch { /* no integration branch / upstream */ }
       if (!baseRef && this.baseSha) baseRef = this.baseSha;
       if (baseRef) ahead = (await run(["rev-list", "--count", `${baseRef}..HEAD`])).trim();
+      // `behind` is measured against the MERGE TARGET (the local branch the merge engine fast-forwards),
+      // NOT the effective/display base above: HEAD@{upstream} can sit at a stale commit while the local
+      // integration branch moved, and the parked->pending-review demotion must mirror what an actual
+      // merge would do. The two counts deliberately use different bases.
+      try {
+        const mergeTarget = this._integrationBranch || (this._workspace && this._workspace.base) || this.baseSha;
+        if (mergeTarget && (await run(["rev-parse", "--verify", "--quiet", mergeTarget])).trim()) {
+          behind = (await run(["rev-list", "--count", `HEAD..${mergeTarget}`])).trim();
+        }
+      } catch { /* no merge target; behind stays "0" */ }
+      // In-progress rebase probe: a rebase can pause on a clean tree, which must never look mergeable.
+      // The rev-parse calls stay async; the trailing fs.existsSync is a deliberate sync stat on an
+      // already-resolved path (no git subprocess, no repo walk), cheap enough for this recurring path.
+      const rebaseMerge = (await run(["rev-parse", "--git-path", "rebase-merge"])).trim();
+      const rebaseApply = (await run(["rev-parse", "--git-path", "rebase-apply"])).trim();
+      const resolveGitPath = (p) => (path.isAbsolute(p) ? p : path.resolve(this.worktreeDir, p));
+      rebaseInProgress = fs.existsSync(resolveGitPath(rebaseMerge)) || fs.existsSync(resolveGitPath(rebaseApply));
     } catch {
       // Worktree momentarily unreadable (mid-rebase, lock contention, pruned dir). Return UNKNOWN, never
       // a false-empty signature: that would wrongly self-heal a real pending-review gate to 'none'.
       return null;
     }
+    // behind/rebaseInProgress are demotion-condition inputs only; the change-detection hash is unchanged.
     const sig = crypto.createHash("sha1").update(`${status} ${head} ${ahead}`).digest("hex");
-    return { sig, dirty: status.trim() !== "", ahead };
+    return { sig, dirty: status.trim() !== "", ahead, behind, rebaseInProgress };
   }
 
   // The funnel every change TRIGGER converges on (turn-end hook, gitdir fs.watch, integration-ref watcher):
-  // recompute the cheap signature and, only on a real delta, (1) live self-heal a stranded review gate
-  // over a now-empty worktree (the same demotion getDiff does, but without needing a manual fetch) and
-  // (2) emit `worktree-changed` so the dashboard auto-refreshes the SELECTED session's diff. Suppressed
-  // mid-merge (the index is being rewritten) so a transient never broadcasts.
+  // recompute the cheap signature, run the gate demotions (empty worktree -> 'none'; resolved parked
+  // rebase -> 'pending-review' so Merge comes back), and emit `worktree-changed` so the dashboard
+  // auto-refreshes the SELECTED session's diff. The emit dedups on the signature EXCEPT when a demotion
+  // fired (a demotion must always broadcast). Suppressed mid-merge (the index is being rewritten) so a
+  // transient never broadcasts.
   async checkWorktreeChange() {
     if (this._destroyed || !this.worktreeDir) return;
     if (this.mergeStatus === "merging") return;
@@ -678,12 +697,27 @@ class Session extends EventEmitter {
     // Re-check liveness after the await: the session may have been destroyed or entered a merge while
     // the git probe ran, in which case a stale broadcast/demotion must not fire.
     if (this._destroyed || this.mergeStatus === "merging") return;
-    if (!sig || sig.sig === this._lastWorktreeSig) return;
-    this._lastWorktreeSig = sig.sig;
+    if (!sig) return;
+    // Gate demotions run BEFORE the signature dedup: a park can leave the worktree byte-identical to the
+    // established baseline (a lost fast-forward does not abort the no-op rebase, and the merge flow never
+    // resets _lastWorktreeSig), so a dedup-gated demotion would never fire and 'parked' would stick forever.
+    let demoted = false;
     if ((this.mergeStatus === "pending-review" || this.mergeStatus === "parked")
         && !sig.dirty && (sig.ahead === "" || sig.ahead === "0")) {
       this._setMergeStatus("none");
+      demoted = true;
     }
+    // A parked merge whose worktree is clean, sits on top of the merge target (behind 0), and is not
+    // mid-rebase is mergeable again: the rebase-then-FF will now succeed, so hand Merge back by demoting
+    // to pending-review (NOT 'none': the committed work is still unmerged and reviewable).
+    if (this.mergeStatus === "parked"
+        && !sig.dirty && sig.ahead !== "" && sig.ahead !== "0"
+        && (sig.behind === "" || sig.behind === "0") && !sig.rebaseInProgress) {
+      this._setMergeStatus("pending-review");
+      demoted = true;
+    }
+    if (sig.sig === this._lastWorktreeSig && !demoted) return;
+    this._lastWorktreeSig = sig.sig;
     this.emit("worktree-changed", { id: this.id, sig: sig.sig });
   }
 

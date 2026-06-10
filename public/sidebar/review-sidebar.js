@@ -16,7 +16,7 @@ import { sendControlMsg } from '../control-ws.js';
 import { el } from '../dom-helpers.js';
 import { showConfirmDialog } from '../session-card/card-dom.js';
 import { sessionUIs } from '../session-card/card-registry.js';
-import { parseUnifiedDiff, summarizeFiles } from './diff-core.mjs';
+import { parseUnifiedDiff, shouldDropDiffCache, summarizeFiles } from './diff-core.mjs';
 import { getSelectedId, onSelectionChange, setSelectedId } from './selection.js';
 
 const REVIEWABLE = new Set(['pending-review', 'parked']);
@@ -114,11 +114,15 @@ export function mountReviewSidebar({ panel }) {
 
 // ── External updates (from app.js message handlers) ──
 
-// Record a status and refresh the count/render. After a merge or discard ('merged'/'none') the worktree
-// is gone, so any cached diff is stale and is dropped; 'merging'/'parked' keep the diff visible.
+// Record a status and refresh the count/render. The cached diff is dropped when the transition makes it
+// stale (merge/discard, or a parked merge handed back as mergeable; see shouldDropDiffCache);
+// 'merging'/'parked' keep the diff visible. The staleness check lives HERE (not in setReviewMergeStatus)
+// because applyStatus is the shared chokepoint: seedReviewMergeStatus (reconnect / page-load hydration)
+// must drop a stale cache too.
 function applyStatus(id, next) {
+  const prev = statusById.get(id);
   statusById.set(id, next);
-  if (next === 'merged' || next === 'none') diffById.delete(id);
+  if (shouldDropDiffCache(prev, next)) diffById.delete(id);
   if (id === getSelectedId()) render();
 }
 

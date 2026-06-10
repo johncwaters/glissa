@@ -68,6 +68,17 @@ export function parseUnifiedDiff(diff) {
   return files;
 }
 
+// Pure cache-staleness decision for the sidebar's per-session diff cache. True when a merge-status
+// transition makes the cached diff payload stale and it must be refetched: after a merge or discard
+// ('merged'/'none' the worktree is gone), and when a parked merge is handed back as mergeable
+// ('parked' -> 'pending-review': the resolve rebase moved HEAD, so the cached hasCommits is stale and
+// would leave the re-enabled Merge button disabled). False otherwise, including 'parked' -> 'merging'
+// (diff stays visible mid-merge) and a first surface into 'pending-review' (nothing cached to drop).
+export function shouldDropDiffCache(prevStatus, nextStatus) {
+  if (nextStatus === 'merged' || nextStatus === 'none') return true;
+  return prevStatus === 'parked' && nextStatus === 'pending-review';
+}
+
 // Roll a parsed file list up into a one-line summary for the sidebar header.
 export function summarizeFiles(files) {
   let added = 0, removed = 0;

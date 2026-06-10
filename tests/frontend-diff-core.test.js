@@ -169,3 +169,21 @@ test('summarizeFiles: rolls up file count and add/remove totals', async () => {
   assert.deepEqual(s, { files: 1, added: 2, removed: 1 });
   assert.deepEqual(summarizeFiles([]), { files: 0, added: 0, removed: 0 });
 });
+
+test('shouldDropDiffCache: drops on merged/none and on parked -> pending-review, keeps otherwise', async () => {
+  const { shouldDropDiffCache } = await importCore();
+  // Worktree gone: any cached diff is stale regardless of where it came from.
+  assert.equal(shouldDropDiffCache('pending-review', 'merged'), true);
+  assert.equal(shouldDropDiffCache('parked', 'merged'), true);
+  assert.equal(shouldDropDiffCache('parked', 'none'), true);
+  assert.equal(shouldDropDiffCache(undefined, 'none'), true);
+  // A parked merge handed back as mergeable: the resolve rebase moved HEAD, the cache is stale.
+  assert.equal(shouldDropDiffCache('parked', 'pending-review'), true);
+  // Everything else keeps the cache.
+  assert.equal(shouldDropDiffCache('parked', 'merging'), false);
+  assert.equal(shouldDropDiffCache('none', 'pending-review'), false);
+  assert.equal(shouldDropDiffCache(undefined, 'pending-review'), false);
+  assert.equal(shouldDropDiffCache('pending-review', 'pending-review'), false);
+  assert.equal(shouldDropDiffCache('parked', 'parked'), false);
+  assert.equal(shouldDropDiffCache('merging', 'parked'), false);
+});

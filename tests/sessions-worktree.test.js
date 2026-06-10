@@ -8,6 +8,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -575,6 +576,227 @@ test('checkWorktreeChange detects an out-of-band merge into the integration bran
     git(['checkout', 'feat'], repo);
     await s.checkWorktreeChange();
     assert.equal(changes.length, baseline + 1, 'an integration-branch move (ahead 1 -> 0) moves the signature and re-emits');
+  } finally { s.destroy(); fs.rmSync(repo, { recursive: true, force: true }); }
+});
+
+// --- parked-merge recovery: behind/rebaseInProgress signature fields + parked -> pending-review demotion ---
+
+// A LINKED worktree (git worktree add) on a new branch at feat's commit: 1 ahead of develop, behind 0,
+// clean. A linked worktree's .git is a FILE, so the per-worktree gitdir (where rebase-merge lives) is NOT
+// <wt>/.git/rebase-merge; the probe must go through `git rev-parse --git-path`. Returns { repo, wt }.
+function initLinkedWorktree() {
+  const repo = initRepoDevelopFeature();
+  const wt = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-lwt-')), 'wt');
+  git(['worktree', 'add', wt, '-b', 'feat2', 'feat'], repo);
+  return { repo, wt };
+}
+
+// A repo where feat tracks a STALE remote upstream (refs/remotes/origin/develop pinned at develop's
+// pre-advance sha), so _resolveEffectiveBase resolves the upstream while `behind` must be measured
+// against the LOCAL develop (the ref a merge actually fast-forwards). diverge commits on develop
+// (feat diverges: behind > 0); landFeat fast-forwards develop to feat (develop already contains the
+// work: behind 0 while ahead-vs-upstream stays > 0, the tolerated two-bases edge).
+// Commit on develop while feat stays put, so the two diverge (feat is ahead AND behind develop).
+function advanceDevelop(repo) {
+  git(['checkout', 'develop'], repo);
+  fs.writeFileSync(path.join(repo, 'develop.txt'), 'develop work\n', 'utf8');
+  git(['add', '-A'], repo);
+  git(['commit', '-m', 'develop advanced'], repo);
+  git(['checkout', 'feat'], repo);
+}
+
+function initStaleUpstream({ diverge = false, landFeat = false } = {}) {
+  const repo = initRepoDevelopFeature(); // HEAD = feat, 1 ahead of develop
+  // A remote named origin must exist (its fetch refspec is what makes refs/remotes/origin/* a tracking
+  // branch --set-upstream-to accepts); the URL is never fetched, the repo itself is a fine dummy.
+  git(['remote', 'add', 'origin', repo], repo);
+  const staleSha = git(['rev-parse', 'develop'], repo).trim();
+  git(['update-ref', 'refs/remotes/origin/develop', staleSha], repo);
+  git(['branch', '--set-upstream-to=origin/develop', 'feat'], repo);
+  if (diverge) advanceDevelop(repo);
+  if (landFeat) {
+    git(['checkout', 'develop'], repo);
+    git(['merge', '--ff-only', 'feat'], repo);
+    git(['checkout', 'feat'], repo);
+  }
+  return repo;
+}
+
+test('_computeWorktreeSignature reports behind and rebaseInProgress', { skip: !GIT }, async () => {
+  const repo = initRepoDevelopFeature(); // clean, feat 1 ahead of develop, on top of it
+  const s = makeSession({ integrationBranch: 'develop' });
+  try {
+    s.worktreeDir = repo;
+    const sig = await s._computeWorktreeSignature();
+    assert.equal(sig.ahead, '1');
+    assert.equal(sig.behind, '0');
+    assert.equal(sig.rebaseInProgress, false);
+  } finally { s.destroy(); fs.rmSync(repo, { recursive: true, force: true }); }
+});
+
+test('checkWorktreeChange demotes parked to pending-review after a resolved rebase (clean, ahead, behind 0)', { skip: !GIT }, async () => {
+  const repo = initRepoDevelopFeature(); // the post-resolve shape: clean, on top of develop, work unmerged
+  const s = makeSession({ integrationBranch: 'develop' });
+  const statuses = [];
+  const changes = [];
+  s.on('merge-status', (e) => statuses.push(e.mergeStatus));
+  s.on('worktree-changed', (e) => changes.push(e));
+  try {
+    s.worktreeDir = repo;
+    s.mergeStatus = 'parked';
+    await s.checkWorktreeChange();
+    assert.equal(s.mergeStatus, 'pending-review', 'Merge handed back once the rebase landed');
+    assert.deepEqual(statuses, ['pending-review'], 'demotion broadcast exactly once');
+    assert.equal(changes.length, 1, 'worktree-changed emitted so the diff refreshes');
+  } finally { s.destroy(); fs.rmSync(repo, { recursive: true, force: true }); }
+});
+
+test('checkWorktreeChange keeps parked while the worktree is still dirty', { skip: !GIT }, async () => {
+  const repo = initRepoDevelopFeature();
+  const s = makeSession({ integrationBranch: 'develop' });
+  const statuses = [];
+  s.on('merge-status', (e) => statuses.push(e.mergeStatus));
+  try {
+    s.worktreeDir = repo;
+    fs.writeFileSync(path.join(repo, 'conflicted.txt'), 'unresolved\n', 'utf8');
+    s.mergeStatus = 'parked';
+    await s.checkWorktreeChange();
+    assert.equal(s.mergeStatus, 'parked', 'a dirty tree is not mergeable');
+    assert.deepEqual(statuses, [], 'no demotion broadcast');
+  } finally { s.destroy(); fs.rmSync(repo, { recursive: true, force: true }); }
+});
+
+test('checkWorktreeChange keeps parked while behind > 0 (diverged, FF impossible)', { skip: !GIT }, async () => {
+  const repo = initRepoDevelopFeature();
+  advanceDevelop(repo); // feat and develop diverge: the un-rebased park shape (the Option-B trap)
+  const s = makeSession({ integrationBranch: 'develop' });
+  const statuses = [];
+  s.on('merge-status', (e) => statuses.push(e.mergeStatus));
+  try {
+    s.worktreeDir = repo;
+    s.mergeStatus = 'parked';
+    await s.checkWorktreeChange();
+    assert.equal(s.mergeStatus, 'parked', 'clean+ahead alone must NOT re-enable Merge before the rebase');
+    assert.deepEqual(statuses, [], 'no demotion broadcast');
+  } finally { s.destroy(); fs.rmSync(repo, { recursive: true, force: true }); }
+});
+
+test('checkWorktreeChange still demotes an empty parked worktree to none', { skip: !GIT }, async () => {
+  const repo = initOneCommitRepo(); // clean, ahead 0: nothing left to review
+  const s = makeSession();
+  const statuses = [];
+  s.on('merge-status', (e) => statuses.push(e.mergeStatus));
+  try {
+    s.worktreeDir = repo;
+    s.mergeStatus = 'parked';
+    await s.checkWorktreeChange();
+    assert.equal(s.mergeStatus, 'none', 'an empty parked worktree clears the gate entirely');
+    assert.deepEqual(statuses, ['none']);
+  } finally { s.destroy(); fs.rmSync(repo, { recursive: true, force: true }); }
+});
+
+test('checkWorktreeChange does not demote parked while a rebase is in progress (linked worktree, real gitdir path)', { skip: !GIT }, async (t) => {
+  let repo, wt;
+  try { ({ repo, wt } = initLinkedWorktree()); } catch { t.skip('git worktree add unavailable'); return; }
+  // Derive the marker dir from git itself: for a linked worktree this is under the per-worktree gitdir
+  // (<common>/.git/worktrees/<name>/rebase-merge), never <wt>/.git/rebase-merge (.git is a FILE here).
+  const markerOut = git(['rev-parse', '--git-path', 'rebase-merge'], wt).trim();
+  const marker = path.isAbsolute(markerOut) ? markerOut : path.resolve(wt, markerOut);
+  fs.mkdirSync(marker, { recursive: true });
+  const s = makeSession({ integrationBranch: 'develop' });
+  const statuses = [];
+  s.on('merge-status', (e) => statuses.push(e.mergeStatus));
+  try {
+    s.worktreeDir = wt;
+    s.mergeStatus = 'parked';
+    const sig = await s._computeWorktreeSignature();
+    assert.equal(sig.rebaseInProgress, true, 'the probe sees the per-worktree rebase-merge dir');
+    assert.equal(sig.ahead, '1');
+    assert.equal(sig.behind, '0');
+    await s.checkWorktreeChange();
+    assert.equal(s.mergeStatus, 'parked', 'a mid-rebase clean stop must never look mergeable');
+    assert.deepEqual(statuses, [], 'no demotion broadcast');
+  } finally {
+    s.destroy();
+    // Deregister the worktree before deleting its dir, so the repo never holds a dangling registration.
+    try { git(['worktree', 'remove', '--force', wt], repo); } catch { /* best-effort; repo dir goes next */ }
+    fs.rmSync(path.dirname(wt), { recursive: true, force: true });
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test('behind/rebaseInProgress fields do not change the sig hash', { skip: !GIT }, async () => {
+  const repo = initRepoDevelopFeature();
+  const s = makeSession({ integrationBranch: 'develop' });
+  try {
+    s.worktreeDir = repo;
+    const sig = await s._computeWorktreeSignature();
+    const status = git(['--no-optional-locks', 'status', '--porcelain'], repo);
+    const head = git(['rev-parse', 'HEAD'], repo).trim();
+    const expected = crypto.createHash('sha1').update(`${status} ${head} 1`).digest('hex');
+    assert.equal(sig.sig, expected, 'hash is still sha1(status head ahead); new fields are not folded in');
+  } finally { s.destroy(); fs.rmSync(repo, { recursive: true, force: true }); }
+});
+
+test('checkWorktreeChange demotes a byte-identical park (lost-FF reproduction, equal sig)', { skip: !GIT }, async () => {
+  const repo = initRepoDevelopFeature();
+  const s = makeSession({ integrationBranch: 'develop' });
+  const statuses = [];
+  const changes = [];
+  s.on('merge-status', (e) => statuses.push(e.mergeStatus));
+  s.on('worktree-changed', (e) => changes.push(e));
+  try {
+    s.worktreeDir = repo;
+    s.mergeStatus = 'parked';
+    await s.checkWorktreeChange();           // establishes _lastWorktreeSig and demotes
+    assert.equal(s.mergeStatus, 'pending-review');
+    assert.equal(changes.length, 1);
+    // Re-park WITHOUT touching the worktree: a lost fast-forward leaves the git state byte-identical,
+    // so the next check sees sig === _lastWorktreeSig. The demotion must still fire and still emit.
+    s.mergeStatus = 'parked';
+    await s.checkWorktreeChange();
+    assert.equal(s.mergeStatus, 'pending-review', 'the signature dedup must not swallow the demotion');
+    assert.deepEqual(statuses, ['pending-review', 'pending-review']);
+    assert.equal(changes.length, 2, 'a demotion forces the emit even on an equal signature');
+  } finally { s.destroy(); fs.rmSync(repo, { recursive: true, force: true }); }
+});
+
+test('behind is measured against the integration branch, not a stale upstream', { skip: !GIT }, async (t) => {
+  let repo;
+  try { repo = initStaleUpstream({ diverge: true }); } catch { t.skip('cannot configure an upstream in this sandbox'); return; }
+  const s = makeSession({ integrationBranch: 'develop' });
+  const statuses = [];
+  s.on('merge-status', (e) => statuses.push(e.mergeStatus));
+  try {
+    s.worktreeDir = repo;
+    const sig = await s._computeWorktreeSignature();
+    assert.equal(sig.ahead, '1', 'ahead still uses the effective base (the stale upstream)');
+    assert.ok(Number(sig.behind) > 0, 'behind counts the advanced LOCAL develop, not the stale upstream');
+    s.mergeStatus = 'parked';
+    await s.checkWorktreeChange();
+    assert.equal(s.mergeStatus, 'parked', 'no demote-then-repark: truly behind the merge target stays parked');
+    assert.deepEqual(statuses, []);
+  } finally { s.destroy(); fs.rmSync(repo, { recursive: true, force: true }); }
+});
+
+test('two-bases edge: integration already contains the commits demotes, then mergeKeep clears to none', { skip: !GIT }, async (t) => {
+  let repo;
+  try { repo = initStaleUpstream({ landFeat: true }); } catch { t.skip('cannot configure an upstream in this sandbox'); return; }
+  // develop already contains feat's work (behind 0, nothing to merge) while the stale upstream keeps
+  // ahead > 0: the tolerated benign demotion. The re-enabled button's path (mergeAndContinue/mergeKeep)
+  // then self-corrects via nothing-to-commit -> 'none'.
+  const gw = fakeGitWorkspace({ mergeKeepResult: { merged: false, reason: 'nothing-to-commit' } });
+  const s = makeSession({ integrationBranch: 'develop', gitWorkspace: gw });
+  try {
+    s.worktreeDir = repo;
+    s._workspace = { cwd: repo, isGit: true, branch: 'feat', base: 'develop' };
+    s.mergeStatus = 'parked';
+    await s.checkWorktreeChange();
+    assert.equal(s.mergeStatus, 'pending-review', 'benign demotion fires (ahead vs stale upstream, behind 0 vs develop)');
+    s.state = STATES.IDLE; // quiescent live session, or mergeAndContinue returns not-continuable
+    const r = s.mergeAndContinue();
+    assert.equal(r.reason, 'nothing-to-commit');
+    assert.equal(s.mergeStatus, 'none', 'one click clears the gate; no demote-then-repark loop');
   } finally { s.destroy(); fs.rmSync(repo, { recursive: true, force: true }); }
 });
 
