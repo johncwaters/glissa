@@ -11,7 +11,7 @@ import { activateFocusView, deactivateFocusView, focusAdjacentInRail, focusNextA
 import { applyHealthSnapshot, mountHealthMonitor } from './health-monitor.js';
 import { initNotifications, showDesktopNotification } from './notifications.js';
 import { handleDebugStateRefresh, handleDebugStateResponse } from './session-card/card-dom.js';
-import { applyState, applyTerminalSettings, createSessionCard, getSessionCount, hasSession, removeSessionCard, renameSessionCard, seedSessionMergeStatus, setSessionAgents, setSessionDiff, setSessionEffectiveBase, setSessionMergeStatus, setSessionPostTurn, setSessionWorktree, updateAggregateStatus } from './session-card/lifecycle.js';
+import { applyState, applyTerminalSettings, createSessionCard, getSessionCount, hasSession, removeSessionCard, renameSessionCard, seedSessionMergeStatus, setSessionAgents, setSessionDiff, setSessionEffectiveBase, setSessionMergeStatus, setSessionPostTurn, setSessionWakeup, setSessionWorktree, updateAggregateStatus } from './session-card/lifecycle.js';
 import { reconnectDataWs } from './session-card/terminal.js';
 import { showErrorToast } from './session-card/toast.js';
 import { forgetReviewSession, mergeSelectedSession, mountReviewSidebar, notifyWorktreeChanged, refreshReviewSidebar, resolveSelectedSession } from './sidebar/review-sidebar.js';
@@ -104,6 +104,8 @@ function handleSnapshot(sessions) {
     setSessionEffectiveBase(s.id, s.effectiveBase);
     // Restore the live background sub-agent chip on reconnect (Glissa reloads on every restart).
     setSessionAgents(s.id, s.activeAgents);
+    // Restore the pending scheduled-revival chip the same way.
+    setSessionWakeup(s.id, s.pendingWakeup);
   }
   updateAggregateStatus();
 
@@ -165,6 +167,7 @@ const messageHandlers = {
   'session-modified':   (msg) => { if (!msg.ephemeral) knownProjects.set(msg.id, msg.session); removeSessionCard(msg.id); forgetReviewSession(msg.id); createSessionCard(msg.id, msg.session, msg.state, { skipPerms: !!msg.skipPerms, worktree: !!msg.worktree, path: msg.path }); if (isFocusActive()) refreshFocusRoster(); },
   'session-git':        (msg) => setSessionWorktree(msg.id, !!msg.worktree),
   'session-agents':     (msg) => setSessionAgents(msg.id, msg.activeAgents),
+  'session-wakeup':     (msg) => setSessionWakeup(msg.id, msg.pendingWakeup),
   'session-merge-status': (msg) => { setSessionMergeStatus(msg.id, msg.mergeStatus); setFocusMergeStatus(msg.id, msg.mergeStatus); },
   'session-worktree-blocked': (msg) => { showErrorToast(`${msg.session}: ${msg.notice || 'integration branch not found'}`, { persist: true }); },
   'session-worktree-ready': () => {},

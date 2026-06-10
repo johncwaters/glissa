@@ -347,6 +347,37 @@ export function setSessionAgents(sessionId, activeAgents) {
   }
 }
 
+// "sleeping until ~HH:MM" (one-shot with a fire time) or "scheduled" (cron, no time computed).
+// Approximate by design: recurring tasks fire with up to 30 minutes of jitter.
+function formatWakeupChip(at) {
+  if (!at) return 'scheduled';
+  const d = new Date(at);
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  return `sleeping until ~${hh}:${mm}`;
+}
+
+// Reflect a pending scheduled revival on the card. `wakeup` is { at, kind, reason } or null
+// (server session-wakeup delta / snapshot pendingWakeup; sessions.js _trackWakeup). Advisory
+// only: the session genuinely finished its turn; the chip just says it will revive itself.
+export function setSessionWakeup(sessionId, wakeup) {
+  const ui = sessionUIs.get(sessionId);
+  if (!ui) return;
+  const badge = ui.card.querySelector('.wakeup-badge');
+  if (!wakeup) {
+    delete ui.card.dataset.wakeup;
+    if (badge) {
+      badge.textContent = '';
+      badge.title = '';
+    }
+    return;
+  }
+  ui.card.dataset.wakeup = wakeup.kind || 'wakeup';
+  if (!badge) return;
+  badge.textContent = formatWakeupChip(wakeup.at);
+  badge.title = wakeup.reason ? `Scheduled revival: ${wakeup.reason}` : 'Scheduled revival pending';
+}
+
 // Reflect a post-turn-check result on the card. `report` is the server broadcast
 // (filesFixed, mode, findings[], skipped). Shows a count badge when files were
 // fixed (mode 'fix') or flagged (mode 'report'); hidden otherwise. The card's

@@ -458,7 +458,8 @@ body {
 .perms-badge,
 .worktree-badge,
 .post-turn-badge,
-.agents-badge {
+.agents-badge,
+.wakeup-badge {
   align-items: center;
   font-size: 11px;
   font-family: var(--font-mono);
@@ -530,6 +531,23 @@ body {
 }
 
 .session-card[data-agents] .agents-badge {
+  display: inline-flex;
+}
+
+/* Pending scheduled revival ("sleeping until ~HH:MM"). Hidden until the card carries
+   data-wakeup (toggled live by setSessionWakeup on a session-wakeup delta): the turn
+   finished, but the session scheduled its own revival, so the quiet card is dormant by
+   intent, not done. Accent tone (mirrors .agents-badge) - informational, not a warning.
+   lowercase: it reads as a status phrase, not a tag. */
+.wakeup-badge {
+  display: none;
+  text-transform: lowercase;
+  color: var(--accent);
+  border: 1px solid color-mix(in oklab, var(--accent) 55%, transparent);
+  background: color-mix(in oklab, var(--accent) 14%, transparent);
+}
+
+.session-card[data-wakeup] .wakeup-badge {
   display: inline-flex;
 }
 
@@ -2806,6 +2824,7 @@ body {
 .focus-center .session-card.focus-centered .perms-badge,
 .focus-center .session-card.focus-centered .worktree-badge,
 .focus-center .session-card.focus-centered .agents-badge,
+.focus-center .session-card.focus-centered .wakeup-badge,
 .focus-center .session-card.focus-centered .post-turn-badge {
   font-size: 10px;
   padding: 0 5px;

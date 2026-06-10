@@ -129,6 +129,12 @@ export function buildCardDOM(sessionId, sessionName, initialState, options = {})
   // still running, so the card stays Working rather than flipping to Complete. Text filled there.
   const agentsBadge = el('span', 'agents-badge', '');
   agentsBadge.title = 'Background sub-agents still running';
+  // Pending scheduled revival. Hidden unless the card carries data-wakeup (set live by
+  // setSessionWakeup on a session-wakeup delta / snapshot): the turn genuinely finished, but the
+  // session scheduled its own revival (dynamic /loop ScheduleWakeup or a cron task), so the card
+  // says "sleeping until ~HH:MM" instead of just looking done. Advisory and self-expiring:
+  // Esc-cancel fires no hook, so the chip ages out rather than being authoritative.
+  const wakeupBadge = el('span', 'wakeup-badge', '');
   const spacer = el('span', 'session-header-spacer');
 
   // Time-in-current-state readout on the card header (trailing the name), shown in the Focus center:
@@ -190,7 +196,7 @@ export function buildCardDOM(sessionId, sessionName, initialState, options = {})
   // zone; the spacer then absorbs the clock's width changes, so the persistent tags + actions in
   // the RIGHT zone never reflow when the timer ticks. (Status is not shown here: it lives on the
   // Focus rail pill and the toolbar accent strip.)
-  const headerChildren = [nameEl, elapsedEl, spacer, worktreeBadge, postTurnBadge, agentsBadge];
+  const headerChildren = [nameEl, elapsedEl, spacer, worktreeBadge, postTurnBadge, agentsBadge, wakeupBadge];
   if (permsBadge) headerChildren.push(permsBadge);
   headerChildren.push(actions);
   header.append(...headerChildren);

@@ -127,6 +127,8 @@ function createBackend(httpServer, options = {}) {
       worktreeShare: cfg.worktreeShare || DEFAULT_CONFIG.worktreeShare,
       // Background sub-agent detection (config kill switch; undefined -> Session default true).
       detectBackgroundAgents: cfg.detectBackgroundAgents,
+      // Scheduled-revival visibility (config kill switch; undefined -> Session default true).
+      detectScheduledWakeups: cfg.detectScheduledWakeups,
       // Lever B: preventive anti-slop system prompt (user sessions only; off by default).
       antiSlopPrompt: cfg.antiSlopPrompt,
     });
@@ -666,6 +668,19 @@ function createBackend(httpServer, options = {}) {
         id: sess.id,
         session: sess.name,
         activeAgents,
+        timestamp: Date.now(),
+      });
+    });
+
+    // Pending scheduled-revival delta -> control WS, so a COMPLETE/IDLE card can say
+    // "sleeping until ~HH:MM" instead of looking finished while a wakeup is pending.
+    // Advisory only (never gates a transition); mirrors the session-agents delta.
+    sess.on('wakeup-change', ({ pendingWakeup }) => {
+      broadcastControl({
+        type: 'session-wakeup',
+        id: sess.id,
+        session: sess.name,
+        pendingWakeup,
         timestamp: Date.now(),
       });
     });

@@ -20,6 +20,12 @@ const DEFAULT_TIMEOUT_SEC = 5; // short: handler returns 200 immediately; never 
 // main-agent Stop fired while a background sub-agent is still running does not falsely COMPLETE.
 const HOOK_EVENTS = ['SessionStart', 'SessionEnd', 'UserPromptSubmit', 'Stop', 'Notification', 'PermissionRequest', 'SubagentStart', 'SubagentStop'];
 
+// PostToolUse is subscribed ONLY with this tool-name matcher (scheduled-revival tracking:
+// ScheduleWakeup = dynamic /loop sleep, CronCreate/CronDelete = cron tasks). The matcher is
+// essential: a matcher-less PostToolUse hook would POST on EVERY tool call. hook-source
+// re-filters by tool_name server-side as defense in depth.
+const WAKEUP_TOOL_MATCHER = 'ScheduleWakeup|CronCreate|CronDelete';
+
 function generateToken() {
   return crypto.randomBytes(32).toString('hex');
 }
@@ -38,7 +44,7 @@ function safeDirSegment(id) {
 // `permissions` ({ deny: [...] }) is merged in for team stages - the deny blacklist (mechanism M2;
 // efficacy under --dangerously-skip-permissions is the open Phase-0(b) question). Omitted for
 // ordinary user sessions, so their settings are byte-identical to before.
-function buildHookSettings({ port, glissaId, token, timeoutSec = DEFAULT_TIMEOUT_SEC, permissions = null }) {
+function buildHookSettings({ port, glissaId, token, timeoutSec = DEFAULT_TIMEOUT_SEC, permissions = null, detectScheduledWakeups = true }) {
   if (!port || !glissaId || !token) {
     throw new Error('buildHookSettings requires port, glissaId, token');
   }
@@ -48,6 +54,10 @@ function buildHookSettings({ port, glissaId, token, timeoutSec = DEFAULT_TIMEOUT
     const url = `${base}/${event.toLowerCase()}?t=${encodeURIComponent(token)}`;
     hooks[event] = [{ hooks: [{ type: 'http', url, timeout: timeoutSec }] }];
   }
+  if (detectScheduledWakeups) {
+    const url = `${base}/posttooluse?t=${encodeURIComponent(token)}`;
+    hooks.PostToolUse = [{ matcher: WAKEUP_TOOL_MATCHER, hooks: [{ type: 'http', url, timeout: timeoutSec }] }];
+  }
   const settings = { hooks };
   if (permissions && Array.isArray(permissions.deny) && permissions.deny.length > 0) {
     settings.permissions = { deny: permissions.deny.slice() };
@@ -56,12 +66,12 @@ function buildHookSettings({ port, glissaId, token, timeoutSec = DEFAULT_TIMEOUT
 }
 
 // Write the per-session settings file. Returns { settingsPath, dir, token, cleanup }.
-function writeSessionSettings({ port, glissaId, token, baseDir = DEFAULT_BASE_DIR, timeoutSec = DEFAULT_TIMEOUT_SEC, permissions = null }) {
+function writeSessionSettings({ port, glissaId, token, baseDir = DEFAULT_BASE_DIR, timeoutSec = DEFAULT_TIMEOUT_SEC, permissions = null, detectScheduledWakeups = true }) {
   const tok = token || generateToken();
   const dir = path.join(baseDir, safeDirSegment(glissaId));
   fs.mkdirSync(dir, { recursive: true });
   const settingsPath = path.join(dir, 'settings.json');
-  const settings = buildHookSettings({ port, glissaId, token: tok, timeoutSec, permissions });
+  const settings = buildHookSettings({ port, glissaId, token: tok, timeoutSec, permissions, detectScheduledWakeups });
   fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
   return {
     settingsPath,
@@ -110,6 +120,7 @@ module.exports = {
   generateToken,
   safeDirSegment,
   HOOK_EVENTS,
+  WAKEUP_TOOL_MATCHER,
   DEFAULT_BASE_DIR,
   DEFAULT_TIMEOUT_SEC,
 };

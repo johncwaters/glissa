@@ -38,6 +38,18 @@ function mapHookToSignal(event, payload) {
       return 'subagent-stop';
     case 'permissionrequest':
       return 'awaiting-input';
+    case 'posttooluse': {
+      // Scheduled-revival bookkeeping (subscribed with a ScheduleWakeup|CronCreate|CronDelete
+      // matcher; see settings-injector.WAKEUP_TOOL_MATCHER). Tracking-only signals, never
+      // transitions (Session._trackWakeup). The tool_name switch is defense in depth: if a
+      // Claude version ignores the matcher and floods every tool call, everything else maps
+      // to null (ignored-event).
+      const tool = String(payload && payload.tool_name || '');
+      if (tool === 'ScheduleWakeup') return 'wakeup-scheduled';
+      if (tool === 'CronCreate') return 'cron-created';
+      if (tool === 'CronDelete') return 'cron-deleted';
+      return null;
+    }
     case 'notification': {
       // Only act on subtypes with a clear meaning; ignore the rest (e.g.
       // auth_success) rather than firing a false WAITING.
