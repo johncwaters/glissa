@@ -7,17 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-06-10
+
+This release hardens the Focus review workflow shipped in 0.14.0: a parked merge now hands Merge back once the conflict is resolved, the review sidebar is resizable and stops repeating itself, sessions can be parked back to dormant for reuse, and the worktree detection that feeds the merge gate is fully event-driven and off the shared event loop, so a slow machine no longer freezes every terminal at once.
+
 ### Added
 
+- **Route sessions through a local LLM proxy**: A new `proxyBaseUrl` setting (Settings > Advanced, or `config.json`) injects `ANTHROPIC_BASE_URL` into every spawned session's environment so Claude Code routes API traffic through a local proxy (e.g. Headroom, LiteLLM). Glissa only points sessions at the proxy, never spawns or manages one; a settings change reaches existing sessions on their next start or restart, and an inherited `ANTHROPIC_BASE_URL` keeps working when the setting is empty.
+- **Park a session back to dormant**: A new "Park" card-menu action returns a quiescent or finished session to DORMANT so its card parks for reuse, the inverse of starting it. Park refuses a RUNNING session and discards the session's worktree; parking a session with unmerged changes asks for inline confirmation first.
+- **Pending-wakeup chip for scheduled self-revivals**: A session that schedules its own revival (a dynamic `/loop` wakeup or a cron task) now shows a "sleeping until ~HH:MM" card chip instead of looking simply finished. Advisory only, never a completion gate; `detectScheduledWakeups: false` is the kill switch.
+- **Resizable review sidebar with session identity and line totals**: The review sidebar gains a drag handle (width persisted per browser), shows the selected session's name in its header, totals +added/-removed lines overall and per file, and marks Merge and Resolve with `alt+m` / `alt+r` shortcut hints. Discard reads as destructive at rest, and a "Resolve prompt sent" indicator confirms the handoff.
 - **Code-slop detector**: An opt-in, report-only post-turn `slop` rule flags AI code-slop patterns (swallowed exceptions, narration-opener comments, placeholder stubs, debug leftovers, type escapes) and surfaces the count on the session card; off by default via `rules.slop`.
 - **Preventive anti-slop prompt**: An opt-in `antiSlopPrompt` appends a fixed anti-slop note to a user session's system prompt at spawn (team and pack-setup stages are excluded); off by default.
 
 ### Changed
 
 - **Pinned review sidebar controls**: The review sidebar's Merge, Resolve in session, and Discard controls sit in a pinned region that stays in view as the diff scrolls, and Merge is always shown while a session is selected, disabled with a one-line reason when it cannot run.
+- **Deduplicated review sidebar copy**: The sidebar no longer repeats the same +/- numbers at three levels and no longer states "nothing to merge" twice; while the diff loads, the reason line doubles as the loading indicator.
 
 ### Fixed
 
+- **Merge comes back after a parked merge is resolved**: A parked worktree merge (rebase conflict, lost fast-forward, or uncommitted changes) could never return to the Merge button once the agent resolved it; the operator had to ask the agent to merge manually. The gate now self-heals to pending-review when the worktree is clean, ahead, and not mid-rebase, and the sidebar re-renders from a fresh diff.
+- **Diff base follows the session's upstream branch**: The review diff and merge gate were always computed against the globally configured integration branch; a session branch tracking a different remote ref showed commits that belonged to the wrong base. The diff base now prefers the session's upstream tracking branch, and the "merges into X" label follows it.
+- **Card stuck on Idle while the session kept working**: A premature Stop hook could move the card to Idle or Complete while the spinner never paused, after which no title signal could ever wake it; the title working latch now re-opens on entry to those states so the next spinner frame self-heals the card.
+- **Stale terminal after parking the focused session**: Parking and rebuilding the centered session could leave its terminal wired to a disposed instance (a stale WebSocket reconnect timer from the removed card), so the visible card received nothing until reload.
+- **No spurious clipboard error on refresh**: Replayed OSC-52 clipboard sequences in the reconnect scrollback no longer trigger a "Write permission denied" toast; the write is skipped silently when there is no real user activation.
 - **Worktree badge on fresh spawn**: A session's worktree badge appears the moment its worktree is provisioned, instead of only after a page reload.
 - **Merge button on turn end**: The Merge button appears the instant a session finishes its turn, instead of only after clicking a review file to expand it.
 - **Discoverable Alt+W attention-queue placeholder**: The roster rail's attention-queue head shows a persistent resting placeholder (a dim Alt+W hint with an "ALL CLEAR" label in a neutral box) and earns its accent only when sessions need attention, so the shortcut is discoverable and the resting head no longer reads as half-finished.
