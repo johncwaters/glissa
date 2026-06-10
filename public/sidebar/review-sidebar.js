@@ -300,16 +300,16 @@ function render() {
     controlsEl.append(note);
   }
 
-  // Combined line totals across all changes so the operator sees diff scope before reaching Merge.
+  // Combined line totals placed inside the actions row (margin-left: auto pushes them right),
+  // so they sit on the same line as Merge rather than stacking above it.
   const allFiles = [...committedFiles, ...uncommittedFiles];
+  const actions = renderActions(id, { status, reviewable, mergeEnabled, live });
   if (allFiles.length > 0) {
     const tot = summarizeFiles(allFiles);
     const overallStat = el('div', 'review-overall-stat');
     overallStat.append(el('span', 'review-add', `+${tot.added}`), el('span', 'review-del', `-${tot.removed}`));
-    controlsEl.append(overallStat);
+    actions.append(overallStat);
   }
-
-  const actions = renderActions(id, { status, reviewable, mergeEnabled, live });
   controlsEl.append(actions);
 
   // Disabled reason only when Merge is rendered (not suppressed by parked) and unavailable.
@@ -338,7 +338,7 @@ function render() {
   } else if (!fetched && reviewable) {
     bodyEl.append(el('div', 'review-nochanges review-loading', 'Loading diff...'));
   } else {
-    const msg = uncommittedFiles.length > 0 ? 'Nothing committed yet. Commit to merge.'
+    const msg = uncommittedFiles.length > 0 ? 'No committed changes.'
       : 'No changes in this worktree.';
     bodyEl.append(el('div', 'review-nochanges', msg));
   }
@@ -466,7 +466,7 @@ function renderActions(id, { status, reviewable, mergeEnabled, live }) {
     merge.id = 'review-merge-btn';
     merge.title = 'Merge into develop and rebase this worktree, then keep working (alt+m)';
     merge.disabled = !mergeEnabled;
-    merge.innerHTML = 'Merge <kbd class="review-shortcut" aria-hidden="true">M</kbd>';
+    merge.innerHTML = 'Merge <kbd class="review-shortcut" aria-hidden="true">alt+m</kbd>';
     merge.addEventListener('click', () => sendControlMsg({ type: 'merge-continue-session', id }));
     actions.append(merge);
   }
@@ -477,7 +477,7 @@ function renderActions(id, { status, reviewable, mergeEnabled, live }) {
     const resolve = el('button', 'review-btn review-btn-primary');
     resolve.type = 'button';
     resolve.title = 'Paste a resolve prompt into this session so the agent can finish the merge (alt+r)';
-    resolve.innerHTML = 'Resolve <kbd class="review-shortcut" aria-hidden="true">R</kbd>';
+    resolve.innerHTML = 'Resolve <kbd class="review-shortcut" aria-hidden="true">alt+r</kbd>';
     resolve.addEventListener('click', () => {
       sendControlMsg({ type: 'resolve-session-merge', id });
       resolveJustSent = true;
