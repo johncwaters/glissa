@@ -100,6 +100,12 @@ function createBackend(httpServer, options = {}) {
   // Clear settings dirs orphaned by prior crashes (best-effort).
   try { sweepOrphans(); } catch { /* ignore */ }
 
+  // Optional LLM proxy (config proxyBaseUrl -> ANTHROPIC_BASE_URL in the spawn env). A GETTER, not
+  // a snapshot: applySettings mutates `config` in place, so a settings change reaches every session
+  // on its next PTY (re)spawn without rebuilding Session objects. Shared by user, team-stage, and
+  // pack-setup sessions so "point everything at the proxy" really means everything.
+  const getProxyBaseUrl = () => config.proxyBaseUrl ?? '';
+
   // Product default: sessions run YOLO (--dangerously-skip-permissions) unless a project record
   // explicitly opts out with `dangerouslySkipPermissions: false`. Absence means YOLO. This is the one
   // place the default is decided; diffProjects() reuses it so a reload sees no phantom perms change.
@@ -114,6 +120,7 @@ function createBackend(httpServer, options = {}) {
       replayBufferKB: cfg.replayBufferKB,
       hookRouter,
       getHookPort,
+      getProxyBaseUrl,
       // Worktree isolation for real user sessions: each forks off the integration branch and merges
       // back on review. Ephemeral team/pack-setup sessions are built elsewhere (not makeSession), so
       // they never receive this and run as they did before.
@@ -425,6 +432,7 @@ function createBackend(httpServer, options = {}) {
       replayBufferKB: config.replayBufferKB,
       hookRouter,
       getHookPort,
+      getProxyBaseUrl,
     });
     teamSessions.set(id, sess);
     sess.on('error', (err) => console.error(`[team ${name}] error: ${err.message}`));
@@ -500,6 +508,7 @@ function createBackend(httpServer, options = {}) {
       replayBufferKB: config.replayBufferKB,
       hookRouter,
       getHookPort,
+      getProxyBaseUrl,
     });
     sessions.set(id, sess);
     wireSessionEvents(sess);

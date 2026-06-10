@@ -12,7 +12,7 @@ backend.js         # Express + WebSocket server factory (shared by server.js and
 sessions.js        # Session class: lifecycle, PTY spawn/kill, timers, hooks; consumes StatusSource; delegates pure logic to session-core/
 session-core/      # Pure cores of a SEAM EXTRACTION from sessions.js - the stateful Session class stays at root by design (moving it in = deferred follow-up)
   spawn-command.js # classifyClaudeKind, resolveClaudeCommand, buildSpawnCommand, CLAUDE_CMD (resolve-then-branch spawn)
-  spawn-env.js     # Pure buildSpawnEnv(baseEnv) - the 5-var scrub + always-on NO_FLICKER, returns a copy
+  spawn-env.js     # Pure buildSpawnEnv(baseEnv, {proxyBaseUrl}) - the 5-var scrub + always-on NO_FLICKER + optional ANTHROPIC_BASE_URL (config proxyBaseUrl: local LLM proxy, e.g. Headroom/LiteLLM; Glissa points, never manages), returns a copy
   state-machine.js # TRANSITIONS, GUARDS, ENTRY_HOOKS, EXIT_HOOKS (lifecycle tables, relocated verbatim)
   status-mapper.js # Pure mapSignalToEvent(signal, state, confidence, activeAgents) -> event|null (the _onStatus decision; activeAgents>0 suppresses ready->task_complete)
   agent-tracker.js # Pure live background sub-agent bookkeeping (addAgent/removeAgent/pruneAgents over a Map<agent_id, ts>)

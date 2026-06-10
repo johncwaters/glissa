@@ -65,6 +65,11 @@
     Debug Mode
     <span class="dialog-hint">Show a debug button on session cards to inspect state, transitions, and detection signals.</span>
   </label>
+  <label class="dialog-label">
+    API proxy URL
+    <input type="text" class="dialog-input" id="settings-proxy-base-url" placeholder="http://127.0.0.1:8787" autocomplete="off" spellcheck="false">
+    <span class="dialog-hint">Sets ANTHROPIC_BASE_URL for spawned sessions so Claude Code routes API traffic through a local LLM proxy (e.g. Headroom, LiteLLM). You run the proxy yourself. Blank disables. Applies on the next session start or restart.</span>
+  </label>
 </div>
 
 <div class="settings-panel settings-shortcuts" id="settings-panel-shortcuts" role="tabpanel" aria-labelledby="settings-tab-shortcuts" data-panel="shortcuts" hidden>

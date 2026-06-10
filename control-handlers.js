@@ -290,6 +290,23 @@ function registerControlHandlers(controlWss, deps) {
       }
     }
 
+    // proxyBaseUrl lands in the spawn env verbatim (ANTHROPIC_BASE_URL), so normalize once at the
+    // boundary (validated == persisted == spawned) and reject anything that is not an http(s) URL
+    // here rather than letting every future spawn fail opaquely.
+    if (typeof s.proxyBaseUrl === 'string') s.proxyBaseUrl = s.proxyBaseUrl.trim();
+    if (s.proxyBaseUrl) {
+      let proxyOk = false;
+      try { proxyOk = /^https?:$/.test(new URL(s.proxyBaseUrl).protocol); } catch { /* invalid URL */ }
+      if (!proxyOk) {
+        ws.send(JSON.stringify({
+          type: 'settings-error',
+          requestId: msg.requestId || null,
+          message: 'proxyBaseUrl must be an http:// or https:// URL'
+        }));
+        return;
+      }
+    }
+
     const freshConfig = configStore.save(cfg => {
       for (const key of TIMEOUT_KEYS) {
         if (s[key] != null) cfg[key] = s[key];

@@ -46,6 +46,50 @@ test('start() spawns the injected exe directly (no cmd.exe layer)', { skip: proc
   }
 });
 
+test('start() injects ANTHROPIC_BASE_URL from getProxyBaseUrl into the PTY env', { skip: process.platform !== 'win32' }, () => {
+  const calls = [];
+  const s = new Session({
+    id: 'spawn-proxy',
+    name: 'spawn-proxy',
+    path: process.cwd(),
+    spawnCommand: { path: process.execPath, kind: 'exe' },
+    getProxyBaseUrl: () => 'http://127.0.0.1:8787',
+    ptySpawn: (file, args, opts) => { calls.push({ file, args, opts }); return fakePty(); },
+  });
+  try {
+    s.start();
+    assert.equal(calls.length, 1, 'pty spawner called exactly once');
+    assert.equal(calls[0].opts.env.ANTHROPIC_BASE_URL, 'http://127.0.0.1:8787');
+  } finally {
+    s.destroy();
+  }
+});
+
+test('start() survives a throwing getProxyBaseUrl (spawns without the proxy var)', { skip: process.platform !== 'win32' }, () => {
+  // The spawn env starts from process.env; park any user-level ANTHROPIC_BASE_URL so the
+  // absence assertion below tests OUR injection, not the host machine's environment.
+  const inherited = process.env.ANTHROPIC_BASE_URL;
+  delete process.env.ANTHROPIC_BASE_URL;
+  const calls = [];
+  const s = new Session({
+    id: 'spawn-proxy-throw',
+    name: 'spawn-proxy-throw',
+    path: process.cwd(),
+    spawnCommand: { path: process.execPath, kind: 'exe' },
+    getProxyBaseUrl: () => { throw new Error('boom'); },
+    ptySpawn: (file, args, opts) => { calls.push({ file, args, opts }); return fakePty(); },
+  });
+  try {
+    s.start();
+    assert.equal(calls.length, 1, 'spawn still happens');
+    assert.ok(!('ANTHROPIC_BASE_URL' in calls[0].opts.env), 'no proxy var on getter failure');
+    assert.equal(s.state, STATES.STARTING);
+  } finally {
+    s.destroy();
+    if (inherited !== undefined) process.env.ANTHROPIC_BASE_URL = inherited;
+  }
+});
+
 test('start() routes a .cmd shim command through cmd.exe /c claude', { skip: process.platform !== 'win32' }, () => {
   const calls = [];
   const s = new Session({

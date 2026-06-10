@@ -2,7 +2,7 @@
 
 // Unit tests for the pure spawn-environment builder extracted from Session._buildSpawnEnv.
 // Asserts the 5-var scrub, the copy semantics (input never mutated), and the
-// no-flicker flag behavior — the invariants the live spawn path depends on.
+// no-flicker flag behavior - the invariants the live spawn path depends on.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -58,7 +58,27 @@ test('CLAUDE_CODE_NO_FLICKER is always set to "1"', () => {
   assert.equal(buildSpawnEnv(fullBase()).CLAUDE_CODE_NO_FLICKER, '1');
 });
 
-test('returns a COPY — baseEnv is never mutated', () => {
+test('proxyBaseUrl injects ANTHROPIC_BASE_URL (trimmed)', () => {
+  const env = buildSpawnEnv(fullBase(), { proxyBaseUrl: '  http://127.0.0.1:8787  ' });
+  assert.equal(env.ANTHROPIC_BASE_URL, 'http://127.0.0.1:8787');
+});
+
+test('no proxyBaseUrl -> no ANTHROPIC_BASE_URL injected', () => {
+  assert.ok(!('ANTHROPIC_BASE_URL' in buildSpawnEnv(fullBase())));
+  assert.ok(!('ANTHROPIC_BASE_URL' in buildSpawnEnv(fullBase(), { proxyBaseUrl: '' })));
+  assert.ok(!('ANTHROPIC_BASE_URL' in buildSpawnEnv(fullBase(), { proxyBaseUrl: '   ' })));
+  assert.ok(!('ANTHROPIC_BASE_URL' in buildSpawnEnv(fullBase(), { proxyBaseUrl: 42 })));
+});
+
+test('empty proxyBaseUrl preserves an inherited ANTHROPIC_BASE_URL (user-level override keeps working)', () => {
+  const base = { ...fullBase(), ANTHROPIC_BASE_URL: 'http://user-proxy:9999' };
+  assert.equal(buildSpawnEnv(base).ANTHROPIC_BASE_URL, 'http://user-proxy:9999');
+  // a configured proxy wins over the inherited value
+  const env = buildSpawnEnv(base, { proxyBaseUrl: 'http://127.0.0.1:8787' });
+  assert.equal(env.ANTHROPIC_BASE_URL, 'http://127.0.0.1:8787');
+});
+
+test('returns a COPY - baseEnv is never mutated', () => {
   const base = fullBase();
   const env = buildSpawnEnv(base);
   assert.notEqual(env, base, 'output must be a distinct object');

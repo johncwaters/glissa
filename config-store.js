@@ -22,6 +22,11 @@ const DEFAULT_CONFIG = {
   // stage sessions never receive it). Takes effect on the next session start/restart.
   antiSlopPrompt: false,
   editorCommand: '',
+  // Optional LLM proxy base URL. Non-empty -> spawned sessions get ANTHROPIC_BASE_URL=<this>,
+  // routing Claude Code's API traffic through a local proxy (e.g. Headroom, LiteLLM). Glissa
+  // never spawns or manages the proxy; it only points sessions at it. Applies on the next
+  // session start/restart. Empty (default) -> no injection.
+  proxyBaseUrl: '',
   // Integration branch every worktree-backed session forks from and merges back into. Glissa never
   // creates it; if it is absent a session stays DORMANT with a notice (it never runs in the real tree).
   integrationBranch: 'develop',
@@ -65,6 +70,7 @@ const BOOLEAN_KEYS = [
 // Free-text settings persisted to config.json
 const STRING_KEYS = [
   'editorCommand',
+  'proxyBaseUrl',
   'integrationBranch',
   'worktreeRoot',
 ];
@@ -168,6 +174,7 @@ function createConfigStore() {
       detectBackgroundAgents: config.detectBackgroundAgents ?? DEFAULT_CONFIG.detectBackgroundAgents,
       antiSlopPrompt: config.antiSlopPrompt ?? DEFAULT_CONFIG.antiSlopPrompt,
       editorCommand: config.editorCommand ?? DEFAULT_CONFIG.editorCommand,
+      proxyBaseUrl: config.proxyBaseUrl ?? DEFAULT_CONFIG.proxyBaseUrl,
       integrationBranch: config.integrationBranch ?? DEFAULT_CONFIG.integrationBranch,
       worktreeRoot: config.worktreeRoot ?? DEFAULT_CONFIG.worktreeRoot,
       worktreeShare: config.worktreeShare ?? DEFAULT_CONFIG.worktreeShare,

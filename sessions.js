@@ -120,6 +120,11 @@ class Session extends EventEmitter {
     // (config detectScheduledWakeups=false) drops the PostToolUse hook group at the source and
     // makes the session ignore the signals, so behavior is exactly as before.
     detectScheduledWakeups = true,
+    // Optional LLM proxy (config proxyBaseUrl). Injected as a GETTER (like getHookPort) so a
+    // settings change applies on the next PTY (re)spawn without rebuilding the Session. A non-empty
+    // return becomes ANTHROPIC_BASE_URL in the spawn env (see session-core/spawn-env.js); Glissa
+    // never spawns or manages the proxy itself. Null/empty -> no injection (default behavior).
+    getProxyBaseUrl = null,
     // Resolved claude command ({ path, kind }). Defaults to the module-load
     // resolution; tests inject a stub to exercise the spawn branches deterministically.
     spawnCommand = CLAUDE_CMD,
@@ -212,6 +217,7 @@ class Session extends EventEmitter {
     this._detectScheduledWakeups = detectScheduledWakeups;
     this._wakeups = new Map();
     this._wakeupSeq = 0;
+    this._getProxyBaseUrl = getProxyBaseUrl;
     this._spawnCommand = spawnCommand;
     this._initialPrompt = initialPrompt;
     this._extraClaudeArgs = Array.isArray(extraClaudeArgs) ? extraClaudeArgs : [];
@@ -1184,7 +1190,15 @@ class Session extends EventEmitter {
   }
 
   _buildSpawnEnv() {
-    return buildSpawnEnv(process.env);
+    let proxyBaseUrl = "";
+    if (this._getProxyBaseUrl) {
+      try {
+        proxyBaseUrl = this._getProxyBaseUrl() || "";
+      } catch {
+        proxyBaseUrl = ""; // a broken getter must never block a spawn
+      }
+    }
+    return buildSpawnEnv(process.env, { proxyBaseUrl });
   }
 
   _handlePtyData(data) {
