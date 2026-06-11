@@ -42,7 +42,7 @@ const { loadTeam, listTeams } = require('./teamlib/team-registry');
 const { createOrchestrator } = require('./teamlib/team-orchestrator');
 const { createScheduler } = require('./scheduler');
 const { createSpawnGate } = require('./spawn-gate');
-const { createGitWorkspace } = require('./teamlib/team-git');
+const { createGitWorkspace, createGitWorkspaceSync } = require('./teamlib/team-git');
 const { buildStageSpawnOptions, teamPermissions } = require('./teamlib/team-settings');
 const { buildStagePrompt } = require('./teamlib/team-prompt');
 const { buildSetupPrompt, setupSessionId, setupSessionName, packPaths } = require('./teamlib/team-setup');
@@ -838,19 +838,23 @@ function createBackend(httpServer, options = {}) {
   // is removed junction-safe. This is what makes cleanup correct regardless of how a session ended: no
   // data loss, no leaked worktrees. Once per distinct repo root, best-effort.
   try {
+    // One-shot cold reconcile at boot (before any live session streams): use the SYNCHRONOUS engine
+    // sibling so this blocking pass steals no PTY time from running sessions and never awaits. The live
+    // async `gitWorkspace` is reserved for the recurring session/orchestrator paths.
+    const gitWorkspaceSync = createGitWorkspaceSync();
     const reconciledRoots = new Set();
     const integrationBranch = config.integrationBranch || 'develop';
     for (const project of config.projects) {
       if (!project.path || reconciledRoots.has(project.path)) continue;
       reconciledRoots.add(project.path);
-      for (const wt of gitWorkspace.listSessionWorktrees({ projectPath: project.path, integrationBranch })) {
+      for (const wt of gitWorkspaceSync.listSessionWorktrees({ projectPath: project.path, integrationBranch })) {
         const sess = sessions.get(wt.id);
         if (sess && wt.hasWork) {
           sess.adoptWorktree({ worktreeDir: wt.cwd, branch: wt.branch, base: integrationBranch });
           integrationPool.ensure(sess); // adopt sets commonGitDir; watch the branch for this re-adopted worktree too
           console.log(`[worktree] re-adopted pending-review worktree for ${sess.name} (${wt.branch})`);
         } else {
-          gitWorkspace.removeWorktreeByPath({ projectPath: project.path, cwd: wt.cwd, branch: wt.branch });
+          gitWorkspaceSync.removeWorktreeByPath({ projectPath: project.path, cwd: wt.cwd, branch: wt.branch });
         }
       }
     }

@@ -34,11 +34,11 @@ function initRepo() {
   return dir;
 }
 
-test('create + integrate fast-forwards the run onto the base branch and cleans up', { skip: !GIT }, () => {
+test('create + integrate fast-forwards the run onto the base branch and cleans up', { skip: !GIT }, async () => {
   const repo = initRepo();
   try {
     const gw = createGitWorkspace();
-    const ws = gw.create({ projectPath: repo, teamId: 'marketing', label: '2026-06-02-tue', outputPath: 'team/marketing' });
+    const ws = await gw.create({ projectPath: repo, teamId: 'marketing', label: '2026-06-02-tue', outputPath: 'team/marketing' });
     assert.equal(ws.isGit, true);
     assert.ok(ws.cwd && ws.cwd !== repo, 'runs in a separate worktree directory');
 
@@ -46,7 +46,7 @@ test('create + integrate fast-forwards the run onto the base branch and cleans u
     fs.mkdirSync(path.join(ws.cwd, runRel), { recursive: true });
     fs.writeFileSync(path.join(ws.cwd, runRel, 'brief.md'), '## Topic\nx\n', 'utf8');
 
-    const r = gw.integrate({ projectPath: repo, workspace: ws, message: 'marketing run', addPaths: [runRel] });
+    const r = await gw.integrate({ projectPath: repo, workspace: ws, message: 'marketing run', addPaths: [runRel] });
     assert.equal(r.committed, true);
     assert.equal(r.merged, true);
     assert.equal(r.branch, null, 'branch deleted after a successful merge');
@@ -60,11 +60,11 @@ test('create + integrate fast-forwards the run onto the base branch and cleans u
   }
 });
 
-test('integrate keeps the run on its branch when the base moved (not a fast-forward)', { skip: !GIT }, () => {
+test('integrate keeps the run on its branch when the base moved (not a fast-forward)', { skip: !GIT }, async () => {
   const repo = initRepo();
   try {
     const gw = createGitWorkspace();
-    const ws = gw.create({ projectPath: repo, teamId: 'marketing', label: 'r1', outputPath: 'team/marketing' });
+    const ws = await gw.create({ projectPath: repo, teamId: 'marketing', label: 'r1', outputPath: 'team/marketing' });
 
     // Base advances after the worktree was created, so a fast-forward is no longer possible.
     fs.writeFileSync(path.join(repo, 'other.md'), 'changed\n', 'utf8');
@@ -75,7 +75,7 @@ test('integrate keeps the run on its branch when the base moved (not a fast-forw
     fs.mkdirSync(path.join(ws.cwd, runRel), { recursive: true });
     fs.writeFileSync(path.join(ws.cwd, runRel, 'brief.md'), 'x', 'utf8');
 
-    const r = gw.integrate({ projectPath: repo, workspace: ws, message: 'run', addPaths: [runRel] });
+    const r = await gw.integrate({ projectPath: repo, workspace: ws, message: 'run', addPaths: [runRel] });
     assert.equal(r.committed, true);
     assert.equal(r.merged, false);
     assert.equal(r.reason, 'not-fast-forward');
@@ -91,12 +91,12 @@ test('integrate keeps the run on its branch when the base moved (not a fast-forw
 // leave an untracked run folder) into the PROJECT tree. The branch tracks those same paths, so a naive
 // `merge --ff-only` aborts ("untracked working tree files would be overwritten") and strands the whole
 // run on its branch. integrate must clear those scoped untracked collisions and complete the merge.
-test('integrate clears an untracked log.md collision in the project tree and still fast-forwards', { skip: !GIT }, () => {
+test('integrate clears an untracked log.md collision in the project tree and still fast-forwards', { skip: !GIT }, async () => {
   const repo = initRepo();
   try {
     const gw = createGitWorkspace();
     const outputPath = '.glissa/teams/release-notes';
-    const ws = gw.create({ projectPath: repo, teamId: 'release-notes', label: '2026-06-04-thursday', outputPath });
+    const ws = await gw.create({ projectPath: repo, teamId: 'release-notes', label: '2026-06-04-thursday', outputPath });
 
     // Simulate the pre-worktree gate: a header-only log.md is left UNTRACKED in the project tree.
     const logRel = `${outputPath}/log.md`;
@@ -113,7 +113,7 @@ test('integrate clears an untracked log.md collision in the project tree and sti
     fs.writeFileSync(path.join(ws.cwd, runRel, 'notes.md'), '## Release\nx\n', 'utf8');
     fs.writeFileSync(path.join(ws.cwd, logRel), '# Team run log\n2026-06-04 | v0.14.0 | - | SHIP\n', 'utf8');
 
-    const r = gw.integrate({ projectPath: repo, workspace: ws, message: 'release-notes run', addPaths: [runRel, logRel] });
+    const r = await gw.integrate({ projectPath: repo, workspace: ws, message: 'release-notes run', addPaths: [runRel, logRel] });
     assert.equal(r.committed, true);
     assert.equal(r.merged, true, 'the untracked log.md no longer blocks the fast-forward');
     assert.equal(r.branch, null, 'branch deleted after a successful merge');
@@ -131,13 +131,13 @@ test('integrate clears an untracked log.md collision in the project tree and sti
   }
 });
 
-test('discard removes the worktree and the branch', { skip: !GIT }, () => {
+test('discard removes the worktree and the branch', { skip: !GIT }, async () => {
   const repo = initRepo();
   try {
     const gw = createGitWorkspace();
-    const ws = gw.create({ projectPath: repo, teamId: 'marketing', label: 'r2', outputPath: 'team/marketing' });
+    const ws = await gw.create({ projectPath: repo, teamId: 'marketing', label: 'r2', outputPath: 'team/marketing' });
     assert.ok(fs.existsSync(ws.cwd));
-    gw.discard({ projectPath: repo, workspace: ws });
+    await gw.discard({ projectPath: repo, workspace: ws });
     assert.ok(!fs.existsSync(ws.cwd), 'worktree removed');
     assert.equal(git(['branch', '--list', ws.branch], repo).trim(), '', 'branch deleted');
   } finally {
@@ -148,7 +148,7 @@ test('discard removes the worktree and the branch', { skip: !GIT }, () => {
 // G1: create() copies BOTH the team-local pack and the project-level shared pack (.glissa/pack/) into the
 // worktree so stages can read shared-scope files (voice/brand). Both are untracked in the project and are
 // never staged by integrate, so they vanish with the worktree.
-test('G1: create copies the team-local pack AND the shared .glissa/pack into the worktree', { skip: !GIT }, () => {
+test('G1: create copies the team-local pack AND the shared .glissa/pack into the worktree', { skip: !GIT }, async () => {
   const repo = initRepo();
   try {
     const outputPath = '.glissa/teams/marketing';
@@ -158,43 +158,43 @@ test('G1: create copies the team-local pack AND the shared .glissa/pack into the
     fs.writeFileSync(path.join(repo, '.glissa', 'pack', 'voice-guide.md'), 'shared voice\n', 'utf8');
 
     const gw = createGitWorkspace();
-    const ws = gw.create({
+    const ws = await gw.create({
       projectPath: repo, teamId: 'marketing', label: 'r', outputPath,
     });
     assert.equal(ws.isGit, true);
     assert.ok(fs.existsSync(path.join(ws.cwd, outputPath, 'pack', 'content-calendar.md')), 'team-local pack copied in');
     assert.ok(fs.existsSync(path.join(ws.cwd, '.glissa', 'pack', 'voice-guide.md')), 'shared pack copied in');
-    gw.discard({ projectPath: repo, workspace: ws });
+    await gw.discard({ projectPath: repo, workspace: ws });
   } finally {
     fs.rmSync(repo, { recursive: true, force: true });
   }
 });
 
 // G1b: an absent shared pack is a no-op (no throw); the team-local pack still copies.
-test('G1b: create does not throw when .glissa/pack is absent', { skip: !GIT }, () => {
+test('G1b: create does not throw when .glissa/pack is absent', { skip: !GIT }, async () => {
   const repo = initRepo();
   try {
     const outputPath = '.glissa/teams/qa';
     fs.mkdirSync(path.join(repo, outputPath, 'pack'), { recursive: true });
     fs.writeFileSync(path.join(repo, outputPath, 'pack', 'how-to-run.md'), 'run\n', 'utf8');
     const gw = createGitWorkspace();
-    const ws = gw.create({
+    const ws = await gw.create({
       projectPath: repo, teamId: 'qa', label: 'r', outputPath,
     });
     assert.equal(ws.isGit, true);
     assert.ok(!fs.existsSync(path.join(ws.cwd, '.glissa', 'pack')), 'no shared pack created when absent');
     assert.ok(fs.existsSync(path.join(ws.cwd, outputPath, 'pack', 'how-to-run.md')), 'team-local pack still copied');
-    gw.discard({ projectPath: repo, workspace: ws });
+    await gw.discard({ projectPath: repo, workspace: ws });
   } finally {
     fs.rmSync(repo, { recursive: true, force: true });
   }
 });
 
-test('create falls back to in-place for a non-git directory', { skip: !GIT }, () => {
+test('create falls back to in-place for a non-git directory', { skip: !GIT }, async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-nongit-'));
   try {
     const gw = createGitWorkspace();
-    const ws = gw.create({ projectPath: dir, teamId: 'marketing', label: 'r', outputPath: 'team/marketing' });
+    const ws = await gw.create({ projectPath: dir, teamId: 'marketing', label: 'r', outputPath: 'team/marketing' });
     assert.equal(ws.isGit, false);
     assert.equal(ws.cwd, dir);
   } finally {
@@ -202,7 +202,7 @@ test('create falls back to in-place for a non-git directory', { skip: !GIT }, ()
   }
 });
 
-test('integrate (injected git) commits, ff-merges, removes the worktree, deletes the branch', () => {
+test('integrate (injected git) commits, ff-merges, removes the worktree, deletes the branch', async () => {
   const cmds = [];
   const fakeGit = (args) => {
     cmds.push(args.join(' '));
@@ -212,7 +212,7 @@ test('integrate (injected git) commits, ff-merges, removes the worktree, deletes
   };
   const gw = createGitWorkspace({ git: fakeGit });
   const ws = { cwd: '/wt', isGit: true, branch: 'glissa/marketing/r', base: 'main' };
-  const r = gw.integrate({ projectPath: '/repo', workspace: ws, message: 'm', addPaths: ['team/marketing/runs/r'] });
+  const r = await gw.integrate({ projectPath: '/repo', workspace: ws, message: 'm', addPaths: ['team/marketing/runs/r'] });
 
   assert.equal(r.committed, true);
   assert.equal(r.merged, true);
@@ -222,6 +222,46 @@ test('integrate (injected git) commits, ff-merges, removes the worktree, deletes
   assert.ok(cmds.includes('merge --ff-only glissa/marketing/r'));
   assert.ok(cmds.includes('worktree remove --force /wt'));
   assert.ok(cmds.includes('branch -D glissa/marketing/r'));
+});
+
+// --- serialize queue: cross-session merges into the same target never interleave (REQUIRED) ----------
+
+// The async engine dissolved the old synchronous de-facto global lock; the explicit serialize queue must
+// replace it. Two concurrent mutating calls on ONE engine instance must run STRICTLY sequentially: the
+// second method's FIRST git command must not fire until the first method has fully resolved. The first
+// runner invocation is held on a deferred promise so the ordering is observable.
+test('serialize: two concurrent mutating calls on one engine run strictly sequentially', async () => {
+  const cmds = [];
+  let releaseFirst;
+  const firstHeld = new Promise((resolve) => { releaseFirst = resolve; });
+  let firstCall = true;
+  const git = async (args) => {
+    cmds.push(args.join(' '));
+    if (firstCall) { firstCall = false; await firstHeld; } // hold the very first git call open
+    if (args[0] === 'diff' && args.includes('--cached')) { const e = new Error('staged'); e.status = 1; throw e; }
+    return '';
+  };
+  const gw = createGitWorkspace({ git });
+  const wsA = { cwd: '/wtA', isGit: true, branch: 'glissa/session/a', base: 'develop' };
+  const wsB = { cwd: '/wtB', isGit: true, branch: 'glissa/session/b', base: 'develop' };
+
+  // Fire both integrates without awaiting; the first is wedged on firstHeld inside its first git call.
+  const pA = gw.integrate({ projectPath: '/repo', workspace: wsA, message: 'a', addPaths: ['runs/a'] });
+  const pB = gw.integrate({ projectPath: '/repo', workspace: wsB, message: 'b', addPaths: ['runs/b'] });
+
+  // Let microtasks settle: only the FIRST method's first git call has fired; the second is queued behind it.
+  await new Promise((r) => setImmediate(r));
+  assert.equal(cmds.length, 1, 'only the first serialized body has started while it is held');
+  assert.ok(cmds[0].startsWith('add -- runs/a'), 'the first call belongs to method A');
+  assert.ok(!cmds.some((c) => c.includes('runs/b')), 'method B has not issued any git command yet');
+
+  releaseFirst(); // unwedge A; it runs to completion, then B is dequeued
+  await Promise.all([pA, pB]);
+  assert.ok(cmds.some((c) => c.includes('runs/b')), 'method B ran only after A fully resolved');
+  // A's full command sequence precedes B's first command (strict serialization, no interleave).
+  const firstBIdx = cmds.findIndex((c) => c.includes('runs/b'));
+  const lastAIdx = cmds.map((c) => c.includes('runs/a') || c.includes('/wtA') || c.includes('glissa/session/a')).lastIndexOf(true);
+  assert.ok(lastAIdx < firstBIdx, 'every command of A precedes the first command of B');
 });
 
 // --- writeScope staging via integrate (the SHIP-gated auto-merge boundary), falsifiable injected git ---
@@ -240,11 +280,11 @@ function recordingGit(cmds, { noMatchGlob = null } = {}) {
   };
 }
 
-test('integrate stages a matching writeScope glob and the commit fires', () => {
+test('integrate stages a matching writeScope glob and the commit fires', async () => {
   const cmds = [];
   const gw = createGitWorkspace({ git: recordingGit(cmds) });
   const ws = { cwd: '/wt', isGit: true, branch: 'glissa/qa/r', base: 'main' };
-  const r = gw.integrate({
+  const r = await gw.integrate({
     projectPath: '/repo', workspace: ws, message: 'qa: r (SHIP)',
     addPaths: ['.glissa/teams/qa/runs/r', '.glissa/teams/qa/log.md', 'src/**'],
   });
@@ -255,11 +295,11 @@ test('integrate stages a matching writeScope glob and the commit fires', () => {
   assert.ok(cmds.includes('merge --ff-only glissa/qa/r'));
 });
 
-test('integrate: a no-match writeScope add throws {status:128} but the commit STILL fires from run folder + log', () => {
+test('integrate: a no-match writeScope add throws {status:128} but the commit STILL fires from run folder + log', async () => {
   const cmds = [];
   const gw = createGitWorkspace({ git: recordingGit(cmds, { noMatchGlob: 'src/**' }) });
   const ws = { cwd: '/wt', isGit: true, branch: 'glissa/qa/r', base: 'main' };
-  const r = gw.integrate({
+  const r = await gw.integrate({
     projectPath: '/repo', workspace: ws, message: 'qa: r (SHIP)',
     addPaths: ['.glissa/teams/qa/runs/r', '.glissa/teams/qa/log.md', 'src/**'],
   });
@@ -269,11 +309,11 @@ test('integrate: a no-match writeScope add throws {status:128} but the commit ST
   assert.equal(r.merged, true);
 });
 
-test('integrate: order-independence, a no-match glob FIRST still commits', () => {
+test('integrate: order-independence, a no-match glob FIRST still commits', async () => {
   const cmds = [];
   const gw = createGitWorkspace({ git: recordingGit(cmds, { noMatchGlob: 'src/**' }) });
   const ws = { cwd: '/wt', isGit: true, branch: 'glissa/qa/r', base: 'main' };
-  const r = gw.integrate({
+  const r = await gw.integrate({
     projectPath: '/repo', workspace: ws, message: 'qa: r (SHIP)',
     addPaths: ['src/**', '.glissa/teams/qa/runs/r', '.glissa/teams/qa/log.md'],
   });
@@ -283,11 +323,11 @@ test('integrate: order-independence, a no-match glob FIRST still commits', () =>
 
 // --- restoreTests: the restore-before-audit oracle reset (command shape via injected git) ---
 
-test('restoreTests issues a per-glob checkout <baseSha> then a per-glob clean -f (testGlob-scoped, in order)', () => {
+test('restoreTests issues a per-glob checkout <baseSha> then a per-glob clean -f (testGlob-scoped, in order)', async () => {
   const cmds = [];
   const gw = createGitWorkspace({ git: (args) => { cmds.push(args.join(' ')); return ''; } });
   const testGlobs = ['**/*.test.*', '**/test/**'];
-  gw.restoreTests({ workspace: { cwd: '/wt', isGit: true, baseSha: 'base123' }, testGlobs });
+  await gw.restoreTests({ workspace: { cwd: '/wt', isGit: true, baseSha: 'base123' }, testGlobs });
 
   // Every glob is checked out at baseSha, then every glob is cleaned; checkout precedes clean.
   for (const g of testGlobs) {
@@ -301,24 +341,25 @@ test('restoreTests issues a per-glob checkout <baseSha> then a per-glob clean -f
   assert.ok(!cmds.some((c) => c.includes('**/*.test.* **/test/**')), 'globs are not batched into one call');
 });
 
-test('restoreTests is a no-op when not git, no baseSha, or empty testGlobs', () => {
+test('restoreTests is a no-op when not git, no baseSha, or empty testGlobs', async () => {
   const cmds = [];
   const gw = createGitWorkspace({ git: (args) => { cmds.push(args.join(' ')); return ''; } });
-  gw.restoreTests({ workspace: { cwd: '/wt', isGit: false, baseSha: 'b' }, testGlobs: ['**/*.test.*'] });
-  gw.restoreTests({ workspace: { cwd: '/wt', isGit: true }, testGlobs: ['**/*.test.*'] }); // no baseSha
-  gw.restoreTests({ workspace: { cwd: '/wt', isGit: true, baseSha: 'b' }, testGlobs: [] });
+  await gw.restoreTests({ workspace: { cwd: '/wt', isGit: false, baseSha: 'b' }, testGlobs: ['**/*.test.*'] });
+  await gw.restoreTests({ workspace: { cwd: '/wt', isGit: true }, testGlobs: ['**/*.test.*'] }); // no baseSha
+  await gw.restoreTests({ workspace: { cwd: '/wt', isGit: true, baseSha: 'b' }, testGlobs: [] });
   assert.equal(cmds.length, 0, 'no git command issued in any no-op case');
 });
 
-test('restoreTests swallows a no-match checkout (no throw propagates)', () => {
+test('restoreTests swallows a no-match checkout (no throw propagates)', async () => {
   const gw = createGitWorkspace({
     git: (args) => {
       if (args[0] === 'checkout') { const e = new Error('did not match'); e.status = 128; throw e; }
       return '';
     },
   });
-  // Must not throw even though every checkout throws 128 (no-match), mirroring real git.
-  assert.doesNotThrow(() => gw.restoreTests({
+  // Must not reject even though every checkout throws 128 (no-match), mirroring real git. The sync throw
+  // inside `await git(...)` rejects into run()'s catch, so the engine method still resolves cleanly.
+  await assert.doesNotReject(gw.restoreTests({
     workspace: { cwd: '/wt', isGit: true, baseSha: 'b' }, testGlobs: ['nope/**'],
   }));
 });
@@ -326,11 +367,11 @@ test('restoreTests swallows a no-match checkout (no throw propagates)', () => {
 // Real-git restore-before-audit end to end: a fixer that edits a tracked test, adds an untracked NEW test
 // under a new dir, AND writes a source file + a run folder. After restoreTests the tracked test is back to
 // base, the untracked new test is gone, and the source file + the run folder survive (clean is scoped).
-test('restoreTests (real git) restores tracked tests, removes untracked new tests, keeps source + run folder', { skip: !GIT }, () => {
+test('restoreTests (real git) restores tracked tests, removes untracked new tests, keeps source + run folder', { skip: !GIT }, async () => {
   const repo = initRepo();
   try {
     const gw = createGitWorkspace();
-    const ws = gw.create({ projectPath: repo, teamId: 'qa', label: 'r', outputPath: '.glissa/teams/qa' });
+    const ws = await gw.create({ projectPath: repo, teamId: 'qa', label: 'r', outputPath: '.glissa/teams/qa' });
     assert.equal(ws.isGit, true);
 
     // Seed a tracked test in the worktree and commit it so it is part of the base the run branched from.
@@ -355,7 +396,7 @@ test('restoreTests (real git) restores tracked tests, removes untracked new test
     fs.writeFileSync(runArtifact, 'run artifact\n', 'utf8');
 
     const testGlobs = ['**/*.test.*', '**/*.spec.*', '**/test/**', '**/tests/**', '**/__tests__/**'];
-    gw.restoreTests({ workspace, testGlobs });
+    await gw.restoreTests({ workspace, testGlobs });
 
     // Normalize CRLF: git autocrlf may rewrite line endings on checkout (Windows); the restore reverting
     // the TAMPERED content to base is what matters here, not the platform line ending.
@@ -366,7 +407,7 @@ test('restoreTests (real git) restores tracked tests, removes untracked new test
     assert.equal(norm(srcFile), 'real source fix\n', 'source content untouched');
     assert.ok(fs.existsSync(runArtifact), 'run folder under .glissa/ survives the scoped clean');
 
-    gw.discard({ projectPath: repo, workspace: ws });
+    await gw.discard({ projectPath: repo, workspace: ws });
   } finally {
     fs.rmSync(repo, { recursive: true, force: true });
   }
@@ -374,11 +415,11 @@ test('restoreTests (real git) restores tracked tests, removes untracked new test
 
 // Real-git writeScope e2e: a source file under src/ merges into the base working tree on integrate; and a
 // companion where src/** matches nothing yet the run folder still merges (no-match add is harmless).
-test('integrate (real git) lands a src/** file in the base working tree and merges cleanly', { skip: !GIT }, () => {
+test('integrate (real git) lands a src/** file in the base working tree and merges cleanly', { skip: !GIT }, async () => {
   const repo = initRepo();
   try {
     const gw = createGitWorkspace();
-    const ws = gw.create({ projectPath: repo, teamId: 'qa', label: 'r', outputPath: '.glissa/teams/qa' });
+    const ws = await gw.create({ projectPath: repo, teamId: 'qa', label: 'r', outputPath: '.glissa/teams/qa' });
 
     const runRel = '.glissa/teams/qa/runs/r';
     fs.mkdirSync(path.join(ws.cwd, runRel), { recursive: true });
@@ -387,7 +428,7 @@ test('integrate (real git) lands a src/** file in the base working tree and merg
     fs.mkdirSync(path.join(ws.cwd, 'src'), { recursive: true });
     fs.writeFileSync(path.join(ws.cwd, srcRel), 'module.exports = 1;\n', 'utf8');
 
-    const r = gw.integrate({
+    const r = await gw.integrate({
       projectPath: repo, workspace: ws, message: 'qa: r (SHIP)', addPaths: [runRel, 'src/**'],
     });
     assert.equal(r.committed, true);
@@ -399,18 +440,18 @@ test('integrate (real git) lands a src/** file in the base working tree and merg
   }
 });
 
-test('integrate (real git) with a no-match src/** still merges the run folder', { skip: !GIT }, () => {
+test('integrate (real git) with a no-match src/** still merges the run folder', { skip: !GIT }, async () => {
   const repo = initRepo();
   try {
     const gw = createGitWorkspace();
-    const ws = gw.create({ projectPath: repo, teamId: 'qa', label: 'r2', outputPath: '.glissa/teams/qa' });
+    const ws = await gw.create({ projectPath: repo, teamId: 'qa', label: 'r2', outputPath: '.glissa/teams/qa' });
 
     const runRel = '.glissa/teams/qa/runs/r2';
     fs.mkdirSync(path.join(ws.cwd, runRel), { recursive: true });
     fs.writeFileSync(path.join(ws.cwd, runRel, 'review.md'), '## Summary\nx\n', 'utf8');
 
     // No file under src/, so 'add -- src/**' matches nothing (throws 128, swallowed).
-    const r = gw.integrate({
+    const r = await gw.integrate({
       projectPath: repo, workspace: ws, message: 'qa: r2 (BLOCK)', addPaths: [runRel, 'src/**'],
     });
     assert.equal(r.committed, true, 'run folder carried the commit despite the no-match glob');

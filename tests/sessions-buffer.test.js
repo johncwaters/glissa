@@ -104,7 +104,7 @@ test('ORDER CONTRACT: getOutputOffset already includes the just-emitted chunk in
   assert.equal(offsetAtEmit, 5, 'ring push + total increment happened BEFORE emit("data")');
 });
 
-test("start() resets the output total to 0 and emits 'rebaseline'", () => {
+test("start() resets the output total to 0 and emits 'rebaseline'", async () => {
   const s = newSession();
   s._handlePtyData('some prior output');
   assert.ok(s.getOutputOffset() > 0, 'precondition: total advanced');
@@ -112,7 +112,7 @@ test("start() resets the output total to 0 and emits 'rebaseline'", () => {
   let rebaselined = 0;
   s.on('rebaseline', () => { rebaselined++; });
   try {
-    s.start(); // re-base (spawns the fake PTY)
+    await s.start(); // start() is async; awaiting re-bases (spawns the fake PTY)
     assert.equal(rebaselined, 1, "start() emitted 'rebaseline' exactly once");
     assert.equal(s.getOutputOffset(), 0, 'monotonic total reset to 0 on (re)start');
   } finally {

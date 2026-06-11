@@ -29,7 +29,7 @@ function fakePty(resizes) {
   };
 }
 
-function startedSession(resizes) {
+async function startedSession(resizes) {
   const s = new Session({
     id: 'resize-test',
     name: 'resize-test',
@@ -37,15 +37,15 @@ function startedSession(resizes) {
     spawnCommand: { path: process.execPath, kind: 'exe' },
     ptySpawn: () => fakePty(resizes),
   });
-  s.start(); // assigns this.ptyProcess synchronously
+  await s.start(); // start() is async (worktree provision await); awaiting assigns this.ptyProcess
   return s;
 }
 
 // The three states that used to defer the resize, plus RUNNING as the control.
 for (const state of [STATES.WAITING, STATES.IDLE, STATES.COMPLETE, STATES.RUNNING]) {
-  test(`resize() reaches the PTY immediately while ${state}`, () => {
+  test(`resize() reaches the PTY immediately while ${state}`, async () => {
     const resizes = [];
-    const s = startedSession(resizes);
+    const s = await startedSession(resizes);
     try {
       s.state = state;
       resizes.length = 0; // isolate from any resize during start()
@@ -62,7 +62,7 @@ for (const state of [STATES.WAITING, STATES.IDLE, STATES.COMPLETE, STATES.RUNNIN
 // the 80x24 default. Otherwise Claude initializes its TUI at 80x24 and renders
 // cramped, since the lone post-reconnect resize races startup and is never
 // retried once the browser-side fit cache matches.
-test('restart respawns the PTY at the last resized dimensions', () => {
+test('restart respawns the PTY at the last resized dimensions', async () => {
   const spawnOpts = [];
   const s = new Session({
     id: 'respawn-size-test',
@@ -75,15 +75,17 @@ test('restart respawns the PTY at the last resized dimensions', () => {
     },
   });
   try {
-    s.start(); // first spawn: no size known yet -> 80x24 default
+    await s.start(); // first spawn: no size known yet -> 80x24 default
     assert.deepEqual(spawnOpts.at(-1), { cols: 80, rows: 24 },
       'first spawn should use the 80x24 default');
 
     s.resize(120, 40);
 
-    // restart() only fires from DONE/FAILED.
+    // restart() only fires from DONE/FAILED. It calls the async start() fire-and-forget, so yield the
+    // microtask queue for the respawn to land before asserting the new spawn dimensions.
     s.state = STATES.DONE;
     s.restart();
+    await new Promise((r) => setImmediate(r));
     assert.deepEqual(spawnOpts.at(-1), { cols: 120, rows: 40 },
       'restart should respawn at the last resized size, not 80x24');
   } finally {

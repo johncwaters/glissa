@@ -34,11 +34,11 @@ function makeSession(writes) {
   });
 }
 
-test('write() reaches a live pty, then stops after kill()', () => {
+test('write() reaches a live pty, then stops after kill()', async () => {
   const writes = [];
   const s = makeSession(writes);
   try {
-    s.start(); // spawns -> _ptyAlive = true
+    await s.start(); // start() is async; awaiting spawns -> _ptyAlive = true
     s.write('before');
     assert.deepEqual(writes, ['before'], 'a live pty should receive writes');
 

@@ -18,6 +18,12 @@ const { Session } = require('../sessions');
 const { STATES } = require('../shared/states');
 const WIN = process.platform === 'win32';
 
+// The finish/park settled branch and the once("exit") handler now fire an ASYNC reset (merge/discard ->
+// resetToDormant) and clear the teardown-mutex flag in a .finally(). Yield the microtask/timer queue so
+// those settle before a synchronous state assertion. The injected fake engine resolves immediately, so a
+// single setImmediate hop drains the awaited chain.
+const drain = () => new Promise((r) => setImmediate(r));
+
 function hasGit() {
   try { execFileSync('git', ['--version'], { stdio: 'ignore' }); return true; } catch { return false; }
 }
@@ -101,7 +107,7 @@ function makeSession(extra = {}) {
   });
 }
 
-test('start() provisions a worktree off the integration branch and spawns the PTY in it', { skip: !WIN }, () => {
+test('start() provisions a worktree off the integration branch and spawns the PTY in it', { skip: !WIN }, async () => {
   const wt = realWorktreeDir();
   const gw = fakeGitWorkspace({ worktreeDir: wt });
   const spawned = [];
@@ -110,7 +116,7 @@ test('start() provisions a worktree off the integration branch and spawns the PT
     ptySpawn: (file, args, optsArg) => { spawned.push(optsArg); return fakePty(); },
   });
   try {
-    s.start();
+    await s.start();
     assert.equal(gw.calls.create.length, 1, 'worktree created once');
     assert.equal(gw.calls.create[0].teamId, 'session');
     assert.equal(gw.calls.create[0].label, 'wt-sess');
@@ -129,7 +135,7 @@ test('start() provisions a worktree off the integration branch and spawns the PT
   }
 });
 
-test('start() BLOCKS when the integration branch is missing - stays DORMANT, no spawn, notice set', () => {
+test('start() BLOCKS when the integration branch is missing - stays DORMANT, no spawn, notice set', async () => {
   const gw = fakeGitWorkspace({ createResult: { cwd: process.cwd(), isGit: false, reason: 'no-base-branch' } });
   const spawned = [];
   let blocked = null;
@@ -139,7 +145,7 @@ test('start() BLOCKS when the integration branch is missing - stays DORMANT, no 
   });
   s.on('worktree-blocked', (e) => { blocked = e; });
   try {
-    s.start();
+    await s.start();
     assert.equal(spawned.length, 0, 'PTY never spawned (never ran in the real tree)');
     assert.equal(s.state, STATES.DORMANT, 'stays DORMANT');
     assert.ok(s.worktreeNotice && /not found/i.test(s.worktreeNotice), 'actionable notice set');
@@ -150,7 +156,7 @@ test('start() BLOCKS when the integration branch is missing - stays DORMANT, no 
   }
 });
 
-test('start() runs in place for a non-git path (the only in-place fallback)', { skip: !WIN }, () => {
+test('start() runs in place for a non-git path (the only in-place fallback)', { skip: !WIN }, async () => {
   const gw = fakeGitWorkspace({ createResult: { cwd: process.cwd(), isGit: false } });
   const spawned = [];
   const s = makeSession({
@@ -158,7 +164,7 @@ test('start() runs in place for a non-git path (the only in-place fallback)', { 
     ptySpawn: (file, args, optsArg) => { spawned.push(optsArg); return fakePty(); },
   });
   try {
-    s.start();
+    await s.start();
     assert.equal(s.worktreeDir, null, 'no worktree');
     assert.equal(s.isWorktree, false);
     assert.equal(spawned.length, 1);
@@ -169,13 +175,13 @@ test('start() runs in place for a non-git path (the only in-place fallback)', { 
   }
 });
 
-test('restart REUSES the existing worktree (never silently recreates over in-progress work)', { skip: !WIN }, () => {
+test('restart REUSES the existing worktree (never silently recreates over in-progress work)', { skip: !WIN }, async () => {
   const wt = realWorktreeDir();
   const gw = fakeGitWorkspace({ worktreeDir: wt });
   const s = makeSession({ gitWorkspace: gw, integrationBranch: 'develop', ptySpawn: () => fakePty() });
   try {
-    s.start();
-    s.start(); // restart funnels through start()
+    await s.start();
+    await s.start(); // restart funnels through start()
     assert.equal(gw.calls.create.length, 1, 'worktree created once across two starts');
     assert.equal(s.worktreeDir, wt);
   } finally {
@@ -184,15 +190,15 @@ test('restart REUSES the existing worktree (never silently recreates over in-pro
   }
 });
 
-test('mergeWorktree delegates to the engine and clears the worktree on success', { skip: !WIN }, () => {
+test('mergeWorktree delegates to the engine and clears the worktree on success', { skip: !WIN }, async () => {
   const wt = realWorktreeDir();
   const gw = fakeGitWorkspace({ worktreeDir: wt, mergeResult: { merged: true, branch: null } });
   const statuses = [];
   const s = makeSession({ gitWorkspace: gw, integrationBranch: 'develop', ptySpawn: () => fakePty() });
   s.on('merge-status', (e) => statuses.push(e.mergeStatus));
   try {
-    s.start();
-    const r = s.mergeWorktree();
+    await s.start();
+    const r = await s.mergeWorktree();
     assert.equal(r.merged, true);
     assert.equal(gw.calls.mergeBack.length, 1);
     assert.equal(gw.calls.mergeBack[0].targetBranch, 'develop');
@@ -205,13 +211,13 @@ test('mergeWorktree delegates to the engine and clears the worktree on success',
   }
 });
 
-test('mergeWorktree parks on a conflict (worktree preserved)', { skip: !WIN }, () => {
+test('mergeWorktree parks on a conflict (worktree preserved)', { skip: !WIN }, async () => {
   const wt = realWorktreeDir();
   const gw = fakeGitWorkspace({ worktreeDir: wt, mergeResult: { merged: false, parked: true, reason: 'rebase-conflict', branch: 'glissa/session/wt-sess' } });
   const s = makeSession({ gitWorkspace: gw, integrationBranch: 'develop', ptySpawn: () => fakePty() });
   try {
-    s.start();
-    const r = s.mergeWorktree();
+    await s.start();
+    const r = await s.mergeWorktree();
     assert.equal(r.merged, false);
     assert.equal(s.mergeStatus, 'parked');
     assert.equal(s.worktreeDir, wt, 'parked worktree preserved');
@@ -221,7 +227,7 @@ test('mergeWorktree parks on a conflict (worktree preserved)', { skip: !WIN }, (
   }
 });
 
-test('mergeAndContinue from COMPLETE merges into develop but KEEPS the worktree + session alive', { skip: !WIN }, () => {
+test('mergeAndContinue from COMPLETE merges into develop but KEEPS the worktree + session alive', { skip: !WIN }, async () => {
   const wt = realWorktreeDir();
   const gw = fakeGitWorkspace({
     worktreeDir: wt,
@@ -231,9 +237,9 @@ test('mergeAndContinue from COMPLETE merges into develop but KEEPS the worktree 
   const s = makeSession({ gitWorkspace: gw, integrationBranch: 'develop', ptySpawn: () => fakePty() });
   s.on('merge-status', (e) => statuses.push(e.mergeStatus));
   try {
-    s.start();
+    await s.start();
     s.state = STATES.COMPLETE; // a completed turn, PTY still alive in the worktree
-    const r = s.mergeAndContinue();
+    const r = await s.mergeAndContinue();
     assert.equal(r.merged, true);
     assert.equal(gw.calls.mergeKeep.length, 1, 'delegated to the keep-worktree merge');
     assert.equal(gw.calls.mergeKeep[0].targetBranch, 'develop');
@@ -247,7 +253,7 @@ test('mergeAndContinue from COMPLETE merges into develop but KEEPS the worktree 
   } finally { s.destroy(); fs.rmSync(wt, { recursive: true, force: true }); }
 });
 
-test('mergeAndContinue surfaces a stash-restore conflict as pending-review (not a silent clean none)', { skip: !WIN }, () => {
+test('mergeAndContinue surfaces a stash-restore conflict as pending-review (not a silent clean none)', { skip: !WIN }, async () => {
   const wt = realWorktreeDir();
   const gw = fakeGitWorkspace({
     worktreeDir: wt,
@@ -257,9 +263,9 @@ test('mergeAndContinue surfaces a stash-restore conflict as pending-review (not 
   const s = makeSession({ gitWorkspace: gw, integrationBranch: 'develop', ptySpawn: () => fakePty() });
   s.on('merge-status', (e) => statuses.push(e));
   try {
-    s.start();
+    await s.start();
     s.state = STATES.COMPLETE;
-    const r = s.mergeAndContinue();
+    const r = await s.mergeAndContinue();
     assert.equal(r.merged, true);
     assert.equal(s.baseSha, 'newbase', 'still tracks the new integration tip it was rebased onto');
     assert.equal(s.mergeStatus, 'pending-review', 'the reapplied-with-conflicts worktree is surfaced');
@@ -268,14 +274,14 @@ test('mergeAndContinue surfaces a stash-restore conflict as pending-review (not 
   } finally { s.destroy(); fs.rmSync(wt, { recursive: true, force: true }); }
 });
 
-test('mergeAndContinue refuses while actively RUNNING (mid-edit; no merge)', { skip: !WIN }, () => {
+test('mergeAndContinue refuses while actively RUNNING (mid-edit; no merge)', { skip: !WIN }, async () => {
   const wt = realWorktreeDir();
   const gw = fakeGitWorkspace({ worktreeDir: wt });
   const s = makeSession({ gitWorkspace: gw, integrationBranch: 'develop', ptySpawn: () => fakePty() });
   try {
-    s.start();
+    await s.start();
     s.state = STATES.RUNNING;
-    const r = s.mergeAndContinue();
+    const r = await s.mergeAndContinue();
     assert.equal(r.merged, false);
     assert.equal(r.reason, 'not-continuable');
     assert.equal(gw.calls.mergeKeep.length, 0, 'no merge attempted mid-work');
@@ -283,7 +289,7 @@ test('mergeAndContinue refuses while actively RUNNING (mid-edit; no merge)', { s
   } finally { s.destroy(); fs.rmSync(wt, { recursive: true, force: true }); }
 });
 
-test('mergeAndContinue from WAITING merges (paused awaiting the operator is quiescent, not working)', { skip: !WIN }, () => {
+test('mergeAndContinue from WAITING merges (paused awaiting the operator is quiescent, not working)', { skip: !WIN }, async () => {
   const wt = realWorktreeDir();
   const gw = fakeGitWorkspace({
     worktreeDir: wt,
@@ -291,9 +297,9 @@ test('mergeAndContinue from WAITING merges (paused awaiting the operator is quie
   });
   const s = makeSession({ gitWorkspace: gw, integrationBranch: 'develop', ptySpawn: () => fakePty() });
   try {
-    s.start();
+    await s.start();
     s.state = STATES.WAITING; // turn ended on a question; the agent is parked waiting for the operator, not editing
-    const r = s.mergeAndContinue();
+    const r = await s.mergeAndContinue();
     assert.equal(r.merged, true, 'a quiescent WAITING session is mergeable, same as IDLE/COMPLETE');
     assert.equal(gw.calls.mergeKeep.length, 1, 'delegated to the keep-worktree merge');
     assert.equal(s.worktreeDir, wt, 'worktree kept alive so the session keeps working');
@@ -301,7 +307,7 @@ test('mergeAndContinue from WAITING merges (paused awaiting the operator is quie
   } finally { s.destroy(); fs.rmSync(wt, { recursive: true, force: true }); }
 });
 
-test('mergeAndContinue parks on a rebase conflict (worktree preserved, session continues)', { skip: !WIN }, () => {
+test('mergeAndContinue parks on a rebase conflict (worktree preserved, session continues)', { skip: !WIN }, async () => {
   const wt = realWorktreeDir();
   const gw = fakeGitWorkspace({
     worktreeDir: wt,
@@ -309,9 +315,9 @@ test('mergeAndContinue parks on a rebase conflict (worktree preserved, session c
   });
   const s = makeSession({ gitWorkspace: gw, integrationBranch: 'develop', ptySpawn: () => fakePty() });
   try {
-    s.start();
+    await s.start();
     s.state = STATES.IDLE;
-    const r = s.mergeAndContinue();
+    const r = await s.mergeAndContinue();
     assert.equal(r.merged, false);
     assert.equal(s.mergeStatus, 'parked');
     assert.equal(s.worktreeDir, wt, 'parked worktree preserved');
@@ -319,7 +325,7 @@ test('mergeAndContinue parks on a rebase conflict (worktree preserved, session c
   } finally { s.destroy(); fs.rmSync(wt, { recursive: true, force: true }); }
 });
 
-test('pasteMergePrompt: a parked session pastes a context-rich merge prompt into its PTY (bracketed paste)', { skip: !WIN }, () => {
+test('pasteMergePrompt: a parked session pastes a context-rich merge prompt into its PTY (bracketed paste)', { skip: !WIN }, async () => {
   const wt = realWorktreeDir();
   const gw = fakeGitWorkspace({
     worktreeDir: wt,
@@ -328,9 +334,9 @@ test('pasteMergePrompt: a parked session pastes a context-rich merge prompt into
   const writes = [];
   const s = makeSession({ gitWorkspace: gw, integrationBranch: 'develop', ptySpawn: () => capturingPty(writes) });
   try {
-    s.start();
+    await s.start();
     s.state = STATES.IDLE;
-    s.mergeAndContinue(); // -> parked; stores reason + conflicts for the handoff
+    await s.mergeAndContinue(); // -> parked; stores reason + conflicts for the handoff
     assert.equal(s.mergeStatus, 'parked');
     assert.deepEqual(s.mergeConflicts, ['src/a.js', 'src/b.js']);
 
@@ -346,20 +352,20 @@ test('pasteMergePrompt: a parked session pastes a context-rich merge prompt into
   } finally { s.destroy(); fs.rmSync(wt, { recursive: true, force: true }); }
 });
 
-test('pasteMergePrompt: refused when not parked (no stray paste into a clean session)', { skip: !WIN }, () => {
+test('pasteMergePrompt: refused when not parked (no stray paste into a clean session)', { skip: !WIN }, async () => {
   const wt = realWorktreeDir();
   const gw = fakeGitWorkspace({ worktreeDir: wt });
   const writes = [];
   const s = makeSession({ gitWorkspace: gw, integrationBranch: 'develop', ptySpawn: () => capturingPty(writes) });
   try {
-    s.start();
+    await s.start();
     s.state = STATES.IDLE; // not parked
     assert.deepEqual(s.pasteMergePrompt(), { ok: false, reason: 'not-parked' });
     assert.equal(writes.length, 0, 'nothing written');
   } finally { s.destroy(); fs.rmSync(wt, { recursive: true, force: true }); }
 });
 
-test('adoptWorktree re-attaches an on-disk worktree as pending-review (restart re-adoption)', { skip: !WIN }, () => {
+test('adoptWorktree re-attaches an on-disk worktree as pending-review (restart re-adoption)', { skip: !WIN }, async () => {
   const wt = realWorktreeDir();
   const gw = fakeGitWorkspace({ worktreeDir: wt, mergeResult: { merged: true, branch: null } });
   const statuses = [];
@@ -372,7 +378,7 @@ test('adoptWorktree re-attaches an on-disk worktree as pending-review (restart r
     assert.equal(s.mergeStatus, 'pending-review');
     assert.equal(s.toSnapshot().mergeStatus, 'pending-review');
     // An adopted worktree can still be merged: it delegates to the engine with the reconstructed workspace.
-    s.mergeWorktree();
+    await s.mergeWorktree();
     assert.equal(gw.calls.mergeBack.length, 1);
     assert.equal(gw.calls.mergeBack[0].targetBranch, 'develop');
   } finally {
@@ -794,13 +800,13 @@ test('two-bases edge: integration already contains the commits demotes, then mer
     await s.checkWorktreeChange();
     assert.equal(s.mergeStatus, 'pending-review', 'benign demotion fires (ahead vs stale upstream, behind 0 vs develop)');
     s.state = STATES.IDLE; // quiescent live session, or mergeAndContinue returns not-continuable
-    const r = s.mergeAndContinue();
+    const r = await s.mergeAndContinue();
     assert.equal(r.reason, 'nothing-to-commit');
     assert.equal(s.mergeStatus, 'none', 'one click clears the gate; no demote-then-repark loop');
   } finally { s.destroy(); fs.rmSync(repo, { recursive: true, force: true }); }
 });
 
-test('resetToDormant: returns to DORMANT only when settled (PTY dead + no worktree), else no-op', () => {
+test('resetToDormant: returns to DORMANT only when settled (PTY dead + no worktree), else no-op', async () => {
   { // allowed: finished, PTY dead, worktree already merged/discarded
     const s = makeSession();
     try {
@@ -827,7 +833,7 @@ test('resetToDormant: returns to DORMANT only when settled (PTY dead + no worktr
   }
 });
 
-test('finishAndMerge refuses while actively RUNNING (mid-work, no merge)', () => {
+test('finishAndMerge refuses while actively RUNNING (mid-work, no merge)', async () => {
   const s = makeSession();
   try {
     s.state = STATES.RUNNING;
@@ -838,29 +844,30 @@ test('finishAndMerge refuses while actively RUNNING (mid-work, no merge)', () =>
   } finally { s.destroy(); }
 });
 
-test('finishAndMerge from DONE merges immediately and resets to dormant', { skip: !WIN }, () => {
+test('finishAndMerge from DONE merges immediately and resets to dormant', { skip: !WIN }, async () => {
   const wt = realWorktreeDir();
   const gw = fakeGitWorkspace({ worktreeDir: wt, mergeResult: { merged: true, branch: null } });
   const s = makeSession({ gitWorkspace: gw, integrationBranch: 'develop', ptySpawn: () => fakePty() });
   try {
-    s.start();              // provisions the worktree (_workspace set)
+    await s.start();              // provisions the worktree (_workspace set)
     s.kill = () => {};       // keep destroy()'s kill from invoking a real taskkill
     s.ptyProcess = null;     // simulate the PTY having exited
     s.state = STATES.DONE;
     s.mergeStatus = 'pending-review';
     const r = s.finishAndMerge();
     assert.equal(r.ok, true);
+    await drain(); // the settled-branch reset is async (fire-and-forget + .finally clear)
     assert.equal(gw.calls.mergeBack.length, 1, 'merged once');
     assert.equal(s.state, STATES.DORMANT, 'returned to dormant after a clean merge');
   } finally { s.destroy(); fs.rmSync(wt, { recursive: true, force: true }); }
 });
 
-test('finishAndMerge from COMPLETE ends the session, then merges + resets on exit', { skip: !WIN }, () => {
+test('finishAndMerge from COMPLETE ends the session, then merges + resets on exit', { skip: !WIN }, async () => {
   const wt = realWorktreeDir();
   const gw = fakeGitWorkspace({ worktreeDir: wt, mergeResult: { merged: true, branch: null } });
   const s = makeSession({ gitWorkspace: gw, integrationBranch: 'develop', ptySpawn: () => fakePty() });
   try {
-    s.start();
+    await s.start();
     s.state = STATES.COMPLETE; // a completed turn with the PTY still alive
     let killed = false;
     s.kill = () => { killed = true; }; // stub real taskkill; we drive the exit by hand below
@@ -871,24 +878,25 @@ test('finishAndMerge from COMPLETE ends the session, then merges + resets on exi
     assert.equal(gw.calls.mergeBack.length, 0, 'not merged yet (still settling)');
     // Simulate _handlePtyExit: worktree settles to pending-review, PTY cleared, exit emitted.
     s.hasChanges = () => true;
-    s._settleWorktreeOnExit();
+    await s._settleWorktreeOnExit();
     s.ptyProcess = null;
     s.emit('exit', { exitCode: 0 });
+    await drain(); // the once("exit") handler awaits the merge+reset before clearing _finishing
     assert.equal(gw.calls.mergeBack.length, 1, 'merged after the exit settled the worktree');
     assert.equal(s.state, STATES.DORMANT, 'returned to dormant');
   } finally { s.destroy(); fs.rmSync(wt, { recursive: true, force: true }); }
 });
 
-test('_settleWorktreeOnExit: a changed worktree -> pending-review; an unchanged one -> silent discard', { skip: !WIN }, () => {
+test('_settleWorktreeOnExit: a changed worktree -> pending-review; an unchanged one -> silent discard', { skip: !WIN }, async () => {
   { // changed
     const wt = realWorktreeDir();
     const gw = fakeGitWorkspace({ worktreeDir: wt });
     const s = makeSession({ gitWorkspace: gw, integrationBranch: 'develop', ptySpawn: () => fakePty() });
     try {
-      s.start();
+      await s.start();
       s.hasChanges = () => true; // stub the porcelain probe
       s.state = STATES.DONE;     // simulate a real PTY exit
-      s._settleWorktreeOnExit();
+      await s._settleWorktreeOnExit();
       assert.equal(s.mergeStatus, 'pending-review');
       assert.equal(s.worktreeDir, wt, 'worktree kept for review');
       assert.equal(gw.calls.discard.length, 0);
@@ -899,10 +907,10 @@ test('_settleWorktreeOnExit: a changed worktree -> pending-review; an unchanged 
     const gw = fakeGitWorkspace({ worktreeDir: wt });
     const s = makeSession({ gitWorkspace: gw, integrationBranch: 'develop', ptySpawn: () => fakePty() });
     try {
-      s.start();
+      await s.start();
       s.hasChanges = () => false;
       s.state = STATES.DONE;
-      s._settleWorktreeOnExit();
+      await s._settleWorktreeOnExit();
       assert.equal(s.mergeStatus, 'none');
       assert.equal(s.worktreeDir, null, 'empty worktree auto-discarded');
       assert.equal(gw.calls.discard.length, 1);
@@ -912,7 +920,7 @@ test('_settleWorktreeOnExit: a changed worktree -> pending-review; an unchanged 
 
 // --- parkToDormant: return a quiescent/finished session to DORMANT (discard-with-confirm on the UI) ---
 
-test('parkToDormant refuses RUNNING and the startup/dormant states (no-op, state untouched)', () => {
+test('parkToDormant refuses RUNNING and the startup/dormant states (no-op, state untouched)', async () => {
   for (const st of [STATES.RUNNING, STATES.INITIALIZING, STATES.STARTING, STATES.DORMANT]) {
     const s = makeSession();
     try {
@@ -925,7 +933,7 @@ test('parkToDormant refuses RUNNING and the startup/dormant states (no-op, state
   }
 });
 
-test('parkToDormant from DONE/FAILED with no worktree returns to DORMANT immediately', () => {
+test('parkToDormant from DONE/FAILED with no worktree returns to DORMANT immediately', async () => {
   for (const st of [STATES.DONE, STATES.FAILED]) {
     const s = makeSession();
     try {
@@ -938,7 +946,7 @@ test('parkToDormant from DONE/FAILED with no worktree returns to DORMANT immedia
   }
 });
 
-test('parkToDormant from a live quiescent state ends the session, then resets on exit', () => {
+test('parkToDormant from a live quiescent state ends the session, then resets on exit', async () => {
   for (const st of [STATES.WAITING, STATES.IDLE, STATES.COMPLETE]) {
     const s = makeSession();
     try {
@@ -958,18 +966,19 @@ test('parkToDormant from a live quiescent state ends the session, then resets on
   }
 });
 
-test('parkToDormant from DONE with an unmerged worktree discards it, then DORMANT', { skip: !WIN }, () => {
+test('parkToDormant from DONE with an unmerged worktree discards it, then DORMANT', { skip: !WIN }, async () => {
   const wt = realWorktreeDir();
   const gw = fakeGitWorkspace({ worktreeDir: wt });
   const s = makeSession({ gitWorkspace: gw, integrationBranch: 'develop', ptySpawn: () => fakePty() });
   try {
-    s.start();               // provisions the worktree (_workspace set)
+    await s.start();               // provisions the worktree (_workspace set)
     s.kill = () => {};
     s.ptyProcess = null;      // PTY already exited
     s.state = STATES.DONE;
     s.mergeStatus = 'pending-review'; // unmerged work on disk
     const r = s.parkToDormant();
     assert.equal(r.ok, true);
+    await drain(); // the settled-branch discard+reset is async (fire-and-forget + .finally clear)
     assert.equal(gw.calls.discard.length, 1, 'worktree discarded');
     assert.equal(s.worktreeDir, null);
     assert.equal(s.state, STATES.DORMANT);
@@ -977,12 +986,12 @@ test('parkToDormant from DONE with an unmerged worktree discards it, then DORMAN
   } finally { s.destroy(); fs.rmSync(wt, { recursive: true, force: true }); }
 });
 
-test('parkToDormant OVERRIDES a changed-tree pending-review settle and discards on exit', { skip: !WIN }, () => {
+test('parkToDormant OVERRIDES a changed-tree pending-review settle and discards on exit', { skip: !WIN }, async () => {
   const wt = realWorktreeDir();
   const gw = fakeGitWorkspace({ worktreeDir: wt });
   const s = makeSession({ gitWorkspace: gw, integrationBranch: 'develop', ptySpawn: () => fakePty() });
   try {
-    s.start();
+    await s.start();
     s.state = STATES.COMPLETE; // a completed turn, PTY still alive
     s.kill = () => {};
     const r = s.parkToDormant();
@@ -991,11 +1000,12 @@ test('parkToDormant OVERRIDES a changed-tree pending-review settle and discards 
     assert.equal(gw.calls.discard.length, 0, 'nothing discarded yet (still settling)');
     // _handlePtyExit ordering: a CHANGED tree settles to pending-review (kept) BEFORE "exit" fires...
     s.hasChanges = () => true;
-    s._settleWorktreeOnExit();
+    await s._settleWorktreeOnExit();
     assert.equal(s.mergeStatus, 'pending-review', 'settle kept the changed tree');
     assert.equal(s.worktreeDir, wt);
     s.ptyProcess = null;
     s.emit('exit', { exitCode: 0 });
+    await drain(); // the once("exit") handler awaits discard+reset before clearing _pendingPark
     // ...then Park's queued handler OVERRIDES that and discards the work (the destructive point).
     assert.equal(gw.calls.discard.length, 1, 'overrode pending-review and discarded');
     assert.equal(s.worktreeDir, null);
@@ -1004,7 +1014,7 @@ test('parkToDormant OVERRIDES a changed-tree pending-review settle and discards 
   } finally { s.destroy(); fs.rmSync(wt, { recursive: true, force: true }); }
 });
 
-test('teardown mutex: a queued park refuses a racing restart, then completes on exit', () => {
+test('teardown mutex: a queued park refuses a racing restart, then completes on exit', async () => {
   const s = makeSession();
   try {
     s.state = STATES.COMPLETE;
@@ -1027,7 +1037,7 @@ test('teardown mutex: a queued park refuses a racing restart, then completes on 
   } finally { s.destroy(); }
 });
 
-test('teardown mutex is symmetric: park and finishAndMerge mutually exclude', () => {
+test('teardown mutex is symmetric: park and finishAndMerge mutually exclude', async () => {
   { // park pending -> finishAndMerge reports in-progress
     const s = makeSession();
     try {
@@ -1053,7 +1063,7 @@ test('teardown mutex is symmetric: park and finishAndMerge mutually exclude', ()
   }
 });
 
-test('a parked session is reusable: park -> DORMANT -> start() re-spawns', { skip: !WIN }, () => {
+test('a parked session is reusable: park -> DORMANT -> start() re-spawns', { skip: !WIN }, async () => {
   const wt = realWorktreeDir();
   const gw = fakeGitWorkspace({ worktreeDir: wt });
   let spawns = 0;
@@ -1062,17 +1072,208 @@ test('a parked session is reusable: park -> DORMANT -> start() re-spawns', { ski
     ptySpawn: () => { spawns++; return fakePty(); },
   });
   try {
-    s.start();                  // spawn #1, worktree provisioned
+    await s.start();                  // spawn #1, worktree provisioned
     assert.equal(spawns, 1);
     s.kill = () => {};
     s.ptyProcess = null;
     s.state = STATES.DONE;
     s.parkToDormant();          // discards the worktree + resets
+    await drain();              // the settled-branch discard+reset is async
     assert.equal(s.state, STATES.DORMANT, 'parked');
     assert.equal(s.worktreeDir, null);
-    s.start();                  // reuse: re-forks a worktree + spawns again
+    await s.start();                  // reuse: re-forks a worktree + spawns again
     assert.equal(spawns, 2, 're-spawned after park');
     assert.equal(s.state, STATES.STARTING);
     assert.equal(gw.calls.create.length, 2, 'a fresh worktree off the integration branch');
   } finally { s.destroy(); fs.rmSync(wt, { recursive: true, force: true }); }
 });
+
+// === Item 1 async-conversion guards =====================================================
+
+// start()'s provision is now awaited; a destroy() landing in that await window must not let the spawn
+// below proceed. A create that resolves on a held deferred lets destroy() slip in mid-await.
+test('start(): destroy() during the provision await -> no spawn', { skip: !WIN }, async () => {
+  const wt = realWorktreeDir();
+  let releaseCreate;
+  const createHeld = new Promise((r) => { releaseCreate = r; });
+  let spawns = 0;
+  const gw = {
+    calls: { create: [], mergeBack: [], mergeKeep: [], discard: [] },
+    async create(args) {
+      this.calls.create.push(args);
+      await createHeld; // hold provision open so destroy() can land in the await window
+      return { cwd: wt, isGit: true, branch: `glissa/session/${args.label}`, base: args.baseBranch, baseSha: 'b' };
+    },
+    mergeBack() { return { merged: true, branch: null }; },
+    mergeKeep() { return { merged: true, kept: true }; },
+    discard() {},
+  };
+  const s = makeSession({ gitWorkspace: gw, integrationBranch: 'develop', ptySpawn: () => { spawns++; return fakePty(); } });
+  try {
+    const p = s.start();        // suspends on the held create
+    s.destroy();                 // lands during the provision await
+    releaseCreate();
+    await p;
+    await drain();
+    assert.equal(spawns, 0, 'no PTY spawned after destroy() during the provision await');
+  } finally { fs.rmSync(wt, { recursive: true, force: true }); }
+});
+
+// The re-entry guard refuses a SECOND concurrent merge on the same session (keyed strictly on 'merging'),
+// invoking the engine exactly once.
+test('mergeWorktree re-entry: a second call while merging is refused, engine invoked once', { skip: !WIN }, async () => {
+  const wt = realWorktreeDir();
+  let releaseMerge;
+  const mergeHeld = new Promise((r) => { releaseMerge = r; });
+  let mergeCalls = 0;
+  const gw = {
+    calls: { create: [], mergeBack: [], mergeKeep: [], discard: [] },
+    create(args) { this.calls.create.push(args); return { cwd: wt, isGit: true, branch: `glissa/session/${args.label}`, base: args.baseBranch, baseSha: 'b' }; },
+    async mergeBack() { mergeCalls++; await mergeHeld; return { merged: true, branch: null }; },
+    mergeKeep() { return { merged: true, kept: true }; },
+    discard() {},
+  };
+  const s = makeSession({ gitWorkspace: gw, integrationBranch: 'develop', ptySpawn: () => fakePty() });
+  try {
+    await s.start();
+    const p1 = s.mergeWorktree();        // sets 'merging', wedges in the engine
+    const r2 = await s.mergeWorktree();  // second call: refused before touching the engine
+    assert.equal(r2.merged, false);
+    assert.equal(r2.reason, 'merge-in-progress');
+    assert.equal(mergeCalls, 1, 'engine invoked exactly once');
+    releaseMerge();
+    await p1;
+  } finally { s.destroy(); fs.rmSync(wt, { recursive: true, force: true }); }
+});
+
+// The guard keys on 'merging' ONLY, so it does NOT block the legitimate finish path, which calls
+// mergeWorktree while mergeStatus is 'pending-review' (settled-on-exit). A finishAndMerge on a DONE
+// changed-tree session MUST still invoke the engine's mergeBack.
+test('mergeWorktree guard does NOT block the finish path (pending-review -> merge runs)', { skip: !WIN }, async () => {
+  const wt = realWorktreeDir();
+  const gw = fakeGitWorkspace({ worktreeDir: wt, mergeResult: { merged: true, branch: null } });
+  const s = makeSession({ gitWorkspace: gw, integrationBranch: 'develop', ptySpawn: () => fakePty() });
+  try {
+    await s.start();
+    s.kill = () => {};
+    s.ptyProcess = null;
+    s.state = STATES.DONE;
+    s.mergeStatus = 'pending-review'; // settled-on-exit, NOT 'merging'
+    const r = s.finishAndMerge();
+    assert.equal(r.ok, true);
+    await drain();
+    assert.equal(gw.calls.mergeBack.length, 1, 'the finish path runs the engine merge (guard not tripped)');
+    assert.equal(s.state, STATES.DORMANT);
+  } finally { s.destroy(); fs.rmSync(wt, { recursive: true, force: true }); }
+});
+
+// _handlePtyExit must settle the worktree BEFORE emitting "exit" (the order Park/Finish rely on). With an
+// async settle, the order is preserved via await: capture the sequence and assert settle-then-exit.
+test('_handlePtyExit: settle completes before "exit" is emitted (changed tree)', { skip: !WIN }, async () => {
+  const wt = realWorktreeDir();
+  const gw = fakeGitWorkspace({ worktreeDir: wt });
+  const s = makeSession({ gitWorkspace: gw, integrationBranch: 'develop', ptySpawn: () => fakePty() });
+  const order = [];
+  try {
+    await s.start();
+    s.hasChanges = () => true;
+    // Mark settle via the merge-status broadcast (pending-review fires inside _settleWorktreeOnExit).
+    s.on('merge-status', (e) => { if (e.mergeStatus === 'pending-review') order.push('settle'); });
+    s.on('exit', () => order.push('exit'));
+    s.state = STATES.IDLE; // a live state; the exit transition lands on DONE so settle runs
+    await s._handlePtyExit(0, null);
+    assert.deepEqual(order, ['settle', 'exit'], 'settle precedes the exit emit');
+  } finally { s.destroy(); fs.rmSync(wt, { recursive: true, force: true }); }
+});
+
+// A settle that REJECTS must NOT skip the exit emit, or a queued once("exit") handler never fires and the
+// teardown mutex (_finishing/_pendingPark) is stranded -> permanent deadlock. The exit must still fire and
+// a pending flag must clear.
+test('_handlePtyExit: a rejecting settle still emits "exit" and clears the teardown flag (no deadlock)', { skip: !WIN }, async () => {
+  const wt = realWorktreeDir();
+  const gw = fakeGitWorkspace({ worktreeDir: wt });
+  const s = makeSession({ gitWorkspace: gw, integrationBranch: 'develop', ptySpawn: () => fakePty() });
+  try {
+    await s.start();
+    // Force the settle path to reject (an unchanged tree calls discard; make it throw).
+    s.hasChanges = () => false;
+    s._gitWorkspace.discard = () => Promise.reject(new Error('settle boom'));
+    let exited = false;
+    s._finishing = true; // simulate a queued finish whose flag must still clear via its once-handler
+    s.once('exit', () => { exited = true; s._finishing = false; });
+    s.state = STATES.DONE;
+    await s._handlePtyExit(0, null);
+    await drain();
+    assert.equal(exited, true, 'exit emitted despite the settle rejection');
+    assert.equal(s._finishing, false, 'the teardown flag cleared (no deadlock)');
+  } finally { s.destroy(); fs.rmSync(wt, { recursive: true, force: true }); }
+});
+
+// The settled (DONE/FAILED) branch of finishAndMerge now sets _finishing synchronously before the async
+// reset, so a SECOND click landing while the first reset is awaiting is refused (in-progress) and the
+// engine merge runs once.
+test('finishAndMerge settled-branch mutex: a double-click is refused, engine merges once', { skip: !WIN }, async () => {
+  const wt = realWorktreeDir();
+  let releaseMerge;
+  const mergeHeld = new Promise((r) => { releaseMerge = r; });
+  let mergeCalls = 0;
+  const gw = {
+    calls: { create: [], mergeBack: [], mergeKeep: [], discard: [] },
+    create(args) { this.calls.create.push(args); return { cwd: wt, isGit: true, branch: `glissa/session/${args.label}`, base: args.baseBranch, baseSha: 'b' }; },
+    async mergeBack() { mergeCalls++; await mergeHeld; return { merged: true, branch: null }; },
+    mergeKeep() { return { merged: true, kept: true }; },
+    discard() {},
+  };
+  const s = makeSession({ gitWorkspace: gw, integrationBranch: 'develop', ptySpawn: () => fakePty() });
+  try {
+    await s.start();
+    s.kill = () => {};
+    s.ptyProcess = null;
+    s.state = STATES.DONE;
+    s.mergeStatus = 'pending-review';
+    const r1 = s.finishAndMerge();   // settled branch: sets _finishing, fires the async (held) reset
+    assert.equal(r1.ok, true);
+    const r2 = s.finishAndMerge();   // second click while the reset awaits: refused
+    assert.equal(r2.ok, false);
+    assert.equal(r2.reason, 'in-progress');
+    releaseMerge();
+    await drain();
+    assert.equal(mergeCalls, 1, 'engine merge ran exactly once');
+    assert.equal(s._finishing, false, 'flag cleared after the reset resolved');
+    assert.equal(s.state, STATES.DORMANT);
+  } finally { s.destroy(); fs.rmSync(wt, { recursive: true, force: true }); }
+});
+
+// Same shape for parkToDormant's settled-branch discard.
+test('parkToDormant settled-branch mutex: a double-click is refused, engine discards once', { skip: !WIN }, async () => {
+  const wt = realWorktreeDir();
+  let releaseDiscard;
+  const discardHeld = new Promise((r) => { releaseDiscard = r; });
+  let discardCalls = 0;
+  const gw = {
+    calls: { create: [], mergeBack: [], mergeKeep: [], discard: [] },
+    create(args) { this.calls.create.push(args); return { cwd: wt, isGit: true, branch: `glissa/session/${args.label}`, base: args.baseBranch, baseSha: 'b' }; },
+    mergeBack() { return { merged: true, branch: null }; },
+    mergeKeep() { return { merged: true, kept: true }; },
+    async discard() { discardCalls++; await discardHeld; },
+  };
+  const s = makeSession({ gitWorkspace: gw, integrationBranch: 'develop', ptySpawn: () => fakePty() });
+  try {
+    await s.start();
+    s.kill = () => {};
+    s.ptyProcess = null;
+    s.state = STATES.DONE;
+    s.mergeStatus = 'pending-review';
+    const r1 = s.parkToDormant();
+    assert.equal(r1.ok, true);
+    const r2 = s.parkToDormant();
+    assert.equal(r2.ok, false);
+    assert.equal(r2.reason, 'in-progress');
+    releaseDiscard();
+    await drain();
+    assert.equal(discardCalls, 1, 'engine discard ran exactly once');
+    assert.equal(s._pendingPark, false, 'flag cleared after the reset resolved');
+    assert.equal(s.state, STATES.DORMANT);
+  } finally { s.destroy(); fs.rmSync(wt, { recursive: true, force: true }); }
+});
+

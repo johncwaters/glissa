@@ -471,12 +471,12 @@ class Session extends EventEmitter {
   // when isolation is required but BLOCKED (integration branch absent): the session then stays put with
   // a surfaced notice and never runs in the operator's real tree. Isolation disabled (no injected
   // gitWorkspace/integrationBranch) or a non-git path -> runs in place (returns true, worktreeDir null).
-  _provisionWorktree() {
+  async _provisionWorktree() {
     if (!this._gitWorkspace || !this._integrationBranch) return true;
     if (this.worktreeDir && fs.existsSync(this.worktreeDir)) return true; // reuse across restart/wake
     let ws;
     try {
-      ws = this._gitWorkspace.create({
+      ws = await this._gitWorkspace.create({
         projectPath: this.path,
         teamId: "session",
         label: this.id,
@@ -513,7 +513,7 @@ class Session extends EventEmitter {
   // On a real PTY exit (DONE/FAILED) decide the review gate: a changed worktree becomes
   // pending-review (the operator merges/discards); an unchanged one (chat/research) is discarded
   // silently so it leaves no branch. Transient COMPLETE never reaches here (it has no PTY exit).
-  _settleWorktreeOnExit() {
+  async _settleWorktreeOnExit() {
     if (!this._gitWorkspace || !this._workspace) return;
     if (this.state !== STATES.DONE && this.state !== STATES.FAILED) return;
     if (this.hasChanges()) {
@@ -521,7 +521,7 @@ class Session extends EventEmitter {
       this._setMergeStatus("pending-review");
     } else {
       this._stopWorktreeWatcher(); // dir about to be removed
-      try { this._gitWorkspace.discard({ projectPath: this.path, workspace: this._workspace }); } catch { /* best-effort */ }
+      try { await this._gitWorkspace.discard({ projectPath: this.path, workspace: this._workspace }); } catch { /* best-effort */ }
       this._workspace = null;
       this.worktreeDir = null;
       this.commonGitDir = null;
@@ -769,12 +769,16 @@ class Session extends EventEmitter {
 
   // Operator action: rebase-then-FF merge the session's worktree into the integration branch, then
   // tear it down. On a conflict/lost-FF the branch PARKS (worktree preserved). Returns the engine result.
-  mergeWorktree() {
+  async mergeWorktree() {
     if (!this._gitWorkspace || !this._workspace) return { merged: false, reason: "no-worktree" };
+    // Re-entry guard: a second merge click while a merge is already in flight would race the engine on
+    // the same worktree. Keyed STRICTLY on 'merging' so it never blocks the legitimate finish path, which
+    // calls mergeWorktree while mergeStatus is 'pending-review' (settled-on-exit) or 'none'.
+    if (this.mergeStatus === "merging") return { merged: false, reason: "merge-in-progress" };
     this._setMergeStatus("merging");
     let r;
     try {
-      r = this._gitWorkspace.mergeBack({
+      r = await this._gitWorkspace.mergeBack({
         projectPath: this.path,
         workspace: this._workspace,
         targetBranch: this._integrationBranch,
@@ -805,16 +809,18 @@ class Session extends EventEmitter {
   // while the PTY is actively working (RUNNING: we must not rewrite a worktree mid-edit); a session that
   // paused awaiting the operator (WAITING) is quiescent and mergeable, same as IDLE/COMPLETE. A rebase
   // conflict / lost FF PARKS (worktree preserved). Returns the engine result.
-  mergeAndContinue() {
+  async mergeAndContinue() {
     if (this._destroyed) return { merged: false, reason: "destroyed" };
     if (!this._gitWorkspace || !this._workspace) return { merged: false, reason: "no-worktree" };
     if (!MERGEABLE_LIVE_STATES.includes(this.state)) {
       return { merged: false, reason: "not-continuable" };
     }
+    // Re-entry guard (see mergeWorktree): refuse a second concurrent merge on the same worktree.
+    if (this.mergeStatus === "merging") return { merged: false, reason: "merge-in-progress" };
     this._setMergeStatus("merging");
     let r;
     try {
-      r = this._gitWorkspace.mergeKeep({
+      r = await this._gitWorkspace.mergeKeep({
         projectPath: this.path,
         workspace: this._workspace,
         targetBranch: this._integrationBranch,
@@ -858,10 +864,10 @@ class Session extends EventEmitter {
   }
 
   // Operator action: throw the worktree away unmerged (junction-safe), reset to no-worktree.
-  discardWorktree() {
+  async discardWorktree() {
     this._stopWorktreeWatcher(); // stop before the dir is removed (fs.watch would ENOENT)
     if (this._gitWorkspace && this._workspace) {
-      try { this._gitWorkspace.discard({ projectPath: this.path, workspace: this._workspace }); } catch { /* best-effort */ }
+      try { await this._gitWorkspace.discard({ projectPath: this.path, workspace: this._workspace }); } catch { /* best-effort */ }
     }
     this._workspace = null;
     this.worktreeDir = null;
@@ -997,7 +1003,7 @@ class Session extends EventEmitter {
     return true;
   }
 
-  start() {
+  async start() {
     if (this._destroyed) return;
     // Defensive cleanup: if a prior PTY is still alive (e.g. _handlePtyExit
     // hasn't propagated yet after a sleep-kill race), force-kill it before
@@ -1020,7 +1026,11 @@ class Session extends EventEmitter {
     // Provision (or reuse) this session's isolated worktree before spawn. All spawn entry points
     // funnel through start(), so each inherits isolation. A blocked provision (integration branch
     // absent) leaves the session DORMANT with a notice and does NOT run in the operator's real tree.
-    if (!this._provisionWorktree()) return;
+    if (!(await this._provisionWorktree())) return;
+    // Re-check destruction AFTER the provision await: a destroy() that landed during the microtask gap
+    // must not let the spawn below proceed (the teardown mutex blocks lifecycle re-entry, but a direct
+    // destroy() races this await window). Guards against a double-spawn / spawn-after-destroy.
+    if (this._destroyed) return;
     // Listen for changes in the (isolated) worktree so the review diff stays live without a manual
     // refresh. Idempotent across restart-reuse; a non-git in-place session has no worktreeDir to watch.
     if (this.worktreeDir) this._startWorktreeWatcher();
@@ -1256,7 +1266,7 @@ class Session extends EventEmitter {
     }
   }
 
-  _handlePtyExit(exitCode, signal) {
+  async _handlePtyExit(exitCode, signal) {
     const pid = this.ptyProcess ? this.ptyProcess.pid : null;
     this._titleSource.reset();
     this._statusSource.reset();
@@ -1291,7 +1301,14 @@ class Session extends EventEmitter {
     // sets mergeStatus='pending-review' and keeps worktreeDir; parkToDormant's queued once("exit") handler
     // (_discardAndReset) runs after this and INTENTIONALLY overrides that to discard. Moving the emit ahead
     // of this call would let Park discard an unsettled worktree. Keep settle-then-emit.
-    this._settleWorktreeOnExit();
+    //
+    // The await is wrapped so a rejected settle (e.g. the engine's discard rejects) ALWAYS still reaches
+    // the exit emit below. Skipping the emit would leave a queued once("exit") handler unfired, so
+    // _finishing / _pendingPark / _pendingRestart would never clear and the teardown mutex would DEADLOCK
+    // this session. _settleWorktreeOnExit already self-catches its discard, so a reject is unlikely; this
+    // catch is the hard guarantee against a future change reintroducing a throw.
+    try { await this._settleWorktreeOnExit(); }
+    catch { /* best-effort: settle failed, but the exit MUST still propagate (anti-deadlock) */ }
 
     if (this._recorder) {
       this._recorder.writeFooter("pty_exit", exitCode);
@@ -1570,14 +1587,18 @@ class Session extends EventEmitter {
       return { ok: false, reason: this._teardownPending() ? "in-progress" : "destroyed" };
     }
     if (this.state === STATES.DONE || this.state === STATES.FAILED) {
-      this._mergeAndReset();
+      // Settled branch: set the mutex flag SYNCHRONOUSLY before the async reset fires, so a second click
+      // (or a restart/force-restart) landing while the reset awaits git sees _teardownPending()===true and
+      // is refused. The .finally clears it whether the reset resolved or rejected (no stranded flag).
+      this._finishing = true;
+      this._mergeAndReset().finally(() => { this._finishing = false; });
       return { ok: true };
     }
     if (this.state === STATES.COMPLETE || this.state === STATES.IDLE) {
       this._finishing = true;
-      this.once("exit", () => {
-        this._finishing = false;
-        if (!this._destroyed) this._mergeAndReset();
+      this.once("exit", async () => {
+        try { if (!this._destroyed) await this._mergeAndReset(); }
+        finally { this._finishing = false; }
       });
       this.killSession(); // -> DONE now; the real PTY exit settles the worktree, then the handler merges
       return { ok: true, pending: true };
@@ -1588,8 +1609,8 @@ class Session extends EventEmitter {
   // Merge the worktree, then (self-guarded) return to DORMANT once the worktree is gone. A parked merge
   // keeps its worktree, so resetToDormant no-ops and the session stays parked for manual resolution; a
   // clean settle (nothing to merge) already cleared the worktree, so the session still finishes dormant.
-  _mergeAndReset() {
-    const r = this.mergeWorktree();
+  async _mergeAndReset() {
+    const r = await this.mergeWorktree();
     this.resetToDormant();
     return r;
   }
@@ -1631,16 +1652,19 @@ class Session extends EventEmitter {
       return { ok: false, reason: this._teardownPending() ? "in-progress" : "destroyed" };
     }
     if (this.state === STATES.DONE || this.state === STATES.FAILED) {
-      this._discardAndReset(); // settled: PTY already dead, discard (if any) + reset now
+      // Settled branch: set the mutex flag SYNCHRONOUSLY before the async reset, mirroring finishAndMerge,
+      // so a second click during the awaiting reset is refused. .finally clears it on resolve or reject.
+      this._pendingPark = true;
+      this._discardAndReset().finally(() => { this._pendingPark = false; }); // settled: PTY already dead, discard (if any) + reset now
       return { ok: true };
     }
     if (MERGEABLE_LIVE_STATES.includes(this.state)) {
       // Live but quiescent: end first (we must not discard a worktree the PTY is still in), then on the
       // real exit settle -> discard -> reset. Mirrors finishAndMerge's structure exactly.
       this._pendingPark = true;
-      this.once("exit", () => {
-        this._pendingPark = false; // clear ONLY our own flag
-        if (!this._destroyed) this._discardAndReset();
+      this.once("exit", async () => {
+        try { if (!this._destroyed) await this._discardAndReset(); }
+        finally { this._pendingPark = false; } // clear ONLY our own flag
       });
       this.killSession(); // -> DONE now; _handlePtyExit settles the worktree, then our handler discards
       return { ok: true, pending: true };
@@ -1654,8 +1678,8 @@ class Session extends EventEmitter {
   // the worktreeDir!=null check skips the redundant discard; on a changed tree (settled as
   // pending-review) this intentionally OVERRIDES that and throws the work away - the destructive point
   // of Park, which the dashboard's inline confirm warns about.
-  _discardAndReset() {
-    if (this.worktreeDir != null) this.discardWorktree();
+  async _discardAndReset() {
+    if (this.worktreeDir != null) await this.discardWorktree();
     this.resetToDormant();
   }
 

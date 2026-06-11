@@ -207,13 +207,13 @@ function createOrchestrator(deps) {
 
     // Commit + fast-forward the run back to the base branch, or (on cancel / no run produced) throw the
     // worktree away. Runs at most once; in-place (non-git) runs are a no-op.
-    const finalize = (mode) => {
+    const finalize = async (mode) => {
       const fallback = { branch: workspace.branch || null, base: workspace.base || null, merged: false };
       if (finalized || !gitWorkspace || !workspace.isGit) return fallback;
       finalized = true;
       try {
         if (mode === 'discard' || !runId) {
-          gitWorkspace.discard({ projectPath, workspace });
+          await gitWorkspace.discard({ projectPath, workspace });
           return { branch: null, base: workspace.base || null, merged: false };
         }
         const message = `${team.id}: ${runId}${verdict ? ` (${verdict})` : ''}`;
@@ -225,7 +225,7 @@ function createOrchestrator(deps) {
           `${team.outputPath}/log.md`,
           ...(verdict === 'SHIP' ? (team.writeScope || []) : []),
         ];
-        return gitWorkspace.integrate({ projectPath, workspace, message, addPaths }) || fallback;
+        return (await gitWorkspace.integrate({ projectPath, workspace, message, addPaths })) || fallback;
       } catch (err) {
         return { ...fallback, reason: err.message };
       }
@@ -259,7 +259,7 @@ function createOrchestrator(deps) {
 
       if (gitWorkspace) {
         try {
-          workspace = gitWorkspace.create({ projectPath, teamId: team.id, label: runLabel(now()), outputPath: team.outputPath })
+          workspace = (await gitWorkspace.create({ projectPath, teamId: team.id, label: runLabel(now()), outputPath: team.outputPath }))
             || { cwd: projectPath, isGit: false };
         } catch {
           workspace = { cwd: projectPath, isGit: false };
@@ -298,12 +298,12 @@ function createOrchestrator(deps) {
         // marketing (writeScope []) and any non-verdict stage never trigger it: byte-identical behavior.
         if (stage.verdict && gitWorkspace && workspace.isGit
           && team.writeScope.length && team.testGlobs.length) {
-          gitWorkspace.restoreTests({ workspace, testGlobs: team.testGlobs });
+          await gitWorkspace.restoreTests({ workspace, testGlobs: team.testGlobs });
         }
         if (active.get(lockKey).cancelled) {
           output.appendLog(cwd, team.outputPath, `${dateStr} | ${topic() || '(topic)'} | ${platforms() || '-'} | CANCELLED`);
           log(`run cancelled: ${lockKey} before stage ${stage.id}`);
-          finalize('discard');
+          await finalize('discard');
           emitter.emit('team-run-failed', { teamId, projectId, reason: 'cancelled', stage: stage.id });
           return { terminal: { cancelled: true, stage: stage.id } };
         }
@@ -322,10 +322,10 @@ function createOrchestrator(deps) {
         const marker = chatCfg.questionMarker || 'QUESTION:';
 
         // CANCELLED terminal, shared by the cancel checks after a spawn or after an awaited question.
-        const cancelledTerminal = () => {
+        const cancelledTerminal = async () => {
           output.appendLog(cwd, team.outputPath, `${dateStr} | ${topic() || '(topic)'} | ${platforms() || '-'} | CANCELLED`);
           log(`run cancelled: ${lockKey} at stage ${stage.id}`);
-          finalize('discard');
+          await finalize('discard');
           emitter.emit('team-run-failed', { teamId, projectId, reason: 'cancelled', stage: stage.id });
           return { terminal: { cancelled: true, stage: stage.id } };
         };
@@ -506,7 +506,7 @@ function createOrchestrator(deps) {
       const topic = topicRef.value;
       const platforms = platformsRef.value;
       output.appendLog(cwd, team.outputPath, `${dateStr} | ${topic || '(topic)'} | ${platforms || '-'} | ${reviseLogVerdict || verdict || 'DONE'}`);
-      const integ = finalize('integrate');
+      const integ = await finalize('integrate');
       log(`run complete: ${lockKey} runId=${runId} verdict=${verdict || 'DONE'}${integ.merged ? ' (merged)' : ''}`);
       emitter.emit('team-run-complete', { teamId, projectId, runId, runDir, verdict, rounds, branch: integ.branch, base: integ.base, merged: integ.merged });
       return { ok: true, verdict, runDir, rounds, branch: integ.branch, merged: integ.merged };
@@ -514,7 +514,7 @@ function createOrchestrator(deps) {
       active.delete(lockKey);
       // Failure / halt paths fall through here: commit + fast-forward them too, so the run is captured
       // and the working tree stays clean. The success and cancel paths already finalized above.
-      if (!finalized) finalize('integrate');
+      if (!finalized) await finalize('integrate');
     }
   }
 

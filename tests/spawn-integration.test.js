@@ -25,7 +25,7 @@ function fakePty(pid = 2147483646) {
   };
 }
 
-test('start() spawns the injected exe directly (no cmd.exe layer)', { skip: process.platform !== 'win32' }, () => {
+test('start() spawns the injected exe directly (no cmd.exe layer)', { skip: process.platform !== 'win32' }, async () => {
   const calls = [];
   const s = new Session({
     id: 'spawn-int',
@@ -35,7 +35,7 @@ test('start() spawns the injected exe directly (no cmd.exe layer)', { skip: proc
     ptySpawn: (file, args) => { calls.push({ file, args }); return fakePty(); },
   });
   try {
-    s.start();
+    await s.start();
     assert.equal(calls.length, 1, 'pty spawner called exactly once');
     assert.equal(calls[0].file, process.execPath, 'spawned the injected exe path');
     assert.notEqual(calls[0].file, 'cmd.exe');
@@ -46,7 +46,7 @@ test('start() spawns the injected exe directly (no cmd.exe layer)', { skip: proc
   }
 });
 
-test('start() injects ANTHROPIC_BASE_URL from getProxyBaseUrl into the PTY env', { skip: process.platform !== 'win32' }, () => {
+test('start() injects ANTHROPIC_BASE_URL from getProxyBaseUrl into the PTY env', { skip: process.platform !== 'win32' }, async () => {
   const calls = [];
   const s = new Session({
     id: 'spawn-proxy',
@@ -57,7 +57,7 @@ test('start() injects ANTHROPIC_BASE_URL from getProxyBaseUrl into the PTY env',
     ptySpawn: (file, args, opts) => { calls.push({ file, args, opts }); return fakePty(); },
   });
   try {
-    s.start();
+    await s.start();
     assert.equal(calls.length, 1, 'pty spawner called exactly once');
     assert.equal(calls[0].opts.env.ANTHROPIC_BASE_URL, 'http://127.0.0.1:8787');
   } finally {
@@ -65,7 +65,7 @@ test('start() injects ANTHROPIC_BASE_URL from getProxyBaseUrl into the PTY env',
   }
 });
 
-test('start() survives a throwing getProxyBaseUrl (spawns without the proxy var)', { skip: process.platform !== 'win32' }, () => {
+test('start() survives a throwing getProxyBaseUrl (spawns without the proxy var)', { skip: process.platform !== 'win32' }, async () => {
   // The spawn env starts from process.env; park any user-level ANTHROPIC_BASE_URL so the
   // absence assertion below tests OUR injection, not the host machine's environment.
   const inherited = process.env.ANTHROPIC_BASE_URL;
@@ -80,7 +80,7 @@ test('start() survives a throwing getProxyBaseUrl (spawns without the proxy var)
     ptySpawn: (file, args, opts) => { calls.push({ file, args, opts }); return fakePty(); },
   });
   try {
-    s.start();
+    await s.start();
     assert.equal(calls.length, 1, 'spawn still happens');
     assert.ok(!('ANTHROPIC_BASE_URL' in calls[0].opts.env), 'no proxy var on getter failure');
     assert.equal(s.state, STATES.STARTING);
@@ -90,7 +90,7 @@ test('start() survives a throwing getProxyBaseUrl (spawns without the proxy var)
   }
 });
 
-test('start() routes a .cmd shim command through cmd.exe /c claude', { skip: process.platform !== 'win32' }, () => {
+test('start() routes a .cmd shim command through cmd.exe /c claude', { skip: process.platform !== 'win32' }, async () => {
   const calls = [];
   const s = new Session({
     id: 'spawn-shim',
@@ -100,7 +100,7 @@ test('start() routes a .cmd shim command through cmd.exe /c claude', { skip: pro
     ptySpawn: (file, args) => { calls.push({ file, args }); return fakePty(); },
   });
   try {
-    s.start();
+    await s.start();
     assert.equal(calls.length, 1, 'pty spawner called exactly once');
     assert.equal(calls[0].file, 'cmd.exe', 'shim install routes through cmd.exe');
     assert.deepEqual(calls[0].args.slice(0, 2), ['/c', 'claude']);

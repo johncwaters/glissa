@@ -361,6 +361,64 @@ test('cancelling a run discards its workspace and does not integrate', async () 
   }
 });
 
+// The team-git engine is now ASYNC (promise-returning). finalize() and every finalize() call site must
+// await it: otherwise the success path reads integ.merged off a pending promise (undefined) and the cancel
+// path returns its { terminal } before the worktree is actually discarded. An async-returning fake engine
+// makes that falsifiable - the assertions below only hold if the orchestrator awaits finalize.
+function asyncFakeWorkspace() {
+  const calls = { create: 0, integrate: 0, discard: 0 };
+  const wdirs = [];
+  const tick = () => new Promise((r) => setImmediate(r)); // forces a real await, not a same-tick resolve
+  return {
+    calls,
+    wdirs,
+    async create() {
+      calls.create += 1; await tick();
+      const wt = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-afakewt-'));
+      wdirs.push(wt);
+      return { cwd: wt, isGit: true, branch: 'glissa/marketing/run', base: 'main', baseSha: 'abc123' };
+    },
+    async integrate() { calls.integrate += 1; await tick(); return { branch: null, base: 'main', merged: true, committed: true }; },
+    async discard() { calls.discard += 1; await tick(); },
+    cleanup: () => { for (const d of wdirs) fs.rmSync(d, { recursive: true, force: true }); },
+  };
+}
+
+test('async engine: finalize is awaited on success (merged defined) and on cancel (discard completes)', async () => {
+  { // success: integ.merged comes from an AWAITED async integrate
+    const proj = tmpProject();
+    const gw = asyncFakeWorkspace();
+    try {
+      seedPack(proj);
+      const { orch, events } = makeOrch(proj, {
+        researcher: { write: BRIEF }, strategist: { write: PLAN }, writer: { write: DRAFTS },
+        editor: { write: REVIEW('SHIP') }, publisher: { write: PUBLISHED },
+      }, { gitWorkspace: gw });
+      const res = await orch.runTeam({ teamId: 'marketing', projectId: 'p1', trigger: 'scheduled' });
+      assert.equal(res.ok, true);
+      assert.equal(res.merged, true, 'integ.merged is defined -> finalize(integrate) was awaited');
+      assert.equal(gw.calls.integrate, 1);
+      const complete = events.find((e) => e.name === 'team-run-complete');
+      assert.equal(complete.merged, true, 'the complete event also reflects the awaited integrate');
+    } finally { gw.cleanup(); fs.rmSync(proj, { recursive: true, force: true }); }
+  }
+  { // cancel: the async discard completes before the run's terminal is returned
+    const proj = tmpProject();
+    const gw = asyncFakeWorkspace();
+    try {
+      seedPack(proj);
+      const { orch } = makeOrch(proj, { researcher: { hang: true } }, { gitWorkspace: gw });
+      const first = orch.runTeam({ teamId: 'marketing', projectId: 'p1' });
+      await new Promise((r) => setImmediate(r));
+      assert.equal(orch.cancelRun('marketing', 'p1'), true);
+      const res = await first;
+      assert.equal(res.cancelled, true);
+      assert.equal(gw.calls.discard, 1, 'the awaited discard completed before the cancel terminal returned');
+      assert.equal(gw.calls.integrate, 0);
+    } finally { gw.cleanup(); fs.rmSync(proj, { recursive: true, force: true }); }
+  }
+});
+
 test('a stage failure still integrates the partial run (kept, not discarded)', async () => {
   const proj = tmpProject();
   const gw = fakeWorkspace();

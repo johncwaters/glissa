@@ -13,7 +13,7 @@ function fakePty(pid = 2147483646) {
   return { pid, onData() {}, onExit() {}, write() {}, resize() {}, kill() {} };
 }
 
-test('start() appends extraClaudeArgs then the initialPrompt as the final positional arg', () => {
+test('start() appends extraClaudeArgs then the initialPrompt as the final positional arg', async () => {
   const calls = [];
   const s = new Session({
     id: 'team:run1:writer',
@@ -27,7 +27,7 @@ test('start() appends extraClaudeArgs then the initialPrompt as the final positi
     ptySpawn: (file, args) => { calls.push({ file, args }); return fakePty(); },
   });
   try {
-    s.start();
+    await s.start();
     assert.equal(calls.length, 1, 'spawned once');
     // No hookRouter injected -> no --settings; so args are exactly skipPerms + extra + prompt.
     assert.deepEqual(calls[0].args, [
@@ -45,7 +45,7 @@ test('start() appends extraClaudeArgs then the initialPrompt as the final positi
   }
 });
 
-test('a session with no team options spawns exactly as before (no extra args)', () => {
+test('a session with no team options spawns exactly as before (no extra args)', async () => {
   const calls = [];
   const s = new Session({
     id: 'plain',
@@ -55,7 +55,7 @@ test('a session with no team options spawns exactly as before (no extra args)', 
     ptySpawn: (file, args) => { calls.push({ file, args }); return fakePty(); },
   });
   try {
-    s.start();
+    await s.start();
     assert.deepEqual(calls[0].args, [], 'no settings, no perms, no team args');
     assert.equal(s.toSnapshot().ephemeral, false);
   } finally {
