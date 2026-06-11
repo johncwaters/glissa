@@ -226,30 +226,15 @@ body {
   color: var(--state-done);
 }
 
-/* ── Connection indicator ────────────────────────────────── */
-/* Shared header-status language (connection + headroom chip): 11px mono, 0.02em
-   tracking, 7px dot. The dot carries the state color; the label stays quiet
+/* ── Connection indicator ─────────────────────────────────── */
+/* Shared status-chip shell: the connection readout and the headroom button are
+   the same family (infrastructure status), so they share one container - same
+   border, padding, and type metrics. The dot (styled by .connection-dot and
+   .headroom-chip-btn::before) carries the state color; the label stays quiet
    (text-dim) for healthy states and only takes a state color when the operator
-   must act (disconnected, failed, confirm-stop) - the Earned Signal rule. */
-.header-connection {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 11px;
-  font-family: var(--font-mono);
-  letter-spacing: 0.02em;
-  color: var(--text-dim);
-  transition: color var(--transition-med);
-}
-
-/* Headroom proxy chip (header). State-driven via [data-state] on the wrapper; visibility is
-   the [hidden] attribute (managed by headroom-chip.js). The dot is a ::before on the button. */
-.headroom-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
+   must act (disconnected, failed, confirm-stop) - the Earned Signal rule. The
+   headroom button layers interactivity on top. */
+.header-connection,
 .headroom-chip-btn {
   display: inline-flex;
   align-items: center;
@@ -263,6 +248,21 @@ body {
   background: transparent;
   border: 1px solid var(--border);
   border-radius: var(--radius);
+}
+
+.header-connection {
+  transition: color var(--transition-med);
+}
+
+/* Headroom proxy chip (header). State-driven via [data-state] on the wrapper; visibility is
+   the [hidden] attribute (managed by headroom-chip.js). The dot is a ::before on the button. */
+.headroom-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.headroom-chip-btn {
   cursor: pointer;
   transition: color var(--transition-fast), border-color var(--transition-fast), background var(--transition-fast);
 }
