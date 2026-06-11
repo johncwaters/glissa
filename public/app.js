@@ -288,6 +288,7 @@ setTabActivityCallback((active) => { tabActivityEl.classList.toggle('active', ac
 mountFocusView({
   rail: document.getElementById('focus-rail'),
   center: document.getElementById('focus-center'),
+  resizer: document.getElementById('focus-rail-resizer'),
 });
 
 mountReviewSidebar({ panel: document.getElementById('review-sidebar') });

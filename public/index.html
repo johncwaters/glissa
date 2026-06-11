@@ -190,6 +190,8 @@
         <!-- Focus view (default): roster rail + single-focus center, mounted by focus-view.js -->
         <section class="focus-view" id="view-focus" role="tabpanel" aria-labelledby="tab-focus" hidden>
           <nav class="focus-rail" id="focus-rail" role="listbox" aria-label="Session roster" aria-keyshortcuts="ArrowUp ArrowDown Alt+ArrowUp Alt+ArrowDown"></nav>
+          <!-- Drag handle: resizes the rail (pointer drag, Arrow keys when focused, double-click resets). -->
+          <div class="focus-rail-resizer" id="focus-rail-resizer" role="separator" aria-orientation="vertical" aria-label="Resize session rail" tabindex="0"></div>
           <div class="focus-center" id="focus-center"></div>
         </section>
       </main>

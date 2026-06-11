@@ -17,7 +17,7 @@ import { setActivityRenderer } from '../session-card/activity.js';
 import { container, sessionUIs } from '../session-card/card-registry.js';
 import { ensureTerminalSetup, forceTerminalRepaint } from '../session-card/terminal.js';
 import { setSelectedId } from '../sidebar/selection.js';
-import { getLastFocusedSessionId, setLastFocusedSessionId } from '../ui-prefs.js';
+import { getLastFocusedSessionId, getRailWidth, setLastFocusedSessionId, setRailWidth } from '../ui-prefs.js';
 import { orderRoster, pickAdjacent, pickNextAttention } from './attention-core.mjs';
 import { groupRoster, NO_PATH_KEY, visibleOrder } from './roster-groups.mjs';
 
@@ -213,9 +213,10 @@ function pickNearestVisible(groups, collapsedKey) {
 
 export function isFocusActive() { return active; }
 
-export function mountFocusView({ rail, center }) {
+export function mountFocusView({ rail, center, resizer }) {
   railEl = rail;
   centerEl = center;
+  wireRailResizer(resizer);
 
   // The rail is a sticky jump header above a scrolling listbox of pills. Move the listbox
   // semantics off the outer nav (which now also holds the header button) onto an inner list, so
@@ -261,6 +262,73 @@ export function mountFocusView({ rail, center }) {
   centerEl.append(emptyEl, cardSlotEl);
 
   railEl.addEventListener('keydown', onRailKeydown);
+}
+
+// ── Rail resize ──
+// The rail width is a user preference: pointer-drag the separator (or Arrow keys when it has focus;
+// double-click resets to the CSS default). The chosen width rides an inline flex-basis on the rail,
+// clamped so pills stay readable and the center always keeps room, and persists via ui-prefs.
+const RAIL_MIN_PX = 180;
+const RAIL_MAX_PX = 480;
+const RAIL_KEY_STEP_PX = 16;
+
+function applyRailWidth(resizer, px) {
+  const w = Math.round(Math.min(RAIL_MAX_PX, Math.max(RAIL_MIN_PX, px)));
+  railEl.style.flexBasis = `${w}px`;
+  resizer.setAttribute('aria-valuenow', String(w));
+  return w;
+}
+
+function wireRailResizer(resizer) {
+  if (!resizer) return;
+  resizer.setAttribute('aria-valuemin', String(RAIL_MIN_PX));
+  resizer.setAttribute('aria-valuemax', String(RAIL_MAX_PX));
+
+  const stored = getRailWidth();
+  if (Number.isFinite(stored)) applyRailWidth(resizer, stored);
+
+  let startX = 0;
+  let startW = 0;
+  resizer.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    startX = e.clientX;
+    startW = railEl.getBoundingClientRect().width;
+    resizer.setPointerCapture(e.pointerId);
+    resizer.dataset.dragging = 'true';
+    e.preventDefault(); // no text selection / focus steal while dragging
+  });
+  resizer.addEventListener('pointermove', (e) => {
+    if (!resizer.hasPointerCapture(e.pointerId)) return;
+    applyRailWidth(resizer, startW + (e.clientX - startX));
+  });
+  const releaseDrag = (e) => {
+    resizer.releasePointerCapture(e.pointerId);
+    delete resizer.dataset.dragging;
+  };
+  resizer.addEventListener('pointerup', (e) => {
+    if (!resizer.hasPointerCapture(e.pointerId)) return;
+    releaseDrag(e);
+    setRailWidth(applyRailWidth(resizer, startW + (e.clientX - startX)));
+  });
+  // A cancelled gesture (capture stolen, touch interrupt) carries unreliable coordinates that
+  // could snap the rail to a clamp edge: revert to the pre-drag width and persist nothing.
+  resizer.addEventListener('pointercancel', (e) => {
+    if (!resizer.hasPointerCapture(e.pointerId)) return;
+    releaseDrag(e);
+    applyRailWidth(resizer, startW);
+  });
+
+  resizer.addEventListener('dblclick', () => {
+    railEl.style.flexBasis = ''; // back to the stylesheet default
+    resizer.removeAttribute('aria-valuenow');
+    setRailWidth(null);
+  });
+  resizer.addEventListener('keydown', (e) => {
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    e.preventDefault();
+    const delta = e.key === 'ArrowRight' ? RAIL_KEY_STEP_PX : -RAIL_KEY_STEP_PX;
+    setRailWidth(applyRailWidth(resizer, railEl.getBoundingClientRect().width + delta));
+  });
 }
 
 // Roving-tabindex list nav: Up/Down move focus between pills; Enter/click (native button) focuses the

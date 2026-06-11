@@ -1,12 +1,12 @@
 // ── UI preferences ───────────────────────────────────────────
 // Persists browser-side UI state to localStorage.
 // Schema: { soundEnabled: boolean, soundId: string, themeId: string, notificationsEnabled: boolean,
-//           activeView: string, lastFocusedSessionId: string|null }
+//           activeView: string, lastFocusedSessionId: string|null, railWidth: number|null }
 
 import { getJSON, setJSON } from './local-store.js';
 
 const STORAGE_KEY = 'glissa-ui-prefs';
-const DEFAULT_PREFS = { soundEnabled: true, soundId: 'coins', themeId: 'phyrexian', notificationsEnabled: true, activeView: 'focus', lastFocusedSessionId: null };
+const DEFAULT_PREFS = { soundEnabled: true, soundId: 'coins', themeId: 'phyrexian', notificationsEnabled: true, activeView: 'focus', lastFocusedSessionId: null, railWidth: null };
 
 function load() {
   const prefs = getJSON(STORAGE_KEY, DEFAULT_PREFS);
@@ -16,6 +16,7 @@ function load() {
   if (typeof prefs.notificationsEnabled !== 'boolean') prefs.notificationsEnabled = true;
   if (typeof prefs.activeView !== 'string') prefs.activeView = 'focus';
   if (typeof prefs.lastFocusedSessionId !== 'string' && prefs.lastFocusedSessionId !== null) prefs.lastFocusedSessionId = null;
+  if (!Number.isFinite(prefs.railWidth)) prefs.railWidth = null;
   return prefs;
 }
 
@@ -70,6 +71,17 @@ export function getActiveView() {
 export function setActiveView(view) {
   const prefs = load();
   prefs.activeView = view;
+  save(prefs);
+}
+
+// Rail width in px, or null for the CSS default. Clamping lives at the consumer (focus-view.js).
+export function getRailWidth() {
+  return load().railWidth;
+}
+
+export function setRailWidth(px) {
+  const prefs = load();
+  prefs.railWidth = Number.isFinite(px) ? px : null;
   save(prefs);
 }
 

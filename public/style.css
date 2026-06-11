@@ -2613,7 +2613,7 @@ body {
 
 /* ── Roster rail ── */
 .focus-rail {
-  flex: 0 0 224px;
+  flex: 0 0 240px; /* default; user drag overrides via inline flex-basis (focus-view.js) */
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -2623,6 +2623,20 @@ body {
   border-right: 1px solid var(--border);
 }
 .focus-rail-list { display: flex; flex-direction: column; gap: 6px; }
+
+/* Rail resize handle: a 7px grab strip straddling the rail's right border (negative margins keep it
+   zero-width in the layout). Invisible at rest so the border stays the only visible line; the strip
+   lights up with the accent on hover, keyboard focus, and during a drag. */
+.focus-rail-resizer {
+  flex: 0 0 7px;
+  margin: 0 -3px;
+  z-index: 1;
+  cursor: col-resize;
+  background: transparent;
+}
+.focus-rail-resizer:hover,
+.focus-rail-resizer[data-dragging] { background: color-mix(in oklch, var(--accent) 40%, transparent); }
+.focus-rail-resizer:focus-visible { outline: none; background: color-mix(in oklch, var(--accent) 40%, transparent); }
 
 /* Sticky jump header: a single readout for the attention queue (WAITING + unacknowledged COMPLETE)
    that also carries the Alt+W legend. focus-view keeps it in a FIXED slot at the top of the rail in
