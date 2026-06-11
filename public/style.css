@@ -100,6 +100,10 @@ html, body {
 body {
   display: flex;
   flex-direction: column;
+  /* The app owns ALL scrolling internally (rail, teams view, sidebar each overflow-y themselves).
+     Never let stray overflow grow the document: a document scrollbar pushes the footer and the
+     terminal's bottom edge below the visible screen. */
+  overflow: hidden;
 }
 
 /* ── Header ───────────────────────────────────────────────── */
@@ -107,6 +111,7 @@ body {
   position: sticky;
   top: 0;
   z-index: 100;
+  flex-shrink: 0; /* fixed strip: never squashed when the body column is tight on height */
   background: var(--bg-header);
   border-bottom: 1px solid var(--border);
   /* [P2] backdrop-filter removed - bg-header is opaque enough */
@@ -365,6 +370,11 @@ body {
   0%, 100% { opacity: 1; }
   50%      { opacity: 0.3; }
 }
+
+/* NOTE on .app-shell: index.html's inline gate styles it (display:none until .app-ready, then
+   display:contents), so the shell has NO box of its own; header / .app-body / footer are direct
+   flex items of body (a height:100% flex column). Do not give .app-shell box rules here: they
+   are inert in the ready state and fight the display:none loading gate before it. */
 
 /* Single <main> landmark wrapping both tab panels. A flex column (not display:contents,
    which can drop the landmark in some assistive tech) that fills the body below the header,
@@ -2958,8 +2968,13 @@ body {
 @keyframes focus-toolbar-breathe { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
 @keyframes focus-toolbar-flash { 0% { opacity: 1; } 100% { opacity: 0; } }
 
-/* A small inset so the terminal reads as a screen set into the strip, not glyphs kissing the edges. */
-.focus-center .session-card.focus-centered .terminal-wrap { padding: 4px 6px 0; }
+/* A small inset so the terminal reads as a screen set into the strip, not glyphs kissing the edges.
+   The padding MUST live on the .xterm element, not on .terminal-wrap: FitAddon sizes rows/cols from
+   the wrap's computed height/width (border-box here, so wrap padding is invisible to it) minus the
+   .xterm element's own padding. Padding on the wrap overstates the available space (4px tall, 12px
+   wide), and on displays whose font metrics land rows inside that phantom strip the bottom row of
+   the TUI renders past the wrap edge and gets cut off. */
+.focus-center .session-card.focus-centered .terminal-wrap .xterm { padding: 4px 6px 0; }
 
 .focus-empty { margin: auto; text-align: center; color: var(--text-dim); }
 .focus-empty-title { font-size: 14px; font-weight: 700; color: var(--text-head); margin: 0 0 4px; }
