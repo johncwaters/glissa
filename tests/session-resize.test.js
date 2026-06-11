@@ -73,6 +73,9 @@ test('restart respawns the PTY at the last resized dimensions', async () => {
       spawnOpts.push({ cols: opts.cols, rows: opts.rows });
       return fakePty([]);
     },
+    // Restart funnels through start()'s prior-PTY kill, now an AWAITED async taskkill; the fake resolves
+    // immediately so the awaited reap does not spawn a real taskkill and the respawn lands on the next tick.
+    killProc: (_args, _opts, cb) => cb(null, '', ''),
   });
   try {
     await s.start(); // first spawn: no size known yet -> 80x24 default
@@ -81,10 +84,11 @@ test('restart respawns the PTY at the last resized dimensions', async () => {
 
     s.resize(120, 40);
 
-    // restart() only fires from DONE/FAILED. It calls the async start() fire-and-forget, so yield the
-    // microtask queue for the respawn to land before asserting the new spawn dimensions.
+    // restart() only fires from DONE/FAILED. It calls the async start() fire-and-forget, and start()
+    // awaits the prior-PTY reap then provision before spawning, so yield twice for the respawn to land.
     s.state = STATES.DONE;
     s.restart();
+    await new Promise((r) => setImmediate(r));
     await new Promise((r) => setImmediate(r));
     assert.deepEqual(spawnOpts.at(-1), { cols: 120, rows: 40 },
       'restart should respawn at the last resized size, not 80x24');

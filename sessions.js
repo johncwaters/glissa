@@ -3,7 +3,7 @@ const path = require("node:path");
 const crypto = require("node:crypto");
 const pty = require("node-pty");
 const { EventEmitter } = require("node:events");
-const { execSync, execFileSync, execFile } = require("node:child_process");
+const { execFileSync, execFile } = require("node:child_process");
 const { STATES, MERGEABLE_LIVE_STATES } = require("./shared/states");
 const { createOscTitleSource } = require("./detection/osc-title-source");
 const { createStatusSource } = require("./detection/status-source");
@@ -145,6 +145,10 @@ class Session extends EventEmitter {
     // PTY spawner seam. Defaults to node-pty; tests inject a fake to assert the
     // spawn wiring (file/args) without launching a real process.
     ptySpawn = null,
+    // Kill executor seam (Windows taskkill). Defaults to async execFile; tests inject a fake to assert
+    // the kill args (['/PID', pid, '/T', '/F']) without spawning a real taskkill. Mirrors ptySpawn/
+    // spawnCommand injection. Signature: (args, opts, cb) -> matches child_process.execFile.
+    killProc = null,
     // Worktree isolation (injected by backend). When gitWorkspace + integrationBranch are present and
     // `path` is a git repo, the session runs in a throwaway worktree forked off integrationBranch and
     // merges back on review. Absent (unit tests, no-git) -> runs in place at `path` exactly as before.
@@ -225,6 +229,9 @@ class Session extends EventEmitter {
     this.ephemeral = !!ephemeral;
     this._settingsPermissions = settingsPermissions;
     this._ptySpawn = ptySpawn || ((file, args, opts) => pty.spawn(file, args, opts));
+    // Async kill executor (taskkill). Default wraps execFile; the callback form keeps the call truly
+    // non-blocking. Injected in tests to assert the kill without spawning a real process.
+    this._killProc = killProc || ((args, opts, cb) => execFile("taskkill", args, opts, cb));
 
     // -- Worktree isolation state (see _provisionWorktree / _settleWorktreeOnExit) --
     this._gitWorkspace = gitWorkspace;
@@ -1012,14 +1019,14 @@ class Session extends EventEmitter {
     if (this.ptyProcess) {
       console.warn(`[session:${this.name}] start() called while PTY exists - killing previous PTY first`);
       const oldPid = this.ptyProcess.pid;
-      try {
-        if (process.platform === "win32") {
-          execSync(`taskkill /PID ${Number(oldPid)} /T /F`, { stdio: "ignore", timeout: 2000 });
-        } else {
-          this.ptyProcess.kill();
-        }
-      } catch {
-        // Already dead, unkillable, or timed out - proceed
+      const oldPty = this.ptyProcess;
+      if (process.platform === "win32") {
+        // Await the reap (bounded by a 2s timeout) so the new PTY is not spawned until the old one is
+        // gone, preserving the "kill previous first" intent now that start() is async.
+        await this._taskkill(oldPid, { timeout: 2000 }).catch(() => { /* already dead/unkillable/timed out - proceed */ });
+      }
+      if (process.platform !== "win32") {
+        try { oldPty.kill(); } catch { /* already dead - proceed */ }
       }
       this.ptyProcess = null;
     }
@@ -1276,13 +1283,10 @@ class Session extends EventEmitter {
     this._ptyAlive = false;
     this.ptyProcess = null;
 
-    // Reap orphan grandchildren on Windows.
+    // Reap orphan grandchildren on Windows. Fire-and-forget: the PTY is already nulled and the settle/emit
+    // sequence below does not depend on the reap completing, so swallow any error (pid already exited).
     if (pid && process.platform === "win32") {
-      try {
-        execSync(`taskkill /PID ${Number(pid)} /T /F`, { stdio: "ignore" });
-      } catch {
-        // pid already exited or taskkill unavailable - nothing to do
-      }
+      this._taskkill(pid).catch(() => { /* pid already exited or taskkill unavailable - nothing to do */ });
     }
 
     let reason = null;
@@ -1400,30 +1404,36 @@ class Session extends EventEmitter {
     }
   }
 
+  // Async Windows taskkill (process tree, forced). Returns a promise so a caller can await the reap
+  // (start()'s prior-PTY kill) or fire-and-forget with a .catch (the reap / kill / force-kill paths).
+  // Array args (no shell string interpolation): safer and faster than the old execSync template.
+  _taskkill(pid, opts = {}) {
+    return new Promise((resolve, reject) => {
+      this._killProc(["/PID", String(Number(pid)), "/T", "/F"], { ...opts }, (err) => {
+        if (err) return reject(err);
+        resolve();
+      });
+    });
+  }
+
   kill() {
     if (!this.ptyProcess) return;
 
     // Stop writing the instant we kill: the conin pipe peer dies with the child,
     // so any further write() would hit the dead pipe (see _guardPtyInputSocket).
+    // The flip and the force-kill scheduling stay SYNCHRONOUS and in order; only the taskkill is async.
     this._ptyAlive = false;
     const pid = this.ptyProcess.pid;
+    const ptyProcess = this.ptyProcess;
 
+    const emitIfListened = (err) => {
+      if (this.listenerCount("error") > 0) this.emit("error", err);
+    };
     if (process.platform === "win32") {
-      try {
-        execSync(`taskkill /PID ${Number(pid)} /T /F`, { stdio: "ignore" });
-      } catch (err) {
-        if (this.listenerCount("error") > 0) {
-          this.emit("error", err);
-        }
-      }
-    } else {
-      try {
-        this.ptyProcess.kill();
-      } catch (err) {
-        if (this.listenerCount("error") > 0) {
-          this.emit("error", err);
-        }
-      }
+      this._taskkill(pid).catch(emitIfListened);
+    }
+    if (process.platform !== "win32") {
+      try { ptyProcess.kill(); } catch (err) { emitIfListened(err); }
     }
 
     this._forceKillAfterTimeout(pid);
@@ -1446,12 +1456,16 @@ class Session extends EventEmitter {
       if (!checkAlive()) return;
       elapsed += KILL_POLL_INTERVAL_MS;
       if (elapsed >= KILL_MAX_WAIT_MS) {
+        // Terminal branch: the process outlived the poll budget. Force-kill async on Windows; the
+        // non-win32 SIGKILL stays synchronous (already a non-blocking signal).
+        if (process.platform === "win32") {
+          this._taskkill(pid).catch((err) => {
+            if (this.listenerCount("error") > 0) this.emit("error", err);
+          });
+          return;
+        }
         try {
-          if (process.platform === "win32") {
-            execSync(`taskkill /PID ${pid} /T /F`, { stdio: "ignore" });
-          } else {
-            process.kill(pid, "SIGKILL");
-          }
+          process.kill(pid, "SIGKILL");
         } catch (err) {
           if (this.listenerCount("error") > 0) {
             this.emit("error", err);
