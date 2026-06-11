@@ -1277,3 +1277,53 @@ test('parkToDormant settled-branch mutex: a double-click is refused, engine disc
   } finally { s.destroy(); fs.rmSync(wt, { recursive: true, force: true }); }
 });
 
+// Run `fn` while capturing any unhandledRejection; returns the captured reasons. The settled-branch fired
+// reset is detached (not awaited by the caller), so a rejection that escapes would surface here.
+async function captureUnhandled(fn) {
+  const reasons = [];
+  const onUnhandled = (reason) => { reasons.push(reason); };
+  process.on('unhandledRejection', onUnhandled);
+  try {
+    await fn();
+    await drain();
+    await drain(); // a second hop lets any escaped rejection reach the handler before we read it
+  } finally {
+    process.removeListener('unhandledRejection', onUnhandled);
+  }
+  return reasons;
+}
+
+// The settled-branch fired reset (finishAndMerge DONE) must NOT leak an unhandledRejection if the reset
+// throws, while the mutex flag still clears - the .finally(clear).catch(swallow) contract.
+test('finishAndMerge settled-branch: a throwing reset clears the flag and never leaks an unhandledRejection', async () => {
+  const reasons = await captureUnhandled(async () => {
+    const s = makeSession();
+    try {
+      s.state = STATES.DONE;
+      s.mergeStatus = 'merged';
+      s.mergeWorktree = async () => ({ merged: true }); // settle: nothing to merge here
+      s.resetToDormant = () => { throw new Error('reset boom'); }; // force the reset to reject
+      const r = s.finishAndMerge();
+      assert.equal(r.ok, true);
+      await drain();
+      assert.equal(s._finishing, false, 'flag cleared even though the reset threw');
+    } finally { s.destroy(); }
+  });
+  assert.deepEqual(reasons, [], 'no unhandledRejection escaped the settled-branch reset');
+});
+
+test('parkToDormant settled-branch: a throwing reset clears the flag and never leaks an unhandledRejection', async () => {
+  const reasons = await captureUnhandled(async () => {
+    const s = makeSession();
+    try {
+      s.state = STATES.DONE; // no worktree -> _discardAndReset skips discard, calls resetToDormant
+      s.resetToDormant = () => { throw new Error('reset boom'); };
+      const r = s.parkToDormant();
+      assert.equal(r.ok, true);
+      await drain();
+      assert.equal(s._pendingPark, false, 'flag cleared even though the reset threw');
+    } finally { s.destroy(); }
+  });
+  assert.deepEqual(reasons, [], 'no unhandledRejection escaped the settled-branch reset');
+});
+

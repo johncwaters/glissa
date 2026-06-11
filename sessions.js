@@ -1603,9 +1603,11 @@ class Session extends EventEmitter {
     if (this.state === STATES.DONE || this.state === STATES.FAILED) {
       // Settled branch: set the mutex flag SYNCHRONOUSLY before the async reset fires, so a second click
       // (or a restart/force-restart) landing while the reset awaits git sees _teardownPending()===true and
-      // is refused. The .finally clears it whether the reset resolved or rejected (no stranded flag).
+      // is refused. .finally clears the flag whether the reset resolved or rejected (no stranded flag);
+      // the trailing .catch swallows a reset rejection so it never escapes as an unhandledRejection,
+      // mirroring the live branch's try/finally contract.
       this._finishing = true;
-      this._mergeAndReset().finally(() => { this._finishing = false; });
+      this._mergeAndReset().finally(() => { this._finishing = false; }).catch(() => {});
       return { ok: true };
     }
     if (this.state === STATES.COMPLETE || this.state === STATES.IDLE) {
@@ -1667,9 +1669,10 @@ class Session extends EventEmitter {
     }
     if (this.state === STATES.DONE || this.state === STATES.FAILED) {
       // Settled branch: set the mutex flag SYNCHRONOUSLY before the async reset, mirroring finishAndMerge,
-      // so a second click during the awaiting reset is refused. .finally clears it on resolve or reject.
+      // so a second click during the awaiting reset is refused. .finally clears it on resolve or reject;
+      // the trailing .catch swallows a reset rejection so it never escapes as an unhandledRejection.
       this._pendingPark = true;
-      this._discardAndReset().finally(() => { this._pendingPark = false; }); // settled: PTY already dead, discard (if any) + reset now
+      this._discardAndReset().finally(() => { this._pendingPark = false; }).catch(() => {}); // settled: PTY already dead, discard (if any) + reset now
       return { ok: true };
     }
     if (MERGEABLE_LIVE_STATES.includes(this.state)) {
