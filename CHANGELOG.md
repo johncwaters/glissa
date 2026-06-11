@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Manage an installed Headroom proxy from the dashboard**: An opt-in `headroomEasyStart` setting lets Glissa detect the `headroom` CLI and start, stop, or restart a local `headroom proxy` from a header chip, with a shortcut that fills `proxyBaseUrl`; off by default, and the chip shows a dim install hint when Headroom is not installed.
+- **Headroom proxy savings on the dashboard**: While the proxy runs, a header pill shows tokens removed and savings percent (request count before compression starts), with a tooltip cost breakdown and a click-through to the proxy's own dashboard.
+- **Resizable session rail**: A drag handle between the roster rail and the center resizes the rail (clamped 180 to 480px), with the width persisted per browser; arrow keys nudge the handle and a double-click resets it.
+
+### Changed
+
+- **Switching sessions clears a completed session's alert**: Switching to a session through the Focus shortcuts or a rail-pill click now returns a COMPLETE session to IDLE, instead of leaving it COMPLETE until its terminal is clicked; a WAITING session is never dismissed on a switch.
+- **Unified navbar status indicators**: The connection status, Headroom chip, and aggregate readout now share one chip shell and a quieter resting style, where a healthy state shows only its dot and label color is reserved for states that need attention.
+
+### Fixed
+
+- **Terminal bottom row clipped on some displays**: The centered terminal sized its fit from the wrong element and overstated the available space, cutting off the bottom TUI row at some font metrics and display scales; the padding now lives on the measured element so the bottom edge stays on screen.
+
+### Performance
+
+- **Worktree git engine runs off the event loop**: Worktree provision, rebase, merge-back, and discard now run as async subprocess calls, with merges into a shared branch serialized, so a session doing git work no longer blocks or stutters the other sessions' terminals.
+- **Async session process termination**: The Windows `taskkill` on a session's kill and exit paths now runs asynchronously instead of blocking the shared event loop.
+- **Skip the health snapshot when no dashboard is open**: The 10-second health snapshot is no longer built or broadcast when no dashboard tab is connected.
+- **Lighter dashboard rendering**: The dashboard skips rendering hidden views, caches roster pill references, and the render scheduler reuses its queue array and advances by a read cursor, cutting per-render work.
+
 ## [0.15.0] - 2026-06-10
 
 This release hardens the Focus review workflow shipped in 0.14.0: a parked merge now hands Merge back once the conflict is resolved, the review sidebar is resizable and stops repeating itself, sessions can be parked back to dormant for reuse, and the worktree detection that feeds the merge gate is fully event-driven and off the shared event loop, so a slow machine no longer freezes every terminal at once.
