@@ -12,7 +12,7 @@ const { EventEmitter } = require('node:events');
 
 const { createHeadroomService } = require('../headroom-service');
 
-const FAST = { readyPollMs: 5, readyBudgetMs: 200, killGraceMs: 20 };
+const FAST = { readyPollMs: 5, readyBudgetMs: 200, killGraceMs: 20, statsPollMs: 5 };
 
 function makeChild({ pid = 4242, exitOnKill = true } = {}) {
   const c = new EventEmitter();
@@ -68,20 +68,23 @@ function makeService(overrides = {}) {
   });
   const statuses = [];
   const events = [];
+  const statsEvents = [];
   const svc = createHeadroomService({
     getConfig: () => ({ headroomPort: overrides.port ?? 8787 }),
     spawn,
     execFile: exec.execFile,
     probe,
+    fetchStats: overrides.fetchStats ?? null,
     timings: FAST,
   });
   const origEmit = svc.emit.bind(svc);
   svc.emit = (name, payload) => {
     events.push(name);
     if (name === 'status') statuses.push(payload.state);
+    if (name === 'stats') statsEvents.push(payload);
     return origEmit(name, payload);
   };
-  return { svc, answers, exec, probeCalls, spawned, child, statuses, events };
+  return { svc, answers, exec, probeCalls, spawned, child, statuses, events, statsEvents };
 }
 
 function waitFor(fn, timeoutMs = 1000) {
@@ -283,4 +286,129 @@ test('invalid configured port falls back to the default in the spawn argv', asyn
   await h.svc.detect();
   await h.svc.start();
   assert.deepEqual(h.spawned[0].args.slice(-3), ['proxy', '--port', '8787']);
+});
+
+// --- /stats polling (analytics) ---
+
+function liveStats(requests) {
+  return {
+    summary: {
+      api_requests: requests,
+      compression: { requests_compressed: 2, total_tokens_removed: 500 },
+      cost: { total_saved_usd: 0.5, savings_pct: 2.5, breakdown: { cache_savings_usd: 3.0 } },
+    },
+  };
+}
+
+// fetchStats fake driven by a mutable answer: { value } read at call time (null = failure).
+function makeFetchStats(initial) {
+  const answer = { value: initial, calls: 0 };
+  const fetchStats = async () => {
+    answer.calls++;
+    return answer.value;
+  };
+  return { answer, fetchStats };
+}
+
+async function reachRunning(h) {
+  await h.svc.detect();
+  await h.svc.start();
+  h.answers.value = true;
+  await waitFor(() => h.svc.getStatus().state === 'running');
+}
+
+test('stats: polls /stats while running and emits the summary (also on getStatus)', async () => {
+  const { answer, fetchStats } = makeFetchStats(liveStats(10));
+  const h = makeService({ fetchStats });
+  await reachRunning(h);
+  await waitFor(() => h.statsEvents.length >= 1);
+  assert.equal(h.statsEvents[0].requests, 10);
+  assert.equal(h.statsEvents[0].tokensRemoved, 500);
+  assert.equal(h.svc.getStatus().stats.requests, 10);
+  assert.ok(answer.calls >= 1);
+});
+
+test('stats: an unchanged payload does not re-emit; a changed one does', async () => {
+  const { answer, fetchStats } = makeFetchStats(liveStats(10));
+  const h = makeService({ fetchStats });
+  await reachRunning(h);
+  await waitFor(() => h.statsEvents.length >= 1);
+  const callsAtFirst = answer.calls;
+  await waitFor(() => answer.calls >= callsAtFirst + 3); // several no-change polls
+  assert.equal(h.statsEvents.length, 1, 'no-change polls must not re-emit');
+  answer.value = liveStats(11);
+  await waitFor(() => h.statsEvents.length >= 2);
+  assert.equal(h.statsEvents[1].requests, 11);
+});
+
+test('stats: a fetch failure keeps the last snapshot (no blanking on a blip)', async () => {
+  const { answer, fetchStats } = makeFetchStats(liveStats(10));
+  const h = makeService({ fetchStats });
+  await reachRunning(h);
+  await waitFor(() => h.statsEvents.length >= 1);
+  answer.value = null; // proxy briefly unreachable
+  const callsAtFail = answer.calls;
+  await waitFor(() => answer.calls >= callsAtFail + 2);
+  assert.equal(h.svc.getStatus().stats.requests, 10, 'last snapshot survives a failed fetch');
+  assert.equal(h.statsEvents.length, 1);
+});
+
+test('stats: a rejecting fetchStats is a miss too (catch path keeps the snapshot and the loop)', async () => {
+  let calls = 0;
+  let fail = false;
+  const fetchStats = async () => {
+    calls++;
+    if (fail) throw new Error('network gone');
+    return liveStats(10);
+  };
+  const h = makeService({ fetchStats });
+  await reachRunning(h);
+  await waitFor(() => h.statsEvents.length >= 1);
+  fail = true;
+  const callsAtFail = calls;
+  await waitFor(() => calls >= callsAtFail + 2);
+  assert.equal(h.svc.getStatus().stats.requests, 10, 'last snapshot survives a rejection');
+  assert.equal(h.statsEvents.length, 1);
+  fail = false; // recovery: the poll loop must still be alive after rejections
+  await waitFor(() => calls >= callsAtFail + 4);
+  assert.equal(h.svc.getStatus().stats.requests, 10);
+});
+
+test('stats: leaving running clears the snapshot and stops polling', async () => {
+  const { answer, fetchStats } = makeFetchStats(liveStats(10));
+  const h = makeService({ fetchStats });
+  await reachRunning(h);
+  await waitFor(() => h.statsEvents.length >= 1);
+  h.answers.value = false;
+  h.svc.stop();
+  await waitFor(() => h.svc.getStatus().state === 'stopped');
+  assert.equal(h.svc.getStatus().stats, null);
+  assert.equal(h.statsEvents[h.statsEvents.length - 1], null, 'a null stats event clears the chip');
+  const callsAtStop = answer.calls;
+  await new Promise((res) => setTimeout(res, FAST.statsPollMs * 6));
+  assert.equal(answer.calls, callsAtStop, 'polling must stop after leaving running');
+});
+
+test('stats: an adopted external proxy is polled too', async () => {
+  const { fetchStats } = makeFetchStats(liveStats(7));
+  const h = makeService({ fetchStats });
+  await h.svc.detect();
+  h.answers.value = true; // something already answers /livez
+  await h.svc.start();
+  assert.equal(h.svc.getStatus().state, 'running-external');
+  await waitFor(() => h.statsEvents.length >= 1);
+  assert.equal(h.statsEvents[0].requests, 7);
+});
+
+test('stats: dispose mid-poll stops the loop without emitting', async () => {
+  const { answer, fetchStats } = makeFetchStats(liveStats(10));
+  const h = makeService({ fetchStats });
+  await reachRunning(h);
+  await waitFor(() => h.statsEvents.length >= 1);
+  h.svc.dispose();
+  const callsAtDispose = answer.calls;
+  const eventsAtDispose = h.statsEvents.length;
+  await new Promise((res) => setTimeout(res, FAST.statsPollMs * 6));
+  assert.equal(answer.calls, callsAtDispose);
+  assert.equal(h.statsEvents.length, eventsAtDispose);
 });

@@ -8,7 +8,7 @@ import { STATES } from '/shared/states.mjs';
 import { connectControl, disableReconnect, onControlMessage, sendControlMsg, sendControlRequest, setConnectionStateCallback } from './control-ws.js';
 import { createAddSessionDialog, createConfirmDialog, createSettingsDialog } from './dialogs.js';
 import { activateFocusView, deactivateFocusView, focusAdjacentInRail, focusNextAttention, focusNthInRail, focusSessionInCenter, isFocusActive, mountFocusView, refreshFocusRoster, restoreFocusedSession, setFocusMergeStatus } from './focus-view/focus-view.js';
-import { applyHeadroomSettings, applyHeadroomStatus, initHeadroomChip } from './headroom-chip.js';
+import { applyHeadroomSettings, applyHeadroomStats, applyHeadroomStatus, initHeadroomChip } from './headroom-chip.js';
 import { applyHealthSnapshot, mountHealthMonitor } from './health-monitor.js';
 import { initNotifications, showDesktopNotification } from './notifications.js';
 import { handleDebugStateRefresh, handleDebugStateResponse } from './session-card/card-dom.js';
@@ -189,6 +189,7 @@ const messageHandlers = {
   'session-error':      (msg) => showErrorToast(`${msg.session}: ${msg.message}`, { persist: true }),
   'settings-updated':   (msg) => { if (msg.settings) { applyTerminalSettings(msg.settings); applyHeadroomSettings(msg.settings); } },
   'headroom-status':    (msg) => applyHeadroomStatus(msg),
+  'headroom-stats':     (msg) => applyHeadroomStats(msg.stats),
   'health-snapshot':    (msg) => { if (msg.stats) applyHealthSnapshot(msg.stats); },
   'team-run-accepted':  (msg) => handleTeamMessage(msg),
   'team-run-started':   (msg) => handleTeamMessage(msg),

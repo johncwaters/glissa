@@ -20,6 +20,7 @@ const {
   nextState,
   candidateCommands,
   buildProxyArgs,
+  summarizeStats,
   DEFAULT_HEADROOM_PORT,
 } = require('./session-core/headroom-core');
 
@@ -28,6 +29,7 @@ const READY_POLL_MS = 1000; // /livez poll cadence while starting
 const READY_BUDGET_MS = 60000; // Headroom cold start (transformers/onnx import) can be slow
 const KILL_GRACE_MS = 5000; // child.kill() grace before the taskkill /T /F tree-kill
 const DETECT_TIMEOUT_MS = 10000; // per-candidate `headroom --version` budget
+const STATS_POLL_MS = 15000; // GET /stats cadence while the proxy is usable
 
 // All deps are injectable for tests. Production wiring (backend.js) passes the real
 // child_process.spawn/execFile and an http.get-based probe.
@@ -35,13 +37,16 @@ const DETECT_TIMEOUT_MS = 10000; // per-candidate `headroom --version` budget
 //   spawn:     child_process.spawn signature
 //   execFile:  child_process.execFile signature (callback style)
 //   probe:     async (port) => boolean ("does /livez answer 200")
+//   fetchStats: OPTIONAL async (port) => parsed GET /stats JSON, or null on any failure.
+//               Absent = stats polling disabled (older callers/tests keep working unchanged).
 //   log:       console.log-compatible
 // opts.timings lets tests shrink the poll/budget/grace intervals to milliseconds; production
 // callers omit it and get the constants above.
-function createHeadroomService({ getConfig, spawn, execFile, probe, log = () => {}, timings = {} }) {
+function createHeadroomService({ getConfig, spawn, execFile, probe, fetchStats = null, log = () => {}, timings = {} }) {
   const readyPollMs = timings.readyPollMs ?? READY_POLL_MS;
   const readyBudgetMs = timings.readyBudgetMs ?? READY_BUDGET_MS;
   const killGraceMs = timings.killGraceMs ?? KILL_GRACE_MS;
+  const statsPollMs = timings.statsPollMs ?? STATS_POLL_MS;
   const svc = new EventEmitter();
 
   let state = 'not-installed';
@@ -51,6 +56,8 @@ function createHeadroomService({ getConfig, spawn, execFile, probe, log = () => 
   let lastError = null;
   let pollTimer = null;
   let killTimer = null;
+  let statsTimer = null;
+  let lastStats = null; // latest summarizeStats() result while the proxy is usable
   let busy = false; // serializes start() (probe-then-spawn has an await gap)
   let disposed = false; // teardown latch: an in-flight async poll tick must die quietly
   const ring = [];
@@ -78,6 +85,7 @@ function createHeadroomService({ getConfig, spawn, execFile, probe, log = () => 
       version,
       error: lastError,
       logTail: ring.slice(-15),
+      stats: lastStats,
     };
   }
 
@@ -89,8 +97,53 @@ function createHeadroomService({ getConfig, spawn, execFile, probe, log = () => 
     // A self-transition (detect-missing while already not-installed) still emits: the boot
     // detect-miss is what hydrates the chip's not-installed hint.
     state = next;
+    // BEFORE the emit so a leave-running status broadcast already carries stats:null and an
+    // enter-running one carries the (still empty) fresh slate.
+    syncStatsPoll();
     svc.emit('status', getStatus());
     return true;
+  }
+
+  // --- /stats polling (analytics for the chip) ---
+  // Runs only while the proxy is usable (running or running-external) and only when a
+  // fetchStats dep was injected. Read-only GETs; a failed fetch keeps the last snapshot
+  // (transient blips do not blank the chip) and the lifecycle table owns "it died".
+
+  function statsActive() {
+    return !disposed && !!fetchStats && (state === 'running' || state === 'running-external');
+  }
+
+  function clearStatsPoll() {
+    if (!statsTimer) return;
+    clearTimeout(statsTimer);
+    statsTimer = null;
+  }
+
+  function syncStatsPoll() {
+    if (statsActive()) {
+      // First tick immediately: the chip should not wait a full poll period after start.
+      if (!statsTimer) statsTimer = unrefd(statsTick, 0);
+      return;
+    }
+    clearStatsPoll();
+    if (lastStats === null) return;
+    lastStats = null;
+    svc.emit('stats', null);
+  }
+
+  async function statsTick() {
+    statsTimer = null;
+    if (!statsActive()) return;
+    let summary = null;
+    try {
+      summary = summarizeStats(await fetchStats(port()));
+    } catch { /* treated as a miss; keep the last snapshot */ }
+    if (!statsActive()) return; // stopped/disposed during the await
+    if (summary && JSON.stringify(summary) !== JSON.stringify(lastStats)) {
+      lastStats = summary;
+      svc.emit('stats', lastStats);
+    }
+    statsTimer = unrefd(statsTick, statsPollMs);
   }
 
   function clearPoll() {
@@ -304,6 +357,7 @@ function createHeadroomService({ getConfig, spawn, execFile, probe, log = () => 
     disposed = true;
     clearPoll();
     clearKillTimer();
+    clearStatsPoll();
     const c = child;
     child = null;
     if (!c) return;

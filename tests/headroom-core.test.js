@@ -12,6 +12,7 @@ const {
   nextState,
   candidateCommands,
   buildProxyArgs,
+  summarizeStats,
   DEFAULT_HEADROOM_PORT,
 } = require('../session-core/headroom-core');
 
@@ -115,4 +116,65 @@ test('buildProxyArgs rejects non-integer and out-of-range values (falls back to 
   assert.deepEqual(buildProxyArgs(8787.5), fallback);
   assert.deepEqual(buildProxyArgs(null), fallback);
   assert.deepEqual(buildProxyArgs(undefined), fallback);
+});
+
+// summarizeStats: the GET /stats payload reduced to the chip's numbers. The fixture mirrors
+// the live v0.24.0 shape (only the fields the reducer reads).
+const STATS_FIXTURE = {
+  summary: {
+    api_requests: 37,
+    compression: { requests_compressed: 5, total_tokens_removed: 12345 },
+    cost: {
+      total_saved_usd: 1.23,
+      savings_pct: 4.5,
+      breakdown: { cache_savings_usd: 18.4 },
+    },
+  },
+};
+
+test('summarizeStats extracts the chip fields from a live-shaped payload', () => {
+  assert.deepEqual(summarizeStats(STATS_FIXTURE), {
+    requests: 37,
+    compressedRequests: 5,
+    tokensRemoved: 12345,
+    savedUsd: 1.23,
+    savingsPct: 4.5,
+    cacheSavedUsd: 18.4,
+  });
+});
+
+test('summarizeStats zero-fills missing or garbage fields (version drift degrades, never throws)', () => {
+  assert.deepEqual(summarizeStats({ summary: {} }), {
+    requests: 0,
+    compressedRequests: 0,
+    tokensRemoved: 0,
+    savedUsd: 0,
+    savingsPct: 0,
+    cacheSavedUsd: 0,
+  });
+  const s = summarizeStats({
+    summary: { api_requests: '37', compression: { total_tokens_removed: NaN }, cost: { breakdown: null } },
+  });
+  assert.equal(s.requests, 0);
+  assert.equal(s.tokensRemoved, 0);
+  assert.equal(s.cacheSavedUsd, 0);
+});
+
+test('summarizeStats zero-fills negative counters (never rendered as "-5 req")', () => {
+  const s = summarizeStats({
+    summary: { api_requests: -5, compression: { total_tokens_removed: -100 }, cost: { total_saved_usd: -0.5 } },
+  });
+  assert.equal(s.requests, 0);
+  assert.equal(s.tokensRemoved, 0);
+  assert.equal(s.savedUsd, 0);
+});
+
+test('summarizeStats returns null for a non-object, array, or summary-less payload', () => {
+  assert.equal(summarizeStats(null), null);
+  assert.equal(summarizeStats(undefined), null);
+  assert.equal(summarizeStats('nope'), null);
+  assert.equal(summarizeStats({}), null);
+  assert.equal(summarizeStats({ summary: 'nope' }), null);
+  assert.equal(summarizeStats([]), null);
+  assert.equal(summarizeStats({ summary: [] }), null);
 });

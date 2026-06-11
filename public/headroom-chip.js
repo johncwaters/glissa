@@ -12,8 +12,10 @@ import { sendControlMsg } from './control-ws.js';
 let chipEl = null;
 let btnEl = null;
 let routeEl = null;
+let statsEl = null;
 
 let lastStatus = null; // latest headroom-status payload
+let lastStats = null; // latest /stats summary (headroom-stats broadcast or status.stats)
 let easyStart = false; // settings.headroomEasyStart (drives not-installed visibility)
 let proxyBaseUrl = ''; // settings.proxyBaseUrl (drives the Use-for-sessions action)
 let confirmTimer = null; // two-click stop confirm window
@@ -54,6 +56,33 @@ function titleFor(status) {
   return 'Start the Headroom proxy';
 }
 
+function fmtTokens(n) {
+  if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+  return String(n);
+}
+
+// Compact savings readout. Compression earning its keep is the headline; until it has
+// removed anything, the request count is the "traffic is flowing through the proxy" proof.
+function statsLabel(s) {
+  if (s.tokensRemoved > 0) {
+    const pct = s.savingsPct > 0 ? ` (${s.savingsPct.toFixed(1)}%)` : '';
+    return `${fmtTokens(s.tokensRemoved)} tok saved${pct}`;
+  }
+  return `${s.requests} req`;
+}
+
+function statsTitle(s) {
+  return [
+    'Headroom analytics',
+    `Requests proxied: ${s.requests} (${s.compressedRequests} compressed)`,
+    `Tokens removed: ${fmtTokens(s.tokensRemoved)}`,
+    `Compression saved: $${s.savedUsd.toFixed(2)} (${s.savingsPct.toFixed(1)}%)`,
+    `Cache reads saved: $${s.cacheSavedUsd.toFixed(2)}`,
+    'Click to open the full Headroom dashboard.',
+  ].join('\n');
+}
+
 function render() {
   if (!chipEl) return;
   if (!lastStatus) return;
@@ -68,8 +97,20 @@ function render() {
   btnEl.title = titleFor(lastStatus);
   btnEl.disabled = state === 'starting' || state === 'not-installed' || state === 'running-external';
 
-  const routable = (state === 'running' || state === 'running-external') && !proxyBaseUrl;
+  const usable = state === 'running' || state === 'running-external';
+  const routable = usable && !proxyBaseUrl;
   routeEl.hidden = !routable;
+
+  // Savings readout, linking to the proxy's own /dashboard for the full picture. The element
+  // guard covers a cached pre-stats index.html served alongside the new module.
+  if (!statsEl) return;
+  const showStats = usable && !!lastStats;
+  statsEl.hidden = !showStats;
+  if (showStats) {
+    statsEl.textContent = statsLabel(lastStats);
+    statsEl.title = statsTitle(lastStats);
+    statsEl.href = `http://127.0.0.1:${port}/dashboard`;
+  }
 }
 
 function onChipClick() {
@@ -104,6 +145,7 @@ export function initHeadroomChip() {
   chipEl = document.getElementById('headroom-chip');
   btnEl = document.getElementById('headroom-chip-btn');
   routeEl = document.getElementById('headroom-chip-route');
+  statsEl = document.getElementById('headroom-chip-stats');
   if (!chipEl) return;
   btnEl.addEventListener('click', onChipClick);
   routeEl.addEventListener('click', onRouteClick);
@@ -114,6 +156,14 @@ export function applyHeadroomStatus(status) {
   // A state change invalidates an armed stop-confirm (the thing being confirmed moved).
   if (lastStatus && lastStatus.state !== status.state) disarmConfirm();
   lastStatus = status;
+  // status payloads carry the supervisor's stats snapshot (null after leaving running);
+  // absent key (older payload shape) leaves the live broadcast value alone.
+  if ('stats' in status) lastStats = status.stats;
+  render();
+}
+
+export function applyHeadroomStats(stats) {
+  lastStats = stats || null;
   render();
 }
 

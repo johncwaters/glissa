@@ -640,6 +640,7 @@ function registerControlHandlers(controlWss, deps) {
       ws.send(JSON.stringify({
         type: 'headroom-status', requestId: msg.requestId || null,
         state: 'not-installed', port: null, pid: null, version: null, error: null, logTail: [],
+        stats: null,
       }));
       return;
     }

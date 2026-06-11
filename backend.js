@@ -342,10 +342,36 @@ function createBackend(httpServer, options = {}) {
       req.on('error', () => resolve(false));
       req.on('timeout', () => { req.destroy(); resolve(false); });
     }),
+    // Read-only analytics: GET /stats while the proxy is usable. Any failure resolves null
+    // (the service keeps its last snapshot); short timeout so a wedged proxy never stacks
+    // sockets. Async http on the shared loop, same as the /livez probe. The body cap matters
+    // because the 3s timeout is socket-idle, not wall-clock: a proxy that streams forever
+    // would otherwise grow the buffer unbounded.
+    fetchStats: (port) => new Promise((resolve) => {
+      const req = http.get({ host: '127.0.0.1', port, path: '/stats', timeout: 3000 }, (res) => {
+        if (res.statusCode !== 200) { res.resume(); resolve(null); return; }
+        let body = '';
+        res.setEncoding('utf8');
+        res.on('data', (c) => {
+          body += c;
+          if (body.length > 256 * 1024) { res.destroy(); resolve(null); }
+        });
+        res.on('end', () => {
+          try { resolve(JSON.parse(body)); } catch { resolve(null); }
+        });
+      });
+      req.on('error', () => resolve(null));
+      req.on('timeout', () => { req.destroy(); resolve(null); });
+    }),
     log: console.log,
   });
   headroomService.on('status', (st) => {
     broadcastControl({ type: 'headroom-status', ...st, timestamp: Date.now() });
+  });
+  // Live savings updates between state changes; (re)connect rehydration rides the
+  // get-headroom-status reply, whose getStatus() payload now carries `stats`.
+  headroomService.on('stats', (stats) => {
+    broadcastControl({ type: 'headroom-stats', stats, timestamp: Date.now() });
   });
   // Easy start: fire-and-forget so a slow detect/cold start never blocks server boot. A detect
   // miss parks in not-installed (inert); errors land in the status payload, never throw.

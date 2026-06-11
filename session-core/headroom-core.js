@@ -99,9 +99,33 @@ function buildProxyArgs(port) {
   return ['proxy', '--port', String(p)];
 }
 
+// Pure /stats reducer: the proxy's GET /stats payload (v0.24.x shape, verified live) boiled
+// down to the handful of numbers the dashboard chip renders. Defensive throughout: any
+// missing/garbage field is 0 so a Headroom version drift degrades to zeros, never a throw.
+// A non-object payload returns null ("no stats"), which callers treat as nothing-to-show.
+function summarizeStats(json) {
+  if (!json || typeof json !== 'object' || Array.isArray(json)) return null;
+  const summary = json.summary;
+  if (!summary || typeof summary !== 'object' || Array.isArray(summary)) return null;
+  // Negative counters are as much version drift as missing ones; the chip never renders them.
+  const num = (v) => (Number.isFinite(v) && v >= 0 ? v : 0);
+  const compression = summary.compression || {};
+  const cost = summary.cost || {};
+  const breakdown = cost.breakdown || {};
+  return {
+    requests: num(summary.api_requests),
+    compressedRequests: num(compression.requests_compressed),
+    tokensRemoved: num(compression.total_tokens_removed),
+    savedUsd: num(cost.total_saved_usd),
+    savingsPct: num(cost.savings_pct),
+    cacheSavedUsd: num(breakdown.cache_savings_usd),
+  };
+}
+
 module.exports = {
   nextState,
   candidateCommands,
   buildProxyArgs,
+  summarizeStats,
   DEFAULT_HEADROOM_PORT,
 };
