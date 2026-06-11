@@ -302,6 +302,12 @@ function createBackend(httpServer, options = {}) {
         broadcastControl({ type: 'session-git', id, worktree: !!sess.isWorktree });
       }
     }
+    // No control client connected = no listener for the snapshot, so skip the whole build (the per-session
+    // iteration + getActiveResourcesInfo + memory). The refreshGitContext loop above still runs so a
+    // later-connecting client reads current worktree state; its broadcast is already a no-op at zero
+    // clients. A client connecting mid-interval gets its first snapshot on the next tick (<=10s) or via the
+    // explicit request-health-snapshot handler the panel sends on expand, so nothing is stale on connect.
+    if (controlWss.clients.size === 0) return;
     broadcastControl({ type: 'health-snapshot', stats: buildHealthSnapshot() });
   }, HEALTH_SNAPSHOT_INTERVAL_MS);
   healthInterval.unref();
