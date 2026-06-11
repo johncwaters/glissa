@@ -28,7 +28,7 @@ export function createScheduler({
   const raf = requestFrame || ((cb) => requestAnimationFrame(cb));
   const caf = cancelFrame || ((id) => cancelAnimationFrame(id));
 
-  const sinks = new Map(); // id -> { write, pending: string[], pendingBytes, inFlight, dirty, live }
+  const sinks = new Map(); // id -> { write, pending: string[], readIdx, pendingBytes, inFlight, dirty, live }
   const order = []; // ids in round-robin order
   let rr = 0;
   let frameId = null;
@@ -55,35 +55,52 @@ export function createScheduler({
       const s = sinks.get(id);
       if (!serviceable(s)) continue;
 
-      // Build the chunk to write by consuming from the front of the pending array.
-      // Whole chunks that fit within maxChunkBytes are accumulated into one write (coalescing).
-      // A single chunk that would overflow is split: the head goes out, the remainder is
-      // written back at the read position. This preserves the exact byte-boundary semantics
-      // the existing tests pin (e.g. enqueue('abcdefg') with cap 4 -> 'abcd' then 'efg').
+      // Build the chunk to write by consuming from the pending array via a read-index cursor.
+      // readIdx advances over fully consumed chunks; the array is compacted (splice) when the
+      // queue drains or the cursor exceeds a threshold. This avoids O(n) per-service shift()
+      // on a deep backlog while preserving byte-exact semantics:
+      //   - Under-cap: all pending chunks coalesce into one write per service.
+      //   - Over-cap: whole chunks are consumed up to maxChunkBytes; a single chunk that
+      //     would overflow alone is split (head sent, remainder written back at readIdx);
+      //     an acc that has content but can't fit the next chunk stops without splitting.
+      // The existing tests pin this boundary: enqueue('abcdefg') cap=4 -> 'abcd' then 'efg'.
+      const COMPACT_THRESHOLD = 64; // splice off consumed prefix when cursor passes this
       let acc = '';
       let consumed = 0;
-      while (s.pending.length > 0) {
-        const next = s.pending[0];
+      while (s.readIdx < s.pending.length) {
+        const next = s.pending[s.readIdx];
         const remaining = maxChunkBytes - acc.length;
         if (acc.length + next.length <= maxChunkBytes) {
           acc += next;
           consumed += next.length;
-          s.pending.shift();
+          s.readIdx++;
           continue;
         }
-        // next would overflow the cap. If acc is still empty this is a single oversized
-        // chunk: split it, take the head, leave the remainder in place.
+        // next would overflow. If acc is empty this is a single oversized chunk: split it,
+        // write the remainder back in place at the cursor position.
         if (acc.length === 0) {
           acc = next.slice(0, remaining);
           consumed += remaining;
-          s.pending[0] = next.slice(remaining);
+          s.pending[s.readIdx] = next.slice(remaining);
+          // do NOT advance readIdx: the remainder stays at the same slot for next service
         }
-        // acc has content (or we just handled the oversized split): send what we have.
+        // acc has content (or oversized split handled): send what we have.
         break;
       }
       s.pendingBytes -= consumed;
-      if (s.pendingBytes === 0) s.dirty = false;
-      // else stays dirty (more to send)
+      // Compact: when the queue drains, reset fully (dirty=false). When the read cursor
+      // has grown past the threshold, splice off the consumed prefix to bound memory.
+      // The drain branch is the common fast-path; the threshold splice is the safety valve
+      // on deep backlogs. Both reset readIdx to 0 so the next service starts at the front.
+      if (s.pendingBytes === 0) {
+        s.pending.length = 0;
+        s.readIdx = 0;
+        s.dirty = false;
+      }
+      if (s.pendingBytes > 0 && s.readIdx >= COMPACT_THRESHOLD) {
+        s.pending.splice(0, s.readIdx);
+        s.readIdx = 0;
+      }
 
       s.inFlight = true;
       s.write(acc, () => {
@@ -108,7 +125,7 @@ export function createScheduler({
         existing.live = true;
         return;
       }
-      sinks.set(id, { write, pending: [], pendingBytes: 0, inFlight: false, dirty: false, live: true });
+      sinks.set(id, { write, pending: [], readIdx: 0, pendingBytes: 0, inFlight: false, dirty: false, live: true });
       order.push(id);
     },
     unregister(id) {

@@ -485,19 +485,6 @@ export function refreshFocusRoster() {
   const groups = groupRoster(order, (row) => row.ui.path);
   const seen = new Set();
 
-  // placePill paints the pill's content on every refresh (state/merge/activity may have changed),
-  // but skips the DOM appendChild move when the pill is already in the correct list position.
-  // The order-key check (listEl._lastOrderKey) gates the move: if the id sequence for this list
-  // is unchanged and the child count matches, no pill needs repositioning this frame.
-  // New pills and removed pills change the key, forcing a re-append to maintain correctness.
-  const placePill = (id, ui, listEl) => {
-    seen.add(id);
-    let pill = pillById.get(id);
-    if (!pill) { pill = buildPill(id); pillById.set(id, pill); }
-    paintPill(pill, id, ui);
-    listEl.appendChild(pill);
-  };
-
   // Build the desired id order for a list and re-append pills only if the order changed.
   // paintPill still runs for every pill to keep content current regardless of order.
   const placeList = (rows, listEl) => {
