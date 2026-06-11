@@ -175,7 +175,13 @@ function renderDetail() {
 }
 
 export function setHealthMonitorVisible(on) {
-  if (_root) _root.hidden = !on;
+  if (!_root) return;
+  const wasHidden = _root.hidden;
+  _root.hidden = !on;
+  if (on && wasHidden && _latest) {
+    renderSummary();
+    if (_expanded) renderDetail();
+  }
 }
 
 export function mountHealthMonitor(parent) {
@@ -187,6 +193,7 @@ export function mountHealthMonitor(parent) {
 
 export function applyHealthSnapshot(stats) {
   _latest = stats;
+  if (!_root || _root.hidden) return;
   renderSummary();
   if (_expanded) renderDetail();
 }

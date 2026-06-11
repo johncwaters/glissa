@@ -143,3 +143,56 @@ test('a chatty sink does not starve others (budget bounds it; round-robin servic
   // 'b' must have been serviced despite 'a' being chatty.
   assert.equal(b.calls.length, 1, 'b not starved by chatty a');
 });
+
+test('multi-chunk crossing the cap boundary: front-consumption + split correctness', async () => {
+  // cap=4: enqueue 'ab','cd','ef' -> first service 'abcd' (two full chunks), second service 'ef'
+  const { sched, runFrame } = await setup({ budget: 4, maxChunkBytes: 4 });
+  const s = makeSink();
+  sched.register('a', s.write);
+  sched.enqueue('a', 'ab');
+  sched.enqueue('a', 'cd');
+  sched.enqueue('a', 'ef');
+  runFrame();
+  assert.deepEqual(s.calls, ['abcd'], 'first service coalesces ab+cd up to cap');
+  s.drainOne();
+  runFrame();
+  assert.deepEqual(s.calls, ['abcd', 'ef'], 'remainder ef carried to next service');
+});
+
+test('multi-chunk with a chunk that straddles the cap boundary', async () => {
+  // cap=4: enqueue 'ab' (2), 'cde' (3) -> acc='ab', next='cde' would make 5 > 4, stop.
+  // First service writes 'ab'; second service writes 'cde'. No data lost.
+  const { sched, runFrame } = await setup({ budget: 4, maxChunkBytes: 4 });
+  const s = makeSink();
+  sched.register('a', s.write);
+  sched.enqueue('a', 'ab');
+  sched.enqueue('a', 'cde');
+  runFrame();
+  assert.deepEqual(s.calls, ['ab'], 'first service stops before overflow (acc+next would exceed cap)');
+  assert.equal(s.calls[0].length <= 4, true, 'first chunk does not exceed cap');
+  s.drainOne();
+  runFrame();
+  assert.equal(s.calls.length, 2, 'remainder carried to next service');
+  assert.equal(s.calls[0] + s.calls[1], 'abcde', 'all data delivered, no loss');
+});
+
+test('large backlog produces same observable output as string accumulation would (regression guard)', async () => {
+  // Enqueue 100 small chunks; the observable write sequence must be byte-for-byte identical
+  // to what the old string-concat path would have produced (no loss, no reorder).
+  const { sched, runFrame } = await setup({ budget: 4, maxChunkBytes: 50 });
+  const s = makeSink();
+  sched.register('a', s.write);
+  const chunks = [];
+  for (let i = 0; i < 100; i++) { const c = String(i % 10); chunks.push(c); sched.enqueue('a', c); }
+  const expected = chunks.join('');
+  let received = '';
+  // Run frames until all data is drained.
+  let maxFrames = 200;
+  while (maxFrames-- > 0) {
+    runFrame();
+    s.drainAll();
+    if (!sched.running()) break;
+  }
+  received = s.calls.join('');
+  assert.equal(received, expected, 'all data delivered in order, no loss or duplication');
+});

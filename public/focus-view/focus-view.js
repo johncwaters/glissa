@@ -382,6 +382,14 @@ function buildPill(id) {
     + '<span class="focus-pill-badge">'
     + '<span class="focus-pill-glyph"></span><span class="focus-pill-label"></span></span>'
     + '<span class="focus-pill-merge"></span>';
+  // Cache child-span refs once at build time. buildPill is the sole innerHTML writer, so these
+  // refs are permanently valid for the life of the pill (never stale).
+  pill._refs = {
+    glyph: pill.querySelector('.focus-pill-glyph'),
+    label: pill.querySelector('.focus-pill-label'),
+    name: pill.querySelector('.focus-pill-name'),
+    merge: pill.querySelector('.focus-pill-merge'),
+  };
   pill.addEventListener('click', () => onPillActivate(id));
   return pill;
 }
@@ -422,12 +430,12 @@ function paintPill(pill, id, ui) {
   if (state !== STATES.COMPLETE) pill.removeAttribute('data-unseen');
   else if (prev && prev !== STATES.COMPLETE) pill.dataset.unseen = '';
   pill.dataset.state = state;
-  pill.querySelector('.focus-pill-glyph').textContent = STATE_GLYPHS[state] || '';
-  pill.querySelector('.focus-pill-label').textContent = (BADGE_LABELS[state] || state).toUpperCase();
-  pill.querySelector('.focus-pill-name').textContent = sessionName(ui);
+  pill._refs.glyph.textContent = STATE_GLYPHS[state] || '';
+  pill._refs.label.textContent = (BADGE_LABELS[state] || state).toUpperCase();
+  pill._refs.name.textContent = sessionName(ui);
   const ms = mergeStatusById.get(id) || 'none';
   pill.dataset.merge = ms === 'none' ? '' : ms;
-  pill.querySelector('.focus-pill-merge').textContent =
+  pill._refs.merge.textContent =
     ms === 'pending-review' ? 'REVIEW' : ms === 'parked' ? 'PARKED' : ms === 'merging' ? 'MERGING' : '';
   // Mirror the working heartbeat flag so a re-render keeps the breathe/quiet treatment without
   // waiting for the next signal (activity.js parks the live value on ui._activity).
@@ -457,7 +465,7 @@ function renderPillActivity(ui, kind) {
   // kind === 'beat': one GPU-only ping (transform + opacity), fire-and-forget WAAPI so there is no
   // class bookkeeping. The CSS ambient breath animates opacity only, so this scale composes on top.
   if (reducedMotion?.matches || document.hidden) return;
-  const glyph = pill.querySelector('.focus-pill-glyph');
+  const glyph = pill._refs?.glyph;
   if (!glyph?.animate) return;
   glyph.animate(
     [
@@ -477,7 +485,11 @@ export function refreshFocusRoster() {
   const groups = groupRoster(order, (row) => row.ui.path);
   const seen = new Set();
 
-  // A re-append moves a pill into sorted position. paint each, into the right container.
+  // placePill paints the pill's content on every refresh (state/merge/activity may have changed),
+  // but skips the DOM appendChild move when the pill is already in the correct list position.
+  // The order-key check (listEl._lastOrderKey) gates the move: if the id sequence for this list
+  // is unchanged and the child count matches, no pill needs repositioning this frame.
+  // New pills and removed pills change the key, forcing a re-append to maintain correctness.
   const placePill = (id, ui, listEl) => {
     seen.add(id);
     let pill = pillById.get(id);
@@ -486,11 +498,26 @@ export function refreshFocusRoster() {
     listEl.appendChild(pill);
   };
 
+  // Build the desired id order for a list and re-append pills only if the order changed.
+  // paintPill still runs for every pill to keep content current regardless of order.
+  const placeList = (rows, listEl) => {
+    const newKey = rows.map((r) => r.id).join(',');
+    const orderUnchanged = listEl._lastOrderKey === newKey && listEl.childElementCount === rows.length;
+    for (const { id, ui } of rows) {
+      seen.add(id);
+      let pill = pillById.get(id);
+      if (!pill) { pill = buildPill(id); pillById.set(id, pill); }
+      paintPill(pill, id, ui);
+      if (!orderUnchanged) listEl.appendChild(pill);
+    }
+    listEl._lastOrderKey = newKey;
+  };
+
   if (groups.flat) {
     // Single project (or 0/1 sessions): flat list, NO headers - exactly today's layout.
     teardownGroups();
     railListEl.hidden = false;
-    for (const { id, ui } of order) placePill(id, ui, railListEl);
+    placeList(order, railListEl);
   } else {
     // Grouped: a header button + its own role=listbox sublist per project, in A->Z group order.
     // railHeadEl stays the sticky first child; the flat railListEl is parked hidden.
@@ -500,7 +527,7 @@ export function refreshFocusRoster() {
       const { header, list } = ensureGroup(group);
       railEl.appendChild(header); // re-append keeps headers + sublists in sorted order
       railEl.appendChild(list);
-      for (const row of group.rows) placePill(row.id, row.ui, list);
+      placeList(group.rows, list);
     }
     // Remove vanished groups (their pills are pruned by the seen-sweep below).
     for (const [key, header] of [...groupHeaderById]) {

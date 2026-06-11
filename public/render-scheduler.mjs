@@ -28,7 +28,7 @@ export function createScheduler({
   const raf = requestFrame || ((cb) => requestAnimationFrame(cb));
   const caf = cancelFrame || ((id) => cancelAnimationFrame(id));
 
-  const sinks = new Map(); // id -> { write, pending, inFlight, dirty, live }
+  const sinks = new Map(); // id -> { write, pending: string[], pendingBytes, inFlight, dirty, live }
   const order = []; // ids in round-robin order
   let rr = 0;
   let frameId = null;
@@ -38,7 +38,7 @@ export function createScheduler({
   }
 
   function serviceable(s) {
-    return !!(s?.live && s.dirty && !s.inFlight && s.pending.length > 0);
+    return !!(s?.live && s.dirty && !s.inFlight && s.pendingBytes > 0);
   }
 
   function anyServiceable() {
@@ -54,20 +54,42 @@ export function createScheduler({
       const id = order[(rr + k) % n];
       const s = sinks.get(id);
       if (!serviceable(s)) continue;
-      let chunk;
-      if (s.pending.length > maxChunkBytes) {
-        chunk = s.pending.slice(0, maxChunkBytes);
-        s.pending = s.pending.slice(maxChunkBytes); // stays dirty (more to send)
-      } else {
-        chunk = s.pending;
-        s.pending = '';
-        s.dirty = false;
+
+      // Build the chunk to write by consuming from the front of the pending array.
+      // Whole chunks that fit within maxChunkBytes are accumulated into one write (coalescing).
+      // A single chunk that would overflow is split: the head goes out, the remainder is
+      // written back at the read position. This preserves the exact byte-boundary semantics
+      // the existing tests pin (e.g. enqueue('abcdefg') with cap 4 -> 'abcd' then 'efg').
+      let acc = '';
+      let consumed = 0;
+      while (s.pending.length > 0) {
+        const next = s.pending[0];
+        const remaining = maxChunkBytes - acc.length;
+        if (acc.length + next.length <= maxChunkBytes) {
+          acc += next;
+          consumed += next.length;
+          s.pending.shift();
+          continue;
+        }
+        // next would overflow the cap. If acc is still empty this is a single oversized
+        // chunk: split it, take the head, leave the remainder in place.
+        if (acc.length === 0) {
+          acc = next.slice(0, remaining);
+          consumed += remaining;
+          s.pending[0] = next.slice(remaining);
+        }
+        // acc has content (or we just handled the oversized split): send what we have.
+        break;
       }
+      s.pendingBytes -= consumed;
+      if (s.pendingBytes === 0) s.dirty = false;
+      // else stays dirty (more to send)
+
       s.inFlight = true;
-      s.write(chunk, () => {
+      s.write(acc, () => {
         if (!s.live) return; // sink unregistered while this write was in flight
         s.inFlight = false;
-        if (s.pending.length > 0) {
+        if (s.pendingBytes > 0) {
           s.dirty = true;
           arm();
         }
@@ -86,7 +108,7 @@ export function createScheduler({
         existing.live = true;
         return;
       }
-      sinks.set(id, { write, pending: '', inFlight: false, dirty: false, live: true });
+      sinks.set(id, { write, pending: [], pendingBytes: 0, inFlight: false, dirty: false, live: true });
       order.push(id);
     },
     unregister(id) {
@@ -101,7 +123,8 @@ export function createScheduler({
     enqueue(id, data) {
       const s = sinks.get(id);
       if (!s || !data) return;
-      s.pending += data;
+      s.pending.push(data);
+      s.pendingBytes += data.length;
       s.dirty = true;
       arm();
     },
