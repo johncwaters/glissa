@@ -29,6 +29,7 @@ const { STATES } = require('./shared/states');
 const { createConfigStore, generateProjectId, ensureProjectIds, DEFAULT_CONFIG } = require('./config-store');
 const { registerControlHandlers } = require('./control-handlers');
 const { NotificationManager } = require('./notification-manager');
+const { createNotifyGate, decideNotification } = require('./session-core/notify-gate');
 const { createToastChannel } = require('./channels/toast');
 const { createWebNotificationChannel } = require('./channels/web-notification');
 const { createRecorder } = require('./session-recorder');
@@ -668,6 +669,9 @@ function createBackend(httpServer, options = {}) {
   function wireSessionEvents(sess) {
     // All closures read sess.id (stable) and sess.name (current) dynamically.
     let ptDebounce = null; // post-turn-check debounce timer (per session closure)
+    // Once-per-work-cycle gate for terminal notification categories. Created per wiring
+    // closure, so a config-reload destroy + re-wire starts fresh (no cleanup needed).
+    const notifyGate = createNotifyGate();
 
     sess.on('error', (err) => {
       console.error(`[${sess.name}] error: ${err.message}`);
@@ -716,15 +720,22 @@ function createBackend(httpServer, options = {}) {
         timestamp: Date.now()
       });
 
-      // Notification triggers: session state -> notification lifecycle. Both turn-complete (COMPLETE)
-      // and process exit (DONE) notify under the 'complete' category so the two terminal "it finished"
-      // states stay consistent; the per-session debounce coalesces a COMPLETE->DONE pair into one toast.
-      if (to === STATES.WAITING) {
-        notificationManager.trigger(sess.id, 'waiting', `${sess.name} needs your input`);
-      } else if (to === STATES.COMPLETE || to === STATES.DONE) {
-        notificationManager.trigger(sess.id, 'complete', `${sess.name} finished working`);
-      } else if (to === STATES.FAILED) {
-        notificationManager.trigger(sess.id, 'failed', `${sess.name} failed`);
+      // Notification triggers: session state -> notification lifecycle. The decision (which
+      // category fires for this state entry, if any) lives in session-core/notify-gate.js
+      // decideNotification, shared with its tests. Both turn-complete (COMPLETE) and process
+      // exit (DONE) notify under 'complete', but terminal categories pass the once-per-work-cycle
+      // gate: a cycle starts on RUNNING (new work) or INITIALIZING (restart) entry, so a
+      // COMPLETE->DONE pair, or a late ready re-completing through the dismiss-opened IDLE
+      // window, can no longer notify twice for one finished turn. 'waiting' stays per-entry
+      // (escalation + a later real "needs input" from COMPLETE must keep firing).
+      const notifyCategory = decideNotification(to, notifyGate);
+      if (notifyCategory) {
+        const messages = {
+          waiting: `${sess.name} needs your input`,
+          complete: `${sess.name} finished working`,
+          failed: `${sess.name} failed`,
+        };
+        notificationManager.trigger(sess.id, notifyCategory, messages[notifyCategory]);
       }
 
       // Acknowledge when leaving a notification-triggering state. DONE is included so a restart
