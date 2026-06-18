@@ -27,11 +27,29 @@ npm install -g glissa
 glissa                      # Start on default port 3000
 glissa --port 3001          # Custom port
 glissa --config <path>      # Custom config file path
+glissa doctor               # Diagnose install / PATH issues
 glissa --help               # Show help
 glissa --version            # Show version
 ```
 
 Open `http://localhost:3000` to view the dashboard.
+
+## Troubleshooting
+
+### `glissa` is not recognized after `npm install -g glissa`
+
+The install succeeded, but the directory where npm placed the `glissa` command is not on your PATH (common with a zip/standalone Node, a locked-down corporate image, or pnpm without `pnpm setup`). To fix it:
+
+1. Confirm it installed: `npm ls -g glissa`
+2. Find npm's global command directory: `npm config get prefix`. On Windows the command shims (`glissa.cmd`, `glissa.ps1`) live directly in that directory.
+3. Make sure that directory is on your PATH. The official Node.js Windows installer adds it for you; if you installed Node from a zip, add it in PowerShell, then open a NEW terminal:
+
+   ```powershell
+   [Environment]::SetEnvironmentVariable("PATH", [Environment]::GetEnvironmentVariable("PATH","User") + ";$(npm config get prefix)", "User")
+   ```
+
+4. Using pnpm? Run `pnpm setup` once (it configures and registers the global bin directory), then reinstall.
+5. Once `glissa` resolves, run `glissa doctor` to confirm PATH, the native module, and the config path are all healthy.
 
 ## Features
 

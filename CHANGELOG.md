@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`glissa doctor` diagnostic command**: `glissa doctor` prints a read-only report (glissa and node versions, which install is answering, the npm and pnpm global command directories and whether each is on your PATH, a node-pty load probe, and the resolved config path), so a "glissa is not recognized" or otherwise unhealthy install can be diagnosed in one step. It never starts the server or modifies anything.
+- **Post-install PATH guidance**: a global `npm install -g glissa` now prints where the `glissa` command was installed and, when that directory is not on your PATH, the exact one-step fix. The notice is print-only (it never edits your PATH), stays silent for local and dependency installs, and is wrapped so it can never fail an install. A new README "Troubleshooting" section documents the same fix, including pnpm (`pnpm setup`) setups.
 - **Manage an installed Headroom proxy from the dashboard**: An opt-in `headroomEasyStart` setting lets Glissa detect the `headroom` CLI and start, stop, or restart a local `headroom proxy` from a header chip, with a shortcut that fills `proxyBaseUrl`; off by default, and the chip shows a dim install hint when Headroom is not installed.
 - **Headroom proxy savings on the dashboard**: While the proxy runs, a header pill shows tokens removed and savings percent (request count before compression starts), with a tooltip cost breakdown and a click-through to the proxy's own dashboard.
 - **Resizable session rail**: A drag handle between the roster rail and the center resizes the rail (clamped 180 to 480px), with the width persisted per browser; arrow keys nudge the handle and a double-click resets it.

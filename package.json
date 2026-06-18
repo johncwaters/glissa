@@ -9,11 +9,14 @@
   },
   "files": [
     "bin/glissa.js",
+    "bin/path-doctor.js",
+    "scripts/postinstall-path-check.js",
     "dist/",
     "!dist/AGENTS.md",
     "!dist/pictures/",
     "server.js",
     "backend.js",
+    "headroom-service.js",
     "sessions.js",
     "notification-manager.js",
     "session-core/",
@@ -73,6 +76,7 @@
     "dev:server-only": "node server.js",
     "build": "vite build",
     "preview": "vite preview",
+    "postinstall": "node scripts/postinstall-path-check.js",
     "prepublishOnly": "node scripts/check-package-files.js && npm run build && node -e \"require('fs').statSync('dist/index.html')\"",
     "release": "node scripts/release.js"
   },
