@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **Terminal bottom row clipped on some displays**: The centered terminal sized its fit from the wrong element and overstated the available space, cutting off the bottom TUI row at some font metrics and display scales; the padding now lives on the measured element so the bottom edge stays on screen.
+- **Menu restart could spawn an unkillable session respawn loop**: Restarting Glissa from the menu and then reopening a session could flood the screen with `cmd` windows in a tight loop that survived closing the Glissa window (only a reboot stopped it). The restart now respawns the replacement hidden (no stray console window) and at most once, waits for the previous session processes to be reaped before exiting so none are orphaned, refuses to start a second instance on the port already in use, and keeps project IDs stable across config reloads so a reload never re-spawns existing sessions.
 
 ### Performance
 

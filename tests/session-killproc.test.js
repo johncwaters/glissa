@@ -124,3 +124,32 @@ test('_forceKillAfterTimeout fires the killer once when the process outlives the
     } finally { s._killPollTimer && clearTimeout(s._killPollTimer); s.destroy(); }
   });
 });
+
+// The server lifecycle (restart/shutdown) awaits each session's reap before exit/respawn so the PTY
+// tree is not orphaned. kill() exposes that reap as an awaitable _killReap.
+test('kill() exposes an awaitable _killReap that settles when the win32 killer completes', async () => {
+  await asWin32(async () => {
+    const killCalls = [];
+    const s = makeSession(killCalls); // injected killProc calls cb(null) -> the reap resolves
+    try {
+      await s.start();
+      s.kill();
+      assert.ok(s._killReap && typeof s._killReap.then === 'function', '_killReap is a promise');
+      await s._killReap;
+    } finally { s._killPollTimer && clearTimeout(s._killPollTimer); s.destroy(); }
+  });
+});
+
+test('kill() on non-win32 sets a resolved _killReap (synchronous SIGKILL, nothing to await)', async () => {
+  const orig = Object.getOwnPropertyDescriptor(process, 'platform');
+  Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+  try {
+    const s = makeSession([]);
+    await s.start();
+    s.kill();
+    assert.ok(s._killReap && typeof s._killReap.then === 'function', '_killReap is a promise');
+    await s._killReap; // already resolved
+    s._killPollTimer && clearTimeout(s._killPollTimer);
+    s.destroy();
+  } finally { Object.defineProperty(process, 'platform', orig); }
+});

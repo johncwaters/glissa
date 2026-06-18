@@ -28,6 +28,7 @@ const { Session } = require('./sessions');
 const { STATES } = require('./shared/states');
 const { createConfigStore, generateProjectId, ensureProjectIds, DEFAULT_CONFIG } = require('./config-store');
 const { registerControlHandlers } = require('./control-handlers');
+const { createLifecycle } = require('./server-lifecycle');
 const { NotificationManager } = require('./notification-manager');
 const { createNotifyGate, decideNotification } = require('./session-core/notify-gate');
 const { createToastChannel } = require('./channels/toast');
@@ -979,7 +980,11 @@ function createBackend(httpServer, options = {}) {
   }
 
   function applyConfigReload(newConfig) {
-    ensureProjectIds(newConfig.projects);
+    // ensureProjectIds mints a fresh random id for any id-less project. On the reload path that runs
+    // against a freshly-read disk config, an id-less project would get a NEW id every reload and be
+    // reclassified removed+added each time (=> a sess.start() respawn storm). Persist the assigned ids
+    // back so the next read is stable; the per-process self-write guard suppresses the resulting watch.
+    const assigned = ensureProjectIds(newConfig.projects);
     const diff = diffProjects(sessions, newConfig.projects);
     _removeOldSessions(diff.removed);
     _addNewSessions(diff.added, newConfig);
@@ -987,6 +992,13 @@ function createBackend(httpServer, options = {}) {
     _renameChangedSessions(diff.renamed);
     config.projects = newConfig.projects;
     applySettingsReload(newConfig);
+    if (assigned) {
+      try {
+        configStore.save((fresh) => { fresh.projects = newConfig.projects; });
+      } catch (err) {
+        console.warn(`[config] Failed to persist assigned project IDs on reload: ${err.message}`);
+      }
+    }
   }
 
   function applySettingsReload(newConfig) {
@@ -1011,45 +1023,16 @@ function createBackend(httpServer, options = {}) {
     }
   }
 
-  function requestShutdown() {
-    shutdown();
-    httpServer.close(() => {
-      console.log('Server closed - exiting.');
-      process.exit(0);
-    });
-    // Fallback: if close callback doesn't fire within 2s, force exit
-    setTimeout(() => process.exit(0), 2000);
-  }
-
-  // requestRestart is provided by the caller (Vite plugin or server.js)
-  // since restart behavior differs between dev and production modes.
-  const _onRestart = options.onRestart || null;
-
-  function requestRestart() {
-    shutdown();
-    if (_onRestart) {
-      _onRestart();
-    } else {
-      // Fallback: restart by spawning a new process.
-      // Close the HTTP server first so the port is released cleanly,
-      // then spawn the replacement and exit.
-      let spawned = false;
-      const spawnAndExit = () => {
-        if (spawned) return;
-        spawned = true;
-        const { spawn } = require('node:child_process');
-        spawn(process.argv[0], process.argv.slice(1), {
-          cwd: process.cwd(),
-          stdio: 'ignore',
-          detached: true,
-        }).unref();
-        process.exit(0);
-      };
-      httpServer.close(spawnAndExit);
-      // Fallback: if close callback doesn't fire within 2s, force it
-      setTimeout(spawnAndExit, 2000);
-    }
-  }
+  // Restart/shutdown handlers live in server-lifecycle.js so the re-entry guard, the reap-before-exit
+  // ordering, and the detached-respawn flags (windowsHide!) are unit-testable. shutdown() returns the
+  // in-flight PTY reaps the lifecycle awaits before exit/respawn so the old PTY tree never orphans.
+  // onRestart differs by mode: dev (Vite) restarts in-process; production (null) respawns detached.
+  const { requestShutdown, requestRestart } = createLifecycle({
+    shutdown,
+    httpServer,
+    onRestart: options.onRestart || null,
+    spawn,
+  });
 
   registerControlHandlers(controlWss, {
     sessions,
@@ -1226,7 +1209,7 @@ function createBackend(httpServer, options = {}) {
   let shuttingDown = false;
 
   function shutdown() {
-    if (shuttingDown) return;
+    if (shuttingDown) return [];
     shuttingDown = true;
     clearInterval(healthInterval);
     // INVARIANT: destroy NotificationManager BEFORE sessions - clears all timers globally
@@ -1236,14 +1219,20 @@ function createBackend(httpServer, options = {}) {
     headroomService.dispose();
     for (const [, s] of teamSchedulers) s.disarm();
     integrationPool.stopAll();
+    // Collect each session's in-flight PTY reap (set by kill() on win32, see sessions.js) so the
+    // lifecycle can await them before exit/respawn; a DORMANT session has no PTY and no reap.
+    const pendingReaps = [];
     for (const [, sess] of sessions) {
       sess.destroy();
+      if (sess._killReap) pendingReaps.push(sess._killReap);
     }
     for (const [, sess] of teamSessions) {
       sess.destroy();
+      if (sess._killReap) pendingReaps.push(sess._killReap);
     }
     controlWss.close();
     dataWss.close();
+    return pendingReaps;
   }
 
   return { shutdown, port, app };

@@ -179,6 +179,10 @@ class Session extends EventEmitter {
     // far they have durably sent against it so a backpressure drop can be backfilled.
     this._outputBufferTotal = 0;
     this._killPollTimer = null;
+    // In-flight reap (taskkill) promise from the most recent kill(), or null. The server lifecycle
+    // (shutdown -> requestRestart/requestShutdown) awaits these before exit/respawn so the PTY tree
+    // (cmd/claude/conhost) is reaped instead of orphaned. Set in kill(); never gates a transition.
+    this._killReap = null;
     this._sleeping = false;
     this._sleepKillTimer = null;
     this._autoKilled = false;
@@ -1430,9 +1434,13 @@ class Session extends EventEmitter {
       if (this.listenerCount("error") > 0) this.emit("error", err);
     };
     if (process.platform === "win32") {
-      this._taskkill(pid).catch(emitIfListened);
+      // Retain the reap promise so the server lifecycle can await it before exit/respawn (orphan fix).
+      // The .catch keeps the error-emission behavior; awaiters use Promise.allSettled so a reject is fine.
+      this._killReap = this._taskkill(pid);
+      this._killReap.catch(emitIfListened);
     }
     if (process.platform !== "win32") {
+      this._killReap = Promise.resolve(); // SIGKILL is synchronous; nothing async to await
       try { ptyProcess.kill(); } catch (err) { emitIfListened(err); }
     }
 
