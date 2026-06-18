@@ -7,35 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-06-18
+
+This release rolls up everything since 0.14.0. It hardens the Focus review workflow (a parked merge hands Merge back once the conflict is resolved, the review sidebar is resizable and stops repeating itself, sessions can be parked back to dormant for reuse), routes sessions through a local LLM proxy with optional one-click management and live savings analytics for an installed Headroom proxy, makes the roster rail resizable, and moves the worktree git engine and session teardown off the shared event loop, so a slow machine no longer freezes every terminal at once. It also closes a menu-restart bug that could spawn an unkillable session respawn loop.
+
 ### Added
 
 - **Manage an installed Headroom proxy from the dashboard**: An opt-in `headroomEasyStart` setting lets Glissa detect the `headroom` CLI and start, stop, or restart a local `headroom proxy` from a header chip, with a shortcut that fills `proxyBaseUrl`; off by default, and the chip shows a dim install hint when Headroom is not installed.
 - **Headroom proxy savings on the dashboard**: While the proxy runs, a header pill shows tokens removed and savings percent (request count before compression starts), with a tooltip cost breakdown and a click-through to the proxy's own dashboard.
 - **Resizable session rail**: A drag handle between the roster rail and the center resizes the rail (clamped 180 to 480px), with the width persisted per browser; arrow keys nudge the handle and a double-click resets it.
-
-### Changed
-
-- **Switching sessions clears a completed session's alert**: Switching to a session through the Focus shortcuts or a rail-pill click now returns a COMPLETE session to IDLE, instead of leaving it COMPLETE until its terminal is clicked; a WAITING session is never dismissed on a switch.
-- **Unified navbar status indicators**: The connection status, Headroom chip, and aggregate readout now share one chip shell and a quieter resting style, where a healthy state shows only its dot and label color is reserved for states that need attention.
-
-### Fixed
-
-- **Terminal bottom row clipped on some displays**: The centered terminal sized its fit from the wrong element and overstated the available space, cutting off the bottom TUI row at some font metrics and display scales; the padding now lives on the measured element so the bottom edge stays on screen.
-- **Menu restart could spawn an unkillable session respawn loop**: Restarting Glissa from the menu and then reopening a session could flood the screen with `cmd` windows in a tight loop that survived closing the Glissa window (only a reboot stopped it). The restart now respawns the replacement hidden (no stray console window) and at most once, waits for the previous session processes to be reaped before exiting so none are orphaned, refuses to start a second instance on the port already in use, and keeps project IDs stable across config reloads so a reload never re-spawns existing sessions.
-
-### Performance
-
-- **Worktree git engine runs off the event loop**: Worktree provision, rebase, merge-back, and discard now run as async subprocess calls, with merges into a shared branch serialized, so a session doing git work no longer blocks or stutters the other sessions' terminals.
-- **Async session process termination**: The Windows `taskkill` on a session's kill and exit paths now runs asynchronously instead of blocking the shared event loop.
-- **Skip the health snapshot when no dashboard is open**: The 10-second health snapshot is no longer built or broadcast when no dashboard tab is connected.
-- **Lighter dashboard rendering**: The dashboard skips rendering hidden views, caches roster pill references, and the render scheduler reuses its queue array and advances by a read cursor, cutting per-render work.
-
-## [0.15.0] - 2026-06-10
-
-This release hardens the Focus review workflow shipped in 0.14.0: a parked merge now hands Merge back once the conflict is resolved, the review sidebar is resizable and stops repeating itself, sessions can be parked back to dormant for reuse, and the worktree detection that feeds the merge gate is fully event-driven and off the shared event loop, so a slow machine no longer freezes every terminal at once.
-
-### Added
-
 - **Route sessions through a local LLM proxy**: A new `proxyBaseUrl` setting (Settings > Advanced, or `config.json`) injects `ANTHROPIC_BASE_URL` into every spawned session's environment so Claude Code routes API traffic through a local proxy (e.g. Headroom, LiteLLM). Glissa only points sessions at the proxy, never spawns or manages one; a settings change reaches existing sessions on their next start or restart, and an inherited `ANTHROPIC_BASE_URL` keeps working when the setting is empty.
 - **Park a session back to dormant**: A new "Park" card-menu action returns a quiescent or finished session to DORMANT so its card parks for reuse, the inverse of starting it. Park refuses a RUNNING session and discards the session's worktree; parking a session with unmerged changes asks for inline confirmation first.
 - **Pending-wakeup chip for scheduled self-revivals**: A session that schedules its own revival (a dynamic `/loop` wakeup or a cron task) now shows a "sleeping until ~HH:MM" card chip instead of looking simply finished. Advisory only, never a completion gate; `detectScheduledWakeups: false` is the kill switch.
@@ -45,11 +25,15 @@ This release hardens the Focus review workflow shipped in 0.14.0: a parked merge
 
 ### Changed
 
+- **Switching sessions clears a completed session's alert**: Switching to a session through the Focus shortcuts or a rail-pill click now returns a COMPLETE session to IDLE, instead of leaving it COMPLETE until its terminal is clicked; a WAITING session is never dismissed on a switch.
+- **Unified navbar status indicators**: The connection status, Headroom chip, and aggregate readout now share one chip shell and a quieter resting style, where a healthy state shows only its dot and label color is reserved for states that need attention.
 - **Pinned review sidebar controls**: The review sidebar's Merge, Resolve in session, and Discard controls sit in a pinned region that stays in view as the diff scrolls, and Merge is always shown while a session is selected, disabled with a one-line reason when it cannot run.
 - **Deduplicated review sidebar copy**: The sidebar no longer repeats the same +/- numbers at three levels and no longer states "nothing to merge" twice; while the diff loads, the reason line doubles as the loading indicator.
 
 ### Fixed
 
+- **Terminal bottom row clipped on some displays**: The centered terminal sized its fit from the wrong element and overstated the available space, cutting off the bottom TUI row at some font metrics and display scales; the padding now lives on the measured element so the bottom edge stays on screen.
+- **Menu restart could spawn an unkillable session respawn loop**: Restarting Glissa from the menu and then reopening a session could flood the screen with `cmd` windows in a tight loop that survived closing the Glissa window (only a reboot stopped it). The restart now respawns the replacement hidden (no stray console window) and at most once, waits for the previous session processes to be reaped before exiting so none are orphaned, refuses to start a second instance on the port already in use, and keeps project IDs stable across config reloads so a reload never re-spawns existing sessions.
 - **Merge comes back after a parked merge is resolved**: A parked worktree merge (rebase conflict, lost fast-forward, or uncommitted changes) could never return to the Merge button once the agent resolved it; the operator had to ask the agent to merge manually. The gate now self-heals to pending-review when the worktree is clean, ahead, and not mid-rebase, and the sidebar re-renders from a fresh diff.
 - **Diff base follows the session's upstream branch**: The review diff and merge gate were always computed against the globally configured integration branch; a session branch tracking a different remote ref showed commits that belonged to the wrong base. The diff base now prefers the session's upstream tracking branch, and the "merges into X" label follows it.
 - **Card stuck on Idle while the session kept working**: A premature Stop hook could move the card to Idle or Complete while the spinner never paused, after which no title signal could ever wake it; the title working latch now re-opens on entry to those states so the next spinner frame self-heals the card.
@@ -61,8 +45,11 @@ This release hardens the Focus review workflow shipped in 0.14.0: a parked merge
 
 ### Performance
 
-- **Worktree git work off the event loop**: Worktree git probes and per-turn post-turn checks run as async, non-blocking work instead of synchronous calls on the shared event loop, so a session doing git work no longer freezes or buffers the others on slower machines; a `liveWorktreeReview` kill-switch can drop the backstop entirely.
+- **Worktree git engine runs off the event loop**: The worktree git subsystem (liveness probes, per-turn post-turn checks, and worktree provision, rebase, merge-back, and discard) now runs as async, non-blocking subprocess calls, with merges into a shared branch serialized, so a session doing git work no longer freezes, stutters, or buffers the other sessions' terminals on slower machines; a `liveWorktreeReview` kill-switch can drop the backstop entirely.
 - **Event-driven worktree detection**: The 10-second cross-session worktree liveness poll is replaced by an integration-branch reflog watcher, removing the recurring git spend and keeping merge gates fresh server-side even with no dashboard open.
+- **Async session process termination**: The Windows `taskkill` on a session's kill and exit paths now runs asynchronously instead of blocking the shared event loop.
+- **Skip the health snapshot when no dashboard is open**: The 10-second health snapshot is no longer built or broadcast when no dashboard tab is connected.
+- **Lighter dashboard rendering**: The dashboard skips rendering hidden views, caches roster pill references, and the render scheduler reuses its queue array and advances by a read cursor, cutting per-render work.
 
 ## [0.14.0] - 2026-06-08
 
