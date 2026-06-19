@@ -3,7 +3,7 @@ const path = require("node:path");
 const crypto = require("node:crypto");
 const pty = require("node-pty");
 const { EventEmitter } = require("node:events");
-const { execFileSync, execFile } = require("node:child_process");
+const { execFileSync, execFile } = require("./child-process-safe");
 const { STATES, MERGEABLE_LIVE_STATES } = require("./shared/states");
 const { createOscTitleSource } = require("./detection/osc-title-source");
 const { createStatusSource } = require("./detection/status-source");
@@ -591,7 +591,7 @@ class Session extends EventEmitter {
     if (!this.worktreeDir) return { committed: empty, uncommitted: empty, hasCommits: false };
     // maxBuffer is generous: a review diff can be large, and unlike execFileSync (which threw on
     // overflow and we recovered partial e.stdout) execFile would error and gitOut would yield "".
-    const opts = { cwd: this.worktreeDir, encoding: "utf8", timeout: 15000, windowsHide: true, maxBuffer: 64 * 1024 * 1024 };
+    const opts = { cwd: this.worktreeDir, encoding: "utf8", timeout: 15000, maxBuffer: 64 * 1024 * 1024 };
     const g = (args) => gitOut(args, opts); // awaited serially below: order matters (intent-to-add before the diffs)
     await g(["add", "-N", "--", "."]); // intent-to-add so new files appear in the uncommitted diff
     // What a merge would actually move is the commits on HEAD that the integration branch does NOT already
@@ -651,7 +651,7 @@ class Session extends EventEmitter {
   // This is the funnel's truth; the heavy getDiff() is only fetched for the selected session.
   async _computeWorktreeSignature() {
     if (!this.worktreeDir) return null;
-    const opts = { cwd: this.worktreeDir, encoding: "utf8", timeout: 10000, windowsHide: true, maxBuffer: 16 * 1024 * 1024 };
+    const opts = { cwd: this.worktreeDir, encoding: "utf8", timeout: 10000, maxBuffer: 16 * 1024 * 1024 };
     // --no-optional-locks: this runs on background event nudges (watchers / turn-end), so it must NEVER
     // take git's index lock and contend with the session's own `git add` / `git commit` in the worktree.
     const run = (args) => gitStrict(["--no-optional-locks", ...args], opts);

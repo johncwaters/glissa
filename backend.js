@@ -37,7 +37,7 @@ const { createRecorder } = require('./session-recorder');
 const { createWsSender } = require('./ws-sender');
 const { HookRouter } = require('./detection/hook-source');
 const { sweepOrphans } = require('./detection/settings-injector');
-const { spawn } = require('node:child_process');
+const { spawn } = require('./child-process-safe');
 const { loadTeam, listTeams } = require('./teamlib/team-registry');
 const { createOrchestrator } = require('./teamlib/team-orchestrator');
 const { createScheduler } = require('./scheduler');
@@ -404,10 +404,10 @@ function createBackend(httpServer, options = {}) {
       if (cmd) {
         const quoted = `"${absPath}"`;
         const full = cmd.includes('{file}') ? cmd.replace(/\{file\}/g, quoted) : `${cmd} ${quoted}`;
-        spawn(full, { detached: true, stdio: 'ignore', shell: true, windowsHide: true }).unref();
+        spawn(full, { detached: true, stdio: 'ignore', shell: true }).unref();
       } else if (process.platform === 'win32') {
         // `start` is a cmd builtin; the empty "" is its window-title arg so a quoted path isn't taken as the title.
-        spawn('cmd', ['/c', 'start', '', absPath], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
+        spawn('cmd', ['/c', 'start', '', absPath], { detached: true, stdio: 'ignore' }).unref();
       } else if (process.platform === 'darwin') {
         spawn('open', [absPath], { detached: true, stdio: 'ignore' }).unref();
       } else {

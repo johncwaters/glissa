@@ -3,7 +3,7 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { execFile, execFileSync } = require('node:child_process');
+const { execFile, execFileSync } = require('../child-process-safe');
 const { promisify } = require('node:util');
 const { SHARED_PACK_DIRNAME } = require('./team-output');
 

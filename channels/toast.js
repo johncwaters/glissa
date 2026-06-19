@@ -1,6 +1,6 @@
 'use strict';
 
-const { execFile, execFileSync } = require('child_process');
+const { execFile, execFileSync } = require('../child-process-safe');
 const path = require('path');
 const fs = require('fs');
 
@@ -60,7 +60,7 @@ function findBurntToastModule() {
 
 /**
  * Create a toast channel adapter for NotificationManager.
- * Dumb delivery pipe — no debounce, no suppression logic.
+ * Dumb delivery pipe - no debounce, no suppression logic.
  * @returns {(sessionName: string, category: string, message: string, context: object) => void}
  */
 function createToastChannel() {

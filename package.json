@@ -28,6 +28,7 @@
     "scheduler.js",
     "spawn-gate.js",
     "ws-sender.js",
+    "child-process-safe.js",
     "teamlib/team-registry.js",
     "teamlib/team-orchestrator.js",
     "teamlib/team-output.js",

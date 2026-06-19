@@ -7,7 +7,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { execFile } = require('node:child_process');
+const { execFile } = require('./child-process-safe');
 const {
   applyRules,
   shouldCheckPath,
@@ -104,7 +104,7 @@ function execGit(args, cwd) {
     execFile(
       'git',
       args,
-      { cwd, timeout: GIT_TIMEOUT_MS, windowsHide: true, maxBuffer: 8 * 1024 * 1024 },
+      { cwd, timeout: GIT_TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024 },
       (err, stdout) => {
         if (err) reject(err);
         else resolve(stdout);
