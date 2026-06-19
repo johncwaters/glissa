@@ -7,9 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-06-19
+
+A maintenance release. It adds install diagnostics (the `glissa doctor` command and post-install PATH guidance), retires the experimental Headroom proxy integration, and stops the burst of Windows console windows that flashed when sessions start and park.
+
+### Added
+
+- **`glissa doctor` diagnostic command**: `glissa doctor` prints a read-only report (glissa and node versions, which install is answering, the npm and pnpm global command directories and whether each is on your PATH, a node-pty load probe, and the resolved config path), so a "glissa is not recognized" or otherwise unhealthy install can be diagnosed in one step. It never starts the server or modifies anything.
+- **Post-install PATH guidance**: a global `npm install -g glissa` now prints where the `glissa` command was installed and, when that directory is not on your PATH, the exact one-step fix. The notice is print-only (it never edits your PATH), stays silent for local and dependency installs, and is wrapped so it can never fail an install. A new README "Troubleshooting" section documents the same fix, including pnpm (`pnpm setup`) setups.
+
 ### Removed
 
 - **Headroom proxy integration**: Removed the opt-in Headroom proxy supervisor (the `headroomEasyStart` and `headroomPort` settings, the header chip, start/stop control, and live savings analytics) together with the generic `proxyBaseUrl` setting that injected `ANTHROPIC_BASE_URL` into spawned sessions. Local-proxy compression did not pay off against Claude Code's own prompt caching, so the entire proxy surface (all introduced in 0.15.0) is gone. Sessions no longer read `proxyBaseUrl`; an `ANTHROPIC_BASE_URL` already present in the environment is left untouched.
+
+### Fixed
+
+- **Console windows no longer flash on session start or park**: starting or parking a session could pop a burst of Windows console (`cmd`) windows that stole focus and interrupted work. On a machine where Glissa runs without its own console, the worktree git probes, the junction setup, and the `taskkill` on park each spawned a visible window. Every child process Glissa spawns is now launched hidden, with a guard test that keeps any future spawn site from regressing.
 
 ## [0.15.0] - 2026-06-18
 
@@ -17,8 +30,6 @@ This release rolls up everything since 0.14.0. It hardens the Focus review workf
 
 ### Added
 
-- **`glissa doctor` diagnostic command**: `glissa doctor` prints a read-only report (glissa and node versions, which install is answering, the npm and pnpm global command directories and whether each is on your PATH, a node-pty load probe, and the resolved config path), so a "glissa is not recognized" or otherwise unhealthy install can be diagnosed in one step. It never starts the server or modifies anything.
-- **Post-install PATH guidance**: a global `npm install -g glissa` now prints where the `glissa` command was installed and, when that directory is not on your PATH, the exact one-step fix. The notice is print-only (it never edits your PATH), stays silent for local and dependency installs, and is wrapped so it can never fail an install. A new README "Troubleshooting" section documents the same fix, including pnpm (`pnpm setup`) setups.
 - **Manage an installed Headroom proxy from the dashboard**: An opt-in `headroomEasyStart` setting lets Glissa detect the `headroom` CLI and start, stop, or restart a local `headroom proxy` from a header chip, with a shortcut that fills `proxyBaseUrl`; off by default, and the chip shows a dim install hint when Headroom is not installed.
 - **Headroom proxy savings on the dashboard**: While the proxy runs, a header pill shows tokens removed and savings percent (request count before compression starts), with a tooltip cost breakdown and a click-through to the proxy's own dashboard.
 - **Resizable session rail**: A drag handle between the roster rail and the center resizes the rail (clamped 180 to 480px), with the width persisted per browser; arrow keys nudge the handle and a double-click resets it.
@@ -439,6 +450,8 @@ _Skipped in changelog - incremental fixes and version bump._
 - Alert sounds for session attention events
 - CLI with `--port`, `--config`, `--help`, `--version` flags
 
+[0.16.0]: https://github.com/johncwaters/glissa/releases/tag/v0.16.0
+[0.15.0]: https://github.com/johncwaters/glissa/releases/tag/v0.15.0
 [0.14.0]: https://github.com/johncwaters/glissa/releases/tag/v0.14.0
 [0.13.0]: https://github.com/johncwaters/glissa/releases/tag/v0.13.0
 [0.12.0]: https://github.com/johncwaters/glissa/releases/tag/v0.12.0
