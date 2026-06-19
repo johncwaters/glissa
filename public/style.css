@@ -227,15 +227,10 @@ body {
 }
 
 /* ── Connection indicator ─────────────────────────────────── */
-/* Shared status-chip shell: the connection readout and the headroom button are
-   the same family (infrastructure status), so they share one container - same
-   border, padding, and type metrics. The dot (styled by .connection-dot and
-   .headroom-chip-btn::before) carries the state color; the label stays quiet
-   (text-dim) for healthy states and only takes a state color when the operator
-   must act (disconnected, failed, confirm-stop) - the Earned Signal rule. The
-   headroom button layers interactivity on top. */
-.header-connection,
-.headroom-chip-btn {
+/* Connection status chip. The dot (styled by .connection-dot) carries the state color; the label
+   stays quiet (text-dim) for healthy states and only takes a state color when the operator must act
+   (disconnected) - the Earned Signal rule. */
+.header-connection {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -252,115 +247,6 @@ body {
 
 .header-connection {
   transition: color var(--transition-med);
-}
-
-/* Headroom proxy chip (header). State-driven via [data-state] on the wrapper; visibility is
-   the [hidden] attribute (managed by headroom-chip.js). The dot is a ::before on the button. */
-.headroom-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.headroom-chip-btn {
-  cursor: pointer;
-  transition: color var(--transition-fast), border-color var(--transition-fast), background var(--transition-fast);
-}
-
-.headroom-chip-btn:hover:not(:disabled) {
-  color: var(--text);
-  border-color: var(--border-hover);
-}
-
-.headroom-chip-btn:active:not(:disabled),
-.headroom-chip-route:active {
-  transform: scale(0.97);
-}
-
-.headroom-chip-btn:focus-visible,
-.headroom-chip-stats:focus-visible,
-.headroom-chip-route:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-
-.headroom-chip-btn:disabled {
-  cursor: default;
-}
-
-.headroom-chip-btn::before {
-  content: '';
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--text-dim);
-  transition: background var(--transition-med), box-shadow var(--transition-med);
-}
-
-.headroom-chip[data-state='starting'] .headroom-chip-btn::before {
-  background: var(--state-waiting, #d9a334);
-  animation: blink 1s ease-in-out infinite;
-}
-
-/* Running is the healthy resting state: green dot only, label stays quiet. */
-.headroom-chip[data-state='running'] .headroom-chip-btn::before,
-.headroom-chip[data-state='running-external'] .headroom-chip-btn::before {
-  background: var(--state-running);
-  box-shadow: 0 0 6px var(--state-running-glow);
-}
-
-.headroom-chip[data-state='failed'] .headroom-chip-btn,
-.headroom-chip[data-state='confirm-stop'] .headroom-chip-btn {
-  color: var(--state-failed);
-}
-
-.headroom-chip[data-state='failed'] .headroom-chip-btn::before,
-.headroom-chip[data-state='confirm-stop'] .headroom-chip-btn::before {
-  background: var(--state-failed);
-}
-
-.headroom-chip[data-state='not-installed'] .headroom-chip-btn {
-  opacity: 0.45;
-}
-
-.headroom-chip-stats {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  letter-spacing: 0.02em;
-  padding: 3px 8px;
-  color: var(--text-dim);
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  white-space: nowrap;
-  text-decoration: none;
-  transition: color var(--transition-fast), border-color var(--transition-fast);
-}
-
-/* Hover lifts to the accent (interactive affordance), never a state color. */
-.headroom-chip-stats:hover {
-  color: var(--accent);
-  border-color: var(--accent);
-}
-
-/* Mini accent-outline action, same language as .btn-add-header. */
-.headroom-chip-route {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  letter-spacing: 0.02em;
-  padding: 3px 8px;
-  color: var(--accent);
-  background: transparent;
-  border: 1px solid var(--accent-dim);
-  border-radius: var(--radius);
-  cursor: pointer;
-  white-space: nowrap;
-  transition: background var(--transition-fast), border-color var(--transition-fast);
-}
-
-.headroom-chip-route:hover {
-  background: color-mix(in oklab, var(--accent) 14%, transparent);
-  border-color: var(--accent);
 }
 
 .connection-dot {

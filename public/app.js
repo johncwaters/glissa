@@ -8,7 +8,6 @@ import { STATES } from '/shared/states.mjs';
 import { connectControl, disableReconnect, onControlMessage, sendControlMsg, sendControlRequest, setConnectionStateCallback } from './control-ws.js';
 import { createAddSessionDialog, createConfirmDialog, createSettingsDialog } from './dialogs.js';
 import { activateFocusView, deactivateFocusView, focusAdjacentInRail, focusNextAttention, focusNthInRail, focusSessionInCenter, isFocusActive, mountFocusView, refreshFocusRoster, restoreFocusedSession, setFocusMergeStatus } from './focus-view/focus-view.js';
-import { applyHeadroomSettings, applyHeadroomStats, applyHeadroomStatus, initHeadroomChip } from './headroom-chip.js';
 import { applyHealthSnapshot, mountHealthMonitor } from './health-monitor.js';
 import { initNotifications, showDesktopNotification } from './notifications.js';
 import { handleDebugStateRefresh, handleDebugStateResponse } from './session-card/card-dom.js';
@@ -65,12 +64,7 @@ setConnectionStateCallback((state, label) => {
       .then((msg) => {
         if (!msg.settings) return;
         applyTerminalSettings(msg.settings);
-        applyHeadroomSettings(msg.settings);
       })
-      .catch(() => {});
-    // Rehydrate the Headroom chip on every (re)connect; live changes ride the broadcast.
-    sendControlRequest('get-headroom-status', {})
-      .then((msg) => applyHeadroomStatus(msg))
       .catch(() => {});
   } else if (state === 'shutdown') {
     if (appRevealed) {
@@ -187,9 +181,7 @@ const messageHandlers = {
   'notify':             (msg) => showDesktopNotification(msg),
   'error':              (msg) => showErrorToast(msg.message, { persist: true }),
   'session-error':      (msg) => showErrorToast(`${msg.session}: ${msg.message}`, { persist: true }),
-  'settings-updated':   (msg) => { if (msg.settings) { applyTerminalSettings(msg.settings); applyHeadroomSettings(msg.settings); } },
-  'headroom-status':    (msg) => applyHeadroomStatus(msg),
-  'headroom-stats':     (msg) => applyHeadroomStats(msg.stats),
+  'settings-updated':   (msg) => { if (msg.settings) applyTerminalSettings(msg.settings); },
   'health-snapshot':    (msg) => { if (msg.stats) applyHealthSnapshot(msg.stats); },
   'team-run-accepted':  (msg) => handleTeamMessage(msg),
   'team-run-started':   (msg) => handleTeamMessage(msg),
@@ -514,10 +506,6 @@ mountHealthMonitor(document.getElementById('health-footer-mount'));
 // ── Desktop notifications ────────────────────────────────────
 
 initNotifications();
-
-// ── Headroom proxy chip ──────────────────────────────────────
-
-initHeadroomChip();
 
 // ── Boot ─────────────────────────────────────────────────────
 

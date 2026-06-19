@@ -37,9 +37,7 @@ const { createRecorder } = require('./session-recorder');
 const { createWsSender } = require('./ws-sender');
 const { HookRouter } = require('./detection/hook-source');
 const { sweepOrphans } = require('./detection/settings-injector');
-const { spawn, execFile } = require('node:child_process');
-const http = require('node:http');
-const { createHeadroomService } = require('./headroom-service');
+const { spawn } = require('node:child_process');
 const { loadTeam, listTeams } = require('./teamlib/team-registry');
 const { createOrchestrator } = require('./teamlib/team-orchestrator');
 const { createScheduler } = require('./scheduler');
@@ -104,12 +102,6 @@ function createBackend(httpServer, options = {}) {
   // Clear settings dirs orphaned by prior crashes (best-effort).
   try { sweepOrphans(); } catch { /* ignore */ }
 
-  // Optional LLM proxy (config proxyBaseUrl -> ANTHROPIC_BASE_URL in the spawn env). A GETTER, not
-  // a snapshot: applySettings mutates `config` in place, so a settings change reaches every session
-  // on its next PTY (re)spawn without rebuilding Session objects. Shared by user, team-stage, and
-  // pack-setup sessions so "point everything at the proxy" really means everything.
-  const getProxyBaseUrl = () => config.proxyBaseUrl ?? '';
-
   // Product default: sessions run YOLO (--dangerously-skip-permissions) unless a project record
   // explicitly opts out with `dangerouslySkipPermissions: false`. Absence means YOLO. This is the one
   // place the default is decided; diffProjects() reuses it so a reload sees no phantom perms change.
@@ -124,7 +116,6 @@ function createBackend(httpServer, options = {}) {
       replayBufferKB: cfg.replayBufferKB,
       hookRouter,
       getHookPort,
-      getProxyBaseUrl,
       // Worktree isolation for real user sessions: each forks off the integration branch and merges
       // back on review. Ephemeral team/pack-setup sessions are built elsewhere (not makeSession), so
       // they never receive this and run as they did before.
@@ -332,65 +323,6 @@ function createBackend(httpServer, options = {}) {
     notificationManager.registerChannel('toast', createToastChannel());
   }
 
-  // --- Headroom proxy supervisor (easy start) ---
-  // Supervises an EXTERNALLY INSTALLED Headroom proxy (headroom-service.js). Headroom is never
-  // a dependency: not installed parks the service in 'not-installed' and the chip degrades to a
-  // hint. Lifecycle rides 'status' events broadcast as headroom-status; start/stop arrive over
-  // the control WS (same localhost trust level as add-session). The probe asks /livez with a
-  // short timeout so a dead port resolves fast and never blocks the loop.
-  const headroomService = createHeadroomService({
-    getConfig: () => config,
-    spawn,
-    execFile,
-    probe: (port) => new Promise((resolve) => {
-      const req = http.get({ host: '127.0.0.1', port, path: '/livez', timeout: 2000 }, (res) => {
-        res.resume();
-        resolve(res.statusCode === 200);
-      });
-      req.on('error', () => resolve(false));
-      req.on('timeout', () => { req.destroy(); resolve(false); });
-    }),
-    // Read-only analytics: GET /stats while the proxy is usable. Any failure resolves null
-    // (the service keeps its last snapshot); short timeout so a wedged proxy never stacks
-    // sockets. Async http on the shared loop, same as the /livez probe. The body cap matters
-    // because the 3s timeout is socket-idle, not wall-clock: a proxy that streams forever
-    // would otherwise grow the buffer unbounded.
-    fetchStats: (port) => new Promise((resolve) => {
-      const req = http.get({ host: '127.0.0.1', port, path: '/stats', timeout: 3000 }, (res) => {
-        if (res.statusCode !== 200) { res.resume(); resolve(null); return; }
-        let body = '';
-        res.setEncoding('utf8');
-        res.on('data', (c) => {
-          body += c;
-          if (body.length > 256 * 1024) { res.destroy(); resolve(null); }
-        });
-        res.on('end', () => {
-          try { resolve(JSON.parse(body)); } catch { resolve(null); }
-        });
-      });
-      req.on('error', () => resolve(null));
-      req.on('timeout', () => { req.destroy(); resolve(null); });
-    }),
-    log: console.log,
-  });
-  headroomService.on('status', (st) => {
-    broadcastControl({ type: 'headroom-status', ...st, timestamp: Date.now() });
-  });
-  // Live savings updates between state changes; (re)connect rehydration rides the
-  // get-headroom-status reply, whose getStatus() payload now carries `stats`.
-  headroomService.on('stats', (stats) => {
-    broadcastControl({ type: 'headroom-stats', stats, timestamp: Date.now() });
-  });
-  // Easy start: fire-and-forget so a slow detect/cold start never blocks server boot. A detect
-  // miss parks in not-installed (inert); errors land in the status payload, never throw.
-  // The explicit detect() is deliberate even though start() self-detects: its boolean gates
-  // start() so a miss never even attempts a spawn (do not "clean up" the double-detect).
-  if (config.headroomEasyStart) {
-    headroomService.detect()
-      .then((ok) => { if (ok) return headroomService.start(); })
-      .catch(() => {});
-  }
-
   // --- Client focus tracking (suppress notifications when dashboard is visible) ---
 
   const focusedClients = new Set();
@@ -501,7 +433,6 @@ function createBackend(httpServer, options = {}) {
       replayBufferKB: config.replayBufferKB,
       hookRouter,
       getHookPort,
-      getProxyBaseUrl,
     });
     teamSessions.set(id, sess);
     sess.on('error', (err) => console.error(`[team ${name}] error: ${err.message}`));
@@ -577,7 +508,6 @@ function createBackend(httpServer, options = {}) {
       replayBufferKB: config.replayBufferKB,
       hookRouter,
       getHookPort,
-      getProxyBaseUrl,
     });
     sessions.set(id, sess);
     wireSessionEvents(sess);
@@ -1002,9 +932,6 @@ function createBackend(httpServer, options = {}) {
   }
 
   function applySettingsReload(newConfig) {
-    // Captured BEFORE applySettings so an off-to-on headroomEasyStart flip is detectable. This
-    // funnel covers BOTH the UI update-settings path and the config.json file-watch reload.
-    const prevEasyStart = config.headroomEasyStart;
     configStore.applySettings(newConfig);
     for (const [, sess] of sessions) {
       sess.updateSettings(config);
@@ -1013,14 +940,6 @@ function createBackend(httpServer, options = {}) {
       escalationIntervalMs: ESCALATION_INTERVAL_MS,
       debounceMs: config.notifyDebounceMs || 3000,
     });
-    // Off-to-on starts the proxy (fire-and-forget, never blocks the reload). Flipping OFF does
-    // NOT stop a running proxy (explicit stop only); a port change while running is
-    // restart-required, mirroring the main `port` setting.
-    if (!prevEasyStart && config.headroomEasyStart) {
-      headroomService.detect()
-        .then((ok) => { if (ok) return headroomService.start(); })
-        .catch(() => {});
-    }
   }
 
   // Restart/shutdown handlers live in server-lifecycle.js so the re-entry guard, the reap-before-exit
@@ -1055,7 +974,6 @@ function createBackend(httpServer, options = {}) {
     getProjectPathById,
     openInEditor,
     startPackSetup,
-    headroomService,
     // Ephemeral sessions (guided pack setup) are not config-backed, so the remove-session
     // handler can't go through the config-reload diff path; give it a direct teardown.
     removeEphemeralSession: (id) => _teardownSession(id, '[control] Removed session via UI'),
@@ -1214,9 +1132,6 @@ function createBackend(httpServer, options = {}) {
     clearInterval(healthInterval);
     // INVARIANT: destroy NotificationManager BEFORE sessions - clears all timers globally
     notificationManager.destroy();
-    // Owned Headroom child only; an external proxy is never ours to reap. Graceful path only:
-    // an ungraceful crash orphans the proxy and the next boot re-adopts it as running-external.
-    headroomService.dispose();
     for (const [, s] of teamSchedulers) s.disarm();
     integrationPool.stopAll();
     // Collect each session's in-flight PTY reap (set by kill() on win32, see sessions.js) so the

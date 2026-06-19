@@ -17,7 +17,6 @@
     "server-lifecycle.js",
     "sessions.js",
     "notification-manager.js",
-    "headroom-service.js",
     "session-core/",
     "channels/toast.js",
     "channels/web-notification.js",

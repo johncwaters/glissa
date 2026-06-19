@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- **Headroom proxy integration**: Removed the opt-in Headroom proxy supervisor (the `headroomEasyStart` and `headroomPort` settings, the header chip, start/stop control, and live savings analytics) together with the generic `proxyBaseUrl` setting that injected `ANTHROPIC_BASE_URL` into spawned sessions. Local-proxy compression did not pay off against Claude Code's own prompt caching, so the entire proxy surface (all introduced in 0.15.0) is gone. Sessions no longer read `proxyBaseUrl`; an `ANTHROPIC_BASE_URL` already present in the environment is left untouched.
+
 ## [0.15.0] - 2026-06-18
 
 This release rolls up everything since 0.14.0. It hardens the Focus review workflow (a parked merge hands Merge back once the conflict is resolved, the review sidebar is resizable and stops repeating itself, sessions can be parked back to dormant for reuse), routes sessions through a local LLM proxy with optional one-click management and live savings analytics for an installed Headroom proxy, makes the roster rail resizable, and moves the worktree git engine and session teardown off the shared event loop, so a slow machine no longer freezes every terminal at once. It also closes a menu-restart bug that could spawn an unkillable session respawn loop.

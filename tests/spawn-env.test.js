@@ -47,35 +47,17 @@ test('negative: no CLAUDECODE-exact or GLISSA_* keys survive', () => {
   assert.equal(keys.includes('CLAUDE_CODE_ENTRYPOINT'), false);
 });
 
-test('preserves unrelated vars', () => {
-  const env = buildSpawnEnv(fullBase());
+test('preserves unrelated vars (including an inherited ANTHROPIC_BASE_URL)', () => {
+  const env = buildSpawnEnv({ ...fullBase(), ANTHROPIC_BASE_URL: 'http://user-proxy:9999' });
   assert.equal(env.PATH, '/usr/bin');
   assert.equal(env.HOME, '/home/u');
+  // Glissa no longer injects or scrubs a proxy var; a user-level ANTHROPIC_BASE_URL passes through.
+  assert.equal(env.ANTHROPIC_BASE_URL, 'http://user-proxy:9999');
 });
 
 test('CLAUDE_CODE_NO_FLICKER is always set to "1"', () => {
   // No-flicker mode is always on; the flag is unconditionally injected.
   assert.equal(buildSpawnEnv(fullBase()).CLAUDE_CODE_NO_FLICKER, '1');
-});
-
-test('proxyBaseUrl injects ANTHROPIC_BASE_URL (trimmed)', () => {
-  const env = buildSpawnEnv(fullBase(), { proxyBaseUrl: '  http://127.0.0.1:8787  ' });
-  assert.equal(env.ANTHROPIC_BASE_URL, 'http://127.0.0.1:8787');
-});
-
-test('no proxyBaseUrl -> no ANTHROPIC_BASE_URL injected', () => {
-  assert.ok(!('ANTHROPIC_BASE_URL' in buildSpawnEnv(fullBase())));
-  assert.ok(!('ANTHROPIC_BASE_URL' in buildSpawnEnv(fullBase(), { proxyBaseUrl: '' })));
-  assert.ok(!('ANTHROPIC_BASE_URL' in buildSpawnEnv(fullBase(), { proxyBaseUrl: '   ' })));
-  assert.ok(!('ANTHROPIC_BASE_URL' in buildSpawnEnv(fullBase(), { proxyBaseUrl: 42 })));
-});
-
-test('empty proxyBaseUrl preserves an inherited ANTHROPIC_BASE_URL (user-level override keeps working)', () => {
-  const base = { ...fullBase(), ANTHROPIC_BASE_URL: 'http://user-proxy:9999' };
-  assert.equal(buildSpawnEnv(base).ANTHROPIC_BASE_URL, 'http://user-proxy:9999');
-  // a configured proxy wins over the inherited value
-  const env = buildSpawnEnv(base, { proxyBaseUrl: 'http://127.0.0.1:8787' });
-  assert.equal(env.ANTHROPIC_BASE_URL, 'http://127.0.0.1:8787');
 });
 
 test('returns a COPY - baseEnv is never mutated', () => {

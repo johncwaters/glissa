@@ -2,7 +2,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { TIMEOUT_KEYS, BOOLEAN_KEYS, STRING_KEYS, NUMBER_KEYS } = require('./config-store');
+const { TIMEOUT_KEYS, BOOLEAN_KEYS, STRING_KEYS } = require('./config-store');
 const { STATES } = require('./shared/states');
 const { computeNextFire } = require('./scheduler');
 
@@ -64,8 +64,6 @@ function registerControlHandlers(controlWss, deps) {
     openInEditor = null,
     startPackSetup = null,
     removeEphemeralSession = null,
-    // Headroom proxy supervisor (optional - undefined in older callers/tests).
-    headroomService = null,
   } = deps;
 
   /** Find a session by id (primary) with name fallback for legacy clients. */
@@ -292,37 +290,6 @@ function registerControlHandlers(controlWss, deps) {
       }
     }
 
-    // NUMBER_KEYS are integers with port-range semantics (today: headroomPort). headroomPort
-    // ends up on a spawned command line (buildProxyArgs), so reject anything that is not an
-    // integer in [1024, 65535] here rather than letting a bad value fail at every proxy start.
-    for (const key of NUMBER_KEYS) {
-      if (s[key] != null && (!Number.isInteger(s[key]) || s[key] < 1024 || s[key] > 65535)) {
-        ws.send(JSON.stringify({
-          type: 'settings-error',
-          requestId: msg.requestId || null,
-          message: `${key} must be an integer between 1024 and 65535`
-        }));
-        return;
-      }
-    }
-
-    // proxyBaseUrl lands in the spawn env verbatim (ANTHROPIC_BASE_URL), so normalize once at the
-    // boundary (validated == persisted == spawned) and reject anything that is not an http(s) URL
-    // here rather than letting every future spawn fail opaquely.
-    if (typeof s.proxyBaseUrl === 'string') s.proxyBaseUrl = s.proxyBaseUrl.trim();
-    if (s.proxyBaseUrl) {
-      let proxyOk = false;
-      try { proxyOk = /^https?:$/.test(new URL(s.proxyBaseUrl).protocol); } catch { /* invalid URL */ }
-      if (!proxyOk) {
-        ws.send(JSON.stringify({
-          type: 'settings-error',
-          requestId: msg.requestId || null,
-          message: 'proxyBaseUrl must be an http:// or https:// URL'
-        }));
-        return;
-      }
-    }
-
     const freshConfig = configStore.save(cfg => {
       for (const key of TIMEOUT_KEYS) {
         if (s[key] != null) cfg[key] = s[key];
@@ -332,9 +299,6 @@ function registerControlHandlers(controlWss, deps) {
       }
       for (const key of STRING_KEYS) {
         if (s[key] != null) cfg[key] = String(s[key]);
-      }
-      for (const key of NUMBER_KEYS) {
-        if (s[key] != null) cfg[key] = s[key];
       }
       if (s.repoRoots != null) cfg.repoRoots = s.repoRoots;
     });
@@ -631,46 +595,6 @@ function registerControlHandlers(controlWss, deps) {
     ws.send(JSON.stringify(out));
   }
 
-  // Headroom proxy supervisor messages. The supervisor runs inside the existing localhost
-  // trust model (same level as add-session spawning claude); state changes ride the
-  // headroom-status broadcast, so start replies with nothing and lets the events narrate.
-  function handleGetHeadroomStatus(msg, ws) {
-    if (!headroomService) {
-      // Shape parity with getStatus() so the chip can read any field on the degraded path too.
-      ws.send(JSON.stringify({
-        type: 'headroom-status', requestId: msg.requestId || null,
-        state: 'not-installed', port: null, pid: null, version: null, error: null, logTail: [],
-        stats: null,
-      }));
-      return;
-    }
-    ws.send(JSON.stringify({
-      type: 'headroom-status', requestId: msg.requestId || null,
-      ...headroomService.getStatus(),
-    }));
-  }
-
-  function handleStartHeadroom(msg, ws) {
-    if (!headroomService) {
-      ws.send(JSON.stringify({ type: 'error', message: 'Headroom supervisor is not available' }));
-      return;
-    }
-    // Fire-and-forget: progress (starting/running/failed + logTail) broadcasts as headroom-status.
-    headroomService.start();
-  }
-
-  function handleStopHeadroom(msg, ws) {
-    if (!headroomService) {
-      ws.send(JSON.stringify({ type: 'error', message: 'Headroom supervisor is not available' }));
-      return;
-    }
-    const r = headroomService.stop();
-    if (!r.ok) {
-      // running-external lands here: Glissa never signals a proxy it did not start.
-      ws.send(JSON.stringify({ type: 'error', message: r.error || 'Cannot stop Headroom' }));
-    }
-  }
-
   // Handler map - single dispatch table for all control message types
   // Session action handlers use findSession() for id-based lookup with name fallback.
   const handlers = {
@@ -686,9 +610,6 @@ function registerControlHandlers(controlWss, deps) {
     'open-artifact':        handleOpenArtifact,
     'get-team-pack-status': handleGetTeamPackStatus,
     'setup-team-pack':      handleSetupTeamPack,
-    'get-headroom-status':  handleGetHeadroomStatus,
-    'start-headroom':       handleStartHeadroom,
-    'stop-headroom':        handleStopHeadroom,
     'add-session':      handleAddSession,
     'remove-session':   handleRemoveSession,
     'rename-session':   handleRenameSession,
