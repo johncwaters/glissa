@@ -65,6 +65,11 @@ function fakeFactory(behaviors) {
       } else {
         b = spec || { exitCode: 0 };
       }
+      // Spawn-fault injection: a synchronous throw from start() and an async start() rejection model the
+      // two ways the real async Session.start() fails before/at spawn (failed provision / hook-settings
+      // write / spawn-command build, or pty.spawn). runStage must turn BOTH into a clean spawn-error.
+      if (b.throwOnStart) throw new Error('boom: start() threw synchronously');
+      if (b.rejectOnStart) return Promise.reject(new Error('boom: start() rejected'));
       if (b.hang) return; // never completes on its own; only a kill() ends it
       const m = /Write your single output file to: (.+)/.exec(sessionOpts.initialPrompt || '');
       const producesPath = m ? m[1].trim() : null;
@@ -87,7 +92,8 @@ function fakeFactory(behaviors) {
 function makeOrch(tmpProj, behaviors, opts = {}) {
   const events = [];
   const prompts = []; // { id, prompt } per stage spawn, for asserting prompt injection
-  const base = fakeFactory(behaviors);
+  // opts.makeStageSession fully replaces the fake factory (used to inject a session-construction throw).
+  const base = opts.makeStageSession || fakeFactory(behaviors);
   const makeStageSession = (sessionOpts) => {
     prompts.push({ id: String(sessionOpts.id).split(':').pop(), prompt: sessionOpts.initialPrompt || '' });
     return base(sessionOpts);
@@ -99,7 +105,8 @@ function makeOrch(tmpProj, behaviors, opts = {}) {
     },
     getProjectPath: () => tmpProj,
     output: teamOutput,
-    buildStagePrompt,
+    // opts.buildStagePrompt lets a test inject an orchestration-time throw OUTSIDE runStage.
+    buildStagePrompt: opts.buildStagePrompt || buildStagePrompt,
     buildStageSpawnOptions,
     teamPermissions,
     spawnGate: createSpawnGate(),
@@ -428,6 +435,89 @@ test('a stage failure still integrates the partial run (kept, not discarded)', a
     const res = await orch.runTeam({ teamId: 'marketing', projectId: 'p1' });
     assert.equal(res.failedStage, 'strategist');
     assert.equal(gw.calls.integrate, 1, 'failed run is committed + integrated');
+    assert.equal(gw.calls.discard, 0);
+  } finally {
+    gw.cleanup();
+    fs.rmSync(proj, { recursive: true, force: true });
+  }
+});
+
+// --- Spawn-fault hardening (regression for the empty glissa/marketing/2026-06-20-saturday stub) ---
+// The async Session.start() was called fire-and-forget, so a pre-spawn rejection (failed worktree
+// provision / hook-settings write / spawn-command build) escaped as an UNHANDLED rejection - crashing the
+// server mid-run and leaving the run branch with nothing committed and no project-visible record. runStage
+// must funnel every spawn fault into the normal failTerminal -> appendLog -> integrate path.
+
+test('spawn fault (async start rejection) fails the first stage cleanly, logs it, integrates (no silent leak)', async () => {
+  const proj = tmpProject();
+  const gw = fakeWorkspace();
+  try {
+    seedPack(proj);
+    const { orch, events } = makeOrch(proj, {
+      researcher: { rejectOnStart: true },
+      strategist: { write: PLAN },
+    }, { gitWorkspace: gw });
+    const res = await orch.runTeam({ teamId: 'marketing', projectId: 'p1', trigger: 'scheduled' });
+    assert.equal(res.failedStage, 'researcher', 'ends on the researcher, not a thrown rejection');
+    assert.equal(res.reason, 'spawn-error');
+    assert.equal(startedCount(events, 'strategist'), 0, 'no downstream stage ran');
+    assert.ok(events.some((e) => e.name === 'team-run-failed'), 'surfaced a failure event');
+    // The failure is RECORDED and the run is INTEGRATED (not discarded): with a real git engine that commit
+    // FF-merges back and the branch is deleted on merge, so no empty stub is left behind.
+    assert.equal(gw.calls.integrate, 1, 'failed run is committed + integrated, not silently dropped');
+    assert.equal(gw.calls.discard, 0);
+    assert.ok(logLines(gw.wdirs[0]).some((l) => l.includes('FAILED') && l.includes('spawn-error')),
+      'a FAILED spawn-error line was logged in the run');
+  } finally {
+    gw.cleanup();
+    fs.rmSync(proj, { recursive: true, force: true });
+  }
+});
+
+test('spawn fault (start throws synchronously) is caught and fails the stage, not the process', async () => {
+  const proj = tmpProject();
+  try {
+    seedPack(proj);
+    const { orch, events } = makeOrch(proj, { researcher: { throwOnStart: true } });
+    const res = await orch.runTeam({ teamId: 'marketing', projectId: 'p1' });
+    assert.equal(res.failedStage, 'researcher');
+    assert.equal(res.reason, 'spawn-error');
+    assert.ok(logLines(proj).some((l) => l.includes('FAILED') && l.includes('spawn-error')), 'logged the spawn fault');
+    assert.ok(events.some((e) => e.name === 'team-run-failed'));
+  } finally {
+    fs.rmSync(proj, { recursive: true, force: true });
+  }
+});
+
+test('spawn fault (constructing the session throws) is caught and fails the stage', async () => {
+  const proj = tmpProject();
+  try {
+    seedPack(proj);
+    const { orch, events } = makeOrch(proj, {}, {
+      makeStageSession: () => { throw new Error('boom: new Session failed'); },
+    });
+    const res = await orch.runTeam({ teamId: 'marketing', projectId: 'p1' });
+    assert.equal(res.failedStage, 'researcher');
+    assert.equal(res.reason, 'spawn-error');
+    assert.ok(events.some((e) => e.name === 'team-run-failed'));
+  } finally {
+    fs.rmSync(proj, { recursive: true, force: true });
+  }
+});
+
+test('an unexpected orchestration throw (buildStagePrompt) is caught, logged, surfaced (not a silent unwind)', async () => {
+  const proj = tmpProject();
+  const gw = fakeWorkspace();
+  try {
+    seedPack(proj);
+    const { orch, events } = makeOrch(proj, { researcher: { write: BRIEF } }, {
+      gitWorkspace: gw,
+      buildStagePrompt: () => { throw new Error('boom: prompt build failed'); },
+    });
+    const res = await orch.runTeam({ teamId: 'marketing', projectId: 'p1', trigger: 'scheduled' });
+    assert.ok(res.error && /prompt build failed/.test(res.error), 'resolves with the error instead of rejecting');
+    assert.ok(events.some((e) => e.name === 'team-run-failed' && e.reason === 'error'), 'surfaced a failure event');
+    assert.ok(logLines(gw.wdirs[0]).some((l) => l.includes('FAILED')), 'recorded a FAILED line in the run log');
     assert.equal(gw.calls.discard, 0);
   } finally {
     gw.cleanup();

@@ -129,37 +129,56 @@ function createOrchestrator(deps) {
     return stored;
   }
 
-  // Spawn one stage and resolve when its process exits (exit 0 = success) or the stage times out.
+  // Spawn one stage and resolve when its process exits (exit 0 = success), it errors, or it times out.
+  // This NEVER rejects. Two failure modes are funnelled into a clean { ok:false, reason:'spawn-error' }:
+  //   (1) a SYNCHRONOUS throw while building the spawn options or constructing the stage session, and
+  //   (2) an ASYNC rejection from Session.start() (which is async and was previously called
+  //       fire-and-forget). start() does its worktree provision, hook-settings write, and spawn-command
+  //       build BEFORE the guarded pty.spawn; a throw in any of those rejects start(). An unhandled
+  //       rejection there crashes the whole server under Node's default - and on a team run it killed the
+  //       run mid-stage, leaving the run branch behind with nothing committed and NO project-visible
+  //       record (the empty `glissa/marketing/2026-06-20-saturday` stub). Catching it fails the stage
+  //       cleanly so the normal failTerminal -> appendLog -> integrate path records and cleans up the run.
   function runStage({ team, stage, runId, projectPath, prompt, lockKey }) {
     return spawnGate.run(() => new Promise((resolve) => {
-      const spawnOptions = buildStageSpawnOptions(team, stage);
-      const session = makeStageSession({
-        id: `team:${runId}:${stage.id}`,
-        name: `${team.id}/${stage.id}`,
-        path: projectPath,
-        initialPrompt: prompt,
-        spawnOptions,
-        permissions: teamPermissions(team),
-      });
       const entry = active.get(lockKey);
-      if (entry) entry.session = session;
-
+      let session = null;
       let settled = false;
-      const timer = setTimeoutFn(() => finish(false, 'timeout'), (team.stageTimeoutSeconds || 900) * 1000);
-      if (timer && typeof timer.unref === 'function') timer.unref();
+      let timer = null;
 
       function finish(ok, reason, exitCode) {
         if (settled) return;
         settled = true;
-        clearTimeoutFn(timer);
-        try { session.destroy(); } catch { /* best-effort */ }
+        if (timer) clearTimeoutFn(timer);
+        try { if (session) session.destroy(); } catch { /* best-effort */ }
         if (entry) entry.session = null;
         resolve({ ok, reason, exitCode });
       }
 
-      session.on('exit', ({ exitCode }) => finish(exitCode === 0, exitCode === 0 ? null : 'nonzero-exit', exitCode));
-      session.on('error', () => finish(false, 'spawn-error'));
-      session.start();
+      try {
+        const spawnOptions = buildStageSpawnOptions(team, stage);
+        session = makeStageSession({
+          id: `team:${runId}:${stage.id}`,
+          name: `${team.id}/${stage.id}`,
+          path: projectPath,
+          initialPrompt: prompt,
+          spawnOptions,
+          permissions: teamPermissions(team),
+        });
+        if (entry) entry.session = session;
+
+        timer = setTimeoutFn(() => finish(false, 'timeout'), (team.stageTimeoutSeconds || 900) * 1000);
+        if (timer && typeof timer.unref === 'function') timer.unref();
+
+        session.on('exit', ({ exitCode }) => finish(exitCode === 0, exitCode === 0 ? null : 'nonzero-exit', exitCode));
+        session.on('error', () => finish(false, 'spawn-error'));
+        // start() is async: a rejection (failed worktree provision, hook-settings write, spawn-command
+        // build) would otherwise escape as an unhandled rejection and never settle this stage. Promise.resolve
+        // wraps a sync-returning fake (tests) and a real async start() alike.
+        Promise.resolve(session.start()).catch(() => finish(false, 'spawn-error'));
+      } catch {
+        finish(false, 'spawn-error');
+      }
     }));
   }
 
@@ -510,6 +529,23 @@ function createOrchestrator(deps) {
       log(`run complete: ${lockKey} runId=${runId} verdict=${verdict || 'DONE'}${integ.merged ? ' (merged)' : ''}`);
       emitter.emit('team-run-complete', { teamId, projectId, runId, runDir, verdict, rounds, branch: integ.branch, base: integ.base, merged: integ.merged });
       return { ok: true, verdict, runDir, rounds, branch: integ.branch, merged: integ.merged };
+    } catch (err) {
+      // Backstop for any UNEXPECTED throw in the run (an fs error building the run folder/prompt, a bad
+      // event listener, a stage fault that surfaced synchronously). Before this guard such a throw unwound
+      // SILENTLY: no project-visible record and, on a git project, an empty leaked branch. Record it where
+      // the run can see it - the worktree log when one exists (the finally's integrate commits + FF-merges
+      // it back), else the project log - and surface a team-run-failed (backend re-broadcasts it to the
+      // dashboard + notifies). Resolve with { error } rather than rejecting, so the call-site .catch does
+      // not ALSO broadcast a duplicate failure. The finally still finalizes the workspace exactly as before.
+      const reason = (err && err.message) ? err.message : String(err);
+      try {
+        const logTarget = (workspace.isGit && workspace.cwd) ? workspace.cwd : projectPath;
+        output.appendLog(logTarget, team.outputPath,
+          `${dateStr} | (error) | - | FAILED${runId ? ` @run ${runId}` : ''} (${clip(reason, 80)})`);
+      } catch { /* best-effort: never mask the original error with a logging failure */ }
+      log(`run errored: ${lockKey}${runId ? ` runId=${runId}` : ''} (${reason})`);
+      emitter.emit('team-run-failed', { teamId, projectId, reason: 'error', error: reason });
+      return { error: reason };
     } finally {
       active.delete(lockKey);
       // Failure / halt paths fall through here: commit + fast-forward them too, so the run is captured
