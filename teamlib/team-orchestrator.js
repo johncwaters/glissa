@@ -7,7 +7,7 @@ const { runFolderLabel, escapeRegExp } = require('./team-output');
 
 // Team run engine. Glissa drives each stage as one short-lived `claude -p` session, gating on the
 // handoff file between stages. Completion is keyed on the session's `exit` event (exit 0 => DONE),
-// which the Phase-0 probe confirmed for `claude -p` in node-pty — NOT on the Stop hook. See
+// which the Phase-0 probe confirmed for `claude -p` in node-pty - NOT on the Stop hook. See
 // .omc/plans/marketing-team-pipeline.md sections 3.4 and 3.10.
 //
 // All side-effecting collaborators are injected so the full stage loop is testable with a fake
@@ -60,7 +60,7 @@ function sectionFirstLine(text, heading) {
 // cap length so log.md stays one scannable line per run even when an agent writes a paragraph.
 function clip(value, max = 100) {
   const t = String(value || '').replace(/\|/g, '/').replace(/\s+/g, ' ').trim();
-  return t.length > max ? `${t.slice(0, max - 1).trimEnd()}…` : t;
+  return t.length > max ? `${t.slice(0, max - 1).trimEnd()}...` : t;
 }
 
 // Format the run-log verdict field to reflect the revise-loop outcome. Pure.
@@ -90,6 +90,12 @@ function createOrchestrator(deps) {
     spawnGate,
     makeStageSession,
     gitWorkspace = null,
+    // App-runtime worktree wiring (injected by backend). worktreeShare is the gitignored local context
+    // to bring into a run worktree (node_modules, .env*, .claude, .omc); getWorktreeBase(projectPath)
+    // returns the stable per-project worktree root. Both consumed ONLY when a team opts in via
+    // runtime.shareLocalContext, so file-in/file-out teams keep their bare temp-dir worktree.
+    worktreeShare = null,
+    getWorktreeBase = null,
     now = () => new Date(),
     setTimeoutFn = setTimeout,
     clearTimeoutFn = clearTimeout,
@@ -276,12 +282,45 @@ function createOrchestrator(deps) {
         return { needsSetup: true, unfilled: pack.unfilled };
       }
 
+      // A team that pins a base branch REQUIRES git isolation off it: never silently run in the
+      // operator's checkout on the wrong branch. Surface a project-visible BLOCK. No worktree exists in
+      // any of these cases, so the finally's finalize is a no-op. `detail` carries the specific cause so
+      // a transient create failure is not misreported as "not a git repo".
+      const blockRun = (why) => {
+        output.appendLog(projectPath, team.outputPath, `${dateStr} | (setup) | - | BLOCKED (${why})`);
+        log(`run blocked: ${lockKey} (${why})`);
+        emitter.emit('team-run-failed', { teamId, projectId, reason: 'no-base-branch', detail: why });
+        return { blocked: true, reason: why };
+      };
+      // baseBranch needs the isolation engine to fork off the branch; without it the run would fall
+      // through to an in-place run on the wrong branch. Block before attempting anything.
+      if (team.runtime?.baseBranch && !gitWorkspace) {
+        return blockRun(`base branch "${team.runtime.baseBranch}" pinned but git isolation is unavailable`);
+      }
+
       if (gitWorkspace) {
+        const runtime = team.runtime || {};
+        const createOpts = {
+          projectPath, teamId: team.id, label: runLabel(now()), outputPath: team.outputPath,
+        };
+        // App-runtime teams (e.g. the persona QA walk) opt in to a worktree that carries the project's
+        // gitignored local context (so the agent can actually boot the app) and to a pinned base branch
+        // (so the run forks from the branch holding the walk inputs, not the operator's current HEAD).
+        if (runtime.shareLocalContext) {
+          if (worktreeShare) createOpts.shareList = worktreeShare;
+          if (getWorktreeBase) createOpts.worktreeBase = getWorktreeBase(projectPath);
+        }
+        if (runtime.baseBranch) createOpts.baseBranch = runtime.baseBranch;
         try {
-          workspace = (await gitWorkspace.create({ projectPath, teamId: team.id, label: runLabel(now()), outputPath: team.outputPath }))
-            || { cwd: projectPath, isGit: false };
-        } catch {
-          workspace = { cwd: projectPath, isGit: false };
+          workspace = (await gitWorkspace.create(createOpts)) || { cwd: projectPath, isGit: false };
+        } catch (err) {
+          // Preserve the cause so the BLOCK below reports the real failure, not a misleading default.
+          workspace = { cwd: projectPath, isGit: false, reason: 'create-failed', detail: err?.message };
+        }
+        if (runtime.baseBranch && !workspace.isGit) {
+          if (workspace.reason === 'no-base-branch') return blockRun(`base branch "${runtime.baseBranch}" not found`);
+          if (workspace.reason === 'create-failed') return blockRun(`worktree create failed (${workspace.detail || 'unknown error'})`);
+          return blockRun('project is not a git repo');
         }
       }
       const cwd = workspace.cwd;
@@ -561,7 +600,7 @@ function createOrchestrator(deps) {
     entry.cancelled = true;
     entry.cancelling = true;
     log(`cancel requested: ${lockKey}${entry.currentStage ? ` (stage ${entry.currentStage})` : ''}`);
-    // Signal every client (and a re-mounting tab, via getRunState) to show "Cancelling…".
+    // Signal every client (and a re-mounting tab, via getRunState) to show "Cancelling...".
     emitter.emit('team-run-cancelling', { teamId, projectId, stage: entry.currentStage || null });
     // If the run is paused awaiting an operator answer (no live stage process), unblock the await so the
     // cancel settles the run promptly instead of hanging until the answer timeout.

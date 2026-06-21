@@ -112,6 +112,8 @@ function makeOrch(tmpProj, behaviors, opts = {}) {
     spawnGate: createSpawnGate(),
     makeStageSession,
     gitWorkspace: opts.gitWorkspace || null,
+    ...(opts.worktreeShare ? { worktreeShare: opts.worktreeShare } : {}),
+    ...(opts.getWorktreeBase ? { getWorktreeBase: opts.getWorktreeBase } : {}),
     now: () => new Date(Date.UTC(2026, 5, 2, 18, 0, 0)),
     log: () => {}, // keep lifecycle logging out of the test output (it pipes through `tail`)
     ...(opts.setTimeoutFn ? { setTimeoutFn: opts.setTimeoutFn } : {}),
@@ -214,6 +216,109 @@ test('happy path: all stages run, SHIP -> publisher, one success log line', asyn
     assert.equal(logLines(proj).length, 2, 'header + exactly one run line');
     assert.equal(events.filter((e) => e.name === 'team-stage-complete').length, 5);
     assert.ok(events.some((e) => e.name === 'team-run-complete'));
+  } finally {
+    fs.rmSync(proj, { recursive: true, force: true });
+  }
+});
+
+test('app-runtime opt-in: shareList + worktreeBase + baseBranch flow into worktree create', async () => {
+  const proj = tmpProject();
+  const wdirs = [];
+  try {
+    seedPack(proj);
+    const seen = [];
+    const gw = {
+      create: (a) => {
+        seen.push(a);
+        const wt = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-fakewt-'));
+        wdirs.push(wt);
+        return { cwd: wt, isGit: true, branch: 'glissa/marketing/run', base: 'develop', baseSha: 'abc' };
+      },
+      integrate: () => ({ branch: null, base: 'develop', merged: true, committed: true }),
+      discard: () => {},
+    };
+    const { orch } = makeOrch(proj, {
+      researcher: { write: BRIEF }, strategist: { write: PLAN }, writer: { write: DRAFTS },
+      editor: { write: REVIEW('SHIP') }, publisher: { write: PUBLISHED },
+    }, {
+      gitWorkspace: gw,
+      teamPatch: (t) => ({ ...t, runtime: { shareLocalContext: true, enableProjectMcp: true, baseBranch: 'develop' } }),
+      worktreeShare: ['node_modules', '.env.local'],
+      getWorktreeBase: () => '/wt/base',
+    });
+    const res = await orch.runTeam({ teamId: 'marketing', projectId: 'p1', trigger: 'manual' });
+    assert.equal(res.ok, true);
+    assert.equal(seen.length, 1, 'worktree created once');
+    assert.deepEqual(seen[0].shareList, ['node_modules', '.env.local'], 'gitignored context passed through');
+    assert.equal(seen[0].worktreeBase, '/wt/base', 'stable worktree base passed through');
+    assert.equal(seen[0].baseBranch, 'develop', 'pinned base branch passed through');
+  } finally {
+    fs.rmSync(proj, { recursive: true, force: true });
+    for (const d of wdirs) fs.rmSync(d, { recursive: true, force: true });
+  }
+});
+
+test('app-runtime opt-in: a missing pinned base branch BLOCKS the run (no stages, BLOCKED log)', async () => {
+  const proj = tmpProject();
+  try {
+    seedPack(proj);
+    const gw = {
+      create: () => ({ cwd: proj, isGit: false, reason: 'no-base-branch' }),
+      integrate: () => ({ merged: false }),
+      discard: () => {},
+    };
+    const { orch, events } = makeOrch(proj, { researcher: { write: BRIEF } }, {
+      gitWorkspace: gw,
+      teamPatch: (t) => ({ ...t, runtime: { shareLocalContext: false, enableProjectMcp: false, baseBranch: 'develop' } }),
+    });
+    const res = await orch.runTeam({ teamId: 'marketing', projectId: 'p1', trigger: 'manual' });
+    assert.equal(res.blocked, true);
+    assert.match(res.reason, /base branch "develop" not found/);
+    assert.equal(runsOf(proj).length, 0, 'no run folder created');
+    assert.ok(logLines(proj).some((l) => l.includes('BLOCKED')), 'logged a BLOCKED line');
+    assert.ok(events.some((e) => e.name === 'team-run-failed' && e.reason === 'no-base-branch'), 'emitted a no-base-branch failure');
+    assert.ok(!events.some((e) => e.name === 'team-stage-started'), 'no stage ran');
+  } finally {
+    fs.rmSync(proj, { recursive: true, force: true });
+  }
+});
+
+test('app-runtime opt-in: a worktree create failure BLOCKS with the real cause (not "not a git repo")', async () => {
+  const proj = tmpProject();
+  try {
+    seedPack(proj);
+    const gw = {
+      create: () => { throw new Error('git timeout'); },
+      integrate: () => ({ merged: false }),
+      discard: () => {},
+    };
+    const { orch, events } = makeOrch(proj, { researcher: { write: BRIEF } }, {
+      gitWorkspace: gw,
+      teamPatch: (t) => ({ ...t, runtime: { shareLocalContext: false, enableProjectMcp: false, baseBranch: 'develop' } }),
+    });
+    const res = await orch.runTeam({ teamId: 'marketing', projectId: 'p1', trigger: 'manual' });
+    assert.equal(res.blocked, true);
+    assert.match(res.reason, /worktree create failed \(git timeout\)/);
+    assert.ok(!res.reason.includes('not a git repo'), 'does not misreport a thrown create as non-git');
+    assert.ok(events.some((e) => e.name === 'team-run-failed' && e.reason === 'no-base-branch'), 'emitted the block failure');
+  } finally {
+    fs.rmSync(proj, { recursive: true, force: true });
+  }
+});
+
+test('app-runtime opt-in: a pinned base branch with no git isolation engine BLOCKS', async () => {
+  const proj = tmpProject();
+  try {
+    seedPack(proj);
+    const { orch, events } = makeOrch(proj, { researcher: { write: BRIEF } }, {
+      // No gitWorkspace injected (defaults to null): the pinned-base invariant must still block.
+      teamPatch: (t) => ({ ...t, runtime: { shareLocalContext: false, enableProjectMcp: false, baseBranch: 'develop' } }),
+    });
+    const res = await orch.runTeam({ teamId: 'marketing', projectId: 'p1', trigger: 'manual' });
+    assert.equal(res.blocked, true);
+    assert.match(res.reason, /git isolation is unavailable/);
+    assert.equal(runsOf(proj).length, 0, 'no run folder created');
+    assert.ok(!events.some((e) => e.name === 'team-stage-started'), 'no stage ran');
   } finally {
     fs.rmSync(proj, { recursive: true, force: true });
   }

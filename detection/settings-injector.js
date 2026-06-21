@@ -44,7 +44,7 @@ function safeDirSegment(id) {
 // `permissions` ({ deny: [...] }) is merged in for team stages - the deny blacklist (mechanism M2;
 // efficacy under --dangerously-skip-permissions is the open Phase-0(b) question). Omitted for
 // ordinary user sessions, so their settings are byte-identical to before.
-function buildHookSettings({ port, glissaId, token, timeoutSec = DEFAULT_TIMEOUT_SEC, permissions = null, detectScheduledWakeups = true }) {
+function buildHookSettings({ port, glissaId, token, timeoutSec = DEFAULT_TIMEOUT_SEC, permissions = null, detectScheduledWakeups = true, enableProjectMcp = false }) {
   if (!port || !glissaId || !token) {
     throw new Error('buildHookSettings requires port, glissaId, token');
   }
@@ -62,16 +62,22 @@ function buildHookSettings({ port, glissaId, token, timeoutSec = DEFAULT_TIMEOUT
   if (permissions && Array.isArray(permissions.deny) && permissions.deny.length > 0) {
     settings.permissions = { deny: permissions.deny.slice() };
   }
+  // Headless (`-p`) sessions cannot answer the interactive "trust this .mcp.json server?" prompt, so a
+  // project MCP server would otherwise never load. This flag pre-trusts every project-scoped server for
+  // the session. Added ONLY when opted in (app-runtime team stages), so ordinary sessions stay byte-identical.
+  if (enableProjectMcp) {
+    settings.enableAllProjectMcpServers = true;
+  }
   return settings;
 }
 
 // Write the per-session settings file. Returns { settingsPath, dir, token, cleanup }.
-function writeSessionSettings({ port, glissaId, token, baseDir = DEFAULT_BASE_DIR, timeoutSec = DEFAULT_TIMEOUT_SEC, permissions = null, detectScheduledWakeups = true }) {
+function writeSessionSettings({ port, glissaId, token, baseDir = DEFAULT_BASE_DIR, timeoutSec = DEFAULT_TIMEOUT_SEC, permissions = null, detectScheduledWakeups = true, enableProjectMcp = false }) {
   const tok = token || generateToken();
   const dir = path.join(baseDir, safeDirSegment(glissaId));
   fs.mkdirSync(dir, { recursive: true });
   const settingsPath = path.join(dir, 'settings.json');
-  const settings = buildHookSettings({ port, glissaId, token: tok, timeoutSec, permissions, detectScheduledWakeups });
+  const settings = buildHookSettings({ port, glissaId, token: tok, timeoutSec, permissions, detectScheduledWakeups, enableProjectMcp });
   fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
   return {
     settingsPath,

@@ -137,6 +137,10 @@ class Session extends EventEmitter {
     // Optional Claude Code permissions ({ deny: [...] }) merged into the injected --settings file
     // (team-stage deny blacklist, mechanism M2). Null for ordinary user sessions.
     settingsPermissions = null,
+    // Opt-in: add `enableAllProjectMcpServers: true` to the injected --settings file so a headless
+    // (`-p`) session loads the project's `.mcp.json` servers (e.g. Playwright MCP) without an
+    // interactive trust prompt it can never answer. Off by default; set for app-runtime team stages.
+    enableProjectMcp = false,
     // PTY spawner seam. Defaults to node-pty; tests inject a fake to assert the
     // spawn wiring (file/args) without launching a real process.
     ptySpawn = null,
@@ -226,6 +230,7 @@ class Session extends EventEmitter {
     this._antiSlopPrompt = !!antiSlopPrompt;
     this.ephemeral = !!ephemeral;
     this._settingsPermissions = settingsPermissions;
+    this._enableProjectMcp = !!enableProjectMcp;
     this._ptySpawn = ptySpawn || ((file, args, opts) => pty.spawn(file, args, opts));
     // Async kill executor (taskkill). Default wraps execFile; the callback form keeps the call truly
     // non-blocking. Injected in tests to assert the kill without spawning a real process.
@@ -1179,6 +1184,7 @@ class Session extends EventEmitter {
         baseDir: this._hooksBaseDir,
         permissions: this._settingsPermissions,
         detectScheduledWakeups: this._detectScheduledWakeups,
+        enableProjectMcp: this._enableProjectMcp,
       });
       this._hookToken = this._settingsHandle.token;
       this._hookRouter.register(this.id, {

@@ -35,6 +35,11 @@
   "pack": {
     "required": ["how-to-run.md"]
   },
+  "runtime": {
+    "shareLocalContext": true,
+    "enableProjectMcp": true,
+    "baseBranch": "develop"
+  },
   "stageTimeoutSeconds": 3600,
   "chat": { "allowQuestions": false },
   "stages": [

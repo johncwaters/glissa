@@ -59,6 +59,10 @@ const invalidCases = [
   ['empty chat.questionMarker', { id: 'x', outputPath: 'y', chat: { questionMarker: '' }, stages: [okStage] }, /chat\.questionMarker/],
   ['bad chat.maxQuestions', { id: 'x', outputPath: 'y', chat: { maxQuestions: 0 }, stages: [okStage] }, /chat\.maxQuestions/],
   ['bad chat.answerTimeoutSec', { id: 'x', outputPath: 'y', chat: { answerTimeoutSec: -1 }, stages: [okStage] }, /chat\.answerTimeoutSec/],
+  ['non-object runtime', { id: 'x', outputPath: 'y', runtime: 'no', stages: [okStage] }, /\bruntime\b/],
+  ['bad runtime.shareLocalContext', { id: 'x', outputPath: 'y', runtime: { shareLocalContext: 'yes' }, stages: [okStage] }, /runtime\.shareLocalContext/],
+  ['bad runtime.enableProjectMcp', { id: 'x', outputPath: 'y', runtime: { enableProjectMcp: 1 }, stages: [okStage] }, /runtime\.enableProjectMcp/],
+  ['empty runtime.baseBranch', { id: 'x', outputPath: 'y', runtime: { baseBranch: '  ' }, stages: [okStage] }, /runtime\.baseBranch/],
 ];
 
 for (const [label, def, re] of invalidCases) {
@@ -482,6 +486,60 @@ test('marketing, qa, and changelog all default chat on (manual interactivity)', 
   for (const id of ['marketing', 'qa', 'changelog']) {
     assert.equal(loadTeam(id, REPO_TEAMS).chat.allowQuestions, true, `${id} chat on by default`);
   }
+});
+
+// --- runtime: the app-runtime opt-in (share local context, project MCP, pinned base branch) ---
+
+test('runtime omitted normalizes to the feature OFF (existing teams unchanged)', () => {
+  const baseDir = makeTmpTeams({ teamId: 't' });
+  withTmp(baseDir, () => {
+    assert.deepEqual(
+      loadTeam('t', baseDir).runtime,
+      { shareLocalContext: false, enableProjectMcp: false, baseBranch: null },
+    );
+  });
+});
+
+test('a real runtime opt-in normalizes (booleans coerced, baseBranch trimmed)', () => {
+  const def = {
+    ...teamDef('t', defaultStages()),
+    runtime: { shareLocalContext: true, enableProjectMcp: true, baseBranch: ' develop ' },
+  };
+  const baseDir = makeTmpTeams({ teamId: 't', def });
+  withTmp(baseDir, () => {
+    assert.deepEqual(
+      loadTeam('t', baseDir).runtime,
+      { shareLocalContext: true, enableProjectMcp: true, baseBranch: 'develop' },
+    );
+  });
+});
+
+test('marketing/qa/changelog do not opt into app runtime (backward-compat lock)', () => {
+  for (const id of ['marketing', 'qa', 'changelog']) {
+    assert.deepEqual(
+      loadTeam(id, REPO_TEAMS).runtime,
+      { shareLocalContext: false, enableProjectMcp: false, baseBranch: null },
+      `${id} runtime off`,
+    );
+  }
+});
+
+test('loadTeam("qa-walk") opts into app runtime (share context, project MCP, develop base)', () => {
+  const team = loadTeam('qa-walk', REPO_TEAMS);
+  assert.equal(team.id, 'qa-walk');
+  assert.equal(team.outputPath, '.glissa/teams/qa-walk');
+  assert.deepEqual(team.stages.map((s) => s.id), ['walk']);
+  assert.ok(fs.existsSync(team.stages[0].agentPath), 'walk agent prompt exists');
+  assert.deepEqual(
+    team.stages[0].requiredSections,
+    ['First-timer', 'Returning-user', 'Skeptic', 'Summary'],
+  );
+  assert.deepEqual(
+    team.runtime,
+    { shareLocalContext: true, enableProjectMcp: true, baseBranch: 'develop' },
+  );
+  assert.equal(team.permissions.mode, 'yolo');
+  assert.deepEqual(team.packRequired, ['how-to-run.md']);
 });
 
 // The real qa team loads with the expected roster, writeScope, testGlobs, schedule, and revise config.

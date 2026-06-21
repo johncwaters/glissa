@@ -21,6 +21,13 @@ test('buildStageSpawnOptions yields -p + the stage model + YOLO + ephemeral', ()
   assert.deepEqual(w.extraClaudeArgs, ['-p', '--model', 'sonnet']);
 });
 
+test('buildStageSpawnOptions: enableProjectMcp follows team.runtime.enableProjectMcp', () => {
+  // marketing ships no runtime opt-in, so MCP stays off.
+  assert.equal(buildStageSpawnOptions(TEAM, byId('researcher')).enableProjectMcp, false);
+  const runtimeTeam = { ...TEAM, runtime: { enableProjectMcp: true } };
+  assert.equal(buildStageSpawnOptions(runtimeTeam, byId('researcher')).enableProjectMcp, true);
+});
+
 test('stageModel defaults to sonnet when unset', () => {
   assert.equal(stageModel({}), 'sonnet');
   assert.equal(stageModel({ model: 'opus' }), 'opus');
@@ -42,4 +49,12 @@ test('buildHookSettings merges permissions.deny when provided, omits it otherwis
 
   const noDeny = buildHookSettings(base);
   assert.equal(noDeny.permissions, undefined, 'user sessions get no permissions block');
+});
+
+test('buildHookSettings adds enableAllProjectMcpServers only when opted in', () => {
+  const base = { port: 1234, glissaId: 'g1', token: 't1' };
+  assert.equal(buildHookSettings(base).enableAllProjectMcpServers, undefined, 'absent by default');
+  const on = buildHookSettings({ ...base, enableProjectMcp: true });
+  assert.equal(on.enableAllProjectMcpServers, true, 'pre-trusts project MCP when opted in');
+  assert.ok(on.hooks, 'hooks still present alongside the MCP flag');
 });

@@ -98,6 +98,29 @@ function validateChat(chat, teamId) {
   }
 }
 
+// Validate the optional app-runtime config. A team opts in here when its stage must actually BOOT the
+// target app and/or drive a browser (e.g. the persona QA walk), which a bare file-in/file-out worktree
+// cannot do. All fields optional; defaults make the feature OFF (existing teams unchanged).
+//   - shareLocalContext: junction/copy the project's gitignored local context (node_modules, .env*,
+//     .claude, .omc) into the run worktree, the same machinery sessions use, so the agent can run the app.
+//   - enableProjectMcp: pre-trust the project's `.mcp.json` servers in the headless (`-p`) stage.
+//   - baseBranch: fork the run worktree off THIS branch (the one holding the walk inputs), not the
+//     operator's currently-checked-out HEAD. The run BLOCKS if the branch is missing (orchestrator).
+function validateRuntime(runtime, teamId) {
+  if (runtime == null) return; // optional
+  if (typeof runtime !== 'object' || Array.isArray(runtime)) fail('runtime', 'must be an object', teamId);
+  if (runtime.shareLocalContext != null && typeof runtime.shareLocalContext !== 'boolean') {
+    fail('runtime.shareLocalContext', 'must be a boolean', teamId);
+  }
+  if (runtime.enableProjectMcp != null && typeof runtime.enableProjectMcp !== 'boolean') {
+    fail('runtime.enableProjectMcp', 'must be a boolean', teamId);
+  }
+  if (runtime.baseBranch != null
+    && (typeof runtime.baseBranch !== 'string' || runtime.baseBranch.trim() === '')) {
+    fail('runtime.baseBranch', 'must be a non-empty string', teamId);
+  }
+}
+
 // The repo-relative globs identifying the oracle (the tests) that the orchestrator restores to the run's
 // base SHA before each audit (restore-before-audit, team-git restoreTests). Optional; normalizes to
 // DEFAULT_TEST_GLOBS.
@@ -182,6 +205,7 @@ function validateAndNormalize(def, teamId, teamDir) {
   validateWriteScope(def.writeScope, teamId);
   validateTestGlobs(def.testGlobs, teamId);
   validateChat(def.chat, teamId);
+  validateRuntime(def.runtime, teamId);
 
   const baseDir = path.dirname(teamDir);
 
@@ -253,6 +277,14 @@ function validateAndNormalize(def, teamId, teamDir) {
       questionMarker: def.chat?.questionMarker || 'QUESTION:',
       maxQuestions: Number.isInteger(def.chat?.maxQuestions) ? def.chat.maxQuestions : 3,
       answerTimeoutSec: Number.isInteger(def.chat?.answerTimeoutSec) ? def.chat.answerTimeoutSec : 600,
+    },
+    // App-runtime opt-in. Normalized to an always-present object with the feature OFF by default, so a
+    // team that omits `runtime` behaves exactly as before (bare worktree, no project MCP, HEAD base).
+    runtime: {
+      shareLocalContext: def.runtime?.shareLocalContext === true,
+      enableProjectMcp: def.runtime?.enableProjectMcp === true,
+      baseBranch: (typeof def.runtime?.baseBranch === 'string' && def.runtime.baseBranch.trim())
+        ? def.runtime.baseBranch.trim() : null,
     },
     stages,
     teamDir,

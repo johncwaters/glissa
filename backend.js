@@ -430,6 +430,8 @@ function createBackend(httpServer, options = {}) {
       initialPrompt,
       ephemeral: true,
       settingsPermissions: permissions || null,
+      // App-runtime team stages load the project's .mcp.json servers (e.g. Playwright MCP) headlessly.
+      enableProjectMcp: !!spawnOptions?.enableProjectMcp,
       replayBufferKB: config.replayBufferKB,
       hookRouter,
       getHookPort,
@@ -546,6 +548,12 @@ function createBackend(httpServer, options = {}) {
     spawnGate,
     makeStageSession,
     gitWorkspace,
+    // App-runtime worktree wiring, mirroring the per-session worktree options (see the Session
+    // construction above): the gitignored local context to bring in, and the stable per-project
+    // worktree root. Consumed only when a team opts in via runtime.shareLocalContext.
+    worktreeShare: config.worktreeShare || DEFAULT_CONFIG.worktreeShare,
+    getWorktreeBase: (projectPath) => config.worktreeRoot
+      || path.join(path.dirname(path.resolve(projectPath)), '.glissa-worktrees'),
     now: () => new Date(),
   });
   for (const ev of ['team-run-started', 'team-stage-started', 'team-stage-complete', 'team-revise-round', 'team-run-cancelling', 'team-run-complete', 'team-run-failed', 'team-run-skipped', 'team-run-needs-setup', 'team-chat-message', 'team-run-awaiting-input', 'team-run-resumed']) {

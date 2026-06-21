@@ -21,6 +21,9 @@ function buildStageSpawnOptions(team, stage) {
     dangerouslySkipPermissions: yolo,
     extraClaudeArgs: ['-p', '--model', stageModel(stage)],
     ephemeral: true,
+    // App-runtime teams opt in to loading the project's `.mcp.json` servers (e.g. Playwright MCP) in
+    // the headless stage; ordinary teams leave it off, so the stage settings stay byte-identical.
+    enableProjectMcp: team?.runtime?.enableProjectMcp === true,
   };
 }
 
