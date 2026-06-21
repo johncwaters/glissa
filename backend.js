@@ -133,6 +133,9 @@ function createBackend(httpServer, options = {}) {
       detectScheduledWakeups: cfg.detectScheduledWakeups,
       // Lever B: preventive anti-slop system prompt (user sessions only; off by default).
       antiSlopPrompt: cfg.antiSlopPrompt,
+      // Resume a prior Claude conversation on spawn (set by the per-card "Resume conversation" picker,
+      // persisted on the project record). Null = fresh conversation. See control-handlers resume-conversation.
+      resumeSessionId: project.resumeSessionId || null,
     });
     const recorder = createRecorder(project.name, cfg.capture);
     if (recorder) {
@@ -883,7 +886,7 @@ function createBackend(httpServer, options = {}) {
       // Broadcast BEFORE start(): sess.start() emits state-change synchronously,
       // and handleStateChange creates a card if one doesn't exist yet - without
       // skipPerms (state-change messages don't carry it), dropping the YOLO badge.
-      broadcastControl({ type: 'session-added', id: project.id, session: project.name, path: project.path, state: sess.state, skipPerms: !!sess.dangerouslySkipPermissions, worktree: !!sess.isWorktree });
+      broadcastControl({ type: 'session-added', id: project.id, session: project.name, path: project.path, state: sess.state, skipPerms: !!sess.dangerouslySkipPermissions, worktree: !!sess.isWorktree, resumeSessionId: sess.resumeSessionId || null });
       sess.start();
       console.log(`[config] Added session: ${project.name}`);
     }
@@ -901,7 +904,7 @@ function createBackend(httpServer, options = {}) {
       sessions.set(project.id, newSess);
       wireSessionEvents(newSess);
       // Broadcast BEFORE start() - see _addNewSessions for rationale.
-      broadcastControl({ type: 'session-modified', id: project.id, session: project.name, path: project.path, state: newSess.state, skipPerms: !!newSess.dangerouslySkipPermissions, worktree: !!newSess.isWorktree });
+      broadcastControl({ type: 'session-modified', id: project.id, session: project.name, path: project.path, state: newSess.state, skipPerms: !!newSess.dangerouslySkipPermissions, worktree: !!newSess.isWorktree, resumeSessionId: newSess.resumeSessionId || null });
       newSess.start();
       console.log(`[config] Modified session: ${project.name}`);
     }

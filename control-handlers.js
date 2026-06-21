@@ -5,6 +5,12 @@ const path = require('node:path');
 const { TIMEOUT_KEYS, BOOLEAN_KEYS, STRING_KEYS } = require('./config-store');
 const { STATES } = require('./shared/states');
 const { computeNextFire } = require('./scheduler');
+const { listRepoConversations } = require('./session-core/conversation-history');
+
+// A Claude session id is a UUID, but stay lenient (any safe id charset) so a non-UUID id is not
+// rejected. The charset itself is the guard: no path separators, dots, or whitespace can reach the
+// spawn arg or be persisted, so a hostile control message cannot inject flags or traverse paths.
+const RESUME_ID_RE = /^[A-Za-z0-9_-]{8,128}$/;
 
 function scanRepoRoots(roots) {
   const results = [];
@@ -234,6 +240,65 @@ function registerControlHandlers(controlWss, deps) {
 
     broadcastControl({ type: 'sessions-reordered', order });
     console.log(`[control] Sessions reordered`);
+  }
+
+  // List the Claude conversations resumable INTO this session's card: every transcript under the
+  // session repo's main checkout and its linked worktrees, newest-first (see
+  // session-core/conversation-history.js). Async (it shells out to `git worktree list`); the dispatch
+  // loop awaits the returned promise. Replies with the session's current binding so the picker can mark it.
+  async function handleListConversations(msg, ws) {
+    const sess = findSession(msg);
+    if (!sess) {
+      ws.send(JSON.stringify({ type: 'conversations', requestId: msg.requestId || null, id: msg.id || null, conversations: [], error: 'Session not found' }));
+      return;
+    }
+    let conversations = [];
+    try {
+      conversations = await listRepoConversations({ repoPath: sess.path });
+    } catch (err) {
+      ws.send(JSON.stringify({ type: 'conversations', requestId: msg.requestId || null, id: sess.id, conversations: [], error: err.message }));
+      return;
+    }
+    ws.send(JSON.stringify({
+      type: 'conversations',
+      requestId: msg.requestId || null,
+      id: sess.id,
+      current: sess.resumeSessionId || null,
+      conversations,
+    }));
+  }
+
+  // Bind a card to a prior conversation (or clear with a falsy conversationId). Persists
+  // resumeSessionId on the project record (survives a server restart) and sets it on the live Session.
+  // Deliberately does NOT (re)start: it takes effect on the next start/restart, so a running session is
+  // never killed out from under the operator. The frontend decides whether to start a DORMANT card.
+  function handleResumeConversation(msg, ws) {
+    const sess = findSession(msg);
+    if (!sess) { ws.send(JSON.stringify({ type: 'error', message: 'Session not found' })); return; }
+    if (sess.ephemeral) { ws.send(JSON.stringify({ type: 'error', message: 'This session cannot resume a conversation' })); return; }
+    const raw = typeof msg.conversationId === 'string' ? msg.conversationId.trim() : '';
+    const conversationId = raw || null;
+    if (conversationId && !RESUME_ID_RE.test(conversationId)) {
+      ws.send(JSON.stringify({ type: 'error', message: 'Invalid conversation id' }));
+      return;
+    }
+
+    const freshConfig = configStore.save(cfg => {
+      const project = cfg.projects.find(p => p.id === sess.id);
+      if (!project) return;
+      if (conversationId) project.resumeSessionId = conversationId;
+      else delete project.resumeSessionId;
+    });
+    if (freshConfig) applyConfigReload(freshConfig);
+
+    // Re-fetch: a config reload could (in principle) have rebuilt the Session object; set on whatever
+    // instance is live now so the binding is never lost to a recreate.
+    const live = sessions.get(sess.id) || sess;
+    live.setResumeConversation(conversationId);
+
+    broadcastControl({ type: 'session-resume', id: live.id, resumeSessionId: conversationId });
+    ws.send(JSON.stringify({ type: 'resume-conversation-ack', id: live.id, resumeSessionId: conversationId, ok: true }));
+    console.log(`[control] resume-conversation: id=${live.id} -> ${conversationId || '(cleared)'}`);
   }
 
   function handleGetSettings(msg, ws) {
@@ -611,6 +676,8 @@ function registerControlHandlers(controlWss, deps) {
     'get-team-pack-status': handleGetTeamPackStatus,
     'setup-team-pack':      handleSetupTeamPack,
     'add-session':      handleAddSession,
+    'list-conversations': handleListConversations,
+    'resume-conversation': handleResumeConversation,
     'remove-session':   handleRemoveSession,
     'rename-session':   handleRenameSession,
     'reorder-sessions': handleReorderSessions,

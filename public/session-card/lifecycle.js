@@ -11,6 +11,7 @@ import { setHealthMonitorVisible } from '../health-monitor.js';
 import { getSoundId, isSoundEnabled } from '../ui-prefs.js';
 import { computeAggregate } from './aggregate-core.mjs';
 import { buildCardDOM, closeDebugOverlay, openDebugOverlay, setDebugMode, showConfirmDialog, startInlineRename } from './card-dom.js';
+import { openResumeDialog } from './resume-dialog.js';
 import { aggregateEl, container, sessionUIs } from './card-registry.js';
 // Load-bearing import: evaluating session-tick.js installs the shared 1s tick (elapsed clock +
 // working-heartbeat poll) at module load.
@@ -104,6 +105,11 @@ function wireCardEvents(ui, sessionId) {
     ui.overflowMenu.classList.remove('open');
     const type = KILLABLE_STATES.includes(ui.currentState) ? 'force-restart' : 'restart';
     sendControlMsg({ type, id: sessionId });
+  });
+
+  ui.btnResume.addEventListener('click', () => {
+    ui.overflowMenu.classList.remove('open');
+    openResumeDialog(sessionId, { currentState: ui.currentState });
   });
 
   ui.btnRemove.addEventListener('click', () => {
@@ -283,6 +289,7 @@ export function createSessionCard(sessionId, sessionName, initialState, options 
     btnDebug: dom.btnDebug,
     btnRename: dom.btnRename,
     btnRestart: dom.btnRestart,
+    btnResume: dom.btnResume,
     parkGroup: dom.parkGroup,
     btnPark: dom.btnPark,
     btnParkCancel: dom.btnParkCancel,
@@ -326,6 +333,15 @@ export function setSessionWorktree(sessionId, worktree) {
   if (!ui) return;
   if (worktree) ui.card.dataset.worktree = '';
   else delete ui.card.dataset.worktree;
+}
+
+// Toggle the "resumed" marker on a card (driven by the server's session-resume delta and the snapshot's
+// resumeSessionId). Marks that the card is bound to a saved conversation it will resume on next start.
+export function setSessionResume(sessionId, resumeSessionId) {
+  const ui = sessionUIs.get(sessionId);
+  if (!ui) return;
+  if (resumeSessionId) ui.card.dataset.resume = '';
+  else delete ui.card.dataset.resume;
 }
 
 // Reflect the live background sub-agent count on the card. n > 0 shows an "N agents" chip and sets

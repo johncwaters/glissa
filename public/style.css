@@ -477,6 +477,7 @@ body {
    font-size 11px reads cleanly in the operator-console context. */
 .perms-badge,
 .worktree-badge,
+.resume-badge,
 .post-turn-badge,
 .agents-badge,
 .wakeup-badge {
@@ -511,6 +512,20 @@ body {
 }
 
 .session-card[data-worktree] .worktree-badge {
+  display: inline-flex;
+}
+
+/* Resumed-conversation marker. Hidden by default; shown only when the card carries data-resume (set at
+   build time from the snapshot, toggled live by setSessionResume on the session-resume delta). Distinct
+   dashed border so it reads apart from the solid worktree badge while sharing the informational accent. */
+.resume-badge {
+  display: none;
+  color: var(--accent);
+  border: 1px dashed color-mix(in oklab, var(--accent) 60%, transparent);
+  background: color-mix(in oklab, var(--accent) 12%, transparent);
+}
+
+.session-card[data-resume] .resume-badge {
   display: inline-flex;
 }
 
@@ -997,6 +1012,74 @@ body {
 
 .btn-dialog-danger:hover {
   background: color-mix(in oklab, var(--state-failed) 18%, transparent);
+}
+
+/* ── Resume-conversation picker ───────────────────────────── */
+/* The per-card "Resume conversation" dialog reuses .dialog chrome and adds a scrollable list of prior
+   conversations (this repo's worktrees + main). Each row is a button: title on top, dim meta below. */
+.resume-dialog {
+  width: 520px;
+}
+
+.resume-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 46vh;
+  overflow-y: auto;
+  margin: 0 -4px;
+  padding: 0 4px;
+}
+
+.resume-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: left;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: transparent;
+  cursor: pointer;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+
+.resume-item:hover,
+.resume-item:focus-visible {
+  background: color-mix(in oklab, var(--accent) 10%, transparent);
+  border-color: var(--accent-dim);
+  outline: none;
+}
+
+.resume-item-current {
+  border-color: var(--accent-dim);
+  background: color-mix(in oklab, var(--accent) 8%, transparent);
+}
+
+.resume-item-title {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text);
+  letter-spacing: 0.02em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.resume-item-meta {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-dim);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.resume-empty {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-dim);
+  padding: 12px 4px;
+  letter-spacing: 0.02em;
 }
 
 /* ── Notices (stacked top-right) ──────────────────────────── */
@@ -2857,6 +2940,7 @@ body {
    YOLO compacts with the rest: one size for the whole set beats singling it out. */
 .focus-center .session-card.focus-centered .perms-badge,
 .focus-center .session-card.focus-centered .worktree-badge,
+.focus-center .session-card.focus-centered .resume-badge,
 .focus-center .session-card.focus-centered .agents-badge,
 .focus-center .session-card.focus-centered .wakeup-badge,
 .focus-center .session-card.focus-centered .post-turn-badge {

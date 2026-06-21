@@ -130,6 +130,11 @@ class Session extends EventEmitter {
     initialPrompt = null,
     extraClaudeArgs = [],
     ephemeral = false,
+    // Resume a prior Claude conversation by session id. At spawn this becomes `--resume <id>`, which
+    // Claude resolves across ALL linked worktrees of the repo - so a card can pick up a conversation
+    // that was started in a DIFFERENT worktree's project dir. Sticky: a non-fork resume keeps the same
+    // id, so a restart re-resumes idempotently. Null = fresh conversation (the historical behavior).
+    resumeSessionId = null,
     // Lever B: append a fixed anti-slop note to the system prompt at spawn (user sessions,
     // opt-in via config antiSlopPrompt). Off by default and never set for team/pack-setup
     // stage sessions. See session-core/anti-slop-prompt.js.
@@ -227,6 +232,7 @@ class Session extends EventEmitter {
     this._spawnCommand = spawnCommand;
     this._initialPrompt = initialPrompt;
     this._extraClaudeArgs = Array.isArray(extraClaudeArgs) ? extraClaudeArgs : [];
+    this._resumeSessionId = resumeSessionId || null;
     this._antiSlopPrompt = !!antiSlopPrompt;
     this.ephemeral = !!ephemeral;
     this._settingsPermissions = settingsPermissions;
@@ -421,6 +427,17 @@ class Session extends EventEmitter {
     return this._sleeping;
   }
 
+  // Bind (or clear, with a falsy id) the conversation this session resumes on its next spawn. Set by the
+  // control layer when the operator picks a conversation; persisted on the project record so it survives
+  // a server restart. Takes effect on the next start()/restart() - never mutates a live PTY.
+  setResumeConversation(id) {
+    this._resumeSessionId = id || null;
+  }
+
+  get resumeSessionId() {
+    return this._resumeSessionId;
+  }
+
   toSnapshot() {
     return {
       id: this.id,
@@ -431,6 +448,7 @@ class Session extends EventEmitter {
       dangerouslySkipPermissions: this.dangerouslySkipPermissions,
       ephemeral: this.ephemeral,
       isWorktree: this.isWorktree,
+      resumeSessionId: this._resumeSessionId,
       activeAgents: this._activeAgentCount(),
       pendingWakeup: this._pendingWakeup(),
       mergeStatus: this.mergeStatus,
@@ -1079,6 +1097,12 @@ class Session extends EventEmitter {
     const claudeArgs = this.dangerouslySkipPermissions
       ? ["--dangerously-skip-permissions"]
       : [];
+    // Resume a prior conversation (possibly from another worktree's project dir). Claude resolves the
+    // id across the repo's linked worktrees, so the session continues that thread in THIS worktree's cwd.
+    // Placed before any team extraClaudeArgs / the initial-prompt positional (both null for user sessions).
+    if (this._resumeSessionId) {
+      claudeArgs.push("--resume", this._resumeSessionId);
+    }
     // Team stages pass extra flags (e.g. -p, --model <m>) then the prompt as the final positional.
     // The positional is a single argv element on the direct-exe path (proven by the Phase-0 probe);
     // on the cmd.exe shim fallback a very large/multiline prompt is subject to cmd parsing.

@@ -104,6 +104,7 @@ export function buildCardDOM(sessionId, sessionName, initialState, options = {})
   card.dataset.state = state;
   if (options.skipPerms) card.dataset.skipPerms = '';
   if (options.worktree) card.dataset.worktree = '';
+  if (options.resume) card.dataset.resume = '';
   // The session's project root. The Focus rail groups pills by this (basename = group label).
   // Durable on-DOM home so the DORMANT close-out rebuild can re-read it (nothing inherits through
   // that rebuild automatically - app.js reads dataset.path back by hand, same as skipPerms).
@@ -120,6 +121,12 @@ export function buildCardDOM(sessionId, sessionName, initialState, options = {})
   const worktreeBadge = el('span', 'worktree-badge', 'worktree');
   worktreeBadge.title = 'Running in a linked git worktree';
   worktreeBadge.setAttribute('aria-label', 'Linked git worktree');
+  // Resumed-conversation marker. Shown only when the card carries data-resume (set at build time from
+  // the snapshot, toggled live by setSessionResume on the session-resume delta): the card will resume a
+  // saved conversation on its next start rather than beginning a fresh one.
+  const resumeBadge = el('span', 'resume-badge', 'resumed');
+  resumeBadge.title = 'Resumes a saved conversation on next start';
+  resumeBadge.setAttribute('aria-label', 'Resumes a saved conversation');
   // Post-turn auto-fix marker. Hidden unless the card carries data-pt (set live by
   // setSessionPostTurn on a post-turn-result delta). Text/title are filled there.
   const postTurnBadge = el('span', 'post-turn-badge', '');
@@ -161,6 +168,9 @@ export function buildCardDOM(sessionId, sessionName, initialState, options = {})
   btnRename.setAttribute('role', 'menuitem');
   const btnRestart = el('button', 'overflow-item overflow-restart', 'Restart');
   btnRestart.setAttribute('role', 'menuitem');
+  // Resume a prior Claude conversation (including one started in a different worktree) into this card.
+  const btnResume = el('button', 'overflow-item overflow-resume', 'Resume conversation...');
+  btnResume.setAttribute('role', 'menuitem');
 
   // Park: returns the session to DORMANT for reuse. On a session with unmerged worktree changes the
   // click reveals an inline confirm (no modal); a clean session parks immediately. The dot marks the
@@ -184,7 +194,7 @@ export function buildCardDOM(sessionId, sessionName, initialState, options = {})
 
   const btnRemove = el('button', 'overflow-item overflow-remove', 'Remove');
   btnRemove.setAttribute('role', 'menuitem');
-  overflowMenu.append(btnRename, btnRestart, parkGroup, btnRemove);
+  overflowMenu.append(btnRename, btnRestart, btnResume, parkGroup, btnRemove);
   overflow.append(btnOverflow, overflowMenu);
 
   const btnDebug = el('button', 'btn-action btn-debug', '\u2699');
@@ -196,7 +206,7 @@ export function buildCardDOM(sessionId, sessionName, initialState, options = {})
   // zone; the spacer then absorbs the clock's width changes, so the persistent tags + actions in
   // the RIGHT zone never reflow when the timer ticks. (Status is not shown here: it lives on the
   // Focus rail pill and the toolbar accent strip.)
-  const headerChildren = [nameEl, elapsedEl, spacer, worktreeBadge, postTurnBadge, agentsBadge, wakeupBadge];
+  const headerChildren = [nameEl, elapsedEl, spacer, worktreeBadge, resumeBadge, postTurnBadge, agentsBadge, wakeupBadge];
   if (permsBadge) headerChildren.push(permsBadge);
   headerChildren.push(actions);
   header.append(...headerChildren);
@@ -208,7 +218,7 @@ export function buildCardDOM(sessionId, sessionName, initialState, options = {})
 
   card.append(header, termWrap);
 
-  return { card, header, nameEl, elapsedEl, btnRename, btnRestart, parkGroup, btnPark, btnParkCancel, btnParkGo, btnRemove, btnDebug, btnOverflow, overflowMenu, termWrap };
+  return { card, header, nameEl, elapsedEl, btnRename, btnRestart, btnResume, parkGroup, btnPark, btnParkCancel, btnParkGo, btnRemove, btnDebug, btnOverflow, overflowMenu, termWrap };
 }
 
 // ── Inline rename ────────────────────────────────────────────
