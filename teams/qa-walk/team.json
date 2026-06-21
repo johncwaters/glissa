@@ -1,0 +1,49 @@
+{
+  "id": "qa-walk",
+  "name": "QA Walk (persona friction)",
+  "description": "Exploratory, persona-driven QA: drives Milepost end to end via Playwright MCP as a first-time RVer, a returning user, and a skeptic, against a freshly started dev server. Logs what happened factually, then assesses FELT FRICTION (not pass/fail), one section per persona. The walk methodology, personas, findings schema, and parser fixture are project-owned and live in the repo at team/qa/ (orchestrator.md, personas/, config/). This is the exploratory B layer; it is never a CI gate. App-startup specifics come from this project's pack under .glissa/teams/qa-walk/pack/how-to-run.md.",
+  "schemaVersion": 1,
+  "outputPath": ".glissa/teams/qa-walk",
+  "schedule": {
+    "days": ["sun"],
+    "time": "05:00",
+    "tz": "America/Denver",
+    "enabled": false
+  },
+  "permissions": {
+    "mode": "yolo",
+    "deny": [
+      "Bash(rm *)",
+      "Bash(rmdir *)",
+      "Bash(del *)",
+      "Bash(rd *)",
+      "Bash(git push*)",
+      "Bash(git reset --hard*)",
+      "Bash(git clean*)",
+      "Bash(npm publish*)",
+      "Bash(npm version*)",
+      "Bash(curl *)",
+      "Bash(wget *)",
+      "Bash(Invoke-WebRequest*)",
+      "Bash(iwr *)",
+      "Write(**/.env)",
+      "Write(**/.env.*)",
+      "Write(**/*secret*)",
+      "Read(**/.env)"
+    ]
+  },
+  "pack": {
+    "required": ["how-to-run.md"]
+  },
+  "stageTimeoutSeconds": 3600,
+  "chat": { "allowQuestions": false },
+  "stages": [
+    {
+      "id": "walk",
+      "model": "opus",
+      "summary": "Brings up the dev server, then walks Milepost via Playwright MCP as first-timer, returning-user, and skeptic; writes one findings section per persona plus a summary.",
+      "produces": "findings.md",
+      "requiredSections": ["First-timer", "Returning-user", "Skeptic", "Summary"]
+    }
+  ]
+}
