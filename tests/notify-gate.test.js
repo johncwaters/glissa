@@ -115,6 +115,14 @@ test('AC6b restart after a completed exit re-arms complete', () => {
   assert.deepEqual(fired, ['complete', 'complete']);
 });
 
+test('user_kill never notifies: killing a RUNNING session is not "finished working"', () => {
+  const gate = createNotifyGate();
+  assert.equal(decideNotification(STATES.RUNNING, gate), null); // cycle opens
+  assert.equal(decideNotification(STATES.DONE, gate, 'user_kill'), null, 'kill is silent');
+  // The category was NOT spent: a later real completion in a new cycle still notifies.
+  assert.equal(decideNotification(STATES.COMPLETE, gate), 'complete');
+});
+
 test('DORMANT transitivity: DORMANT needs no reset entry because user_start passes INITIALIZING', () => {
   // DONE -> DORMANT (user_reset) does not reset; the only exit from DORMANT is
   // user_start -> INITIALIZING, which does. Do not add DORMANT to the reset set.

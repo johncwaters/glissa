@@ -313,3 +313,141 @@ test('detectBackgroundAgents=false restores prior behavior (Stop completes despi
   assert.equal(s.toSnapshot().activeAgents, 0);
   s.destroy();
 });
+
+// --- Stop payload background_tasks (v2.1.145+): authoritative gate over the counted map ---
+// Covers background Bash tasks and native-team teammates, which never fire SubagentStart.
+
+test('background_tasks on Stop suppresses completion even with zero counted sub-agents', async () => {
+  const s = makeSession(STATES.RUNNING);
+  hook(s, 'ready', { payload: { background_tasks: [{ id: 'bash-1' }] } });
+  await sleep(40);
+  assert.equal(s.state, STATES.RUNNING, 'background Bash still running: no COMPLETE');
+  assert.equal(s.toSnapshot().activeAgents, 1, 'declared count rides the snapshot chip');
+  s.destroy();
+});
+
+test('a later Stop with empty background_tasks completes (self-correcting drain)', async () => {
+  const s = makeSession(STATES.RUNNING);
+  hook(s, 'ready', { payload: { background_tasks: [{ id: 'bash-1' }] } });
+  await sleep(40);
+  assert.equal(s.state, STATES.RUNNING);
+  hook(s, 'ready', { payload: { background_tasks: [] } }); // the resumed turn's Stop
+  await sleep(40);
+  assert.equal(s.state, STATES.COMPLETE);
+  assert.equal(s.toSnapshot().activeAgents, 0);
+  s.destroy();
+});
+
+test('resume clears a stale background_tasks override (new turn, fresh snapshot)', async () => {
+  const s = makeSession(STATES.RUNNING);
+  hook(s, 'ready', { payload: { background_tasks: [{ id: 'b1' }] } });
+  await sleep(40);
+  assert.equal(s.toSnapshot().activeAgents, 1);
+  hook(s, 'resume'); // UserPromptSubmit
+  assert.equal(s.toSnapshot().activeAgents, 0);
+  s.destroy();
+});
+
+test('SubagentStop with background_tasks:[] drains the counted map (dropped-Start/Stop recovery)', async () => {
+  const s = makeSession(STATES.RUNNING);
+  hook(s, 'subagent-start', { payload: { agent_id: 'a1' } });
+  hook(s, 'subagent-start', { payload: { agent_id: 'a2' } });
+  assert.equal(s.toSnapshot().activeAgents, 2);
+  // a1's stop was dropped; a2's stop carries the authoritative empty count.
+  hook(s, 'subagent-stop', { payload: { agent_id: 'a2', background_tasks: [] } });
+  assert.equal(s.toSnapshot().activeAgents, 0, 'authoritative drain beats the TTL prune');
+  hook(s, 'ready');
+  await sleep(40);
+  assert.equal(s.state, STATES.COMPLETE);
+  s.destroy();
+});
+
+test('a stale background_tasks override ages out (TTL), so a hung task cannot pin RUNNING forever', async () => {
+  const s = makeSession(STATES.RUNNING, { agentTtlMs: 150 });
+  hook(s, 'ready', { payload: { background_tasks: [{ id: 'hung' }] } });
+  await sleep(40);
+  assert.equal(s.state, STATES.RUNNING, 'suppressed while the override is fresh');
+  await sleep(150); // past agentTtlMs with no refreshing Stop
+  assert.equal(s.toSnapshot().activeAgents, 0, 'override pruned lazily like the counted map');
+  hook(s, 'ready');
+  await sleep(40);
+  assert.equal(s.state, STATES.COMPLETE, 'completion recovers after the TTL');
+  s.destroy();
+});
+
+test('detectBackgroundAgents=false ignores background_tasks payloads too', async () => {
+  const s = makeSession(STATES.RUNNING, { detectBackgroundAgents: false });
+  hook(s, 'ready', { payload: { background_tasks: [{ id: 'b1' }] } });
+  await sleep(40);
+  assert.equal(s.state, STATES.COMPLETE);
+  s.destroy();
+});
+
+// --- /clear latch: SessionStart(source: clear|compact) resets detection and quiets titles ---
+
+// Feeds the REAL title listener (the latch lives there), unlike the title() helper
+// which ingests directly into the StatusSource.
+function titleEvent(s, signal) {
+  s._titleSource.emit('signal', { signal, source: 'title', ts: Date.now() });
+}
+
+test('/clear: title spinner+idle noise after SessionStart(clear) causes no transitions', async () => {
+  const s = makeSession(STATES.COMPLETE);
+  const seen = [];
+  s.on('state-change', (e) => seen.push(e.to));
+  hook(s, 'session-start', { payload: { source: 'clear' } });
+  titleEvent(s, 'working'); // TUI redraw flashes a spinner
+  titleEvent(s, 'ready');   // then the idle glyph
+  await sleep(50);
+  assert.equal(s.state, STATES.COMPLETE, 'no fake work cycle from /clear redraw');
+  assert.deepEqual(seen, [], 'no transitions at all');
+  s.destroy();
+});
+
+test('/clear: a held ready from the pre-clear turn is cancelled by SessionStart(clear)', async () => {
+  const s = makeSession(STATES.RUNNING);
+  hook(s, 'ready'); // held for the conflict window
+  hook(s, 'session-start', { payload: { source: 'clear' } }); // lands inside the window
+  await sleep(50);
+  assert.equal(s.state, STATES.RUNNING, 'stale ready must not resolve after a clear');
+  s.destroy();
+});
+
+test('/clear latch: the next real prompt unlatches and titles work again', async () => {
+  const s = makeSession(STATES.IDLE);
+  hook(s, 'session-start', { payload: { source: 'compact' } });
+  titleEvent(s, 'working');
+  assert.equal(s.state, STATES.IDLE, 'latched: title working ignored');
+  hook(s, 'resume'); // UserPromptSubmit -> RUNNING and unlatch
+  assert.equal(s.state, STATES.RUNNING);
+  hook(s, 'ready');
+  await sleep(40);
+  assert.equal(s.state, STATES.COMPLETE, 'post-prompt cycle completes normally');
+  s.destroy();
+});
+
+test('SessionStart(source: startup) does not latch or reset (only clear/compact)', () => {
+  const s = makeSession(STATES.IDLE);
+  hook(s, 'session-start', { payload: { source: 'startup' } });
+  titleEvent(s, 'working');
+  assert.equal(s.state, STATES.RUNNING, 'titles still flow after a normal SessionStart');
+  s.destroy();
+});
+
+// --- idle_prompt demotion: an idle nudge only completes from RUNNING ---
+
+test('a low-confidence hook ready (idle_prompt) does NOT complete a fresh IDLE session', async () => {
+  const s = makeSession(STATES.IDLE);
+  hook(s, 'ready', { confidence: 'low' }); // Notification(idle_prompt) via mapHookConfidence
+  await sleep(40);
+  assert.equal(s.state, STATES.IDLE, 'a session that never ran must not report finished');
+  s.destroy();
+});
+
+test('a low-confidence hook ready still completes from RUNNING (quiescence confirmed)', async () => {
+  const s = makeSession(STATES.RUNNING);
+  hook(s, 'ready', { confidence: 'low' });
+  await sleep(40);
+  assert.equal(s.state, STATES.COMPLETE);
+  s.destroy();
+});

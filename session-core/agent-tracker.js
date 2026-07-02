@@ -47,4 +47,18 @@ function pruneAgents(map, now, ttlMs = DEFAULT_AGENT_TTL_MS) {
   return removed;
 }
 
-module.exports = { addAgent, removeAgent, pruneAgents, DEFAULT_AGENT_TTL_MS };
+// Authoritative live-background-work count carried on a Stop/SubagentStop hook payload
+// (Claude Code v2.1.145+ `background_tasks`). This covers work the SubagentStart/Stop
+// counting can NOT see: background Bash tasks (run_in_background) and native-team
+// teammates. Returns the count, or null when the field is absent/unrecognized (older
+// Claude versions) so the caller falls back to the counted map. Defensive on shape:
+// an array counts its entries, a finite non-negative number is taken as-is.
+function extractBackgroundTaskCount(payload) {
+  if (!payload) return null;
+  const v = payload.background_tasks;
+  if (Array.isArray(v)) return v.length;
+  if (typeof v === 'number' && Number.isFinite(v) && v >= 0) return v;
+  return null;
+}
+
+module.exports = { addAgent, removeAgent, pruneAgents, extractBackgroundTaskCount, DEFAULT_AGENT_TTL_MS };

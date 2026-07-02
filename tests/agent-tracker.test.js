@@ -5,7 +5,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { addAgent, removeAgent, pruneAgents, DEFAULT_AGENT_TTL_MS } = require('../session-core/agent-tracker');
+const { addAgent, removeAgent, pruneAgents, extractBackgroundTaskCount, DEFAULT_AGENT_TTL_MS } = require('../session-core/agent-tracker');
 
 test('addAgent adds a new id and reports the change; a duplicate is idempotent (count unchanged, ts refreshed)', () => {
   const m = new Map();
@@ -47,4 +47,17 @@ test('pruneAgents drops only entries at or past the ttl, returns the count remov
 test('DEFAULT_AGENT_TTL_MS is a sane positive default', () => {
   assert.equal(typeof DEFAULT_AGENT_TTL_MS, 'number');
   assert.ok(DEFAULT_AGENT_TTL_MS > 0);
+});
+
+test('extractBackgroundTaskCount reads array and numeric shapes, null otherwise', () => {
+  assert.equal(extractBackgroundTaskCount({ background_tasks: [] }), 0);
+  assert.equal(extractBackgroundTaskCount({ background_tasks: [{ id: 'b1' }, { id: 'b2' }] }), 2);
+  assert.equal(extractBackgroundTaskCount({ background_tasks: 3 }), 3);
+  assert.equal(extractBackgroundTaskCount({ background_tasks: 0 }), 0);
+  // Absent/unrecognized (older Claude versions) -> null so the caller falls back to counting.
+  assert.equal(extractBackgroundTaskCount({}), null);
+  assert.equal(extractBackgroundTaskCount(null), null);
+  assert.equal(extractBackgroundTaskCount({ background_tasks: 'two' }), null);
+  assert.equal(extractBackgroundTaskCount({ background_tasks: -1 }), null);
+  assert.equal(extractBackgroundTaskCount({ background_tasks: Number.NaN }), null);
 });

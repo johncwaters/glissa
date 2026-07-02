@@ -224,6 +224,22 @@ class Session extends EventEmitter {
     this._detectBackgroundAgents = detectBackgroundAgents;
     this._activeAgents = new Map();
     this._agentTtlMs = agentTtlMs;
+    // Authoritative background-work count from the latest Stop/SubagentStop payload
+    // (`background_tasks`, Claude Code v2.1.145+), or null when the running Claude does
+    // not send it. Covers background Bash tasks and native-team teammates that the
+    // SubagentStart/Stop counting cannot see. Cleared on resume (new turn) and PTY
+    // exit/(re)start; each Stop refreshes it, so a suppressed completion self-corrects
+    // on the main agent's next Stop. Like the counted map, it is TTL-bounded (lazy, in
+    // _activeAgentCount): a stale positive override must not pin the card out of
+    // COMPLETE forever when the final Stop is never delivered.
+    this._bgTaskOverride = null;
+    this._bgTaskOverrideTs = 0;
+    // True between a SessionStart(source: clear|compact) hook and the next real
+    // UserPromptSubmit: the TUI redraw around /clear flashes a spinner + idle glyph in
+    // the OSC title, which would otherwise open a fake work cycle (RUNNING) and close
+    // it with a false COMPLETE ("finished working" on every /clear). While latched,
+    // title signals are dropped; hooks still flow (they are authoritative).
+    this._titleQuiet = false;
     // Pending scheduled revivals, keyed by cron task id or a synthetic one-shot key. Advisory
     // only (see _trackWakeup); lazily pruned (fireAt + grace / cron TTL); never a transition.
     this._detectScheduledWakeups = detectScheduledWakeups;
@@ -272,7 +288,10 @@ class Session extends EventEmitter {
       ...(statusConflictMs != null ? { conflictWindowMs: statusConflictMs } : {}),
       ...(statusDedupMs != null ? { dedupWindowMs: statusDedupMs } : {}),
     });
-    this._titleSource.on("signal", (s) => this._statusSource.ingest(s));
+    this._titleSource.on("signal", (s) => {
+      if (this._titleQuiet) return; // /clear redraw noise; see _titleQuiet above
+      this._statusSource.ingest(s);
+    });
     this._statusSource.on("status", (s) => this._onStatus(s));
     this._statusSource.on("meta", (m) => this._onMeta(m));
   }
@@ -305,7 +324,51 @@ class Session extends EventEmitter {
       this._trackWakeup(raw);
       return;
     }
+    // /clear and /compact fire SessionEnd+SessionStart with NO UserPromptSubmit and no
+    // Stop; the only movement they cause is TUI title noise. Reset the merged stream
+    // (cancels a held ready from the pre-clear turn) and latch titles quiet until the
+    // next real prompt.
+    if (raw && raw.signal === "session-start") this._onSessionStartHook(raw);
+    if (raw && raw.signal === "resume") {
+      this._titleQuiet = false;
+      this._clearBgTaskOverride(); // a new turn starts with no settled background snapshot
+    }
+    // A main-agent Stop carries the authoritative background-work count (v2.1.145+).
+    if (raw && raw.signal === "ready" && raw.source === "hook") {
+      this._applyBackgroundTasks(raw.payload);
+    }
     this._statusSource.ingest(raw);
+  }
+
+  // SessionStart(source: clear|compact): nothing is running, nothing completed. See _titleQuiet.
+  _onSessionStartHook(raw) {
+    const src = String((raw.payload && raw.payload.source) || "").toLowerCase();
+    if (src !== "clear" && src !== "compact") return;
+    this._statusSource.reset();
+    this._titleSource.reset();
+    this._titleQuiet = true;
+  }
+
+  // Reconcile the live count against an authoritative `background_tasks` payload field.
+  // A count of 0 also drains the id map (bounds a dropped SubagentStop immediately
+  // instead of waiting for the TTL prune). Absent field (older Claude) changes nothing.
+  _applyBackgroundTasks(payload) {
+    if (!this._detectBackgroundAgents) return;
+    const count = agentTracker.extractBackgroundTaskCount(payload);
+    if (count === null) return;
+    const before = this._activeAgentCount();
+    this._bgTaskOverride = count;
+    this._bgTaskOverrideTs = Date.now();
+    if (count === 0 && this._activeAgents.size > 0) this._activeAgents.clear();
+    if (this._activeAgentCount() !== before) this._emitAgentsChange();
+  }
+
+  _clearBgTaskOverride() {
+    if (this._bgTaskOverride === null) return;
+    const before = this._activeAgentCount();
+    this._bgTaskOverride = null;
+    this._bgTaskOverrideTs = 0;
+    if (this._activeAgentCount() !== before) this._emitAgentsChange();
   }
 
   // Apply one subagent-start/stop signal to the live set. Off (kill switch) or a payload with no
@@ -314,19 +377,34 @@ class Session extends EventEmitter {
   _trackSubagent(raw) {
     if (!this._detectBackgroundAgents) return;
     const agentId = raw.payload && raw.payload.agent_id;
-    if (!agentId) return;
-    const changed = raw.signal === "subagent-start"
-      ? agentTracker.addAgent(this._activeAgents, agentId, raw.ts || Date.now())
-      : agentTracker.removeAgent(this._activeAgents, agentId);
-    if (changed) this._emitAgentsChange();
+    if (agentId) {
+      const changed = raw.signal === "subagent-start"
+        ? agentTracker.addAgent(this._activeAgents, agentId, raw.ts || Date.now())
+        : agentTracker.removeAgent(this._activeAgents, agentId);
+      if (changed) this._emitAgentsChange();
+    }
+    // SubagentStop also carries `background_tasks` (v2.1.145+): reconcile even when the
+    // id was missing/unknown, so a drain is authoritative rather than TTL-bounded.
+    if (raw.signal === "subagent-stop") this._applyBackgroundTasks(raw.payload);
   }
 
   // Pruned count of live background sub-agents. Lazy prune (no per-session timer) bounds a dropped
   // SubagentStop. Returns 0 when detection is off so the gate is inert.
   _activeAgentCount() {
     if (!this._detectBackgroundAgents) return 0;
-    agentTracker.pruneAgents(this._activeAgents, Date.now(), this._agentTtlMs);
-    return this._activeAgents.size;
+    const now = Date.now();
+    agentTracker.pruneAgents(this._activeAgents, now, this._agentTtlMs);
+    // Same lazy TTL bound as the counted map: an override whose refreshing Stop never
+    // arrived (hung background task, dropped hook) ages out instead of suppressing
+    // completion forever.
+    if (this._bgTaskOverride !== null && now - this._bgTaskOverrideTs >= this._agentTtlMs) {
+      this._bgTaskOverride = null;
+      this._bgTaskOverrideTs = 0;
+    }
+    // The payload-declared count wins when larger: it sees background Bash tasks and
+    // teammates that never fire SubagentStart. The counted map wins when larger: it is
+    // fresher than a pre-drain Stop snapshot.
+    return Math.max(this._activeAgents.size, this._bgTaskOverride || 0);
   }
 
   _emitAgentsChange() {
@@ -334,11 +412,14 @@ class Session extends EventEmitter {
     this.emit("agents-change", { activeAgents: this._activeAgentCount() });
   }
 
-  // Drop all live ids (PTY exit, (re)start). Emits a clearing delta only if something was live.
+  // Drop all live ids + the payload override (PTY exit, (re)start). Emits a clearing
+  // delta only if something was live.
   _clearAgents() {
-    if (this._activeAgents.size === 0) return;
+    const had = this._activeAgents.size > 0 || (this._bgTaskOverride || 0) > 0;
     this._activeAgents.clear();
-    this._emitAgentsChange();
+    this._bgTaskOverride = null;
+    this._bgTaskOverrideTs = 0;
+    if (had) this._emitAgentsChange();
   }
 
   // Apply one scheduled-revival signal to the pending-wakeup set. ADVISORY metadata only: a Stop
@@ -1084,6 +1165,7 @@ class Session extends EventEmitter {
     this.emit("rebaseline");
     this._titleSource.reset();
     this._statusSource.reset();
+    this._titleQuiet = false;
 
     const env = this._buildSpawnEnv();
 
@@ -1297,6 +1379,7 @@ class Session extends EventEmitter {
     const pid = this.ptyProcess ? this.ptyProcess.pid : null;
     this._titleSource.reset();
     this._statusSource.reset();
+    this._titleQuiet = false;
     this._clearAgents();
     this._clearWakeups();
     this._cleanupHooks();

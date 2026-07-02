@@ -47,11 +47,14 @@ function createNotifyGate() {
 // backend listener and the tests execute the SAME decision logic (no hand-mirrored copy to
 // drift). Side effects on the gate are intentional: a RUNNING/INITIALIZING entry resets the
 // cycle, and a matching terminal entry spends its category via the short-circuited fire().
-function decideNotification(to, gate) {
+function decideNotification(to, gate, event) {
   if (to === STATES.RUNNING || to === STATES.INITIALIZING) {
     gate.reset();
     return null;
   }
+  // The user killed it themselves: "finished working" would be a false toast. The
+  // category is NOT spent (no gate.fire), deliberately: nothing real completed.
+  if (event === 'user_kill') return null;
   if (to === STATES.WAITING) return 'waiting';
   if ((to === STATES.COMPLETE || to === STATES.DONE) && gate.fire('complete')) return 'complete';
   if (to === STATES.FAILED && gate.fire('failed')) return 'failed';

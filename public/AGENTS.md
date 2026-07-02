@@ -17,6 +17,7 @@ The browser dashboard frontend: ES modules bundled by Vite (dev server with HMR 
 | `teams-panel.js` | Teams tab: instance panels (header, pipeline, setup banner, run history) |
 | `render-scheduler.mjs` | Global xterm WRITE scheduler: callback-gated round-robin with per-frame budget (distinct from root `scheduler.js`, which is a cron) |
 | `notifications.js` | Native Web Notifications (browser routes to Windows Action Center); replaces the server-side toast path |
+| `notify-dedupe-core.mjs` | Pure cross-tab claim (short-TTL localStorage) so exactly one open tab raises each notification |
 | `alert-sound.js` | Notification sounds: audio files from `audio/` + synth-beep fallback |
 | `health-monitor.js` | Footer panel rendering server memory/leak telemetry from `health-snapshot` messages |
 | `theme.js` | Theme definitions applied as CSS custom properties; terminal theme derived at runtime |

@@ -41,7 +41,7 @@ console.log('\n--- Unit Tests ---');
   nm.destroy();
 }
 
-// Test: trigger while focused -> suppressed -> IDLE
+// Test: trigger while focused -> SUPPRESSED (deferred, delivered on blur)
 {
   console.log('\nFocus suppression:');
   const nm = new NotificationManager({ debounceMs: 0 });
@@ -49,8 +49,10 @@ console.log('\n--- Unit Tests ---');
   nm.registerChannel('mock', () => calls.push(1));
   nm.setFocusSuppressed(true);
   nm.trigger('s1', 'waiting', 'needs input');
-  assert('state is IDLE (suppressed)', nm.getNotificationState('s1'), NS.IDLE);
-  assert('channel NOT called', calls.length, 0);
+  assert('state is SUPPRESSED (held)', nm.getNotificationState('s1'), NS.SUPPRESSED);
+  assert('channel NOT called while focused', calls.length, 0);
+  nm.setFocusSuppressed(false);
+  assert('delivered on blur', calls.length, 1);
   nm.destroy();
 }
 
@@ -304,7 +306,7 @@ async function runAsyncTests() {
   nm5.acknowledge('s1');
   nm5.trigger('s2', 'waiting', 'other session');
   assertAsync('second trigger suppressed', calls5.length, 1);
-  assertAsync('s2 is IDLE (suppressed)', nm5.getNotificationState('s2'), NS.IDLE);
+  assertAsync('s2 is SUPPRESSED (held for blur)', nm5.getNotificationState('s2'), NS.SUPPRESSED);
   nm5.destroy();
 
   // Integration: mock Session emits state-change events

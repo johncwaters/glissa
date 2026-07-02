@@ -31,16 +31,29 @@ class NotificationManager extends EventEmitter {
   }
 
   setFocusSuppressed(val) {
+    const was = this._focusSuppressed;
     this._focusSuppressed = !!val;
+    // Focus suppression DEFERS, it does not drop: on blur, every held notification
+    // re-runs the deliver decision. Snapshot first - transitions mutate the map.
+    if (was && !this._focusSuppressed) {
+      for (const name of [...this._entries.keys()]) {
+        const entry = this._entries.get(name);
+        if (entry && entry.state === NS.SUPPRESSED) this._transition(name, 'unsuppress');
+      }
+    }
   }
 
   trigger(sessionName, category, message) {
     this._ensureEntry(sessionName);
     const entry = this._entries.get(sessionName);
+    // Validate BEFORE mutating: a trigger the state machine rejects must not corrupt a
+    // live entry (e.g. relabel a running 'waiting' escalation with the new category).
+    const stateTransitions = NOTIFICATION_TRANSITIONS[entry.state];
+    if (!stateTransitions || !('trigger' in stateTransitions)) return false;
     entry.category = category;
     entry.message = message;
     entry.escalationCount = 0;
-    this._transition(sessionName, 'trigger');
+    return this._transition(sessionName, 'trigger');
   }
 
   acknowledge(sessionName) {
@@ -127,6 +140,11 @@ class NotificationManager extends EventEmitter {
         this._transition(sessionName, 'deliver');
         break;
 
+      case NS.SUPPRESSED:
+        // Parked until blur (unsuppress) or the session leaves the trigger state
+        // (acknowledge). No timer: delivery decisions re-run through PENDING.
+        break;
+
       case NS.DELIVERED:
         // Deliver via all channels (only record debounce on first delivery, not escalation re-entries)
         if (entry.escalationCount === 0) {
@@ -201,9 +219,14 @@ class NotificationManager extends EventEmitter {
   }
 
   _recordCategory(sessionName, category) {
-    if (category) {
-      this._recentCategories.set(`${sessionName}\0${category}`, Date.now());
+    if (!category) return;
+    const now = Date.now();
+    // Lazy sweep: entries older than the window can never debounce again; without
+    // this the map grows one key per session+category forever.
+    for (const [key, ts] of this._recentCategories) {
+      if (now - ts >= this._debounceMs) this._recentCategories.delete(key);
     }
+    this._recentCategories.set(`${sessionName}\0${category}`, now);
   }
 
   // -- Timer helpers --

@@ -10,6 +10,7 @@
 // delivery while the dashboard is focused, so this module trusts the server and
 // shows whenever a `notify` message arrives and permission is granted.
 
+import { claimKey, claimNotification } from './notify-dedupe-core.mjs';
 import { isNotificationsEnabled } from './ui-prefs.js';
 
 const supported = typeof window !== 'undefined' && 'Notification' in window;
@@ -51,6 +52,10 @@ export function initNotifications() {
 export function showDesktopNotification({ session, category, message } = {}) {
   if (!supported || !isNotificationsEnabled()) return;
   if (Notification.permission !== 'granted') return;
+  // Cross-tab claim: every open tab receives the broadcast, and with renotify each
+  // construction re-alerts, so only the tab that wins the short-TTL localStorage
+  // claim raises the toast (see notify-dedupe-core.mjs). Fail-open on storage errors.
+  if (!claimNotification(window.localStorage, claimKey(session, category), Date.now())) return;
   try {
     const n = new Notification('Glissa', {
       body: message || 'Session needs attention',
@@ -62,7 +67,7 @@ export function showDesktopNotification({ session, category, message } = {}) {
       n.close();
     };
   } catch {
-    // Notification construction can throw on some platforms/contexts; ignore —
+    // Notification construction can throw on some platforms/contexts; ignore -
     // the in-app card state still reflects status.
   }
 }

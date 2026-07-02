@@ -10,6 +10,22 @@
 // the live session's token. Trust level == "can read this session's settings file"
 // == can read the PTY. See docs/postmortem-terminal-detection.md.
 
+function notificationType(payload) {
+  return String(payload && (payload.notification_type || payload.notificationType) || '').toLowerCase();
+}
+
+// Confidence override for a mapped signal, or null for the source default ('high').
+// idle_prompt means "Claude is waiting for YOU", not "the turn finished": as a `ready`
+// it only confirms quiescence, so it is demoted to 'low' and the mapper completes it
+// from RUNNING only (same rule as the title fallback). Without this, an idle nudge on
+// a session that never ran a turn (fresh IDLE) or one parked at a prompt would fire a
+// false COMPLETE + "finished working" notification.
+function mapHookConfidence(event, payload) {
+  const e = String(event || '').toLowerCase();
+  if (e === 'notification' && notificationType(payload) === 'idle_prompt') return 'low';
+  return null;
+}
+
 // Map a Claude Code hook event (+ payload) to a normalized StatusSource signal.
 // Returns null for events that should be ignored.
 function mapHookToSignal(event, payload) {
@@ -53,7 +69,7 @@ function mapHookToSignal(event, payload) {
     case 'notification': {
       // Only act on subtypes with a clear meaning; ignore the rest (e.g.
       // auth_success) rather than firing a false WAITING.
-      const t = String(payload && (payload.notification_type || payload.notificationType) || '').toLowerCase();
+      const t = notificationType(payload);
       if (t === 'idle_prompt') return 'ready';
       if (t === 'permission_prompt' || t.startsWith('elicitation')) return 'awaiting-input';
       return null;
@@ -93,8 +109,9 @@ class HookRouter {
     if (!signal) {
       return { status: 200, signal: null, reason: 'ignored-event' };
     }
+    const confidence = mapHookConfidence(event, payload);
     try {
-      entry.onSignal({ signal, source: 'hook', ts: Date.now(), event, payload });
+      entry.onSignal({ signal, source: 'hook', ...(confidence ? { confidence } : {}), ts: Date.now(), event, payload });
     } catch (err) {
       console.warn(`[hook-source] onSignal threw for ${glissaId}: ${err.message}`);
     }
@@ -102,4 +119,4 @@ class HookRouter {
   }
 }
 
-module.exports = { HookRouter, mapHookToSignal };
+module.exports = { HookRouter, mapHookToSignal, mapHookConfidence };

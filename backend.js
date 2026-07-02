@@ -670,7 +670,18 @@ function createBackend(httpServer, options = {}) {
       // COMPLETE->DONE pair, or a late ready re-completing through the dismiss-opened IDLE
       // window, can no longer notify twice for one finished turn. 'waiting' stays per-entry
       // (escalation + a later real "needs input" from COMPLETE must keep firing).
-      const notifyCategory = decideNotification(to, notifyGate);
+      // Acknowledge BEFORE deciding/triggering: on a notifying-to-notifying hop (e.g.
+      // WAITING -> COMPLETE via a late authoritative Stop) the old entry must clear
+      // first, or the new trigger lands on a live DELIVERED entry and is rejected -
+      // the completion toast would be silently swallowed. DONE is included so a restart
+      // (DONE -> INITIALIZING) clears the 'complete' entry a direct RUNNING->DONE exit
+      // left in DELIVERED; without this the restarted session's next trigger is a no-op
+      // and it goes silent.
+      if (from === STATES.WAITING || from === STATES.COMPLETE || from === STATES.DONE || from === STATES.FAILED) {
+        notificationManager.acknowledge(sess.id);
+      }
+
+      const notifyCategory = decideNotification(to, notifyGate, event);
       if (notifyCategory) {
         const messages = {
           waiting: `${sess.name} needs your input`,
@@ -678,13 +689,6 @@ function createBackend(httpServer, options = {}) {
           failed: `${sess.name} failed`,
         };
         notificationManager.trigger(sess.id, notifyCategory, messages[notifyCategory]);
-      }
-
-      // Acknowledge when leaving a notification-triggering state. DONE is included so a restart
-      // (DONE -> INITIALIZING) clears the 'complete' entry a direct RUNNING->DONE exit left in
-      // DELIVERED; without this the restarted session's next trigger is a no-op and it goes silent.
-      if (from === STATES.WAITING || from === STATES.COMPLETE || from === STATES.DONE || from === STATES.FAILED) {
-        notificationManager.acknowledge(sess.id);
       }
     });
 

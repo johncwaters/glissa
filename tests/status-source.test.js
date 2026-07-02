@@ -91,6 +91,51 @@ test('unknown is forwarded as meta, never as a status transition', async () => {
   src.destroy();
 });
 
+test('working during the conflict window cancels a pending ready (fast re-prompt)', async () => {
+  const src = createStatusSource({ sessionId: 's1', conflictWindowMs: 80 });
+  const out = collect(src);
+  src.ingest({ signal: 'ready', source: 'hook' }); // Stop
+  await sleep(20);
+  src.ingest({ signal: 'working', source: 'title' }); // spinner: the turn did not settle
+  await sleep(120);
+  assert.deepEqual(out.map((s) => s.signal), ['working'], 'stale ready must not resolve');
+  src.destroy();
+});
+
+test('resume during the conflict window cancels a pending ready (user re-prompted)', async () => {
+  const src = createStatusSource({ sessionId: 's1', conflictWindowMs: 80 });
+  const out = collect(src);
+  src.ingest({ signal: 'ready', source: 'hook' }); // Stop
+  await sleep(20);
+  src.ingest({ signal: 'resume', source: 'hook' }); // UserPromptSubmit within the window
+  await sleep(120);
+  assert.deepEqual(out.map((s) => s.signal), ['resume'], 'stale ready must not resolve');
+  src.destroy();
+});
+
+test('an explicit confidence override rides through to the resolved signal', async () => {
+  const src = createStatusSource({ sessionId: 's1', conflictWindowMs: 30 });
+  const out = collect(src);
+  src.ingest({ signal: 'ready', source: 'hook', confidence: 'low' }); // idle_prompt-derived
+  await sleep(60);
+  assert.equal(out.length, 1);
+  assert.equal(out[0].confidence, 'low', 'hook default must not overwrite the override');
+  src.destroy();
+});
+
+test('a high-confidence duplicate upgrades a held low-confidence ready', async () => {
+  const src = createStatusSource({ sessionId: 's1', conflictWindowMs: 60 });
+  const out = collect(src);
+  src.ingest({ signal: 'ready', source: 'title' }); // low, held
+  await sleep(10);
+  src.ingest({ signal: 'ready', source: 'hook' }); // authoritative Stop lands in the window
+  await sleep(90);
+  assert.equal(out.length, 1);
+  assert.equal(out[0].confidence, 'high');
+  assert.equal(out[0].source, 'hook');
+  src.destroy();
+});
+
 test('destroy stops further emissions', async () => {
   const src = createStatusSource({ sessionId: 's1', conflictWindowMs: 30 });
   const out = collect(src);

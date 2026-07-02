@@ -7,7 +7,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { HookRouter, mapHookToSignal } = require('../detection/hook-source');
+const { HookRouter, mapHookToSignal, mapHookConfidence } = require('../detection/hook-source');
 const {
   buildHookSettings,
   writeSessionSettings,
@@ -41,6 +41,28 @@ test('mapHookToSignal: benign/unknown Notification subtypes are ignored (no fals
   assert.equal(mapHookToSignal('Notification', {}), null);
   // elicitation prompts still count as needing input
   assert.equal(mapHookToSignal('Notification', { notification_type: 'elicitation_dialog' }), 'awaiting-input');
+});
+
+test('mapHookConfidence: idle_prompt readys are demoted to low (idle nudge, not a completion proof)', () => {
+  assert.equal(mapHookConfidence('Notification', { notification_type: 'idle_prompt' }), 'low');
+  assert.equal(mapHookConfidence('notification', { notificationType: 'idle_prompt' }), 'low');
+  // Everything else keeps the source default (high for hooks).
+  assert.equal(mapHookConfidence('Stop', {}), null);
+  assert.equal(mapHookConfidence('Notification', { notification_type: 'permission_prompt' }), null);
+  assert.equal(mapHookConfidence('UserPromptSubmit', {}), null);
+});
+
+test('HookRouter passes the low-confidence override for idle_prompt, none for Stop', () => {
+  const r = new HookRouter();
+  const got = [];
+  r.register('s1', { token: 'tok', onSignal: (s) => got.push(s) });
+  r.handle({ glissaId: 's1', event: 'Notification', token: 'tok', payload: { notification_type: 'idle_prompt' } });
+  r.handle({ glissaId: 's1', event: 'Stop', token: 'tok', payload: {} });
+  assert.equal(got.length, 2);
+  assert.equal(got[0].signal, 'ready');
+  assert.equal(got[0].confidence, 'low');
+  assert.equal(got[1].signal, 'ready');
+  assert.equal('confidence' in got[1], false, 'Stop keeps the hook default');
 });
 
 test('HookRouter rejects unknown session (404)', () => {
