@@ -481,7 +481,13 @@ function createOrchestrator(deps) {
         if (stage.id === 'researcher') topicRef.value = clip(sectionFirstLine(produced, 'Topic')) || topicRef.value;
         if (stage.id === 'strategist') platformsRef.value = clip(sectionFirstLine(produced, 'Platforms')) || platformsRef.value;
         let stageVerdict = null;
-        if (stage.verdict) { stageVerdict = parseVerdict(produced, stage.verdict); verdict = stageVerdict; }
+        if (stage.verdict) {
+          stageVerdict = parseVerdict(produced, stage.verdict);
+          // A verdict stage with no parseable VERDICT line is a broken auditor, not a pass: letting it
+          // through would silently skip both the revise loop and the publisher gate and end the run DONE.
+          if (stageVerdict === null) return failTerminal('missing-verdict');
+          verdict = stageVerdict;
+        }
 
         log(`stage complete: ${lockKey} ${stage.id}${stageVerdict ? ` verdict=${stageVerdict}` : ''}${round ? ` round=${round}` : ''}`);
         emitter.emit('team-stage-complete', {

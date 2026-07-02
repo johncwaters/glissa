@@ -407,6 +407,29 @@ test('incomplete handoff (missing sections) fails the stage', async () => {
   }
 });
 
+test('verdict stage with no parseable VERDICT line fails the run instead of finishing DONE', async () => {
+  const proj = tmpProject();
+  try {
+    seedPack(proj);
+    const { orch, events } = makeOrch(proj, {
+      researcher: { write: BRIEF },
+      strategist: { write: PLAN },
+      writer: { write: DRAFTS },
+      editor: { write: 'Reviewed every draft. Looks good to me.\n' },
+      publisher: { write: PUBLISHED },
+    });
+    const res = await orch.runTeam({ teamId: 'marketing', projectId: 'p1' });
+    assert.equal(res.failedStage, 'editor');
+    assert.equal(res.reason, 'missing-verdict');
+    assert.equal(startedCount(events, 'publisher'), 0, 'publisher never ran');
+    const failed = events.find((e) => e.name === 'team-run-failed');
+    assert.ok(failed && failed.reason === 'missing-verdict' && failed.stage === 'editor', 'failure event carries stage + reason');
+    assert.ok(logLines(proj).some((l) => l.includes('FAILED @editor (missing-verdict)')), 'log records the failure');
+  } finally {
+    fs.rmSync(proj, { recursive: true, force: true });
+  }
+});
+
 test('editor BLOCK completes the run but skips the publisher', async () => {
   const proj = tmpProject();
   try {

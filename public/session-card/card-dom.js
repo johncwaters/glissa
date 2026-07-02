@@ -80,16 +80,19 @@ export function showConfirmDialog({ title, message, confirmLabel = 'Confirm', on
   });
 
   function close() {
+    document.removeEventListener('keydown', escHandler);
     overlay.remove();
     opener?.focus?.();
+  }
+
+  function escHandler(e) {
+    if (e.key === 'Escape') close();
   }
 
   btnCancel.addEventListener('click', close);
   btnConfirm.addEventListener('click', () => { close(); onConfirm?.(); });
   overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
-  document.addEventListener('keydown', function escHandler(e) {
-    if (e.key === 'Escape') { close(); document.removeEventListener('keydown', escHandler); }
-  });
+  document.addEventListener('keydown', escHandler);
 
   requestAnimationFrame(() => btnCancel.focus());
 }

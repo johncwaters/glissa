@@ -758,8 +758,13 @@ function registerControlHandlers(controlWss, deps) {
         return;
       }
 
+      // Own-property guard: a bracket lookup on an object literal resolves inherited keys too, so
+      // {"type":"__proto__"} would yield Object.prototype and the call below would throw synchronously,
+      // crashing the process (no uncaughtException handler exists by design). The null check matters:
+      // a literal `null` frame parses fine, and dereferencing .type on it is the same crash class.
+      if (!msg || typeof msg !== 'object' || typeof msg.type !== 'string'
+        || !Object.prototype.hasOwnProperty.call(handlers, msg.type)) return;
       const handler = handlers[msg.type];
-      if (!handler) return;
       // Run synchronously so a sync handler's side effects land in this tick (the existing tests and
       // callers rely on that). Only an async handler returns a thenable; attach a catch so its rejection
       // can't become an unhandledRejection, and return it so a direct test caller can await completion.

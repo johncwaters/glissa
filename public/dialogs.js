@@ -147,8 +147,13 @@ export function createAddSessionDialog() {
   // (it asks Claude for permission prompts). Nothing dangerous to acknowledge here.
 
   function close() {
+    document.removeEventListener('keydown', escHandler);
     overlay.remove();
     opener?.focus?.();
+  }
+
+  function escHandler(e) {
+    if (e.key === 'Escape') close();
   }
 
   function submit() {
@@ -176,12 +181,7 @@ export function createAddSessionDialog() {
   btnConfirm.addEventListener('click', submit);
   nameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') pathInput.focus(); });
   pathInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
-  document.addEventListener('keydown', function escHandler(e) {
-    if (e.key === 'Escape') {
-      close();
-      document.removeEventListener('keydown', escHandler);
-    }
-  });
+  document.addEventListener('keydown', escHandler);
 
   // Focus picker after render
   requestAnimationFrame(() => pickerEl.focus());
@@ -319,8 +319,13 @@ export function createSettingsDialog(initialTab) {
   let repoRoots = [];
 
   function close() {
+    document.removeEventListener('keydown', escHandler);
     overlay.remove();
     opener?.focus?.();
+  }
+
+  function escHandler(e) {
+    if (e.key === 'Escape') close();
   }
 
   function renderRootList() {
@@ -432,12 +437,7 @@ export function createSettingsDialog(initialTab) {
   btnSave.addEventListener('click', save);
   rootAddBtn.addEventListener('click', addRoot);
   rootInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') addRoot(); });
-  document.addEventListener('keydown', function escHandler(e) {
-    if (e.key === 'Escape') {
-      close();
-      document.removeEventListener('keydown', escHandler);
-    }
-  });
+  document.addEventListener('keydown', escHandler);
 
   // Open on a requested tab (the header ? button / ? key open straight to Shortcuts). Focus the tab
   // itself in that case, since the General theme picker lives in a now-hidden panel.
@@ -536,8 +536,13 @@ export function createConfirmDialog({ title, message, confirmLabel = 'Confirm', 
   applyDialogAria(dialog, titleId);
 
   function close() {
+    document.removeEventListener('keydown', escHandler);
     overlay.remove();
     opener?.focus?.();
+  }
+
+  function escHandler(e) {
+    if (e.key === 'Escape') close();
   }
 
   btnCancel.addEventListener('click', close);
@@ -546,12 +551,7 @@ export function createConfirmDialog({ title, message, confirmLabel = 'Confirm', 
     onConfirm?.();
   });
   overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
-  document.addEventListener('keydown', function escHandler(e) {
-    if (e.key === 'Escape') {
-      close();
-      document.removeEventListener('keydown', escHandler);
-    }
-  });
+  document.addEventListener('keydown', escHandler);
 
   requestAnimationFrame(() => btnCancel.focus());
 }
