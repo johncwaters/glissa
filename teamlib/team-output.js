@@ -350,9 +350,12 @@ function readRecentLog(projectPath, outputPath, n = 10) {
   return lines.slice(-n);
 }
 
+// U+2026 built with fromCharCode: the repo bans raw dash/ellipsis literals in source (editor tooling
+// mangles them), but the truncation marker itself should stay a single ellipsis glyph in the UI.
+const ELLIPSIS = String.fromCharCode(0x2026);
 function clip(value, max) {
   const t = String(value || '').replace(/\s+/g, ' ').trim();
-  return t.length > max ? `${t.slice(0, max - 1).trimEnd()}…` : t;
+  return t.length > max ? `${t.slice(0, max - 1).trimEnd()}${ELLIPSIS}` : t;
 }
 
 // The paragraph (joined non-empty lines) directly under a markdown heading.
@@ -371,18 +374,22 @@ function readParagraph(text, heading) {
   return lines.join(' ');
 }
 
-// Summarize recent runs from their on-disk artifacts (newest first).
-function listRunSummaries(projectPath, outputPath, stages = [], limit = 10) {
+// Summarize recent runs from their on-disk artifacts (newest first). Async on purpose: this serves a
+// dashboard request (get-team-runs) and reads up to limit x stages files; sync reads here block every
+// live session's PTY streaming on the shared event loop.
+async function listRunSummaries(projectPath, outputPath, stages = [], limit = 10) {
   const { runsDir } = teamPaths(projectPath, outputPath);
-  if (!fs.existsSync(runsDir)) return [];
-  const folders = fs.readdirSync(runsDir, { withFileTypes: true })
+  const entries = await fs.promises.readdir(runsDir, { withFileTypes: true }).catch(() => null);
+  if (!entries) return [];
+  const folders = entries
     .filter((d) => d.isDirectory())
     .map((d) => d.name)
     .sort()
     .reverse()
     .slice(0, limit);
 
-  return folders.map((runId) => {
+  const summaries = [];
+  for (const runId of folders) {
     const dir = path.join(runsDir, runId);
     const reached = [];
     let topic = '';
@@ -392,10 +399,12 @@ function listRunSummaries(projectPath, outputPath, stages = [], limit = 10) {
     for (const stage of stages) {
       if (!stage || !stage.produces) continue;
       const fp = path.join(dir, stage.produces);
-      if (!fs.existsSync(fp)) continue;
+      // A present-but-unreadable artifact still counts as reached (matches the old existsSync gate).
+      const st = await fs.promises.stat(fp).catch(() => null);
+      if (!st) continue;
       reached.push(stage.id);
       let text = '';
-      try { text = fs.readFileSync(fp, 'utf8'); } catch { continue; }
+      try { text = await fs.promises.readFile(fp, 'utf8'); } catch { continue; }
       if (!topic) topic = clip(readParagraph(text, 'Topic'), 140);
       if (!platforms) platforms = clip(readParagraph(text, 'Platforms'), 140);
       const v = /VERDICT:\s*([A-Za-z]+)/i.exec(text);
@@ -404,10 +413,10 @@ function listRunSummaries(projectPath, outputPath, stages = [], limit = 10) {
         summary = clip(readParagraph(text, 'Summary'), 320);
       }
     }
-    return {
-      runId, topic, platforms, verdict, summary, reached, chat: fs.existsSync(path.join(dir, 'chat.md')),
-    };
-  });
+    const chat = await fs.promises.access(path.join(dir, 'chat.md')).then(() => true, () => false);
+    summaries.push({ runId, topic, platforms, verdict, summary, reached, chat });
+  }
+  return summaries;
 }
 
 module.exports = {

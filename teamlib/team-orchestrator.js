@@ -358,7 +358,7 @@ function createOrchestrator(deps) {
           && team.writeScope.length && team.testGlobs.length) {
           await gitWorkspace.restoreTests({ workspace, testGlobs: team.testGlobs });
         }
-        if (active.get(lockKey).cancelled) {
+        if (active.get(lockKey)?.cancelled) {
           output.appendLog(cwd, team.outputPath, `${dateStr} | ${topic() || '(topic)'} | ${platforms() || '-'} | CANCELLED`);
           log(`run cancelled: ${lockKey} before stage ${stage.id}`);
           await finalize('discard');
@@ -416,7 +416,7 @@ function createOrchestrator(deps) {
           });
 
           const result = await runStage({ team, stage, runId, projectPath: cwd, prompt, lockKey });
-          if (active.get(lockKey).cancelled) return cancelledTerminal();
+          if (active.get(lockKey)?.cancelled) return cancelledTerminal();
           if (!result.ok) return failTerminal(result.reason);
 
           produced = readText(produces.path);
@@ -454,7 +454,7 @@ function createOrchestrator(deps) {
           entry.awaiting = false;
           entry.pendingQuestion = null;
 
-          if (active.get(lockKey).cancelled || outcome.cancelled) return cancelledTerminal();
+          if (active.get(lockKey)?.cancelled || outcome.cancelled) return cancelledTerminal();
           if (outcome.timedOut) return failTerminal('answer-timeout');
           // Answered: re-run this stage with the answer now present in chat.md.
           emitter.emit('team-run-resumed', { teamId, projectId, runId, stage: stage.id });

@@ -172,7 +172,7 @@ test('open-artifact allows opening the run conversation transcript (chat.md)', (
   }
 });
 
-test('get-team-runs returns run summaries + active flag', () => {
+test('get-team-runs returns run summaries + active flag', async () => {
   const h = harness({
     registry: realRegistry,
     teamOutput: {
@@ -183,7 +183,7 @@ test('get-team-runs returns run summaries + active flag', () => {
     getProjectPathById: () => 'C:/proj',
     orchestrator: { isActive: () => true },
   });
-  h.send({ type: 'get-team-runs', teamId: 'marketing', projectId: 'p1', requestId: 'g1' });
+  await h.send({ type: 'get-team-runs', teamId: 'marketing', projectId: 'p1', requestId: 'g1' });
   const msg = h.sent.find((m) => m.type === 'team-runs');
   assert.equal(msg.requestId, 'g1');
   assert.equal(msg.active, true);
@@ -191,7 +191,7 @@ test('get-team-runs returns run summaries + active flag', () => {
   assert.equal(msg.runs[0].verdict, 'SHIP');
 });
 
-test('get-team-runs includes a live snapshot (current stage + timestamps) while active', () => {
+test('get-team-runs includes a live snapshot (current stage + timestamps) while active', async () => {
   const h = harness({
     registry: realRegistry,
     teamOutput: { listRunSummaries: () => [] },
@@ -201,7 +201,7 @@ test('get-team-runs includes a live snapshot (current stage + timestamps) while 
       getRunState: () => ({ runId: '2026-06-02-tuesday', currentStage: 'writer', runStartedAtMs: 1000, stageStartedAtMs: 2000, cancelling: false }),
     },
   });
-  h.send({ type: 'get-team-runs', teamId: 'marketing', projectId: 'p1', requestId: 'g4' });
+  await h.send({ type: 'get-team-runs', teamId: 'marketing', projectId: 'p1', requestId: 'g4' });
   const msg = h.sent.find((m) => m.type === 'team-runs');
   assert.equal(msg.active, true);
   assert.ok(msg.live, 'includes a live snapshot so a re-mounting client can rehydrate');
@@ -210,14 +210,14 @@ test('get-team-runs includes a live snapshot (current stage + timestamps) while 
   assert.equal(msg.live.cancelling, false);
 });
 
-test('get-team-runs omits the live snapshot when no run is active', () => {
+test('get-team-runs omits the live snapshot when no run is active', async () => {
   const h = harness({
     registry: realRegistry,
     teamOutput: { listRunSummaries: () => [] },
     getProjectPathById: () => 'C:/proj',
     orchestrator: { isActive: () => false, getRunState: () => assert.fail('must not query run state when inactive') },
   });
-  h.send({ type: 'get-team-runs', teamId: 'marketing', projectId: 'p1', requestId: 'g5' });
+  await h.send({ type: 'get-team-runs', teamId: 'marketing', projectId: 'p1', requestId: 'g5' });
   const msg = h.sent.find((m) => m.type === 'team-runs');
   assert.equal(msg.active, false);
   assert.equal(msg.live, null);
@@ -239,14 +239,14 @@ test('run-team reports "not available" when no orchestrator is wired', () => {
   assert.ok(h.sent.some((m) => m.type === 'error' && /not available/i.test(m.message)));
 });
 
-test('get-team-runs reports the effective schedule and a next fire time', () => {
+test('get-team-runs reports the effective schedule and a next fire time', async () => {
   const h = harness({
     registry: realRegistry,
     teamOutput: { listRunSummaries: () => [] },
     getProjectPathById: () => 'C:/proj',
     orchestrator: { isActive: () => false },
   });
-  h.send({ type: 'get-team-runs', teamId: 'marketing', projectId: 'p1', requestId: 'g2' });
+  await h.send({ type: 'get-team-runs', teamId: 'marketing', projectId: 'p1', requestId: 'g2' });
   const msg = h.sent.find((m) => m.type === 'team-runs');
   assert.equal(typeof msg.nextFire, 'number', 'marketing has a default schedule, so a next fire computes');
   assert.ok(msg.nextFire > Date.now());

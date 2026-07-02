@@ -142,7 +142,7 @@ test('appendLog writes one line per call; parseRecentTopics reads topics', () =>
   }
 });
 
-test('listRunSummaries extracts topic/platforms/verdict/summary + reached from artifacts', () => {
+test('listRunSummaries extracts topic/platforms/verdict/summary + reached from artifacts', async () => {
   const proj = tmpProject();
   try {
     out.ensureStructure(proj, OUT);
@@ -156,7 +156,7 @@ test('listRunSummaries extracts topic/platforms/verdict/summary + reached from a
       { id: 'writer', produces: 'drafts.md' },
       { id: 'editor', produces: 'review.md' },
     ];
-    const runs = out.listRunSummaries(proj, OUT, stages, 10);
+    const runs = await out.listRunSummaries(proj, OUT, stages, 10);
     assert.equal(runs.length, 1);
     const r = runs[0];
     assert.equal(r.topic, 'Boondocking basics');
@@ -170,7 +170,7 @@ test('listRunSummaries extracts topic/platforms/verdict/summary + reached from a
   }
 });
 
-test('listRunSummaries is newest-first and tolerates a partial (no-review) run', () => {
+test('listRunSummaries is newest-first and tolerates a partial (no-review) run', async () => {
   const proj = tmpProject();
   try {
     out.ensureStructure(proj, OUT);
@@ -179,7 +179,7 @@ test('listRunSummaries is newest-first and tolerates a partial (no-review) run',
     const r2 = out.createRunFolder(proj, OUT, '2026-06-04-thursday');
     fs.writeFileSync(path.join(r2, 'brief.md'), 'INSUFFICIENT_TOPICS\n', 'utf8');
     const stages = [{ id: 'researcher', produces: 'brief.md' }, { id: 'editor', produces: 'review.md' }];
-    const runs = out.listRunSummaries(proj, OUT, stages, 10);
+    const runs = await out.listRunSummaries(proj, OUT, stages, 10);
     assert.equal(runs[0].runId, '2026-06-04-thursday', 'newest first');
     assert.equal(runs[0].verdict, '', 'no review.md -> no verdict (incomplete)');
     assert.deepEqual(runs[1].reached, ['researcher']);
@@ -245,16 +245,16 @@ test('chat: an unknown role normalizes to operator; ts is auto-filled when omitt
   }
 });
 
-test('listRunSummaries sets chat:true only when the run recorded a conversation', () => {
+test('listRunSummaries sets chat:true only when the run recorded a conversation', async () => {
   const proj = tmpProject();
   try {
     out.ensureStructure(proj, OUT);
     const run = out.createRunFolder(proj, OUT, '2026-06-02-tuesday');
     fs.writeFileSync(path.join(run, 'brief.md'), '## Topic\nX\n', 'utf8');
     const stages = [{ id: 'researcher', produces: 'brief.md' }];
-    assert.equal(out.listRunSummaries(proj, OUT, stages, 10)[0].chat, false, 'no chat.md -> false');
+    assert.equal((await out.listRunSummaries(proj, OUT, stages, 10))[0].chat, false, 'no chat.md -> false');
     out.appendChat(run, { role: 'operator', text: 'go' });
-    assert.equal(out.listRunSummaries(proj, OUT, stages, 10)[0].chat, true, 'chat.md present -> true');
+    assert.equal((await out.listRunSummaries(proj, OUT, stages, 10))[0].chat, true, 'chat.md present -> true');
   } finally {
     fs.rmSync(proj, { recursive: true, force: true });
   }

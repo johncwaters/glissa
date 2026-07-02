@@ -42,14 +42,14 @@ export function sendControlRequest(type, payload) {
       pendingRequests.delete(requestId);
       reject(new Error('Request timed out'));
     }, 5000);
-    pendingRequests.set(requestId, { resolve, timer });
-    if (controlWs?.readyState === WebSocket.OPEN) {
-      controlWs.send(JSON.stringify({ type, requestId, ...payload }));
-    } else {
+    pendingRequests.set(requestId, { resolve, reject, timer });
+    if (controlWs?.readyState !== WebSocket.OPEN) {
       clearTimeout(timer);
       pendingRequests.delete(requestId);
       reject(new Error('Not connected'));
+      return;
     }
+    controlWs.send(JSON.stringify({ type, requestId, ...payload }));
   });
 }
 
@@ -89,6 +89,13 @@ export function connectControl() {
 
   ws.addEventListener('close', () => {
     controlWs = null;
+    // A response can never arrive on a dead socket; failing fast beats each caller waiting out its
+    // 5s request timeout.
+    for (const pending of pendingRequests.values()) {
+      clearTimeout(pending.timer);
+      pending.reject(new Error('Connection closed'));
+    }
+    pendingRequests.clear();
     if (reconnectDisabled) {
       if (_connectionStateCallback) _connectionStateCallback('shutdown', 'Server shut down');
       return;

@@ -39,7 +39,11 @@ function revealApp() {
   appRevealed = true;
   document.body.classList.add('app-ready');
   loadingScreen.classList.add('fade-out');
-  loadingScreen.addEventListener('transitionend', () => loadingScreen.remove());
+  // transitionend never fires under reduced-motion / no computed transition; the timeout is the
+  // fallback so the overlay node cannot persist. remove() on an already-removed node is a no-op.
+  const removeLoading = () => loadingScreen.remove();
+  loadingScreen.addEventListener('transitionend', removeLoading, { once: true });
+  setTimeout(removeLoading, 1000);
 }
 
 function showShutdownOverlay(message) {

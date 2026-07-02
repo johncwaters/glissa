@@ -483,7 +483,12 @@ export function removeSessionCard(sessionId) {
   if (ui.abortController) ui.abortController.abort();
   if (ui.dataWs?.readyState <= WebSocket.OPEN) ui.dataWs.close();
   releaseWebgl(ui);
+  if (ui._repaintRafId != null) { cancelAnimationFrame(ui._repaintRafId); ui._repaintRafId = null; }
   if (ui.term) ui.term.dispose();
+  // Null the disposed instance so still-pending RAF callbacks' `if (!ui.term)` guards actually skip it
+  // (a disposed terminal is truthy, and refresh()/fit() on it throws inside the RAF).
+  ui.term = null;
+  ui.fitAddon = null;
   if (ui.card) ui.card.remove();
   updateAggregateStatus();
 }

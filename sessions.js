@@ -625,18 +625,18 @@ class Session extends EventEmitter {
   async _settleWorktreeOnExit() {
     if (!this._gitWorkspace || !this._workspace) return;
     if (this.state !== STATES.DONE && this.state !== STATES.FAILED) return;
-    if (this.hasChanges()) {
+    if (await this.hasChanges()) {
       // Keep watching the kept-for-review worktree: a post-exit CLI merge/clean still self-heals fast.
       this._setMergeStatus("pending-review");
-    } else {
-      this._stopWorktreeWatcher(); // dir about to be removed
-      try { await this._gitWorkspace.discard({ projectPath: this.path, workspace: this._workspace }); } catch { /* best-effort */ }
-      this._workspace = null;
-      this.worktreeDir = null;
-      this.commonGitDir = null;
-      this.isWorktree = false;
-      this._setMergeStatus("none");
+      return;
     }
+    this._stopWorktreeWatcher(); // dir about to be removed
+    try { await this._gitWorkspace.discard({ projectPath: this.path, workspace: this._workspace }); } catch { /* best-effort */ }
+    this._workspace = null;
+    this.worktreeDir = null;
+    this.commonGitDir = null;
+    this.isWorktree = false;
+    this._setMergeStatus("none");
   }
 
   _setMergeStatus(status, extra = {}) {
@@ -674,14 +674,14 @@ class Session extends EventEmitter {
 
   // True when the worktree has any uncommitted change vs its base, COUNTING untracked new files
   // (a feature session's deliverable is usually new files, which a plain `git diff` would miss).
-  hasChanges() {
+  // Async: this runs on every PTY exit; a sync git subprocess here stalls every other session's
+  // streaming. gitOut resolves "" on a git error, which keeps the old catch -> false semantics.
+  async hasChanges() {
     if (!this.worktreeDir) return false;
-    try {
-      const out = execFileSync("git", ["status", "--porcelain"], {
-        cwd: this.worktreeDir, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 10000,
-      });
-      return out.trim().length > 0;
-    } catch { return false; }
+    const out = await gitOut(["status", "--porcelain"], {
+      cwd: this.worktreeDir, encoding: "utf8", timeout: 10000,
+    });
+    return out.trim().length > 0;
   }
 
   // Two diffs the review sidebar draws a hard line between: COMMITTED changes (the commits a merge would

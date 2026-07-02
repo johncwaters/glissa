@@ -13,7 +13,14 @@ const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 
-const { createGitWorkspace, linkNodeModules } = require('../teamlib/team-git');
+const { createGitWorkspace } = require('../teamlib/team-git');
+
+// Junction-setup helper for the teardown-safety tests below: the junction is what the live shareList
+// path (populateWorktree) creates; these tests only need one to exist, however it got there.
+function makeNodeModulesJunction(projectPath, wtDir) {
+  execFileSync('cmd', ['/c', 'mklink', '/J', path.join(wtDir, 'node_modules'), path.join(projectPath, 'node_modules')], { stdio: 'ignore' });
+  return fs.existsSync(path.join(wtDir, 'node_modules'));
+}
 
 function hasGit() {
   try { execFileSync('git', ['--version'], { stdio: 'ignore' }); return true; } catch { return false; }
@@ -468,7 +475,7 @@ test('discard is junction-safe: the real node_modules survives worktree teardown
   try {
     const gw = createGitWorkspace();
     const ws = await gw.create({ projectPath: repo, teamId: 'session', label: 'nm', outputPath: '' });
-    assert.equal(linkNodeModules(repo, ws.cwd), true, 'junction created');
+    assert.equal(makeNodeModulesJunction(repo, ws.cwd), true, 'junction created');
     assert.ok(fs.existsSync(path.join(ws.cwd, 'node_modules', 'sentinel.txt')), 'junction resolves to the real node_modules');
 
     await gw.discard({ projectPath: repo, workspace: ws });
@@ -487,7 +494,7 @@ test('mergeBack is junction-safe: the real node_modules survives a successful me
   try {
     const gw = createGitWorkspace();
     const ws = await gw.create({ projectPath: repo, teamId: 'session', label: 'nm2', outputPath: '' });
-    linkNodeModules(repo, ws.cwd);
+    makeNodeModulesJunction(repo, ws.cwd);
     fs.writeFileSync(path.join(ws.cwd, 'feature.js'), 'x\n', 'utf8');
     git(['add', 'feature.js'], ws.cwd); git(['commit', '-m', 'feat'], ws.cwd);
 

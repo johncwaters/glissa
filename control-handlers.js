@@ -464,7 +464,7 @@ function registerControlHandlers(controlWss, deps) {
   // Everything one instance panel needs in a single round-trip: its run history (newest-first),
   // whether a run is active, and the effective schedule + next fire time (activation override, else
   // the team default). Runs are isolated in a git worktree, so the working-tree state is irrelevant.
-  function handleGetTeamRuns(msg, ws) {
+  async function handleGetTeamRuns(msg, ws) {
     const { teamId, projectId } = msg;
     const out = {
       type: 'team-runs', requestId: msg.requestId || null, teamId, projectId,
@@ -475,7 +475,7 @@ function registerControlHandlers(controlWss, deps) {
       if (registry) team = registry.loadTeam(teamId);
       const projectPath = getProjectPathById ? getProjectPathById(projectId) : null;
       if (team && teamOutput && projectPath) {
-        out.runs = teamOutput.listRunSummaries(projectPath, team.outputPath, team.stages, 10);
+        out.runs = await teamOutput.listRunSummaries(projectPath, team.outputPath, team.stages, 10);
       }
       const activation = (config.teams || []).find((e) => e.teamId === teamId && e.projectId === projectId);
       out.enabled = !!activation?.enabled;
@@ -564,7 +564,9 @@ function registerControlHandlers(controlWss, deps) {
     if (!team) { ws.send(JSON.stringify({ type: 'error', message: `Unknown team "${teamId}"` })); return; }
     const projectPath = getProjectPathById ? getProjectPathById(projectId) : null;
     if (!projectPath) { ws.send(JSON.stringify({ type: 'error', message: 'Unknown project' })); return; }
-    if (!/^[\w.-]+$/.test(String(runId || ''))) { ws.send(JSON.stringify({ type: 'error', message: 'Invalid run id' })); return; }
+    // The charset admits dot-only names ("..", "..."); confinePath blocks the traversal anyway, but a
+    // run id can never be dot-only, so reject it here too (defense in depth).
+    if (!/^[\w.-]+$/.test(String(runId || '')) || /^\.+$/.test(String(runId))) { ws.send(JSON.stringify({ type: 'error', message: 'Invalid run id' })); return; }
     const allowed = new Set(team.stages.map((s) => s.produces));
     allowed.add('chat.md'); // the per-run operator conversation transcript is openable too
     if (!allowed.has(artifact)) { ws.send(JSON.stringify({ type: 'error', message: 'Unknown artifact' })); return; }

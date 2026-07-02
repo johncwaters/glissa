@@ -158,6 +158,9 @@ function createBackend(httpServer, options = {}) {
     }
     let body = '';
     let aborted = false;
+    // The oversize req.destroy() below (and any client reset) surfaces as a request 'error' event;
+    // without a listener that is an unhandled 'error' throw from the stream.
+    req.on('error', () => { aborted = true; });
     req.on('data', (c) => {
       body += c;
       if (body.length > 65536) { aborted = true; req.destroy(); }
@@ -816,9 +819,17 @@ function createBackend(httpServer, options = {}) {
           sess.adoptWorktree({ worktreeDir: wt.cwd, branch: wt.branch, base: integrationBranch });
           integrationPool.ensure(sess); // adopt sets commonGitDir; watch the branch for this re-adopted worktree too
           console.log(`[worktree] re-adopted pending-review worktree for ${sess.name} (${wt.branch})`);
-        } else {
-          gitWorkspaceSync.removeWorktreeByPath({ projectPath: project.path, cwd: wt.cwd, branch: wt.branch });
+          continue;
         }
+        if (wt.hasWork) {
+          // An ORPHAN with work is not removable: "no data loss" must hold even when no session claims
+          // the id (deleted project, or a foreign glissa/session/* branch that shares the naming, e.g. a
+          // Claude Code session worktree). Removing one destroys uncommitted work. Leave it for manual
+          // review; the async sweep (sweepSessionWorktrees) already preserves these the same way.
+          console.warn(`[worktree] keeping orphan worktree with unmerged work: ${wt.branch} (${wt.cwd})`);
+          continue;
+        }
+        gitWorkspaceSync.removeWorktreeByPath({ projectPath: project.path, cwd: wt.cwd, branch: wt.branch });
       }
     }
   } catch (err) {
@@ -1133,7 +1144,7 @@ function createBackend(httpServer, options = {}) {
 
   // --- Config hot-reload ---
 
-  configStore.watchForChanges((newConfig) => {
+  const stopConfigWatch = configStore.watchForChanges((newConfig) => {
     applyConfigReload(newConfig);
   });
 
@@ -1145,6 +1156,7 @@ function createBackend(httpServer, options = {}) {
     if (shuttingDown) return [];
     shuttingDown = true;
     clearInterval(healthInterval);
+    stopConfigWatch();
     // INVARIANT: destroy NotificationManager BEFORE sessions - clears all timers globally
     notificationManager.destroy();
     for (const [, s] of teamSchedulers) s.disarm();

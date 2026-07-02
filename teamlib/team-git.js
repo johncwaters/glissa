@@ -8,6 +8,7 @@ const { promisify } = require('node:util');
 const { SHARED_PACK_DIRNAME } = require('./team-output');
 
 const execFileP = promisify(execFile);
+const fsp = fs.promises;
 
 // Run each team run inside a throwaway git worktree on a dedicated branch, so the team's writes never
 // touch the user's working tree or current branch during the (multi-minute) run. On a terminal
@@ -124,7 +125,7 @@ function createGitWorkspace(opts = {}) {
     // Bring the project's pack (voice-guide etc.) into the worktree so the agents read it, including
     // edits not yet committed to HEAD. It is never staged (integrate adds only the run folder + log), so
     // it vanishes with the worktree.
-    try { copyPack(projectPath, wtDir, outputPath); } catch { /* best-effort */ }
+    try { await copyPack(projectPath, wtDir, outputPath); } catch { /* best-effort */ }
     // Bring the gitignored local working context (node_modules, .env, .claude, .omc, ...) into the
     // worktree so the spawned agent sees a COMPLETE, recognizable project, not a bare checkout. Dirs are
     // junctioned (shared with the real repo, never copied or merged, gitignored so `git add -A` skips
@@ -139,7 +140,7 @@ function createGitWorkspace(opts = {}) {
           ignored.push(rel);
         }
       }
-      if (ignored.length) { try { populateWorktree(projectPath, wtDir, ignored); } catch { /* best-effort */ } }
+      if (ignored.length) { try { await populateWorktree(projectPath, wtDir, ignored); } catch { /* best-effort */ } }
     }
     return { cwd: wtDir, isGit: true, branch, base, baseSha };
   }
@@ -530,54 +531,43 @@ function removeWorktreeLinks(wtDir) {
 // (mklink /J - shared with the real repo, never copied or merged, gitignored so `git add -A` skips it);
 // a FILE is copied. Entries already present in the worktree (committed) or absent in the project are
 // skipped. Best-effort per entry so one failure never aborts the spawn. Windows junctions need no admin.
-function populateWorktree(projectPath, wtDir, shareList) {
+// Async on purpose: this runs on EVERY isolated session/team spawn, and a sync cmd.exe spawn or copy
+// here stalls every other session's PTY streaming on the shared event loop.
+async function populateWorktree(projectPath, wtDir, shareList) {
   for (const rel of shareList) {
     if (!rel || String(rel).includes('..')) continue; // no path traversal
     const src = path.join(projectPath, rel);
     const dst = path.join(wtDir, rel);
     try {
-      if (!fs.existsSync(src)) continue;  // nothing to share
-      if (fs.existsSync(dst)) continue;    // already in the worktree (committed) - leave it
-      fs.mkdirSync(path.dirname(dst), { recursive: true });
-      if (fs.statSync(src).isDirectory()) {
-        execFileSync('cmd', ['/c', 'mklink', '/J', dst, src], { stdio: 'ignore' });
-      } else {
-        fs.copyFileSync(src, dst);
+      const srcStat = await fsp.stat(src).catch(() => null);
+      if (!srcStat) continue;  // nothing to share
+      const dstExists = await fsp.access(dst).then(() => true, () => false);
+      if (dstExists) continue; // already in the worktree (committed) - leave it
+      await fsp.mkdir(path.dirname(dst), { recursive: true });
+      if (srcStat.isDirectory()) {
+        await execFileP('cmd', ['/c', 'mklink', '/J', dst, src]);
+        continue;
       }
+      await fsp.copyFile(src, dst);
     } catch { /* best-effort: the session runs without that piece */ }
   }
 }
 
-// Create a Windows directory junction <wtDir>/node_modules -> <projectPath>/node_modules so a session
-// worktree can run the project's tooling (build/lint/test) without a reinstall. A junction (mklink /J)
-// needs no admin rights, unlike a symlink. Best-effort: the session simply runs without node_modules
-// on any failure (absent target, link already present, non-Windows). Returns true only when it linked.
-function linkNodeModules(projectPath, wtDir) {
-  if (!projectPath || !wtDir) return false;
-  const target = path.join(projectPath, 'node_modules');
-  const link = path.join(wtDir, 'node_modules');
-  try {
-    if (!fs.existsSync(target)) return false;
-    if (fs.existsSync(link)) return false;
-    execFileSync('cmd', ['/c', 'mklink', '/J', link, target], { stdio: 'ignore' });
-    return true;
-  } catch { return false; }
+async function copyDirInto(src, dest) {
+  const exists = await fsp.access(src).then(() => true, () => false);
+  if (!exists) return;
+  await fsp.mkdir(path.dirname(dest), { recursive: true });
+  await fsp.cp(src, dest, { recursive: true });
 }
 
-function copyDirInto(src, dest) {
-  if (!fs.existsSync(src)) return;
-  fs.mkdirSync(path.dirname(dest), { recursive: true });
-  fs.cpSync(src, dest, { recursive: true });
-}
-
-function defaultCopyPack(projectPath, wtDir, outputPath) {
+async function defaultCopyPack(projectPath, wtDir, outputPath) {
   // The project-level shared pack (.glissa/pack/) holds cross-team files (voice/avoid/brand) used by any
   // team that declares them shared. It lives OUTSIDE outputPath, so copy it in independently of the
   // team-local pack. Both copies stay UNSTAGED (integrate adds only the run folder + log + SHIP writeScope),
   // so neither is committed back and both vanish with the worktree. Guarded so an absent dir is a no-op.
-  copyDirInto(path.join(projectPath, SHARED_PACK_DIRNAME), path.join(wtDir, SHARED_PACK_DIRNAME));
+  await copyDirInto(path.join(projectPath, SHARED_PACK_DIRNAME), path.join(wtDir, SHARED_PACK_DIRNAME));
   if (!outputPath) return;
-  copyDirInto(path.join(projectPath, outputPath, 'pack'), path.join(wtDir, outputPath, 'pack'));
+  await copyDirInto(path.join(projectPath, outputPath, 'pack'), path.join(wtDir, outputPath, 'pack'));
 }
 
-module.exports = { createGitWorkspace, createGitWorkspaceSync, linkNodeModules };
+module.exports = { createGitWorkspace, createGitWorkspaceSync };

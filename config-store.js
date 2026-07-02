@@ -197,9 +197,12 @@ function createConfigStore() {
     }
   }
 
-  /** Watch config.json for external changes (debounced, ignores self-writes). */
+  /** Watch config.json for external changes (debounced, ignores self-writes).
+   * Returns a closer so shutdown can release the fs.watch handle (a leaked watcher
+   * keeps the event loop alive, which hangs any embedder that expects exit). */
   function watchForChanges(callback) {
     let reloadTimer = null;
+    let watcher = null;
 
     function handleConfigChange(err, data) {
       if (err) {
@@ -222,7 +225,7 @@ function createConfigStore() {
     }
 
     try {
-      fs.watch(configPath, () => {
+      watcher = fs.watch(configPath, () => {
         clearTimeout(reloadTimer);
         reloadTimer = setTimeout(() => {
           if (Date.now() - _lastSelfWriteTs < 500) return;
@@ -233,6 +236,11 @@ function createConfigStore() {
     } catch (watchErr) {
       console.warn('[config] Failed to watch config.json:', watchErr.message);
     }
+    return function stop() {
+      clearTimeout(reloadTimer);
+      if (watcher) { try { watcher.close(); } catch { /* already closed */ } }
+      watcher = null;
+    };
   }
 
   return {
