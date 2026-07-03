@@ -414,48 +414,9 @@ function createOrchestrator(deps) {
         log(`stage start: ${lockKey} ${stage.id} (${stage.model || 'sonnet'})${round ? ` round=${round}` : ''}`);
         emitter.emit('team-stage-started', { teamId, projectId, runId, stage: stage.id, round });
 
-        // Spawn the stage, then (interactive runs only) pause if it emitted the QUESTION marker and re-run
-        // with the operator's answer once it lands in chat.md. A normal stage runs the body exactly once.
-        let produced = '';
-        let lastQuestionOutput = null;
-        for (;;) {
-          const reads = readNames.map((name) => ({ name, path: path.join(runDir, name) }));
-          // Inject the operator conversation when it exists and is non-empty, so a run nobody has spoken in
-          // produces byte-identical prompts to before this feature (and scheduled runs never see it).
-          let chatRead = null;
-          const cp = output.chatPath(runDir);
-          if (fs.existsSync(cp) && readText(cp).trim()) chatRead = { name: 'chat.md', path: cp };
-          const prompt = buildStagePrompt(readText(stage.agentPath), {
-            runDir, packDir, packFiles, reads, produces, chat: chatRead, allowQuestions: interactive,
-          });
-
-          const result = await runStage({ team, stage, runId, projectPath: cwd, prompt, lockKey });
-          if (active.get(lockKey)?.cancelled) return cancelledTerminal();
-          if (!result.ok) return failTerminal(result.reason);
-
-          produced = readText(produces.path);
-          const question = extractQuestion(produced, marker);
-          if (!question) break; // normal handoff: fall through to the halt/section gates below
-
-          if (!interactive) {
-            // Scheduled / opt-out: never block on a human. A stray question becomes a needs-operator halt.
-            return failTerminal('needs-operator', `NEEDS_OPERATOR @${stage.id}`, 'halted');
-          }
-          // No-progress guard: the agent re-asked an identical question after being answered.
-          if (lastQuestionOutput !== null && produced === lastQuestionOutput) return failTerminal('question-no-progress');
-          const entry = active.get(lockKey);
-          // questionsAsked is a RUN-WIDE budget (not reset between stages), so a multi-stage run cannot
-          // pepper the operator with maxQuestions per stage.
-          entry.questionsAsked += 1;
-          if (entry.questionsAsked > (chatCfg.maxQuestions || 3)) return failTerminal('question-budget');
-
-          // Surface the question and wait for the operator (postMessage), a timeout, or a cancel.
-          recordChat(entry, teamId, projectId, 'agent', stage.id, question);
-          entry.awaiting = true;
-          entry.pendingQuestion = question;
-          emitter.emit('team-run-awaiting-input', { teamId, projectId, runId, stage: stage.id, question });
-          log(`run awaiting operator: ${lockKey} at stage ${stage.id}`);
-
+        // Await the operator's answer to a surfaced QUESTION: resolved by postMessage, the answer
+        // timeout, or a cancel. Owns the entry's awaiting bookkeeping so no exit path leaks a timer.
+        const awaitOperatorAnswer = async (entry) => {
           const outcome = await new Promise((resolve) => {
             entry.awaitResolve = resolve;
             const t = setTimeoutFn(() => resolve({ timedOut: true }), (chatCfg.answerTimeoutSec || 600) * 1000);
@@ -467,14 +428,67 @@ function createOrchestrator(deps) {
           entry.awaitResolve = null;
           entry.awaiting = false;
           entry.pendingQuestion = null;
+          return outcome;
+        };
 
-          if (active.get(lockKey)?.cancelled || outcome.cancelled) return cancelledTerminal();
-          if (outcome.timedOut) return failTerminal('answer-timeout');
-          // Answered: re-run this stage with the answer now present in chat.md.
-          emitter.emit('team-run-resumed', { teamId, projectId, runId, stage: stage.id });
-          log(`run resumed: ${lockKey} at stage ${stage.id}`);
-          lastQuestionOutput = produced;
-        }
+        // Spawn the stage, then (interactive runs only) pause if it emitted the QUESTION marker and re-run
+        // with the operator's answer once it lands in chat.md. A normal stage runs the body exactly once.
+        // Returns { terminal } on a bail (caller returns it verbatim) or { produced } on a handoff.
+        const spawnStageLoop = async () => {
+          let produced = '';
+          let lastQuestionOutput = null;
+          for (;;) {
+            const reads = readNames.map((name) => ({ name, path: path.join(runDir, name) }));
+            // Inject the operator conversation when it exists and is non-empty, so a run nobody has spoken in
+            // produces byte-identical prompts to before this feature (and scheduled runs never see it).
+            let chatRead = null;
+            const cp = output.chatPath(runDir);
+            if (fs.existsSync(cp) && readText(cp).trim()) chatRead = { name: 'chat.md', path: cp };
+            const prompt = buildStagePrompt(readText(stage.agentPath), {
+              runDir, packDir, packFiles, reads, produces, chat: chatRead, allowQuestions: interactive,
+            });
+
+            const result = await runStage({ team, stage, runId, projectPath: cwd, prompt, lockKey });
+            if (active.get(lockKey)?.cancelled) return cancelledTerminal();
+            if (!result.ok) return failTerminal(result.reason);
+
+            produced = readText(produces.path);
+            const question = extractQuestion(produced, marker);
+            if (!question) return { produced }; // normal handoff: caller runs the halt/section gates
+
+            if (!interactive) {
+              // Scheduled / opt-out: never block on a human. A stray question becomes a needs-operator halt.
+              return failTerminal('needs-operator', `NEEDS_OPERATOR @${stage.id}`, 'halted');
+            }
+            // No-progress guard: the agent re-asked an identical question after being answered.
+            if (lastQuestionOutput !== null && produced === lastQuestionOutput) return failTerminal('question-no-progress');
+            const entry = active.get(lockKey);
+            // questionsAsked is a RUN-WIDE budget (not reset between stages), so a multi-stage run cannot
+            // pepper the operator with maxQuestions per stage.
+            entry.questionsAsked += 1;
+            if (entry.questionsAsked > (chatCfg.maxQuestions || 3)) return failTerminal('question-budget');
+
+            // Surface the question and wait for the operator (postMessage), a timeout, or a cancel.
+            recordChat(entry, teamId, projectId, 'agent', stage.id, question);
+            entry.awaiting = true;
+            entry.pendingQuestion = question;
+            emitter.emit('team-run-awaiting-input', { teamId, projectId, runId, stage: stage.id, question });
+            log(`run awaiting operator: ${lockKey} at stage ${stage.id}`);
+
+            const outcome = await awaitOperatorAnswer(entry);
+
+            if (active.get(lockKey)?.cancelled || outcome.cancelled) return cancelledTerminal();
+            if (outcome.timedOut) return failTerminal('answer-timeout');
+            // Answered: re-run this stage with the answer now present in chat.md.
+            emitter.emit('team-run-resumed', { teamId, projectId, runId, stage: stage.id });
+            log(`run resumed: ${lockKey} at stage ${stage.id}`);
+            lastQuestionOutput = produced;
+          }
+        };
+
+        const spawnOutcome = await spawnStageLoop();
+        if (spawnOutcome.terminal) return spawnOutcome;
+        const produced = spawnOutcome.produced;
         // Researcher halt signal (e.g. INSUFFICIENT_TOPICS) is checked BEFORE section verification:
         // a halt brief legitimately omits the normal sections.
         if (stage.haltSignal && produced.includes(stage.haltSignal)) {
@@ -492,8 +506,13 @@ function createOrchestrator(deps) {
           emitter.emit('team-run-failed', { teamId, projectId, reason: 'incomplete-handoff', stage: stage.id, missing: check.missing });
           return { terminal: { failedStage: stage.id, missing: check.missing } };
         }
-        if (stage.id === 'researcher') topicRef.value = clip(sectionFirstLine(produced, 'Topic')) || topicRef.value;
-        if (stage.id === 'strategist') platformsRef.value = clip(sectionFirstLine(produced, 'Platforms')) || platformsRef.value;
+        // Config-driven run-log capture (stage.capture in team.json): a stage may publish one handoff
+        // section's first line into a run-log column. Replaces hardcoded stage-id matching so the
+        // generic runtime carries no team-specific stage ids.
+        if (stage.capture) {
+          const slotRef = { topic: topicRef, platforms: platformsRef }[stage.capture.slot];
+          if (slotRef) slotRef.value = clip(sectionFirstLine(produced, stage.capture.section)) || slotRef.value;
+        }
         let stageVerdict = null;
         if (stage.verdict) {
           stageVerdict = parseVerdict(produced, stage.verdict);

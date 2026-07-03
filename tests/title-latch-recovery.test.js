@@ -9,7 +9,6 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { setTimeout: sleep } = require('node:timers/promises');
 
 const { Session } = require('../sessions');
 const { STATES } = require('../shared/states');
@@ -61,11 +60,12 @@ test('resyncWorkingLatch re-opens the working latch and preserves hasSeenSpinner
   src.destroy();
 });
 
-test('resyncWorkingLatch is a no-op for non-working kinds', async () => {
+test('resyncWorkingLatch is a no-op for non-working kinds', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   const src = createOscTitleSource({ stabilizationMs: 5 });
   src.feed(`\x1b]0;${SPIN_A} t\x07`);
   src.feed(`\x1b]0;${IDLE_GLYPH} t\x07`);
-  await sleep(20); // stabilization -> ready
+  t.mock.timers.tick(20); // stabilization -> ready
   assert.equal(src.getState().lastKind, 'ready');
   src.resyncWorkingLatch();
   assert.equal(src.getState().lastKind, 'ready', 'ready kind untouched');
@@ -74,13 +74,14 @@ test('resyncWorkingLatch is a no-op for non-working kinds', async () => {
 
 // (b) Incident regression (RED on main): ready/hook -> COMPLETE -> user_dismiss -> IDLE
 // while the spinner never paused; continued braille frames must recover to RUNNING.
-test('INCIDENT: premature ready + dismiss strands IDLE; continued spinner recovers to RUNNING', async () => {
+test('INCIDENT: premature ready + dismiss strands IDLE; continued spinner recovers to RUNNING', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   const s = makeSession(STATES.IDLE);
   feedTitle(s, SPIN_A);
   assert.equal(s.state, STATES.RUNNING, 'spinner wakes the idle card');
 
   hook(s, 'ready'); // premature Stop mid-work
-  await sleep(40);
+  t.mock.timers.tick(40);
   assert.equal(s.state, STATES.COMPLETE);
 
   assert.equal(s.dismiss(), true);
@@ -92,11 +93,12 @@ test('INCIDENT: premature ready + dismiss strands IDLE; continued spinner recove
 });
 
 // (c) Same without dismiss: COMPLETE + continued spinner recovers.
-test('premature ready without dismiss: COMPLETE + continued spinner recovers to RUNNING', async () => {
+test('premature ready without dismiss: COMPLETE + continued spinner recovers to RUNNING', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   const s = makeSession(STATES.IDLE);
   feedTitle(s, SPIN_A);
   hook(s, 'ready');
-  await sleep(40);
+  t.mock.timers.tick(40);
   assert.equal(s.state, STATES.COMPLETE);
 
   feedTitle(s, SPIN_B);
@@ -105,17 +107,18 @@ test('premature ready without dismiss: COMPLETE + continued spinner recovers to 
 });
 
 // (d) Legit complete: idle-glyph titles after the Stop must NOT re-wake or flap.
-test('legit complete: idle-glyph titles after ready keep the card COMPLETE', async () => {
+test('legit complete: idle-glyph titles after ready keep the card COMPLETE', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   const s = makeSession(STATES.IDLE);
   const seen = [];
   s.on('state-change', (e) => seen.push(e.to));
   feedTitle(s, SPIN_A);
   hook(s, 'ready');
-  await sleep(40);
+  t.mock.timers.tick(40);
   assert.equal(s.state, STATES.COMPLETE);
 
   feedTitle(s, IDLE_GLYPH);
-  await sleep(60); // stabilization (15ms) + conflict window (20ms) fully elapsed
+  t.mock.timers.tick(60); // stabilization (15ms) + conflict window (20ms) fully elapsed
   assert.equal(s.state, STATES.COMPLETE, 'no spurious wake from the idle glyph');
   const afterComplete = seen.slice(seen.indexOf(STATES.COMPLETE) + 1);
   assert.equal(afterComplete.includes(STATES.RUNNING), false, 'no flap');
@@ -124,12 +127,13 @@ test('legit complete: idle-glyph titles after ready keep the card COMPLETE', asy
 
 // (e) Startup guard intact: an idle-glyph-only session (never spun) emits nothing,
 // and resync does not weaken that.
-test('startup idle glyph still emits no ready; resync does not arm anything', async () => {
+test('startup idle glyph still emits no ready; resync does not arm anything', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   const s = makeSession(STATES.IDLE);
   feedTitle(s, IDLE_GLYPH);
   s._titleSource.resyncWorkingLatch();
   feedTitle(s, IDLE_GLYPH);
-  await sleep(60);
+  t.mock.timers.tick(60);
   assert.equal(s.state, STATES.IDLE, 'never-spun session stays idle');
   s.destroy();
 });
@@ -140,14 +144,15 @@ test('startup idle glyph still emits no ready; resync does not arm anything', as
 // test/test-notification-manager.js "same-session re-trigger debounced" - suppresses a
 // duplicate toast within the window). Asserted here at the Session boundary: one
 // emission per COMPLETE entry, and the flap settles without oscillation.
-test('flap COMPLETE -> RUNNING -> COMPLETE emits one post-turn-check per entry and settles', async () => {
+test('flap COMPLETE -> RUNNING -> COMPLETE emits one post-turn-check per entry and settles', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   const s = makeSession(STATES.IDLE);
   let postTurnChecks = 0;
   s.on('post-turn-check', () => postTurnChecks++);
 
   feedTitle(s, SPIN_A);
   hook(s, 'ready'); // premature
-  await sleep(40);
+  t.mock.timers.tick(40);
   assert.equal(s.state, STATES.COMPLETE);
   assert.equal(postTurnChecks, 1);
 
@@ -155,12 +160,12 @@ test('flap COMPLETE -> RUNNING -> COMPLETE emits one post-turn-check per entry a
   assert.equal(s.state, STATES.RUNNING);
 
   hook(s, 'ready'); // the real turn end
-  await sleep(40);
+  t.mock.timers.tick(40);
   assert.equal(s.state, STATES.COMPLETE);
   assert.equal(postTurnChecks, 2, 'exactly one post-turn-check per COMPLETE entry');
 
   feedTitle(s, IDLE_GLYPH); // genuinely done now
-  await sleep(60);
+  t.mock.timers.tick(60);
   assert.equal(s.state, STATES.COMPLETE, 'settled, no oscillation');
   assert.equal(postTurnChecks, 2);
   s.destroy();

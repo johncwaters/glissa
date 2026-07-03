@@ -63,6 +63,9 @@ const invalidCases = [
   ['bad runtime.shareLocalContext', { id: 'x', outputPath: 'y', runtime: { shareLocalContext: 'yes' }, stages: [okStage] }, /runtime\.shareLocalContext/],
   ['bad runtime.enableProjectMcp', { id: 'x', outputPath: 'y', runtime: { enableProjectMcp: 1 }, stages: [okStage] }, /runtime\.enableProjectMcp/],
   ['empty runtime.baseBranch', { id: 'x', outputPath: 'y', runtime: { baseBranch: '  ' }, stages: [okStage] }, /runtime\.baseBranch/],
+  ['non-object capture', { id: 'x', outputPath: 'y', stages: [{ ...okStage, capture: 'Topic' }] }, /capture/],
+  ['empty capture.section', { id: 'x', outputPath: 'y', stages: [{ ...okStage, capture: { section: ' ', slot: 'topic' } }] }, /capture\.section/],
+  ['bad capture.slot', { id: 'x', outputPath: 'y', stages: [{ ...okStage, capture: { section: 'Topic', slot: 'headline' } }] }, /capture\.slot/],
 ];
 
 for (const [label, def, re] of invalidCases) {

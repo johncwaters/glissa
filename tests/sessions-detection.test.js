@@ -6,7 +6,6 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { setTimeout: sleep } = require('node:timers/promises');
 
 const { Session } = require('../sessions');
 const { STATES } = require('../shared/states');
@@ -68,42 +67,47 @@ test('working from WAITING -> RUNNING (user answered)', () => {
   s.destroy();
 });
 
-test('ready (hook) from RUNNING -> COMPLETE', async () => {
+test('ready (hook) from RUNNING -> COMPLETE', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   const s = makeSession(STATES.RUNNING);
   hook(s, 'ready');
-  await sleep(40);
+  t.mock.timers.tick(40);
   assert.equal(s.state, STATES.COMPLETE);
   s.destroy();
 });
 
-test('ready (hook) from WAITING -> COMPLETE (new edge, authoritative)', async () => {
+test('ready (hook) from WAITING -> COMPLETE (new edge, authoritative)', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   const s = makeSession(STATES.WAITING);
   hook(s, 'ready');
-  await sleep(40);
+  t.mock.timers.tick(40);
   assert.equal(s.state, STATES.COMPLETE);
   s.destroy();
 });
 
-test('ready (hook) from IDLE -> COMPLETE (new edge, authoritative)', async () => {
+test('ready (hook) from IDLE -> COMPLETE (new edge, authoritative)', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   const s = makeSession(STATES.IDLE);
   hook(s, 'ready');
-  await sleep(40);
+  t.mock.timers.tick(40);
   assert.equal(s.state, STATES.COMPLETE);
   s.destroy();
 });
 
-test('ready (title, low confidence) from WAITING does NOT complete', async () => {
+test('ready (title, low confidence) from WAITING does NOT complete', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   const s = makeSession(STATES.WAITING);
   title(s, 'ready');
-  await sleep(40);
+  t.mock.timers.tick(40);
   assert.equal(s.state, STATES.WAITING);
   s.destroy();
 });
 
-test('ready (title) from RUNNING -> COMPLETE', async () => {
+test('ready (title) from RUNNING -> COMPLETE', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   const s = makeSession(STATES.RUNNING);
   title(s, 'ready');
-  await sleep(40);
+  t.mock.timers.tick(40);
   assert.equal(s.state, STATES.COMPLETE);
   s.destroy();
 });
@@ -131,26 +135,28 @@ test('awaiting-input while WAITING stays WAITING (no-op)', () => {
   s.destroy();
 });
 
-test('CONFLICT: Notification(idle->ready) + Stop(ready) racing awaiting-input -> WAITING, no spurious COMPLETE', async () => {
+test('CONFLICT: Notification(idle->ready) + Stop(ready) racing awaiting-input -> WAITING, no spurious COMPLETE', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   const s = makeSession(STATES.RUNNING);
   const seen = [];
   s.on('state-change', (e) => seen.push(e.to));
   hook(s, 'ready'); // Stop
-  await sleep(5);
+  t.mock.timers.tick(5);
   hook(s, 'awaiting-input'); // permission/idle prompt within conflict window
-  await sleep(60);
+  t.mock.timers.tick(60);
   assert.equal(s.state, STATES.WAITING);
   assert.equal(seen.includes(STATES.COMPLETE), false, 'must not flip through COMPLETE');
   s.destroy();
 });
 
-test('DEDUP: double ready (Stop double-fire) -> single COMPLETE', async () => {
+test('DEDUP: double ready (Stop double-fire) -> single COMPLETE', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   const s = makeSession(STATES.RUNNING);
   const completes = [];
   s.on('state-change', (e) => { if (e.to === STATES.COMPLETE) completes.push(e); });
   hook(s, 'ready');
   hook(s, 'ready');
-  await sleep(50);
+  t.mock.timers.tick(50);
   assert.equal(completes.length, 1);
   s.destroy();
 });
@@ -164,7 +170,8 @@ test('session-start / session-end cause no transition', () => {
   s.destroy();
 });
 
-test('state-change chain: COMPLETE and WAITING emit state-change (backend notification hook)', async () => {
+test('state-change chain: COMPLETE and WAITING emit state-change (backend notification hook)', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   const s = makeSession(STATES.RUNNING);
   const events = [];
   s.on('state-change', (e) => events.push({ from: e.from, to: e.to }));
@@ -172,7 +179,7 @@ test('state-change chain: COMPLETE and WAITING emit state-change (backend notifi
   assert.equal(events.at(-1).to, STATES.WAITING);
   title(s, 'working'); // WAITING -> RUNNING
   hook(s, 'ready'); // -> COMPLETE
-  await sleep(40);
+  t.mock.timers.tick(40);
   assert.equal(events.at(-1).to, STATES.COMPLETE);
   s.destroy();
 });
@@ -224,37 +231,40 @@ test('getDetectionStats().lastSignal carries meta:true after a meta signal', () 
 
 // --- Background sub-agent gate (subagent-start/stop tracking; ready suppressed while count > 0) ---
 
-test('background sub-agent: a main Stop while a sub-agent is live does NOT complete', async () => {
+test('background sub-agent: a main Stop while a sub-agent is live does NOT complete', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   const s = makeSession(STATES.RUNNING);
   const seen = [];
   s.on('state-change', (e) => seen.push(e.to));
   hook(s, 'subagent-start', { payload: { agent_id: 'a1' } });
   hook(s, 'ready'); // main-agent Stop, but a1 is still running
-  await sleep(40);
+  t.mock.timers.tick(40);
   assert.equal(s.state, STATES.RUNNING, 'must stay RUNNING while a background sub-agent runs');
   assert.equal(seen.includes(STATES.COMPLETE), false, 'must not flip through COMPLETE');
   s.destroy();
 });
 
-test('background sub-agent: after the sub-agent stops, a later Stop completes', async () => {
+test('background sub-agent: after the sub-agent stops, a later Stop completes', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   const s = makeSession(STATES.RUNNING);
   hook(s, 'subagent-start', { payload: { agent_id: 'a1' } });
   hook(s, 'ready'); // suppressed (a1 live)
-  await sleep(40);
+  t.mock.timers.tick(40);
   assert.equal(s.state, STATES.RUNNING);
   hook(s, 'subagent-stop', { payload: { agent_id: 'a1' } }); // drains
   hook(s, 'ready'); // the resumed turn's Stop, count 0 -> completes
-  await sleep(40);
+  t.mock.timers.tick(40);
   assert.equal(s.state, STATES.COMPLETE);
   s.destroy();
 });
 
-test('synchronous sub-agent: Start then Stop then a main Stop completes (no regression)', async () => {
+test('synchronous sub-agent: Start then Stop then a main Stop completes (no regression)', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   const s = makeSession(STATES.RUNNING);
   hook(s, 'subagent-start', { payload: { agent_id: 'a1' } });
   hook(s, 'subagent-stop', { payload: { agent_id: 'a1' } }); // finishes before the main Stop
   hook(s, 'ready');
-  await sleep(40);
+  t.mock.timers.tick(40);
   assert.equal(s.state, STATES.COMPLETE);
   s.destroy();
 });
@@ -294,21 +304,23 @@ test('a duplicate SubagentStart does not double-count; an unknown SubagentStop i
   s.destroy();
 });
 
-test('a SubagentStart with no agent_id is ignored (defensive)', async () => {
+test('a SubagentStart with no agent_id is ignored (defensive)', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   const s = makeSession(STATES.RUNNING);
   hook(s, 'subagent-start', { payload: {} }); // no agent_id -> untracked
   assert.equal(s.toSnapshot().activeAgents, 0);
   hook(s, 'ready'); // nothing tracked -> completes normally
-  await sleep(40);
+  t.mock.timers.tick(40);
   assert.equal(s.state, STATES.COMPLETE);
   s.destroy();
 });
 
-test('detectBackgroundAgents=false restores prior behavior (Stop completes despite a sub-agent signal)', async () => {
+test('detectBackgroundAgents=false restores prior behavior (Stop completes despite a sub-agent signal)', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   const s = makeSession(STATES.RUNNING, { detectBackgroundAgents: false });
   hook(s, 'subagent-start', { payload: { agent_id: 'a1' } });
   hook(s, 'ready');
-  await sleep(40);
+  t.mock.timers.tick(40);
   assert.equal(s.state, STATES.COMPLETE);
   assert.equal(s.toSnapshot().activeAgents, 0);
   s.destroy();
@@ -317,38 +329,42 @@ test('detectBackgroundAgents=false restores prior behavior (Stop completes despi
 // --- Stop payload background_tasks (v2.1.145+): authoritative gate over the counted map ---
 // Covers background Bash tasks and native-team teammates, which never fire SubagentStart.
 
-test('background_tasks on Stop suppresses completion even with zero counted sub-agents', async () => {
+test('background_tasks on Stop suppresses completion even with zero counted sub-agents', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   const s = makeSession(STATES.RUNNING);
   hook(s, 'ready', { payload: { background_tasks: [{ id: 'bash-1' }] } });
-  await sleep(40);
+  t.mock.timers.tick(40);
   assert.equal(s.state, STATES.RUNNING, 'background Bash still running: no COMPLETE');
   assert.equal(s.toSnapshot().activeAgents, 1, 'declared count rides the snapshot chip');
   s.destroy();
 });
 
-test('a later Stop with empty background_tasks completes (self-correcting drain)', async () => {
+test('a later Stop with empty background_tasks completes (self-correcting drain)', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   const s = makeSession(STATES.RUNNING);
   hook(s, 'ready', { payload: { background_tasks: [{ id: 'bash-1' }] } });
-  await sleep(40);
+  t.mock.timers.tick(40);
   assert.equal(s.state, STATES.RUNNING);
   hook(s, 'ready', { payload: { background_tasks: [] } }); // the resumed turn's Stop
-  await sleep(40);
+  t.mock.timers.tick(40);
   assert.equal(s.state, STATES.COMPLETE);
   assert.equal(s.toSnapshot().activeAgents, 0);
   s.destroy();
 });
 
-test('resume clears a stale background_tasks override (new turn, fresh snapshot)', async () => {
+test('resume clears a stale background_tasks override (new turn, fresh snapshot)', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   const s = makeSession(STATES.RUNNING);
   hook(s, 'ready', { payload: { background_tasks: [{ id: 'b1' }] } });
-  await sleep(40);
+  t.mock.timers.tick(40);
   assert.equal(s.toSnapshot().activeAgents, 1);
   hook(s, 'resume'); // UserPromptSubmit
   assert.equal(s.toSnapshot().activeAgents, 0);
   s.destroy();
 });
 
-test('SubagentStop with background_tasks:[] drains the counted map (dropped-Start/Stop recovery)', async () => {
+test('SubagentStop with background_tasks:[] drains the counted map (dropped-Start/Stop recovery)', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   const s = makeSession(STATES.RUNNING);
   hook(s, 'subagent-start', { payload: { agent_id: 'a1' } });
   hook(s, 'subagent-start', { payload: { agent_id: 'a2' } });
@@ -357,28 +373,30 @@ test('SubagentStop with background_tasks:[] drains the counted map (dropped-Star
   hook(s, 'subagent-stop', { payload: { agent_id: 'a2', background_tasks: [] } });
   assert.equal(s.toSnapshot().activeAgents, 0, 'authoritative drain beats the TTL prune');
   hook(s, 'ready');
-  await sleep(40);
+  t.mock.timers.tick(40);
   assert.equal(s.state, STATES.COMPLETE);
   s.destroy();
 });
 
-test('a stale background_tasks override ages out (TTL), so a hung task cannot pin RUNNING forever', async () => {
+test('a stale background_tasks override ages out (TTL), so a hung task cannot pin RUNNING forever', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   const s = makeSession(STATES.RUNNING, { agentTtlMs: 150 });
   hook(s, 'ready', { payload: { background_tasks: [{ id: 'hung' }] } });
-  await sleep(40);
+  t.mock.timers.tick(40);
   assert.equal(s.state, STATES.RUNNING, 'suppressed while the override is fresh');
-  await sleep(150); // past agentTtlMs with no refreshing Stop
+  t.mock.timers.tick(150); // past agentTtlMs with no refreshing Stop
   assert.equal(s.toSnapshot().activeAgents, 0, 'override pruned lazily like the counted map');
   hook(s, 'ready');
-  await sleep(40);
+  t.mock.timers.tick(40);
   assert.equal(s.state, STATES.COMPLETE, 'completion recovers after the TTL');
   s.destroy();
 });
 
-test('detectBackgroundAgents=false ignores background_tasks payloads too', async () => {
+test('detectBackgroundAgents=false ignores background_tasks payloads too', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   const s = makeSession(STATES.RUNNING, { detectBackgroundAgents: false });
   hook(s, 'ready', { payload: { background_tasks: [{ id: 'b1' }] } });
-  await sleep(40);
+  t.mock.timers.tick(40);
   assert.equal(s.state, STATES.COMPLETE);
   s.destroy();
 });
@@ -391,29 +409,32 @@ function titleEvent(s, signal) {
   s._titleSource.emit('signal', { signal, source: 'title', ts: Date.now() });
 }
 
-test('/clear: title spinner+idle noise after SessionStart(clear) causes no transitions', async () => {
+test('/clear: title spinner+idle noise after SessionStart(clear) causes no transitions', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   const s = makeSession(STATES.COMPLETE);
   const seen = [];
   s.on('state-change', (e) => seen.push(e.to));
   hook(s, 'session-start', { payload: { source: 'clear' } });
   titleEvent(s, 'working'); // TUI redraw flashes a spinner
   titleEvent(s, 'ready');   // then the idle glyph
-  await sleep(50);
+  t.mock.timers.tick(50);
   assert.equal(s.state, STATES.COMPLETE, 'no fake work cycle from /clear redraw');
   assert.deepEqual(seen, [], 'no transitions at all');
   s.destroy();
 });
 
-test('/clear: a held ready from the pre-clear turn is cancelled by SessionStart(clear)', async () => {
+test('/clear: a held ready from the pre-clear turn is cancelled by SessionStart(clear)', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   const s = makeSession(STATES.RUNNING);
   hook(s, 'ready'); // held for the conflict window
   hook(s, 'session-start', { payload: { source: 'clear' } }); // lands inside the window
-  await sleep(50);
+  t.mock.timers.tick(50);
   assert.equal(s.state, STATES.RUNNING, 'stale ready must not resolve after a clear');
   s.destroy();
 });
 
-test('/clear latch: the next real prompt unlatches and titles work again', async () => {
+test('/clear latch: the next real prompt unlatches and titles work again', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   const s = makeSession(STATES.IDLE);
   hook(s, 'session-start', { payload: { source: 'compact' } });
   titleEvent(s, 'working');
@@ -421,7 +442,7 @@ test('/clear latch: the next real prompt unlatches and titles work again', async
   hook(s, 'resume'); // UserPromptSubmit -> RUNNING and unlatch
   assert.equal(s.state, STATES.RUNNING);
   hook(s, 'ready');
-  await sleep(40);
+  t.mock.timers.tick(40);
   assert.equal(s.state, STATES.COMPLETE, 'post-prompt cycle completes normally');
   s.destroy();
 });
@@ -436,18 +457,20 @@ test('SessionStart(source: startup) does not latch or reset (only clear/compact)
 
 // --- idle_prompt demotion: an idle nudge only completes from RUNNING ---
 
-test('a low-confidence hook ready (idle_prompt) does NOT complete a fresh IDLE session', async () => {
+test('a low-confidence hook ready (idle_prompt) does NOT complete a fresh IDLE session', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   const s = makeSession(STATES.IDLE);
   hook(s, 'ready', { confidence: 'low' }); // Notification(idle_prompt) via mapHookConfidence
-  await sleep(40);
+  t.mock.timers.tick(40);
   assert.equal(s.state, STATES.IDLE, 'a session that never ran must not report finished');
   s.destroy();
 });
 
-test('a low-confidence hook ready still completes from RUNNING (quiescence confirmed)', async () => {
+test('a low-confidence hook ready still completes from RUNNING (quiescence confirmed)', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   const s = makeSession(STATES.RUNNING);
   hook(s, 'ready', { confidence: 'low' });
-  await sleep(40);
+  t.mock.timers.tick(40);
   assert.equal(s.state, STATES.COMPLETE);
   s.destroy();
 });

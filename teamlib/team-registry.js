@@ -155,6 +155,22 @@ function resolveAgentPath(stage, teamDir, baseDir, teamId) {
   return null; // unreachable; fail() throws
 }
 
+// Validate a stage's optional run-log capture config: `capture` publishes one handoff section's first
+// line into a run-log column (the log line format is "date | topic | platforms | status").
+const CAPTURE_SLOTS = new Set(['topic', 'platforms']);
+function validateStageCapture(stage, teamId) {
+  if (stage.capture == null) return;
+  if (typeof stage.capture !== 'object' || Array.isArray(stage.capture)) {
+    fail(`stages.${stage.id}.capture`, 'must be an object', teamId);
+  }
+  if (typeof stage.capture.section !== 'string' || !stage.capture.section.trim()) {
+    fail(`stages.${stage.id}.capture.section`, 'must be a non-empty section heading', teamId);
+  }
+  if (!CAPTURE_SLOTS.has(stage.capture.slot)) {
+    fail(`stages.${stage.id}.capture.slot`, 'must be one of topic, platforms', teamId);
+  }
+}
+
 // Validate a stage's optional revise loop config (the generic FIX-revision mechanism). `priorIds` is
 // the set of stage ids that appear BEFORE this stage, so revise.stages can only point at earlier stages
 // (a forward or self reference is rejected). A field-naming error is thrown on any violation.
@@ -215,6 +231,7 @@ function validateAndNormalize(def, teamId, teamDir) {
     if (!stage.id) fail(`stages[${i}].id`, 'is required', teamId);
     if (!stage.produces) fail(`stages[${stage.id}].produces`, 'is required', teamId);
     const agentPath = resolveAgentPath(stage, teamDir, baseDir, teamId);
+    validateStageCapture(stage, teamId);
     validateStageRevise(stage, priorIds, teamId);
     priorIds.push(stage.id);
     return { ...stage, agentPath };

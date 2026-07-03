@@ -1,5 +1,5 @@
 <!-- Parent: ../AGENTS.md -->
-<!-- Generated: 2026-06-10 | Updated: 2026-06-10 -->
+<!-- Generated: 2026-06-10 | Updated: 2026-07-02 -->
 
 # session-card
 
@@ -20,6 +20,7 @@ Session card modules, decomposed from the old monolithic session-card.js. Each s
 | `naming.js` / `naming-core.mjs` | Session name suggestion; pure core: `nextSuggestedName`, `countAutoNames`, `isAutoNameOf` |
 | `webgl-pool.js` / `webgl-core.mjs` | WebGL context pool with LRU cap; pure core: `pickEvictionVictims` |
 | `toast.js` | `showErrorToast` - leaf, no local deps |
+| `modal.js` | Shared modal overlay scaffold (overlay, Escape-to-close, backdrop click, opener refocus); used by `card-dom.js` and `dialogs.js` |
 
 ## For AI Agents
 

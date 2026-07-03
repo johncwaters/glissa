@@ -44,6 +44,7 @@
       "summary": "Picks the topic and angle from the project's content calendar and recent runs; writes brief.md.",
       "produces": "brief.md",
       "requiredSections": ["Topic", "Angle", "Audience", "Differentiator", "Sources", "Sensitivities"],
+      "capture": { "section": "Topic", "slot": "topic" },
       "haltSignal": "INSUFFICIENT_TOPICS"
     },
     {
@@ -52,7 +53,8 @@
       "summary": "Chooses platforms, per-platform angle, CTA, length, and posting time; writes plan.md.",
       "reads": ["brief.md"],
       "produces": "plan.md",
-      "requiredSections": ["Platforms", "Per-platform angle", "CTA", "Length", "Posting time"]
+      "requiredSections": ["Platforms", "Per-platform angle", "CTA", "Length", "Posting time"],
+      "capture": { "section": "Platforms", "slot": "platforms" }
     },
     {
       "id": "writer",

@@ -1,5 +1,5 @@
 <!-- Parent: ../AGENTS.md -->
-<!-- Generated: 2026-06-10 | Updated: 2026-06-10 -->
+<!-- Generated: 2026-06-10 | Updated: 2026-07-02 -->
 
 # public
 
@@ -14,7 +14,7 @@ The browser dashboard frontend: ES modules bundled by Vite (dev server with HMR 
 | `app.js` | Thin boot entry: wires modules, owns the document-level Alt+key shortcut dispatch |
 | `control-ws.js` | Control WebSocket client: connection, reconnect, request/response |
 | `dialogs.js` | Add Session and Settings dialog factories (HTML imported `?raw` from `components/`) |
-| `teams-panel.js` | Teams tab: instance panels (header, pipeline, setup banner, run history) |
+| `teams-panel.js` | Barrel for the Teams tab (re-exports the 4-symbol public API from `teams-panel/`) |
 | `render-scheduler.mjs` | Global xterm WRITE scheduler: callback-gated round-robin with per-frame budget (distinct from root `scheduler.js`, which is a cron) |
 | `notifications.js` | Native Web Notifications (browser routes to Windows Action Center); replaces the server-side toast path |
 | `notify-dedupe-core.mjs` | Pure cross-tab claim (short-TTL localStorage) so exactly one open tab raises each notification |
@@ -33,6 +33,7 @@ The browser dashboard frontend: ES modules bundled by Vite (dev server with HMR 
 | Directory | Purpose |
 |-----------|---------|
 | `session-card/` | Session card modules: terminal, lifecycle, DOM, naming, WebGL pool (see `session-card/AGENTS.md`) |
+| `teams-panel/` | Teams tab package: `lifecycle.js` orchestrator + registry, instance panel, pipeline, runs list, schedule editor, chat, setup banner, pure `format-core.mjs` |
 | `focus-view/` | Focus view: roster rail + centered card, attention queue (see `focus-view/AGENTS.md`) |
 | `sidebar/` | Review sidebar: diff rendering, selection, merge actions (see `sidebar/AGENTS.md`) |
 | `components/` | Static HTML fragments imported `?raw` (see `components/AGENTS.md`) |

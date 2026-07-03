@@ -407,6 +407,48 @@ test('incomplete handoff (missing sections) fails the stage', async () => {
   }
 });
 
+test('stage.capture publishes handoff sections into the run-log columns (config-driven, no stage-id matching)', async () => {
+  const proj = tmpProject();
+  try {
+    seedPack(proj);
+    const { orch } = makeOrch(proj, {
+      researcher: { write: BRIEF }, strategist: { write: PLAN }, writer: { write: DRAFTS },
+      editor: { write: REVIEW('SHIP') }, publisher: { write: PUBLISHED },
+    });
+    const res = await orch.runTeam({ teamId: 'marketing', projectId: 'p1' });
+    assert.equal(res.ok, true);
+    const last = logLines(proj).pop();
+    assert.ok(last.includes('| Boondocking basics |'), `topic captured from brief.md Topic section: ${last}`);
+    assert.ok(last.includes('| X, LinkedIn |'), `platforms captured from plan.md Platforms section: ${last}`);
+  } finally {
+    fs.rmSync(proj, { recursive: true, force: true });
+  }
+});
+
+test('a stage without capture leaves the run-log columns at their placeholders', async () => {
+  const proj = tmpProject();
+  try {
+    seedPack(proj);
+    const { orch } = makeOrch(proj, { researcher: { write: BRIEF } }, {
+      teamPatch: (t) => ({
+        ...t,
+        stages: t.stages.map((s) => {
+          const { capture, ...rest } = s;
+          return rest;
+        }),
+      }),
+    });
+    // Only the researcher produces output, so the run fails at the strategist; the point is that
+    // WITHOUT capture config the researcher's Topic never reaches the log column.
+    const res = await orch.runTeam({ teamId: 'marketing', projectId: 'p1' });
+    assert.equal(res.failedStage, 'strategist');
+    const last = logLines(proj).pop();
+    assert.ok(last.includes('| (topic) |'), `no capture config means no capture: ${last}`);
+  } finally {
+    fs.rmSync(proj, { recursive: true, force: true });
+  }
+});
+
 test('verdict stage with no parseable VERDICT line fails the run instead of finishing DONE', async () => {
   const proj = tmpProject();
   try {
