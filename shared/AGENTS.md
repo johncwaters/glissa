@@ -18,7 +18,7 @@ State constants used by BOTH the CommonJS server and the ESM browser bundle. Sin
 
 ### Working In This Directory
 - `states.js` and `states.esm.js` are maintained as a synchronized pair (same constants and sets, different module syntax); change both together.
-- States are frozen string constants; transitions live in `session-core/state-machine.js` and `notification-manager.js`, never here.
+- States are frozen string constants; transitions live in `session/core/state-machine.js` and `notification-manager.js`, never here.
 - `MERGEABLE_LIVE_STATES` is the merge-as-you-go gate shared by server and review sidebar; do not let the two copies drift.
 
 ### Testing Requirements

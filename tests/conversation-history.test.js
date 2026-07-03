@@ -1,6 +1,6 @@
 'use strict';
 
-// Unit tests for session-core/conversation-history.js: the cross-worktree Claude conversation
+// Unit tests for session/core/conversation-history.js: the cross-worktree Claude conversation
 // discovery used by the per-card "Resume conversation" picker. Exercises the project-dir encoding,
 // the worktree-set walk (injected git), title extraction, newest-first ordering, and id de-dup.
 // Uses a real temp projects dir (so the bounded head-read + stat path is exercised) with an injected
@@ -16,7 +16,7 @@ const {
   encodeProjectDir,
   listRepoConversations,
   cleanTitle,
-} = require('../session-core/conversation-history');
+} = require('../session/core/conversation-history');
 
 test('encodeProjectDir matches Claude\'s scheme (every non-alnum -> dash, case preserved)', () => {
   assert.equal(encodeProjectDir('C:\\Users\\johnw\\Projects\\glissa'), 'C--Users-johnw-Projects-glissa');

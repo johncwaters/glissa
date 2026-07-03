@@ -1,6 +1,6 @@
 'use strict';
 
-// Pure review-gate demotion matrix (session-core/merge-gate.js), extracted from
+// Pure review-gate demotion matrix (session/core/merge-gate.js), extracted from
 // Session.checkWorktreeChange / Session.getDiff. The Session-level wiring (emit
 // ordering, dedup interplay) stays covered by sessions-worktree tests; this pins
 // the decision table itself.
@@ -8,7 +8,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { decideSignatureDemotion, decideDiffSelfHeal } = require('../session-core/merge-gate');
+const { decideSignatureDemotion, decideDiffSelfHeal } = require('../session/core/merge-gate');
 
 function sig(over = {}) {
   return { dirty: false, ahead: '0', behind: '0', rebaseInProgress: false, ...over };

@@ -30,7 +30,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { promisify } = require('node:util');
-const { execFile } = require('../child-process-safe');
+const { execFile } = require('../../server/child-process-safe');
 
 const execFileP = promisify(execFile);
 

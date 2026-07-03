@@ -7,7 +7,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { buildSpawnEnv } = require('../session-core/spawn-env');
+const { buildSpawnEnv } = require('../session/core/spawn-env');
 
 const SCRUBBED = [
   'CLAUDECODE',

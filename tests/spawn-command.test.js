@@ -6,7 +6,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { buildSpawnCommand, classifyClaudeKind } = require('../sessions');
+const { buildSpawnCommand, classifyClaudeKind } = require('../session/sessions');
 
 const SETTINGS = ['--settings', 'C:\\tmp\\glissa\\settings.json'];
 const DANGER = ['--dangerously-skip-permissions'];

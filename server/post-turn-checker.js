@@ -1,7 +1,7 @@
 'use strict';
 
 // Thin IO runner for post-turn hygiene checks. Lists a session's git-changed
-// files and applies the pure rules in session-core/post-turn-rules.js, fixing in
+// files and applies the pure rules in session/core/post-turn-rules.js, fixing in
 // place by default. Async and bounded (execFile with a timeout); it NEVER throws,
 // always resolving a structured report. See .omc/plans/post-turn-checks.md.
 
@@ -12,7 +12,7 @@ const {
   applyRules,
   shouldCheckPath,
   looksBinary,
-} = require('./session-core/post-turn-rules');
+} = require('../session/core/post-turn-rules');
 
 const GIT_TIMEOUT_MS = 5000;
 
@@ -21,7 +21,7 @@ const GIT_TIMEOUT_MS = 5000;
 const DEFAULTS = Object.freeze({
   enabled: true,
   mode: 'fix', // 'fix' | 'report'
-  // `slop` is the report-only code-slop detector (session-core/slop-code-patterns.js).
+  // `slop` is the report-only code-slop detector (session/core/slop-code-patterns.js).
   // OFF by default: opt in per project with postTurnChecks.rules.slop = true. It never
   // rewrites content, so it is safe to enable even when mode is 'fix'.
   rules: { dashes: true, trailingWs: true, finalNewline: true, bom: true, slop: false },

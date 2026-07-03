@@ -1,4 +1,4 @@
-const { execSync } = require("../child-process-safe");
+const { execSync } = require("../../server/child-process-safe");
 
 // Pure/stateless spawn-command seam, extracted from sessions.js (behavior-preserving).
 // Decides how `claude` is launched per platform/install shape. No session state here.

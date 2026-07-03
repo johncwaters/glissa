@@ -19,7 +19,7 @@ The right-docked review sidebar: the single home for the worktree review gate of
 ### Working In This Directory
 - Selection goes through `selection.js` only; never track a competing "current session" elsewhere.
 - `diff-core.mjs` stays pure and dependency-free (node:test runs it); rendering belongs in `review-sidebar.js`.
-- Merge semantics live server-side (rebase-then-FF, park on conflict, `session-core/merge-prompt.js` handoff); the sidebar only sends control messages and renders results.
+- Merge semantics live server-side (rebase-then-FF, park on conflict, `session/core/merge-prompt.js` handoff); the sidebar only sends control messages and renders results.
 - Diff text renders via textContent/escaped markup; never innerHTML raw diff content.
 
 ### Testing Requirements

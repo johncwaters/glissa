@@ -10,11 +10,11 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { setTimeout: sleep } = require('node:timers/promises');
 
-const { Session } = require('../sessions');
+const { Session } = require('../session/sessions');
 const { STATES } = require('../shared/states');
 const { mapHookToSignal } = require('../detection/hook-source');
 const { buildHookSettings, WAKEUP_TOOL_MATCHER, HOOK_EVENTS } = require('../detection/settings-injector');
-const wakeupTracker = require('../session-core/wakeup-tracker');
+const wakeupTracker = require('../session/core/wakeup-tracker');
 
 function makeSession(state, overrides = {}) {
   const s = new Session({

@@ -1,6 +1,6 @@
 'use strict';
 
-// Unit tests for the pure post-turn hygiene rules (session-core/post-turn-rules.js).
+// Unit tests for the pure post-turn hygiene rules (session/core/post-turn-rules.js).
 // Repo convention (MEMORY dash-literals-roundtrip): NO literal em/en dash or
 // ellipsis in this file; build them via String.fromCharCode.
 
@@ -17,8 +17,8 @@ const {
   exemptions,
   shouldCheckPath,
   looksBinary,
-} = require('../session-core/post-turn-rules');
-const { detectCodeSlop } = require('../session-core/slop-code-patterns');
+} = require('../session/core/post-turn-rules');
+const { detectCodeSlop } = require('../session/core/slop-code-patterns');
 
 const EM_DASH = String.fromCharCode(0x2014);
 const EN_DASH = String.fromCharCode(0x2013);

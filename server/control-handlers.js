@@ -3,9 +3,9 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { TIMEOUT_KEYS, BOOLEAN_KEYS, STRING_KEYS } = require('./config-store');
-const { STATES } = require('./shared/states');
+const { STATES } = require('../shared/states');
 const { computeNextFire } = require('./scheduler');
-const { listRepoConversations } = require('./session-core/conversation-history');
+const { listRepoConversations } = require('../session/core/conversation-history');
 
 // A Claude session id is a UUID, but stay lenient (any safe id charset) so a non-UUID id is not
 // rejected. The charset itself is the guard: no path separators, dots, or whitespace can reach the
@@ -244,7 +244,7 @@ function registerControlHandlers(controlWss, deps) {
 
   // List the Claude conversations resumable INTO this session's card: every transcript under the
   // session repo's main checkout and its linked worktrees, newest-first (see
-  // session-core/conversation-history.js). Async (it shells out to `git worktree list`); the dispatch
+  // session/core/conversation-history.js). Async (it shells out to `git worktree list`); the dispatch
   // loop awaits the returned promise. Replies with the session's current binding so the picker can mark it.
   async function handleListConversations(msg, ws) {
     const sess = findSession(msg);

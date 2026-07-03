@@ -26,14 +26,14 @@ Status detection and change watching. Session status is derived from machine-emi
 - Hook signals are authoritative; the title source is fallback only and must never emit `awaiting-input`.
 - Keep the bearer-token check in `hook-source.js`; it is the trust boundary of the only HTTP write ingress.
 - Watchers are listeners, not pollers: they say "look again", `sessions.js` recomputes the truth. Keep recompute work async (shared event loop).
-- The signal x state transition matrix lives in `session-core/status-mapper.js` and is documented in `docs/postmortem-terminal-detection.md`.
+- The signal x state transition matrix lives in `session/core/status-mapper.js` and is documented in `docs/postmortem-terminal-detection.md`.
 
 ### Testing Requirements
 - Unit tests: `tests/status-source.test.js`, `hook-source.test.js`, `osc-title-source.test.js`, `worktree-watch.test.js`, `integration-ref-watch.test.js`, `integration-watcher-pool.test.js`.
 - Detection behavior changes must keep `tests/replay-harness.test.js` green against the `tests/fixtures/*.jsonl` recordings; add a fixture for a new signal scenario.
 
 ### Common Patterns
-- Sources emit normalized signals; `sessions.js._onStatus` + `session-core/status-mapper.js` decide transitions.
+- Sources emit normalized signals; `sessions.js._onStatus` + `session/core/status-mapper.js` decide transitions.
 - Injected dependencies (watcher factory, session map, recheck fn) so modules unit-test without a real fs or backend.
 
 ## Dependencies
@@ -41,6 +41,6 @@ Status detection and change watching. Session status is derived from machine-emi
 ### Internal
 - `../sessions.js` - consumes StatusSource, owns transitions
 - `../session-recorder.js` - produces the JSONL that `replay.js` consumes
-- `../session-core/status-mapper.js` - the pure signal-to-event decision
+- `../session/core/status-mapper.js` - the pure signal-to-event decision
 
 <!-- MANUAL: Any manually added notes below this line are preserved on regeneration -->

@@ -2,7 +2,7 @@
 
 // Pure, deterministic code-slop pattern matching (in-house, no LLM, no deps).
 // detectCodeSlop(content, relPath) -> [{ subrule, axis, index }], where `index`
-// is a 0-based offset into `content`. The caller (session-core/post-turn-rules.js
+// is a 0-based offset into `content`. The caller (session/core/post-turn-rules.js
 // detectSlop) maps offsets to line/col and the post-turn finding shape. This module
 // only matches; it never mutates and never touches fs/git.
 //

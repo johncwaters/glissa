@@ -1,12 +1,12 @@
 'use strict';
 
-// Unit tests for Lever B (session-core/anti-slop-prompt.js): the fixed preventive note
+// Unit tests for Lever B (session/core/anti-slop-prompt.js): the fixed preventive note
 // and its spawn-arg helper. No literal em/en dash in this file (dash-literals-roundtrip).
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { ANTI_SLOP_NOTE, buildAntiSlopArgs } = require('../session-core/anti-slop-prompt');
+const { ANTI_SLOP_NOTE, buildAntiSlopArgs } = require('../session/core/anti-slop-prompt');
 
 const EM_DASH = String.fromCharCode(0x2014);
 const EN_DASH = String.fromCharCode(0x2013);

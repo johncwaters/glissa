@@ -1,6 +1,6 @@
 'use strict';
 
-const { STATES } = require('../shared/states');
+const { STATES } = require('../../shared/states');
 
 // Pure once-per-work-cycle notification gate (the seam pattern used by agent-tracker.js /
 // status-mapper.js). The backend's per-session state-change listener consults it before
@@ -17,7 +17,7 @@ const { STATES } = require('../shared/states');
 // - Self-transitions never reach the listener (sessions.js transition() returns early
 //   without emitting state-change), so the RUNNING reset is edge-triggered by construction.
 // - DORMANT needs no reset entry: the only exit is user_start -> INITIALIZING
-//   (session-core/state-machine.js), which resets transitively.
+//   (session/core/state-machine.js), which resets transitively.
 // - The gate is created inside the per-session wiring closure, so a config-reload
 //   destroy + re-wire gives the new session a fresh gate; no destroy-time cleanup.
 //

@@ -7,7 +7,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { createWebNotificationChannel } = require('../channels/web-notification');
+const { createWebNotificationChannel } = require('../notifications/channels/web-notification');
 
 function makeBroadcastSpy() {
   const calls = [];

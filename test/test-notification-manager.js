@@ -1,7 +1,7 @@
 'use strict';
 
 const { EventEmitter } = require('node:events');
-const { NotificationManager } = require('../notification-manager');
+const { NotificationManager } = require('../notifications/notification-manager');
 const { NOTIFICATION_STATES: NS } = require('../shared/notification-states');
 
 let passed = 0;

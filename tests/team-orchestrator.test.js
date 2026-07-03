@@ -12,7 +12,7 @@ const { loadTeam } = require('../teamlib/team-registry');
 const teamOutput = require('../teamlib/team-output');
 const { buildStagePrompt } = require('../teamlib/team-prompt');
 const { buildStageSpawnOptions, teamPermissions } = require('../teamlib/team-settings');
-const { createSpawnGate } = require('../spawn-gate');
+const { createSpawnGate } = require('../server/spawn-gate');
 
 const REPO_TEAMS = path.join(__dirname, '..', 'teams');
 const OUT = '.glissa/teams/marketing';

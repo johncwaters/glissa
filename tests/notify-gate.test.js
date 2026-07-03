@@ -1,6 +1,6 @@
 'use strict';
 
-// Tests for the once-per-work-cycle notification gate (session-core/notify-gate.js) and its
+// Tests for the once-per-work-cycle notification gate (session/core/notify-gate.js) and its
 // backend wiring contract, plus a NotificationManager regression guard that the 'waiting'
 // escalation ping-pong is untouched by the gate change (the gate sits at the call site,
 // BEFORE the manager; the manager's debounce/suppression/escalation are unchanged).
@@ -8,9 +8,9 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { createNotifyGate, decideNotification } = require('../session-core/notify-gate');
+const { createNotifyGate, decideNotification } = require('../session/core/notify-gate');
 const { STATES } = require('../shared/states');
-const { NotificationManager } = require('../notification-manager');
+const { NotificationManager } = require('../notifications/notification-manager');
 
 // ---------------------------------------------------------------------------
 // Gate unit behavior

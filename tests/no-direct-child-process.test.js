@@ -36,7 +36,7 @@ const SKIP_DIRS = new Set([
 ]);
 
 // The single module permitted to import child_process directly.
-const ALLOWED = new Set([path.join(ROOT, "child-process-safe.js")]);
+const ALLOWED = new Set([path.join(ROOT, "server", "child-process-safe.js")]);
 
 const CHILD_PROCESS_REQUIRE = /require\(\s*['"](?:node:)?child_process['"]\s*\)/;
 
@@ -79,7 +79,7 @@ test("only child-process-safe.js imports child_process directly (all spawns go t
 });
 
 test("child-process-safe.js exists and exports the spawn surface", () => {
-  const safe = require("../child-process-safe");
+  const safe = require("../server/child-process-safe");
   for (const fn of ["execFile", "execFileSync", "execSync", "spawn", "hide"]) {
     assert.equal(typeof safe[fn], "function", `child-process-safe must export ${fn}`);
   }

@@ -13,7 +13,7 @@ const path = require('node:path');
 
 const {
   createConfigStore, ensureProjectIds, DEFAULT_CONFIG,
-} = require('../config-store');
+} = require('../server/config-store');
 
 function writeTmpConfig(cfg) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-cfgstore-'));

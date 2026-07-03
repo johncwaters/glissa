@@ -11,7 +11,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { EventEmitter } = require('node:events');
 
-const { registerControlHandlers } = require('../control-handlers');
+const { registerControlHandlers } = require('../server/control-handlers');
 const { loadTeam } = require('../teamlib/team-registry');
 
 const REPO_TEAMS = path.join(__dirname, '..', 'teams');

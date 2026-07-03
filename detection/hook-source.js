@@ -46,7 +46,7 @@ function mapHookToSignal(event, payload) {
       // A background sub-agent (Task run_in_background / Ctrl+B) began. NOT a state
       // transition: tracked as a live-count delta so a later main-agent Stop fired while
       // it is still running does not falsely COMPLETE the card (see Session._trackSubagent
-      // and the activeAgents gate in session-core/status-mapper.js).
+      // and the activeAgents gate in session/core/status-mapper.js).
       return 'subagent-start';
     case 'subagentstop':
       // A sub-agent finished. Drops the live count; never completes the session itself

@@ -38,6 +38,6 @@ Tests are named `<module>.test.js` after the module under test. Notable clusters
 ## Dependencies
 
 ### Internal
-- Everything under test: root modules, `../session-core/`, `../detection/`, `../teamlib/`, `../public/**/*.mjs`, `../shared/`.
+- Everything under test: `../server/`, `../session/`, `../notifications/`, `../session/core/`, `../detection/`, `../teamlib/`, `../public/**/*.mjs`, `../shared/`.
 
 <!-- MANUAL: Any manually added notes below this line are preserved on regeneration -->

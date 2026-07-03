@@ -3,7 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { computeNextFire, createScheduler } = require('../scheduler');
+const { computeNextFire, createScheduler } = require('../server/scheduler');
 
 const SCHEDULE = { days: ['tue', 'thu', 'sat'], time: '05:00', tz: 'America/Denver' };
 

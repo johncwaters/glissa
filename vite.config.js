@@ -14,7 +14,7 @@ function glissaBackendPlugin() {
   return {
     name: 'glissa-backend',
     configureServer(server) {
-      const { createBackend } = require('./backend');
+      const { createBackend } = require('./server/backend');
       backend = createBackend(server.httpServer, {
         staticDir: null,
         onRestart: () => {

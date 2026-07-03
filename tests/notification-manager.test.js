@@ -10,7 +10,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { NotificationManager } = require('../notification-manager');
+const { NotificationManager } = require('../notifications/notification-manager');
 const { NOTIFICATION_STATES: NS } = require('../shared/notification-states');
 
 function makeManager(opts = {}) {

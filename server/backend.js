@@ -24,33 +24,33 @@ const fs = require('node:fs');
 const path = require('node:path');
 const express = require('express');
 const { WebSocketServer } = require('ws');
-const { Session } = require('./sessions');
-const { STATES } = require('./shared/states');
+const { Session } = require('../session/sessions');
+const { STATES } = require('../shared/states');
 const { createConfigStore, generateProjectId, ensureProjectIds, DEFAULT_CONFIG } = require('./config-store');
 const { registerControlHandlers } = require('./control-handlers');
 const { createLifecycle } = require('./server-lifecycle');
-const { NotificationManager } = require('./notification-manager');
-const { createNotifyGate, decideNotification } = require('./session-core/notify-gate');
-const { createToastChannel } = require('./channels/toast');
-const { createWebNotificationChannel } = require('./channels/web-notification');
-const { createRecorder } = require('./session-recorder');
+const { NotificationManager } = require('../notifications/notification-manager');
+const { createNotifyGate, decideNotification } = require('../session/core/notify-gate');
+const { createToastChannel } = require('../notifications/channels/toast');
+const { createWebNotificationChannel } = require('../notifications/channels/web-notification');
+const { createRecorder } = require('../session/session-recorder');
 const { createWsSender } = require('./ws-sender');
-const { HookRouter } = require('./detection/hook-source');
-const { sweepOrphans } = require('./detection/settings-injector');
+const { HookRouter } = require('../detection/hook-source');
+const { sweepOrphans } = require('../detection/settings-injector');
 const { spawn } = require('./child-process-safe');
-const { loadTeam, listTeams } = require('./teamlib/team-registry');
-const { createOrchestrator } = require('./teamlib/team-orchestrator');
+const { loadTeam, listTeams } = require('../teamlib/team-registry');
+const { createOrchestrator } = require('../teamlib/team-orchestrator');
 const { createScheduler } = require('./scheduler');
 const { createSpawnGate } = require('./spawn-gate');
-const { createGitWorkspace, createGitWorkspaceSync } = require('./teamlib/team-git');
-const { buildStageSpawnOptions, teamPermissions } = require('./teamlib/team-settings');
-const { buildStagePrompt } = require('./teamlib/team-prompt');
-const { buildSetupPrompt, setupSessionId, setupSessionName, packPaths } = require('./teamlib/team-setup');
-const { scanProjectContext } = require('./teamlib/project-context');
-const teamOutput = require('./teamlib/team-output');
+const { createGitWorkspace, createGitWorkspaceSync } = require('../teamlib/team-git');
+const { buildStageSpawnOptions, teamPermissions } = require('../teamlib/team-settings');
+const { buildStagePrompt } = require('../teamlib/team-prompt');
+const { buildSetupPrompt, setupSessionId, setupSessionName, packPaths } = require('../teamlib/team-setup');
+const { scanProjectContext } = require('../teamlib/project-context');
+const teamOutput = require('../teamlib/team-output');
 const { runPostTurnChecks, resolveCheckConfig } = require('./post-turn-checker');
-const { createIntegrationRefWatcher } = require('./detection/integration-ref-watch');
-const { createIntegrationWatcherPool } = require('./detection/integration-watcher-pool');
+const { createIntegrationRefWatcher } = require('../detection/integration-ref-watch');
+const { createIntegrationWatcherPool } = require('../detection/integration-watcher-pool');
 
 // WAITING-state notification escalation cadence (fixed 5 minutes; previously the
 // configurable waitingEscalationSeconds setting).
@@ -184,10 +184,10 @@ function createBackend(httpServer, options = {}) {
   });
 
   if (staticDir === 'auto') {
-    const distPath = path.join(__dirname, 'dist');
+    const distPath = path.join(__dirname, '..', 'dist');
     const useDistDir = fs.existsSync(distPath) && fs.statSync(distPath).isDirectory();
     const resolvedDir = useDistDir ? 'dist' : 'public';
-    app.use(express.static(path.join(__dirname, resolvedDir)));
+    app.use(express.static(path.join(__dirname, '..', resolvedDir)));
 
     if (!useDistDir) {
       mountDevRoutes(app);
@@ -378,7 +378,7 @@ function createBackend(httpServer, options = {}) {
 
   // --- Teams: registry + orchestrator + scheduler ---
 
-  const TEAMS_DIR = path.join(__dirname, 'teams');
+  const TEAMS_DIR = path.join(__dirname, '..', 'teams');
   const registry = {
     listTeams: () => listTeams(TEAMS_DIR),
     loadTeam: (id) => loadTeam(id, TEAMS_DIR),
@@ -666,7 +666,7 @@ function createBackend(httpServer, options = {}) {
       });
 
       // Notification triggers: session state -> notification lifecycle. The decision (which
-      // category fires for this state entry, if any) lives in session-core/notify-gate.js
+      // category fires for this state entry, if any) lives in session/core/notify-gate.js
       // decideNotification, shared with its tests. Both turn-complete (COMPLETE) and process
       // exit (DONE) notify under 'complete', but terminal categories pass the once-per-work-cycle
       // gate: a cycle starts on RUNNING (new work) or INITIALIZING (restart) entry, so a
@@ -1186,23 +1186,23 @@ function createBackend(httpServer, options = {}) {
  */
 function mountDevRoutes(app) {
   app.get('/xterm/xterm.css', (_req, res) => {
-    res.sendFile(path.join(__dirname, 'node_modules/@xterm/xterm/css/xterm.css'));
+    res.sendFile(path.join(__dirname, '..', 'node_modules/@xterm/xterm/css/xterm.css'));
   });
   app.get('/xterm/xterm.mjs', (_req, res) => {
     res.type('application/javascript');
-    res.sendFile(path.join(__dirname, 'node_modules/@xterm/xterm/lib/xterm.mjs'));
+    res.sendFile(path.join(__dirname, '..', 'node_modules/@xterm/xterm/lib/xterm.mjs'));
   });
   app.get('/xterm/addon-fit.mjs', (_req, res) => {
     res.type('application/javascript');
-    res.sendFile(path.join(__dirname, 'node_modules/@xterm/addon-fit/lib/addon-fit.mjs'));
+    res.sendFile(path.join(__dirname, '..', 'node_modules/@xterm/addon-fit/lib/addon-fit.mjs'));
   });
   app.get('/xterm/addon-webgl.mjs', (_req, res) => {
     res.type('application/javascript');
-    res.sendFile(path.join(__dirname, 'node_modules/@xterm/addon-webgl/lib/addon-webgl.mjs'));
+    res.sendFile(path.join(__dirname, '..', 'node_modules/@xterm/addon-webgl/lib/addon-webgl.mjs'));
   });
 
   app.get('/shared/states.mjs', (_req, res) => {
-    const states = require('./shared/states');
+    const states = require('../shared/states');
     const lines = [];
     for (const [key, val] of Object.entries(states)) {
       lines.push(`export const ${key} = ${JSON.stringify(val)};`);

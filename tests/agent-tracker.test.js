@@ -1,6 +1,6 @@
 'use strict';
 
-// Unit tests for the pure background sub-agent bookkeeping (session-core/agent-tracker.js).
+// Unit tests for the pure background sub-agent bookkeeping (session/core/agent-tracker.js).
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -13,7 +13,7 @@ const {
   declaredActiveCount,
   soleActiveTeammateId,
   DEFAULT_AGENT_TTL_MS,
-} = require('../session-core/agent-tracker');
+} = require('../session/core/agent-tracker');
 
 test('addAgent adds a new id and reports the change; a duplicate is idempotent (count unchanged, ts refreshed)', () => {
   const m = new Map();

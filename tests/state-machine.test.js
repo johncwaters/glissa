@@ -1,6 +1,6 @@
 'use strict';
 
-// Unit tests for the relocated state-machine tables (session-core/state-machine.js).
+// Unit tests for the relocated state-machine tables (session/core/state-machine.js).
 // Locks the matrix shape (every state's allowed events -> target states), the two
 // guards, and the entry/exit hooks against the engine in sessions.js that consumes them.
 
@@ -13,7 +13,7 @@ const {
   GUARDS,
   ENTRY_HOOKS,
   EXIT_HOOKS,
-} = require('../session-core/state-machine');
+} = require('../session/core/state-machine');
 const { STATES } = require('../shared/states');
 
 test('TRANSITIONS matrix is frozen and matches the lifecycle shape', () => {

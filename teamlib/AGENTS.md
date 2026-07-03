@@ -36,7 +36,7 @@ Server runtime for the Teams feature: loads team definitions from `teams/`, runs
 - Orchestrator changes should also keep `tests/team-changelog.test.js` (end-to-end-ish pipeline test) green.
 
 ### Common Patterns
-- io-shell + pure-core pairs (`project-context.js` / `project-context-core.js`) mirroring `session-core/`.
+- io-shell + pure-core pairs (`project-context.js` / `project-context-core.js`) mirroring `session/core/`.
 - Events broadcast over the control WS (`team-run-needs-setup`, `team-pack-updated`, `team-revise-round`, `team-run-complete`).
 
 ## Dependencies

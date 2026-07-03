@@ -1,4 +1,4 @@
-const { STATES } = require("../shared/states");
+const { STATES } = require("../../shared/states");
 
 // Pure decision function extracted from Session._onStatus (behavior-preserving).
 // Maps a normalized status signal + the session's current state (+ confidence, for the

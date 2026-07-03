@@ -14,7 +14,7 @@ const { execFileSync } = require('node:child_process');
 const {
   runPostTurnChecks,
   resolveCheckConfig,
-} = require('../post-turn-checker');
+} = require('../server/post-turn-checker');
 
 const EM_DASH = String.fromCharCode(0x2014);
 const NL = String.fromCharCode(10);

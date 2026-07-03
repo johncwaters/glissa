@@ -2,7 +2,7 @@
 
 // Pure parser/renderer for the deterministic first-run team-setup context. No fs, no I/O: every input is
 // a raw string (or null/undefined) that the io shell (project-context.js) read off disk. Keeping this pure
-// mirrors the repo's seam pattern (session-core/, *-core.mjs) so the whole parser is unit-testable without
+// mirrors the repo's seam pattern (session/core/, *-core.mjs) so the whole parser is unit-testable without
 // temp-dir fixtures. Output is ASCII-clean (no em/en dashes, no emoji) and deterministic: the same inputs
 // always render the same summary, with no timestamps.
 

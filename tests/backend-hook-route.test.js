@@ -17,7 +17,7 @@ const http = require('node:http');
 const os = require('node:os');
 const path = require('node:path');
 
-const { createBackend } = require('../backend');
+const { createBackend } = require('../server/backend');
 
 let tmpDir = null;
 let prevEnv = null;

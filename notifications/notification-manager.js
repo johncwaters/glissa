@@ -1,7 +1,7 @@
 'use strict';
 
 const { EventEmitter } = require('node:events');
-const { NOTIFICATION_STATES: NS, NOTIFICATION_TRANSITIONS } = require('./shared/notification-states');
+const { NOTIFICATION_STATES: NS, NOTIFICATION_TRANSITIONS } = require('../shared/notification-states');
 
 class NotificationManager extends EventEmitter {
   /**

@@ -14,7 +14,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { Session } = require('../sessions');
+const { Session } = require('../session/sessions');
 const { STATES } = require('../shared/states');
 
 function fakePty(resizes) {

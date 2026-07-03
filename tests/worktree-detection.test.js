@@ -3,7 +3,7 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { Session } = require('../sessions');
+const { Session } = require('../session/sessions');
 
 // Build a throwaway working dir and return its path plus a cleanup fn. The caller
 // seeds it with a `.git` entry to exercise each detection branch.

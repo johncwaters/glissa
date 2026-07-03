@@ -10,7 +10,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { awaitReaps, createLifecycle } = require('../server-lifecycle');
+const { awaitReaps, createLifecycle } = require('../server/server-lifecycle');
 
 // httpServer fake: close(cb) releases the listener and runs the spawn-and-exit / exit callback now.
 function fakeHttpServer() {

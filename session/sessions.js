@@ -3,32 +3,32 @@ const path = require("node:path");
 const crypto = require("node:crypto");
 const pty = require("node-pty");
 const { EventEmitter } = require("node:events");
-const { execFileSync, execFile } = require("./child-process-safe");
-const { STATES, MERGEABLE_LIVE_STATES } = require("./shared/states");
-const { createOscTitleSource } = require("./detection/osc-title-source");
-const { createStatusSource } = require("./detection/status-source");
-const { createWorktreeWatcher } = require("./detection/worktree-watch");
-const { writeSessionSettings } = require("./detection/settings-injector");
+const { execFileSync, execFile } = require("../server/child-process-safe");
+const { STATES, MERGEABLE_LIVE_STATES } = require("../shared/states");
+const { createOscTitleSource } = require("../detection/osc-title-source");
+const { createStatusSource } = require("../detection/status-source");
+const { createWorktreeWatcher } = require("../detection/worktree-watch");
+const { writeSessionSettings } = require("../detection/settings-injector");
 const {
   classifyClaudeKind,
   resolveClaudeCommand,
   buildSpawnCommand,
   CLAUDE_CMD,
-} = require("./session-core/spawn-command");
-const { buildSpawnEnv } = require("./session-core/spawn-env");
-const { buildAntiSlopArgs } = require("./session-core/anti-slop-prompt");
+} = require("./core/spawn-command");
+const { buildSpawnEnv } = require("./core/spawn-env");
+const { buildAntiSlopArgs } = require("./core/anti-slop-prompt");
 const {
   TRANSITIONS,
   GUARDS,
   ENTRY_HOOKS,
   EXIT_HOOKS,
-} = require("./session-core/state-machine");
-const { mapSignalToEvent } = require("./session-core/status-mapper");
-const { buildMergePrompt } = require("./session-core/merge-prompt");
-const { createOutputRing } = require("./session-core/output-ring");
-const { decideSignatureDemotion, decideDiffSelfHeal } = require("./session-core/merge-gate");
-const agentTracker = require("./session-core/agent-tracker");
-const wakeupTracker = require("./session-core/wakeup-tracker");
+} = require("./core/state-machine");
+const { mapSignalToEvent } = require("./core/status-mapper");
+const { buildMergePrompt } = require("./core/merge-prompt");
+const { createOutputRing } = require("./core/output-ring");
+const { decideSignatureDemotion, decideDiffSelfHeal } = require("./core/merge-gate");
+const agentTracker = require("./core/agent-tracker");
+const wakeupTracker = require("./core/wakeup-tracker");
 
 const KILL_POLL_INTERVAL_MS = 200;
 const KILL_MAX_WAIT_MS = 3000;
@@ -69,7 +69,7 @@ function gitStrict(args, opts) {
 // to transitions in _onStatus per the signal x state matrix. There is NO
 // screen-content parsing and NO detection timer here. The transition tables
 // (TRANSITIONS, GUARDS, ENTRY_HOOKS, EXIT_HOOKS) live in
-// session-core/state-machine.js; the transition() engine below consumes them.
+// session/core/state-machine.js; the transition() engine below consumes them.
 // ---------------------------------------------------------------------------
 
 // A linked git worktree marks its working dir with a `.git` FILE containing
@@ -110,13 +110,13 @@ class Session extends EventEmitter {
     titleStabilizationMs = 1500,
     statusConflictMs = undefined,
     statusDedupMs = undefined,
-    // Background sub-agent detection (see session-core/agent-tracker.js). When true (default), a
+    // Background sub-agent detection (see session/core/agent-tracker.js). When true (default), a
     // main-agent Stop fired while a background sub-agent is still running does NOT complete the card.
     // The kill switch (config detectBackgroundAgents=false) makes the session ignore subagent signals
     // so behavior is exactly as before. agentTtlMs bounds a dropped-SubagentStop leak.
     detectBackgroundAgents = true,
     agentTtlMs = agentTracker.DEFAULT_AGENT_TTL_MS,
-    // Scheduled-revival visibility (see session-core/wakeup-tracker.js). When true (default), a
+    // Scheduled-revival visibility (see session/core/wakeup-tracker.js). When true (default), a
     // ScheduleWakeup / cron task seen via PostToolUse hooks rides toSnapshot().pendingWakeup as an
     // ADVISORY card chip ("sleeping until ~HH:MM"); it never gates a transition. The kill switch
     // (config detectScheduledWakeups=false) drops the PostToolUse hook group at the source and
@@ -139,7 +139,7 @@ class Session extends EventEmitter {
     resumeSessionId = null,
     // Lever B: append a fixed anti-slop note to the system prompt at spawn (user sessions,
     // opt-in via config antiSlopPrompt). Off by default and never set for team/pack-setup
-    // stage sessions. See session-core/anti-slop-prompt.js.
+    // stage sessions. See session/core/anti-slop-prompt.js.
     antiSlopPrompt = false,
     // Optional Claude Code permissions ({ deny: [...] }) merged into the injected --settings file
     // (team-stage deny blacklist, mechanism M2). Null for ordinary user sessions.
@@ -176,7 +176,7 @@ class Session extends EventEmitter {
     this.state = STATES.DORMANT;
     this.auditLog = [];
     this._receivedFirstOutput = false;
-    // Ring buffer of recent PTY chunks (see session-core/output-ring.js for the
+    // Ring buffer of recent PTY chunks (see session/core/output-ring.js for the
     // eviction, monotonic-total, and offset semantics).
     this._outputRing = createOutputRing(replayBufferKB * 1024);
     this._killPollTimer = null;
@@ -606,7 +606,7 @@ class Session extends EventEmitter {
     this._lastSignal = { signal: s.signal, source: s.source, confidence: s.confidence, ts: s.ts };
     // Any non-ready activity supersedes a held ready: the turn is demonstrably not settled.
     if (s.signal !== "ready") this._clearGateHeldReady();
-    // Pure decision in session-core/status-mapper.js; this wrapper owns the side effects:
+    // Pure decision in session/core/status-mapper.js; this wrapper owns the side effects:
     // the _destroyed guard + _lastSignal write above, and the transition below. The detail
     // { source, signal } is uniform across every firing case (byte-identical to the prior
     // per-branch details), so it is assembled here rather than in the pure mapper.
@@ -947,7 +947,7 @@ class Session extends EventEmitter {
     // Gate demotions run BEFORE the signature dedup: a park can leave the worktree byte-identical to the
     // established baseline (a lost fast-forward does not abort the no-op rebase, and the merge flow never
     // resets _lastWorktreeSig), so a dedup-gated demotion would never fire and 'parked' would stick forever.
-    // The decision matrix itself is pure (session-core/merge-gate.js).
+    // The decision matrix itself is pure (session/core/merge-gate.js).
     const next = decideSignatureDemotion(this.mergeStatus, sig);
     const demoted = next !== null;
     if (demoted) this._setMergeStatus(next);
@@ -1462,7 +1462,7 @@ class Session extends EventEmitter {
       }
     }
 
-    // Buffer for late-joining data WS clients (session-core/output-ring.js).
+    // Buffer for late-joining data WS clients (session/core/output-ring.js).
     //
     // ORDER CONTRACT: the ring push (which advances the monotonic total) MUST stay
     // BEFORE emit("data") below. ws-sender.maybeBackfill() reads getBufferSince()
@@ -1539,7 +1539,7 @@ class Session extends EventEmitter {
   }
 
   // Slice of output produced at or after `offset`; full offset/eviction semantics
-  // documented on session-core/output-ring.js since().
+  // documented on session/core/output-ring.js since().
   getBufferSince(offset) {
     return this._outputRing.since(offset);
   }

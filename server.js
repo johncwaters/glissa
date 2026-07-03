@@ -1,7 +1,7 @@
 'use strict';
 
 const http = require('node:http');
-const { createBackend } = require('./backend');
+const { createBackend } = require('./server/backend');
 
 const server = http.createServer();
 const { shutdown, port, app } = createBackend(server, { staticDir: 'auto' });

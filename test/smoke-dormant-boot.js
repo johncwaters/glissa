@@ -5,8 +5,8 @@
 
 const http = require('node:http');
 const WebSocket = require('ws');
-const { createBackend } = require('../backend');
-const { CLAUDE_CMD } = require('../sessions');
+const { createBackend } = require('../server/backend');
+const { CLAUDE_CMD } = require('../session/sessions');
 
 const PORT = 3098;
 process.env.GLISSA_PORT = String(PORT);

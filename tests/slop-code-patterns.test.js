@@ -1,6 +1,6 @@
 'use strict';
 
-// Unit tests for the in-house code-slop detector (session-core/slop-code-patterns.js).
+// Unit tests for the in-house code-slop detector (session/core/slop-code-patterns.js).
 // Repo convention (MEMORY dash-literals-roundtrip): NO literal em/en dash or ellipsis in
 // this file; build them via String.fromCharCode for the no-dash source assertions.
 
@@ -9,7 +9,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const { detectCodeSlop, extOf, DEFAULT_FINDINGS_CAP } = require('../session-core/slop-code-patterns');
+const { detectCodeSlop, extOf, DEFAULT_FINDINGS_CAP } = require('../session/core/slop-code-patterns');
 
 const EM_DASH = String.fromCharCode(0x2014);
 const EN_DASH = String.fromCharCode(0x2013);
@@ -136,7 +136,7 @@ test('detectCodeSlop is idempotent (no shared-regex lastIndex leak)', () => {
 // --- no-dash source guard (dash-literals-roundtrip) -----------------------
 
 test('new slop source files contain no literal em/en dash or ellipsis', () => {
-  const files = ['session-core/slop-code-patterns.js', 'session-core/anti-slop-prompt.js'];
+  const files = ['session/core/slop-code-patterns.js', 'session/core/anti-slop-prompt.js'];
   for (const rel of files) {
     const src = fs.readFileSync(path.join(__dirname, '..', rel), 'utf8');
     assert.equal(src.includes(EM_DASH), false, `${rel} has an em dash`);

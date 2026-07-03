@@ -1,7 +1,7 @@
 <!-- Parent: ../AGENTS.md -->
 <!-- Generated: 2026-06-10 | Updated: 2026-06-10 -->
 
-# session-core
+# session/core
 
 ## Purpose
 Pure cores seam-extracted from `sessions.js`: no fs, no git, no async, no Session import. The stateful Session class stays at the repo root by design. Everything here is deterministic and unit-testable in isolation.

@@ -1,6 +1,6 @@
 'use strict';
 
-const { execFile, execFileSync } = require('../child-process-safe');
+const { execFile, execFileSync } = require('../../server/child-process-safe');
 const path = require('path');
 const fs = require('fs');
 

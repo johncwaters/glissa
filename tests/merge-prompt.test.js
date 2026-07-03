@@ -1,12 +1,12 @@
 'use strict';
 
-// Unit tests for the pure manual-merge handoff prompt builder (session-core/merge-prompt.js).
+// Unit tests for the pure manual-merge handoff prompt builder (session/core/merge-prompt.js).
 // Locks the content contract the parked-merge handoff relies on: the prompt names the branch, the
 // integration target, the conflicting files, and the rebase-then-resolve steps, and degrades safely.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { buildMergePrompt } = require('../session-core/merge-prompt');
+const { buildMergePrompt } = require('../session/core/merge-prompt');
 
 test('buildMergePrompt (rebase-conflict): names branch, target, conflicting files, and the rebase steps', () => {
   const p = buildMergePrompt({

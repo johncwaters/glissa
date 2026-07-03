@@ -15,10 +15,10 @@ const DEFAULT_CONFIG = {
   debugMode: false,
   // Hold a session out of COMPLETE while it still has background sub-agents running (Task
   // run_in_background / Ctrl+B). On by default; set false to fall back to "main-agent Stop completes
-  // the card" behavior (see sessions.js detectBackgroundAgents / session-core/agent-tracker.js).
+  // the card" behavior (see sessions.js detectBackgroundAgents / session/core/agent-tracker.js).
   detectBackgroundAgents: true,
   // Lever B: append a fixed anti-slop note to each user session's system prompt at spawn
-  // (session-core/anti-slop-prompt.js). OFF by default; user sessions only (team/pack-setup
+  // (session/core/anti-slop-prompt.js). OFF by default; user sessions only (team/pack-setup
   // stage sessions never receive it). Takes effect on the next session start/restart.
   antiSlopPrompt: false,
   editorCommand: '',
@@ -79,7 +79,7 @@ function resolveConfigPath() {
   }
 
   // 2. Local config (__dirname/config.json) - dev use with `node server.js` or `vite`
-  const localConfig = path.join(__dirname, 'config.json');
+  const localConfig = path.join(__dirname, '..', 'config.json');
   if (fs.existsSync(localConfig)) return localConfig;
 
   // 3. User home directory (~/.glissa/config.json) - installed CLI use
