@@ -52,6 +52,20 @@ function mapHookToSignal(event, payload) {
       // A sub-agent finished. Drops the live count; never completes the session itself
       // (the main agent's own Stop does that, gated on the count).
       return 'subagent-stop';
+    case 'taskcreated':
+      // Background task registered (payload: task_id, teammate_name?). Tracking-only:
+      // maps teammate names to task ids and reactivates a previously idled id.
+      return 'task-created';
+    case 'taskcompleted':
+      // Background task finished (payload: task_id). Tracking-only: drains that id from
+      // the declared background_tasks gate without waiting for the next Stop.
+      return 'task-completed';
+    case 'teammateidle':
+      // A native-team teammate went idle (payload: teammate_name, NO task_id). Its task
+      // registry entry stays status:running until shutdown, so every later Stop keeps
+      // declaring it in background_tasks; this signal is the only way to know the entry
+      // no longer gates completion. Tracking-only.
+      return 'teammate-idle';
     case 'permissionrequest':
       return 'awaiting-input';
     case 'posttooluse': {

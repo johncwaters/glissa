@@ -5,7 +5,15 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { addAgent, removeAgent, pruneAgents, extractBackgroundTaskCount, DEFAULT_AGENT_TTL_MS } = require('../session-core/agent-tracker');
+const {
+  addAgent,
+  removeAgent,
+  pruneAgents,
+  extractBackgroundTasks,
+  declaredActiveCount,
+  soleActiveTeammateId,
+  DEFAULT_AGENT_TTL_MS,
+} = require('../session-core/agent-tracker');
 
 test('addAgent adds a new id and reports the change; a duplicate is idempotent (count unchanged, ts refreshed)', () => {
   const m = new Map();
@@ -49,32 +57,48 @@ test('DEFAULT_AGENT_TTL_MS is a sane positive default', () => {
   assert.ok(DEFAULT_AGENT_TTL_MS > 0);
 });
 
-test('extractBackgroundTaskCount reads array and numeric shapes, null otherwise', () => {
-  assert.equal(extractBackgroundTaskCount({ background_tasks: [] }), 0);
-  assert.equal(extractBackgroundTaskCount({ background_tasks: [{ id: 'b1' }, { id: 'b2' }] }), 2);
-  assert.equal(extractBackgroundTaskCount({ background_tasks: 3 }), 3);
-  assert.equal(extractBackgroundTaskCount({ background_tasks: 0 }), 0);
-  // Absent/unrecognized (older Claude versions) -> null so the caller falls back to counting.
-  assert.equal(extractBackgroundTaskCount({}), null);
-  assert.equal(extractBackgroundTaskCount(null), null);
-  assert.equal(extractBackgroundTaskCount({ background_tasks: 'two' }), null);
-  assert.equal(extractBackgroundTaskCount({ background_tasks: -1 }), null);
-  assert.equal(extractBackgroundTaskCount({ background_tasks: Number.NaN }), null);
+test('extractBackgroundTasks reads the array shape only (hooks never send other shapes)', () => {
+  assert.deepEqual(extractBackgroundTasks({ background_tasks: [] }), []);
+  assert.deepEqual(
+    extractBackgroundTasks({ background_tasks: [{ id: 'b1', type: 'shell', status: 'running' }] }),
+    [{ id: 'b1', type: 'shell' }],
+  );
+  assert.deepEqual(extractBackgroundTasks({ background_tasks: [{}] }), [{ id: null, type: null }]);
+  // Absent/unrecognized (older Claude versions, non-hook shapes) -> null so the caller
+  // falls back to the counted map alone. The { count, tasks } shape (claude-code#33310)
+  // is a statusLine surface, never sent to hooks: deliberately unparsed.
+  assert.equal(extractBackgroundTasks({}), null);
+  assert.equal(extractBackgroundTasks(null), null);
+  assert.equal(extractBackgroundTasks({ background_tasks: 3 }), null);
+  assert.equal(extractBackgroundTasks({ background_tasks: { count: 2, tasks: [] } }), null);
 });
 
-test('extractBackgroundTaskCount ignores settled entries (idle teammate must not gate completion)', () => {
-  assert.equal(extractBackgroundTaskCount({ background_tasks: [{ id: 'b1', status: 'running' }, { id: 'tm', status: 'idle' }] }), 1);
-  assert.equal(extractBackgroundTaskCount({ background_tasks: [{ id: 'tm', status: 'completed' }] }), 0);
-  assert.equal(extractBackgroundTaskCount({ background_tasks: [{ id: 'tm', status: 'IDLE' }] }), 0);
-  // Deny-list, not allow-list: an unknown status still counts as running (err toward suppression).
-  assert.equal(extractBackgroundTaskCount({ background_tasks: [{ id: 'x', status: 'starting' }] }), 1);
-  assert.equal(extractBackgroundTaskCount({ background_tasks: [{ id: 'x' }] }), 1);
+test('extractBackgroundTasks drops settled entries (defensive; emitter pre-filters to running|pending)', () => {
+  const entries = extractBackgroundTasks({
+    background_tasks: [
+      { id: 'b1', type: 'shell', status: 'running' },
+      { id: 'tm', type: 'teammate', status: 'idle' },
+      { id: 'tm2', type: 'teammate', status: 'IDLE' },
+      // Deny-list, not allow-list: an unknown status still counts as running.
+      { id: 'x', type: 'subagent', status: 'starting' },
+    ],
+  });
+  assert.deepEqual(entries, [{ id: 'b1', type: 'shell' }, { id: 'x', type: 'subagent' }]);
 });
 
-test('extractBackgroundTaskCount reads the object shape { count, tasks } (claude-code#33310)', () => {
-  assert.equal(extractBackgroundTaskCount({ background_tasks: { count: 2, tasks: [{ id: 'b1', status: 'running' }, { id: 'tm', status: 'idle' }] } }), 1, 'filtered tasks beat the raw count');
-  assert.equal(extractBackgroundTaskCount({ background_tasks: { count: 0, tasks: [] } }), 0);
-  assert.equal(extractBackgroundTaskCount({ background_tasks: { count: 2 } }), 2);
-  assert.equal(extractBackgroundTaskCount({ background_tasks: { count: -1 } }), null);
-  assert.equal(extractBackgroundTaskCount({ background_tasks: {} }), null);
+test('declaredActiveCount filters out-of-band idled ids; an id-less entry always counts', () => {
+  const entries = [{ id: 'a', type: 'teammate' }, { id: null, type: 'shell' }, { id: 'b', type: 'shell' }];
+  assert.equal(declaredActiveCount(entries, new Set()), 3);
+  assert.equal(declaredActiveCount(entries, new Set(['a'])), 2);
+  assert.equal(declaredActiveCount(entries, new Set(['a', 'b'])), 1);
+  assert.equal(declaredActiveCount(null, new Set(['a'])), 0);
+});
+
+test('soleActiveTeammateId returns the single unambiguous live teammate id, else null', () => {
+  assert.equal(soleActiveTeammateId([{ id: 't1', type: 'teammate' }], new Set()), 't1');
+  assert.equal(soleActiveTeammateId([{ id: 't1', type: 'teammate' }, { id: 'b1', type: 'shell' }], new Set()), 't1');
+  assert.equal(soleActiveTeammateId([{ id: 't1', type: 'teammate' }, { id: 't2', type: 'teammate' }], new Set()), null, 'two live teammates is ambiguous');
+  assert.equal(soleActiveTeammateId([{ id: 't1', type: 'teammate' }, { id: 't2', type: 'teammate' }], new Set(['t1'])), 't2', 'an already-idled teammate is excluded');
+  assert.equal(soleActiveTeammateId(null, new Set()), null);
+  assert.equal(soleActiveTeammateId([{ id: null, type: 'teammate' }], new Set()), null);
 });

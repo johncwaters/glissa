@@ -407,14 +407,105 @@ test('a ready suppressed by a live sub-agent completes when the count drains (he
   s.destroy();
 });
 
-test('Stop declaring only an idle teammate completes (settled tasks never gate)', (t) => {
+test('Stop declaring only a settled-status entry completes (defensive filter)', (t) => {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   const s = makeSession(STATES.RUNNING);
-  hook(s, 'subagent-start', { payload: { agent_id: 'tm1' } }); // teammate whose Stop is never fired
-  hook(s, 'ready', { payload: { background_tasks: { count: 1, tasks: [{ id: 'tm1', status: 'idle' }] } } });
+  hook(s, 'subagent-start', { payload: { agent_id: 'tm1' } }); // its SubagentStop is never fired
+  hook(s, 'ready', { payload: { background_tasks: [{ id: 'tm1', type: 'teammate', status: 'idle' }] } });
   t.mock.timers.tick(40);
-  assert.equal(s.state, STATES.COMPLETE, 'an idle teammate is not running background work');
+  assert.equal(s.state, STATES.COMPLETE, 'a settled entry is not running background work');
   assert.equal(s.toSnapshot().activeAgents, 0, 'declared drain also empties the counted map');
+  s.destroy();
+});
+
+// --- Teammate lifecycle (TaskCreated/TaskCompleted/TeammateIdle): precise per-id drains ---
+// Ground truth (CC 2.1.199 binary): an idle-but-alive teammate stays status:running in the
+// task registry until shutdown, so every Stop re-declares it in background_tasks. Only the
+// TeammateIdle hook says it stopped gating.
+
+test('TeammateIdle drains a declared running teammate and releases the held ready', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const s = makeSession(STATES.RUNNING);
+  hook(s, 'task-created', { payload: { task_id: 'tm-task', teammate_name: 'store-explore' } });
+  hook(s, 'ready', { payload: { background_tasks: [{ id: 'tm-task', type: 'teammate', status: 'running' }] } });
+  t.mock.timers.tick(40);
+  assert.equal(s.state, STATES.RUNNING, 'a running-declared teammate still gates');
+  assert.equal(s.toSnapshot().activeAgents, 1);
+  hook(s, 'teammate-idle', { payload: { teammate_name: 'store-explore' } });
+  assert.equal(s.state, STATES.COMPLETE, 'TeammateIdle releases the gate-held ready');
+  assert.equal(s.toSnapshot().activeAgents, 0);
+  s.destroy();
+});
+
+test('an idled teammate stays drained across later Stops that re-declare it', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const s = makeSession(STATES.RUNNING);
+  const declared = { background_tasks: [{ id: 'tm-task', type: 'teammate', status: 'running' }] };
+  hook(s, 'task-created', { payload: { task_id: 'tm-task', teammate_name: 'store-explore' } });
+  hook(s, 'ready', { payload: declared });
+  t.mock.timers.tick(40);
+  hook(s, 'teammate-idle', { payload: { teammate_name: 'store-explore' } });
+  assert.equal(s.state, STATES.COMPLETE);
+  hook(s, 'resume'); // next user prompt; the teammate is still alive and idle
+  assert.equal(s.state, STATES.RUNNING);
+  hook(s, 'ready', { payload: declared }); // Stop re-declares the idle teammate as running
+  t.mock.timers.tick(40);
+  assert.equal(s.state, STATES.COMPLETE, 'the idle id survives resume and keeps filtering');
+  s.destroy();
+});
+
+test('TeammateIdle without a name mapping falls back to the sole declared teammate', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const s = makeSession(STATES.RUNNING);
+  // No TaskCreated seen (e.g. Glissa attached mid-run): name->id mapping unavailable.
+  hook(s, 'ready', { payload: { background_tasks: [{ id: 'tm1', type: 'teammate', status: 'running' }] } });
+  t.mock.timers.tick(40);
+  assert.equal(s.state, STATES.RUNNING);
+  hook(s, 'teammate-idle', { payload: { teammate_name: 'unmapped' } });
+  assert.equal(s.state, STATES.COMPLETE, 'a single live teammate is unambiguous');
+  s.destroy();
+});
+
+test('TeammateIdle with an ambiguous fallback is dropped (two live teammates)', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const s = makeSession(STATES.RUNNING);
+  hook(s, 'ready', { payload: { background_tasks: [
+    { id: 'tm1', type: 'teammate', status: 'running' },
+    { id: 'tm2', type: 'teammate', status: 'running' },
+  ] } });
+  t.mock.timers.tick(40);
+  hook(s, 'teammate-idle', { payload: { teammate_name: 'unmapped' } });
+  assert.equal(s.state, STATES.RUNNING, 'guessing between two teammates would risk a false COMPLETE');
+  assert.equal(s.toSnapshot().activeAgents, 2);
+  s.destroy();
+});
+
+test('TaskCompleted drains a declared background task without waiting for the next Stop', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const s = makeSession(STATES.RUNNING);
+  hook(s, 'ready', { payload: { background_tasks: [{ id: 'bash-1', type: 'shell', status: 'running' }] } });
+  t.mock.timers.tick(40);
+  assert.equal(s.state, STATES.RUNNING);
+  hook(s, 'task-completed', { payload: { task_id: 'bash-1' } });
+  assert.equal(s.state, STATES.COMPLETE);
+  s.destroy();
+});
+
+test('TaskCreated reactivates an idled teammate so it gates again', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const s = makeSession(STATES.RUNNING);
+  const declared = { background_tasks: [{ id: 'tm-task', type: 'teammate', status: 'running' }] };
+  hook(s, 'task-created', { payload: { task_id: 'tm-task', teammate_name: 'store-explore' } });
+  hook(s, 'ready', { payload: declared });
+  t.mock.timers.tick(40);
+  hook(s, 'teammate-idle', { payload: { teammate_name: 'store-explore' } });
+  assert.equal(s.state, STATES.COMPLETE);
+  hook(s, 'resume');
+  hook(s, 'task-created', { payload: { task_id: 'tm-task', teammate_name: 'store-explore' } }); // re-tasked
+  hook(s, 'ready', { payload: declared });
+  t.mock.timers.tick(40);
+  assert.equal(s.state, STATES.RUNNING, 'the reactivated teammate gates the new turn');
+  assert.equal(s.toSnapshot().activeAgents, 1);
   s.destroy();
 });
 

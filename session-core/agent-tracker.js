@@ -47,47 +47,78 @@ function pruneAgents(map, now, ttlMs = DEFAULT_AGENT_TTL_MS) {
   return removed;
 }
 
-// A task entry with one of these statuses is settled: it must not gate completion. Covers the
-// idle-teammate case (a native teammate that finished its task but stays alive in the team is
-// not "background work still running"; counting it pinned a card WORKING until the TTL). The
-// enum is undocumented (field reverse-engineered, claude-code#33310), so this is a deny-list:
-// an unknown/absent status still counts as running, which errs toward suppressing completion
+// Statuses that mean an entry is settled and must not gate completion. GROUND TRUTH
+// (extracted from the Claude Code 2.1.199 binary, memory: background-tasks-ground-truth):
+// the emitter pre-filters background_tasks to status running|pending, so settled statuses
+// should never arrive; this deny-list is belt-and-braces against a future emitter change.
+// An unknown/absent status still counts as running, erring toward suppressing completion
 // (the failure the gate exists to prevent) rather than completing early.
-// 'stopped' is deliberately absent: it is ambiguous between terminated and paused-resumable,
-// and a wrong guess here fires a premature COMPLETE. Revisit when the enum is documented.
 const SETTLED_TASK_STATUSES = new Set([
   'completed', 'complete', 'done', 'finished', 'failed', 'error',
   'killed', 'cancelled', 'canceled', 'exited', 'idle', 'success',
 ]);
 
-function countRunningTasks(tasks) {
-  let n = 0;
-  for (const t of tasks) {
+// Authoritative in-flight background work declared on a Stop/SubagentStop hook payload
+// (`background_tasks`, Claude Code v2.1.145+). It sees work the SubagentStart/Stop counting
+// can NOT see: background Bash tasks (run_in_background) and native-team teammates. Shape
+// per the 2.1.199 binary schema: an ARRAY of { id, type, status, description, ... } holding
+// only running|pending backgrounded entries ("Empty array when nothing is in flight"). The
+// `{ count, tasks }` object shape from claude-code#33310 belongs to a different surface
+// (statusLine metadata) and never reaches hooks, so it is deliberately not parsed.
+// Returns the non-settled entries as [{ id, type }] (id/type null when absent), or null
+// when the field is missing/unrecognized (older Claude) so the caller falls back to the
+// counted map alone.
+function extractBackgroundTasks(payload) {
+  if (!payload) return null;
+  const v = payload.background_tasks;
+  if (!Array.isArray(v)) return null;
+  const entries = [];
+  for (const t of v) {
     const status = t && typeof t.status === 'string' ? t.status.toLowerCase() : null;
     if (status && SETTLED_TASK_STATUSES.has(status)) continue;
+    entries.push({
+      id: t && typeof t.id === 'string' && t.id ? t.id : null,
+      type: t && typeof t.type === 'string' && t.type ? t.type : null,
+    });
+  }
+  return entries;
+}
+
+// How many declared entries still gate completion, given the set of task ids known settled
+// out-of-band (TaskCompleted / TeammateIdle hooks). An id-less entry can never be drained
+// individually, so it always counts (suppression-safe).
+function declaredActiveCount(entries, idleIds) {
+  if (!entries) return 0;
+  let n = 0;
+  for (const e of entries) {
+    if (e.id && idleIds && idleIds.has(e.id)) continue;
     n++;
   }
   return n;
 }
 
-// Authoritative live-background-work count carried on a Stop/SubagentStop hook payload
-// (Claude Code v2.1.145+ `background_tasks`). This covers work the SubagentStart/Stop
-// counting can NOT see: background Bash tasks (run_in_background) and native-team
-// teammates. Returns the count, or null when the field is absent/unrecognized (older
-// Claude versions) so the caller falls back to the counted map. Defensive on shape
-// (the field is undocumented): an array counts its non-settled entries, an object
-// `{ count, tasks }` prefers filtering `tasks` over the raw `count` (count includes
-// settled entries), and a finite non-negative number is taken as-is.
-function extractBackgroundTaskCount(payload) {
-  if (!payload) return null;
-  const v = payload.background_tasks;
-  if (Array.isArray(v)) return countRunningTasks(v);
-  if (typeof v === 'number' && Number.isFinite(v) && v >= 0) return v;
-  if (v && typeof v === 'object') {
-    if (Array.isArray(v.tasks)) return countRunningTasks(v.tasks);
-    if (typeof v.count === 'number' && Number.isFinite(v.count) && v.count >= 0) return v.count;
+// The declared entry an id-less TeammateIdle can safely drain: exactly one non-idle
+// teammate-type entry with an id. Ambiguity (several live teammates) returns null so the
+// signal is dropped rather than guessed. Used when the TaskCreated name->id mapping is
+// unavailable (e.g. Glissa attached after the teammate was spawned).
+function soleActiveTeammateId(entries, idleIds) {
+  if (!entries) return null;
+  let found = null;
+  for (const e of entries) {
+    if (e.type !== 'teammate' || !e.id) continue;
+    if (idleIds && idleIds.has(e.id)) continue;
+    if (found) return null;
+    found = e.id;
   }
-  return null;
+  return found;
 }
 
-module.exports = { addAgent, removeAgent, pruneAgents, extractBackgroundTaskCount, DEFAULT_AGENT_TTL_MS };
+module.exports = {
+  addAgent,
+  removeAgent,
+  pruneAgents,
+  extractBackgroundTasks,
+  declaredActiveCount,
+  soleActiveTeammateId,
+  DEFAULT_AGENT_TTL_MS,
+};

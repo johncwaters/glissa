@@ -221,16 +221,24 @@ class Session extends EventEmitter {
     this._detectBackgroundAgents = detectBackgroundAgents;
     this._activeAgents = new Map();
     this._agentTtlMs = agentTtlMs;
-    // Authoritative background-work count from the latest Stop/SubagentStop payload
-    // (`background_tasks`, Claude Code v2.1.145+), or null when the running Claude does
-    // not send it. Covers background Bash tasks and native-team teammates that the
-    // SubagentStart/Stop counting cannot see. Cleared on resume (new turn) and PTY
-    // exit/(re)start; each Stop refreshes it, so a suppressed completion self-corrects
-    // on the main agent's next Stop. Like the counted map, it is TTL-bounded (lazy, in
-    // _activeAgentCount): a stale positive override must not pin the card out of
-    // COMPLETE forever when the final Stop is never delivered.
-    this._bgTaskOverride = null;
-    this._bgTaskOverrideTs = 0;
+    // Authoritative in-flight background work declared by the latest Stop/SubagentStop
+    // payload (`background_tasks`, Claude Code v2.1.145+): an array of { id, type } entries,
+    // or null when the running Claude does not send it. Covers background Bash tasks and
+    // native-team teammates that the SubagentStart/Stop counting cannot see. Cleared on
+    // resume (new turn) and PTY exit/(re)start; each Stop refreshes it. TTL-bounded (lazy,
+    // in _activeAgentCount) so a stale snapshot cannot pin the card out of COMPLETE forever.
+    this._bgDeclared = null;
+    this._bgDeclaredTs = 0;
+    // Task ids known settled out-of-band via TaskCompleted / TeammateIdle hooks. An
+    // idle-but-alive teammate stays status:running in Claude's task registry (ground truth,
+    // 2.1.199 binary), so every later Stop re-declares it; this set filters those entries
+    // out of the gate. Survives resume (the teammate stays idle across the user's next
+    // prompt); pruned to the declared snapshot on each refresh; an id is removed when a
+    // TaskCreated reactivates it; cleared with the rest on PTY exit/(re)start.
+    this._idleTaskIds = new Set();
+    // teammate_name -> task_id learned from TaskCreated, because TeammateIdle carries only
+    // the name. Cleared on PTY exit/(re)start.
+    this._teammateTasks = new Map();
     // A main-agent `ready` suppressed by the activeAgents gate, held so the card can still
     // complete when the background count later drains WITHOUT another Stop (idle teammate
     // declared in background_tasks, dropped SubagentStop bounded only by the TTL). Without
@@ -324,6 +332,14 @@ class Session extends EventEmitter {
       this._trackSubagent(raw);
       return;
     }
+    // Task lifecycle is tracking-only too: TaskCreated/TaskCompleted/TeammateIdle drain (or
+    // reactivate) individual entries of the declared background_tasks gate. TeammateIdle is
+    // the only signal that an idle-but-alive teammate (still declared status:running on every
+    // Stop) has stopped gating completion.
+    if (raw && (raw.signal === "task-created" || raw.signal === "task-completed" || raw.signal === "teammate-idle")) {
+      this._trackTaskLifecycle(raw);
+      return;
+    }
     // Scheduled-revival lifecycle is likewise tracking-only: it must never reach the
     // StatusSource (a pending wakeup is metadata, not a state signal).
     if (raw && (raw.signal === "wakeup-scheduled" || raw.signal === "cron-created" || raw.signal === "cron-deleted")) {
@@ -340,7 +356,7 @@ class Session extends EventEmitter {
       // Drop the held ready BEFORE the override clear: clearing may drain the count to 0,
       // and a stale ready must not fire COMPLETE on the very prompt that starts a new turn.
       this._clearGateHeldReady();
-      this._clearBgTaskOverride(); // a new turn starts with no settled background snapshot
+      this._clearBgDeclared(); // a new turn starts with no settled background snapshot
     }
     // A main-agent Stop carries the authoritative background-work count (v2.1.145+).
     if (raw && raw.signal === "ready" && raw.source === "hook") {
@@ -359,25 +375,70 @@ class Session extends EventEmitter {
     this._clearGateHeldReady();
   }
 
-  // Reconcile the live count against an authoritative `background_tasks` payload field.
-  // A count of 0 also drains the id map (bounds a dropped SubagentStop immediately
-  // instead of waiting for the TTL prune). Absent field (older Claude) changes nothing.
+  // Reconcile against an authoritative `background_tasks` payload array. A declaration of
+  // 0 running entries also drains the counted id map (bounds a dropped SubagentStop
+  // immediately instead of waiting for the TTL prune). The idle set is pruned to ids still
+  // declared: an id gone from Claude's registry no longer needs remembering. Absent field
+  // (older Claude) changes nothing.
   _applyBackgroundTasks(payload) {
     if (!this._detectBackgroundAgents) return;
-    const count = agentTracker.extractBackgroundTaskCount(payload);
-    if (count === null) return;
+    const entries = agentTracker.extractBackgroundTasks(payload);
+    if (entries === null) return;
     const before = this._activeAgentCount();
-    this._bgTaskOverride = count;
-    this._bgTaskOverrideTs = Date.now();
-    if (count === 0 && this._activeAgents.size > 0) this._activeAgents.clear();
+    this._bgDeclared = entries;
+    this._bgDeclaredTs = Date.now();
+    const declaredIds = new Set(entries.map((e) => e.id).filter(Boolean));
+    for (const id of this._idleTaskIds) {
+      if (!declaredIds.has(id)) this._idleTaskIds.delete(id);
+    }
+    const declaredActive = agentTracker.declaredActiveCount(entries, this._idleTaskIds);
+    if (declaredActive === 0 && this._activeAgents.size > 0) this._activeAgents.clear();
     if (this._activeAgentCount() !== before) this._emitAgentsChange();
   }
 
-  _clearBgTaskOverride() {
-    if (this._bgTaskOverride === null) return;
+  _clearBgDeclared() {
+    if (this._bgDeclared === null) return;
     const before = this._activeAgentCount();
-    this._bgTaskOverride = null;
-    this._bgTaskOverrideTs = 0;
+    this._bgDeclared = null;
+    this._bgDeclaredTs = 0;
+    if (this._activeAgentCount() !== before) this._emitAgentsChange();
+  }
+
+  // Apply one TaskCreated/TaskCompleted/TeammateIdle signal to the idle-id bookkeeping.
+  // Never a transition; a drain can release a gate-held ready via _emitAgentsChange.
+  _trackTaskLifecycle(raw) {
+    if (!this._detectBackgroundAgents) return;
+    const p = raw.payload || {};
+    const taskId = typeof p.task_id === "string" && p.task_id ? p.task_id : null;
+    if (raw.signal === "task-created") {
+      // New background work: like subagent-start, it invalidates a held ready, and a
+      // reactivated teammate (new task) must gate again.
+      this._clearGateHeldReady();
+      if (!taskId) return;
+      if (typeof p.teammate_name === "string" && p.teammate_name) {
+        this._teammateTasks.set(p.teammate_name, taskId);
+      }
+      const before = this._activeAgentCount();
+      this._idleTaskIds.delete(taskId);
+      if (this._activeAgentCount() !== before) this._emitAgentsChange();
+      return;
+    }
+    const before = this._activeAgentCount();
+    if (raw.signal === "task-completed") {
+      if (!taskId) return;
+      this._idleTaskIds.add(taskId);
+      // Task ids and subagent agent_ids can share a namespace; a no-op removal is harmless.
+      agentTracker.removeAgent(this._activeAgents, taskId);
+      if (this._activeAgentCount() !== before) this._emitAgentsChange();
+      return;
+    }
+    // teammate-idle: name only, no task_id. Resolve via the TaskCreated mapping, falling
+    // back to the single unambiguous declared teammate entry (drop the signal otherwise).
+    const name = typeof p.teammate_name === "string" ? p.teammate_name : "";
+    const resolved = (name && this._teammateTasks.get(name))
+      || agentTracker.soleActiveTeammateId(this._bgDeclared, this._idleTaskIds);
+    if (!resolved) return;
+    this._idleTaskIds.add(resolved);
     if (this._activeAgentCount() !== before) this._emitAgentsChange();
   }
 
@@ -407,17 +468,18 @@ class Session extends EventEmitter {
     if (!this._detectBackgroundAgents) return 0;
     const now = Date.now();
     agentTracker.pruneAgents(this._activeAgents, now, this._agentTtlMs);
-    // Same lazy TTL bound as the counted map: an override whose refreshing Stop never
+    // Same lazy TTL bound as the counted map: a snapshot whose refreshing Stop never
     // arrived (hung background task, dropped hook) ages out instead of suppressing
     // completion forever.
-    if (this._bgTaskOverride !== null && now - this._bgTaskOverrideTs >= this._agentTtlMs) {
-      this._bgTaskOverride = null;
-      this._bgTaskOverrideTs = 0;
+    if (this._bgDeclared !== null && now - this._bgDeclaredTs >= this._agentTtlMs) {
+      this._bgDeclared = null;
+      this._bgDeclaredTs = 0;
     }
-    // The payload-declared count wins when larger: it sees background Bash tasks and
-    // teammates that never fire SubagentStart. The counted map wins when larger: it is
-    // fresher than a pre-drain Stop snapshot.
-    return Math.max(this._activeAgents.size, this._bgTaskOverride || 0);
+    // The declared count (minus out-of-band idled ids) wins when larger: it sees background
+    // Bash tasks and teammates that never fire SubagentStart. The counted map wins when
+    // larger: it is fresher than a pre-drain Stop snapshot.
+    const declared = agentTracker.declaredActiveCount(this._bgDeclared, this._idleTaskIds);
+    return Math.max(this._activeAgents.size, declared);
   }
 
   _emitAgentsChange() {
@@ -470,13 +532,15 @@ class Session extends EventEmitter {
     if (event) this.transition(event, { source: p.source, signal: p.signal, deferred: true });
   }
 
-  // Drop all live ids + the payload override (PTY exit, (re)start). Emits a clearing
-  // delta only if something was live.
+  // Drop all live ids + the declared snapshot + the task-lifecycle bookkeeping (PTY exit,
+  // (re)start). Emits a clearing delta only if something was live.
   _clearAgents() {
-    const had = this._activeAgents.size > 0 || (this._bgTaskOverride || 0) > 0;
+    const had = this._activeAgentCount() > 0;
     this._activeAgents.clear();
-    this._bgTaskOverride = null;
-    this._bgTaskOverrideTs = 0;
+    this._bgDeclared = null;
+    this._bgDeclaredTs = 0;
+    this._idleTaskIds.clear();
+    this._teammateTasks.clear();
     if (had) this._emitAgentsChange();
   }
 

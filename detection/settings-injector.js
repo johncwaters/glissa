@@ -18,7 +18,11 @@ const DEFAULT_TIMEOUT_SEC = 5; // short: handler returns 200 immediately; never 
 // permission_prompt (=>awaiting-input); see hook-source.mapHookToSignal. SubagentStart/
 // SubagentStop are not state transitions: they track the live background sub-agent count so a
 // main-agent Stop fired while a background sub-agent is still running does not falsely COMPLETE.
-const HOOK_EVENTS = ['SessionStart', 'SessionEnd', 'UserPromptSubmit', 'Stop', 'Notification', 'PermissionRequest', 'SubagentStart', 'SubagentStop'];
+// TaskCreated/TaskCompleted/TeammateIdle are likewise tracking-only: they drain (or reactivate)
+// the declared background_tasks gate precisely, so an idle-but-alive teammate (declared
+// status:running on every Stop until shutdown) releases a gated completion immediately instead
+// of pinning the card WORKING until the TTL.
+const HOOK_EVENTS = ['SessionStart', 'SessionEnd', 'UserPromptSubmit', 'Stop', 'Notification', 'PermissionRequest', 'SubagentStart', 'SubagentStop', 'TaskCreated', 'TaskCompleted', 'TeammateIdle'];
 
 // PostToolUse is subscribed ONLY with this tool-name matcher (scheduled-revival tracking:
 // ScheduleWakeup = dynamic /loop sleep, CronCreate/CronDelete = cron tasks). The matcher is
