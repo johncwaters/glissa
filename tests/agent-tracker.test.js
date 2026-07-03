@@ -61,3 +61,20 @@ test('extractBackgroundTaskCount reads array and numeric shapes, null otherwise'
   assert.equal(extractBackgroundTaskCount({ background_tasks: -1 }), null);
   assert.equal(extractBackgroundTaskCount({ background_tasks: Number.NaN }), null);
 });
+
+test('extractBackgroundTaskCount ignores settled entries (idle teammate must not gate completion)', () => {
+  assert.equal(extractBackgroundTaskCount({ background_tasks: [{ id: 'b1', status: 'running' }, { id: 'tm', status: 'idle' }] }), 1);
+  assert.equal(extractBackgroundTaskCount({ background_tasks: [{ id: 'tm', status: 'completed' }] }), 0);
+  assert.equal(extractBackgroundTaskCount({ background_tasks: [{ id: 'tm', status: 'IDLE' }] }), 0);
+  // Deny-list, not allow-list: an unknown status still counts as running (err toward suppression).
+  assert.equal(extractBackgroundTaskCount({ background_tasks: [{ id: 'x', status: 'starting' }] }), 1);
+  assert.equal(extractBackgroundTaskCount({ background_tasks: [{ id: 'x' }] }), 1);
+});
+
+test('extractBackgroundTaskCount reads the object shape { count, tasks } (claude-code#33310)', () => {
+  assert.equal(extractBackgroundTaskCount({ background_tasks: { count: 2, tasks: [{ id: 'b1', status: 'running' }, { id: 'tm', status: 'idle' }] } }), 1, 'filtered tasks beat the raw count');
+  assert.equal(extractBackgroundTaskCount({ background_tasks: { count: 0, tasks: [] } }), 0);
+  assert.equal(extractBackgroundTaskCount({ background_tasks: { count: 2 } }), 2);
+  assert.equal(extractBackgroundTaskCount({ background_tasks: { count: -1 } }), null);
+  assert.equal(extractBackgroundTaskCount({ background_tasks: {} }), null);
+});

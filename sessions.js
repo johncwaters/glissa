@@ -231,6 +231,15 @@ class Session extends EventEmitter {
     // COMPLETE forever when the final Stop is never delivered.
     this._bgTaskOverride = null;
     this._bgTaskOverrideTs = 0;
+    // A main-agent `ready` suppressed by the activeAgents gate, held so the card can still
+    // complete when the background count later drains WITHOUT another Stop (idle teammate
+    // declared in background_tasks, dropped SubagentStop bounded only by the TTL). Without
+    // this latch the suppressed ready is gone forever and the card pins WORKING until some
+    // new signal happens to arrive. Cleared by any newer activity (working/resume/
+    // awaiting-input), any state change since the stash, /clear, and PTY exit/(re)start.
+    // Released in _maybeReleaseGateHeldReady; the timer bounds the TTL-only drain path.
+    this._gateHeldReady = null;
+    this._gateHeldReadyTimer = null;
     // True between a SessionStart(source: clear|compact) hook and the next real
     // UserPromptSubmit: the TUI redraw around /clear flashes a spinner + idle glyph in
     // the OSC title, which would otherwise open a fake work cycle (RUNNING) and close
@@ -328,6 +337,9 @@ class Session extends EventEmitter {
     if (raw && raw.signal === "session-start") this._onSessionStartHook(raw);
     if (raw && raw.signal === "resume") {
       this._titleQuiet = false;
+      // Drop the held ready BEFORE the override clear: clearing may drain the count to 0,
+      // and a stale ready must not fire COMPLETE on the very prompt that starts a new turn.
+      this._clearGateHeldReady();
       this._clearBgTaskOverride(); // a new turn starts with no settled background snapshot
     }
     // A main-agent Stop carries the authoritative background-work count (v2.1.145+).
@@ -344,6 +356,7 @@ class Session extends EventEmitter {
     this._statusSource.reset();
     this._titleSource.reset();
     this._titleQuiet = true;
+    this._clearGateHeldReady();
   }
 
   // Reconcile the live count against an authoritative `background_tasks` payload field.
@@ -373,6 +386,9 @@ class Session extends EventEmitter {
   // 'agents-change' delta only when the live count actually changed.
   _trackSubagent(raw) {
     if (!this._detectBackgroundAgents) return;
+    // Fresh background work is newer activity: a held ready from before it must not release
+    // when only the OLDER ids drain (subagent-start never reaches _onStatus's clearing path).
+    if (raw.signal === "subagent-start") this._clearGateHeldReady();
     const agentId = raw.payload && raw.payload.agent_id;
     if (agentId) {
       const changed = raw.signal === "subagent-start"
@@ -407,6 +423,51 @@ class Session extends EventEmitter {
   _emitAgentsChange() {
     // Internal event; the backend listener already has the session (id/name), so carry only the count.
     this.emit("agents-change", { activeAgents: this._activeAgentCount() });
+    this._maybeReleaseGateHeldReady();
+  }
+
+  // Hold a main-agent ready that only the background-agent gate suppressed. The stash records
+  // the state it was suppressed in: any transition between stash and release invalidates it.
+  // The timer covers the TTL-only drain (no further hooks ever arrive): it re-checks after the
+  // full TTL, when the lazy prune in _activeAgentCount is guaranteed to see every entry expired.
+  _stashGateHeldReady(s) {
+    this._gateHeldReady = { source: s.source, signal: s.signal, confidence: s.confidence, state: this.state };
+    this._armGateHeldReadyTimer();
+  }
+
+  _armGateHeldReadyTimer() {
+    if (this._gateHeldReadyTimer) clearTimeout(this._gateHeldReadyTimer);
+    this._gateHeldReadyTimer = setTimeout(() => {
+      this._gateHeldReadyTimer = null;
+      this._maybeReleaseGateHeldReady();
+    }, this._agentTtlMs + 50);
+    if (typeof this._gateHeldReadyTimer.unref === "function") this._gateHeldReadyTimer.unref();
+  }
+
+  _clearGateHeldReady() {
+    this._gateHeldReady = null;
+    if (!this._gateHeldReadyTimer) return;
+    clearTimeout(this._gateHeldReadyTimer);
+    this._gateHeldReadyTimer = null;
+  }
+
+  // Fire the held ready once the background count has drained, unless anything moved the
+  // session since the stash (state check) or newer activity already cleared it.
+  _maybeReleaseGateHeldReady() {
+    const p = this._gateHeldReady;
+    if (!p || this._destroyed) return;
+    if (this.state !== p.state) {
+      this._clearGateHeldReady();
+      return;
+    }
+    if (this._activeAgentCount() > 0) {
+      // Refreshed entries can outlive the first timer window; re-arm so the TTL bound holds.
+      if (!this._gateHeldReadyTimer) this._armGateHeldReadyTimer();
+      return;
+    }
+    const event = mapSignalToEvent(p.signal, this.state, p.confidence, 0);
+    this._clearGateHeldReady();
+    if (event) this.transition(event, { source: p.source, signal: p.signal, deferred: true });
   }
 
   // Drop all live ids + the payload override (PTY exit, (re)start). Emits a clearing
@@ -479,13 +540,24 @@ class Session extends EventEmitter {
   _onStatus(s) {
     if (this._destroyed) return;
     this._lastSignal = { signal: s.signal, source: s.source, confidence: s.confidence, ts: s.ts };
+    // Any non-ready activity supersedes a held ready: the turn is demonstrably not settled.
+    if (s.signal !== "ready") this._clearGateHeldReady();
     // Pure decision in session-core/status-mapper.js; this wrapper owns the side effects:
     // the _destroyed guard + _lastSignal write above, and the transition below. The detail
     // { source, signal } is uniform across every firing case (byte-identical to the prior
     // per-branch details), so it is assembled here rather than in the pure mapper.
-    const event = mapSignalToEvent(s.signal, this.state, s.confidence, this._activeAgentCount());
+    const active = this._activeAgentCount();
+    const event = mapSignalToEvent(s.signal, this.state, s.confidence, active);
     if (event) {
+      this._clearGateHeldReady();
       this.transition(event, { source: s.source, signal: s.signal });
+    }
+    // A ready suppressed ONLY by the background-agent gate is held, not dropped: when the
+    // count drains without another Stop (idle teammate, dropped SubagentStop) the drain
+    // releases it and the card still completes (see _maybeReleaseGateHeldReady).
+    if (!event && s.signal === "ready" && active > 0
+        && mapSignalToEvent(s.signal, this.state, s.confidence, 0)) {
+      this._stashGateHeldReady(s);
     }
     // A turn end (`ready`) is the precise moment a batch of edits/commits has settled, so refresh the
     // review diff right then (debounced). The signature dedup makes a no-change turn a cheap no-op.
@@ -1132,7 +1204,9 @@ class Session extends EventEmitter {
     }
     this._receivedFirstOutput = false;
     this._sleeping = false;
-    // A (re)started PTY begins with no live background sub-agents; drop any stale ids from a prior run.
+    // A (re)started PTY begins with no live background sub-agents; drop any stale ids from a prior
+    // run. Pending ready first: the clear below emits agents-change, which must not release it.
+    this._clearGateHeldReady();
     this._clearAgents();
     this._clearWakeups();
     this._autoKilled = false;
@@ -1342,6 +1416,9 @@ class Session extends EventEmitter {
     this._titleSource.reset();
     this._statusSource.reset();
     this._titleQuiet = false;
+    // Pending ready first: _clearAgents emits agents-change, and a drain-release here would
+    // fire a COMPLETE ahead of the process_exit transition below.
+    this._clearGateHeldReady();
     this._clearAgents();
     this._clearWakeups();
     this._cleanupHooks();
@@ -1755,6 +1832,8 @@ class Session extends EventEmitter {
       clearTimeout(this._killPollTimer);
       this._killPollTimer = null;
     }
+
+    this._clearGateHeldReady();
 
     if (this._recorder) {
       this._recorder.close(); // Idempotent - safe if already closed by _handlePtyExit

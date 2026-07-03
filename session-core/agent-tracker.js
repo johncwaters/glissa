@@ -47,17 +47,46 @@ function pruneAgents(map, now, ttlMs = DEFAULT_AGENT_TTL_MS) {
   return removed;
 }
 
+// A task entry with one of these statuses is settled: it must not gate completion. Covers the
+// idle-teammate case (a native teammate that finished its task but stays alive in the team is
+// not "background work still running"; counting it pinned a card WORKING until the TTL). The
+// enum is undocumented (field reverse-engineered, claude-code#33310), so this is a deny-list:
+// an unknown/absent status still counts as running, which errs toward suppressing completion
+// (the failure the gate exists to prevent) rather than completing early.
+// 'stopped' is deliberately absent: it is ambiguous between terminated and paused-resumable,
+// and a wrong guess here fires a premature COMPLETE. Revisit when the enum is documented.
+const SETTLED_TASK_STATUSES = new Set([
+  'completed', 'complete', 'done', 'finished', 'failed', 'error',
+  'killed', 'cancelled', 'canceled', 'exited', 'idle', 'success',
+]);
+
+function countRunningTasks(tasks) {
+  let n = 0;
+  for (const t of tasks) {
+    const status = t && typeof t.status === 'string' ? t.status.toLowerCase() : null;
+    if (status && SETTLED_TASK_STATUSES.has(status)) continue;
+    n++;
+  }
+  return n;
+}
+
 // Authoritative live-background-work count carried on a Stop/SubagentStop hook payload
 // (Claude Code v2.1.145+ `background_tasks`). This covers work the SubagentStart/Stop
 // counting can NOT see: background Bash tasks (run_in_background) and native-team
 // teammates. Returns the count, or null when the field is absent/unrecognized (older
-// Claude versions) so the caller falls back to the counted map. Defensive on shape:
-// an array counts its entries, a finite non-negative number is taken as-is.
+// Claude versions) so the caller falls back to the counted map. Defensive on shape
+// (the field is undocumented): an array counts its non-settled entries, an object
+// `{ count, tasks }` prefers filtering `tasks` over the raw `count` (count includes
+// settled entries), and a finite non-negative number is taken as-is.
 function extractBackgroundTaskCount(payload) {
   if (!payload) return null;
   const v = payload.background_tasks;
-  if (Array.isArray(v)) return v.length;
+  if (Array.isArray(v)) return countRunningTasks(v);
   if (typeof v === 'number' && Number.isFinite(v) && v >= 0) return v;
+  if (v && typeof v === 'object') {
+    if (Array.isArray(v.tasks)) return countRunningTasks(v.tasks);
+    if (typeof v.count === 'number' && Number.isFinite(v.count) && v.count >= 0) return v.count;
+  }
   return null;
 }
 

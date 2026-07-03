@@ -392,6 +392,98 @@ test('a stale background_tasks override ages out (TTL), so a hung task cannot pi
   s.destroy();
 });
 
+// --- Deferred completion: a gate-suppressed ready is HELD and released on drain, not dropped ---
+
+test('a ready suppressed by a live sub-agent completes when the count drains (held, not dropped)', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const s = makeSession(STATES.RUNNING);
+  hook(s, 'subagent-start', { payload: { agent_id: 'a1' } });
+  hook(s, 'ready');
+  t.mock.timers.tick(40);
+  assert.equal(s.state, STATES.RUNNING, 'gate suppresses while the sub-agent runs');
+  hook(s, 'subagent-stop', { payload: { agent_id: 'a1' } });
+  assert.equal(s.state, STATES.COMPLETE, 'drain releases the held ready');
+  assert.equal(s.toSnapshot().activeAgents, 0);
+  s.destroy();
+});
+
+test('Stop declaring only an idle teammate completes (settled tasks never gate)', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const s = makeSession(STATES.RUNNING);
+  hook(s, 'subagent-start', { payload: { agent_id: 'tm1' } }); // teammate whose Stop is never fired
+  hook(s, 'ready', { payload: { background_tasks: { count: 1, tasks: [{ id: 'tm1', status: 'idle' }] } } });
+  t.mock.timers.tick(40);
+  assert.equal(s.state, STATES.COMPLETE, 'an idle teammate is not running background work');
+  assert.equal(s.toSnapshot().activeAgents, 0, 'declared drain also empties the counted map');
+  s.destroy();
+});
+
+test('newer activity cancels a held ready (drain later must not complete a resumed turn)', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const s = makeSession(STATES.RUNNING);
+  hook(s, 'subagent-start', { payload: { agent_id: 'a1' } });
+  hook(s, 'ready');
+  t.mock.timers.tick(40);
+  assert.equal(s.state, STATES.RUNNING);
+  hook(s, 'resume'); // user re-prompted before the sub-agent finished
+  hook(s, 'subagent-stop', { payload: { agent_id: 'a1' } });
+  assert.equal(s.state, STATES.RUNNING, 'the stale ready must not fire on the new turn');
+  s.destroy();
+});
+
+test('a fresh subagent-start invalidates a held ready (older ids draining must not complete)', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const s = makeSession(STATES.RUNNING);
+  hook(s, 'subagent-start', { payload: { agent_id: 'a1' } });
+  hook(s, 'ready');
+  t.mock.timers.tick(40);
+  assert.equal(s.state, STATES.RUNNING);
+  hook(s, 'subagent-start', { payload: { agent_id: 'a2' } }); // new background work after the Stop
+  hook(s, 'subagent-stop', { payload: { agent_id: 'a1' } });
+  hook(s, 'subagent-stop', { payload: { agent_id: 'a2' } });
+  assert.equal(s.state, STATES.RUNNING, 'the pre-a2 ready is stale; only a new Stop may complete');
+  s.destroy();
+});
+
+test('a held ready still completes when the dropped SubagentStop only ages out (TTL timer)', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const s = makeSession(STATES.RUNNING, { agentTtlMs: 150 });
+  hook(s, 'subagent-start', { payload: { agent_id: 'a1' } }); // its Stop is lost forever
+  hook(s, 'ready');
+  t.mock.timers.tick(40);
+  assert.equal(s.state, STATES.RUNNING, 'suppressed while the entry is fresh');
+  t.mock.timers.tick(300); // past agentTtlMs + the release timer epsilon, no further hooks
+  assert.equal(s.state, STATES.COMPLETE, 'the TTL drain releases the held ready without any new signal');
+  s.destroy();
+});
+
+test('a state change between stash and drain invalidates the held ready', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const s = makeSession(STATES.RUNNING);
+  hook(s, 'subagent-start', { payload: { agent_id: 'a1' } });
+  hook(s, 'ready');
+  t.mock.timers.tick(40);
+  assert.equal(s.state, STATES.RUNNING);
+  s.transition('prompt_detected'); // out-of-band move (bypasses _onStatus)
+  assert.equal(s.state, STATES.WAITING);
+  hook(s, 'subagent-stop', { payload: { agent_id: 'a1' } });
+  assert.equal(s.state, STATES.WAITING, 'the drain must not complete a session that moved on');
+  s.destroy();
+});
+
+test('destroy() with a held ready armed fires nothing after the TTL (timer hygiene)', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const s = makeSession(STATES.RUNNING, { agentTtlMs: 150 });
+  hook(s, 'subagent-start', { payload: { agent_id: 'a1' } });
+  hook(s, 'ready');
+  t.mock.timers.tick(40);
+  assert.equal(s.state, STATES.RUNNING);
+  s.destroy();
+  const stateAtDestroy = s.state;
+  t.mock.timers.tick(400); // past agentTtlMs + release epsilon
+  assert.equal(s.state, stateAtDestroy, 'no post-destroy transition from the release timer');
+});
+
 test('detectBackgroundAgents=false ignores background_tasks payloads too', (t) => {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   const s = makeSession(STATES.RUNNING, { detectBackgroundAgents: false });
