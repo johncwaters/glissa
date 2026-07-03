@@ -10,6 +10,14 @@ const { SHARED_PACK_DIRNAME } = require('./team-output');
 const execFileP = promisify(execFile);
 const fsp = fs.promises;
 
+// Shared {ok,out}/{ok:false,out,err} result shaping for the sync and async `run()` git helpers below.
+function okResult(out) {
+  return { ok: true, out: String(out || '').trim() };
+}
+function errResult(err) {
+  return { ok: false, out: String(err.stdout || '').trim(), err: String(err.stderr || err.message || '') };
+}
+
 // Run each team run inside a throwaway git worktree on a dedicated branch, so the team's writes never
 // touch the user's working tree or current branch during the (multi-minute) run. On a terminal
 // outcome the run is committed on that branch and fast-forwarded back into the base branch when that
@@ -48,8 +56,8 @@ function createGitWorkspace(opts = {}) {
   };
 
   async function run(args, cwd) {
-    try { return { ok: true, out: String(await git(args, cwd) || '').trim() }; }
-    catch (err) { return { ok: false, out: String(err.stdout || '').trim(), err: String(err.stderr || err.message || '') }; }
+    try { return okResult(await git(args, cwd)); }
+    catch (err) { return errResult(err); }
   }
   function sanitize(s) { return String(s || '').replace(/[^\w.-]+/g, '-').replace(/^-+|-+$/g, ''); }
 
@@ -459,8 +467,8 @@ function createGitWorkspaceSync(opts = {}) {
     cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 20000,
   }));
   function run(args, cwd) {
-    try { return { ok: true, out: String(git(args, cwd) || '').trim() }; }
-    catch (err) { return { ok: false, out: String(err.stdout || '').trim(), err: String(err.stderr || err.message || '') }; }
+    try { return okResult(git(args, cwd)); }
+    catch (err) { return errResult(err); }
   }
 
   function worktreeHasWork(cwd, branch, projectPath, integrationBranch) {

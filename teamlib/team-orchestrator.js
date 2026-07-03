@@ -3,7 +3,9 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { EventEmitter } = require('node:events');
-const { runFolderLabel, escapeRegExp } = require('./team-output');
+const { runFolderLabel } = require('./team-output');
+const { sectionFirstLine } = require('./markdown');
+const { parseVerdict } = require('./verdict');
 
 // Team run engine. Glissa drives each stage as one short-lived `claude -p` session, gating on the
 // handoff file between stages. Completion is keyed on the session's `exit` event (exit 0 => DONE),
@@ -17,18 +19,6 @@ const { runFolderLabel, escapeRegExp } = require('./team-output');
 // the git worktree branch name).
 const defaultRunLabel = runFolderLabel;
 
-// Parse the editor VERDICT line. Returns the matched value (e.g. "SHIP") or null.
-function parseVerdict(text, verdictSpec) {
-  if (!text || !verdictSpec) return null;
-  const marker = verdictSpec.marker || 'VERDICT:';
-  const values = verdictSpec.values || ['SHIP', 'FIX', 'BLOCK'];
-  const re = new RegExp(`${escapeRegExp(marker)}\\s*([A-Z]+)`, 'i');
-  const m = re.exec(text);
-  if (!m) return null;
-  const found = m[1].toUpperCase();
-  return values.includes(found) ? found : null;
-}
-
 // Detect an operator-question sentinel: the agent wrote the marker as the ENTIRE output (the QUESTION
 // protocol in team-prompt) instead of a normal handoff. Returns the trimmed question text, or null.
 // Matching at the START of the output (not as a substring) avoids a false positive from a handoff that
@@ -39,21 +29,6 @@ function extractQuestion(text, marker = 'QUESTION:') {
   if (t.length < m.length) return null;
   if (t.slice(0, m.length).toUpperCase() !== m.toUpperCase()) return null;
   return t.slice(m.length).trim() || '(no question text)';
-}
-
-// First non-empty content line under a markdown heading (used for the log line's topic/platforms).
-function sectionFirstLine(text, heading) {
-  if (!text) return '';
-  const esc = escapeRegExp(heading);
-  const re = new RegExp(`^#{1,6}\\s*${esc}\\b.*$`, 'im');
-  const m = re.exec(text);
-  if (!m) return '';
-  const rest = text.slice(m.index + m[0].length).split(/\r?\n/);
-  for (const line of rest) {
-    const t = line.trim().replace(/^[-*]\s*/, '');
-    if (t && !/^#{1,6}\s/.test(t)) return t;
-  }
-  return '';
 }
 
 // Clamp a logged field to one tidy segment: drop the pipe delimiter, collapse to a single line, and
@@ -77,6 +52,39 @@ function formatRunVerdict({
   if (verdict !== initialVerdict) return `${initialVerdict}->${verdict} (${rounds} ${plural})`;
   // Still the trigger verdict after spending the budget.
   return `${verdict} (maxRounds ${maxRounds || rounds})`;
+}
+
+// Reads for one stage attempt: stage.reads UNION (round > 0 ? stage.reviseReads : []), de-duplicated by
+// name, base reads first. Pure.
+function buildReadNames(stage, round) {
+  const names = [...(stage.reads || [])];
+  if (round > 0) {
+    for (const name of (stage.reviseReads || [])) {
+      if (!names.includes(name)) names.push(name);
+    }
+  }
+  return names;
+}
+
+// Resolve a revise loop's stage ids against the team's stage list, in order, dropping any id that does
+// not match a known stage. Pure.
+function selectReviseStages(teamStages, ids) {
+  return (ids || []).map((id) => teamStages.find((s) => s.id === id)).filter(Boolean);
+}
+
+// No-progress detection for the revise loop: true when every {before, after} pair is unchanged, meaning
+// re-running the revise stages produced byte-identical output to what was just archived. Pure.
+function allUnchanged(pairs) {
+  return pairs.every((p) => p.after === p.before);
+}
+
+// Whether a run must BLOCK because the team pins a base branch but git isolation is unavailable: without
+// the isolation engine the run would fall through to running in place on the wrong branch. Pure.
+function baseBranchBlockReason(team, gitWorkspace) {
+  if (team.runtime?.baseBranch && !gitWorkspace) {
+    return `base branch "${team.runtime.baseBranch}" pinned but git isolation is unavailable`;
+  }
+  return null;
 }
 
 function createOrchestrator(deps) {
@@ -256,11 +264,12 @@ function createOrchestrator(deps) {
       }
     };
 
-    try {
-      // First-run setup gate (main repo): glissa owns the agents; the project owns the pack (voice,
-      // brand, calendar, channels). Scaffold it from the team's templates (idempotent) and halt until
-      // filled, so a run never produces output from empty voice rules. team-git copies the pack into the
-      // worktree at run time. This runs before any worktree is created.
+    // First-run setup gate (main repo): glissa owns the agents; the project owns the pack (voice, brand,
+    // calendar, channels). Scaffold it from the team's templates (idempotent) and halt until filled, so a
+    // run never produces output from empty voice rules. team-git copies the pack into the worktree at run
+    // time. This runs before any worktree is created. Returns null when the pack is ready, or the
+    // `{ needsSetup, unfilled }` result to return from runTeam verbatim.
+    const ensurePackGate = async () => {
       output.ensureStructure(projectPath, team.outputPath);
       const scaffolded = output.scaffoldPack(
         projectPath, team.outputPath, team.packTemplatesDir, team.packRequired,
@@ -273,56 +282,67 @@ function createOrchestrator(deps) {
         log(`pack divergent: ${d.name} (team-local copy at ${d.teamLocalPath} differs from shared, left for manual reconcile)`);
       }
       const pack = output.packStatus(projectPath, team.outputPath, team.packRequired, team.packShared);
-      if (!pack.configured) {
-        output.appendLog(projectPath, team.outputPath, `${dateStr} | (setup) | - | NEEDS_SETUP (${pack.unfilled.join(', ')})`);
-        log(`run halted: ${lockKey} needs pack setup (${pack.unfilled.join(', ')})`);
-        emitter.emit('team-run-needs-setup', {
-          teamId, projectId, packDir: pack.packDir, unfilled: pack.unfilled,
-        });
-        return { needsSetup: true, unfilled: pack.unfilled };
-      }
+      if (pack.configured) return null;
+      output.appendLog(projectPath, team.outputPath, `${dateStr} | (setup) | - | NEEDS_SETUP (${pack.unfilled.join(', ')})`);
+      log(`run halted: ${lockKey} needs pack setup (${pack.unfilled.join(', ')})`);
+      emitter.emit('team-run-needs-setup', {
+        teamId, projectId, packDir: pack.packDir, unfilled: pack.unfilled,
+      });
+      return { needsSetup: true, unfilled: pack.unfilled };
+    };
 
-      // A team that pins a base branch REQUIRES git isolation off it: never silently run in the
-      // operator's checkout on the wrong branch. Surface a project-visible BLOCK. No worktree exists in
-      // any of these cases, so the finally's finalize is a no-op. `detail` carries the specific cause so
-      // a transient create failure is not misreported as "not a git repo".
-      const blockRun = (why) => {
-        output.appendLog(projectPath, team.outputPath, `${dateStr} | (setup) | - | BLOCKED (${why})`);
-        log(`run blocked: ${lockKey} (${why})`);
-        emitter.emit('team-run-failed', { teamId, projectId, reason: 'no-base-branch', detail: why });
-        return { blocked: true, reason: why };
-      };
+    // A team that pins a base branch REQUIRES git isolation off it: never silently run in the operator's
+    // checkout on the wrong branch. Surface a project-visible BLOCK. No worktree exists in any of these
+    // cases, so the finally's finalize is a no-op. `detail` carries the specific cause so a transient
+    // create failure is not misreported as "not a git repo".
+    const blockRun = (why) => {
+      output.appendLog(projectPath, team.outputPath, `${dateStr} | (setup) | - | BLOCKED (${why})`);
+      log(`run blocked: ${lockKey} (${why})`);
+      emitter.emit('team-run-failed', { teamId, projectId, reason: 'no-base-branch', detail: why });
+      return { blocked: true, reason: why };
+    };
+
+    // Establish the run's git workspace (or the in-place fallback). Mutates the enclosing `workspace`.
+    // Returns the blockRun() result when a pinned base branch cannot be honored, else null.
+    const establishWorkspace = async () => {
       // baseBranch needs the isolation engine to fork off the branch; without it the run would fall
       // through to an in-place run on the wrong branch. Block before attempting anything.
-      if (team.runtime?.baseBranch && !gitWorkspace) {
-        return blockRun(`base branch "${team.runtime.baseBranch}" pinned but git isolation is unavailable`);
-      }
+      const preBlock = baseBranchBlockReason(team, gitWorkspace);
+      if (preBlock) return blockRun(preBlock);
+      if (!gitWorkspace) return null;
 
-      if (gitWorkspace) {
-        const runtime = team.runtime || {};
-        const createOpts = {
-          projectPath, teamId: team.id, label: runLabel(now()), outputPath: team.outputPath,
-        };
-        // App-runtime teams (e.g. the persona QA walk) opt in to a worktree that carries the project's
-        // gitignored local context (so the agent can actually boot the app) and to a pinned base branch
-        // (so the run forks from the branch holding the walk inputs, not the operator's current HEAD).
-        if (runtime.shareLocalContext) {
-          if (worktreeShare) createOpts.shareList = worktreeShare;
-          if (getWorktreeBase) createOpts.worktreeBase = getWorktreeBase(projectPath);
-        }
-        if (runtime.baseBranch) createOpts.baseBranch = runtime.baseBranch;
-        try {
-          workspace = (await gitWorkspace.create(createOpts)) || { cwd: projectPath, isGit: false };
-        } catch (err) {
-          // Preserve the cause so the BLOCK below reports the real failure, not a misleading default.
-          workspace = { cwd: projectPath, isGit: false, reason: 'create-failed', detail: err?.message };
-        }
-        if (runtime.baseBranch && !workspace.isGit) {
-          if (workspace.reason === 'no-base-branch') return blockRun(`base branch "${runtime.baseBranch}" not found`);
-          if (workspace.reason === 'create-failed') return blockRun(`worktree create failed (${workspace.detail || 'unknown error'})`);
-          return blockRun('project is not a git repo');
-        }
+      const runtime = team.runtime || {};
+      const createOpts = {
+        projectPath, teamId: team.id, label: runLabel(now()), outputPath: team.outputPath,
+      };
+      // App-runtime teams (e.g. the persona QA walk) opt in to a worktree that carries the project's
+      // gitignored local context (so the agent can actually boot the app) and to a pinned base branch
+      // (so the run forks from the branch holding the walk inputs, not the operator's current HEAD).
+      if (runtime.shareLocalContext) {
+        if (worktreeShare) createOpts.shareList = worktreeShare;
+        if (getWorktreeBase) createOpts.worktreeBase = getWorktreeBase(projectPath);
       }
+      if (runtime.baseBranch) createOpts.baseBranch = runtime.baseBranch;
+      try {
+        workspace = (await gitWorkspace.create(createOpts)) || { cwd: projectPath, isGit: false };
+      } catch (err) {
+        // Preserve the cause so the BLOCK below reports the real failure, not a misleading default.
+        workspace = { cwd: projectPath, isGit: false, reason: 'create-failed', detail: err?.message };
+      }
+      if (runtime.baseBranch && !workspace.isGit) {
+        if (workspace.reason === 'no-base-branch') return blockRun(`base branch "${runtime.baseBranch}" not found`);
+        if (workspace.reason === 'create-failed') return blockRun(`worktree create failed (${workspace.detail || 'unknown error'})`);
+        return blockRun('project is not a git repo');
+      }
+      return null;
+    };
+
+    try {
+      const packHalt = await ensurePackGate();
+      if (packHalt) return packHalt;
+
+      const workspaceBlocked = await establishWorkspace();
+      if (workspaceBlocked) return workspaceBlocked;
       const cwd = workspace.cwd;
 
       output.ensureStructure(cwd, team.outputPath);
@@ -366,13 +386,7 @@ function createOrchestrator(deps) {
           return { terminal: { cancelled: true, stage: stage.id } };
         }
 
-        // Reads = stage.reads UNION (round > 0 ? stage.reviseReads : []), de-duplicated by name.
-        const readNames = [...(stage.reads || [])];
-        if (round > 0) {
-          for (const name of (stage.reviseReads || [])) {
-            if (!readNames.includes(name)) readNames.push(name);
-          }
-        }
+        const readNames = buildReadNames(stage, round);
         const produces = { name: stage.produces, path: path.join(runDir, stage.produces) };
         const stageEntry = active.get(lockKey);
         const interactive = !!stageEntry?.interactive;
@@ -499,73 +513,88 @@ function createOrchestrator(deps) {
       let rounds = 0;
       let reviseLogVerdict = null;
 
-      for (const stage of team.stages) {
-        // Publisher (and any conditional stage) runs only when the editor verdict matches.
-        if (stage.runIfVerdict && verdict !== stage.runIfVerdict) continue;
+      // Bounded FIX revision loop: after `stage`'s verdict matches its `revise.onVerdict`, re-run the
+      // earlier revise.stages then re-audit, bounded by maxRounds, with a no-progress bail. Shares the
+      // enclosing `verdict`/`rounds` with runOneStage's own verdict mutation (both close over the same
+      // run-scoped state). Returns a terminal object to bubble, or null to let the pipeline continue.
+      const runReviseLoop = async (stage) => {
+        const initialVerdict = verdict;
+        const maxRounds = stage.revise.maxRounds || 2;
+        const reviseStages = selectReviseStages(team.stages, stage.revise.stages);
+        let noProgress = false;
 
-        const linear = await runOneStage({ stage, round: 0 });
-        if (linear.terminal) return linear.terminal;
+        for (let n = 1; n <= maxRounds; n += 1) {
+          emitter.emit('team-revise-round', {
+            teamId, projectId, runId, round: n, fromVerdict: verdict,
+          });
+          // Archive the round we are about to overwrite (the revise stages' outputs + the verdict
+          // stage's output) into rounds/r{n-1}-<name> before re-running.
+          const archiveNames = [...reviseStages.map((s) => s.produces), stage.produces];
+          output.archiveRoundArtifacts(runDir, n - 1, archiveNames);
+          const archivedBefore = reviseStages.map((s) => ({
+            produces: s.produces,
+            prior: readText(path.join(runDir, 'rounds', `r${n - 1}-${s.produces}`)),
+          }));
 
-        // Bounded FIX revision loop: after a verdict stage whose verdict triggers revise, re-run the
-        // earlier revise.stages then re-audit, bounded by maxRounds, with a byte-identical no-progress
-        // guard. The publisher still reads the final post-loop `verdict` through the :219 gate above.
-        if (stage.revise && verdict === stage.revise.onVerdict) {
-          const initialVerdict = verdict;
-          const maxRounds = stage.revise.maxRounds || 2;
-          const reviseStages = stage.revise.stages
-            .map((id) => team.stages.find((s) => s.id === id))
-            .filter(Boolean);
-          let noProgress = false;
+          // Re-run each revise stage (in order) at round n.
+          let reviseTerminal = null;
+          for (const reviseStage of reviseStages) {
+            const r = await runOneStage({ stage: reviseStage, round: n });
+            if (r.terminal) { reviseTerminal = r.terminal; break; }
+          }
+          if (reviseTerminal) return reviseTerminal;
 
-          for (let n = 1; n <= maxRounds; n += 1) {
-            emitter.emit('team-revise-round', {
-              teamId, projectId, runId, round: n, fromVerdict: verdict,
-            });
-            // Archive the round we are about to overwrite (the revise stages' outputs + the verdict
-            // stage's output) into rounds/r{n-1}-<name> before re-running.
-            const archiveNames = [...reviseStages.map((s) => s.produces), stage.produces];
-            output.archiveRoundArtifacts(runDir, n - 1, archiveNames);
-            const archivedBefore = reviseStages.map((s) => ({
-              produces: s.produces,
-              prior: readText(path.join(runDir, 'rounds', `r${n - 1}-${s.produces}`)),
-            }));
-
-            // Re-run each revise stage (in order) at round n.
-            let reviseTerminal = null;
-            for (const reviseStage of reviseStages) {
-              const r = await runOneStage({ stage: reviseStage, round: n });
-              if (r.terminal) { reviseTerminal = r.terminal; break; }
-            }
-            if (reviseTerminal) return reviseTerminal;
-
-            // No-progress guard: if EVERY revise stage's new output is byte-identical to its just
-            // archived prior copy, the loop cannot converge by re-running, so skip the re-audit, exit
-            // with the verdict unchanged, and record the reason.
-            const allIdentical = archivedBefore.every(
-              (a) => readText(path.join(runDir, a.produces)) === a.prior,
-            );
-            if (allIdentical) {
-              noProgress = true;
-              rounds = n;
-              break;
-            }
-
-            // Re-audit: re-run the verdict stage at round n and recompute the verdict.
-            const audit = await runOneStage({ stage, round: n });
-            if (audit.terminal) return audit.terminal;
-            verdict = parseVerdict(audit.produced, stage.verdict);
+          // No-progress guard: if EVERY revise stage's new output is byte-identical to its just
+          // archived prior copy, the loop cannot converge by re-running, so skip the re-audit, exit
+          // with the verdict unchanged, and record the reason.
+          const pairs = archivedBefore.map((a) => ({
+            before: a.prior, after: readText(path.join(runDir, a.produces)),
+          }));
+          if (allUnchanged(pairs)) {
+            noProgress = true;
             rounds = n;
-
-            if (verdict !== stage.revise.onVerdict) break; // SHIP / BLOCK: converged or hard stop.
-            // Still the trigger verdict: continue if budget remains, else break (maxRounds reached).
+            break;
           }
 
-          // Reflect the loop outcome in the log line written after the stage loop completes.
-          reviseLogVerdict = formatRunVerdict({
-            verdict, initialVerdict, rounds, noProgress, maxRounds,
-          });
+          // Re-audit: re-run the verdict stage at round n and recompute the verdict.
+          const audit = await runOneStage({ stage, round: n });
+          if (audit.terminal) return audit.terminal;
+          verdict = parseVerdict(audit.produced, stage.verdict);
+          rounds = n;
+
+          if (verdict !== stage.revise.onVerdict) break; // SHIP / BLOCK: converged or hard stop.
+          // Still the trigger verdict: continue if budget remains, else break (maxRounds reached).
         }
-      }
+
+        // Reflect the loop outcome in the log line written after the stage loop completes.
+        reviseLogVerdict = formatRunVerdict({
+          verdict, initialVerdict, rounds, noProgress, maxRounds,
+        });
+        return null;
+      };
+
+      // Drive the linear stage list: each stage runs once; a verdict stage whose result matches its
+      // `revise.onVerdict` triggers the bounded revise loop before the loop continues. `runIfVerdict`
+      // gates a conditional stage (e.g. the publisher) on the CURRENT verdict. Returns a terminal object
+      // to bubble, or null once every stage has run.
+      const runStagePipeline = async () => {
+        for (const stage of team.stages) {
+          // Publisher (and any conditional stage) runs only when the editor verdict matches.
+          if (stage.runIfVerdict && verdict !== stage.runIfVerdict) continue;
+
+          const linear = await runOneStage({ stage, round: 0 });
+          if (linear.terminal) return linear.terminal;
+
+          if (stage.revise && verdict === stage.revise.onVerdict) {
+            const reviseTerminal = await runReviseLoop(stage);
+            if (reviseTerminal) return reviseTerminal;
+          }
+        }
+        return null;
+      };
+
+      const pipelineTerminal = await runStagePipeline();
+      if (pipelineTerminal) return pipelineTerminal;
 
       const topic = topicRef.value;
       const platforms = platformsRef.value;
@@ -672,5 +701,14 @@ function createOrchestrator(deps) {
 }
 
 module.exports = {
-  createOrchestrator, parseVerdict, extractQuestion, sectionFirstLine, formatRunVerdict, defaultRunLabel,
+  createOrchestrator,
+  parseVerdict,
+  extractQuestion,
+  sectionFirstLine,
+  formatRunVerdict,
+  defaultRunLabel,
+  buildReadNames,
+  selectReviseStages,
+  allUnchanged,
+  baseBranchBlockReason,
 };

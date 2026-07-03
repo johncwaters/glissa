@@ -25,6 +25,8 @@ const {
 } = require("./session-core/state-machine");
 const { mapSignalToEvent } = require("./session-core/status-mapper");
 const { buildMergePrompt } = require("./session-core/merge-prompt");
+const { createOutputRing } = require("./session-core/output-ring");
+const { decideSignatureDemotion, decideDiffSelfHeal } = require("./session-core/merge-gate");
 const agentTracker = require("./session-core/agent-tracker");
 const wakeupTracker = require("./session-core/wakeup-tracker");
 
@@ -174,14 +176,9 @@ class Session extends EventEmitter {
     this.state = STATES.DORMANT;
     this.auditLog = [];
     this._receivedFirstOutput = false;
-    this._outputBuffer = []; // ring buffer of recent PTY chunks
-    this._outputBufferHead = 0; // index of oldest valid entry; advances instead of shift()
-    this._outputBufferSize = 0;
-    this._outputBufferMax = replayBufferKB * 1024;
-    // Monotonic count of total bytes ever produced (never decremented by eviction).
-    // This is the "end" offset for getBufferSince(); per-client ws-senders track how
-    // far they have durably sent against it so a backpressure drop can be backfilled.
-    this._outputBufferTotal = 0;
+    // Ring buffer of recent PTY chunks (see session-core/output-ring.js for the
+    // eviction, monotonic-total, and offset semantics).
+    this._outputRing = createOutputRing(replayBufferKB * 1024);
     this._killPollTimer = null;
     // In-flight reap (taskkill) promise from the most recent kill(), or null. The server lifecycle
     // (shutdown -> requestRestart/requestShutdown) awaits these before exit/respawn so the PTY tree
@@ -726,10 +723,8 @@ class Session extends EventEmitter {
     // phantom "1" on the review badge with "No changes in this worktree" below it. getDiff is the one
     // place that re-derives what is actually reviewable, so when nothing is, drop the gate to 'none'
     // (broadcast via the merge-status event, which clears the badge and the note).
-    if ((this.mergeStatus === "pending-review" || this.mergeStatus === "parked")
-        && committed.diff.trim() === "" && uncommitted.diff.trim() === "") {
-      this._setMergeStatus("none");
-    }
+    const healed = decideDiffSelfHeal(this.mergeStatus, committed.diff, uncommitted.diff);
+    if (healed) this._setMergeStatus(healed);
     return { committed, uncommitted, hasCommits };
   }
 
@@ -816,21 +811,10 @@ class Session extends EventEmitter {
     // Gate demotions run BEFORE the signature dedup: a park can leave the worktree byte-identical to the
     // established baseline (a lost fast-forward does not abort the no-op rebase, and the merge flow never
     // resets _lastWorktreeSig), so a dedup-gated demotion would never fire and 'parked' would stick forever.
-    let demoted = false;
-    if ((this.mergeStatus === "pending-review" || this.mergeStatus === "parked")
-        && !sig.dirty && (sig.ahead === "" || sig.ahead === "0")) {
-      this._setMergeStatus("none");
-      demoted = true;
-    }
-    // A parked merge whose worktree is clean, sits on top of the merge target (behind 0), and is not
-    // mid-rebase is mergeable again: the rebase-then-FF will now succeed, so hand Merge back by demoting
-    // to pending-review (NOT 'none': the committed work is still unmerged and reviewable).
-    if (this.mergeStatus === "parked"
-        && !sig.dirty && sig.ahead !== "" && sig.ahead !== "0"
-        && (sig.behind === "" || sig.behind === "0") && !sig.rebaseInProgress) {
-      this._setMergeStatus("pending-review");
-      demoted = true;
-    }
+    // The decision matrix itself is pure (session-core/merge-gate.js).
+    const next = decideSignatureDemotion(this.mergeStatus, sig);
+    const demoted = next !== null;
+    if (demoted) this._setMergeStatus(next);
     if (sig.sig === this._lastWorktreeSig && !demoted) return;
     this._lastWorktreeSig = sig.sig;
     this.emit("worktree-changed", { id: this.id, sig: sig.sig });
@@ -1005,9 +989,9 @@ class Session extends EventEmitter {
       pendingRestart: this._pendingRestart,
       hasPty: this.ptyProcess !== null,
       ptyPid: this.ptyProcess ? this.ptyProcess.pid : null,
-      outputBufferEntries: this._outputBuffer.length - this._outputBufferHead,
-      outputBufferBytes: this._outputBufferSize,
-      outputBufferTotal: this._outputBufferTotal,
+      outputBufferEntries: this._outputRing.stats().entries,
+      outputBufferBytes: this._outputRing.size,
+      outputBufferTotal: this._outputRing.total,
       auditLogLength: this.auditLog.length,
       dataListenerCount: this.listenerCount("data"),
       hookSeen: this._hookSeen,
@@ -1152,10 +1136,7 @@ class Session extends EventEmitter {
     this._clearAgents();
     this._clearWakeups();
     this._autoKilled = false;
-    this._outputBuffer = [];
-    this._outputBufferHead = 0;
-    this._outputBufferSize = 0;
-    this._outputBufferTotal = 0;
+    this._outputRing.reset();
     // A restarted PTY re-bases its monotonic output offset at 0. Signal the backend so
     // it force-closes any LIVE data-WS client (whose ws-sender.sentOffset is now
     // stale-high relative to the reset total) and lets it reconnect + re-baseline.
@@ -1343,33 +1324,14 @@ class Session extends EventEmitter {
       }
     }
 
-    // Buffer for late-joining data WS clients. Uses a head-index ring instead
-    // of Array.shift() (O(n) per call) to keep the hot path O(1) amortized.
+    // Buffer for late-joining data WS clients (session-core/output-ring.js).
     //
-    // ORDER CONTRACT: the ring push + _outputBufferTotal increment MUST stay BEFORE
-    // emit("data") below. ws-sender.maybeBackfill() reads getBufferSince() from inside
-    // the "data" listener and relies on the just-arrived chunk already being
-    // retained and counted (see ws-sender.js maybeBackfill). Reordering would make a
-    // backfill miss the in-flight chunk.
-    this._outputBuffer.push(data);
-    this._outputBufferSize += data.length;
-    this._outputBufferTotal += data.length;
-    while (
-      this._outputBufferSize > this._outputBufferMax &&
-      this._outputBuffer.length - this._outputBufferHead > 1
-    ) {
-      this._outputBufferSize -= this._outputBuffer[this._outputBufferHead].length;
-      this._outputBuffer[this._outputBufferHead] = null;
-      this._outputBufferHead++;
-    }
-    if (this._outputBufferHead > 1024) {
-      this._outputBuffer = this._outputBuffer.slice(this._outputBufferHead);
-      this._outputBufferHead = 0;
-    }
-
-    // ORDER CONTRACT (see the ring-push block above): emit AFTER the push +
-    // _outputBufferTotal increment so a backfill triggered from this listener sees
-    // the in-flight chunk already in the ring.
+    // ORDER CONTRACT: the ring push (which advances the monotonic total) MUST stay
+    // BEFORE emit("data") below. ws-sender.maybeBackfill() reads getBufferSince()
+    // from inside the "data" listener and relies on the just-arrived chunk already
+    // being retained and counted (see ws-sender.js maybeBackfill). Reordering would
+    // make a backfill miss the in-flight chunk.
+    this._outputRing.push(data);
     if (this.listenerCount("data") > 0) {
       this.emit("data", data);
     }
@@ -1426,52 +1388,19 @@ class Session extends EventEmitter {
   }
 
   getReplayBuffer() {
-    return this._outputBufferHead === 0
-      ? this._outputBuffer.join("")
-      : this._outputBuffer.slice(this._outputBufferHead).join("");
+    return this._outputRing.replay();
   }
 
   // Current monotonic output offset (== total bytes ever produced). A data-WS client
   // captures this at connect as its live baseline (startOffset).
   getOutputOffset() {
-    return this._outputBufferTotal;
+    return this._outputRing.total;
   }
 
-  // Return the slice of output produced at or after `offset`. Offsets are monotonic
-  // byte counts in JS string .length units (UTF-16 code units), consistent with the
-  // ring's sizing. Returns { data, base, end, evicted }:
-  //   - end  = current total (the offset the caller should adopt after consuming).
-  //   - base = oldest retained offset = end - retained bytes.
-  //   - offset >= end  -> nothing new ({ data: "" }).
-  //   - offset <  base -> the missed range was evicted from the ring; `data` is the
-  //                       full current replay and `evicted` is true (caller must
-  //                       screen-clear before writing it).
-  //   - otherwise      -> the exact tail from `offset`, slicing the boundary chunk.
-  // `offset` is always a previous cumulative .length (a chunk-append boundary), never an
-  // arbitrary mid-chunk index, so the boundary slice never splits a UTF-16 surrogate pair.
+  // Slice of output produced at or after `offset`; full offset/eviction semantics
+  // documented on session-core/output-ring.js since().
   getBufferSince(offset) {
-    const end = this._outputBufferTotal;
-    const base = end - this._outputBufferSize; // oldest retained offset (bytes evicted)
-    if (offset >= end) {
-      return { data: "", base, end, evicted: false };
-    }
-    if (offset < base) {
-      return { data: this.getReplayBuffer(), base, end, evicted: true };
-    }
-    let pos = base;
-    let out = "";
-    for (let i = this._outputBufferHead; i < this._outputBuffer.length; i++) {
-      const chunk = this._outputBuffer[i];
-      if (chunk == null) continue; // eviction nulls entries before head compaction
-      const len = chunk.length;
-      if (pos + len <= offset) {
-        pos += len;
-        continue;
-      }
-      out += offset > pos ? chunk.slice(offset - pos) : chunk;
-      pos += len;
-    }
-    return { data: out, base, end, evicted: false };
+    return this._outputRing.since(offset);
   }
 
   write(text) {
@@ -1809,7 +1738,7 @@ class Session extends EventEmitter {
 
   updateSettings(cfg) {
     if (cfg.replayBufferKB != null)
-      this._outputBufferMax = cfg.replayBufferKB * 1024;
+      this._outputRing.setMax(cfg.replayBufferKB * 1024);
   }
 
   destroy() {

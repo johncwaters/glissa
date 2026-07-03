@@ -1,7 +1,7 @@
 'use strict';
 
 // Coverage for the per-client backfill substrate added to Session: the monotonic output
-// total (_outputBufferTotal / getOutputOffset), the getBufferSince(offset) range accessor
+// total (output-ring total / getOutputOffset), the getBufferSince(offset) range accessor
 // (all four branches + the boundary/null/surrogate edges), the push-before-emit ORDER
 // CONTRACT that the ws-sender backfill relies on, and the start()-time 'rebaseline' signal
 // that tells the backend to re-baseline live data-WS clients on an in-place restart.
@@ -55,7 +55,7 @@ test('getBufferSince: exact tail within the retained window (boundary + mid-chun
 });
 
 test('getBufferSince: evicted branch (offset < base) returns full replay + evicted=true', () => {
-  const s = newSession({ replayBufferKB: 0 }); // _outputBufferMax = 0 -> evict to 1 entry
+  const s = newSession({ replayBufferKB: 0 }); // ring max = 0 -> evict to 1 entry
   s._handlePtyData('aaaa');
   s._handlePtyData('bbbb'); // evicts 'aaaa'; retained = 'bbbb', base = 4
   const r = s.getBufferSince(0);
@@ -70,7 +70,7 @@ test('getBufferSince: tolerates a null hole in the retained range (defensive)', 
   s._handlePtyData('aaaa');
   s._handlePtyData('bbbb');
   // Inject a defensive null between retained chunks (mirrors a transient eviction state).
-  s._outputBuffer.splice(1, 0, null); // ['aaaa', null, 'bbbb'], size/total unchanged
+  s._outputRing.chunks.splice(1, 0, null); // ['aaaa', null, 'bbbb'], size/total unchanged
   assert.equal(s.getBufferSince(0).data, 'aaaabbbb', 'null entry skipped; slice correct');
   assert.equal(s.getBufferSince(4).data, 'bbbb');
 });
@@ -88,7 +88,7 @@ test('getBufferSince: offset on a chunk boundary never splits a surrogate pair',
   assert.equal([...full].length, 3, 'x, emoji, y — one code point, not mojibake');
 });
 
-test('_outputBufferTotal increments on push and is exposed via getHealthStats', () => {
+test('output-ring total increments on push and is exposed via getHealthStats', () => {
   const s = newSession();
   s._handlePtyData('abc');
   s._handlePtyData('de');

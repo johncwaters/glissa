@@ -11,6 +11,7 @@ import { STATES } from '/shared/states.mjs';
 import { sendControlMsg } from '../control-ws.js';
 import { el, escapeHtml } from '../dom-helpers.js';
 import { sessionUIs } from './card-registry.js';
+import { createModalOverlay } from './modal.js';
 import { showErrorToast } from './toast.js';
 
 // Debug overlay visibility - toggled by applyTerminalSettings (lifecycle) via
@@ -26,13 +27,7 @@ export function setDebugMode(on) {
 
 // Inline confirm dialog - avoids circular dep with dialogs.js (card-dom.js <-> dialogs.js).
 export function showConfirmDialog({ title, message, confirmLabel = 'Confirm', onConfirm }) {
-  const opener = document.activeElement;
-
-  const overlay = document.createElement('div');
-  overlay.className = 'dialog-overlay';
-
-  const dialog = document.createElement('div');
-  dialog.className = 'dialog';
+  const { dialog, close } = createModalOverlay();
 
   const titleId = 'sc-confirm-' + Math.random().toString(36).slice(2);
 
@@ -58,8 +53,6 @@ export function showConfirmDialog({ title, message, confirmLabel = 'Confirm', on
 
   actions.append(btnCancel, btnConfirm);
   dialog.append(titleEl, msgEl, actions);
-  overlay.appendChild(dialog);
-  document.body.appendChild(overlay);
 
   dialog.setAttribute('role', 'dialog');
   dialog.setAttribute('aria-modal', 'true');
@@ -79,20 +72,8 @@ export function showConfirmDialog({ title, message, confirmLabel = 'Confirm', on
     }
   });
 
-  function close() {
-    document.removeEventListener('keydown', escHandler);
-    overlay.remove();
-    opener?.focus?.();
-  }
-
-  function escHandler(e) {
-    if (e.key === 'Escape') close();
-  }
-
   btnCancel.addEventListener('click', close);
   btnConfirm.addEventListener('click', () => { close(); onConfirm?.(); });
-  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
-  document.addEventListener('keydown', escHandler);
 
   requestAnimationFrame(() => btnCancel.focus());
 }
@@ -327,10 +308,6 @@ function renderDebugOverlay(ui, payload) {
   html += `</div>`;
 
   ui.debugOverlay.innerHTML = html;
-}
-
-function truncate(str, max) {
-  return str.length > max ? str.slice(0, max) + '...' : str;
 }
 
 export function openDebugOverlay(ui, sessionId) {

@@ -6,6 +6,7 @@ import addSessionHTML from './components/add-session-dialog.html?raw';
 import settingsHTML from './components/settings-dialog.html?raw';
 import { sendControlMsg, sendControlRequest } from './control-ws.js';
 import { ensureNotificationPermission, notificationsSupported } from './notifications.js';
+import { createModalOverlay } from './session-card/modal.js';
 import { countSessionsByName, suggestSessionName } from './session-card/naming.js';
 import { SHORTCUT_GROUPS } from './shortcuts.mjs';
 import { applyTheme, getThemeList } from './theme.js';
@@ -42,18 +43,8 @@ function applyDialogAria(dialog, titleId) {
 // ── Add Session dialog ────────────────────────────────────────
 
 export function createAddSessionDialog() {
-  const opener = document.activeElement;
-
-  const overlay = document.createElement('div');
-  overlay.className = 'dialog-overlay';
-
-  const dialog = document.createElement('div');
-  dialog.className = 'dialog';
-
+  const { dialog, close } = createModalOverlay();
   dialog.innerHTML = addSessionHTML;
-
-  overlay.appendChild(dialog);
-  document.body.appendChild(overlay);
 
   // Ensure title id exists for aria-labelledby
   let titleEl = dialog.querySelector('#add-session-title');
@@ -146,16 +137,6 @@ export function createAddSessionDialog() {
   // No confirm gate: YOLO is the default, so checking this box is the SAFE direction
   // (it asks Claude for permission prompts). Nothing dangerous to acknowledge here.
 
-  function close() {
-    document.removeEventListener('keydown', escHandler);
-    overlay.remove();
-    opener?.focus?.();
-  }
-
-  function escHandler(e) {
-    if (e.key === 'Escape') close();
-  }
-
   function submit() {
     const name = nameInput.value.trim();
     const projectPath = pathInput.value.trim();
@@ -174,14 +155,10 @@ export function createAddSessionDialog() {
     close();
   }
 
-  overlay.addEventListener('click', (e) => {
-    if (e.target === overlay) close();
-  });
   btnCancel.addEventListener('click', close);
   btnConfirm.addEventListener('click', submit);
   nameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') pathInput.focus(); });
   pathInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
-  document.addEventListener('keydown', escHandler);
 
   // Focus picker after render
   requestAnimationFrame(() => pickerEl.focus());
@@ -190,18 +167,8 @@ export function createAddSessionDialog() {
 // ── Settings dialog ──────────────────────────────────────────
 
 export function createSettingsDialog(initialTab) {
-  const opener = document.activeElement;
-
-  const overlay = document.createElement('div');
-  overlay.className = 'dialog-overlay';
-
-  const dialog = document.createElement('div');
-  dialog.className = 'dialog dialog-settings';
-
+  const { dialog, close } = createModalOverlay({ dialogClass: 'dialog dialog-settings' });
   dialog.innerHTML = settingsHTML;
-
-  overlay.appendChild(dialog);
-  document.body.appendChild(overlay);
 
   // Ensure title id exists for aria-labelledby
   let titleEl = dialog.querySelector('#settings-title');
@@ -318,16 +285,6 @@ export function createSettingsDialog(initialTab) {
 
   let repoRoots = [];
 
-  function close() {
-    document.removeEventListener('keydown', escHandler);
-    overlay.remove();
-    opener?.focus?.();
-  }
-
-  function escHandler(e) {
-    if (e.key === 'Escape') close();
-  }
-
   function renderRootList() {
     rootListEl.innerHTML = '';
     if (repoRoots.length === 0) {
@@ -432,12 +389,10 @@ export function createSettingsDialog(initialTab) {
   const shortcutGroupsEl = dialog.querySelector('#settings-shortcut-groups');
   if (shortcutGroupsEl) renderShortcutGroups(shortcutGroupsEl);
 
-  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
   btnCancel.addEventListener('click', close);
   btnSave.addEventListener('click', save);
   rootAddBtn.addEventListener('click', addRoot);
   rootInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') addRoot(); });
-  document.addEventListener('keydown', escHandler);
 
   // Open on a requested tab (the header ? button / ? key open straight to Shortcuts). Focus the tab
   // itself in that case, since the General theme picker lives in a now-hidden panel.
@@ -498,13 +453,7 @@ function shortcutSep(ch) {
 // ── Confirm dialog ───────────────────────────────────────────
 
 export function createConfirmDialog({ title, message, confirmLabel = 'Confirm', danger = false, onConfirm }) {
-  const opener = document.activeElement;
-
-  const overlay = document.createElement('div');
-  overlay.className = 'dialog-overlay';
-
-  const dialog = document.createElement('div');
-  dialog.className = 'dialog';
+  const { dialog, close } = createModalOverlay();
 
   const titleId = 'confirm-dialog-title-' + Math.random().toString(36).slice(2);
 
@@ -530,28 +479,14 @@ export function createConfirmDialog({ title, message, confirmLabel = 'Confirm', 
 
   actions.append(btnCancel, btnConfirm);
   dialog.append(titleEl, msgEl, actions);
-  overlay.appendChild(dialog);
-  document.body.appendChild(overlay);
 
   applyDialogAria(dialog, titleId);
-
-  function close() {
-    document.removeEventListener('keydown', escHandler);
-    overlay.remove();
-    opener?.focus?.();
-  }
-
-  function escHandler(e) {
-    if (e.key === 'Escape') close();
-  }
 
   btnCancel.addEventListener('click', close);
   btnConfirm.addEventListener('click', () => {
     close();
     onConfirm?.();
   });
-  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
-  document.addEventListener('keydown', escHandler);
 
   requestAnimationFrame(() => btnCancel.focus());
 }

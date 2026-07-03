@@ -2,6 +2,8 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const { escapeRegExp, hasHeading, readParagraph } = require('./markdown');
+const { extractVerdictToken } = require('./verdict');
 
 // The project-side <outputPath>/ convention for a team (outputPath defaults to .glissa/teams/<id> so
 // everything glissa writes into a target repo lives under .glissa/). See
@@ -27,12 +29,6 @@ const LOG_HEADER = '# Team run log\n';
 // First line of a run's chat.md. Not a chat marker, so readChat ignores it.
 const CHAT_HEADER = '# Team conversation\n\n';
 const WEEKDAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
-
-// Escape a string for literal use inside a RegExp (shared by the markdown-section matchers below and
-// by team-orchestrator's verdict/section parsing).
-function escapeRegExp(s) {
-  return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
 
 // Per-repo paths for a team, all under <projectPath>/<outputPath>/.
 function teamPaths(projectPath, outputPath) {
@@ -303,10 +299,7 @@ function verifyHandoff(filePath, requiredSections = []) {
     return { ok: false, missing: [...requiredSections] };
   }
   const text = fs.readFileSync(filePath, 'utf8');
-  const missing = requiredSections.filter((section) => {
-    const esc = escapeRegExp(section);
-    return !new RegExp(`^#{1,6}\\s*${esc}\\b`, 'im').test(text);
-  });
+  const missing = requiredSections.filter((section) => !hasHeading(text, section));
   return { ok: missing.length === 0, missing };
 }
 
@@ -358,22 +351,6 @@ function clip(value, max) {
   return t.length > max ? `${t.slice(0, max - 1).trimEnd()}${ELLIPSIS}` : t;
 }
 
-// The paragraph (joined non-empty lines) directly under a markdown heading.
-function readParagraph(text, heading) {
-  if (!text) return '';
-  const esc = escapeRegExp(heading);
-  const m = new RegExp(`^#{1,6}\\s*${esc}\\b.*$`, 'im').exec(text);
-  if (!m) return '';
-  const lines = [];
-  for (const raw of text.slice(m.index + m[0].length).split(/\r?\n/)) {
-    const t = raw.trim();
-    if (/^#{1,6}\s/.test(t)) break; // next heading
-    if (t === '' && lines.length) break; // end of paragraph
-    if (t) lines.push(t.replace(/^[-*]\s*/, ''));
-  }
-  return lines.join(' ');
-}
-
 // Summarize recent runs from their on-disk artifacts (newest first). Async on purpose: this serves a
 // dashboard request (get-team-runs) and reads up to limit x stages files; sync reads here block every
 // live session's PTY streaming on the shared event loop.
@@ -407,9 +384,9 @@ async function listRunSummaries(projectPath, outputPath, stages = [], limit = 10
       try { text = await fs.promises.readFile(fp, 'utf8'); } catch { continue; }
       if (!topic) topic = clip(readParagraph(text, 'Topic'), 140);
       if (!platforms) platforms = clip(readParagraph(text, 'Platforms'), 140);
-      const v = /VERDICT:\s*([A-Za-z]+)/i.exec(text);
+      const v = extractVerdictToken(text);
       if (v) {
-        verdict = v[1].toUpperCase();
+        verdict = v;
         summary = clip(readParagraph(text, 'Summary'), 320);
       }
     }
