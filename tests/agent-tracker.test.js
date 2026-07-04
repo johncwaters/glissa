@@ -12,6 +12,7 @@ const {
   extractBackgroundTasks,
   declaredActiveCount,
   soleActiveTeammateId,
+  drainPendingTeammateIdles,
   DEFAULT_AGENT_TTL_MS,
 } = require('../session/core/agent-tracker');
 
@@ -101,4 +102,42 @@ test('soleActiveTeammateId returns the single unambiguous live teammate id, else
   assert.equal(soleActiveTeammateId([{ id: 't1', type: 'teammate' }, { id: 't2', type: 'teammate' }], new Set(['t1'])), 't2', 'an already-idled teammate is excluded');
   assert.equal(soleActiveTeammateId(null, new Set()), null);
   assert.equal(soleActiveTeammateId([{ id: null, type: 'teammate' }], new Set()), null);
+});
+
+test('declaredActiveCount: a weak (shell/monitor) entry counts fresh and stops counting past the weak TTL; a teammate entry keeps counting', () => {
+  const entries = [{ id: 'b1', type: 'shell' }, { id: 't1', type: 'teammate' }];
+  const idleIds = new Set();
+  assert.equal(declaredActiveCount(entries, idleIds, 0, 100), 2, 'both count when fresh');
+  assert.equal(declaredActiveCount(entries, idleIds, 99, 100), 2, 'still under the ttl');
+  assert.equal(declaredActiveCount(entries, idleIds, 100, 100), 1, 'the shell entry stops counting at the ttl boundary; the teammate still counts');
+});
+
+test('drainPendingTeammateIdles drains the sole live teammate against one pending entry', () => {
+  const entries = [{ id: 't1', type: 'teammate' }];
+  const idleIds = new Set();
+  const pending = new Map([['x', 1000]]);
+  const drained = drainPendingTeammateIdles(entries, idleIds, pending, 2000);
+  assert.equal(drained, 1);
+  assert.ok(idleIds.has('t1'));
+  assert.equal(pending.size, 0);
+});
+
+test('drainPendingTeammateIdles expires stale pending entries without draining', () => {
+  const entries = [{ id: 't1', type: 'teammate' }];
+  const idleIds = new Set();
+  const pending = new Map([['x', 1000]]);
+  const drained = drainPendingTeammateIdles(entries, idleIds, pending, 10000, 5000); // 9000ms old, ttl 5000
+  assert.equal(drained, 0);
+  assert.equal(idleIds.size, 0);
+  assert.equal(pending.size, 0, 'the stale entry is dropped, not retried');
+});
+
+test('drainPendingTeammateIdles is ambiguity-safe: two live teammates leaves the pending entry retained', () => {
+  const entries = [{ id: 't1', type: 'teammate' }, { id: 't2', type: 'teammate' }];
+  const idleIds = new Set();
+  const pending = new Map([['x', 1000]]);
+  const drained = drainPendingTeammateIdles(entries, idleIds, pending, 2000);
+  assert.equal(drained, 0);
+  assert.equal(idleIds.size, 0);
+  assert.equal(pending.size, 1, 'nothing resolvable, so the pending entry is kept for a later retry');
 });

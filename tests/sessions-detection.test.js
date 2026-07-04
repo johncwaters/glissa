@@ -509,6 +509,53 @@ test('TaskCreated reactivates an idled teammate so it gates again', (t) => {
   s.destroy();
 });
 
+// --- Deferred TeammateIdle resolution (pending retry against a later background_tasks snapshot) ---
+
+test('a TeammateIdle that cannot resolve at resume time is retried and drains on the next Stop', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const s = makeSession(STATES.RUNNING);
+  hook(s, 'ready', { payload: { background_tasks: [{ id: 'tm1', type: 'teammate', status: 'running' }] } });
+  t.mock.timers.tick(40);
+  assert.equal(s.state, STATES.RUNNING, 'the declared teammate still gates');
+  hook(s, 'resume'); // clears the declared snapshot; a TeammateIdle arriving now can't resolve
+  assert.equal(s.state, STATES.RUNNING);
+  hook(s, 'teammate-idle', { payload: { teammate_name: 'x' } }); // unresolvable, goes pending
+  assert.equal(s.state, STATES.RUNNING);
+  hook(s, 'ready', { payload: { background_tasks: [{ id: 'tm1', type: 'teammate', status: 'running' }] } });
+  t.mock.timers.tick(40);
+  assert.equal(s.state, STATES.COMPLETE, 'the pending idle drains against the fresh snapshot before this Stop is mapped');
+  s.destroy();
+});
+
+test('a pending TeammateIdle drains a gate-held ready without any further Stop', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const s = makeSession(STATES.RUNNING);
+  hook(s, 'subagent-start', { payload: { agent_id: 'a1' } });
+  hook(s, 'ready');
+  t.mock.timers.tick(40);
+  assert.equal(s.state, STATES.RUNNING, 'suppressed and held while a1 is live');
+  hook(s, 'teammate-idle', { payload: { teammate_name: 'x' } }); // no declared snapshot yet: goes pending
+  assert.equal(s.state, STATES.RUNNING);
+  hook(s, 'subagent-stop', {
+    payload: { agent_id: 'a1', background_tasks: [{ id: 'tm1', type: 'teammate', status: 'running' }] },
+  });
+  assert.equal(s.state, STATES.COMPLETE, 'a1 drains, the pending idle drains tm1, and the held ready releases');
+  s.destroy();
+});
+
+// --- Weak (shell/monitor) background_tasks TTL: no completion hook ever fires for these ---
+
+test('a declared shell task stops gating past its TTL and the held ready is released', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const s = makeSession(STATES.RUNNING, { shellTaskTtlMs: 150 });
+  hook(s, 'ready', { payload: { background_tasks: [{ id: 'b1', type: 'shell', status: 'running' }] } });
+  t.mock.timers.tick(100);
+  assert.equal(s.state, STATES.RUNNING, 'still gating before the ttl boundary');
+  t.mock.timers.tick(250); // past ttl + the release timer epsilon
+  assert.equal(s.state, STATES.COMPLETE, 'a shell task never gets a completion hook; the ttl releases the held ready');
+  s.destroy();
+});
+
 test('newer activity cancels a held ready (drain later must not complete a resumed turn)', (t) => {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   const s = makeSession(STATES.RUNNING);
