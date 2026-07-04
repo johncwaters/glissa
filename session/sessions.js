@@ -243,12 +243,25 @@ class Session extends EventEmitter {
     // teammate_name -> task_id learned from TaskCreated, because TeammateIdle carries only
     // the name. Cleared on PTY exit/(re)start.
     this._teammateTasks = new Map();
-    // TeammateIdle that could not be resolved to a declared id yet (no name mapping and no
-    // unambiguous declared snapshot at the time, e.g. a resume just cleared _bgDeclared).
-    // Retried against every later background_tasks snapshot in _applyBackgroundTasks; TTL-
-    // bounded (see agent-tracker.DEFAULT_PENDING_IDLE_TTL_MS) so a stale name can never drain
-    // a future, unrelated teammate. Keyed by pendingKey -> ts received.
-    this._pendingIdleTeammates = new Map();
+    // Teammates known idle BY NAME when no TaskCreated mapping resolved them (declared entries
+    // can NOT be matched to a name; a teammate's `description` is the spawn prompt, live-
+    // verified). Map<name, ts>, insertion-ordered; a nameless payload gets a synthetic key
+    // (same collision-free scheme as _trackWakeup). Persists across resume (an idle teammate
+    // stays declared by every later Stop); subtracted from the declared teammate count in
+    // agent-tracker.declaredActiveCount, clamped there to the live teammate count. Re-gated by
+    // TaskCreated (reactivation) or a SubagentStart whose agent_id embeds the name
+    // (`a<name>-<hex>`, the only signal for a teammate the lead re-wakes via mailbox, since no
+    // TaskCreated ever fires for a named-agent teammate). TTL-pruned lazily in
+    // _activeAgentCount so a stale name can never mask a future same-named teammate forever.
+    this._idleTeammateNames = new Map();
+    // The teammate-entry ids seen in the last background_tasks snapshot. Persists across resume
+    // exactly like _idleTeammateNames (both outlive the snapshot they were learned from), so a
+    // departed teammate can be detected on the NEXT snapshot: without this, a name idled for a
+    // teammate that then shuts down stays in _idleTeammateNames forever and wrongly offsets a
+    // later, unrelated teammate declared under a different id (the count-based subtraction has
+    // no other way to tell "the teammate I idled" from "a different teammate that happens to
+    // keep the count the same"). Cleared in _clearAgents.
+    this._declaredTeammateIds = new Set();
     // A main-agent `ready` suppressed by the activeAgents gate, held so the card can still
     // complete when the background count later drains WITHOUT another Stop (idle teammate
     // declared in background_tasks, dropped SubagentStop bounded only by the TTL). Without
@@ -401,13 +414,31 @@ class Session extends EventEmitter {
     for (const id of this._idleTaskIds) {
       if (!declaredIds.has(id)) this._idleTaskIds.delete(id);
     }
-    // Retry any TeammateIdle that arrived before this snapshot existed (e.g. a resume cleared
-    // the prior one): this fresh snapshot may now resolve it unambiguously.
-    agentTracker.drainPendingTeammateIdles(entries, this._idleTaskIds, this._pendingIdleTeammates, Date.now());
+    // A teammate id that was declared last snapshot but is gone from this one has departed
+    // (shut down); any name idled against it no longer means anything, and left in place it
+    // would wrongly offset a DIFFERENT teammate that happens to keep the surviving count the
+    // same (see _declaredTeammateIds). Evict that many of the OLDEST idle names: names are
+    // anonymous bookkeeping (the arithmetic only cares about the count), so evicting the
+    // oldest is as correct as evicting the departed one and needs no name-to-id mapping.
+    const currentTeammateIds = new Set(entries.filter((e) => e.type === 'teammate' && e.id).map((e) => e.id));
+    let departedCount = 0;
+    for (const id of this._declaredTeammateIds) {
+      if (!currentTeammateIds.has(id)) departedCount++;
+    }
+    for (const name of this._idleTeammateNames.keys()) {
+      if (departedCount <= 0) break;
+      this._idleTeammateNames.delete(name);
+      departedCount--;
+    }
+    this._declaredTeammateIds = currentTeammateIds;
     // Deliberately no ageMs here: this snapshot is fresh (age 0), so weak (shell/monitor)
     // entries always count. Only _activeAgentCount ages them (see its declaredActiveCount call).
-    const declaredActive = agentTracker.declaredActiveCount(entries, this._idleTaskIds);
-    if (declaredActive === 0 && this._activeAgents.size > 0) this._activeAgents.clear();
+    //
+    // The counted-map drain below must key off the RAW count (no idleNameCount): that heuristic
+    // is Glissa-side bookkeeping, not something Claude declared, so it must never be the reason
+    // a live counted agent_id gets wiped out from under a still-running turn.
+    const rawDeclaredActive = agentTracker.declaredActiveCount(entries, this._idleTaskIds);
+    if (rawDeclaredActive === 0 && this._activeAgents.size > 0) this._activeAgents.clear();
     if (this._activeAgentCount() !== before) this._emitAgentsChange();
   }
 
@@ -429,10 +460,10 @@ class Session extends EventEmitter {
       // New background work: like subagent-start, it invalidates a held ready, and a
       // reactivated teammate (new task) must gate again.
       this._clearGateHeldReady();
-      // A reactivated teammate cancels any pending idle recorded for it, even on a payload
-      // with no task_id (the pending map is name-keyed and independent of the id bookkeeping).
+      // A reactivated teammate cancels any idle-by-name record for it, even on a payload
+      // with no task_id (the name map is independent of the id bookkeeping).
       if (typeof p.teammate_name === "string" && p.teammate_name) {
-        this._pendingIdleTeammates.delete(p.teammate_name);
+        this._idleTeammateNames.delete(p.teammate_name);
       }
       if (!taskId) return;
       if (typeof p.teammate_name === "string" && p.teammate_name) {
@@ -449,26 +480,32 @@ class Session extends EventEmitter {
       this._idleTaskIds.add(taskId);
       // Task ids and subagent agent_ids can share a namespace; a no-op removal is harmless.
       agentTracker.removeAgent(this._activeAgents, taskId);
+      // A payload that carries both an id and a name must drain by id only ONCE: leaving the
+      // name behind would also subtract it from a different, still-live teammate.
+      if (typeof p.teammate_name === "string" && p.teammate_name) {
+        this._idleTeammateNames.delete(p.teammate_name);
+      }
       if (this._activeAgentCount() !== before) this._emitAgentsChange();
       return;
     }
-    // teammate-idle: name only, no task_id. Resolve via the TaskCreated mapping, falling
-    // back to the single unambiguous declared teammate entry (drop the signal otherwise).
+    // teammate-idle: name only, no task_id. Resolve via the TaskCreated mapping only -
+    // declared entries can NOT be matched to a name (their `description` is the spawn prompt,
+    // live-verified). An unresolved idle is recorded BY NAME instead: agent-tracker's
+    // declaredActiveCount subtracts the idle-name count from the declared teammate count, so
+    // several simultaneous idle teammates each drain the gate without needing a per-id match.
     const name = typeof p.teammate_name === "string" ? p.teammate_name : "";
-    const resolved = (name && this._teammateTasks.get(name))
-      || agentTracker.soleActiveTeammateId(this._bgDeclared, this._idleTaskIds);
-    if (!resolved) {
-      // Can't resolve yet (e.g. a resume just cleared the declared snapshot): retry against
-      // the next background_tasks snapshot instead of dropping it outright.
-      const key = name || `i${++this._wakeupSeq}`; // collision-free synthetic key, same scheme as _trackWakeup
-      this._pendingIdleTeammates.set(key, Date.now());
+    const resolved = name && this._teammateTasks.get(name);
+    if (resolved) {
+      this._idleTaskIds.add(resolved);
+      this._idleTeammateNames.delete(name); // no double-count against the same teammate
+      if (this._activeAgentCount() !== before) this._emitAgentsChange();
       return;
     }
-    // A resolved idle also cancels any pending entry for the same name, so the same signal
-    // cannot drain twice. (A pending entry draining a differently-named sole teammate within
-    // the TTL remains an accepted heuristic risk of the name-agnostic fallback.)
-    if (name) this._pendingIdleTeammates.delete(name);
-    this._idleTaskIds.add(resolved);
+    // A nameless payload can never be re-gated (no TaskCreated match, no a<name>- prefix match),
+    // so recording it would be a pure false-drain vector with no way back. Ground truth says the
+    // payload always carries teammate_name; drop it rather than guess a synthetic key.
+    if (!name) return;
+    this._idleTeammateNames.set(name, Date.now());
     if (this._activeAgentCount() !== before) this._emitAgentsChange();
   }
 
@@ -477,10 +514,28 @@ class Session extends EventEmitter {
   // 'agents-change' delta only when the live count actually changed.
   _trackSubagent(raw) {
     if (!this._detectBackgroundAgents) return;
-    // Fresh background work is newer activity: a held ready from before it must not release
-    // when only the OLDER ids drain (subagent-start never reaches _onStatus's clearing path).
-    if (raw.signal === "subagent-start") this._clearGateHeldReady();
     const agentId = raw.payload && raw.payload.agent_id;
+    if (raw.signal === "subagent-start") {
+      // Fresh background work is newer activity: a held ready from before it must not release
+      // when only the OLDER ids drain (subagent-start never reaches _onStatus's clearing path).
+      this._clearGateHeldReady();
+      // Teammate agent_ids embed the spawn name (live-captured: "a<name>-<hex>"). This is the
+      // only re-gating signal for a teammate the lead wakes via mailbox: no TaskCreated ever
+      // fires for a named-agent teammate (memory: named-agent-teammate-hook-sequence).
+      if (typeof agentId === "string") {
+        const before = this._activeAgentCount();
+        for (const name of this._idleTeammateNames.keys()) {
+          const prefix = `a${name}-`;
+          // The remainder after the prefix must be pure hex: without this check, idle name
+          // "foo" would be falsely re-gated by a DIFFERENT teammate "foo-bar" starting
+          // (agent_id "afoo-bar-1a2b" also starts with "afoo-").
+          if (agentId.startsWith(prefix) && /^[0-9a-f]+$/i.test(agentId.slice(prefix.length))) {
+            this._idleTeammateNames.delete(name);
+          }
+        }
+        if (this._activeAgentCount() !== before) this._emitAgentsChange();
+      }
+    }
     if (agentId) {
       const changed = raw.signal === "subagent-start"
         ? agentTracker.addAgent(this._activeAgents, agentId, raw.ts || Date.now())
@@ -498,6 +553,9 @@ class Session extends EventEmitter {
     if (!this._detectBackgroundAgents) return 0;
     const now = Date.now();
     agentTracker.pruneAgents(this._activeAgents, now, this._agentTtlMs);
+    // Same lazy TTL bound as the counted map: a stale idle-by-name record (e.g. a teammate
+    // that never gets reactivated) can never mask a future, unrelated same-named teammate.
+    agentTracker.pruneAgents(this._idleTeammateNames, now, this._agentTtlMs);
     // Same lazy TTL bound as the counted map: a snapshot whose refreshing Stop never
     // arrived (hung background task, dropped hook) ages out instead of suppressing
     // completion forever.
@@ -505,11 +563,12 @@ class Session extends EventEmitter {
       this._bgDeclared = null;
       this._bgDeclaredTs = 0;
     }
-    // The declared count (minus out-of-band idled ids) wins when larger: it sees background
-    // Bash tasks and teammates that never fire SubagentStart. The counted map wins when
-    // larger: it is fresher than a pre-drain Stop snapshot.
+    // The declared count (minus out-of-band idled ids/names) wins when larger: it sees
+    // background Bash tasks and teammates that never fire SubagentStart. The counted map wins
+    // when larger: it is fresher than a pre-drain Stop snapshot.
     const declared = agentTracker.declaredActiveCount(
-      this._bgDeclared, this._idleTaskIds, this._bgDeclared ? now - this._bgDeclaredTs : 0, this._shellTaskTtlMs,
+      this._bgDeclared, this._idleTaskIds, this._bgDeclared ? now - this._bgDeclaredTs : 0,
+      this._shellTaskTtlMs, this._idleTeammateNames.size,
     );
     return Math.max(this._activeAgents.size, declared);
   }
@@ -573,7 +632,8 @@ class Session extends EventEmitter {
     this._bgDeclaredTs = 0;
     this._idleTaskIds.clear();
     this._teammateTasks.clear();
-    this._pendingIdleTeammates.clear();
+    this._idleTeammateNames.clear();
+    this._declaredTeammateIds.clear();
     if (had) this._emitAgentsChange();
   }
 

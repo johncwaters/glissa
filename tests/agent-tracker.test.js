@@ -11,8 +11,6 @@ const {
   pruneAgents,
   extractBackgroundTasks,
   declaredActiveCount,
-  soleActiveTeammateId,
-  drainPendingTeammateIdles,
   DEFAULT_AGENT_TTL_MS,
 } = require('../session/core/agent-tracker');
 
@@ -95,15 +93,6 @@ test('declaredActiveCount filters out-of-band idled ids; an id-less entry always
   assert.equal(declaredActiveCount(null, new Set(['a'])), 0);
 });
 
-test('soleActiveTeammateId returns the single unambiguous live teammate id, else null', () => {
-  assert.equal(soleActiveTeammateId([{ id: 't1', type: 'teammate' }], new Set()), 't1');
-  assert.equal(soleActiveTeammateId([{ id: 't1', type: 'teammate' }, { id: 'b1', type: 'shell' }], new Set()), 't1');
-  assert.equal(soleActiveTeammateId([{ id: 't1', type: 'teammate' }, { id: 't2', type: 'teammate' }], new Set()), null, 'two live teammates is ambiguous');
-  assert.equal(soleActiveTeammateId([{ id: 't1', type: 'teammate' }, { id: 't2', type: 'teammate' }], new Set(['t1'])), 't2', 'an already-idled teammate is excluded');
-  assert.equal(soleActiveTeammateId(null, new Set()), null);
-  assert.equal(soleActiveTeammateId([{ id: null, type: 'teammate' }], new Set()), null);
-});
-
 test('declaredActiveCount: a weak (shell/monitor) entry counts fresh and stops counting past the weak TTL; a teammate entry keeps counting', () => {
   const entries = [{ id: 'b1', type: 'shell' }, { id: 't1', type: 'teammate' }];
   const idleIds = new Set();
@@ -112,32 +101,38 @@ test('declaredActiveCount: a weak (shell/monitor) entry counts fresh and stops c
   assert.equal(declaredActiveCount(entries, idleIds, 100, 100), 1, 'the shell entry stops counting at the ttl boundary; the teammate still counts');
 });
 
-test('drainPendingTeammateIdles drains the sole live teammate against one pending entry', () => {
-  const entries = [{ id: 't1', type: 'teammate' }];
-  const idleIds = new Set();
-  const pending = new Map([['x', 1000]]);
-  const drained = drainPendingTeammateIdles(entries, idleIds, pending, 2000);
-  assert.equal(drained, 1);
-  assert.ok(idleIds.has('t1'));
-  assert.equal(pending.size, 0);
+test('declaredActiveCount: dream entries never gate, alone or mixed with gating entries', () => {
+  assert.equal(declaredActiveCount([{ id: 'd1', type: 'dream' }], new Set()), 0, 'a lone dream entry never gates');
+  const mixed = [{ id: 'd1', type: 'dream' }, { id: 'b1', type: 'shell' }];
+  assert.equal(declaredActiveCount(mixed, new Set()), 1, 'the dream entry is skipped; the shell entry still gates');
 });
 
-test('drainPendingTeammateIdles expires stale pending entries without draining', () => {
-  const entries = [{ id: 't1', type: 'teammate' }];
-  const idleIds = new Set();
-  const pending = new Map([['x', 1000]]);
-  const drained = drainPendingTeammateIdles(entries, idleIds, pending, 10000, 5000); // 9000ms old, ttl 5000
-  assert.equal(drained, 0);
-  assert.equal(idleIds.size, 0);
-  assert.equal(pending.size, 0, 'the stale entry is dropped, not retried');
+test('declaredActiveCount: idleNameCount subtracts from surviving teammate-type entries', () => {
+  const entries = [{ id: 't1', type: 'teammate' }, { id: 't2', type: 'teammate' }, { id: 't3', type: 'teammate' }];
+  assert.equal(declaredActiveCount(entries, new Set(), 0, undefined, 0), 3, 'no idle names, nothing subtracted');
+  assert.equal(declaredActiveCount(entries, new Set(), 0, undefined, 1), 2, 'one idle name drains one teammate');
+  assert.equal(declaredActiveCount(entries, new Set(), 0, undefined, 3), 0, 'all three idle names drain all three teammates');
 });
 
-test('drainPendingTeammateIdles is ambiguity-safe: two live teammates leaves the pending entry retained', () => {
-  const entries = [{ id: 't1', type: 'teammate' }, { id: 't2', type: 'teammate' }];
-  const idleIds = new Set();
-  const pending = new Map([['x', 1000]]);
-  const drained = drainPendingTeammateIdles(entries, idleIds, pending, 2000);
-  assert.equal(drained, 0);
-  assert.equal(idleIds.size, 0);
-  assert.equal(pending.size, 1, 'nothing resolvable, so the pending entry is kept for a later retry');
+test('declaredActiveCount: idleNameCount is clamped to the surviving teammate count (a stale name cannot mask a shell/subagent entry)', () => {
+  const entries = [
+    { id: 't1', type: 'teammate' },
+    { id: 't2', type: 'teammate' },
+    { id: 'b1', type: 'shell' },
+  ];
+  // idleNameCount=5 but only 2 teammate entries exist: clamp to 2, leaving the shell entry.
+  assert.equal(declaredActiveCount(entries, new Set(), 0, undefined, 5), 1);
+});
+
+test('declaredActiveCount: dream + weak-ttl + id-drain + idleNameCount compose correctly', () => {
+  const entries = [
+    { id: 'd1', type: 'dream' },        // never gates
+    { id: 'b1', type: 'shell' },        // past weak ttl: drops out
+    { id: 't1', type: 'teammate' },     // id-drained
+    { id: 't2', type: 'teammate' },     // survives, then subtracted by idleNameCount
+    { id: 'x1', type: 'subagent' },     // survives, always gates
+  ];
+  const idleIds = new Set(['t1']);
+  // ageMs=100 >= weakTtlMs=100 drops the shell entry; one idle name drains t2, leaving x1.
+  assert.equal(declaredActiveCount(entries, idleIds, 100, 100, 1), 1);
 });

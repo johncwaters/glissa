@@ -454,7 +454,7 @@ test('an idled teammate stays drained across later Stops that re-declare it', (t
   s.destroy();
 });
 
-test('TeammateIdle without a name mapping falls back to the sole declared teammate', (t) => {
+test('TeammateIdle without a name mapping still drains via the idle-by-name count against a single live teammate', (t) => {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   const s = makeSession(STATES.RUNNING);
   // No TaskCreated seen (e.g. Glissa attached mid-run): name->id mapping unavailable.
@@ -462,11 +462,11 @@ test('TeammateIdle without a name mapping falls back to the sole declared teamma
   t.mock.timers.tick(40);
   assert.equal(s.state, STATES.RUNNING);
   hook(s, 'teammate-idle', { payload: { teammate_name: 'unmapped' } });
-  assert.equal(s.state, STATES.COMPLETE, 'a single live teammate is unambiguous');
+  assert.equal(s.state, STATES.COMPLETE, 'one idle name offsets the one declared teammate');
   s.destroy();
 });
 
-test('TeammateIdle with an ambiguous fallback is dropped (two live teammates)', (t) => {
+test('TeammateIdle with an unmapped name only offsets ONE of several live teammates (count-based, not a guess)', (t) => {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   const s = makeSession(STATES.RUNNING);
   hook(s, 'ready', { payload: { background_tasks: [
@@ -475,8 +475,198 @@ test('TeammateIdle with an ambiguous fallback is dropped (two live teammates)', 
   ] } });
   t.mock.timers.tick(40);
   hook(s, 'teammate-idle', { payload: { teammate_name: 'unmapped' } });
-  assert.equal(s.state, STATES.RUNNING, 'guessing between two teammates would risk a false COMPLETE');
+  assert.equal(s.state, STATES.RUNNING, 'one of two teammates is still live: no false COMPLETE');
+  assert.equal(s.toSnapshot().activeAgents, 1, 'the idle name subtracts exactly one from the declared count');
+  s.destroy();
+});
+
+test('three declared teammates each idle by name: the card COMPLETEs on the third TeammateIdle', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const s = makeSession(STATES.RUNNING);
+  const declared = { background_tasks: [
+    { id: 'tm1', type: 'teammate', status: 'running' },
+    { id: 'tm2', type: 'teammate', status: 'running' },
+    { id: 'tm3', type: 'teammate', status: 'running' },
+  ] };
+  hook(s, 'ready', { payload: declared });
+  t.mock.timers.tick(40);
+  assert.equal(s.state, STATES.RUNNING, 'a gate-held ready with three live teammates');
+  assert.equal(s.toSnapshot().activeAgents, 3);
+  hook(s, 'teammate-idle', { payload: { teammate_name: 'a' } });
+  assert.equal(s.state, STATES.RUNNING);
   assert.equal(s.toSnapshot().activeAgents, 2);
+  hook(s, 'teammate-idle', { payload: { teammate_name: 'b' } });
+  assert.equal(s.state, STATES.RUNNING);
+  assert.equal(s.toSnapshot().activeAgents, 1);
+  hook(s, 'teammate-idle', { payload: { teammate_name: 'c' } });
+  assert.equal(s.state, STATES.COMPLETE, 'the third idle name drains the last teammate and releases the held ready');
+  assert.equal(s.toSnapshot().activeAgents, 0);
+  s.destroy();
+});
+
+test('a Stop declaring only a dream entry (pending self-revival) does not suppress completion', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const s = makeSession(STATES.RUNNING);
+  hook(s, 'ready', { payload: { background_tasks: [{ id: 'wu1', type: 'dream', status: 'pending' }] } });
+  t.mock.timers.tick(40);
+  assert.equal(s.state, STATES.COMPLETE, 'a pending wakeup is a finished turn, per wakeup-tracker design');
+  assert.equal(s.toSnapshot().activeAgents, 0);
+  s.destroy();
+});
+
+test('a subagent-start whose agent_id embeds an idle teammate name re-gates it', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const s = makeSession(STATES.RUNNING);
+  hook(s, 'ready', { payload: { background_tasks: [{ id: 'tm1', type: 'teammate', status: 'running' }] } });
+  t.mock.timers.tick(40);
+  hook(s, 'teammate-idle', { payload: { teammate_name: 'probe' } });
+  assert.equal(s.state, STATES.COMPLETE, 'the sole declared teammate idled by name');
+  hook(s, 'resume'); // a new user turn; the idle-by-name record for "probe" survives this
+  assert.equal(s.state, STATES.RUNNING);
+  // The lead re-wakes "probe" via mailbox: no TaskCreated fires, only a fresh SubagentStart
+  // whose agent_id embeds the name (live-captured shape "a<name>-<hex>").
+  hook(s, 'subagent-start', { payload: { agent_id: 'aprobe-1a2b3c' } });
+  hook(s, 'ready', { payload: { background_tasks: [{ id: 'tm1', type: 'teammate', status: 'running' }] } });
+  t.mock.timers.tick(40);
+  assert.equal(s.state, STATES.RUNNING, 're-gated: the idle-by-name record was invalidated');
+  assert.equal(s.toSnapshot().activeAgents, 1);
+  s.destroy();
+});
+
+// --- Departed-teammate eviction: a stale idle-by-name record must not mask a DIFFERENT teammate ---
+
+test('REGRESSION: a departed teammate idled by name does not mask a newly declared different teammate', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const s = makeSession(STATES.RUNNING);
+  hook(s, 'ready', { payload: { background_tasks: [{ id: 'alice-id', type: 'teammate', status: 'running' }] } });
+  t.mock.timers.tick(40);
+  hook(s, 'teammate-idle', { payload: { teammate_name: 'alice' } });
+  assert.equal(s.state, STATES.COMPLETE, 'alice idled by name completes the card');
+  hook(s, 'resume'); // alice has since shut down; a new turn starts
+  assert.equal(s.state, STATES.RUNNING);
+  // bob is a DIFFERENT teammate under a different id. Naive count subtraction (no departure
+  // eviction) would still see "1 declared teammate, 1 idle name" and wrongly offset bob.
+  hook(s, 'ready', { payload: { background_tasks: [{ id: 'bob-id', type: 'teammate', status: 'running' }] } });
+  t.mock.timers.tick(40);
+  assert.equal(s.state, STATES.RUNNING, 'bob is live and was never idled; alice departing must evict her stale record');
+  assert.equal(s.toSnapshot().activeAgents, 1);
+  s.destroy();
+});
+
+test('departed-teammate eviction only evicts as many idle names as teammates actually departed', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const s = makeSession(STATES.RUNNING);
+  hook(s, 'ready', { payload: { background_tasks: [
+    { id: 't1', type: 'teammate', status: 'running' },
+    { id: 't2', type: 'teammate', status: 'running' },
+  ] } });
+  t.mock.timers.tick(40);
+  hook(s, 'teammate-idle', { payload: { teammate_name: 'a' } }); // offsets t1
+  hook(s, 'teammate-idle', { payload: { teammate_name: 'b' } }); // offsets t2
+  assert.equal(s.state, STATES.COMPLETE, 'both teammates idle by name');
+  hook(s, 'resume');
+  // Only t1 departs; t2 is re-declared still running (still legitimately idle).
+  hook(s, 'ready', { payload: { background_tasks: [{ id: 't2', type: 'teammate', status: 'running' }] } });
+  t.mock.timers.tick(40);
+  assert.equal(s.state, STATES.COMPLETE, 'exactly one name (the oldest, "a") is evicted for the one departure; "b" still legitimately offsets t2');
+  assert.equal(s.toSnapshot().activeAgents, 0);
+  s.destroy();
+});
+
+// --- The counted-map drain must key off the RAW declared count, never the name heuristic ---
+
+test('a name-based zero must not wipe a live counted subagent from the counted map', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const s = makeSession(STATES.RUNNING);
+  hook(s, 'subagent-start', { payload: { agent_id: 'sub1' } }); // unrelated live background subagent
+  hook(s, 'ready', { payload: { background_tasks: [{ id: 't1', type: 'teammate', status: 'running' }] } });
+  t.mock.timers.tick(40);
+  assert.equal(s.state, STATES.RUNNING, 'both sub1 and t1 still gate');
+  hook(s, 'teammate-idle', { payload: { teammate_name: 'x' } }); // offsets t1 by name; sub1 untouched
+  assert.equal(s.state, STATES.RUNNING, 'sub1 alone still gates');
+  hook(s, 'ready', { payload: { background_tasks: [{ id: 't1', type: 'teammate', status: 'running' }] } }); // Stop re-declares t1
+  t.mock.timers.tick(40);
+  assert.equal(s.state, STATES.RUNNING, 'sub1 must survive: the name-based zero is Glissa bookkeeping, not an authoritative drain');
+  assert.equal(s.toSnapshot().activeAgents, 1, 'only sub1 remains counted; t1 is offset by the idle name');
+  s.destroy();
+});
+
+// --- TaskCompleted must not leave a name behind once the same teammate drains by id ---
+
+test('TaskCompleted carrying a teammate_name also clears any idle-by-name record for it (no double-count)', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const s = makeSession(STATES.RUNNING);
+  hook(s, 'ready', { payload: { background_tasks: [
+    { id: 't1', type: 'teammate', status: 'running' },
+    { id: 't2', type: 'teammate', status: 'running' },
+  ] } });
+  t.mock.timers.tick(40);
+  hook(s, 'teammate-idle', { payload: { teammate_name: 'a' } }); // offsets t1 by name (unresolved)
+  assert.equal(s.state, STATES.RUNNING, 't2 still gates');
+  assert.equal(s.toSnapshot().activeAgents, 1);
+  hook(s, 'task-completed', { payload: { task_id: 't1', teammate_name: 'a' } }); // t1 also drains by id
+  assert.equal(s.state, STATES.RUNNING, 'still one live teammate (t2): draining t1 by id must not ALSO subtract the "a" name from t2');
+  assert.equal(s.toSnapshot().activeAgents, 1);
+  s.destroy();
+});
+
+// --- Re-gate prefix match must not fire on a different teammate name sharing a prefix ---
+
+test('a subagent-start only re-gates when the remainder after "a<name>-" is pure hex (no false-prefix match)', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const s = makeSession(STATES.RUNNING);
+  hook(s, 'ready', { payload: { background_tasks: [{ id: 'tm1', type: 'teammate', status: 'running' }] } });
+  t.mock.timers.tick(40);
+  hook(s, 'teammate-idle', { payload: { teammate_name: 'foo' } });
+  assert.equal(s.state, STATES.COMPLETE, 'the sole declared teammate idled by name');
+  hook(s, 'resume');
+  // "foo-bar" is a DIFFERENT teammate that happens to share the "afoo-" prefix; its agent_id
+  // must not re-gate the idle record for "foo" (the remainder "bar-1a2b" is not pure hex).
+  hook(s, 'subagent-start', { payload: { agent_id: 'afoo-bar-1a2b' } });
+  hook(s, 'subagent-stop', { payload: { agent_id: 'afoo-bar-1a2b' } }); // drain the counted noise, isolate the name check
+  hook(s, 'ready', { payload: { background_tasks: [{ id: 'tm1', type: 'teammate', status: 'running' }] } });
+  t.mock.timers.tick(40);
+  assert.equal(s.state, STATES.COMPLETE, 'foo is still correctly idle; the false-prefix match must not have re-gated it');
+  s.destroy();
+});
+
+test('a nameless TeammateIdle is dropped, not recorded under a synthetic key (it could never be re-gated)', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const s = makeSession(STATES.RUNNING);
+  hook(s, 'ready', { payload: { background_tasks: [{ id: 'tm1', type: 'teammate', status: 'running' }] } });
+  t.mock.timers.tick(40);
+  hook(s, 'teammate-idle', { payload: {} }); // defensive: ground truth says this never happens
+  assert.equal(s.state, STATES.RUNNING, 'dropped: the declared teammate still gates');
+  assert.equal(s.toSnapshot().activeAgents, 1);
+  s.destroy();
+});
+
+test('a TeammateIdle arriving before any background_tasks snapshot exists still drains once a later Stop declares the teammate', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const s = makeSession(STATES.RUNNING);
+  // No snapshot yet at all (not even a prior Stop): the idle name is recorded independent of
+  // any declared entries and simply waits.
+  hook(s, 'teammate-idle', { payload: { teammate_name: 'probe' } });
+  assert.equal(s.state, STATES.RUNNING);
+  hook(s, 'ready', { payload: { background_tasks: [{ id: 'tm1', type: 'teammate', status: 'running' }] } });
+  t.mock.timers.tick(40);
+  assert.equal(s.state, STATES.COMPLETE, 'the idle name persisted and offset the newly declared teammate');
+  s.destroy();
+});
+
+test('idle-by-name records survive resume: a re-declaring Stop for the same idle teammate does not re-pin the card', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const s = makeSession(STATES.RUNNING);
+  const declared = { background_tasks: [{ id: 'tm1', type: 'teammate', status: 'running' }] };
+  hook(s, 'ready', { payload: declared });
+  t.mock.timers.tick(40);
+  hook(s, 'teammate-idle', { payload: { teammate_name: 'probe' } });
+  assert.equal(s.state, STATES.COMPLETE);
+  hook(s, 'resume'); // next user prompt; the idle-but-alive teammate is still declared by name
+  assert.equal(s.state, STATES.RUNNING);
+  hook(s, 'ready', { payload: declared }); // Stop re-declares the idle teammate as running
+  t.mock.timers.tick(40);
+  assert.equal(s.state, STATES.COMPLETE, 'the idle name survives resume and keeps offsetting the re-declared teammate');
   s.destroy();
 });
 
@@ -509,37 +699,37 @@ test('TaskCreated reactivates an idled teammate so it gates again', (t) => {
   s.destroy();
 });
 
-// --- Deferred TeammateIdle resolution (pending retry against a later background_tasks snapshot) ---
+// --- Idle-by-name persistence: TeammateIdle recorded independent of any declared snapshot ---
 
-test('a TeammateIdle that cannot resolve at resume time is retried and drains on the next Stop', (t) => {
+test('a TeammateIdle recorded after resume clears the snapshot still drains the next Stop', (t) => {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   const s = makeSession(STATES.RUNNING);
   hook(s, 'ready', { payload: { background_tasks: [{ id: 'tm1', type: 'teammate', status: 'running' }] } });
   t.mock.timers.tick(40);
   assert.equal(s.state, STATES.RUNNING, 'the declared teammate still gates');
-  hook(s, 'resume'); // clears the declared snapshot; a TeammateIdle arriving now can't resolve
+  hook(s, 'resume'); // clears the declared snapshot; the idle-by-name record is independent of it
   assert.equal(s.state, STATES.RUNNING);
-  hook(s, 'teammate-idle', { payload: { teammate_name: 'x' } }); // unresolvable, goes pending
+  hook(s, 'teammate-idle', { payload: { teammate_name: 'x' } }); // no name mapping: recorded by name
   assert.equal(s.state, STATES.RUNNING);
   hook(s, 'ready', { payload: { background_tasks: [{ id: 'tm1', type: 'teammate', status: 'running' }] } });
   t.mock.timers.tick(40);
-  assert.equal(s.state, STATES.COMPLETE, 'the pending idle drains against the fresh snapshot before this Stop is mapped');
+  assert.equal(s.state, STATES.COMPLETE, 'the idle name offsets the freshly declared teammate before this Stop is mapped');
   s.destroy();
 });
 
-test('a pending TeammateIdle drains a gate-held ready without any further Stop', (t) => {
+test('a TeammateIdle recorded by name drains a gate-held ready without any further Stop', (t) => {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   const s = makeSession(STATES.RUNNING);
   hook(s, 'subagent-start', { payload: { agent_id: 'a1' } });
   hook(s, 'ready');
   t.mock.timers.tick(40);
   assert.equal(s.state, STATES.RUNNING, 'suppressed and held while a1 is live');
-  hook(s, 'teammate-idle', { payload: { teammate_name: 'x' } }); // no declared snapshot yet: goes pending
+  hook(s, 'teammate-idle', { payload: { teammate_name: 'x' } }); // no declared snapshot yet: recorded by name
   assert.equal(s.state, STATES.RUNNING);
   hook(s, 'subagent-stop', {
     payload: { agent_id: 'a1', background_tasks: [{ id: 'tm1', type: 'teammate', status: 'running' }] },
   });
-  assert.equal(s.state, STATES.COMPLETE, 'a1 drains, the pending idle drains tm1, and the held ready releases');
+  assert.equal(s.state, STATES.COMPLETE, 'a1 drains, the idle name offsets tm1, and the held ready releases');
   s.destroy();
 });
 

@@ -89,6 +89,12 @@ function extractBackgroundTasks(payload) {
 // card WORKING forever. Bounded instead by a TTL off the age of the declaring snapshot.
 const WEAK_TASK_TYPES = new Set(['shell', 'monitor']);
 
+// background_tasks entry types that must NEVER gate completion, at any age. A `dream` entry
+// is a pending ScheduleWakeup (see wakeup-tracker.js): by that module's own design a Stop with
+// a pending wakeup IS a finished turn, surfaced as the advisory wakeup chip, not the completion
+// gate. Counting it would pin a self-pacing loop session WORKING for its entire sleep.
+const NON_GATING_TASK_TYPES = new Set(['dream']);
+
 // Default time a weak-typed entry (shell/monitor) keeps gating after the Stop that declared
 // it. Shorter than DEFAULT_AGENT_TTL_MS because there is no dropped-hook story here to bias
 // long for: the entry NEVER gets a completion hook, this TTL is the only way it ever drains.
@@ -98,59 +104,25 @@ const DEFAULT_SHELL_TASK_TTL_MS = 5 * 60 * 1000;
 // out-of-band (TaskCompleted / TeammateIdle hooks). An id-less entry can never be drained
 // individually, so it always counts (suppression-safe). ageMs is how long ago the snapshot
 // was declared; a weak-typed entry (no completion hook) stops counting past weakTtlMs.
-function declaredActiveCount(entries, idleIds, ageMs = 0, weakTtlMs = DEFAULT_SHELL_TASK_TTL_MS) {
+//
+// idleNameCount is the number of teammates known idle BY NAME (a TeammateIdle payload carries
+// only teammate_name, and a declared teammate entry's `description` is the spawn prompt, not
+// the name - live-verified - so a name can never be matched to a specific declared id). With
+// several live teammates, an id-based drain leaves every TeammateIdle unresolvable forever.
+// Instead this subtracts idleNameCount from the surviving teammate-type entries, clamped to
+// that teammate count so a stale/extra idle name can never mask a shell or subagent entry.
+function declaredActiveCount(entries, idleIds, ageMs = 0, weakTtlMs = DEFAULT_SHELL_TASK_TTL_MS, idleNameCount = 0) {
   if (!entries) return 0;
   let n = 0;
+  let teammateCount = 0;
   for (const e of entries) {
     if (e.id && idleIds && idleIds.has(e.id)) continue;
     if (WEAK_TASK_TYPES.has(e.type) && ageMs >= weakTtlMs) continue;
+    if (NON_GATING_TASK_TYPES.has(e.type)) continue;
     n++;
+    if (e.type === 'teammate') teammateCount++;
   }
-  return n;
-}
-
-// The declared entry an id-less TeammateIdle can safely drain: exactly one non-idle
-// teammate-type entry with an id. Ambiguity (several live teammates) returns null so the
-// signal is dropped rather than guessed. Used when the TaskCreated name->id mapping is
-// unavailable (e.g. Glissa attached after the teammate was spawned).
-function soleActiveTeammateId(entries, idleIds) {
-  if (!entries) return null;
-  let found = null;
-  for (const e of entries) {
-    if (e.type !== 'teammate' || !e.id) continue;
-    if (idleIds && idleIds.has(e.id)) continue;
-    if (found) return null;
-    found = e.id;
-  }
-  return found;
-}
-
-// Default time a pending, unresolved TeammateIdle stays retryable against later
-// background_tasks snapshots. Bounds a name that never resolves (e.g. a stale/duplicate
-// signal) so it cannot drain some unrelated future teammate.
-const DEFAULT_PENDING_IDLE_TTL_MS = 5 * 60 * 1000;
-
-// Retry TeammateIdle signals that could not be resolved to a declared id at the time they
-// arrived (e.g. a resume just cleared the declared snapshot). pendingMap is
-// Map<pendingKey, tsReceived>, insertion-ordered so the oldest pending entry drains first.
-// Expires entries past ttlMs before attempting any drain. Drains at most one id per pending
-// entry per call, stopping at the first ambiguous/unresolvable snapshot (soleActiveTeammateId
-// returning null) since later entries would only apply to a different snapshot. Mutates
-// idleIds and pendingMap in place; returns the number drained.
-function drainPendingTeammateIdles(entries, idleIds, pendingMap, now, ttlMs = DEFAULT_PENDING_IDLE_TTL_MS) {
-  for (const [key, ts] of pendingMap) {
-    if (now - ts >= ttlMs) pendingMap.delete(key);
-  }
-  let drained = 0;
-  while (pendingMap.size > 0) {
-    const id = soleActiveTeammateId(entries, idleIds);
-    if (!id) break;
-    idleIds.add(id);
-    const oldestKey = pendingMap.keys().next().value;
-    pendingMap.delete(oldestKey);
-    drained++;
-  }
-  return drained;
+  return n - Math.min(idleNameCount, teammateCount);
 }
 
 module.exports = {
@@ -159,8 +131,6 @@ module.exports = {
   pruneAgents,
   extractBackgroundTasks,
   declaredActiveCount,
-  soleActiveTeammateId,
-  drainPendingTeammateIdles,
   DEFAULT_AGENT_TTL_MS,
   DEFAULT_SHELL_TASK_TTL_MS,
 };
