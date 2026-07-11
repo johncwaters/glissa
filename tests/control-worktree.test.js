@@ -116,6 +116,31 @@ test('merge-continue-session on an unknown session is a no-op (no throw)', () =>
   assert.doesNotThrow(() => h.send({ type: 'merge-continue-session', id: 'nope' }));
 });
 
+test('merge-continue-session with force:true passes { force: true } through to session.mergeAndContinue()', () => {
+  const calls = [];
+  const s = {
+    id: 'p1', name: 'p1', ephemeral: false,
+    mergeAndContinue(opts) { calls.push(opts); return { merged: true, kept: true }; },
+    toSnapshot() { return { id: this.id, name: this.name }; },
+  };
+  const h = harness(new Map([['p1', s]]));
+  h.send({ type: 'merge-continue-session', id: 'p1', force: true });
+  assert.deepEqual(calls, [{ force: true }]);
+});
+
+test('merge-continue-session without force sends { force: false } (a truthy-but-not-true value never forces)', () => {
+  const calls = [];
+  const s = {
+    id: 'p1', name: 'p1', ephemeral: false,
+    mergeAndContinue(opts) { calls.push(opts); return { merged: true, kept: true }; },
+    toSnapshot() { return { id: this.id, name: this.name }; },
+  };
+  const h = harness(new Map([['p1', s]]));
+  h.send({ type: 'merge-continue-session', id: 'p1' });
+  h.send({ type: 'merge-continue-session', id: 'p1', force: 'yes' });
+  assert.deepEqual(calls, [{ force: false }, { force: false }]);
+});
+
 // --- park-session: return-to-DORMANT delegates to Session.parkToDormant (logic tested there) ---
 
 test('park-session dispatches to session.parkToDormant()', () => {

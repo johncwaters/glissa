@@ -289,6 +289,38 @@ test('mergeAndContinue refuses while actively RUNNING (mid-edit; no merge)', { s
   } finally { s.destroy(); fs.rmSync(wt, { recursive: true, force: true }); }
 });
 
+test('mergeAndContinue({ force: true }) overrides the RUNNING refusal (operator explicit "merge anyway")', { skip: !WIN }, async () => {
+  const wt = realWorktreeDir();
+  const gw = fakeGitWorkspace({
+    worktreeDir: wt,
+    mergeKeepResult: { merged: true, kept: true, branch: 'glissa/session/wt-sess', base: 'develop', baseSha: 'newbase' },
+  });
+  const s = makeSession({ gitWorkspace: gw, integrationBranch: 'develop', ptySpawn: () => fakePty() });
+  try {
+    await s.start();
+    s.state = STATES.RUNNING;
+    const r = await s.mergeAndContinue({ force: true });
+    assert.equal(r.merged, true, 'force overrides the RUNNING guard');
+    assert.equal(gw.calls.mergeKeep.length, 1);
+    assert.equal(s.worktreeDir, wt, 'worktree kept alive');
+    assert.equal(s.state, STATES.RUNNING, 'session is NOT ended by the merge');
+  } finally { s.destroy(); fs.rmSync(wt, { recursive: true, force: true }); }
+});
+
+test('mergeAndContinue({ force: true }) still refuses a non-live state (force only widens the RUNNING guard)', { skip: !WIN }, async () => {
+  const wt = realWorktreeDir();
+  const gw = fakeGitWorkspace({ worktreeDir: wt });
+  const s = makeSession({ gitWorkspace: gw, integrationBranch: 'develop', ptySpawn: () => fakePty() });
+  try {
+    await s.start();
+    s.state = STATES.DONE;
+    const r = await s.mergeAndContinue({ force: true });
+    assert.equal(r.merged, false);
+    assert.equal(r.reason, 'not-continuable');
+    assert.equal(gw.calls.mergeKeep.length, 0, 'force does not widen past RUNNING');
+  } finally { s.destroy(); fs.rmSync(wt, { recursive: true, force: true }); }
+});
+
 test('mergeAndContinue from WAITING merges (paused awaiting the operator is quiescent, not working)', { skip: !WIN }, async () => {
   const wt = realWorktreeDir();
   const gw = fakeGitWorkspace({

@@ -746,6 +746,84 @@ test('a declared shell task stops gating past its TTL and the held ready is rele
   s.destroy();
 });
 
+// --- Declared teammate TTL: a teammate is near-redundant with the counted SubagentStart/Stop map,
+// so a declared entry is bounded short (default 90s) instead of riding the full agent TTL ---
+
+test('a declared teammate entry stops gating past its TTL and the held ready is released', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const s = makeSession(STATES.RUNNING, { teammateTaskTtlMs: 150 });
+  hook(s, 'ready', { payload: { background_tasks: [{ id: 'tm1', type: 'teammate', status: 'running' }] } });
+  t.mock.timers.tick(100);
+  assert.equal(s.state, STATES.RUNNING, 'still gating before the ttl boundary');
+  t.mock.timers.tick(250); // past ttl + the release timer epsilon
+  assert.equal(s.state, STATES.COMPLETE, 'an idle-alive teammate never drains via hooks alone; the ttl releases the held ready');
+  s.destroy();
+});
+
+test('a declared teammate entry younger than the TTL still gates', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const s = makeSession(STATES.RUNNING, { teammateTaskTtlMs: 500 });
+  hook(s, 'ready', { payload: { background_tasks: [{ id: 'tm1', type: 'teammate', status: 'running' }] } });
+  t.mock.timers.tick(40);
+  assert.equal(s.state, STATES.RUNNING, 'a fresh declared teammate still gates');
+  assert.equal(s.toSnapshot().activeAgents, 1);
+  t.mock.timers.tick(200); // well under the 500ms ttl
+  assert.equal(s.state, STATES.RUNNING, 'still gates before the ttl boundary');
+  s.destroy();
+});
+
+test('an aged-out declared teammate does not let a leftover idle-by-name record clamp a still-live shell entry', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const s = makeSession(STATES.RUNNING, { teammateTaskTtlMs: 100 });
+  hook(s, 'ready', { payload: { background_tasks: [
+    { id: 'tm1', type: 'teammate', status: 'running' },
+    { id: 'b1', type: 'shell', status: 'running' },
+  ] } });
+  t.mock.timers.tick(40);
+  assert.equal(s.state, STATES.RUNNING, 'both entries gate while fresh');
+  assert.equal(s.toSnapshot().activeAgents, 2);
+  // Recorded by name before the teammate ages out; once it ages out there is no surviving teammate
+  // entry left for this name to offset.
+  hook(s, 'teammate-idle', { payload: { teammate_name: 'unmapped' } });
+  t.mock.timers.tick(120); // past teammateTaskTtlMs (100ms); well under the 5min shell ttl
+  assert.equal(s.toSnapshot().activeAgents, 1, 'the teammate aged out on its own; the idle name has nothing left to clamp, so the shell entry still gates');
+  assert.equal(s.state, STATES.RUNNING, 'the shell entry alone keeps the card gated');
+  s.destroy();
+});
+
+// Accepted risk, documented in agent-tracker.js: a teammate DOES fire SubagentStart/SubagentStop
+// (unlike shell/monitor, which never get any completion hook at all), so the declared-entry TTL
+// only matters when a SubagentStart was dropped AND the teammate is still genuinely working past
+// the ttl. That early completion is self-correcting (the teammate's next hook activity, or the
+// lead resuming on its mailbox, flips the card back to WORKING); the stuck-WORKING failure the
+// short ttl fixes instead blocked operator actions and never self-corrected.
+test('accepted risk: a dropped-SubagentStart teammate declared running stops gating at the teammate TTL', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const s = makeSession(STATES.RUNNING, { teammateTaskTtlMs: 150 });
+  // No subagent-start ever fired for this teammate (the hook was dropped): the counted map never
+  // learns about it, so only the declared background_tasks entry (and its ttl) covers it.
+  hook(s, 'ready', { payload: { background_tasks: [{ id: 'tm1', type: 'teammate', status: 'running' }] } });
+  t.mock.timers.tick(100);
+  assert.equal(s.state, STATES.RUNNING, 'still gates within the ttl window');
+  t.mock.timers.tick(250); // past ttl + the release timer epsilon
+  assert.equal(s.state, STATES.COMPLETE, 'accepted risk: completes even if the teammate is still genuinely working past the ttl');
+  s.destroy();
+});
+
+test('counted map coverage: a SubagentStart-counted teammate id keeps the card gated well past the teammate TTL', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const s = makeSession(STATES.RUNNING, { teammateTaskTtlMs: 100 });
+  hook(s, 'subagent-start', { payload: { agent_id: 'tm1' } }); // the hook actually fired: counted map has it
+  hook(s, 'ready', { payload: { background_tasks: [{ id: 'tm1', type: 'teammate', status: 'running' }] } });
+  t.mock.timers.tick(40);
+  assert.equal(s.state, STATES.RUNNING);
+  assert.equal(s.toSnapshot().activeAgents, 1);
+  t.mock.timers.tick(300); // well past teammateTaskTtlMs=100; the declared entry ages out on its own
+  assert.equal(s.toSnapshot().activeAgents, 1, 'the counted map (max with the aged-out declared count) still sees the live SubagentStart');
+  assert.equal(s.state, STATES.RUNNING, 'real teammate work does not falsely complete at the teammate ttl');
+  s.destroy();
+});
+
 test('newer activity cancels a held ready (drain later must not complete a resumed turn)', (t) => {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   const s = makeSession(STATES.RUNNING);

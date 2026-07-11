@@ -12,6 +12,7 @@ const {
   extractBackgroundTasks,
   declaredActiveCount,
   DEFAULT_AGENT_TTL_MS,
+  DEFAULT_TEAMMATE_TASK_TTL_MS,
 } = require('../session/core/agent-tracker');
 
 test('addAgent adds a new id and reports the change; a duplicate is idempotent (count unchanged, ts refreshed)', () => {
@@ -122,6 +123,27 @@ test('declaredActiveCount: idleNameCount is clamped to the surviving teammate co
   ];
   // idleNameCount=5 but only 2 teammate entries exist: clamp to 2, leaving the shell entry.
   assert.equal(declaredActiveCount(entries, new Set(), 0, undefined, 5), 1);
+});
+
+test('DEFAULT_TEAMMATE_TASK_TTL_MS is a sane positive default', () => {
+  assert.equal(typeof DEFAULT_TEAMMATE_TASK_TTL_MS, 'number');
+  assert.ok(DEFAULT_TEAMMATE_TASK_TTL_MS > 0);
+});
+
+test('declaredActiveCount: a teammate entry counts fresh and stops counting past teammateTtlMs', () => {
+  const entries = [{ id: 't1', type: 'teammate' }];
+  const idleIds = new Set();
+  assert.equal(declaredActiveCount(entries, idleIds, 0, undefined, 0, 100), 1, 'counts when fresh');
+  assert.equal(declaredActiveCount(entries, idleIds, 99, undefined, 0, 100), 1, 'still under the ttl');
+  assert.equal(declaredActiveCount(entries, idleIds, 100, undefined, 0, 100), 0, 'stops counting at the ttl boundary');
+});
+
+test('declaredActiveCount: an aged-out teammate does not absorb the idleNameCount clamp, leaving a shell entry counted', () => {
+  const entries = [{ id: 't1', type: 'teammate' }, { id: 'b1', type: 'shell' }];
+  // ageMs=200 ages out the teammate (teammateTtlMs=100) but is well under the weak ttl (default 5min),
+  // so the shell entry still counts. The aged-out teammate must not be in teammateCount, so the idle
+  // name (which no longer matches any surviving teammate) cannot wrongly subtract from the shell entry.
+  assert.equal(declaredActiveCount(entries, new Set(), 200, undefined, 1, 100), 1, 'the shell entry survives; the stale idle name has nothing to clamp against');
 });
 
 test('declaredActiveCount: dream + weak-ttl + id-drain + idleNameCount compose correctly', () => {

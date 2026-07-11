@@ -119,6 +119,11 @@ class Session extends EventEmitter {
     // shell/monitor background_tasks entries never get a completion hook (no SubagentStop, no
     // TaskCompleted/TeammateIdle), so past this long since the declaring Stop they stop gating.
     shellTaskTtlMs = agentTracker.DEFAULT_SHELL_TASK_TTL_MS,
+    // A declared teammate entry is near-redundant with the counted SubagentStart/Stop map (real
+    // teammate work is already tracked there); it only matters for a dropped SubagentStart, while
+    // an idle-but-alive teammate is declared running forever. Bounding it short keeps a dropped
+    // TeammateIdle/TaskCompleted from pinning the card WORKING for the full agent TTL.
+    teammateTaskTtlMs = agentTracker.DEFAULT_TEAMMATE_TASK_TTL_MS,
     // Scheduled-revival visibility (see session/core/wakeup-tracker.js). When true (default), a
     // ScheduleWakeup / cron task seen via PostToolUse hooks rides toSnapshot().pendingWakeup as an
     // ADVISORY card chip ("sleeping until ~HH:MM"); it never gates a transition. The kill switch
@@ -225,6 +230,7 @@ class Session extends EventEmitter {
     this._activeAgents = new Map();
     this._agentTtlMs = agentTtlMs;
     this._shellTaskTtlMs = shellTaskTtlMs;
+    this._teammateTaskTtlMs = teammateTaskTtlMs;
     // Authoritative in-flight background work declared by the latest Stop/SubagentStop
     // payload (`background_tasks`, Claude Code v2.1.145+): an array of { id, type } entries,
     // or null when the running Claude does not send it. Covers background Bash tasks and
@@ -433,6 +439,11 @@ class Session extends EventEmitter {
     this._declaredTeammateIds = currentTeammateIds;
     // Deliberately no ageMs here: this snapshot is fresh (age 0), so weak (shell/monitor)
     // entries always count. Only _activeAgentCount ages them (see its declaredActiveCount call).
+    // Same reasoning covers the teammate TTL: this raw count must see EVERY declared entry (it
+    // only answers "did Claude declare zero"), so this._teammateTaskTtlMs is deliberately NOT
+    // threaded in here either. Doing so could age out a teammates-only declaration and read as
+    // zero, which would wrongly clear the counted map (this._activeAgents) out from under a
+    // still-running turn the counted map alone would otherwise still be gating.
     //
     // The counted-map drain below must key off the RAW count (no idleNameCount): that heuristic
     // is Glissa-side bookkeeping, not something Claude declared, so it must never be the reason
@@ -568,7 +579,7 @@ class Session extends EventEmitter {
     // when larger: it is fresher than a pre-drain Stop snapshot.
     const declared = agentTracker.declaredActiveCount(
       this._bgDeclared, this._idleTaskIds, this._bgDeclared ? now - this._bgDeclaredTs : 0,
-      this._shellTaskTtlMs, this._idleTeammateNames.size,
+      this._shellTaskTtlMs, this._idleTeammateNames.size, this._teammateTaskTtlMs,
     );
     return Math.max(this._activeAgents.size, declared);
   }
@@ -593,7 +604,7 @@ class Session extends EventEmitter {
     this._gateHeldReadyTimer = setTimeout(() => {
       this._gateHeldReadyTimer = null;
       this._maybeReleaseGateHeldReady();
-    }, Math.min(this._agentTtlMs, this._shellTaskTtlMs) + 50);
+    }, Math.min(this._agentTtlMs, this._shellTaskTtlMs, this._teammateTaskTtlMs) + 50);
     if (typeof this._gateHeldReadyTimer.unref === "function") this._gateHeldReadyTimer.unref();
   }
 
@@ -1131,10 +1142,15 @@ class Session extends EventEmitter {
   // while the PTY is actively working (RUNNING: we must not rewrite a worktree mid-edit); a session that
   // paused awaiting the operator (WAITING) is quiescent and mergeable, same as IDLE/COMPLETE. A rebase
   // conflict / lost FF PARKS (worktree preserved). Returns the engine result.
-  async mergeAndContinue() {
+  //
+  // force is the operator's explicit "merge anyway" for a card stuck WORKING (e.g. a background-agent
+  // gate that never drained): it additionally allows RUNNING, but still refuses every other non-live
+  // state (DORMANT/INITIALIZING/STARTING/DONE/FAILED all mean there is no live worktree to merge from).
+  async mergeAndContinue({ force = false } = {}) {
     if (this._destroyed) return { merged: false, reason: "destroyed" };
     if (!this._gitWorkspace || !this._workspace) return { merged: false, reason: "no-worktree" };
-    if (!MERGEABLE_LIVE_STATES.includes(this.state)) {
+    const runningOverride = force && this.state === STATES.RUNNING;
+    if (!MERGEABLE_LIVE_STATES.includes(this.state) && !runningOverride) {
       return { merged: false, reason: "not-continuable" };
     }
     // Re-entry guard (see mergeWorktree): refuse a second concurrent merge on the same worktree.

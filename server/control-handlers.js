@@ -718,7 +718,7 @@ function registerControlHandlers(controlWss, deps) {
     // Merge-as-you-go: merge the live session's worktree into the integration branch and rebase the
     // worktree onto it, WITHOUT ending the session, so the operator keeps working and commits as they go.
     // Session.mergeAndContinue self-guards the state and emits 'merge-status' (broadcast), so no reply.
-    'merge-continue-session':     (msg) => { const s = findSession(msg); if (s) s.mergeAndContinue(); },
+    'merge-continue-session':     (msg) => { const s = findSession(msg); if (s) s.mergeAndContinue({ force: msg.force === true }); },
     'discard-session-worktree':   (msg) => { const s = findSession(msg); if (s) s.discardWorktree(); },
     // Parked-merge handoff: paste a context-rich prompt (why it parked + the conflicting files + how to
     // rebase/resolve) into the session's live PTY so the agent in the worktree can finish the merge.

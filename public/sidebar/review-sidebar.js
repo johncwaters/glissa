@@ -196,7 +196,7 @@ export function mergeSelectedSession() {
   const payload = diffById.get(id);
   const hasCommits = !!(payload && payload.hasCommits);
   if (!isMergeableLive(ui.currentState, hasCommits)) return false;
-  sendControlMsg({ type: 'merge-continue-session', id });
+  sendMergeContinue(id, ui.currentState);
   return true;
 }
 
@@ -219,12 +219,29 @@ export function resolveSelectedSession() {
 
 // The Merge action's gate in one place, shared by the rendered button and the Alt+M shortcut: a quiescent
 // live session (WAITING, IDLE, or COMPLETE - see shared MERGEABLE_LIVE_STATES, the same set the server's
-// mergeAndContinue enforces) whose worktree has COMMITTED changes. RUNNING is excluded (the agent is
-// actively editing); WAITING is fine (the agent paused for the operator, so its committed work is stable).
-// The 'merging' in-flight check is the caller's separate concern (it disables the button / short-circuits
-// the shortcut).
+// mergeAndContinue enforces) whose worktree has COMMITTED changes. WAITING is fine (the agent paused for
+// the operator, so its committed work is stable). RUNNING is also allowed here (a stuck-WORKING card can
+// still merge), but goes through an explicit confirm + force:true (see sendMergeContinue) since the agent
+// may still be mid-edit. The 'merging' in-flight check is the caller's separate concern (it disables the
+// button / short-circuits the shortcut).
 function isMergeableLive(state, hasCommits) {
-  return MERGEABLE_LIVE_STATES.includes(state) && hasCommits;
+  return (MERGEABLE_LIVE_STATES.includes(state) || state === STATES.RUNNING) && hasCommits;
+}
+
+// Single chokepoint for sending the merge-continue control message. A RUNNING session still "looks like"
+// it might be mid-edit, so it gets an explicit confirm before force:true is sent; every other mergeable
+// state sends immediately, exactly as before.
+function sendMergeContinue(id, state) {
+  if (state !== STATES.RUNNING) {
+    sendControlMsg({ type: 'merge-continue-session', id });
+    return;
+  }
+  showConfirmDialog({
+    title: 'Merge while working',
+    message: 'This session still looks like it is working. Merging rebases its worktree under it. Merge anyway?',
+    confirmLabel: 'Merge anyway',
+    onConfirm: () => sendControlMsg({ type: 'merge-continue-session', id, force: true }),
+  });
 }
 
 // Whether the session still has a live PTY in its worktree (anything but a terminal/dormant state). Gates
@@ -236,14 +253,18 @@ function isLive(state) {
 // Pure: the one-line reason Merge is unavailable, or null when no line is needed. Centralizes the
 // disabled-state copy so the always-visible control region can say WHY the operator cannot merge yet.
 // Only called when Merge is disabled; ordered most-specific first.
-function mergeDisabledReason({ status, fetched, hasCommits, live, hasUncommitted }) {
+function mergeDisabledReason({ status, fetched, hasCommits, live, hasUncommitted, state }) {
   if (status === 'merging') return null;                       // the status note already says "Merging..."
   if (status === 'parked') return 'Resolve the conflict, then merge.';
   if (!fetched) return 'Checking for changes...';
   if (!hasCommits && !hasUncommitted) return 'No changes to merge.';
   if (!hasCommits) return 'Nothing committed yet. Commit to merge.';
   if (!live) return 'Session ended.';                          // committed work, but no PTY to keep running
-  return 'Working. Mergeable when the turn ends.';             // committed work, live, but still RUNNING
+  // isMergeableLive now includes RUNNING (via sendMergeContinue's confirm + force), so the only
+  // live, hasCommits states that still reach here are INITIALIZING/STARTING, before the worktree
+  // exists to merge from.
+  if (state === STATES.INITIALIZING || state === STATES.STARTING) return 'Starting up. Mergeable once the session is live.';
+  return 'Mergeable when the turn ends.';                      // defensive fallback; not expected to be reached
 }
 
 function requestDiff(id) {
@@ -306,14 +327,14 @@ function render() {
 
   // No combined total in the actions row: each section head right below carries its own +/- stat,
   // and a pinned grand total only repeated those numbers one scroll-line above them.
-  const actions = renderActions(id, { status, reviewable, mergeEnabled, live });
+  const actions = renderActions(id, { status, reviewable, mergeEnabled, live, state });
   controlsEl.append(actions);
 
   // Disabled reason only when Merge is rendered (not suppressed by parked) and unavailable.
   let reasonShown = false;
   if (!mergeEnabled && status !== 'parked') {
     const reason = mergeDisabledReason({
-      status, fetched, hasCommits, live, hasUncommitted: uncommittedFiles.length > 0,
+      status, fetched, hasCommits, live, hasUncommitted: uncommittedFiles.length > 0, state,
     });
     if (reason) {
       // While the diff is unfetched the reason line IS the loading indicator (it replaced the body's
@@ -456,7 +477,7 @@ function renderFile(f, kind) {
   return sec;
 }
 
-function renderActions(id, { status, reviewable, mergeEnabled, live }) {
+function renderActions(id, { status, reviewable, mergeEnabled, live, state }) {
   const actions = el('div', 'review-actions');
 
   // Suppress Merge when parked: Resolve is the only path forward until the conflict clears.
@@ -468,7 +489,7 @@ function renderActions(id, { status, reviewable, mergeEnabled, live }) {
     merge.title = 'Merge into develop and rebase this worktree, then keep working (alt+m)';
     merge.disabled = !mergeEnabled;
     merge.innerHTML = 'Merge <kbd class="review-shortcut" aria-hidden="true">alt+m</kbd>';
-    merge.addEventListener('click', () => sendControlMsg({ type: 'merge-continue-session', id }));
+    merge.addEventListener('click', () => sendMergeContinue(id, state));
     actions.append(merge);
   }
 

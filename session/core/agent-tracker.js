@@ -100,6 +100,27 @@ const NON_GATING_TASK_TYPES = new Set(['dream']);
 // long for: the entry NEVER gets a completion hook, this TTL is the only way it ever drains.
 const DEFAULT_SHELL_TASK_TTL_MS = 5 * 60 * 1000;
 
+// Default time a declared teammate entry keeps gating after the Stop that declared it. A
+// teammate that is ACTUALLY working is already covered by the counted SubagentStart/Stop map;
+// a declared teammate entry only matters for a dropped SubagentStart. But an idle-but-alive
+// teammate stays status:running in Claude's task registry forever, and the drain heuristics
+// (TeammateIdle by name, TaskCompleted by id) depend on hooks that sometimes never arrive, so
+// without a short TTL a declared teammate can pin a card WORKING for the full agent TTL. This
+// bounds that failure at seconds instead of 30 minutes.
+//
+// Accepted risk: unlike shell/monitor (WEAK_TASK_TYPES, which never get ANY completion hook,
+// hence their own 5-minute TTL as the only drain they ever get), a teammate DOES fire
+// SubagentStart/SubagentStop (live-verified against Claude Code 2.1.200). So this TTL only
+// matters when a SubagentStart hook was dropped AND the teammate is still genuinely working
+// past 90 seconds: the declared entry ages out and the card completes early while background
+// work continues. That failure is self-correcting, the still-working teammate's next hook
+// activity (or the lead resuming on its mailbox) flips the card back to WORKING. The failure
+// this short TTL fixes instead, a card stuck WORKING on an idle-but-alive teammate, blocked
+// operator actions (merge, restart) and never self-corrected on its own. Trading a rare,
+// self-healing early completion for a common, non-self-healing stuck card is the accepted
+// tradeoff; DEFAULT_TEAMMATE_TASK_TTL_MS stays 90s rather than growing toward DEFAULT_AGENT_TTL_MS.
+const DEFAULT_TEAMMATE_TASK_TTL_MS = 90 * 1000;
+
 // How many declared entries still gate completion, given the set of task ids known settled
 // out-of-band (TaskCompleted / TeammateIdle hooks). An id-less entry can never be drained
 // individually, so it always counts (suppression-safe). ageMs is how long ago the snapshot
@@ -111,7 +132,10 @@ const DEFAULT_SHELL_TASK_TTL_MS = 5 * 60 * 1000;
 // several live teammates, an id-based drain leaves every TeammateIdle unresolvable forever.
 // Instead this subtracts idleNameCount from the surviving teammate-type entries, clamped to
 // that teammate count so a stale/extra idle name can never mask a shell or subagent entry.
-function declaredActiveCount(entries, idleIds, ageMs = 0, weakTtlMs = DEFAULT_SHELL_TASK_TTL_MS, idleNameCount = 0) {
+function declaredActiveCount(
+  entries, idleIds, ageMs = 0, weakTtlMs = DEFAULT_SHELL_TASK_TTL_MS, idleNameCount = 0,
+  teammateTtlMs = DEFAULT_TEAMMATE_TASK_TTL_MS,
+) {
   if (!entries) return 0;
   let n = 0;
   let teammateCount = 0;
@@ -119,6 +143,7 @@ function declaredActiveCount(entries, idleIds, ageMs = 0, weakTtlMs = DEFAULT_SH
     if (e.id && idleIds && idleIds.has(e.id)) continue;
     if (WEAK_TASK_TYPES.has(e.type) && ageMs >= weakTtlMs) continue;
     if (NON_GATING_TASK_TYPES.has(e.type)) continue;
+    if (e.type === 'teammate' && ageMs >= teammateTtlMs) continue;
     n++;
     if (e.type === 'teammate') teammateCount++;
   }
@@ -133,4 +158,5 @@ module.exports = {
   declaredActiveCount,
   DEFAULT_AGENT_TTL_MS,
   DEFAULT_SHELL_TASK_TTL_MS,
+  DEFAULT_TEAMMATE_TASK_TTL_MS,
 };
