@@ -85,6 +85,24 @@ function registerControlHandlers(controlWss, deps) {
     return null;
   }
 
+  // Human-readable copy for the pre-merge guard refusals (refused: true results from
+  // Session.mergeWorktree / mergeAndContinue). Those guards fire BEFORE any merge-status change, so
+  // nothing is broadcast for them; this reply to the requesting client is the operator's only feedback.
+  const MERGE_REFUSAL_COPY = {
+    'destroyed':         'session no longer exists',
+    'no-worktree':       'no worktree to merge',
+    'merge-in-progress': 'a merge is already in flight on this worktree',
+  };
+
+  function reportMergeRefusal(ws, s, r) {
+    if (!r || r.refused !== true) return;
+    const detail = r.reason === 'not-continuable'
+      ? `session state ${s.state} is not mergeable`
+      : (MERGE_REFUSAL_COPY[r.reason] || r.reason);
+    console.log(`[control] merge refused: id=${s.id} state=${s.state} reason=${r.reason}`);
+    ws.send(JSON.stringify({ type: 'session-error', id: s.id, session: s.name, message: `Merge refused: ${detail}.` }));
+  }
+
   function buildSnapshot() {
     const list = [];
     for (const [, sess] of sessions) {
@@ -707,9 +725,11 @@ function registerControlHandlers(controlWss, deps) {
     'sleep':            (msg) => { const s = findSession(msg); if (s) s.sleep(); },
     'wake':             (msg) => { const s = findSession(msg); if (s) s.wake(); },
     // Worktree review gate: merge the session's worktree into the integration branch, throw it away,
-    // or stream its diff to the requesting client. mergeWorktree/discardWorktree emit 'merge-status'
-    // which wireSessionEvents broadcasts, so no explicit reply is needed for those two.
-    'merge-session':              (msg) => { const s = findSession(msg); if (s) s.mergeWorktree(); },
+    // or stream its diff to the requesting client. Merge PROGRESS/RESULT rides the broadcast
+    // 'merge-status' events, but a merge REFUSED by a pre-merge guard (refused: true) changes no
+    // status and broadcasts nothing, so reportMergeRefusal replies to the requesting client instead;
+    // without it a refused merge click does nothing with zero feedback.
+    'merge-session':              async (msg, ws) => { const s = findSession(msg); if (s) reportMergeRefusal(ws, s, await s.mergeWorktree()); },
     // One-click close-out: merge the worktree into the integration branch (develop) and return the
     // session to DORMANT. A live but quiescent session (COMPLETE/IDLE) is ended first, then merged once
     // it settles; a parked/failed merge keeps its worktree (no data loss). All of that is decided in
@@ -717,8 +737,9 @@ function registerControlHandlers(controlWss, deps) {
     'finish-session':             (msg) => { const s = findSession(msg); if (s) s.finishAndMerge(); },
     // Merge-as-you-go: merge the live session's worktree into the integration branch and rebase the
     // worktree onto it, WITHOUT ending the session, so the operator keeps working and commits as they go.
-    // Session.mergeAndContinue self-guards the state and emits 'merge-status' (broadcast), so no reply.
-    'merge-continue-session':     (msg) => { const s = findSession(msg); if (s) s.mergeAndContinue({ force: msg.force === true }); },
+    // Session.mergeAndContinue self-guards the state and emits 'merge-status' (broadcast) once a merge
+    // actually starts; a guard refusal is replied via reportMergeRefusal (see merge-session above).
+    'merge-continue-session':     async (msg, ws) => { const s = findSession(msg); if (s) reportMergeRefusal(ws, s, await s.mergeAndContinue({ force: msg.force === true })); },
     'discard-session-worktree':   (msg) => { const s = findSession(msg); if (s) s.discardWorktree(); },
     // Parked-merge handoff: paste a context-rich prompt (why it parked + the conflicting files + how to
     // rebase/resolve) into the session's live PTY so the agent in the worktree can finish the merge.

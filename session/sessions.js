@@ -1102,12 +1102,16 @@ class Session extends EventEmitter {
 
   // Operator action: rebase-then-FF merge the session's worktree into the integration branch, then
   // tear it down. On a conflict/lost-FF the branch PARKS (worktree preserved). Returns the engine result.
+  // `refused: true` on the early returns here (and in mergeAndContinue) marks a guard that fired BEFORE
+  // any merge-status change: nothing is broadcast for these, so the control handler is the one that must
+  // surface them to the operator (see reportMergeRefusal in server/control-handlers.js). Without that
+  // flag a refused merge is invisible: the click does nothing and no feedback ever reaches the dashboard.
   async mergeWorktree() {
-    if (!this._gitWorkspace || !this._workspace) return { merged: false, reason: "no-worktree" };
+    if (!this._gitWorkspace || !this._workspace) return { merged: false, refused: true, reason: "no-worktree" };
     // Re-entry guard: a second merge click while a merge is already in flight would race the engine on
     // the same worktree. Keyed STRICTLY on 'merging' so it never blocks the legitimate finish path, which
     // calls mergeWorktree while mergeStatus is 'pending-review' (settled-on-exit) or 'none'.
-    if (this.mergeStatus === "merging") return { merged: false, reason: "merge-in-progress" };
+    if (this.mergeStatus === "merging") return { merged: false, refused: true, reason: "merge-in-progress" };
     this._setMergeStatus("merging");
     let r;
     try {
@@ -1147,14 +1151,16 @@ class Session extends EventEmitter {
   // gate that never drained): it additionally allows RUNNING, but still refuses every other non-live
   // state (DORMANT/INITIALIZING/STARTING/DONE/FAILED all mean there is no live worktree to merge from).
   async mergeAndContinue({ force = false } = {}) {
-    if (this._destroyed) return { merged: false, reason: "destroyed" };
-    if (!this._gitWorkspace || !this._workspace) return { merged: false, reason: "no-worktree" };
+    // refused: true = a pre-merge guard fired with NO merge-status side effect; the control handler
+    // surfaces it (see the mergeWorktree header note).
+    if (this._destroyed) return { merged: false, refused: true, reason: "destroyed" };
+    if (!this._gitWorkspace || !this._workspace) return { merged: false, refused: true, reason: "no-worktree" };
     const runningOverride = force && this.state === STATES.RUNNING;
     if (!MERGEABLE_LIVE_STATES.includes(this.state) && !runningOverride) {
-      return { merged: false, reason: "not-continuable" };
+      return { merged: false, refused: true, reason: "not-continuable" };
     }
     // Re-entry guard (see mergeWorktree): refuse a second concurrent merge on the same worktree.
-    if (this.mergeStatus === "merging") return { merged: false, reason: "merge-in-progress" };
+    if (this.mergeStatus === "merging") return { merged: false, refused: true, reason: "merge-in-progress" };
     this._setMergeStatus("merging");
     let r;
     try {

@@ -128,6 +128,48 @@ test('merge-continue-session with force:true passes { force: true } through to s
   assert.deepEqual(calls, [{ force: true }]);
 });
 
+// --- refused merges reply to the requesting client (a silent guard refusal gave zero feedback) ---
+
+test('merge-continue-session replies session-error when a pre-merge guard refuses', async () => {
+  const s = {
+    id: 'p1', name: 'worker', ephemeral: false, state: 'DONE',
+    mergeAndContinue() { return { merged: false, refused: true, reason: 'not-continuable' }; },
+    toSnapshot() { return { id: this.id, name: this.name }; },
+  };
+  const h = harness(new Map([['p1', s]]));
+  await h.send({ type: 'merge-continue-session', id: 'p1', force: true });
+  const err = h.sent.find((m) => m.type === 'session-error');
+  assert.ok(err, 'refusal replied to the requesting client');
+  assert.equal(err.id, 'p1');
+  assert.equal(err.session, 'worker');
+  assert.match(err.message, /Merge refused: session state DONE is not mergeable/);
+});
+
+test('merge-session replies session-error when a merge is already in flight', async () => {
+  const s = {
+    id: 'p1', name: 'p1', ephemeral: false, state: 'DONE',
+    mergeWorktree() { return { merged: false, refused: true, reason: 'merge-in-progress' }; },
+    toSnapshot() { return { id: this.id, name: this.name }; },
+  };
+  const h = harness(new Map([['p1', s]]));
+  await h.send({ type: 'merge-session', id: 'p1' });
+  const err = h.sent.find((m) => m.type === 'session-error');
+  assert.ok(err, 'refusal replied to the requesting client');
+  assert.match(err.message, /Merge refused: a merge is already in flight/);
+});
+
+test('a merge that proceeds (or fails past the guards) sends no session-error reply', async () => {
+  const s = {
+    id: 'p1', name: 'p1', ephemeral: false, state: 'IDLE',
+    mergeAndContinue() { return { merged: false, reason: 'rebase-conflict', parked: true }; },
+    toSnapshot() { return { id: this.id, name: this.name }; },
+  };
+  const h = harness(new Map([['p1', s]]));
+  await h.send({ type: 'merge-continue-session', id: 'p1' });
+  assert.equal(h.sent.find((m) => m.type === 'session-error'), undefined,
+    'parked/failed merges already broadcast merge-status; no refusal reply');
+});
+
 test('merge-continue-session without force sends { force: false } (a truthy-but-not-true value never forces)', () => {
   const calls = [];
   const s = {

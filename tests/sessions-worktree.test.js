@@ -283,6 +283,7 @@ test('mergeAndContinue refuses while actively RUNNING (mid-edit; no merge)', { s
     s.state = STATES.RUNNING;
     const r = await s.mergeAndContinue();
     assert.equal(r.merged, false);
+    assert.equal(r.refused, true, 'guard refusals are flagged so the control handler can surface them');
     assert.equal(r.reason, 'not-continuable');
     assert.equal(gw.calls.mergeKeep.length, 0, 'no merge attempted mid-work');
     assert.equal(s.worktreeDir, wt, 'worktree untouched');
@@ -316,6 +317,7 @@ test('mergeAndContinue({ force: true }) still refuses a non-live state (force on
     s.state = STATES.DONE;
     const r = await s.mergeAndContinue({ force: true });
     assert.equal(r.merged, false);
+    assert.equal(r.refused, true, 'guard refusals are flagged so the control handler can surface them');
     assert.equal(r.reason, 'not-continuable');
     assert.equal(gw.calls.mergeKeep.length, 0, 'force does not widen past RUNNING');
   } finally { s.destroy(); fs.rmSync(wt, { recursive: true, force: true }); }
