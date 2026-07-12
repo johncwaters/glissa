@@ -60,6 +60,40 @@ test('resume (hook) from COMPLETE -> RUNNING', () => {
   s.destroy();
 });
 
+// --- 'user-prompt' event: fired ONLY for an authoritative hook resume (UserPromptSubmit), so
+// the backend's notify-cycle reset does not depend on winning the resume-vs-title-working race
+// (both are immediate in status-source.js; see notify-gate.js and the MEDIUM fix notes) ---
+
+test('a hook resume signal emits "user-prompt" (authoritative UserPromptSubmit)', () => {
+  const s = makeSession(STATES.IDLE);
+  const seen = [];
+  s.on('user-prompt', () => seen.push('user-prompt'));
+  hook(s, 'resume');
+  assert.deepEqual(seen, ['user-prompt']);
+  s.destroy();
+});
+
+test('a title working signal does NOT emit "user-prompt" (self-wake, not an authoritative prompt)', () => {
+  const s = makeSession(STATES.IDLE);
+  const seen = [];
+  s.on('user-prompt', () => seen.push('user-prompt'));
+  title(s, 'working');
+  assert.deepEqual(seen, []);
+  s.destroy();
+});
+
+test('subagent/task lifecycle signals do NOT emit "user-prompt"', () => {
+  const s = makeSession(STATES.RUNNING);
+  const seen = [];
+  s.on('user-prompt', () => seen.push('user-prompt'));
+  hook(s, 'subagent-start', { payload: { agent_id: 'a1' } });
+  hook(s, 'subagent-stop', { payload: { agent_id: 'a1' } });
+  hook(s, 'task-created', { payload: { task_id: 't1', teammate_name: 'x' } });
+  hook(s, 'teammate-idle', { payload: { teammate_name: 'x' } });
+  assert.deepEqual(seen, []);
+  s.destroy();
+});
+
 test('working from WAITING -> RUNNING (user answered)', () => {
   const s = makeSession(STATES.WAITING);
   title(s, 'working');
@@ -396,14 +430,70 @@ test('a stale background_tasks override ages out (TTL), so a hung task cannot pi
 
 test('a ready suppressed by a live sub-agent completes when the count drains (held, not dropped)', (t) => {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
-  const s = makeSession(STATES.RUNNING);
+  const s = makeSession(STATES.RUNNING, { gateReleaseSettleMs: 30 });
   hook(s, 'subagent-start', { payload: { agent_id: 'a1' } });
   hook(s, 'ready');
   t.mock.timers.tick(40);
   assert.equal(s.state, STATES.RUNNING, 'gate suppresses while the sub-agent runs');
   hook(s, 'subagent-stop', { payload: { agent_id: 'a1' } });
-  assert.equal(s.state, STATES.COMPLETE, 'drain releases the held ready');
+  assert.equal(s.state, STATES.RUNNING, 'the drain starts the settle window, it does not complete instantly');
   assert.equal(s.toSnapshot().activeAgents, 0);
+  t.mock.timers.tick(40);
+  assert.equal(s.state, STATES.COMPLETE, 'drain releases the held ready once the settle window elapses');
+  s.destroy();
+});
+
+// --- Settle window: a drain does not release instantly (a TeammateIdle/SubagentStop drain
+// usually precedes the lead auto-resuming on the teammate's mailbox message a few seconds
+// later, which fires no UserPromptSubmit hook) ---
+
+test('a working signal inside the settle window cancels the release entirely (no COMPLETE ever fires)', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const s = makeSession(STATES.RUNNING, { gateReleaseSettleMs: 30 });
+  const seen = [];
+  s.on('state-change', (e) => seen.push(e.to));
+  hook(s, 'subagent-start', { payload: { agent_id: 'a1' } });
+  hook(s, 'ready');
+  t.mock.timers.tick(40);
+  assert.equal(s.state, STATES.RUNNING, 'gate suppresses while the sub-agent runs');
+  hook(s, 'subagent-stop', { payload: { agent_id: 'a1' } }); // drains: arms the settle window
+  title(s, 'working'); // the lead auto-resumed on the teammate's mailbox message
+  t.mock.timers.tick(60); // well past the settle window
+  assert.equal(s.state, STATES.RUNNING, 'the resume cancelled the pending release; still working');
+  assert.equal(seen.includes(STATES.COMPLETE), false, 'must never have completed, not even transiently');
+  s.destroy();
+});
+
+test('a quiet drain releases only after the settle window elapses, with detail.deferred true', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const s = makeSession(STATES.RUNNING, { gateReleaseSettleMs: 30 });
+  let deferredDetail = null;
+  s.on('state-change', (e) => { if (e.to === STATES.COMPLETE) deferredDetail = e.detail; });
+  hook(s, 'subagent-start', { payload: { agent_id: 'a1' } });
+  hook(s, 'ready');
+  t.mock.timers.tick(40);
+  hook(s, 'subagent-stop', { payload: { agent_id: 'a1' } }); // drains
+  assert.equal(s.state, STATES.RUNNING, 'still RUNNING immediately after the drain, before the settle window elapses');
+  t.mock.timers.tick(10);
+  assert.equal(s.state, STATES.RUNNING, 'still RUNNING partway through the settle window');
+  t.mock.timers.tick(25); // past the 30ms settle window
+  assert.equal(s.state, STATES.COMPLETE, 'released once the settle window elapses with no cancelling activity');
+  assert.equal(deferredDetail && deferredDetail.deferred, true, 'a released held ready carries deferred:true, like the old immediate release');
+  s.destroy();
+});
+
+test('repeated drain events do not extend the settle window (armed once)', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const s = makeSession(STATES.RUNNING, { gateReleaseSettleMs: 30 });
+  hook(s, 'subagent-start', { payload: { agent_id: 'a1' } });
+  hook(s, 'ready');
+  t.mock.timers.tick(40);
+  assert.equal(s.state, STATES.RUNNING, 'suppressed while a1 is live');
+  hook(s, 'subagent-stop', { payload: { agent_id: 'a1' } }); // drains to 0: arms the settle window
+  t.mock.timers.tick(20); // 20ms into the 30ms window
+  s._emitAgentsChange(); // a second, redundant agents-change while already drained
+  t.mock.timers.tick(20); // 40ms since the FIRST drain: past its 30ms window
+  assert.equal(s.state, STATES.COMPLETE, 'the window was armed once at the first drain; the redundant emission did not push it out');
   s.destroy();
 });
 
@@ -425,26 +515,29 @@ test('Stop declaring only a settled-status entry completes (defensive filter)', 
 
 test('TeammateIdle drains a declared running teammate and releases the held ready', (t) => {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
-  const s = makeSession(STATES.RUNNING);
+  const s = makeSession(STATES.RUNNING, { gateReleaseSettleMs: 30 });
   hook(s, 'task-created', { payload: { task_id: 'tm-task', teammate_name: 'store-explore' } });
   hook(s, 'ready', { payload: { background_tasks: [{ id: 'tm-task', type: 'teammate', status: 'running' }] } });
   t.mock.timers.tick(40);
   assert.equal(s.state, STATES.RUNNING, 'a running-declared teammate still gates');
   assert.equal(s.toSnapshot().activeAgents, 1);
   hook(s, 'teammate-idle', { payload: { teammate_name: 'store-explore' } });
-  assert.equal(s.state, STATES.COMPLETE, 'TeammateIdle releases the gate-held ready');
+  assert.equal(s.state, STATES.RUNNING, 'the drain starts the settle window, it does not complete instantly');
   assert.equal(s.toSnapshot().activeAgents, 0);
+  t.mock.timers.tick(40);
+  assert.equal(s.state, STATES.COMPLETE, 'TeammateIdle releases the gate-held ready once the settle window elapses');
   s.destroy();
 });
 
 test('an idled teammate stays drained across later Stops that re-declare it', (t) => {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
-  const s = makeSession(STATES.RUNNING);
+  const s = makeSession(STATES.RUNNING, { gateReleaseSettleMs: 30 });
   const declared = { background_tasks: [{ id: 'tm-task', type: 'teammate', status: 'running' }] };
   hook(s, 'task-created', { payload: { task_id: 'tm-task', teammate_name: 'store-explore' } });
   hook(s, 'ready', { payload: declared });
   t.mock.timers.tick(40);
   hook(s, 'teammate-idle', { payload: { teammate_name: 'store-explore' } });
+  t.mock.timers.tick(40); // settle window
   assert.equal(s.state, STATES.COMPLETE);
   hook(s, 'resume'); // next user prompt; the teammate is still alive and idle
   assert.equal(s.state, STATES.RUNNING);
@@ -456,12 +549,13 @@ test('an idled teammate stays drained across later Stops that re-declare it', (t
 
 test('TeammateIdle without a name mapping still drains via the idle-by-name count against a single live teammate', (t) => {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
-  const s = makeSession(STATES.RUNNING);
+  const s = makeSession(STATES.RUNNING, { gateReleaseSettleMs: 30 });
   // No TaskCreated seen (e.g. Glissa attached mid-run): name->id mapping unavailable.
   hook(s, 'ready', { payload: { background_tasks: [{ id: 'tm1', type: 'teammate', status: 'running' }] } });
   t.mock.timers.tick(40);
   assert.equal(s.state, STATES.RUNNING);
   hook(s, 'teammate-idle', { payload: { teammate_name: 'unmapped' } });
+  t.mock.timers.tick(40); // settle window
   assert.equal(s.state, STATES.COMPLETE, 'one idle name offsets the one declared teammate');
   s.destroy();
 });
@@ -482,7 +576,7 @@ test('TeammateIdle with an unmapped name only offsets ONE of several live teamma
 
 test('three declared teammates each idle by name: the card COMPLETEs on the third TeammateIdle', (t) => {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
-  const s = makeSession(STATES.RUNNING);
+  const s = makeSession(STATES.RUNNING, { gateReleaseSettleMs: 30 });
   const declared = { background_tasks: [
     { id: 'tm1', type: 'teammate', status: 'running' },
     { id: 'tm2', type: 'teammate', status: 'running' },
@@ -499,8 +593,9 @@ test('three declared teammates each idle by name: the card COMPLETEs on the thir
   assert.equal(s.state, STATES.RUNNING);
   assert.equal(s.toSnapshot().activeAgents, 1);
   hook(s, 'teammate-idle', { payload: { teammate_name: 'c' } });
-  assert.equal(s.state, STATES.COMPLETE, 'the third idle name drains the last teammate and releases the held ready');
   assert.equal(s.toSnapshot().activeAgents, 0);
+  t.mock.timers.tick(40); // settle window
+  assert.equal(s.state, STATES.COMPLETE, 'the third idle name drains the last teammate and releases the held ready');
   s.destroy();
 });
 
@@ -516,10 +611,11 @@ test('a Stop declaring only a dream entry (pending self-revival) does not suppre
 
 test('a subagent-start whose agent_id embeds an idle teammate name re-gates it', (t) => {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
-  const s = makeSession(STATES.RUNNING);
+  const s = makeSession(STATES.RUNNING, { gateReleaseSettleMs: 30 });
   hook(s, 'ready', { payload: { background_tasks: [{ id: 'tm1', type: 'teammate', status: 'running' }] } });
   t.mock.timers.tick(40);
   hook(s, 'teammate-idle', { payload: { teammate_name: 'probe' } });
+  t.mock.timers.tick(40); // settle window
   assert.equal(s.state, STATES.COMPLETE, 'the sole declared teammate idled by name');
   hook(s, 'resume'); // a new user turn; the idle-by-name record for "probe" survives this
   assert.equal(s.state, STATES.RUNNING);
@@ -537,10 +633,11 @@ test('a subagent-start whose agent_id embeds an idle teammate name re-gates it',
 
 test('REGRESSION: a departed teammate idled by name does not mask a newly declared different teammate', (t) => {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
-  const s = makeSession(STATES.RUNNING);
+  const s = makeSession(STATES.RUNNING, { gateReleaseSettleMs: 30 });
   hook(s, 'ready', { payload: { background_tasks: [{ id: 'alice-id', type: 'teammate', status: 'running' }] } });
   t.mock.timers.tick(40);
   hook(s, 'teammate-idle', { payload: { teammate_name: 'alice' } });
+  t.mock.timers.tick(40); // settle window
   assert.equal(s.state, STATES.COMPLETE, 'alice idled by name completes the card');
   hook(s, 'resume'); // alice has since shut down; a new turn starts
   assert.equal(s.state, STATES.RUNNING);
@@ -555,7 +652,7 @@ test('REGRESSION: a departed teammate idled by name does not mask a newly declar
 
 test('departed-teammate eviction only evicts as many idle names as teammates actually departed', (t) => {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
-  const s = makeSession(STATES.RUNNING);
+  const s = makeSession(STATES.RUNNING, { gateReleaseSettleMs: 30 });
   hook(s, 'ready', { payload: { background_tasks: [
     { id: 't1', type: 'teammate', status: 'running' },
     { id: 't2', type: 'teammate', status: 'running' },
@@ -563,6 +660,7 @@ test('departed-teammate eviction only evicts as many idle names as teammates act
   t.mock.timers.tick(40);
   hook(s, 'teammate-idle', { payload: { teammate_name: 'a' } }); // offsets t1
   hook(s, 'teammate-idle', { payload: { teammate_name: 'b' } }); // offsets t2
+  t.mock.timers.tick(40); // settle window
   assert.equal(s.state, STATES.COMPLETE, 'both teammates idle by name');
   hook(s, 'resume');
   // Only t1 departs; t2 is re-declared still running (still legitimately idle).
@@ -614,10 +712,11 @@ test('TaskCompleted carrying a teammate_name also clears any idle-by-name record
 
 test('a subagent-start only re-gates when the remainder after "a<name>-" is pure hex (no false-prefix match)', (t) => {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
-  const s = makeSession(STATES.RUNNING);
+  const s = makeSession(STATES.RUNNING, { gateReleaseSettleMs: 30 });
   hook(s, 'ready', { payload: { background_tasks: [{ id: 'tm1', type: 'teammate', status: 'running' }] } });
   t.mock.timers.tick(40);
   hook(s, 'teammate-idle', { payload: { teammate_name: 'foo' } });
+  t.mock.timers.tick(40); // settle window
   assert.equal(s.state, STATES.COMPLETE, 'the sole declared teammate idled by name');
   hook(s, 'resume');
   // "foo-bar" is a DIFFERENT teammate that happens to share the "afoo-" prefix; its agent_id
@@ -656,11 +755,12 @@ test('a TeammateIdle arriving before any background_tasks snapshot exists still 
 
 test('idle-by-name records survive resume: a re-declaring Stop for the same idle teammate does not re-pin the card', (t) => {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
-  const s = makeSession(STATES.RUNNING);
+  const s = makeSession(STATES.RUNNING, { gateReleaseSettleMs: 30 });
   const declared = { background_tasks: [{ id: 'tm1', type: 'teammate', status: 'running' }] };
   hook(s, 'ready', { payload: declared });
   t.mock.timers.tick(40);
   hook(s, 'teammate-idle', { payload: { teammate_name: 'probe' } });
+  t.mock.timers.tick(40); // settle window
   assert.equal(s.state, STATES.COMPLETE);
   hook(s, 'resume'); // next user prompt; the idle-but-alive teammate is still declared by name
   assert.equal(s.state, STATES.RUNNING);
@@ -672,23 +772,25 @@ test('idle-by-name records survive resume: a re-declaring Stop for the same idle
 
 test('TaskCompleted drains a declared background task without waiting for the next Stop', (t) => {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
-  const s = makeSession(STATES.RUNNING);
+  const s = makeSession(STATES.RUNNING, { gateReleaseSettleMs: 30 });
   hook(s, 'ready', { payload: { background_tasks: [{ id: 'bash-1', type: 'shell', status: 'running' }] } });
   t.mock.timers.tick(40);
   assert.equal(s.state, STATES.RUNNING);
   hook(s, 'task-completed', { payload: { task_id: 'bash-1' } });
+  t.mock.timers.tick(40); // settle window
   assert.equal(s.state, STATES.COMPLETE);
   s.destroy();
 });
 
 test('TaskCreated reactivates an idled teammate so it gates again', (t) => {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
-  const s = makeSession(STATES.RUNNING);
+  const s = makeSession(STATES.RUNNING, { gateReleaseSettleMs: 30 });
   const declared = { background_tasks: [{ id: 'tm-task', type: 'teammate', status: 'running' }] };
   hook(s, 'task-created', { payload: { task_id: 'tm-task', teammate_name: 'store-explore' } });
   hook(s, 'ready', { payload: declared });
   t.mock.timers.tick(40);
   hook(s, 'teammate-idle', { payload: { teammate_name: 'store-explore' } });
+  t.mock.timers.tick(40); // settle window
   assert.equal(s.state, STATES.COMPLETE);
   hook(s, 'resume');
   hook(s, 'task-created', { payload: { task_id: 'tm-task', teammate_name: 'store-explore' } }); // re-tasked
@@ -719,7 +821,7 @@ test('a TeammateIdle recorded after resume clears the snapshot still drains the 
 
 test('a TeammateIdle recorded by name drains a gate-held ready without any further Stop', (t) => {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
-  const s = makeSession(STATES.RUNNING);
+  const s = makeSession(STATES.RUNNING, { gateReleaseSettleMs: 30 });
   hook(s, 'subagent-start', { payload: { agent_id: 'a1' } });
   hook(s, 'ready');
   t.mock.timers.tick(40);
@@ -729,6 +831,7 @@ test('a TeammateIdle recorded by name drains a gate-held ready without any furth
   hook(s, 'subagent-stop', {
     payload: { agent_id: 'a1', background_tasks: [{ id: 'tm1', type: 'teammate', status: 'running' }] },
   });
+  t.mock.timers.tick(40); // settle window
   assert.equal(s.state, STATES.COMPLETE, 'a1 drains, the idle name offsets tm1, and the held ready releases');
   s.destroy();
 });
@@ -737,11 +840,12 @@ test('a TeammateIdle recorded by name drains a gate-held ready without any furth
 
 test('a declared shell task stops gating past its TTL and the held ready is released', (t) => {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
-  const s = makeSession(STATES.RUNNING, { shellTaskTtlMs: 150 });
+  const s = makeSession(STATES.RUNNING, { shellTaskTtlMs: 150, gateReleaseSettleMs: 30 });
   hook(s, 'ready', { payload: { background_tasks: [{ id: 'b1', type: 'shell', status: 'running' }] } });
   t.mock.timers.tick(100);
   assert.equal(s.state, STATES.RUNNING, 'still gating before the ttl boundary');
   t.mock.timers.tick(250); // past ttl + the release timer epsilon
+  t.mock.timers.tick(40); // settle window (the ttl-timer drain also waits it out)
   assert.equal(s.state, STATES.COMPLETE, 'a shell task never gets a completion hook; the ttl releases the held ready');
   s.destroy();
 });
@@ -751,11 +855,12 @@ test('a declared shell task stops gating past its TTL and the held ready is rele
 
 test('a declared teammate entry stops gating past its TTL and the held ready is released', (t) => {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
-  const s = makeSession(STATES.RUNNING, { teammateTaskTtlMs: 150 });
+  const s = makeSession(STATES.RUNNING, { teammateTaskTtlMs: 150, gateReleaseSettleMs: 30 });
   hook(s, 'ready', { payload: { background_tasks: [{ id: 'tm1', type: 'teammate', status: 'running' }] } });
   t.mock.timers.tick(100);
   assert.equal(s.state, STATES.RUNNING, 'still gating before the ttl boundary');
   t.mock.timers.tick(250); // past ttl + the release timer epsilon
+  t.mock.timers.tick(40); // settle window (the ttl-timer drain also waits it out)
   assert.equal(s.state, STATES.COMPLETE, 'an idle-alive teammate never drains via hooks alone; the ttl releases the held ready');
   s.destroy();
 });
@@ -799,13 +904,14 @@ test('an aged-out declared teammate does not let a leftover idle-by-name record 
 // short ttl fixes instead blocked operator actions and never self-corrected.
 test('accepted risk: a dropped-SubagentStart teammate declared running stops gating at the teammate TTL', (t) => {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
-  const s = makeSession(STATES.RUNNING, { teammateTaskTtlMs: 150 });
+  const s = makeSession(STATES.RUNNING, { teammateTaskTtlMs: 150, gateReleaseSettleMs: 30 });
   // No subagent-start ever fired for this teammate (the hook was dropped): the counted map never
   // learns about it, so only the declared background_tasks entry (and its ttl) covers it.
   hook(s, 'ready', { payload: { background_tasks: [{ id: 'tm1', type: 'teammate', status: 'running' }] } });
   t.mock.timers.tick(100);
   assert.equal(s.state, STATES.RUNNING, 'still gates within the ttl window');
   t.mock.timers.tick(250); // past ttl + the release timer epsilon
+  t.mock.timers.tick(40); // settle window (the ttl-timer drain also waits it out)
   assert.equal(s.state, STATES.COMPLETE, 'accepted risk: completes even if the teammate is still genuinely working past the ttl');
   s.destroy();
 });
@@ -853,12 +959,13 @@ test('a fresh subagent-start invalidates a held ready (older ids draining must n
 
 test('a held ready still completes when the dropped SubagentStop only ages out (TTL timer)', (t) => {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
-  const s = makeSession(STATES.RUNNING, { agentTtlMs: 150 });
+  const s = makeSession(STATES.RUNNING, { agentTtlMs: 150, gateReleaseSettleMs: 30 });
   hook(s, 'subagent-start', { payload: { agent_id: 'a1' } }); // its Stop is lost forever
   hook(s, 'ready');
   t.mock.timers.tick(40);
   assert.equal(s.state, STATES.RUNNING, 'suppressed while the entry is fresh');
   t.mock.timers.tick(300); // past agentTtlMs + the release timer epsilon, no further hooks
+  t.mock.timers.tick(40); // settle window (the ttl-timer drain also waits it out)
   assert.equal(s.state, STATES.COMPLETE, 'the TTL drain releases the held ready without any new signal');
   s.destroy();
 });
@@ -888,6 +995,24 @@ test('destroy() with a held ready armed fires nothing after the TTL (timer hygie
   const stateAtDestroy = s.state;
   t.mock.timers.tick(400); // past agentTtlMs + release epsilon
   assert.equal(s.state, stateAtDestroy, 'no post-destroy transition from the release timer');
+});
+
+test('destroy() with the settle timer armed (drained to 0) fires nothing after the window (timer hygiene)', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const s = makeSession(STATES.RUNNING, { gateReleaseSettleMs: 30 });
+  const seen = [];
+  s.on('state-change', (e) => seen.push(e.to));
+  hook(s, 'subagent-start', { payload: { agent_id: 'a1' } });
+  hook(s, 'ready');
+  t.mock.timers.tick(40);
+  assert.equal(s.state, STATES.RUNNING);
+  hook(s, 'subagent-stop', { payload: { agent_id: 'a1' } }); // drains to 0: arms the settle timer
+  assert.equal(s.state, STATES.RUNNING, 'settle window just armed, not released yet');
+  s.destroy();
+  const stateAtDestroy = s.state;
+  t.mock.timers.tick(200); // well past the 30ms settle window
+  assert.equal(s.state, stateAtDestroy, 'no post-destroy transition from the settle timer');
+  assert.equal(seen.includes(STATES.COMPLETE), false, 'destroy before the settle window elapses must never complete the card');
 });
 
 test('detectBackgroundAgents=false ignores background_tasks payloads too', (t) => {

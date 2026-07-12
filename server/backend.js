@@ -656,7 +656,7 @@ function createBackend(httpServer, options = {}) {
       }, cfg.debounceMs);
     });
 
-    sess.on('state-change', ({ from, to, event }) => {
+    sess.on('state-change', ({ from, to, event, detail }) => {
       broadcastControl({
         type: 'state-change',
         id: sess.id,
@@ -669,10 +669,11 @@ function createBackend(httpServer, options = {}) {
       // category fires for this state entry, if any) lives in session/core/notify-gate.js
       // decideNotification, shared with its tests. Both turn-complete (COMPLETE) and process
       // exit (DONE) notify under 'complete', but terminal categories pass the once-per-work-cycle
-      // gate: a cycle starts on RUNNING (new work) or INITIALIZING (restart) entry, so a
-      // COMPLETE->DONE pair, or a late ready re-completing through the dismiss-opened IDLE
-      // window, can no longer notify twice for one finished turn. 'waiting' stays per-entry
-      // (escalation + a later real "needs input" from COMPLETE must keep firing).
+      // gate: a cycle starts on INITIALIZING (restart) or a USER-driven RUNNING entry (event
+      // user_input, or an authoritative resume signal; a hook-less session keeps the legacy
+      // always-reset), plus the 'user-prompt' listener below for the resume/working race. See
+      // notify-gate.js for the full reset rule. 'waiting' stays per-entry (escalation + a later
+      // real "needs input" from COMPLETE must keep firing).
       // Acknowledge BEFORE deciding/triggering: on a notifying-to-notifying hop (e.g.
       // WAITING -> COMPLETE via a late authoritative Stop) the old entry must clear
       // first, or the new trigger lands on a live DELIVERED entry and is rejected -
@@ -684,7 +685,7 @@ function createBackend(httpServer, options = {}) {
         notificationManager.acknowledge(sess.id);
       }
 
-      const notifyCategory = decideNotification(to, notifyGate, event);
+      const notifyCategory = decideNotification(to, notifyGate, event, { signal: detail && detail.signal, hookSeen: sess.hookSeen });
       if (notifyCategory) {
         const messages = {
           waiting: `${sess.name} needs your input`,
@@ -694,6 +695,13 @@ function createBackend(httpServer, options = {}) {
         notificationManager.trigger(sess.id, notifyCategory, messages[notifyCategory]);
       }
     });
+
+    // An authoritative UserPromptSubmit always resets the notify cycle, even when the racing
+    // title 'working' signal won the IDLE/COMPLETE->RUNNING transition (both are immediate in
+    // status-source.js, so the transition's detail.signal is not a reliable "was this user-
+    // driven" read). A self-wake (mailbox resume) never fires UserPromptSubmit, so it still never
+    // resets here.
+    sess.on('user-prompt', () => notifyGate.reset());
 
     // Live background sub-agent count delta -> control WS, so the card shows "N agents" while a
     // background sub-agent keeps running after the main turn's Stop (instead of flipping to Complete).

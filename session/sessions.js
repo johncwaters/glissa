@@ -124,6 +124,9 @@ class Session extends EventEmitter {
     // an idle-but-alive teammate is declared running forever. Bounding it short keeps a dropped
     // TeammateIdle/TaskCompleted from pinning the card WORKING for the full agent TTL.
     teammateTaskTtlMs = agentTracker.DEFAULT_TEAMMATE_TASK_TTL_MS,
+    // Quiet window a drained gate-held ready waits out before it actually releases. Why a
+    // window at all: see _stashGateHeldReady / agent-tracker.js DEFAULT_GATE_RELEASE_SETTLE_MS.
+    gateReleaseSettleMs = agentTracker.DEFAULT_GATE_RELEASE_SETTLE_MS,
     // Scheduled-revival visibility (see session/core/wakeup-tracker.js). When true (default), a
     // ScheduleWakeup / cron task seen via PostToolUse hooks rides toSnapshot().pendingWakeup as an
     // ADVISORY card chip ("sleeping until ~HH:MM"); it never gates a transition. The kill switch
@@ -231,6 +234,7 @@ class Session extends EventEmitter {
     this._agentTtlMs = agentTtlMs;
     this._shellTaskTtlMs = shellTaskTtlMs;
     this._teammateTaskTtlMs = teammateTaskTtlMs;
+    this._gateReleaseSettleMs = gateReleaseSettleMs;
     // Authoritative in-flight background work declared by the latest Stop/SubagentStop
     // payload (`background_tasks`, Claude Code v2.1.145+): an array of { id, type } entries,
     // or null when the running Claude does not send it. Covers background Bash tasks and
@@ -277,6 +281,9 @@ class Session extends EventEmitter {
     // Released in _maybeReleaseGateHeldReady; the timer bounds the TTL-only drain path.
     this._gateHeldReady = null;
     this._gateHeldReadyTimer = null;
+    // Armed once the background count actually drains to 0, so the release is not instant
+    // (the settle window; rationale at _stashGateHeldReady). Cleared with the held ready.
+    this._gateSettleTimer = null;
     // True between a SessionStart(source: clear|compact) hook and the next real
     // UserPromptSubmit: the TUI redraw around /clear flashes a spinner + idle glyph in
     // the OSC title, which would otherwise open a fake work cycle (RUNNING) and close
@@ -386,6 +393,14 @@ class Session extends EventEmitter {
       // and a stale ready must not fire COMPLETE on the very prompt that starts a new turn.
       this._clearGateHeldReady();
       this._clearBgDeclared(); // a new turn starts with no settled background snapshot
+      // Only a hook ever produces "resume" (UserPromptSubmit; the title source cannot), so this
+      // means exactly "authoritative user prompt". Emitted separately from the state-change this
+      // signal may (or may not) cause: both "working" (title) and "resume" (hook) are IMMEDIATE
+      // in status-source.js, so the racing title spinner can win the IDLE/COMPLETE->RUNNING
+      // transition first, carrying signal "working" instead of "resume" in its detail. The
+      // notify-cycle reset must not depend on winning that race, so the backend resets on this
+      // event directly instead of only reading the transition detail.
+      this.emit("user-prompt");
     }
     // A main-agent Stop carries the authoritative background-work count (v2.1.145+).
     if (raw && raw.signal === "ready" && raw.source === "hook") {
@@ -594,6 +609,15 @@ class Session extends EventEmitter {
   // the state it was suppressed in: any transition between stash and release invalidates it.
   // The timer covers the TTL-only drain (no further hooks ever arrive): it re-checks after the
   // full TTL, when the lazy prune in _activeAgentCount is guaranteed to see every entry expired.
+  //
+  // A drain (the count reaching 0) does NOT release immediately: it only starts the
+  // gateReleaseSettleMs quiet window (see _maybeReleaseGateHeldReady). A TeammateIdle/
+  // SubagentStop drain usually precedes the lead auto-resuming on the teammate's mailbox message
+  // 1-3s later (the mailbox wake fires no UserPromptSubmit hook), so releasing the instant the
+  // count hit 0 falsely COMPLETEd (and notified) the card once per orchestration round, then
+  // flipped it right back to WORKING. Any newer activity within the window (working/resume/
+  // awaiting-input, a fresh subagent-start/task-created, a state change, /clear, PTY exit)
+  // cancels the pending release via _clearGateHeldReady before it ever fires.
   _stashGateHeldReady(s) {
     this._gateHeldReady = { source: s.source, signal: s.signal, confidence: s.confidence, state: this.state };
     this._armGateHeldReadyTimer();
@@ -608,15 +632,24 @@ class Session extends EventEmitter {
     if (typeof this._gateHeldReadyTimer.unref === "function") this._gateHeldReadyTimer.unref();
   }
 
+  _clearGateSettleTimer() {
+    if (!this._gateSettleTimer) return;
+    clearTimeout(this._gateSettleTimer);
+    this._gateSettleTimer = null;
+  }
+
   _clearGateHeldReady() {
     this._gateHeldReady = null;
+    this._clearGateSettleTimer();
     if (!this._gateHeldReadyTimer) return;
     clearTimeout(this._gateHeldReadyTimer);
     this._gateHeldReadyTimer = null;
   }
 
-  // Fire the held ready once the background count has drained, unless anything moved the
-  // session since the stash (state check) or newer activity already cleared it.
+  // Called whenever the background count changes (a drain) or the TTL timer re-checks. A drain
+  // to 0 does not release the held ready right away: it arms the gateReleaseSettleMs quiet window
+  // (once; a repeated drain event must not extend it) and only _releaseGateHeldReadyNow actually
+  // fires the transition, after that window elapses with no cancelling activity.
   _maybeReleaseGateHeldReady() {
     const p = this._gateHeldReady;
     if (!p || this._destroyed) return;
@@ -625,7 +658,32 @@ class Session extends EventEmitter {
       return;
     }
     if (this._activeAgentCount() > 0) {
-      // Refreshed entries can outlive the first timer window; re-arm so the TTL bound holds.
+      // The drain retracted (refreshed/re-declared): drop any pending settle and, as before,
+      // re-arm the TTL timer so a still-live entry keeps re-checking.
+      this._clearGateSettleTimer();
+      if (!this._gateHeldReadyTimer) this._armGateHeldReadyTimer();
+      return;
+    }
+    if (this._gateSettleTimer) return; // already counting down; do not extend the window
+    this._gateSettleTimer = setTimeout(() => {
+      this._gateSettleTimer = null;
+      this._releaseGateHeldReadyNow();
+    }, this._gateReleaseSettleMs);
+    if (typeof this._gateSettleTimer.unref === "function") this._gateSettleTimer.unref();
+  }
+
+  // The actual release, run only after the settle window has elapsed with no cancelling
+  // activity. Byte-equivalent to the old immediate-release tail of _maybeReleaseGateHeldReady,
+  // re-checked here because the drain could have retracted (or the session moved on) during
+  // the wait.
+  _releaseGateHeldReadyNow() {
+    const p = this._gateHeldReady;
+    if (!p || this._destroyed) return;
+    if (this.state !== p.state) {
+      this._clearGateHeldReady();
+      return;
+    }
+    if (this._activeAgentCount() > 0) {
       if (!this._gateHeldReadyTimer) this._armGateHeldReadyTimer();
       return;
     }
@@ -739,6 +797,13 @@ class Session extends EventEmitter {
 
   get pid() {
     return this.ptyProcess ? this.ptyProcess.pid : null;
+  }
+
+  // Whether this session has ever received a Claude Code hook callback. The notify-gate RUNNING
+  // reset (session/core/notify-gate.js decideNotification) falls back to the legacy per-RUNNING
+  // reset for a degraded, title-only session, since it has no resume signal to key off.
+  get hookSeen() {
+    return this._hookSeen;
   }
 
   get sleeping() {

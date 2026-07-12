@@ -5,13 +5,20 @@ const { STATES } = require('../../shared/states');
 // Pure once-per-work-cycle notification gate (the seam pattern used by agent-tracker.js /
 // status-mapper.js). The backend's per-session state-change listener consults it before
 // calling notificationManager.trigger for the terminal categories ('complete', 'failed'),
-// so a single work cycle can never notify the same terminal category twice. A work cycle
-// starts when the session enters RUNNING (genuinely new work) or INITIALIZING (restart);
-// the listener calls reset() on those entries. This closes the duplicate-'complete' paths
-// the per-state-entry trigger design allowed: the dismiss-opened IDLE window re-completed
-// by a late authoritative ready, and the COMPLETE -> DONE exit pair beyond the manager's
-// 3s debounce. 'waiting' is deliberately NOT routed through the gate (its escalation
-// re-fire and a later real "needs input" raised from COMPLETE must keep working).
+// so a single work cycle can never notify the same terminal category twice. This closes the
+// duplicate-'complete' paths the per-state-entry trigger design allowed: the dismiss-opened
+// IDLE window re-completed by a late authoritative ready, and the COMPLETE -> DONE exit pair
+// beyond the manager's 3s debounce. 'waiting' is deliberately NOT routed through the gate (its
+// escalation re-fire and a later real "needs input" raised from COMPLETE must keep working).
+//
+// A work cycle starts on INITIALIZING (restart), or on a USER-driven RUNNING entry: the user
+// answering a prompt (event 'user_input') or an authoritative resume (an actual UserPromptSubmit
+// hook, signal 'resume'). It deliberately does NOT start on a self-wake RUNNING entry (a lead
+// agent's title flips to 'working' after it auto-resumes on a teammate's mailbox message, which
+// fires no UserPromptSubmit): otherwise an orchestrator lead that wakes N times per user prompt
+// could re-arm 'complete' and fire a fresh toast on every wake instead of once per prompt. A
+// degraded, title-only session (no hook ever seen) has no resume signal to key off, so it keeps
+// the legacy reset-on-every-RUNNING behavior.
 //
 // Invariants the wiring relies on:
 // - Self-transitions never reach the listener (sessions.js transition() returns early
@@ -45,11 +52,24 @@ function createNotifyGate() {
 // The whole trigger decision for a state entry: which notification category (if any) fires for
 // the entered state `to`, given the session's cycle gate. Lives here, not in backend.js, so the
 // backend listener and the tests execute the SAME decision logic (no hand-mirrored copy to
-// drift). Side effects on the gate are intentional: a RUNNING/INITIALIZING entry resets the
-// cycle, and a matching terminal entry spends its category via the short-circuited fire().
-function decideNotification(to, gate, event) {
-  if (to === STATES.RUNNING || to === STATES.INITIALIZING) {
+// drift). Side effects on the gate are intentional: an INITIALIZING entry, or a USER-driven
+// RUNNING entry, resets the cycle; a matching terminal entry spends its category via the
+// short-circuited fire().
+//
+// opts is optional: { signal, hookSeen }. signal is the state-change detail's signal string (or
+// undefined); hookSeen is whether the session has ever received a Claude Code hook. Omitted opts
+// (or a session with hookSeen false) keeps the legacy reset-on-every-RUNNING behavior, since a
+// degraded title-only session has no resume signal to key a user-driven reset off.
+function decideNotification(to, gate, event, opts) {
+  if (to === STATES.INITIALIZING) {
     gate.reset();
+    return null;
+  }
+  if (to === STATES.RUNNING) {
+    const userDriven = event === 'user_input'
+      || (opts && opts.signal === 'resume')
+      || !opts || !opts.hookSeen;
+    if (userDriven) gate.reset();
     return null;
   }
   // The user killed it themselves: "finished working" would be a false toast. The

@@ -134,6 +134,78 @@ test('DORMANT transitivity: DORMANT needs no reset entry because user_start pass
 });
 
 // ---------------------------------------------------------------------------
+// User-driven RUNNING reset (opts: { signal, hookSeen }). A RUNNING entry only starts a new
+// work cycle when the user actually drove it (answered a prompt, or an authoritative resume);
+// a self-wake (an orchestrator lead's title flipping to 'working' after it auto-resumes on a
+// teammate's mailbox message, which fires no UserPromptSubmit) must NOT re-arm 'complete'.
+// ---------------------------------------------------------------------------
+
+test('RUNNING self-wake (signal: working, hookSeen: true) does not reset: the spent category stays spent', () => {
+  const gate = createNotifyGate();
+  assert.equal(decideNotification(STATES.RUNNING, gate), null); // opens the first cycle (no opts = legacy)
+  assert.equal(decideNotification(STATES.COMPLETE, gate), 'complete');
+  const category = decideNotification(STATES.RUNNING, gate, undefined, { signal: 'working', hookSeen: true });
+  assert.equal(category, null);
+  assert.equal(decideNotification(STATES.COMPLETE, gate), null, 'complete was not re-armed by the self-wake');
+});
+
+test('RUNNING via an authoritative resume signal resets: complete notifies again', () => {
+  const gate = createNotifyGate();
+  assert.equal(decideNotification(STATES.RUNNING, gate), null);
+  assert.equal(decideNotification(STATES.COMPLETE, gate), 'complete');
+  decideNotification(STATES.RUNNING, gate, undefined, { signal: 'resume', hookSeen: true });
+  assert.equal(decideNotification(STATES.COMPLETE, gate), 'complete', 'an authoritative UserPromptSubmit re-arms the cycle');
+});
+
+test('RUNNING via event user_input resets, even with a self-wake-looking signal', () => {
+  const gate = createNotifyGate();
+  assert.equal(decideNotification(STATES.RUNNING, gate), null);
+  assert.equal(decideNotification(STATES.COMPLETE, gate), 'complete');
+  decideNotification(STATES.RUNNING, gate, 'user_input', { signal: 'working', hookSeen: true });
+  assert.equal(decideNotification(STATES.COMPLETE, gate), 'complete', 'the user answering a WAITING prompt always re-arms');
+});
+
+test('RUNNING on a degraded title-only session (hookSeen: false) keeps the legacy per-RUNNING reset', () => {
+  const gate = createNotifyGate();
+  assert.equal(decideNotification(STATES.RUNNING, gate), null);
+  assert.equal(decideNotification(STATES.COMPLETE, gate), 'complete');
+  decideNotification(STATES.RUNNING, gate, undefined, { signal: 'working', hookSeen: false });
+  assert.equal(decideNotification(STATES.COMPLETE, gate), 'complete', 'no hook ever seen: no resume signal to key off, so every RUNNING still resets');
+});
+
+test('INITIALIZING always resets regardless of opts', () => {
+  const gate = createNotifyGate();
+  assert.equal(decideNotification(STATES.RUNNING, gate), null);
+  assert.equal(decideNotification(STATES.COMPLETE, gate), 'complete');
+  decideNotification(STATES.INITIALIZING, gate, undefined, { signal: 'working', hookSeen: true });
+  assert.equal(decideNotification(STATES.COMPLETE, gate), 'complete', 'a restart always re-arms, opts or not');
+});
+
+test('omitted opts on RUNNING preserves legacy behavior (always resets)', () => {
+  const gate = createNotifyGate();
+  assert.equal(decideNotification(STATES.RUNNING, gate), null);
+  assert.equal(decideNotification(STATES.COMPLETE, gate), 'complete');
+  decideNotification(STATES.RUNNING, gate); // no opts at all, exactly like the old call sites
+  assert.equal(decideNotification(STATES.COMPLETE, gate), 'complete');
+});
+
+test('MEDIUM fix: an out-of-band gate.reset() (the user-prompt listener) re-arms complete even when the RUNNING transition lost the race to a title working signal', () => {
+  // Both 'working' (title) and 'resume' (hook) are immediate in status-source.js, so the
+  // racing title spinner can win the IDLE/COMPLETE->RUNNING transition and carry signal
+  // 'working' in its detail even though a real UserPromptSubmit is also in flight. The gate
+  // must still notify again once the session's 'user-prompt' event calls gate.reset()
+  // directly (see server/backend.js), independent of the transition's own decideNotification.
+  const gate = createNotifyGate();
+  assert.equal(decideNotification(STATES.RUNNING, gate), null);
+  assert.equal(decideNotification(STATES.COMPLETE, gate), 'complete');
+  const category = decideNotification(STATES.RUNNING, gate, undefined, { signal: 'working', hookSeen: true });
+  assert.equal(category, null, 'the transition itself does not reset: title working lost the resume race');
+  assert.equal(decideNotification(STATES.COMPLETE, gate), null, 'still spent: the transition alone never re-armed it');
+  gate.reset(); // the backend's sess.on('user-prompt', () => notifyGate.reset()) listener
+  assert.equal(decideNotification(STATES.COMPLETE, gate), 'complete', 're-armed by the out-of-band reset, not by the transition');
+});
+
+// ---------------------------------------------------------------------------
 // NotificationManager regression: 'waiting' escalation ping-pong is untouched.
 // First direct coverage for notification-manager.js.
 // ---------------------------------------------------------------------------
