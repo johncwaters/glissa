@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-07-13
+
+Adds a startup update check so an outdated install tells you how to update itself.
+
+### Added
+
+- **Startup update check**: on launch Glissa checks the npm registry once for a newer published version and, when one exists, shows a dismissible banner under the header with the running and latest versions and a copy button for the update command (`npm install -g glissa@latest`), plus a one-line console notice. It is advisory and fail-open: any network error, timeout, or offline start is silently ignored and never delays or blocks startup. A new "Check for Updates on Startup" setting (Settings > General, on by default; `checkForUpdates` in `config.json`) is the kill switch, and a dev run from a source checkout is skipped so it never nags while you work on Glissa itself.
+
 ## [0.16.0] - 2026-06-19
 
 A maintenance release. It adds install diagnostics (the `glissa doctor` command and post-install PATH guidance), retires the experimental Headroom proxy integration, and stops the burst of Windows console windows that flashed when sessions start and park.
