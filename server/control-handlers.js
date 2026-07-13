@@ -61,6 +61,7 @@ function registerControlHandlers(controlWss, deps) {
     requestRestart,
     handleClientFocus,
     buildHealthSnapshot,
+    getUpdateStatus,
     // Teams (optional - undefined in older callers/tests).
     registry = null,
     orchestrator = null,
@@ -771,6 +772,13 @@ function registerControlHandlers(controlWss, deps) {
     ws.send(JSON.stringify(buildSnapshot()));
     if (buildHealthSnapshot) {
       ws.send(JSON.stringify({ type: 'health-snapshot', stats: buildHealthSnapshot() }));
+    }
+    // Replay a cached startup update-check result to a client connecting AFTER the check resolved.
+    // Guarded for the accessor's absence exactly like buildHealthSnapshot above: existing control-WS
+    // tests call registerControlHandlers without getUpdateStatus, and an unguarded call would throw.
+    const update = typeof getUpdateStatus === 'function' ? getUpdateStatus() : null;
+    if (update && update.updateAvailable) {
+      ws.send(JSON.stringify({ type: 'update-available', ...update }));
     }
 
     ws.on('message', (raw) => {

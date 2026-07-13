@@ -38,6 +38,7 @@ const { createWsSender } = require('./ws-sender');
 const { HookRouter } = require('../detection/hook-source');
 const { sweepOrphans } = require('../detection/settings-injector');
 const { spawn } = require('./child-process-safe');
+const { checkForUpdate: defaultCheckForUpdate } = require('./update-check');
 const { loadTeam, listTeams } = require('../teamlib/team-registry');
 const { createOrchestrator } = require('../teamlib/team-orchestrator');
 const { createScheduler } = require('./scheduler');
@@ -987,6 +988,14 @@ function createBackend(httpServer, options = {}) {
     spawn,
   });
 
+  // Latest startup update-check result, cached so a control client connecting AFTER the check resolves
+  // still gets the update-available replay (see the connection handler in control-handlers.js).
+  let updateStatus = null;
+  const getUpdateStatus = () => updateStatus;
+  // Abort handle for the in-flight startup registry request, so shutdown can cancel it instead of
+  // waiting out its timeout (see shutdown() and the update-check kickoff at the end of the factory).
+  const updateAbort = new AbortController();
+
   registerControlHandlers(controlWss, {
     sessions,
     config,
@@ -1001,6 +1010,7 @@ function createBackend(httpServer, options = {}) {
     requestRestart,
     handleClientFocus,
     buildHealthSnapshot,
+    getUpdateStatus,
     registry,
     orchestrator,
     scheduler: { reload: armTeamSchedules },
@@ -1165,6 +1175,7 @@ function createBackend(httpServer, options = {}) {
     shuttingDown = true;
     clearInterval(healthInterval);
     stopConfigWatch();
+    try { updateAbort.abort(); } catch { /* no in-flight update request */ }
     // INVARIANT: destroy NotificationManager BEFORE sessions - clears all timers globally
     notificationManager.destroy();
     for (const [, s] of teamSchedulers) s.disarm();
@@ -1183,6 +1194,27 @@ function createBackend(httpServer, options = {}) {
     controlWss.close();
     dataWss.close();
     return pendingReaps;
+  }
+
+  // --- Startup update check ---
+  // Fire-and-forget: NEVER awaited, so a slow/hung registry can't delay boot. The terminal .catch is
+  // load-bearing - surface() calls console.log + broadcastControl, and this process has no
+  // uncaughtException handler, so a throw here would become an unhandledRejection that crashes it.
+  // Primary dev-nag guard is the version compare itself (a dev at/ahead of latest never triggers a
+  // banner); isLocalConfig is a best-effort secondary skip. checkForUpdate is injectable so a boot
+  // test can drive it with a stub instead of hitting the network.
+  const runUpdateCheck = options.checkForUpdate || defaultCheckForUpdate;
+  function surfaceUpdate(result) {
+    if (!result || !result.updateAvailable) return;
+    updateStatus = result;
+    console.log(`[update] A newer glissa is available: ${result.current} -> ${result.latest}. Update: ${result.command}`);
+    broadcastControl({ type: 'update-available', ...result });
+  }
+  if (config.checkForUpdates !== false && !configStore.isLocalConfig) {
+    const currentVersion = require('../package.json').version;
+    runUpdateCheck({ currentVersion, abortController: updateAbort })
+      .then(surfaceUpdate)
+      .catch(() => { /* advisory only - never let the update check affect the process */ });
   }
 
   return { shutdown, port, app };

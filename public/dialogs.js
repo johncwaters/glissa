@@ -216,6 +216,7 @@ export function createSettingsDialog(initialTab) {
   const rootErrorEl = dialog.querySelector('#settings-root-error');
   const replayBufferInput = dialog.querySelector('#settings-replay-buffer');
   const cursorBlinkCheckbox = dialog.querySelector('#settings-cursor-blink');
+  const checkUpdatesCheckbox = dialog.querySelector('#settings-check-updates');
   const debugModeCheckbox = dialog.querySelector('#settings-debug-mode');
   const soundSelect = dialog.querySelector('#settings-sound');
   const notificationsCheckbox = dialog.querySelector('#settings-notifications');
@@ -347,6 +348,7 @@ export function createSettingsDialog(initialTab) {
     const settings = {
       replayBufferKB: Number(replayBufferInput.value),
       cursorBlink: cursorBlinkCheckbox.checked,
+      checkForUpdates: checkUpdatesCheckbox.checked,
       debugMode: debugModeCheckbox.checked,
       editorCommand: editorCommandInput.value.trim(),
       repoRoots: repoRoots,
@@ -371,6 +373,7 @@ export function createSettingsDialog(initialTab) {
       const s = msg.settings;
       replayBufferInput.value = s.replayBufferKB ?? 512;
       cursorBlinkCheckbox.checked = !!s.cursorBlink;
+      checkUpdatesCheckbox.checked = s.checkForUpdates !== false;
       debugModeCheckbox.checked = !!s.debugMode;
       editorCommandInput.value = s.editorCommand ?? '';
       repoRoots = Array.isArray(s.repoRoots) ? [...s.repoRoots] : [];

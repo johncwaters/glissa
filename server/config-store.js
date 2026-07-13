@@ -17,6 +17,9 @@ const DEFAULT_CONFIG = {
   // run_in_background / Ctrl+B). On by default; set false to fall back to "main-agent Stop completes
   // the card" behavior (see sessions.js detectBackgroundAgents / session/core/agent-tracker.js).
   detectBackgroundAgents: true,
+  // Check the npm registry once at startup for a newer published glissa and surface the update command
+  // (dashboard banner + console line). Advisory, fail-open, off-switchable. See server/update-check.js.
+  checkForUpdates: true,
   // Lever B: append a fixed anti-slop note to each user session's system prompt at spawn
   // (session/core/anti-slop-prompt.js). OFF by default; user sessions only (team/pack-setup
   // stage sessions never receive it). Takes effect on the next session start/restart.
@@ -60,6 +63,7 @@ const BOOLEAN_KEYS = [
   'debugMode',
   'detectBackgroundAgents',
   'antiSlopPrompt',
+  'checkForUpdates',
 ];
 
 // Free-text settings persisted to config.json
@@ -112,6 +116,10 @@ function ensureProjectIds(projects) {
 
 function createConfigStore() {
   const configPath = resolveConfigPath();
+  // True only when the resolved config is the in-repo config.json (dev via `node server.js`/`vite`).
+  // A real global install never resolves this (config.json is not in package.json `files`, so it self-
+  // seeds at ~/.glissa/config.json). Used as a best-effort dev-skip for the startup update check.
+  const isLocalConfig = configPath === path.join(__dirname, '..', 'config.json');
   const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
   config.repoRoots = config.repoRoots || [];
 
@@ -167,6 +175,7 @@ function createConfigStore() {
       debugMode: config.debugMode ?? DEFAULT_CONFIG.debugMode,
       detectBackgroundAgents: config.detectBackgroundAgents ?? DEFAULT_CONFIG.detectBackgroundAgents,
       antiSlopPrompt: config.antiSlopPrompt ?? DEFAULT_CONFIG.antiSlopPrompt,
+      checkForUpdates: config.checkForUpdates ?? DEFAULT_CONFIG.checkForUpdates,
       editorCommand: config.editorCommand ?? DEFAULT_CONFIG.editorCommand,
       integrationBranch: config.integrationBranch ?? DEFAULT_CONFIG.integrationBranch,
       worktreeRoot: config.worktreeRoot ?? DEFAULT_CONFIG.worktreeRoot,
@@ -246,6 +255,7 @@ function createConfigStore() {
   return {
     config,
     configPath,
+    isLocalConfig,
     save,
     getSettings,
     applySettings,

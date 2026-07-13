@@ -186,6 +186,7 @@ const messageHandlers = {
   'post-turn-result':   (msg) => setSessionPostTurn(msg.id, msg),
   'debug-state-response': (msg) => handleDebugStateResponse(msg),
   'notify':             (msg) => showDesktopNotification(msg),
+  'update-available':   (msg) => showUpdateBanner(msg),
   'error':              (msg) => showErrorToast(msg.message, { persist: true }),
   'session-error':      (msg) => showErrorToast(`${msg.session}: ${msg.message}`, { persist: true }),
   'settings-updated':   (msg) => { if (msg.settings) applyTerminalSettings(msg.settings); },
@@ -236,6 +237,34 @@ onControlMessage((msg) => {
   const handler = messageHandlers[msg.type];
   if (handler) handler(msg);
 });
+
+// Dismissible startup update notice. The banner is passive (never a desktop notification); it shows the
+// running -> latest versions and the copy-pasteable update command. Dismiss hides it for this page load;
+// it reappears on the next boot only while a newer version is still published.
+let updateBannerDismissed = false;
+function showUpdateBanner({ current, latest, command }) {
+  if (updateBannerDismissed) return;
+  const banner = document.getElementById('update-banner');
+  if (!banner) return;
+  document.getElementById('update-banner-text').textContent = `Update available: ${current} -> ${latest}`;
+  document.getElementById('update-banner-cmd').textContent = command;
+  banner.hidden = false;
+
+  const copyBtn = document.getElementById('update-banner-copy');
+  const flashLabel = (text) => {
+    copyBtn.textContent = text;
+    setTimeout(() => { copyBtn.textContent = 'Copy'; }, 2000);
+  };
+  copyBtn.onclick = () => {
+    navigator.clipboard.writeText(command)
+      .then(() => flashLabel('Copied'))
+      .catch(() => flashLabel('Copy failed'));
+  };
+  document.getElementById('update-banner-dismiss').onclick = () => {
+    updateBannerDismissed = true;
+    banner.hidden = true;
+  };
+}
 
 // ── Toolbar buttons ──────────────────────────────────────────
 
