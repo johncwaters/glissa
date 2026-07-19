@@ -28,6 +28,7 @@ const { Session } = require('../session/sessions');
 const { STATES } = require('../shared/states');
 const { createConfigStore, generateProjectId, ensureProjectIds, DEFAULT_CONFIG } = require('./config-store');
 const { registerControlHandlers } = require('./control-handlers');
+const { createReplayLog } = require('./control-replay-core');
 const { createLifecycle } = require('./server-lifecycle');
 const { NotificationManager } = require('../notifications/notification-manager');
 const { createNotifyGate, decideNotification } = require('../session/core/notify-gate');
@@ -203,7 +204,13 @@ function createBackend(httpServer, options = {}) {
   const controlWss = new WebSocketServer({ noServer: true, maxPayload: 16 * 1024 });
   const dataWss = new WebSocketServer({ noServer: true, maxPayload: 2 * 1024 * 1024 });
 
+  // Stamps every control broadcast with a monotonic seq and retains the replayable ones
+  // (notify, session-error, post-turn-result, team-*) so a reconnecting dashboard can
+  // recover exactly what it missed (see control-handlers.js connection handler).
+  const controlReplayLog = createReplayLog();
+
   function broadcastControl(msg) {
+    controlReplayLog.stamp(msg);
     const payload = JSON.stringify(msg);
     for (const client of controlWss.clients) {
       if (client.readyState === 1) {
@@ -730,6 +737,18 @@ function createBackend(httpServer, options = {}) {
       });
     });
 
+    // Pending-prompt-kind delta -> control WS, so a WAITING card shows what it is waiting on
+    // (permission vs elicitation). Advisory only; mirrors the session-agents delta.
+    sess.on('prompt-kind-change', ({ pendingPromptKind }) => {
+      broadcastControl({
+        type: 'session-prompt',
+        id: sess.id,
+        session: sess.name,
+        pendingPromptKind,
+        timestamp: Date.now(),
+      });
+    });
+
     sess.on('sleep', () => {
       broadcastControl({
         type: 'session-sleep',
@@ -825,7 +844,7 @@ function createBackend(httpServer, options = {}) {
       for (const wt of gitWorkspaceSync.listSessionWorktrees({ projectPath: project.path, integrationBranch })) {
         const sess = sessions.get(wt.id);
         if (sess && wt.hasWork) {
-          sess.adoptWorktree({ worktreeDir: wt.cwd, branch: wt.branch, base: integrationBranch });
+          sess.adoptWorktree({ worktreeDir: wt.cwd, branch: wt.branch, base: wt.integrationBranch || integrationBranch });
           integrationPool.ensure(sess); // adopt sets commonGitDir; watch the branch for this re-adopted worktree too
           console.log(`[worktree] re-adopted pending-review worktree for ${sess.name} (${wt.branch})`);
           continue;
@@ -1001,6 +1020,7 @@ function createBackend(httpServer, options = {}) {
     config,
     configStore,
     broadcastControl,
+    controlReplayLog,
     generateProjectId,
     makeSession,
     wireSessionEvents,

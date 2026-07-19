@@ -18,6 +18,30 @@ function errResult(err) {
   return { ok: false, out: String(err.stdout || '').trim(), err: String(err.stderr || err.message || '') };
 }
 
+// Pure parse of `git worktree list --porcelain`: returns { cwd, branch } for every worktree block that
+// carries a `branch refs/heads/...` line (a detached or bare worktree has none and is skipped). Shared
+// by findWorktreeForBranch and both listSessionWorktrees engines below.
+function parseWorktreeBranches(porcelain) {
+  const result = [];
+  let curWt = null;
+  for (const line of porcelain.split(/\r?\n/)) {
+    if (line.startsWith('worktree ')) { curWt = line.slice('worktree '.length).trim(); continue; }
+    if (line === '') { curWt = null; continue; }
+    if (!line.startsWith('branch ')) continue;
+    const branch = line.slice('branch '.length).trim().replace(/^refs\/heads\//, '');
+    const cwd = curWt;
+    curWt = null;
+    if (cwd) result.push({ cwd, branch });
+  }
+  return result;
+}
+
+// The worktree path already holding `branch` checked out, or null.
+function findWorktreeForBranch(porcelain, branch) {
+  const hit = parseWorktreeBranches(porcelain).find((w) => w.branch === branch);
+  return hit ? hit.cwd : null;
+}
+
 // Run each team run inside a throwaway git worktree on a dedicated branch, so the team's writes never
 // touch the user's working tree or current branch during the (multi-minute) run. On a terminal
 // outcome the run is committed on that branch and fast-forwarded back into the base branch when that
@@ -109,7 +133,18 @@ function createGitWorkspace(opts = {}) {
     }
     const branch = `glissa/${sanitize(teamId)}/${sanitize(label)}`;
 
+    // Prune BEFORE the branch-in-use check: a stale registration whose directory is gone must be
+    // reclaimed (the pre-existing crash-recovery behavior), not misreported as a live conflict.
     await run(['worktree', 'prune'], projectPath);
+
+    // Pre-empt both the branch -D failure below and git's raw "already checked out" error: a domain
+    // reason the caller can act on (another worktree already holds this exact branch checked out).
+    const listed = await run(['worktree', 'list', '--porcelain'], projectPath);
+    if (listed.ok) {
+      const conflictPath = findWorktreeForBranch(listed.out, branch);
+      if (conflictPath) return { cwd: projectPath, isGit: false, reason: 'branch-in-use', conflictPath };
+    }
+
     await run(['branch', '-D', branch], projectPath); // drop a stale branch left by a crashed prior run
 
     // A SESSION worktree lives under a stable, project-associated root (worktreeBase, e.g. a
@@ -130,6 +165,10 @@ function createGitWorkspace(opts = {}) {
       try { fs.rmSync(wtDir, { recursive: true, force: true }); } catch { /* best-effort */ }
       return { cwd: projectPath, isGit: false, error: add.err };
     }
+    // Stamp the fork-base target on the branch itself, so later reads (listSessionWorktrees, boot
+    // reconcile) resolve the correct integration branch even if the live config changes afterward.
+    // Non-fatal: git drops branch.<name>.* config on branch delete, so no cleanup path is needed either.
+    await run(['config', `branch.${branch}.glissa-integration`, base], projectPath);
     // Bring the project's pack (voice-guide etc.) into the worktree so the agents read it, including
     // edits not yet committed to HEAD. It is never staged (integrate adds only the run folder + log), so
     // it vanishes with the worktree.
@@ -395,6 +434,14 @@ function createGitWorkspace(opts = {}) {
     return false;
   }
 
+  // Read the fork-base target stamped on `branch` at create time (see createBody), so a worktree's
+  // integration branch is resolved from its own git config instead of assuming the caller's live config
+  // never changed. Returns null when unset (older worktree, or the stamp failed).
+  async function readIntegrationMarker(projectPath, branch) {
+    const r = await run(['config', '--get', `branch.${branch}.glissa-integration`], projectPath);
+    return r.ok && r.out ? r.out : null;
+  }
+
   // List the SESSION worktrees (branch `glissa/session/<id>`) of a repo, each with its extracted session
   // id and whether it holds unmerged work. Team worktrees (`glissa/<teamId>/*`) are excluded by namespace.
   async function listSessionWorktrees({ projectPath, integrationBranch }) {
@@ -403,22 +450,16 @@ function createGitWorkspace(opts = {}) {
     if (!inside.ok || inside.out !== 'true') return out;
     const listed = await run(['worktree', 'list', '--porcelain'], projectPath);
     if (!listed.ok) return out;
-    let curWt = null;
-    for (const line of listed.out.split(/\r?\n/)) {
-      if (line.startsWith('worktree ')) {
-        curWt = line.slice('worktree '.length).trim();
-      } else if (line.startsWith('branch ')) {
-        const name = line.slice('branch '.length).trim().replace(/^refs\/heads\//, '');
-        if (curWt && name.startsWith('glissa/session/')) {
-          out.push({
-            cwd: curWt, branch: name, id: name.slice('glissa/session/'.length),
-            hasWork: await worktreeHasWork(curWt, name, projectPath, integrationBranch),
-          });
-        }
-        curWt = null;
-      } else if (line === '') {
-        curWt = null;
-      }
+    for (const { cwd: wt, branch: name } of parseWorktreeBranches(listed.out)) {
+      if (!name.startsWith('glissa/session/')) continue;
+      // The marker is the authority for THIS worktree's integration branch; the passed integrationBranch
+      // is only the fallback for a worktree created before the marker existed.
+      const resolvedIntegrationBranch = (await readIntegrationMarker(projectPath, name)) || integrationBranch;
+      out.push({
+        cwd: wt, branch: name, id: name.slice('glissa/session/'.length),
+        hasWork: await worktreeHasWork(wt, name, projectPath, resolvedIntegrationBranch),
+        integrationBranch: resolvedIntegrationBranch,
+      });
     }
     return out;
   }
@@ -481,28 +522,26 @@ function createGitWorkspaceSync(opts = {}) {
     return false;
   }
 
+  // Mirrors the async engine's readIntegrationMarker (see createGitWorkspace) for the sync boot path.
+  function readIntegrationMarker(projectPath, branch) {
+    const r = run(['config', '--get', `branch.${branch}.glissa-integration`], projectPath);
+    return r.ok && r.out ? r.out : null;
+  }
+
   function listSessionWorktrees({ projectPath, integrationBranch }) {
     const out = [];
     const inside = run(['rev-parse', '--is-inside-work-tree'], projectPath);
     if (!inside.ok || inside.out !== 'true') return out;
     const listed = run(['worktree', 'list', '--porcelain'], projectPath);
     if (!listed.ok) return out;
-    let curWt = null;
-    for (const line of listed.out.split(/\r?\n/)) {
-      if (line.startsWith('worktree ')) {
-        curWt = line.slice('worktree '.length).trim();
-      } else if (line.startsWith('branch ')) {
-        const name = line.slice('branch '.length).trim().replace(/^refs\/heads\//, '');
-        if (curWt && name.startsWith('glissa/session/')) {
-          out.push({
-            cwd: curWt, branch: name, id: name.slice('glissa/session/'.length),
-            hasWork: worktreeHasWork(curWt, name, projectPath, integrationBranch),
-          });
-        }
-        curWt = null;
-      } else if (line === '') {
-        curWt = null;
-      }
+    for (const { cwd: wt, branch: name } of parseWorktreeBranches(listed.out)) {
+      if (!name.startsWith('glissa/session/')) continue;
+      const resolvedIntegrationBranch = readIntegrationMarker(projectPath, name) || integrationBranch;
+      out.push({
+        cwd: wt, branch: name, id: name.slice('glissa/session/'.length),
+        hasWork: worktreeHasWork(wt, name, projectPath, resolvedIntegrationBranch),
+        integrationBranch: resolvedIntegrationBranch,
+      });
     }
     return out;
   }

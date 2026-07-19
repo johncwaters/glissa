@@ -11,6 +11,7 @@ const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 
 const { registerControlHandlers } = require('../server/control-handlers');
+const { createReplayLog } = require('../server/control-replay-core');
 
 function harness() {
   const controlWss = new EventEmitter();
@@ -53,4 +54,88 @@ test('non-object payloads are ignored', () => {
   assert.doesNotThrow(() => h.send('kill'));
   assert.doesNotThrow(() => h.send(['type', 'kill']));
   assert.equal(h.sent.length, 0, 'nothing sent back');
+});
+
+// Item D: control-WS replay of transient broadcasts missed across a reconnect gap.
+// This harness wires a real createReplayLog through broadcastControl (mirroring backend.js's
+// stamp-then-fanout) and lets a test connect a fresh ws with an explicit `?since=` cursor,
+// like a reconnecting dashboard would.
+function harnessWithReplay(replayLog) {
+  const controlWss = new EventEmitter();
+  function connect(url) {
+    const sent = [];
+    let messageHandler = null;
+    const ws = { send: (s) => sent.push(JSON.parse(s)), on: (ev, h) => { if (ev === 'message') messageHandler = h; } };
+    controlWss.emit('connection', ws, { url });
+    return { sent, send: (msg) => messageHandler(JSON.stringify(msg)) };
+  }
+  registerControlHandlers(controlWss, {
+    sessions: new Map(),
+    config: { projects: [], teams: [] },
+    configStore: { save: (fn) => fn({ projects: [], teams: [] }), getSettings: () => ({}) },
+    applyConfigReload: () => {},
+    broadcastControl: (msg) => replayLog.stamp(msg),
+    controlReplayLog: replayLog,
+  });
+  return { connect };
+}
+
+test('a reconnect with ?since replays only the missed replayable broadcasts, after the snapshot', () => {
+  const replayLog = createReplayLog();
+  const h = harnessWithReplay(replayLog);
+
+  // Broadcasts that happened while this client was disconnected.
+  replayLog.stamp({ type: 'notify', message: 'hi' });
+  replayLog.stamp({ type: 'session-changed', id: 'a' });
+
+  const client = h.connect('/control?since=0');
+  assert.equal(client.sent.length, 2, 'snapshot then exactly one replayed notify');
+  assert.equal(client.sent[0].type, 'snapshot');
+  assert.equal(client.sent[1].type, 'notify');
+});
+
+test('no ?since param (first connect) replays nothing', () => {
+  const replayLog = createReplayLog();
+  const h = harnessWithReplay(replayLog);
+  replayLog.stamp({ type: 'notify', message: 'hi' });
+
+  const client = h.connect('/control');
+  assert.equal(client.sent.length, 1, 'snapshot only');
+  assert.equal(client.sent[0].type, 'snapshot');
+});
+
+test('a since behind an overflowed ring still replays the surviving entries and logs the evicted note', (t) => {
+  const replayLog = createReplayLog({ maxEntries: 2 });
+  const h = harnessWithReplay(replayLog);
+  replayLog.stamp({ type: 'notify', n: 1 }); // evicted once n:3 lands
+  replayLog.stamp({ type: 'notify', n: 2 });
+  replayLog.stamp({ type: 'notify', n: 3 });
+
+  // t.mock.method (not a manual `console.log = fn` swap) - the test runner's own reporting
+  // instrumentation does not play well with a hand-rolled monkey-patch of console.log here.
+  const logSpy = t.mock.method(console, 'log');
+  const client = h.connect('/control?since=0');
+
+  assert.equal(client.sent.length, 3, 'snapshot plus the two surviving notify entries');
+  assert.equal(client.sent[0].type, 'snapshot');
+  assert.deepEqual(client.sent.slice(1).map((m) => m.n), [2, 3]);
+  assert.ok(
+    logSpy.mock.calls.some((call) => String(call.arguments[0]).includes('stale')),
+    'the evicted-cursor note is logged for the caller',
+  );
+});
+
+// Fix (Item D follow-up): the client-side seq reset on server restart relies on the per-connection
+// snapshot ALWAYS being seq-less, so it can be told apart from a config-reload snapshot broadcast
+// (which IS stamped, and must not reset the client's cursor). Locks that invariant server-side.
+test('the per-connection snapshot has no seq, but a snapshot sent through broadcastControl does', () => {
+  const replayLog = createReplayLog();
+  const h = harnessWithReplay(replayLog);
+
+  const client = h.connect('/control');
+  assert.equal(client.sent[0].type, 'snapshot');
+  assert.equal('seq' in client.sent[0], false, 'the per-connection snapshot bypasses broadcastControl/stamp');
+
+  const broadcastSnapshot = replayLog.stamp({ type: 'snapshot', sessions: [] });
+  assert.equal(typeof broadcastSnapshot.seq, 'number', 'a snapshot broadcast through stamp is numbered like any other broadcast');
 });

@@ -363,6 +363,24 @@ export function setSessionAgents(sessionId, activeAgents) {
   }
 }
 
+// Reflect the advisory pending-prompt-kind on the card (server session-prompt delta / snapshot
+// pendingPromptKind). `kind` is null | 'permission' | 'elicitation'; sets data-prompt and a short
+// badge label so a WAITING card shows WHAT it is waiting on. Never gates anything (mirrors
+// setSessionAgents).
+export function setSessionPrompt(sessionId, kind) {
+  const ui = sessionUIs.get(sessionId);
+  if (!ui) return;
+  const badge = ui.card.querySelector('.prompt-badge');
+  if (!kind) {
+    delete ui.card.dataset.prompt;
+    if (badge) badge.textContent = '';
+    return;
+  }
+  ui.card.dataset.prompt = kind;
+  if (!badge) return;
+  badge.textContent = kind === 'permission' ? 'permission' : 'input';
+}
+
 // "sleeping until ~HH:MM" (one-shot with a fire time) or "scheduled" (cron, no time computed).
 // Approximate by design: recurring tasks fire with up to 30 minutes of jitter.
 function formatWakeupChip(at) {

@@ -540,6 +540,84 @@ test('create (baseBranch): a missing integration branch returns reason:no-base-b
   }
 });
 
+// --- fork-base git-config marker: stamped at create, read back by listSessionWorktrees, dropped with the branch ---
+
+test('create (real git): stamps the fork-base marker on the branch; branch delete drops it', { skip: !GIT }, async () => {
+  const repo = initRepoOnDevelop();
+  try {
+    const gw = createGitWorkspace();
+    const ws = await gw.create({ projectPath: repo, teamId: 'session', label: 'mark1', baseBranch: 'develop', outputPath: '' });
+    assert.equal(ws.isGit, true);
+    assert.equal(git(['config', '--get', `branch.${ws.branch}.glissa-integration`], repo).trim(), 'develop');
+
+    await gw.discard({ projectPath: repo, workspace: ws }); // deletes the branch
+    assert.throws(() => git(['config', '--get', `branch.${ws.branch}.glissa-integration`], repo), 'git drops branch.<name>.* config on branch delete');
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test('listSessionWorktrees (real git): resolves integrationBranch from the marker, not the passed value, and computes hasWork against it', { skip: !GIT }, async () => {
+  const { dir, developSha } = initRepoMainWithDevelop(); // main = initial commit; develop = initial + 1 commit
+  try {
+    const gw = createGitWorkspace();
+    const ws = await gw.create({ projectPath: dir, teamId: 'session', label: 'markresolve', baseBranch: 'develop', outputPath: '' });
+    assert.equal(ws.baseSha, developSha, 'worktree HEAD sits exactly on develop, no extra commits');
+
+    // Pass the WRONG integration branch ('main'): if hasWork used it, ahead(main..branch) would be 1 (the
+    // develop-only commit) and wrongly report work. The marker (develop) must win, giving ahead 0.
+    const [entry] = await gw.listSessionWorktrees({ projectPath: dir, integrationBranch: 'main' });
+    assert.equal(entry.integrationBranch, 'develop', 'resolved from the marker, not the passed integrationBranch');
+    assert.equal(entry.hasWork, false, 'hasWork computed against the marker branch (develop), not the passed one (main)');
+
+    await gw.discard({ projectPath: dir, workspace: ws });
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// --- branch-in-use domain error: a pre-check before `git worktree add`/`branch -D` ---
+
+test('create (injected git): a branch already checked out in another worktree returns reason branch-in-use, never adds a new worktree', async () => {
+  const cmds = [];
+  const fakeGit = (args) => {
+    cmds.push(args.join(' '));
+    if (args[0] === 'rev-parse' && args.includes('--is-inside-work-tree')) return 'true';
+    if (args[0] === 'rev-parse' && args.includes('--abbrev-ref')) return 'main';
+    if (args[0] === 'rev-parse') return 'headsha';
+    if (args[0] === 'worktree' && args[1] === 'list') {
+      return 'worktree /repo\nbranch refs/heads/main\n\nworktree /other/wt\nbranch refs/heads/glissa/session/dup1\n\n';
+    }
+    return '';
+  };
+  const gw = createGitWorkspace({ git: fakeGit });
+  const ws = await gw.create({ projectPath: '/repo', teamId: 'session', label: 'dup1', outputPath: '' });
+  assert.equal(ws.isGit, false);
+  assert.equal(ws.reason, 'branch-in-use');
+  assert.equal(ws.conflictPath, '/other/wt');
+  assert.ok(!cmds.some((c) => c.startsWith('worktree add')), 'never adds a new worktree over an in-use branch');
+  assert.ok(!cmds.some((c) => c.startsWith('branch -D')), 'never attempts to drop the conflicting branch');
+});
+
+test('create (real git): creating the same session branch twice returns branch-in-use on the second attempt', { skip: !GIT }, async () => {
+  const repo = initRepoOnDevelop();
+  try {
+    const gw = createGitWorkspace();
+    const ws1 = await gw.create({ projectPath: repo, teamId: 'session', label: 'dup2', outputPath: '' });
+    assert.equal(ws1.isGit, true);
+
+    const ws2 = await gw.create({ projectPath: repo, teamId: 'session', label: 'dup2', outputPath: '' });
+    assert.equal(ws2.isGit, false);
+    assert.equal(ws2.reason, 'branch-in-use');
+    // git's porcelain output uses forward slashes on Windows; normalize before comparing to ws1.cwd.
+    assert.equal(path.resolve(ws2.conflictPath), path.resolve(ws1.cwd));
+
+    await gw.discard({ projectPath: repo, workspace: ws1 });
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
 // --- sweepSessionWorktrees: crash-orphan cleanup scoped to the session namespace ---
 
 test('sweepSessionWorktrees removes orphaned glissa/session/* worktrees but spares live team worktrees', { skip: !GIT }, async () => {

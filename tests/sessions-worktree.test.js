@@ -156,6 +156,28 @@ test('start() BLOCKS when the integration branch is missing - stays DORMANT, no 
   }
 });
 
+test('start() runs in place with a notice when the session branch is already checked out elsewhere (branch-in-use)', { skip: !WIN }, async () => {
+  const gw = fakeGitWorkspace({ createResult: { cwd: process.cwd(), isGit: false, reason: 'branch-in-use', conflictPath: 'C:\\other\\wt' } });
+  const spawned = [];
+  let blocked = null;
+  const s = makeSession({
+    gitWorkspace: gw, integrationBranch: 'develop',
+    ptySpawn: (file, args, optsArg) => { spawned.push(optsArg); return fakePty(); },
+  });
+  s.on('worktree-blocked', (e) => { blocked = e; });
+  try {
+    await s.start();
+    assert.equal(spawned.length, 1, 'still spawns, running in place (not blocked like no-base-branch)');
+    assert.equal(s.worktreeDir, null);
+    assert.equal(s.isWorktree, false);
+    assert.ok(s.worktreeNotice && /already checked out/i.test(s.worktreeNotice), 'actionable notice set');
+    assert.ok(s.worktreeNotice.includes('C:\\other\\wt'), 'notice names the conflicting worktree path');
+    assert.ok(blocked && blocked.notice === s.worktreeNotice, 'worktree-blocked event carries the same notice');
+  } finally {
+    s.destroy();
+  }
+});
+
 test('start() runs in place for a non-git path (the only in-place fallback)', { skip: !WIN }, async () => {
   const gw = fakeGitWorkspace({ createResult: { cwd: process.cwd(), isGit: false } });
   const spawned = [];

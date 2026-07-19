@@ -42,6 +42,18 @@ function confinePath(baseDir, ...segments) {
   return rel.startsWith('..') || path.isAbsolute(rel) ? null : abs;
 }
 
+// Reads `since` from a `/control?since=<n>` upgrade URL. Returns null for a missing/malformed
+// value (no query string, no param, non-numeric) so the caller treats it as "no replay wanted".
+function parseSinceParam(url) {
+  if (!url) return null;
+  const qIndex = url.indexOf('?');
+  if (qIndex === -1) return null;
+  const raw = new URLSearchParams(url.slice(qIndex + 1)).get('since');
+  if (raw === null) return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : null;
+}
+
 /**
  * Register control WebSocket handlers using a handler-map dispatch pattern.
  * Dependencies are injected via the deps object (factory pattern).
@@ -62,6 +74,9 @@ function registerControlHandlers(controlWss, deps) {
     handleClientFocus,
     buildHealthSnapshot,
     getUpdateStatus,
+    // Replay of transient broadcasts missed across a reconnect gap (optional - undefined in
+    // older callers/tests; connect then behaves as before, snapshot-only).
+    controlReplayLog = null,
     // Teams (optional - undefined in older callers/tests).
     registry = null,
     orchestrator = null,
@@ -768,7 +783,7 @@ function registerControlHandlers(controlWss, deps) {
     },
   };
 
-  controlWss.on('connection', (ws) => {
+  controlWss.on('connection', (ws, req) => {
     ws.send(JSON.stringify(buildSnapshot()));
     if (buildHealthSnapshot) {
       ws.send(JSON.stringify({ type: 'health-snapshot', stats: buildHealthSnapshot() }));
@@ -779,6 +794,17 @@ function registerControlHandlers(controlWss, deps) {
     const update = typeof getUpdateStatus === 'function' ? getUpdateStatus() : null;
     if (update && update.updateAvailable) {
       ws.send(JSON.stringify({ type: 'update-available', ...update }));
+    }
+
+    // Replay transient broadcasts missed while this client was disconnected. The client
+    // declares its own cursor (`?since=<lastSeq>`) since the server holds no per-connection
+    // state across a reconnect; absent param (first connect) means no replay. Sent AFTER
+    // snapshot/health/update so ordering matches a client that never disconnected.
+    const since = parseSinceParam(req && req.url);
+    if (controlReplayLog && since !== null) {
+      const { entries, evicted } = controlReplayLog.entriesSince(since);
+      for (const entry of entries) ws.send(JSON.stringify(entry));
+      if (evicted) console.log(`[control] replay cursor since=${since} is stale; some transient broadcasts were dropped`);
     }
 
     ws.on('message', (raw) => {

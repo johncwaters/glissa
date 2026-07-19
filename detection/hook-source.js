@@ -26,6 +26,20 @@ function mapHookConfidence(event, payload) {
   return null;
 }
 
+// Advisory classification of an 'awaiting-input' signal's origin, surfaced as a card chip so the
+// dashboard shows WHAT the session is waiting on. Only meaningful when mapHookToSignal returned
+// 'awaiting-input' for this event/payload; null otherwise (never gates a transition).
+function mapHookPromptKind(event, payload) {
+  const e = String(event || '').toLowerCase();
+  if (e === 'permissionrequest') return 'permission';
+  if (e === 'notification') {
+    const t = notificationType(payload);
+    if (t === 'permission_prompt') return 'permission';
+    if (t.startsWith('elicitation')) return 'elicitation';
+  }
+  return null;
+}
+
 // Map a Claude Code hook event (+ payload) to a normalized StatusSource signal.
 // Returns null for events that should be ignored.
 function mapHookToSignal(event, payload) {
@@ -124,8 +138,14 @@ class HookRouter {
       return { status: 200, signal: null, reason: 'ignored-event' };
     }
     const confidence = mapHookConfidence(event, payload);
+    const promptKind = signal === 'awaiting-input' ? mapHookPromptKind(event, payload) : null;
     try {
-      entry.onSignal({ signal, source: 'hook', ...(confidence ? { confidence } : {}), ts: Date.now(), event, payload });
+      entry.onSignal({
+        signal, source: 'hook',
+        ...(confidence ? { confidence } : {}),
+        ...(promptKind ? { promptKind } : {}),
+        ts: Date.now(), event, payload,
+      });
     } catch (err) {
       console.warn(`[hook-source] onSignal threw for ${glissaId}: ${err.message}`);
     }
@@ -133,4 +153,4 @@ class HookRouter {
   }
 }
 
-module.exports = { HookRouter, mapHookToSignal, mapHookConfidence };
+module.exports = { HookRouter, mapHookToSignal, mapHookConfidence, mapHookPromptKind };

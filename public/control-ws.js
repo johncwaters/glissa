@@ -8,6 +8,11 @@ let controlRetryTimer = null;
 let reconnectDisabled = false;
 const pendingRequests = new Map(); // requestId -> { resolve, timer }
 
+// Highest control-broadcast seq seen so far. Survives across reconnects (unlike the server,
+// which holds no per-connection state) so a reconnect can declare `?since=<lastSeq>` and
+// recover exactly the transient broadcasts (notify, team-*, ...) missed during the gap.
+let lastSeq = 0;
+
 let _messageHandler = null;
 let _connectionStateCallback = null;
 
@@ -59,7 +64,10 @@ export function connectControl() {
     controlRetryTimer = null;
   }
 
-  const url = `ws://${location.host}/control`;
+  // lastSeq > 0 only once a message has actually been processed, which never happens before
+  // the first connection - so this doubles as "is this a reconnect" without a separate flag.
+  const since = lastSeq > 0 ? `?since=${lastSeq}` : '';
+  const url = `ws://${location.host}/control${since}`;
   const ws = new WebSocket(url);
   controlWs = ws;
 
@@ -73,6 +81,23 @@ export function connectControl() {
       msg = JSON.parse(event.data);
     } catch {
       return;
+    }
+
+    // A server restart resets its replay log's seq counter back to 1, so a stale lastSeq
+    // carried over from before the restart would otherwise dedupe away every live broadcast
+    // until seq climbs back past it (dashboard looks connected but is actually frozen). The
+    // per-connection snapshot is sent directly by control-handlers.js, never through
+    // broadcastControl, so it is always seq-less and always the first message on a (re)connect;
+    // a config-reload snapshot BROADCAST is stamped and must not reset the cursor.
+    if (msg.type === 'snapshot' && typeof msg.seq !== 'number') lastSeq = 0;
+
+    // Dedupe against the replay/live race: a seq at or below what we've already processed
+    // (from a prior connection, or replay overlapping a live send) is a repeat. Update BEFORE
+    // dispatching so a handler that itself triggers another message sees the advanced cursor.
+    // Messages without a numeric seq (request/response replies) always pass through.
+    if (typeof msg.seq === 'number') {
+      if (msg.seq <= lastSeq) return;
+      lastSeq = msg.seq;
     }
 
     // Route requestId-based responses to pending callbacks

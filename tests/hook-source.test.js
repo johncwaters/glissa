@@ -7,7 +7,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { HookRouter, mapHookToSignal, mapHookConfidence } = require('../detection/hook-source');
+const { HookRouter, mapHookToSignal, mapHookConfidence, mapHookPromptKind } = require('../detection/hook-source');
 const {
   buildHookSettings,
   writeSessionSettings,
@@ -50,6 +50,29 @@ test('mapHookConfidence: idle_prompt readys are demoted to low (idle nudge, not 
   assert.equal(mapHookConfidence('Stop', {}), null);
   assert.equal(mapHookConfidence('Notification', { notification_type: 'permission_prompt' }), null);
   assert.equal(mapHookConfidence('UserPromptSubmit', {}), null);
+});
+
+test('mapHookPromptKind: classifies the origin of an awaiting-input signal', () => {
+  assert.equal(mapHookPromptKind('PermissionRequest', {}), 'permission');
+  assert.equal(mapHookPromptKind('Notification', { notification_type: 'permission_prompt' }), 'permission');
+  assert.equal(mapHookPromptKind('Notification', { notification_type: 'elicitation_dialog' }), 'elicitation');
+  // Not an awaiting-input origin: no kind.
+  assert.equal(mapHookPromptKind('Stop', {}), null);
+  assert.equal(mapHookPromptKind('Notification', { notification_type: 'idle_prompt' }), null);
+  assert.equal(mapHookPromptKind('Notification', {}), null);
+});
+
+test('HookRouter attaches promptKind for permission/elicitation, omits it otherwise', () => {
+  const r = new HookRouter();
+  const got = [];
+  r.register('s1', { token: 'tok', onSignal: (s) => got.push(s) });
+  r.handle({ glissaId: 's1', event: 'PermissionRequest', token: 'tok', payload: {} });
+  r.handle({ glissaId: 's1', event: 'Notification', token: 'tok', payload: { notification_type: 'elicitation_form' } });
+  r.handle({ glissaId: 's1', event: 'Stop', token: 'tok', payload: {} });
+  assert.equal(got.length, 3);
+  assert.equal(got[0].promptKind, 'permission');
+  assert.equal(got[1].promptKind, 'elicitation');
+  assert.equal('promptKind' in got[2], false, 'Stop never carries a promptKind');
 });
 
 test('HookRouter passes the low-confidence override for idle_prompt, none for Stop', () => {

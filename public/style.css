@@ -480,7 +480,8 @@ body {
 .resume-badge,
 .post-turn-badge,
 .agents-badge,
-.wakeup-badge {
+.wakeup-badge,
+.prompt-badge {
   align-items: center;
   font-size: 11px;
   font-family: var(--font-mono);
@@ -584,6 +585,31 @@ body {
 
 .session-card[data-wakeup] .wakeup-badge {
   display: inline-flex;
+}
+
+/* Advisory pending-prompt-kind marker ("permission" / "input"). Hidden until the card carries
+   data-prompt (toggled live by setSessionPrompt on a session-prompt delta / snapshot): shows WHAT
+   a WAITING session is waiting on. Distinct warning tone for a permission prompt (mirrors
+   .perms-badge - it is the same kind of "needs a yes/no"); accent tone for an elicitation form
+   (mirrors .agents-badge - informational). */
+.prompt-badge {
+  display: none;
+}
+
+.session-card[data-prompt] .prompt-badge {
+  display: inline-flex;
+}
+
+.session-card[data-prompt="permission"] .prompt-badge {
+  color: var(--perms-warn);
+  border: 1px solid color-mix(in oklab, var(--perms-warn) 55%, transparent);
+  background: color-mix(in oklab, var(--perms-warn) 14%, transparent);
+}
+
+.session-card[data-prompt="elicitation"] .prompt-badge {
+  color: var(--accent);
+  border: 1px solid color-mix(in oklab, var(--accent) 55%, transparent);
+  background: color-mix(in oklab, var(--accent) 14%, transparent);
 }
 
 /* ── Card header ──────────────────────────────────────────── */
@@ -2943,6 +2969,7 @@ body {
 .focus-center .session-card.focus-centered .resume-badge,
 .focus-center .session-card.focus-centered .agents-badge,
 .focus-center .session-card.focus-centered .wakeup-badge,
+.focus-center .session-card.focus-centered .prompt-badge,
 .focus-center .session-card.focus-centered .post-turn-badge {
   font-size: 10px;
   padding: 0 5px;

@@ -237,6 +237,90 @@ test('COMPLETE is reached ONLY via the mapper task_complete (RUNNING; high-confi
   assert.equal(mapSignalToEvent('ready', STATES.DORMANT, 'high'), null);
 });
 
+// --- pendingPromptKind (WS3): advisory "what is this WAITING session waiting on" chip. Mirrors
+// activeAgents/pendingWakeup - never gates a transition. See hook-source.js mapHookPromptKind. ---
+
+test('awaiting-input with promptKind sets pendingPromptKind, surfaces in snapshot, emits prompt-kind-change once', () => {
+  const s = makeSession(STATES.RUNNING);
+  const deltas = [];
+  s.on('prompt-kind-change', (e) => deltas.push(e.pendingPromptKind));
+  hook(s, 'awaiting-input', { promptKind: 'permission' });
+  assert.equal(s.state, STATES.WAITING);
+  assert.equal(s.toSnapshot().pendingPromptKind, 'permission');
+  assert.deepEqual(deltas, ['permission']);
+  s.destroy();
+});
+
+test('awaiting-input with no promptKind leaves pendingPromptKind null (no false chip)', () => {
+  const s = makeSession(STATES.RUNNING);
+  const deltas = [];
+  s.on('prompt-kind-change', (e) => deltas.push(e));
+  hook(s, 'awaiting-input');
+  assert.equal(s.toSnapshot().pendingPromptKind, null);
+  assert.deepEqual(deltas, [], 'no change from null -> null, nothing emitted');
+  s.destroy();
+});
+
+test('a resume signal clears pendingPromptKind', () => {
+  const s = makeSession(STATES.RUNNING);
+  hook(s, 'awaiting-input', { promptKind: 'elicitation' });
+  assert.equal(s.toSnapshot().pendingPromptKind, 'elicitation');
+  hook(s, 'resume');
+  assert.equal(s.toSnapshot().pendingPromptKind, null);
+  s.destroy();
+});
+
+test('a working signal (user answered) clears pendingPromptKind', () => {
+  const s = makeSession(STATES.WAITING);
+  hook(s, 'awaiting-input', { promptKind: 'permission' });
+  title(s, 'working');
+  assert.equal(s.state, STATES.RUNNING);
+  assert.equal(s.toSnapshot().pendingPromptKind, null);
+  s.destroy();
+});
+
+test('any transition leaving WAITING clears pendingPromptKind (direct user_input, not just working)', () => {
+  const s = makeSession(STATES.RUNNING);
+  hook(s, 'awaiting-input', { promptKind: 'permission' });
+  assert.equal(s.state, STATES.WAITING);
+  s.transition('user_input'); // backend.js manual-answer path (WAITING -> RUNNING)
+  assert.equal(s.state, STATES.RUNNING);
+  assert.equal(s.toSnapshot().pendingPromptKind, null);
+  s.destroy();
+});
+
+test('/clear (SessionStart source: clear) clears pendingPromptKind', () => {
+  const s = makeSession(STATES.RUNNING);
+  hook(s, 'awaiting-input', { promptKind: 'elicitation' });
+  s.ingestHookSignal({ signal: 'session-start', source: 'hook', ts: Date.now(), payload: { source: 'clear' } });
+  assert.equal(s.toSnapshot().pendingPromptKind, null);
+  s.destroy();
+});
+
+test('PTY exit clears pendingPromptKind', async () => {
+  const s = makeSession(STATES.RUNNING);
+  hook(s, 'awaiting-input', { promptKind: 'permission' });
+  assert.equal(s.toSnapshot().pendingPromptKind, 'permission');
+  await s._handlePtyExit(0, null);
+  assert.equal(s.toSnapshot().pendingPromptKind, null);
+  s.destroy();
+});
+
+test('restart (start()) clears a stale pendingPromptKind from a prior run', async () => {
+  function fakePty(pid = 2147483646) {
+    return { pid, onData() {}, onExit() {}, write() {}, resize() {}, kill() {} };
+  }
+  const s = makeSession(STATES.WAITING, {
+    spawnCommand: { path: process.execPath, kind: 'exe' },
+    ptySpawn: () => fakePty(),
+  });
+  hook(s, 'awaiting-input', { promptKind: 'permission' });
+  assert.equal(s.toSnapshot().pendingPromptKind, 'permission');
+  await s.start();
+  assert.equal(s.toSnapshot().pendingPromptKind, null);
+  s.destroy();
+});
+
 test('no idle/silence timer or content scraping remains - sessions.js AND the mapper (fail-closed)', () => {
   const fs = require('node:fs');
   const scrape = /_resetIdleTimer|isLayer4Chrome|patternDetector|hasPendingContent/;

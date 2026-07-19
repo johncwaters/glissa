@@ -11,7 +11,7 @@ import { activateFocusView, deactivateFocusView, focusAdjacentInRail, focusNextA
 import { applyHealthSnapshot, mountHealthMonitor } from './health-monitor.js';
 import { initNotifications, showDesktopNotification } from './notifications.js';
 import { handleDebugStateRefresh, handleDebugStateResponse } from './session-card/card-dom.js';
-import { applyState, applyTerminalSettings, createSessionCard, getSessionCount, hasSession, removeSessionCard, renameSessionCard, seedSessionMergeStatus, setSessionAgents, setSessionDiff, setSessionEffectiveBase, setSessionMergeStatus, setSessionPostTurn, setSessionResume, setSessionWakeup, setSessionWorktree, updateAggregateStatus } from './session-card/lifecycle.js';
+import { applyState, applyTerminalSettings, createSessionCard, getSessionCount, hasSession, removeSessionCard, renameSessionCard, seedSessionMergeStatus, setSessionAgents, setSessionDiff, setSessionEffectiveBase, setSessionMergeStatus, setSessionPostTurn, setSessionPrompt, setSessionResume, setSessionWakeup, setSessionWorktree, updateAggregateStatus } from './session-card/lifecycle.js';
 import { reconnectDataWs } from './session-card/terminal.js';
 import { showErrorToast } from './session-card/toast.js';
 import { forgetReviewSession, mergeSelectedSession, mountReviewSidebar, notifyWorktreeChanged, refreshReviewSidebar, resolveSelectedSession } from './sidebar/review-sidebar.js';
@@ -115,6 +115,8 @@ function handleSnapshot(sessions) {
     setSessionAgents(s.id, s.activeAgents);
     // Restore the pending scheduled-revival chip the same way.
     setSessionWakeup(s.id, s.pendingWakeup);
+    // Restore the advisory pending-prompt-kind chip the same way.
+    setSessionPrompt(s.id, s.pendingPromptKind);
   }
   updateAggregateStatus();
 
@@ -178,6 +180,7 @@ const messageHandlers = {
   'session-resume':     (msg) => setSessionResume(msg.id, msg.resumeSessionId),
   'session-agents':     (msg) => setSessionAgents(msg.id, msg.activeAgents),
   'session-wakeup':     (msg) => setSessionWakeup(msg.id, msg.pendingWakeup),
+  'session-prompt':     (msg) => setSessionPrompt(msg.id, msg.pendingPromptKind),
   'session-merge-status': (msg) => { setSessionMergeStatus(msg.id, msg.mergeStatus); setFocusMergeStatus(msg.id, msg.mergeStatus); },
   'session-worktree-blocked': (msg) => { showErrorToast(`${msg.session}: ${msg.notice || 'integration branch not found'}`, { persist: true }); },
   'session-worktree-ready': () => {},

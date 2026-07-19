@@ -226,6 +226,11 @@ class Session extends EventEmitter {
     this._settingsHandle = null;
     this._hookSeen = false;
     this._lastSignal = null;
+    // Advisory: which flavor of "waiting on you" a WAITING session is parked on (null | 'permission' |
+    // 'elicitation'), surfaced as a card chip. Set from an authoritative hook awaiting-input signal;
+    // mirrors activeAgents/pendingWakeup in that it NEVER gates a transition. Cleared on resume,
+    // user_input, working, any transition leaving WAITING, /clear, and PTY exit/restart.
+    this._pendingPromptKind = null;
     // Live background sub-agents, keyed by Claude Code agent_id -> last-seen ts. Non-empty means
     // background work is still running after the main agent's Stop, which gates ready->task_complete
     // (see _onStatus / mapSignalToEvent). Lazily pruned by agentTtlMs; never drives a state transition.
@@ -386,9 +391,13 @@ class Session extends EventEmitter {
     // Stop; the only movement they cause is TUI title noise. Reset the merged stream
     // (cancels a held ready from the pre-clear turn) and latch titles quiet until the
     // next real prompt.
+    // An authoritative awaiting-input hook (PermissionRequest / permission_prompt / elicitation*
+    // Notification) carries WHICH kind of prompt this is; see mapHookPromptKind in hook-source.js.
+    if (raw && raw.signal === "awaiting-input") this._setPendingPromptKind(raw.promptKind || null);
     if (raw && raw.signal === "session-start") this._onSessionStartHook(raw);
     if (raw && raw.signal === "resume") {
       this._titleQuiet = false;
+      this._setPendingPromptKind(null);
       // Drop the held ready BEFORE the override clear: clearing may drain the count to 0,
       // and a stale ready must not fire COMPLETE on the very prompt that starts a new turn.
       this._clearGateHeldReady();
@@ -417,6 +426,16 @@ class Session extends EventEmitter {
     this._titleSource.reset();
     this._titleQuiet = true;
     this._clearGateHeldReady();
+    this._setPendingPromptKind(null);
+  }
+
+  // Advisory pending-prompt-kind setter (see _pendingPromptKind above). Emits 'prompt-kind-change'
+  // only when the value actually changes, mirroring _emitAgentsChange/_emitWakeupChange.
+  _setPendingPromptKind(kind) {
+    const next = kind || null;
+    if (next === this._pendingPromptKind) return;
+    this._pendingPromptKind = next;
+    this.emit("prompt-kind-change", { pendingPromptKind: next });
   }
 
   // Reconcile against an authoritative `background_tasks` payload array. A declaration of
@@ -768,6 +787,9 @@ class Session extends EventEmitter {
     this._lastSignal = { signal: s.signal, source: s.source, confidence: s.confidence, ts: s.ts };
     // Any non-ready activity supersedes a held ready: the turn is demonstrably not settled.
     if (s.signal !== "ready") this._clearGateHeldReady();
+    // A working signal means the operator answered (or the agent resumed) - the prompt this
+    // session was waiting on no longer applies.
+    if (s.signal === "working") this._setPendingPromptKind(null);
     // Pure decision in session/core/status-mapper.js; this wrapper owns the side effects:
     // the _destroyed guard + _lastSignal write above, and the transition below. The detail
     // { source, signal } is uniform across every firing case (byte-identical to the prior
@@ -834,6 +856,7 @@ class Session extends EventEmitter {
       resumeSessionId: this._resumeSessionId,
       activeAgents: this._activeAgentCount(),
       pendingWakeup: this._pendingWakeup(),
+      pendingPromptKind: this._pendingPromptKind,
       mergeStatus: this.mergeStatus,
       worktreeNotice: this.worktreeNotice,
       effectiveBase: (this._effectiveBase || this._integrationBranch || null)
@@ -905,7 +928,11 @@ class Session extends EventEmitter {
       this.emit("worktree-blocked", { id: this.id, branch: this._integrationBranch, notice: this.worktreeNotice });
       return false;
     }
-    if (!ws || !ws.isGit) { // non-git path: the ONLY in-place fallback
+    if (ws && ws.reason === "branch-in-use") {
+      this.worktreeNotice = `session branch already checked out at ${ws.conflictPath}; running in place`;
+      this.emit("worktree-blocked", { id: this.id, branch: this._integrationBranch, notice: this.worktreeNotice });
+    }
+    if (!ws || !ws.isGit) { // non-git path (including branch-in-use): the ONLY in-place fallback
       this.worktreeDir = null;
       this.isWorktree = false;
       return true;
@@ -1369,6 +1396,11 @@ class Session extends EventEmitter {
       exitHook(this);
     }
 
+    // Leaving WAITING for any reason (user_input included) means whatever prompt held it no
+    // longer applies. Covers both a real hook signal and a direct transition('user_input') call
+    // (backend.js manual-answer path).
+    if (from === STATES.WAITING) this._setPendingPromptKind(null);
+
     // Update state
     this.state = to;
 
@@ -1453,6 +1485,7 @@ class Session extends EventEmitter {
     this._clearGateHeldReady();
     this._clearAgents();
     this._clearWakeups();
+    this._setPendingPromptKind(null);
     this._autoKilled = false;
     this._outputRing.reset();
     // A restarted PTY re-bases its monotonic output offset at 0. Signal the backend so
@@ -1665,6 +1698,7 @@ class Session extends EventEmitter {
     this._clearGateHeldReady();
     this._clearAgents();
     this._clearWakeups();
+    this._setPendingPromptKind(null);
     this._cleanupHooks();
     this._ptyAlive = false;
     this.ptyProcess = null;

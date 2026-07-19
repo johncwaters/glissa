@@ -126,6 +126,11 @@ export function buildCardDOM(sessionId, sessionName, initialState, options = {})
   // says "sleeping until ~HH:MM" instead of just looking done. Advisory and self-expiring:
   // Esc-cancel fires no hook, so the chip ages out rather than being authoritative.
   const wakeupBadge = el('span', 'wakeup-badge', '');
+  // Advisory pending-prompt-kind marker. Hidden unless the card carries data-prompt (set live by
+  // setSessionPrompt on a session-prompt delta / snapshot): shows WHAT a WAITING session is
+  // waiting on (permission vs elicitation). Text filled there.
+  const promptBadge = el('span', 'prompt-badge', '');
+  promptBadge.title = 'Waiting on a permission or input prompt';
   const spacer = el('span', 'session-header-spacer');
 
   // Time-in-current-state readout on the card header (trailing the name), shown in the Focus center:
@@ -190,7 +195,7 @@ export function buildCardDOM(sessionId, sessionName, initialState, options = {})
   // zone; the spacer then absorbs the clock's width changes, so the persistent tags + actions in
   // the RIGHT zone never reflow when the timer ticks. (Status is not shown here: it lives on the
   // Focus rail pill and the toolbar accent strip.)
-  const headerChildren = [nameEl, elapsedEl, spacer, worktreeBadge, resumeBadge, postTurnBadge, agentsBadge, wakeupBadge];
+  const headerChildren = [nameEl, elapsedEl, spacer, worktreeBadge, resumeBadge, postTurnBadge, agentsBadge, wakeupBadge, promptBadge];
   if (permsBadge) headerChildren.push(permsBadge);
   headerChildren.push(actions);
   header.append(...headerChildren);
