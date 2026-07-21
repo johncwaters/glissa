@@ -310,6 +310,7 @@ export function applyTheme(themeId) {
 
   _currentThemeId = themeId;
   const root = document.documentElement;
+  root.dataset.theme = themeId;
   for (const [prop, value] of Object.entries(theme.colors)) {
     root.style.setProperty(prop, value);
   }
