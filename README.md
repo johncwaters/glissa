@@ -63,6 +63,7 @@ The install succeeded, but the directory where npm placed the `glissa` command i
 - Keyboard navigation: jump between sessions, step through the ones needing attention, and merge or resolve from the keyboard
 - Teams: project-portable agent pipelines that run against any project you manage
 - Dormant boot so unopened sessions cost nothing until you focus them
+- Auto-resume by default: sessions that were live when Glissa stopped (cleanly or by crash) come back on the next start with their Claude conversation resumed (`autoResume: false` to disable)
 - Configurable themes (Golgari, Midnight, Phyrexian, Compleated)
 - Hot-reloadable configuration
 

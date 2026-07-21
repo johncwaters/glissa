@@ -29,6 +29,7 @@ const { createOutputRing } = require("./core/output-ring");
 const { decideSignatureDemotion, decideDiffSelfHeal } = require("./core/merge-gate");
 const agentTracker = require("./core/agent-tracker");
 const wakeupTracker = require("./core/wakeup-tracker");
+const { RESUME_ID_RE } = require("./core/auto-resume");
 
 const KILL_POLL_INTERVAL_MS = 200;
 const KILL_MAX_WAIT_MS = 3000;
@@ -418,15 +419,30 @@ class Session extends EventEmitter {
     this._statusSource.ingest(raw);
   }
 
-  // SessionStart(source: clear|compact): nothing is running, nothing completed. See _titleQuiet.
+  // SessionStart fires on every startup/resume/clear/compact/fork; capture the live Claude
+  // session_id on all of them (resume assigns a NEW id each time, so the chain must stay
+  // current - graceful-shutdown-auto-resume plan, design A). clear/compact additionally need
+  // the quiet-title handling below: nothing is running, nothing completed. See _titleQuiet.
   _onSessionStartHook(raw) {
-    const src = String((raw.payload && raw.payload.source) || "").toLowerCase();
+    const payload = raw.payload || {};
+    this._captureClaudeSessionId(payload.session_id, payload.source);
+    const src = String(payload.source || "").toLowerCase();
     if (src !== "clear" && src !== "compact") return;
     this._statusSource.reset();
     this._titleSource.reset();
     this._titleQuiet = true;
     this._clearGateHeldReady();
     this._setPendingPromptKind(null);
+  }
+
+  // Malformed/absent ids are a no-op: crash-safe persistence (design A) depends on this only
+  // ever recording a real, resumable id. Mirrors into the live binding immediately, so a plain
+  // dashboard restart after a PTY crash already resumes even without a server reboot; the
+  // backend listens for the emitted event to persist it to config.json.
+  _captureClaudeSessionId(id, source) {
+    if (typeof id !== "string" || !RESUME_ID_RE.test(id)) return;
+    this.setResumeConversation(id);
+    this.emit("claude-session-id", { id, source: source || null });
   }
 
   // Advisory pending-prompt-kind setter (see _pendingPromptKind above). Emits 'prompt-kind-change'
@@ -830,6 +846,14 @@ class Session extends EventEmitter {
 
   get sleeping() {
     return this._sleeping;
+  }
+
+  // True from forceRestart()'s kill through its queued exit handler (see forceRestart / restart).
+  // The state-change this window fires is a transient user_kill on the way back to a respawn, not
+  // an intentional stop - a listener that treats every user_kill as "gone for good" (e.g. the
+  // backend's wasActive persistence, graceful-shutdown-auto-resume design B) must read this first.
+  get pendingRestart() {
+    return this._pendingRestart;
   }
 
   // Bind (or clear, with a falsy id) the conversation this session resumes on its next spawn. Set by the

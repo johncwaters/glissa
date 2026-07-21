@@ -32,6 +32,7 @@ const { createReplayLog } = require('./control-replay-core');
 const { createLifecycle } = require('./server-lifecycle');
 const { NotificationManager } = require('../notifications/notification-manager');
 const { createNotifyGate, decideNotification } = require('../session/core/notify-gate');
+const { pickAutoResume } = require('../session/core/auto-resume');
 const { createToastChannel } = require('../notifications/channels/toast');
 const { createWebNotificationChannel } = require('../notifications/channels/web-notification');
 const { createRecorder } = require('../session/session-recorder');
@@ -69,6 +70,69 @@ const ESCALATION_INTERVAL_MS = 300000;
  *   string  - absolute path to serve from
  * @returns {{ shutdown: () => void, port: number, app: import('express').Express }}
  */
+// Read-modify-write one field on a session's project record. config.json is the single source of
+// truth (design A: persisted at hook time, not shutdown time, so a crash between the hook and this
+// write never loses the id), so this always reads fresh off disk rather than trusting `liveConfig`.
+// No-ops when the project is absent from cfg.projects (ephemeral team/setup sessions are never
+// config-backed). Also updates the matching entry in `liveConfig.projects` (the same array
+// resolvePostTurn and friends read) so a later read in this process sees the value without a full
+// config reload. Module-level (no createBackend closure) so tests can drive it directly against a
+// real configStore - see tests/backend-auto-resume.test.js.
+function persistSessionField(configStore, liveConfig, sessionId, field, value) {
+  const freshConfig = configStore.save((cfg) => {
+    const project = cfg.projects.find((p) => p.id === sessionId);
+    if (!project) return;
+    project[field] = value;
+  });
+  if (!freshConfig) return;
+  const project = liveConfig.projects.find((p) => p.id === sessionId);
+  if (project) project[field] = value;
+}
+
+// Pure decision for the wasActive boot-time auto-resume signal (design B): what a single
+// state-change entry should flip it to, or null for no flip. true = the session now has a live
+// PTY; false = an intentional stop (a genuine user_kill, or a terminal DONE/FAILED exit) that
+// should not come back next boot. `pendingRestart` exempts forceRestart()'s transient user_kill
+// on its way back to a respawn (Session.pendingRestart) - that window is not the operator giving
+// up on the session, so a crash mid-restart still needs to resume on the next boot. Module-level
+// and pure (no Session/config access) so tests can drive every case directly - see
+// tests/backend-auto-resume.test.js.
+function decideWasActiveFlip(to, event, pendingRestart) {
+  if (to === STATES.STARTING || to === STATES.RUNNING) return true;
+  if (!pendingRestart && (event === 'user_kill' || to === STATES.DONE || to === STATES.FAILED)) return false;
+  return null;
+}
+
+// Boot-time smart auto-resume (design C): spawn every picked, still-DORMANT session through
+// `gate` so N picks at boot never race pty.spawn against each other - the ConPTY wedge risk
+// spawn-gate.js exists for, worse at boot (many sessions can be picked at once) than a single
+// user click. A picked id absent from `sessionsMap` (deleted project between reads) is skipped
+// up front, but the DORMANT check must happen INSIDE the gate callback, at execution time, not
+// while enqueuing: the gate can serialize a picked session's start() seconds behind others, and
+// Session.start() has no re-entrancy guard (it spawns unconditionally once past the DORMANT-gated
+// transition), so an ungated start (e.g. the user clicking the card via the plain start-session
+// control path) landing in that window would otherwise get double-spawned once this queued job
+// finally runs. Returns a promise that resolves once every picked run has settled (module-level,
+// no createBackend closure, so tests can drive it directly with fake Session instances - see
+// tests/backend-auto-resume.test.js).
+function runAutoResume(sessionsMap, cfg, gate) {
+  const ids = pickAutoResume(cfg.projects, cfg);
+  const runs = [];
+  for (const id of ids) {
+    const sess = sessionsMap.get(id);
+    if (!sess) continue;
+    runs.push(
+      gate.run(() => {
+        if (sess.state !== STATES.DORMANT) return null;
+        return sess.start();
+      }).catch((err) => {
+        console.warn(`[boot] auto-resume failed for ${sess.name}: ${err.message}`);
+      })
+    );
+  }
+  return Promise.all(runs);
+}
+
 function isAllowedOrigin(req) {
   const origin = req.headers.origin;
   if (!origin) return true; // Non-browser clients (curl, ws CLI) have no Origin
@@ -625,6 +689,19 @@ function createBackend(httpServer, options = {}) {
     // Once-per-work-cycle gate for terminal notification categories. Created per wiring
     // closure, so a config-reload destroy + re-wire starts fresh (no cleanup needed).
     const notifyGate = createNotifyGate();
+    // Last wasActive value this process persisted for this session, so a burst of RUNNING
+    // re-entries (every turn) writes config.json at most once per actual flip. Starts unknown
+    // (null) so the first flip always writes, even if it happens to match what's on disk.
+    let lastPersistedWasActive = null;
+
+    const persistProjectField = (field, value) => persistSessionField(configStore, config, sess.id, field, value);
+
+    // Crash-safe capture of the live Claude session id (design A): persisted the moment the hook
+    // fires, not at shutdown, so a hard kill of Glissa loses nothing. Unifies with the manual
+    // Resume-dialog binding (control-handlers.js handleResumeConversation) - same config field.
+    sess.on('claude-session-id', ({ id }) => {
+      persistProjectField('resumeSessionId', id);
+    });
 
     sess.on('error', (err) => {
       console.error(`[${sess.name}] error: ${err.message}`);
@@ -672,6 +749,15 @@ function createBackend(httpServer, options = {}) {
         from, to, event,
         timestamp: Date.now()
       });
+
+      // wasActive: the boot-time auto-resume signal (design B; decision logic in
+      // decideWasActiveFlip). Flips only, so this writes config.json a handful of times per
+      // session lifetime, not on every transition.
+      const nextWasActive = decideWasActiveFlip(to, event, sess.pendingRestart);
+      if (nextWasActive !== null && nextWasActive !== lastPersistedWasActive) {
+        lastPersistedWasActive = nextWasActive;
+        persistProjectField('wasActive', nextWasActive);
+      }
 
       // Notification triggers: session state -> notification lifecycle. The decision (which
       // category fires for this state entry, if any) lives in session/core/notify-gate.js
@@ -863,6 +949,12 @@ function createBackend(httpServer, options = {}) {
   } catch (err) {
     console.warn(`[worktree] worktree reconcile failed: ${err.message}`);
   }
+
+  // Smart auto-resume (design C): sessions active when Glissa last shut down come back with
+  // their live Claude conversation resumed. Runs after worktree reconciliation, so a re-adopted
+  // pending-review worktree is already in place before the session spawns into it. Fire-and-
+  // forget: boot does not block on PTY spawns finishing (matches _addNewSessions' sess.start()).
+  runAutoResume(sessions, config, spawnGate);
 
   function diffProjects(currentSessions, newProjects) {
     ensureProjectIds(newProjects);
@@ -1272,4 +1364,4 @@ function mountDevRoutes(app) {
   });
 }
 
-module.exports = { createBackend };
+module.exports = { createBackend, runAutoResume, persistSessionField, decideWasActiveFlip };

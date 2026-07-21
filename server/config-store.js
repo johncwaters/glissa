@@ -20,6 +20,11 @@ const DEFAULT_CONFIG = {
   // Check the npm registry once at startup for a newer published glissa and surface the update command
   // (dashboard banner + console line). Advisory, fail-open, off-switchable. See server/update-check.js.
   checkForUpdates: true,
+  // Smart auto-resume: at boot, a session that had a live conversation when Glissa last shut down
+  // (crash, hard kill, or graceful) auto-spawns with that conversation resumed. Kill switch; the
+  // per-project gating (wasActive + resumeSessionId) lives in session/core/auto-resume.js pickAutoResume.
+  // See .omc/plans/graceful-shutdown-auto-resume.md.
+  autoResume: true,
   // Lever B: append a fixed anti-slop note to each user session's system prompt at spawn
   // (session/core/anti-slop-prompt.js). OFF by default; user sessions only (team/pack-setup
   // stage sessions never receive it). Takes effect on the next session start/restart.
@@ -64,6 +69,7 @@ const BOOLEAN_KEYS = [
   'detectBackgroundAgents',
   'antiSlopPrompt',
   'checkForUpdates',
+  'autoResume',
 ];
 
 // Free-text settings persisted to config.json
@@ -176,6 +182,7 @@ function createConfigStore() {
       detectBackgroundAgents: config.detectBackgroundAgents ?? DEFAULT_CONFIG.detectBackgroundAgents,
       antiSlopPrompt: config.antiSlopPrompt ?? DEFAULT_CONFIG.antiSlopPrompt,
       checkForUpdates: config.checkForUpdates ?? DEFAULT_CONFIG.checkForUpdates,
+      autoResume: config.autoResume ?? DEFAULT_CONFIG.autoResume,
       editorCommand: config.editorCommand ?? DEFAULT_CONFIG.editorCommand,
       integrationBranch: config.integrationBranch ?? DEFAULT_CONFIG.integrationBranch,
       worktreeRoot: config.worktreeRoot ?? DEFAULT_CONFIG.worktreeRoot,

@@ -2,6 +2,7 @@
 
 const http = require('node:http');
 const { createBackend } = require('./server/backend');
+const { createLifecycle } = require('./server/server-lifecycle');
 
 const server = http.createServer();
 const { shutdown, port, app } = createBackend(server, { staticDir: 'auto' });
@@ -24,11 +25,21 @@ server.listen(port, '127.0.0.1', () => {
   console.log(`Glissa server listening on http://127.0.0.1:${port}`);
 });
 
-let shuttingDown = false;
-process.on('SIGINT', () => {
-  if (shuttingDown) return;
-  shuttingDown = true;
-  console.log('\nSIGINT received - shutting down...');
-  shutdown();
-  server.close(() => process.exit(0));
-});
+// Route every termination signal through the same lifecycle path as the dashboard-triggered shutdown
+// (server/backend.js wires an identical createLifecycle instance to the control WS "shutdown" message):
+// requestShutdown awaits the in-flight PTY reaps shutdown() started, then closes the listener with a
+// bounded fallback exit timer. The fallback matters because an open dashboard tab holds a live WS
+// connection, so httpServer.close()'s callback alone would never fire and the process would hang
+// forever on SIGINT/SIGTERM/SIGBREAK/SIGHUP. createLifecycle owns the single re-entry guard, so no
+// local shuttingDown flag is needed here.
+const { requestShutdown } = createLifecycle({ shutdown, httpServer: server });
+
+function handleShutdownSignal(signal) {
+  console.log(`\n${signal} received - shutting down...`);
+  requestShutdown();
+}
+
+process.on('SIGINT', () => handleShutdownSignal('SIGINT'));
+process.on('SIGTERM', () => handleShutdownSignal('SIGTERM'));
+process.on('SIGBREAK', () => handleShutdownSignal('SIGBREAK'));
+process.on('SIGHUP', () => handleShutdownSignal('SIGHUP'));
