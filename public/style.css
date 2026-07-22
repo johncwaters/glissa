@@ -3620,7 +3620,10 @@ body {
    public/nyan-cat.js only mounts .nyan-flight while that theme is active. */
 :root[data-theme="unicorn"] .nyan-flight {
   position: fixed;
-  top: var(--nyan-top, 18vh);
+  /* px floor keeps top-biased flights out of the sticky header's band:
+     the header is opaque and z-index 100 sits above the sprite's 30, so
+     a flight under it reads as clipped */
+  top: max(var(--nyan-top, 18vh), 64px);
   left: 0;
   width: 61.2px;
   height: 37.8px;
