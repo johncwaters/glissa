@@ -23,7 +23,12 @@ function basename(p) {
 }
 
 // orderedRows: rows from orderRoster, each at least { id, ui }. pathOf(row) -> the group key (path).
-export function groupRoster(orderedRows, pathOf) {
+// emptyKeys (optional): project paths KEPT in the rail after their last session closed. Each becomes a
+// session-less group (rows: []) so the operator re-adds a session via the header "+" without re-picking
+// the folder. A kept path that already owns a real group (a live session) is skipped; NO_PATH_KEY is
+// never kept (it has no spawnable path). Consumers identify a kept group by rows.length === 0 (a real
+// group always holds >= 1 row).
+export function groupRoster(orderedRows, pathOf, emptyKeys) {
   const rows = Array.isArray(orderedRows) ? orderedRows : [];
   // Stable partition: first-seen key order, rows appended in input order.
   const byKey = new Map(); // key -> { key, label, title, rows }
@@ -36,6 +41,14 @@ export function groupRoster(orderedRows, pathOf) {
       byKey.set(key, g);
     }
     g.rows.push(row);
+  }
+  if (emptyKeys) {
+    for (const raw of emptyKeys) {
+      if (!raw) continue;
+      const key = String(raw);
+      if (key === NO_PATH_KEY || byKey.has(key)) continue;
+      byKey.set(key, { key, label: basename(key), title: key, rows: [] });
+    }
   }
   const groups = [...byKey.values()];
   // A->Z by label (case-insensitive, numeric-aware), tie-broken by full key for determinism. Never

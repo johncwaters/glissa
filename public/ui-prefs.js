@@ -1,12 +1,13 @@
 // ── UI preferences ───────────────────────────────────────────
 // Persists browser-side UI state to localStorage.
 // Schema: { soundEnabled: boolean, soundId: string, themeId: string, notificationsEnabled: boolean,
-//           activeView: string, lastFocusedSessionId: string|null, railWidth: number|null }
+//           activeView: string, lastFocusedSessionId: string|null, railWidth: number|null,
+//           keptProjects: string[] }
 
 import { getJSON, setJSON } from './local-store.js';
 
 const STORAGE_KEY = 'glissa-ui-prefs';
-const DEFAULT_PREFS = { soundEnabled: true, soundId: 'coins', themeId: 'phyrexian', notificationsEnabled: true, activeView: 'focus', lastFocusedSessionId: null, railWidth: null };
+const DEFAULT_PREFS = { soundEnabled: true, soundId: 'coins', themeId: 'phyrexian', notificationsEnabled: true, activeView: 'focus', lastFocusedSessionId: null, railWidth: null, keptProjects: [] };
 
 function load() {
   const prefs = getJSON(STORAGE_KEY, DEFAULT_PREFS);
@@ -17,6 +18,7 @@ function load() {
   if (typeof prefs.activeView !== 'string') prefs.activeView = 'focus';
   if (typeof prefs.lastFocusedSessionId !== 'string' && prefs.lastFocusedSessionId !== null) prefs.lastFocusedSessionId = null;
   if (!Number.isFinite(prefs.railWidth)) prefs.railWidth = null;
+  prefs.keptProjects = Array.isArray(prefs.keptProjects) ? prefs.keptProjects.filter((p) => typeof p === 'string' && p) : [];
   return prefs;
 }
 
@@ -82,6 +84,20 @@ export function getRailWidth() {
 export function setRailWidth(px) {
   const prefs = load();
   prefs.railWidth = Number.isFinite(px) ? px : null;
+  save(prefs);
+}
+
+// Known project paths (every project Glissa has seen). A known path with no live session stays in the
+// Focus rail as an empty group so the operator re-adds a session via the header "+" without re-picking
+// the folder. Persisted across reloads (config.json no longer lists a removed session, so this is the
+// only record the empty rail group survives on).
+export function getKeptProjects() {
+  return load().keptProjects;
+}
+
+export function setKeptProjects(paths) {
+  const prefs = load();
+  prefs.keptProjects = Array.isArray(paths) ? [...new Set(paths.filter((p) => typeof p === 'string' && p))] : [];
   save(prefs);
 }
 

@@ -7,7 +7,7 @@ import './tailwind.css';
 import { STATES } from '/shared/states.mjs';
 import { connectControl, disableReconnect, onControlMessage, sendControlMsg, sendControlRequest, setConnectionStateCallback } from './control-ws.js';
 import { createAddSessionDialog, createConfirmDialog, createSettingsDialog } from './dialogs.js';
-import { activateFocusView, deactivateFocusView, focusAdjacentInRail, focusNextAttention, focusNthInRail, focusSessionInCenter, isFocusActive, mountFocusView, refreshFocusRoster, restoreFocusedSession, setFocusMergeStatus } from './focus-view/focus-view.js';
+import { activateFocusView, deactivateFocusView, focusAdjacentInRail, focusNextAttention, focusNthInRail, focusSessionInCenter, isFocusActive, mountFocusView, noteKnownProjectPath, refreshFocusRoster, restoreFocusedSession, setFocusMergeStatus } from './focus-view/focus-view.js';
 import { applyHealthSnapshot, mountHealthMonitor } from './health-monitor.js';
 import { initNotifications, showDesktopNotification } from './notifications.js';
 import { handleDebugStateRefresh, handleDebugStateResponse } from './session-card/card-dom.js';
@@ -101,6 +101,7 @@ function handleSnapshot(sessions) {
   }
 
   for (const s of (sessions || [])) {
+    if (!s.ephemeral) noteKnownProjectPath(s.path); // remember the project so its rail group survives a last-session close
     if (hasSession(s.id)) {
       applyState(s.id, s.state);
     } else {
@@ -172,10 +173,10 @@ function handleStateChange(msg) {
 const messageHandlers = {
   'snapshot':           (msg) => handleSnapshot(msg.sessions),
   'state-change':       (msg) => handleStateChange(msg),
-  'session-added':      (msg) => { if (!msg.ephemeral) knownProjects.set(msg.id, msg.session); if (!hasSession(msg.id)) { createSessionCard(msg.id, msg.session, msg.state, { skipPerms: !!msg.skipPerms, worktree: !!msg.worktree, path: msg.path, resume: !!msg.resumeSessionId }); } if (isFocusActive()) refreshFocusRoster(); },
+  'session-added':      (msg) => { if (!msg.ephemeral) { knownProjects.set(msg.id, msg.session); noteKnownProjectPath(msg.path); } if (!hasSession(msg.id)) { createSessionCard(msg.id, msg.session, msg.state, { skipPerms: !!msg.skipPerms, worktree: !!msg.worktree, path: msg.path, resume: !!msg.resumeSessionId }); } if (isFocusActive()) refreshFocusRoster(); },
   'session-removed':    (msg) => { knownProjects.delete(msg.id); removeSessionCard(msg.id); forgetReviewSession(msg.id); if (isFocusActive()) refreshFocusRoster(); },
   'session-renamed':    (msg) => { if (knownProjects.has(msg.id)) knownProjects.set(msg.id, msg.newName); renameSessionCard(msg.id, msg.newName); },
-  'session-modified':   (msg) => { if (!msg.ephemeral) knownProjects.set(msg.id, msg.session); removeSessionCard(msg.id); forgetReviewSession(msg.id); createSessionCard(msg.id, msg.session, msg.state, { skipPerms: !!msg.skipPerms, worktree: !!msg.worktree, path: msg.path, resume: !!msg.resumeSessionId }); if (isFocusActive()) refreshFocusRoster(); },
+  'session-modified':   (msg) => { if (!msg.ephemeral) { knownProjects.set(msg.id, msg.session); noteKnownProjectPath(msg.path); } removeSessionCard(msg.id); forgetReviewSession(msg.id); createSessionCard(msg.id, msg.session, msg.state, { skipPerms: !!msg.skipPerms, worktree: !!msg.worktree, path: msg.path, resume: !!msg.resumeSessionId }); if (isFocusActive()) refreshFocusRoster(); },
   'session-git':        (msg) => setSessionWorktree(msg.id, !!msg.worktree),
   'session-resume':     (msg) => setSessionResume(msg.id, msg.resumeSessionId),
   'session-agents':     (msg) => setSessionAgents(msg.id, msg.activeAgents),

@@ -2661,9 +2661,11 @@ body {
   max-width: 60%;
 }
 .focus-rail-group-rule { flex: 1; height: 1px; background: var(--border); }
-/* The "+" quick-add: a quiet square button on the header's right, warming to the accent on hover so it
-   reads as an affordance without competing with the pills below. */
-.focus-rail-group-add {
+/* Header action squares: a quiet 18px button on the header's right. "+" quick-adds a session (warms to
+   the accent on hover); "×" dismisses a kept session-less project (warms to the removal tone). Shared
+   box so both read as one affordance family without competing with the pills below. */
+.focus-rail-group-add,
+.focus-rail-group-remove {
   flex: none;
   display: flex;
   align-items: center;
@@ -2685,10 +2687,20 @@ body {
   border-color: color-mix(in oklch, var(--accent) 55%, var(--border));
   background: color-mix(in oklch, var(--accent) 10%, transparent);
 }
-.focus-rail-group-add:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.focus-rail-group-remove:hover {
+  color: var(--state-failed);
+  border-color: color-mix(in oklch, var(--state-failed) 45%, var(--border));
+  background: color-mix(in oklch, var(--state-failed) 12%, transparent);
+}
+.focus-rail-group-add:focus-visible,
+.focus-rail-group-remove:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .focus-rail-group:hover .focus-rail-group-label { color: var(--text); }
+/* A kept project with no live session: dim its rule so the empty row reads as a placeholder, not an
+   active project. The label + "+" stay legible so the re-add affordance is obvious. */
+.focus-rail-group[data-empty] .focus-rail-group-rule { opacity: 0.5; }
 @media (prefers-reduced-motion: reduce) {
-  .focus-rail-group-add { transition: none; }
+  .focus-rail-group-add,
+  .focus-rail-group-remove { transition: none; }
 }
 
 .focus-pill {

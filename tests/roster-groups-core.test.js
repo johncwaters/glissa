@@ -92,6 +92,55 @@ test('9. missing/empty path -> stable (no path) fallback, no throw', async () =>
   assert.deepEqual(g.groups[0].rows.map((x) => x.id), ['a', 'b', 'c']);
 });
 
+// ── groupRoster: kept (session-less) empty projects ──────────
+
+test('16. emptyKeys default omitted -> unchanged (no empty groups)', async () => {
+  const { groupRoster } = await importCore();
+  const g = groupRoster([r('a', 'C:\\code\\proj')], pathOf);
+  assert.equal(g.groups.length, 1);
+  assert.equal(g.groups[0].rows.length, 1);
+});
+
+test('17. kept path with no session -> empty group (rows: []), header data present', async () => {
+  const { groupRoster } = await importCore();
+  const g = groupRoster([], pathOf, ['C:\\code\\ghost']);
+  assert.equal(g.groups.length, 1);
+  assert.equal(g.flat, true); // single group
+  const only = g.groups[0];
+  assert.equal(only.key, 'C:\\code\\ghost');
+  assert.equal(only.label, 'ghost');
+  assert.equal(only.title, 'C:\\code\\ghost');
+  assert.deepEqual(only.rows, []);
+});
+
+test('18. kept path that also has a live session -> one real group, NOT duplicated', async () => {
+  const { groupRoster } = await importCore();
+  const g = groupRoster([r('a', 'C:\\code\\live')], pathOf, ['C:\\code\\live']);
+  assert.equal(g.groups.length, 1);
+  assert.equal(g.groups[0].rows.length, 1); // the real session group wins; no empty twin
+});
+
+test('19. live + kept-empty groups sort together A->Z by basename', async () => {
+  const { groupRoster } = await importCore();
+  const g = groupRoster([r('m', 'C:\\code\\mid')], pathOf, ['C:\\code\\alpha', 'C:\\code\\zebra']);
+  assert.deepEqual(g.groups.map((x) => x.label), ['alpha', 'mid', 'zebra']);
+  assert.equal(g.groups.find((x) => x.label === 'alpha').rows.length, 0);
+  assert.equal(g.groups.find((x) => x.label === 'mid').rows.length, 1);
+  assert.equal(g.groups.find((x) => x.label === 'zebra').rows.length, 0);
+});
+
+test('20. NO_PATH_KEY and falsy entries in emptyKeys are ignored (no spawnable path)', async () => {
+  const { groupRoster, NO_PATH_KEY } = await importCore();
+  const g = groupRoster([], pathOf, [NO_PATH_KEY, '', null, undefined]);
+  assert.deepEqual(g.groups, []);
+});
+
+test('21. kept-empty groups contribute no navigable ids to visibleOrder', async () => {
+  const { groupRoster, visibleOrder } = await importCore();
+  const g = groupRoster([r('a', 'C:\\code\\live')], pathOf, ['C:\\code\\ghost']);
+  assert.deepEqual(visibleOrder(g, new Set()), ['a']); // ghost adds no pill
+});
+
 // ── visibleOrder ─────────────────────────────────────────────
 
 test('10. visibleOrder flat -> all ids in input order, collapsedSet ignored', async () => {
