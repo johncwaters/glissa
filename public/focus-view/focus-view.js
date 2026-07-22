@@ -14,7 +14,9 @@
 import { BADGE_LABELS, STATE_GLYPHS, STATES } from '/shared/states.mjs';
 import { sendControlMsg } from '../control-ws.js';
 import { setActivityRenderer } from '../session-card/activity.js';
+import { showConfirmDialog } from '../session-card/card-dom.js';
 import { container, sessionUIs } from '../session-card/card-registry.js';
+import { suggestSessionName } from '../session-card/naming.js';
 import { ensureTerminalSetup, forceTerminalRepaint } from '../session-card/terminal.js';
 import { setSelectedId } from '../sidebar/selection.js';
 import { getLastFocusedSessionId, getRailWidth, setLastFocusedSessionId, setRailWidth } from '../ui-prefs.js';
@@ -44,6 +46,7 @@ const pillById = new Map();        // id -> rail pill element
 // only options (ARIA valid). The single-project case renders the flat railListEl with no headers.
 const groupListById = new Map();   // project key (path) -> its <div role=listbox> sublist element
 const groupHeaderById = new Map(); // project key (path) -> its header <button>
+const addBtnById = new Map();      // project key (path) -> its "+ session" quick-add <button>
 
 // railTabStopId is the rail's single roving / selected option, DECOUPLED from focusedId (which is
 // "which session is centered"). They coincide in steady state; they diverge only when a collapse
@@ -171,6 +174,54 @@ function teardownGroups() {
   }
   groupHeaderById.clear();
   groupListById.clear();
+}
+
+// ── Quick-add (spawn another session on a project without opening the Add Session dialog) ──
+// One "+ session" button per project, rendered as a sibling of the group's listbox (NOT an option
+// inside it, so it never joins the arrow-key/Alt+1..9 option set). It spawns on the project's own
+// path with an auto-suggested name, exactly what the dialog does after you pick that project.
+// Created once per key and reused; path/label ride the dataset so the reused button stays current.
+function ensureAddBtn(group) {
+  let btn = addBtnById.get(group.key);
+  if (!btn) {
+    btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'focus-rail-add';
+    btn.innerHTML = '<span class="focus-rail-add-icon" aria-hidden="true">+</span>'
+      + '<span class="focus-rail-add-label">session</span>';
+    btn.addEventListener('click', () => quickAdd(btn.dataset.path, btn.dataset.label));
+    addBtnById.set(group.key, btn);
+  }
+  btn.dataset.path = group.key;
+  btn.dataset.label = group.label;
+  btn.title = `Add a session to ${group.label}`;
+  btn.setAttribute('aria-label', `Add a session to ${group.label}`);
+  return btn;
+}
+
+function quickAdd(path, label) {
+  if (!path) return;
+  sendControlMsg({ type: 'add-session', name: suggestSessionName(label), path });
+}
+
+// Confirm-then-remove a session from the rail: same teardown (config entry + PTY) and same
+// unmerged-worktree warning the card overflow menu uses (session-card/lifecycle.js), so a session
+// can be retired from the sidebar without opening its card. Backs both the pill's hover "×" and the
+// Delete/Backspace shortcut on the focused pill.
+function confirmRemove(id) {
+  const ui = sessionUIs.get(id);
+  if (!ui) return;
+  const name = sessionName(ui);
+  const merge = mergeStatusById.get(id) || 'none';
+  const unmerged = merge === 'pending-review' || merge === 'parked';
+  showConfirmDialog({
+    title: 'Remove Session',
+    message: unmerged
+      ? `"${name}" has unmerged worktree changes that will be permanently discarded if you remove it. Merge or review them first to keep them. Remove anyway?`
+      : `Remove session "${name}"?`,
+    confirmLabel: unmerged ? 'Discard & Remove' : 'Remove',
+    onConfirm: () => sendControlMsg({ type: 'remove-session', id }),
+  });
 }
 
 function expandGroup(key) {
@@ -335,6 +386,18 @@ function wireRailResizer(resizer) {
 // session into the center. Lives on the rail only, so it never intercepts keystrokes meant for the
 // centered terminal.
 function onRailKeydown(e) {
+  // Delete/Backspace removes the session whose PILL currently holds focus (with confirm), the keyboard
+  // peer of the pill's mouse-only hover "×". Keyed off the focused pill's own id, NOT railTabStopId:
+  // the rail also holds Tab-reachable group-header and "+ session" buttons, and railTabStopId tracks
+  // the centered session independently of focus, so acting on it would remove the wrong session when a
+  // non-pill control is focused. The pillById identity check also excludes any text field.
+  if (e.key === 'Delete' || e.key === 'Backspace') {
+    const id = e.target?.dataset?.id;
+    if (!id || pillById.get(id) !== e.target) return;
+    e.preventDefault();
+    confirmRemove(id);
+    return;
+  }
   if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
   // VISIBLE navigation order comes from the pure core (collapsed groups excluded), never a DOM scan.
   // pickAdjacent wraps and handles an absent roving id (its group was just collapsed) by starting from
@@ -391,6 +454,26 @@ function buildPill(id) {
     merge: pill.querySelector('.focus-pill-merge'),
   };
   pill.addEventListener('click', () => onPillActivate(id));
+
+  // Wrap the option in a positioned row so a hover-only "×" can overlay its right edge. The remove
+  // button is aria-hidden + tabindex -1 (a redundant MOUSE control): keeping it out of the AT tree
+  // and tab order leaves the listbox holding only role=option pills, so screen-reader users retire a
+  // session via Delete/Backspace on the focused pill instead. placeList appends pill._row (not the
+  // bare pill), and the prune sweep removes pill._row, so the wrapper is invisible to every other
+  // consumer, which still resolves the pill button through pillById.
+  const row = document.createElement('div');
+  row.className = 'focus-pill-row';
+  row.setAttribute('role', 'presentation');
+  const removeBtn = document.createElement('button');
+  removeBtn.type = 'button';
+  removeBtn.className = 'focus-pill-remove';
+  removeBtn.tabIndex = -1;
+  removeBtn.setAttribute('aria-hidden', 'true');
+  removeBtn.title = 'Remove session';
+  removeBtn.textContent = '×';
+  removeBtn.addEventListener('click', (e) => { e.stopPropagation(); confirmRemove(id); });
+  row.append(pill, removeBtn);
+  pill._row = row;
   return pill;
 }
 
@@ -495,9 +578,20 @@ export function refreshFocusRoster() {
       let pill = pillById.get(id);
       if (!pill) { pill = buildPill(id); pillById.set(id, pill); }
       paintPill(pill, id, ui);
-      if (!orderUnchanged) listEl.appendChild(pill);
+      if (!orderUnchanged) listEl.appendChild(pill._row);
     }
     listEl._lastOrderKey = newKey;
+  };
+
+  // Every project key that still owns a quick-add button this pass; the rest are pruned below.
+  const presentAddKeys = new Set();
+  // Place (or move) a project's "+ session" button right after its listbox. Skipped for the
+  // pathless bucket, which has no spawnable path.
+  const placeAddBtn = (group, afterEl) => {
+    if (!group || group.key === NO_PATH_KEY) return;
+    presentAddKeys.add(group.key);
+    const btn = ensureAddBtn(group);
+    if (afterEl.nextElementSibling !== btn) afterEl.after(btn);
   };
 
   if (groups.flat) {
@@ -505,7 +599,9 @@ export function refreshFocusRoster() {
     teardownGroups();
     railListEl.hidden = false;
     placeList(order, railListEl);
-  } else {
+    placeAddBtn(groups.groups[0], railListEl);
+  }
+  if (!groups.flat) {
     // Grouped: a header button + its own role=listbox sublist per project, in A->Z group order.
     // railHeadEl stays the sticky first child; the flat railListEl is parked hidden.
     railListEl.hidden = true;
@@ -515,6 +611,7 @@ export function refreshFocusRoster() {
       railEl.appendChild(header); // re-append keeps headers + sublists in sorted order
       railEl.appendChild(list);
       placeList(group.rows, list);
+      placeAddBtn(group, list);
     }
     // Remove vanished groups (their pills are pruned by the seen-sweep below).
     for (const [key, header] of [...groupHeaderById]) {
@@ -530,10 +627,15 @@ export function refreshFocusRoster() {
 
   for (const [id, pill] of pillById) {
     if (!seen.has(id)) {
-      pill.remove();
+      (pill._row || pill).remove();
       pillById.delete(id);
       if (id === railTabStopId) railTabStopId = null; // don't leave the tab stop on a gone session
     }
+  }
+  // Drop quick-add buttons for projects no longer in the roster (a removed project, or the flat<->grouped
+  // switch leaving other-project buttons behind).
+  for (const [key, btn] of [...addBtnById]) {
+    if (!presentAddKeys.has(key)) { btn.remove(); addBtnById.delete(key); }
   }
   // Prune merge-status for gone sessions (the rest of the module is careful not to leak).
   for (const id of [...mergeStatusById.keys()]) {
