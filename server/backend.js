@@ -996,11 +996,15 @@ function createBackend(httpServer, options = {}) {
     if (!sess) return false;
     closeSessionDataClients(id);
     notificationManager.acknowledge(id);
-    // Explicit removal -> throw the worktree away (junction-safe). Shutdown/restart go through destroy()
-    // directly and do NOT discard, so a pending-review worktree survives for the next-boot reconcile.
-    try { sess.discardWorktree?.(); } catch { /* best-effort */ }
     integrationPool.release(sess);
     sess.destroy();
+    // Explicit removal -> throw the worktree away (junction-safe), but only AFTER destroy() has killed the
+    // PTY and its reap settles: `git worktree remove --force` fails while the live process still holds the
+    // worktree as its cwd (Windows directory lock), which used to leak the worktree AND its branch (the
+    // follow-up `branch -D` then fails because the branch is still checked out), so a same-named re-add hit
+    // "session branch already checked out". Shutdown/restart go through destroy() WITHOUT discard, so a
+    // pending-review worktree survives for the next-boot reconcile.
+    Promise.resolve(sess._killReap).catch(() => {}).then(() => sess.discardWorktree?.()).catch(() => { /* best-effort */ });
     sessions.delete(id);
     broadcastControl({ type: 'session-removed', id, session: sess.name });
     console.log(`${logLabel}: ${sess.name}`);
