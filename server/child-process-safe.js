@@ -8,7 +8,7 @@
 // that owns no console - Glissa runs as a background server, launched from a
 // shortcut, an npm script, or the detached self-respawn - pops its OWN visible,
 // focus-stealing console window for the child's lifetime. At session start the
-// worktree probes plus the junction mklinks, and at park/stop the taskkill plus
+// worktree probes plus the junction mklinks, and at stop/restart the taskkill plus
 // the merge-back git calls, fire several of these at once: a burst of CMD
 // windows that steals focus and blocks the operator.
 //

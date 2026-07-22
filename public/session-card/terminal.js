@@ -64,7 +64,7 @@ function connectDataWs(sessionId, ui, term) {
 
   ws.addEventListener('close', () => {
     // Only act if this ws is still the active one: guards concurrent reconnect races
-    // and suppresses stale timers when the card is rebuilt under the same id (e.g. park).
+    // and suppresses stale timers when the card is rebuilt under the same id (e.g. restart).
     if (ui.dataWs === ws) {
       renderScheduler.unregister(sessionId);
       ui.dataWs = null;

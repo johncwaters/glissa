@@ -204,10 +204,6 @@ class Session extends EventEmitter {
     // True between a "Merge & finish" on a live session and its post-exit merge, so a double-click
     // cannot kick off a second merge against a worktree whose PTY is still tearing down.
     this._finishing = false;
-    // True between a live "Park" and its post-exit discard+reset, mirroring _finishing. Part of the
-    // shared teardown mutex (_teardownPending) so no other lifecycle action respawns on the worktree
-    // a queued park is about to discard.
-    this._pendingPark = false;
     // True only between a successful spawn and the kill/exit that follows. Gates
     // write() so we never push input into a pty whose console pipe is already
     // dead (see write() and the conin-socket guard in start()).
@@ -1746,13 +1742,13 @@ class Session extends EventEmitter {
     }
 
     // ORDER CONTRACT: settle the worktree BEFORE emitting "exit". On a changed tree _settleWorktreeOnExit
-    // sets mergeStatus='pending-review' and keeps worktreeDir; parkToDormant's queued once("exit") handler
-    // (_discardAndReset) runs after this and INTENTIONALLY overrides that to discard. Moving the emit ahead
-    // of this call would let Park discard an unsettled worktree. Keep settle-then-emit.
+    // sets mergeStatus='pending-review' and keeps worktreeDir; a queued once("exit") handler (e.g.
+    // finishAndMerge) runs after this and relies on the settle having already happened. Moving the emit
+    // ahead of this call would let a queued handler act on an unsettled worktree. Keep settle-then-emit.
     //
     // The await is wrapped so a rejected settle (e.g. the engine's discard rejects) ALWAYS still reaches
     // the exit emit below. Skipping the emit would leave a queued once("exit") handler unfired, so
-    // _finishing / _pendingPark / _pendingRestart would never clear and the teardown mutex would DEADLOCK
+    // _finishing / _pendingRestart would never clear and the teardown mutex would DEADLOCK
     // this session. _settleWorktreeOnExit already self-catches its discard, so a reject is unlikely; this
     // catch is the hard guarantee against a future change reintroducing a throw.
     try { await this._settleWorktreeOnExit(); }
@@ -1924,7 +1920,7 @@ class Session extends EventEmitter {
     this.emit("wake");
     // Sleep-kill terminated the PTY while user was away. Auto-restart on wake
     // so opening the card brings the session back instead of stranding it as DONE.
-    // Skipped while a teardown (park/finish/force-restart) is queued: respawning here would
+    // Skipped while a teardown (finish/force-restart) is queued: respawning here would
     // race the queued exit handler. restart() also self-guards on _teardownPending, so this is
     // belt-and-suspenders, but skipping the call keeps the intent explicit. (The sleep-kill timer
     // never restarts directly; it only kills + sets _autoKilled, deferring the restart to here.)
@@ -1935,13 +1931,13 @@ class Session extends EventEmitter {
     }
   }
 
-  // Shared teardown mutex. True while any lifecycle action has a kill-then-settle queued (a live park,
-  // a "Merge & finish", or a force-restart). Every action that could respawn a PTY or rewrite/discard a
+  // Shared teardown mutex. True while any lifecycle action has a kill-then-settle queued (a
+  // "Merge & finish" or a force-restart). Every action that could respawn a PTY or rewrite/discard a
   // worktree checks this first, so a second action cannot race the queued once("exit") handler of the
-  // first (e.g. Park kills -> the card shows DONE -> a Restart click would otherwise respawn on the very
-  // worktree Park is about to discard). Each action clears ONLY its own flag in its own exit callback.
+  // first (e.g. a force-restart kills -> the card shows DONE -> a Restart click would otherwise respawn
+  // on the worktree the first action is settling). Each action clears ONLY its own flag in its own exit callback.
   _teardownPending() {
-    return this._pendingRestart || this._finishing || this._pendingPark;
+    return this._pendingRestart || this._finishing;
   }
 
   _scheduleSleepKill() {
@@ -1982,10 +1978,10 @@ class Session extends EventEmitter {
 
   restart() {
     if (this._destroyed) return false;
-    // A queued teardown (park/finish/force-restart) is mid-flight; respawning now would race its
-    // exit handler. This is the load-bearing guard: once a live park's killSession() flips the card
-    // to DONE, the dashboard's Restart button sends a plain `restart` (not `force-restart`), so the
-    // mutex MUST live here too, not only in forceRestart.
+    // A queued teardown (finish/force-restart) is mid-flight; respawning now would race its exit
+    // handler. This is the load-bearing guard: once a finish/force-restart's killSession() flips the
+    // card to DONE, the dashboard's Restart button sends a plain `restart` (not `force-restart`), so
+    // the mutex MUST live here too, not only in forceRestart.
     if (this._teardownPending()) return false;
     if (this.state !== STATES.DONE && this.state !== STATES.FAILED)
       return false;
@@ -2070,49 +2066,6 @@ class Session extends EventEmitter {
     } else if (this.state === STATES.DONE || this.state === STATES.FAILED) {
       this.restart();
     }
-  }
-
-  // Park a quiescent or finished session back to DORMANT so its card parks for reuse. DESTRUCTIVE: any
-  // unmerged worktree (pending-review OR parked) is discarded. Acceptance is QUIESCENT-ONLY, mirroring
-  // finishAndMerge - MERGEABLE_LIVE_STATES (WAITING/IDLE/COMPLETE) + the finished states (DONE/FAILED).
-  // RUNNING is REFUSED (force-restart it first): unlike forceRestart, which kills anything because restart
-  // *preserves* the worktree, Park *discards*, so it must never nuke a tree the agent is mid-edit in.
-  // Gated by the shared _teardownPending mutex. Returns { ok, pending?, reason? }.
-  parkToDormant() {
-    if (this._destroyed || this._teardownPending()) {
-      return { ok: false, reason: this._teardownPending() ? "in-progress" : "destroyed" };
-    }
-    if (this.state === STATES.DONE || this.state === STATES.FAILED) {
-      // Settled branch: set the mutex flag SYNCHRONOUSLY before the async reset, mirroring finishAndMerge,
-      // so a second click during the awaiting reset is refused. .finally clears it on resolve or reject;
-      // the trailing .catch swallows a reset rejection so it never escapes as an unhandledRejection.
-      this._pendingPark = true;
-      this._discardAndReset().finally(() => { this._pendingPark = false; }).catch(() => {}); // settled: PTY already dead, discard (if any) + reset now
-      return { ok: true };
-    }
-    if (MERGEABLE_LIVE_STATES.includes(this.state)) {
-      // Live but quiescent: end first (we must not discard a worktree the PTY is still in), then on the
-      // real exit settle -> discard -> reset. Mirrors finishAndMerge's structure exactly.
-      this._pendingPark = true;
-      this.once("exit", async () => {
-        try { if (!this._destroyed) await this._discardAndReset(); }
-        finally { this._pendingPark = false; } // clear ONLY our own flag
-      });
-      this.killSession(); // -> DONE now; _handlePtyExit settles the worktree, then our handler discards
-      return { ok: true, pending: true };
-    }
-    // RUNNING / INITIALIZING / STARTING / DORMANT: no-op, state untouched.
-    return { ok: false, reason: "not-parkable" };
-  }
-
-  // Discard any live worktree, then return to DORMANT. discardWorktree nulls worktreeDir, so the
-  // (unchanged) user_reset guard then passes. On a tree already settled clean by _settleWorktreeOnExit
-  // the worktreeDir!=null check skips the redundant discard; on a changed tree (settled as
-  // pending-review) this intentionally OVERRIDES that and throws the work away - the destructive point
-  // of Park, which the dashboard's inline confirm warns about.
-  async _discardAndReset() {
-    if (this.worktreeDir != null) await this.discardWorktree();
-    this.resetToDormant();
   }
 
   updateSettings(cfg) {

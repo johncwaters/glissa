@@ -127,22 +127,25 @@ function quickAdd(path, label) {
   sendControlMsg({ type: 'add-session', name: suggestSessionName(label), path });
 }
 
-// Confirm-then-remove a session from the rail: same teardown (config entry + PTY) and same
-// unmerged-worktree warning the card overflow menu uses (session-card/lifecycle.js), so a session
-// can be retired from the sidebar without opening its card. Backs both the pill's hover "×" and the
-// Delete/Backspace shortcut on the focused pill.
-function confirmRemove(id) {
+// Remove a session from the rail (same teardown as the card overflow menu: config entry + PTY). A
+// CLEAN session (no unmerged worktree changes) is removed immediately with NO confirm - the operator
+// asked for one-click retire and there is nothing on disk to lose. Only an unmerged worktree
+// (pending-review / parked) still prompts, because removing it discards work. Backs both the pill's
+// hover "×" and the Delete/Backspace shortcut on the focused pill.
+function removeSession(id) {
   const ui = sessionUIs.get(id);
   if (!ui) return;
-  const name = sessionName(ui);
   const merge = mergeStatusById.get(id) || 'none';
   const unmerged = merge === 'pending-review' || merge === 'parked';
+  if (!unmerged) {
+    sendControlMsg({ type: 'remove-session', id });
+    return;
+  }
+  const name = sessionName(ui);
   showConfirmDialog({
     title: 'Remove Session',
-    message: unmerged
-      ? `"${name}" has unmerged worktree changes that will be permanently discarded if you remove it. Merge or review them first to keep them. Remove anyway?`
-      : `Remove session "${name}"?`,
-    confirmLabel: unmerged ? 'Discard & Remove' : 'Remove',
+    message: `"${name}" has unmerged worktree changes that will be permanently discarded if you remove it. Merge or review them first to keep them. Remove anyway?`,
+    confirmLabel: 'Discard & Remove',
     onConfirm: () => sendControlMsg({ type: 'remove-session', id }),
   });
 }
@@ -274,7 +277,7 @@ function onRailKeydown(e) {
     const id = e.target?.dataset?.id;
     if (!id || pillById.get(id) !== e.target) return;
     e.preventDefault();
-    confirmRemove(id);
+    removeSession(id);
     return;
   }
   if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
@@ -350,7 +353,7 @@ function buildPill(id) {
   removeBtn.setAttribute('aria-hidden', 'true');
   removeBtn.title = 'Remove session';
   removeBtn.textContent = '×';
-  removeBtn.addEventListener('click', (e) => { e.stopPropagation(); confirmRemove(id); });
+  removeBtn.addEventListener('click', (e) => { e.stopPropagation(); removeSession(id); });
   row.append(pill, removeBtn);
   pill._row = row;
   return pill;
