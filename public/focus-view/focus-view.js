@@ -27,7 +27,6 @@ const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)');
 
 let railEl = null;
 let railHeadEl = null;  // the "{n} NEED YOU" jump header (sticky top of the rail)
-let railListEl = null;  // inner listbox the pills live in (so the header is not a listbox child)
 let centerEl = null;
 let cardSlotEl = null;
 let emptyEl = null;
@@ -41,78 +40,27 @@ const mergeStatusById = new Map(); // id -> 'none'|'pending-review'|'merging'|'p
 const pillById = new Map();        // id -> rail pill element
 
 // ── Project grouping (organization level) ──
-// The rail groups its pills by project (the session's repo path). Each project is a header button
-// (collapse toggle) followed by its OWN role=listbox sublist of option pills, so every listbox holds
-// only options (ARIA valid). The single-project case renders the flat railListEl with no headers.
+// The rail groups its pills by project (the session's repo path). Each project is a header row
+// (project name + a "+" quick-add button) followed by its OWN role=listbox sublist of option pills,
+// so every listbox holds only options (ARIA valid). A single project renders exactly one header +
+// sublist; there is no separate headerless flat path.
 const groupListById = new Map();   // project key (path) -> its <div role=listbox> sublist element
-const groupHeaderById = new Map(); // project key (path) -> its header <button>
-const addBtnById = new Map();      // project key (path) -> its "+ session" quick-add <button>
+const groupHeaderById = new Map(); // project key (path) -> its header <div>
 
 // railTabStopId is the rail's single roving / selected option, DECOUPLED from focusedId (which is
-// "which session is centered"). They coincide in steady state; they diverge only when a collapse
-// moves the tab stop off a now-hidden pill. paintPill derives tabIndex/aria-selected from this scalar
-// (not focusedId), so a relocation SURVIVES the per-signal refreshFocusRoster repaint - the single
-// selection invariant is structural, not a one-shot DOM poke.
+// "which session is centered"). They coincide in steady state. paintPill derives tabIndex/aria-selected
+// from this scalar (not focusedId), so it SURVIVES the per-signal refreshFocusRoster repaint - the
+// single selection invariant is structural, not a one-shot DOM poke.
 let railTabStopId = null;
 
-// Per-project collapse state, persisted and size-bounded. Map<path, lastSeen>; PRESENCE means
-// collapsed (expanded is the default and stores nothing). Bounded by an LRU cap so a long tail of
-// stale projects can't grow localStorage without end; a present (live) group is never evicted.
-const COLLAPSE_KEY = 'glissa.focus.collapsedGroups';
-const COLLAPSE_CAP = 50;
-let collapseMap = loadCollapse();
+// Every group is always fully visible (per-project collapse was removed). visibleOrder still takes a
+// collapsed-set argument, so pass this shared empty set rather than allocating one per call.
+const NO_COLLAPSED = new Set();
+function railVisibleIds() { return visibleOrder(currentGroups(), NO_COLLAPSED); }
 
-function loadCollapse() {
-  try {
-    const raw = JSON.parse(localStorage.getItem(COLLAPSE_KEY) || '{}');
-    const m = new Map();
-    for (const [k, v] of Object.entries(raw)) m.set(k, Number(v) || 0);
-    return m;
-  } catch { return new Map(); }
-}
-function persistCollapsed() {
-  try { localStorage.setItem(COLLAPSE_KEY, JSON.stringify(Object.fromEntries(collapseMap))); }
-  catch { /* storage unavailable: stays in-memory for this session */ }
-}
-function isCollapsed(key) { return collapseMap.has(key); }
-function collapsedSet() { return new Set(collapseMap.keys()); }
-function setCollapsed(key, collapsed) {
-  if (collapsed) collapseMap.set(key, Date.now());
-  else collapseMap.delete(key);
-  persistCollapsed();
-}
-// Bump lastSeen for present groups BEFORE eviction, so a present group is never the oldest and is
-// never evicted; eviction acts only on stale (non-present) collapsed keys.
-function touchAndBound(presentKeys) {
-  const now = Date.now();
-  // Bump present groups' lastSeen IN MEMORY only. A timestamp bump is NOT a membership change, so it
-  // must not trigger a localStorage write on this hot path (refreshFocusRoster runs on every state /
-  // merge / agent signal). The persisted timestamps refresh whenever setCollapsed (toggle) or an
-  // eviction below actually changes the SET of collapsed keys - which is all the cold-start LRU needs.
-  for (const k of presentKeys) if (collapseMap.has(k)) collapseMap.set(k, now);
-  if (collapseMap.size > COLLAPSE_CAP) {
-    const oldestFirst = [...collapseMap.entries()].sort((a, b) => a[1] - b[1]);
-    let over = collapseMap.size - COLLAPSE_CAP;
-    let evicted = false;
-    for (const [k] of oldestFirst) {
-      if (over <= 0) break;
-      if (presentKeys.has(k)) continue;
-      collapseMap.delete(k); over--; evicted = true;
-    }
-    if (evicted) persistCollapsed(); // membership changed -> persist
-  }
-}
-
-// The group key for a session id, keyed exactly as groupRoster keys rows (so isCollapsed lines up).
-function groupKeyOf(id) {
-  const ui = sessionUIs.get(id);
-  const p = ui && ui.path;
-  return p ? String(p) : NO_PATH_KEY;
-}
-
-// Move the rail's single tab stop / selected option to `id` (or null), updating the DOM immediately
-// so Arrow nav and collapse don't wait for a refresh. paintPill re-derives the same thing from
-// railTabStopId on every later repaint, so this stays consistent.
+// Move the rail's single tab stop / selected option to `id` (or null), updating the DOM immediately so
+// Arrow nav doesn't wait for a refresh. paintPill re-derives the same thing from railTabStopId on every
+// later repaint, so this stays consistent.
 function setRailTabStop(id) {
   const prev = railTabStopId;
   railTabStopId = id || null;
@@ -131,28 +79,28 @@ function currentGroups() {
   return groupRoster(orderedSessions(), (row) => row.ui.path);
 }
 
-// Apply a group's collapsed state to its header (aria-expanded + data-collapsed) and sublist (hidden).
-function paintGroupCollapsed(key, collapsed) {
-  const header = groupHeaderById.get(key);
-  const list = groupListById.get(key);
-  if (header) { header.setAttribute('aria-expanded', String(!collapsed)); header.dataset.collapsed = String(collapsed); }
-  if (list) list.hidden = collapsed;
-}
-
-// Ensure (and relabel) a project group's header button + sublist listbox. Created once per key and
-// reused; the click handler toggles collapse. Returns { header, list }.
+// ── Quick-add (spawn another session on a project without opening the Add Session dialog) ──
+// Ensure (and relabel) a project group's header row + sublist listbox. Created once per key and reused.
+// The header is a plain row carrying the project name and a "+" quick-add button that spawns another
+// session on this project's path with an auto-suggested name - exactly what the Add Session dialog does
+// after you pick that project. path/label ride the header dataset so the reused button stays current.
+// Returns { header, list }.
 function ensureGroup(group) {
   let header = groupHeaderById.get(group.key);
   let list = groupListById.get(group.key);
   if (!list) {
-    header = document.createElement('button');
-    header.type = 'button';
+    header = document.createElement('div');
     header.className = 'focus-rail-group';
     header.dataset.key = group.key;
     header.innerHTML = '<span class="focus-rail-group-label"></span>'
-      + '<span class="focus-rail-group-rule" aria-hidden="true"></span>'
-      + '<span class="focus-rail-group-chev" aria-hidden="true">▾</span>';
-    header.addEventListener('click', () => toggleGroup(group.key));
+      + '<span class="focus-rail-group-rule" aria-hidden="true"></span>';
+    const add = document.createElement('button');
+    add.type = 'button';
+    add.className = 'focus-rail-group-add';
+    add.textContent = '+';
+    add.addEventListener('click', () => quickAdd(header.dataset.path, header.dataset.label));
+    header._addBtn = add;
+    header.appendChild(add);
     list = document.createElement('div');
     list.className = 'focus-rail-list';
     list.setAttribute('role', 'listbox');
@@ -161,42 +109,17 @@ function ensureGroup(group) {
   }
   header.querySelector('.focus-rail-group-label').textContent = group.label; // ORIGINAL case; CSS uppercases
   header.title = group.title; // full path
+  header.dataset.path = group.key;
+  header.dataset.label = group.label;
+  // The pathless bucket has no spawnable path, so it gets no "+".
+  const noPath = group.key === NO_PATH_KEY;
+  header._addBtn.hidden = noPath;
+  if (!noPath) {
+    header._addBtn.title = `Add a session to ${group.label}`;
+    header._addBtn.setAttribute('aria-label', `Add a session to ${group.label}`);
+  }
   list.setAttribute('aria-label', `${group.label} sessions`);
-  paintGroupCollapsed(group.key, isCollapsed(group.key));
   return { header, list };
-}
-
-// Remove all group headers/sublists (used when switching to the flat single-project render).
-function teardownGroups() {
-  for (const [key, header] of groupHeaderById) {
-    header.remove();
-    groupListById.get(key)?.remove();
-  }
-  groupHeaderById.clear();
-  groupListById.clear();
-}
-
-// ── Quick-add (spawn another session on a project without opening the Add Session dialog) ──
-// One "+ session" button per project, rendered as a sibling of the group's listbox (NOT an option
-// inside it, so it never joins the arrow-key/Alt+1..9 option set). It spawns on the project's own
-// path with an auto-suggested name, exactly what the dialog does after you pick that project.
-// Created once per key and reused; path/label ride the dataset so the reused button stays current.
-function ensureAddBtn(group) {
-  let btn = addBtnById.get(group.key);
-  if (!btn) {
-    btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'focus-rail-add';
-    btn.innerHTML = '<span class="focus-rail-add-icon" aria-hidden="true">+</span>'
-      + '<span class="focus-rail-add-label">session</span>';
-    btn.addEventListener('click', () => quickAdd(btn.dataset.path, btn.dataset.label));
-    addBtnById.set(group.key, btn);
-  }
-  btn.dataset.path = group.key;
-  btn.dataset.label = group.label;
-  btn.title = `Add a session to ${group.label}`;
-  btn.setAttribute('aria-label', `Add a session to ${group.label}`);
-  return btn;
 }
 
 function quickAdd(path, label) {
@@ -224,44 +147,6 @@ function confirmRemove(id) {
   });
 }
 
-function expandGroup(key) {
-  if (!isCollapsed(key)) return;
-  setCollapsed(key, false);
-  paintGroupCollapsed(key, false);
-}
-
-function toggleGroup(key) {
-  const collapsing = !isCollapsed(key);
-  setCollapsed(key, collapsing);
-  paintGroupCollapsed(key, collapsing);
-  // If we just hid the group holding the rail tab stop, relocate it to the nearest visible pill (or
-  // none). setRailTabStop survives the next refresh because paintPill sources from railTabStopId.
-  if (collapsing && railTabStopId && groupKeyOf(railTabStopId) === key) {
-    setRailTabStop(pickNearestVisible(currentGroups(), key));
-  }
-}
-
-// The visible id closest to a just-collapsed group: the first row of the nearest visible group AT or
-// AFTER it in group order, else the last row of the nearest visible group before it, else null.
-function pickNearestVisible(groups, collapsedKey) {
-  const collapsed = collapsedSet();
-  const byKey = new Map(groups.groups.map((g) => [g.key, g]));
-  const idx = groups.order.indexOf(collapsedKey);
-  for (let i = idx + 1; i < groups.order.length; i++) {
-    const k = groups.order[i];
-    if (collapsed.has(k)) continue;
-    const g = byKey.get(k);
-    if (g && g.rows.length) return g.rows[0].id;
-  }
-  for (let i = idx - 1; i >= 0; i--) {
-    const k = groups.order[i];
-    if (collapsed.has(k)) continue;
-    const g = byKey.get(k);
-    if (g && g.rows.length) return g.rows[g.rows.length - 1].id;
-  }
-  return null;
-}
-
 export function isFocusActive() { return active; }
 
 export function mountFocusView({ rail, center, resizer }) {
@@ -269,10 +154,9 @@ export function mountFocusView({ rail, center, resizer }) {
   centerEl = center;
   wireRailResizer(resizer);
 
-  // The rail is a sticky jump header above a scrolling listbox of pills. Move the listbox
-  // semantics off the outer nav (which now also holds the header button) onto an inner list, so
-  // the header is never an invalid child of a listbox. The roving-arrow keydown listener stays on
-  // the outer nav (pill keydowns bubble up to it).
+  // The rail is a sticky jump header above one project-header + role=listbox sublist per project. The
+  // outer nav is NOT itself a listbox (each project sublist is), so strip its listbox semantics; the
+  // roving-arrow keydown listener stays on the outer nav (pill keydowns bubble up to it).
   railEl.removeAttribute('role');
   railEl.removeAttribute('aria-label');
 
@@ -291,12 +175,7 @@ export function mountFocusView({ rail, center, resizer }) {
   railHeadEl.addEventListener('click', focusNextAttention);
   setRailHeadActive(false, ''); // resting from the start: quiet "ALL CLEAR" legend until something needs you
 
-  railListEl = document.createElement('div');
-  railListEl.className = 'focus-rail-list';
-  railListEl.setAttribute('role', 'listbox');
-  railListEl.setAttribute('aria-label', 'Session roster');
-
-  railEl.append(railHeadEl, railListEl);
+  railEl.append(railHeadEl);
 
   emptyEl = document.createElement('div');
   emptyEl.className = 'focus-empty';
@@ -388,9 +267,9 @@ function wireRailResizer(resizer) {
 function onRailKeydown(e) {
   // Delete/Backspace removes the session whose PILL currently holds focus (with confirm), the keyboard
   // peer of the pill's mouse-only hover "×". Keyed off the focused pill's own id, NOT railTabStopId:
-  // the rail also holds Tab-reachable group-header and "+ session" buttons, and railTabStopId tracks
-  // the centered session independently of focus, so acting on it would remove the wrong session when a
-  // non-pill control is focused. The pillById identity check also excludes any text field.
+  // the rail also holds Tab-reachable "+" quick-add buttons, and railTabStopId tracks the centered
+  // session independently of focus, so acting on it would remove the wrong session when a non-pill
+  // control is focused. The pillById identity check also excludes any text field.
   if (e.key === 'Delete' || e.key === 'Backspace') {
     const id = e.target?.dataset?.id;
     if (!id || pillById.get(id) !== e.target) return;
@@ -399,10 +278,10 @@ function onRailKeydown(e) {
     return;
   }
   if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
-  // VISIBLE navigation order comes from the pure core (collapsed groups excluded), never a DOM scan.
-  // pickAdjacent wraps and handles an absent roving id (its group was just collapsed) by starting from
-  // the end per direction, so this only moves the highlight; centering stays on Enter/click (ARIA).
-  const id = pickAdjacent(visibleOrder(currentGroups(), collapsedSet()), railTabStopId, e.key === 'ArrowDown' ? 1 : -1);
+  // Navigation order comes from the pure core (group A->Z, then in-group order), never a DOM scan.
+  // pickAdjacent wraps and handles an absent roving id by starting from the end per direction, so this
+  // only moves the highlight; centering stays on Enter/click (ARIA).
+  const id = pickAdjacent(railVisibleIds(), railTabStopId, e.key === 'ArrowDown' ? 1 : -1);
   if (id == null) return;
   e.preventDefault();
   setRailTabStop(id);
@@ -524,7 +403,7 @@ function paintPill(pill, id, ui) {
   // waiting for the next signal (activity.js parks the live value on ui._activity).
   pill.dataset.activity = ui._activity || '';
   // .focused (the centered session highlight) stays on focusedId; the roving tab stop / aria-selected
-  // option is railTabStopId (decoupled so collapse can move it off a hidden pill, refresh-stable).
+  // option is railTabStopId (decoupled from focusedId, refresh-stable via this scalar).
   pill.classList.toggle('focused', id === focusedId);
   const isTabStop = id === railTabStopId;
   pill.setAttribute('aria-selected', String(isTabStop));
@@ -583,46 +462,24 @@ export function refreshFocusRoster() {
     listEl._lastOrderKey = newKey;
   };
 
-  // Every project key that still owns a quick-add button this pass; the rest are pruned below.
-  const presentAddKeys = new Set();
-  // Place (or move) a project's "+ session" button right after its listbox. Skipped for the
-  // pathless bucket, which has no spawnable path.
-  const placeAddBtn = (group, afterEl) => {
-    if (!group || group.key === NO_PATH_KEY) return;
-    presentAddKeys.add(group.key);
-    const btn = ensureAddBtn(group);
-    if (afterEl.nextElementSibling !== btn) afterEl.after(btn);
-  };
-
-  if (groups.flat) {
-    // Single project (or 0/1 sessions): flat list, NO headers - exactly today's layout.
-    teardownGroups();
-    railListEl.hidden = false;
-    placeList(order, railListEl);
-    placeAddBtn(groups.groups[0], railListEl);
+  // Every project gets its own header row (with a "+" quick-add) + its own role=listbox sublist, in
+  // A->Z group order; a single project renders exactly one header + sublist. railHeadEl stays the
+  // sticky first child.
+  const presentKeys = new Set(groups.order);
+  for (const group of groups.groups) {
+    const { header, list } = ensureGroup(group);
+    railEl.appendChild(header); // re-append keeps headers + sublists in sorted order
+    railEl.appendChild(list);
+    placeList(group.rows, list);
   }
-  if (!groups.flat) {
-    // Grouped: a header button + its own role=listbox sublist per project, in A->Z group order.
-    // railHeadEl stays the sticky first child; the flat railListEl is parked hidden.
-    railListEl.hidden = true;
-    const presentKeys = new Set(groups.order);
-    for (const group of groups.groups) {
-      const { header, list } = ensureGroup(group);
-      railEl.appendChild(header); // re-append keeps headers + sublists in sorted order
-      railEl.appendChild(list);
-      placeList(group.rows, list);
-      placeAddBtn(group, list);
+  // Remove vanished groups (their pills are pruned by the seen-sweep below).
+  for (const [key, header] of [...groupHeaderById]) {
+    if (!presentKeys.has(key)) {
+      header.remove();
+      groupListById.get(key)?.remove();
+      groupHeaderById.delete(key);
+      groupListById.delete(key);
     }
-    // Remove vanished groups (their pills are pruned by the seen-sweep below).
-    for (const [key, header] of [...groupHeaderById]) {
-      if (!presentKeys.has(key)) {
-        header.remove();
-        groupListById.get(key)?.remove();
-        groupHeaderById.delete(key);
-        groupListById.delete(key);
-      }
-    }
-    touchAndBound(presentKeys); // bump live groups' lastSeen, LRU-evict stale collapse keys
   }
 
   for (const [id, pill] of pillById) {
@@ -631,11 +488,6 @@ export function refreshFocusRoster() {
       pillById.delete(id);
       if (id === railTabStopId) railTabStopId = null; // don't leave the tab stop on a gone session
     }
-  }
-  // Drop quick-add buttons for projects no longer in the roster (a removed project, or the flat<->grouped
-  // switch leaving other-project buttons behind).
-  for (const [key, btn] of [...addBtnById]) {
-    if (!presentAddKeys.has(key)) { btn.remove(); addBtnById.delete(key); }
   }
   // Prune merge-status for gone sessions (the rest of the module is careful not to leak).
   for (const id of [...mergeStatusById.keys()]) {
@@ -781,10 +633,6 @@ function releaseCenter() {
 
 function focusSession(id) {
   if (!active || !sessionUIs.has(id) || id === focusedId) return;
-  // Expand the target's group if collapsed, so externally-driven focus (guided-setup, sidebar
-  // selection, merge-status) never lands the tab stop / aria-selected on a hidden option.
-  const key = groupKeyOf(id);
-  if (isCollapsed(key)) expandGroup(key);
   releaseCenter();
   focusedId = id;
   railTabStopId = id; // sync: the centered session is also the rail's roving option
@@ -834,8 +682,7 @@ export function focusSessionInCenter(id) {
 // Focus the Nth session (1-based) in the current rail order. Backs the Alt+1..9 chrome shortcut.
 export function focusNthInRail(n) {
   if (!active) return;
-  // Count VISIBLE pills only (collapsed groups excluded), resolved by the pure core.
-  const id = visibleOrder(currentGroups(), collapsedSet())[n - 1];
+  const id = railVisibleIds()[n - 1];
   if (id) onPillActivate(id);
 }
 
@@ -849,7 +696,7 @@ export function focusNthInRail(n) {
 // focusNextAttention's scroll + cursor handoff.
 export function focusAdjacentInRail(dir) {
   if (!active) return;
-  const id = pickAdjacent(visibleOrder(currentGroups(), collapsedSet()), railTabStopId, dir);
+  const id = pickAdjacent(railVisibleIds(), railTabStopId, dir);
   if (id == null) return;
   onPillActivate(id); // centers; starts a DORMANT target first, exactly like a pill click
   pillById.get(id)?.scrollIntoView({ block: 'nearest' });
