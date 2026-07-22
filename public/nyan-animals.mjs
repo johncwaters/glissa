@@ -7,11 +7,16 @@ export const ANIMALS = [
   { sprite: 'is-dragon', trail: 'is-embers' },
   { sprite: 'is-pig', trail: 'is-hearts' },
   { sprite: 'is-whale', trail: 'is-bubbles' },
-  { sprite: 'is-corgi', trail: 'is-paws' },
+  { sprite: 'is-fox', trail: 'is-paws' },
   { sprite: 'is-frog', trail: 'is-dust' },
   { sprite: 'is-penguin', trail: 'is-snow' },
   { sprite: 'is-bee', trail: 'is-honey' },
   { sprite: 'is-owl', trail: 'is-stars' },
+  { sprite: 'is-cow', trail: 'is-daisies' },
+  { sprite: 'is-panda', trail: 'is-bamboo' },
+  { sprite: 'is-red-panda', trail: 'is-leaves' },
+  { sprite: 'is-deer', trail: 'is-acorns' },
+  { sprite: 'is-horse', trail: 'is-clover' },
 ];
 
 /**
