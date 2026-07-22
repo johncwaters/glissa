@@ -7,7 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.17.0] - 2026-07-13
+## [0.18.0] - 2026-07-21
+
+Conversations now survive a crash or shutdown and resume themselves on the next boot, the dashboard reconnects without losing notifications, and a new Rainbow Unicorns dark theme ships with a fully animated nyan cat easter egg.
+
+### Added
+
+- **Crash-safe auto-resume (on by default)**: Glissa captures Claude's session id the moment each conversation starts and persists it immediately, so even a hard kill of Glissa loses nothing. On the next boot, every project that was mid-conversation is respawned with `--resume` and picks up where it left off. Sessions with no captured id stay dormant rather than guessing at a conversation. A new "Auto-Resume" setting (Settings > General, `autoResume` in `config.json`, default on) is the kill switch.
+- **Rainbow Unicorns (Dark) theme**: a new dark plum theme with soft lavender text, a dusty rose accent, and a rainbow identity carried by clearly separated status colors, including a vivid azure "complete" that stands out at a glance. Selecting it releases an animated pixel-art nyan cat that flies across the dashboard on randomized flights, alternating with a unicorn that trails twinkling parallax sparkles instead of the rainbow. Sprites are frame-animated (running legs, wagging tails, waving rainbow), trails fade out with a soft outline, flights prefer the upper screen and stay clear of the header, reduced-motion hides the whole show, and switching to the theme plays a short original chiptune jingle.
+- **Prompt-kind chip**: while Claude is waiting on you, the session card now shows an advisory chip distinguishing a permission prompt from a question, driven by Claude Code hooks. It never affects state detection.
+- **Worktree conflict pre-check**: creating a session worktree for a branch that is already checked out elsewhere now degrades gracefully to running in place, with a notice naming the conflicting path instead of a raw git error. Each worktree is also stamped with its integration branch so later reconciliation no longer assumes the config never changed.
+- **Control-channel replay**: the dashboard's control connection now replays missed transient events (notifications, session errors, post-turn results, team events) after a reconnect, so a brief network blip or server restart no longer drops them.
+
+### Fixed
+
+- **Shutdown can no longer hang on an open dashboard tab**: Ctrl+C and service-stop signals are routed through the same guarded lifecycle as a dashboard-initiated shutdown, with a bounded wait for session teardown and a fallback exit timer.
 
 Adds a startup update check so an outdated install tells you how to update itself.
 
