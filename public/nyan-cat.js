@@ -4,6 +4,8 @@
 // two runs look identical; the very first flight also gets a random
 // negative animation-delay so it can enter mid-flight.
 
+import { ANIMALS, pickAnimalIndex } from './nyan-animals.mjs';
+
 const MIN_TOP_VH = 5;
 const MAX_TOP_VH = 75;
 const MIN_DURATION_S = 6.9;
@@ -32,17 +34,16 @@ let _el = null;
 let _sprite = null;
 let _trail = null;
 let _timeoutId = null;
-let _flightCount = 0; // parity picks the pair: even = cat/rainbow, odd = unicorn/sparkles
+let _lastAnimal = -1; // index into ANIMALS; -1 means no flight has run yet
 
 function launchFlight(isFirst) {
   if (!_el || !_sprite || !_trail) return;
   const { topVh, durationS, gapMs, firstDelayS } = pickFlight();
-  const isCat = _flightCount % 2 === 0;
-  _sprite.classList.toggle('is-cat', isCat);
-  _sprite.classList.toggle('is-unicorn', !isCat);
-  _trail.classList.toggle('is-rainbow', isCat);
-  _trail.classList.toggle('is-sparkles', !isCat);
-  _flightCount++;
+  const animalIndex = pickAnimalIndex(Math.random, _lastAnimal);
+  const animal = ANIMALS[animalIndex];
+  _sprite.className = `nyan-sprite ${animal.sprite}`;
+  _trail.className = `nyan-trail ${animal.trail}`;
+  _lastAnimal = animalIndex;
   _el.style.setProperty('--nyan-top', `${topVh}vh`);
   _el.style.animation = `nyan-fly ${durationS}s linear`;
   if (isFirst) {
@@ -67,9 +68,9 @@ export function startNyanCat() {
   const flight = document.createElement('div');
   flight.className = 'nyan-flight';
   const trail = document.createElement('div');
-  trail.className = 'nyan-trail is-rainbow';
+  trail.className = 'nyan-trail';
   const sprite = document.createElement('div');
-  sprite.className = 'nyan-sprite is-cat';
+  sprite.className = 'nyan-sprite';
   flight.appendChild(trail);
   flight.appendChild(sprite);
   document.body.appendChild(flight);
@@ -92,5 +93,5 @@ export function stopNyanCat() {
     _sprite = null;
     _trail = null;
   }
-  _flightCount = 0;
+  _lastAnimal = -1;
 }
