@@ -3,6 +3,9 @@
 // setting CSS custom properties on :root. The terminal theme is
 // derived from CSS variables at runtime.
 
+import { startNyanCat, stopNyanCat } from './nyan-cat.js';
+import { playNyanJingle } from './alert-sound.js';
+
 // ── Theme definitions ────────────────────────────────────────
 
 const THEMES = {
@@ -308,12 +311,22 @@ export function applyTheme(themeId) {
   const theme = THEMES[themeId];
   if (!theme) return;
 
+  const prev = _currentThemeId;
   _currentThemeId = themeId;
   const root = document.documentElement;
   root.dataset.theme = themeId;
   for (const [prop, value] of Object.entries(theme.colors)) {
     root.style.setProperty(prop, value);
   }
+
+  if (themeId === 'unicorn') {
+    startNyanCat();
+    if (prev !== null && prev !== 'unicorn') {
+      playNyanJingle();
+    }
+    return;
+  }
+  stopNyanCat();
 }
 
 /**
