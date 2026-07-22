@@ -8,8 +8,8 @@ const MIN_TOP_VH = 5;
 const MAX_TOP_VH = 75;
 const MIN_DURATION_S = 6.9;
 const MAX_DURATION_S = 11.5;
-const MIN_GAP_MS = 2000;
-const MAX_GAP_MS = 10000;
+const MIN_GAP_MS = 4000;
+const MAX_GAP_MS = 20000;
 
 /**
  * Pure randomization for one flight. Takes an injected rng so it is
