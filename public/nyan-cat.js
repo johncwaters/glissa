@@ -6,19 +6,22 @@
 
 const MIN_TOP_VH = 5;
 const MAX_TOP_VH = 75;
-const MIN_DURATION_S = 9;
-const MAX_DURATION_S = 15;
+const MIN_DURATION_S = 6.9;
+const MAX_DURATION_S = 11.5;
 const MIN_GAP_MS = 2000;
 const MAX_GAP_MS = 10000;
 
 /**
  * Pure randomization for one flight. Takes an injected rng so it is
  * unit-testable without mocking Math.random.
+ * topVh is biased toward the top of its range (product of two uniforms),
+ * not uniform: the median lands around the top third, full range still
+ * reachable.
  * @param {() => number} rng
  * @returns {{ topVh: number, durationS: number, gapMs: number, firstDelayS: number }}
  */
 export function pickFlight(rng = Math.random) {
-  const topVh = MIN_TOP_VH + rng() * (MAX_TOP_VH - MIN_TOP_VH);
+  const topVh = MIN_TOP_VH + (MAX_TOP_VH - MIN_TOP_VH) * rng() * rng();
   const durationS = MIN_DURATION_S + rng() * (MAX_DURATION_S - MIN_DURATION_S);
   const gapMs = MIN_GAP_MS + rng() * (MAX_GAP_MS - MIN_GAP_MS);
   const firstDelayS = rng() * durationS;
