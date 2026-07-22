@@ -26,11 +26,20 @@ export function pickFlight(rng = Math.random) {
 }
 
 let _el = null;
+let _sprite = null;
+let _trail = null;
 let _timeoutId = null;
+let _flightCount = 0; // parity picks the pair: even = cat/rainbow, odd = unicorn/sparkles
 
 function launchFlight(isFirst) {
-  if (!_el) return;
+  if (!_el || !_sprite || !_trail) return;
   const { topVh, durationS, gapMs, firstDelayS } = pickFlight();
+  const isCat = _flightCount % 2 === 0;
+  _sprite.classList.toggle('is-cat', isCat);
+  _sprite.classList.toggle('is-unicorn', !isCat);
+  _trail.classList.toggle('is-rainbow', isCat);
+  _trail.classList.toggle('is-sparkles', !isCat);
+  _flightCount++;
   _el.style.setProperty('--nyan-top', `${topVh}vh`);
   _el.style.animation = `nyan-fly ${durationS}s linear`;
   if (isFirst) {
@@ -55,13 +64,15 @@ export function startNyanCat() {
   const flight = document.createElement('div');
   flight.className = 'nyan-flight';
   const trail = document.createElement('div');
-  trail.className = 'nyan-trail';
+  trail.className = 'nyan-trail is-rainbow';
   const sprite = document.createElement('div');
-  sprite.className = 'nyan-sprite';
+  sprite.className = 'nyan-sprite is-cat';
   flight.appendChild(trail);
   flight.appendChild(sprite);
   document.body.appendChild(flight);
   _el = flight;
+  _sprite = sprite;
+  _trail = trail;
 
   launchFlight(true);
 }
@@ -75,5 +86,8 @@ export function stopNyanCat() {
   if (_el) {
     _el.remove();
     _el = null;
+    _sprite = null;
+    _trail = null;
   }
+  _flightCount = 0;
 }
