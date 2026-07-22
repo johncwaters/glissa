@@ -3662,6 +3662,10 @@ body {
      must be listed together */
   animation: nyan-bob 0.6s steps(1, end) infinite, rainbow-wave 0.6s steps(2) infinite;
   animation-delay: -0.15s, 0s;
+  /* the solid rainbow band needs far less rim than the sprites and
+     sparkles on the dark theme */
+  filter: drop-shadow(1px 0 0 rgba(240, 232, 255, 0.25)) drop-shadow(-1px 0 0 rgba(240, 232, 255, 0.25))
+    drop-shadow(0 1px 0 rgba(240, 232, 255, 0.25)) drop-shadow(0 -1px 0 rgba(240, 232, 255, 0.25));
 }
 
 :root[data-theme="unicorn"] .nyan-trail.is-sparkles {
