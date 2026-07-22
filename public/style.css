@@ -3642,6 +3642,14 @@ body {
   height: 100%;
   animation: nyan-bob 0.6s steps(1, end) infinite;
   animation-delay: -0.15s;
+  /* shared by both is-rainbow and is-sparkles: fades out toward the far
+     (left) end, away from the sprite */
+  mask-image: linear-gradient(to left, #000 55%, transparent);
+  -webkit-mask-image: linear-gradient(to left, #000 55%, transparent);
+  /* filters apply before masking, so this outline fades out with the
+     trail instead of leaving a hard edge past the fade point */
+  filter: drop-shadow(1px 0 0 rgba(240, 232, 255, 0.7)) drop-shadow(-1px 0 0 rgba(240, 232, 255, 0.7))
+    drop-shadow(0 1px 0 rgba(240, 232, 255, 0.7)) drop-shadow(0 -1px 0 rgba(240, 232, 255, 0.7));
 }
 
 :root[data-theme="unicorn"] .nyan-trail.is-rainbow {
@@ -3661,8 +3669,6 @@ body {
   background-repeat: repeat;
   background-size: 48px 42px;
   image-rendering: pixelated;
-  mask-image: linear-gradient(to left, #000 60%, transparent);
-  -webkit-mask-image: linear-gradient(to left, #000 60%, transparent);
   animation: nyan-bob 0.6s steps(1, end) infinite, sparkle-twinkle 1.2s infinite, sparkle-drift 4s linear infinite;
   animation-delay: -0.15s, 0s, 0s;
 }
@@ -3674,6 +3680,8 @@ body {
   background-repeat: no-repeat;
   image-rendering: pixelated;
   animation: nyan-bob 0.6s steps(1, end) infinite, nyan-frames 0.9s steps(6) infinite;
+  filter: drop-shadow(1px 0 0 rgba(240, 232, 255, 0.7)) drop-shadow(-1px 0 0 rgba(240, 232, 255, 0.7))
+    drop-shadow(0 1px 0 rgba(240, 232, 255, 0.7)) drop-shadow(0 -1px 0 rgba(240, 232, 255, 0.7));
 }
 
 :root[data-theme="unicorn"] .nyan-sprite.is-cat {
