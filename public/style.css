@@ -3637,16 +3637,21 @@ body {
 
 :root[data-theme="unicorn"] .nyan-trail {
   position: absolute;
-  right: 100%;
+  /* tuck the trail's near end under the sprite's rear (the sprite is a
+     later sibling, so it paints on top) so the trail emerges from behind
+     the animal instead of starting flush at the sprite box's left edge */
+  right: calc(100% - 20px);
   top: 5%;
   width: 36vw;
   height: 90%;
   animation: nyan-bob 0.6s steps(1, end) infinite;
   animation-delay: -0.15s;
   /* shared by both is-rainbow and is-sparkles: fades out toward the far
-     (left) end, away from the sprite */
-  mask-image: linear-gradient(to left, #000 55%, transparent);
-  -webkit-mask-image: linear-gradient(to left, #000 55%, transparent);
+     (left) end, away from the sprite; a small near-end fade softens the
+     20px tucked under the sprite so a short animal that doesn't cover the
+     trail's full height doesn't reveal a hard vertical edge there */
+  mask-image: linear-gradient(to left, transparent, #000 10%, #000 55%, transparent);
+  -webkit-mask-image: linear-gradient(to left, transparent, #000 10%, #000 55%, transparent);
   /* filters apply before masking, so this outline fades out with the
      trail instead of leaving a hard edge past the fade point */
   filter: drop-shadow(1px 0 0 rgba(240, 232, 255, 0.7)) drop-shadow(-1px 0 0 rgba(240, 232, 255, 0.7))
