@@ -54,10 +54,89 @@ const teamOutput = require('../teamlib/team-output');
 const { runPostTurnChecks, resolveCheckConfig } = require('./post-turn-checker');
 const { createIntegrationRefWatcher } = require('../detection/integration-ref-watch');
 const { createIntegrationWatcherPool } = require('../detection/integration-watcher-pool');
+const os = require('node:os');
+const { createPrPoller } = require('./pr-poller');
+const { createPrGh } = require('./pr-gh');
+const { sendPrPing } = require('./pr-telegram');
 
 // WAITING-state notification escalation cadence (fixed 5 minutes; previously the
 // configurable waitingEscalationSeconds setting).
 const ESCALATION_INTERVAL_MS = 300000;
+
+// Belt-and-suspenders deny-list for the headless PR-review sessions (they run under
+// --dangerously-skip-permissions, so this is a guard, not the guard). Blocks the destructive/
+// outward verbs the reviewer must never take: the poller merges (never the agent), and workflow
+// files are never edited or merged automatically.
+const PR_REVIEW_DENY = {
+  deny: [
+    'Bash(gh pr merge:*)',
+    'Bash(gh pr close:*)',
+    'Bash(gh repo delete:*)',
+    'Bash(git push --force:*)',
+    'Bash(git push -f:*)',
+    'Bash(git push --force-with-lease:*)',
+    'Edit(.github/workflows/**)',
+    'Write(.github/workflows/**)',
+  ],
+};
+
+// The seed prompt for one headless PR review. Pure string building (unit-coverable via the poller's
+// integration path). The verdict travels back through a result FILE, not stdout, mirroring the teams
+// file-handoff convention. Self-review via `gh pr review` is impossible on your own PR, so findings go
+// out as a `gh pr comment`; the poller (never the agent) merges once checks are green.
+function buildReviewPrompt({ slug, number, baseRefName, conflicting, resultPath }) {
+  const base = baseRefName || 'the base branch';
+  const lines = [
+    `You are an automated reviewer for ${slug}, a repository the operator owns. Review pull request #${number} (base branch: ${base}).`,
+    '',
+    'Hard rules:',
+    '- Do NOT run `gh pr merge`. A separate process merges after checks pass.',
+    '- Do NOT use `gh pr review` (approving/requesting-changes on your own PR is rejected by GitHub). Post findings with `gh pr comment`.',
+    '- Never force-push, never delete branches or the repo, never touch other PRs, never edit files under .github/workflows/.',
+    '',
+    'Steps:',
+    `1. Inspect: \`gh pr view ${number} --json mergeable,mergeStateStatus,files\`.`,
+    `2. If any changed file is under .github/workflows/: post a \`gh pr comment ${number}\` saying a human must review and merge workflow changes, write verdict CHANGES, and stop.`,
+  ];
+  if (conflicting) {
+    lines.push(
+      `3. This PR has conflicts and you are in an ISOLATED worktree. Run \`gh pr checkout ${number}\`, rebase onto \`origin/${base}\` (\`git rebase origin/${base}\`), resolve every conflict faithfully to the intent of BOTH sides, commit, and \`git push\`. If you cannot resolve confidently, write verdict ERROR with the reason and stop. Never push a guessed resolution.`,
+    );
+  }
+  lines.push(
+    `${conflicting ? 4 : 3}. Review the diff (\`gh pr diff ${number}\`) against the repo conventions (read CLAUDE.md / AGENTS.md if present).`,
+    '   - If it needs changes: post a specific `gh pr comment` and write verdict CHANGES.',
+    '   - If it was conflicting and you resolved+pushed and it is otherwise clean: write verdict RESOLVED.',
+    '   - If clean with no conflict: write verdict CLEAN.',
+    `${conflicting ? 5 : 4}. Write the result as JSON to ${resultPath}: {"verdict":"CLEAN|RESOLVED|CHANGES|ERROR","head":"<current head sha>","summary":"<one line>"}.`,
+  );
+  return lines.join('\n');
+}
+
+// Read the verdict a review session wrote to its result file. Missing/invalid file -> ERROR, so a
+// crashed or confused session never masquerades as a clean pass.
+function readReviewResult(resultPath) {
+  const allowed = new Set(['CLEAN', 'RESOLVED', 'CHANGES', 'ERROR']);
+  try {
+    const obj = JSON.parse(fs.readFileSync(resultPath, 'utf8'));
+    const verdict = String(obj.verdict || '').toUpperCase();
+    if (!allowed.has(verdict)) return { verdict: 'ERROR', summary: 'invalid verdict in result file' };
+    return { verdict, summary: String(obj.summary || '') };
+  } catch {
+    return { verdict: 'ERROR', summary: 'no result file' };
+  }
+}
+
+// Pure gate for the opt-in poller: start only when enabled AND telegram is configured (pings must be
+// deliverable). A plain "disabled" reports no reason (silent); a misconfiguration reports one (warned).
+function prPollerShouldStart(cfg) {
+  if (!cfg.prReview || !cfg.prReview.enabled) return { start: false, reason: null };
+  const t = cfg.telegram;
+  if (!t || !t.botToken || !t.chatId) {
+    return { start: false, reason: 'prReview.enabled but telegram botToken/chatId missing' };
+  }
+  return { start: true, reason: null };
+}
 
 /**
  * Create and wire the Glissa backend onto an existing HTTP server.
@@ -437,6 +516,9 @@ function createBackend(httpServer, options = {}) {
   // Team-stage sessions live in a SEPARATE map so config hot-reload diffing (diffProjects) never
   // destroys a live stage, and so they are not persisted to config.json. See plan 3.5.
   const teamSessions = new Map();
+  // Headless PR-review sessions (opt-in poller). Their own map for the same reasons as teamSessions,
+  // and so shutdown() can reap in-flight review PTYs without touching persisted sessions.
+  const reviewSessions = new Map();
 
   function closeSessionDataClients(sessionId) {
     const clients = sessionDataClients.get(sessionId);
@@ -531,6 +613,74 @@ function createBackend(httpServer, options = {}) {
     const origDestroy = sess.destroy.bind(sess);
     sess.destroy = () => { origDestroy(); removeFromMap(); };
     return sess;
+  }
+
+  // Build one headless (claude -p) PR-review session, registered in reviewSessions and auto-removed on
+  // exit. Mirrors makeStageSession; not surfaced as a card (a -p session has no watchable TUI).
+  function makeReviewSession({ id, name, path: cwd, initialPrompt }) {
+    const sess = new Session({
+      id,
+      name,
+      path: cwd,
+      dangerouslySkipPermissions: true,
+      extraClaudeArgs: ['-p'],
+      initialPrompt,
+      ephemeral: true,
+      settingsPermissions: PR_REVIEW_DENY,
+      replayBufferKB: config.replayBufferKB,
+      hookRouter,
+      getHookPort,
+    });
+    reviewSessions.set(id, sess);
+    sess.on('error', (err) => console.error(`[pr-review ${name}] error: ${err.message}`));
+    const removeFromMap = () => {
+      if (reviewSessions.get(id) === sess) {
+        reviewSessions.delete(id);
+        closeSessionDataClients(id);
+      }
+    };
+    sess.on('exit', removeFromMap);
+    const origDestroy = sess.destroy.bind(sess);
+    sess.destroy = () => { origDestroy(); removeFromMap(); };
+    return sess;
+  }
+
+  // The real spawnReview the poller injects: seed a headless review, run it through the spawn gate,
+  // and resolve the file-borne verdict on exit. Honors an AbortSignal (the poller's hard timeout) by
+  // destroying the session; the poller has already resolved ERROR in that case, so the returned value
+  // is ignored. Never rejects: any failure resolves to an ERROR verdict.
+  async function prReviewSpawn({ cwd, pr, slug, conflicting, signal }) {
+    const safeSlug = String(slug).replace(/[^\w.-]+/g, '-');
+    const resultPath = path.join(os.tmpdir(), `glissa-pr-${safeSlug}-${pr.number}-${process.pid}-${pr.headRefOid}.json`);
+    try { fs.rmSync(resultPath, { force: true }); } catch { /* fresh file */ }
+    const prompt = buildReviewPrompt({
+      slug, number: pr.number, baseRefName: pr.baseRefName, conflicting, resultPath,
+    });
+    const id = `pr-review:${slug}#${pr.number}`;
+    const sess = makeReviewSession({ id, name: `PR review ${slug}#${pr.number}`, path: cwd, initialPrompt: prompt });
+
+    let onAbort = null;
+    try {
+      await new Promise((resolve, reject) => {
+        let settled = false;
+        const done = () => { if (settled) return; settled = true; resolve(); };
+        const fail = (e) => { if (settled) return; settled = true; reject(e); };
+        sess.on('exit', done);
+        sess.on('error', fail);
+        if (signal) {
+          onAbort = () => { try { sess.destroy(); } catch { /* already gone */ } done(); };
+          if (signal.aborted) onAbort();
+          if (!signal.aborted) signal.addEventListener('abort', onAbort, { once: true });
+        }
+        spawnGate.run(() => (signal?.aborted ? undefined : sess.start())).catch(fail);
+      });
+      return readReviewResult(resultPath);
+    } catch (e) {
+      return { verdict: 'ERROR', summary: String(e.message || e) };
+    } finally {
+      if (signal && onAbort) { try { signal.removeEventListener('abort', onAbort); } catch { /* noop */ } }
+      try { fs.rmSync(resultPath, { force: true }); } catch { /* best-effort */ }
+    }
   }
 
   // Guided pack setup. Spawn ONE interactive Claude session (a normal PTY session, surfaced as a
@@ -956,6 +1106,49 @@ function createBackend(httpServer, options = {}) {
   // forget: boot does not block on PTY spawns finishing (matches _addNewSessions' sess.start()).
   runAutoResume(sessions, config, spawnGate);
 
+  // --- GitHub PR auto-review poller (opt-in; inert unless config.prReview.enabled) ---
+  // State lives in one cross-project file under the user config dir, written atomically (tmp+rename).
+  const prStatePath = path.join(os.homedir(), '.glissa', 'pr-review-state.json');
+  async function readPrState() {
+    try { return JSON.parse(fs.readFileSync(prStatePath, 'utf8')); }
+    catch { return {}; }
+  }
+  async function writePrState(state) {
+    try { fs.mkdirSync(path.dirname(prStatePath), { recursive: true }); } catch { /* exists */ }
+    const tmp = `${prStatePath}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(state, null, 2));
+    fs.renameSync(tmp, prStatePath);
+  }
+
+  // Started once at boot; toggling config.prReview.enabled needs a restart (like osToast, the flag is
+  // read once here, not on config hot-reload).
+  let prPoller = null;
+  function startPrPoller() {
+    const gate = prPollerShouldStart(config);
+    if (!gate.start) {
+      if (gate.reason) console.warn(`[pr-poller] not starting: ${gate.reason}`);
+      return;
+    }
+    prPoller = createPrPoller({
+      projects: config.prReview.projects || [],
+      getProjectPathById,
+      makePrGh: (projectPath) => createPrGh(projectPath),
+      gitWorkspace,
+      getWorktreeBase: (projectPath) => config.worktreeRoot
+        || path.join(path.dirname(path.resolve(projectPath)), '.glissa-worktrees'),
+      spawnReview: prReviewSpawn,
+      telegram: (text) => sendPrPing(config.telegram.botToken, config.telegram.chatId, text),
+      readState: readPrState,
+      writeState: writePrState,
+      intervalMinutes: config.prReview.intervalMinutes || 15,
+      mergeMethod: config.prReview.mergeMethod || 'rebase',
+      maxConcurrentReviews: config.prReview.maxConcurrentReviews || 3,
+      reviewTimeoutSeconds: config.prReview.reviewTimeoutSeconds || 900,
+    });
+    prPoller.start().catch((e) => console.warn(`[pr-poller] start failed: ${e.message}`));
+  }
+  startPrPoller();
+
   function diffProjects(currentSessions, newProjects) {
     ensureProjectIds(newProjects);
     const newMap = new Map(newProjects.map(p => [p.id, p]));
@@ -1307,6 +1500,11 @@ function createBackend(httpServer, options = {}) {
       sess.destroy();
       if (sess._killReap) pendingReaps.push(sess._killReap);
     }
+    if (prPoller) prPoller.stop();
+    for (const [, sess] of reviewSessions) {
+      sess.destroy();
+      if (sess._killReap) pendingReaps.push(sess._killReap);
+    }
     controlWss.close();
     dataWss.close();
     return pendingReaps;
@@ -1368,4 +1566,7 @@ function mountDevRoutes(app) {
   });
 }
 
-module.exports = { createBackend, runAutoResume, persistSessionField, decideWasActiveFlip };
+module.exports = {
+  createBackend, runAutoResume, persistSessionField, decideWasActiveFlip,
+  buildReviewPrompt, readReviewResult, prPollerShouldStart,
+};

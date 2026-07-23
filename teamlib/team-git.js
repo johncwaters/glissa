@@ -491,9 +491,22 @@ function createGitWorkspace(opts = {}) {
     return removed;
   }
 
+  // Generic worktree enumeration for callers that need to know which branches are checked out
+  // anywhere in a repo (e.g. the PR-review poller's branch-in-use precheck and its orphan prune).
+  // Returns every worktree carrying a branch as { cwd, branch }; goes through this module so the
+  // `git worktree` guard stays satisfied. A read-only listing (not serialized): a stale entry only
+  // makes a precheck slightly stale, which the caller's failing `gh pr checkout` then handles.
+  async function listWorktreeBranches({ projectPath }) {
+    const inside = await run(['rev-parse', '--is-inside-work-tree'], projectPath);
+    if (!inside.ok || inside.out !== 'true') return [];
+    const listed = await run(['worktree', 'list', '--porcelain'], projectPath);
+    if (!listed.ok) return [];
+    return parseWorktreeBranches(listed.out);
+  }
+
   return {
     create, integrate, discard, restoreTests, mergeBack, mergeKeep,
-    sweepSessionWorktrees, listSessionWorktrees, removeWorktreeByPath,
+    sweepSessionWorktrees, listSessionWorktrees, listWorktreeBranches, removeWorktreeByPath,
   };
 }
 
