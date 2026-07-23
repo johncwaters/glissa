@@ -19,6 +19,10 @@ server/            # Backend runtime (Express + WS wiring, control plane, shared
   spawn-gate.js        # Concurrent-spawn limiter
   config-store.js      # config.json load/save/merge (root config.json; resolves __dirname/..)
   child-process-safe.js  # THE ONLY module allowed to import node:child_process (windowsHide)
+  pr-poller.js         # GitHub PR auto-review poller (opt-in): lists/filters/reviews/merges own PRs; IO-free, deps injected
+  pr-gh.js             # gh/git wrappers for the PR poller (via child-process-safe); pure classifyChecks (four-way)
+  pr-telegram.js       # PR-only Telegram push helper (never throws; NOT a NotificationManager channel)
+  core/pr-review-core.js  # Pure PR-review decisions (prKey/filterActionablePrs/planReviews/planMerges/nextState/pingFor)
 session/           # Session domain: the stateful Session class + its pure cores
   sessions.js        # Session class: lifecycle, PTY spawn/kill, timers, hooks; consumes StatusSource; delegates pure logic to session/core/
   session-recorder.js  # PTY + hook + state recording (.pty-capture)
@@ -70,7 +74,7 @@ teamlib/           # Team runtime server modules
   team-registry.js   # load/validate team.json (+ pack.required, pack.shared, pack-templates)
   team-orchestrator.js  # run engine: scaffold+halt gate, worktree-isolated stage pipeline
   team-output.js     # .glissa/teams/<id>/ paths, pack scaffold/status, run log + summaries
-  team-git.js        # per-run git worktree isolation + fast-forward merge back
+  team-git.js        # per-run git worktree isolation + fast-forward merge back; generic listWorktreeBranches (used by the PR poller)
   team-prompt.js     # stage prompt builder (embeds pack + run paths)
   team-setup.js      # guided pack setup: interview prompt + interactive setup-session helpers
   team-settings.js   # per-stage spawn options and permission config
@@ -176,6 +180,18 @@ Sessions spawn `claude` via `pty.spawn()` from node-pty (NOT `child_process.spaw
 - **`wasActive` marker.** Per-project boolean persisted on flips only: true when a session enters STARTING/RUNNING, false on `user_kill` / DONE / FAILED. A crash mid-run leaves it true on disk, which is exactly the boot signal.
 - **Boot auto-resume.** `session/core/auto-resume.js pickAutoResume(projects, config)` (pure) selects projects with `wasActive` + a `resumeSessionId`; `runAutoResume` in `backend.js` starts each matching DORMANT session through the spawn gate (ConPTY wedges under concurrent spawns) after the worktree reconciliation pass. Spawn appends `--resume <id>` (pre-existing plumbing at `sessions.js` spawn-args assembly). No captured id = stays dormant, never guess with `--continue`. Kill switch: top-level `autoResume: false` (default true; Settings dialog toggle). A stale id fails the session to FAILED, which flips `wasActive` false, so there is no retry loop.
 - **Shutdown signals.** `server.js` routes SIGINT/SIGTERM/SIGBREAK/SIGHUP through one guarded handler that awaits the PTY kill reaps (`awaitReaps`, bounded 3000ms) before exit, matching the dashboard-triggered lifecycle path. Still no `uncaughtException` handler by design. Shutdown never writes config: `wasActive` staying true across a server shutdown IS the resume-next-boot case.
+
+### GitHub PR Auto-Review (opt-in, off by default)
+
+An optional background lane that reviews the operator's OWN GitHub PRs and merges the clean ones, unattended. Inert unless BOTH `config.prReview.enabled` and `config.telegram` (botToken + chatId) are set; absent = byte-identical prior behavior (read once at boot, like `osToast`; toggling needs a restart). Distinct from the Teams product feature.
+
+- **Poller.** `server/pr-poller.js createPrPoller(deps)` is IO-FREE (every side effect injected) and unit-tested with fakes like `scheduler.js`. A `setInterval(intervalMinutes).unref()` (default 15m; the calendar `scheduler.js` cannot express intervals) drives one `tick()` per cycle behind a `tickRunning` re-entrancy guard. Wired at boot after `runAutoResume`; torn down in `shutdown()` (stop the poller + reap the `reviewSessions` map alongside `teamSessions`).
+- **Per project (`config.prReview.projects`, an explicit opt-in list of project ids).** `gh pr list` -> filter to the operator's own non-draft branches (skip forks/drafts/bots; pure `server/core/pr-review-core.js filterActionablePrs`) -> `planReviews` (head SHA changed since last review) and `planMerges` (phase `awaiting-checks`). State is one cross-project file (`~/.glissa/pr-review-state.json`, atomic tmp+rename), keyed `owner/repo#N` -> `{ reviewedHead, phase, inFlight, wasConflicting, pingedError }`; `inFlight` is reset on boot; entries are pruned when a PR leaves the open list (merged/closed elsewhere).
+- **Review session.** One ephemeral headless `claude -p` per new head SHA, spawned through the shared `spawnGate` (START only, so reviews run concurrently under `maxConcurrentReviews`), keyed on the `exit` event, into a dedicated `reviewSessions` map (not surfaced as a card). A hard timeout (`spawnWithTimeout`, `reviewTimeoutSeconds` default 900) aborts a hung session (AbortController -> `sess.destroy()`) and frees the concurrency slot, so a stuck review cannot pin the cap forever. The verdict travels via a RESULT FILE the agent writes (`readReviewResult` in `backend.js`; missing/invalid/unknown -> ERROR, never a false clean), because `gh pr review` 422s on your OWN PR; findings go out as a `gh pr comment`.
+- **Two lanes.** A clean PR is reviewed IN PLACE (diff-only: `gh pr diff` + reads at HEAD + `gh` remote ops, no checkout/worktree, no working-tree mutation), so it coexists with a live interactive session in the same repo. A CONFLICTING PR runs in an isolated `team-git` worktree (`gitWorkspace.create`, branch `glissa/pr-review/pr-N`), where the agent runs `gh pr checkout` + rebase onto `origin/<base>` + resolve + `git push`; a branch-in-use precheck (`gitWorkspace.listWorktreeBranches`) degrades to ERROR before spawning a doomed checkout, and every exit path `discard`s the worktree and deletes the leaked pr-head branch. `pr-poller` NEVER shells `git worktree` (it goes through `team-git`, the only module allowed to, per `tests/no-direct-git-worktree.test.js`); all `gh`/`git` go through `child-process-safe`.
+- **Merge gate (poller only; the AGENT never merges).** `tryMerge` merges (`gh pr merge --rebase`) ONLY when: reviewedHead still equals the current head (a commit pushed after review is re-reviewed, never merged stale) AND `gh pr checks` is `green` (four-way `classifyChecks` in `pr-gh.js`: no checks -> `none`, never green; handles both CheckRun and legacy StatusContext shapes) AND the PR touches no `.github/workflows/` file (a gh error on that files query returns `null` -> fail CLOSED, defer to next tick). Own-non-fork-non-draft is already enforced by the actionable filter. Both no-checks and unknown-workflow fail closed, so a CI-less repo or a transient gh error never auto-merges.
+- **Telegram.** `server/pr-telegram.js sendPrPing` (fire-and-forget, never throws) fires on ACTIONABLE transitions only (changes requested / conflicts resolved / merged / error); a clean-awaiting-checks PR is silent. PR-only: it is NOT a `NotificationManager` channel (no focus-suppression interaction, no session-complete pings).
+- **Security.** The review session runs `--dangerously-skip-permissions` bounded by a best-effort `PR_REVIEW_DENY` deny-list (the real safety is that only the poller merges, behind the full gate above; the deny-list is a guard, not the guard). Consistent with the localhost single-user trust boundary below. Prereq when opted in: `gh` authenticated on the host.
 
 ### Security: Trust Boundary
 
