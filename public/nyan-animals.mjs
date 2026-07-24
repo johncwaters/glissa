@@ -17,6 +17,9 @@ export const ANIMALS = [
   { sprite: 'is-red-panda', trail: 'is-leaves' },
   { sprite: 'is-deer', trail: 'is-acorns' },
   { sprite: 'is-horse', trail: 'is-clover' },
+  { sprite: 'is-sheep', trail: 'is-clouds' },
+  { sprite: 'is-hamster', trail: 'is-seeds' },
+  { sprite: 'is-giraffe', trail: 'is-acacia' },
 ];
 
 /**

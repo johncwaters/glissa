@@ -6,13 +6,13 @@ const assert = require('node:assert/strict');
 // nyan-animals is ESM (.mjs); dynamic-import it from this CJS test file.
 const importCore = () => import('../public/nyan-animals.mjs');
 
-test('ANIMALS: 15 entries, all sprite/trail classes unique', async () => {
+test('ANIMALS: 18 entries, all sprite/trail classes unique', async () => {
   const { ANIMALS } = await importCore();
-  assert.equal(ANIMALS.length, 15);
+  assert.equal(ANIMALS.length, 18);
   const sprites = ANIMALS.map((a) => a.sprite);
   const trails = ANIMALS.map((a) => a.trail);
-  assert.equal(new Set(sprites).size, 15);
-  assert.equal(new Set(trails).size, 15);
+  assert.equal(new Set(sprites).size, 18);
+  assert.equal(new Set(trails).size, 18);
 });
 
 test('pickAnimalIndex: never returns prevIndex across a sweep of rng values', async () => {
