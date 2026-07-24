@@ -228,6 +228,15 @@ export function createSettingsDialog(initialTab) {
   const btnCancel = dialog.querySelector('#settings-cancel');
   const btnSave = dialog.querySelector('#settings-save');
 
+  const prEnabledCheckbox = dialog.querySelector('#settings-pr-enabled');
+  const prBotTokenInput = dialog.querySelector('#settings-pr-bot-token');
+  const prChatIdInput = dialog.querySelector('#settings-pr-chat-id');
+  const prProjectsEl = dialog.querySelector('#settings-pr-projects');
+  const prIntervalInput = dialog.querySelector('#settings-pr-interval');
+  const prMaxReviewsInput = dialog.querySelector('#settings-pr-max-reviews');
+  const prTimeoutInput = dialog.querySelector('#settings-pr-timeout');
+  const prMergeMethodSelect = dialog.querySelector('#settings-pr-merge-method');
+
   // Populate sound picker
   for (const opt of SOUND_OPTIONS) {
     const option = document.createElement('option');
@@ -330,9 +339,39 @@ export function createSettingsDialog(initialTab) {
     renderRootList();
   }
 
+  let prProjectChoices = [];
+
+  function renderPrProjects(checkedIds) {
+    prProjectsEl.textContent = '';
+    if (prProjectChoices.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'settings-empty';
+      empty.textContent = 'No projects configured. Add a session to pick a project here.';
+      prProjectsEl.appendChild(empty);
+      return;
+    }
+    const checked = new Set(checkedIds);
+    for (const proj of prProjectChoices) {
+      const label = document.createElement('label');
+      label.className = 'dialog-label dialog-checkbox-label';
+      const input = document.createElement('input');
+      input.type = 'checkbox';
+      input.className = 'dialog-checkbox';
+      input.dataset.projectId = proj.id;
+      input.checked = checked.has(proj.id);
+      label.appendChild(input);
+      label.appendChild(document.createTextNode(proj.name));
+      prProjectsEl.appendChild(label);
+    }
+  }
+
+  function checkedPrProjectIds() {
+    return [...prProjectsEl.querySelectorAll('input[type="checkbox"]:checked')].map((el) => el.dataset.projectId);
+  }
+
   function validateTimeouts() {
     errorEl.textContent = '';
-    for (const input of [replayBufferInput]) {
+    for (const input of [replayBufferInput, prIntervalInput, prMaxReviewsInput, prTimeoutInput]) {
       const v = Number(input.value);
       if (!input.value || Number.isNaN(v) || v <= 0 || !Number.isInteger(v)) {
         errorEl.textContent = 'All numeric fields must be positive integers';
@@ -354,6 +393,18 @@ export function createSettingsDialog(initialTab) {
       debugMode: debugModeCheckbox.checked,
       editorCommand: editorCommandInput.value.trim(),
       repoRoots: repoRoots,
+      prReview: {
+        enabled: prEnabledCheckbox.checked,
+        projects: checkedPrProjectIds(),
+        intervalMinutes: Number(prIntervalInput.value),
+        mergeMethod: prMergeMethodSelect.value,
+        maxConcurrentReviews: Number(prMaxReviewsInput.value),
+        reviewTimeoutSeconds: Number(prTimeoutInput.value),
+      },
+      telegram: {
+        botToken: prBotTokenInput.value.trim(),
+        chatId: prChatIdInput.value.trim(),
+      },
     };
 
     sendControlRequest('update-settings', { settings })
@@ -381,6 +432,18 @@ export function createSettingsDialog(initialTab) {
       editorCommandInput.value = s.editorCommand ?? '';
       repoRoots = Array.isArray(s.repoRoots) ? [...s.repoRoots] : [];
       renderRootList();
+
+      const pr = s.prReview || {};
+      prEnabledCheckbox.checked = !!pr.enabled;
+      prIntervalInput.value = pr.intervalMinutes ?? 15;
+      prMaxReviewsInput.value = pr.maxConcurrentReviews ?? 3;
+      prTimeoutInput.value = pr.reviewTimeoutSeconds ?? 900;
+      prMergeMethodSelect.value = pr.mergeMethod ?? 'rebase';
+      const telegram = s.telegram || {};
+      prBotTokenInput.value = telegram.botToken ?? '';
+      prChatIdInput.value = telegram.chatId ?? '';
+      prProjectChoices = Array.isArray(s.projectChoices) ? s.projectChoices : [];
+      renderPrProjects(pr.projects || []);
     })
     .catch(() => {
       errorEl.textContent = 'Failed to load settings. Close and retry.';

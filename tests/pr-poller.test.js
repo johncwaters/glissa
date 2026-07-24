@@ -102,6 +102,37 @@ test('start() runs an immediate tick, arms an unref-d interval, stop() clears it
   assert.ok(cleared, 'stop cleared the interval');
 });
 
+test('stop() drains in-flight reviews before resolving; no new review spawns after stop', async () => {
+  let resolveReview;
+  let spawnCount = 0;
+  const { poller } = harness({
+    gh: { listPrs: async () => [ownPr()] },
+    spawnReview: () => {
+      spawnCount += 1;
+      return new Promise((resolve) => { resolveReview = resolve; });
+    },
+  });
+  await poller.start();
+  await flush();
+  assert.equal(spawnCount, 1, 'review in flight');
+  assert.equal(poller._state()['me/repo#7'].inFlight, true);
+
+  let stopSettled = false;
+  const stopPromise = poller.stop().then(() => { stopSettled = true; });
+
+  await flush();
+  assert.equal(stopSettled, false, 'stop() waits for the in-flight review to settle, does not resolve early');
+
+  resolveReview({ verdict: 'CLEAN' });
+  await stopPromise;
+  assert.equal(stopSettled, true, 'stop() resolves once the drained review settles');
+  assert.equal(poller._state()['me/repo#7'].inFlight, false, 'the drained review finished normally');
+
+  await poller.tick();
+  await flush();
+  assert.equal(spawnCount, 1, 'no new review spawns after stop (existing stopped guard)');
+});
+
 test('a PR is reviewed once per head SHA (dedupe)', async () => {
   const spawnCalls = [];
   const { poller } = harness({

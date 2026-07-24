@@ -188,6 +188,12 @@ function createConfigStore() {
       worktreeRoot: config.worktreeRoot ?? DEFAULT_CONFIG.worktreeRoot,
       worktreeShare: config.worktreeShare ?? DEFAULT_CONFIG.worktreeShare,
       repoRoots: config.repoRoots,
+      // Opt-in GitHub PR auto-review (see CLAUDE.md). null when never configured, so a user who
+      // never opens the PR Review tab gets a byte-identical config (not added to DEFAULT_CONFIG).
+      prReview: config.prReview ? { ...config.prReview } : null,
+      telegram: config.telegram ? { ...config.telegram } : null,
+      // Read-only helper for the PR Review tab's project picker; derived, never persisted back.
+      projectChoices: (config.projects || []).map(p => ({ id: p.id, name: p.name })),
     };
   }
 
@@ -208,6 +214,8 @@ function createConfigStore() {
     // the runner's DEFAULTS when the key is absent on both sides).
     if (newConfig.postTurnChecks != null) config.postTurnChecks = newConfig.postTurnChecks;
     if (newConfig.worktreeShare != null) config.worktreeShare = newConfig.worktreeShare;
+    if (newConfig.prReview != null) config.prReview = newConfig.prReview;
+    if (newConfig.telegram != null) config.telegram = newConfig.telegram;
     if (newConfig.port != null && newConfig.port !== config.port) {
       console.log(`[settings] Port changed to ${newConfig.port} - restart required to take effect`);
     }

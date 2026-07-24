@@ -138,6 +138,13 @@ function prPollerShouldStart(cfg) {
   return { start: true, reason: null };
 }
 
+// Identity of the poller-relevant config, recomputed on every settings reload and compared against the
+// key recorded at the last startPrPoller() invocation. A settings save that touches neither prReview
+// nor telegram (cursorBlink, etc.) must never restart a poller that may have a review in flight.
+function prReviewCfgKey(cfg) {
+  return JSON.stringify({ prReview: cfg.prReview || null, telegram: cfg.telegram || null });
+}
+
 /**
  * Create and wire the Glissa backend onto an existing HTTP server.
  *
@@ -1120,32 +1127,51 @@ function createBackend(httpServer, options = {}) {
     fs.renameSync(tmp, prStatePath);
   }
 
-  // Started once at boot; toggling config.prReview.enabled needs a restart (like osToast, the flag is
-  // read once here, not on config hot-reload).
+  // Started at boot and re-evaluated on every settings reload whose prReview/telegram key changed
+  // (applySettingsReload below, gated by prReviewCfgKey), so toggling config.prReview / config.telegram
+  // via the Settings dialog or a config.json hand-edit hot-applies without a server restart.
+  //
+  // Restarts are serialized through prPollerChain so a stop-drain-start never overlaps a prior one: the
+  // old instance's in-flight reviews (up to reviewTimeoutSeconds) and pending state writes finish before
+  // a new instance reuses the same result-file paths, gitWorkspace, and state file. A settings save that
+  // lands mid-drain just queues another restart on the chain; that coalesces naturally. startPrPoller
+  // itself stays synchronous from its callers' perspective (it only appends to the chain).
   let prPoller = null;
+  let prPollerChain = Promise.resolve();
+  let prPollerStopped = false;
+  let prReviewLastKey = null;
   function startPrPoller() {
-    const gate = prPollerShouldStart(config);
-    if (!gate.start) {
-      if (gate.reason) console.warn(`[pr-poller] not starting: ${gate.reason}`);
-      return;
-    }
-    prPoller = createPrPoller({
-      projects: config.prReview.projects || [],
-      getProjectPathById,
-      makePrGh: (projectPath) => createPrGh(projectPath),
-      gitWorkspace,
-      getWorktreeBase: (projectPath) => config.worktreeRoot
-        || path.join(path.dirname(path.resolve(projectPath)), '.glissa-worktrees'),
-      spawnReview: prReviewSpawn,
-      telegram: (text) => sendPrPing(config.telegram.botToken, config.telegram.chatId, text),
-      readState: readPrState,
-      writeState: writePrState,
-      intervalMinutes: config.prReview.intervalMinutes || 15,
-      mergeMethod: config.prReview.mergeMethod || 'rebase',
-      maxConcurrentReviews: config.prReview.maxConcurrentReviews || 3,
-      reviewTimeoutSeconds: config.prReview.reviewTimeoutSeconds || 900,
-    });
-    prPoller.start().catch((e) => console.warn(`[pr-poller] start failed: ${e.message}`));
+    prReviewLastKey = prReviewCfgKey(config);
+    prPollerChain = prPollerChain.then(async () => {
+      if (prPollerStopped) return;
+      if (prPoller) {
+        const old = prPoller;
+        prPoller = null;
+        await old.stop();
+      }
+      const gate = prPollerShouldStart(config);
+      if (!gate.start) {
+        if (gate.reason) console.warn(`[pr-poller] not starting: ${gate.reason}`);
+        return;
+      }
+      prPoller = createPrPoller({
+        projects: config.prReview.projects || [],
+        getProjectPathById,
+        makePrGh: (projectPath) => createPrGh(projectPath),
+        gitWorkspace,
+        getWorktreeBase: (projectPath) => config.worktreeRoot
+          || path.join(path.dirname(path.resolve(projectPath)), '.glissa-worktrees'),
+        spawnReview: prReviewSpawn,
+        telegram: (text) => sendPrPing(config.telegram.botToken, config.telegram.chatId, text),
+        readState: readPrState,
+        writeState: writePrState,
+        intervalMinutes: config.prReview.intervalMinutes || 15,
+        mergeMethod: config.prReview.mergeMethod || 'rebase',
+        maxConcurrentReviews: config.prReview.maxConcurrentReviews || 3,
+        reviewTimeoutSeconds: config.prReview.reviewTimeoutSeconds || 900,
+      });
+      await prPoller.start().catch((e) => console.warn(`[pr-poller] start failed: ${e.message}`));
+    }).catch((e) => console.warn(`[pr-poller] restart failed: ${e.message}`));
   }
   startPrPoller();
 
@@ -1283,6 +1309,11 @@ function createBackend(httpServer, options = {}) {
       escalationIntervalMs: ESCALATION_INTERVAL_MS,
       debounceMs: config.notifyDebounceMs || 3000,
     });
+    // The poller closure captures config.prReview/telegram at creation time, so a restart (stop+start,
+    // gated by prPollerShouldStart) is how a config change actually takes effect. Only restart when the
+    // prReview/telegram key actually changed: an unrelated settings save (cursorBlink, etc.) must never
+    // interrupt a review that may be in flight (see prReviewCfgKey / prReviewLastKey above).
+    if (prReviewCfgKey(config) !== prReviewLastKey) startPrPoller();
   }
 
   // Restart/shutdown handlers live in server-lifecycle.js so the re-entry guard, the reap-before-exit
@@ -1500,6 +1531,10 @@ function createBackend(httpServer, options = {}) {
       sess.destroy();
       if (sess._killReap) pendingReaps.push(sess._killReap);
     }
+    // Blocks a restart still queued on prPollerChain (e.g. a settings save that raced shutdown) from
+    // starting a fresh poller after the process has begun tearing down. stop() is now async, but fire-
+    // and-forget here is unchanged prior behavior: the process is exiting, nothing awaits it.
+    prPollerStopped = true;
     if (prPoller) prPoller.stop();
     for (const [, sess] of reviewSessions) {
       sess.destroy();
@@ -1568,5 +1603,5 @@ function mountDevRoutes(app) {
 
 module.exports = {
   createBackend, runAutoResume, persistSessionField, decideWasActiveFlip,
-  buildReviewPrompt, readReviewResult, prPollerShouldStart,
+  buildReviewPrompt, readReviewResult, prPollerShouldStart, prReviewCfgKey,
 };

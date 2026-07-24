@@ -99,6 +99,33 @@ test('applySettings coerces booleans and strings and applies timeouts', () => {
   });
 });
 
+test('getSettings: prReview/telegram are null when absent, echoed when set; projectChoices derives from projects', () => {
+  withStore({ projects: [{ id: 'p1', name: 'proj-one', path: 'C:/p1' }] }, (store) => {
+    const s = store.getSettings();
+    assert.equal(s.prReview, null);
+    assert.equal(s.telegram, null);
+    assert.deepEqual(s.projectChoices, [{ id: 'p1', name: 'proj-one' }]);
+
+    store.config.prReview = { enabled: true, projects: ['p1'] };
+    store.config.telegram = { botToken: 'tok', chatId: '123' };
+    const s2 = store.getSettings();
+    assert.deepEqual(s2.prReview, { enabled: true, projects: ['p1'] });
+    assert.deepEqual(s2.telegram, { botToken: 'tok', chatId: '123' });
+  });
+});
+
+test('applySettings passes prReview/telegram through only when present on the incoming config', () => {
+  withStore({ projects: [] }, (store) => {
+    store.applySettings({ cursorBlink: true });
+    assert.equal(store.config.prReview, undefined, 'absent on the incoming config leaves it untouched');
+    assert.equal(store.config.telegram, undefined);
+
+    store.applySettings({ prReview: { enabled: true }, telegram: { botToken: 'x', chatId: 'y' } });
+    assert.deepEqual(store.config.prReview, { enabled: true });
+    assert.deepEqual(store.config.telegram, { botToken: 'x', chatId: 'y' });
+  });
+});
+
 test('watchForChanges returns a closer that releases the fs.watch handle', () => {
   withStore({ projects: [] }, (store) => {
     const stop = store.watchForChanges(() => {});

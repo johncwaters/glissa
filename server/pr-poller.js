@@ -42,6 +42,9 @@ function createPrPoller(deps) {
   let tickRunning = false;
   let stopped = false;
   let persistChain = Promise.resolve();
+  // In-flight runReview() calls, tracked so stop() can drain them before a caller reuses the
+  // dependencies (result-file paths, gitWorkspace, state file) for a fresh poller instance.
+  const running = new Set();
 
   function persist() {
     persistChain = persistChain.then(() => writeState(state)).catch((e) => {
@@ -232,7 +235,13 @@ function createPrPoller(deps) {
       state[pr.key] = entry;
       dirty = true;
       slots -= 1;
-      void runReview(gh, projectPath, slug, pr);
+      // runReview's finally block awaits gitWorkspace.discard, which can reject; the .catch here keeps
+      // this a never-rejecting tracking promise so stop()'s Promise.allSettled always resolves promptly.
+      const reviewPromise = runReview(gh, projectPath, slug, pr).catch((e) => {
+        log.warn(`[pr-poller] review crashed for ${pr.key}: ${e.message}`);
+      });
+      running.add(reviewPromise);
+      reviewPromise.finally(() => running.delete(reviewPromise));
     }
     return dirty;
   }
@@ -292,10 +301,16 @@ function createPrPoller(deps) {
     if (timer && typeof timer.unref === 'function') timer.unref();
   }
 
-  function stop() {
+  // Async so a caller that restarts the poller (backend.js startPrPoller) can await it: the old
+  // instance's in-flight reviews (up to reviewTimeoutSeconds) and pending state writes must drain
+  // BEFORE a new instance reuses the same result-file paths, gitWorkspace, and state file, or a
+  // duplicate review races the old one and pruneOrphanWorktrees can remove its live worktree.
+  async function stop() {
     stopped = true;
     if (timer) clearIntervalFn(timer);
     timer = null;
+    await Promise.allSettled([...running]);
+    await persistChain;
   }
 
   return { start, stop, tick, _state: () => state };

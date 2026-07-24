@@ -34,6 +34,50 @@ function scanRepoRoots(roots) {
   return results;
 }
 
+const PR_REVIEW_NUMERIC_KEYS = ['intervalMinutes', 'maxConcurrentReviews', 'reviewTimeoutSeconds'];
+const PR_REVIEW_MERGE_METHODS = new Set(['rebase', 'squash', 'merge']);
+
+// Validate the optional nested prReview settings object. Returns an error message, or null when valid
+// (a missing/null prReview is valid: the tab was never touched).
+function validatePrReview(pr) {
+  if (pr == null) return null;
+  if (typeof pr !== 'object' || Array.isArray(pr)) return 'prReview must be an object';
+  if (pr.enabled != null && typeof pr.enabled !== 'boolean') return 'prReview.enabled must be a boolean';
+  if (pr.projects != null && (!Array.isArray(pr.projects) || !pr.projects.every(p => typeof p === 'string'))) {
+    return 'prReview.projects must be an array of strings';
+  }
+  for (const key of PR_REVIEW_NUMERIC_KEYS) {
+    if (pr[key] != null && (typeof pr[key] !== 'number' || !Number.isFinite(pr[key]) || pr[key] <= 0)) {
+      return `prReview.${key} must be a positive number`;
+    }
+  }
+  if (pr.mergeMethod != null && !PR_REVIEW_MERGE_METHODS.has(pr.mergeMethod)) {
+    return 'prReview.mergeMethod must be one of rebase, squash, merge';
+  }
+  return null;
+}
+
+// Validate the optional nested telegram settings object. Empty strings are allowed (they mean unset).
+function validateTelegram(t) {
+  if (t == null) return null;
+  if (typeof t !== 'object' || Array.isArray(t)) return 'telegram must be an object';
+  if (t.botToken != null && typeof t.botToken !== 'string') return 'telegram.botToken must be a string';
+  if (t.chatId != null && typeof t.chatId !== 'string') return 'telegram.chatId must be a string';
+  return null;
+}
+
+// Keep only the known prReview fields (drops anything unrecognized, e.g. a stray projectChoices echo).
+function sanitizePrReview(pr) {
+  const out = {};
+  if (pr.enabled != null) out.enabled = !!pr.enabled;
+  if (pr.projects != null) out.projects = pr.projects;
+  if (pr.intervalMinutes != null) out.intervalMinutes = pr.intervalMinutes;
+  if (pr.mergeMethod != null) out.mergeMethod = pr.mergeMethod;
+  if (pr.maxConcurrentReviews != null) out.maxConcurrentReviews = pr.maxConcurrentReviews;
+  if (pr.reviewTimeoutSeconds != null) out.reviewTimeoutSeconds = pr.reviewTimeoutSeconds;
+  return out;
+}
+
 // Resolve `segments` under `baseDir` and confirm the result stays inside it (path-traversal guard).
 // Returns the absolute path, or null when the resolved path escapes baseDir.
 function confinePath(baseDir, ...segments) {
@@ -389,6 +433,18 @@ function registerControlHandlers(controlWss, deps) {
       }
     }
 
+    const prReviewError = validatePrReview(s.prReview);
+    if (prReviewError) {
+      ws.send(JSON.stringify({ type: 'settings-error', requestId: msg.requestId || null, message: prReviewError }));
+      return;
+    }
+
+    const telegramError = validateTelegram(s.telegram);
+    if (telegramError) {
+      ws.send(JSON.stringify({ type: 'settings-error', requestId: msg.requestId || null, message: telegramError }));
+      return;
+    }
+
     const freshConfig = configStore.save(cfg => {
       for (const key of TIMEOUT_KEYS) {
         if (s[key] != null) cfg[key] = s[key];
@@ -400,6 +456,13 @@ function registerControlHandlers(controlWss, deps) {
         if (s[key] != null) cfg[key] = String(s[key]);
       }
       if (s.repoRoots != null) cfg.repoRoots = s.repoRoots;
+      if (s.prReview != null) cfg.prReview = sanitizePrReview(s.prReview);
+      if (s.telegram != null) {
+        cfg.telegram = {
+          botToken: String(s.telegram.botToken || '').trim(),
+          chatId: String(s.telegram.chatId || '').trim(),
+        };
+      }
     });
     if (!freshConfig) return;
     applySettingsReload(freshConfig);
