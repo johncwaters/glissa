@@ -1,0 +1,38 @@
+# Release profile for the /release skill. Derived 2026-07-23 from repo survey; review before first use.
+type: npm_cli
+versioning:
+  scheme: semver
+  version_file: package.json        # hand-edited; lockfile synced in same commit
+  tag_format: vX.Y.Z                # created by scripts/release.js (historical anomaly: first tag was 0.1.0 unprefixed; v0.11.0 gap exists)
+changelog:
+  path: CHANGELOG.md
+  format: keep_a_changelog          # [Unreleased] on top; scripts/release.js extracts the version section for GitHub release notes
+git:
+  release_from: develop             # reality: releases are cut from develop; main historically drifts behind
+  integration: develop
+  release_commit_pattern: "chore(release): X.Y.Z"
+  require: [clean_tree]
+gates:
+  pre_tag:
+    - node scripts/check-package-files.js          # verifies package.json files whitelist
+    - npm run build                                # Vite frontend; dist/index.html must exist
+  post_release:
+    - npm view glissa version                      # registry shows new version
+    - gh release view vX.Y.Z
+    - sync main: git fetch . develop:main && git push origin main   # close the standing main-drift after each release
+  evidence: [registry_version, git_tag, github_release_url]
+publish:
+  trigger: local_script
+  detail:
+    command: npm run release                       # scripts/release.js
+    script_does: npm whoami check, dirty-tree check, tag-exists check, files check, build, npm publish --ignore-scripts, git push, tag + push tag, gh release create from changelog section
+    partial_failure_note: script is not atomic; on mid-flight failure check what landed (registry vs tag vs release) before any rerun
+  auth: token_local                                # TODO migrate to GHA trusted publishing + provenance (OIDC)
+rollback:
+  steps:
+    - "npm deprecate glissa@<bad> 'broken, use <prev>'"
+    - "npm dist-tag add glissa@<prev> latest"
+    - "Forward-fix with a new patch version"
+  never: [unpublish, retag, reuse_version]
+approval:
+  human_before: [npm_run_release]

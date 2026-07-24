@@ -8,6 +8,7 @@ dist/
 .vscode/
 .claude/*
 !.claude/omc.jsonc
+!.claude/release-profile.yml
 config.json
 .pty-capture/
 # Per-session post-turn checker output (runtime telemetry, written into the session worktree). Not a
