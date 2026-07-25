@@ -13,7 +13,7 @@ const assert = require('node:assert/strict');
 const { carryWorktreeAcrossRecreate } = require('../server/backend');
 
 function fakeOldSession({ path: projectPath = 'C:/proj', worktreeDir = 'C:/wts/proj-abc', workspace, killReap, hasChanges = false } = {}) {
-  const calls = { hasChanges: 0, discard: 0 };
+  const calls = { settleChecks: 0, discard: 0 };
   return {
     calls,
     path: projectPath,
@@ -24,7 +24,7 @@ function fakeOldSession({ path: projectPath = 'C:/proj', worktreeDir = 'C:/wts/p
     _killReap: killReap,
     // Mirrors Session.discardWorktreeIfClean's contract: dirty -> kept (false), clean -> discarded (true).
     async discardWorktreeIfClean() {
-      calls.hasChanges += 1;
+      calls.settleChecks += 1;
       if (hasChanges) return false;
       calls.discard += 1;
       return true;
@@ -68,7 +68,7 @@ test('path changed + dirty worktree: left on disk untouched (no data loss)', asy
   const newSess = fakeNewSession('C:/new-proj');
   await carryWorktreeAcrossRecreate(oldSess, newSess);
   assert.equal(newSess.adopted.length, 0);
-  assert.equal(oldSess.calls.hasChanges, 1, 'dirty test consulted');
+  assert.equal(oldSess.calls.settleChecks, 1, 'dirty test consulted');
   assert.equal(oldSess.calls.discard, 0, 'unmerged work is never destroyed');
 });
 
