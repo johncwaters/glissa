@@ -196,27 +196,42 @@ function decideWasActiveFlip(to, event, pendingRestart) {
 // single-flight guard closes). Same project path -> the new Session adopts the surviving worktree and
 // resumes in it (mirrors the boot reconcile's re-adopt). Path changed -> the worktree belongs to the
 // OLD repo and can never serve the new path: once the old PTY's kill reap settles (a live process
-// holding the worktree as cwd blocks removal on Windows), a clean worktree is discarded junction-safe
-// and one with uncommitted work is left on disk untouched (no data loss - the same dirty test
-// _settleWorktreeOnExit uses). NOTE a kept worktree becomes an orphan the boot reconcile can no longer
+// holding the worktree as cwd blocks removal on Windows), Session.discardWorktreeIfClean discards a
+// clean worktree junction-safe and leaves one with uncommitted work on disk untouched (no data loss -
+// the same settle _settleWorktreeOnExit uses). NOTE a kept worktree becomes an orphan the boot reconcile can no longer
 // see (it only visits paths still in config.projects), so it waits for manual reconcile or a future
 // project entry at the old path. Module-level so tests drive it with fake sessions directly.
+// Same physical directory despite spelling differences: Windows paths are case-insensitive and a
+// config hand-edit can change only casing or a trailing separator, which must NOT count as a repo
+// change (misclassifying it would skip the adopt and reproduce the branch-in-use fallback).
+function isSameProjectPath(a, b) {
+  const resolvedA = path.resolve(String(a || ''));
+  const resolvedB = path.resolve(String(b || ''));
+  if (resolvedA === resolvedB) return true;
+  return process.platform === 'win32' && resolvedA.toLowerCase() === resolvedB.toLowerCase();
+}
+
 function carryWorktreeAcrossRecreate(oldSess, newSess) {
   if (!oldSess || !oldSess.worktreeDir || !oldSess._workspace) return;
-  if (newSess.path === oldSess.path) {
-    newSess.adoptWorktree({
-      worktreeDir: oldSess.worktreeDir,
-      branch: oldSess._workspace.branch,
-      base: oldSess._workspace.base,
-    });
+  if (isSameProjectPath(newSess.path, oldSess.path)) {
+    // adoptWorktree is synchronous by contract: the caller's newSess.start() right after this relies
+    // on worktreeDir being set before it provisions. Best-effort like the provision fallback - a
+    // failed adopt (e.g. the dir vanished) leaves the session provisioning fresh, never crashes the
+    // config-reload handler.
+    try {
+      newSess.adoptWorktree({
+        worktreeDir: oldSess.worktreeDir,
+        branch: oldSess._workspace.branch,
+        base: oldSess._workspace.base,
+      });
+    } catch (err) {
+      console.warn(`[config] worktree carry-over adopt failed for ${newSess.name}: ${err.message}`);
+    }
     return;
   }
   return Promise.resolve(oldSess._killReap)
     .catch(() => {})
-    .then(async () => {
-      if (await oldSess.hasChanges()) return; // unmerged work: keep for the boot reconcile
-      await oldSess.discardWorktree();
-    })
+    .then(() => oldSess.discardWorktreeIfClean())
     .catch(() => { /* best-effort */ });
 }
 

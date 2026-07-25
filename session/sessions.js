@@ -975,18 +975,19 @@ class Session extends EventEmitter {
   async _settleWorktreeOnExit() {
     if (!this._gitWorkspace || !this._workspace) return;
     if (this.state !== STATES.DONE && this.state !== STATES.FAILED) return;
-    if (await this.hasChanges()) {
-      // Keep watching the kept-for-review worktree: a post-exit CLI merge/clean still self-heals fast.
-      this._setMergeStatus("pending-review");
-      return;
-    }
-    this._stopWorktreeWatcher(); // dir about to be removed
-    try { await this._gitWorkspace.discard({ projectPath: this.path, workspace: this._workspace }); } catch { /* best-effort */ }
-    this._workspace = null;
-    this.worktreeDir = null;
-    this.commonGitDir = null;
-    this.isWorktree = false;
-    this._setMergeStatus("none");
+    if (await this.discardWorktreeIfClean()) return;
+    // Keep watching the kept-for-review worktree: a post-exit CLI merge/clean still self-heals fast.
+    this._setMergeStatus("pending-review");
+  }
+
+  // Shared keep-if-dirty/discard-if-clean settle: discard the worktree (junction-safe) only when it has
+  // no uncommitted work, and report which way it went. Used by the exit settle above and the backend's
+  // config-modify carry-over, so both apply the same never-destroy-work test.
+  async discardWorktreeIfClean() {
+    if (!this.worktreeDir) return false;
+    if (await this.hasChanges()) return false; // unmerged work is never destroyed
+    await this.discardWorktree();
+    return true;
   }
 
   _setMergeStatus(status, extra = {}) {

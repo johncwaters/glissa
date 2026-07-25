@@ -22,8 +22,13 @@ function fakeOldSession({ path: projectPath = 'C:/proj', worktreeDir = 'C:/wts/p
       ? { cwd: worktreeDir, isGit: true, branch: 'glissa/session/sess-1', base: 'develop' }
       : workspace,
     _killReap: killReap,
-    async hasChanges() { calls.hasChanges += 1; return hasChanges; },
-    async discardWorktree() { calls.discard += 1; },
+    // Mirrors Session.discardWorktreeIfClean's contract: dirty -> kept (false), clean -> discarded (true).
+    async discardWorktreeIfClean() {
+      calls.hasChanges += 1;
+      if (hasChanges) return false;
+      calls.discard += 1;
+      return true;
+    },
   };
 }
 
@@ -65,6 +70,14 @@ test('path changed + dirty worktree: left on disk untouched (no data loss)', asy
   assert.equal(newSess.adopted.length, 0);
   assert.equal(oldSess.calls.hasChanges, 1, 'dirty test consulted');
   assert.equal(oldSess.calls.discard, 0, 'unmerged work is never destroyed');
+});
+
+test('a casing-only path difference still adopts on win32 (case-insensitive filesystem)', { skip: process.platform !== 'win32' }, () => {
+  const oldSess = fakeOldSession({ path: 'C:/Proj' });
+  const newSess = fakeNewSession('c:/proj');
+  carryWorktreeAcrossRecreate(oldSess, newSess);
+  assert.equal(newSess.adopted.length, 1, 'same physical directory: adopted, not settled as a repo change');
+  assert.equal(oldSess.calls.discard, 0);
 });
 
 test('no surviving worktree (in-place or already settled): a no-op', () => {
