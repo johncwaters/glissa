@@ -16,7 +16,6 @@ const {
   resolveCheckConfig,
 } = require('../server/post-turn-checker');
 
-const EM_DASH = String.fromCharCode(0x2014);
 const NL = String.fromCharCode(10);
 
 // In-memory fake repo. files: { relPosixPath: content }.
@@ -54,7 +53,7 @@ test('resolveCheckConfig is enabled by default (no config at all)', () => {
   const cfg = resolveCheckConfig();
   assert.equal(cfg.enabled, true);
   assert.equal(cfg.mode, 'fix');
-  assert.equal(cfg.rules.dashes.enabled, true);
+  assert.equal(cfg.rules.trailingWs.enabled, true);
 });
 
 test('resolveCheckConfig: explicit enabled:false disables', () => {
@@ -62,15 +61,15 @@ test('resolveCheckConfig: explicit enabled:false disables', () => {
 });
 
 test('resolveCheckConfig: per-project disables a single rule', () => {
-  const cfg = resolveCheckConfig({}, { rules: { dashes: false } });
-  assert.equal(cfg.rules.dashes.enabled, false);
+  const cfg = resolveCheckConfig({}, { rules: { bom: false } });
+  assert.equal(cfg.rules.bom.enabled, false);
   assert.equal(cfg.rules.trailingWs.enabled, true);
 });
 
 test('resolveCheckConfig: report mode propagates to rule modes', () => {
   const cfg = resolveCheckConfig({ mode: 'report' });
   assert.equal(cfg.mode, 'report');
-  assert.equal(cfg.rules.dashes.mode, 'report');
+  assert.equal(cfg.rules.trailingWs.mode, 'report');
 });
 
 test('resolveCheckConfig: arrays replace, project overrides global', () => {
@@ -83,7 +82,7 @@ test('resolveCheckConfig: arrays replace, project overrides global', () => {
 test('fixes changed files, skips excluded ones, returns a report', async () => {
   const files = {
     'a.js': `x ${NL}`, // trailing space
-    'docs/note.md': `title ${EM_DASH} sub`, // em dash + no final newline
+    'docs/note.md': 'title sub', // no final newline
     'node_modules/dep.js': `bad ${NL}`, // excluded
     'pkg.lock': `y ${NL}`, // excluded (*.lock)
   };
@@ -97,13 +96,12 @@ test('fixes changed files, skips excluded ones, returns a report', async () => {
   assert.equal('docs/note.md' in writes, true);
   assert.equal('node_modules/dep.js' in writes, false);
   assert.equal('pkg.lock' in writes, false);
-  // The em dash is gone and a final newline was added.
-  assert.equal(writes['docs/note.md'].includes(EM_DASH), false);
+  // A final newline was added.
   assert.equal(writes['docs/note.md'].endsWith(NL), true);
 });
 
 test('a glissa-no-fix file is left byte-identical', async () => {
-  const files = { 'keep.md': `glissa-no-fix${NL}a ${EM_DASH} b   ` };
+  const files = { 'keep.md': `glissa-no-fix${NL}a b   ` };
   const { deps, writes } = makeDeps(files);
   const report = await runPostTurnChecks({ cwd: '/x', config: fixCfg, deps });
   assert.equal(report.filesFixed, 0);
@@ -111,14 +109,14 @@ test('a glissa-no-fix file is left byte-identical', async () => {
 });
 
 test('report mode never writes but still lists findings', async () => {
-  const files = { 'a.md': `a ${EM_DASH} b` };
+  const files = { 'a.md': 'a b   ' };
   const { deps, writes } = makeDeps(files);
   const cfg = resolveCheckConfig({ mode: 'report' });
   const report = await runPostTurnChecks({ cwd: '/x', config: cfg, deps });
   assert.equal(report.mode, 'report');
   assert.equal(report.filesFixed, 0);
   assert.equal(Object.keys(writes).length, 0);
-  assert.ok(report.findings.some((f) => f.rule === 'dashes'));
+  assert.ok(report.findings.some((f) => f.rule === 'trailingWs'));
 });
 
 test('mtime race: a file changed between read and write is skipped, not clobbered', async () => {
@@ -192,14 +190,13 @@ test('real git: fixes a dirty file in a temp repo', { skip: !gitAvailable() }, a
     fs.writeFileSync(file, 'seed\n');
     run(['add', '.']);
     run(['commit', '-m', 'seed']);
-    // Now dirty it: trailing space + em dash + no final newline.
-    fs.writeFileSync(file, `hello ${EM_DASH} world  `);
+    // Now dirty it: trailing space + no final newline.
+    fs.writeFileSync(file, 'hello world  ');
 
     const report = await runPostTurnChecks({ cwd: dir, config: fixCfg });
     assert.equal(report.skipped, null);
     assert.equal(report.filesFixed, 1);
     const after = fs.readFileSync(file, 'utf8');
-    assert.equal(after.includes(EM_DASH), false);
     assert.equal(/[ \t]$/.test(after.replace(/\n$/, '')), false);
     assert.equal(after.endsWith('\n'), true);
   } finally {

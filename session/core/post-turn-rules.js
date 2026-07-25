@@ -4,16 +4,11 @@
 // (content) -> { content, findings } and is idempotent. The thin IO runner
 // (../post-turn-checker.js) lists a session's git-changed files and applies these.
 //
-// Repo convention (MEMORY dash-literals-roundtrip): this file must contain NO
-// literal em dash / en dash / ellipsis character. The characters this module
-// rewrites are referenced ONLY via String.fromCharCode so the no-dash policy
-// round-trips through source and tests.
+// Repo convention: this file must contain NO literal em dash / en dash /
+// ellipsis character (build any needed via String.fromCharCode).
 
 const { detectCodeSlop } = require('./slop-code-patterns');
 
-const EM_DASH = String.fromCharCode(0x2014);
-const EN_DASH = String.fromCharCode(0x2013);
-const ELLIPSIS = String.fromCharCode(0x2026);
 const BOM = String.fromCharCode(0xfeff);
 const NL = String.fromCharCode(10); // '\n'
 const CRLF = String.fromCharCode(13, 10); // '\r\n'
@@ -32,24 +27,6 @@ function posAt(content, offset) {
     }
   }
   return { line, col };
-}
-
-// em/en dash -> ASCII hyphen; ellipsis char -> three ASCII dots.
-// Single-scan regex (mirrors fixTrailingWhitespace): a clean file is matched once
-// and returned unchanged instead of rebuilt char-by-char, so the common no-dash
-// case costs no per-character string growth. The char class is assembled from the
-// String.fromCharCode constants so this source still carries no literal dash chars
-// (MEMORY dash-literals-roundtrip).
-const DASH_RE = new RegExp('[' + EM_DASH + EN_DASH + ELLIPSIS + ']', 'g');
-function fixDashes(content) {
-  const findings = [];
-  const out = content.replace(DASH_RE, (ch, offset) => {
-    const { line, col } = posAt(content, offset);
-    const after = ch === ELLIPSIS ? '...' : '-';
-    findings.push({ rule: 'dashes', line, col, before: ch, after });
-    return after;
-  });
-  return { content: out, findings };
 }
 
 // Report-only code-slop detector. Unlike the other rules it NEVER mutates: it returns
@@ -122,7 +99,6 @@ function stripBom(content) {
 // runner's DEFAULTS.rules, not here, so this is purely the transform lookup.
 const RULES = Object.freeze({
   bom: { fix: stripBom },
-  dashes: { fix: fixDashes },
   trailingWs: { fix: fixTrailingWhitespace },
   finalNewline: { fix: fixFinalNewline },
   slop: { fix: detectSlop },
@@ -130,7 +106,7 @@ const RULES = Object.freeze({
 
 // Fixed apply order: BOM first, newline last (so it sees post-trim content). `slop` is
 // report-only and order-independent; it runs last.
-const RULE_ORDER = ['bom', 'dashes', 'trailingWs', 'finalNewline', 'slop'];
+const RULE_ORDER = ['bom', 'trailingWs', 'finalNewline', 'slop'];
 
 const EXEMPT_MARKER = 'glissa-no-fix';
 
@@ -221,7 +197,6 @@ module.exports = {
   shouldCheckPath,
   globToRegExp,
   looksBinary,
-  fixDashes,
   fixTrailingWhitespace,
   fixFinalNewline,
   stripBom,

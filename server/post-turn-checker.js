@@ -24,7 +24,7 @@ const DEFAULTS = Object.freeze({
   // `slop` is the report-only code-slop detector (session/core/slop-code-patterns.js).
   // OFF by default: opt in per project with postTurnChecks.rules.slop = true. It never
   // rewrites content, so it is safe to enable even when mode is 'fix'.
-  rules: { dashes: true, trailingWs: true, finalNewline: true, bom: true, slop: false },
+  rules: { trailingWs: true, finalNewline: true, bom: true, slop: false },
   include: ['**/*'],
   exclude: [
     '**/node_modules/**',

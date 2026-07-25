@@ -8,7 +8,6 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
-  fixDashes,
   fixTrailingWhitespace,
   fixFinalNewline,
   stripBom,
@@ -20,44 +19,15 @@ const {
 } = require('../session/core/post-turn-rules');
 const { detectCodeSlop } = require('../session/core/slop-code-patterns');
 
-const EM_DASH = String.fromCharCode(0x2014);
-const EN_DASH = String.fromCharCode(0x2013);
-const ELLIPSIS = String.fromCharCode(0x2026);
 const BOM = String.fromCharCode(0xfeff);
 const NL = String.fromCharCode(10);
 const CR = String.fromCharCode(13);
 
-function hasForbidden(s) {
-  return s.includes(EM_DASH) || s.includes(EN_DASH) || s.includes(ELLIPSIS);
-}
-
 const allRules = {
   bom: { enabled: true, mode: 'fix' },
-  dashes: { enabled: true, mode: 'fix' },
   trailingWs: { enabled: true, mode: 'fix' },
   finalNewline: { enabled: true, mode: 'fix' },
 };
-
-// --- fixDashes ------------------------------------------------------------
-
-test('fixDashes maps em/en dash to hyphen and ellipsis to three dots', () => {
-  const input = `a ${EM_DASH} b ${EN_DASH} c ${ELLIPSIS}`;
-  const { content, findings } = fixDashes(input);
-  assert.equal(hasForbidden(content), false);
-  assert.equal(content, 'a - b - c ...');
-  assert.equal(findings.length, 3);
-  assert.equal(findings[0].rule, 'dashes');
-  assert.equal(findings[0].line, 1);
-});
-
-test('fixDashes is idempotent and records correct line numbers', () => {
-  const input = `x${NL}y ${EM_DASH} z`;
-  const first = fixDashes(input);
-  assert.equal(first.findings[0].line, 2);
-  const second = fixDashes(first.content);
-  assert.equal(second.findings.length, 0);
-  assert.equal(second.content, first.content);
-});
 
 // --- fixTrailingWhitespace ------------------------------------------------
 
@@ -170,25 +140,25 @@ test('detectSlop single-pass line/col matches a naive per-finding reference (LF 
 // --- applyRules -----------------------------------------------------------
 
 test('applyRules applies all enabled fix rules and reports changed', () => {
-  const input = `${BOM}a ${EM_DASH} b   ${NL}no-newline-here`;
+  const input = `${BOM}a   ${NL}no-newline-here`;
   const { content, findings, changed } = applyRules(input, allRules);
   assert.equal(changed, true);
   assert.equal(content.charCodeAt(0) === 0xfeff, false); // BOM gone
-  assert.equal(hasForbidden(content), false); // dash gone
+  assert.equal(/[ \t]+\n/.test(content), false); // trailing whitespace gone
   assert.equal(content.endsWith(NL), true); // final newline added
-  assert.ok(findings.length >= 3);
+  assert.ok(findings.length >= 2);
 });
 
 test('applyRules respects a disabled rule', () => {
-  const input = `a ${EM_DASH} b`;
-  const rules = { ...allRules, dashes: { enabled: false, mode: 'fix' } };
+  const input = `${BOM}a   `;
+  const rules = { bom: { enabled: true, mode: 'fix' }, trailingWs: { enabled: false, mode: 'fix' } };
   const { content } = applyRules(input, rules);
-  assert.equal(hasForbidden(content), true); // dash preserved
+  assert.equal(content, 'a   '); // trailing whitespace preserved; BOM still stripped
 });
 
 test('applyRules report mode records findings without mutating', () => {
-  const input = `a ${EM_DASH} b`;
-  const rules = { dashes: { enabled: true, mode: 'report' } };
+  const input = 'a   ';
+  const rules = { trailingWs: { enabled: true, mode: 'report' } };
   const { content, findings, changed } = applyRules(input, rules);
   assert.equal(content, input);
   assert.equal(changed, false);
@@ -196,26 +166,27 @@ test('applyRules report mode records findings without mutating', () => {
 });
 
 test('applyRules honors the bare glissa-no-fix marker (skips everything)', () => {
-  const input = `glissa-no-fix${NL}a ${EM_DASH} b   `;
+  const input = `glissa-no-fix${NL}a   `;
   const { content, changed } = applyRules(input, allRules);
   assert.equal(content, input);
   assert.equal(changed, false);
 });
 
-test('applyRules honors a per-rule glissa-no-fix:dashes marker', () => {
-  const input = `glissa-no-fix:dashes${NL}a ${EM_DASH} b   `;
-  const { content } = applyRules(input, allRules);
-  // dash preserved, but trailing whitespace still fixed
-  assert.equal(hasForbidden(content), true);
-  assert.equal(/[ \t]+$/.test(content), false);
+test('applyRules honors a per-rule glissa-no-fix:trailingWs marker', () => {
+  const input = `${BOM}glissa-no-fix:trailingWs${NL}a   `;
+  const rules = { bom: { enabled: true, mode: 'fix' }, trailingWs: { enabled: true, mode: 'fix' } };
+  const { content } = applyRules(input, rules);
+  // trailing whitespace preserved, but BOM still stripped
+  assert.equal(/[ \t]+$/.test(content), true);
+  assert.equal(content.charCodeAt(0) === 0xfeff, false);
 });
 
 test('exemptions distinguishes bare marker from per-rule marker', () => {
   assert.deepEqual(exemptions('nothing here'), { all: false, rules: new Set() });
   assert.equal(exemptions('glissa-no-fix').all, true);
-  const perRule = exemptions('glissa-no-fix:dashes');
+  const perRule = exemptions('glissa-no-fix:slop');
   assert.equal(perRule.all, false);
-  assert.equal(perRule.rules.has('dashes'), true);
+  assert.equal(perRule.rules.has('slop'), true);
 });
 
 test('applyRules threads ctx to the slop rule and never mutates for it (even in fix mode)', () => {

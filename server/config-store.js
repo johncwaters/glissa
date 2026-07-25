@@ -48,7 +48,7 @@ const DEFAULT_CONFIG = {
     enabled: true,
     mode: 'fix',
     // `slop` is the report-only code-slop detector; OFF by default (opt in per project).
-    rules: { dashes: true, trailingWs: true, finalNewline: true, bom: true, slop: false },
+    rules: { trailingWs: true, finalNewline: true, bom: true, slop: false },
   },
   projects: []
 };
