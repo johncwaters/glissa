@@ -135,6 +135,41 @@ test('start() provisions a worktree off the integration branch and spawns the PT
   }
 });
 
+test('concurrent start() calls are single-flight: one worktree, one PTY, no branch-in-use fallback', { skip: !WIN }, async () => {
+  const wt = realWorktreeDir();
+  const spawned = [];
+  // Async create with a real event-loop gap, mirroring the serialized git engine: without the
+  // single-flight guard the second start() enters during the first's provision await, sees its own
+  // just-created branch as in-use, and respawns in place.
+  const gw = {
+    calls: { create: [] },
+    async create(args) {
+      gw.calls.create.push(args);
+      await new Promise((r) => setImmediate(r));
+      if (gw.calls.create.length > 1) {
+        return { cwd: process.cwd(), isGit: false, reason: 'branch-in-use', conflictPath: wt };
+      }
+      return { cwd: wt, isGit: true, branch: `glissa/session/${args.label}`, base: args.baseBranch, baseSha: 'basesha' };
+    },
+    mergeBack() {}, mergeKeep() {}, discard() {},
+  };
+  const s = makeSession({
+    gitWorkspace: gw, integrationBranch: 'develop',
+    ptySpawn: (file, args, optsArg) => { spawned.push(optsArg); return fakePty(); },
+  });
+  try {
+    await Promise.all([s.start(), s.start()]);
+    assert.equal(gw.calls.create.length, 1, 'worktree provisioned once');
+    assert.equal(spawned.length, 1, 'exactly one PTY spawned');
+    assert.equal(spawned[0].cwd, wt, 'the PTY runs in the worktree, not in place');
+    assert.equal(s.worktreeDir, wt, 'worktreeDir not clobbered by a losing racer');
+    assert.equal(s.worktreeNotice, null, 'no branch-in-use notice against our own branch');
+  } finally {
+    s.destroy();
+    fs.rmSync(wt, { recursive: true, force: true });
+  }
+});
+
 test('start() BLOCKS when the integration branch is missing - stays DORMANT, no spawn, notice set', async () => {
   const gw = fakeGitWorkspace({ createResult: { cwd: process.cwd(), isGit: false, reason: 'no-base-branch' } });
   const spawned = [];

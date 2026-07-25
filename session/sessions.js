@@ -317,6 +317,7 @@ class Session extends EventEmitter {
     this._worktreeRoot = worktreeRoot;
     this._worktreeShare = worktreeShare;
     this.worktreeDir = null;     // active session worktree cwd (null = in-place at this.path)
+    this._startPending = null;   // in-flight start() promise (single-flight; see start())
     this.commonGitDir = null;    // shared gitdir all linked worktrees write refs into (git rev-parse
                                  // --git-common-dir); the key the backend groups integration-ref watchers by
     this.baseSha = null;         // integration-branch SHA the worktree forked from
@@ -1464,7 +1465,18 @@ class Session extends EventEmitter {
     return true;
   }
 
-  async start() {
+  // Single-flight: concurrent start() calls (a double-click, or focus-view's DORMANT auto-start racing
+  // the resume dialog's start-session) collapse onto the in-flight run. Without this, both callers pass
+  // the ptyProcess/DORMANT guards during the async provision gap: the first creates the session worktree,
+  // the second then sees its OWN fresh branch as branch-in-use, clobbers worktreeDir back to null, and
+  // spawns a SECOND Claude in place - leaking the first PTY inside the worktree it holds checked out.
+  start() {
+    if (this._startPending) return this._startPending;
+    this._startPending = this._startBody().finally(() => { this._startPending = null; });
+    return this._startPending;
+  }
+
+  async _startBody() {
     if (this._destroyed) return;
     // Defensive cleanup: if a prior PTY is still alive (e.g. _handlePtyExit
     // hasn't propagated yet after a sleep-kill race), force-kill it before
