@@ -191,8 +191,48 @@ test('start() BLOCKS when the integration branch is missing - stays DORMANT, no 
   }
 });
 
-test('start() runs in place with a notice when the session branch is already checked out elsewhere (branch-in-use)', { skip: !WIN }, async () => {
-  const gw = fakeGitWorkspace({ createResult: { cwd: process.cwd(), isGit: false, reason: 'branch-in-use', conflictPath: 'C:\\other\\wt' } });
+test('start() ADOPTS its own surviving worktree on branch-in-use (failed boot removal / discard)', { skip: !WIN }, async () => {
+  const wt = realWorktreeDir();
+  const populated = [];
+  const gw = fakeGitWorkspace({
+    createResult: { cwd: process.cwd(), isGit: false, reason: 'branch-in-use', conflictPath: wt, branch: 'glissa/session/wt-sess' },
+  });
+  gw.populate = async (args) => { populated.push(args); };
+  const spawned = [];
+  let blocked = null;
+  let ready = null;
+  const s = makeSession({
+    gitWorkspace: gw, integrationBranch: 'develop',
+    ptySpawn: (file, args, optsArg) => { spawned.push(optsArg); return fakePty(); },
+  });
+  s.on('worktree-blocked', (e) => { blocked = e; });
+  s.on('worktree-ready', (e) => { ready = e; });
+  try {
+    await s.start();
+    assert.equal(s.worktreeDir, wt, 'the surviving worktree is re-adopted, not abandoned');
+    assert.equal(s.isWorktree, true);
+    assert.equal(spawned.length, 1);
+    assert.equal(spawned[0].cwd, wt, 'PTY spawns in the adopted worktree, never in place');
+    assert.equal(s.worktreeNotice, null, 'no running-in-place notice');
+    assert.equal(blocked, null, 'no worktree-blocked event');
+    assert.ok(ready && ready.worktreeDir === wt, 'worktree-ready announces the adopted dir');
+    assert.equal(s.mergeStatus, 'pending-review', 'adopted survivor surfaces for review until the self-heal check');
+    // The failed removal stripped the survivor's junctions; adoption must re-share the gitignored context.
+    assert.equal(populated.length, 1, 'gitignored share context re-populated into the survivor');
+    assert.equal(populated[0].wtDir, wt);
+    // The self-heal check must survive _startWorktreeWatcher's restart (which cancels pending timers):
+    // a clean survivor demotes its provisional pending-review to none on this first check.
+    assert.ok(s._worktreeCheckTimer, 'worktree check armed after the watcher (re)start');
+  } finally {
+    s.destroy();
+    fs.rmSync(wt, { recursive: true, force: true });
+  }
+});
+
+test('start() runs in place with a notice when the branch-in-use conflict dir is gone (unadoptable)', { skip: !WIN }, async () => {
+  const gw = fakeGitWorkspace({
+    createResult: { cwd: process.cwd(), isGit: false, reason: 'branch-in-use', conflictPath: 'C:\\other\\wt', branch: 'glissa/session/wt-sess' },
+  });
   const spawned = [];
   let blocked = null;
   const s = makeSession({
@@ -208,6 +248,28 @@ test('start() runs in place with a notice when the session branch is already che
     assert.ok(s.worktreeNotice && /already checked out/i.test(s.worktreeNotice), 'actionable notice set');
     assert.ok(s.worktreeNotice.includes('C:\\other\\wt'), 'notice names the conflicting worktree path');
     assert.ok(blocked && blocked.notice === s.worktreeNotice, 'worktree-blocked event carries the same notice');
+  } finally {
+    s.destroy();
+  }
+});
+
+test('start() never adopts the MAIN checkout when the operator checked the session branch out there', { skip: !WIN }, async () => {
+  // conflictPath == the project path itself: adopting would treat the operator's real tree as a
+  // disposable worktree (discard/merge teardown targets it), so this stays the in-place fallback.
+  const gw = fakeGitWorkspace({
+    createResult: { cwd: process.cwd(), isGit: false, reason: 'branch-in-use', conflictPath: process.cwd(), branch: 'glissa/session/wt-sess' },
+  });
+  const spawned = [];
+  const s = makeSession({
+    gitWorkspace: gw, integrationBranch: 'develop',
+    ptySpawn: (file, args, optsArg) => { spawned.push(optsArg); return fakePty(); },
+  });
+  try {
+    await s.start();
+    assert.equal(s.worktreeDir, null, 'main checkout never adopted');
+    assert.equal(s.isWorktree, false);
+    assert.equal(spawned.length, 1, 'runs in place');
+    assert.ok(s.worktreeNotice && /already checked out/i.test(s.worktreeNotice), 'notice set');
   } finally {
     s.destroy();
   }

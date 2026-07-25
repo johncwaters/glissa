@@ -142,7 +142,9 @@ function createGitWorkspace(opts = {}) {
     const listed = await run(['worktree', 'list', '--porcelain'], projectPath);
     if (listed.ok) {
       const conflictPath = findWorktreeForBranch(listed.out, branch);
-      if (conflictPath) return { cwd: projectPath, isGit: false, reason: 'branch-in-use', conflictPath };
+      // `branch` rides along so a session caller can recognize the conflict as its OWN surviving
+      // worktree (the session branch embeds the session id) and re-adopt it instead of degrading.
+      if (conflictPath) return { cwd: projectPath, isGit: false, reason: 'branch-in-use', conflictPath, branch };
     }
 
     await run(['branch', '-D', branch], projectPath); // drop a stale branch left by a crashed prior run
@@ -177,19 +179,35 @@ function createGitWorkspace(opts = {}) {
     // worktree so the spawned agent sees a COMPLETE, recognizable project, not a bare checkout. Dirs are
     // junctioned (shared with the real repo, never copied or merged, gitignored so `git add -A` skips
     // them); files are copied. Entries already committed or absent are skipped.
-    if (shareList && shareList.length) {
-      // Only bring in entries git IGNORES, so a shared file/junction can NEVER be staged by mergeBack's
-      // `git add -A` and accidentally committed to the integration branch (e.g. leaking a .env). Checked
-      // sequentially so the check-ignore probes never interleave with another serialized mutation.
-      const ignored = [];
-      for (const rel of shareList) {
-        if (rel && !String(rel).includes('..') && (await run(['check-ignore', '-q', '--', rel], projectPath)).ok) {
-          ignored.push(rel);
-        }
-      }
-      if (ignored.length) { try { await populateWorktree(projectPath, wtDir, ignored); } catch { /* best-effort */ } }
-    }
+    await populateShare(projectPath, wtDir, shareList);
     return { cwd: wtDir, isGit: true, branch, base, baseSha };
+  }
+
+  // Bring the gitignored share entries into a worktree. Only entries git IGNORES are brought in, so a
+  // shared file/junction can NEVER be staged by mergeBack's `git add -A` and accidentally committed to
+  // the integration branch (e.g. leaking a .env). Checked sequentially so the check-ignore probes never
+  // interleave with another serialized mutation. Idempotent (entries already present are skipped), so
+  // it is also safe on an ADOPTED survivor worktree whose junctions were stripped by a failed removal
+  // (removeWorktreeLinks runs before the `worktree remove` that then fails on a locked dir).
+  async function populateShare(projectPath, wtDir, shareList) {
+    if (!shareList || !shareList.length) return;
+    const ignored = [];
+    for (const rel of shareList) {
+      if (rel && !String(rel).includes('..') && (await run(['check-ignore', '-q', '--', rel], projectPath)).ok) {
+        ignored.push(rel);
+      }
+    }
+    if (!ignored.length) return;
+    try { await populateWorktree(projectPath, wtDir, ignored); } catch { /* best-effort */ }
+  }
+
+  // Public re-share entry for a caller that adopts an existing worktree outside create() (the
+  // branch-in-use self-adopt in sessions.js). Serialized like every other engine method that touches
+  // a worktree, so it never interleaves with a live merge/remove. createBody must keep calling the
+  // inner populateShare directly: calling this serialized wrapper from inside the serialize chain
+  // would deadlock (the inner call would chain onto a tail that includes the in-flight create).
+  function populate({ projectPath, wtDir, shareList }) {
+    return serialize(() => populateShare(projectPath, wtDir, shareList));
   }
 
   // Commit the run on its branch and fast-forward it into the base branch when safe. `addPaths` are
@@ -505,7 +523,7 @@ function createGitWorkspace(opts = {}) {
   }
 
   return {
-    create, integrate, discard, restoreTests, mergeBack, mergeKeep,
+    create, integrate, discard, restoreTests, mergeBack, mergeKeep, populate,
     sweepSessionWorktrees, listSessionWorktrees, listWorktreeBranches, removeWorktreeByPath,
   };
 }

@@ -5,6 +5,7 @@ const pty = require("node-pty");
 const { EventEmitter } = require("node:events");
 const { execFileSync, execFile } = require("../server/child-process-safe");
 const { STATES, MERGEABLE_LIVE_STATES } = require("../shared/states");
+const { isSameDirectoryPath } = require("../shared/paths");
 const { createOscTitleSource } = require("../detection/osc-title-source");
 const { createStatusSource } = require("../detection/status-source");
 const { createWorktreeWatcher } = require("../detection/worktree-watch");
@@ -950,10 +951,35 @@ class Session extends EventEmitter {
       return false;
     }
     if (ws && ws.reason === "branch-in-use") {
+      // The conflicting branch is this session's UNIQUE branch (it embeds the session id), so the
+      // worktree holding it is this session's own survivor: a boot-reconcile removal or an exit-time
+      // discard that failed on a locked dir (Windows: an orphaned Claude process keeps the cwd alive),
+      // or a missed recreate carry. Re-adopt and run in it instead of degrading to the operator's real
+      // tree. The one unsafe target is the main checkout itself (an operator `git checkout` of the
+      // session branch): adopting that would treat the real tree as disposable, so it stays in place.
+      if (ws.branch && ws.conflictPath && fs.existsSync(ws.conflictPath)
+          && !isSameDirectoryPath(ws.conflictPath, this.path)) {
+        this.adoptWorktree({ worktreeDir: ws.conflictPath, branch: ws.branch });
+        this.worktreeNotice = null;
+        // The failed removal that left this survivor stripped its junctions first (removeWorktreeLinks
+        // runs before `worktree remove`), so re-share the gitignored context (node_modules, .claude,
+        // ...) before the PTY spawns into a checkout with no dependencies. Idempotent: entries already
+        // present are skipped. (The self-heal check for the adopted pending-review is armed in
+        // _startBody AFTER _startWorktreeWatcher, which would cancel one scheduled here.)
+        if (typeof this._gitWorkspace.populate === "function") {
+          // Promise.resolve: the typeof guard only proves callability, not that it returns a promise
+          // (a sync fake would make a bare .catch throw and reject _startBody unhandled).
+          await Promise.resolve(
+            this._gitWorkspace.populate({ projectPath: this.path, wtDir: this.worktreeDir, shareList: this._worktreeShare }),
+          ).catch(() => { /* best-effort: the session runs without the shared context */ });
+        }
+        this.emit("worktree-ready", { id: this.id, worktreeDir: this.worktreeDir, branch: ws.branch });
+        return true;
+      }
       this.worktreeNotice = `session branch already checked out at ${ws.conflictPath}; running in place`;
       this.emit("worktree-blocked", { id: this.id, branch: this._integrationBranch, notice: this.worktreeNotice });
     }
-    if (!ws || !ws.isGit) { // non-git path (including branch-in-use): the ONLY in-place fallback
+    if (!ws || !ws.isGit) { // non-git path (including an unadoptable branch-in-use): the ONLY in-place fallback
       this.worktreeDir = null;
       this.isWorktree = false;
       return true;
@@ -1507,7 +1533,12 @@ class Session extends EventEmitter {
     if (this._destroyed) return;
     // Listen for changes in the (isolated) worktree so the review diff stays live without a manual
     // refresh. Idempotent across restart-reuse; a non-git in-place session has no worktreeDir to watch.
-    if (this.worktreeDir) this._startWorktreeWatcher();
+    if (this.worktreeDir) {
+      this._startWorktreeWatcher();
+      // Armed AFTER the watcher (re)start, which cancels any pending check timer: an adopted clean
+      // survivor carries a provisional pending-review that this first check demotes to none.
+      if (this.mergeStatus === "pending-review") this._scheduleWorktreeCheck();
+    }
     if (this.state === STATES.DORMANT) {
       this.transition("user_start");
     }

@@ -26,6 +26,7 @@ const express = require('express');
 const { WebSocketServer } = require('ws');
 const { Session } = require('../session/sessions');
 const { STATES } = require('../shared/states');
+const { isSameDirectoryPath } = require('../shared/paths');
 const { createConfigStore, generateProjectId, ensureProjectIds, DEFAULT_CONFIG } = require('./config-store');
 const { registerControlHandlers } = require('./control-handlers');
 const { createReplayLog } = require('./control-replay-core');
@@ -203,17 +204,11 @@ function decideWasActiveFlip(to, event, pendingRestart) {
 // project entry at the old path. Module-level so tests drive it with fake sessions directly.
 // Same physical directory despite spelling differences: Windows paths are case-insensitive and a
 // config hand-edit can change only casing or a trailing separator, which must NOT count as a repo
-// change (misclassifying it would skip the adopt and reproduce the branch-in-use fallback).
-function isSameProjectPath(a, b) {
-  const resolvedA = path.resolve(String(a || ''));
-  const resolvedB = path.resolve(String(b || ''));
-  if (resolvedA === resolvedB) return true;
-  return process.platform === 'win32' && resolvedA.toLowerCase() === resolvedB.toLowerCase();
-}
-
+// change (misclassifying it would skip the adopt and reproduce the branch-in-use fallback); the
+// case-fold compare lives in shared/paths.js isSameDirectoryPath.
 function carryWorktreeAcrossRecreate(oldSess, newSess) {
   if (!oldSess || !oldSess.worktreeDir || !oldSess._workspace) return;
-  if (isSameProjectPath(newSess.path, oldSess.path)) {
+  if (isSameDirectoryPath(newSess.path, oldSess.path)) {
     // adoptWorktree is synchronous by contract: the caller's newSess.start() right after this relies
     // on worktreeDir being set before it provisions. Best-effort like the provision fallback - a
     // failed adopt (e.g. the dir vanished) leaves the session provisioning fresh, never crashes the

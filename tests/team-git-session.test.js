@@ -595,6 +595,7 @@ test('create (injected git): a branch already checked out in another worktree re
   assert.equal(ws.isGit, false);
   assert.equal(ws.reason, 'branch-in-use');
   assert.equal(ws.conflictPath, '/other/wt');
+  assert.equal(ws.branch, 'glissa/session/dup1', 'result names the conflicting branch so the caller can self-adopt');
   assert.ok(!cmds.some((c) => c.startsWith('worktree add')), 'never adds a new worktree over an in-use branch');
   assert.ok(!cmds.some((c) => c.startsWith('branch -D')), 'never attempts to drop the conflicting branch');
 });
@@ -672,6 +673,40 @@ test('create (worktreeBase + shareList): worktree lives under the base and gets 
     assert.ok(!fs.existsSync(ws.cwd), 'worktree removed');
     assert.ok(fs.existsSync(path.join(repo, 'node_modules', 'dep.txt')), 'real node_modules survived (junction-safe)');
     assert.ok(fs.existsSync(path.join(repo, '.omc', 'memory.json')), 'real .omc survived (junction-safe)');
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test('populate re-shares stripped junctions into a surviving worktree (adopt-after-failed-removal)', { skip: !GIT || !WIN }, async () => {
+  const repo = initRepoOnDevelop();
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-wtroot-'));
+  fs.writeFileSync(path.join(repo, '.gitignore'), 'node_modules/\n.env\n', 'utf8');
+  git(['add', '.gitignore'], repo); git(['commit', '-m', 'ignore local context'], repo);
+  fs.mkdirSync(path.join(repo, 'node_modules'), { recursive: true });
+  fs.writeFileSync(path.join(repo, 'node_modules', 'dep.txt'), 'real dep\n', 'utf8');
+  fs.writeFileSync(path.join(repo, '.env'), 'SECRET=1\n', 'utf8');
+  fs.writeFileSync(path.join(repo, 'tracked.txt'), 'tracked\n', 'utf8');
+  try {
+    const gw = createGitWorkspace();
+    const shareList = ['node_modules', '.env', 'tracked.txt'];
+    const ws = await gw.create({
+      projectPath: repo, teamId: 'session', label: 'strip', baseBranch: 'develop', outputPath: '',
+      worktreeBase: base, shareList,
+    });
+    assert.equal(ws.isGit, true);
+    // Simulate a failed removal: removeWorktreeLinks stripped the junctions, then `worktree remove` failed.
+    fs.rmSync(path.join(ws.cwd, 'node_modules'), { recursive: false, force: true });
+    assert.ok(!fs.existsSync(path.join(ws.cwd, 'node_modules')), 'junction stripped');
+
+    await gw.populate({ projectPath: repo, wtDir: ws.cwd, shareList });
+    assert.ok(fs.existsSync(path.join(ws.cwd, 'node_modules', 'dep.txt')), 'junction re-shared');
+    assert.equal(fs.readFileSync(path.join(ws.cwd, '.env'), 'utf8'), 'SECRET=1\n', 'existing copy untouched');
+    assert.ok(!fs.existsSync(path.join(ws.cwd, 'tracked.txt')), 'an entry git does not IGNORE is still refused');
+    assert.ok(fs.existsSync(path.join(repo, 'node_modules', 'dep.txt')), 'real node_modules untouched');
+
+    await gw.discard({ projectPath: repo, workspace: ws });
   } finally {
     fs.rmSync(repo, { recursive: true, force: true });
     fs.rmSync(base, { recursive: true, force: true });
