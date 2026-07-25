@@ -179,7 +179,7 @@ function createGitWorkspace(opts = {}) {
     // worktree so the spawned agent sees a COMPLETE, recognizable project, not a bare checkout. Dirs are
     // junctioned (shared with the real repo, never copied or merged, gitignored so `git add -A` skips
     // them); files are copied. Entries already committed or absent are skipped.
-    await populateShare(projectPath, wtDir, shareList);
+    await populateShare({ projectPath, wtDir, shareList });
     return { cwd: wtDir, isGit: true, branch, base, baseSha };
   }
 
@@ -189,7 +189,7 @@ function createGitWorkspace(opts = {}) {
   // interleave with another serialized mutation. Idempotent (entries already present are skipped), so
   // it is also safe on an ADOPTED survivor worktree whose junctions were stripped by a failed removal
   // (removeWorktreeLinks runs before the `worktree remove` that then fails on a locked dir).
-  async function populateShare(projectPath, wtDir, shareList) {
+  async function populateShare({ projectPath, wtDir, shareList }) {
     if (!shareList || !shareList.length) return;
     const ignored = [];
     for (const rel of shareList) {
@@ -206,8 +206,8 @@ function createGitWorkspace(opts = {}) {
   // a worktree, so it never interleaves with a live merge/remove. createBody must keep calling the
   // inner populateShare directly: calling this serialized wrapper from inside the serialize chain
   // would deadlock (the inner call would chain onto a tail that includes the in-flight create).
-  function populate({ projectPath, wtDir, shareList }) {
-    return serialize(() => populateShare(projectPath, wtDir, shareList));
+  function populate(args) {
+    return serialize(() => populateShare(args));
   }
 
   // Commit the run on its branch and fast-forward it into the base branch when safe. `addPaths` are

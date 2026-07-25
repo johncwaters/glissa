@@ -957,22 +957,26 @@ class Session extends EventEmitter {
       // or a missed recreate carry. Re-adopt and run in it instead of degrading to the operator's real
       // tree. The one unsafe target is the main checkout itself (an operator `git checkout` of the
       // session branch): adopting that would treat the real tree as disposable, so it stays in place.
+      let adopted = false;
       if (ws.branch && ws.conflictPath && fs.existsSync(ws.conflictPath)
           && !isSameDirectoryPath(ws.conflictPath, this.path)) {
-        this.adoptWorktree({ worktreeDir: ws.conflictPath, branch: ws.branch });
+        try {
+          this.adoptWorktree({ worktreeDir: ws.conflictPath, branch: ws.branch });
+          adopted = true;
+        } catch { /* survivor vanished mid-adopt (concurrent reconcile); fall through to in-place */ }
+      }
+      if (adopted && this.worktreeDir) {
         this.worktreeNotice = null;
         // The failed removal that left this survivor stripped its junctions first (removeWorktreeLinks
         // runs before `worktree remove`), so re-share the gitignored context (node_modules, .claude,
         // ...) before the PTY spawns into a checkout with no dependencies. Idempotent: entries already
-        // present are skipped. (The self-heal check for the adopted pending-review is armed in
-        // _startBody AFTER _startWorktreeWatcher, which would cancel one scheduled here.)
-        if (typeof this._gitWorkspace.populate === "function") {
-          // Promise.resolve: the typeof guard only proves callability, not that it returns a promise
-          // (a sync fake would make a bare .catch throw and reject _startBody unhandled).
-          await Promise.resolve(
-            this._gitWorkspace.populate({ projectPath: this.path, wtDir: this.worktreeDir, shareList: this._worktreeShare }),
-          ).catch(() => { /* best-effort: the session runs without the shared context */ });
-        }
+        // present are skipped. Promise.resolve: a sync fake engine's populate would otherwise make the
+        // bare .catch throw and reject _startBody unhandled. (The self-heal check for the adopted
+        // pending-review is armed in _startBody AFTER _startWorktreeWatcher, which would cancel one
+        // scheduled here.)
+        await Promise.resolve(
+          this._gitWorkspace.populate({ projectPath: this.path, wtDir: this.worktreeDir, shareList: this._worktreeShare }),
+        ).catch(() => { /* best-effort: the session runs without the shared context */ });
         this.emit("worktree-ready", { id: this.id, worktreeDir: this.worktreeDir, branch: ws.branch });
         return true;
       }

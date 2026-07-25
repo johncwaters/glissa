@@ -77,9 +77,11 @@ function realWorktreeDir() {
 }
 
 function fakeGitWorkspace(opts = {}) {
-  const calls = { create: [], mergeBack: [], mergeKeep: [], discard: [] };
+  const calls = { create: [], mergeBack: [], mergeKeep: [], discard: [], populate: [] };
   return {
     calls,
+    // Sync no-op on purpose: the adopt path must tolerate a populate that does not return a promise.
+    populate(args) { calls.populate.push(args); },
     create(args) {
       calls.create.push(args);
       if (opts.createResult) return opts.createResult;
@@ -193,11 +195,9 @@ test('start() BLOCKS when the integration branch is missing - stays DORMANT, no 
 
 test('start() ADOPTS its own surviving worktree on branch-in-use (failed boot removal / discard)', { skip: !WIN }, async () => {
   const wt = realWorktreeDir();
-  const populated = [];
   const gw = fakeGitWorkspace({
     createResult: { cwd: process.cwd(), isGit: false, reason: 'branch-in-use', conflictPath: wt, branch: 'glissa/session/wt-sess' },
   });
-  gw.populate = async (args) => { populated.push(args); };
   const spawned = [];
   let blocked = null;
   let ready = null;
@@ -218,8 +218,8 @@ test('start() ADOPTS its own surviving worktree on branch-in-use (failed boot re
     assert.ok(ready && ready.worktreeDir === wt, 'worktree-ready announces the adopted dir');
     assert.equal(s.mergeStatus, 'pending-review', 'adopted survivor surfaces for review until the self-heal check');
     // The failed removal stripped the survivor's junctions; adoption must re-share the gitignored context.
-    assert.equal(populated.length, 1, 'gitignored share context re-populated into the survivor');
-    assert.equal(populated[0].wtDir, wt);
+    assert.equal(gw.calls.populate.length, 1, 'gitignored share context re-populated into the survivor');
+    assert.equal(gw.calls.populate[0].wtDir, wt);
     // The self-heal check must survive _startWorktreeWatcher's restart (which cancels pending timers):
     // a clean survivor demotes its provisional pending-review to none on this first check.
     assert.ok(s._worktreeCheckTimer, 'worktree check armed after the watcher (re)start');
