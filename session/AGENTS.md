@@ -16,4 +16,4 @@ The session domain: the stateful Session class (lifecycle, PTY spawn/kill, timer
 ## For AI Agents
 - New Session logic that can be pure goes in `core/` with a unit test in `tests/`; the class keeps only state and side effects.
 - Status detection is structural (hooks + OSC-0 title). Never reintroduce PTY body/content scraping.
-- See root `CLAUDE.md` ("Status Detection", "Session State Machine") before touching transitions or the completion gate.
+- See root `AGENTS.md` ("Status Detection", "Session State Machine") before touching transitions or the completion gate.

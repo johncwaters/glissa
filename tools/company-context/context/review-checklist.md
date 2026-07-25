@@ -4,4 +4,4 @@
 
 - [ ] TODO: Tests updated or added.
 - [ ] TODO: No new dependencies without sign-off.
-- [ ] TODO: Docs / CLAUDE.md updated if behavior changed.
+- [ ] TODO: Docs / AGENTS.md updated if behavior changed.

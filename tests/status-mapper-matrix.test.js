@@ -2,7 +2,7 @@
 
 // Exhaustive signal x state x confidence x activeAgents matrix for the pure
 // decision function session/core/status-mapper.js mapSignalToEvent. Expected
-// outcomes are derived from the documented semantics (CLAUDE.md "Status
+// outcomes are derived from the documented semantics (AGENTS.md "Status
 // Detection" section) and the module's own inline comments, laid out as an
 // explicit data table so a future semantic change fails with a readable
 // per-case diff instead of one opaque assertion.

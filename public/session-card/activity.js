@@ -1,6 +1,6 @@
 // Working-session heartbeat: turns the live PTY output stream into an honest "what is this
 // agent doing right now" signal WITHOUT reading a single byte of content (the data path stays
-// a dumb pipe; see CLAUDE.md "Status Detection"). Two structural facts surface on the focus
+// a dumb pipe; see AGENTS.md "Status Detection"). Two structural facts surface on the focus
 // ROSTER RAIL pill (the left sidebar) - and ONLY there, never on the centered terminal, where it
 // would just be redundant:
 //

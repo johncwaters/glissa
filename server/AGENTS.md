@@ -22,4 +22,4 @@ Backend runtime: the Express + WebSocket server factory and its control plane, p
 ## For AI Agents
 - These modules live one level below the repo root: filesystem assets (`dist/`, `public/`, `teams/`, `config.json`, `node_modules/`) resolve via `path.join(__dirname, '..', ...)`. Keep that offset when adding paths.
 - CommonJS only; no new dependencies without explicit instruction; avoid `else` (guard clauses).
-- See root `CLAUDE.md` and `AGENTS.md` for architecture and conventions.
+- See root `AGENTS.md` for architecture and conventions.
