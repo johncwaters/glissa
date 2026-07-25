@@ -963,7 +963,11 @@ class Session extends EventEmitter {
         try {
           this.adoptWorktree({ worktreeDir: ws.conflictPath, branch: ws.branch });
           adopted = true;
-        } catch { /* survivor vanished mid-adopt (concurrent reconcile); fall through to in-place */ }
+        } catch (err) {
+          // Survivor vanished mid-adopt (concurrent reconcile) or the adopt itself failed; log it so
+          // an unrelated adopt bug is diagnosable, then fall through to the in-place notice.
+          console.warn(`[session ${this.id}] survivor adopt failed: ${err.message} - running in place`);
+        }
       }
       if (adopted && this.worktreeDir) {
         this.worktreeNotice = null;
