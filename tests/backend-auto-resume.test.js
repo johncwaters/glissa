@@ -198,8 +198,9 @@ test('runAutoResume skips a picked id with no live session in the map', async ()
 
 // The DORMANT check must run at gate-execution time, not at enqueue time: the gate can serialize a
 // picked session's start() well behind another queued job, and in that window the plain
-// start-session control path (control-handlers.js, ungated) could start the very same session -
-// Session.start() has no re-entrancy guard, so a stale enqueue-time check would double-spawn it.
+// start-session control path (control-handlers.js, ungated) could start the very same session.
+// Session.start()'s single-flight guard only collapses starts still in flight, not one that already
+// settled, so a stale enqueue-time check would still respawn an externally started session here.
 test('runAutoResume does not double-spawn a session started externally while queued behind the gate', async () => {
   const calls = [];
   const sess = fakeSession('race', '4a3d4462-4cf7-4a23-8f00-ccec89a48ba5', calls);

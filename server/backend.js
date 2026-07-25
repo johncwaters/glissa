@@ -189,16 +189,47 @@ function decideWasActiveFlip(to, event, pendingRestart) {
   return null;
 }
 
+// A config modify (path or permission change) replaces the Session OBJECT, but destroy() leaves the
+// old instance's on-disk worktree checked out on the session branch. Without a carry-over the new
+// Session provisions fresh, finds its own surviving branch as branch-in-use, and falls back to running
+// IN PLACE in the operator's real tree (the recreate sibling of the double-start race Session.start()'s
+// single-flight guard closes). Same project path -> the new Session adopts the surviving worktree and
+// resumes in it (mirrors the boot reconcile's re-adopt). Path changed -> the worktree belongs to the
+// OLD repo and can never serve the new path: once the old PTY's kill reap settles (a live process
+// holding the worktree as cwd blocks removal on Windows), a clean worktree is discarded junction-safe
+// and one with uncommitted work is left on disk untouched (no data loss - the same dirty test
+// _settleWorktreeOnExit uses). NOTE a kept worktree becomes an orphan the boot reconcile can no longer
+// see (it only visits paths still in config.projects), so it waits for manual reconcile or a future
+// project entry at the old path. Module-level so tests drive it with fake sessions directly.
+function carryWorktreeAcrossRecreate(oldSess, newSess) {
+  if (!oldSess || !oldSess.worktreeDir || !oldSess._workspace) return;
+  if (newSess.path === oldSess.path) {
+    newSess.adoptWorktree({
+      worktreeDir: oldSess.worktreeDir,
+      branch: oldSess._workspace.branch,
+      base: oldSess._workspace.base,
+    });
+    return;
+  }
+  return Promise.resolve(oldSess._killReap)
+    .catch(() => {})
+    .then(async () => {
+      if (await oldSess.hasChanges()) return; // unmerged work: keep for the boot reconcile
+      await oldSess.discardWorktree();
+    })
+    .catch(() => { /* best-effort */ });
+}
+
 // Boot-time smart auto-resume (design C): spawn every picked, still-DORMANT session through
 // `gate` so N picks at boot never race pty.spawn against each other - the ConPTY wedge risk
 // spawn-gate.js exists for, worse at boot (many sessions can be picked at once) than a single
 // user click. A picked id absent from `sessionsMap` (deleted project between reads) is skipped
 // up front, but the DORMANT check must happen INSIDE the gate callback, at execution time, not
-// while enqueuing: the gate can serialize a picked session's start() seconds behind others, and
-// Session.start() has no re-entrancy guard (it spawns unconditionally once past the DORMANT-gated
-// transition), so an ungated start (e.g. the user clicking the card via the plain start-session
-// control path) landing in that window would otherwise get double-spawned once this queued job
-// finally runs. Returns a promise that resolves once every picked run has settled (module-level,
+// while enqueuing: the gate can serialize a picked session's start() seconds behind others, and a
+// session the user already started (via the plain start-session control path) and that already
+// SETTLED must not be respawned when this queued job finally runs - Session.start()'s single-flight
+// guard only collapses starts that are still in flight, not a completed one.
+// Returns a promise that resolves once every picked run has settled (module-level,
 // no createBackend closure, so tests can drive it directly with fake Session instances - see
 // tests/backend-auto-resume.test.js).
 function runAutoResume(sessionsMap, cfg, gate) {
@@ -1260,7 +1291,13 @@ function createBackend(httpServer, options = {}) {
       oldSess.destroy();
       const newSess = makeSession(project, { ...config, ...newConfig });
       sessions.set(project.id, newSess);
+      // Wire listeners BEFORE the carry-over: adoptWorktree emits merge-status synchronously, and an
+      // unwired emit is dropped, leaving open dashboards merge-clean while the server holds
+      // pending-review (the boot reconcile wires-then-adopts in this same order).
       wireSessionEvents(newSess);
+      carryWorktreeAcrossRecreate(oldSess, newSess);
+      // adopt (same path) sets commonGitDir; watch the integration ref for the carried worktree too.
+      if (newSess.worktreeDir) integrationPool.ensure(newSess);
       // Broadcast BEFORE start() - see _addNewSessions for rationale.
       broadcastControl({ type: 'session-modified', id: project.id, session: project.name, path: project.path, state: newSess.state, skipPerms: !!newSess.dangerouslySkipPermissions, worktree: !!newSess.isWorktree, resumeSessionId: newSess.resumeSessionId || null });
       newSess.start();
@@ -1602,6 +1639,6 @@ function mountDevRoutes(app) {
 }
 
 module.exports = {
-  createBackend, runAutoResume, persistSessionField, decideWasActiveFlip,
+  createBackend, runAutoResume, persistSessionField, decideWasActiveFlip, carryWorktreeAcrossRecreate,
   buildReviewPrompt, readReviewResult, prPollerShouldStart, prReviewCfgKey,
 };
