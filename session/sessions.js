@@ -1006,7 +1006,13 @@ class Session extends EventEmitter {
   // On a real PTY exit (DONE/FAILED) decide the review gate: a changed worktree becomes
   // pending-review (the operator merges/discards); an unchanged one (chat/research) is discarded
   // silently so it leaves no branch. Transient COMPLETE never reaches here (it has no PTY exit).
+  //
+  // A DESTROYED session's PTY exit is not the operator ending the work: it is a server shutdown or a
+  // config-driven recreate, where the tree must SURVIVE so the next boot re-adopts it and auto-resume
+  // lands back in the same worktree (the boot reconcile adopts a clean claimed tree; the recreate carry
+  // settles it explicitly). Discarding here would delete the worktree merely because the process closed.
   async _settleWorktreeOnExit() {
+    if (this._destroyed) return;
     if (!this._gitWorkspace || !this._workspace) return;
     if (this.state !== STATES.DONE && this.state !== STATES.FAILED) return;
     if (await this.discardWorktreeIfClean()) return;
@@ -1343,13 +1349,16 @@ class Session extends EventEmitter {
   // survived a server restart), so its unreviewed work is resurfaced as pending-review instead of
   // stranded. The session stays DORMANT; the operator can then review/merge it, or starting it reuses
   // this same worktree (_provisionWorktree early-returns on an existing worktreeDir).
-  adoptWorktree({ worktreeDir, branch, base }) {
+  // `hasUnmergedWork: false` adopts WITHOUT the review gate: a tree that survived a shutdown with
+  // nothing uncommitted has nothing to review, so gating it would put a stale review banner on the card.
+  // Callers that know (or cannot cheaply tell) the tree holds work keep the pending-review default.
+  adoptWorktree({ worktreeDir, branch, base, hasUnmergedWork = true }) {
     if (!worktreeDir) return;
     this._workspace = { cwd: worktreeDir, isGit: true, branch, base: base || this._integrationBranch };
     this.worktreeDir = worktreeDir;
     this.commonGitDir = this._resolveCommonGitDir();
     this.isWorktree = true;
-    this._setMergeStatus("pending-review");
+    this._setMergeStatus(hasUnmergedWork ? "pending-review" : "none");
     // Watch the re-adopted worktree too: an operator who merges/cleans it from the CLI then sees the
     // stranded gate self-heal fast, without starting the session.
     this._startWorktreeWatcher();

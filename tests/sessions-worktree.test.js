@@ -1246,6 +1246,107 @@ test('_handlePtyExit: a rejecting settle still emits "exit" and clears the teard
   } finally { s.destroy(); fs.rmSync(wt, { recursive: true, force: true }); }
 });
 
+// --- survive-shutdown: a destroyed session's PTY exit must NOT settle the worktree ---
+
+// Server shutdown destroys every session and the PTY exit lands async, after destroy(). Settling there
+// discarded a clean worktree (and review-gated a dirty one) merely because the process closed, so the
+// next boot found no tree and auto-resume provisioned a fresh one. The destroy guard keeps the tree
+// exactly as it was; only an explicit end (killSession / discard) settles.
+test('_settleWorktreeOnExit: a DESTROYED session keeps its worktree untouched (shutdown, not an end)', { skip: !WIN }, async () => {
+  { // clean tree: no discard
+    const wt = realWorktreeDir();
+    const gw = fakeGitWorkspace({ worktreeDir: wt });
+    const s = makeSession({ gitWorkspace: gw, integrationBranch: 'develop', ptySpawn: () => fakePty() });
+    try {
+      await s.start();
+      s.hasChanges = () => false;
+      s.state = STATES.DONE;
+      s.destroy();
+      await s._settleWorktreeOnExit();
+      assert.equal(gw.calls.discard.length, 0, 'a clean tree survives shutdown (not discarded)');
+      assert.equal(s.worktreeDir, wt, 'worktreeDir kept for the next boot to re-adopt');
+      assert.equal(s.mergeStatus, 'none');
+    } finally { fs.rmSync(wt, { recursive: true, force: true }); }
+  }
+  { // dirty tree: no review gate either (the shutdown decides nothing; the boot reconcile does)
+    const wt = realWorktreeDir();
+    const gw = fakeGitWorkspace({ worktreeDir: wt });
+    const s = makeSession({ gitWorkspace: gw, integrationBranch: 'develop', ptySpawn: () => fakePty() });
+    try {
+      await s.start();
+      s.hasChanges = () => true;
+      s.state = STATES.DONE;
+      s.destroy();
+      await s._settleWorktreeOnExit();
+      assert.equal(s.mergeStatus, 'none', 'mergeStatus untouched by a shutdown-time exit');
+      assert.equal(s.worktreeDir, wt, 'worktree kept');
+    } finally { fs.rmSync(wt, { recursive: true, force: true }); }
+  }
+});
+
+// The suppressed settle must not cost the rest of the exit path: "exit" still fires (a queued
+// once("exit") handler must never strand a teardown flag) and the kill reap the server lifecycle
+// awaits (awaitReaps) still settles.
+test('_handlePtyExit after destroy(): tree kept, "exit" still emitted, kill reap still settles', { skip: !WIN }, async () => {
+  const wt = realWorktreeDir();
+  const gw = fakeGitWorkspace({ worktreeDir: wt });
+  const s = makeSession({ gitWorkspace: gw, integrationBranch: 'develop', ptySpawn: () => fakePty() });
+  try {
+    await s.start();
+    s.hasChanges = () => false;
+    s.state = STATES.IDLE;
+    s.destroy();
+    // Registered AFTER destroy: destroy() drops every prior listener, and this asserts the emit itself
+    // still happens (the anti-deadlock contract) rather than that shutdown listeners survive.
+    let exited = 0;
+    s.on('exit', () => { exited += 1; });
+    await s._handlePtyExit(0, null);
+    assert.equal(exited, 1, 'exit emitted once');
+    assert.equal(s.worktreeDir, wt, 'worktree survives the shutdown-time exit');
+    assert.equal(gw.calls.discard.length, 0);
+    assert.ok(s._killReap && typeof s._killReap.then === 'function', 'kill reap retained for awaitReaps');
+    await Promise.allSettled([s._killReap]); // rejects on a bogus pid; awaitReaps uses allSettled too
+  } finally { fs.rmSync(wt, { recursive: true, force: true }); }
+});
+
+// The other half of surviving a shutdown: the session must not be recorded as intentionally stopped, or
+// the boot auto-resume skips it (wasActive false) and the preserved worktree is never re-entered. The
+// backend persists wasActive from its `state-change` listener (backend.js decideWasActiveFlip), and
+// destroy() detaches every listener BEFORE the async PTY exit transitions to DONE - so the flip never
+// reaches config.json. This pins that ordering: a listener attached pre-destroy sees nothing.
+test('destroy() detaches state-change before the async exit, so no wasActive:false is persisted', { skip: !WIN }, async () => {
+  const wt = realWorktreeDir();
+  const gw = fakeGitWorkspace({ worktreeDir: wt });
+  const s = makeSession({ gitWorkspace: gw, integrationBranch: 'develop', ptySpawn: () => fakePty() });
+  try {
+    await s.start();
+    const seen = [];
+    s.on('state-change', (e) => seen.push(e.to)); // stands in for the backend's persist listener
+    s.state = STATES.RUNNING;
+    s.destroy();
+    await s._handlePtyExit(0, null);
+    assert.equal(s.state, STATES.DONE, 'the exit still transitions the session');
+    assert.deepEqual(seen, [], 'no state-change reached the persist listener during shutdown');
+  } finally { fs.rmSync(wt, { recursive: true, force: true }); }
+});
+
+test('adoptWorktree({ hasUnmergedWork: false }) adopts a clean survivor with NO review gate', { skip: !WIN }, async () => {
+  const wt = realWorktreeDir();
+  const gw = fakeGitWorkspace({ worktreeDir: wt });
+  const s = makeSession({ gitWorkspace: gw, integrationBranch: 'develop', ptySpawn: () => fakePty() });
+  try {
+    s.adoptWorktree({ worktreeDir: wt, branch: 'glissa/session/wt-sess', base: 'develop', hasUnmergedWork: false });
+    assert.equal(s.worktreeDir, wt);
+    assert.equal(s.isWorktree, true);
+    assert.equal(s.mergeStatus, 'none', 'nothing to review, so no banner');
+    assert.equal(s.toSnapshot().mergeStatus, 'none');
+    // The reuse guard is what makes auto-resume land back in this same tree.
+    await s.start();
+    assert.equal(gw.calls.create.length, 0, 'start() reused the adopted worktree instead of provisioning');
+    assert.equal(s.worktreeDir, wt);
+  } finally { s.destroy(); fs.rmSync(wt, { recursive: true, force: true }); }
+});
+
 // The settled (DONE/FAILED) branch of finishAndMerge now sets _finishing synchronously before the async
 // reset, so a SECOND click landing while the first reset is awaiting is refused (in-progress) and the
 // engine merge runs once.

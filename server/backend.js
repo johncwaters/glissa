@@ -260,6 +260,49 @@ function runAutoResume(sessionsMap, cfg, gate) {
   return Promise.all(runs);
 }
 
+// Boot reconcile of the on-disk session worktrees a prior run left behind (clean shutdown OR crash).
+// Four outcomes, chosen so no path destroys work and no resumable session is stranded:
+//   CLAIMED (a session in `sessions` owns the id) -> always adopted, so the session keeps its worktree:
+//     with work it resurfaces as pending-review (review/merge, or resuming reuses it); CLEAN it adopts
+//     ungated (mergeStatus 'none'), which is the survive-shutdown case - Session._settleWorktreeOnExit
+//     no longer discards a clean tree on a destroyed session, so auto-resume must land back in the SAME
+//     worktree instead of finding it removed and provisioning a fresh one.
+//   UNCLAIMED with work -> kept with a warning: no session owns the id (deleted project, or a foreign
+//     glissa/session/* branch sharing the naming, e.g. a Claude Code session worktree), and removing it
+//     would destroy uncommitted work. Left for manual review, same as sweepSessionWorktrees.
+//   UNCLAIMED and clean -> removed junction-safe. A true leftover orphan.
+// Module-level with injected dependencies so tests drive it with fakes; booting createBackend against a
+// real repo to exercise this would delete that repo's own glissa/session/* worktrees.
+function reconcileSessionWorktrees({ projects, sessions, gitWorkspaceSync, integrationBranch, onAdopt, worktreeDirExists = fs.existsSync }) {
+  const reconciledRoots = new Set();
+  for (const project of projects) {
+    if (!project.path || reconciledRoots.has(project.path)) continue;
+    reconciledRoots.add(project.path);
+    for (const wt of gitWorkspaceSync.listSessionWorktrees({ projectPath: project.path, integrationBranch })) {
+      const sess = sessions.get(wt.id);
+      // Adopt only a coherent claim: the session must still live in THIS repo (a project whose path was
+      // edited away must not adopt a tree in the old repo) and the directory must still exist (a
+      // vanished-but-unpruned worktree still lists, as clean, so it falls through to the prune below).
+      if (sess && isSameDirectoryPath(sess.path, project.path) && worktreeDirExists(wt.cwd)) {
+        sess.adoptWorktree({
+          worktreeDir: wt.cwd,
+          branch: wt.branch,
+          base: wt.integrationBranch || integrationBranch,
+          hasUnmergedWork: Boolean(wt.hasWork),
+        });
+        if (onAdopt) onAdopt(sess, wt);
+        console.log(`[worktree] re-adopted ${wt.hasWork ? 'pending-review' : 'clean'} worktree for ${sess.name} (${wt.branch})`);
+        continue;
+      }
+      if (wt.hasWork) {
+        console.warn(`[worktree] keeping orphan worktree with unmerged work: ${wt.branch} (${wt.cwd})`);
+        continue;
+      }
+      gitWorkspaceSync.removeWorktreeByPath({ projectPath: project.path, cwd: wt.cwd, branch: wt.branch });
+    }
+  }
+}
+
 function isAllowedOrigin(req) {
   const origin = req.headers.origin;
   if (!origin) return true; // Non-browser clients (curl, ws CLI) have no Origin
@@ -1110,40 +1153,20 @@ function createBackend(httpServer, options = {}) {
     wireSessionEvents(sess);
   }
 
-  // Reconcile on-disk session worktrees left by a prior run/crash: a worktree whose session still exists
-  // and holds UNMERGED work is re-adopted (resurfaced as pending-review, so the operator can still
-  // review/merge or resume it); anything else (a clean orphan, or a worktree for a since-deleted session)
-  // is removed junction-safe. This is what makes cleanup correct regardless of how a session ended: no
-  // data loss, no leaked worktrees. Once per distinct repo root, best-effort.
+  // Reconcile the on-disk session worktrees a prior run/crash/shutdown left behind (decision table and
+  // rationale on reconcileSessionWorktrees). Once per distinct repo root, best-effort.
   try {
     // One-shot cold reconcile at boot (before any live session streams): use the SYNCHRONOUS engine
     // sibling so this blocking pass steals no PTY time from running sessions and never awaits. The live
     // async `gitWorkspace` is reserved for the recurring session/orchestrator paths.
-    const gitWorkspaceSync = createGitWorkspaceSync();
-    const reconciledRoots = new Set();
-    const integrationBranch = config.integrationBranch || 'develop';
-    for (const project of config.projects) {
-      if (!project.path || reconciledRoots.has(project.path)) continue;
-      reconciledRoots.add(project.path);
-      for (const wt of gitWorkspaceSync.listSessionWorktrees({ projectPath: project.path, integrationBranch })) {
-        const sess = sessions.get(wt.id);
-        if (sess && wt.hasWork) {
-          sess.adoptWorktree({ worktreeDir: wt.cwd, branch: wt.branch, base: wt.integrationBranch || integrationBranch });
-          integrationPool.ensure(sess); // adopt sets commonGitDir; watch the branch for this re-adopted worktree too
-          console.log(`[worktree] re-adopted pending-review worktree for ${sess.name} (${wt.branch})`);
-          continue;
-        }
-        if (wt.hasWork) {
-          // An ORPHAN with work is not removable: "no data loss" must hold even when no session claims
-          // the id (deleted project, or a foreign glissa/session/* branch that shares the naming, e.g. a
-          // Claude Code session worktree). Removing one destroys uncommitted work. Leave it for manual
-          // review; the async sweep (sweepSessionWorktrees) already preserves these the same way.
-          console.warn(`[worktree] keeping orphan worktree with unmerged work: ${wt.branch} (${wt.cwd})`);
-          continue;
-        }
-        gitWorkspaceSync.removeWorktreeByPath({ projectPath: project.path, cwd: wt.cwd, branch: wt.branch });
-      }
-    }
+    reconcileSessionWorktrees({
+      projects: config.projects,
+      sessions,
+      gitWorkspaceSync: createGitWorkspaceSync(),
+      integrationBranch: config.integrationBranch || 'develop',
+      // adopt sets commonGitDir; watch the integration branch for this re-adopted worktree too
+      onAdopt: (sess) => integrationPool.ensure(sess),
+    });
   } catch (err) {
     console.warn(`[worktree] worktree reconcile failed: ${err.message}`);
   }
@@ -1650,5 +1673,6 @@ function mountDevRoutes(app) {
 
 module.exports = {
   createBackend, runAutoResume, persistSessionField, decideWasActiveFlip, carryWorktreeAcrossRecreate,
+  reconcileSessionWorktrees,
   buildReviewPrompt, readReviewResult, prPollerShouldStart, prReviewCfgKey,
 };
