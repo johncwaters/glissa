@@ -273,7 +273,7 @@ function runAutoResume(sessionsMap, cfg, gate) {
 //   UNCLAIMED and clean -> removed junction-safe. A true leftover orphan.
 // Module-level with injected dependencies so tests drive it with fakes; booting createBackend against a
 // real repo to exercise this would delete that repo's own glissa/session/* worktrees.
-function reconcileSessionWorktrees({ projects, sessions, gitWorkspaceSync, integrationBranch, onAdopt, worktreeDirExists = fs.existsSync }) {
+function reconcileSessionWorktrees({ projects, sessions, gitWorkspaceSync, integrationBranch, onAdopt, worktreeDirExists = fs.existsSync, log = console.log, warn = console.warn }) {
   const reconciledRoots = new Set();
   for (const project of projects) {
     if (!project.path || reconciledRoots.has(project.path)) continue;
@@ -288,14 +288,14 @@ function reconcileSessionWorktrees({ projects, sessions, gitWorkspaceSync, integ
           worktreeDir: wt.cwd,
           branch: wt.branch,
           base: wt.integrationBranch || integrationBranch,
-          hasUnmergedWork: Boolean(wt.hasWork),
+          hasUnmergedWork: wt.hasWork,
         });
         if (onAdopt) onAdopt(sess, wt);
-        console.log(`[worktree] re-adopted ${wt.hasWork ? 'pending-review' : 'clean'} worktree for ${sess.name} (${wt.branch})`);
+        log(`[worktree] re-adopted ${wt.hasWork ? 'pending-review' : 'clean'} worktree for ${sess.name} (${wt.branch})`);
         continue;
       }
       if (wt.hasWork) {
-        console.warn(`[worktree] keeping orphan worktree with unmerged work: ${wt.branch} (${wt.cwd})`);
+        warn(`[worktree] keeping orphan worktree with unmerged work: ${wt.branch} (${wt.cwd})`);
         continue;
       }
       gitWorkspaceSync.removeWorktreeByPath({ projectPath: project.path, cwd: wt.cwd, branch: wt.branch });

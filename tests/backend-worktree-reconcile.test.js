@@ -74,17 +74,18 @@ function fakeEngine(byProjectPath) {
   };
 }
 
-function run(t, { projects, sessions, engine, integrationBranch = 'develop', onAdopt, worktreeDirExists = () => true }) {
-  t.mock.method(console, 'log', () => {});
-  t.mock.method(console, 'warn', () => {});
-  reconcileSessionWorktrees({ projects, sessions, gitWorkspaceSync: engine, integrationBranch, onAdopt, worktreeDirExists });
+function run({ projects, sessions, engine, integrationBranch = 'develop', onAdopt, worktreeDirExists = () => true }) {
+  reconcileSessionWorktrees({
+    projects, sessions, gitWorkspaceSync: engine, integrationBranch, onAdopt, worktreeDirExists,
+    log: () => {}, warn: () => {},
+  });
 }
 
-test('CLEAN + claimed: adopted ungated (no review banner) and NOT removed - the survive-shutdown case', (t) => {
+test('CLEAN + claimed: adopted ungated (no review banner) and NOT removed - the survive-shutdown case', () => {
   const sess = fakeSession('alpha');
   const engine = fakeEngine({ 'C:/proj': [worktreeEntry({ id: 'sess-1', hasWork: false })] });
   const adoptedSessions = [];
-  run(t, {
+  run({
     projects: [{ id: 'sess-1', path: 'C:/proj' }],
     sessions: new Map([['sess-1', sess]]),
     engine,
@@ -101,33 +102,33 @@ test('CLEAN + claimed: adopted ungated (no review banner) and NOT removed - the 
   assert.deepEqual(adoptedSessions, ['alpha'], 'onAdopt fires so the integration-ref watcher is armed');
 });
 
-test('DIRTY + claimed: adopted as pending-review (unchanged behavior)', (t) => {
+test('DIRTY + claimed: adopted as pending-review (unchanged behavior)', () => {
   const sess = fakeSession('alpha');
   const engine = fakeEngine({ 'C:/proj': [worktreeEntry({ id: 'sess-1', hasWork: true })] });
-  run(t, { projects: [{ id: 'sess-1', path: 'C:/proj' }], sessions: new Map([['sess-1', sess]]), engine });
+  run({ projects: [{ id: 'sess-1', path: 'C:/proj' }], sessions: new Map([['sess-1', sess]]), engine });
   assert.equal(sess.adopted.length, 1);
   assert.equal(sess.adopted[0].hasUnmergedWork, true, 'unmerged work still raises the review gate');
   assert.deepEqual(engine.removed, []);
 });
 
-test('CLEAN + unclaimed: removed junction-safe (a true leftover orphan)', (t) => {
+test('CLEAN + unclaimed: removed junction-safe (a true leftover orphan)', () => {
   const engine = fakeEngine({ 'C:/proj': [worktreeEntry({ id: 'gone-1', hasWork: false })] });
-  run(t, { projects: [{ id: 'sess-1', path: 'C:/proj' }], sessions: new Map(), engine });
+  run({ projects: [{ id: 'sess-1', path: 'C:/proj' }], sessions: new Map(), engine });
   assert.deepEqual(engine.removed, [{
     projectPath: 'C:/proj', cwd: 'C:/wts/proj-gone-1', branch: 'glissa/session/gone-1',
   }]);
 });
 
-test('DIRTY + unclaimed: kept - neither adopted nor removed (no data loss without an owner)', (t) => {
+test('DIRTY + unclaimed: kept - neither adopted nor removed (no data loss without an owner)', () => {
   const engine = fakeEngine({ 'C:/proj': [worktreeEntry({ id: 'gone-1', hasWork: true })] });
-  run(t, { projects: [{ id: 'sess-1', path: 'C:/proj' }], sessions: new Map(), engine });
+  run({ projects: [{ id: 'sess-1', path: 'C:/proj' }], sessions: new Map(), engine });
   assert.deepEqual(engine.removed, [], 'unclaimed uncommitted work is left for manual review');
 });
 
-test('CLEAN + claimed but the directory vanished: pruned, not adopted onto a dead path', (t) => {
+test('CLEAN + claimed but the directory vanished: pruned, not adopted onto a dead path', () => {
   const sess = fakeSession('alpha');
   const engine = fakeEngine({ 'C:/proj': [worktreeEntry({ id: 'sess-1', hasWork: false })] });
-  run(t, {
+  run({
     projects: [{ id: 'sess-1', path: 'C:/proj' }],
     sessions: new Map([['sess-1', sess]]),
     engine,
@@ -137,7 +138,7 @@ test('CLEAN + claimed but the directory vanished: pruned, not adopted onto a dea
   assert.deepEqual(engine.removed.map((r) => r.branch), ['glissa/session/sess-1'], 'the stale registration is pruned');
 });
 
-test('claimed but the session now lives in a DIFFERENT repo: dirty kept, clean removed, never adopted', (t) => {
+test('claimed but the session now lives in a DIFFERENT repo: dirty kept, clean removed, never adopted', () => {
   const movedDirty = fakeSession('moved-dirty', 'C:/other-repo');
   const movedClean = fakeSession('moved-clean', 'C:/other-repo');
   const engine = fakeEngine({
@@ -146,7 +147,7 @@ test('claimed but the session now lives in a DIFFERENT repo: dirty kept, clean r
       worktreeEntry({ id: 'sess-2', hasWork: false }),
     ],
   });
-  run(t, {
+  run({
     projects: [{ id: 'sess-1', path: 'C:/proj' }],
     sessions: new Map([['sess-1', movedDirty], ['sess-2', movedClean]]),
     engine,
@@ -156,7 +157,7 @@ test('claimed but the session now lives in a DIFFERENT repo: dirty kept, clean r
   assert.deepEqual(engine.removed.map((r) => r.branch), ['glissa/session/sess-2'], 'clean wrong-repo tree treated as orphan');
 });
 
-test('base comes from the worktree marker when present, else the configured integration branch', (t) => {
+test('base comes from the worktree marker when present, else the configured integration branch', () => {
   const marked = fakeSession('marked');
   const plain = fakeSession('plain');
   const engine = fakeEngine({
@@ -165,7 +166,7 @@ test('base comes from the worktree marker when present, else the configured inte
       worktreeEntry({ id: 'sess-2', hasWork: true }),
     ],
   });
-  run(t, {
+  run({
     projects: [{ id: 'sess-1', path: 'C:/proj' }],
     sessions: new Map([['sess-1', marked], ['sess-2', plain]]),
     engine,
@@ -174,9 +175,9 @@ test('base comes from the worktree marker when present, else the configured inte
   assert.equal(plain.adopted[0].base, 'develop');
 });
 
-test('each repo root is visited once and a project with no path is skipped', (t) => {
+test('each repo root is visited once and a project with no path is skipped', () => {
   const engine = fakeEngine({ 'C:/proj': [] });
-  run(t, {
+  run({
     projects: [
       { id: 'sess-1', path: 'C:/proj' },
       { id: 'sess-2', path: 'C:/proj' },
@@ -188,7 +189,7 @@ test('each repo root is visited once and a project with no path is skipped', (t)
   assert.deepEqual(engine.listed, [{ projectPath: 'C:/proj', integrationBranch: 'develop' }]);
 });
 
-test('a mixed repo resolves every worktree independently in one pass', (t) => {
+test('a mixed repo resolves every worktree independently in one pass', () => {
   const dirtyOwner = fakeSession('dirty-owner');
   const cleanOwner = fakeSession('clean-owner');
   const engine = fakeEngine({
@@ -199,7 +200,7 @@ test('a mixed repo resolves every worktree independently in one pass', (t) => {
       worktreeEntry({ id: 'orphan-dirty', hasWork: true }),
     ],
   });
-  run(t, {
+  run({
     projects: [{ id: 'sess-1', path: 'C:/proj' }],
     sessions: new Map([['sess-1', dirtyOwner], ['sess-2', cleanOwner]]),
     engine,
