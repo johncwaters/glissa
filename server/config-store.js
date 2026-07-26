@@ -188,7 +188,7 @@ function createConfigStore() {
       worktreeRoot: config.worktreeRoot ?? DEFAULT_CONFIG.worktreeRoot,
       worktreeShare: config.worktreeShare ?? DEFAULT_CONFIG.worktreeShare,
       repoRoots: config.repoRoots,
-      // Opt-in GitHub PR auto-review (see CLAUDE.md). null when never configured, so a user who
+      // Opt-in GitHub PR auto-review (see AGENTS.md). null when never configured, so a user who
       // never opens the PR Review tab gets a byte-identical config (not added to DEFAULT_CONFIG).
       prReview: config.prReview ? { ...config.prReview } : null,
       telegram: config.telegram ? { ...config.telegram } : null,

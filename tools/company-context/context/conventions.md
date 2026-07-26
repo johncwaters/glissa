@@ -1,8 +1,8 @@
 # Engineering Conventions
 
-Distilled from the project `CLAUDE.md`. Informational reference for OMC
-workflows. `CLAUDE.md` remains the authoritative source; if the two ever
-disagree, `CLAUDE.md` wins and this file should be updated.
+Distilled from the project `AGENTS.md`. Informational reference for OMC
+workflows. `AGENTS.md` remains the authoritative source; if the two ever
+disagree, `AGENTS.md` wins and this file should be updated.
 
 ## Platform and runtime
 

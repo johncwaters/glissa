@@ -14,4 +14,4 @@ The notification domain: the lifecycle state machine deciding when the operator 
 
 ## For AI Agents
 - The per-state notify decision lives in `../session/core/notify-gate.js`; the manager only owns entry lifecycle and timers.
-- See root `CLAUDE.md` ("Notifications (lifecycle + delivery)") for the delivery contract.
+- See root `AGENTS.md` ("Notifications (lifecycle + delivery)") for the delivery contract.

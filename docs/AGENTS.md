@@ -21,7 +21,7 @@ Design documents, postmortems, and operator guides. Background reading for why t
 ## For AI Agents
 
 ### Working In This Directory
-- Docs are historical context: when a doc conflicts with `CLAUDE.md` or the code, the code and `CLAUDE.md` win.
+- Docs are historical context: when a doc conflicts with `AGENTS.md` or the code, the code and `AGENTS.md` win.
 - Keep the no-dash/no-emoji house style in any new doc.
 - Detection work should cite `postmortem-terminal-detection.md` rather than restating it.
 
@@ -31,6 +31,6 @@ Design documents, postmortems, and operator guides. Background reading for why t
 ## Dependencies
 
 ### Internal
-- Referenced by `CLAUDE.md` and code comments (notably detection and spawn-gate modules).
+- Referenced by `AGENTS.md` and code comments (notably detection and spawn-gate modules).
 
 <!-- MANUAL: Any manually added notes below this line are preserved on regeneration -->

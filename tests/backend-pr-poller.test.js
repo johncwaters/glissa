@@ -98,7 +98,7 @@ test('prReviewCfgKey: absent prReview/telegram normalizes to null, distinct from
 });
 
 // --- applySettingsReload hot-applies the poller, gated + serialized (backend.js startPrPoller is
-// invoked only when prReviewCfgKey(config) changes; see CLAUDE.md GitHub PR Auto-Review). startPrPoller
+// invoked only when prReviewCfgKey(config) changes; see AGENTS.md GitHub PR Auto-Review). startPrPoller
 // and its `prPoller` instance are closure-private to createBackend, so there is no seam to inspect them
 // directly. This exercises the wiring end to end through a real boot + real control-WS 'update-settings'
 // round trips, but stays off the misconfigured (enabled, no telegram) path: prPollerShouldStart fails
