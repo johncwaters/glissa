@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-07-27
+
+The Focus rail keeps a project's slot after its last session closes and gains one-click quick-add/remove, session worktrees survive a broad set of races and edge cases (double-spawn, config-modify recreate, branch-in-use, server shutdown), an opt-in GitHub PR auto-review poller can review and merge your own clean PRs unattended, and the Rainbow Unicorns nyan easter egg grows from 2 animals to 18.
+
+### Added
+
+- **GitHub PR auto-review (opt-in, off by default)**: a background lane that reviews the operator's own GitHub PRs and merges the clean ones unattended. Configured from Settings > PR Review (enable toggle, Telegram bot token/chat id, project picker, poll interval, concurrency, timeout, merge method); inert unless both PR Review and Telegram are configured. Every 15 minutes it reviews new commits on your own non-draft PRs with an ephemeral headless Claude session (in place for a clean PR, in an isolated worktree for a conflicting one), posts findings as a PR comment, and merges only once GitHub checks are green and the PR touches no workflow file. Actionable transitions (changes requested, conflicts resolved, merged, error) ping Telegram.
+- **Focus rail keeps a project after its last session closes**: every project path Glissa has seen stays in the rail as an empty group (header, quick-add, dismiss) instead of disappearing and forcing a re-add through the Add Session dialog.
+- **Quick add/remove sessions from the rail**: a "+" on each project header spawns another session on that project's path with an auto-suggested name; a hover (mouse) or Delete/Backspace (keyboard) control retires a pill directly, without the Add Session dialog or the card overflow menu. A clean session retires immediately with no confirm; a session with unmerged work still prompts before discarding.
+- **Nyan menagerie grows to 18 animals**: cat and unicorn are joined by dragon, pig, whale, fox, frog, penguin, bee, owl, cow, panda, red panda, deer, horse, sheep, hamster, and giraffe, each with its own 6-frame sprite, motion, and themed trail (embers, bubbles, clover, acorns, sunflower seeds, and more).
+
+### Fixed
+
+- **Session worktree reliability**: fixes several worktree races and edge cases uncovered under normal use, including a double-spawn race on concurrent session starts, a worktree left orphaned across a config-driven session recreate, a session that fell back to running in place after failing to clean up its own worktree, worktrees no longer surviving a server shutdown/restart, and a worktree/branch leak on quick-delete when the PTY still held the directory locked.
+- Manual Park is removed; the rail's one-click remove now covers retiring a session, including discarding its worktree.
+
 ## [0.18.0] - 2026-07-21
 
 Conversations now survive a crash or shutdown and resume themselves on the next boot, the dashboard reconnects without losing notifications, and a new Rainbow Unicorns dark theme ships with a fully animated nyan cat easter egg.
