@@ -17,6 +17,11 @@ const DEFAULT_CONFIG = {
   // run_in_background / Ctrl+B). On by default; set false to fall back to "main-agent Stop completes
   // the card" behavior (see sessions.js detectBackgroundAgents / session/core/agent-tracker.js).
   detectBackgroundAgents: true,
+  // Forensic recording of a session's STRUCTURAL signals (hook payloads verbatim, state
+  // transitions) to ~/.glissa/recordings. On by default and tiny; it is what a detection
+  // post-mortem needs. Raw PTY byte capture is a separate opt-in (`capture.enabled`, bulky,
+  // replay-harness work only). See AGENTS.md, "Session Recording", and session-recorder.js.
+  recordSignals: true,
   // Check the npm registry once at startup for a newer published glissa and surface the update command
   // (dashboard banner + console line). Advisory, fail-open, off-switchable. See server/update-check.js.
   checkForUpdates: true,
@@ -67,6 +72,7 @@ const BOOLEAN_KEYS = [
   'cursorBlink',
   'debugMode',
   'detectBackgroundAgents',
+  'recordSignals',
   'antiSlopPrompt',
   'checkForUpdates',
   'autoResume',
@@ -180,6 +186,7 @@ function createConfigStore() {
       cursorBlink: config.cursorBlink ?? DEFAULT_CONFIG.cursorBlink,
       debugMode: config.debugMode ?? DEFAULT_CONFIG.debugMode,
       detectBackgroundAgents: config.detectBackgroundAgents ?? DEFAULT_CONFIG.detectBackgroundAgents,
+      recordSignals: config.recordSignals ?? DEFAULT_CONFIG.recordSignals,
       antiSlopPrompt: config.antiSlopPrompt ?? DEFAULT_CONFIG.antiSlopPrompt,
       checkForUpdates: config.checkForUpdates ?? DEFAULT_CONFIG.checkForUpdates,
       autoResume: config.autoResume ?? DEFAULT_CONFIG.autoResume,

@@ -373,7 +373,9 @@ function createBackend(httpServer, options = {}) {
       // persisted on the project record). Null = fresh conversation. See control-handlers resume-conversation.
       resumeSessionId: project.resumeSessionId || null,
     });
-    const recorder = createRecorder(project.name, cfg.capture);
+    // Signals-only by default (kill switch: config recordSignals); cfg.capture opts into raw PTY
+    // bytes on top. See AGENTS.md, "Session Recording".
+    const recorder = createRecorder(project.name, cfg.capture, cfg.recordSignals ?? DEFAULT_CONFIG.recordSignals);
     if (recorder) {
       session.setRecorder(recorder);
     }

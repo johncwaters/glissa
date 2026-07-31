@@ -412,12 +412,10 @@ class Session extends EventEmitter {
       this._trackWakeup(raw);
       return;
     }
-    // Every MAIN-agent hook payload carries the live Claude session_id, so the crash-safe resume
-    // capture (AGENTS.md, "Auto-Resume and Shutdown") keys off whichever hook arrives, not off one
-    // event name: Claude Code does not reliably fire SessionStart (2.1.220 fires none at startup),
-    // which left the capture, and with it boot auto-resume, permanently dead. Tracking-only
-    // background-agent signals returned above and are deliberately excluded: they can describe a
-    // different Claude session than the one this card resumes.
+    // Keys off whichever main-agent hook arrives, never one event name: Claude Code does not
+    // reliably fire SessionStart. Tracking-only background-agent signals returned above and are
+    // deliberately excluded, since they can describe a different Claude session than the one
+    // this card resumes (AGENTS.md, "Auto-Resume and Shutdown").
     if (raw?.payload) this._captureClaudeSessionId(raw.payload.session_id, raw.payload.source);
     // /clear and /compact fire SessionEnd+SessionStart with NO UserPromptSubmit and no
     // Stop; the only movement they cause is TUI title noise. Reset the merged stream
@@ -451,7 +449,7 @@ class Session extends EventEmitter {
   }
 
   // clear/compact need the quiet-title handling below: nothing is running, nothing completed.
-  // See _titleQuiet. (The session_id capture is central, in ingestHookSignal.)
+  // See _titleQuiet.
   _onSessionStartHook(raw) {
     const payload = raw.payload || {};
     const src = String(payload.source || "").toLowerCase();
