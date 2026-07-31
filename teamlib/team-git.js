@@ -114,7 +114,9 @@ function createGitWorkspace(opts = {}) {
   // the same name first (it just is not checked out locally yet), then the repo's likely default
   // branches, then HEAD as a final catch-all (createBody already verified HEAD resolves earlier, so a
   // seed is effectively always found in a repo with commits). Passing the REF NAME (not the sha) to
-  // `git branch` means creating from a remote-tracking ref also sets upstream tracking automatically.
+  // `git branch` means creating from a remote-tracking ref also sets upstream tracking automatically;
+  // `--` keeps a config-sourced branch name from ever parsing as a flag. Returns the new branch tip
+  // sha (the seed's own sha, so no re-verify is needed), or null when creation fails.
   async function ensureLocalBranch(projectPath, baseBranch) {
     const seedCandidates = [
       `refs/remotes/origin/${baseBranch}`,
@@ -124,16 +126,14 @@ function createGitWorkspace(opts = {}) {
       'refs/remotes/origin/master',
       'HEAD',
     ];
-    let seedRef = null;
     for (const candidate of seedCandidates) {
       const verify = await run(['rev-parse', '--verify', '--quiet', candidate], projectPath);
       if (!verify.ok) continue;
-      seedRef = candidate;
-      break;
+      const created = await run(['branch', '--', baseBranch, candidate], projectPath);
+      if (!created.ok) return null;
+      return verify.out;
     }
-    if (!seedRef) return false;
-    const created = await run(['branch', baseBranch, seedRef], projectPath);
-    return created.ok;
+    return null;
   }
 
   // Create an isolated worktree on `glissa/<teamId>/<label>`. Returns
@@ -153,14 +153,9 @@ function createGitWorkspace(opts = {}) {
       // the operator's main checkout currently has checked out. A missing local branch is auto-created
       // from origin/<baseBranch>, then main/master, then HEAD (ensureLocalBranch below); reason:
       // 'no-base-branch' remains only as the fallback when that creation itself fails.
-      let ref = await run(['rev-parse', '--verify', '--quiet', `refs/heads/${baseBranch}`], projectPath);
-      if (!ref.ok) {
-        const created = await ensureLocalBranch(projectPath, baseBranch);
-        if (!created) return { cwd: projectPath, isGit: false, reason: 'no-base-branch' };
-        ref = await run(['rev-parse', '--verify', '--quiet', `refs/heads/${baseBranch}`], projectPath);
-        if (!ref.ok) return { cwd: projectPath, isGit: false, reason: 'no-base-branch' };
-      }
-      baseSha = ref.out;
+      const ref = await run(['rev-parse', '--verify', '--quiet', `refs/heads/${baseBranch}`], projectPath);
+      baseSha = ref.ok ? ref.out : await ensureLocalBranch(projectPath, baseBranch);
+      if (!baseSha) return { cwd: projectPath, isGit: false, reason: 'no-base-branch' };
       base = baseBranch;
     }
     const branch = `glissa/${sanitize(teamId)}/${sanitize(label)}`;

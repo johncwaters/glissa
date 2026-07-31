@@ -32,10 +32,10 @@ function git(args, cwd) {
   return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
 }
 
-// A repo whose main checkout sits ON `develop` (the integration branch), with node_modules gitignored
-// the way every Node repo has it (so a commit made in the worktree never stages a node_modules junction).
-function initRepoOnDevelop() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-sess-'));
+// Shared base fixture: a repo on `main` with one commit and node_modules gitignored the way every Node
+// repo has it (so a commit made in the worktree never stages a node_modules junction).
+function initRepoOnMain(prefix) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
   try { git(['init', '-b', 'main'], dir); } catch { git(['init'], dir); }
   git(['config', 'user.email', 'test@example.com'], dir);
   git(['config', 'user.name', 'Glissa Test'], dir);
@@ -44,6 +44,12 @@ function initRepoOnDevelop() {
   fs.writeFileSync(path.join(dir, '.gitignore'), 'node_modules/\n', 'utf8');
   git(['add', '-A'], dir);
   git(['commit', '-m', 'init'], dir);
+  return dir;
+}
+
+// A repo whose main checkout sits ON `develop` (the integration branch).
+function initRepoOnDevelop() {
+  const dir = initRepoOnMain('glissa-sess-');
   git(['branch', 'develop'], dir);
   git(['checkout', 'develop'], dir);
   return dir;
@@ -52,30 +58,13 @@ function initRepoOnDevelop() {
 // A repo with only `main` (no `develop` branch at all, local or remote-tracking) - the fixture for the
 // auto-create-missing-integration-branch tests below.
 function initRepoMainOnly() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-mainonly-'));
-  try { git(['init', '-b', 'main'], dir); } catch { git(['init'], dir); }
-  git(['config', 'user.email', 'test@example.com'], dir);
-  git(['config', 'user.name', 'Glissa Test'], dir);
-  git(['config', 'commit.gpgsign', 'false'], dir);
-  fs.writeFileSync(path.join(dir, '.gitignore'), 'node_modules/\n', 'utf8');
-  fs.writeFileSync(path.join(dir, 'README.md'), '# repo\n', 'utf8');
-  git(['add', '-A'], dir);
-  git(['commit', '-m', 'init'], dir);
-  return dir;
+  return initRepoOnMain('glissa-mainonly-');
 }
 
 // A repo whose main checkout sits on `main` while `develop` has an EXTRA commit, so forking off
 // develop is observably different from forking off HEAD (proves create({baseBranch}) uses the branch).
 function initRepoMainWithDevelop() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-base-'));
-  try { git(['init', '-b', 'main'], dir); } catch { git(['init'], dir); }
-  git(['config', 'user.email', 'test@example.com'], dir);
-  git(['config', 'user.name', 'Glissa Test'], dir);
-  git(['config', 'commit.gpgsign', 'false'], dir);
-  fs.writeFileSync(path.join(dir, 'README.md'), '# repo\n', 'utf8');
-  fs.writeFileSync(path.join(dir, '.gitignore'), 'node_modules/\n', 'utf8');
-  git(['add', '-A'], dir);
-  git(['commit', '-m', 'init'], dir);
+  const dir = initRepoOnMain('glissa-base-');
   git(['branch', 'develop'], dir);
   git(['checkout', 'develop'], dir);
   fs.writeFileSync(path.join(dir, 'on-develop.txt'), 'dev\n', 'utf8');
