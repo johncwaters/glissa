@@ -201,16 +201,19 @@ function applyResyncResult(id, payload) {
   }
 }
 
-// Pure: the one-line outcome text for a completed resync, or null when there is nothing worth saying
-// (should not happen in practice - every resync reply carries either an error, a mutation action, or a
-// classifiable state). Ordered most-specific first, mirroring branchSyncLabel/mergeDisabledReason.
+// Pure: the one-line outcome text for a completed resync, exhaustive over every reply the server can
+// send: an error, a mutation action, or any post-resync state. The UI's button gate never sends a
+// resync for no-upstream, but the server does not re-check that gate, so a non-UI control-WS caller
+// (or a stale sidebar) can still land here with those states. Ordered most-specific first, mirroring
+// branchSyncLabel/mergeDisabledReason.
 function resyncOutcomeText(sync) {
   if (sync.error) return `Resync failed: ${sync.error}`;
   if (sync.action === 'fast-forwarded') return `Fast-forwarded ${sync.branch} to ${sync.upstream}.`;
   if (sync.action === 'pushed') return `Pushed ${sync.branch} to ${sync.upstream}.`;
   if (sync.state === 'diverged') return `${sync.branch} has diverged from ${sync.upstream}. Resolve manually.`;
   if (sync.state === 'in-sync') return `${sync.branch} is already in sync with ${sync.upstream}.`;
-  return null;
+  if (sync.state === 'no-upstream') return `${sync.branch || 'The base branch'} has no upstream to resync against.`;
+  return 'Could not determine sync status.';
 }
 
 // A server `session-changed` push: this session's worktree changed (a commit/stage via the gitdir

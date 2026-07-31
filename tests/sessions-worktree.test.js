@@ -647,25 +647,31 @@ test('getBranchSync reports in-sync right after a push', { skip: !GIT }, async (
   }
 });
 
+// Push a single extra commit from a fresh clone of `remoteDir`, so the ORIGINAL checkout's cached
+// origin/<branch> ref goes stale (remote-only work it does not yet know about) until a fetch catches
+// it up. -b <branch>: the bare remote's symbolic HEAD is whatever init.defaultBranch left it (often
+// "master", which was never created here), so a plain clone would check out nothing and any commit
+// made in it would be unrelated history, rejected as non-fast-forward on push.
+function pushRemoteOnlyCommit(remoteDir, branch, fileName) {
+  const clone = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-bsync-clone-'));
+  git(['clone', '-q', '-b', branch, remoteDir, clone], os.tmpdir());
+  git(['config', 'user.email', 'test@example.com'], clone);
+  git(['config', 'user.name', 'Glissa Test'], clone);
+  git(['config', 'commit.gpgsign', 'false'], clone);
+  fs.writeFileSync(path.join(clone, fileName), 'remote\n', 'utf8');
+  git(['add', '-A'], clone);
+  git(['commit', '-m', 'remote-only commit'], clone);
+  git(['push', '-q', 'origin', `HEAD:${branch}`], clone);
+  return clone;
+}
+
 // Reproduces exactly the shape verified by hand against a real repo before writing the pure core: 2
 // local-only commits (ahead) and 1 remote-only commit pushed from a second clone (behind), with the
 // local origin/develop ref deliberately stale until getBranchSync's own `git fetch` catches it up.
 test('getBranchSync fetches then reports diverged with the correct ahead/behind orientation', { skip: !GIT }, async () => {
   const { dir: repo, remoteDir } = initRepoWithRemote();
-  const clone = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-bsync-clone-'));
+  const clone = pushRemoteOnlyCommit(remoteDir, 'develop', 'remote-work.txt');
   try {
-    // -b develop: the bare remote's symbolic HEAD is whatever init.defaultBranch left it (often
-    // "master", which was never created here), so a plain clone would check out nothing and any
-    // commit made in it would be unrelated history, rejected as non-fast-forward on push.
-    git(['clone', '-q', '-b', 'develop', remoteDir, clone], os.tmpdir());
-    git(['config', 'user.email', 'test@example.com'], clone);
-    git(['config', 'user.name', 'Glissa Test'], clone);
-    git(['config', 'commit.gpgsign', 'false'], clone);
-    fs.writeFileSync(path.join(clone, 'remote-work.txt'), 'remote\n', 'utf8');
-    git(['add', '-A'], clone);
-    git(['commit', '-m', 'remote-only commit'], clone);
-    git(['push', '-q', 'origin', 'HEAD:develop'], clone);
-
     // Two local-only commits in the original checkout, never pushed. Its cached origin/develop ref is
     // now stale (it does not yet know about the remote-only commit above) until getBranchSync fetches.
     fs.writeFileSync(path.join(repo, 'local-work-1.txt'), 'local1\n', 'utf8');
@@ -692,22 +698,6 @@ test('getBranchSync fetches then reports diverged with the correct ahead/behind 
 });
 
 // --- resyncBranch: on-demand fetch + resolve the local-base-branch-vs-remote drift ---
-
-// Push a single extra commit from a fresh clone of `remoteDir`, so the ORIGINAL checkout's cached
-// origin/<branch> ref goes stale (remote-only work it does not yet know about) until a resync fetches.
-// Mirrors the clone setup already verified for getBranchSync's diverged case above.
-function pushRemoteOnlyCommit(remoteDir, branch, fileName) {
-  const clone = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-resync-clone-'));
-  git(['clone', '-q', '-b', branch, remoteDir, clone], os.tmpdir());
-  git(['config', 'user.email', 'test@example.com'], clone);
-  git(['config', 'user.name', 'Glissa Test'], clone);
-  git(['config', 'commit.gpgsign', 'false'], clone);
-  fs.writeFileSync(path.join(clone, fileName), 'remote\n', 'utf8');
-  git(['add', '-A'], clone);
-  git(['commit', '-m', 'remote-only commit'], clone);
-  git(['push', '-q', 'origin', `HEAD:${branch}`], clone);
-  return clone;
-}
 
 test('resyncBranch: behind + branch checked out -> ff-merge (advances the checkout)', { skip: !GIT }, async () => {
   const { dir: repo, remoteDir } = initRepoWithRemote();
