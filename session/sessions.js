@@ -648,17 +648,11 @@ class Session extends EventEmitter {
     this._evaluateGateHeldReady();
   }
 
-  // Hold a main-agent ready that only the background-agent gate suppressed. The stash records
-  // the state and the moment it was suppressed in; session/core/gate-release.js decides whether
-  // that hold may ever fire (any transition since, or any activity since, invalidates it).
-  //
-  // Re-opening the title source's working latch is what makes "activity since" observable at
-  // all: OscTitleSource emits `working` only on a kind EDGE, so a card that has been RUNNING
-  // with a spinning title since before this Stop would never report the spinner again, and a new
-  // turn opened by a teammate mailbox wake (which fires NO UserPromptSubmit hook) would be
-  // completely invisible to the release path. That blind spot falsely COMPLETEd a working
-  // orchestrator card twice on 2026-07-30. With the latch re-opened, the next real braille frame
-  // proves the turn is not over; a genuinely finished turn emits no further frames.
+  // Hold a main-agent ready that only the background-agent gate suppressed;
+  // decideGateRelease (session/core/gate-release.js) decides whether it may ever fire.
+  // The latch re-open makes "activity since the stash" observable at all, since the
+  // edge-triggered title source would otherwise never re-report a still-spinning title
+  // (full rationale: AGENTS.md, Background sub-agents / completion gate).
   _stashGateHeldReady(s) {
     const now = Date.now();
     this._gateHeldReady = {

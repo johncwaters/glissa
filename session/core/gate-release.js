@@ -3,30 +3,15 @@
 // Pure decision for the DEFERRED COMPLETION path: whether a gate-held `ready` may finally
 // fire (see sessions.js _stashGateHeldReady / _evaluateGateHeldReady). No IO, no Session import.
 //
-// A main-agent `ready` (Stop) suppressed by the background-agent gate is HELD rather than
-// dropped, so the card can still complete when the background count later drains WITHOUT
-// another Stop (idle teammate, dropped SubagentStop). Firing that hold is a completion claim
-// made minutes after the Stop that produced it, so it must be re-validated against LIVE
-// evidence at release time, not just against a drained count and an unchanged state: a lead
-// that auto-resumes on a teammate mailbox message fires no UserPromptSubmit, so without this
-// check the stale hold releases mid-turn and falsely COMPLETEs a working card.
-//
-// The evidence that the turn is NOT over is any non-ready signal observed AFTER the stash
-// (`working`, `resume`, `awaiting-input`, ...). A spinner frame in the OSC-0 title is enough:
-// sessions.js re-opens the title source's working-kind latch when it stashes, so a continuously
-// spinning title (which otherwise reports `working` exactly once, on the kind edge) reports one
-// again while the hold is pending.
-//
-// This is the ONLY judge of whether a hold may fire. Callers stash, feed it evidence, and act on
-// the verdict; they never separately decide a hold is stale.
+// The invariant: firing a hold is a completion claim made minutes after the Stop that produced
+// it, so it must be re-validated against live evidence at release time, never against a drained
+// count and an unchanged state alone. This is the ONLY judge of whether a hold may fire; callers
+// stash, feed it evidence, and act on the verdict, they never separately decide a hold is stale.
+// Full rationale (mailbox wakes, the title kind-edge latch, why the quiet window exists):
+// AGENTS.md, Background sub-agents / completion gate.
 
 const DEFAULT_GATE_RELEASE_SETTLE_MS = 10 * 1000;
 
-// Why a quiet window at all: a TeammateIdle/SubagentStop drain almost always precedes the lead
-// auto-resuming on the teammate's mailbox message 1-3s later, so releasing the instant the count
-// hits 0 fired a false COMPLETE + notification per orchestration round and then flipped straight
-// back to WORKING. The window gives that wake time to arrive and cancel the hold.
-//
 // Decisions (the caller owns the side effects):
 //   "cancel"  drop the hold - it no longer describes the session
 //   "gated"   background work is still live - keep holding, re-check on the next drain or TTL tick

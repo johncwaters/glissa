@@ -1,16 +1,8 @@
 'use strict';
 
-// Deferred completion (gate-held ready) release validation.
-//
-// The failure shape under test: a lead's Stop is held while teammates run, the lead resumes
-// on a teammate mailbox message (which fires NO UserPromptSubmit hook), the teammates go
-// idle, the count drains, and the stale hold must NOT release onto the new turn. Two failure
-// modes are covered:
-//   1. the title source emits `working` only on a kind EDGE, so a card RUNNING with a
-//      spinning title since before the Stop would never report the spinner again unless the
-//      stash re-opens the latch;
-//   2. the release path must not trust a drained count plus an unchanged state without
-//      checking that no new turn opened since the stash.
+// Deferred completion (gate-held ready) release validation: session/core/gate-release.js
+// plus the sessions.js stash/evaluate shell around it. Rationale for the failure shapes
+// covered here: AGENTS.md, Background sub-agents / completion gate.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
