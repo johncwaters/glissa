@@ -11,7 +11,7 @@ Repo-level static assets for documentation and source media. Runtime-served audi
 | Directory | Purpose |
 |-----------|---------|
 | `audio/` | Source notification sound files (OGG); copies served at runtime live in `public/audio/` |
-| `pictures/` | Screenshots for README/docs (`glissa-screenshot.png`) |
+| `pictures/` | Screenshots for README/docs (`glissa-screenshot.png` Focus view hero, `glissa-teams.png` Teams tab) |
 
 ## For AI Agents
 

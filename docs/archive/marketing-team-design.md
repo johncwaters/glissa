@@ -1,3 +1,5 @@
+> Historical document, superseded. Predates the `.glissa/` pack path convention and project-level shared packs described in AGENTS.md. Current behavior: see AGENTS.md and CHANGELOG.md.
+
 ## Glissa Teams: Marketing Pipeline Design
 
 A four-agent marketing pipeline that researches, plans, writes, and edits Milepost marketing content on a schedule. Built as a reusable "team" inside Glissa. The shape borrows from the Planner, Coder, Tester, Reviewer pattern used in agentic coding, adapted for marketing, where success criteria are softer and topic choice matters as much as execution.

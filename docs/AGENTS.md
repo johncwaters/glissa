@@ -1,5 +1,5 @@
 <!-- Parent: ../AGENTS.md -->
-<!-- Generated: 2026-06-10 | Updated: 2026-06-10 -->
+<!-- Generated: 2026-06-10 | Updated: 2026-07-31 -->
 
 # docs
 
@@ -11,12 +11,15 @@ Design documents, postmortems, and operator guides. Background reading for why t
 | File | Description |
 |------|-------------|
 | `postmortem-terminal-detection.md` | Postmortem of the content-scraping detection era; rationale for the structural-signal rewrite and the signal x state matrix |
-| `glissa-plan.md` | Original project plan |
-| `marketing-team-design.md` | Design doc for the Teams marketing pipeline |
 | `PRODUCT.md` | Older design-context doc; the canonical product definition is the root `PRODUCT.md` |
-| `publishing.md` | npm publishing notes |
-| `testing-cli.md` | How to test the CLI |
-| `progress.txt` | Running progress notes |
+| `publishing.md` | npm release process: `npm run release` (`scripts/release.js`) as the primary path, with a manual walkthrough appendix as fallback |
+| `testing-cli.md` | Manual CLI test scenarios (`--help`, `--version`, `--port`, `--config`, `doctor`, `npm pack`) to run before a release |
+
+## Subdirectories
+
+| Directory | Purpose |
+|-----------|---------|
+| `archive/` | Superseded design docs and progress logs, kept for historical rationale only. Each file carries a banner pointing back to `AGENTS.md`/`CHANGELOG.md` for current behavior. See `archive/glissa-plan.md` (original pre-0.12 project plan, screen-scraping era), `archive/marketing-team-design.md` (pre-`.glissa/`-pack-convention design doc for the marketing team), `archive/progress.txt` (build log of the first Teams implementation) |
 
 ## For AI Agents
 
@@ -24,6 +27,7 @@ Design documents, postmortems, and operator guides. Background reading for why t
 - Docs are historical context: when a doc conflicts with `AGENTS.md` or the code, the code and `AGENTS.md` win.
 - Keep the no-dash/no-emoji house style in any new doc.
 - Detection work should cite `postmortem-terminal-detection.md` rather than restating it.
+- A doc that becomes fully superseded moves to `archive/` via `git mv` (never deleted outright) with a short banner paragraph at the top naming what replaced it.
 
 ### Testing Requirements
 - None; prose only.

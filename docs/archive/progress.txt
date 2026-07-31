@@ -1,4 +1,6 @@
-# Ralph progress — marketing-team pipeline
+Historical document, superseded. Point-in-time build log of the first Teams implementation (the marketing pipeline). Current behavior: see AGENTS.md and CHANGELOG.md.
+
+# Ralph progress: marketing-team pipeline
 
 Plan: .omc/plans/marketing-team-pipeline.md (deliberate consensus, APPROVE-WITH-CHANGES)
 PRD: .omc/state/sessions/509e2267-df93-4584-8431-3aae8c18668f/prd.json

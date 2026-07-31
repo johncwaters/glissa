@@ -1,4 +1,6 @@
-## Claude Code Session Manager — Glissa
+> Historical document, superseded. Kept for design rationale: it describes the pre-0.12 screen-scraping detection architecture, which no longer exists (status detection today is structural, see AGENTS.md). Current behavior: see AGENTS.md and CHANGELOG.md.
+
+## Claude Code Session Manager, Glissa
 
 ---
 

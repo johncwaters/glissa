@@ -59,12 +59,15 @@ The install succeeded, but the directory where npm placed the `glissa` command i
 - Real-time terminal output via xterm.js with WebGL acceleration
 - Dual WebSocket architecture (control channel + per-session PTY streaming)
 - Structural status detection: authoritative Claude Code hooks (injected per session, no repo changes) with an OSC-0 title fallback, never screen scraping
+- Background sub-agent completion gate: a session with live background agents or tasks stays out of Complete until they finish, with an "N agents" card chip showing the count
 - Native browser notifications when a session needs input, finishes, or fails (opt-in Windows toast fallback)
 - Keyboard navigation: jump between sessions, step through the ones needing attention, and merge or resolve from the keyboard
 - Teams: project-portable agent pipelines that run against any project you manage
+- GitHub PR auto-review (opt-in): reviews your own open PRs headlessly, comments its findings, and auto-merges only the clean PRs whose checks are green (configured in Settings; needs `gh` and Telegram)
+- Session recording: every session writes a JSONL forensic log to `~/.glissa/recordings` (structural signals by default, raw PTY bytes opt-in) with bounded retention
 - Dormant boot so unopened sessions cost nothing until you focus them
 - Auto-resume by default: sessions that were live when Glissa stopped (cleanly or by crash) come back on the next start with their Claude conversation resumed (`autoResume: false` to disable)
-- Configurable themes (Golgari, Midnight, Phyrexian, Compleated)
+- Configurable themes (Golgari, Midnight, Phyrexian, Compleated, Rainbow Unicorns)
 - Hot-reloadable configuration
 
 ## Focus
@@ -77,12 +80,21 @@ Navigate it all from the keyboard: `Alt+1`..`Alt+9` jump to a session, `Alt+Up`/
 
 ## Teams
 
-A team is a sequential agent pipeline (the bundled `marketing` team runs researcher -> strategist -> writer -> editor -> publisher) that you can point at any project Glissa manages. Ownership is split so the same agents serve every project:
+A team is a sequential agent pipeline that you can point at any project Glissa manages. Four ship with Glissa:
 
-- **Glissa owns the agents**: generic, brand-neutral role prompts under `teams/<id>/`.
-- **The project owns the pack**: its voice, avoid-list, brand, content calendar, and channels live under `<project>/.glissa/teams/<id>/pack/`.
+- **marketing**: researcher -> strategist -> writer -> editor -> publisher. Drafts content in the project's brand voice and, on a SHIP verdict, queues approved posts to Postiz as drafts.
+- **changelog**: analyst -> curator -> auditor -> announcer. Reconciles `CHANGELOG.md` against git history, then drafts a release announcement in the project's voice.
+- **qa**: runner-triager -> fixer -> auditor -> reporter. A regression auto-fixer: it keeps the existing test suite green by fixing source, never the tests.
+- **qa-walk**: an exploratory, persona-driven walk over Playwright MCP (first-timer, returning user, skeptic) that reports felt friction rather than pass/fail; scheduling is off by default.
 
-On first run, Glissa scaffolds the pack and halts until you fill it in, either by hand or with the dashboard's **Set up automatically** button, which spawns one interactive Claude session that reads the repo and interviews you for the subjective fields. Each run executes inside a throwaway git worktree so your working tree is never dirtied mid-run.
+Ownership is split so the same agents serve every project:
+
+- **Glissa owns the agents**: generic, brand-neutral role prompts under `teams/<id>/`, composed from reusable blocks in `teams/_shared/` where possible.
+- **The project owns the pack**: its voice, avoid-list, brand, content calendar, and channels live under `<project>/.glissa/teams/<id>/pack/`. A subset of those files (voice-guide, avoid-list, brand) is project-level shared, filled once under `<project>/.glissa/pack/` and reused by every team that declares them, instead of being re-interviewed and duplicated per team.
+
+On first run, Glissa scaffolds the pack and halts until you fill it in, either by hand or with the dashboard's **Set up automatically** button, which spawns one interactive Claude session that reads the repo and interviews you for the subjective fields. Each run executes inside a throwaway git worktree so your working tree is never dirtied mid-run. A verdict stage (SHIP / FIX / BLOCK) can trigger a bounded FIX revision loop: earlier stages re-run with the reviewer's notes and the audit repeats, up to a capped number of rounds, before the run finalizes.
+
+![Glissa Teams tab with a Marketing Pipeline bound to a project](assets/pictures/glissa-teams.png)
 
 ## Configuration
 
@@ -97,6 +109,8 @@ On first run, Glissa creates `~/.glissa/config.json` with defaults. You can also
   "repoRoots": ["C:\\path\\to\\repos"]
 }
 ```
+
+This is a minimal starting example. The full key list (`integrationBranch`, `autoResume`, `prReview`, `detectBackgroundAgents`, `recordSignals`, and more) is documented in the dashboard's Settings dialog and can also be edited directly in `config.json`.
 
 ## Requirements
 

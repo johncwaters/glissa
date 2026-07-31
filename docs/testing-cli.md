@@ -27,7 +27,10 @@ node bin/glissa.js --help
 **Expected:**
 
 ```
-Usage: glissa [options]
+Usage: glissa [command] [options]
+
+Commands:
+  doctor            Diagnose install / PATH issues and exit
 
 Options:
   --port <number>   Override the server port (default: 3000)
@@ -56,7 +59,7 @@ node bin/glissa.js -h
 node bin/glissa.js --version
 ```
 
-**Expected:** `0.1.0` (matches `package.json`)
+**Expected:** matches the `version` field in `package.json` (currently `0.19.0`)
 
 ---
 
@@ -168,56 +171,66 @@ node server.js
 
 ---
 
-## Test 9: `npm pack` Verification
+## Test 9: `glissa doctor`
+
+```powershell
+node bin/glissa.js doctor
+```
+
+**Expected:** A read-only report, no server started and nothing written to disk: glissa/node/platform versions, where the CLI is running from, the npm (and pnpm, if present) global bin directory and whether each is on PATH, a `node-pty` load probe, and the resolved config path. When the npm global bin directory is not on PATH, it also prints the one-step fix.
+
+**Exit code:** 0
+
+---
+
+## Test 10: `npm pack` Verification
 
 ```powershell
 npm pack --dry-run
 ```
 
-**Expected files included:**
+**Expected files included** (per the `files` array in `package.json`):
 
 ```
 bin/glissa.js
+bin/path-doctor.js
+scripts/postinstall-path-check.js
+dist/            (built frontend, excludes dist/AGENTS.md and dist/pictures/)
 server.js
-sessions.js
-notify.js
-patterns.js
-public/index.html
-public/app.js
-public/style.css
+server/
+session/
+notifications/
+detection/
+teamlib/team-registry.js
+teamlib/team-orchestrator.js
+teamlib/team-output.js
+teamlib/team-prompt.js
+teamlib/team-git.js
+teamlib/team-settings.js
+teamlib/team-setup.js
+teamlib/project-context.js
+teamlib/project-context-core.js
+teamlib/markdown.js
+teamlib/verdict.js
+teams/
+shared/states.js
+shared/states.esm.js
+shared/notification-states.js
+shared/paths.js
 package.json
 ```
 
-**Verify no unwanted files** — `config.json`, `spike/`, `.omc/`, `.claude/`, `docs/` should NOT appear.
+**Verify no unwanted files**: `config.json`, `spike/`, `.omc/`, `.claude/`, `docs/`, `node_modules/` should NOT appear.
 
 ---
 
-## Test 10: `package.json` Fields
+## Test 11: `package.json` Fields
 
 ```powershell
 node -e "const p=require('./package.json'); console.log(JSON.stringify({bin:p.bin,files:p.files,engines:p.engines},null,2))"
 ```
 
-**Expected:**
-
-```json
-{
-  "bin": {
-    "glissa": "bin/glissa.js"
-  },
-  "files": [
-    "bin/",
-    "public/",
-    "server.js",
-    "sessions.js",
-    "notify.js",
-    "patterns.js"
-  ],
-  "engines": {
-    "node": ">=18"
-  }
-}
-```
+**Expected:** `bin.glissa` points at `bin/glissa.js`, `engines.node` is `>=18`, and `files` matches the array above (check `package.json` directly for the current list; it grows as new server-side modules ship).
 
 ---
 
@@ -250,17 +263,17 @@ npm unlink -g glissa
 
 Verify `GLISSA_PORT` and `GLISSA_CONFIG` don't leak to child Claude processes.
 
-Check `sessions.js` lines 204-208:
+Check the pure scrub in `session/core/spawn-env.js` (`buildSpawnEnv`), which unsets, at minimum:
 
 ```javascript
-delete env.CLAUDECODE;
-delete env.CLAUDE_CODE_SSE_PORT;
-delete env.CLAUDE_CODE_ENTRYPOINT;
-delete env.GLISSA_PORT;
-delete env.GLISSA_CONFIG;
+CLAUDECODE
+CLAUDE_CODE_SSE_PORT
+CLAUDE_CODE_ENTRYPOINT
+GLISSA_PORT
+GLISSA_CONFIG
 ```
 
-This is a code-level verification — the env vars are deleted before `pty.spawn()`.
+This is a code-level verification: `buildSpawnEnv` returns a scrubbed copy of the environment before `pty.spawn()`, so the same check works standalone (`session/core/spawn-env.js` has no IO and no dependency on the rest of the session module).
 
 ---
 
@@ -270,16 +283,17 @@ This is a code-level verification — the env vars are deleted before `pty.spawn
 |---|------|-------|
 | 1 | `--help` prints usage, exits 0 | |
 | 2 | `-h` works as short flag | |
-| 3 | `--version` prints 0.1.0 | |
+| 3 | `--version` prints the package.json version | |
 | 4 | `--port 4567` starts on custom port | |
 | 5 | `--config ./config.json` uses explicit config | |
 | 6 | `--config <nonexistent>` errors with exit 1 | |
 | 7 | Auto-seeds `~/.glissa/config.json` when none exist | |
 | 8 | `node server.js` still works (backward compat) | |
-| 9 | `npm pack --dry-run` includes correct files | |
-| 10 | `package.json` has bin, files, engines | |
-| 11 | `npm link` + `glissa --help` works globally | |
-| 12 | `npm unlink -g glissa` cleans up | |
+| 9 | `glissa doctor` prints a read-only report, exits 0 | |
+| 10 | `npm pack --dry-run` includes correct files | |
+| 11 | `package.json` has bin, files, engines | |
+| 12 | `npm link` + `glissa --help` works globally | |
+| 13 | `npm unlink -g glissa` cleans up | |
 
 ---
 
