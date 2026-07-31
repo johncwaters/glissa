@@ -14,7 +14,7 @@ import { handleDebugStateRefresh, handleDebugStateResponse } from './session-car
 import { applyState, applyTerminalSettings, createSessionCard, getSessionCount, hasSession, removeSessionCard, renameSessionCard, seedSessionMergeStatus, setSessionAgents, setSessionDiff, setSessionEffectiveBase, setSessionMergeStatus, setSessionPostTurn, setSessionPrompt, setSessionResume, setSessionWakeup, setSessionWorktree, updateAggregateStatus } from './session-card/lifecycle.js';
 import { reconnectDataWs } from './session-card/terminal.js';
 import { showErrorToast } from './session-card/toast.js';
-import { forgetReviewSession, mergeSelectedSession, mountReviewSidebar, notifyWorktreeChanged, refreshReviewSidebar, resolveSelectedSession, setReviewBranchSync } from './sidebar/review-sidebar.js';
+import { forgetReviewSession, mergeSelectedSession, mountReviewSidebar, notifyWorktreeChanged, refreshReviewSidebar, resolveSelectedSession, resyncSelectedSession, setReviewBranchSync } from './sidebar/review-sidebar.js';
 import { handleTeamMessage, mountTeamsView, refreshTeamsProjects, setTabActivityCallback } from './teams-panel.js';
 import { applyTheme } from './theme.js';
 import { getActiveView, getThemeId, isSoundEnabled, setActiveView, setSoundEnabled } from './ui-prefs.js';
@@ -186,7 +186,7 @@ const messageHandlers = {
   'session-worktree-blocked': (msg) => { showErrorToast(`${msg.session}: ${msg.notice || 'integration branch not found'}`, { persist: true }); },
   'session-worktree-ready': () => {},
   'session-diff':       (msg) => { setSessionDiff(msg.id, { committed: msg.committed, uncommitted: msg.uncommitted, hasCommits: msg.hasCommits }); },
-  'branch-sync-status': (msg) => setReviewBranchSync(msg.id, { branch: msg.branch, upstream: msg.upstream, state: msg.state, ahead: msg.ahead, behind: msg.behind, fetched: msg.fetched }),
+  'branch-sync-status': (msg) => setReviewBranchSync(msg.id, { branch: msg.branch, upstream: msg.upstream, state: msg.state, ahead: msg.ahead, behind: msg.behind, fetched: msg.fetched, action: msg.action, error: msg.error }),
   'session-changed':    (msg) => notifyWorktreeChanged(msg.id),
   'post-turn-result':   (msg) => setSessionPostTurn(msg.id, msg),
   'debug-state-response': (msg) => handleDebugStateResponse(msg),
@@ -436,8 +436,9 @@ btnMute.addEventListener('click', (e) => {
 // ── Keyboard shortcuts (chrome-level) ─────────────────────────
 // Alt+0 opens a new session; Alt+1..9 focuses the Nth session in the Focus rail; Alt+Up/Down moves to
 // the previous/next session in the rail; Alt+W jumps to the next session that needs input (triage);
-// Alt+M merges the session selected in the review sidebar, Alt+R hands a parked merge to its session
-// (the keyboard paths to the sidebar's Merge / Resolve buttons).
+// Alt+M merges the session selected in the review sidebar; Alt+R hands a parked merge to its session,
+// or - when nothing is parked - resyncs its project's base branch against its remote upstream (the
+// keyboard paths to the sidebar's Merge / Resolve / Resync buttons).
 // All drive the Focus center, the only session destination now that the Sessions grid view was removed.
 // The Alt+<key> namespace is used on purpose: it collides with neither browser shortcuts (which switch
 // tabs on Ctrl+digit, not Alt) nor VS Code defaults (Ctrl / Ctrl+Shift / F-key / chord based, Ctrl+1..3
@@ -476,11 +477,14 @@ document.addEventListener('keydown', (e) => {
     mergeSelectedSession();
     return;
   }
-  // Alt+R: hand a parked merge to the agent in its worktree ("Resolve in session"). Same app-level posture
-  // as Alt+M; resolveSelectedSession no-ops unless the selection is a parked, still-live session.
+  // Alt+R: two actions share this binding, tried in order of urgency. First, hand a parked merge to the
+  // agent in its worktree ("Resolve in session") - resolveSelectedSession no-ops unless the selection is
+  // a parked, still-live session. Only when that no-ops (nothing parked) does Alt+R fall through to
+  // Resync (fetch + fast-forward/push the project's base branch against its remote); resyncSelectedSession
+  // is its own no-op when nothing is actionable. Same app-level posture as Alt+M either way.
   if (e.key === 'r' || e.key === 'R') {
     e.preventDefault();
-    resolveSelectedSession();
+    if (!resolveSelectedSession()) resyncSelectedSession();
     return;
   }
   if ((e.key === 'w' || e.key === 'W') && isFocusActive()) {

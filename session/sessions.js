@@ -28,7 +28,13 @@ const { mapSignalToEvent } = require("./core/status-mapper");
 const { buildMergePrompt } = require("./core/merge-prompt");
 const { createOutputRing } = require("./core/output-ring");
 const { decideSignatureDemotion, decideDiffSelfHeal } = require("./core/merge-gate");
-const { parseLeftRightCount, decideBranchSyncState } = require("../server/core/branch-sync-core");
+const {
+  parseLeftRightCount,
+  decideBranchSyncState,
+  parseRemoteFromUpstream,
+  decideResyncAction,
+  firstGitErrorLine,
+} = require("../server/core/branch-sync-core");
 const agentTracker = require("./core/agent-tracker");
 const { decideGateRelease, DEFAULT_GATE_RELEASE_SETTLE_MS } = require("./core/gate-release");
 const wakeupTracker = require("./core/wakeup-tracker");
@@ -66,6 +72,15 @@ function gitStrict(args, opts) {
     execFile("git", args, opts, (err, stdout) => (err ? reject(err) : resolve(stdout != null ? String(stdout) : "")));
   });
 }
+
+// Table-driven mapping from a resyncBranch decision (decideResyncAction's return) to the concrete git
+// command + past-tense outcome label. 'none' has no entry (the caller's lookup misses and mutates
+// nothing), so a diverged branch can never fall through to a command by construction.
+const RESYNC_COMMANDS = {
+  "ff-merge": ({ upstream, opts }) => ({ args: ["merge", "--ff-only", upstream], opts, successAction: "fast-forwarded" }),
+  "ff-fetch": ({ branch, remote, opts }) => ({ args: ["fetch", "--quiet", remote, `${branch}:${branch}`], opts: { ...opts, timeout: 8000 }, successAction: "fast-forwarded" }),
+  push: ({ branch, remote, opts }) => ({ args: ["push", remote, branch], opts: { ...opts, timeout: 15000 }, successAction: "pushed" }),
+};
 
 // ---------------------------------------------------------------------------
 // State machine. Status is driven by structural signals from StatusSource
@@ -325,6 +340,7 @@ class Session extends EventEmitter {
     this._gitWorkspace = gitWorkspace;
     this._integrationBranch = integrationBranch;
     this._effectiveBase = null;    // cached result of _resolveEffectiveBase(); null until first diff
+    this._resyncPromise = null;    // in-flight resyncBranch() call, so a second click rides the same one
     this._worktreeRoot = worktreeRoot;
     this._worktreeShare = worktreeShare;
     this.worktreeDir = null;     // active session worktree cwd (null = in-place at this.path)
@@ -1144,28 +1160,93 @@ class Session extends EventEmitter {
   // explicit sidebar open/refresh request - never on a recurring timer.
   async getBranchSync() {
     const branch = this._integrationBranch;
-    // fetched: null on these short-circuits - no fetch was ever attempted, which the UI must not
-    // render as a failed (stale) fetch.
-    const noUpstream = () => ({ branch: branch || null, upstream: null, state: decideBranchSyncState({ hasUpstream: false }), ahead: 0, behind: 0, fetched: null });
-    if (!branch || !this.path) return noUpstream();
+    if (!branch || !this.path) return this._branchSyncNoUpstream(branch);
     const opts = { cwd: this.path, encoding: "utf8", timeout: 10000 };
-    // gitOut (not gitStrict): "no upstream configured for branch" is an EXPECTED outcome here, not an
-    // error to reject on, so it must resolve to empty stdout rather than throw.
-    const upstream = (await gitOut(["rev-parse", "--abbrev-ref", "--symbolic-full-name", `${branch}@{upstream}`], opts)).trim();
-    if (!upstream || upstream.includes("@{")) return noUpstream();
+    const upstream = await this._branchSyncUpstream(branch, opts);
+    if (!upstream) return this._branchSyncNoUpstream(branch);
 
-    const upstreamSlashIdx = upstream.indexOf("/");
-    const remote = upstreamSlashIdx === -1 ? "origin" : upstream.slice(0, upstreamSlashIdx);
-    let fetched = true;
-    try {
-      await gitStrict(["fetch", "--quiet", remote, branch], { ...opts, timeout: 8000 });
-    } catch {
-      fetched = false; // offline / slow remote - fall through and report the (possibly stale) counts
+    const fetched = await this._branchSyncFetch(parseRemoteFromUpstream(upstream), branch, opts);
+    const counts = await this._branchSyncCounts(upstream, branch, opts);
+    return { branch, upstream, fetched, ...counts };
+  }
+
+  // On-demand resync: fetch, then RESOLVE the drift rather than just report it. behind-only fast-
+  // forwards the local base branch (never a rebase); ahead-only pushes it; every other state (diverged,
+  // in-sync, no-upstream, unknown) mutates nothing - decideResyncAction is the single place that
+  // decision is made, and it never returns anything but 'none' for a diverged branch, so this method
+  // can never rebase or force-push no matter what future state values are added. Only called on an
+  // explicit operator action (the sidebar's Resync button or its alt+r shortcut) - never on a timer.
+  // Concurrency: a second call while one is still running rides the SAME in-flight promise instead of
+  // starting a fresh git mutation (this._resyncPromise), so two clicks can never race two `git push`es.
+  async resyncBranch() {
+    if (this._resyncPromise) return this._resyncPromise;
+    this._resyncPromise = this._resyncBranchBody().finally(() => { this._resyncPromise = null; });
+    return this._resyncPromise;
+  }
+
+  async _resyncBranchBody() {
+    const branch = this._integrationBranch;
+    if (!branch || !this.path) return { ...this._branchSyncNoUpstream(branch), action: "none", error: null };
+    const opts = { cwd: this.path, encoding: "utf8", timeout: 10000 };
+    const upstream = await this._branchSyncUpstream(branch, opts);
+    if (!upstream) return { ...this._branchSyncNoUpstream(branch), action: "none", error: null };
+
+    const remote = parseRemoteFromUpstream(upstream);
+    const fetched = await this._branchSyncFetch(remote, branch, opts);
+    const before = await this._branchSyncCounts(upstream, branch, opts);
+
+    const checkedOut = (await gitOut(["rev-parse", "--abbrev-ref", "HEAD"], opts)).trim();
+    const decision = decideResyncAction(before.state, checkedOut === branch);
+
+    let action = "none";
+    let error = null;
+    const cmd = RESYNC_COMMANDS[decision]?.({ upstream, branch, remote, opts });
+    if (cmd) {
+      try {
+        await gitStrict(cmd.args, cmd.opts);
+        action = cmd.successAction;
+      } catch (err) {
+        error = firstGitErrorLine(err);
+      }
     }
 
+    // Recompute AFTER the mutation (no re-fetch: the remote has not moved further, only the local ref
+    // may have) so the UI lands on the post-resync truth, not the pre-mutation snapshot.
+    const after = await this._branchSyncCounts(upstream, branch, opts);
+    return { branch, upstream, fetched, ...after, action, error };
+  }
+
+  // fetched: null means no fetch was ever attempted (there is no upstream to fetch from), which the UI
+  // must not render as a failed/stale fetch - distinct from fetched: false (a real fetch that failed).
+  _branchSyncNoUpstream(branch) {
+    return { branch: branch || null, upstream: null, state: decideBranchSyncState({ hasUpstream: false }), ahead: 0, behind: 0, fetched: null };
+  }
+
+  // The branch's upstream tracking ref (e.g. "origin/develop"), or null when none is configured.
+  // gitOut (not gitStrict): "no upstream configured for branch" is an EXPECTED outcome here, not an
+  // error to reject on, so it must resolve to empty stdout rather than throw.
+  async _branchSyncUpstream(branch, opts) {
+    const upstream = (await gitOut(["rev-parse", "--abbrev-ref", "--symbolic-full-name", `${branch}@{upstream}`], opts)).trim();
+    return upstream && !upstream.includes("@{") ? upstream : null;
+  }
+
+  // Best-effort freshness fetch, bounded so an offline/slow remote never stalls the caller for long.
+  // Returns whether it actually succeeded; the caller reports counts either way (possibly stale).
+  async _branchSyncFetch(remote, branch, opts) {
+    try {
+      await gitStrict(["fetch", "--quiet", remote, branch], { ...opts, timeout: 8000 });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  // Ahead/behind + display state for an already-resolved upstream, shared by getBranchSync (called
+  // once, after its own fetch) and resyncBranch (called twice: before and after its mutation, without
+  // fetching again in between - the remote has not moved, only the local ref may have).
+  async _branchSyncCounts(upstream, branch, opts) {
     const counts = parseLeftRightCount(await gitOut(["rev-list", "--left-right", "--count", `${upstream}...${branch}`], opts));
     return {
-      branch, upstream, fetched,
       ahead: counts ? counts.ahead : 0,
       behind: counts ? counts.behind : 0,
       state: decideBranchSyncState({ hasUpstream: true, ahead: counts?.ahead, behind: counts?.behind }),

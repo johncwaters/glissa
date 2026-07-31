@@ -10,6 +10,12 @@
 // the diff via setReviewDiff (reply to request-session-diff, asked on selection and on every server
 // `session-changed` push via notifyWorktreeChanged). Session name/state are read live from the shared
 // card registry. Pure parsing lives in diff-core.mjs.
+//
+// A separate, unrelated fact - whether the project's LOCAL base branch (e.g. develop) has drifted from
+// its remote upstream - arrives via setReviewBranchSync (reply to request-branch-sync, asked on
+// selection, or resync-branch, asked on a Resync click/Alt+R). Both requests reply with the same
+// branch-sync-status message; a resync-branch reply additionally carries action/error, which is what
+// tells the two apart client-side. This never touches the worktree merge gate above it.
 
 import { MERGEABLE_LIVE_STATES, STATES } from '/shared/states.mjs';
 import { sendControlMsg } from '../control-ws.js';
@@ -28,6 +34,8 @@ const statusById = new Map(); // id -> mergeStatus ('none'|'pending-review'|'mer
 const diffById = new Map();   // id -> { committed, uncommitted, hasCommits } (null until fetched)
 // id -> branch-sync payload; null while a request is in flight, undefined if never requested.
 const syncById = new Map();
+// ids with a resync-branch request in flight (Resync button disabled; sibling status shows "Resyncing...").
+const resyncingIds = new Set();
 // Open/expanded keys are `${section}:${path}` so the SAME file appearing in both the committed and the
 // uncommitted section collapses independently (default: every file minimized).
 const openFiles = new Set();
@@ -41,6 +49,10 @@ let sessionNameEl = null;
 let resolveJustSent = false;
 let resolveJustSentFor = null;
 let resolveSentTimer = null;
+// Latest resync outcome, keyed to the session it came from: { forId, text, isError } | null. A success/
+// diverged/in-sync result auto-fades (see applyResyncResult); an error persists until the next resync.
+let resyncResult = null;
+let resyncResultTimer = null;
 
 // ── Mount ──
 // The sidebar is always visible (no collapse): with no session selected it shows an empty state, and
@@ -162,11 +174,43 @@ export function setReviewDiff(id, payload) {
   if (id === getSelectedId()) render();
 }
 
-// Cache a session's branch-sync payload (reply to request-branch-sync) and re-render if it is the
-// selected one. `payload` is { branch, upstream, state, ahead, behind, fetched }.
+// Cache a session's branch-sync payload (reply to request-branch-sync OR resync-branch, which share the
+// same message) and re-render if it is the selected one. `payload` is { branch, upstream, state, ahead,
+// behind, fetched } for a plain refresh, plus { action, error } for a resync outcome. `action` is only
+// ever present on a resync-branch reply (getBranchSync never sets it), so that field's presence is what
+// tells a shared reply apart from a plain one.
 export function setReviewBranchSync(id, payload) {
   syncById.set(id, payload || null);
+  if (payload && payload.action !== undefined) applyResyncResult(id, payload);
   if (id === getSelectedId()) render();
+}
+
+// Record a resync's outcome and clear its in-flight marker. A clean success/diverged/in-sync result
+// auto-fades after a few seconds (mirrors review-resolve-sent); an error is left up until the next
+// resync attempt for this session, since the operator needs time to actually read it.
+function applyResyncResult(id, payload) {
+  resyncingIds.delete(id);
+  clearTimeout(resyncResultTimer);
+  const text = resyncOutcomeText(payload);
+  resyncResult = text ? { forId: id, text, isError: !!payload.error } : null;
+  if (resyncResult && !resyncResult.isError) {
+    resyncResultTimer = setTimeout(() => {
+      if (resyncResult && resyncResult.forId === id) resyncResult = null;
+      render();
+    }, 5000);
+  }
+}
+
+// Pure: the one-line outcome text for a completed resync, or null when there is nothing worth saying
+// (should not happen in practice - every resync reply carries either an error, a mutation action, or a
+// classifiable state). Ordered most-specific first, mirroring branchSyncLabel/mergeDisabledReason.
+function resyncOutcomeText(sync) {
+  if (sync.error) return `Resync failed: ${sync.error}`;
+  if (sync.action === 'fast-forwarded') return `Fast-forwarded ${sync.branch} to ${sync.upstream}.`;
+  if (sync.action === 'pushed') return `Pushed ${sync.branch} to ${sync.upstream}.`;
+  if (sync.state === 'diverged') return `${sync.branch} has diverged from ${sync.upstream}. Resolve manually.`;
+  if (sync.state === 'in-sync') return `${sync.branch} is already in sync with ${sync.upstream}.`;
+  return null;
 }
 
 // A server `session-changed` push: this session's worktree changed (a commit/stage via the gitdir
@@ -194,6 +238,8 @@ export function forgetReviewSession(id) {
   statusById.delete(id);
   diffById.delete(id);
   syncById.delete(id);
+  resyncingIds.delete(id);
+  if (resyncResult && resyncResult.forId === id) { clearTimeout(resyncResultTimer); resyncResult = null; }
   if (id === getSelectedId()) { setSelectedId(null); return; } // setSelectedId fires render
   render();
 }
@@ -228,6 +274,21 @@ export function resolveSelectedSession() {
   if ((statusById.get(id) || 'none') !== 'parked') return false;
   if (!isLive(ui.currentState)) return false;
   sendControlMsg({ type: 'resolve-session-merge', id });
+  return true;
+}
+
+// Fire the Resync action for the currently selected session - the same control message the Resync
+// button sends, and the fallback half of the Alt+R shortcut (app.js tries resolveSelectedSession first;
+// this only runs when that no-ops, i.e. nothing is parked, since the two share the Alt+R binding and a
+// parked worktree conflict is the more urgent of the two). Gated exactly like the rendered button: a
+// session must be selected, not already resyncing, and its branch-sync state must be one
+// resyncDisabledReason does not withhold. Returns true only when a request was actually sent.
+export function resyncSelectedSession() {
+  const id = getSelectedId();
+  if (!id || !sessionUIs.has(id)) return false;
+  if (resyncingIds.has(id)) return false;
+  if (resyncDisabledReason(syncById.get(id), false)) return false;
+  requestResyncBranch(id);
   return true;
 }
 
@@ -295,6 +356,17 @@ function requestBranchSync(id) {
   if (id === getSelectedId()) render();
 }
 
+// Explicit request only (the Resync button click or the Alt+R fallback) - never on a timer. A second
+// call for the SAME id while one is in flight is a no-op here (the caller checks resyncingIds first);
+// the server additionally coalesces concurrent resyncs per session as a backstop.
+function requestResyncBranch(id) {
+  resyncingIds.add(id);
+  clearTimeout(resyncResultTimer);
+  if (resyncResult && resyncResult.forId === id) resyncResult = null; // a fresh attempt supersedes the last outcome
+  sendControlMsg({ type: 'resync-branch', id });
+  if (id === getSelectedId()) render();
+}
+
 // Pure: the compact display text for a branch-sync payload, or null when there is nothing to show yet
 // (never requested). Ordered by state, mirroring mergeDisabledReason's shape below.
 function branchSyncLabel(sync) {
@@ -307,6 +379,28 @@ function branchSyncLabel(sync) {
   if (state === 'behind') return `${branch}: ${behind} behind ${upstream}`;
   if (state === 'diverged') return `${branch}: ${ahead} ahead, ${behind} behind ${upstream}`;
   return null;
+}
+
+// Pure: the one-line reason Resync is unavailable, or null when it is actionable. Unlike Merge, most
+// states stay enabled: in-sync (still worth a fetch+refresh), ahead, behind, and diverged (clicking
+// still fetches and reports the diverged outcome - see resyncOutcomeText - it just never mutates
+// anything for that state). Only "nothing to compare against yet" disables it.
+function resyncDisabledReason(sync, resyncing) {
+  if (resyncing) return null; // the sibling status line already says "Resyncing..."
+  if (!sync) return 'Checking branch sync...';
+  if (sync.state === 'no-upstream') return 'No upstream configured.';
+  if (sync.state === 'unknown') return 'Could not determine sync status.';
+  return null;
+}
+
+// Pure: the { text, loading, error } to render as the Resync sibling status line, or null for nothing.
+// Priority order: an in-flight spinner beats a stale outcome, which beats a fresh disabled reason -
+// only one of the three is ever true for a given (id, sync, resyncing), so this is a single line.
+function resyncStatusLine(id, sync, resyncing) {
+  if (resyncing) return { text: 'Resyncing...', loading: true, error: false };
+  if (resyncResult && resyncResult.forId === id) return { text: resyncResult.text, loading: false, error: resyncResult.isError };
+  const reason = resyncDisabledReason(sync, false);
+  return reason ? { text: reason, loading: !sync, error: false } : null;
 }
 
 function sessionName(ui, id) {
@@ -356,6 +450,11 @@ function render() {
   // Parked means a conflict needs resolving first; suppress Merge entirely until it clears.
   const mergeEnabled = mergeableLive && status !== 'merging' && status !== 'parked';
 
+  // Resync is orthogonal to the merge/worktree gate above (it acts on the project's base branch vs its
+  // own remote, not this session's worktree), so it renders regardless of merge `status`.
+  const sync = syncById.get(id);
+  const resyncing = resyncingIds.has(id);
+
   if (sessionNameEl) sessionNameEl.textContent = sessionName(ui, id);
 
   // ── Pinned control region: status note + overall totals + actions + why-disabled reason.
@@ -371,8 +470,20 @@ function render() {
 
   // No combined total in the actions row: each section head right below carries its own +/- stat,
   // and a pinned grand total only repeated those numbers one scroll-line above them.
-  const actions = renderActions(id, { status, reviewable, mergeEnabled, live, state });
+  const actions = renderActions(id, { status, reviewable, mergeEnabled, live, state, sync, resyncing });
   controlsEl.append(actions);
+
+  // Resync status line: spinner while in flight, else the latest outcome (persists on error), else the
+  // disabled reason. At most one of these applies at a time, so this is a single line, not three.
+  const resyncStatus = resyncStatusLine(id, sync, resyncing);
+  if (resyncStatus) {
+    const r = el('div', resyncStatus.loading ? 'review-control-reason review-loading' : 'review-control-reason', resyncStatus.text);
+    if (resyncStatus.error) r.classList.add('review-control-reason-error');
+    r.id = 'review-resync-reason';
+    controlsEl.append(r);
+    const resyncBtn = actions.querySelector('#review-resync-btn');
+    if (resyncBtn) resyncBtn.setAttribute('aria-describedby', 'review-resync-reason');
+  }
 
   // Disabled reason only when Merge is rendered (not suppressed by parked) and unavailable.
   let reasonShown = false;
@@ -545,7 +656,7 @@ function renderFile(f, kind) {
   return sec;
 }
 
-function renderActions(id, { status, reviewable, mergeEnabled, live, state }) {
+function renderActions(id, { status, reviewable, mergeEnabled, live, state, sync, resyncing }) {
   const actions = el('div', 'review-actions');
 
   // Suppress Merge when parked: Resolve is the only path forward until the conflict clears.
@@ -563,7 +674,8 @@ function renderActions(id, { status, reviewable, mergeEnabled, live, state }) {
 
   // Parked: the auto rebase-then-FF could not complete due to a conflict. Paste a context-rich
   // resolve prompt into the session so the agent can finish the merge; operator re-runs Merge after.
-  if (status === 'parked' && live) {
+  const resolveShown = status === 'parked' && live;
+  if (resolveShown) {
     const resolve = el('button', 'review-btn review-btn-primary');
     resolve.type = 'button';
     resolve.title = 'Paste a resolve prompt into this session so the agent can finish the merge (alt+r)';
@@ -578,6 +690,25 @@ function renderActions(id, { status, reviewable, mergeEnabled, live, state }) {
     });
     actions.append(resolve);
   }
+
+  // Resync: fetch + fast-forward/push the project's LOCAL base branch against its remote upstream.
+  // Orthogonal to the worktree merge gate above (it never touches this session's worktree), so it
+  // always renders next to Merge/Resolve regardless of `status`. The label never changes for any
+  // reason (in flight, error, success) - progress/outcome live in the sibling reason line render()
+  // appends after the actions row, per the button-label rule. When Resolve is also shown, Alt+R goes to
+  // it first (see app.js), so the shortcut hint is suppressed here to avoid implying a false tie.
+  const resync = el('button', 'review-btn review-btn-primary');
+  resync.type = 'button';
+  resync.id = 'review-resync-btn';
+  resync.disabled = resyncing || !!resyncDisabledReason(sync, resyncing);
+  resync.title = resolveShown
+    ? 'Fetch and fast-forward/push the local base branch against its remote upstream'
+    : 'Fetch and fast-forward/push the local base branch against its remote upstream (alt+r)';
+  resync.innerHTML = resolveShown
+    ? 'Resync'
+    : 'Resync <kbd class="review-shortcut" aria-hidden="true">alt+r</kbd>';
+  resync.addEventListener('click', () => requestResyncBranch(id));
+  actions.append(resync);
 
   // Discard throws the worktree away unmerged. Gated on NO live PTY (never destroy a worktree a
   // running session is sitting in).

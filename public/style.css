@@ -3115,6 +3115,9 @@ body {
   line-height: 1.5;
   color: var(--text-muted);
 }
+/* A failed resync (e.g. an unpushable base branch) persists in this line until the next attempt, so it
+   needs to read as an error, not a neutral disabled-reason. */
+.review-control-reason-error { color: var(--state-failed); }
 @keyframes review-fadeout {
   0%, 60% { opacity: 1; }
   100% { opacity: 0; }

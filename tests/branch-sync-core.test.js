@@ -3,7 +3,9 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { parseLeftRightCount, decideBranchSyncState } = require('../server/core/branch-sync-core');
+const {
+  parseLeftRightCount, decideBranchSyncState, parseRemoteFromUpstream, decideResyncAction, firstGitErrorLine,
+} = require('../server/core/branch-sync-core');
 
 // --- parseLeftRightCount: "<behind><TAB><ahead>" per `git rev-list --left-right --count U...B` ---
 
@@ -65,4 +67,62 @@ test('decideBranchSyncState: upstream with unparseable counts is unknown, not no
   assert.equal(decideBranchSyncState({ hasUpstream: true }), 'unknown');
   assert.equal(decideBranchSyncState({ hasUpstream: true, ahead: undefined, behind: undefined }), 'unknown');
   assert.equal(decideBranchSyncState({ hasUpstream: true, ahead: 1.5, behind: 0 }), 'unknown');
+});
+
+// --- parseRemoteFromUpstream ---
+
+test('parseRemoteFromUpstream reads the segment before the first slash', () => {
+  assert.equal(parseRemoteFromUpstream('origin/develop'), 'origin');
+  assert.equal(parseRemoteFromUpstream('upstream/feature/nested'), 'upstream');
+});
+
+test('parseRemoteFromUpstream defaults to origin for a slash-less or empty value', () => {
+  assert.equal(parseRemoteFromUpstream('develop'), 'origin');
+  assert.equal(parseRemoteFromUpstream(''), 'origin');
+  assert.equal(parseRemoteFromUpstream(null), 'origin');
+  assert.equal(parseRemoteFromUpstream(undefined), 'origin');
+});
+
+// --- decideResyncAction: the resync decision table (state x checked-out -> action) ---
+
+test('decideResyncAction: behind + checked out -> ff-merge (advances the working tree too)', () => {
+  assert.equal(decideResyncAction('behind', true), 'ff-merge');
+});
+
+test('decideResyncAction: behind + NOT checked out -> ff-fetch (never touches the working tree)', () => {
+  assert.equal(decideResyncAction('behind', false), 'ff-fetch');
+});
+
+test('decideResyncAction: ahead (either checked-out state) -> push', () => {
+  assert.equal(decideResyncAction('ahead', true), 'push');
+  assert.equal(decideResyncAction('ahead', false), 'push');
+});
+
+test('decideResyncAction: diverged never mutates, regardless of checked-out state', () => {
+  assert.equal(decideResyncAction('diverged', true), 'none');
+  assert.equal(decideResyncAction('diverged', false), 'none');
+});
+
+test('decideResyncAction: in-sync, no-upstream, and unknown are all none', () => {
+  assert.equal(decideResyncAction('in-sync', true), 'none');
+  assert.equal(decideResyncAction('no-upstream', true), 'none');
+  assert.equal(decideResyncAction('unknown', true), 'none');
+});
+
+// --- firstGitErrorLine ---
+
+test('firstGitErrorLine strips the "Command failed: ..." echo and keeps the git complaint', () => {
+  const err = new Error('Command failed: git merge --ff-only origin/develop\nmerge: origin/develop - not something we can merge\n');
+  assert.equal(firstGitErrorLine(err), 'merge: origin/develop - not something we can merge');
+});
+
+test('firstGitErrorLine keeps only the first non-blank line of a multi-line stderr block', () => {
+  const err = new Error('Command failed: git push origin develop\n! [rejected] develop -> develop (non-fast-forward)\nerror: failed to push some refs\nhint: try pull first\n');
+  assert.equal(firstGitErrorLine(err), '! [rejected] develop -> develop (non-fast-forward)');
+});
+
+test('firstGitErrorLine falls back to a generic line for an empty/missing error', () => {
+  assert.equal(firstGitErrorLine(new Error('')), 'git command failed');
+  assert.equal(firstGitErrorLine(null), 'git command failed');
+  assert.equal(firstGitErrorLine(undefined), 'git command failed');
 });

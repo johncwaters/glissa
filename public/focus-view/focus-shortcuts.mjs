@@ -6,7 +6,8 @@
 // Keep this in lockstep with the dispatch in app.js:
 //   W                 -> next session needing you (focusNextAttention)
 //   M                 -> merge the review-sidebar selection (mergeSelectedSession)
-//   R                 -> resolve a parked merge in its session (resolveSelectedSession)
+//   R                 -> resolve a parked merge in its session, else resync its base branch
+//                        (resolveSelectedSession, falling back to resyncSelectedSession)
 //   ArrowUp/ArrowDown -> previous/next rail session (focusAdjacentInRail)
 //   0                 -> open Add Session
 //   1-9               -> focus the Nth rail pill (focusNthInRail)

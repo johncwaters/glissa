@@ -831,6 +831,18 @@ function registerControlHandlers(controlWss, deps) {
       const sync = await s.getBranchSync();
       ws.send(JSON.stringify({ type: 'branch-sync-status', id: s.id, ...sync }));
     },
+    // On-demand resync: fetch + fast-forward/push the session's project base branch against its remote
+    // upstream (never for a diverged branch - Session.resyncBranch enforces that, not this handler).
+    // Reuses the branch-sync-status reply shape, additively carrying action/error, so the sidebar's
+    // existing branch-sync-status handler updates both the indicator and the resync outcome from one
+    // message. Session.resyncBranch coalesces a concurrent call itself, so a duplicate message here can
+    // never race two mutating git commands.
+    'resync-branch':               async (msg, ws) => {
+      const s = findSession(msg);
+      if (!s) return;
+      const sync = await s.resyncBranch();
+      ws.send(JSON.stringify({ type: 'branch-sync-status', id: s.id, ...sync }));
+    },
     'debug-state':      (msg, ws) => {
       const s = findSession(msg);
       if (!s) { ws.send(JSON.stringify({ type: 'error', message: 'Session not found' })); return; }

@@ -691,6 +691,171 @@ test('getBranchSync fetches then reports diverged with the correct ahead/behind 
   }
 });
 
+// --- resyncBranch: on-demand fetch + resolve the local-base-branch-vs-remote drift ---
+
+// Push a single extra commit from a fresh clone of `remoteDir`, so the ORIGINAL checkout's cached
+// origin/<branch> ref goes stale (remote-only work it does not yet know about) until a resync fetches.
+// Mirrors the clone setup already verified for getBranchSync's diverged case above.
+function pushRemoteOnlyCommit(remoteDir, branch, fileName) {
+  const clone = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-resync-clone-'));
+  git(['clone', '-q', '-b', branch, remoteDir, clone], os.tmpdir());
+  git(['config', 'user.email', 'test@example.com'], clone);
+  git(['config', 'user.name', 'Glissa Test'], clone);
+  git(['config', 'commit.gpgsign', 'false'], clone);
+  fs.writeFileSync(path.join(clone, fileName), 'remote\n', 'utf8');
+  git(['add', '-A'], clone);
+  git(['commit', '-m', 'remote-only commit'], clone);
+  git(['push', '-q', 'origin', `HEAD:${branch}`], clone);
+  return clone;
+}
+
+test('resyncBranch: behind + branch checked out -> ff-merge (advances the checkout)', { skip: !GIT }, async () => {
+  const { dir: repo, remoteDir } = initRepoWithRemote();
+  // initRepoWithRemote renamed the CURRENT branch to develop, so it is checked out here.
+  assert.equal(git(['rev-parse', '--abbrev-ref', 'HEAD'], repo).trim(), 'develop');
+  const clone = pushRemoteOnlyCommit(remoteDir, 'develop', 'remote-only.txt');
+  try {
+    const s = makeSession({ integrationBranch: 'develop' });
+    s.path = repo;
+    try {
+      const result = await s.resyncBranch();
+      assert.equal(result.action, 'fast-forwarded');
+      assert.equal(result.error, null);
+      assert.equal(result.state, 'in-sync');
+      assert.equal(result.ahead, 0);
+      assert.equal(result.behind, 0);
+      assert.equal(git(['rev-parse', 'HEAD'], repo).trim(), git(['rev-parse', 'origin/develop'], repo).trim());
+      assert.ok(fs.existsSync(path.join(repo, 'remote-only.txt')), 'ff-merge updated the working tree, not just the ref');
+    } finally { s.destroy(); }
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+    fs.rmSync(remoteDir, { recursive: true, force: true });
+    fs.rmSync(clone, { recursive: true, force: true });
+  }
+});
+
+test('resyncBranch: behind + a DIFFERENT branch checked out -> ff-fetch (never touches the working tree)', { skip: !GIT }, async () => {
+  const { dir: repo, remoteDir } = initRepoWithRemote();
+  git(['checkout', '-q', '-b', 'other-branch'], repo); // develop is no longer HEAD
+  const clone = pushRemoteOnlyCommit(remoteDir, 'develop', 'remote-only.txt');
+  try {
+    const s = makeSession({ integrationBranch: 'develop' });
+    s.path = repo;
+    try {
+      const result = await s.resyncBranch();
+      assert.equal(result.action, 'fast-forwarded');
+      assert.equal(result.error, null);
+      assert.equal(result.state, 'in-sync');
+      assert.equal(git(['rev-parse', '--abbrev-ref', 'HEAD'], repo).trim(), 'other-branch', 'the checkout itself is untouched');
+      assert.equal(git(['rev-parse', 'develop'], repo).trim(), git(['rev-parse', 'origin/develop'], repo).trim(), 'the local develop REF still advanced');
+      assert.ok(!fs.existsSync(path.join(repo, 'remote-only.txt')), 'the working tree (on other-branch) never saw the fetched file');
+    } finally { s.destroy(); }
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+    fs.rmSync(remoteDir, { recursive: true, force: true });
+    fs.rmSync(clone, { recursive: true, force: true });
+  }
+});
+
+test('resyncBranch: ahead only -> push', { skip: !GIT }, async () => {
+  const { dir: repo, remoteDir } = initRepoWithRemote();
+  fs.writeFileSync(path.join(repo, 'local-only.txt'), 'local\n', 'utf8');
+  git(['add', '-A'], repo);
+  git(['commit', '-m', 'local-only commit'], repo);
+
+  const s = makeSession({ integrationBranch: 'develop' });
+  s.path = repo;
+  try {
+    const result = await s.resyncBranch();
+    assert.equal(result.action, 'pushed');
+    assert.equal(result.error, null);
+    assert.equal(result.state, 'in-sync');
+    assert.equal(result.ahead, 0);
+    assert.equal(result.behind, 0);
+    // The bare remote actually received the commit.
+    const remoteHead = git(['rev-parse', 'develop'], remoteDir).trim();
+    assert.equal(remoteHead, git(['rev-parse', 'HEAD'], repo).trim());
+  } finally {
+    s.destroy();
+    fs.rmSync(repo, { recursive: true, force: true });
+    fs.rmSync(remoteDir, { recursive: true, force: true });
+  }
+});
+
+test('resyncBranch: diverged -> mutates nothing, reports the state so the UI can tell the operator to resolve manually', { skip: !GIT }, async () => {
+  const { dir: repo, remoteDir } = initRepoWithRemote();
+  const clone = pushRemoteOnlyCommit(remoteDir, 'develop', 'remote-only.txt');
+  fs.writeFileSync(path.join(repo, 'local-only.txt'), 'local\n', 'utf8');
+  git(['add', '-A'], repo);
+  git(['commit', '-m', 'local-only commit'], repo);
+  const headBefore = git(['rev-parse', 'HEAD'], repo).trim();
+  try {
+    const s = makeSession({ integrationBranch: 'develop' });
+    s.path = repo;
+    try {
+      const result = await s.resyncBranch();
+      assert.equal(result.action, 'none');
+      assert.equal(result.error, null);
+      assert.equal(result.state, 'diverged');
+      assert.equal(result.ahead, 1);
+      assert.equal(result.behind, 1);
+      assert.equal(git(['rev-parse', 'HEAD'], repo).trim(), headBefore, 'never rebased, merged, or force-pushed');
+    } finally { s.destroy(); }
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+    fs.rmSync(remoteDir, { recursive: true, force: true });
+    fs.rmSync(clone, { recursive: true, force: true });
+  }
+});
+
+test('resyncBranch: in-sync -> mutates nothing', { skip: !GIT }, async () => {
+  const { dir: repo, remoteDir } = initRepoWithRemote();
+  const s = makeSession({ integrationBranch: 'develop' });
+  s.path = repo;
+  try {
+    const result = await s.resyncBranch();
+    assert.equal(result.action, 'none');
+    assert.equal(result.error, null);
+    assert.equal(result.state, 'in-sync');
+  } finally {
+    s.destroy();
+    fs.rmSync(repo, { recursive: true, force: true });
+    fs.rmSync(remoteDir, { recursive: true, force: true });
+  }
+});
+
+test('resyncBranch: no upstream -> mutates nothing, action none', { skip: !GIT }, async () => {
+  const repo = initOneCommitRepo();
+  git(['branch', '-M', 'develop'], repo);
+  const s = makeSession({ integrationBranch: 'develop' });
+  s.path = repo;
+  try {
+    const result = await s.resyncBranch();
+    assert.equal(result.action, 'none');
+    assert.equal(result.error, null);
+    assert.equal(result.state, 'no-upstream');
+  } finally { s.destroy(); fs.rmSync(repo, { recursive: true, force: true }); }
+});
+
+test('resyncBranch: a second concurrent call rides the same in-flight promise (no double mutation)', { skip: !GIT }, async () => {
+  const { dir: repo, remoteDir } = initRepoWithRemote();
+  fs.writeFileSync(path.join(repo, 'local-only.txt'), 'local\n', 'utf8');
+  git(['add', '-A'], repo);
+  git(['commit', '-m', 'local-only commit'], repo);
+
+  const s = makeSession({ integrationBranch: 'develop' });
+  s.path = repo;
+  try {
+    const [first, second] = await Promise.all([s.resyncBranch(), s.resyncBranch()]);
+    assert.deepEqual(first, second, 'both callers observed the exact same resolved result');
+    assert.equal(first.action, 'pushed');
+  } finally {
+    s.destroy();
+    fs.rmSync(repo, { recursive: true, force: true });
+    fs.rmSync(remoteDir, { recursive: true, force: true });
+  }
+});
+
 // --- checkWorktreeChange: the live change funnel (turn-end hook / gitdir watch / integration-ref watcher) ---
 
 test('checkWorktreeChange emits worktree-changed on a real delta and dedups an unchanged worktree', { skip: !GIT }, async () => {

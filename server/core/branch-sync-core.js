@@ -34,4 +34,38 @@ function decideBranchSyncState({ hasUpstream, ahead, behind }) {
   return 'in-sync';
 }
 
-module.exports = { parseLeftRightCount, decideBranchSyncState };
+// Remote name from an upstream ref like "origin/develop" -> "origin". Defensive fallback of 'origin'
+// for a slash-less value (should not happen for a real @{upstream} result, but a resync must never be
+// pointed at an empty remote name).
+function parseRemoteFromUpstream(upstream) {
+  const idx = String(upstream || '').indexOf('/');
+  return idx === -1 ? 'origin' : upstream.slice(0, idx);
+}
+
+// Decide what an on-demand resync should DO, purely from the already-classified sync state and whether
+// the base branch is the one currently checked out in the main checkout. Only 'behind' and 'ahead' ever
+// mutate anything; every other state (in-sync, diverged, no-upstream, unknown) is 'none' - a resync
+// must never rebase, force-push, or otherwise touch a diverged branch. isCheckedOut decides HOW a
+// fast-forward happens: `git merge --ff-only` needs the branch checked out (it advances the working
+// tree too), whereas an unchecked-out branch is fast-forwarded via `git fetch <remote> <branch>:<branch>`
+// (ff-only by default) so the operator's actual checkout is never touched.
+function decideResyncAction(state, isCheckedOut) {
+  if (state === 'behind') return isCheckedOut ? 'ff-merge' : 'ff-fetch';
+  if (state === 'ahead') return 'push';
+  return 'none';
+}
+
+// A short, human-readable line from a failed git command. execFile's default error message is
+// "Command failed: <cmd>\n<stderr...>"; drop the command echo and keep the first non-blank line of the
+// actual git complaint (a multi-line hint block from git would otherwise blow up the sidebar's status
+// line). Falls back to a generic line when the shape is unrecognized (no error, empty message).
+function firstGitErrorLine(err) {
+  // typeof-checked, not a truthiness `||` chain: an Error with a legitimately empty .message must stay
+  // empty (and fall through to the generic line below), not stringify the whole Error object to "Error".
+  const raw = err && typeof err.message === 'string' ? err.message : String(err || '');
+  const msg = raw.replace(/^Command failed:[^\n]*\n?/, '');
+  const line = msg.split(/\r?\n/).find((l) => l.trim());
+  return line ? line.trim() : 'git command failed';
+}
+
+module.exports = { parseLeftRightCount, decideBranchSyncState, parseRemoteFromUpstream, decideResyncAction, firstGitErrorLine };
