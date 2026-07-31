@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-07-31
+
+The review sidebar learns to see and fix base-branch drift with a live ahead/behind indicator and a one-click Resync, every session now leaves a lightweight forensic recording by default, and crash-safe auto-resume actually works: the session id capture it depends on was keyed to a hook that current Claude Code never fires.
+
+### Added
+
+- **Branch sync in the review sidebar**: the sidebar now shows whether the project's base branch (e.g. `develop`) is ahead of or behind its remote upstream, counted after a bounded best-effort fetch that runs only in the main checkout and never touches a session worktree. A new **Resync** button (and `Alt+R` when nothing is parked) resolves the drift on demand: fast-forward when behind, push when ahead, and report-only on diverged, in-sync, no-upstream, or unknown, so it never rebases or force-pushes. Never polled: it fires only on sidebar open or an explicit click, since it performs a git fetch. A branch with an upstream whose counts cannot be parsed now reports a distinct unknown state instead of masquerading as having no upstream.
+- **Signals-mode session recording (on by default)**: every session writes a lightweight JSONL forensic log to `~/.glissa/recordings` (header, verbatim hook payloads, state transitions) even when raw PTY capture is off. Raw bytes, input, and resizes stay behind the existing `capture.enabled` opt-in. The file opens lazily on first write, so a session that never starts leaves nothing behind, and retention now caps files per session (`retainFiles`, default 20) alongside the age sweep, both async off the shared event loop. `recordSignals: false` is the kill switch.
+- **Missing integration branch is auto-created**: a worktree-backed session no longer parks DORMANT when the configured integration branch does not exist locally; it is created from `origin/<branch>`, a local or remote default branch, or HEAD, in that order.
+
+### Fixed
+
+- **Boot auto-resume never actually resumed**: the crash-safe session id capture was keyed to the `SessionStart` hook, which Claude Code 2.1.220 never fires, leaving the resume id permanently empty. The id is now captured from whichever main-agent hook arrives first, and persisting fires only on an actual id change.
+
+### Changed
+
+- **Docs refresh**: README now covers the background-agent completion gate, PR auto-review, session recording, all four bundled teams (including qa-walk), project-level shared packs, and the FIX revision loop, with new dashboard screenshots. `docs/publishing.md` is rebuilt around `npm run release` as the primary path, `docs/testing-cli.md` is corrected against the real CLI and package manifest, and three superseded design docs moved to `docs/archive/`.
+
 ## [0.19.0] - 2026-07-27
 
 The Focus rail keeps a project's slot after its last session closes and gains one-click quick-add/remove, session worktrees survive a broad set of races and edge cases (double-spawn, config-modify recreate, branch-in-use, server shutdown), an opt-in GitHub PR auto-review poller can review and merge your own clean PRs unattended, and the Rainbow Unicorns nyan easter egg grows from 2 animals to 18.
