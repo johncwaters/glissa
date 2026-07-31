@@ -412,6 +412,13 @@ class Session extends EventEmitter {
       this._trackWakeup(raw);
       return;
     }
+    // Every MAIN-agent hook payload carries the live Claude session_id, so the crash-safe resume
+    // capture (AGENTS.md, "Auto-Resume and Shutdown") keys off whichever hook arrives, not off one
+    // event name: Claude Code does not reliably fire SessionStart (2.1.220 fires none at startup),
+    // which left the capture, and with it boot auto-resume, permanently dead. Tracking-only
+    // background-agent signals returned above and are deliberately excluded: they can describe a
+    // different Claude session than the one this card resumes.
+    if (raw?.payload) this._captureClaudeSessionId(raw.payload.session_id, raw.payload.source);
     // /clear and /compact fire SessionEnd+SessionStart with NO UserPromptSubmit and no
     // Stop; the only movement they cause is TUI title noise. Reset the merged stream
     // (cancels a held ready from the pre-clear turn) and latch titles quiet until the
@@ -443,13 +450,10 @@ class Session extends EventEmitter {
     this._statusSource.ingest(raw);
   }
 
-  // SessionStart fires on every startup/resume/clear/compact/fork; capture the live Claude
-  // session_id on all of them (resume assigns a NEW id each time, so the chain must stay
-  // current - graceful-shutdown-auto-resume plan, design A). clear/compact additionally need
-  // the quiet-title handling below: nothing is running, nothing completed. See _titleQuiet.
+  // clear/compact need the quiet-title handling below: nothing is running, nothing completed.
+  // See _titleQuiet. (The session_id capture is central, in ingestHookSignal.)
   _onSessionStartHook(raw) {
     const payload = raw.payload || {};
-    this._captureClaudeSessionId(payload.session_id, payload.source);
     const src = String(payload.source || "").toLowerCase();
     if (src !== "clear" && src !== "compact") return;
     this._statusSource.reset();
@@ -459,12 +463,14 @@ class Session extends EventEmitter {
     this._setPendingPromptKind(null);
   }
 
-  // Malformed/absent ids are a no-op: crash-safe persistence (design A) depends on this only
-  // ever recording a real, resumable id. Mirrors into the live binding immediately, so a plain
-  // dashboard restart after a PTY crash already resumes even without a server reboot; the
-  // backend listens for the emitted event to persist it to config.json.
+  // Malformed/absent ids are a no-op: crash-safe persistence depends on this only ever recording
+  // a real, resumable id. Mirrors into the live binding immediately, so a plain dashboard restart
+  // after a PTY crash already resumes even without a server reboot; the backend listens for the
+  // emitted event to persist it to config.json. Emits only on an actual CHANGE: every hook now
+  // feeds this, and each emission is a synchronous config.json write on a per-turn path.
   _captureClaudeSessionId(id, source) {
     if (typeof id !== "string" || !RESUME_ID_RE.test(id)) return;
+    if (id === this._resumeSessionId) return;
     this.setResumeConversation(id);
     this.emit("claude-session-id", { id, source: source || null });
   }
