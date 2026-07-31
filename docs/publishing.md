@@ -50,7 +50,7 @@ The release profile also expects `main` to be fast-forwarded from `develop` afte
 
 ## Appendix: manual publish walkthrough
 
-Use this only when `npm run release` cannot run. It duplicates the same npm-facing steps by hand.
+Use this only when `npm run release` cannot run. It duplicates the same npm-facing steps by hand; `scripts/release.js` supersedes every step here, including the version bump. Glissa releases from `develop`, not `main`.
 
 ### Pre-Publish Checklist
 
@@ -147,7 +147,7 @@ Future releases use semantic versioning (semver):
 ```powershell
 npm version patch    # or minor / major
 npm publish
-git push origin main
+git push origin develop
 git push origin --tags
 ```
 
