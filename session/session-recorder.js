@@ -57,7 +57,6 @@ const DEFAULT_RETAIN_FILES = 20;
 
 // Session names are operator-supplied and become a filename segment.
 function safeFileSegment(name) {
-  // eslint-disable-next-line no-control-regex
   return String(name).replace(/[<>:"/\\|?*\x00-\x1f]/g, '-').replace(/[. ]+$/, '') || '_';
 }
 
