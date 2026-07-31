@@ -1,5 +1,5 @@
 <!-- Parent: ../AGENTS.md -->
-<!-- Generated: 2026-06-10 | Updated: 2026-06-10 -->
+<!-- Generated: 2026-06-10 | Updated: 2026-07-31 -->
 
 # assets
 
@@ -11,7 +11,7 @@ Repo-level static assets for documentation and source media. Runtime-served audi
 | Directory | Purpose |
 |-----------|---------|
 | `audio/` | Source notification sound files (OGG); copies served at runtime live in `public/audio/` |
-| `pictures/` | Screenshots for README/docs (`glissa-screenshot.png` Focus view hero, `glissa-teams.png` Teams tab) |
+| `pictures/` | Screenshots and demo media for README/docs (`glissa-demo.gif` README hero: a real Claude Code session mid-run, captured via Playwright driving an actual Glissa instance; `glissa-screenshot.png` Focus view static screenshot, `glissa-teams.png` Teams tab) |
 
 ## For AI Agents
 

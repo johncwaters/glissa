@@ -12,7 +12,7 @@ Running more than a couple of Claude Code agents at once turns into alt-tabbing 
 
 It's on npm (`npm install -g glissa`), and I run my daily agent fleet in it. This README was written inside a Glissa session: Glissa is developed inside Glissa.
 
-![Glissa Dashboard](assets/pictures/glissa-screenshot.png)
+![Glissa dashboard mid-run: two Claude Code sessions streaming live terminal output, one working, one flipping to Complete with its real output and worktree diff visible in the review sidebar](assets/pictures/glissa-demo.gif)
 
 ## Install
 
