@@ -30,6 +30,7 @@ const { createOutputRing } = require("./core/output-ring");
 const { decideSignatureDemotion, decideDiffSelfHeal } = require("./core/merge-gate");
 const { parseLeftRightCount, decideBranchSyncState } = require("../server/core/branch-sync-core");
 const agentTracker = require("./core/agent-tracker");
+const { decideGateRelease, DEFAULT_GATE_RELEASE_SETTLE_MS } = require("./core/gate-release");
 const wakeupTracker = require("./core/wakeup-tracker");
 const { RESUME_ID_RE } = require("./core/auto-resume");
 
@@ -128,8 +129,8 @@ class Session extends EventEmitter {
     // TeammateIdle/TaskCompleted from pinning the card WORKING for the full agent TTL.
     teammateTaskTtlMs = agentTracker.DEFAULT_TEAMMATE_TASK_TTL_MS,
     // Quiet window a drained gate-held ready waits out before it actually releases. Why a
-    // window at all: see _stashGateHeldReady / agent-tracker.js DEFAULT_GATE_RELEASE_SETTLE_MS.
-    gateReleaseSettleMs = agentTracker.DEFAULT_GATE_RELEASE_SETTLE_MS,
+    // window at all: see session/core/gate-release.js.
+    gateReleaseSettleMs = DEFAULT_GATE_RELEASE_SETTLE_MS,
     // Scheduled-revival visibility (see session/core/wakeup-tracker.js). When true (default), a
     // ScheduleWakeup / cron task seen via PostToolUse hooks rides toSnapshot().pendingWakeup as an
     // ADVISORY card chip ("sleeping until ~HH:MM"); it never gates a transition. The kill switch
@@ -282,12 +283,20 @@ class Session extends EventEmitter {
     // this latch the suppressed ready is gone forever and the card pins WORKING until some
     // new signal happens to arrive. Cleared by any newer activity (working/resume/
     // awaiting-input), any state change since the stash, /clear, and PTY exit/(re)start.
-    // Released in _maybeReleaseGateHeldReady; the timer bounds the TTL-only drain path.
+    // Released in _evaluateGateHeldReady, which re-validates the hold against live evidence
+    // (session/core/gate-release.js) instead of trusting a drained count alone.
     this._gateHeldReady = null;
     this._gateHeldReadyTimer = null;
-    // Armed once the background count actually drains to 0, so the release is not instant
-    // (the settle window; rationale at _stashGateHeldReady). Cleared with the held ready.
-    this._gateSettleTimer = null;
+    // Earliest timestamp from which the hold has been continuously eligible to release: pushed
+    // forward every time an evaluation still finds live background work, so the quiet window is
+    // measured from the last moment the gate was actually gating.
+    this._gateQuietSince = 0;
+    // Arrival order of the signals reaching _onStatus, and the sequence number of the last
+    // non-ready (activity) one. A hold stashed BEFORE that activity is stale: the main agent
+    // opened a new turn, so it must never complete the card (incident 2026-07-30; see
+    // session/core/gate-release.js). Sequence rather than clock: signals share milliseconds.
+    this._signalSeq = 0;
+    this._lastActivitySeq = 0;
     // True between a SessionStart(source: clear|compact) hook and the next real
     // UserPromptSubmit: the TUI redraw around /clear flashes a spinner + idle glyph in
     // the OSC title, which would otherwise open a fake work cycle (RUNNING) and close
@@ -636,94 +645,86 @@ class Session extends EventEmitter {
   _emitAgentsChange() {
     // Internal event; the backend listener already has the session (id/name), so carry only the count.
     this.emit("agents-change", { activeAgents: this._activeAgentCount() });
-    this._maybeReleaseGateHeldReady();
+    this._evaluateGateHeldReady();
   }
 
   // Hold a main-agent ready that only the background-agent gate suppressed. The stash records
-  // the state it was suppressed in: any transition between stash and release invalidates it.
-  // The timer covers the TTL-only drain (no further hooks ever arrive): it re-checks after the
-  // full TTL, when the lazy prune in _activeAgentCount is guaranteed to see every entry expired.
+  // the state and the moment it was suppressed in; session/core/gate-release.js decides whether
+  // that hold may ever fire (any transition since, or any activity since, invalidates it).
   //
-  // A drain (the count reaching 0) does NOT release immediately: it only starts the
-  // gateReleaseSettleMs quiet window (see _maybeReleaseGateHeldReady). A TeammateIdle/
-  // SubagentStop drain usually precedes the lead auto-resuming on the teammate's mailbox message
-  // 1-3s later (the mailbox wake fires no UserPromptSubmit hook), so releasing the instant the
-  // count hit 0 falsely COMPLETEd (and notified) the card once per orchestration round, then
-  // flipped it right back to WORKING. Any newer activity within the window (working/resume/
-  // awaiting-input, a fresh subagent-start/task-created, a state change, /clear, PTY exit)
-  // cancels the pending release via _clearGateHeldReady before it ever fires.
+  // Re-opening the title source's working latch is what makes "activity since" observable at
+  // all: OscTitleSource emits `working` only on a kind EDGE, so a card that has been RUNNING
+  // with a spinning title since before this Stop would never report the spinner again, and a new
+  // turn opened by a teammate mailbox wake (which fires NO UserPromptSubmit hook) would be
+  // completely invisible to the release path. That blind spot falsely COMPLETEd a working
+  // orchestrator card twice on 2026-07-30. With the latch re-opened, the next real braille frame
+  // proves the turn is not over; a genuinely finished turn emits no further frames.
   _stashGateHeldReady(s) {
-    this._gateHeldReady = { source: s.source, signal: s.signal, confidence: s.confidence, state: this.state };
-    this._armGateHeldReadyTimer();
+    const now = Date.now();
+    this._gateHeldReady = {
+      source: s.source,
+      signal: s.signal,
+      confidence: s.confidence,
+      state: this.state,
+      ts: now,
+      seq: this._signalSeq,
+    };
+    this._gateQuietSince = now;
+    this._titleSource.resyncWorkingLatch();
+    this._evaluateGateHeldReady();
   }
 
-  _armGateHeldReadyTimer() {
+  _armGateTimer(ms) {
     if (this._gateHeldReadyTimer) clearTimeout(this._gateHeldReadyTimer);
     this._gateHeldReadyTimer = setTimeout(() => {
       this._gateHeldReadyTimer = null;
-      this._maybeReleaseGateHeldReady();
-    }, Math.min(this._agentTtlMs, this._shellTaskTtlMs, this._teammateTaskTtlMs) + 50);
+      this._evaluateGateHeldReady();
+    }, ms);
     if (typeof this._gateHeldReadyTimer.unref === "function") this._gateHeldReadyTimer.unref();
-  }
-
-  _clearGateSettleTimer() {
-    if (!this._gateSettleTimer) return;
-    clearTimeout(this._gateSettleTimer);
-    this._gateSettleTimer = null;
   }
 
   _clearGateHeldReady() {
     this._gateHeldReady = null;
-    this._clearGateSettleTimer();
     if (!this._gateHeldReadyTimer) return;
     clearTimeout(this._gateHeldReadyTimer);
     this._gateHeldReadyTimer = null;
   }
 
-  // Called whenever the background count changes (a drain) or the TTL timer re-checks. A drain
-  // to 0 does not release the held ready right away: it arms the gateReleaseSettleMs quiet window
-  // (once; a repeated drain event must not extend it) and only _releaseGateHeldReadyNow actually
-  // fires the transition, after that window elapses with no cancelling activity.
-  _maybeReleaseGateHeldReady() {
-    const p = this._gateHeldReady;
-    if (!p || this._destroyed) return;
-    if (this.state !== p.state) {
+  // Re-validate the held ready and act on the verdict. Runs whenever the background count changes
+  // (a drain) and whenever the timer re-checks; the timer covers the TTL-only drain, where no
+  // further hook ever arrives and only the lazy prune in _activeAgentCount moves the count.
+  _evaluateGateHeldReady() {
+    const held = this._gateHeldReady;
+    if (!held || this._destroyed) return;
+    const now = Date.now();
+    const { decision, waitMs } = decideGateRelease({
+      heldState: held.state,
+      currentState: this.state,
+      activeAgents: this._activeAgentCount(),
+      stashSeq: held.seq,
+      lastActivitySeq: this._lastActivitySeq,
+      stashTs: held.ts,
+      quietSince: this._gateQuietSince,
+      now,
+      settleMs: this._gateReleaseSettleMs,
+    });
+    if (decision === "cancel") {
       this._clearGateHeldReady();
       return;
     }
-    if (this._activeAgentCount() > 0) {
-      // The drain retracted (refreshed/re-declared): drop any pending settle and, as before,
-      // re-arm the TTL timer so a still-live entry keeps re-checking.
-      this._clearGateSettleTimer();
-      if (!this._gateHeldReadyTimer) this._armGateHeldReadyTimer();
+    if (decision === "gated") {
+      // Still gating right now, so the quiet window cannot have started earlier than this.
+      this._gateQuietSince = now;
+      this._armGateTimer(Math.min(this._agentTtlMs, this._shellTaskTtlMs, this._teammateTaskTtlMs) + 50);
       return;
     }
-    if (this._gateSettleTimer) return; // already counting down; do not extend the window
-    this._gateSettleTimer = setTimeout(() => {
-      this._gateSettleTimer = null;
-      this._releaseGateHeldReadyNow();
-    }, this._gateReleaseSettleMs);
-    if (typeof this._gateSettleTimer.unref === "function") this._gateSettleTimer.unref();
-  }
-
-  // The actual release, run only after the settle window has elapsed with no cancelling
-  // activity. Byte-equivalent to the old immediate-release tail of _maybeReleaseGateHeldReady,
-  // re-checked here because the drain could have retracted (or the session moved on) during
-  // the wait.
-  _releaseGateHeldReadyNow() {
-    const p = this._gateHeldReady;
-    if (!p || this._destroyed) return;
-    if (this.state !== p.state) {
-      this._clearGateHeldReady();
+    if (decision === "wait") {
+      this._armGateTimer(waitMs);
       return;
     }
-    if (this._activeAgentCount() > 0) {
-      if (!this._gateHeldReadyTimer) this._armGateHeldReadyTimer();
-      return;
-    }
-    const event = mapSignalToEvent(p.signal, this.state, p.confidence, 0);
+    const event = mapSignalToEvent(held.signal, this.state, held.confidence, 0);
     this._clearGateHeldReady();
-    if (event) this.transition(event, { source: p.source, signal: p.signal, deferred: true });
+    if (event) this.transition(event, { source: held.source, signal: held.signal, deferred: true });
   }
 
   // Drop all live ids + the declared snapshot + the task-lifecycle bookkeeping (PTY exit,
@@ -800,8 +801,11 @@ class Session extends EventEmitter {
   _onStatus(s) {
     if (this._destroyed) return;
     this._lastSignal = { signal: s.signal, source: s.source, confidence: s.confidence, ts: s.ts };
-    // Any non-ready activity supersedes a held ready: the turn is demonstrably not settled.
-    if (s.signal !== "ready") this._clearGateHeldReady();
+    // Any non-ready signal is proof the turn a held ready announced did not settle. Recorded as
+    // arrival order so decideGateRelease is the ONE place that judges a hold stale (it cancels
+    // any hold stashed before this); no separate eager-clear path to keep in sync.
+    this._signalSeq += 1;
+    if (s.signal !== "ready") this._lastActivitySeq = this._signalSeq;
     // A working signal means the operator answered (or the agent resumed) - the prompt this
     // session was waiting on no longer applies.
     if (s.signal === "working") this._setPendingPromptKind(null);
@@ -811,13 +815,10 @@ class Session extends EventEmitter {
     // per-branch details), so it is assembled here rather than in the pure mapper.
     const active = this._activeAgentCount();
     const event = mapSignalToEvent(s.signal, this.state, s.confidence, active);
-    if (event) {
-      this._clearGateHeldReady();
-      this.transition(event, { source: s.source, signal: s.signal });
-    }
+    if (event) this.transition(event, { source: s.source, signal: s.signal });
     // A ready suppressed ONLY by the background-agent gate is held, not dropped: when the
     // count drains without another Stop (idle teammate, dropped SubagentStop) the drain
-    // releases it and the card still completes (see _maybeReleaseGateHeldReady).
+    // releases it and the card still completes (see _evaluateGateHeldReady).
     if (!event && s.signal === "ready" && active > 0
         && mapSignalToEvent(s.signal, this.state, s.confidence, 0)) {
       this._stashGateHeldReady(s);

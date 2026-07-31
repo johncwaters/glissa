@@ -121,15 +121,6 @@ const DEFAULT_SHELL_TASK_TTL_MS = 5 * 60 * 1000;
 // tradeoff; DEFAULT_TEAMMATE_TASK_TTL_MS stays 90s rather than growing toward DEFAULT_AGENT_TTL_MS.
 const DEFAULT_TEAMMATE_TASK_TTL_MS = 90 * 1000;
 
-// Default quiet window a drained gate-held ready waits out before it actually releases (see
-// sessions.js _maybeReleaseGateHeldReady). A TeammateIdle/SubagentStop drain almost always
-// precedes the lead auto-resuming 1-3s later on the teammate's mailbox message (the mailbox
-// wake fires no UserPromptSubmit hook), so releasing the instant the count hits zero fired a
-// false COMPLETE + notification per orchestration round, then flipped right back to WORKING.
-// Any newer activity during the window (working/resume/awaiting-input, a fresh subagent-start
-// or task-created, a state change, /clear, PTY exit) cancels the release via _clearGateHeldReady.
-const DEFAULT_GATE_RELEASE_SETTLE_MS = 10 * 1000;
-
 // How many declared entries still gate completion, given the set of task ids known settled
 // out-of-band (TaskCompleted / TeammateIdle hooks). An id-less entry can never be drained
 // individually, so it always counts (suppression-safe). ageMs is how long ago the snapshot
@@ -168,5 +159,4 @@ module.exports = {
   DEFAULT_AGENT_TTL_MS,
   DEFAULT_SHELL_TASK_TTL_MS,
   DEFAULT_TEAMMATE_TASK_TTL_MS,
-  DEFAULT_GATE_RELEASE_SETTLE_MS,
 };
