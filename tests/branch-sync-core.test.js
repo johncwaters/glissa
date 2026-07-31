@@ -60,3 +60,9 @@ test('decideBranchSyncState: behind only', () => {
 test('decideBranchSyncState: both nonzero is diverged', () => {
   assert.equal(decideBranchSyncState({ hasUpstream: true, ahead: 1, behind: 1 }), 'diverged');
 });
+
+test('decideBranchSyncState: upstream with unparseable counts is unknown, not no-upstream', () => {
+  assert.equal(decideBranchSyncState({ hasUpstream: true }), 'unknown');
+  assert.equal(decideBranchSyncState({ hasUpstream: true, ahead: undefined, behind: undefined }), 'unknown');
+  assert.equal(decideBranchSyncState({ hasUpstream: true, ahead: 1.5, behind: 0 }), 'unknown');
+});

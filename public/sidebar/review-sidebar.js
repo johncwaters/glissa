@@ -301,6 +301,7 @@ function branchSyncLabel(sync) {
   if (!sync) return null;
   const { branch, upstream, state, ahead, behind } = sync;
   if (state === 'no-upstream') return `${branch}: no upstream`;
+  if (state === 'unknown') return `${branch}: sync state unknown vs ${upstream}`;
   if (state === 'in-sync') return `${branch}: in sync with ${upstream}`;
   if (state === 'ahead') return `${branch}: ${ahead} ahead of ${upstream}`;
   if (state === 'behind') return `${branch}: ${behind} behind ${upstream}`;

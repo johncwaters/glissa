@@ -10,7 +10,7 @@
 // from upstream but not branch (behind), the RIGHT count is commits reachable from branch but not
 // upstream (ahead) - i.e. the output is "<behind><TAB><ahead>", matching `git status -sb`'s "ahead 2,
 // behind 1" for that same repo. Tolerates surrounding whitespace and a stray CR. Returns null when
-// the shape does not parse (unexpected git output), so the caller can report it as no-upstream rather
+// the shape does not parse (unexpected git output), so the caller can report it as unknown rather
 // than trusting a garbage count.
 function parseLeftRightCount(output) {
   const parts = String(output || '').trim().split(/\s+/);
@@ -23,9 +23,11 @@ function parseLeftRightCount(output) {
 
 // Decide the compact display state. hasUpstream:false short-circuits to 'no-upstream' regardless of
 // counts (there is nothing to compare against: a fresh local branch, or one whose upstream was never
-// configured).
+// configured). An upstream with missing/unparseable counts is 'unknown', a distinct state from
+// 'no-upstream' so a fetch failure on that path is still surfaced as stale by the UI.
 function decideBranchSyncState({ hasUpstream, ahead, behind }) {
   if (!hasUpstream) return 'no-upstream';
+  if (!Number.isInteger(ahead) || !Number.isInteger(behind)) return 'unknown';
   if (ahead > 0 && behind > 0) return 'diverged';
   if (ahead > 0) return 'ahead';
   if (behind > 0) return 'behind';

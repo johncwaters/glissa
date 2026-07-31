@@ -1169,11 +1169,11 @@ class Session extends EventEmitter {
     }
 
     const counts = parseLeftRightCount(await gitOut(["rev-list", "--left-right", "--count", `${upstream}...${branch}`], opts));
-    if (!counts) return { branch, upstream, state: decideBranchSyncState({ hasUpstream: false }), ahead: 0, behind: 0, fetched };
     return {
       branch, upstream, fetched,
-      ahead: counts.ahead, behind: counts.behind,
-      state: decideBranchSyncState({ hasUpstream: true, ahead: counts.ahead, behind: counts.behind }),
+      ahead: counts ? counts.ahead : 0,
+      behind: counts ? counts.behind : 0,
+      state: decideBranchSyncState({ hasUpstream: true, ahead: counts?.ahead, behind: counts?.behind }),
     };
   }
 
