@@ -62,9 +62,8 @@ function createIntegrationRefWatcher({ commonGitDir, branch, onChange, debounceM
     try { exists = fs.existsSync(watchDir); } catch { exists = false; }
     if (!exists) return false; // no reflog dir yet; the floor (turn-end / gitdir watch) still covers it
     try {
-      // Canonical path required: libuv expands each reported event filename to its long form and
-      // asserts that it still starts with the watched dir, so an 8.3 short path (a commonGitDir under
-      // a %TEMP% like C:\Users\RUNNER~1\...) aborts the whole PROCESS from native code, past this catch.
+      // Canonical path required: fs.watch on an 8.3 short path aborts the process from native code,
+      // past this catch (see canonicalizePath in shared/paths.js).
       watcher = fs.watch(canonicalizePath(watchDir), { persistent: false }, (_evt, filename) => {
         // filename is the changed entry. Fire only for our branch's reflog; a null filename (some
         // platforms omit it) is treated as "maybe ours" and fires, since the watch is lossy anyway.

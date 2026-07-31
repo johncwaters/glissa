@@ -134,10 +134,8 @@ test('stop() halts the watcher: no onChange after stop', async () => {
   }
 });
 
-// A CI runner's %TEMP% is C:\Users\RUNNER~1\..., so the gitdir path carries an 8.3 segment while the
-// event filenames libuv reports are expanded to their long form. libuv asserts that the two share a
-// prefix and ABORTS THE PROCESS when they do not, which no try/catch here can intercept: the whole
-// test file dies. start() must therefore hand fs.watch a canonical path.
+// Regression: an 8.3 segment in the gitdir path (a CI runner's short %TEMP%) used to abort the whole
+// process via libuv (see canonicalizePath in shared/paths.js); start() must canonicalize first.
 test('the watcher survives a gitdir under an 8.3 short parent', { skip: !SHORT_NAMES_AVAILABLE }, async () => {
   const base = tmpdir('glissa-ww-shortbase-');
   const shortBase = shortPathOf(base);

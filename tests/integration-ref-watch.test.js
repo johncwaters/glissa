@@ -84,9 +84,8 @@ test('handles a nested integration branch (release/x)', async () => {
   }
 });
 
-// Same hazard as detection/worktree-watch.js: an 8.3 segment in the watched dir (a commonGitDir under
-// a runner's C:\Users\RUNNER~1\... %TEMP%) makes libuv's prefix assertion fail and ABORT THE PROCESS,
-// past any try/catch, killing the whole test file. start() must canonicalize before fs.watch.
+// Regression: an 8.3 segment in the watched dir (a CI runner's short %TEMP%) used to abort the whole
+// process via libuv (see canonicalizePath in shared/paths.js); start() must canonicalize first.
 test('the watcher survives a commonGitDir under an 8.3 short parent', { skip: !SHORT_NAMES_AVAILABLE }, async () => {
   const outer = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-irw-shortbase-'));
   const dir = shortPathOf(outer);

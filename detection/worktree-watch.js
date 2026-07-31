@@ -82,9 +82,8 @@ function createWorktreeWatcher({ worktreeDir, onChange, debounceMs = 400 }) {
     try {
       // Non-recursive: only the gitdir's direct children (index, HEAD, COMMIT_EDITMSG,
       // ORIG_HEAD, MERGE_HEAD) carry the stage/commit/reset signal we want.
-      // The path MUST be canonical: libuv expands each reported event filename to its long form and
-      // asserts that it still starts with the watched dir, so an 8.3 short path (a gitdir under a
-      // %TEMP% like C:\Users\RUNNER~1\...) aborts the whole PROCESS from native code, past this catch.
+      // Canonical path required: fs.watch on an 8.3 short path aborts the process from native code,
+      // past this catch (see canonicalizePath in shared/paths.js).
       watcher = fs.watch(canonicalizePath(gitDir), { persistent: false }, () => fire());
       // The gitdir can be removed out from under us (worktree pruned). Treat any
       // watcher error as "stop watching"; the turn-end hook + a later re-check still cover the session.
