@@ -49,6 +49,21 @@ function initRepoOnDevelop() {
   return dir;
 }
 
+// A repo with only `main` (no `develop` branch at all, local or remote-tracking) - the fixture for the
+// auto-create-missing-integration-branch tests below.
+function initRepoMainOnly() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-mainonly-'));
+  try { git(['init', '-b', 'main'], dir); } catch { git(['init'], dir); }
+  git(['config', 'user.email', 'test@example.com'], dir);
+  git(['config', 'user.name', 'Glissa Test'], dir);
+  git(['config', 'commit.gpgsign', 'false'], dir);
+  fs.writeFileSync(path.join(dir, '.gitignore'), 'node_modules/\n', 'utf8');
+  fs.writeFileSync(path.join(dir, 'README.md'), '# repo\n', 'utf8');
+  git(['add', '-A'], dir);
+  git(['commit', '-m', 'init'], dir);
+  return dir;
+}
+
 // A repo whose main checkout sits on `main` while `develop` has an EXTRA commit, so forking off
 // develop is observably different from forking off HEAD (proves create({baseBranch}) uses the branch).
 function initRepoMainWithDevelop() {
@@ -527,11 +542,50 @@ test('create (baseBranch): forks off the named branch even when the main checkou
   }
 });
 
-test('create (baseBranch): a missing integration branch returns reason:no-base-branch and creates no worktree', { skip: !GIT }, async () => {
+test('create (baseBranch): a missing local integration branch is auto-created from local main', { skip: !GIT }, async () => {
+  const repo = initRepoMainOnly();
+  try {
+    const mainSha = git(['rev-parse', 'main'], repo).trim();
+    const gw = createGitWorkspace();
+    const ws = await gw.create({ projectPath: repo, teamId: 'session', label: 'x2', baseBranch: 'develop', outputPath: '' });
+    assert.equal(ws.isGit, true);
+    assert.equal(ws.base, 'develop');
+    assert.equal(ws.baseSha, mainSha, 'new develop branch was seeded from main');
+    assert.equal(git(['rev-parse', '--verify', '--quiet', 'refs/heads/develop'], repo).trim(), mainSha, 'local develop branch now exists, pointing at main');
+    await gw.discard({ projectPath: repo, workspace: ws });
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test('create (baseBranch): a missing local integration branch prefers an existing origin/<branch> remote-tracking ref over main', { skip: !GIT }, async () => {
+  const repo = initRepoMainOnly();
+  try {
+    const firstSha = git(['rev-parse', 'main'], repo).trim();
+    fs.writeFileSync(path.join(repo, 'second.txt'), 'second\n', 'utf8');
+    git(['add', '-A'], repo);
+    git(['commit', '-m', 'second commit'], repo);
+    const secondSha = git(['rev-parse', 'main'], repo).trim();
+    assert.notEqual(firstSha, secondSha);
+    git(['update-ref', 'refs/remotes/origin/develop', firstSha], repo); // no local develop, only remote-tracking
+
+    const gw = createGitWorkspace();
+    const ws = await gw.create({ projectPath: repo, teamId: 'session', label: 'x3', baseBranch: 'develop', outputPath: '' });
+    assert.equal(ws.isGit, true);
+    assert.equal(ws.base, 'develop');
+    assert.equal(ws.baseSha, firstSha, 'seeded from origin/develop, not the newer main');
+    assert.equal(git(['rev-parse', '--verify', '--quiet', 'refs/heads/develop'], repo).trim(), firstSha);
+    await gw.discard({ projectPath: repo, workspace: ws });
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test('create (baseBranch): a branch name git refuses to create still returns reason:no-base-branch and creates no worktree', { skip: !GIT }, async () => {
   const repo = initRepoOnDevelop();
   try {
     const gw = createGitWorkspace();
-    const ws = await gw.create({ projectPath: repo, teamId: 'session', label: 'x2', baseBranch: 'nonexistent', outputPath: '' });
+    const ws = await gw.create({ projectPath: repo, teamId: 'session', label: 'x4', baseBranch: 'bad..name', outputPath: '' });
     assert.equal(ws.isGit, false);
     assert.equal(ws.reason, 'no-base-branch');
     assert.equal(git(['worktree', 'list'], repo).trim().split(/\r?\n/).length, 1, 'no extra worktree created');

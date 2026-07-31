@@ -939,10 +939,12 @@ class Session extends EventEmitter {
     } catch { return null; }
   }
 
-  // Create (or reuse) this session's isolated worktree off the integration branch. Returns false ONLY
-  // when isolation is required but BLOCKED (integration branch absent): the session then stays put with
-  // a surfaced notice and never runs in the operator's real tree. Isolation disabled (no injected
-  // gitWorkspace/integrationBranch) or a non-git path -> runs in place (returns true, worktreeDir null).
+  // Create (or reuse) this session's isolated worktree off the integration branch. A missing local
+  // integration branch is auto-created by team-git.js (from origin/<branch>, then main/master, then
+  // HEAD); this method returns false ONLY when that creation itself FAILED (reason:'no-base-branch'):
+  // the session then stays put with a surfaced notice and never runs in the operator's real tree.
+  // Isolation disabled (no injected gitWorkspace/integrationBranch) or a non-git path -> runs in place
+  // (returns true, worktreeDir null).
   async _provisionWorktree() {
     if (!this._gitWorkspace || !this._integrationBranch) return true;
     if (this.worktreeDir && fs.existsSync(this.worktreeDir)) return true; // reuse across restart/wake

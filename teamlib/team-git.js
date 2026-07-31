@@ -110,6 +110,32 @@ function createGitWorkspace(opts = {}) {
     }
   }
 
+  // Seed refs tried in order to auto-create a missing integration branch: the remote-tracking branch of
+  // the same name first (it just is not checked out locally yet), then the repo's likely default
+  // branches, then HEAD as a final catch-all (createBody already verified HEAD resolves earlier, so a
+  // seed is effectively always found in a repo with commits). Passing the REF NAME (not the sha) to
+  // `git branch` means creating from a remote-tracking ref also sets upstream tracking automatically.
+  async function ensureLocalBranch(projectPath, baseBranch) {
+    const seedCandidates = [
+      `refs/remotes/origin/${baseBranch}`,
+      'refs/heads/main',
+      'refs/heads/master',
+      'refs/remotes/origin/main',
+      'refs/remotes/origin/master',
+      'HEAD',
+    ];
+    let seedRef = null;
+    for (const candidate of seedCandidates) {
+      const verify = await run(['rev-parse', '--verify', '--quiet', candidate], projectPath);
+      if (!verify.ok) continue;
+      seedRef = candidate;
+      break;
+    }
+    if (!seedRef) return false;
+    const created = await run(['branch', baseBranch, seedRef], projectPath);
+    return created.ok;
+  }
+
   // Create an isolated worktree on `glissa/<teamId>/<label>`. Returns
   // { cwd, isGit, branch, base, baseSha }; falls back to { cwd: projectPath, isGit: false }.
   function create(args) {
@@ -124,10 +150,16 @@ function createGitWorkspace(opts = {}) {
     let base = (await run(['rev-parse', '--abbrev-ref', 'HEAD'], projectPath)).out || 'HEAD';
     if (baseBranch) {
       // Fork off a SPECIFIC branch (the session integration branch, e.g. develop) regardless of what
-      // the operator's main checkout currently has checked out. A missing branch is reported as
-      // reason:'no-base-branch' so the caller can BLOCK - Glissa never creates the integration branch.
-      const ref = await run(['rev-parse', '--verify', '--quiet', `refs/heads/${baseBranch}`], projectPath);
-      if (!ref.ok) return { cwd: projectPath, isGit: false, reason: 'no-base-branch' };
+      // the operator's main checkout currently has checked out. A missing local branch is auto-created
+      // from origin/<baseBranch>, then main/master, then HEAD (ensureLocalBranch below); reason:
+      // 'no-base-branch' remains only as the fallback when that creation itself fails.
+      let ref = await run(['rev-parse', '--verify', '--quiet', `refs/heads/${baseBranch}`], projectPath);
+      if (!ref.ok) {
+        const created = await ensureLocalBranch(projectPath, baseBranch);
+        if (!created) return { cwd: projectPath, isGit: false, reason: 'no-base-branch' };
+        ref = await run(['rev-parse', '--verify', '--quiet', `refs/heads/${baseBranch}`], projectPath);
+        if (!ref.ok) return { cwd: projectPath, isGit: false, reason: 'no-base-branch' };
+      }
       baseSha = ref.out;
       base = baseBranch;
     }

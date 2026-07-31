@@ -35,8 +35,9 @@ const DEFAULT_CONFIG = {
   // stage sessions never receive it). Takes effect on the next session start/restart.
   antiSlopPrompt: false,
   editorCommand: '',
-  // Integration branch every worktree-backed session forks from and merges back into. Glissa never
-  // creates it; if it is absent a session stays DORMANT with a notice (it never runs in the real tree).
+  // Integration branch every worktree-backed session forks from and merges back into. If it is absent
+  // locally, team-git.js auto-creates it (from origin/<branch>, then main/master, then HEAD); a session
+  // only stays DORMANT with a notice if that creation itself fails (see team-git.js createBody).
   integrationBranch: 'develop',
   // Where session worktrees live: a stable, project-associated root (NOT system-temp), kept outside the
   // repo working tree. Empty -> a `.glissa-worktrees` sibling of each repo (resolved in backend).
