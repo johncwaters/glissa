@@ -11,8 +11,12 @@ dist/
 !.claude/release-profile.yml
 config.json
 .pty-capture/
-# Per-session post-turn checker output (runtime telemetry, written into the session worktree). Not a
-# deliverable: ignoring it keeps it out of session diffs and out of the merge into the integration branch.
+# Runtime output (team runs, post-turn checker telemetry, etc). Not a deliverable.
+# Excludes the project pack (.glissa/pack/, .glissa/teams/*/pack/), which AGENTS.md documents as committed.
 .glissa/post-turn/
+.glissa/teams/*/runs/
+.glissa/teams/*/log.md
+# Leftovers from a retired team id; the live teams are listed in teams/.
+.glissa/teams/release-notes/
 # Local scratch repo used for integration testing; not part of the package.
 ita-test/

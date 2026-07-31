@@ -1,3 +1,5 @@
+> Historical document, superseded. This was the implementation-planning doc drafted before the GitHub PR Auto-Review feature was built. Current behavior: see AGENTS.md's "GitHub PR Auto-Review" section.
+
 # Code Change Plan: GitHub PR Auto-Review
 
 **Status:** pending approval

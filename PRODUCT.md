@@ -1,9 +1,5 @@
 # Product
 
-## Register
-
-product
-
 ## Users
 
 A single power user: a developer running many Claude Code agents at once, on Windows, often late and often tired. Their context is a 27-inch monitor in a dim room at 2am, several live terminals in view, attention split across sessions that each move at their own pace. They are not browsing; they are on watch.

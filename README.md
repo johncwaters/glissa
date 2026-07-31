@@ -1,17 +1,16 @@
 # Glissa
 
 [![npm version](https://img.shields.io/npm/v/glissa)](https://www.npmjs.com/package/glissa)
+[![CI](https://github.com/johncwaters/glissa/actions/workflows/test.yml/badge.svg)](https://github.com/johncwaters/glissa/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/npm/l/glissa)](https://opensource.org/licenses/MIT)
 [![Node.js](https://img.shields.io/node/v/glissa)](https://nodejs.org)
 [![Platform: Windows](https://img.shields.io/badge/platform-Windows-0078d4?logo=windows)](https://www.npmjs.com/package/glissa)
 
 **Run dozens of Claude Code agents at once. See every session. Miss nothing.**
 
-Claude Code is powerful, but managing multiple sessions across terminals is chaos. You're alt-tabbing between windows, losing track of which agent is waiting for input, and missing the moment one finishes. Work piles up while you context-switch.
+Running more than a couple of Claude Code agents at once turns into alt-tabbing between terminal windows, missing the exact moment one finishes or silently blocks on a prompt, and merging work you never watched happen. Glissa is the shipped fix: one browser dashboard, live terminal output for every session, exact status instead of a guess, and per-agent git worktrees you can review and merge without leaving the page.
 
-Glissa gives you a single browser dashboard to spawn, monitor, and control all your Claude Code sessions in real time. Live terminal output streams via WebSocket. Native browser notifications tell you exactly when a session needs attention. Every agent, every project, one screen.
-
-> **Built for Windows**: the platform where multi-session Claude Code tooling didn't exist. One `npm install -g glissa` and you're running.
+It's on npm (`npm install -g glissa`), and I run my daily agent fleet in it. This README was written inside a Glissa session: Glissa is developed inside Glissa.
 
 ![Glissa Dashboard](assets/pictures/glissa-screenshot.png)
 
@@ -57,18 +56,38 @@ The install succeeded, but the directory where npm placed the `glissa` command i
 - Per-session git worktree isolation: review and merge each agent's committed work from the dashboard while it keeps running
 - Spawn and manage multiple Claude Code sessions simultaneously
 - Real-time terminal output via xterm.js with WebGL acceleration
-- Dual WebSocket architecture (control channel + per-session PTY streaming)
-- Structural status detection: authoritative Claude Code hooks (injected per session, no repo changes) with an OSC-0 title fallback, never screen scraping
-- Background sub-agent completion gate: a session with live background agents or tasks stays out of Complete until they finish, with an "N agents" card chip showing the count
+- Structural status detection: hooks as the authoritative signal, an OSC-0 title fallback, never screen scraping (see below)
+- Background sub-agent completion gate: a session with live background agents or tasks stays out of Complete until they finish
 - Native browser notifications when a session needs input, finishes, or fails (opt-in Windows toast fallback)
 - Keyboard navigation: jump between sessions, step through the ones needing attention, and merge or resolve from the keyboard
 - Teams: project-portable agent pipelines that run against any project you manage
-- GitHub PR auto-review (opt-in): reviews your own open PRs headlessly, comments its findings, and auto-merges only the clean PRs whose checks are green (configured in Settings; needs `gh` and Telegram)
-- Session recording: every session writes a JSONL forensic log to `~/.glissa/recordings` (structural signals by default, raw PTY bytes opt-in) with bounded retention
-- Dormant boot so unopened sessions cost nothing until you focus them
-- Auto-resume by default: sessions that were live when Glissa stopped (cleanly or by crash) come back on the next start with their Claude conversation resumed (`autoResume: false` to disable)
-- Configurable themes (Golgari, Midnight, Phyrexian, Compleated, Rainbow Unicorns)
-- Hot-reloadable configuration
+- GitHub PR auto-review (opt-in): reviews your own open PRs headlessly, comments its findings, and auto-merges only the clean PRs whose checks are green
+- Auto-resume by default: sessions that were live when Glissa stopped come back on the next start with their Claude conversation resumed
+- Configurable themes, hot-reloadable configuration
+
+## Why the status detection is hard (and how Glissa does it)
+
+The obvious way to know if a Claude Code session finished, is waiting on you, or is still working is to scrape the terminal: watch for a prompt string, a spinner glyph, some text pattern. It breaks constantly. Every TUI redraw, every theme change, every Claude Code release that adjusts spacing invalidates the scrape. Glissa never does this.
+
+Instead, at spawn Glissa injects Claude Code hooks scoped to that one session, no changes to the target repo, that POST to a local HTTP endpoint on every lifecycle event: prompt submitted, turn stopped, notification raised, sub-agent started or finished. These hooks are the authoritative signal. An OSC-0 terminal title fallback (braille spinner glyph = working, idle glyph = ready) covers the gap for anything that predates or bypasses the hooks. The two are merged with explicit precedence (hook beats title) and a short conflict window so a racing signal can still win before the UI settles.
+
+That design didn't arrive whole. Three incidents shaped it:
+
+`/clear` and `/compact` fire no `UserPromptSubmit` and no `Stop`, but the terminal redraw briefly flashes a spinner then an idle glyph in the title. Early on, that flash looked exactly like a finished work cycle, so Glissa fired a "session complete" notification on every `/clear`. (The bug report was, more or less, "why did my terminal congratulate me for clearing the screen.") The fix: on a detected clear/compact, reset both signal sources and mute title-only signals until the next real prompt.
+
+A background sub-agent (launched via `Task` with `run_in_background`, or Ctrl+B) can still be running when the main agent's own turn ends and its `Stop` hook fires. Treating that `Stop` as completion closed the card while real work was still happening in the background. The fix is a completion gate: Glissa counts live sub-agents from `SubagentStart`/`SubagentStop` and reconciles that count against `background_tasks`, a field Claude Code's own hook payloads declare independently. Staleness between the two is resolved by a sequence number, not a timestamp, because concurrent signals routinely land in the same millisecond.
+
+Boot auto-resume (reattaching a session's Claude conversation after Glissa restarts) depends on capturing Claude's session id from a hook. It was wired to capture that id from `SessionStart`, which seemed reasonable until testing showed Claude Code doesn't reliably fire `SessionStart` on interactive startup at all, silently dead in production, no error, resume just never happened. The fix: capture the session id from whichever main-agent hook arrives first, since they all carry it.
+
+Every session also writes a JSONL forensic recording by default (hook payloads and state transitions, not raw terminal bytes), and a version-aware replay harness drives recorded traffic back through the detection code as regression fixtures. That's how bugs like the ones above get diagnosed from real session data instead of guesswork, and how they stay caught if the logic regresses.
+
+## Engineering notes
+
+- Pure-core seam architecture: IO-free decision logic lives in `session/core/` and `*-core.mjs` modules; thin shells around them do the actual I/O.
+- 93-file `node:test` suite in `tests/`, zero test-framework dependency.
+- Table-driven state machines, e.g. `session/core/state-machine.js`.
+- Fail-closed PR auto-review merge gate: `server/core/pr-review-core.js` only merges a clean, non-stale, green-checks PR; anything ambiguous (no checks, a `gh` error, a touched workflow file) blocks instead of guessing.
+- Bounded-retention session recorder: `session/session-recorder.js`, capped by file size, file count, and age so it can run unattended indefinitely.
 
 ## Focus
 
@@ -127,6 +146,14 @@ npm run dev:server-only # Express backend only (port 3000)
 npm run build           # Production build to dist/
 npm start               # Production server
 ```
+
+`tests/` is the automated `node:test` suite (`npm test`). `test/` holds manual smoke scripts, run by hand, not part of CI.
+
+## Limitations
+
+- **Windows 11 only.** Built for the platform where multi-session Claude Code tooling didn't exist. Other platforms are untested, not merely unsupported in the docs.
+- **Localhost-only, single-user trust boundary.** Neither WebSocket channel has authentication; any local process can connect. That's a deliberate scope choice for a single-user dev tool, not an oversight, but it means the port must never be exposed beyond `localhost`.
+- **Requires the Claude Code CLI.** Glissa spawns and manages it; it doesn't replace it.
 
 ## Changelog
 

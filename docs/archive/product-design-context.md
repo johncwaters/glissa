@@ -1,4 +1,6 @@
-# Glissa — Design Context
+> Historical document, superseded. This was the working design-context doc before the current product definition was written. Current behavior: see the root `PRODUCT.md`.
+
+# Glissa: Design Context
 
 ## Users
 

@@ -25,7 +25,7 @@ Glissa is a lightweight Node.js background process that spawns and manages Claud
 | `package.json` | CommonJS package; `files` whitelist validated by `scripts/check-package-files.js` |
 | `AGENTS.md` | Project agent instructions: architecture, conventions, design decisions. Read it first. `CLAUDE.md` is a stub that imports this file via `@AGENTS.md` |
 | `DESIGN.md` / `DESIGN.json` | Dashboard visual design system |
-| `PRODUCT.md` | Product definition and positioning (canonical; `docs/PRODUCT.md` is an older design-context doc) |
+| `PRODUCT.md` | Product definition and positioning (canonical; see `docs/archive/product-design-context.md` for the superseded design-context doc) |
 
 ## Subdirectories
 
