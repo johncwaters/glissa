@@ -1149,15 +1149,18 @@ class Session extends EventEmitter {
   // explicit sidebar open/refresh request - never on a recurring timer.
   async getBranchSync() {
     const branch = this._integrationBranch;
-    const noUpstream = (fetched) => ({ branch: branch || null, upstream: null, state: "no-upstream", ahead: 0, behind: 0, fetched });
-    if (!branch || !this.path) return noUpstream(false);
+    // fetched: null on these short-circuits - no fetch was ever attempted, which the UI must not
+    // render as a failed (stale) fetch.
+    const noUpstream = () => ({ branch: branch || null, upstream: null, state: decideBranchSyncState({ hasUpstream: false }), ahead: 0, behind: 0, fetched: null });
+    if (!branch || !this.path) return noUpstream();
     const opts = { cwd: this.path, encoding: "utf8", timeout: 10000 };
     // gitOut (not gitStrict): "no upstream configured for branch" is an EXPECTED outcome here, not an
     // error to reject on, so it must resolve to empty stdout rather than throw.
     const upstream = (await gitOut(["rev-parse", "--abbrev-ref", "--symbolic-full-name", `${branch}@{upstream}`], opts)).trim();
-    if (!upstream || upstream.includes("@{")) return noUpstream(false);
+    if (!upstream || upstream.includes("@{")) return noUpstream();
 
-    const remote = upstream.slice(0, upstream.indexOf("/")) || "origin";
+    const upstreamSlashIdx = upstream.indexOf("/");
+    const remote = upstreamSlashIdx === -1 ? "origin" : upstream.slice(0, upstreamSlashIdx);
     let fetched = true;
     try {
       await gitStrict(["fetch", "--quiet", remote, branch], { ...opts, timeout: 8000 });
@@ -1166,7 +1169,7 @@ class Session extends EventEmitter {
     }
 
     const counts = parseLeftRightCount(await gitOut(["rev-list", "--left-right", "--count", `${upstream}...${branch}`], opts));
-    if (!counts) return { branch, upstream, state: "no-upstream", ahead: 0, behind: 0, fetched };
+    if (!counts) return { branch, upstream, state: decideBranchSyncState({ hasUpstream: false }), ahead: 0, behind: 0, fetched };
     return {
       branch, upstream, fetched,
       ahead: counts.ahead, behind: counts.behind,

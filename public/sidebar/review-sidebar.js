@@ -435,12 +435,13 @@ function renderBranchSync(id) {
   const row = el('button', 'review-branch-sync-text', label);
   row.type = 'button';
   row.dataset.syncState = sync.state;
-  if (sync.fetched === false) {
-    row.dataset.stale = 'true';
-    row.title = 'The last fetch against the remote failed; these counts may be stale. Click to retry.';
-  } else {
-    row.title = 'Click to refresh';
-  }
+  // fetched null means no fetch was attempted (no-upstream short-circuit), which is not staleness;
+  // the state guard covers the fetch-attempted-then-parse-failed path that also lands on no-upstream.
+  const isStale = sync.fetched === false && sync.state !== 'no-upstream';
+  if (isStale) row.dataset.stale = 'true';
+  row.title = isStale
+    ? 'The last fetch against the remote failed; these counts may be stale. Click to retry.'
+    : 'Click to refresh';
   row.addEventListener('click', () => requestBranchSync(id));
   return row;
 }
