@@ -5,6 +5,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 
+const { canonicalizePath } = require('../shared/paths');
+
 const DEFAULT_CONFIG = {
   port: 3000,
   autoRecoverSeconds: 3,
@@ -257,7 +259,10 @@ function createConfigStore() {
     }
 
     try {
-      watcher = fs.watch(configPath, () => {
+      // Canonical path required: libuv watches the parent dir and asserts that each reported event
+      // filename (expanded to its long form) still starts with it, so an 8.3 short path (a config
+      // under a short HOME, or a short GLISSA_CONFIG) aborts the whole PROCESS past this catch.
+      watcher = fs.watch(canonicalizePath(configPath), () => {
         clearTimeout(reloadTimer);
         reloadTimer = setTimeout(() => {
           if (Date.now() - _lastSelfWriteTs < 500) return;

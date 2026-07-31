@@ -14,6 +14,7 @@ const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 
 const { createGitWorkspace } = require('../teamlib/team-git');
+const { isSameDirectoryPath } = require('../shared/paths');
 
 // Junction-setup helper for the teardown-safety tests below: the junction is what the live shareList
 // path (populateWorktree) creates; these tests only need one to exist, however it got there.
@@ -653,8 +654,12 @@ test('create (real git): creating the same session branch twice returns branch-i
     const ws2 = await gw.create({ projectPath: repo, teamId: 'session', label: 'dup2', outputPath: '' });
     assert.equal(ws2.isGit, false);
     assert.equal(ws2.reason, 'branch-in-use');
-    // git's porcelain output uses forward slashes on Windows; normalize before comparing to ws1.cwd.
-    assert.equal(path.resolve(ws2.conflictPath), path.resolve(ws1.cwd));
+    // The two spellings come from different producers: git porcelain reports the canonical long path
+    // with forward slashes, while ws1.cwd inherits whatever os.tmpdir() gave (an 8.3 short path on a
+    // CI runner). The contract is that they name the SAME directory, which is what the adoption
+    // decision in sessions.js asks, so assert it with that same predicate.
+    assert.ok(isSameDirectoryPath(ws2.conflictPath, ws1.cwd),
+      `conflictPath ${ws2.conflictPath} names the first worktree ${ws1.cwd}`);
 
     await gw.discard({ projectPath: repo, workspace: ws1 });
   } finally {

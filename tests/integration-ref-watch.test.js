@@ -12,6 +12,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const { createIntegrationRefWatcher } = require('../detection/integration-ref-watch');
+const { SHORT_NAMES_AVAILABLE, shortPathOf } = require('./helpers/short-path');
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -80,6 +81,28 @@ test('handles a nested integration branch (release/x)', async () => {
   } finally {
     w.stop();
     fx.cleanup();
+  }
+});
+
+// Same hazard as detection/worktree-watch.js: an 8.3 segment in the watched dir (a commonGitDir under
+// a runner's C:\Users\RUNNER~1\... %TEMP%) makes libuv's prefix assertion fail and ABORT THE PROCESS,
+// past any try/catch, killing the whole test file. start() must canonicalize before fs.watch.
+test('the watcher survives a commonGitDir under an 8.3 short parent', { skip: !SHORT_NAMES_AVAILABLE }, async () => {
+  const outer = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-irw-shortbase-'));
+  const dir = shortPathOf(outer);
+  const logsHeads = path.join(dir, 'logs', 'refs', 'heads');
+  fs.mkdirSync(logsHeads, { recursive: true });
+  fs.writeFileSync(path.join(logsHeads, 'develop'), '0000 init\n', 'utf8');
+  let calls = 0;
+  const w = createIntegrationRefWatcher({ commonGitDir: dir, branch: 'develop', onChange: () => { calls++; }, debounceMs: 50 });
+  try {
+    assert.equal(w.start(), true, 'started over the short-path reflog dir');
+    fs.appendFileSync(path.join(logsHeads, 'develop'), 'move\n', 'utf8');
+    await wait(300);
+    assert.equal(calls, 1, 'fires normally instead of aborting on the short-path prefix');
+  } finally {
+    w.stop();
+    fs.rmSync(outer, { recursive: true, force: true });
   }
 });
 

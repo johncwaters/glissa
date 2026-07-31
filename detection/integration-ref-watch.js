@@ -26,6 +26,8 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
+const { canonicalizePath } = require('../shared/paths');
+
 // A one-directory, debounced fs.watch over an integration branch's reflog.
 //   createIntegrationRefWatcher({ commonGitDir, branch, onChange, debounceMs? })
 // start() is a no-op (returns false) when the reflog dir does not exist yet (the branch has never been
@@ -60,7 +62,10 @@ function createIntegrationRefWatcher({ commonGitDir, branch, onChange, debounceM
     try { exists = fs.existsSync(watchDir); } catch { exists = false; }
     if (!exists) return false; // no reflog dir yet; the floor (turn-end / gitdir watch) still covers it
     try {
-      watcher = fs.watch(watchDir, { persistent: false }, (_evt, filename) => {
+      // Canonical path required: libuv expands each reported event filename to its long form and
+      // asserts that it still starts with the watched dir, so an 8.3 short path (a commonGitDir under
+      // a %TEMP% like C:\Users\RUNNER~1\...) aborts the whole PROCESS from native code, past this catch.
+      watcher = fs.watch(canonicalizePath(watchDir), { persistent: false }, (_evt, filename) => {
         // filename is the changed entry. Fire only for our branch's reflog; a null filename (some
         // platforms omit it) is treated as "maybe ours" and fires, since the watch is lossy anyway.
         if (!filename || filename === leaf) fire();

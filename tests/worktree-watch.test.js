@@ -12,6 +12,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const { createWorktreeWatcher, resolveWorktreeGitDir } = require('../detection/worktree-watch');
+const { SHORT_NAMES_AVAILABLE, shortPathOf } = require('./helpers/short-path');
 
 function tmpdir(prefix) {
   return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
@@ -130,6 +131,33 @@ test('stop() halts the watcher: no onChange after stop', async () => {
   } finally {
     w.stop();
     fx.cleanup();
+  }
+});
+
+// A CI runner's %TEMP% is C:\Users\RUNNER~1\..., so the gitdir path carries an 8.3 segment while the
+// event filenames libuv reports are expanded to their long form. libuv asserts that the two share a
+// prefix and ABORTS THE PROCESS when they do not, which no try/catch here can intercept: the whole
+// test file dies. start() must therefore hand fs.watch a canonical path.
+test('the watcher survives a gitdir under an 8.3 short parent', { skip: !SHORT_NAMES_AVAILABLE }, async () => {
+  const base = tmpdir('glissa-ww-shortbase-');
+  const shortBase = shortPathOf(base);
+  const wt = path.join(shortBase, 'wt');
+  fs.mkdirSync(wt);
+  // Only the parent is short, exactly as os.tmpdir() leaves it; the worktrees/ tail stays long.
+  const gitDir = path.join(shortBase, '.git', 'worktrees', 'feature');
+  fs.mkdirSync(gitDir, { recursive: true });
+  fs.writeFileSync(path.join(wt, '.git'), `gitdir: ${gitDir}\n`, 'utf8');
+  fs.writeFileSync(path.join(gitDir, 'index'), 'v1', 'utf8');
+  let calls = 0;
+  const w = createWorktreeWatcher({ worktreeDir: wt, onChange: () => { calls++; }, debounceMs: 50 });
+  try {
+    assert.equal(w.start(), true, 'started over the short-path gitdir');
+    fs.writeFileSync(path.join(gitDir, 'index'), 'v2', 'utf8');
+    await wait(300);
+    assert.equal(calls, 1, 'fires normally instead of aborting on the short-path prefix');
+  } finally {
+    w.stop();
+    fs.rmSync(base, { recursive: true, force: true });
   }
 });
 

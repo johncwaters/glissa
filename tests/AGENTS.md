@@ -22,6 +22,7 @@ Tests are named `<module>.test.js` after the module under test. Notable clusters
 | Directory | Purpose |
 |-----------|---------|
 | `fixtures/` | JSONL session recordings (v1 legacy and v2 structural-signal format) consumed by `replay-harness.test.js` |
+| `helpers/` | Shared test fixtures that are not themselves tests (the `*.test.js` glob skips them). `short-path.js` mints 8.3 aliases so the CI runner's short `%TEMP%` is reproducible locally |
 
 ## For AI Agents
 
