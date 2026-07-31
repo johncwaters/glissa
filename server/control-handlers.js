@@ -822,6 +822,15 @@ function registerControlHandlers(controlWss, deps) {
       const { committed, uncommitted, hasCommits } = await s.getDiff();
       ws.send(JSON.stringify({ type: 'session-diff', id: s.id, committed, uncommitted, hasCommits }));
     },
+    // Branch sync: whether this session's project base branch (e.g. develop) is ahead/behind its
+    // remote upstream. Sent only in reply to an explicit sidebar open/refresh (see review-sidebar.js
+    // requestBranchSync) - never polled. getBranchSync includes a bounded `git fetch` for freshness.
+    'request-branch-sync':        async (msg, ws) => {
+      const s = findSession(msg);
+      if (!s) return;
+      const sync = await s.getBranchSync();
+      ws.send(JSON.stringify({ type: 'branch-sync-status', id: s.id, ...sync }));
+    },
     'debug-state':      (msg, ws) => {
       const s = findSession(msg);
       if (!s) { ws.send(JSON.stringify({ type: 'error', message: 'Session not found' })); return; }

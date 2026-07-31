@@ -29,7 +29,7 @@ function harness(sessions) {
 function fakeSession(id) {
   return {
     id, name: id, ephemeral: false,
-    calls: { merge: 0, discard: 0, diff: 0 },
+    calls: { merge: 0, discard: 0, diff: 0, branchSync: 0 },
     mergeWorktree() { this.calls.merge++; return { merged: true }; },
     discardWorktree() { this.calls.discard++; },
     getDiff() {
@@ -39,6 +39,10 @@ function fakeSession(id) {
         uncommitted: { stat: ' g.js | 1 +', diff: '+y\n' },
         hasCommits: true,
       };
+    },
+    getBranchSync() {
+      this.calls.branchSync++;
+      return { branch: 'develop', upstream: 'origin/develop', state: 'ahead', ahead: 2, behind: 0, fetched: true };
     },
     toSnapshot() { return { id: this.id, name: this.name }; },
   };
@@ -76,6 +80,27 @@ test('request-session-diff replies with the committed + uncommitted diff and the
 test('merge-session on an unknown session is a no-op (no throw)', () => {
   const h = harness(new Map());
   assert.doesNotThrow(() => h.send({ type: 'merge-session', id: 'nope' }));
+});
+
+test('request-branch-sync replies with the session\'s branch sync status', async () => {
+  const s = fakeSession('p1');
+  const h = harness(new Map([['p1', s]]));
+  await h.send({ type: 'request-branch-sync', id: 'p1' });
+  const msg = h.sent.find((m) => m.type === 'branch-sync-status');
+  assert.ok(msg, 'sent a branch-sync-status message');
+  assert.equal(msg.id, 'p1');
+  assert.equal(msg.branch, 'develop');
+  assert.equal(msg.upstream, 'origin/develop');
+  assert.equal(msg.state, 'ahead');
+  assert.equal(msg.ahead, 2);
+  assert.equal(msg.behind, 0);
+  assert.equal(msg.fetched, true);
+  assert.equal(s.calls.branchSync, 1);
+});
+
+test('request-branch-sync on an unknown session is a no-op (no throw)', () => {
+  const h = harness(new Map());
+  assert.doesNotThrow(() => h.send({ type: 'request-branch-sync', id: 'nope' }));
 });
 
 // --- finish-session: one-click close-out delegates to Session.finishAndMerge (logic tested there) ---

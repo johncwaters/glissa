@@ -601,6 +601,96 @@ test('getDiff: a branch already on develop shows nothing to merge despite a stal
   } finally { s.destroy(); fs.rmSync(repo, { recursive: true, force: true }); }
 });
 
+// --- getBranchSync: the project's LOCAL base branch vs its remote upstream (not the worktree gate) ---
+
+// A repo with a bare "remote" and a local `develop` branch pushed to it, so HEAD@{upstream} resolves
+// to origin/develop. Returns the local checkout dir; the caller commits further to create drift.
+function initRepoWithRemote() {
+  const remoteDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-bsync-remote-'));
+  git(['init', '--bare'], remoteDir);
+  const dir = initOneCommitRepo();
+  git(['branch', '-M', 'develop'], dir);
+  git(['remote', 'add', 'origin', remoteDir], dir);
+  git(['push', '-q', '-u', 'origin', 'develop'], dir);
+  return { dir, remoteDir };
+}
+
+test('getBranchSync reports no-upstream for a branch with no remote configured', { skip: !GIT }, async () => {
+  const repo = initOneCommitRepo();
+  git(['branch', '-M', 'develop'], repo);
+  const s = makeSession({ integrationBranch: 'develop' });
+  s.path = repo;
+  try {
+    const sync = await s.getBranchSync();
+    assert.equal(sync.state, 'no-upstream');
+    assert.equal(sync.upstream, null);
+    assert.equal(sync.ahead, 0);
+    assert.equal(sync.behind, 0);
+  } finally { s.destroy(); fs.rmSync(repo, { recursive: true, force: true }); }
+});
+
+test('getBranchSync reports in-sync right after a push', { skip: !GIT }, async () => {
+  const { dir: repo, remoteDir } = initRepoWithRemote();
+  const s = makeSession({ integrationBranch: 'develop' });
+  s.path = repo;
+  try {
+    const sync = await s.getBranchSync();
+    assert.equal(sync.state, 'in-sync');
+    assert.equal(sync.upstream, 'origin/develop');
+    assert.equal(sync.ahead, 0);
+    assert.equal(sync.behind, 0);
+    assert.equal(sync.fetched, true);
+  } finally {
+    s.destroy();
+    fs.rmSync(repo, { recursive: true, force: true });
+    fs.rmSync(remoteDir, { recursive: true, force: true });
+  }
+});
+
+// Reproduces exactly the shape verified by hand against a real repo before writing the pure core: 2
+// local-only commits (ahead) and 1 remote-only commit pushed from a second clone (behind), with the
+// local origin/develop ref deliberately stale until getBranchSync's own `git fetch` catches it up.
+test('getBranchSync fetches then reports diverged with the correct ahead/behind orientation', { skip: !GIT }, async () => {
+  const { dir: repo, remoteDir } = initRepoWithRemote();
+  const clone = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-bsync-clone-'));
+  try {
+    // -b develop: the bare remote's symbolic HEAD is whatever init.defaultBranch left it (often
+    // "master", which was never created here), so a plain clone would check out nothing and any
+    // commit made in it would be unrelated history, rejected as non-fast-forward on push.
+    git(['clone', '-q', '-b', 'develop', remoteDir, clone], os.tmpdir());
+    git(['config', 'user.email', 'test@example.com'], clone);
+    git(['config', 'user.name', 'Glissa Test'], clone);
+    git(['config', 'commit.gpgsign', 'false'], clone);
+    fs.writeFileSync(path.join(clone, 'remote-work.txt'), 'remote\n', 'utf8');
+    git(['add', '-A'], clone);
+    git(['commit', '-m', 'remote-only commit'], clone);
+    git(['push', '-q', 'origin', 'HEAD:develop'], clone);
+
+    // Two local-only commits in the original checkout, never pushed. Its cached origin/develop ref is
+    // now stale (it does not yet know about the remote-only commit above) until getBranchSync fetches.
+    fs.writeFileSync(path.join(repo, 'local-work-1.txt'), 'local1\n', 'utf8');
+    git(['add', '-A'], repo);
+    git(['commit', '-m', 'local-only commit 1'], repo);
+    fs.writeFileSync(path.join(repo, 'local-work-2.txt'), 'local2\n', 'utf8');
+    git(['add', '-A'], repo);
+    git(['commit', '-m', 'local-only commit 2'], repo);
+
+    const s = makeSession({ integrationBranch: 'develop' });
+    s.path = repo;
+    try {
+      const sync = await s.getBranchSync();
+      assert.equal(sync.state, 'diverged');
+      assert.equal(sync.ahead, 2, 'two local-only commits');
+      assert.equal(sync.behind, 1, 'one remote-only commit, caught by the fetch');
+      assert.equal(sync.fetched, true);
+    } finally { s.destroy(); }
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+    fs.rmSync(remoteDir, { recursive: true, force: true });
+    fs.rmSync(clone, { recursive: true, force: true });
+  }
+});
+
 // --- checkWorktreeChange: the live change funnel (turn-end hook / gitdir watch / integration-ref watcher) ---
 
 test('checkWorktreeChange emits worktree-changed on a real delta and dedups an unchanged worktree', { skip: !GIT }, async () => {

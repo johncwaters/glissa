@@ -26,12 +26,15 @@ const SIDEBAR_MAX = 700;
 
 const statusById = new Map(); // id -> mergeStatus ('none'|'pending-review'|'merging'|'parked'|'merged')
 const diffById = new Map();   // id -> { committed, uncommitted, hasCommits } (null until fetched)
+// id -> branch-sync payload; null while a request is in flight, undefined if never requested.
+const syncById = new Map();
 // Open/expanded keys are `${section}:${path}` so the SAME file appearing in both the committed and the
 // uncommitted section collapses independently (default: every file minimized).
 const openFiles = new Set();
 const expanded = new Set();
 
 let panelEl = null;
+let branchSyncEl = null;
 let controlsEl = null;
 let bodyEl = null;
 let sessionNameEl = null;
@@ -52,6 +55,11 @@ export function mountReviewSidebar({ panel }) {
   sessionNameEl = el('span', 'review-sidebar-session');
   head.append(title, sessionNameEl);
 
+  // Local-base-branch-vs-remote-upstream indicator (e.g. "develop: 2 ahead, 1 behind origin/develop").
+  // A project-level fact, not tied to the merge/review gate below it, so it is its own row (collapses
+  // via :empty when nothing is selected/requested yet) rather than folded into review-controls.
+  branchSyncEl = el('div', 'review-branch-sync');
+
   // Pinned control region between the title and the scrolling diff: status note + actions + a
   // why-disabled reason line. Always present while a session is selected (collapsed via :empty
   // otherwise), so Merge and the other controls never scroll out of reach inside a long diff.
@@ -61,7 +69,7 @@ export function mountReviewSidebar({ panel }) {
   // Resize handle: drag left edge to widen, right to narrow. Width persisted to localStorage.
   const handle = el('div', 'review-resize-handle');
   handle.setAttribute('aria-hidden', 'true');
-  panelEl.append(head, controlsEl, bodyEl, handle);
+  panelEl.append(head, branchSyncEl, controlsEl, bodyEl, handle);
 
   let dragStartX = 0, dragStartWidth = 0;
 
@@ -105,7 +113,7 @@ export function mountReviewSidebar({ panel }) {
     // Per-session: don't carry one session's open/expanded files into the next (start minimized).
     openFiles.clear();
     expanded.clear();
-    if (id) requestDiff(id);
+    if (id) { requestDiff(id); requestBranchSync(id); }
     render();
   });
 
@@ -154,6 +162,13 @@ export function setReviewDiff(id, payload) {
   if (id === getSelectedId()) render();
 }
 
+// Cache a session's branch-sync payload (reply to request-branch-sync) and re-render if it is the
+// selected one. `payload` is { branch, upstream, state, ahead, behind, fetched }.
+export function setReviewBranchSync(id, payload) {
+  syncById.set(id, payload || null);
+  if (id === getSelectedId()) render();
+}
+
 // A server `session-changed` push: this session's worktree changed (a commit/stage via the gitdir
 // watch, a turn end, or the integration-ref watcher catching an out-of-band / cross-session merge into
 // the integration branch). Auto-re-fetch the diff, but ONLY for the selected session, so the heavy git
@@ -178,6 +193,7 @@ export function refreshReviewSidebar(id) {
 export function forgetReviewSession(id) {
   statusById.delete(id);
   diffById.delete(id);
+  syncById.delete(id);
   if (id === getSelectedId()) { setSelectedId(null); return; } // setSelectedId fires render
   render();
 }
@@ -271,6 +287,27 @@ function requestDiff(id) {
   sendControlMsg({ type: 'request-session-diff', id });
 }
 
+// Explicit request only (sidebar open via onSelectionChange, or the operator clicking the rendered
+// branch-sync line to refresh) - never on a timer, since it includes a `git fetch` against the remote.
+function requestBranchSync(id) {
+  syncById.set(id, null); // pending: renders the loading pulse until the reply lands
+  sendControlMsg({ type: 'request-branch-sync', id });
+  if (id === getSelectedId()) render();
+}
+
+// Pure: the compact display text for a branch-sync payload, or null when there is nothing to show yet
+// (never requested). Ordered by state, mirroring mergeDisabledReason's shape below.
+function branchSyncLabel(sync) {
+  if (!sync) return null;
+  const { branch, upstream, state, ahead, behind } = sync;
+  if (state === 'no-upstream') return `${branch}: no upstream`;
+  if (state === 'in-sync') return `${branch}: in sync with ${upstream}`;
+  if (state === 'ahead') return `${branch}: ${ahead} ahead of ${upstream}`;
+  if (state === 'behind') return `${branch}: ${behind} behind ${upstream}`;
+  if (state === 'diverged') return `${branch}: ${ahead} ahead, ${behind} behind ${upstream}`;
+  return null;
+}
+
 function sessionName(ui, id) {
   return ui?.card?.dataset.session || id;
 }
@@ -281,6 +318,7 @@ function render() {
   if (!controlsEl || !bodyEl) return;
   controlsEl.replaceChildren();
   bodyEl.replaceChildren();
+  if (branchSyncEl) branchSyncEl.replaceChildren();
 
   const id = getSelectedId();
   const ui = id ? sessionUIs.get(id) : null;
@@ -288,6 +326,11 @@ function render() {
     if (sessionNameEl) sessionNameEl.textContent = '';
     renderEmpty('No session selected', 'Click a session name to review its changes here.');
     return;
+  }
+
+  if (branchSyncEl) {
+    const row = renderBranchSync(id);
+    if (row) branchSyncEl.append(row);
   }
 
   const status = statusById.get(id) || 'none';
@@ -377,6 +420,29 @@ function renderEmpty(title, desc) {
   const wrap = el('div', 'review-empty');
   wrap.append(el('div', 'review-empty-title', title), el('div', 'review-empty-desc', desc));
   bodyEl.append(wrap);
+}
+
+// The local-base-branch-vs-remote-upstream row for the given (selected) session id. Returns a node or
+// null (nothing requested yet, e.g. a session card that hasn't been selected since page load). Clicking
+// the rendered line is the operator's explicit "refresh" action (the only other trigger is selecting
+// the session, in onSelectionChange - never a timer, since this includes a `git fetch`).
+function renderBranchSync(id) {
+  const sync = syncById.get(id);
+  if (sync === undefined) return null;
+  if (sync === null) return el('span', 'review-branch-sync-text review-loading', 'Checking branch sync...');
+  const label = branchSyncLabel(sync);
+  if (!label) return null;
+  const row = el('button', 'review-branch-sync-text', label);
+  row.type = 'button';
+  row.dataset.syncState = sync.state;
+  if (sync.fetched === false) {
+    row.dataset.stale = 'true';
+    row.title = 'The last fetch against the remote failed; these counts may be stale. Click to retry.';
+  } else {
+    row.title = 'Click to refresh';
+  }
+  row.addEventListener('click', () => requestBranchSync(id));
+  return row;
 }
 
 // One change group, summarized in a SINGLE header row so the two groups read as two distinct things at a

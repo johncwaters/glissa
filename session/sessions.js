@@ -28,6 +28,7 @@ const { mapSignalToEvent } = require("./core/status-mapper");
 const { buildMergePrompt } = require("./core/merge-prompt");
 const { createOutputRing } = require("./core/output-ring");
 const { decideSignatureDemotion, decideDiffSelfHeal } = require("./core/merge-gate");
+const { parseLeftRightCount, decideBranchSyncState } = require("../server/core/branch-sync-core");
 const agentTracker = require("./core/agent-tracker");
 const wakeupTracker = require("./core/wakeup-tracker");
 const { RESUME_ID_RE } = require("./core/auto-resume");
@@ -1135,6 +1136,42 @@ class Session extends EventEmitter {
     }
     this._effectiveBase = this._integrationBranch || null;
     return this._integrationBranch || null;
+  }
+
+  // Ahead/behind of the project's LOCAL base branch (this._integrationBranch, e.g. develop) against
+  // its remote upstream tracking branch. Distinct from getDiff()'s worktree-vs-integration-branch
+  // gate: this answers "did the operator's agents commit to local develop without pushing, or did
+  // origin move while they worked", neither of which the worktree diff surfaces. Runs in `this.path`
+  // (the main checkout, never a session worktree) and touches only refs - no checkout - so it never
+  // disturbs whatever the operator has checked out there. The freshness fetch is best-effort and
+  // timeout-bounded: a failure (offline, slow remote) still returns the (possibly stale) counts,
+  // flagged `fetched: false` so the UI can hint the "behind" number may be outdated. Only called on an
+  // explicit sidebar open/refresh request - never on a recurring timer.
+  async getBranchSync() {
+    const branch = this._integrationBranch;
+    const noUpstream = (fetched) => ({ branch: branch || null, upstream: null, state: "no-upstream", ahead: 0, behind: 0, fetched });
+    if (!branch || !this.path) return noUpstream(false);
+    const opts = { cwd: this.path, encoding: "utf8", timeout: 10000 };
+    // gitOut (not gitStrict): "no upstream configured for branch" is an EXPECTED outcome here, not an
+    // error to reject on, so it must resolve to empty stdout rather than throw.
+    const upstream = (await gitOut(["rev-parse", "--abbrev-ref", "--symbolic-full-name", `${branch}@{upstream}`], opts)).trim();
+    if (!upstream || upstream.includes("@{")) return noUpstream(false);
+
+    const remote = upstream.slice(0, upstream.indexOf("/")) || "origin";
+    let fetched = true;
+    try {
+      await gitStrict(["fetch", "--quiet", remote, branch], { ...opts, timeout: 8000 });
+    } catch {
+      fetched = false; // offline / slow remote - fall through and report the (possibly stale) counts
+    }
+
+    const counts = parseLeftRightCount(await gitOut(["rev-list", "--left-right", "--count", `${upstream}...${branch}`], opts));
+    if (!counts) return { branch, upstream, state: "no-upstream", ahead: 0, behind: 0, fetched };
+    return {
+      branch, upstream, fetched,
+      ahead: counts.ahead, behind: counts.behind,
+      state: decideBranchSyncState({ hasUpstream: true, ahead: counts.ahead, behind: counts.behind }),
+    };
   }
 
   // A CHEAP fingerprint of the worktree's reviewable state: uncommitted+untracked (porcelain), the

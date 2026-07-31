@@ -3072,6 +3072,34 @@ body {
   min-width: 0;
 }
 
+/* Local base branch (e.g. develop) vs its remote upstream tracking branch. A project-level fact, not
+   tied to the merge/review gate below it, so it gets its own row rather than folding into
+   .review-controls; it stays visible across every merge status, including 'none'. Collapses to
+   nothing when no session is selected or nothing has been requested yet for it (mirrors
+   .review-controls' :empty collapse). */
+.review-branch-sync {
+  flex: 0 0 auto;
+  padding: 6px 14px;
+  border-bottom: 1px solid var(--border-dim);
+}
+.review-branch-sync:empty { display: none; }
+.review-branch-sync-text {
+  appearance: none;
+  border: none;
+  background: none;
+  padding: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-dim);
+  cursor: pointer;
+  text-align: left;
+}
+.review-branch-sync-text:hover { color: var(--text-head); }
+.review-branch-sync-text[data-sync-state="ahead"] { color: var(--accent); }
+.review-branch-sync-text[data-sync-state="behind"] { color: var(--state-waiting); }
+.review-branch-sync-text[data-sync-state="diverged"] { color: var(--state-failed); }
+.review-branch-sync-text[data-stale="true"] { opacity: 0.7; }
+
 /* Pinned control region between the title and the scrolling diff. Holds the status note, the action
    buttons (Merge always leads), and a why-disabled reason line, so the controls never scroll away with
    a long diff. Flat at rest (a 1px divider, no shadow); collapses entirely when empty (no selection). */
