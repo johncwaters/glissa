@@ -25,6 +25,23 @@ function assert(label, cond) {
 
 function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
 
+// Best-effort: when claude resolves to a real .exe, the spawn must go direct
+// (no cmd.exe /c shim layer). Skips on hosts where claude is a .cmd/.ps1 shim.
+function assertSpawnStrategy(target) {
+  console.log('\nSpawn strategy:');
+  const isDirectExeSpawn = process.platform === 'win32' && CLAUDE_CMD && CLAUDE_CMD.kind === 'exe';
+  if (!isDirectExeSpawn) {
+    origConsoleLog('  SKIP  direct-exe spawn assertion (claude is not a .exe on this host)');
+    return;
+  }
+  const spawnLine = logLines.find(
+    (l) => l.includes(`[session ${target.id}]`) && l.includes('spawn:'),
+  );
+  assert('spawn log line captured for target session', !!spawnLine);
+  assert('direct exe spawn (resolved .exe present, no cmd.exe /c)',
+    !!spawnLine && spawnLine.includes(CLAUDE_CMD.path) && !spawnLine.includes('cmd.exe /c'));
+}
+
 async function main() {
   const httpServer = http.createServer();
   const backend = createBackend(httpServer, { staticDir: null });
@@ -72,19 +89,7 @@ async function main() {
     );
     assert('other sessions remain dormant (no spurious state-changes)', otherChanges.length === 0);
 
-    // Best-effort: when claude resolves to a real .exe, the spawn must go direct
-    // (no cmd.exe /c shim layer). Skips on hosts where claude is a .cmd/.ps1 shim.
-    console.log('\nSpawn strategy:');
-    if (process.platform === 'win32' && CLAUDE_CMD && CLAUDE_CMD.kind === 'exe') {
-      const spawnLine = logLines.find(
-        (l) => l.includes(`[session ${target.id}]`) && l.includes('spawn:'),
-      );
-      assert('spawn log line captured for target session', !!spawnLine);
-      assert('direct exe spawn (resolved .exe present, no cmd.exe /c)',
-        !!spawnLine && spawnLine.includes(CLAUDE_CMD.path) && !spawnLine.includes('cmd.exe /c'));
-    } else {
-      origConsoleLog('  SKIP  direct-exe spawn assertion (claude is not a .exe on this host)');
-    }
+    assertSpawnStrategy(target);
   }
 
   // Cleanup

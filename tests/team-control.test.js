@@ -413,7 +413,7 @@ test('setup-team-pack requires teamId and projectId', () => {
 
 test('remove-session tears down an ephemeral session directly, not via the config diff', () => {
   // Regression: ephemeral setup sessions are never in config.projects, so the persisted-config
-  // filter is a no-op and the reload diff skips them — the X button was a dead click. They must be
+  // filter is a no-op and the reload diff skips them: the X button was a dead click. They must be
   // routed to the direct teardown instead.
   const removed = [];
   let saveCalled = false;

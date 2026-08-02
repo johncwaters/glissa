@@ -15,6 +15,7 @@ const { execFileSync } = require('node:child_process');
 
 const { createGitWorkspace } = require('../teamlib/team-git');
 const { isSameDirectoryPath } = require('../shared/paths');
+const { hasGit, git } = require('./helpers/git-fixture');
 
 // Junction-setup helper for the teardown-safety tests below: the junction is what the live shareList
 // path (populateWorktree) creates; these tests only need one to exist, however it got there.
@@ -23,15 +24,8 @@ function makeNodeModulesJunction(projectPath, wtDir) {
   return fs.existsSync(path.join(wtDir, 'node_modules'));
 }
 
-function hasGit() {
-  try { execFileSync('git', ['--version'], { stdio: 'ignore' }); return true; } catch { return false; }
-}
 const GIT = hasGit();
 const WIN = process.platform === 'win32';
-
-function git(args, cwd) {
-  return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
-}
 
 // Shared base fixture: a repo on `main` with one commit and node_modules gitignored the way every Node
 // repo has it (so a commit made in the worktree never stages a node_modules junction).

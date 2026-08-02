@@ -12,10 +12,10 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { execFileSync } = require('node:child_process');
 
 const { Session } = require('../session/sessions');
 const { STATES } = require('../shared/states');
+const { hasGit, git } = require('./helpers/git-fixture');
 const WIN = process.platform === 'win32';
 
 // The finish settled branch and the once("exit") handler now fire an ASYNC reset (merge/discard ->
@@ -24,14 +24,7 @@ const WIN = process.platform === 'win32';
 // single setImmediate hop drains the awaited chain.
 const drain = () => new Promise((r) => setImmediate(r));
 
-function hasGit() {
-  try { execFileSync('git', ['--version'], { stdio: 'ignore' }); return true; } catch { return false; }
-}
 const GIT = hasGit();
-
-function git(args, cwd) {
-  return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
-}
 
 // A real one-commit git repo to stand in for a session worktree, so getDiff runs against actual git
 // (the reconcile path it drives is git-truth, not mockable).

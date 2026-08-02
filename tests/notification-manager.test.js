@@ -123,3 +123,80 @@ test('the debounce map is pruned lazily (no unbounded growth across sessions)', 
   assert.equal(manager._recentCategories.has('s1\0complete'), false, 'stale key swept');
   manager.destroy();
 });
+
+// ---------------------------------------------------------------------------
+// Ported from the retired test/test-notification-manager.js manual harness: low-level
+// unit behavior not otherwise covered by the scenario tests above or by notify-gate.test.js.
+// ---------------------------------------------------------------------------
+
+test('a failed trigger delivers once with no escalation timer', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { manager, deliveries } = makeManager({ escalationIntervalMs: 1000 });
+  manager.trigger('s1', 'failed', 'oops');
+  assert.equal(deliveries.length, 1);
+  t.mock.timers.tick(60000);
+  assert.equal(deliveries.length, 1, 'failed never escalates');
+  manager.destroy();
+});
+
+test('acknowledge on an entry with no active notification is a no-op', () => {
+  const { manager } = makeManager();
+  assert.doesNotThrow(() => manager.acknowledge('nonexistent'));
+  manager.destroy();
+});
+
+test('destroy() clears every tracked entry back to IDLE', () => {
+  const { manager } = makeManager();
+  manager.trigger('s1', 'waiting', 'needs input');
+  manager.trigger('s2', 'failed', 'oops');
+  manager.destroy();
+  assert.equal(manager.getNotificationState('s1'), NS.IDLE);
+  assert.equal(manager.getNotificationState('s2'), NS.IDLE);
+});
+
+test('multiple registered channels are all called, in registration order', () => {
+  const manager = new NotificationManager({ escalationIntervalMs: 60000, debounceMs: 0 });
+  const order = [];
+  manager.registerChannel('first', () => order.push('first'));
+  manager.registerChannel('second', () => order.push('second'));
+  manager.trigger('s1', 'waiting', 'test');
+  assert.deepEqual(order, ['first', 'second']);
+  manager.destroy();
+});
+
+test('a channel that throws does not block a later channel from delivering', () => {
+  const manager = new NotificationManager({ escalationIntervalMs: 60000, debounceMs: 0 });
+  const calls = [];
+  manager.registerChannel('broken', () => { throw new Error('boom'); });
+  manager.registerChannel('working', () => calls.push(1));
+  manager.trigger('s1', 'waiting', 'test');
+  assert.equal(calls.length, 1, 'the second channel still ran after the first threw');
+  manager.destroy();
+});
+
+test('session_destroyed clears the entry back to IDLE from a live state', () => {
+  const { manager } = makeManager();
+  manager.trigger('s1', 'waiting', 'test');
+  manager._transition('s1', 'session_destroyed');
+  assert.equal(manager.getNotificationState('s1'), NS.IDLE);
+  manager.destroy();
+});
+
+test('notification-state-change fires on delivery with the session and category', () => {
+  const { manager } = makeManager();
+  const events = [];
+  manager.on('notification-state-change', (e) => events.push(e));
+  manager.trigger('s1', 'complete', 'done');
+  const deliveredEvent = events.find((e) => e.to === NS.DELIVERED);
+  assert.equal(deliveredEvent?.session, 's1');
+  assert.equal(deliveredEvent?.category, 'complete');
+  manager.destroy();
+});
+
+test('updateSettings changes the escalation interval and debounce window', () => {
+  const manager = new NotificationManager({ escalationIntervalMs: 999, debounceMs: 111 });
+  manager.updateSettings({ escalationIntervalMs: 500, debounceMs: 200 });
+  assert.equal(manager._escalationIntervalMs, 500);
+  assert.equal(manager._debounceMs, 200);
+  manager.destroy();
+});

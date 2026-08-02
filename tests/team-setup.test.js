@@ -9,6 +9,9 @@ const {
 } = require('../teamlib/team-setup');
 const { PACK_SENTINEL } = require('../teamlib/team-output');
 
+const EM_DASH = String.fromCharCode(0x2014);
+const EN_DASH = String.fromCharCode(0x2013);
+
 const TEAM = {
   id: 'marketing',
   name: 'Marketing Pipeline',
@@ -55,8 +58,8 @@ test('buildSetupPrompt instructs a learn-then-interview flow (no blind autofill)
 
 test('buildSetupPrompt contains no em or en dashes', () => {
   const p = promptFor();
-  assert.equal(p.includes('—'), false, 'no em dash');
-  assert.equal(p.includes('–'), false, 'no en dash');
+  assert.equal(p.includes(EM_DASH), false, 'no em dash');
+  assert.equal(p.includes(EN_DASH), false, 'no en dash');
 });
 
 test('buildSetupPrompt tolerates a team with no name (falls back to id)', () => {
@@ -85,8 +88,8 @@ test('buildSetupPrompt output is unchanged when projectContext is absent or empt
 
 test('buildSetupPrompt with context still contains no em or en dashes', () => {
   const p = promptFor({ projectContext: '- Project: demo\n- Description: lean and mean' });
-  assert.equal(p.includes('—'), false, 'no em dash');
-  assert.equal(p.includes('–'), false, 'no en dash');
+  assert.equal(p.includes(EM_DASH), false, 'no em dash');
+  assert.equal(p.includes(EN_DASH), false, 'no en dash');
 });
 
 test('setupSessionId is stable and namespaced', () => {
@@ -151,6 +154,6 @@ test('S2: buildSetupPrompt lists only the files it is given (a filled shared fil
   assert.ok(p.includes(path.join(localDir, 'content-calendar.md')), 'lists the unfilled local file');
   assert.equal(p.includes('voice-guide.md'), false, 'the already-filled shared file is NOT in the prompt');
   assert.match(p, /shared pack \(under \.glissa\/pack\/\)/, 'advisory names the project shared pack');
-  assert.equal(p.includes('—'), false, 'no em dash');
-  assert.equal(p.includes('–'), false, 'no en dash');
+  assert.equal(p.includes(EM_DASH), false, 'no em dash');
+  assert.equal(p.includes(EN_DASH), false, 'no en dash');
 });

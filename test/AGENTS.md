@@ -11,7 +11,6 @@ Manual smoke tests and harnesses run directly with `node`, separate from the aut
 | File | Description |
 |------|-------------|
 | `smoke-dormant-boot.js` | Boots the backend in-process, verifies dormant-by-default boot and the start-session control flow |
-| `test-notification-manager.js` | Manual harness for the notification lifecycle state machine |
 
 ## For AI Agents
 
@@ -25,6 +24,6 @@ Manual smoke tests and harnesses run directly with `node`, separate from the aut
 ## Dependencies
 
 ### Internal
-- `../backend.js`, `../sessions.js`, `../notification-manager.js`
+- `../backend.js`, `../sessions.js`
 
 <!-- MANUAL: Any manually added notes below this line are preserved on regeneration -->

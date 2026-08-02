@@ -14,19 +14,12 @@ const fs = require('node:fs');
 const http = require('node:http');
 const os = require('node:os');
 const path = require('node:path');
-const { execFileSync } = require('node:child_process');
 
 const { reconcileSessionWorktrees, createBackend } = require('../server/backend');
 const { createGitWorkspace } = require('../teamlib/team-git');
+const { hasGit, git } = require('./helpers/git-fixture');
 
-function hasGit() {
-  try { execFileSync('git', ['--version'], { stdio: 'ignore' }); return true; } catch { return false; }
-}
 const GIT = hasGit();
-
-function git(args, cwd) {
-  return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
-}
 
 // A throwaway repo checked out on the integration branch, the shape the boot reconcile expects.
 function initRepoOnDevelop() {

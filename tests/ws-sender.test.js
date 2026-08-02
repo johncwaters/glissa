@@ -137,7 +137,7 @@ test('T10: a sustained flood to a wedged client is dropped locally (bounded), ne
   // ~5 MiB in 64 KiB chunks while the client is pinned above high-water.
   const chunk = 'x'.repeat(64 * 1024);
   for (let i = 0; i < 80; i++) s.onData(chunk);
-  assert.deepEqual(ws.sent, [], 'nothing forwarded to a wedged socket — no unbounded userspace queue');
+  assert.deepEqual(ws.sent, [], 'nothing forwarded to a wedged socket: no unbounded userspace queue');
 
   // On recovery only NEW data flows; the 5 MiB backlog was dropped locally
   // (it lives in the session ring buffer and replays on reconnect), proving the
@@ -189,7 +189,7 @@ test('destroy stops further sends and clears timers', () => {
 
 // Minimal session-ring double for the injected backfill source. `produce` models the
 // session pushing a chunk into the ring (advancing the monotonic total) BEFORE it emits
-// 'data' — the ORDER CONTRACT the sender's onData short-circuit relies on. `calls`
+// 'data': the ORDER CONTRACT the sender's onData short-circuit relies on. `calls`
 // records every offset getBufferSince was asked for (to assert call count + no-advance).
 function fakeRing() {
   let full = '';   // everything produced from offset 0 (the intended stream)
@@ -216,7 +216,7 @@ function feed(ring, sender, chunk) {
   sender.onData(chunk);
 }
 
-test('AC1: gap-free in-place recovery — drop then drain backfills the exact missed range', () => {
+test('AC1: gap-free in-place recovery: drop then drain backfills the exact missed range', () => {
   const ws = fakeWs({ bufferedAmount: DEFAULTS.highWaterMark + 1 });
   const sched = manualScheduler();
   const ring = fakeRing();
@@ -249,7 +249,7 @@ test('AC2: happy path (no drop) never calls the source and sends each byte once'
   assert.equal(ring.calls.length, 0, 'no backfill on the happy path');
 });
 
-test('AC3: bounded memory with a source — flood to a pinned client queues nothing, defers backfill to drain', () => {
+test('AC3: bounded memory with a source: flood to a pinned client queues nothing, defers backfill to drain', () => {
   const ws = fakeWs({ bufferedAmount: DEFAULTS.highWaterMark + 1 });
   const sched = manualScheduler();
   const ring = fakeRing();
@@ -277,7 +277,7 @@ test('AC3: sustained flood arms the stall timer once (no per-frame re-arm)', () 
   assert.equal(sched.pendingTimers(), 1, 'exactly one stall timer across the whole flood');
 });
 
-test('AC4: evicted fallback — missed range scrolled out of the ring -> CLEAR + full replay', () => {
+test('AC4: evicted fallback: missed range scrolled out of the ring -> CLEAR + full replay', () => {
   const ws = fakeWs({ bufferedAmount: DEFAULTS.highWaterMark + 1 });
   const sched = manualScheduler();
   const ring = fakeRing();
@@ -310,11 +310,11 @@ test('AC6: sendImmediate does not advance the live offset (backfill resumes from
   ring.produce('Z');
   s.onData('Z'); // drained -> backfill
 
-  assert.ok(ring.calls.includes(100), 'backfill queried getBufferSince(100) — sendImmediate did not advance sentOffset');
+  assert.ok(ring.calls.includes(100), 'backfill queried getBufferSince(100): sendImmediate did not advance sentOffset');
   assert.ok(!ring.calls.includes(106), 'sentOffset was not bumped by the 6-byte replay frame');
 });
 
-test('AC7: quiet-drain — a drop then silence recovers the tail via the stall-timer re-check', () => {
+test('AC7: quiet-drain: a drop then silence recovers the tail via the stall-timer re-check', () => {
   const ws = fakeWs({ bufferedAmount: DEFAULTS.highWaterMark + 1 });
   const sched = manualScheduler();
   const ring = fakeRing();
@@ -423,7 +423,7 @@ test('a sub-cap frame buffered across a drain is not double-sent (regression)', 
 // rewinds sentOffset to that base so maybeBackfill re-pulls history + live, instead of
 // resuming live-only and stranding the (already client-side-cleared) history.
 
-test('sendImmediate drop rewinds sentOffset to the replay base — recovers history + live', () => {
+test('sendImmediate drop rewinds sentOffset to the replay base: recovers history + live', () => {
   const ws = fakeWs({ bufferedAmount: DEFAULTS.highWaterMark + 1 }); // pinned at connect
   const sched = manualScheduler();
   const ring = fakeRing();
@@ -437,7 +437,7 @@ test('sendImmediate drop rewinds sentOffset to the replay base — recovers hist
   feed(ring, s, 'LIVE'); // drained -> onData short-circuit backfills from the rewound base
 
   // THE bite: rewound to base 0, not the live baseline 100 (the pre-fix live-only bug).
-  assert.ok(ring.calls.includes(0), 'backfill queried getBufferSince(0) — rewound to replay base');
+  assert.ok(ring.calls.includes(0), 'backfill queried getBufferSince(0): rewound to replay base');
   assert.ok(!ring.calls.includes(100), 'did NOT resume from the live baseline (pre-fix behavior)');
   assert.equal(ws.sent.join(''), 'R'.repeat(100) + 'LIVE', 'history + live recovered, in order');
 });
@@ -474,7 +474,7 @@ test('sendImmediate drop on a non-fresh socket logs loudly and still rewinds', (
   try {
     assert.equal(s.sendImmediate('REPLAY'), false, 'dropped while pinned');
   } finally {
-    console.error = orig; // MANDATORY restore — node:test runs the file in ONE process
+    console.error = orig; // MANDATORY restore: node:test runs the file in ONE process
   }
   assert.equal(errs.length, 1, 'loud guard fired exactly once');
   assert.match(String(errs[0][0]), /non-fresh socket/, 'diagnostic identifies the violation');

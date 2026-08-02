@@ -85,7 +85,7 @@ test('getBufferSince: offset on a chunk boundary never splits a surrogate pair',
   assert.equal(tail, `${lo}y`, 'slice starts cleanly at the chunk-append boundary');
   const full = `x${hi}${tail}`; // prefix already sent + backfilled tail
   assert.equal(full, 'x\u{1F600}y');
-  assert.equal([...full].length, 3, 'x, emoji, y — one code point, not mojibake');
+  assert.equal([...full].length, 3, 'x, emoji, y: one code point, not mojibake');
 });
 
 test('output-ring total increments on push and is exposed via getHealthStats', () => {

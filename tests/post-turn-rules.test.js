@@ -112,9 +112,9 @@ function refLineCol(content, offset) {
     if (content.charCodeAt(i) === 10) {
       line++;
       col = 1;
-    } else {
-      col++;
+      continue;
     }
+    col++;
   }
   return { line, col };
 }

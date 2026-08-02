@@ -21,7 +21,7 @@ function makeSink() {
 }
 
 // Build a scheduler with a manual frame queue so frames run only when the test
-// calls runFrame() — no real requestAnimationFrame.
+// calls runFrame(): no real requestAnimationFrame.
 async function setup(opts = {}) {
   const { createScheduler } = await importSched();
   const queue = [];
@@ -86,7 +86,7 @@ test('round-robin: budget=1 services both sinks over two frames (fairness)', asy
   runFrame(); // services one
   runFrame(); // services the other (first is in-flight, rr advanced)
   assert.equal(a.calls.length, 1, 'a serviced');
-  assert.equal(b.calls.length, 1, 'b serviced — neither starves');
+  assert.equal(b.calls.length, 1, 'b serviced: neither starves');
 });
 
 test('parks (schedules no frame) when nothing is dirty, re-arms on enqueue', async () => {
@@ -98,7 +98,7 @@ test('parks (schedules no frame) when nothing is dirty, re-arms on enqueue', asy
   assert.equal(pendingFrames(), 1, 'armed on enqueue');
   runFrame();
   s.drainAll();
-  assert.equal(pendingFrames(), 0, 'parked after drain — no busy spin');
+  assert.equal(pendingFrames(), 0, 'parked after drain: no busy spin');
   assert.equal(sched.running(), false);
 });
 
@@ -111,7 +111,7 @@ test('unregister removes the sink; enqueue to it is a no-op and a pending callba
   sched.unregister('a');
   sched.enqueue('a', 'after'); // no sink -> ignored
   assert.equal(sched.has('a'), false);
-  s.drainAll(); // the in-flight callback fires after unregister — must be inert
+  s.drainAll(); // the in-flight callback fires after unregister: must be inert
   runFrame();
   assert.deepEqual(s.calls, ['live'], 'no write after unregister');
 });

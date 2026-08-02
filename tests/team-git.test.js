@@ -9,18 +9,11 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { execFileSync } = require('node:child_process');
 
 const { createGitWorkspace } = require('../teamlib/team-git');
+const { hasGit, git } = require('./helpers/git-fixture');
 
-function hasGit() {
-  try { execFileSync('git', ['--version'], { stdio: 'ignore' }); return true; } catch { return false; }
-}
 const GIT = hasGit();
-
-function git(args, cwd) {
-  return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
-}
 
 function initRepo() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-gitrepo-'));

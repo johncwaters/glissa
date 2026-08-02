@@ -3,7 +3,7 @@
 // Regression: Session.resize() must apply to the PTY immediately, including the
 // quiescent states (WAITING / IDLE / COMPLETE). A now-removed deferral used to
 // stash the resize in _pendingResize and only flush it on the next RUNNING
-// transition — so minimizing a sibling card resized the browser xterm but did
+// transition, so minimizing a sibling card resized the browser xterm but did
 // NOT SIGWINCH Claude, which then reflowed only "after a message input"
 // (the WAITING -> RUNNING transition that flushed the deferral).
 //

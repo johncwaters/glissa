@@ -2,7 +2,7 @@
 
 // Verifies the team-stage Session options (initialPrompt / extraClaudeArgs / ephemeral) wire into
 // start()'s claudeArgs in the right ORDER, using the injected ptySpawn fake so no real process is
-// launched (a real spawn would keep the PTY alive and hang the runner — see docs/progress.txt learning).
+// launched (a real spawn would keep the PTY alive and hang the runner, see docs/progress.txt learning).
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
