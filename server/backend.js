@@ -386,7 +386,7 @@ function createBackend(httpServer, options = {}) {
     let listenerMismatch = false;
     let orphanPty = false;
     let destroyedReachable = false;
-    for (const sess of [...sessions.values(), ...teamSessions.values()]) {
+    for (const sess of [...sessions.values(), ...teamSessions.values(), ...reviewSessions.values()]) {
       const stats = sess.getHealthStats();
       stats.detection = sess.getDetectionStats();
       stats.ephemeral = !!sess.ephemeral;
@@ -396,8 +396,8 @@ function createBackend(httpServer, options = {}) {
       totalDataListeners += stats.dataListenerCount;
       totalOutputBufferBytes += stats.outputBufferBytes;
       // Anomaly checks assume a persisted session with tracked data-WS clients and a stable
-      // lifecycle. Ephemeral team-stage sessions stream transiently and tear down fast, so they are
-      // excluded to avoid false-positive listenerMismatch/orphanPty during a run.
+      // lifecycle. Ephemeral sessions (team stages, PR reviews, guided setup) stream transiently and
+      // tear down fast, so they are excluded to avoid false-positive listenerMismatch/orphanPty.
       if (!sess.ephemeral) {
         const clientCount = sessionDataClients.get(stats.id)?.size || 0;
         if (stats.dataListenerCount !== clientCount) listenerMismatch = true;
