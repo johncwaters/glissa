@@ -195,11 +195,10 @@ test('AC6b: teamPermissions yields a non-empty deny-list with the state-change b
   }
 });
 
-test('AC15: announcer carries the engine-honored runIfVerdict/optional gate and produces published.md', () => {
+test('AC15: announcer carries the engine-honored runIfVerdict gate and produces published.md', () => {
   const team = loadTeam('changelog', REPO_TEAMS);
   const announcer = team.stages.find((s) => s.id === 'announcer');
   assert.equal(announcer.runIfVerdict, 'SHIP');
-  assert.equal(announcer.optional, true);
   assert.equal(announcer.produces, 'published.md');
   assert.deepEqual(announcer.requiredSections, ['Summary', 'Announcement draft']);
 });

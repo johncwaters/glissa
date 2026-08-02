@@ -539,24 +539,6 @@ test('marketing/qa/changelog do not opt into app runtime (backward-compat lock)'
   }
 });
 
-test('loadTeam("qa-walk") opts into app runtime (share context, project MCP, develop base)', () => {
-  const team = loadTeam('qa-walk', REPO_TEAMS);
-  assert.equal(team.id, 'qa-walk');
-  assert.equal(team.outputPath, '.glissa/teams/qa-walk');
-  assert.deepEqual(team.stages.map((s) => s.id), ['walk']);
-  assert.ok(fs.existsSync(team.stages[0].agentPath), 'walk agent prompt exists');
-  assert.deepEqual(
-    team.stages[0].requiredSections,
-    ['First-timer', 'Returning-user', 'Skeptic', 'Summary'],
-  );
-  assert.deepEqual(
-    team.runtime,
-    { shareLocalContext: true, enableProjectMcp: true, baseBranch: 'develop' },
-  );
-  assert.equal(team.permissions.mode, 'yolo');
-  assert.deepEqual(team.packRequired, ['how-to-run.md']);
-});
-
 // The real qa team loads with the expected roster, writeScope, testGlobs, schedule, and revise config.
 test('loadTeam("qa") loads the 4-stage roster with writeScope/testGlobs and a fixer revise loop', () => {
   const team = loadTeam('qa', REPO_TEAMS);

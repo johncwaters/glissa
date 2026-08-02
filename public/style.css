@@ -80,10 +80,10 @@
 /* [P0] Respect prefers-reduced-motion system preference */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
-    scroll-behavior: auto !important;
+    animation-duration: 0.01ms;
+    animation-iteration-count: 1;
+    transition-duration: 0.01ms;
+    scroll-behavior: auto;
   }
 }
 
@@ -704,13 +704,13 @@ body {
 }
 
 .terminal-wrap .xterm {
-  height: 100% !important;
-  background-color: var(--bg-card) !important;
+  height: 100%;
+  background-color: var(--bg-card);
 }
 
 .terminal-wrap .xterm-viewport {
   border-radius: 4px;
-  background-color: var(--bg-card) !important;
+  background-color: var(--bg-card);
 }
 
 
@@ -2061,7 +2061,6 @@ body {
   font-size: 12px;
   transition: border-color var(--transition-med), background var(--transition-med);
 }
-.pipeline-stage[data-optional="true"] { border-style: dashed; }
 .pipeline-stage .stage-glyph { color: var(--text-muted); font-size: 11px; }
 .pipeline-stage .stage-name { color: var(--text-dim); }
 .pipeline-stage .stage-model {

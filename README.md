@@ -99,12 +99,11 @@ Navigate it all from the keyboard: `Alt+1`..`Alt+9` jump to a session, `Alt+Up`/
 
 ## Teams
 
-A team is a sequential agent pipeline that you can point at any project Glissa manages. Four ship with Glissa:
+A team is a sequential agent pipeline that you can point at any project Glissa manages. Three ship with Glissa:
 
 - **marketing**: researcher -> strategist -> writer -> editor -> publisher. Drafts content in the project's brand voice and, on a SHIP verdict, queues approved posts to Postiz as drafts.
 - **changelog**: analyst -> curator -> auditor -> announcer. Reconciles `CHANGELOG.md` against git history, then drafts a release announcement in the project's voice.
 - **qa**: runner-triager -> fixer -> auditor -> reporter. A regression auto-fixer: it keeps the existing test suite green by fixing source, never the tests.
-- **qa-walk**: an exploratory, persona-driven walk over Playwright MCP (first-timer, returning user, skeptic) that reports felt friction rather than pass/fail; scheduling is off by default.
 
 Ownership is split so the same agents serve every project:
 

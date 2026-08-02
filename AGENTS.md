@@ -3,7 +3,7 @@
 # glissa
 
 ## Purpose
-Glissa is a lightweight Node.js background process that spawns and manages Claude Code sessions via node-pty, streams terminal output to a browser dashboard over WebSockets, derives session status from structural signals (Claude Code hooks plus an OSC-0 title fallback, never screen scraping), and notifies the operator through browser notifications. It also ships "Teams": project-portable headless agent pipelines (marketing, changelog, qa, qa-walk) that run in isolated git worktrees.
+Glissa is a lightweight Node.js background process that spawns and manages Claude Code sessions via node-pty, streams terminal output to a browser dashboard over WebSockets, derives session status from structural signals (Claude Code hooks plus an OSC-0 title fallback, never screen scraping), and notifies the operator through browser notifications. It also ships "Teams": project-portable headless agent pipelines (marketing, changelog, qa) that run in isolated git worktrees.
 
 ## Key Files
 

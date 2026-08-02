@@ -362,7 +362,7 @@ async function listRunSummaries(projectPath, outputPath, stages = [], limit = 10
     // Config-driven, per team.json stage.capture (section + slot): the orchestrator's run-log line
     // (team-orchestrator.js) reads the same stage.capture config, so a heading name is declared once
     // per team instead of hardcoded here as "Topic"/"Platforms" (which only the marketing team has).
-    // A team with no capture-declaring stage (changelog, qa, qa-walk) simply reports neither field.
+    // A team with no capture-declaring stage (changelog, qa) simply reports neither field.
     const captured = { topic: '', platforms: '' };
     let verdict = '';
     let summary = '';

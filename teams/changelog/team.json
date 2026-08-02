@@ -61,8 +61,7 @@
       "reads": ["analysis.md", "revision.md", "review.md"],
       "produces": "published.md",
       "requiredSections": ["Summary", "Announcement draft"],
-      "runIfVerdict": "SHIP",
-      "optional": true
+      "runIfVerdict": "SHIP"
     }
   ]
 }

@@ -122,8 +122,8 @@ function validateChat(chat, teamId) {
 }
 
 // Validate the optional app-runtime config. A team opts in here when its stage must actually BOOT the
-// target app and/or drive a browser (e.g. the persona QA walk), which a bare file-in/file-out worktree
-// cannot do. All fields optional; defaults make the feature OFF (existing teams unchanged).
+// target app and/or drive a browser, which a bare file-in/file-out worktree cannot do. All fields
+// optional; defaults make the feature OFF (existing teams unchanged).
 //   - shareLocalContext: junction/copy the project's gitignored local context (node_modules, .env*,
 //     .claude, .omc) into the run worktree, the same machinery sessions use, so the agent can run the app.
 //   - enableProjectMcp: pre-trust the project's `.mcp.json` servers in the headless (`-p`) stage.
@@ -317,10 +317,10 @@ function validateAndNormalize(def, teamId, teamDir) {
     stageTimeoutSeconds: def.stageTimeoutSeconds || 900,
     // The SHIP-gated auto-merge boundary; default [] (a team stages only the run folder + log, so
     // marketing's addPaths stays byte-identical and nothing extra merges).
-    writeScope: (def.writeScope && def.writeScope.length) ? def.writeScope.slice() : [],
+    writeScope: (def.writeScope?.length) ? def.writeScope.slice() : [],
     // The restore-before-audit oracle pathspec; default DEFAULT_TEST_GLOBS so the guard always has a
     // sane project-agnostic test matcher even when a team omits it. (Inert unless writeScope is set.)
-    testGlobs: (def.testGlobs && def.testGlobs.length) ? def.testGlobs.slice() : DEFAULT_TEST_GLOBS.slice(),
+    testGlobs: (def.testGlobs?.length) ? def.testGlobs.slice() : DEFAULT_TEST_GLOBS.slice(),
     // Interactive Teams chat + operator-question loop. ON by default (manual runs); a team opts out with
     // chat.allowQuestions:false. The orchestrator scopes the question pause to trigger==='manual' so
     // scheduled/unattended runs never block.

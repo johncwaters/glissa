@@ -80,8 +80,7 @@
       "summary": "On a SHIP verdict, queues the approved drafts to Postiz as drafts (never scheduled); writes published.md.",
       "reads": ["plan.md", "drafts.md", "review.md"],
       "produces": "published.md",
-      "runIfVerdict": "SHIP",
-      "optional": true
+      "runIfVerdict": "SHIP"
     }
   ]
 }

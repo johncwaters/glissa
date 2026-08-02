@@ -94,8 +94,7 @@ export function renderInstancePanel(team, activation) {
     const node = el('li', 'pipeline-stage');
     node.dataset.stage = s.id;
     node.dataset.state = 'idle';
-    if (s.optional) node.dataset.optional = 'true';
-    if (s.summary) node.title = s.summary + (s.optional ? ' (optional)' : '');
+    if (s.summary) node.title = s.summary;
     node.append(el('span', 'stage-glyph', STAGE_GLYPH.idle));
     node.append(el('span', 'stage-name', labelFor(s.id)));
     if (s.model) node.append(el('span', 'stage-model', s.model));

@@ -73,8 +73,7 @@
       "summary": "On a final SHIP, summarizes what was red, the root causes, the fixes, and residual risk; writes report.md.",
       "reads": ["triage.md", "fixes.md", "review.md"],
       "produces": "report.md",
-      "runIfVerdict": "SHIP",
-      "optional": true
+      "runIfVerdict": "SHIP"
     }
   ]
 }

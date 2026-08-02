@@ -75,12 +75,12 @@ export function setRunning(refs, on) {
 // of a blank rail, a zeroed clock, and a generic "Running...". The timer continues from the server's
 // stageStartedAtMs (the Glissa client and server share one machine, so Date.now() is a common clock).
 export function rehydrateLive(refs, live) {
-  if (live && live.stageStartedAtMs) refs.stageStartMs = live.stageStartedAtMs;
+  if (live?.stageStartedAtMs) refs.stageStartMs = live.stageStartedAtMs;
   setRunning(refs, true); // setRunning keeps the stageStartMs we set above, so elapsed is true wall-clock
-  if (live && live.currentStage) {
+  if (live?.currentStage) {
     markStage(refs.stageNodes, live.currentStage, 'active');
     setStatus(refs, `${labelFor(live.currentStage)} · ${stageIndexLabel(refs, live.currentStage)}`, 'run');
   }
   if (!live || !live.currentStage) setStatus(refs, 'Running...', 'run');
-  if (live && live.cancelling) setStatus(refs, 'Cancelling...', '');
+  if (live?.cancelling) setStatus(refs, 'Cancelling...', '');
 }

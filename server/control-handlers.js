@@ -515,7 +515,6 @@ function registerControlHandlers(controlWss, deps) {
               model: s.model || 'sonnet',
               summary: s.summary || '',
               produces: s.produces,
-              optional: !!s.optional,
             })),
           });
         } catch { /* skip an invalid team definition */ }
@@ -853,7 +852,7 @@ function registerControlHandlers(controlWss, deps) {
     // Guarded for the accessor's absence exactly like buildHealthSnapshot above: existing control-WS
     // tests call registerControlHandlers without getUpdateStatus, and an unguarded call would throw.
     const update = typeof getUpdateStatus === 'function' ? getUpdateStatus() : null;
-    if (update && update.updateAvailable) {
+    if (update?.updateAvailable) {
       ws.send(JSON.stringify({ type: 'update-available', ...update }));
     }
 
@@ -861,7 +860,7 @@ function registerControlHandlers(controlWss, deps) {
     // declares its own cursor (`?since=<lastSeq>`) since the server holds no per-connection
     // state across a reconnect; absent param (first connect) means no replay. Sent AFTER
     // snapshot/health/update so ordering matches a client that never disconnected.
-    const since = parseSinceParam(req && req.url);
+    const since = parseSinceParam(req?.url);
     if (controlReplayLog && since !== null) {
       const { entries, evicted } = controlReplayLog.entriesSince(since);
       for (const entry of entries) ws.send(JSON.stringify(entry));
@@ -881,7 +880,7 @@ function registerControlHandlers(controlWss, deps) {
       // crashing the process (no uncaughtException handler exists by design). The null check matters:
       // a literal `null` frame parses fine, and dereferencing .type on it is the same crash class.
       if (!msg || typeof msg !== 'object' || typeof msg.type !== 'string'
-        || !Object.prototype.hasOwnProperty.call(handlers, msg.type)) return;
+        || !Object.hasOwn(handlers, msg.type)) return;
       const handler = handlers[msg.type];
       // Run synchronously so a sync handler's side effects land in this tick (the existing tests and
       // callers rely on that). Only an async handler returns a thenable; attach a catch so its rejection
@@ -889,7 +888,7 @@ function registerControlHandlers(controlWss, deps) {
       const result = handler(msg, ws);
       if (result && typeof result.then === 'function') {
         return result.catch((err) => {
-          console.warn(`[control] ${msg.type} handler failed: ${err && err.message}`);
+          console.warn(`[control] ${msg.type} handler failed: ${err?.message}`);
         });
       }
     });
