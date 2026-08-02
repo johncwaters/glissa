@@ -25,7 +25,7 @@ Server runtime for the Teams feature: loads team definitions from `teams/`, runs
 ### Working In This Directory
 - Everything Glissa writes into a target repo lives under `.glissa/` (the team's `outputPath`). Never write elsewhere in a target project.
 - Pack ownership split: Glissa owns agents/templates (`teams/`), the project owns the pack. Shared pack files resolve through `resolvePackLayout`, the one resolver every consumer must use.
-- Permissions: only `permission.mode: "yolo"` is supported. `team-registry.js loadTeam` REJECTS `scoped`/`interactive` at load time (every stage runs headless `claude -p` and cannot answer a permission prompt, so those modes would hang a stage forever). The deny-list is the real guardrail.
+- Permissions: `permissions.mode` is REQUIRED (no default) and only `"yolo"` is supported. `team-registry.js loadTeam` REJECTS a missing/omitted `permissions` block or mode, and REJECTS `scoped`/`interactive` at load time (every stage runs headless `claude -p` and cannot answer a permission prompt, so those modes would hang a stage forever). A team must declare `"permissions": { "mode": "yolo", "deny": [...] }` explicitly, in the open, rather than inheriting a default. The deny-list is the real guardrail.
 - Merge-back is rebase-then-FF and stages only `outputPath` by default; `writeScope` is the SHIP-gated allowlist for tracked paths, and a team has exactly ONE verdict stage owning it.
 - Pack migration is non-destructive: filled team-local copies promote to `.glissa/pack/`; byte-different duplicates are reported `divergent`, never auto-merged or deleted.
 - No sync git on recurring paths; the orchestrator runs on the shared event loop.

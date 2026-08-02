@@ -54,10 +54,19 @@ function checkPermissionModeSupported(mode, teamId) {
   );
 }
 
+// permissions.mode is REQUIRED (no default): a team must explicitly opt into "yolo" rather than
+// silently inheriting it, so a team.json reader (and a portfolio reviewer) sees the skip-permissions
+// choice made in the open, not defaulted away. Shared between the missing-block and missing-mode
+// guards below so both report the identical reason.
+const REQUIRE_MODE_MSG = 'is required: a team must explicitly declare permissions.mode "yolo" (the '
+  + 'only supported mode) because every stage runs headless (claude -p) and cannot answer a permission '
+  + 'prompt; permissions.deny is the guardrail.';
+
 function validatePermissions(permissions, teamId) {
-  if (permissions == null) return; // optional
+  if (permissions == null) fail('permissions.mode', REQUIRE_MODE_MSG, teamId);
   if (typeof permissions !== 'object') fail('permissions', 'must be an object', teamId);
-  if (permissions.mode != null && !PERMISSION_MODES.has(permissions.mode)) {
+  if (permissions.mode == null) fail('permissions.mode', REQUIRE_MODE_MSG, teamId);
+  if (!PERMISSION_MODES.has(permissions.mode)) {
     fail('permissions.mode', 'must be one of yolo, scoped, interactive', teamId);
   }
   checkPermissionModeSupported(permissions.mode, teamId);
@@ -304,9 +313,9 @@ function validateAndNormalize(def, teamId, teamDir) {
     schemaVersion: def.schemaVersion || 1,
     outputPath: def.outputPath,
     schedule: def.schedule || null,
-    // yolo is the only supported mode (see checkPermissionModeSupported); default to it so a team that
-    // omits permissions entirely runs instead of silently normalizing to a mode that hangs every stage.
-    permissions: def.permissions || { mode: 'yolo', deny: [] },
+    // validatePermissions already required an explicit permissions.mode "yolo" above, so def.permissions
+    // is guaranteed present and valid here; no default to fall back to.
+    permissions: def.permissions,
     stageTimeoutSeconds: def.stageTimeoutSeconds || 900,
     // The SHIP-gated auto-merge boundary; default [] (a team stages only the run folder + log, so
     // marketing's addPaths stays byte-identical and nothing extra merges).

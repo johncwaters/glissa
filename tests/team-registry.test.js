@@ -37,39 +37,44 @@ test('listTeams includes the marketing team', () => {
 
 // Each invalid definition must throw with the offending field named in the message.
 // teamDir = the real marketing dir so the agent-file existence check is never the failure point
-// for these earlier-field cases.
+// for these earlier-field cases. YOLO = a valid permissions block, spread into every case that is not
+// itself testing permissions, so that field-specific case reaches the field it targets instead of
+// tripping the (now-required) permissions.mode check first.
 const okStage = { id: 'researcher', produces: 'brief.md' };
+const YOLO = { permissions: { mode: 'yolo' } };
 const invalidCases = [
   ['missing id', { outputPath: 'team/x', stages: [okStage] }, /\bid\b/],
   ['missing outputPath', { id: 'x', stages: [okStage] }, /outputPath/],
   ['stages not an array', { id: 'x', outputPath: 'y', stages: 'no' }, /stages/],
   ['empty stages', { id: 'x', outputPath: 'y', stages: [] }, /stages/],
-  ['stage missing id', { id: 'x', outputPath: 'y', stages: [{ produces: 'a.md' }] }, /\bid\b/],
-  ['stage missing produces', { id: 'x', outputPath: 'y', stages: [{ id: 'researcher' }] }, /produces/],
+  ['stage missing id', { id: 'x', outputPath: 'y', ...YOLO, stages: [{ produces: 'a.md' }] }, /\bid\b/],
+  ['stage missing produces', { id: 'x', outputPath: 'y', ...YOLO, stages: [{ id: 'researcher' }] }, /produces/],
   ['bad schedule.days', { id: 'x', outputPath: 'y', schedule: { days: ['funday'] }, stages: [okStage] }, /schedule\.days/],
   ['bad schedule.time', { id: 'x', outputPath: 'y', schedule: { time: '5am' }, stages: [okStage] }, /schedule\.time/],
+  ['missing permissions entirely', { id: 'x', outputPath: 'y', stages: [okStage] }, /permissions\.mode/],
+  ['permissions block present but mode omitted', { id: 'x', outputPath: 'y', permissions: {}, stages: [okStage] }, /permissions\.mode/],
   ['bad permissions.mode', { id: 'x', outputPath: 'y', permissions: { mode: 'bogus' }, stages: [okStage] }, /permissions\.mode/],
   ['permissions.mode "scoped" is rejected (headless stages cannot answer a prompt)', { id: 'x', outputPath: 'y', permissions: { mode: 'scoped' }, stages: [okStage] }, /permissions\.mode/],
   ['permissions.mode "interactive" is rejected (headless stages cannot answer a prompt)', { id: 'x', outputPath: 'y', permissions: { mode: 'interactive' }, stages: [okStage] }, /permissions\.mode/],
-  ['non-array permissions.deny', { id: 'x', outputPath: 'y', permissions: { deny: 'no' }, stages: [okStage] }, /permissions\.deny/],
-  ['non-number stageTimeoutSeconds', { id: 'x', outputPath: 'y', stageTimeoutSeconds: '900', stages: [okStage] }, /stageTimeoutSeconds/],
-  ['non-positive stageTimeoutSeconds', { id: 'x', outputPath: 'y', stageTimeoutSeconds: 0, stages: [okStage] }, /stageTimeoutSeconds/],
-  ['non-array writeScope', { id: 'x', outputPath: 'y', writeScope: 'src/**', stages: [okStage] }, /writeScope/],
-  ['non-string writeScope element', { id: 'x', outputPath: 'y', writeScope: ['src/**', 5], stages: [okStage] }, /writeScope/],
-  ['non-array testGlobs', { id: 'x', outputPath: 'y', testGlobs: '**/*.test.*', stages: [okStage] }, /testGlobs/],
-  ['non-string testGlobs element', { id: 'x', outputPath: 'y', testGlobs: ['**/*.test.*', 5], stages: [okStage] }, /testGlobs/],
-  ['non-object chat', { id: 'x', outputPath: 'y', chat: 'no', stages: [okStage] }, /\bchat\b/],
-  ['bad chat.allowQuestions', { id: 'x', outputPath: 'y', chat: { allowQuestions: 'yes' }, stages: [okStage] }, /chat\.allowQuestions/],
-  ['empty chat.questionMarker', { id: 'x', outputPath: 'y', chat: { questionMarker: '' }, stages: [okStage] }, /chat\.questionMarker/],
-  ['bad chat.maxQuestions', { id: 'x', outputPath: 'y', chat: { maxQuestions: 0 }, stages: [okStage] }, /chat\.maxQuestions/],
-  ['bad chat.answerTimeoutSec', { id: 'x', outputPath: 'y', chat: { answerTimeoutSec: -1 }, stages: [okStage] }, /chat\.answerTimeoutSec/],
-  ['non-object runtime', { id: 'x', outputPath: 'y', runtime: 'no', stages: [okStage] }, /\bruntime\b/],
-  ['bad runtime.shareLocalContext', { id: 'x', outputPath: 'y', runtime: { shareLocalContext: 'yes' }, stages: [okStage] }, /runtime\.shareLocalContext/],
-  ['bad runtime.enableProjectMcp', { id: 'x', outputPath: 'y', runtime: { enableProjectMcp: 1 }, stages: [okStage] }, /runtime\.enableProjectMcp/],
-  ['empty runtime.baseBranch', { id: 'x', outputPath: 'y', runtime: { baseBranch: '  ' }, stages: [okStage] }, /runtime\.baseBranch/],
-  ['non-object capture', { id: 'x', outputPath: 'y', stages: [{ ...okStage, capture: 'Topic' }] }, /capture/],
-  ['empty capture.section', { id: 'x', outputPath: 'y', stages: [{ ...okStage, capture: { section: ' ', slot: 'topic' } }] }, /capture\.section/],
-  ['bad capture.slot', { id: 'x', outputPath: 'y', stages: [{ ...okStage, capture: { section: 'Topic', slot: 'headline' } }] }, /capture\.slot/],
+  ['non-array permissions.deny', { id: 'x', outputPath: 'y', permissions: { mode: 'yolo', deny: 'no' }, stages: [okStage] }, /permissions\.deny/],
+  ['non-number stageTimeoutSeconds', { id: 'x', outputPath: 'y', ...YOLO, stageTimeoutSeconds: '900', stages: [okStage] }, /stageTimeoutSeconds/],
+  ['non-positive stageTimeoutSeconds', { id: 'x', outputPath: 'y', ...YOLO, stageTimeoutSeconds: 0, stages: [okStage] }, /stageTimeoutSeconds/],
+  ['non-array writeScope', { id: 'x', outputPath: 'y', ...YOLO, writeScope: 'src/**', stages: [okStage] }, /writeScope/],
+  ['non-string writeScope element', { id: 'x', outputPath: 'y', ...YOLO, writeScope: ['src/**', 5], stages: [okStage] }, /writeScope/],
+  ['non-array testGlobs', { id: 'x', outputPath: 'y', ...YOLO, testGlobs: '**/*.test.*', stages: [okStage] }, /testGlobs/],
+  ['non-string testGlobs element', { id: 'x', outputPath: 'y', ...YOLO, testGlobs: ['**/*.test.*', 5], stages: [okStage] }, /testGlobs/],
+  ['non-object chat', { id: 'x', outputPath: 'y', ...YOLO, chat: 'no', stages: [okStage] }, /\bchat\b/],
+  ['bad chat.allowQuestions', { id: 'x', outputPath: 'y', ...YOLO, chat: { allowQuestions: 'yes' }, stages: [okStage] }, /chat\.allowQuestions/],
+  ['empty chat.questionMarker', { id: 'x', outputPath: 'y', ...YOLO, chat: { questionMarker: '' }, stages: [okStage] }, /chat\.questionMarker/],
+  ['bad chat.maxQuestions', { id: 'x', outputPath: 'y', ...YOLO, chat: { maxQuestions: 0 }, stages: [okStage] }, /chat\.maxQuestions/],
+  ['bad chat.answerTimeoutSec', { id: 'x', outputPath: 'y', ...YOLO, chat: { answerTimeoutSec: -1 }, stages: [okStage] }, /chat\.answerTimeoutSec/],
+  ['non-object runtime', { id: 'x', outputPath: 'y', ...YOLO, runtime: 'no', stages: [okStage] }, /\bruntime\b/],
+  ['bad runtime.shareLocalContext', { id: 'x', outputPath: 'y', ...YOLO, runtime: { shareLocalContext: 'yes' }, stages: [okStage] }, /runtime\.shareLocalContext/],
+  ['bad runtime.enableProjectMcp', { id: 'x', outputPath: 'y', ...YOLO, runtime: { enableProjectMcp: 1 }, stages: [okStage] }, /runtime\.enableProjectMcp/],
+  ['empty runtime.baseBranch', { id: 'x', outputPath: 'y', ...YOLO, runtime: { baseBranch: '  ' }, stages: [okStage] }, /runtime\.baseBranch/],
+  ['non-object capture', { id: 'x', outputPath: 'y', ...YOLO, stages: [{ ...okStage, capture: 'Topic' }] }, /capture/],
+  ['empty capture.section', { id: 'x', outputPath: 'y', ...YOLO, stages: [{ ...okStage, capture: { section: ' ', slot: 'topic' } }] }, /capture\.section/],
+  ['bad capture.slot', { id: 'x', outputPath: 'y', ...YOLO, stages: [{ ...okStage, capture: { section: 'Topic', slot: 'headline' } }] }, /capture\.slot/],
 ];
 
 for (const [label, def, re] of invalidCases) {
@@ -81,7 +86,7 @@ for (const [label, def, re] of invalidCases) {
 test('validateAndNormalize rejects a stage whose agent prompt file is missing', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-team-'));
   try {
-    const def = { id: 'x', outputPath: 'y', stages: [{ id: 'ghost', produces: 'g.md' }] };
+    const def = { id: 'x', outputPath: 'y', ...YOLO, stages: [{ id: 'ghost', produces: 'g.md' }] };
     assert.throws(() => validateAndNormalize(def, 'x', tmp), /ghost/);
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
@@ -92,24 +97,27 @@ test('a fully valid in-memory definition normalizes (defaults applied)', () => {
   const def = {
     id: 'marketing',
     outputPath: 'team/marketing',
+    permissions: { mode: 'yolo' }, // required: no default, must be declared explicitly
     stages: [{ id: 'researcher', produces: 'brief.md' }],
   };
   const norm = validateAndNormalize(def, 'marketing', MKT_DIR);
   assert.equal(norm.name, 'marketing');
   assert.equal(norm.stageTimeoutSeconds, 900);
-  assert.equal(norm.permissions.mode, 'yolo'); // default when omitted (the only supported mode)
+  assert.equal(norm.permissions.mode, 'yolo');
   assert.ok(norm.stages[0].agentPath.endsWith(path.join('agents', 'researcher.md')));
 });
 
 // --- Phase A: reusable shared agent + pack-template blocks (loadTeam over a temp teams dir) ---
 
 // A minimal valid team.json whose stages are named after the shared roles, so each agent prompt
-// resolves from teams/_shared/agents/<id>.md unless overridden by a local block.
+// resolves from teams/_shared/agents/<id>.md unless overridden by a local block. permissions.mode is
+// required (no default), so every def built through this helper declares yolo explicitly.
 function teamDef(id, stages) {
   return {
     id,
     name: id,
     outputPath: `.glissa/teams/${id}`,
+    permissions: { mode: 'yolo' },
     pack: { required: ['voice-guide.md'] },
     stages,
   };
