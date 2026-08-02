@@ -1,7 +1,6 @@
 'use strict';
 
-// Unit tests for the pure PTY-exit decision function (session/core/exit-transition.js),
-// extracted from Session._handlePtyExit.
+// Unit tests for the pure PTY-exit decision function (session/core/exit-transition.js).
 
 const test = require('node:test');
 const assert = require('node:assert/strict');

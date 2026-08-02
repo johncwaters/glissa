@@ -26,7 +26,6 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-const { canonicalizePath } = require('../shared/paths');
 const { createWatchDebounce } = require('./watch-debounce');
 
 // A one-directory, debounced fs.watch over an integration branch's reflog.
@@ -46,27 +45,18 @@ function createIntegrationRefWatcher({ commonGitDir, branch, onChange, debounceM
   const leaf = reflogPath ? path.basename(reflogPath) : null;
 
   function start() {
-    if (w.watcher || w.stopped || !watchDir) return !!w.watcher;
+    if (w.active || w.stopped || !watchDir) return w.active;
     let exists;
     try { exists = fs.existsSync(watchDir); } catch { exists = false; }
     if (!exists) return false; // no reflog dir yet; the floor (turn-end / gitdir watch) still covers it
-    try {
-      // Canonical path required: fs.watch on an 8.3 short path aborts the process from native code,
-      // past this catch (see canonicalizePath in shared/paths.js).
-      w.watcher = fs.watch(canonicalizePath(watchDir), { persistent: false }, (_evt, filename) => {
-        // filename is the changed entry. Fire only for our branch's reflog; a null filename (some
-        // platforms omit it) is treated as "maybe ours" and fires, since the watch is lossy anyway.
-        if (!filename || filename === leaf) w.fire();
-      });
-      w.watcher.on('error', () => w.stop());
-    } catch {
-      w.watcher = null;
-      return false;
-    }
-    return true;
+    return w.watch(watchDir, (_evt, filename) => {
+      // filename is the changed entry. Fire only for our branch's reflog; a null filename (some
+      // platforms omit it) is treated as "maybe ours" and fires, since the watch is lossy anyway.
+      if (!filename || filename === leaf) w.fire();
+    });
   }
 
-  return { start, stop: w.stop, get active() { return !!w.watcher; } };
+  return { start, stop: w.stop, get active() { return w.active; } };
 }
 
 module.exports = { createIntegrationRefWatcher };

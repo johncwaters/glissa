@@ -29,7 +29,6 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-const { canonicalizePath } = require('../shared/paths');
 const { createWatchDebounce } = require('./watch-debounce');
 
 // Resolve a linked worktree's per-worktree git metadata dir from its `.git`
@@ -65,26 +64,17 @@ function createWorktreeWatcher({ worktreeDir, onChange, debounceMs = 400 }) {
   const w = createWatchDebounce({ onChange, debounceMs });
 
   function start() {
-    if (w.watcher || w.stopped) return !!w.watcher;
+    if (w.active || w.stopped) return w.active;
     const gitDir = resolveWorktreeGitDir(worktreeDir);
     if (!gitDir) return false;
-    try {
-      // Non-recursive: only the gitdir's direct children (index, HEAD, COMMIT_EDITMSG,
-      // ORIG_HEAD, MERGE_HEAD) carry the stage/commit/reset signal we want.
-      // Canonical path required: fs.watch on an 8.3 short path aborts the process from native code,
-      // past this catch (see canonicalizePath in shared/paths.js).
-      w.watcher = fs.watch(canonicalizePath(gitDir), { persistent: false }, () => w.fire());
-      // The gitdir can be removed out from under us (worktree pruned). Treat any
-      // watcher error as "stop watching"; the turn-end hook + a later re-check still cover the session.
-      w.watcher.on('error', () => w.stop());
-    } catch {
-      w.watcher = null;
-      return false;
-    }
-    return true;
+    // Non-recursive: only the gitdir's direct children (index, HEAD, COMMIT_EDITMSG,
+    // ORIG_HEAD, MERGE_HEAD) carry the stage/commit/reset signal we want. The gitdir can be
+    // removed out from under us (worktree pruned); watch() self-stops on watcher error and
+    // the turn-end hook + a later re-check still cover the session.
+    return w.watch(gitDir);
   }
 
-  return { start, stop: w.stop, get active() { return !!w.watcher; } };
+  return { start, stop: w.stop, get active() { return w.active; } };
 }
 
 module.exports = { createWorktreeWatcher, resolveWorktreeGitDir };

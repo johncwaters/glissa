@@ -1,8 +1,7 @@
 'use strict';
 
-// Unit tests for agent-tracker.evictDepartedTeammateNames, extracted from
-// Session._applyBackgroundTasks's departed-teammate-name eviction computation.
-// Separate file per house convention: do not add to tests/agent-tracker.test.js.
+// Unit tests for agent-tracker.evictDepartedTeammateNames (the departed-teammate-name
+// eviction that drains the completion gate when a declared teammate id disappears).
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
