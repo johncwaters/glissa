@@ -1,8 +1,10 @@
 'use strict';
 
-// The PR-review wiring that backend.js exports for direct testing (no createBackend/httpServer):
+// The pure pieces server/pr-review-wiring.js exports for direct testing (no createBackend/httpServer):
 // the start-gate decision, the seed-prompt builder, and the result-file verdict reader. Mirrors
-// backend-auto-resume.test.js, which tests backend's module-level helpers the same way.
+// backend-auto-resume.test.js, which tests backend's module-level helpers the same way. The
+// applySettingsReload hot-apply test at the bottom still boots a real backend, since that wiring is
+// only reachable through createBackend.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -12,7 +14,8 @@ const os = require('node:os');
 const path = require('node:path');
 const WebSocket = require('ws');
 
-const { buildReviewPrompt, readReviewResult, prPollerShouldStart, createBackend } = require('../server/backend');
+const { buildReviewPrompt, readReviewResult, prPollerShouldStart } = require('../server/pr-review-wiring');
+const { createBackend } = require('../server/backend');
 
 // --- prPollerShouldStart: inert-by-default + misconfiguration gating ---
 
@@ -85,21 +88,21 @@ test('readReviewResult: a missing file is ERROR (never a false clean pass)', () 
 // --- prReviewCfgKey: identity used to gate a restart to actual prReview/telegram changes ---
 
 test('prReviewCfgKey: identical prReview/telegram produce the same key regardless of key order', () => {
-  const { prReviewCfgKey } = require('../server/backend');
+  const { prReviewCfgKey } = require('../server/pr-review-wiring');
   const a = prReviewCfgKey({ prReview: { enabled: true, projects: ['p1'] }, telegram: { botToken: 'x', chatId: 'y' } });
   const b = prReviewCfgKey({ telegram: { botToken: 'x', chatId: 'y' }, prReview: { enabled: true, projects: ['p1'] } });
   assert.equal(a, b);
 });
 
 test('prReviewCfgKey: absent prReview/telegram normalizes to null, distinct from a disabled/empty object', () => {
-  const { prReviewCfgKey } = require('../server/backend');
+  const { prReviewCfgKey } = require('../server/pr-review-wiring');
   assert.equal(prReviewCfgKey({}), prReviewCfgKey({ prReview: undefined, telegram: undefined }));
   assert.notEqual(prReviewCfgKey({}), prReviewCfgKey({ prReview: { enabled: false } }));
 });
 
-// --- applySettingsReload hot-applies the poller, gated + serialized (backend.js startPrPoller is
-// invoked only when prReviewCfgKey(config) changes; see AGENTS.md GitHub PR Auto-Review). startPrPoller
-// and its `prPoller` instance are closure-private to createBackend, so there is no seam to inspect them
+// --- applySettingsReload hot-applies the poller, gated + serialized (pr-review-wiring.js startPoller
+// runs only when prReviewCfgKey(config) changes; see AGENTS.md GitHub PR Auto-Review). startPoller and
+// its `prPoller` instance are private to the wiring closure, so there is no seam to inspect them
 // directly. This exercises the wiring end to end through a real boot + real control-WS 'update-settings'
 // round trips, but stays off the misconfigured (enabled, no telegram) path: prPollerShouldStart fails
 // the gate before any gh/git/fs IO runs, so the test never touches a real gh binary or
@@ -155,7 +158,7 @@ function sendAndWait(ws, msg, matchType) {
   });
 }
 
-// The restart runs on backend.js's prPollerChain, appended (not awaited) by applySettingsReload, so a
+// The restart runs on the wiring's prPollerChain, appended (not awaited) by applySettingsReload, so a
 // warning it logs can land after the settings-updated ack the client already received. Poll briefly
 // instead of asserting immediately, bounded so a genuinely missing warning still fails promptly.
 async function waitFor(predicate, { timeoutMs = 2000, intervalMs = 20 } = {}) {

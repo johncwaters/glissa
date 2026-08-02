@@ -49,102 +49,16 @@ const { createSpawnGate } = require('./spawn-gate');
 const { createGitWorkspace, createGitWorkspaceSync } = require('../teamlib/team-git');
 const { buildStageSpawnOptions, teamPermissions } = require('../teamlib/team-settings');
 const { buildStagePrompt } = require('../teamlib/team-prompt');
-const { buildSetupPrompt, setupSessionId, setupSessionName, packPaths } = require('../teamlib/team-setup');
-const { scanProjectContext } = require('../teamlib/project-context');
 const teamOutput = require('../teamlib/team-output');
 const { runPostTurnChecks, resolveCheckConfig } = require('./post-turn-checker');
 const { createIntegrationRefWatcher } = require('../detection/integration-ref-watch');
 const { createIntegrationWatcherPool } = require('../detection/integration-watcher-pool');
-const os = require('node:os');
-const { createPrPoller } = require('./pr-poller');
-const { createPrGh } = require('./pr-gh');
-const { sendPrPing } = require('./pr-telegram');
+const { createTeamSessionFactory } = require('./team-session-factory');
+const { createPrReviewWiring } = require('./pr-review-wiring');
 
 // WAITING-state notification escalation cadence (fixed 5 minutes; previously the
 // configurable waitingEscalationSeconds setting).
 const ESCALATION_INTERVAL_MS = 300000;
-
-// Belt-and-suspenders deny-list for the headless PR-review sessions (they run under
-// --dangerously-skip-permissions, so this is a guard, not the guard). Blocks the destructive/
-// outward verbs the reviewer must never take: the poller merges (never the agent), and workflow
-// files are never edited or merged automatically.
-const PR_REVIEW_DENY = {
-  deny: [
-    'Bash(gh pr merge:*)',
-    'Bash(gh pr close:*)',
-    'Bash(gh repo delete:*)',
-    'Bash(git push --force:*)',
-    'Bash(git push -f:*)',
-    'Bash(git push --force-with-lease:*)',
-    'Edit(.github/workflows/**)',
-    'Write(.github/workflows/**)',
-  ],
-};
-
-// The seed prompt for one headless PR review. Pure string building (unit-coverable via the poller's
-// integration path). The verdict travels back through a result FILE, not stdout, mirroring the teams
-// file-handoff convention. Self-review via `gh pr review` is impossible on your own PR, so findings go
-// out as a `gh pr comment`; the poller (never the agent) merges once checks are green.
-function buildReviewPrompt({ slug, number, baseRefName, conflicting, resultPath }) {
-  const base = baseRefName || 'the base branch';
-  const lines = [
-    `You are an automated reviewer for ${slug}, a repository the operator owns. Review pull request #${number} (base branch: ${base}).`,
-    '',
-    'Hard rules:',
-    '- Do NOT run `gh pr merge`. A separate process merges after checks pass.',
-    '- Do NOT use `gh pr review` (approving/requesting-changes on your own PR is rejected by GitHub). Post findings with `gh pr comment`.',
-    '- Never force-push, never delete branches or the repo, never touch other PRs, never edit files under .github/workflows/.',
-    '',
-    'Steps:',
-    `1. Inspect: \`gh pr view ${number} --json mergeable,mergeStateStatus,files\`.`,
-    `2. If any changed file is under .github/workflows/: post a \`gh pr comment ${number}\` saying a human must review and merge workflow changes, write verdict CHANGES, and stop.`,
-  ];
-  if (conflicting) {
-    lines.push(
-      `3. This PR has conflicts and you are in an ISOLATED worktree. Run \`gh pr checkout ${number}\`, rebase onto \`origin/${base}\` (\`git rebase origin/${base}\`), resolve every conflict faithfully to the intent of BOTH sides, commit, and \`git push\`. If you cannot resolve confidently, write verdict ERROR with the reason and stop. Never push a guessed resolution.`,
-    );
-  }
-  lines.push(
-    `${conflicting ? 4 : 3}. Review the diff (\`gh pr diff ${number}\`) against the repo conventions (read CLAUDE.md / AGENTS.md if present).`,
-    '   - If it needs changes: post a specific `gh pr comment` and write verdict CHANGES.',
-    '   - If it was conflicting and you resolved+pushed and it is otherwise clean: write verdict RESOLVED.',
-    '   - If clean with no conflict: write verdict CLEAN.',
-    `${conflicting ? 5 : 4}. Write the result as JSON to ${resultPath}: {"verdict":"CLEAN|RESOLVED|CHANGES|ERROR","head":"<current head sha>","summary":"<one line>"}.`,
-  );
-  return lines.join('\n');
-}
-
-// Read the verdict a review session wrote to its result file. Missing/invalid file -> ERROR, so a
-// crashed or confused session never masquerades as a clean pass.
-function readReviewResult(resultPath) {
-  const allowed = new Set(['CLEAN', 'RESOLVED', 'CHANGES', 'ERROR']);
-  try {
-    const obj = JSON.parse(fs.readFileSync(resultPath, 'utf8'));
-    const verdict = String(obj.verdict || '').toUpperCase();
-    if (!allowed.has(verdict)) return { verdict: 'ERROR', summary: 'invalid verdict in result file' };
-    return { verdict, summary: String(obj.summary || '') };
-  } catch {
-    return { verdict: 'ERROR', summary: 'no result file' };
-  }
-}
-
-// Pure gate for the opt-in poller: start only when enabled AND telegram is configured (pings must be
-// deliverable). A plain "disabled" reports no reason (silent); a misconfiguration reports one (warned).
-function prPollerShouldStart(cfg) {
-  if (!cfg.prReview || !cfg.prReview.enabled) return { start: false, reason: null };
-  const t = cfg.telegram;
-  if (!t || !t.botToken || !t.chatId) {
-    return { start: false, reason: 'prReview.enabled but telegram botToken/chatId missing' };
-  }
-  return { start: true, reason: null };
-}
-
-// Identity of the poller-relevant config, recomputed on every settings reload and compared against the
-// key recorded at the last startPrPoller() invocation. A settings save that touches neither prReview
-// nor telegram (cursorBlink, etc.) must never restart a poller that may have a review in flight.
-function prReviewCfgKey(cfg) {
-  return JSON.stringify({ prReview: cfg.prReview || null, telegram: cfg.telegram || null });
-}
 
 /**
  * Create and wire the Glissa backend onto an existing HTTP server.
@@ -674,192 +588,19 @@ function createBackend(httpServer, options = {}) {
     }
   }
 
-  // Build a real Session for one team stage, registered in teamSessions and auto-removed on end.
-  function makeStageSession({ id, name, path: projectPath, initialPrompt, spawnOptions, permissions }) {
-    const sess = new Session({
-      id,
-      name,
-      path: projectPath,
-      dangerouslySkipPermissions: !!spawnOptions?.dangerouslySkipPermissions,
-      extraClaudeArgs: spawnOptions?.extraClaudeArgs || [],
-      initialPrompt,
-      ephemeral: true,
-      settingsPermissions: permissions || null,
-      // App-runtime team stages load the project's .mcp.json servers (e.g. Playwright MCP) headlessly.
-      enableProjectMcp: !!spawnOptions?.enableProjectMcp,
-      replayBufferKB: config.replayBufferKB,
-      hookRouter,
-      getHookPort,
-    });
-    teamSessions.set(id, sess);
-    sess.on('error', (err) => console.error(`[team ${name}] error: ${err.message}`));
-    // Stage sessions run headless (claude -p) and produce no watchable TUI, so they are NOT surfaced
-    // as terminal cards (that just shows an empty terminal). Run progress lives in the Teams view
-    // pipeline; these sessions stay out of the session-card broadcast stream entirely.
-    const removeFromMap = () => {
-      if (teamSessions.get(id) === sess) {
-        teamSessions.delete(id);
-        closeSessionDataClients(id);
-      }
-    };
-    sess.on('exit', removeFromMap);
-    // destroy() runs in every orchestrator finish path (success/timeout/cancel) and removeAllListeners
-    // there can pre-empt the 'exit' cleanup, so wrap destroy to guarantee map removal.
-    const origDestroy = sess.destroy.bind(sess);
-    sess.destroy = () => { origDestroy(); removeFromMap(); };
-    return sess;
-  }
+  // Team-stage + guided-pack-setup Session construction (server/team-session-factory.js).
+  const { makeStageSession, startPackSetup } = createTeamSessionFactory({
+    config, sessions, teamSessions, closeSessionDataClients, hookRouter, getHookPort,
+    wireSessionEvents, broadcastControl, registry, getProjectPathById,
+  });
 
-  // Build one headless (claude -p) PR-review session, registered in reviewSessions and auto-removed on
-  // exit. Mirrors makeStageSession; not surfaced as a card (a -p session has no watchable TUI).
-  function makeReviewSession({ id, name, path: cwd, initialPrompt }) {
-    const sess = new Session({
-      id,
-      name,
-      path: cwd,
-      dangerouslySkipPermissions: true,
-      extraClaudeArgs: ['-p'],
-      initialPrompt,
-      ephemeral: true,
-      settingsPermissions: PR_REVIEW_DENY,
-      replayBufferKB: config.replayBufferKB,
-      hookRouter,
-      getHookPort,
-    });
-    reviewSessions.set(id, sess);
-    sess.on('error', (err) => console.error(`[pr-review ${name}] error: ${err.message}`));
-    const removeFromMap = () => {
-      if (reviewSessions.get(id) === sess) {
-        reviewSessions.delete(id);
-        closeSessionDataClients(id);
-      }
-    };
-    sess.on('exit', removeFromMap);
-    const origDestroy = sess.destroy.bind(sess);
-    sess.destroy = () => { origDestroy(); removeFromMap(); };
-    return sess;
-  }
-
-  // The real spawnReview the poller injects: seed a headless review, run it through the spawn gate,
-  // and resolve the file-borne verdict on exit. Honors an AbortSignal (the poller's hard timeout) by
-  // destroying the session; the poller has already resolved ERROR in that case, so the returned value
-  // is ignored. Never rejects: any failure resolves to an ERROR verdict.
-  async function prReviewSpawn({ cwd, pr, slug, conflicting, signal }) {
-    const safeSlug = String(slug).replace(/[^\w.-]+/g, '-');
-    const resultPath = path.join(os.tmpdir(), `glissa-pr-${safeSlug}-${pr.number}-${process.pid}-${pr.headRefOid}.json`);
-    try { fs.rmSync(resultPath, { force: true }); } catch { /* fresh file */ }
-    const prompt = buildReviewPrompt({
-      slug, number: pr.number, baseRefName: pr.baseRefName, conflicting, resultPath,
-    });
-    const id = `pr-review:${slug}#${pr.number}`;
-    const sess = makeReviewSession({ id, name: `PR review ${slug}#${pr.number}`, path: cwd, initialPrompt: prompt });
-
-    let onAbort = null;
-    try {
-      await new Promise((resolve, reject) => {
-        let settled = false;
-        const done = () => { if (settled) return; settled = true; resolve(); };
-        const fail = (e) => { if (settled) return; settled = true; reject(e); };
-        sess.on('exit', done);
-        sess.on('error', fail);
-        if (signal) {
-          onAbort = () => { try { sess.destroy(); } catch { /* already gone */ } done(); };
-          if (signal.aborted) onAbort();
-          if (!signal.aborted) signal.addEventListener('abort', onAbort, { once: true });
-        }
-        spawnGate.run(() => (signal?.aborted ? undefined : sess.start())).catch(fail);
-      });
-      return readReviewResult(resultPath);
-    } catch (e) {
-      return { verdict: 'ERROR', summary: String(e.message || e) };
-    } finally {
-      if (signal && onAbort) { try { signal.removeEventListener('abort', onAbort); } catch { /* noop */ } }
-      try { fs.rmSync(resultPath, { force: true }); } catch { /* best-effort */ }
-    }
-  }
-
-  // Guided pack setup. Spawn ONE interactive Claude session (a normal PTY session, surfaced as a
-  // terminal card) seeded with a prompt that interviews the operator and fills this project's pack.
-  // Unlike a team stage it is NOT headless (the interview needs back-and-forth) and IS shown as a
-  // card so the operator can answer in the terminal. It lives in the regular `sessions` map but is
-  // flagged ephemeral (skips config-reload diffing and health anomaly checks) and is never persisted
-  // to config.json. On exit we re-check the pack and broadcast team-pack-status so the Teams view
-  // drops its setup banner. Returns { ok, sessionId, already?, error? }.
-  function startPackSetup({ teamId, projectId }) {
-    let team;
-    try { team = registry.loadTeam(teamId); } catch { return { ok: false, error: `Unknown team "${teamId}"` }; }
-    const projectPath = getProjectPathById(projectId);
-    if (!projectPath) return { ok: false, error: 'Unknown project' };
-
-    const id = setupSessionId(teamId, projectId);
-    if (sessions.has(id)) return { ok: true, already: true, sessionId: id };
-
-    // Make sure the pack files exist (idempotent) so the agent has templates to fill in place. Shared
-    // files (team.packShared) scaffold into the project-level .glissa/pack/ from the _shared fallback
-    // templates; a pre-filled team-local copy of a now-shared file is promoted up here too.
-    teamOutput.ensureStructure(projectPath, team.outputPath);
-    teamOutput.scaffoldPack(
-      projectPath, team.outputPath, team.packTemplatesDir, team.packRequired,
-      team.packTemplatesFallbackDir, team.packShared,
-    );
-    const { packDir, sharedPackDir, packFiles } = packPaths(projectPath, team);
-    // Interview ONLY the files that still need filling, so an already-filled shared file (filled by an
-    // earlier team's setup) is skipped instead of re-asked. A fresh project has every file unfilled, so
-    // toFill == packFiles and the prompt is unchanged from before this feature.
-    const status = teamOutput.packStatus(projectPath, team.outputPath, team.packRequired, team.packShared);
-    const unfilled = new Set(status.unfilled);
-    const toFill = packFiles.filter((f) => unfilled.has(f.name));
-    // Deterministic project-context scan (total, never throws); an empty summary degrades to the
-    // original prompt with no STARTING FACTS block.
-    const projectContext = scanProjectContext(projectPath).summary;
-    const prompt = buildSetupPrompt(team, {
-      packDir, sharedPackDir, packFiles: toFill, projectPath, projectContext,
-    });
-
-    const projectDisplayName = (config.projects.find((p) => p.id === projectId) || {}).name || '';
-    const name = setupSessionName(team, projectDisplayName);
-
-    const sess = new Session({
-      id,
-      name,
-      path: projectPath,
-      // Interactive (no -p): the prompt is submitted as the first message and the operator keeps
-      // typing. Writes to the pack are approved in the terminal; the team deny-list is applied as a
-      // belt-and-suspenders guard via the injected settings file.
-      dangerouslySkipPermissions: false,
-      initialPrompt: prompt,
-      ephemeral: true,
-      settingsPermissions: teamPermissions(team),
-      replayBufferKB: config.replayBufferKB,
-      hookRouter,
-      getHookPort,
-    });
-    sessions.set(id, sess);
-    wireSessionEvents(sess);
-    // Surface as a card (same shape the config-reload add path broadcasts).
-    broadcastControl({ type: 'session-added', id, session: name, state: sess.state, skipPerms: false, ephemeral: true });
-
-    sess.on('exit', () => {
-      let st = null;
-      try { st = teamOutput.packStatus(projectPath, team.outputPath, team.packRequired, team.packShared); } catch { /* report nothing */ }
-      if (st) {
-        // Distinct from the team-pack-status request REPLY so it never collides with a get-team-pack-
-        // status round-trip; the Teams view routes this broadcast to refresh the setup banner.
-        broadcastControl({
-          type: 'team-pack-updated', teamId, projectId,
-          configured: st.configured, unfilled: st.unfilled, packDir: st.packDir,
-          timestamp: Date.now(),
-        });
-      }
-      if (sessions.get(id) === sess) {
-        sessions.delete(id);
-        closeSessionDataClients(id);
-      }
-      broadcastControl({ type: 'session-removed', id, session: name });
-    });
-    sess.start();
-    return { ok: true, sessionId: id };
-  }
+  // GitHub PR auto-review lane (server/pr-review-wiring.js): inert unless config.prReview.enabled and
+  // config.telegram are both set. Started at boot below, restarted on a prReview/telegram settings
+  // change, stopped in shutdown().
+  const prReview = createPrReviewWiring({
+    config, reviewSessions, closeSessionDataClients, hookRouter, getHookPort, spawnGate, gitWorkspace,
+    getProjectPathById,
+  });
 
   const orchestrator = createOrchestrator({
     loadTeam: registry.loadTeam,
@@ -1151,66 +892,7 @@ function createBackend(httpServer, options = {}) {
   runAutoResume(sessions, config, spawnGate);
 
   // --- GitHub PR auto-review poller (opt-in; inert unless config.prReview.enabled) ---
-  // State lives in one cross-project file under the user config dir, written atomically (tmp+rename).
-  const prStatePath = path.join(os.homedir(), '.glissa', 'pr-review-state.json');
-  async function readPrState() {
-    try { return JSON.parse(fs.readFileSync(prStatePath, 'utf8')); }
-    catch { return {}; }
-  }
-  async function writePrState(state) {
-    try { fs.mkdirSync(path.dirname(prStatePath), { recursive: true }); } catch { /* exists */ }
-    const tmp = `${prStatePath}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(state, null, 2));
-    fs.renameSync(tmp, prStatePath);
-  }
-
-  // Started at boot and re-evaluated on every settings reload whose prReview/telegram key changed
-  // (applySettingsReload below, gated by prReviewCfgKey), so toggling config.prReview / config.telegram
-  // via the Settings dialog or a config.json hand-edit hot-applies without a server restart.
-  //
-  // Restarts are serialized through prPollerChain so a stop-drain-start never overlaps a prior one: the
-  // old instance's in-flight reviews (up to reviewTimeoutSeconds) and pending state writes finish before
-  // a new instance reuses the same result-file paths, gitWorkspace, and state file. A settings save that
-  // lands mid-drain just queues another restart on the chain; that coalesces naturally. startPrPoller
-  // itself stays synchronous from its callers' perspective (it only appends to the chain).
-  let prPoller = null;
-  let prPollerChain = Promise.resolve();
-  let prPollerStopped = false;
-  let prReviewLastKey = null;
-  function startPrPoller() {
-    prReviewLastKey = prReviewCfgKey(config);
-    prPollerChain = prPollerChain.then(async () => {
-      if (prPollerStopped) return;
-      if (prPoller) {
-        const old = prPoller;
-        prPoller = null;
-        await old.stop();
-      }
-      const gate = prPollerShouldStart(config);
-      if (!gate.start) {
-        if (gate.reason) console.warn(`[pr-poller] not starting: ${gate.reason}`);
-        return;
-      }
-      prPoller = createPrPoller({
-        projects: config.prReview.projects || [],
-        getProjectPathById,
-        makePrGh: (projectPath) => createPrGh(projectPath),
-        gitWorkspace,
-        getWorktreeBase: (projectPath) => config.worktreeRoot
-          || path.join(path.dirname(path.resolve(projectPath)), '.glissa-worktrees'),
-        spawnReview: prReviewSpawn,
-        telegram: (text) => sendPrPing(config.telegram.botToken, config.telegram.chatId, text),
-        readState: readPrState,
-        writeState: writePrState,
-        intervalMinutes: config.prReview.intervalMinutes || 15,
-        mergeMethod: config.prReview.mergeMethod || 'rebase',
-        maxConcurrentReviews: config.prReview.maxConcurrentReviews || 3,
-        reviewTimeoutSeconds: config.prReview.reviewTimeoutSeconds || 900,
-      });
-      await prPoller.start().catch((e) => console.warn(`[pr-poller] start failed: ${e.message}`));
-    }).catch((e) => console.warn(`[pr-poller] restart failed: ${e.message}`));
-  }
-  startPrPoller();
+  prReview.startPoller();
 
   function diffProjects(currentSessions, newProjects) {
     ensureProjectIds(newProjects);
@@ -1354,11 +1036,9 @@ function createBackend(httpServer, options = {}) {
       escalationIntervalMs: ESCALATION_INTERVAL_MS,
       debounceMs: config.notifyDebounceMs || 3000,
     });
-    // The poller closure captures config.prReview/telegram at creation time, so a restart (stop+start,
-    // gated by prPollerShouldStart) is how a config change actually takes effect. Only restart when the
-    // prReview/telegram key actually changed: an unrelated settings save (cursorBlink, etc.) must never
-    // interrupt a review that may be in flight (see prReviewCfgKey / prReviewLastKey above).
-    if (prReviewCfgKey(config) !== prReviewLastKey) startPrPoller();
+    // No-op unless this save actually changed config.prReview/telegram; the restart itself is
+    // serialized and drains in-flight reviews (see pr-review-wiring.js).
+    prReview.restartIfConfigChanged();
   }
 
   // Restart/shutdown handlers live in server-lifecycle.js so the re-entry guard, the reap-before-exit
@@ -1580,11 +1260,9 @@ function createBackend(httpServer, options = {}) {
       sess.destroy();
       if (sess._killReap) pendingReaps.push(sess._killReap);
     }
-    // Blocks a restart still queued on prPollerChain (e.g. a settings save that raced shutdown) from
-    // starting a fresh poller after the process has begun tearing down. stop() is now async, but fire-
-    // and-forget here is unchanged prior behavior: the process is exiting, nothing awaits it.
-    prPollerStopped = true;
-    if (prPoller) prPoller.stop();
+    // Blocks a restart still queued on the poller's restart chain (e.g. a settings save that raced
+    // shutdown) from starting a fresh poller after the process has begun tearing down.
+    prReview.stopPoller();
     for (const [, sess] of reviewSessions) {
       sess.destroy();
       if (sess._killReap) pendingReaps.push(sess._killReap);
@@ -1653,5 +1331,4 @@ function mountDevRoutes(app) {
 module.exports = {
   createBackend, runAutoResume, persistSessionField, decideWasActiveFlip, carryWorktreeAcrossRecreate,
   reconcileSessionWorktrees,
-  buildReviewPrompt, readReviewResult, prPollerShouldStart, prReviewCfgKey,
 };
