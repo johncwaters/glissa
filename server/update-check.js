@@ -87,8 +87,6 @@ async function checkForUpdate({
 }
 
 module.exports = {
-  REGISTRY_URL,
-  DEFAULT_TIMEOUT_MS,
   compareSemver,
   parseLatestVersion,
   buildUpdateCommand,

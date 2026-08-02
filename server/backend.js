@@ -430,7 +430,8 @@ function createBackend(httpServer, options = {}) {
     if (!useDistDir) {
       mountDevRoutes(app);
     }
-  } else if (typeof staticDir === 'string') {
+  }
+  if (staticDir !== 'auto' && typeof staticDir === 'string') {
     app.use(express.static(staticDir));
   }
   // staticDir === null: skip all static serving (Vite mode)
@@ -582,11 +583,8 @@ function createBackend(httpServer, options = {}) {
   }
 
   function handleClientFocus(ws, focused) {
-    if (focused) {
-      focusedClients.add(ws);
-    } else {
-      focusedClients.delete(ws);
-    }
+    if (focused) focusedClients.add(ws);
+    if (!focused) focusedClients.delete(ws);
     updateNotifySuppression();
   }
 
@@ -658,14 +656,18 @@ function createBackend(httpServer, options = {}) {
         const quoted = `"${absPath}"`;
         const full = cmd.includes('{file}') ? cmd.replace(/\{file\}/g, quoted) : `${cmd} ${quoted}`;
         spawn(full, { detached: true, stdio: 'ignore', shell: true }).unref();
-      } else if (process.platform === 'win32') {
+        return { ok: true };
+      }
+      if (process.platform === 'win32') {
         // `start` is a cmd builtin; the empty "" is its window-title arg so a quoted path isn't taken as the title.
         spawn('cmd', ['/c', 'start', '', absPath], { detached: true, stdio: 'ignore' }).unref();
-      } else if (process.platform === 'darwin') {
-        spawn('open', [absPath], { detached: true, stdio: 'ignore' }).unref();
-      } else {
-        spawn('xdg-open', [absPath], { detached: true, stdio: 'ignore' }).unref();
+        return { ok: true };
       }
+      if (process.platform === 'darwin') {
+        spawn('open', [absPath], { detached: true, stdio: 'ignore' }).unref();
+        return { ok: true };
+      }
+      spawn('xdg-open', [absPath], { detached: true, stdio: 'ignore' }).unref();
       return { ok: true };
     } catch (err) {
       return { ok: false, error: err.message };
@@ -1040,61 +1042,30 @@ function createBackend(httpServer, options = {}) {
     // resets here.
     sess.on('user-prompt', () => notifyGate.reset());
 
+    // Relay a session event straight onto the control WS, prefixed with this session's id/name and a
+    // fresh timestamp. Shared by the five simple delta broadcasts below (session-agents, session-wakeup,
+    // session-prompt, session-sleep, session-wake); a handler with extra side effects beyond the
+    // broadcast (e.g. worktree-ready, merge-status) stays hand-written.
+    const relay = (event, type) => sess.on(event, (payload) => broadcastControl({
+      type, id: sess.id, session: sess.name, ...payload, timestamp: Date.now(),
+    }));
+
     // Live background sub-agent count delta -> control WS, so the card shows "N agents" while a
     // background sub-agent keeps running after the main turn's Stop (instead of flipping to Complete).
     // Mirrors the session-git delta: a small targeted update, no full snapshot refetch.
-    sess.on('agents-change', ({ activeAgents }) => {
-      broadcastControl({
-        type: 'session-agents',
-        id: sess.id,
-        session: sess.name,
-        activeAgents,
-        timestamp: Date.now(),
-      });
-    });
+    relay('agents-change', 'session-agents');
 
     // Pending scheduled-revival delta -> control WS, so a COMPLETE/IDLE card can say
     // "sleeping until ~HH:MM" instead of looking finished while a wakeup is pending.
     // Advisory only (never gates a transition); mirrors the session-agents delta.
-    sess.on('wakeup-change', ({ pendingWakeup }) => {
-      broadcastControl({
-        type: 'session-wakeup',
-        id: sess.id,
-        session: sess.name,
-        pendingWakeup,
-        timestamp: Date.now(),
-      });
-    });
+    relay('wakeup-change', 'session-wakeup');
 
     // Pending-prompt-kind delta -> control WS, so a WAITING card shows what it is waiting on
     // (permission vs elicitation). Advisory only; mirrors the session-agents delta.
-    sess.on('prompt-kind-change', ({ pendingPromptKind }) => {
-      broadcastControl({
-        type: 'session-prompt',
-        id: sess.id,
-        session: sess.name,
-        pendingPromptKind,
-        timestamp: Date.now(),
-      });
-    });
+    relay('prompt-kind-change', 'session-prompt');
 
-    sess.on('sleep', () => {
-      broadcastControl({
-        type: 'session-sleep',
-        id: sess.id,
-        session: sess.name,
-        timestamp: Date.now()
-      });
-    });
-
-    sess.on('wake', () => {
-      broadcastControl({
-        type: 'session-wake',
-        id: sess.id,
-        session: sess.name,
-        timestamp: Date.now()
-      });
-    });
+    relay('sleep', 'session-sleep');
+    relay('wake', 'session-wake');
 
     // Worktree lifecycle -> control WS, so the dashboard reflects the review/merge state and any
     // blocker (e.g. the integration branch missing) without re-fetching a full snapshot.
@@ -1249,20 +1220,22 @@ function createBackend(httpServer, options = {}) {
     for (const [id, sess] of currentSessions) {
       // Ephemeral setup sessions are not config-backed; never add/remove/rename them on a reload.
       if (sess.ephemeral) continue;
-      if (newMap.has(id)) {
-        const newP = newMap.get(id);
-        const pathChanged = newP.path !== sess.path;
-        const permsChanged = projectSkipPerms(newP) !== sess.dangerouslySkipPermissions;
-        if (pathChanged || permsChanged) {
-          modified.push(newP);
-        } else if (newP.name !== sess.name) {
-          renamed.push(newP);
-        } else {
-          unchanged.push(id);
-        }
-      } else {
+      if (!newMap.has(id)) {
         removed.push(id);
+        continue;
       }
+      const newP = newMap.get(id);
+      const pathChanged = newP.path !== sess.path;
+      const permsChanged = projectSkipPerms(newP) !== sess.dangerouslySkipPermissions;
+      if (pathChanged || permsChanged) {
+        modified.push(newP);
+        continue;
+      }
+      if (newP.name !== sess.name) {
+        renamed.push(newP);
+        continue;
+      }
+      unchanged.push(id);
     }
     for (const [id, proj] of newMap) {
       if (!currentSessions.has(id)) {
@@ -1513,7 +1486,9 @@ function createBackend(httpServer, options = {}) {
         if (sess.state === STATES.WAITING) {
           sess.transition('user_input');
         }
-      } else if (msg.type === 'resize') {
+        return;
+      }
+      if (msg.type === 'resize') {
         const cols = Number(msg.cols);
         const rows = Number(msg.rows);
         if (Number.isInteger(cols) && Number.isInteger(rows)
@@ -1563,7 +1538,9 @@ function createBackend(httpServer, options = {}) {
       controlWss.handleUpgrade(req, socket, head, (ws) => {
         controlWss.emit('connection', ws, req);
       });
-    } else if (url.startsWith('/terminals/')) {
+      return;
+    }
+    if (url.startsWith('/terminals/')) {
       if (!isAllowedOrigin(req)) { socket.destroy(); return; }
       dataWss.handleUpgrade(req, socket, head, (ws) => {
         dataWss.emit('connection', ws, req);

@@ -255,4 +255,4 @@ async function runPostTurnChecks({ cwd, config, sessionId, deps = {} } = {}) {
   return finalReport;
 }
 
-module.exports = { runPostTurnChecks, resolveCheckConfig, listChangedFiles, gitRoot, DEFAULTS };
+module.exports = { runPostTurnChecks, resolveCheckConfig, listChangedFiles, gitRoot };

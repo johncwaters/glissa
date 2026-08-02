@@ -37,6 +37,21 @@ function scanRepoRoots(roots) {
 const PR_REVIEW_NUMERIC_KEYS = ['intervalMinutes', 'maxConcurrentReviews', 'reviewTimeoutSeconds'];
 const PR_REVIEW_MERGE_METHODS = new Set(['rebase', 'squash', 'merge']);
 
+// Single wire-format builder for every 'error'/'settings-error' reply, so all call sites agree on the
+// shape. `requestId` is omitted from the payload entirely when not passed (matches every call site that
+// never carried one), rather than defaulting to null, to keep the wire format byte-identical to before.
+function sendError(ws, message, { type = 'error', requestId } = {}) {
+  const payload = requestId !== undefined ? { type, requestId, message } : { type, message };
+  ws.send(JSON.stringify(payload));
+}
+
+// One data-driven pass over the three settings key-lists instead of three structurally identical loops.
+const SETTINGS_VALIDATORS = [
+  { keys: TIMEOUT_KEYS, isValid: (v) => typeof v === 'number' && v > 0, label: 'a positive number' },
+  { keys: BOOLEAN_KEYS, isValid: (v) => typeof v === 'boolean', label: 'a boolean' },
+  { keys: STRING_KEYS, isValid: (v) => typeof v === 'string', label: 'a string' },
+];
+
 // Validate the optional nested prReview settings object. Returns an error message, or null when valid
 // (a missing/null prReview is valid: the tab was never touched).
 function validatePrReview(pr) {
@@ -178,26 +193,26 @@ function registerControlHandlers(controlWss, deps) {
     const projectPath = (msg.path || '').trim();
 
     if (!name || !projectPath) {
-      ws.send(JSON.stringify({ type: 'error', message: 'Name and path are required' }));
+      sendError(ws, 'Name and path are required');
       return;
     }
 
     if (!SESSION_NAME_RE.test(name)) {
-      ws.send(JSON.stringify({ type: 'error', message: 'Session name may only contain letters, numbers, spaces, dashes, dots, underscores, and parentheses (max 64 chars)' }));
+      sendError(ws, 'Session name may only contain letters, numbers, spaces, dashes, dots, underscores, and parentheses (max 64 chars)');
       return;
     }
 
     // Check for duplicate name
     for (const [, sess] of sessions) {
       if (sess.name === name) {
-        ws.send(JSON.stringify({ type: 'error', message: `Session "${name}" already exists` }));
+        sendError(ws, `Session "${name}" already exists`);
         return;
       }
     }
 
     const resolvedPath = path.resolve(projectPath);
     if (!fs.existsSync(resolvedPath)) {
-      ws.send(JSON.stringify({ type: 'error', message: `Path does not exist: ${projectPath}` }));
+      sendError(ws, `Path does not exist: ${projectPath}`);
       return;
     }
 
@@ -220,7 +235,7 @@ function registerControlHandlers(controlWss, deps) {
   function handleRemoveSession(msg, ws) {
     const sess = findSession(msg);
     if (!sess) {
-      ws.send(JSON.stringify({ type: 'error', message: 'Session not found' }));
+      sendError(ws, 'Session not found');
       return;
     }
 
@@ -230,13 +245,13 @@ function registerControlHandlers(controlWss, deps) {
     if (sess.ephemeral) {
       if (removeEphemeralSession) {
         removeEphemeralSession(sess.id);
-      } else {
-        // Minimal fallback when backend teardown isn't injected (older callers/tests).
-        sess.destroy();
-        sessions.delete(sess.id);
-        broadcastControl({ type: 'session-removed', id: sess.id, session: sess.name });
-        console.log(`[control] Removed session via UI: ${sess.name}`);
+        return;
       }
+      // Minimal fallback when backend teardown isn't injected (older callers/tests).
+      sess.destroy();
+      sessions.delete(sess.id);
+      broadcastControl({ type: 'session-removed', id: sess.id, session: sess.name });
+      console.log(`[control] Removed session via UI: ${sess.name}`);
       return;
     }
 
@@ -252,19 +267,19 @@ function registerControlHandlers(controlWss, deps) {
     const newName = (msg.newName || '').trim();
 
     if (!sess || !newName) {
-      ws.send(JSON.stringify({ type: 'error', message: 'Session and new name are required' }));
+      sendError(ws, 'Session and new name are required');
       return;
     }
 
     if (!SESSION_NAME_RE.test(newName)) {
-      ws.send(JSON.stringify({ type: 'error', message: 'Session name may only contain letters, numbers, spaces, dashes, dots, underscores, and parentheses (max 64 chars)' }));
+      sendError(ws, 'Session name may only contain letters, numbers, spaces, dashes, dots, underscores, and parentheses (max 64 chars)');
       return;
     }
 
     // Check for duplicate name (excluding self)
     for (const [, other] of sessions) {
       if (other !== sess && other.name === newName) {
-        ws.send(JSON.stringify({ type: 'error', message: `Session "${newName}" already exists` }));
+        sendError(ws, `Session "${newName}" already exists`);
         return;
       }
     }
@@ -281,14 +296,14 @@ function registerControlHandlers(controlWss, deps) {
   function handleReorderSessions(msg, ws) {
     const order = msg.order;
     if (!Array.isArray(order) || order.length === 0) {
-      ws.send(JSON.stringify({ type: 'error', message: 'order must be a non-empty array' }));
+      sendError(ws, 'order must be a non-empty array');
       return;
     }
 
     // order is an array of session ids
     const allExist = order.every(id => sessions.has(id));
     if (!allExist) {
-      ws.send(JSON.stringify({ type: 'error', message: 'Session list changed during reorder' }));
+      sendError(ws, 'Session list changed during reorder');
       broadcastControl(buildSnapshot());
       return;
     }
@@ -352,12 +367,12 @@ function registerControlHandlers(controlWss, deps) {
   // never killed out from under the operator. The frontend decides whether to start a DORMANT card.
   function handleResumeConversation(msg, ws) {
     const sess = findSession(msg);
-    if (!sess) { ws.send(JSON.stringify({ type: 'error', message: 'Session not found' })); return; }
-    if (sess.ephemeral) { ws.send(JSON.stringify({ type: 'error', message: 'This session cannot resume a conversation' })); return; }
+    if (!sess) { sendError(ws, 'Session not found'); return; }
+    if (sess.ephemeral) { sendError(ws, 'This session cannot resume a conversation'); return; }
     const raw = typeof msg.conversationId === 'string' ? msg.conversationId.trim() : '';
     const conversationId = raw || null;
     if (conversationId && !RESUME_ID_RE.test(conversationId)) {
-      ws.send(JSON.stringify({ type: 'error', message: 'Invalid conversation id' }));
+      sendError(ws, 'Invalid conversation id');
       return;
     }
 
@@ -392,56 +407,28 @@ function registerControlHandlers(controlWss, deps) {
 
     const invalidPaths = (s.repoRoots || []).filter(p => !fs.existsSync(p));
     if (invalidPaths.length > 0) {
-      ws.send(JSON.stringify({
-        type: 'settings-error',
-        requestId: msg.requestId || null,
-        message: `Invalid paths: ${invalidPaths.join(', ')}`
-      }));
+      sendError(ws, `Invalid paths: ${invalidPaths.join(', ')}`, { type: 'settings-error', requestId: msg.requestId || null });
       return;
     }
 
-    for (const key of TIMEOUT_KEYS) {
-      if (s[key] != null && (typeof s[key] !== 'number' || s[key] <= 0)) {
-        ws.send(JSON.stringify({
-          type: 'settings-error',
-          requestId: msg.requestId || null,
-          message: `${key} must be a positive number`
-        }));
-        return;
-      }
-    }
-
-    for (const key of BOOLEAN_KEYS) {
-      if (s[key] != null && typeof s[key] !== 'boolean') {
-        ws.send(JSON.stringify({
-          type: 'settings-error',
-          requestId: msg.requestId || null,
-          message: `${key} must be a boolean`
-        }));
-        return;
-      }
-    }
-
-    for (const key of STRING_KEYS) {
-      if (s[key] != null && typeof s[key] !== 'string') {
-        ws.send(JSON.stringify({
-          type: 'settings-error',
-          requestId: msg.requestId || null,
-          message: `${key} must be a string`
-        }));
-        return;
+    for (const { keys, isValid, label } of SETTINGS_VALIDATORS) {
+      for (const key of keys) {
+        if (s[key] != null && !isValid(s[key])) {
+          sendError(ws, `${key} must be ${label}`, { type: 'settings-error', requestId: msg.requestId || null });
+          return;
+        }
       }
     }
 
     const prReviewError = validatePrReview(s.prReview);
     if (prReviewError) {
-      ws.send(JSON.stringify({ type: 'settings-error', requestId: msg.requestId || null, message: prReviewError }));
+      sendError(ws, prReviewError, { type: 'settings-error', requestId: msg.requestId || null });
       return;
     }
 
     const telegramError = validateTelegram(s.telegram);
     if (telegramError) {
-      ws.send(JSON.stringify({ type: 'settings-error', requestId: msg.requestId || null, message: telegramError }));
+      sendError(ws, telegramError, { type: 'settings-error', requestId: msg.requestId || null });
       return;
     }
 
@@ -538,9 +525,9 @@ function registerControlHandlers(controlWss, deps) {
   }
 
   function handleRunTeam(msg, ws) {
-    if (!orchestrator) { ws.send(JSON.stringify({ type: 'error', message: 'Teams are not available' })); return; }
+    if (!orchestrator) { sendError(ws, 'Teams are not available'); return; }
     const { teamId, projectId } = msg;
-    if (!teamId || !projectId) { ws.send(JSON.stringify({ type: 'error', message: 'teamId and projectId are required' })); return; }
+    if (!teamId || !projectId) { sendError(ws, 'teamId and projectId are required'); return; }
     if (orchestrator.isActive(teamId, projectId)) {
       ws.send(JSON.stringify({ type: 'team-run-skipped', teamId, projectId, reason: 'already-active' }));
       return;
@@ -587,15 +574,24 @@ function registerControlHandlers(controlWss, deps) {
         }
       }
     } catch (err) {
-      ws.send(JSON.stringify({ type: 'error', requestId: msg.requestId || null, message: err.message }));
+      sendError(ws, err.message, { requestId: msg.requestId || null });
       return;
     }
     ws.send(JSON.stringify(out));
   }
 
+  // Applies a fresh teams config (post configStore.save) to the live config and re-arms the scheduler.
+  // Shared by set-team-schedule, add-team-instance, and remove-team-instance, which otherwise repeat
+  // this same 4-line block after their own configStore.save.
+  function applyTeamsConfig(fresh) {
+    if (!fresh) return;
+    config.teams = fresh.teams;
+    if (scheduler && typeof scheduler.reload === 'function') scheduler.reload(fresh.teams);
+  }
+
   function handleSetTeamSchedule(msg, ws) {
     const { teamId, projectId } = msg;
-    if (!teamId || !projectId) { ws.send(JSON.stringify({ type: 'error', message: 'teamId and projectId are required' })); return; }
+    if (!teamId || !projectId) { sendError(ws, 'teamId and projectId are required'); return; }
     const fresh = configStore.save((cfg) => {
       cfg.teams = Array.isArray(cfg.teams) ? cfg.teams : [];
       let entry = cfg.teams.find((e) => e.teamId === teamId && e.projectId === projectId);
@@ -603,10 +599,7 @@ function registerControlHandlers(controlWss, deps) {
       if (msg.schedule != null) entry.schedule = msg.schedule;
       if (msg.enabled != null) entry.enabled = !!msg.enabled;
     });
-    if (fresh) {
-      config.teams = fresh.teams;
-      if (scheduler && typeof scheduler.reload === 'function') scheduler.reload(fresh.teams);
-    }
+    applyTeamsConfig(fresh);
     ws.send(JSON.stringify({ type: 'team-schedule-updated', teamId, projectId, activations: fresh?.teams || config.teams || [] }));
   }
 
@@ -615,21 +608,18 @@ function registerControlHandlers(controlWss, deps) {
   // user turns its schedule on. Broadcast so every connected tab reflects the new instance.
   function handleAddTeamInstance(msg, ws) {
     const { teamId, projectId } = msg;
-    if (!teamId || !projectId) { ws.send(JSON.stringify({ type: 'error', message: 'teamId and projectId are required' })); return; }
+    if (!teamId || !projectId) { sendError(ws, 'teamId and projectId are required'); return; }
     if (registry) {
-      try { registry.loadTeam(teamId); } catch { ws.send(JSON.stringify({ type: 'error', message: `Unknown team "${teamId}"` })); return; }
+      try { registry.loadTeam(teamId); } catch { sendError(ws, `Unknown team "${teamId}"`); return; }
     }
-    if (getProjectPathById && !getProjectPathById(projectId)) { ws.send(JSON.stringify({ type: 'error', message: 'Unknown project' })); return; }
+    if (getProjectPathById && !getProjectPathById(projectId)) { sendError(ws, 'Unknown project'); return; }
     const fresh = configStore.save((cfg) => {
       cfg.teams = Array.isArray(cfg.teams) ? cfg.teams : [];
       if (!cfg.teams.some((e) => e.teamId === teamId && e.projectId === projectId)) {
         cfg.teams.push({ teamId, projectId, enabled: false });
       }
     });
-    if (fresh) {
-      config.teams = fresh.teams;
-      if (scheduler && typeof scheduler.reload === 'function') scheduler.reload(fresh.teams);
-    }
+    applyTeamsConfig(fresh);
     broadcastControl({ type: 'team-instance-added', teamId, projectId, activations: fresh?.teams || config.teams || [] });
   }
 
@@ -637,16 +627,13 @@ function registerControlHandlers(controlWss, deps) {
   // intentionally preserved (removing an instance never deletes the work it produced).
   function handleRemoveTeamInstance(msg, ws) {
     const { teamId, projectId } = msg;
-    if (!teamId || !projectId) { ws.send(JSON.stringify({ type: 'error', message: 'teamId and projectId are required' })); return; }
+    if (!teamId || !projectId) { sendError(ws, 'teamId and projectId are required'); return; }
     const fresh = configStore.save((cfg) => {
       cfg.teams = (Array.isArray(cfg.teams) ? cfg.teams : []).filter(
         (e) => !(e.teamId === teamId && e.projectId === projectId),
       );
     });
-    if (fresh) {
-      config.teams = fresh.teams;
-      if (scheduler && typeof scheduler.reload === 'function') scheduler.reload(fresh.teams);
-    }
+    applyTeamsConfig(fresh);
     broadcastControl({ type: 'team-instance-removed', teamId, projectId, activations: fresh?.teams || config.teams || [] });
   }
 
@@ -654,23 +641,23 @@ function registerControlHandlers(controlWss, deps) {
   // safe segment, artifact must be one of the team's known produced files, and the resolved path must
   // stay inside this team's runs/ directory. The spawn itself lives in backend (openInEditor).
   function handleOpenArtifact(msg, ws) {
-    if (!openInEditor) { ws.send(JSON.stringify({ type: 'error', message: 'Opening artifacts is not available' })); return; }
+    if (!openInEditor) { sendError(ws, 'Opening artifacts is not available'); return; }
     const { teamId, projectId, runId, artifact } = msg;
     let team = null;
     try { if (registry) team = registry.loadTeam(teamId); } catch { /* reported below */ }
-    if (!team) { ws.send(JSON.stringify({ type: 'error', message: `Unknown team "${teamId}"` })); return; }
+    if (!team) { sendError(ws, `Unknown team "${teamId}"`); return; }
     const projectPath = getProjectPathById ? getProjectPathById(projectId) : null;
-    if (!projectPath) { ws.send(JSON.stringify({ type: 'error', message: 'Unknown project' })); return; }
+    if (!projectPath) { sendError(ws, 'Unknown project'); return; }
     // The charset admits dot-only names ("..", "..."); confinePath blocks the traversal anyway, but a
     // run id can never be dot-only, so reject it here too (defense in depth).
-    if (!/^[\w.-]+$/.test(String(runId || '')) || /^\.+$/.test(String(runId))) { ws.send(JSON.stringify({ type: 'error', message: 'Invalid run id' })); return; }
+    if (!/^[\w.-]+$/.test(String(runId || '')) || /^\.+$/.test(String(runId))) { sendError(ws, 'Invalid run id'); return; }
     const allowed = new Set(team.stages.map((s) => s.produces));
     allowed.add('chat.md'); // the per-run operator conversation transcript is openable too
-    if (!allowed.has(artifact)) { ws.send(JSON.stringify({ type: 'error', message: 'Unknown artifact' })); return; }
+    if (!allowed.has(artifact)) { sendError(ws, 'Unknown artifact'); return; }
     const runsDir = path.join(projectPath, team.outputPath, 'runs');
     const abs = confinePath(runsDir, runId, artifact);
-    if (!abs) { ws.send(JSON.stringify({ type: 'error', message: 'Invalid artifact path' })); return; }
-    if (!fs.existsSync(abs)) { ws.send(JSON.stringify({ type: 'error', message: 'Artifact not found' })); return; }
+    if (!abs) { sendError(ws, 'Invalid artifact path'); return; }
+    if (!fs.existsSync(abs)) { sendError(ws, 'Artifact not found'); return; }
     const r = openInEditor(abs);
     ws.send(JSON.stringify({ type: 'artifact-opened', teamId, projectId, runId, artifact, ok: !!r.ok, error: r.error || null }));
   }
@@ -694,7 +681,7 @@ function registerControlHandlers(controlWss, deps) {
         out.packDir = st.packDir;
       }
     } catch (err) {
-      ws.send(JSON.stringify({ type: 'error', requestId: msg.requestId || null, message: err.message }));
+      sendError(ws, err.message, { requestId: msg.requestId || null });
       return;
     }
     ws.send(JSON.stringify(out));
@@ -704,11 +691,11 @@ function registerControlHandlers(controlWss, deps) {
   // card) that reads the project, interviews the operator, and fills the pack. The session is spawned
   // by the backend (startPackSetup); on its exit the backend broadcasts an updated team-pack-status.
   function handleSetupTeamPack(msg, ws) {
-    if (!startPackSetup) { ws.send(JSON.stringify({ type: 'error', message: 'Guided setup is not available' })); return; }
+    if (!startPackSetup) { sendError(ws, 'Guided setup is not available'); return; }
     const { teamId, projectId } = msg;
-    if (!teamId || !projectId) { ws.send(JSON.stringify({ type: 'error', message: 'teamId and projectId are required' })); return; }
+    if (!teamId || !projectId) { sendError(ws, 'teamId and projectId are required'); return; }
     const r = startPackSetup({ teamId, projectId });
-    if (!r.ok) { ws.send(JSON.stringify({ type: 'error', message: r.error || 'Could not start setup' })); return; }
+    if (!r.ok) { sendError(ws, r.error || 'Could not start setup'); return; }
     ws.send(JSON.stringify({
       type: 'setup-team-pack-started', teamId, projectId,
       sessionId: r.sessionId, already: !!r.already,
@@ -720,13 +707,13 @@ function registerControlHandlers(controlWss, deps) {
   // resolves the pause so the stage re-runs with the answer.
   function handlePostTeamMessage(msg, ws) {
     if (!orchestrator || typeof orchestrator.postMessage !== 'function') {
-      ws.send(JSON.stringify({ type: 'error', message: 'Teams are not available' })); return;
+      sendError(ws, 'Teams are not available'); return;
     }
     const { teamId, projectId } = msg;
     const text = typeof msg.text === 'string' ? msg.text : '';
-    if (!teamId || !projectId) { ws.send(JSON.stringify({ type: 'error', message: 'teamId and projectId are required' })); return; }
-    if (!text.trim()) { ws.send(JSON.stringify({ type: 'error', message: 'Message text is required' })); return; }
-    if (text.length > 8192) { ws.send(JSON.stringify({ type: 'error', message: 'Message too long (max 8192 chars)' })); return; }
+    if (!teamId || !projectId) { sendError(ws, 'teamId and projectId are required'); return; }
+    if (!text.trim()) { sendError(ws, 'Message text is required'); return; }
+    if (text.length > 8192) { sendError(ws, 'Message too long (max 8192 chars)'); return; }
     const r = orchestrator.postMessage(teamId, projectId, text);
     ws.send(JSON.stringify({
       type: 'team-message-ack', teamId, projectId, ok: !!r.ok, answered: !!r.answered, error: r.ok ? null : (r.reason || 'no active run'),
@@ -753,7 +740,7 @@ function registerControlHandlers(controlWss, deps) {
         out.pendingQuestion = live.pendingQuestion || null;
       }
     } catch (err) {
-      ws.send(JSON.stringify({ type: 'error', requestId: msg.requestId || null, message: err.message }));
+      sendError(ws, err.message, { requestId: msg.requestId || null });
       return;
     }
     ws.send(JSON.stringify(out));
@@ -845,7 +832,7 @@ function registerControlHandlers(controlWss, deps) {
     },
     'debug-state':      (msg, ws) => {
       const s = findSession(msg);
-      if (!s) { ws.send(JSON.stringify({ type: 'error', message: 'Session not found' })); return; }
+      if (!s) { sendError(ws, 'Session not found'); return; }
       ws.send(JSON.stringify({ type: 'debug-state-response', id: s.id, payload: s.getDebugState() }));
     },
     'shutdown':         handleShutdown,

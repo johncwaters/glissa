@@ -139,7 +139,4 @@ function createScheduler(opts = {}) {
 module.exports = {
   computeNextFire,
   createScheduler,
-  tzOffsetMs,
-  wallClockToInstant,
-  MAX_TIMEOUT_MS,
 };

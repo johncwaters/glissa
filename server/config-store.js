@@ -19,6 +19,14 @@ const DEFAULT_CONFIG = {
   // run_in_background / Ctrl+B). On by default; set false to fall back to "main-agent Stop completes
   // the card" behavior (see sessions.js detectBackgroundAgents / session/core/agent-tracker.js).
   detectBackgroundAgents: true,
+  // Advisory "sleeping until ~HH:MM" chip for a session that scheduled its own revival (a dynamic
+  // /loop wakeup or a cron task). Never gates a transition. On by default; see sessions.js
+  // detectScheduledWakeups / session/core/wakeup-tracker.js.
+  detectScheduledWakeups: true,
+  // How much terminal history (KB) each session's replay ring retains, backfilling a reconnecting
+  // client. Matches the Session constructor's own default (session/sessions.js) and the settings
+  // dialog's fallback (public/dialogs.js), so a config.json that omits this key is unaffected.
+  replayBufferKB: 512,
   // Forensic recording of a session's STRUCTURAL signals (hook payloads verbatim, state
   // transitions) to ~/.glissa/recordings. On by default and tiny; it is what a detection
   // post-mortem needs. Raw PTY byte capture is a separate opt-in (`capture.enabled`, bulky,

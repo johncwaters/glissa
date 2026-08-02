@@ -1,7 +1,7 @@
 'use strict';
 
 /*
- * Data-WebSocket sender — backpressure-aware, echo-prioritizing.
+ * Data-WebSocket sender: backpressure-aware, echo-prioritizing.
  *
  * Extracted from backend.js so the batching, the bufferedAmount backpressure,
  * and the echo fast-flush are unit-testable without a real socket. One sender
@@ -9,8 +9,8 @@
  *
  * Backpressure (bounds server RSS by construction): above `highWaterMark`
  * bytes queued in the socket, we STOP sending and drop the local coalesce
- * buffer — the bytes are NOT lost, they stay in the session's ring buffer and
- * are replayed when the client reconnects. If the socket stays pinned above
+ * buffer (the bytes are NOT lost, they stay in the session's ring buffer and
+ * are replayed when the client reconnects). If the socket stays pinned above
  * water past `stallCloseMs`, we close it; the browser's auto-reconnect + replay
  * resync it cleanly. "Coalesce harder" would only relocate the unbounded growth
  * into this buffer, so we skip instead.
@@ -60,7 +60,7 @@ function createWsSender(ws, opts = {}) {
   let stallTimer = null;
   let destroyed = false;
   // sentOffset = LIVE bytes (offset >= startOffset) durably handed to ws.send for this
-  // client. Advanced FORWARD only by live flushSend sends and by maybeBackfill — NOT by
+  // client. Advanced FORWARD only by live flushSend sends and by maybeBackfill, NOT by
   // sendImmediate's success path, whose replay frame carries historical bytes BEFORE
   // startOffset. The SOLE backward movement is sendImmediate's drop branch, which rewinds
   // sentOffset to the dropped replay's base so maybeBackfill re-pulls history + live.
@@ -81,7 +81,7 @@ function createWsSender(ws, opts = {}) {
       // Quiet-drain re-check (third backfill trigger): if the socket drained since the
       // drop but output then went silent, neither onData/flushSend nor the close below
       // (which fires only while STILL pinned) would recover the missed tail. Run the
-      // backfill here first. No new timer is introduced — this reuses the stall timer.
+      // backfill here first. No new timer is introduced: this reuses the stall timer.
       maybeBackfill();
       // Still backed up after the grace period -> drop the wedged client.
       // Recent output is safe in the session ring buffer; auto-reconnect replays it.
@@ -111,19 +111,16 @@ function createWsSender(ws, opts = {}) {
     // into the ring BEFORE it emits 'data', so when this runs from inside the 'data'
     // listener the just-arrived chunk is already included in getBufferSince.
     const { data, end, evicted } = source.getBufferSince(sentOffset);
-    if (evicted) {
-      // Missed range scrolled out of the ring: converge via clear + full replay.
-      ws.send(CLEAR + data);
-    } else if (data) {
-      ws.send(data);
-    }
+    // Missed range scrolled out of the ring: converge via clear + full replay.
+    if (evicted) ws.send(CLEAR + data);
+    if (!evicted && data) ws.send(data);
     sentOffset = end;
     desynced = false;
     // The backfill just covered [oldSentOffset, end), which already includes any bytes
     // still queued in sendBuffer: every queued byte was pushed to the ring before onData
     // saw it (push-before-emit), so its offset is < end. Discard the now-covered local
-    // slice so a pending scheduled flush — or the flushSend fall-through below the
-    // top-of-function maybeBackfill call — cannot re-send it (double-send + overshoot).
+    // slice so a pending scheduled flush (or the flushSend fall-through below the
+    // top-of-function maybeBackfill call) cannot re-send it (double-send + overshoot).
     sendBuffer = '';
     clearStall();
   }
@@ -138,7 +135,7 @@ function createWsSender(ws, opts = {}) {
     if (overHighWater()) {
       // Drop the local slice (recoverable from the ring via sentOffset) and let the
       // socket drain. PAIRING REQUIREMENT: setting `desynced` MUST be paired with
-      // armStallClose() here — the stall timer doubles as the quiet-drain backfill
+      // armStallClose() here: the stall timer doubles as the quiet-drain backfill
       // re-check, so a drop that armed no timer could strand the tail if output then
       // goes silent. armStallClose is idempotent, so this never re-arms per frame.
       // `desynced` is only meaningful with a source; without one the sender keeps its
@@ -168,7 +165,7 @@ function createWsSender(ws, opts = {}) {
     // the missed range and RETURN without appending. `data` is already in the ring
     // (push-before-emit, see sessions.js ORDER CONTRACT), so getBufferSince covers it;
     // appending here too would double-send / overshoot. While still pinned we fall
-    // through and drop as usual — the chunk stays in the ring for a later backfill.
+    // through and drop as usual: the chunk stays in the ring for a later backfill.
     if (desynced && !overHighWater()) {
       maybeBackfill();
       return;
@@ -204,22 +201,22 @@ function createWsSender(ws, opts = {}) {
       // Only meaningful with a source; otherwise unchanged (drop-and-forget).
       if (source) {
         // This runs on a FRESH socket (called once, before onData is wired), so sentOffset
-        // is still initialOffset and sendBuffer is empty — that invariant is what makes the
-        // rewind below land on the replay's exact base. If a future refactor calls
+        // is still initialOffset and sendBuffer is empty (that invariant is what makes the
+        // rewind below land on the replay's exact base). If a future refactor calls
         // sendImmediate on a non-fresh socket, the rewind base is wrong: make that loud
-        // (console.error, NOT throw — a throw here tears down the connection, against the
+        // (console.error, NOT throw: a throw here tears down the connection, against the
         // EventEmitter/log error contract) but still recover so production self-heals.
         if (sentOffset !== initialOffset || sendBuffer.length !== 0) {
           console.error(
             '[ws-sender] sendImmediate drop on a non-fresh socket: sentOffset=%d ' +
-            'initialOffset=%d sendBuffer.length=%d — rewind base may be wrong; recovering anyway.',
+            'initialOffset=%d sendBuffer.length=%d, rewind base may be wrong; recovering anyway.',
             sentOffset, initialOffset, sendBuffer.length,
           );
         }
         // Rewind sentOffset to the dropped replay's base. The payload IS the historical
         // replay frame [sentOffset - payload.length, sentOffset), so the next maybeBackfill
         // re-pulls getBufferSince(base) = [base, end) (history + any live, or CLEAR + data
-        // if evicted) instead of live-only — which would strand the cleared client's history.
+        // if evicted) instead of live-only, which would strand the cleared client's history.
         sentOffset -= payload.length;
         desynced = true;
       }
