@@ -2,7 +2,9 @@
 
 Date: 2026-05-29
 Branch: `feat/detection-rewrite`
-Related: `.omc/plans/rewrite-terminal-detection.md`
+
+Note: paths under `.omc/` mentioned below were local working notes and probe scripts, not tracked
+in this repo; they are named for the historical record only.
 
 ## Why the old approach failed
 
