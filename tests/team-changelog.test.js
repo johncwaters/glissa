@@ -67,11 +67,9 @@ function fakeFactory(behaviors) {
       const spec = behaviors[stageId];
       const n = calls[stageId] || 0;
       calls[stageId] = n + 1;
-      let b;
+      let b = spec || { exitCode: 0 };
       if (Array.isArray(spec)) {
         b = spec.length ? (spec[n] || spec[spec.length - 1]) : { exitCode: 0 };
-      } else {
-        b = spec || { exitCode: 0 };
       }
       if (b.hang) return;
       const m = /Write your single output file to: (.+)/.exec(sessionOpts.initialPrompt || '');

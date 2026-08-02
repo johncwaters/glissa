@@ -49,7 +49,11 @@ const invalidCases = [
   ['bad schedule.days', { id: 'x', outputPath: 'y', schedule: { days: ['funday'] }, stages: [okStage] }, /schedule\.days/],
   ['bad schedule.time', { id: 'x', outputPath: 'y', schedule: { time: '5am' }, stages: [okStage] }, /schedule\.time/],
   ['bad permissions.mode', { id: 'x', outputPath: 'y', permissions: { mode: 'bogus' }, stages: [okStage] }, /permissions\.mode/],
+  ['permissions.mode "scoped" is rejected (headless stages cannot answer a prompt)', { id: 'x', outputPath: 'y', permissions: { mode: 'scoped' }, stages: [okStage] }, /permissions\.mode/],
+  ['permissions.mode "interactive" is rejected (headless stages cannot answer a prompt)', { id: 'x', outputPath: 'y', permissions: { mode: 'interactive' }, stages: [okStage] }, /permissions\.mode/],
   ['non-array permissions.deny', { id: 'x', outputPath: 'y', permissions: { deny: 'no' }, stages: [okStage] }, /permissions\.deny/],
+  ['non-number stageTimeoutSeconds', { id: 'x', outputPath: 'y', stageTimeoutSeconds: '900', stages: [okStage] }, /stageTimeoutSeconds/],
+  ['non-positive stageTimeoutSeconds', { id: 'x', outputPath: 'y', stageTimeoutSeconds: 0, stages: [okStage] }, /stageTimeoutSeconds/],
   ['non-array writeScope', { id: 'x', outputPath: 'y', writeScope: 'src/**', stages: [okStage] }, /writeScope/],
   ['non-string writeScope element', { id: 'x', outputPath: 'y', writeScope: ['src/**', 5], stages: [okStage] }, /writeScope/],
   ['non-array testGlobs', { id: 'x', outputPath: 'y', testGlobs: '**/*.test.*', stages: [okStage] }, /testGlobs/],
@@ -93,7 +97,7 @@ test('a fully valid in-memory definition normalizes (defaults applied)', () => {
   const norm = validateAndNormalize(def, 'marketing', MKT_DIR);
   assert.equal(norm.name, 'marketing');
   assert.equal(norm.stageTimeoutSeconds, 900);
-  assert.equal(norm.permissions.mode, 'interactive'); // default when omitted
+  assert.equal(norm.permissions.mode, 'yolo'); // default when omitted (the only supported mode)
   assert.ok(norm.stages[0].agentPath.endsWith(path.join('agents', 'researcher.md')));
 });
 

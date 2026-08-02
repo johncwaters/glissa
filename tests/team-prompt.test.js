@@ -2,11 +2,8 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const os = require('node:os');
-const path = require('node:path');
 
-const { buildStagePrompt, writePromptFile } = require('../teamlib/team-prompt');
+const { buildStagePrompt } = require('../teamlib/team-prompt');
 
 test('buildStagePrompt embeds agent text and every run-context path', () => {
   const runDir = 'C:/proj/.glissa/teams/marketing/runs/2026-06-02-tuesday';
@@ -85,17 +82,4 @@ test('buildStagePrompt appends the QUESTION protocol only when allowQuestions is
   assert.ok(/do not guess/i.test(on), 'tells the agent not to guess');
   // The produces line must stay parseable by the orchestrator stage fake regardless of the additions.
   assert.match(on, /Write your single output file to: (.+)/);
-});
-
-test('writePromptFile writes the exact content and returns a path under dir', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-prompt-'));
-  try {
-    const content = '# Researcher\nPick a topic.\n## RUN CONTEXT\n- Run folder: X';
-    const file = writePromptFile(dir, content);
-    assert.ok(fs.existsSync(file), 'file created');
-    assert.equal(fs.readFileSync(file, 'utf8'), content);
-    assert.ok(path.resolve(file).startsWith(path.resolve(dir)), 'path under dir');
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
 });

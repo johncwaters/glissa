@@ -24,4 +24,4 @@ function parseVerdict(text, verdictSpec) {
   return found && values.includes(found) ? found : null;
 }
 
-module.exports = { extractVerdictToken, parseVerdict, DEFAULT_MARKER };
+module.exports = { extractVerdictToken, parseVerdict };

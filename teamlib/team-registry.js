@@ -39,12 +39,28 @@ function validateSchedule(schedule, teamId) {
   }
 }
 
+// scoped/interactive are recognized SHAPES but are guaranteed-broken at runtime: every stage runs
+// headless (`claude -p`), which cannot answer a permission prompt, so either mode hangs a stage
+// forever on its first tool call. yolo (plus the permissions.deny guardrail) is the only supported
+// mode; reject the other two at load time instead of leaving the footgun for a run to discover.
+function checkPermissionModeSupported(mode, teamId) {
+  if (mode !== 'scoped' && mode !== 'interactive') return;
+  fail(
+    'permissions.mode',
+    `"${mode}" is not supported: every stage runs headless (claude -p) and cannot answer a permission `
+      + 'prompt, so this mode would hang the stage forever on its first tool call. Use "yolo" and rely '
+      + 'on permissions.deny as the guardrail.',
+    teamId,
+  );
+}
+
 function validatePermissions(permissions, teamId) {
   if (permissions == null) return; // optional
   if (typeof permissions !== 'object') fail('permissions', 'must be an object', teamId);
   if (permissions.mode != null && !PERMISSION_MODES.has(permissions.mode)) {
     fail('permissions.mode', 'must be one of yolo, scoped, interactive', teamId);
   }
+  checkPermissionModeSupported(permissions.mode, teamId);
   if (permissions.deny != null && !Array.isArray(permissions.deny)) {
     fail('permissions.deny', 'must be an array of "Tool(glob)" strings', teamId);
   }
@@ -118,6 +134,15 @@ function validateRuntime(runtime, teamId) {
   if (runtime.baseBranch != null
     && (typeof runtime.baseBranch !== 'string' || runtime.baseBranch.trim() === '')) {
     fail('runtime.baseBranch', 'must be a non-empty string', teamId);
+  }
+}
+
+// A stage's spawn timeout budget in seconds (see team-orchestrator.js runStage). Optional; normalizes
+// to 900 (below).
+function validateStageTimeoutSeconds(stageTimeoutSeconds, teamId) {
+  if (stageTimeoutSeconds == null) return; // optional
+  if (typeof stageTimeoutSeconds !== 'number' || !Number.isFinite(stageTimeoutSeconds) || stageTimeoutSeconds <= 0) {
+    fail('stageTimeoutSeconds', 'must be a positive number', teamId);
   }
 }
 
@@ -217,6 +242,7 @@ function validateAndNormalize(def, teamId, teamDir) {
 
   validateSchedule(def.schedule, teamId);
   validatePermissions(def.permissions, teamId);
+  validateStageTimeoutSeconds(def.stageTimeoutSeconds, teamId);
   validatePack(def.pack, teamId);
   validateWriteScope(def.writeScope, teamId);
   validateTestGlobs(def.testGlobs, teamId);
@@ -278,7 +304,9 @@ function validateAndNormalize(def, teamId, teamDir) {
     schemaVersion: def.schemaVersion || 1,
     outputPath: def.outputPath,
     schedule: def.schedule || null,
-    permissions: def.permissions || { mode: 'interactive', deny: [] },
+    // yolo is the only supported mode (see checkPermissionModeSupported); default to it so a team that
+    // omits permissions entirely runs instead of silently normalizing to a mode that hangs every stage.
+    permissions: def.permissions || { mode: 'yolo', deny: [] },
     stageTimeoutSeconds: def.stageTimeoutSeconds || 900,
     // The SHIP-gated auto-merge boundary; default [] (a team stages only the run folder + log, so
     // marketing's addPaths stays byte-identical and nothing extra merges).
@@ -336,5 +364,5 @@ function listTeams(baseDir = DEFAULT_TEAMS_DIR) {
 }
 
 module.exports = {
-  loadTeam, listTeams, validateAndNormalize, DEFAULT_TEAMS_DIR,
+  loadTeam, listTeams, validateAndNormalize,
 };

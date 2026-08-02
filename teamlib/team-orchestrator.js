@@ -31,9 +31,10 @@ function extractQuestion(text, marker = 'QUESTION:') {
   return t.slice(m.length).trim() || '(no question text)';
 }
 
-// Clamp a logged field to one tidy segment: drop the pipe delimiter, collapse to a single line, and
-// cap length so log.md stays one scannable line per run even when an agent writes a paragraph.
-function clip(value, max = 100) {
+// Clamp a run-log field to one tidy segment: drop the pipe delimiter, collapse to a single line, and
+// cap length so log.md stays one scannable line per run even when an agent writes a paragraph. ASCII
+// "..." (not the ellipsis glyph) so the run-log file stays byte-plain.
+function clipLogCell(value, max = 100) {
   const t = String(value || '').replace(/\|/g, '/').replace(/\s+/g, ' ').trim();
   return t.length > max ? `${t.slice(0, max - 1).trimEnd()}...` : t;
 }
@@ -511,7 +512,7 @@ function createOrchestrator(deps) {
         // generic runtime carries no team-specific stage ids.
         if (stage.capture) {
           const slotRef = { topic: topicRef, platforms: platformsRef }[stage.capture.slot];
-          if (slotRef) slotRef.value = clip(sectionFirstLine(produced, stage.capture.section)) || slotRef.value;
+          if (slotRef) slotRef.value = clipLogCell(sectionFirstLine(produced, stage.capture.section)) || slotRef.value;
         }
         let stageVerdict = null;
         if (stage.verdict) {
@@ -634,7 +635,7 @@ function createOrchestrator(deps) {
       try {
         const logTarget = (workspace.isGit && workspace.cwd) ? workspace.cwd : projectPath;
         output.appendLog(logTarget, team.outputPath,
-          `${dateStr} | (error) | - | FAILED${runId ? ` @run ${runId}` : ''} (${clip(reason, 80)})`);
+          `${dateStr} | (error) | - | FAILED${runId ? ` @run ${runId}` : ''} (${clipLogCell(reason, 80)})`);
       } catch { /* best-effort: never mask the original error with a logging failure */ }
       log(`run errored: ${lockKey}${runId ? ` runId=${runId}` : ''} (${reason})`);
       emitter.emit('team-run-failed', { teamId, projectId, reason: 'error', error: reason });
@@ -721,11 +722,8 @@ function createOrchestrator(deps) {
 
 module.exports = {
   createOrchestrator,
-  parseVerdict,
   extractQuestion,
-  sectionFirstLine,
   formatRunVerdict,
-  defaultRunLabel,
   buildReadNames,
   selectReviseStages,
   allUnchanged,

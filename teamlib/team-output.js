@@ -2,7 +2,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { escapeRegExp, hasHeading, readParagraph } = require('./markdown');
+const { hasHeading, readParagraph } = require('./markdown');
 const { extractVerdictToken } = require('./verdict');
 
 // The project-side <outputPath>/ convention for a team (outputPath defaults to .glissa/teams/<id> so
@@ -139,15 +139,16 @@ function scaffoldPack(
         continue;
       }
       const src = fallbackTemplatesDir ? path.join(fallbackTemplatesDir, file.name) : null;
-      if (src && fs.existsSync(src)) fs.copyFileSync(src, dest);
-      else stub(dest, file.name);
+      const hasSrc = src && fs.existsSync(src);
+      if (hasSrc) fs.copyFileSync(src, dest);
+      if (!hasSrc) stub(dest, file.name);
       created.push(file.name);
       continue;
     }
     // Local file: unchanged behavior (team templatesDir -> shared fallback -> stub).
     const src = pickTemplate(file.name, templatesDir, fallbackTemplatesDir);
     if (src) fs.copyFileSync(src, dest);
-    else stub(dest, file.name);
+    if (!src) stub(dest, file.name);
     created.push(file.name);
   }
 
@@ -156,7 +157,8 @@ function scaffoldPack(
     const readmeSrc = pickTemplate('README.md', templatesDir, fallbackTemplatesDir);
     if (readmeSrc) {
       fs.copyFileSync(readmeSrc, readmeDest);
-    } else {
+    }
+    if (!readmeSrc) {
       fs.writeFileSync(
         readmeDest,
         `# Team pack\n\nProject-owned inputs for this team. Replace the ${PACK_SENTINEL} markers,`
@@ -264,9 +266,9 @@ function readChat(runDir) {
       cur = {
         role: m[1], stage: m[2] || null, ts: m[3], text: [],
       };
-    } else if (cur) {
-      cur.text.push(line);
+      continue;
     }
+    if (cur) cur.text.push(line);
   }
   if (cur) { cur.text = cur.text.join('\n').trim(); out.push(cur); }
   return out;
@@ -332,21 +334,10 @@ function parseRecentTopics(projectPath, outputPath, n = 5) {
     .filter(Boolean);
 }
 
-// The last n log entries (raw lines), newest last; header/comment lines skipped.
-function readRecentLog(projectPath, outputPath, n = 10) {
-  const { logPath } = teamPaths(projectPath, outputPath);
-  if (!fs.existsSync(logPath)) return [];
-  const lines = fs.readFileSync(logPath, 'utf8')
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter((l) => l && !l.startsWith('#'));
-  return lines.slice(-n);
-}
-
 // U+2026 built with fromCharCode: the repo bans raw dash/ellipsis literals in source (editor tooling
 // mangles them), but the truncation marker itself should stay a single ellipsis glyph in the UI.
 const ELLIPSIS = String.fromCharCode(0x2026);
-function clip(value, max) {
+function clipDisplayText(value, max) {
   const t = String(value || '').replace(/\s+/g, ' ').trim();
   return t.length > max ? `${t.slice(0, max - 1).trimEnd()}${ELLIPSIS}` : t;
 }
@@ -369,8 +360,11 @@ async function listRunSummaries(projectPath, outputPath, stages = [], limit = 10
   for (const runId of folders) {
     const dir = path.join(runsDir, runId);
     const reached = [];
-    let topic = '';
-    let platforms = '';
+    // Config-driven, per team.json stage.capture (section + slot): the orchestrator's run-log line
+    // (team-orchestrator.js) reads the same stage.capture config, so a heading name is declared once
+    // per team instead of hardcoded here as "Topic"/"Platforms" (which only the marketing team has).
+    // A team with no capture-declaring stage (changelog, qa, qa-walk) simply reports neither field.
+    const captured = { topic: '', platforms: '' };
     let verdict = '';
     let summary = '';
     for (const stage of stages) {
@@ -382,16 +376,19 @@ async function listRunSummaries(projectPath, outputPath, stages = [], limit = 10
       reached.push(stage.id);
       let text = '';
       try { text = await fs.promises.readFile(fp, 'utf8'); } catch { continue; }
-      if (!topic) topic = clip(readParagraph(text, 'Topic'), 140);
-      if (!platforms) platforms = clip(readParagraph(text, 'Platforms'), 140);
+      if (stage.capture && !captured[stage.capture.slot]) {
+        captured[stage.capture.slot] = clipDisplayText(readParagraph(text, stage.capture.section), 140);
+      }
       const v = extractVerdictToken(text);
       if (v) {
         verdict = v;
-        summary = clip(readParagraph(text, 'Summary'), 320);
+        summary = clipDisplayText(readParagraph(text, 'Summary'), 320);
       }
     }
     const chat = await fs.promises.access(path.join(dir, 'chat.md')).then(() => true, () => false);
-    summaries.push({ runId, topic, platforms, verdict, summary, reached, chat });
+    summaries.push({
+      runId, topic: captured.topic, platforms: captured.platforms, verdict, summary, reached, chat,
+    });
   }
   return summaries;
 }
@@ -402,7 +399,6 @@ module.exports = {
   resolvePackLayout,
   scaffoldPack,
   packStatus,
-  isFilled,
   runFolderLabel,
   createRunFolder,
   chatPath,
@@ -412,10 +408,7 @@ module.exports = {
   verifyHandoff,
   appendLog,
   parseRecentTopics,
-  readRecentLog,
-  readParagraph,
   listRunSummaries,
-  escapeRegExp,
   PACK_SENTINEL,
   DEFAULT_PACK_FILES,
   SHARED_PACK_DIRNAME,

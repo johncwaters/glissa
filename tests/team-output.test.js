@@ -150,9 +150,11 @@ test('listRunSummaries extracts topic/platforms/verdict/summary + reached from a
     fs.writeFileSync(path.join(run, 'brief.md'), '## Topic\nBoondocking basics\n## Angle\nhook\n', 'utf8');
     fs.writeFileSync(path.join(run, 'plan.md'), '## Platforms\nX, LinkedIn\n', 'utf8');
     fs.writeFileSync(path.join(run, 'review.md'), '## Summary\nStrong run overall, minor fixes.\n\nVERDICT: FIX\n', 'utf8');
+    // capture config mirrors the real marketing team.json: listRunSummaries reads section/slot from the
+    // team's own stage config instead of hardcoding "Topic"/"Platforms" headings.
     const stages = [
-      { id: 'researcher', produces: 'brief.md' },
-      { id: 'strategist', produces: 'plan.md' },
+      { id: 'researcher', produces: 'brief.md', capture: { section: 'Topic', slot: 'topic' } },
+      { id: 'strategist', produces: 'plan.md', capture: { section: 'Platforms', slot: 'platforms' } },
       { id: 'writer', produces: 'drafts.md' },
       { id: 'editor', produces: 'review.md' },
     ];
@@ -165,6 +167,23 @@ test('listRunSummaries extracts topic/platforms/verdict/summary + reached from a
     assert.match(r.summary, /Strong run overall/);
     // drafts.md was never written, so the writer stage is not "reached".
     assert.deepEqual(r.reached, ['researcher', 'strategist', 'editor']);
+  } finally {
+    fs.rmSync(proj, { recursive: true, force: true });
+  }
+});
+
+test('listRunSummaries only captures a slot when the stage declares capture (config-driven, not heading-name-driven)', async () => {
+  const proj = tmpProject();
+  try {
+    out.ensureStructure(proj, OUT);
+    const run = out.createRunFolder(proj, OUT, '2026-06-02-tuesday');
+    // The analysis.md heading is literally "Topic" (like changelog's analyst stage), but the stage
+    // declares no capture config, so it must NOT be picked up as the run's topic.
+    fs.writeFileSync(path.join(run, 'analysis.md'), '## Topic\nRange 1.0.0..HEAD\n', 'utf8');
+    const stages = [{ id: 'analyst', produces: 'analysis.md' }];
+    const runs = await out.listRunSummaries(proj, OUT, stages, 10);
+    assert.equal(runs[0].topic, '', 'no capture config on the stage -> topic stays empty');
+    assert.equal(runs[0].platforms, '');
   } finally {
     fs.rmSync(proj, { recursive: true, force: true });
   }

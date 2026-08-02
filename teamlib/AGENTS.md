@@ -17,7 +17,6 @@ Server runtime for the Teams feature: loads team definitions from `teams/`, runs
 | `team-prompt.js` | Stage prompt builder, embeds pack and run paths |
 | `team-setup.js` | Guided pack setup: interview prompt + interactive setup-session helpers (one ephemeral PTY card, not a headless stage) |
 | `team-settings.js` | Per-stage spawn options and permission config |
-| `team-blacklist.js` | Glob deny-list enforcement (test-only, not published) |
 | `project-context.js` | fs-only shell reading an exact top-level allowlist of non-secret files for first-run setup context; never throws, no recursive walk |
 | `project-context-core.js` | Pure parser/renderer of that context: string in, deterministic ASCII-clean summary out |
 
@@ -26,7 +25,7 @@ Server runtime for the Teams feature: loads team definitions from `teams/`, runs
 ### Working In This Directory
 - Everything Glissa writes into a target repo lives under `.glissa/` (the team's `outputPath`). Never write elsewhere in a target project.
 - Pack ownership split: Glissa owns agents/templates (`teams/`), the project owns the pack. Shared pack files resolve through `resolvePackLayout`, the one resolver every consumer must use.
-- Permissions: only `permission.mode: "yolo"` skips prompts; `scoped`/`interactive` hang a headless stage on its first tool call. The deny-list is the real guardrail.
+- Permissions: only `permission.mode: "yolo"` is supported. `team-registry.js loadTeam` REJECTS `scoped`/`interactive` at load time (every stage runs headless `claude -p` and cannot answer a permission prompt, so those modes would hang a stage forever). The deny-list is the real guardrail.
 - Merge-back is rebase-then-FF and stages only `outputPath` by default; `writeScope` is the SHIP-gated allowlist for tracked paths, and a team has exactly ONE verdict stage owning it.
 - Pack migration is non-destructive: filled team-local copies promote to `.glissa/pack/`; byte-different duplicates are reported `divergent`, never auto-merged or deleted.
 - No sync git on recurring paths; the orchestrator runs on the shared event loop.

@@ -258,15 +258,14 @@ function createGitWorkspace(opts = {}) {
       : false;
 
     let merged = false;
-    let reason = null;
-    if (committed && workspace.branch && workspace.base && workspace.base !== 'HEAD') {
-      await clearFfCollisions(projectPath, workspace.branch, addPaths);
-      merged = (await run(['merge', '--ff-only', workspace.branch], projectPath)).ok;
-      if (!merged) reason = 'not-fast-forward';
-    } else if (!committed) {
-      reason = 'nothing-to-commit';
-    } else {
+    let reason = 'nothing-to-commit';
+    if (committed) {
       reason = 'detached-head';
+      const canFf = workspace.branch && workspace.base && workspace.base !== 'HEAD';
+      if (canFf) {
+        merged = await fastForwardTarget(projectPath, workspace.branch, workspace.base, addPaths, true);
+        reason = merged ? null : 'not-fast-forward';
+      }
     }
 
     removeWorktreeLinks(wt);
@@ -284,6 +283,17 @@ function createGitWorkspace(opts = {}) {
     await run(['worktree', 'remove', '--force', wt], projectPath);
     await run(['worktree', 'prune'], projectPath);
     if (branch) await run(['branch', '-D', branch], projectPath);
+  }
+
+  // Advance `target` to `branch`'s tip: an ff-only merge when `target` is the checked-out HEAD in
+  // projectPath (advances the working tree too), else a direct ref update via `fetch` (no checkout of
+  // the target required).
+  async function fastForwardTarget(projectPath, branch, target, addPaths, targetIsHead) {
+    if (!targetIsHead) {
+      return (await run(['fetch', '.', `refs/heads/${branch}:refs/heads/${target}`], projectPath)).ok;
+    }
+    await clearFfCollisions(projectPath, branch, addPaths);
+    return (await run(['merge', '--ff-only', branch], projectPath)).ok;
   }
 
   // The shared merge core (COMMITTED-ONLY): merge the commits already on `branch` into `target` via
@@ -322,17 +332,9 @@ function createGitWorkspace(opts = {}) {
       return { committed: true, merged: false, reason: 'rebase-conflict', parked: true, conflicts };
     }
 
-    // Fast-forward the integration branch to the rebased session branch. If it is checked out in
-    // projectPath, an ff-only merge advances it + its working tree; otherwise update the ref directly
-    // via an ff-only `fetch . <branch>:<target>` (no checkout of the target required).
+    // Fast-forward the integration branch to the rebased session branch.
     const head = (await run(['rev-parse', '--abbrev-ref', 'HEAD'], projectPath)).out;
-    let merged;
-    if (head === target) {
-      await clearFfCollisions(projectPath, branch, addPaths);
-      merged = (await run(['merge', '--ff-only', branch], projectPath)).ok;
-    } else {
-      merged = (await run(['fetch', '.', `refs/heads/${branch}:refs/heads/${target}`], projectPath)).ok;
-    }
+    const merged = await fastForwardTarget(projectPath, branch, target, addPaths, head === target);
     if (!merged) {
       if (stashed) await run(['stash', 'pop'], wt);
       return { committed: true, merged: false, reason: 'not-fast-forward', parked: true };

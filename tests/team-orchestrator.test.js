@@ -59,11 +59,9 @@ function fakeFactory(behaviors) {
       const spec = behaviors[stageId];
       const n = calls[stageId] || 0;
       calls[stageId] = n + 1;
-      let b;
+      let b = spec || { exitCode: 0 };
       if (Array.isArray(spec)) {
         b = spec.length ? (spec[n] || spec[spec.length - 1]) : { exitCode: 0 };
-      } else {
-        b = spec || { exitCode: 0 };
       }
       // Spawn-fault injection: a synchronous throw from start() and an async start() rejection model the
       // two ways the real async Session.start() fails before/at spawn (failed provision / hook-settings
@@ -962,7 +960,9 @@ test('loop 8: cancel during a revise round discards the worktree', async () => {
       const tick = () => {
         if (events.some((e) => e.name === 'team-stage-started' && e.stage === 'writer' && e.round === 1)) {
           resolve();
-        } else { setImmediate(tick); }
+          return;
+        }
+        setImmediate(tick);
       };
       tick();
     });

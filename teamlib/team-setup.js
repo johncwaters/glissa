@@ -1,6 +1,5 @@
 'use strict';
 
-const path = require('node:path');
 const { PACK_SENTINEL, resolvePackLayout } = require('./team-output');
 
 // Guided pack setup. The setup phase fills a project's pack (voice, brand, audience, calendar,
@@ -12,6 +11,29 @@ const { PACK_SENTINEL, resolvePackLayout } = require('./team-output');
 // This is intentionally NOT a headless `claude -p` stage: the interview needs back-and-forth, which a
 // headless session cannot do. The per-file guidance lives in the scaffolded template files themselves
 // (the agent reads them on disk), so this prompt stays small and never duplicates that content.
+
+// PASS 1 instructions: when starting facts were gathered automatically, the pass becomes verify-not-
+// rediscover; otherwise the agent explores from scratch. Extracted so buildSetupPrompt's branch needs
+// no if/else, just a guard-clause return per case.
+function pass1Instructions(hasContext) {
+  if (hasContext) {
+    return [
+      'PASS 1, LEARN THE PROJECT. The starting facts above were pulled deterministically from this',
+      'project\'s README, package.json, and git config. Treat them as a starting point to confirm, not as',
+      'authoritative. Verify and extend them by exploring the repository: confirm the product or brand name',
+      'and what it does, who the audience is, the content and posting cadence, and which social channels it',
+      'targets. Good places to look: README, package.json, any docs or content directories, marketing or',
+      'site config, and any social or scheduling configuration. Do not open secrets or .env files.',
+    ];
+  }
+  return [
+    'PASS 1, LEARN THE PROJECT. Explore this repository to infer what you can on your own: the',
+    'product or brand name and what it does, who the audience is, the content and posting cadence, and',
+    'which social channels it targets. Good places to look: README, package.json, any docs or content',
+    'directories, marketing or site config, and any social or scheduling configuration. Do not open',
+    'secrets or .env files.',
+  ];
+}
 
 // Build the initial prompt for the interactive setup session. `packFiles` is
 // [{ name, path }] (absolute paths to the already-scaffolded pack files). `projectContext` is an optional
@@ -47,25 +69,7 @@ function buildSetupPrompt(team, {
   }
 
   lines.push('Work in two passes.', '');
-
-  if (hasContext) {
-    lines.push(
-      'PASS 1, LEARN THE PROJECT. The starting facts above were pulled deterministically from this',
-      'project\'s README, package.json, and git config. Treat them as a starting point to confirm, not as',
-      'authoritative. Verify and extend them by exploring the repository: confirm the product or brand name',
-      'and what it does, who the audience is, the content and posting cadence, and which social channels it',
-      'targets. Good places to look: README, package.json, any docs or content directories, marketing or',
-      'site config, and any social or scheduling configuration. Do not open secrets or .env files.',
-    );
-  } else {
-    lines.push(
-      'PASS 1, LEARN THE PROJECT. Explore this repository to infer what you can on your own: the',
-      'product or brand name and what it does, who the audience is, the content and posting cadence, and',
-      'which social channels it targets. Good places to look: README, package.json, any docs or content',
-      'directories, marketing or site config, and any social or scheduling configuration. Do not open',
-      'secrets or .env files.',
-    );
-  }
+  lines.push(...pass1Instructions(hasContext));
 
   lines.push(
     '',

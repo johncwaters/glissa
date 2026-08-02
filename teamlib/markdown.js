@@ -57,5 +57,5 @@ function readParagraph(text, heading) {
 }
 
 module.exports = {
-  escapeRegExp, headingRegex, hasHeading, textAfterHeading, sectionFirstLine, readParagraph,
+  escapeRegExp, hasHeading, sectionFirstLine, readParagraph,
 };
