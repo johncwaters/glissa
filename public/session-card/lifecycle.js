@@ -183,11 +183,11 @@ export function updateAggregateStatus() {
   for (const [, ui] of sessionUIs) {
     total++;
     const state = ui.currentState;
-    if (state === STATES.WAITING) waiting++;
-    else if (state === STATES.FAILED) failed++;
-    else if (state === STATES.DONE) done++;
-    else if (state === STATES.COMPLETE) complete++;
-    else if (state === STATES.DORMANT) dormant++;
+    if (state === STATES.WAITING) { waiting++; continue; }
+    if (state === STATES.FAILED) { failed++; continue; }
+    if (state === STATES.DONE) { done++; continue; }
+    if (state === STATES.COMPLETE) { complete++; continue; }
+    if (state === STATES.DORMANT) dormant++;
   }
 
   const { text, severity, alertCount } = computeAggregate({ waiting, failed, done, complete, dormant, total });
@@ -276,8 +276,8 @@ export function setSessionEffectiveBase(sessionId, base) {
 export function setSessionWorktree(sessionId, worktree) {
   const ui = sessionUIs.get(sessionId);
   if (!ui) return;
-  if (worktree) ui.card.dataset.worktree = '';
-  else delete ui.card.dataset.worktree;
+  if (worktree) { ui.card.dataset.worktree = ''; return; }
+  delete ui.card.dataset.worktree;
 }
 
 // Toggle the "resumed" marker on a card (driven by the server's session-resume delta and the snapshot's
@@ -285,8 +285,8 @@ export function setSessionWorktree(sessionId, worktree) {
 export function setSessionResume(sessionId, resumeSessionId) {
   const ui = sessionUIs.get(sessionId);
   if (!ui) return;
-  if (resumeSessionId) ui.card.dataset.resume = '';
-  else delete ui.card.dataset.resume;
+  if (resumeSessionId) { ui.card.dataset.resume = ''; return; }
+  delete ui.card.dataset.resume;
 }
 
 // Reflect the live background sub-agent count on the card. n > 0 shows an "N agents" chip and sets
@@ -302,10 +302,10 @@ export function setSessionAgents(sessionId, activeAgents) {
   if (n > 0) {
     ui.card.dataset.agents = String(n);
     if (badge) badge.textContent = n === 1 ? '1 agent' : `${n} agents`;
-  } else {
-    delete ui.card.dataset.agents;
-    if (badge) badge.textContent = '';
+    return;
   }
+  delete ui.card.dataset.agents;
+  if (badge) badge.textContent = '';
 }
 
 // Reflect the advisory pending-prompt-kind on the card (server session-prompt delta / snapshot
@@ -374,7 +374,8 @@ export function setSessionPostTurn(sessionId, report) {
   if (!r.skipped && r.mode === 'fix' && fixed > 0) {
     kind = 'fixed';
     count = fixed;
-  } else if (!r.skipped && r.mode === 'report' && findings.length > 0) {
+  }
+  if (!r.skipped && r.mode === 'report' && findings.length > 0) {
     kind = 'flagged';
     count = new Set(findings.map((f) => f.file)).size;
   }
@@ -398,14 +399,18 @@ export function setSessionPostTurn(sessionId, report) {
 // (none|pending-review|merging|parked|merged). The review UI itself (diff + Merge / Discard)
 // now lives in the right review sidebar; here we only keep data-merge on the card so the remove button
 // can warn before discarding unmerged work, and forward the status to the sidebar.
+// Shared by setSessionMergeStatus and seedSessionMergeStatus: set the card's data-merge for an
+// unmerged status, clear it otherwise.
+function applyMergeDataset(card, ms) {
+  if (ms === 'pending-review' || ms === 'parked' || ms === 'merging') { card.dataset.merge = ms; return; }
+  delete card.dataset.merge;
+}
+
 export function setSessionMergeStatus(sessionId, mergeStatus) {
   const ui = sessionUIs.get(sessionId);
-  if (ui) {
-    const ms = mergeStatus || 'none';
-    if (ms === 'pending-review' || ms === 'parked' || ms === 'merging') ui.card.dataset.merge = ms;
-    else delete ui.card.dataset.merge;
-  }
-  setReviewMergeStatus(sessionId, mergeStatus || 'none');
+  const ms = mergeStatus || 'none';
+  if (ui) applyMergeDataset(ui.card, ms);
+  setReviewMergeStatus(sessionId, ms);
 }
 
 // Snapshot hydration: set the card's data-merge (remove-warning) and seed the sidebar quietly (count +
@@ -413,12 +418,9 @@ export function setSessionMergeStatus(sessionId, mergeStatus) {
 // immediately instead of only after the next live broadcast.
 export function seedSessionMergeStatus(sessionId, mergeStatus) {
   const ui = sessionUIs.get(sessionId);
-  if (ui) {
-    const ms = mergeStatus || 'none';
-    if (ms === 'pending-review' || ms === 'parked' || ms === 'merging') ui.card.dataset.merge = ms;
-    else delete ui.card.dataset.merge;
-  }
-  seedReviewMergeStatus(sessionId, mergeStatus || 'none');
+  const ms = mergeStatus || 'none';
+  if (ui) applyMergeDataset(ui.card, ms);
+  seedReviewMergeStatus(sessionId, ms);
 }
 
 // Forward a session's diff payload ({ committed, uncommitted, hasCommits }, reply to

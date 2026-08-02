@@ -10,7 +10,7 @@ import { rehydrateLive } from './run-status.js';
 import { renderRuns } from './runs-list.js';
 import { renderSetup } from './setup-banner.js';
 
-export function applyScheduleSummary(refs, nextFire) {
+function applyScheduleSummary(refs, nextFire) {
   const sch = refs.schedule;
   const hasDays = sch?.days?.length;
   if (refs.enabled && hasDays) {

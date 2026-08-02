@@ -36,3 +36,17 @@ export function createModalOverlay({ dialogClass = 'dialog', closeOnBackdrop = t
 
   return { overlay, dialog, close };
 }
+
+// Tab-key focus trap: keeps keyboard focus cycling within the dialog's focusable elements instead
+// of escaping to the page behind the overlay. Shared by every dialog built on createModalOverlay.
+export function trapFocus(dialog) {
+  dialog.addEventListener('keydown', (e) => {
+    if (e.key !== 'Tab') return;
+    const focusable = [...dialog.querySelectorAll('button, input, select, textarea, [tabindex]:not([tabindex="-1"])')];
+    if (focusable.length === 0) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); return; }
+    if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  });
+}

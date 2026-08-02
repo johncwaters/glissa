@@ -16,6 +16,6 @@ export function setJSON(key, value) {
   try {
     localStorage.setItem(key, JSON.stringify(value));
   } catch {
-    // Silently fail — private browsing or quota exceeded
+    // Silently fail: private browsing or quota exceeded
   }
 }

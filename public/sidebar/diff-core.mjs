@@ -28,8 +28,8 @@ export function parseUnifiedDiff(diff) {
     if (line.startsWith('diff --git ')) { startFile(line); continue; }
     if (!cur) {
       // Tolerate a diff with no "diff --git" prefix (e.g. a single-file `git diff`): synthesize a file.
-      if (line.startsWith('--- ') || line.startsWith('@@')) startFile('diff --git a/ b/');
-      else continue;
+      if (!line.startsWith('--- ') && !line.startsWith('@@')) continue;
+      startFile('diff --git a/ b/');
     }
     if (line.startsWith('new file mode')) { cur.status = 'added'; continue; }
     if (line.startsWith('deleted file mode')) { cur.status = 'deleted'; continue; }
@@ -41,13 +41,13 @@ export function parseUnifiedDiff(diff) {
       continue;
     }
     if (line.startsWith('--- ')) {
-      if (line === '--- /dev/null') cur.status = 'added';
-      else if (!cur.path) { const p = line.slice(4).replace(/^a\//, ''); if (p && p !== '/dev/null') cur.oldPath = cur.oldPath || p; }
+      if (line === '--- /dev/null') { cur.status = 'added'; continue; }
+      if (!cur.path) { const p = line.slice(4).replace(/^a\//, ''); if (p && p !== '/dev/null') cur.oldPath = cur.oldPath || p; }
       continue;
     }
     if (line.startsWith('+++ ')) {
-      if (line === '+++ /dev/null') cur.status = 'deleted';
-      else if (!cur.path) { const p = line.slice(4).replace(/^b\//, ''); if (p && p !== '/dev/null') cur.path = p; }
+      if (line === '+++ /dev/null') { cur.status = 'deleted'; continue; }
+      if (!cur.path) { const p = line.slice(4).replace(/^b\//, ''); if (p && p !== '/dev/null') cur.path = p; }
       continue;
     }
     if (line.startsWith('@@')) {
@@ -58,10 +58,10 @@ export function parseUnifiedDiff(diff) {
     if (hunk) {
       if (line === '') continue; // trailing split artifact / blank separator (a real blank line is " ")
       const c = line[0];
-      if (c === '+') { hunk.lines.push({ type: 'add', text: line.slice(1) }); cur.added++; }
-      else if (c === '-') { hunk.lines.push({ type: 'del', text: line.slice(1) }); cur.removed++; }
-      else if (c === '\\') { hunk.lines.push({ type: 'meta', text: line.slice(1).trim() }); }
-      else { hunk.lines.push({ type: 'context', text: c === ' ' ? line.slice(1) : line }); }
+      if (c === '+') { hunk.lines.push({ type: 'add', text: line.slice(1) }); cur.added++; continue; }
+      if (c === '-') { hunk.lines.push({ type: 'del', text: line.slice(1) }); cur.removed++; continue; }
+      if (c === '\\') { hunk.lines.push({ type: 'meta', text: line.slice(1).trim() }); continue; }
+      hunk.lines.push({ type: 'context', text: c === ' ' ? line.slice(1) : line });
     }
   }
   for (const f of files) { if (!f.path) f.path = f.oldPath || '(unknown)'; }

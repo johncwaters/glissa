@@ -70,19 +70,23 @@ setConnectionStateCallback((state, label) => {
         applyTerminalSettings(msg.settings);
       })
       .catch(() => {});
-  } else if (state === 'shutdown') {
+    return;
+  }
+  if (state === 'shutdown') {
     if (appRevealed) {
       shutdownStatus.textContent = 'Server shut down';
       shutdownScreen.classList.add('done');
-    } else {
-      loadingStatus.textContent = 'Server shut down';
+      return;
     }
-  } else if (state === 'disconnected' && shutdownScreen.classList.contains('active')) {
+    loadingStatus.textContent = 'Server shut down';
+    return;
+  }
+  if (state === 'disconnected' && shutdownScreen.classList.contains('active')) {
     // Restart: server dropped connection, waiting for it to come back
     shutdownStatus.textContent = 'Waiting for server...';
-  } else if (!appRevealed) {
-    loadingStatus.textContent = 'Reconnecting to server...';
+    return;
   }
+  if (!appRevealed) loadingStatus.textContent = 'Reconnecting to server...';
 });
 
 // ── Control message handlers ─────────────────────────────────
@@ -102,11 +106,9 @@ function handleSnapshot(sessions) {
 
   for (const s of (sessions || [])) {
     if (!s.ephemeral) noteKnownProjectPath(s.path); // remember the project so its rail group survives a last-session close
-    if (hasSession(s.id)) {
-      applyState(s.id, s.state);
-    } else {
-      createSessionCard(s.id, s.name, s.state, { skipPerms: !!s.dangerouslySkipPermissions, worktree: !!s.isWorktree, path: s.path, resume: !!s.resumeSessionId });
-    }
+    const exists = hasSession(s.id);
+    if (exists) applyState(s.id, s.state);
+    if (!exists) createSessionCard(s.id, s.name, s.state, { skipPerms: !!s.dangerouslySkipPermissions, worktree: !!s.isWorktree, path: s.path, resume: !!s.resumeSessionId });
     // Restore the "resumed" marker on reconnect (the binding lives on the server; the badge does not).
     setSessionResume(s.id, s.resumeSessionId);
     // Hydrate the review sidebar's status/count from the snapshot (quiet: no auto-open on reconnect).
@@ -128,7 +130,7 @@ function handleSnapshot(sessions) {
   if (isFocusActive()) { refreshFocusRoster(); restoreFocusedSession(); }
   // Teams may have been restored as the active view at boot, before knownProjects was populated, so its
   // project picker was seeded empty; refill it in place now that the snapshot has arrived.
-  else if (_activeView === 'teams') refreshTeamsProjects(getKnownProjects());
+  if (!isFocusActive() && _activeView === 'teams') refreshTeamsProjects(getKnownProjects());
 }
 
 function handleStateChange(msg) {
@@ -354,11 +356,8 @@ function activateView(view) {
   }
   // Leaving Focus returns the borrowed card to its off-screen home grid.
   if (prev === 'focus' && view !== 'focus') deactivateFocusView();
-  if (view === 'teams') {
-    mountTeamsView(viewTeamsEl, getKnownProjects());
-  } else if (view === 'focus') {
-    activateFocusView();
-  }
+  if (view === 'teams') mountTeamsView(viewTeamsEl, getKnownProjects());
+  if (view === 'focus') activateFocusView();
 }
 
 for (let i = 0; i < VIEW_TABS.length; i++) {

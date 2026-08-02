@@ -11,28 +11,16 @@ export function computeAggregate(counts) {
   // "exited" bucket so a finished session neither raises its own navbar banner
   // nor counts toward the title-badge alert - only WAITING/FAILED nag.
   const exited = done + complete;
+  const alertCount = waiting + failed;
 
   // The steady "N running" state is deliberately NOT surfaced: an always-on
   // active-session counter is noise that provides no actionable signal. The banner
   // only speaks for states worth acting on (needs-input, failed) or terminal
   // roll-ups (all exited / all dormant); an active mix renders blank (hidden).
-  let text = '';
-  let severity = '';
-
-  if (waiting > 0) {
-    text = `${waiting} session${pl(waiting)} need input`;
-    severity = 'warning';
-  } else if (failed > 0) {
-    text = `${failed} session${pl(failed)} failed`;
-    severity = 'critical';
-  } else if (total > 0 && exited === total) {
-    text = 'All sessions exited';
-    severity = 'done';
-  } else if (total > 0 && dormant === total) {
-    text = `${dormant} session${pl(dormant)} dormant`;
-    severity = '';
-  }
-
-  const alertCount = waiting + failed;
-  return { text, severity, alertCount };
+  // Precedence ladder: each guard returns before the next is evaluated, same order as before.
+  if (waiting > 0) return { text: `${waiting} session${pl(waiting)} need input`, severity: 'warning', alertCount };
+  if (failed > 0) return { text: `${failed} session${pl(failed)} failed`, severity: 'critical', alertCount };
+  if (total > 0 && exited === total) return { text: 'All sessions exited', severity: 'done', alertCount };
+  if (total > 0 && dormant === total) return { text: `${dormant} session${pl(dormant)} dormant`, severity: '', alertCount };
+  return { text: '', severity: '', alertCount };
 }

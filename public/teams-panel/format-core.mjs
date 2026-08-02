@@ -1,7 +1,7 @@
 // Pure formatting/classification helpers for the Teams panel. No DOM access, so importable and
 // testable without a browser (see tests/frontend-teams-format.test.js).
 
-export const STAGE_LABEL = {
+const STAGE_LABEL = {
   researcher: 'Researcher',
   strategist: 'Strategist',
   writer: 'Writer',

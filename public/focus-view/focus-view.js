@@ -13,6 +13,7 @@
 
 import { BADGE_LABELS, STATE_GLYPHS, STATES } from '/shared/states.mjs';
 import { sendControlMsg } from '../control-ws.js';
+import { el } from '../dom-helpers.js';
 import { setActivityRenderer } from '../session-card/activity.js';
 import { showConfirmDialog } from '../session-card/card-dom.js';
 import { container, sessionUIs } from '../session-card/card-registry.js';
@@ -140,29 +141,23 @@ function ensureGroup(group) {
   let header = groupHeaderById.get(group.key);
   let list = groupListById.get(group.key);
   if (!list) {
-    header = document.createElement('div');
-    header.className = 'focus-rail-group';
+    header = el('div', 'focus-rail-group');
     header.dataset.key = group.key;
     header.innerHTML = '<span class="focus-rail-group-label"></span>'
       + '<span class="focus-rail-group-rule" aria-hidden="true"></span>';
-    const add = document.createElement('button');
+    const add = el('button', 'focus-rail-group-add', '+');
     add.type = 'button';
-    add.className = 'focus-rail-group-add';
-    add.textContent = '+';
     add.addEventListener('click', () => quickAdd(header.dataset.path, header.dataset.label));
     header._addBtn = add;
     header.appendChild(add);
     // Dismiss button for a KEPT session-less project: forgets its path so the empty header disappears.
     // Shown only while the group is empty (a populated project is retired by removing its sessions).
-    const forget = document.createElement('button');
+    const forget = el('button', 'focus-rail-group-remove', '×');
     forget.type = 'button';
-    forget.className = 'focus-rail-group-remove';
-    forget.textContent = '×';
     forget.addEventListener('click', () => forgetProject(header.dataset.path));
     header._forgetBtn = forget;
     header.appendChild(forget);
-    list = document.createElement('div');
-    list.className = 'focus-rail-list';
+    list = el('div', 'focus-rail-list');
     list.setAttribute('role', 'listbox');
     groupHeaderById.set(group.key, header);
     groupListById.set(group.key, list);
@@ -231,9 +226,8 @@ export function mountFocusView({ rail, center, resizer }) {
   railEl.removeAttribute('role');
   railEl.removeAttribute('aria-label');
 
-  railHeadEl = document.createElement('button');
+  railHeadEl = el('button', 'focus-rail-head');
   railHeadEl.type = 'button';
-  railHeadEl.className = 'focus-rail-head';
   // Render the shortcut as the SAME shared <kbd> chips the Shortcuts help panel uses (dialogs.js
   // renderShortcutGroups: .shortcut-keys cluster of .kbd chips joined by a .shortcut-sep "+"), so the
   // operator meets one consistent representation of Alt+W on both surfaces. The head is a single
@@ -248,15 +242,13 @@ export function mountFocusView({ rail, center, resizer }) {
 
   railEl.append(railHeadEl);
 
-  emptyEl = document.createElement('div');
-  emptyEl.className = 'focus-empty';
+  emptyEl = el('div', 'focus-empty');
   emptyEl.innerHTML = '<p class="focus-empty-title"></p>'
     + '<p class="focus-empty-desc"></p>';
   emptyTitleEl = emptyEl.querySelector('.focus-empty-title');
   emptyDescEl = emptyEl.querySelector('.focus-empty-desc');
 
-  cardSlotEl = document.createElement('div');
-  cardSlotEl.className = 'focus-card-slot';
+  cardSlotEl = el('div', 'focus-card-slot');
 
   // Review (diff + Merge / Discard) lives in the right review sidebar, not in the center, so
   // the borrowed card is just the live terminal; selection drives the sidebar (see focusSession).
@@ -384,8 +376,7 @@ function sessionName(ui) {
 // ── Rail pills ──
 
 function buildPill(id) {
-  const pill = document.createElement('button');
-  pill.className = 'focus-pill';
+  const pill = el('button', 'focus-pill');
   pill.type = 'button';
   pill.dataset.id = id;
   pill.setAttribute('role', 'option');
@@ -411,16 +402,13 @@ function buildPill(id) {
   // session via Delete/Backspace on the focused pill instead. placeList appends pill._row (not the
   // bare pill), and the prune sweep removes pill._row, so the wrapper is invisible to every other
   // consumer, which still resolves the pill button through pillById.
-  const row = document.createElement('div');
-  row.className = 'focus-pill-row';
+  const row = el('div', 'focus-pill-row');
   row.setAttribute('role', 'presentation');
-  const removeBtn = document.createElement('button');
+  const removeBtn = el('button', 'focus-pill-remove', '×');
   removeBtn.type = 'button';
-  removeBtn.className = 'focus-pill-remove';
   removeBtn.tabIndex = -1;
   removeBtn.setAttribute('aria-hidden', 'true');
   removeBtn.title = 'Remove session';
-  removeBtn.textContent = '×';
   removeBtn.addEventListener('click', (e) => { e.stopPropagation(); removeSession(id); });
   row.append(pill, removeBtn);
   pill._row = row;
@@ -461,7 +449,7 @@ function paintPill(pill, id, ui) {
   // the flag untouched, so a focus-acknowledge persists across later unrelated refreshes.
   const prev = pill.dataset.state; // undefined on a freshly built pill
   if (state !== STATES.COMPLETE) pill.removeAttribute('data-unseen');
-  else if (prev && prev !== STATES.COMPLETE) pill.dataset.unseen = '';
+  if (state === STATES.COMPLETE && prev && prev !== STATES.COMPLETE) pill.dataset.unseen = '';
   pill.dataset.state = state;
   pill._refs.glyph.textContent = STATE_GLYPHS[state] || '';
   pill._refs.label.textContent = (BADGE_LABELS[state] || state).toUpperCase();
@@ -571,7 +559,8 @@ export function refreshFocusRoster() {
     railTabStopId = null;
     const next = order.find((o) => sessionUIs.has(o.id));
     if (next) { focusSession(next.id); return; } // focusSession re-syncs both scalars
-  } else if (focusedId) {
+  }
+  if (focusedId) {
     const ui = sessionUIs.get(focusedId);
     if (ui && ui.card.parentElement !== cardSlotEl) borrowToCenter(ui, focusedId);
   }
@@ -613,10 +602,10 @@ function setRailHeadActive(on, label) {
   if (on) {
     railHeadEl.removeAttribute('data-empty');
     railHeadEl.removeAttribute('aria-hidden');
-  } else {
-    railHeadEl.dataset.empty = '';
-    railHeadEl.setAttribute('aria-hidden', 'true');
+    return;
   }
+  railHeadEl.dataset.empty = '';
+  railHeadEl.setAttribute('aria-hidden', 'true');
 }
 
 export function focusNextAttention() {
@@ -683,18 +672,23 @@ function borrowToCenter(ui, id) {
   forceTerminalRepaint(ui);
 }
 
+// Put a released card back at its remembered home position, or append it to the fallback
+// container if that position's parent is gone (e.g. removed from the DOM while centered).
+function reinsertCard(card, home) {
+  if (home && home.parent && home.parent.isConnected) {
+    if (home.next && home.next.parentElement === home.parent) { home.parent.insertBefore(card, home.next); return; }
+    home.parent.appendChild(card);
+    return;
+  }
+  container.appendChild(card);
+}
+
 function releaseCenter() {
   if (!focusedId) return;
   const ui = sessionUIs.get(focusedId);
   if (ui && ui.card && ui.card.parentElement === cardSlotEl) {
     ui.card.classList.remove('focus-centered');
-    const home = ui.card._focusHome;
-    if (home && home.parent && home.parent.isConnected) {
-      if (home.next && home.next.parentElement === home.parent) home.parent.insertBefore(ui.card, home.next);
-      else home.parent.appendChild(ui.card);
-    } else {
-      container.appendChild(ui.card);
-    }
+    reinsertCard(ui.card, ui.card._focusHome);
     delete ui.card._focusHome;
     ui._applyFit?.();
     forceTerminalRepaint(ui);

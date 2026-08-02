@@ -11,7 +11,7 @@ import { STATES } from '/shared/states.mjs';
 import { sendControlMsg } from '../control-ws.js';
 import { el, escapeHtml } from '../dom-helpers.js';
 import { sessionUIs } from './card-registry.js';
-import { createModalOverlay } from './modal.js';
+import { createModalOverlay, trapFocus } from './modal.js';
 import { showErrorToast } from './toast.js';
 
 // Debug overlay visibility - toggled by applyTerminalSettings (lifecycle) via
@@ -58,19 +58,7 @@ export function showConfirmDialog({ title, message, confirmLabel = 'Confirm', on
   dialog.setAttribute('aria-modal', 'true');
   dialog.setAttribute('aria-labelledby', titleId);
 
-  // Focus trap
-  dialog.addEventListener('keydown', (e) => {
-    if (e.key !== 'Tab') return;
-    const focusable = [...dialog.querySelectorAll('button, input, select, textarea, [tabindex]:not([tabindex="-1"])')];
-    if (focusable.length === 0) return;
-    const first = focusable[0];
-    const last = focusable[focusable.length - 1];
-    if (e.shiftKey) {
-      if (document.activeElement === first) { e.preventDefault(); last.focus(); }
-    } else {
-      if (document.activeElement === last) { e.preventDefault(); first.focus(); }
-    }
-  });
+  trapFocus(dialog);
 
   btnCancel.addEventListener('click', close);
   btnConfirm.addEventListener('click', () => { close(); onConfirm?.(); });
@@ -272,7 +260,8 @@ function renderDebugOverlay(ui, payload) {
   html += `<div class="debug-section"><div class="debug-section-title">Transitions (last ${p.transitions.length})</div>`;
   if (p.transitions.length === 0) {
     html += `<div class="debug-field debug-dim">No transitions recorded</div>`;
-  } else {
+  }
+  if (p.transitions.length > 0) {
     for (const t of p.transitions) {
       const d = t.detail && typeof t.detail === 'object' ? t.detail : null;
       const tag = d && (d.signal || d.source) ? ` <span class="debug-dim">${escapeHtml([d.signal, d.source].filter(Boolean).join('/'))}</span>` : '';

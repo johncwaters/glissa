@@ -3,7 +3,7 @@
 
 import { STAGE_GLYPH } from './format-core.mjs';
 
-export function setNode(node, state) {
+function setNode(node, state) {
   if (!node) return;
   node.dataset.state = state;
   const glyph = node.querySelector('.stage-glyph');

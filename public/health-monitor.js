@@ -17,8 +17,12 @@ let _root = null;
 let _summaryEl = null;
 let _detailEl = null;
 
+// House style forbids literal dash characters in source; built here so the rendered
+// missing-value placeholder is unchanged.
+const NO_VALUE = String.fromCharCode(0x2014);
+
 function formatBytes(n) {
-  if (n == null) return '—';
+  if (n == null) return NO_VALUE;
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
   if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
@@ -26,7 +30,7 @@ function formatBytes(n) {
 }
 
 function formatUptime(s) {
-  if (s == null) return '—';
+  if (s == null) return NO_VALUE;
   if (s < 60) return `${s}s`;
   if (s < 3600) return `${Math.floor(s / 60)}m ${s % 60}s`;
   return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`;
@@ -83,12 +87,12 @@ function renderSummary() {
     <span class="health-chev" aria-hidden="true">${_expanded ? '▼' : '▲'}</span>
     <span class="health-stat" title="V8 heap used"><span class="health-stat-label">Heap</span> ${formatBytes(s.process.heapUsed)}</span>
     <span class="health-stat" title="Resident set size (process memory)"><span class="health-stat-label">RSS</span> ${formatBytes(s.process.rss)}</span>
-    <span class="health-stat" title="External buffers — PTY data lives here"><span class="health-stat-label">Ext</span> ${formatBytes(s.process.external)}</span>
+    <span class="health-stat" title="External buffers (PTY data lives here)"><span class="health-stat-label">Ext</span> ${formatBytes(s.process.external)}</span>
     <span class="health-stat" title="Active resources (handles + requests)"><span class="health-stat-label">Hdl</span> ${s.process.activeResources}</span>
     <span class="health-stat" title="Sessions: alivePty / sleeping / total"><span class="health-stat-label">Sess</span> ${s.sessions.alivePty}/${s.sessions.sleeping}/${s.sessions.total}</span>
     <span class="health-stat" title="WebSockets: control + data"><span class="health-stat-label">WS</span> ${s.websockets.control}+${s.websockets.data}</span>
     <span class="health-stat" title="Server uptime"><span class="health-stat-label">Up</span> ${formatUptime(s.uptimeSeconds)}</span>
-    ${anomalies > 0 ? `<span class="health-anomaly" title="${anomalies} anomaly type(s) — expand for details">⚠ ${anomalies}</span>` : ''}
+    ${anomalies > 0 ? `<span class="health-anomaly" title="${anomalies} anomaly type(s), expand for details">⚠ ${anomalies}</span>` : ''}
   `;
 }
 
@@ -103,8 +107,8 @@ function renderDetail() {
   let anomaliesHtml = '';
   if (anomalyCount(a) > 0) {
     const lines = [];
-    if (a.listenerMismatch) lines.push('Listener count mismatch — data WS listener leaked or missing');
-    if (a.orphanPty) lines.push('Orphan PTY — session has live PTY but state is DONE/FAILED/DORMANT');
+    if (a.listenerMismatch) lines.push('Listener count mismatch: data WS listener leaked or missing');
+    if (a.orphanPty) lines.push('Orphan PTY: session has live PTY but state is DONE/FAILED/DORMANT');
     if (a.destroyedReachable) lines.push('Destroyed session still reachable in sessions map');
     anomaliesHtml = `
       <div class="health-section health-section-warn">
@@ -125,7 +129,7 @@ function renderDetail() {
       <tr>
         <td>${escapeHtml(sx.name)}</td>
         <td class="health-mono">${STATE_ABBREV[sx.state] || sx.state}</td>
-        <td class="health-mono">${sx.hasPty ? sx.ptyPid : '—'}</td>
+        <td class="health-mono">${sx.hasPty ? sx.ptyPid : NO_VALUE}</td>
         <td class="health-mono">${formatBytes(sx.outputBufferBytes)}</td>
         <td class="health-mono">${sx.outputBufferEntries}</td>
         <td class="health-mono">${sx.dataListenerCount}</td>

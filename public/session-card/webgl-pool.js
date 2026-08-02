@@ -27,7 +27,7 @@ function evictWebglIfNeeded(exceptUi) {
 
 export function tryLoadWebGL(ui) {
   try {
-    // Already have a healthy context — just refresh LRU recency and return.
+    // Already have a healthy context: just refresh LRU recency and return.
     // Don't tear down and rebuild a live GL context on a no-op call (e.g. every
     // visible card on reorder): context creation is expensive and rebuilding a
     // healthy one works against the GPU-pressure goal this cap exists for.
@@ -57,7 +57,7 @@ export function tryLoadWebGL(ui) {
     // A freshly attached GL context starts on a blank canvas; xterm's
     // setRenderer -> _fullRefresh is suppressed when the card was just
     // re-parented and isn't observed visible yet (_isPaused), so only the
-    // rows the next write dirties get painted — quiescent rows stay as ghosts.
+    // rows the next write dirties get painted: quiescent rows stay as ghosts.
     // Defer one frame (card now on-screen) then force atlas clear + full redraw.
     requestAnimationFrame(() => {
       if (ui.webglAddon !== addon || !ui.term) return;

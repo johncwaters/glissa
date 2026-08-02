@@ -2,7 +2,7 @@
 //
 // BROWSER-RUN: open `/perf.html` under `npm run dev`. It is NOT part of the
 // production build (perf.html is not a build entry, so this module is never
-// bundled into index) and is NOT headlessly verified — it is a manual
+// bundled into index) and is NOT headlessly verified: it is a manual
 // measurement tool for the Phase 1 / Phase 2 gate.
 //
 // It drives K real xterm terminals with dense ANSI corpus at a controlled rate

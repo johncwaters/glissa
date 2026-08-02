@@ -22,7 +22,7 @@ export function setCollapsed(refs, collapsed) {
   }
 }
 
-export function tickElapsed(refs) {
+function tickElapsed(refs) {
   const sec = refs.stageStartMs ? Math.round((Date.now() - refs.stageStartMs) / 1000) : 0;
   refs.elapsedEl.textContent = `${mmss(sec)} / ${mmss(refs.budget)}`;
   // Tint the timer once a stage runs past its budget, so a stuck stage reads at a glance.

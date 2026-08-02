@@ -1,6 +1,6 @@
-// Global terminal RENDER scheduler — Option A: callback-gated round-robin with a
+// Global terminal RENDER scheduler, Option A: callback-gated round-robin with a
 // per-frame terminal budget. (Distinct from the root scheduler.js, which is a
-// calendar/cron that fires team runs — this one schedules xterm WRITES per frame.)
+// calendar/cron that fires team runs: this one schedules xterm WRITES per frame.)
 //
 // Empirically the best feed strategy under heavy multi-session load (see
 // .omc/plans/perf-responsiveness.md): vs the old per-session throttle it cut echo

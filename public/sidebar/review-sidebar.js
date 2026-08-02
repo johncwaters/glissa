@@ -515,7 +515,8 @@ function render() {
   if (committedFiles.length > 0) {
     const mergeTarget = ui?.effectiveBase || 'develop';
     bodyEl.append(renderSection('committed', 'Committed', `merges into ${mergeTarget}`, committedFiles));
-  } else if (!reasonShown) {
+  }
+  if (committedFiles.length === 0 && !reasonShown) {
     // The pinned reason line already explains an empty committed section ("No changes to merge.",
     // "Nothing committed yet...", "Checking for changes..."), so the body adds its own placeholder
     // only when no reason rendered, never a second wording of the same fact.
@@ -611,14 +612,13 @@ function renderFile(f, kind) {
   head.append(twisty, el('span', 'review-file-path', f.path));
   const c = el('span', 'review-file-counts');
   if (f.binary) c.append(el('span', 'review-bin', 'bin'));
-  else c.append(
+  if (!f.binary) c.append(
     el('span', 'review-add', `+${f.added}`),
     el('span', 'review-del', `-${f.removed}`)
   );
   head.append(c);
   head.addEventListener('click', () => {
-    if (openFiles.has(key)) openFiles.delete(key);
-    else openFiles.add(key);
+    openFiles.has(key) ? openFiles.delete(key) : openFiles.add(key);
     render();
   });
   sec.append(head);

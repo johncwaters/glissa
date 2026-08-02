@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Glissa — perf harness (dev)</title>
+  <title>Glissa: perf harness (dev)</title>
   <style>
     body { margin: 0; background: #0a0810; color: #c8c0e0; font-family: system-ui, sans-serif; }
     #bar { padding: 10px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; border-bottom: 1px solid #2a2440; }
@@ -38,7 +38,7 @@
     const $ = (id) => document.getElementById(id);
     $('run').addEventListener('click', async () => {
       $('run').disabled = true;
-      $('status').textContent = 'running…';
+      $('status').textContent = 'running...';
       $('mount').innerHTML = '';
       try {
         const m = await runStress({

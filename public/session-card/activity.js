@@ -69,8 +69,7 @@ export function setRunningActivity(ui, running) {
     ui._lastOutputAt = performance.now();
     ui._activityGate = 0; // let the first chunk after entry beat immediately
     ui._activity = 'active';
-  } else {
-    ui._activity = undefined;
   }
+  if (!running) ui._activity = undefined;
   renderer?.(ui, 'flag');
 }

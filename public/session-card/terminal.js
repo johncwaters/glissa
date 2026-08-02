@@ -261,11 +261,8 @@ export function setupTerminal(termWrap, ui) {
     }
     // Ctrl+Backspace: send ESC+DEL so readline/bash deletes the previous word
     if (ctrl && ev.key === 'Backspace') {
-      if (ui.dataWs?.readyState === WebSocket.OPEN) {
-        ui.dataWs.send(JSON.stringify({ type: 'input', data: '\x1b\x7f' }));
-      } else if (ui._inputQueue && ui._inputQueue.length < INPUT_QUEUE_MAX) {
-        ui._inputQueue.push('\x1b\x7f');
-      }
+      if (ui.dataWs?.readyState === WebSocket.OPEN) { ui.dataWs.send(JSON.stringify({ type: 'input', data: '\x1b\x7f' })); return false; }
+      if (ui._inputQueue && ui._inputQueue.length < INPUT_QUEUE_MAX) ui._inputQueue.push('\x1b\x7f');
       return false;
     }
     return true;
@@ -278,11 +275,8 @@ export function wireTerminalIO(ui, sessionId) {
   ui._inputQueue = [];
 
   ui.term.onData((data) => {
-    if (ui.dataWs?.readyState === WebSocket.OPEN) {
-      ui.dataWs.send(JSON.stringify({ type: 'input', data }));
-    } else if (ui._inputQueue.length < INPUT_QUEUE_MAX) {
-      ui._inputQueue.push(data);
-    }
+    if (ui.dataWs?.readyState === WebSocket.OPEN) { ui.dataWs.send(JSON.stringify({ type: 'input', data })); return; }
+    if (ui._inputQueue.length < INPUT_QUEUE_MAX) ui._inputQueue.push(data);
   });
 
   // Note: term.onResize is intentionally not wired - the ResizeObserver

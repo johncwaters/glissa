@@ -3,11 +3,13 @@
 // session to that conversation via the control channel. A DORMANT card is then started immediately so
 // the conversation visibly loads; a live card is left running (the binding applies on its next restart).
 //
-// Standalone leaf module (imports only control-ws + dom-helpers + the toast leaf) so it adds no edge to
-// the card-dom.js <-> dialogs.js boundary. Mirrors card-dom.js showConfirmDialog for focus-trap/aria.
+// Standalone leaf module (imports only control-ws + dom-helpers + the toast leaf, plus the shared
+// modal scaffold) so it adds no edge to the card-dom.js <-> dialogs.js boundary. Shares its overlay
+// and focus-trap mechanics with card-dom.js showConfirmDialog via modal.js rather than duplicating them.
 
 import { sendControlMsg, sendControlRequest } from '../control-ws.js';
 import { el, escapeHtml } from '../dom-helpers.js';
+import { createModalOverlay, trapFocus } from './modal.js';
 import { showErrorToast } from './toast.js';
 
 const DORMANT = 'DORMANT';
@@ -44,10 +46,8 @@ function buildItem(conv, currentId, onPick) {
 
 export function openResumeDialog(sessionId, opts = {}) {
   const isDormant = (opts.currentState || '') === DORMANT;
-  const opener = document.activeElement;
 
-  const overlay = el('div', 'dialog-overlay');
-  const dialog = el('div', 'dialog resume-dialog');
+  const { overlay, dialog, close } = createModalOverlay({ dialogClass: 'dialog resume-dialog' });
   const titleId = 'resume-title-' + Math.random().toString(36).slice(2);
 
   const titleEl = el('h3', 'dialog-title', 'Resume a conversation');
@@ -65,29 +65,12 @@ export function openResumeDialog(sessionId, opts = {}) {
   actions.append(btnClear, btnCancel);
 
   dialog.append(titleEl, hint, listEl, actions);
-  overlay.appendChild(dialog);
-  document.body.appendChild(overlay);
 
   dialog.setAttribute('role', 'dialog');
   dialog.setAttribute('aria-modal', 'true');
   dialog.setAttribute('aria-labelledby', titleId);
 
-  dialog.addEventListener('keydown', (e) => {
-    if (e.key !== 'Tab') return;
-    const focusable = [...dialog.querySelectorAll('button, [tabindex]:not([tabindex="-1"])')];
-    if (focusable.length === 0) return;
-    const first = focusable[0];
-    const last = focusable[focusable.length - 1];
-    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
-    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
-  });
-
-  function close() {
-    overlay.remove();
-    document.removeEventListener('keydown', escHandler);
-    opener?.focus?.();
-  }
-  function escHandler(e) { if (e.key === 'Escape') close(); }
+  trapFocus(dialog);
 
   // Bind (or clear) the conversation, then surface the result. A DORMANT card is started so the
   // conversation loads now; a live card keeps running and picks up the binding on its next restart.
@@ -95,17 +78,15 @@ export function openResumeDialog(sessionId, opts = {}) {
     sendControlMsg({ type: 'resume-conversation', id: sessionId, conversationId: conversationId || '' });
     close();
     if (!conversationId) return;
-    if (isDormant) {
-      sendControlMsg({ type: 'start-session', id: sessionId });
-    } else {
+    if (!isDormant) {
       showErrorToast("Conversation will resume on this session's next restart.");
+      return;
     }
+    sendControlMsg({ type: 'start-session', id: sessionId });
   }
 
   btnCancel.addEventListener('click', close);
   btnClear.addEventListener('click', () => apply(null));
-  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
-  document.addEventListener('keydown', escHandler);
   requestAnimationFrame(() => btnCancel.focus());
 
   sendControlRequest('list-conversations', { id: sessionId })

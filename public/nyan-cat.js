@@ -22,7 +22,7 @@ const MAX_GAP_MS = 20000;
  * @param {() => number} rng
  * @returns {{ topVh: number, durationS: number, gapMs: number, firstDelayS: number }}
  */
-export function pickFlight(rng = Math.random) {
+function pickFlight(rng = Math.random) {
   const topVh = MIN_TOP_VH + (MAX_TOP_VH - MIN_TOP_VH) * rng() * rng();
   const durationS = MIN_DURATION_S + rng() * (MAX_DURATION_S - MIN_DURATION_S);
   const gapMs = MIN_GAP_MS + rng() * (MAX_GAP_MS - MIN_GAP_MS);

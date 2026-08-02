@@ -75,10 +75,10 @@ export function playAlertSound(soundId) {
       const audio = new Audio(option.file);
       audio.volume = 0.3;
       audio.play().catch(() => {});
-    } else {
-      playSynthBeep();
+      return;
     }
+    playSynthBeep();
   } catch {
-    // Silently fail — sound is non-critical
+    // Silently fail: sound is non-critical
   }
 }

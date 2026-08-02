@@ -1,7 +1,7 @@
 // Deterministic SGR/cursor-dense ANSI corpus for perf measurement.
 //
 // Pure, dependency-free, no DOM. `.mjs` so it is ESM in BOTH the browser (Vite
-// imports it from perf-harness.js) and Node (tests dynamic-import it) — the
+// imports it from perf-harness.js) and Node (tests dynamic-import it): the
 // project is type:commonjs, so a plain `.js` with `export` would be treated as
 // CJS by Node and fail to load. Dense escape content (colors, dim, cursor
 // moves) so the xterm parser does realistic work, not trivial ASCII.

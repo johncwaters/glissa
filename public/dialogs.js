@@ -25,11 +25,8 @@ function attachFocusTrap(dialog) {
     if (focusable.length === 0) return;
     const first = focusable[0];
     const last = focusable[focusable.length - 1];
-    if (e.shiftKey) {
-      if (document.activeElement === first) { e.preventDefault(); last.focus(); }
-    } else {
-      if (document.activeElement === last) { e.preventDefault(); first.focus(); }
-    }
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); return; }
+    if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
   });
 }
 
@@ -256,11 +253,13 @@ export function createSettingsDialog(initialTab) {
   function refreshNotificationsHint() {
     if (!notificationsSupported()) {
       notificationsHint.textContent = 'This browser does not support desktop notifications.';
-    } else if (notificationsCheckbox.checked && Notification.permission === 'denied') {
-      notificationsHint.textContent = 'Blocked by the browser. Allow notifications for this site to enable them.';
-    } else {
-      notificationsHint.textContent = DEFAULT_NOTIF_HINT;
+      return;
     }
+    if (notificationsCheckbox.checked && Notification.permission === 'denied') {
+      notificationsHint.textContent = 'Blocked by the browser. Allow notifications for this site to enable them.';
+      return;
+    }
+    notificationsHint.textContent = DEFAULT_NOTIF_HINT;
   }
   notificationsCheckbox.checked = isNotificationsEnabled() && notificationsSupported();
   notificationsCheckbox.disabled = !notificationsSupported();
@@ -409,11 +408,8 @@ export function createSettingsDialog(initialTab) {
 
     sendControlRequest('update-settings', { settings })
       .then((msg) => {
-        if (msg.type === 'settings-error') {
-          errorEl.textContent = msg.message;
-        } else {
-          close();
-        }
+        if (msg.type === 'settings-error') { errorEl.textContent = msg.message; return; }
+        close();
       })
       .catch((err) => {
         errorEl.textContent = err.message || 'Failed to save settings.';
