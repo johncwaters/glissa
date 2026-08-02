@@ -84,7 +84,7 @@ Every session also writes a JSONL forensic recording by default (hook payloads a
 ## Engineering notes
 
 - Pure-core seam architecture: IO-free decision logic lives in `session/core/` and `*-core.mjs` modules; thin shells around them do the actual I/O.
-- 93-file `node:test` suite in `tests/`, zero test-framework dependency.
+- `node:test` suite in `tests/`, zero test-framework dependency.
 - Table-driven state machines, e.g. `session/core/state-machine.js`.
 - Fail-closed PR auto-review merge gate: `server/core/pr-review-core.js` only merges a clean, non-stale, green-checks PR; anything ambiguous (no checks, a `gh` error, a touched workflow file) blocks instead of guessing.
 - Bounded-retention session recorder: `session/session-recorder.js`, capped by file size, file count, and age so it can run unattended indefinitely.

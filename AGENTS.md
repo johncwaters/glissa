@@ -52,7 +52,7 @@ Glissa is a lightweight Node.js background process that spawns and manages Claud
 ## For AI Agents
 
 ### Working In This Directory
-- Server code is CommonJS only (`require` / `module.exports`); frontend is ESM bundled by Vite. Node v24+, Windows 11.
+- Server code is CommonJS only (`require` / `module.exports`); frontend is ESM bundled by Vite. Node >=18 (developed on v24), Windows 11.
 - Do NOT add dependencies without explicit instruction.
 - Status detection is structural (hooks + OSC-0 title). Never reintroduce PTY body/content scraping.
 - Spawn sessions with `pty.spawn` (never `child_process.spawn`), no `shell: true`; scrub env via `session/core/spawn-env.js`.
@@ -117,6 +117,7 @@ vite.config.js     # Vite frontend build config + backend plugin (ESM)
 server/            # Backend runtime (Express + WS wiring, control plane, shared server plumbing)
   backend.js         # Express + WebSocket server factory (shared by server.js and Vite plugin)
   control-handlers.js  # Control-WS message dispatch
+  control-replay-core.js  # Pure control-broadcast replay log: monotonic seq stamping + retention of replayable message types
   server-lifecycle.js  # Boot/shutdown lifecycle
   ws-sender.js         # Data-WS send/backfill (monotonic offsets)
   scheduler.js         # Team schedule computation + timers
@@ -124,10 +125,15 @@ server/            # Backend runtime (Express + WS wiring, control plane, shared
   spawn-gate.js        # Concurrent-spawn limiter
   config-store.js      # config.json load/save/merge (dev resolves the in-repo config.json via __dirname/..; see Key Files for the full resolution order)
   child-process-safe.js  # THE ONLY module allowed to import node:child_process (windowsHide)
+  update-check.js      # Startup npm-registry version check (abortable, advisory only) behind config.checkForUpdates
+  ephemeral-session.js # Shared ephemeral-Session registration: map insert, exit cleanup, destroy() wrap; used by the team and PR-review lanes
+  team-session-factory.js  # Team Session construction: makeStageSession (headless stage) + startPackSetup (interactive guided setup)
   pr-poller.js         # GitHub PR auto-review poller (opt-in): lists/filters/reviews/merges own PRs; IO-free, deps injected
   pr-gh.js             # gh/git wrappers for the PR poller (via child-process-safe); pure classifyChecks (four-way)
   pr-telegram.js       # PR-only Telegram push helper (never throws; NOT a NotificationManager channel)
+  pr-review-wiring.js  # PR auto-review IO shell: review session + spawn, poller start/restart/stop, pure prompt/result/gate/cfg-key
   core/pr-review-core.js  # Pure PR-review decisions (prKey/filterActionablePrs/planReviews/planMerges/nextState/pingFor)
+  core/branch-sync-core.js  # Pure ahead/behind parsing + decisions for the review sidebar's branch-sync indicator
 session/           # Session domain: the stateful Session class + its pure cores
   sessions.js        # Session class: lifecycle, PTY spawn/kill, timers, hooks; consumes StatusSource; delegates pure logic to session/core/
   session-recorder.js  # hook + state recording by default, PTY bytes opt-in (~/.glissa/recordings)
@@ -138,12 +144,27 @@ session/           # Session domain: the stateful Session class + its pure cores
     status-mapper.js # Pure mapSignalToEvent(signal, state, confidence, activeAgents) -> event|null (the _onStatus decision; activeAgents>0 suppresses ready->task_complete)
     agent-tracker.js # Pure background-work bookkeeping: counted sub-agents (Map<agent_id, ts>), declared background_tasks parsing, idle-id gate math
     gate-release.js  # Pure decideGateRelease(...) -> cancel|gated|wait|release: the ONE judge of whether a gate-held (deferred) ready may complete the card
+    anti-slop-prompt.js  # Fixed deterministic anti-slop note for --append-system-prompt; no double quotes (cmd.exe shim re-parse safety)
+    auto-resume.js       # Pure pickAutoResume(projects, config): boot-time selection of DORMANT projects to auto-spawn with resumeSessionId
+    conversation-history.js  # Pure cross-worktree Claude transcript discovery: cwd -> encoded <claudeHome>/projects/<dir> path
+    exit-transition.js   # Pure decideExitTransition(state, exitCode, signal, receivedFirstOutput) -> { event, detail }, extracted from Session._handlePtyExit
+    merge-gate.js         # Pure review-gate demotion decisions (worktree diff signature -> mergeStatus), extracted from Session.checkWorktreeChange/getDiff
+    merge-prompt.js       # Pure builder of the manual-merge handoff prompt pasted into a parked worktree's PTY
+    notify-gate.js        # Pure decideNotification(to, gate, event, opts): once-per-work-cycle notification gate for terminal categories
+    output-ring.js        # Pure O(1) ring buffer of recent PTY output chunks; backs since()-based WS backfill
+    post-turn-rules.js    # Pure idempotent post-turn hygiene rules, (content) -> { content, findings }; applied by server/post-turn-checker.js
+    slop-code-patterns.js # Pure regex-based code-slop detection (detectCodeSlop), Noise/Lies/Soul taxonomy, offsets only
+    wakeup-tracker.js     # Pending self-revival bookkeeping (ScheduleWakeup/CronCreate/CronDelete); advisory only, never gates a transition
 detection/
   status-source.js     # Merges hook + title signals (precedence, conflict window, dedup)
   osc-title-source.js  # OSC-0 title fallback signal (working/ready/unknown only)
   hook-source.js       # HookRouter: validates per-session token, maps Claude Code hooks -> signals
   settings-injector.js # Per-session `--settings` file with HTTP hooks (token in URL)
   replay.js            # Version-aware replay harness (drives recordings through detection)
+  worktree-watch.js         # fs.watch on the per-worktree gitdir; nudges sessions.js to recompute the diff
+  integration-ref-watch.js  # Reflog-based listener for integration-branch movement no local worktree event would surface
+  watch-debounce.js         # Shared debounce-into-trailing-call + stop lifecycle for the two fs.watch listeners
+  integration-watcher-pool.js  # Ref-counted pool: one fs.watch per (commonGitDir, branch), fanned out to sibling sessions
 notifications/     # Notification domain
   notification-manager.js  # Notification lifecycle state machine
   channels/web-notification.js  # PRIMARY: broadcasts `notify` over control WS; browser raises native Notification (Windows Action Center)
@@ -155,6 +176,16 @@ public/
   style.css        # Component styles, state-driven rules, animations
   control-ws.js    # WebSocket control channel client
   dialogs.js       # Add Session and Settings dialog factories
+  teams-panel.js   # Barrel for the Teams tab (re-exports the public API from teams-panel/)
+  render-scheduler.mjs  # Global xterm WRITE scheduler: callback-gated round-robin with per-frame budget
+  notifications.js # Native Web Notifications (browser routes to Windows Action Center)
+  notify-dedupe-core.mjs  # Pure cross-tab claim (short-TTL localStorage) so exactly one open tab raises each notification
+  alert-sound.js   # Notification sounds: audio files from audio/ + synth-beep fallback
+  health-monitor.js  # Footer panel rendering server memory/leak telemetry
+  theme.js         # Theme definitions applied as CSS custom properties
+  ui-prefs.js / local-store.js  # localStorage persistence for UI state, quota-safe wrappers
+  shortcuts.mjs    # Pure display catalog of keyboard shortcuts for the Settings dialog
+  dom-helpers.js   # el() / escapeHtml() DOM utilities
   components/      # Static HTML dialog fragments, imported by dialogs.js via Vite ?raw
   session-card/    # Session card modules (decomposed from session-card.js)
     card-registry.js   # Shared state owner: sessionUIs Map + 2 DOM singletons
@@ -168,8 +199,10 @@ public/
     session-tick.js    # Shared 1s tick: elapsed clock + working-heartbeat poll (refreshElapsed)
     lifecycle.js       # createSessionCard, removeSessionCard, applyState, etc.
     aggregate-core.mjs # Pure: computeAggregate (used by lifecycle)
+  teams-panel/     # Teams tab package: lifecycle orchestrator, instance panel, pipeline, runs list, schedule editor, chat, setup banner
   focus-view/      # Focus view: persistent left roster rail + one re-parented focused card
   sidebar/         # Right-docked review sidebar: changed-files diffs + merge/discard actions
+  audio/           # Notification sound files (OGG)
 shared/
   states.js        # Session states (CJS, server-side)
   states.esm.js    # Session states (ESM, browser-side via Vite)
@@ -187,7 +220,10 @@ teamlib/           # Team runtime server modules
   team-prompt.js     # stage prompt builder (embeds pack + run paths)
   team-setup.js      # guided pack setup: interview prompt + interactive setup-session helpers
   team-settings.js   # per-stage spawn options and permission config
-  team-blacklist.js  # glob deny-list enforcement (test-only, not published)
+  markdown.js        # Shared markdown ATX-heading regex core (pack/handoff section checks, topic/platforms extraction)
+  project-context.js # fs-only shell reading a top-level allowlist of non-secret files for first-run setup context
+  project-context-core.js  # Pure parser/renderer of that context: string in, deterministic ASCII-clean summary out
+  verdict.js         # Shared VERDICT: token extraction core (strict orchestrator parse, loose run-summary scan)
 config.json        # Runtime configuration
 dist/              # Vite production build output (gitignored)
 ```
@@ -223,7 +259,7 @@ Status is derived from machine-emitted signals, never from parsing the rendered 
 
 - **Authoritative: Claude Code hooks.** At spawn, `sessions.js` appends `--settings <file>` (written by `detection/settings-injector.js`) injecting HTTP hooks (`Stop`, `Notification`, `UserPromptSubmit`, `SessionStart`/`End`, `SubagentStart`/`SubagentStop`) that POST to `POST /hook/:glissaId/:event` on the existing Express server. A per-session bearer token (in the hook URL) is validated by `detection/hook-source.js` `HookRouter`. No target-repo modification; HTTP hooks need no shell.
 - **Fallback: OSC-0 title** (`detection/osc-title-source.js`) - braille spinner = `working`, idle glyph = `ready`; an unknown glyph is `unknown`, never a guess. It NEVER emits `awaiting-input`.
-- `detection/status-source.js` merges both (precedence hook > title), holds `ready` for a conflict window so a racing `awaiting-input` wins, and dedups. `working`/`resume` arriving inside that window CANCEL the held `ready` (the turn did not settle; letting it resolve fired a false COMPLETE right after a fast re-prompt). `sessions.js._onStatus` maps the normalized signal to a transition per the signal x state matrix (see `.omc/plans/rewrite-terminal-detection.md` §4a and `docs/postmortem-terminal-detection.md`).
+- `detection/status-source.js` merges both (precedence hook > title), holds `ready` for a conflict window so a racing `awaiting-input` wins, and dedups. `working`/`resume` arriving inside that window CANCEL the held `ready` (the turn did not settle; letting it resolve fired a false COMPLETE right after a fast re-prompt). `sessions.js._onStatus` maps the normalized signal to a transition per the signal x state matrix (see `docs/postmortem-terminal-detection.md` for the design rationale and live-verification findings).
 - **idle_prompt is demoted.** A `Notification(idle_prompt)` maps to `ready` but with `confidence: 'low'` (`mapHookConfidence` in `hook-source.js`): an idle nudge means "Claude is waiting for YOU", so it may only confirm quiescence from RUNNING, same as the title fallback. It must never complete a fresh IDLE session or a WAITING prompt.
 - **/clear and /compact are quiet.** They fire `SessionEnd`+`SessionStart(source: clear|compact)` (no `UserPromptSubmit`, no `Stop`), but the TUI redraw flashes a spinner+idle glyph in the OSC title, which used to open a fake work cycle and fire a false "finished working" per /clear. On `SessionStart(source: clear|compact)` the session resets both sources (cancelling any held `ready`) and latches title signals off (`_titleQuiet`) until the next real `UserPromptSubmit`.
 - **Background sub-agents (completion gate).** `SubagentStart`/`SubagentStop` (each carrying `agent_id`) are NOT transitions. `sessions.js` keeps a per-session live `agent_id` set (pure bookkeeping in `session/core/agent-tracker.js`), and `mapSignalToEvent` suppresses `ready` to `task_complete` while that set is non-empty, so a main-agent `Stop` fired while a background sub-agent (Task `run_in_background` / Ctrl+B) is still running does NOT falsely COMPLETE the card. The main agent usually auto-resumes when the sub-agent finishes and its later `Stop` (count back to 0) completes normally; when no later `Stop` ever comes (idle teammate, dropped `SubagentStop`), the suppressed `ready` is HELD (`_gateHeldReady` in `sessions.js`) and released when the count drains (via `SubagentStop`, a declared 0, or the TTL prune, bounded by a one-shot release timer), so the card cannot pin WORKING forever. The hold is cancelled by any newer activity (`working`/`resume`/`awaiting-input`), any state change, /clear, or PTY exit/restart. The live count rides `toSnapshot().activeAgents` and a `session-agents` control broadcast (rendered as an "N agents" card chip). On by default; `config.json` `detectBackgroundAgents: false` is the kill switch (signals ignored, behavior as before). A dropped `SubagentStop` is bounded by a per-id TTL prune (`session/core/agent-tracker.js`) plus a hard clear on PTY exit / restart. **Authoritative override:** `Stop`/`SubagentStop` payloads carry `background_tasks` (Claude Code v2.1.145+), which sees background work the Start/Stop counting cannot (background Bash tasks, native-team teammates). Ground truth (extracted from the CC 2.1.199 binary, memory: background-tasks-ground-truth): the field is an ARRAY of `{ id, type, status, ... }` pre-filtered by the emitter to running|pending entries; `agent-tracker.extractBackgroundTasks` parses that shape only (the `{ count, tasks }` object from claude-code#33310 is a statusLine surface, never sent to hooks) with a defensive settled-status deny-list. `sessions.js` keeps the declared entries (`_bgDeclared`) and takes `max(counted, declaredActive)` for the gate, drains the counted map when a payload declares 0 running (no waiting on the TTL), and clears the snapshot on `resume` / PTY exit / restart. Absent field (older Claude) = counting behavior unchanged. **Teammate/task lifecycle drains:** an idle-but-alive teammate stays `status: running` in Claude's registry until shutdown, so every Stop re-declares it; Glissa subscribes `TaskCreated`/`TaskCompleted`/`TeammateIdle` (tracking-only, `_trackTaskLifecycle`) to drain per-id: `TaskCompleted(task_id)` adds the id to `_idleTaskIds`, which filters declared entries out of the gate and survives `resume`; `TaskCreated` reactivates the id (and, like `SubagentStart`, invalidates a gate-held ready). `TeammateIdle(teammate_name)` resolves via the TaskCreated name->id map when available; in practice `TaskCreated` NEVER fires for named-Agent teammates (live-verified vs CC 2.1.200, memory: named-agent-teammate-hook-sequence), and a declared entry can NOT be matched to a name (its `description` is the spawn prompt, live-verified), so per-id resolution is impossible with several live teammates. Instead an unresolved `TeammateIdle` is recorded BY NAME in `_idleTeammateNames` (Map<name, ts>, persists across `resume`), and `agent-tracker.declaredActiveCount` takes a fifth `idleNameCount` argument: it subtracts that count from the surviving declared `teammate`-type entries, clamped to that teammate count so a stale/extra idle name can never mask a shell/subagent entry. This is count-based, not id-based, so N simultaneous idle teammates each drain the gate by one regardless of ambiguity. A name is re-gated (deleted from `_idleTeammateNames`) by a matching `TaskCreated`, or by a `SubagentStart` whose `agent_id` embeds the name (`a<name>-<hex>`, live-captured) since no `TaskCreated` ever fires for a teammate the lead re-wakes via mailbox. **Releasing a held ready is re-validated against live evidence, never against the count alone.** One pure arbiter, `session/core/gate-release.js decideGateRelease`, decides every hold: `cancel` (the state moved on, or a non-ready signal arrived AFTER the stash), `gated` (background work still live), `wait` (eligible, quiet window not elapsed) or `release`. `sessions.js _evaluateGateHeldReady` is the thin shell that acts on the verdict and re-arms the single gate timer; there is no separate eager-clear path deciding staleness in parallel. Staleness is ordered by a signal SEQUENCE number, not a clock, because signals routinely share a millisecond. The activity check exists because a lead that auto-resumes on a teammate mailbox message fires no `UserPromptSubmit` and, since `OscTitleSource` emits `working` only on a kind EDGE, a card RUNNING with an already-spinning title reported nothing either: a held Stop then released minutes into a NEW turn and falsely COMPLETEd a working card. `_stashGateHeldReady` therefore also calls `resyncWorkingLatch()` on the title source, so the next real braille frame proves the turn is still open (a genuinely finished turn emits no further frames, so the release path is unaffected). The `gateReleaseSettleMs` quiet window (default 10s, `DEFAULT_GATE_RELEASE_SETTLE_MS` in `gate-release.js`) is still needed on top of that: the drain usually lands 1-3s BEFORE the mailbox wake, so an instant release would fire a false COMPLETE + notification before any spinner frame could arrive. Explicit `_clearGateHeldReady` calls remain only where no signal ever reaches `_onStatus` to carry the evidence: `SubagentStart`/`TaskCreated` (tracking-only signals, and fresh background work invalidates an older Stop), `SessionStart(clear|compact)`, the `resume` branch (it must beat the `_clearBgDeclared` drain in the same call), and PTY start/exit/destroy. A genuinely settled idle teammate still completes the card in ~10s instead of at the TTL. `_idleTeammateNames` is TTL-pruned lazily in `_activeAgentCount` (bound by `agentTtlMs`) so a stale name can never mask a future same-named teammate forever. **Scheduled self-revival never gates:** a declared entry of `type: 'dream'` (a pending `ScheduleWakeup`) is skipped entirely by `declaredActiveCount` (`NON_GATING_TASK_TYPES` in `agent-tracker.js`) - per `session/core/wakeup-tracker.js`'s own design a Stop with a pending wakeup IS a finished turn, surfaced via the advisory wakeup chip, not the completion gate. **Hook-less task types:** declared `shell`/`monitor` entries never get ANY completion hook, so past `shellTaskTtlMs` (default 5 min) since the declaring Stop they stop counting (`WEAK_TASK_TYPES` in `agent-tracker.js`) and the held-ready release timer re-checks at `min(agentTtlMs, shellTaskTtlMs, teammateTaskTtlMs)`; without this a background dev server or orphaned test shell pinned the card WORKING for the full 30-minute agent TTL after every turn. **Declared teammate entries are also TTL-bounded** (`teammateTaskTtlMs`, default 90s): real teammate work is already covered by the counted `SubagentStart`/`SubagentStop` map, so a declared `teammate` entry only matters for a dropped `SubagentStart`, while an idle-but-alive teammate is declared running forever and its drain depends on `TeammateIdle`/`TaskCompleted` hooks that sometimes never arrive; a short TTL bounds that stuck-WORKING failure at seconds instead of the 30-minute agent TTL.
@@ -256,7 +292,7 @@ Sessions spawn `claude` via `pty.spawn()` from node-pty (NOT `child_process.spaw
 
 ### GitHub PR Auto-Review (opt-in, off by default)
 
-An optional background lane that reviews the operator's OWN GitHub PRs and merges the clean ones, unattended. Inert unless BOTH `config.prReview.enabled` and `config.telegram` (botToken + chatId) are set; absent = byte-identical prior behavior. Configured from the dashboard Settings dialog's PR Review tab (`public/components/settings-dialog.html`, `public/dialogs.js`), persisted via the existing get-settings/update-settings control-WS flow. Unlike `osToast`, toggling takes effect immediately: `backend.js applySettingsReload` calls `startPrPoller()` only when a settings save or config.json hand-edit reload actually changes the `prReview`/`telegram` config key (`prReviewCfgKey`), so an unrelated save (cursorBlink, etc.) never disturbs a running poller. The restart itself is serialized through a `prPollerChain` promise chain: it awaits the old instance's `stop()` (which drains its in-flight reviews and pending state write, see `pr-poller.js`) before starting a fresh one gated by `prPollerShouldStart`, so a stale review can never race a new instance over the same result-file path, worktree, or state file. No server restart needed. Distinct from the Teams product feature.
+An optional background lane that reviews the operator's OWN GitHub PRs and merges the clean ones, unattended. Inert unless BOTH `config.prReview.enabled` and `config.telegram` (botToken + chatId) are set; absent = byte-identical prior behavior. Configured from the dashboard Settings dialog's PR Review tab (`public/components/settings-dialog.html`, `public/dialogs.js`), persisted via the existing get-settings/update-settings control-WS flow. Unlike `osToast`, toggling takes effect immediately: `backend.js applySettingsReload` calls `pr-review-wiring.js restartIfConfigChanged()`, which restarts the poller only when a settings save or config.json hand-edit reload actually changes the `prReview`/`telegram` config key (`prReviewCfgKey`), so an unrelated save (cursorBlink, etc.) never disturbs a running poller. The restart itself is serialized through a `prPollerChain` promise chain: it awaits the old instance's `stop()` (which drains its in-flight reviews and pending state write, see `pr-poller.js`) before starting a fresh one gated by `prPollerShouldStart`, so a stale review can never race a new instance over the same result-file path, worktree, or state file. No server restart needed. Distinct from the Teams product feature.
 
 - **Poller.** `server/pr-poller.js createPrPoller(deps)` is IO-FREE (every side effect injected) and unit-tested with fakes like `scheduler.js`. A `setInterval(intervalMinutes).unref()` (default 15m; the calendar `scheduler.js` cannot express intervals) drives one `tick()` per cycle behind a `tickRunning` re-entrancy guard. `stop()` is async: it clears the timer, then awaits a `running` Set of in-flight `runReview()` calls and the pending state-write chain, so a caller that reuses the same dependencies (a settings-triggered restart, or `shutdown()`) never races a stale review over the same result-file path, worktree, or state file. Wired at boot after `runAutoResume`; torn down in `shutdown()` (stop the poller, fire-and-forget since the process is exiting anyway, + reap the `reviewSessions` map alongside `teamSessions`).
 - **Per project (`config.prReview.projects`, an explicit opt-in list of project ids).** `gh pr list` -> filter to the operator's own non-draft branches (skip forks/drafts/bots; pure `server/core/pr-review-core.js filterActionablePrs`) -> `planReviews` (head SHA changed since last review) and `planMerges` (phase `awaiting-checks`). State is one cross-project file (`~/.glissa/pr-review-state.json`, atomic tmp+rename), keyed `owner/repo#N` -> `{ reviewedHead, phase, inFlight, wasConflicting, pingedError }`; `inFlight` is reset on boot; entries are pruned when a PR leaves the open list (merged/closed elsewhere).

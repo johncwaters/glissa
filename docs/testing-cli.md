@@ -59,7 +59,7 @@ node bin/glissa.js -h
 node bin/glissa.js --version
 ```
 
-**Expected:** matches the `version` field in `package.json` (currently `0.19.0`)
+**Expected:** matches the `version` field in `package.json`
 
 ---
 

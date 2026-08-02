@@ -8,7 +8,7 @@ The job to be done: spawn, monitor, and steer dozens of Claude Code sessions fro
 
 ## Product Purpose
 
-Glissa is a lightweight background process that spawns and manages Claude Code sessions, streams their live terminal output to a browser dashboard over WebSocket, and raises Windows toast notifications when a session needs attention, finishes, or fails. It exists because running multiple Claude Code sessions across separate terminal windows is chaos: work piles up during context-switches and the moment that matters (an agent waiting on input) is easy to miss.
+Glissa is a lightweight background process that spawns and manages Claude Code sessions, streams their live terminal output to a browser dashboard over WebSocket, and raises native browser notifications when a session needs attention, finishes, or fails (with opt-in OS toast as a fallback). It exists because running multiple Claude Code sessions across separate terminal windows is chaos: work piles up during context-switches and the moment that matters (an agent waiting on input) is easy to miss.
 
 Success looks like an operator keeping a dozen agents productive from one screen, never missing the instant a session needs them, and never having to interpret or second-guess what they are seeing. The interface earns its keep by disappearing: the terminal output is the product, and the chrome exists only to route attention to the right session at the right time.
 

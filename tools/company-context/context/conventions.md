@@ -6,7 +6,7 @@ disagree, `AGENTS.md` wins and this file should be updated.
 
 ## Platform and runtime
 
-- Target OS is Windows 11; Node v24+.
+- Target OS is Windows 11; Node >=18 (developed on v24).
 - Server code is **CommonJS only** (`const x = require('x')`, `module.exports = { ... }`). No ESM in server code.
 - Frontend code is ES modules, bundled by Vite.
 

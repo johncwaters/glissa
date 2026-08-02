@@ -155,16 +155,7 @@ git push origin --tags
 
 ### node-pty Native Dependencies
 
-Glissa depends on `node-pty`, which compiles C++ code.
-
-**Windows and macOS:** Pre-built binaries are included for Windows x64/arm64 and macOS x64/arm64; users can `npm install -g glissa` without build tools.
-
-**Linux:** Requires `build-essential` and `python3`:
-
-```bash
-sudo apt-get install build-essential python3
-npm install -g glissa
-```
+Glissa depends on `node-pty`, which compiles C++ code. Glissa itself is Windows-only: `package.json`'s `os` field is `["win32"]`, so `npm install` refuses on any other platform. macOS and Linux are untested and unsupported; there is no pre-built or source install path for them.
 
 ### Unpublishing and Deprecation
 
