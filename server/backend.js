@@ -322,7 +322,7 @@ function createBackend(httpServer, options = {}) {
       let payload = {};
       try { payload = body ? JSON.parse(body) : {}; } catch { /* tolerate */ }
       const token =
-        (req.query?.t) ||
+        req.query?.t ||
         (req.headers.authorization || '').replace(/^Bearer\s+/i, '') ||
         null;
       const out = hookRouter.handle({

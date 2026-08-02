@@ -107,8 +107,7 @@ test('the watcher survives a commonGitDir under an 8.3 short parent', { skip: !S
 
 test('start() declines when the reflog dir does not exist yet', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-irw-none-'));
-  let _calls = 0;
-  const w = createIntegrationRefWatcher({ commonGitDir: dir, branch: 'develop', onChange: () => { _calls++; }, debounceMs: 50 });
+  const w = createIntegrationRefWatcher({ commonGitDir: dir, branch: 'develop', onChange: () => {}, debounceMs: 50 });
   try {
     assert.equal(w.start(), false, 'no logs/refs/heads dir -> start() declines, leans on the floor');
     assert.equal(w.active, false);

@@ -631,7 +631,7 @@ function createOrchestrator(deps) {
       // it back), else the project log - and surface a team-run-failed (backend re-broadcasts it to the
       // dashboard + notifies). Resolve with { error } rather than rejecting, so the call-site .catch does
       // not ALSO broadcast a duplicate failure. The finally still finalizes the workspace exactly as before.
-      const reason = (err?.message) ? err.message : String(err);
+      const reason = err?.message ? err.message : String(err);
       try {
         const logTarget = (workspace.isGit && workspace.cwd) ? workspace.cwd : projectPath;
         output.appendLog(logTarget, team.outputPath,
