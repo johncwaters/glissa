@@ -113,9 +113,14 @@ function scaffoldPack(
   const promoted = [];
   const divergent = [];
   const stub = (dest, name) => fs.writeFileSync(dest, `# ${name}\n\n<!-- ${PACK_SENTINEL}: fill this in. -->\n`, 'utf8');
-  const copyOrStub = (src, dest, name) => {
-    if (src) {
+  // Existence is checked here so callers just pass a path or null.
+  const copyOrStub = (src, dest, name, fallbackText) => {
+    if (src && fs.existsSync(src)) {
       fs.copyFileSync(src, dest);
+      return;
+    }
+    if (fallbackText !== undefined) {
+      fs.writeFileSync(dest, fallbackText, 'utf8');
       return;
     }
     stub(dest, name);
@@ -146,7 +151,7 @@ function scaffoldPack(
         continue;
       }
       const src = fallbackTemplatesDir ? path.join(fallbackTemplatesDir, file.name) : null;
-      copyOrStub(src && fs.existsSync(src) ? src : null, dest, file.name);
+      copyOrStub(src, dest, file.name);
       created.push(file.name);
       continue;
     }
@@ -157,12 +162,9 @@ function scaffoldPack(
 
   const readmeDest = path.join(packDir, 'README.md');
   if (!fs.existsSync(readmeDest)) {
-    const readmeSrc = pickTemplate('README.md', templatesDir, fallbackTemplatesDir);
-    const readmeText = readmeSrc
-      ? fs.readFileSync(readmeSrc, 'utf8')
-      : `# Team pack\n\nProject-owned inputs for this team. Replace the ${PACK_SENTINEL} markers,`
-        + ' then run the team again.\n';
-    fs.writeFileSync(readmeDest, readmeText, 'utf8');
+    const readmeFallback = `# Team pack\n\nProject-owned inputs for this team. Replace the ${PACK_SENTINEL} markers,`
+      + ' then run the team again.\n';
+    copyOrStub(pickTemplate('README.md', templatesDir, fallbackTemplatesDir), readmeDest, 'README.md', readmeFallback);
     created.push('README.md');
   }
   return {
