@@ -127,10 +127,11 @@ function handleSnapshot(sessions) {
   // then restore the session the operator had open (the boot/reload race: the saved session does not
   // exist until this first snapshot populates the cards). The empty state ("Nothing to focus") lives
   // in the Focus view itself, so no grid placeholder here.
-  if (isFocusActive()) { refreshFocusRoster(); restoreFocusedSession(); }
+  const focusActive = isFocusActive();
+  if (focusActive) { refreshFocusRoster(); restoreFocusedSession(); }
   // Teams may have been restored as the active view at boot, before knownProjects was populated, so its
   // project picker was seeded empty; refill it in place now that the snapshot has arrived.
-  if (!isFocusActive() && _activeView === 'teams') refreshTeamsProjects(getKnownProjects());
+  if (!focusActive && _activeView === 'teams') refreshTeamsProjects(getKnownProjects());
 }
 
 function handleStateChange(msg) {

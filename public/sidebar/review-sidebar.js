@@ -618,7 +618,7 @@ function renderFile(f, kind) {
   );
   head.append(c);
   head.addEventListener('click', () => {
-    openFiles.has(key) ? openFiles.delete(key) : openFiles.add(key);
+    openFiles[openFiles.has(key) ? 'delete' : 'add'](key);
     render();
   });
   sec.append(head);

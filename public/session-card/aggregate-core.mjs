@@ -17,7 +17,6 @@ export function computeAggregate(counts) {
   // active-session counter is noise that provides no actionable signal. The banner
   // only speaks for states worth acting on (needs-input, failed) or terminal
   // roll-ups (all exited / all dormant); an active mix renders blank (hidden).
-  // Precedence ladder: each guard returns before the next is evaluated, same order as before.
   if (waiting > 0) return { text: `${waiting} session${pl(waiting)} need input`, severity: 'warning', alertCount };
   if (failed > 0) return { text: `${failed} session${pl(failed)} failed`, severity: 'critical', alertCount };
   if (total > 0 && exited === total) return { text: 'All sessions exited', severity: 'done', alertCount };

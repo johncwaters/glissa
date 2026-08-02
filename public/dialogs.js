@@ -6,7 +6,7 @@ import addSessionHTML from './components/add-session-dialog.html?raw';
 import settingsHTML from './components/settings-dialog.html?raw';
 import { sendControlMsg, sendControlRequest } from './control-ws.js';
 import { ensureNotificationPermission, notificationsSupported } from './notifications.js';
-import { createModalOverlay } from './session-card/modal.js';
+import { createModalOverlay, trapFocus } from './session-card/modal.js';
 import { countSessionsByName, suggestSessionName } from './session-card/naming.js';
 import { SHORTCUT_GROUPS } from './shortcuts.mjs';
 import { applyTheme, getThemeList } from './theme.js';
@@ -14,27 +14,11 @@ import { getSoundId, getThemeId, isNotificationsEnabled, setNotificationsEnabled
 
 // ── Shared dialog ARIA + focus trap helpers ──────────────────
 
-function getFocusable(dialog) {
-  return [...dialog.querySelectorAll('button, input, select, textarea, [tabindex]:not([tabindex="-1"])')];
-}
-
-function attachFocusTrap(dialog) {
-  dialog.addEventListener('keydown', (e) => {
-    if (e.key !== 'Tab') return;
-    const focusable = getFocusable(dialog);
-    if (focusable.length === 0) return;
-    const first = focusable[0];
-    const last = focusable[focusable.length - 1];
-    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); return; }
-    if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
-  });
-}
-
 function applyDialogAria(dialog, titleId) {
   dialog.setAttribute('role', 'dialog');
   dialog.setAttribute('aria-modal', 'true');
   dialog.setAttribute('aria-labelledby', titleId);
-  attachFocusTrap(dialog);
+  trapFocus(dialog);
 }
 
 // ── Add Session dialog ────────────────────────────────────────
