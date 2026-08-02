@@ -1047,7 +1047,7 @@ function createBackend(httpServer, options = {}) {
     // session-prompt, session-sleep, session-wake); a handler with extra side effects beyond the
     // broadcast (e.g. worktree-ready, merge-status) stays hand-written.
     const relay = (event, type) => sess.on(event, (payload) => broadcastControl({
-      type, id: sess.id, session: sess.name, ...payload, timestamp: Date.now(),
+      ...payload, type, id: sess.id, session: sess.name, timestamp: Date.now(),
     }));
 
     // Live background sub-agent count delta -> control WS, so the card shows "N agents" while a
