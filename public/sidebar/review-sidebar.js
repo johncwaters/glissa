@@ -259,7 +259,7 @@ export function mergeSelectedSession() {
   const curStatus = statusById.get(id) || 'none';
   if (curStatus === 'merging' || curStatus === 'parked') return false; // in-flight or conflict needs resolving
   const payload = diffById.get(id);
-  const hasCommits = !!(payload && payload.hasCommits);
+  const hasCommits = !!(payload?.hasCommits);
   if (!isMergeableLive(ui.currentState, hasCommits)) return false;
   sendMergeContinue(id, ui.currentState);
   return true;
@@ -441,7 +441,7 @@ function render() {
   // tree changes are shown for awareness but are never part of a merge until the session commits them.
   const committedFiles = payload ? parseUnifiedDiff(payload.committed?.diff || '') : [];
   const uncommittedFiles = payload ? parseUnifiedDiff(payload.uncommitted?.diff || '') : [];
-  const hasCommits = !!(payload && payload.hasCommits);
+  const hasCommits = !!(payload?.hasCommits);
 
   // One merge action, never a "finish". A session's PTY effectively never dies (Claude's built-in restart
   // keeps it alive; only an explicit /exit ends it, which never happens), so there is no settled/close-out

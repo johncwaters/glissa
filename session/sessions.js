@@ -593,7 +593,7 @@ class Session extends EventEmitter {
   // 'agents-change' delta only when the live count actually changed.
   _trackSubagent(raw) {
     if (!this._detectBackgroundAgents) return;
-    const agentId = raw.payload && raw.payload.agent_id;
+    const agentId = raw.payload?.agent_id;
     if (raw.signal === "subagent-start") {
       // Fresh background work is newer activity: a held ready from before it must not release
       // when only the OLDER ids drain (subagent-start never reaches _onStatus's clearing path).
@@ -1274,7 +1274,7 @@ class Session extends EventEmitter {
       // integration branch moved, and the parked->pending-review demotion must mirror what an actual
       // merge would do. The two counts deliberately use different bases.
       try {
-        const mergeTarget = this._integrationBranch || (this._workspace && this._workspace.base) || this.baseSha;
+        const mergeTarget = this._integrationBranch || (this._workspace?.base) || this.baseSha;
         if (mergeTarget && (await run(["rev-parse", "--verify", "--quiet", mergeTarget])).trim()) {
           behind = (await run(["rev-list", "--count", `HEAD..${mergeTarget}`])).trim();
         }

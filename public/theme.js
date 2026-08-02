@@ -3,8 +3,8 @@
 // setting CSS custom properties on :root. The terminal theme is
 // derived from CSS variables at runtime.
 
-import { startNyanCat, stopNyanCat } from './nyan-cat.js';
 import { playNyanJingle } from './alert-sound.js';
+import { startNyanCat, stopNyanCat } from './nyan-cat.js';
 
 // ── Theme definitions ────────────────────────────────────────
 

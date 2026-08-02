@@ -19,7 +19,7 @@ function awaitReaps(pendingReaps, { capMs = 3000, setTimeoutFn = setTimeout, cle
   let timer;
   const cap = new Promise((resolve) => {
     timer = setTimeoutFn(resolve, capMs);
-    if (timer && timer.unref) timer.unref();
+    if (timer?.unref) timer.unref();
   });
   return Promise.race([Promise.allSettled(pendingReaps), cap]).then(() => clearTimeoutFn(timer));
 }
@@ -48,7 +48,7 @@ function createLifecycle({
 
   function fallbackTimer(fn) {
     const t = setTimeout(fn, closeTimeoutMs);
-    if (t && t.unref) t.unref();
+    if (t?.unref) t.unref();
     return t;
   }
 

@@ -1,8 +1,8 @@
 'use strict';
 
 const { execFile, execFileSync } = require('../../server/child-process-safe');
-const path = require('path');
-const fs = require('fs');
+const path = require('node:path');
+const fs = require('node:fs');
 
 let burntToastModulePath = null; // null = unknown, false = not found, string = resolved path
 

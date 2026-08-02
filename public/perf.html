@@ -35,6 +35,7 @@
   <div id="mount"></div>
   <script type="module">
     import { runStress } from './perf-harness.js';
+
     const $ = (id) => document.getElementById(id);
     $('run').addEventListener('click', async () => {
       $('run').disabled = true;
@@ -53,7 +54,7 @@
         $('out').textContent = JSON.stringify(m, null, 2);
         $('status').textContent = 'done';
       } catch (err) {
-        $('out').textContent = String(err && err.stack ? err.stack : err);
+        $('out').textContent = String(err?.stack ? err.stack : err);
         $('status').textContent = 'error';
       } finally {
         $('run').disabled = false;

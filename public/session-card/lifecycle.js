@@ -5,19 +5,19 @@
 import { KILLABLE_STATES, RESTARTABLE_STATES, STATES } from '/shared/states.mjs';
 import { playAlertSound } from '../alert-sound.js';
 import { sendControlMsg } from '../control-ws.js';
-import { setRunningActivity } from './activity.js';
 import { el } from '../dom-helpers.js';
 import { setHealthMonitorVisible } from '../health-monitor.js';
+import { seedReviewMergeStatus, setReviewDiff, setReviewMergeStatus } from '../sidebar/review-sidebar.js';
+import { setSelectedId } from '../sidebar/selection.js';
 import { getSoundId, isSoundEnabled } from '../ui-prefs.js';
+import { setRunningActivity } from './activity.js';
 import { computeAggregate } from './aggregate-core.mjs';
 import { buildCardDOM, closeDebugOverlay, openDebugOverlay, setDebugMode, showConfirmDialog, startInlineRename } from './card-dom.js';
-import { openResumeDialog } from './resume-dialog.js';
 import { aggregateEl, container, sessionUIs } from './card-registry.js';
+import { openResumeDialog } from './resume-dialog.js';
 // Load-bearing import: evaluating session-tick.js installs the shared 1s tick (elapsed clock +
 // working-heartbeat poll) at module load.
 import { refreshElapsed } from './session-tick.js';
-import { seedReviewMergeStatus, setReviewDiff, setReviewMergeStatus } from '../sidebar/review-sidebar.js';
-import { setSelectedId } from '../sidebar/selection.js';
 import { ensureTerminalSetup, setTerminalCursorBlink, setupTerminal, wireTerminalIO } from './terminal.js';
 import { releaseWebgl } from './webgl-pool.js';
 

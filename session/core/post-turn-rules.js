@@ -35,7 +35,7 @@ function posAt(content, offset) {
 // drives language gating in detectCodeSlop (TS-only / py-only subrules). Pure delegation:
 // the pattern matching lives in ./slop-code-patterns; here we only map offsets to line/col.
 function detectSlop(content, ctx) {
-  const relPath = ctx && ctx.relPath;
+  const relPath = ctx?.relPath;
   const matches = detectCodeSlop(content, relPath);
   // Single linear sweep instead of per-finding posAt. detectCodeSlop returns matches in
   // ascending offset order, so one monotonic cursor maps every offset to line/col in
@@ -116,10 +116,13 @@ function exemptions(content) {
   const head = content.slice(0, 4096);
   if (head.indexOf(EXEMPT_MARKER) === -1) return { all: false, rules: new Set() };
   const rules = new Set();
-  const re = new RegExp(EXEMPT_MARKER + ':([a-zA-Z]+)', 'g');
-  let m;
-  while ((m = re.exec(head)) !== null) rules.add(m[1]);
-  const all = new RegExp(EXEMPT_MARKER + '(?!:)').test(head);
+  const re = new RegExp(`${EXEMPT_MARKER}:([a-zA-Z]+)`, 'g');
+  let m = re.exec(head);
+  while (m !== null) {
+    rules.add(m[1]);
+    m = re.exec(head);
+  }
+  const all = new RegExp(`${EXEMPT_MARKER}(?!:)`).test(head);
   return { all, rules };
 }
 
@@ -131,7 +134,7 @@ function applyRules(content, rules, ctx) {
   const findings = [];
   let current = content;
   for (const name of RULE_ORDER) {
-    const cfg = rules && rules[name];
+    const cfg = rules?.[name];
     if (!cfg || !cfg.enabled) continue;
     if (ex.all || ex.rules.has(name)) continue;
     const res = RULES[name].fix(current, ctx);
@@ -161,8 +164,9 @@ function globToRegExp(glob) {
       }
     } else if (c === '?') {
       re += '[^/]';
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: this is a literal regex metacharacter class, not a template
     } else if ('.+^${}()|[]\\'.indexOf(c) !== -1) {
-      re += '\\' + c;
+      re += `\\${c}`;
     } else {
       re += c;
     }
@@ -174,10 +178,10 @@ function globToRegExp(glob) {
 // A path is in scope if it matches >=1 include glob and 0 exclude globs.
 function shouldCheckPath(relPath, { include, exclude } = {}) {
   const p = String(relPath).replace(/\\/g, '/');
-  const inc = include && include.length ? include : ['**/*'];
+  const inc = include?.length ? include : ['**/*'];
   const matchAny = (globs) => globs.some((g) => globToRegExp(g).test(p));
   if (!matchAny(inc)) return false;
-  if (exclude && exclude.length && matchAny(exclude)) return false;
+  if (exclude?.length && matchAny(exclude)) return false;
   return true;
 }
 

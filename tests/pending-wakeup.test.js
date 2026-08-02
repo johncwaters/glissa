@@ -104,7 +104,7 @@ test('buildHookSettings emits a matched PostToolUse group by default and none wh
   assert.match(on.hooks.PostToolUse[0].hooks[0].url, /\/hook\/abc\/posttooluse\?t=tok$/);
   // Existing events keep their matcher-less shape.
   for (const event of HOOK_EVENTS) {
-    assert.equal(Object.prototype.hasOwnProperty.call(on.hooks[event][0], 'matcher'), false, `${event} stays matcher-less`);
+    assert.equal(Object.hasOwn(on.hooks[event][0], 'matcher'), false, `${event} stays matcher-less`);
   }
   const off = buildHookSettings({ ...base, detectScheduledWakeups: false });
   assert.equal('PostToolUse' in off.hooks, false, 'kill switch removes the group at the source');

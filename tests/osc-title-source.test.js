@@ -130,7 +130,7 @@ test('pending buffer truncation does not corrupt subsequent parsing', (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const src = createOscTitleSource({ stabilizationMs: 50 });
   const signals = collect(src);
-  src.feed('\x1b]0;noterm' + 'x'.repeat(9000));
+  src.feed(`\x1b]0;noterm${'x'.repeat(9000)}`);
   src.feed('\x1b]0;⠂ Claude Code\x07');
   src.feed('\x1b]0;✳ Claude Code\x07');
   t.mock.timers.tick(120);

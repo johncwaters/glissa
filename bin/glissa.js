@@ -109,7 +109,7 @@ function runDoctor() {
     require('node-pty');
     line('node-pty', 'loads OK');
   } catch (err) {
-    const reason = (err && err.message ? err.message : String(err)).split('\n')[0];
+    const reason = (err?.message ? err.message : String(err)).split('\n')[0];
     line('node-pty', 'FAILED to load');
     line('reason', reason);
     line('hint', 'reinstall, or force a rebuild: npm install -g glissa --build-from-source');

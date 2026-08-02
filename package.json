@@ -63,6 +63,7 @@
   ],
   "scripts": {
     "start": "node server.js",
+    "lint": "biome check .",
     "test": "node --test \"tests/**/*.test.js\"",
     "dev": "vite",
     "dev:server-only": "node server.js",

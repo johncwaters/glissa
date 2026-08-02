@@ -83,7 +83,7 @@ function createTeamSessionFactory({
       packDir, sharedPackDir, packFiles: toFill, projectPath, projectContext,
     });
 
-    const projectDisplayName = (config.projects.find((p) => p.id === projectId) || {}).name || '';
+    const projectDisplayName = config.projects.find((p) => p.id === projectId)?.name || '';
     const name = setupSessionName(team, projectDisplayName);
 
     const sess = new Session({

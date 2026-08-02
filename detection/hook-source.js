@@ -88,7 +88,7 @@ function mapHookToSignal(event, payload) {
       // transitions (Session._trackWakeup). The tool_name switch is defense in depth: if a
       // Claude version ignores the matcher and floods every tool call, everything else maps
       // to null (ignored-event).
-      const tool = String(payload && payload.tool_name || '');
+      const tool = String(payload?.tool_name || '');
       if (tool === 'ScheduleWakeup') return 'wakeup-scheduled';
       if (tool === 'CronCreate') return 'cron-created';
       if (tool === 'CronDelete') return 'cron-deleted';

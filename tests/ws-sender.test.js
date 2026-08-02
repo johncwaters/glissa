@@ -439,7 +439,7 @@ test('sendImmediate drop rewinds sentOffset to the replay base: recovers history
   // THE bite: rewound to base 0, not the live baseline 100 (the pre-fix live-only bug).
   assert.ok(ring.calls.includes(0), 'backfill queried getBufferSince(0): rewound to replay base');
   assert.ok(!ring.calls.includes(100), 'did NOT resume from the live baseline (pre-fix behavior)');
-  assert.equal(ws.sent.join(''), 'R'.repeat(100) + 'LIVE', 'history + live recovered, in order');
+  assert.equal(ws.sent.join(''), `${'R'.repeat(100)}LIVE`, 'history + live recovered, in order');
 });
 
 test('sendImmediate drop with NO source neither rewinds nor desyncs (drop-and-forget unchanged)', () => {
@@ -498,5 +498,5 @@ test('sendImmediate drop then eviction recovers via CLEAR + retained replay', ()
 
   assert.equal(ws.sent.length, 1, 'one backfill frame');
   assert.ok(ws.sent[0].startsWith('\x1b[2J\x1b[3J\x1b[H'), 'CLEAR prefix on evicted recovery');
-  assert.equal(ws.sent[0], '\x1b[2J\x1b[3J\x1b[H' + 'R'.repeat(50) + 'LIVE', 'CLEAR + retained tail');
+  assert.equal(ws.sent[0], `\x1b[2J\x1b[3J\x1b[H${'R'.repeat(50)}LIVE`, 'CLEAR + retained tail');
 });

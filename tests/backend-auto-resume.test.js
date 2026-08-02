@@ -245,7 +245,7 @@ function restartableSession(id, killCalls) {
     path: process.cwd(),
     spawnCommand: { path: process.execPath, kind: 'exe' },
     ptySpawn: () => fakePty(),
-    killProc: (args, opts, cb) => { killCalls.push(args); cb(null, '', ''); },
+    killProc: (args, _opts, cb) => { killCalls.push(args); cb(null, '', ''); },
   });
 }
 

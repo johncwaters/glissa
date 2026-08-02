@@ -214,7 +214,7 @@ test('waiting escalation still re-delivers on the interval and stops on acknowle
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const manager = new NotificationManager({ escalationIntervalMs: 1000, debounceMs: 0 });
   const deliveries = [];
-  manager.registerChannel('test', (session, category, message, context) => {
+  manager.registerChannel('test', (_session, category, _message, context) => {
     deliveries.push({ category, escalationCount: context.escalationCount });
   });
 
@@ -239,7 +239,7 @@ test('complete delivers once with no escalation timer', (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const manager = new NotificationManager({ escalationIntervalMs: 1000, debounceMs: 0 });
   const deliveries = [];
-  manager.registerChannel('test', (session, category) => deliveries.push(category));
+  manager.registerChannel('test', (_session, category) => deliveries.push(category));
 
   manager.trigger('s1', 'complete', 'finished working');
   assert.equal(deliveries.length, 1);

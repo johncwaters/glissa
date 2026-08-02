@@ -246,7 +246,7 @@ function createBackend(httpServer, options = {}) {
   // the bound address is always available here. Returns null only if (unexpectedly)
   // not listening, in which case the session runs OSC-title-only.
   const getHookPort = () => {
-    const addr = httpServer && httpServer.address();
+    const addr = httpServer?.address();
     return addr && typeof addr === 'object' && addr.port ? addr.port : null;
   };
   // Clear settings dirs orphaned by prior crashes (best-effort).
@@ -322,7 +322,7 @@ function createBackend(httpServer, options = {}) {
       let payload = {};
       try { payload = body ? JSON.parse(body) : {}; } catch { /* tolerate */ }
       const token =
-        (req.query && req.query.t) ||
+        (req.query?.t) ||
         (req.headers.authorization || '').replace(/^Bearer\s+/i, '') ||
         null;
       const out = hookRouter.handle({
@@ -765,7 +765,7 @@ function createBackend(httpServer, options = {}) {
         notificationManager.acknowledge(sess.id);
       }
 
-      const notifyCategory = decideNotification(to, notifyGate, event, { signal: detail && detail.signal, hookSeen: sess.hookSeen });
+      const notifyCategory = decideNotification(to, notifyGate, event, { signal: detail?.signal, hookSeen: sess.hookSeen });
       if (notifyCategory) {
         const messages = {
           waiting: `${sess.name} needs your input`,

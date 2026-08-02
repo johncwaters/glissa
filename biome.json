@@ -12,6 +12,13 @@
   "formatter": {
     "enabled": false
   },
+  "assist": {
+    "actions": {
+      "source": {
+        "organizeImports": "off"
+      }
+    }
+  },
   "css": {
     "parser": {
       "tailwindDirectives": true
@@ -25,6 +32,14 @@
       },
       "style": {
         "noDescendingSpecificity": "off"
+      },
+      "correctness": {
+        "noUnusedVariables": {
+          "level": "warn",
+          "options": {
+            "ignoreRestSiblings": true
+          }
+        }
       }
     }
   }

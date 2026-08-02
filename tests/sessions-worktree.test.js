@@ -108,7 +108,7 @@ test('start() provisions a worktree off the integration branch and spawns the PT
   const spawned = [];
   const s = makeSession({
     gitWorkspace: gw, integrationBranch: 'develop',
-    ptySpawn: (file, args, optsArg) => { spawned.push(optsArg); return fakePty(); },
+    ptySpawn: (_file, _args, optsArg) => { spawned.push(optsArg); return fakePty(); },
   });
   try {
     await s.start();
@@ -150,7 +150,7 @@ test('concurrent start() calls are single-flight: one worktree, one PTY, no bran
   };
   const s = makeSession({
     gitWorkspace: gw, integrationBranch: 'develop',
-    ptySpawn: (file, args, optsArg) => { spawned.push(optsArg); return fakePty(); },
+    ptySpawn: (_file, _args, optsArg) => { spawned.push(optsArg); return fakePty(); },
   });
   try {
     await Promise.all([s.start(), s.start()]);
@@ -171,7 +171,7 @@ test('start() BLOCKS when the integration branch is missing - stays DORMANT, no 
   let blocked = null;
   const s = makeSession({
     gitWorkspace: gw, integrationBranch: 'develop',
-    ptySpawn: (file, args, optsArg) => { spawned.push(optsArg); return fakePty(); },
+    ptySpawn: (_file, _args, optsArg) => { spawned.push(optsArg); return fakePty(); },
   });
   s.on('worktree-blocked', (e) => { blocked = e; });
   try {
@@ -196,7 +196,7 @@ test('start() ADOPTS its own surviving worktree on branch-in-use (failed boot re
   let ready = null;
   const s = makeSession({
     gitWorkspace: gw, integrationBranch: 'develop',
-    ptySpawn: (file, args, optsArg) => { spawned.push(optsArg); return fakePty(); },
+    ptySpawn: (_file, _args, optsArg) => { spawned.push(optsArg); return fakePty(); },
   });
   s.on('worktree-blocked', (e) => { blocked = e; });
   s.on('worktree-ready', (e) => { ready = e; });
@@ -230,7 +230,7 @@ test('start() runs in place with a notice when the branch-in-use conflict dir is
   let blocked = null;
   const s = makeSession({
     gitWorkspace: gw, integrationBranch: 'develop',
-    ptySpawn: (file, args, optsArg) => { spawned.push(optsArg); return fakePty(); },
+    ptySpawn: (_file, _args, optsArg) => { spawned.push(optsArg); return fakePty(); },
   });
   s.on('worktree-blocked', (e) => { blocked = e; });
   try {
@@ -255,7 +255,7 @@ test('start() never adopts the MAIN checkout when the operator checked the sessi
   const spawned = [];
   const s = makeSession({
     gitWorkspace: gw, integrationBranch: 'develop',
-    ptySpawn: (file, args, optsArg) => { spawned.push(optsArg); return fakePty(); },
+    ptySpawn: (_file, _args, optsArg) => { spawned.push(optsArg); return fakePty(); },
   });
   try {
     await s.start();
@@ -273,7 +273,7 @@ test('start() runs in place for a non-git path (the only in-place fallback)', { 
   const spawned = [];
   const s = makeSession({
     gitWorkspace: gw, integrationBranch: 'develop',
-    ptySpawn: (file, args, optsArg) => { spawned.push(optsArg); return fakePty(); },
+    ptySpawn: (_file, _args, optsArg) => { spawned.push(optsArg); return fakePty(); },
   });
   try {
     await s.start();

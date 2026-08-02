@@ -64,7 +64,7 @@ async function main() {
   const snapshot = events.find(e => e.type === 'snapshot');
   assert('snapshot received', !!snapshot);
   assert('snapshot has sessions', snapshot && Array.isArray(snapshot.sessions));
-  const allDormant = snapshot && snapshot.sessions.every(s => s.state === 'DORMANT');
+  const allDormant = snapshot?.sessions.every(s => s.state === 'DORMANT');
   assert(`all ${snapshot?.sessions.length || 0} sessions are DORMANT`, allDormant);
 
   // Pick one session and start it

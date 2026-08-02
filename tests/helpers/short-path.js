@@ -19,7 +19,7 @@ const WIN = process.platform === 'win32';
 function shortPathOf(target) {
   if (!WIN) return null;
   try {
-    const out = execFileSync('cmd', ['/d /c for %I in ("' + target + '") do @echo %~sI'], {
+    const out = execFileSync('cmd', [`/d /c for %I in ("${target}") do @echo %~sI`], {
       encoding: 'utf8',
       windowsVerbatimArguments: true,
     }).trim();

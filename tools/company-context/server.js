@@ -16,8 +16,8 @@
  * query-aware later if the corpus grows.
  */
 
-const fs = require("fs");
-const path = require("path");
+const fs = require("node:fs");
+const path = require("node:path");
 
 const CONTEXT_DIR = path.join(__dirname, "context");
 const SERVER_NAME = "company-context";
@@ -76,7 +76,7 @@ function readContext() {
 }
 
 function send(msg) {
-  process.stdout.write(JSON.stringify(msg) + "\n");
+  process.stdout.write(`${JSON.stringify(msg)}\n`);
 }
 function sendResult(id, result) {
   send({ jsonrpc: "2.0", id, result });
@@ -89,7 +89,7 @@ function handle(msg) {
   const { id, method, params } = msg;
 
   if (method === "initialize") {
-    const requested = params && params.protocolVersion;
+    const requested = params?.protocolVersion;
     sendResult(id, {
       protocolVersion: typeof requested === "string" ? requested : DEFAULT_PROTOCOL,
       capabilities: { tools: {} },
@@ -104,7 +104,7 @@ function handle(msg) {
   }
 
   if (method === "tools/call") {
-    const name = params && params.name;
+    const name = params?.name;
     if (name !== TOOL.name) {
       sendError(id, -32602, `Unknown tool: ${String(name)}`);
       return;
@@ -132,10 +132,11 @@ let buf = "";
 process.stdin.setEncoding("utf8");
 process.stdin.on("data", (chunk) => {
   buf += chunk;
-  let nl;
-  while ((nl = buf.indexOf("\n")) >= 0) {
+  let nl = buf.indexOf("\n");
+  while (nl >= 0) {
     const line = buf.slice(0, nl).trim();
     buf = buf.slice(nl + 1);
+    nl = buf.indexOf("\n");
     if (!line) continue;
     let msg;
     try {

@@ -26,7 +26,7 @@ function fakeCommonGitDir(branches = ['develop']) {
     fs.mkdirSync(path.dirname(p), { recursive: true });
     fs.writeFileSync(p, '0000 init\n', 'utf8');
   }
-  const append = (b, line) => fs.appendFileSync(path.join(logsHeads, b), line + '\n', 'utf8');
+  const append = (b, line) => fs.appendFileSync(path.join(logsHeads, b), `${line}\n`, 'utf8');
   return { dir, append, cleanup: () => fs.rmSync(dir, { recursive: true, force: true }) };
 }
 
@@ -107,8 +107,8 @@ test('the watcher survives a commonGitDir under an 8.3 short parent', { skip: !S
 
 test('start() declines when the reflog dir does not exist yet', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-irw-none-'));
-  let calls = 0;
-  const w = createIntegrationRefWatcher({ commonGitDir: dir, branch: 'develop', onChange: () => { calls++; }, debounceMs: 50 });
+  let _calls = 0;
+  const w = createIntegrationRefWatcher({ commonGitDir: dir, branch: 'develop', onChange: () => { _calls++; }, debounceMs: 50 });
   try {
     assert.equal(w.start(), false, 'no logs/refs/heads dir -> start() declines, leans on the floor');
     assert.equal(w.active, false);

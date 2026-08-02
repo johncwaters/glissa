@@ -92,7 +92,7 @@ function userText(content) {
 function cleanTitle(raw, max = 100) {
   let s = String(raw || '');
   const argsMatch = /<command-args>([\s\S]*?)<\/command-args>/i.exec(s);
-  if (argsMatch && argsMatch[1].trim()) {
+  if (argsMatch?.[1].trim()) {
     s = argsMatch[1];
   } else {
     s = s
@@ -102,7 +102,7 @@ function cleanTitle(raw, max = 100) {
       .replace(/<[^>]+>/g, ' ');
   }
   s = s.replace(/\s+/g, ' ').trim();
-  return s.length > max ? s.slice(0, max - 3).trimEnd() + '...' : s;
+  return s.length > max ? `${s.slice(0, max - 3).trimEnd()}...` : s;
 }
 
 // Read up to maxBytes from the head of a transcript and return its COMPLETE

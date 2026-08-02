@@ -45,7 +45,7 @@ function writeTranscript(dir, id, { title, cwd, branch, mtimeMs }) {
     JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: 'ok' } }),
   ];
   const file = path.join(dir, `${id}.jsonl`);
-  fs.writeFileSync(file, lines.join('\n') + '\n');
+  fs.writeFileSync(file, `${lines.join('\n')}\n`);
   if (mtimeMs != null) fs.utimesSync(file, new Date(mtimeMs), new Date(mtimeMs));
   return file;
 }

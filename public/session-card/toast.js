@@ -43,7 +43,7 @@ export function showErrorToast(message, opts = {}) {
   if (newest && newest._message === message && !newest._dismissed) {
     newest._count = (newest._count || 1) + 1;
     const counter = newest.querySelector('.notice-count');
-    counter.textContent = 'x' + newest._count;
+    counter.textContent = `x${newest._count}`;
     counter.hidden = false;
     if (!persist && newest._timer) {
       clearTimeout(newest._timer);

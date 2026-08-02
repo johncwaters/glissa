@@ -38,7 +38,7 @@ function makeDeps(files, opts = {}) {
         statCalls[rel] = (statCalls[rel] || 0) + 1;
         const size = Buffer.byteLength(files[rel] != null ? files[rel] : '', 'utf8');
         // Race simulation: a file listed in opts.raceFiles changes mtime each stat.
-        const mtimeMs = opts.raceFiles && opts.raceFiles.includes(rel) ? statCalls[rel] : 7;
+        const mtimeMs = opts.raceFiles?.includes(rel) ? statCalls[rel] : 7;
         return { mtimeMs, size };
       },
     },

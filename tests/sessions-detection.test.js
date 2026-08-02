@@ -562,7 +562,7 @@ test('a quiet drain releases only after the settle window elapses, with detail.d
   assert.equal(s.state, STATES.RUNNING, 'still RUNNING partway through the settle window');
   t.mock.timers.tick(25); // past the 30ms settle window
   assert.equal(s.state, STATES.COMPLETE, 'released once the settle window elapses with no cancelling activity');
-  assert.equal(deferredDetail && deferredDetail.deferred, true, 'a released held ready carries deferred:true, like the old immediate release');
+  assert.equal(deferredDetail?.deferred, true, 'a released held ready carries deferred:true, like the old immediate release');
   s.destroy();
 });
 

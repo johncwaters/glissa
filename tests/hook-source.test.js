@@ -209,7 +209,7 @@ test('end-to-end: real HTTP POST through router validates token and dispatches',
   const server = http.createServer((req, res) => {
     const m = req.url.match(/^\/hook\/([^/]+)\/([^/?]+)(?:\?t=([^&]+))?$/);
     let body = '';
-    req.on('data', (c) => (body += c));
+    req.on('data', (c) => { body += c; });
     req.on('end', () => {
       let payload = {};
       try { payload = JSON.parse(body); } catch {}

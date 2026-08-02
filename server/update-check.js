@@ -65,8 +65,8 @@ async function checkForUpdate({
   packageManager,
   abortController = new AbortController(),
 } = {}) {
-  let timer = setTimeout(() => abortController.abort(), timeoutMs);
-  if (timer && timer.unref) timer.unref();
+  const timer = setTimeout(() => abortController.abort(), timeoutMs);
+  if (timer?.unref) timer.unref();
   try {
     const res = await fetchFn(registryUrl, { signal: abortController.signal });
     if (!res || !res.ok) return null;

@@ -48,7 +48,7 @@ export function openResumeDialog(sessionId, opts = {}) {
   const isDormant = (opts.currentState || '') === DORMANT;
 
   const { overlay, dialog, close } = createModalOverlay({ dialogClass: 'dialog resume-dialog' });
-  const titleId = 'resume-title-' + Math.random().toString(36).slice(2);
+  const titleId = `resume-title-${Math.random().toString(36).slice(2)}`;
 
   const titleEl = el('h3', 'dialog-title', 'Resume a conversation');
   titleEl.id = titleId;

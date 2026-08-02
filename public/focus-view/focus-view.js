@@ -675,7 +675,7 @@ function borrowToCenter(ui, id) {
 // Put a released card back at its remembered home position, or append it to the fallback
 // container if that position's parent is gone (e.g. removed from the DOM while centered).
 function reinsertCard(card, home) {
-  if (home && home.parent && home.parent.isConnected) {
+  if (home?.parent?.isConnected) {
     if (home.next && home.next.parentElement === home.parent) { home.parent.insertBefore(card, home.next); return; }
     home.parent.appendChild(card);
     return;
@@ -686,7 +686,7 @@ function reinsertCard(card, home) {
 function releaseCenter() {
   if (!focusedId) return;
   const ui = sessionUIs.get(focusedId);
-  if (ui && ui.card && ui.card.parentElement === cardSlotEl) {
+  if (ui?.card && ui.card.parentElement === cardSlotEl) {
     ui.card.classList.remove('focus-centered');
     reinsertCard(ui.card, ui.card._focusHome);
     delete ui.card._focusHome;

@@ -29,7 +29,7 @@ export function setDebugMode(on) {
 export function showConfirmDialog({ title, message, confirmLabel = 'Confirm', onConfirm }) {
   const { dialog, close } = createModalOverlay();
 
-  const titleId = 'sc-confirm-' + Math.random().toString(36).slice(2);
+  const titleId = `sc-confirm-${Math.random().toString(36).slice(2)}`;
 
   const titleEl = document.createElement('h3');
   titleEl.id = titleId;
@@ -275,7 +275,7 @@ function renderDebugOverlay(ui, payload) {
   const ls = det.lastSignal;
   const ts = det.titleState || {};
   html += `<div class="debug-section"><div class="debug-section-title">Detection</div>`;
-  html += `<div class="debug-field"><span class="debug-label">Last signal:</span> <span class="debug-value">${ls ? `${escapeHtml(ls.signal)} (${escapeHtml(ls.source || '?')}${ls.confidence ? '/' + escapeHtml(ls.confidence) : ''})` : 'none'}</span></div>`;
+  html += `<div class="debug-field"><span class="debug-label">Last signal:</span> <span class="debug-value">${ls ? `${escapeHtml(ls.signal)} (${escapeHtml(ls.source || '?')}${ls.confidence ? `/${escapeHtml(ls.confidence)}` : ''})` : 'none'}</span></div>`;
   html += `<div class="debug-field"><span class="debug-label">Hooks injected:</span> <span class="debug-value">${det.hooksInjected ? 'yes' : 'no'}</span></div>`;
   html += `<div class="debug-field"><span class="debug-label">Hook seen:</span> <span class="debug-value">${det.hookSeen ? 'yes' : 'no (degraded → title)'}</span></div>`;
   html += `<div class="debug-field"><span class="debug-label">Title state:</span> <span class="debug-value">${escapeHtml(ts.lastKind || 'none')}${ts.hasSeenSpinner ? ' · spun' : ''}</span></div>`;
@@ -289,7 +289,7 @@ export function openDebugOverlay(ui, sessionId) {
 
   const overlay = document.createElement('div');
   overlay.className = 'debug-overlay';
-  overlay.innerHTML = DEBUG_CLOSE_BTN + '<div class="debug-field debug-dim">Loading...</div>';
+  overlay.innerHTML = `${DEBUG_CLOSE_BTN}<div class="debug-field debug-dim">Loading...</div>`;
   ui.card.appendChild(overlay);
   ui.debugOverlay = overlay;
   ui.debugOpen = true;

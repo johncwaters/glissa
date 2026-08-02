@@ -16,7 +16,7 @@ const cjs = require('../shared/states');
 // loader always treats as a module regardless of the origin file's extension.
 function importEsm() {
   const source = fs.readFileSync(path.join(__dirname, '..', 'shared', 'states.esm.js'), 'utf8');
-  const dataUrl = 'data:text/javascript;base64,' + Buffer.from(source).toString('base64');
+  const dataUrl = `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`;
   return import(dataUrl);
 }
 

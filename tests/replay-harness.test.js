@@ -58,7 +58,7 @@ test('real v1 recordings replay cleanly and never emit awaiting-input (title hon
 
 test('perf: title source processes a large output stream cheaply (hot-path budget)', () => {
   // Build ~1 MB of mixed PTY output with occasional OSC-0 titles.
-  const chunkPlain = 'x'.repeat(900) + '\r\n';
+  const chunkPlain = `${'x'.repeat(900)}\r\n`;
   const spin = '\x1b]0;⠂ Claude Code\x07';
   const idle = '\x1b]0;✳ Claude Code\x07';
   const chunks = [];

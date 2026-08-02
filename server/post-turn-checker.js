@@ -246,7 +246,7 @@ async function runPostTurnChecks({ cwd, config, sessionId, deps = {} } = {}) {
       const dir = path.join(root, cfg.reportDir);
       fs.mkdirSync(dir, { recursive: true });
       const safe = String(sessionId).replace(/[^a-zA-Z0-9_.-]/g, '_');
-      fs.writeFileSync(path.join(dir, safe + '.json'), JSON.stringify(finalReport, null, 2));
+      fs.writeFileSync(path.join(dir, `${safe}.json`), JSON.stringify(finalReport, null, 2));
     } catch {
       /* best-effort */
     }

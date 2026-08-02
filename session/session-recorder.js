@@ -159,7 +159,7 @@ class SessionRecorder {
     this._closed = true;
     try {
       this._stream.end();
-    } catch (err) {
+    } catch (_err) {
       // Best-effort close
     }
     this._stream = null;
@@ -172,7 +172,7 @@ class SessionRecorder {
     if (!this._opened) this.open();
     if (!this._stream) return;
     try {
-      const line = JSON.stringify(record) + '\n';
+      const line = `${JSON.stringify(record)}\n`;
       this._stream.write(line);
       this._currentSize += Buffer.byteLength(line, 'utf8');
 

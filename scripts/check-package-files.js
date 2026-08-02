@@ -58,8 +58,8 @@ function resolveRequire(fromFile, target) {
 
   // Try with .js extension if no extension
   if (!path.extname(resolved)) {
-    if (fs.existsSync(resolved + '.js')) {
-      resolved = resolved + '.js';
+    if (fs.existsSync(`${resolved}.js`)) {
+      resolved = `${resolved}.js`;
     } else {
       return null;
     }
@@ -134,7 +134,7 @@ for (const entry of filesArray) {
   // Directory entry (ends with /)
   if (entry.endsWith('/')) {
     // Mark directory - we'll do prefix matching below
-    coveredFiles.add('DIR:' + entry);
+    coveredFiles.add(`DIR:${entry}`);
   } else {
     coveredFiles.add(entry);
   }

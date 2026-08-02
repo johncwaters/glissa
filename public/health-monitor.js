@@ -2,8 +2,8 @@
 // Renders memory + leak telemetry from server health-snapshot messages.
 // Always shows a compact summary; click to expand into a detailed panel.
 
-import { el, escapeHtml } from './dom-helpers.js';
 import { sendControlMsg } from './control-ws.js';
+import { el, escapeHtml } from './dom-helpers.js';
 
 const STATE_ABBREV = {
   DORMANT: 'DOR', INITIALIZING: 'INI', STARTING: 'STA',

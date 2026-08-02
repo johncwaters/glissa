@@ -150,7 +150,7 @@ test("promisify(execFile) resolves {stdout,stderr} AND injects windowsHide", asy
   const execFileP = promisify(safe.execFile);
   const r = await withSpy(
     "execFile",
-    (file, args, options, callback) => {
+    (_file, _args, options, callback) => {
       cap = options;
       callback(null, "the-stdout", "the-stderr");
     },
@@ -167,7 +167,7 @@ test("promisify(execFile) rejects with stdout/stderr attached (team-git's catch 
     () =>
       withSpy(
         "execFile",
-        (file, args, options, callback) => callback(err, "partial-out", "the-err"),
+        (_file, _args, _options, callback) => callback(err, "partial-out", "the-err"),
         () => execFileP("git", ["merge"], {}),
       ),
     (thrown) => {
