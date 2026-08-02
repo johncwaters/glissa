@@ -54,10 +54,8 @@ function checkPermissionModeSupported(mode, teamId) {
   );
 }
 
-// permissions.mode is REQUIRED (no default): a team must explicitly opt into "yolo" rather than
-// silently inheriting it, so a team.json reader (and a portfolio reviewer) sees the skip-permissions
-// choice made in the open, not defaulted away. Shared between the missing-block and missing-mode
-// guards below so both report the identical reason.
+// permissions.mode has NO default: yolo means skip-permissions, so a team must make that choice
+// in the open in its team.json rather than inherit it silently.
 const REQUIRE_MODE_MSG = 'is required: a team must explicitly declare permissions.mode "yolo" (the '
   + 'only supported mode) because every stage runs headless (claude -p) and cannot answer a permission '
   + 'prompt; permissions.deny is the guardrail.';
