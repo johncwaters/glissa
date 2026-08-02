@@ -17,6 +17,7 @@ Status detection and change watching. Session status is derived from machine-emi
 | `replay.js` | Version-aware replay harness: drives `session-recorder.js` JSONL recordings (v1/v2) through the detection stack |
 | `worktree-watch.js` | fs.watch on the per-worktree gitdir; nudges `sessions.js` to recompute the diff when git state moves. Watch-only, no parsing |
 | `integration-ref-watch.js` | Reflog-based listener for integration-branch movement (e.g. another session merged into develop) that no local worktree event would surface |
+| `watch-debounce.js` | Shared debounce-into-trailing-call + stop lifecycle used by `worktree-watch.js` and `integration-ref-watch.js` (both single-directory fs.watch listeners) |
 | `integration-watcher-pool.js` | Ref-counted pool: at most one fs.watch per (commonGitDir, branch), fanned out to every sibling session; factory/registry/recheck injected for testability |
 
 ## For AI Agents

@@ -4,7 +4,7 @@ const crypto = require("node:crypto");
 const pty = require("node-pty");
 const { EventEmitter } = require("node:events");
 const { execFileSync, execFile } = require("../server/child-process-safe");
-const { STATES, MERGEABLE_LIVE_STATES } = require("../shared/states");
+const { STATES, MERGEABLE_LIVE_STATES, KILLABLE_STATES, RESTARTABLE_STATES } = require("../shared/states");
 const { isSameDirectoryPath } = require("../shared/paths");
 const { createOscTitleSource } = require("../detection/osc-title-source");
 const { createStatusSource } = require("../detection/status-source");
@@ -12,7 +12,6 @@ const { createWorktreeWatcher } = require("../detection/worktree-watch");
 const { writeSessionSettings } = require("../detection/settings-injector");
 const {
   classifyClaudeKind,
-  resolveClaudeCommand,
   buildSpawnCommand,
   CLAUDE_CMD,
 } = require("./core/spawn-command");
@@ -25,6 +24,7 @@ const {
   EXIT_HOOKS,
 } = require("./core/state-machine");
 const { mapSignalToEvent } = require("./core/status-mapper");
+const { decideExitTransition } = require("./core/exit-transition");
 const { buildMergePrompt } = require("./core/merge-prompt");
 const { createOutputRing } = require("./core/output-ring");
 const { decideSignatureDemotion, decideDiffSelfHeal } = require("./core/merge-gate");
@@ -501,20 +501,10 @@ class Session extends EventEmitter {
     // A teammate id that was declared last snapshot but is gone from this one has departed
     // (shut down); any name idled against it no longer means anything, and left in place it
     // would wrongly offset a DIFFERENT teammate that happens to keep the surviving count the
-    // same (see _declaredTeammateIds). Evict that many of the OLDEST idle names: names are
-    // anonymous bookkeeping (the arithmetic only cares about the count), so evicting the
-    // oldest is as correct as evicting the departed one and needs no name-to-id mapping.
-    const currentTeammateIds = new Set(entries.filter((e) => e.type === 'teammate' && e.id).map((e) => e.id));
-    let departedCount = 0;
-    for (const id of this._declaredTeammateIds) {
-      if (!currentTeammateIds.has(id)) departedCount++;
-    }
-    for (const name of this._idleTeammateNames.keys()) {
-      if (departedCount <= 0) break;
-      this._idleTeammateNames.delete(name);
-      departedCount--;
-    }
-    this._declaredTeammateIds = currentTeammateIds;
+    // same. See agent-tracker.evictDepartedTeammateNames for the eviction rule.
+    this._declaredTeammateIds = agentTracker.evictDepartedTeammateNames(
+      this._idleTeammateNames, this._declaredTeammateIds, entries,
+    );
     // Deliberately no ageMs here: this snapshot is fresh (age 0), so weak (shell/monitor)
     // entries always count. Only _activeAgentCount ages them (see its declaredActiveCount call).
     // Same reasoning covers the teammate TTL: this raw count must see EVERY declared entry (it
@@ -1032,7 +1022,7 @@ class Session extends EventEmitter {
   async _settleWorktreeOnExit() {
     if (this._destroyed) return;
     if (!this._gitWorkspace || !this._workspace) return;
-    if (this.state !== STATES.DONE && this.state !== STATES.FAILED) return;
+    if (!RESTARTABLE_STATES.includes(this.state)) return;
     if (await this.discardWorktreeIfClean()) return;
     // Keep watching the kept-for-review worktree: a post-exit CLI merge/clean still self-heals fast.
     this._setMergeStatus("pending-review");
@@ -1052,13 +1042,9 @@ class Session extends EventEmitter {
     this.mergeStatus = status;
     // Retain the park context only while parked; clear it on any other status so a stale conflict list
     // never rides a later clean/merged state.
-    if (status === "parked") {
-      this.mergeReason = extra.reason || null;
-      this.mergeConflicts = Array.isArray(extra.conflicts) ? extra.conflicts : [];
-    } else {
-      this.mergeReason = null;
-      this.mergeConflicts = [];
-    }
+    const isParked = status === "parked";
+    this.mergeReason = isParked ? (extra.reason || null) : null;
+    this.mergeConflicts = isParked && Array.isArray(extra.conflicts) ? extra.conflicts : [];
     this.emit("merge-status", { id: this.id, mergeStatus: status, ...extra });
   }
 
@@ -1407,11 +1393,13 @@ class Session extends EventEmitter {
       this.commonGitDir = null;
       this.isWorktree = false;
       this._setMergeStatus("merged");
-    } else if (r.parked) {
-      this._setMergeStatus("parked", { reason: r.reason || null, conflicts: r.conflicts || [] });
-    } else {
-      this._setMergeStatus("pending-review", { reason: r.reason || null });
+      return r;
     }
+    if (r.parked) {
+      this._setMergeStatus("parked", { reason: r.reason || null, conflicts: r.conflicts || [] });
+      return r;
+    }
+    this._setMergeStatus("pending-review", { reason: r.reason || null });
     return r;
   }
 
@@ -1455,15 +1443,22 @@ class Session extends EventEmitter {
       // Committed work merged out, so the gate normally returns to 'none'. But if the stashed uncommitted
       // work reapplied WITH conflicts, the worktree now holds conflict markers the operator must resolve -
       // surface that as pending-review instead of silently reporting clean.
-      if (r.restoreConflict) this._setMergeStatus("pending-review", { reason: "restore-conflict" });
-      else this._setMergeStatus("none");
-    } else if (r.parked) {
-      this._setMergeStatus("parked", { reason: r.reason || null, conflicts: r.conflicts || [] });
-    } else if (r.reason === "nothing-to-commit") {
-      this._setMergeStatus("none");
-    } else {
-      this._setMergeStatus("pending-review", { reason: r.reason || null });
+      if (!r.restoreConflict) {
+        this._setMergeStatus("none");
+        return r;
+      }
+      this._setMergeStatus("pending-review", { reason: "restore-conflict" });
+      return r;
     }
+    if (r.parked) {
+      this._setMergeStatus("parked", { reason: r.reason || null, conflicts: r.conflicts || [] });
+      return r;
+    }
+    if (r.reason === "nothing-to-commit") {
+      this._setMergeStatus("none");
+      return r;
+    }
+    this._setMergeStatus("pending-review", { reason: r.reason || null });
     return r;
   }
 
@@ -1912,17 +1907,9 @@ class Session extends EventEmitter {
       this._taskkill(pid).catch(() => { /* pid already exited or taskkill unavailable - nothing to do */ });
     }
 
-    let reason = null;
-    if (this.state === STATES.STARTING && !this._receivedFirstOutput) {
-      reason = "no_output_before_exit";
-      this.transition("process_exit", { exitCode, signal, reason });
-    } else if (exitCode === 0) {
-      this.transition("process_exit_ok", { exitCode, signal });
-    } else if (this.state === STATES.STARTING) {
-      this.transition("process_exit", { exitCode, signal });
-    } else {
-      this.transition("process_exit_fail", { exitCode, signal });
-    }
+    const { event, detail } = decideExitTransition(this.state, exitCode, signal, this._receivedFirstOutput);
+    const reason = detail.reason || null;
+    this.transition(event, detail);
 
     // ORDER CONTRACT: settle the worktree BEFORE emitting "exit". On a changed tree _settleWorktreeOnExit
     // sets mergeStatus='pending-review' and keeps worktreeDir; a queued once("exit") handler (e.g.
@@ -2086,8 +2073,7 @@ class Session extends EventEmitter {
     // Only sleep dead-PTY terminal states. Sleeping a live PTY (IDLE/COMPLETE)
     // would arm the sleep-kill timer below and terminate a session whose work
     // can still continue.
-    const sleepable = [STATES.DONE, STATES.FAILED];
-    if (!sleepable.includes(this.state)) return;
+    if (!RESTARTABLE_STATES.includes(this.state)) return;
     this._sleeping = true;
     this._titleSource.reset();
     this._statusSource.reset();
@@ -2109,7 +2095,7 @@ class Session extends EventEmitter {
     // never restarts directly; it only kills + sets _autoKilled, deferring the restart to here.)
     if (this._autoKilled
         && !this._teardownPending()
-        && (this.state === STATES.DONE || this.state === STATES.FAILED)) {
+        && RESTARTABLE_STATES.includes(this.state)) {
       this.restart();
     }
   }
@@ -2133,8 +2119,7 @@ class Session extends EventEmitter {
         || this.state === STATES.IDLE
         || this.state === STATES.COMPLETE;
       this.killSession();
-      if (wasActive
-          && (this.state === STATES.DONE || this.state === STATES.FAILED)) {
+      if (wasActive && RESTARTABLE_STATES.includes(this.state)) {
         this._autoKilled = true;
       }
     }, SLEEP_KILL_TIMEOUT_MS);
@@ -2148,13 +2133,7 @@ class Session extends EventEmitter {
   }
 
   killSession() {
-    const killable = [
-      STATES.RUNNING,
-      STATES.WAITING,
-      STATES.IDLE,
-      STATES.COMPLETE,
-    ];
-    if (!killable.includes(this.state)) return false;
+    if (!KILLABLE_STATES.includes(this.state)) return false;
     this.kill();
     return this.transition("user_kill");
   }
@@ -2166,8 +2145,7 @@ class Session extends EventEmitter {
     // card to DONE, the dashboard's Restart button sends a plain `restart` (not `force-restart`), so
     // the mutex MUST live here too, not only in forceRestart.
     if (this._teardownPending()) return false;
-    if (this.state !== STATES.DONE && this.state !== STATES.FAILED)
-      return false;
+    if (!RESTARTABLE_STATES.includes(this.state)) return false;
     this.transition("user_restart");
     this.start();
     return true;
@@ -2194,7 +2172,7 @@ class Session extends EventEmitter {
     if (this._destroyed || this._teardownPending()) {
       return { ok: false, reason: this._teardownPending() ? "in-progress" : "destroyed" };
     }
-    if (this.state === STATES.DONE || this.state === STATES.FAILED) {
+    if (RESTARTABLE_STATES.includes(this.state)) {
       // Settled branch: set the mutex flag SYNCHRONOUSLY before the async reset fires, so a second click
       // (or a restart/force-restart) landing while the reset awaits git sees _teardownPending()===true and
       // is refused. .finally clears the flag whether the reset resolved or rejected (no stranded flag);
@@ -2228,27 +2206,21 @@ class Session extends EventEmitter {
   forceRestart() {
     if (this._destroyed) return;
     if (this._teardownPending()) return;
-    const killable = [
-      STATES.RUNNING,
-      STATES.WAITING,
-      STATES.IDLE,
-      STATES.COMPLETE,
-    ];
-    if (killable.includes(this.state)) {
+    if (KILLABLE_STATES.includes(this.state)) {
       this._pendingRestart = true;
       this.once("exit", () => {
         this._pendingRestart = false;
         if (this._destroyed) return;
-        if (this.state === STATES.DONE || this.state === STATES.FAILED) {
-          this.transition("user_restart");
-          this.start();
-        }
+        if (!RESTARTABLE_STATES.includes(this.state)) return;
+        this.transition("user_restart");
+        this.start();
       });
       this.kill();
       this.transition("user_kill");
-    } else if (this.state === STATES.DONE || this.state === STATES.FAILED) {
-      this.restart();
+      return;
     }
+    if (!RESTARTABLE_STATES.includes(this.state)) return;
+    this.restart();
   }
 
   updateSettings(cfg) {
@@ -2286,7 +2258,6 @@ class Session extends EventEmitter {
 module.exports = {
   Session,
   buildSpawnCommand,
-  resolveClaudeCommand,
   classifyClaudeKind,
   CLAUDE_CMD,
 };

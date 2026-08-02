@@ -58,6 +58,18 @@ function findBurntToastModule() {
   return findBurntToastViaPowerShell() || findBurntToastByPath();
 }
 
+// Resolve and log the BurntToast module path once, or log the msg-fallback decision.
+// Guard-clause form of the found/not-found branch so the caller stays else-free.
+function resolveBurntToastModulePath() {
+  const found = findBurntToastModule();
+  if (found) {
+    console.log(`[channel:toast] BurntToast found at ${found}`);
+    return found;
+  }
+  console.warn('[channel:toast] BurntToast not found, using msg fallback');
+  return false;
+}
+
 /**
  * Create a toast channel adapter for NotificationManager.
  * Dumb delivery pipe - no debounce, no suppression logic.
@@ -67,35 +79,28 @@ function createToastChannel() {
   return function toastChannel(_sessionName, _category, message, _context) {
     // Lazy BurntToast discovery on first call
     if (burntToastModulePath === null) {
-      const found = findBurntToastModule();
-      if (found) {
-        burntToastModulePath = found;
-        console.log(`[channel:toast] BurntToast found at ${found}`);
-      } else {
-        burntToastModulePath = false;
-        console.warn('[channel:toast] BurntToast not found, using msg fallback');
-      }
+      burntToastModulePath = resolveBurntToastModulePath();
     }
 
     const title = 'Glissa';
-    if (burntToastModulePath) {
-      const t = escapeForPowerShell(title);
-      const m = escapeForPowerShell(message);
-      const modulePath = escapeForPowerShell(burntToastModulePath);
-      const script = `Import-Module '${modulePath}'; New-BurntToastNotification -Text '${t}', '${m}'`;
-      execFile('powershell', ['-NoProfile', '-Command', script], (err) => {
-        if (err) {
-          console.warn('[channel:toast] BurntToast notification failed:', err.message);
-        }
-      });
-    } else {
+    if (!burntToastModulePath) {
       const text = `${title}: ${message}`;
       execFile('msg', ['*', text], (err) => {
         if (err) {
           console.warn('[channel:toast] msg fallback notification failed:', err.message);
         }
       });
+      return;
     }
+    const t = escapeForPowerShell(title);
+    const m = escapeForPowerShell(message);
+    const modulePath = escapeForPowerShell(burntToastModulePath);
+    const script = `Import-Module '${modulePath}'; New-BurntToastNotification -Text '${t}', '${m}'`;
+    execFile('powershell', ['-NoProfile', '-Command', script], (err) => {
+      if (err) {
+        console.warn('[channel:toast] BurntToast notification failed:', err.message);
+      }
+    });
   };
 }
 

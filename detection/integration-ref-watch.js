@@ -27,6 +27,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const { canonicalizePath } = require('../shared/paths');
+const { createWatchDebounce } = require('./watch-debounce');
 
 // A one-directory, debounced fs.watch over an integration branch's reflog.
 //   createIntegrationRefWatcher({ commonGitDir, branch, onChange, debounceMs? })
@@ -34,9 +35,7 @@ const { canonicalizePath } = require('../shared/paths');
 // updated, so there is nothing to merge into anyway); the caller can re-try on the next worktree-ready.
 // onChange is called at most once per debounce window after a burst of ref writes; it receives no args.
 function createIntegrationRefWatcher({ commonGitDir, branch, onChange, debounceMs = 400 }) {
-  let watcher = null;
-  let timer = null;
-  let stopped = false;
+  const w = createWatchDebounce({ onChange, debounceMs });
 
   // logs/refs/heads/<branch>. The branch can be nested (e.g. release/x), so split the leaf from the dir
   // and watch the dir, filtering the leaf - a non-recursive watch on the exact parent.
@@ -46,47 +45,28 @@ function createIntegrationRefWatcher({ commonGitDir, branch, onChange, debounceM
   const watchDir = reflogPath ? path.dirname(reflogPath) : null;
   const leaf = reflogPath ? path.basename(reflogPath) : null;
 
-  function fire() {
-    if (timer) return; // coalesce a write burst into one trailing call
-    timer = setTimeout(() => {
-      timer = null;
-      if (stopped) return;
-      try { onChange(); } catch { /* a consumer error must not kill the watcher */ }
-    }, debounceMs);
-    if (timer.unref) timer.unref();
-  }
-
   function start() {
-    if (watcher || stopped || !watchDir) return !!watcher;
+    if (w.watcher || w.stopped || !watchDir) return !!w.watcher;
     let exists;
     try { exists = fs.existsSync(watchDir); } catch { exists = false; }
     if (!exists) return false; // no reflog dir yet; the floor (turn-end / gitdir watch) still covers it
     try {
       // Canonical path required: fs.watch on an 8.3 short path aborts the process from native code,
       // past this catch (see canonicalizePath in shared/paths.js).
-      watcher = fs.watch(canonicalizePath(watchDir), { persistent: false }, (_evt, filename) => {
+      w.watcher = fs.watch(canonicalizePath(watchDir), { persistent: false }, (_evt, filename) => {
         // filename is the changed entry. Fire only for our branch's reflog; a null filename (some
         // platforms omit it) is treated as "maybe ours" and fires, since the watch is lossy anyway.
-        if (!filename || filename === leaf) fire();
+        if (!filename || filename === leaf) w.fire();
       });
-      watcher.on('error', () => stop());
+      w.watcher.on('error', () => w.stop());
     } catch {
-      watcher = null;
+      w.watcher = null;
       return false;
     }
     return true;
   }
 
-  function stop() {
-    stopped = true;
-    if (timer) { clearTimeout(timer); timer = null; }
-    if (watcher) {
-      try { watcher.close(); } catch { /* already closed */ }
-      watcher = null;
-    }
-  }
-
-  return { start, stop, get active() { return !!watcher; } };
+  return { start, stop: w.stop, get active() { return !!w.watcher; } };
 }
 
 module.exports = { createIntegrationRefWatcher };

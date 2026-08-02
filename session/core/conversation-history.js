@@ -209,7 +209,6 @@ async function listRepoConversations({
 
 module.exports = {
   encodeProjectDir,
-  claudeProjectsDir,
   listRepoWorktreePaths,
   listRepoConversations,
   cleanTitle, // exported for unit tests

@@ -144,4 +144,4 @@ function createStatusSource(opts) {
   return new StatusSource(opts);
 }
 
-module.exports = { StatusSource, createStatusSource };
+module.exports = { createStatusSource };

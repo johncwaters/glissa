@@ -34,7 +34,11 @@ function resolveClaudeCommand() {
     return { path: null, kind: "unresolved" };
   }
   const resolvedPath = matches[0];
-  console.log(`[glissa] resolved 'claude' (first match wins): ${resolvedPath}`);
+  // Gated: this prints the operator's home-dir path, and every Session construction (each test
+  // included) triggers module-load resolution, so an ungated log spams a full test run.
+  if (process.env.GLISSA_DEBUG_SPAWN) {
+    console.log(`[glissa] resolved 'claude' (first match wins): ${resolvedPath}`);
+  }
   if (matches.length > 1) {
     console.warn(
       `[glissa] multiple 'claude' on PATH (Bun shim risk):\n  ${matches.join("\n  ")}`,

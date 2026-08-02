@@ -52,7 +52,8 @@ async function replayDetection(records, opts = {}) {
   for (const r of records) {
     if (r.type === 'data' && typeof r.data === 'string') {
       title.feed(r.data);
-    } else if (r.type === 'hook') {
+    }
+    if (r.type === 'hook') {
       const sig = mapHookToSignal(r.event, r.payload);
       if (sig) {
         status.ingest({ signal: sig, source: 'hook', ts: Date.now(), event: r.event, payload: r.payload });

@@ -150,12 +150,36 @@ function declaredActiveCount(
   return n - Math.min(idleNameCount, teammateCount);
 }
 
+// A teammate id declared last snapshot but missing from this one has departed (shut down); any
+// name idled against it no longer means anything, and left in place it would wrongly offset a
+// DIFFERENT teammate that happens to keep the surviving count the same. Evicts that many of the
+// OLDEST entries from idleTeammateNames: names are anonymous bookkeeping (the arithmetic only
+// cares about the count), so evicting the oldest is as correct as evicting the departed one and
+// needs no name-to-id mapping. Mutates idleTeammateNames and returns the current declared
+// teammate id set (the caller's new declaredTeammateIds).
+function evictDepartedTeammateNames(idleTeammateNames, declaredTeammateIds, currentEntries) {
+  const currentTeammateIds = new Set(
+    currentEntries.filter((e) => e.type === 'teammate' && e.id).map((e) => e.id),
+  );
+  let departedCount = 0;
+  for (const id of declaredTeammateIds) {
+    if (!currentTeammateIds.has(id)) departedCount++;
+  }
+  for (const name of idleTeammateNames.keys()) {
+    if (departedCount <= 0) break;
+    idleTeammateNames.delete(name);
+    departedCount--;
+  }
+  return currentTeammateIds;
+}
+
 module.exports = {
   addAgent,
   removeAgent,
   pruneAgents,
   extractBackgroundTasks,
   declaredActiveCount,
+  evictDepartedTeammateNames,
   DEFAULT_AGENT_TTL_MS,
   DEFAULT_SHELL_TASK_TTL_MS,
   DEFAULT_TEAMMATE_TASK_TTL_MS,

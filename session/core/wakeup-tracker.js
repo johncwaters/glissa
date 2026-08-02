@@ -90,5 +90,4 @@ module.exports = {
   extractCronTaskId,
   MAX_WAKEUPS,
   DEFAULT_WAKEUP_GRACE_MS,
-  DEFAULT_CRON_TTL_MS,
 };

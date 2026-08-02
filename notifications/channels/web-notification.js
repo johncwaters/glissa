@@ -3,7 +3,7 @@
 /**
  * Create a Web Notification channel adapter for NotificationManager.
  *
- * Dumb delivery pipe — no debounce, no suppression logic (that lives in
+ * Dumb delivery pipe: no debounce, no suppression logic (that lives in
  * NotificationManager). Instead of spawning an OS-level toast, it broadcasts a
  * `notify` control message over the existing control WebSocket. Each connected
  * dashboard client raises a native browser Notification (routed to the Windows

@@ -190,8 +190,6 @@ function looksBinary(buf) {
 }
 
 module.exports = {
-  RULES,
-  RULE_ORDER,
   applyRules,
   exemptions,
   shouldCheckPath,

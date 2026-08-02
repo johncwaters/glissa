@@ -12,6 +12,7 @@ Pure cores seam-extracted from `sessions.js`: no fs, no git, no async, no Sessio
 |------|-------------|
 | `state-machine.js` | `TRANSITIONS`, `GUARDS`, `ENTRY_HOOKS`, `EXIT_HOOKS` lifecycle tables for the session state machine (states defined in `shared/states.js`) |
 | `status-mapper.js` | Pure `mapSignalToEvent(signal, state, confidence, activeAgents)` -> event or null; `activeAgents > 0` suppresses `ready` -> `task_complete` |
+| `exit-transition.js` | Pure `decideExitTransition(state, exitCode, signal, receivedFirstOutput)` -> `{ event, detail }`: the real-PTY-exit decision extracted from `Session._handlePtyExit` |
 | `spawn-command.js` | `classifyClaudeKind`, `resolveClaudeCommand`, `buildSpawnCommand`, `CLAUDE_CMD`: resolve-then-branch spawn (direct `.exe` vs `cmd.exe /c` shim fallback) |
 | `spawn-env.js` | Pure `buildSpawnEnv(baseEnv)`: the 5-var scrub (`CLAUDECODE` etc.) + always-on `CLAUDE_CODE_NO_FLICKER`, returns a copy |
 | `agent-tracker.js` | Live background sub-agent bookkeeping over a `Map<agent_id, ts>` with TTL prune; feeds the completion gate |

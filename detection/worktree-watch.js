@@ -30,6 +30,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const { canonicalizePath } = require('../shared/paths');
+const { createWatchDebounce } = require('./watch-debounce');
 
 // Resolve a linked worktree's per-worktree git metadata dir from its `.git`
 // pointer file (`gitdir: <path>`), or null when `dir` is not a linked worktree
@@ -61,22 +62,10 @@ function resolveWorktreeGitDir(dir) {
 // onChange is called at most once per debounce window after a burst of git writes
 // (a single `git commit` touches several files); it receives no arguments.
 function createWorktreeWatcher({ worktreeDir, onChange, debounceMs = 400 }) {
-  let watcher = null;
-  let timer = null;
-  let stopped = false;
-
-  function fire() {
-    if (timer) return; // coalesce a write burst into one trailing call
-    timer = setTimeout(() => {
-      timer = null;
-      if (stopped) return;
-      try { onChange(); } catch { /* a consumer error must not kill the watcher */ }
-    }, debounceMs);
-    if (timer.unref) timer.unref();
-  }
+  const w = createWatchDebounce({ onChange, debounceMs });
 
   function start() {
-    if (watcher || stopped) return !!watcher;
+    if (w.watcher || w.stopped) return !!w.watcher;
     const gitDir = resolveWorktreeGitDir(worktreeDir);
     if (!gitDir) return false;
     try {
@@ -84,27 +73,18 @@ function createWorktreeWatcher({ worktreeDir, onChange, debounceMs = 400 }) {
       // ORIG_HEAD, MERGE_HEAD) carry the stage/commit/reset signal we want.
       // Canonical path required: fs.watch on an 8.3 short path aborts the process from native code,
       // past this catch (see canonicalizePath in shared/paths.js).
-      watcher = fs.watch(canonicalizePath(gitDir), { persistent: false }, () => fire());
+      w.watcher = fs.watch(canonicalizePath(gitDir), { persistent: false }, () => w.fire());
       // The gitdir can be removed out from under us (worktree pruned). Treat any
       // watcher error as "stop watching"; the turn-end hook + a later re-check still cover the session.
-      watcher.on('error', () => stop());
+      w.watcher.on('error', () => w.stop());
     } catch {
-      watcher = null;
+      w.watcher = null;
       return false;
     }
     return true;
   }
 
-  function stop() {
-    stopped = true;
-    if (timer) { clearTimeout(timer); timer = null; }
-    if (watcher) {
-      try { watcher.close(); } catch { /* already closed */ }
-      watcher = null;
-    }
-  }
-
-  return { start, stop, get active() { return !!watcher; } };
+  return { start, stop: w.stop, get active() { return !!w.watcher; } };
 }
 
 module.exports = { createWorktreeWatcher, resolveWorktreeGitDir };

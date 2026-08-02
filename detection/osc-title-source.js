@@ -1,6 +1,6 @@
 'use strict';
 
-// OSC-0 title source — the DEGRADED fallback status signal.
+// OSC-0 title source: the DEGRADED fallback status signal.
 //
 // Claude Code emits an activity glyph as the first char of its OSC-0 title:
 //   - braille family U+2800..U+28FF  => spinner ("working")
@@ -8,16 +8,16 @@
 // See docs/postmortem-terminal-detection.md and .omc/probes/common-patterns.md.
 //
 // CONTRACT (honest fallback): this source emits ONLY `working` / `ready` / `unknown`.
-// It NEVER emits `awaiting-input` — the title cannot authoritatively tell "needs input"
+// It NEVER emits `awaiting-input`: the title cannot authoritatively tell "needs input"
 // from "finished". WAITING is the hook source's job. An unrecognized leading glyph is
 // reported as `unknown` (with a one-time warning), never silently treated as `ready`.
 //
 // Generic window titles are ignored. Claude ALWAYS leads its activity title with a
 // pictographic glyph (braille spinner or a symbol, all > U+007F). A title that leads
-// with a plain ASCII / text character is therefore NOT a Claude activity title — it is
+// with a plain ASCII / text character is therefore NOT a Claude activity title: it is
 // a window title set by the spawn shell or OS (e.g. on Windows, Glissa spawns
 // `cmd.exe /c claude`, and cmd.exe sets the console title to "C:\...\cmd.exe"). Such
-// titles carry no Claude status and are dropped silently — never flagged as `unknown`,
+// titles carry no Claude status and are dropped silently, never flagged as `unknown`,
 // since `unknown` is reserved for genuine new-glyph candidates worth triaging.
 
 const { EventEmitter } = require('node:events');
@@ -53,16 +53,10 @@ function findOscTitle(buffer, fromIndex) {
   const contentStart = start + OSC_START.length;
   const belEnd = buffer.indexOf(BEL, contentStart);
   const stEnd = buffer.indexOf(ST, contentStart);
-  let end;
-  let termLen;
   if (belEnd === -1 && stEnd === -1) return null;
-  if (belEnd !== -1 && (stEnd === -1 || belEnd < stEnd)) {
-    end = belEnd;
-    termLen = 1;
-  } else {
-    end = stEnd;
-    termLen = 2;
-  }
+  const useBel = belEnd !== -1 && (stEnd === -1 || belEnd < stEnd);
+  const end = useBel ? belEnd : stEnd;
+  const termLen = useBel ? 1 : 2;
   return { start, end, next: end + termLen, title: buffer.slice(contentStart, end) };
 }
 
@@ -96,7 +90,7 @@ class OscTitleSource extends EventEmitter {
 
   _processTitle(title) {
     const trimmed = title.replace(/^[\s\x00-\x1f]+/, '');
-    if (!trimmed) return; // cleared/empty title — ignore
+    if (!trimmed) return; // cleared/empty title, ignore
     const char = String.fromCodePoint(trimmed.codePointAt(0));
 
     if (isBrailleChar(char)) {
@@ -129,7 +123,7 @@ class OscTitleSource extends EventEmitter {
       return;
     }
 
-    // Unrecognized non-ASCII glyph — could be a NEW Claude idle/activity glyph from
+    // Unrecognized non-ASCII glyph: could be a NEW Claude idle/activity glyph from
     // a future version. NEVER treat as ready. Report once so it can be triaged.
     this._lastChar = char;
     if (this._lastKind !== 'unknown') {
@@ -139,7 +133,7 @@ class OscTitleSource extends EventEmitter {
         this._warnedUnknown = true;
         console.warn(
           `[osc-title-source] unknown leading title glyph U+${char.codePointAt(0).toString(16)} ` +
-            `(${JSON.stringify(char)}) — treating as 'unknown', not 'ready'. ` +
+            `(${JSON.stringify(char)}), treating as 'unknown', not 'ready'. ` +
             `If this is a new idle glyph, add it to KNOWN_IDLE_CODEPOINTS.`,
         );
       }
@@ -218,10 +212,7 @@ function createOscTitleSource(opts) {
 }
 
 module.exports = {
-  OscTitleSource,
   createOscTitleSource,
   isBrailleChar,
   isKnownIdleChar,
-  findOscTitle,
-  KNOWN_IDLE_CODEPOINTS,
 };
