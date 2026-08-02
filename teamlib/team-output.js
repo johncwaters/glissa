@@ -113,6 +113,13 @@ function scaffoldPack(
   const promoted = [];
   const divergent = [];
   const stub = (dest, name) => fs.writeFileSync(dest, `# ${name}\n\n<!-- ${PACK_SENTINEL}: fill this in. -->\n`, 'utf8');
+  const copyOrStub = (src, dest, name) => {
+    if (src) {
+      fs.copyFileSync(src, dest);
+      return;
+    }
+    stub(dest, name);
+  };
 
   for (const file of files) {
     const dest = file.path;
@@ -139,33 +146,23 @@ function scaffoldPack(
         continue;
       }
       const src = fallbackTemplatesDir ? path.join(fallbackTemplatesDir, file.name) : null;
-      const hasSrc = src && fs.existsSync(src);
-      if (hasSrc) fs.copyFileSync(src, dest);
-      if (!hasSrc) stub(dest, file.name);
+      copyOrStub(src && fs.existsSync(src) ? src : null, dest, file.name);
       created.push(file.name);
       continue;
     }
     // Local file: unchanged behavior (team templatesDir -> shared fallback -> stub).
-    const src = pickTemplate(file.name, templatesDir, fallbackTemplatesDir);
-    if (src) fs.copyFileSync(src, dest);
-    if (!src) stub(dest, file.name);
+    copyOrStub(pickTemplate(file.name, templatesDir, fallbackTemplatesDir), dest, file.name);
     created.push(file.name);
   }
 
   const readmeDest = path.join(packDir, 'README.md');
   if (!fs.existsSync(readmeDest)) {
     const readmeSrc = pickTemplate('README.md', templatesDir, fallbackTemplatesDir);
-    if (readmeSrc) {
-      fs.copyFileSync(readmeSrc, readmeDest);
-    }
-    if (!readmeSrc) {
-      fs.writeFileSync(
-        readmeDest,
-        `# Team pack\n\nProject-owned inputs for this team. Replace the ${PACK_SENTINEL} markers,`
-          + ' then run the team again.\n',
-        'utf8',
-      );
-    }
+    const readmeText = readmeSrc
+      ? fs.readFileSync(readmeSrc, 'utf8')
+      : `# Team pack\n\nProject-owned inputs for this team. Replace the ${PACK_SENTINEL} markers,`
+        + ' then run the team again.\n';
+    fs.writeFileSync(readmeDest, readmeText, 'utf8');
     created.push('README.md');
   }
   return {
