@@ -149,14 +149,16 @@ function ensureGroup(group) {
     add.type = 'button';
     add.addEventListener('click', () => quickAdd(header.dataset.path, header.dataset.label));
     header._addBtn = add;
-    header.appendChild(add);
     // Dismiss button for a KEPT session-less project: forgets its path so the empty header disappears.
     // Shown only while the group is empty (a populated project is retired by removing its sessions).
+    // Appended BEFORE "+" so "+" owns one fixed rightmost slot whether or not the "x" is visible;
+    // when "+" shifted with the "x", the rightmost slot became an accidental dismiss target.
     const forget = el('button', 'focus-rail-group-remove', '×');
     forget.type = 'button';
     forget.addEventListener('click', () => forgetProject(header.dataset.path));
     header._forgetBtn = forget;
     header.appendChild(forget);
+    header.appendChild(add);
     list = el('div', 'focus-rail-list');
     list.setAttribute('role', 'listbox');
     groupHeaderById.set(group.key, header);
