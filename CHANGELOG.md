@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-08-05
+
+A hardening and housekeeping release: detection survives Windows 8.3 short paths instead of aborting the process, team configs must now declare their permission mode explicitly, the focus rail's quick-add button stops trading places with the dismiss control, and lint moves under CI enforcement.
+
+### Fixed
+
+- **Focus rail quick-add no longer shifts position**: the dismiss control shown on an empty project group used to render after the "+" quick-add, so the rightmost click target flipped between "add a session" and "remove this project" depending on the group. The "+" now always owns the rightmost slot, ending accidental project dismissals.
+- **Windows 8.3 short paths no longer abort the process**: watching a directory through an unresolved short path (e.g. `C:\Users\RUNNER~1\...`) tripped a native libuv assertion inside `fs.watch` that no JS `try/catch` can intercept, killing the whole server. Every watched path is now canonicalized first, and path comparison falls back to canonical forms so short/long spellings of the same directory still match (Windows only).
+- **PR-review sessions appear in the health snapshot**, so the footer telemetry no longer undercounts live sessions while the PR auto-review lane is working.
+- **Control-channel relay messages can no longer be spoofed by their own payload**: a forwarded event carrying a same-named key could overwrite the relay's `type`, `id`, `session`, or `timestamp`; the relay's own identity fields now always win.
+
+### Changed
+
+- **`team.json` must declare `permissions.mode` explicitly**: the silent default is gone, and validation reports an honest error for a missing or unknown mode. Existing team definitions need a one-line addition.
+- **Lint is now enforced**: `npm run lint` runs Biome and CI fails on findings; the whole tree was brought clean.
+- **README demo GIF and docs cleanup**: the static screenshot is replaced with a captured demo GIF, stale design docs moved to `docs/archive/`, and AGENTS.md file trees were synced with reality.
+- Internal hardening across the tree: pure-core extractions in session/detection, shared modal scaffolding in the dashboard, control-plane dedupe, and PR-review/team-session wiring extracted from `backend.js`.
+
+### Removed
+
+- **The qa-walk team is retired**, along with the never-honored `stage.optional` field in team definitions.
+
+### Security
+
+- Dependency patches for known CVEs: `postcss`, `body-parser`, `nanoid`.
+
 ## [0.20.0] - 2026-07-31
 
 The review sidebar learns to see and fix base-branch drift with a live ahead/behind indicator and a one-click Resync, every session now leaves a lightweight forensic recording by default, and crash-safe auto-resume actually works: the session id capture it depends on was keyed to a hook that current Claude Code never fires.
