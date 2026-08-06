@@ -8,12 +8,17 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 
 const { registerControlHandlers } = require('../server/control-handlers');
+const { createConfigStore } = require('../server/config-store');
 
 function fakeConfigStore(cfg) {
   return {
     save: (fn) => { fn(cfg); return cfg; },
+    isUnchosenLaunchDefault: () => false, // no launch-default overlay in these fixtures
     getSettings: () => ({
       prReview: cfg.prReview || null,
       telegram: cfg.telegram || null,
@@ -23,7 +28,7 @@ function fakeConfigStore(cfg) {
   };
 }
 
-function harness(cfg) {
+function harness(cfg, store = fakeConfigStore(cfg)) {
   const controlWss = new EventEmitter();
   const sent = [];
   const broadcasts = [];
@@ -33,9 +38,9 @@ function harness(cfg) {
   registerControlHandlers(controlWss, {
     sessions: new Map(),
     config: cfg,
-    configStore: fakeConfigStore(cfg),
+    configStore: store,
     applyConfigReload: () => {},
-    applySettingsReload: (c) => reloadCalls.push(c),
+    applySettingsReload: (c) => { reloadCalls.push(c); if (store.applySettings) store.applySettings(c); },
     broadcastControl: (m) => broadcasts.push(m),
   });
   controlWss.emit('connection', ws);
@@ -122,4 +127,63 @@ test('empty telegram strings persist as-is (means unset), key is not deleted', (
   h.send({ type: 'update-settings', settings: { telegram: { botToken: '', chatId: '' } } });
 
   assert.deepEqual(h.cfg.telegram, { botToken: '', chatId: '' });
+});
+
+// ---------------------------------------------------------------------------
+// Launch defaults (the dev server's debugMode overlay) through the REAL config store: the dialog
+// sends every boolean on every save, so an unrelated change must not write this launch's default
+// into config.json, which would leak the dev overlay into `npm start` from the same repo config.
+// ---------------------------------------------------------------------------
+
+// Runs fn against a real config store over a temp config.json, then restores env + disk.
+function withRealStore(cfg, storeOpts, fn) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-ctl-settings-'));
+  const configPath = path.join(dir, 'config.json');
+  fs.writeFileSync(configPath, JSON.stringify(cfg, null, 2), 'utf8');
+  const prev = process.env.GLISSA_CONFIG;
+  process.env.GLISSA_CONFIG = configPath;
+  try {
+    const store = createConfigStore(storeOpts);
+    return fn(harness(store.config, store), store, () => JSON.parse(fs.readFileSync(configPath, 'utf8')));
+  } finally {
+    if (prev == null) delete process.env.GLISSA_CONFIG;
+    if (prev != null) process.env.GLISSA_CONFIG = prev;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test('an unrelated save never materializes an untouched launch default', () => {
+  withRealStore({ projects: [], teams: [] }, { settingsDefaults: { debugMode: true } }, (h, store, readDisk) => {
+    // Exactly what the dialog sends: the changed setting plus the echoed-back debugMode.
+    h.send({ type: 'update-settings', settings: { debugMode: true, cursorBlink: true } });
+
+    const onDisk = readDisk();
+    assert.equal(onDisk.cursorBlink, true, 'the real change persists');
+    assert.equal('debugMode' in onDisk, false, 'the untouched launch default is not written to disk');
+    assert.equal('debugMode' in store.config, false, 'nor into the in-memory config');
+    assert.equal(store.getSettings().debugMode, true, 'the dev overlay still echoes true');
+  });
+});
+
+test('flipping the checkbox away from the launch default persists it, and it wins from then on', () => {
+  withRealStore({ projects: [], teams: [] }, { settingsDefaults: { debugMode: true } }, (h, store, readDisk) => {
+    h.send({ type: 'update-settings', settings: { debugMode: false } });
+    assert.equal(readDisk().debugMode, false, 'an explicit choice is persisted');
+    assert.equal(store.getSettings().debugMode, false, 'and beats the launch default in the echo');
+
+    // Now that the key exists, re-checking it persists normally: no guard once the value is real.
+    h.send({ type: 'update-settings', settings: { debugMode: true } });
+    assert.equal(readDisk().debugMode, true);
+    assert.equal(store.getSettings().debugMode, true);
+  });
+});
+
+test('with no launch defaults (production) every boolean persists exactly as before', () => {
+  withRealStore({ projects: [], teams: [] }, undefined, (h, store, readDisk) => {
+    h.send({ type: 'update-settings', settings: { debugMode: true, cursorBlink: true } });
+    const onDisk = readDisk();
+    assert.equal(onDisk.debugMode, true, 'no overlay means no guard');
+    assert.equal(onDisk.cursorBlink, true);
+    assert.equal(store.getSettings().debugMode, true);
+  });
 });

@@ -247,6 +247,45 @@ function formatTimestamp(ts) {
   return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
+function formatSeconds(ms) {
+  return `${(Number(ms || 0) / 1000).toFixed(1)}s`;
+}
+
+// What a gate verdict was decided on. 'cancel' has neither figure to report: it fires on a state
+// change or newer activity, where the live count and the quiet window are both irrelevant.
+function gateEvidence(d) {
+  if (d.decision === 'gated') return `(${Number(d.active) || 0} bg)`;
+  if (d.decision === 'wait' || d.decision === 'release') return `(quiet ${formatSeconds(d.quietMs)})`;
+  return '';
+}
+
+// One compact line per decision-trace entry (session/core/decision-log.js): what the session
+// decided, and the evidence it decided on.
+function formatDecision(d) {
+  const at = `<span class="debug-dim">${formatTimestamp(d.ts)}</span>`;
+  if (d.kind === 'signal') {
+    const from = escapeHtml([d.signal, d.source].filter(Boolean).join('/'));
+    if (d.action === 'transition') return `${at} ${from} → <span class="debug-label">${escapeHtml(d.event || '')}</span>`;
+    if (d.action === 'gate-held') return `${at} ${from} → held <span class="debug-dim">(${Number(d.active) || 0} bg)</span>`;
+    return `${at} ${from} → <span class="debug-dim">no-op</span>`;
+  }
+  if (d.kind === 'gate') {
+    const repeats = d.repeats > 1 ? ` <span class="debug-dim">x${Number(d.repeats)}</span>` : '';
+    const evidence = gateEvidence(d);
+    const why = evidence ? ` <span class="debug-dim">${evidence}</span>` : '';
+    return `${at} gate <span class="debug-label">${escapeHtml(d.decision || '?')}</span>${why}${repeats}`;
+  }
+  if (d.kind === 'notify') {
+    const what = escapeHtml(d.category || d.to || '?');
+    if (d.category) return `${at} notify <span class="debug-label">${what}</span>: fired`;
+    return `${at} notify ${what}: <span class="debug-dim">silent (${escapeHtml(d.reason || '')})</span>`;
+  }
+  if (d.kind === 'notify-state') {
+    return `${at} notify ${escapeHtml(d.category || '?')}: <span class="debug-dim">${escapeHtml(d.from || '?')} → ${escapeHtml(d.to || '?')}</span>`;
+  }
+  return `${at} <span class="debug-dim">${escapeHtml(d.kind || 'decision')}</span>`;
+}
+
 function renderDebugOverlay(ui, payload) {
   if (!ui.debugOverlay) return;
   const p = payload;
@@ -264,7 +303,8 @@ function renderDebugOverlay(ui, payload) {
   if (p.transitions.length > 0) {
     for (const t of p.transitions) {
       const d = t.detail && typeof t.detail === 'object' ? t.detail : null;
-      const tag = d && (d.signal || d.source) ? ` <span class="debug-dim">${escapeHtml([d.signal, d.source].filter(Boolean).join('/'))}</span>` : '';
+      const tagParts = d ? [d.signal, d.source, d.deferred ? 'deferred' : null].filter(Boolean) : [];
+      const tag = tagParts.length > 0 ? ` <span class="debug-dim">${escapeHtml(tagParts.join('/'))}</span>` : '';
       html += `<div class="debug-field"><span class="debug-dim">${formatTimestamp(t.timestamp)}</span> ${escapeHtml(t.from)} → ${escapeHtml(t.to)} <span class="debug-label">${escapeHtml(t.event)}</span>${tag}</div>`;
     }
   }
@@ -279,6 +319,30 @@ function renderDebugOverlay(ui, payload) {
   html += `<div class="debug-field"><span class="debug-label">Hooks injected:</span> <span class="debug-value">${det.hooksInjected ? 'yes' : 'no'}</span></div>`;
   html += `<div class="debug-field"><span class="debug-label">Hook seen:</span> <span class="debug-value">${det.hookSeen ? 'yes' : 'no (degraded → title)'}</span></div>`;
   html += `<div class="debug-field"><span class="debug-label">Title state:</span> <span class="debug-value">${escapeHtml(ts.lastKind || 'none')}${ts.hasSeenSpinner ? ' · spun' : ''}</span></div>`;
+  html += `</div>`;
+
+  // Background work + the completion gate: the two inputs that decide whether a turn-end ready
+  // completes the card now, later, or never.
+  const agents = det.agents || {};
+  const gate = det.gate;
+  html += `<div class="debug-section"><div class="debug-section-title">Agents</div>`;
+  html += `<div class="debug-field"><span class="debug-label">Active:</span> <span class="debug-value">${Number(agents.active) || 0} (counted ${Number(agents.counted) || 0}, declared ${Number(agents.declared) || 0})</span></div>`;
+  html += `<div class="debug-field"><span class="debug-label">Idle:</span> <span class="debug-value">${Number(agents.idleNames) || 0} names, ${Number(agents.idleTasks) || 0} tasks</span></div>`;
+  const gateText = gate
+    ? `held ${formatSeconds(gate.heldForMs)} (seq ${Number(gate.seq) || 0}, lastActivity ${Number(gate.lastActivitySeq) || 0})`
+    : 'none';
+  html += `<div class="debug-field"><span class="debug-label">Gate:</span> <span class="debug-value">${escapeHtml(gateText)}</span></div>`;
+  html += `</div>`;
+
+  // Decision trace: why each of the above fired (or stayed silent), newest last.
+  const decisions = Array.isArray(p.decisions) ? p.decisions : [];
+  html += `<div class="debug-section"><div class="debug-section-title">Decisions (last ${decisions.length})</div>`;
+  if (decisions.length === 0) {
+    html += `<div class="debug-field debug-dim">No decisions recorded</div>`;
+  }
+  for (const d of decisions) {
+    html += `<div class="debug-field">${formatDecision(d)}</div>`;
+  }
   html += `</div>`;
 
   ui.debugOverlay.innerHTML = html;

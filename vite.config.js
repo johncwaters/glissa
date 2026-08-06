@@ -17,6 +17,10 @@ function glissaBackendPlugin() {
       const { createBackend } = require('./server/backend');
       backend = createBackend(server.httpServer, {
         staticDir: null,
+        // Dev sessions are the ones being debugged, so the debug button and health panel default
+        // on here. Fallback only: nothing is written to config.json, and an explicit debugMode key
+        // (or a settings save from the dashboard) still wins.
+        settingsDefaults: { debugMode: true },
         onRestart: () => {
           console.log('Restart requested - restarting Vite server...');
           server.restart();

@@ -32,7 +32,7 @@ const { registerControlHandlers } = require('./control-handlers');
 const { createReplayLog } = require('./control-replay-core');
 const { createLifecycle } = require('./server-lifecycle');
 const { NotificationManager } = require('../notifications/notification-manager');
-const { createNotifyGate, decideNotification } = require('../session/core/notify-gate');
+const { createNotifyGate, explainNotification } = require('../session/core/notify-gate');
 const { pickAutoResume } = require('../session/core/auto-resume');
 const { createToastChannel } = require('../notifications/channels/toast');
 const { createWebNotificationChannel } = require('../notifications/channels/web-notification');
@@ -229,9 +229,11 @@ function isAllowedOrigin(req) {
 }
 
 function createBackend(httpServer, options = {}) {
-  const { staticDir = 'auto' } = options;
+  const { staticDir = 'auto', settingsDefaults } = options;
 
-  const configStore = createConfigStore();
+  // settingsDefaults is a per-launch fallback for keys config.json omits, never persisted (the dev
+  // server defaults debugMode on that way). Production passes nothing and behaves as before.
+  const configStore = createConfigStore({ settingsDefaults });
   const { config } = configStore;
   const port = process.env.GLISSA_PORT
     ? Number.parseInt(process.env.GLISSA_PORT, 10)
@@ -525,6 +527,15 @@ function createBackend(httpServer, options = {}) {
   // and so shutdown() can reap in-flight review PTYs without touching persisted sessions.
   const reviewSessions = new Map();
 
+  // The manager keys its entries by the session id passed to trigger(), so a lifecycle hop can be
+  // routed straight back into that session's decision trace: focus suppression, the debounce and
+  // escalation otherwise produce no evidence anywhere. Team pseudo-entries have no session; skipped.
+  notificationManager.on('notification-state-change', ({ session, from, to, event, category }) => {
+    const sess = sessions.get(session);
+    if (!sess) return;
+    sess.recordNotifyDecision({ ts: Date.now(), kind: 'notify-state', from, to, event, category });
+  });
+
   function closeSessionDataClients(sessionId) {
     const clients = sessionDataClients.get(sessionId);
     if (clients) {
@@ -746,8 +757,8 @@ function createBackend(httpServer, options = {}) {
       }
 
       // Notification triggers: session state -> notification lifecycle. The decision (which
-      // category fires for this state entry, if any) lives in session/core/notify-gate.js
-      // decideNotification, shared with its tests. Both turn-complete (COMPLETE) and process
+      // category fires for this state entry, if any, and why) lives in session/core/notify-gate.js
+      // explainNotification, shared with its tests. Both turn-complete (COMPLETE) and process
       // exit (DONE) notify under 'complete', but terminal categories pass the once-per-work-cycle
       // gate: a cycle starts on INITIALIZING (restart) or a USER-driven RUNNING entry (event
       // user_input, or an authoritative resume signal; a hook-less session keeps the legacy
@@ -765,7 +776,21 @@ function createBackend(httpServer, options = {}) {
         notificationManager.acknowledge(sess.id);
       }
 
-      const notifyCategory = decideNotification(to, notifyGate, event, { signal: detail?.signal, hookSeen: sess.hookSeen });
+      const { category: notifyCategory, reason: notifyReason } = explainNotification(
+        to, notifyGate, event, { signal: detail?.signal, hookSeen: sess.hookSeen },
+      );
+      // The decision and its evidence go into the session's decision trace (debug overlay +
+      // recorder). Without this a silent state entry leaves no trace of having been considered.
+      sess.recordNotifyDecision({
+        ts: Date.now(),
+        kind: 'notify',
+        to,
+        event: event || null,
+        signal: detail?.signal || null,
+        hookSeen: sess.hookSeen,
+        category: notifyCategory,
+        reason: notifyReason,
+      });
       if (notifyCategory) {
         const messages = {
           waiting: `${sess.name} needs your input`,

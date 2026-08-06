@@ -22,13 +22,14 @@ function writeTmpConfig(cfg) {
   return { dir, p };
 }
 
-// Runs fn with GLISSA_CONFIG pointed at a temp config, then restores env + disk.
-function withStore(cfg, fn) {
+// Runs fn with GLISSA_CONFIG pointed at a temp config, then restores env + disk. storeOpts is
+// passed straight to createConfigStore (the per-launch settingsDefaults the dev server uses).
+function withStore(cfg, fn, storeOpts) {
   const { dir, p } = writeTmpConfig(cfg);
   const prev = process.env.GLISSA_CONFIG;
   process.env.GLISSA_CONFIG = p;
   try {
-    return fn(createConfigStore(), p);
+    return fn(createConfigStore(storeOpts), p);
   } finally {
     if (prev == null) delete process.env.GLISSA_CONFIG;
     if (prev != null) process.env.GLISSA_CONFIG = prev;
@@ -86,6 +87,36 @@ test('getSettings falls back to DEFAULT_CONFIG for absent keys', () => {
     assert.equal(s.detectBackgroundAgents, DEFAULT_CONFIG.detectBackgroundAgents);
     assert.equal(s.integrationBranch, DEFAULT_CONFIG.integrationBranch);
     assert.deepEqual(s.worktreeShare, DEFAULT_CONFIG.worktreeShare);
+  });
+});
+
+// The dev server (vite.config.js) turns debugMode on this way: a fallback for a key config.json
+// omits, never a persisted value, and never a win over an explicit setting.
+test('settingsDefaults overlays a key the config file omits', () => {
+  withStore({ projects: [] }, (store) => {
+    assert.equal(DEFAULT_CONFIG.debugMode, false, 'the production default is off');
+    assert.equal(store.getSettings().debugMode, true, 'the launch default fills the absent key');
+  }, { settingsDefaults: { debugMode: true } });
+});
+
+test('an explicit config value beats settingsDefaults', () => {
+  withStore({ projects: [], debugMode: false }, (store) => {
+    assert.equal(store.getSettings().debugMode, false, 'the user setting always wins');
+  }, { settingsDefaults: { debugMode: true } });
+});
+
+test('settingsDefaults is never persisted and leaves other keys on DEFAULT_CONFIG', () => {
+  withStore({ projects: [] }, (store, p) => {
+    store.getSettings();
+    const onDisk = JSON.parse(fs.readFileSync(p, 'utf8'));
+    assert.equal('debugMode' in onDisk, false, 'a launch default writes nothing to config.json');
+    assert.equal(store.getSettings().cursorBlink, DEFAULT_CONFIG.cursorBlink, 'unrelated keys are untouched');
+  }, { settingsDefaults: { debugMode: true } });
+});
+
+test('no settingsDefaults option keeps plain DEFAULT_CONFIG behavior', () => {
+  withStore({ projects: [] }, (store) => {
+    assert.equal(store.getSettings().debugMode, DEFAULT_CONFIG.debugMode);
   });
 });
 

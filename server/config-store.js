@@ -137,8 +137,23 @@ function ensureProjectIds(projects) {
   return changed;
 }
 
-function createConfigStore() {
+/**
+ * @param {object} [opts]
+ * @param {object} [opts.settingsDefaults] Per-launch overrides of DEFAULT_CONFIG used ONLY as the
+ *   fallback for keys the config file omits (getSettings). Nothing is persisted, and an explicit
+ *   key in config.json still wins. The dev server (vite.config.js) uses it to default debugMode on.
+ *   Constraint: only overlay a key with NO direct server-side `config[key]` consumer. The overlay
+ *   exists solely in the getSettings echo, so a reader touching config[key] would still see the
+ *   raw (absent) value; and applySettings deliberately declines to materialize an incoming value
+ *   equal to the launch default, so a hand-edit to exactly that value never lands in config either.
+ */
+function createConfigStore({ settingsDefaults } = {}) {
   const configPath = resolveConfigPath();
+  const effectiveDefaults = { ...DEFAULT_CONFIG, ...(settingsDefaults || {}) };
+  // The keys whose default this launch overrides. A launch default is a fallback, never a value:
+  // it must not be materialized into config.json by a save that merely echoed it back, or the dev
+  // overlay would leak into production the first time the operator changes an unrelated setting.
+  const launchDefaultKeys = new Set(Object.keys(settingsDefaults || {}));
   // True only when the resolved config is the in-repo config.json (dev via `node server.js`/`vite`).
   // A real global install never resolves this (config.json is not in package.json `files`, so it self-
   // seeds at ~/.glissa/config.json). Used as a best-effort dev-skip for the startup update check.
@@ -194,17 +209,17 @@ function createConfigStore() {
       promptDetectionMs: config.promptDetectionMs,
       notifyDebounceMs: config.notifyDebounceMs,
       replayBufferKB: config.replayBufferKB,
-      cursorBlink: config.cursorBlink ?? DEFAULT_CONFIG.cursorBlink,
-      debugMode: config.debugMode ?? DEFAULT_CONFIG.debugMode,
-      detectBackgroundAgents: config.detectBackgroundAgents ?? DEFAULT_CONFIG.detectBackgroundAgents,
-      recordSignals: config.recordSignals ?? DEFAULT_CONFIG.recordSignals,
-      antiSlopPrompt: config.antiSlopPrompt ?? DEFAULT_CONFIG.antiSlopPrompt,
-      checkForUpdates: config.checkForUpdates ?? DEFAULT_CONFIG.checkForUpdates,
-      autoResume: config.autoResume ?? DEFAULT_CONFIG.autoResume,
-      editorCommand: config.editorCommand ?? DEFAULT_CONFIG.editorCommand,
-      integrationBranch: config.integrationBranch ?? DEFAULT_CONFIG.integrationBranch,
-      worktreeRoot: config.worktreeRoot ?? DEFAULT_CONFIG.worktreeRoot,
-      worktreeShare: config.worktreeShare ?? DEFAULT_CONFIG.worktreeShare,
+      cursorBlink: config.cursorBlink ?? effectiveDefaults.cursorBlink,
+      debugMode: config.debugMode ?? effectiveDefaults.debugMode,
+      detectBackgroundAgents: config.detectBackgroundAgents ?? effectiveDefaults.detectBackgroundAgents,
+      recordSignals: config.recordSignals ?? effectiveDefaults.recordSignals,
+      antiSlopPrompt: config.antiSlopPrompt ?? effectiveDefaults.antiSlopPrompt,
+      checkForUpdates: config.checkForUpdates ?? effectiveDefaults.checkForUpdates,
+      autoResume: config.autoResume ?? effectiveDefaults.autoResume,
+      editorCommand: config.editorCommand ?? effectiveDefaults.editorCommand,
+      integrationBranch: config.integrationBranch ?? effectiveDefaults.integrationBranch,
+      worktreeRoot: config.worktreeRoot ?? effectiveDefaults.worktreeRoot,
+      worktreeShare: config.worktreeShare ?? effectiveDefaults.worktreeShare,
       repoRoots: config.repoRoots,
       // Opt-in GitHub PR auto-review (see AGENTS.md). null when never configured, so a user who
       // never opens the PR Review tab gets a byte-identical config (not added to DEFAULT_CONFIG).
@@ -215,13 +230,30 @@ function createConfigStore() {
     };
   }
 
+  /**
+   * True when writing `key` into `target` would materialize a launch default the operator never
+   * chose: the key is absent there AND the incoming value is exactly what this launch was already
+   * defaulting it to. The write is then a no-op in meaning and a permanent change on disk, so both
+   * the persistence path (control-handlers) and applySettings skip it. Once the key exists, or the
+   * value differs (the operator actually flipped it), it is written normally and wins everywhere.
+   */
+  function isUnchosenLaunchDefault(target, key, value) {
+    if (!launchDefaultKeys.has(key)) return false;
+    if (key in target) return false;
+    return value === effectiveDefaults[key];
+  }
+
   /** Apply settings from a new config object into the in-memory config. */
   function applySettings(newConfig) {
     for (const key of TIMEOUT_KEYS) {
       if (newConfig[key] != null) config[key] = newConfig[key];
     }
     for (const key of BOOLEAN_KEYS) {
-      if (newConfig[key] != null) config[key] = !!newConfig[key];
+      if (newConfig[key] == null) continue;
+      // Keeping the key absent in memory too, so the getSettings fallback (and therefore a later
+      // hand-edit of config.json) keeps describing the file rather than a phantom value.
+      if (isUnchosenLaunchDefault(config, key, !!newConfig[key])) continue;
+      config[key] = !!newConfig[key];
     }
     for (const key of STRING_KEYS) {
       if (newConfig[key] != null) config[key] = String(newConfig[key]);
@@ -294,6 +326,7 @@ function createConfigStore() {
     save,
     getSettings,
     applySettings,
+    isUnchosenLaunchDefault,
     watchForChanges,
     TIMEOUT_KEYS,
     DEFAULT_CONFIG,

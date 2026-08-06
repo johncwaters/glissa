@@ -5,8 +5,8 @@
  *
  * Two verbosity levels, one format (see AGENTS.md, "Session Recording"):
  *   - signals (default, every real session): header, hook (VERBATIM payloads, so
- *     background_tasks and friends survive), state transitions, footer. Tiny, and it is
- *     exactly what a detection post-mortem needs.
+ *     background_tasks and friends survive), state transitions, decisions (the gate/notification
+ *     trace), footer. Tiny, and it is exactly what a detection post-mortem needs.
  *   - full (opt-in via config.capture.enabled): the above plus raw PTY bytes, user input and
  *     resizes. Bulky; only replay-harness work needs it.
  *
@@ -29,6 +29,9 @@
  *
  *   State (each successful state transition):
  *     {"type":"state","ts":epoch,"from":"STATE","to":"STATE","event":"...","detail":{...}}
+ *
+ *   Decision (each detection/gate/notification decision and its evidence):
+ *     {"type":"decision","ts":epoch,"kind":"signal"|"gate"|"notify"|"notify-state",...}
  *
  *   Input (user writes to PTY; `full` only):
  *     {"type":"input","ts":epoch,"data":"..."}
@@ -134,6 +137,14 @@ class SessionRecorder {
 
   writeState(from, to, event, detail) {
     this._write({ type: 'state', ts: Date.now(), from, to, event, detail: detail || null });
+  }
+
+  // The decision trace (session/core/decision-log.js): gate verdicts and notification decisions
+  // with the evidence behind them. Tiny, and the exact thing a false-completion post-mortem needs,
+  // so it rides the default signals mode alongside hooks and transitions.
+  writeDecision(entry) {
+    const e = entry || {};
+    this._write({ type: 'decision', ts: e.ts || Date.now(), ...e });
   }
 
   writeInput(data) {

@@ -60,25 +60,43 @@ function createNotifyGate() {
 // undefined); hookSeen is whether the session has ever received a Claude Code hook. Omitted opts
 // (or a session with hookSeen false) keeps the legacy reset-on-every-RUNNING behavior, since a
 // degraded title-only session has no resume signal to key a user-driven reset off.
-function decideNotification(to, gate, event, opts) {
+//
+// explainNotification is the decision itself; decideNotification is the thin category-only
+// wrapper the trigger path uses. The reason string is the decision trace's evidence (see
+// session/core/decision-log.js): without it a silent state entry is indistinguishable from one
+// the listener never saw.
+function explainNotification(to, gate, event, opts) {
   if (to === STATES.INITIALIZING) {
     gate.reset();
-    return null;
+    return { category: null, reason: 'cycle-reset-restart' };
   }
   if (to === STATES.RUNNING) {
     const userDriven = event === 'user_input'
       || (opts && opts.signal === 'resume')
       || !opts || !opts.hookSeen;
-    if (userDriven) gate.reset();
-    return null;
+    if (userDriven) {
+      gate.reset();
+      return { category: null, reason: 'cycle-reset-user-driven' };
+    }
+    return { category: null, reason: 'self-wake-no-reset' };
   }
   // The user killed it themselves: "finished working" would be a false toast. The
   // category is NOT spent (no gate.fire), deliberately: nothing real completed.
-  if (event === 'user_kill') return null;
-  if (to === STATES.WAITING) return 'waiting';
-  if ((to === STATES.COMPLETE || to === STATES.DONE) && gate.fire('complete')) return 'complete';
-  if (to === STATES.FAILED && gate.fire('failed')) return 'failed';
-  return null;
+  if (event === 'user_kill') return { category: null, reason: 'user-kill-silent' };
+  if (to === STATES.WAITING) return { category: 'waiting', reason: 'waiting-not-gated' };
+  if (to === STATES.COMPLETE || to === STATES.DONE) {
+    if (gate.fire('complete')) return { category: 'complete', reason: 'first-this-cycle' };
+    return { category: null, reason: 'already-notified-this-cycle' };
+  }
+  if (to === STATES.FAILED) {
+    if (gate.fire('failed')) return { category: 'failed', reason: 'first-this-cycle' };
+    return { category: null, reason: 'already-notified-this-cycle' };
+  }
+  return { category: null, reason: 'not-a-notifying-state' };
 }
 
-module.exports = { createNotifyGate, decideNotification };
+function decideNotification(to, gate, event, opts) {
+  return explainNotification(to, gate, event, opts).category;
+}
+
+module.exports = { createNotifyGate, decideNotification, explainNotification };

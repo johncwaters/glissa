@@ -437,7 +437,12 @@ function registerControlHandlers(controlWss, deps) {
         if (s[key] != null) cfg[key] = s[key];
       }
       for (const key of BOOLEAN_KEYS) {
-        if (s[key] != null) cfg[key] = !!s[key];
+        if (s[key] == null) continue;
+        // The dialog sends every boolean on every save, so an unrelated change would otherwise
+        // write this launch's default (dev debugMode) into config.json permanently and leak it
+        // into production. Skipped only while the key is absent AND the value is that default.
+        if (configStore.isUnchosenLaunchDefault(cfg, key, !!s[key])) continue;
+        cfg[key] = !!s[key];
       }
       for (const key of STRING_KEYS) {
         if (s[key] != null) cfg[key] = String(s[key]);

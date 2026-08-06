@@ -13,7 +13,7 @@ Glissa is a lightweight Node.js background process that spawns and manages Claud
 | `server/backend.js` | Express + WebSocket server factory, shared by `server.js` and the Vite dev plugin |
 | `session/sessions.js` | Session class: lifecycle, PTY spawn/kill, timers, hooks; consumes StatusSource; delegates pure logic to `session/core/` |
 | `server/control-handlers.js` | Control-WebSocket message handlers (kill, restart, rename, settings, team control) |
-| `server/config-store.js` | Runtime config load/save/defaults, key whitelists for control updates. Path resolution order: `GLISSA_CONFIG` env (via `--config`), in-repo `config.json` (`__dirname/..`, dev use), then `~/.glissa/config.json` (installed CLI use), seeded there if none exists |
+| `server/config-store.js` | Runtime config load/save/defaults, key whitelists for control updates. Path resolution order: `GLISSA_CONFIG` env (via `--config`), in-repo `config.json` (`__dirname/..`, dev use), then `~/.glissa/config.json` (installed CLI use), seeded there if none exists. The `settingsDefaults` option overlays per-launch defaults for ABSENT keys only (the Vite dev plugin turns `debugMode` on that way); `isUnchosenLaunchDefault` keeps such a key from being materialized into config.json by a save that merely echoed it back, so the dev overlay cannot leak into production |
 | `notifications/notification-manager.js` | Notification lifecycle state machine (states in `shared/notification-states.js`) |
 | `server/scheduler.js` | In-process calendar/cron for scheduled team runs; Intl-based timezone offset-solving |
 | `session/session-recorder.js` | Always-on JSONL forensic recorder (v1 legacy, v2 structural-signal format). Signals (hook payloads + transitions) by default; raw PTY bytes opt-in. See "Session Recording" |
@@ -147,10 +147,11 @@ session/           # Session domain: the stateful Session class + its pure cores
     anti-slop-prompt.js  # Fixed deterministic anti-slop note for --append-system-prompt; no double quotes (cmd.exe shim re-parse safety)
     auto-resume.js       # Pure pickAutoResume(projects, config): boot-time selection of DORMANT projects to auto-spawn with resumeSessionId
     conversation-history.js  # Pure cross-worktree Claude transcript discovery: cwd -> encoded <claudeHome>/projects/<dir> path
+    decision-log.js      # Pure ring for the per-session DECISION TRACE (signal/gate/notify entries), with gate-repeat collapse; surfaced by getDebugState + the recorder
     exit-transition.js   # Pure decideExitTransition(state, exitCode, signal, receivedFirstOutput) -> { event, detail }, extracted from Session._handlePtyExit
     merge-gate.js         # Pure review-gate demotion decisions (worktree diff signature -> mergeStatus), extracted from Session.checkWorktreeChange/getDiff
     merge-prompt.js       # Pure builder of the manual-merge handoff prompt pasted into a parked worktree's PTY
-    notify-gate.js        # Pure decideNotification(to, gate, event, opts): once-per-work-cycle notification gate for terminal categories
+    notify-gate.js        # Pure explainNotification(to, gate, event, opts) -> { category, reason } (decideNotification is its category-only wrapper): once-per-work-cycle notification gate for terminal categories
     output-ring.js        # Pure O(1) ring buffer of recent PTY output chunks; backs since()-based WS backfill
     post-turn-rules.js    # Pure idempotent post-turn hygiene rules, (content) -> { content, findings }; applied by server/post-turn-checker.js
     slop-code-patterns.js # Pure regex-based code-slop detection (detectCodeSlop), Noise/Lies/Soul taxonomy, offsets only
@@ -306,7 +307,7 @@ An optional background lane that reviews the operator's OWN GitHub PRs and merge
 
 Every real session writes a JSONL recording to `~/.glissa/recordings` (never a cwd-relative directory: recording is on by default and must not scatter through whichever repo the server was launched from). Two verbosity levels, ONE v2 format, declared in the header's `records` field so a reader can tell them apart without scanning:
 
-- **`signals` (default, kill switch `recordSignals: false`).** Header, every hook callback with its payload VERBATIM (`background_tasks`, `session_id`, teammate fields: the exact evidence a detection post-mortem needs), every state transition with its detail, footer. Tiny. The detection design is only debuggable after the fact if this is on, so it is on: a completion-gate incident with recording off costs a forensic reconstruction from Claude transcripts instead of one grep.
+- **`signals` (default, kill switch `recordSignals: false`).** Header, every hook callback with its payload VERBATIM (`background_tasks`, `session_id`, teammate fields: the exact evidence a detection post-mortem needs), every state transition with its detail, every `decision` record (the per-session decision trace from `session/core/decision-log.js`: each signal's mapper/gate outcome, each `decideGateRelease` verdict, and each notification decision with its reason), footer. Tiny. The detection design is only debuggable after the fact if this is on, so it is on: a completion-gate incident with recording off costs a forensic reconstruction from Claude transcripts instead of one grep.
 - **`full` (opt-in, `capture: { enabled: true }`).** The above plus raw PTY bytes, user input and resizes. Bulky, and only replay-harness work (`detection/replay.js`, whose fixtures are v2 recordings) needs it.
 
 Bounds, because this runs unattended: the file opens LAZILY on the first record (a DORMANT session that never starts leaves nothing behind), rotates at `maxFileSizeMB`, and each `open()` kicks off a fire-and-forget async sweep that keeps the newest `retainFiles` (default 20) recordings PER SESSION and drops anything past `retainDays` (default 7). The sweep is fully async by design (all sessions share one event loop) and best-effort: a locked file is skipped, never retried. Nothing awaits it except tests (`recorder.retentionDone`).

@@ -182,7 +182,9 @@ const messageHandlers = {
   'session-modified':   (msg) => { if (!msg.ephemeral) { knownProjects.set(msg.id, msg.session); noteKnownProjectPath(msg.path); } removeSessionCard(msg.id); forgetReviewSession(msg.id); createSessionCard(msg.id, msg.session, msg.state, { skipPerms: !!msg.skipPerms, worktree: !!msg.worktree, path: msg.path, resume: !!msg.resumeSessionId }); if (isFocusActive()) refreshFocusRoster(); },
   'session-git':        (msg) => setSessionWorktree(msg.id, !!msg.worktree),
   'session-resume':     (msg) => setSessionResume(msg.id, msg.resumeSessionId),
-  'session-agents':     (msg) => setSessionAgents(msg.id, msg.activeAgents),
+  // The agent count and a delivered notification both move the decision trace without any
+  // state-change, so each refreshes the overlay too (a no-op unless it is open).
+  'session-agents':     (msg) => { setSessionAgents(msg.id, msg.activeAgents); handleDebugStateRefresh(msg.id); },
   'session-wakeup':     (msg) => setSessionWakeup(msg.id, msg.pendingWakeup),
   'session-prompt':     (msg) => setSessionPrompt(msg.id, msg.pendingPromptKind),
   'session-merge-status': (msg) => { setSessionMergeStatus(msg.id, msg.mergeStatus); setFocusMergeStatus(msg.id, msg.mergeStatus); },
@@ -193,7 +195,9 @@ const messageHandlers = {
   'session-changed':    (msg) => notifyWorktreeChanged(msg.id),
   'post-turn-result':   (msg) => setSessionPostTurn(msg.id, msg),
   'debug-state-response': (msg) => handleDebugStateResponse(msg),
-  'notify':             (msg) => showDesktopNotification(msg),
+  // msg.session carries the session id here (NotificationManager keys its entries by the id the
+  // backend passes to trigger), so it is what the overlay refresh needs.
+  'notify':             (msg) => { showDesktopNotification(msg); handleDebugStateRefresh(msg.session); },
   'update-available':   (msg) => showUpdateBanner(msg),
   'error':              (msg) => showErrorToast(msg.message, { persist: true }),
   'session-error':      (msg) => showErrorToast(`${msg.session}: ${msg.message}`, { persist: true }),

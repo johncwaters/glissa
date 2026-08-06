@@ -37,6 +37,7 @@ const {
 } = require("../server/core/branch-sync-core");
 const agentTracker = require("./core/agent-tracker");
 const { decideGateRelease, DEFAULT_GATE_RELEASE_SETTLE_MS } = require("./core/gate-release");
+const { pushDecision } = require("./core/decision-log");
 const wakeupTracker = require("./core/wakeup-tracker");
 const { RESUME_ID_RE } = require("./core/auto-resume");
 
@@ -312,6 +313,13 @@ class Session extends EventEmitter {
     // session/core/gate-release.js). Sequence rather than clock: signals share milliseconds.
     this._signalSeq = 0;
     this._lastActivitySeq = 0;
+    // Decision trace: why each detection/gate/notification decision came out the way it did. Pure
+    // observability (session/core/decision-log.js owns the ring), read by getDebugState and mirrored
+    // into the recorder; nothing in the detection path reads it back.
+    this._decisionLog = [];
+    // Components behind the last _activeAgentCount() result, so a trace entry can say WHICH source
+    // gated a ready (counted sub-agents vs a declared background_tasks snapshot) instead of a total.
+    this._agentBreakdown = { counted: 0, declared: 0, idleNames: 0, idleTasks: 0 };
     // True between a SessionStart(source: clear|compact) hook and the next real
     // UserPromptSubmit: the TUI redraw around /clear flashes a spinner + idle glyph in
     // the OSC title, which would otherwise open a fake work cycle (RUNNING) and close
@@ -629,7 +637,10 @@ class Session extends EventEmitter {
   // Pruned count of live background sub-agents. Lazy prune (no per-session timer) bounds a dropped
   // SubagentStop. Returns 0 when detection is off so the gate is inert.
   _activeAgentCount() {
-    if (!this._detectBackgroundAgents) return 0;
+    if (!this._detectBackgroundAgents) {
+      this._agentBreakdown = { counted: 0, declared: 0, idleNames: 0, idleTasks: 0 };
+      return 0;
+    }
     const now = Date.now();
     agentTracker.pruneAgents(this._activeAgents, now, this._agentTtlMs);
     // Same lazy TTL bound as the counted map: a stale idle-by-name record (e.g. a teammate
@@ -649,7 +660,28 @@ class Session extends EventEmitter {
       this._bgDeclared, this._idleTaskIds, this._bgDeclared ? now - this._bgDeclaredTs : 0,
       this._shellTaskTtlMs, this._idleTeammateNames.size, this._teammateTaskTtlMs,
     );
+    this._agentBreakdown = {
+      counted: this._activeAgents.size,
+      declared,
+      idleNames: this._idleTeammateNames.size,
+      idleTasks: this._idleTaskIds.size,
+    };
     return Math.max(this._activeAgents.size, declared);
+  }
+
+  // Append one decision-trace entry. Mirrored to the forensic recorder only when it is genuinely
+  // new: a collapsed repeat (an unchanged gate verdict re-evaluated on a TTL tick) already has a
+  // line on disk.
+  _recordDecision(entry) {
+    const outcome = pushDecision(this._decisionLog, entry);
+    if (outcome === "appended" && this._recorder) this._recorder.writeDecision(entry);
+  }
+
+  // Push a decision the BACKEND made for this session (notification category + reason, and the
+  // notification lifecycle hops it caused) into the same per-session trace, so the debug overlay
+  // shows the detection decision and its notification outcome as one sequence.
+  recordNotifyDecision(entry) {
+    this._recordDecision(entry);
   }
 
   _emitAgentsChange() {
@@ -701,16 +733,29 @@ class Session extends EventEmitter {
     const held = this._gateHeldReady;
     if (!held || this._destroyed) return;
     const now = Date.now();
+    const activeAgents = this._activeAgentCount();
     const { decision, waitMs } = decideGateRelease({
       heldState: held.state,
       currentState: this.state,
-      activeAgents: this._activeAgentCount(),
+      activeAgents,
       stashSeq: held.seq,
       lastActivitySeq: this._lastActivitySeq,
       stashTs: held.ts,
       quietSince: this._gateQuietSince,
       now,
       settleMs: this._gateReleaseSettleMs,
+    });
+    // Recorded before acting, so a cancel/release leaves its evidence even though the branches
+    // below drop the hold the entry describes.
+    this._recordDecision({
+      ts: now,
+      kind: "gate",
+      decision,
+      waitMs,
+      active: activeAgents,
+      heldSeq: held.seq,
+      lastActivitySeq: this._lastActivitySeq,
+      quietMs: now - held.ts,
     });
     if (decision === "cancel") {
       this._clearGateHeldReady();
@@ -819,14 +864,28 @@ class Session extends EventEmitter {
     // per-branch details), so it is assembled here rather than in the pure mapper.
     const active = this._activeAgentCount();
     const event = mapSignalToEvent(s.signal, this.state, s.confidence, active);
-    if (event) this.transition(event, { source: s.source, signal: s.signal });
     // A ready suppressed ONLY by the background-agent gate is held, not dropped: when the
     // count drains without another Stop (idle teammate, dropped SubagentStop) the drain
-    // releases it and the card still completes (see _evaluateGateHeldReady).
-    if (!event && s.signal === "ready" && active > 0
-        && mapSignalToEvent(s.signal, this.state, s.confidence, 0)) {
-      this._stashGateHeldReady(s);
-    }
+    // releases it and the card still completes (see _evaluateGateHeldReady). Decided before
+    // the transition below, which cannot change the answer (a fired event rules the hold out)
+    // but would move this.state under the second mapper call.
+    const gateHeld = !event && s.signal === "ready" && active > 0
+      && !!mapSignalToEvent(s.signal, this.state, s.confidence, 0);
+    this._recordDecision({
+      ts: Date.now(),
+      kind: "signal",
+      signal: s.signal,
+      source: s.source,
+      confidence: s.confidence || null,
+      state: this.state,
+      seq: this._signalSeq,
+      active,
+      ...this._agentBreakdown,
+      event: event || null,
+      action: event ? "transition" : (gateHeld ? "gate-held" : "no-op"),
+    });
+    if (event) this.transition(event, { source: s.source, signal: s.signal });
+    if (gateHeld) this._stashGateHeldReady(s);
     // A turn end (`ready`) is the precise moment a batch of edits/commits has settled, so refresh the
     // review diff right then (debounced). The signature dedup makes a no-change turn a cheap no-op.
     if (s.signal === "ready") this._scheduleWorktreeCheck();
@@ -1528,6 +1587,9 @@ class Session extends EventEmitter {
   }
 
   getDebugState() {
+    // Also refreshes _agentBreakdown (and prunes), so the breakdown below describes this instant.
+    const active = this._activeAgentCount();
+    const held = this._gateHeldReady;
     return {
       state: this.state,
       transitions: this.auditLog.slice(-5).map((e) => ({
@@ -1537,7 +1599,14 @@ class Session extends EventEmitter {
         timestamp: e.timestamp,
         detail: e.detail,
       })),
-      detection: this.getDetectionStats(),
+      detection: {
+        ...this.getDetectionStats(),
+        agents: { ...this._agentBreakdown, active },
+        gate: held
+          ? { heldForMs: Date.now() - held.ts, seq: held.seq, lastActivitySeq: this._lastActivitySeq }
+          : null,
+      },
+      decisions: this._decisionLog.slice(-15),
     };
   }
 

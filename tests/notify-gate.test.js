@@ -8,7 +8,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { createNotifyGate, decideNotification } = require('../session/core/notify-gate');
+const { createNotifyGate, decideNotification, explainNotification } = require('../session/core/notify-gate');
 const { STATES } = require('../shared/states');
 const { NotificationManager } = require('../notifications/notification-manager');
 
@@ -203,6 +203,64 @@ test('MEDIUM fix: an out-of-band gate.reset() (the user-prompt listener) re-arms
   assert.equal(decideNotification(STATES.COMPLETE, gate), null, 'still spent: the transition alone never re-armed it');
   gate.reset(); // the backend's sess.on('user-prompt', () => notifyGate.reset()) listener
   assert.equal(decideNotification(STATES.COMPLETE, gate), 'complete', 're-armed by the out-of-band reset, not by the transition');
+});
+
+// ---------------------------------------------------------------------------
+// explainNotification: the same decision plus the reason the decision trace records
+// (session/core/decision-log.js). decideNotification is its category-only wrapper, so these
+// mirror the cases above and additionally pin the reason each branch reports.
+// ---------------------------------------------------------------------------
+
+test('explainNotification reports the reset reason for INITIALIZING and a user-driven RUNNING', () => {
+  const gate = createNotifyGate();
+  assert.deepEqual(explainNotification(STATES.INITIALIZING, gate), { category: null, reason: 'cycle-reset-restart' });
+  assert.deepEqual(
+    explainNotification(STATES.RUNNING, gate, 'user_input', { signal: 'working', hookSeen: true }),
+    { category: null, reason: 'cycle-reset-user-driven' },
+  );
+  assert.deepEqual(
+    explainNotification(STATES.RUNNING, gate, undefined, { signal: 'resume', hookSeen: true }),
+    { category: null, reason: 'cycle-reset-user-driven' },
+  );
+});
+
+test('explainNotification distinguishes a self-wake RUNNING from a user-driven one', () => {
+  const gate = createNotifyGate();
+  const explained = explainNotification(STATES.RUNNING, gate, undefined, { signal: 'working', hookSeen: true });
+  assert.deepEqual(explained, { category: null, reason: 'self-wake-no-reset' });
+});
+
+test('explainNotification reports why a terminal state stayed silent', () => {
+  const gate = createNotifyGate();
+  explainNotification(STATES.RUNNING, gate);
+  assert.deepEqual(explainNotification(STATES.COMPLETE, gate), { category: 'complete', reason: 'first-this-cycle' });
+  assert.deepEqual(
+    explainNotification(STATES.DONE, gate),
+    { category: null, reason: 'already-notified-this-cycle' },
+    'the exit pair is the gate doing its job, and now it says so',
+  );
+});
+
+test('explainNotification names the kill and the non-notifying states', () => {
+  const gate = createNotifyGate();
+  assert.deepEqual(explainNotification(STATES.DONE, gate, 'user_kill'), { category: null, reason: 'user-kill-silent' });
+  assert.deepEqual(explainNotification(STATES.WAITING, gate), { category: 'waiting', reason: 'waiting-not-gated' });
+  assert.deepEqual(explainNotification(STATES.IDLE, gate), { category: null, reason: 'not-a-notifying-state' });
+  assert.deepEqual(explainNotification(STATES.FAILED, gate), { category: 'failed', reason: 'first-this-cycle' });
+  assert.deepEqual(explainNotification(STATES.FAILED, gate), { category: null, reason: 'already-notified-this-cycle' });
+});
+
+test('decideNotification is exactly explainNotification().category (same gate side effects)', () => {
+  const viaDecide = createNotifyGate();
+  const viaExplain = createNotifyGate();
+  const sequence = [
+    [STATES.RUNNING, undefined], [STATES.COMPLETE, undefined], [STATES.DONE, undefined],
+    [STATES.RUNNING, undefined], [STATES.WAITING, undefined], [STATES.COMPLETE, undefined],
+    [STATES.DONE, 'user_kill'], [STATES.FAILED, undefined],
+  ];
+  for (const [to, event] of sequence) {
+    assert.equal(decideNotification(to, viaDecide, event), explainNotification(to, viaExplain, event).category);
+  }
 });
 
 // ---------------------------------------------------------------------------

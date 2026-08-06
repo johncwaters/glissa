@@ -59,6 +59,7 @@ test('round-trips header, data, hook, state, input, resize, footer in write orde
     recorder.writeData('hello world');
     recorder.writeHook('Stop', { reason: 'turn-end' });
     recorder.writeState('RUNNING', 'COMPLETE', 'task_complete', { via: 'hook' });
+    recorder.writeDecision({ ts: 1234, kind: 'gate', decision: 'release', active: 0, quietMs: 10500 });
     recorder.writeInput('ls -la\n');
     recorder.writeResize(120, 40);
     recorder.writeFooter('exit', 0);
@@ -67,13 +68,13 @@ test('round-trips header, data, hook, state, input, resize, footer in write orde
     const filepath = findRecordingFile(baseDir, 'roundtrip-session');
     const records = readLines(filepath);
 
-    assert.equal(records.length, 7);
+    assert.equal(records.length, 8);
     assert.deepEqual(
       records.map((r) => r.type),
-      ['header', 'data', 'hook', 'state', 'input', 'resize', 'footer'],
+      ['header', 'data', 'hook', 'state', 'decision', 'input', 'resize', 'footer'],
     );
 
-    const [header, data, hook, state, input, resize, footer] = records;
+    const [header, data, hook, state, decision, input, resize, footer] = records;
 
     assert.equal(header.version, 2);
     assert.equal(header.session, 'roundtrip-session');
@@ -93,6 +94,11 @@ test('round-trips header, data, hook, state, input, resize, footer in write orde
     assert.equal(state.to, 'COMPLETE');
     assert.equal(state.event, 'task_complete');
     assert.deepEqual(state.detail, { via: 'hook' });
+
+    assert.equal(decision.kind, 'gate');
+    assert.equal(decision.decision, 'release');
+    assert.equal(decision.quietMs, 10500);
+    assert.equal(decision.ts, 1234, 'the entry keeps the timestamp the decision was made at');
 
     assert.equal(input.data, 'ls -la\n');
 
@@ -213,19 +219,21 @@ test('signals mode records hooks and state transitions but no PTY bytes, input o
     recorder.writeInput('secret typing');
     recorder.writeResize(120, 40);
     recorder.writeHook('Stop', { session_id: 'abc', background_tasks: [{ id: 't1', type: 'teammate', status: 'running' }] });
+    recorder.writeDecision({ ts: 7, kind: 'signal', signal: 'ready', source: 'hook', active: 1, action: 'gate-held' });
     recorder.writeState('RUNNING', 'COMPLETE', 'task_complete', { source: 'hook', signal: 'ready', deferred: true });
     recorder.writeFooter('pty_exit', 0);
     await closeAndFlush(recorder);
 
     const records = readLines(findRecordingFile(baseDir, 'signals-only'));
-    assert.deepEqual(records.map((r) => r.type), ['header', 'hook', 'state', 'footer']);
+    assert.deepEqual(records.map((r) => r.type), ['header', 'hook', 'decision', 'state', 'footer']);
     assert.equal(records[0].records, 'signals', 'the header declares the verbosity level');
     assert.deepEqual(
       records[1].payload.background_tasks,
       [{ id: 't1', type: 'teammate', status: 'running' }],
       'hook payloads are recorded verbatim: that is the whole point',
     );
-    assert.equal(records[2].detail.deferred, true);
+    assert.equal(records[2].action, 'gate-held', 'decisions ride the default signals mode');
+    assert.equal(records[3].detail.deferred, true);
   } finally {
     fs.rmSync(baseDir, { recursive: true, force: true });
   }
@@ -328,6 +336,10 @@ test('a live session records its hook payloads and transitions in signals mode',
     const state = records.find((r) => r.type === 'state');
     assert.equal(state.to, STATES.COMPLETE, 'the transition the hook caused is recorded alongside it');
     assert.equal(state.detail.signal, 'ready');
+    const decision = records.find((r) => r.type === 'decision');
+    assert.equal(decision.kind, 'signal');
+    assert.equal(decision.action, 'transition', 'the decision behind the transition is recorded too');
+    assert.equal(decision.active, 0, 'with the evidence it was made on: no background work declared');
   } finally {
     fs.rmSync(baseDir, { recursive: true, force: true });
   }
