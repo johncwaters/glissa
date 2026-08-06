@@ -1,32 +1,11 @@
-diff --git a/.compiled-commit-tmp/slop_patch.diff b/.compiled-commit-tmp/slop_patch.diff
-deleted file mode 100644
-index 9c6456b..0000000
---- a/.compiled-commit-tmp/slop_patch.diff
-+++ /dev/null
-@@ -1,12 +0,0 @@
----- a/teamlib/team-output.js
--+++ b/teamlib/team-output.js
--@@ -113,8 +113,7 @@
--   const promoted = [];
--   const divergent = [];
--   const stub = (dest, name) => fs.writeFileSync(dest, `# ${name}\n\n<!-- ${PACK_SENTINEL}: fill this in. -->\n`, 'utf8');
---  // Copy src into dest when it exists (byte copy, no re-encode); otherwise write fallbackText,
---  // defaulting to the NEEDS-INPUT stub. Existence is checked here so callers just pass a path or null.
--+  // Existence is checked here so callers just pass a path or null.
--   const copyOrStub = (src, dest, name, fallbackText) => {
--     if (src && fs.existsSync(src)) {
--       fs.copyFileSync(src, dest);
-diff --git a/tests/integration-ref-watch.test.js b/tests/integration-ref-watch.test.js
-index 16bab09..a1b2c3d 100644
---- a/tests/integration-ref-watch.test.js
-+++ b/tests/integration-ref-watch.test.js
-@@ -106,8 +106,7 @@
- 
- test('start() declines when the reflog dir does not exist yet', async () => {
-   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-irw-none-'));
--  let _calls = 0;
--  const w = createIntegrationRefWatcher({ commonGitDir: dir, branch: 'develop', onChange: () => { _calls++; }, debounceMs: 50 });
-+  const w = createIntegrationRefWatcher({ commonGitDir: dir, branch: 'develop', onChange: () => {}, debounceMs: 50 });
-   try {
-     assert.equal(w.start(), false, 'no logs/refs/heads dir -> start() declines, leans on the floor');
-     assert.equal(w.active, false);
+--- a/session/sessions.js
++++ b/session/sessions.js
+@@ -754,7 +754,7 @@
+       waitMs,
+       active: activeAgents,
+       heldSeq: held.seq,
+       lastActivitySeq: this._lastActivitySeq,
+-      quietMs: now - Math.max(this._gateQuietSince, held.ts),
++      quietMs: now - held.ts,
+     });
+     if (decision === "cancel") {
