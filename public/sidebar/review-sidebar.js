@@ -332,19 +332,19 @@ function isLive(state) {
 
 // Pure: the one-line reason Merge is unavailable, or null when no line is needed. Centralizes the
 // disabled-state copy so the always-visible control region can say WHY the operator cannot merge yet.
-// Only called when Merge is disabled; ordered most-specific first.
-function mergeDisabledReason({ status, fetched, hasCommits, live, hasUncommitted, state }) {
+// Only called when Merge is disabled; ordered most-specific first. No-changes states return null:
+// the empty diff body already shows that, and restating it here was noise.
+function mergeDisabledReason({ status, fetched, hasCommits, live, state }) {
   if (status === 'merging') return null;                       // the status note already says "Merging..."
   if (status === 'parked') return 'Resolve the conflict, then merge.';
   if (!fetched) return 'Checking for changes...';
-  if (!hasCommits && !hasUncommitted) return 'No changes to merge.';
-  if (!hasCommits) return 'Nothing committed yet. Commit to merge.';
+  if (!hasCommits) return null;
   if (!live) return 'Session ended.';                          // committed work, but no PTY to keep running
   // isMergeableLive now includes RUNNING (via sendMergeContinue's confirm + force), so the only
   // live, hasCommits states that still reach here are INITIALIZING/STARTING, before the worktree
   // exists to merge from.
   if (state === STATES.INITIALIZING || state === STATES.STARTING) return 'Starting up. Mergeable once the session is live.';
-  return 'Mergeable when the turn ends.';                      // defensive fallback; not expected to be reached
+  return null;
 }
 
 function requestDiff(id) {
@@ -461,13 +461,15 @@ function render() {
   if (sessionNameEl) sessionNameEl.textContent = sessionName(ui, id);
 
   // ── Pinned control region: status note + overall totals + actions + why-disabled reason.
-  if (status && status !== 'none') {
+  // Only statuses that carry news get a note; a reviewable diff speaks for itself in the body.
+  const statusNoteText = status === 'parked' ? 'Needs manual merge'
+    : status === 'merging' ? 'Merging...'
+    : status === 'merged' ? 'Merged'
+    : null;
+  if (statusNoteText) {
     const note = el('div', 'review-status-note');
     note.dataset.merge = status;
-    note.textContent = status === 'parked' ? 'Needs manual merge'
-      : status === 'merging' ? 'Merging...'
-      : status === 'merged' ? 'Merged'
-      : 'Changes ready to review';
+    note.textContent = statusNoteText;
     controlsEl.append(note);
   }
 
@@ -491,9 +493,7 @@ function render() {
   // Disabled reason only when Merge is rendered (not suppressed by parked) and unavailable.
   let reasonShown = false;
   if (!mergeEnabled && status !== 'parked') {
-    const reason = mergeDisabledReason({
-      status, fetched, hasCommits, live, hasUncommitted: uncommittedFiles.length > 0, state,
-    });
+    const reason = mergeDisabledReason({ status, fetched, hasCommits, live, state });
     if (reason) {
       // While the diff is unfetched the reason line IS the loading indicator (it replaced the body's
       // "Loading diff..." placeholder), so it carries the loading pulse.
@@ -517,9 +517,9 @@ function render() {
     bodyEl.append(renderSection('committed', 'Committed', `merges into ${mergeTarget}`, committedFiles));
   }
   if (committedFiles.length === 0 && !reasonShown) {
-    // The pinned reason line already explains an empty committed section ("No changes to merge.",
-    // "Nothing committed yet...", "Checking for changes..."), so the body adds its own placeholder
-    // only when no reason rendered, never a second wording of the same fact.
+    // A pinned reason line ("Checking for changes...", "Session ended.") already explains an empty
+    // committed section, so the body adds its own placeholder only when no reason rendered, never a
+    // second wording of the same fact.
     const placeholder = !fetched && reviewable
       ? el('div', 'review-nochanges review-loading', 'Loading diff...')
       : el('div', 'review-nochanges', uncommittedFiles.length > 0 ? 'No committed changes.' : 'No changes in this worktree.');
