@@ -723,7 +723,7 @@ class Session extends EventEmitter {
   // their own timestamps (the declaring Stop, each SubagentStart), so a full interval measured
   // from now bounded the stuck-WORKING window at up to 2x the TTL: a snapshot 60s into its 90s
   // teammate TTL got a fresh 90s. Capped by the old full interval so this can only ever shorten
-  // the wait, and floored so a boundary case cannot spin.
+  // the wait; msUntilNextDrain returns strictly positive values, so no floor is needed.
   _gateRecheckMs(now) {
     const fullInterval = Math.min(this._agentTtlMs, this._shellTaskTtlMs, this._teammateTaskTtlMs) + 50;
     const remaining = agentTracker.msUntilNextDrain({
