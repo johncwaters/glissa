@@ -11,6 +11,7 @@ const {
   pruneAgents,
   extractBackgroundTasks,
   declaredActiveCount,
+  msUntilNextDrain,
   DEFAULT_AGENT_TTL_MS,
   DEFAULT_TEAMMATE_TASK_TTL_MS,
 } = require('../session/core/agent-tracker');
@@ -144,6 +145,121 @@ test('declaredActiveCount: an aged-out teammate does not absorb the idleNameCoun
   // so the shell entry still counts. The aged-out teammate must not be in teammateCount, so the idle
   // name (which no longer matches any surviving teammate) cannot wrongly subtract from the shell entry.
   assert.equal(declaredActiveCount(entries, new Set(), 200, undefined, 1, 100), 1, 'the shell entry survives; the stale idle name has nothing to clamp against');
+});
+
+// --- msUntilNextDrain: what a gate timer should wait when background work is still gating.
+// The whole point is that TTLs age from the timestamp that created them, not from "now".
+
+const TTLS = { agentTtlMs: 30 * 60 * 1000, weakTtlMs: 5 * 60 * 1000, teammateTtlMs: 90 * 1000 };
+
+test('msUntilNextDrain: a declared teammate snapshot 60s into a 90s TTL has 30s left, not a fresh 90s', () => {
+  const now = 1000000;
+  const ms = msUntilNextDrain({
+    declaredEntries: [{ id: 'tm1', type: 'teammate' }],
+    declaredTs: now - 60000,
+    now,
+    ...TTLS,
+  });
+  assert.equal(ms, 30000);
+});
+
+test('msUntilNextDrain: picks the sooner of a weak entry and a teammate entry in the same snapshot', () => {
+  const now = 1000000;
+  const entries = [{ id: 'b1', type: 'shell' }, { id: 'tm1', type: 'teammate' }];
+  assert.equal(
+    msUntilNextDrain({ declaredEntries: entries, declaredTs: now, now, ...TTLS }),
+    TTLS.teammateTtlMs,
+    'the 90s teammate ttl expires before the 5min weak ttl',
+  );
+  assert.equal(
+    msUntilNextDrain({ declaredEntries: entries, declaredTs: now, now, ...TTLS, teammateTtlMs: 10 * 60 * 1000 }),
+    TTLS.weakTtlMs,
+    'with a longer teammate ttl the weak entry becomes the next drain',
+  );
+});
+
+test('msUntilNextDrain: an untyped declared entry only drains when the whole snapshot ages out', () => {
+  const now = 1000000;
+  const ms = msUntilNextDrain({
+    declaredEntries: [{ id: 'x1', type: 'subagent' }],
+    declaredTs: now - 1000,
+    now,
+    ...TTLS,
+  });
+  assert.equal(ms, TTLS.agentTtlMs - 1000);
+});
+
+test('msUntilNextDrain: counted-only uses the OLDEST counted ts plus the agent TTL', () => {
+  const now = 1000000;
+  const counted = new Map([['a1', now - 5000], ['a2', now - 60000], ['a3', now - 100]]);
+  const ms = msUntilNextDrain({ countedAgents: counted, now, ...TTLS });
+  assert.equal(ms, TTLS.agentTtlMs - 60000);
+});
+
+test('msUntilNextDrain: the counted map and the declared snapshot are compared against each other', () => {
+  const now = 1000000;
+  const ms = msUntilNextDrain({
+    countedAgents: new Map([['a1', now - 29 * 60 * 1000]]), // ~1min of agent ttl left
+    declaredEntries: [{ id: 'tm1', type: 'teammate' }],
+    declaredTs: now - 80000,                                // 10s of teammate ttl left
+    now,
+    ...TTLS,
+  });
+  assert.equal(ms, 10000);
+});
+
+test('msUntilNextDrain: a drained id and a dream entry contribute nothing (dream-only falls back)', () => {
+  const now = 1000000;
+  assert.equal(
+    msUntilNextDrain({ declaredEntries: [{ id: 'd1', type: 'dream' }], declaredTs: now, now, ...TTLS }),
+    null,
+    'a dream entry never gates, so it is never the next drain',
+  );
+  assert.equal(
+    msUntilNextDrain({
+      declaredEntries: [{ id: 'tm1', type: 'teammate' }],
+      declaredTs: now,
+      idleIds: new Set(['tm1']),
+      now,
+      ...TTLS,
+    }),
+    null,
+    'an out-of-band idled id is already drained',
+  );
+});
+
+test('msUntilNextDrain: nothing gating returns null so the caller keeps its own interval', () => {
+  assert.equal(msUntilNextDrain(), null);
+  assert.equal(msUntilNextDrain({ countedAgents: new Map(), declaredEntries: [], now: 1, ...TTLS }), null);
+});
+
+test('msUntilNextDrain: an already-expired contributor is skipped, never reported as an instant drain', () => {
+  const now = 1000000;
+  // The weak entry expired 1min ago but sits in a snapshot the subagent entry keeps alive: reporting
+  // it as "drains now" would re-arm the gate timer at its floor for the rest of the snapshot's life.
+  const ms = msUntilNextDrain({
+    declaredEntries: [{ id: 'b1', type: 'shell' }, { id: 'x1', type: 'subagent' }],
+    declaredTs: now - 6 * 60 * 1000,
+    now,
+    ...TTLS,
+  });
+  assert.equal(ms, TTLS.agentTtlMs - 6 * 60 * 1000, 'the surviving subagent entry sets the next drain');
+  assert.equal(
+    msUntilNextDrain({ countedAgents: new Map([['a1', now - TTLS.agentTtlMs]]), now, ...TTLS }),
+    null,
+    'a counted entry at its ttl boundary is already prunable, so it is not a future drain',
+  );
+});
+
+test('msUntilNextDrain: every returned value is strictly positive', () => {
+  const now = 1000000;
+  const ms = msUntilNextDrain({
+    declaredEntries: [{ id: 'tm1', type: 'teammate' }],
+    declaredTs: now - (TTLS.teammateTtlMs - 1),
+    now,
+    ...TTLS,
+  });
+  assert.equal(ms, 1);
 });
 
 test('declaredActiveCount: dream + weak-ttl + id-drain + idleNameCount compose correctly', () => {

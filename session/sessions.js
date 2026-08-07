@@ -719,6 +719,27 @@ class Session extends EventEmitter {
     if (typeof this._gateHeldReadyTimer.unref === "function") this._gateHeldReadyTimer.unref();
   }
 
+  // How long a still-gated hold should wait before re-checking. The TTLs it waits on age from
+  // their own timestamps (the declaring Stop, each SubagentStart), so a full interval measured
+  // from now bounded the stuck-WORKING window at up to 2x the TTL: a snapshot 60s into its 90s
+  // teammate TTL got a fresh 90s. Capped by the old full interval so this can only ever shorten
+  // the wait, and floored so a boundary case cannot spin.
+  _gateRecheckMs(now) {
+    const fullInterval = Math.min(this._agentTtlMs, this._shellTaskTtlMs, this._teammateTaskTtlMs) + 50;
+    const remaining = agentTracker.msUntilNextDrain({
+      countedAgents: this._activeAgents,
+      declaredEntries: this._bgDeclared,
+      declaredTs: this._bgDeclaredTs,
+      idleIds: this._idleTaskIds,
+      now,
+      agentTtlMs: this._agentTtlMs,
+      weakTtlMs: this._shellTaskTtlMs,
+      teammateTtlMs: this._teammateTaskTtlMs,
+    });
+    if (remaining === null) return fullInterval;
+    return Math.min(remaining + 50, fullInterval);
+  }
+
   _clearGateHeldReady() {
     this._gateHeldReady = null;
     if (!this._gateHeldReadyTimer) return;
@@ -764,7 +785,7 @@ class Session extends EventEmitter {
     if (decision === "gated") {
       // Still gating right now, so the quiet window cannot have started earlier than this.
       this._gateQuietSince = now;
-      this._armGateTimer(Math.min(this._agentTtlMs, this._shellTaskTtlMs, this._teammateTaskTtlMs) + 50);
+      this._armGateTimer(this._gateRecheckMs(now));
       return;
     }
     if (decision === "wait") {

@@ -150,6 +150,56 @@ function declaredActiveCount(
   return n - Math.min(idleNameCount, teammateCount);
 }
 
+// How long a declared entry of this type keeps gating, measured from the snapshot that declared
+// it. Capped by agentTtlMs because _activeAgentCount drops the WHOLE snapshot at that age, so no
+// entry can outlive it.
+function declaredEntryTtlMs(type, weakTtlMs, teammateTtlMs, agentTtlMs) {
+  if (WEAK_TASK_TYPES.has(type)) return Math.min(weakTtlMs, agentTtlMs);
+  if (type === 'teammate') return Math.min(teammateTtlMs, agentTtlMs);
+  return agentTtlMs;
+}
+
+// Milliseconds from `now` until the earliest moment some CURRENTLY gating contributor could stop
+// counting through TTL aging alone (no further hooks). Mirrors the filters declaredActiveCount and
+// pruneAgents apply, so a gate timer can be re-armed for the time actually remaining: the declared
+// snapshot ages from the Stop that declared it and each counted id from its own SubagentStart, so
+// re-arming a full TTL from `now` waits up to twice the TTL before a card can leave WORKING.
+//
+// Contributors already past their TTL are skipped rather than reported as "drains right now": a
+// weak entry sitting in a snapshot other entries keep alive is permanently expired, and reporting
+// it would re-arm at the caller's floor forever. Returns null when nothing TTL-bound is gating, so
+// the caller falls back to its own interval. The idle-teammate-name offset is deliberately not
+// modelled: it only ever RAISES the count as names age out, so it can never be the next drain, and
+// including an offset teammate entry here only arms earlier (a re-check, never a missed one).
+function msUntilNextDrain({
+  countedAgents = null,
+  declaredEntries = null,
+  declaredTs = 0,
+  idleIds = null,
+  now = 0,
+  agentTtlMs = DEFAULT_AGENT_TTL_MS,
+  weakTtlMs = DEFAULT_SHELL_TASK_TTL_MS,
+  teammateTtlMs = DEFAULT_TEAMMATE_TASK_TTL_MS,
+} = {}) {
+  let earliestExpiry = null;
+  const consider = (expiresAt) => {
+    if (expiresAt <= now) return;
+    if (earliestExpiry === null || expiresAt < earliestExpiry) earliestExpiry = expiresAt;
+  };
+  if (countedAgents) {
+    for (const ts of countedAgents.values()) consider(ts + agentTtlMs);
+  }
+  if (declaredEntries) {
+    for (const e of declaredEntries) {
+      if (e.id && idleIds && idleIds.has(e.id)) continue;
+      if (NON_GATING_TASK_TYPES.has(e.type)) continue;
+      consider(declaredTs + declaredEntryTtlMs(e.type, weakTtlMs, teammateTtlMs, agentTtlMs));
+    }
+  }
+  if (earliestExpiry === null) return null;
+  return earliestExpiry - now;
+}
+
 // A teammate id declared last snapshot but missing from this one has departed (shut down); any
 // name idled against it no longer means anything, and left in place it would wrongly offset a
 // DIFFERENT teammate that happens to keep the surviving count the same. Evicts that many of the
@@ -179,6 +229,7 @@ module.exports = {
   pruneAgents,
   extractBackgroundTasks,
   declaredActiveCount,
+  msUntilNextDrain,
   evictDepartedTeammateNames,
   DEFAULT_AGENT_TTL_MS,
   DEFAULT_SHELL_TASK_TTL_MS,

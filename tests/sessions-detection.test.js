@@ -961,6 +961,26 @@ test('a declared teammate entry younger than the TTL still gates', (t) => {
   s.destroy();
 });
 
+// A re-evaluation that finds the gate still gating must wait only the REMAINING life of the
+// declared snapshot: it ages from the Stop that declared it, so a fresh full TTL from now bounded
+// the stuck-WORKING window at up to 2x the TTL (live incident: a 60s-old snapshot got a fresh 90s).
+test('a still-gated re-arm waits the remaining declared TTL, not a fresh full one', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const s = makeSession(STATES.RUNNING, { teammateTaskTtlMs: 300, gateReleaseSettleMs: 10 });
+  hook(s, 'ready', { payload: { background_tasks: [{ id: 'tm1', type: 'teammate', status: 'running' }] } });
+  t.mock.timers.tick(40);
+  assert.equal(s.state, STATES.RUNNING, 'the declared teammate gates the first ready');
+  t.mock.timers.tick(160); // ~200ms into the declared entry's 300ms ttl
+  // A second Stop carrying no background_tasks field re-stashes the hold WITHOUT refreshing the
+  // snapshot, which is the shape that produced the doubled wait.
+  hook(s, 'ready');
+  t.mock.timers.tick(40);
+  assert.equal(s.state, STATES.RUNNING, 'still gated: the snapshot has ~60ms of ttl left');
+  t.mock.timers.tick(120); // past the snapshot's REMAINING ttl (a fresh 300ms arm would still be pending)
+  assert.equal(s.state, STATES.COMPLETE, 'the re-arm fired on the remaining ttl, not 300ms from the re-stash');
+  s.destroy();
+});
+
 test('an aged-out declared teammate does not let a leftover idle-by-name record clamp a still-live shell entry', (t) => {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   const s = makeSession(STATES.RUNNING, { teammateTaskTtlMs: 100 });
