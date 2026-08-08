@@ -69,11 +69,8 @@ test('parseLatestVersion reads .version, null on mismatch', () => {
 // buildUpdateCommand
 // ---------------------------------------------------------------------------
 
-test('buildUpdateCommand picks npm by default, pnpm when specified', () => {
-  assert.equal(buildUpdateCommand(), 'npm install -g glissa@latest');
-  assert.equal(buildUpdateCommand({}), 'npm install -g glissa@latest');
-  assert.equal(buildUpdateCommand({ packageManager: 'npm' }), 'npm install -g glissa@latest');
-  assert.equal(buildUpdateCommand({ packageManager: 'pnpm' }), 'pnpm add -g glissa@latest');
+test('buildUpdateCommand returns the git update command', () => {
+  assert.equal(buildUpdateCommand(), 'git pull && npm ci && npm run build');
 });
 
 // ---------------------------------------------------------------------------
@@ -89,7 +86,7 @@ test('checkForUpdate reports an available update with the command', async () => 
     updateAvailable: true,
     current: '0.16.0',
     latest: '0.17.0',
-    command: 'npm install -g glissa@latest',
+    command: 'git pull && npm ci && npm run build',
   });
 });
 
@@ -107,13 +104,20 @@ test('checkForUpdate reports updateAvailable false when current is latest or ahe
   assert.equal(ahead.updateAvailable, false);
 });
 
-test('checkForUpdate honors the packageManager hint', async () => {
+test('checkForUpdate fetches the GitHub package.json URL', async () => {
+  let requestedUrl = null;
   const result = await checkForUpdate({
     currentVersion: '0.16.0',
-    packageManager: 'pnpm',
-    fetchFn: fakeFetch({ json: { version: '0.17.0' } }),
+    fetchFn: async (url) => {
+      requestedUrl = url;
+      return {
+        ok: true,
+        json: async () => ({ version: '0.17.0' }),
+      };
+    },
   });
-  assert.equal(result.command, 'pnpm add -g glissa@latest');
+  assert.equal(requestedUrl, 'https://raw.githubusercontent.com/johncwaters/glissa/main/package.json');
+  assert.equal(result.command, 'git pull && npm ci && npm run build');
 });
 
 test('checkForUpdate resolves null on a non-200 response', async () => {

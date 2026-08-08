@@ -42,7 +42,7 @@ test('replays exactly one update-available frame when an update is cached', () =
     updateAvailable: true,
     current: '0.16.0',
     latest: '0.17.0',
-    command: 'npm install -g glissa@latest',
+    command: 'git pull && npm ci && npm run build',
   };
   const sent = connect({ getUpdateStatus: () => status });
   const updates = sent.filter((m) => m.type === 'update-available');

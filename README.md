@@ -1,24 +1,50 @@
 # Glissa
 
-[![npm version](https://img.shields.io/npm/v/glissa)](https://www.npmjs.com/package/glissa)
 [![CI](https://github.com/johncwaters/glissa/actions/workflows/test.yml/badge.svg)](https://github.com/johncwaters/glissa/actions/workflows/test.yml)
-[![License: MIT](https://img.shields.io/npm/l/glissa)](https://opensource.org/licenses/MIT)
-[![Node.js](https://img.shields.io/node/v/glissa)](https://nodejs.org)
-[![Platform: Windows](https://img.shields.io/badge/platform-Windows-0078d4?logo=windows)](https://www.npmjs.com/package/glissa)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![Node.js](https://img.shields.io/badge/node-%3E%3D18-brightgreen.svg)](https://nodejs.org)
+[![Platform: Windows | Linux](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-0078d4)](https://github.com/johncwaters/glissa)
 
 **Run dozens of Claude Code agents at once. See every session. Miss nothing.**
 
 Running more than a couple of Claude Code agents at once turns into alt-tabbing between terminal windows, missing the exact moment one finishes or silently blocks on a prompt, and merging work you never watched happen. Glissa is the shipped fix: one browser dashboard, live terminal output for every session, exact status instead of a guess, and per-agent git worktrees you can review and merge without leaving the page.
 
-It's on npm (`npm install -g glissa`), and I run my daily agent fleet in it. This README was written inside a Glissa session: Glissa is developed inside Glissa.
+I run my daily agent fleet in it. This README was written inside a Glissa session: Glissa is developed inside Glissa.
 
 ![Glissa dashboard mid-run: two Claude Code sessions streaming live terminal output, one working, one flipping to Complete with its real output and worktree diff visible in the review sidebar](assets/pictures/glissa-demo.gif)
 
 ## Install
 
+### Install from git
+
+```bash
+git clone https://github.com/johncwaters/glissa.git
+cd glissa
+npm ci
+npm run build
+npm start
 ```
-npm install -g glissa
+
+Open `http://localhost:3000` to view the dashboard.
+
+For a global CLI install from GitHub:
+
+```bash
+npm install -g github:johncwaters/glissa
 ```
+
+The operator's own machines are provisioned by the `claude-setup` flow, so manual installs are mainly for fresh machines and outside preview.
+
+### Docker preview
+
+The Dockerfile is a courtesy preview path, not the recommended daily path. The container has no authentication and must only ever be published to localhost.
+
+```bash
+docker build -t glissa .
+docker run -e GLISSA_HOST=0.0.0.0 -e GLISSA_INSECURE_BIND=1 -p 127.0.0.1:3000:3000 glissa
+```
+
+The two env vars make Glissa bind all interfaces INSIDE the container (docker port mapping cannot reach the container's loopback); the `-p 127.0.0.1:...` prefix is what keeps the host side loopback-only. Never publish the port wider. Claude Code credentials and repos must be mounted for real use.
 
 ## Usage
 
@@ -35,7 +61,7 @@ Open `http://localhost:3000` to view the dashboard.
 
 ## Troubleshooting
 
-### `glissa` is not recognized after `npm install -g glissa`
+### `glissa` is not recognized after the global install
 
 The install succeeded, but the directory where npm placed the `glissa` command is not on your PATH (common with a zip/standalone Node, a locked-down corporate image, or pnpm without `pnpm setup`). To fix it:
 

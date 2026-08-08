@@ -1,6 +1,7 @@
 {
   "name": "glissa",
   "version": "0.21.0",
+  "private": true,
   "description": "Spawn and manage Claude Code sessions with a browser dashboard: a Windows terminal manager with real-time xterm.js streaming",
   "type": "commonjs",
   "main": "server.js",
@@ -10,6 +11,7 @@
   "files": [
     "bin/glissa.js",
     "bin/path-doctor.js",
+    "scripts/prepare-build.js",
     "scripts/postinstall-path-check.js",
     "dist/",
     "!dist/AGENTS.md",
@@ -68,6 +70,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "postinstall": "node scripts/postinstall-path-check.js",
+    "prepare": "node scripts/prepare-build.js",
     "prepublishOnly": "node scripts/check-package-files.js && npm run build && node -e \"require('fs').statSync('dist/index.html')\"",
     "release": "node scripts/release.js"
   },

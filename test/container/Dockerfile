@@ -9,12 +9,8 @@ RUN apt-get update \
 
 WORKDIR /app
 
-# scripts/ comes first because package.json's postinstall runs during npm ci.
-COPY package.json package-lock.json ./
-COPY scripts ./scripts
-RUN npm ci
-
 COPY . .
+RUN npm ci
 
 # The image intentionally does not run the suite at build time: the script needs a writable
 # /root/.glissa and starts real listeners, both of which belong to `docker run`.
