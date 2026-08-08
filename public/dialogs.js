@@ -234,12 +234,16 @@ export function createSettingsDialog(initialTab) {
 
   // Desktop notifications (client-side pref, applied immediately like sound/theme)
   const DEFAULT_NOTIF_HINT = 'Native browser notification when a session needs attention while the dashboard is in the background';
+  function notificationPermission() {
+    if (typeof Notification === 'undefined') return 'unavailable';
+    return Notification.permission;
+  }
   function refreshNotificationsHint() {
     if (!notificationsSupported()) {
-      notificationsHint.textContent = 'This browser does not support desktop notifications.';
+      notificationsHint.textContent = 'Desktop notifications are unavailable for this page.';
       return;
     }
-    if (notificationsCheckbox.checked && Notification.permission === 'denied') {
+    if (notificationsCheckbox.checked && notificationPermission() === 'denied') {
       notificationsHint.textContent = 'Blocked by the browser. Allow notifications for this site to enable them.';
       return;
     }

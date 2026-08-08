@@ -652,7 +652,11 @@ async function populateWorktree(projectPath, wtDir, shareList) {
       if (dstExists) continue; // already in the worktree (committed) - leave it
       await fsp.mkdir(path.dirname(dst), { recursive: true });
       if (srcStat.isDirectory()) {
-        await execFileP('cmd', ['/c', 'mklink', '/J', dst, src]);
+        if (process.platform === 'win32') {
+          await execFileP('cmd', ['/c', 'mklink', '/J', dst, src]);
+          continue;
+        }
+        await fsp.symlink(src, dst, 'dir');
         continue;
       }
       await fsp.copyFile(src, dst);

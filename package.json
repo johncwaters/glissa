@@ -39,9 +39,6 @@
   "engines": {
     "node": ">=18"
   },
-  "os": [
-    "win32"
-  ],
   "author": "John C. Waters <john@johncwaters.com>",
   "license": "MIT",
   "repository": {

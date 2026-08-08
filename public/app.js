@@ -268,6 +268,10 @@ function showUpdateBanner({ current, latest, command }) {
     setTimeout(() => { copyBtn.textContent = 'Copy'; }, 2000);
   };
   copyBtn.onclick = () => {
+    if (!navigator.clipboard?.writeText) {
+      flashLabel('Copy failed');
+      return;
+    }
     navigator.clipboard.writeText(command)
       .then(() => flashLabel('Copied'))
       .catch(() => flashLabel('Copy failed'));

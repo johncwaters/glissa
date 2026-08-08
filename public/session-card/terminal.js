@@ -8,6 +8,7 @@ import { Terminal } from '@xterm/xterm';
 import { isFocusAltShortcut } from '../focus-view/focus-shortcuts.mjs';
 import { renderScheduler } from '../render-scheduler.mjs';
 import { getTerminalTheme } from '../theme.js';
+import { buildWebSocketUrl } from '../ws-url-core.mjs';
 import { noteSessionOutput } from './activity.js';
 import { sessionUIs } from './card-registry.js';
 import { showErrorToast } from './toast.js';
@@ -44,10 +45,15 @@ function reportClipboardFailure(source, err) {
   showErrorToast(`Clipboard ${source} failed: ${msg}`);
 }
 
+function writeClipboardText(text) {
+  if (!navigator.clipboard?.writeText) return null;
+  return navigator.clipboard.writeText(text);
+}
+
 // ── Data WebSocket ───────────────────────────────────────────
 
 function connectDataWs(sessionId, ui, term) {
-  const url = `ws://${location.host}/terminals/${encodeURIComponent(sessionId)}`;
+  const url = buildWebSocketUrl(location, `/terminals/${encodeURIComponent(sessionId)}`);
   const ws = new WebSocket(url);
   ui.dataWs = ws;
 
@@ -225,7 +231,9 @@ export function setupTerminal(termWrap, ui) {
     const hasActivation = document.hasFocus()
       && navigator.userActivation?.isActive !== false;
     if (!hasActivation) return true;
-    navigator.clipboard.writeText(text).catch((err) => {
+    const write = writeClipboardText(text);
+    if (!write) return true;
+    write.catch((err) => {
       reportClipboardFailure('osc52 write', err);
     });
     return true;
@@ -251,7 +259,9 @@ export function setupTerminal(termWrap, ui) {
     if (ctrl && ev.key === 'c' && term.hasSelection()) {
       const selection = term.getSelection();
       term.clearSelection();
-      navigator.clipboard.writeText(selection).catch((err) => {
+      const write = writeClipboardText(selection);
+      if (!write) return false;
+      write.catch((err) => {
         reportClipboardFailure('copy', err);
       });
       return false;

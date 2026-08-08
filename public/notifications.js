@@ -13,10 +13,13 @@
 import { claimKey, claimNotification } from './notify-dedupe-core.mjs';
 import { isNotificationsEnabled } from './ui-prefs.js';
 
-const supported = typeof window !== 'undefined' && 'Notification' in window;
+function getNotificationApi() {
+  if (typeof Notification === 'undefined') return null;
+  return Notification;
+}
 
 export function notificationsSupported() {
-  return supported;
+  return getNotificationApi() !== null;
 }
 
 /**
@@ -26,19 +29,21 @@ export function notificationsSupported() {
  * @returns {Promise<NotificationPermission>}
  */
 export async function ensureNotificationPermission() {
-  if (!supported) return 'denied';
-  if (Notification.permission !== 'default') return Notification.permission;
+  const notificationApi = getNotificationApi();
+  if (!notificationApi) return 'denied';
+  if (notificationApi.permission !== 'default') return notificationApi.permission;
   try {
-    return await Notification.requestPermission();
+    return await notificationApi.requestPermission();
   } catch {
-    return Notification.permission;
+    return notificationApi.permission;
   }
 }
 
 // Best-effort prompt on boot when notifications are enabled and not yet decided.
 export function initNotifications() {
-  if (!supported || !isNotificationsEnabled()) return;
-  if (Notification.permission === 'default') {
+  const notificationApi = getNotificationApi();
+  if (!notificationApi || !isNotificationsEnabled()) return;
+  if (notificationApi.permission === 'default') {
     ensureNotificationPermission();
   }
 }
@@ -50,14 +55,15 @@ export function initNotifications() {
  * @param {{ session?: string, category?: string, message?: string }} msg
  */
 export function showDesktopNotification({ session, category, message } = {}) {
-  if (!supported || !isNotificationsEnabled()) return;
-  if (Notification.permission !== 'granted') return;
+  const notificationApi = getNotificationApi();
+  if (!notificationApi || !isNotificationsEnabled()) return;
+  if (notificationApi.permission !== 'granted') return;
   // Cross-tab claim: every open tab receives the broadcast, and with renotify each
   // construction re-alerts, so only the tab that wins the short-TTL localStorage
   // claim raises the toast (see notify-dedupe-core.mjs). Fail-open on storage errors.
   if (!claimNotification(window.localStorage, claimKey(session, category), Date.now())) return;
   try {
-    const n = new Notification('Glissa', {
+    const n = new notificationApi('Glissa', {
       body: message || 'Session needs attention',
       tag: `glissa-${session || ''}-${category || ''}`,
       renotify: true,

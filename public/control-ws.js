@@ -1,6 +1,8 @@
 // ── Control WebSocket module ──────────────────────────────────
 // Owns the control WebSocket connection, reconnect logic, and request/response.
 
+import { buildWebSocketUrl } from './ws-url-core.mjs';
+
 const RECONNECT_DELAY_MS = 500;
 
 let controlWs = null;
@@ -67,7 +69,7 @@ export function connectControl() {
   // lastSeq > 0 only once a message has actually been processed, which never happens before
   // the first connection - so this doubles as "is this a reconnect" without a separate flag.
   const since = lastSeq > 0 ? `?since=${lastSeq}` : '';
-  const url = `ws://${location.host}/control${since}`;
+  const url = buildWebSocketUrl(location, `/control${since}`);
   const ws = new WebSocket(url);
   controlWs = ws;
 
