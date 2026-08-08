@@ -22,6 +22,12 @@ export function notificationsSupported() {
   return getNotificationApi() !== null;
 }
 
+export function notificationPermission() {
+  const notificationApi = getNotificationApi();
+  if (!notificationApi) return 'unavailable';
+  return notificationApi.permission;
+}
+
 /**
  * Request notification permission once. Browsers may ignore requestPermission()
  * outside a user gesture, so the settings toggle (a real click) is the reliable

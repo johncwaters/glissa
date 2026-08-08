@@ -5,6 +5,7 @@
 
 import { FitAddon } from '@xterm/addon-fit';
 import { Terminal } from '@xterm/xterm';
+import { writeClipboardText } from '../dom-helpers.js';
 import { isFocusAltShortcut } from '../focus-view/focus-shortcuts.mjs';
 import { renderScheduler } from '../render-scheduler.mjs';
 import { getTerminalTheme } from '../theme.js';
@@ -43,11 +44,6 @@ function reportClipboardFailure(source, err) {
   const msg = err?.message || String(err);
   console.error(`[clipboard:${source}]`, err);
   showErrorToast(`Clipboard ${source} failed: ${msg}`);
-}
-
-function writeClipboardText(text) {
-  if (!navigator.clipboard?.writeText) return null;
-  return navigator.clipboard.writeText(text);
 }
 
 // ── Data WebSocket ───────────────────────────────────────────

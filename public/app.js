@@ -7,6 +7,7 @@ import './tailwind.css';
 import { STATES } from '/shared/states.mjs';
 import { connectControl, disableReconnect, onControlMessage, sendControlMsg, sendControlRequest, setConnectionStateCallback } from './control-ws.js';
 import { createAddSessionDialog, createConfirmDialog, createSettingsDialog } from './dialogs.js';
+import { writeClipboardText } from './dom-helpers.js';
 import { activateFocusView, deactivateFocusView, focusAdjacentInRail, focusNextAttention, focusNthInRail, focusSessionInCenter, isFocusActive, mountFocusView, noteKnownProjectPath, refreshFocusRoster, restoreFocusedSession, setFocusMergeStatus } from './focus-view/focus-view.js';
 import { applyHealthSnapshot, mountHealthMonitor } from './health-monitor.js';
 import { initNotifications, showDesktopNotification } from './notifications.js';
@@ -268,11 +269,12 @@ function showUpdateBanner({ current, latest, command }) {
     setTimeout(() => { copyBtn.textContent = 'Copy'; }, 2000);
   };
   copyBtn.onclick = () => {
-    if (!navigator.clipboard?.writeText) {
+    const write = writeClipboardText(command);
+    if (!write) {
       flashLabel('Copy failed');
       return;
     }
-    navigator.clipboard.writeText(command)
+    write
       .then(() => flashLabel('Copied'))
       .catch(() => flashLabel('Copy failed'));
   };

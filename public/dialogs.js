@@ -5,7 +5,7 @@ import { playAlertSound, SOUND_OPTIONS } from './alert-sound.js';
 import addSessionHTML from './components/add-session-dialog.html?raw';
 import settingsHTML from './components/settings-dialog.html?raw';
 import { sendControlMsg, sendControlRequest } from './control-ws.js';
-import { ensureNotificationPermission, notificationsSupported } from './notifications.js';
+import { ensureNotificationPermission, notificationPermission, notificationsSupported } from './notifications.js';
 import { createModalOverlay, trapFocus } from './session-card/modal.js';
 import { countSessionsByName, suggestSessionName } from './session-card/naming.js';
 import { SHORTCUT_GROUPS } from './shortcuts.mjs';
@@ -234,10 +234,6 @@ export function createSettingsDialog(initialTab) {
 
   // Desktop notifications (client-side pref, applied immediately like sound/theme)
   const DEFAULT_NOTIF_HINT = 'Native browser notification when a session needs attention while the dashboard is in the background';
-  function notificationPermission() {
-    if (typeof Notification === 'undefined') return 'unavailable';
-    return Notification.permission;
-  }
   function refreshNotificationsHint() {
     if (!notificationsSupported()) {
       notificationsHint.textContent = 'Desktop notifications are unavailable for this page.';
