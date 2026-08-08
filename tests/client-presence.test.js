@@ -84,7 +84,6 @@ test('disconnect recounts: a dashboard that dies while focused cannot suppress f
   presence.disconnect('crashed');
   assert.equal(presence.connectionCount(), 0);
   assert.equal(presence.shouldSuppress(), false);
-  assert.equal(presence.shouldSendOffDashboard(), true);
 });
 
 test('disconnecting the unfocused peer of a focused connection re-suppresses', () => {
@@ -111,13 +110,8 @@ test('disconnect of an unknown key is a no-op', () => {
   assert.equal(presence.connectionCount(), 1);
 });
 
-test('shouldSendOffDashboard tracks connections, not focus', () => {
-  const presence = createClientPresence();
-  assert.equal(presence.shouldSendOffDashboard(), true, 'nobody connected');
-  presence.connect('a');
-  assert.equal(presence.shouldSendOffDashboard(), false, 'an unfocused tab still raises the browser toast');
-  presence.setFocus('a', true);
-  assert.equal(presence.shouldSendOffDashboard(), false);
-  presence.disconnect('a');
-  assert.equal(presence.shouldSendOffDashboard(), true);
+test('decideOffDashboardDelivery keys on connection count alone, never focus', () => {
+  assert.equal(decideOffDashboardDelivery(0), true, 'nobody connected');
+  assert.equal(decideOffDashboardDelivery(1), false, 'an unfocused tab still raises the browser toast');
+  assert.equal(decideOffDashboardDelivery(3), false);
 });

@@ -64,7 +64,6 @@ function createClientPresence() {
     setFocus,
     connectionCount: () => focusedByConnection.size,
     shouldSuppress: () => decideFocusSuppression([...focusedByConnection.values()]),
-    shouldSendOffDashboard: () => decideOffDashboardDelivery(focusedByConnection.size),
   };
 }
 
