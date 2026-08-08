@@ -7,7 +7,7 @@
 
 const GITHUB_PACKAGE_JSON_URL = 'https://raw.githubusercontent.com/johncwaters/glissa/main/package.json';
 const DEFAULT_TIMEOUT_MS = 3000;
-// Run from the clone directory; the install location is the operator's choice, so no path is assumed.
+// Run from the clone directory.
 const GIT_UPDATE_COMMAND = 'git pull && npm ci && npm run build';
 
 // Parse an x.y.z version into a [major, minor, patch] number triple. Tolerates a leading `v` and a
