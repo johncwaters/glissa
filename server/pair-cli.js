@@ -44,19 +44,17 @@ function formatTimestamp(ms) {
   return new Date(ms).toISOString().replace('T', ' ').slice(0, 19);
 }
 
-function pad(value, width) {
-  const str = String(value);
-  if (str.length >= width) return str;
-  return str + ' '.repeat(width - str.length);
-}
-
 function buildPairUrl(remote, token) {
   if (remote.publicHost) return `https://${remote.publicHost}/pair/${token}`;
-  const port = remote.port || 3001;
-  return `http://127.0.0.1:${port}/pair/${token}`;
+  return `http://127.0.0.1:${remote.port}/pair/${token}`;
 }
 
 function runMint(store, remote, name) {
+  if (!remote.publicHost && !remote.port) {
+    console.error('remote.port is not set, so a pairing link cannot be built.');
+    console.error('Set remote.port (and remote.publicHost for a shareable link) in config.json first.');
+    return 1;
+  }
   const minted = store.mintPending({ name: name || '' });
   if (!minted) {
     console.error('Failed to write the pairing file - no token was created.');
@@ -85,14 +83,14 @@ function runList(store, seenStore) {
     return 0;
   }
   const seen = seenStore.readAll();
-  console.log(`${pad('ID', 14)}${pad('NAME', 22)}${pad('PAIRED', 21)}${pad('LAST SEEN', 21)}STATUS`);
+  console.log(`${'ID'.padEnd(14)}${'NAME'.padEnd(22)}${'PAIRED'.padEnd(21)}${'LAST SEEN'.padEnd(21)}STATUS`);
   for (const device of devices) {
     const status = device.revokedAt ? `revoked ${formatTimestamp(device.revokedAt)}` : 'active';
     console.log(
-      pad(device.id, 14)
-      + pad(device.name || '-', 22)
-      + pad(formatTimestamp(device.createdAt), 21)
-      + pad(formatTimestamp(seen[device.id]), 21)
+      device.id.padEnd(14)
+      + (device.name || '-').padEnd(22)
+      + formatTimestamp(device.createdAt).padEnd(21)
+      + formatTimestamp(seen[device.id]).padEnd(21)
       + status
     );
   }

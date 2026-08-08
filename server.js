@@ -77,8 +77,6 @@ if (backend.remote.enabled) {
   remoteServers.push(remoteServer);
 }
 
-console.log(`Listeners: local ${bind.host}:${port} (no auth)${backend.remote.enabled ? `, remote ${bind.host}:${backend.remote.port} (pairing cookie required)` : ', remote disabled'}`);
-
 // Route every termination signal through the same lifecycle path as the dashboard-triggered shutdown
 // (server/backend.js wires an identical createLifecycle instance to the control WS "shutdown" message):
 // requestShutdown awaits the in-flight PTY reaps shutdown() started, then closes the listener with a
