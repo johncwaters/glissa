@@ -212,6 +212,9 @@ export function createSettingsDialog(initialTab) {
   const prEnabledCheckbox = dialog.querySelector('#settings-pr-enabled');
   const prBotTokenInput = dialog.querySelector('#settings-pr-bot-token');
   const prChatIdInput = dialog.querySelector('#settings-pr-chat-id');
+  // Shares the bot credentials above but gates a separate lane (session notifications), so it saves
+  // as its own top-level boolean rather than anything under prReview.
+  const telegramNotificationsCheckbox = dialog.querySelector('#settings-telegram-notifications');
   const prProjectsEl = dialog.querySelector('#settings-pr-projects');
   const prIntervalInput = dialog.querySelector('#settings-pr-interval');
   const prMaxReviewsInput = dialog.querySelector('#settings-pr-max-reviews');
@@ -374,6 +377,7 @@ export function createSettingsDialog(initialTab) {
       checkForUpdates: checkUpdatesCheckbox.checked,
       autoResume: autoResumeCheckbox.checked,
       debugMode: debugModeCheckbox.checked,
+      telegramNotifications: telegramNotificationsCheckbox.checked,
       editorCommand: editorCommandInput.value.trim(),
       repoRoots: repoRoots,
       prReview: {
@@ -422,6 +426,7 @@ export function createSettingsDialog(initialTab) {
       const telegram = s.telegram || {};
       prBotTokenInput.value = telegram.botToken ?? '';
       prChatIdInput.value = telegram.chatId ?? '';
+      telegramNotificationsCheckbox.checked = !!s.telegramNotifications;
       prProjectChoices = Array.isArray(s.projectChoices) ? s.projectChoices : [];
       renderPrProjects(pr.projects || []);
     })

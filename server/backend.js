@@ -34,6 +34,7 @@ const { createLifecycle } = require('./server-lifecycle');
 const { NotificationManager } = require('../notifications/notification-manager');
 const { createNotifyGate, explainNotification } = require('../session/core/notify-gate');
 const { pickAutoResume } = require('../session/core/auto-resume');
+const { createTelegramChannel } = require('../notifications/channels/telegram');
 const { createToastChannel } = require('../notifications/channels/toast');
 const { createWebNotificationChannel } = require('../notifications/channels/web-notification');
 const { createRecorder } = require('../session/session-recorder');
@@ -56,6 +57,7 @@ const { createIntegrationWatcherPool } = require('../detection/integration-watch
 const { createTeamSessionFactory } = require('./team-session-factory');
 const { createPrReviewWiring } = require('./pr-review-wiring');
 const { normalizeRemoteConfig, validateRemoteConfig, decideBindHost } = require('./core/remote-config');
+const { createClientPresence } = require('./core/client-presence');
 const { classifyRequestOrigin, decideUpgradeAccess } = require('./core/request-trust');
 const { createRemoteAuth } = require('./remote-auth');
 const { createPairingsStore, createSeenStore, defaultPairingsPath, defaultSeenPath } = require('./pairings-store');
@@ -500,6 +502,8 @@ function createBackend(httpServer, options = {}) {
 
   // --- Notification manager ---
 
+  const clientPresence = createClientPresence();
+
   const notificationManager = new NotificationManager({
     escalationIntervalMs: ESCALATION_INTERVAL_MS,
     debounceMs: config.notifyDebounceMs || 3000,
@@ -515,28 +519,39 @@ function createBackend(httpServer, options = {}) {
   if (config.osToast) {
     notificationManager.registerChannel('toast', createToastChannel());
   }
+  // Off-dashboard channel: reaches the operator's phone when NO dashboard tab is open anywhere, so
+  // the web channel's broadcast would land on nobody. Registered unconditionally and gated per
+  // delivery off live config (telegramNotifications + the telegram credentials the PR lane already
+  // defines), so the toggle needs no restart and no re-registration. Absent key = never sends.
+  notificationManager.registerChannel('telegram', createTelegramChannel({
+    getConfig: () => config,
+    getConnectionCount: () => clientPresence.connectionCount(),
+  }));
 
-  // --- Client focus tracking (suppress notifications when dashboard is visible) ---
-
-  const focusedClients = new Set();
+  // --- Client presence (per-connection focus; drives suppression and the off-dashboard channel) ---
+  // Bookkeeping and both decisions are pure (server/core/client-presence.js); this is the IO shell
+  // that registers a key per control connection and pushes the resulting boolean into the manager.
+  // Per-connection, not global: with a phone paired through the remote listener, a dashboard left
+  // focused at the desk used to suppress the phone's notification forever.
 
   function updateNotifySuppression() {
-    notificationManager.setFocusSuppressed(focusedClients.size > 0);
+    notificationManager.setFocusSuppressed(clientPresence.shouldSuppress());
   }
 
   function handleClientFocus(ws, focused) {
-    if (focused) focusedClients.add(ws);
-    if (!focused) focusedClients.delete(ws);
+    clientPresence.setFocus(ws, focused);
     updateNotifySuppression();
   }
 
-  // Clean up focus tracking when a control WS client disconnects
   controlWss.on('connection', (ws) => {
+    clientPresence.connect(ws);
+    updateNotifySuppression();
     ws.on('error', (err) => {
       console.warn(`[control-ws] Error: ${err.message}`);
     });
+    // Recount on disconnect: a dashboard that crashes while focused must not suppress forever.
     ws.on('close', () => {
-      focusedClients.delete(ws);
+      clientPresence.disconnect(ws);
       updateNotifySuppression();
     });
   });
@@ -1294,6 +1309,11 @@ function createBackend(httpServer, options = {}) {
 
     if (isControl) {
       controlWss.handleUpgrade(req, socket, head, (ws) => {
+        // Carry the listener-derived trust onto the connection: control handlers that trigger a
+        // side effect on the SERVER machine (open-artifact spawning the editor) have no other way
+        // to tell a paired phone from the local dashboard. Same invariant as the classifier - it
+        // comes from the socket's local port, never from anything the client sent.
+        ws.glissaTrust = trust;
         controlWss.emit('connection', ws, req);
       });
       return;

@@ -93,6 +93,11 @@
     <input type="text" class="dialog-input" id="settings-pr-chat-id" autocomplete="off" spellcheck="false">
     <span class="dialog-hint">Both fields are required for the poller to run. Pings fire on actionable events only (changes requested, conflicts resolved, merged, error).</span>
   </label>
+  <label class="dialog-label dialog-checkbox-label">
+    <input type="checkbox" class="dialog-checkbox" id="settings-telegram-notifications">
+    Send session notifications to Telegram
+    <span class="dialog-hint">Uses the same bot above. Pings when a session completes, needs input, or fails AND no dashboard tab is open anywhere, so the browser notification would reach nobody. Independent of PR auto-review.</span>
+  </label>
   <div class="settings-section">
     <div class="settings-section-title">Projects to watch</div>
     <div class="settings-root-list" id="settings-pr-projects"></div>

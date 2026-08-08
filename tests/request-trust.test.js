@@ -4,8 +4,18 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
-  classifyRequestOrigin, decideRequestAccess, decideUpgradeAccess, isPairPath,
+  classifyRequestOrigin, decideRequestAccess, decideUpgradeAccess, decideEditorOpenAccess, isPairPath,
 } = require('../server/core/request-trust');
+
+// Opening a run artifact spawns the configured editor on the SERVER machine, so a paired phone must
+// be refused explicitly rather than told a window opened somewhere it cannot see.
+test('decideEditorOpenAccess refuses remote connections and nothing else', () => {
+  assert.deepEqual(decideEditorOpenAccess('remote'), { allow: false, reason: 'remote' });
+  assert.deepEqual(decideEditorOpenAccess('local'), { allow: true, reason: null });
+  assert.deepEqual(decideEditorOpenAccess(undefined), { allow: true, reason: null },
+    'remote mode off stamps no trust, which is local by definition');
+  assert.deepEqual(decideEditorOpenAccess(null), { allow: true, reason: null });
+});
 
 test('with no remote listener every socket is local', () => {
   assert.equal(classifyRequestOrigin({ localPort: 3000, remoteListenerPort: null }), 'local');

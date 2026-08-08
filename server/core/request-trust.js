@@ -48,4 +48,18 @@ function decideUpgradeAccess({ remoteEnabled, trust, origin, allowedOrigins, aut
   return { allow: true, reason: null };
 }
 
-module.exports = { classifyRequestOrigin, decideRequestAccess, decideUpgradeAccess, isPairPath };
+/**
+ * Server-side side effects that only make sense ON the machine Glissa runs on. Opening a run
+ * artifact spawns the configured editor there, so honoring the request for a remote-classified
+ * control connection puts a window on a desk the operator is not sitting at and reports success. A
+ * remote connection gets an explicit refusal instead; local connections are unchanged, and an
+ * unclassified connection (remote mode off, so no trust was ever stamped) is local by definition.
+ */
+function decideEditorOpenAccess(trust) {
+  if (trust === 'remote') return { allow: false, reason: 'remote' };
+  return { allow: true, reason: null };
+}
+
+module.exports = {
+  classifyRequestOrigin, decideRequestAccess, decideUpgradeAccess, decideEditorOpenAccess, isPairPath,
+};

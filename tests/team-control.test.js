@@ -16,11 +16,14 @@ const { loadTeam } = require('../teamlib/team-registry');
 
 const REPO_TEAMS = path.join(__dirname, '..', 'teams');
 
-function harness(depsOverride = {}) {
+// `trust` mirrors what backend.js stamps on a control connection at upgrade time; absent (the
+// default, and what a remote-disabled server produces) reads as local.
+function harness(depsOverride = {}, { trust } = {}) {
   const controlWss = new EventEmitter();
   const sent = [];
   let messageHandler = null;
   const ws = {
+    glissaTrust: trust,
     send: (s) => sent.push(JSON.parse(s)),
     on: (ev, h) => { if (ev === 'message') messageHandler = h; },
   };
@@ -314,6 +317,31 @@ test('open-artifact opens a known file and rejects unknown files + path traversa
     assert.ok(h.sent.some((m) => m.type === 'error' && /run id/i.test(m.message)));
 
     assert.equal(opened.length, 1, 'no editor spawn for rejected requests');
+  } finally {
+    fs.rmSync(proj, { recursive: true, force: true });
+  }
+});
+
+// The editor opens on the machine running Glissa, so honoring this from a paired phone would spawn a
+// window nobody is looking at and report success.
+test('open-artifact from a remote connection is refused instead of spawning the editor', () => {
+  const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-art-remote-'));
+  const runDir = path.join(proj, '.glissa', 'teams', 'marketing', 'runs', '2026-06-02-tuesday');
+  fs.mkdirSync(runDir, { recursive: true });
+  fs.writeFileSync(path.join(runDir, 'review.md'), 'VERDICT: SHIP\n', 'utf8');
+  const opened = [];
+  try {
+    const h = harness({
+      registry: realRegistry,
+      getProjectPathById: () => proj,
+      openInEditor: (p) => { opened.push(p); return { ok: true }; },
+    }, { trust: 'remote' });
+    h.send({ type: 'open-artifact', teamId: 'marketing', projectId: 'p1', runId: '2026-06-02-tuesday', artifact: 'review.md' });
+    assert.equal(opened.length, 0, 'no editor spawn for a remote request');
+    const err = h.sent.find((m) => m.type === 'error');
+    assert.ok(err, 'the operator is told why');
+    assert.ok(/machine running Glissa/.test(err.message));
+    assert.ok(!h.sent.some((m) => m.type === 'artifact-opened'), 'never reports a false success');
   } finally {
     fs.rmSync(proj, { recursive: true, force: true });
   }

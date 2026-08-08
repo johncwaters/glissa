@@ -6,6 +6,7 @@ const { TIMEOUT_KEYS, BOOLEAN_KEYS, STRING_KEYS } = require('./config-store');
 const { STATES } = require('../shared/states');
 const { computeNextFire } = require('./scheduler');
 const { listRepoConversations } = require('../session/core/conversation-history');
+const { decideEditorOpenAccess } = require('./core/request-trust');
 
 // A Claude session id is a UUID, but stay lenient (any safe id charset) so a non-UUID id is not
 // rejected. The charset itself is the guard: no path separators, dots, or whitespace can reach the
@@ -645,6 +646,14 @@ function registerControlHandlers(controlWss, deps) {
   // safe segment, artifact must be one of the team's known produced files, and the resolved path must
   // stay inside this team's runs/ directory. The spawn itself lives in backend (openInEditor).
   function handleOpenArtifact(msg, ws) {
+    // A remote-classified connection (a paired phone reaching the second listener) would otherwise
+    // open the editor on the server machine and be told it succeeded. Refuse explicitly instead;
+    // ws.glissaTrust is stamped at upgrade time and absent when remote mode is off, which the
+    // decision reads as local.
+    if (!decideEditorOpenAccess(ws.glissaTrust).allow) {
+      sendError(ws, 'Artifacts open in an editor on the machine running Glissa, not on this device');
+      return;
+    }
     if (!openInEditor) { sendError(ws, 'Opening artifacts is not available'); return; }
     const { teamId, projectId, runId, artifact } = msg;
     let team = null;

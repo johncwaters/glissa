@@ -76,6 +76,12 @@ if (backend.remote.enabled) {
   });
   remoteServers.push(remoteServer);
 }
+if (!backend.remote.enabled) {
+  // The enabled case announces itself with its own listener line above; the disabled case has no
+  // listener to announce, so without this the log is silent about remote mode and an operator
+  // debugging "my phone cannot reach it" has nothing to read.
+  console.log('Glissa remote mode is disabled (set remote.enabled in config.json to turn it on)');
+}
 
 // Route every termination signal through the same lifecycle path as the dashboard-triggered shutdown
 // (server/backend.js wires an identical createLifecycle instance to the control WS "shutdown" message):

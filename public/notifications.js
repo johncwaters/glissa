@@ -64,6 +64,12 @@ export function showDesktopNotification({ session, category, message } = {}) {
   const notificationApi = getNotificationApi();
   if (!notificationApi || !isNotificationsEnabled()) return;
   if (notificationApi.permission !== 'granted') return;
+  // The server suppresses only while EVERY connected device reports focused (see
+  // server/core/client-presence.js), so with a phone paired a focused desktop tab now DOES receive
+  // notifications meant for the other screen. Decline here: the operator is already looking at this
+  // window. This must run BEFORE the cross-tab claim below, or this tab would win the claim and then
+  // stay silent, muting every other tab with it.
+  if (typeof document !== 'undefined' && typeof document.hasFocus === 'function' && document.hasFocus()) return;
   // Cross-tab claim: every open tab receives the broadcast, and with renotify each
   // construction re-alerts, so only the tab that wins the short-TTL localStorage
   // claim raises the toast (see notify-dedupe-core.mjs). Fail-open on storage errors.

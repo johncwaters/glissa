@@ -44,6 +44,11 @@ const DEFAULT_CONFIG = {
   // (session/core/anti-slop-prompt.js). OFF by default; user sessions only (team/pack-setup
   // stage sessions never receive it). Takes effect on the next session start/restart.
   antiSlopPrompt: false,
+  // Push session notifications (complete / waiting / failed) to Telegram when NO dashboard tab is
+  // open anywhere, using the same config.telegram credentials the PR-review lane defines. Separate
+  // from prReview.enabled on purpose: PR pings and session pings are independently switchable. Off
+  // by default; see notifications/channels/telegram.js for the per-delivery gate.
+  telegramNotifications: false,
   editorCommand: '',
   // Integration branch every worktree-backed session forks from and merges back into. If it is absent
   // locally, team-git.js auto-creates it (from origin/<branch>, then main/master, then HEAD); a session
@@ -102,6 +107,7 @@ const BOOLEAN_KEYS = [
   'antiSlopPrompt',
   'checkForUpdates',
   'autoResume',
+  'telegramNotifications',
 ];
 
 // Free-text settings persisted to config.json.
@@ -234,6 +240,7 @@ function createConfigStore({ settingsDefaults } = {}) {
       antiSlopPrompt: config.antiSlopPrompt ?? effectiveDefaults.antiSlopPrompt,
       checkForUpdates: config.checkForUpdates ?? effectiveDefaults.checkForUpdates,
       autoResume: config.autoResume ?? effectiveDefaults.autoResume,
+      telegramNotifications: config.telegramNotifications ?? effectiveDefaults.telegramNotifications,
       editorCommand: config.editorCommand ?? effectiveDefaults.editorCommand,
       integrationBranch: config.integrationBranch ?? effectiveDefaults.integrationBranch,
       worktreeRoot: config.worktreeRoot ?? effectiveDefaults.worktreeRoot,
