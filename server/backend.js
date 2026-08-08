@@ -55,6 +55,10 @@ const { createIntegrationRefWatcher } = require('../detection/integration-ref-wa
 const { createIntegrationWatcherPool } = require('../detection/integration-watcher-pool');
 const { createTeamSessionFactory } = require('./team-session-factory');
 const { createPrReviewWiring } = require('./pr-review-wiring');
+const { normalizeRemoteConfig, validateRemoteConfig, decideBindHost } = require('./core/remote-config');
+const { classifyRequestOrigin, decideUpgradeAccess } = require('./core/request-trust');
+const { createRemoteAuth } = require('./remote-auth');
+const { createPairingsStore, createSeenStore, defaultPairingsPath, defaultSeenPath } = require('./pairings-store');
 
 // WAITING-state notification escalation cadence (fixed 5 minutes; previously the
 // configurable waitingEscalationSeconds setting).
@@ -217,15 +221,10 @@ function reconcileSessionWorktrees({ projects, sessions, gitWorkspaceSync, integ
   }
 }
 
-function isAllowedOrigin(req) {
-  const origin = req.headers.origin;
-  if (!origin) return true; // Non-browser clients (curl, ws CLI) have no Origin
-  try {
-    const { hostname } = new URL(origin);
-    return hostname === 'localhost' || hostname === '127.0.0.1';
-  } catch {
-    return false;
-  }
+function bootError(message) {
+  const err = new Error(message);
+  err.glissaBoot = true;
+  return err;
 }
 
 function createBackend(httpServer, options = {}) {
@@ -238,6 +237,26 @@ function createBackend(httpServer, options = {}) {
   const port = process.env.GLISSA_PORT
     ? Number.parseInt(process.env.GLISSA_PORT, 10)
     : (config.port || 3000);
+
+  // --- Remote mode (off unless config.remote.enabled) ---
+  // Two listeners, one Express app. Trust is decided per request by which listener the socket landed
+  // on, so nothing a client can send widens it. With remote disabled every branch below is inert and
+  // the request/upgrade paths behave exactly as they did before (pinned by
+  // tests/backend-remote-disabled.test.js).
+  const remote = normalizeRemoteConfig(config.remote);
+  const remoteCheck = validateRemoteConfig(remote, port);
+  if (!remoteCheck.ok) throw bootError(`[remote] invalid configuration: ${remoteCheck.error}`);
+  const insecureBind = process.env.GLISSA_INSECURE_BIND === '1';
+  const bindDecision = decideBindHost({ envHost: process.env.GLISSA_HOST, insecureBind });
+  const remoteListenerPort = remote.enabled ? remote.port : null;
+
+  const remoteAuth = remote.enabled
+    ? createRemoteAuth({
+      remote,
+      pairingsStore: createPairingsStore({ filePath: defaultPairingsPath(configStore.configPath) }),
+      seenStore: createSeenStore({ filePath: defaultSeenPath(configStore.configPath) }),
+    })
+    : null;
 
   // --- Detection: shared hook router + per-session settings injection ---
   // The hook port MUST come from the actually-bound server, not config.port:
@@ -301,6 +320,13 @@ function createBackend(httpServer, options = {}) {
   // --- Express setup ---
 
   const app = express();
+
+  // Remote gate FIRST, ahead of every route including /hook: a remote-classified request is refused
+  // before any handler sees it. The middleware self-exempts /pair/*, which mountPairRoutes serves.
+  if (remoteAuth) {
+    app.use(remoteAuth.httpMiddleware);
+    remoteAuth.mountPairRoutes(app);
+  }
 
   // Hook ingress: Claude Code HTTP hooks POST here (injected via --settings at
   // spawn). Localhost-only + per-session bearer token (validated in HookRouter).
@@ -1235,24 +1261,49 @@ function createBackend(httpServer, options = {}) {
   // we own (/control, /terminals/*). Unrecognized paths are left alone so
   // other listeners (e.g. Vite HMR) can handle them.
 
-  httpServer.on('upgrade', (req, socket, head) => {
+  function handleUpgrade(req, socket, head) {
     const { url } = req;
+    const isControl = url === '/control';
+    const isData = url.startsWith('/terminals/');
+    const trust = classifyRequestOrigin({ localPort: socket.localPort, remoteListenerPort });
 
-    if (url === '/control') {
-      if (!isAllowedOrigin(req)) { socket.destroy(); return; }
+    if (!isControl && !isData) {
+      // Locally, leave the socket alone so other upgrade listeners (Vite HMR) can claim it. On the
+      // remote listener nothing else is listening, so returning would strand an authenticated-by-
+      // nobody socket open with no timeout; close it instead.
+      if (trust === 'remote') socket.destroy();
+      return;
+    }
+
+    const authenticated = trust === 'remote' && remoteAuth ? remoteAuth.isUpgradeAuthorized(req) : false;
+    const decision = decideUpgradeAccess({
+      remoteEnabled: remote.enabled,
+      trust,
+      origin: req.headers.origin,
+      allowedOrigins: remote.allowedOrigins,
+      authenticated,
+    });
+    if (!decision.allow) {
+      // A bare destroy() is what a rejected origin has always got, and remote-disabled builds must
+      // stay byte-identical; the explicit status line is a remote-mode affordance so an unpaired
+      // client sees why its socket died instead of a naked reset.
+      if (remote.enabled) socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');
+      socket.destroy();
+      return;
+    }
+
+    if (isControl) {
       controlWss.handleUpgrade(req, socket, head, (ws) => {
         controlWss.emit('connection', ws, req);
       });
       return;
     }
-    if (url.startsWith('/terminals/')) {
-      if (!isAllowedOrigin(req)) { socket.destroy(); return; }
-      dataWss.handleUpgrade(req, socket, head, (ws) => {
-        dataWss.emit('connection', ws, req);
-      });
-    }
-    // No else - let other upgrade listeners (Vite HMR) handle their paths
-  });
+    dataWss.handleUpgrade(req, socket, head, (ws) => {
+      dataWss.emit('connection', ws, req);
+    });
+  }
+
+  httpServer.on('upgrade', handleUpgrade);
 
   // --- Config hot-reload ---
 
@@ -1269,6 +1320,9 @@ function createBackend(httpServer, options = {}) {
     shuttingDown = true;
     clearInterval(healthInterval);
     stopConfigWatch();
+    // Same reason as stopConfigWatch: a leaked fs.watch keeps the event loop alive and hangs any
+    // embedder that expects the process to exit.
+    if (remoteAuth) remoteAuth.stop();
     try { updateAbort.abort(); } catch { /* no in-flight update request */ }
     // INVARIANT: destroy NotificationManager BEFORE sessions - clears all timers globally
     notificationManager.destroy();
@@ -1318,7 +1372,25 @@ function createBackend(httpServer, options = {}) {
       .catch(() => { /* advisory only - never let the update check affect the process */ });
   }
 
-  return { shutdown, port, app };
+  // attach() wires the SAME Express app and upgrade handler onto the remote listener's HTTP server.
+  // Sharing them is what makes the two listeners identical except for the trust classification, so a
+  // route can never exist on one and be forgotten on the other. The Vite dev plugin never calls it,
+  // which is why remote mode is inert in dev by design.
+  return {
+    shutdown,
+    port,
+    app,
+    bindHost: bindDecision.host,
+    remote: {
+      enabled: remote.enabled,
+      port: remote.port,
+      publicHost: remote.publicHost,
+      attach(remoteHttpServer) {
+        remoteHttpServer.on('request', app);
+        remoteHttpServer.on('upgrade', handleUpgrade);
+      },
+    },
+  };
 }
 
 /**

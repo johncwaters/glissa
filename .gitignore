@@ -10,6 +10,10 @@ dist/
 !.claude/omc.jsonc
 !.claude/release-profile.yml
 config.json
+# Remote-mode device pairings (hashes only, but machine-local state). Sits next to config.json, so a
+# dev run with the in-repo config.json lands them here.
+pairings.json
+pairings-seen.json
 .pty-capture/
 # Runtime output (team runs, post-turn checker telemetry, etc). Not a deliverable.
 # Excludes the project pack (.glissa/pack/, .glissa/teams/*/pack/), which AGENTS.md documents as committed.

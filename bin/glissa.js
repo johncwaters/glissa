@@ -9,8 +9,12 @@ if (args.includes('--help') || args.includes('-h')) {
 
 Commands:
   doctor            Diagnose install / PATH issues and exit
+  pair              Mint a single-use pairing link for a remote device
+  pair --list       List paired devices
+  pair --revoke <id>  Revoke a paired device
 
 Options:
+  --name <label>    Label for the device being paired (with: pair)
   --port <number>   Override the server port (default: 3000)
   --config <path>   Path to config file (default: ~/.glissa/config.json)
   --version         Show version number
@@ -45,6 +49,13 @@ if (configArg) {
 const portArg = getArgValue('--port');
 if (portArg) {
   process.env.GLISSA_PORT = portArg;
+}
+
+// Dispatched BEFORE require('../server') so the CLI never boots a server, and AFTER --config is
+// bridged into the env so it resolves the same ~/.glissa root the server would.
+if (args[0] === 'pair') {
+  const { runPairCli } = require('../server/pair-cli');
+  process.exit(runPairCli(args.slice(1)));
 }
 
 require('../server');

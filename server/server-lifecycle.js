@@ -31,9 +31,20 @@ function awaitReaps(pendingReaps, { capMs = 3000, setTimeoutFn = setTimeout, cle
 //   onRestart     - dev (Vite) restarts in-process via this; when null, production respawns detached.
 //   spawn         - child_process.spawn (the production respawn); defaults to require at call sites.
 //   exit/getArgv/cwd - process seams (defaulted to process.*) so tests observe instead of exiting.
+// Secondary listeners (remote mode's cookie-gated server) are closed alongside the primary, with
+// their sockets forced shut: the primary's close is what gates exit, and a lingering remote listener
+// would keep its port bound past a restart's respawn.
+function closeExtraServers(extraServers) {
+  for (const server of extraServers) {
+    try { server.close(); } catch { /* not listening */ }
+    try { if (server.closeAllConnections) server.closeAllConnections(); } catch { /* older node */ }
+  }
+}
+
 function createLifecycle({
   shutdown,
   httpServer,
+  extraServers = [],
   onRestart = null,
   spawn,
   exit = process.exit,
@@ -57,6 +68,7 @@ function createLifecycle({
     requested = true;
     const pendingReaps = shutdown() || [];
     await awaitReaps(pendingReaps, { capMs });
+    closeExtraServers(extraServers);
     let exited = false;
     const doExit = () => {
       if (exited) return;
@@ -75,6 +87,7 @@ function createLifecycle({
     requested = true;
     const pendingReaps = shutdown() || [];
     await awaitReaps(pendingReaps, { capMs });
+    closeExtraServers(extraServers);
     // Dev mode (Vite) restarts the server in-process; no detached respawn, no new console window.
     // Release the guard and rethrow if the in-process restart throws, so a thrown onRestart does not
     // latch `requested` and permanently no-op every later restart/shutdown. Production never reaches

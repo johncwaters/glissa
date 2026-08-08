@@ -66,6 +66,21 @@ const DEFAULT_CONFIG = {
     // `slop` is the report-only code-slop detector; OFF by default (opt in per project).
     rules: { trailingWs: true, finalNewline: true, bom: true, slop: false },
   },
+  // Remote access (off by default, see AGENTS.md "Remote Mode"). When enabled the server opens a
+  // SECOND listener on remote.port that requires a paired device cookie for everything except
+  // /pair/*; the local 127.0.0.1 listener is untouched. Deliberately NOT reachable from the control
+  // WebSocket: the local dashboard is unauthenticated, so letting it edit these keys would turn any
+  // local process into a remote-access grant. Config file or CLI only, restart required.
+  remote: {
+    enabled: false,
+    // Port for the remote listener (the reverse proxy's upstream). Must differ from `port`.
+    port: null,
+    // Public hostname used to BUILD pairing URLs. Binds nothing.
+    publicHost: '',
+    // Browser origins allowed to open a WebSocket. Empty + publicHost set defaults to
+    // ["https://<publicHost>"]. Supports a leading "*." host wildcard.
+    allowedOrigins: [],
+  },
   projects: []
 };
 
@@ -89,7 +104,10 @@ const BOOLEAN_KEYS = [
   'autoResume',
 ];
 
-// Free-text settings persisted to config.json
+// Free-text settings persisted to config.json.
+// `remote` appears in NEITHER key list, is not echoed by getSettings, and is not read by
+// applySettings: the control WebSocket is unauthenticated on localhost, so a settable remote block
+// would let any local process open the machine to the network. See AGENTS.md "Remote Mode".
 const STRING_KEYS = [
   'editorCommand',
   'integrationBranch',
@@ -333,4 +351,7 @@ function createConfigStore({ settingsDefaults } = {}) {
   };
 }
 
-module.exports = { createConfigStore, generateProjectId, ensureProjectIds, TIMEOUT_KEYS, BOOLEAN_KEYS, STRING_KEYS, DEFAULT_CONFIG };
+module.exports = {
+  createConfigStore, resolveConfigPath, generateProjectId, ensureProjectIds,
+  TIMEOUT_KEYS, BOOLEAN_KEYS, STRING_KEYS, DEFAULT_CONFIG,
+};

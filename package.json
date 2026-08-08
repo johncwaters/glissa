@@ -62,6 +62,7 @@
     "start": "node server.js",
     "lint": "biome check .",
     "test": "node --test \"tests/**/*.test.js\"",
+    "test:container": "docker build -f test/container/Dockerfile -t glissa-remote-test . && docker run --rm glissa-remote-test",
     "dev": "vite",
     "dev:server-only": "node server.js",
     "build": "vite build",

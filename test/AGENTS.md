@@ -11,6 +11,9 @@ Manual smoke tests and harnesses run directly with `node`, separate from the aut
 | File | Description |
 |------|-------------|
 | `smoke-dormant-boot.js` | Boots the backend in-process, verifies dormant-by-default boot and the start-session control flow |
+| `container/Dockerfile` | node:24-bookworm image for the Linux-only remote-mode suite (`npm run test:container`) |
+| `container/remote-mode.sh` | Remote-mode integration assertions: two listeners, pairing lifecycle, revocation, Origin policy |
+| `container/ws-check.js` | WebSocket probe used by that script (cookie/Origin headers, waits for a control snapshot) |
 
 ## For AI Agents
 
