@@ -60,15 +60,18 @@ function emptyDoc() {
   return { version: 1, pending: [], devices: [] };
 }
 
-/** ~/.glissa/pairings.json, or a sibling of an explicitly configured config.json. */
+/** A sibling of an explicitly configured config.json, or the fallback under ~/.glissa. */
+function configSiblingPath(configPath, name) {
+  if (configPath) return path.join(path.dirname(configPath), name);
+  return path.join(os.homedir(), '.glissa', name);
+}
+
 function defaultPairingsPath(configPath) {
-  if (configPath) return path.join(path.dirname(configPath), 'pairings.json');
-  return path.join(os.homedir(), '.glissa', 'pairings.json');
+  return configSiblingPath(configPath, 'pairings.json');
 }
 
 function defaultSeenPath(configPath) {
-  if (configPath) return path.join(path.dirname(configPath), 'pairings-seen.json');
-  return path.join(os.homedir(), '.glissa', 'pairings-seen.json');
+  return configSiblingPath(configPath, 'pairings-seen.json');
 }
 
 function coerceDoc(parsed) {
@@ -394,6 +397,6 @@ function createSeenStore({ filePath, throttleMs = 60000, now = Date.now } = {}) 
 }
 
 module.exports = {
-  createPairingsStore, createSeenStore, defaultPairingsPath, defaultSeenPath, pairingsSignature,
+  configSiblingPath, createPairingsStore, createSeenStore, defaultPairingsPath, defaultSeenPath, pairingsSignature,
   EMPTY_DOC, SNAPSHOT_RELOAD_MS, REVOCATION_PROPAGATION_SECONDS,
 };

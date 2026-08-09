@@ -93,7 +93,6 @@ function extensionIsUpload(name) {
 }
 
 module.exports = {
-  IMAGE_EXTENSION_BY_MIME,
   MAX_UPLOAD_BYTES,
   UPLOAD_RETAIN_FILES,
   buildUploadFilename,

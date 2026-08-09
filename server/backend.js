@@ -23,7 +23,6 @@
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const fsp = require('node:fs/promises');
-const os = require('node:os');
 const path = require('node:path');
 const { pipeline } = require('node:stream');
 const express = require('express');
@@ -64,7 +63,7 @@ const { normalizeRemoteConfig, validateRemoteConfig, decideBindHost } = require(
 const { createClientPresence } = require('./core/client-presence');
 const { classifyRequestOrigin, decideUpgradeAccess } = require('./core/request-trust');
 const { createRemoteAuth } = require('./remote-auth');
-const { createPairingsStore, createSeenStore, defaultPairingsPath, defaultSeenPath } = require('./pairings-store');
+const { configSiblingPath, createPairingsStore, createSeenStore, defaultPairingsPath, defaultSeenPath } = require('./pairings-store');
 const {
   buildUploadFilename,
   decideUploadType,
@@ -383,11 +382,9 @@ function createBackend(httpServer, options = {}) {
   // paired phone must carry its pairing cookie; on the local listener it sits at the same trust level
   // as the control WS, which can already spawn a session in any directory.
   //
-  // Uploads live beside the resolved config file (defaultPairingsPath's idiom), one directory per
-  // session, so a temp GLISSA_CONFIG keeps its uploads in the temp dir too.
-  const uploadsRoot = configStore.configPath
-    ? path.join(path.dirname(configStore.configPath), 'uploads')
-    : path.join(os.homedir(), '.glissa', 'uploads');
+  // Uploads live beside the resolved config file, one directory per session, so a temp GLISSA_CONFIG
+  // keeps its uploads in the temp dir too.
+  const uploadsRoot = configSiblingPath(configStore.configPath, 'uploads');
 
   // Keep the newest uploads per session; fire-and-forget after a save, best-effort like the recorder's
   // sweep (all sessions share one event loop, so nothing here blocks or retries).
