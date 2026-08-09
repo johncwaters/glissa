@@ -205,9 +205,8 @@ export function startInlineRename(ui, sessionId) {
   // moves the target mid-edit.
   const nameBeforeEdit = ui.card?.dataset.session ?? targetEl.textContent;
 
-  // Repaint every node that shows this name, so neither surface holds a stale one until its own next
-  // repaint. Reads the authoritative value again at call time: by commit, a server broadcast may
-  // already have applied the new name.
+  // Repaint every node that shows this name from the authoritative value, so neither surface is left
+  // holding a stale one until its own next repaint.
   function repaintName() {
     const name = ui.card?.dataset.session ?? nameBeforeEdit;
     targetEl.textContent = name;
@@ -241,7 +240,14 @@ export function startInlineRename(ui, sessionId) {
       }
     }
     sendControlMsg({ type: 'rename-session', id: sessionId, newName });
-    repaintName(); // server broadcast applies the actual rename through renameSessionCard
+    // Repaints the name the session CURRENTLY has, not the one just submitted, so the operator sees the
+    // old name until the server's session-renamed broadcast lands and renameSessionCard applies the new
+    // one. That brief flash is deliberate, not an oversight: the server can refuse this rename and sends
+    // no broadcast when it does, and its name pattern (SESSION_NAME_RE in control-handlers.js) is
+    // stricter than the two checks above, so a name with a slash or a colon reaches here and is rejected.
+    // Painting newName optimistically would leave the card header showing a name the session never took,
+    // with nothing to correct it. Show the state that is known, never the one that was asked for.
+    repaintName();
   }
 
   function cancel() {
