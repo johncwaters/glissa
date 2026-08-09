@@ -354,13 +354,18 @@ function wireSoftKeyboardInput(termWrap, term, ui) {
     return true;
   };
 
-  const listenBeforeXterm = (type, handler) => termWrap.addEventListener(type, handler, true);
+  // Desktop never intercepts: every event only resyncs the diff baseline and passes through to xterm.
+  const listenBeforeXterm = (type, handler) => {
+    termWrap.addEventListener(type, (event) => {
+      if (!isPhoneLayout()) {
+        resyncBaseline();
+        return;
+      }
+      handler(event);
+    }, true);
+  };
 
   listenBeforeXterm('keydown', (event) => {
-    if (!isPhoneLayout()) {
-      resyncBaseline();
-      return;
-    }
     if (isImeProcessingKeydown(event)) {
       event.stopPropagation();
       return;
@@ -373,28 +378,16 @@ function wireSoftKeyboardInput(termWrap, term, ui) {
   });
 
   listenBeforeXterm('compositionstart', (event) => {
-    if (!isPhoneLayout()) {
-      resyncBaseline();
-      return;
-    }
     event.stopPropagation();
   });
 
   // The textarea is not updated yet when compositionupdate fires, so the value is read from the input
   // event that follows instead of from here.
   listenBeforeXterm('compositionupdate', (event) => {
-    if (!isPhoneLayout()) {
-      resyncBaseline();
-      return;
-    }
     event.stopPropagation();
   });
 
   listenBeforeXterm('compositionend', (event) => {
-    if (!isPhoneLayout()) {
-      resyncBaseline();
-      return;
-    }
     event.stopPropagation();
     // Engines disagree on whether the committed text lands before or after this event, so it is read
     // on the next task rather than here.
@@ -402,10 +395,6 @@ function wireSoftKeyboardInput(termWrap, term, ui) {
   });
 
   listenBeforeXterm('input', (event) => {
-    if (!isPhoneLayout()) {
-      resyncBaseline();
-      return;
-    }
     // Text xterm's own paste handler already sent; the browser inserts a copy of it afterwards.
     if (!isTypedInputType(event.inputType)) {
       queueMicrotask(() => ui._resetSoftKeyboardBuffer());
