@@ -66,15 +66,27 @@ export function createTerminalScreen({ onBack }) {
   let renameTargetUi = null;
 
   // Bytes from the key strip go to whichever session this screen is showing, over the same data WS
-  // xterm's own keystrokes use. DOM focus is deliberately left alone: re-focusing the terminal would
-  // force the soft keyboard open on every Esc or arrow press. A refused send (socket down and the
-  // replay queue full) is reported - a Ctrl+C tap that silently vanishes reads as a wedged session.
+  // xterm's own keystrokes use. The strip never takes DOM focus (mobile-key-strip.js), so the keyboard
+  // survives an Esc or arrow press. A refused send (socket down and the replay queue full) is reported -
+  // a Ctrl+C tap that silently vanishes reads as a wedged session.
   function sendToShownTerminal(data) {
     const ui = shownId ? sessionUIs.get(shownId) : null;
     if (!ui) return;
     if (sendTerminalInput(ui, data)) return;
     showErrorToast('Session is not connected; key press was dropped');
   }
+
+  // Typing on a phone goes through xterm's hidden 0x0 helper textarea, and its own synthetic focus on
+  // mousedown does not reliably raise a soft keyboard, so the tap focuses the terminal explicitly. Click
+  // rather than pointerdown: a scroll drag fires no click, and a click still counts as the user gesture
+  // iOS demands before it will open the keyboard.
+  function focusShownTerminal() {
+    const ui = shownId ? sessionUIs.get(shownId) : null;
+    if (!ui?.term) return;
+    ui.term.focus();
+  }
+
+  cardSlot.addEventListener('click', focusShownTerminal);
 
   function paint() {
     const ui = shownId ? sessionUIs.get(shownId) : null;
@@ -184,6 +196,7 @@ export function createTerminalScreen({ onBack }) {
     if (!ui) return;
     ui._applyFit?.();
     forceTerminalRepaint(ui);
+    focusShownTerminal();
   }
 
   onSessionTick(() => {

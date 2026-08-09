@@ -3830,7 +3830,16 @@ html[data-layout="phone"] .phone-shell[hidden] { display: none; }
 .phone-terminal-bar[data-state="WAITING"] .phone-terminal-badge { color: var(--state-waiting); }
 .phone-terminal-bar[data-state="FAILED"] .phone-terminal-badge { color: var(--state-failed); }
 
-.phone-card-slot { flex: 1 1 auto; min-height: 0; display: flex; }
+/* touch-action drops the double-tap-zoom wait so a tap focuses the terminal immediately, and the callout
+   suppression keeps a press from raising the OS selection/copy sheet over the keyboard we are opening.
+   Both reach the terminal through the descendant chain, so the card itself needs no copy. */
+.phone-card-slot {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  touch-action: manipulation;
+  -webkit-touch-callout: none;
+}
 .phone-card-slot[hidden] { display: none; }
 
 /* The card, re-cast as the whole screen. Same treatment (and the same (0,3,0) specificity needed to

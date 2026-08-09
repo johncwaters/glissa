@@ -17,6 +17,10 @@ export function createMobileKeyStrip({ send }) {
     btn.type = 'button';
     btn.dataset.key = key.id;
     btn.title = key.title;
+    // A press must not move DOM focus off xterm's hidden textarea, or the soft keyboard closes on every
+    // Esc or arrow tap; preventing the default on pointerdown blocks the focus change while leaving the
+    // click that actually sends the bytes.
+    btn.addEventListener('pointerdown', (event) => event.preventDefault());
     btn.addEventListener('click', () => pressKey(key, send));
     strip.appendChild(btn);
   }
