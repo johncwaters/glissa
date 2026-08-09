@@ -1443,6 +1443,14 @@ function mountDevRoutes(app) {
     res.type('application/javascript');
     res.send(lines.join('\n'));
   });
+
+  // Sent as a FILE, unlike the states route above: that one regenerates its module from a require()d
+  // object, which works because states exports nothing but constants. This module exports functions,
+  // and a required function cannot be serialized back into source, so the ESM twin ships as-is.
+  app.get('/shared/client-trust.mjs', (_req, res) => {
+    res.type('application/javascript');
+    res.sendFile(path.join(__dirname, '..', 'shared/client-trust.esm.js'));
+  });
 }
 
 module.exports = {

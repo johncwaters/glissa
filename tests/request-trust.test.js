@@ -5,16 +5,16 @@ const assert = require('node:assert/strict');
 
 const {
   classifyRequestOrigin, decideRequestAccess, decideUpgradeAccess, decideEditorOpenAccess, isPairPath,
-  clientTrustLabel,
+  normalizeClientTrust,
 } = require('../server/core/request-trust');
 
-test('clientTrustLabel collapses an unstamped connection to local', () => {
-  assert.equal(clientTrustLabel('remote'), 'remote');
-  assert.equal(clientTrustLabel('local'), 'local');
-  assert.equal(clientTrustLabel(undefined), 'local',
+test('normalizeClientTrust collapses an unstamped connection to local', () => {
+  assert.equal(normalizeClientTrust('remote'), 'remote');
+  assert.equal(normalizeClientTrust('local'), 'local');
+  assert.equal(normalizeClientTrust(undefined), 'local',
     'remote mode off stamps no trust, and the client must read that as local');
-  assert.equal(clientTrustLabel(null), 'local');
-  assert.equal(clientTrustLabel('anything-else'), 'local');
+  assert.equal(normalizeClientTrust(null), 'local');
+  assert.equal(normalizeClientTrust('anything-else'), 'local');
 });
 
 // Opening a run artifact spawns the configured editor on the SERVER machine, so a paired phone must

@@ -8,6 +8,7 @@
 // remote visitor the unauthenticated local trust level. The listener port cannot be spoofed by a
 // client: it is whichever socket the kernel accepted the connection on.
 
+const { normalizeClientTrust } = require('../../shared/client-trust');
 const { decideOriginAllowed } = require('./origin-policy');
 
 const PAIR_PATH_PREFIX = '/pair/';
@@ -60,17 +61,12 @@ function decideEditorOpenAccess(trust) {
   return { allow: true, reason: null };
 }
 
-/**
- * Display metadata handed to a control-WS client so its UI can stop offering actions that only make
- * sense on the machine Glissa runs on. Same 'remote' test as every decision above, and an unstamped
- * connection (remote mode off) is local by definition. This is NOT a boundary: a paired device is
- * full-trust by design, so nothing may be enforced client-side on the strength of this label.
- */
-function clientTrustLabel(trust) {
-  return trust === 'remote' ? 'remote' : 'local';
-}
-
 module.exports = {
   classifyRequestOrigin, decideRequestAccess, decideUpgradeAccess, decideEditorOpenAccess, isPairPath,
-  clientTrustLabel,
+  // The label handed to a control-WS client so its UI can stop offering actions that only make sense
+  // on the machine Glissa runs on. It lives in shared/ because the browser applies the same rule to
+  // the label it receives, and re-exports here so this module stays the one-stop trust API. This is
+  // NOT a boundary: a paired device is full-trust by design, so nothing may be enforced client-side
+  // on the strength of it.
+  normalizeClientTrust,
 };

@@ -54,6 +54,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '/shared/states.mjs': path.resolve(__dirname, 'shared/states.esm.js'),
+      '/shared/client-trust.mjs': path.resolve(__dirname, 'shared/client-trust.esm.js'),
     },
   },
 

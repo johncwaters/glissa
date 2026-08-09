@@ -4,9 +4,9 @@
 import '@xterm/xterm/css/xterm.css';
 import './tailwind.css';
 
+import { shouldShowServerAction } from '/shared/client-trust.mjs';
 import { STATES } from '/shared/states.mjs';
 import { connectControl, disableReconnect, onControlMessage, sendControlMsg, sendControlRequest, setConnectionStateCallback } from './control-ws.js';
-import { shouldShowServerAction } from './client-trust-core.mjs';
 import { createAddSessionDialog, createConfirmDialog, createSettingsDialog } from './dialogs.js';
 import { writeClipboardText } from './dom-helpers.js';
 import { activateFocusView, deactivateFocusView, focusAdjacentInRail, focusNextAttention, focusNthInRail, focusSessionInCenter, isFocusActive, mountFocusView, noteKnownProjectPath, refreshFocusRoster, restoreFocusedSession, setFocusMergeStatus } from './focus-view/focus-view.js';
