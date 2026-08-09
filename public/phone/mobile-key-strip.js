@@ -1,11 +1,5 @@
-// Touch key strip: the one-row control bar under the terminal on the phone Terminal screen. A soft
-// keyboard gives xterm printable characters only, so Esc / Tab / Ctrl+C / arrows have no other way in,
-// and the browser refuses a synthetic paste into the terminal textarea. Each button writes the same
-// bytes the physical keys write (catalog in ../mobile-keys.mjs) through the session's existing data-WS
-// send path.
-//
-// It lives in the phone package because the phone Terminal screen is the only surface that mounts it:
-// every other surface implies a physical keyboard.
+// The touch key strip's DOM. A soft keyboard gives xterm printable characters only, so Esc / Tab /
+// Ctrl+C / arrows have no other way in; byte catalog in ../mobile-keys.mjs.
 
 import { el } from '../dom-helpers.js';
 import { isClipboardKey, mobileKeyBytes, MOBILE_KEYS } from '../mobile-keys.mjs';

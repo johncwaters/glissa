@@ -11,7 +11,7 @@ The Focus view: a watch-and-steer layout with a persistent left roster rail (one
 | File | Description |
 |------|-------------|
 | `focus-view.js` | The DOM layout: rail, center re-parenting, attention header ("{n} NEED YOU"), pill rendering |
-| `attention-core.mjs` | Pure roster ordering (non-dormant first, then numeric/case-insensitive name) + attention-queue cursor (`pickNextAttention`) |
+| `attention-core.mjs` | Pure roster ordering (non-dormant first, then numeric/case-insensitive name), attention-queue cursor (`pickNextAttention`), and THE shared "needs you" rule (`needsAttention` / `countSessionsNeedingAttention` / `attentionSummaryText`) that both the rail head and the phone Board render |
 | `roster-groups.mjs` | Pure project grouping over an already-ordered roster; stable partition, groups A->Z by basename. Optional 3rd arg `emptyKeys` adds session-less KEPT projects as empty groups (`rows: []`) |
 | `focus-shortcuts.mjs` | Single source of truth for which Alt+key combos are dashboard shortcuts; consulted by `session-card/terminal.js` so they bubble past xterm |
 

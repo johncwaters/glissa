@@ -220,7 +220,7 @@ public/
     phone-shell.js     # Screen container, bottom nav, screen switching, history, visual-viewport sizing, the desktop handoff
     board-screen.js    # Default screen: attention-first session rows + the phone top bar (adopts the desktop header controls)
     terminal-screen.js # One session's full-bleed terminal: back, name, badge, the card's adopted action cluster, key strip
-    triage-core.mjs    # Pure attention-first ordering + attention count + the header readout text
+    triage-core.mjs    # Pure attention-first ORDER only; the shared "needs you" rule + readout wording live in focus-view/attention-core.mjs
     mobile-key-strip.js # Esc/Tab/Ctrl+C/arrows/Paste, the keys a soft keyboard cannot produce
   sidebar/         # Right-docked review sidebar: changed-files diffs + merge/discard actions
   audio/           # Notification sound files (OGG)
@@ -384,7 +384,7 @@ The dashboard has two layouts, not one responsive shell. `public/form-factor-cor
 - **The desktop shell is `display:none` on a phone.** `public/phone/phone-shell.js` renders four screens (Board, Terminal, Review, Teams) behind a bottom nav. Board is the base screen; entering another pushes exactly ONE history entry, so the back gesture always means "return to the Board". History is untouched on desktop.
 - **Nothing is duplicated; live elements are RE-PARENTED.** The review sidebar (`reparentReviewPanel`), the Teams panel, the desktop header's controls (connection chip, "+ Session", help, the hamburger with its client-trust gating) and the focused session's card all MOVE into the phone screens and move back on the flip out (`dom-helpers.js` `adoptElement` / `releaseElement`). A second copy would mean a second state pipeline for the same facts. The phone Board reads the same `session-card/card-registry` the desktop cards read and is refreshed by the same `app.js` control-WS handlers.
 - **One card-borrow seam, one borrower.** `public/card-host.js` `borrowCard` / `releaseCard` is shared by the Focus center and the phone Terminal screen; a session owns one xterm, so the single-borrower invariant is GLOBAL and a layout flip hands the card across cleanly instead of stranding a live terminal in a hidden subtree.
-- **Board order is attention-first** (`public/phone/triage-core.mjs`), the deliberate opposite of the desktop rail's stable identity order: a rail is stared at for hours and needs a fixed spatial map, a phone is picked up for a minute to answer "who needs me".
+- **Board order is attention-first** (`public/phone/triage-core.mjs`), the deliberate opposite of the desktop rail's stable identity order: a rail is stared at for hours and needs a fixed spatial map, a phone is picked up for a minute to answer "who needs me". The ORDER is phone-specific; the "needs you" RULE behind the `{n} NEED YOU` readout is not, and lives once in `public/focus-view/attention-core.mjs` (WAITING plus an unopened COMPLETE) so the rail head and the Board can never report two numbers under one sentence.
 - **Soft keyboard.** The phone shell is sized from `window.visualViewport`, not `100dvh`, so an open keyboard RESIZES the terminal (and the card's existing ResizeObserver refits cols/rows) instead of covering its last rows and the nav.
 
 ### WebSocket Transport

@@ -192,49 +192,61 @@ export function isRenameInProgress(targetEl) {
 }
 
 export function startInlineRename(ui, sessionId) {
-  // Rename edits whichever element is actually showing the name. The phone Terminal screen borrows the
-  // card without its header and parks its own top-bar name element on ui.renameTargetEl, so the field
-  // opens where the operator can see it instead of inside a hidden header.
-  const nameEl = ui.renameTargetEl?.isConnected ? ui.renameTargetEl : ui.nameEl;
+  // Resolve the target BEFORE anything reads a name, so the seed, the field and the restore all act on
+  // the same element. The phone Terminal screen borrows the card without its header and parks its own
+  // top-bar name on ui.renameTargetEl; a stale target left disconnected by a layout flip falls back to
+  // the card header rather than editing a node nobody can see.
+  const targetEl = ui.renameTargetEl?.isConnected ? ui.renameTargetEl : ui.nameEl;
+  if (!targetEl || isRenameInProgress(targetEl)) return; // also guards double-invoke
 
-  // Guard: prevent double-invoke
-  if (isRenameInProgress(nameEl)) return;
+  // card.dataset.session is the one authoritative display name (renameSessionCard writes it when the
+  // server broadcasts). Seeding and restoring from it, rather than from whichever node happened to be
+  // the target, is what keeps the card header and the phone top bar in agreement when a layout flip
+  // moves the target mid-edit.
+  const nameBeforeEdit = ui.card?.dataset.session ?? targetEl.textContent;
 
-  const oldName = nameEl.textContent;
+  // Repaint every node that shows this name, so neither surface holds a stale one until its own next
+  // repaint. Reads the authoritative value again at call time: by commit, a server broadcast may
+  // already have applied the new name.
+  function repaintName() {
+    const name = ui.card?.dataset.session ?? nameBeforeEdit;
+    targetEl.textContent = name;
+    if (ui.nameEl && ui.nameEl !== targetEl) ui.nameEl.textContent = name;
+  }
 
   const input = document.createElement('input');
   input.type = 'text';
   input.className = RENAME_INPUT_CLASS;
-  input.value = oldName;
+  input.value = nameBeforeEdit;
   input.maxLength = 64;
 
-  nameEl.textContent = '';
-  nameEl.appendChild(input);
+  targetEl.textContent = '';
+  targetEl.appendChild(input);
   input.focus();
   input.select();
 
   function commit() {
     const newName = input.value.trim();
     cleanup();
-    if (!newName || newName === oldName) {
-      nameEl.textContent = oldName;
+    if (!newName || newName === nameBeforeEdit) {
+      repaintName();
       return;
     }
     // Check for duplicate name (not id - names are display labels)
     for (const [, other] of sessionUIs) {
       if (other !== ui && other.card.dataset.session === newName) {
-        nameEl.textContent = oldName;
+        repaintName();
         showErrorToast(`Session "${newName}" already exists.`);
         return;
       }
     }
     sendControlMsg({ type: 'rename-session', id: sessionId, newName });
-    nameEl.textContent = oldName; // server broadcast will apply the actual rename
+    repaintName(); // server broadcast applies the actual rename through renameSessionCard
   }
 
   function cancel() {
     cleanup();
-    nameEl.textContent = oldName;
+    repaintName();
   }
 
   function cleanup() {

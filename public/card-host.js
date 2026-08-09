@@ -1,14 +1,6 @@
-// THE re-parenting seam for a live session card, shared by every surface that shows one.
-//
-// A session owns exactly one xterm, so its card is MOVED into whichever surface is displaying it and
-// returned to its off-screen grid home afterwards. There are two such surfaces now (the desktop Focus
-// center and the phone Terminal screen) and the borrow logic must exist once: two copies would drift,
-// and a layout flip between them would leave a live terminal parented into a hidden subtree, where
-// xterm's fit computes garbage and the operator sees a blank box.
-//
-// The single-borrower invariant is GLOBAL, not per-surface. borrowCard releases whoever currently holds
-// a card before taking one, so a phone rotating into desktop width (or the reverse) hands the card
-// across cleanly with no coordination between the two surfaces.
+// THE re-parenting seam for a live session card. A session owns exactly one xterm, so the
+// single-borrower invariant is GLOBAL, not per-surface: borrowCard releases whoever holds a card before
+// taking one, which is what lets a layout flip hand the card across without coordination.
 
 import { adoptElement, releaseElement } from './dom-helpers.js';
 import { container, sessionUIs } from './session-card/card-registry.js';

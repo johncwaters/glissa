@@ -106,3 +106,57 @@ test('pickAdjacent: single-element list stays put either direction', async () =>
   assert.equal(pickAdjacent(['only'], 'only', 1), 'only');
   assert.equal(pickAdjacent(['only'], 'only', -1), 'only');
 });
+
+// ── The shared "needs you" rule ──
+// The desktop rail head and the phone Board both render this count under the same wording, so the rule
+// lives in this one core and these tests are what keep the two surfaces honest.
+
+const attentionRow = (id, state, unseen) => ({ id, state, unseen });
+
+test('needsAttention: WAITING always qualifies, regardless of the unseen flag', async () => {
+  const { needsAttention } = await importCore();
+  assert.equal(needsAttention({ state: 'WAITING' }), true);
+  assert.equal(needsAttention({ state: 'WAITING', unseen: false }), true);
+});
+
+test('needsAttention: COMPLETE qualifies only while it is unseen', async () => {
+  const { needsAttention } = await importCore();
+  assert.equal(needsAttention({ state: 'COMPLETE', unseen: true }), true);
+  assert.equal(needsAttention({ state: 'COMPLETE', unseen: false }), false);
+  // An absent flag is not an unseen flag: a caller that never tracked it must not inflate the count.
+  assert.equal(needsAttention({ state: 'COMPLETE' }), false);
+});
+
+test('needsAttention: no other state qualifies, and the unseen flag cannot promote one', async () => {
+  const { needsAttention } = await importCore();
+  for (const state of ['RUNNING', 'FAILED', 'IDLE', 'DONE', 'DORMANT', 'STARTING', 'INITIALIZING']) {
+    assert.equal(needsAttention({ state }), false, `${state} must not qualify`);
+    assert.equal(needsAttention({ state, unseen: true }), false, `${state} must not qualify when unseen`);
+  }
+  assert.equal(needsAttention({}), false);
+  assert.equal(needsAttention(), false);
+});
+
+test('countSessionsNeedingAttention: counts exactly the rows needsAttention accepts', async () => {
+  const { countSessionsNeedingAttention } = await importCore();
+  assert.equal(countSessionsNeedingAttention([
+    attentionRow('a', 'WAITING'),
+    attentionRow('b', 'FAILED'),
+    attentionRow('c', 'COMPLETE', true),
+    attentionRow('d', 'COMPLETE', false),
+    attentionRow('e', 'RUNNING'),
+    attentionRow('f', 'IDLE'),
+  ]), 2);
+  assert.equal(countSessionsNeedingAttention([attentionRow('a', 'RUNNING'), attentionRow('b', 'DORMANT')]), 0);
+  assert.equal(countSessionsNeedingAttention([]), 0);
+  assert.equal(countSessionsNeedingAttention(undefined), 0);
+  assert.equal(countSessionsNeedingAttention([null, undefined]), 0);
+});
+
+test('attentionSummaryText: resting reads as a sentence, never an empty slot', async () => {
+  const { attentionSummaryText } = await importCore();
+  assert.equal(attentionSummaryText(0), 'ALL CLEAR');
+  assert.equal(attentionSummaryText(-1), 'ALL CLEAR');
+  assert.equal(attentionSummaryText(1), '1 NEEDS YOU');
+  assert.equal(attentionSummaryText(4), '4 NEED YOU');
+});

@@ -15,7 +15,7 @@ The job it serves is triage, per `PRODUCT.md`: scan the board, find the session 
 | `phone-shell.js` | Owns the screen container, the bottom nav, screen switching, history integration, visual-viewport sizing, and the activate/deactivate handoff with the desktop layout |
 | `board-screen.js` | The default screen: attention-first session rows + the phone top bar (which adopts the desktop header's connection chip, "+ Session", help, and hamburger) |
 | `terminal-screen.js` | One session's full-bleed terminal: back control, name, state badge, the card's adopted action cluster, and the touch key strip |
-| `triage-core.mjs` | Pure attention-first ordering (`orderSessionsForTriage`), the attention count, and the header readout text |
+| `triage-core.mjs` | Pure attention-first ORDER (`orderSessionsForTriage`) only. The "needs you" rule and its readout wording are shared with the desktop rail head in `../focus-view/attention-core.mjs` |
 | `mobile-key-strip.js` | Esc / Tab / Ctrl+C / arrows / Paste, the keys a soft keyboard cannot produce (catalog in `../mobile-keys.mjs`) |
 
 Review and Teams have no module: each screen is a mount container that re-parents the real `#review-sidebar` / `#view-teams` element in.
@@ -26,6 +26,7 @@ Review and Teams have no module: each screen is a mount container that re-parent
 - Which layout runs is decided by `../form-factor-core.mjs` (`coarse AND narrow`) and stamped on `<html data-layout>` by `../form-factor.js`. Style phone surfaces off that attribute; never add a `max-width` override of a desktop selector.
 - Re-parent, never duplicate. `dom-helpers.js` `adoptElement` / `releaseElement` for panels; `../card-host.js` `borrowCard` / `releaseCard` for a session card (single borrower GLOBALLY, shared with the Focus center).
 - One state pipeline. The Board reads `session-card/card-registry` and is refreshed by the same `app.js` control-WS handlers that refresh the desktop rail. Do not subscribe to the control WS from here.
+- One "needs you" rule. The Board and the desktop rail head render the same `{n} NEED YOU` readout, so the predicate and the wording live once in `../focus-view/attention-core.mjs`. Each surface supplies its own `unseen` bookkeeping (the Board a Set, the rail its pill's `data-unseen`); never re-implement the rule here.
 - Row clocks ride the shared tick (`session-card/session-tick.js` `onSessionTick`), never a timer of their own.
 - History: at most ONE entry is pushed above the Board, and only while the phone shell is active. Desktop must never touch history.
 - Soft keyboard: the shell is sized from `window.visualViewport`, so the keyboard resizes the terminal instead of covering it; the card's existing ResizeObserver then refits cols/rows.

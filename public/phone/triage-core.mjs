@@ -35,31 +35,6 @@ export function orderSessionsForTriage(rows) {
     .map((entry) => entry.row);
 }
 
-// How many sessions genuinely want a carbon unit right now. This is the SAME rule the desktop rail head
-// applies (focus-view.js attentionIds): WAITING, plus a COMPLETE the operator has not opened yet. Both
-// surfaces render the identical "{n} NEED YOU" string, so they must report the identical number - two
-// readouts that say the same words and disagree are worse than one of them not existing.
-//
-// `unseen` is supplied by the caller (the Board's own announce-once bookkeeping), never read back off
-// the DOM, so this stays a pure function of its input.
-//
-// Two states are deliberately NOT counted. RUNNING is doing exactly what it should, and counting it
-// would make the readout mean "how many sessions exist", which teaches the operator to ignore it. FAILED
-// is not counted either, matching the desktop head exactly; it is not lost, because a failed row sorts
-// straight to the top of the triage order and is one of the two states that get a loud row treatment.
-export function countSessionsNeedingAttention(rows) {
-  let count = 0;
-  for (const row of (rows || [])) {
-    if (row?.state === 'WAITING') { count++; continue; }
-    if (row?.state === 'COMPLETE' && row.unseen === true) count++;
-  }
-  return count;
-}
-
-// The Board header's one-line readout. Resting is a real sentence ("ALL CLEAR"), not an empty slot, so
-// the line never collapses and the operator can tell "nothing needs you" from "not loaded yet".
-export function attentionSummaryText(count) {
-  if (count <= 0) return 'ALL CLEAR';
-  if (count === 1) return '1 NEEDS YOU';
-  return `${count} NEED YOU`;
-}
+// The attention RULE and its readout wording are not here: both surfaces share one definition in
+// ../focus-view/attention-core.mjs (needsAttention / countSessionsNeedingAttention /
+// attentionSummaryText). Only the phone-specific ORDER lives in this module.

@@ -21,7 +21,7 @@ import { sessionUIs } from '../session-card/card-registry.js';
 import { suggestSessionName } from '../session-card/naming.js';
 import { setSelectedId } from '../sidebar/selection.js';
 import { getKeptProjects, getLastFocusedSessionId, getRailWidth, setKeptProjects, setLastFocusedSessionId, setRailWidth } from '../ui-prefs.js';
-import { orderRoster, pickAdjacent, pickNextAttention } from './attention-core.mjs';
+import { attentionSummaryText, countSessionsNeedingAttention, needsAttention, orderRoster, pickAdjacent, pickNextAttention } from './attention-core.mjs';
 import { groupRoster, NO_PATH_KEY, visibleOrder } from './roster-groups.mjs';
 
 const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)');
@@ -249,7 +249,7 @@ export function mountFocusView({ rail, center, resizer }) {
     + '<kbd class="kbd">Alt</kbd><span class="shortcut-sep">+</span><kbd class="kbd">W</kbd>'
     + '</span>';
   railHeadEl.addEventListener('click', focusNextAttention);
-  setRailHeadActive(false, ''); // resting from the start: quiet "ALL CLEAR" legend until something needs you
+  setRailHeadActive(false, attentionSummaryText(0)); // resting from the start until something needs you
 
   railEl.append(railHeadEl);
 
@@ -593,19 +593,23 @@ export function refreshFocusRoster() {
 // target pill into view. Every target also gets the terminal cursor so the operator can answer a
 // WAITING prompt or send the next turn to a COMPLETE session immediately, no click.
 
+// The rail's rows in the shape the shared rule reads: state plus this pill's announce-once flag. The
+// rule itself (and the readout's wording) lives in attention-core, shared with the phone Board.
+function attentionRows() {
+  return orderedSessions().map(({ id, ui }) => ({
+    id,
+    state: ui.currentState || STATES.DORMANT,
+    unseen: !!pillById.get(id)?.hasAttribute('data-unseen'),
+  }));
+}
+
 function attentionIds() {
-  return orderedSessions()
-    .filter(({ id, ui }) => {
-      const state = ui.currentState || STATES.DORMANT;
-      if (state === STATES.WAITING) return true;
-      return state === STATES.COMPLETE && !!pillById.get(id)?.hasAttribute('data-unseen');
-    })
-    .map(({ id }) => id);
+  return attentionRows().filter(needsAttention).map(({ id }) => id);
 }
 
 function updateRailHead() {
-  const n = attentionIds().length;
-  setRailHeadActive(n > 0, n === 1 ? '1 NEEDS YOU' : `${n} NEED YOU`);
+  const count = countSessionsNeedingAttention(attentionRows());
+  setRailHeadActive(count > 0, attentionSummaryText(count));
 }
 
 // Toggle the jump header between its quiet resting legend and the lit attention readout WITHOUT
@@ -615,7 +619,7 @@ function updateRailHead() {
 // it is also non-interactive and out of the tab/AT order (disabled + aria-hidden): nothing to jump to.
 function setRailHeadActive(on, label) {
   if (!railHeadEl) return;
-  railHeadEl.querySelector('.focus-rail-head-count').textContent = on ? label : 'ALL CLEAR';
+  railHeadEl.querySelector('.focus-rail-head-count').textContent = label;
   railHeadEl.disabled = !on;
   if (on) {
     railHeadEl.removeAttribute('data-empty');

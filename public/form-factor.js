@@ -1,11 +1,6 @@
-// Thin IO shell over form-factor-core.mjs: evaluate the two media queries, stamp the answer onto
-// <html data-layout>, and tell subscribers when it flips.
-//
-// data-layout is the ONLY hook the phone stylesheet keys off, so nothing in the phone layout is written
-// as a max-width override of a desktop selector. The attribute is also live: a phone rotated into
-// landscape past 768px genuinely becomes the desktop layout, and the subscribers below are what let the
-// app hand the borrowed terminal card, the review sidebar and the Teams panel across that flip instead
-// of stranding them in a hidden subtree.
+// IO shell over form-factor-core.mjs. The stamp is live, not boot-only: a phone rotated past 768px
+// genuinely becomes the desktop layout, and the subscribers are what let the app hand the borrowed card,
+// sidebar and Teams panel across that flip instead of stranding them in a hidden subtree.
 
 import { COARSE_POINTER_QUERY, decideLayout, PHONE_NARROW_QUERY } from './form-factor-core.mjs';
 

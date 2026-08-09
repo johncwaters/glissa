@@ -13,10 +13,10 @@
 
 import { BADGE_LABELS, STATE_GLYPHS, STATES } from '/shared/states.mjs';
 import { el } from '../dom-helpers.js';
-import { orderRoster } from '../focus-view/attention-core.mjs';
+import { attentionSummaryText, countSessionsNeedingAttention, orderRoster } from '../focus-view/attention-core.mjs';
 import { sessionUIs } from '../session-card/card-registry.js';
 import { onSessionTick, sessionElapsedText } from '../session-card/session-tick.js';
-import { attentionSummaryText, countSessionsNeedingAttention, orderSessionsForTriage } from './triage-core.mjs';
+import { orderSessionsForTriage } from './triage-core.mjs';
 
 // createBoardScreen({ onSelectSession }) -> { el, topBarEl, refresh, getAttentionCount }
 // The shell adopts the desktop header controls into topBarEl on activation and gives them back on
