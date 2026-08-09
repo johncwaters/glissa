@@ -80,7 +80,6 @@ function connectDataWs(sessionId, ui, term) {
     if (ui.dataWs === ws) {
       renderScheduler.unregister(sessionId);
       ui.dataWs = null;
-      // Per-card attempt count (each card has its own socket), reset once one opens again.
       const retryDelayMs = nextReconnectDelayMs(ui._dataWsRetryAttempt || 0);
       ui._dataWsRetryAttempt = (ui._dataWsRetryAttempt || 0) + 1;
       setTimeout(() => {
