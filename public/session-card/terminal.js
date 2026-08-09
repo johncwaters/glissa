@@ -19,6 +19,10 @@ import { tryLoadWebGL } from './webgl-pool.js';
 
 const RECONNECT_DELAY_MS = 500;
 const INPUT_QUEUE_MAX = 1024;
+// Phone-width terminals get a smaller cell so a usable column count fits in ~390px.
+const MOBILE_WIDTH_QUERY = '(max-width: 768px)';
+const MOBILE_FONT_SIZE = 12;
+const DESKTOP_FONT_SIZE = 14;
 
 // Terminal defaults - cursorBlink updated from server settings on connect
 // (applyTerminalSettings in lifecycle.js drives it through the setter below).
@@ -108,12 +112,32 @@ export function reconnectDataWs(id) {
   }
 }
 
+// THE write path into a session's PTY: send on the live data WS, or queue for the reconnect flush.
+// Every producer (xterm onData, the Ctrl+Backspace key handler, the touch key strip) goes through
+// here so a disconnected socket has one queueing rule instead of one per caller.
+export function sendTerminalInput(ui, data) {
+  if (!ui || data == null || data === '') return false;
+  if (ui.dataWs?.readyState === WebSocket.OPEN) {
+    ui.dataWs.send(JSON.stringify({ type: 'input', data }));
+    return true;
+  }
+  if (ui._inputQueue && ui._inputQueue.length < INPUT_QUEUE_MAX) {
+    ui._inputQueue.push(data);
+    return true;
+  }
+  return false;
+}
+
 // ── Terminal setup ───────────────────────────────────────────
 
 export function setupTerminal(termWrap, ui) {
+  // Cell size is chosen once, at construction: xterm re-measures its whole grid on a font change, so
+  // a live switch would reflow every buffer mid-session. A window resized across the breakpoint
+  // therefore keeps the size it was built with until the card is rebuilt.
+  const fontSize = window.matchMedia?.(MOBILE_WIDTH_QUERY).matches ? MOBILE_FONT_SIZE : DESKTOP_FONT_SIZE;
   const term = new Terminal({
     cursorBlink: _terminalCursorBlink,
-    fontSize: 14,
+    fontSize,
     fontFamily: "'Cascadia Code', 'Fira Code', 'Consolas', 'Menlo', monospace",
     theme: getTerminalTheme(),
     scrollback: TERMINAL_SCROLLBACK,
@@ -267,8 +291,7 @@ export function setupTerminal(termWrap, ui) {
     }
     // Ctrl+Backspace: send ESC+DEL so readline/bash deletes the previous word
     if (ctrl && ev.key === 'Backspace') {
-      if (ui.dataWs?.readyState === WebSocket.OPEN) { ui.dataWs.send(JSON.stringify({ type: 'input', data: '\x1b\x7f' })); return false; }
-      if (ui._inputQueue && ui._inputQueue.length < INPUT_QUEUE_MAX) ui._inputQueue.push('\x1b\x7f');
+      sendTerminalInput(ui, '\x1b\x7f');
       return false;
     }
     return true;
@@ -280,10 +303,7 @@ export function wireTerminalIO(ui, sessionId) {
   // Queue keystrokes during WebSocket disconnection for replay on reconnect
   ui._inputQueue = [];
 
-  ui.term.onData((data) => {
-    if (ui.dataWs?.readyState === WebSocket.OPEN) { ui.dataWs.send(JSON.stringify({ type: 'input', data })); return; }
-    if (ui._inputQueue.length < INPUT_QUEUE_MAX) ui._inputQueue.push(data);
-  });
+  ui.term.onData((data) => { sendTerminalInput(ui, data); });
 
   // Note: term.onResize is intentionally not wired - the ResizeObserver
   // path in setupTerminal owns all "fit and notify server" duties via

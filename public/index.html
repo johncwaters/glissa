@@ -158,6 +158,9 @@
           </div>
           <span class="header-aggregate" id="aggregate-status" role="status" aria-live="polite"></span>
           <button class="btn-add-header" id="btn-add-session-header" type="button" title="Add a new session">+ Session</button>
+          <!-- Narrow-screen only (CSS-hidden on desktop): opens the review sidebar as a full-screen
+               overlay, where it cannot be docked beside the focus center. -->
+          <button class="btn-sidebar-toggle" id="btn-sidebar-toggle" type="button" title="Review sidebar" aria-expanded="false" aria-controls="review-sidebar">Review</button>
           <button class="btn-help" id="btn-help" type="button" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts and version">?</button>
           <div class="header-menu" id="header-menu">
             <button class="btn-menu" id="btn-menu" title="Menu" aria-label="Open menu" aria-haspopup="menu" aria-expanded="false" aria-controls="header-menu-dropdown">&#9776;</button>
@@ -165,7 +168,7 @@
               <button class="menu-item" id="btn-mute" role="menuitem"><span class="menu-item-glyph">&#9834;</span>Mute Alerts</button>
               <button class="menu-item" id="btn-settings" role="menuitem"><span class="menu-item-glyph">&#9881;</span>Settings</button>
               <button class="menu-item menu-item-warning" id="btn-restart" role="menuitem"><span class="menu-item-glyph">&#8634;</span>Restart Server</button>
-              <div class="menu-divider"></div>
+              <div class="menu-divider" id="menu-divider-shutdown"></div>
               <button class="menu-item menu-item-danger" id="btn-shutdown" role="menuitem"><span class="menu-item-glyph">&#9632;</span>Shut Down</button>
             </div>
           </div>
@@ -179,7 +182,9 @@
       <button class="update-banner-copy" id="update-banner-copy" type="button">Copy</button>
       <button class="update-banner-dismiss" id="update-banner-dismiss" type="button" aria-label="Dismiss update notice">&times;</button>
     </div>
-    <!-- Body row: main views on the left, the review sidebar docked right (collapsed by default). -->
+    <!-- Body row: main views on the left, the review sidebar docked right. The sidebar is always
+         docked on desktop; below 768px it leaves the row and opens as an overlay instead
+         (body[data-sidebar-open], driven by the header Review button). -->
     <div class="app-body" id="app-body">
       <main class="app-main" id="app-main">
         <!-- Off-screen card home: every session card lives here; Focus borrows cards from it into the

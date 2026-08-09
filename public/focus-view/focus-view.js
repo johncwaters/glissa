@@ -18,18 +18,26 @@ import { setActivityRenderer } from '../session-card/activity.js';
 import { showConfirmDialog } from '../session-card/card-dom.js';
 import { container, sessionUIs } from '../session-card/card-registry.js';
 import { suggestSessionName } from '../session-card/naming.js';
-import { ensureTerminalSetup, forceTerminalRepaint } from '../session-card/terminal.js';
+import { showErrorToast } from '../session-card/toast.js';
+import { ensureTerminalSetup, forceTerminalRepaint, sendTerminalInput } from '../session-card/terminal.js';
 import { setSelectedId } from '../sidebar/selection.js';
 import { getKeptProjects, getLastFocusedSessionId, getRailWidth, setKeptProjects, setLastFocusedSessionId, setRailWidth } from '../ui-prefs.js';
 import { orderRoster, pickAdjacent, pickNextAttention } from './attention-core.mjs';
+import { createMobileKeyStrip } from './mobile-key-strip.js';
 import { groupRoster, NO_PATH_KEY, visibleOrder } from './roster-groups.mjs';
 
 const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)');
+// The widths where a touch device actually RENDERS the pill's "x": the phone strip drops that button
+// (see the <=768px block in style.css), so only the wider touch rail needs it exposed to AT, where no
+// Delete key exists to retire a session instead. Must track the CSS that renders it, or a phone would
+// carry a stray role=button in the listbox subtree for a display:none control (see buildPill).
+const touchRail = window.matchMedia?.('(hover: none) and (min-width: 769px)');
 
 let railEl = null;
 let railHeadEl = null;  // the "{n} NEED YOU" jump header (sticky top of the rail)
 let centerEl = null;
 let cardSlotEl = null;
+let keyStripEl = null;  // touch-only Esc/Tab/Ctrl+C/arrows/Paste bar under the centered card
 let emptyEl = null;
 let emptyTitleEl = null;
 let emptyDescEl = null;
@@ -251,25 +259,30 @@ export function mountFocusView({ rail, center, resizer }) {
   emptyDescEl = emptyEl.querySelector('.focus-empty-desc');
 
   cardSlotEl = el('div', 'focus-card-slot');
+  keyStripEl = createMobileKeyStrip({ send: sendToCenteredTerminal });
+  keyStripEl.hidden = true; // no card borrowed yet; updateCenter owns this from here on
 
   // Review (diff + Merge / Discard) lives in the right review sidebar, not in the center, so
   // the borrowed card is just the live terminal; selection drives the sidebar (see focusSession).
-  centerEl.append(emptyEl, cardSlotEl);
+  centerEl.append(emptyEl, cardSlotEl, keyStripEl);
 
   railEl.addEventListener('keydown', onRailKeydown);
 }
 
 // ── Rail resize ──
 // The rail width is a user preference: pointer-drag the separator (or Arrow keys when it has focus;
-// double-click resets to the CSS default). The chosen width rides an inline flex-basis on the rail,
-// clamped so pills stay readable and the center always keeps room, and persists via ui-prefs.
+// double-click resets to the CSS default). The chosen width rides an inline --rail-width custom
+// property the rail's flex-basis reads (same shape as the review sidebar's --sidebar-width), clamped
+// so pills stay readable and the center always keeps room, and persists via ui-prefs. A property, not
+// an inline flex-basis: at phone width the stylesheet re-lays the rail as a horizontal strip, where a
+// basis would set its HEIGHT, and an inline declaration can only be overridden with !important.
 const RAIL_MIN_PX = 180;
 const RAIL_MAX_PX = 480;
 const RAIL_KEY_STEP_PX = 16;
 
 function applyRailWidth(resizer, px) {
   const w = Math.round(Math.min(RAIL_MAX_PX, Math.max(RAIL_MIN_PX, px)));
-  railEl.style.flexBasis = `${w}px`;
+  railEl.style.setProperty('--rail-width', `${w}px`);
   resizer.setAttribute('aria-valuenow', String(w));
   return w;
 }
@@ -314,7 +327,7 @@ function wireRailResizer(resizer) {
   });
 
   resizer.addEventListener('dblclick', () => {
-    railEl.style.flexBasis = ''; // back to the stylesheet default
+    railEl.style.removeProperty('--rail-width'); // back to the stylesheet default
     resizer.removeAttribute('aria-valuenow');
     setRailWidth(null);
   });
@@ -409,7 +422,11 @@ function buildPill(id) {
   const removeBtn = el('button', 'focus-pill-remove', '×');
   removeBtn.type = 'button';
   removeBtn.tabIndex = -1;
-  removeBtn.setAttribute('aria-hidden', 'true');
+  // On a mouse the "x" is redundant with Delete/Backspace on the focused pill, so it stays out of the
+  // AT tree and the listbox keeps only role=option children. On the touch RAIL (where it is both
+  // rendered and the only removal path, since there is no Delete key) it is exposed instead. It keeps
+  // tabIndex -1 either way, so the rail's roving-tabstop nav is unchanged.
+  if (!touchRail?.matches) removeBtn.setAttribute('aria-hidden', 'true');
   removeBtn.title = 'Remove session';
   removeBtn.addEventListener('click', (e) => { e.stopPropagation(); removeSession(id); });
   row.append(pill, removeBtn);
@@ -716,9 +733,23 @@ function focusSession(id) {
   refreshFocusRoster();
 }
 
+// Bytes from the touch key strip go to whichever session currently holds the center, over the same
+// data WS xterm's own keystrokes use. DOM focus is deliberately left alone: re-focusing the terminal
+// would force the soft keyboard open on every Esc or arrow press. A refused send (socket down and the
+// replay queue full) is reported: a Ctrl+C tap that silently vanishes reads as a wedged session.
+function sendToCenteredTerminal(data) {
+  const ui = focusedId ? sessionUIs.get(focusedId) : null;
+  if (!ui) return;
+  if (sendTerminalInput(ui, data)) return;
+  showErrorToast('Session is not connected; key press was dropped');
+}
+
 function updateCenter() {
   const has = !!(focusedId && sessionUIs.has(focusedId));
   emptyEl.hidden = has;
+  // The strip is a control surface for a live terminal; with an empty center it has no target. CSS
+  // keeps it hidden on desktop and on a fine pointer regardless of this flag.
+  if (keyStripEl) keyStripEl.hidden = !has;
   if (has) return;
   // Two empty states: sessions exist but none is selected yet (the default on every open), vs. no
   // sessions at all. The first directs the operator to the rail; the second to spawn a session.

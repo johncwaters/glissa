@@ -7,7 +7,10 @@
 import { WebglAddon } from '@xterm/addon-webgl';
 import { pickEvictionVictims } from './webgl-core.mjs';
 
-const MAX_WEBGL_CONTEXTS = 12;
+// A mobile GPU drops contexts far below the desktop ceiling, so a coarse pointer takes a much tighter
+// cap. Read once at module init: a device does not change pointer class mid-session, and the cap must
+// be a constant for the LRU policy to be predictable.
+const MAX_WEBGL_CONTEXTS = window.matchMedia?.('(pointer: coarse)').matches ? 4 : 12;
 const _webglLru = new Map(); // ui -> true; insertion order = LRU, oldest first
 
 export function releaseWebgl(ui) {

@@ -55,17 +55,24 @@ let resyncResult = null;
 let resyncResultTimer = null;
 
 // ── Mount ──
-// The sidebar is always visible (no collapse): with no session selected it shows an empty state, and
-// with a selected session that has no changes it says so.
+// The sidebar is always visible on desktop (no collapse): with no session selected it shows an empty
+// state, and with a selected session that has no changes it says so. Below 768px there is no room to
+// dock it beside the focus center, so CSS drops it out of the row and the header's Review button opens
+// it as a full-screen overlay; `onClose` is how the close button inside it hands that state back to
+// the owner of the toggle (app.js), which keeps the button's aria-expanded honest.
 
-export function mountReviewSidebar({ panel }) {
+export function mountReviewSidebar({ panel, onClose }) {
   panelEl = panel;
   if (!panelEl) return;
 
   const head = el('div', 'review-sidebar-head');
   const title = el('span', 'review-sidebar-title', 'Review');
   sessionNameEl = el('span', 'review-sidebar-session');
-  head.append(title, sessionNameEl);
+  const closeBtn = el('button', 'review-sidebar-close', String.fromCharCode(0x00d7));
+  closeBtn.type = 'button';
+  closeBtn.setAttribute('aria-label', 'Close review sidebar');
+  closeBtn.addEventListener('click', () => onClose?.());
+  head.append(title, sessionNameEl, closeBtn);
 
   // Local-base-branch-vs-remote-upstream indicator (e.g. "develop: 2 ahead, 1 behind origin/develop").
   // A project-level fact, not tied to the merge/review gate below it, so it is its own row (collapses
@@ -78,7 +85,10 @@ export function mountReviewSidebar({ panel }) {
   controlsEl = el('div', 'review-controls');
   bodyEl = el('div', 'review-sidebar-body');
 
-  // Resize handle: drag left edge to widen, right to narrow. Width persisted to localStorage.
+  // Resize handle: drag left edge to widen, right to narrow. Width persisted to localStorage. Pointer
+  // events (not mouse) with capture, so the drag survives the cursor leaving the 6px strip and a pen
+  // or trackpad drives it identically; CSS hides the handle entirely in the mobile overlay, where the
+  // sidebar is full-width and there is nothing to resize.
   const handle = el('div', 'review-resize-handle');
   handle.setAttribute('aria-hidden', 'true');
   panelEl.append(head, branchSyncEl, controlsEl, bodyEl, handle);
@@ -86,32 +96,42 @@ export function mountReviewSidebar({ panel }) {
   let dragStartX = 0, dragStartWidth = 0;
 
   const onDrag = (e) => {
+    if (!handle.hasPointerCapture(e.pointerId)) return;
     const delta = dragStartX - e.clientX; // drag left = wider (sidebar is right-docked)
     const w = Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, dragStartWidth + delta));
     panelEl.style.setProperty('--sidebar-width', `${w}px`);
   };
 
-  const stopDrag = () => {
-    document.removeEventListener('mousemove', onDrag);
-    document.removeEventListener('mouseup', stopDrag);
-    window.removeEventListener('blur', stopDrag); // cancel on focus loss mid-drag
+  // Teardown runs from pointerup AND from lostpointercapture, which is the only signal for a capture
+  // torn away by something other than a clean release (window blur mid-drag, the OS stealing the
+  // pointer). Without it the col-resize cursor and the userSelect lock would stick on the whole
+  // document. lostpointercapture also fires right after our own releasePointerCapture, so the guard
+  // makes the second call a no-op rather than a double persist.
+  let dragging = false;
+  const stopDrag = (e) => {
+    if (!dragging) return;
+    dragging = false;
+    if (handle.hasPointerCapture(e.pointerId)) handle.releasePointerCapture(e.pointerId);
     document.documentElement.style.cursor = '';
     document.documentElement.style.userSelect = '';
     const w = panelEl.style.getPropertyValue('--sidebar-width');
     if (w) { try { localStorage.setItem('glissa:sidebar-width', parseInt(w, 10)); } catch (_) {} }
   };
 
-  handle.addEventListener('mousedown', (e) => {
+  handle.addEventListener('pointerdown', (e) => {
     if (e.button !== 0) return;
     e.preventDefault();
     dragStartX = e.clientX;
     dragStartWidth = panelEl.getBoundingClientRect().width;
+    handle.setPointerCapture(e.pointerId);
+    dragging = true;
     document.documentElement.style.cursor = 'col-resize';
     document.documentElement.style.userSelect = 'none';
-    document.addEventListener('mousemove', onDrag);
-    document.addEventListener('mouseup', stopDrag);
-    window.addEventListener('blur', stopDrag, { once: true });
   });
+  handle.addEventListener('pointermove', onDrag);
+  handle.addEventListener('pointerup', stopDrag);
+  handle.addEventListener('pointercancel', stopDrag);
+  handle.addEventListener('lostpointercapture', stopDrag);
 
   try {
     const stored = localStorage.getItem('glissa:sidebar-width');

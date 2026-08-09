@@ -6,7 +6,7 @@ const { TIMEOUT_KEYS, BOOLEAN_KEYS, STRING_KEYS } = require('./config-store');
 const { STATES } = require('../shared/states');
 const { computeNextFire } = require('./scheduler');
 const { listRepoConversations } = require('../session/core/conversation-history');
-const { decideEditorOpenAccess } = require('./core/request-trust');
+const { decideEditorOpenAccess, clientTrustLabel } = require('./core/request-trust');
 
 // A Claude session id is a UUID, but stay lenient (any safe id charset) so a non-UUID id is not
 // rejected. The charset itself is the guard: no path separators, dots, or whitespace can reach the
@@ -859,6 +859,10 @@ function registerControlHandlers(controlWss, deps) {
 
   controlWss.on('connection', (ws, req) => {
     ws.send(JSON.stringify(buildSnapshot()));
+    // Per-connection, so it cannot ride the snapshot (that one is also BROADCAST on config reload,
+    // which would hand every client whichever connection's trust built it). Sent after the snapshot
+    // so that one stays the first frame of a (re)connect, which control-ws.js keys its seq reset on.
+    ws.send(JSON.stringify({ type: 'client-trust', trust: clientTrustLabel(ws.glissaTrust) }));
     if (buildHealthSnapshot) {
       ws.send(JSON.stringify({ type: 'health-snapshot', stats: buildHealthSnapshot() }));
     }

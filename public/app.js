@@ -6,6 +6,7 @@ import './tailwind.css';
 
 import { STATES } from '/shared/states.mjs';
 import { connectControl, disableReconnect, onControlMessage, sendControlMsg, sendControlRequest, setConnectionStateCallback } from './control-ws.js';
+import { shouldShowServerAction } from './client-trust-core.mjs';
 import { createAddSessionDialog, createConfirmDialog, createSettingsDialog } from './dialogs.js';
 import { writeClipboardText } from './dom-helpers.js';
 import { activateFocusView, deactivateFocusView, focusAdjacentInRail, focusNextAttention, focusNthInRail, focusSessionInCenter, isFocusActive, mountFocusView, noteKnownProjectPath, refreshFocusRoster, restoreFocusedSession, setFocusMergeStatus } from './focus-view/focus-view.js';
@@ -231,6 +232,7 @@ const messageHandlers = {
   },
   'team-pack-updated':     (msg) => handleTeamMessage(msg),
   'artifact-opened':    (msg) => { if (!msg.ok) showErrorToast(`Could not open ${msg.artifact || 'artifact'}${msg.error ? `: ${msg.error}` : ''}`); },
+  'client-trust':       (msg) => applyClientTrust(msg.trust),
   'shutting-down':      () => {
     disableReconnect();
     connectionEl.dataset.state = 'shutdown';
@@ -311,6 +313,53 @@ document.addEventListener('click', (e) => {
   }
 });
 
+// ── Review sidebar overlay (narrow screens only) ─────────────
+// The sidebar is docked in .app-body on desktop and needs no control there. Below 768px CSS drops it
+// out of the row, and this flag re-opens it as a full-screen overlay. The flag lives on <body> so the
+// stylesheet owns every pixel of the two layouts; nothing here runs (or is reachable) on desktop,
+// where the button is display:none.
+
+const btnSidebarToggle = document.getElementById('btn-sidebar-toggle');
+
+function setSidebarOpen(open) {
+  if (open) document.body.dataset.sidebarOpen = '1';
+  if (!open) delete document.body.dataset.sidebarOpen;
+  btnSidebarToggle.setAttribute('aria-expanded', String(open));
+}
+
+btnSidebarToggle.addEventListener('click', () => {
+  setSidebarOpen(document.body.dataset.sidebarOpen !== '1');
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape' || document.body.dataset.sidebarOpen !== '1') return;
+  // A dialog is the innermost dismissable thing on screen (it paints over the sidebar overlay at
+  // z-index 200 vs 150) and owns Escape; closing both on one press would tear down a panel the
+  // operator was not looking at.
+  if (document.querySelector('.dialog-overlay')) return;
+  setSidebarOpen(false);
+});
+
+// ── Header height token ──────────────────────────────────────
+// --header-h positions the notice region (and anything else anchored below the header). The header is
+// a fixed 52px strip until it wraps to two or three rows on a narrow screen, at which point a stale
+// token drops every toast on top of it. Measure the real height instead; the stylesheet value stays as
+// the pre-JS fallback.
+
+const headerEl = document.querySelector('.header');
+if (headerEl) {
+  let headerSizeRaf = null;
+  const syncHeaderHeight = () => {
+    headerSizeRaf = null;
+    const h = headerEl.offsetHeight;
+    if (h > 0) document.documentElement.style.setProperty('--header-h', `${h}px`);
+  };
+  new ResizeObserver(() => {
+    if (headerSizeRaf !== null) return;
+    headerSizeRaf = requestAnimationFrame(syncHeaderHeight);
+  }).observe(headerEl);
+}
+
 document.getElementById('btn-settings').addEventListener('click', () => {
   headerMenu.classList.remove('open');
   syncMenuAria();
@@ -338,7 +387,10 @@ mountFocusView({
   resizer: document.getElementById('focus-rail-resizer'),
 });
 
-mountReviewSidebar({ panel: document.getElementById('review-sidebar') });
+mountReviewSidebar({
+  panel: document.getElementById('review-sidebar'),
+  onClose: () => setSidebarOpen(false),
+});
 
 // Primary views in tab-strip order. Adding a view = adding an entry here (N-way, not a boolean).
 // Focus leads as the default landing view; the session-card grid (#sessions-container) stays mounted
@@ -407,6 +459,15 @@ document.getElementById('btn-restart').addEventListener('click', () => {
     onConfirm: () => sendControlMsg({ type: 'restart-server' }),
   });
 });
+
+// UX honesty, not a security boundary: a paired device is full-trust by design, but a phone that
+// shuts the server down has no way to start it again, so that item is not offered there. Restart
+// stays: production respawns the process detached and the dashboard reconnects on its own.
+function applyClientTrust(trust) {
+  const showShutdown = shouldShowServerAction('shutdown', trust);
+  document.getElementById('btn-shutdown').hidden = !showShutdown;
+  document.getElementById('menu-divider-shutdown').hidden = !showShutdown;
+}
 
 document.getElementById('btn-shutdown').addEventListener('click', () => {
   headerMenu.classList.remove('open');

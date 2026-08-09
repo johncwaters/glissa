@@ -65,7 +65,12 @@ function harnessWithReplay(replayLog) {
   function connect(url) {
     const sent = [];
     let messageHandler = null;
-    const ws = { send: (s) => sent.push(JSON.parse(s)), on: (ev, h) => { if (ev === 'message') messageHandler = h; } };
+    // Drop the per-connection client-trust frame: these tests count REPLAY frames, and the
+    // connection preamble is pinned by control-client-trust.test.js instead.
+    const ws = {
+      send: (s) => { const msg = JSON.parse(s); if (msg.type !== 'client-trust') sent.push(msg); },
+      on: (ev, h) => { if (ev === 'message') messageHandler = h; },
+    };
     controlWss.emit('connection', ws, { url });
     return { sent, send: (msg) => messageHandler(JSON.stringify(msg)) };
   }

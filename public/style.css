@@ -179,6 +179,38 @@ body {
   box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
 }
 
+/* Narrow-screen affordance for the review sidebar, which cannot dock beside the focus center below
+   768px. Quiet sibling of "+ Session" (neutral border, no accent: opening a panel is not a primary
+   action), and absent from the desktop header entirely, where the sidebar is always docked. The label
+   names the panel and never reports its open/closed state; aria-expanded carries that. */
+.btn-sidebar-toggle {
+  display: none;
+  align-items: center;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 6px 14px;
+  color: var(--text-dim);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color var(--transition-fast), border-color var(--transition-fast);
+}
+
+.btn-sidebar-toggle[aria-expanded="true"] {
+  color: var(--accent);
+  border-color: var(--accent-dim);
+}
+
+.btn-sidebar-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 
 /* ── Status indicator ─────────────────────────────────────── */
 .status-indicator {
@@ -293,8 +325,9 @@ body {
 /* Single <main> landmark wrapping both tab panels. A flex column (not display:contents,
    which can drop the landmark in some assistive tech) that fills the body below the header,
    so the inner panels keep their flex:1 sizing. */
-/* Body row: main views (left) + the review sidebar (right). The sidebar is collapsed by default, so
-   when it is closed .app-main fills the full width and the layout is identical to before. */
+/* Body row: main views (left) + the review sidebar (right), both always present at desktop widths.
+   Below 768px the sidebar leaves the row entirely (there is not enough width for three columns) and
+   .app-main fills it alone; see the Responsive section for the overlay it becomes there. */
 .app-body {
   flex: 1;
   min-height: 0;
@@ -831,6 +864,10 @@ body {
   /* [P1] Tokenized scrim; [P2] backdrop-filter removed - black scrim alone does the job */
   background: var(--scrim);
   animation: dialogFadeIn 150ms ease;
+  /* A dialog taller than the viewport (Settings on a short window or a phone) scrolls here rather than
+     clipping both ends unreachably; the containment keeps that scroll off the document behind it. */
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .dialog {
@@ -840,6 +877,13 @@ body {
   padding: 24px;
   width: 420px;
   max-width: calc(100vw - 32px);
+  /* dvh, not vh: a phone's vh includes the retracted browser chrome, so a vh-sized dialog hides its
+     own footer behind the address bar. The overlay is a ROW flex container, so flex-shrink:0 governs
+     width: it keeps a wide dialog at its declared width (bounded by max-width) instead of letting the
+     overlay squeeze it narrower, which would reflow the content taller and deepen the scroll. */
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+  flex-shrink: 0;
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -1229,6 +1273,13 @@ body {
   height: 1px;
   margin: 4px 8px;
   background: var(--border);
+}
+
+/* Explicit because .menu-item has display:flex, which would override the UA [hidden] rule. Hidden
+   menu entries must leave no gap: the dropdown is sized by its remaining children. */
+.menu-item[hidden],
+.menu-divider[hidden] {
+  display: none;
 }
 
 /* [P2] Mono-safe glyph column for menu items - keeps labels aligned */
@@ -2547,7 +2598,7 @@ body {
 
 /* ── Roster rail ── */
 .focus-rail {
-  flex: 0 0 240px; /* default; user drag overrides via inline flex-basis (focus-view.js) */
+  flex: 0 0 var(--rail-width, 240px); /* default; user drag sets --rail-width inline (focus-view.js) */
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -3000,13 +3051,50 @@ body {
    the TUI renders past the wrap edge and gets cut off. */
 .focus-center .session-card.focus-centered .terminal-wrap .xterm { padding: 4px 6px 0; }
 
+/* ── Touch key strip (under the centered card) ──
+   Esc / Tab / Ctrl+C / arrows / Paste, the keys a soft keyboard cannot produce. Absent wherever a
+   physical keyboard exists: the display:none here is lifted only by the coarse-pointer phone block in
+   the Responsive section, and focus-view.js additionally hides it while the center is empty. Quiet
+   ghost buttons on the inset surface so the strip reads as chrome under the screen, not a toolbar
+   competing with it. */
+.focus-key-strip {
+  display: none;
+  flex: 0 0 auto;
+  align-items: stretch;
+  gap: 6px;
+  padding: 6px 8px;
+  background: var(--bg-surface);
+  border-top: 1px solid var(--border-dim);
+}
+.focus-key-strip[hidden] { display: none; }
+.focus-key {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0 4px;
+  appearance: none;
+  background: transparent;
+  border: 1px solid var(--border-dim);
+  border-radius: var(--radius);
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.focus-key:active { color: var(--text-head); border-color: var(--border-hover); }
+.focus-key:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
 .focus-empty { margin: auto; text-align: center; color: var(--text-dim); }
 .focus-empty-title { font-size: 14px; font-weight: 700; color: var(--text-head); margin: 0 0 4px; }
 .focus-empty-desc { font-size: 12px; margin: 0; }
 
 /* ── Review sidebar (right-docked single review home) ──
    The worktree review gate (collapsible per-file diff + Merge / Discard) for the SELECTED session.
-   Always visible: with no selection it shows an empty state. Built by sidebar/review-sidebar.js. */
+   Always docked and visible on desktop: with no selection it shows an empty state. Below 768px it
+   leaves the body row and becomes a full-screen overlay instead (see the Responsive section). Built by
+   sidebar/review-sidebar.js. */
 .app-sidebar {
   flex: 0 0 var(--sidebar-width, clamp(320px, 26vw, 460px));
   min-width: 0;
@@ -3058,6 +3146,29 @@ body {
   flex: 1;
   min-width: 0;
 }
+
+/* Overlay-only dismiss. A docked sidebar has nothing to close, so this is absent on desktop; the
+   Responsive section reveals it alongside the overlay layout. */
+.review-sidebar-close {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  position: relative;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  appearance: none;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+.review-sidebar-close:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* Local base branch (e.g. develop) vs its remote upstream tracking branch. A project-level fact, not
    tied to the merge/review gate below it, so it gets its own row rather than folding into
@@ -3468,12 +3579,28 @@ body {
   }
 }
 
-/* Very narrow window - wrap header, compact gaps */
+/* Very narrow window - compact grid gaps */
 @media (max-width: 640px) {
   .sessions {
     gap: 8px;
   }
+}
 
+/* ── Phone-width layout (<=768px) ─────────────────────────────
+   A desktop window at 769px or wider sees none of this, so the docked three-column shell is untouched.
+   Two structural moves carry the whole layout: the review sidebar leaves the body row and becomes an
+   overlay, and the focus rail turns from a left column into a horizontal chip strip above the terminal.
+   Between them the rail (240px) + resizer (7px) + sidebar (320px minimum) claimed 567px of an
+   unshrinkable 390px viewport, collapsing the terminal column to nothing. */
+@media (max-width: 768px) {
+  /* Header must wrap from the SAME width the Review button appears at. The wrap used to start at
+     640px, so between 641 and 768 the extra button pushed the row past the viewport, and with
+     body{overflow:hidden} the clipped tail is the right end: the help button and the hamburger, which
+     is the only route to Settings / Restart / Shut Down. The two live-region readouts also come out of
+     the flow here (clipped, not display:none, so they keep announcing): the connection state still
+     reads from its dot, and the attention count is already the focus rail's leading chip.
+     At 390px this leaves the right row at roughly 27 + 99 + 76 + 34 + 34 + 40 = 310px inside the
+     366px the 12px inner padding leaves, and .header-right wraps if a wider theme font overruns it. */
   .header-inner {
     flex-wrap: wrap;
     gap: 8px;
@@ -3481,7 +3608,207 @@ body {
 
   .header-right {
     gap: 10px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
   }
+
+  .header-aggregate,
+  .connection-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  /* Sidebar: out of the row entirely, and a full-screen overlay when the header's Review button opens
+     it. 100dvh (not 100vh) so the panel ends above the phone's browser chrome instead of behind it. */
+  .app-sidebar { display: none; }
+
+  body[data-sidebar-open="1"] .app-sidebar {
+    display: flex;
+    position: fixed;
+    left: 0;
+    right: 0;
+    top: var(--header-h);
+    width: 100%;
+    height: calc(100dvh - var(--header-h));
+    /* Above the app body, BELOW .dialog-overlay (200) and the notice region (300). A dialog opened
+       from inside the sidebar (Discard, Remove) must paint over it, not under it: at 250 the confirm
+       was invisible while still holding the focus trap. */
+    z-index: 150;
+    border-left: none;
+  }
+
+  .btn-sidebar-toggle { display: inline-flex; }
+  .review-sidebar-close { display: inline-flex; }
+  /* Full-width overlay: no adjacent column to resize against. */
+  .review-resize-handle { display: none; }
+  .review-sidebar-body { overscroll-behavior: contain; }
+
+  /* Focus view: rail above the terminal instead of beside it. The center's min-width:0 covered the row
+     axis; stacked, it needs min-height:0 or the terminal column cannot shrink below its content and
+     pushes the key strip off the bottom of the screen. */
+  .focus-view { flex-direction: column; }
+  .focus-center { min-height: 0; }
+
+  .focus-rail {
+    /* Drops the persisted --rail-width basis: in a COLUMN flex container that basis would size the
+       strip's height, so a saved 400px rail would eat the screen. */
+    flex: 0 0 auto;
+    flex-direction: row;
+    align-items: center;
+    width: 100%;
+    height: 56px;
+    gap: 8px;
+    padding: 6px 10px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+  .focus-rail::-webkit-scrollbar { display: none; }
+  .focus-rail-resizer { display: none; }
+
+  /* The attention queue readout leads the strip (it is the rail's whole point), minus the Alt+W legend
+     that no phone can press. */
+  .focus-rail-head {
+    position: static;
+    flex: 0 0 auto;
+    width: auto;
+    height: 100%;
+    padding: 0 12px;
+  }
+  .focus-rail-head .shortcut-keys { display: none; }
+  .focus-rail-head-count { white-space: nowrap; }
+
+  /* A project header row cannot share a single-row strip with the pills it labels. Roster switching is
+     the essential function here, so the group name and its quick-add / dismiss buttons drop out; both
+     stay available at any wider width. */
+  .focus-rail-group { display: none; }
+
+  .focus-rail-list { flex: 0 0 auto; flex-direction: row; align-items: center; gap: 8px; }
+  .focus-pill-row { flex: 0 0 auto; }
+
+  /* Pill to chip: name plus the state dot, sized as a 44px tap target. The spelled-out state label is
+     dropped (no room in a row of chips); state still reads from the dot's color and the pill's border,
+     which already carry it, so nothing becomes color-only that was not already. */
+  .focus-pill {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: auto;
+    min-height: 44px;
+    padding: 6px 12px;
+  }
+  .focus-pill-name { max-width: 40vw; font-size: 12px; }
+  .focus-pill-badge { margin-left: 0; }
+  .focus-pill-label { display: none; }
+  .focus-pill-merge { margin-left: 4px; }
+  /* Removing a clean session is immediate and irreversible; an always-visible "x" inside a chip the
+     operator taps to SWITCH sessions is a misfire waiting to happen at this size. The strip omits it
+     (the hover:none block below reveals it only on the wider rail layout). */
+  .focus-pill-remove { display: none; }
+
+  /* Six settings tabs do not fit 390px. Wrapping to two rows shows all of them at once, which beats
+     the desktop strip's hidden-scrollbar overflow: a touch operator gets no scrollbar hint that three
+     more tabs exist off the right edge. */
+  .settings-tabs { flex-wrap: wrap; overflow-x: visible; }
+  .dialog-settings { width: 100%; }
+
+  /* Teams: long server strings must wrap rather than push the panel past the viewport. The status
+     column also has to be allowed to shrink - min-width:0 alone cannot, since it is flex-shrink:0. */
+  .team-status-group { min-width: 0; flex-shrink: 1; }
+  .team-status { white-space: normal; overflow-wrap: anywhere; }
+  .team-next { white-space: normal; overflow-wrap: anywhere; }
+  .sched-editor-actions { flex-wrap: wrap; }
+}
+
+/* Touch key strip: revealed only where the keys it sends have no other source. The [hidden] rule
+   declared with the strip outranks this by specificity, so focus-view.js still hides it on an empty
+   center. */
+@media (pointer: coarse) and (max-width: 768px) {
+  .focus-key-strip { display: flex; }
+}
+
+/* ── Touch input corrections ──────────────────────────────────
+   Keyed on the POINTER, not the width: a hover-revealed affordance is broken on any touch device,
+   including a large tablet, and a fine-pointer desktop matches none of this. */
+@media (hover: none) {
+  /* Hovering a pill BLANKS its state badge to clear room for the quick-remove "x". A touch device
+     produces no hover, or a sticky one that never lifts, so the badge either never returned or the
+     "x" it made room for never appeared. Keep state visible unconditionally here. */
+  .focus-pill-row:hover .focus-pill-badge,
+  .focus-pill-row:hover .focus-pill-merge { opacity: 1; }
+}
+
+/* The "x" itself is only rendered on the vertical rail (the phone strip drops it, see above), so its
+   reveal - and the slot the pill must reserve for it once the badge stops yielding - belongs to the
+   widths where that rail exists. */
+@media (hover: none) and (min-width: 769px) {
+  .focus-pill { padding-right: 34px; }
+  .focus-pill-remove { opacity: 1; pointer-events: auto; }
+}
+
+@media (pointer: coarse) {
+  /* 16px is the threshold below which iOS Safari zooms the page on field focus, which then strands
+     half the dialog off-screen. */
+  .dialog input,
+  .dialog select,
+  .dialog textarea { font-size: 16px; }
+
+  /* Tap targets. A control that owns its box simply grows to 44px; an icon-sized control keeps its
+     visual size and extends an invisible hit area instead (the ::after pattern .btn-action set), so
+     the chrome does not visibly inflate on a tablet. Each inset is bounded by the neighbor gap, so no
+     two hit areas overlap: an accidental tap can miss, but never hit the wrong control. */
+  .btn-dialog,
+  .settings-tab,
+  .review-btn,
+  .header-tab { min-height: 44px; }
+
+  /* The card kebab and its menu ARE the removal path on a phone, where the rail chip drops its "x".
+     The menu items stack vertically, so they take real height rather than a ::after bleed that would
+     put each item's hit area over its neighbour's label. .btn-action already reaches 44px tall via its
+     existing ::after; only its width is short, and 6px of sibling gap caps how far that can bleed, so
+     the button itself widens instead. */
+  .overflow-item { min-height: 44px; }
+  .btn-action { width: 36px; }
+
+  .notice-close {
+    align-self: center;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  /* .focus-pill-remove is deliberately absent: it is already position:absolute, and a same-specificity
+     `relative` here would clobber that and drop it back into the pill's flow. Its ::after anchors to
+     the absolute box just as well. */
+  .team-collapse,
+  .focus-rail-group-add,
+  .focus-rail-group-remove,
+  .review-sidebar-close { position: relative; }
+
+  .team-collapse::after,
+  .focus-rail-group-add::after,
+  .focus-rail-group-remove::after,
+  .focus-pill-remove::after,
+  .review-sidebar-close::after {
+    content: '';
+    position: absolute;
+  }
+  .team-collapse::after { inset: -12px; }
+  /* 8px apart in the group header: 6px each side is the widest bleed that keeps them separate. */
+  .focus-rail-group-add::after,
+  .focus-rail-group-remove::after { inset: -13px -6px; }
+  /* Exactly the 34px slot the hover:none block reserves, so it never reaches over the pill's name. */
+  .focus-pill-remove::after { inset: -12px -7px; }
+  .review-sidebar-close::after { inset: -8px; }
 }
 
 /* ── Debug overlay ──────────────────────────────────────── */

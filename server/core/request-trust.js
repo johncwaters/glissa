@@ -60,6 +60,17 @@ function decideEditorOpenAccess(trust) {
   return { allow: true, reason: null };
 }
 
+/**
+ * Display metadata handed to a control-WS client so its UI can stop offering actions that only make
+ * sense on the machine Glissa runs on. Same 'remote' test as every decision above, and an unstamped
+ * connection (remote mode off) is local by definition. This is NOT a boundary: a paired device is
+ * full-trust by design, so nothing may be enforced client-side on the strength of this label.
+ */
+function clientTrustLabel(trust) {
+  return trust === 'remote' ? 'remote' : 'local';
+}
+
 module.exports = {
   classifyRequestOrigin, decideRequestAccess, decideUpgradeAccess, decideEditorOpenAccess, isPairPath,
+  clientTrustLabel,
 };
