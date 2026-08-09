@@ -1,6 +1,6 @@
 'use strict';
 
-// Best-effort PATH notice printed after a GLOBAL `npm install -g glissa`.
+// Best-effort PATH notice printed after a GLOBAL `npm install -g github:johncwaters/glissa`.
 //
 // Contract: print-only. It never edits the user's PATH and must NEVER fail an
 // install: every path is wrapped so we always exit 0. It stays silent for local,

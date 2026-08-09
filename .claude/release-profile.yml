@@ -1,5 +1,6 @@
-# Release profile for the /release skill. Derived 2026-07-23 from repo survey; review before first use.
-type: npm_cli
+# Release profile for the /release skill. Derived 2026-07-23 from repo survey; rewritten 2026-08-09 when
+# distribution moved off the npm registry to the claude-setup repo (see docs/distribution.md).
+type: git_tag
 versioning:
   scheme: semver
   version_file: package.json        # hand-edited; lockfile synced in same commit
@@ -14,25 +15,27 @@ git:
   require: [clean_tree]
 gates:
   pre_tag:
-    - node scripts/check-package-files.js          # verifies package.json files whitelist
+    - node scripts/check-package-files.js          # verifies package.json files whitelist (bounds the GitHub-spec install tarball)
     - npm run build                                # Vite frontend; dist/index.html must exist
   post_release:
-    - npm view glissa version                      # registry shows new version
+    - git ls-remote --tags origin vX.Y.Z           # GitHub has the tag
     - gh release view vX.Y.Z
-    - sync main: git fetch . develop:main && git push origin main   # close the standing main-drift after each release
-  evidence: [registry_version, git_tag, github_release_url]
+    - "curl -s https://raw.githubusercontent.com/johncwaters/glissa/main/package.json"   # the version the startup update check serves
+    - sync main: git fetch . develop:main && git push origin main   # close the standing main-drift; also what makes the update check see the new version
+  evidence: [git_tag, github_release_url, raw_main_package_version]
 publish:
   trigger: local_script
   detail:
     command: npm run release                       # scripts/release.js
-    script_does: npm whoami check, dirty-tree check, tag-exists check, files check, build, npm publish --ignore-scripts, git push, tag + push tag, gh release create from changelog section
-    partial_failure_note: script is not atomic; on mid-flight failure check what landed (registry vs tag vs release) before any rerun
-  auth: token_local                                # TODO migrate to GHA trusted publishing + provenance (OIDC)
+    script_does: dirty-tree check, tag-exists check, files check, build, git push, annotated tag + push tag, gh release create from changelog section
+    no_registry: package is private; nothing is published to npm. Distribution is the GitHub repo plus claude-setup provisioning (docs/distribution.md)
+    partial_failure_note: script is not atomic; on mid-flight failure check what landed (pushed commits vs tag vs release) before any rerun
+  auth: gh_cli_local                               # gh for the release; git push for commits and the tag
 rollback:
   steps:
-    - "npm deprecate glissa@<bad> 'broken, use <prev>'"
-    - "npm dist-tag add glissa@<prev> latest"
-    - "Forward-fix with a new patch version"
-  never: [unpublish, retag, reuse_version]
+    - "git push origin :refs/tags/vX.Y.Z && git tag -d vX.Y.Z"
+    - "gh release delete vX.Y.Z"
+    - "Revert the release commit on develop, or forward-fix with a new patch version"
+  never: [reuse_version, force_push_main]
 approval:
   human_before: [npm_run_release]

@@ -73,7 +73,6 @@
     "preview": "vite preview",
     "postinstall": "node scripts/postinstall-path-check.js",
     "prepare": "node scripts/prepare-build.js",
-    "prepublishOnly": "node scripts/check-package-files.js && npm run build && node -e \"require('fs').statSync('dist/index.html')\"",
     "release": "node scripts/release.js"
   },
   "dependencies": {

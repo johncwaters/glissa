@@ -4,7 +4,7 @@
 # bin
 
 ## Purpose
-The npm-installed CLI entry point for Glissa. Parses CLI flags and boots the production server.
+The globally-installed CLI entry point for Glissa (`npm i -g github:johncwaters/glissa`; there is no registry package, see `../docs/distribution.md`). Parses CLI flags and boots the production server.
 
 ## Key Files
 
@@ -16,7 +16,7 @@ The npm-installed CLI entry point for Glissa. Parses CLI flags and boots the pro
 
 ### Working In This Directory
 - Keep this a thin argv parser; real logic belongs in `backend.js` or `config-store.js`.
-- It is listed in `package.json` `bin`, so every local file it requires must be in the `files` whitelist (`scripts/check-package-files.js` enforces this).
+- It is listed in `package.json` `bin`, so every local file it requires must be in the `files` whitelist that bounds the GitHub-spec install tarball (`scripts/check-package-files.js` enforces this).
 
 ### Testing Requirements
 - `node scripts/check-package-files.js` after changing requires; `npm test` for behavior.

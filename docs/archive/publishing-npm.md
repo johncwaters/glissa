@@ -1,3 +1,5 @@
+> Historical document, superseded. This was the npm-registry publish runbook, from before distribution moved to the `claude-setup` repo and the package went private. Current behavior: see `docs/distribution.md`.
+
 # Publishing Glissa to npm
 
 Glissa releases through `scripts/release.js` (`npm run release`). It automates the whole flow: npm auth check, clean-tree check, tag-exists check, package-files check, build, publish, git push, tag, and an optional GitHub release. Use it for every release; the manual walkthrough in the appendix below is a fallback for when the script cannot run (no npm auth on the box, a partial failure needs finishing by hand, or a one-off task like unpublishing).

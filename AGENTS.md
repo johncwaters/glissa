@@ -22,7 +22,7 @@ Glissa is a lightweight Node.js background process that spawns and manages Claud
 | `server/post-turn-checker.js` | Thin async IO runner for post-turn hygiene checks; applies pure rules from `session/core/post-turn-rules.js` to a session's git-changed files |
 | `vite.config.js` | Vite frontend build config + backend-attach plugin (ESM) |
 | `biome.json` | Lint/format config (worktrees inherit the nested-config gotcha from main) |
-| `package.json` | CommonJS package; `files` whitelist validated by `scripts/check-package-files.js` |
+| `package.json` | CommonJS package, `private` (never published to a registry); the `files` whitelist bounds the tarball npm packs for a `github:johncwaters/glissa` install, validated by `scripts/check-package-files.js`. See `docs/distribution.md` |
 | `AGENTS.md` | Project agent instructions: architecture, conventions, design decisions. Read it first. `CLAUDE.md` is a stub that imports this file via `@AGENTS.md` |
 | `DESIGN.md` / `DESIGN.json` | Dashboard visual design system |
 | `PRODUCT.md` | Product definition and positioning (canonical; see `docs/archive/product-design-context.md` for the superseded design-context doc) |
@@ -133,7 +133,7 @@ server/            # Backend runtime (Express + WS wiring, control plane, shared
   core/cookie.js          # Pure cookie parse/serialize + Secure/SameSite decision
   core/pairing-token.js   # Pure token/device minting, TTL, single-use and revocation rules
   core/request-trust.js   # Pure listener-port trust classification + HTTP/upgrade access decisions
-  update-check.js      # Startup npm-registry version check (abortable, advisory only) behind config.checkForUpdates
+  update-check.js      # Startup GitHub version check, main-branch package.json (abortable, advisory only) behind config.checkForUpdates
   ephemeral-session.js # Shared ephemeral-Session registration: map insert, exit cleanup, destroy() wrap; used by the team and PR-review lanes
   team-session-factory.js  # Team Session construction: makeStageSession (headless stage) + startPackSetup (interactive guided setup)
   pr-poller.js         # GitHub PR auto-review poller (opt-in): lists/filters/reviews/merges own PRs; IO-free, deps injected

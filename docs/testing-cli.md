@@ -1,6 +1,6 @@
 # Glissa CLI Testing Guide
 
-Test scenarios for Glissa's CLI functionality. Run these before publishing to npm.
+Test scenarios for Glissa's CLI functionality. Run these before cutting a release, since a tagged commit is what a `npm install -g github:johncwaters/glissa` and a `claude-setup` server update both pull. See `distribution.md` for the shipping model.
 
 ## Prerequisites
 
@@ -185,6 +185,8 @@ node bin/glissa.js doctor
 
 ## Test 10: `npm pack` Verification
 
+Installing from the GitHub spec packs the repo first, so this list is exactly what lands in a global install.
+
 ```powershell
 npm pack --dry-run
 ```
@@ -236,7 +238,7 @@ node -e "const p=require('./package.json'); console.log(JSON.stringify({bin:p.bi
 
 ## Testing as Global Install (npm link)
 
-Simulate a global install:
+Simulate the `npm install -g github:johncwaters/glissa` result without a network round trip:
 
 ```powershell
 npm link

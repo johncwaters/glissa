@@ -15,7 +15,19 @@ I run my daily agent fleet in it. This README was written inside a Glissa sessio
 
 ## Install
 
-### Install from git
+Glissa is not on the npm registry. It ships from this repo, through two channels.
+
+### Server machines: claude-setup
+
+My own always-on machines are provisioned by the [`claude-setup`](https://github.com/johncwaters/claude-setup) server profile: it clones this repo to `~/Projects/glissa`, runs `npm ci` and `npm run build`, installs a systemd user service, and fronts the remote listener with `tailscale serve`. Updating is re-running its apply script.
+
+### Standalone CLI
+
+```bash
+npm install -g github:johncwaters/glissa
+```
+
+Or clone and run it in place:
 
 ```bash
 git clone https://github.com/johncwaters/glissa.git
@@ -27,13 +39,13 @@ npm start
 
 Open `http://localhost:3000` to view the dashboard.
 
-For a global CLI install from GitHub:
+To update a clone, pull and rebuild (this is exactly what Glissa's own startup update check tells you to run):
 
 ```bash
-npm install -g github:johncwaters/glissa
+git pull --ff-only && npm ci && npm run build
 ```
 
-The operator's own machines are provisioned by the `claude-setup` flow, so manual installs are mainly for fresh machines and outside preview.
+Then restart the server (`systemctl --user restart glissa` where the service is installed). See [docs/distribution.md](docs/distribution.md) for the full picture.
 
 ### Docker preview
 

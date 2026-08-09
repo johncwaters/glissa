@@ -1,7 +1,9 @@
 'use strict';
 
 // ── Glissa release script ─────────────────────────────────────
-// Publishes to npm, pushes to GitHub, tags, and creates a release.
+// Pushes to GitHub, tags, and creates a release. Nothing is published to a
+// registry: the package is private and distribution is the GitHub repo itself
+// (see docs/distribution.md).
 // Usage: node scripts/release.js
 
 const { execSync } = require('node:child_process');
@@ -30,16 +32,6 @@ const TAG = `v${VERSION}`;
 
 console.log(`==> Releasing glissa ${TAG}\n`);
 
-// 0. Verify npm auth before doing anything else
-try {
-  const npmUser = runCapture('npm whoami');
-  console.log(`==> Authenticated as npm user: ${npmUser}`);
-} catch {
-  console.error('ERROR: Not logged in to npm. Run `npm login` or check ~/.npmrc token.');
-  console.error('       Tip: Use an automation token (npm token create --type=automation) to bypass OTP.');
-  process.exit(1);
-}
-
 // 1. Ensure working tree is clean
 const status = runCapture('git status --porcelain');
 if (status) {
@@ -63,20 +55,16 @@ console.log('==> Building...');
 run('npm run build');
 fs.statSync('dist/index.html');
 
-// 5. Publish to npm (--ignore-scripts skips prepublishOnly to avoid double build)
-console.log('\n==> Publishing to npm...');
-run('npm publish --ignore-scripts');
-
-// 6. Push commits to GitHub
+// 5. Push commits to GitHub
 console.log('\n==> Pushing to GitHub...');
 run('git push');
 
-// 7. Tag and push tag
+// 6. Tag and push tag
 console.log(`\n==> Tagging ${TAG}...`);
-run(`git tag ${TAG}`);
+run(`git tag -a ${TAG} -m "Glissa ${TAG}"`);
 run(`git push origin ${TAG}`);
 
-// 8. Create GitHub release from CHANGELOG (optional — requires gh CLI)
+// 7. Create GitHub release from CHANGELOG (optional, requires the gh CLI)
 if (hasCommand('gh')) {
   console.log('\n==> Creating GitHub release...');
   const changelog = fs.readFileSync('CHANGELOG.md', 'utf8');
@@ -97,4 +85,4 @@ if (hasCommand('gh')) {
   console.log(`   Create manually at: https://github.com/johncwaters/glissa/releases/new?tag=${TAG}`);
 }
 
-console.log(`\n==> Done! Published glissa@${VERSION} to npm and GitHub.`);
+console.log(`\n==> Done! Tagged and pushed glissa ${TAG}.`);
