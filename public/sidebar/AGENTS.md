@@ -4,7 +4,7 @@
 # sidebar
 
 ## Purpose
-The right-docked review sidebar: the single home for the worktree review gate of the selected session. Shows a changed-files summary over collapsible per-file diffs plus the actions (Merge into the integration branch without ending the session; Discard for a settled worktree). App-level, shared by the Sessions grid and the Focus view.
+The review sidebar: the single home for the worktree review gate of the selected session. Shows a changed-files summary over collapsible per-file diffs plus the actions (Merge into the integration branch without ending the session; Discard for a settled worktree). App-level, shared by every view. Right-docked on the desktop layout; the SAME element is re-parented into the phone Review screen (`reparentReviewPanel`), so both layouts are one review surface with one set of caches and listeners.
 
 ## Key Files
 
@@ -21,6 +21,7 @@ The right-docked review sidebar: the single home for the worktree review gate of
 - `diff-core.mjs` stays pure and dependency-free (node:test runs it); rendering belongs in `review-sidebar.js`.
 - Merge semantics live server-side (rebase-then-FF, park on conflict, `session/core/merge-prompt.js` handoff); the sidebar only sends control messages and renders results.
 - Diff text renders via textContent/escaped markup; never innerHTML raw diff content.
+- The panel is built once and MOVED between layouts, never rebuilt. It has no close control in either one (the desktop dock is permanent; the phone screen is dismissed by the bottom nav), so do not reintroduce a dismiss button without a layout that needs it.
 
 ### Testing Requirements
 - `tests/frontend-diff-core.test.js` for the parser; merge flow verified end-to-end via `npm run dev` with a worktree session.

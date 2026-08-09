@@ -12,32 +12,29 @@
 // returned to its exact home slot in the off-screen grid on leave/swap.
 
 import { BADGE_LABELS, STATE_GLYPHS, STATES } from '/shared/states.mjs';
+import { borrowCard, getBorrowedCardId, releaseCard } from '../card-host.js';
 import { sendControlMsg } from '../control-ws.js';
 import { el } from '../dom-helpers.js';
 import { setActivityRenderer } from '../session-card/activity.js';
 import { showConfirmDialog } from '../session-card/card-dom.js';
-import { container, sessionUIs } from '../session-card/card-registry.js';
+import { sessionUIs } from '../session-card/card-registry.js';
 import { suggestSessionName } from '../session-card/naming.js';
-import { showErrorToast } from '../session-card/toast.js';
-import { ensureTerminalSetup, forceTerminalRepaint, sendTerminalInput } from '../session-card/terminal.js';
 import { setSelectedId } from '../sidebar/selection.js';
 import { getKeptProjects, getLastFocusedSessionId, getRailWidth, setKeptProjects, setLastFocusedSessionId, setRailWidth } from '../ui-prefs.js';
 import { orderRoster, pickAdjacent, pickNextAttention } from './attention-core.mjs';
-import { createMobileKeyStrip } from './mobile-key-strip.js';
 import { groupRoster, NO_PATH_KEY, visibleOrder } from './roster-groups.mjs';
 
 const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)');
-// The widths where a touch device actually RENDERS the pill's "x": the phone strip drops that button
-// (see the <=768px block in style.css), so only the wider touch rail needs it exposed to AT, where no
-// Delete key exists to retire a session instead. Must track the CSS that renders it, or a phone would
-// carry a stray role=button in the listbox subtree for a display:none control (see buildPill).
+// A coarse pointer on the DESKTOP layout: a tablet, which keeps the vertical rail and therefore
+// renders the pill's "x". There it is the only removal path (no Delete key), so it is exposed to AT;
+// on a mouse it stays a redundant hidden control. A phone never reaches this rail at all - it gets the
+// phone layout's Board instead - so the width half of the query mirrors the form-factor rule.
 const touchRail = window.matchMedia?.('(hover: none) and (min-width: 769px)');
 
 let railEl = null;
 let railHeadEl = null;  // the "{n} NEED YOU" jump header (sticky top of the rail)
 let centerEl = null;
 let cardSlotEl = null;
-let keyStripEl = null;  // touch-only Esc/Tab/Ctrl+C/arrows/Paste bar under the centered card
 let emptyEl = null;
 let emptyTitleEl = null;
 let emptyDescEl = null;
@@ -225,6 +222,10 @@ function removeSession(id) {
 
 export function isFocusActive() { return active; }
 
+// Which session the center currently holds, or null. Read when handing the layout over to the phone
+// shell so the same session is already open on its Terminal screen.
+export function getFocusedSessionId() { return focusedId; }
+
 export function mountFocusView({ rail, center, resizer }) {
   railEl = rail;
   centerEl = center;
@@ -259,12 +260,10 @@ export function mountFocusView({ rail, center, resizer }) {
   emptyDescEl = emptyEl.querySelector('.focus-empty-desc');
 
   cardSlotEl = el('div', 'focus-card-slot');
-  keyStripEl = createMobileKeyStrip({ send: sendToCenteredTerminal });
-  keyStripEl.hidden = true; // no card borrowed yet; updateCenter owns this from here on
 
   // Review (diff + Merge / Discard) lives in the right review sidebar, not in the center, so
   // the borrowed card is just the live terminal; selection drives the sidebar (see focusSession).
-  centerEl.append(emptyEl, cardSlotEl, keyStripEl);
+  centerEl.append(emptyEl, cardSlotEl);
 
   railEl.addEventListener('keydown', onRailKeydown);
 }
@@ -677,41 +676,17 @@ function flashAttention(id) {
   }
 }
 
-// ── Center: borrow the focused card, run the review bar ──
+// ── Center: borrow the focused card ──
+// The borrow itself lives in ../card-host.js, shared with the phone Terminal screen: a session owns one
+// xterm, so exactly one surface may hold its card at a time and that invariant has to be global.
 
 function borrowToCenter(ui, id) {
-  ui.card._focusHome = { parent: ui.card.parentElement, next: ui.card.nextElementSibling };
-  ui.card.classList.add('focus-centered');
-  cardSlotEl.appendChild(ui.card);
-  // A dormant card has no terminal yet - ensure a live xterm so the center is not a blank box.
-  // ensureTerminalSetup does NOT spawn a PTY for a dormant session; it only builds the xterm.
-  if (!ui.term) ensureTerminalSetup(ui, id);
-  // Deterministic fit to the (much larger) center rather than waiting on the ResizeObserver.
-  ui._applyFit?.();
-  forceTerminalRepaint(ui);
-}
-
-// Put a released card back at its remembered home position, or append it to the fallback
-// container if that position's parent is gone (e.g. removed from the DOM while centered).
-function reinsertCard(card, home) {
-  if (home?.parent?.isConnected) {
-    if (home.next && home.next.parentElement === home.parent) { home.parent.insertBefore(card, home.next); return; }
-    home.parent.appendChild(card);
-    return;
-  }
-  container.appendChild(card);
+  borrowCard(ui, id, cardSlotEl, { className: 'focus-centered' });
 }
 
 function releaseCenter() {
   if (!focusedId) return;
-  const ui = sessionUIs.get(focusedId);
-  if (ui?.card && ui.card.parentElement === cardSlotEl) {
-    ui.card.classList.remove('focus-centered');
-    reinsertCard(ui.card, ui.card._focusHome);
-    delete ui.card._focusHome;
-    ui._applyFit?.();
-    forceTerminalRepaint(ui);
-  }
+  if (getBorrowedCardId() === focusedId) releaseCard();
   focusedId = null;
 }
 
@@ -733,23 +708,9 @@ function focusSession(id) {
   refreshFocusRoster();
 }
 
-// Bytes from the touch key strip go to whichever session currently holds the center, over the same
-// data WS xterm's own keystrokes use. DOM focus is deliberately left alone: re-focusing the terminal
-// would force the soft keyboard open on every Esc or arrow press. A refused send (socket down and the
-// replay queue full) is reported: a Ctrl+C tap that silently vanishes reads as a wedged session.
-function sendToCenteredTerminal(data) {
-  const ui = focusedId ? sessionUIs.get(focusedId) : null;
-  if (!ui) return;
-  if (sendTerminalInput(ui, data)) return;
-  showErrorToast('Session is not connected; key press was dropped');
-}
-
 function updateCenter() {
   const has = !!(focusedId && sessionUIs.has(focusedId));
   emptyEl.hidden = has;
-  // The strip is a control surface for a live terminal; with an empty center it has no target. CSS
-  // keeps it hidden on desktop and on a fine pointer regardless of this flag.
-  if (keyStripEl) keyStripEl.hidden = !has;
   if (has) return;
   // Two empty states: sessions exist but none is selected yet (the default on every open), vs. no
   // sessions at all. The first directs the operator to the rail; the second to spawn a session.
@@ -775,6 +736,16 @@ export function setFocusMergeStatus(id, mergeStatus) {
 // hidden view from spawning a dormant session as a side effect, so the caller must switch to Focus first.
 export function focusSessionInCenter(id) {
   if (active) onPillActivate(id);
+}
+
+// Center a session WITHOUT the operator-selection side effects: no start-session for a DORMANT target,
+// no dismiss for a COMPLETE one. This is the same posture restoreFocusedSession has, and for the same
+// reason (see dismissIfComplete: non-operator focus paths never dismiss). Used by the form-factor
+// handoff, where rotating a phone into desktop width is a LAYOUT event, not a selection - treating it as
+// one would respawn a session the operator just killed, or acknowledge away a COMPLETE they never read.
+export function centerSessionQuietly(id) {
+  if (!active || !sessionUIs.has(id)) return;
+  focusSession(id);
 }
 
 // Focus the Nth session (1-based) in the current rail order. Backs the Alt+1..9 chrome shortcut.

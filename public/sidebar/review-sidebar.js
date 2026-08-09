@@ -4,7 +4,8 @@
 // and rebases the worktree onto it WITHOUT ending the session, so the operator commits as they go (the
 // PTY effectively never dies, so there is no separate finish/close-out step). It REPLACES the old inline
 // card review bar; the card now only carries data-merge for the remove-warning. The sidebar is app-level
-// (spans every view via .app-body), so it serves the Sessions grid and the Focus view alike.
+// (spans every view via .app-body) on desktop, and the SAME element is re-parented into the phone
+// Review screen (reparentReviewPanel), so both layouts share one review surface.
 //
 // Data flow: merge status arrives via setReviewMergeStatus (from the server's session-merge-status),
 // the diff via setReviewDiff (reply to request-session-diff, asked on selection and on every server
@@ -19,7 +20,7 @@
 
 import { MERGEABLE_LIVE_STATES, STATES } from '/shared/states.mjs';
 import { sendControlMsg } from '../control-ws.js';
-import { el } from '../dom-helpers.js';
+import { adoptElement, el, releaseElement } from '../dom-helpers.js';
 import { showConfirmDialog } from '../session-card/card-dom.js';
 import { sessionUIs } from '../session-card/card-registry.js';
 import { parseUnifiedDiff, shouldDropDiffCache, summarizeFiles } from './diff-core.mjs';
@@ -55,24 +56,20 @@ let resyncResult = null;
 let resyncResultTimer = null;
 
 // ── Mount ──
-// The sidebar is always visible on desktop (no collapse): with no session selected it shows an empty
-// state, and with a selected session that has no changes it says so. Below 768px there is no room to
-// dock it beside the focus center, so CSS drops it out of the row and the header's Review button opens
-// it as a full-screen overlay; `onClose` is how the close button inside it hands that state back to
-// the owner of the toggle (app.js), which keeps the button's aria-expanded honest.
+// The panel is built once and never rebuilt. On desktop it is docked in the body row; on a phone the
+// SAME element is re-parented into the Review screen (see reparentReviewPanel below), so both layouts
+// share one review surface with one set of caches and listeners rather than two implementations that
+// could disagree. It has no close control in either layout: the desktop dock is permanent, and the
+// phone screen is dismissed by the bottom nav like every other screen.
 
-export function mountReviewSidebar({ panel, onClose }) {
+export function mountReviewSidebar({ panel }) {
   panelEl = panel;
   if (!panelEl) return;
 
   const head = el('div', 'review-sidebar-head');
   const title = el('span', 'review-sidebar-title', 'Review');
   sessionNameEl = el('span', 'review-sidebar-session');
-  const closeBtn = el('button', 'review-sidebar-close', String.fromCharCode(0x00d7));
-  closeBtn.type = 'button';
-  closeBtn.setAttribute('aria-label', 'Close review sidebar');
-  closeBtn.addEventListener('click', () => onClose?.());
-  head.append(title, sessionNameEl, closeBtn);
+  head.append(title, sessionNameEl);
 
   // Local-base-branch-vs-remote-upstream indicator (e.g. "develop: 2 ahead, 1 behind origin/develop").
   // A project-level fact, not tied to the merge/review gate below it, so it is its own row (collapses
@@ -87,8 +84,8 @@ export function mountReviewSidebar({ panel, onClose }) {
 
   // Resize handle: drag left edge to widen, right to narrow. Width persisted to localStorage. Pointer
   // events (not mouse) with capture, so the drag survives the cursor leaving the 6px strip and a pen
-  // or trackpad drives it identically; CSS hides the handle entirely in the mobile overlay, where the
-  // sidebar is full-width and there is nothing to resize.
+  // or trackpad drives it identically; CSS hides the handle under [data-layout="phone"], where the
+  // panel is a full-width screen and there is nothing to resize against.
   const handle = el('div', 'review-resize-handle');
   handle.setAttribute('aria-hidden', 'true');
   panelEl.append(head, branchSyncEl, controlsEl, bodyEl, handle);
@@ -150,6 +147,19 @@ export function mountReviewSidebar({ panel, onClose }) {
   });
 
   render();
+}
+
+// The phone Review screen is just another mount target for this panel. Moving the built element (rather
+// than rebuilding it there) is what makes the two layouts one review surface: the diff cache, the
+// selection subscription, the resize preference and every listener travel with it. Pass null to put it
+// back in its declared home in the body row.
+export function reparentReviewPanel(parentEl) {
+  if (!panelEl) return;
+  if (parentEl) {
+    adoptElement(panelEl, parentEl);
+    return;
+  }
+  releaseElement(panelEl);
 }
 
 // ── External updates (from app.js message handlers) ──

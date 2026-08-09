@@ -2,7 +2,7 @@
 // A phone has no physical Esc / Tab / Ctrl / arrow keys, and xterm's soft-keyboard textarea never
 // produces them, so this strip is the only way a touch operator can interrupt a run, indent, or walk
 // shell history. DOM-free so the mapping is unit-testable; the strip element itself is built by
-// focus-view/mobile-key-strip.js and the bytes go out through terminal.js sendTerminalInput.
+// phone/mobile-key-strip.js and the bytes go out through terminal.js sendTerminalInput.
 
 // Paste carries no fixed bytes: its payload is whatever the clipboard holds at press time.
 export const CLIPBOARD_ACTION = 'clipboard';

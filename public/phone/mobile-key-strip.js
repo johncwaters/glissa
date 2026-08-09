@@ -1,22 +1,25 @@
-// Touch key strip: the one-row control bar under the centered focus card on a phone. A soft keyboard
-// gives xterm printable characters only, so Esc / Tab / Ctrl+C / arrows have no other way in, and the
-// browser refuses a synthetic paste into the terminal textarea. Each button writes the same bytes the
-// physical keys write (catalog in ../mobile-keys.mjs) through the session's existing data-WS send path.
-// Focus is the only surface a phone uses, so this lives with the focus view rather than on the card.
+// Touch key strip: the one-row control bar under the terminal on the phone Terminal screen. A soft
+// keyboard gives xterm printable characters only, so Esc / Tab / Ctrl+C / arrows have no other way in,
+// and the browser refuses a synthetic paste into the terminal textarea. Each button writes the same
+// bytes the physical keys write (catalog in ../mobile-keys.mjs) through the session's existing data-WS
+// send path.
+//
+// It lives in the phone package because the phone Terminal screen is the only surface that mounts it:
+// every other surface implies a physical keyboard.
 
 import { el } from '../dom-helpers.js';
 import { isClipboardKey, mobileKeyBytes, MOBILE_KEYS } from '../mobile-keys.mjs';
 import { showErrorToast } from '../session-card/toast.js';
 
-// send(data) writes into the currently centered session; the caller owns resolving that session, so
-// the strip itself holds no session state and survives every focus swap unchanged.
+// send(data) writes into the currently shown session; the caller owns resolving that session, so the
+// strip itself holds no session state and survives every session swap unchanged.
 export function createMobileKeyStrip({ send }) {
-  const strip = el('div', 'focus-key-strip');
+  const strip = el('div', 'phone-key-strip');
   strip.setAttribute('role', 'toolbar');
   strip.setAttribute('aria-label', 'Terminal keys');
 
   for (const key of MOBILE_KEYS) {
-    const btn = el('button', 'focus-key', key.label);
+    const btn = el('button', 'phone-key', key.label);
     btn.type = 'button';
     btn.dataset.key = key.id;
     btn.title = key.title;

@@ -9,9 +9,11 @@ import { STATES } from '/shared/states.mjs';
 import { connectControl, disableReconnect, onControlMessage, sendControlMsg, sendControlRequest, setConnectionStateCallback } from './control-ws.js';
 import { createAddSessionDialog, createConfirmDialog, createSettingsDialog } from './dialogs.js';
 import { writeClipboardText } from './dom-helpers.js';
-import { activateFocusView, deactivateFocusView, focusAdjacentInRail, focusNextAttention, focusNthInRail, focusSessionInCenter, isFocusActive, mountFocusView, noteKnownProjectPath, refreshFocusRoster, restoreFocusedSession, setFocusMergeStatus } from './focus-view/focus-view.js';
+import { activateFocusView, centerSessionQuietly, deactivateFocusView, focusAdjacentInRail, focusNextAttention, focusNthInRail, focusSessionInCenter, getFocusedSessionId, isFocusActive, mountFocusView, noteKnownProjectPath, refreshFocusRoster, restoreFocusedSession, setFocusMergeStatus } from './focus-view/focus-view.js';
+import { initFormFactor, isPhoneLayout, onLayoutChange } from './form-factor.js';
 import { applyHealthSnapshot, mountHealthMonitor } from './health-monitor.js';
 import { initNotifications, showDesktopNotification } from './notifications.js';
+import { activatePhoneShell, deactivatePhoneShell, getPhoneSessionId, mountPhoneShell, refreshPhoneBoard } from './phone/phone-shell.js';
 import { handleDebugStateRefresh, handleDebugStateResponse } from './session-card/card-dom.js';
 import { applyState, applyTerminalSettings, createSessionCard, getSessionCount, hasSession, removeSessionCard, renameSessionCard, seedSessionMergeStatus, setSessionAgents, setSessionDiff, setSessionEffectiveBase, setSessionMergeStatus, setSessionPostTurn, setSessionPrompt, setSessionResume, setSessionWakeup, setSessionWorktree, updateAggregateStatus } from './session-card/lifecycle.js';
 import { reconnectDataWs } from './session-card/terminal.js';
@@ -24,6 +26,13 @@ import { getActiveView, getThemeId, isSoundEnabled, setActiveView, setSoundEnabl
 // ── Apply saved theme ─────────────────────────────────────────
 
 applyTheme(getThemeId());
+
+// ── Form factor ──────────────────────────────────────────────
+// Stamp <html data-layout> before anything else runs, so the first paint is already in the right one of
+// the two first-class layouts (desktop three-panel, or the phone screen stack). Everything phone-shaped
+// keys off that attribute; see form-factor-core.mjs for the rule.
+
+initFormFactor();
 
 // ── Connection status UI ─────────────────────────────────────
 
@@ -131,6 +140,8 @@ function handleSnapshot(sessions) {
   // in the Focus view itself, so no grid placeholder here.
   const focusActive = isFocusActive();
   if (focusActive) { refreshFocusRoster(); restoreFocusedSession(); }
+  // The phone Board reads the same registry these cards just populated; a no-op off the phone layout.
+  refreshPhoneBoard();
   // Teams may have been restored as the active view at boot, before knownProjects was populated, so its
   // project picker was seeded empty; refill it in place now that the snapshot has arrived.
   if (!focusActive && _activeView === 'teams') refreshTeamsProjects(getKnownProjects());
@@ -155,6 +166,7 @@ function handleStateChange(msg) {
     removeSessionCard(msg.id);
     createSessionCard(msg.id, msg.session, STATES.DORMANT, { skipPerms, path });
     if (isFocusActive()) refreshFocusRoster();
+    refreshPhoneBoard();
     refreshReviewSidebar(msg.id);
     return;
   }
@@ -165,6 +177,7 @@ function handleStateChange(msg) {
   // COMPLETE -> RUNNING must withdraw it. No-op unless this session is selected.
   refreshReviewSidebar(msg.id);
   if (isFocusActive()) refreshFocusRoster();
+  refreshPhoneBoard();
 
   // Live-update debug overlay on state change
   handleDebugStateRefresh(msg.id);
@@ -178,10 +191,10 @@ function handleStateChange(msg) {
 const messageHandlers = {
   'snapshot':           (msg) => handleSnapshot(msg.sessions),
   'state-change':       (msg) => handleStateChange(msg),
-  'session-added':      (msg) => { if (!msg.ephemeral) { knownProjects.set(msg.id, msg.session); noteKnownProjectPath(msg.path); } if (!hasSession(msg.id)) { createSessionCard(msg.id, msg.session, msg.state, { skipPerms: !!msg.skipPerms, worktree: !!msg.worktree, path: msg.path, resume: !!msg.resumeSessionId }); } if (isFocusActive()) refreshFocusRoster(); },
-  'session-removed':    (msg) => { knownProjects.delete(msg.id); removeSessionCard(msg.id); forgetReviewSession(msg.id); if (isFocusActive()) refreshFocusRoster(); },
-  'session-renamed':    (msg) => { if (knownProjects.has(msg.id)) knownProjects.set(msg.id, msg.newName); renameSessionCard(msg.id, msg.newName); },
-  'session-modified':   (msg) => { if (!msg.ephemeral) { knownProjects.set(msg.id, msg.session); noteKnownProjectPath(msg.path); } removeSessionCard(msg.id); forgetReviewSession(msg.id); createSessionCard(msg.id, msg.session, msg.state, { skipPerms: !!msg.skipPerms, worktree: !!msg.worktree, path: msg.path, resume: !!msg.resumeSessionId }); if (isFocusActive()) refreshFocusRoster(); },
+  'session-added':      (msg) => { if (!msg.ephemeral) { knownProjects.set(msg.id, msg.session); noteKnownProjectPath(msg.path); } if (!hasSession(msg.id)) { createSessionCard(msg.id, msg.session, msg.state, { skipPerms: !!msg.skipPerms, worktree: !!msg.worktree, path: msg.path, resume: !!msg.resumeSessionId }); } if (isFocusActive()) refreshFocusRoster(); refreshPhoneBoard(); },
+  'session-removed':    (msg) => { knownProjects.delete(msg.id); removeSessionCard(msg.id); forgetReviewSession(msg.id); if (isFocusActive()) refreshFocusRoster(); refreshPhoneBoard(); },
+  'session-renamed':    (msg) => { if (knownProjects.has(msg.id)) knownProjects.set(msg.id, msg.newName); renameSessionCard(msg.id, msg.newName); refreshPhoneBoard(); },
+  'session-modified':   (msg) => { if (!msg.ephemeral) { knownProjects.set(msg.id, msg.session); noteKnownProjectPath(msg.path); } removeSessionCard(msg.id); forgetReviewSession(msg.id); createSessionCard(msg.id, msg.session, msg.state, { skipPerms: !!msg.skipPerms, worktree: !!msg.worktree, path: msg.path, resume: !!msg.resumeSessionId }); if (isFocusActive()) refreshFocusRoster(); refreshPhoneBoard(); },
   'session-git':        (msg) => setSessionWorktree(msg.id, !!msg.worktree),
   'session-resume':     (msg) => setSessionResume(msg.id, msg.resumeSessionId),
   // The agent count and a delivered notification both move the decision trace without any
@@ -189,7 +202,7 @@ const messageHandlers = {
   'session-agents':     (msg) => { setSessionAgents(msg.id, msg.activeAgents); handleDebugStateRefresh(msg.id); },
   'session-wakeup':     (msg) => setSessionWakeup(msg.id, msg.pendingWakeup),
   'session-prompt':     (msg) => setSessionPrompt(msg.id, msg.pendingPromptKind),
-  'session-merge-status': (msg) => { setSessionMergeStatus(msg.id, msg.mergeStatus); setFocusMergeStatus(msg.id, msg.mergeStatus); },
+  'session-merge-status': (msg) => { setSessionMergeStatus(msg.id, msg.mergeStatus); setFocusMergeStatus(msg.id, msg.mergeStatus); refreshPhoneBoard(); },
   'session-worktree-blocked': (msg) => { showErrorToast(`${msg.session}: ${msg.notice || 'integration branch not found'}`, { persist: true }); },
   'session-worktree-ready': () => {},
   'session-diff':       (msg) => { setSessionDiff(msg.id, { committed: msg.committed, uncommitted: msg.uncommitted, hasCommits: msg.hasCommits }); },
@@ -313,38 +326,12 @@ document.addEventListener('click', (e) => {
   }
 });
 
-// ── Review sidebar overlay (narrow screens only) ─────────────
-// The sidebar is docked in .app-body on desktop and needs no control there. Below 768px CSS drops it
-// out of the row, and this flag re-opens it as a full-screen overlay. The flag lives on <body> so the
-// stylesheet owns every pixel of the two layouts; nothing here runs (or is reachable) on desktop,
-// where the button is display:none.
-
-const btnSidebarToggle = document.getElementById('btn-sidebar-toggle');
-
-function setSidebarOpen(open) {
-  if (open) document.body.dataset.sidebarOpen = '1';
-  if (!open) delete document.body.dataset.sidebarOpen;
-  btnSidebarToggle.setAttribute('aria-expanded', String(open));
-}
-
-btnSidebarToggle.addEventListener('click', () => {
-  setSidebarOpen(document.body.dataset.sidebarOpen !== '1');
-});
-
-document.addEventListener('keydown', (e) => {
-  if (e.key !== 'Escape' || document.body.dataset.sidebarOpen !== '1') return;
-  // A dialog is the innermost dismissable thing on screen (it paints over the sidebar overlay at
-  // z-index 200 vs 150) and owns Escape; closing both on one press would tear down a panel the
-  // operator was not looking at.
-  if (document.querySelector('.dialog-overlay')) return;
-  setSidebarOpen(false);
-});
-
 // ── Header height token ──────────────────────────────────────
-// --header-h positions the notice region (and anything else anchored below the header). The header is
-// a fixed 52px strip until it wraps to two or three rows on a narrow screen, at which point a stale
-// token drops every toast on top of it. Measure the real height instead; the stylesheet value stays as
-// the pre-JS fallback.
+// --header-h positions the notice region (and anything else anchored below the header). The desktop
+// header is a fixed 52px strip until a theme font or a narrow window changes its height, at which point
+// a stale token drops every toast on top of it. Measure the real height instead; the stylesheet value
+// stays as the pre-JS fallback. The phone Board's top bar measures itself the same way (board-screen.js);
+// only one of the two bars is ever rendered, and each skips the write while it measures zero.
 
 const headerEl = document.querySelector('.header');
 if (headerEl) {
@@ -387,10 +374,7 @@ mountFocusView({
   resizer: document.getElementById('focus-rail-resizer'),
 });
 
-mountReviewSidebar({
-  panel: document.getElementById('review-sidebar'),
-  onClose: () => setSidebarOpen(false),
-});
+mountReviewSidebar({ panel: document.getElementById('review-sidebar') });
 
 // Primary views in tab-strip order. Adding a view = adding an entry here (N-way, not a boolean).
 // Focus leads as the default landing view; the session-card grid (#sessions-container) stays mounted
@@ -442,6 +426,46 @@ for (let i = 0; i < VIEW_TABS.length; i++) {
 // the centered session / Teams projects (see handleSnapshot).
 const savedView = getActiveView();
 activateView(VIEW_TABS.some((v) => v.view === savedView) ? savedView : 'focus');
+
+// ── Form-factor layout switch ────────────────────────────────
+// One app instance, two first-class layouts. Switching between them is a HANDOFF, not a re-render: the
+// phone shell borrows the review sidebar, the Teams panel, the desktop header's controls and the
+// focused session's card out of the desktop DOM, and gives all four back on the way out. Nothing is
+// duplicated, so neither layout can drift from the other's state.
+
+mountPhoneShell({
+  teamsPanelEl: viewTeamsEl,
+  // The desktop header does not render under [data-layout="phone"], so its controls move to the Board's
+  // top bar rather than being rebuilt there. Every listener, and the client-trust gating on Shut Down,
+  // travels with them.
+  headerControls: [
+    document.getElementById('status-indicator'),
+    document.getElementById('btn-add-session-header'),
+    document.getElementById('btn-help'),
+    headerMenu,
+  ],
+  onTeamsShown: (panel) => mountTeamsView(panel, getKnownProjects()),
+});
+
+function applyFormFactorLayout(layout) {
+  if (layout === 'phone') {
+    const carriedSessionId = getFocusedSessionId();
+    deactivateFocusView(); // returns the centered card to its off-screen home before the phone takes it
+    activatePhoneShell({ sessionId: carriedSessionId });
+    return;
+  }
+  const carriedSessionId = getPhoneSessionId();
+  deactivatePhoneShell();
+  activateView(_activeView); // re-activates Focus (or re-mounts Teams) now that the desktop DOM is whole
+  // Quietly, NOT via focusSessionInCenter: that path is the operator activating a pill, so it sends
+  // start-session for a DORMANT target and dismiss for a COMPLETE one. A rotation is a layout event,
+  // and treating it as a selection would respawn a session the operator just killed or acknowledge away
+  // a COMPLETE they never read.
+  if (carriedSessionId) centerSessionQuietly(carriedSessionId);
+}
+
+if (isPhoneLayout()) applyFormFactorLayout('phone');
+onLayoutChange(applyFormFactorLayout);
 
 document.getElementById('btn-restart').addEventListener('click', () => {
   headerMenu.classList.remove('open');

@@ -30,15 +30,27 @@ function fmtElapsed(ms) {
   return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
 }
 
-// The header's time-in-state text, or '' for settled states (which show no timer; :empty hides it).
-function elapsedText(ui) {
+// The time-in-state text, or '' for settled states (which show no timer; :empty hides it). Exported
+// because the phone Board row and the phone Terminal top bar render the same readout outside the card
+// header, and a second formatter would be a second definition of "how long has this been working".
+export function sessionElapsedText(ui) {
   return showsElapsed(ui.currentState) ? fmtElapsed(Date.now() - (ui.stateSince || Date.now())) : '';
 }
 
 // Refresh a single card's elapsed readout. Called by lifecycle.applyState so a state change reflects
 // immediately, and by the interval tick for the running clock.
 export function refreshElapsed(ui) {
-  if (ui.elapsedEl) ui.elapsedEl.textContent = elapsedText(ui);
+  if (ui.elapsedEl) ui.elapsedEl.textContent = sessionElapsedText(ui);
+}
+
+// Extra per-tick subscribers (the phone Board's row clocks, the phone Terminal top bar). They ride this
+// SAME interval rather than starting their own: a second timer per surface is exactly what this module
+// exists to avoid. Returns an unsubscribe function.
+const tickSubscribers = new Set();
+
+export function onSessionTick(notify) {
+  tickSubscribers.add(notify);
+  return () => tickSubscribers.delete(notify);
 }
 
 // The shared 1s tick: advance every card's elapsed clock and derive each working session's quiet flag.
@@ -47,5 +59,9 @@ setInterval(() => {
   for (const [, ui] of sessionUIs) {
     refreshElapsed(ui);
     refreshSessionActivity(ui);
+  }
+  for (const notify of tickSubscribers) {
+    // A subscriber that throws must not stop the clock for every other session.
+    try { notify(); } catch { /* ignore */ }
   }
 }, 1000);

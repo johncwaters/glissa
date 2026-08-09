@@ -179,39 +179,6 @@ body {
   box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
 }
 
-/* Narrow-screen affordance for the review sidebar, which cannot dock beside the focus center below
-   768px. Quiet sibling of "+ Session" (neutral border, no accent: opening a panel is not a primary
-   action), and absent from the desktop header entirely, where the sidebar is always docked. The label
-   names the panel and never reports its open/closed state; aria-expanded carries that. */
-.btn-sidebar-toggle {
-  display: none;
-  align-items: center;
-  font-family: var(--font-mono);
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  padding: 6px 14px;
-  color: var(--text-dim);
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  cursor: pointer;
-  white-space: nowrap;
-  transition: color var(--transition-fast), border-color var(--transition-fast);
-}
-
-.btn-sidebar-toggle[aria-expanded="true"] {
-  color: var(--accent);
-  border-color: var(--accent-dim);
-}
-
-.btn-sidebar-toggle:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-
-
 /* ── Status indicator ─────────────────────────────────────── */
 .status-indicator {
   position: relative;
@@ -325,9 +292,9 @@ body {
 /* Single <main> landmark wrapping both tab panels. A flex column (not display:contents,
    which can drop the landmark in some assistive tech) that fills the body below the header,
    so the inner panels keep their flex:1 sizing. */
-/* Body row: main views (left) + the review sidebar (right), both always present at desktop widths.
-   Below 768px the sidebar leaves the row entirely (there is not enough width for three columns) and
-   .app-main fills it alone; see the Responsive section for the overlay it becomes there. */
+/* Body row: main views (left) + the review sidebar (right), both always present. This is the DESKTOP
+   layout; the phone layout hides .app-shell entirely and re-parents the sidebar into its Review
+   screen (see the Phone Layout section). */
 .app-body {
   flex: 1;
   min-height: 0;
@@ -3051,50 +3018,15 @@ body {
    the TUI renders past the wrap edge and gets cut off. */
 .focus-center .session-card.focus-centered .terminal-wrap .xterm { padding: 4px 6px 0; }
 
-/* ── Touch key strip (under the centered card) ──
-   Esc / Tab / Ctrl+C / arrows / Paste, the keys a soft keyboard cannot produce. Absent wherever a
-   physical keyboard exists: the display:none here is lifted only by the coarse-pointer phone block in
-   the Responsive section, and focus-view.js additionally hides it while the center is empty. Quiet
-   ghost buttons on the inset surface so the strip reads as chrome under the screen, not a toolbar
-   competing with it. */
-.focus-key-strip {
-  display: none;
-  flex: 0 0 auto;
-  align-items: stretch;
-  gap: 6px;
-  padding: 6px 8px;
-  background: var(--bg-surface);
-  border-top: 1px solid var(--border-dim);
-}
-.focus-key-strip[hidden] { display: none; }
-.focus-key {
-  flex: 1 1 0;
-  min-width: 0;
-  min-height: 44px;
-  padding: 0 4px;
-  appearance: none;
-  background: transparent;
-  border: 1px solid var(--border-dim);
-  border-radius: var(--radius);
-  color: var(--text-dim);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  letter-spacing: 0.04em;
-  white-space: nowrap;
-  cursor: pointer;
-}
-.focus-key:active { color: var(--text-head); border-color: var(--border-hover); }
-.focus-key:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-
 .focus-empty { margin: auto; text-align: center; color: var(--text-dim); }
 .focus-empty-title { font-size: 14px; font-weight: 700; color: var(--text-head); margin: 0 0 4px; }
 .focus-empty-desc { font-size: 12px; margin: 0; }
 
-/* ── Review sidebar (right-docked single review home) ──
+/* ── Review sidebar (single review home) ──
    The worktree review gate (collapsible per-file diff + Merge / Discard) for the SELECTED session.
-   Always docked and visible on desktop: with no selection it shows an empty state. Below 768px it
-   leaves the body row and becomes a full-screen overlay instead (see the Responsive section). Built by
-   sidebar/review-sidebar.js. */
+   Always docked and visible on desktop: with no selection it shows an empty state. On the phone layout
+   the SAME element is re-parented into the Review screen (see the Phone Layout section), where it fills
+   the screen instead of a fixed column. Built by sidebar/review-sidebar.js. */
 .app-sidebar {
   flex: 0 0 var(--sidebar-width, clamp(320px, 26vw, 460px));
   min-width: 0;
@@ -3146,29 +3078,6 @@ body {
   flex: 1;
   min-width: 0;
 }
-
-/* Overlay-only dismiss. A docked sidebar has nothing to close, so this is absent on desktop; the
-   Responsive section reveals it alongside the overlay layout. */
-.review-sidebar-close {
-  display: none;
-  align-items: center;
-  justify-content: center;
-  flex: 0 0 auto;
-  position: relative;
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  appearance: none;
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  color: var(--text-dim);
-  font-family: var(--font-mono);
-  font-size: 16px;
-  line-height: 1;
-  cursor: pointer;
-}
-.review-sidebar-close:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* Local base branch (e.g. develop) vs its remote upstream tracking branch. A project-level fact, not
    tied to the merge/review gate below it, so it gets its own row rather than folding into
@@ -3586,133 +3495,10 @@ body {
   }
 }
 
-/* ── Phone-width layout (<=768px) ─────────────────────────────
-   A desktop window at 769px or wider sees none of this, so the docked three-column shell is untouched.
-   Two structural moves carry the whole layout: the review sidebar leaves the body row and becomes an
-   overlay, and the focus rail turns from a left column into a horizontal chip strip above the terminal.
-   Between them the rail (240px) + resizer (7px) + sidebar (320px minimum) claimed 567px of an
-   unshrinkable 390px viewport, collapsing the terminal column to nothing. */
+/* Narrow viewport, ANY pointer: content that must wrap rather than push a panel past the edge. These
+   are corrections to the desktop layout at a small window, not a layout of their own; the phone gets
+   the Phone Layout section below instead. */
 @media (max-width: 768px) {
-  /* Header must wrap from the SAME width the Review button appears at. The wrap used to start at
-     640px, so between 641 and 768 the extra button pushed the row past the viewport, and with
-     body{overflow:hidden} the clipped tail is the right end: the help button and the hamburger, which
-     is the only route to Settings / Restart / Shut Down. The two live-region readouts also come out of
-     the flow here (clipped, not display:none, so they keep announcing): the connection state still
-     reads from its dot, and the attention count is already the focus rail's leading chip.
-     At 390px this leaves the right row at roughly 27 + 99 + 76 + 34 + 34 + 40 = 310px inside the
-     366px the 12px inner padding leaves, and .header-right wraps if a wider theme font overruns it. */
-  .header-inner {
-    flex-wrap: wrap;
-    gap: 8px;
-  }
-
-  .header-right {
-    gap: 10px;
-    flex-wrap: wrap;
-    justify-content: flex-end;
-  }
-
-  .header-aggregate,
-  .connection-label {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    padding: 0;
-    overflow: hidden;
-    clip-path: inset(50%);
-    white-space: nowrap;
-  }
-
-  /* Sidebar: out of the row entirely, and a full-screen overlay when the header's Review button opens
-     it. 100dvh (not 100vh) so the panel ends above the phone's browser chrome instead of behind it. */
-  .app-sidebar { display: none; }
-
-  body[data-sidebar-open="1"] .app-sidebar {
-    display: flex;
-    position: fixed;
-    left: 0;
-    right: 0;
-    top: var(--header-h);
-    width: 100%;
-    height: calc(100dvh - var(--header-h));
-    /* Above the app body, BELOW .dialog-overlay (200) and the notice region (300). A dialog opened
-       from inside the sidebar (Discard, Remove) must paint over it, not under it: at 250 the confirm
-       was invisible while still holding the focus trap. */
-    z-index: 150;
-    border-left: none;
-  }
-
-  .btn-sidebar-toggle { display: inline-flex; }
-  .review-sidebar-close { display: inline-flex; }
-  /* Full-width overlay: no adjacent column to resize against. */
-  .review-resize-handle { display: none; }
-  .review-sidebar-body { overscroll-behavior: contain; }
-
-  /* Focus view: rail above the terminal instead of beside it. The center's min-width:0 covered the row
-     axis; stacked, it needs min-height:0 or the terminal column cannot shrink below its content and
-     pushes the key strip off the bottom of the screen. */
-  .focus-view { flex-direction: column; }
-  .focus-center { min-height: 0; }
-
-  .focus-rail {
-    /* Drops the persisted --rail-width basis: in a COLUMN flex container that basis would size the
-       strip's height, so a saved 400px rail would eat the screen. */
-    flex: 0 0 auto;
-    flex-direction: row;
-    align-items: center;
-    width: 100%;
-    height: 56px;
-    gap: 8px;
-    padding: 6px 10px;
-    overflow-x: auto;
-    overflow-y: hidden;
-    scrollbar-width: none;
-    border-right: none;
-    border-bottom: 1px solid var(--border);
-  }
-  .focus-rail::-webkit-scrollbar { display: none; }
-  .focus-rail-resizer { display: none; }
-
-  /* The attention queue readout leads the strip (it is the rail's whole point), minus the Alt+W legend
-     that no phone can press. */
-  .focus-rail-head {
-    position: static;
-    flex: 0 0 auto;
-    width: auto;
-    height: 100%;
-    padding: 0 12px;
-  }
-  .focus-rail-head .shortcut-keys { display: none; }
-  .focus-rail-head-count { white-space: nowrap; }
-
-  /* A project header row cannot share a single-row strip with the pills it labels. Roster switching is
-     the essential function here, so the group name and its quick-add / dismiss buttons drop out; both
-     stay available at any wider width. */
-  .focus-rail-group { display: none; }
-
-  .focus-rail-list { flex: 0 0 auto; flex-direction: row; align-items: center; gap: 8px; }
-  .focus-pill-row { flex: 0 0 auto; }
-
-  /* Pill to chip: name plus the state dot, sized as a 44px tap target. The spelled-out state label is
-     dropped (no room in a row of chips); state still reads from the dot's color and the pill's border,
-     which already carry it, so nothing becomes color-only that was not already. */
-  .focus-pill {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    width: auto;
-    min-height: 44px;
-    padding: 6px 12px;
-  }
-  .focus-pill-name { max-width: 40vw; font-size: 12px; }
-  .focus-pill-badge { margin-left: 0; }
-  .focus-pill-label { display: none; }
-  .focus-pill-merge { margin-left: 4px; }
-  /* Removing a clean session is immediate and irreversible; an always-visible "x" inside a chip the
-     operator taps to SWITCH sessions is a misfire waiting to happen at this size. The strip omits it
-     (the hover:none block below reveals it only on the wider rail layout). */
-  .focus-pill-remove { display: none; }
-
   /* Six settings tabs do not fit 390px. Wrapping to two rows shows all of them at once, which beats
      the desktop strip's hidden-scrollbar overflow: a touch operator gets no scrollbar hint that three
      more tabs exist off the right edge. */
@@ -3727,13 +3513,6 @@ body {
   .sched-editor-actions { flex-wrap: wrap; }
 }
 
-/* Touch key strip: revealed only where the keys it sends have no other source. The [hidden] rule
-   declared with the strip outranks this by specificity, so focus-view.js still hides it on an empty
-   center. */
-@media (pointer: coarse) and (max-width: 768px) {
-  .focus-key-strip { display: flex; }
-}
-
 /* ── Touch input corrections ──────────────────────────────────
    Keyed on the POINTER, not the width: a hover-revealed affordance is broken on any touch device,
    including a large tablet, and a fine-pointer desktop matches none of this. */
@@ -3745,9 +3524,10 @@ body {
   .focus-pill-row:hover .focus-pill-merge { opacity: 1; }
 }
 
-/* The "x" itself is only rendered on the vertical rail (the phone strip drops it, see above), so its
-   reveal - and the slot the pill must reserve for it once the badge stops yielding - belongs to the
-   widths where that rail exists. */
+/* The rail only exists on the desktop layout, and a coarse pointer reaches that layout above 769px
+   (a tablet - see form-factor-core.mjs). There the pill's "x" is the ONLY removal path, since there is
+   no Delete key, so it is revealed and the pill reserves its slot. A phone never renders this rail at
+   all: it gets the Board, where Remove lives in the Terminal screen's kebab. */
 @media (hover: none) and (min-width: 769px) {
   .focus-pill { padding-right: 34px; }
   .focus-pill-remove { opacity: 1; pointer-events: auto; }
@@ -3769,11 +3549,11 @@ body {
   .review-btn,
   .header-tab { min-height: 44px; }
 
-  /* The card kebab and its menu ARE the removal path on a phone, where the rail chip drops its "x".
-     The menu items stack vertically, so they take real height rather than a ::after bleed that would
-     put each item's hit area over its neighbour's label. .btn-action already reaches 44px tall via its
-     existing ::after; only its width is short, and 6px of sibling gap caps how far that can bleed, so
-     the button itself widens instead. */
+  /* The card kebab and its menu ARE the removal path on a phone, where the Terminal screen's top bar
+     adopts them. The menu items stack vertically, so they take real height rather than a ::after bleed
+     that would put each item's hit area over its neighbour's label. .btn-action already reaches 44px
+     tall via its existing ::after; only its width is short, and 6px of sibling gap caps how far that
+     can bleed, so the button itself widens instead. */
   .overflow-item { min-height: 44px; }
   .btn-action { width: 36px; }
 
@@ -3791,14 +3571,12 @@ body {
      the absolute box just as well. */
   .team-collapse,
   .focus-rail-group-add,
-  .focus-rail-group-remove,
-  .review-sidebar-close { position: relative; }
+  .focus-rail-group-remove { position: relative; }
 
   .team-collapse::after,
   .focus-rail-group-add::after,
   .focus-rail-group-remove::after,
-  .focus-pill-remove::after,
-  .review-sidebar-close::after {
+  .focus-pill-remove::after {
     content: '';
     position: absolute;
   }
@@ -3808,8 +3586,378 @@ body {
   .focus-rail-group-remove::after { inset: -13px -6px; }
   /* Exactly the 34px slot the hover:none block reserves, so it never reaches over the pill's name. */
   .focus-pill-remove::after { inset: -12px -7px; }
-  .review-sidebar-close::after { inset: -8px; }
 }
+
+/* ── Phone Layout ─────────────────────────────────────────────
+   A SECOND first-class layout, not a narrowed copy of the first. Everything below is gated on
+   [data-layout="phone"] (public/form-factor.js writes it; form-factor-core.mjs decides it), never on a
+   bare max-width, so no desktop selector is overridden and no desktop pixel is at risk here.
+
+   The desktop shell is not rendered at all: the phone gets four screens (Board, Terminal, Review,
+   Teams) behind a bottom nav. Elements that own live state - the review sidebar, the Teams panel, the
+   header controls, a session's card - are re-parented into those screens rather than rebuilt, so both
+   layouts are one app with one state pipeline.
+
+   Design posture, per DESIGN.md: monospace throughout, orchid as the only accent (the active nav item
+   and the lit attention count), flat surfaces separated by tonal steps and 1px borders, state carried
+   by glyph + label + color together, and motion spent on exactly one thing (a blocked session's
+   glyph). Reduced motion is covered by the global rule at the top of this file. */
+
+/* Higher specificity than index.html's `.app-ready .app-shell { display: contents }` gate, so it wins
+   regardless of source order. #sessions-container stays inside the hidden shell as every card's
+   canonical home; the Terminal screen borrows one card out at a time (public/card-host.js). */
+html[data-layout="phone"] .app-shell { display: none; }
+
+.phone-shell { display: none; }
+
+html[data-layout="phone"] .phone-shell {
+  position: fixed;
+  left: 0;
+  /* Both custom properties are written by phone-shell.js from window.visualViewport. A 100dvh shell
+     keeps its bottom nav and the terminal's last rows UNDER an open soft keyboard; sizing to the
+     visual viewport makes the keyboard resize the terminal instead, and the card's existing
+     ResizeObserver refits cols/rows from there. The dvh fallback covers engines without the API. */
+  top: var(--phone-vv-top, 0px);
+  width: 100%;
+  height: var(--phone-vh, 100dvh);
+  /* Below .dialog-overlay (200) and the notice region (300): a confirm opened from a phone screen must
+     paint over it, and a toast over both. */
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  overflow: hidden;
+}
+/* Declared AFTER (and one step more specific than) the layout rule above, so a shell hidden mid-flip
+   really is hidden rather than losing to the display:flex. */
+html[data-layout="phone"] .phone-shell[hidden] { display: none; }
+
+.phone-screens { flex: 1 1 auto; min-height: 0; display: flex; }
+.phone-screen { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.phone-screen[hidden] { display: none; }
+
+/* ── Phone top bar (per screen, not a global strip) ── */
+.phone-topbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 48px;
+  padding: 8px 12px;
+  padding-top: max(8px, env(safe-area-inset-top));
+  background: var(--bg-header);
+  border-bottom: 1px solid var(--border-dim);
+}
+
+/* The adopted desktop controls. "+ Session" starts the right-hand group, so the connection chip keeps
+   the slack and the hamburger stays pinned to the edge where a thumb expects it. */
+.phone-topbar > .btn-add-header { margin-left: auto; }
+.phone-topbar > .status-indicator,
+.phone-topbar .header-connection { min-width: 0; overflow: hidden; }
+
+/* ── Board screen ── */
+.phone-board { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+
+/* The honest headline. Quiet at rest so the lit state means something (the Earned Signal rule applied
+   to a readout: a count that is always coloured teaches the operator to stop reading it). */
+.phone-attention {
+  flex: 0 0 auto;
+  padding: 8px 14px;
+  background: var(--bg-header);
+  border-bottom: 1px solid var(--border-dim);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+.phone-attention[data-lit] { color: var(--accent); }
+
+.phone-board-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* Carries role=listitem so the row BUTTON keeps its button role (an explicit role on the button itself
+   would replace it, and a row that does not announce as activatable is a worse lie than no list). */
+.phone-row-item { display: block; }
+
+.phone-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 56px;
+  padding: 8px 14px;
+  appearance: none;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--border-dim);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+.phone-row:active { background: color-mix(in srgb, var(--text) 5%, transparent); }
+.phone-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+.phone-row-glyph { flex: 0 0 auto; font-size: 12px; line-height: 1; color: var(--text-muted); }
+.phone-row-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.phone-row-name {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--text-head);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.phone-row-meta { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.phone-row-badge,
+.phone-row-merge {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.phone-row-merge { color: var(--accent-dim); }
+.phone-row-merge:empty { display: none; }
+.phone-row[data-merge="parked"] .phone-row-merge { color: var(--state-failed); }
+.phone-row-elapsed {
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.phone-row-elapsed:empty { display: none; }
+
+/* State at row scale. Every state tints its glyph, but only the two that genuinely need a carbon unit
+   take a lit row (tinted fill plus a full-strength badge). Everything else stays recessive so those
+   two can be found in a glance - the minimized bar's two-loud-states rule, one surface up. */
+.phone-row[data-state="RUNNING"] .phone-row-glyph { color: var(--state-running); }
+.phone-row[data-state="IDLE"] .phone-row-glyph { color: var(--state-idle); }
+.phone-row[data-state="STARTING"] .phone-row-glyph { color: var(--state-starting); }
+.phone-row[data-state="DONE"] .phone-row-glyph { color: var(--state-done); }
+/* A finished turn is emerald only while it is UNREAD; opening the session drops data-unseen and the row
+   recedes to the resting treatment. Same announce-once rule the rail pill applies, and the same rule the
+   attention count above is computed from, so the readout and the rows can never disagree. */
+.phone-row[data-state="COMPLETE"][data-unseen] .phone-row-glyph,
+.phone-row[data-state="COMPLETE"][data-unseen] .phone-row-badge { color: var(--state-complete); }
+
+.phone-row[data-state="WAITING"] { background: color-mix(in oklab, var(--state-waiting) 10%, transparent); }
+.phone-row[data-state="WAITING"] .phone-row-glyph,
+.phone-row[data-state="WAITING"] .phone-row-badge { color: var(--state-waiting); }
+.phone-row[data-state="FAILED"] { background: color-mix(in oklab, var(--state-failed) 10%, transparent); }
+.phone-row[data-state="FAILED"] .phone-row-glyph,
+.phone-row[data-state="FAILED"] .phone-row-badge { color: var(--state-failed); }
+
+/* The board's only motion, and only for a session actively blocked on the operator. Amber-and-breathing
+   versus emerald-and-steady differ on hue, saturation and animation at once, so the signal survives
+   without hue. */
+.phone-row[data-state="WAITING"] .phone-row-glyph {
+  animation: phone-glyph-breathe 2s ease-in-out infinite;
+}
+@keyframes phone-glyph-breathe {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.45; }
+}
+
+/* ── Terminal screen ── */
+.phone-terminal { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+
+.phone-back {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  min-height: 40px;
+  appearance: none;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+.phone-back:active { color: var(--text-head); border-color: var(--border-hover); }
+.phone-back:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.phone-terminal-identity { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.phone-terminal-identity[hidden] { display: none; }
+.phone-terminal-name {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: var(--text-head);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.phone-terminal-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+.phone-terminal-elapsed {
+  font-weight: 400;
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.phone-terminal-elapsed:empty { display: none; }
+
+/* Where the borrowed card's own action cluster (debug + the kebab holding Rename / Restart / Resume /
+   Remove) lands. Collapses when no session is shown, since the cluster travels with the card. */
+.phone-terminal-actions { flex: 0 0 auto; display: flex; align-items: center; }
+.phone-terminal-actions:empty { display: none; }
+
+.phone-terminal-bar[data-state="RUNNING"] .phone-terminal-badge { color: var(--state-running); }
+.phone-terminal-bar[data-state="IDLE"] .phone-terminal-badge { color: var(--state-idle); }
+.phone-terminal-bar[data-state="STARTING"] .phone-terminal-badge { color: var(--state-starting); }
+.phone-terminal-bar[data-state="DONE"] .phone-terminal-badge { color: var(--state-done); }
+.phone-terminal-bar[data-state="COMPLETE"] .phone-terminal-badge { color: var(--state-complete); }
+.phone-terminal-bar[data-state="WAITING"] .phone-terminal-badge { color: var(--state-waiting); }
+.phone-terminal-bar[data-state="FAILED"] .phone-terminal-badge { color: var(--state-failed); }
+
+.phone-card-slot { flex: 1 1 auto; min-height: 0; display: flex; }
+.phone-card-slot[hidden] { display: none; }
+
+/* The card, re-cast as the whole screen. Same treatment (and the same (0,3,0) specificity needed to
+   beat the [data-state] border/shadow rules) the Focus center gives it: the grid-tile cues are cues
+   for a grid that is not on screen. */
+.phone-card-slot .session-card.phone-centered {
+  flex: 1 1 auto;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+.phone-card-slot .session-card.phone-centered::after { display: none; }
+.phone-card-slot .session-card.phone-centered.completion-flash { animation: none; }
+/* The card header does not render here: its name, state and elapsed clock are in the screen's top bar,
+   and its action cluster was adopted up there. The terminal gets the whole screen. */
+.phone-card-slot .session-card.phone-centered .session-card-header { display: none; }
+.phone-card-slot .session-card.phone-centered .terminal-wrap { flex: 1 1 auto; min-height: 0; }
+
+/* ── Touch key strip (under the phone terminal) ──
+   Esc / Tab / Ctrl+C / arrows / Paste: the keys a soft keyboard cannot produce. Quiet ghost buttons on
+   the inset surface so the strip reads as chrome under the screen, not a toolbar competing with it. */
+.phone-key-strip {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+  padding: 6px 8px;
+  background: var(--bg-surface);
+  border-top: 1px solid var(--border-dim);
+}
+.phone-key-strip[hidden] { display: none; }
+.phone-key {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0 4px;
+  appearance: none;
+  background: transparent;
+  border: 1px solid var(--border-dim);
+  border-radius: var(--radius);
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.phone-key:active { color: var(--text-head); border-color: var(--border-hover); }
+.phone-key:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* ── Review and Teams screens (adopted desktop panels) ── */
+.phone-review,
+.phone-teams { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+/* The docked column's fixed flex basis is meaningless as a full screen, and there is no neighbour to
+   resize against or border off. */
+.phone-review > .app-sidebar { flex: 1 1 auto; border-left: none; }
+html[data-layout="phone"] .review-resize-handle { display: none; }
+html[data-layout="phone"] .review-sidebar-body { overscroll-behavior: contain; }
+.phone-teams > .teams-view { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+
+/* ── Empty states ── */
+.phone-empty { margin: auto; padding: 24px; text-align: center; color: var(--text-dim); }
+.phone-empty[hidden] { display: none; }
+.phone-empty-title {
+  margin: 0 0 6px;
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-head);
+}
+.phone-empty-desc { margin: 0; font-family: var(--font-mono); font-size: 12px; }
+
+/* ── Bottom nav ──
+   Mirror of the minimized bar's treatment, flipped to the bottom of the screen: Shadow Violet, a 1px
+   dim border on the edge that faces the content, and no ornament. Labels are constant action names,
+   never a state or a count; the one piece of state the nav carries is the Board's attention dot. */
+.phone-nav {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: stretch;
+  background: var(--bg-header);
+  border-top: 1px solid var(--border-dim);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.phone-nav-item {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 48px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: 6px 2px;
+  appearance: none;
+  background: transparent;
+  border: none;
+  /* Reserved slot for the active marker, so selecting an item never shifts the row by 2px. */
+  border-top: 2px solid transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color var(--transition-fast), border-color var(--transition-fast);
+}
+.phone-nav-item[aria-current="page"] { color: var(--accent); border-top-color: var(--accent); }
+.phone-nav-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.phone-nav-glyph { font-size: 13px; line-height: 1; }
+.phone-nav-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.phone-nav-dot {
+  position: absolute;
+  top: 5px;
+  right: calc(50% - 18px);
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--state-waiting);
+}
+.phone-nav-dot[hidden] { display: none; }
 
 /* ── Debug overlay ──────────────────────────────────────── */
 

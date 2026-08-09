@@ -189,6 +189,9 @@ public/
   control-ws.js    # WebSocket control channel client
   dialogs.js       # Add Session and Settings dialog factories
   teams-panel.js   # Barrel for the Teams tab (re-exports the public API from teams-panel/)
+  form-factor-core.mjs  # Pure decideLayout({ coarse, narrowWidth }) -> 'phone'|'desktop': the ONE predicate choosing between the two first-class layouts (coarse AND narrow = phone; a narrowed desktop window and a coarse tablet both stay desktop)
+  form-factor.js   # Its IO shell: evaluates the two media queries, stamps <html data-layout>, notifies subscribers on a live flip (orientation)
+  card-host.js     # THE session-card re-parenting seam (borrowCard/releaseCard). Single borrower GLOBALLY, so the Focus center and the phone Terminal screen hand a live xterm across a layout flip instead of stranding it
   render-scheduler.mjs  # Global xterm WRITE scheduler: callback-gated round-robin with per-frame budget
   notifications.js # Native Web Notifications (browser routes to Windows Action Center)
   notify-dedupe-core.mjs  # Pure cross-tab claim (short-TTL localStorage) so exactly one open tab raises each notification
@@ -213,6 +216,12 @@ public/
     aggregate-core.mjs # Pure: computeAggregate (used by lifecycle)
   teams-panel/     # Teams tab package: lifecycle orchestrator, instance panel, pipeline, runs list, schedule editor, chat, setup banner
   focus-view/      # Focus view: persistent left roster rail + one re-parented focused card
+  phone/           # Phone layout: Board / Terminal / Review / Teams screens + bottom nav, rendered only under [data-layout="phone"]
+    phone-shell.js     # Screen container, bottom nav, screen switching, history, visual-viewport sizing, the desktop handoff
+    board-screen.js    # Default screen: attention-first session rows + the phone top bar (adopts the desktop header controls)
+    terminal-screen.js # One session's full-bleed terminal: back, name, badge, the card's adopted action cluster, key strip
+    triage-core.mjs    # Pure attention-first ordering + attention count + the header readout text
+    mobile-key-strip.js # Esc/Tab/Ctrl+C/arrows/Paste, the keys a soft keyboard cannot produce
   sidebar/         # Right-docked review sidebar: changed-files diffs + merge/discard actions
   audio/           # Notification sound files (OGG)
 shared/
@@ -366,6 +375,17 @@ Sessions are keyed by a stable UUID (`id`), not the mutable display `name`. The 
 - `@xterm/addon-fit` for resize, `@xterm/addon-webgl` for GPU rendering
 - Vite bundles @xterm/* for production; dev mode proxies to Express
 - Status detection does NOT tap the rendered body; it scans only OSC-0 titles (fallback) and consumes Claude Code hooks (authoritative). See "Status Detection" above.
+
+### Two First-Class Layouts (desktop / phone)
+
+The dashboard has two layouts, not one responsive shell. `public/form-factor-core.mjs` `decideLayout({ coarse, narrowWidth })` is the ONE predicate: `'phone'` requires a coarse pointer AND a viewport at or below 768px. The AND is the point - a desktop window dragged to 500px keeps the three-panel IA (the operator can widen it back), and a coarse-pointer TABLET above 768px also stays desktop (it has room for the docked rail + terminal + sidebar, and the touch corrections in `style.css` are keyed on the pointer alone). `public/form-factor.js` evaluates the two media queries, stamps `<html data-layout>` at boot and on every live change (orientation), and notifies subscribers.
+
+- **All phone styling keys off `[data-layout="phone"]`.** There is no `max-width` override of a desktop selector; a bare `max-width` block is reserved for content that must wrap in a narrow DESKTOP window (settings tabs, long team strings).
+- **The desktop shell is `display:none` on a phone.** `public/phone/phone-shell.js` renders four screens (Board, Terminal, Review, Teams) behind a bottom nav. Board is the base screen; entering another pushes exactly ONE history entry, so the back gesture always means "return to the Board". History is untouched on desktop.
+- **Nothing is duplicated; live elements are RE-PARENTED.** The review sidebar (`reparentReviewPanel`), the Teams panel, the desktop header's controls (connection chip, "+ Session", help, the hamburger with its client-trust gating) and the focused session's card all MOVE into the phone screens and move back on the flip out (`dom-helpers.js` `adoptElement` / `releaseElement`). A second copy would mean a second state pipeline for the same facts. The phone Board reads the same `session-card/card-registry` the desktop cards read and is refreshed by the same `app.js` control-WS handlers.
+- **One card-borrow seam, one borrower.** `public/card-host.js` `borrowCard` / `releaseCard` is shared by the Focus center and the phone Terminal screen; a session owns one xterm, so the single-borrower invariant is GLOBAL and a layout flip hands the card across cleanly instead of stranding a live terminal in a hidden subtree.
+- **Board order is attention-first** (`public/phone/triage-core.mjs`), the deliberate opposite of the desktop rail's stable identity order: a rail is stared at for hours and needs a fixed spatial map, a phone is picked up for a minute to answer "who needs me".
+- **Soft keyboard.** The phone shell is sized from `window.visualViewport`, not `100dvh`, so an open keyboard RESIZES the terminal (and the card's existing ResizeObserver refits cols/rows) instead of covering its last rows and the nav.
 
 ### WebSocket Transport
 

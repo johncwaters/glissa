@@ -12,7 +12,7 @@ import { setSelectedId } from '../sidebar/selection.js';
 import { getSoundId, isSoundEnabled } from '../ui-prefs.js';
 import { setRunningActivity } from './activity.js';
 import { computeAggregate } from './aggregate-core.mjs';
-import { buildCardDOM, closeDebugOverlay, openDebugOverlay, setDebugMode, showConfirmDialog, startInlineRename } from './card-dom.js';
+import { buildCardDOM, closeDebugOverlay, isRenameInProgress, openDebugOverlay, setDebugMode, showConfirmDialog, startInlineRename } from './card-dom.js';
 import { aggregateEl, container, sessionUIs } from './card-registry.js';
 import { openResumeDialog } from './resume-dialog.js';
 // Load-bearing import: evaluating session-tick.js installs the shared 1s tick (elapsed clock +
@@ -85,7 +85,7 @@ function wireCardEvents(ui, sessionId) {
   // Click a session's name to select it for the review sidebar (single-click; double-click still renames).
   // Ignored while the inline rename input is open so typing/clicking the field never re-selects.
   ui.nameEl.addEventListener('click', () => {
-    if (ui.nameEl.querySelector('.session-rename-input')) return;
+    if (isRenameInProgress(ui.nameEl)) return;
     setSelectedId(sessionId);
   });
 

@@ -180,16 +180,31 @@ export function buildCardDOM(sessionId, sessionName, initialState, options = {})
 
 // ── Inline rename ────────────────────────────────────────────
 
-export function startInlineRename(ui, sessionId) {
-  // Guard: prevent double-invoke
-  if (ui.nameEl.querySelector('.session-rename-input')) return;
+// The rename field's class, and the predicate ANY surface must consult before repainting a name into
+// an element that can be a rename target. Both live here because startInlineRename owns the field's
+// lifecycle. A repaint that replaces the node mid-edit either loses what the operator typed outright
+// (Chrome does not reliably fire blur on a removed focused node) or fires blur and commits a
+// half-typed name, so this guard is load-bearing, not cosmetic.
+const RENAME_INPUT_CLASS = 'session-rename-input';
 
-  const nameEl = ui.nameEl;
+export function isRenameInProgress(targetEl) {
+  return !!targetEl?.querySelector(`.${RENAME_INPUT_CLASS}`);
+}
+
+export function startInlineRename(ui, sessionId) {
+  // Rename edits whichever element is actually showing the name. The phone Terminal screen borrows the
+  // card without its header and parks its own top-bar name element on ui.renameTargetEl, so the field
+  // opens where the operator can see it instead of inside a hidden header.
+  const nameEl = ui.renameTargetEl?.isConnected ? ui.renameTargetEl : ui.nameEl;
+
+  // Guard: prevent double-invoke
+  if (isRenameInProgress(nameEl)) return;
+
   const oldName = nameEl.textContent;
 
   const input = document.createElement('input');
   input.type = 'text';
-  input.className = 'session-rename-input';
+  input.className = RENAME_INPUT_CLASS;
   input.value = oldName;
   input.maxLength = 64;
 

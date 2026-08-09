@@ -23,7 +23,10 @@ The browser dashboard frontend: ES modules bundled by Vite (dev server with HMR 
 | `theme.js` | Theme definitions applied as CSS custom properties; terminal theme derived at runtime |
 | `ui-prefs.js` / `local-store.js` | localStorage persistence for UI state (sound, theme, active view) with quota-safe wrappers |
 | `shortcuts.mjs` | Pure display catalog of keyboard shortcuts for the Settings dialog; handlers live in `app.js` and `session-card/terminal.js`, keep in sync |
-| `dom-helpers.js` | `el()` / `escapeHtml()` DOM utilities |
+| `form-factor-core.mjs` | Pure `decideLayout({ coarse, narrowWidth })` -> `'phone' \| 'desktop'`: the one predicate choosing between the two first-class layouts |
+| `form-factor.js` | Its IO shell: evaluates the two media queries, stamps `<html data-layout>`, notifies subscribers on a live flip |
+| `card-host.js` | THE session-card re-parenting seam (`borrowCard` / `releaseCard`), single borrower GLOBALLY; shared by the Focus center and the phone Terminal screen |
+| `dom-helpers.js` | `el()` / `escapeHtml()` DOM utilities, plus `adoptElement()` / `releaseElement()` (move a live element and put it back) |
 | `style.css` | Component styles, `[data-state]` rules, animations, `::before` pseudo-elements |
 | `tailwind.css` | Tailwind v4 entry: `@theme` block mapping colors, fonts, radii |
 | `perf.html` / `perf-harness.js` / `perf-corpus.mjs` | Dev-only manual perf harness (K xterm terminals under dense ANSI load); never bundled into production |
@@ -35,6 +38,7 @@ The browser dashboard frontend: ES modules bundled by Vite (dev server with HMR 
 | `session-card/` | Session card modules: terminal, lifecycle, DOM, naming, WebGL pool (see `session-card/AGENTS.md`) |
 | `teams-panel/` | Teams tab package: `lifecycle.js` orchestrator + registry, instance panel, pipeline, runs list, schedule editor, chat, setup banner, pure `format-core.mjs` |
 | `focus-view/` | Focus view: roster rail + centered card, attention queue (see `focus-view/AGENTS.md`) |
+| `phone/` | Phone layout: four screens + bottom nav, rendered only under `[data-layout="phone"]` (see `phone/AGENTS.md`) |
 | `sidebar/` | Review sidebar: diff rendering, selection, merge actions (see `sidebar/AGENTS.md`) |
 | `components/` | Static HTML fragments imported `?raw` (see `components/AGENTS.md`) |
 | `audio/` | Notification sound files (OGG) |
@@ -44,6 +48,7 @@ The browser dashboard frontend: ES modules bundled by Vite (dev server with HMR 
 ### Working In This Directory
 - ESM only (this is the Vite side; the server is CJS). `.mjs` files are PURE modules (no DOM) shared with node:test; keep them dependency-free.
 - CSS convention: Tailwind utilities in `index.html`; semantic classes in `style.css` for JS-created DOM; state-driven styles via `[data-state]`; keyframes and pseudo-elements in `style.css`; theme tokens in `tailwind.css`.
+- TWO first-class layouts, chosen by `form-factor-core.mjs` and stamped on `<html data-layout>`. Phone styling keys off `[data-layout="phone"]`, never a `max-width` override of a desktop selector; a bare `max-width` block is only for content that must wrap in a narrow DESKTOP window. Neither layout duplicates the other's DOM: elements owning live state are re-parented (`adoptElement` / `card-host.js`).
 - All terminal writes go through `render-scheduler.mjs`; never call `term.write` with unbounded data outside it.
 - Use `id` (stable UUID) for any session keying; `name` is display only.
 - New persistent UI state goes through `ui-prefs.js`, not raw localStorage.

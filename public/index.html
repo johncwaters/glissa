@@ -139,6 +139,10 @@
 
   <!-- App shell - hidden until CSS loads and WS connects -->
   <!-- [P3] Tailwind utility duplicates stripped - semantic classes in style.css are authoritative -->
+  <!-- This is the DESKTOP layout. Under [data-layout="phone"] the whole shell is display:none and the
+       phone shell (public/phone/phone-shell.js) renders instead, borrowing the header controls, the
+       review sidebar, the Teams panel and the focused session's card out of here. Sessions cards stay
+       parented in #sessions-container either way: it is their one canonical home. -->
   <div class="app-shell">
     <header class="header">
       <div class="header-inner">
@@ -158,9 +162,6 @@
           </div>
           <span class="header-aggregate" id="aggregate-status" role="status" aria-live="polite"></span>
           <button class="btn-add-header" id="btn-add-session-header" type="button" title="Add a new session">+ Session</button>
-          <!-- Narrow-screen only (CSS-hidden on desktop): opens the review sidebar as a full-screen
-               overlay, where it cannot be docked beside the focus center. -->
-          <button class="btn-sidebar-toggle" id="btn-sidebar-toggle" type="button" title="Review sidebar" aria-expanded="false" aria-controls="review-sidebar">Review</button>
           <button class="btn-help" id="btn-help" type="button" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts and version">?</button>
           <div class="header-menu" id="header-menu">
             <button class="btn-menu" id="btn-menu" title="Menu" aria-label="Open menu" aria-haspopup="menu" aria-expanded="false" aria-controls="header-menu-dropdown">&#9776;</button>
@@ -182,9 +183,8 @@
       <button class="update-banner-copy" id="update-banner-copy" type="button">Copy</button>
       <button class="update-banner-dismiss" id="update-banner-dismiss" type="button" aria-label="Dismiss update notice">&times;</button>
     </div>
-    <!-- Body row: main views on the left, the review sidebar docked right. The sidebar is always
-         docked on desktop; below 768px it leaves the row and opens as an overlay instead
-         (body[data-sidebar-open], driven by the header Review button). -->
+    <!-- Body row: main views on the left, the review sidebar docked right. Always docked here; on the
+         phone layout the same element is re-parented into the Review screen. -->
     <div class="app-body" id="app-body">
       <main class="app-main" id="app-main">
         <!-- Off-screen card home: every session card lives here; Focus borrows cards from it into the
@@ -202,7 +202,8 @@
           <div class="focus-center" id="focus-center"></div>
         </section>
       </main>
-      <!-- Right review sidebar: always-visible single home for the worktree review gate; built by review-sidebar.js. -->
+      <!-- Right review sidebar: the single home for the worktree review gate; built by review-sidebar.js.
+           The phone Review screen re-parents this exact element rather than building a second one. -->
       <aside class="app-sidebar" id="review-sidebar" aria-label="Session review"></aside>
     </div>
     <!-- Health monitor footer injected by health-monitor.js -->
