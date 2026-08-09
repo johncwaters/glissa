@@ -1,3 +1,5 @@
+const path = require("node:path");
+
 const { execSync } = require("../../server/child-process-safe");
 
 // Pure/stateless spawn-command seam, extracted from sessions.js (behavior-preserving).
@@ -10,6 +12,26 @@ function classifyClaudeKind(resolvedPath) {
   if (!resolvedPath) return "unresolved";
   const ext = (resolvedPath.match(/\.[^.\\/]+$/) || [""])[0].toLowerCase();
   return ext === ".exe" || ext === ".com" ? "exe" : "shim";
+}
+
+// Collapse candidates that name the SAME file. `which -a` / `where` walk PATH entry by entry, so a
+// PATH holding ~/.local/bin twice reports that one claude twice, which used to print a "multiple
+// claude on PATH" warning listing the identical path twice. Normalization only (separators, trailing
+// slashes, and case on Windows, whose filesystem is case-insensitive); no realpath, because two
+// distinct paths pointing at one file through a symlink IS the shadowing risk the warning is for.
+// Order is preserved, so the first match still wins the resolution.
+function dedupeClaudeMatches(matches, platform = process.platform) {
+  const seen = new Set();
+  const unique = [];
+  for (const candidate of matches) {
+    let normalized = path.normalize(candidate.trim());
+    if (normalized.length > 1) normalized = normalized.replace(/[\\/]+$/, "");
+    const key = platform === "win32" ? normalized.toLowerCase() : normalized;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(candidate.trim());
+  }
+  return unique;
 }
 
 // Resolve `claude` once at module load. On Windows we prefer spawning the resolved
@@ -25,7 +47,7 @@ function resolveClaudeCommand() {
       stdio: ["ignore", "pipe", "ignore"],
       timeout: 2000,
     });
-    matches = out.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+    matches = dedupeClaudeMatches(out.split(/\r?\n/).filter((s) => s.trim()));
   } catch {
     // fall through to "could not resolve" warning below
   }
@@ -73,6 +95,7 @@ function buildSpawnCommand({ platform, resolved, settingsArgs = [], claudeArgs =
 
 module.exports = {
   classifyClaudeKind,
+  dedupeClaudeMatches,
   resolveClaudeCommand,
   buildSpawnCommand,
   CLAUDE_CMD,

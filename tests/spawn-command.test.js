@@ -7,6 +7,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const { buildSpawnCommand, classifyClaudeKind } = require('../session/sessions');
+const { dedupeClaudeMatches } = require('../session/core/spawn-command');
 
 const SETTINGS = ['--settings', 'C:\\tmp\\glissa\\settings.json'];
 const DANGER = ['--dangerously-skip-permissions'];
@@ -110,6 +111,38 @@ test('empty inputs default safely (no crash, posix bare claude)', () => {
   const { file, args } = buildSpawnCommand({ platform: 'linux', resolved: null });
   assert.equal(file, 'claude');
   assert.deepEqual(args, []);
+});
+
+// A PATH listing ~/.local/bin twice made `which -a claude` report one install twice, and the boot
+// warning then listed the identical path twice as if two claudes were shadowing each other.
+test('dedupeClaudeMatches collapses a path repeated by a duplicated PATH entry', () => {
+  const p = '/home/jwaters/.local/bin/claude';
+  assert.deepEqual(dedupeClaudeMatches([p, p], 'linux'), [p], 'one real install, one entry');
+  assert.deepEqual(
+    dedupeClaudeMatches([p, '/usr/local/bin/claude', p], 'linux'),
+    [p, '/usr/local/bin/claude'],
+    'genuine shadowing survives, order preserved so the first match still wins',
+  );
+});
+
+test('dedupeClaudeMatches normalizes separators, trailing slashes and surrounding space', () => {
+  assert.deepEqual(
+    dedupeClaudeMatches(['/home/u/.local/bin/claude', '/home/u/.local//bin/claude', '  /home/u/.local/bin/claude  '], 'linux'),
+    ['/home/u/.local/bin/claude'],
+  );
+  assert.deepEqual(dedupeClaudeMatches(['/opt/bin/', '/opt/bin'], 'linux'), ['/opt/bin/']);
+});
+
+test('dedupeClaudeMatches is case-insensitive on win32 only', () => {
+  const a = 'C:\\Users\\johnw\\.local\\bin\\claude.exe';
+  const b = 'c:\\users\\johnw\\.local\\bin\\CLAUDE.EXE';
+  assert.deepEqual(dedupeClaudeMatches([a, b], 'win32'), [a], 'one file, Windows is case-insensitive');
+  assert.equal(dedupeClaudeMatches(['/a/claude', '/A/Claude'], 'linux').length, 2, 'posix paths are case-sensitive');
+});
+
+test('dedupeClaudeMatches leaves an empty or single-entry list alone', () => {
+  assert.deepEqual(dedupeClaudeMatches([], 'linux'), []);
+  assert.deepEqual(dedupeClaudeMatches(['/usr/bin/claude'], 'linux'), ['/usr/bin/claude']);
 });
 
 test('classifyClaudeKind maps extensions correctly', () => {

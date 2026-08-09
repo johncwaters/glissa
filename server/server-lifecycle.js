@@ -11,6 +11,8 @@
 // and it exited BEFORE the async taskkill reaped the PTY tree (orphaned cmd/claude/conhost). The guard
 // + windowsHide + awaited reap below close all three.
 
+const { decideRestartStrategy, SUPERVISED_RESTART_EXIT_CODE } = require('./core/restart-strategy');
+
 // Bounded wait for the pending PTY reaps a shutdown started, so the process does not exit (or respawn)
 // before taskkill has reaped the cmd/claude/conhost tree. Capped so a child that resists kill cannot
 // hang the lifecycle. Returns a promise that always resolves.
@@ -30,7 +32,7 @@ function awaitReaps(pendingReaps, { capMs = 3000, setTimeoutFn = setTimeout, cle
 //   httpServer    - { close(cb) }: closes the listener, then runs cb (spawn-and-exit / exit).
 //   onRestart     - dev (Vite) restarts in-process via this; when null, production respawns detached.
 //   spawn         - child_process.spawn (the production respawn); defaults to require at call sites.
-//   exit/getArgv/cwd - process seams (defaulted to process.*) so tests observe instead of exiting.
+//   exit/getArgv/cwd/env - process seams (defaulted to process.*) so tests observe instead of exiting.
 // Secondary listeners (remote mode's cookie-gated server) are closed alongside the primary, with
 // their sockets forced shut: the primary's close is what gates exit, and a lingering remote listener
 // would keep its port bound past a restart's respawn.
@@ -50,6 +52,8 @@ function createLifecycle({
   exit = process.exit,
   getArgv = () => process.argv,
   cwd = () => process.cwd(),
+  env = process.env,
+  log = console.log,
   capMs = 3000,
   closeTimeoutMs = 2000,
 }) {
@@ -101,14 +105,25 @@ function createLifecycle({
       }
       return;
     }
-    // Production: close the listener so the port is released, then spawn the replacement and exit.
-    // detached so it outlives this process; windowsHide so it does NOT pop its own console window
-    // (mirrors the openInEditor spawn in backend.js). The spawned guard makes the close-cb and the
-    // fallback timer idempotent (exactly one respawn).
-    let spawned = false;
-    const spawnAndExit = () => {
-      if (spawned) return;
-      spawned = true;
+    // Production: close the listener so the port is released, then hand off to the replacement. WHO
+    // starts that replacement depends on whether anything supervises this process (see
+    // core/restart-strategy.js): under systemd the self-respawn silently bricks the service, so the
+    // process exits NON-ZERO and lets `Restart=on-failure` start the unit again. Unsupervised, the
+    // original respawn is the only thing that can bring Glissa back, so it is kept verbatim: detached
+    // so it outlives this process, windowsHide so it does NOT pop its own console window (mirrors the
+    // openInEditor spawn in backend.js). Shutdown stays exit 0 in BOTH worlds - "Shut Down" must stay
+    // down, and a zero exit is what keeps `Restart=on-failure` from reviving it.
+    const strategy = decideRestartStrategy(env);
+    let handedOff = false;
+    // Idempotent across the close callback and the fallback timer (exactly one hand-off).
+    const handOffAndExit = () => {
+      if (handedOff) return;
+      handedOff = true;
+      if (strategy === 'exit-for-supervisor') {
+        log(`[lifecycle] Supervised by systemd - exiting ${SUPERVISED_RESTART_EXIT_CODE} so the supervisor restarts the unit`);
+        exit(SUPERVISED_RESTART_EXIT_CODE);
+        return;
+      }
       const argv = getArgv();
       spawn(argv[0], argv.slice(1), {
         cwd: cwd(),
@@ -118,8 +133,8 @@ function createLifecycle({
       }).unref();
       exit(0);
     };
-    httpServer.close(spawnAndExit);
-    fallbackTimer(spawnAndExit);
+    httpServer.close(handOffAndExit);
+    fallbackTimer(handOffAndExit);
   }
 
   return { requestShutdown, requestRestart };

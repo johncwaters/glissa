@@ -9,7 +9,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const {
-  createPairingsStore, createSeenStore, defaultPairingsPath, defaultSeenPath,
+  createPairingsStore, createSeenStore, defaultPairingsPath, defaultSeenPath, pairingsSignature,
   SNAPSHOT_RELOAD_MS, REVOCATION_PROPAGATION_SECONDS,
 } = require('../server/pairings-store');
 const { hashSecret } = require('../server/core/pairing-token');
@@ -283,6 +283,80 @@ test('watch installs one reload interval at SNAPSHOT_RELOAD_MS, unref-ed and cle
   } finally {
     global.setInterval = realSetInterval;
     global.clearInterval = realClearInterval;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('pairingsSignature ignores formatting and key order, tracks auth-relevant fields', () => {
+  const base = { version: 1, pending: [], devices: [{ id: 'd1', secretHash: 'h', revokedAt: null }] };
+  const reserialized = JSON.parse(JSON.stringify(base));
+  assert.equal(pairingsSignature(base), pairingsSignature(reserialized), 'identical content, one signature');
+  assert.notEqual(
+    pairingsSignature(base),
+    pairingsSignature({ version: 1, pending: [], devices: [{ id: 'd1', secretHash: 'h', revokedAt: 5 }] }),
+    'a revocation must change the signature',
+  );
+  assert.notEqual(
+    pairingsSignature(base),
+    pairingsSignature({ version: 1, pending: [{ tokenHash: 't' }], devices: base.devices }),
+    'a new pending token must change the signature',
+  );
+  assert.equal(pairingsSignature(null), pairingsSignature(undefined), 'garbage coerces to the empty doc');
+});
+
+// An idle server used to announce a change on every 30s tick, writing ~2880 identical log lines a day.
+test('an unchanged reload refreshes the snapshot but does NOT report a change', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-pairings-quiet-'));
+  const filePath = path.join(dir, 'pairings.json');
+  try {
+    const writer = createPairingsStore({ filePath });
+    const minted = writer.mintPending({ name: 'phone' });
+    const { device } = writer.redeem(minted.token);
+
+    const reader = createPairingsStore({ filePath });
+    let changes = 0;
+    const stop = reader.watch(() => { changes += 1; });
+    try {
+      // A byte-identical rewrite of the same content, exactly what an interval tick sees.
+      const raw = fs.readFileSync(filePath, 'utf8');
+      fs.writeFileSync(filePath, raw, 'utf8');
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      assert.equal(changes, 0, 'no change reported for identical content');
+
+      writer.revokeDevice(device.id);
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      assert.equal(changes, 1, 'a real revocation still reports exactly once');
+      assert.equal(typeof reader.findDevice(device.id).revokedAt, 'number', 'and propagated to the snapshot');
+    } finally {
+      stop();
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// The sibling pairings-seen.json (display-only telemetry) is written from the request path and shares
+// the directory being watched; on inotify its writes surface as events on that directory.
+test('a write to a sibling file in the watched directory reports no change', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-pairings-sibling-'));
+  const filePath = path.join(dir, 'pairings.json');
+  try {
+    const writer = createPairingsStore({ filePath });
+    writer.mintPending({ name: 'phone' });
+
+    const reader = createPairingsStore({ filePath });
+    let changes = 0;
+    const stop = reader.watch(() => { changes += 1; });
+    try {
+      const seen = createSeenStore({ filePath: path.join(dir, 'pairings-seen.json'), throttleMs: 0 });
+      seen.touch('device-1');
+      await seen.pending;
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      assert.equal(changes, 0, 'a seen-store write must not look like a device-list change');
+    } finally {
+      stop();
+    }
+  } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });

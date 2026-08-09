@@ -11,6 +11,12 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const { awaitReaps, createLifecycle } = require('../server/server-lifecycle');
+const { decideRestartStrategy, SUPERVISED_RESTART_EXIT_CODE } = require('../server/core/restart-strategy');
+
+// Every test injects env explicitly: the restart hand-off branches on it, and the suite itself may run
+// under a supervisor whose INVOCATION_ID would otherwise leak into these assertions.
+const UNSUPERVISED = {};
+const SYSTEMD = { INVOCATION_ID: 'a1b2c3d4e5f64718a9bc0d1e2f3a4b5c' };
 
 // httpServer fake: close(cb) releases the listener and runs the spawn-and-exit / exit callback now.
 function fakeHttpServer() {
@@ -31,6 +37,7 @@ test('production restart respawns detached + windowsHide and then exits', async 
     shutdown: () => [],
     httpServer: fakeHttpServer(),
     onRestart: null,
+    env: UNSUPERVISED,
     spawn,
     exit: (code) => exits.push(code),
     getArgv: () => ['node.exe', 'server.js'],
@@ -55,6 +62,7 @@ test('double requestRestart spawns the replacement at most once (re-entry guard)
     shutdown: () => { shutdowns++; return []; },
     httpServer: fakeHttpServer(),
     onRestart: null,
+    env: UNSUPERVISED,
     spawn,
     exit: () => {},
     getArgv: () => ['node.exe', 'server.js'],
@@ -73,6 +81,7 @@ test('restart and shutdown share one guard: shutdown after restart is a no-op', 
     shutdown: () => [],
     httpServer: http,
     onRestart: null,
+    env: UNSUPERVISED,
     spawn,
     exit: (code) => exits.push(code),
     getArgv: () => ['node.exe', 'server.js'],
@@ -93,6 +102,7 @@ test('reaps are awaited BEFORE the respawn (no orphaned PTY tree)', async () => 
     shutdown: () => [reap],
     httpServer: fakeHttpServer(),
     onRestart: null,
+    env: UNSUPERVISED,
     spawn: wrappedSpawn,
     exit: () => {},
     getArgv: () => ['node.exe', 'server.js'],
@@ -140,12 +150,57 @@ test('requestShutdown closes the server and exits once', async () => {
     shutdown: () => [],
     httpServer: http,
     onRestart: null,
+    env: UNSUPERVISED,
     spawn: fakeSpawn(),
     exit: (code) => exits.push(code),
   });
   await lc.requestShutdown();
   assert.equal(http.closes, 1, 'listener closed');
   assert.deepEqual(exits, [0], 'exited exactly once');
+});
+
+// Under systemd the self-respawn bricked the service: the clean exit 0 did not trigger
+// Restart=on-failure and the detached child died with the cgroup, leaving nothing listening.
+test('decideRestartStrategy: INVOCATION_ID present means the supervisor restarts us', () => {
+  assert.equal(decideRestartStrategy({ INVOCATION_ID: 'abc123' }), 'exit-for-supervisor');
+  assert.equal(decideRestartStrategy({}), 'respawn');
+  assert.equal(decideRestartStrategy({ INVOCATION_ID: '' }), 'respawn', 'empty is not a real invocation');
+  assert.equal(decideRestartStrategy(undefined), 'respawn', 'no env at all falls back to the respawn');
+  assert.notEqual(SUPERVISED_RESTART_EXIT_CODE, 0, 'a zero exit would not trigger Restart=on-failure');
+});
+
+test('supervised restart exits non-zero WITHOUT respawning (systemd starts the replacement)', async () => {
+  const spawn = fakeSpawn();
+  const exits = [];
+  const http = fakeHttpServer();
+  const lc = createLifecycle({
+    shutdown: () => [],
+    httpServer: http,
+    onRestart: null,
+    env: SYSTEMD,
+    spawn,
+    exit: (code) => exits.push(code),
+    getArgv: () => ['node', 'server.js'],
+    log: () => {},
+  });
+  await lc.requestRestart();
+  assert.equal(spawn.calls.length, 0, 'no detached child to die with the cgroup');
+  assert.equal(http.closes, 1, 'listener released before exiting');
+  assert.deepEqual(exits, [SUPERVISED_RESTART_EXIT_CODE], 'non-zero so Restart=on-failure fires');
+});
+
+test('supervised SHUTDOWN still exits 0 so the unit stays down', async () => {
+  const exits = [];
+  const lc = createLifecycle({
+    shutdown: () => [],
+    httpServer: fakeHttpServer(),
+    onRestart: null,
+    env: SYSTEMD,
+    spawn: fakeSpawn(),
+    exit: (code) => exits.push(code),
+  });
+  await lc.requestShutdown();
+  assert.deepEqual(exits, [0], 'Shut Down must not look like a failure to the supervisor');
 });
 
 test('awaitReaps resolves when a reap never settles (bounded cap)', async () => {

@@ -80,6 +80,16 @@ function coerceDoc(parsed) {
   };
 }
 
+/**
+ * Cheap content fingerprint of a coerced doc. Taken over the NORMALIZED doc rather than the raw bytes
+ * (or an mtime) so re-serialization, a rewrite with identical content, or a touched mtime does not read
+ * as a change. Pure.
+ */
+function pairingsSignature(doc) {
+  const safe = coerceDoc(doc);
+  return JSON.stringify(safe);
+}
+
 function createPairingsStore({ filePath, now = Date.now, randomBytes, warn = console.warn } = {}) {
   const pairingsPath = filePath;
   let snapshot = emptyDoc();
@@ -289,9 +299,17 @@ function createPairingsStore({ filePath, now = Date.now, randomBytes, warn = con
     let timer = null;
     let watcher = null;
     const dir = path.dirname(pairingsPath);
+    let lastSignature = pairingsSignature(snapshot);
 
+    // The snapshot is reloaded on EVERY tick (that unconditional reload is the revocation guarantee),
+    // but onChange fires only when the content actually differs. Without this gate the 30s interval
+    // announced a change forever - the remote-auth listener logs one line per call, so an idle server
+    // wrote "pairings.json changed" 2880 times a day into journalctl.
     function refresh() {
       load();
+      const signature = pairingsSignature(snapshot);
+      if (signature === lastSignature) return;
+      lastSignature = signature;
       if (onChange) onChange(snapshot);
     }
 
@@ -372,6 +390,6 @@ function createSeenStore({ filePath, throttleMs = 60000, now = Date.now } = {}) 
 }
 
 module.exports = {
-  createPairingsStore, createSeenStore, defaultPairingsPath, defaultSeenPath,
+  createPairingsStore, createSeenStore, defaultPairingsPath, defaultSeenPath, pairingsSignature,
   EMPTY_DOC, SNAPSHOT_RELOAD_MS, REVOCATION_PROPAGATION_SECONDS,
 };

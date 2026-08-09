@@ -12,7 +12,7 @@ Backend runtime: the Express + WebSocket server factory and its control plane, p
 | `backend.js` | Express + WebSocket server factory, shared by root `server.js` and the Vite dev plugin |
 | `control-handlers.js` | Control-WebSocket message handlers (kill, restart, rename, settings, team control) |
 | `control-replay-core.js` | Pure control-broadcast replay log: monotonic seq stamping + retention of the replayable message types |
-| `server-lifecycle.js` | Boot/shutdown lifecycle helpers |
+| `server-lifecycle.js` | Boot/shutdown lifecycle helpers. A UI restart respawns `argv` detached and exits 0 when nothing supervises the process, but exits NON-ZERO without respawning under systemd (see `core/restart-strategy.js`); shutdown exits 0 in both worlds |
 | `ws-sender.js` | Data-WebSocket sender: batching, bufferedAmount backpressure, echo fast-flush |
 | `scheduler.js` | In-process calendar/cron for scheduled team runs |
 | `post-turn-checker.js` | Async IO runner for post-turn hygiene checks (pure rules in `../session/core/post-turn-rules.js`) |
@@ -28,6 +28,7 @@ Backend runtime: the Express + WebSocket server factory and its control plane, p
 | `pr-telegram.js` | PR-only Telegram push helper (never throws; NOT a `NotificationManager` channel) |
 | `core/pr-review-core.js` | Pure PR-review decisions (`prKey`/`filterActionablePrs`/`planReviews`/`planMerges`/`nextState`/`pingFor`) |
 | `core/branch-sync-core.js` | Pure ahead/behind parsing + decisions for the review sidebar's branch-sync indicator (IO in `session/sessions.js getBranchSync`) |
+| `core/restart-strategy.js` | Pure `decideRestartStrategy(env)` -> `respawn` \| `exit-for-supervisor`, keyed on systemd's `INVOCATION_ID` |
 
 ## For AI Agents
 - These modules live one level below the repo root: filesystem assets (`dist/`, `public/`, `teams/`, `config.json`, `node_modules/`) resolve via `path.join(__dirname, '..', ...)`. Keep that offset when adding paths.

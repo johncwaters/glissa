@@ -118,7 +118,7 @@ server/            # Backend runtime (Express + WS wiring, control plane, shared
   backend.js         # Express + WebSocket server factory (shared by server.js and Vite plugin)
   control-handlers.js  # Control-WS message dispatch
   control-replay-core.js  # Pure control-broadcast replay log: monotonic seq stamping + retention of replayable message types
-  server-lifecycle.js  # Boot/shutdown lifecycle
+  server-lifecycle.js  # Boot/shutdown lifecycle (restart self-respawns detached, or exits non-zero for systemd)
   ws-sender.js         # Data-WS send/backfill (monotonic offsets)
   scheduler.js         # Team schedule computation + timers
   post-turn-checker.js # Async IO runner for post-turn hygiene checks (rules from session/core/post-turn-rules.js)
@@ -128,6 +128,7 @@ server/            # Backend runtime (Express + WS wiring, control plane, shared
   remote-auth.js       # Remote-mode auth shell: cookie -> device lookup, /pair/:token redemption, HTTP gate
   pairings-store.js    # ~/.glissa/pairings.json (hashes only) + the display-only pairings-seen.json
   pair-cli.js          # `glissa pair` / --list / --revoke (in server/, not bin/, for the files whitelist)
+  core/restart-strategy.js  # Pure decideRestartStrategy(env): respawn, or exit non-zero so a supervisor restarts us
   core/remote-config.js   # Pure normalize/validate of config.remote + decideBindHost
   core/origin-policy.js   # Pure Origin allow-list (replaced backend.js isAllowedOrigin)
   core/cookie.js          # Pure cookie parse/serialize + Secure/SameSite decision
