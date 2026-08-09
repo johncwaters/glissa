@@ -932,6 +932,13 @@ class Session extends EventEmitter {
     return this._sleeping;
   }
 
+  // Whether write() would actually reach a terminal. The same three conditions pasteMergePrompt
+  // guards on, exposed for callers outside this file (the upload route pastes a saved image path and
+  // must refuse - and delete the file - rather than write into a dead PTY nobody can see).
+  get hasLivePty() {
+    return !this._destroyed && !!this.ptyProcess && !!this._ptyAlive;
+  }
+
   // True from forceRestart()'s kill through its queued exit handler (see forceRestart / restart).
   // The state-change this window fires is a transient user_kill on the way back to a respawn, not
   // an intentional stop - a listener that treats every user_kill as "gone for good" (e.g. the

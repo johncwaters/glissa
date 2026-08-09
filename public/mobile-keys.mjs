@@ -7,6 +7,10 @@
 // Paste carries no fixed bytes: its payload is whatever the clipboard holds at press time.
 export const CLIPBOARD_ACTION = 'clipboard';
 
+// Image carries no bytes either: it picks a file, POSTs it to /upload/:sessionId, and the SERVER
+// pastes the saved path into the PTY (a phone cannot hand Claude Code a file any other way).
+export const UPLOAD_ACTION = 'upload';
+
 export const MOBILE_KEYS = Object.freeze([
   Object.freeze({ id: 'esc', label: 'Esc', bytes: '\x1b', title: 'Send Escape' }),
   Object.freeze({ id: 'tab', label: 'Tab', bytes: '\x09', title: 'Send Tab' }),
@@ -14,6 +18,7 @@ export const MOBILE_KEYS = Object.freeze([
   Object.freeze({ id: 'up', label: 'Up', bytes: '\x1b[A', title: 'Arrow up' }),
   Object.freeze({ id: 'down', label: 'Down', bytes: '\x1b[B', title: 'Arrow down' }),
   Object.freeze({ id: 'paste', label: 'Paste', bytes: null, action: CLIPBOARD_ACTION, title: 'Paste from the clipboard' }),
+  Object.freeze({ id: 'upload-image', label: 'Image', bytes: null, action: UPLOAD_ACTION, title: 'Upload an image to this session' }),
 ]);
 
 // Bytes for a key id, or null for an id that has none (the clipboard action) and for an unknown id.
@@ -25,4 +30,8 @@ export function mobileKeyBytes(id) {
 
 export function isClipboardKey(key) {
   return !!key && key.action === CLIPBOARD_ACTION;
+}
+
+export function isUploadKey(key) {
+  return !!key && key.action === UPLOAD_ACTION;
 }

@@ -14,6 +14,9 @@ config.json
 # dev run with the in-repo config.json lands them here.
 pairings.json
 pairings-seen.json
+# Images uploaded from the phone (POST /upload/:sessionId). Same story: a dev run resolves the in-repo
+# config.json, so they land beside it and must never be swept into a commit by a `git add -A`.
+uploads/
 .pty-capture/
 # Runtime output (team runs, post-turn checker telemetry, etc). Not a deliverable.
 # Excludes the project pack (.glissa/pack/, .glissa/teams/*/pack/), which AGENTS.md documents as committed.

@@ -54,7 +54,7 @@ export function createTerminalScreen({ onBack }) {
   emptyEl.innerHTML = '<p class="phone-empty-title">No session selected</p>'
     + '<p class="phone-empty-desc">Select a session from the board to watch it here.</p>';
 
-  const keyStrip = createMobileKeyStrip({ send: sendToShownTerminal });
+  const keyStrip = createMobileKeyStrip({ send: sendToShownTerminal, getSessionId: () => shownId });
 
   screen.append(topBar, cardSlot, emptyEl, keyStrip);
 

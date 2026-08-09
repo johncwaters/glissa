@@ -134,6 +134,7 @@ server/            # Backend runtime (Express + WS wiring, control plane, shared
   core/cookie.js          # Pure cookie parse/serialize + Secure/SameSite decision
   core/pairing-token.js   # Pure token/device minting, TTL, single-use and revocation rules
   core/request-trust.js   # Pure listener-port trust classification + HTTP/upgrade access decisions
+  core/upload-core.js     # Pure image-upload rules: mime -> extension, size cap, filename, bracketed-paste framing, retention plan
   update-check.js      # Startup GitHub version check, main-branch package.json (abortable, advisory only) behind config.checkForUpdates
   ephemeral-session.js # Shared ephemeral-Session registration: map insert, exit cleanup, destroy() wrap; used by the team and PR-review lanes
   team-session-factory.js  # Team Session construction: makeStageSession (headless stage) + startPackSetup (interactive guided setup)
@@ -342,7 +343,8 @@ Glissa binds to `localhost` only. Both WebSocket channels (data and control) hav
 
 - Do NOT expose Glissa's port to the network (no `0.0.0.0` binding)
 - The `dangerouslySkipPermissions` option is settable via the control WebSocket; any local process can create a permissionless session
-- There is ONE HTTP write ingress, `POST /hook/:glissaId/:event` (Claude Code hook callbacks). It is localhost-only and gated by a per-session bearer token (unguessable, written into that session's managed settings file), so the trust level is "can read this session's settings file" = same as reading the PTY. Keep that token check if you touch the route.
+- There are TWO HTTP write ingresses. The first is `POST /hook/:glissaId/:event` (Claude Code hook callbacks): localhost-only and gated by a per-session bearer token (unguessable, written into that session's managed settings file), so the trust level is "can read this session's settings file" = same as reading the PTY. Keep that token check if you touch the route.
+- The second is `POST /upload/:sessionId` (the phone key strip's Image button): raw image bytes in, saved under `<config dir>/uploads/<sessionId>/`, and the saved absolute path bracket-pasted into that session's PTY (no CR, so the operator sends it). It is mounted AFTER the remote-auth middleware, so a remote caller must carry a valid pairing cookie; on the local listener it carries the same trust as the control WS, which can already spawn a session anywhere. Guards: unknown session 404, content-type whitelist (`image/png|jpeg|webp|gif`) 415, a streamed 15MB cap 413 with the partial file removed, and 409 (file deleted) when the session has no live PTY to paste into. Uploads are retained newest-20 per session. Pure rules in `server/core/upload-core.js`, HTTP coverage in `tests/backend-upload-route.test.js`.
 - If network exposure is ever needed, add authentication to the control WebSocket first
 
 #### Remote Mode (opt-in, off by default)

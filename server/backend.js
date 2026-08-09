@@ -20,8 +20,12 @@
 
 'use strict';
 
+const crypto = require('node:crypto');
 const fs = require('node:fs');
+const fsp = require('node:fs/promises');
+const os = require('node:os');
 const path = require('node:path');
+const { pipeline } = require('node:stream');
 const express = require('express');
 const { WebSocketServer } = require('ws');
 const { Session } = require('../session/sessions');
@@ -61,6 +65,14 @@ const { createClientPresence } = require('./core/client-presence');
 const { classifyRequestOrigin, decideUpgradeAccess } = require('./core/request-trust');
 const { createRemoteAuth } = require('./remote-auth');
 const { createPairingsStore, createSeenStore, defaultPairingsPath, defaultSeenPath } = require('./pairings-store');
+const {
+  buildUploadFilename,
+  decideUploadType,
+  exceedsUploadCap,
+  framePathPaste,
+  isSafePathSegment,
+  planUploadRetention,
+} = require('./core/upload-core');
 
 // WAITING-state notification escalation cadence (fixed 5 minutes; previously the
 // configurable waitingEscalationSeconds setting).
@@ -364,6 +376,158 @@ function createBackend(httpServer, options = {}) {
       res.status(out.status).json({ ok: out.status === 200, reason: out.reason });
     });
   });
+
+  // Image ingress: the phone key strip's Image button POSTs the picked file's raw bytes here, and the
+  // saved absolute path is bracket-pasted into that session's PTY so the operator can add words and
+  // press Enter (Claude Code reads the image off the path). Mounted AFTER the remote gate above, so a
+  // paired phone must carry its pairing cookie; on the local listener it sits at the same trust level
+  // as the control WS, which can already spawn a session in any directory.
+  //
+  // Uploads live beside the resolved config file (defaultPairingsPath's idiom), one directory per
+  // session, so a temp GLISSA_CONFIG keeps its uploads in the temp dir too.
+  const uploadsRoot = configStore.configPath
+    ? path.join(path.dirname(configStore.configPath), 'uploads')
+    : path.join(os.homedir(), '.glissa', 'uploads');
+
+  // Keep the newest uploads per session; fire-and-forget after a save, best-effort like the recorder's
+  // sweep (all sessions share one event loop, so nothing here blocks or retries).
+  async function sweepSessionUploads(dir, justWritten) {
+    let entries = null;
+    try {
+      entries = await fsp.readdir(dir);
+    } catch {
+      return;
+    }
+    for (const name of planUploadRetention(entries, { justWritten })) {
+      try {
+        await fsp.unlink(path.join(dir, name));
+      } catch {
+        // Locked or already gone; the next upload sweeps again.
+      }
+    }
+  }
+
+  app.post('/upload/:sessionId', (req, res) => {
+    const sess = getSessionAny(req.params.sessionId);
+    if (!sess) {
+      res.status(404).json({ error: 'unknown session' });
+      return;
+    }
+    // A live session id is always a plain uuid; anything that could climb out of uploadsRoot is
+    // refused as unknown rather than sanitized into some other session's directory.
+    if (!isSafePathSegment(sess.id)) {
+      res.status(404).json({ error: 'unknown session' });
+      return;
+    }
+    const typeVerdict = decideUploadType(req.headers['content-type']);
+    if (!typeVerdict.ok) {
+      res.status(typeVerdict.status).json({ error: typeVerdict.error });
+      return;
+    }
+    // Cheap pre-check so a dead session does not cost a 15MB write; the PTY can still die mid-upload,
+    // which the post-save check below catches.
+    if (!sess.hasLivePty) {
+      res.status(409).json({ error: 'session has no live terminal' });
+      return;
+    }
+
+    const dir = path.join(uploadsRoot, sess.id);
+    const filename = buildUploadFilename({
+      now: Date.now(),
+      randomSuffix: crypto.randomBytes(4).toString('hex'),
+      extension: typeVerdict.extension,
+    });
+    const savedPath = path.join(dir, filename);
+
+    // The client can reset between its headers and the mkdir below resolving, and this listener has to
+    // exist SYNCHRONOUSLY to catch it: an 'error' with no listener is swallowed, and the request would
+    // then already be destroyed when the pipeline starts, leaving a write stream nothing ever closes
+    // and a partial file nothing ever unlinks (one leaked fd per aborted request).
+    let abortedBeforeReceive = false;
+    const markAbortedBeforeReceive = () => { abortedBeforeReceive = true; };
+    req.on('error', markAbortedBeforeReceive);
+
+    // 0o700 to match the pairing files this sits beside: uploads are the operator's screenshots.
+    fsp.mkdir(dir, { recursive: true, mode: 0o700 })
+      .then(() => {
+        // Nothing has been created yet, so a client that gave up in this window costs nothing.
+        if (abortedBeforeReceive || req.destroyed) return;
+        req.off('error', markAbortedBeforeReceive);
+        receiveUpload({ req, res, sess, dir, filename, savedPath });
+      })
+      .catch(() => {
+        if (!res.headersSent) res.status(500).json({ error: 'could not store the upload' });
+      });
+  });
+
+  function receiveUpload({ req, res, sess, dir, filename, savedPath }) {
+    const writeStream = fs.createWriteStream(savedPath);
+    let bytesReceived = 0;
+    let settled = false;
+
+    const answer = (status, body) => {
+      if (settled) return;
+      settled = true;
+      if (!res.headersSent) res.status(status).json(body);
+    };
+    // Windows refuses to unlink a file whose handle is still open and destroy() closes the descriptor
+    // asynchronously, so a discard waits for the stream's 'close'. Ordering is not assumed in either
+    // direction: pipeline's callback can land after 'close' has already fired.
+    let discardWanted = false;
+    let streamClosed = false;
+    const unlinkPartial = () => {
+      fsp.unlink(savedPath).catch(() => { /* best effort; the retention sweep catches leftovers */ });
+    };
+    const discardPartial = () => {
+      discardWanted = true;
+      if (streamClosed) unlinkPartial();
+    };
+    writeStream.on('close', () => {
+      streamClosed = true;
+      if (discardWanted) unlinkPartial();
+    });
+
+    // Fires before pipeline's callback, so a disk failure answers 500 rather than the generic 400.
+    writeStream.on('error', () => {
+      answer(500, { error: 'could not store the upload' });
+      discardPartial();
+    });
+    req.on('data', (chunk) => {
+      bytesReceived += chunk.length;
+      if (!exceedsUploadCap(bytesReceived)) return;
+      answer(413, { error: 'image is too large' });
+      req.destroy();
+      writeStream.destroy();
+      discardPartial();
+    });
+
+    // Streamed, never buffered: a 15MB image held in memory would ride the same heap every session's
+    // output ring lives on. pipeline, not req.pipe: it owns the error plumbing in both directions, so
+    // a client reset destroys the write stream (closing the fd, unlinking the partial) instead of
+    // leaving it open forever waiting for an 'end' that a destroyed request never emits.
+    pipeline(req, writeStream, (err) => {
+      if (err) {
+        answer(400, { error: 'upload failed' });
+        discardPartial();
+        return;
+      }
+      // A refusal already answered (the size cap, a disk error) must never go on to paste: pipeline
+      // reports a destroy after the last chunk as a clean finish.
+      if (settled) {
+        discardPartial();
+        return;
+      }
+      // The PTY may have exited while the bytes were arriving. An image nobody can paste is a leak.
+      if (!sess.hasLivePty) {
+        answer(409, { error: 'session has no live terminal' });
+        discardPartial();
+        return;
+      }
+      sess.write(framePathPaste(savedPath));
+      answer(200, { ok: true, path: savedPath });
+      sweepSessionUploads(dir, filename);
+    });
+  }
 
   if (staticDir === 'auto') {
     const distPath = path.join(__dirname, '..', 'dist');
@@ -1400,6 +1564,10 @@ function createBackend(httpServer, options = {}) {
     shutdown,
     port,
     app,
+    // Persisted or ephemeral session by id. The maps themselves stay closed over; this is the one
+    // read-only way in for an embedder (and for the route tests, which have no other way to hold the
+    // Session a request will act on).
+    getSession: getSessionAny,
     bindHost: bindDecision.host,
     remote: {
       enabled: remote.enabled,
