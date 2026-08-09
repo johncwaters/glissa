@@ -14,22 +14,27 @@ function classifyClaudeKind(resolvedPath) {
   return ext === ".exe" || ext === ".com" ? "exe" : "shim";
 }
 
-// Collapse candidates that name the SAME file. `which -a` / `where` walk PATH entry by entry, so a
-// PATH holding ~/.local/bin twice reports that one claude twice, which used to print a "multiple
-// claude on PATH" warning listing the identical path twice. Normalization only (separators, trailing
-// slashes, and case on Windows, whose filesystem is case-insensitive); no realpath, because two
-// distinct paths pointing at one file through a symlink IS the shadowing risk the warning is for.
-// Order is preserved, so the first match still wins the resolution.
+// Collapse candidates that name the SAME file, returning each survivor in its NORMALIZED form so the
+// value compared and the value handed on (spawn path, boot warning) are the same string. `which -a` /
+// `where` walk PATH entry by entry, so a PATH holding ~/.local/bin twice reports that one claude
+// twice, which used to print a "multiple claude on PATH" warning listing the identical path twice.
+// Normalization only (separators, trailing slashes, and case-INSENSITIVE keying on Windows, whose
+// filesystem ignores case); no realpath, because two distinct paths pointing at one file through a
+// symlink IS the shadowing risk the warning is for. Case is preserved in the output even where it is
+// ignored for keying. Order is preserved, so the first match still wins the resolution.
 function dedupeClaudeMatches(matches, platform = process.platform) {
+  // Keyed off the platform argument rather than the ambient `path`, so the normalization a caller
+  // asks for does not depend on the OS this happens to run on.
+  const pathApi = platform === "win32" ? path.win32 : path.posix;
   const seen = new Set();
   const unique = [];
   for (const candidate of matches) {
-    let normalized = path.normalize(candidate.trim());
+    let normalized = pathApi.normalize(candidate.trim());
     if (normalized.length > 1) normalized = normalized.replace(/[\\/]+$/, "");
     const key = platform === "win32" ? normalized.toLowerCase() : normalized;
     if (seen.has(key)) continue;
     seen.add(key);
-    unique.push(candidate.trim());
+    unique.push(normalized);
   }
   return unique;
 }

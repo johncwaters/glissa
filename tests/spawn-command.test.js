@@ -125,18 +125,23 @@ test('dedupeClaudeMatches collapses a path repeated by a duplicated PATH entry',
   );
 });
 
+// Survivors come back NORMALIZED, so the form compared is the form handed to the spawn and the
+// warning. Normalization follows the platform ARGUMENT, never the OS the test happens to run on.
 test('dedupeClaudeMatches normalizes separators, trailing slashes and surrounding space', () => {
   assert.deepEqual(
     dedupeClaudeMatches(['/home/u/.local/bin/claude', '/home/u/.local//bin/claude', '  /home/u/.local/bin/claude  '], 'linux'),
     ['/home/u/.local/bin/claude'],
   );
-  assert.deepEqual(dedupeClaudeMatches(['/opt/bin/', '/opt/bin'], 'linux'), ['/opt/bin/']);
+  assert.deepEqual(dedupeClaudeMatches(['/opt/bin/', '/opt/bin'], 'linux'), ['/opt/bin'],
+    'the canonical form comes back, not the raw first spelling');
+  assert.deepEqual(dedupeClaudeMatches(['C:\\a\\\\b\\claude.exe'], 'win32'), ['C:\\a\\b\\claude.exe']);
 });
 
-test('dedupeClaudeMatches is case-insensitive on win32 only', () => {
+test('dedupeClaudeMatches is case-insensitive on win32 only, and preserves the case it keeps', () => {
   const a = 'C:\\Users\\johnw\\.local\\bin\\claude.exe';
   const b = 'c:\\users\\johnw\\.local\\bin\\CLAUDE.EXE';
   assert.deepEqual(dedupeClaudeMatches([a, b], 'win32'), [a], 'one file, Windows is case-insensitive');
+  assert.deepEqual(dedupeClaudeMatches([b, a], 'win32'), [b], 'first spelling wins, case untouched');
   assert.equal(dedupeClaudeMatches(['/a/claude', '/A/Claude'], 'linux').length, 2, 'posix paths are case-sensitive');
 });
 

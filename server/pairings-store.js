@@ -299,6 +299,10 @@ function createPairingsStore({ filePath, now = Date.now, randomBytes, warn = con
     let timer = null;
     let watcher = null;
     const dir = path.dirname(pairingsPath);
+    // Safe to seed from the snapshot without a fresh read: createPairingsStore calls load()
+    // synchronously before returning, so this is the on-disk content as of construction. A change
+    // landing between construction and this call is therefore REPORTED by the first refresh, not
+    // masked - which is why the seed is not taken after a re-load here.
     let lastSignature = pairingsSignature(snapshot);
 
     // The snapshot is reloaded on EVERY tick (that unconditional reload is the revocation guarantee),
