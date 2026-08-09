@@ -61,6 +61,7 @@ const { createTeamSessionFactory } = require('./team-session-factory');
 const { createPrReviewWiring } = require('./pr-review-wiring');
 const { normalizeRemoteConfig, validateRemoteConfig, decideBindHost } = require('./core/remote-config');
 const { createClientPresence } = require('./core/client-presence');
+const { classifyUpgradePath, dataSessionIdFromUrl } = require('./core/upgrade-route');
 const { classifyRequestOrigin, decideUpgradeAccess } = require('./core/request-trust');
 const { createRemoteAuth } = require('./remote-auth');
 const { configSiblingPath, createPairingsStore, createSeenStore, defaultPairingsPath, defaultSeenPath } = require('./pairings-store');
@@ -1318,11 +1319,8 @@ function createBackend(httpServer, options = {}) {
   // --- Data WebSocket ---
 
   dataWss.on('connection', (ws, req) => {
-    const parts = req.url.split('/');
-    let sessionId;
-    try {
-      sessionId = decodeURIComponent(parts[parts.length - 1]);
-    } catch {
+    const sessionId = dataSessionIdFromUrl(req.url);
+    if (sessionId === null) {
       ws.close(1008, 'Invalid session id');
       return;
     }
@@ -1435,15 +1433,14 @@ function createBackend(httpServer, options = {}) {
   // --- WebSocket upgrade routing ---
   // Node's 'upgrade' event fires for ALL listeners. We only handle paths
   // we own (/control, /terminals/*). Unrecognized paths are left alone so
-  // other listeners (e.g. Vite HMR) can handle them.
+  // other listeners (e.g. Vite HMR) can handle them. Routing is by PATHNAME
+  // (core/upgrade-route.js): the dashboard reconnects with `/control?since=<seq>`.
 
   function handleUpgrade(req, socket, head) {
-    const { url } = req;
-    const isControl = url === '/control';
-    const isData = url.startsWith('/terminals/');
+    const route = classifyUpgradePath(req.url);
     const trust = classifyRequestOrigin({ localPort: socket.localPort, remoteListenerPort });
 
-    if (!isControl && !isData) {
+    if (route === 'unknown') {
       // Locally, leave the socket alone so other upgrade listeners (Vite HMR) can claim it. On the
       // remote listener nothing else is listening, so returning would strand an authenticated-by-
       // nobody socket open with no timeout; close it instead.
@@ -1468,7 +1465,7 @@ function createBackend(httpServer, options = {}) {
       return;
     }
 
-    if (isControl) {
+    if (route === 'control') {
       controlWss.handleUpgrade(req, socket, head, (ws) => {
         // Carry the listener-derived trust onto the connection: control handlers that trigger a
         // side effect on the SERVER machine (open-artifact spawning the editor) have no other way

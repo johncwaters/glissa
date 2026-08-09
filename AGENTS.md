@@ -135,6 +135,7 @@ server/            # Backend runtime (Express + WS wiring, control plane, shared
   core/pairing-token.js   # Pure token/device minting, TTL, single-use and revocation rules
   core/request-trust.js   # Pure listener-port trust classification + HTTP/upgrade access decisions
   core/upload-core.js     # Pure image-upload rules: mime -> extension, size cap, filename, bracketed-paste framing, retention plan
+  core/upgrade-route.js   # Pure WS-upgrade classification (control/data/unknown) by PATHNAME, plus the data-route session id
   update-check.js      # Startup GitHub version check, main-branch package.json (abortable, advisory only) behind config.checkForUpdates
   ephemeral-session.js # Shared ephemeral-Session registration: map insert, exit cleanup, destroy() wrap; used by the team and PR-review lanes
   team-session-factory.js  # Team Session construction: makeStageSession (headless stage) + startPackSetup (interactive guided setup)

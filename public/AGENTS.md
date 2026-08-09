@@ -13,6 +13,7 @@ The browser dashboard frontend: ES modules bundled by Vite (dev server with HMR 
 | `index.html` | Dashboard shell (Tailwind utility classes) |
 | `app.js` | Thin boot entry: wires modules, owns the document-level Alt+key shortcut dispatch |
 | `control-ws.js` | Control WebSocket client: connection, reconnect, request/response |
+| `reconnect-backoff.mjs` | Pure `nextReconnectDelayMs(attempt, random)`: the ONE retry delay for both WS clients (500ms doubling to a 30s cap, jittered to 50-100%) |
 | `dialogs.js` | Add Session and Settings dialog factories (HTML imported `?raw` from `components/`) |
 | `teams-panel.js` | Barrel for the Teams tab (re-exports the 4-symbol public API from `teams-panel/`) |
 | `render-scheduler.mjs` | Global xterm WRITE scheduler: callback-gated round-robin with per-frame budget (distinct from root `scheduler.js`, which is a cron) |

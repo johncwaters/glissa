@@ -3,7 +3,7 @@
 /*
  * Pure core for control-WS sequencing + replay of transient broadcasts.
  *
- * The dashboard's control-WS reconnects with a flat 500ms retry (public/control-ws.js).
+ * The dashboard's control-WS reconnects on a jittered backoff (public/reconnect-backoff.mjs).
  * The fresh `snapshot` sent on reconnect repairs all per-session state, but one-shot
  * broadcasts fired during the gap (notify, session-error, post-turn-result, team-* events)
  * are otherwise lost forever. `stamp` gives every broadcast a monotonic `seq`; `entriesSince`

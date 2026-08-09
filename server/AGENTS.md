@@ -29,6 +29,7 @@ Backend runtime: the Express + WebSocket server factory and its control plane, p
 | `core/pr-review-core.js` | Pure PR-review decisions (`prKey`/`filterActionablePrs`/`planReviews`/`planMerges`/`nextState`/`pingFor`) |
 | `core/branch-sync-core.js` | Pure ahead/behind parsing + decisions for the review sidebar's branch-sync indicator (IO in `session/sessions.js getBranchSync`) |
 | `core/restart-strategy.js` | Pure `decideRestartStrategy(env)` -> `respawn` \| `exit-for-supervisor`, keyed on systemd's `INVOCATION_ID` |
+| `core/upgrade-route.js` | Pure WS-upgrade target classification: `control` \| `data` \| `unknown` by PATHNAME (a reconnect carries `?since=<seq>`), plus the data-route session id |
 
 ## For AI Agents
 - These modules live one level below the repo root: filesystem assets (`dist/`, `public/`, `teams/`, `config.json`, `node_modules/`) resolve via `path.join(__dirname, '..', ...)`. Keep that offset when adding paths.

@@ -1,12 +1,13 @@
 // ── Control WebSocket module ──────────────────────────────────
 // Owns the control WebSocket connection, reconnect logic, and request/response.
 
+import { nextReconnectDelayMs } from './reconnect-backoff.mjs';
 import { buildWebSocketUrl } from './ws-url-core.mjs';
-
-const RECONNECT_DELAY_MS = 500;
 
 let controlWs = null;
 let controlRetryTimer = null;
+// Consecutive failed attempts since the last connection that actually opened; drives the backoff.
+let controlRetryAttempt = 0;
 let reconnectDisabled = false;
 const pendingRequests = new Map(); // requestId -> { resolve, timer }
 
@@ -74,6 +75,7 @@ export function connectControl() {
   controlWs = ws;
 
   ws.addEventListener('open', () => {
+    controlRetryAttempt = 0;
     if (_connectionStateCallback) _connectionStateCallback('connected', 'Connected');
   });
 
@@ -128,7 +130,9 @@ export function connectControl() {
       return;
     }
     if (_connectionStateCallback) _connectionStateCallback('disconnected', 'Reconnecting');
-    controlRetryTimer = setTimeout(connectControl, RECONNECT_DELAY_MS);
+    const retryDelayMs = nextReconnectDelayMs(controlRetryAttempt);
+    controlRetryAttempt += 1;
+    controlRetryTimer = setTimeout(connectControl, retryDelayMs);
   });
 
   ws.addEventListener('error', () => {

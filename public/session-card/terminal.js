@@ -7,6 +7,7 @@ import { FitAddon } from '@xterm/addon-fit';
 import { Terminal } from '@xterm/xterm';
 import { writeClipboardText } from '../dom-helpers.js';
 import { isFocusAltShortcut } from '../focus-view/focus-shortcuts.mjs';
+import { nextReconnectDelayMs } from '../reconnect-backoff.mjs';
 import { renderScheduler } from '../render-scheduler.mjs';
 import { getTerminalTheme } from '../theme.js';
 import { buildWebSocketUrl } from '../ws-url-core.mjs';
@@ -23,7 +24,6 @@ import { tryLoadWebGL } from './webgl-pool.js';
 
 // ── Constants ────────────────────────────────────────────────
 
-const RECONNECT_DELAY_MS = 500;
 const INPUT_QUEUE_MAX = 1024;
 // Phone-width terminals get a smaller cell so a usable column count fits in ~390px.
 const MOBILE_WIDTH_QUERY = '(max-width: 768px)';
@@ -80,15 +80,19 @@ function connectDataWs(sessionId, ui, term) {
     if (ui.dataWs === ws) {
       renderScheduler.unregister(sessionId);
       ui.dataWs = null;
+      // Per-card attempt count (each card has its own socket), reset once one opens again.
+      const retryDelayMs = nextReconnectDelayMs(ui._dataWsRetryAttempt || 0);
+      ui._dataWsRetryAttempt = (ui._dataWsRetryAttempt || 0) + 1;
       setTimeout(() => {
         if (sessionUIs.get(sessionId) === ui) {
           connectDataWs(sessionId, ui, term);
         }
-      }, RECONNECT_DELAY_MS);
+      }, retryDelayMs);
     }
   });
 
   ws.addEventListener('open', () => {
+    ui._dataWsRetryAttempt = 0;
     // Clear terminal before replay to prevent duplicate content accumulation
     term.clear();
     // Push the current size to the PTY on every (re)connect so it can't

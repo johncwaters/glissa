@@ -14,8 +14,10 @@ const http = require('node:http');
 const net = require('node:net');
 const os = require('node:os');
 const path = require('node:path');
+const WebSocket = require('ws');
 
 const { createBackend } = require('../server/backend');
+const { createPairingsStore } = require('../server/pairings-store');
 
 let tmpDir = null;
 let prevEnv = null;
@@ -89,6 +91,19 @@ function backendDestroyedUpgrade(server, port, requestPath) {
     });
     client.on('error', () => { /* the server end closing is the expected outcome */ });
   });
+}
+
+/**
+ * Mints a pairing token the way `glissa pair` does (a second store instance over the same temp
+ * pairings.json - redeem re-reads the file under its lock) and redeems it over HTTP, returning the
+ * device cookie the browser would then send.
+ */
+async function pairDevice() {
+  const minted = createPairingsStore({ filePath: path.join(tmpDir, 'pairings.json') })
+    .mintPending({ name: 'reconnect test device' });
+  const res = await fetch(`http://127.0.0.1:${remotePort}/pair/${minted.token}`, { redirect: 'manual' });
+  assert.equal(res.status, 303, 'a fresh token redeems');
+  return res.headers.get('set-cookie').split(';')[0];
 }
 
 test.before(async () => {
@@ -173,9 +188,25 @@ test('the same unknown upgrade path is left alone on the local listener (Vite HM
   assert.equal(destroyed, false, 'another upgrade listener must still get its chance');
 });
 
-// '/control?x=1' does not match the exact '/control' route, so it lands in the unknown bucket. That
-// matching behavior is preserved; the point here is that the remote listener closes it either way.
-test('a control upgrade with a query string is also closed remotely rather than stranded', async () => {
-  const destroyed = await backendDestroyedUpgrade(remoteServer, remotePort, '/control?x=1');
-  assert.equal(destroyed, true);
+// The dashboard reconnects with '/control?since=<seq>', so a query string must reach the control route
+// and be judged by the pairing gate, not fall through to the unknown-path bucket (which is what exact
+// URL matching used to do, killing every in-page reconnect).
+test('a control upgrade with a query string is refused as a control connection, not as an unknown path', async () => {
+  const { closed, body } = await rawUpgrade(remotePort, '/control?since=7');
+  assert.equal(closed, true);
+  assert.match(body, /^HTTP\/1\.1 401/, 'the 401 status line proves the control route judged it');
+});
+
+test('a paired device may reconnect with a replay cursor on the remote listener', async () => {
+  const cookie = await pairDevice();
+  const ws = new WebSocket(`ws://127.0.0.1:${remotePort}/control?since=7`, {
+    headers: { Cookie: cookie },
+    origin: 'https://glissa.test',
+  });
+  const first = await new Promise((resolve, reject) => {
+    ws.once('message', (raw) => resolve(JSON.parse(raw.toString())));
+    ws.once('error', reject);
+  });
+  assert.equal(first.type, 'snapshot', 'the cursor-carrying reconnect reached the control route');
+  await new Promise((resolve) => { ws.once('close', resolve); ws.close(); });
 });
