@@ -4,17 +4,33 @@ const { spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const npmBin = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 const viteBin = path.join(__dirname, '..', 'node_modules', '.bin', process.platform === 'win32' ? 'vite.cmd' : 'vite');
 
+// Node 20.12+ refuses to spawn .cmd shims without a shell (CVE-2024-27980
+// hardening, EINVAL), so npm.cmd can never be spawned directly on Windows.
+// Under an npm lifecycle, npm_execpath points at npm's own JS entry, which the
+// current node can run shell-free on every platform; outside a lifecycle fall
+// back to the PATH npm through a shell on Windows only.
+function npmInvocation(args) {
+  const npmExecPath = process.env.npm_execpath;
+  if (npmExecPath && /\.[cm]?js$/.test(npmExecPath)) {
+    return { command: process.execPath, args: [npmExecPath, ...args], shell: false };
+  }
+  if (process.platform === 'win32') {
+    return { command: 'npm', args, shell: true };
+  }
+  return { command: 'npm', args, shell: false };
+}
+
 function runNpm(args, env = {}) {
-  const child = spawnSync(npmBin, args, {
+  const invocation = npmInvocation(args);
+  const child = spawnSync(invocation.command, invocation.args, {
     env: { ...process.env, ...env, npm_config_global: 'false' },
     stdio: 'inherit',
-    shell: false,
+    shell: invocation.shell,
   });
   if (child.error) {
-    console.error(`prepare-build: ${npmBin} failed to start: ${child.error.message}`);
+    console.error(`prepare-build: npm failed to start: ${child.error.message}`);
     process.exit(1);
   }
   if (child.status === 0) return;
