@@ -54,8 +54,11 @@ function buildUpdateCommand() {
 // Query the remote package.json and decide whether an update exists. Resolves:
 //   { updateAvailable, current, latest, command }  when the fetch + parse succeed
 //   null                                           on ANY failure (throw, non-200, bad JSON, timeout)
-// Never rejects. The abort timer is unref'd (never pins the loop) and always cleared. The caller may pass
-// its own abortController so a shutdown can cancel an in-flight request; otherwise a fresh one is used.
+// Never rejects. The abort timer is deliberately NOT unref'd: it is the only thing that settles the
+// promise when the request hangs, so an unref'd timer lets the loop drain and leaves the caller awaiting
+// forever instead of resolving null. It is cleared in every exit path, so it pins the loop only while a
+// check is genuinely in flight (bounded by timeoutMs), which a real fetch's socket does anyway. The
+// caller may pass its own abortController so a shutdown can cancel an in-flight request.
 async function checkForUpdate({
   currentVersion,
   fetchFn = fetch,
@@ -64,7 +67,6 @@ async function checkForUpdate({
   abortController = new AbortController(),
 } = {}) {
   const timer = setTimeout(() => abortController.abort(), timeoutMs);
-  if (timer?.unref) timer.unref();
   try {
     const res = await fetchFn(packageJsonUrl, { signal: abortController.signal });
     if (!res || !res.ok) return null;

@@ -20,6 +20,7 @@ import {
   isTypedInputType,
 } from './ime-core.mjs';
 import { showErrorToast } from './toast.js';
+import { wireTouchScroll } from './touch-scroll.js';
 import { tryLoadWebGL } from './webgl-pool.js';
 
 // ── Constants ────────────────────────────────────────────────
@@ -92,8 +93,14 @@ function connectDataWs(sessionId, ui, term) {
 
   ws.addEventListener('open', () => {
     ui._dataWsRetryAttempt = 0;
-    // Clear terminal before replay to prevent duplicate content accumulation
-    term.clear();
+    // Full reset, not clear(), before the server's replay frame. The replay starts at whatever chunk
+    // boundary the session ring still retains, so it can open mid-escape-sequence and it carries no
+    // preamble re-establishing the emulator's modes. clear() keeps every one of them: a live parser
+    // state, the alternate buffer, the scroll region, the SGR attributes and the application cursor
+    // mode all survive it, so replaying into a terminal that was already inside Claude's alt-screen TUI
+    // renders mush that only a page reload (a brand new Terminal) clears. reset() puts the emulator
+    // back where a fresh one starts, which is the state the replay is implicitly written against.
+    term.reset();
     // Push the current size to the PTY on every (re)connect so it can't
     // drift out of sync with the browser after a disconnect. Reset the cache
     // first so the send isn't skipped when cols/rows match the last value.
@@ -311,6 +318,7 @@ export function setupTerminal(termWrap, ui) {
   });
 
   wireSoftKeyboardInput(termWrap, term, ui);
+  wireTouchScroll(termWrap, term);
 }
 
 // Predictive text, autocorrect and word deletion reach a phone keyboard's terminal through composition
@@ -439,8 +447,17 @@ export function ensureTerminalSetup(ui, sessionId) {
 // refresh runs - a refresh issued while still off-screen is suppressed by
 // xterm's _isPaused. Single in-flight rAF per card, mirroring the fit/scroll
 // coalescing in setupTerminal.
-export function forceTerminalRepaint(ui) {
-  if (!ui || ui._repaintRafId != null) return;
+//
+// `force` re-arms an already-pending repaint instead of collapsing into it. A caller that has just
+// made the card visible and re-fitted it knows the pending repaint was armed against the PREVIOUS
+// geometry, and the coalescing would otherwise silently drop the newer, better-informed request.
+export function forceTerminalRepaint(ui, { force = false } = {}) {
+  if (!ui) return;
+  if (ui._repaintRafId != null) {
+    if (!force) return;
+    cancelAnimationFrame(ui._repaintRafId);
+    ui._repaintRafId = null;
+  }
   ui._repaintRafId = requestAnimationFrame(() => {
     ui._repaintRafId = null;
     if (!ui.term) return;

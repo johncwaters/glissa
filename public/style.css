@@ -3859,7 +3859,15 @@ html[data-layout="phone"] .phone-shell[hidden] { display: none; }
 /* The card header does not render here: its name, state and elapsed clock are in the screen's top bar,
    and its action cluster was adopted up there. The terminal gets the whole screen. */
 .phone-card-slot .session-card.phone-centered .session-card-header { display: none; }
-.phone-card-slot .session-card.phone-centered .terminal-wrap { flex: 1 1 auto; min-height: 0; }
+/* touch-action:none is what lets session-card/touch-scroll.js call preventDefault on a vertical drag
+   and turn it into scrollback (xterm 6.0.0 has no touch path of its own): under the `manipulation`
+   inherited from the slot the browser can claim the pan first and hand the listener a non-cancelable
+   move. Only the terminal box is claimed; the rest of the screen behaves normally. */
+.phone-card-slot .session-card.phone-centered .terminal-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+  touch-action: none;
+}
 
 /* ── Touch key strip (under the phone terminal) ──
    Esc / Tab / Ctrl+C / arrows / Paste: the keys a soft keyboard cannot produce. Quiet ghost buttons on
@@ -3872,6 +3880,12 @@ html[data-layout="phone"] .phone-shell[hidden] { display: none; }
   padding: 6px 8px;
   background: var(--bg-surface);
   border-top: 1px solid var(--border-dim);
+}
+html[data-layout="phone"] .phone-shell:not([data-keyboard="open"]) .phone-key-strip {
+  display: none;
+}
+html[data-layout="phone"] .phone-shell[data-keyboard="open"] .phone-key-strip:not([hidden]) {
+  display: flex;
 }
 .phone-key-strip[hidden] { display: none; }
 .phone-key {
@@ -3927,6 +3941,7 @@ html[data-layout="phone"] .review-sidebar-body { overscroll-behavior: contain; }
   border-top: 1px solid var(--border-dim);
   padding-bottom: env(safe-area-inset-bottom);
 }
+html[data-layout="phone"] .phone-shell[data-keyboard="open"] .phone-nav { display: none; }
 .phone-nav-item {
   position: relative;
   flex: 1 1 0;

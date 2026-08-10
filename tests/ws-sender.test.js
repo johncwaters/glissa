@@ -289,8 +289,8 @@ test('AC4: evicted fallback: missed range scrolled out of the ring -> CLEAR + fu
   feed(ring, s, 'bbbb'); // drained -> backfill; sentOffset(0) < base(2) -> evicted
 
   assert.equal(ws.sent.length, 1, 'one backfill frame');
-  assert.ok(ws.sent[0].startsWith('\x1b[2J\x1b[3J\x1b[H'), 'frame begins with the CLEAR sequence');
-  assert.equal(ws.sent[0], '\x1b[2J\x1b[3J\x1b[H' + 'aabbbb', 'CLEAR + retained replay tail');
+  assert.ok(ws.sent[0].startsWith('\x1bc\x1b[2J\x1b[3J\x1b[H'), 'frame begins with the CLEAR sequence');
+  assert.equal(ws.sent[0], '\x1bc\x1b[2J\x1b[3J\x1b[H' + 'aabbbb', 'CLEAR + retained replay tail');
 });
 
 test('AC6: sendImmediate does not advance the live offset (backfill resumes from startOffset)', () => {
@@ -497,6 +497,6 @@ test('sendImmediate drop then eviction recovers via CLEAR + retained replay', ()
   feed(ring, s, 'LIVE');
 
   assert.equal(ws.sent.length, 1, 'one backfill frame');
-  assert.ok(ws.sent[0].startsWith('\x1b[2J\x1b[3J\x1b[H'), 'CLEAR prefix on evicted recovery');
-  assert.equal(ws.sent[0], `\x1b[2J\x1b[3J\x1b[H${'R'.repeat(50)}LIVE`, 'CLEAR + retained tail');
+  assert.ok(ws.sent[0].startsWith('\x1bc\x1b[2J\x1b[3J\x1b[H'), 'CLEAR prefix on evicted recovery');
+  assert.equal(ws.sent[0], `\x1bc\x1b[2J\x1b[3J\x1b[H${'R'.repeat(50)}LIVE`, 'CLEAR + retained tail');
 });

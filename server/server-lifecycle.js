@@ -16,12 +16,15 @@ const { decideRestartStrategy, SUPERVISED_RESTART_EXIT_CODE } = require('./core/
 // Bounded wait for the pending PTY reaps a shutdown started, so the process does not exit (or respawn)
 // before taskkill has reaped the cmd/claude/conhost tree. Capped so a child that resists kill cannot
 // hang the lifecycle. Returns a promise that always resolves.
+// The cap timer is deliberately NOT unref'd: when a reap hangs it is the only thing that settles the
+// returned promise, so an unref'd timer lets the loop drain and leaves the awaiting caller hanging
+// instead of proceeding. It is cleared as soon as the race settles, so it pins the loop only while a
+// reap is genuinely outstanding, bounded by capMs.
 function awaitReaps(pendingReaps, { capMs = 3000, setTimeoutFn = setTimeout, clearTimeoutFn = clearTimeout } = {}) {
   if (!Array.isArray(pendingReaps) || pendingReaps.length === 0) return Promise.resolve();
   let timer;
   const cap = new Promise((resolve) => {
     timer = setTimeoutFn(resolve, capMs);
-    if (timer?.unref) timer.unref();
   });
   return Promise.race([Promise.allSettled(pendingReaps), cap]).then(() => clearTimeoutFn(timer));
 }

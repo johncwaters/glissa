@@ -28,6 +28,16 @@ function evictWebglIfNeeded(exceptUi) {
   }
 }
 
+// The other half of eviction, and the only reader of the flag evictWebglIfNeeded sets. A card gives up
+// its context while off-screen and takes one back when it is shown again, so the cap follows what the
+// operator is actually looking at. Without this the flag was write-only and an evicted card stayed on
+// the DOM renderer permanently - on a phone, where the cap is 4, that is every session past the fourth
+// for the rest of the page's life. A no-op for a card that never lost its context.
+export function reacquireWebglIfEvicted(ui) {
+  if (!ui?.term || !ui.needsWebGLReload) return;
+  tryLoadWebGL(ui);
+}
+
 export function tryLoadWebGL(ui) {
   try {
     // Already have a healthy context: just refresh LRU recency and return.

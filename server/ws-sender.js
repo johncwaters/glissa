@@ -25,10 +25,19 @@
 
 const OPEN = 1;
 
-// Clear screen + clear scrollback + cursor home. Emitted ONLY on the evicted-fallback
-// backfill (when the missed range scrolled out of the ring), never on an exact resend,
-// so good scrollback is preserved on the common recovery.
-const CLEAR = '\x1b[2J\x1b[3J\x1b[H';
+// Full reset (RIS) + clear screen + clear scrollback + cursor home. Emitted ONLY on the
+// evicted-fallback backfill (when the missed range scrolled out of the ring), never on an
+// exact resend, so good scrollback is preserved on the common recovery.
+//
+// RIS leads because the replay that follows it starts at whichever ring chunk boundary
+// survived eviction: it can open mid-escape-sequence and it re-establishes none of the
+// emulator state the evicted bytes set up. The erase sequences alone leave the parser
+// mid-sequence and leave the alternate buffer, the scroll region, the SGR attributes and
+// the application cursor mode exactly as they were, so replaying into a terminal already
+// inside an alt-screen TUI renders mush. RIS puts the emulator where a fresh one starts,
+// which is the state the replay is implicitly written against. The erase sequences are
+// kept after it because RIS alone leaves the scrollback on some emulators.
+const CLEAR = '\x1bc\x1b[2J\x1b[3J\x1b[H';
 
 const DEFAULTS = Object.freeze({
   maxSendBuffer: 65536, // coalesce target and hard per-frame cap (bytes)

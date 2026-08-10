@@ -5,6 +5,7 @@
 import { adoptElement, releaseElement } from './dom-helpers.js';
 import { container, sessionUIs } from './session-card/card-registry.js';
 import { ensureTerminalSetup, forceTerminalRepaint } from './session-card/terminal.js';
+import { reacquireWebglIfEvicted } from './session-card/webgl-pool.js';
 
 let borrowedId = null;
 
@@ -30,6 +31,12 @@ export function borrowCard(ui, sessionId, slotEl, { className } = {}) {
   // A dormant card has no terminal yet - build one so the surface is not a blank box. This does NOT
   // spawn a PTY; it only constructs the xterm.
   if (!ui.term) ensureTerminalSetup(ui, sessionId);
+  // Becoming visible is the moment a card evicted from the WebGL context pool gets its context back.
+  // The pool caps contexts at 4 on a coarse pointer, so on a phone every session switch past the
+  // fourth evicts someone; without this the flag the pool sets is never read and an evicted card is
+  // stuck on the DOM renderer for the rest of the page's life. tryLoadWebGL is a no-op on a card that
+  // already holds a healthy context, so this costs nothing on the common borrow.
+  reacquireWebglIfEvicted(ui);
   // Deterministic fit to the new (usually much larger) slot rather than waiting on the ResizeObserver.
   ui._applyFit?.();
   forceTerminalRepaint(ui);

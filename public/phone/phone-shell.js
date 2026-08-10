@@ -46,6 +46,11 @@ let teamsPanelEl = null;
 let hooks = {};
 let activeScreen = BOARD;
 let active = false;
+const SOFT_KEYBOARD_OPEN_DELTA_PX = 120;
+// Tallest visual viewport seen at the current width, which is by construction its keyboard-closed
+// height. Zero until the first measurement.
+let keyboardClosedBaselineHeightPx = 0;
+let baselineViewportWidthPx = 0;
 // Whether we have pushed our one history entry above the Board. At most one entry is ever pushed, so
 // the browser back gesture always lands on the Board rather than walking a stack of screen visits.
 let pushedHistoryEntry = false;
@@ -55,11 +60,40 @@ let pushedHistoryEntry = false;
 // up: the layout viewport does not shrink, so a 100dvh shell keeps its bottom nav and the terminal's
 // last rows underneath the keyboard. Sizing the shell to visualViewport.height instead makes the
 // keyboard RESIZE the terminal, and the terminal's existing ResizeObserver then refits cols/rows.
+//
+// "Keyboard open" is measured against the tallest viewport seen, NOT against window.innerHeight: the
+// visual viewport also excludes collapsing browser chrome (iOS Safari's URL bar is ~90-110px), so on
+// some devices innerHeight - viewport.height clears the threshold with no keyboard up at all and
+// data-keyboard="open" latches forever, hiding the bottom nav for the rest of the session.
+function resetSoftKeyboardBaseline() {
+  keyboardClosedBaselineHeightPx = 0;
+  baselineViewportWidthPx = 0;
+}
+
 function syncVisualViewport() {
   const viewport = window.visualViewport;
-  if (!viewport || !shellEl) return;
+  if (!shellEl) return;
+  if (!active) {
+    shellEl.removeAttribute('data-keyboard');
+    return;
+  }
+  if (!viewport) {
+    shellEl.removeAttribute('data-keyboard');
+    return;
+  }
   shellEl.style.setProperty('--phone-vh', `${viewport.height}px`);
   shellEl.style.setProperty('--phone-vv-top', `${viewport.offsetTop}px`);
+  // An orientation flip changes the width and invalidates the height baseline with it.
+  if (viewport.width !== baselineViewportWidthPx) {
+    baselineViewportWidthPx = viewport.width;
+    keyboardClosedBaselineHeightPx = 0;
+  }
+  keyboardClosedBaselineHeightPx = Math.max(keyboardClosedBaselineHeightPx, viewport.height);
+  if (keyboardClosedBaselineHeightPx - viewport.height > SOFT_KEYBOARD_OPEN_DELTA_PX) {
+    shellEl.dataset.keyboard = 'open';
+    return;
+  }
+  shellEl.removeAttribute('data-keyboard');
 }
 
 // Deliberately NOT the ARIA tabs pattern. These four are DESTINATIONS, not panels of one document:
@@ -278,6 +312,8 @@ export function deactivatePhoneShell() {
   releaseElement(teamsPanelEl);
   for (const control of (hooks.headerControls || [])) releaseElement(control);
   shellEl.hidden = true;
+  shellEl.removeAttribute('data-keyboard');
+  resetSoftKeyboardBaseline();
   // The desktop layout must not inherit our history entry: nothing there listens for it, so it would
   // cost the operator one dead Back press.
   surrenderHistoryEntry();

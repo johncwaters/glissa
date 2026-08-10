@@ -18,6 +18,7 @@ import { sessionUIs } from '../session-card/card-registry.js';
 import { onSessionTick, sessionElapsedText } from '../session-card/session-tick.js';
 import { forceTerminalRepaint, sendTerminalInput } from '../session-card/terminal.js';
 import { showErrorToast } from '../session-card/toast.js';
+import { reacquireWebglIfEvicted } from '../session-card/webgl-pool.js';
 import { createMobileKeyStrip } from './mobile-key-strip.js';
 
 const BACK_GLYPH = String.fromCharCode(0x2039); // single left-pointing angle quotation mark
@@ -190,12 +191,19 @@ export function createTerminalScreen({ onBack }) {
   // can leave the frame from before the screen was hidden painted over the live buffer. Force the fit
   // and repaint here, mirroring what card-host.borrowCard does on a fresh borrow, so a
   // Board -> Terminal -> Board -> Terminal round trip is deterministic rather than dimension-dependent.
+  //
+  // The repaint is FORCED because the ordering makes a plain one a no-op on the path that matters:
+  // phone-shell.openSession borrows the card while this section is still hidden, so borrowCard's fit
+  // early-returned on a card with no offsetParent and armed a repaint against that stale geometry.
+  // Only the fit below runs against the real box, so the repaint that follows it has to be the one
+  // that lands rather than collapsing into the pending, worse-informed one.
   function reveal() {
     refresh();
     const ui = shownId ? sessionUIs.get(shownId) : null;
     if (!ui) return;
+    reacquireWebglIfEvicted(ui);
     ui._applyFit?.();
-    forceTerminalRepaint(ui);
+    forceTerminalRepaint(ui, { force: true });
     focusShownTerminal();
   }
 
