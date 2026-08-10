@@ -33,7 +33,6 @@ function projectsOf(snapshot) {
   return Array.isArray(snapshot?.projects) ? snapshot.projects : [];
 }
 
-
 function buildPrRow(pr) {
   const row = el('div', 'pr-row');
   row.dataset.severity = severity(pr.phase, { inFlight: !!pr.inFlight, pingedError: !!pr.pingedError });

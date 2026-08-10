@@ -5,7 +5,7 @@
 
 import { onSessionTick } from './session-card/session-tick.js';
 
-export function formatAgo(ts) {
+function formatAgo(ts) {
   if (!Number.isFinite(ts)) return 'never';
   const seconds = Math.max(0, Math.round((Date.now() - ts) / 1000));
   if (seconds < 60) return `${seconds}s ago`;
