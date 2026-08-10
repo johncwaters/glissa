@@ -1278,7 +1278,9 @@ body {
   overflow: hidden;
 }
 
-/* [P2] Settings tab strip - replaces single-scroll section stack */
+/* [P2] Settings tab strip - replaces single-scroll section stack. Wraps at every width: the old
+   hidden-scrollbar overflow gave no hint that tabs past the dialog edge existed, so a newly added
+   tab was invisible until the operator happened to scroll a strip that did not look scrollable. */
 .settings-tabs {
   display: flex;
   flex-wrap: wrap;
