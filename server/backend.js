@@ -64,6 +64,7 @@ const { normalizeRemoteConfig, validateRemoteConfig, decideBindHost } = require(
 const { createClientPresence } = require('./core/client-presence');
 const { classifyUpgradePath, dataSessionIdFromUrl } = require('./core/upgrade-route');
 const { classifyRequestOrigin, decideUpgradeAccess } = require('./core/request-trust');
+const { isApplicableViewerSize, pickSizeAfterDeparture } = require('./core/viewer-size-core');
 const { createRemoteAuth } = require('./remote-auth');
 const { configSiblingPath, createPairingsStore, createSeenStore, defaultPairingsPath, defaultSeenPath } = require('./pairings-store');
 const {
@@ -601,8 +602,8 @@ function createBackend(httpServer, options = {}) {
       if (stats.destroyed) destroyedReachable = true;
     }
     let dataClientTotal = 0;
-    for (const set of sessionDataClients.values()) {
-      dataClientTotal += set.size;
+    for (const clients of sessionDataClients.values()) {
+      dataClientTotal += clients.size;
     }
     let activeResources = 0;
     try {
@@ -723,7 +724,11 @@ function createBackend(httpServer, options = {}) {
   // Sessions are keyed by stable `id` (UUID), not mutable `name`.
 
   const sessions = new Map();
+  // sessionId -> Map<ws, { cols, rows, resizeSeq } | null>. The keys are the health telemetry's
+  // data-client count; the values carry each connection's last declared viewer size so a viewer that
+  // stops looking can hand the PTY back to whoever is still watching (server/core/viewer-size-core.js).
   const sessionDataClients = new Map();
+  let nextViewerResizeSeq = 0;
   // Team-stage sessions live in a SEPARATE map so config hot-reload diffing (diffProjects) never
   // destroys a live stage, and so they are not persisted to config.json. See plan 3.5.
   const teamSessions = new Map();
@@ -746,7 +751,7 @@ function createBackend(httpServer, options = {}) {
   function closeSessionDataClients(sessionId) {
     const clients = sessionDataClients.get(sessionId);
     if (clients) {
-      for (const ws of clients) {
+      for (const ws of clients.keys()) {
         ws.close(1001, 'Session removed');
       }
       sessionDataClients.delete(sessionId);
@@ -1358,9 +1363,24 @@ function createBackend(httpServer, options = {}) {
     }
 
     if (!sessionDataClients.has(sessionId)) {
-      sessionDataClients.set(sessionId, new Set());
+      sessionDataClients.set(sessionId, new Map());
     }
-    sessionDataClients.get(sessionId).add(ws);
+    const viewerSizes = sessionDataClients.get(sessionId);
+    viewerSizes.set(ws, null);
+
+    // A viewer that stops looking (phone leaving the Terminal screen, card released back to its hidden
+    // home) hands the PTY back to the most recent viewer still watching; its own client caches the size
+    // it last sent and cannot re-assert on demand, so the server does it.
+    function releaseViewerSize() {
+      if (!viewerSizes.get(ws)) return;
+      viewerSizes.set(ws, null);
+      // The session was removed out from under us (closeSessionDataClients drops the whole map before
+      // the close handlers run); resizing its PTY on the way out is meaningless.
+      if (sessionDataClients.get(sessionId) !== viewerSizes) return;
+      const successor = pickSizeAfterDeparture(viewerSizes, ws);
+      if (!successor) return;
+      sess.resize(successor.cols, successor.rows);
+    }
 
     // Backpressure-aware, echo-prioritizing sender (see ws-sender.js): coalesces
     // PTY frames into fewer/larger WS frames, SKIPS sends when the socket is
@@ -1422,10 +1442,17 @@ function createBackend(httpServer, options = {}) {
       if (msg.type === 'resize') {
         const cols = Number(msg.cols);
         const rows = Number(msg.rows);
-        if (Number.isInteger(cols) && Number.isInteger(rows)
-            && cols > 0 && cols <= 500 && rows > 0 && rows <= 200) {
+        if (isApplicableViewerSize(cols, rows)) {
+          nextViewerResizeSeq += 1;
+          viewerSizes.set(ws, { cols, rows, resizeSeq: nextViewerResizeSeq });
           sess.resize(cols, rows);
         }
+        return;
+      }
+      // The connection stays open (bytes keep flowing into the card's terminal); only this viewer's
+      // claim on the PTY size is dropped.
+      if (msg.type === 'unview') {
+        releaseViewerSize();
       }
     });
 
@@ -1448,6 +1475,7 @@ function createBackend(httpServer, options = {}) {
     ws.on('close', () => {
       sess.removeListener('data', dataListener);
       sender.destroy();
+      releaseViewerSize();
       const clients = sessionDataClients.get(sessionId);
       if (clients) {
         clients.delete(ws);

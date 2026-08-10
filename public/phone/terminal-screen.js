@@ -186,6 +186,14 @@ export function createTerminalScreen({ onBack }) {
     paint();
   }
 
+  // The screen was navigated away from. The card stays borrowed (its bytes keep flowing) but it is no
+  // longer on screen, so it stops speaking for the PTY's size and a desktop watching the same session
+  // gets its own dimensions back. reveal() re-asserts on the way in.
+  function unview() {
+    const ui = shownId ? sessionUIs.get(shownId) : null;
+    ui?._unviewTerminal?.();
+  }
+
   // The screen just became visible. A card that never left the slot keeps its exact dimensions, so
   // applyFit's cols/rows comparison early-returns and the WebGL texture atlas is never cleared - which
   // can leave the frame from before the screen was hidden painted over the live buffer. Force the fit
@@ -220,6 +228,7 @@ export function createTerminalScreen({ onBack }) {
     clear,
     refresh,
     reveal,
+    unview,
     getSessionId: () => shownId,
   };
 }

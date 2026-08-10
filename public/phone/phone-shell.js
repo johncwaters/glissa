@@ -264,7 +264,12 @@ function applyScreen(screenId) {
   if (screenId === 'teams') hooks.onTeamsShown?.(teamsPanelEl);
   // A hidden terminal had no measurable box, and one that never left the slot has unchanged dimensions
   // that make applyFit early-return; reveal() forces the fit + repaint either way.
-  if (screenId === 'terminal') terminalScreen.reveal();
+  if (screenId === 'terminal') {
+    terminalScreen.reveal();
+    return;
+  }
+  // The card is still borrowed by the hidden Terminal screen, so releaseCard's hand-back never runs.
+  terminalScreen.unview();
 }
 
 function showScreen(screenId) {

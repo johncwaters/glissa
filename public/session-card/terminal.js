@@ -183,6 +183,9 @@ export function setupTerminal(termWrap, ui) {
   let lastSentRows = 0;
   let lastFittedCols = 0;
   let lastFittedRows = 0;
+  // Whether this card has told the server a size the PTY may still be wearing. A board-only phone or a
+  // card that has never been visible has claimed nothing, so it has nothing to hand back.
+  let hasClaimedViewerSize = false;
   function applyFit() {
     fitRafId = null;
     if (!ui.fitAddon || !ui.term) return;
@@ -205,6 +208,7 @@ export function setupTerminal(termWrap, ui) {
     ui.dataWs.send(JSON.stringify({ type: 'resize', cols, rows }));
     lastSentCols = cols;
     lastSentRows = rows;
+    hasClaimedViewerSize = true;
   }
   const resizeObserver = new ResizeObserver(() => {
     if (fitRafId !== null) return;
@@ -218,6 +222,21 @@ export function setupTerminal(termWrap, ui) {
   // respawned and needs the current size even if the browser-side cols/rows
   // haven't changed.
   ui._resetResizeCache = () => { lastSentCols = 0; lastSentRows = 0; };
+
+  // A session owns one PTY but any number of viewers (a second tab, a paired phone), and resize is
+  // last-write-wins, so a phone opening a session reflows the desktop's terminal to phone width. The
+  // desktop cannot notice: its own box never changed, so the cache above suppresses any re-send. The
+  // viewer that STOPS looking therefore hands its claim back and the server re-applies the most recent
+  // surviving viewer's size (server/core/viewer-size-core.js). The cache is dropped with it because
+  // this card may become the visible viewer again at exactly the dimensions it just gave up, and the
+  // fit that follows would otherwise early-return and leave the PTY at the other viewer's size.
+  ui._unviewTerminal = () => {
+    if (!hasClaimedViewerSize) return;
+    hasClaimedViewerSize = false;
+    ui._resetResizeCache();
+    if (ui.dataWs?.readyState !== WebSocket.OPEN) return;
+    ui.dataWs.send(JSON.stringify({ type: 'unview' }));
+  };
 
   // First-render fit: xterm's FitAddon silently no-ops if it's called before
   // the renderer has measured a cell, so the initial ResizeObserver fire can

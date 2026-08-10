@@ -50,6 +50,9 @@ export function releaseCard() {
   if (!releasedId) return null;
 
   const ui = sessionUIs.get(releasedId);
+  // Back in the hidden home slot this card is nobody's viewer, so it gives its claim on the PTY size
+  // back to whichever client is still looking at the session.
+  ui?._unviewTerminal?.();
   const card = ui?.card;
   if (!card) return releasedId;
 

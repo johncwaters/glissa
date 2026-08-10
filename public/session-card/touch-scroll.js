@@ -14,11 +14,21 @@
 // Phone only. On desktop a wheel already works, and claiming touchmove there would break a coarse
 // pointer device that is still on the desktop layout (a tablet), where the drag may belong to the page.
 
+// A released flick coasts, on the scrollback path only. The physics is the VS Code Gesture inertia
+// vendored into xterm (see touch-scroll-core.mjs), driven here by requestAnimationFrame. The wheel path
+// never coasts: every coasted row there would cost the application another mouse report or arrow key
+// plus a full-screen redraw, for motion the operator's finger already stopped asking for.
+
 import {
+  beginInertia,
   cellHeightFromElement,
   isScrollGesture,
+  MAX_WHEEL_ROWS_PER_STEP,
+  pushVelocitySample,
+  releaseVelocity,
   scrollLinesForDrag,
   shouldSendWheelReport,
+  stepInertia,
 } from './touch-scroll-core.mjs';
 
 const DOM_DELTA_LINE = 1;
@@ -50,11 +60,33 @@ export function wireTouchScroll(termWrap, term) {
   let lastY = 0;
   let isScrolling = false;
   let pendingPx = 0;
+  let velocitySamples = [];
+  let inertiaState = null;
+  let inertiaFrame = null;
+
+  const cancelInertia = () => {
+    if (inertiaFrame !== null) cancelAnimationFrame(inertiaFrame);
+    inertiaFrame = null;
+    inertiaState = null;
+  };
+
+  const routesToApplication = () =>
+    shouldSendWheelReport(term.buffer?.active?.type, term.modes?.mouseTrackingMode);
+
+  // The rows box, not term.element: .xterm is stretched to the wrap's full height on the phone
+  // (.terminal-wrap .xterm { height: 100% }), which includes the partial row below the last full one,
+  // and dividing that box by term.rows overstates the row height, so the buffer would travel slightly
+  // less than the finger for the whole drag.
+  const measureCellHeight = () => {
+    const screen = term.element?.querySelector('.xterm-screen');
+    return cellHeightFromElement(screen?.clientHeight || term.element?.clientHeight || 0, term.rows);
+  };
 
   const endGesture = () => {
     activeTouchId = null;
     isScrolling = false;
     pendingPx = 0;
+    velocitySamples = [];
   };
 
   // One notch per row, so a burst reaches the application as the wheel events it would have got from a
@@ -75,15 +107,47 @@ export function wireTouchScroll(termWrap, term) {
     }
   };
 
-  const applyScroll = (scrollLines, clientX, clientY) => {
-    if (shouldSendWheelReport(term.buffer.active.type, term.modes?.mouseTrackingMode)) {
-      dispatchWheelNotches(scrollLines, clientX, clientY);
+  // One coasting frame. The coast ends by itself when the velocity decays away, and is abandoned early
+  // whenever the surface it was scrolling stops being the one the operator flicked: the card was torn
+  // down or re-parented out of the document, the layout flipped off phone, the application turned mouse
+  // tracking on or switched to the alternate buffer, or the scrollback hit its end (a stuck viewport
+  // would otherwise spin frames against a boundary until the friction ran out).
+  const runInertiaFrame = () => {
+    inertiaFrame = null;
+    if (!inertiaState) return;
+    if (!termWrap.isConnected || !isPhoneLayout() || routesToApplication()) {
+      cancelInertia();
       return;
     }
-    term.scrollLines(scrollLines);
+
+    const viewportBefore = term.buffer?.active?.viewportY;
+    const { scrollLines, state } = stepInertia(inertiaState, performance.now());
+    inertiaState = state;
+    if (scrollLines !== 0) term.scrollLines(scrollLines);
+    if (!inertiaState) return;
+    if (scrollLines !== 0 && term.buffer?.active?.viewportY === viewportBefore) {
+      cancelInertia();
+      return;
+    }
+    inertiaFrame = requestAnimationFrame(runInertiaFrame);
+  };
+
+  const startInertia = (velocityPxPerMs, startedAtMs, carriedPx) => {
+    inertiaState = beginInertia({
+      velocityPxPerMs,
+      startedAtMs,
+      cellHeightPx: measureCellHeight(),
+      pendingPx: carriedPx,
+    });
+    if (!inertiaState) return;
+    inertiaFrame = requestAnimationFrame(runInertiaFrame);
   };
 
   termWrap.addEventListener('touchstart', (event) => {
+    // A finger landing during a coast stops it where it is, the way every native scroll surface
+    // behaves: the touch is a catch, not a request to keep moving underneath it.
+    cancelInertia();
+
     // A second finger is a pinch or a two-finger pan; hand the whole gesture back rather than
     // scrolling off whichever touch happens to be first.
     if (!isPhoneLayout() || event.touches.length !== 1) {
@@ -97,6 +161,7 @@ export function wireTouchScroll(termWrap, term) {
     lastY = touch.clientY;
     isScrolling = false;
     pendingPx = 0;
+    velocitySamples = [];
   }, { passive: true });
 
   termWrap.addEventListener('touchmove', (event) => {
@@ -111,6 +176,7 @@ export function wireTouchScroll(termWrap, term) {
       // jump the buffer.
       lastY = touch.clientY;
       pendingPx = 0;
+      velocitySamples = pushVelocitySample([], touch.clientY, event.timeStamp);
     }
 
     // Claimed only once the gesture is a scroll: up to that point the touch still belongs to the
@@ -120,14 +186,44 @@ export function wireTouchScroll(termWrap, term) {
 
     pendingPx += touch.clientY - lastY;
     lastY = touch.clientY;
+    velocitySamples = pushVelocitySample(velocitySamples, touch.clientY, event.timeStamp);
 
-    const cellHeight = cellHeightFromElement(term.element?.clientHeight || 0, term.rows);
-    const { scrollLines, remainderPx } = scrollLinesForDrag(pendingPx, cellHeight);
+    const sendsToApplication = routesToApplication();
+    const { scrollLines, remainderPx } = scrollLinesForDrag(
+      pendingPx,
+      measureCellHeight(),
+      sendsToApplication ? MAX_WHEEL_ROWS_PER_STEP : undefined,
+    );
     pendingPx = remainderPx;
     if (scrollLines === 0) return;
-    applyScroll(scrollLines, touch.clientX, touch.clientY);
+    if (sendsToApplication) {
+      dispatchWheelNotches(scrollLines, touch.clientX, touch.clientY);
+      return;
+    }
+    term.scrollLines(scrollLines);
   }, { passive: false });
 
-  termWrap.addEventListener('touchend', endGesture, { passive: true });
-  termWrap.addEventListener('touchcancel', endGesture, { passive: true });
+  termWrap.addEventListener('touchend', (event) => {
+    if (!isScrolling || routesToApplication()) {
+      endGesture();
+      return;
+    }
+    // The lift position closes the window: a finger held still fires no touchmove, so without this the
+    // samples would still describe the flick that preceded the pause and the buffer would coast after
+    // the operator had already stopped it.
+    velocitySamples = pushVelocitySample(velocitySamples, lastY, event.timeStamp);
+    const velocityPxPerMs = releaseVelocity(velocitySamples);
+    const carriedPx = pendingPx;
+    endGesture();
+    if (velocityPxPerMs === 0) return;
+    // Seeded with performance.now(), the clock the rAF frames advance on. Seeding from event.timeStamp
+    // assumes the two share an origin; where they did not, the first frame's elapsedMs <= 0 would
+    // reschedule without advancing lastMs and the loop would spin without ever scrolling.
+    startInertia(velocityPxPerMs, performance.now(), carriedPx);
+  }, { passive: true });
+
+  termWrap.addEventListener('touchcancel', () => {
+    cancelInertia();
+    endGesture();
+  }, { passive: true });
 }
