@@ -5,10 +5,13 @@
 
 import { el } from './dom-helpers.js';
 import { severityFor as severity, sortIssuesByAttention, summarizeIssues } from './radar-core.mjs';
+import { onSessionTick } from './session-card/session-tick.js';
 
 let _latest = null;
 let _root = null;
 let _activityCallback = null;
+let _tickEls = [];
+let _unsubscribeTick = null;
 
 const CHANGE_LABEL = {
   spiking: 'spiking',
@@ -41,6 +44,31 @@ function formatCount(n) {
 
 function projectsOf(snapshot) {
   return Array.isArray(snapshot?.projects) ? snapshot.projects : [];
+}
+
+function pollText(ts) {
+  return `polled ${formatAgo(ts)}`;
+}
+
+function paintPollText(tickEl, ts) {
+  const nextText = pollText(ts);
+  if (tickEl.textContent === nextText) return;
+  tickEl.textContent = nextText;
+}
+
+function isVisible() {
+  if (!_root) return false;
+  return !_root.closest('[hidden]');
+}
+
+function refreshPollTimes() {
+  if (!isVisible()) return;
+  for (const tick of _tickEls) paintPollText(tick.el, tick.lastTickAt);
+}
+
+function ensureTickSubscription() {
+  if (_unsubscribeTick) return;
+  _unsubscribeTick = onSessionTick(refreshPollTimes);
 }
 
 function buildIssueRow(issue) {
@@ -104,7 +132,10 @@ function buildProject(project) {
   const summary = el('div', 'radar-project-summary');
   summary.append(summaryStat(counts.active === 1 ? 'active issue' : 'active issues', formatCount(counts.active)));
   summary.append(summaryStat('spiking', formatCount(counts.spiking), counts.spiking > 0 ? 'crit' : null));
-  summary.append(el('span', 'radar-project-tick', `polled ${formatAgo(project.lastTickAt)}`));
+  const tickEl = el('span', 'radar-project-tick');
+  paintPollText(tickEl, project.lastTickAt);
+  _tickEls.push({ el: tickEl, lastTickAt: project.lastTickAt });
+  summary.append(tickEl);
   wrap.append(summary);
 
   if (issues.length === 0) {
@@ -127,6 +158,7 @@ function attentionCount() {
 function render() {
   if (!_root) return;
   _root.textContent = '';
+  _tickEls = [];
   const projects = projectsOf(_latest);
   if (projects.length === 0) {
     _root.append(el('p', 'radar-unconfigured', 'PostHog monitoring is not configured, or has not ticked yet. Open Settings and its PostHog tab to set it up.'));
@@ -146,6 +178,7 @@ export function mountRadarView(parent) {
   const root = el('div', 'radar-content');
   parent.appendChild(root);
   _root = root;
+  ensureTickSubscription();
   render();
   return root;
 }

@@ -5,10 +5,13 @@
 
 import { el } from './dom-helpers.js';
 import { normalizePhase, severityFor as severity, sortPrsByAttention, summarizePrs } from './pr-view-core.mjs';
+import { onSessionTick } from './session-card/session-tick.js';
 
 let _latest = null;
 let _root = null;
 let _activityCallback = null;
+let _tickEls = [];
+let _unsubscribeTick = null;
 
 const PHASE_LABEL = {
   error: 'error',
@@ -38,6 +41,31 @@ function shortSha(sha) {
 
 function projectsOf(snapshot) {
   return Array.isArray(snapshot?.projects) ? snapshot.projects : [];
+}
+
+function pollText(ts) {
+  return `polled ${formatAgo(ts)}`;
+}
+
+function paintPollText(tickEl, ts) {
+  const nextText = pollText(ts);
+  if (tickEl.textContent === nextText) return;
+  tickEl.textContent = nextText;
+}
+
+function isVisible() {
+  if (!_root) return false;
+  return !_root.closest('[hidden]');
+}
+
+function refreshPollTimes() {
+  if (!isVisible()) return;
+  for (const tick of _tickEls) paintPollText(tick.el, tick.lastTickAt);
+}
+
+function ensureTickSubscription() {
+  if (_unsubscribeTick) return;
+  _unsubscribeTick = onSessionTick(refreshPollTimes);
 }
 
 function buildPrRow(pr) {
@@ -98,7 +126,10 @@ function buildProject(project) {
   summary.append(summaryStat(counts.open === 1 ? 'open pr' : 'open prs', String(counts.open)));
   summary.append(summaryStat('in review', String(counts.inReview)));
   summary.append(summaryStat('errors', String(counts.errors), counts.errors > 0 ? 'crit' : null));
-  summary.append(el('span', 'pr-project-tick', `polled ${formatAgo(project.lastTickAt)}`));
+  const tickEl = el('span', 'pr-project-tick');
+  paintPollText(tickEl, project.lastTickAt);
+  _tickEls.push({ el: tickEl, lastTickAt: project.lastTickAt });
+  summary.append(tickEl);
   wrap.append(summary);
 
   if (prs.length === 0) {
@@ -118,6 +149,7 @@ function attentionCount() {
 function render() {
   if (!_root) return;
   _root.textContent = '';
+  _tickEls = [];
   const projects = projectsOf(_latest);
   if (projects.length === 0) {
     _root.append(el('p', 'pr-unconfigured', 'PR auto-review is not configured, or has not ticked yet. Open Settings and its PR Review tab to set it up.'));
@@ -137,6 +169,7 @@ export function mountPrView(parent) {
   const root = el('div', 'pr-content');
   parent.appendChild(root);
   _root = root;
+  ensureTickSubscription();
   render();
   return root;
 }
