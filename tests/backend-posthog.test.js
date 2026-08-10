@@ -81,7 +81,7 @@ test('buildInvestigationPrompt names the issue, its url, the result path, and th
   assert.match(p, /iss-1/);
   assert.match(p, /https:\/\/ph\.test\/project\/1\/error_tracking\/iss-1/);
   assert.match(p, /\/tmp\/r\.json/);
-  assert.match(p, /posthog-reports/, 'tells the agent where to write its markdown report');
+  assert.match(p, /posthog-reports.*iss-1\.html/, 'tells the agent where to write its HTML report');
 });
 
 // The prompt seeds a --dangerously-skip-permissions session, and an issue title is the monitored
@@ -145,7 +145,7 @@ test('sweepReports keeps the newest N reports and drops the rest', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-phreports-'));
   try {
     for (let i = 0; i < 6; i += 1) {
-      const file = path.join(dir, `iss-${i}.md`);
+      const file = path.join(dir, `iss-${i}.html`);
       fs.writeFileSync(file, 'report');
       fs.utimesSync(file, new Date(1000 + i * 1000), new Date(1000 + i * 1000));
     }
@@ -153,8 +153,8 @@ test('sweepReports keeps the newest N reports and drops the rest', async () => {
 
     await sweepReports(dir, 2);
 
-    assert.deepEqual(fs.readdirSync(dir).filter((n) => n.endsWith('.md')).sort(), ['iss-4.md', 'iss-5.md']);
-    assert.ok(fs.existsSync(path.join(dir, 'notes.txt')), 'only .md reports are swept');
+    assert.deepEqual(fs.readdirSync(dir).filter((n) => n.endsWith('.html')).sort(), ['iss-4.html', 'iss-5.html']);
+    assert.ok(fs.existsSync(path.join(dir, 'notes.txt')), 'only .html reports are swept');
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

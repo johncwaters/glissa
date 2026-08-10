@@ -1304,6 +1304,15 @@ body {
   overflow-wrap: anywhere;
 }
 
+.dialog-report-frame {
+  width: 100%;
+  min-height: min(62dvh, 620px);
+  flex: 1 1 auto;
+  border: 1px solid var(--border-dim);
+  border-radius: var(--radius);
+  background: var(--bg-surface);
+}
+
 .dialog-report-error {
   color: var(--state-failed);
 }

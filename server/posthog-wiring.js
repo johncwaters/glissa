@@ -52,7 +52,7 @@ function safeIssueId(issueId) {
 }
 
 function reportPathFor(issueId) {
-  return path.join(REPORT_DIR, `${safeIssueId(issueId)}.md`);
+  return path.join(REPORT_DIR, `${safeIssueId(issueId)}.html`);
 }
 
 /*
@@ -103,7 +103,7 @@ function buildInvestigationPrompt({ issueId, projectId, host, url, resultPath, r
     lines.push(`4. Cross-reference the stack frames against the source at ${repoPath} (read only) to name the failing code.`);
   }
   lines.push(
-    `${repoPath ? 5 : 4}. Write a markdown report to ${reportPath}: what breaks, why, the evidence, and the suggested fix.`,
+    `${repoPath ? 5 : 4}. Write a single self-contained HTML report to ${reportPath}. Use inline CSS only, support a dark dashboard theme, load no external resources, include no <script> tags, no emoji, and no em or en dashes. The report is rendered inside a sandboxed iframe in a dashboard dialog roughly 700px wide. Use clear sections: what breaks, evidence, root cause, suggested fix, and next steps.`,
     `${repoPath ? 6 : 5}. Write the result as JSON to ${resultPath}: {"verdict":"ROOT_CAUSE|NEEDS_HUMAN|TRANSIENT","summary":"<one line>"}.`,
     '   - ROOT_CAUSE: you identified the failing code path with evidence.',
     '   - NEEDS_HUMAN: real and reproducible, but diagnosis needs judgment or access you do not have.',
@@ -117,7 +117,7 @@ function buildInvestigationPrompt({ issueId, projectId, host, url, resultPath, r
 // the recorder's precedent: this runs on the one-shot spawn path, so it must never block or throw.
 async function sweepReports(dir = REPORT_DIR, retain = REPORT_RETAIN_FILES) {
   try {
-    const names = (await fs.promises.readdir(dir)).filter((n) => n.endsWith('.md'));
+    const names = (await fs.promises.readdir(dir)).filter((n) => n.endsWith('.html'));
     if (names.length <= retain) return;
     const stamped = await Promise.all(names.map(async (name) => {
       const full = path.join(dir, name);

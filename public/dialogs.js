@@ -633,7 +633,7 @@ export function createConfirmDialog({ title, message, confirmLabel = 'Confirm', 
   requestAnimationFrame(() => btnCancel.focus());
 }
 
-export function createPosthogReportDialog({ issueId, issueTitle, content, message, error }) {
+export function createPosthogReportDialog({ issueId, issueTitle, format, content, message, error }) {
   const { dialog, close } = createModalOverlay({ dialogClass: 'dialog dialog-report' });
   const titleId = `posthog-report-title-${Math.random().toString(36).slice(2)}`;
 
@@ -646,9 +646,18 @@ export function createPosthogReportDialog({ issueId, issueTitle, content, messag
   metaEl.className = 'dialog-report-meta';
   metaEl.textContent = issueTitle || issueId || '';
 
-  const bodyEl = document.createElement('pre');
-  bodyEl.className = error ? 'dialog-report-body dialog-report-error' : 'dialog-report-body';
-  bodyEl.textContent = error || message || content || '';
+  let bodyEl = null;
+  if (format === 'html' && !error && !message) {
+    bodyEl = document.createElement('iframe');
+    bodyEl.className = 'dialog-report-frame';
+    bodyEl.setAttribute('sandbox', '');
+    bodyEl.srcdoc = content || '';
+  }
+  if (!bodyEl) {
+    bodyEl = document.createElement('pre');
+    bodyEl.className = error ? 'dialog-report-body dialog-report-error' : 'dialog-report-body';
+    bodyEl.textContent = error || message || content || '';
+  }
 
   const actions = document.createElement('div');
   actions.className = 'dialog-actions';

@@ -22,12 +22,22 @@ function resolvePosthogReportPath(issueId, reportDir = DEFAULT_POSTHOG_REPORT_DI
   }
 
   const resolvedReportDir = path.resolve(reportDir);
-  const resolvedReportPath = confinePath(resolvedReportDir, `${rawIssueId}.md`);
-  if (!resolvedReportPath) {
+  const htmlReportPath = confinePath(resolvedReportDir, `${rawIssueId}.html`);
+  const markdownReportPath = confinePath(resolvedReportDir, `${rawIssueId}.md`);
+  if (!htmlReportPath || !markdownReportPath) {
     return { ok: false, reason: 'Invalid report path' };
   }
 
-  return { ok: true, issueId: rawIssueId, reportDir: resolvedReportDir, reportPath: resolvedReportPath };
+  return {
+    ok: true,
+    issueId: rawIssueId,
+    reportDir: resolvedReportDir,
+    candidates: [
+      { format: 'html', reportPath: htmlReportPath },
+      { format: 'markdown', reportPath: markdownReportPath },
+    ],
+    reportPath: htmlReportPath,
+  };
 }
 
 async function readPosthogReport(issueId, { reportDir = DEFAULT_POSTHOG_REPORT_DIR } = {}) {
@@ -36,17 +46,19 @@ async function readPosthogReport(issueId, { reportDir = DEFAULT_POSTHOG_REPORT_D
     return { ok: false, found: false, issueId: typeof issueId === 'string' ? issueId : null, error: resolved.reason };
   }
 
-  try {
-    const content = await fs.promises.readFile(resolved.reportPath, 'utf8');
-    return { ok: true, found: true, issueId: resolved.issueId, content };
-  } catch (err) {
-    if (err?.code === 'ENOENT') {
-      return { ok: true, found: false, issueId: resolved.issueId, message: 'Report not found' };
+  for (const candidate of resolved.candidates) {
+    try {
+      const content = await fs.promises.readFile(candidate.reportPath, 'utf8');
+      return { ok: true, found: true, issueId: resolved.issueId, format: candidate.format, content };
+    } catch (err) {
+      if (err?.code === 'ENOENT') continue;
+      // Generic message on purpose: fs error strings carry the absolute server path, which does not
+      // belong on a paired remote client.
+      return { ok: false, found: false, issueId: resolved.issueId, error: 'Could not read report' };
     }
-    // Generic message on purpose: fs error strings carry the absolute server path, which does not
-    // belong on a paired remote client.
-    return { ok: false, found: false, issueId: resolved.issueId, error: 'Could not read report' };
   }
+
+  return { ok: true, found: false, issueId: resolved.issueId, message: 'Report not found' };
 }
 
 module.exports = {

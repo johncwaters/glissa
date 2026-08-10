@@ -55,7 +55,7 @@ function openIssueReport(issue) {
         createPosthogReportDialog({ issueId, issueTitle: issue.title, message: msg.message || 'Report not found' });
         return;
       }
-      createPosthogReportDialog({ issueId, issueTitle: issue.title, content: msg.content || '' });
+      createPosthogReportDialog({ issueId, issueTitle: issue.title, format: msg.format, content: msg.content || '' });
     })
     .catch((err) => {
       createPosthogReportDialog({ issueId, issueTitle: issue.title, error: err?.message || 'Could not read report' });

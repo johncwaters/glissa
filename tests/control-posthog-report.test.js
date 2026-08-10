@@ -64,7 +64,30 @@ test('get-posthog-report returns not found for a missing report', async () => {
   });
 });
 
-test('get-posthog-report reads the markdown report for a safe issue id', async () => {
+test('get-posthog-report prefers the html report when html and markdown both exist', async () => {
+  const h = harness();
+  const issueId = '018fb7a4-1a2b-7c3d-9e4f-aaaaaaaaaaaa';
+  fs.writeFileSync(path.join(h.reportDir, `${issueId}.md`), '# Report\n\nOld report.\n');
+  fs.writeFileSync(path.join(h.reportDir, `${issueId}.html`), '<!doctype html><h1>Report</h1>\n');
+
+  await h.send({
+    type: 'get-posthog-report',
+    requestId: 'r1',
+    issueId,
+  });
+
+  assert.deepEqual(h.sent[0], {
+    type: 'posthog-report',
+    requestId: 'r1',
+    ok: true,
+    found: true,
+    issueId,
+    format: 'html',
+    content: '<!doctype html><h1>Report</h1>\n',
+  });
+});
+
+test('get-posthog-report falls back to the markdown report for a safe issue id', async () => {
   const h = harness();
   fs.writeFileSync(path.join(h.reportDir, '018fb7a4-1a2b-7c3d-9e4f-aaaaaaaaaaaa.md'), '# Report\n\nRoot cause found.\n');
 
@@ -80,6 +103,7 @@ test('get-posthog-report reads the markdown report for a safe issue id', async (
     ok: true,
     found: true,
     issueId: '018fb7a4-1a2b-7c3d-9e4f-aaaaaaaaaaaa',
+    format: 'markdown',
     content: '# Report\n\nRoot cause found.\n',
   });
 });
