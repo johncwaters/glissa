@@ -36,7 +36,6 @@ function resolvePosthogReportPath(issueId, reportDir = DEFAULT_POSTHOG_REPORT_DI
       { format: 'html', reportPath: htmlReportPath },
       { format: 'markdown', reportPath: markdownReportPath },
     ],
-    reportPath: htmlReportPath,
   };
 }
 
