@@ -47,12 +47,11 @@ export function scrollLinesForDrag(pendingPx, cellHeightPx) {
 }
 
 // Which of the two mechanisms a drag gets: a synthetic wheel notch the application decides the meaning
-// of, or a local scrollback move. The mouse protocol is checked FIRST, the order xterm's own native
-// touch path uses: an application that has asked for wheel/mouse tracking must be told about the
-// scroll, and it can do that on the PRIMARY buffer too (a pager or vim run without the alternate
-// screen), where scrolling our own scrollback instead would move the wrong thing and starve the
-// application of the event entirely. The alternate buffer takes the same path for its own reason: it
-// has no scrollback to move.
+// of, or a local scrollback move. Either condition alone routes to the wheel, matching xterm's own
+// native touch policy: the alternate buffer has no scrollback to move, and an application that has
+// asked for wheel/mouse tracking must be told about the scroll even on the PRIMARY buffer (a pager or
+// vim run without the alternate screen), where scrolling our own scrollback instead would move the
+// wrong thing and starve the application of the event entirely.
 export function shouldSendWheelReport(bufferType, mouseTrackingMode) {
   if (bufferType === 'alternate') return true;
   return Boolean(mouseTrackingMode) && mouseTrackingMode !== 'none';
