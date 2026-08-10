@@ -106,7 +106,7 @@ function prReviewCfgKey(cfg) {
 
 function createPrReviewWiring({
   config, reviewSessions, closeSessionDataClients, hookRouter, getHookPort, spawnGate, gitWorkspace,
-  getProjectPathById,
+  getProjectPathById, getProjectNameById = () => null, broadcast = () => {},
 }) {
   // Build one headless (claude -p) PR-review session, registered in reviewSessions and auto-removed on
   // exit. Mirrors makeStageSession; not surfaced as a card (a -p session has no watchable TUI).
@@ -188,6 +188,11 @@ function createPrReviewWiring({
   // a new instance reuses the same result-file paths, gitWorkspace, and state file. A settings save that
   // lands mid-drain just queues another restart on the chain; that coalesces naturally. startPoller
   // itself stays synchronous from its callers' perspective (it only appends to the chain).
+  // The last tick summary, replayed to a control client that connects between ticks (the same
+  // cached-snapshot pattern the PostHog lane and the startup update check use).
+  let lastStatus = null;
+  const getStatus = () => lastStatus;
+
   let prPoller = null;
   let prPollerChain = Promise.resolve();
   let prPollerStopped = false;
@@ -209,6 +214,7 @@ function createPrReviewWiring({
       prPoller = createPrPoller({
         projects: config.prReview.projects || [],
         getProjectPathById,
+        getProjectNameById,
         makePrGh: (projectPath) => createPrGh(projectPath),
         gitWorkspace,
         getWorktreeBase: (projectPath) => config.worktreeRoot
@@ -221,6 +227,10 @@ function createPrReviewWiring({
         mergeMethod: config.prReview.mergeMethod || 'rebase',
         maxConcurrentReviews: config.prReview.maxConcurrentReviews || 3,
         reviewTimeoutSeconds: config.prReview.reviewTimeoutSeconds || 900,
+        onTickComplete: (summary) => {
+          lastStatus = summary;
+          broadcast(summary);
+        },
       });
       await prPoller.start().catch((e) => console.warn(`[pr-poller] start failed: ${e.message}`));
     }).catch((e) => console.warn(`[pr-poller] restart failed: ${e.message}`));
@@ -242,7 +252,7 @@ function createPrReviewWiring({
     if (prPoller) prPoller.stop();
   }
 
-  return { startPoller, restartIfConfigChanged, stopPoller };
+  return { startPoller, restartIfConfigChanged, stopPoller, getStatus };
 }
 
 module.exports = {

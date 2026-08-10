@@ -59,6 +59,7 @@ const { createIntegrationRefWatcher } = require('../detection/integration-ref-wa
 const { createIntegrationWatcherPool } = require('../detection/integration-watcher-pool');
 const { createTeamSessionFactory } = require('./team-session-factory');
 const { createPrReviewWiring } = require('./pr-review-wiring');
+const { createPosthogWiring } = require('./posthog-wiring');
 const { normalizeRemoteConfig, validateRemoteConfig, decideBindHost } = require('./core/remote-config');
 const { createClientPresence } = require('./core/client-presence');
 const { classifyUpgradePath, dataSessionIdFromUrl } = require('./core/upgrade-route');
@@ -578,7 +579,7 @@ function createBackend(httpServer, options = {}) {
     let listenerMismatch = false;
     let orphanPty = false;
     let destroyedReachable = false;
-    for (const sess of [...sessions.values(), ...teamSessions.values(), ...reviewSessions.values()]) {
+    for (const sess of [...sessions.values(), ...teamSessions.values(), ...reviewSessions.values(), ...investigationSessions.values()]) {
       const stats = sess.getHealthStats();
       stats.detection = sess.getDetectionStats();
       stats.ephemeral = !!sess.ephemeral;
@@ -729,6 +730,9 @@ function createBackend(httpServer, options = {}) {
   // Headless PR-review sessions (opt-in poller). Their own map for the same reasons as teamSessions,
   // and so shutdown() can reap in-flight review PTYs without touching persisted sessions.
   const reviewSessions = new Map();
+  // Headless PostHog investigation sessions (opt-in poller). Own map for the same reasons as
+  // reviewSessions: never persisted, never surfaced as a card, reaped independently on shutdown.
+  const investigationSessions = new Map();
 
   // The manager keys its entries by the session id passed to trigger(), so a lifecycle hop can be
   // routed straight back into that session's decision trace: focus suppression, the debounce and
@@ -773,6 +777,10 @@ function createBackend(httpServer, options = {}) {
     const p = config.projects.find((x) => x.id === projectId);
     return p ? p.path : null;
   }
+  function getProjectNameById(projectId) {
+    const p = config.projects.find((x) => x.id === projectId);
+    return p ? p.name : null;
+  }
   // Open a run artifact in the user's configured editor (Settings > General > Editor command). The
   // command is user-authored and runs on the user's own machine, the same trust level as reading the
   // PTY, so it runs through the shell - `.cmd`/`.bat` shims like `code` resolve. The path is validated
@@ -813,7 +821,16 @@ function createBackend(httpServer, options = {}) {
   // change, stopped in shutdown().
   const prReview = createPrReviewWiring({
     config, reviewSessions, closeSessionDataClients, hookRouter, getHookPort, spawnGate, gitWorkspace,
-    getProjectPathById,
+    getProjectPathById, getProjectNameById,
+    broadcast: (msg) => broadcastControl(msg),
+  });
+
+  // PostHog monitoring lane (server/posthog-wiring.js): inert unless config.posthog.enabled and
+  // config.telegram are both set. Same lifecycle as the PR lane - started at boot below, restarted on
+  // a posthog/telegram settings change, stopped in shutdown().
+  const posthog = createPosthogWiring({
+    config, investigationSessions, closeSessionDataClients, hookRouter, getHookPort, spawnGate,
+    broadcast: (msg) => broadcastControl(msg),
   });
 
   const orchestrator = createOrchestrator({
@@ -1122,6 +1139,9 @@ function createBackend(httpServer, options = {}) {
   // --- GitHub PR auto-review poller (opt-in; inert unless config.prReview.enabled) ---
   prReview.startPoller();
 
+  // --- PostHog monitoring poller (opt-in; inert unless config.posthog.enabled) ---
+  posthog.startPoller();
+
   function diffProjects(currentSessions, newProjects) {
     ensureProjectIds(newProjects);
     const newMap = new Map(newProjects.map(p => [p.id, p]));
@@ -1267,6 +1287,8 @@ function createBackend(httpServer, options = {}) {
     // No-op unless this save actually changed config.prReview/telegram; the restart itself is
     // serialized and drains in-flight reviews (see pr-review-wiring.js).
     prReview.restartIfConfigChanged();
+    // Same gating for the PostHog lane: no-op unless this save changed config.posthog/telegram.
+    posthog.restartIfConfigChanged();
   }
 
   // Restart/shutdown handlers live in server-lifecycle.js so the re-entry guard, the reap-before-exit
@@ -1304,6 +1326,10 @@ function createBackend(httpServer, options = {}) {
     handleClientFocus,
     buildHealthSnapshot,
     getUpdateStatus,
+    // Cached last PostHog tick summary, replayed to a client that connects between ticks.
+    getPosthogStatus: () => posthog.getStatus(),
+    // Same for the PR auto-review lane.
+    getPrStatus: () => prReview.getStatus(),
     registry,
     orchestrator,
     scheduler: { reload: armTeamSchedules },
@@ -1521,6 +1547,11 @@ function createBackend(httpServer, options = {}) {
     // shutdown) from starting a fresh poller after the process has begun tearing down.
     prReview.stopPoller();
     for (const [, sess] of reviewSessions) {
+      sess.destroy();
+      if (sess._killReap) pendingReaps.push(sess._killReap);
+    }
+    posthog.stopPoller();
+    for (const [, sess] of investigationSessions) {
       sess.destroy();
       if (sess._killReap) pendingReaps.push(sess._killReap);
     }

@@ -37,6 +37,18 @@ function scanRepoRoots(roots) {
 
 const PR_REVIEW_NUMERIC_KEYS = ['intervalMinutes', 'maxConcurrentReviews', 'reviewTimeoutSeconds'];
 const PR_REVIEW_MERGE_METHODS = new Set(['rebase', 'squash', 'merge']);
+const POSTHOG_NUMERIC_KEYS = [
+  'intervalMinutes',
+  'maxConcurrentInvestigations',
+  'investigationTimeoutSeconds',
+  'minUsersToInvestigate',
+  'userEscalationThreshold',
+];
+// Only `enabled` exists. allowStatusWrites/dailyDigest were validated and persisted here while no
+// module in the lane ever read them, which promised behavior (PostHog writes, a digest) that does not
+// exist; a key earns a place in this list when something consumes it.
+const POSTHOG_BOOLEAN_KEYS = ['enabled'];
+const POSTHOG_STRING_KEYS = ['host', 'apiKey', 'repoPath'];
 
 // Single wire-format builder for every 'error'/'settings-error' reply, so all call sites agree on the
 // shape. `requestId` is omitted from the payload entirely when not passed (matches every call site that
@@ -73,6 +85,45 @@ function validatePrReview(pr) {
   return null;
 }
 
+function isPlainObject(value) {
+  return value != null && typeof value === 'object' && !Array.isArray(value);
+}
+
+// Validate the optional nested posthog settings object. Returns an error message, or null when valid
+// (a missing/null posthog is valid: the tab was never touched). Same shape and strictness as
+// validatePrReview - a wrong type is REJECTED rather than coerced, so a checkbox that somehow sends
+// the string 'no' cannot silently enable the lane.
+function validatePosthog(ph) {
+  if (ph == null) return null;
+  if (!isPlainObject(ph)) return 'posthog must be an object';
+  for (const key of POSTHOG_BOOLEAN_KEYS) {
+    if (ph[key] != null && typeof ph[key] !== 'boolean') return `posthog.${key} must be a boolean`;
+  }
+  // Empty means unset (same rule as telegram's credentials), so only a non-empty host is URL-checked.
+  if (ph.host != null && typeof ph.host !== 'string') return 'posthog.host must be a string';
+  if (typeof ph.host === 'string' && ph.host.trim() && !/^https?:\/\//i.test(ph.host.trim())) {
+    return 'posthog.host must be an http(s) URL';
+  }
+  if (ph.apiKey != null && typeof ph.apiKey !== 'string') return 'posthog.apiKey must be a string';
+  if (ph.repoPath != null && typeof ph.repoPath !== 'string') return 'posthog.repoPath must be a string';
+  if (ph.projects != null && !isValidPosthogProjects(ph.projects)) {
+    return 'posthog.projects must be "all" or an array of positive integer project ids';
+  }
+  for (const key of POSTHOG_NUMERIC_KEYS) {
+    if (ph[key] != null && (typeof ph[key] !== 'number' || !Number.isFinite(ph[key]) || ph[key] <= 0)) {
+      return `posthog.${key} must be a positive number`;
+    }
+  }
+  if (ph.projectMap != null && !isPlainObject(ph.projectMap)) return 'posthog.projectMap must be an object';
+  return null;
+}
+
+function isValidPosthogProjects(projects) {
+  if (projects === 'all') return true;
+  if (!Array.isArray(projects)) return false;
+  return projects.every((id) => typeof id === 'number' && Number.isInteger(id) && id > 0);
+}
+
 // Validate the optional nested telegram settings object. Empty strings are allowed (they mean unset).
 function validateTelegram(t) {
   if (t == null) return null;
@@ -91,6 +142,24 @@ function sanitizePrReview(pr) {
   if (pr.mergeMethod != null) out.mergeMethod = pr.mergeMethod;
   if (pr.maxConcurrentReviews != null) out.maxConcurrentReviews = pr.maxConcurrentReviews;
   if (pr.reviewTimeoutSeconds != null) out.reviewTimeoutSeconds = pr.reviewTimeoutSeconds;
+  return out;
+}
+
+// Keep only the known posthog fields (drops anything unrecognized). projectMap is a free-form
+// id -> display-name map owned by the dashboard, so it passes through untouched once it is an object.
+function sanitizePosthog(ph) {
+  const out = {};
+  for (const key of POSTHOG_BOOLEAN_KEYS) {
+    if (ph[key] != null) out[key] = !!ph[key];
+  }
+  for (const key of POSTHOG_STRING_KEYS) {
+    if (ph[key] != null) out[key] = String(ph[key]).trim();
+  }
+  if (ph.projects != null) out.projects = ph.projects;
+  if (isPlainObject(ph.projectMap)) out.projectMap = ph.projectMap;
+  for (const key of POSTHOG_NUMERIC_KEYS) {
+    if (ph[key] != null) out[key] = ph[key];
+  }
   return out;
 }
 
@@ -134,6 +203,10 @@ function registerControlHandlers(controlWss, deps) {
     handleClientFocus,
     buildHealthSnapshot,
     getUpdateStatus,
+    // Cached last PostHog tick summary (optional - undefined in older callers/tests).
+    getPosthogStatus,
+    // Cached last PR auto-review tick summary (optional - undefined in older callers/tests).
+    getPrStatus,
     // Replay of transient broadcasts missed across a reconnect gap (optional - undefined in
     // older callers/tests; connect then behaves as before, snapshot-only).
     controlReplayLog = null,
@@ -427,6 +500,12 @@ function registerControlHandlers(controlWss, deps) {
       return;
     }
 
+    const posthogError = validatePosthog(s.posthog);
+    if (posthogError) {
+      sendError(ws, posthogError, { type: 'settings-error', requestId: msg.requestId || null });
+      return;
+    }
+
     const telegramError = validateTelegram(s.telegram);
     if (telegramError) {
       sendError(ws, telegramError, { type: 'settings-error', requestId: msg.requestId || null });
@@ -450,6 +529,7 @@ function registerControlHandlers(controlWss, deps) {
       }
       if (s.repoRoots != null) cfg.repoRoots = s.repoRoots;
       if (s.prReview != null) cfg.prReview = sanitizePrReview(s.prReview);
+      if (s.posthog != null) cfg.posthog = sanitizePosthog(s.posthog);
       if (s.telegram != null) {
         cfg.telegram = {
           botToken: String(s.telegram.botToken || '').trim(),
@@ -872,6 +952,17 @@ function registerControlHandlers(controlWss, deps) {
     const update = typeof getUpdateStatus === 'function' ? getUpdateStatus() : null;
     if (update?.updateAvailable) {
       ws.send(JSON.stringify({ type: 'update-available', ...update }));
+    }
+    // Same cached-snapshot replay for the PostHog lane: ticks are ~15 minutes apart, so a client
+    // connecting between them would otherwise show an empty panel until the next one.
+    const posthogStatus = typeof getPosthogStatus === 'function' ? getPosthogStatus() : null;
+    if (posthogStatus) {
+      ws.send(JSON.stringify(posthogStatus));
+    }
+    // And the same for the PR auto-review lane, whose ticks are just as far apart.
+    const prStatus = typeof getPrStatus === 'function' ? getPrStatus() : null;
+    if (prStatus) {
+      ws.send(JSON.stringify(prStatus));
     }
 
     // Replay transient broadcasts missed while this client was disconnected. The client

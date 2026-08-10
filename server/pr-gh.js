@@ -59,6 +59,7 @@ function normalizePr(row) {
     baseRefName: row.baseRefName,
     mergeable: row.mergeable,
     title: row.title || '',
+    url: row.url || '',
     isDraft: !!row.isDraft,
     isCrossRepository: !!row.isCrossRepository,
     headOwner: row.headRepositoryOwner?.login || null,
@@ -70,7 +71,7 @@ function normalizePr(row) {
 }
 
 function createPrGh(cwd) {
-  const PR_LIST_FIELDS = 'number,headRefOid,headRefName,baseRefName,mergeable,isDraft,isCrossRepository,headRepositoryOwner,author,title';
+  const PR_LIST_FIELDS = 'number,headRefOid,headRefName,baseRefName,mergeable,isDraft,isCrossRepository,headRepositoryOwner,author,title,url';
 
   return {
     async authOk() {

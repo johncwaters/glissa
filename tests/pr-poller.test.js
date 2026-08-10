@@ -53,11 +53,13 @@ function makeWorkspace(over = {}) {
 // BEFORE construction (readState reads the store lazily, so seeding after would be ignored).
 function harness(over = {}) {
   const pings = [];
+  const summaries = [];
   const stateStore = { value: over.initialState ? JSON.parse(JSON.stringify(over.initialState)) : {} };
   const noFireTimer = { unref() {} };
   const deps = {
-    projects: ['p1'],
-    getProjectPathById: () => '/repo',
+    projects: over.projects || ['p1'],
+    getProjectPathById: over.getProjectPathById || (() => '/repo'),
+    getProjectNameById: over.getProjectNameById || (() => 'My Repo'),
     makePrGh: () => makeGh(over.gh),
     gitWorkspace: makeWorkspace(over.workspace),
     getWorktreeBase: () => '/wtbase',
@@ -71,11 +73,13 @@ function harness(over = {}) {
     clearTimeoutFn: () => {},
     sleep: async () => {},
     log: { warn() {} },
+    onTickComplete: (s) => summaries.push(s),
+    now: () => 1000,
     maxConcurrentReviews: over.maxConcurrentReviews || 3,
     intervalMinutes: 15,
     mergeMethod: 'rebase',
   };
-  return { deps, pings, stateStore, poller: createPrPoller(deps) };
+  return { deps, pings, summaries, stateStore, poller: createPrPoller(deps) };
 }
 
 test('start() runs an immediate tick, arms an unref-d interval, stop() clears it', async () => {
@@ -390,4 +394,89 @@ test('filtered PRs (draft) are neither reviewed nor merged', async () => {
   await poller.start();
   await flush();
   assert.equal(spawned, 0);
+});
+
+// --- onTickComplete: the dashboard broadcast payload ---
+
+test('onTickComplete emits the dashboard broadcast payload', async () => {
+  const { poller, summaries } = harness({
+    gh: { listPrs: async () => [ownPr({ title: 'Fix the thing', url: 'https://github.com/me/repo/pull/7' })] },
+    spawnReview: async () => ({ verdict: 'CLEAN' }),
+  });
+  await poller.start();
+  await flush();
+
+  const summary = summaries.at(-1);
+  assert.equal(summary.type, 'pr-status');
+  assert.equal(summary.ts, 1000);
+  assert.equal(summary.projects.length, 1);
+  const project = summary.projects[0];
+  assert.equal(project.projectId, 'p1');
+  assert.equal(project.name, 'My Repo');
+  assert.equal(project.repoSlug, 'me/repo');
+  assert.equal(project.lastTickAt, 1000);
+  assert.deepEqual(project.prs, [{
+    key: 'me/repo#7',
+    number: 7,
+    title: 'Fix the thing',
+    url: 'https://github.com/me/repo/pull/7',
+    headSha: 'sha1',
+    phase: null,
+    inFlight: true,
+    wasConflicting: false,
+    pingedError: false,
+  }], 'the snapshot describes the tick, so the review is still in flight');
+});
+
+test('onTickComplete: phase carries the state-machine value verbatim on the next tick', async () => {
+  const { poller, summaries } = harness({
+    gh: { listPrs: async () => [ownPr()], checksStatus: async () => 'pending' },
+    spawnReview: async () => ({ verdict: 'CLEAN' }),
+  });
+  await poller.start();
+  await flush();
+  await poller.tick();
+  await flush();
+
+  const pr = summaries.at(-1).projects[0].prs[0];
+  assert.equal(pr.phase, 'awaiting-checks');
+  assert.equal(pr.inFlight, false);
+  assert.equal(pr.url, 'https://github.com/me/repo/pull/7', 'url derived when gh reported none');
+});
+
+test('onTickComplete: a project with no open PRs still appears with an empty list', async () => {
+  const { poller, summaries } = harness({ gh: { listPrs: async () => [] } });
+  await poller.start();
+  await flush();
+  assert.deepEqual(summaries.at(-1).projects, [{
+    projectId: 'p1', name: 'My Repo', repoSlug: 'me/repo', lastTickAt: 1000, prs: [],
+  }]);
+});
+
+test('onTickComplete: a PR pruned from the live list is omitted from the snapshot', async () => {
+  const { poller, summaries } = harness({
+    gh: { listPrs: async () => [ownPr({ number: 8, headRefName: 'live' })] },
+    spawnReview: async () => ({ verdict: 'CLEAN' }),
+    initialState: { 'me/repo#7': { phase: 'awaiting-checks', reviewedHead: 'sha1', inFlight: false } },
+  });
+  await poller.start();
+  await flush();
+  assert.deepEqual(summaries.at(-1).projects[0].prs.map((p) => p.key), ['me/repo#8']);
+});
+
+test('onTickComplete: name falls back to the repo slug when the project name is unknown', async () => {
+  const { poller, summaries } = harness({
+    gh: { listPrs: async () => [] },
+    getProjectNameById: () => null,
+  });
+  await poller.start();
+  await flush();
+  assert.equal(summaries.at(-1).projects[0].name, 'me/repo');
+});
+
+test('onTickComplete: a project whose path cannot be resolved is left out entirely', async () => {
+  const { poller, summaries } = harness({ getProjectPathById: () => null });
+  await poller.start();
+  await flush();
+  assert.deepEqual(summaries.at(-1), { type: 'pr-status', ts: 1000, projects: [] });
 });

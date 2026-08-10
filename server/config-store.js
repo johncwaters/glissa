@@ -250,6 +250,9 @@ function createConfigStore({ settingsDefaults } = {}) {
       // Opt-in GitHub PR auto-review (see AGENTS.md). null when never configured, so a user who
       // never opens the PR Review tab gets a byte-identical config (not added to DEFAULT_CONFIG).
       prReview: config.prReview ? { ...config.prReview } : null,
+      // Opt-in PostHog monitoring lane (see AGENTS.md). Same null-when-unconfigured rule as
+      // prReview, so a user who never enables it gets a byte-identical config.
+      posthog: config.posthog ? { ...config.posthog } : null,
       telegram: config.telegram ? { ...config.telegram } : null,
       // Read-only helper for the PR Review tab's project picker; derived, never persisted back.
       projectChoices: (config.projects || []).map(p => ({ id: p.id, name: p.name })),
@@ -291,6 +294,7 @@ function createConfigStore({ settingsDefaults } = {}) {
     if (newConfig.postTurnChecks != null) config.postTurnChecks = newConfig.postTurnChecks;
     if (newConfig.worktreeShare != null) config.worktreeShare = newConfig.worktreeShare;
     if (newConfig.prReview != null) config.prReview = newConfig.prReview;
+    if (newConfig.posthog != null) config.posthog = newConfig.posthog;
     if (newConfig.telegram != null) config.telegram = newConfig.telegram;
     if (newConfig.port != null && newConfig.port !== config.port) {
       console.log(`[settings] Port changed to ${newConfig.port} - restart required to take effect`);

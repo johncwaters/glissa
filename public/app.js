@@ -14,6 +14,8 @@ import { initFormFactor, isPhoneLayout, onLayoutChange } from './form-factor.js'
 import { applyHealthSnapshot, mountHealthMonitor } from './health-monitor.js';
 import { initNotifications, showDesktopNotification } from './notifications.js';
 import { activatePhoneShell, deactivatePhoneShell, getPhoneSessionId, mountPhoneShell, refreshPhoneBoard } from './phone/phone-shell.js';
+import { applyPrStatus, mountPrView, setPrActivityCallback } from './pr-panel.js';
+import { applyPosthogStatus, mountRadarView, setRadarActivityCallback } from './radar-panel.js';
 import { handleDebugStateRefresh, handleDebugStateResponse } from './session-card/card-dom.js';
 import { applyState, applyTerminalSettings, createSessionCard, getSessionCount, hasSession, removeSessionCard, renameSessionCard, seedSessionMergeStatus, setSessionAgents, setSessionDiff, setSessionEffectiveBase, setSessionMergeStatus, setSessionPostTurn, setSessionPrompt, setSessionResume, setSessionWakeup, setSessionWorktree, updateAggregateStatus } from './session-card/lifecycle.js';
 import { reconnectDataWs } from './session-card/terminal.js';
@@ -218,6 +220,8 @@ const messageHandlers = {
   'session-error':      (msg) => showErrorToast(`${msg.session}: ${msg.message}`, { persist: true }),
   'settings-updated':   (msg) => { if (msg.settings) applyTerminalSettings(msg.settings); },
   'health-snapshot':    (msg) => { if (msg.stats) applyHealthSnapshot(msg.stats); },
+  'posthog-status':     (msg) => applyPosthogStatus(msg),
+  'pr-status':          (msg) => applyPrStatus(msg),
   'team-run-accepted':  (msg) => handleTeamMessage(msg),
   'team-run-started':   (msg) => handleTeamMessage(msg),
   'team-stage-started': (msg) => handleTeamMessage(msg),
@@ -358,15 +362,23 @@ document.getElementById('btn-help').addEventListener('click', () => {
   createSettingsDialog('shortcuts');
 });
 
-// ── Primary view tabs (Focus / Teams) ─────────────────────
+// ── Primary view tabs (Focus / Teams / Radar / PRs) ────────
 
 const viewTeamsEl = document.getElementById('view-teams');
 const viewFocusEl = document.getElementById('view-focus');
+const viewRadarEl = document.getElementById('view-radar');
+const viewPrsEl = document.getElementById('view-prs');
 const tabTeams = document.getElementById('tab-teams');
 const tabFocus = document.getElementById('tab-focus');
+const tabRadar = document.getElementById('tab-radar');
+const tabPrs = document.getElementById('tab-prs');
 const tabActivityEl = document.getElementById('tab-teams-activity');
+const tabRadarActivityEl = document.getElementById('tab-radar-activity');
+const tabPrsActivityEl = document.getElementById('tab-prs-activity');
 
 setTabActivityCallback((active) => { tabActivityEl.classList.toggle('active', active); });
+setRadarActivityCallback((active) => { tabRadarActivityEl.classList.toggle('active', active); });
+setPrActivityCallback((active) => { tabPrsActivityEl.classList.toggle('active', active); });
 
 mountFocusView({
   rail: document.getElementById('focus-rail'),
@@ -376,12 +388,22 @@ mountFocusView({
 
 mountReviewSidebar({ panel: document.getElementById('review-sidebar') });
 
+// Mounted eagerly, unlike Teams: a posthog-status broadcast can land while another tab is active,
+// and the tab's attention dot has to reflect it without the operator ever opening Radar.
+mountRadarView(viewRadarEl);
+
+// Eager for the same reason as Radar: a pr-status broadcast can land while another tab is active, and
+// the tab's attention dot has to reflect it without the operator ever opening PRs.
+mountPrView(viewPrsEl);
+
 // Primary views in tab-strip order. Adding a view = adding an entry here (N-way, not a boolean).
 // Focus leads as the default landing view; the session-card grid (#sessions-container) stays mounted
 // off-screen as the canonical card home Focus borrows from - it is no longer a navigable view.
 const VIEW_TABS = [
   { view: 'focus', tab: tabFocus, el: viewFocusEl },
   { view: 'teams', tab: tabTeams, el: viewTeamsEl },
+  { view: 'radar', tab: tabRadar, el: viewRadarEl },
+  { view: 'prs', tab: tabPrs, el: viewPrsEl },
 ];
 
 let _activeView = 'focus';

@@ -30,6 +30,9 @@ function createPrPoller(deps) {
     clearTimeoutFn = clearTimeout,
     sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
     log = console,
+    getProjectNameById = () => null,
+    onTickComplete = () => {},
+    now = () => Date.now(),
   } = deps;
 
   const intervalMinutes = deps.intervalMinutes || 15;
@@ -208,12 +211,32 @@ function createPrPoller(deps) {
     return dirty;
   }
 
+  // One dashboard row per live PR: the gh data this tick already fetched (title, url, head) merged
+  // with the lane's own state entry. A key that is in state but no longer live was pruned above, so
+  // iterating the live list is what omits it.
+  function summarizePrs(prs, slug) {
+    return prs.map((pr) => {
+      const entry = state[pr.key] || {};
+      return {
+        key: pr.key,
+        number: pr.number,
+        title: pr.title || '',
+        url: pr.url || `https://github.com/${slug}/pull/${pr.number}`,
+        headSha: pr.headRefOid || null,
+        phase: entry.phase || null,
+        inFlight: entry.inFlight === true,
+        wasConflicting: entry.wasConflicting === true,
+        pingedError: entry.pingedError === true,
+      };
+    });
+  }
+
   async function tickProject(projectId) {
     const projectPath = getProjectPathById(projectId);
-    if (!projectPath) return false;
+    if (!projectPath) return null;
     const gh = makePrGh(projectPath);
     const slug = await gh.repoSlug();
-    if (!slug) return false;
+    if (!slug) return null;
     const owner = slug.split('/')[0];
 
     const raw = await gh.listPrs();
@@ -243,7 +266,17 @@ function createPrPoller(deps) {
       running.add(reviewPromise);
       reviewPromise.finally(() => running.delete(reviewPromise));
     }
-    return dirty;
+
+    return {
+      dirty,
+      summary: {
+        projectId,
+        name: getProjectNameById(projectId) || slug,
+        repoSlug: slug,
+        lastTickAt: now(),
+        prs: summarizePrs(actionable, slug),
+      },
+    };
   }
 
   async function tick() {
@@ -251,14 +284,18 @@ function createPrPoller(deps) {
     tickRunning = true;
     try {
       let dirty = false;
+      const summaries = [];
       for (const projectId of projects) {
-        const changed = await tickProject(projectId).catch((e) => {
+        const res = await tickProject(projectId).catch((e) => {
           log.warn(`[pr-poller] tick failed for ${projectId}: ${e.message}`);
-          return false;
+          return null;
         });
-        if (changed) dirty = true;
+        if (!res) continue;
+        if (res.dirty) dirty = true;
+        summaries.push(res.summary);
       }
       if (dirty) await persist();
+      onTickComplete({ type: 'pr-status', ts: now(), projects: summaries });
     } finally {
       tickRunning = false;
     }

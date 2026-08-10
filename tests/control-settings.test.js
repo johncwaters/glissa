@@ -21,6 +21,7 @@ function fakeConfigStore(cfg) {
     isUnchosenLaunchDefault: () => false, // no launch-default overlay in these fixtures
     getSettings: () => ({
       prReview: cfg.prReview || null,
+      posthog: cfg.posthog || null,
       telegram: cfg.telegram || null,
       projectChoices: (cfg.projects || []).map((p) => ({ id: p.id, name: p.name })),
       repoRoots: cfg.repoRoots || [],
@@ -127,6 +128,173 @@ test('empty telegram strings persist as-is (means unset), key is not deleted', (
   h.send({ type: 'update-settings', settings: { telegram: { botToken: '', chatId: '' } } });
 
   assert.deepEqual(h.cfg.telegram, { botToken: '', chatId: '' });
+});
+
+// ---------------------------------------------------------------------------
+// The posthog block (server/control-handlers.js validatePosthog/sanitizePosthog), same contract as
+// prReview above: validated on the way in, persisted sanitized, echoed back, and hot-applied via
+// applySettingsReload (which calls the lane's restartIfConfigChanged).
+// ---------------------------------------------------------------------------
+
+// Exactly what the Settings dialog's PostHog tab sends (public/dialogs.js save()).
+function posthogPayload(over = {}) {
+  return {
+    enabled: true,
+    host: 'https://us.posthog.com',
+    apiKey: 'phx_secret',
+    projects: [1, 2],
+    intervalMinutes: 15,
+    maxConcurrentInvestigations: 2,
+    investigationTimeoutSeconds: 900,
+    minUsersToInvestigate: 1,
+    userEscalationThreshold: 25,
+    repoPath: '/repo/web',
+    ...over,
+  };
+}
+
+test('a valid posthog payload persists, echoes in settings-updated, and hot-applies', () => {
+  const h = harness({ projects: [], teams: [] });
+  const payload = posthogPayload();
+
+  h.send({ type: 'update-settings', settings: { posthog: payload } });
+
+  assert.deepEqual(h.cfg.posthog, payload);
+  const updated = h.sent.find((m) => m.type === 'settings-updated');
+  assert.ok(updated, 'replied settings-updated');
+  assert.deepEqual(updated.settings.posthog, payload);
+  assert.equal(h.reloadCalls.length, 1, 'applySettingsReload invoked once (hot-applies the poller)');
+  assert.ok(h.broadcasts.some((m) => m.type === 'settings-updated'));
+});
+
+test('posthog projects accepts the "all" sentinel', () => {
+  const h = harness({ projects: [], teams: [] });
+  h.send({ type: 'update-settings', settings: { posthog: posthogPayload({ projects: 'all' }) } });
+  assert.equal(h.cfg.posthog.projects, 'all');
+});
+
+test('posthog projectMap survives a save untouched', () => {
+  const h = harness({ projects: [], teams: [] });
+  const projectMap = { 1: 'web', 2: 'api' };
+  h.send({ type: 'update-settings', settings: { posthog: posthogPayload({ projectMap }) } });
+  assert.deepEqual(h.cfg.posthog.projectMap, projectMap);
+});
+
+test('a non-object posthog is rejected with settings-error', () => {
+  const h = harness({ projects: [], teams: [] });
+  h.send({ type: 'update-settings', settings: { posthog: 'nope' } });
+  assert.ok(h.sent.find((m) => m.type === 'settings-error' && /posthog must be an object/.test(m.message)));
+  assert.equal(h.cfg.posthog, undefined, 'nothing persisted');
+  assert.equal(h.reloadCalls.length, 0, 'no reload on a rejected save');
+});
+
+test('a non-boolean posthog.enabled is rejected rather than coerced', () => {
+  const h = harness({ projects: [], teams: [] });
+  h.send({ type: 'update-settings', settings: { posthog: { enabled: 'yes' } } });
+  assert.ok(h.sent.find((m) => m.type === 'settings-error' && /enabled/.test(m.message)));
+  assert.equal(h.cfg.posthog, undefined);
+});
+
+test('a non-http(s) posthog.host is rejected with settings-error', () => {
+  const h = harness({ projects: [], teams: [] });
+  h.send({ type: 'update-settings', settings: { posthog: posthogPayload({ host: 'us.posthog.com' }) } });
+  assert.ok(h.sent.find((m) => m.type === 'settings-error' && /http\(s\) URL/.test(m.message)));
+  assert.equal(h.cfg.posthog, undefined);
+});
+
+test('an empty posthog.host means unset and is accepted (a disabled lane can still be saved)', () => {
+  const h = harness({ projects: [], teams: [] });
+  h.send({ type: 'update-settings', settings: { posthog: posthogPayload({ enabled: false, host: '', apiKey: '' }) } });
+  assert.equal(h.cfg.posthog.host, '');
+  assert.equal(h.cfg.posthog.enabled, false);
+});
+
+test('posthog.projects rejects a non-integer or non-positive id', () => {
+  for (const projects of [['1'], [0], [-3], [1.5], 'some']) {
+    const h = harness({ projects: [], teams: [] });
+    h.send({ type: 'update-settings', settings: { posthog: posthogPayload({ projects }) } });
+    assert.ok(
+      h.sent.find((m) => m.type === 'settings-error' && /projects/.test(m.message)),
+      `rejected ${JSON.stringify(projects)}`,
+    );
+    assert.equal(h.cfg.posthog, undefined);
+  }
+});
+
+test('a non-positive posthog numeric field is rejected with settings-error', () => {
+  for (const key of ['intervalMinutes', 'maxConcurrentInvestigations', 'investigationTimeoutSeconds', 'minUsersToInvestigate', 'userEscalationThreshold']) {
+    const h = harness({ projects: [], teams: [] });
+    h.send({ type: 'update-settings', settings: { posthog: posthogPayload({ [key]: 0 }) } });
+    assert.ok(h.sent.find((m) => m.type === 'settings-error' && new RegExp(key).test(m.message)), `rejected ${key}: 0`);
+  }
+});
+
+test('a non-object posthog.projectMap is rejected with settings-error', () => {
+  const h = harness({ projects: [], teams: [] });
+  h.send({ type: 'update-settings', settings: { posthog: posthogPayload({ projectMap: ['web'] }) } });
+  assert.ok(h.sent.find((m) => m.type === 'settings-error' && /projectMap/.test(m.message)));
+});
+
+// allowStatusWrites/dailyDigest were removed: nothing in the lane consumed them, and persisting a
+// key implies behavior behind it.
+test('retired posthog keys are dropped rather than persisted', () => {
+  const h = harness({ projects: [], teams: [] });
+  h.send({
+    type: 'update-settings',
+    settings: { posthog: posthogPayload({ allowStatusWrites: true, dailyDigest: true }) },
+  });
+  assert.equal('allowStatusWrites' in h.cfg.posthog, false);
+  assert.equal('dailyDigest' in h.cfg.posthog, false);
+});
+
+test('posthog.repoPath persists and is trimmed; a non-string is rejected', () => {
+  const h = harness({ projects: [], teams: [] });
+  h.send({ type: 'update-settings', settings: { posthog: posthogPayload({ repoPath: '  /repo/web  ' }) } });
+  assert.equal(h.cfg.posthog.repoPath, '/repo/web');
+
+  const bad = harness({ projects: [], teams: [] });
+  bad.send({ type: 'update-settings', settings: { posthog: posthogPayload({ repoPath: 7 }) } });
+  assert.ok(bad.sent.find((m) => m.type === 'settings-error' && /posthog\.repoPath must be a string/.test(m.message)));
+  assert.equal(bad.cfg.posthog, undefined);
+});
+
+test('unknown posthog keys are dropped, and host/apiKey are trimmed', () => {
+  const h = harness({ projects: [], teams: [] });
+  h.send({
+    type: 'update-settings',
+    settings: { posthog: posthogPayload({ host: '  https://ph.test  ', apiKey: '  k  ', bogus: 'x', projectChoices: [] }) },
+  });
+  assert.equal(h.cfg.posthog.host, 'https://ph.test');
+  assert.equal(h.cfg.posthog.apiKey, 'k');
+  assert.equal('bogus' in h.cfg.posthog, false, 'unknown keys never reach config.json');
+  assert.equal('projectChoices' in h.cfg.posthog, false);
+});
+
+test('a save with no posthog key leaves an existing posthog block untouched', () => {
+  const existing = posthogPayload();
+  const h = harness({ projects: [], teams: [], posthog: { ...existing } });
+  h.send({ type: 'update-settings', settings: { cursorBlink: true } });
+  assert.deepEqual(h.cfg.posthog, existing, 'an unrelated save never rewrites the lane config');
+});
+
+test('a rejected posthog block blocks the whole save, including unrelated keys', () => {
+  const h = harness({ projects: [], teams: [] });
+  h.send({ type: 'update-settings', settings: { cursorBlink: true, posthog: { enabled: 'yes' } } });
+  assert.ok(h.sent.find((m) => m.type === 'settings-error'));
+  assert.equal(h.cfg.cursorBlink, undefined, 'the save is atomic: nothing lands when validation fails');
+});
+
+test('posthog validation leaves prReview, telegram and remote alone', () => {
+  const h = harness({
+    projects: [], teams: [],
+    prReview: { enabled: true, projects: ['p1'] },
+    remote: { enabled: true, port: 3001 },
+  });
+  h.send({ type: 'update-settings', settings: { posthog: posthogPayload() } });
+
+  assert.deepEqual(h.cfg.prReview, { enabled: true, projects: ['p1'] }, 'prReview untouched');
+  assert.deepEqual(h.cfg.remote, { enabled: true, port: 3001 }, 'remote is not settable and is untouched');
+  assert.equal(h.cfg.telegram, undefined, 'telegram not written by a posthog-only save');
 });
 
 // ---------------------------------------------------------------------------

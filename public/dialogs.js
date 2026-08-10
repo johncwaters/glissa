@@ -209,17 +209,48 @@ export function createSettingsDialog(initialTab) {
   const btnCancel = dialog.querySelector('#settings-cancel');
   const btnSave = dialog.querySelector('#settings-save');
 
-  const prEnabledCheckbox = dialog.querySelector('#settings-pr-enabled');
-  const prBotTokenInput = dialog.querySelector('#settings-pr-bot-token');
-  const prChatIdInput = dialog.querySelector('#settings-pr-chat-id');
-  // Shares the bot credentials above but gates a separate lane (session notifications), so it saves
-  // as its own top-level boolean rather than anything under prReview.
+  // One bot serves three lanes (session notifications, PR review pings, PostHog pings), so the
+  // credentials live on their own tab rather than inside whichever lane was written first.
+  const telegramPanel = dialog.querySelector('#settings-panel-telegram');
+  const telegramBotTokenInput = dialog.querySelector('#settings-telegram-bot-token');
+  const telegramChatIdInput = dialog.querySelector('#settings-telegram-chat-id');
+  // Gates a lane rather than the credentials, so it saves as its own top-level boolean.
   const telegramNotificationsCheckbox = dialog.querySelector('#settings-telegram-notifications');
+
+  const prEnabledCheckbox = dialog.querySelector('#settings-pr-enabled');
   const prProjectsEl = dialog.querySelector('#settings-pr-projects');
   const prIntervalInput = dialog.querySelector('#settings-pr-interval');
   const prMaxReviewsInput = dialog.querySelector('#settings-pr-max-reviews');
   const prTimeoutInput = dialog.querySelector('#settings-pr-timeout');
   const prMergeMethodSelect = dialog.querySelector('#settings-pr-merge-method');
+
+  const posthogPanel = dialog.querySelector('#settings-panel-posthog');
+  const posthogEnabledCheckbox = dialog.querySelector('#settings-posthog-enabled');
+  const posthogHostInput = dialog.querySelector('#settings-posthog-host');
+  const posthogApiKeyInput = dialog.querySelector('#settings-posthog-api-key');
+  const posthogProjectsInput = dialog.querySelector('#settings-posthog-projects');
+  const posthogIntervalInput = dialog.querySelector('#settings-posthog-interval');
+  const posthogMaxInvestigationsInput = dialog.querySelector('#settings-posthog-max-investigations');
+  const posthogTimeoutInput = dialog.querySelector('#settings-posthog-timeout');
+  const posthogMinUsersInput = dialog.querySelector('#settings-posthog-min-users');
+  const posthogEscalationInput = dialog.querySelector('#settings-posthog-escalation');
+
+  // The panel's fields are always populated with defaults, so saving them unconditionally would
+  // materialize a posthog block into config.json for every operator who never opens this tab.
+  // Send it only once the operator edits something here, or once the key already exists on disk.
+  let posthogHydrated = null;
+  let posthogTouched = false;
+  posthogPanel.addEventListener('input', () => { posthogTouched = true; });
+  posthogPanel.addEventListener('change', () => { posthogTouched = true; });
+  const shouldSavePosthog = () => posthogTouched || posthogHydrated !== null;
+
+  // Same materialization guard for the credentials: an operator who never opens this tab does not get
+  // an empty telegram block written into config.json by an unrelated save.
+  let telegramHydrated = null;
+  let telegramTouched = false;
+  telegramPanel.addEventListener('input', () => { telegramTouched = true; });
+  telegramPanel.addEventListener('change', () => { telegramTouched = true; });
+  const shouldSaveTelegram = () => telegramTouched || telegramHydrated !== null;
 
   // Populate sound picker
   for (const opt of SOUND_OPTIONS) {
@@ -355,9 +386,16 @@ export function createSettingsDialog(initialTab) {
     return [...prProjectsEl.querySelectorAll('input[type="checkbox"]:checked')].map((el) => el.dataset.projectId);
   }
 
+  const POSTHOG_NUMERIC_INPUTS = () => [
+    posthogIntervalInput, posthogMaxInvestigationsInput, posthogTimeoutInput,
+    posthogMinUsersInput, posthogEscalationInput,
+  ];
+
   function validateTimeouts() {
     errorEl.textContent = '';
-    for (const input of [replayBufferInput, prIntervalInput, prMaxReviewsInput, prTimeoutInput]) {
+    const inputs = [replayBufferInput, prIntervalInput, prMaxReviewsInput, prTimeoutInput];
+    if (shouldSavePosthog()) inputs.push(...POSTHOG_NUMERIC_INPUTS());
+    for (const input of inputs) {
       const v = Number(input.value);
       if (!input.value || Number.isNaN(v) || v <= 0 || !Number.isInteger(v)) {
         errorEl.textContent = 'All numeric fields must be positive integers';
@@ -365,6 +403,17 @@ export function createSettingsDialog(initialTab) {
       }
     }
     return true;
+  }
+
+  // 'all' or a comma-separated list of numeric project ids. Returns null when the text is neither,
+  // so save() can refuse rather than silently watching nothing.
+  function parsePosthogProjects(raw) {
+    const text = raw.trim();
+    if (!text || text.toLowerCase() === 'all') return 'all';
+    const ids = text.split(',').map((part) => part.trim()).filter((part) => part);
+    if (ids.length === 0) return 'all';
+    if (ids.some((id) => !/^\d+$/.test(id))) return null;
+    return ids.map(Number);
   }
 
   function save() {
@@ -388,11 +437,35 @@ export function createSettingsDialog(initialTab) {
         maxConcurrentReviews: Number(prMaxReviewsInput.value),
         reviewTimeoutSeconds: Number(prTimeoutInput.value),
       },
-      telegram: {
-        botToken: prBotTokenInput.value.trim(),
-        chatId: prChatIdInput.value.trim(),
-      },
     };
+
+    if (shouldSaveTelegram()) {
+      settings.telegram = {
+        botToken: telegramBotTokenInput.value.trim(),
+        chatId: telegramChatIdInput.value.trim(),
+      };
+    }
+
+    if (shouldSavePosthog()) {
+      const projects = parsePosthogProjects(posthogProjectsInput.value);
+      if (projects === null) {
+        errorEl.textContent = 'PostHog projects must be "all" or a comma-separated list of numeric ids.';
+        return;
+      }
+      // Spread the hydrated object first so projectMap and any key this UI does not edit survive a save.
+      settings.posthog = {
+        ...(posthogHydrated || {}),
+        enabled: posthogEnabledCheckbox.checked,
+        host: posthogHostInput.value.trim(),
+        apiKey: posthogApiKeyInput.value.trim(),
+        projects,
+        intervalMinutes: Number(posthogIntervalInput.value),
+        maxConcurrentInvestigations: Number(posthogMaxInvestigationsInput.value),
+        investigationTimeoutSeconds: Number(posthogTimeoutInput.value),
+        minUsersToInvestigate: Number(posthogMinUsersInput.value),
+        userEscalationThreshold: Number(posthogEscalationInput.value),
+      };
+    }
 
     sendControlRequest('update-settings', { settings })
       .then((msg) => {
@@ -423,12 +496,27 @@ export function createSettingsDialog(initialTab) {
       prMaxReviewsInput.value = pr.maxConcurrentReviews ?? 3;
       prTimeoutInput.value = pr.reviewTimeoutSeconds ?? 900;
       prMergeMethodSelect.value = pr.mergeMethod ?? 'rebase';
-      const telegram = s.telegram || {};
-      prBotTokenInput.value = telegram.botToken ?? '';
-      prChatIdInput.value = telegram.chatId ?? '';
+      telegramHydrated = s.telegram && typeof s.telegram === 'object' ? s.telegram : null;
+      const telegram = telegramHydrated || {};
+      telegramBotTokenInput.value = telegram.botToken ?? '';
+      telegramChatIdInput.value = telegram.chatId ?? '';
       telegramNotificationsCheckbox.checked = !!s.telegramNotifications;
       prProjectChoices = Array.isArray(s.projectChoices) ? s.projectChoices : [];
       renderPrProjects(pr.projects || []);
+
+      posthogHydrated = s.posthog && typeof s.posthog === 'object' ? s.posthog : null;
+      const ph = posthogHydrated || {};
+      posthogEnabledCheckbox.checked = !!ph.enabled;
+      posthogHostInput.value = ph.host ?? 'https://us.posthog.com';
+      // Matches how the Telegram bot token round-trips: the stored value is put back into a
+      // password field rather than masked, so a save does not wipe the credential.
+      posthogApiKeyInput.value = ph.apiKey ?? '';
+      posthogProjectsInput.value = Array.isArray(ph.projects) ? ph.projects.join(', ') : 'all';
+      posthogIntervalInput.value = ph.intervalMinutes ?? 15;
+      posthogMaxInvestigationsInput.value = ph.maxConcurrentInvestigations ?? 2;
+      posthogTimeoutInput.value = ph.investigationTimeoutSeconds ?? 900;
+      posthogMinUsersInput.value = ph.minUsersToInvestigate ?? 1;
+      posthogEscalationInput.value = ph.userEscalationThreshold ?? 25;
     })
     .catch(() => {
       errorEl.textContent = 'Failed to load settings. Close and retry.';

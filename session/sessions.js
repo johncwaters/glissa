@@ -175,6 +175,10 @@ class Session extends EventEmitter {
     // Optional Claude Code permissions ({ deny: [...] }) merged into the injected --settings file
     // (team-stage deny blacklist, mechanism M2). Null for ordinary user sessions.
     settingsPermissions = null,
+    // Extra environment variables for the spawned PTY, merged over the scrubbed base env. Lane
+    // credentials that must NOT be exported process-wide (a poller-owned API key would otherwise
+    // reach every user session) travel this way. Null for ordinary user sessions.
+    spawnEnv = null,
     // Opt-in: add `enableAllProjectMcpServers: true` to the injected --settings file so a headless
     // (`-p`) session loads the project's `.mcp.json` servers (e.g. Playwright MCP) without an
     // interactive trust prompt it can never answer. Off by default; set for app-runtime team stages.
@@ -338,6 +342,7 @@ class Session extends EventEmitter {
     this._antiSlopPrompt = !!antiSlopPrompt;
     this.ephemeral = !!ephemeral;
     this._settingsPermissions = settingsPermissions;
+    this._spawnEnv = spawnEnv;
     this._enableProjectMcp = !!enableProjectMcp;
     this._ptySpawn = ptySpawn || ((file, args, opts) => pty.spawn(file, args, opts));
     // Async kill executor (taskkill). Default wraps execFile; the callback form keeps the call truly
@@ -1944,7 +1949,7 @@ class Session extends EventEmitter {
   }
 
   _buildSpawnEnv() {
-    return buildSpawnEnv(process.env);
+    return buildSpawnEnv(process.env, this._spawnEnv);
   }
 
   _handlePtyData(data) {

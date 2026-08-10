@@ -4,7 +4,9 @@
   <button type="button" class="settings-tab" role="tab" id="settings-tab-terminal" aria-controls="settings-panel-terminal" aria-selected="false" data-tab="terminal" tabindex="-1">Terminal</button>
   <button type="button" class="settings-tab" role="tab" id="settings-tab-repos" aria-controls="settings-panel-repos" aria-selected="false" data-tab="repos" tabindex="-1">Repos</button>
   <button type="button" class="settings-tab" role="tab" id="settings-tab-advanced" aria-controls="settings-panel-advanced" aria-selected="false" data-tab="advanced" tabindex="-1">Advanced</button>
+  <button type="button" class="settings-tab" role="tab" id="settings-tab-telegram" aria-controls="settings-panel-telegram" aria-selected="false" data-tab="telegram" tabindex="-1">Telegram</button>
   <button type="button" class="settings-tab" role="tab" id="settings-tab-pr-review" aria-controls="settings-panel-pr-review" aria-selected="false" data-tab="pr-review" tabindex="-1">PR Review</button>
+  <button type="button" class="settings-tab" role="tab" id="settings-tab-posthog" aria-controls="settings-panel-posthog" aria-selected="false" data-tab="posthog" tabindex="-1">PostHog</button>
   <button type="button" class="settings-tab" role="tab" id="settings-tab-shortcuts" aria-controls="settings-panel-shortcuts" aria-selected="false" data-tab="shortcuts" tabindex="-1">Shortcuts</button>
 </div>
 
@@ -78,25 +80,28 @@
   </label>
 </div>
 
-<div class="settings-panel" id="settings-panel-pr-review" role="tabpanel" aria-labelledby="settings-tab-pr-review" data-panel="pr-review" hidden>
-  <label class="dialog-label dialog-checkbox-label">
-    <input type="checkbox" class="dialog-checkbox" id="settings-pr-enabled">
-    Enable PR auto-review
-    <span class="dialog-hint">Reviews your own open pull requests and merges the clean ones on green checks. Needs gh authenticated on this machine. Takes effect immediately, no restart required.</span>
+<div class="settings-panel" id="settings-panel-telegram" role="tabpanel" aria-labelledby="settings-tab-telegram" data-panel="telegram" hidden>
+  <label class="dialog-label">
+    Bot token
+    <input type="password" class="dialog-input" id="settings-telegram-bot-token" autocomplete="off" spellcheck="false">
   </label>
   <label class="dialog-label">
-    Telegram bot token
-    <input type="password" class="dialog-input" id="settings-pr-bot-token" autocomplete="off" spellcheck="false">
-  </label>
-  <label class="dialog-label">
-    Telegram chat id
-    <input type="text" class="dialog-input" id="settings-pr-chat-id" autocomplete="off" spellcheck="false">
-    <span class="dialog-hint">Both fields are required for the poller to run. Pings fire on actionable events only (changes requested, conflicts resolved, merged, error).</span>
+    Chat id
+    <input type="text" class="dialog-input" id="settings-telegram-chat-id" autocomplete="off" spellcheck="false">
+    <span class="dialog-hint">One bot, shared by session notifications, PR review pings and PostHog monitoring pings. Each lane is switched on separately; both fields are required before any of them can send.</span>
   </label>
   <label class="dialog-label dialog-checkbox-label">
     <input type="checkbox" class="dialog-checkbox" id="settings-telegram-notifications">
     Send session notifications to Telegram
-    <span class="dialog-hint">Uses the same bot above. Pings when a session completes, needs input, or fails AND no dashboard tab is open anywhere, so the browser notification would reach nobody. Independent of PR auto-review.</span>
+    <span class="dialog-hint">Pings when a session completes, needs input, or fails AND no dashboard tab is open anywhere, so the browser notification would reach nobody.</span>
+  </label>
+</div>
+
+<div class="settings-panel" id="settings-panel-pr-review" role="tabpanel" aria-labelledby="settings-tab-pr-review" data-panel="pr-review" hidden>
+  <label class="dialog-label dialog-checkbox-label">
+    <input type="checkbox" class="dialog-checkbox" id="settings-pr-enabled">
+    Enable PR auto-review
+    <span class="dialog-hint">Reviews your own open pull requests and merges the clean ones on green checks. Needs gh authenticated on this machine, and the bot credentials on the Telegram tab. Pings fire on actionable events only (changes requested, conflicts resolved, merged, error). Takes effect immediately, no restart required.</span>
   </label>
   <div class="settings-section">
     <div class="settings-section-title">Projects to watch</div>
@@ -124,6 +129,50 @@
       <option value="merge">Merge</option>
     </select>
   </label>
+</div>
+
+<div class="settings-panel" id="settings-panel-posthog" role="tabpanel" aria-labelledby="settings-tab-posthog" data-panel="posthog" hidden>
+  <label class="dialog-label dialog-checkbox-label">
+    <input type="checkbox" class="dialog-checkbox" id="settings-posthog-enabled">
+    Enable PostHog monitoring
+    <span class="dialog-hint">Polls PostHog error tracking and investigates the issues that move. Needs a personal API key with read access.</span>
+  </label>
+  <label class="dialog-label">
+    Host
+    <input type="text" class="dialog-input" id="settings-posthog-host" placeholder="https://us.posthog.com" autocomplete="off" spellcheck="false">
+    <span class="dialog-hint">Use https://eu.posthog.com for EU cloud, or your self-hosted URL.</span>
+  </label>
+  <label class="dialog-label">
+    Personal API key
+    <input type="password" class="dialog-input" id="settings-posthog-api-key" autocomplete="off" spellcheck="false">
+  </label>
+  <label class="dialog-label">
+    Projects
+    <input type="text" class="dialog-input" id="settings-posthog-projects" placeholder="all" autocomplete="off" spellcheck="false">
+    <span class="dialog-hint">Either all, or a comma-separated list of numeric PostHog project ids.</span>
+  </label>
+  <div class="settings-timeout-grid">
+    <label class="dialog-label">
+      Poll interval (minutes)
+      <input type="number" class="dialog-input" id="settings-posthog-interval" min="1" step="1" autocomplete="off">
+    </label>
+    <label class="dialog-label">
+      Max concurrent investigations
+      <input type="number" class="dialog-input" id="settings-posthog-max-investigations" min="1" step="1" autocomplete="off">
+    </label>
+    <label class="dialog-label">
+      Investigation timeout (seconds)
+      <input type="number" class="dialog-input" id="settings-posthog-timeout" min="1" step="1" autocomplete="off">
+    </label>
+    <label class="dialog-label">
+      Min users to investigate
+      <input type="number" class="dialog-input" id="settings-posthog-min-users" min="1" step="1" autocomplete="off">
+    </label>
+    <label class="dialog-label">
+      Escalation threshold (users)
+      <input type="number" class="dialog-input" id="settings-posthog-escalation" min="1" step="1" autocomplete="off">
+    </label>
+  </div>
 </div>
 
 <div class="settings-panel settings-shortcuts" id="settings-panel-shortcuts" role="tabpanel" aria-labelledby="settings-tab-shortcuts" data-panel="shortcuts" hidden>
