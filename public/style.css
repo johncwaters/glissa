@@ -1274,21 +1274,26 @@ body {
 /* ── Settings dialog ────────────────────────────────────── */
 .dialog-settings {
   width: 560px;
+  max-height: min(85dvh, 720px);
+  overflow: hidden;
 }
 
 /* [P2] Settings tab strip - replaces single-scroll section stack */
 .settings-tabs {
   display: flex;
+  flex-wrap: wrap;
+  flex-shrink: 0;
   gap: 2px;
   margin: -4px -4px 4px;
   padding: 4px;
   border-bottom: 1px solid var(--border);
-  overflow-x: auto;
-  scrollbar-width: none;
 }
 
-.settings-tabs::-webkit-scrollbar {
-  display: none;
+.dialog-settings > .dialog-title,
+.dialog-settings > .settings-tabs,
+.dialog-settings > .dialog-error,
+.dialog-settings > .settings-actions {
+  flex-shrink: 0;
 }
 
 .settings-tab {
@@ -1321,7 +1326,11 @@ body {
 .settings-panel {
   display: flex;
   flex-direction: column;
+  flex: 1 1 auto;
   gap: 16px;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 4px;
 }
 
 .settings-panel[hidden] {
@@ -3895,10 +3904,6 @@ a.pr-title:hover {
    are corrections to the desktop layout at a small window, not a layout of their own; the phone gets
    the Phone Layout section below instead. */
 @media (max-width: 768px) {
-  /* Six settings tabs do not fit 390px. Wrapping to two rows shows all of them at once, which beats
-     the desktop strip's hidden-scrollbar overflow: a touch operator gets no scrollbar hint that three
-     more tabs exist off the right edge. */
-  .settings-tabs { flex-wrap: wrap; overflow-x: visible; }
   .dialog-settings { width: 100%; }
 
   /* Teams: long server strings must wrap rather than push the panel past the viewport. The status
