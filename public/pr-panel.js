@@ -5,13 +5,12 @@
 
 import { el } from './dom-helpers.js';
 import { normalizePhase, severityFor as severity, sortPrsByAttention, summarizePrs } from './pr-view-core.mjs';
-import { onSessionTick } from './session-card/session-tick.js';
+import { createPollAgoTicker } from './poll-ago.js';
 
 let _latest = null;
 let _root = null;
 let _activityCallback = null;
-let _tickEls = [];
-let _unsubscribeTick = null;
+const _pollTicker = createPollAgoTicker(() => _root);
 
 const PHASE_LABEL = {
   error: 'error',
@@ -25,15 +24,6 @@ const PHASE_LABEL = {
   merged: 'merged',
 };
 
-function formatAgo(ts) {
-  if (!Number.isFinite(ts)) return 'never';
-  const seconds = Math.max(0, Math.round((Date.now() - ts) / 1000));
-  if (seconds < 60) return `${seconds}s ago`;
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
-  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
-  return `${Math.floor(seconds / 86400)}d ago`;
-}
-
 function shortSha(sha) {
   if (typeof sha !== 'string') return '';
   return sha.slice(0, 7);
@@ -43,30 +33,6 @@ function projectsOf(snapshot) {
   return Array.isArray(snapshot?.projects) ? snapshot.projects : [];
 }
 
-function pollText(ts) {
-  return `polled ${formatAgo(ts)}`;
-}
-
-function paintPollText(tickEl, ts) {
-  const nextText = pollText(ts);
-  if (tickEl.textContent === nextText) return;
-  tickEl.textContent = nextText;
-}
-
-function isVisible() {
-  if (!_root) return false;
-  return !_root.closest('[hidden]');
-}
-
-function refreshPollTimes() {
-  if (!isVisible()) return;
-  for (const tick of _tickEls) paintPollText(tick.el, tick.lastTickAt);
-}
-
-function ensureTickSubscription() {
-  if (_unsubscribeTick) return;
-  _unsubscribeTick = onSessionTick(refreshPollTimes);
-}
 
 function buildPrRow(pr) {
   const row = el('div', 'pr-row');
@@ -127,8 +93,7 @@ function buildProject(project) {
   summary.append(summaryStat('in review', String(counts.inReview)));
   summary.append(summaryStat('errors', String(counts.errors), counts.errors > 0 ? 'crit' : null));
   const tickEl = el('span', 'pr-project-tick');
-  paintPollText(tickEl, project.lastTickAt);
-  _tickEls.push({ el: tickEl, lastTickAt: project.lastTickAt });
+  _pollTicker.track(tickEl, project.lastTickAt);
   summary.append(tickEl);
   wrap.append(summary);
 
@@ -149,7 +114,7 @@ function attentionCount() {
 function render() {
   if (!_root) return;
   _root.textContent = '';
-  _tickEls = [];
+  _pollTicker.reset();
   const projects = projectsOf(_latest);
   if (projects.length === 0) {
     _root.append(el('p', 'pr-unconfigured', 'PR auto-review is not configured, or has not ticked yet. Open Settings and its PR Review tab to set it up.'));
@@ -169,7 +134,7 @@ export function mountPrView(parent) {
   const root = el('div', 'pr-content');
   parent.appendChild(root);
   _root = root;
-  ensureTickSubscription();
+  _pollTicker.ensure();
   render();
   return root;
 }

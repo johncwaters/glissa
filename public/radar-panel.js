@@ -4,14 +4,13 @@
 // configured the PostHog lane still finds the surface and is told where to switch it on.
 
 import { el } from './dom-helpers.js';
+import { createPollAgoTicker } from './poll-ago.js';
 import { severityFor as severity, sortIssuesByAttention, summarizeIssues } from './radar-core.mjs';
-import { onSessionTick } from './session-card/session-tick.js';
 
 let _latest = null;
 let _root = null;
 let _activityCallback = null;
-let _tickEls = [];
-let _unsubscribeTick = null;
+const _pollTicker = createPollAgoTicker(() => _root);
 
 const CHANGE_LABEL = {
   spiking: 'spiking',
@@ -28,15 +27,6 @@ const VERDICT_LABEL = {
   ERROR: 'error',
 };
 
-function formatAgo(ts) {
-  if (!Number.isFinite(ts)) return 'never';
-  const seconds = Math.max(0, Math.round((Date.now() - ts) / 1000));
-  if (seconds < 60) return `${seconds}s ago`;
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
-  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
-  return `${Math.floor(seconds / 86400)}d ago`;
-}
-
 function formatCount(n) {
   if (!Number.isFinite(n)) return '0';
   return String(n);
@@ -44,31 +34,6 @@ function formatCount(n) {
 
 function projectsOf(snapshot) {
   return Array.isArray(snapshot?.projects) ? snapshot.projects : [];
-}
-
-function pollText(ts) {
-  return `polled ${formatAgo(ts)}`;
-}
-
-function paintPollText(tickEl, ts) {
-  const nextText = pollText(ts);
-  if (tickEl.textContent === nextText) return;
-  tickEl.textContent = nextText;
-}
-
-function isVisible() {
-  if (!_root) return false;
-  return !_root.closest('[hidden]');
-}
-
-function refreshPollTimes() {
-  if (!isVisible()) return;
-  for (const tick of _tickEls) paintPollText(tick.el, tick.lastTickAt);
-}
-
-function ensureTickSubscription() {
-  if (_unsubscribeTick) return;
-  _unsubscribeTick = onSessionTick(refreshPollTimes);
 }
 
 function buildIssueRow(issue) {
@@ -133,8 +98,7 @@ function buildProject(project) {
   summary.append(summaryStat(counts.active === 1 ? 'active issue' : 'active issues', formatCount(counts.active)));
   summary.append(summaryStat('spiking', formatCount(counts.spiking), counts.spiking > 0 ? 'crit' : null));
   const tickEl = el('span', 'radar-project-tick');
-  paintPollText(tickEl, project.lastTickAt);
-  _tickEls.push({ el: tickEl, lastTickAt: project.lastTickAt });
+  _pollTicker.track(tickEl, project.lastTickAt);
   summary.append(tickEl);
   wrap.append(summary);
 
@@ -158,7 +122,7 @@ function attentionCount() {
 function render() {
   if (!_root) return;
   _root.textContent = '';
-  _tickEls = [];
+  _pollTicker.reset();
   const projects = projectsOf(_latest);
   if (projects.length === 0) {
     _root.append(el('p', 'radar-unconfigured', 'PostHog monitoring is not configured, or has not ticked yet. Open Settings and its PostHog tab to set it up.'));
@@ -178,7 +142,7 @@ export function mountRadarView(parent) {
   const root = el('div', 'radar-content');
   parent.appendChild(root);
   _root = root;
-  ensureTickSubscription();
+  _pollTicker.ensure();
   render();
   return root;
 }
