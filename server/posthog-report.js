@@ -7,9 +7,12 @@ const path = require('node:path');
 const DEFAULT_POSTHOG_REPORT_DIR = path.join(os.homedir(), '.glissa', 'posthog-reports');
 const POSTHOG_REPORT_ID_RE = /^[A-Za-z0-9_-]{1,128}$/;
 
-function isInsideDir(parentDir, candidatePath) {
-  const relative = path.relative(parentDir, candidatePath);
-  return relative === '' || (!!relative && !relative.startsWith('..') && !path.isAbsolute(relative));
+// Same traversal guard as control-handlers.js confinePath: resolve under the base dir and refuse a
+// result that escapes it. Kept locally because control-handlers exports only its registration entry.
+function confinePath(baseDir, ...segments) {
+  const abs = path.resolve(baseDir, ...segments);
+  const rel = path.relative(baseDir, abs);
+  return rel.startsWith('..') || path.isAbsolute(rel) ? null : abs;
 }
 
 function resolvePosthogReportPath(issueId, reportDir = DEFAULT_POSTHOG_REPORT_DIR) {
@@ -19,8 +22,8 @@ function resolvePosthogReportPath(issueId, reportDir = DEFAULT_POSTHOG_REPORT_DI
   }
 
   const resolvedReportDir = path.resolve(reportDir);
-  const resolvedReportPath = path.resolve(resolvedReportDir, `${rawIssueId}.md`);
-  if (!isInsideDir(resolvedReportDir, resolvedReportPath)) {
+  const resolvedReportPath = confinePath(resolvedReportDir, `${rawIssueId}.md`);
+  if (!resolvedReportPath) {
     return { ok: false, reason: 'Invalid report path' };
   }
 
@@ -40,13 +43,14 @@ async function readPosthogReport(issueId, { reportDir = DEFAULT_POSTHOG_REPORT_D
     if (err?.code === 'ENOENT') {
       return { ok: true, found: false, issueId: resolved.issueId, message: 'Report not found' };
     }
-    return { ok: false, found: false, issueId: resolved.issueId, error: err?.message || 'Could not read report' };
+    // Generic message on purpose: fs error strings carry the absolute server path, which does not
+    // belong on a paired remote client.
+    return { ok: false, found: false, issueId: resolved.issueId, error: 'Could not read report' };
   }
 }
 
 module.exports = {
   DEFAULT_POSTHOG_REPORT_DIR,
-  POSTHOG_REPORT_ID_RE,
   readPosthogReport,
   resolvePosthogReportPath,
 };
