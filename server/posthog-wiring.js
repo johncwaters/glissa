@@ -20,6 +20,7 @@ const { registerEphemeralSession } = require('./ephemeral-session');
 const { createPosthogPoller } = require('./posthog-poller');
 const { createPosthogApi } = require('./posthog-api');
 const { sendPosthogPing } = require('./posthog-telegram');
+const { DEFAULT_POSTHOG_REPORT_DIR } = require('./posthog-report');
 
 // Belt-and-suspenders deny-list for the headless investigation sessions (they run under
 // --dangerously-skip-permissions, so this is a guard, not the guard). v1 is READ-ONLY against
@@ -36,7 +37,7 @@ const POSTHOG_DENY = {
   ],
 };
 
-const REPORT_DIR = path.join(os.homedir(), '.glissa', 'posthog-reports');
+const REPORT_DIR = DEFAULT_POSTHOG_REPORT_DIR;
 // Fallback cwd for an investigation with no repo to read: a per-issue scratch directory. Never the
 // operator's home, which is the one directory where a confused agent can do the most damage.
 const WORK_DIR = path.join(os.homedir(), '.glissa', 'posthog-work');

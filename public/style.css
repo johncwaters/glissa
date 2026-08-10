@@ -1278,6 +1278,36 @@ body {
   overflow: hidden;
 }
 
+.dialog-report {
+  width: min(860px, calc(100vw - 32px));
+}
+
+.dialog-report-meta {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.dialog-report-body {
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--border-dim);
+  border-radius: var(--radius);
+  background: var(--bg-surface);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.dialog-report-error {
+  color: var(--state-failed);
+}
+
 /* [P2] Settings tab strip - replaces single-scroll section stack. Wraps at every width: the old
    hidden-scrollbar overflow gave no hint that tabs past the dialog edge existed, so a newly added
    tab was invisible until the operator happened to scroll a strip that did not look scrollable. */
@@ -1860,6 +1890,22 @@ body {
   gap: 10px;
   min-width: 0;
   padding: 3px 0;
+}
+
+.radar-issue-reportable {
+  cursor: pointer;
+  border-radius: var(--radius);
+}
+
+.radar-issue-reportable:hover,
+.radar-issue-reportable:focus-visible {
+  background: color-mix(in oklab, var(--accent) 8%, transparent);
+  outline: none;
+}
+
+.radar-issue-reportable .radar-verdict::after {
+  content: ' view';
+  color: var(--text-muted);
 }
 
 .radar-stripe {

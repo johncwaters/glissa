@@ -4,6 +4,8 @@
 // configured the PostHog lane still finds the surface and is told where to switch it on.
 
 import { el } from './dom-helpers.js';
+import { createPosthogReportDialog } from './dialogs.js';
+import { sendControlRequest } from './control-ws.js';
 import { createPollAgoTicker } from './poll-ago.js';
 import { severityFor as severity, sortIssuesByAttention, summarizeIssues } from './radar-core.mjs';
 
@@ -34,6 +36,30 @@ function formatCount(n) {
 
 function projectsOf(snapshot) {
   return Array.isArray(snapshot?.projects) ? snapshot.projects : [];
+}
+
+function issueReportId(issue) {
+  return typeof issue?.issueId === 'string' ? issue.issueId : '';
+}
+
+function openIssueReport(issue) {
+  const issueId = issueReportId(issue);
+  if (!issueId) return;
+  sendControlRequest('get-posthog-report', { issueId })
+    .then((msg) => {
+      if (!msg.ok) {
+        createPosthogReportDialog({ issueId, issueTitle: issue.title, error: msg.error || 'Could not read report' });
+        return;
+      }
+      if (!msg.found) {
+        createPosthogReportDialog({ issueId, issueTitle: issue.title, message: msg.message || 'Report not found' });
+        return;
+      }
+      createPosthogReportDialog({ issueId, issueTitle: issue.title, content: msg.content || '' });
+    })
+    .catch((err) => {
+      createPosthogReportDialog({ issueId, issueTitle: issue.title, error: err?.message || 'Could not read report' });
+    });
 }
 
 function buildIssueRow(issue) {
@@ -72,6 +98,22 @@ function buildIssueRow(issue) {
     const chip = el('span', 'radar-verdict', VERDICT_LABEL[issue.verdict] || String(issue.verdict).toLowerCase());
     chip.dataset.verdict = issue.verdict;
     row.append(chip);
+    if (issueReportId(issue)) {
+      row.classList.add('radar-issue-reportable');
+      row.tabIndex = 0;
+      row.setAttribute('role', 'button');
+      row.setAttribute('aria-label', `View investigation report for ${issue.title || issue.issueId}`);
+      row.title = 'View investigation report';
+      row.addEventListener('click', (event) => {
+        if (event.target.closest('a')) return;
+        openIssueReport(issue);
+      });
+      row.addEventListener('keydown', (event) => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
+        openIssueReport(issue);
+      });
+    }
   }
   return row;
 }

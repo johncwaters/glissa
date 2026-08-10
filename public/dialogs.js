@@ -632,3 +632,36 @@ export function createConfirmDialog({ title, message, confirmLabel = 'Confirm', 
 
   requestAnimationFrame(() => btnCancel.focus());
 }
+
+export function createPosthogReportDialog({ issueId, issueTitle, content, message, error }) {
+  const { dialog, close } = createModalOverlay({ dialogClass: 'dialog dialog-report' });
+  const titleId = `posthog-report-title-${Math.random().toString(36).slice(2)}`;
+
+  const titleEl = document.createElement('h3');
+  titleEl.id = titleId;
+  titleEl.className = 'dialog-title';
+  titleEl.textContent = 'Investigation report';
+
+  const metaEl = document.createElement('div');
+  metaEl.className = 'dialog-report-meta';
+  metaEl.textContent = issueTitle || issueId || '';
+
+  const bodyEl = document.createElement('pre');
+  bodyEl.className = error ? 'dialog-report-body dialog-report-error' : 'dialog-report-body';
+  bodyEl.textContent = error || message || content || '';
+
+  const actions = document.createElement('div');
+  actions.className = 'dialog-actions';
+
+  const btnClose = document.createElement('button');
+  btnClose.className = 'btn-dialog btn-dialog-cancel';
+  btnClose.textContent = 'Close';
+
+  actions.append(btnClose);
+  dialog.append(titleEl, metaEl, bodyEl, actions);
+
+  applyDialogAria(dialog, titleId);
+
+  btnClose.addEventListener('click', close);
+  requestAnimationFrame(() => btnClose.focus());
+}

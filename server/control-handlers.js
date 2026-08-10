@@ -7,6 +7,7 @@ const { STATES } = require('../shared/states');
 const { computeNextFire } = require('./scheduler');
 const { listRepoConversations } = require('../session/core/conversation-history');
 const { decideEditorOpenAccess, normalizeClientTrust } = require('./core/request-trust');
+const { readPosthogReport } = require('./posthog-report');
 
 // A Claude session id is a UUID, but stay lenient (any safe id charset) so a non-UUID id is not
 // rejected. The charset itself is the guard: no path separators, dots, or whitespace can reach the
@@ -205,6 +206,7 @@ function registerControlHandlers(controlWss, deps) {
     getUpdateStatus,
     // Cached last PostHog tick summary (optional - undefined in older callers/tests).
     getPosthogStatus,
+    posthogReportsDir = null,
     // Cached last PR auto-review tick summary (optional - undefined in older callers/tests).
     getPrStatus,
     // Replay of transient broadcasts missed across a reconnect gap (optional - undefined in
@@ -562,6 +564,15 @@ function registerControlHandlers(controlWss, deps) {
     }));
   }
 
+  async function handleGetPosthogReport(msg, ws) {
+    const result = await readPosthogReport(msg.issueId, { reportDir: posthogReportsDir || undefined });
+    ws.send(JSON.stringify({
+      type: 'posthog-report',
+      requestId: msg.requestId || null,
+      ...result,
+    }));
+  }
+
   function handleShutdown() {
     console.log('[control] Shutdown requested via UI');
     broadcastControl({ type: 'shutting-down' });
@@ -863,6 +874,7 @@ function registerControlHandlers(controlWss, deps) {
     'get-settings':     handleGetSettings,
     'update-settings':  handleUpdateSettings,
     'scan-repo-roots':  handleScanRepoRoots,
+    'get-posthog-report': handleGetPosthogReport,
     'kill':             (msg) => { const s = findSession(msg); if (s) s.killSession(); },
     'start-session':    (msg) => {
       const s = findSession(msg);
