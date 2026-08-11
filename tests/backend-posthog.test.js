@@ -16,6 +16,7 @@ const {
   posthogShouldStart,
   posthogCfgKey,
   sweepReports,
+  makeResolveProjects,
 } = require('../server/posthog-wiring');
 
 const ENABLED = { enabled: true, host: 'https://ph.test', apiKey: 'phx_secret' };
@@ -48,6 +49,60 @@ test('posthogShouldStart: enabled but telegram missing -> does not start, with a
 
 test('posthogShouldStart: fully configured -> starts', () => {
   assert.deepEqual(posthogShouldStart({ posthog: ENABLED, telegram: TELEGRAM }), { start: true, reason: null });
+});
+
+// --- makeResolveProjects: project display naming ---
+
+function fakeApi({ orgs, projectsByOrg }) {
+  return {
+    listOrganizations: async () => ({ ok: true, body: orgs }),
+    listProjects: async (orgId) => ({ ok: true, body: projectsByOrg[orgId] || [] }),
+  };
+}
+
+test('makeResolveProjects: stock "Default project" name falls back to the org name', async () => {
+  const api = fakeApi({
+    orgs: [{ id: 'o1', name: 'Card Harbor' }, { id: 'o2', name: 'Keeplings' }],
+    projectsByOrg: {
+      o1: [{ id: 1, name: 'Default project' }],
+      o2: [{ id: 2, name: 'Renamed' }],
+    },
+  });
+  const resolve = makeResolveProjects(api, { posthog: { projects: 'all' } });
+  assert.deepEqual(await resolve(), [
+    { projectId: 1, name: 'Card Harbor' },
+    { projectId: 2, name: 'Renamed' },
+  ]);
+});
+
+test('makeResolveProjects: projectMap override beats both project and org names', async () => {
+  const api = fakeApi({
+    orgs: [{ id: 'o1', name: 'Card Harbor' }],
+    projectsByOrg: { o1: [{ id: 1, name: 'Default project' }] },
+  });
+  const resolve = makeResolveProjects(api, { posthog: { projects: 'all', projectMap: { 1: 'Mapped' } } });
+  assert.deepEqual(await resolve(), [{ projectId: 1, name: 'Mapped' }]);
+});
+
+test('makeResolveProjects: missing project and org names fall back to the project id', async () => {
+  const api = fakeApi({
+    orgs: [{ id: 'o1' }],
+    projectsByOrg: { o1: [{ id: 7 }] },
+  });
+  const resolve = makeResolveProjects(api, { posthog: { projects: 'all' } });
+  assert.deepEqual(await resolve(), [{ projectId: 7, name: '7' }]);
+});
+
+test('makeResolveProjects: explicit project array is taken verbatim, no org walk', async () => {
+  const api = {
+    listOrganizations: async () => { throw new Error('must not be called'); },
+    listProjects: async () => { throw new Error('must not be called'); },
+  };
+  const resolve = makeResolveProjects(api, { posthog: { projects: [5, 6], projectMap: { 5: 'Five' } } });
+  assert.deepEqual(await resolve(), [
+    { projectId: 5, name: 'Five' },
+    { projectId: 6, name: '6' },
+  ]);
 });
 
 // --- posthogCfgKey: identity used to gate a restart to actual posthog/telegram changes ---

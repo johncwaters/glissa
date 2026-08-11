@@ -285,33 +285,6 @@ function createPosthogWiring({
     fs.renameSync(tmp, posthogStatePath);
   }
 
-  // `projects: 'all'` walks every organization the personal API key can see; an explicit array is
-  // taken verbatim, with display names from config.posthog.projectMap when present.
-  function makeResolveProjects(api) {
-    return async function resolveProjects() {
-      const configured = config.posthog.projects;
-      const projectMap = config.posthog.projectMap || {};
-      if (Array.isArray(configured)) {
-        return configured.map((projectId) => ({
-          projectId, name: projectMap[projectId] || String(projectId),
-        }));
-      }
-      const orgs = await api.listOrganizations();
-      if (!orgs.ok) return [];
-      const orgRows = Array.isArray(orgs.body) ? orgs.body : (orgs.body?.results || []);
-      const out = [];
-      for (const org of orgRows) {
-        const res = await api.listProjects(org.id);
-        if (!res.ok) continue;
-        const rows = Array.isArray(res.body) ? res.body : (res.body?.results || []);
-        for (const project of rows) {
-          out.push({ projectId: project.id, name: projectMap[project.id] || project.name || String(project.id) });
-        }
-      }
-      return out;
-    };
-  }
-
   // The last tick summary, replayed to a control client that connects between ticks (the same
   // cached-snapshot pattern backend.js uses for the startup update check).
   let lastStatus = null;
@@ -343,7 +316,7 @@ function createPosthogWiring({
       poller = createPosthogPoller({
         api,
         host: config.posthog.host,
-        resolveProjects: makeResolveProjects(api),
+        resolveProjects: makeResolveProjects(api, config),
         spawnInvestigation: posthogInvestigationSpawn,
         telegram: (text) => sendPosthogPing(config.telegram.botToken, config.telegram.chatId, text),
         readState: readPosthogState,
@@ -377,8 +350,41 @@ function createPosthogWiring({
   return { startPoller, restartIfConfigChanged, stopPoller, getStatus };
 }
 
+// `projects: 'all'` walks every organization the personal API key can see; an explicit array is
+// taken verbatim, with display names from config.posthog.projectMap when present. Top-level (not a
+// closure of createPosthogWiring) so the naming rules are unit-testable with a fake api.
+function makeResolveProjects(api, config) {
+  return async function resolveProjects() {
+    const configured = config.posthog.projects;
+    const projectMap = config.posthog.projectMap || {};
+    if (Array.isArray(configured)) {
+      return configured.map((projectId) => ({
+        projectId, name: projectMap[projectId] || String(projectId),
+      }));
+    }
+    const orgs = await api.listOrganizations();
+    if (!orgs.ok) return [];
+    const orgRows = Array.isArray(orgs.body) ? orgs.body : (orgs.body?.results || []);
+    const out = [];
+    for (const org of orgRows) {
+      const res = await api.listProjects(org.id);
+      if (!res.ok) continue;
+      const rows = Array.isArray(res.body) ? res.body : (res.body?.results || []);
+      for (const project of rows) {
+        // PostHog names every org's initial project "Default project"; with one org per app that
+        // stock name identifies nothing, so the org name is the honest label for it.
+        const isStockName = !project.name || project.name === 'Default project';
+        const fallbackName = (isStockName && org.name) || project.name || String(project.id);
+        out.push({ projectId: project.id, name: projectMap[project.id] || fallbackName });
+      }
+    }
+    return out;
+  };
+}
+
 module.exports = {
   createPosthogWiring,
+  makeResolveProjects,
   buildInvestigationPrompt,
   readInvestigationResult,
   posthogShouldStart,
