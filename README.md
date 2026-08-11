@@ -86,7 +86,7 @@ glissa pair --list
 glissa pair --revoke <device-id>
 ```
 
-A pairing cookie is full code execution as the server account, so treat those URLs as passwords. See [Limitations](#limitations) for the whole trust boundary.
+Pairing grants real access to your machine; see [Limitations](#limitations) for the whole trust boundary.
 
 ## Troubleshooting
 
