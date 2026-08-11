@@ -31,8 +31,12 @@ Usage: glissa [command] [options]
 
 Commands:
   doctor            Diagnose install / PATH issues and exit
+  pair              Mint a single-use pairing link for a remote device
+  pair --list       List paired devices
+  pair --revoke <id>  Revoke a paired device
 
 Options:
+  --name <label>    Label for the device being paired (with: pair)
   --port <number>   Override the server port (default: 3000)
   --config <path>   Path to config file (default: ~/.glissa/config.json)
   --version         Show version number
@@ -183,7 +187,64 @@ node bin/glissa.js doctor
 
 ---
 
-## Test 10: `npm pack` Verification
+## Test 10: `glissa pair`
+
+Use a temporary config so the test does not modify your normal pairing store. Start Glissa in one PowerShell window:
+
+```powershell
+$pairDir = Join-Path $env:TEMP "glissa-pair-cli-test"
+New-Item -ItemType Directory -Force $pairDir | Out-Null
+$pairConfig = Join-Path $pairDir "config.json"
+@'
+{
+  "port": 3000,
+  "remote": {
+    "enabled": true,
+    "port": 3456
+  },
+  "projects": []
+}
+'@ | Set-Content -Encoding UTF8 $pairConfig
+
+node bin/glissa.js --config $pairConfig --port 3455
+```
+
+In a second PowerShell window, mint and redeem a pairing link:
+
+```powershell
+$pairConfig = Join-Path (Join-Path $env:TEMP "glissa-pair-cli-test") "config.json"
+$mintOutput = node bin/glissa.js --config $pairConfig pair --name Phone
+$mintOutput
+$pairUrl = ($mintOutput | Select-String "http://127.0.0.1:3456/pair/").Matches.Value
+Invoke-WebRequest $pairUrl -SessionVariable pairedSession | Out-Null
+```
+
+**Expected mint output includes:** `http://127.0.0.1:3456/pair/` and `Treat this link like a password.`
+
+List the paired device:
+
+```powershell
+node bin/glissa.js --config $pairConfig pair --list
+```
+
+**Expected output includes:** a table with `ID`, `NAME`, `PAIRED`, `LAST SEEN`, `STATUS`, and a row whose `NAME` is `Phone`.
+
+Revoke it, replacing `<id>` with the `ID` from the list output:
+
+```powershell
+node bin/glissa.js --config $pairConfig pair --revoke <id>
+node bin/glissa.js --config $pairConfig pair --list
+```
+
+**Expected output includes:** `Revoked <id>. A running Glissa applies this within 30 seconds, no restart needed.` and the same device row with `revoked` in the `STATUS` column.
+
+**Exit code:** 0 for mint, list, and revoke.
+
+Stop the server from the first PowerShell window with `Ctrl+C`.
+
+---
+
+## Test 11: `npm pack` Verification
 
 Installing from the GitHub spec packs the repo first, so this list is exactly what lands in a global install.
 
@@ -226,7 +287,7 @@ package.json
 
 ---
 
-## Test 11: `package.json` Fields
+## Test 12: `package.json` Fields
 
 ```powershell
 node -e "const p=require('./package.json'); console.log(JSON.stringify({bin:p.bin,files:p.files,engines:p.engines},null,2))"
@@ -292,10 +353,11 @@ This is a code-level verification: `buildSpawnEnv` returns a scrubbed copy of th
 | 7 | Auto-seeds `~/.glissa/config.json` when none exist | |
 | 8 | `node server.js` still works (backward compat) | |
 | 9 | `glissa doctor` prints a read-only report, exits 0 | |
-| 10 | `npm pack --dry-run` includes correct files | |
-| 11 | `package.json` has bin, files, engines | |
-| 12 | `npm link` + `glissa --help` works globally | |
-| 13 | `npm unlink -g glissa` cleans up | |
+| 10 | `glissa pair` can mint, list, and revoke a device | |
+| 11 | `npm pack --dry-run` includes correct files | |
+| 12 | `package.json` has bin, files, engines | |
+| 13 | `npm link` + `glissa --help` works globally | |
+| 14 | `npm unlink -g glissa` cleans up | |
 
 ---
 

@@ -39,7 +39,7 @@ npm start
 
 Open `http://localhost:3000` to view the dashboard.
 
-To update a clone, pull and rebuild (this is exactly what Glissa's own startup update check tells you to run):
+To update a clone, pull and rebuild (Glissa's own startup update check nudges you with the same three steps; `--ff-only` is the safer form of the pull):
 
 ```bash
 git pull --ff-only && npm ci && npm run build
@@ -61,15 +61,32 @@ The two env vars make Glissa bind all interfaces INSIDE the container (docker po
 ## Usage
 
 ```
-glissa                      # Start on default port 3000
-glissa --port 3001          # Custom port
-glissa --config <path>      # Custom config file path
-glissa doctor               # Diagnose install / PATH issues
-glissa --help               # Show help
-glissa --version            # Show version
+glissa                        # Start on default port 3000
+glissa doctor                 # Diagnose install / PATH issues and exit
+glissa pair                   # Mint a single-use pairing link for a remote device
+glissa pair --list            # List paired devices
+glissa pair --revoke <id>     # Revoke a paired device
+
+glissa pair --name <label>    # Label the device being paired
+glissa --port 3001            # Override the server port (default: 3000)
+glissa --config <path>        # Path to config file (default: ~/.glissa/config.json)
+glissa --version              # Show version number
+glissa --help                 # Show help
 ```
 
 Open `http://localhost:3000` to view the dashboard.
+
+## Remote access
+
+Remote access is off unless you add a `remote` block to `config.json`; it opens a second loopback listener designed to sit behind a reverse proxy such as `tailscale serve`, never a wider bind. Pair a device with `glissa pair`, which prints a single-use URL valid for 10 minutes and sets an auth cookie on redemption; `glissa pair --list` and `glissa pair --revoke <id>` manage devices, and a revoke takes effect without a restart.
+
+```bash
+glissa pair --name phone
+glissa pair --list
+glissa pair --revoke <device-id>
+```
+
+A pairing cookie is full code execution as the server account, so treat those URLs as passwords. See [Limitations](#limitations) for the whole trust boundary.
 
 ## Troubleshooting
 
@@ -97,6 +114,10 @@ The install succeeded, but the directory where npm placed the `glissa` command i
 - Structural status detection: hooks as the authoritative signal, an OSC-0 title fallback, never screen scraping (see below)
 - Background sub-agent completion gate: a session with live background agents or tasks stays out of Complete until they finish
 - Native browser notifications when a session needs input, finishes, or fails (opt-in Windows toast fallback)
+- Phone layout as a first-class second layout, not a squeezed desktop: Board, Terminal, Review and Teams screens, attention-first ordering, and soft-keyboard handling that resizes the terminal instead of covering it
+- Remote mode (opt-in): a separate listener with single-use device pairing and cookie auth (see [Remote access](#remote-access))
+- Telegram notifications (opt-in): pings your phone only when no dashboard tab is open anywhere, so it fills the gap instead of duplicating the browser notification
+- Image upload from the phone key strip: pick an image, and its saved path is pasted into that session's prompt for you to send
 - Keyboard navigation: jump between sessions, step through the ones needing attention, and merge or resolve from the keyboard
 - Teams: project-portable agent pipelines that run against any project you manage
 - GitHub PR auto-review (opt-in): reviews your own open PRs headlessly, comments its findings, and auto-merges only the clean PRs whose checks are green
@@ -171,7 +192,7 @@ This is a minimal starting example. The full key list (`integrationBranch`, `aut
 ## Requirements
 
 - **Node.js** >= 18
-- **Windows 11**
+- **Windows 11 or Linux**
 - **Claude Code CLI** installed and available on PATH
 
 ## Development
@@ -188,8 +209,8 @@ npm start               # Production server
 
 ## Limitations
 
-- **Windows 11 only.** Built for the platform where multi-session Claude Code tooling didn't exist. Other platforms are untested, not merely unsupported in the docs.
-- **Localhost-only, single-user trust boundary.** Neither WebSocket channel has authentication; any local process can connect. That's a deliberate scope choice for a single-user dev tool, not an oversight, but it means the port must never be exposed beyond `localhost`.
+- **Windows 11 and Linux.** Developed daily on Windows 11, which is where the multi-session tooling didn't exist; it also runs on Linux servers, which is how my always-on machines are provisioned. macOS is untested, not merely undocumented.
+- **Local-first, with an opt-in remote door.** By default Glissa binds `localhost` and neither WebSocket channel has authentication, so any local process can connect. That's a deliberate single-user scope choice, not an oversight, but it means the local port must never be exposed to the network. Remote access is a separate opt-in listener gated by single-use pairing tokens and cookies, meant to sit behind a reverse proxy such as `tailscale serve`; a pairing cookie grants full code execution as the server account, so pairing URLs are passwords and should be handled like them.
 - **Requires the Claude Code CLI.** Glissa spawns and manages it; it doesn't replace it.
 
 ## Changelog

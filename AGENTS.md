@@ -23,6 +23,7 @@ Glissa is a lightweight Node.js background process that spawns and manages Claud
 | `vite.config.js` | Vite frontend build config + backend-attach plugin (ESM) |
 | `biome.json` | Lint/format config (worktrees inherit the nested-config gotcha from main) |
 | `package.json` | CommonJS package, `private` (never published to a registry); the `files` whitelist bounds the tarball npm packs for a `github:johncwaters/glissa` install, validated by `scripts/check-package-files.js`. See `docs/distribution.md` |
+| `socket.yml` | Socket.dev security-scan policy suppressing expected findings: shell access, network access, native code, and env reads are core features, not supply-chain risk |
 | `AGENTS.md` | Project agent instructions: architecture, conventions, design decisions. Read it first. `CLAUDE.md` is a stub that imports this file via `@AGENTS.md` |
 | `DESIGN.md` / `DESIGN.json` | Dashboard visual design system |
 | `PRODUCT.md` | Product definition and positioning (canonical; see `docs/archive/product-design-context.md` for the superseded design-context doc) |

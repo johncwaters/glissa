@@ -10,7 +10,8 @@ The globally-installed CLI entry point for Glissa (`npm i -g github:johncwaters/
 
 | File | Description |
 |------|-------------|
-| `glissa.js` | `#!/usr/bin/env node` launcher: `--port`, `--config` (default `~/.glissa/config.json`), `--version`, `--help`; sets `GLISSA_PORT`/`GLISSA_CONFIG` env vars then `require('../server')` |
+| `glissa.js` | `#!/usr/bin/env node` launcher: `doctor`, `pair` (`--list`, `--revoke <id>`, `--name <label>`), `--port`, `--config`, `--version`, `--help`; sets env vars, dispatches CLI-only commands, then `require('../server')` |
+| `path-doctor.js` | Pure PATH helpers shared by `glissa doctor` and the post-install PATH notice |
 
 ## For AI Agents
 
@@ -24,7 +25,7 @@ The globally-installed CLI entry point for Glissa (`npm i -g github:johncwaters/
 ## Dependencies
 
 ### Internal
-- `../server.js` / `../backend.js` - the server it boots
-- `../config-store.js` - config resolution
+- `../server.js` / `../server/backend.js` - the server it boots
+- `../server/config-store.js` - config resolution used by the pairing CLI
 
 <!-- MANUAL: Any manually added notes below this line are preserved on regeneration -->

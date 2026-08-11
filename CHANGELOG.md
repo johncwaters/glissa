@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **First-class phone layout**: the dashboard now has dedicated Board, Terminal, Review, and Teams screens on phones, with bottom navigation, live element re-parenting, attention-first triage, and soft-keyboard handling that routes phone text input around xterm's fragile IME path.
+- **Phone image upload**: the phone key strip can upload an image into the active session, saving the file under Glissa's upload area and bracket-pasting the path into the PTY for the operator to send.
+
+### Changed
+
+- **Distribution moved to GitHub installs**: Glissa is no longer published to the npm registry; standalone installs now use `npm install -g github:johncwaters/glissa`, and release/update docs now point at GitHub tags and the `main` branch package metadata.
+
+### Fixed
+
+- **WebSocket upgrades are routed by pathname**: control and data upgrades are classified before handoff, unknown local upgrades are left for Vite, remote unknown upgrades are closed, and both control and terminal clients now use jittered reconnect backoff instead of reconnecting in lockstep.
+- **Server lifecycle and install diagnostics are quieter and more reliable**: service-managed restarts now exit non-zero under systemd so the supervisor restarts Glissa, pairing writes dedupe stored devices, and PATH diagnostics dedupe duplicate Claude command matches.
+
 ## [0.21.0] - 2026-08-05
 
 A hardening and housekeeping release: detection survives Windows 8.3 short paths instead of aborting the process, team configs must now declare their permission mode explicitly, the focus rail's quick-add button stops trading places with the dismiss control, and lint moves under CI enforcement.

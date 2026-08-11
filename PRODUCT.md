@@ -2,9 +2,9 @@
 
 ## Users
 
-A single power user: a developer running many Claude Code agents at once, on Windows, often late and often tired. Their context is a 27-inch monitor in a dim room at 2am, several live terminals in view, attention split across sessions that each move at their own pace. They are not browsing; they are on watch.
+A single power user: a developer running many Claude Code agents at once, on Windows or against a Linux server, often late and often tired. Their context is a 27-inch monitor in a dim room at 2am, several live terminals in view, attention split across sessions that each move at their own pace. They are not browsing; they are on watch.
 
-The job to be done: spawn, monitor, and steer dozens of Claude Code sessions from one screen without alt-tabbing between windows, losing track of which agent is waiting for input, or missing the moment one finishes or fails. Glissa runs locally (localhost only, single user), so the operator already trusts the machine; what they need from the interface is honest, legible state. The primary task on any given screen is triage: scan the board, find the session that needs a human, act, return to watching.
+The job to be done: spawn, monitor, and steer dozens of Claude Code sessions from one screen without alt-tabbing between windows, losing track of which agent is waiting for input, or missing the moment one finishes or fails. Glissa is local-first (localhost by default, single user, with opt-in paired remote access from their own phone), so the operator already trusts the machine; what they need from the interface is honest, legible state. The primary task on any given screen is triage: scan the board, find the session that needs a human, act, return to watching.
 
 ## Product Purpose
 
