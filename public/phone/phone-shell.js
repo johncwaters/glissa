@@ -35,7 +35,7 @@ const SCREENS = Object.freeze([
   { id: BOARD, label: 'Board', glyph: '▤' },       // square with horizontal fill: the roster list
   { id: 'terminal', label: 'Terminal', glyph: '▸' }, // the brand forward marker: live output
   { id: 'review', label: 'Review', glyph: '◫' },     // square bisected vertically: a diff
-  { id: 'teams', label: 'Teams', glyph: '◈' },       // diamond in a diamond: a staged pipeline
+  { id: 'teams', label: 'Teams', glyph: '◈', nested: true }, // diamond in a diamond: a staged pipeline
   { id: 'radar', label: 'Radar', glyph: '◎', nested: true }, // ringed circle: a scan sweep
   { id: 'prs', label: 'PRs', glyph: '⇅', nested: true },     // opposed arrows: push and pull
 ]);
