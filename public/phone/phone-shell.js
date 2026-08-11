@@ -116,16 +116,24 @@ function syncVisualViewport() {
 // a bottom nav a thumb taps. So it is a plain <nav> of buttons with aria-current on the active one:
 // each button announces as a button, and half-implemented tab semantics (role=tab with no
 // aria-controls and no roving) are worse for a screen reader than no roles at all.
+function appendGlyphAndLabel(btn, glyph, label) {
+  const glyphEl = el('span', 'phone-nav-glyph');
+  glyphEl.setAttribute('aria-hidden', 'true');
+  glyphEl.textContent = glyph;
+  const labelEl = el('span', 'phone-nav-label');
+  labelEl.textContent = label;
+  btn.append(glyphEl, labelEl);
+}
+
 function buildNavButton(label, glyph) {
   const btn = el('button', 'phone-nav-item');
   btn.type = 'button';
-  btn.innerHTML = '<span class="phone-nav-glyph" aria-hidden="true"></span>'
-    + '<span class="phone-nav-label"></span>'
-    + '<span class="phone-nav-dot" aria-hidden="true"></span>';
-  btn.querySelector('.phone-nav-glyph').textContent = glyph;
-  btn.querySelector('.phone-nav-label').textContent = label;
+  appendGlyphAndLabel(btn, glyph, label);
+  const dot = el('span', 'phone-nav-dot');
+  dot.setAttribute('aria-hidden', 'true');
   // Dots start hidden; only the Board's is ever lit (driven by refreshPhoneBoard).
-  btn.querySelector('.phone-nav-dot').hidden = true;
+  dot.hidden = true;
+  btn.appendChild(dot);
   return btn;
 }
 
@@ -140,10 +148,7 @@ function buildMoreMenu() {
     const btn = el('button', 'phone-nav-menu-item');
     btn.type = 'button';
     btn.dataset.screen = screen.id;
-    btn.innerHTML = '<span class="phone-nav-glyph" aria-hidden="true"></span>'
-      + '<span class="phone-nav-label"></span>';
-    btn.querySelector('.phone-nav-glyph').textContent = screen.glyph;
-    btn.querySelector('.phone-nav-label').textContent = screen.label;
+    appendGlyphAndLabel(btn, screen.glyph, screen.label);
     btn.addEventListener('click', () => {
       setMoreMenuOpen(false);
       showScreen(screen.id);
