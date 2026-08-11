@@ -39,7 +39,7 @@ The browser dashboard frontend: ES modules bundled by Vite (dev server with HMR 
 | `session-card/` | Session card modules: terminal, lifecycle, DOM, naming, WebGL pool (see `session-card/AGENTS.md`) |
 | `teams-panel/` | Teams tab package: `lifecycle.js` orchestrator + registry, instance panel, pipeline, runs list, schedule editor, chat, setup banner, pure `format-core.mjs` |
 | `focus-view/` | Focus view: roster rail + centered card, attention queue (see `focus-view/AGENTS.md`) |
-| `phone/` | Phone layout: four screens + bottom nav, rendered only under `[data-layout="phone"]` (see `phone/AGENTS.md`) |
+| `phone/` | Phone layout: six screens + bottom nav, rendered only under `[data-layout="phone"]` (see `phone/AGENTS.md`) |
 | `sidebar/` | Review sidebar: diff rendering, selection, merge actions (see `sidebar/AGENTS.md`) |
 | `components/` | Static HTML fragments imported `?raw` (see `components/AGENTS.md`) |
 | `audio/` | Notification sound files (OGG) |

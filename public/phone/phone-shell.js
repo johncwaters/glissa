@@ -1,18 +1,20 @@
-// The phone layout's shell: four screens, one visible at a time, behind a bottom nav.
+// The phone layout's shell: six screens, one visible at a time, behind a bottom nav.
 //
 // This is a first-class layout, not a narrowed desktop. The desktop DOM (header, focus view, docked
 // sidebar) is not rendered at all under [data-layout="phone"]; the shell is only built the first time
 // the browser is actually in that layout, so a desktop session never pays for a line of it.
 //
-// The four screens map to the phone job described in PRODUCT.md - scan, open, act, go back:
+// The screens map to the phone job described in PRODUCT.md - scan, open, act, go back:
 //   Board    - the landing screen: which session needs a carbon unit (see board-screen.js)
 //   Terminal - the selected session's live terminal, full bleed (see terminal-screen.js)
 //   Review   - the real review sidebar, re-parented in as a full screen
 //   Teams    - the real Teams panel, re-parented in as a full screen
+//   Radar    - the real Radar panel, re-parented in as a full screen
+//   PRs      - the real PRs panel, re-parented in as a full screen
 //
-// Three elements are BORROWED from the desktop DOM rather than rebuilt: the review sidebar, the Teams
-// panel, and the header controls the Board top bar adopts. Rebuilding any of them would mean a second
-// state pipeline for the same facts.
+// Five elements are BORROWED from the desktop DOM rather than rebuilt: the review sidebar, the Teams,
+// Radar and PRs panels, and the header controls the Board top bar adopts. Rebuilding any of them would
+// mean a second state pipeline for the same facts.
 
 import { STATES } from '/shared/states.mjs';
 import { sendControlMsg } from '../control-ws.js';
@@ -33,6 +35,8 @@ const SCREENS = Object.freeze([
   { id: 'terminal', label: 'Terminal', glyph: '▸' }, // the brand forward marker: live output
   { id: 'review', label: 'Review', glyph: '◫' },     // square bisected vertically: a diff
   { id: 'teams', label: 'Teams', glyph: '◈' },       // diamond in a diamond: a staged pipeline
+  { id: 'radar', label: 'Radar', glyph: '◎' },       // ringed circle: a scan sweep
+  { id: 'prs', label: 'PRs', glyph: '⇅' },           // opposed arrows: push and pull
 ]);
 
 let shellEl = null;
@@ -43,6 +47,10 @@ let terminalScreen = null;
 let reviewMountEl = null;
 let teamsMountEl = null;
 let teamsPanelEl = null;
+let radarMountEl = null;
+let radarPanelEl = null;
+let prsMountEl = null;
+let prPanelEl = null;
 let hooks = {};
 let activeScreen = BOARD;
 let active = false;
@@ -96,7 +104,7 @@ function syncVisualViewport() {
   shellEl.removeAttribute('data-keyboard');
 }
 
-// Deliberately NOT the ARIA tabs pattern. These four are DESTINATIONS, not panels of one document:
+// Deliberately NOT the ARIA tabs pattern. These screens are DESTINATIONS, not panels of one document:
 // each pushes browser history (the back gesture returns to the Board), and each holds an independent
 // surface - a live terminal, a diff panel, the Teams panel - rather than alternate content for one
 // region. Tabs also imply Left/Right roving focus within a single composite control, which is wrong for
@@ -115,6 +123,8 @@ function buildNav() {
       + '<span class="phone-nav-dot" aria-hidden="true"></span>';
     btn.querySelector('.phone-nav-glyph').textContent = screen.glyph;
     btn.querySelector('.phone-nav-label').textContent = screen.label;
+    // Dots start hidden; the Board's is driven by refreshPhoneBoard, Radar/PRs by setPhoneNavActivity.
+    btn.querySelector('.phone-nav-dot').hidden = true;
     btn.addEventListener('click', () => showScreen(screen.id));
     navButtonById.set(screen.id, btn);
     nav.appendChild(btn);
@@ -126,7 +136,7 @@ function wrapScreen(id, label, contentEl) {
   const section = el('section', 'phone-screen');
   section.dataset.screen = id;
   section.setAttribute('aria-label', label);
-  // Every screen starts hidden; activation reveals exactly one. Without this the four stack visibly
+  // Every screen starts hidden; activation reveals exactly one. Without this the screens stack visibly
   // for a frame between build() and the first applyScreen.
   section.hidden = true;
   if (contentEl) section.appendChild(contentEl);
@@ -142,6 +152,8 @@ function build() {
   terminalScreen = createTerminalScreen({ onBack: () => showScreen(BOARD) });
   reviewMountEl = el('div', 'phone-review');
   teamsMountEl = el('div', 'phone-teams');
+  radarMountEl = el('div', 'phone-radar');
+  prsMountEl = el('div', 'phone-prs');
 
   const screens = el('div', 'phone-screens');
   const contentByScreenId = {
@@ -149,6 +161,8 @@ function build() {
     terminal: terminalScreen.el,
     review: reviewMountEl,
     teams: teamsMountEl,
+    radar: radarMountEl,
+    prs: prsMountEl,
   };
   for (const screen of SCREENS) {
     screens.appendChild(wrapScreen(screen.id, screen.label, contentByScreenId[screen.id]));
@@ -285,6 +299,24 @@ function showScreen(screenId) {
 export function mountPhoneShell(options) {
   hooks = options || {};
   teamsPanelEl = hooks.teamsPanelEl || null;
+  radarPanelEl = hooks.radarPanelEl || null;
+  prPanelEl = hooks.prPanelEl || null;
+}
+
+// Attention dot on a nav item (Radar / PRs activity). Safe before build and on desktop: with no shell
+// yet there is no button, and the toggle re-applies on the next activation via the stored flag.
+const navActivityByScreenId = new Map();
+export function setPhoneNavActivity(screenId, isActive) {
+  navActivityByScreenId.set(screenId, !!isActive);
+  const dot = navButtonById.get(screenId)?.querySelector('.phone-nav-dot');
+  if (dot) dot.hidden = !isActive;
+}
+
+function applyStoredNavActivity() {
+  for (const [screenId, isActive] of navActivityByScreenId) {
+    const dot = navButtonById.get(screenId)?.querySelector('.phone-nav-dot');
+    if (dot) dot.hidden = !isActive;
+  }
 }
 
 // `sessionId` is the session the desktop Focus center was holding, if any. It is pre-loaded into the
@@ -299,6 +331,14 @@ export function activatePhoneShell({ sessionId } = {}) {
   reparentReviewPanel(reviewMountEl);
   adoptElement(teamsPanelEl, teamsMountEl);
   if (teamsPanelEl) teamsPanelEl.hidden = false;
+  // Radar and PRs are adopted the same way as Teams: the desktop tabpanel moves in whole, so the
+  // eagerly-mounted panel keeps its state, and hidden (set by the desktop tab strip) is lifted while
+  // the phone owns it. deactivate gives it back and activateView re-applies desktop visibility.
+  adoptElement(radarPanelEl, radarMountEl);
+  if (radarPanelEl) radarPanelEl.hidden = false;
+  adoptElement(prPanelEl, prsMountEl);
+  if (prPanelEl) prPanelEl.hidden = false;
+  applyStoredNavActivity();
   syncVisualViewport();
   if (sessionId) terminalScreen.show(sessionId);
   // Reconcile history BEFORE opening a screen, so the flag and the stack agree from the first tap.
@@ -315,6 +355,8 @@ export function deactivatePhoneShell() {
   terminalScreen.clear();
   reparentReviewPanel(null);
   releaseElement(teamsPanelEl);
+  releaseElement(radarPanelEl);
+  releaseElement(prPanelEl);
   for (const control of (hooks.headerControls || [])) releaseElement(control);
   shellEl.hidden = true;
   shellEl.removeAttribute('data-keyboard');

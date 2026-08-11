@@ -4,7 +4,7 @@
 # phone
 
 ## Purpose
-The phone layout: four screens (Board, Terminal, Review, Teams) behind a bottom nav, rendered ONLY under `[data-layout="phone"]`. It is a first-class layout, not a narrowed desktop: the desktop shell is `display:none` on a phone, and the phone shell borrows the elements that own live state (the review sidebar, the Teams panel, the desktop header controls, a session's card) instead of rebuilding them.
+The phone layout: six screens (Board, Terminal, Review, Teams, Radar, PRs) behind a bottom nav, rendered ONLY under `[data-layout="phone"]`. It is a first-class layout, not a narrowed desktop: the desktop shell is `display:none` on a phone, and the phone shell borrows the elements that own live state (the review sidebar, the Teams/Radar/PRs panels, the desktop header controls, a session's card) instead of rebuilding them.
 
 The job it serves is triage, per `PRODUCT.md`: scan the board, find the session that needs a carbon unit, open it, act, go back.
 
