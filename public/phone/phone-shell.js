@@ -50,7 +50,7 @@ let teamsPanelEl = null;
 let radarMountEl = null;
 let radarPanelEl = null;
 let prsMountEl = null;
-let prPanelEl = null;
+let prsPanelEl = null;
 let hooks = {};
 let activeScreen = BOARD;
 let active = false;
@@ -300,7 +300,7 @@ export function mountPhoneShell(options) {
   hooks = options || {};
   teamsPanelEl = hooks.teamsPanelEl || null;
   radarPanelEl = hooks.radarPanelEl || null;
-  prPanelEl = hooks.prPanelEl || null;
+  prsPanelEl = hooks.prsPanelEl || null;
 }
 
 // Attention dot on a nav item (Radar / PRs activity). Safe before build and on desktop: with no shell
@@ -336,8 +336,8 @@ export function activatePhoneShell({ sessionId } = {}) {
   // the phone owns it. deactivate gives it back and activateView re-applies desktop visibility.
   adoptElement(radarPanelEl, radarMountEl);
   if (radarPanelEl) radarPanelEl.hidden = false;
-  adoptElement(prPanelEl, prsMountEl);
-  if (prPanelEl) prPanelEl.hidden = false;
+  adoptElement(prsPanelEl, prsMountEl);
+  if (prsPanelEl) prsPanelEl.hidden = false;
   applyStoredNavActivity();
   syncVisualViewport();
   if (sessionId) terminalScreen.show(sessionId);
@@ -356,7 +356,7 @@ export function deactivatePhoneShell() {
   reparentReviewPanel(null);
   releaseElement(teamsPanelEl);
   releaseElement(radarPanelEl);
-  releaseElement(prPanelEl);
+  releaseElement(prsPanelEl);
   for (const control of (hooks.headerControls || [])) releaseElement(control);
   shellEl.hidden = true;
   shellEl.removeAttribute('data-keyboard');

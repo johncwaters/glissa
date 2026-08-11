@@ -465,7 +465,7 @@ activateView(VIEW_TABS.some((v) => v.view === savedView) ? savedView : 'focus');
 mountPhoneShell({
   teamsPanelEl: viewTeamsEl,
   radarPanelEl: viewRadarEl,
-  prPanelEl: viewPrsEl,
+  prsPanelEl: viewPrsEl,
   // The desktop header does not render under [data-layout="phone"], so its controls move to the Board's
   // top bar rather than being rebuilt there. Every listener, and the client-trust gating on Shut Down,
   // travels with them.
