@@ -4396,6 +4396,7 @@ html[data-layout="phone"] .review-sidebar-body { overscroll-behavior: contain; }
    dim border on the edge that faces the content, and no ornament. Labels are constant action names,
    never a state or a count; the one piece of state the nav carries is the Board's attention dot. */
 .phone-nav {
+  position: relative; /* anchor for the More sheet */
   flex: 0 0 auto;
   display: flex;
   align-items: stretch;
@@ -4448,6 +4449,42 @@ html[data-layout="phone"] .phone-shell[data-keyboard="open"] .phone-nav { displa
   background: var(--state-waiting);
 }
 .phone-nav-dot[hidden] { display: none; }
+
+/* ── More sheet ──
+   Overflow destinations (Radar, PRs) float above the nav from the More item, so the nav row never
+   grows past five thumb-sized targets. Same surface treatment as the nav it springs from. */
+.phone-nav-more-menu {
+  position: absolute;
+  right: 8px;
+  bottom: calc(100% + 8px);
+  display: flex;
+  flex-direction: column;
+  min-width: 160px;
+  background: var(--bg-header);
+  border: 1px solid var(--border-dim);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.45);
+  overflow: hidden;
+}
+.phone-nav-more-menu[hidden] { display: none; }
+.phone-nav-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 0 14px;
+  appearance: none;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--border-dim);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  cursor: pointer;
+}
+.phone-nav-menu-item:last-child { border-bottom: none; }
+.phone-nav-menu-item:active { background: color-mix(in srgb, var(--text) 5%, transparent); }
+.phone-nav-menu-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.phone-nav-menu-item[aria-current="page"] { color: var(--accent); }
 
 /* ── Debug overlay ──────────────────────────────────────── */
 

@@ -27,7 +27,8 @@ import { createBoardScreen } from './board-screen.js';
 import { createTerminalScreen } from './terminal-screen.js';
 
 // Screen ids, in bottom-nav order. Board is the base screen: it is what the phone opens on, and the
-// only one the back gesture never has to leave.
+// only one the back gesture never has to leave. Nested screens do not get their own nav item: they
+// live in the More sheet, so the nav row stays four thumb-sized destinations plus one overflow.
 const BOARD = 'board';
 const SCREENS = Object.freeze([
   // Geometric glyphs from the same family as the state vocabulary; no emoji, no icon font.
@@ -35,9 +36,10 @@ const SCREENS = Object.freeze([
   { id: 'terminal', label: 'Terminal', glyph: '▸' }, // the brand forward marker: live output
   { id: 'review', label: 'Review', glyph: '◫' },     // square bisected vertically: a diff
   { id: 'teams', label: 'Teams', glyph: '◈' },       // diamond in a diamond: a staged pipeline
-  { id: 'radar', label: 'Radar', glyph: '◎' },       // ringed circle: a scan sweep
-  { id: 'prs', label: 'PRs', glyph: '⇅' },           // opposed arrows: push and pull
+  { id: 'radar', label: 'Radar', glyph: '◎', nested: true }, // ringed circle: a scan sweep
+  { id: 'prs', label: 'PRs', glyph: '⇅', nested: true },     // opposed arrows: push and pull
 ]);
+const MORE = 'more';
 
 let shellEl = null;
 const navButtonById = new Map();
@@ -51,6 +53,9 @@ let radarMountEl = null;
 let radarPanelEl = null;
 let prsMountEl = null;
 let prsPanelEl = null;
+let moreButtonEl = null;
+let moreMenuEl = null;
+const menuButtonById = new Map();
 let hooks = {};
 let activeScreen = BOARD;
 let active = false;
@@ -111,24 +116,71 @@ function syncVisualViewport() {
 // a bottom nav a thumb taps. So it is a plain <nav> of buttons with aria-current on the active one:
 // each button announces as a button, and half-implemented tab semantics (role=tab with no
 // aria-controls and no roving) are worse for a screen reader than no roles at all.
+function buildNavButton(label, glyph) {
+  const btn = el('button', 'phone-nav-item');
+  btn.type = 'button';
+  btn.innerHTML = '<span class="phone-nav-glyph" aria-hidden="true"></span>'
+    + '<span class="phone-nav-label"></span>'
+    + '<span class="phone-nav-dot" aria-hidden="true"></span>';
+  btn.querySelector('.phone-nav-glyph').textContent = glyph;
+  btn.querySelector('.phone-nav-label').textContent = label;
+  // Dots start hidden; only the Board's is ever lit (driven by refreshPhoneBoard).
+  btn.querySelector('.phone-nav-dot').hidden = true;
+  return btn;
+}
+
+// The More sheet: nested screens' entries, floated above the nav from the More item. It is a plain
+// popover of buttons (no menu roles for the same reason the nav has no tab roles), dismissed by
+// choosing an entry, tapping anywhere else, or Escape.
+function buildMoreMenu() {
+  const menu = el('div', 'phone-nav-more-menu');
+  menu.hidden = true;
+  for (const screen of SCREENS) {
+    if (!screen.nested) continue;
+    const btn = el('button', 'phone-nav-menu-item');
+    btn.type = 'button';
+    btn.dataset.screen = screen.id;
+    btn.innerHTML = '<span class="phone-nav-glyph" aria-hidden="true"></span>'
+      + '<span class="phone-nav-label"></span>';
+    btn.querySelector('.phone-nav-glyph').textContent = screen.glyph;
+    btn.querySelector('.phone-nav-label').textContent = screen.label;
+    btn.addEventListener('click', () => {
+      setMoreMenuOpen(false);
+      showScreen(screen.id);
+    });
+    menuButtonById.set(screen.id, btn);
+    menu.appendChild(btn);
+  }
+  return menu;
+}
+
+function setMoreMenuOpen(isOpen) {
+  if (!moreMenuEl) return;
+  moreMenuEl.hidden = !isOpen;
+  moreButtonEl.setAttribute('aria-expanded', String(isOpen));
+}
+
+function isMoreMenuOpen() {
+  return !!moreMenuEl && !moreMenuEl.hidden;
+}
+
 function buildNav() {
   const nav = el('nav', 'phone-nav');
   nav.setAttribute('aria-label', 'Screens');
   for (const screen of SCREENS) {
-    const btn = el('button', 'phone-nav-item');
-    btn.type = 'button';
+    if (screen.nested) continue;
+    const btn = buildNavButton(screen.label, screen.glyph);
     btn.dataset.screen = screen.id;
-    btn.innerHTML = '<span class="phone-nav-glyph" aria-hidden="true"></span>'
-      + '<span class="phone-nav-label"></span>'
-      + '<span class="phone-nav-dot" aria-hidden="true"></span>';
-    btn.querySelector('.phone-nav-glyph').textContent = screen.glyph;
-    btn.querySelector('.phone-nav-label').textContent = screen.label;
-    // Dots start hidden; the Board's is driven by refreshPhoneBoard, Radar/PRs by setPhoneNavActivity.
-    btn.querySelector('.phone-nav-dot').hidden = true;
     btn.addEventListener('click', () => showScreen(screen.id));
     navButtonById.set(screen.id, btn);
     nav.appendChild(btn);
   }
+  moreButtonEl = buildNavButton('More', String.fromCharCode(0x22ef)); // midline horizontal ellipsis
+  moreButtonEl.setAttribute('aria-expanded', 'false');
+  moreButtonEl.addEventListener('click', () => setMoreMenuOpen(!isMoreMenuOpen()));
+  nav.appendChild(moreButtonEl);
+  moreMenuEl = buildMoreMenu();
+  nav.appendChild(moreMenuEl);
   return nav;
 }
 
@@ -176,6 +228,16 @@ function build() {
   window.visualViewport?.addEventListener('resize', syncVisualViewport);
   window.visualViewport?.addEventListener('scroll', syncVisualViewport);
   window.addEventListener('popstate', onPopState);
+  // A tap anywhere outside the sheet (or Escape) dismisses it; the More button's own tap already
+  // toggled by the time this bubbles up, so it is excluded to avoid an instant reopen-close.
+  document.addEventListener('click', (event) => {
+    if (!isMoreMenuOpen()) return;
+    if (moreMenuEl.contains(event.target) || moreButtonEl.contains(event.target)) return;
+    setMoreMenuOpen(false);
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && isMoreMenuOpen()) setMoreMenuOpen(false);
+  });
 }
 
 // Open a session from the Board. Same semantics as tapping its desktop rail pill: a DORMANT session is
@@ -265,10 +327,22 @@ function onPopState(event) {
 
 function applyScreen(screenId) {
   activeScreen = screenId;
+  setMoreMenuOpen(false);
   for (const [id, section] of screenElById) {
     section.hidden = id !== screenId;
   }
   for (const [id, btn] of navButtonById) {
+    if (id === screenId) {
+      btn.setAttribute('aria-current', 'page');
+      continue;
+    }
+    btn.removeAttribute('aria-current');
+  }
+  // A nested screen lights the More item, since it has no nav item of its own.
+  const isNestedActive = menuButtonById.has(screenId);
+  if (isNestedActive) moreButtonEl.setAttribute('aria-current', 'page');
+  if (!isNestedActive) moreButtonEl.removeAttribute('aria-current');
+  for (const [id, btn] of menuButtonById) {
     if (id === screenId) {
       btn.setAttribute('aria-current', 'page');
       continue;
@@ -303,22 +377,6 @@ export function mountPhoneShell(options) {
   prsPanelEl = hooks.prsPanelEl || null;
 }
 
-// Attention dot on a nav item (Radar / PRs activity). Safe before build and on desktop: with no shell
-// yet there is no button, and the toggle re-applies on the next activation via the stored flag.
-const navActivityByScreenId = new Map();
-export function setPhoneNavActivity(screenId, isActive) {
-  navActivityByScreenId.set(screenId, !!isActive);
-  const dot = navButtonById.get(screenId)?.querySelector('.phone-nav-dot');
-  if (dot) dot.hidden = !isActive;
-}
-
-function applyStoredNavActivity() {
-  for (const [screenId, isActive] of navActivityByScreenId) {
-    const dot = navButtonById.get(screenId)?.querySelector('.phone-nav-dot');
-    if (dot) dot.hidden = !isActive;
-  }
-}
-
 // `sessionId` is the session the desktop Focus center was holding, if any. It is pre-loaded into the
 // Terminal screen but does NOT change which screen opens: a phone's job is triage, so it always lands
 // on the Board and the operator taps through.
@@ -338,7 +396,6 @@ export function activatePhoneShell({ sessionId } = {}) {
   if (radarPanelEl) radarPanelEl.hidden = false;
   adoptElement(prsPanelEl, prsMountEl);
   if (prsPanelEl) prsPanelEl.hidden = false;
-  applyStoredNavActivity();
   syncVisualViewport();
   if (sessionId) terminalScreen.show(sessionId);
   // Reconcile history BEFORE opening a screen, so the flag and the stack agree from the first tap.
@@ -358,6 +415,7 @@ export function deactivatePhoneShell() {
   releaseElement(radarPanelEl);
   releaseElement(prsPanelEl);
   for (const control of (hooks.headerControls || [])) releaseElement(control);
+  setMoreMenuOpen(false);
   shellEl.hidden = true;
   shellEl.removeAttribute('data-keyboard');
   resetSoftKeyboardBaseline();
