@@ -661,12 +661,12 @@ function registerControlHandlers(controlWss, deps) {
 
   // Archive one investigations-inbox record. The id is a log key, not an issue reference: the record
   // it names routinely outlives the issue row it came from, which is the point of the inbox.
-  function handlePosthogArchiveInvestigation(msg, ws) {
+  async function handlePosthogArchiveInvestigation(msg, ws) {
     const reply = (payload) => replyTo(ws, msg, 'posthog-archive-investigation-result', { ok: false, error: null, ...payload });
     const ref = posthogCore.validateInvestigationId(msg.id);
     if (!ref.ok) { reply({ error: ref.error }); return; }
     if (!posthogArchiveInvestigation) { reply({ error: 'PostHog monitoring is not running' }); return; }
-    const res = posthogArchiveInvestigation({ id: ref.id });
+    const res = await posthogArchiveInvestigation({ id: ref.id });
     reply({ ok: res.ok === true, error: res.error || null });
   }
 

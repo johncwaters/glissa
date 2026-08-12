@@ -129,6 +129,7 @@ function createActionCluster() {
   const wrap = el('div', 'radar-issue-actions');
   const status = el('span', 'radar-issue-action-status');
   status.setAttribute('role', 'status');
+  wrap.append(status);
   const buttons = [];
   const permanentlyOff = new Set();
 
@@ -145,7 +146,7 @@ function createActionCluster() {
       onClick();
     });
     buttons.push(button);
-    wrap.append(button);
+    wrap.insertBefore(button, status);
     return button;
   };
 
@@ -166,17 +167,11 @@ function createActionCluster() {
       .catch((err) => settle('error', err?.message || 'Request failed'));
   };
 
-  // The status line trails the buttons, so it is appended last rather than at construction.
-  const finish = () => {
-    wrap.append(status);
-    return wrap;
-  };
-
-  return { addButton, request, permanentlyOff, finish };
+  return { addButton, request, permanentlyOff, wrap };
 }
 
 function buildIssueActions(issue, projectId) {
-  const { addButton, request, permanentlyOff, finish } = createActionCluster();
+  const { addButton, request, permanentlyOff, wrap } = createActionCluster();
 
   const run = (type, payload, pendingText, describe) => request(
     `${type}:${issue.issueId}`,
@@ -211,7 +206,7 @@ function buildIssueActions(issue, projectId) {
     run('posthog-issue-action', { action: 'suppress' }, 'Suppressing in PostHog', () => 'Marked suppressed');
   });
 
-  return finish();
+  return wrap;
 }
 
 function buildIssueRow(issue, projectId) {
@@ -366,7 +361,7 @@ function buildErrorsSection(projects) {
 // resolved issue's row is gone from there, and this is where its verdict survives. Quiet review
 // material by design, so it contributes nothing to the attention count.
 function buildInvestigationActions(row) {
-  const { addButton, request, finish } = createActionCluster();
+  const { addButton, request, wrap } = createActionCluster();
 
   if (row.issueId) {
     addButton('Open report', 'Open the investigation report for this issue', () => {
@@ -383,7 +378,7 @@ function buildInvestigationActions(row) {
     );
   });
 
-  return finish();
+  return wrap;
 }
 
 function buildInvestigationRow(row) {

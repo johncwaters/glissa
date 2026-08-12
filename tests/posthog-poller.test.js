@@ -613,13 +613,13 @@ test('archiveInvestigation hides one record, persists it, and is idempotent', as
   await poller.start();
   await flush();
 
-  const res = poller.archiveInvestigation('iss-1@1000');
+  const res = await poller.archiveInvestigation('iss-1@1000');
   assert.equal(res.ok, true);
   assert.deepEqual(res.investigations, [], 'the archived record leaves the broadcast list');
   await flush();
   assert.equal(stateStore.value._investigations[0].archived, true, 'persisted');
 
-  assert.equal(poller.archiveInvestigation('iss-1@1000').ok, true, 'idempotent');
+  assert.equal((await poller.archiveInvestigation('iss-1@1000')).ok, true, 'idempotent');
   assert.deepEqual(poller.investigations(), []);
 });
 
@@ -628,9 +628,9 @@ test('archiveInvestigation refuses an unknown or malformed id', async () => {
   await poller.start();
   await flush();
 
-  assert.deepEqual(poller.archiveInvestigation('iss-9@1'), { ok: false, error: 'Unknown investigation' });
-  assert.deepEqual(poller.archiveInvestigation('nonsense'), { ok: false, error: 'Invalid investigation id' });
-  assert.deepEqual(poller.archiveInvestigation(''), { ok: false, error: 'id is required' });
+  assert.deepEqual(await poller.archiveInvestigation('iss-9@1'), { ok: false, error: 'Unknown investigation' });
+  assert.deepEqual(await poller.archiveInvestigation('nonsense'), { ok: false, error: 'Invalid investigation id' });
+  assert.deepEqual(await poller.archiveInvestigation(''), { ok: false, error: 'id is required' });
 });
 
 test('a state file written by an older server (no _investigations) loads and starts a log', async () => {

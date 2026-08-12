@@ -237,10 +237,11 @@ test('posthog-reinvestigate answers cleanly when the lane is not wired in', () =
 
 // --- D. archive one investigations-inbox record ---
 
-test('posthog-archive-investigation forwards a valid id and reports success', () => {
+test('posthog-archive-investigation forwards a valid id and reports success', async () => {
   const h = harness();
 
   h.send({ type: 'posthog-archive-investigation', requestId: 'r1', id: 'iss-1@1700' });
+  await new Promise(setImmediate);
 
   assert.deepEqual(h.archiveCalls, [{ id: 'iss-1@1700' }]);
   assert.deepEqual(h.sent[0], {
@@ -248,10 +249,11 @@ test('posthog-archive-investigation forwards a valid id and reports success', ()
   });
 });
 
-test('posthog-archive-investigation reports an unknown id without touching the lane', () => {
+test('posthog-archive-investigation reports an unknown id without touching the lane', async () => {
   const h = harness({ archiveResult: { ok: false, error: 'Unknown investigation' } });
 
   h.send({ type: 'posthog-archive-investigation', requestId: 'r1', id: 'iss-9@1700' });
+  await new Promise(setImmediate);
 
   assert.equal(h.sent[0].ok, false);
   assert.equal(h.sent[0].error, 'Unknown investigation');

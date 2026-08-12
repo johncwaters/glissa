@@ -219,11 +219,6 @@ function nextState(prevEntry, current, verdictInfo = {}) {
   return entry;
 }
 
-// ── Investigations inbox ─────────────────────────────────────
-// An issue row disappears the moment the issue is resolved (in PostHog or from a Radar action), and
-// TRANSIENT/ROOT_CAUSE verdicts never ping by design, so an operator who was not watching had no way
-// to learn an investigation ever ran. The log is that record: append-only, capped, archived by hand.
-
 function stampOf(at) {
   return Math.max(0, Math.trunc(toCount(at, 0)));
 }

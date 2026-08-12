@@ -188,13 +188,13 @@ function createPosthogPoller(deps) {
    * written to PostHog, and the record stays in the log (archived) rather than being deleted, so the
    * cap keeps behaving as a plain newest-N window.
    */
-  function archiveInvestigation(id) {
+  async function archiveInvestigation(id) {
     const ref = core.validateInvestigationId(id);
     if (!ref.ok) return { ok: false, error: ref.error };
     const res = core.markInvestigationArchived(state[core.INVESTIGATIONS_KEY], ref.id);
     if (!res.ok) return { ok: false, error: res.error };
     state[core.INVESTIGATIONS_KEY] = res.log;
-    void persist();
+    await persist();
     return { ok: true, investigations: currentInvestigations() };
   }
 

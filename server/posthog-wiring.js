@@ -390,9 +390,9 @@ function createPosthogWiring({
    * what is a list edit. lastStatus can still be null here (archiving from a client that connected
    * before the first tick), so the patch seeds a minimal payload rather than dropping the update.
    */
-  function archiveInvestigation({ id } = {}) {
+  async function archiveInvestigation({ id } = {}) {
     if (!poller) return { ok: false, error: 'PostHog monitoring is not running' };
-    const res = poller.archiveInvestigation(id);
+    const res = await poller.archiveInvestigation(id);
     if (!res.ok) return { ok: false, error: res.error };
     const base = lastStatus || { type: 'posthog-status', ts: Date.now(), projects: [] };
     lastStatus = { ...base, investigations: res.investigations };
