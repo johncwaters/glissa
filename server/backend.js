@@ -1144,13 +1144,16 @@ function createBackend(httpServer, options = {}) {
   // their live Claude conversation resumed. Runs after worktree reconciliation, so a re-adopted
   // pending-review worktree is already in place before the session spawns into it. Fire-and-
   // forget: boot does not block on PTY spawns finishing (matches _addNewSessions' sess.start()).
-  if (httpServer.listening) {
-    startAutoResume();
-  }
-  if (!httpServer.listening) {
+  // Hooks need the bound port (getHookPort), so a pre-listen boot waits for 'listening'.
+  const scheduleAutoResume = () => {
+    if (httpServer.listening) {
+      startAutoResume();
+      return;
+    }
     pendingAutoResumeOnListening = startAutoResume;
     httpServer.once('listening', pendingAutoResumeOnListening);
-  }
+  };
+  scheduleAutoResume();
 
   // --- GitHub PR auto-review poller (opt-in; inert unless config.prReview.enabled) ---
   prReview.startPoller();
