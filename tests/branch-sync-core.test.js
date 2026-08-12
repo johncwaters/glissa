@@ -121,6 +121,31 @@ test('firstGitErrorLine keeps only the first non-blank line of a multi-line stde
   assert.equal(firstGitErrorLine(err), '! [rejected] develop -> develop (non-fast-forward)');
 });
 
+test('firstGitErrorLine prefers git push errors after hook noise', () => {
+  const err = new Error(
+    'Command failed: git push origin develop\n'
+      + 'stderr | src/renderer/src/backupsLogic.test.ts > backupsLogic > records a refused listing read instead of leaving the pane loading forever\n'
+      + 'AssertionError: expected false to be true\n'
+      + "error: failed to push some refs to 'https://example.invalid/repo.git'\n",
+  );
+  assert.equal(firstGitErrorLine(err), "error: failed to push some refs to 'https://example.invalid/repo.git'");
+});
+
+test('firstGitErrorLine strips ANSI color escapes before returning a line', () => {
+  const err = new Error('Command failed: git push origin develop\n\x1b[31merror: failed to push some refs\x1b[0m\n');
+  assert.equal(firstGitErrorLine(err), 'error: failed to push some refs');
+});
+
+test('firstGitErrorLine keeps the first non-blank line when no git marker is present', () => {
+  const err = new Error('Command failed: git push origin develop\n\npre-push hook failed\nmore output\n');
+  assert.equal(firstGitErrorLine(err), 'pre-push hook failed');
+});
+
+test('firstGitErrorLine caps the returned line at 200 characters', () => {
+  const err = new Error(`Command failed: git push origin develop\n${'x'.repeat(250)}\n`);
+  assert.equal(firstGitErrorLine(err).length, 200);
+});
+
 test('firstGitErrorLine falls back to a generic line for an empty/missing error', () => {
   assert.equal(firstGitErrorLine(new Error('')), 'git command failed');
   assert.equal(firstGitErrorLine(null), 'git command failed');

@@ -55,17 +55,22 @@ function decideResyncAction(state, isCheckedOut) {
   return 'none';
 }
 
-// A short, human-readable line from a failed git command. execFile's default error message is
-// "Command failed: <cmd>\n<stderr...>"; drop the command echo and keep the first non-blank line of the
-// actual git complaint (a multi-line hint block from git would otherwise blow up the sidebar's status
-// line). Falls back to a generic line when the shape is unrecognized (no error, empty message).
+// A short, readable line from a failed git command. Strip command echoes, ANSI/control noise,
+// then prefer git's own fatal/error/push-rejection line over hook chatter.
 function firstGitErrorLine(err) {
   // typeof-checked, not a truthiness `||` chain: an Error with a legitimately empty .message must stay
   // empty (and fall through to the generic line below), not stringify the whole Error object to "Error".
+  const maxGitErrorLineLength = 200;
   const raw = err && typeof err.message === 'string' ? err.message : String(err || '');
-  const msg = raw.replace(/^Command failed:[^\n]*\n?/, '');
-  const line = msg.split(/\r?\n/).find((l) => l.trim());
-  return line ? line.trim() : 'git command failed';
+  const msg = raw
+    .replace(/\x1b\][\s\S]*?(?:\x07|\x1b\\)/g, '')
+    .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '')
+    .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '')
+    .replace(/^Command failed:[^\n]*\n?/, '');
+  const lines = msg.split('\n').map((line) => line.trim()).filter(Boolean);
+  const preferredLine = lines.find((line) => line.startsWith('fatal:') || line.startsWith('error:') || line.startsWith('! ['));
+  const line = preferredLine || lines[0];
+  return line ? line.slice(0, maxGitErrorLineLength) : 'git command failed';
 }
 
 module.exports = { parseLeftRightCount, decideBranchSyncState, parseRemoteFromUpstream, decideResyncAction, firstGitErrorLine };
