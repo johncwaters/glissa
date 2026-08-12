@@ -19,6 +19,7 @@ import {
   isImeProcessingKeydown,
   isTypedInputType,
 } from './ime-core.mjs';
+import { osc8LinkHandler, registerUrlLinkProvider } from './terminal-links.js';
 import { showErrorToast } from './toast.js';
 import { wireTouchScroll } from './touch-scroll.js';
 import { tryLoadWebGL } from './webgl-pool.js';
@@ -162,11 +163,16 @@ export function setupTerminal(termWrap, ui) {
     theme: getTerminalTheme(),
     scrollback: TERMINAL_SCROLLBACK,
     allowProposedApi: true,
+    // OSC 8 hyperlinks open on the VIEWING device (xterm's default is a
+    // confirm() prompt; without any handler nothing opens on a paired phone).
+    linkHandler: osc8LinkHandler(),
   });
 
   const fitAddon = new FitAddon();
   term.loadAddon(fitAddon);
   term.open(termWrap);
+  // Plain-text URLs in Claude output are not links until a provider says so.
+  registerUrlLinkProvider(term);
 
   ui.term = term;
   ui.fitAddon = fitAddon;
