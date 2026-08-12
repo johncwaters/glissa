@@ -15,10 +15,12 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const http = require('node:http');
 const os = require('node:os');
 const path = require('node:path');
+const pty = require('node-pty');
 
-const { runAutoResume, persistSessionField, decideWasActiveFlip } = require('../server/backend');
+const { createBackend, runAutoResume, persistSessionField, decideWasActiveFlip } = require('../server/backend');
 const { createConfigStore } = require('../server/config-store');
 const { createSpawnGate } = require('../server/spawn-gate');
 const { Session } = require('../session/sessions');
@@ -127,6 +129,15 @@ function fakePty(pid = 2147483646) {
   return { pid, onData() {}, onExit() {}, write() {}, resize() {}, kill() {} };
 }
 
+async function waitFor(predicate) {
+  const deadline = Date.now() + 1000;
+  while (Date.now() < deadline) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.ok(predicate(), 'condition became true');
+}
+
 function fakeSession(id, resumeSessionId, calls) {
   return new Session({
     id,
@@ -228,6 +239,104 @@ test('runAutoResume does not double-spawn a session started externally while que
     assert.equal(calls.length, 1, 'the gate-queued auto-resume job re-checked and saw the session was no longer DORMANT');
   } finally {
     sess.destroy();
+  }
+});
+
+test('createBackend defers boot auto-resume until the HTTP listener has a hook port', async () => {
+  const cfgDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-autoresume-cfg-'));
+  const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-autoresume-proj-'));
+  const cfgPath = path.join(cfgDir, 'config.json');
+  const resumeSessionId = '4a3d4462-4cf7-4a23-8f00-ccec89a48ba5';
+  fs.writeFileSync(cfgPath, JSON.stringify({
+    autoResume: true,
+    checkForUpdates: false,
+    projects: [{
+      id: 'boot-picked',
+      name: 'boot-picked',
+      path: projectDir,
+      wasActive: true,
+      resumeSessionId,
+    }],
+    teams: [],
+    repoRoots: [],
+  }, null, 2), 'utf8');
+  const prevEnv = process.env.GLISSA_CONFIG;
+  const originalSpawn = pty.spawn;
+  const calls = [];
+  let backend = null;
+  let server = null;
+  process.env.GLISSA_CONFIG = cfgPath;
+  pty.spawn = (file, args, opts) => {
+    calls.push({ file, args, opts });
+    return fakePty();
+  };
+  try {
+    server = http.createServer();
+    backend = createBackend(server, { staticDir: null });
+    assert.equal(calls.length, 0, 'auto-resume waits until the HTTP listener is bound');
+
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    await waitFor(() => calls.length === 1);
+
+    const port = server.address().port;
+    const settingsIndex = calls[0].args.indexOf('--settings');
+    assert.notEqual(settingsIndex, -1, 'auto-resume spawn includes injected settings');
+    const settingsPath = calls[0].args[settingsIndex + 1];
+    const settingsText = fs.readFileSync(settingsPath, 'utf8');
+    assert.match(settingsText, new RegExp(`http://127\\.0\\.0\\.1:${port}/hook/boot-picked/stop`));
+    const resumeIndex = calls[0].args.indexOf('--resume');
+    assert.notEqual(resumeIndex, -1, 'auto-resume keeps the resume argument');
+    assert.equal(calls[0].args[resumeIndex + 1], resumeSessionId);
+  } finally {
+    if (backend) backend.shutdown();
+    if (server?.listening) await new Promise((resolve) => server.close(resolve));
+    pty.spawn = originalSpawn;
+    if (prevEnv == null) delete process.env.GLISSA_CONFIG;
+    if (prevEnv != null) process.env.GLISSA_CONFIG = prevEnv;
+    fs.rmSync(cfgDir, { recursive: true, force: true });
+    fs.rmSync(projectDir, { recursive: true, force: true });
+  }
+});
+
+test('createBackend shutdown removes pending boot auto-resume listener before listen', async () => {
+  const cfgDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-autoresume-cfg-'));
+  const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-autoresume-proj-'));
+  const cfgPath = path.join(cfgDir, 'config.json');
+  fs.writeFileSync(cfgPath, JSON.stringify({
+    autoResume: true,
+    checkForUpdates: false,
+    projects: [{
+      id: 'boot-picked',
+      name: 'boot-picked',
+      path: projectDir,
+      wasActive: true,
+      resumeSessionId: '4a3d4462-4cf7-4a23-8f00-ccec89a48ba5',
+    }],
+    teams: [],
+    repoRoots: [],
+  }, null, 2), 'utf8');
+  const prevEnv = process.env.GLISSA_CONFIG;
+  const originalSpawn = pty.spawn;
+  let backend = null;
+  let server = null;
+  process.env.GLISSA_CONFIG = cfgPath;
+  pty.spawn = () => fakePty();
+  try {
+    server = http.createServer();
+    const listenersBeforeBackend = server.listenerCount('listening');
+    backend = createBackend(server, { staticDir: null });
+    assert.equal(server.listenerCount('listening'), listenersBeforeBackend + 1);
+    backend.shutdown();
+    backend = null;
+    assert.equal(server.listenerCount('listening'), listenersBeforeBackend);
+  } finally {
+    if (backend) backend.shutdown();
+    if (server?.listening) await new Promise((resolve) => server.close(resolve));
+    pty.spawn = originalSpawn;
+    if (prevEnv == null) delete process.env.GLISSA_CONFIG;
+    if (prevEnv != null) process.env.GLISSA_CONFIG = prevEnv;
+    fs.rmSync(cfgDir, { recursive: true, force: true });
+    fs.rmSync(projectDir, { recursive: true, force: true });
   }
 });
 

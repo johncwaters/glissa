@@ -1135,11 +1135,22 @@ function createBackend(httpServer, options = {}) {
     console.warn(`[worktree] worktree reconcile failed: ${err.message}`);
   }
 
+  let pendingAutoResumeOnListening = null;
+  const startAutoResume = () => {
+    pendingAutoResumeOnListening = null;
+    runAutoResume(sessions, config, spawnGate);
+  };
   // Smart auto-resume (design C): sessions active when Glissa last shut down come back with
   // their live Claude conversation resumed. Runs after worktree reconciliation, so a re-adopted
   // pending-review worktree is already in place before the session spawns into it. Fire-and-
   // forget: boot does not block on PTY spawns finishing (matches _addNewSessions' sess.start()).
-  runAutoResume(sessions, config, spawnGate);
+  if (httpServer.listening) {
+    startAutoResume();
+  }
+  if (!httpServer.listening) {
+    pendingAutoResumeOnListening = startAutoResume;
+    httpServer.once('listening', pendingAutoResumeOnListening);
+  }
 
   // --- GitHub PR auto-review poller (opt-in; inert unless config.prReview.enabled) ---
   prReview.startPoller();
@@ -1555,6 +1566,10 @@ function createBackend(httpServer, options = {}) {
   function shutdown() {
     if (shuttingDown) return [];
     shuttingDown = true;
+    if (pendingAutoResumeOnListening) {
+      httpServer.off('listening', pendingAutoResumeOnListening);
+      pendingAutoResumeOnListening = null;
+    }
     clearInterval(healthInterval);
     stopConfigWatch();
     // Same reason as stopConfigWatch: a leaked fs.watch keeps the event loop alive and hangs any

@@ -1974,7 +1974,10 @@ class Session extends EventEmitter {
     } catch {
       port = null;
     }
-    if (!port) return [];
+    if (!port) {
+      console.warn(`[session:${this.name}] hook injection skipped: HTTP listener port unavailable - hooks were not injected`);
+      return [];
+    }
     try {
       this._settingsHandle = writeSessionSettings({
         port,
