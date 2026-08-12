@@ -35,10 +35,6 @@ export function trimTrailingPunctuation(url) {
   }
 }
 
-export function isHttpUrl(text) {
-  return /^https?:\/\//i.test(text);
-}
-
 // -> [{ start, end, url }] with end exclusive, offsets into `text`.
 export function findUrls(text) {
   const found = [];

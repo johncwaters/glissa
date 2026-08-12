@@ -60,14 +60,6 @@ test('findUrls: no URLs means empty result', async () => {
   assert.deepEqual(findUrls('plain text only'), []);
 });
 
-test('isHttpUrl: accepts http(s) only', async () => {
-  const { isHttpUrl } = await importCore();
-  assert.equal(isHttpUrl('https://example.com'), true);
-  assert.equal(isHttpUrl('HTTP://EXAMPLE.COM'), true);
-  assert.equal(isHttpUrl('javascript:alert(1)'), false);
-  assert.equal(isHttpUrl('file:///etc/passwd'), false);
-});
-
 test('trimTrailingPunctuation: strips stacked punctuation', async () => {
   const { trimTrailingPunctuation } = await importCore();
   assert.equal(trimTrailingPunctuation('https://x.dev/a).,'), 'https://x.dev/a');
