@@ -468,6 +468,12 @@ export function refreshPhoneBoard() {
   restoreShownSession();
   boardScreen.refresh();
   terminalScreen.refresh();
+  // A session removed while its terminal is on screen leaves the Terminal screen holding nothing
+  // (refresh() above already cleared it). Staring at that empty state helps nobody: the session is
+  // gone, so the screen's job is over; hand the operator back to the Board. Keyed on the ACTIVE
+  // screen so a removal never yanks the operator off Teams/Review/etc, where the Terminal screen is
+  // hidden and its empty state costs nothing.
+  if (activeScreen === 'terminal' && !terminalScreen.getSessionId()) showScreen(BOARD);
   const dot = dotOf(navButtonById.get(BOARD));
   if (dot) dot.hidden = boardScreen.getAttentionCount() === 0;
 }

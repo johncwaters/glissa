@@ -212,7 +212,9 @@ export function createTerminalScreen({ onBack }) {
     reacquireWebglIfEvicted(ui);
     ui._applyFit?.();
     forceTerminalRepaint(ui, { force: true });
-    focusShownTerminal();
+    // Deliberately NOT focusing the terminal here: focus raises the soft keyboard, and entering this
+    // screen is usually READING, not typing. The keyboard comes up on an explicit tap on the terminal
+    // (the cardSlot click handler), which is also the gesture iOS requires anyway.
   }
 
   onSessionTick(() => {
