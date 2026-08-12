@@ -41,7 +41,7 @@ const SVG_NS = 'http://www.w3.org/2000/svg';
 // Rows are rebuilt wholesale on every broadcast and a row action's outcome line lives inside a row,
 // so a broadcast landing mid-request is held (see radar-hold-core.mjs for the whole state machine and
 // why it owns its own timer).
-const _hold = createRenderHold({ render: () => render() });
+const _hold = createRenderHold({ render });
 
 // Records the operator archived in THIS page session. The server drops an archived record from the
 // next payload, so this set is normally redundant - but it is the one thing that does not depend on
