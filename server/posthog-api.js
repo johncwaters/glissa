@@ -5,8 +5,11 @@
  * module in the lane that talks to PostHog, and like pr-gh it NEVER throws - every method resolves
  * to { ok, status, body } or { ok: false, error } so a poller tick can degrade instead of dying.
  *
- * v1 is READ-ONLY. Nothing here writes an issue status, assigns, or merges, and the lane's API key
- * therefore only ever needs PostHog READ scopes.
+ * The POLLING lane is read-only: nothing on an automatic tick writes to PostHog. The single write
+ * below (updateIssueStatus) is only ever reached from an explicit operator click on a Radar row, and
+ * it is the reason an install that wants that button needs an error_tracking WRITE scope on its key.
+ * The headless investigation sessions never get to call it: they are deny-listed from the issues
+ * endpoint (POSTHOG_DENY in server/posthog-wiring.js) and only Glissa itself holds this client.
  *
  * TODO (live probe): the issues-query request body and the spike/recommendation endpoints below are
  * modeled on the PostHog MCP tool layer and have NOT been verified against a live instance or the
@@ -145,7 +148,27 @@ function createPosthogApi({ host, apiKey, fetchFn } = {}) {
     return request(`/api/projects/${encodeURIComponent(projectId)}/error_tracking/recommendations/`);
   }
 
-  return { host: base, listOrganizations, listProjects, queryIssues, listSpikeEvents, listRecommendations };
+  /*
+   * Set one issue's status. The only write in the lane, driven by the Radar row's resolve/suppress
+   * actions. Endpoint per the PostHog API reference (error-tracking issues partial update):
+   * PATCH /api/projects/:project_id/error_tracking/issues/:id/ with a status of
+   * active | resolved | suppressed. The caller maps its action name through
+   * core/posthog-core.js decideIssueAction, so no arbitrary status string reaches this path.
+   */
+  function updateIssueStatus(projectId, issueId, status) {
+    const pathname = `/api/projects/${encodeURIComponent(projectId)}/error_tracking/issues/${encodeURIComponent(issueId)}/`;
+    return request(pathname, { method: 'PATCH', body: { status } });
+  }
+
+  return {
+    host: base,
+    listOrganizations,
+    listProjects,
+    queryIssues,
+    listSpikeEvents,
+    listRecommendations,
+    updateIssueStatus,
+  };
 }
 
 module.exports = {

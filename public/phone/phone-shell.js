@@ -44,6 +44,7 @@ const MORE = 'more';
 let shellEl = null;
 const navButtonById = new Map();
 const screenElById = new Map();
+const screenAttentionById = new Map();
 let boardScreen = null;
 let terminalScreen = null;
 let reviewMountEl = null;
@@ -131,10 +132,26 @@ function buildNavButton(label, glyph) {
   appendGlyphAndLabel(btn, glyph, label);
   const dot = el('span', 'phone-nav-dot');
   dot.setAttribute('aria-hidden', 'true');
-  // Dots start hidden; only the Board's is ever lit (driven by refreshPhoneBoard).
   dot.hidden = true;
   btn.appendChild(dot);
   return btn;
+}
+
+function dotOf(button) {
+  return button?.querySelector('.phone-nav-dot') || null;
+}
+
+function syncMoreAttention() {
+  let hasNestedAttention = false;
+  for (const screen of SCREENS) {
+    if (!screen.nested) continue;
+    const hasAttention = screenAttentionById.get(screen.id) === true;
+    if (hasAttention) hasNestedAttention = true;
+    const dot = dotOf(menuButtonById.get(screen.id));
+    if (dot) dot.hidden = !hasAttention;
+  }
+  const moreDot = dotOf(moreButtonEl);
+  if (moreDot) moreDot.hidden = !hasNestedAttention;
 }
 
 // The More sheet: nested screens' entries, floated above the nav from the More item. It is a plain
@@ -149,6 +166,10 @@ function buildMoreMenu() {
     btn.type = 'button';
     btn.dataset.screen = screen.id;
     appendGlyphAndLabel(btn, screen.glyph, screen.label);
+    const dot = el('span', 'phone-nav-dot phone-nav-menu-dot');
+    dot.setAttribute('aria-hidden', 'true');
+    dot.hidden = true;
+    btn.appendChild(dot);
     btn.addEventListener('click', () => {
       setMoreMenuOpen(false);
       showScreen(screen.id);
@@ -229,6 +250,7 @@ function build() {
   shellEl.id = 'phone-shell';
   shellEl.append(screens, buildNav());
   document.body.appendChild(shellEl);
+  syncMoreAttention();
 
   window.visualViewport?.addEventListener('resize', syncVisualViewport);
   window.visualViewport?.addEventListener('scroll', syncVisualViewport);
@@ -446,8 +468,13 @@ export function refreshPhoneBoard() {
   restoreShownSession();
   boardScreen.refresh();
   terminalScreen.refresh();
-  const dot = navButtonById.get(BOARD)?.querySelector('.phone-nav-dot');
+  const dot = dotOf(navButtonById.get(BOARD));
   if (dot) dot.hidden = boardScreen.getAttentionCount() === 0;
+}
+
+export function setPhoneScreenAttention(screenId, hasAttention) {
+  screenAttentionById.set(screenId, hasAttention === true);
+  syncMoreAttention();
 }
 
 // The phone peer of the desktop's restoreFocusedSession, and what makes a reload that lands back on the

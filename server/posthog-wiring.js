@@ -17,6 +17,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { Session } = require('../session/sessions');
 const { registerEphemeralSession } = require('./ephemeral-session');
+const core = require('./core/posthog-core');
 const { createPosthogPoller } = require('./posthog-poller');
 const { createPosthogApi } = require('./posthog-api');
 const { sendPosthogPing } = require('./posthog-telegram');
@@ -44,6 +45,7 @@ const WORK_DIR = path.join(os.homedir(), '.glissa', 'posthog-work');
 // Reports are keyed by issue id, so this is a per-issue cap in practice; it bounds an unbounded
 // directory the way the recorder bounds its own (newest-N, swept async, best-effort).
 const REPORT_RETAIN_FILES = 20;
+const FORCE_TICK_DEBOUNCE_MS = 3000;
 
 // PostHog issue ids reach the filesystem and the prompt, so they are reduced to a conservative
 // charset first. Everything else the API returns is free text and never reaches either.
@@ -298,6 +300,22 @@ function createPosthogWiring({
   let pollerChain = Promise.resolve();
   let pollerStopped = false;
   let lastKey = null;
+  let forcedTickTimer = null;
+  function clearForcedTickTimer() {
+    if (!forcedTickTimer) return;
+    clearTimeout(forcedTickTimer);
+    forcedTickTimer = null;
+  }
+  function queueForcedTick() {
+    clearForcedTickTimer();
+    forcedTickTimer = setTimeout(() => {
+      forcedTickTimer = null;
+      if (pollerStopped) return;
+      if (!poller) return;
+      void poller.tick();
+    }, FORCE_TICK_DEBOUNCE_MS);
+    if (typeof forcedTickTimer.unref === 'function') forcedTickTimer.unref();
+  }
   function startPoller() {
     lastKey = posthogCfgKey(config);
     pollerChain = pollerChain.then(async () => {
@@ -335,6 +353,36 @@ function createPosthogWiring({
     }).catch((e) => console.warn(`[posthog-poller] restart failed: ${e.message}`));
   }
 
+  /*
+   * Operator-driven issue status change (Radar's resolve/suppress). The lane's own ticks stay
+   * read-only; this is the one write, and it is gated on the poller actually running so an action
+   * cannot fire against a half-configured lane. The immediate tick is what makes the row disappear
+   * after the debounce instead of at the next interval: a resolved/suppressed issue drops out of the
+   * active query and reconcileVanished retires its entry.
+   */
+  async function setIssueStatus({ projectId, issueId, action }) {
+    const decision = core.decideIssueAction(action);
+    if (!decision.ok) return decision;
+    if (!poller) return { ok: false, error: 'PostHog monitoring is not running' };
+    const api = createPosthogApi({ host: config.posthog.host, apiKey: config.posthog.apiKey });
+    const res = await api.updateIssueStatus(projectId, issueId, decision.status);
+    // The error string can carry an HTTP status but never a credential: request() builds it from the
+    // status code alone, and the key lives only in the Authorization header.
+    if (!res.ok) return { ok: false, error: `PostHog refused the change (${res.error || 'unknown error'})` };
+    queueForcedTick();
+    return { ok: true, status: decision.status };
+  }
+
+  // Manual re-investigation. The poller owns the concurrency slots and the in-flight bookkeeping, so
+  // this is a pass-through; the tick afterwards republishes the status so the row shows investigating
+  // without waiting out the interval.
+  function reinvestigateIssue({ projectId, issueId }) {
+    if (!poller) return { ok: false, error: 'PostHog monitoring is not running' };
+    const res = poller.investigateNow({ projectId, issueId });
+    if (res.ok) queueForcedTick();
+    return res;
+  }
+
   function restartIfConfigChanged() {
     if (posthogCfgKey(config) !== lastKey) startPoller();
   }
@@ -344,10 +392,11 @@ function createPosthogWiring({
   // fire-and-forget here is deliberate: the process is exiting, nothing awaits it.
   function stopPoller() {
     pollerStopped = true;
+    clearForcedTickTimer();
     if (poller) poller.stop();
   }
 
-  return { startPoller, restartIfConfigChanged, stopPoller, getStatus };
+  return { startPoller, restartIfConfigChanged, stopPoller, getStatus, setIssueStatus, reinvestigateIssue };
 }
 
 // `projects: 'all'` walks every organization the personal API key can see; an explicit array is
@@ -394,4 +443,5 @@ module.exports = {
   REPORT_DIR,
   WORK_DIR,
   REPORT_RETAIN_FILES,
+  FORCE_TICK_DEBOUNCE_MS,
 };

@@ -188,3 +188,56 @@ test('listProjects builds the organization-scoped path', async () => {
   await api.listProjects('org-1');
   assert.equal(calls[0], 'https://eu.posthog.com/api/organizations/org-1/projects/');
 });
+
+// --- updateIssueStatus: the lane's ONE write (Radar's resolve/suppress row actions) ---
+
+test('updateIssueStatus PATCHes the issue endpoint with the status body', async () => {
+  const calls = [];
+  const api = createPosthogApi({
+    host: 'https://eu.posthog.com/',
+    apiKey: 'phx_secret',
+    fetchFn: async (url, init) => { calls.push({ url, init }); return fakeResponse({ body: { status: 'resolved' } }); },
+  });
+
+  const res = await api.updateIssueStatus(42, 'iss-1', 'resolved');
+
+  assert.equal(res.ok, true);
+  assert.equal(calls[0].url, 'https://eu.posthog.com/api/projects/42/error_tracking/issues/iss-1/');
+  assert.equal(calls[0].init.method, 'PATCH');
+  assert.equal(calls[0].init.headers.Authorization, 'Bearer phx_secret');
+  assert.deepEqual(JSON.parse(calls[0].init.body), { status: 'resolved' });
+});
+
+test('updateIssueStatus url-encodes both ids', async () => {
+  const calls = [];
+  const api = createPosthogApi({
+    host: 'https://eu.posthog.com',
+    apiKey: 'k',
+    fetchFn: async (url) => { calls.push(url); return fakeResponse({}); },
+  });
+  await api.updateIssueStatus('a b', 'x/y', 'suppressed');
+  assert.equal(calls[0], 'https://eu.posthog.com/api/projects/a%20b/error_tracking/issues/x%2Fy/');
+});
+
+test('updateIssueStatus reports an HTTP failure instead of throwing', async () => {
+  const api = createPosthogApi({
+    host: 'https://eu.posthog.com',
+    apiKey: 'k',
+    fetchFn: async () => fakeResponse({ ok: false, status: 403, body: { detail: 'no write scope' } }),
+  });
+  const res = await api.updateIssueStatus(1, 'iss-1', 'resolved');
+  assert.equal(res.ok, false);
+  assert.equal(res.status, 403);
+  assert.equal(res.error, 'HTTP 403');
+});
+
+test('updateIssueStatus survives a transport error', async () => {
+  const api = createPosthogApi({
+    host: 'https://eu.posthog.com',
+    apiKey: 'k',
+    fetchFn: async () => { throw new Error('ECONNRESET'); },
+  });
+  const res = await api.updateIssueStatus(1, 'iss-1', 'suppressed');
+  assert.equal(res.ok, false);
+  assert.match(res.error, /ECONNRESET/);
+});

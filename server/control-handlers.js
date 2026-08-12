@@ -8,6 +8,7 @@ const { computeNextFire } = require('./scheduler');
 const { listRepoConversations } = require('../session/core/conversation-history');
 const { decideEditorOpenAccess, normalizeClientTrust } = require('./core/request-trust');
 const { readPosthogReport } = require('./posthog-report');
+const posthogCore = require('./core/posthog-core');
 
 // A Claude session id is a UUID, but stay lenient (any safe id charset) so a non-UUID id is not
 // rejected. The charset itself is the guard: no path separators, dots, or whitespace can reach the
@@ -207,6 +208,9 @@ function registerControlHandlers(controlWss, deps) {
     // Cached last PostHog tick summary (optional - undefined in older callers/tests).
     getPosthogStatus,
     posthogReportsDir = null,
+    // PostHog per-issue actions (optional - undefined in older callers/tests, which then refuse).
+    posthogSetIssueStatus = null,
+    posthogReinvestigate = null,
     // Cached last PR auto-review tick summary (optional - undefined in older callers/tests).
     getPrStatus,
     // Replay of transient broadcasts missed across a reconnect gap (optional - undefined in
@@ -573,6 +577,87 @@ function registerControlHandlers(controlWss, deps) {
     }));
   }
 
+  /*
+   * The three per-issue Radar actions. All of them are DASHBOARD-EQUIVALENT (open/paste into a
+   * session, change an issue status in PostHog, re-run an investigation), so unlike open-artifact
+   * they carry no remote refusal: a paired phone is meant to be able to act on an error the same way
+   * the desk dashboard can, and the control WS can already spawn a session anywhere. See
+   * server/core/request-trust.js for the actions that do need the local listener.
+   *
+   * Every reply is a requestId round-trip, so an OLD client (which never sends these) sees nothing
+   * new on the wire.
+   */
+
+  // The facts one issue is currently known by, read from the last tick summary rather than from the
+  // client: the row's own title/counts arrive over the same socket, but trusting them would let any
+  // control-WS message choose the text pasted into a session.
+  function findPosthogIssue(projectId, issueId) {
+    const status = typeof getPosthogStatus === 'function' ? getPosthogStatus() : null;
+    const projects = Array.isArray(status?.projects) ? status.projects : [];
+    for (const project of projects) {
+      if (String(project.projectId) !== String(projectId)) continue;
+      const issues = Array.isArray(project.issues) ? project.issues : [];
+      const issue = issues.find((row) => String(row?.issueId) === String(issueId));
+      if (issue) return { issue, projectName: project.name, host: project.host };
+    }
+    return null;
+  }
+
+  function replyTo(ws, msg, type, payload) {
+    ws.send(JSON.stringify({ type, requestId: msg.requestId || null, ...payload }));
+  }
+
+  // Open (or wake) the Glissa session mapped to this PostHog project and paste an investigation
+  // prompt into it, WITHOUT a trailing CR: the operator reads the draft and presses Enter.
+  function handlePosthogOpenSession(msg, ws) {
+    const reply = (payload) => replyTo(ws, msg, 'posthog-open-session-result', { ok: false, error: null, ...payload });
+    const ref = posthogCore.validateIssueRef(msg);
+    if (!ref.ok) { reply({ error: ref.error }); return; }
+    const found = findPosthogIssue(ref.projectId, ref.issueId);
+    if (!found) { reply({ error: 'That issue is not in the latest PostHog poll' }); return; }
+    const project = posthogCore.resolveIssueProject(config.posthog, config.projects, ref.projectId);
+    if (!project) {
+      reply({ error: 'No Glissa session is mapped to this PostHog project (set posthog.projectMap)' });
+      return;
+    }
+    const sess = sessions.get(project.id);
+    if (!sess) { reply({ error: `Session "${project.name}" is not loaded` }); return; }
+    const prompt = posthogCore.buildIssueSessionPrompt({
+      issue: found.issue,
+      projectName: found.projectName,
+      host: found.host,
+      url: found.issue.url,
+    });
+    const res = sess.pasteTextWhenReady(prompt);
+    if (!res.ok) { reply({ error: `Could not write to "${sess.name}" (${res.reason})` }); return; }
+    reply({ ok: true, sessionId: sess.id, sessionName: sess.name, pending: res.deferred === true });
+    console.log(`[control] posthog-open-session: issue=${ref.issueId} -> session=${sess.name}`);
+  }
+
+  async function handlePosthogIssueAction(msg, ws) {
+    const reply = (payload) => replyTo(ws, msg, 'posthog-issue-action-result', { ok: false, error: null, ...payload });
+    const ref = posthogCore.validateIssueRef(msg);
+    if (!ref.ok) { reply({ error: ref.error }); return; }
+    const found = findPosthogIssue(ref.projectId, ref.issueId);
+    if (!found) { reply({ error: 'That issue is not in the latest PostHog poll' }); return; }
+    const decision = posthogCore.decideIssueAction(msg.action);
+    if (!decision.ok) { reply({ error: decision.error }); return; }
+    if (!posthogSetIssueStatus) { reply({ error: 'PostHog monitoring is not running' }); return; }
+    const res = await posthogSetIssueStatus({
+      projectId: ref.projectId, issueId: ref.issueId, action: msg.action,
+    });
+    reply({ ok: res.ok === true, error: res.error || null, status: res.status || null });
+  }
+
+  function handlePosthogReinvestigate(msg, ws) {
+    const reply = (payload) => replyTo(ws, msg, 'posthog-reinvestigate-result', { ok: false, error: null, ...payload });
+    const ref = posthogCore.validateIssueRef(msg);
+    if (!ref.ok) { reply({ error: ref.error }); return; }
+    if (!posthogReinvestigate) { reply({ error: 'PostHog monitoring is not running' }); return; }
+    const res = posthogReinvestigate({ projectId: ref.projectId, issueId: ref.issueId });
+    reply({ ok: res.ok === true, error: res.error || null });
+  }
+
   function handleShutdown() {
     console.log('[control] Shutdown requested via UI');
     broadcastControl({ type: 'shutting-down' });
@@ -875,6 +960,9 @@ function registerControlHandlers(controlWss, deps) {
     'update-settings':  handleUpdateSettings,
     'scan-repo-roots':  handleScanRepoRoots,
     'get-posthog-report': handleGetPosthogReport,
+    'posthog-open-session': handlePosthogOpenSession,
+    'posthog-issue-action': handlePosthogIssueAction,
+    'posthog-reinvestigate': handlePosthogReinvestigate,
     'kill':             (msg) => { const s = findSession(msg); if (s) s.killSession(); },
     'start-session':    (msg) => {
       const s = findSession(msg);

@@ -13,7 +13,7 @@ import { activateFocusView, centerSessionQuietly, deactivateFocusView, focusAdja
 import { initFormFactor, isPhoneLayout, onLayoutChange } from './form-factor.js';
 import { applyHealthSnapshot, mountHealthMonitor } from './health-monitor.js';
 import { initNotifications, showDesktopNotification } from './notifications.js';
-import { activatePhoneShell, deactivatePhoneShell, getPhoneSessionId, mountPhoneShell, refreshPhoneBoard } from './phone/phone-shell.js';
+import { activatePhoneShell, deactivatePhoneShell, getPhoneSessionId, mountPhoneShell, refreshPhoneBoard, setPhoneScreenAttention } from './phone/phone-shell.js';
 import { applyPrStatus, mountPrView, setPrActivityCallback } from './pr-panel.js';
 import { applyPosthogStatus, mountRadarView, setRadarActivityCallback } from './radar-panel.js';
 import { handleDebugStateRefresh, handleDebugStateResponse } from './session-card/card-dom.js';
@@ -377,8 +377,14 @@ const tabRadarActivityEl = document.getElementById('tab-radar-activity');
 const tabPrsActivityEl = document.getElementById('tab-prs-activity');
 
 setTabActivityCallback((active) => { tabActivityEl.classList.toggle('active', active); });
-setRadarActivityCallback((active) => { tabRadarActivityEl.classList.toggle('active', active); });
-setPrActivityCallback((active) => { tabPrsActivityEl.classList.toggle('active', active); });
+setRadarActivityCallback((active) => {
+  tabRadarActivityEl.classList.toggle('active', active);
+  setPhoneScreenAttention('radar', active);
+});
+setPrActivityCallback((active) => {
+  tabPrsActivityEl.classList.toggle('active', active);
+  setPhoneScreenAttention('prs', active);
+});
 
 mountFocusView({
   rail: document.getElementById('focus-rail'),

@@ -1817,6 +1817,12 @@ body {
   max-width: 78ch;
 }
 
+.radar-global-tick {
+  color: var(--text-muted);
+  font-size: 10px;
+  text-align: right;
+}
+
 .radar-project {
   border: 1px solid var(--border-dim);
   border-radius: var(--radius);
@@ -1942,8 +1948,33 @@ body {
 .radar-issue[data-severity="crit"] .radar-change { color: var(--state-failed); }
 .radar-issue[data-severity="warn"] .radar-change { color: var(--state-waiting); }
 
-.radar-issue-title {
+.radar-sparkline {
+  flex: 0 0 auto;
+  width: 64px;
+  height: 16px;
+  color: var(--text-muted);
+}
+
+.radar-issue[data-severity="crit"] .radar-sparkline { color: var(--state-failed); }
+.radar-issue[data-severity="warn"] .radar-sparkline { color: var(--state-waiting); }
+
+.radar-sparkline polyline {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.25;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.radar-issue-copy {
   flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.radar-issue-title {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1955,6 +1986,15 @@ body {
 a.radar-issue-title:hover {
   color: var(--accent);
   text-decoration: underline;
+}
+
+.radar-issue-summary {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+  font-size: 10px;
 }
 
 .radar-metric {
@@ -2004,6 +2044,58 @@ a.radar-issue-title:hover {
   color: var(--accent);
   border-color: var(--accent-dim);
 }
+
+/* Per-issue actions. Muted until the row is hovered or something inside it holds focus, so a long
+   board reads as data first and a control panel second. */
+.radar-issue-actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  opacity: 0.35;
+  transition: opacity 120ms ease;
+}
+
+.radar-issue:hover .radar-issue-actions,
+.radar-issue:focus-within .radar-issue-actions {
+  opacity: 1;
+}
+
+.radar-issue-action {
+  border: 1px solid var(--border-dim);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 1px 6px;
+  cursor: pointer;
+}
+
+.radar-issue-action:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--accent-dim);
+}
+
+.radar-issue-action:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* Progress and outcome live here, never on the button label. */
+.radar-issue-action-status {
+  font-size: 10px;
+  color: var(--text-muted);
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.radar-issue-action-status[data-tone="ok"] { color: var(--state-complete); }
+.radar-issue-action-status[data-tone="error"] { color: var(--state-failed); }
 
 .radar-empty {
   color: var(--text-muted);
@@ -4378,6 +4470,11 @@ html[data-layout="phone"] .review-sidebar-body { overscroll-behavior: contain; }
 .phone-teams > .teams-view { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 .phone-radar > .radar-view,
 .phone-prs > .pr-view { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+/* An issue row is one line of data plus four controls: on a phone that only fits if the controls drop
+   to their own line, and there is no hover to reveal them with. */
+html[data-layout="phone"] .radar-issue { flex-wrap: wrap; }
+html[data-layout="phone"] .radar-issue-actions { opacity: 1; flex-basis: 100%; flex-wrap: wrap; }
+html[data-layout="phone"] .radar-issue-action { padding: 4px 8px; }
 
 /* ── Empty states ── */
 .phone-empty { margin: auto; padding: 24px; text-align: center; color: var(--text-dim); }
@@ -4449,6 +4546,11 @@ html[data-layout="phone"] .phone-shell[data-keyboard="open"] .phone-nav { displa
   background: var(--state-waiting);
 }
 .phone-nav-dot[hidden] { display: none; }
+.phone-nav-menu-dot {
+  top: 50%;
+  right: 12px;
+  transform: translateY(-50%);
+}
 
 /* ── More sheet ──
    Overflow destinations (Radar, PRs) float above the nav from the More item, so the nav row never
@@ -4468,11 +4570,12 @@ html[data-layout="phone"] .phone-shell[data-keyboard="open"] .phone-nav { displa
 }
 .phone-nav-more-menu[hidden] { display: none; }
 .phone-nav-menu-item {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 10px;
   min-height: 44px;
-  padding: 0 14px;
+  padding: 0 26px 0 14px;
   appearance: none;
   background: transparent;
   border: none;

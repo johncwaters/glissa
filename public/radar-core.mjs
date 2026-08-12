@@ -25,6 +25,26 @@ export function severityFor(change) {
   return CHANGE_SEVERITY[change] || 'dim';
 }
 
+function finiteNumbers(values) {
+  if (!Array.isArray(values)) return [];
+  return values.map((value) => Number(value)).filter((value) => Number.isFinite(value));
+}
+
+export function sparklinePoints(values, width = 64, height = 16) {
+  const numbers = finiteNumbers(values);
+  if (numbers.length < 2) return '';
+  const max = Math.max(...numbers);
+  const min = Math.min(...numbers);
+  const xStep = width / (numbers.length - 1);
+  const yMid = height / 2;
+  const span = max - min;
+  return numbers.map((value, index) => {
+    const x = index * xStep;
+    const y = span === 0 ? yMid : height - ((value - min) / span) * height;
+    return `${Number(x.toFixed(2))},${Number(y.toFixed(2))}`;
+  }).join(' ');
+}
+
 // One pass for the per-project summary line and the tab attention badge. Active is every tracked
 // issue; spiking and needsHuman are the two conditions that mean "look at this now".
 export function summarizeIssues(issues) {

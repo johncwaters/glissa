@@ -45,6 +45,13 @@ const KILL_POLL_INTERVAL_MS = 200;
 const KILL_MAX_WAIT_MS = 3000;
 const SLEEP_KILL_TIMEOUT_MS = 15 * 60 * 1000;
 
+// States in which Claude's TUI is up and reading input, so a bracketed paste actually lands. A
+// deferred paste (pasteTextWhenReady) waits for the session to enter one of these; INITIALIZING and
+// STARTING deliberately are not here (bytes written before first_output are read by nothing).
+const PASTE_READY_STATES = new Set([
+  STATES.IDLE, STATES.RUNNING, STATES.WAITING, STATES.COMPLETE,
+]);
+
 // Trailing debounce for the worktree-change funnel: a single `git commit` touches
 // several gitdir files and a turn-end can race the fs.watch, so collapse a burst
 // into one signature recompute. The triggers are all event-driven (no poll): the per-worktree gitdir
@@ -223,6 +230,8 @@ class Session extends EventEmitter {
     this._sleepKillTimer = null;
     this._autoKilled = false;
     this._destroyed = false;
+    // A paste waiting for this session's TUI to come up (see pasteTextWhenReady). At most one.
+    this._pendingPaste = null;
     this._pendingRestart = false;
     // True between a "Merge & finish" on a live session and its post-exit merge, so a double-click
     // cannot kick off a second merge against a worktree whose PTY is still tearing down.
@@ -1155,8 +1164,59 @@ class Session extends EventEmitter {
       conflicts: this.mergeConflicts,
       worktreeDir: this.worktreeDir,
     });
-    this.write(`\x1b[200~${prompt}\x1b[201~`);
+    return this.pasteText(prompt);
+  }
+
+  // THE bracketed-paste seam for a multi-line prompt: one input the terminal takes literally (raw
+  // newlines would submit each line) with no trailing CR, so the operator reviews it and presses
+  // Enter. Every caller that hands a session a prompt to review goes through here.
+  pasteText(text) {
+    if (!this.hasLivePty) return { ok: false, reason: "no-pty" };
+    this.write(`\x1b[200~${text}\x1b[201~`);
     return { ok: true };
+  }
+
+  /*
+   * Paste as soon as this session can receive it, starting it first when it is DORMANT.
+   *
+   * A spawn is not a terminal: bytes written between pty.spawn and Claude's TUI coming up are read by
+   * whatever is on stdin at the time and are simply lost. The structural signal for "the TUI is up"
+   * already exists - STARTING -> IDLE on first_output - so the paste waits on that state-change
+   * rather than on a sleep. It is dropped if the session dies on the way up or a newer deferred paste
+   * replaces it; only one can be pending at a time.
+   */
+  pasteTextWhenReady(text, { timeoutMs = 120000 } = {}) {
+    if (this._destroyed) return { ok: false, reason: "destroyed" };
+    if (this.hasLivePty && PASTE_READY_STATES.has(this.state)) return this.pasteText(text);
+    // Read before the listener is armed: a spawn that fails lands in FAILED, and re-reading the state
+    // after start() would then take the restart branch and respawn in a loop.
+    const stateBeforeWaiting = this.state;
+    this._clearPendingPaste();
+    const onStateChange = ({ to }) => {
+      if (!PASTE_READY_STATES.has(to)) return;
+      this._clearPendingPaste();
+      this.pasteText(text);
+    };
+    const onExit = () => this._clearPendingPaste();
+    const timer = setTimeout(() => this._clearPendingPaste(), timeoutMs);
+    if (typeof timer.unref === "function") timer.unref();
+    this._pendingPaste = { timer, onStateChange, onExit };
+    this.on("state-change", onStateChange);
+    this.once("exit", onExit);
+    if (stateBeforeWaiting === STATES.DORMANT) this.start();
+    // A finished or failed card is the ordinary resting state of a project session, so opening an
+    // issue against one respawns it exactly as the dashboard's Restart button would.
+    if (RESTARTABLE_STATES.includes(stateBeforeWaiting)) this.restart();
+    return { ok: true, deferred: true };
+  }
+
+  _clearPendingPaste() {
+    const pending = this._pendingPaste;
+    if (!pending) return;
+    this._pendingPaste = null;
+    clearTimeout(pending.timer);
+    this.off("state-change", pending.onStateChange);
+    this.off("exit", pending.onExit);
   }
 
   // True when the worktree has any uncommitted change vs its base, COUNTING untracked new files
@@ -2335,6 +2395,8 @@ class Session extends EventEmitter {
     this._destroyed = true;
 
     this._clearSleepKill();
+
+    this._clearPendingPaste();
 
     this._cleanupHooks();
 

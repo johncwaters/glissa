@@ -109,3 +109,26 @@ test('summarizeIssues: malformed entries never throw', async () => {
   const { summarizeIssues } = await importCore();
   assert.deepEqual(summarizeIssues([null, undefined, {}]), { active: 3, spiking: 0, needsHuman: 0 });
 });
+
+test('sparklinePoints: normalizes values into the requested box', async () => {
+  const { sparklinePoints } = await importCore();
+  assert.equal(sparklinePoints([0, 10, 5], 100, 10), '0,10 50,0 100,5');
+});
+
+test('sparklinePoints: renders flat lines through the vertical midpoint', async () => {
+  const { sparklinePoints } = await importCore();
+  assert.equal(sparklinePoints([7, 7, 7], 10, 10), '0,5 5,5 10,5');
+});
+
+test('sparklinePoints: requires at least two finite values', async () => {
+  const { sparklinePoints } = await importCore();
+  assert.equal(sparklinePoints([3], 64, 16), '');
+  assert.equal(sparklinePoints([], 64, 16), '');
+  assert.equal(sparklinePoints(undefined, 64, 16), '');
+  assert.equal(sparklinePoints(['nope', null], 64, 16), '');
+});
+
+test('sparklinePoints: two points span the full width', async () => {
+  const { sparklinePoints } = await importCore();
+  assert.equal(sparklinePoints([1, 3], 64, 16), '0,16 64,0');
+});

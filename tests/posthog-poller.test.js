@@ -381,9 +381,52 @@ test('onTickComplete emits the dashboard broadcast payload', async () => {
     occurrences: 120,
     users: 8,
     verdict: null,
+    summaryLine: null,
+    history: [{ ts: 1000, occurrences: 120 }],
     inFlight: true,
     url: 'https://ph.test/project/1/error_tracking/iss-1',
   }], 'the snapshot describes the tick, so the verdict is still null while the session runs');
+});
+
+test('onTickComplete includes a persisted investigation summary line', async () => {
+  const { poller, summaries } = harness({
+    initialState: {
+      [KEY]: {
+        status: 'active',
+        lastOccurrences: 120,
+        lastUsers: 8,
+        verdict: 'NEEDS_HUMAN',
+        summaryLine: 'checkout fails after payment',
+        investigatedUsers: 8,
+        pingedPhases: [],
+      },
+    },
+  });
+  await poller.start();
+  await flush();
+  const issue = summaries.at(-1).projects[0].issues[0];
+  assert.equal(issue.verdict, 'NEEDS_HUMAN');
+  assert.equal(issue.summaryLine, 'checkout fails after payment');
+  assert.deepEqual(issue.history, [{ ts: 1000, occurrences: 120 }]);
+  assert.equal(issue.inFlight, false);
+});
+
+test('onTickComplete carries the persisted occurrence history', async () => {
+  const { poller, summaries } = harness({
+    initialState: {
+      [KEY]: {
+        status: 'active',
+        lastOccurrences: 100,
+        lastUsers: 8,
+        history: [{ ts: 500, occurrences: 100 }],
+        pingedPhases: [],
+      },
+    },
+  });
+  await poller.start();
+  await flush();
+  const issue = summaries.at(-1).projects[0].issues[0];
+  assert.deepEqual(issue.history, [{ ts: 500, occurrences: 100 }, { ts: 1000, occurrences: 120 }]);
 });
 
 // Stamping lastTickAt after the queries left the whole query window invisible to the next tick, so a
@@ -428,4 +471,85 @@ test('start() clears a stale inFlight left by a crash so the issue is re-investi
   await poller.start();
   await flush();
   assert.equal(spawned, 1, 'a stale in-flight marker does not wedge the issue forever');
+});
+
+// --- investigateNow: the operator's manual re-investigation (Radar row action) ---
+
+test('investigateNow re-runs an already diagnosed issue the tick would have left alone', async () => {
+  const spawnCalls = [];
+  const { poller } = harness({
+    spawnInvestigation: async (a) => { spawnCalls.push(a); return { verdict: 'ROOT_CAUSE', summary: 'again' }; },
+  });
+  await poller.start();
+  await flush();
+  assert.equal(spawnCalls.length, 1, 'the first tick investigated it once');
+
+  await poller.tick();
+  await flush();
+  assert.equal(spawnCalls.length, 1, 'a quiet, already diagnosed issue is not re-investigated by a tick');
+
+  const res = poller.investigateNow({ projectId: 1, issueId: 'iss-1' });
+  assert.deepEqual(res, { ok: true });
+  await flush();
+
+  assert.equal(spawnCalls.length, 2, 'the manual request spawned a fresh investigation');
+  assert.equal(spawnCalls[1].issue.issueId, 'iss-1');
+  assert.equal(spawnCalls[1].url, 'https://ph.test/project/1/error_tracking/iss-1');
+  assert.equal(poller._state()[KEY].inFlight, false, 'in-flight cleared when it finished');
+});
+
+test('investigateNow refuses a second run while one is in flight', async () => {
+  let release = null;
+  const { poller } = harness({
+    spawnInvestigation: () => new Promise((resolve) => { release = () => resolve({ verdict: 'ROOT_CAUSE' }); }),
+  });
+  await poller.start();
+  await flush();
+  assert.equal(poller._state()[KEY].inFlight, true, 'the boot investigation is still running');
+
+  const res = poller.investigateNow({ projectId: 1, issueId: 'iss-1' });
+  assert.equal(res.ok, false);
+  assert.match(res.error, /already running/);
+
+  release();
+  await flush();
+});
+
+test('investigateNow refuses an issue the latest poll never saw', async () => {
+  const { poller } = harness();
+  await poller.start();
+  await flush();
+
+  const res = poller.investigateNow({ projectId: 1, issueId: 'iss-unknown' });
+  assert.equal(res.ok, false);
+  assert.match(res.error, /latest poll/);
+});
+
+test('investigateNow honours the concurrency cap instead of over-spending slots', async () => {
+  const releases = [];
+  const { poller } = harness({
+    maxConcurrentInvestigations: 1,
+    spawnInvestigation: () => new Promise((resolve) => releases.push(() => resolve({ verdict: 'ROOT_CAUSE' }))),
+    api: { queryIssues: async () => ({ ok: true, body: { results: [issueRow(), issueRow({ id: 'iss-2' })] } }) },
+  });
+  await poller.start();
+  await flush();
+  assert.equal(releases.length, 1, 'the cap allowed one investigation');
+
+  const res = poller.investigateNow({ projectId: 1, issueId: 'iss-2' });
+  assert.equal(res.ok, false);
+  assert.match(res.error, /slots are busy/);
+
+  for (const release of releases) release();
+  await flush();
+});
+
+test('investigateNow refuses once the poller is stopping', async () => {
+  const { poller } = harness();
+  await poller.start();
+  await flush();
+  await poller.stop();
+
+  const res = poller.investigateNow({ projectId: 1, issueId: 'iss-1' });
+  assert.equal(res.ok, false);
 });
