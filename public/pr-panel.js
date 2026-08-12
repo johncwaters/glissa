@@ -4,25 +4,13 @@
 // configured the PR lane still finds the surface and is told where to switch it on.
 
 import { el } from './dom-helpers.js';
-import { normalizePhase, severityFor as severity, sortPrsByAttention, summarizePrs } from './pr-view-core.mjs';
+import { phaseLabel, severityFor as severity, sortPrsByAttention, summarizePrs } from './pr-view-core.mjs';
 import { createPollAgoTicker } from './poll-ago.js';
 
 let _latest = null;
 let _root = null;
 let _activityCallback = null;
 const _pollTicker = createPollAgoTicker(() => _root);
-
-const PHASE_LABEL = {
-  error: 'error',
-  done: 'changes requested',
-  'changes-requested': 'changes requested',
-  conflicting: 'conflicting',
-  'resolving-conflicts': 'resolving',
-  'awaiting-checks': 'awaiting checks',
-  'in-review': 'in review',
-  pending: 'pending',
-  merged: 'merged',
-};
 
 function shortSha(sha) {
   if (typeof sha !== 'string') return '';
@@ -40,9 +28,9 @@ function buildPrRow(pr) {
   const stripe = el('span', 'pr-stripe');
   stripe.setAttribute('aria-hidden', 'true');
 
-  const phaseKey = normalizePhase(pr.phase);
-  const phase = el('span', 'pr-phase', PHASE_LABEL[phaseKey] || String(phaseKey));
-  if (!PHASE_LABEL[phaseKey]) phase.dataset.unknown = 'true';
+  const { label: phaseText, known: phaseKnown } = phaseLabel(pr.phase);
+  const phase = el('span', 'pr-phase', phaseText);
+  if (!phaseKnown) phase.dataset.unknown = 'true';
 
   // PR titles come from GitHub: built as text, never markup.
   const title = pr.url ? el('a', 'pr-title') : el('span', 'pr-title');

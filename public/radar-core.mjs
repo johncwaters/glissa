@@ -1,5 +1,9 @@
 // ── Radar core (pure) ────────────────────────────────────────
-// Attention ordering and severity mapping for PostHog issue rows. No DOM, no IO.
+// Attention ordering and severity mapping for PostHog issue rows, plus the aggregation that turns the
+// three outside-world feeds (PostHog issues, ops telemetry, PR auto-review) into Radar's sections and
+// its one attention count. No DOM, no IO.
+
+import { normalizePhase, prNeedsAction, severityFor as prSeverityFor, sortPrsByAttention } from './pr-view-core.mjs';
 
 // Rank is attention-first, deliberately NOT the same grouping as severity: a brand new issue is
 // less urgent than one that already regressed, yet both share the warn stripe.
@@ -56,6 +60,86 @@ export function summarizeIssues(issues) {
     if (issue?.verdict === 'NEEDS_HUMAN') needsHuman += 1;
   }
   return { active: list.length, spiking, needsHuman };
+}
+
+// ── Ops section ──────────────────────────────────────────────
+// Wording is the health monitor's own anomaly copy, kept identical so the compact Radar row and the
+// expanded footer panel can never describe the same condition two different ways.
+const HEALTH_ANOMALIES = [
+  ['listenerMismatch', 'Listener count mismatch: data WS listener leaked or missing'],
+  ['orphanPty', 'Orphan PTY: session has live PTY but state is DONE/FAILED/DORMANT'],
+  ['destroyedReachable', 'Destroyed session still reachable in sessions map'],
+];
+
+// Only ACTIVE anomalies produce a row: an all-zero snapshot arrives every ten seconds and must leave
+// the board silent.
+export function healthAnomalyRows(snapshot) {
+  const anomalies = snapshot?.anomalies;
+  if (!anomalies) return [];
+  const rows = [];
+  for (const [key, label] of HEALTH_ANOMALIES) {
+    if (!anomalies[key]) continue;
+    rows.push({ key, label });
+  }
+  return rows;
+}
+
+function textOr(value, fallback) {
+  return typeof value === 'string' && value.trim() ? value.trim() : fallback;
+}
+
+export function updateAvailableRow(update) {
+  const current = textOr(update?.current, '');
+  const latest = textOr(update?.latest, '');
+  if (!current || !latest) return null;
+  return { text: `Update available: ${current} -> ${latest}`, command: textOr(update?.command, '') };
+}
+
+// One list so the panel renders ops in a fixed order regardless of which feed landed first: the
+// advisory update line, then every live anomaly.
+export function opsRows({ update, health } = {}) {
+  const rows = [];
+  const updateEntry = updateAvailableRow(update);
+  if (updateEntry) rows.push({ kind: 'update', key: 'update', text: updateEntry.text, detail: updateEntry.command, tone: 'dim' });
+  for (const anomaly of healthAnomalyRows(health)) {
+    rows.push({ kind: 'anomaly', key: anomaly.key, text: anomaly.label, detail: '', tone: 'warn' });
+  }
+  return rows;
+}
+
+// ── Pull requests section ────────────────────────────────────
+// Attention-worthy PRs only, flattened across projects. The needs-action predicate and the ordering
+// both come from pr-view-core: Radar summarizes the PR lane, it does not own a second reading of it.
+export function needsActionPrRows(snapshot) {
+  const projects = Array.isArray(snapshot?.projects) ? snapshot.projects : [];
+  const rows = [];
+  for (const project of projects) {
+    const prs = Array.isArray(project?.prs) ? project.prs : [];
+    const actionable = sortPrsByAttention(prs.filter((pr) => prNeedsAction(pr)));
+    for (const pr of actionable) {
+      rows.push({
+        projectId: textOr(project?.projectId, ''),
+        projectLabel: textOr(project?.repoSlug, textOr(project?.name, textOr(project?.projectId, 'project'))),
+        number: Number.isFinite(pr?.number) ? pr.number : null,
+        title: textOr(pr?.title, 'Untitled pull request'),
+        phase: normalizePhase(pr?.phase),
+        severity: prSeverityFor(pr?.phase, { inFlight: !!pr?.inFlight, pingedError: !!pr?.pingedError }),
+      });
+    }
+  }
+  return rows;
+}
+
+// ── Attention count ──────────────────────────────────────────
+// The single number behind the desktop tab dot and the phone More dot. An available update is
+// advisory and deliberately contributes nothing; anomalies and needs-action PRs each count once.
+export function radarAttentionCount({ posthog, health, prs } = {}) {
+  const projects = Array.isArray(posthog?.projects) ? posthog.projects : [];
+  const issues = projects.reduce((total, project) => {
+    const counts = summarizeIssues(project?.issues);
+    return total + counts.spiking + counts.needsHuman;
+  }, 0);
+  return issues + healthAnomalyRows(health).length + needsActionPrRows(prs).length;
 }
 
 function rankFor(change) {

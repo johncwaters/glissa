@@ -472,6 +472,16 @@ export function refreshPhoneBoard() {
   if (dot) dot.hidden = boardScreen.getAttentionCount() === 0;
 }
 
+// Navigation seam for panels that point at another screen (Radar's PR rows). Returns false when the
+// phone layout is not up or the screen is unknown, which is the caller's signal to use the desktop
+// tab strip instead.
+export function showPhoneScreen(screenId) {
+  if (!active) return false;
+  if (!screenElById.has(screenId)) return false;
+  showScreen(screenId);
+  return true;
+}
+
 export function setPhoneScreenAttention(screenId, hasAttention) {
   screenAttentionById.set(screenId, hasAttention === true);
   syncMoreAttention();

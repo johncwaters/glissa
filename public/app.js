@@ -13,9 +13,11 @@ import { activateFocusView, centerSessionQuietly, deactivateFocusView, focusAdja
 import { initFormFactor, isPhoneLayout, onLayoutChange } from './form-factor.js';
 import { applyHealthSnapshot, mountHealthMonitor } from './health-monitor.js';
 import { initNotifications, showDesktopNotification } from './notifications.js';
-import { activatePhoneShell, deactivatePhoneShell, getPhoneSessionId, mountPhoneShell, refreshPhoneBoard, setPhoneScreenAttention } from './phone/phone-shell.js';
+import { activatePhoneShell, deactivatePhoneShell, getPhoneSessionId, mountPhoneShell, refreshPhoneBoard, setPhoneScreenAttention, showPhoneScreen } from './phone/phone-shell.js';
 import { applyPrStatus, mountPrView, setPrActivityCallback } from './pr-panel.js';
-import { applyPosthogStatus, mountRadarView, setRadarActivityCallback } from './radar-panel.js';
+// Radar is a SECOND consumer of the health, update and PR feeds: it summarizes what needs the operator,
+// while the health footer, the update banner and the PRs tab keep rendering each feed in full.
+import { applyHealthSnapshot as applyRadarHealth, applyPosthogStatus, applyPrStatus as applyRadarPrStatus, applyUpdateAvailable as applyRadarUpdate, mountRadarView, setRadarActivityCallback, setRadarNavigateToPrs } from './radar-panel.js';
 import { handleDebugStateRefresh, handleDebugStateResponse } from './session-card/card-dom.js';
 import { applyState, applyTerminalSettings, createSessionCard, getSessionCount, hasSession, removeSessionCard, renameSessionCard, seedSessionMergeStatus, setSessionAgents, setSessionDiff, setSessionEffectiveBase, setSessionMergeStatus, setSessionPostTurn, setSessionPrompt, setSessionResume, setSessionWakeup, setSessionWorktree, updateAggregateStatus } from './session-card/lifecycle.js';
 import { reconnectDataWs } from './session-card/terminal.js';
@@ -215,13 +217,13 @@ const messageHandlers = {
   // msg.session carries the session id here (NotificationManager keys its entries by the id the
   // backend passes to trigger), so it is what the overlay refresh needs.
   'notify':             (msg) => { showDesktopNotification(msg); handleDebugStateRefresh(msg.session); },
-  'update-available':   (msg) => showUpdateBanner(msg),
+  'update-available':   (msg) => { showUpdateBanner(msg); applyRadarUpdate(msg); },
   'error':              (msg) => showErrorToast(msg.message, { persist: true }),
   'session-error':      (msg) => showErrorToast(`${msg.session}: ${msg.message}`, { persist: true }),
   'settings-updated':   (msg) => { if (msg.settings) applyTerminalSettings(msg.settings); },
-  'health-snapshot':    (msg) => { if (msg.stats) applyHealthSnapshot(msg.stats); },
+  'health-snapshot':    (msg) => { if (msg.stats) { applyHealthSnapshot(msg.stats); applyRadarHealth(msg.stats); } },
   'posthog-status':     (msg) => applyPosthogStatus(msg),
-  'pr-status':          (msg) => applyPrStatus(msg),
+  'pr-status':          (msg) => { applyPrStatus(msg); applyRadarPrStatus(msg); },
   'team-run-accepted':  (msg) => handleTeamMessage(msg),
   'team-run-started':   (msg) => handleTeamMessage(msg),
   'team-stage-started': (msg) => handleTeamMessage(msg),
@@ -384,6 +386,12 @@ setRadarActivityCallback((active) => {
 setPrActivityCallback((active) => {
   tabPrsActivityEl.classList.toggle('active', active);
   setPhoneScreenAttention('prs', active);
+});
+// A Radar PR row points at the full PR view: the phone screen when that layout owns the panel, the
+// desktop tab otherwise. Radar never navigates itself.
+setRadarNavigateToPrs(() => {
+  if (showPhoneScreen('prs')) return;
+  activateView('prs');
 });
 
 mountFocusView({

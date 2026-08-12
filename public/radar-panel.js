@@ -1,17 +1,38 @@
 // ── Radar view ───────────────────────────────────────────────
-// Renders PostHog issue status from `posthog-status` control-WS broadcasts into its own top-level
-// dashboard tab. The tab is always present; only its content varies, so an operator who has not
-// configured the PostHog lane still finds the surface and is told where to switch it on.
+// The one "everything outside your sessions that needs you" surface. Three sections fed by three
+// existing control-WS broadcasts: PostHog issues (`posthog-status`), ops (`update-available` plus the
+// anomaly block of `health-snapshot`) and the PR auto-review lane (`pr-status`). Radar is an ADDITIONAL
+// consumer of the last three: the update banner, the health footer and the PRs tab all keep receiving
+// them and rendering them in full. The tab is always present; only its content varies, so an operator
+// who has configured none of the lanes still finds the surface and is told where to switch them on.
 
 import { el } from './dom-helpers.js';
 import { createPosthogReportDialog } from './dialogs.js';
 import { sendControlRequest } from './control-ws.js';
 import { createPollAgoTicker } from './poll-ago.js';
-import { severityFor as severity, sortIssuesByAttention, sparklinePoints, summarizeIssues } from './radar-core.mjs';
+import { phaseLabel } from './pr-view-core.mjs';
+import {
+  healthAnomalyRows,
+  needsActionPrRows,
+  opsRows,
+  radarAttentionCount,
+  severityFor as severity,
+  sortIssuesByAttention,
+  sparklinePoints,
+  summarizeIssues,
+} from './radar-core.mjs';
 
 let _latest = null;
+let _health = null;
+// The anomaly shape of the last health snapshot. A snapshot lands every ten seconds and is almost
+// always all-zero, and a full repaint on each one would drop hover state and reset the poll tickers
+// for nothing, so only a CHANGE in which anomalies are live repaints the board.
+let _healthKey = '';
+let _update = null;
+let _prs = null;
 let _root = null;
 let _activityCallback = null;
+let _navigateToPrs = null;
 // Rows are rebuilt wholesale on every posthog-status broadcast, and two of the three row actions
 // force an immediate tick. Re-rendering mid-request would drop the in-flight disable (inviting a
 // double fire) and wipe the outcome line the operator has not read yet, so a broadcast arriving while
@@ -294,10 +315,89 @@ function buildProject(project) {
 }
 
 function attentionCount() {
-  return projectsOf(_latest).reduce((total, project) => {
-    const counts = summarizeIssues(project.issues);
-    return total + counts.spiking + counts.needsHuman;
-  }, 0);
+  return radarAttentionCount({ posthog: _latest, health: _health, prs: _prs });
+}
+
+const UNCONFIGURED_TEXT = 'PostHog monitoring is not configured, or has not ticked yet. Open Settings and its PostHog tab to set it up.';
+
+function buildSection(title, hint) {
+  const section = el('section', 'radar-section');
+  const head = el('div', 'radar-section-head');
+  head.append(el('h2', 'radar-section-title', title));
+  if (hint) head.append(el('span', 'radar-section-hint', hint));
+  section.append(head);
+  return section;
+}
+
+function buildErrorsSection(projects) {
+  const section = buildSection('Errors');
+  if (projects.length === 0) {
+    section.append(el('p', 'radar-unconfigured', UNCONFIGURED_TEXT));
+    return section;
+  }
+  const globalTickEl = el('div', 'radar-global-tick');
+  _pollTicker.track(globalTickEl, _latest?.ts);
+  section.append(globalTickEl);
+  for (const project of projects) section.append(buildProject(project));
+  return section;
+}
+
+function buildOpsSection(rows) {
+  const section = buildSection('Ops');
+  const list = el('div', 'radar-ops');
+  for (const row of rows) {
+    const item = el('div', 'radar-ops-row');
+    item.dataset.tone = row.tone;
+    const stripe = el('span', 'radar-stripe');
+    stripe.setAttribute('aria-hidden', 'true');
+    item.append(stripe, el('span', 'radar-ops-text', row.text));
+    // The update command is copy-pasteable text, exactly as the banner shows it; Radar mirrors the
+    // notice quietly rather than owning a second copy button for it.
+    if (row.detail) item.append(el('code', 'radar-ops-detail', row.detail));
+    list.append(item);
+  }
+  section.append(list);
+  return section;
+}
+
+function openPrsView() {
+  if (!_navigateToPrs) return;
+  _navigateToPrs();
+}
+
+function buildPrRow(row) {
+  const item = el('div', 'radar-pr-row');
+  item.dataset.severity = row.severity;
+  const stripe = el('span', 'radar-stripe');
+  stripe.setAttribute('aria-hidden', 'true');
+  const { label: phaseText } = phaseLabel(row.phase);
+  const numbered = row.number === null ? row.title : `#${row.number} ${row.title}`;
+  // Titles and repo slugs come from GitHub: built as text, never markup.
+  const title = el('span', 'radar-pr-title');
+  title.textContent = numbered;
+  title.title = numbered;
+  item.append(stripe, el('span', 'radar-pr-phase', phaseText), title, el('span', 'radar-pr-repo', row.projectLabel));
+
+  item.tabIndex = 0;
+  item.setAttribute('role', 'button');
+  item.setAttribute('aria-label', `Open the pull requests view for ${numbered}`);
+  item.title = 'Open the pull requests view';
+  item.addEventListener('click', () => openPrsView());
+  item.addEventListener('keydown', (event) => {
+    if (event.target !== item) return;
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault();
+    openPrsView();
+  });
+  return item;
+}
+
+function buildPrsSection(rows) {
+  const section = buildSection('Pull requests', 'needing action');
+  const list = el('div', 'radar-prs');
+  for (const row of rows) list.append(buildPrRow(row));
+  section.append(list);
+  return section;
 }
 
 function render() {
@@ -305,20 +405,47 @@ function render() {
   _root.textContent = '';
   _pollTicker.reset();
   const projects = projectsOf(_latest);
-  if (projects.length === 0) {
-    _root.append(el('p', 'radar-unconfigured', 'PostHog monitoring is not configured, or has not ticked yet. Open Settings and its PostHog tab to set it up.'));
+  const ops = opsRows({ update: _update, health: _health });
+  const prs = needsActionPrRows(_prs);
+  // Nothing configured anywhere: the bare hint, with no section chrome to make an empty board look
+  // like a broken one.
+  if (projects.length === 0 && ops.length === 0 && prs.length === 0) {
+    _root.append(el('p', 'radar-unconfigured', UNCONFIGURED_TEXT));
     return;
   }
-  const globalTickEl = el('div', 'radar-global-tick');
-  _pollTicker.track(globalTickEl, _latest?.ts);
-  _root.append(globalTickEl);
-  for (const project of projects) _root.append(buildProject(project));
+  _root.append(buildErrorsSection(projects));
+  if (ops.length > 0) _root.append(buildOpsSection(ops));
+  if (prs.length > 0) _root.append(buildPrsSection(prs));
+}
+
+// Every feed repaints through here, so an in-flight per-issue action still holds the board (see
+// _pendingActions): a health snapshot landing mid-request must not wipe an outcome line either.
+function renderOrDefer() {
+  const actionInProgress = _pendingActions.size > 0 || _deferredRenderTimer !== null;
+  if (actionInProgress) {
+    _renderDeferred = true;
+    return;
+  }
+  render();
+}
+
+function refreshActivity() {
+  if (!_activityCallback) return;
+  _activityCallback(attentionCount() > 0);
 }
 
 // Mirrors the Teams tab's activity seam: the view owns the condition, app.js owns the dot element.
+// The condition is now the FULL Radar attention count (issues + live anomalies + needs-action PRs),
+// so the desktop tab dot and the phone More dot, which both hang off this one callback, agree.
 export function setRadarActivityCallback(callback) {
   _activityCallback = callback;
-  if (_activityCallback) _activityCallback(attentionCount() > 0);
+  refreshActivity();
+}
+
+// A PR row is a pointer, not a second PR view: app.js owns the navigation (desktop tab vs phone
+// screen), Radar only knows that the operator asked to go there.
+export function setRadarNavigateToPrs(navigate) {
+  _navigateToPrs = navigate;
 }
 
 export function mountRadarView(parent) {
@@ -333,8 +460,28 @@ export function mountRadarView(parent) {
 
 export function applyPosthogStatus(msg) {
   _latest = msg;
-  const actionInProgress = _pendingActions.size > 0 || _deferredRenderTimer !== null;
-  if (actionInProgress) _renderDeferred = true;
-  if (!actionInProgress) render();
-  if (_activityCallback) _activityCallback(attentionCount() > 0);
+  renderOrDefer();
+  refreshActivity();
+}
+
+// A health snapshot lands every ten seconds; only a change in which anomalies are live is worth a
+// repaint, and an all-zero snapshot renders nothing at all.
+export function applyHealthSnapshot(stats) {
+  _health = stats;
+  const key = healthAnomalyRows(stats).map((row) => row.key).join(',');
+  if (key === _healthKey) return;
+  _healthKey = key;
+  renderOrDefer();
+  refreshActivity();
+}
+
+export function applyUpdateAvailable(msg) {
+  _update = msg;
+  renderOrDefer();
+}
+
+export function applyPrStatus(msg) {
+  _prs = msg;
+  renderOrDefer();
+  refreshActivity();
 }

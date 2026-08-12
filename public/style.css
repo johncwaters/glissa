@@ -2102,6 +2102,120 @@ a.radar-issue-title:hover {
   font-size: 11px;
 }
 
+/* Sections (Errors / Ops / Pull requests). One heading rhythm above the existing project heads, so a
+   three-section board still reads as one column rather than three stacked panels. */
+.radar-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.radar-section-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  border-bottom: 1px solid var(--border-dim);
+  padding-bottom: 6px;
+}
+
+.radar-section-title {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-dim);
+}
+
+.radar-section-hint {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.radar-ops,
+.radar-prs {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.radar-ops-row,
+.radar-pr-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 8px;
+  border: 1px solid var(--border-dim);
+  border-radius: var(--radius);
+  background: color-mix(in oklab, var(--bg) 60%, transparent);
+  min-width: 0;
+}
+
+.radar-ops-row[data-tone="dim"] .radar-stripe { background: var(--border); }
+.radar-ops-row[data-tone="warn"] .radar-stripe { background: var(--state-waiting); }
+
+.radar-ops-text {
+  color: var(--text-dim);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.radar-ops-row[data-tone="warn"] .radar-ops-text { color: var(--text); }
+
+.radar-ops-detail {
+  flex: 0 1 auto;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.radar-pr-row[data-severity="crit"] .radar-stripe { background: var(--state-failed); }
+.radar-pr-row[data-severity="warn"] .radar-stripe { background: var(--state-waiting); }
+.radar-pr-row[data-severity="info"] .radar-stripe { background: var(--accent-dim); }
+.radar-pr-row[data-severity="ok"] .radar-stripe { background: var(--state-complete); }
+.radar-pr-row[data-severity="dim"] .radar-stripe { background: var(--border); }
+
+.radar-pr-row {
+  cursor: pointer;
+}
+
+.radar-pr-row:hover,
+.radar-pr-row:focus-visible {
+  border-color: var(--accent-dim);
+}
+
+.radar-pr-phase {
+  flex: 0 0 auto;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  min-width: 88px;
+}
+
+.radar-pr-row[data-severity="crit"] .radar-pr-phase { color: var(--state-failed); }
+.radar-pr-row[data-severity="warn"] .radar-pr-phase { color: var(--state-waiting); }
+
+.radar-pr-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.radar-pr-repo {
+  flex: 0 0 auto;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
 /* ── PR auto-review view ─────────────────────────────────────── */
 /* Same page rhythm and tokens as the Radar view; its own selectors because PR rows carry two extra
    severity tones (info, ok) and a head-sha column the issue rows have no equivalent for. */

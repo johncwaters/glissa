@@ -137,3 +137,51 @@ test('summarizePrs: malformed entries never throw', async () => {
   const { summarizePrs } = await importCore();
   assert.deepEqual(summarizePrs([null, undefined, {}]), { open: 3, inReview: 0, errors: 0 });
 });
+
+test('prNeedsAction: error, changes-requested and conflicting phases need the operator', async () => {
+  const { prNeedsAction } = await importCore();
+  assert.equal(prNeedsAction({ phase: 'error' }), true);
+  assert.equal(prNeedsAction({ phase: 'done' }), true);
+  assert.equal(prNeedsAction({ phase: 'changes-requested' }), true);
+  assert.equal(prNeedsAction({ phase: 'conflicting' }), true);
+});
+
+test('prNeedsAction: healthy in-flight and settled phases do not', async () => {
+  const { prNeedsAction } = await importCore();
+  assert.equal(prNeedsAction({ phase: 'resolving-conflicts' }), false);
+  assert.equal(prNeedsAction({ phase: 'awaiting-checks' }), false);
+  assert.equal(prNeedsAction({ phase: 'in-review', inFlight: true }), false);
+  assert.equal(prNeedsAction({ phase: 'merged' }), false);
+  assert.equal(prNeedsAction({ phase: null }), false);
+  assert.equal(prNeedsAction({}), false);
+  assert.equal(prNeedsAction(null), false);
+});
+
+test('prNeedsAction: pingedError outranks an otherwise calm phase', async () => {
+  const { prNeedsAction } = await importCore();
+  assert.equal(prNeedsAction({ phase: 'awaiting-checks', pingedError: true }), true);
+});
+
+test('prNeedsAction: a resolved wasConflicting flag is history, not an open ask', async () => {
+  const { prNeedsAction } = await importCore();
+  assert.equal(prNeedsAction({ phase: 'awaiting-checks', wasConflicting: true }), false);
+  assert.equal(prNeedsAction({ phase: 'merged', wasConflicting: true }), false);
+});
+
+test('prNeedsAction: every PR the tab dot counts as an error also needs action', async () => {
+  const { prNeedsAction, summarizePrs } = await importCore();
+  const prs = [
+    { phase: 'error' },
+    { phase: 'merged', pingedError: true },
+    { phase: 'awaiting-checks' },
+  ];
+  assert.equal(summarizePrs(prs).errors, 2);
+  assert.equal(prs.filter((pr) => prNeedsAction(pr)).length, 2);
+});
+
+test('phaseLabel: known phases read in words, an unknown one keeps its raw string', async () => {
+  const { phaseLabel } = await importCore();
+  assert.deepEqual(phaseLabel('done'), { label: 'changes requested', known: true });
+  assert.deepEqual(phaseLabel(null), { label: 'pending', known: true });
+  assert.deepEqual(phaseLabel('sideways'), { label: 'sideways', known: false });
+});

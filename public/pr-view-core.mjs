@@ -27,6 +27,18 @@ const PHASE_SEVERITY = {
   merged: 'ok',
 };
 
+const PHASE_LABEL = {
+  error: 'error',
+  done: 'changes requested',
+  'changes-requested': 'changes requested',
+  conflicting: 'conflicting',
+  'resolving-conflicts': 'resolving',
+  'awaiting-checks': 'awaiting checks',
+  'in-review': 'in review',
+  pending: 'pending',
+  merged: 'merged',
+};
+
 const UNKNOWN_RANK = 99;
 
 // The lane has no state entry for a PR it has not reached yet, and sends a null phase for it. That is
@@ -35,6 +47,15 @@ export const PENDING_PHASE = 'pending';
 
 export function normalizePhase(phase) {
   return phase == null ? PENDING_PHASE : phase;
+}
+
+// An unrecognized phase renders as its raw string rather than a guess; `known` lets a view mark that
+// row so the styling can say "this came from a lane we do not have vocabulary for".
+export function phaseLabel(phase) {
+  const key = normalizePhase(phase);
+  const label = PHASE_LABEL[key];
+  if (label) return { label, known: true };
+  return { label: String(key), known: false };
 }
 
 // pingedError outranks the phase: the lane already told the operator something broke, so the row says
@@ -58,6 +79,18 @@ export function summarizePrs(prs) {
     if (pr?.pingedError || pr?.phase === 'error') errors += 1;
   }
   return { open: list.length, inReview, errors };
+}
+
+// Phases that mean a carbon unit has to do something: the lane failed, the review asked for changes,
+// or the branch is conflicting and nothing is resolving it yet. `resolving-conflicts` is deliberately
+// absent (the lane is working on it), and so is a historical `wasConflicting` flag on a PR whose phase
+// has moved on: that is resolved history, not an open ask. This is THE needs-action vocabulary; the
+// Radar summary and any future consumer read it here rather than re-deriving phase meanings.
+const NEEDS_ACTION_PHASES = new Set(['error', 'done', 'changes-requested', 'conflicting']);
+
+export function prNeedsAction(pr) {
+  if (pr?.pingedError) return true;
+  return NEEDS_ACTION_PHASES.has(normalizePhase(pr?.phase));
 }
 
 function rankFor(pr) {
