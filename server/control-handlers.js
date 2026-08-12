@@ -211,6 +211,7 @@ function registerControlHandlers(controlWss, deps) {
     // PostHog per-issue actions (optional - undefined in older callers/tests, which then refuse).
     posthogSetIssueStatus = null,
     posthogReinvestigate = null,
+    posthogArchiveInvestigation = null,
     // Cached last PR auto-review tick summary (optional - undefined in older callers/tests).
     getPrStatus,
     // Replay of transient broadcasts missed across a reconnect gap (optional - undefined in
@@ -658,6 +659,17 @@ function registerControlHandlers(controlWss, deps) {
     reply({ ok: res.ok === true, error: res.error || null });
   }
 
+  // Archive one investigations-inbox record. The id is a log key, not an issue reference: the record
+  // it names routinely outlives the issue row it came from, which is the point of the inbox.
+  function handlePosthogArchiveInvestigation(msg, ws) {
+    const reply = (payload) => replyTo(ws, msg, 'posthog-archive-investigation-result', { ok: false, error: null, ...payload });
+    const ref = posthogCore.validateInvestigationId(msg.id);
+    if (!ref.ok) { reply({ error: ref.error }); return; }
+    if (!posthogArchiveInvestigation) { reply({ error: 'PostHog monitoring is not running' }); return; }
+    const res = posthogArchiveInvestigation({ id: ref.id });
+    reply({ ok: res.ok === true, error: res.error || null });
+  }
+
   function handleShutdown() {
     console.log('[control] Shutdown requested via UI');
     broadcastControl({ type: 'shutting-down' });
@@ -963,6 +975,7 @@ function registerControlHandlers(controlWss, deps) {
     'posthog-open-session': handlePosthogOpenSession,
     'posthog-issue-action': handlePosthogIssueAction,
     'posthog-reinvestigate': handlePosthogReinvestigate,
+    'posthog-archive-investigation': handlePosthogArchiveInvestigation,
     'kill':             (msg) => { const s = findSession(msg); if (s) s.killSession(); },
     'start-session':    (msg) => {
       const s = findSession(msg);

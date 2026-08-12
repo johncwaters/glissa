@@ -383,6 +383,23 @@ function createPosthogWiring({
     return res;
   }
 
+  /*
+   * Archive one investigations-inbox record. Deliberately NOT a forced tick: archiving edits one
+   * boolean in the state file and changes nothing a poll would discover, so the cached status is
+   * patched in place and rebroadcast. A tick would re-query PostHog (and could re-spawn work) for
+   * what is a list edit. lastStatus can still be null here (archiving from a client that connected
+   * before the first tick), so the patch seeds a minimal payload rather than dropping the update.
+   */
+  function archiveInvestigation({ id } = {}) {
+    if (!poller) return { ok: false, error: 'PostHog monitoring is not running' };
+    const res = poller.archiveInvestigation(id);
+    if (!res.ok) return { ok: false, error: res.error };
+    const base = lastStatus || { type: 'posthog-status', ts: Date.now(), projects: [] };
+    lastStatus = { ...base, investigations: res.investigations };
+    broadcast(lastStatus);
+    return { ok: true };
+  }
+
   function restartIfConfigChanged() {
     if (posthogCfgKey(config) !== lastKey) startPoller();
   }
@@ -396,7 +413,10 @@ function createPosthogWiring({
     if (poller) poller.stop();
   }
 
-  return { startPoller, restartIfConfigChanged, stopPoller, getStatus, setIssueStatus, reinvestigateIssue };
+  return {
+    startPoller, restartIfConfigChanged, stopPoller, getStatus,
+    setIssueStatus, reinvestigateIssue, archiveInvestigation,
+  };
 }
 
 // `projects: 'all'` walks every organization the personal API key can see; an explicit array is

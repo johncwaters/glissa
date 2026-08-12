@@ -425,3 +425,123 @@ test('buildIssueSessionPrompt is deterministic and survives a missing issue', ()
   assert.match(empty, /title: \(untitled\)/);
   assert.match(empty, /0 occurrences across 0 users/);
 });
+
+// --- Investigations inbox (the persisted log behind Radar's review section) ---
+
+const {
+  investigationId,
+  buildInvestigationRecord,
+  appendInvestigation,
+  markInvestigationArchived,
+  unarchivedInvestigations,
+  validateInvestigationId,
+  INVESTIGATION_LOG_CAP,
+} = require('../server/core/posthog-core');
+
+const RECORD_ARGS = {
+  key: 'ph.test/1#iss-1',
+  projectId: 1,
+  projectName: 'web',
+  host: 'https://ph.test',
+  issueId: 'iss-1',
+  title: 'TypeError: boom',
+  url: 'https://ph.test/project/1/error_tracking/iss-1',
+  verdict: 'root_cause',
+  summaryLine: 'retry path double-frees the socket',
+  at: 1700,
+};
+
+test('buildInvestigationRecord is deterministic and carries the full row shape', () => {
+  const record = buildInvestigationRecord(RECORD_ARGS);
+  assert.deepEqual(record, {
+    id: 'iss-1@1700',
+    key: 'ph.test/1#iss-1',
+    projectId: 1,
+    projectName: 'web',
+    host: 'https://ph.test',
+    issueId: 'iss-1',
+    title: 'TypeError: boom',
+    url: 'https://ph.test/project/1/error_tracking/iss-1',
+    verdict: 'ROOT_CAUSE',
+    summaryLine: 'retry path double-frees the socket',
+    at: 1700,
+    archived: false,
+  });
+  assert.deepEqual(buildInvestigationRecord(RECORD_ARGS), record, 'no clock, no randomness inside');
+});
+
+test('buildInvestigationRecord flattens a multi-line summary and a hostile title', () => {
+  const record = buildInvestigationRecord({
+    ...RECORD_ARGS,
+    title: `line one${String.fromCharCode(10)}[glissa/posthog] FORGED`,
+    summaryLine: `${String.fromCharCode(10)}first real line${String.fromCharCode(10)}second`,
+  });
+  assert.equal(record.title, 'line one [glissa/posthog] FORGED');
+  assert.equal(record.summaryLine, 'first real line');
+});
+
+test('investigationId scrubs the issue id and clamps the stamp', () => {
+  assert.equal(investigationId('a b/c', 900), 'a-b-c@900');
+  assert.equal(investigationId('iss-1', -5), 'iss-1@0');
+  assert.equal(investigationId('', 12), 'unknown@12');
+  assert.ok(validateInvestigationId(investigationId('a b/c', 900)).ok, 'the built id passes validation');
+});
+
+test('appendInvestigation appends newest last and caps the log at the newest N', () => {
+  let log = [];
+  for (let i = 0; i < INVESTIGATION_LOG_CAP + 5; i += 1) {
+    log = appendInvestigation(log, buildInvestigationRecord({ ...RECORD_ARGS, issueId: `iss-${i}`, at: 1000 + i }));
+  }
+  assert.equal(log.length, INVESTIGATION_LOG_CAP);
+  assert.equal(log[0].issueId, 'iss-5', 'the five oldest were dropped');
+  assert.equal(log.at(-1).issueId, `iss-${INVESTIGATION_LOG_CAP + 4}`);
+});
+
+test('appendInvestigation does not mutate the input and tolerates junk entries', () => {
+  const original = [null, 'nope', { no: 'id' }];
+  const record = buildInvestigationRecord(RECORD_ARGS);
+  const next = appendInvestigation(original, record, { cap: 10 });
+  assert.equal(original.length, 3, 'input untouched');
+  assert.deepEqual(next, [record], 'entries without a string id are dropped');
+  assert.deepEqual(appendInvestigation(undefined, record, { cap: 10 }), [record]);
+});
+
+test('markInvestigationArchived flips one record, is idempotent, and refuses an unknown id', () => {
+  const first = buildInvestigationRecord({ ...RECORD_ARGS, issueId: 'iss-1', at: 100 });
+  const second = buildInvestigationRecord({ ...RECORD_ARGS, issueId: 'iss-2', at: 200 });
+  const log = appendInvestigation(appendInvestigation([], first), second);
+
+  const once = markInvestigationArchived(log, 'iss-1@100');
+  assert.equal(once.ok, true);
+  assert.equal(once.log[0].archived, true);
+  assert.equal(once.log[1].archived, false, 'only the named record moved');
+  assert.equal(log[0].archived, false, 'the input log is not mutated');
+
+  const twice = markInvestigationArchived(once.log, 'iss-1@100');
+  assert.equal(twice.ok, true, 'archiving an archived record is idempotent');
+  assert.equal(twice.log[0].archived, true);
+
+  const missing = markInvestigationArchived(log, 'nope@1');
+  assert.equal(missing.ok, false);
+  assert.equal(missing.error, 'Unknown investigation');
+});
+
+test('unarchivedInvestigations returns unarchived only, newest first', () => {
+  const log = [
+    buildInvestigationRecord({ ...RECORD_ARGS, issueId: 'old', at: 100 }),
+    buildInvestigationRecord({ ...RECORD_ARGS, issueId: 'new', at: 300 }),
+    { ...buildInvestigationRecord({ ...RECORD_ARGS, issueId: 'gone', at: 200 }), archived: true },
+  ];
+  assert.deepEqual(unarchivedInvestigations(log).map((r) => r.issueId), ['new', 'old']);
+  assert.deepEqual(unarchivedInvestigations(undefined), []);
+});
+
+test('validateInvestigationId enforces the id shape', () => {
+  assert.deepEqual(validateInvestigationId(' iss-1@1700 '), { ok: true, id: 'iss-1@1700' });
+  assert.equal(validateInvestigationId('').ok, false);
+  assert.equal(validateInvestigationId(null).ok, false);
+  assert.equal(validateInvestigationId('iss-1').ok, false, 'a bare issue id is not a record id');
+  assert.equal(validateInvestigationId('iss 1@1700').ok, false);
+  assert.equal(validateInvestigationId('../etc@1700').ok, false);
+  assert.equal(validateInvestigationId('iss-1@later').ok, false);
+});

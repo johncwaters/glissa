@@ -553,3 +553,122 @@ test('investigateNow refuses once the poller is stopping', async () => {
   const res = poller.investigateNow({ projectId: 1, issueId: 'iss-1' });
   assert.equal(res.ok, false);
 });
+
+// --- Investigations inbox: the persisted log the Radar review section renders ---
+
+test('a completed investigation appends one record to the persisted log', async () => {
+  const { poller, stateStore, summaries } = harness({
+    spawnInvestigation: async () => ({ verdict: 'TRANSIENT', summary: 'one-off dependency blip' }),
+    now: () => 4200,
+  });
+  await poller.start();
+  await flush();
+
+  const log = stateStore.value._investigations;
+  assert.equal(log.length, 1, 'the silent verdict still lands in the inbox');
+  assert.deepEqual(log[0], {
+    id: 'iss-1@4200',
+    key: KEY,
+    projectId: 1,
+    projectName: 'web',
+    host: HOST,
+    issueId: 'iss-1',
+    title: 'TypeError: boom',
+    url: 'https://ph.test/project/1/error_tracking/iss-1',
+    verdict: 'TRANSIENT',
+    summaryLine: 'one-off dependency blip',
+    at: 4200,
+    archived: false,
+  });
+  assert.deepEqual(summaries.at(-1).investigations.map((r) => r.id), ['iss-1@4200'], 'and rides the broadcast');
+});
+
+test('the broadcast carries unarchived records, and a re-investigation appends a second one', async () => {
+  let clock = 1000;
+  const { poller, summaries, stateStore } = harness({
+    spawnInvestigation: async () => ({ verdict: 'ROOT_CAUSE', summary: 'null deref in the retry path' }),
+    now: () => clock,
+  });
+  await poller.start();
+  await flush();
+
+  clock = 2000;
+  assert.equal(poller.investigateNow({ projectId: 1, issueId: 'iss-1' }).ok, true);
+  await flush();
+
+  assert.equal(stateStore.value._investigations.length, 2, 'a re-investigation appends, never overwrites');
+
+  clock = 3000;
+  await poller.tick();
+  await flush();
+  const carried = summaries.at(-1).investigations;
+  assert.deepEqual(carried.map((r) => r.id), ['iss-1@2000', 'iss-1@1000'], 'newest first');
+});
+
+test('archiveInvestigation hides one record, persists it, and is idempotent', async () => {
+  const { poller, stateStore } = harness({
+    spawnInvestigation: async () => ({ verdict: 'NEEDS_HUMAN', summary: 'needs a carbon unit' }),
+    now: () => 1000,
+  });
+  await poller.start();
+  await flush();
+
+  const res = poller.archiveInvestigation('iss-1@1000');
+  assert.equal(res.ok, true);
+  assert.deepEqual(res.investigations, [], 'the archived record leaves the broadcast list');
+  await flush();
+  assert.equal(stateStore.value._investigations[0].archived, true, 'persisted');
+
+  assert.equal(poller.archiveInvestigation('iss-1@1000').ok, true, 'idempotent');
+  assert.deepEqual(poller.investigations(), []);
+});
+
+test('archiveInvestigation refuses an unknown or malformed id', async () => {
+  const { poller } = harness({ now: () => 1000 });
+  await poller.start();
+  await flush();
+
+  assert.deepEqual(poller.archiveInvestigation('iss-9@1'), { ok: false, error: 'Unknown investigation' });
+  assert.deepEqual(poller.archiveInvestigation('nonsense'), { ok: false, error: 'Invalid investigation id' });
+  assert.deepEqual(poller.archiveInvestigation(''), { ok: false, error: 'id is required' });
+});
+
+test('a state file written by an older server (no _investigations) loads and starts a log', async () => {
+  const { poller, stateStore } = harness({
+    initialState: {
+      // A resolved entry reappearing in the active list classifies as regressed, so this boots
+      // straight into an investigation with no _investigations key anywhere in the file.
+      [KEY]: {
+        status: 'resolved', lastOccurrences: 120, lastUsers: 8, verdict: null, pingedPhases: [],
+      },
+    },
+    spawnInvestigation: async () => ({ verdict: 'ERROR', summary: 'no result file' }),
+    now: () => 5000,
+  });
+  await poller.start();
+  await flush();
+
+  assert.equal(stateStore.value._investigations.length, 1);
+  assert.equal(stateStore.value[KEY].verdict, 'ERROR', 'the per-issue entry is untouched by the log');
+});
+
+test('the investigations log is never treated as an issue entry', async () => {
+  const { poller, stateStore } = harness({
+    spawnInvestigation: async () => ({ verdict: 'ROOT_CAUSE', summary: 'fixed upstream' }),
+    now: () => 1000,
+  });
+  await poller.start();
+  await flush();
+  // Second tick with the issue gone: reconcileVanished walks every key and must skip the log.
+  poller._state()._meta.lastTickAt[1] = 0;
+  const { poller: gone, stateStore: goneStore } = harness({
+    initialState: poller._state(),
+    api: { queryIssues: async () => ({ ok: true, body: { results: [] } }) },
+    now: () => 9000,
+  });
+  await gone.start();
+  await flush();
+  assert.ok(Array.isArray(goneStore.value._investigations), 'still a plain array');
+  assert.equal(goneStore.value._investigations.length, 1, 'the record outlives its issue');
+  assert.equal(goneStore.value._investigations[0].archived, false);
+});

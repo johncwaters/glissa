@@ -295,3 +295,82 @@ test('radarAttentionCount: every feed absent is zero, never a throw', async () =
   assert.equal(radarAttentionCount({}), 0);
   assert.equal(radarAttentionCount({ posthog: null, health: null, prs: null }), 0);
 });
+
+// --- Investigations inbox rows ---
+
+const investigationRecord = (over = {}) => ({
+  id: 'iss-1@1700',
+  key: 'ph.test/1#iss-1',
+  projectId: 1,
+  projectName: 'web',
+  host: 'https://ph.test',
+  issueId: 'iss-1',
+  title: 'TypeError: boom',
+  url: 'https://ph.test/project/1/error_tracking/iss-1',
+  verdict: 'ROOT_CAUSE',
+  summaryLine: 'null deref in the retry path',
+  at: 1700,
+  archived: false,
+  ...over,
+});
+
+test('investigationRows: absent field renders nothing (older server payload)', async () => {
+  const { investigationRows } = await importCore();
+  assert.deepEqual(investigationRows({ type: 'posthog-status', projects: [] }), []);
+  assert.deepEqual(investigationRows(null), []);
+  assert.deepEqual(investigationRows({ investigations: 'nope' }), []);
+});
+
+test('investigationRows: drops archived records and orders newest first', async () => {
+  const { investigationRows } = await importCore();
+  const rows = investigationRows({
+    investigations: [
+      investigationRecord({ id: 'a@100', at: 100 }),
+      investigationRecord({ id: 'c@300', at: 300 }),
+      investigationRecord({ id: 'b@200', at: 200, archived: true }),
+    ],
+  });
+  assert.deepEqual(rows.map((row) => row.id), ['c@300', 'a@100']);
+});
+
+test('investigationRows: normalizes one record into a renderable row', async () => {
+  const { investigationRows } = await importCore();
+  const [row] = investigationRows({ investigations: [investigationRecord({ verdict: 'needs_human' })] });
+  assert.deepEqual(row, {
+    id: 'iss-1@1700',
+    issueId: 'iss-1',
+    projectId: 1,
+    projectLabel: 'web',
+    title: 'TypeError: boom',
+    summaryLine: 'null deref in the retry path',
+    url: 'https://ph.test/project/1/error_tracking/iss-1',
+    verdict: 'NEEDS_HUMAN',
+    at: 1700,
+  });
+});
+
+test('investigationRows: survives a partial record and skips one with no id', async () => {
+  const { investigationRows } = await importCore();
+  const rows = investigationRows({
+    investigations: [null, 'nope', { id: '' }, { id: 'x@1' }],
+  });
+  assert.equal(rows.length, 1);
+  assert.deepEqual(rows[0], {
+    id: 'x@1',
+    issueId: '',
+    projectId: null,
+    projectLabel: '',
+    title: 'Untitled issue',
+    summaryLine: '',
+    url: '',
+    verdict: 'ERROR',
+    at: 0,
+  });
+});
+
+test('investigationRows: an unarchived record never moves the attention count', async () => {
+  const { investigationRows, radarAttentionCount } = await importCore();
+  const posthog = { projects: [], investigations: [investigationRecord()] };
+  assert.equal(investigationRows(posthog).length, 1);
+  assert.equal(radarAttentionCount({ posthog }), 0, 'the inbox is quiet review material');
+});

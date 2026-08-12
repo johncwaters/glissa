@@ -62,6 +62,31 @@ export function summarizeIssues(issues) {
   return { active: list.length, spiking, needsHuman };
 }
 
+// ── Investigations inbox ─────────────────────────────────────
+// The persisted log of completed investigations (server/core/posthog-core.js), carried on the same
+// posthog-status broadcast. Rows survive their issue: a resolved issue leaves the Errors section
+// immediately, and its verdict would leave with it. An absent field renders nothing, so an older
+// server keeps behaving exactly as before.
+export function investigationRows(snapshot) {
+  const list = Array.isArray(snapshot?.investigations) ? snapshot.investigations : [];
+  return list
+    .filter((record) => record && typeof record === 'object')
+    .filter((record) => typeof record.id === 'string' && record.id)
+    .filter((record) => record.archived !== true)
+    .map((record) => ({
+      id: record.id,
+      issueId: textOr(record.issueId, ''),
+      projectId: record.projectId ?? null,
+      projectLabel: textOr(record.projectName, ''),
+      title: textOr(record.title, 'Untitled issue'),
+      summaryLine: textOr(record.summaryLine, ''),
+      url: textOr(record.url, ''),
+      verdict: textOr(record.verdict, 'ERROR').toUpperCase(),
+      at: Number.isFinite(Number(record.at)) ? Number(record.at) : 0,
+    }))
+    .sort((a, b) => b.at - a.at);
+}
+
 // ── Ops section ──────────────────────────────────────────────
 // Wording is the health monitor's own anomaly copy, kept identical so the compact Radar row and the
 // expanded footer panel can never describe the same condition two different ways.

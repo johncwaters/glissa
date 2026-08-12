@@ -48,6 +48,7 @@ function harness(over = {}) {
   const sent = [];
   const actionCalls = [];
   const reinvestigateCalls = [];
+  const archiveCalls = [];
   let messageHandler = null;
   const ws = {
     send: (raw) => sent.push(JSON.parse(raw)),
@@ -73,11 +74,15 @@ function harness(over = {}) {
       reinvestigateCalls.push(args);
       return over.reinvestigateResult || { ok: true };
     },
+    posthogArchiveInvestigation: over.posthogArchiveInvestigation === null ? null : (args) => {
+      archiveCalls.push(args);
+      return over.archiveResult || { ok: true };
+    },
   });
   controlWss.emit('connection', ws);
   sent.length = 0;
   return {
-    sent, sessions, actionCalls, reinvestigateCalls,
+    sent, sessions, actionCalls, reinvestigateCalls, archiveCalls,
     send: (msg) => messageHandler(JSON.stringify(msg)),
   };
 }
@@ -225,6 +230,56 @@ test('posthog-reinvestigate answers cleanly when the lane is not wired in', () =
   const h = harness({ posthogReinvestigate: null });
 
   h.send({ type: 'posthog-reinvestigate', requestId: 'r1', projectId: 7, issueId: 'iss-1' });
+
+  assert.equal(h.sent[0].ok, false);
+  assert.match(h.sent[0].error, /not running/);
+});
+
+// --- D. archive one investigations-inbox record ---
+
+test('posthog-archive-investigation forwards a valid id and reports success', () => {
+  const h = harness();
+
+  h.send({ type: 'posthog-archive-investigation', requestId: 'r1', id: 'iss-1@1700' });
+
+  assert.deepEqual(h.archiveCalls, [{ id: 'iss-1@1700' }]);
+  assert.deepEqual(h.sent[0], {
+    type: 'posthog-archive-investigation-result', requestId: 'r1', ok: true, error: null,
+  });
+});
+
+test('posthog-archive-investigation reports an unknown id without touching the lane', () => {
+  const h = harness({ archiveResult: { ok: false, error: 'Unknown investigation' } });
+
+  h.send({ type: 'posthog-archive-investigation', requestId: 'r1', id: 'iss-9@1700' });
+
+  assert.equal(h.sent[0].ok, false);
+  assert.equal(h.sent[0].error, 'Unknown investigation');
+});
+
+test('posthog-archive-investigation refuses a malformed id before the lane is called', () => {
+  const h = harness();
+
+  h.send({ type: 'posthog-archive-investigation', requestId: 'r1', id: '../etc/passwd' });
+
+  assert.equal(h.sent[0].ok, false);
+  assert.match(h.sent[0].error, /Invalid investigation id/);
+  assert.deepEqual(h.archiveCalls, [], 'nothing reached the lane');
+});
+
+test('posthog-archive-investigation refuses a missing id', () => {
+  const h = harness();
+
+  h.send({ type: 'posthog-archive-investigation', requestId: 'r1' });
+
+  assert.equal(h.sent[0].ok, false);
+  assert.match(h.sent[0].error, /id is required/);
+});
+
+test('posthog-archive-investigation answers cleanly when the lane is not wired in', () => {
+  const h = harness({ posthogArchiveInvestigation: null });
+
+  h.send({ type: 'posthog-archive-investigation', requestId: 'r1', id: 'iss-1@1700' });
 
   assert.equal(h.sent[0].ok, false);
   assert.match(h.sent[0].error, /not running/);

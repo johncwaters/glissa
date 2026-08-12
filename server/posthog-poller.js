@@ -150,6 +150,7 @@ function createPosthogPoller(deps) {
     const prev = state[change.key] || {};
     const phases = [...(prev.pingedPhases || [])];
     const verdict = String((result?.verdict) || 'ERROR').toUpperCase();
+    const completedAt = now();
     const kind = VERDICT_PING_KIND[verdict];
     if (kind) {
       pingOnce(kind, { ...pingContext(change), summary: result?.summary }, phases);
@@ -157,11 +158,44 @@ function createPosthogPoller(deps) {
     state[change.key] = core.nextState(prev, change.issue, {
       verdict,
       summaryLine: core.summaryLineFromReportText(result?.summary),
-      at: now(),
+      at: completedAt,
       inFlight: false,
       pingedPhases: phases,
     });
+    // The inbox entry is written HERE, at the same seam as the verdict, so it exists whether or not
+    // the verdict pinged and whether or not the issue survives in the active list.
+    state[core.INVESTIGATIONS_KEY] = core.appendInvestigation(state[core.INVESTIGATIONS_KEY], core.buildInvestigationRecord({
+      key: change.key,
+      projectId: change.projectId,
+      projectName: change.projectName,
+      host,
+      issueId: change.issue.issueId,
+      title: change.issue.title,
+      url: change.url,
+      verdict,
+      summaryLine: result?.summary,
+      at: completedAt,
+    }));
     return persist();
+  }
+
+  function currentInvestigations() {
+    return core.unarchivedInvestigations(state[core.INVESTIGATIONS_KEY]);
+  }
+
+  /*
+   * Operator-driven archive of one inbox record. Purely a state edit: nothing is polled, nothing is
+   * written to PostHog, and the record stays in the log (archived) rather than being deleted, so the
+   * cap keeps behaving as a plain newest-N window.
+   */
+  function archiveInvestigation(id) {
+    const ref = core.validateInvestigationId(id);
+    if (!ref.ok) return { ok: false, error: ref.error };
+    const res = core.markInvestigationArchived(state[core.INVESTIGATIONS_KEY], ref.id);
+    if (!res.ok) return { ok: false, error: res.error };
+    state[core.INVESTIGATIONS_KEY] = res.log;
+    void persist();
+    return { ok: true, investigations: currentInvestigations() };
   }
 
   async function runInvestigation(change) {
@@ -331,7 +365,12 @@ function createPosthogPoller(deps) {
         summaries.push(res.summary);
       }
       if (dirty) await persist();
-      onTickComplete({ type: 'posthog-status', ts: now(), projects: summaries });
+      onTickComplete({
+        type: 'posthog-status',
+        ts: now(),
+        projects: summaries,
+        investigations: currentInvestigations(),
+      });
     } finally {
       tickRunning = false;
     }
@@ -386,7 +425,11 @@ function createPosthogPoller(deps) {
     await persistChain;
   }
 
-  return { start, stop, tick, investigateNow, _state: () => state };
+  return {
+    start, stop, tick, investigateNow, archiveInvestigation,
+    investigations: currentInvestigations,
+    _state: () => state,
+  };
 }
 
 module.exports = { createPosthogPoller };

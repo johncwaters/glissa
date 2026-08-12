@@ -9,10 +9,11 @@
 import { el } from './dom-helpers.js';
 import { createPosthogReportDialog } from './dialogs.js';
 import { sendControlRequest } from './control-ws.js';
-import { createPollAgoTicker } from './poll-ago.js';
+import { createPollAgoTicker, formatAgo } from './poll-ago.js';
 import { phaseLabel } from './pr-view-core.mjs';
 import {
   healthAnomalyRows,
+  investigationRows,
   needsActionPrRows,
   opsRows,
   radarAttentionCount,
@@ -119,38 +120,20 @@ function openIssueReport(issue) {
     });
 }
 
-// Per-row actions. Labels are constant for the control's whole lifecycle (no "Resolving...", no
-// counts): the sibling status line carries progress and outcome, and the buttons are disabled while
-// a request is in flight so the row cannot be double-fired.
-function buildIssueActions(issue, projectId) {
+// Per-row actions, shared by the issue rows and the investigations inbox. Labels are constant for the
+// control's whole lifecycle (no "Resolving...", no counts): the sibling status line carries progress
+// and outcome, and every button is disabled while a request is in flight so a row cannot be
+// double-fired. `permanentlyOff` holds controls unavailable for the row's own reasons (an
+// investigation already running), which must stay off when an unrelated request finishes.
+function createActionCluster() {
   const wrap = el('div', 'radar-issue-actions');
   const status = el('span', 'radar-issue-action-status');
   status.setAttribute('role', 'status');
   const buttons = [];
-  // Controls that are unavailable for this row's own reasons (an investigation already running), as
-  // opposed to the temporary in-flight disable. They must stay off when a request finishes.
   const permanentlyOff = new Set();
 
   const setBusy = (busy) => {
     for (const button of buttons) button.disabled = busy || permanentlyOff.has(button);
-  };
-
-  const run = (type, payload, pendingText, describe) => {
-    const token = `${type}:${issue.issueId}`;
-    _pendingActions.add(token);
-    setBusy(true);
-    status.dataset.tone = 'busy';
-    status.textContent = pendingText;
-    const settle = (tone, text) => {
-      _pendingActions.delete(token);
-      setBusy(false);
-      status.dataset.tone = tone;
-      status.textContent = text;
-      armOutcomeHold();
-    };
-    sendControlRequest(type, { projectId, issueId: issue.issueId, ...payload })
-      .then((msg) => settle(msg.ok ? 'ok' : 'error', msg.ok ? describe(msg) : (msg.error || 'Request failed')))
-      .catch((err) => settle('error', err?.message || 'Request failed'));
   };
 
   const addButton = (label, title, onClick) => {
@@ -165,6 +148,43 @@ function buildIssueActions(issue, projectId) {
     wrap.append(button);
     return button;
   };
+
+  const request = (token, type, payload, pendingText, describe) => {
+    _pendingActions.add(token);
+    setBusy(true);
+    status.dataset.tone = 'busy';
+    status.textContent = pendingText;
+    const settle = (tone, text) => {
+      _pendingActions.delete(token);
+      setBusy(false);
+      status.dataset.tone = tone;
+      status.textContent = text;
+      armOutcomeHold();
+    };
+    sendControlRequest(type, payload)
+      .then((msg) => settle(msg.ok ? 'ok' : 'error', msg.ok ? describe(msg) : (msg.error || 'Request failed')))
+      .catch((err) => settle('error', err?.message || 'Request failed'));
+  };
+
+  // The status line trails the buttons, so it is appended last rather than at construction.
+  const finish = () => {
+    wrap.append(status);
+    return wrap;
+  };
+
+  return { addButton, request, permanentlyOff, finish };
+}
+
+function buildIssueActions(issue, projectId) {
+  const { addButton, request, permanentlyOff, finish } = createActionCluster();
+
+  const run = (type, payload, pendingText, describe) => request(
+    `${type}:${issue.issueId}`,
+    type,
+    { projectId, issueId: issue.issueId, ...payload },
+    pendingText,
+    describe,
+  );
 
   addButton('Open session', 'Paste an investigation prompt into the mapped project session', () => {
     run('posthog-open-session', {}, 'Opening session', (msg) => (
@@ -191,8 +211,7 @@ function buildIssueActions(issue, projectId) {
     run('posthog-issue-action', { action: 'suppress' }, 'Suppressing in PostHog', () => 'Marked suppressed');
   });
 
-  wrap.append(status);
-  return wrap;
+  return finish();
 }
 
 function buildIssueRow(issue, projectId) {
@@ -342,6 +361,78 @@ function buildErrorsSection(projects) {
   return section;
 }
 
+// ── Investigations inbox ─────────────────────────────────────
+// One row per completed, unarchived investigation. Deliberately independent of the Errors section: a
+// resolved issue's row is gone from there, and this is where its verdict survives. Quiet review
+// material by design, so it contributes nothing to the attention count.
+function buildInvestigationActions(row) {
+  const { addButton, request, finish } = createActionCluster();
+
+  if (row.issueId) {
+    addButton('Open report', 'Open the investigation report for this issue', () => {
+      openIssueReport({ issueId: row.issueId, title: row.title });
+    });
+  }
+  addButton('Archive', 'Remove this investigation from the inbox', () => {
+    request(
+      `archive:${row.id}`,
+      'posthog-archive-investigation',
+      { id: row.id },
+      'Archiving',
+      () => 'Archived',
+    );
+  });
+
+  return finish();
+}
+
+function buildInvestigationRow(row) {
+  const item = el('div', 'radar-investigation');
+
+  const verdict = el('span', 'radar-verdict', VERDICT_LABEL[row.verdict] || row.verdict.toLowerCase());
+  verdict.dataset.verdict = row.verdict;
+
+  // Titles and summaries come from a third-party service and a headless agent: text, never markup.
+  const title = row.url ? el('a', 'radar-issue-title') : el('span', 'radar-issue-title');
+  title.textContent = row.title;
+  title.title = row.title;
+  if (row.url) {
+    title.href = row.url;
+    title.target = '_blank';
+    title.rel = 'noopener';
+  }
+
+  const copy = el('span', 'radar-issue-copy');
+  copy.append(title);
+  if (row.summaryLine) {
+    const summary = el('span', 'radar-issue-summary');
+    summary.textContent = row.summaryLine;
+    copy.append(summary);
+  }
+
+  item.append(verdict, copy);
+  if (row.projectLabel) {
+    const project = el('span', 'radar-investigation-project');
+    project.textContent = row.projectLabel;
+    item.append(project);
+  }
+  if (row.at > 0) {
+    const when = el('span', 'radar-investigation-time', formatAgo(row.at));
+    when.title = new Date(row.at).toLocaleString();
+    item.append(when);
+  }
+  item.append(buildInvestigationActions(row));
+  return item;
+}
+
+function buildInvestigationsSection(rows) {
+  const section = buildSection('Investigations', 'completed, not yet archived');
+  const list = el('div', 'radar-investigations');
+  for (const row of rows) list.append(buildInvestigationRow(row));
+  section.append(list);
+  return section;
+}
+
 function buildOpsSection(rows) {
   const section = buildSection('Ops');
   const list = el('div', 'radar-ops');
@@ -405,15 +496,17 @@ function render() {
   _root.textContent = '';
   _pollTicker.reset();
   const projects = projectsOf(_latest);
+  const investigations = investigationRows(_latest);
   const ops = opsRows({ update: _update, health: _health });
   const prs = needsActionPrRows(_prs);
   // Nothing configured anywhere: the bare hint, with no section chrome to make an empty board look
   // like a broken one.
-  if (projects.length === 0 && ops.length === 0 && prs.length === 0) {
+  if (projects.length === 0 && investigations.length === 0 && ops.length === 0 && prs.length === 0) {
     _root.append(el('p', 'radar-unconfigured', UNCONFIGURED_TEXT));
     return;
   }
   _root.append(buildErrorsSection(projects));
+  if (investigations.length > 0) _root.append(buildInvestigationsSection(investigations));
   if (ops.length > 0) _root.append(buildOpsSection(ops));
   if (prs.length > 0) _root.append(buildPrsSection(prs));
 }

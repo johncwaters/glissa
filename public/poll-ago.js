@@ -5,7 +5,9 @@
 
 import { onSessionTick } from './session-card/session-tick.js';
 
-function formatAgo(ts) {
+// Also used directly for one-shot "X ago" labels that do not tick (the Radar investigations inbox),
+// so the two surfaces cannot word the same elapsed time two different ways.
+export function formatAgo(ts) {
   if (!Number.isFinite(ts)) return 'never';
   const seconds = Math.max(0, Math.round((Date.now() - ts) / 1000));
   if (seconds < 60) return `${seconds}s ago`;

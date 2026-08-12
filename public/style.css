@@ -2057,7 +2057,9 @@ a.radar-issue-title:hover {
 }
 
 .radar-issue:hover .radar-issue-actions,
-.radar-issue:focus-within .radar-issue-actions {
+.radar-issue:focus-within .radar-issue-actions,
+.radar-investigation:hover .radar-issue-actions,
+.radar-investigation:focus-within .radar-issue-actions {
   opacity: 1;
 }
 
@@ -2100,6 +2102,40 @@ a.radar-issue-title:hover {
 .radar-empty {
   color: var(--text-muted);
   font-size: 11px;
+}
+
+/* Investigations inbox. Same row rhythm as .radar-issue so the board reads as one column, but with
+   the verdict chip leading instead of a severity stripe: an archived-or-not record carries no live
+   severity, only what the investigation concluded. */
+.radar-investigations {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.radar-investigation {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 3px 0;
+}
+
+.radar-investigation-project {
+  flex: 0 0 auto;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.radar-investigation-time {
+  flex: 0 0 auto;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
 }
 
 /* Sections (Errors / Ops / Pull requests). One heading rhythm above the existing project heads, so a

@@ -34,6 +34,17 @@ const ISSUE_ACTION_STATUS = Object.freeze({
 // conservative charset the report route enforces (server/posthog-report.js).
 const ISSUE_ID_RE = /^[A-Za-z0-9_-]{1,128}$/;
 
+// The investigations inbox. Every completed investigation appends one record to a plain array parked
+// under a single underscore key in the state file, so an older server (which iterates issue keys and
+// skips anything starting with '_') loads a newer file unharmed and vice versa.
+const INVESTIGATIONS_KEY = '_investigations';
+// Newest-N, oldest dropped. The inbox is review material, not an audit trail: an operator who has not
+// looked in fifty investigations is not going to read the fifty-first from the bottom.
+const INVESTIGATION_LOG_CAP = 50;
+// `<scrubbed issue id>@<ms timestamp>`. Unique per completion, so a re-investigation of the same issue
+// appends a second record instead of overwriting the first.
+const INVESTIGATION_ID_RE = /^[A-Za-z0-9_.-]{1,128}@\d{1,20}$/;
+
 // Every C0/C1 control character plus DEL, built from char codes because the house style forbids
 // literal control bytes in source. Used to flatten API text before it rides a bracketed paste.
 const CONTROL_CHARS_RE = new RegExp(
@@ -208,6 +219,85 @@ function nextState(prevEntry, current, verdictInfo = {}) {
   return entry;
 }
 
+// ── Investigations inbox ─────────────────────────────────────
+// An issue row disappears the moment the issue is resolved (in PostHog or from a Radar action), and
+// TRANSIENT/ROOT_CAUSE verdicts never ping by design, so an operator who was not watching had no way
+// to learn an investigation ever ran. The log is that record: append-only, capped, archived by hand.
+
+function stampOf(at) {
+  return Math.max(0, Math.trunc(toCount(at, 0)));
+}
+
+/** Deterministic record id. The timestamp is passed in, never read from a clock. */
+function investigationId(issueId, at) {
+  const safeId = String(issueId ?? '').replace(/[^\w.-]+/g, '-').slice(0, 128) || 'unknown';
+  return `${safeId}@${stampOf(at)}`;
+}
+
+function normalizeInvestigations(log) {
+  if (!Array.isArray(log)) return [];
+  return log.filter((record) => record && typeof record === 'object' && typeof record.id === 'string' && record.id);
+}
+
+/**
+ * One inbox record for a completed investigation. Title and summary are display surfaces flattened
+ * and capped exactly as the Telegram path flattens them: both are attacker-influenced free text.
+ */
+function buildInvestigationRecord({
+  key, projectId, projectName, host, issueId, title, url, verdict, summaryLine, at,
+} = {}) {
+  const stamp = stampOf(at);
+  return {
+    id: investigationId(issueId, stamp),
+    key: String(key ?? ''),
+    projectId: projectId ?? null,
+    projectName: String(projectName ?? ''),
+    host: String(host ?? ''),
+    issueId: String(issueId ?? ''),
+    title: displayTitle(title),
+    url: String(url ?? ''),
+    verdict: String(verdict || 'ERROR').toUpperCase(),
+    summaryLine: summaryLineFromReportText(summaryLine),
+    at: stamp,
+    archived: false,
+  };
+}
+
+/** Append one record and drop the oldest past the cap. Returns a new array; input is not mutated. */
+function appendInvestigation(log, record, opts = {}) {
+  const cap = opts.cap ?? INVESTIGATION_LOG_CAP;
+  const next = [...normalizeInvestigations(log), record];
+  return next.slice(Math.max(0, next.length - cap));
+}
+
+/**
+ * Mark one record archived. Idempotent (archiving an archived record is still ok); an id no record
+ * carries is an error, so the dashboard can say so instead of silently doing nothing.
+ */
+function markInvestigationArchived(log, id) {
+  const wanted = String(id ?? '');
+  const kept = normalizeInvestigations(log);
+  if (!kept.some((record) => record.id === wanted)) {
+    return { ok: false, error: 'Unknown investigation', log: kept };
+  }
+  return { ok: true, log: kept.map((record) => (record.id === wanted ? { ...record, archived: true } : record)) };
+}
+
+/** What the dashboard sees: unarchived only, newest first. */
+function unarchivedInvestigations(log) {
+  return normalizeInvestigations(log)
+    .filter((record) => record.archived !== true)
+    .sort((a, b) => toCount(b.at, 0) - toCount(a.at, 0));
+}
+
+/** Shape check for the archive control message, before the id is matched against the log. */
+function validateInvestigationId(id) {
+  const value = String(id ?? '').trim();
+  if (!value) return { ok: false, error: 'id is required' };
+  if (!INVESTIGATION_ID_RE.test(value)) return { ok: false, error: 'Invalid investigation id' };
+  return { ok: true, id: value };
+}
+
 /**
  * What to do with a tracked entry whose issue is absent from this tick's active list.
  *
@@ -356,10 +446,18 @@ module.exports = {
   summaryLineFromReportText,
   validateIssueRef,
   decideIssueAction,
+  investigationId,
+  buildInvestigationRecord,
+  appendInvestigation,
+  markInvestigationArchived,
+  unarchivedInvestigations,
+  validateInvestigationId,
   resolveIssueProject,
   scrubForPaste,
   buildIssueSessionPrompt,
   ISSUE_ACTION_STATUS,
+  INVESTIGATIONS_KEY,
+  INVESTIGATION_LOG_CAP,
   DEFAULT_USER_ESCALATION_THRESHOLD,
   DEFAULT_MIN_USERS_TO_INVESTIGATE,
   DEFAULT_ENTRY_RETENTION_DAYS,

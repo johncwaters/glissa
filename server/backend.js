@@ -1336,6 +1336,8 @@ function createBackend(httpServer, options = {}) {
     // Per-issue Radar actions: the one PostHog write (resolve/suppress) and a manual re-investigation.
     posthogSetIssueStatus: (args) => posthog.setIssueStatus(args),
     posthogReinvestigate: (args) => posthog.reinvestigateIssue(args),
+    // Investigations inbox: archive one completed record (cached-status patch + rebroadcast).
+    posthogArchiveInvestigation: (args) => posthog.archiveInvestigation(args),
     // Same for the PR auto-review lane.
     getPrStatus: () => prReview.getStatus(),
     registry,
