@@ -11,9 +11,11 @@ import { createPosthogReportDialog } from './dialogs.js';
 import { sendControlRequest } from './control-ws.js';
 import { createPollAgoTicker, formatAgo } from './poll-ago.js';
 import { phaseLabel } from './pr-view-core.mjs';
+import { createRenderHold } from './radar-hold-core.mjs';
 import {
   healthAnomalyRows,
   investigationRows,
+  retainKnownInvestigationIds,
   needsActionPrRows,
   opsRows,
   radarAttentionCount,
@@ -34,33 +36,22 @@ let _prs = null;
 let _root = null;
 let _activityCallback = null;
 let _navigateToPrs = null;
-// Rows are rebuilt wholesale on every posthog-status broadcast, and two of the three row actions
-// force an immediate tick. Re-rendering mid-request would drop the in-flight disable (inviting a
-// double fire) and wipe the outcome line the operator has not read yet, so a broadcast arriving while
-// any action is outstanding is held and applied once they all settle.
-const _pendingActions = new Set();
-let _renderDeferred = false;
-let _deferredRenderTimer = null;
-// How long a settled action's outcome line survives before the held broadcast repaints the rows. Long
-// enough to read one short line, short enough that the board is never meaningfully stale.
-const OUTCOME_READ_MS = 4000;
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
-const _pollTicker = createPollAgoTicker(() => _root);
+// Rows are rebuilt wholesale on every broadcast and a row action's outcome line lives inside a row,
+// so a broadcast landing mid-request is held (see radar-hold-core.mjs for the whole state machine and
+// why it owns its own timer).
+const _hold = createRenderHold({ render: () => render() });
 
-// Armed when an action settles: the forced tick it triggered lands within a second or two, and a
-// repaint the instant the outcome line appears would leave the operator with no feedback at all.
-function armOutcomeHold() {
-  if (_deferredRenderTimer !== null) return;
-  _deferredRenderTimer = setTimeout(() => {
-    _deferredRenderTimer = null;
-    // Another action started inside the window; its own settle re-arms the hold.
-    if (_pendingActions.size > 0) return;
-    if (!_renderDeferred) return;
-    _renderDeferred = false;
-    render();
-  }, OUTCOME_READ_MS);
-}
+// Records the operator archived in THIS page session. The server drops an archived record from the
+// next payload, so this set is normally redundant - but it is the one thing that does not depend on
+// a broadcast arriving, in the right order, and winning the render-hold race. A row the operator
+// dismissed must not be able to come back from a snapshot, and the connect-time replay of a cached
+// posthog-status can hand a reconnecting tab exactly that. Pruned on every snapshot that no longer
+// carries the record, so it cannot grow for the life of the page.
+const _archivedLocally = new Set();
+
+const _pollTicker = createPollAgoTicker(() => _root);
 
 const CHANGE_LABEL = {
   spiking: 'spiking',
@@ -150,20 +141,30 @@ function createActionCluster() {
     return button;
   };
 
-  const request = (token, type, payload, pendingText, describe) => {
-    _pendingActions.add(token);
+  // `onOk` is the seam for a request whose success the panel must remember beyond the reply (the
+  // archive: see _archivedLocally). It runs before the outcome line is written, so the repaint the
+  // hold releases already sees it.
+  const request = (token, type, payload, pendingText, describe, onOk = null) => {
+    _hold.begin(token);
     setBusy(true);
     status.dataset.tone = 'busy';
     status.textContent = pendingText;
     const settle = (tone, text) => {
-      _pendingActions.delete(token);
       setBusy(false);
       status.dataset.tone = tone;
       status.textContent = text;
-      armOutcomeHold();
+      _hold.settle(token);
+    };
+    const resolved = (msg) => {
+      if (!msg.ok) {
+        settle('error', msg.error || 'Request failed');
+        return;
+      }
+      if (onOk) onOk(msg);
+      settle('ok', describe(msg));
     };
     sendControlRequest(type, payload)
-      .then((msg) => settle(msg.ok ? 'ok' : 'error', msg.ok ? describe(msg) : (msg.error || 'Request failed')))
+      .then(resolved)
       .catch((err) => settle('error', err?.message || 'Request failed'));
   };
 
@@ -375,6 +376,7 @@ function buildInvestigationActions(row) {
       { id: row.id },
       'Archiving',
       () => 'Archived',
+      () => _archivedLocally.add(row.id),
     );
   });
 
@@ -491,7 +493,7 @@ function render() {
   _root.textContent = '';
   _pollTicker.reset();
   const projects = projectsOf(_latest);
-  const investigations = investigationRows(_latest);
+  const investigations = investigationRows(_latest, _archivedLocally);
   const ops = opsRows({ update: _update, health: _health });
   const prs = needsActionPrRows(_prs);
   // Nothing configured anywhere: the bare hint, with no section chrome to make an empty board look
@@ -506,15 +508,10 @@ function render() {
   if (prs.length > 0) _root.append(buildPrsSection(prs));
 }
 
-// Every feed repaints through here, so an in-flight per-issue action still holds the board (see
-// _pendingActions): a health snapshot landing mid-request must not wipe an outcome line either.
+// Every feed repaints through here, so an in-flight per-issue action still holds the board: a health
+// snapshot landing mid-request must not wipe an outcome line either.
 function renderOrDefer() {
-  const actionInProgress = _pendingActions.size > 0 || _deferredRenderTimer !== null;
-  if (actionInProgress) {
-    _renderDeferred = true;
-    return;
-  }
-  render();
+  _hold.request();
 }
 
 function refreshActivity() {
@@ -548,6 +545,9 @@ export function mountRadarView(parent) {
 
 export function applyPosthogStatus(msg) {
   _latest = msg;
+  // Forget the ids this payload no longer carries: the server has confirmed the archive, so the
+  // local guard has nothing left to guard and the set stays bounded.
+  retainKnownInvestigationIds(msg, _archivedLocally);
   renderOrDefer();
   refreshActivity();
 }

@@ -4620,11 +4620,103 @@ html[data-layout="phone"] .review-sidebar-body { overscroll-behavior: contain; }
 .phone-teams > .teams-view { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 .phone-radar > .radar-view,
 .phone-prs > .pr-view { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
-/* An issue row is one line of data plus four controls: on a phone that only fits if the controls drop
-   to their own line, and there is no hover to reveal them with. */
-html[data-layout="phone"] .radar-issue { flex-wrap: wrap; }
-html[data-layout="phone"] .radar-issue-actions { opacity: 1; flex-basis: 100%; flex-wrap: wrap; }
-html[data-layout="phone"] .radar-issue-action { padding: 4px 8px; }
+/* ── Radar on a phone ──
+   The desktop board is deliberately dense: one line per issue, controls at 35% opacity until the row
+   is hovered. Neither half survives touch. There is no hover to reveal a control with, and a row of
+   eight inline parts cannot fit a phone without squeezing the title to nothing or overflowing the
+   screen sideways. Every rule below does one of two things: turn a row into a small stack (identity
+   line, then metadata, then controls) or grow a control to a thumb-sized target. */
+html[data-layout="phone"] .radar-view {
+  padding: 14px 12px 24px;
+  font-size: 13px;
+}
+html[data-layout="phone"] .radar-content { gap: 22px; }
+html[data-layout="phone"] .radar-section { gap: 10px; }
+html[data-layout="phone"] .radar-section-head { flex-wrap: wrap; gap: 2px 8px; }
+html[data-layout="phone"] .radar-section-title { font-size: 12px; }
+html[data-layout="phone"] .radar-project { padding: 12px; }
+/* The project head and its stat row are short facts, not a table: wrapping keeps the poll time on
+   screen instead of pushing it past the right edge. */
+html[data-layout="phone"] .radar-project-head { flex-wrap: wrap; gap: 2px 10px; }
+html[data-layout="phone"] .radar-project-host { flex: 1 1 100%; }
+html[data-layout="phone"] .radar-project-summary { flex-wrap: wrap; gap: 6px 14px; margin-bottom: 8px; }
+
+/* Rows become cards-without-chrome: a hairline between them replaces the 2px gap, because a stacked
+   row needs a visible boundary to read as one item. */
+html[data-layout="phone"] .radar-issues,
+html[data-layout="phone"] .radar-investigations { gap: 0; }
+html[data-layout="phone"] .radar-issue,
+html[data-layout="phone"] .radar-investigation {
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border-dim);
+}
+html[data-layout="phone"] .radar-issue:last-child,
+html[data-layout="phone"] .radar-investigation:last-child { border-bottom: none; }
+
+/* The one measurement that shapes the stack. Its basis leaves room for the leading chip (the change
+   label on an issue row, the verdict on an inbox row) and nothing else, so the identity line is
+   always "chip + title" and every remaining part wraps to the metadata line under it. */
+html[data-layout="phone"] .radar-issue-copy { flex: 1 1 calc(100% - 100px); }
+/* Titles are error messages. One clipped line tells the operator almost nothing on a narrow screen,
+   so they wrap to a bounded two lines instead of ending in an ellipsis. */
+html[data-layout="phone"] .radar-issue-title,
+html[data-layout="phone"] .radar-issue-summary {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+html[data-layout="phone"] .radar-issue-summary { font-size: 11px; }
+
+/* Decoration, not data: it must never be the reason a row scrolls sideways. */
+html[data-layout="phone"] .radar-sparkline { width: 48px; opacity: 0.6; }
+
+/* Always visible (there is no hover on touch) and thumb-sized. */
+html[data-layout="phone"] .radar-issue-actions {
+  opacity: 1;
+  flex-basis: 100%;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+html[data-layout="phone"] .radar-issue-action {
+  min-height: 44px;
+  padding: 0 12px;
+  font-size: 11px;
+}
+/* The outcome line keeps a reserved strip whether or not it holds text, so a settling action never
+   reflows the rows under it. */
+html[data-layout="phone"] .radar-issue-action-status {
+  flex: 1 1 100%;
+  max-width: 100%;
+  min-height: 15px;
+  white-space: normal;
+  overflow: visible;
+}
+
+/* Ops and PR rows carry the same one-line-or-overflow problem, with a fixed-width phase column. */
+html[data-layout="phone"] .radar-ops-row,
+html[data-layout="phone"] .radar-pr-row {
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  padding: 10px;
+  min-height: 44px;
+}
+html[data-layout="phone"] .radar-ops-text {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  flex: 1 1 calc(100% - 30px);
+}
+html[data-layout="phone"] .radar-ops-detail {
+  flex: 1 1 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+html[data-layout="phone"] .radar-pr-title { flex: 1 1 calc(100% - 130px); }
 
 /* ── Empty states ── */
 .phone-empty { margin: auto; padding: 24px; text-align: center; color: var(--text-dim); }

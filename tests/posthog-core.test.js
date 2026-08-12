@@ -433,10 +433,14 @@ const {
   buildInvestigationRecord,
   appendInvestigation,
   markInvestigationArchived,
+  pruneInvestigations,
   unarchivedInvestigations,
   validateInvestigationId,
   INVESTIGATION_LOG_CAP,
+  DEFAULT_ARCHIVED_RETENTION_DAYS,
 } = require('../server/core/posthog-core');
+
+const ARCHIVED_RETENTION_MS = DEFAULT_ARCHIVED_RETENTION_DAYS * 86400000;
 
 const RECORD_ARGS = {
   key: 'ph.test/1#iss-1',
@@ -511,10 +515,12 @@ test('markInvestigationArchived flips one record, is idempotent, and refuses an 
   const second = buildInvestigationRecord({ ...RECORD_ARGS, issueId: 'iss-2', at: 200 });
   const log = appendInvestigation(appendInvestigation([], first), second);
 
-  const once = markInvestigationArchived(log, 'iss-1@100');
+  const once = markInvestigationArchived(log, 'iss-1@100', 5000);
   assert.equal(once.ok, true);
   assert.equal(once.log[0].archived, true);
+  assert.equal(once.log[0].archivedAt, 5000, 'the archive time is stamped, not the completion time');
   assert.equal(once.log[1].archived, false, 'only the named record moved');
+  assert.equal(once.log[1].archivedAt, undefined);
   assert.equal(log[0].archived, false, 'the input log is not mutated');
 
   const twice = markInvestigationArchived(once.log, 'iss-1@100');
@@ -534,6 +540,46 @@ test('unarchivedInvestigations returns unarchived only, newest first', () => {
   ];
   assert.deepEqual(unarchivedInvestigations(log).map((r) => r.issueId), ['new', 'old']);
   assert.deepEqual(unarchivedInvestigations(undefined), []);
+});
+
+test('pruneInvestigations drops archived records at the retention boundary and never unarchived ones', () => {
+  const now = 10 * ARCHIVED_RETENTION_MS;
+  const archivedAt = (stamp) => ({
+    ...buildInvestigationRecord({ ...RECORD_ARGS, issueId: `iss-${stamp}`, at: 1 }),
+    id: `iss-${stamp}@1`,
+    archived: true,
+    archivedAt: stamp,
+  });
+  const justInside = archivedAt(now - ARCHIVED_RETENTION_MS + 1);
+  const exactlyAtTheBoundary = archivedAt(now - ARCHIVED_RETENTION_MS);
+  const wellPast = archivedAt(now - (ARCHIVED_RETENTION_MS * 3));
+  const live = buildInvestigationRecord({ ...RECORD_ARGS, issueId: 'live', at: 1 });
+
+  const kept = pruneInvestigations([justInside, exactlyAtTheBoundary, wellPast, live], now);
+  assert.deepEqual(kept.map((r) => r.id), [justInside.id, live.id], 'age >= the window is dropped');
+  assert.equal(live.archived, false, 'an unarchived record survives regardless of how old it is');
+});
+
+test('pruneInvestigations ages a record without archivedAt from its completion time', () => {
+  const now = 10 * ARCHIVED_RETENTION_MS;
+  const legacy = (at) => {
+    const record = { ...buildInvestigationRecord({ ...RECORD_ARGS, issueId: 'legacy', at }), archived: true };
+    delete record.archivedAt;
+    return record;
+  };
+  const fresh = legacy(now - 1000);
+  const stale = legacy(now - ARCHIVED_RETENTION_MS - 1000);
+  assert.deepEqual(pruneInvestigations([fresh], now).length, 1, 'a recent pre-stamp record is tolerated');
+  assert.deepEqual(pruneInvestigations([stale], now).length, 0, 'and an old one still ages out');
+});
+
+test('pruneInvestigations honours an overridden window and does not mutate the input', () => {
+  const record = { ...buildInvestigationRecord(RECORD_ARGS), archived: true, archivedAt: 1000 };
+  const log = [record];
+  assert.equal(pruneInvestigations(log, 1000 + 86400000, { archivedRetentionDays: 2 }).length, 1);
+  assert.equal(pruneInvestigations(log, 1000 + (2 * 86400000), { archivedRetentionDays: 2 }).length, 0);
+  assert.equal(log.length, 1, 'input untouched');
+  assert.deepEqual(pruneInvestigations(undefined, 1000), []);
 });
 
 test('validateInvestigationId enforces the id shape', () => {

@@ -623,6 +623,74 @@ test('archiveInvestigation hides one record, persists it, and is idempotent', as
   assert.deepEqual(poller.investigations(), []);
 });
 
+test('archiveInvestigation stamps archivedAt so the record ages from the operator action', async () => {
+  let clock = 1000;
+  const { poller, stateStore } = harness({
+    spawnInvestigation: async () => ({ verdict: 'ROOT_CAUSE' }),
+    now: () => clock,
+  });
+  await poller.start();
+  await flush();
+
+  clock = 777000;
+  await poller.archiveInvestigation('iss-1@1000');
+  await flush();
+  assert.equal(stateStore.value._investigations[0].archivedAt, 777000);
+});
+
+test('the 7-day purge runs on state load and on the tick persist, and spares unarchived records', async () => {
+  const day = 86400000;
+  const bootAt = 100 * day;
+  const record = (id, over = {}) => ({
+    id, key: KEY, projectId: 1, projectName: 'web', host: HOST, issueId: 'iss-1',
+    title: 'boom', url: '', verdict: 'ROOT_CAUSE', summaryLine: null, at: 1, archived: false, ...over,
+  });
+  const { poller, stateStore } = harness({
+    initialState: {
+      _investigations: [
+        record('stale@1', { archived: true, archivedAt: bootAt - (8 * day) }),
+        record('recent@2', { archived: true, archivedAt: bootAt - day }),
+        // Archived by a deploy that predates the archivedAt stamp: aged from `at` instead.
+        record('legacy@3', { archived: true, at: bootAt - (9 * day) }),
+        record('live@4', { at: 1 }),
+      ],
+    },
+    now: () => bootAt,
+  });
+  await poller.start();
+  await flush();
+
+  const ids = stateStore.value._investigations.map((r) => r.id);
+  assert.ok(!ids.includes('stale@1'), 'an archived record past the window is gone from the file');
+  assert.ok(!ids.includes('legacy@3'), 'and so is one with no archivedAt but an old completion time');
+  assert.ok(ids.includes('recent@2'), 'a recently archived record is kept');
+  assert.ok(ids.includes('live@4'), 'an unarchived record is never purged by age');
+});
+
+test('a purge on an otherwise clean tick still persists', async () => {
+  const day = 86400000;
+  let clock = 1000;
+  const { poller, stateStore } = harness({
+    initialState: {
+      _investigations: [{
+        id: 'old@1', key: KEY, projectId: 1, projectName: 'web', host: HOST, issueId: 'iss-1',
+        title: 'boom', url: '', verdict: 'ROOT_CAUSE', summaryLine: null, at: 1,
+        archived: true, archivedAt: 1000,
+      }],
+    },
+    api: { queryIssues: async () => ({ ok: false, error: 'down' }) },
+    now: () => clock,
+  });
+  await poller.start();
+  await flush();
+  assert.equal(stateStore.value._investigations.length, 1, 'still inside the window at boot');
+
+  clock = 1000 + (8 * day);
+  await poller.tick();
+  await flush();
+  assert.deepEqual(stateStore.value._investigations, [], 'the tick persisted the purge with no other change');
+});
+
 test('archiveInvestigation refuses an unknown or malformed id', async () => {
   const { poller } = harness({ now: () => 1000 });
   await poller.start();

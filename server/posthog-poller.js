@@ -67,6 +67,7 @@ function createPosthogPoller(deps) {
   const userEscalationThreshold = deps.userEscalationThreshold ?? core.DEFAULT_USER_ESCALATION_THRESHOLD;
   const dateRangeHours = deps.dateRangeHours || 24;
   const entryRetentionDays = deps.entryRetentionDays ?? core.DEFAULT_ENTRY_RETENTION_DAYS;
+  const archivedRetentionDays = deps.archivedRetentionDays ?? core.DEFAULT_ARCHIVED_RETENTION_DAYS;
 
   let state = {};
   let timer = null;
@@ -184,6 +185,21 @@ function createPosthogPoller(deps) {
   }
 
   /*
+   * Drop archived records past the retention window. Runs at the two seams that already touch the
+   * log - the state load and each tick, just before its persist - so the cleanup needs no timer of
+   * its own and rides the write that was happening anyway. Returns whether anything went, so the
+   * tick can persist a purge that happened on an otherwise clean cycle.
+   */
+  function pruneInvestigationLog() {
+    const log = state[core.INVESTIGATIONS_KEY];
+    if (!Array.isArray(log) || log.length === 0) return false;
+    const pruned = core.pruneInvestigations(log, now(), { archivedRetentionDays });
+    if (pruned.length === log.length) return false;
+    state[core.INVESTIGATIONS_KEY] = pruned;
+    return true;
+  }
+
+  /*
    * Operator-driven archive of one inbox record. Purely a state edit: nothing is polled, nothing is
    * written to PostHog, and the record stays in the log (archived) rather than being deleted, so the
    * cap keeps behaving as a plain newest-N window.
@@ -191,7 +207,7 @@ function createPosthogPoller(deps) {
   async function archiveInvestigation(id) {
     const ref = core.validateInvestigationId(id);
     if (!ref.ok) return { ok: false, error: ref.error };
-    const res = core.markInvestigationArchived(state[core.INVESTIGATIONS_KEY], ref.id);
+    const res = core.markInvestigationArchived(state[core.INVESTIGATIONS_KEY], ref.id, now());
     if (!res.ok) return { ok: false, error: res.error };
     state[core.INVESTIGATIONS_KEY] = res.log;
     await persist();
@@ -364,6 +380,7 @@ function createPosthogPoller(deps) {
         if (res.dirty) dirty = true;
         summaries.push(res.summary);
       }
+      if (pruneInvestigationLog()) dirty = true;
       if (dirty) await persist();
       onTickComplete({
         type: 'posthog-status',
@@ -409,6 +426,7 @@ function createPosthogPoller(deps) {
       if (!isIssueKey(key)) continue;
       if (state[key]) state[key].inFlight = false;
     }
+    pruneInvestigationLog();
     await tick();
     timer = setIntervalFn(() => { void tick(); }, intervalMinutes * 60000);
     if (timer && typeof timer.unref === 'function') timer.unref();

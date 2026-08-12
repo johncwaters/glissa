@@ -333,6 +333,40 @@ test('investigationRows: drops archived records and orders newest first', async 
   assert.deepEqual(rows.map((row) => row.id), ['c@300', 'a@100']);
 });
 
+test('investigationRows: a locally archived id stays gone even when the payload still carries it', async () => {
+  const { investigationRows } = await importCore();
+  // Exactly the shape a cached/replayed snapshot has: the server built it before the archive, so the
+  // record is present and unarchived. The row must not come back.
+  const snapshot = {
+    investigations: [
+      investigationRecord({ id: 'a@100', at: 100 }),
+      investigationRecord({ id: 'b@200', at: 200 }),
+    ],
+  };
+  assert.deepEqual(investigationRows(snapshot, new Set(['b@200'])).map((row) => row.id), ['a@100']);
+  assert.deepEqual(investigationRows(snapshot, new Set()).map((row) => row.id), ['b@200', 'a@100']);
+  assert.deepEqual(investigationRows(snapshot).map((row) => row.id), ['b@200', 'a@100'], 'the argument is optional');
+});
+
+test('retainKnownInvestigationIds: forgets an id the payload no longer carries', async () => {
+  const { retainKnownInvestigationIds } = await importCore();
+  const ids = new Set(['a@100', 'b@200']);
+  retainKnownInvestigationIds({ investigations: [investigationRecord({ id: 'a@100' })] }, ids);
+  assert.deepEqual([...ids], ['a@100'], 'the server confirmed b, so the local guard drops it');
+
+  retainKnownInvestigationIds({ investigations: [] }, ids);
+  assert.deepEqual([...ids], [], 'the set can never grow for the life of the page');
+  assert.doesNotThrow(() => retainKnownInvestigationIds(null, ids));
+  assert.doesNotThrow(() => retainKnownInvestigationIds({ investigations: 'nope' }, new Set(['x'])));
+});
+
+test('retainKnownInvestigationIds: an archived-but-still-sent record keeps its guard', async () => {
+  const { retainKnownInvestigationIds } = await importCore();
+  const ids = new Set(['a@100']);
+  retainKnownInvestigationIds({ investigations: [investigationRecord({ id: 'a@100', archived: true })] }, ids);
+  assert.deepEqual([...ids], ['a@100'], 'still on the wire, so the guard is still load-bearing');
+});
+
 test('investigationRows: normalizes one record into a renderable row', async () => {
   const { investigationRows } = await importCore();
   const [row] = investigationRows({ investigations: [investigationRecord({ verdict: 'needs_human' })] });

@@ -41,6 +41,9 @@ const INVESTIGATIONS_KEY = '_investigations';
 // Newest-N, oldest dropped. The inbox is review material, not an audit trail: an operator who has not
 // looked in fifty investigations is not going to read the fifty-first from the bottom.
 const INVESTIGATION_LOG_CAP = 50;
+// How long an ARCHIVED record survives in the log before pruneInvestigations drops it entirely. An
+// archived record is already invisible to the dashboard, so past this window it is pure file bloat.
+const DEFAULT_ARCHIVED_RETENTION_DAYS = 7;
 // `<scrubbed issue id>@<ms timestamp>`. Unique per completion, so a re-investigation of the same issue
 // appends a second record instead of overwriting the first.
 const INVESTIGATION_ID_RE = /^[A-Za-z0-9_.-]{1,128}@\d{1,20}$/;
@@ -266,16 +269,42 @@ function appendInvestigation(log, record, opts = {}) {
 }
 
 /**
- * Mark one record archived. Idempotent (archiving an archived record is still ok); an id no record
- * carries is an error, so the dashboard can say so instead of silently doing nothing.
+ * Mark one record archived, stamping WHEN it was archived so pruneInvestigations can age it from the
+ * operator's action rather than from when the investigation happened. Idempotent (archiving an
+ * archived record is still ok, and re-stamps it); an id no record carries is an error, so the
+ * dashboard can say so instead of silently doing nothing.
  */
-function markInvestigationArchived(log, id) {
+function markInvestigationArchived(log, id, at) {
   const wanted = String(id ?? '');
   const kept = normalizeInvestigations(log);
   if (!kept.some((record) => record.id === wanted)) {
     return { ok: false, error: 'Unknown investigation', log: kept };
   }
-  return { ok: true, log: kept.map((record) => (record.id === wanted ? { ...record, archived: true } : record)) };
+  const archivedAt = stampOf(at);
+  return {
+    ok: true,
+    log: kept.map((record) => (record.id === wanted ? { ...record, archived: true, archivedAt } : record)),
+  };
+}
+
+/**
+ * Drop archived records past the retention window, so the log does not grow a permanent tail of
+ * things the operator already dismissed.
+ *
+ * Age is measured from `archivedAt` (when the operator archived it), falling back to `at` (when the
+ * investigation completed) for records archived by a deploy that predates that stamp. UNARCHIVED
+ * records are never dropped by age: the inbox is a review queue, not a buffer, and the newest-N cap
+ * already bounds it. Returns a new array; the input is not mutated.
+ */
+function pruneInvestigations(log, nowMs, opts = {}) {
+  const days = opts.archivedRetentionDays ?? DEFAULT_ARCHIVED_RETENTION_DAYS;
+  const maxAgeMs = days * 86400000;
+  const now = toCount(nowMs, 0);
+  return normalizeInvestigations(log).filter((record) => {
+    if (record.archived !== true) return true;
+    const archivedAt = toCount(record.archivedAt, 0) || toCount(record.at, 0);
+    return now - archivedAt < maxAgeMs;
+  });
 }
 
 /** What the dashboard sees: unarchived only, newest first. */
@@ -445,6 +474,7 @@ module.exports = {
   buildInvestigationRecord,
   appendInvestigation,
   markInvestigationArchived,
+  pruneInvestigations,
   unarchivedInvestigations,
   validateInvestigationId,
   resolveIssueProject,
@@ -453,6 +483,7 @@ module.exports = {
   ISSUE_ACTION_STATUS,
   INVESTIGATIONS_KEY,
   INVESTIGATION_LOG_CAP,
+  DEFAULT_ARCHIVED_RETENTION_DAYS,
   DEFAULT_USER_ESCALATION_THRESHOLD,
   DEFAULT_MIN_USERS_TO_INVESTIGATE,
   DEFAULT_ENTRY_RETENTION_DAYS,
