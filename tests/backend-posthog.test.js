@@ -184,6 +184,15 @@ test('buildInvestigationPrompt forbids every PostHog write and every repo write 
   assert.match(p, /Do not commit, push, or open a pull request/);
 });
 
+test('buildInvestigationPrompt pins the terse report style and applies it to the report step', () => {
+  const p = promptFor();
+  assert.match(p, /Report style:/);
+  assert.match(p, /No filler, no hedging, no preamble/);
+  assert.match(p, /Lead every section with its conclusion/);
+  assert.match(p, /read in under a minute/);
+  assert.match(p, /Write every section in the report style above/);
+});
+
 test('buildInvestigationPrompt lists the three allowed verdicts', () => {
   const p = promptFor();
   assert.match(p, /ROOT_CAUSE\|NEEDS_HUMAN\|TRANSIENT/);

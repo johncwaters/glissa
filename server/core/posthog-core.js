@@ -453,6 +453,9 @@ function buildIssueSessionPrompt({ issue, projectName, host, url } = {}) {
     '',
     'Find the root cause in this repository: locate the failing code path from the error text, work out',
     'under what input or conditions it breaks, and report what you found before changing anything.',
+    '',
+    'Report tersely: lead with the conclusion, short declarative sentences, every claim anchored to a',
+    'file and line, no filler and no preamble.',
   );
   return lines.join('\n');
 }

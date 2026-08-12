@@ -418,6 +418,12 @@ test('buildIssueSessionPrompt includes a prior verdict and summary only when pre
   assert.match(withVerdict, /earlier automated summary: race in the retry path/);
 });
 
+test('buildIssueSessionPrompt asks for a terse conclusion-first report', () => {
+  const prompt = buildIssueSessionPrompt({ issue: SESSION_ISSUE, projectName: 'web' });
+  assert.match(prompt, /Report tersely: lead with the conclusion/);
+  assert.match(prompt, /no filler and no preamble/);
+});
+
 test('buildIssueSessionPrompt is deterministic and survives a missing issue', () => {
   const args = { issue: SESSION_ISSUE, projectName: 'web', host: 'https://ph.test', url: 'u' };
   assert.equal(buildIssueSessionPrompt(args), buildIssueSessionPrompt(args));
