@@ -21,11 +21,13 @@ systemctl --user restart glissa
 
 ## Standalone CLI
 
-For a machine that only needs the `glissa` command:
+For a machine that only needs the `glissa` command (npm 12 or newer required):
 
 ```bash
-npm install -g github:johncwaters/glissa
+npm install -g github:johncwaters/glissa --allow-git=root
 ```
+
+On an older npm, run it through npm 12 instead: `npx npm@12 install -g github:johncwaters/glissa --allow-git=root`. The floor is hard: npm 11 global installs from git specs land as a link into npm's cache temp clone, which npm then deletes (npm/cli#9406, fixed by pacote 22 which ships in npm 12). The `--allow-git=root` flag is npm 12's opt-in for git dependencies, scoped to the root package. npm 12 skips install scripts by default and warns about it; harmless here, since `prepare` builds `dist/` during packing and node-pty runs from its shipped prebuilds.
 
 npm packs the repo before installing from a GitHub spec, so `package.json`'s `files` whitelist still bounds exactly what lands in the install.
 

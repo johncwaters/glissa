@@ -23,9 +23,19 @@ My own always-on machines are provisioned by the [`claude-setup`](https://github
 
 ### Standalone CLI
 
+Requires npm 12 or newer (`npm --version` to check). npm 12 refuses git dependencies by default, so the install carries an explicit opt-in flag:
+
 ```bash
-npm install -g github:johncwaters/glissa
+npm install -g github:johncwaters/glissa --allow-git=root
 ```
+
+On an older npm, run the same install through npm 12 without upgrading:
+
+```bash
+npx npm@12 install -g github:johncwaters/glissa --allow-git=root
+```
+
+The npm 12 floor is hard, not advisory: npm 11 global installs from git specs are broken outright ([npm/cli#9406](https://github.com/npm/cli/issues/9406), the package lands as a link into npm's cache temp clone, which npm then deletes). npm 12 also skips the packages' install scripts by default and warns that it did; that is fine here, the dashboard frontend is prebuilt during packing and node-pty loads its shipped prebuilds.
 
 Or clone and run it in place:
 
