@@ -725,6 +725,8 @@ class Session extends EventEmitter {
       seq: this._signalSeq,
     };
     this._gateQuietSince = now;
+    // Each hold's settle tracking starts clean; the first evaluation below observes the real count.
+    this._gateLastObservedActive = 0;
     this._titleSource.resyncWorkingLatch();
     this._evaluateGateHeldReady();
   }
@@ -761,6 +763,7 @@ class Session extends EventEmitter {
 
   _clearGateHeldReady() {
     this._gateHeldReady = null;
+    this._gateLastObservedActive = 0;
     if (!this._gateHeldReadyTimer) return;
     clearTimeout(this._gateHeldReadyTimer);
     this._gateHeldReadyTimer = null;
