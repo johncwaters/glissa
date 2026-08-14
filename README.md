@@ -15,7 +15,7 @@ I run my daily agent fleet in it. This README was written inside a Glissa sessio
 
 ## Install
 
-Glissa is not on the npm registry. It ships from this repo, through two channels.
+Glissa ships from this repo, through two channels. It is no longer published to the npm registry: the old registry versions (up to 0.20.0) are deprecated, so a bare `npm install -g glissa` gets a stale, unsupported build. Always install with the `github:` spec below.
 
 ### Server machines: claude-setup
 
