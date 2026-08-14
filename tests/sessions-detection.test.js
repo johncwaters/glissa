@@ -566,6 +566,45 @@ test('a quiet drain releases only after the settle window elapses, with detail.d
   s.destroy();
 });
 
+// --- Stale quiet window: gate evaluations are event/TTL driven, so a drain can land minutes
+// after the last gated look. The first look after the drain must start a FRESH settle window;
+// trusting the stale quiet timestamp released instantly and falsely COMPLETEd a card whose
+// lead resumed on the teammate's mailbox message 8.5s later (incident 2026-08-14) ---
+
+test('a drain long after the last gated look still waits the full settle window (2026-08-14)', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const s = makeSession(STATES.RUNNING, { gateReleaseSettleMs: 30 });
+  const seen = [];
+  s.on('state-change', (e) => seen.push(e.to));
+  hook(s, 'subagent-start', { payload: { agent_id: 'a1' } });
+  hook(s, 'ready');
+  t.mock.timers.tick(40); // stash + gated look; the recheck timer sits at the far-off teammate TTL
+  assert.equal(s.state, STATES.RUNNING, 'held while a1 is live');
+  t.mock.timers.tick(200); // long gap with no evaluation, well past the settle window
+  hook(s, 'subagent-stop', { payload: { agent_id: 'a1' } }); // drain lands mid-gap
+  assert.equal(s.state, STATES.RUNNING, 'the drain starts a fresh settle window, it does not release against the stale quiet timestamp');
+  hook(s, 'subagent-start', { payload: { agent_id: 'a2' } }); // mailbox wake re-spawns inside the window
+  t.mock.timers.tick(60);
+  assert.equal(s.state, STATES.RUNNING, 'the reopened turn keeps the card working');
+  assert.equal(seen.includes(STATES.COMPLETE), false, 'must never have completed, not even transiently');
+  s.destroy();
+});
+
+test('a genuinely quiet drain after a long gated gap completes one settle window after the drain', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const s = makeSession(STATES.RUNNING, { gateReleaseSettleMs: 30 });
+  hook(s, 'subagent-start', { payload: { agent_id: 'a1' } });
+  hook(s, 'ready');
+  t.mock.timers.tick(40);
+  t.mock.timers.tick(200); // long gated gap, no evaluation
+  hook(s, 'subagent-stop', { payload: { agent_id: 'a1' } }); // drain
+  t.mock.timers.tick(10);
+  assert.equal(s.state, STATES.RUNNING, 'partway through the fresh window');
+  t.mock.timers.tick(25); // past the 30ms window measured from the drain
+  assert.equal(s.state, STATES.COMPLETE, 'a truly settled drain still completes, one window after the drain');
+  s.destroy();
+});
+
 test('repeated drain events do not extend the settle window (armed once)', (t) => {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   const s = makeSession(STATES.RUNNING, { gateReleaseSettleMs: 30 });
@@ -977,6 +1016,7 @@ test('a still-gated re-arm waits the remaining declared TTL, not a fresh full on
   t.mock.timers.tick(40);
   assert.equal(s.state, STATES.RUNNING, 'still gated: the snapshot has ~60ms of ttl left');
   t.mock.timers.tick(120); // past the snapshot's REMAINING ttl (a fresh 300ms arm would still be pending)
+  t.mock.timers.tick(20); // plus the settle window, measured from the look that observed the ttl drain
   assert.equal(s.state, STATES.COMPLETE, 'the re-arm fired on the remaining ttl, not 300ms from the re-stash');
   s.destroy();
 });

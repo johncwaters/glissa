@@ -320,6 +320,11 @@ class Session extends EventEmitter {
     // forward every time an evaluation still finds live background work, so the quiet window is
     // measured from the last moment the gate was actually gating.
     this._gateQuietSince = 0;
+    // Active count the previous gate evaluation observed. Evaluations are event/TTL driven, so
+    // the first look after a drain must start the settle window itself: the gate was gating at
+    // every earlier look, and trusting a stale quiet timestamp released a held ready instantly
+    // at the drain, before the mailbox wake could disprove it (false COMPLETE, 2026-08-14).
+    this._gateLastObservedActive = 0;
     // Arrival order of the signals reaching _onStatus, and the sequence number of the last
     // non-ready (activity) one. A hold stashed BEFORE that activity is stale: the main agent
     // opened a new turn, so it must never complete the card (incident 2026-07-30; see
@@ -769,6 +774,9 @@ class Session extends EventEmitter {
     if (!held || this._destroyed) return;
     const now = Date.now();
     const activeAgents = this._activeAgentCount();
+    // First look after a drain: the settle window runs from HERE, not from the stale last-gated look.
+    if (activeAgents === 0 && this._gateLastObservedActive > 0) this._gateQuietSince = now;
+    this._gateLastObservedActive = activeAgents;
     const { decision, waitMs } = decideGateRelease({
       heldState: held.state,
       currentState: this.state,
