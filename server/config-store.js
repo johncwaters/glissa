@@ -207,22 +207,11 @@ function validateConfig(candidate) {
   return { ok: true };
 }
 
-function writeBackupFile(sourcePath, backupPath) {
+function writeBackupContent(backupPath, content) {
   try {
-    fs.copyFileSync(sourcePath, backupPath);
-    return true;
+    fs.writeFileSync(backupPath, content, 'utf8');
   } catch (err) {
     console.warn(`[config] Failed to write backup ${backupPath}:`, err.code || err.message);
-    return false;
-  }
-}
-
-function writeBootSnapshot(configPath, loadedContent) {
-  const backupPath = `${configPath}.boot.bak`;
-  try {
-    fs.writeFileSync(backupPath, loadedContent, 'utf8');
-  } catch (err) {
-    console.warn(`[config] Failed to write boot snapshot ${backupPath}:`, err.code || err.message);
   }
 }
 
@@ -299,7 +288,7 @@ function createConfigStore({ settingsDefaults } = {}) {
   const isLocalConfig = configPath === path.join(__dirname, '..', 'config.json');
   const loadedConfig = loadConfigFile(configPath);
   const config = loadedConfig.config;
-  writeBootSnapshot(configPath, loadedConfig.loadedContent);
+  writeBackupContent(`${configPath}.boot.bak`, loadedConfig.loadedContent);
   config.repoRoots = config.repoRoots || [];
 
   // Auto-assign stable IDs to any projects missing them
@@ -353,7 +342,7 @@ function createConfigStore({ settingsDefaults } = {}) {
     try {
       const tmpPath = `${configPath}.tmp.${process.pid}`;
       const nextContent = JSON.stringify(freshConfig, null, 2);
-      if (freshContent !== nextContent) writeBackupFile(configPath, `${configPath}.bak`);
+      if (freshContent !== nextContent) writeBackupContent(`${configPath}.bak`, freshContent);
       fs.writeFileSync(tmpPath, nextContent, 'utf8');
       fs.renameSync(tmpPath, configPath);
     } catch (err) {
