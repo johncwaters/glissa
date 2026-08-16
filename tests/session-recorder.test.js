@@ -284,6 +284,18 @@ test('createRecorder records signals by default and only adds PTY bytes when cap
   dataOnlyOptIn.close();
 });
 
+test('createRecorder honors a config-provided baseDir', async () => {
+  const baseDir = makeBaseDir();
+  try {
+    const recorder = createRecorder('configured-dir', { baseDir }, true);
+    recorder.writeHeader({});
+    await closeAndFlush(recorder);
+    assert.equal(fs.readdirSync(baseDir).filter((f) => f.endsWith('.jsonl')).length, 1);
+  } finally {
+    fs.rmSync(baseDir, { recursive: true, force: true });
+  }
+});
+
 // A constructed-but-never-started session (DORMANT at boot) must not touch the disk at all.
 test('no file is created until the first record is written', async () => {
   const baseDir = makeBaseDir();

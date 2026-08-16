@@ -286,7 +286,7 @@ class SessionRecorder {
  * Returns null only when both are off.
  *
  * @param {string} sessionName
- * @param {object} [captureConfig]   config.capture: { enabled, maxFileSizeMB, retainDays, retainFiles }
+ * @param {object} [captureConfig]   config.capture: { enabled, baseDir, maxFileSizeMB, retainDays, retainFiles }
  * @param {boolean} [recordSignals]  config.recordSignals (default true)
  * @returns {SessionRecorder|null}
  */
@@ -298,6 +298,7 @@ function createRecorder(sessionName, captureConfig, recordSignals = true) {
   // Not opened here: the first record opens the file, so a session that never starts leaves nothing.
   return new SessionRecorder({
     name: sessionName,
+    baseDir: cfg.baseDir,
     recordData,
     maxFileSize: cfg.maxFileSizeMB ? cfg.maxFileSizeMB * 1024 * 1024 : undefined,
     retainDays: cfg.retainDays,

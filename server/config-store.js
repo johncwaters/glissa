@@ -150,6 +150,120 @@ function generateProjectId() {
   return crypto.randomUUID();
 }
 
+function isPlainObject(value) {
+  if (value == null || Array.isArray(value)) return false;
+  return Object.getPrototypeOf(value) === Object.prototype;
+}
+
+function validateConfig(candidate) {
+  const errors = [];
+  if (!isPlainObject(candidate)) {
+    return { ok: false, errors: ['config must be a plain object'] };
+  }
+  if (!Array.isArray(candidate.projects)) {
+    errors.push('projects must be an array');
+  }
+  if (Array.isArray(candidate.projects)) {
+    candidate.projects.forEach((project, index) => {
+      if (!isPlainObject(project)) {
+        errors.push(`projects[${index}] must be a plain object`);
+        return;
+      }
+      if (typeof project.path !== 'string') errors.push(`projects[${index}].path must be a string`);
+      if (project.id != null && typeof project.id !== 'string') errors.push(`projects[${index}].id must be a string`);
+    });
+  }
+  if (candidate.port != null && (!Number.isInteger(candidate.port) || candidate.port < 1 || candidate.port > 65535)) {
+    errors.push('port must be an integer from 1 to 65535');
+  }
+  for (const key of TIMEOUT_KEYS) {
+    if (candidate[key] == null) continue;
+    if (typeof candidate[key] !== 'number' || !Number.isFinite(candidate[key]) || candidate[key] < 0) {
+      errors.push(`${key} must be a finite number greater than or equal to 0`);
+    }
+  }
+  for (const key of BOOLEAN_KEYS) {
+    if (candidate[key] == null) continue;
+    if (typeof candidate[key] !== 'boolean') errors.push(`${key} must be a boolean`);
+  }
+  for (const key of STRING_KEYS) {
+    if (candidate[key] == null) continue;
+    if (typeof candidate[key] !== 'string') errors.push(`${key} must be a string`);
+  }
+  for (const key of ['repoRoots', 'worktreeShare']) {
+    if (candidate[key] == null) continue;
+    if (!Array.isArray(candidate[key])) {
+      errors.push(`${key} must be an array of strings`);
+      continue;
+    }
+    if (candidate[key].some((entry) => typeof entry !== 'string')) {
+      errors.push(`${key} must be an array of strings`);
+    }
+  }
+  if (candidate.remote != null && !isPlainObject(candidate.remote)) {
+    errors.push('remote must be a plain object');
+  }
+  if (errors.length > 0) return { ok: false, errors };
+  return { ok: true };
+}
+
+function writeBackupFile(sourcePath, backupPath) {
+  try {
+    fs.copyFileSync(sourcePath, backupPath);
+    return true;
+  } catch (err) {
+    console.warn(`[config] Failed to write backup ${backupPath}:`, err.code || err.message);
+    return false;
+  }
+}
+
+function writeBootSnapshot(configPath, loadedContent) {
+  const backupPath = `${configPath}.boot.bak`;
+  try {
+    fs.writeFileSync(backupPath, loadedContent, 'utf8');
+  } catch (err) {
+    console.warn(`[config] Failed to write boot snapshot ${backupPath}:`, err.code || err.message);
+  }
+}
+
+function loadConfigFile(configPath, { exitOnError = true } = {}) {
+  const loadedContent = fs.readFileSync(configPath, 'utf8');
+  try {
+    const parsed = JSON.parse(loadedContent);
+    return { config: parsed, loadedContent };
+  } catch (err) {
+    const invalidBackupPath = `${configPath}.invalid.bak`;
+    try {
+      fs.writeFileSync(invalidBackupPath, loadedContent, 'utf8');
+    } catch (backupErr) {
+      console.warn(`[config] Failed to save invalid config copy ${invalidBackupPath}:`, backupErr.code || backupErr.message);
+    }
+    const message = `[config] Could not parse ${configPath}: ${err.message}. The broken file was copied to ${invalidBackupPath} when possible. Restore from ${configPath}.boot.bak or ${configPath}.bak, then restart Glissa.`;
+    if (!exitOnError) return { error: err, message, invalidBackupPath };
+    console.error(message);
+    process.exit(1);
+  }
+}
+
+function topLevelKeyCount(candidate) {
+  if (!isPlainObject(candidate)) return 0;
+  return Object.keys(candidate).length;
+}
+
+function isSuspectedExternalWipe(candidate, currentConfig) {
+  const currentKeyCount = topLevelKeyCount(currentConfig);
+  if (currentKeyCount === 0) return false;
+  return topLevelKeyCount(candidate) * 2 < currentKeyCount;
+}
+
+function warnInvalidConfig(action, validation) {
+  console.warn(`[config] Refusing to ${action}; validation failed: ${validation.errors.join('; ')}. Recovery sources: config.json.bak and config.json.boot.bak.`);
+}
+
+function warnSuspectedWipe(action) {
+  console.warn(`[config] Refusing to ${action}; config.json has fewer than half the top-level keys of the in-memory config. This looks like an external wipe. Recovery sources: config.json.bak and config.json.boot.bak.`);
+}
+
 /** Ensure every project in the array has a stable `id` field. */
 function ensureProjectIds(projects) {
   let changed = false;
@@ -183,7 +297,9 @@ function createConfigStore({ settingsDefaults } = {}) {
   // A real global install never resolves this (config.json is not in package.json `files`, so it self-
   // seeds at ~/.glissa/config.json). Used as a best-effort dev-skip for the startup update check.
   const isLocalConfig = configPath === path.join(__dirname, '..', 'config.json');
-  const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+  const loadedConfig = loadConfigFile(configPath);
+  const config = loadedConfig.config;
+  writeBootSnapshot(configPath, loadedConfig.loadedContent);
   config.repoRoots = config.repoRoots || [];
 
   // Auto-assign stable IDs to any projects missing them
@@ -205,18 +321,40 @@ function createConfigStore({ settingsDefaults } = {}) {
    * for in-place mutation, then writes back. Returns the mutated config or null on error.
    */
   function save(mutatorFn) {
-    let freshConfig;
+    let loaded;
     try {
-      freshConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+      loaded = loadConfigFile(configPath, { exitOnError: false });
     } catch (err) {
       console.warn('[config] Failed to read config.json for save:', err.code || err.message);
       return null;
     }
+    if (loaded.error) {
+      console.warn(loaded.message);
+      return null;
+    }
+    const freshConfig = loaded.config;
+    const freshContent = loaded.loadedContent;
+    const freshValidation = validateConfig(freshConfig);
+    if (!freshValidation.ok) {
+      warnInvalidConfig('save config.json', freshValidation);
+      return null;
+    }
+    if (isSuspectedExternalWipe(freshConfig, config)) {
+      warnSuspectedWipe('save config.json');
+      return null;
+    }
     mutatorFn(freshConfig);
+    const mutatedValidation = validateConfig(freshConfig);
+    if (!mutatedValidation.ok) {
+      warnInvalidConfig('save config.json', mutatedValidation);
+      return null;
+    }
     _lastSelfWriteTs = Date.now();
     try {
       const tmpPath = `${configPath}.tmp.${process.pid}`;
-      fs.writeFileSync(tmpPath, JSON.stringify(freshConfig, null, 2), 'utf8');
+      const nextContent = JSON.stringify(freshConfig, null, 2);
+      if (freshContent !== nextContent) writeBackupFile(configPath, `${configPath}.bak`);
+      fs.writeFileSync(tmpPath, nextContent, 'utf8');
       fs.renameSync(tmpPath, configPath);
     } catch (err) {
       console.warn('[config] Failed to write config.json:', err.code || err.message);
@@ -320,8 +458,13 @@ function createConfigStore({ settingsDefaults } = {}) {
         console.warn('[config] Invalid JSON in config.json:', parseErr.message);
         return;
       }
-      if (!Array.isArray(newConfig.projects)) {
-        console.warn('[config] config.json missing "projects" array');
+      const validation = validateConfig(newConfig);
+      if (!validation.ok) {
+        warnInvalidConfig('reload config.json', validation);
+        return;
+      }
+      if (isSuspectedExternalWipe(newConfig, config)) {
+        warnSuspectedWipe('reload config.json');
         return;
       }
       callback(newConfig);
@@ -376,6 +519,6 @@ function createConfigStore({ settingsDefaults } = {}) {
 }
 
 module.exports = {
-  createConfigStore, resolveConfigPath, generateProjectId, ensureProjectIds,
+  createConfigStore, resolveConfigPath, generateProjectId, ensureProjectIds, validateConfig, loadConfigFile,
   TIMEOUT_KEYS, BOOLEAN_KEYS, STRING_KEYS, DEFAULT_CONFIG,
 };
