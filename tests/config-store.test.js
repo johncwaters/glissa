@@ -12,7 +12,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const {
-  createConfigStore, ensureProjectIds, DEFAULT_CONFIG,
+  createConfigStore, ensureProjectIds, validateConfig, loadConfigFile, DEFAULT_CONFIG,
 } = require('../server/config-store');
 
 function writeTmpConfig(cfg) {
@@ -20,6 +20,20 @@ function writeTmpConfig(cfg) {
   const p = path.join(dir, 'config.json');
   fs.writeFileSync(p, JSON.stringify(cfg, null, 2), 'utf8');
   return { dir, p };
+}
+
+function richConfig(overrides = {}) {
+  return {
+    port: 4123,
+    autoRecoverSeconds: 3,
+    cursorBlink: false,
+    editorCommand: '',
+    repoRoots: ['/repo'],
+    worktreeShare: ['node_modules'],
+    remote: { enabled: false },
+    projects: [{ id: 'p1', name: 'proj', path: '/repo/proj' }],
+    ...overrides,
+  };
 }
 
 // Runs fn with GLISSA_CONFIG pointed at a temp config, then restores env + disk. storeOpts is
@@ -45,6 +59,60 @@ test('ensureProjectIds assigns ids only where missing and reports change', () =>
   assert.equal(ensureProjectIds(projects), false, 'second pass is a no-op');
 });
 
+test('validateConfig accepts lenient partial configs and unknown keys', () => {
+  assert.deepEqual(validateConfig({ projects: [], custom: { any: true } }), { ok: true });
+  assert.deepEqual(validateConfig({
+    projects: [{ path: '/repo' }],
+    port: 65535,
+    autoRecoverSeconds: 0,
+    cursorBlink: true,
+    editorCommand: 'code',
+    repoRoots: ['/repo'],
+    worktreeShare: ['node_modules'],
+    remote: {},
+    unknownKey: 123,
+  }), { ok: true });
+});
+
+test('validateConfig rejects malformed known fields', () => {
+  const validation = validateConfig({
+    projects: [{ id: 7 }],
+    port: 70000,
+    autoRecoverSeconds: Number.POSITIVE_INFINITY,
+    cursorBlink: 'yes',
+    editorCommand: 3,
+    repoRoots: ['/repo', 5],
+    worktreeShare: 'node_modules',
+    remote: [],
+  });
+  assert.equal(validation.ok, false);
+  assert.match(validation.errors.join('\n'), /projects\[0\]\.path must be a string/);
+  assert.match(validation.errors.join('\n'), /port must be an integer/);
+  assert.match(validation.errors.join('\n'), /autoRecoverSeconds must be a finite number/);
+  assert.match(validation.errors.join('\n'), /cursorBlink must be a boolean/);
+  assert.match(validation.errors.join('\n'), /editorCommand must be a string/);
+  assert.match(validation.errors.join('\n'), /repoRoots must be an array of strings/);
+  assert.match(validation.errors.join('\n'), /worktreeShare must be an array of strings/);
+  assert.match(validation.errors.join('\n'), /remote must be a plain object/);
+  assert.equal(validateConfig(null).ok, false);
+  assert.equal(validateConfig([]).ok, false);
+});
+
+test('validateConfig rejects a config missing the projects key entirely', () => {
+  const validation = validateConfig({ port: 4123 });
+  assert.equal(validation.ok, false);
+  assert.match(validation.errors.join('\n'), /projects must be an array/);
+});
+
+test('save writes an invalid.bak copy when the fresh read is corrupt JSON', () => {
+  withStore(richConfig(), (store, p) => {
+    fs.writeFileSync(p, '{ not json', 'utf8');
+    assert.equal(store.save((cfg) => { cfg.port = 4124; }), null);
+    assert.equal(fs.readFileSync(p, 'utf8'), '{ not json');
+    assert.equal(fs.readFileSync(`${p}.invalid.bak`, 'utf8'), '{ not json');
+  });
+});
+
 test('createConfigStore persists auto-assigned ids, stable across reloads', () => {
   const { dir, p } = writeTmpConfig({ projects: [{ name: 'proj', path: 'C:/proj' }] });
   const prev = process.env.GLISSA_CONFIG;
@@ -57,6 +125,21 @@ test('createConfigStore persists auto-assigned ids, stable across reloads', () =
     assert.equal(onDisk.projects[0].id, id, 'assigned id persisted to disk');
     const second = createConfigStore();
     assert.equal(second.config.projects[0].id, id, 'same id on reload (stable session identity)');
+  } finally {
+    if (prev == null) delete process.env.GLISSA_CONFIG;
+    if (prev != null) process.env.GLISSA_CONFIG = prev;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('createConfigStore writes a boot snapshot of the loaded config', () => {
+  const original = { projects: [{ name: 'proj', path: 'C:/proj' }] };
+  const { dir, p } = writeTmpConfig(original);
+  const prev = process.env.GLISSA_CONFIG;
+  process.env.GLISSA_CONFIG = p;
+  try {
+    createConfigStore();
+    assert.deepEqual(JSON.parse(fs.readFileSync(`${p}.boot.bak`, 'utf8')), original);
   } finally {
     if (prev == null) delete process.env.GLISSA_CONFIG;
     if (prev != null) process.env.GLISSA_CONFIG = prev;
@@ -78,6 +161,58 @@ test('save returns null when the config file is unreadable', () => {
     fs.rmSync(p);
     assert.equal(store.save((cfg) => { cfg.projects = []; }), null);
   });
+});
+
+test('save refuses an invalid fresh read without writing', () => {
+  withStore(richConfig(), (store, p) => {
+    const invalidContent = JSON.stringify({ projects: [{ id: 'missing-path' }] }, null, 2);
+    fs.writeFileSync(p, invalidContent, 'utf8');
+    assert.equal(store.save((cfg) => { cfg.port = 4124; }), null);
+    assert.equal(fs.readFileSync(p, 'utf8'), invalidContent);
+  });
+});
+
+test('save refuses an invalid mutation result without writing', () => {
+  withStore(richConfig(), (store, p) => {
+    const before = fs.readFileSync(p, 'utf8');
+    assert.equal(store.save((cfg) => { cfg.port = 70000; }), null);
+    assert.equal(fs.readFileSync(p, 'utf8'), before);
+  });
+});
+
+test('save refuses a suspected external wipe without laundering it', () => {
+  withStore(richConfig(), (store, p) => {
+    const wipedContent = JSON.stringify({ projects: [] }, null, 2);
+    fs.writeFileSync(p, wipedContent, 'utf8');
+    assert.equal(store.save((cfg) => { cfg.projects.push({ id: 'x', path: '/x' }); }), null);
+    assert.equal(fs.readFileSync(p, 'utf8'), wipedContent);
+  });
+});
+
+test('save writes a rolling backup before replacing changed config content', () => {
+  withStore(richConfig(), (store, p) => {
+    const before = JSON.parse(fs.readFileSync(p, 'utf8'));
+    const out = store.save((cfg) => { cfg.port = 4124; });
+    assert.equal(out.port, 4124);
+    assert.deepEqual(JSON.parse(fs.readFileSync(`${p}.bak`, 'utf8')), before);
+    assert.equal(JSON.parse(fs.readFileSync(p, 'utf8')).port, 4124);
+  });
+});
+
+test('loadConfigFile saves corrupt JSON aside and returns the startup error when requested', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-cfgstore-corrupt-'));
+  const p = path.join(dir, 'config.json');
+  fs.writeFileSync(p, '{ not json', 'utf8');
+  try {
+    const loaded = loadConfigFile(p, { exitOnError: false });
+    assert.ok(loaded.error);
+    assert.match(loaded.message, /Could not parse/);
+    assert.match(loaded.message, /config\.json\.boot\.bak/);
+    assert.match(loaded.message, /config\.json\.bak/);
+    assert.equal(fs.readFileSync(`${p}.invalid.bak`, 'utf8'), '{ not json');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('getSettings falls back to DEFAULT_CONFIG for absent keys', () => {
@@ -205,6 +340,28 @@ test('watchForChanges still sees a hand-edit after a save replaced the file inod
       fs.writeFileSync(p, JSON.stringify({ projects: [{ id: 'hand-edit', name: 'h', path: 'C:/h' }] }, null, 2), 'utf8');
       await waitFor(() => reloads.length > 0, 'hand-edit after a save never reloaded');
       assert.equal(reloads[reloads.length - 1].projects[0].id, 'hand-edit', 'callback carries the edited content');
+    } finally {
+      stop();
+    }
+  });
+});
+
+test('watchForChanges rejects invalid and wiped config edits', async () => {
+  await withStoreAsync(richConfig(), async (store, p) => {
+    const reloads = [];
+    const stop = store.watchForChanges((cfg) => { reloads.push(cfg); });
+    try {
+      fs.writeFileSync(p, JSON.stringify({ projects: [{ id: 'bad' }] }, null, 2), 'utf8');
+      await sleep(1200);
+      assert.equal(reloads.length, 0, 'invalid config must not reload');
+
+      fs.writeFileSync(p, JSON.stringify({ projects: [] }, null, 2), 'utf8');
+      await sleep(1200);
+      assert.equal(reloads.length, 0, 'wiped config must not reload');
+
+      fs.writeFileSync(p, JSON.stringify(richConfig({ port: 4124 }), null, 2), 'utf8');
+      await waitFor(() => reloads.length > 0, 'valid config after rejected edits never reloaded');
+      assert.equal(reloads[0].port, 4124);
     } finally {
       stop();
     }
