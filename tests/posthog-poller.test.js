@@ -861,6 +861,25 @@ test('an escalated cluster never dedupes again and never re-pings', async () => 
   assert.deepEqual(pings, [], 'the escalation ping already fired for this cluster');
 });
 
+test('two same-cluster escalations planned in one tick fire one ping, not two', async () => {
+  const spawned = [];
+  const { poller, pings } = harness({
+    initialState: seedCluster({ recurrences: 2 }),
+    api: {
+      queryIssues: async () => ({
+        ok: true,
+        body: { results: [chunkRow('iss-6', CHUNK_B), chunkRow('iss-7', CHUNK_A)] },
+      }),
+    },
+    spawnInvestigation: async (a) => { spawned.push(a.issue.issueId); return { verdict: 'ROOT_CAUSE', summary: 'real defect' }; },
+    now: () => 2000,
+  });
+  await poller.start();
+  await flush();
+  assert.deepEqual(spawned.sort(), ['iss-6', 'iss-7'], 'both escalated twins are investigated');
+  assert.equal(pings.length, 1, 'the cluster escalates once');
+});
+
 test('a repeat affecting more than one user escalates on its first sighting', async () => {
   const spawned = [];
   const { poller, pings } = harness({

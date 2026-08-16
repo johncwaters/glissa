@@ -178,11 +178,8 @@ function planInvestigations(changes, state = {}, opts = {}) {
 
 /**
  * Build the Telegram text for one ping kind, or null when the kind never pings. The lane tag comes
- * first so a shared chat can be filtered by lane (mirrors the PR lane's messages).
- *
- * `ctx.detail` is an optional Glissa-authored line (the recurrence lane explaining why an old verdict
- * stopped being trusted). It is flattened like the title: it can quote an issue id from the state
- * file, and no line of a ping may forge another.
+ * first so a shared chat can be filtered by lane (mirrors the PR lane's messages). `ctx.detail` is an
+ * optional extra line, flattened like the title so no line of a ping may forge another.
  */
 function pingFor(kind, ctx = {}) {
   const label = PING_LABELS[kind];
@@ -200,10 +197,8 @@ function pingFor(kind, ctx = {}) {
 /**
  * Fold this tick's observation (and an optional investigation result) into the persisted entry.
  * `verdictInfo.at` is passed in rather than read from a clock so this stays synchronously testable.
- *
- * `recurrenceOf` names the signature cluster (core/posthog-recurrence.js) this issue was matched
- * into, and is carried across observations so a verdict landing ticks later still folds back into the
- * cluster that spawned it instead of opening a second one. An older state file simply has none.
+ * `recurrenceOf` carries the matched signature cluster across observations so a verdict landing ticks
+ * later folds back into the cluster that spawned it instead of opening a second one.
  */
 function nextState(prevEntry, current, verdictInfo = {}) {
   const prev = prevEntry || {};
@@ -551,6 +546,7 @@ function buildIssueSessionPrompt({ issue, projectName, host, url } = {}) {
 }
 
 module.exports = {
+  toCount,
   issueKey,
   issueUrl,
   classifyIssueChange,

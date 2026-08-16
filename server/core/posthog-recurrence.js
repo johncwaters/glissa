@@ -1,30 +1,10 @@
 'use strict';
 
-/*
- * Pure recurrence core of the PostHog lane. Sibling of core/posthog-core.js (which it composes with,
- * and which stays require-free): no IO, no clock, no state file.
- *
- * WHY THIS EXISTS. PostHog mints a fresh issue id whenever an error's grouping fingerprint shifts, so
- * one non-event (a crawler failing to lazy-load a chunk) produced two ids hours apart and each one
- * bought its own paid investigation, both concluding TRANSIENT. The lane had no cross-issue memory:
- * every id is new to it. This module is that memory, and the decision it feeds.
- *
- * The memory is a SIGNATURE REGISTRY parked under one underscore key in the state file, so an older
- * server (which iterates issue keys and skips anything starting with '_') loads a newer file unharmed.
- * A record is written when an investigation concludes TRANSIENT and holds the tokens a later issue is
- * matched against, plus the recurrence counter and the escalated latch. It lives in the registry
- * rather than on the issue entry because entries age out on their own clock: the counter has to
- * outlive both the entry that opened the cluster and every entry deduped into it.
- *
- * MATCHING IS DELIBERATELY CONSERVATIVE. A false positive here silently swallows a real bug, while a
- * false negative only costs one investigation, so every rule below is written to fail toward spawning:
- * boilerplate tokens are stripped before comparison (an error title alone means nothing, "TypeError"
- * matches half the internet), a signature with fewer than MIN_DISTINCTIVE_TOKENS distinctive tokens
- * never matches at all, and a match needs both a high token overlap and an absolute floor of shared
- * tokens.
- */
+// Pure cross-issue recurrence memory for the PostHog lane: a signature registry under one
+// underscore state key, conservative token matching that fails toward spawning (a false positive
+// silently swallows a real bug), and the spawn/dedupe/escalate decision the poller acts on.
 
-const { planInvestigations } = require('./posthog-core');
+const { planInvestigations, toCount } = require('./posthog-core');
 
 // The recency window a prior TRANSIENT verdict is trusted within. Past it the registry record is not
 // just unusable for matching, it is pruned: a transient nobody has seen for a week is not evidence.
@@ -74,12 +54,6 @@ const GENERIC_TOKENS = new Set([
   'type', 'types', 'unknown', 'missing', 'empty',
 ]);
 
-function toCount(value, fallback = 0) {
-  const n = Number(value);
-  if (Number.isFinite(n)) return n;
-  return fallback;
-}
-
 function dayMs(days, fallback) {
   const n = toCount(days, fallback);
   const safe = n > 0 ? n : fallback;
@@ -93,11 +67,8 @@ function isBuildHashish(token) {
   return /[a-z]/.test(token) && /\d/.test(token);
 }
 
-/**
- * The distinctive tokens of one or more texts, deduped, in first-seen order. Lowercased, split on
- * every non-alphanumeric run, then stripped of anything that cannot distinguish two incidents:
- * fragments under three characters, pure digits, hex-looking ids, build hashes, and boilerplate.
- */
+// Deduped distinctive tokens: lowercased, split on non-alphanumerics, stripped of short fragments,
+// digits, hex ids, build hashes, and boilerplate that cannot distinguish two incidents.
 function distinctiveTokens(...texts) {
   const seen = new Set();
   const tokens = [];
@@ -136,10 +107,7 @@ function jaccard(a, b) {
   return shared / union;
 }
 
-/**
- * Score one candidate title against one prior transient. Returns the decision inputs rather than a
- * bare boolean so a test (and the decision log) can see WHY a near miss missed.
- */
+// Returns the decision inputs, not a bare boolean, so tests can see why a near miss missed.
 function scoreAgainstPrior(candidateTokens, prior = {}) {
   const priorTokens = distinctiveTokens(prior.title);
   const summaryTokens = distinctiveTokens(prior.summaryLine);
@@ -159,13 +127,8 @@ function signatureRecords(state = {}) {
   return registry;
 }
 
-/**
- * The best prior transient this candidate recurs from, or null.
- *
- * Records outside the recency window, from another PostHog project, or belonging to this very issue
- * are not candidates. Ordering is total (score, then recency, then key) so the same state file always
- * picks the same prior.
- */
+// Best in-window same-project prior transient, or null; total ordering (score, recency, key) keeps
+// the pick deterministic for a given state file.
 function findRecurrenceMatch({ title, projectId, key } = {}, state = {}, nowMs = 0, opts = {}) {
   const candidateTokens = distinctiveTokens(title);
   if (candidateTokens.length < MIN_DISTINCTIVE_TOKENS) return null;
@@ -191,13 +154,8 @@ function findRecurrenceMatch({ title, projectId, key } = {}, state = {}, nowMs =
   return matches[0];
 }
 
-/**
- * Why a matched recurrence must be investigated anyway, or null when the prior verdict still holds.
- *
- * Each trigger is a way the pattern changed since the verdict that is being reused: enough repeats
- * that "one-off" stopped being credible, a blast radius past a single carbon unit, or PostHog's own
- * spike detection naming it.
- */
+// Why a matched recurrence must be investigated anyway (repeats, blast radius, or a spike), or null
+// when the prior verdict still holds.
 function escalationReason(change, ordinal, opts = {}) {
   const limit = toCount(opts.transientRecurrenceLimit, DEFAULT_TRANSIENT_RECURRENCE_LIMIT);
   const safeLimit = limit > 0 ? limit : DEFAULT_TRANSIENT_RECURRENCE_LIMIT;
@@ -207,17 +165,8 @@ function escalationReason(change, ordinal, opts = {}) {
   return null;
 }
 
-/**
- * Spawn, dedupe, or escalate one candidate investigation.
- *
- *   'spawn'    - no usable prior, or the feature is off: the lane behaves exactly as it did before.
- *   'dedupe'   - a confident match against a prior transient inside the window. No session is spawned;
- *                the caller records the verdict directly and increments the cluster's counter.
- *   'escalate' - matched, but the pattern changed (see escalationReason). A fresh investigation runs
- *                and the cluster latches escalated, so its stale verdict is never reused again.
- *
- * `reason` is carried on every verdict for the operator reading a state file or a test naming a case.
- */
+// Spawn (no usable prior), dedupe (confident in-window match, no session spawned), or escalate
+// (matched but the pattern changed, so the stale verdict is never reused again).
 function decideRecurrence(change = {}, state = {}, opts = {}) {
   const spawn = (reason) => ({ action: 'spawn', reason, matchKey: null, matchIssueId: null, ordinal: 0, score: 0 });
   if (opts.recurrenceDedupe === false) return spawn('disabled');
@@ -242,11 +191,8 @@ function decideRecurrence(change = {}, state = {}, opts = {}) {
   return { action: 'dedupe', reason: 'prior-transient', ...verdict };
 }
 
-/**
- * The one planning call the poller makes: which changes earn attention (core.planInvestigations, the
- * pre-existing filter) crossed with what recurrence memory says to do about each. Deduped items are
- * split out rather than dropped, because they still get a verdict, an inbox record and a broadcast.
- */
+// planInvestigations crossed with recurrence memory; deduped items are split out, not dropped,
+// because they still get a verdict, an inbox record and a broadcast.
 function planIssueActions(changes, state = {}, opts = {}) {
   const investigate = [];
   const dedupe = [];
@@ -275,11 +221,8 @@ function normalizeRecord(record) {
   };
 }
 
-/**
- * Open or refresh the cluster a TRANSIENT verdict belongs to. Refreshing keeps the ORIGINAL title and
- * counter (that title is the corpus every later candidate is matched against, and the counter must
- * survive) and only moves the recency window forward. Returns a new registry; the input is untouched.
- */
+// Open or refresh a cluster; a refresh keeps the original title (the matching corpus) and counter,
+// moving only the recency window forward. Returns a new registry.
 function recordTransientSignature(state = {}, { key, projectId, issueId, title, summaryLine, at } = {}) {
   const wanted = String(key ?? '');
   if (!wanted) return signatureRecords(state);
@@ -296,10 +239,8 @@ function recordTransientSignature(state = {}, { key, projectId, issueId, title, 
   return registry;
 }
 
-/**
- * Count one repeat against a cluster, optionally latching it escalated. The counter lives here, on
- * the cluster, precisely so it outlives the deduped issue's own entry when that entry ages out.
- */
+// Count one repeat (optionally latching escalated); the counter lives on the cluster so it outlives
+// the deduped issue's own entry.
 function noteRecurrence(state = {}, key, { at, issueId, escalated = false } = {}) {
   const wanted = String(key ?? '');
   const registry = { ...signatureRecords(state) };
@@ -317,10 +258,7 @@ function noteRecurrence(state = {}, key, { at, issueId, escalated = false } = {}
   return registry;
 }
 
-/**
- * Drop clusters past the recency window (they can no longer match anything) and cap what is left at
- * the newest SIGNATURE_CAP. Returns a new registry; the input is not mutated.
- */
+// Drop clusters past the window and cap the rest at the newest SIGNATURE_CAP. Returns a new registry.
 function pruneSignatures(state = {}, nowMs = 0, opts = {}) {
   const windowMs = dayMs(opts.recurrenceWindowDays, DEFAULT_RECURRENCE_WINDOW_DAYS);
   const now = toCount(nowMs, 0);

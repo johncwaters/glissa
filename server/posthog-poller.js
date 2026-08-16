@@ -153,12 +153,8 @@ function createPosthogPoller(deps) {
     return res || { verdict: 'ERROR', summary: 'no verdict' };
   }
 
-  /*
-   * Open or refresh this issue's signature cluster after a TRANSIENT verdict, so the NEXT issue id
-   * PostHog mints for the same non-event has something to match against. An issue investigated as
-   * part of an existing cluster (recurrenceOf, set when it was matched) folds back into that cluster
-   * rather than opening a rival one, which is what keeps the counter and the escalated latch whole.
-   */
+  // Open or refresh the signature cluster after a TRANSIENT verdict; recurrenceOf folds a matched
+  // issue back into its cluster rather than opening a rival one.
   function recordTransientCluster(change, prev, summaryLine, at) {
     state[recurrence.SIGNATURES_KEY] = recurrence.recordTransientSignature(state, {
       key: prev.recurrenceOf || change.key,
@@ -226,11 +222,7 @@ function createPosthogPoller(deps) {
     return true;
   }
 
-  /*
-   * Age out signature clusters past the recurrence window: past it they can no longer match anything,
-   * so they are dead weight. Runs at the same two seams as the investigations-log prune (state load,
-   * and each tick just before its persist), riding a write that was happening anyway.
-   */
+  // Age out clusters past the window, at the same two seams as the investigations-log prune.
   function pruneSignatureRegistry() {
     const before = Object.keys(recurrence.signatureRecords(state)).length;
     if (before === 0) return false;
@@ -285,13 +277,8 @@ function createPosthogPoller(deps) {
     investigation.finally(() => running.delete(investigation));
   }
 
-  /*
-   * Record a would-be investigation that the lane's recurrence memory already answered: PostHog minted
-   * a fresh issue id for a non-event a prior session already concluded was TRANSIENT. Nothing spawns.
-   * Everything else is the normal completion path (verdict, inbox record, broadcast, state), so the
-   * row reads like any other investigation minus the cost, and the cluster's counter grows on the
-   * PRIOR record, which outlives this entry when it ages out.
-   */
+  // A would-be investigation the recurrence memory already answered: nothing spawns, but the normal
+  // completion path still runs, and the counter grows on the PRIOR record, which outlives this entry.
   function applyDedupe(item) {
     const { change, recurrence: decision } = item;
     state[recurrence.SIGNATURES_KEY] = recurrence.noteRecurrence(state, decision.matchKey, {
@@ -307,11 +294,8 @@ function createPosthogPoller(deps) {
     });
   }
 
-  /*
-   * Stop trusting a cluster's verdict. Latching it escalated is what keeps every later issue out of
-   * the dedupe path, and the ping is the point of the feature: a "transient" on its third repeat, or
-   * one that outgrew a single carbon unit, is exactly what a silent dedupe would have buried.
-   */
+  // Stop trusting a cluster's verdict: the escalated latch keeps later issues out of the dedupe
+  // path, and the ping surfaces what a silent dedupe would have buried.
   function applyEscalation(item) {
     const { change, recurrence: decision } = item;
     state[recurrence.SIGNATURES_KEY] = recurrence.noteRecurrence(state, decision.matchKey, {
@@ -426,8 +410,11 @@ function createPosthogPoller(deps) {
       if (stopped) break;
       slots -= 1;
       // Escalation is latched only alongside the spawn it justifies: out of slots means undecided,
-      // and the next tick re-decides rather than burning the ping on nothing.
-      if (item.recurrence.action === 'escalate') applyEscalation(item);
+      // and the next tick re-decides rather than burning the ping on nothing. The latch re-check
+      // covers two same-cluster escalations planned from one pre-tick snapshot: one ping, not two.
+      const escalating = item.recurrence.action === 'escalate'
+        && recurrence.signatureRecords(state)[item.recurrence.matchKey]?.escalated !== true;
+      if (escalating) applyEscalation(item);
       startInvestigation(item.change, item.recurrence);
     }
 
