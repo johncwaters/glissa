@@ -409,9 +409,8 @@ function createPosthogPoller(deps) {
       if (slots <= 0) break;
       if (stopped) break;
       slots -= 1;
-      // Escalation is latched only alongside the spawn it justifies: out of slots means undecided,
-      // and the next tick re-decides rather than burning the ping on nothing. The latch re-check
-      // covers two same-cluster escalations planned from one pre-tick snapshot: one ping, not two.
+      // Latch-and-ping only alongside the spawn it justifies; the latch re-check keeps two
+      // same-cluster escalations planned from one pre-tick snapshot down to a single ping.
       const escalating = item.recurrence.action === 'escalate'
         && recurrence.signatureRecords(state)[item.recurrence.matchKey]?.escalated !== true;
       if (escalating) applyEscalation(item);
