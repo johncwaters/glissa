@@ -8,6 +8,9 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 
 const { registerControlHandlers } = require('../server/control-handlers');
 
@@ -55,15 +58,27 @@ function harness(over = {}) {
     on: (event, handler) => { if (event === 'message') messageHandler = handler; },
   };
   const sessions = over.sessions || new Map([['p1', fakeSession('p1', 'web-app')]]);
+  const config = {
+    projects: over.projects || [{ id: 'p1', name: 'web-app', path: 'C:/code/web-app' }],
+    teams: [],
+    posthog: over.posthog === undefined ? { projectMap: { 7: 'C:/code/web-app' } } : over.posthog,
+  };
+  const created = [];
+  let nextId = 0;
   registerControlHandlers(controlWss, {
     sessions,
-    config: {
-      projects: [{ id: 'p1', name: 'web-app', path: 'C:/code/web-app' }],
-      teams: [],
-      posthog: over.posthog === undefined ? { projectMap: { 7: 'C:/code/web-app' } } : over.posthog,
+    config,
+    // Mirrors the real store closely enough for the auto-create path: the mutation lands on the live
+    // config object and the fresh config comes back for applyConfigReload.
+    configStore: { save: (fn) => { fn(config); return config; }, getSettings: () => ({}) },
+    generateProjectId: () => `auto-${++nextId}`,
+    applyConfigReload: (cfg) => {
+      for (const project of cfg.projects) {
+        if (sessions.has(project.id)) continue;
+        sessions.set(project.id, fakeSession(project.id, project.name));
+        created.push(project);
+      }
     },
-    configStore: { save: (fn) => fn({ projects: [] }), getSettings: () => ({}) },
-    applyConfigReload: () => {},
     broadcastControl: () => {},
     getPosthogStatus: () => (over.status === undefined ? STATUS : over.status),
     posthogSetIssueStatus: over.posthogSetIssueStatus === null ? null : (args) => {
@@ -82,7 +97,7 @@ function harness(over = {}) {
   controlWss.emit('connection', ws);
   sent.length = 0;
   return {
-    sent, sessions, actionCalls, reinvestigateCalls, archiveCalls,
+    sent, sessions, config, created, actionCalls, reinvestigateCalls, archiveCalls,
     send: (msg) => messageHandler(JSON.stringify(msg)),
   };
 }
@@ -152,6 +167,100 @@ test('posthog-open-session refuses a malformed issue id before any lookup', () =
 
   assert.equal(h.sent[0].ok, false);
   assert.equal(h.sent[0].error, 'Invalid issue id');
+});
+
+// --- A2. auto-creating the Glissa project when none is mapped ---
+
+// The name PostHog knows the project by; the handler must never take it from the client message.
+function statusNamed(projectName) {
+  return { ...STATUS, projects: [{ ...STATUS.projects[0], name: projectName }] };
+}
+
+function tempRepos(layout) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-posthog-'));
+  for (const relative of layout) fs.mkdirSync(path.join(root, relative), { recursive: true });
+  test.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  return root;
+}
+
+test('posthog-open-session auto-creates the session from a projectMap directory', () => {
+  const root = tempRepos(['Projects/glissa', 'Projects/card-harbor']);
+  const h = harness({
+    projects: [{ id: 'p1', name: 'web-app', path: path.join(root, 'Projects/glissa') }],
+    posthog: { projectMap: { 7: path.join(root, 'Projects/card-harbor') } },
+    status: statusNamed('CardHarbor'),
+  });
+
+  h.send({ type: 'posthog-open-session', requestId: 'r1', projectId: 7, issueId: 'iss-1' });
+
+  assert.equal(h.sent[0].ok, true);
+  assert.equal(h.sent[0].sessionName, 'card-harbor');
+  assert.deepEqual(h.created.map((p) => p.path), [path.join(root, 'Projects/card-harbor')]);
+  assert.equal(h.created[0].dangerouslySkipPermissions, undefined, 'keeps the product default');
+  assert.equal(h.config.projects.length, 2, 'the project is persisted');
+  assert.match(h.sessions.get(h.created[0].id).pastes[0], /issue id: iss-1/);
+});
+
+test('posthog-open-session auto-creates from a name-derived sibling directory', () => {
+  const root = tempRepos(['Projects/glissa', 'Projects/card-harbor', 'Projects/unrelated']);
+  const h = harness({
+    projects: [{ id: 'p1', name: 'web-app', path: path.join(root, 'Projects/glissa') }],
+    posthog: {},
+    status: statusNamed('CardHarbor'),
+  });
+
+  h.send({ type: 'posthog-open-session', requestId: 'r1', projectId: 7, issueId: 'iss-1' });
+
+  assert.equal(h.sent[0].ok, true);
+  assert.deepEqual(h.created.map((p) => p.path), [path.join(root, 'Projects/card-harbor')]);
+});
+
+test('posthog-open-session refuses rather than guessing between two matching directories', () => {
+  const root = tempRepos(['A/glissa', 'A/card-harbor', 'B/other', 'B/CardHarbor']);
+  const h = harness({
+    projects: [
+      { id: 'p1', name: 'web-app', path: path.join(root, 'A/glissa') },
+      { id: 'p2', name: 'other', path: path.join(root, 'B/other') },
+    ],
+    posthog: {},
+    status: statusNamed('CardHarbor'),
+  });
+
+  h.send({ type: 'posthog-open-session', requestId: 'r1', projectId: 7, issueId: 'iss-1' });
+
+  assert.equal(h.sent[0].ok, false);
+  assert.match(h.sent[0].error, /No Glissa session is mapped/);
+  assert.deepEqual(h.created, []);
+});
+
+test('posthog-open-session does not auto-create when the derived name collides with a session', () => {
+  const root = tempRepos(['Projects/glissa', 'Projects/web-app']);
+  const h = harness({
+    projects: [{ id: 'p1', name: 'web-app', path: path.join(root, 'Projects/glissa') }],
+    posthog: {},
+    status: statusNamed('web-app'),
+  });
+
+  h.send({ type: 'posthog-open-session', requestId: 'r1', projectId: 7, issueId: 'iss-1' });
+
+  assert.equal(h.sent[0].ok, false);
+  assert.match(h.sent[0].error, /No Glissa session is mapped/);
+  assert.deepEqual(h.created, []);
+});
+
+test('posthog-open-session keeps the mapping error when no directory resolves', () => {
+  const root = tempRepos(['Projects/glissa']);
+  const h = harness({
+    projects: [{ id: 'p1', name: 'web-app', path: path.join(root, 'Projects/glissa') }],
+    posthog: { projectMap: { 7: path.join(root, 'Projects/gone') } },
+    status: statusNamed('CardHarbor'),
+  });
+
+  h.send({ type: 'posthog-open-session', requestId: 'r1', projectId: 7, issueId: 'iss-1' });
+
+  assert.equal(h.sent[0].ok, false);
+  assert.equal(h.sent[0].error, 'No Glissa session is mapped to this PostHog project (set posthog.projectMap)');
+  assert.deepEqual(h.created, []);
 });
 
 // --- B. resolve / suppress in PostHog ---

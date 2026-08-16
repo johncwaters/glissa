@@ -40,4 +40,4 @@ function isSameDirectoryPath(a, b) {
   return equalsIgnoringCaseOnWindows(canonicalizePath(resolvedA), canonicalizePath(resolvedB));
 }
 
-module.exports = { canonicalizePath, isSameDirectoryPath };
+module.exports = { canonicalizePath, equalsIgnoringCaseOnWindows, isSameDirectoryPath };

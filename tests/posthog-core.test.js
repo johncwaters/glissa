@@ -597,3 +597,83 @@ test('validateInvestigationId enforces the id shape', () => {
   assert.equal(validateInvestigationId('../etc@1700').ok, false);
   assert.equal(validateInvestigationId('iss-1@later').ok, false);
 });
+
+// --- Auto-creating the Glissa project a Radar row wants when none is mapped ---
+
+const {
+  slugKey,
+  isAbsolutePathish,
+  projectParentDirs,
+  pickDirectoryForProjectName,
+  sanitizeSessionName,
+} = require('../server/core/posthog-core');
+
+test('slugKey compares on alphanumerics only', () => {
+  assert.equal(slugKey('CardHarbor'), slugKey('card-harbor'));
+  assert.equal(slugKey('Keeplings'), slugKey('keeplings'));
+  assert.equal(slugKey('My App v2'), 'myappv2');
+  assert.equal(slugKey('---'), '');
+  assert.equal(slugKey(null), '');
+});
+
+test('isAbsolutePathish accepts posix, drive-letter and UNC paths', () => {
+  assert.equal(isAbsolutePathish('/home/jw/Projects/app'), true);
+  assert.equal(isAbsolutePathish('C:/code/app'), true);
+  assert.equal(isAbsolutePathish('C:\\code\\app'), true);
+  assert.equal(isAbsolutePathish('\\\\server\\share'), true);
+  assert.equal(isAbsolutePathish('web-app'), false, 'a bare display name is not a path');
+  assert.equal(isAbsolutePathish('./relative'), false);
+  assert.equal(isAbsolutePathish(''), false);
+  assert.equal(isAbsolutePathish(undefined), false);
+});
+
+test('projectParentDirs dedupes the folders the operator already keeps repos in', () => {
+  const dirs = projectParentDirs([
+    { path: '/home/jw/Projects/glissa' },
+    { path: '/home/jw/Projects/card-harbor/' },
+    { path: 'C:\\code\\keeplings' },
+    { path: '/home/jw/PROJECTS/other' },
+    null,
+    { path: '' },
+    { path: 'bare' },
+  ]);
+  assert.deepEqual(dirs, ['/home/jw/Projects', 'C:\\code']);
+});
+
+test('pickDirectoryForProjectName matches a display name against directory names', () => {
+  const candidates = [
+    { name: 'glissa', path: '/p/glissa' },
+    { name: 'card-harbor', path: '/p/card-harbor' },
+  ];
+  assert.deepEqual(pickDirectoryForProjectName('CardHarbor', candidates), {
+    name: 'card-harbor', path: '/p/card-harbor',
+  });
+  assert.equal(pickDirectoryForProjectName('nothing-here', candidates), null);
+  assert.equal(pickDirectoryForProjectName('', candidates), null);
+  assert.equal(pickDirectoryForProjectName('glissa', undefined), null);
+});
+
+test('pickDirectoryForProjectName refuses an ambiguous match but tolerates a duplicate path', () => {
+  const twoRepos = [
+    { name: 'card-harbor', path: '/a/card-harbor' },
+    { name: 'CardHarbor', path: '/b/CardHarbor' },
+  ];
+  assert.equal(pickDirectoryForProjectName('cardharbor', twoRepos), null, 'guessing a repo is worse than refusing');
+
+  const sameDirTwice = [
+    { name: 'card-harbor', path: '/a/card-harbor' },
+    { name: 'card-harbor', path: '/a/card-harbor/' },
+  ];
+  assert.equal(pickDirectoryForProjectName('CardHarbor', sameDirTwice).path, '/a/card-harbor');
+});
+
+test('sanitizeSessionName produces a name the control handler accepts', () => {
+  const SESSION_NAME_RE = /^[a-zA-Z0-9_\-. ()]{1,64}$/;
+  for (const raw of ['card-harbor', 'My App (v2)', 'weird/name:here', 'a'.repeat(200)]) {
+    assert.match(sanitizeSessionName(raw), SESSION_NAME_RE, `sanitized "${raw}"`);
+  }
+  assert.equal(sanitizeSessionName('weird/name:here'), 'weird-name-here');
+  assert.equal(sanitizeSessionName('  spaced  '), 'spaced');
+  assert.equal(sanitizeSessionName('///'), null);
+  assert.equal(sanitizeSessionName(''), null);
+});

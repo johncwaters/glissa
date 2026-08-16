@@ -608,6 +608,62 @@ function registerControlHandlers(controlWss, deps) {
     ws.send(JSON.stringify({ type, requestId: msg.requestId || null, ...payload }));
   }
 
+  function isExistingDirectory(candidate) {
+    try {
+      return fs.statSync(candidate).isDirectory();
+    } catch {
+      return false;
+    }
+  }
+
+  // Everything one level inside the folders the operator already keeps repos in. One-shot cold path
+  // (an operator click that is about to spawn a Claude session), so sync readdir is fine.
+  function listSiblingRepoDirs() {
+    const entries = [];
+    for (const parent of posthogCore.projectParentDirs(config.projects)) {
+      try {
+        for (const dirent of fs.readdirSync(parent, { withFileTypes: true })) {
+          if (!dirent.isDirectory() || dirent.name.startsWith('.') || dirent.name === 'node_modules') continue;
+          entries.push({ name: dirent.name, path: path.join(parent, dirent.name) });
+        }
+      } catch (err) {
+        // A parent that is simply gone is ordinary (a project path from another machine), not news.
+        if (err.code === 'ENOENT' || err.code === 'ENOTDIR') continue;
+        console.warn(`[control] posthog auto-create: cannot read ${parent}: ${err.code || err.message}`);
+      }
+    }
+    return entries;
+  }
+
+  /**
+   * Create the Glissa project a Radar row wants when none is mapped yet, or null when the repo
+   * cannot be resolved CONFIDENTLY. Refusing to guess is the point: an auto-created session points a
+   * permissionless Claude at a directory, so a wrong directory is worse than the mapping error.
+   */
+  function autoCreatePosthogProject(projectId, posthogProjectName) {
+    const mapped = String(config.posthog?.projectMap?.[String(projectId)] ?? '').trim();
+    const mappedDir = posthogCore.isAbsolutePathish(mapped) && isExistingDirectory(mapped) ? mapped : null;
+    const match = mappedDir ? null : posthogCore.pickDirectoryForProjectName(posthogProjectName, listSiblingRepoDirs());
+    const repoDir = mappedDir || (match && isExistingDirectory(match.path) ? match.path : null);
+    if (!repoDir) return null;
+
+    const resolvedPath = path.resolve(repoDir);
+    const name = posthogCore.sanitizeSessionName(path.basename(resolvedPath))
+      || posthogCore.sanitizeSessionName(posthogProjectName);
+    if (!name) return null;
+    for (const [, sess] of sessions) {
+      if (sess.name === name) return null;
+    }
+
+    const project = { id: generateProjectId(), name, path: resolvedPath };
+    const freshConfig = configStore.save(cfg => {
+      cfg.projects.push(project);
+    });
+    if (freshConfig) applyConfigReload(freshConfig);
+    console.log(`[control] posthog-open-session auto-created session: ${name} (${resolvedPath})`);
+    return project;
+  }
+
   // Open (or wake) the Glissa session mapped to this PostHog project and paste an investigation
   // prompt into it, WITHOUT a trailing CR: the operator reads the draft and presses Enter.
   function handlePosthogOpenSession(msg, ws) {
@@ -616,7 +672,8 @@ function registerControlHandlers(controlWss, deps) {
     if (!ref.ok) { reply({ error: ref.error }); return; }
     const found = findPosthogIssue(ref.projectId, ref.issueId);
     if (!found) { reply({ error: 'That issue is not in the latest PostHog poll' }); return; }
-    const project = posthogCore.resolveIssueProject(config.posthog, config.projects, ref.projectId);
+    const project = posthogCore.resolveIssueProject(config.posthog, config.projects, ref.projectId)
+      || autoCreatePosthogProject(ref.projectId, found.projectName);
     if (!project) {
       reply({ error: 'No Glissa session is mapped to this PostHog project (set posthog.projectMap)' });
       return;

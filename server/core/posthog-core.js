@@ -405,6 +405,85 @@ function resolveIssueProject(posthogConfig, projects, projectId) {
   return null;
 }
 
+// Comparison key for "is this directory the repo this PostHog project is about". Display names and
+// directory names disagree on casing and separators far more often than on letters, so both sides
+// collapse to their alphanumerics: "CardHarbor" and "card-harbor" are the same repo, "Keeplings" and
+// "keeplings" are too.
+function slugKey(value) {
+  return String(value ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+}
+
+// Cross-platform absoluteness, because the config file is written on Windows and read by tests (and
+// by a Linux install) where node's path.isAbsolute would call "C:/code/app" relative. Drive-letter
+// and UNC forms count as absolute everywhere.
+function isAbsolutePathish(value) {
+  const raw = String(value ?? '').trim();
+  if (!raw) return false;
+  if (/^[\\/]/.test(raw)) return true;
+  return /^[A-Za-z]:[\\/]/.test(raw);
+}
+
+/**
+ * The folders the operator keeps repos in, inferred from the projects they already manage: each
+ * project path's parent directory, deduped. There is no configured "projects root" in Glissa and
+ * adding one would make every install re-configure, so the existing paths ARE the configuration.
+ */
+function projectParentDirs(projects) {
+  const list = Array.isArray(projects) ? projects.filter((p) => p && typeof p === 'object') : [];
+  const seen = new Set();
+  const dirs = [];
+  for (const project of list) {
+    const raw = String(project.path ?? '').trim().replace(/[\\/]+$/, '');
+    const cut = Math.max(raw.lastIndexOf('/'), raw.lastIndexOf('\\'));
+    if (cut <= 0) continue;
+    const parent = raw.slice(0, cut);
+    const key = normalizePathish(parent);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    dirs.push(parent);
+  }
+  return dirs;
+}
+
+/**
+ * Which candidate directory a PostHog project's display name means, or null.
+ *
+ * Candidates are `{ name, path }` entries listed from the folders above. Two directories matching
+ * the same name is NOT a tie to break by heuristics: the operator has two plausible repos and
+ * guessing one would auto-create a session pointing at the wrong tree, so ambiguity means no match.
+ */
+function pickDirectoryForProjectName(projectName, candidates) {
+  const wanted = slugKey(projectName);
+  if (!wanted) return null;
+  const seen = new Set();
+  const matches = [];
+  for (const candidate of Array.isArray(candidates) ? candidates : []) {
+    if (!candidate || typeof candidate !== 'object') continue;
+    if (slugKey(candidate.name) !== wanted) continue;
+    const key = normalizePathish(candidate.path);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    matches.push({ name: String(candidate.name ?? ''), path: String(candidate.path ?? '') });
+  }
+  if (matches.length !== 1) return null;
+  return matches[0];
+}
+
+// A session name that will pass the control handler's SESSION_NAME_RE, or null when nothing usable
+// survives. Anything outside that charset becomes a dash rather than being dropped, so two repos
+// that differ only in punctuation do not collapse to the same name.
+function sanitizeSessionName(value) {
+  const name = String(value ?? '')
+    .replace(/[^a-zA-Z0-9_\-. ()]+/g, '-')
+    .replace(/-{2,}/g, '-')
+    .trim()
+    .replace(/^[-.\s]+|[-.\s]+$/g, '')
+    .slice(0, 64)
+    .trim();
+  if (!name) return null;
+  return name;
+}
+
 /**
  * Flatten API-derived text for a bracketed paste. ESC in particular would close the paste framing
  * early (the receiving terminal would then read the rest as key input) and CR would submit a prompt
@@ -481,6 +560,11 @@ module.exports = {
   unarchivedInvestigations,
   validateInvestigationId,
   resolveIssueProject,
+  slugKey,
+  isAbsolutePathish,
+  projectParentDirs,
+  pickDirectoryForProjectName,
+  sanitizeSessionName,
   scrubForPaste,
   buildIssueSessionPrompt,
   ISSUE_ACTION_STATUS,

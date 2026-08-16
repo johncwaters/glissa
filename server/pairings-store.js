@@ -25,7 +25,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 
-const { canonicalizePath } = require('../shared/paths');
+const { canonicalizePath, equalsIgnoringCaseOnWindows } = require('../shared/paths');
 const {
   hashSecret, mintPairingToken, decideRedemption, mintDeviceCredential,
 } = require('./core/pairing-token');
@@ -328,7 +328,7 @@ function createPairingsStore({ filePath, now = Date.now, randomBytes, warn = con
       // Watching the DIRECTORY, not the file: the atomic tmp+rename write replaces the inode, which
       // silently detaches a file watcher after the first write.
       watcher = fs.watch(canonicalizePath(dir), (_event, filename) => {
-        if (filename && path.basename(String(filename)) !== path.basename(pairingsPath)) return;
+        if (filename && !equalsIgnoringCaseOnWindows(path.basename(String(filename)), path.basename(pairingsPath))) return;
         clearTimeout(timer);
         timer = setTimeout(refresh, 200);
         if (timer.unref) timer.unref();

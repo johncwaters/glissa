@@ -157,6 +157,75 @@ test('applySettings passes prReview/telegram through only when present on the in
   });
 });
 
+// The reload debounce is 500ms and a self-write suppresses for 500ms after it, so every wait here is
+// a generous multiple of that: these poll to a deadline rather than sleeping a fixed amount.
+const WATCH_DEADLINE_MS = 15000;
+
+function sleep(ms) {
+  return new Promise((resolve) => { setTimeout(resolve, ms); });
+}
+
+async function waitFor(predicate, message) {
+  const deadline = Date.now() + WATCH_DEADLINE_MS;
+  while (Date.now() < deadline) {
+    if (predicate()) return;
+    await sleep(50);
+  }
+  assert.fail(`${message} (waited ${WATCH_DEADLINE_MS}ms)`);
+}
+
+// Runs fn with GLISSA_CONFIG pointed at a temp config, awaiting it before cleanup.
+async function withStoreAsync(cfg, fn) {
+  const { dir, p } = writeTmpConfig(cfg);
+  const prev = process.env.GLISSA_CONFIG;
+  process.env.GLISSA_CONFIG = p;
+  try {
+    return await fn(createConfigStore(), p);
+  } finally {
+    if (prev == null) delete process.env.GLISSA_CONFIG;
+    if (prev != null) process.env.GLISSA_CONFIG = prev;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// The regression this guards: save() commits by tmp+rename, replacing the inode. fs.watch on the
+// FILE is an inotify watch on that inode, so on Linux the watcher silently followed the dead file
+// and no later hand-edit of config.json ever reloaded. Watching the parent directory survives it.
+test('watchForChanges still sees a hand-edit after a save replaced the file inode', async () => {
+  await withStoreAsync({ projects: [] }, async (store, p) => {
+    const reloads = [];
+    const stop = store.watchForChanges((cfg) => { reloads.push(cfg); });
+    try {
+      store.save((cfg) => { cfg.projects.push({ id: 'from-save', name: 's', path: 'C:/s' }); });
+      // Past both the debounce and the self-write suppression window, so the save itself is settled
+      // and cannot be mistaken for the hand-edit below.
+      await sleep(1200);
+      assert.equal(reloads.length, 0, 'a self-write does not reload');
+
+      fs.writeFileSync(p, JSON.stringify({ projects: [{ id: 'hand-edit', name: 'h', path: 'C:/h' }] }, null, 2), 'utf8');
+      await waitFor(() => reloads.length > 0, 'hand-edit after a save never reloaded');
+      assert.equal(reloads[reloads.length - 1].projects[0].id, 'hand-edit', 'callback carries the edited content');
+    } finally {
+      stop();
+    }
+  });
+});
+
+test('watchForChanges ignores directory events for other files', async () => {
+  await withStoreAsync({ projects: [] }, async (store, p) => {
+    const reloads = [];
+    const stop = store.watchForChanges((cfg) => { reloads.push(cfg); });
+    try {
+      fs.writeFileSync(`${p}.tmp.9999`, 'not the config', 'utf8');
+      fs.writeFileSync(path.join(path.dirname(p), 'unrelated.json'), '{}', 'utf8');
+      await sleep(1200);
+      assert.equal(reloads.length, 0, 'a sibling write is not a config change');
+    } finally {
+      stop();
+    }
+  });
+});
+
 test('watchForChanges returns a closer that releases the fs.watch handle', () => {
   withStore({ projects: [] }, (store) => {
     const stop = store.watchForChanges(() => {});

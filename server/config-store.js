@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 
-const { canonicalizePath } = require('../shared/paths');
+const { canonicalizePath, equalsIgnoringCaseOnWindows } = require('../shared/paths');
 
 const DEFAULT_CONFIG = {
   port: 3000,
@@ -144,6 +144,14 @@ function resolveConfigPath() {
   fs.writeFileSync(homeConfig, JSON.stringify(DEFAULT_CONFIG, null, 2), 'utf8');
   console.log(`Created default config at ${homeConfig}`);
   return homeConfig;
+}
+
+/**
+ * Does a directory-watch event name the file we care about? A null filename never reaches here: the
+ * caller treats "no name" as a match and lets the debounced re-read decide.
+ */
+function isTargetFile(filename, targetName) {
+  return equalsIgnoringCaseOnWindows(path.basename(filename), targetName);
 }
 
 function generateProjectId() {
@@ -331,10 +339,22 @@ function createConfigStore({ settingsDefaults } = {}) {
     try {
       // Canonical path required: fs.watch on an 8.3 short path aborts the process from native code,
       // past this catch (see canonicalizePath in shared/paths.js).
-      watcher = fs.watch(canonicalizePath(configPath), () => {
+      const canonicalConfigPath = canonicalizePath(configPath);
+      const watchDir = path.dirname(canonicalConfigPath);
+      const targetName = path.basename(canonicalConfigPath);
+      // Watching the DIRECTORY, not the file: save() commits via tmp+rename, which replaces the
+      // inode, and an inotify watch follows the dead inode - so on Linux a file watcher stopped
+      // seeing hand-edits after the first save. Windows watches the directory either way.
+      watcher = fs.watch(watchDir, (_event, filename) => {
+        if (filename != null && !isTargetFile(String(filename), targetName)) return;
+        // Stamped when the EVENT arrives, not when the debounce fires: the two windows are both
+        // 500ms, so measuring at fire time always reads as "500ms since the self-write" and every
+        // save() (one per persisted session field) would reload its own write back through the
+        // whole settings-reload path.
+        const eventTs = Date.now();
         clearTimeout(reloadTimer);
         reloadTimer = setTimeout(() => {
-          if (Date.now() - _lastSelfWriteTs < 500) return;
+          if (eventTs - _lastSelfWriteTs < 500) return;
           fs.readFile(configPath, 'utf8', handleConfigChange);
         }, 500);
       });
