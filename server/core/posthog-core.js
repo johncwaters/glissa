@@ -64,6 +64,7 @@ const PING_LABELS = {
   needs_human: 'NEEDS HUMAN',
   error: 'ERROR',
   new_high_impact: 'HIGH IMPACT',
+  recurrence_escalated: 'RECURRING',
 };
 
 function stripProtocol(host) {
@@ -178,22 +179,31 @@ function planInvestigations(changes, state = {}, opts = {}) {
 /**
  * Build the Telegram text for one ping kind, or null when the kind never pings. The lane tag comes
  * first so a shared chat can be filtered by lane (mirrors the PR lane's messages).
+ *
+ * `ctx.detail` is an optional Glissa-authored line (the recurrence lane explaining why an old verdict
+ * stopped being trusted). It is flattened like the title: it can quote an issue id from the state
+ * file, and no line of a ping may forge another.
  */
 function pingFor(kind, ctx = {}) {
   const label = PING_LABELS[kind];
   if (!label) return null;
   const head = ctx.projectName ? `[glissa/posthog] ${label} ${ctx.projectName}` : `[glissa/posthog] ${label}`;
-  return [
-    head,
-    displayTitle(ctx.title),
+  const lines = [head, displayTitle(ctx.title)];
+  if (ctx.detail) lines.push(displayTitle(ctx.detail));
+  lines.push(
     `${toCount(ctx.occurrences, 0)} occurrences / ${toCount(ctx.users, 0)} users`,
     String(ctx.url || ''),
-  ].join('\n');
+  );
+  return lines.join('\n');
 }
 
 /**
  * Fold this tick's observation (and an optional investigation result) into the persisted entry.
  * `verdictInfo.at` is passed in rather than read from a clock so this stays synchronously testable.
+ *
+ * `recurrenceOf` names the signature cluster (core/posthog-recurrence.js) this issue was matched
+ * into, and is carried across observations so a verdict landing ticks later still folds back into the
+ * cluster that spawned it instead of opening a second one. An older state file simply has none.
  */
 function nextState(prevEntry, current, verdictInfo = {}) {
   const prev = prevEntry || {};
@@ -212,6 +222,7 @@ function nextState(prevEntry, current, verdictInfo = {}) {
     summaryLine: prev.summaryLine ?? null,
     inFlight: info.inFlight === true,
     pingedPhases: Array.isArray(info.pingedPhases) ? [...info.pingedPhases] : [...(prev.pingedPhases || [])],
+    recurrenceOf: info.recurrenceOf ?? prev.recurrenceOf ?? null,
     history,
   };
   if (!info.verdict) return entry;

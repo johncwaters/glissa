@@ -222,7 +222,7 @@ test('posthog.projects rejects a non-integer or non-positive id', () => {
 });
 
 test('a non-positive posthog numeric field is rejected with settings-error', () => {
-  for (const key of ['intervalMinutes', 'maxConcurrentInvestigations', 'investigationTimeoutSeconds', 'minUsersToInvestigate', 'userEscalationThreshold']) {
+  for (const key of ['intervalMinutes', 'maxConcurrentInvestigations', 'investigationTimeoutSeconds', 'minUsersToInvestigate', 'userEscalationThreshold', 'recurrenceWindowDays', 'transientRecurrenceLimit']) {
     const h = harness({ projects: [], teams: [] });
     h.send({ type: 'update-settings', settings: { posthog: posthogPayload({ [key]: 0 }) } });
     assert.ok(h.sent.find((m) => m.type === 'settings-error' && new RegExp(key).test(m.message)), `rejected ${key}: 0`);
@@ -245,6 +245,27 @@ test('retired posthog keys are dropped rather than persisted', () => {
   });
   assert.equal('allowStatusWrites' in h.cfg.posthog, false);
   assert.equal('dailyDigest' in h.cfg.posthog, false);
+});
+
+// The recurrence-dedupe keys are hand-edited today (the dialog does not render them), so they have to
+// survive a save that never mentions them: the dialog spreads the hydrated object, and only a
+// whitelisted key makes it back through sanitizePosthog.
+test('the recurrence dedupe keys round-trip, and the kill switch is validated as a boolean', () => {
+  const h = harness({ projects: [], teams: [] });
+  h.send({
+    type: 'update-settings',
+    settings: {
+      posthog: posthogPayload({ recurrenceDedupe: false, recurrenceWindowDays: 14, transientRecurrenceLimit: 5 }),
+    },
+  });
+  assert.equal(h.cfg.posthog.recurrenceDedupe, false);
+  assert.equal(h.cfg.posthog.recurrenceWindowDays, 14);
+  assert.equal(h.cfg.posthog.transientRecurrenceLimit, 5);
+
+  const bad = harness({ projects: [], teams: [] });
+  bad.send({ type: 'update-settings', settings: { posthog: posthogPayload({ recurrenceDedupe: 'no' }) } });
+  assert.ok(bad.sent.find((m) => m.type === 'settings-error' && /recurrenceDedupe/.test(m.message)));
+  assert.equal(bad.cfg.posthog, undefined);
 });
 
 test('posthog.repoPath persists and is trimmed; a non-string is rejected', () => {

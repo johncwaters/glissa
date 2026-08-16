@@ -1,6 +1,7 @@
 'use strict';
 
 const core = require('./core/posthog-core');
+const recurrence = require('./core/posthog-recurrence');
 const { normalizeIssues, parseSpikeIssueIds } = require('./posthog-api');
 
 /*
@@ -68,6 +69,11 @@ function createPosthogPoller(deps) {
   const dateRangeHours = deps.dateRangeHours || 24;
   const entryRetentionDays = deps.entryRetentionDays ?? core.DEFAULT_ENTRY_RETENTION_DAYS;
   const archivedRetentionDays = deps.archivedRetentionDays ?? core.DEFAULT_ARCHIVED_RETENTION_DAYS;
+  // Recurrence dedupe is ON unless explicitly disabled: a repeat of a diagnosed non-event is the
+  // common case, and the kill switch exists for an operator who would rather pay than ever miss one.
+  const recurrenceDedupe = deps.recurrenceDedupe !== false;
+  const recurrenceWindowDays = deps.recurrenceWindowDays ?? recurrence.DEFAULT_RECURRENCE_WINDOW_DAYS;
+  const transientRecurrenceLimit = deps.transientRecurrenceLimit ?? recurrence.DEFAULT_TRANSIENT_RECURRENCE_LIMIT;
 
   let state = {};
   let timer = null;
@@ -147,6 +153,23 @@ function createPosthogPoller(deps) {
     return res || { verdict: 'ERROR', summary: 'no verdict' };
   }
 
+  /*
+   * Open or refresh this issue's signature cluster after a TRANSIENT verdict, so the NEXT issue id
+   * PostHog mints for the same non-event has something to match against. An issue investigated as
+   * part of an existing cluster (recurrenceOf, set when it was matched) folds back into that cluster
+   * rather than opening a rival one, which is what keeps the counter and the escalated latch whole.
+   */
+  function recordTransientCluster(change, prev, summaryLine, at) {
+    state[recurrence.SIGNATURES_KEY] = recurrence.recordTransientSignature(state, {
+      key: prev.recurrenceOf || change.key,
+      projectId: change.projectId,
+      issueId: change.issue.issueId,
+      title: change.issue.title,
+      summaryLine,
+      at,
+    });
+  }
+
   function finishInvestigation(change, result) {
     const prev = state[change.key] || {};
     const phases = [...(prev.pingedPhases || [])];
@@ -156,9 +179,13 @@ function createPosthogPoller(deps) {
     if (kind) {
       pingOnce(kind, { ...pingContext(change), summary: result?.summary }, phases);
     }
+    const summaryLine = core.summaryLineFromReportText(result?.summary);
+    if (recurrenceDedupe && verdict === 'TRANSIENT') {
+      recordTransientCluster(change, prev, summaryLine, completedAt);
+    }
     state[change.key] = core.nextState(prev, change.issue, {
       verdict,
-      summaryLine: core.summaryLineFromReportText(result?.summary),
+      summaryLine,
       at: completedAt,
       inFlight: false,
       pingedPhases: phases,
@@ -200,6 +227,20 @@ function createPosthogPoller(deps) {
   }
 
   /*
+   * Age out signature clusters past the recurrence window: past it they can no longer match anything,
+   * so they are dead weight. Runs at the same two seams as the investigations-log prune (state load,
+   * and each tick just before its persist), riding a write that was happening anyway.
+   */
+  function pruneSignatureRegistry() {
+    const before = Object.keys(recurrence.signatureRecords(state)).length;
+    if (before === 0) return false;
+    const pruned = recurrence.pruneSignatures(state, now(), { recurrenceWindowDays });
+    if (Object.keys(pruned).length === before) return false;
+    state[recurrence.SIGNATURES_KEY] = pruned;
+    return true;
+  }
+
+  /*
    * Operator-driven archive of one inbox record. Purely a state edit: nothing is polled, nothing is
    * written to PostHog, and the record stays in the log (archived) rather than being deleted, so the
    * cap keeps behaving as a plain newest-N window.
@@ -234,13 +275,54 @@ function createPosthogPoller(deps) {
   // Mark an issue in-flight and launch its investigation, tracked so stop() drains it. Shared by the
   // tick's planned investigations and the operator's manual re-investigation, so both take the same
   // concurrency slot, the same never-rejecting tracking promise, and the same state bookkeeping.
-  function startInvestigation(change) {
+  function startInvestigation(change, decision = null) {
     state[change.key].inFlight = true;
+    if (decision?.matchKey) state[change.key].recurrenceOf = decision.matchKey;
     const investigation = runInvestigation(change).catch((e) => {
       log.warn(`[posthog-poller] investigation crashed for ${change.key}: ${e.message}`);
     });
     running.add(investigation);
     investigation.finally(() => running.delete(investigation));
+  }
+
+  /*
+   * Record a would-be investigation that the lane's recurrence memory already answered: PostHog minted
+   * a fresh issue id for a non-event a prior session already concluded was TRANSIENT. Nothing spawns.
+   * Everything else is the normal completion path (verdict, inbox record, broadcast, state), so the
+   * row reads like any other investigation minus the cost, and the cluster's counter grows on the
+   * PRIOR record, which outlives this entry when it ages out.
+   */
+  function applyDedupe(item) {
+    const { change, recurrence: decision } = item;
+    state[recurrence.SIGNATURES_KEY] = recurrence.noteRecurrence(state, decision.matchKey, {
+      at: now(),
+      issueId: change.issue.issueId,
+    });
+    const entry = state[change.key] || core.nextState(undefined, change.issue, {});
+    entry.recurrenceOf = decision.matchKey;
+    state[change.key] = entry;
+    return finishInvestigation(change, {
+      verdict: 'TRANSIENT',
+      summary: recurrence.recurrenceSummaryLine(decision),
+    });
+  }
+
+  /*
+   * Stop trusting a cluster's verdict. Latching it escalated is what keeps every later issue out of
+   * the dedupe path, and the ping is the point of the feature: a "transient" on its third repeat, or
+   * one that outgrew a single carbon unit, is exactly what a silent dedupe would have buried.
+   */
+  function applyEscalation(item) {
+    const { change, recurrence: decision } = item;
+    state[recurrence.SIGNATURES_KEY] = recurrence.noteRecurrence(state, decision.matchKey, {
+      at: now(),
+      issueId: change.issue.issueId,
+      escalated: true,
+    });
+    pingAlways('recurrence_escalated', {
+      ...pingContext(change),
+      detail: recurrence.escalationDetail({ ...decision, recurrenceWindowDays }),
+    });
   }
 
   // Absence from one tick is NOT death: queryIssues returns only the top-50 active issues of the last
@@ -323,15 +405,30 @@ function createPosthogPoller(deps) {
       });
     }
 
-    let slots = maxConcurrentInvestigations - inFlightCount();
-    const planned = core.planInvestigations(changes, state, {
-      minUsersToInvestigate, userEscalationThreshold,
+    // One planning call decides everything about a change: whether it earns attention at all, and
+    // whether the lane's recurrence memory already knows the answer. Deduped items still get a
+    // verdict and an inbox record, they just never spawn a session.
+    const plan = recurrence.planIssueActions(changes, state, {
+      minUsersToInvestigate,
+      userEscalationThreshold,
+      recurrenceDedupe,
+      recurrenceWindowDays,
+      transientRecurrenceLimit,
+      now: tickStartedAt,
     });
-    for (const change of planned) {
+    for (const item of plan.dedupe) {
+      await applyDedupe(item);
+    }
+
+    let slots = maxConcurrentInvestigations - inFlightCount();
+    for (const item of plan.investigate) {
       if (slots <= 0) break;
       if (stopped) break;
       slots -= 1;
-      startInvestigation(change);
+      // Escalation is latched only alongside the spawn it justifies: out of slots means undecided,
+      // and the next tick re-decides rather than burning the ping on nothing.
+      if (item.recurrence.action === 'escalate') applyEscalation(item);
+      startInvestigation(item.change, item.recurrence);
     }
 
     // The stamp itself is state, and the next tick's spike cutoff depends on it surviving a restart,
@@ -381,6 +478,7 @@ function createPosthogPoller(deps) {
         summaries.push(res.summary);
       }
       if (pruneInvestigationLog()) dirty = true;
+      if (pruneSignatureRegistry()) dirty = true;
       if (dirty) await persist();
       onTickComplete({
         type: 'posthog-status',
@@ -427,6 +525,7 @@ function createPosthogPoller(deps) {
       if (state[key]) state[key].inFlight = false;
     }
     pruneInvestigationLog();
+    pruneSignatureRegistry();
     await tick();
     timer = setIntervalFn(() => { void tick(); }, intervalMinutes * 60000);
     if (timer && typeof timer.unref === 'function') timer.unref();

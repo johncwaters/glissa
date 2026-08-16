@@ -45,11 +45,14 @@ const POSTHOG_NUMERIC_KEYS = [
   'investigationTimeoutSeconds',
   'minUsersToInvestigate',
   'userEscalationThreshold',
+  'recurrenceWindowDays',
+  'transientRecurrenceLimit',
 ];
-// Only `enabled` exists. allowStatusWrites/dailyDigest were validated and persisted here while no
-// module in the lane ever read them, which promised behavior (PostHog writes, a digest) that does not
-// exist; a key earns a place in this list when something consumes it.
-const POSTHOG_BOOLEAN_KEYS = ['enabled'];
+// `recurrenceDedupe` is the recurrence-dedupe kill switch and defaults to ON, so absence means
+// enabled; the poller reads it as `!== false`. allowStatusWrites/dailyDigest were validated and
+// persisted here while no module in the lane ever read them, which promised behavior (PostHog writes,
+// a digest) that does not exist; a key earns a place in this list when something consumes it.
+const POSTHOG_BOOLEAN_KEYS = ['enabled', 'recurrenceDedupe'];
 const POSTHOG_STRING_KEYS = ['host', 'apiKey', 'repoPath'];
 
 // Single wire-format builder for every 'error'/'settings-error' reply, so all call sites agree on the

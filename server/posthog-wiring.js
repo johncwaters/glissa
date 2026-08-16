@@ -351,6 +351,9 @@ function createPosthogWiring({
         investigationTimeoutSeconds: config.posthog.investigationTimeoutSeconds || 900,
         minUsersToInvestigate: config.posthog.minUsersToInvestigate,
         userEscalationThreshold: config.posthog.userEscalationThreshold,
+        recurrenceDedupe: config.posthog.recurrenceDedupe,
+        recurrenceWindowDays: config.posthog.recurrenceWindowDays,
+        transientRecurrenceLimit: config.posthog.transientRecurrenceLimit,
         onTickComplete: (summary) => {
           lastStatus = summary;
           broadcast(summary);

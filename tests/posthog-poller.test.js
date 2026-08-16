@@ -60,6 +60,9 @@ function harness(over = {}) {
     maxConcurrentInvestigations: over.maxConcurrentInvestigations || 2,
     minUsersToInvestigate: over.minUsersToInvestigate ?? 1,
     userEscalationThreshold: over.userEscalationThreshold ?? 25,
+    recurrenceDedupe: over.recurrenceDedupe,
+    recurrenceWindowDays: over.recurrenceWindowDays,
+    transientRecurrenceLimit: over.transientRecurrenceLimit,
   };
   return { deps, pings, summaries, stateStore, poller: createPosthogPoller(deps) };
 }
@@ -739,4 +742,238 @@ test('the investigations log is never treated as an issue entry', async () => {
   assert.ok(Array.isArray(goneStore.value._investigations), 'still a plain array');
   assert.equal(goneStore.value._investigations.length, 1, 'the record outlives its issue');
   assert.equal(goneStore.value._investigations[0].archived, false);
+});
+
+// --- recurrence dedupe and escalation (server/core/posthog-recurrence.js) ---
+//
+// PostHog mints a new issue id whenever an error's grouping fingerprint shifts, so one non-event
+// bought two full investigations hours apart, both concluding TRANSIENT. These cover the lane's
+// cross-issue memory: the second id costs nothing, and a pattern that changes stops trusting it.
+
+const CHUNK_A = 'TypeError: Failed to fetch dynamically imported module: https://shop.example.com/assets/maplibre-gl-B3nQ.js';
+const CHUNK_B = 'TypeError: Failed to fetch dynamically imported module: https://shop.example.com/assets/maplibre-gl-Zk91.js';
+const CHUNK_SUMMARY = 'A crawler failed to lazy-load the map chunk; no code defect.';
+
+function chunkRow(id, name, users = 1) {
+  return issueRow({ id, name, aggregations: { occurrences: 4, users } });
+}
+
+// A cluster as the lane would have written it after one TRANSIENT verdict on iss-1.
+function seedCluster(over = {}) {
+  return {
+    _signatures: {
+      'ph.test/1#iss-1': {
+        projectId: '1',
+        issueId: 'iss-1',
+        title: CHUNK_A,
+        summaryLine: CHUNK_SUMMARY,
+        firstAt: 1000,
+        lastAt: 1000,
+        recurrences: 0,
+        escalated: false,
+        recurredIssueIds: [],
+        ...over,
+      },
+    },
+  };
+}
+
+test('a fresh issue id for an already-diagnosed transient is deduped, not investigated', async () => {
+  let issues = [chunkRow('iss-1', CHUNK_A)];
+  const spawned = [];
+  const { poller, stateStore, pings } = harness({
+    api: { queryIssues: async () => ({ ok: true, body: { results: issues } }) },
+    spawnInvestigation: async (a) => {
+      spawned.push(a.issue.issueId);
+      return { verdict: 'TRANSIENT', summary: CHUNK_SUMMARY };
+    },
+    now: () => 1000,
+  });
+  await poller.start();
+  await flush();
+  assert.deepEqual(spawned, ['iss-1'], 'the first sighting is investigated normally');
+  assert.equal(stateStore.value._signatures['ph.test/1#iss-1'].recurrences, 0, 'the transient opened a cluster');
+
+  issues = [chunkRow('iss-2', CHUNK_B)];
+  await poller.tick();
+  await flush();
+
+  const key = 'ph.test/1#iss-2';
+  assert.deepEqual(spawned, ['iss-1'], 'the twin issue never spawned a session');
+  assert.equal(poller._state()[key].verdict, 'TRANSIENT');
+  assert.match(poller._state()[key].summaryLine, /matches prior transient issue iss-1/);
+  assert.equal(poller._state()[key].recurrenceOf, 'ph.test/1#iss-1');
+  assert.equal(stateStore.value._signatures['ph.test/1#iss-1'].recurrences, 1, 'the counter lives on the prior');
+  assert.deepEqual(stateStore.value._signatures['ph.test/1#iss-1'].recurredIssueIds, ['iss-2']);
+  assert.equal(stateStore.value._investigations.length, 2, 'the deduped verdict still reaches the inbox');
+  assert.equal(stateStore.value._investigations[1].verdict, 'TRANSIENT');
+  assert.deepEqual(pings, [], 'a first repeat is not worth a phone buzz');
+});
+
+test('a deduped issue is quiet on the next tick: the verdict is its own now', async () => {
+  let spawned = 0;
+  const { poller } = harness({
+    initialState: seedCluster(),
+    api: { queryIssues: async () => ({ ok: true, body: { results: [chunkRow('iss-2', CHUNK_B)] } }) },
+    spawnInvestigation: async () => { spawned += 1; return { verdict: 'TRANSIENT', summary: CHUNK_SUMMARY }; },
+    now: () => 2000,
+  });
+  await poller.start();
+  await flush();
+  await poller.tick();
+  await flush();
+  assert.equal(spawned, 0, 'no session, on either tick');
+  assert.equal(poller._state()._signatures['ph.test/1#iss-1'].recurrences, 1, 'counted exactly once');
+});
+
+test('the configured repeat escalates: a real investigation runs and the phone hears about it', async () => {
+  const spawned = [];
+  const { poller, pings } = harness({
+    initialState: seedCluster({ recurrences: 2 }),
+    api: { queryIssues: async () => ({ ok: true, body: { results: [chunkRow('iss-4', CHUNK_B)] } }) },
+    spawnInvestigation: async (a) => { spawned.push(a.issue.issueId); return { verdict: 'ROOT_CAUSE', summary: 'real defect' }; },
+    now: () => 2000,
+  });
+  await poller.start();
+  await flush();
+
+  assert.deepEqual(spawned, ['iss-4'], 'the third repeat is paid for');
+  assert.equal(pings.length, 1);
+  assert.match(pings[0], /^\[glissa\/posthog\] RECURRING web$/m);
+  assert.match(pings[0], /recurring transient escalated: repeat 3 within 7 days of issue iss-1/);
+  const cluster = poller._state()._signatures['ph.test/1#iss-1'];
+  assert.equal(cluster.escalated, true, 'the cluster stops being reusable');
+  assert.equal(cluster.recurrences, 3);
+  assert.equal(poller._state()['ph.test/1#iss-4'].verdict, 'ROOT_CAUSE');
+});
+
+test('an escalated cluster never dedupes again and never re-pings', async () => {
+  const spawned = [];
+  const { poller, pings } = harness({
+    initialState: seedCluster({ recurrences: 3, escalated: true }),
+    api: { queryIssues: async () => ({ ok: true, body: { results: [chunkRow('iss-5', CHUNK_B)] } }) },
+    spawnInvestigation: async (a) => { spawned.push(a.issue.issueId); return { verdict: 'TRANSIENT', summary: CHUNK_SUMMARY }; },
+    now: () => 2000,
+  });
+  await poller.start();
+  await flush();
+  assert.deepEqual(spawned, ['iss-5']);
+  assert.deepEqual(pings, [], 'the escalation ping already fired for this cluster');
+});
+
+test('a repeat affecting more than one user escalates on its first sighting', async () => {
+  const spawned = [];
+  const { poller, pings } = harness({
+    initialState: seedCluster(),
+    api: { queryIssues: async () => ({ ok: true, body: { results: [chunkRow('iss-3', CHUNK_B, 4)] } }) },
+    spawnInvestigation: async (a) => { spawned.push(a.issue.issueId); return { verdict: 'NEEDS_HUMAN', summary: 'wider than a crawler' }; },
+    now: () => 2000,
+  });
+  await poller.start();
+  await flush();
+
+  assert.deepEqual(spawned, ['iss-3'], 'a blast radius past one carbon unit is not a transient');
+  assert.match(pings[0], /RECURRING web/);
+  assert.match(pings[0], /now affecting more than one user/);
+  assert.equal(poller._state()._signatures['ph.test/1#iss-1'].escalated, true);
+});
+
+test('a spiking repeat escalates rather than reusing the old verdict', async () => {
+  const spawned = [];
+  const { poller, pings } = harness({
+    initialState: seedCluster(),
+    api: {
+      queryIssues: async () => ({ ok: true, body: { results: [chunkRow('iss-6', CHUNK_B)] } }),
+      listSpikeEvents: async () => ({ ok: true, body: { results: [{ issue_id: 'iss-6', timestamp: '2099-01-01T00:00:00Z' }] } }),
+    },
+    spawnInvestigation: async (a) => { spawned.push(a.issue.issueId); return { verdict: 'ROOT_CAUSE', summary: 'real defect' }; },
+    now: () => 2000,
+  });
+  await poller.start();
+  await flush();
+
+  assert.deepEqual(spawned, ['iss-6']);
+  assert.ok(pings.some((p) => /RECURRING web/.test(p) && /spiking/.test(p)), 'the escalation names the spike');
+});
+
+test('an unrelated error is never deduped into an existing cluster', async () => {
+  const spawned = [];
+  const { poller } = harness({
+    initialState: seedCluster(),
+    api: {
+      queryIssues: async () => ({
+        ok: true,
+        body: { results: [chunkRow('iss-7', 'RangeError: invoice pagination cursor out of bounds')] },
+      }),
+    },
+    spawnInvestigation: async (a) => { spawned.push(a.issue.issueId); return { verdict: 'ROOT_CAUSE', summary: 'off by one' }; },
+    now: () => 2000,
+  });
+  await poller.start();
+  await flush();
+  assert.deepEqual(spawned, ['iss-7']);
+});
+
+test('the recurrenceDedupe kill switch restores the prior behavior exactly', async () => {
+  const spawned = [];
+  const { poller, stateStore, pings } = harness({
+    recurrenceDedupe: false,
+    initialState: seedCluster(),
+    api: { queryIssues: async () => ({ ok: true, body: { results: [chunkRow('iss-2', CHUNK_B)] } }) },
+    spawnInvestigation: async (a) => { spawned.push(a.issue.issueId); return { verdict: 'TRANSIENT', summary: CHUNK_SUMMARY }; },
+    now: () => 2000,
+  });
+  await poller.start();
+  await flush();
+
+  assert.deepEqual(spawned, ['iss-2'], 'every issue is investigated, as before');
+  assert.deepEqual(pings, []);
+  assert.equal(stateStore.value._signatures['ph.test/1#iss-1'].recurrences, 0, 'no cluster bookkeeping happens');
+  assert.equal(stateStore.value._signatures['ph.test/1#iss-2'], undefined, 'and the transient verdict opens none');
+});
+
+test('a state file written before recurrence memory existed loads and behaves as before', async () => {
+  const spawned = [];
+  const { poller, stateStore } = harness({
+    // An old file records a TRANSIENT verdict on iss-1 with no cluster anywhere, and iss-1 has since
+    // been assumed resolved, so its reappearance is a regression.
+    initialState: {
+      'ph.test/1#iss-1': {
+        status: 'resolved', lastOccurrences: 4, lastUsers: 1, verdict: 'TRANSIENT', summaryLine: CHUNK_SUMMARY, pingedPhases: [],
+      },
+    },
+    api: { queryIssues: async () => ({ ok: true, body: { results: [chunkRow('iss-1', CHUNK_A), chunkRow('iss-2', CHUNK_B)] } }) },
+    spawnInvestigation: async (a) => { spawned.push(a.issue.issueId); return { verdict: 'ROOT_CAUSE', summary: 'real defect' }; },
+    now: () => 1000,
+  });
+  await poller.start();
+  await flush();
+  assert.deepEqual(spawned.sort(), ['iss-1', 'iss-2'], 'an old verdict with no cluster dedupes nothing');
+  assert.equal(stateStore.value._signatures, undefined, 'a non-transient verdict writes no registry');
+});
+
+test('a cluster past the recurrence window is pruned and stops deduping', async () => {
+  const day = 86400000;
+  const spawned = [];
+  const { poller, stateStore } = harness({
+    initialState: seedCluster({ lastAt: 1000 }),
+    api: { queryIssues: async () => ({ ok: true, body: { results: [chunkRow('iss-8', CHUNK_B)] } }) },
+    spawnInvestigation: async (a) => { spawned.push(a.issue.issueId); return { verdict: 'ROOT_CAUSE', summary: 'real defect' }; },
+    now: () => 1000 + (8 * day),
+  });
+  await poller.start();
+  await flush();
+  assert.deepEqual(spawned, ['iss-8'], 'a week-old transient is not evidence');
+  assert.deepEqual(stateStore.value._signatures, {}, 'and the dead cluster went with the tick');
+});
+
+test('the signature registry is never treated as an issue entry', async () => {
+  const { poller } = harness({
+    initialState: seedCluster(),
+    api: { queryIssues: async () => ({ ok: true, body: { results: [] } }) },
+    now: () => 2000,
+  });
+  await poller.start();
+  await flush();
+  assert.ok(poller._state()._signatures['ph.test/1#iss-1'], 'reconcileVanished skipped the underscore key');
 });
