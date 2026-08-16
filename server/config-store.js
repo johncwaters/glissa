@@ -146,14 +146,6 @@ function resolveConfigPath() {
   return homeConfig;
 }
 
-/**
- * Does a directory-watch event name the file we care about? A null filename never reaches here: the
- * caller treats "no name" as a match and lets the debounced re-read decide.
- */
-function isTargetFile(filename, targetName) {
-  return equalsIgnoringCaseOnWindows(path.basename(filename), targetName);
-}
-
 function generateProjectId() {
   return crypto.randomUUID();
 }
@@ -346,7 +338,7 @@ function createConfigStore({ settingsDefaults } = {}) {
       // inode, and an inotify watch follows the dead inode - so on Linux a file watcher stopped
       // seeing hand-edits after the first save. Windows watches the directory either way.
       watcher = fs.watch(watchDir, (_event, filename) => {
-        if (filename != null && !isTargetFile(String(filename), targetName)) return;
+        if (filename != null && !equalsIgnoringCaseOnWindows(path.basename(String(filename)), targetName)) return;
         // Stamped when the EVENT arrives, not when the debounce fires: the two windows are both
         // 500ms, so measuring at fire time always reads as "500ms since the self-write" and every
         // save() (one per persisted session field) would reload its own write back through the
