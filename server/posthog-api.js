@@ -20,6 +20,9 @@
 
 const DEFAULT_ISSUE_LIMIT = 50;
 const DEFAULT_DATE_RANGE_HOURS = 24;
+const DEFAULT_BASELINE_DAYS = 7;
+const MAX_BASELINE_DAYS = 30;
+const CURRENT_WINDOW_MINUTES = 60;
 
 function toCount(value, fallback = 0) {
   const n = Number(value);
@@ -95,6 +98,15 @@ function parseSpikeIssueIds(body, sinceTs = 0) {
   return ids;
 }
 
+// The traffic query is the one place a config value reaches SQL text, so it is reduced to a whole
+// number inside a fixed range first: anything unparseable becomes the default, never an expression.
+function clampBaselineDays(value) {
+  if (value == null || value === '') return DEFAULT_BASELINE_DAYS;
+  const n = Math.trunc(Number(value));
+  if (!Number.isFinite(n)) return DEFAULT_BASELINE_DAYS;
+  return Math.min(MAX_BASELINE_DAYS, Math.max(1, n));
+}
+
 function createPosthogApi({ host, apiKey, fetchFn } = {}) {
   const base = String(host || '').replace(/\/+$/, '');
   const doFetch = fetchFn || ((url, init) => fetch(url, init));
@@ -140,6 +152,47 @@ function createPosthogApi({ host, apiKey, fetchFn } = {}) {
     });
   }
 
+  function runHogQL(projectId, query) {
+    return request(`/api/projects/${encodeURIComponent(projectId)}/query/`, {
+      method: 'POST',
+      body: { query: { kind: 'HogQLQuery', query } },
+    });
+  }
+
+  /*
+   * Hourly unique-user counts over the baseline window, plus the trailing hour, for the traffic
+   * spike lane. Two small queries rather than a union: the baseline is a series and the current
+   * window is a scalar, and one query returning both would need a synthetic marker column that the
+   * caller then has to split apart again.
+   *
+   * `baselineDays` is the ONLY caller-supplied value anywhere near this SQL and it is clamped to a
+   * whole number in 1..30 before interpolation; nothing else is interpolated at all.
+   */
+  async function queryTrafficBuckets(projectId, { baselineDays = DEFAULT_BASELINE_DAYS } = {}) {
+    const days = clampBaselineDays(baselineDays);
+    const bucketsRes = await runHogQL(projectId, [
+      'SELECT toStartOfHour(timestamp) AS bucket, count(DISTINCT person_id) AS users',
+      'FROM events',
+      `WHERE timestamp >= now() - INTERVAL ${days} DAY AND timestamp < toStartOfHour(now())`,
+      'GROUP BY bucket ORDER BY bucket',
+    ].join(' '));
+    if (!bucketsRes.ok) return bucketsRes;
+    const currentRes = await runHogQL(projectId, [
+      'SELECT count(DISTINCT person_id) AS users',
+      'FROM events',
+      `WHERE timestamp >= now() - INTERVAL ${CURRENT_WINDOW_MINUTES} MINUTE`,
+    ].join(' '));
+    if (!currentRes.ok) return currentRes;
+    return {
+      ok: true,
+      buckets: extractRows(bucketsRes.body).map((row) => ({
+        bucket: firstDefined(row.bucket, row.hour, null) ?? null,
+        users: toCount(row.users, 0),
+      })),
+      currentUsers: toCount(extractRows(currentRes.body)[0]?.users, 0),
+    };
+  }
+
   function listSpikeEvents(projectId) {
     return request(`/api/projects/${encodeURIComponent(projectId)}/error_tracking/spikes/`);
   }
@@ -165,6 +218,7 @@ function createPosthogApi({ host, apiKey, fetchFn } = {}) {
     listOrganizations,
     listProjects,
     queryIssues,
+    queryTrafficBuckets,
     listSpikeEvents,
     listRecommendations,
     updateIssueStatus,
@@ -177,4 +231,7 @@ module.exports = {
   normalizeIssues,
   parseSpikeIssueIds,
   extractRows,
+  clampBaselineDays,
+  DEFAULT_BASELINE_DAYS,
+  MAX_BASELINE_DAYS,
 };

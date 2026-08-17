@@ -149,6 +149,11 @@ function posthogPayload(over = {}) {
     minUsersToInvestigate: 1,
     userEscalationThreshold: 25,
     repoPath: '/repo/web',
+    trafficSpikeEnabled: true,
+    trafficSpikeMultiplier: 3,
+    trafficSpikeMinUsers: 10,
+    trafficSpikeCooldownMinutes: 360,
+    trafficSpikeBaselineDays: 7,
     ...over,
   };
 }
@@ -227,6 +232,52 @@ test('a non-positive posthog numeric field is rejected with settings-error', () 
     h.send({ type: 'update-settings', settings: { posthog: posthogPayload({ [key]: 0 }) } });
     assert.ok(h.sent.find((m) => m.type === 'settings-error' && new RegExp(key).test(m.message)), `rejected ${key}: 0`);
   }
+});
+
+// The traffic spike lane's keys. They ride the same whitelist as the rest of the posthog block, but
+// their bounds are their own: a spike multiplier under 1 would fire on every quiet hour, and the
+// baseline window has to stay inside what the HogQL query clamps to.
+test('a traffic spike multiplier below 1 is rejected', () => {
+  const h = harness({ projects: [], teams: [] });
+  h.send({ type: 'update-settings', settings: { posthog: posthogPayload({ trafficSpikeMultiplier: 0.5 }) } });
+  assert.ok(h.sent.find((m) => m.type === 'settings-error' && /trafficSpikeMultiplier/.test(m.message)));
+  assert.equal(h.cfg.posthog, undefined);
+});
+
+test('a traffic spike cooldown of zero is accepted (never mute a spike)', () => {
+  const h = harness({ projects: [], teams: [] });
+  h.send({ type: 'update-settings', settings: { posthog: posthogPayload({ trafficSpikeCooldownMinutes: 0 }) } });
+  assert.equal(h.cfg.posthog.trafficSpikeCooldownMinutes, 0);
+});
+
+test('a negative traffic spike cooldown is rejected', () => {
+  const h = harness({ projects: [], teams: [] });
+  h.send({ type: 'update-settings', settings: { posthog: posthogPayload({ trafficSpikeCooldownMinutes: -1 }) } });
+  assert.ok(h.sent.find((m) => m.type === 'settings-error' && /trafficSpikeCooldownMinutes/.test(m.message)));
+});
+
+test('a traffic baseline window outside 1..30 days is rejected', () => {
+  for (const days of [0, 31, 365]) {
+    const h = harness({ projects: [], teams: [] });
+    h.send({ type: 'update-settings', settings: { posthog: posthogPayload({ trafficSpikeBaselineDays: days }) } });
+    assert.ok(
+      h.sent.find((m) => m.type === 'settings-error' && /trafficSpikeBaselineDays/.test(m.message)),
+      `rejected ${days} days`,
+    );
+  }
+});
+
+test('a non-boolean trafficSpikeEnabled is rejected rather than coerced', () => {
+  const h = harness({ projects: [], teams: [] });
+  h.send({ type: 'update-settings', settings: { posthog: posthogPayload({ trafficSpikeEnabled: 'yes' }) } });
+  assert.ok(h.sent.find((m) => m.type === 'settings-error' && /trafficSpikeEnabled/.test(m.message)));
+  assert.equal(h.cfg.posthog, undefined);
+});
+
+test('trafficSpikeEnabled: false persists rather than being dropped as falsy', () => {
+  const h = harness({ projects: [], teams: [] });
+  h.send({ type: 'update-settings', settings: { posthog: posthogPayload({ trafficSpikeEnabled: false }) } });
+  assert.equal(h.cfg.posthog.trafficSpikeEnabled, false);
 });
 
 test('a non-object posthog.projectMap is rejected with settings-error', () => {

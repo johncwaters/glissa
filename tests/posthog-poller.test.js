@@ -63,6 +63,11 @@ function harness(over = {}) {
     recurrenceDedupe: over.recurrenceDedupe,
     recurrenceWindowDays: over.recurrenceWindowDays,
     transientRecurrenceLimit: over.transientRecurrenceLimit,
+    trafficSpikeEnabled: over.trafficSpikeEnabled,
+    trafficSpikeMultiplier: over.trafficSpikeMultiplier,
+    trafficSpikeMinUsers: over.trafficSpikeMinUsers,
+    trafficSpikeCooldownMinutes: over.trafficSpikeCooldownMinutes,
+    trafficSpikeBaselineDays: over.trafficSpikeBaselineDays,
   };
   return { deps, pings, summaries, stateStore, poller: createPosthogPoller(deps) };
 }
@@ -995,4 +1000,151 @@ test('the signature registry is never treated as an issue entry', async () => {
   await poller.start();
   await flush();
   assert.ok(poller._state()._signatures['ph.test/1#iss-1'], 'reconcileVanished skipped the underscore key');
+});
+
+// ---------------------------------------------------------------------------
+// The traffic spike lane: same tick, its own state slice, failure-isolated from issue triage.
+// ---------------------------------------------------------------------------
+
+const HOUR_MS = 3600000;
+
+// A flat baseline of `users` per hour over two days, i.e. a project with a very stable normal.
+function trafficBody(currentUsers, baselineUsers = 10, hours = 48) {
+  return {
+    ok: true,
+    buckets: Array.from({ length: hours }, (_, i) => ({ bucket: `h${i}`, users: baselineUsers })),
+    currentUsers,
+  };
+}
+
+// A poller harness whose api answers the traffic query from a queue of bodies (one per tick).
+function trafficHarness(bodies, over = {}) {
+  const trafficCalls = [];
+  const built = harness({
+    ...over,
+    api: {
+      queryIssues: async () => ({ ok: true, body: { results: [] } }),
+      queryTrafficBuckets: async (projectId, opts) => {
+        trafficCalls.push({ projectId, opts });
+        const body = bodies[Math.min(trafficCalls.length - 1, bodies.length - 1)];
+        if (typeof body === 'function') return body();
+        return body;
+      },
+      ...over.api,
+    },
+  });
+  return { ...built, trafficCalls };
+}
+
+test('a traffic spike pings once and persists its state slice', async () => {
+  const { poller, pings, stateStore } = trafficHarness([trafficBody(87)], { now: () => HOUR_MS });
+  await poller.start();
+  await flush();
+
+  assert.equal(pings.length, 1);
+  assert.match(pings[0], /^\[glissa\/posthog\] TRAFFIC SPIKE web$/m);
+  assert.match(pings[0], /87 users in the last hour, ~8\.7x normal \(p90 10\)/);
+  assert.equal(pings[0].includes('occurrences'), false, 'a project-level ping carries no issue counts');
+  assert.deepEqual(stateStore.value._traffic['1'], {
+    active: true, lastPingAt: HOUR_MS, lastPingedUsers: 87, peakUsers: 87,
+  });
+});
+
+test('a spike that persists across ticks is not re-pinged', async () => {
+  const { poller, pings } = trafficHarness([trafficBody(87), trafficBody(90)], { now: () => HOUR_MS });
+  await poller.start();
+  await flush();
+  await poller.tick();
+  await flush();
+
+  assert.equal(pings.length, 1, 'the second tick saw the same spike, already reported');
+  assert.equal(poller._state()._traffic['1'].peakUsers, 90);
+});
+
+test('a spike that doubles again escalates with its own label', async () => {
+  const { poller, pings } = trafficHarness([trafficBody(87), trafficBody(200)], { now: () => HOUR_MS });
+  await poller.start();
+  await flush();
+  await poller.tick();
+  await flush();
+
+  assert.equal(pings.length, 2);
+  assert.match(pings[1], /^\[glissa\/posthog\] TRAFFIC CLIMBING web$/m);
+  assert.match(pings[1], /200 users in the last hour/);
+  assert.equal(poller._state()._traffic['1'].lastPingedUsers, 200);
+});
+
+test('traffic falling back to normal clears the state without a ping', async () => {
+  const { poller, pings } = trafficHarness([trafficBody(87), trafficBody(11)], { now: () => HOUR_MS });
+  await poller.start();
+  await flush();
+  await poller.tick();
+  await flush();
+
+  assert.equal(pings.length, 1, 'spike over is not news');
+  assert.equal(poller._state()._traffic['1'].active, false);
+});
+
+test('a baseline shorter than a day never pings', async () => {
+  const { poller, pings } = trafficHarness([trafficBody(500, 2, 12)], { now: () => HOUR_MS });
+  await poller.start();
+  await flush();
+  assert.deepEqual(pings, []);
+});
+
+test('a traffic query that throws leaves issue triage untouched and never pings', async () => {
+  const spawned = [];
+  const { poller, pings } = trafficHarness([() => { throw new Error('no query scope'); }], {
+    api: { queryIssues: async () => ({ ok: true, body: { results: [issueRow()] } }) },
+    spawnInvestigation: async (a) => { spawned.push(a.issue.issueId); return { verdict: 'ROOT_CAUSE' }; },
+  });
+  await poller.start();
+  await flush();
+
+  assert.deepEqual(spawned, ['iss-1'], 'the issue lane ran to completion');
+  assert.equal(poller._state()[KEY].verdict, 'ROOT_CAUSE');
+  assert.deepEqual(pings, [], 'a broken traffic query never buzzes the operator');
+  assert.equal(poller._state()._traffic, undefined, 'and wrote no state slice');
+});
+
+test('a failed traffic response is logged, not thrown, and leaves the slice alone', async () => {
+  const { poller, pings } = trafficHarness([{ ok: false, error: 'HTTP 403' }]);
+  await poller.start();
+  await flush();
+  assert.deepEqual(pings, []);
+  assert.equal(poller._state()._traffic, undefined);
+});
+
+test('the traffic slice is never treated as an issue entry', async () => {
+  const { poller } = trafficHarness([trafficBody(87)], { now: () => HOUR_MS });
+  await poller.start();
+  await flush();
+  await poller.tick();
+  await flush();
+  assert.ok(poller._state()._traffic['1'], 'reconcileVanished skipped the underscore key');
+});
+
+test('the configured baseline window reaches the query', async () => {
+  const { poller, trafficCalls } = trafficHarness([trafficBody(1)], { trafficSpikeBaselineDays: 14 });
+  await poller.start();
+  await flush();
+  assert.equal(trafficCalls[0].opts.baselineDays, 14);
+});
+
+test('trafficSpikeEnabled: false makes zero traffic calls', async () => {
+  const { poller, pings, trafficCalls } = trafficHarness([trafficBody(87)], {
+    trafficSpikeEnabled: false, now: () => HOUR_MS,
+  });
+  await poller.start();
+  await flush();
+  assert.equal(trafficCalls.length, 0);
+  assert.deepEqual(pings, []);
+  assert.equal(poller._state()._traffic, undefined);
+});
+
+test('an api with no traffic method (an older client) is skipped rather than crashed on', async () => {
+  const { poller, pings } = harness({ api: { queryIssues: async () => ({ ok: true, body: { results: [] } }) } });
+  await poller.start();
+  await flush();
+  assert.deepEqual(pings, []);
 });

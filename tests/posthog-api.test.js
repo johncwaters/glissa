@@ -8,6 +8,9 @@ const {
   normalizeIssue,
   normalizeIssues,
   parseSpikeIssueIds,
+  clampBaselineDays,
+  DEFAULT_BASELINE_DAYS,
+  MAX_BASELINE_DAYS,
 } = require('../server/posthog-api');
 
 // --- normalizeIssue: the shapes the query endpoint is known to return, plus defensive fallbacks ---
@@ -240,4 +243,118 @@ test('updateIssueStatus survives a transport error', async () => {
   const res = await api.updateIssueStatus(1, 'iss-1', 'suppressed');
   assert.equal(res.ok, false);
   assert.match(res.error, /ECONNRESET/);
+});
+
+// --- queryTrafficBuckets: the traffic spike lane's two read-only HogQL queries ---
+
+function trafficFetch(calls, bodies) {
+  return async (url, init) => {
+    calls.push({ url, init });
+    return fakeResponse({ body: bodies[calls.length - 1] });
+  };
+}
+
+test('queryTrafficBuckets POSTs two HogQL queries to the query endpoint with a bearer token', async () => {
+  const calls = [];
+  const api = createPosthogApi({
+    host: 'https://eu.posthog.com/',
+    apiKey: 'phx_secret',
+    fetchFn: trafficFetch(calls, [
+      { columns: ['bucket', 'users'], results: [['2026-08-15T09:00:00Z', 12]] },
+      { columns: ['users'], results: [[87]] },
+    ]),
+  });
+
+  const res = await api.queryTrafficBuckets(42, { baselineDays: 7 });
+
+  assert.equal(res.ok, true);
+  assert.equal(calls.length, 2);
+  for (const call of calls) {
+    assert.equal(call.url, 'https://eu.posthog.com/api/projects/42/query/');
+    assert.equal(call.init.method, 'POST');
+    assert.equal(call.init.headers.Authorization, 'Bearer phx_secret');
+    assert.equal(JSON.parse(call.init.body).query.kind, 'HogQLQuery');
+  }
+  const baselineSql = JSON.parse(calls[0].init.body).query.query;
+  assert.match(baselineSql, /toStartOfHour\(timestamp\) AS bucket/);
+  assert.match(baselineSql, /count\(DISTINCT person_id\) AS users/);
+  assert.match(baselineSql, /INTERVAL 7 DAY/);
+  assert.match(baselineSql, /timestamp < toStartOfHour\(now\(\)\)/, 'the partial current hour is excluded');
+  assert.match(JSON.parse(calls[1].init.body).query.query, /INTERVAL 60 MINUTE/);
+});
+
+test('queryTrafficBuckets parses the positional HogQL matrix into buckets and a current count', async () => {
+  const api = createPosthogApi({
+    host: 'https://eu.posthog.com',
+    apiKey: 'k',
+    fetchFn: trafficFetch([], [
+      { columns: ['bucket', 'users'], results: [['h1', 3], ['h2', '9']] },
+      { columns: ['users'], results: [[87]] },
+    ]),
+  });
+  const res = await api.queryTrafficBuckets(1, {});
+  assert.deepEqual(res.buckets, [{ bucket: 'h1', users: 3 }, { bucket: 'h2', users: 9 }]);
+  assert.equal(res.currentUsers, 87);
+});
+
+test('queryTrafficBuckets degrades to zero rather than NaN on an unusable body', async () => {
+  const api = createPosthogApi({
+    host: 'https://eu.posthog.com',
+    apiKey: 'k',
+    fetchFn: async () => fakeResponse({ body: { nope: true } }),
+  });
+  const res = await api.queryTrafficBuckets(1, {});
+  assert.equal(res.ok, true);
+  assert.deepEqual(res.buckets, []);
+  assert.equal(res.currentUsers, 0);
+});
+
+test('queryTrafficBuckets clamps baselineDays into 1..30 and never interpolates anything else', async () => {
+  const cases = [
+    [0, 1], [-5, 1], [1, 1], [30, 30], [365, 30], [7.9, 7],
+    ['9', 9], [undefined, 7], [null, 7], [Number.NaN, 7],
+    ['1 DAY UNION ALL SELECT 1', 7],
+  ];
+  for (const [input, expected] of cases) {
+    const calls = [];
+    const api = createPosthogApi({
+      host: 'https://eu.posthog.com',
+      apiKey: 'k',
+      fetchFn: trafficFetch(calls, [{ results: [] }, { results: [] }]),
+    });
+    await api.queryTrafficBuckets(1, { baselineDays: input });
+    const sql = JSON.parse(calls[0].init.body).query.query;
+    assert.match(sql, new RegExp(`INTERVAL ${expected} DAY`), `baselineDays ${String(input)}`);
+    assert.equal(sql.includes('UNION'), false, 'no caller text reaches the SQL');
+  }
+});
+
+test('clampBaselineDays is the exported bound the query relies on', () => {
+  assert.equal(clampBaselineDays(0), 1);
+  assert.equal(clampBaselineDays(31), MAX_BASELINE_DAYS);
+  assert.equal(clampBaselineDays('nope'), DEFAULT_BASELINE_DAYS);
+});
+
+test('queryTrafficBuckets reports a failed baseline query and never runs the second one', async () => {
+  const calls = [];
+  const api = createPosthogApi({
+    host: 'https://eu.posthog.com',
+    apiKey: 'k',
+    fetchFn: async (url, init) => { calls.push({ url, init }); return fakeResponse({ ok: false, status: 403 }); },
+  });
+  const res = await api.queryTrafficBuckets(1, {});
+  assert.equal(res.ok, false);
+  assert.equal(res.error, 'HTTP 403');
+  assert.equal(calls.length, 1);
+});
+
+test('queryTrafficBuckets survives a transport error', async () => {
+  const api = createPosthogApi({
+    host: 'https://eu.posthog.com',
+    apiKey: 'k',
+    fetchFn: async () => { throw new Error('ECONNREFUSED'); },
+  });
+  const res = await api.queryTrafficBuckets(1, {});
+  assert.equal(res.ok, false);
+  assert.match(res.error, /ECONNREFUSED/);
 });

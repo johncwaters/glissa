@@ -65,6 +65,8 @@ const PING_LABELS = {
   error: 'ERROR',
   new_high_impact: 'HIGH IMPACT',
   recurrence_escalated: 'RECURRING',
+  traffic_spike: 'TRAFFIC SPIKE',
+  traffic_spike_growth: 'TRAFFIC CLIMBING',
 };
 
 function stripProtocol(host) {
@@ -180,6 +182,9 @@ function planInvestigations(changes, state = {}, opts = {}) {
  * Build the Telegram text for one ping kind, or null when the kind never pings. The lane tag comes
  * first so a shared chat can be filtered by lane (mirrors the PR lane's messages). `ctx.detail` is an
  * optional extra line, flattened like the title so no line of a ping may forge another.
+ *
+ * The volume line and the url render only when the caller supplies them: a traffic-spike ping is
+ * about a whole project, so it carries neither an issue's occurrence counts nor an issue page.
  */
 function pingFor(kind, ctx = {}) {
   const label = PING_LABELS[kind];
@@ -187,10 +192,10 @@ function pingFor(kind, ctx = {}) {
   const head = ctx.projectName ? `[glissa/posthog] ${label} ${ctx.projectName}` : `[glissa/posthog] ${label}`;
   const lines = [head, displayTitle(ctx.title)];
   if (ctx.detail) lines.push(displayTitle(ctx.detail));
-  lines.push(
-    `${toCount(ctx.occurrences, 0)} occurrences / ${toCount(ctx.users, 0)} users`,
-    String(ctx.url || ''),
-  );
+  if (ctx.occurrences !== undefined || ctx.users !== undefined) {
+    lines.push(`${toCount(ctx.occurrences, 0)} occurrences / ${toCount(ctx.users, 0)} users`);
+  }
+  if (ctx.url) lines.push(String(ctx.url));
   return lines.join('\n');
 }
 

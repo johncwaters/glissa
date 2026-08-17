@@ -2,6 +2,7 @@
 
 const core = require('./core/posthog-core');
 const recurrence = require('./core/posthog-recurrence');
+const traffic = require('./core/traffic-spike-core');
 const { normalizeIssues, parseSpikeIssueIds } = require('./posthog-api');
 
 /*
@@ -35,6 +36,13 @@ const OBSERVATION_PINGS = {
 const VERDICT_PING_KIND = {
   NEEDS_HUMAN: 'needs_human',
   ERROR: 'error',
+};
+
+// Traffic-lane verdicts that reach Telegram. 'clear' is absent on purpose: traffic falling back to
+// normal re-arms the state silently, it is not news.
+const TRAFFIC_PING_KIND = {
+  ping: 'traffic_spike',
+  escalate: 'traffic_spike_growth',
 };
 
 const META_KEY = '_meta';
@@ -74,6 +82,13 @@ function createPosthogPoller(deps) {
   const recurrenceDedupe = deps.recurrenceDedupe !== false;
   const recurrenceWindowDays = deps.recurrenceWindowDays ?? recurrence.DEFAULT_RECURRENCE_WINDOW_DAYS;
   const transientRecurrenceLimit = deps.transientRecurrenceLimit ?? recurrence.DEFAULT_TRANSIENT_RECURRENCE_LIMIT;
+  // Traffic spike detection rides the same tick and is ON unless explicitly disabled: it costs two
+  // read-only HogQL queries per project and answers the one question error triage cannot.
+  const trafficSpikeEnabled = deps.trafficSpikeEnabled !== false;
+  const trafficSpikeMultiplier = deps.trafficSpikeMultiplier ?? traffic.DEFAULT_TRAFFIC_SPIKE_MULTIPLIER;
+  const trafficSpikeMinUsers = deps.trafficSpikeMinUsers ?? traffic.DEFAULT_TRAFFIC_SPIKE_MIN_USERS;
+  const trafficSpikeCooldownMinutes = deps.trafficSpikeCooldownMinutes ?? traffic.DEFAULT_TRAFFIC_SPIKE_COOLDOWN_MINUTES;
+  const trafficSpikeBaselineDays = deps.trafficSpikeBaselineDays ?? traffic.DEFAULT_TRAFFIC_BASELINE_DAYS;
 
   let state = {};
   let timer = null;
@@ -336,6 +351,57 @@ function createPosthogPoller(deps) {
     return parseSpikeIssueIds(res.body, sinceTs);
   }
 
+  function trafficState() {
+    const slice = state[traffic.TRAFFIC_KEY];
+    if (!slice || typeof slice !== 'object' || Array.isArray(slice)) state[traffic.TRAFFIC_KEY] = {};
+    return state[traffic.TRAFFIC_KEY];
+  }
+
+  /*
+   * The traffic spike lane's per-project turn: read the project's hourly baseline plus its trailing
+   * hour, ask the pure core what that means, persist the verdict's state and ping the actionable
+   * ones. Fully failure-isolated - an install whose key lacks query scope loses its traffic reading
+   * and nothing else - and it never pings about its own errors: a broken query would otherwise buzz
+   * the operator every interval forever.
+   */
+  async function tickTraffic(projectId, projectName, nowTs) {
+    if (!trafficSpikeEnabled) return;
+    if (typeof api.queryTrafficBuckets !== 'function') return;
+    try {
+      const res = await api.queryTrafficBuckets(projectId, { baselineDays: trafficSpikeBaselineDays });
+      if (!res || !res.ok) {
+        log.warn(`[posthog-poller] traffic query failed for ${projectName}: ${(res?.error) || 'no response'}`);
+        return;
+      }
+      const baseline = traffic.computeBaseline(res.buckets);
+      const key = String(projectId);
+      const verdict = traffic.decideTrafficSpike({
+        currentUsers: res.currentUsers,
+        baseline,
+        prev: trafficState()[key],
+        now: nowTs,
+        cfg: {
+          multiplier: trafficSpikeMultiplier,
+          minUsers: trafficSpikeMinUsers,
+          cooldownMinutes: trafficSpikeCooldownMinutes,
+        },
+      });
+      trafficState()[key] = verdict.nextState;
+      const kind = TRAFFIC_PING_KIND[verdict.action];
+      if (!kind) return;
+      pingAlways(kind, {
+        projectName,
+        title: traffic.spikeSummaryLine({
+          currentUsers: res.currentUsers,
+          baseline,
+          multiple: verdict.multiple,
+        }),
+      });
+    } catch (e) {
+      log.warn(`[posthog-poller] traffic check failed for ${projectName}: ${e.message}`);
+    }
+  }
+
   async function tickProject(project) {
     const { projectId } = project;
     const projectName = project.name || String(projectId);
@@ -416,6 +482,8 @@ function createPosthogPoller(deps) {
       if (escalating) applyEscalation(item);
       startInvestigation(item.change, item.recurrence);
     }
+
+    await tickTraffic(projectId, projectName, tickStartedAt);
 
     // The stamp itself is state, and the next tick's spike cutoff depends on it surviving a restart,
     // so a project that got as far as querying always persists.

@@ -47,12 +47,25 @@ const POSTHOG_NUMERIC_KEYS = [
   'userEscalationThreshold',
   'recurrenceWindowDays',
   'transientRecurrenceLimit',
+  'trafficSpikeMultiplier',
+  'trafficSpikeMinUsers',
+  'trafficSpikeCooldownMinutes',
+  'trafficSpikeBaselineDays',
 ];
+// Per-key bounds for the numerics above. The default floor is "greater than zero", which every
+// pre-existing key relies on; a key listed here states its own, so a cooldown of 0 (ping every
+// spike, never mute) is expressible and a baseline window cannot exceed what the query clamps to.
+const POSTHOG_NUMERIC_RANGES = {
+  trafficSpikeMultiplier: { min: 1, label: 'at least 1' },
+  trafficSpikeMinUsers: { min: 1, label: 'at least 1' },
+  trafficSpikeCooldownMinutes: { min: 0, label: 'zero or more' },
+  trafficSpikeBaselineDays: { min: 1, max: 30, label: 'between 1 and 30' },
+};
 // `recurrenceDedupe` is the recurrence-dedupe kill switch and defaults to ON, so absence means
 // enabled; the poller reads it as `!== false`. allowStatusWrites/dailyDigest were validated and
 // persisted here while no module in the lane ever read them, which promised behavior (PostHog writes,
 // a digest) that does not exist; a key earns a place in this list when something consumes it.
-const POSTHOG_BOOLEAN_KEYS = ['enabled', 'recurrenceDedupe'];
+const POSTHOG_BOOLEAN_KEYS = ['enabled', 'recurrenceDedupe', 'trafficSpikeEnabled'];
 const POSTHOG_STRING_KEYS = ['host', 'apiKey', 'repoPath'];
 
 // Single wire-format builder for every 'error'/'settings-error' reply, so all call sites agree on the
@@ -115,9 +128,15 @@ function validatePosthog(ph) {
     return 'posthog.projects must be "all" or an array of positive integer project ids';
   }
   for (const key of POSTHOG_NUMERIC_KEYS) {
-    if (ph[key] != null && (typeof ph[key] !== 'number' || !Number.isFinite(ph[key]) || ph[key] <= 0)) {
-      return `posthog.${key} must be a positive number`;
+    if (ph[key] == null) continue;
+    if (typeof ph[key] !== 'number' || !Number.isFinite(ph[key])) return `posthog.${key} must be a positive number`;
+    const range = POSTHOG_NUMERIC_RANGES[key];
+    if (!range) {
+      if (ph[key] <= 0) return `posthog.${key} must be a positive number`;
+      continue;
     }
+    if (ph[key] < range.min) return `posthog.${key} must be ${range.label}`;
+    if (range.max != null && ph[key] > range.max) return `posthog.${key} must be ${range.label}`;
   }
   if (ph.projectMap != null && !isPlainObject(ph.projectMap)) return 'posthog.projectMap must be an object';
   return null;

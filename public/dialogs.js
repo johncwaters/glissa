@@ -234,6 +234,11 @@ export function createSettingsDialog(initialTab) {
   const posthogTimeoutInput = dialog.querySelector('#settings-posthog-timeout');
   const posthogMinUsersInput = dialog.querySelector('#settings-posthog-min-users');
   const posthogEscalationInput = dialog.querySelector('#settings-posthog-escalation');
+  const posthogTrafficEnabledCheckbox = dialog.querySelector('#settings-posthog-traffic-enabled');
+  const posthogTrafficMultiplierInput = dialog.querySelector('#settings-posthog-traffic-multiplier');
+  const posthogTrafficMinUsersInput = dialog.querySelector('#settings-posthog-traffic-min-users');
+  const posthogTrafficCooldownInput = dialog.querySelector('#settings-posthog-traffic-cooldown');
+  const posthogTrafficBaselineInput = dialog.querySelector('#settings-posthog-traffic-baseline');
 
   // The panel's fields are always populated with defaults, so saving them unconditionally would
   // materialize a posthog block into config.json for every operator who never opens this tab.
@@ -389,16 +394,22 @@ export function createSettingsDialog(initialTab) {
   const POSTHOG_NUMERIC_INPUTS = () => [
     posthogIntervalInput, posthogMaxInvestigationsInput, posthogTimeoutInput,
     posthogMinUsersInput, posthogEscalationInput,
+    posthogTrafficMultiplierInput, posthogTrafficMinUsersInput,
+    posthogTrafficCooldownInput, posthogTrafficBaselineInput,
   ];
 
+  // Each field's own min/max attributes are the bounds, so a field that legitimately accepts zero
+  // (the spike cooldown, meaning never mute) does not need a second list to be exempted from.
   function validateTimeouts() {
     errorEl.textContent = '';
     const inputs = [replayBufferInput, prIntervalInput, prMaxReviewsInput, prTimeoutInput];
     if (shouldSavePosthog()) inputs.push(...POSTHOG_NUMERIC_INPUTS());
     for (const input of inputs) {
       const v = Number(input.value);
-      if (!input.value || Number.isNaN(v) || v <= 0 || !Number.isInteger(v)) {
-        errorEl.textContent = 'All numeric fields must be positive integers';
+      const floor = input.min === '' ? 1 : Number(input.min);
+      const ceiling = input.max === '' ? Infinity : Number(input.max);
+      if (!input.value || Number.isNaN(v) || !Number.isInteger(v) || v < floor || v > ceiling) {
+        errorEl.textContent = 'Every numeric field must be a whole number within its allowed range';
         return false;
       }
     }
@@ -464,6 +475,11 @@ export function createSettingsDialog(initialTab) {
         investigationTimeoutSeconds: Number(posthogTimeoutInput.value),
         minUsersToInvestigate: Number(posthogMinUsersInput.value),
         userEscalationThreshold: Number(posthogEscalationInput.value),
+        trafficSpikeEnabled: posthogTrafficEnabledCheckbox.checked,
+        trafficSpikeMultiplier: Number(posthogTrafficMultiplierInput.value),
+        trafficSpikeMinUsers: Number(posthogTrafficMinUsersInput.value),
+        trafficSpikeCooldownMinutes: Number(posthogTrafficCooldownInput.value),
+        trafficSpikeBaselineDays: Number(posthogTrafficBaselineInput.value),
       };
     }
 
@@ -517,6 +533,12 @@ export function createSettingsDialog(initialTab) {
       posthogTimeoutInput.value = ph.investigationTimeoutSeconds ?? 900;
       posthogMinUsersInput.value = ph.minUsersToInvestigate ?? 1;
       posthogEscalationInput.value = ph.userEscalationThreshold ?? 25;
+      // Absent means on, matching how the poller reads the key.
+      posthogTrafficEnabledCheckbox.checked = ph.trafficSpikeEnabled !== false;
+      posthogTrafficMultiplierInput.value = ph.trafficSpikeMultiplier ?? 3;
+      posthogTrafficMinUsersInput.value = ph.trafficSpikeMinUsers ?? 10;
+      posthogTrafficCooldownInput.value = ph.trafficSpikeCooldownMinutes ?? 360;
+      posthogTrafficBaselineInput.value = ph.trafficSpikeBaselineDays ?? 7;
     })
     .catch(() => {
       errorEl.textContent = 'Failed to load settings. Close and retry.';

@@ -354,6 +354,11 @@ function createPosthogWiring({
         recurrenceDedupe: config.posthog.recurrenceDedupe,
         recurrenceWindowDays: config.posthog.recurrenceWindowDays,
         transientRecurrenceLimit: config.posthog.transientRecurrenceLimit,
+        trafficSpikeEnabled: config.posthog.trafficSpikeEnabled,
+        trafficSpikeMultiplier: config.posthog.trafficSpikeMultiplier,
+        trafficSpikeMinUsers: config.posthog.trafficSpikeMinUsers,
+        trafficSpikeCooldownMinutes: config.posthog.trafficSpikeCooldownMinutes,
+        trafficSpikeBaselineDays: config.posthog.trafficSpikeBaselineDays,
         onTickComplete: (summary) => {
           lastStatus = summary;
           broadcast(summary);
