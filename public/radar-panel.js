@@ -312,6 +312,15 @@ function alertTextOf(entry) {
   return '';
 }
 
+// Project names come from PostHog: text only, never markup; title tooltip keeps the raw value reachable.
+function appendProjectLabel(parent, project, showHost, nameTag, nameClass, hostClass) {
+  const name = el(nameTag, nameClass, radarDisplayName(project));
+  name.title = project.name || '';
+  parent.append(name);
+  const host = showHost ? shortHost(project.host) : '';
+  if (host) parent.append(el('span', hostClass, host));
+}
+
 function buildProject(entry, showHost) {
   const project = entry.project;
   const wrap = el('div', 'radar-project');
@@ -319,13 +328,7 @@ function buildProject(entry, showHost) {
   const counts = summarizeIssues(issues);
 
   const head = el('div', 'radar-project-head');
-  // Project names come from PostHog: text only, never markup. The tooltip keeps the raw configured
-  // value (usually the mapped repo path) reachable.
-  const name = el('h3', 'radar-project-name', radarDisplayName(project));
-  name.title = project.name || '';
-  head.append(name);
-  const host = showHost ? shortHost(project.host) : '';
-  if (host) head.append(el('span', 'radar-project-host', host));
+  appendProjectLabel(head, project, showHost, 'h3', 'radar-project-name', 'radar-project-host');
   wrap.append(head);
 
   const summary = el('div', 'radar-project-summary');
@@ -353,11 +356,8 @@ function buildQuietRow(entry, showHost) {
   const row = el('div', 'radar-quiet-row');
   const dot = el('span', 'radar-quiet-dot');
   dot.setAttribute('aria-hidden', 'true');
-  const name = el('span', 'radar-quiet-name', radarDisplayName(project));
-  name.title = project.name || '';
-  row.append(dot, name);
-  const host = showHost ? shortHost(project.host) : '';
-  if (host) row.append(el('span', 'radar-quiet-host', host));
+  row.append(dot);
+  appendProjectLabel(row, project, showHost, 'span', 'radar-quiet-name', 'radar-quiet-host');
   row.append(el('span', 'radar-quiet-count', '0 issues'));
   return row;
 }
