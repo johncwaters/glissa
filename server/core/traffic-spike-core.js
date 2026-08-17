@@ -1,16 +1,8 @@
 'use strict';
 
-/*
- * Pure core of the PostHog TRAFFIC SPIKE lane (sibling of core/posthog-core.js and
- * core/posthog-recurrence.js). No IO, no requires: every decision about "is this project's traffic
- * taking off" lives here so it is unit-testable without a PostHog instance or a state file.
- *
- * A spike is measured against the project's OWN normal, never an absolute number: an app whose
- * quiet hour is 4 users and one whose quiet hour is 4000 both want the same sentence. The baseline
- * is therefore the p90 of the last N days of hourly unique-user counts, and the current window is
- * the trailing hour. p90 rather than the mean because a single past spike would drag a mean up far
- * enough to hide the next one.
- */
+// Baseline uses the project's p90 so one past spike cannot hide the next one.
+
+const { toCount } = require('./posthog-core');
 
 const DEFAULT_TRAFFIC_SPIKE_MULTIPLIER = 3;
 const DEFAULT_TRAFFIC_SPIKE_MIN_USERS = 10;
@@ -24,12 +16,6 @@ const ESCALATION_GROWTH_FACTOR = 2;
 // Per-project traffic state, parked under an underscore key so a server that iterates issue keys
 // (everything not starting with '_') loads a newer state file unharmed.
 const TRAFFIC_KEY = '_traffic';
-
-function toCount(value, fallback = 0) {
-  const n = Number(value);
-  if (Number.isFinite(n)) return n;
-  return fallback;
-}
 
 function sortedUserCounts(buckets) {
   const list = Array.isArray(buckets) ? buckets : [];
@@ -100,19 +86,7 @@ function verdict(action, reason, nextState, multiple) {
   return { action, reason, nextState, multiple };
 }
 
-/**
- * Decide what this tick's traffic window means for one project.
- *
- * `prev` is that project's persisted slice ({ active, lastPingAt, lastPingedUsers, peakUsers } or
- * null) and `now` is injected ms, never a clock read in here.
- *
- * Actions:
- *   'none'     - nothing to say (no spike, unreliable baseline, or a spike already reported).
- *   'ping'     - a spike just started.
- *   'escalate' - an already-reported spike doubled again since its ping.
- *   'clear'    - traffic fell back toward normal. Deliberately SILENT: an operator does not need a
- *                phone buzz to learn that a good thing stopped; the state simply re-arms.
- */
+// The clear action is silent downstream: it only re-arms future spike pings.
 function decideTrafficSpike({ currentUsers, baseline, prev, now, cfg } = {}) {
   const options = cfg && typeof cfg === 'object' ? cfg : {};
   const multiplier = toCount(options.multiplier, DEFAULT_TRAFFIC_SPIKE_MULTIPLIER);

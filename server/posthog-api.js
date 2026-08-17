@@ -159,15 +159,7 @@ function createPosthogApi({ host, apiKey, fetchFn } = {}) {
     });
   }
 
-  /*
-   * Hourly unique-user counts over the baseline window, plus the trailing hour, for the traffic
-   * spike lane. Two small queries rather than a union: the baseline is a series and the current
-   * window is a scalar, and one query returning both would need a synthetic marker column that the
-   * caller then has to split apart again.
-   *
-   * `baselineDays` is the ONLY caller-supplied value anywhere near this SQL and it is clamped to a
-   * whole number in 1..30 before interpolation; nothing else is interpolated at all.
-   */
+  // Two small queries avoid adding a synthetic marker column just to split series from scalar.
   async function queryTrafficBuckets(projectId, { baselineDays = DEFAULT_BASELINE_DAYS } = {}) {
     const days = clampBaselineDays(baselineDays);
     const bucketsRes = await runHogQL(projectId, [

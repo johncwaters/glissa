@@ -52,9 +52,7 @@ const POSTHOG_NUMERIC_KEYS = [
   'trafficSpikeCooldownMinutes',
   'trafficSpikeBaselineDays',
 ];
-// Per-key bounds for the numerics above. The default floor is "greater than zero", which every
-// pre-existing key relies on; a key listed here states its own, so a cooldown of 0 (ping every
-// spike, never mute) is expressible and a baseline window cannot exceed what the query clamps to.
+// Listed keys override the default positive floor, allowing zero cooldown and capping baseline days.
 const POSTHOG_NUMERIC_RANGES = {
   trafficSpikeMultiplier: { min: 1, label: 'at least 1' },
   trafficSpikeMinUsers: { min: 1, label: 'at least 1' },

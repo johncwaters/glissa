@@ -357,13 +357,7 @@ function createPosthogPoller(deps) {
     return state[traffic.TRAFFIC_KEY];
   }
 
-  /*
-   * The traffic spike lane's per-project turn: read the project's hourly baseline plus its trailing
-   * hour, ask the pure core what that means, persist the verdict's state and ping the actionable
-   * ones. Fully failure-isolated - an install whose key lacks query scope loses its traffic reading
-   * and nothing else - and it never pings about its own errors: a broken query would otherwise buzz
-   * the operator every interval forever.
-   */
+  // Traffic query failures warn only, because a broken query would otherwise buzz a carbon unit every interval.
   async function tickTraffic(projectId, projectName, nowTs) {
     if (!trafficSpikeEnabled) return;
     if (typeof api.queryTrafficBuckets !== 'function') return;
