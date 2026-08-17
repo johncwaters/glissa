@@ -1348,9 +1348,8 @@ function createBackend(httpServer, options = {}) {
     getUpdateStatus,
     // Cached last PostHog tick summary, replayed to a client that connects between ticks.
     getPosthogStatus: () => posthog.getStatus(),
-    // Per-issue Radar actions: the one PostHog write (resolve/suppress) and a manual re-investigation.
+    // Per-issue Radar action: the one PostHog write (resolve/suppress).
     posthogSetIssueStatus: (args) => posthog.setIssueStatus(args),
-    posthogReinvestigate: (args) => posthog.reinvestigateIssue(args),
     // Investigations inbox: archive one completed record (cached-status patch + rebroadcast).
     posthogArchiveInvestigation: (args) => posthog.archiveInvestigation(args),
     // Same for the PR auto-review lane.

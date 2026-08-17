@@ -1,9 +1,9 @@
 'use strict';
 
-// Control-WS dispatch for the three per-issue Radar actions (server/control-handlers.js):
+// Control-WS dispatch for per-issue Radar actions (server/control-handlers.js):
 // posthog-open-session (paste an investigation prompt into the mapped project session),
-// posthog-issue-action (resolve/suppress in PostHog) and posthog-reinvestigate (re-run the headless
-// investigation). Same fake-controlWss harness as control-posthog-report.test.js.
+// posthog-issue-action (resolve/suppress in PostHog), and investigation archive actions.
+// Same fake-controlWss harness as control-posthog-report.test.js.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -50,7 +50,6 @@ function harness(over = {}) {
   const controlWss = new EventEmitter();
   const sent = [];
   const actionCalls = [];
-  const reinvestigateCalls = [];
   const archiveCalls = [];
   let messageHandler = null;
   const ws = {
@@ -85,10 +84,6 @@ function harness(over = {}) {
       actionCalls.push(args);
       return Promise.resolve(over.actionResult || { ok: true, status: 'resolved' });
     },
-    posthogReinvestigate: over.posthogReinvestigate === null ? null : (args) => {
-      reinvestigateCalls.push(args);
-      return over.reinvestigateResult || { ok: true };
-    },
     posthogArchiveInvestigation: over.posthogArchiveInvestigation === null ? null : (args) => {
       archiveCalls.push(args);
       return over.archiveResult || { ok: true };
@@ -97,7 +92,7 @@ function harness(over = {}) {
   controlWss.emit('connection', ws);
   sent.length = 0;
   return {
-    sent, sessions, config, created, actionCalls, reinvestigateCalls, archiveCalls,
+    sent, sessions, config, created, actionCalls, archiveCalls,
     send: (msg) => messageHandler(JSON.stringify(msg)),
   };
 }
@@ -314,37 +309,7 @@ test('posthog-issue-action answers cleanly when the lane is not wired in', async
   assert.match(h.sent[0].error, /not running/);
 });
 
-// --- C. re-investigate on demand ---
-
-test('posthog-reinvestigate passes the validated ref through to the poller', () => {
-  const h = harness();
-
-  h.send({ type: 'posthog-reinvestigate', requestId: 'r1', projectId: 7, issueId: 'iss-1' });
-
-  assert.deepEqual(h.reinvestigateCalls, [{ projectId: '7', issueId: 'iss-1' }]);
-  assert.equal(h.sent[0].type, 'posthog-reinvestigate-result');
-  assert.equal(h.sent[0].ok, true);
-});
-
-test('posthog-reinvestigate surfaces an already-in-flight refusal', () => {
-  const h = harness({ reinvestigateResult: { ok: false, error: 'An investigation is already running for this issue' } });
-
-  h.send({ type: 'posthog-reinvestigate', requestId: 'r1', projectId: 7, issueId: 'iss-1' });
-
-  assert.equal(h.sent[0].ok, false);
-  assert.match(h.sent[0].error, /already running/);
-});
-
-test('posthog-reinvestigate answers cleanly when the lane is not wired in', () => {
-  const h = harness({ posthogReinvestigate: null });
-
-  h.send({ type: 'posthog-reinvestigate', requestId: 'r1', projectId: 7, issueId: 'iss-1' });
-
-  assert.equal(h.sent[0].ok, false);
-  assert.match(h.sent[0].error, /not running/);
-});
-
-// --- D. archive one investigations-inbox record ---
+// --- C. archive one investigations-inbox record ---
 
 test('posthog-archive-investigation forwards a valid id and reports success', async () => {
   const h = harness();

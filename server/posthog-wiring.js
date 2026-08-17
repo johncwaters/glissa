@@ -388,16 +388,6 @@ function createPosthogWiring({
     return { ok: true, status: decision.status };
   }
 
-  // Manual re-investigation. The poller owns the concurrency slots and the in-flight bookkeeping, so
-  // this is a pass-through; the tick afterwards republishes the status so the row shows investigating
-  // without waiting out the interval.
-  function reinvestigateIssue({ projectId, issueId }) {
-    if (!poller) return { ok: false, error: 'PostHog monitoring is not running' };
-    const res = poller.investigateNow({ projectId, issueId });
-    if (res.ok) queueForcedTick();
-    return res;
-  }
-
   /*
    * Archive one investigations-inbox record. Deliberately NOT a forced tick: archiving edits one
    * boolean in the state file and changes nothing a poll would discover, so the cached status is
@@ -430,7 +420,7 @@ function createPosthogWiring({
 
   return {
     startPoller, restartIfConfigChanged, stopPoller, getStatus,
-    setIssueStatus, reinvestigateIssue, archiveInvestigation,
+    setIssueStatus, archiveInvestigation,
   };
 }
 

@@ -230,7 +230,6 @@ function registerControlHandlers(controlWss, deps) {
     posthogReportsDir = null,
     // PostHog per-issue actions (optional - undefined in older callers/tests, which then refuse).
     posthogSetIssueStatus = null,
-    posthogReinvestigate = null,
     posthogArchiveInvestigation = null,
     // Cached last PR auto-review tick summary (optional - undefined in older callers/tests).
     getPrStatus,
@@ -727,15 +726,6 @@ function registerControlHandlers(controlWss, deps) {
     reply({ ok: res.ok === true, error: res.error || null, status: res.status || null });
   }
 
-  function handlePosthogReinvestigate(msg, ws) {
-    const reply = (payload) => replyTo(ws, msg, 'posthog-reinvestigate-result', { ok: false, error: null, ...payload });
-    const ref = posthogCore.validateIssueRef(msg);
-    if (!ref.ok) { reply({ error: ref.error }); return; }
-    if (!posthogReinvestigate) { reply({ error: 'PostHog monitoring is not running' }); return; }
-    const res = posthogReinvestigate({ projectId: ref.projectId, issueId: ref.issueId });
-    reply({ ok: res.ok === true, error: res.error || null });
-  }
-
   // Archive one investigations-inbox record. The id is a log key, not an issue reference: the record
   // it names routinely outlives the issue row it came from, which is the point of the inbox.
   async function handlePosthogArchiveInvestigation(msg, ws) {
@@ -1051,7 +1041,6 @@ function registerControlHandlers(controlWss, deps) {
     'get-posthog-report': handleGetPosthogReport,
     'posthog-open-session': handlePosthogOpenSession,
     'posthog-issue-action': handlePosthogIssueAction,
-    'posthog-reinvestigate': handlePosthogReinvestigate,
     'posthog-archive-investigation': handlePosthogArchiveInvestigation,
     'kill':             (msg) => { const s = findSession(msg); if (s) s.killSession(); },
     'start-session':    (msg) => {

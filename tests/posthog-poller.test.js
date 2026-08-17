@@ -499,87 +499,6 @@ test('start() clears a stale inFlight left by a crash so the issue is re-investi
   assert.equal(spawned, 1, 'a stale in-flight marker does not wedge the issue forever');
 });
 
-// --- investigateNow: the operator's manual re-investigation (Radar row action) ---
-
-test('investigateNow re-runs an already diagnosed issue the tick would have left alone', async () => {
-  const spawnCalls = [];
-  const { poller } = harness({
-    spawnInvestigation: async (a) => { spawnCalls.push(a); return { verdict: 'ROOT_CAUSE', summary: 'again' }; },
-  });
-  await poller.start();
-  await flush();
-  assert.equal(spawnCalls.length, 1, 'the first tick investigated it once');
-
-  await poller.tick();
-  await flush();
-  assert.equal(spawnCalls.length, 1, 'a quiet, already diagnosed issue is not re-investigated by a tick');
-
-  const res = poller.investigateNow({ projectId: 1, issueId: 'iss-1' });
-  assert.deepEqual(res, { ok: true });
-  await flush();
-
-  assert.equal(spawnCalls.length, 2, 'the manual request spawned a fresh investigation');
-  assert.equal(spawnCalls[1].issue.issueId, 'iss-1');
-  assert.equal(spawnCalls[1].url, 'https://ph.test/project/1/error_tracking/iss-1');
-  assert.equal(poller._state()[KEY].inFlight, false, 'in-flight cleared when it finished');
-});
-
-test('investigateNow refuses a second run while one is in flight', async () => {
-  let release = null;
-  const { poller } = harness({
-    spawnInvestigation: () => new Promise((resolve) => { release = () => resolve({ verdict: 'ROOT_CAUSE' }); }),
-  });
-  await poller.start();
-  await flush();
-  assert.equal(poller._state()[KEY].inFlight, true, 'the boot investigation is still running');
-
-  const res = poller.investigateNow({ projectId: 1, issueId: 'iss-1' });
-  assert.equal(res.ok, false);
-  assert.match(res.error, /already running/);
-
-  release();
-  await flush();
-});
-
-test('investigateNow refuses an issue the latest poll never saw', async () => {
-  const { poller } = harness();
-  await poller.start();
-  await flush();
-
-  const res = poller.investigateNow({ projectId: 1, issueId: 'iss-unknown' });
-  assert.equal(res.ok, false);
-  assert.match(res.error, /latest poll/);
-});
-
-test('investigateNow honours the concurrency cap instead of over-spending slots', async () => {
-  const releases = [];
-  const { poller } = harness({
-    maxConcurrentInvestigations: 1,
-    spawnInvestigation: () => new Promise((resolve) => releases.push(() => resolve({ verdict: 'ROOT_CAUSE' }))),
-    api: { queryIssues: async () => ({ ok: true, body: { results: [issueRow(), issueRow({ id: 'iss-2' })] } }) },
-  });
-  await poller.start();
-  await flush();
-  assert.equal(releases.length, 1, 'the cap allowed one investigation');
-
-  const res = poller.investigateNow({ projectId: 1, issueId: 'iss-2' });
-  assert.equal(res.ok, false);
-  assert.match(res.error, /slots are busy/);
-
-  for (const release of releases) release();
-  await flush();
-});
-
-test('investigateNow refuses once the poller is stopping', async () => {
-  const { poller } = harness();
-  await poller.start();
-  await flush();
-  await poller.stop();
-
-  const res = poller.investigateNow({ projectId: 1, issueId: 'iss-1' });
-  assert.equal(res.ok, false);
-});
-
 // --- Investigations inbox: the persisted log the Radar review section renders ---
 
 test('a completed investigation appends one record to the persisted log', async () => {
@@ -607,28 +526,6 @@ test('a completed investigation appends one record to the persisted log', async 
     archived: false,
   });
   assert.deepEqual(summaries.at(-1).investigations.map((r) => r.id), ['iss-1@4200'], 'and rides the broadcast');
-});
-
-test('the broadcast carries unarchived records, and a re-investigation appends a second one', async () => {
-  let clock = 1000;
-  const { poller, summaries, stateStore } = harness({
-    spawnInvestigation: async () => ({ verdict: 'ROOT_CAUSE', summary: 'null deref in the retry path' }),
-    now: () => clock,
-  });
-  await poller.start();
-  await flush();
-
-  clock = 2000;
-  assert.equal(poller.investigateNow({ projectId: 1, issueId: 'iss-1' }).ok, true);
-  await flush();
-
-  assert.equal(stateStore.value._investigations.length, 2, 'a re-investigation appends, never overwrites');
-
-  clock = 3000;
-  await poller.tick();
-  await flush();
-  const carried = summaries.at(-1).investigations;
-  assert.deepEqual(carried.map((r) => r.id), ['iss-1@2000', 'iss-1@1000'], 'newest first');
 });
 
 test('archiveInvestigation hides one record, persists it, and is idempotent', async () => {
@@ -747,7 +644,7 @@ test('a state file written by an older server (no _investigations) loads and sta
 });
 
 test('the investigations log is never treated as an issue entry', async () => {
-  const { poller, stateStore } = harness({
+  const { poller } = harness({
     spawnInvestigation: async () => ({ verdict: 'ROOT_CAUSE', summary: 'fixed upstream' }),
     now: () => 1000,
   });

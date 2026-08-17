@@ -118,18 +118,16 @@ function openIssueReport(issue) {
 // Per-row actions, shared by the issue rows and the investigations inbox. Labels are constant for the
 // control's whole lifecycle (no "Resolving...", no counts): the sibling status line carries progress
 // and outcome, and every button is disabled while a request is in flight so a row cannot be
-// double-fired. `permanentlyOff` holds controls unavailable for the row's own reasons (an
-// investigation already running), which must stay off when an unrelated request finishes.
+// double-fired.
 function createActionCluster() {
   const wrap = el('div', 'radar-issue-actions');
   const status = el('span', 'radar-issue-action-status');
   status.setAttribute('role', 'status');
   wrap.append(status);
   const buttons = [];
-  const permanentlyOff = new Set();
 
   const setBusy = (busy) => {
-    for (const button of buttons) button.disabled = busy || permanentlyOff.has(button);
+    for (const button of buttons) button.disabled = busy;
   };
 
   const addButton = (label, title, onClick) => {
@@ -172,11 +170,11 @@ function createActionCluster() {
       .catch((err) => settle('error', err?.message || 'Request failed'));
   };
 
-  return { addButton, request, permanentlyOff, wrap };
+  return { addButton, request, wrap };
 }
 
 function buildIssueActions(issue, projectId) {
-  const { addButton, request, permanentlyOff, wrap } = createActionCluster();
+  const { addButton, request, wrap } = createActionCluster();
 
   const run = (type, payload, pendingText, describe) => request(
     `${type}:${issue.issueId}`,
@@ -193,16 +191,6 @@ function buildIssueActions(issue, projectId) {
         : `Prompt pasted into ${msg.sessionName || 'the session'}; press Enter there`
     ));
   });
-
-  // A re-run only makes sense once an investigation has already produced a verdict; while one is in
-  // flight the server would refuse anyway, so the control is disabled rather than shown as bait.
-  if (issue.verdict) {
-    const rerun = addButton('Investigate', 'Run a fresh headless investigation for this issue', () => {
-      run('posthog-reinvestigate', {}, 'Requesting investigation', () => 'Investigation started');
-    });
-    if (issue.inFlight) permanentlyOff.add(rerun);
-    rerun.disabled = !!issue.inFlight;
-  }
 
   addButton('Resolve', 'Mark this issue resolved in PostHog', () => {
     run('posthog-issue-action', { action: 'resolve' }, 'Resolving in PostHog', () => 'Marked resolved');

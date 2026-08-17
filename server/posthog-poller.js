@@ -17,9 +17,8 @@ const { normalizeIssues, parseSpikeIssueIds } = require('./posthog-api');
  * An issue that vanishes from the active list is marked resolved and aged out (see reconcileVanished).
  *
  * The poller makes ZERO writes to PostHog: nothing on a tick resolves, assigns, or merges an issue.
- * The only write in the lane is the operator's explicit resolve/suppress click, which goes through
- * posthog-wiring.js, never through here. investigateNow() is the poller's one other operator entry
- * point: a manual re-investigation that reuses the automatic path's slots and bookkeeping.
+ * The only write in the lane is the carbon unit's explicit resolve/suppress click, which goes
+ * through posthog-wiring.js, never through here.
  */
 
 // Observation-level pings (fired from the classification, before any investigation runs).
@@ -98,10 +97,6 @@ function createPosthogPoller(deps) {
   // In-flight runInvestigation() calls, tracked so stop() can drain them before a caller reuses the
   // dependencies (result-file paths, report dir, state file) for a fresh poller instance.
   const running = new Set();
-  // Last tick's issues per project, keyed by issue id. The persisted state entry records what an
-  // issue DID (verdict, counts at diagnosis) but not what it IS (title, current aggregates), and the
-  // manual investigateNow() below needs the latter to build the same change object a tick builds.
-  const lastIssuesByProject = new Map();
 
   function persist() {
     persistChain = persistChain.then(() => writeState(state)).catch((e) => {
@@ -437,11 +432,6 @@ function createPosthogPoller(deps) {
       }),
     }));
 
-    lastIssuesByProject.set(String(projectId), {
-      projectName,
-      byId: new Map(changes.map((change) => [String(change.issue.issueId), change])),
-    });
-
     reconcileVanished(core.issueKey(host, projectId, ''), new Set(changes.map((c) => c.key)), tickStartedAt);
 
     for (const change of changes) {
@@ -555,32 +545,6 @@ function createPosthogPoller(deps) {
     }
   }
 
-  /*
-   * Operator-driven re-investigation of one issue, from a Radar row. Deliberately bypasses
-   * core.planInvestigations (an explicit click IS the plan: the whole point is re-running an issue
-   * whose head and verdict have not moved) but keeps every other guarantee of the automatic path -
-   * the same spawn, the same concurrency cap, the same in-flight bookkeeping and result plumbing.
-   * Refuses rather than queues: a second click while one is running would double-spend a slot.
-   */
-  function investigateNow({ projectId, issueId }) {
-    if (stopped) return { ok: false, error: 'PostHog monitoring is stopping' };
-    const key = core.issueKey(host, projectId, issueId);
-    if (state[key]?.inFlight) {
-      return { ok: false, error: 'An investigation is already running for this issue' };
-    }
-    if (inFlightCount() >= maxConcurrentInvestigations) {
-      return { ok: false, error: 'All investigation slots are busy; try again shortly' };
-    }
-    const known = lastIssuesByProject.get(String(projectId));
-    const change = known?.byId.get(String(issueId));
-    if (!change) return { ok: false, error: 'That issue is not in the latest poll' };
-    state[key] = core.nextState(state[key] || {}, change.issue, {
-      inFlight: true, pingedPhases: [...(state[key]?.pingedPhases || [])],
-    });
-    startInvestigation(change);
-    return { ok: true };
-  }
-
   async function start() {
     stopped = false;
     state = (await readState()) || {};
@@ -607,7 +571,7 @@ function createPosthogPoller(deps) {
   }
 
   return {
-    start, stop, tick, investigateNow, archiveInvestigation,
+    start, stop, tick, archiveInvestigation,
     investigations: currentInvestigations,
     _state: () => state,
   };
