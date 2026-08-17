@@ -1885,10 +1885,67 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-.radar-project-tick {
-  color: var(--text-muted);
-  font-size: 10px;
+/* Why this project earned a card despite having nothing to report. Sits where the per-project poll
+   clock used to, and is the only place a per-project time survives. */
+.radar-project-alert {
   margin-left: auto;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.radar-project-alert[data-tone="crit"] { color: var(--state-failed); }
+.radar-project-alert[data-tone="warn"] { color: var(--state-waiting); }
+
+/* Healthy projects, one row each in a single block. A quiet project is context, not a headline, so it
+   gets a hairline container instead of a card apiece. */
+.radar-quiet {
+  border: 1px solid var(--border-dim);
+  border-radius: var(--radius);
+  padding: 6px 12px;
+  background: color-mix(in oklab, var(--bg) 60%, transparent);
+  display: flex;
+  flex-direction: column;
+}
+
+.radar-quiet-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 3px 0;
+  font-size: 11px;
+}
+
+/* Neutral and steady: the resting state has no color of its own, and only the loud cards above move. */
+.radar-quiet-dot {
+  flex: 0 0 auto;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  opacity: 0.45;
+}
+
+.radar-quiet-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-dim);
+}
+
+.radar-quiet-host {
+  flex: 0 0 auto;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.radar-quiet-count {
+  margin-left: auto;
+  flex: 0 0 auto;
+  font-size: 10px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
 }
 
 .radar-issues {
@@ -2098,11 +2155,6 @@ a.radar-issue-title:hover {
 
 .radar-issue-action-status[data-tone="ok"] { color: var(--state-complete); }
 .radar-issue-action-status[data-tone="error"] { color: var(--state-failed); }
-
-.radar-empty {
-  color: var(--text-muted);
-  font-size: 11px;
-}
 
 /* Investigations inbox. Same row rhythm as .radar-issue so the board reads as one column, but with
    the verdict chip leading instead of a severity stripe: an archived-or-not record carries no live
@@ -4635,11 +4687,13 @@ html[data-layout="phone"] .radar-section { gap: 10px; }
 html[data-layout="phone"] .radar-section-head { flex-wrap: wrap; gap: 2px 8px; }
 html[data-layout="phone"] .radar-section-title { font-size: 12px; }
 html[data-layout="phone"] .radar-project { padding: 12px; }
-/* The project head and its stat row are short facts, not a table: wrapping keeps the poll time on
-   screen instead of pushing it past the right edge. */
+/* The project head and its stat row are short facts, not a table: wrapping keeps the stale/error
+   reason on screen instead of pushing it past the right edge. */
 html[data-layout="phone"] .radar-project-head { flex-wrap: wrap; gap: 2px 10px; }
 html[data-layout="phone"] .radar-project-host { flex: 1 1 100%; }
 html[data-layout="phone"] .radar-project-summary { flex-wrap: wrap; gap: 6px 14px; margin-bottom: 8px; }
+html[data-layout="phone"] .radar-quiet { padding: 4px 12px; }
+html[data-layout="phone"] .radar-quiet-row { padding: 5px 0; font-size: 12px; }
 
 /* Rows become cards-without-chrome: a hairline between them replaces the 2px gap, because a stacked
    row needs a visible boundary to read as one item. */

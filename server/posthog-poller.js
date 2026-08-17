@@ -405,8 +405,21 @@ function createPosthogPoller(deps) {
     const tickStartedAt = now();
     const issuesRes = await api.queryIssues(projectId, { dateRangeHours });
     if (!issuesRes || !issuesRes.ok) {
-      log.warn(`[posthog-poller] issue query failed for ${projectName}: ${(issuesRes?.error) || 'no response'}`);
-      return null;
+      const error = String((issuesRes?.error) || 'no response');
+      log.warn(`[posthog-poller] issue query failed for ${projectName}: ${error}`);
+      // Reported rather than dropped: a project that silently vanished from the dashboard looked
+      // exactly like a healthy one nobody had errors in.
+      return {
+        dirty: false,
+        summary: {
+          projectId,
+          name: projectName,
+          host,
+          lastTickAt: meta().lastTickAt[projectId] || 0,
+          issues: [],
+          error,
+        },
+      };
     }
 
     const issues = normalizeIssues(issuesRes.body);
@@ -531,6 +544,9 @@ function createPosthogPoller(deps) {
       onTickComplete({
         type: 'posthog-status',
         ts: now(),
+        // The dashboard's staleness threshold is two missed polls, which it cannot compute without
+        // knowing how often we poll.
+        intervalMinutes,
         projects: summaries,
         investigations: currentInvestigations(),
       });

@@ -349,7 +349,7 @@ test('an entry gone longer than the retention window is finally pruned', async (
   assert.equal(poller._state()[KEY], undefined, 'aged out on the clock, not on one absent tick');
 });
 
-test('a failed issue query skips the project without killing the cycle', async () => {
+test('a failed issue query reports that project without killing the cycle', async () => {
   const seen = [];
   const { poller, summaries } = harness({
     resolveProjects: async () => [{ projectId: 1, name: 'web' }, { projectId: 2, name: 'api' }],
@@ -364,7 +364,10 @@ test('a failed issue query skips the project without killing the cycle', async (
   await poller.start();
   await flush();
   assert.deepEqual(seen, [1, 2], 'the second project was still polled');
-  assert.deepEqual(summaries.at(-1).projects.map((p) => p.projectId), [2]);
+  const reported = summaries.at(-1).projects;
+  assert.deepEqual(reported.map((p) => p.projectId), [1, 2]);
+  assert.equal(reported[0].error, 'HTTP 500', 'the failure is reported, not hidden by omission');
+  assert.equal(reported[1].error, undefined);
 });
 
 test('onTickComplete emits the dashboard broadcast payload', async () => {
@@ -376,6 +379,7 @@ test('onTickComplete emits the dashboard broadcast payload', async () => {
   const summary = summaries.at(-1);
   assert.equal(summary.type, 'posthog-status');
   assert.equal(summary.ts, 1000);
+  assert.equal(summary.intervalMinutes, 15, 'the dashboard needs the interval to judge staleness');
   assert.equal(summary.projects.length, 1);
   const project = summary.projects[0];
   assert.equal(project.projectId, 1);
@@ -394,6 +398,20 @@ test('onTickComplete emits the dashboard broadcast payload', async () => {
     inFlight: true,
     url: 'https://ph.test/project/1/error_tracking/iss-1',
   }], 'the snapshot describes the tick, so the verdict is still null while the session runs');
+});
+
+test('onTickComplete reports a project whose issue query failed instead of dropping it', async () => {
+  const { poller, summaries } = harness({
+    api: { queryIssues: async () => ({ ok: false, error: 'HTTP 401' }) },
+  });
+  await poller.start();
+  await flush();
+  const project = summaries.at(-1).projects[0];
+  assert.equal(project.projectId, 1);
+  assert.equal(project.name, 'web');
+  assert.equal(project.error, 'HTTP 401');
+  assert.deepEqual(project.issues, []);
+  assert.equal(project.lastTickAt, 0, 'no successful poll yet, so no stamp to report');
 });
 
 test('onTickComplete includes a persisted investigation summary line', async () => {

@@ -9,17 +9,21 @@
 import { el } from './dom-helpers.js';
 import { createPosthogReportDialog } from './dialogs.js';
 import { sendControlRequest } from './control-ws.js';
-import { createPollAgoTicker, formatAgo } from './poll-ago.js';
+import { createPollAgoTicker, formatAgo, formatDuration } from './poll-ago.js';
 import { phaseLabel } from './pr-view-core.mjs';
 import { createRenderHold } from './radar-hold-core.mjs';
 import {
   healthAnomalyRows,
+  hostsDiffer,
   investigationRows,
   retainKnownInvestigationIds,
   needsActionPrRows,
   opsRows,
+  partitionRadarProjects,
   radarAttentionCount,
+  radarDisplayName,
   severityFor as severity,
+  shortHost,
   sortIssuesByAttention,
   sparklinePoints,
   summarizeIssues,
@@ -300,33 +304,62 @@ function summaryStat(label, value, tone) {
   return wrap;
 }
 
-function buildProject(project) {
+// The only per-project time still rendered, and only for the projects that earned a card by being
+// stale or errored: the section's one global clock covers the healthy case.
+function alertTextOf(entry) {
+  if (entry.error) return `poll failed: ${entry.error}`;
+  if (entry.staleMs > 0) return `stale ${formatDuration(entry.staleMs)}`;
+  return '';
+}
+
+function buildProject(entry, showHost) {
+  const project = entry.project;
   const wrap = el('div', 'radar-project');
   const issues = sortIssuesByAttention(project.issues);
   const counts = summarizeIssues(issues);
 
   const head = el('div', 'radar-project-head');
-  // Project names come from PostHog: text only, never markup.
-  head.append(el('h3', 'radar-project-name', project.name || `project ${project.projectId}`));
-  if (project.host) head.append(el('span', 'radar-project-host', project.host));
+  // Project names come from PostHog: text only, never markup. The tooltip keeps the raw configured
+  // value (usually the mapped repo path) reachable.
+  const name = el('h3', 'radar-project-name', radarDisplayName(project));
+  name.title = project.name || '';
+  head.append(name);
+  const host = showHost ? shortHost(project.host) : '';
+  if (host) head.append(el('span', 'radar-project-host', host));
   wrap.append(head);
 
   const summary = el('div', 'radar-project-summary');
   summary.append(summaryStat(counts.active === 1 ? 'active issue' : 'active issues', formatCount(counts.active)));
   summary.append(summaryStat('spiking', formatCount(counts.spiking), counts.spiking > 0 ? 'crit' : null));
-  const tickEl = el('span', 'radar-project-tick');
-  _pollTicker.track(tickEl, project.lastTickAt);
-  summary.append(tickEl);
+  const alertText = alertTextOf(entry);
+  if (alertText) {
+    const alert = el('span', 'radar-project-alert', alertText);
+    alert.dataset.tone = entry.error ? 'crit' : 'warn';
+    summary.append(alert);
+  }
   wrap.append(summary);
 
-  if (issues.length === 0) {
-    wrap.append(el('div', 'radar-empty', 'No tracked issues.'));
-    return wrap;
-  }
+  if (issues.length === 0) return wrap;
   const list = el('div', 'radar-issues');
   for (const issue of issues) list.append(buildIssueRow(issue, project.projectId));
   wrap.append(list);
   return wrap;
+}
+
+// One row per healthy project, in one bordered block: a state dot, the name, and the count. No host,
+// no clock, no "No tracked issues." - the row's existence already says the project is being watched.
+function buildQuietRow(entry, showHost) {
+  const project = entry.project;
+  const row = el('div', 'radar-quiet-row');
+  const dot = el('span', 'radar-quiet-dot');
+  dot.setAttribute('aria-hidden', 'true');
+  const name = el('span', 'radar-quiet-name', radarDisplayName(project));
+  name.title = project.name || '';
+  row.append(dot, name);
+  const host = showHost ? shortHost(project.host) : '';
+  if (host) row.append(el('span', 'radar-quiet-host', host));
+  row.append(el('span', 'radar-quiet-count', '0 issues'));
+  return row;
 }
 
 function attentionCount() {
@@ -353,7 +386,14 @@ function buildErrorsSection(projects) {
   const globalTickEl = el('div', 'radar-global-tick');
   _pollTicker.track(globalTickEl, _latest?.ts);
   section.append(globalTickEl);
-  for (const project of projects) section.append(buildProject(project));
+  const intervalMs = Number(_latest?.intervalMinutes) > 0 ? Number(_latest.intervalMinutes) * 60000 : 0;
+  const { loud, quiet } = partitionRadarProjects(projects, Date.now(), { intervalMs });
+  const showHost = hostsDiffer(projects);
+  for (const entry of loud) section.append(buildProject(entry, showHost));
+  if (quiet.length === 0) return section;
+  const quietBlock = el('div', 'radar-quiet');
+  for (const entry of quiet) quietBlock.append(buildQuietRow(entry, showHost));
+  section.append(quietBlock);
   return section;
 }
 

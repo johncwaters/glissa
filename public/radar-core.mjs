@@ -62,6 +62,86 @@ export function summarizeIssues(issues) {
   return { active: list.length, spiking, needsHuman };
 }
 
+// ── Errors section: quiet vs loud projects ───────────────────
+// A healthy project is not news. Every project used to render a full card (name, host, two stats, its
+// own poll clock, "No tracked issues."), so five healthy projects filled a phone screen with five
+// identical ways of saying nothing. Loud projects keep the card; quiet ones collapse to one row each.
+
+// Used only when the payload carries no poll interval (an older server): the real threshold is twice
+// the interval, so a project is stale once it has missed a poll rather than at a wall-clock guess.
+export const DEFAULT_STALE_MS = 5 * 60 * 1000;
+
+export function staleThresholdMs(intervalMs) {
+  const interval = Number(intervalMs);
+  if (!Number.isFinite(interval) || interval <= 0) return DEFAULT_STALE_MS;
+  return interval * 2;
+}
+
+function lastPathSegment(value) {
+  const segments = value.split(/[\\/]+/).filter(Boolean);
+  return segments.length === 0 ? '' : segments[segments.length - 1];
+}
+
+// posthog.projectMap entries name either a display name or the project's PATH (the same entry
+// resolveIssueProject reads), and the payload's `name` is that entry verbatim, so a mapped project
+// currently renders its whole absolute path as a title. One rule covers both: the last path segment
+// of a path IS its display name, and a plain name has exactly one segment.
+export function radarDisplayName(project) {
+  const configured = lastPathSegment(textOr(project?.name, ''));
+  if (configured) return configured;
+  const projectId = project?.projectId;
+  return projectId == null || projectId === '' ? 'project' : String(projectId);
+}
+
+// Hostname only: the scheme, port and any path are noise on a row that exists to disambiguate two
+// PostHog installs from each other.
+export function shortHost(host) {
+  const raw = textOr(host, '');
+  if (!raw) return '';
+  const authority = raw.replace(/^[a-z][a-z0-9+.-]*:\/\//i, '').split('/')[0];
+  return authority.split('@').pop().replace(/:\d+$/, '');
+}
+
+// One host across the board tells the operator nothing, so it is shown only when there are two to
+// tell apart.
+export function hostsDiffer(projects) {
+  const seen = new Set();
+  for (const project of Array.isArray(projects) ? projects : []) {
+    const host = shortHost(project?.host);
+    if (host) seen.add(host);
+  }
+  return seen.size > 1;
+}
+
+// The four conditions that earn a full card. `error` is the poll error the server reports for a
+// project whose issue query failed; a project that never ticked successfully carries no age at all,
+// so it can only be loud through that error.
+export function radarProjectAlert(project, nowTs, opts = {}) {
+  const counts = summarizeIssues(project?.issues);
+  const error = textOr(project?.error, '').slice(0, 200);
+  const now = Number(nowTs);
+  const lastTickAt = Number(project?.lastTickAt);
+  const age = Number.isFinite(now) && Number.isFinite(lastTickAt) && lastTickAt > 0 ? now - lastTickAt : 0;
+  const threshold = staleThresholdMs(opts.intervalMs);
+  const staleMs = age > threshold ? age : 0;
+  return { loud: counts.active > 0 || counts.spiking > 0 || !!error || staleMs > 0, counts, error, staleMs };
+}
+
+export function partitionRadarProjects(projects, nowTs, opts = {}) {
+  const loud = [];
+  const quiet = [];
+  for (const project of Array.isArray(projects) ? projects : []) {
+    const alert = radarProjectAlert(project, nowTs, opts);
+    const entry = { project, ...alert };
+    if (alert.loud) {
+      loud.push(entry);
+      continue;
+    }
+    quiet.push(entry);
+  }
+  return { loud, quiet };
+}
+
 // ── Investigations inbox ─────────────────────────────────────
 // The persisted log of completed investigations (server/core/posthog-core.js), carried on the same
 // posthog-status broadcast. Rows survive their issue: a resolved issue leaves the Errors section

@@ -5,15 +5,21 @@
 
 import { onSessionTick } from './session-card/session-tick.js';
 
+// The unit ladder every elapsed readout here shares, taking a DURATION rather than a timestamp so a
+// span with no "ago" reading (Radar's "stale 12m") wears the same units as the ticking labels.
+export function formatDuration(ms) {
+  const seconds = Math.max(0, Math.round((Number(ms) || 0) / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h`;
+  return `${Math.floor(seconds / 86400)}d`;
+}
+
 // Also used directly for one-shot "X ago" labels that do not tick (the Radar investigations inbox),
 // so the two surfaces cannot word the same elapsed time two different ways.
 export function formatAgo(ts) {
   if (!Number.isFinite(ts)) return 'never';
-  const seconds = Math.max(0, Math.round((Date.now() - ts) / 1000));
-  if (seconds < 60) return `${seconds}s ago`;
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
-  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
-  return `${Math.floor(seconds / 86400)}d ago`;
+  return `${formatDuration(Date.now() - ts)} ago`;
 }
 
 // One ticker per panel. `getRoot` hands back the panel's root (or null before mount); a hidden panel

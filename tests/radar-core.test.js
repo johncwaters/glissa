@@ -110,6 +110,106 @@ test('summarizeIssues: malformed entries never throw', async () => {
   assert.deepEqual(summarizeIssues([null, undefined, {}]), { active: 3, spiking: 0, needsHuman: 0 });
 });
 
+// ── Quiet vs loud projects ───────────────────────────────────
+const NOW = 1_700_000_000_000;
+const FIFTEEN_MIN_MS = 15 * 60 * 1000;
+const quietProject = (over = {}) => ({ projectId: 1, name: 'web', host: 'https://ph.test', lastTickAt: NOW, issues: [], ...over });
+const namesOf = (entries) => entries.map((entry) => entry.project.projectId);
+
+test('partitionRadarProjects: a healthy project is quiet, any active issue makes it loud', async () => {
+  const { partitionRadarProjects } = await importCore();
+  const projects = [
+    quietProject({ projectId: 1 }),
+    quietProject({ projectId: 2, issues: [{ issueId: 'a', change: 'quiet' }] }),
+  ];
+  const { loud, quiet } = partitionRadarProjects(projects, NOW, { intervalMs: FIFTEEN_MIN_MS });
+  assert.deepEqual(namesOf(quiet), [1]);
+  assert.deepEqual(namesOf(loud), [2]);
+});
+
+test('partitionRadarProjects: a spiking issue is loud on its own', async () => {
+  const { partitionRadarProjects } = await importCore();
+  const projects = [quietProject({ issues: [{ issueId: 'a', change: 'spiking' }] })];
+  const { loud, quiet } = partitionRadarProjects(projects, NOW, { intervalMs: FIFTEEN_MIN_MS });
+  assert.equal(quiet.length, 0);
+  assert.equal(loud[0].counts.spiking, 1);
+});
+
+test('partitionRadarProjects: a poll error is loud with zero issues, and carries the reason', async () => {
+  const { partitionRadarProjects } = await importCore();
+  const projects = [quietProject({ error: 'HTTP 401' })];
+  const { loud } = partitionRadarProjects(projects, NOW, { intervalMs: FIFTEEN_MIN_MS });
+  assert.equal(loud.length, 1);
+  assert.equal(loud[0].error, 'HTTP 401');
+  assert.equal(loud[0].counts.active, 0);
+});
+
+test('partitionRadarProjects: staleness is two poll intervals, exclusive at the edge', async () => {
+  const { partitionRadarProjects } = await importCore();
+  const opts = { intervalMs: FIFTEEN_MIN_MS };
+  const atEdge = [quietProject({ lastTickAt: NOW - 2 * FIFTEEN_MIN_MS })];
+  assert.equal(partitionRadarProjects(atEdge, NOW, opts).quiet.length, 1, 'exactly two intervals is not yet stale');
+  const past = [quietProject({ lastTickAt: NOW - 2 * FIFTEEN_MIN_MS - 1 })];
+  const { loud } = partitionRadarProjects(past, NOW, opts);
+  assert.equal(loud.length, 1);
+  assert.equal(loud[0].staleMs, 2 * FIFTEEN_MIN_MS + 1);
+});
+
+test('partitionRadarProjects: an unknown interval falls back to the five minute default', async () => {
+  const { partitionRadarProjects, DEFAULT_STALE_MS } = await importCore();
+  assert.equal(DEFAULT_STALE_MS, 5 * 60 * 1000);
+  const projects = [quietProject({ lastTickAt: NOW - DEFAULT_STALE_MS - 1 })];
+  assert.equal(partitionRadarProjects(projects, NOW, {}).loud.length, 1);
+  assert.equal(partitionRadarProjects([quietProject({ lastTickAt: NOW - DEFAULT_STALE_MS })], NOW, {}).quiet.length, 1);
+});
+
+test('partitionRadarProjects: a project that never polled is not called stale, only errored', async () => {
+  const { partitionRadarProjects } = await importCore();
+  assert.equal(partitionRadarProjects([quietProject({ lastTickAt: 0 })], NOW, {}).quiet.length, 1);
+  assert.equal(partitionRadarProjects([quietProject({ lastTickAt: 0, error: 'no response' })], NOW, {}).loud.length, 1);
+});
+
+test('partitionRadarProjects: a malformed or absent list never throws', async () => {
+  const { partitionRadarProjects } = await importCore();
+  assert.deepEqual(partitionRadarProjects(undefined, NOW, {}), { loud: [], quiet: [] });
+  const { quiet } = partitionRadarProjects([{}], NOW, {});
+  assert.equal(quiet.length, 1);
+});
+
+test('radarDisplayName: a mapped path shows its last segment, a plain name shows itself', async () => {
+  const { radarDisplayName } = await importCore();
+  assert.equal(radarDisplayName({ name: '/home/jwaters/Projects/claude-setup' }), 'claude-setup');
+  assert.equal(radarDisplayName({ name: 'C:\\code\\web-app\\' }), 'web-app');
+  assert.equal(radarDisplayName({ name: 'Marketing site' }), 'Marketing site');
+});
+
+test('radarDisplayName: falls back to the raw project id when there is no name', async () => {
+  const { radarDisplayName } = await importCore();
+  assert.equal(radarDisplayName({ projectId: 7 }), '7');
+  assert.equal(radarDisplayName({ projectId: 7, name: '   ' }), '7');
+  assert.equal(radarDisplayName({ projectId: 7, name: '/' }), '7');
+  assert.equal(radarDisplayName({}), 'project');
+});
+
+test('shortHost: keeps the hostname only', async () => {
+  const { shortHost } = await importCore();
+  assert.equal(shortHost('https://us.posthog.com'), 'us.posthog.com');
+  assert.equal(shortHost('http://ph.local:8000/some/path'), 'ph.local');
+  assert.equal(shortHost('eu.posthog.com'), 'eu.posthog.com');
+  assert.equal(shortHost(''), '');
+  assert.equal(shortHost(undefined), '');
+});
+
+test('hostsDiffer: only a second distinct host earns the label', async () => {
+  const { hostsDiffer } = await importCore();
+  const same = [quietProject({ projectId: 1 }), quietProject({ projectId: 2 })];
+  assert.equal(hostsDiffer(same), false);
+  assert.equal(hostsDiffer([quietProject({ projectId: 1, host: '' })]), false);
+  const mixed = [quietProject({ projectId: 1 }), quietProject({ projectId: 2, host: 'https://eu.posthog.com' })];
+  assert.equal(hostsDiffer(mixed), true);
+  assert.equal(hostsDiffer(undefined), false);
+});
+
 test('sparklinePoints: normalizes values into the requested box', async () => {
   const { sparklinePoints } = await importCore();
   assert.equal(sparklinePoints([0, 10, 5], 100, 10), '0,10 50,0 100,5');
