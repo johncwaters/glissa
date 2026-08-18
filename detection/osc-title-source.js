@@ -26,6 +26,7 @@ const { EventEmitter } = require('node:events');
 const DEFAULT_STABILIZATION_MS = 1500;
 const BRAILLE_MIN = 0x2800;
 const BRAILLE_MAX = 0x28ff;
+// Only U+25D0/U+25D1 live-probed (CC 2.1.234); the other two circle-halves frames can only ever mean spinning.
 const KNOWN_SPINNER_CODEPOINTS = new Set([0x25d0, 0x25d1, 0x25d2, 0x25d3]);
 
 // Known idle glyphs (extend as Step-0 probe confirms per Claude version).
