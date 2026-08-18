@@ -6,6 +6,7 @@ const assert = require('node:assert/strict');
 const {
   createOscTitleSource,
   isBrailleChar,
+  isSpinnerChar,
   isKnownIdleChar,
 } = require('../detection/osc-title-source');
 
@@ -32,6 +33,18 @@ test('isKnownIdleChar recognises U+2733 only', () => {
   assert.equal(isKnownIdleChar('✳'), true);
   assert.equal(isKnownIdleChar('A'), false);
   assert.equal(isKnownIdleChar('⠂'), false);
+});
+
+test('isSpinnerChar recognises braille and circle-halves spinner glyphs only', () => {
+  assert.equal(isSpinnerChar(String.fromCodePoint(0x25d0)), true);
+  assert.equal(isSpinnerChar(String.fromCodePoint(0x25d1)), true);
+  assert.equal(isSpinnerChar(String.fromCodePoint(0x25d2)), true);
+  assert.equal(isSpinnerChar(String.fromCodePoint(0x25d3)), true);
+  assert.equal(isSpinnerChar(String.fromCodePoint(0x2802)), true);
+  assert.equal(isSpinnerChar(String.fromCodePoint(0x2733)), false);
+  assert.equal(isSpinnerChar('A'), false);
+  assert.equal(isSpinnerChar(''), false);
+  assert.equal(isSpinnerChar(null), false);
 });
 
 test('idle glyph without prior spinner does NOT emit ready', (t) => {
@@ -68,6 +81,33 @@ test('spinner then stabilized idle emits ready exactly once', (t) => {
   assert.equal(ready[0].char, '✳');
   // working emitted once despite two spinner frames
   assert.equal(signals.filter((s) => s.signal === 'working').length, 1);
+  src.destroy();
+});
+
+test('circle-halves spinner then stabilized idle emits ready exactly once', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const src = createOscTitleSource({ stabilizationMs: 60 });
+  const signals = collect(src);
+  src.feed(bulletTitle(String.fromCodePoint(0x25d0)));
+  src.feed(bulletTitle(String.fromCodePoint(0x25d1)));
+  src.feed(bulletTitle(String.fromCodePoint(0x2733)));
+  t.mock.timers.tick(150);
+  const ready = signals.filter((s) => s.signal === 'ready');
+  assert.equal(ready.length, 1);
+  assert.equal(ready[0].char, String.fromCodePoint(0x2733));
+  assert.equal(signals.filter((s) => s.signal === 'working').length, 1);
+  src.destroy();
+});
+
+test('circle-halves spinner is not an unknown glyph', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const warnSpy = t.mock.method(console, 'warn');
+  const src = createOscTitleSource({ stabilizationMs: 50 });
+  const signals = collect(src);
+  src.feed(bulletTitle(String.fromCodePoint(0x25d0)));
+  t.mock.timers.tick(120);
+  assert.equal(signals.filter((s) => s.signal === 'unknown').length, 0);
+  assert.equal(warnSpy.mock.calls.length, 0);
   src.destroy();
 });
 

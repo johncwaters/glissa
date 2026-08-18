@@ -13,7 +13,7 @@ Status detection and change watching. Session status is derived from machine-emi
 | `status-source.js` | Merges hook + title signals: precedence hook > title, `ready` conflict window so a racing `awaiting-input` wins, dedup |
 | `hook-source.js` | `HookRouter`: validates the per-session bearer token, maps Claude Code hook POSTs (`Stop`, `Notification`, `UserPromptSubmit`, `SessionStart/End`, `SubagentStart/Stop`, post-tool wakeups) to signals |
 | `settings-injector.js` | Writes the per-session `--settings` file injecting HTTP hooks that POST to `POST /hook/:glissaId/:event` (token in URL) |
-| `osc-title-source.js` | OSC-0 title fallback: braille spinner = `working`, idle glyph = `ready`, unknown glyph = `unknown` (never a guess, never `awaiting-input`) |
+| `osc-title-source.js` | OSC-0 title fallback: braille or circle-halves spinner = `working`, idle glyph = `ready`, unknown glyph = `unknown` (never a guess, never `awaiting-input`) |
 | `replay.js` | Version-aware replay harness: drives `session-recorder.js` JSONL recordings (v1/v2) through the detection stack |
 | `worktree-watch.js` | fs.watch on the per-worktree gitdir; nudges `sessions.js` to recompute the diff when git state moves. Watch-only, no parsing |
 | `integration-ref-watch.js` | Reflog-based listener for integration-branch movement (e.g. another session merged into develop) that no local worktree event would surface |
