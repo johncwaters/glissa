@@ -469,6 +469,7 @@ body {
 .post-turn-badge,
 .agents-badge,
 .pack-badge,
+.usage-badge,
 .wakeup-badge,
 .prompt-badge {
   align-items: center;
@@ -571,6 +572,26 @@ body {
 }
 
 .session-card[data-pack-stale] .pack-badge {
+  display: inline-flex;
+}
+
+/* Conversation token spend + estimated cost. Hidden until the card carries data-usage (toggled live by
+   setSessionUsage on a usage-sessions delta). Muted hairline rather than the accent tone the other
+   informational chips wear: it is standing context on every running card, not a state change, and must
+   not compete with the chips that are. lowercase for the same reason .wakeup-badge is - it reads as a
+   measurement, not a tag. */
+.usage-badge {
+  display: none;
+  text-transform: none;
+  letter-spacing: 0.04em;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  border: 1px solid var(--border-dim);
+  background: color-mix(in oklab, var(--bg) 60%, transparent);
+}
+
+.session-card[data-usage] .usage-badge {
   display: inline-flex;
 }
 
@@ -2507,7 +2528,239 @@ a.pr-title:hover {
   font-size: 11px;
 }
 
-/* ── Primary view tabs (Focus / Radar / PRs) ───────────────── */
+/* ── Usage view ─────────────────────────────────────────────── */
+/* Same page rhythm and tokens as the Radar and PR views. Its own selectors because usage is the one
+   surface built out of dense numeric TABLES rather than attention rows, so it needs tabular alignment
+   and a meter the other two have no equivalent for. */
+.usage-view {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  width: 100%;
+  max-width: var(--content-max);
+  margin: 0 auto;
+  padding: clamp(16px, 2.5vw, 36px) clamp(12px, 2vw, 32px) 48px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.usage-content {
+  max-width: 1080px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.usage-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.usage-section-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  border-bottom: 1px solid var(--border-dim);
+  padding-bottom: 6px;
+}
+
+.usage-section-title {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-dim);
+}
+
+.usage-section-hint {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+/* The estimates caveat. Deliberately the widest, plainest text on the page: every number below it is
+   list-price arithmetic, and that has to be readable before the totals are. */
+.usage-caveat {
+  margin: 0;
+  max-width: 78ch;
+  line-height: 1.55;
+  color: var(--text);
+}
+
+.usage-meta {
+  margin: 0;
+  max-width: 78ch;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.usage-meta[data-tone="warn"] { color: var(--state-waiting); }
+.usage-meta[data-tone="crit"] { color: var(--state-failed); }
+
+.usage-warning {
+  margin: 0;
+  max-width: 78ch;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--state-waiting);
+}
+
+.usage-projection {
+  margin: 0;
+  font-size: 11px;
+  color: var(--accent);
+}
+
+.usage-empty {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.55;
+  max-width: 78ch;
+}
+
+.usage-tiles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.usage-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 104px;
+  padding: 8px 12px;
+  border: 1px solid var(--border-dim);
+  border-radius: var(--radius);
+  background: color-mix(in oklab, var(--bg) 60%, transparent);
+}
+
+.usage-tile-value {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-head);
+  font-variant-numeric: tabular-nums;
+}
+
+.usage-tile-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
+.usage-tile-sub {
+  font-size: 11px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Block progress and the token-limit bar. Tone comes from the data attribute, the fill width is the
+   only inline style (it is the value, not the styling). */
+.usage-meter {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border-dim);
+  overflow: hidden;
+}
+
+.usage-meter-fill {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+
+.usage-meter[data-tone="warn"] .usage-meter-fill { background: var(--state-waiting); }
+.usage-meter[data-tone="crit"] .usage-meter-fill { background: var(--state-failed); }
+
+.usage-table-scroll {
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+
+.usage-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+
+.usage-table th {
+  text-align: left;
+  font-weight: 600;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  padding: 0 8px 5px 0;
+  border-bottom: 1px solid var(--border-dim);
+}
+
+.usage-table td {
+  padding: 4px 8px 4px 0;
+  color: var(--text);
+  vertical-align: top;
+}
+
+.usage-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.usage-row-breakdown td {
+  padding-bottom: 8px;
+}
+
+.usage-model-cell,
+.usage-session-cell {
+  max-width: 42ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A transcript Glissa never managed still costs money, so it stays in the table; the managed rows are
+   the ones an operator can act on, so only they get the full-strength label. */
+.usage-row[data-managed="true"] .usage-session-cell {
+  color: var(--text-head);
+  font-weight: 600;
+}
+
+.usage-models {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
+
+.usage-model-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 1px 6px;
+  border: 1px solid var(--border-dim);
+  border-radius: var(--radius);
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.usage-model-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 28ch;
+}
+
+.usage-model-value {
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Primary view tabs (Focus / Radar / PRs / Usage) ───────── */
 .header-left {
   display: flex;
   align-items: center;
@@ -2999,6 +3252,7 @@ a.pr-title:hover {
 .focus-center .session-card.focus-centered .resume-badge,
 .focus-center .session-card.focus-centered .agents-badge,
 .focus-center .session-card.focus-centered .pack-badge,
+.focus-center .session-card.focus-centered .usage-badge,
 .focus-center .session-card.focus-centered .wakeup-badge,
 .focus-center .session-card.focus-centered .prompt-badge,
 .focus-center .session-card.focus-centered .post-turn-badge {
@@ -3408,6 +3662,19 @@ a.pr-title:hover {
   font-style: italic;
   padding: 8px 4px;
   text-align: center;
+}
+
+/* Reported facts an operator cannot edit (the Usage tab's pricing source and scan stats): same type as
+   a hint, but a block per line so two or three of them read as a small readout. */
+.settings-readonly {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  padding: 4px 0;
 }
 
 /* ── Advanced toggle in Add Session ─────────────────────── */
@@ -3903,17 +4170,35 @@ html[data-layout="phone"] .phone-shell[data-keyboard="open"] .phone-key-strip:no
 .phone-key:active { color: var(--text-head); border-color: var(--border-hover); }
 .phone-key:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-/* ── Review, Radar and PRs screens (adopted desktop panels) ── */
+/* ── Review, Radar, PRs and Usage screens (adopted desktop panels) ── */
 .phone-review,
 .phone-radar,
-.phone-prs { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.phone-prs,
+.phone-usage { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
 /* The docked column's fixed flex basis is meaningless as a full screen, and there is no neighbour to
    resize against or border off. */
 .phone-review > .app-sidebar { flex: 1 1 auto; border-left: none; }
 html[data-layout="phone"] .review-resize-handle { display: none; }
 html[data-layout="phone"] .review-sidebar-body { overscroll-behavior: contain; }
 .phone-radar > .radar-view,
-.phone-prs > .pr-view { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.phone-prs > .pr-view,
+.phone-usage > .usage-view { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+/* ── Usage on a phone ──
+   The desktop page is numeric tables at 11px, which is unreadable on a phone but does not need
+   restructuring the way the Radar rows did: each table already scrolls inside its own box, so the phone
+   only grows the type and loosens the tiles into a wrapping grid a thumb can read. */
+html[data-layout="phone"] .usage-view { padding: 14px 12px 24px; font-size: 13px; }
+html[data-layout="phone"] .usage-content { gap: 24px; }
+html[data-layout="phone"] .usage-section-title { font-size: 12px; }
+html[data-layout="phone"] .usage-table { font-size: 12px; }
+html[data-layout="phone"] .usage-tile { flex: 1 1 calc(50% - 8px); min-width: 0; }
+html[data-layout="phone"] .usage-meta,
+html[data-layout="phone"] .usage-warning,
+html[data-layout="phone"] .usage-projection,
+html[data-layout="phone"] .usage-empty { font-size: 12px; }
+/* Model ids and project names are long; on a phone they wrap instead of clipping to an unreadable stub. */
+html[data-layout="phone"] .usage-model-cell,
+html[data-layout="phone"] .usage-session-cell { max-width: 22ch; white-space: normal; overflow-wrap: anywhere; }
 /* ── Radar on a phone ──
    The desktop board is deliberately dense: one line per issue, controls at 35% opacity until the row
    is hovered. Neither half survives touch. There is no hover to reveal a control with, and a row of

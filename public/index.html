@@ -152,6 +152,7 @@
             <button class="header-tab" id="tab-focus" role="tab" aria-selected="true" aria-controls="view-focus" tabindex="0">Focus</button>
             <button class="header-tab" id="tab-radar" role="tab" aria-selected="false" aria-controls="view-radar" tabindex="-1">Radar<span class="tab-activity" id="tab-radar-activity" aria-hidden="true"></span></button>
             <button class="header-tab" id="tab-prs" role="tab" aria-selected="false" aria-controls="view-prs" tabindex="-1">PRs<span class="tab-activity" id="tab-prs-activity" aria-hidden="true"></span></button>
+            <button class="header-tab" id="tab-usage" role="tab" aria-selected="false" aria-controls="view-usage" tabindex="-1">Usage<span class="tab-activity" id="tab-usage-activity" aria-hidden="true"></span></button>
           </nav>
         </div>
         <div class="header-right">
@@ -197,6 +198,8 @@
         <section class="radar-view" id="view-radar" role="tabpanel" aria-labelledby="tab-radar" hidden></section>
         <!-- PRs view: GitHub PR auto-review status, mounted by pr-panel.js -->
         <section class="pr-view" id="view-prs" role="tabpanel" aria-labelledby="tab-prs" hidden></section>
+        <!-- Usage view: token and estimated-cost roll-up, mounted by usage-panel.js -->
+        <section class="usage-view" id="view-usage" role="tabpanel" aria-labelledby="tab-usage" hidden></section>
         <!-- Focus view (default): roster rail + single-focus center, mounted by focus-view.js -->
         <section class="focus-view" id="view-focus" role="tabpanel" aria-labelledby="tab-focus" hidden>
           <nav class="focus-rail" id="focus-rail" role="listbox" aria-label="Session roster" aria-keyshortcuts="ArrowUp ArrowDown Alt+ArrowUp Alt+ArrowDown"></nav>

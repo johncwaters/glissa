@@ -7,6 +7,7 @@
   <button type="button" class="settings-tab" role="tab" id="settings-tab-telegram" aria-controls="settings-panel-telegram" aria-selected="false" data-tab="telegram" tabindex="-1">Telegram</button>
   <button type="button" class="settings-tab" role="tab" id="settings-tab-pr-review" aria-controls="settings-panel-pr-review" aria-selected="false" data-tab="pr-review" tabindex="-1">PR Review</button>
   <button type="button" class="settings-tab" role="tab" id="settings-tab-posthog" aria-controls="settings-panel-posthog" aria-selected="false" data-tab="posthog" tabindex="-1">PostHog</button>
+  <button type="button" class="settings-tab" role="tab" id="settings-tab-usage" aria-controls="settings-panel-usage" aria-selected="false" data-tab="usage" tabindex="-1">Usage</button>
   <button type="button" class="settings-tab" role="tab" id="settings-tab-shortcuts" aria-controls="settings-panel-shortcuts" aria-selected="false" data-tab="shortcuts" tabindex="-1">Shortcuts</button>
 </div>
 
@@ -196,6 +197,42 @@
       Baseline window (days)
       <input type="number" class="dialog-input" id="settings-posthog-traffic-baseline" min="1" max="30" step="1" autocomplete="off">
     </label>
+  </div>
+</div>
+
+<div class="settings-panel" id="settings-panel-usage" role="tabpanel" aria-labelledby="settings-tab-usage" data-panel="usage" hidden>
+  <label class="dialog-label dialog-checkbox-label">
+    <input type="checkbox" class="dialog-checkbox" id="settings-usage-enabled">
+    Track token usage
+    <span class="dialog-hint">Reads the Claude Code transcripts already on this machine and rolls them up into the Usage tab and the per-card chips. Costs are API list-price estimates, not a bill: a Claude subscription does not charge per token.</span>
+  </label>
+  <label class="dialog-label dialog-checkbox-label">
+    <input type="checkbox" class="dialog-checkbox" id="settings-usage-fetch-pricing">
+    Fetch current model prices
+    <span class="dialog-hint">Refreshes the price table from the public source once a day. Off means the table bundled with this Glissa build is used, which drifts as new models ship.</span>
+  </label>
+  <div class="settings-timeout-grid">
+    <label class="dialog-label">
+      Scan interval (minutes)
+      <input type="number" class="dialog-input" id="settings-usage-scan-interval" min="1" max="1440" step="1" autocomplete="off">
+    </label>
+    <label class="dialog-label">
+      Retain (days)
+      <input type="number" class="dialog-input" id="settings-usage-retain-days" min="1" max="3650" step="1" autocomplete="off">
+    </label>
+  </div>
+  <label class="dialog-label">
+    Cost mode
+    <select class="dialog-input" id="settings-usage-cost-mode">
+      <option value="auto">Auto</option>
+      <option value="calculate">Calculate</option>
+      <option value="display">Display</option>
+    </select>
+    <span class="dialog-hint">Auto uses the cost a transcript recorded and computes the rest; Calculate always computes from the price table; Display shows only recorded costs, which a subscription leaves empty.</span>
+  </label>
+  <div class="settings-section">
+    <div class="settings-section-title">Last report</div>
+    <div class="settings-readonly" id="settings-usage-status"></div>
   </div>
 </div>
 

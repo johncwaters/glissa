@@ -11,6 +11,7 @@ import { countSessionsByName, suggestSessionName } from './session-card/naming.j
 import { SHORTCUT_GROUPS } from './shortcuts.mjs';
 import { applyTheme, getThemeList } from './theme.js';
 import { getSoundId, getThemeId, isNotificationsEnabled, setNotificationsEnabled, setSoundId, setThemeId } from './ui-prefs.js';
+import { usageStatusLines } from './usage-panel.js';
 
 // ── Shared dialog ARIA + focus trap helpers ──────────────────
 
@@ -250,6 +251,31 @@ export function createSettingsDialog(initialTab) {
   posthogPanel.addEventListener('change', () => { posthogTouched = true; });
   const shouldSavePosthog = () => posthogTouched || posthogHydrated !== null;
 
+  const usagePanel = dialog.querySelector('#settings-panel-usage');
+  const usageEnabledCheckbox = dialog.querySelector('#settings-usage-enabled');
+  const usageFetchPricingCheckbox = dialog.querySelector('#settings-usage-fetch-pricing');
+  const usageScanIntervalInput = dialog.querySelector('#settings-usage-scan-interval');
+  const usageRetainDaysInput = dialog.querySelector('#settings-usage-retain-days');
+  const usageCostModeSelect = dialog.querySelector('#settings-usage-cost-mode');
+  const usageStatusEl = dialog.querySelector('#settings-usage-status');
+
+  // Same materialization guard as the posthog tab: the fields always carry defaults, so saving them
+  // unconditionally would write a usage block into config.json for every operator who never opens this
+  // tab (and an absent block already means enabled-with-defaults).
+  let usageHydrated = null;
+  let usageTouched = false;
+  usagePanel.addEventListener('input', () => { usageTouched = true; });
+  usagePanel.addEventListener('change', () => { usageTouched = true; });
+  const shouldSaveUsage = () => usageTouched || usageHydrated !== null;
+
+  // Read-only readout of what the last usage report said, sourced from the panel rather than a second
+  // request: the panel is mounted eagerly and already holds it.
+  for (const line of usageStatusLines()) {
+    const row = document.createElement('div');
+    row.textContent = line;
+    usageStatusEl.appendChild(row);
+  }
+
   // Same materialization guard for the credentials: an operator who never opens this tab does not get
   // an empty telegram block written into config.json by an unrelated save.
   let telegramHydrated = null;
@@ -413,6 +439,7 @@ export function createSettingsDialog(initialTab) {
     errorEl.textContent = '';
     const inputs = [replayBufferInput, prIntervalInput, prMaxReviewsInput, prTimeoutInput];
     if (shouldSavePosthog()) inputs.push(...POSTHOG_NUMERIC_INPUTS());
+    if (shouldSaveUsage()) inputs.push(usageScanIntervalInput, usageRetainDaysInput);
     for (const input of inputs) {
       const v = Number(input.value);
       const floor = input.min === '' ? 1 : Number(input.min);
@@ -492,6 +519,19 @@ export function createSettingsDialog(initialTab) {
       };
     }
 
+    if (shouldSaveUsage()) {
+      // Spread the hydrated object first so keys this UI does not edit (sessionBlockHours,
+      // extraProjectsDirs) survive a save.
+      settings.usage = {
+        ...(usageHydrated || {}),
+        enabled: usageEnabledCheckbox.checked,
+        fetchPricing: usageFetchPricingCheckbox.checked,
+        scanIntervalMinutes: Number(usageScanIntervalInput.value),
+        retainDays: Number(usageRetainDaysInput.value),
+        costMode: usageCostModeSelect.value,
+      };
+    }
+
     sendControlRequest('update-settings', { settings })
       .then((msg) => {
         if (msg.type === 'settings-error') { errorEl.textContent = msg.message; return; }
@@ -550,6 +590,15 @@ export function createSettingsDialog(initialTab) {
       posthogTrafficMinUsersInput.value = ph.trafficSpikeMinUsers ?? 10;
       posthogTrafficCooldownInput.value = ph.trafficSpikeCooldownMinutes ?? 360;
       posthogTrafficBaselineInput.value = ph.trafficSpikeBaselineDays ?? 7;
+
+      usageHydrated = s.usage && typeof s.usage === 'object' ? s.usage : null;
+      const usage = usageHydrated || {};
+      // Absent means on, matching how the lane reads the key.
+      usageEnabledCheckbox.checked = usage.enabled !== false;
+      usageFetchPricingCheckbox.checked = usage.fetchPricing !== false;
+      usageScanIntervalInput.value = usage.scanIntervalMinutes ?? 5;
+      usageRetainDaysInput.value = usage.retainDays ?? 90;
+      usageCostModeSelect.value = usage.costMode ?? 'auto';
     })
     .catch(() => {
       errorEl.textContent = 'Failed to load settings. Close and retry.';

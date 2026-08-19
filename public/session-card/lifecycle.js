@@ -10,6 +10,7 @@ import { setHealthMonitorVisible } from '../health-monitor.js';
 import { seedReviewMergeStatus, setReviewDiff, setReviewMergeStatus } from '../sidebar/review-sidebar.js';
 import { setSelectedId } from '../sidebar/selection.js';
 import { getSoundId, isSoundEnabled } from '../ui-prefs.js';
+import { sessionChipText } from '../usage-view-core.mjs';
 import { setRunningActivity } from './activity.js';
 import { computeAggregate } from './aggregate-core.mjs';
 import { buildCardDOM, closeDebugOverlay, isRenameInProgress, openDebugOverlay, setDebugMode, showConfirmDialog, startInlineRename } from './card-dom.js';
@@ -353,6 +354,24 @@ function applyPackStaleness(ui) {
 
 function refreshPackStaleness() {
   for (const [, ui] of sessionUIs) applyPackStaleness(ui);
+}
+
+// Reflect this conversation's token spend on the card (server usage-sessions delta). `usage` is
+// { tokens, costUSD } or null; sets data-usage and a short chip so the operator sees what the turn cost
+// without opening the Usage tab. Estimated list-price arithmetic, never a bill; advisory only, and
+// hidden entirely until the scanner has attributed something to this card (mirrors setSessionAgents).
+export function setSessionUsage(sessionId, usage) {
+  const ui = sessionUIs.get(sessionId);
+  if (!ui) return;
+  const badge = ui.card.querySelector('.usage-badge');
+  const text = sessionChipText(usage);
+  if (!text) {
+    delete ui.card.dataset.usage;
+    if (badge) badge.textContent = '';
+    return;
+  }
+  ui.card.dataset.usage = '';
+  if (badge) badge.textContent = text;
 }
 
 // Reflect the advisory pending-prompt-kind on the card (server session-prompt delta / snapshot

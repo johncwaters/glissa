@@ -13,18 +13,19 @@ import { activateFocusView, centerSessionQuietly, deactivateFocusView, focusAdja
 import { initFormFactor, isPhoneLayout, onLayoutChange } from './form-factor.js';
 import { applyHealthSnapshot, mountHealthMonitor } from './health-monitor.js';
 import { initNotifications, showDesktopNotification } from './notifications.js';
-import { activatePhoneShell, deactivatePhoneShell, getPhoneSessionId, mountPhoneShell, refreshPhoneBoard, setPhoneScreenAttention, showPhoneScreen } from './phone/phone-shell.js';
+import { activatePhoneShell, deactivatePhoneShell, getPhoneSessionId, isPhoneScreenActive, isPhoneShellActive, mountPhoneShell, refreshPhoneBoard, setPhoneScreenAttention, showPhoneScreen } from './phone/phone-shell.js';
 import { applyPrStatus, mountPrView, setPrActivityCallback } from './pr-panel.js';
 // Radar is a SECOND consumer of the health, update and PR feeds: it summarizes what needs the operator,
 // while the health footer, the update banner and the PRs tab keep rendering each feed in full.
 import { applyHealthSnapshot as applyRadarHealth, applyPosthogStatus, applyPrStatus as applyRadarPrStatus, applyUpdateAvailable as applyRadarUpdate, mountRadarView, setRadarActivityCallback, setRadarNavigateToPrs } from './radar-panel.js';
 import { handleDebugStateRefresh, handleDebugStateResponse } from './session-card/card-dom.js';
-import { applyState, applyTerminalSettings, createSessionCard, getSessionCount, hasSession, notePackVersion, removeSessionCard, renameSessionCard, seedSessionMergeStatus, setLatestPackVersions, setSessionAgents, setSessionDiff, setSessionEffectiveBase, setSessionMergeStatus, setSessionPacks, setSessionPostTurn, setSessionPrompt, setSessionResume, setSessionWakeup, setSessionWorktree, updateAggregateStatus } from './session-card/lifecycle.js';
+import { applyState, applyTerminalSettings, createSessionCard, getSessionCount, hasSession, notePackVersion, removeSessionCard, renameSessionCard, seedSessionMergeStatus, setLatestPackVersions, setSessionAgents, setSessionDiff, setSessionEffectiveBase, setSessionMergeStatus, setSessionPacks, setSessionPostTurn, setSessionPrompt, setSessionResume, setSessionUsage, setSessionWakeup, setSessionWorktree, updateAggregateStatus } from './session-card/lifecycle.js';
 import { reconnectDataWs } from './session-card/terminal.js';
 import { showErrorToast } from './session-card/toast.js';
 import { forgetReviewSession, mergeSelectedSession, mountReviewSidebar, notifyWorktreeChanged, refreshReviewSidebar, resolveSelectedSession, resyncSelectedSession, setReviewBranchSync } from './sidebar/review-sidebar.js';
 import { applyTheme } from './theme.js';
 import { getActiveView, getThemeId, isSoundEnabled, setActiveView, setSoundEnabled } from './ui-prefs.js';
+import { applyUsageReport, applyUsageSessions, mountUsageView, setUsageActivityCallback } from './usage-panel.js';
 
 // ── Apply saved theme ─────────────────────────────────────────
 
@@ -77,6 +78,9 @@ setConnectionStateCallback((state, label) => {
     }
     revealApp();
     sendFocusState();
+    // A reload straight into the Usage tab (or a reconnect while it is open) has to ask for its own
+    // report: the connect-time replay only carries one if the server already had a cached report.
+    requestUsageReportIfVisible();
     // Fetch terminal settings on initial connect to apply cursorBlink/debugMode
     sendControlRequest('get-settings', {})
       .then((msg) => {
@@ -180,6 +184,42 @@ function handleStateChange(msg) {
   }
 }
 
+// ── Usage ────────────────────────────────────────────────────
+// usage-sessions is a small push (and a connect-time replay); the full report is pulled, so it is
+// re-requested when the Usage surface is the one the operator is looking at and a delta says the
+// numbers moved. Off-surface deltas still update the per-card chips and the tab dot for free.
+const usageChipSessionIds = new Set();
+
+function applyUsageSessionChips(rows) {
+  const seen = new Set();
+  for (const row of (Array.isArray(rows) ? rows : [])) {
+    if (!row?.id) continue;
+    seen.add(row.id);
+    setSessionUsage(row.id, { tokens: row.tokens, costUSD: row.costUSD });
+  }
+  // A session the payload no longer accounts for (transcript pruned by retainDays, session removed)
+  // must lose its chip rather than wear a frozen number forever.
+  for (const id of usageChipSessionIds) {
+    if (!seen.has(id)) setSessionUsage(id, null);
+  }
+  usageChipSessionIds.clear();
+  for (const id of seen) usageChipSessionIds.add(id);
+}
+
+function requestUsageReport() {
+  sendControlMsg({ type: 'request-usage-report' });
+}
+
+function isUsageSurfaceVisible() {
+  if (isPhoneShellActive()) return isPhoneScreenActive('usage');
+  return _activeView === 'usage';
+}
+
+function requestUsageReportIfVisible() {
+  if (!isUsageSurfaceVisible()) return;
+  requestUsageReport();
+}
+
 const messageHandlers = {
   'snapshot':           (msg) => handleSnapshot(msg.sessions, msg.packVersions),
   // A context pack finished rebuilding: every session still running an older version of it is now
@@ -217,6 +257,8 @@ const messageHandlers = {
   'health-snapshot':    (msg) => { if (msg.stats) { applyHealthSnapshot(msg.stats); applyRadarHealth(msg.stats); } },
   'posthog-status':     (msg) => applyPosthogStatus(msg),
   'pr-status':          (msg) => { applyPrStatus(msg); applyRadarPrStatus(msg); },
+  'usage-sessions':     (msg) => { applyUsageSessionChips(msg.sessions); applyUsageSessions(msg); requestUsageReportIfVisible(); },
+  'usage-report':       (msg) => applyUsageReport(msg),
   'client-trust':       (msg) => applyClientTrust(msg.trust),
   'shutting-down':      () => {
     disableReconnect();
@@ -330,16 +372,19 @@ document.getElementById('btn-help').addEventListener('click', () => {
   createSettingsDialog('shortcuts');
 });
 
-// ── Primary view tabs (Focus / Radar / PRs) ────────
+// ── Primary view tabs (Focus / Radar / PRs / Usage) ────────
 
 const viewFocusEl = document.getElementById('view-focus');
 const viewRadarEl = document.getElementById('view-radar');
 const viewPrsEl = document.getElementById('view-prs');
+const viewUsageEl = document.getElementById('view-usage');
 const tabFocus = document.getElementById('tab-focus');
 const tabRadar = document.getElementById('tab-radar');
 const tabPrs = document.getElementById('tab-prs');
+const tabUsage = document.getElementById('tab-usage');
 const tabRadarActivityEl = document.getElementById('tab-radar-activity');
 const tabPrsActivityEl = document.getElementById('tab-prs-activity');
+const tabUsageActivityEl = document.getElementById('tab-usage-activity');
 
 setRadarActivityCallback((active) => {
   tabRadarActivityEl.classList.toggle('active', active);
@@ -348,6 +393,10 @@ setRadarActivityCallback((active) => {
 setPrActivityCallback((active) => {
   tabPrsActivityEl.classList.toggle('active', active);
   setPhoneScreenAttention('prs', active);
+});
+setUsageActivityCallback((active) => {
+  tabUsageActivityEl.classList.toggle('active', active);
+  setPhoneScreenAttention('usage', active);
 });
 // A Radar PR row points at the full PR view: the phone screen when that layout owns the panel, the
 // desktop tab otherwise. Radar never navigates itself.
@@ -372,6 +421,11 @@ mountRadarView(viewRadarEl);
 // the tab's attention dot has to reflect it without the operator ever opening PRs.
 mountPrView(viewPrsEl);
 
+// Eager for the same reason again: usage-sessions is pushed and the connect-time usage-report replay
+// can land before the operator ever opens Usage, and its token-limit warning has to raise the tab dot
+// from wherever they are.
+mountUsageView(viewUsageEl);
+
 // Primary views in tab-strip order. Adding a view = adding an entry here (N-way, not a boolean).
 // Focus leads as the default landing view; the session-card grid (#sessions-container) stays mounted
 // off-screen as the canonical card home Focus borrows from - it is no longer a navigable view.
@@ -379,6 +433,7 @@ const VIEW_TABS = [
   { view: 'focus', tab: tabFocus, el: viewFocusEl },
   { view: 'radar', tab: tabRadar, el: viewRadarEl },
   { view: 'prs', tab: tabPrs, el: viewPrsEl },
+  { view: 'usage', tab: tabUsage, el: viewUsageEl },
 ];
 
 let _activeView = 'focus';
@@ -401,6 +456,9 @@ function activateView(view) {
   // Leaving Focus returns the borrowed card to its off-screen home grid.
   if (prev === 'focus' && view !== 'focus') deactivateFocusView();
   if (view === 'focus') activateFocusView();
+  // The usage report is pulled, not pushed (it is far too big to broadcast on every scan), so opening
+  // the tab asks for a current one.
+  if (view === 'usage') requestUsageReport();
 }
 
 for (let i = 0; i < VIEW_TABS.length; i++) {
@@ -432,6 +490,10 @@ activateView(VIEW_TABS.some((v) => v.view === savedView) ? savedView : 'focus');
 mountPhoneShell({
   radarPanelEl: viewRadarEl,
   prsPanelEl: viewPrsEl,
+  usagePanelEl: viewUsageEl,
+  // Usage is the one screen that PULLS rather than being pushed to, so it asks for a fresh report the
+  // moment it becomes visible; every other screen ignores this.
+  onScreenShown: (screenId) => { if (screenId === 'usage') requestUsageReport(); },
   // The desktop header does not render under [data-layout="phone"], so its controls move to the Board's
   // top bar rather than being rebuilt there. Every listener, and the client-trust gating on Shut Down,
   // travels with them.

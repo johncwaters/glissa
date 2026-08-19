@@ -1,4 +1,4 @@
-// The phone layout's shell: five screens, one visible at a time, behind a bottom nav.
+// The phone layout's shell: six screens, one visible at a time, behind a bottom nav.
 //
 // This is a first-class layout, not a narrowed desktop. The desktop DOM (header, focus view, docked
 // sidebar) is not rendered at all under [data-layout="phone"]; the shell is only built the first time
@@ -10,10 +10,11 @@
 //   Review   - the real review sidebar, re-parented in as a full screen
 //   Radar    - the real Radar panel, re-parented in as a full screen
 //   PRs      - the real PRs panel, re-parented in as a full screen
+//   Usage    - the real Usage panel, re-parented in as a full screen
 //
-// Four elements are BORROWED from the desktop DOM rather than rebuilt: the review sidebar, the Radar
-// and PRs panels, and the header controls the Board top bar adopts. Rebuilding any of them would mean
-// a second state pipeline for the same facts.
+// Five elements are BORROWED from the desktop DOM rather than rebuilt: the review sidebar, the Radar,
+// PRs and Usage panels, and the header controls the Board top bar adopts. Rebuilding any of them would
+// mean a second state pipeline for the same facts.
 
 import { STATES } from '/shared/states.mjs';
 import { sendControlMsg } from '../control-ws.js';
@@ -36,6 +37,7 @@ const SCREENS = Object.freeze([
   { id: 'review', label: 'Review', glyph: '◫' },     // square bisected vertically: a diff
   { id: 'radar', label: 'Radar', glyph: '◎', nested: true }, // ringed circle: a scan sweep
   { id: 'prs', label: 'PRs', glyph: '⇅', nested: true },     // opposed arrows: push and pull
+  { id: 'usage', label: 'Usage', glyph: '◔', nested: true }, // part-filled circle: a consumption gauge
 ]);
 const MORE = 'more';
 
@@ -50,6 +52,8 @@ let radarMountEl = null;
 let radarPanelEl = null;
 let prsMountEl = null;
 let prsPanelEl = null;
+let usageMountEl = null;
+let usagePanelEl = null;
 let moreButtonEl = null;
 let moreMenuEl = null;
 const menuButtonById = new Map();
@@ -227,6 +231,7 @@ function build() {
   reviewMountEl = el('div', 'phone-review');
   radarMountEl = el('div', 'phone-radar');
   prsMountEl = el('div', 'phone-prs');
+  usageMountEl = el('div', 'phone-usage');
 
   const screens = el('div', 'phone-screens');
   const contentByScreenId = {
@@ -235,6 +240,7 @@ function build() {
     review: reviewMountEl,
     radar: radarMountEl,
     prs: prsMountEl,
+    usage: usageMountEl,
   };
   for (const screen of SCREENS) {
     screens.appendChild(wrapScreen(screen.id, screen.label, contentByScreenId[screen.id]));
@@ -349,6 +355,9 @@ function onPopState(event) {
 function applyScreen(screenId) {
   activeScreen = screenId;
   setMoreMenuOpen(false);
+  // A screen that pulls its own data (Usage requests a report) is told it became visible; every other
+  // screen is fed by broadcasts and ignores this.
+  hooks.onScreenShown?.(screenId);
   for (const [id, section] of screenElById) {
     section.hidden = id !== screenId;
   }
@@ -394,6 +403,7 @@ export function mountPhoneShell(options) {
   hooks = options || {};
   radarPanelEl = hooks.radarPanelEl || null;
   prsPanelEl = hooks.prsPanelEl || null;
+  usagePanelEl = hooks.usagePanelEl || null;
 }
 
 // `sessionId` is the session the desktop Focus center was holding, if any. It is pre-loaded into the
@@ -413,6 +423,8 @@ export function activatePhoneShell({ sessionId } = {}) {
   if (radarPanelEl) radarPanelEl.hidden = false;
   adoptElement(prsPanelEl, prsMountEl);
   if (prsPanelEl) prsPanelEl.hidden = false;
+  adoptElement(usagePanelEl, usageMountEl);
+  if (usagePanelEl) usagePanelEl.hidden = false;
   syncVisualViewport();
   if (sessionId) terminalScreen.show(sessionId);
   // Reconcile history BEFORE opening a screen, so the flag and the stack agree from the first tap.
@@ -430,6 +442,7 @@ export function deactivatePhoneShell() {
   reparentReviewPanel(null);
   releaseElement(radarPanelEl);
   releaseElement(prsPanelEl);
+  releaseElement(usagePanelEl);
   for (const control of (hooks.headerControls || [])) releaseElement(control);
   setMoreMenuOpen(false);
   shellEl.hidden = true;
@@ -442,6 +455,12 @@ export function deactivatePhoneShell() {
 
 export function isPhoneShellActive() {
   return active;
+}
+
+// Whether a given screen is the one on display. The peer of the desktop's active-view check, for a
+// panel that only fetches while the operator is actually looking at it.
+export function isPhoneScreenActive(screenId) {
+  return active && activeScreen === screenId;
 }
 
 // The session the Terminal screen is showing, so the app can keep the desktop Focus center pointed at
