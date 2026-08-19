@@ -436,11 +436,7 @@ test('stats reports dirs, files, entries and lastScanMs', async () => {
   assert.equal(stats.lastScanMs, Date.parse('2026-08-19T12:00:00.000Z'));
 });
 
-/*
- * A MONTHLY budget has to be measured against the whole month. budgetSpend therefore widens its lookback
- * past retainDays when the month so far is longer than it; without that, `usage.retainDays: 7` would compare
- * a month's ceiling against seven days of spend and hold the alert ladder back for most of the month.
- */
+// Without the retention floor, retainDays: 7 compares a month's ceiling against seven days of spend.
 test('budgetSpend sees the whole month even when retainDays is shorter than it', async () => {
   const root = await makeTempRoot();
   const projectsDir = await makeProjectsDir(root);

@@ -75,8 +75,7 @@ function createUsageScanner(deps = {}) {
     chunkSize = DEFAULT_CHUNK_SIZE,
   } = deps;
 
-  // Normalized ONCE here, at the edge where an arbitrary caller's value arrives. Nothing downstream
-  // re-normalizes: the boundary rule for this module is defensive at the seam, trusting inside it.
+  // Normalized once at this module's seam; nothing downstream re-normalizes.
   const budget = normalizeBudgetConfig(budgetDep);
   const fileStates = new Map();
   const primaryIndex = new Map();
@@ -495,21 +494,14 @@ function createUsageScanner(deps = {}) {
     return Number.isFinite(day) ? day : 1;
   }
 
-  /*
-   * A MONTHLY budget has to be measured against the whole month, so the entry store keeps at least that
-   * much regardless of retainDays. Widening the aggregate window alone would not work: the entries are
-   * pruned to this floor first, so a shorter retention would have already thrown the earlier days away.
-   * Coupled to the budget on purpose and only when one is configured, so an operator who set
-   * `retainDays: 7` and no budget still gets exactly the seven days they asked for. Bounded at 31 days.
-   */
+  // A monthly budget is measured against the whole month, so with one configured the entry store keeps
+  // at least the elapsed month (pruning runs before aggregation, so widening later cannot recover days).
   function entryRetentionDays() {
     if (budget.monthlyUsd === null) return retainDays;
     return Math.max(retainDays, daysElapsedThisMonth());
   }
 
-  // Matches the retention floor above, so the rollups cover what the store now holds. Only a widened
-  // window needs its own cache key: cachedRollupsForDays memoizes ON its first argument, so reusing
-  // `undefined` for a different window would hand back rollups built for the narrower one.
+  // Matches the retention floor; a widened window needs its own cache key (memoized on the first arg).
   function budgetRollups() {
     const lookback = entryRetentionDays();
     if (lookback === retainDays) return cachedRollupsForDays(undefined, retainDays);
