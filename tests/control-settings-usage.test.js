@@ -23,7 +23,7 @@ function fakeConfigStore(cfg) {
   };
 }
 
-function harness(cfg) {
+function harness(cfg, deps = {}, { preserveConnectFrames = false } = {}) {
   const controlWss = new EventEmitter();
   const sent = [];
   const broadcasts = [];
@@ -37,9 +37,10 @@ function harness(cfg) {
     applyConfigReload: () => {},
     applySettingsReload: (c) => reloadCalls.push(c),
     broadcastControl: (m) => broadcasts.push(m),
+    ...deps,
   });
   controlWss.emit('connection', ws);
-  sent.length = 0;
+  if (!preserveConnectFrames) sent.length = 0;
   return { send: (msg) => messageHandler(JSON.stringify(msg)), sent, broadcasts, reloadCalls, cfg };
 }
 
@@ -214,75 +215,40 @@ test('request-usage-report without a wired lane replies an error, never a silent
 
 test('request-usage-report passes force through and drops an out-of-range days', async () => {
   const calls = [];
-  const controlWss = new EventEmitter();
-  const cfg = baseCfg();
-  const sent = [];
-  let messageHandler = null;
-  const ws = { send: (s) => sent.push(JSON.parse(s)), on: (ev, h) => { if (ev === 'message') messageHandler = h; } };
-  registerControlHandlers(controlWss, {
-    sessions: new Map(),
-    config: cfg,
-    configStore: fakeConfigStore(cfg),
-    applyConfigReload: () => {},
-    applySettingsReload: () => {},
-    broadcastControl: () => {},
+  const h = harness(baseCfg(), {
     requestUsageReport: async (args) => {
       calls.push(args);
       return { type: 'usage-report', requestId: args.requestId, totals: { tokens: 0 } };
     },
   });
-  controlWss.emit('connection', ws);
 
-  await messageHandler(JSON.stringify({ type: 'request-usage-report', requestId: 'a', days: 30, force: true }));
-  await messageHandler(JSON.stringify({ type: 'request-usage-report', requestId: 'b', days: 99999 }));
-  await messageHandler(JSON.stringify({ type: 'request-usage-report', requestId: 'c', days: 'lots', force: 'yes' }));
+  await h.send({ type: 'request-usage-report', requestId: 'a', days: 30, force: true });
+  await h.send({ type: 'request-usage-report', requestId: 'b', days: 99999 });
+  await h.send({ type: 'request-usage-report', requestId: 'c', days: 'lots', force: 'yes' });
 
   assert.deepEqual(calls, [
     { days: 30, force: true, requestId: 'a' },
     { days: undefined, force: false, requestId: 'b' },
     { days: undefined, force: false, requestId: 'c' },
   ]);
-  assert.equal(sent.filter((m) => m.type === 'usage-report').length, 3, 'every request is answered');
+  assert.equal(h.sent.filter((m) => m.type === 'usage-report').length, 3, 'every request is answered');
 });
 
 // --- connect replay ---
 
 test('a connecting client gets the live usage-sessions and the cached usage-report', () => {
-  const controlWss = new EventEmitter();
-  const cfg = baseCfg();
-  const sent = [];
-  const ws = { send: (s) => sent.push(JSON.parse(s)), on: () => {} };
-  registerControlHandlers(controlWss, {
-    sessions: new Map(),
-    config: cfg,
-    configStore: fakeConfigStore(cfg),
-    applyConfigReload: () => {},
-    applySettingsReload: () => {},
-    broadcastControl: () => {},
+  const h = harness(baseCfg(), {
     getUsageSessions: () => ({ type: 'usage-sessions', ts: 1, pricingSource: 'snapshot', sessions: [] }),
     getUsageReport: () => ({ type: 'usage-report', requestId: null, totals: { tokens: 7 } }),
-  });
-  controlWss.emit('connection', ws);
+  }, { preserveConnectFrames: true });
 
-  assert.ok(sent.some((m) => m.type === 'usage-sessions'));
-  assert.ok(sent.some((m) => m.type === 'usage-report' && m.totals.tokens === 7));
+  assert.ok(h.sent.some((m) => m.type === 'usage-sessions'));
+  assert.ok(h.sent.some((m) => m.type === 'usage-report' && m.totals.tokens === 7));
 });
 
 test('a caller that wires no usage accessors replays no usage messages', () => {
-  const controlWss = new EventEmitter();
-  const cfg = baseCfg();
-  const sent = [];
-  const ws = { send: (s) => sent.push(JSON.parse(s)), on: () => {} };
-  registerControlHandlers(controlWss, {
-    sessions: new Map(),
-    config: cfg,
-    configStore: fakeConfigStore(cfg),
-    applyConfigReload: () => {},
-    applySettingsReload: () => {},
-    broadcastControl: () => {},
-  });
-  controlWss.emit('connection', ws);
+  const h = harness(baseCfg(), {}, { preserveConnectFrames: true });
 
-  assert.equal(sent.filter((m) => m.type.startsWith('usage-')).length, 0, 'an older caller sees nothing new on the wire');
-  assert.ok(sent.some((m) => m.type === 'snapshot'), 'the pre-existing connect frames still go out');
+  assert.equal(h.sent.filter((m) => m.type.startsWith('usage-')).length, 0, 'an older caller sees nothing new on the wire');
+  assert.ok(h.sent.some((m) => m.type === 'snapshot'), 'the pre-existing connect frames still go out');
 });

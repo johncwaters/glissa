@@ -67,14 +67,9 @@ const POSTHOG_BOOLEAN_KEYS = ['enabled', 'recurrenceDedupe', 'trafficSpikeEnable
 const POSTHOG_STRING_KEYS = ['host', 'apiKey', 'repoPath'];
 
 const USAGE_BOOLEAN_KEYS = ['enabled', 'fetchPricing'];
-// Integer, not "positive number": every one of these is a count of whole minutes/days/hours, and the
-// upper bounds keep a typo from arming a scan every day or retaining a decade of entries in memory.
-const USAGE_INTEGER_RANGES = {
-  scanIntervalMinutes: { min: 1, max: 1440 },
-  retainDays: { min: 1, max: 3650 },
-  sessionBlockHours: { min: 1, max: 24 },
-};
-const USAGE_COST_MODES = ['auto', 'calculate', 'display'];
+// Ranges and modes come from the lane itself so the wire validator and resolveUsageConfig's fallback
+// logic cannot drift apart.
+const { USAGE_INTEGER_RANGES, USAGE_COST_MODES } = require('./usage-wiring');
 // Max days a client may ask a usage report to cover, matching the retainDays ceiling.
 const USAGE_REPORT_MAX_DAYS = 3650;
 

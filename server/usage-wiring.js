@@ -41,12 +41,16 @@ const NUDGE_DEBOUNCE_MS = 2000;
  */
 const PARTIAL_CONTINUE_MS = 15000;
 const FORCE_PASS_MIN_INTERVAL_MS = 3000;
-const COST_MODES = new Set(['auto', 'calculate', 'display']);
-const INTEGER_RANGES = Object.freeze({
+// Shared with control-handlers' validateUsage/sanitizeUsage: one source of truth for the ranges the
+// wire validator enforces and the fallback resolver tolerates, so the two cannot drift apart.
+const USAGE_COST_MODES = Object.freeze(['auto', 'calculate', 'display']);
+const COST_MODES = new Set(USAGE_COST_MODES);
+const USAGE_INTEGER_RANGES = Object.freeze({
   scanIntervalMinutes: { min: 1, max: 1440 },
   retainDays: { min: 1, max: 3650 },
   sessionBlockHours: { min: 1, max: 24 },
 });
+const INTEGER_RANGES = USAGE_INTEGER_RANGES;
 
 function integerWithin(value, { min, max }, fallback) {
   if (!Number.isInteger(value)) return fallback;
@@ -399,4 +403,6 @@ module.exports = {
   DEFAULT_USAGE_CONFIG,
   NUDGE_DEBOUNCE_MS,
   PARTIAL_CONTINUE_MS,
+  USAGE_INTEGER_RANGES,
+  USAGE_COST_MODES,
 };
