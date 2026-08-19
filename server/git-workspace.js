@@ -110,9 +110,8 @@ function createGitWorkspace(opts = {}) {
   }
 
   // Create an isolated worktree on `glissa/<teamId>/<label>`. `teamId` names the LANE ("session",
-  // "pr-review"); the segment name is on-disk branch shape that boot reconciliation matches, so it stays.
-  // Returns
-  // { cwd, isGit, branch, base, baseSha }; falls back to { cwd: projectPath, isGit: false }.
+  // "pr-review"); the segment name is on-disk branch shape that boot reconciliation matches, so it
+  // stays. Returns { cwd, isGit, branch, base, baseSha }; falls back to { cwd: projectPath, isGit: false }.
   function create(args) {
     return serialize(() => createBody(args));
   }
