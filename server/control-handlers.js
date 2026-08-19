@@ -69,7 +69,7 @@ const POSTHOG_STRING_KEYS = ['host', 'apiKey', 'repoPath'];
 const USAGE_BOOLEAN_KEYS = ['enabled', 'fetchPricing', 'planLimits'];
 // Ranges and modes come from the lane itself so the wire validator and resolveUsageConfig's fallback
 // logic cannot drift apart.
-const { USAGE_INTEGER_RANGES, USAGE_COST_MODES } = require('./usage-wiring');
+const { USAGE_INTEGER_RANGES, USAGE_COST_MODES, USAGE_VENDOR_KEYS } = require('./usage-wiring');
 // Max days a client may ask a usage report to cover, matching the retainDays ceiling.
 const USAGE_REPORT_MAX_DAYS = 3650;
 
@@ -175,6 +175,12 @@ function validateUsage(u) {
   if (u.costMode != null && !USAGE_COST_MODES.includes(u.costMode)) {
     return `usage.costMode must be one of ${USAGE_COST_MODES.join(', ')}`;
   }
+  if (u.vendors != null) {
+    if (!isPlainObject(u.vendors)) return 'usage.vendors must be an object';
+    for (const key of USAGE_VENDOR_KEYS) {
+      if (u.vendors[key] != null && typeof u.vendors[key] !== 'boolean') return `usage.vendors.${key} must be a boolean`;
+    }
+  }
   if (u.extraProjectsDirs == null) return null;
   if (!Array.isArray(u.extraProjectsDirs)) return 'usage.extraProjectsDirs must be an array of absolute paths';
   for (const dir of u.extraProjectsDirs) {
@@ -234,6 +240,13 @@ function sanitizeUsage(u) {
     if (u[key] != null) out[key] = u[key];
   }
   if (u.costMode != null) out.costMode = String(u.costMode);
+  if (isPlainObject(u.vendors)) {
+    const vendors = {};
+    for (const key of USAGE_VENDOR_KEYS) {
+      if (u.vendors[key] != null) vendors[key] = !!u.vendors[key];
+    }
+    if (Object.keys(vendors).length > 0) out.vendors = vendors;
+  }
   if (Array.isArray(u.extraProjectsDirs)) out.extraProjectsDirs = u.extraProjectsDirs.map((dir) => String(dir).trim());
   return out;
 }

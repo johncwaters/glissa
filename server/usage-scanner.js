@@ -13,7 +13,22 @@ const {
 const { buildUsageReport, pruneEntries } = require('./core/usage-aggregate-core');
 const { buildBlocks, burnRate, projectBlock } = require('./core/usage-blocks-core');
 const { costForEntry, lookupModelPrice } = require('./core/usage-pricing-core');
-const { decideFileRead, projectDirCandidates, resolveProjectsDirs, splitLines } = require('./core/usage-scan-core');
+const {
+  codexFallbackRoots,
+  codexHomes,
+  codexRootCandidates,
+  codexSessionIdFromPath,
+  dedupeCodexFiles,
+  decideFileRead,
+  grokHomes,
+  grokRootCandidates,
+  isUsageFile,
+  projectDirCandidates,
+  resolveProjectsDirs,
+  splitLines,
+} = require('./core/usage-scan-core');
+const { codexDedupIdentity, createCodexUsageState, parseCodexUsageLine } = require('./core/usage-codex-core');
+const { grokDedupIdentity, parseGrokUsageLine } = require('./core/usage-grok-core');
 
 const DEFAULT_BYTE_BUDGET = 64 * 1024 * 1024;
 const DEFAULT_CHUNK_SIZE = 1024 * 1024;
@@ -33,6 +48,9 @@ function createUsageScanner(deps = {}) {
     blockHours = 5,
     retainDays = 90,
     extraProjectsDirs = [],
+    // Which non-Claude vendors to walk. A disabled vendor contributes no roots at all, so its tree is
+    // never read and an all-Claude machine behaves exactly as before.
+    vendors = { codex: true, grok: true },
     logger = noopLogger,
     byteBudget = DEFAULT_BYTE_BUDGET,
     chunkSize = DEFAULT_CHUNK_SIZE,
@@ -43,6 +61,9 @@ function createUsageScanner(deps = {}) {
   const collisionIndex = new Map();
   const entries = [];
   const missingModels = new Set();
+  // `claudeDirs` drives Claude identity (relPath -> project + session id) and the resolution error;
+  // `dirs` is every transcript root scanned, which is what the report reports.
+  let claudeDirs = [];
   let dirs = [];
   let lastFileCount = 0;
   let lastScanMs = null;
@@ -86,9 +107,15 @@ function createUsageScanner(deps = {}) {
     let bytesReadThisPass = 0;
     if (force) resetStore();
     const resolved = await resolveProjectsDirsAsync({ fsPromises, env, extraProjectsDirs, logger });
-    dirs = resolved.dirs;
+    claudeDirs = resolved.dirs;
     resolutionError = resolved.error;
-    const files = await walkJsonlFiles(dirs, fsPromises, logger);
+    const vendorRoots = await resolveVendorRootsAsync({ fsPromises, env, vendors });
+    const roots = [
+      ...claudeDirs.map((dir) => ({ vendor: 'claude', dir, kind: 'active' })),
+      ...vendorRoots,
+    ];
+    dirs = roots.map((root) => root.dir);
+    const files = await walkSourceFiles(roots, fsPromises, logger);
     lastFileCount = files.length;
 
     for (const file of files) {
@@ -99,14 +126,15 @@ function createUsageScanner(deps = {}) {
       }
       let fileNewEntryCount = 0;
       const fileResult = await scanFile({
-        file,
+        file: file.file,
+        vendor: file.vendor,
         fsPromises,
         force,
         maxBytes: remainingBudget,
         chunkSize,
-        onLine: (line, lineOrdinal) => {
+        onLine: (line, lineOrdinal, vendorState) => {
           parsedLineCount += 1;
-          fileNewEntryCount += ingestLine({ line, file, dirs, lineOrdinal });
+          fileNewEntryCount += ingestLine({ line, file: file.file, vendor: file.vendor, vendorState, dirs: claudeDirs, lineOrdinal });
         },
         shouldYieldAfterLine: () => parsedLineCount % LINE_YIELD_INTERVAL === 0,
         logger,
@@ -133,7 +161,7 @@ function createUsageScanner(deps = {}) {
     };
   }
 
-  async function scanFile({ file, fsPromises, force, maxBytes, chunkSize, onLine, shouldYieldAfterLine, logger }) {
+  async function scanFile({ file, vendor, fsPromises, force, maxBytes, chunkSize, onLine, shouldYieldAfterLine, logger }) {
     let stat;
     try {
       stat = await fsPromises.stat(file);
@@ -147,9 +175,17 @@ function createUsageScanner(deps = {}) {
     const decision = decideFileRead(prior, { size: stat.size, mtimeMs: stat.mtimeMs });
     if (decision.action === 'skip') return { bytesRead: 0, partial: false };
 
+    /*
+     * Codex token_count lines report CUMULATIVE totals and name their model in a separate earlier line,
+     * so an appended read has to continue from the same running snapshot or it would re-count the whole
+     * session as one delta. That is what vendorState carries, per file, beside offset and carry.
+     */
     const state = decision.action === 'restart'
-      ? { size: stat.size, mtimeMs: stat.mtimeMs, offset: 0, carry: '', lineOrdinal: 0 }
-      : { ...(prior || {}), size: stat.size, mtimeMs: stat.mtimeMs, offset: decision.readFrom, carry: prior?.carry || '' };
+      ? { size: stat.size, mtimeMs: stat.mtimeMs, offset: 0, carry: '', lineOrdinal: 0, vendorState: createVendorState(vendor) }
+      : { ...(prior || {}), size: stat.size, mtimeMs: stat.mtimeMs, offset: decision.readFrom, carry: prior?.carry || '', vendorState: prior?.vendorState || createVendorState(vendor) };
+    // The parsers MUTATE vendorState, so the rollback snapshot needs its own copy or a failed read would
+    // leave the running Codex totals advanced past the entries that were just rolled back.
+    const priorSnapshot = prior ? { ...prior, vendorState: cloneVendorState(prior.vendorState) } : null;
     fileStates.set(file, state);
 
     let handle;
@@ -185,7 +221,7 @@ function createUsageScanner(deps = {}) {
         state.carry = split.carry;
         for (const line of split.lines) {
           state.lineOrdinal = (state.lineOrdinal || 0) + 1;
-          onLine(line, state.lineOrdinal);
+          onLine(line, state.lineOrdinal, state.vendorState);
           if (shouldYieldAfterLine()) await yieldNow();
         }
       }
@@ -198,13 +234,13 @@ function createUsageScanner(deps = {}) {
         state.carry = split.carry;
         for (const line of split.lines) {
           state.lineOrdinal = (state.lineOrdinal || 0) + 1;
-          onLine(line, state.lineOrdinal);
+          onLine(line, state.lineOrdinal, state.vendorState);
         }
       }
       state.size = stat.size;
       state.mtimeMs = stat.mtimeMs;
     } catch (error) {
-      if (hadPrior) fileStates.set(file, prior);
+      if (hadPrior) fileStates.set(file, priorSnapshot);
       if (!hadPrior) fileStates.delete(file);
       warn(logger, `usage scan read failed for ${file}: ${error.message}`);
       return { bytesRead, partial: false, failed: true };
@@ -214,7 +250,9 @@ function createUsageScanner(deps = {}) {
     return { bytesRead, partial, failed: false };
   }
 
-  function ingestLine({ line, file, dirs, lineOrdinal }) {
+  function ingestLine({ line, file, vendor, vendorState, dirs, lineOrdinal }) {
+    if (vendor === 'codex') return ingestVendorLine(parseCodexUsageLine(line, vendorState, { sessionId: codexSessionIdFromPath(file) }), file);
+    if (vendor === 'grok') return ingestVendorLine(parseGrokUsageLine(line), file);
     const parsed = parseUsageLine(line);
     if (!parsed) return 0;
     const relPath = relativeToProjects(file, dirs);
@@ -237,7 +275,22 @@ function createUsageScanner(deps = {}) {
     return accepted;
   }
 
+  /*
+   * A non-Claude entry, already in the shared entry shape. Its own core owns identity and (for Grok)
+   * cost, and there is no advisor expansion or transcript-path identity to derive: the project is the
+   * vendor's session dir, and attribution to a Glissa card is deliberately not attempted (cards are keyed
+   * by CLAUDE session id).
+   */
+  function ingestVendorLine(parsed, file) {
+    if (!parsed) return 0;
+    const entry = stripIngestFields(priceEntry({ ...parsed, project: path.dirname(file) }));
+    return storeEntry(entry) ? 1 : 0;
+  }
+
   function priceEntry(entry) {
+    // Grok reports its own cost in the transcript (billing ticks, or the parser's published rate card),
+    // so it is authoritative here and never routed through the price table or the missing-price warning.
+    if (entry.vendor === 'grok') return entry;
     const resolved = lookupModelPrice(pricingTable, entry.model, { aliases });
     const priced = costForEntry(entry, resolved?.price || null, { costMode });
     if (shouldTrackMissingModel({ entry, resolved, priced, costMode })) missingModels.add(entry.model);
@@ -282,7 +335,13 @@ function createUsageScanner(deps = {}) {
     const reportRetainDays = days == null ? retainDays : days;
     const rollups = cachedRollupsForDays(days, reportRetainDays);
     const now = nowFn();
-    const blockEntries = entriesWithinDays(entries, { now, retainDays: reportRetainDays });
+    /*
+     * Blocks, burn rate and the token-limit reference are CLAUDE-ONLY. The 5h window is a Claude
+     * subscription concept, and mixing another vendor's tokens into it would produce a number that looks
+     * like a plan limit and is not one.
+     */
+    const blockEntries = entriesWithinDays(entries, { now, retainDays: reportRetainDays })
+      .filter((entry) => isClaudeEntry(entry));
     const blockSummary = buildBlocks(blockEntries, { blockHours, now });
     const activeBurn = burnRate(blockSummary.activeBlock, now);
     const activeBlock = blockSummary.activeBlock
@@ -308,6 +367,8 @@ function createUsageScanner(deps = {}) {
     if (cachedSessionTotals && !isReportDirty) return cloneSessionTotals(cachedSessionTotals);
     const totalsBySession = new Map();
     for (const entry of entries) {
+      // Per-card attribution is by CLAUDE session id, so other vendors never reach a card chip.
+      if (!isClaudeEntry(entry)) continue;
       if (!entry.inlineSessionId) continue;
       const bucket = totalsBySession.get(entry.inlineSessionId) || { tokens: 0, costUSD: 0, lastTs: null };
       bucket.tokens += totalTokensOf(entry);
@@ -436,13 +497,55 @@ async function resolveProjectsDirsAsync({ fsPromises, env, extraProjectsDirs, lo
   }
 }
 
-async function walkJsonlFiles(dirs, fsPromises, logger) {
-  const files = [];
-  for (const dir of dirs) await walkDir(dir, fsPromises, files, logger);
-  return files.sort();
+/*
+ * Codex and Grok roots that actually exist. A missing home is silently absent, NOT an error: unlike
+ * CLAUDE_CONFIG_DIR (an explicit claim that a directory is there), these are opportunistic. A vendor
+ * switched off in config contributes no candidates at all, so its tree is never even stat'ed.
+ */
+async function resolveVendorRootsAsync({ fsPromises, env, vendors }) {
+  const roots = [];
+  if (vendors?.codex !== false) {
+    const homes = codexHomes(env);
+    const surviving = await existingRoots(codexRootCandidates(homes), fsPromises);
+    // Only when neither sessions/ nor archived_sessions/ exists does the home itself count as a flat
+    // JSONL dir; a real ~/.codex also holds history.jsonl and plugin fixtures, which are not usage.
+    const fallback = await existingRoots(codexFallbackRoots(homes, surviving), fsPromises);
+    for (const root of [...surviving, ...fallback]) roots.push({ vendor: 'codex', dir: root.dir, kind: root.kind });
+  }
+  if (vendors?.grok !== false) {
+    const surviving = await existingRoots(grokRootCandidates(grokHomes(env)), fsPromises);
+    for (const root of surviving) roots.push({ vendor: 'grok', dir: root.dir, kind: root.kind });
+  }
+  return roots;
 }
 
-async function walkDir(dir, fsPromises, files, logger) {
+async function existingRoots(candidates, fsPromises) {
+  const checks = await Promise.all(candidates.map(async (candidate) => {
+    try {
+      const stat = await fsPromises.stat(candidate.dir);
+      return stat.isDirectory() ? candidate : null;
+    } catch {
+      return null;
+    }
+  }));
+  return checks.filter(Boolean);
+}
+
+async function walkSourceFiles(roots, fsPromises, logger) {
+  const files = [];
+  for (const root of roots) {
+    const found = [];
+    await walkDir(root.dir, root.vendor, fsPromises, found, logger);
+    for (const file of found) files.push({ file, vendor: root.vendor, kind: root.kind });
+  }
+  // The same Codex rollout can exist under both sessions/ and archived_sessions/; the active copy wins,
+  // since it is the one still being appended to.
+  const codexFiles = dedupeCodexFiles(files.filter((entry) => entry.vendor === 'codex'));
+  const others = files.filter((entry) => entry.vendor !== 'codex');
+  return [...others, ...codexFiles].sort((left, right) => left.file.localeCompare(right.file));
+}
+
+async function walkDir(dir, vendor, fsPromises, files, logger) {
   let entries;
   try {
     entries = await fsPromises.readdir(dir, { withFileTypes: true });
@@ -453,11 +556,11 @@ async function walkDir(dir, fsPromises, files, logger) {
   for (const entry of entries) {
     const fullPath = path.join(dir, entry.name);
     if (entry.isDirectory()) {
-      await walkDir(fullPath, fsPromises, files, logger);
+      await walkDir(fullPath, vendor, fsPromises, files, logger);
       continue;
     }
     if (!entry.isFile()) continue;
-    if (!entry.name.endsWith('.jsonl')) continue;
+    if (!isUsageFile(vendor, entry.name)) continue;
     files.push(fullPath);
   }
 }
@@ -468,9 +571,27 @@ function relativeToProjects(file, dirs) {
   return path.relative(owner, file);
 }
 
+/*
+ * Dedup identity, per vendor. Each vendor's own core owns its rule (Codex has no message id, Grok has a
+ * prompt id), and both cores put the vendor name in the first segment of the key they return, so a
+ * Claude key can never collide with a Codex or Grok one. Pinned by a test.
+ */
 function keysForEntry(entry, syntheticPrimary = null) {
+  if (entry?.vendor === 'codex') return { primary: codexDedupIdentity(entry), collision: null };
+  if (entry?.vendor === 'grok') return { primary: grokDedupIdentity(entry), collision: null };
   const keys = dedupKeys(entry);
   return { primary: keys.primary || syntheticPrimary || entry?.[SYNTHETIC_PRIMARY] || null, collision: keys.collision };
+}
+
+// Only Codex carries state across lines within a file; the others are line-local.
+function createVendorState(vendor) {
+  if (vendor === 'codex') return createCodexUsageState();
+  return null;
+}
+
+function cloneVendorState(vendorState) {
+  if (!vendorState) return vendorState;
+  return { ...vendorState };
 }
 
 function deleteIndexKeys(keys, primaryIndex, collisionIndex) {
@@ -484,11 +605,20 @@ function stripIngestFields(entry) {
 }
 
 function shouldTrackMissingModel({ entry, resolved, priced, costMode }) {
+  // Grok prices itself, so a Grok model missing from the price table is not a gap in the report.
+  if (entry?.vendor === 'grok') return false;
   if (costMode === 'display') return false;
   if (resolved) return false;
   if (priced.priced) return false;
   if (!entry.model) return false;
   return totalTokensOf(entry) > 0;
+}
+
+// Absent vendor means Claude: the field was added when other vendors were, and every pre-existing entry
+// shape is a Claude one.
+function isClaudeEntry(entry) {
+  const vendor = typeof entry?.vendor === 'string' ? entry.vendor.trim() : '';
+  return vendor === '' || vendor === 'claude';
 }
 
 function entriesWithinDays(sourceEntries, { now, retainDays }) {

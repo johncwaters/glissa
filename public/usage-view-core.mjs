@@ -273,6 +273,55 @@ export function projectionLimitLine(projection, tokenLimit) {
   return `On this burn rate the block ends at ${Math.round(pct)}% of that reference.`;
 }
 
+// ── Vendors ──
+// The lane reads Codex CLI and Grok CLI transcripts alongside Claude's. Everything vendor-aware is
+// additive: a machine with only Claude usage reports one vendor and renders exactly as it did before.
+
+const VENDOR_LABELS = Object.freeze({ claude: 'Claude', codex: 'Codex', grok: 'Grok' });
+
+export function vendorLabel(vendor) {
+  const key = typeof vendor === 'string' ? vendor.trim() : '';
+  if (!key) return VENDOR_LABELS.claude;
+  return VENDOR_LABELS[key] || key;
+}
+
+// A model row's vendor is only worth showing once another vendor is on the page; on an all-Claude machine
+// it is noise on every row.
+export function modelRowPrefix(row, totals) {
+  if (!hasMultiVendorUsage(totals)) return '';
+  return vendorLabel(row?.vendor);
+}
+
+export function vendorTotalsRows(totals) {
+  const byVendor = totals?.byVendor;
+  if (!byVendor || typeof byVendor !== 'object') return [];
+  return Object.keys(byVendor)
+    .filter((vendor) => byVendor[vendor] && typeof byVendor[vendor] === 'object')
+    .sort((left, right) => (finiteNumber(byVendor[right].tokens) ?? 0) - (finiteNumber(byVendor[left].tokens) ?? 0))
+    .map((vendor) => ({
+      vendor,
+      label: vendorLabel(vendor),
+      tokens: finiteNumber(byVendor[vendor].tokens) ?? 0,
+      costUSD: finiteNumber(byVendor[vendor].costUSD) ?? 0,
+    }));
+}
+
+// More than one vendor, or a single vendor that is not Claude: either way the split is worth showing.
+export function hasMultiVendorUsage(totals) {
+  const rows = vendorTotalsRows(totals);
+  if (rows.length > 1) return true;
+  return rows.length === 1 && rows[0].vendor !== 'claude';
+}
+
+// One short clause, wherever a number is deliberately Claude-only, so a smaller figure next to a
+// multi-vendor total does not read as an inconsistency.
+export const CLAUDE_ONLY_HINT = 'Claude only';
+
+export function claudeOnlyHint(totals) {
+  if (!hasMultiVendorUsage(totals)) return '';
+  return CLAUDE_ONLY_HINT;
+}
+
 // ── Official plan limits ──
 // The rate limits Claude Code publishes through its statusLine payload: the same numbers `/usage`
 // shows, for the whole account rather than one session. When they are present they REPLACE the

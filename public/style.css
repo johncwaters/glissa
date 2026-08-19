@@ -2867,6 +2867,28 @@ a.pr-title:hover {
   border-radius: 3px;
 }
 
+/* Per-vendor split, shown only when a non-Claude vendor has data. A second row under the totals rather
+   than mixed into them: these re-cut the same numbers, they do not add to them. */
+.usage-vendor-tiles {
+  margin-top: 2px;
+}
+
+/* Which CLI a model belongs to, on the model rows, once more than one vendor is on the page. */
+.usage-model-name-wrap {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+.usage-vendor-tag {
+  flex: 0 0 auto;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+
 /* Where a number came from, wherever one could be mistaken for the other. Quietest text on the page:
    it qualifies a figure, it is not a figure. */
 .usage-provenance {

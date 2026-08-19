@@ -4,7 +4,10 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { loadPricing } = require('../server/usage-pricing');
 
-test('fetch success trims anthropic entries, writes cache and overlays snapshot', async () => {
+// The trim covers every provider the bundled snapshot covers: anthropic for Claude Code, openai for the
+// Codex CLI lane. Keeping it anthropic-only silently dropped every gpt entry from a fetch, which left
+// Codex usage priced from the snapshot alone and any newer gpt model unpriced.
+test('fetch keeps anthropic and openai entries, drops other providers, writes cache and overlays snapshot', async () => {
   const writes = [];
   const pricing = await loadPricing({
     fetchEnabled: true,
@@ -21,6 +24,11 @@ test('fetch success trims anthropic entries, writes cache and overlays snapshot'
       'openai-test': {
         litellm_provider: 'openai',
         input_cost_per_token: 99,
+        ignored: true,
+      },
+      'mistral-test': {
+        litellm_provider: 'mistral',
+        input_cost_per_token: 7,
       },
     }),
     cachePath: 'C:/cache/pricing.json',
@@ -29,9 +37,14 @@ test('fetch success trims anthropic entries, writes cache and overlays snapshot'
 
   assert.equal(pricing.source, 'fetched');
   assert.equal(pricing.table.get('claude-test').input_cost_per_token, 9);
-  assert.equal(pricing.table.has('openai-test'), false);
+  // Codex needs gpt pricing, so openai survives the trim now.
+  assert.equal(pricing.table.get('openai-test').input_cost_per_token, 99);
+  // The widening stops at the providers the snapshot covers; it does not take the whole upstream file.
+  assert.equal(pricing.table.has('mistral-test'), false);
   assert.equal(pricing.table.has('claude-sonnet-4-20250514'), true);
+  assert.equal(pricing.table.has('gpt-5.5'), true, 'the bundled snapshot carries the gpt family');
   assert.equal(JSON.parse(writes[0].text).models['claude-test'].ignored, undefined);
+  assert.equal(JSON.parse(writes[0].text).models['openai-test'].ignored, undefined, 'unknown fields are trimmed for every provider');
 });
 
 test('fresh cache skips fetchFn entirely', async () => {

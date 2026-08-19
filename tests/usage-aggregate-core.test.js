@@ -31,7 +31,20 @@ test('buildUsageReport uses local date buckets and rolls up totals, models and s
     tz: 'America/Denver',
   });
   assert.deepEqual(report.daily.map((day) => day.day), ['2026-08-18', '2026-08-19']);
-  assert.deepEqual(report.totals, { tokens: 10, costUSD: 2, input: 1, output: 2, cacheCreate: 3, cacheRead: 4 });
+  // An entry with no vendor field is Claude: the field was added when other CLI vendors were, and every
+  // pre-existing entry shape predates it.
+  assert.deepEqual(report.totals, {
+    tokens: 10,
+    costUSD: 2,
+    input: 1,
+    output: 2,
+    cacheCreate: 3,
+    cacheRead: 4,
+    byVendor: { claude: { tokens: 10, costUSD: 2 } },
+  });
+  assert.deepEqual(report.daily[0].vendors, ['claude']);
+  assert.equal(report.models.find((model) => model.key === 'claude-a').vendor, 'claude');
+  assert.equal(report.sessions.find((session) => session.id === 'session-a').vendor, 'claude');
   assert.deepEqual(report.daily[0].models.map((model) => ({ model: model.model, tokens: model.tokens, costUSD: model.costUSD })), [
     { model: 'claude-a', tokens: 3, costUSD: 0.5 },
   ]);

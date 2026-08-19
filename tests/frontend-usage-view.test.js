@@ -408,6 +408,49 @@ test('sessionChipCost: official cost wins over the estimate, and the title says 
   assert.match(sessionChipTitle({ costUSD: 0.42 }), /estimated API list-price/);
 });
 
+// ── Vendors ──
+// Everything vendor-aware is additive: an all-Claude machine must render exactly as it did before, so
+// each of these is gated on a non-Claude vendor actually having data.
+
+test('vendorTotalsRows and hasMultiVendorUsage: biggest first, and silent on an all-Claude machine', async () => {
+  const { vendorTotalsRows, hasMultiVendorUsage, vendorLabel } = await importCore();
+  const totals = {
+    byVendor: {
+      claude: { tokens: 1000, costUSD: 5 },
+      codex: { tokens: 3000, costUSD: 2 },
+      grok: { tokens: 20, costUSD: 0.1 },
+    },
+  };
+  assert.deepEqual(vendorTotalsRows(totals).map((row) => row.vendor), ['codex', 'claude', 'grok']);
+  assert.deepEqual(vendorTotalsRows(totals)[0], { vendor: 'codex', label: 'Codex', tokens: 3000, costUSD: 2 });
+  assert.equal(hasMultiVendorUsage(totals), true);
+  // One vendor, and it is Claude: nothing to split.
+  assert.equal(hasMultiVendorUsage({ byVendor: { claude: { tokens: 5, costUSD: 1 } } }), false);
+  // One vendor that is NOT Claude is still worth naming.
+  assert.equal(hasMultiVendorUsage({ byVendor: { codex: { tokens: 5, costUSD: 1 } } }), true);
+  assert.equal(hasMultiVendorUsage({ byVendor: {} }), false);
+  assert.equal(hasMultiVendorUsage({}), false);
+  assert.equal(hasMultiVendorUsage(null), false);
+  assert.deepEqual(vendorTotalsRows(null), []);
+  assert.equal(vendorLabel('codex'), 'Codex');
+  assert.equal(vendorLabel('grok'), 'Grok');
+  assert.equal(vendorLabel('claude'), 'Claude');
+  assert.equal(vendorLabel(''), 'Claude', 'an absent vendor is Claude');
+  assert.equal(vendorLabel('something-new'), 'something-new');
+});
+
+test('modelRowPrefix and claudeOnlyHint: only shown once another vendor is on the page', async () => {
+  const { modelRowPrefix, claudeOnlyHint, CLAUDE_ONLY_HINT } = await importCore();
+  const multi = { byVendor: { claude: { tokens: 1, costUSD: 1 }, codex: { tokens: 1, costUSD: 1 } } };
+  const single = { byVendor: { claude: { tokens: 1, costUSD: 1 } } };
+  assert.equal(modelRowPrefix({ vendor: 'codex' }, multi), 'Codex');
+  assert.equal(modelRowPrefix({ vendor: 'claude' }, multi), 'Claude');
+  assert.equal(modelRowPrefix({ vendor: 'codex' }, single), '', 'no prefix when nothing to disambiguate');
+  assert.equal(claudeOnlyHint(multi), CLAUDE_ONLY_HINT);
+  assert.equal(claudeOnlyHint(single), '', 'no clause needed when every number is Claude');
+  assert.equal(claudeOnlyHint(null), '');
+});
+
 // ── Official plan limits ──
 
 test('planWindowOf and hasOfficialPlanLimits: a window is absent unless it reported something', async () => {
@@ -534,6 +577,8 @@ test('no produced string contains an em dash, en dash or ellipsis character', as
   produced.push(core.usageWarningLine({ warning: 'nope' }), core.usageErrorLine({ error: 'off' }));
   produced.push(core.shareLabel('costUSD'), core.shareLabel('tokens'));
   produced.push(core.provenanceLabel('official'), core.provenanceLabel('estimated'), core.provenanceLabel(null));
+  produced.push(core.CLAUDE_ONLY_HINT, core.vendorLabel('codex'), core.vendorLabel('grok'), core.vendorLabel(''));
+  produced.push(core.claudeOnlyHint({ byVendor: { claude: {}, codex: { tokens: 1 } } }));
   for (const window of core.PLAN_WINDOWS) produced.push(window.label);
   for (const n of numbers) {
     produced.push(core.planWindowUsedText({ pct: n }), core.resetCountdownText(n, now));

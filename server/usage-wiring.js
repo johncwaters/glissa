@@ -32,7 +32,12 @@ const DEFAULT_USAGE_CONFIG = Object.freeze({
   sessionBlockHours: 5,
   costMode: 'auto',
   extraProjectsDirs: [],
+  // Other CLI vendors whose local transcripts are read alongside Claude's. On by default; a false here
+  // means that vendor's tree is never walked at all.
+  vendors: { codex: true, grok: true },
 });
+
+const USAGE_VENDOR_KEYS = Object.freeze(['codex', 'grok']);
 
 /*
  * Claude session ids seen in statusLine payloads, capped. Claude assigns a NEW id on every resume, so
@@ -94,7 +99,19 @@ function resolveUsageConfig(usage) {
     sessionBlockHours: integerWithin(source.sessionBlockHours, INTEGER_RANGES.sessionBlockHours, DEFAULT_USAGE_CONFIG.sessionBlockHours),
     costMode: COST_MODES.has(source.costMode) ? source.costMode : DEFAULT_USAGE_CONFIG.costMode,
     extraProjectsDirs: absoluteDirList(source.extraProjectsDirs),
+    vendors: resolveVendors(source.vendors),
   };
+}
+
+// Defensive like every other key here: only an explicit `false` opts a vendor out, so a hand-edited
+// garbage value leaves the vendor on rather than silently hiding its usage.
+function resolveVendors(vendors) {
+  const source = vendors != null && typeof vendors === 'object' && !Array.isArray(vendors) ? vendors : {};
+  const resolved = {};
+  for (const key of USAGE_VENDOR_KEYS) {
+    resolved[key] = source[key] !== false;
+  }
+  return resolved;
 }
 
 // Pure gate for the lane. No credential can be missing here (the data is local transcript files), so
@@ -179,6 +196,7 @@ function createUsageWiring({
         blockHours: cfg.sessionBlockHours,
         retainDays: cfg.retainDays,
         extraProjectsDirs: cfg.extraProjectsDirs,
+        vendors: cfg.vendors,
         logger,
         ...scannerDeps,
       });
@@ -467,4 +485,5 @@ module.exports = {
   PARTIAL_CONTINUE_MS,
   USAGE_INTEGER_RANGES,
   USAGE_COST_MODES,
+  USAGE_VENDOR_KEYS,
 };

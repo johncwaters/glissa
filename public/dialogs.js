@@ -254,6 +254,8 @@ export function createSettingsDialog(initialTab) {
   const usagePanel = dialog.querySelector('#settings-panel-usage');
   const usageEnabledCheckbox = dialog.querySelector('#settings-usage-enabled');
   const usageFetchPricingCheckbox = dialog.querySelector('#settings-usage-fetch-pricing');
+  const usageCodexCheckbox = dialog.querySelector('#settings-usage-codex');
+  const usageGrokCheckbox = dialog.querySelector('#settings-usage-grok');
   const usageScanIntervalInput = dialog.querySelector('#settings-usage-scan-interval');
   const usageRetainDaysInput = dialog.querySelector('#settings-usage-retain-days');
   const usageCostModeSelect = dialog.querySelector('#settings-usage-cost-mode');
@@ -526,6 +528,7 @@ export function createSettingsDialog(initialTab) {
         ...(usageHydrated || {}),
         enabled: usageEnabledCheckbox.checked,
         fetchPricing: usageFetchPricingCheckbox.checked,
+        vendors: { codex: usageCodexCheckbox.checked, grok: usageGrokCheckbox.checked },
         scanIntervalMinutes: Number(usageScanIntervalInput.value),
         retainDays: Number(usageRetainDaysInput.value),
         costMode: usageCostModeSelect.value,
@@ -596,6 +599,9 @@ export function createSettingsDialog(initialTab) {
       // Absent means on, matching how the lane reads the key.
       usageEnabledCheckbox.checked = usage.enabled !== false;
       usageFetchPricingCheckbox.checked = usage.fetchPricing !== false;
+      // Only an explicit false opts a vendor out, matching resolveUsageConfig.
+      usageCodexCheckbox.checked = usage.vendors?.codex !== false;
+      usageGrokCheckbox.checked = usage.vendors?.grok !== false;
       usageScanIntervalInput.value = usage.scanIntervalMinutes ?? 5;
       usageRetainDaysInput.value = usage.retainDays ?? 90;
       usageCostModeSelect.value = usage.costMode ?? 'auto';

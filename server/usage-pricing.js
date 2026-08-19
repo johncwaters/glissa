@@ -99,13 +99,21 @@ function overlaySnapshot(models) {
   return { models: { ...(pricingSnapshot.models || {}), ...(models || {}) } };
 }
 
+/*
+ * Keep only the providers the bundled snapshot covers. This was anthropic-only, which silently dropped
+ * every openai entry from a fetch: the overlay is keyed by model name, so a fetched table without gpt
+ * models left Codex usage priced from the snapshot alone and any newer gpt model unpriced. Grok is
+ * absent on purpose (it reports its own cost), so widening stops here rather than taking the whole file.
+ */
+const FETCH_PROVIDERS = new Set(['anthropic', 'openai']);
+
 function trimAnthropicModels(raw) {
   const sourceModels = raw?.models && typeof raw.models === 'object' ? raw.models : raw;
   if (!sourceModels || typeof sourceModels !== 'object') return null;
   const models = {};
   for (const [key, model] of Object.entries(sourceModels)) {
     if (!model || typeof model !== 'object') continue;
-    if (model.litellm_provider !== 'anthropic') continue;
+    if (!FETCH_PROVIDERS.has(model.litellm_provider)) continue;
     models[key] = trimModel(model);
   }
   return models;
@@ -131,4 +139,5 @@ module.exports = {
   trimAnthropicModels,
   LITELLM_PRICING_URL,
   CACHE_TTL_MS,
+  FETCH_PROVIDERS,
 };

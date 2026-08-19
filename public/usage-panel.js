@@ -20,6 +20,7 @@ import {
   USAGE_CAVEAT_SHORT,
   USAGE_DISABLED_HINT,
   ariaSortValue,
+  claudeOnlyHint,
   blockAttentionTone,
   blockHistoryRows,
   blockLabel,
@@ -32,6 +33,7 @@ import {
   formatPercent,
   formatTokens,
   formatUsd,
+  hasMultiVendorUsage,
   hasOfficialPlanLimits,
   hasUsageAttention,
   isGlissaSessionRow,
@@ -39,6 +41,7 @@ import {
   limitPct,
   missingPricingLine,
   modelLabel,
+  modelRowPrefix,
   nextSortState,
   percentOfTotal,
   planLimitAgeText,
@@ -63,6 +66,7 @@ import {
   tokenLimitTone,
   usageErrorLine,
   usageWarningLine,
+  vendorTotalsRows,
 } from './usage-view-core.mjs';
 
 const REFRESH_STATUS_TIMEOUT_MS = 20000;
@@ -325,7 +329,10 @@ function buildHeaderSection() {
 // stale, with its age, rather than hidden or silently swapped for the estimate.
 function buildPlanLimitsSection() {
   if (!hasOfficialPlanLimits(_planLimits)) return null;
-  const section = buildSection('Plan limits', provenanceLabel('official'));
+  const claudeOnly = claudeOnlyHint(_report?.totals);
+  const section = buildSection('Plan limits', claudeOnly
+    ? `${provenanceLabel('official')}, ${claudeOnly}`
+    : provenanceLabel('official'));
   const stale = planLimitStaleNote(_planLimits?.ts);
   if (stale) {
     const note = el('p', 'usage-meta', stale);
@@ -382,7 +389,10 @@ function paintPlanAge() {
 function buildActiveBlockSection() {
   const block = _report?.activeBlock;
   const hours = Number.isFinite(_report?.blockHours) ? _report.blockHours : 5;
-  const section = buildSection('Current block', `${hours}h window`);
+  // The 5h window is a Claude subscription concept, so the block numbers exclude other vendors. Said out
+  // loud, because otherwise they read as inconsistent with the multi-vendor totals below.
+  const claudeOnly = claudeOnlyHint(_report?.totals);
+  const section = buildSection('Current block', claudeOnly ? `${hours}h window, ${claudeOnly}` : `${hours}h window`);
   if (!block) {
     section.append(el('p', 'usage-empty', 'No block is active. The window opens again with the next turn.'));
     return section;
@@ -441,7 +451,8 @@ function buildActiveBlockSection() {
 function buildBlockHistorySection() {
   const rows = blockHistoryRows(_report?.blocks);
   if (rows.length === 0) return null;
-  const section = buildSection('Recent blocks', 'newest first');
+  const claudeOnly = claudeOnlyHint(_report?.totals);
+  const section = buildSection('Recent blocks', claudeOnly ? `newest first, ${claudeOnly}` : 'newest first');
   const list = el('div', 'usage-blocks');
   const peak = rows.reduce((best, row) => Math.max(best, row.tokens), 0);
   for (const row of rows) {
@@ -474,6 +485,16 @@ function buildTotalsSection() {
   tiles.append(buildTile('cache write', formatTokens(totals.cacheCreate ?? 0)).tile);
   tiles.append(buildTile('cache read', formatTokens(totals.cacheRead ?? 0)).tile);
   section.append(tiles);
+  // The per-vendor split, only once a non-Claude vendor has data: on an all-Claude machine it would just
+  // restate the totals above.
+  const vendorRows = hasMultiVendorUsage(totals) ? vendorTotalsRows(totals) : [];
+  if (vendorRows.length > 0) {
+    const vendorTiles = el('div', 'usage-tiles usage-vendor-tiles');
+    for (const row of vendorRows) {
+      vendorTiles.append(buildTile(row.label, formatTokens(row.tokens), formatUsd(row.costUSD)).tile);
+    }
+    section.append(vendorTiles);
+  }
   _sessionsTsEl = el('p', 'usage-meta', '');
   section.append(_sessionsTsEl);
   paintSessionsTs();
@@ -560,6 +581,16 @@ function buildBreakdownRow(models) {
   return breakdown;
 }
 
+// A muted vendor prefix, added only once the page shows more than one vendor: "gpt-5.5" alone does not
+// say where it came from, and on an all-Claude machine the prefix would be on every row for nothing.
+function buildModelCell(row, totals) {
+  const wrap = el('span', 'usage-model-name-wrap');
+  const prefix = modelRowPrefix(row, totals);
+  if (prefix) wrap.append(el('span', 'usage-vendor-tag', prefix));
+  wrap.append(el('span', null, modelLabel(row)));
+  return wrap;
+}
+
 // ── Per model ──
 function buildModelsSection() {
   const rows = sortModelRows(_report?.models, _modelSort);
@@ -591,7 +622,7 @@ function buildModelsSection() {
   for (const row of rows) {
     const tr = el('tr', 'usage-row');
     appendCells(tr, [
-      { text: modelLabel(row), className: 'usage-model-cell', title: modelLabel(row) },
+      { node: buildModelCell(row, totals), className: 'usage-model-cell', title: modelLabel(row) },
       { text: formatTokens(row.tokens), numeric: true },
       { text: formatUsd(row.costUSD), numeric: true },
       { node: buildShareCell(percentOfTotal(row[basis], totals[basis])), className: 'usage-share-cell' },

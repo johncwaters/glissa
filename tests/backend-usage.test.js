@@ -86,7 +86,9 @@ function makeUsageProbe(claudeHome) {
       counts.scanners += 1;
       return createUsageScanner(deps);
     },
-    scannerDeps: { env: { CLAUDE_CONFIG_DIR: claudeHome }, fsPromises },
+    // HOME is pinned to the fixture as well as CLAUDE_CONFIG_DIR: the scanner also resolves the Codex and
+    // Grok homes from it, so without this the lane would walk the operator's real ~/.codex and ~/.grok.
+    scannerDeps: { env: { CLAUDE_CONFIG_DIR: claudeHome, HOME: path.dirname(claudeHome), USERPROFILE: path.dirname(claudeHome) }, fsPromises },
     logger: { warn: () => {} },
   };
   return { counts, options };
