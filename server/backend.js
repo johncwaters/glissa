@@ -54,6 +54,7 @@ const { createIntegrationRefWatcher } = require('../detection/integration-ref-wa
 const { createIntegrationWatcherPool } = require('../detection/integration-watcher-pool');
 const { createPrReviewWiring } = require('./pr-review-wiring');
 const { createPosthogWiring } = require('./posthog-wiring');
+const { createUsageWiring } = require('./usage-wiring');
 const { normalizeRemoteConfig, validateRemoteConfig, decideBindHost } = require('./core/remote-config');
 const { createClientPresence } = require('./core/client-presence');
 const { normalizePackNames } = require('./core/pack-core');
@@ -840,6 +841,21 @@ function createBackend(httpServer, options = {}) {
     for (const sess of sessions.values()) sess.notePackUpdate(name, version);
   });
 
+  // Usage tracking lane (server/usage-wiring.js): on by default, but started LAZILY on the first
+  // control connection (the initial transcript scan is the expensive pass and nobody is watching at
+  // cold boot). Spawns nothing: it reads the Claude Code JSONL transcripts and nothing else.
+  const usage = createUsageWiring({
+    config, sessions,
+    broadcast: (msg) => broadcastControl(msg),
+    controlClientCount: () => controlWss.clients.size,
+    ...(options.usageWiringOptions || {}),
+  });
+  // Deferred boot pass: idempotent, so only the first connection pays for it. Registered here, not in
+  // the presence listener above, which is declared before `usage` exists (temporal dead zone).
+  controlWss.on('connection', () => {
+    void usage.start();
+  });
+
   // --- Integration-branch watchers (event-driven cross-session gate liveness) ---
   // Replaces the old 10s poll's one unique job: noticing that a session's integration branch moved
   // WITHOUT this session's own worktree changing (another session merged, or an out-of-band CLI merge),
@@ -873,6 +889,9 @@ function createBackend(httpServer, options = {}) {
     // Resume-dialog binding (control-handlers.js handleResumeConversation) - same config field.
     sess.on('claude-session-id', ({ id }) => {
       persistProjectField('resumeSessionId', id);
+      // The card's usage totals are attributed through this id, so the mapping it just changed makes
+      // the last usage-sessions payload wrong for this card.
+      usage.refreshSessions();
     });
 
     sess.on('error', (err) => {
@@ -912,6 +931,11 @@ function createBackend(httpServer, options = {}) {
           .catch((err) => console.warn(`[${sess.name}] post-turn checks failed: ${err.message}`));
       }, cfg.debounceMs);
     });
+
+    // Second, independent listener on the same signal: a finished turn is when this session's
+    // transcript grew, so the usage lane rescans (its own 2s debounce, shared across sessions). Kept
+    // apart from the hygiene checker above so neither one's debounce or config gate touches the other.
+    sess.on('post-turn-check', () => usage.nudgeSession());
 
     sess.on('state-change', ({ from, to, event, detail }) => {
       broadcastControl({
@@ -1276,6 +1300,8 @@ function createBackend(httpServer, options = {}) {
     prReview.restartIfConfigChanged();
     // Same gating for the PostHog lane: no-op unless this save changed config.posthog/telegram.
     posthog.restartIfConfigChanged();
+    // And for the usage lane: no-op unless this save changed config.usage.
+    usage.restartIfConfigChanged();
   }
 
   // Restart/shutdown handlers live in server-lifecycle.js so the re-entry guard, the reap-before-exit
@@ -1324,6 +1350,11 @@ function createBackend(httpServer, options = {}) {
     // Latest built version per pack, so a connecting client can tell which sessions were spawned
     // against an older one. Empty while auto-rebuild is off: nothing then knows a pack moved.
     getPackVersions: () => packService.getVersions(),
+    // Usage lane: the small per-card payload is rebuilt live on connect, the large report is replayed
+    // from its cache, and a report request is served on demand.
+    getUsageSessions: () => usage.getSessionsMessage(),
+    getUsageReport: () => usage.getCachedReport(),
+    requestUsageReport: (args) => usage.requestReport(args),
   });
 
   // --- Data WebSocket ---
@@ -1561,6 +1592,9 @@ function createBackend(httpServer, options = {}) {
     // in-flight rebuild, and a build cut short leaves a tmp dir the next build sweeps, so exit does
     // not wait on it (nothing here is a PTY reap).
     void packService.stop();
+    // Fire-and-forget like the pollers above: the process is exiting and nothing awaits it. Stopping
+    // clears the scan interval and the pending nudge so a leaked timer cannot outlive the server.
+    void usage.stop();
     for (const [, sess] of investigationSessions) {
       sess.destroy();
       if (sess._killReap) pendingReaps.push(sess._killReap);

@@ -391,6 +391,9 @@ function createConfigStore({ settingsDefaults } = {}) {
       // Opt-in PostHog monitoring lane (see AGENTS.md). Same null-when-unconfigured rule as
       // prReview, so a user who never enables it gets a byte-identical config.
       posthog: config.posthog ? { ...config.posthog } : null,
+      // Usage tracking (see AGENTS.md). Same null-when-unconfigured rule, but unlike the two opt-in
+      // lanes an absent block means ENABLED with defaults, not off.
+      usage: config.usage ? { ...config.usage } : null,
       telegram: config.telegram ? { ...config.telegram } : null,
       // Read-only helper for the PR Review tab's project picker; derived, never persisted back.
       projectChoices: (config.projects || []).map(p => ({ id: p.id, name: p.name })),
@@ -433,6 +436,7 @@ function createConfigStore({ settingsDefaults } = {}) {
     if (newConfig.worktreeShare != null) config.worktreeShare = newConfig.worktreeShare;
     if (newConfig.prReview != null) config.prReview = newConfig.prReview;
     if (newConfig.posthog != null) config.posthog = newConfig.posthog;
+    if (newConfig.usage != null) config.usage = newConfig.usage;
     if (newConfig.telegram != null) config.telegram = newConfig.telegram;
     if (newConfig.port != null && newConfig.port !== config.port) {
       console.log(`[settings] Port changed to ${newConfig.port} - restart required to take effect`);

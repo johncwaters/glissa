@@ -66,6 +66,18 @@ const POSTHOG_NUMERIC_RANGES = {
 const POSTHOG_BOOLEAN_KEYS = ['enabled', 'recurrenceDedupe', 'trafficSpikeEnabled'];
 const POSTHOG_STRING_KEYS = ['host', 'apiKey', 'repoPath'];
 
+const USAGE_BOOLEAN_KEYS = ['enabled', 'fetchPricing'];
+// Integer, not "positive number": every one of these is a count of whole minutes/days/hours, and the
+// upper bounds keep a typo from arming a scan every day or retaining a decade of entries in memory.
+const USAGE_INTEGER_RANGES = {
+  scanIntervalMinutes: { min: 1, max: 1440 },
+  retainDays: { min: 1, max: 3650 },
+  sessionBlockHours: { min: 1, max: 24 },
+};
+const USAGE_COST_MODES = ['auto', 'calculate', 'display'];
+// Max days a client may ask a usage report to cover, matching the retainDays ceiling.
+const USAGE_REPORT_MAX_DAYS = 3650;
+
 // Single wire-format builder for every 'error'/'settings-error' reply, so all call sites agree on the
 // shape. `requestId` is omitted from the payload entirely when not passed (matches every call site that
 // never carried one), rather than defaulting to null, to keep the wire format byte-identical to before.
@@ -146,6 +158,37 @@ function isValidPosthogProjects(projects) {
   return projects.every((id) => typeof id === 'number' && Number.isInteger(id) && id > 0);
 }
 
+/*
+ * Validate the optional nested usage settings object. Returns an error message, or null when valid (a
+ * missing/null usage is valid: the tab was never touched, and an absent block means enabled-with-
+ * defaults in server/usage-wiring.js resolveUsageConfig). Same reject-rather-than-coerce strictness as
+ * validatePosthog. extraProjectsDirs must be ABSOLUTE: the scanner walks whatever it is given, and a
+ * relative entry would resolve against the server's cwd, which is not a directory the operator picked.
+ */
+function validateUsage(u) {
+  if (u == null) return null;
+  if (!isPlainObject(u)) return 'usage must be an object';
+  for (const key of USAGE_BOOLEAN_KEYS) {
+    if (u[key] != null && typeof u[key] !== 'boolean') return `usage.${key} must be a boolean`;
+  }
+  for (const [key, range] of Object.entries(USAGE_INTEGER_RANGES)) {
+    if (u[key] == null) continue;
+    if (!Number.isInteger(u[key]) || u[key] < range.min || u[key] > range.max) {
+      return `usage.${key} must be an integer between ${range.min} and ${range.max}`;
+    }
+  }
+  if (u.costMode != null && !USAGE_COST_MODES.includes(u.costMode)) {
+    return `usage.costMode must be one of ${USAGE_COST_MODES.join(', ')}`;
+  }
+  if (u.extraProjectsDirs == null) return null;
+  if (!Array.isArray(u.extraProjectsDirs)) return 'usage.extraProjectsDirs must be an array of absolute paths';
+  for (const dir of u.extraProjectsDirs) {
+    if (typeof dir !== 'string' || !dir.trim()) return 'usage.extraProjectsDirs must be an array of absolute paths';
+    if (!path.isAbsolute(dir.trim())) return `usage.extraProjectsDirs entries must be absolute paths: ${dir}`;
+  }
+  return null;
+}
+
 // Validate the optional nested telegram settings object. Empty strings are allowed (they mean unset).
 function validateTelegram(t) {
   if (t == null) return null;
@@ -182,6 +225,21 @@ function sanitizePosthog(ph) {
   for (const key of POSTHOG_NUMERIC_KEYS) {
     if (ph[key] != null) out[key] = ph[key];
   }
+  return out;
+}
+
+// Keep only the known usage fields (drops anything unrecognized, e.g. the read-only pricing-source
+// and scan-stats line the Usage tab renders next to the toggles).
+function sanitizeUsage(u) {
+  const out = {};
+  for (const key of USAGE_BOOLEAN_KEYS) {
+    if (u[key] != null) out[key] = !!u[key];
+  }
+  for (const key of Object.keys(USAGE_INTEGER_RANGES)) {
+    if (u[key] != null) out[key] = u[key];
+  }
+  if (u.costMode != null) out.costMode = String(u.costMode);
+  if (Array.isArray(u.extraProjectsDirs)) out.extraProjectsDirs = u.extraProjectsDirs.map((dir) => String(dir).trim());
   return out;
 }
 
@@ -228,6 +286,11 @@ function registerControlHandlers(controlWss, deps) {
     // Latest built version per context pack (optional - {} in older callers/tests, which then just
     // means no card can be judged stale).
     getPackVersions = () => ({}),
+    // Usage lane accessors (optional - undefined in older callers/tests, which then replay nothing and
+    // refuse a report request).
+    getUsageSessions = null,
+    getUsageReport = null,
+    requestUsageReport = null,
     // Replay of transient broadcasts missed across a reconnect gap (optional - undefined in
     // older callers/tests; connect then behaves as before, snapshot-only).
     controlReplayLog = null,
@@ -509,6 +572,12 @@ function registerControlHandlers(controlWss, deps) {
       return;
     }
 
+    const usageError = validateUsage(s.usage);
+    if (usageError) {
+      sendError(ws, usageError, { type: 'settings-error', requestId: msg.requestId || null });
+      return;
+    }
+
     const telegramError = validateTelegram(s.telegram);
     if (telegramError) {
       sendError(ws, telegramError, { type: 'settings-error', requestId: msg.requestId || null });
@@ -533,6 +602,7 @@ function registerControlHandlers(controlWss, deps) {
       if (s.repoRoots != null) cfg.repoRoots = s.repoRoots;
       if (s.prReview != null) cfg.prReview = sanitizePrReview(s.prReview);
       if (s.posthog != null) cfg.posthog = sanitizePosthog(s.posthog);
+      if (s.usage != null) cfg.usage = sanitizeUsage(s.usage);
       if (s.telegram != null) {
         cfg.telegram = {
           botToken: String(s.telegram.botToken || '').trim(),
@@ -714,6 +784,23 @@ function registerControlHandlers(controlWss, deps) {
     reply({ ok: res.ok === true, error: res.error || null });
   }
 
+  /*
+   * The pulled half of the usage protocol: the report is large (daily + per-model + per-session +
+   * blocks), so it is never broadcast, only replied to the requesting socket like
+   * request-health-snapshot. `force` re-reads every transcript from offset zero (an operator hard
+   * refresh); an out-of-range `days` is dropped rather than rejected, so an old or sloppy client gets
+   * the lane's own retention window instead of an error.
+   */
+  async function handleRequestUsageReport(msg, ws) {
+    if (!requestUsageReport) {
+      ws.send(JSON.stringify({ type: 'usage-report', requestId: msg.requestId || null, error: 'Usage tracking is not running' }));
+      return;
+    }
+    const days = Number.isInteger(msg.days) && msg.days > 0 && msg.days <= USAGE_REPORT_MAX_DAYS ? msg.days : undefined;
+    const report = await requestUsageReport({ days, force: msg.force === true, requestId: msg.requestId || null });
+    ws.send(JSON.stringify(report));
+  }
+
   function handleShutdown() {
     console.log('[control] Shutdown requested via UI');
     broadcastControl({ type: 'shutting-down' });
@@ -746,6 +833,7 @@ function registerControlHandlers(controlWss, deps) {
     'posthog-open-session': handlePosthogOpenSession,
     'posthog-issue-action': handlePosthogIssueAction,
     'posthog-archive-investigation': handlePosthogArchiveInvestigation,
+    'request-usage-report': handleRequestUsageReport,
     'kill':             (msg) => { const s = findSession(msg); if (s) s.killSession(); },
     'start-session':    (msg) => {
       const s = findSession(msg);
@@ -846,6 +934,18 @@ function registerControlHandlers(controlWss, deps) {
     const prStatus = typeof getPrStatus === 'function' ? getPrStatus() : null;
     if (prStatus) {
       ws.send(JSON.stringify(prStatus));
+    }
+    // Usage lane. The per-card payload is rebuilt live (it is small, and the session-to-transcript
+    // mapping may have moved since the last push); the report is replayed from its cache only, because
+    // building one costs a full aggregate pass no client has asked for yet. Both are null until the
+    // lazy first scan lands, which is the same connection that triggered it.
+    const usageSessions = typeof getUsageSessions === 'function' ? getUsageSessions() : null;
+    if (usageSessions) {
+      ws.send(JSON.stringify(usageSessions));
+    }
+    const usageReport = typeof getUsageReport === 'function' ? getUsageReport() : null;
+    if (usageReport) {
+      ws.send(JSON.stringify(usageReport));
     }
 
     // Replay transient broadcasts missed while this client was disconnected. The client
