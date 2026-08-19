@@ -200,14 +200,10 @@ export function setupTerminal(termWrap, ui) {
     if (!ui.card.offsetParent) return;
     ui.fitAddon.fit();
     const { cols, rows } = ui.term;
-    // When the buffer reflows after a dimension change, the WebGL renderer
-    // can leave stale glyphs in cells that shifted (visible as ghost text
-    // fragments at the left edge after window resize). clearTextureAtlas
-    // invalidates the cached glyph atlas and triggers a full redraw.
     if (cols !== lastFittedCols || rows !== lastFittedRows) {
-      ui.webglAddon?.clearTextureAtlas?.();
       lastFittedCols = cols;
       lastFittedRows = rows;
+      forceTerminalRepaint(ui, { force: true });
     }
     if (cols === lastSentCols && rows === lastSentRows) return;
     if (ui.dataWs?.readyState !== WebSocket.OPEN) return;
@@ -486,7 +482,6 @@ export function forceTerminalRepaint(ui, { force = false } = {}) {
   ui._repaintRafId = requestAnimationFrame(() => {
     ui._repaintRafId = null;
     if (!ui.term) return;
-    ui.webglAddon?.clearTextureAtlas?.();
     ui.term.refresh(0, ui.term.rows - 1);
   });
 }

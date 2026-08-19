@@ -5,13 +5,15 @@
 import { adoptElement, releaseElement } from './dom-helpers.js';
 import { container, sessionUIs } from './session-card/card-registry.js';
 import { ensureTerminalSetup, forceTerminalRepaint } from './session-card/terminal.js';
-import { reacquireWebglIfEvicted } from './session-card/webgl-pool.js';
+import { reacquireWebglIfEvicted, setBorrowedWebglCardIdProvider } from './session-card/webgl-pool.js';
 
 let borrowedId = null;
 
 export function getBorrowedCardId() {
   return borrowedId;
 }
+
+setBorrowedWebglCardIdProvider(getBorrowedCardId);
 
 // Move `ui.card` into `slotEl` and make its terminal live and correctly sized there. `className` is the
 // surface's own marker class (the Focus center and the phone Terminal screen style the borrowed card

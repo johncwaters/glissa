@@ -5,6 +5,7 @@
 // pure eviction policy lives in webgl-core.mjs.
 
 import { WebglAddon } from '@xterm/addon-webgl';
+import { sessionUIs } from './card-registry.js';
 import { pickEvictionVictims } from './webgl-core.mjs';
 
 // A mobile GPU drops contexts far below the desktop ceiling, so a coarse pointer takes a much tighter
@@ -12,6 +13,11 @@ import { pickEvictionVictims } from './webgl-core.mjs';
 // be a constant for the LRU policy to be predictable.
 const MAX_WEBGL_CONTEXTS = window.matchMedia?.('(pointer: coarse)').matches ? 4 : 12;
 const _webglLru = new Map(); // ui -> true; insertion order = LRU, oldest first
+let getBorrowedWebglCardId = () => null;
+
+export function setBorrowedWebglCardIdProvider(provider) {
+  getBorrowedWebglCardId = typeof provider === 'function' ? provider : () => null;
+}
 
 export function releaseWebgl(ui) {
   _webglLru.delete(ui);
@@ -22,7 +28,10 @@ export function releaseWebgl(ui) {
 }
 
 function evictWebglIfNeeded(exceptUi) {
-  for (const victim of pickEvictionVictims([..._webglLru.keys()], MAX_WEBGL_CONTEXTS, exceptUi)) {
+  const protectedUis = [exceptUi];
+  const borrowedUi = sessionUIs.get(getBorrowedWebglCardId());
+  if (borrowedUi) protectedUis.push(borrowedUi);
+  for (const victim of pickEvictionVictims([..._webglLru.keys()], MAX_WEBGL_CONTEXTS, protectedUis)) {
     releaseWebgl(victim);
     victim.needsWebGLReload = true; // recreated when it next becomes visible
   }
@@ -67,14 +76,10 @@ export function tryLoadWebGL(ui) {
     ui.webglAddon = addon;
     ui.needsWebGLReload = false;
     _webglLru.set(ui, true); // mark most-recently-used (inserts at end)
-    // A freshly attached GL context starts on a blank canvas; xterm's
-    // setRenderer -> _fullRefresh is suppressed when the card was just
-    // re-parented and isn't observed visible yet (_isPaused), so only the
-    // rows the next write dirties get painted: quiescent rows stay as ghosts.
-    // Defer one frame (card now on-screen) then force atlas clear + full redraw.
+    // A freshly attached GL context can miss its first full refresh while paused.
+    // Defer one frame so the card is on-screen before repainting every row.
     requestAnimationFrame(() => {
       if (ui.webglAddon !== addon || !ui.term) return;
-      addon.clearTextureAtlas?.();
       ui.term.refresh(0, ui.term.rows - 1);
     });
   } catch {
