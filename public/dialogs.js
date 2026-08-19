@@ -199,6 +199,8 @@ export function createSettingsDialog(initialTab) {
   const cursorBlinkCheckbox = dialog.querySelector('#settings-cursor-blink');
   const checkUpdatesCheckbox = dialog.querySelector('#settings-check-updates');
   const autoResumeCheckbox = dialog.querySelector('#settings-auto-resume');
+  const rtkCheckbox = dialog.querySelector('#settings-rtk');
+  const rtkWarning = dialog.querySelector('#settings-rtk-warning');
   const debugModeCheckbox = dialog.querySelector('#settings-debug-mode');
   const soundSelect = dialog.querySelector('#settings-sound');
   const notificationsCheckbox = dialog.querySelector('#settings-notifications');
@@ -316,6 +318,14 @@ export function createSettingsDialog(initialTab) {
   });
 
   let repoRoots = [];
+  let rtkAvailable = false;
+
+  function refreshRtkWarning() {
+    rtkWarning.textContent = rtkCheckbox.checked && !rtkAvailable
+      ? 'rtk binary not found at ~/.glissa/bin/rtk.exe'
+      : '';
+  }
+  rtkCheckbox.addEventListener('change', refreshRtkWarning);
 
   function renderRootList() {
     rootListEl.innerHTML = '';
@@ -435,6 +445,7 @@ export function createSettingsDialog(initialTab) {
       cursorBlink: cursorBlinkCheckbox.checked,
       checkForUpdates: checkUpdatesCheckbox.checked,
       autoResume: autoResumeCheckbox.checked,
+      rtk: rtkCheckbox.checked,
       debugMode: debugModeCheckbox.checked,
       telegramNotifications: telegramNotificationsCheckbox.checked,
       repoRoots: repoRoots,
@@ -499,6 +510,9 @@ export function createSettingsDialog(initialTab) {
       cursorBlinkCheckbox.checked = !!s.cursorBlink;
       checkUpdatesCheckbox.checked = s.checkForUpdates !== false;
       autoResumeCheckbox.checked = s.autoResume !== false;
+      rtkCheckbox.checked = !!s.rtk;
+      rtkAvailable = !!s.rtkAvailable;
+      refreshRtkWarning();
       debugModeCheckbox.checked = !!s.debugMode;
       repoRoots = Array.isArray(s.repoRoots) ? [...s.repoRoots] : [];
       renderRootList();

@@ -8,6 +8,7 @@ const { listRepoConversations } = require('../session/core/conversation-history'
 const { normalizeClientTrust } = require('./core/request-trust');
 const { readPosthogReport } = require('./posthog-report');
 const posthogCore = require('./core/posthog-core');
+const { RTK_PATH } = require('../session/core/rtk-command');
 
 // A Claude session id is a UUID, but stay lenient (any safe id charset) so a non-UUID id is not
 // rejected. The charset itself is the guard: no path separators, dots, or whitespace can reach the
@@ -228,6 +229,10 @@ function registerControlHandlers(controlWss, deps) {
     // older callers/tests; connect then behaves as before, snapshot-only).
     controlReplayLog = null,
   } = deps;
+
+  function buildSettingsPayload() {
+    return { ...configStore.getSettings(), rtkAvailable: !!RTK_PATH };
+  }
 
   /** Find a session by id (primary) with name fallback for legacy clients. */
   function findSession(msg) {
@@ -464,7 +469,7 @@ function registerControlHandlers(controlWss, deps) {
     ws.send(JSON.stringify({
       type: 'settings',
       requestId: msg.requestId || null,
-      settings: configStore.getSettings()
+      settings: buildSettingsPayload()
     }));
   }
 
@@ -531,7 +536,7 @@ function registerControlHandlers(controlWss, deps) {
     });
     if (!freshConfig) return;
     applySettingsReload(freshConfig);
-    const updatedSettings = configStore.getSettings();
+    const updatedSettings = buildSettingsPayload();
 
     ws.send(JSON.stringify({
       type: 'settings-updated',

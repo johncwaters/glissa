@@ -219,6 +219,7 @@ test('getSettings falls back to DEFAULT_CONFIG for absent keys', () => {
     const s = store.getSettings();
     assert.equal(s.cursorBlink, DEFAULT_CONFIG.cursorBlink);
     assert.equal(s.detectBackgroundAgents, DEFAULT_CONFIG.detectBackgroundAgents);
+    assert.equal(s.rtk, DEFAULT_CONFIG.rtk);
     assert.equal(s.integrationBranch, DEFAULT_CONFIG.integrationBranch);
     assert.deepEqual(s.worktreeShare, DEFAULT_CONFIG.worktreeShare);
   });
@@ -261,6 +262,16 @@ test('applySettings coerces booleans and strings and applies timeouts', () => {
     assert.equal(store.config.debugMode, false, 'falsy boolean coerced');
     assert.equal(store.config.autoRecoverSeconds, 7, 'timeout applied');
     assert.equal(store.config.integrationBranch, '123', 'string coerced');
+  });
+});
+
+test('rtk is a settable top-level boolean', () => {
+  withStore({ projects: [] }, (store) => {
+    store.applySettings({ rtk: true });
+    assert.equal(store.config.rtk, true);
+    assert.equal(store.getSettings().rtk, true);
+    store.applySettings({ rtk: false });
+    assert.equal(store.config.rtk, false);
   });
 });
 

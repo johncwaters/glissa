@@ -44,6 +44,7 @@ const { createRecorder } = require('../session/session-recorder');
 const { createWsSender } = require('./ws-sender');
 const { HookRouter } = require('../detection/hook-source');
 const { sweepOrphans } = require('../detection/settings-injector');
+const { RTK_PATH } = require('../session/core/rtk-command');
 const { checkForUpdate: defaultCheckForUpdate } = require('./update-check');
 const { createSpawnGate } = require('./spawn-gate');
 const { spawn } = require('./child-process-safe');
@@ -286,6 +287,17 @@ function createBackend(httpServer, options = {}) {
   // explicitly opts out with `dangerouslySkipPermissions: false`. Absence means YOLO. This is the one
   // place the default is decided; diffProjects() reuses it so a reload sees no phantom perms change.
   const projectSkipPerms = (project) => project.dangerouslySkipPermissions !== false;
+  let warnedMissingRtk = false;
+
+  function rtkPathForConfig(cfg) {
+    if (!cfg.rtk) return null;
+    if (RTK_PATH) return RTK_PATH;
+    if (!warnedMissingRtk) {
+      warnedMissingRtk = true;
+      console.warn('[rtk] config.rtk is true, but no rtk binary was found. Sessions will spawn without rtk hooks.');
+    }
+    return null;
+  }
 
   function makeSession(project, cfg) {
     const session = new Session({
@@ -313,6 +325,7 @@ function createBackend(httpServer, options = {}) {
       detectScheduledWakeups: cfg.detectScheduledWakeups,
       // Lever B: preventive anti-slop system prompt (user sessions only; off by default).
       antiSlopPrompt: cfg.antiSlopPrompt,
+      rtkPath: rtkPathForConfig(cfg),
       // Resume a prior Claude conversation on spawn (set by the per-card "Resume conversation" picker,
       // persisted on the project record). Null = fresh conversation. See control-handlers resume-conversation.
       resumeSessionId: project.resumeSessionId || null,

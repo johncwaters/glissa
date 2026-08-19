@@ -167,6 +167,18 @@ test('buildHookSettings adds enableAllProjectMcpServers only when opted in', () 
   assert.ok(on.hooks, 'hooks still present alongside the MCP flag');
 });
 
+test('buildHookSettings adds the rtk PreToolUse hook only when an rtk path is supplied', () => {
+  const base = { port: 1234, glissaId: 'g1', token: 't1' };
+  const off = buildHookSettings(base);
+  assert.equal('PreToolUse' in off.hooks, false, 'no empty PreToolUse key when rtk is off');
+
+  const on = buildHookSettings({ ...base, rtkPath: 'C:\\Users\\johnw\\.glissa\\bin\\rtk.exe' });
+  assert.deepEqual(on.hooks.PreToolUse, [{
+    matcher: 'Bash',
+    hooks: [{ type: 'command', command: 'C:\\Users\\johnw\\.glissa\\bin\\rtk.exe hook claude' }],
+  }]);
+});
+
 test('writeSessionSettings writes file and cleanup removes it', () => {
   const baseDir = path.join(os.tmpdir(), `glissa-test-${Date.now()}`);
   const { settingsPath, dir, token, cleanup } = writeSessionSettings({
@@ -177,9 +189,27 @@ test('writeSessionSettings writes file and cleanup removes it', () => {
   assert.ok(fs.existsSync(settingsPath));
   const parsed = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
   assert.match(parsed.hooks.Stop[0].hooks[0].url, /\/hook\/sess-1\/stop\?t=/);
+  assert.equal('PreToolUse' in parsed.hooks, false, 'rtk off writes no PreToolUse block');
   assert.ok(token && token.length >= 32);
   cleanup();
   assert.equal(fs.existsSync(dir), false);
+  try { fs.rmSync(baseDir, { recursive: true, force: true }); } catch {}
+});
+
+test('writeSessionSettings writes the rtk PreToolUse block when opted in', () => {
+  const baseDir = path.join(os.tmpdir(), `glissa-rtk-${Date.now()}`);
+  const { settingsPath, cleanup } = writeSessionSettings({
+    port: 5173,
+    glissaId: 'sess-rtk',
+    baseDir,
+    rtkPath: 'C:\\Program Files\\rtk\\rtk.exe',
+  });
+  const parsed = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+  assert.deepEqual(parsed.hooks.PreToolUse, [{
+    matcher: 'Bash',
+    hooks: [{ type: 'command', command: '"C:\\Program Files\\rtk\\rtk.exe" hook claude' }],
+  }]);
+  cleanup();
   try { fs.rmSync(baseDir, { recursive: true, force: true }); } catch {}
 });
 

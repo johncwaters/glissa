@@ -11,6 +11,8 @@ const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
 
+const { buildRtkHookEntry } = require('../session/core/rtk-command');
+
 const DEFAULT_BASE_DIR = path.join(os.tmpdir(), 'glissa-hooks');
 const DEFAULT_TIMEOUT_SEC = 5; // short: handler returns 200 immediately; never stall Claude
 
@@ -48,7 +50,7 @@ function safeDirSegment(id) {
 // `permissions` ({ deny: [...] }) is merged in for the headless lanes - the PR-review and PostHog
 // deny-lists (efficacy under --dangerously-skip-permissions is why they are a guard, not the guard).
 // Omitted for ordinary user sessions, so their settings are byte-identical to before.
-function buildHookSettings({ port, glissaId, token, timeoutSec = DEFAULT_TIMEOUT_SEC, permissions = null, detectScheduledWakeups = true, enableProjectMcp = false }) {
+function buildHookSettings({ port, glissaId, token, timeoutSec = DEFAULT_TIMEOUT_SEC, permissions = null, detectScheduledWakeups = true, enableProjectMcp = false, rtkPath = null }) {
   if (!port || !glissaId || !token) {
     throw new Error('buildHookSettings requires port, glissaId, token');
   }
@@ -61,6 +63,9 @@ function buildHookSettings({ port, glissaId, token, timeoutSec = DEFAULT_TIMEOUT
   if (detectScheduledWakeups) {
     const url = `${base}/posttooluse?t=${encodeURIComponent(token)}`;
     hooks.PostToolUse = [{ matcher: WAKEUP_TOOL_MATCHER, hooks: [{ type: 'http', url, timeout: timeoutSec }] }];
+  }
+  if (rtkPath) {
+    hooks.PreToolUse = [buildRtkHookEntry(rtkPath)];
   }
   const settings = { hooks };
   if (permissions && Array.isArray(permissions.deny) && permissions.deny.length > 0) {
@@ -76,12 +81,12 @@ function buildHookSettings({ port, glissaId, token, timeoutSec = DEFAULT_TIMEOUT
 }
 
 // Write the per-session settings file. Returns { settingsPath, dir, token, cleanup }.
-function writeSessionSettings({ port, glissaId, token, baseDir = DEFAULT_BASE_DIR, timeoutSec = DEFAULT_TIMEOUT_SEC, permissions = null, detectScheduledWakeups = true, enableProjectMcp = false }) {
+function writeSessionSettings({ port, glissaId, token, baseDir = DEFAULT_BASE_DIR, timeoutSec = DEFAULT_TIMEOUT_SEC, permissions = null, detectScheduledWakeups = true, enableProjectMcp = false, rtkPath = null }) {
   const tok = token || generateToken();
   const dir = path.join(baseDir, safeDirSegment(glissaId));
   fs.mkdirSync(dir, { recursive: true });
   const settingsPath = path.join(dir, 'settings.json');
-  const settings = buildHookSettings({ port, glissaId, token: tok, timeoutSec, permissions, detectScheduledWakeups, enableProjectMcp });
+  const settings = buildHookSettings({ port, glissaId, token: tok, timeoutSec, permissions, detectScheduledWakeups, enableProjectMcp, rtkPath });
   fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
   return {
     settingsPath,

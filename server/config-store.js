@@ -45,6 +45,7 @@ const DEFAULT_CONFIG = {
   // (session/core/anti-slop-prompt.js). OFF by default; user sessions only (the headless lane
   // sessions never receive it). Takes effect on the next session start/restart.
   antiSlopPrompt: false,
+  rtk: false,
   // Push session notifications (complete / waiting / failed) to Telegram when NO dashboard tab is
   // open anywhere, using the same config.telegram credentials the PR-review lane defines. Separate
   // from prReview.enabled on purpose: PR pings and session pings are independently switchable. Off
@@ -105,6 +106,7 @@ const BOOLEAN_KEYS = [
   'detectBackgroundAgents',
   'recordSignals',
   'antiSlopPrompt',
+  'rtk',
   'checkForUpdates',
   'autoResume',
   'telegramNotifications',
@@ -368,6 +370,7 @@ function createConfigStore({ settingsDefaults } = {}) {
       detectBackgroundAgents: config.detectBackgroundAgents ?? effectiveDefaults.detectBackgroundAgents,
       recordSignals: config.recordSignals ?? effectiveDefaults.recordSignals,
       antiSlopPrompt: config.antiSlopPrompt ?? effectiveDefaults.antiSlopPrompt,
+      rtk: config.rtk ?? effectiveDefaults.rtk,
       checkForUpdates: config.checkForUpdates ?? effectiveDefaults.checkForUpdates,
       autoResume: config.autoResume ?? effectiveDefaults.autoResume,
       telegramNotifications: config.telegramNotifications ?? effectiveDefaults.telegramNotifications,

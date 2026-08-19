@@ -190,6 +190,7 @@ class Session extends EventEmitter {
     // (`-p`) session loads the project's `.mcp.json` servers (e.g. Playwright MCP) without an
     // interactive trust prompt it can never answer. Off by default; set by a headless lane that needs it.
     enableProjectMcp = false,
+    rtkPath = null,
     // PTY spawner seam. Defaults to node-pty; tests inject a fake to assert the
     // spawn wiring (file/args) without launching a real process.
     ptySpawn = null,
@@ -358,6 +359,7 @@ class Session extends EventEmitter {
     this._settingsPermissions = settingsPermissions;
     this._spawnEnv = spawnEnv;
     this._enableProjectMcp = !!enableProjectMcp;
+    this._rtkPath = rtkPath || null;
     this._ptySpawn = ptySpawn || ((file, args, opts) => pty.spawn(file, args, opts));
     // Async kill executor (taskkill). Default wraps execFile; the callback form keeps the call truly
     // non-blocking. Injected in tests to assert the kill without spawning a real process.
@@ -1996,6 +1998,7 @@ class Session extends EventEmitter {
         permissions: this._settingsPermissions,
         detectScheduledWakeups: this._detectScheduledWakeups,
         enableProjectMcp: this._enableProjectMcp,
+        rtkPath: this._rtkPath,
       });
       this._hookToken = this._settingsHandle.token;
       this._hookRouter.register(this.id, {

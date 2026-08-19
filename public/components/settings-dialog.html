@@ -32,6 +32,12 @@
     Auto-resume sessions on startup
     <span class="dialog-hint">Sessions that were running when Glissa last shut down or crashed auto-spawn with their conversation resumed</span>
   </label>
+  <label class="dialog-label dialog-checkbox-label">
+    <input type="checkbox" class="dialog-checkbox" id="settings-rtk">
+    rtk output compression
+    <span class="dialog-hint">Compresses Bash output for newly spawned or restarted sessions.</span>
+    <span class="dialog-hint dialog-hint-warning" id="settings-rtk-warning"></span>
+  </label>
 </div>
 
 <div class="settings-panel" id="settings-panel-terminal" role="tabpanel" aria-labelledby="settings-tab-terminal" data-panel="terminal" hidden>
