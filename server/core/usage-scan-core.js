@@ -25,23 +25,37 @@ function resolveProjectsDirs(env = process.env, extraDirs = [], isDirectory) {
   const override = typeof env.CLAUDE_CONFIG_DIR === 'string' ? env.CLAUDE_CONFIG_DIR : '';
   const extraHomes = normalizeHomeCandidates(extraDirs, env);
   if (override.trim()) {
-    const overrideHomes = normalizeHomeCandidates(override.split(','), env);
-    const overrideProjects = projectsDirsForHomes(overrideHomes, isDirectory);
+    const overrideProjects = projectDirCandidates(env, []).filter(isDirectory);
     if (overrideProjects.length === 0) throw new Error('CLAUDE_CONFIG_DIR is set but no projects directory exists');
     return uniqueStrings([...overrideProjects, ...projectsDirsForHomes(extraHomes, isDirectory)]);
   }
 
+  return projectDirCandidates(env, extraDirs).filter(isDirectory);
+}
+
+function projectDirCandidates(env = process.env, extraDirs = []) {
+  const override = typeof env.CLAUDE_CONFIG_DIR === 'string' ? env.CLAUDE_CONFIG_DIR : '';
+  if (override.trim()) {
+    const overrideHomes = normalizeHomeCandidates(override.split(','), env);
+    const extraHomes = normalizeHomeCandidates(extraDirs, env);
+    return uniqueStrings([...projectsDirsFromHomes(overrideHomes), ...projectsDirsFromHomes(extraHomes)]);
+  }
+
   const xdgConfigHome = stringOrNull(env.XDG_CONFIG_HOME) || path.join(homeDir(env), '.config');
   const defaultHomes = [path.join(xdgConfigHome, 'claude'), path.join(homeDir(env), '.claude')];
-  return uniqueStrings([...projectsDirsForHomes(defaultHomes, isDirectory), ...projectsDirsForHomes(extraHomes, isDirectory)]);
+  const extraHomes = normalizeHomeCandidates(extraDirs, env);
+  return uniqueStrings([...projectsDirsFromHomes(defaultHomes), ...projectsDirsFromHomes(extraHomes)]);
 }
 
 function projectsDirsForHomes(homes, isDirectory) {
+  return projectsDirsFromHomes(homes).filter(isDirectory);
+}
+
+function projectsDirsFromHomes(homes) {
   const projectsDirs = [];
   for (const candidate of homes) {
     const home = path.basename(candidate) === 'projects' ? path.dirname(candidate) : candidate;
     const projectsDir = path.join(home, 'projects');
-    if (!isDirectory(projectsDir)) continue;
     projectsDirs.push(projectsDir);
   }
   return projectsDirs;
@@ -70,6 +84,7 @@ function uniqueStrings(values) {
 
 module.exports = {
   decideFileRead,
+  projectDirCandidates,
   resolveProjectsDirs,
   splitLines,
 };

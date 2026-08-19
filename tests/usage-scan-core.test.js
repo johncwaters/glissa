@@ -6,6 +6,7 @@ const assert = require('node:assert/strict');
 
 const {
   decideFileRead,
+  projectDirCandidates,
   resolveProjectsDirs,
   splitLines,
 } = require('../server/core/usage-scan-core');
@@ -62,4 +63,19 @@ test('resolveProjectsDirs probes XDG and home Claude dirs when no override is se
     path.join('C:/xdg', 'claude', 'projects'),
     path.join('C:/home', '.claude', 'projects'),
   ]);
+});
+
+test('projectDirCandidates matches resolver probes and filters blank override segments', () => {
+  const root = path.resolve('C:/home');
+  const candidates = projectDirCandidates({
+    CLAUDE_CONFIG_DIR: ` ${path.join(root, '.claude')} ,,   , ${path.join(root, 'other', 'projects')} `,
+    HOME: root,
+  }, [path.join(root, 'extra')]);
+
+  assert.deepEqual(candidates, [
+    path.join(root, '.claude', 'projects'),
+    path.join(root, 'other', 'projects'),
+    path.join(root, 'extra', 'projects'),
+  ]);
+  assert.equal(candidates.includes('projects'), false);
 });
