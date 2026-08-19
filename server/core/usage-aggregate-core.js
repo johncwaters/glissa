@@ -156,4 +156,7 @@ function pad2(value) {
 module.exports = {
   buildUsageReport,
   pruneEntries,
+  // The daily bucket key, exported so anything asking "which day is it" (the anomaly baseline's
+  // exclude-today, the warehouse prune cutoff) uses the same local-clock rule the buckets were keyed on.
+  localDayKey: localDay,
 };

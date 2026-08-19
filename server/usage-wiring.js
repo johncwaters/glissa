@@ -29,6 +29,9 @@ const DEFAULT_USAGE_CONFIG = Object.freeze({
   planLimits: true,
   scanIntervalMinutes: 5,
   retainDays: 90,
+  // Durable history retention, independent of transcript retention: the point of the warehouse is to
+  // outlive the ~30 days Claude Code keeps its transcripts for.
+  warehouseRetainDays: 365,
   sessionBlockHours: 5,
   costMode: 'auto',
   extraProjectsDirs: [],
@@ -65,6 +68,7 @@ const COST_MODES = new Set(USAGE_COST_MODES);
 const USAGE_INTEGER_RANGES = Object.freeze({
   scanIntervalMinutes: { min: 1, max: 1440 },
   retainDays: { min: 1, max: 3650 },
+  warehouseRetainDays: { min: 30, max: 3650 },
   sessionBlockHours: { min: 1, max: 24 },
 });
 const INTEGER_RANGES = USAGE_INTEGER_RANGES;
@@ -96,6 +100,7 @@ function resolveUsageConfig(usage) {
     planLimits: typeof source.planLimits === 'boolean' ? source.planLimits : DEFAULT_USAGE_CONFIG.planLimits,
     scanIntervalMinutes: integerWithin(source.scanIntervalMinutes, INTEGER_RANGES.scanIntervalMinutes, DEFAULT_USAGE_CONFIG.scanIntervalMinutes),
     retainDays: integerWithin(source.retainDays, INTEGER_RANGES.retainDays, DEFAULT_USAGE_CONFIG.retainDays),
+    warehouseRetainDays: integerWithin(source.warehouseRetainDays, INTEGER_RANGES.warehouseRetainDays, DEFAULT_USAGE_CONFIG.warehouseRetainDays),
     sessionBlockHours: integerWithin(source.sessionBlockHours, INTEGER_RANGES.sessionBlockHours, DEFAULT_USAGE_CONFIG.sessionBlockHours),
     costMode: COST_MODES.has(source.costMode) ? source.costMode : DEFAULT_USAGE_CONFIG.costMode,
     extraProjectsDirs: absoluteDirList(source.extraProjectsDirs),
@@ -131,6 +136,9 @@ function createUsageWiring({
   sessions = new Map(),
   broadcast = () => {},
   controlClientCount = () => 0,
+  // Beside the resolved config file, so a temp GLISSA_CONFIG keeps its history in the temp dir too (the
+  // same rule uploads and recordings follow). Null disables the warehouse entirely.
+  warehousePath = null,
   createScanner = createUsageScanner,
   loadPricingFn = loadPricing,
   scannerDeps = {},
@@ -197,6 +205,8 @@ function createUsageWiring({
         retainDays: cfg.retainDays,
         extraProjectsDirs: cfg.extraProjectsDirs,
         vendors: cfg.vendors,
+        warehousePath,
+        warehouseRetainDays: cfg.warehouseRetainDays,
         logger,
         ...scannerDeps,
       });
@@ -390,6 +400,7 @@ function createUsageWiring({
       sessions: report.sessions,
       blocks: report.blocks,
       activeBlock: report.activeBlock,
+      anomaly: report.anomaly,
       tokenLimit: report.tokenLimit,
       pricing: { source: pricing.source, fetchedAt: pricing.fetchedAt, missing: report.pricing.missing },
       scan: {

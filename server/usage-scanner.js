@@ -10,8 +10,15 @@ const {
   shouldReplace,
   totalTokensOf,
 } = require('./core/usage-entry-core');
-const { buildUsageReport, pruneEntries } = require('./core/usage-aggregate-core');
+const { buildUsageReport, localDayKey, pruneEntries } = require('./core/usage-aggregate-core');
 const { buildBlocks, burnRate, projectBlock } = require('./core/usage-blocks-core');
+const { dailyBaseline, detectBurnAnomaly, detectDailyAnomaly } = require('./core/usage-anomaly-core');
+const {
+  mergeWarehouse,
+  pruneWarehouse,
+  rollupFromReport,
+  warehouseDailyRows,
+} = require('./core/usage-warehouse-core');
 const { costForEntry, lookupModelPrice } = require('./core/usage-pricing-core');
 const {
   codexFallbackRoots,
@@ -34,6 +41,9 @@ const DEFAULT_BYTE_BUDGET = 64 * 1024 * 1024;
 const DEFAULT_CHUNK_SIZE = 1024 * 1024;
 const LINE_YIELD_INTERVAL = 5000;
 const SYNTHETIC_PRIMARY = Symbol('syntheticPrimary');
+// The anomaly baseline is the trailing month, NOT the whole retained series: a sparse multi-month mean
+// makes an ordinary day look like a spike (and a heavy month makes a real spike look ordinary).
+const ANOMALY_BASELINE_DAYS = 30;
 
 const noopLogger = Object.freeze({ warn: () => {} });
 
@@ -51,6 +61,11 @@ function createUsageScanner(deps = {}) {
     // Which non-Claude vendors to walk. A disabled vendor contributes no roots at all, so its tree is
     // never read and an all-Claude machine behaves exactly as before.
     vendors = { codex: true, grok: true },
+    // Durable per-day-per-model history. Claude Code deletes transcripts after about 30 days, so without
+    // this the daily series silently truncates and every longer view is quietly wrong. Absent path (older
+    // callers, unit tests) means the warehouse is inert: nothing is read, nothing is written.
+    warehousePath = null,
+    warehouseRetainDays = 365,
     logger = noopLogger,
     byteBudget = DEFAULT_BYTE_BUDGET,
     chunkSize = DEFAULT_CHUNK_SIZE,
@@ -75,6 +90,10 @@ function createUsageScanner(deps = {}) {
   const cachedRollupsByDays = new Map();
   let cachedSessionTotals = null;
   let currentFileJournal = null;
+  let warehouseRecords = [];
+  let warehouseLoaded = false;
+  let warehouseSignature = null;
+  let warehouseWriteChain = Promise.resolve();
 
   function runPass({ force = false } = {}) {
     if (activePass) {
@@ -152,6 +171,12 @@ function createUsageScanner(deps = {}) {
     lastScanMs = nowFn();
     lastPartial = partial;
     if (newEntryCount > 0) markDirty();
+    /*
+     * Only a COMPLETE pass may write history. A partial pass has seen an arbitrary slice of the tree, so
+     * merging its day totals would persist an undercount as durable truth; that is also why continuation
+     * storms cost no writes at all rather than needing a timer to coalesce them.
+     */
+    if (!partial) await persistWarehouse();
     return {
       files: lastFileCount,
       entries: entries.length,
@@ -331,6 +356,113 @@ function createUsageScanner(deps = {}) {
     markDirty();
   }
 
+  // ── Warehouse ──
+
+  async function loadWarehouse() {
+    if (warehouseLoaded || !warehousePath) return;
+    warehouseLoaded = true;
+    let text = null;
+    try {
+      text = await fsPromises.readFile(warehousePath, 'utf8');
+    } catch {
+      // No file yet is the ordinary first-run case, not a problem to report.
+      return;
+    }
+    try {
+      const parsed = JSON.parse(text);
+      const records = Array.isArray(parsed?.records) ? parsed.records : [];
+      warehouseRecords = pruneWarehouse(records, { retainDays: warehouseRetainDays, todayKey: todayDayKey() });
+      warehouseSignature = null;
+    } catch (error) {
+      // A corrupt file starts empty rather than crashing the lane: the transcripts are still the source of
+      // truth for everything inside live coverage, and the next complete pass rebuilds what it can see.
+      warn(logger, `usage warehouse unreadable, starting empty: ${error.message}`);
+      warehouseRecords = [];
+    }
+  }
+
+  /*
+   * Merge this pass's live day rollups into durable history and write atomically. `liveDays` is what the
+   * scan actually produced, so a day the live scan covers always WINS over the stored copy (the live read
+   * is fresher), while a day the transcripts no longer have survives untouched.
+   */
+  async function persistWarehouse() {
+    if (!warehousePath) return;
+    await loadWarehouse();
+    const rollups = cachedRollupsForDays(undefined, retainDays);
+    const liveDays = rollups.daily.map((row) => row.day);
+    const merged = mergeWarehouse(warehouseRecords, rollupFromReport(rollups.daily), { liveDays });
+    warehouseRecords = pruneWarehouse(merged, { retainDays: warehouseRetainDays, todayKey: todayDayKey() });
+    const payload = `${JSON.stringify({ version: 1, updatedAt: new Date(nowFn()).toISOString(), records: warehouseRecords }, null, 2)}\n`;
+    const signature = JSON.stringify(warehouseRecords);
+    // Nothing moved: an idle machine rescanning on its interval should not rewrite the same bytes.
+    if (signature === warehouseSignature) return;
+    warehouseSignature = signature;
+    warehouseWriteChain = warehouseWriteChain.then(() => writeWarehouseFile(payload)).catch(() => {});
+    await warehouseWriteChain;
+  }
+
+  // tmp + rename, so a crash mid-write can never leave a half-written history file behind.
+  async function writeWarehouseFile(payload) {
+    const tmpPath = `${warehousePath}.tmp`;
+    try {
+      await fsPromises.mkdir(path.dirname(warehousePath), { recursive: true });
+      await fsPromises.writeFile(tmpPath, payload);
+      await fsPromises.rename(tmpPath, warehousePath);
+    } catch (error) {
+      warn(logger, `usage warehouse write failed: ${error.message}`);
+      warehouseSignature = null;
+    }
+  }
+
+  function todayDayKey() {
+    return localDayKey(nowFn());
+  }
+
+  /*
+   * The daily series the report ships: live rows, plus history for days OLDER than live coverage. Strictly
+   * older, so a day the live scan is still filling in is never topped up from a stale stored copy. Each
+   * history row is marked, because a row Glissa remembers is a different claim from one it can still see.
+   */
+  function mergedDailyRows(liveDaily) {
+    if (warehouseRecords.length === 0) return liveDaily;
+    const liveDays = liveDaily.map((row) => row.day).filter(Boolean);
+    const earliestLive = liveDays.length > 0 ? liveDays.slice().sort()[0] : null;
+    const historyRows = warehouseDailyRows(warehouseRecords)
+      .filter((row) => (earliestLive === null ? true : row.day < earliestLive))
+      .map((row) => ({ ...row, models: sortedModels(row.models), vendors: [], source: 'history' }));
+    if (historyRows.length === 0) return liveDaily;
+    return [...historyRows, ...liveDaily].sort((a, b) => a.day.localeCompare(b.day));
+  }
+
+  function sortedModels(models) {
+    return (models || []).slice().sort((a, b) => b.tokens - a.tokens);
+  }
+
+  // ── Anomaly ──
+  // Machine level only. A per-session baseline is a different data model (sessions are short and unevenly
+  // sampled), so it is deliberately out of scope here.
+  function buildAnomaly(daily, blockSummary, activeBlock) {
+    const todayKey = todayDayKey();
+    const ordered = daily.slice().sort((a, b) => a.day.localeCompare(b.day));
+    const trailing = ordered.slice(-(ANOMALY_BASELINE_DAYS + 1));
+    const baseline = dailyBaseline(trailing, { excludeDay: todayKey });
+    const todayRow = ordered.find((row) => row.day === todayKey) || null;
+    const daily30 = detectDailyAnomaly({
+      todayUsd: todayRow?.costUSD,
+      todayTokens: todayRow?.tokens,
+      baseline,
+    });
+    const burn = detectBurnAnomaly({
+      currentTokensPerMinute: activeBlock?.burn?.tokensPerMinute,
+      completedBlocks: (blockSummary.blocks || []).filter((block) => !block.isGap && !block.isActive),
+    });
+    return {
+      daily: daily30 ? { ...daily30, baselineDays: baseline.days } : null,
+      burn,
+    };
+  }
+
   function buildReport({ days } = {}) {
     const reportRetainDays = days == null ? retainDays : days;
     const rollups = cachedRollupsForDays(days, reportRetainDays);
@@ -347,16 +479,21 @@ function createUsageScanner(deps = {}) {
     const activeBlock = blockSummary.activeBlock
       ? { ...blockSummary.activeBlock, burn: activeBurn, projection: projectBlock(blockSummary.activeBlock, activeBurn, now) }
       : null;
+    // Only the DAILY series is extended with history (and what the dashboard derives from it: the week and
+    // month views, the heatmap, the anomaly baseline). Totals, models, sessions and blocks stay live-only,
+    // because the warehouse stores day-by-model rollups and nothing finer.
+    const daily = mergedDailyRows(cloneValue(rollups.daily));
     return {
       ts: now,
       tz: rollups.tz,
       blockHours: rollups.blockHours,
       totals: cloneValue(rollups.totals),
-      daily: cloneValue(rollups.daily),
+      daily,
       models: cloneValue(rollups.models),
       sessions: cloneValue(rollups.sessions),
       blocks: blockSummary.blocks,
       activeBlock,
+      anomaly: buildAnomaly(daily, blockSummary, activeBlock),
       tokenLimit: blockSummary.tokenLimit,
       pricing: { missing: Array.from(missingModels).sort() },
       scan: { dirs: dirs.slice(), files: lastFileCount, entries: entries.length, lastScanMs, partial: lastPartial, resolutionError },

@@ -12,13 +12,19 @@ import { createPollAgoTicker, formatAgo } from './poll-ago.js';
 import {
   DEFAULT_DAY_SORT,
   DEFAULT_MODEL_SORT,
+  DEFAULT_PERIOD_VIEW,
   DEFAULT_RANGE_VALUE,
   DEFAULT_SESSION_SORT,
+  HEATMAP_DAY_LABELS,
+  NO_ANOMALY_LINE,
+  PERIOD_VIEWS,
   PLAN_WINDOWS,
   RANGE_OPTIONS,
   USAGE_CAVEAT,
   USAGE_CAVEAT_SHORT,
   USAGE_DISABLED_HINT,
+  anomalyLine,
+  anomalyTone,
   ariaSortValue,
   claudeOnlyHint,
   blockAttentionTone,
@@ -27,15 +33,18 @@ import {
   blockProgress,
   burnTiles,
   dailyRowForDay,
-  dayLabel,
   dayRangeLabel,
   formatMinutes,
   formatPercent,
   formatTokens,
   formatUsd,
+  hasAnomaly,
   hasMultiVendorUsage,
   hasOfficialPlanLimits,
   hasUsageAttention,
+  heatmapCellTitle,
+  heatmapCells,
+  historyNote,
   isGlissaSessionRow,
   isUsageUnavailable,
   limitPct,
@@ -44,6 +53,9 @@ import {
   modelRowPrefix,
   nextSortState,
   percentOfTotal,
+  periodHint,
+  periodLabel,
+  periodRows,
   planLimitAgeText,
   planLimitStaleNote,
   planWindowOf,
@@ -87,6 +99,7 @@ let _daySort = DEFAULT_DAY_SORT;
 let _modelSort = DEFAULT_MODEL_SORT;
 let _sessionSort = DEFAULT_SESSION_SORT;
 let _focusAfterRender = null;
+let _periodView = DEFAULT_PERIOD_VIEW;
 const _expandedDays = new Set();
 
 // Elements the shared tick repaints in place, so a report that has not changed is never rebuilt just to
@@ -426,6 +439,7 @@ function buildActiveBlockSection() {
     projectionEl.dataset.tone = tone;
     section.append(projectionEl);
   }
+  section.append(buildAnomalyLine());
 
   const limit = tokenLimitLine(_report?.tokenLimit);
   if (!limit) return section;
@@ -445,6 +459,19 @@ function buildActiveBlockSection() {
     section.append(projectedEl);
   }
   return section;
+}
+
+/*
+ * Whether today (or this block) is out of line with the recent past. Present either way: a quiet
+ * confirmation is worth one muted line, because an alarm that only ever appears cannot be trusted to be
+ * working. Compared against a 30 day baseline server-side; the wording always names the comparison.
+ */
+function buildAnomalyLine() {
+  const anomaly = _report?.anomaly;
+  if (!hasAnomaly(anomaly)) return el('p', 'usage-meta', NO_ANOMALY_LINE);
+  const line = el('p', 'usage-meta', anomalyLine(anomaly));
+  line.dataset.tone = anomalyTone(anomaly);
+  return line;
 }
 
 // ── Block history ──
@@ -502,17 +529,26 @@ function buildTotalsSection() {
   return section;
 }
 
-// ── Daily ──
+// ── Over time ──
+// One table, three period views, all derived from the same merged daily series so a week total can never
+// disagree with the days under it. Sorting and the per-period model breakdown carry across the switch.
 function buildDailySection() {
-  const rows = sortDailyRows(_report?.daily, _daySort);
-  const section = buildSection('By day', 'newest first by default');
+  const daily = _report?.daily || [];
+  const periodView = _periodView;
+  const rows = sortDailyRows(periodRows(daily, periodView), _daySort);
+  const columnLabel = PERIOD_VIEWS.find((view) => view.value === periodView)?.label || 'Day';
+  const hints = [periodHint(periodView), historyNote(daily)].filter(Boolean);
+  const section = buildSection('Over time', hints.join(', '));
+  section.append(buildPeriodSwitch());
   if (rows.length === 0) {
-    section.append(el('p', 'usage-empty', 'No daily usage recorded yet.'));
+    section.append(el('p', 'usage-empty', 'No usage recorded yet.'));
     return section;
   }
+  const heatmap = buildHeatmap(daily);
+  if (heatmap) section.append(heatmap);
   const { wrap, body } = buildTable(
     [
-      { label: 'Day', key: 'day' },
+      { label: columnLabel, key: 'day' },
       { label: 'Tokens', numeric: true, key: 'tokens' },
       { label: 'Cost', numeric: true, key: 'costUSD' },
       { label: 'Models' },
@@ -527,10 +563,11 @@ function buildDailySection() {
   for (const row of rows) {
     const day = String(row.day ?? '');
     const tr = el('tr', 'usage-row');
+    if (row.source === 'history') tr.dataset.source = 'history';
     const models = sortModelRows(row.models);
     const toggle = buildBreakdownToggle(day, models.length);
     appendCells(tr, [
-      { text: dayLabel(row.day), title: day },
+      { node: buildPeriodCell(row, periodView), title: day },
       { text: formatTokens(row.tokens), numeric: true },
       { text: formatUsd(row.costUSD), numeric: true },
       { node: toggle, className: 'usage-toggle-cell' },
@@ -542,6 +579,62 @@ function buildDailySection() {
   }
   section.append(wrap);
   return section;
+}
+
+// Three stable labels with aria-pressed, not one control that renames itself: the pressed state is the
+// indicator, and every button always says which view it selects.
+function buildPeriodSwitch() {
+  const group = el('div', 'usage-period');
+  group.setAttribute('role', 'group');
+  group.setAttribute('aria-label', 'Period');
+  for (const view of PERIOD_VIEWS) {
+    const button = el('button', 'usage-period-button', view.label);
+    button.type = 'button';
+    button.dataset.periodView = view.value;
+    button.setAttribute('aria-pressed', view.value === _periodView ? 'true' : 'false');
+    button.addEventListener('click', () => {
+      if (_periodView === view.value) return;
+      _periodView = view.value;
+      _focusAfterRender = { kind: 'period', view: view.value };
+      render();
+    });
+    group.append(button);
+  }
+  return group;
+}
+
+// A remembered row reads differently from an observed one, so history is tagged in the table too.
+function buildPeriodCell(row, periodView) {
+  const wrap = el('span', 'usage-period-cell');
+  wrap.append(el('span', null, periodLabel(row.day, periodView)));
+  if (row.source === 'history') wrap.append(el('span', 'usage-history-tag', 'history'));
+  return wrap;
+}
+
+// ── Heatmap ──
+// A CSS grid, one column per week, Monday to Sunday down each column. No canvas and no library: the whole
+// thing is 112 spans whose only variable is a tone attribute.
+function buildHeatmap(daily) {
+  const { cells, max } = heatmapCells(daily);
+  if (cells.length === 0 || max <= 0) return null;
+  const wrap = el('div', 'usage-heatmap-scroll');
+  const grid = el('div', 'usage-heatmap');
+  grid.setAttribute('role', 'img');
+  grid.setAttribute('aria-label', `Daily usage for the trailing ${Math.max(...cells.map((cell) => cell.week)) + 1} weeks`);
+  const labels = el('div', 'usage-heatmap-days');
+  for (const label of HEATMAP_DAY_LABELS) labels.append(el('span', 'usage-heatmap-day', label));
+  for (const cell of cells) {
+    const box = el('span', 'usage-heatmap-cell');
+    box.dataset.tone = String(cell.tone);
+    if (cell.noData) box.dataset.noData = 'true';
+    if (cell.source === 'history') box.dataset.source = 'history';
+    box.style.gridColumn = String(cell.week + 1);
+    box.style.gridRow = String(cell.weekday + 1);
+    box.title = heatmapCellTitle(cell);
+    grid.append(box);
+  }
+  wrap.append(labels, grid);
+  return wrap;
 }
 
 // Stable label, state on aria-expanded (the chevron is a CSS response to that attribute), so the
@@ -736,10 +829,16 @@ function restoreFocusAfterRender() {
   const target = _focusAfterRender;
   _focusAfterRender = null;
   if (!target) return;
-  const selector = target.kind === 'day'
-    ? `.usage-toggle[data-usage-day="${CSS.escape(target.day)}"]`
-    : `[data-usage-table="${CSS.escape(target.table)}"] .usage-sort[data-sort-key="${CSS.escape(target.key)}"]`;
+  const selector = selectorForFocusTarget(target);
+  if (!selector) return;
   _root.querySelector(selector)?.focus();
+}
+
+function selectorForFocusTarget(target) {
+  if (target.kind === 'day') return `.usage-toggle[data-usage-day="${CSS.escape(target.day)}"]`;
+  if (target.kind === 'period') return `.usage-period-button[data-period-view="${CSS.escape(target.view)}"]`;
+  if (target.kind === 'sort') return `[data-usage-table="${CSS.escape(target.table)}"] .usage-sort[data-sort-key="${CSS.escape(target.key)}"]`;
+  return null;
 }
 
 function buildBody() {

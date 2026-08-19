@@ -273,6 +273,262 @@ export function projectionLimitLine(projection, tokenLimit) {
   return `On this burn rate the block ends at ${Math.round(pct)}% of that reference.`;
 }
 
+// ── Period rollups ──
+// Week and month views are derived HERE, from the daily rows the report already ships, rather than being
+// three more arrays on the wire: the merged daily series is the single source, so a period total can never
+// disagree with the days it is made of.
+
+export const PERIOD_VIEWS = Object.freeze([
+  { value: 'day', label: 'Day' },
+  { value: 'week', label: 'Week' },
+  { value: 'month', label: 'Month' },
+]);
+export const DEFAULT_PERIOD_VIEW = 'day';
+
+function parseDayKey(day) {
+  const parts = DAY_KEY_RE.exec(String(day ?? ''));
+  if (!parts) return null;
+  // Local noon, so a period key can never be shifted a day by a DST transition.
+  return new Date(Number(parts[1]), Number(parts[2]) - 1, Number(parts[3]), 12);
+}
+
+function pad2(value) {
+  return String(value).padStart(2, '0');
+}
+
+function dayKeyOfDate(date) {
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
+}
+
+// Weeks start Monday and are keyed by that Monday's day key, so a week spanning a month boundary stays one
+// bucket instead of splitting.
+export function weekStartKey(day) {
+  const date = parseDayKey(day);
+  if (!date) return '';
+  const dayOfWeek = date.getDay();
+  const daysSinceMonday = (dayOfWeek + 6) % 7;
+  date.setDate(date.getDate() - daysSinceMonday);
+  return dayKeyOfDate(date);
+}
+
+export function monthKey(day) {
+  const parts = DAY_KEY_RE.exec(String(day ?? ''));
+  if (!parts) return '';
+  return `${parts[1]}-${parts[2]}`;
+}
+
+function emptyPeriodBucket(key) {
+  return {
+    key,
+    tokens: 0,
+    costUSD: 0,
+    input: 0,
+    output: 0,
+    cacheCreate: 0,
+    cacheRead: 0,
+    days: 0,
+    sources: new Set(),
+    modelByName: new Map(),
+  };
+}
+
+function addDayToPeriod(bucket, row) {
+  bucket.tokens += finiteNumber(row?.tokens) ?? 0;
+  bucket.costUSD += finiteNumber(row?.costUSD) ?? 0;
+  bucket.input += finiteNumber(row?.input) ?? 0;
+  bucket.output += finiteNumber(row?.output) ?? 0;
+  bucket.cacheCreate += finiteNumber(row?.cacheCreate) ?? 0;
+  bucket.cacheRead += finiteNumber(row?.cacheRead) ?? 0;
+  bucket.days += 1;
+  bucket.sources.add(row?.source === 'history' ? 'history' : 'live');
+  for (const model of (row?.models || [])) {
+    const name = modelLabel(model);
+    const existing = bucket.modelByName.get(name) || { key: name, model: model?.model ?? name, vendor: model?.vendor, tokens: 0, costUSD: 0, input: 0, output: 0, cacheCreate: 0, cacheRead: 0 };
+    existing.tokens += finiteNumber(model?.tokens) ?? 0;
+    existing.costUSD += finiteNumber(model?.costUSD) ?? 0;
+    existing.input += finiteNumber(model?.input) ?? 0;
+    existing.output += finiteNumber(model?.output) ?? 0;
+    existing.cacheCreate += finiteNumber(model?.cacheCreate) ?? 0;
+    existing.cacheRead += finiteNumber(model?.cacheRead) ?? 0;
+    bucket.modelByName.set(name, existing);
+  }
+}
+
+// A period is history only when EVERY day in it is: one live day makes the total a live claim.
+function serializePeriodBucket(bucket) {
+  const { modelByName, sources, ...row } = bucket;
+  row.day = bucket.key;
+  row.models = Array.from(modelByName.values()).sort((a, b) => b.tokens - a.tokens);
+  row.source = sources.has('live') ? 'live' : 'history';
+  return row;
+}
+
+function rollupByPeriod(daily, keyOf) {
+  const buckets = new Map();
+  for (const row of (Array.isArray(daily) ? daily : [])) {
+    const key = keyOf(row?.day);
+    if (!key) continue;
+    const bucket = buckets.get(key) || emptyPeriodBucket(key);
+    addDayToPeriod(bucket, row);
+    buckets.set(key, bucket);
+  }
+  return Array.from(buckets.values()).map(serializePeriodBucket);
+}
+
+export function weeklyRows(daily) {
+  return rollupByPeriod(daily, weekStartKey);
+}
+
+export function monthlyRows(daily) {
+  return rollupByPeriod(daily, monthKey);
+}
+
+export function periodRows(daily, view) {
+  if (view === 'week') return weeklyRows(daily);
+  if (view === 'month') return monthlyRows(daily);
+  return Array.isArray(daily) ? [...daily] : [];
+}
+
+const MONTH_KEY_RE = /^(\d{4})-(\d{2})$/;
+
+// One label rule for all three views, so a switch between them reads as the same table.
+export function periodLabel(key, view) {
+  if (view === 'month') {
+    const parts = MONTH_KEY_RE.exec(String(key ?? ''));
+    if (!parts) return String(key ?? '') || NO_VALUE;
+    const month = MONTH_NAMES[Number(parts[2]) - 1];
+    if (!month) return String(key);
+    return `${month} ${parts[1]}`;
+  }
+  if (view === 'week') {
+    const label = dayLabel(key);
+    return label === NO_VALUE ? label : `week of ${label}`;
+  }
+  return dayLabel(key);
+}
+
+export function periodHint(view) {
+  if (view === 'week') return 'weeks start Monday';
+  if (view === 'month') return 'calendar months';
+  return 'newest first by default';
+}
+
+// A row Glissa REMEMBERS is a different claim from one it can still see, so history is labelled wherever
+// it appears rather than blended in silently.
+export function historyNote(rows) {
+  const hasHistory = (Array.isArray(rows) ? rows : []).some((row) => row?.source === 'history');
+  if (!hasHistory) return '';
+  return 'older days from local history';
+}
+
+// ── Calendar heatmap ──
+// Trailing 16 weeks of the merged series as week columns of Monday-to-Sunday rows. Tone is a FIXED
+// fraction of the window's own maximum rather than a quantile: quantiles guarantee dark cells even on a
+// quiet fortnight, which would read as heavy usage that is not there.
+export const HEATMAP_WEEKS = 16;
+const HEATMAP_TONE_FRACTIONS = Object.freeze([0.05, 0.25, 0.5, 0.75]);
+export const HEATMAP_DAY_LABELS = Object.freeze(['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']);
+
+export function heatmapTone(tokens, max) {
+  const value = finiteNumber(tokens) ?? 0;
+  const peak = finiteNumber(max) ?? 0;
+  if (value <= 0 || peak <= 0) return 0;
+  const share = value / peak;
+  let tone = 1;
+  for (let index = 0; index < HEATMAP_TONE_FRACTIONS.length; index += 1) {
+    if (share >= HEATMAP_TONE_FRACTIONS[index]) tone = index + 1;
+  }
+  return tone;
+}
+
+/*
+ * Cells for the grid, oldest week first. An EMPTY day (in range, no usage) is distinct from a NO-DATA day
+ * (before the series began, or after today): the first is a real zero, the second is an absence, and
+ * colouring them alike would invent quiet days that were never observed.
+ */
+export function heatmapCells(daily, { weeks = HEATMAP_WEEKS, today = new Date() } = {}) {
+  const rows = (Array.isArray(daily) ? daily : []).filter((row) => DAY_KEY_RE.test(String(row?.day ?? '')));
+  const byDay = new Map(rows.map((row) => [row.day, row]));
+  const todayKey = dayKeyOfDate(today instanceof Date ? today : new Date(today));
+  const anchor = parseDayKey(weekStartKey(todayKey));
+  if (!anchor) return { cells: [], max: 0, weeks: 0 };
+  const firstDay = rows.length > 0 ? rows.map((row) => row.day).sort()[0] : null;
+  const start = new Date(anchor.getFullYear(), anchor.getMonth(), anchor.getDate() - (weeks - 1) * 7, 12);
+  const startKey = dayKeyOfDate(start);
+  const cells = [];
+  // Scaled to the window's OWN peak, not the whole series: a heavy month last quarter must not flatten
+  // every cell of the fortnight on screen.
+  let max = 0;
+  for (const row of rows) {
+    if (row.day < startKey || row.day > todayKey) continue;
+    max = Math.max(max, finiteNumber(row.tokens) ?? 0);
+  }
+  for (let week = 0; week < weeks; week += 1) {
+    for (let weekday = 0; weekday < 7; weekday += 1) {
+      const date = new Date(start.getFullYear(), start.getMonth(), start.getDate() + week * 7 + weekday, 12);
+      const key = dayKeyOfDate(date);
+      const row = byDay.get(key) || null;
+      const beyondToday = key > todayKey;
+      const beforeSeries = firstDay !== null && key < firstDay;
+      cells.push({
+        day: key,
+        week,
+        weekday,
+        tokens: finiteNumber(row?.tokens) ?? 0,
+        costUSD: finiteNumber(row?.costUSD) ?? 0,
+        source: row?.source === 'history' ? 'history' : row ? 'live' : null,
+        // No data at all: outside the observed series, so it gets the empty treatment and says so.
+        noData: beyondToday || beforeSeries || (!row && firstDay === null),
+        tone: heatmapTone(row?.tokens, max),
+      });
+    }
+  }
+  return { cells, max, weeks };
+}
+
+export function heatmapCellTitle(cell) {
+  const label = dayLabel(cell?.day);
+  if (cell?.noData) return `${label}: no data`;
+  const tokens = finiteNumber(cell?.tokens) ?? 0;
+  if (tokens <= 0) return `${label}: no usage`;
+  return `${label}: ${formatTokens(tokens)} tokens, ${formatUsd(finiteNumber(cell?.costUSD) ?? 0)}`;
+}
+
+// ── Anomaly ──
+// Machine level, evaluated server-side (the burn check needs block internals). The wording always names
+// the comparison: "3.1x the 30 day average" is actionable, "unusual usage" is not.
+
+export function anomalyLine(anomaly) {
+  const daily = anomaly?.daily;
+  if (daily) {
+    const days = finiteNumber(daily.baselineDays);
+    const window = days === null ? 'recent' : `${Math.round(days)} day`;
+    return `Today is ${formatRatio(daily.ratio)} the ${window} average: ${formatUsd(daily.todayUsd)} against ${formatUsd(daily.baselineUsd)}.`;
+  }
+  const burn = anomaly?.burn;
+  if (burn) {
+    return `This block is burning ${formatRatio(burn.ratio)} the usual rate: ${formatTokens(burn.current)} tokens per minute against ${formatTokens(burn.baseline)}.`;
+  }
+  return '';
+}
+
+export function anomalyTone(anomaly) {
+  if (anomaly?.daily || anomaly?.burn) return 'warn';
+  return 'ok';
+}
+
+export function hasAnomaly(anomaly) {
+  return Boolean(anomaly?.daily || anomaly?.burn);
+}
+
+export const NO_ANOMALY_LINE = 'Today is in line with recent usage.';
+
+function formatRatio(ratio) {
+  const value = finiteNumber(ratio);
+  if (value === null) return NO_VALUE;
+  return `${trimTrailingZeros(value.toFixed(1))}x`;
+}
+
 // ── Vendors ──
 // The lane reads Codex CLI and Grok CLI transcripts alongside Claude's. Everything vendor-aware is
 // additive: a machine with only Claude usage reports one vendor and renders exactly as it did before.
@@ -377,8 +633,11 @@ export function blockAttentionTone(report, planLimits = null) {
   return tokenLimitTone(projectedLimitPct(report?.activeBlock?.projection, report?.tokenLimit));
 }
 
+// A flagged anomaly raises the tab dot on its own: it is the one usage fact that appears without any
+// threshold being crossed, so nothing else would surface it.
 export function hasUsageAttention(report, planLimits = null) {
-  return blockAttentionTone(report, planLimits) !== 'ok';
+  if (blockAttentionTone(report, planLimits) !== 'ok') return true;
+  return hasAnomaly(report?.anomaly);
 }
 
 export function planWindowUsedText(window) {

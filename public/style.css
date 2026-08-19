@@ -2867,6 +2867,110 @@ a.pr-title:hover {
   border-radius: 3px;
 }
 
+/* Day / Week / Month. Three stable labels; aria-pressed is the state, so no button ever renames itself. */
+.usage-period {
+  display: inline-flex;
+  gap: 0;
+  border: 1px solid var(--border-dim);
+  border-radius: var(--radius);
+  overflow: hidden;
+  align-self: flex-start;
+}
+
+.usage-period-button {
+  border: 0;
+  border-right: 1px solid var(--border-dim);
+  padding: 3px 12px;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+}
+
+.usage-period-button:last-child { border-right: 0; }
+.usage-period-button:hover { color: var(--text); }
+
+.usage-period-button[aria-pressed="true"] {
+  color: var(--text-head);
+  background: color-mix(in oklab, var(--accent) 14%, transparent);
+}
+
+/* A row Glissa REMEMBERS rather than one it can still see. Quiet: it qualifies the row, it is not a state. */
+.usage-period-cell {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.usage-history-tag {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+
+/* Calendar heatmap: one column per week, Monday to Sunday down each column. Plain grid of spans, so it
+   costs no canvas and no library, and every cell carries its own title text. */
+.usage-heatmap-scroll {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  padding-bottom: 2px;
+  background:
+    linear-gradient(to right, var(--bg) 40%, transparent) left center / 34px 100% no-repeat local,
+    linear-gradient(to left, var(--bg) 40%, transparent) right center / 34px 100% no-repeat local,
+    radial-gradient(farthest-side at 0 50%, color-mix(in oklab, var(--accent) 30%, transparent), transparent) left center / 12px 100% no-repeat scroll,
+    radial-gradient(farthest-side at 100% 50%, color-mix(in oklab, var(--accent) 30%, transparent), transparent) right center / 12px 100% no-repeat scroll;
+}
+
+.usage-heatmap-days {
+  flex: 0 0 auto;
+  display: grid;
+  grid-template-rows: repeat(7, 11px);
+  gap: 2px;
+  padding-right: 2px;
+}
+
+.usage-heatmap-day {
+  font-size: 8px;
+  line-height: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.usage-heatmap {
+  flex: 0 0 auto;
+  display: grid;
+  grid-auto-flow: column;
+  grid-template-rows: repeat(7, 11px);
+  gap: 2px;
+}
+
+.usage-heatmap-cell {
+  width: 11px;
+  height: 11px;
+  border-radius: 2px;
+  background: color-mix(in oklab, var(--accent) 8%, var(--bg-surface));
+}
+
+/* Four filled steps, scaled to the window's own peak. */
+.usage-heatmap-cell[data-tone="1"] { background: color-mix(in oklab, var(--accent) 28%, var(--bg-surface)); }
+.usage-heatmap-cell[data-tone="2"] { background: color-mix(in oklab, var(--accent) 50%, var(--bg-surface)); }
+.usage-heatmap-cell[data-tone="3"] { background: color-mix(in oklab, var(--accent) 72%, var(--bg-surface)); }
+.usage-heatmap-cell[data-tone="4"] { background: var(--accent); }
+
+/* An observed zero and an unobserved day must not look alike: the second is an absence, drawn as a hairline
+   outline with no fill at all. */
+.usage-heatmap-cell[data-no-data="true"] {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--border-dim);
+}
+
 /* Per-vendor split, shown only when a non-Claude vendor has data. A second row under the totals rather
    than mixed into them: these re-cut the same numbers, they do not add to them. */
 .usage-vendor-tiles {
@@ -4543,6 +4647,12 @@ html[data-layout="phone"] .usage-footnote,
 html[data-layout="phone"] .usage-empty { font-size: 12px; }
 /* The plan meters are the one thing worth reading at arm's length on a phone. */
 html[data-layout="phone"] .usage-plan-used { font-size: 15px; }
+/* Thumb-sized period switch, and heatmap cells that survive a 390px screen by scrolling rather than shrinking. */
+html[data-layout="phone"] .usage-period-button { min-height: 34px; padding: 4px 14px; font-size: 11px; }
+html[data-layout="phone"] .usage-heatmap,
+html[data-layout="phone"] .usage-heatmap-days { grid-template-rows: repeat(7, 13px); }
+html[data-layout="phone"] .usage-heatmap-cell { width: 13px; height: 13px; }
+html[data-layout="phone"] .usage-heatmap-day { line-height: 13px; }
 html[data-layout="phone"] .usage-plan-window .usage-meter { height: 8px; }
 
 /* Thumb-sized controls: these are the only tappable things on the screen besides the sort headers and
