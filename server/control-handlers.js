@@ -8,7 +8,7 @@ const { listRepoConversations } = require('../session/core/conversation-history'
 const { normalizeClientTrust } = require('./core/request-trust');
 const { readPosthogReport } = require('./posthog-report');
 const posthogCore = require('./core/posthog-core');
-const { RTK_PATH } = require('../session/core/rtk-command');
+const { getRtkPath } = require('../session/core/rtk-command');
 
 // A Claude session id is a UUID, but stay lenient (any safe id charset) so a non-UUID id is not
 // rejected. The charset itself is the guard: no path separators, dots, or whitespace can reach the
@@ -231,7 +231,7 @@ function registerControlHandlers(controlWss, deps) {
   } = deps;
 
   function buildSettingsPayload() {
-    return { ...configStore.getSettings(), rtkAvailable: !!RTK_PATH };
+    return { ...configStore.getSettings(), rtkAvailable: !!getRtkPath() };
   }
 
   /** Find a session by id (primary) with name fallback for legacy clients. */

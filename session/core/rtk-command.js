@@ -5,13 +5,14 @@ const os = require('node:os');
 const path = require('node:path');
 
 const { execSync } = require('../../server/child-process-safe');
-const { dedupeClaudeMatches } = require('./spawn-command');
+const { dedupePathMatches } = require('./spawn-command');
 
 function firstExistingFile(candidates, fsApi = fs) {
   for (const candidate of candidates) {
     try {
       if (fsApi.statSync(candidate).isFile()) return path.resolve(candidate);
     } catch {
+      // existence probe: any stat failure just means try the next candidate
     }
   }
   return null;
@@ -37,7 +38,7 @@ function resolveRtkPath({
       stdio: ['ignore', 'pipe', 'ignore'],
       timeout: 2000,
     });
-    const matches = dedupeClaudeMatches(out.split(/\r?\n/).filter((line) => line.trim()), platform);
+    const matches = dedupePathMatches(out.split(/\r?\n/).filter((line) => line.trim()), platform);
     if (matches.length === 0) return null;
     return path.resolve(matches[0]);
   } catch {
@@ -57,10 +58,16 @@ function buildRtkHookEntry(rtkPath) {
   };
 }
 
-const RTK_PATH = resolveRtkPath();
+// Lazy, success-only memo: nothing is probed until rtk is actually consulted (settings dialog or an
+// rtk-enabled spawn), and a miss is re-probed so installing rtk later needs no server restart.
+let cachedRtkPath = null;
+function getRtkPath() {
+  if (!cachedRtkPath) cachedRtkPath = resolveRtkPath();
+  return cachedRtkPath;
+}
 
 module.exports = {
   resolveRtkPath,
   buildRtkHookEntry,
-  RTK_PATH,
+  getRtkPath,
 };

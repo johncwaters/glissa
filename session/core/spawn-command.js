@@ -22,7 +22,7 @@ function classifyClaudeKind(resolvedPath) {
 // filesystem ignores case); no realpath, because two distinct paths pointing at one file through a
 // symlink IS the shadowing risk the warning is for. Case is preserved in the output even where it is
 // ignored for keying. Order is preserved, so the first match still wins the resolution.
-function dedupeClaudeMatches(matches, platform = process.platform) {
+function dedupePathMatches(matches, platform = process.platform) {
   // Keyed off the platform argument rather than the ambient `path`, so the normalization a caller
   // asks for does not depend on the OS this happens to run on.
   const pathApi = platform === "win32" ? path.win32 : path.posix;
@@ -52,7 +52,7 @@ function resolveClaudeCommand() {
       stdio: ["ignore", "pipe", "ignore"],
       timeout: 2000,
     });
-    matches = dedupeClaudeMatches(out.split(/\r?\n/).filter((s) => s.trim()));
+    matches = dedupePathMatches(out.split(/\r?\n/).filter((s) => s.trim()));
   } catch {
     // fall through to "could not resolve" warning below
   }
@@ -100,7 +100,7 @@ function buildSpawnCommand({ platform, resolved, settingsArgs = [], claudeArgs =
 
 module.exports = {
   classifyClaudeKind,
-  dedupeClaudeMatches,
+  dedupePathMatches,
   resolveClaudeCommand,
   buildSpawnCommand,
   CLAUDE_CMD,

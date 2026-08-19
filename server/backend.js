@@ -44,7 +44,7 @@ const { createRecorder } = require('../session/session-recorder');
 const { createWsSender } = require('./ws-sender');
 const { HookRouter } = require('../detection/hook-source');
 const { sweepOrphans } = require('../detection/settings-injector');
-const { RTK_PATH } = require('../session/core/rtk-command');
+const { getRtkPath } = require('../session/core/rtk-command');
 const { checkForUpdate: defaultCheckForUpdate } = require('./update-check');
 const { createSpawnGate } = require('./spawn-gate');
 const { spawn } = require('./child-process-safe');
@@ -291,7 +291,8 @@ function createBackend(httpServer, options = {}) {
 
   function rtkPathForConfig(cfg) {
     if (!cfg.rtk) return null;
-    if (RTK_PATH) return RTK_PATH;
+    const rtkPath = getRtkPath();
+    if (rtkPath) return rtkPath;
     if (!warnedMissingRtk) {
       warnedMissingRtk = true;
       console.warn('[rtk] config.rtk is true, but no rtk binary was found. Sessions will spawn without rtk hooks.');
