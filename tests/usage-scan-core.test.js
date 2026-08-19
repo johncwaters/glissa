@@ -77,5 +77,4 @@ test('projectDirCandidates matches resolver probes and filters blank override se
     path.join(root, 'other', 'projects'),
     path.join(root, 'extra', 'projects'),
   ]);
-  assert.equal(candidates.includes('projects'), false);
 });

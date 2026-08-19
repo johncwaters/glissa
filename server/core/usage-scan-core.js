@@ -22,33 +22,29 @@ function splitLines(carry, chunkText) {
 
 function resolveProjectsDirs(env = process.env, extraDirs = [], isDirectory) {
   if (typeof isDirectory !== 'function') throw new TypeError('resolveProjectsDirs requires an isDirectory function');
-  const override = typeof env.CLAUDE_CONFIG_DIR === 'string' ? env.CLAUDE_CONFIG_DIR : '';
-  const extraHomes = normalizeHomeCandidates(extraDirs, env);
-  if (override.trim()) {
-    const overrideProjects = projectDirCandidates(env, []).filter(isDirectory);
-    if (overrideProjects.length === 0) throw new Error('CLAUDE_CONFIG_DIR is set but no projects directory exists');
-    return uniqueStrings([...overrideProjects, ...projectsDirsForHomes(extraHomes, isDirectory)]);
-  }
-
-  return projectDirCandidates(env, extraDirs).filter(isDirectory);
+  const surviving = projectDirCandidates(env, extraDirs).filter(isDirectory);
+  if (!configDirOverride(env)) return surviving;
+  const overrideSurvivors = projectDirCandidates(env, []).filter(isDirectory);
+  if (overrideSurvivors.length === 0) throw new Error('CLAUDE_CONFIG_DIR is set but no projects directory exists');
+  return surviving;
 }
 
 function projectDirCandidates(env = process.env, extraDirs = []) {
-  const override = typeof env.CLAUDE_CONFIG_DIR === 'string' ? env.CLAUDE_CONFIG_DIR : '';
-  if (override.trim()) {
+  const override = configDirOverride(env);
+  const extraHomes = normalizeHomeCandidates(extraDirs, env);
+  if (override) {
     const overrideHomes = normalizeHomeCandidates(override.split(','), env);
-    const extraHomes = normalizeHomeCandidates(extraDirs, env);
     return uniqueStrings([...projectsDirsFromHomes(overrideHomes), ...projectsDirsFromHomes(extraHomes)]);
   }
 
   const xdgConfigHome = stringOrNull(env.XDG_CONFIG_HOME) || path.join(homeDir(env), '.config');
   const defaultHomes = [path.join(xdgConfigHome, 'claude'), path.join(homeDir(env), '.claude')];
-  const extraHomes = normalizeHomeCandidates(extraDirs, env);
   return uniqueStrings([...projectsDirsFromHomes(defaultHomes), ...projectsDirsFromHomes(extraHomes)]);
 }
 
-function projectsDirsForHomes(homes, isDirectory) {
-  return projectsDirsFromHomes(homes).filter(isDirectory);
+function configDirOverride(env) {
+  const override = typeof env.CLAUDE_CONFIG_DIR === 'string' ? env.CLAUDE_CONFIG_DIR : '';
+  return override.trim();
 }
 
 function projectsDirsFromHomes(homes) {
