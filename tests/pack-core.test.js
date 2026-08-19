@@ -10,8 +10,10 @@ const {
   INDEX_FILE,
   MANIFEST_FILE,
   MAX_INDEX_TOKENS,
+  MAX_PACKS_PER_SESSION,
   estimateTokens,
   matchesGlob,
+  normalizePackNames,
   planPackBuild,
   sourceSlug,
   validatePackSpec,
@@ -326,4 +328,31 @@ test('two source groups get their own rules file, numbered in spec order', () =>
   assert.ok(outputByPath(plan, '.claude/rules/01-demo.md'));
   assert.ok(outputByPath(plan, '.claude/rules/02-notes.md'));
   assert.match(outputByPath(plan, '.claude/rules/02-notes.md').content, /beta/);
+});
+
+test('normalizePackNames keeps valid names in config order', () => {
+  assert.deepEqual(normalizePackNames(['company-context', 'glissa']).names, ['company-context', 'glissa']);
+  assert.deepEqual(normalizePackNames(['company-context']).warnings, []);
+});
+
+test('normalizePackNames treats an absent list and a non-array as no packs', () => {
+  assert.deepEqual(normalizePackNames(undefined), { names: [], warnings: [] });
+  assert.deepEqual(normalizePackNames(null), { names: [], warnings: [] });
+  const notAnArray = normalizePackNames('company-context');
+  assert.deepEqual(notAnArray.names, []);
+  assert.equal(notAnArray.warnings.length, 1);
+});
+
+test('normalizePackNames drops non-string, path-escaping, and duplicate entries with a warning each', () => {
+  const result = normalizePackNames(['ok', 42, '../escape', 'has space', '', 'ok']);
+  assert.deepEqual(result.names, ['ok']);
+  assert.equal(result.warnings.length, 5);
+});
+
+test('normalizePackNames caps the per-session pack count', () => {
+  const many = Array.from({ length: MAX_PACKS_PER_SESSION + 2 }, (_, i) => `pack-${i}`);
+  const result = normalizePackNames(many);
+  assert.equal(result.names.length, MAX_PACKS_PER_SESSION);
+  assert.equal(result.warnings.length, 2);
+  assert.ok(result.warnings.every((w) => w.includes('cap')));
 });

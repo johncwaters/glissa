@@ -12,7 +12,7 @@ const crypto = require('node:crypto');
 const path = require('node:path');
 
 const { glissaHomeDir } = require('./config-store');
-const { matchesGlob, planPackBuild, sourcePattern, validatePackSpec } = require('./core/pack-core');
+const { PACK_NAME_RE, matchesGlob, planPackBuild, sourcePattern, validatePackSpec } = require('./core/pack-core');
 
 const SPEC_SUFFIX = '.pack.json';
 // Source patterns resolve against packs/, so a shared spec reads the same whether it runs from a repo
@@ -316,6 +316,27 @@ async function readBuiltManifest(name, { builtRoot = defaultBuiltRoot() } = {}) 
   }
 }
 
+/**
+ * Delivery view of one pack: the `current` dir a spawn may add plus the version it is running, or a
+ * skip reason. Never throws and never guesses: an unbuilt or unreadable pack resolves to dir null.
+ *
+ * @returns {Promise<{name: string, dir: string|null, version: string|null, reason: string|null}>}
+ */
+async function resolveBuiltPack(name, { builtRoot = defaultBuiltRoot() } = {}) {
+  const skip = (reason) => ({ name, dir: null, version: null, reason });
+  // A pack name comes from config.json and becomes a path segment here, so it is re-checked even
+  // though the caller normalizes: a `..` segment would resolve outside the built root.
+  if (typeof name !== 'string' || !PACK_NAME_RE.test(name)) return skip('not a valid pack name');
+
+  const currentDir = path.join(builtRoot, name, 'current');
+  const stats = await statOrNull(currentDir);
+  if (!stats || !stats.isDirectory()) return skip(`not built (no ${currentDir})`);
+
+  const manifest = await readBuiltManifest(name, { builtRoot });
+  if (!manifest || typeof manifest.version !== 'string') return skip(`manifest.json missing or unreadable in ${currentDir}`);
+  return { name, dir: currentDir, version: manifest.version, reason: null };
+}
+
 module.exports = {
   DEFAULT_PACKS_DIR,
   SPEC_SUFFIX,
@@ -327,4 +348,5 @@ module.exports = {
   listPackSpecs,
   loadPackSpec,
   readBuiltManifest,
+  resolveBuiltPack,
 };

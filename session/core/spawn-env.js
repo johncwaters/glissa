@@ -6,7 +6,12 @@
 // extraEnv lets a lane hand a credential to its own headless session without exporting it
 // process-wide, where every user session would inherit it. It is merged into the copy before the
 // scrub, so it can add vars but never smuggle back one of the scrubbed names.
-function buildSpawnEnv(baseEnv, extraEnv) {
+//
+// additionalDirsClaudeMd is the context-mill delivery flag: without it Claude Code loads only
+// skills and commands from an --add-dir, not the dir's CLAUDE.md or .claude/rules (live-verified on
+// 2.1.235). It is an explicit argument rather than an extraEnv entry so the decision lives here, and
+// it is set ONLY when a pack dir was actually added: a session with no packs keeps today's env.
+function buildSpawnEnv(baseEnv, extraEnv, { additionalDirsClaudeMd = false } = {}) {
   const env = { ...baseEnv, ...(extraEnv || {}) };
   delete env.CLAUDECODE;
   delete env.CLAUDE_CODE_SSE_PORT;
@@ -14,6 +19,7 @@ function buildSpawnEnv(baseEnv, extraEnv) {
   delete env.GLISSA_PORT;
   delete env.GLISSA_CONFIG;
   env.CLAUDE_CODE_NO_FLICKER = "1";
+  if (additionalDirsClaudeMd) env.CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD = "1";
   return env;
 }
 
