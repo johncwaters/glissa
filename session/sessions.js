@@ -375,7 +375,7 @@ class Session extends EventEmitter {
     this.commonGitDir = null;    // shared gitdir all linked worktrees write refs into (git rev-parse
                                  // --git-common-dir); the key the backend groups integration-ref watchers by
     this.baseSha = null;         // integration-branch SHA the worktree forked from
-    this._workspace = null;      // opaque team-git workspace handle for merge/discard
+    this._workspace = null;      // opaque git-workspace handle for merge/discard
     this.mergeStatus = 'none';   // none | pending-review | merging | parked | merged
     // Park context (set only while mergeStatus === 'parked'): why the auto-merge could not complete and
     // which files conflict. Feeds the manual-merge handoff prompt (pasteMergePrompt); cleared otherwise.
@@ -1042,7 +1042,7 @@ class Session extends EventEmitter {
   }
 
   // Create (or reuse) this session's isolated worktree off the integration branch. A missing local
-  // integration branch is auto-created by team-git.js (from origin/<branch>, then main/master, then
+  // integration branch is auto-created by git-workspace.js (from origin/<branch>, then main/master, then
   // HEAD); this method returns false ONLY when that creation itself FAILED (reason:'no-base-branch'):
   // the session then stays put with a surfaced notice and never runs in the operator's real tree.
   // Isolation disabled (no injected gitWorkspace/integrationBranch) or a non-git path -> runs in place

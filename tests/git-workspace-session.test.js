@@ -13,7 +13,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 
-const { createGitWorkspace } = require('../teamlib/team-git');
+const { createGitWorkspace } = require('../server/git-workspace');
 const { isSameDirectoryPath } = require('../shared/paths');
 const { hasGit, git } = require('./helpers/git-fixture');
 

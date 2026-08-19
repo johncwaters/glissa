@@ -51,8 +51,8 @@ const DEFAULT_CONFIG = {
   // by default; see notifications/channels/telegram.js for the per-delivery gate.
   telegramNotifications: false,
   // Integration branch every worktree-backed session forks from and merges back into. If it is absent
-  // locally, team-git.js auto-creates it (from origin/<branch>, then main/master, then HEAD); a session
-  // only stays DORMANT with a notice if that creation itself fails (see team-git.js createBody).
+  // locally, git-workspace.js auto-creates it (from origin/<branch>, then main/master, then HEAD); a
+  // session only stays DORMANT with a notice if that creation itself fails (see its createBody).
   integrationBranch: 'develop',
   // Where session worktrees live: a stable, project-associated root (NOT system-temp), kept outside the
   // repo working tree. Empty -> a `.glissa-worktrees` sibling of each repo (resolved in backend).

@@ -59,7 +59,7 @@ function reportPathFor(issueId) {
 
 /*
  * The seed prompt for one headless investigation. Pure string building. The verdict travels back
- * through a result FILE, not stdout, mirroring the PR lane and the teams file-handoff convention.
+ * through a result FILE, not stdout, mirroring the PR lane.
  *
  * NOTHING API-DERIVED BUT IDS GOES IN HERE. An issue title is the error message of the monitored
  * application, i.e. text an end user can often steer, and this prompt seeds a session running under

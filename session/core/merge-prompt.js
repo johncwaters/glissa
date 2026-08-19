@@ -8,7 +8,7 @@
 // Side-effect free and string-only so it is unit-testable without a Session or a PTY. The bracketed-
 // paste wrapping and the actual PTY write live in sessions.js; this returns just the text.
 
-// Plain-English "why it parked", keyed by the engine's park reason (teamlib/team-git.js).
+// Plain-English "why it parked", keyed by the engine's park reason (server/git-workspace.js).
 function reasonText(reason, target) {
   switch (reason) {
     case "rebase-conflict":

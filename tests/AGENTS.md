@@ -14,7 +14,7 @@ Tests are named `<module>.test.js` after the module under test. Notable clusters
 | Detection | `status-source`, `hook-source`, `osc-title-source`, `replay-harness`, `worktree-detection`, `worktree-watch`, `integration-ref-watch`, `integration-watcher-pool`, `title-latch-recovery` |
 | Session core | `state-machine`, `status-mapper` (via `sessions-detection`), `agent-tracker`, `wakeup-tracker` (via `pending-wakeup`), `spawn-command`, `spawn-env`, `spawn-gate`, `spawn-integration`, `merge-prompt`, `anti-slop-prompt`, `post-turn-rules`, `slop-code-patterns`, `post-turn-checker` |
 | Session/server | `sessions-buffer`, `sessions-worktree`, `session-resize`, `session-write-guard`, `ws-sender`, `control-worktree` |
-| Worktrees | `team-git-session`, `team-session-args`, `no-direct-git-worktree`, `backend-worktree-reconcile` |
+| Worktrees | `git-workspace-session`, `session-spawn-args`, `no-direct-git-worktree`, `backend-worktree-reconcile` |
 | Frontend pure cores | `frontend-naming`, `frontend-webgl-pool`, `frontend-aggregate-status`, `frontend-attention-roster`, `frontend-diff-core`, `roster-groups-core`, `focus-shortcuts-core`, `shortcuts-core`, `render-scheduler`, `perf-corpus` |
 
 ## Subdirectories
@@ -39,6 +39,6 @@ Tests are named `<module>.test.js` after the module under test. Notable clusters
 ## Dependencies
 
 ### Internal
-- Everything under test: `../server/`, `../session/`, `../notifications/`, `../session/core/`, `../detection/`, `../teamlib/`, `../public/**/*.mjs`, `../shared/`.
+- Everything under test: `../server/`, `../session/`, `../notifications/`, `../session/core/`, `../detection/`, `../public/**/*.mjs`, `../shared/`.
 
 <!-- MANUAL: Any manually added notes below this line are preserved on regeneration -->

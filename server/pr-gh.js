@@ -6,7 +6,7 @@ const { execFile } = require('./child-process-safe');
 const execFileP = promisify(execFile);
 
 // The gh/git shell-outs the PR-review poller needs, all through child-process-safe (windowsHide).
-// No `git worktree` here (that stays in teamlib/team-git.js behind the worktree guard); this module
+// No `git worktree` here (that stays in server/git-workspace.js behind the worktree guard); this module
 // only runs `gh` and non-worktree `git` (branch/rev-parse). Every wrapper returns a normalized
 // {ok,out,err,code} and never throws, so the poller can branch on ok without try/catch at each site.
 

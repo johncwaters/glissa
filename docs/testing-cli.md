@@ -265,7 +265,6 @@ server/
 session/
 notifications/
 detection/
-teamlib/team-git.js
 shared/states.js
 shared/states.esm.js
 shared/client-trust.js

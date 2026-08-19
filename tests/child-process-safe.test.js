@@ -3,7 +3,7 @@
 // Unit tests for the child-process-safe wrapper: every spawn form must inject
 // windowsHide:true (the burst-of-CMD-windows fix) while preserving the file,
 // args, options, callback, return value, and the promisified {stdout,stderr}
-// contract that teamlib/team-git.js depends on.
+// contract that server/git-workspace.js depends on.
 //
 // The wrapper calls cp.<fn>(...) at CALL TIME on the shared node:child_process
 // module object, so swapping a property on that object captures exactly what the
@@ -160,7 +160,7 @@ test("promisify(execFile) resolves {stdout,stderr} AND injects windowsHide", asy
   assert.equal(cap.windowsHide, true);
 });
 
-test("promisify(execFile) rejects with stdout/stderr attached (team-git's catch contract)", async () => {
+test("promisify(execFile) rejects with stdout/stderr attached (git-workspace's catch contract)", async () => {
   const execFileP = promisify(safe.execFile);
   const err = new Error("git failed");
   await assert.rejects(

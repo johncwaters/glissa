@@ -109,7 +109,9 @@ function createGitWorkspace(opts = {}) {
     return null;
   }
 
-  // Create an isolated worktree on `glissa/<teamId>/<label>`. Returns
+  // Create an isolated worktree on `glissa/<teamId>/<label>`. `teamId` names the LANE ("session",
+  // "pr-review"); the segment name is on-disk branch shape that boot reconciliation matches, so it stays.
+  // Returns
   // { cwd, isGit, branch, base, baseSha }; falls back to { cwd: projectPath, isGit: false }.
   function create(args) {
     return serialize(() => createBody(args));
@@ -526,7 +528,7 @@ function removeWorktreeLinks(wtDir) {
 // (mklink /J - shared with the real repo, never copied or merged, gitignored so `git add -A` skips it);
 // a FILE is copied. Entries already present in the worktree (committed) or absent in the project are
 // skipped. Best-effort per entry so one failure never aborts the spawn. Windows junctions need no admin.
-// Async on purpose: this runs on EVERY isolated session/team spawn, and a sync cmd.exe spawn or copy
+// Async on purpose: this runs on EVERY isolated lane spawn, and a sync cmd.exe spawn or copy
 // here stalls every other session's PTY streaming on the shared event loop.
 async function populateWorktree(projectPath, wtDir, shareList) {
   for (const rel of shareList) {

@@ -3,7 +3,7 @@
 // Session-level worktree isolation wiring. start() provisions/reuses a worktree off the integration
 // branch; a missing integration branch BLOCKS (stays DORMANT, never spawns in the real tree); a non-git
 // path runs in place; merge/discard/exit-settle drive mergeStatus and delegate to the injected git
-// engine. The git engine itself is exercised in team-git-session.test.js; a FAKE engine here isolates
+// engine. The git engine itself is exercised in git-workspace-session.test.js; a FAKE engine here isolates
 // Session wiring, so the fake-workspace coverage is platform-neutral.
 
 const test = require('node:test');

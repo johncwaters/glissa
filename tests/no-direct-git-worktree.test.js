@@ -1,13 +1,13 @@
 "use strict";
 
-// Guardrail: teamlib/team-git.js is the ONLY module allowed to issue `git worktree`
+// Guardrail: server/git-workspace.js is the ONLY module allowed to issue `git worktree`
 // commands. Every other runtime module must go through it so worktree add/remove/prune
 // stay serialized behind its mutex and junction-safe teardown (the bug this enforces:
-// a bypassing caller racing team-git.js's own worktree add/remove and corrupting a
+// a bypassing caller racing git-workspace.js's own worktree add/remove and corrupting a
 // concurrent run).
 //
 // This scans the runtime source tree and fails listing any offender. If you need to
-// create, remove, or list a worktree, go through team-git.js instead of shelling to
+// create, remove, or list a worktree, go through git-workspace.js instead of shelling to
 // `git worktree` directly.
 //
 // Excluded (not server runtime, and intentionally allowed to use `git worktree`
@@ -38,10 +38,10 @@ const SKIP_DIRS = new Set([
 
 // The module permitted to issue `git worktree` directly.
 const ALLOWED = new Set([
-  path.join(ROOT, "teamlib", "team-git.js"),
+  path.join(ROOT, "server", "git-workspace.js"),
   // Pre-existing, read-only exception: cross-worktree conversation discovery needs to
-  // enumerate a repo's linked worktrees (`git worktree list`) independent of the team
-  // run engine, and never adds/removes/prunes one. Flagged here rather than silently
+  // enumerate a repo's linked worktrees (`git worktree list`) independent of the worktree
+  // engine, and never adds/removes/prunes one. Flagged here rather than silently
   // excluded so a reviewer can see it was a deliberate call, not a gap in the scan.
   path.join(ROOT, "session", "core", "conversation-history.js"),
 ]);
@@ -73,7 +73,7 @@ function collectJsFiles(dir, acc) {
   return acc;
 }
 
-test("only team-git.js (plus the documented read-only exception) issues `git worktree` directly", () => {
+test("only git-workspace.js (plus the documented read-only exception) issues `git worktree` directly", () => {
   const files = collectJsFiles(ROOT, []);
   // Sanity: the walk actually found the runtime tree (guards against an over-broad skip).
   assert.ok(files.length > 20, `expected to scan the runtime tree, only found ${files.length} files`);
@@ -88,13 +88,13 @@ test("only team-git.js (plus the documented read-only exception) issues `git wor
   assert.deepEqual(
     offenders,
     [],
-    `These modules must go through teamlib/team-git.js instead of issuing 'git worktree' directly:\n  ${offenders.join("\n  ")}`,
+    `These modules must go through server/git-workspace.js instead of issuing 'git worktree' directly:\n  ${offenders.join("\n  ")}`,
   );
 });
 
-test("team-git.js exists and exports the worktree workspace factories", () => {
-  const teamGit = require("../teamlib/team-git");
+test("git-workspace.js exists and exports the worktree workspace factories", () => {
+  const gitWorkspace = require("../server/git-workspace");
   for (const fn of ["createGitWorkspace", "createGitWorkspaceSync"]) {
-    assert.equal(typeof teamGit[fn], "function", `team-git.js must export ${fn}`);
+    assert.equal(typeof gitWorkspace[fn], "function", `git-workspace.js must export ${fn}`);
   }
 });

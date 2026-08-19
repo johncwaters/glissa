@@ -16,7 +16,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const { reconcileSessionWorktrees, createBackend } = require('../server/backend');
-const { createGitWorkspace } = require('../teamlib/team-git');
+const { createGitWorkspace } = require('../server/git-workspace');
 const { hasGit, git } = require('./helpers/git-fixture');
 
 const GIT = hasGit();
@@ -42,7 +42,7 @@ function fakeSession(name, sessionProjectPath = 'C:/proj') {
   return { name, path: sessionProjectPath, adopted, adoptWorktree(args) { adopted.push(args); } };
 }
 
-// Mirrors the shape gitWorkspaceSync.listSessionWorktrees yields per worktree (teamlib/team-git.js).
+// Mirrors the shape gitWorkspaceSync.listSessionWorktrees yields per worktree (server/git-workspace.js).
 function worktreeEntry({ id, hasWork = false, integrationBranch }) {
   return {
     id,

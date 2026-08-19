@@ -47,7 +47,7 @@ const { sweepOrphans } = require('../detection/settings-injector');
 const { checkForUpdate: defaultCheckForUpdate } = require('./update-check');
 const { createSpawnGate } = require('./spawn-gate');
 const { spawn } = require('./child-process-safe');
-const { createGitWorkspace, createGitWorkspaceSync } = require('../teamlib/team-git');
+const { createGitWorkspace, createGitWorkspaceSync } = require('./git-workspace');
 const { runPostTurnChecks, resolveCheckConfig } = require('./post-turn-checker');
 const { createIntegrationRefWatcher } = require('../detection/integration-ref-watch');
 const { createIntegrationWatcherPool } = require('../detection/integration-watcher-pool');
@@ -752,7 +752,7 @@ function createBackend(httpServer, options = {}) {
 
   const spawnGate = createSpawnGate();
   // Every isolated lane (a session, a PR review) executes in a git worktree on a dedicated branch,
-  // fast-forwarded back on success (see team-git.js), so it never dirties the user's working tree.
+  // fast-forwarded back on success (see git-workspace.js), so it never dirties the user's working tree.
   const gitWorkspace = createGitWorkspace();
 
   // On-disk session worktrees from a prior run are reconciled AFTER the boot session loop below, so a

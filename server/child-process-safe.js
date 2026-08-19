@@ -62,7 +62,7 @@ function execFile(file, ...rest) {
 }
 
 // Preserve child_process.execFile's PROMISIFIED contract: resolve { stdout,
-// stderr }, reject with an Error carrying .stdout/.stderr. teamlib/team-git.js
+// stderr }, reject with an Error carrying .stdout/.stderr. server/git-workspace.js
 // consumes this via promisify(execFile); a default-promisified wrapper would
 // resolve with stdout only and break it. Built by hand (not by copying cp's
 // custom symbol) so cp.execFile is still called at call time WITH windowsHide.
