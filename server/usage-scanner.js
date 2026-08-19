@@ -69,12 +69,15 @@ function createUsageScanner(deps = {}) {
     warehouseRetainDays = 365,
     // Spend budgets (config usage.budget). Absent means off, and every budget surface then reports
     // nothing at all rather than a zero ceiling.
-    budget = null,
+    budget: budgetDep = null,
     logger = noopLogger,
     byteBudget = DEFAULT_BYTE_BUDGET,
     chunkSize = DEFAULT_CHUNK_SIZE,
   } = deps;
 
+  // Normalized ONCE here, at the edge where an arbitrary caller's value arrives. Nothing downstream
+  // re-normalizes: the boundary rule for this module is defensive at the seam, trusting inside it.
+  const budget = normalizeBudgetConfig(budgetDep);
   const fileStates = new Map();
   const primaryIndex = new Map();
   const collisionIndex = new Map();
@@ -351,7 +354,7 @@ function createUsageScanner(deps = {}) {
   }
 
   function pruneStoredEntries() {
-    const pruned = pruneEntries(entries, { now: nowFn(), retainDays });
+    const pruned = pruneEntries(entries, { now: nowFn(), retainDays: entryRetentionDays() });
     if (pruned.kept.length === entries.length) return;
     entries.length = 0;
     entries.push(...pruned.kept);
@@ -432,8 +435,7 @@ function createUsageScanner(deps = {}) {
   function budgetSpend() {
     const todayKey = todayDayKey();
     const monthKey = todayKey.slice(0, 7);
-    const rollups = cachedRollupsForDays(undefined, retainDays);
-    const daily = mergedDailyRows(rollups.daily);
+    const daily = mergedDailyRows(budgetRollups().daily);
     let todayUsd = 0;
     let monthUsd = 0;
     for (const row of daily) {
@@ -488,18 +490,43 @@ function createUsageScanner(deps = {}) {
     };
   }
 
+  function daysElapsedThisMonth() {
+    const day = Number(todayDayKey().slice(8, 10));
+    return Number.isFinite(day) ? day : 1;
+  }
+
+  /*
+   * A MONTHLY budget has to be measured against the whole month, so the entry store keeps at least that
+   * much regardless of retainDays. Widening the aggregate window alone would not work: the entries are
+   * pruned to this floor first, so a shorter retention would have already thrown the earlier days away.
+   * Coupled to the budget on purpose and only when one is configured, so an operator who set
+   * `retainDays: 7` and no budget still gets exactly the seven days they asked for. Bounded at 31 days.
+   */
+  function entryRetentionDays() {
+    if (budget.monthlyUsd === null) return retainDays;
+    return Math.max(retainDays, daysElapsedThisMonth());
+  }
+
+  // Matches the retention floor above, so the rollups cover what the store now holds. Only a widened
+  // window needs its own cache key: cachedRollupsForDays memoizes ON its first argument, so reusing
+  // `undefined` for a different window would hand back rollups built for the narrower one.
+  function budgetRollups() {
+    const lookback = entryRetentionDays();
+    if (lookback === retainDays) return cachedRollupsForDays(undefined, retainDays);
+    return cachedRollupsForDays(lookback, lookback);
+  }
+
   /*
    * The standing meters. Computed here rather than client-side because usage-budget-core owns the tone
    * ladder, and a second implementation in the browser core would be a second place for it to drift.
    */
   function buildBudget() {
-    const normalized = normalizeBudgetConfig(budget);
-    if (normalized.dailyUsd === null && normalized.monthlyUsd === null) return null;
+    if (budget.dailyUsd === null && budget.monthlyUsd === null) return null;
     const spend = budgetSpend();
     return {
-      dailyUsd: normalized.dailyUsd,
-      monthlyUsd: normalized.monthlyUsd,
-      rows: budgetStanding({ budget: normalized, todayUsd: spend.todayUsd, monthUsd: spend.monthUsd }),
+      dailyUsd: budget.dailyUsd,
+      monthlyUsd: budget.monthlyUsd,
+      rows: budgetStanding({ budget, todayUsd: spend.todayUsd, monthUsd: spend.monthUsd }),
     };
   }
 

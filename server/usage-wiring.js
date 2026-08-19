@@ -147,10 +147,16 @@ function usageCfgKey(cfg) {
  */
 function budgetAlertText({ scope, threshold, spentUsd, budgetUsd }) {
   const period = scope === 'monthly' ? 'monthly' : 'daily';
-  return `Usage budget: ${period} spend ${formatUsd(spentUsd)} reached ${threshold}% of ${formatUsd(budgetUsd)}`;
+  return `Usage budget: ${period} spend ${formatBudgetUsd(spentUsd)} reached ${threshold}% of ${formatBudgetUsd(budgetUsd)}`;
 }
 
-function formatUsd(value) {
+/*
+ * Deliberately NOT the panel's formatUsd, and deliberately simpler. A budget is never sub-cent, so that
+ * formatter's four-decimal branch is wrong here, and a notification string that goes out over Telegram must
+ * be byte-identical on every host, which rules out locale-aware grouping. Two decimals, always. The visible
+ * consequence is that the alert reads $5000.00 where the panel reads $5,000.00.
+ */
+function formatBudgetUsd(value) {
   const number = Number.isFinite(value) ? value : 0;
   return `$${number.toFixed(2)}`;
 }
@@ -427,12 +433,12 @@ function createUsageWiring({
 
   async function evaluateBudgets() {
     if (stopped || !scanner || !budgetStatePath) return;
-    const normalized = normalizeBudgetConfig(cfg.budget);
-    if (normalized.dailyUsd === null && normalized.monthlyUsd === null) return;
+    // cfg.budget is already normalized by resolveUsageConfig, which is this module's own edge.
+    if (cfg.budget.dailyUsd === null && cfg.budget.monthlyUsd === null) return;
     await loadBudgetState();
     const spend = scanner.budgetSpend();
     const { alerts, firedState } = evaluateBudget({
-      budget: normalized,
+      budget: cfg.budget,
       todayUsd: spend.todayUsd,
       monthUsd: spend.monthUsd,
       todayKey: spend.todayKey,
