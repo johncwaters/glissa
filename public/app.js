@@ -220,7 +220,7 @@ function restoreUsageChip(sessionId) {
   setSessionUsage(sessionId, usage);
 }
 
-setUsageRequestSender((msg) => sendControlMsg(msg));
+setUsageRequestSender(sendControlMsg);
 
 function isUsageSurfaceVisible() {
   if (isPhoneShellActive()) return isPhoneScreenActive('usage');

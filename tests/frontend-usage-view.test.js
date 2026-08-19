@@ -24,7 +24,7 @@ test('formatUsd: a nonzero cost below the last decimal never prints as $0.0000',
   const { formatUsd } = await importCore();
   assert.equal(formatUsd(0.000004), '<$0.0001');
   assert.equal(formatUsd(0.00009), '<$0.0001');
-  assert.equal(formatUsd(-0.000004), '>-$0.0001');
+  assert.equal(formatUsd(-0.000004), 'above -$0.0001');
   // The boundary itself is representable, so it prints normally.
   assert.equal(formatUsd(0.0001), '$0.0001');
 });

@@ -57,7 +57,7 @@ export function formatUsd(value) {
   const abs = Math.abs(value);
   if (abs === 0) return '$0.00';
   const sign = value < 0 ? '-' : '';
-  if (abs < 0.0001) return value < 0 ? '>-$0.0001' : '<$0.0001';
+  if (abs < 0.0001) return value < 0 ? 'above -$0.0001' : '<$0.0001';
   if (abs < 0.01) return `${sign}$${abs.toFixed(4)}`;
   const [whole, cents] = abs.toFixed(2).split('.');
   return `${sign}$${groupThousands(whole)}.${cents}`;
