@@ -8,8 +8,7 @@
 
 const path = require('node:path');
 
-const { buildPacks, defaultBuiltRoot, defaultSpecsDir, listPackSpecs, loadPackSpec, readBuiltManifest } = require('./pack-builder');
-const { validatePackSpec } = require('./core/pack-core');
+const { buildPacks, defaultBuiltRoot, defaultSpecsDir, describePackSpec, listPackSpecs, readBuiltManifest } = require('./pack-builder');
 
 const USAGE = [
   'Usage: glissa pack <command>',
@@ -55,17 +54,6 @@ async function runBuild(name) {
   return 0;
 }
 
-async function describeSpec(spec) {
-  try {
-    const parsed = await loadPackSpec(spec.specPath);
-    const check = validatePackSpec(parsed);
-    const sources = Array.isArray(parsed.sources) ? parsed.sources.length : 0;
-    return { sources: String(sources), budget: String(parsed.budgetTokens || '-'), invalid: !check.ok };
-  } catch {
-    return { sources: '-', budget: '-', invalid: true };
-  }
-}
-
 async function runList() {
   const specs = await listPackSpecs();
   if (specs.length === 0) {
@@ -74,13 +62,13 @@ async function runList() {
   }
   console.log(`${'NAME'.padEnd(24)}${'SOURCES'.padEnd(9)}${'BUDGET'.padEnd(9)}${'BUILT VERSION'.padEnd(15)}BUILT AT`);
   for (const spec of specs) {
-    const described = await describeSpec(spec);
+    const described = await describePackSpec(spec.specPath);
     const manifest = await readBuiltManifest(spec.name);
-    const version = described.invalid ? 'INVALID SPEC' : shortVersion(manifest ? manifest.version : null);
+    const version = described.valid ? shortVersion(manifest ? manifest.version : null) : 'INVALID SPEC';
     console.log(
       spec.name.padEnd(24)
-      + described.sources.padEnd(9)
-      + described.budget.padEnd(9)
+      + String(described.sourceCount).padEnd(9)
+      + String(described.budgetTokens === null ? '-' : described.budgetTokens).padEnd(9)
       + version.padEnd(15)
       + formatTimestamp(manifest ? manifest.builtAt : null)
     );

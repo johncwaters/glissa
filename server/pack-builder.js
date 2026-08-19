@@ -63,7 +63,18 @@ async function pathExists(target) {
   return (await statOrNull(target)) !== null;
 }
 
-async function walkFiles(rootDir, found = []) {
+async function walkFiles(rootDir, found = [], visitedRealDirs = new Set()) {
+  // Dirent.isSymbolicLink does not flag Windows junctions on every Node version, so the resolved-path
+  // set is the loop guard that always holds; a pack build must terminate unattended.
+  let realDir;
+  try {
+    realDir = await fsp.realpath(rootDir);
+  } catch {
+    return found;
+  }
+  if (visitedRealDirs.has(realDir)) return found;
+  visitedRealDirs.add(realDir);
+
   let entries;
   try {
     entries = await fsp.readdir(rootDir, { withFileTypes: true });
@@ -72,12 +83,11 @@ async function walkFiles(rootDir, found = []) {
   }
   entries.sort((a, b) => (a.name === b.name ? 0 : a.name < b.name ? -1 : 1));
   for (const entry of entries) {
-    // A junction or symlink can point back up the tree; a pack build must terminate unattended.
     if (entry.isSymbolicLink()) continue;
     const full = path.join(rootDir, entry.name);
     if (entry.isDirectory()) {
       if (SKIP_DIRS.has(entry.name)) continue;
-      await walkFiles(full, found);
+      await walkFiles(full, found, visitedRealDirs);
       continue;
     }
     if (!entry.isFile()) continue;
@@ -200,8 +210,24 @@ async function listPackSpecs({ specsDir = defaultSpecsDir() } = {}) {
   return specs;
 }
 
+/** The one owner of the build-report shape; success and failure differ only in their overrides. */
+function buildReport(name, specPath, overrides) {
+  return {
+    ok: false,
+    name,
+    specPath,
+    errors: [],
+    version: null,
+    fileCount: 0,
+    tokenEstimate: 0,
+    budgetTokens: null,
+    currentDir: null,
+    ...overrides,
+  };
+}
+
 function failure(name, specPath, errors) {
-  return { ok: false, name, specPath, errors, version: null, fileCount: 0, tokenEstimate: 0, budgetTokens: null, currentDir: null };
+  return buildReport(name, specPath, { errors });
 }
 
 /**
@@ -242,17 +268,14 @@ async function buildPack({ specPath, baseDir = DEFAULT_PACKS_DIR, builtRoot = de
   if (!plan.ok) return failure(spec.name, specPath, plan.errors);
 
   const currentDir = await publishBuild(builtRoot, spec.name, plan.outputs);
-  return {
+  return buildReport(spec.name, specPath, {
     ok: true,
-    name: spec.name,
-    specPath,
-    errors: [],
     version: plan.manifest.version,
     fileCount: plan.outputs.length,
     tokenEstimate: plan.manifest.tokenEstimate,
     budgetTokens: plan.manifest.budgetTokens,
     currentDir,
-  };
+  });
 }
 
 /** Build every spec, or just the named one. Reports per pack; never throws. */
@@ -267,6 +290,20 @@ async function buildPacks({ name = null, specsDir = defaultSpecsDir(), baseDir =
     reports.push(await buildPack({ specPath: spec.specPath, baseDir, builtRoot, now }));
   }
   return reports;
+}
+
+/** Load-and-validate summary of one spec file for listings; never throws. */
+async function describePackSpec(specPath) {
+  try {
+    const spec = await loadPackSpec(specPath);
+    return {
+      valid: validatePackSpec(spec).ok,
+      sourceCount: Array.isArray(spec.sources) ? spec.sources.length : 0,
+      budgetTokens: typeof spec.budgetTokens === 'number' ? spec.budgetTokens : null,
+    };
+  } catch {
+    return { valid: false, sourceCount: 0, budgetTokens: null };
+  }
 }
 
 /** The manifest of a pack's current build, or null when it has never been built. */
@@ -286,6 +323,7 @@ module.exports = {
   buildPacks,
   defaultBuiltRoot,
   defaultSpecsDir,
+  describePackSpec,
   listPackSpecs,
   loadPackSpec,
   readBuiltManifest,
