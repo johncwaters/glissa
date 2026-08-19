@@ -1,7 +1,7 @@
 'use strict';
 
 const path = require('node:path');
-const { safeNumber, stringOrNull } = require('./usage-number-core');
+const { numberOrNull, safeNumber, stringOrNull } = require('./usage-number-core');
 
 const NULL_REJECT_FIELDS = Object.freeze([
   ['id'],
@@ -115,7 +115,7 @@ function identityFromRelPath(relPath) {
 }
 
 function dedupKeys(entry) {
-  // Stores index both keys: primary hits always dedup, collision hits dedup when either entry is sidechain.
+  // Caller contract: a primary hit always dedups; a collision hit dedups only when either entry isSidechain.
   if (!entry || !entry.messageId) return { primary: null, collision: null };
   const primary = entry.requestId ? `${entry.messageId}:${entry.requestId}` : entry.messageId;
   return { primary, collision: entry.messageId };
@@ -182,11 +182,6 @@ function hasPresentEmptyIdentity(parsed) {
 
 function presentEmpty(value) {
   return typeof value === 'string' && value.trim() === '';
-}
-
-function numberOrNull(value) {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return null;
-  return value;
 }
 
 module.exports = {

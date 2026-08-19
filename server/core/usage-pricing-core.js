@@ -1,5 +1,7 @@
 'use strict';
 
+const { numberOrNull } = require('./usage-number-core');
+
 const MARGINAL_TIER_THRESHOLD = 200000;
 
 function normalizePricingTable(rawLiteLlmJson) {
@@ -37,22 +39,22 @@ function lookupModelPrice(table, model, { aliases = {} } = {}) {
 
 function costForEntry(entry, price, { costMode = 'auto' } = {}) {
   if (costMode === 'display') {
-    const displayedCost = finiteNumber(entry?.costUSD);
+    const displayedCost = numberOrNull(entry?.costUSD);
     return { costUSD: displayedCost === null ? 0 : displayedCost, priced: displayedCost !== null };
   }
   if (costMode === 'auto') {
-    const displayedCost = finiteNumber(entry?.costUSD);
+    const displayedCost = numberOrNull(entry?.costUSD);
     if (displayedCost !== null) return { costUSD: displayedCost, priced: true };
   }
   if (!price) return { costUSD: 0, priced: false };
 
-  const input = finiteNumber(entry?.input) || 0;
-  const output = finiteNumber(entry?.output) || 0;
-  const own5m = finiteNumber(entry?.cacheCreation5m);
-  const cacheCreation5m = own5m === null ? finiteNumber(entry?.cacheCreate) || 0 : own5m;
-  const own1h = finiteNumber(entry?.cacheCreation1h);
+  const input = numberOrNull(entry?.input) || 0;
+  const output = numberOrNull(entry?.output) || 0;
+  const own5m = numberOrNull(entry?.cacheCreation5m);
+  const cacheCreation5m = own5m === null ? numberOrNull(entry?.cacheCreate) || 0 : own5m;
+  const own1h = numberOrNull(entry?.cacheCreation1h);
   const cacheCreation1h = own1h === null ? 0 : own1h;
-  const cacheRead = finiteNumber(entry?.cacheRead) || 0;
+  const cacheRead = numberOrNull(entry?.cacheRead) || 0;
   const contextTokens = input + cacheRead + cacheCreation5m + cacheCreation1h;
   const rates = ratesForPrice(price);
   const cost = bucketCost({
@@ -70,7 +72,7 @@ function costForEntry(entry, price, { costMode = 'auto' } = {}) {
 }
 
 function bucketCost({ input, output, cacheCreation5m, cacheCreation1h, cacheRead, contextTokens, price, rates }) {
-  const longContextThreshold = finiteNumber(price.long_context_threshold);
+  const longContextThreshold = numberOrNull(price.long_context_threshold);
   if (longContextThreshold !== null && contextTokens <= longContextThreshold) {
     return input * rates.input
       + output * rates.output
@@ -93,14 +95,14 @@ function bucketCost({ input, output, cacheCreation5m, cacheCreation1h, cacheRead
 }
 
 function ratesForPrice(price) {
-  const input = finiteNumber(price.input_cost_per_token) || 0;
-  const output = finiteNumber(price.output_cost_per_token) || 0;
-  const cacheCreate = finiteNumber(price.cache_creation_input_token_cost) ?? input * 1.25;
-  const cacheRead = finiteNumber(price.cache_read_input_token_cost) ?? input * 0.1;
-  const inputAbove = finiteNumber(price.input_cost_per_token_above_200k_tokens) ?? input;
-  const outputAbove = finiteNumber(price.output_cost_per_token_above_200k_tokens) ?? output;
-  const cacheCreateAbove = finiteNumber(price.cache_creation_input_token_cost_above_200k_tokens) ?? inputAbove * 1.25;
-  const cacheReadAbove = finiteNumber(price.cache_read_input_token_cost_above_200k_tokens) ?? inputAbove * 0.1;
+  const input = numberOrNull(price.input_cost_per_token) || 0;
+  const output = numberOrNull(price.output_cost_per_token) || 0;
+  const cacheCreate = numberOrNull(price.cache_creation_input_token_cost) ?? input * 1.25;
+  const cacheRead = numberOrNull(price.cache_read_input_token_cost) ?? input * 0.1;
+  const inputAbove = numberOrNull(price.input_cost_per_token_above_200k_tokens) ?? input;
+  const outputAbove = numberOrNull(price.output_cost_per_token_above_200k_tokens) ?? output;
+  const cacheCreateAbove = numberOrNull(price.cache_creation_input_token_cost_above_200k_tokens) ?? inputAbove * 1.25;
+  const cacheReadAbove = numberOrNull(price.cache_read_input_token_cost_above_200k_tokens) ?? inputAbove * 0.1;
   return { input, output, cacheCreate, cacheRead, inputAbove, outputAbove, cacheCreateAbove, cacheReadAbove };
 }
 
@@ -122,7 +124,7 @@ function fastMultiplierFor(entry, price) {
   if (entry?.speed !== 'fast' && !String(entry?.model || '').endsWith('-fast')) return 1;
   if (price?._resolvedExact && isExactOnlyKey(price?._resolvedPricingKey)) return 1;
   // LiteLLM anthropic entries currently carry no fast multiplier, so fast entries bill at 1x until data provides one.
-  return finiteNumber(price?.fast_multiplier) ?? finiteNumber(price?.fastMultiplier) ?? 1;
+  return numberOrNull(price?.fast_multiplier) ?? numberOrNull(price?.fastMultiplier) ?? 1;
 }
 
 function resolvedPrice(key, price, isExact) {
@@ -134,11 +136,6 @@ function resolvedPrice(key, price, isExact) {
       _resolvedPricingKey: key,
     },
   };
-}
-
-function finiteNumber(value) {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return null;
-  return value;
 }
 
 module.exports = {
