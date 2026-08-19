@@ -37,6 +37,13 @@ test('pruneWarehouse keeps the retainDays boundary', () => {
   assert.deepEqual(pruneWarehouse(records, { retainDays: 4, todayKey: '2026-08-19' }), [records[1], records[2]]);
 });
 
+test('pruneWarehouse fails safe: an uncomputable cutoff keeps every record', () => {
+  const records = [record('2026-01-01', 'claude-a', 1), record('2026-08-19', 'claude-b', 2)];
+  assert.deepEqual(pruneWarehouse(records, { retainDays: 0, todayKey: '2026-08-19' }), records);
+  assert.deepEqual(pruneWarehouse(records, { retainDays: 30, todayKey: 'not-a-day' }), records);
+  assert.deepEqual(pruneWarehouse(records, {}), records);
+});
+
 test('rollupFromReport and warehouseDailyRows round trip daily rows', () => {
   const daily = [
     {

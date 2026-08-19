@@ -43,7 +43,10 @@ function mergeWarehouse(existingRecords, freshRecords, { liveDays } = {}) {
 
 function pruneWarehouse(records, { retainDays, todayKey } = {}) {
   const cutoffDay = cutoffDayKey(todayKey, retainDays);
-  if (!cutoffDay) return [];
+  // An uncomputable cutoff must fail safe: dropping durable history is the one unrecoverable outcome.
+  if (!cutoffDay) {
+    return (records || []).map(normalizeRecord).filter(Boolean).sort(compareRecords);
+  }
   return (records || [])
     .map(normalizeRecord)
     .filter((record) => record && record.day >= cutoffDay)

@@ -48,11 +48,12 @@ function budgetStanding({ budget, todayUsd, monthUsd } = {}) {
 function evaluateScope({ scope, spentUsd, budgetUsd, periodKey, firedState }) {
   if (!budgetUsd) return null;
   if (typeof periodKey !== 'string' || periodKey.length === 0) return null;
-  const pct = (safeNumber(spentUsd) / budgetUsd) * 100;
+  const pct = pctOfBudget(spentUsd, budgetUsd);
   const crossedThresholds = BUDGET_THRESHOLDS.filter((threshold) => pct >= threshold && !hasFired(firedState, scope, periodKey, threshold));
   if (crossedThresholds.length === 0) return null;
   const threshold = crossedThresholds[crossedThresholds.length - 1];
-  markFired(firedState, scope, periodKey, threshold);
+  // Mark every newly crossed threshold so a later spend correction cannot re-fire a lower one.
+  for (const crossed of crossedThresholds) markFired(firedState, scope, periodKey, crossed);
   return {
     scope,
     threshold,
@@ -89,15 +90,18 @@ function markFired(firedState, scope, periodKey, threshold) {
 
 function standingRow(scope, spentUsd, budgetUsd) {
   if (!budgetUsd) return null;
-  const safeSpentUsd = safeNumber(spentUsd);
-  const pct = (safeSpentUsd / budgetUsd) * 100;
+  const pct = pctOfBudget(spentUsd, budgetUsd);
   return {
     scope,
-    spentUsd: safeSpentUsd,
+    spentUsd: safeNumber(spentUsd),
     budgetUsd,
     pct,
     tone: toneForPct(pct),
   };
+}
+
+function pctOfBudget(spentUsd, budgetUsd) {
+  return (safeNumber(spentUsd) / budgetUsd) * 100;
 }
 
 function toneForPct(pct) {
