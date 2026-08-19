@@ -208,6 +208,7 @@ async function listRepoConversations({
 }
 
 module.exports = {
+  claudeProjectsDir,
   encodeProjectDir,
   listRepoWorktreePaths,
   listRepoConversations,
