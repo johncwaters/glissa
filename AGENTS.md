@@ -21,6 +21,7 @@ Glissa is a lightweight Node.js background process that spawns and manages Claud
 | `server/pack-service.js` | Context mill automation loop: a debounced watcher per source root plus a fallback sweep, rebuilding packs and emitting `pack-updated`. IO-free, deps injected (pr-poller pattern) |
 | `server/ws-sender.js` | Data-WebSocket sender: batching, bufferedAmount backpressure, echo fast-flush |
 | `server/post-turn-checker.js` | Thin async IO runner for post-turn hygiene checks; applies pure rules from `session/core/post-turn-rules.js` to a session's git-changed files |
+| `server/usage-wiring.js` | Usage lane shell: lazy scanner start, pricing load, post-turn nudges, per-card usage pushes, and pulled usage reports |
 | `vite.config.js` | Vite frontend build config + backend-attach plugin (ESM) |
 | `biome.json` | Lint/format config (worktrees inherit the nested-config gotcha from main) |
 | `package.json` | CommonJS package, `private` (never published to a registry); the `files` whitelist bounds the tarball npm packs for a `github:johncwaters/glissa` install, validated by `scripts/check-package-files.js`. See `docs/distribution.md` |
@@ -122,6 +123,9 @@ server/            # Backend runtime (Express + WS wiring, control plane, shared
   server-lifecycle.js  # Boot/shutdown lifecycle (restart self-respawns detached, or exits non-zero for systemd)
   ws-sender.js         # Data-WS send/backfill (monotonic offsets)
   post-turn-checker.js # Async IO runner for post-turn hygiene checks (rules from session/core/post-turn-rules.js)
+  usage-wiring.js      # Usage lane IO shell: lazy start, config restart, post-turn nudge, usage-sessions push, usage-report pull
+  usage-scanner.js     # Claude Code transcript scanner: project-dir resolution, JSONL walk, incremental offset reads, deduped entry store
+  usage-pricing.js     # Claude model pricing loader: bundled LiteLLM snapshot, optional fetch, 24h disk cache, snapshot overlay
   spawn-gate.js        # Concurrent-spawn limiter
   git-workspace.js     # THE ONLY module allowed to run `git worktree`: per-session worktree isolation + fast-forward merge back; generic listWorktreeBranches (used by the PR poller)
   config-store.js      # config.json load/save/merge (dev resolves the in-repo config.json via __dirname/..; see Key Files for the full resolution order)
@@ -133,6 +137,7 @@ server/            # Backend runtime (Express + WS wiring, control plane, shared
   pack-service.js      # Context mill automation loop: per-source-root watchers + fallback sweep, emits pack-updated (IO-free, deps injected)
   pack-watch.js        # Its recursive debounced fs.watch (detection/watch-debounce.js for the timer half)
   pack-cli.js          # `glissa pack build [name]` / `pack list` (in server/, same whitelist reason as pair-cli)
+  data/claude-pricing.json  # Bundled Claude pricing snapshot from LiteLLM, trimmed to fields Glissa reads
   core/pack-core.js    # Pure pack assembly: spec validation, glob matcher, token estimate, build plan + manifest
   core/restart-strategy.js  # Pure decideRestartStrategy(env): respawn, or exit non-zero so a supervisor restarts us
   core/remote-config.js   # Pure normalize/validate of config.remote + decideBindHost
@@ -142,6 +147,12 @@ server/            # Backend runtime (Express + WS wiring, control plane, shared
   core/request-trust.js   # Pure listener-port trust classification + HTTP/upgrade access decisions
   core/upload-core.js     # Pure image-upload rules: mime -> extension, size cap, filename, bracketed-paste framing, retention plan
   core/upgrade-route.js   # Pure WS-upgrade classification (control/data/unknown) by PATHNAME, plus the data-route session id
+  core/usage-entry-core.js  # Pure usage line parsing, advisor expansion, transcript identity, dedup keys, replacement ordering, token totals
+  core/usage-pricing-core.js  # Pure pricing table normalization, model lookup, cache pricing, fast labels, and long-context tier math
+  core/usage-aggregate-core.js  # Pure usage rollups: totals, local daily buckets, model rows, session rows, retention prune
+  core/usage-blocks-core.js  # Pure 5h block windows, gap blocks, active burn rate, projection, and largest-block token limit
+  core/usage-scan-core.js  # Pure transcript-dir resolution, file-read decisions, and line splitting with carry
+  core/usage-number-core.js  # Shared finite-number and non-empty-string coercion helpers for usage cores
   update-check.js      # Startup GitHub version check, main-branch package.json (abortable, advisory only) behind config.checkForUpdates
   ephemeral-session.js # Shared ephemeral-Session registration: map insert, exit cleanup, destroy() wrap; used by the PR-review and PostHog investigation lanes
   pr-poller.js         # GitHub PR auto-review poller (opt-in): lists/filters/reviews/merges own PRs; IO-free, deps injected
@@ -205,6 +216,8 @@ public/
   notify-dedupe-core.mjs  # Pure cross-tab claim (short-TTL localStorage) so exactly one open tab raises each notification
   alert-sound.js   # Notification sounds: audio files from audio/ + synth-beep fallback
   health-monitor.js  # Footer panel rendering server memory/leak telemetry
+  usage-panel.js     # Usage tab DOM shell fed by usage-sessions pushes and request-usage-report replies
+  usage-view-core.mjs  # Pure Usage tab formatting, sorting, caveat text, warning text, and per-card chip text
   theme.js         # Theme definitions applied as CSS custom properties
   ui-prefs.js / local-store.js  # localStorage persistence for UI state, quota-safe wrappers
   shortcuts.mjs    # Pure display catalog of keyboard shortcuts for the Settings dialog
@@ -325,6 +338,15 @@ An optional background lane that reviews the operator's OWN GitHub PRs and merge
 - **Telegram.** `server/pr-telegram.js sendPrPing` (fire-and-forget, never throws) fires on ACTIONABLE transitions only (changes requested / conflicts resolved / merged / error); a clean-awaiting-checks PR is silent. PR-only: it is NOT a `NotificationManager` channel (no focus-suppression interaction, no session-complete pings). Session pings to the same chat are a SEPARATE opt-in channel (`config.telegramNotifications`, see Notifications) that shares only the `server/telegram-transport.js` HTTP call and the `config.telegram` credentials, so either lane can be switched on without the other.
 - **Security.** The review session runs `--dangerously-skip-permissions` bounded by a best-effort `PR_REVIEW_DENY` deny-list (the real safety is that only the poller merges, behind the full gate above; the deny-list is a guard, not the guard). Consistent with the localhost single-user trust boundary below. Prereq when opted in: `gh` authenticated on the host.
 
+### Usage Tracking (token counts and estimated cost)
+
+The Usage lane reports Claude Code language-model tokens and estimated API list-price cost from local transcript files. It reimplements the ccusage v20 algorithm in Node and pins the behavior with usage core tests: transcript dirs from `CLAUDE_CONFIG_DIR`, `XDG_CONFIG_HOME/claude`, and `~/.claude`; recursive JSONL reads; global dedup by `message.id` + `requestId`, with sidechain collision handling; cache creation split into 5m and 1h buckets, with 1h charged at 2x input; 200k marginal tiering and explicit long-context threshold tiering; 5h UTC-floored blocks with gaps, burn rate, projection, and largest-completed-block token-limit warnings. It never parses PTY bytes, terminal output, or rendered screen content.
+
+- **Lane lifecycle.** `config.usage` is ON by default through `resolveUsageConfig`; `enabled: false` is fully inert and constructs no scanner. The lane starts lazily on the first control connection because the first machine-wide scan is the expensive pass. After that, `server/usage-scanner.js` tracks `{ size, mtimeMs, offset, carry }` per file and reads only appended bytes unless a file shrank or a forced report asks for a rebuild. A byte-budgeted pass that returns `partial: true` is continued on a 15s timer only while a dashboard is connected; normal interval scans default to 5 minutes and also do nothing with zero control clients. Post-turn refresh is debounced 2s because Claude Code flushes transcript entries after the Stop hook.
+- **Attribution and protocol.** Per-card usage comes from entries whose in-line transcript `sessionId` matches the card's live `resumeSessionId`; filename identity is only a fallback for report rows, never the card chip. The small pushed message is `usage-sessions` and is replayed on connect. The full report is pulled by `request-usage-report` and returned as `usage-report`, with a cached replay for a reconnect after a report has been built.
+- **Pricing.** `server/data/claude-pricing.json` is a committed LiteLLM snapshot trimmed to Claude fields. If `usage.fetchPricing` is true, `server/usage-pricing.js` optionally fetches the public LiteLLM pricing table, stores a 24h cache under `~/.glissa/litellm-pricing.json`, and overlays fetched models onto the snapshot. Fetch failures are silent fallback, not a lane failure. Unknown models cost 0 and are surfaced as `pricing.missing`.
+- **Limitations.** Costs are estimates, not bills; a Claude subscription does not bill per token. The scope is local transcripts on this machine, plus configured extra project dirs. Non-Claude work, remote transcripts, provider-side billing adjustments, and any model missing pricing data are outside the number.
+
 ### Session Recording (forensics)
 
 Every real session writes a JSONL recording to `~/.glissa/recordings` (never a cwd-relative directory: recording is on by default and must not scatter through whichever repo the server was launched from). Two verbosity levels, ONE v2 format, declared in the header's `records` field so a reader can tell them apart without scanning:
@@ -403,8 +425,8 @@ Sessions are keyed by a stable UUID (`id`), not the mutable display `name`. The 
 The dashboard has two layouts, not one responsive shell. `public/form-factor-core.mjs` `decideLayout({ coarse, narrowWidth })` is the ONE predicate: `'phone'` requires a coarse pointer AND a viewport at or below 768px. The AND is the point - a desktop window dragged to 500px keeps the three-panel IA (the operator can widen it back), and a coarse-pointer TABLET above 768px also stays desktop (it has room for the docked rail + terminal + sidebar, and the touch corrections in `style.css` are keyed on the pointer alone). `public/form-factor.js` evaluates the two media queries, stamps `<html data-layout>` at boot and on every live change (orientation), and notifies subscribers.
 
 - **All phone styling keys off `[data-layout="phone"]`.** There is no `max-width` override of a desktop selector; a bare `max-width` block is reserved for content that must wrap in a narrow DESKTOP window (settings tabs, long strings).
-- **The desktop shell is `display:none` on a phone.** `public/phone/phone-shell.js` renders five screens (Board, Terminal, Review, Radar, PRs) behind a bottom nav (Radar and PRs are nested under a More item, so the nav row stays five targets). Board is the base screen; entering another pushes exactly ONE history entry, so the back gesture always means "return to the Board". History is untouched on desktop.
-- **Nothing is duplicated; live elements are RE-PARENTED.** The review sidebar (`reparentReviewPanel`), the desktop header's controls (connection chip, "+ Session", help, the hamburger with its client-trust gating) and the focused session's card all MOVE into the phone screens and move back on the flip out (`dom-helpers.js` `adoptElement` / `releaseElement`). A second copy would mean a second state pipeline for the same facts. The phone Board reads the same `session-card/card-registry` the desktop cards read and is refreshed by the same `app.js` control-WS handlers.
+- **The desktop shell is `display:none` on a phone.** `public/phone/phone-shell.js` renders six screens (Board, Terminal, Review, Radar, PRs, Usage) behind a bottom nav (Radar, PRs, and Usage are nested under a More item, so the nav row stays five targets). Board is the base screen; entering another pushes exactly ONE history entry, so the back gesture always means "return to the Board". History is untouched on desktop.
+- **Nothing is duplicated; live elements are RE-PARENTED.** The review sidebar (`reparentReviewPanel`), the Usage panel (`reparentUsagePanel`), the desktop header's controls (connection chip, "+ Session", help, the hamburger with its client-trust gating) and the focused session's card all MOVE into the phone screens and move back on the flip out (`dom-helpers.js` `adoptElement` / `releaseElement`). A second copy would mean a second state pipeline for the same facts. The phone Board reads the same `session-card/card-registry` the desktop cards read and is refreshed by the same `app.js` control-WS handlers.
 - **One card-borrow seam, one borrower.** `public/card-host.js` `borrowCard` / `releaseCard` is shared by the Focus center and the phone Terminal screen; a session owns one xterm, so the single-borrower invariant is GLOBAL and a layout flip hands the card across cleanly instead of stranding a live terminal in a hidden subtree.
 - **Board order is attention-first** (`public/phone/triage-core.mjs`), the deliberate opposite of the desktop rail's stable identity order: a rail is stared at for hours and needs a fixed spatial map, a phone is picked up for a minute to answer "who needs me". The ORDER is phone-specific; the "needs you" RULE behind the `{n} NEED YOU` readout is not, and lives once in `public/focus-view/attention-core.mjs` (WAITING plus an unopened COMPLETE) so the rail head and the Board can never report two numbers under one sentence.
 - **Soft keyboard.** The phone shell is sized from `window.visualViewport`, not `100dvh`, so an open keyboard RESIZES the terminal (and the card's existing ResizeObserver refits cols/rows) instead of covering its last rows and the nav.

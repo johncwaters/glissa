@@ -4,7 +4,7 @@
 # public
 
 ## Purpose
-The browser dashboard frontend: ES modules bundled by Vite (dev server with HMR on 5173, production build to `dist/`). Renders session cards with xterm.js terminals, a Focus view, a review sidebar, dialogs, themes, and notifications. The server is a dumb pipe; ALL ANSI rendering happens here.
+The browser dashboard frontend: ES modules bundled by Vite (dev server with HMR on 5173, production build to `dist/`). Renders session cards with xterm.js terminals, a Focus view, a review sidebar, the Usage tab, dialogs, themes, and notifications. The server is a dumb pipe; ALL ANSI rendering happens here.
 
 ## Key Files
 
@@ -20,6 +20,8 @@ The browser dashboard frontend: ES modules bundled by Vite (dev server with HMR 
 | `notify-dedupe-core.mjs` | Pure cross-tab claim (short-TTL localStorage) so exactly one open tab raises each notification |
 | `alert-sound.js` | Notification sounds: audio files from `audio/` + synth-beep fallback |
 | `health-monitor.js` | Footer panel rendering server memory/leak telemetry from `health-snapshot` messages |
+| `usage-panel.js` | Usage tab DOM shell fed by `usage-sessions` pushes and `request-usage-report` replies |
+| `usage-view-core.mjs` | Pure Usage tab formatting, sorting, caveat text, warning text, and per-card chip text |
 | `theme.js` | Theme definitions applied as CSS custom properties; terminal theme derived at runtime |
 | `ui-prefs.js` / `local-store.js` | localStorage persistence for UI state (sound, theme, active view) with quota-safe wrappers |
 | `shortcuts.mjs` | Pure display catalog of keyboard shortcuts for the Settings dialog; handlers live in `app.js` and `session-card/terminal.js`, keep in sync |
@@ -37,7 +39,7 @@ The browser dashboard frontend: ES modules bundled by Vite (dev server with HMR 
 |-----------|---------|
 | `session-card/` | Session card modules: terminal, lifecycle, DOM, naming, WebGL pool (see `session-card/AGENTS.md`) |
 | `focus-view/` | Focus view: roster rail + centered card, attention queue (see `focus-view/AGENTS.md`) |
-| `phone/` | Phone layout: five screens + bottom nav, rendered only under `[data-layout="phone"]` (see `phone/AGENTS.md`) |
+| `phone/` | Phone layout: six screens + bottom nav, rendered only under `[data-layout="phone"]` (see `phone/AGENTS.md`) |
 | `sidebar/` | Review sidebar: diff rendering, selection, merge actions (see `sidebar/AGENTS.md`) |
 | `components/` | Static HTML fragments imported `?raw` (see `components/AGENTS.md`) |
 | `audio/` | Notification sound files (OGG) |

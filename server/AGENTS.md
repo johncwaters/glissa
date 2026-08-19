@@ -15,6 +15,10 @@ Backend runtime: the Express + WebSocket server factory and its control plane, p
 | `server-lifecycle.js` | Boot/shutdown lifecycle helpers. A UI restart respawns `argv` detached and exits 0 when nothing supervises the process, but exits NON-ZERO without respawning under systemd (see `core/restart-strategy.js`); shutdown exits 0 in both worlds |
 | `ws-sender.js` | Data-WebSocket sender: batching, bufferedAmount backpressure, echo fast-flush |
 | `post-turn-checker.js` | Async IO runner for post-turn hygiene checks (pure rules in `../session/core/post-turn-rules.js`) |
+| `usage-wiring.js` | Usage lane IO shell: lazy scanner start, config restart, post-turn nudge, `usage-sessions` push, `usage-report` pull |
+| `usage-scanner.js` | Claude Code transcript scanner: project-dir resolution, recursive JSONL walk, incremental reads, deduped entry store, report memo |
+| `usage-pricing.js` | Claude model pricing loader: bundled LiteLLM snapshot, optional public fetch, 24h disk cache, snapshot overlay |
+| `data/claude-pricing.json` | Bundled Claude pricing snapshot from LiteLLM, trimmed to fields the Usage lane reads |
 | `spawn-gate.js` | Process-wide async serialization of `pty.spawn` initiation (ConPTY wedge avoidance) |
 | `git-workspace.js` | THE ONLY module allowed to run `git worktree` (enforced by `tests/no-direct-git-worktree.test.js`); per-session worktree isolation + merge-back, also used by the PR-review lane |
 | `config-store.js` | Runtime config load/save/defaults; resolves the repo-root `config.json` via `__dirname/..` |

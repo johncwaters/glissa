@@ -353,7 +353,12 @@ function createUsageScanner(deps = {}) {
   function cachedRollupsForDays(days, reportRetainDays) {
     const cached = cachedRollupsByDays.get(days);
     if (cached && !isReportDirty) return cached;
-    const report = buildUsageReport(entries, { now: nowFn(), blockHours, retainDays: reportRetainDays });
+    const report = buildUsageReport(entries, {
+      now: nowFn(),
+      blockHours,
+      retainDays: reportRetainDays,
+      tz: Intl.DateTimeFormat().resolvedOptions().timeZone || null,
+    });
     const rollups = {
       tz: report.tz,
       blockHours: report.blockHours,
