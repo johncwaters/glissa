@@ -1094,7 +1094,7 @@ function createBackend(httpServer, options = {}) {
       const permsChanged = projectSkipPerms(newP) !== sess.dangerouslySkipPermissions;
       // Packs are read at spawn, so an edited list only reaches the session through a recreate - the
       // same treatment permsChanged already gets for the same reason.
-      const packsChanged = normalizePackNames(newP.packs).names.join('\n') !== sess.packNames.join('\n');
+      const packsChanged = JSON.stringify(normalizePackNames(newP.packs).names) !== JSON.stringify(sess.packNames);
       if (pathChanged || permsChanged || packsChanged) {
         modified.push(newP);
         continue;
