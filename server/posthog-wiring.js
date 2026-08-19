@@ -18,6 +18,7 @@ const path = require('node:path');
 const { Session } = require('../session/sessions');
 const { registerEphemeralSession } = require('./ephemeral-session');
 const core = require('./core/posthog-core');
+const { normalizePackNames } = require('./core/pack-core');
 const { createPosthogPoller } = require('./posthog-poller');
 const { createPosthogApi } = require('./posthog-api');
 const { sendPosthogPing } = require('./posthog-telegram');
@@ -178,6 +179,13 @@ function posthogCfgKey(cfg) {
   return JSON.stringify({ posthog: cfg.posthog || null, telegram: cfg.telegram || null });
 }
 
+// Context packs this lane delivers to its investigation sessions (config.posthog.packs), normalized
+// the same defensive way a project's list is, so a hand-edited entry costs that entry and never the
+// investigation. Absent key means an empty list, i.e. a spawn identical to before packs existed.
+function posthogPackNames(cfg) {
+  return normalizePackNames(cfg.posthog ? cfg.posthog.packs : null).names;
+}
+
 function createPosthogWiring({
   config, investigationSessions, closeSessionDataClients, hookRouter, getHookPort, spawnGate,
   broadcast = () => {},
@@ -194,6 +202,7 @@ function createPosthogWiring({
       initialPrompt,
       ephemeral: true,
       settingsPermissions: POSTHOG_DENY,
+      packs: posthogPackNames(config),
       spawnEnv,
       replayBufferKB: config.replayBufferKB,
       hookRouter,
@@ -421,6 +430,9 @@ function createPosthogWiring({
   return {
     startPoller, restartIfConfigChanged, stopPoller, getStatus,
     setIssueStatus, archiveInvestigation,
+    // Exposed for tests only (the pack-service `_watcherCount` precedent): the session factory is the
+    // one place the lane's Session options are assembled, and pinning them needs no live poller.
+    _makeInvestigationSession: makeInvestigationSession,
   };
 }
 
@@ -463,6 +475,7 @@ module.exports = {
   readInvestigationResult,
   posthogShouldStart,
   posthogCfgKey,
+  posthogPackNames,
   sweepReports,
   POSTHOG_DENY,
   REPORT_DIR,

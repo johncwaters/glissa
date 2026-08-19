@@ -17,6 +17,42 @@ const WebSocket = require('ws');
 const { buildReviewPrompt, readReviewResult, prPollerShouldStart } = require('../server/pr-review-wiring');
 const { createBackend } = require('../server/backend');
 
+function withFakeSession(modulePath, fn) {
+  const sessionPath = require.resolve('../session/sessions');
+  const wiringPath = require.resolve(modulePath);
+  const previousSession = require.cache[sessionPath];
+  const previousWiring = require.cache[wiringPath];
+  const constructed = [];
+  class FakeSession {
+    constructor(options) {
+      this.options = options;
+      constructed.push(options);
+    }
+
+    on() {
+      return this;
+    }
+
+    destroy() {}
+  }
+
+  delete require.cache[wiringPath];
+  require.cache[sessionPath] = {
+    id: sessionPath,
+    filename: sessionPath,
+    loaded: true,
+    exports: { Session: FakeSession },
+  };
+  try {
+    return fn(require(modulePath), constructed);
+  } finally {
+    delete require.cache[wiringPath];
+    if (previousWiring) require.cache[wiringPath] = previousWiring;
+    if (previousSession) require.cache[sessionPath] = previousSession;
+    if (!previousSession) delete require.cache[sessionPath];
+  }
+}
+
 // --- prPollerShouldStart: inert-by-default + misconfiguration gating ---
 
 test('prPollerShouldStart: inert when prReview absent or disabled (no reason, silent)', () => {
@@ -98,6 +134,47 @@ test('prReviewCfgKey: absent prReview/telegram normalizes to null, distinct from
   const { prReviewCfgKey } = require('../server/pr-review-wiring');
   assert.equal(prReviewCfgKey({}), prReviewCfgKey({ prReview: undefined, telegram: undefined }));
   assert.notEqual(prReviewCfgKey({}), prReviewCfgKey({ prReview: { enabled: false } }));
+});
+
+test('prReviewCfgKey: a changed packs list counts as a lane config change', () => {
+  const { prReviewCfgKey } = require('../server/pr-review-wiring');
+  const base = { prReview: { enabled: true, projects: ['p1'], packs: ['glissa'] }, telegram: { botToken: 'x', chatId: 'y' } };
+  const changed = { prReview: { enabled: true, projects: ['p1'], packs: ['company-context'] }, telegram: { botToken: 'x', chatId: 'y' } };
+  assert.notEqual(prReviewCfgKey(base), prReviewCfgKey(changed));
+});
+
+test('PR review lane passes configured packs into Session options', () => {
+  withFakeSession('../server/pr-review-wiring', ({ createPrReviewWiring }, constructed) => {
+    const wiring = createPrReviewWiring({
+      config: { prReview: { packs: ['glissa', '../bad', 'glissa', 'company-context'] }, replayBufferKB: 256 },
+      reviewSessions: new Map(),
+      closeSessionDataClients() {},
+      hookRouter: null,
+      getHookPort: null,
+      spawnGate: null,
+      gitWorkspace: null,
+      getProjectPathById: () => null,
+    });
+    wiring._makeReviewSession({ id: 'pr:1', name: 'PR', path: process.cwd(), initialPrompt: 'prompt' });
+    assert.deepEqual(constructed[0].packs, ['glissa', 'company-context']);
+  });
+});
+
+test('PR review lane omitting packs leaves Session options with an empty packs list', () => {
+  withFakeSession('../server/pr-review-wiring', ({ createPrReviewWiring }, constructed) => {
+    const wiring = createPrReviewWiring({
+      config: { prReview: {}, replayBufferKB: 256 },
+      reviewSessions: new Map(),
+      closeSessionDataClients() {},
+      hookRouter: null,
+      getHookPort: null,
+      spawnGate: null,
+      gitWorkspace: null,
+      getProjectPathById: () => null,
+    });
+    wiring._makeReviewSession({ id: 'pr:2', name: 'PR', path: process.cwd(), initialPrompt: 'prompt' });
+    assert.deepEqual(constructed[0].packs, []);
+  });
 });
 
 // --- applySettingsReload hot-applies the poller, gated + serialized (pr-review-wiring.js startPoller

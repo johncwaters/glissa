@@ -45,6 +45,15 @@ const DEFAULT_CONFIG = {
   // switch only, read once at boot: with it false no watcher and no timer is installed and packs are
   // whatever `glissa pack build` last wrote. See server/pack-service.js and AGENTS.md "Context Packs".
   packsAutoRebuild: true,
+  // The distiller lane: an LLM pass that regenerates a pack's DERIVED source files when the sources
+  // they distill have drifted (server/pack-distiller.js). Off by default, and deliberately not
+  // settable from the control WebSocket, like `remote`: enabling it lets a scheduled headless session
+  // write files inside the install. `glissa pack distill` is the manual trigger and needs no key.
+  packDistiller: {
+    enabled: false,
+    intervalHours: 24,
+    timeoutSeconds: 900,
+  },
   // Lever B: append a fixed anti-slop note to each user session's system prompt at spawn
   // (session/core/anti-slop-prompt.js). OFF by default; user sessions only (the headless lane
   // sessions never receive it). Takes effect on the next session start/restart.

@@ -18,6 +18,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { Session } = require('../session/sessions');
 const { registerEphemeralSession } = require('./ephemeral-session');
+const { normalizePackNames } = require('./core/pack-core');
 const { createPrPoller } = require('./pr-poller');
 const { createPrGh } = require('./pr-gh');
 const { sendPrPing } = require('./pr-telegram');
@@ -104,6 +105,14 @@ function prReviewCfgKey(cfg) {
   return JSON.stringify({ prReview: cfg.prReview || null, telegram: cfg.telegram || null });
 }
 
+// Context packs this lane delivers to its review sessions (config.prReview.packs). A review session is
+// exactly the consumer packs were built for: the company-context pack carries the review checklist. The
+// list is normalized the same defensive way a project's is, so a hand-edited entry costs that entry and
+// never the review. Absent key means an empty list, i.e. a spawn identical to before packs existed.
+function prReviewPackNames(cfg) {
+  return normalizePackNames(cfg.prReview ? cfg.prReview.packs : null).names;
+}
+
 function createPrReviewWiring({
   config, reviewSessions, closeSessionDataClients, hookRouter, getHookPort, spawnGate, gitWorkspace,
   getProjectPathById, getProjectNameById = () => null, broadcast = () => {},
@@ -120,6 +129,7 @@ function createPrReviewWiring({
       initialPrompt,
       ephemeral: true,
       settingsPermissions: PR_REVIEW_DENY,
+      packs: prReviewPackNames(config),
       replayBufferKB: config.replayBufferKB,
       hookRouter,
       getHookPort,
@@ -252,7 +262,9 @@ function createPrReviewWiring({
     if (prPoller) prPoller.stop();
   }
 
-  return { startPoller, restartIfConfigChanged, stopPoller, getStatus };
+  // Exposed for tests only (the pack-service `_watcherCount` precedent): the session factory is the
+  // one place the lane's Session options are assembled, and pinning them needs no live poller.
+  return { startPoller, restartIfConfigChanged, stopPoller, getStatus, _makeReviewSession: makeReviewSession };
 }
 
 module.exports = {
@@ -261,4 +273,5 @@ module.exports = {
   readReviewResult,
   prPollerShouldStart,
   prReviewCfgKey,
+  prReviewPackNames,
 };

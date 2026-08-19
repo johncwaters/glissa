@@ -196,7 +196,7 @@ class Session extends EventEmitter {
     rtkPath = null,
     // Context packs delivered at spawn: names of built packs whose `current` dir becomes an
     // --add-dir (see _resolvePacks and AGENTS.md "Context Packs"). Comes from the project record's
-    // `packs` array; the ephemeral lanes never set it, so they spawn exactly as before.
+    // `packs` array, or from a headless lane's own pack config.
     packs = [],
     // Where built packs live. Defaults to ~/.glissa/packs/built; tests point it at a fixture root.
     packsBuiltRoot = null,

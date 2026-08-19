@@ -22,6 +22,42 @@ const {
 const ENABLED = { enabled: true, host: 'https://ph.test', apiKey: 'phx_secret' };
 const TELEGRAM = { botToken: 'x', chatId: '1' };
 
+function withFakeSession(modulePath, fn) {
+  const sessionPath = require.resolve('../session/sessions');
+  const wiringPath = require.resolve(modulePath);
+  const previousSession = require.cache[sessionPath];
+  const previousWiring = require.cache[wiringPath];
+  const constructed = [];
+  class FakeSession {
+    constructor(options) {
+      this.options = options;
+      constructed.push(options);
+    }
+
+    on() {
+      return this;
+    }
+
+    destroy() {}
+  }
+
+  delete require.cache[wiringPath];
+  require.cache[sessionPath] = {
+    id: sessionPath,
+    filename: sessionPath,
+    loaded: true,
+    exports: { Session: FakeSession },
+  };
+  try {
+    return fn(require(modulePath), constructed);
+  } finally {
+    delete require.cache[wiringPath];
+    if (previousWiring) require.cache[wiringPath] = previousWiring;
+    if (previousSession) require.cache[sessionPath] = previousSession;
+    if (!previousSession) delete require.cache[sessionPath];
+  }
+}
+
 // --- posthogShouldStart: inert-by-default + misconfiguration gating ---
 
 test('posthogShouldStart: inert when posthog absent or disabled (no reason, silent)', () => {
@@ -116,6 +152,54 @@ test('posthogCfgKey: identical posthog/telegram produce the same key regardless 
 test('posthogCfgKey: absent posthog/telegram normalizes to null, distinct from a disabled object', () => {
   assert.equal(posthogCfgKey({}), posthogCfgKey({ posthog: undefined, telegram: undefined }));
   assert.notEqual(posthogCfgKey({}), posthogCfgKey({ posthog: { enabled: false } }));
+});
+
+test('posthogCfgKey: a changed packs list counts as a lane config change', () => {
+  const base = { posthog: { ...ENABLED, packs: ['glissa'] }, telegram: TELEGRAM };
+  const changed = { posthog: { ...ENABLED, packs: ['company-context'] }, telegram: TELEGRAM };
+  assert.notEqual(posthogCfgKey(base), posthogCfgKey(changed));
+});
+
+test('PostHog lane passes configured packs into Session options', () => {
+  withFakeSession('../server/posthog-wiring', ({ createPosthogWiring }, constructed) => {
+    const wiring = createPosthogWiring({
+      config: { posthog: { ...ENABLED, packs: ['glissa', '../bad', 'glissa', 'company-context'] }, replayBufferKB: 256 },
+      investigationSessions: new Map(),
+      closeSessionDataClients() {},
+      hookRouter: null,
+      getHookPort: null,
+      spawnGate: null,
+    });
+    wiring._makeInvestigationSession({
+      id: 'posthog:1',
+      name: 'PostHog',
+      path: process.cwd(),
+      initialPrompt: 'prompt',
+      spawnEnv: { POSTHOG_API_KEY: 'x', POSTHOG_HOST: 'https://ph.test' },
+    });
+    assert.deepEqual(constructed[0].packs, ['glissa', 'company-context']);
+  });
+});
+
+test('PostHog lane omitting packs leaves Session options with an empty packs list', () => {
+  withFakeSession('../server/posthog-wiring', ({ createPosthogWiring }, constructed) => {
+    const wiring = createPosthogWiring({
+      config: { posthog: ENABLED, replayBufferKB: 256 },
+      investigationSessions: new Map(),
+      closeSessionDataClients() {},
+      hookRouter: null,
+      getHookPort: null,
+      spawnGate: null,
+    });
+    wiring._makeInvestigationSession({
+      id: 'posthog:2',
+      name: 'PostHog',
+      path: process.cwd(),
+      initialPrompt: 'prompt',
+      spawnEnv: { POSTHOG_API_KEY: 'x', POSTHOG_HOST: 'https://ph.test' },
+    });
+    assert.deepEqual(constructed[0].packs, []);
+  });
 });
 
 // --- buildInvestigationPrompt ---

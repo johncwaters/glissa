@@ -1,6 +1,6 @@
 # Plan: Glissa Context Mill (automated context packs)
 
-Status: PROPOSED, 2026-08-19. Research inputs: live-verified Claude Code 2.1.235 injection probes, the public PostHog/context-mill repo, prior-art survey (Repomix, Context7, Mintlify, GitMCP, DeepWiki, llms.txt), and a full inventory of Glissa's current spawn injections.
+Status: EXECUTED, 2026-08-19. Research inputs: live-verified Claude Code 2.1.235 injection probes, the public PostHog/context-mill repo, prior-art survey (Repomix, Context7, Mintlify, GitMCP, DeepWiki, llms.txt), and a full inventory of Glissa's current spawn injections.
 
 ## Goal
 
@@ -103,11 +103,11 @@ Live (the automation crown jewel, two channels that need no respawn):
 
 ## Milestones
 
-- M1 Assembly: spec format, `pack-core.js` (pure, tested), `pack-builder.js`, budget gates, `glissa pack build` style manual trigger. Proof pack: migrate `tools/` company-context content into a pack.
-- M2 Spawn delivery: config `packs` list, `--add-dir` plus env wiring, snapshot version stamp, worktree and headless lane coverage, trust-dialog check on first interactive spawn with an added dir.
-- M3 Auto-rebuild: watch loop plus interval sweep, `pack-updated` event, dashboard staleness chip, verify skill hot-reload into a live session.
-- M4 Live channel: hook-response `additionalContext` plumbing (hook-source, backend route), pack-update notices, regression tests pinning that a normal hook reply stays byte-identical when no notice is pending.
-- M5 Consumers and distiller: shared prompt fragments for the PR-review and PostHog lanes sourced from packs; optional distiller lane behind its own config key.
+- M1 Assembly: LANDED in 82fc76b and fad74fb, spec format, pure planner, builder, budget gates, and manual build/list CLI.
+- M2 Spawn delivery: LANDED in b84d044 and 5ff952f, config `packs`, `--add-dir`, env wiring, and snapshot version stamps.
+- M3 Auto-rebuild: LANDED in ff99e6d, watcher plus interval sweep, `pack-updated`, and dashboard staleness chip.
+- M4 Live channel: LANDED in 78dbc0b, `UserPromptSubmit` additional context notices with byte-identical ordinary hook replies.
+- M5 Consumers and distiller: LANDED in this change, PR-review and PostHog lane pack consumers plus the opt-in distiller lane.
 
 Each milestone lands independently; M1+M2 alone already beat the status quo (versioned, budgeted, portable context with no repo edits).
 

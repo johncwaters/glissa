@@ -59,6 +59,9 @@ const { normalizeRemoteConfig, validateRemoteConfig, decideBindHost } = require(
 const { createClientPresence } = require('./core/client-presence');
 const { normalizePackNames } = require('./core/pack-core');
 const { createPackService } = require('./pack-service');
+const {
+  DEFAULT_INTERVAL_HOURS, DEFAULT_TIMEOUT_SECONDS, createDistillSpawn, createPackDistiller,
+} = require('./pack-distiller');
 const { classifyUpgradePath, dataSessionIdFromUrl } = require('./core/upgrade-route');
 const { classifyRequestOrigin, decideUpgradeAccess } = require('./core/request-trust');
 const { isApplicableViewerSize, pickSizeAfterDeparture } = require('./core/viewer-size-core');
@@ -613,7 +616,7 @@ function createBackend(httpServer, options = {}) {
     let listenerMismatch = false;
     let orphanPty = false;
     let destroyedReachable = false;
-    for (const sess of [...sessions.values(), ...reviewSessions.values(), ...investigationSessions.values()]) {
+    for (const sess of [...sessions.values(), ...reviewSessions.values(), ...investigationSessions.values(), ...distillSessions.values()]) {
       const stats = sess.getHealthStats();
       stats.detection = sess.getDetectionStats();
       stats.ephemeral = !!sess.ephemeral;
@@ -854,6 +857,21 @@ function createBackend(httpServer, options = {}) {
   // the presence listener above, which is declared before `usage` exists (temporal dead zone).
   controlWss.on('connection', () => {
     void usage.start();
+  });
+
+  // Context-pack distiller (server/pack-distiller.js): opt-in, off by default, regenerates a pack's
+  // DERIVED source files when what they distill has drifted. It writes only under packs/, so the pack
+  // service's own watcher sees the written file and rebuilds that pack: the two loops compose without
+  // either knowing about the other. Its sessions live in their own ephemeral map, reaped in shutdown().
+  const distillSessions = new Map();
+  const packDistiller = createPackDistiller({
+    enabled: config.packDistiller ? config.packDistiller.enabled === true : false,
+    intervalHours: config.packDistiller?.intervalHours || DEFAULT_INTERVAL_HOURS,
+    timeoutSeconds: config.packDistiller?.timeoutSeconds || DEFAULT_TIMEOUT_SECONDS,
+    spawnDistill: createDistillSpawn({
+      sessions: distillSessions, closeSessionDataClients, hookRouter, getHookPort, spawnGate,
+      replayBufferKB: config.replayBufferKB,
+    }),
   });
 
   // --- Integration-branch watchers (event-driven cross-session gate liveness) ---
@@ -1149,6 +1167,11 @@ function createBackend(httpServer, options = {}) {
   if (config.packsAutoRebuild !== false) {
     packService.start().catch((err) => console.warn(`[packs] auto-rebuild failed to start: ${err.message}`));
   }
+
+  // --- Context-pack distiller (opt-in; inert unless config.packDistiller.enabled) ---
+  // Fire-and-forget: start() runs one drift pass immediately (a source edited while Glissa was down is
+  // the case worth catching) and then every intervalHours. Disabled is a no-op returning at once.
+  packDistiller.start().catch((err) => console.warn(`[distill] failed to start: ${err.message}`));
 
   function diffProjects(currentSessions, newProjects) {
     ensureProjectIds(newProjects);
@@ -1595,6 +1618,13 @@ function createBackend(httpServer, options = {}) {
     // Fire-and-forget like the pollers above: the process is exiting and nothing awaits it. Stopping
     // clears the scan interval and the pending nudge so a leaked timer cannot outlive the server.
     void usage.stop();
+    // Same treatment as the pack service: the timer goes synchronously, the returned promise only
+    // drains an in-flight distill, and the session below is destroyed regardless.
+    void packDistiller.stop();
+    for (const [, sess] of distillSessions) {
+      sess.destroy();
+      if (sess._killReap) pendingReaps.push(sess._killReap);
+    }
     for (const [, sess] of investigationSessions) {
       sess.destroy();
       if (sess._killReap) pendingReaps.push(sess._killReap);
