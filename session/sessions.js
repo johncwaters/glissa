@@ -1984,7 +1984,10 @@ class Session extends EventEmitter {
     this._statusSource.reset();
     this._titleQuiet = false;
 
-    const env = this._buildSpawnEnv({ additionalDirsClaudeMd: packDelivery.packs.length > 0 });
+    const env = this._buildSpawnEnv({
+      additionalDirsClaudeMd: packDelivery.packs.length > 0,
+      prependPathDir: this._rtkPath ? path.dirname(this._rtkPath) : null,
+    });
 
     // Inject Claude Code hooks via a per-session managed settings file (HTTP hooks
     // POSTing to Glissa's localhost server). No repo modification; no shell command.

@@ -6,6 +6,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const path = require('node:path');
 
 const { buildSpawnEnv } = require('../session/core/spawn-env');
 
@@ -86,4 +87,38 @@ test('the pack flag lands on the copy, never on the source env', () => {
   const base = fullBase();
   buildSpawnEnv(base, null, { additionalDirsClaudeMd: true });
   assert.ok(!('CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD' in base));
+});
+
+test('prependPathDir prepends to an existing Path key without adding PATH', () => {
+  const base = { ...fullBase(), PATH: undefined, Path: `C:\\Windows${path.delimiter}C:\\Tools` };
+  delete base.PATH;
+  const env = buildSpawnEnv(base, null, { prependPathDir: 'C:\\Users\\johnw\\.glissa\\bin' });
+  assert.equal(env.Path, `C:\\Users\\johnw\\.glissa\\bin${path.delimiter}C:\\Windows${path.delimiter}C:\\Tools`);
+  assert.equal('PATH' in env, false);
+});
+
+test('prependPathDir prepends to an existing PATH key', () => {
+  const env = buildSpawnEnv(fullBase(), null, { prependPathDir: '/home/u/.glissa/bin' });
+  assert.equal(env.PATH, `/home/u/.glissa/bin${path.delimiter}/usr/bin`);
+});
+
+test('prependPathDir does not duplicate an existing path entry case-insensitively', () => {
+  const existingPath = `C:\\Users\\johnw\\.glissa\\bin${path.delimiter}C:\\Windows`;
+  const env = buildSpawnEnv({ ...fullBase(), PATH: existingPath }, null, {
+    prependPathDir: 'c:\\users\\johnw\\.glissa\\bin',
+  });
+  assert.equal(env.PATH, existingPath);
+});
+
+test('prependPathDir sets PATH when no path variable exists', () => {
+  const base = fullBase();
+  delete base.PATH;
+  const env = buildSpawnEnv(base, null, { prependPathDir: '/home/u/.glissa/bin' });
+  assert.equal(env.PATH, '/home/u/.glissa/bin');
+});
+
+test('omitted or null prependPathDir leaves the path variable byte-identical', () => {
+  const base = fullBase();
+  assert.equal(buildSpawnEnv(base).PATH, base.PATH);
+  assert.equal(buildSpawnEnv(base, null, { prependPathDir: null }).PATH, base.PATH);
 });

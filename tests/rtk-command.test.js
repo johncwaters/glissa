@@ -17,17 +17,17 @@ function fsWithFiles(files) {
   };
 }
 
-test('buildRtkHookEntry emits the Claude Bash PreToolUse command without quoting a plain path', () => {
+test('buildRtkHookEntry emits a forward-slash hook command without quoting a plain path', () => {
   assert.deepEqual(buildRtkHookEntry('C:\\tools\\rtk.exe'), {
     matcher: 'Bash',
-    hooks: [{ type: 'command', command: 'C:\\tools\\rtk.exe hook claude' }],
+    hooks: [{ type: 'command', command: 'C:/tools/rtk.exe hook claude' }],
   });
 });
 
-test('buildRtkHookEntry quotes a path containing spaces', () => {
+test('buildRtkHookEntry quotes a forward-slash hook command containing spaces', () => {
   assert.deepEqual(buildRtkHookEntry('C:\\Program Files\\rtk\\rtk.exe'), {
     matcher: 'Bash',
-    hooks: [{ type: 'command', command: '"C:\\Program Files\\rtk\\rtk.exe" hook claude' }],
+    hooks: [{ type: 'command', command: '"C:/Program Files/rtk/rtk.exe" hook claude' }],
   });
 });
 

@@ -51,10 +51,16 @@ function quoteCommandPath(commandPath) {
   return `"${commandPath}"`;
 }
 
+function toForwardSlashes(commandPath) {
+  return commandPath.replace(/\\/g, '/');
+}
+
 function buildRtkHookEntry(rtkPath) {
+  // Forward slashes: Claude Code executes command hooks via git-bash, which eats backslashes.
+  const command = `${quoteCommandPath(toForwardSlashes(rtkPath))} hook claude`;
   return {
     matcher: 'Bash',
-    hooks: [{ type: 'command', command: `${quoteCommandPath(rtkPath)} hook claude` }],
+    hooks: [{ type: 'command', command }],
   };
 }
 

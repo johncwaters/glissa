@@ -11,7 +11,25 @@
 // skills and commands from an --add-dir, not the dir's CLAUDE.md or .claude/rules (live-verified on
 // 2.1.235). It is an explicit argument rather than an extraEnv entry so the decision lives here, and
 // it is set ONLY when a pack dir was actually added: a session with no packs keeps today's env.
-function buildSpawnEnv(baseEnv, extraEnv, { additionalDirsClaudeMd = false } = {}) {
+// prependPathDir lets rtk's bare `rtk <cmd>` rewrites resolve inside the spawned session.
+const path = require("node:path");
+
+function prependPathDir(env, prependPathDirValue) {
+  if (!prependPathDirValue) return;
+  const pathKey = Object.keys(env).find((key) => key.toLowerCase() === "path") || "PATH";
+  const existingPath = env[pathKey] || "";
+  const pathEntries = existingPath.split(path.delimiter).filter(Boolean);
+  const normalizedPrependDir = prependPathDirValue.toLowerCase();
+  const alreadyPresent = pathEntries.some((entry) => entry.toLowerCase() === normalizedPrependDir);
+  if (alreadyPresent) return;
+  if (!existingPath) {
+    env[pathKey] = prependPathDirValue;
+    return;
+  }
+  env[pathKey] = `${prependPathDirValue}${path.delimiter}${existingPath}`;
+}
+
+function buildSpawnEnv(baseEnv, extraEnv, { additionalDirsClaudeMd = false, prependPathDir: pathDir = null } = {}) {
   const env = { ...baseEnv, ...(extraEnv || {}) };
   delete env.CLAUDECODE;
   delete env.CLAUDE_CODE_SSE_PORT;
@@ -20,6 +38,7 @@ function buildSpawnEnv(baseEnv, extraEnv, { additionalDirsClaudeMd = false } = {
   delete env.GLISSA_CONFIG;
   env.CLAUDE_CODE_NO_FLICKER = "1";
   if (additionalDirsClaudeMd) env.CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD = "1";
+  prependPathDir(env, pathDir);
   return env;
 }
 

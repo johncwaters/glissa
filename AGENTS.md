@@ -299,6 +299,7 @@ Status is derived from machine-emitted signals, never from parsing the rendered 
 #### rtk Output Compression
 
 `config.rtk` is an opt-in top-level boolean. When enabled and an rtk binary resolves, Glissa injects rtk's `PreToolUse` Bash hook through the per-session managed `--settings` file. Glissa never edits `~/.claude` and never runs `rtk init`. The matcher is Bash only, so PowerShell-tool calls and built-in Read/Grep/Glob traffic are not compressed. Split-pane teammates are unverified.
+The hook command is written with forward slashes because Claude Code executes command hooks via git-bash on Windows. The spawn env prepends the rtk binary's directory to PATH so rtk's bare `rtk <cmd>` rewrites resolve.
 
 ### Notifications (lifecycle + delivery)
 

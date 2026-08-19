@@ -192,7 +192,7 @@ test('buildHookSettings adds the rtk PreToolUse hook only when an rtk path is su
   const on = buildHookSettings({ ...base, rtkPath: 'C:\\Users\\johnw\\.glissa\\bin\\rtk.exe' });
   assert.deepEqual(on.hooks.PreToolUse, [{
     matcher: 'Bash',
-    hooks: [{ type: 'command', command: 'C:\\Users\\johnw\\.glissa\\bin\\rtk.exe hook claude' }],
+    hooks: [{ type: 'command', command: 'C:/Users/johnw/.glissa/bin/rtk.exe hook claude' }],
   }]);
 });
 
@@ -224,7 +224,7 @@ test('writeSessionSettings writes the rtk PreToolUse block when opted in', () =>
   const parsed = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
   assert.deepEqual(parsed.hooks.PreToolUse, [{
     matcher: 'Bash',
-    hooks: [{ type: 'command', command: '"C:\\Program Files\\rtk\\rtk.exe" hook claude' }],
+    hooks: [{ type: 'command', command: '"C:/Program Files/rtk/rtk.exe" hook claude' }],
   }]);
   cleanup();
   try { fs.rmSync(baseDir, { recursive: true, force: true }); } catch {}
