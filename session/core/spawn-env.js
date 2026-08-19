@@ -13,7 +13,6 @@ const path = require("node:path");
 // skills and commands from an --add-dir, not the dir's CLAUDE.md or .claude/rules (live-verified on
 // 2.1.235). It is an explicit argument rather than an extraEnv entry so the decision lives here, and
 // it is set ONLY when a pack dir was actually added: a session with no packs keeps today's env.
-//
 // prependPathDir lets rtk's bare `rtk <cmd>` rewrites resolve inside the spawned session.
 function normalizePathEntry(entry) {
   return entry.replace(/\\/g, "/").toLowerCase();
