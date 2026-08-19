@@ -307,10 +307,13 @@ export function vendorTotalsRows(totals) {
 }
 
 // More than one vendor, or a single vendor that is not Claude: either way the split is worth showing.
+// Key inspection only (no row building): this runs once per rendered model row via modelRowPrefix.
 export function hasMultiVendorUsage(totals) {
-  const rows = vendorTotalsRows(totals);
-  if (rows.length > 1) return true;
-  return rows.length === 1 && rows[0].vendor !== 'claude';
+  const byVendor = totals?.byVendor;
+  if (!byVendor || typeof byVendor !== 'object') return false;
+  const vendors = Object.keys(byVendor).filter((vendor) => byVendor[vendor] && typeof byVendor[vendor] === 'object');
+  if (vendors.length > 1) return true;
+  return vendors.length === 1 && vendors[0] !== 'claude';
 }
 
 // One short clause, wherever a number is deliberately Claude-only, so a smaller figure next to a

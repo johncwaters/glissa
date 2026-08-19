@@ -98,11 +98,8 @@ function grokHomes(env = process.env) {
   return vendorHomes(env, 'GROK_HOME', '.grok');
 }
 
-/*
- * Codex root rule, matching ccusage: prefer `sessions/` and `archived_sessions/` under the home, and
- * only when NEITHER exists fall back to treating the home itself as a flat JSONL dir. The fallback
- * matters because a real ~/.codex also holds history.jsonl and plugin fixtures, which are not usage.
- */
+// ccusage's Codex root rule: sessions/ and archived_sessions/ when present, else the home itself as
+// a flat JSONL dir (a real ~/.codex also holds history.jsonl and plugin fixtures, which are not usage).
 function codexRootCandidates(homes) {
   const candidates = [];
   for (const home of homes) {
@@ -132,10 +129,7 @@ function isUsageFile(vendor, fileName) {
   return fileName.endsWith('.jsonl');
 }
 
-/*
- * ccusage's active-over-archived rule: the same rollout can exist in both trees, and the active copy is
- * the one that is still being appended to. Keyed on basename, which is what the two copies share.
- */
+// ccusage's active-over-archived rule, keyed on basename: the active copy is still being appended to.
 function dedupeCodexFiles(files) {
   const byName = new Map();
   for (const file of files) {
