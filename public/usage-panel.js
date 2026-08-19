@@ -565,8 +565,7 @@ function buildDailySection() {
     const tr = el('tr', 'usage-row');
     if (row.source === 'history') tr.dataset.source = 'history';
     const models = sortModelRows(row.models);
-    // Namespaced by view: weeks are keyed by their MONDAY, so a bare day key expanded in Day view would
-    // arrive pre-expanded in Week view as the same string.
+    // Namespaced by view: weeks are keyed by their Monday, the same string as that day's Day-view key.
     const expandKey = `${periodView}:${day}`;
     const toggle = buildBreakdownToggle(expandKey, models.length);
     appendCells(tr, [

@@ -228,8 +228,7 @@ test('an unwritable warehouse path degrades to a warning, not a failed scan', as
   assert.equal(await warehouseExists(root), false, 'the injected failure really did block the write');
 });
 
-// The terminal catch on the write chain is reachable: writeWarehouseFile rejects when its OWN catch block
-// throws, and without that catch the rejection fails the entire scan pass.
+// Pins the write-chain catch: without it a throwing logger inside a failed write fails the scan pass.
 test('a throwing logger during a failed write still does not fail the scan', async () => {
   const root = await makeTempRoot();
   await writeTranscript(root, 'a.jsonl', [claudeLine({ messageId: 'm1', day: '2026-08-18' })]);

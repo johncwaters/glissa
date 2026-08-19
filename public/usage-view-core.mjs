@@ -342,14 +342,10 @@ function addDayToPeriod(bucket, row) {
   bucket.cacheRead += finiteNumber(row?.cacheRead) ?? 0;
   bucket.days += 1;
   bucket.sources.add(row?.source === 'history' ? 'history' : 'live');
-  // A period row mirrors a daily row's shape, so it carries the union of the vendors under it. Taken from
-  // the day's own `vendors` when the server supplied one, and from its model rows otherwise (history rows
-  // are rebuilt from stored rollups, which are keyed by model rather than by vendor).
+  // Vendors union from row.vendors AND model rows: history rows rebuilt from rollups carry no vendors.
   for (const vendor of (Array.isArray(row?.vendors) ? row.vendors : [])) bucket.vendorSet.add(vendor);
   for (const model of (row?.models || [])) {
     if (model?.vendor) bucket.vendorSet.add(model.vendor);
-  }
-  for (const model of (row?.models || [])) {
     const name = modelLabel(model);
     const existing = bucket.modelByName.get(name) || { key: name, model: model?.model ?? name, vendor: model?.vendor, tokens: 0, costUSD: 0, input: 0, output: 0, cacheCreate: 0, cacheRead: 0 };
     existing.tokens += finiteNumber(model?.tokens) ?? 0;
