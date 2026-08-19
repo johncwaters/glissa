@@ -1,3 +1,5 @@
+const path = require("node:path");
+
 // Pure spawn-environment builder, extracted from Session._buildSpawnEnv (behavior-preserving).
 // Returns a COPY of baseEnv with the inherited Glissa/Claude-Code vars scrubbed so a spawned
 // `claude` does not think it is running inside Glissa's own Claude session, plus the always-on
@@ -11,16 +13,19 @@
 // skills and commands from an --add-dir, not the dir's CLAUDE.md or .claude/rules (live-verified on
 // 2.1.235). It is an explicit argument rather than an extraEnv entry so the decision lives here, and
 // it is set ONLY when a pack dir was actually added: a session with no packs keeps today's env.
+//
 // prependPathDir lets rtk's bare `rtk <cmd>` rewrites resolve inside the spawned session.
-const path = require("node:path");
+function normalizePathEntry(entry) {
+  return entry.replace(/\\/g, "/").toLowerCase();
+}
 
 function prependPathDir(env, prependPathDirValue) {
   if (!prependPathDirValue) return;
   const pathKey = Object.keys(env).find((key) => key.toLowerCase() === "path") || "PATH";
   const existingPath = env[pathKey] || "";
   const pathEntries = existingPath.split(path.delimiter).filter(Boolean);
-  const normalizedPrependDir = prependPathDirValue.toLowerCase();
-  const alreadyPresent = pathEntries.some((entry) => entry.toLowerCase() === normalizedPrependDir);
+  const normalizedPrependDir = normalizePathEntry(prependPathDirValue);
+  const alreadyPresent = pathEntries.some((entry) => normalizePathEntry(entry) === normalizedPrependDir);
   if (alreadyPresent) return;
   if (!existingPath) {
     env[pathKey] = prependPathDirValue;

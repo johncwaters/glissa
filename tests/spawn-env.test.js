@@ -90,7 +90,7 @@ test('the pack flag lands on the copy, never on the source env', () => {
 });
 
 test('prependPathDir prepends to an existing Path key without adding PATH', () => {
-  const base = { ...fullBase(), PATH: undefined, Path: `C:\\Windows${path.delimiter}C:\\Tools` };
+  const base = { ...fullBase(), Path: `C:\\Windows${path.delimiter}C:\\Tools` };
   delete base.PATH;
   const env = buildSpawnEnv(base, null, { prependPathDir: 'C:\\Users\\johnw\\.glissa\\bin' });
   assert.equal(env.Path, `C:\\Users\\johnw\\.glissa\\bin${path.delimiter}C:\\Windows${path.delimiter}C:\\Tools`);
@@ -106,6 +106,14 @@ test('prependPathDir does not duplicate an existing path entry case-insensitivel
   const existingPath = `C:\\Users\\johnw\\.glissa\\bin${path.delimiter}C:\\Windows`;
   const env = buildSpawnEnv({ ...fullBase(), PATH: existingPath }, null, {
     prependPathDir: 'c:\\users\\johnw\\.glissa\\bin',
+  });
+  assert.equal(env.PATH, existingPath);
+});
+
+test('prependPathDir does not duplicate an entry that differs only in slash direction', () => {
+  const existingPath = `C:/Users/johnw/.glissa/bin${path.delimiter}C:\\Windows`;
+  const env = buildSpawnEnv({ ...fullBase(), PATH: existingPath }, null, {
+    prependPathDir: 'C:\\Users\\johnw\\.glissa\\bin',
   });
   assert.equal(env.PATH, existingPath);
 });
