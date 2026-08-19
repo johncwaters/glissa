@@ -31,6 +31,11 @@ import {
   blockHistoryRows,
   blockLabel,
   blockProgress,
+  budgetRowMeterLabel,
+  budgetRowPct,
+  budgetRowText,
+  budgetRows,
+  budgetScopeLabel,
   burnTiles,
   dailyRowForDay,
   dayRangeLabel,
@@ -522,11 +527,34 @@ function buildTotalsSection() {
     }
     section.append(vendorTiles);
   }
+  const budget = buildBudgetMeters();
+  if (budget) section.append(budget);
   _sessionsTsEl = el('p', 'usage-meta', '');
   section.append(_sessionsTsEl);
   paintSessionsTs();
   _ticker.onTick(paintSessionsTs);
   return section;
+}
+
+/*
+ * The operator's own spend ceilings. Absent entirely with no budget configured: an unset budget must not
+ * render as a zero one. Tones come from usage-budget-core, so the meter colour and the alert ladder agree.
+ */
+function buildBudgetMeters() {
+  const rows = budgetRows(_report);
+  if (rows.length === 0) return null;
+  const wrap = el('div', 'usage-budgets');
+  for (const row of rows) {
+    const item = el('div', 'usage-budget');
+    const head = el('div', 'usage-budget-head');
+    head.append(el('span', 'usage-budget-label', budgetScopeLabel(row.scope)));
+    head.append(el('span', 'usage-budget-value', budgetRowText(row)));
+    head.append(el('span', 'usage-budget-pct', formatPercent(budgetRowPct(row))));
+    item.append(head);
+    item.append(buildMeter(budgetRowPct(row), row.tone, budgetRowMeterLabel(row)));
+    wrap.append(item);
+  }
+  return wrap;
 }
 
 // ── Over time ──

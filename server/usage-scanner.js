@@ -13,6 +13,7 @@ const {
 const { buildUsageReport, localDayKey, pruneEntries } = require('./core/usage-aggregate-core');
 const { buildBlocks, burnRate, projectBlock } = require('./core/usage-blocks-core');
 const { dailyBaseline, detectBurnAnomaly, detectDailyAnomaly } = require('./core/usage-anomaly-core');
+const { budgetStanding, normalizeBudgetConfig } = require('./core/usage-budget-core');
 const {
   mergeWarehouse,
   pruneWarehouse,
@@ -66,6 +67,9 @@ function createUsageScanner(deps = {}) {
     // callers, unit tests) means the warehouse is inert: nothing is read, nothing is written.
     warehousePath = null,
     warehouseRetainDays = 365,
+    // Spend budgets (config usage.budget). Absent means off, and every budget surface then reports
+    // nothing at all rather than a zero ceiling.
+    budget = null,
     logger = noopLogger,
     byteBudget = DEFAULT_BYTE_BUDGET,
     chunkSize = DEFAULT_CHUNK_SIZE,
@@ -421,6 +425,26 @@ function createUsageScanner(deps = {}) {
   }
 
   /*
+   * Spend for the two budget periods, over the MERGED daily series so it matches what the panel shows
+   * (history included). One definition, used both for the report's standing meters and for the wiring's
+   * once-per-period alert evaluation, so a meter and an alert can never disagree about what was spent.
+   */
+  function budgetSpend() {
+    const todayKey = todayDayKey();
+    const monthKey = todayKey.slice(0, 7);
+    const rollups = cachedRollupsForDays(undefined, retainDays);
+    const daily = mergedDailyRows(rollups.daily);
+    let todayUsd = 0;
+    let monthUsd = 0;
+    for (const row of daily) {
+      const cost = Number.isFinite(row.costUSD) ? row.costUSD : 0;
+      if (row.day === todayKey) todayUsd += cost;
+      if (String(row.day).startsWith(monthKey)) monthUsd += cost;
+    }
+    return { todayKey, monthKey, todayUsd, monthUsd };
+  }
+
+  /*
    * The daily series the report ships: live rows, plus history for days OLDER than live coverage. Strictly
    * older, so a day the live scan is still filling in is never topped up from a stale stored copy. Each
    * history row is marked, because a row Glissa remembers is a different claim from one it can still see.
@@ -464,6 +488,21 @@ function createUsageScanner(deps = {}) {
     };
   }
 
+  /*
+   * The standing meters. Computed here rather than client-side because usage-budget-core owns the tone
+   * ladder, and a second implementation in the browser core would be a second place for it to drift.
+   */
+  function buildBudget() {
+    const normalized = normalizeBudgetConfig(budget);
+    if (normalized.dailyUsd === null && normalized.monthlyUsd === null) return null;
+    const spend = budgetSpend();
+    return {
+      dailyUsd: normalized.dailyUsd,
+      monthlyUsd: normalized.monthlyUsd,
+      rows: budgetStanding({ budget: normalized, todayUsd: spend.todayUsd, monthUsd: spend.monthUsd }),
+    };
+  }
+
   function buildReport({ days } = {}) {
     const reportRetainDays = days == null ? retainDays : days;
     const rollups = cachedRollupsForDays(days, reportRetainDays);
@@ -495,6 +534,7 @@ function createUsageScanner(deps = {}) {
       blocks: blockSummary.blocks,
       activeBlock,
       anomaly: buildAnomaly(daily, blockSummary, activeBlock),
+      budget: buildBudget(),
       tokenLimit: blockSummary.tokenLimit,
       pricing: { missing: Array.from(missingModels).sort() },
       scan: { dirs: dirs.slice(), files: lastFileCount, entries: entries.length, lastScanMs, partial: lastPartial, resolutionError },
@@ -607,7 +647,7 @@ function createUsageScanner(deps = {}) {
     cachedSessionTotals = null;
   }
 
-  const api = { runPass, buildReport, sessionTotals, stats };
+  const api = { runPass, buildReport, sessionTotals, stats, budgetSpend };
   Object.defineProperty(api, '_entriesForTest', {
     value: () => entries.map((entry) => entry),
     enumerable: false,

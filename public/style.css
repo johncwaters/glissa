@@ -2867,6 +2867,51 @@ a.pr-title:hover {
   border-radius: 3px;
 }
 
+/* Spend budgets: the operator's own ceilings, under the totals they are measured against. Taller meters
+   than the estimate bars, like the plan limits, because a ceiling is a harder fact than a trend. */
+.usage-budgets {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.usage-budget {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.usage-budget-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.usage-budget-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  min-width: 9ch;
+}
+
+.usage-budget-value {
+  font-size: 12px;
+  color: var(--text-head);
+  font-variant-numeric: tabular-nums;
+}
+
+.usage-budget-pct {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.usage-budget .usage-meter {
+  height: 6px;
+  border-radius: 3px;
+}
+
 /* Day / Week / Month. Three stable labels; aria-pressed is the state, so no button ever renames itself. */
 .usage-period {
   display: inline-flex;

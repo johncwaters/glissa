@@ -252,3 +252,53 @@ test('a caller that wires no usage accessors replays no usage messages', () => {
   assert.equal(h.sent.filter((m) => m.type.startsWith('usage-')).length, 0, 'an older caller sees nothing new on the wire');
   assert.ok(h.sent.some((m) => m.type === 'snapshot'), 'the pre-existing connect frames still go out');
 });
+
+// --- budgets ---
+// Null and absent both mean "no ceiling". A zero or negative budget is rejected rather than coerced,
+// because it would put every budget surface permanently over its limit.
+
+test('a valid budget block round trips through the wire', () => {
+  const h = sendUsage({ budget: { dailyUsd: 16, monthlyUsd: 400.5 } });
+  assert.equal(errorFrom(h), undefined);
+  assert.deepEqual(h.cfg.usage.budget, { dailyUsd: 16, monthlyUsd: 400.5 });
+  const echoed = h.sent.find((m) => m.type === 'settings-updated');
+  assert.deepEqual(echoed.settings.usage.budget, { dailyUsd: 16, monthlyUsd: 400.5 });
+});
+
+test('an explicit null budget field is kept as null, meaning no ceiling', () => {
+  const h = sendUsage({ budget: { dailyUsd: null, monthlyUsd: 25 } });
+  assert.equal(errorFrom(h), undefined);
+  assert.deepEqual(h.cfg.usage.budget, { dailyUsd: null, monthlyUsd: 25 });
+});
+
+test('a partial budget block persists only the field it carried', () => {
+  const h = sendUsage({ budget: { dailyUsd: 5 } });
+  assert.equal(errorFrom(h), undefined);
+  assert.deepEqual(h.cfg.usage.budget, { dailyUsd: 5 });
+});
+
+// NaN and Infinity are deliberately absent from this list: JSON.stringify turns them into null on the way
+// in, which is the valid "no ceiling" value. The validator's finite check therefore guards the hand-edited
+// config.json path, not this one.
+test('a zero, negative or non-numeric budget is rejected', () => {
+  for (const value of [0, -1, '16', true, {}]) {
+    const h = sendUsage({ budget: { dailyUsd: value } });
+    const err = errorFrom(h);
+    assert.ok(err && /usage\.budget\.dailyUsd must be a positive number or null/.test(err.message), `rejected ${JSON.stringify(value)}`);
+    assert.equal(h.cfg.usage, undefined);
+  }
+});
+
+test('a non-object budget is rejected', () => {
+  for (const value of ['16', 42, []]) {
+    const h = sendUsage({ budget: value });
+    const err = errorFrom(h);
+    assert.ok(err && /usage\.budget must be an object/.test(err.message), `rejected ${JSON.stringify(value)}`);
+  }
+});
+
+test('an unrecognized budget field is dropped rather than persisted', () => {
+  const h = sendUsage({ budget: { dailyUsd: 5, weeklyUsd: 9 } });
+  assert.equal(errorFrom(h), undefined);
+  assert.deepEqual(h.cfg.usage.budget, { dailyUsd: 5 });
+});

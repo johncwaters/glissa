@@ -69,7 +69,7 @@ const POSTHOG_STRING_KEYS = ['host', 'apiKey', 'repoPath'];
 const USAGE_BOOLEAN_KEYS = ['enabled', 'fetchPricing', 'planLimits'];
 // Ranges and modes come from the lane itself so the wire validator and resolveUsageConfig's fallback
 // logic cannot drift apart.
-const { USAGE_INTEGER_RANGES, USAGE_COST_MODES, USAGE_VENDOR_KEYS } = require('./usage-wiring');
+const { USAGE_INTEGER_RANGES, USAGE_COST_MODES, USAGE_VENDOR_KEYS, USAGE_BUDGET_KEYS } = require('./usage-wiring');
 // Max days a client may ask a usage report to cover, matching the retainDays ceiling.
 const USAGE_REPORT_MAX_DAYS = 3650;
 
@@ -181,6 +181,18 @@ function validateUsage(u) {
       if (u.vendors[key] != null && typeof u.vendors[key] !== 'boolean') return `usage.vendors.${key} must be a boolean`;
     }
   }
+  if (u.budget != null) {
+    if (!isPlainObject(u.budget)) return 'usage.budget must be an object';
+    for (const key of USAGE_BUDGET_KEYS) {
+      const value = u.budget[key];
+      if (value == null) continue;
+      // Null and absent both mean "no ceiling"; a present value has to be a real positive amount, because a
+      // zero or negative budget would put every surface permanently over its limit.
+      if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+        return `usage.budget.${key} must be a positive number or null`;
+      }
+    }
+  }
   if (u.extraProjectsDirs == null) return null;
   if (!Array.isArray(u.extraProjectsDirs)) return 'usage.extraProjectsDirs must be an array of absolute paths';
   for (const dir of u.extraProjectsDirs) {
@@ -246,6 +258,14 @@ function sanitizeUsage(u) {
       if (u.vendors[key] != null) vendors[key] = !!u.vendors[key];
     }
     if (Object.keys(vendors).length > 0) out.vendors = vendors;
+  }
+  if (isPlainObject(u.budget)) {
+    const budget = {};
+    for (const key of USAGE_BUDGET_KEYS) {
+      if (u.budget[key] === null) budget[key] = null;
+      if (typeof u.budget[key] === 'number') budget[key] = u.budget[key];
+    }
+    if (Object.keys(budget).length > 0) out.budget = budget;
   }
   if (Array.isArray(u.extraProjectsDirs)) out.extraProjectsDirs = u.extraProjectsDirs.map((dir) => String(dir).trim());
   return out;

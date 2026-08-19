@@ -271,3 +271,47 @@ test('no forbidden characters reach the DOM from the new builders', async () => 
     for (const glyph of forbidden) assert.equal(value.includes(glyph), false, `forbidden character in ${JSON.stringify(value)}`);
   }
 });
+
+// ── Spend budgets ──
+// The rows and their tones come from server/core/usage-budget-core.js; these only format them and decide
+// when the tab dot is owed, so an unset budget must render nothing rather than a zero ceiling.
+
+test('budgetRows: only rows with a real ceiling, nothing at all without a budget', async () => {
+  const { budgetRows } = await importCore();
+  const report = { budget: { rows: [
+    { scope: 'daily', spentUsd: 12.4, budgetUsd: 16, pct: 77.5, tone: 'warn' },
+    { scope: 'monthly', spentUsd: 210, budgetUsd: null, pct: 0, tone: 'ok' },
+  ] } };
+  assert.deepEqual(budgetRows(report).map((row) => row.scope), ['daily']);
+  assert.deepEqual(budgetRows({ budget: null }), []);
+  assert.deepEqual(budgetRows({}), []);
+  assert.deepEqual(budgetRows(null), []);
+  assert.deepEqual(budgetRows({ budget: { rows: 'nope' } }), []);
+});
+
+test('budget row formatting: a position, not a bare percentage', async () => {
+  const { budgetRowText, budgetRowPct, budgetScopeLabel, budgetRowMeterLabel } = await importCore();
+  const row = { scope: 'daily', spentUsd: 12.4, budgetUsd: 16, pct: 77.5, tone: 'warn' };
+  assert.equal(budgetRowText(row), '$12.40 of $16.00');
+  assert.equal(budgetRowPct(row), 77.5);
+  assert.equal(budgetScopeLabel('daily'), 'today');
+  assert.equal(budgetScopeLabel('monthly'), 'this month');
+  assert.equal(budgetRowMeterLabel(row), 'today spend against budget');
+  // Missing numbers read as zero rather than breaking the meter geometry.
+  assert.equal(budgetRowPct({}), 0);
+  assert.equal(budgetRowText({}), '$0.00 of $0.00');
+});
+
+test('a budget at or past 90 percent raises the tab dot on its own', async () => {
+  const { hasBudgetAttention, hasUsageAttention, BUDGET_ATTENTION_PCT } = await importCore();
+  assert.equal(BUDGET_ATTENTION_PCT, 90);
+  const at = (pct) => ({ tokenLimit: null, anomaly: null, budget: { rows: [{ scope: 'daily', spentUsd: 1, budgetUsd: 2, pct, tone: 'crit' }] } });
+  assert.equal(hasBudgetAttention(at(89.9)), false);
+  assert.equal(hasBudgetAttention(at(90)), true);
+  assert.equal(hasBudgetAttention(at(150)), true);
+  assert.equal(hasBudgetAttention({ budget: null }), false);
+  // It composes with the other two arbiters rather than replacing either.
+  assert.equal(hasUsageAttention(at(95)), true);
+  assert.equal(hasUsageAttention(at(10)), false);
+  assert.equal(hasUsageAttention({ tokenLimit: { max: 10, pct: 0.95 }, budget: null }), true);
+});

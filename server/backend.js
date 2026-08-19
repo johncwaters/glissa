@@ -884,6 +884,7 @@ function createBackend(httpServer, options = {}) {
     // Durable per-day history, beside the resolved config file like uploads and recordings, so a temp
     // GLISSA_CONFIG never writes into the operator's real ~/.glissa.
     warehousePath: configSiblingPath(configStore.configPath, 'usage-warehouse.json'),
+    budgetStatePath: configSiblingPath(configStore.configPath, 'usage-budget-state.json'),
     ...(options.usageWiringOptions || {}),
   });
   // Deferred boot pass: idempotent, so only the first connection pays for it. Registered here, not in

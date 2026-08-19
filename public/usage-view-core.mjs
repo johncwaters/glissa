@@ -273,6 +273,44 @@ export function projectionLimitLine(projection, tokenLimit) {
   return `On this burn rate the block ends at ${Math.round(pct)}% of that reference.`;
 }
 
+// ── Spend budgets ──
+// The rows and their tones come from server/core/usage-budget-core.js, which owns the ladder; nothing is
+// recomputed here. These only format them, and decide when the tab dot is owed.
+
+// The tone ladder's own top step. A budget that far along is worth pulling an operator over, which is a
+// stronger claim than the warn step and so has its own threshold.
+export const BUDGET_ATTENTION_PCT = 90;
+
+export function budgetRows(report) {
+  const rows = report?.budget?.rows;
+  if (!Array.isArray(rows)) return [];
+  return rows.filter((row) => row && finiteNumber(row.budgetUsd) !== null);
+}
+
+export function budgetScopeLabel(scope) {
+  if (scope === 'monthly') return 'this month';
+  return 'today';
+}
+
+// "$12.40 of $16.00" reads as a position; a bare percentage does not say how much room is left.
+export function budgetRowText(row) {
+  return `${formatUsd(finiteNumber(row?.spentUsd) ?? 0)} of ${formatUsd(finiteNumber(row?.budgetUsd) ?? 0)}`;
+}
+
+export function budgetRowPct(row) {
+  const pct = finiteNumber(row?.pct);
+  if (pct === null) return 0;
+  return pct;
+}
+
+export function budgetRowMeterLabel(row) {
+  return `${budgetScopeLabel(row?.scope)} spend against budget`;
+}
+
+export function hasBudgetAttention(report) {
+  return budgetRows(report).some((row) => budgetRowPct(row) >= BUDGET_ATTENTION_PCT);
+}
+
 // ── Period rollups ──
 // Week and month views are derived HERE, from the daily rows the report already ships, rather than being
 // three more arrays on the wire: the merged daily series is the single source, so a period total can never
@@ -642,7 +680,10 @@ export function blockAttentionTone(report, planLimits = null) {
 // threshold being crossed, so nothing else would surface it.
 export function hasUsageAttention(report, planLimits = null) {
   if (blockAttentionTone(report, planLimits) !== 'ok') return true;
-  return hasAnomaly(report?.anomaly);
+  if (hasAnomaly(report?.anomaly)) return true;
+  // A budget is the operator's OWN ceiling, so it earns the dot independently of the plan limit and the
+  // anomaly check, both of which measure something else.
+  return hasBudgetAttention(report);
 }
 
 export function planWindowUsedText(window) {

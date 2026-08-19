@@ -17,6 +17,9 @@
 const path = require('node:path');
 const { createUsageScanner } = require('./usage-scanner');
 const { loadPricing } = require('./usage-pricing');
+const { evaluateBudget, normalizeBudgetConfig } = require('./core/usage-budget-core');
+const { decideTelegramNotification } = require('../notifications/channels/telegram');
+const { sendTelegramMessage } = require('./telegram-transport');
 const {
   buildPlanLimitsMessage,
   normalizeStatuslinePayload,
@@ -35,12 +38,17 @@ const DEFAULT_USAGE_CONFIG = Object.freeze({
   sessionBlockHours: 5,
   costMode: 'auto',
   extraProjectsDirs: [],
+  // Spend ceilings in USD. Absent (the default) means no budget at all: no meters, no alerts.
+  budget: { dailyUsd: null, monthlyUsd: null },
   // Other CLI vendors whose local transcripts are read alongside Claude's. On by default; a false here
   // means that vendor's tree is never walked at all.
   vendors: { codex: true, grok: true },
 });
 
 const USAGE_VENDOR_KEYS = Object.freeze(['codex', 'grok']);
+// Shared with control-handlers' validateUsage, like the ranges and vendor keys: one source of truth for
+// which budget fields exist.
+const USAGE_BUDGET_KEYS = Object.freeze(['dailyUsd', 'monthlyUsd']);
 
 /*
  * Claude session ids seen in statusLine payloads, capped. Claude assigns a NEW id on every resume, so
@@ -105,6 +113,7 @@ function resolveUsageConfig(usage) {
     costMode: COST_MODES.has(source.costMode) ? source.costMode : DEFAULT_USAGE_CONFIG.costMode,
     extraProjectsDirs: absoluteDirList(source.extraProjectsDirs),
     vendors: resolveVendors(source.vendors),
+    budget: normalizeBudgetConfig(source.budget),
   };
 }
 
@@ -131,6 +140,21 @@ function usageCfgKey(cfg) {
   return JSON.stringify({ usage: cfg?.usage || null });
 }
 
+/*
+ * The one wording for a budget alert, built here and shipped ON the broadcast so the browser notification
+ * and the Telegram message are the same string by construction rather than by two implementations
+ * agreeing. Plain text, no dash characters.
+ */
+function budgetAlertText({ scope, threshold, spentUsd, budgetUsd }) {
+  const period = scope === 'monthly' ? 'monthly' : 'daily';
+  return `Usage budget: ${period} spend ${formatUsd(spentUsd)} reached ${threshold}% of ${formatUsd(budgetUsd)}`;
+}
+
+function formatUsd(value) {
+  const number = Number.isFinite(value) ? value : 0;
+  return `$${number.toFixed(2)}`;
+}
+
 function createUsageWiring({
   config,
   sessions = new Map(),
@@ -139,6 +163,11 @@ function createUsageWiring({
   // Beside the resolved config file, so a temp GLISSA_CONFIG keeps its history in the temp dir too (the
   // same rule uploads and recordings follow). Null disables the warehouse entirely.
   warehousePath = null,
+  // Which budget thresholds have already fired this period. Beside the config file for the same reason the
+  // warehouse is: a temp GLISSA_CONFIG must never write into the operator's real ~/.glissa.
+  budgetStatePath = null,
+  sendTelegram = sendTelegramMessage,
+  fsPromises = require('node:fs/promises'),
   createScanner = createUsageScanner,
   loadPricingFn = loadPricing,
   scannerDeps = {},
@@ -168,6 +197,9 @@ function createUsageWiring({
   // card and every connected client.
   let planLimits = null;
   const officialCostByClaudeId = new Map();
+  let budgetFiredState = {};
+  let budgetStateLoaded = false;
+  let budgetStateSignature = null;
 
   function warn(message) {
     if (!logger || typeof logger.warn !== 'function') return;
@@ -207,6 +239,7 @@ function createUsageWiring({
         vendors: cfg.vendors,
         warehousePath,
         warehouseRetainDays: cfg.warehouseRetainDays,
+        budget: cfg.budget,
         logger,
         ...scannerDeps,
       });
@@ -246,6 +279,10 @@ function createUsageWiring({
     // The first pass pushes unconditionally so a dashboard learns the pricing source and an empty
     // baseline even on a machine with no transcripts yet.
     if (lastSessionsMessage === null || (result && result.newEntries > 0)) pushSessions();
+    // Budgets are evaluated only on a COMPLETE pass, for the same reason the warehouse only writes on one:
+    // a partial pass has seen an arbitrary slice of the tree, and firing a once-per-period alert off an
+    // undercount would burn that threshold for the rest of the period.
+    if (result && !result.partial) await evaluateBudgets();
     if (result?.partial) scheduleContinuation();
     return result;
   }
@@ -361,6 +398,95 @@ function createUsageWiring({
   function getPlanLimitsMessage() {
     if (!cfg.enabled || !cfg.planLimits) return null;
     return buildPlanLimitsMessage(planLimits);
+  }
+
+  // ── Budgets ──
+  // A threshold fires once per period. The fired state is on disk because the alternative is re-alerting
+  // 50/75/100 on every restart, which is exactly how an alert channel teaches its operator to ignore it.
+
+  async function loadBudgetState() {
+    if (budgetStateLoaded || !budgetStatePath) return;
+    budgetStateLoaded = true;
+    let text = null;
+    try {
+      text = await fsPromises.readFile(budgetStatePath, 'utf8');
+    } catch {
+      // No file yet is the ordinary first-run case.
+      return;
+    }
+    try {
+      const parsed = JSON.parse(text);
+      budgetFiredState = parsed && typeof parsed === 'object' && parsed.fired && typeof parsed.fired === 'object' ? parsed.fired : {};
+    } catch (error) {
+      // Starting empty can only ever RE-fire an alert, never suppress a real one, so this fails toward noise
+      // rather than silence.
+      warn(`budget state unreadable, starting empty: ${error.message}`);
+      budgetFiredState = {};
+    }
+  }
+
+  async function evaluateBudgets() {
+    if (stopped || !scanner || !budgetStatePath) return;
+    const normalized = normalizeBudgetConfig(cfg.budget);
+    if (normalized.dailyUsd === null && normalized.monthlyUsd === null) return;
+    await loadBudgetState();
+    const spend = scanner.budgetSpend();
+    const { alerts, firedState } = evaluateBudget({
+      budget: normalized,
+      todayUsd: spend.todayUsd,
+      monthUsd: spend.monthUsd,
+      todayKey: spend.todayKey,
+      monthKey: spend.monthKey,
+    }, budgetFiredState);
+    budgetFiredState = firedState;
+    if (alerts.length === 0) {
+      // The prune inside evaluateBudget drops last period's marks, so a rollover still needs a write.
+      await saveBudgetState();
+      return;
+    }
+    for (const alert of alerts) {
+      const message = { type: 'usage-budget-alert', ...alert, text: budgetAlertText(alert), ts: nowFn() };
+      broadcast(message);
+      deliverBudgetTelegram(alert);
+    }
+    await saveBudgetState();
+  }
+
+  async function saveBudgetState() {
+    if (!budgetStatePath) return;
+    const payload = `${JSON.stringify({ version: 1, fired: budgetFiredState }, null, 2)}\n`;
+    const signature = JSON.stringify(budgetFiredState);
+    if (signature === budgetStateSignature) return;
+    budgetStateSignature = signature;
+    const tmpPath = `${budgetStatePath}.tmp`;
+    try {
+      await fsPromises.mkdir(path.dirname(budgetStatePath), { recursive: true });
+      await fsPromises.writeFile(tmpPath, payload);
+      await fsPromises.rename(tmpPath, budgetStatePath);
+    } catch (error) {
+      warn(`budget state write failed: ${error.message}`);
+      budgetStateSignature = null;
+    }
+  }
+
+  /*
+   * Same rule the session channel applies: ping the phone only when nobody would see the browser
+   * notification. The gate itself is decideTelegramNotification, reused rather than reimplemented, so the
+   * two channels cannot drift on what "nobody is watching" means.
+   */
+  function deliverBudgetTelegram(alert) {
+    const decision = decideTelegramNotification({
+      enabled: config.telegramNotifications === true,
+      botToken: config.telegram?.botToken,
+      chatId: config.telegram?.chatId,
+      connectionCount: controlClientCount(),
+    });
+    if (!decision.send) return;
+    void Promise.resolve(sendTelegram({
+      botToken: config.telegram.botToken,
+      chatId: config.telegram.chatId,
+      text: budgetAlertText(alert),
+    })).catch(() => {});
   }
 
   function unavailableReport(requestId, error) {
@@ -497,4 +623,6 @@ module.exports = {
   USAGE_INTEGER_RANGES,
   USAGE_COST_MODES,
   USAGE_VENDOR_KEYS,
+  USAGE_BUDGET_KEYS,
+  budgetAlertText,
 };

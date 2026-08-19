@@ -148,6 +148,16 @@ export function createAddSessionDialog() {
 
 // ── Settings dialog ──────────────────────────────────────────
 
+// An empty budget field means no ceiling, which the wire expresses as null. A blank or unparseable value
+// is never coerced to 0: that would put the meter permanently over its limit.
+function budgetFieldValue(input) {
+  const raw = String(input?.value ?? '').trim();
+  if (!raw) return null;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  return parsed;
+}
+
 export function createSettingsDialog(initialTab) {
   const { dialog, close } = createModalOverlay({ dialogClass: 'dialog dialog-settings' });
   dialog.innerHTML = settingsHTML;
@@ -256,6 +266,8 @@ export function createSettingsDialog(initialTab) {
   const usageFetchPricingCheckbox = dialog.querySelector('#settings-usage-fetch-pricing');
   const usageCodexCheckbox = dialog.querySelector('#settings-usage-codex');
   const usageGrokCheckbox = dialog.querySelector('#settings-usage-grok');
+  const usageBudgetDailyInput = dialog.querySelector('#settings-usage-budget-daily');
+  const usageBudgetMonthlyInput = dialog.querySelector('#settings-usage-budget-monthly');
   const usageScanIntervalInput = dialog.querySelector('#settings-usage-scan-interval');
   const usageRetainDaysInput = dialog.querySelector('#settings-usage-retain-days');
   const usageCostModeSelect = dialog.querySelector('#settings-usage-cost-mode');
@@ -529,6 +541,9 @@ export function createSettingsDialog(initialTab) {
         enabled: usageEnabledCheckbox.checked,
         fetchPricing: usageFetchPricingCheckbox.checked,
         vendors: { codex: usageCodexCheckbox.checked, grok: usageGrokCheckbox.checked },
+        // Empty means no ceiling, which the wire expresses as null rather than 0 (a zero budget would read
+        // as permanently over).
+        budget: { dailyUsd: budgetFieldValue(usageBudgetDailyInput), monthlyUsd: budgetFieldValue(usageBudgetMonthlyInput) },
         scanIntervalMinutes: Number(usageScanIntervalInput.value),
         retainDays: Number(usageRetainDaysInput.value),
         costMode: usageCostModeSelect.value,
@@ -602,6 +617,8 @@ export function createSettingsDialog(initialTab) {
       // Only an explicit false opts a vendor out, matching resolveUsageConfig.
       usageCodexCheckbox.checked = usage.vendors?.codex !== false;
       usageGrokCheckbox.checked = usage.vendors?.grok !== false;
+      usageBudgetDailyInput.value = usage.budget?.dailyUsd ?? '';
+      usageBudgetMonthlyInput.value = usage.budget?.monthlyUsd ?? '';
       usageScanIntervalInput.value = usage.scanIntervalMinutes ?? 5;
       usageRetainDaysInput.value = usage.retainDays ?? 90;
       usageCostModeSelect.value = usage.costMode ?? 'auto';
