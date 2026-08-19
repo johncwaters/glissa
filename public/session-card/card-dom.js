@@ -375,6 +375,19 @@ function renderDebugOverlay(ui, payload) {
   html += `<div class="debug-field"><span class="debug-label">Gate:</span> <span class="debug-value">${escapeHtml(gateText)}</span></div>`;
   html += `</div>`;
 
+  // Context packs: whether the delivered context was ever actually opened, and whether a staleness
+  // notice made the agent re-open it. Absent entirely for a session that delivers no packs.
+  const packs = Array.isArray(p.packs) ? p.packs : [];
+  if (packs.length > 0) {
+    html += `<div class="debug-section"><div class="debug-section-title">Packs</div>`;
+    for (const pack of packs) {
+      const since = pack.readsSinceNotice == null ? '' : ` <span class="debug-dim">(${Number(pack.readsSinceNotice) || 0} since notice)</span>`;
+      const reads = Number(pack.reads) || 0;
+      html += `<div class="debug-field"><span class="debug-label">${escapeHtml(pack.name)}:</span> <span class="debug-value">${reads} ${reads === 1 ? 'read' : 'reads'}</span>${since}</div>`;
+    }
+    html += `</div>`;
+  }
+
   // Decision trace: why each of the above fired (or stayed silent), newest last.
   const decisions = Array.isArray(p.decisions) ? p.decisions : [];
   html += `<div class="debug-section"><div class="debug-section-title">Decisions (last ${decisions.length})</div>`;

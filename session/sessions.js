@@ -38,6 +38,7 @@ const {
 const { normalizePackNames } = require("../server/core/pack-core");
 const { defaultBuiltRoot, resolveBuiltPack } = require("../server/pack-builder");
 const { buildPackNotice, listStalePacks } = require("./core/pack-notice");
+const packReadTracker = require("./core/pack-read-tracker");
 const agentTracker = require("./core/agent-tracker");
 const { decideGateRelease, DEFAULT_GATE_RELEASE_SETTLE_MS } = require("./core/gate-release");
 const { pushDecision } = require("./core/decision-log");
@@ -200,6 +201,9 @@ class Session extends EventEmitter {
     packs = [],
     // Where built packs live. Defaults to ~/.glissa/packs/built; tests point it at a fixture root.
     packsBuiltRoot = null,
+    // Count Read tool calls that land inside a delivered pack dir (config kill switch). Costs one
+    // matcher-scoped PostToolUse hook, and only for a session that actually delivers packs.
+    packReadTelemetry = true,
     // PTY spawner seam. Defaults to node-pty; tests inject a fake to assert the
     // spawn wiring (file/args) without launching a real process.
     ptySpawn = null,
@@ -381,6 +385,10 @@ class Session extends EventEmitter {
     // hook response (see notePackUpdate / takePackNoticeContext).
     this._latestPackVersions = new Map();
     this._packNoticePending = false;
+    // Consumption telemetry for those delivered packs: per-pack read counts, plus a since-notice
+    // count armed the moment a staleness notice is taken (session/core/pack-read-tracker.js).
+    this._packReadTelemetry = packReadTelemetry !== false;
+    this._packReads = packReadTracker.createPackReadState();
     this._ptySpawn = ptySpawn || ((file, args, opts) => pty.spawn(file, args, opts));
     // Async kill executor (taskkill). Default wraps execFile; the callback form keeps the call truly
     // non-blocking. Injected in tests to assert the kill without spawning a real process.
@@ -437,7 +445,11 @@ class Session extends EventEmitter {
   ingestHookSignal(raw) {
     if (this._destroyed) return;
     this._hookSeen = true;
-    if (this._recorder && raw && raw.event) {
+    // Pack-read telemetry fires once per Read tool call, so recording each callback would bury a
+    // signals recording under them; the footer's aggregate carries it instead (a `full` capture,
+    // whose whole point is the raw stream, still keeps every callback).
+    const quietRead = raw?.signal === "pack-read" && this._recorder && !this._recorder.recordsData;
+    if (this._recorder && raw && raw.event && !quietRead) {
       this._recorder.writeHook(raw.event, raw.payload);
     }
     // Background sub-agent lifecycle is COUNTED, not a state transition: it never reaches the
@@ -460,6 +472,12 @@ class Session extends EventEmitter {
     // StatusSource (a pending wakeup is metadata, not a state signal).
     if (raw && (raw.signal === "wakeup-scheduled" || raw.signal === "cron-created" || raw.signal === "cron-deleted")) {
       this._trackWakeup(raw);
+      return;
+    }
+    // Pack reads are consumption telemetry, not detection: they must never reach the StatusSource
+    // (a Read mid-turn says nothing about whether the turn finished).
+    if (raw && raw.signal === "pack-read") {
+      this._trackPackRead(raw);
       return;
     }
     // Keys off whichever main-agent hook arrives, never one event name: Claude Code does not
@@ -1036,8 +1054,28 @@ class Session extends EventEmitter {
     const notice = buildPackNotice(this._deliveredPacks, this._latestPackVersions);
     if (!notice) return null;
     const names = listStalePacks(this._deliveredPacks, this._latestPackVersions).map((pack) => pack.name);
-    this._recordDecision({ kind: "pack", ts: Date.now(), decision: "notice", names });
+    const ts = Date.now();
+    // Restart the per-pack count here, so the next reads answer whether the notice actually made the
+    // agent re-open the pack it was told had changed.
+    packReadTracker.armNoticeCounter(this._packReads, ts);
+    this._recordDecision({ kind: "pack", ts, decision: "notice", names });
     return notice;
+  }
+
+  // Count one Read tool call against the delivered pack whose dir contains it. Tracking-only, and
+  // silent for every other path: the hook is matcher-scoped to Read, so most callbacks describe
+  // ordinary repo files the session was going to read anyway.
+  _trackPackRead(raw) {
+    if (!this._packReadTelemetry || this._deliveredPacks.length === 0) return;
+    const name = packReadTracker.packForPath(raw?.payload?.tool_input?.file_path, this._deliveredPacks);
+    if (!name) return;
+    packReadTracker.notePackRead(this._packReads, name, raw.ts || Date.now());
+  }
+
+  // Per-pack read counters for the delivered packs, newest state: the debug overlay and the
+  // recording footer report this shape.
+  packReadSummary() {
+    return packReadTracker.summarizePackReads(this._packReads, this._deliveredPacks);
   }
 
   // A spawn re-resolves what is delivered, so notices owed by the previous spawn are void.
@@ -1058,7 +1096,14 @@ class Session extends EventEmitter {
       isWorktree: this.isWorktree,
       resumeSessionId: this._resumeSessionId,
       activeAgents: this._activeAgentCount(),
-      packs: this._deliveredPacks.map((pack) => ({ ...pack })),
+      // Delivered packs plus what the agent has actually read of them. Built field by field, not
+      // spread: the resolved `dir` is a server-side absolute path a paired remote client has no use for.
+      packs: this._deliveredPacks.map((pack) => {
+        const stats = packReadTracker.packReadStats(this._packReads, pack.name);
+        const entry = { name: pack.name, version: pack.version, reads: stats.reads };
+        if (stats.readsSinceNotice !== null) entry.readsSinceNotice = stats.readsSinceNotice;
+        return entry;
+      }),
       pendingWakeup: this._pendingWakeup(),
       pendingPromptKind: this._pendingPromptKind,
       mergeStatus: this.mergeStatus,
@@ -1773,6 +1818,7 @@ class Session extends EventEmitter {
           ? { heldForMs: Date.now() - held.ts, seq: held.seq, lastActivitySeq: this._lastActivitySeq }
           : null,
       },
+      packs: this.packReadSummary(),
       decisions: this._decisionLog.slice(-15),
     };
   }
@@ -2066,6 +2112,9 @@ class Session extends EventEmitter {
         baseDir: this._hooksBaseDir,
         permissions: this._settingsPermissions,
         detectScheduledWakeups: this._detectScheduledWakeups,
+        // Only a session that actually delivered a pack can attribute a Read to one, so nothing else
+        // pays for the extra matcher (and its settings file stays byte-identical to the pre-telemetry one).
+        packReadTelemetry: this._packReadTelemetry && this._deliveredPacks.length > 0,
         enableProjectMcp: this._enableProjectMcp,
         rtkPath: this._rtkPath,
       });
@@ -2100,6 +2149,7 @@ class Session extends EventEmitter {
   async _resolvePacks() {
     this._deliveredPacks = [];
     this._clearPackNotice();
+    packReadTracker.clearPackReads(this._packReads);
     if (this._packs.length === 0) return { args: [], packs: [] };
 
     const builtRoot = this._packsBuiltRoot || defaultBuiltRoot();
@@ -2113,7 +2163,9 @@ class Session extends EventEmitter {
         continue;
       }
       args.push("--add-dir", resolved.dir);
-      this._deliveredPacks.push({ name: resolved.name, version: resolved.version });
+      // `dir` rides the delivered record so the read tracker can classify a path against it; it is
+      // server-side only (toSnapshot rebuilds its entries without it).
+      this._deliveredPacks.push({ name: resolved.name, version: resolved.version, dir: resolved.dir });
       this._recordDecision({ kind: "pack", ts, name, decision: "delivered", version: resolved.version });
     }
     return { args, packs: this._deliveredPacks };
@@ -2200,7 +2252,7 @@ class Session extends EventEmitter {
     catch { /* best-effort: settle failed, but the exit MUST still propagate (anti-deadlock) */ }
 
     if (this._recorder) {
-      this._recorder.writeFooter("pty_exit", exitCode);
+      this._recorder.writeFooter("pty_exit", exitCode, { packReads: this.packReadSummary() });
       this._recorder.close();
     }
 

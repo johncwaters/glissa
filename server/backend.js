@@ -345,6 +345,8 @@ function createBackend(httpServer, options = {}) {
       // Context packs delivered as --add-dir at spawn. Hand-edited on the project record in M2 (it is
       // deliberately not a control-WS settable key); the Session validates the shape defensively.
       packs: project.packs,
+      // Pack read telemetry (config kill switch; undefined -> Session default true).
+      packReadTelemetry: cfg.packReadTelemetry,
     });
     // Signals-only by default (kill switch: config recordSignals); cfg.capture opts into raw PTY
     // bytes on top. See AGENTS.md, "Session Recording".

@@ -32,6 +32,11 @@ const HOOK_EVENTS = ['SessionStart', 'SessionEnd', 'UserPromptSubmit', 'Stop', '
 // re-filters by tool_name server-side as defense in depth.
 const WAKEUP_TOOL_MATCHER = 'ScheduleWakeup|CronCreate|CronDelete';
 
+// Second PostToolUse matcher: pack read telemetry (did the spawned agent ever open the context pack
+// it was given). Injected ONLY for a session that delivers packs, so a pack-less session's settings
+// file stays byte-identical to the pre-telemetry one.
+const PACK_READ_TOOL_MATCHER = 'Read';
+
 function generateToken() {
   return crypto.randomBytes(32).toString('hex');
 }
@@ -50,7 +55,7 @@ function safeDirSegment(id) {
 // `permissions` ({ deny: [...] }) is merged in for the headless lanes - the PR-review and PostHog
 // deny-lists (efficacy under --dangerously-skip-permissions is why they are a guard, not the guard).
 // Omitted for ordinary user sessions, so their settings are byte-identical to before.
-function buildHookSettings({ port, glissaId, token, timeoutSec = DEFAULT_TIMEOUT_SEC, permissions = null, detectScheduledWakeups = true, enableProjectMcp = false, rtkPath = null }) {
+function buildHookSettings({ port, glissaId, token, timeoutSec = DEFAULT_TIMEOUT_SEC, permissions = null, detectScheduledWakeups = true, packReadTelemetry = false, enableProjectMcp = false, rtkPath = null }) {
   if (!port || !glissaId || !token) {
     throw new Error('buildHookSettings requires port, glissaId, token');
   }
@@ -60,9 +65,12 @@ function buildHookSettings({ port, glissaId, token, timeoutSec = DEFAULT_TIMEOUT
     const url = `${base}/${event.toLowerCase()}?t=${encodeURIComponent(token)}`;
     hooks[event] = [{ hooks: [{ type: 'http', url, timeout: timeoutSec }] }];
   }
-  if (detectScheduledWakeups) {
+  const postToolUse = [];
+  if (detectScheduledWakeups) postToolUse.push(WAKEUP_TOOL_MATCHER);
+  if (packReadTelemetry) postToolUse.push(PACK_READ_TOOL_MATCHER);
+  if (postToolUse.length > 0) {
     const url = `${base}/posttooluse?t=${encodeURIComponent(token)}`;
-    hooks.PostToolUse = [{ matcher: WAKEUP_TOOL_MATCHER, hooks: [{ type: 'http', url, timeout: timeoutSec }] }];
+    hooks.PostToolUse = postToolUse.map((matcher) => ({ matcher, hooks: [{ type: 'http', url, timeout: timeoutSec }] }));
   }
   if (rtkPath) {
     hooks.PreToolUse = [buildRtkHookEntry(rtkPath)];
@@ -81,12 +89,12 @@ function buildHookSettings({ port, glissaId, token, timeoutSec = DEFAULT_TIMEOUT
 }
 
 // Write the per-session settings file. Returns { settingsPath, dir, token, cleanup }.
-function writeSessionSettings({ port, glissaId, token, baseDir = DEFAULT_BASE_DIR, timeoutSec = DEFAULT_TIMEOUT_SEC, permissions = null, detectScheduledWakeups = true, enableProjectMcp = false, rtkPath = null }) {
+function writeSessionSettings({ port, glissaId, token, baseDir = DEFAULT_BASE_DIR, timeoutSec = DEFAULT_TIMEOUT_SEC, permissions = null, detectScheduledWakeups = true, packReadTelemetry = false, enableProjectMcp = false, rtkPath = null }) {
   const tok = token || generateToken();
   const dir = path.join(baseDir, safeDirSegment(glissaId));
   fs.mkdirSync(dir, { recursive: true });
   const settingsPath = path.join(dir, 'settings.json');
-  const settings = buildHookSettings({ port, glissaId, token: tok, timeoutSec, permissions, detectScheduledWakeups, enableProjectMcp, rtkPath });
+  const settings = buildHookSettings({ port, glissaId, token: tok, timeoutSec, permissions, detectScheduledWakeups, packReadTelemetry, enableProjectMcp, rtkPath });
   fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
   return {
     settingsPath,
@@ -136,6 +144,7 @@ module.exports = {
   safeDirSegment,
   HOOK_EVENTS,
   WAKEUP_TOOL_MATCHER,
+  PACK_READ_TOOL_MATCHER,
   DEFAULT_BASE_DIR,
   DEFAULT_TIMEOUT_SEC,
 };

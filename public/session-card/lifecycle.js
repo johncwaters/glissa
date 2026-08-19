@@ -340,6 +340,17 @@ export function notePackVersion(name, version) {
   refreshPackStaleness();
 }
 
+// One line of read telemetry per delivered pack: "name: N reads" (plus the count since the staleness
+// notice, once one has been injected). Server-side counters, so a pack never read reads as 0.
+function packReadsText(packs) {
+  const rows = (Array.isArray(packs) ? packs : []).map((pack) => {
+    const reads = Number(pack.reads) || 0;
+    const since = pack.readsSinceNotice == null ? '' : `, ${Number(pack.readsSinceNotice) || 0} since notice`;
+    return `${pack.name}: ${reads} ${reads === 1 ? 'read' : 'reads'}${since}`;
+  });
+  return `Reads by this session: ${rows.join('; ')}`;
+}
+
 function applyPackStaleness(ui) {
   const stale = stalePackNames(ui.packs, latestPackVersions);
   const badge = ui.card.querySelector('.pack-badge');
@@ -349,7 +360,9 @@ function applyPackStaleness(ui) {
     return;
   }
   ui.card.dataset.packStale = '';
-  if (badge) badge.title = `Rebuilt since this session started: ${stale.join(', ')}. Restart it to pick up the new context.`;
+  // Reads ride the same tooltip rather than a chip of their own: "rebuilt, and this session read it
+  // N times" is one thought, and the chip only renders while a pack is stale anyway.
+  if (badge) badge.title = `Rebuilt since this session started: ${stale.join(', ')}. Restart it to pick up the new context.\n${packReadsText(ui.packs)}`;
 }
 
 function refreshPackStaleness() {

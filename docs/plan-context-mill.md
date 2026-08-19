@@ -123,3 +123,12 @@ Each milestone lands independently; M1+M2 alone already beat the status quo (ver
 1. Shared pack sources and specs live in a dedicated `packs/` directory inside the Glissa install (this repo), version-controlled with Glissa itself. Built output stays under `~/.glissa/packs/built/` (runtime artifact, writable even when the install dir is not).
 2. Distiller lane: yes, and its first target is the glissa pack (distilling this repo's own docs).
 3. No auto-derived default pack; every pack is explicit opt-in per project.
+
+## Measuring (what is observable now)
+
+The mill can assemble, deliver, rebuild and warn; the open question it could not answer was whether any of that helps. First measurable landed: consumption.
+
+- **Per-pack read counts.** A session that delivers packs gets a second matcher-scoped `PostToolUse` hook (`matcher: 'Read'`); each callback whose `file_path` falls inside a delivered pack dir bumps that pack. Off for pack-less sessions (byte-identical settings file) and killable with `config.packReadTelemetry: false`.
+- **Did the live notice work.** Taking an M4 staleness notice arms a `readsSinceNotice` counter, so a notice followed by zero re-reads is visible as exactly that.
+- **Where to look.** `toSnapshot().packs[].reads` (card debug overlay, and the pack-stale chip tooltip), and the `packReads` aggregate in each session recording's footer. Per-read hook callbacks are deliberately not recorded at the `signals` level.
+- **Not yet measured.** Whether reads correlate with better outcomes. The cost half of that comparison already exists in the usage lane (`server/usage-wiring.js`), so a pack-on vs pack-off run can be priced; the quality half still needs a judgment call from the operator.

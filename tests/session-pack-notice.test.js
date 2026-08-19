@@ -117,7 +117,7 @@ test('a restart voids the notice the previous spawn owed', async () => {
     // The next spawn re-resolves the pack dir, so it delivers whatever is current and starts clean.
     await s._resolvePacks();
     assert.equal(s.takePackNoticeContext(), null, 'the pending notice did not survive the re-resolve');
-    assert.deepEqual(s.toSnapshot().packs, [{ name: 'alpha', version: 'v1' }]);
+    assert.deepEqual(s.toSnapshot().packs, [{ name: 'alpha', version: 'v1', reads: 0 }]);
   } finally {
     s.destroy();
     await fsp.rm(builtRoot, { recursive: true, force: true });

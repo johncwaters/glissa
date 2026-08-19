@@ -20,6 +20,7 @@ Pure cores seam-extracted from `sessions.js`: no fs, no git, no async, no Sessio
 | `wakeup-tracker.js` | Pending self-revival bookkeeping (ScheduleWakeup / CronCreate / CronDelete); advisory metadata only, never gates a transition; self-expiring entries |
 | `merge-prompt.js` | Pure builder of the manual-merge handoff prompt pasted into a parked worktree's PTY |
 | `pack-notice.js` | Pure `buildPackNotice(deliveredPacks, latestVersions)` -> the one Glissa-authored line a `UserPromptSubmit` hook response injects when a delivered context pack has been rebuilt; hard-capped, never pack content |
+| `pack-read-tracker.js` | Pure pack read telemetry: `packForPath` classifies a Read tool call against the delivered pack dirs (normalization keyed on path SHAPE, so a Windows path folds case wherever the test runs), plus per-pack counts and the after-notice counter |
 | `anti-slop-prompt.js` | Fixed deterministic anti-slop note for `--append-system-prompt`; single line, no double quotes (must survive the cmd.exe shim re-parse) |
 | `post-turn-rules.js` | Pure idempotent post-turn hygiene rules, `(content) -> { content, findings }`; applied by `../post-turn-checker.js` |
 | `slop-code-patterns.js` | Pure regex-based code-slop detection (`detectCodeSlop`), Noise/Lies/Soul taxonomy, offsets only |
