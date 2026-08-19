@@ -207,6 +207,12 @@ test('a corrupt warehouse starts empty, warns, and never crashes the pass', asyn
   assert.deepEqual(stored.records.map((record) => record.day), ['2026-08-18']);
 });
 
+/*
+ * `fsPromises` is a real injected dep of createUsageScanner, so the broken write below genuinely reaches
+ * writeWarehouseFile. The third assertion is what keeps this test from ever passing vacuously: if the
+ * injection stopped taking effect, the REAL write would succeed, the file would exist, and no warning
+ * would have been emitted.
+ */
 test('an unwritable warehouse path degrades to a warning, not a failed scan', async () => {
   const root = await makeTempRoot();
   await writeTranscript(root, 'a.jsonl', [claudeLine({ messageId: 'm1', day: '2026-08-18' })]);
@@ -219,6 +225,21 @@ test('an unwritable warehouse path degrades to a warning, not a failed scan', as
   const pass = await scanner.runPass();
   assert.equal(pass.entries, 1, 'the scan itself succeeded');
   assert.ok(warnings.some((message) => message.includes('warehouse write failed')), `warned: ${warnings.join(' | ')}`);
+  assert.equal(await warehouseExists(root), false, 'the injected failure really did block the write');
+});
+
+// The terminal catch on the write chain is reachable: writeWarehouseFile rejects when its OWN catch block
+// throws, and without that catch the rejection fails the entire scan pass.
+test('a throwing logger during a failed write still does not fail the scan', async () => {
+  const root = await makeTempRoot();
+  await writeTranscript(root, 'a.jsonl', [claudeLine({ messageId: 'm1', day: '2026-08-18' })]);
+  const scanner = makeScanner(root, {
+    logger: { warn: () => { throw new Error('logger exploded'); } },
+    fsPromises: brokenWriteFs(),
+  });
+  const pass = await scanner.runPass();
+  assert.equal(pass.entries, 1, 'a history write problem never costs the scan');
+  assert.equal(await warehouseExists(root), false);
 });
 
 test('no warehousePath means the feature is inert: nothing read, nothing written', async () => {

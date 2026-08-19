@@ -565,7 +565,10 @@ function buildDailySection() {
     const tr = el('tr', 'usage-row');
     if (row.source === 'history') tr.dataset.source = 'history';
     const models = sortModelRows(row.models);
-    const toggle = buildBreakdownToggle(day, models.length);
+    // Namespaced by view: weeks are keyed by their MONDAY, so a bare day key expanded in Day view would
+    // arrive pre-expanded in Week view as the same string.
+    const expandKey = `${periodView}:${day}`;
+    const toggle = buildBreakdownToggle(expandKey, models.length);
     appendCells(tr, [
       { node: buildPeriodCell(row, periodView), title: day },
       { text: formatTokens(row.tokens), numeric: true },
@@ -574,7 +577,7 @@ function buildDailySection() {
     ]);
     body.append(tr);
     if (models.length === 0) continue;
-    if (!_expandedDays.has(day)) continue;
+    if (!_expandedDays.has(expandKey)) continue;
     body.append(buildBreakdownRow(models));
   }
   section.append(wrap);
@@ -639,20 +642,20 @@ function buildHeatmap(daily) {
 
 // Stable label, state on aria-expanded (the chevron is a CSS response to that attribute), so the
 // control never renames itself between open and closed.
-function buildBreakdownToggle(day, modelCount) {
+function buildBreakdownToggle(expandKey, modelCount) {
   if (modelCount === 0) return null;
   const button = el('button', 'usage-toggle', 'Models');
   button.type = 'button';
-  button.dataset.usageDay = day;
-  button.setAttribute('aria-expanded', _expandedDays.has(day) ? 'true' : 'false');
+  button.dataset.usageDay = expandKey;
+  button.setAttribute('aria-expanded', _expandedDays.has(expandKey) ? 'true' : 'false');
   button.addEventListener('click', () => {
-    _focusAfterRender = { kind: 'day', day };
-    if (_expandedDays.has(day)) {
-      _expandedDays.delete(day);
+    _focusAfterRender = { kind: 'day', day: expandKey };
+    if (_expandedDays.has(expandKey)) {
+      _expandedDays.delete(expandKey);
       render();
       return;
     }
-    _expandedDays.add(day);
+    _expandedDays.add(expandKey);
     render();
   });
   return button;

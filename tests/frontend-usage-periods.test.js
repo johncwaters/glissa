@@ -106,6 +106,25 @@ test('period source: history only when every day in the bucket is history', asyn
   assert.equal(historyNote(null), '');
 });
 
+// A period row mirrors a daily row's shape, vendors included, so a consumer cannot have to branch on which
+// view it was handed.
+test('period rows carry the union of the vendors under them', async () => {
+  const { weeklyRows, monthlyRows } = await importCore();
+  const opus = { key: 'claude-opus-5', model: 'claude-opus-5', vendor: 'claude', tokens: 100, costUSD: 1, input: 100, output: 0, cacheCreate: 0, cacheRead: 0 };
+  const codex = { key: 'gpt-5.5', model: 'gpt-5.5', vendor: 'codex', tokens: 50, costUSD: 1, input: 50, output: 0, cacheCreate: 0, cacheRead: 0 };
+  const rows = weeklyRows([
+    { ...day('2026-08-17', { models: [opus] }), vendors: ['claude'] },
+    { ...day('2026-08-18', { models: [codex] }), vendors: ['codex'] },
+  ]);
+  assert.deepEqual(rows[0].vendors, ['claude', 'codex']);
+  assert.deepEqual(monthlyRows([{ ...day('2026-08-17', { models: [opus] }), vendors: ['claude'] }])[0].vendors, ['claude']);
+  // A history row is rebuilt from stored day-by-model rollups, so its vendors come off the model rows.
+  const historyOnly = weeklyRows([day('2026-08-17', { models: [codex], source: 'history' })]);
+  assert.deepEqual(historyOnly[0].vendors, ['codex']);
+  // Same key as a daily row, so the shape matches even when nothing is known.
+  assert.deepEqual(weeklyRows([{ day: '2026-08-17', tokens: 1, costUSD: 1, models: [] }])[0].vendors, []);
+});
+
 test('periodRows and periodLabel: one switch, three views, one label rule', async () => {
   const { periodRows, periodLabel, periodHint, PERIOD_VIEWS, DEFAULT_PERIOD_VIEW } = await importCore();
   const daily = [day('2026-08-17'), day('2026-08-18')];

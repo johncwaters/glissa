@@ -398,6 +398,9 @@ function createUsageScanner(deps = {}) {
     // Nothing moved: an idle machine rescanning on its interval should not rewrite the same bytes.
     if (signature === warehouseSignature) return;
     warehouseSignature = signature;
+    // The terminal catch is NOT redundant with writeWarehouseFile's own try/catch: if that catch block
+    // itself throws (an injected logger that raises, a non-Error thrown so error.message does), the
+    // rejection propagates out of this awaited chain and fails the whole scan pass. Verified both ways.
     warehouseWriteChain = warehouseWriteChain.then(() => writeWarehouseFile(payload)).catch(() => {});
     await warehouseWriteChain;
   }

@@ -328,6 +328,7 @@ function emptyPeriodBucket(key) {
     cacheRead: 0,
     days: 0,
     sources: new Set(),
+    vendorSet: new Set(),
     modelByName: new Map(),
   };
 }
@@ -341,6 +342,13 @@ function addDayToPeriod(bucket, row) {
   bucket.cacheRead += finiteNumber(row?.cacheRead) ?? 0;
   bucket.days += 1;
   bucket.sources.add(row?.source === 'history' ? 'history' : 'live');
+  // A period row mirrors a daily row's shape, so it carries the union of the vendors under it. Taken from
+  // the day's own `vendors` when the server supplied one, and from its model rows otherwise (history rows
+  // are rebuilt from stored rollups, which are keyed by model rather than by vendor).
+  for (const vendor of (Array.isArray(row?.vendors) ? row.vendors : [])) bucket.vendorSet.add(vendor);
+  for (const model of (row?.models || [])) {
+    if (model?.vendor) bucket.vendorSet.add(model.vendor);
+  }
   for (const model of (row?.models || [])) {
     const name = modelLabel(model);
     const existing = bucket.modelByName.get(name) || { key: name, model: model?.model ?? name, vendor: model?.vendor, tokens: 0, costUSD: 0, input: 0, output: 0, cacheCreate: 0, cacheRead: 0 };
@@ -356,10 +364,11 @@ function addDayToPeriod(bucket, row) {
 
 // A period is history only when EVERY day in it is: one live day makes the total a live claim.
 function serializePeriodBucket(bucket) {
-  const { modelByName, sources, ...row } = bucket;
+  const { modelByName, sources, vendorSet, ...row } = bucket;
   row.day = bucket.key;
   row.models = Array.from(modelByName.values()).sort((a, b) => b.tokens - a.tokens);
   row.source = sources.has('live') ? 'live' : 'history';
+  row.vendors = Array.from(vendorSet).sort();
   return row;
 }
 
