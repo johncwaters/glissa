@@ -110,7 +110,7 @@ function render() {
   for (const project of projects) _root.append(buildProject(project));
 }
 
-// Mirrors the Radar and Teams activity seam: the view owns the condition, app.js owns the dot element.
+// The tab-activity seam shared by every view that raises a dot: the view owns the condition, app.js owns the dot element.
 export function setPrActivityCallback(callback) {
   _activityCallback = callback;
   if (_activityCallback) _activityCallback(attentionCount() > 0);

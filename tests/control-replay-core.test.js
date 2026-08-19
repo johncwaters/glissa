@@ -21,28 +21,29 @@ test('entriesSince returns only replayable types, non-replayable types are stamp
   log.stamp({ type: 'session-changed', id: 'a' });
   const notify = log.stamp({ type: 'notify', message: 'hi' });
   log.stamp({ type: 'health-snapshot' });
-  const teamStarted = log.stamp({ type: 'team-run-started', teamId: 'x' });
+  const postTurn = log.stamp({ type: 'post-turn-result', id: 'a' });
   log.stamp({ type: 'session-git', id: 'a' });
 
   const { entries, evicted } = log.entriesSince(0);
   assert.equal(evicted, false);
-  assert.deepEqual(entries.map((e) => e.type), ['notify', 'team-run-started']);
+  assert.deepEqual(entries.map((e) => e.type), ['notify', 'post-turn-result']);
   assert.equal(entries[0], notify);
-  assert.equal(entries[1], teamStarted);
+  assert.equal(entries[1], postTurn);
 });
 
-test('entriesSince covers the full allowlist: notify, session-error, post-turn-result, team-*', () => {
+test('entriesSince covers the exact allowlist and nothing else: notify, session-error, post-turn-result', () => {
   const log = createReplayLog();
   log.stamp({ type: 'notify' });
   log.stamp({ type: 'session-error' });
   log.stamp({ type: 'post-turn-result' });
-  log.stamp({ type: 'team-stage-complete' });
-  log.stamp({ type: 'team-run-failed' });
+  // A near-miss type is not a prefix match away from replaying: the allowlist is exact.
+  log.stamp({ type: 'notify-extra' });
+  log.stamp({ type: 'session-agents' });
 
   const { entries } = log.entriesSince(0);
   assert.deepEqual(
     entries.map((e) => e.type),
-    ['notify', 'session-error', 'post-turn-result', 'team-stage-complete', 'team-run-failed'],
+    ['notify', 'session-error', 'post-turn-result'],
   );
 });
 

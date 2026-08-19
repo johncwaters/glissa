@@ -13,7 +13,7 @@ const pendingRequests = new Map(); // requestId -> { resolve, timer }
 
 // Highest control-broadcast seq seen so far. Survives across reconnects (unlike the server,
 // which holds no per-connection state) so a reconnect can declare `?since=<lastSeq>` and
-// recover exactly the transient broadcasts (notify, team-*, ...) missed during the gap.
+// recover exactly the transient broadcasts (notify, ...) missed during the gap.
 let lastSeq = 0;
 
 let _messageHandler = null;

@@ -4,9 +4,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { TIMEOUT_KEYS, BOOLEAN_KEYS, STRING_KEYS } = require('./config-store');
 const { STATES } = require('../shared/states');
-const { computeNextFire } = require('./scheduler');
 const { listRepoConversations } = require('../session/core/conversation-history');
-const { decideEditorOpenAccess, normalizeClientTrust } = require('./core/request-trust');
+const { normalizeClientTrust } = require('./core/request-trust');
 const { readPosthogReport } = require('./posthog-report');
 const posthogCore = require('./core/posthog-core');
 
@@ -185,14 +184,6 @@ function sanitizePosthog(ph) {
   return out;
 }
 
-// Resolve `segments` under `baseDir` and confirm the result stays inside it (path-traversal guard).
-// Returns the absolute path, or null when the resolved path escapes baseDir.
-function confinePath(baseDir, ...segments) {
-  const abs = path.resolve(baseDir, ...segments);
-  const rel = path.relative(baseDir, abs);
-  return rel.startsWith('..') || path.isAbsolute(rel) ? null : abs;
-}
-
 // Reads `since` from a `/control?since=<n>` upgrade URL. Returns null for a missing/malformed
 // value (no query string, no param, non-numeric) so the caller treats it as "no replay wanted".
 function parseSinceParam(url) {
@@ -236,15 +227,6 @@ function registerControlHandlers(controlWss, deps) {
     // Replay of transient broadcasts missed across a reconnect gap (optional - undefined in
     // older callers/tests; connect then behaves as before, snapshot-only).
     controlReplayLog = null,
-    // Teams (optional - undefined in older callers/tests).
-    registry = null,
-    orchestrator = null,
-    scheduler = null,
-    teamOutput = null,
-    getProjectPathById = null,
-    openInEditor = null,
-    startPackSetup = null,
-    removeEphemeralSession = null,
   } = deps;
 
   /** Find a session by id (primary) with name fallback for legacy clients. */
@@ -336,22 +318,6 @@ function registerControlHandlers(controlWss, deps) {
     const sess = findSession(msg);
     if (!sess) {
       sendError(ws, 'Session not found');
-      return;
-    }
-
-    // Ephemeral sessions (e.g. guided team-pack setup) were never persisted to config.projects, so
-    // the filter below is a no-op and the config-reload diff explicitly skips them - making the UI
-    // remove button a dead click. Tear them down directly instead: kill the PTY, drop the card.
-    if (sess.ephemeral) {
-      if (removeEphemeralSession) {
-        removeEphemeralSession(sess.id);
-        return;
-      }
-      // Minimal fallback when backend teardown isn't injected (older callers/tests).
-      sess.destroy();
-      sessions.delete(sess.id);
-      broadcastControl({ type: 'session-removed', id: sess.id, session: sess.name });
-      console.log(`[control] Removed session via UI: ${sess.name}`);
       return;
     }
 
@@ -599,9 +565,9 @@ function registerControlHandlers(controlWss, deps) {
 
   /*
    * The three per-issue Radar actions. All of them are DASHBOARD-EQUIVALENT (open/paste into a
-   * session, change an issue status in PostHog, re-run an investigation), so unlike open-artifact
-   * they carry no remote refusal: a paired phone is meant to be able to act on an error the same way
-   * the desk dashboard can, and the control WS can already spawn a session anywhere. See
+   * session, change an issue status in PostHog, re-run an investigation), so they carry no remote
+   * refusal: a paired phone is meant to be able to act on an error the same way the desk dashboard
+   * can, and the control WS can already spawn a session anywhere. See
    * server/core/request-trust.js for the actions that do need the local listener.
    *
    * Every reply is a requestId round-trip, so an OLD client (which never sends these) sees nothing
@@ -753,282 +719,9 @@ function registerControlHandlers(controlWss, deps) {
     }, 200);
   }
 
-  // --- Teams ---
-
-  function handleListTeams(msg, ws) {
-    const teams = [];
-    if (registry) {
-      for (const id of registry.listTeams()) {
-        try {
-          const t = registry.loadTeam(id);
-          teams.push({
-            id: t.id,
-            name: t.name,
-            description: t.description || '',
-            outputPath: t.outputPath,
-            schedule: t.schedule,
-            stageTimeoutSeconds: t.stageTimeoutSeconds || 900,
-            permissions: { mode: t.permissions?.mode || 'interactive', deny: t.permissions?.deny || [] },
-            chat: { allowQuestions: t.chat?.allowQuestions !== false },
-            stages: t.stages.map((s) => s.id),
-            stageDetail: t.stages.map((s) => ({
-              id: s.id,
-              model: s.model || 'sonnet',
-              summary: s.summary || '',
-              produces: s.produces,
-            })),
-          });
-        } catch { /* skip an invalid team definition */ }
-      }
-    }
-    ws.send(JSON.stringify({ type: 'teams', requestId: msg.requestId || null, teams, activations: config.teams || [] }));
-  }
-
-  function handleRunTeam(msg, ws) {
-    if (!orchestrator) { sendError(ws, 'Teams are not available'); return; }
-    const { teamId, projectId } = msg;
-    if (!teamId || !projectId) { sendError(ws, 'teamId and projectId are required'); return; }
-    if (orchestrator.isActive(teamId, projectId)) {
-      ws.send(JSON.stringify({ type: 'team-run-skipped', teamId, projectId, reason: 'already-active' }));
-      return;
-    }
-    ws.send(JSON.stringify({ type: 'team-run-accepted', teamId, projectId }));
-    // Long-running; do not await. Failures are broadcast by the orchestrator's own events, with a
-    // catch here as a backstop for synchronous setup errors (e.g. missing project).
-    Promise.resolve(orchestrator.runTeam({ teamId, projectId, trigger: 'manual' }))
-      .catch((err) => broadcastControl({ type: 'team-run-failed', teamId, projectId, reason: err.message }));
-  }
-
-  function handleCancelTeamRun(msg, ws) {
-    if (!orchestrator) return;
-    const cancelled = orchestrator.cancelRun(msg.teamId, msg.projectId);
-    ws.send(JSON.stringify({ type: 'team-run-cancel-ack', teamId: msg.teamId, projectId: msg.projectId, cancelled }));
-  }
-
-  // Everything one instance panel needs in a single round-trip: its run history (newest-first),
-  // whether a run is active, and the effective schedule + next fire time (activation override, else
-  // the team default). Runs are isolated in a git worktree, so the working-tree state is irrelevant.
-  async function handleGetTeamRuns(msg, ws) {
-    const { teamId, projectId } = msg;
-    const out = {
-      type: 'team-runs', requestId: msg.requestId || null, teamId, projectId,
-      runs: [], active: false, live: null, nextFire: null, enabled: false, schedule: null,
-    };
-    try {
-      let team = null;
-      if (registry) team = registry.loadTeam(teamId);
-      const projectPath = getProjectPathById ? getProjectPathById(projectId) : null;
-      if (team && teamOutput && projectPath) {
-        out.runs = await teamOutput.listRunSummaries(projectPath, team.outputPath, team.stages, 10);
-      }
-      const activation = (config.teams || []).find((e) => e.teamId === teamId && e.projectId === projectId);
-      out.enabled = !!activation?.enabled;
-      out.schedule = activation?.schedule || team?.schedule || null;
-      if (out.schedule?.days) out.nextFire = computeNextFire(out.schedule);
-      if (orchestrator) {
-        out.active = orchestrator.isActive(teamId, projectId);
-        // Live snapshot so a re-mounting/second client rehydrates the active stage, a continuous
-        // elapsed timer, and any in-flight cancel, instead of a blank rail + a zeroed clock.
-        if (out.active && typeof orchestrator.getRunState === 'function') {
-          out.live = orchestrator.getRunState(teamId, projectId);
-        }
-      }
-    } catch (err) {
-      sendError(ws, err.message, { requestId: msg.requestId || null });
-      return;
-    }
-    ws.send(JSON.stringify(out));
-  }
-
-  // Applies a fresh teams config (post configStore.save) to the live config and re-arms the scheduler.
-  // Shared by set-team-schedule, add-team-instance, and remove-team-instance, which otherwise repeat
-  // this same 4-line block after their own configStore.save.
-  function applyTeamsConfig(fresh) {
-    if (!fresh) return;
-    config.teams = fresh.teams;
-    if (scheduler && typeof scheduler.reload === 'function') scheduler.reload(fresh.teams);
-  }
-
-  function handleSetTeamSchedule(msg, ws) {
-    const { teamId, projectId } = msg;
-    if (!teamId || !projectId) { sendError(ws, 'teamId and projectId are required'); return; }
-    const fresh = configStore.save((cfg) => {
-      cfg.teams = Array.isArray(cfg.teams) ? cfg.teams : [];
-      let entry = cfg.teams.find((e) => e.teamId === teamId && e.projectId === projectId);
-      if (!entry) { entry = { teamId, projectId, enabled: false }; cfg.teams.push(entry); }
-      if (msg.schedule != null) entry.schedule = msg.schedule;
-      if (msg.enabled != null) entry.enabled = !!msg.enabled;
-    });
-    applyTeamsConfig(fresh);
-    ws.send(JSON.stringify({ type: 'team-schedule-updated', teamId, projectId, activations: fresh?.teams || config.teams || [] }));
-  }
-
-  // Create a team instance (a roster bound to a project). The same roster may target several
-  // projects; one activation per (teamId, projectId) pair. Created disabled (manual-only) until the
-  // user turns its schedule on. Broadcast so every connected tab reflects the new instance.
-  function handleAddTeamInstance(msg, ws) {
-    const { teamId, projectId } = msg;
-    if (!teamId || !projectId) { sendError(ws, 'teamId and projectId are required'); return; }
-    if (registry) {
-      try { registry.loadTeam(teamId); } catch { sendError(ws, `Unknown team "${teamId}"`); return; }
-    }
-    if (getProjectPathById && !getProjectPathById(projectId)) { sendError(ws, 'Unknown project'); return; }
-    const fresh = configStore.save((cfg) => {
-      cfg.teams = Array.isArray(cfg.teams) ? cfg.teams : [];
-      if (!cfg.teams.some((e) => e.teamId === teamId && e.projectId === projectId)) {
-        cfg.teams.push({ teamId, projectId, enabled: false });
-      }
-    });
-    applyTeamsConfig(fresh);
-    broadcastControl({ type: 'team-instance-added', teamId, projectId, activations: fresh?.teams || config.teams || [] });
-  }
-
-  // Remove a team instance. Drops the activation only - the on-disk run history under the project is
-  // intentionally preserved (removing an instance never deletes the work it produced).
-  function handleRemoveTeamInstance(msg, ws) {
-    const { teamId, projectId } = msg;
-    if (!teamId || !projectId) { sendError(ws, 'teamId and projectId are required'); return; }
-    const fresh = configStore.save((cfg) => {
-      cfg.teams = (Array.isArray(cfg.teams) ? cfg.teams : []).filter(
-        (e) => !(e.teamId === teamId && e.projectId === projectId),
-      );
-    });
-    applyTeamsConfig(fresh);
-    broadcastControl({ type: 'team-instance-removed', teamId, projectId, activations: fresh?.teams || config.teams || [] });
-  }
-
-  // Open one run artifact in the user's configured editor. Path-traversal guards: runId is a single
-  // safe segment, artifact must be one of the team's known produced files, and the resolved path must
-  // stay inside this team's runs/ directory. The spawn itself lives in backend (openInEditor).
-  function handleOpenArtifact(msg, ws) {
-    // A remote-classified connection (a paired phone reaching the second listener) would otherwise
-    // open the editor on the server machine and be told it succeeded. Refuse explicitly instead;
-    // ws.glissaTrust is stamped at upgrade time and absent when remote mode is off, which the
-    // decision reads as local.
-    if (!decideEditorOpenAccess(ws.glissaTrust).allow) {
-      sendError(ws, 'Artifacts open in an editor on the machine running Glissa, not on this device');
-      return;
-    }
-    if (!openInEditor) { sendError(ws, 'Opening artifacts is not available'); return; }
-    const { teamId, projectId, runId, artifact } = msg;
-    let team = null;
-    try { if (registry) team = registry.loadTeam(teamId); } catch { /* reported below */ }
-    if (!team) { sendError(ws, `Unknown team "${teamId}"`); return; }
-    const projectPath = getProjectPathById ? getProjectPathById(projectId) : null;
-    if (!projectPath) { sendError(ws, 'Unknown project'); return; }
-    // The charset admits dot-only names ("..", "..."); confinePath blocks the traversal anyway, but a
-    // run id can never be dot-only, so reject it here too (defense in depth).
-    if (!/^[\w.-]+$/.test(String(runId || '')) || /^\.+$/.test(String(runId))) { sendError(ws, 'Invalid run id'); return; }
-    const allowed = new Set(team.stages.map((s) => s.produces));
-    allowed.add('chat.md'); // the per-run operator conversation transcript is openable too
-    if (!allowed.has(artifact)) { sendError(ws, 'Unknown artifact'); return; }
-    const runsDir = path.join(projectPath, team.outputPath, 'runs');
-    const abs = confinePath(runsDir, runId, artifact);
-    if (!abs) { sendError(ws, 'Invalid artifact path'); return; }
-    if (!fs.existsSync(abs)) { sendError(ws, 'Artifact not found'); return; }
-    const r = openInEditor(abs);
-    ws.send(JSON.stringify({ type: 'artifact-opened', teamId, projectId, runId, artifact, ok: !!r.ok, error: r.error || null }));
-  }
-
-  // Report whether this project's pack for a team is filled in. Drives the dashboard's "set up" state
-  // so the operator knows to fill the pack before the first run.
-  function handleGetTeamPackStatus(msg, ws) {
-    const { teamId, projectId } = msg;
-    const out = {
-      type: 'team-pack-status', requestId: msg.requestId || null, teamId, projectId,
-      configured: false, unfilled: [], packDir: null,
-    };
-    try {
-      let team = null;
-      if (registry) team = registry.loadTeam(teamId);
-      const projectPath = getProjectPathById ? getProjectPathById(projectId) : null;
-      if (team && teamOutput && projectPath && typeof teamOutput.packStatus === 'function') {
-        const st = teamOutput.packStatus(projectPath, team.outputPath, team.packRequired, team.packShared);
-        out.configured = st.configured;
-        out.unfilled = st.unfilled;
-        out.packDir = st.packDir;
-      }
-    } catch (err) {
-      sendError(ws, err.message, { requestId: msg.requestId || null });
-      return;
-    }
-    ws.send(JSON.stringify(out));
-  }
-
-  // Start the guided pack-setup interview: an interactive Claude session (surfaced as a terminal
-  // card) that reads the project, interviews the operator, and fills the pack. The session is spawned
-  // by the backend (startPackSetup); on its exit the backend broadcasts an updated team-pack-status.
-  function handleSetupTeamPack(msg, ws) {
-    if (!startPackSetup) { sendError(ws, 'Guided setup is not available'); return; }
-    const { teamId, projectId } = msg;
-    if (!teamId || !projectId) { sendError(ws, 'teamId and projectId are required'); return; }
-    const r = startPackSetup({ teamId, projectId });
-    if (!r.ok) { sendError(ws, r.error || 'Could not start setup'); return; }
-    ws.send(JSON.stringify({
-      type: 'setup-team-pack-started', teamId, projectId,
-      sessionId: r.sessionId, already: !!r.already,
-    }));
-  }
-
-  // Post an operator message into the active run's conversation (steering note, or the answer to a
-  // pending agent QUESTION). The orchestrator records the turn and, if the run is awaiting input,
-  // resolves the pause so the stage re-runs with the answer.
-  function handlePostTeamMessage(msg, ws) {
-    if (!orchestrator || typeof orchestrator.postMessage !== 'function') {
-      sendError(ws, 'Teams are not available'); return;
-    }
-    const { teamId, projectId } = msg;
-    const text = typeof msg.text === 'string' ? msg.text : '';
-    if (!teamId || !projectId) { sendError(ws, 'teamId and projectId are required'); return; }
-    if (!text.trim()) { sendError(ws, 'Message text is required'); return; }
-    if (text.length > 8192) { sendError(ws, 'Message too long (max 8192 chars)'); return; }
-    const r = orchestrator.postMessage(teamId, projectId, text);
-    ws.send(JSON.stringify({
-      type: 'team-message-ack', teamId, projectId, ok: !!r.ok, answered: !!r.answered, error: r.ok ? null : (r.reason || 'no active run'),
-    }));
-  }
-
-  // Return the active run's conversation transcript (+ whether it is awaiting an answer) so a freshly
-  // mounted or second client rehydrates the chat pane. Reads chat.md from the active run folder.
-  function handleGetTeamChat(msg, ws) {
-    const { teamId, projectId } = msg;
-    const out = {
-      type: 'team-chat', requestId: msg.requestId || null, teamId, projectId,
-      messages: [], awaiting: false, pendingQuestion: null,
-    };
-    try {
-      const live = orchestrator?.getRunState?.(teamId, projectId) || null;
-      let team = null;
-      if (registry) team = registry.loadTeam(teamId);
-      const projectPath = getProjectPathById ? getProjectPathById(projectId) : null;
-      if (live?.runId && team && teamOutput && projectPath && typeof teamOutput.readChat === 'function') {
-        const runDir = path.join(projectPath, team.outputPath, 'runs', live.runId);
-        out.messages = teamOutput.readChat(runDir);
-        out.awaiting = !!live.awaiting;
-        out.pendingQuestion = live.pendingQuestion || null;
-      }
-    } catch (err) {
-      sendError(ws, err.message, { requestId: msg.requestId || null });
-      return;
-    }
-    ws.send(JSON.stringify(out));
-  }
-
   // Handler map - single dispatch table for all control message types
   // Session action handlers use findSession() for id-based lookup with name fallback.
   const handlers = {
-    'list-teams':       handleListTeams,
-    'run-team':         handleRunTeam,
-    'cancel-team-run':  handleCancelTeamRun,
-    'post-team-message': handlePostTeamMessage,
-    'get-team-chat':    handleGetTeamChat,
-    'get-team-runs':    handleGetTeamRuns,
-    'set-team-schedule': handleSetTeamSchedule,
-    'add-team-instance':    handleAddTeamInstance,
-    'remove-team-instance': handleRemoveTeamInstance,
-    'open-artifact':        handleOpenArtifact,
-    'get-team-pack-status': handleGetTeamPackStatus,
-    'setup-team-pack':      handleSetupTeamPack,
     'add-session':      handleAddSession,
     'list-conversations': handleListConversations,
     'resume-conversation': handleResumeConversation,

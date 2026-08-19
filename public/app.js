@@ -9,7 +9,7 @@ import { STATES } from '/shared/states.mjs';
 import { connectControl, disableReconnect, onControlMessage, sendControlMsg, sendControlRequest, setConnectionStateCallback } from './control-ws.js';
 import { createAddSessionDialog, createConfirmDialog, createSettingsDialog } from './dialogs.js';
 import { writeClipboardText } from './dom-helpers.js';
-import { activateFocusView, centerSessionQuietly, deactivateFocusView, focusAdjacentInRail, focusNextAttention, focusNthInRail, focusSessionInCenter, getFocusedSessionId, isFocusActive, mountFocusView, noteKnownProjectPath, refreshFocusRoster, restoreFocusedSession, setFocusMergeStatus } from './focus-view/focus-view.js';
+import { activateFocusView, centerSessionQuietly, deactivateFocusView, focusAdjacentInRail, focusNextAttention, focusNthInRail, getFocusedSessionId, isFocusActive, mountFocusView, noteKnownProjectPath, refreshFocusRoster, restoreFocusedSession, setFocusMergeStatus } from './focus-view/focus-view.js';
 import { initFormFactor, isPhoneLayout, onLayoutChange } from './form-factor.js';
 import { applyHealthSnapshot, mountHealthMonitor } from './health-monitor.js';
 import { initNotifications, showDesktopNotification } from './notifications.js';
@@ -23,7 +23,6 @@ import { applyState, applyTerminalSettings, createSessionCard, getSessionCount, 
 import { reconnectDataWs } from './session-card/terminal.js';
 import { showErrorToast } from './session-card/toast.js';
 import { forgetReviewSession, mergeSelectedSession, mountReviewSidebar, notifyWorktreeChanged, refreshReviewSidebar, resolveSelectedSession, resyncSelectedSession, setReviewBranchSync } from './sidebar/review-sidebar.js';
-import { handleTeamMessage, mountTeamsView, refreshTeamsProjects, setTabActivityCallback } from './teams-panel.js';
 import { applyTheme } from './theme.js';
 import { getActiveView, getThemeId, isSoundEnabled, setActiveView, setSoundEnabled } from './ui-prefs.js';
 
@@ -106,19 +105,7 @@ setConnectionStateCallback((state, label) => {
 
 // ── Control message handlers ─────────────────────────────────
 
-// Real projects (id -> name) for the Teams panel project picker. Ephemeral team-stage sessions
-// (id like "team:<run>:<stage>") are excluded - they are transient run cards, not run targets.
-const knownProjects = new Map();
-function getKnownProjects() {
-  return [...knownProjects].map(([id, name]) => ({ id, name }));
-}
-
 function handleSnapshot(sessions) {
-  knownProjects.clear();
-  for (const s of (sessions || [])) {
-    if (!s.ephemeral) knownProjects.set(s.id, s.name);
-  }
-
   for (const s of (sessions || [])) {
     if (!s.ephemeral) noteKnownProjectPath(s.path); // remember the project so its rail group survives a last-session close
     const exists = hasSession(s.id);
@@ -142,13 +129,9 @@ function handleSnapshot(sessions) {
   // then restore the session the operator had open (the boot/reload race: the saved session does not
   // exist until this first snapshot populates the cards). The empty state ("Nothing to focus") lives
   // in the Focus view itself, so no grid placeholder here.
-  const focusActive = isFocusActive();
-  if (focusActive) { refreshFocusRoster(); restoreFocusedSession(); }
+  if (isFocusActive()) { refreshFocusRoster(); restoreFocusedSession(); }
   // The phone Board reads the same registry these cards just populated; a no-op off the phone layout.
   refreshPhoneBoard();
-  // Teams may have been restored as the active view at boot, before knownProjects was populated, so its
-  // project picker was seeded empty; refill it in place now that the snapshot has arrived.
-  if (!focusActive && _activeView === 'teams') refreshTeamsProjects(getKnownProjects());
 }
 
 function handleStateChange(msg) {
@@ -195,10 +178,10 @@ function handleStateChange(msg) {
 const messageHandlers = {
   'snapshot':           (msg) => handleSnapshot(msg.sessions),
   'state-change':       (msg) => handleStateChange(msg),
-  'session-added':      (msg) => { if (!msg.ephemeral) { knownProjects.set(msg.id, msg.session); noteKnownProjectPath(msg.path); } if (!hasSession(msg.id)) { createSessionCard(msg.id, msg.session, msg.state, { skipPerms: !!msg.skipPerms, worktree: !!msg.worktree, path: msg.path, resume: !!msg.resumeSessionId }); } if (isFocusActive()) refreshFocusRoster(); refreshPhoneBoard(); },
-  'session-removed':    (msg) => { knownProjects.delete(msg.id); removeSessionCard(msg.id); forgetReviewSession(msg.id); if (isFocusActive()) refreshFocusRoster(); refreshPhoneBoard(); },
-  'session-renamed':    (msg) => { if (knownProjects.has(msg.id)) knownProjects.set(msg.id, msg.newName); renameSessionCard(msg.id, msg.newName); refreshPhoneBoard(); },
-  'session-modified':   (msg) => { if (!msg.ephemeral) { knownProjects.set(msg.id, msg.session); noteKnownProjectPath(msg.path); } removeSessionCard(msg.id); forgetReviewSession(msg.id); createSessionCard(msg.id, msg.session, msg.state, { skipPerms: !!msg.skipPerms, worktree: !!msg.worktree, path: msg.path, resume: !!msg.resumeSessionId }); if (isFocusActive()) refreshFocusRoster(); refreshPhoneBoard(); },
+  'session-added':      (msg) => { if (!msg.ephemeral) noteKnownProjectPath(msg.path); if (!hasSession(msg.id)) { createSessionCard(msg.id, msg.session, msg.state, { skipPerms: !!msg.skipPerms, worktree: !!msg.worktree, path: msg.path, resume: !!msg.resumeSessionId }); } if (isFocusActive()) refreshFocusRoster(); refreshPhoneBoard(); },
+  'session-removed':    (msg) => { removeSessionCard(msg.id); forgetReviewSession(msg.id); if (isFocusActive()) refreshFocusRoster(); refreshPhoneBoard(); },
+  'session-renamed':    (msg) => { renameSessionCard(msg.id, msg.newName); refreshPhoneBoard(); },
+  'session-modified':   (msg) => { if (!msg.ephemeral) noteKnownProjectPath(msg.path); removeSessionCard(msg.id); forgetReviewSession(msg.id); createSessionCard(msg.id, msg.session, msg.state, { skipPerms: !!msg.skipPerms, worktree: !!msg.worktree, path: msg.path, resume: !!msg.resumeSessionId }); if (isFocusActive()) refreshFocusRoster(); refreshPhoneBoard(); },
   'session-git':        (msg) => setSessionWorktree(msg.id, !!msg.worktree),
   'session-resume':     (msg) => setSessionResume(msg.id, msg.resumeSessionId),
   // The agent count and a delivered notification both move the decision trace without any
@@ -224,33 +207,6 @@ const messageHandlers = {
   'health-snapshot':    (msg) => { if (msg.stats) { applyHealthSnapshot(msg.stats); applyRadarHealth(msg.stats); } },
   'posthog-status':     (msg) => applyPosthogStatus(msg),
   'pr-status':          (msg) => { applyPrStatus(msg); applyRadarPrStatus(msg); },
-  'team-run-accepted':  (msg) => handleTeamMessage(msg),
-  'team-run-started':   (msg) => handleTeamMessage(msg),
-  'team-stage-started': (msg) => handleTeamMessage(msg),
-  'team-stage-complete': (msg) => handleTeamMessage(msg),
-  'team-run-cancelling': (msg) => handleTeamMessage(msg),
-  'team-run-complete':  (msg) => handleTeamMessage(msg),
-  'team-revise-round':  (msg) => handleTeamMessage(msg),
-  'team-run-failed':    (msg) => handleTeamMessage(msg),
-  'team-run-skipped':   (msg) => handleTeamMessage(msg),
-  'team-run-needs-setup': (msg) => handleTeamMessage(msg),
-  'team-chat-message':  (msg) => handleTeamMessage(msg),
-  'team-run-awaiting-input': (msg) => handleTeamMessage(msg),
-  'team-run-resumed':   (msg) => handleTeamMessage(msg),
-  'team-instance-added':   (msg) => handleTeamMessage(msg),
-  'team-instance-removed': (msg) => handleTeamMessage(msg),
-  'team-schedule-updated': (msg) => handleTeamMessage(msg),
-  'setup-team-pack-started': (msg) => {
-    handleTeamMessage(msg);
-    // The guided-setup session is an interactive terminal; jump to Focus and pull it into the center
-    // so the operator can answer the interview instead of the click appearing to do nothing.
-    if (msg.sessionId) {
-      activateView('focus'); // synchronous; activates Focus so the borrow below has a live center
-      focusSessionInCenter(msg.sessionId);
-    }
-  },
-  'team-pack-updated':     (msg) => handleTeamMessage(msg),
-  'artifact-opened':    (msg) => { if (!msg.ok) showErrorToast(`Could not open ${msg.artifact || 'artifact'}${msg.error ? `: ${msg.error}` : ''}`); },
   'client-trust':       (msg) => applyClientTrust(msg.trust),
   'shutting-down':      () => {
     disableReconnect();
@@ -364,21 +320,17 @@ document.getElementById('btn-help').addEventListener('click', () => {
   createSettingsDialog('shortcuts');
 });
 
-// ── Primary view tabs (Focus / Teams / Radar / PRs) ────────
+// ── Primary view tabs (Focus / Radar / PRs) ────────
 
-const viewTeamsEl = document.getElementById('view-teams');
 const viewFocusEl = document.getElementById('view-focus');
 const viewRadarEl = document.getElementById('view-radar');
 const viewPrsEl = document.getElementById('view-prs');
-const tabTeams = document.getElementById('tab-teams');
 const tabFocus = document.getElementById('tab-focus');
 const tabRadar = document.getElementById('tab-radar');
 const tabPrs = document.getElementById('tab-prs');
-const tabActivityEl = document.getElementById('tab-teams-activity');
 const tabRadarActivityEl = document.getElementById('tab-radar-activity');
 const tabPrsActivityEl = document.getElementById('tab-prs-activity');
 
-setTabActivityCallback((active) => { tabActivityEl.classList.toggle('active', active); });
 setRadarActivityCallback((active) => {
   tabRadarActivityEl.classList.toggle('active', active);
   setPhoneScreenAttention('radar', active);
@@ -402,8 +354,8 @@ mountFocusView({
 
 mountReviewSidebar({ panel: document.getElementById('review-sidebar') });
 
-// Mounted eagerly, unlike Teams: a posthog-status broadcast can land while another tab is active,
-// and the tab's attention dot has to reflect it without the operator ever opening Radar.
+// Mounted eagerly: a posthog-status broadcast can land while another tab is active, and the tab's
+// attention dot has to reflect it without the operator ever opening Radar.
 mountRadarView(viewRadarEl);
 
 // Eager for the same reason as Radar: a pr-status broadcast can land while another tab is active, and
@@ -415,7 +367,6 @@ mountPrView(viewPrsEl);
 // off-screen as the canonical card home Focus borrows from - it is no longer a navigable view.
 const VIEW_TABS = [
   { view: 'focus', tab: tabFocus, el: viewFocusEl },
-  { view: 'teams', tab: tabTeams, el: viewTeamsEl },
   { view: 'radar', tab: tabRadar, el: viewRadarEl },
   { view: 'prs', tab: tabPrs, el: viewPrsEl },
 ];
@@ -439,7 +390,6 @@ function activateView(view) {
   }
   // Leaving Focus returns the borrowed card to its off-screen home grid.
   if (prev === 'focus' && view !== 'focus') deactivateFocusView();
-  if (view === 'teams') mountTeamsView(viewTeamsEl, getKnownProjects());
   if (view === 'focus') activateFocusView();
 }
 
@@ -459,18 +409,17 @@ for (let i = 0; i < VIEW_TABS.length; i++) {
 // Restore the last active view (Focus by default). Validate the saved view against VIEW_TABS so a
 // stale id (e.g. the removed "sessions" grid) falls back to Focus. Call activateView (not a bare
 // dataset set) so the view module activates; the snapshot that arrives later refreshes it and restores
-// the centered session / Teams projects (see handleSnapshot).
+// the centered session (see handleSnapshot).
 const savedView = getActiveView();
 activateView(VIEW_TABS.some((v) => v.view === savedView) ? savedView : 'focus');
 
 // ── Form-factor layout switch ────────────────────────────────
 // One app instance, two first-class layouts. Switching between them is a HANDOFF, not a re-render: the
-// phone shell borrows the review sidebar, the Teams panel, the desktop header's controls and the
-// focused session's card out of the desktop DOM, and gives all four back on the way out. Nothing is
+// phone shell borrows the review sidebar, the Radar and PRs panels, the desktop header's controls and
+// the focused session's card out of the desktop DOM, and gives them all back on the way out. Nothing is
 // duplicated, so neither layout can drift from the other's state.
 
 mountPhoneShell({
-  teamsPanelEl: viewTeamsEl,
   radarPanelEl: viewRadarEl,
   prsPanelEl: viewPrsEl,
   // The desktop header does not render under [data-layout="phone"], so its controls move to the Board's
@@ -482,7 +431,6 @@ mountPhoneShell({
     document.getElementById('btn-help'),
     headerMenu,
   ],
-  onTeamsShown: (panel) => mountTeamsView(panel, getKnownProjects()),
 });
 
 function applyFormFactorLayout(layout) {
@@ -494,7 +442,7 @@ function applyFormFactorLayout(layout) {
   }
   const carriedSessionId = getPhoneSessionId();
   deactivatePhoneShell();
-  activateView(_activeView); // re-activates Focus (or re-mounts Teams) now that the desktop DOM is whole
+  activateView(_activeView); // re-activates the saved view now that the desktop DOM is whole
   // Quietly, NOT via focusSessionInCenter: that path is the operator activating a pill, so it sends
   // start-session for a DORMANT target and dismiss for a COMPLETE one. A rotation is a layout event,
   // and treating it as a selection would respawn a session the operator just killed or acknowledge away

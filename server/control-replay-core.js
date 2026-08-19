@@ -5,7 +5,7 @@
  *
  * The dashboard's control-WS reconnects on a jittered backoff (public/reconnect-backoff.mjs).
  * The fresh `snapshot` sent on reconnect repairs all per-session state, but one-shot
- * broadcasts fired during the gap (notify, session-error, post-turn-result, team-* events)
+ * broadcasts fired during the gap (notify, session-error, post-turn-result)
  * are otherwise lost forever. `stamp` gives every broadcast a monotonic `seq`; `entriesSince`
  * lets a reconnecting client (which declares its own last-seen seq, since the server holds
  * no per-connection state across a reconnect) recover exactly the replayable ones it missed.
@@ -16,7 +16,7 @@
 const REPLAYABLE_EXACT = new Set(['notify', 'session-error', 'post-turn-result']);
 
 function isReplayable(type) {
-  return REPLAYABLE_EXACT.has(type) || (typeof type === 'string' && type.startsWith('team-'));
+  return REPLAYABLE_EXACT.has(type);
 }
 
 function createReplayLog({ maxEntries = 500, maxAgeMs = 5 * 60_000 } = {}) {

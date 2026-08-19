@@ -1,4 +1,4 @@
-// The phone layout's shell: six screens, one visible at a time, behind a bottom nav.
+// The phone layout's shell: five screens, one visible at a time, behind a bottom nav.
 //
 // This is a first-class layout, not a narrowed desktop. The desktop DOM (header, focus view, docked
 // sidebar) is not rendered at all under [data-layout="phone"]; the shell is only built the first time
@@ -8,13 +8,12 @@
 //   Board    - the landing screen: which session needs a carbon unit (see board-screen.js)
 //   Terminal - the selected session's live terminal, full bleed (see terminal-screen.js)
 //   Review   - the real review sidebar, re-parented in as a full screen
-//   Teams    - the real Teams panel, re-parented in as a full screen
 //   Radar    - the real Radar panel, re-parented in as a full screen
 //   PRs      - the real PRs panel, re-parented in as a full screen
 //
-// Five elements are BORROWED from the desktop DOM rather than rebuilt: the review sidebar, the Teams,
-// Radar and PRs panels, and the header controls the Board top bar adopts. Rebuilding any of them would
-// mean a second state pipeline for the same facts.
+// Four elements are BORROWED from the desktop DOM rather than rebuilt: the review sidebar, the Radar
+// and PRs panels, and the header controls the Board top bar adopts. Rebuilding any of them would mean
+// a second state pipeline for the same facts.
 
 import { STATES } from '/shared/states.mjs';
 import { sendControlMsg } from '../control-ws.js';
@@ -35,7 +34,6 @@ const SCREENS = Object.freeze([
   { id: BOARD, label: 'Board', glyph: '▤' },       // square with horizontal fill: the roster list
   { id: 'terminal', label: 'Terminal', glyph: '▸' }, // the brand forward marker: live output
   { id: 'review', label: 'Review', glyph: '◫' },     // square bisected vertically: a diff
-  { id: 'teams', label: 'Teams', glyph: '◈', nested: true }, // diamond in a diamond: a staged pipeline
   { id: 'radar', label: 'Radar', glyph: '◎', nested: true }, // ringed circle: a scan sweep
   { id: 'prs', label: 'PRs', glyph: '⇅', nested: true },     // opposed arrows: push and pull
 ]);
@@ -48,8 +46,6 @@ const screenAttentionById = new Map();
 let boardScreen = null;
 let terminalScreen = null;
 let reviewMountEl = null;
-let teamsMountEl = null;
-let teamsPanelEl = null;
 let radarMountEl = null;
 let radarPanelEl = null;
 let prsMountEl = null;
@@ -112,7 +108,7 @@ function syncVisualViewport() {
 
 // Deliberately NOT the ARIA tabs pattern. These screens are DESTINATIONS, not panels of one document:
 // each pushes browser history (the back gesture returns to the Board), and each holds an independent
-// surface - a live terminal, a diff panel, the Teams panel - rather than alternate content for one
+// surface - a live terminal, a diff panel, the Radar board - rather than alternate content for one
 // region. Tabs also imply Left/Right roving focus within a single composite control, which is wrong for
 // a bottom nav a thumb taps. So it is a plain <nav> of buttons with aria-current on the active one:
 // each button announces as a button, and half-implemented tab semantics (role=tab with no
@@ -229,7 +225,6 @@ function build() {
   boardScreen = createBoardScreen({ onSelectSession: (id) => openSession(id) });
   terminalScreen = createTerminalScreen({ onBack: () => showScreen(BOARD) });
   reviewMountEl = el('div', 'phone-review');
-  teamsMountEl = el('div', 'phone-teams');
   radarMountEl = el('div', 'phone-radar');
   prsMountEl = el('div', 'phone-prs');
 
@@ -238,7 +233,6 @@ function build() {
     [BOARD]: boardScreen.el,
     terminal: terminalScreen.el,
     review: reviewMountEl,
-    teams: teamsMountEl,
     radar: radarMountEl,
     prs: prsMountEl,
   };
@@ -376,7 +370,6 @@ function applyScreen(screenId) {
     }
     btn.removeAttribute('aria-current');
   }
-  if (screenId === 'teams') hooks.onTeamsShown?.(teamsPanelEl);
   // A hidden terminal had no measurable box, and one that never left the slot has unchanged dimensions
   // that make applyFit early-return; reveal() forces the fit + repaint either way.
   if (screenId === 'terminal') {
@@ -395,11 +388,10 @@ function showScreen(screenId) {
 
 // ── Activation ──
 // mountPhoneShell wires the shell to the app once; activatePhoneShell / deactivatePhoneShell run on
-// every layout flip and are what hand the borrowed DOM (review sidebar, Teams panel, the focused card)
-// between the two layouts.
+// every layout flip and are what hand the borrowed DOM (review sidebar, Radar and PRs panels, the
+// focused card) between the two layouts.
 export function mountPhoneShell(options) {
   hooks = options || {};
-  teamsPanelEl = hooks.teamsPanelEl || null;
   radarPanelEl = hooks.radarPanelEl || null;
   prsPanelEl = hooks.prsPanelEl || null;
 }
@@ -414,11 +406,9 @@ export function activatePhoneShell({ sessionId } = {}) {
   shellEl.hidden = false;
   for (const control of (hooks.headerControls || [])) adoptElement(control, boardScreen.topBarEl);
   reparentReviewPanel(reviewMountEl);
-  adoptElement(teamsPanelEl, teamsMountEl);
-  if (teamsPanelEl) teamsPanelEl.hidden = false;
-  // Radar and PRs are adopted the same way as Teams: the desktop tabpanel moves in whole, so the
-  // eagerly-mounted panel keeps its state, and hidden (set by the desktop tab strip) is lifted while
-  // the phone owns it. deactivate gives it back and activateView re-applies desktop visibility.
+  // The desktop tabpanel moves in whole, so the eagerly-mounted panel keeps its state, and hidden (set
+  // by the desktop tab strip) is lifted while the phone owns it. deactivate gives it back and
+  // activateView re-applies desktop visibility.
   adoptElement(radarPanelEl, radarMountEl);
   if (radarPanelEl) radarPanelEl.hidden = false;
   adoptElement(prsPanelEl, prsMountEl);
@@ -438,7 +428,6 @@ export function deactivatePhoneShell() {
   // subtree where its terminal cannot measure itself.
   terminalScreen.clear();
   reparentReviewPanel(null);
-  releaseElement(teamsPanelEl);
   releaseElement(radarPanelEl);
   releaseElement(prsPanelEl);
   for (const control of (hooks.headerControls || [])) releaseElement(control);
@@ -471,7 +460,7 @@ export function refreshPhoneBoard() {
   // A session removed while its terminal is on screen leaves the Terminal screen holding nothing
   // (refresh() above already cleared it). Staring at that empty state helps nobody: the session is
   // gone, so the screen's job is over; hand the operator back to the Board. Keyed on the ACTIVE
-  // screen so a removal never yanks the operator off Teams/Review/etc, where the Terminal screen is
+  // screen so a removal never yanks the operator off Review/Radar/etc, where the Terminal screen is
   // hidden and its empty state costs nothing.
   if (activeScreen === 'terminal' && !terminalScreen.getSessionId()) showScreen(BOARD);
   const dot = dotOf(navButtonById.get(BOARD));

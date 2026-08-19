@@ -163,10 +163,10 @@ class Session extends EventEmitter {
     // Resolved claude command ({ path, kind }). Defaults to the module-load
     // resolution; tests inject a stub to exercise the spawn branches deterministically.
     spawnCommand = CLAUDE_CMD,
-    // Team-stage spawn options. initialPrompt is appended as the FINAL positional arg (proven safe
-    // as a single argv element on the direct-exe path by the Phase-0 probe); extraClaudeArgs carries
-    // e.g. ["-p", "--model", "sonnet"]; ephemeral marks orchestrator-owned stage sessions that live
-    // in a separate map and must never be persisted to config.json.
+    // Headless-lane spawn options (PR review, PostHog investigations). initialPrompt is appended as
+    // the FINAL positional arg (proven safe as a single argv element on the direct-exe path by the
+    // Phase-0 probe); extraClaudeArgs carries e.g. ["-p", "--model", "sonnet"]; ephemeral marks
+    // lane-owned sessions that live in a separate map and must never be persisted to config.json.
     initialPrompt = null,
     extraClaudeArgs = [],
     ephemeral = false,
@@ -176,11 +176,11 @@ class Session extends EventEmitter {
     // id, so a restart re-resumes idempotently. Null = fresh conversation (the historical behavior).
     resumeSessionId = null,
     // Lever B: append a fixed anti-slop note to the system prompt at spawn (user sessions,
-    // opt-in via config antiSlopPrompt). Off by default and never set for team/pack-setup
-    // stage sessions. See session/core/anti-slop-prompt.js.
+    // opt-in via config antiSlopPrompt). Off by default and never set for the headless lane
+    // sessions. See session/core/anti-slop-prompt.js.
     antiSlopPrompt = false,
     // Optional Claude Code permissions ({ deny: [...] }) merged into the injected --settings file
-    // (team-stage deny blacklist, mechanism M2). Null for ordinary user sessions.
+    // (the PR-review and PostHog lane deny-lists). Null for ordinary user sessions.
     settingsPermissions = null,
     // Extra environment variables for the spawned PTY, merged over the scrubbed base env. Lane
     // credentials that must NOT be exported process-wide (a poller-owned API key would otherwise
@@ -188,7 +188,7 @@ class Session extends EventEmitter {
     spawnEnv = null,
     // Opt-in: add `enableAllProjectMcpServers: true` to the injected --settings file so a headless
     // (`-p`) session loads the project's `.mcp.json` servers (e.g. Playwright MCP) without an
-    // interactive trust prompt it can never answer. Off by default; set for app-runtime team stages.
+    // interactive trust prompt it can never answer. Off by default; set by a headless lane that needs it.
     enableProjectMcp = false,
     // PTY spawner seam. Defaults to node-pty; tests inject a fake to assert the
     // spawn wiring (file/args) without launching a real process.
@@ -1057,7 +1057,6 @@ class Session extends EventEmitter {
         teamId: "session",
         label: this.id,
         baseBranch: this._integrationBranch,
-        outputPath: "",
         worktreeBase: this._worktreeRoot,
         shareList: this._worktreeShare,
       });
@@ -1884,11 +1883,11 @@ class Session extends EventEmitter {
       : [];
     // Resume a prior conversation (possibly from another worktree's project dir). Claude resolves the
     // id across the repo's linked worktrees, so the session continues that thread in THIS worktree's cwd.
-    // Placed before any team extraClaudeArgs / the initial-prompt positional (both null for user sessions).
+    // Placed before any lane extraClaudeArgs / the initial-prompt positional (both null for user sessions).
     if (this._resumeSessionId) {
       claudeArgs.push("--resume", this._resumeSessionId);
     }
-    // Team stages pass extra flags (e.g. -p, --model <m>) then the prompt as the final positional.
+    // A headless lane passes extra flags (e.g. -p, --model <m>) then the prompt as the final positional.
     // The positional is a single argv element on the direct-exe path (proven by the Phase-0 probe);
     // on the cmd.exe shim fallback a very large/multiline prompt is subject to cmd parsing.
     if (this._extraClaudeArgs.length > 0) {
@@ -1933,8 +1932,8 @@ class Session extends EventEmitter {
 
     this.transition("spawn_success");
 
-    // Redact a positional initialPrompt (team stages) from the spawn log - it can be a multi-KB
-    // RUN CONTEXT block that does not belong in the console. Run detail lives in the Teams view.
+    // Redact a positional initialPrompt (headless lanes) from the spawn log - it can be a multi-KB
+    // context block that does not belong in the console.
     const argsForLog = this._initialPrompt
       ? args.map((a) => (a === this._initialPrompt ? `<prompt:${this._initialPrompt.length}c>` : a)).join(" ")
       : args.join(" ");

@@ -124,12 +124,11 @@ The install succeeded, but the directory where npm placed the `glissa` command i
 - Structural status detection: hooks as the authoritative signal, an OSC-0 title fallback, never screen scraping (see below)
 - Background sub-agent completion gate: a session with live background agents or tasks stays out of Complete until they finish
 - Native browser notifications when a session needs input, finishes, or fails (opt-in Windows toast fallback)
-- Phone layout as a first-class second layout, not a squeezed desktop: Board, Terminal, Review and Teams screens, attention-first ordering, and soft-keyboard handling that resizes the terminal instead of covering it
+- Phone layout as a first-class second layout, not a squeezed desktop: Board, Terminal, Review, Radar and PRs screens, attention-first ordering, and soft-keyboard handling that resizes the terminal instead of covering it
 - Remote mode (opt-in): a separate listener with single-use device pairing and cookie auth (see [Remote access](#remote-access))
 - Telegram notifications (opt-in): pings your phone only when no dashboard tab is open anywhere, so it fills the gap instead of duplicating the browser notification
 - Image upload from the phone key strip: pick an image, and its saved path is pasted into that session's prompt for you to send
 - Keyboard navigation: jump between sessions, step through the ones needing attention, and merge or resolve from the keyboard
-- Teams: project-portable agent pipelines that run against any project you manage
 - GitHub PR auto-review (opt-in): reviews your own open PRs headlessly, comments its findings, and auto-merges only the clean PRs whose checks are green
 - Auto-resume by default: sessions that were live when Glissa stopped come back on the next start with their Claude conversation resumed
 - Configurable themes, hot-reloadable configuration
@@ -165,23 +164,6 @@ Glissa centers on one session at a time. A left **roster rail** lists one pill p
 Every git-repo session runs in its own git worktree forked from the integration branch (`integrationBranch`, default `develop`), so an agent's edits stay out of your main checkout until you review them. The sidebar splits **Committed** (the mergeable unit) from **Uncommitted** work, keeps the diff live, and merges into the integration branch with one click while the session keeps running. If a merge hits conflicts it parks, and **Resolve in session** hands the conflict back to the agent that owns the worktree with a ready-to-run prompt.
 
 Navigate it all from the keyboard: `Alt+1`..`Alt+9` jump to a session, `Alt+Up`/`Alt+Down` move through the rail, `Alt+W` steps through the sessions needing attention, and `Alt+M` / `Alt+R` merge or resolve the selected one. Press `?` for the full list.
-
-## Teams
-
-A team is a sequential agent pipeline that you can point at any project Glissa manages. Three ship with Glissa:
-
-- **marketing**: researcher -> strategist -> writer -> editor -> publisher. Drafts content in the project's brand voice and, on a SHIP verdict, queues approved posts to Postiz as drafts.
-- **changelog**: analyst -> curator -> auditor -> announcer. Reconciles `CHANGELOG.md` against git history, then drafts a release announcement in the project's voice.
-- **qa**: runner-triager -> fixer -> auditor -> reporter. A regression auto-fixer: it keeps the existing test suite green by fixing source, never the tests.
-
-Ownership is split so the same agents serve every project:
-
-- **Glissa owns the agents**: generic, brand-neutral role prompts under `teams/<id>/`, composed from reusable blocks in `teams/_shared/` where possible.
-- **The project owns the pack**: its voice, avoid-list, brand, content calendar, and channels live under `<project>/.glissa/teams/<id>/pack/`. A subset of those files (voice-guide, avoid-list, brand) is project-level shared, filled once under `<project>/.glissa/pack/` and reused by every team that declares them, instead of being re-interviewed and duplicated per team.
-
-On first run, Glissa scaffolds the pack and halts until you fill it in, either by hand or with the dashboard's **Set up automatically** button, which spawns one interactive Claude session that reads the repo and interviews you for the subjective fields. Each run executes inside a throwaway git worktree so your working tree is never dirtied mid-run. A verdict stage (SHIP / FIX / BLOCK) can trigger a bounded FIX revision loop: earlier stages re-run with the reviewer's notes and the audit repeats, up to a capped number of rounds, before the run finalizes.
-
-![Glissa Teams tab with a Marketing Pipeline bound to a project](assets/pictures/glissa-teams.png)
 
 ## Configuration
 

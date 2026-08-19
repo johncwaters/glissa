@@ -44,20 +44,13 @@ const { createRecorder } = require('../session/session-recorder');
 const { createWsSender } = require('./ws-sender');
 const { HookRouter } = require('../detection/hook-source');
 const { sweepOrphans } = require('../detection/settings-injector');
-const { spawn } = require('./child-process-safe');
 const { checkForUpdate: defaultCheckForUpdate } = require('./update-check');
-const { loadTeam, listTeams } = require('../teamlib/team-registry');
-const { createOrchestrator } = require('../teamlib/team-orchestrator');
-const { createScheduler } = require('./scheduler');
 const { createSpawnGate } = require('./spawn-gate');
+const { spawn } = require('./child-process-safe');
 const { createGitWorkspace, createGitWorkspaceSync } = require('../teamlib/team-git');
-const { buildStageSpawnOptions, teamPermissions } = require('../teamlib/team-settings');
-const { buildStagePrompt } = require('../teamlib/team-prompt');
-const teamOutput = require('../teamlib/team-output');
 const { runPostTurnChecks, resolveCheckConfig } = require('./post-turn-checker');
 const { createIntegrationRefWatcher } = require('../detection/integration-ref-watch');
 const { createIntegrationWatcherPool } = require('../detection/integration-watcher-pool');
-const { createTeamSessionFactory } = require('./team-session-factory');
 const { createPrReviewWiring } = require('./pr-review-wiring');
 const { createPosthogWiring } = require('./posthog-wiring');
 const { normalizeRemoteConfig, validateRemoteConfig, decideBindHost } = require('./core/remote-config');
@@ -94,7 +87,7 @@ const ESCALATION_INTERVAL_MS = 300000;
 // Read-modify-write one field on a session's project record. config.json is the single source of
 // truth (design A: persisted at hook time, not shutdown time, so a crash between the hook and this
 // write never loses the id), so this always reads fresh off disk rather than trusting `liveConfig`.
-// No-ops when the project is absent from cfg.projects (ephemeral team/setup sessions are never
+// No-ops when the project is absent from cfg.projects (ephemeral lane sessions are never
 // config-backed). Also updates the matching entry in `liveConfig.projects` (the same array
 // resolvePostTurn and friends read) so a later read in this process sees the value without a full
 // config reload. Module-level (no createBackend closure) so tests can drive it directly against a
@@ -203,7 +196,7 @@ function runAutoResume(sessionsMap, cfg, gate) {
 //     worktree instead of finding it removed and provisioning a fresh one.
 //   UNCLAIMED with work -> kept with a warning: no session owns the id (deleted project, or a foreign
 //     glissa/session/* branch sharing the naming, e.g. a Claude Code session worktree), and removing it
-//     would destroy uncommitted work. Left for manual review, same as sweepSessionWorktrees.
+//     would destroy uncommitted work. Left for manual review rather than swept.
 //   UNCLAIMED and clean -> removed junction-safe. A true leftover orphan.
 // Module-level with injected dependencies so tests drive it with fakes; booting createBackend against a
 // real repo to exercise this would delete that repo's own glissa/session/* worktrees.
@@ -304,8 +297,8 @@ function createBackend(httpServer, options = {}) {
       hookRouter,
       getHookPort,
       // Worktree isolation for real user sessions: each forks off the integration branch and merges
-      // back on review. Ephemeral team/pack-setup sessions are built elsewhere (not makeSession), so
-      // they never receive this and run as they did before.
+      // back on review. Ephemeral lane sessions are built elsewhere (not makeSession), so they never
+      // receive this and run as they did before.
       gitWorkspace,
       integrationBranch: cfg.integrationBranch || 'develop',
       // Worktree root: a `.glissa-worktrees` sibling of THIS repo by default (attached to the repo,
@@ -551,7 +544,7 @@ function createBackend(httpServer, options = {}) {
   const dataWss = new WebSocketServer({ noServer: true, maxPayload: 2 * 1024 * 1024 });
 
   // Stamps every control broadcast with a monotonic seq and retains the replayable ones
-  // (notify, session-error, post-turn-result, team-*) so a reconnecting dashboard can
+  // (notify, session-error, post-turn-result) so a reconnecting dashboard can
   // recover exactly what it missed (see control-handlers.js connection handler).
   const controlReplayLog = createReplayLog();
 
@@ -581,7 +574,7 @@ function createBackend(httpServer, options = {}) {
     let listenerMismatch = false;
     let orphanPty = false;
     let destroyedReachable = false;
-    for (const sess of [...sessions.values(), ...teamSessions.values(), ...reviewSessions.values(), ...investigationSessions.values()]) {
+    for (const sess of [...sessions.values(), ...reviewSessions.values(), ...investigationSessions.values()]) {
       const stats = sess.getHealthStats();
       stats.detection = sess.getDetectionStats();
       stats.ephemeral = !!sess.ephemeral;
@@ -591,7 +584,7 @@ function createBackend(httpServer, options = {}) {
       totalDataListeners += stats.dataListenerCount;
       totalOutputBufferBytes += stats.outputBufferBytes;
       // Anomaly checks assume a persisted session with tracked data-WS clients and a stable
-      // lifecycle. Ephemeral sessions (team stages, PR reviews, guided setup) stream transiently and
+      // lifecycle. Ephemeral sessions (PR reviews, PostHog investigations) stream transiently and
       // tear down fast, so they are excluded to avoid false-positive listenerMismatch/orphanPty.
       if (!sess.ephemeral) {
         const clientCount = sessionDataClients.get(stats.id)?.size || 0;
@@ -629,8 +622,6 @@ function createBackend(httpServer, options = {}) {
         sleeping: sleepingCount,
         totalDataListeners,
         totalOutputBufferBytes,
-        ephemeralTeamSessions: teamSessions.size,
-        activeTeamRuns: orchestrator.activeCount(),
         list: sessionStats,
       },
       websockets: {
@@ -730,11 +721,9 @@ function createBackend(httpServer, options = {}) {
   // stops looking can hand the PTY back to whoever is still watching (server/core/viewer-size-core.js).
   const sessionDataClients = new Map();
   let nextViewerResizeSeq = 0;
-  // Team-stage sessions live in a SEPARATE map so config hot-reload diffing (diffProjects) never
-  // destroys a live stage, and so they are not persisted to config.json. See plan 3.5.
-  const teamSessions = new Map();
-  // Headless PR-review sessions (opt-in poller). Their own map for the same reasons as teamSessions,
-  // and so shutdown() can reap in-flight review PTYs without touching persisted sessions.
+  // Headless PR-review sessions (opt-in poller). Their own map so config hot-reload diffing
+  // (diffProjects) never destroys a live review, they are never persisted to config.json, and
+  // shutdown() can reap in-flight review PTYs without touching persisted sessions.
   const reviewSessions = new Map();
   // Headless PostHog investigation sessions (opt-in poller). Own map for the same reasons as
   // reviewSessions: never persisted, never surfaced as a card, reaped independently on shutdown.
@@ -742,7 +731,7 @@ function createBackend(httpServer, options = {}) {
 
   // The manager keys its entries by the session id passed to trigger(), so a lifecycle hop can be
   // routed straight back into that session's decision trace: focus suppression, the debounce and
-  // escalation otherwise produce no evidence anywhere. Team pseudo-entries have no session; skipped.
+  // escalation otherwise produce no evidence anywhere. An entry with no session is skipped.
   notificationManager.on('notification-state-change', ({ session, from, to, event, category }) => {
     const sess = sessions.get(session);
     if (!sess) return;
@@ -759,25 +748,20 @@ function createBackend(httpServer, options = {}) {
     }
   }
 
-  // --- Teams: registry + orchestrator + scheduler ---
+  // --- Shared spawn + worktree engines ---
 
-  const TEAMS_DIR = path.join(__dirname, '..', 'teams');
-  const registry = {
-    listTeams: () => listTeams(TEAMS_DIR),
-    loadTeam: (id) => loadTeam(id, TEAMS_DIR),
-  };
   const spawnGate = createSpawnGate();
-  // Each team run executes in an isolated git worktree on a dedicated branch, fast-forwarded back on
-  // success (see team-git.js), so a run never dirties the user's working tree.
+  // Every isolated lane (a session, a PR review) executes in a git worktree on a dedicated branch,
+  // fast-forwarded back on success (see team-git.js), so it never dirties the user's working tree.
   const gitWorkspace = createGitWorkspace();
 
   // On-disk session worktrees from a prior run are reconciled AFTER the boot session loop below, so a
   // worktree holding unmerged work can be re-adopted onto its session instead of swept (see the
   // reconcile after `for (const project of config.projects)`).
 
-  /** Look up either a persisted session or an ephemeral team-stage session. */
+  /** Look up a session by id. */
   function getSessionAny(id) {
-    return sessions.get(id) || teamSessions.get(id) || null;
+    return sessions.get(id) || null;
   }
   function getProjectPathById(projectId) {
     const p = config.projects.find((x) => x.id === projectId);
@@ -787,41 +771,6 @@ function createBackend(httpServer, options = {}) {
     const p = config.projects.find((x) => x.id === projectId);
     return p ? p.name : null;
   }
-  // Open a run artifact in the user's configured editor (Settings > General > Editor command). The
-  // command is user-authored and runs on the user's own machine, the same trust level as reading the
-  // PTY, so it runs through the shell - `.cmd`/`.bat` shims like `code` resolve. The path is validated
-  // and confined to the team's runs/ directory by handleOpenArtifact before it reaches here.
-  function openInEditor(absPath) {
-    const cmd = (config.editorCommand || '').trim();
-    try {
-      if (cmd) {
-        const quoted = `"${absPath}"`;
-        const full = cmd.includes('{file}') ? cmd.replace(/\{file\}/g, quoted) : `${cmd} ${quoted}`;
-        spawn(full, { detached: true, stdio: 'ignore', shell: true }).unref();
-        return { ok: true };
-      }
-      if (process.platform === 'win32') {
-        // `start` is a cmd builtin; the empty "" is its window-title arg so a quoted path isn't taken as the title.
-        spawn('cmd', ['/c', 'start', '', absPath], { detached: true, stdio: 'ignore' }).unref();
-        return { ok: true };
-      }
-      if (process.platform === 'darwin') {
-        spawn('open', [absPath], { detached: true, stdio: 'ignore' }).unref();
-        return { ok: true };
-      }
-      spawn('xdg-open', [absPath], { detached: true, stdio: 'ignore' }).unref();
-      return { ok: true };
-    } catch (err) {
-      return { ok: false, error: err.message };
-    }
-  }
-
-  // Team-stage + guided-pack-setup Session construction (server/team-session-factory.js).
-  const { makeStageSession, startPackSetup } = createTeamSessionFactory({
-    config, sessions, teamSessions, closeSessionDataClients, hookRouter, getHookPort,
-    wireSessionEvents, broadcastControl, registry, getProjectPathById,
-  });
-
   // GitHub PR auto-review lane (server/pr-review-wiring.js): inert unless config.prReview.enabled and
   // config.telegram are both set. Started at boot below, restarted on a prReview/telegram settings
   // change, stopped in shutdown().
@@ -838,58 +787,6 @@ function createBackend(httpServer, options = {}) {
     config, investigationSessions, closeSessionDataClients, hookRouter, getHookPort, spawnGate,
     broadcast: (msg) => broadcastControl(msg),
   });
-
-  const orchestrator = createOrchestrator({
-    loadTeam: registry.loadTeam,
-    getProjectPath: getProjectPathById,
-    output: teamOutput,
-    buildStagePrompt,
-    buildStageSpawnOptions,
-    teamPermissions,
-    spawnGate,
-    makeStageSession,
-    gitWorkspace,
-    // App-runtime worktree wiring, mirroring the per-session worktree options (see the Session
-    // construction above): the gitignored local context to bring in, and the stable per-project
-    // worktree root. Consumed only when a team opts in via runtime.shareLocalContext.
-    worktreeShare: config.worktreeShare || DEFAULT_CONFIG.worktreeShare,
-    getWorktreeBase: (projectPath) => config.worktreeRoot
-      || path.join(path.dirname(path.resolve(projectPath)), '.glissa-worktrees'),
-    now: () => new Date(),
-  });
-  for (const ev of ['team-run-started', 'team-stage-started', 'team-stage-complete', 'team-revise-round', 'team-run-cancelling', 'team-run-complete', 'team-run-failed', 'team-run-skipped', 'team-run-needs-setup', 'team-chat-message', 'team-run-awaiting-input', 'team-run-resumed']) {
-    orchestrator.on(ev, (payload) => broadcastControl({ type: ev, ...payload, timestamp: Date.now() }));
-  }
-  orchestrator.on('team-run-complete', ({ teamId, verdict }) => {
-    notificationManager.trigger(`team:${teamId}`, 'complete', `Team ${teamId} finished: ${verdict || 'done'}`);
-  });
-  orchestrator.on('team-run-failed', ({ teamId, reason }) => {
-    notificationManager.trigger(`team:${teamId}`, 'failed', `Team ${teamId} failed${reason ? `: ${reason}` : ''}`);
-  });
-
-  // One scheduler per enabled activation in config.teams; re-armed on set-team-schedule.
-  const teamSchedulers = new Map();
-  function armTeamSchedules(teamsCfg) {
-    for (const [, s] of teamSchedulers) s.disarm();
-    teamSchedulers.clear();
-    for (const a of (teamsCfg || [])) {
-      if (!a || !a.enabled || !a.teamId || !a.projectId) continue;
-      let schedule = a.schedule;
-      if (!schedule) {
-        try { schedule = registry.loadTeam(a.teamId).schedule; } catch { continue; }
-      }
-      if (!schedule || !schedule.days) continue;
-      const key = `${a.teamId}:${a.projectId}`;
-      const sched = createScheduler({
-        onFire: () => Promise.resolve(
-          orchestrator.runTeam({ teamId: a.teamId, projectId: a.projectId, trigger: 'scheduled' }),
-        ).catch((err) => console.warn(`[team-scheduler] ${key} run failed: ${err.message}`)),
-      });
-      sched.arm(schedule, key);
-      teamSchedulers.set(key, sched);
-    }
-  }
-  armTeamSchedules(config.teams);
 
   // --- Integration-branch watchers (event-driven cross-session gate liveness) ---
   // Replaces the old 10s poll's one unique job: noticing that a session's integration branch moved
@@ -938,12 +835,12 @@ function createBackend(httpServer, options = {}) {
 
     // Post-turn deterministic checks. The state machine emits `post-turn-check` on
     // entry to COMPLETE (turn ended, process alive: the pre-/commit checkpoint).
-    // Gated to real project sessions (not team-stage or ephemeral setup sessions,
-    // which run in throwaway worktrees a team manages). Config resolved at run time
+    // Gated to real project sessions (not the ephemeral lane sessions, which run in
+    // throwaway worktrees their lane manages). Config resolved at run time
     // because config.projects is refreshed on reload; debounced so a burst of
     // turn-ends collapses to one run after the agent settles.
     // Resolve config fresh each call: config.projects is refreshed on reload, and
-    // returns null for an ephemeral/team session (not a user project) so it is skipped.
+    // returns null for an ephemeral session (not a user project) so it is skipped.
     const resolvePostTurn = () => {
       const proj = config.projects.find((p) => p.id === sess.id);
       return proj ? resolveCheckConfig(config.postTurnChecks, proj.postTurnChecks) : null;
@@ -1123,7 +1020,7 @@ function createBackend(httpServer, options = {}) {
   try {
     // One-shot cold reconcile at boot (before any live session streams): use the SYNCHRONOUS engine
     // sibling so this blocking pass steals no PTY time from running sessions and never awaits. The live
-    // async `gitWorkspace` is reserved for the recurring session/orchestrator paths.
+    // async `gitWorkspace` is reserved for the recurring session and PR-review paths.
     reconcileSessionWorktrees({
       projects: config.projects,
       sessions,
@@ -1354,16 +1251,6 @@ function createBackend(httpServer, options = {}) {
     posthogArchiveInvestigation: (args) => posthog.archiveInvestigation(args),
     // Same for the PR auto-review lane.
     getPrStatus: () => prReview.getStatus(),
-    registry,
-    orchestrator,
-    scheduler: { reload: armTeamSchedules },
-    teamOutput,
-    getProjectPathById,
-    openInEditor,
-    startPackSetup,
-    // Ephemeral sessions (guided pack setup) are not config-backed, so the remove-session
-    // handler can't go through the config-reload diff path; give it a direct teardown.
-    removeEphemeralSession: (id) => _teardownSession(id, '[control] Removed session via UI'),
   });
 
   // --- Data WebSocket ---
@@ -1540,10 +1427,10 @@ function createBackend(httpServer, options = {}) {
 
     if (route === 'control') {
       controlWss.handleUpgrade(req, socket, head, (ws) => {
-        // Carry the listener-derived trust onto the connection: control handlers that trigger a
-        // side effect on the SERVER machine (open-artifact spawning the editor) have no other way
-        // to tell a paired phone from the local dashboard. Same invariant as the classifier - it
-        // comes from the socket's local port, never from anything the client sent.
+        // Carry the listener-derived trust onto the connection: control-handlers.js reads it back to
+        // send that client its `client-trust` frame, so the UI can stop offering actions that only
+        // make sense on the machine Glissa runs on. Same invariant as the classifier - it comes from
+        // the socket's local port, never from anything the client sent.
         ws.glissaTrust = trust;
         controlWss.emit('connection', ws, req);
       });
@@ -1581,16 +1468,11 @@ function createBackend(httpServer, options = {}) {
     try { updateAbort.abort(); } catch { /* no in-flight update request */ }
     // INVARIANT: destroy NotificationManager BEFORE sessions - clears all timers globally
     notificationManager.destroy();
-    for (const [, s] of teamSchedulers) s.disarm();
     integrationPool.stopAll();
     // Collect each session's in-flight PTY reap (set by kill() on win32, see sessions.js) so the
     // lifecycle can await them before exit/respawn; a DORMANT session has no PTY and no reap.
     const pendingReaps = [];
     for (const [, sess] of sessions) {
-      sess.destroy();
-      if (sess._killReap) pendingReaps.push(sess._killReap);
-    }
-    for (const [, sess] of teamSessions) {
       sess.destroy();
       if (sess._killReap) pendingReaps.push(sess._killReap);
     }
@@ -1640,7 +1522,7 @@ function createBackend(httpServer, options = {}) {
     shutdown,
     port,
     app,
-    // Persisted or ephemeral session by id. The maps themselves stay closed over; this is the one
+    // A session by id. The maps themselves stay closed over; this is the one
     // read-only way in for an embedder (and for the route tests, which have no other way to hold the
     // Session a request will act on).
     getSession: getSessionAny,

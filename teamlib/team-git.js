@@ -5,7 +5,6 @@ const os = require('node:os');
 const path = require('node:path');
 const { execFile, execFileSync } = require('../server/child-process-safe');
 const { promisify } = require('node:util');
-const { SHARED_PACK_DIRNAME } = require('./team-output');
 
 const execFileP = promisify(execFile);
 const fsp = fs.promises;
@@ -42,11 +41,11 @@ function findWorktreeForBranch(porcelain, branch) {
   return hit ? hit.cwd : null;
 }
 
-// Run each team run inside a throwaway git worktree on a dedicated branch, so the team's writes never
-// touch the user's working tree or current branch during the (multi-minute) run. On a terminal
-// outcome the run is committed on that branch and fast-forwarded back into the base branch when that
-// is safe; if the base moved meanwhile, the branch is kept for a manual merge. A non-git project, a
-// repo with no commits, or a detached HEAD falls back to running in place (no isolation, no merge).
+// Run each isolated lane (a session, a PR review) inside a throwaway git worktree on a dedicated
+// branch, so its writes never touch the user's working tree or current branch during the
+// (multi-minute) run. On a terminal outcome the work is fast-forwarded back into the base branch when
+// that is safe; if the base moved meanwhile, the branch is kept for a manual merge. A non-git project,
+// a repo with no commits, or a detached HEAD falls back to running in place (no isolation, no merge).
 //
 // The git runner is injected so the branch/worktree/merge sequence is unit-testable without a repo;
 // backend.js wires the real `git` via execFileSync.
@@ -63,7 +62,6 @@ function createGitWorkspace(opts = {}) {
     return stdout;
   });
   const mkdtemp = opts.mkdtemp || ((prefix) => fs.mkdtempSync(prefix));
-  const copyPack = opts.copyPack || defaultCopyPack;
 
   // Engine-level serialization queue. ALL sessions share ONE gitWorkspace instance, and the old
   // synchronous engine was a de-facto global lock (two merges in one process never interleaved). Making
@@ -84,31 +82,6 @@ function createGitWorkspace(opts = {}) {
     catch (err) { return errResult(err); }
   }
   function sanitize(s) { return String(s || '').replace(/[^\w.-]+/g, '-').replace(/^-+|-+$/g, ''); }
-
-  // A fast-forward refuses to overwrite UNTRACKED working-tree files (git aborts to avoid clobbering
-  // content it does not know about). The team writes its run log + run folder into the project tree
-  // BEFORE the worktree exists (the pre-worktree setup/skip gates call ensureStructure/appendLog on
-  // projectPath), and a prior run that failed to merge can leave its run folder there too. Those land
-  // as untracked files; the branch then tracks the same paths, so the merge-back aborts and the whole
-  // run is stranded on its branch. The branch is the authority for everything it commits under the run
-  // paths, so remove exactly those untracked collisions before the FF. Conservative on three axes so
-  // the project-owned pack and the user's own files are never touched:
-  //   (1) only paths under addPaths (the run folder + log + the team's writeScope) are considered,
-  //   (2) only files the branch actually tracks are removed (the merge would bring them in regardless),
-  //   (3) --exclude-standard skips ignored files (which never block a FF anyway).
-  async function clearFfCollisions(projectPath, branch, addPaths) {
-    if (!branch || !addPaths.length) return;
-    const lines = (s) => s.split(/\r?\n/).map((t) => t.trim()).filter(Boolean);
-    const tracked = await run(['ls-tree', '-r', '--name-only', branch], projectPath);
-    if (!tracked.ok) return;
-    const trackedSet = new Set(lines(tracked.out));
-    const others = await run(['ls-files', '--others', '--exclude-standard', '--', ...addPaths], projectPath);
-    if (!others.ok) return;
-    for (const rel of lines(others.out)) {
-      if (!trackedSet.has(rel)) continue; // leave an untracked file the merge would NOT touch
-      try { fs.rmSync(path.join(projectPath, rel), { force: true }); } catch { /* best-effort */ }
-    }
-  }
 
   // Seed refs tried in order to auto-create a missing integration branch: the remote-tracking branch of
   // the same name first (it just is not checked out locally yet), then the repo's likely default
@@ -141,7 +114,7 @@ function createGitWorkspace(opts = {}) {
   function create(args) {
     return serialize(() => createBody(args));
   }
-  async function createBody({ projectPath, teamId, label, outputPath, baseBranch, worktreeBase, shareList }) {
+  async function createBody({ projectPath, teamId, label, baseBranch, worktreeBase, shareList }) {
     const inside = await run(['rev-parse', '--is-inside-work-tree'], projectPath);
     if (!inside.ok || inside.out !== 'true') return { cwd: projectPath, isGit: false };
     const head = await run(['rev-parse', 'HEAD'], projectPath);
@@ -180,7 +153,7 @@ function createGitWorkspace(opts = {}) {
     // `.glissa-worktrees` sibling of the repo) rather than system-temp, so its path is recognizable and
     // persistent. It stays
     // OUTSIDE the repo working tree (no nested biome/eslint config; the main checkout's git status stays
-    // clean). Teams pass no worktreeBase and keep the temp-dir default.
+    // clean). A caller that passes no worktreeBase keeps the temp-dir default.
     let wtParent = os.tmpdir();
     let prefix = `glissa-wt-${sanitize(teamId)}-`;
     if (worktreeBase) {
@@ -198,10 +171,6 @@ function createGitWorkspace(opts = {}) {
     // reconcile) resolve the correct integration branch even if the live config changes afterward.
     // Non-fatal: git drops branch.<name>.* config on branch delete, so no cleanup path is needed either.
     await run(['config', `branch.${branch}.glissa-integration`, base], projectPath);
-    // Bring the project's pack (voice-guide etc.) into the worktree so the agents read it, including
-    // edits not yet committed to HEAD. It is never staged (integrate adds only the run folder + log), so
-    // it vanishes with the worktree.
-    try { await copyPack(projectPath, wtDir, outputPath); } catch { /* best-effort */ }
     // Bring the gitignored local working context (node_modules, .env, .claude, .omc, ...) into the
     // worktree so the spawned agent sees a COMPLETE, recognizable project, not a bare checkout. Dirs are
     // junctioned (shared with the real repo, never copied or merged, gitignored so `git add -A` skips
@@ -237,45 +206,6 @@ function createGitWorkspace(opts = {}) {
     return serialize(() => populateShare(args));
   }
 
-  // Commit the run on its branch and fast-forward it into the base branch when safe. `addPaths` are
-  // repo-relative (the run folder + the log). Always removes the worktree; deletes the branch only on
-  // a successful merge. Returns { branch, base, merged, committed, reason }: `branch` is null once
-  // merged (deleted), else the branch the run is parked on.
-  function integrate(args) {
-    return serialize(() => integrateBody(args));
-  }
-  async function integrateBody({ projectPath, workspace, message, addPaths = [] }) {
-    if (!workspace || !workspace.isGit) return { branch: null, base: null, merged: false, committed: false, reason: 'not-git' };
-    const wt = workspace.cwd;
-    // addPaths are git pathspecs run verbatim (no shell). A matching glob stages its subtree; a NO-MATCH
-    // pathspec makes 'git add' exit non-zero (e.g. 128), which run() swallows to {ok:false}. The run folder
-    // + log always match and are staged first, so by 'diff --cached --quiet' there is staged content and we
-    // commit. ':(glob)' is the escape hatch only if a future git config breaks '**'. Staged sequentially:
-    // the per-path adds must complete in order before the diff-cached check reads the index.
-    for (const p of addPaths) await run(['add', '--', p], wt);
-    const committed = (await run(['diff', '--cached', '--quiet'], wt)).ok === false
-      ? (await run(['commit', '-m', message || 'glissa team run'], wt)).ok
-      : false;
-
-    let merged = false;
-    let reason = 'nothing-to-commit';
-    if (committed) {
-      reason = 'detached-head';
-      const canFf = workspace.branch && workspace.base && workspace.base !== 'HEAD';
-      if (canFf) {
-        merged = await fastForwardTarget(projectPath, workspace.branch, workspace.base, addPaths, true);
-        reason = merged ? null : 'not-fast-forward';
-      }
-    }
-
-    removeWorktreeLinks(wt);
-    await run(['worktree', 'remove', '--force', wt], projectPath);
-    await run(['worktree', 'prune'], projectPath);
-    if (merged && workspace.branch) await run(['branch', '-D', workspace.branch], projectPath);
-
-    return { branch: merged ? null : (workspace.branch || null), base: workspace.base || null, merged, committed, reason };
-  }
-
   // Junction-safe teardown of a worktree (+ its branch): the node_modules junction is removed BEFORE
   // `worktree remove` so git can never follow it into the operator's real node_modules.
   async function tearDownWorktree(projectPath, wt, branch) {
@@ -288,11 +218,10 @@ function createGitWorkspace(opts = {}) {
   // Advance `target` to `branch`'s tip: an ff-only merge when `target` is the checked-out HEAD in
   // projectPath (advances the working tree too), else a direct ref update via `fetch` (no checkout of
   // the target required).
-  async function fastForwardTarget(projectPath, branch, target, addPaths, targetIsHead) {
+  async function fastForwardTarget(projectPath, branch, target, targetIsHead) {
     if (!targetIsHead) {
       return (await run(['fetch', '.', `refs/heads/${branch}:refs/heads/${target}`], projectPath)).ok;
     }
-    await clearFfCollisions(projectPath, branch, addPaths);
     return (await run(['merge', '--ff-only', branch], projectPath)).ok;
   }
 
@@ -307,7 +236,7 @@ function createGitWorkspace(opts = {}) {
   // the second reads it. A rebase conflict ABORTS and reports parked; nothing is ever auto-resolved.
   // `committed` means "there were commits to merge", not that this function made one.
   // Returns { committed, merged, reason, parked?, restoreConflict? }.
-  async function rebaseFfBranch({ projectPath, wt, branch, target, addPaths = [] }) {
+  async function rebaseFfBranch({ projectPath, wt, branch, target }) {
     // Commits on the branch but not yet on the target = exactly what merging would bring in. None means
     // there is nothing committed to merge (uncommitted-only work is left for the operator to commit).
     const ahead = await run(['rev-list', '--count', `${target}..${branch}`], projectPath);
@@ -334,7 +263,7 @@ function createGitWorkspace(opts = {}) {
 
     // Fast-forward the integration branch to the rebased session branch.
     const head = (await run(['rev-parse', '--abbrev-ref', 'HEAD'], projectPath)).out;
-    const merged = await fastForwardTarget(projectPath, branch, target, addPaths, head === target);
+    const merged = await fastForwardTarget(projectPath, branch, target, head === target);
     if (!merged) {
       if (stashed) await run(['stash', 'pop'], wt);
       return { committed: true, merged: false, reason: 'not-fast-forward', parked: true };
@@ -370,7 +299,7 @@ function createGitWorkspace(opts = {}) {
   function mergeBack(args) {
     return serialize(() => mergeBackBody(args));
   }
-  async function mergeBackBody({ projectPath, workspace, targetBranch, addPaths = [] }) {
+  async function mergeBackBody({ projectPath, workspace, targetBranch }) {
     const g = await resolveMergeBack({ projectPath, workspace, targetBranch });
     if (g.error) return g.error;
     const { wt, branch, target } = g;
@@ -383,7 +312,7 @@ function createGitWorkspace(opts = {}) {
       return { merged: false, committed: false, branch, base: target, reason: 'uncommitted-changes', parked: true };
     }
 
-    const r = await rebaseFfBranch({ projectPath, wt, branch, target, addPaths });
+    const r = await rebaseFfBranch({ projectPath, wt, branch, target });
     if (!r.committed) {
       // Clean worktree with nothing committed = a throwaway chat/research session: discard it (junction-safe).
       await tearDownWorktree(projectPath, wt, branch);
@@ -407,12 +336,12 @@ function createGitWorkspace(opts = {}) {
   function mergeKeep(args) {
     return serialize(() => mergeKeepBody(args));
   }
-  async function mergeKeepBody({ projectPath, workspace, targetBranch, addPaths = [] }) {
+  async function mergeKeepBody({ projectPath, workspace, targetBranch }) {
     const g = await resolveMergeBack({ projectPath, workspace, targetBranch });
     if (g.error) return g.error;
     const { wt, branch, target } = g;
 
-    const r = await rebaseFfBranch({ projectPath, wt, branch, target, addPaths });
+    const r = await rebaseFfBranch({ projectPath, wt, branch, target });
     if (!r.committed) {
       // Nothing committed to merge yet - keep the worktree; the live session commits more then merges.
       return { merged: false, committed: false, branch, base: target, reason: 'nothing-to-commit', kept: true };
@@ -440,34 +369,6 @@ function createGitWorkspace(opts = {}) {
     await run(['worktree', 'prune'], projectPath);
   }
 
-  // Restore the oracle (tests) in the worktree to the run's base SHA before an audit, so the auditor
-  // grades the SOURCE against the unedited tests: any test the fixer edited/deleted is reverted, and any
-  // untracked NEW test the fixer added is removed. Combined with tests being EXCLUDED from writeScope
-  // (a test edit can never merge), the oracle is protected at both the audit and the merge.
-  //
-  // Issued through the SAME swallowing run() as everything else, ONE call per glob. Per-glob is
-  // load-bearing: a SINGLE `git checkout <sha> -- <glob...>` is ATOMIC and ABORTS the whole restore if
-  // ANY pathspec matches nothing (verified on git 2.44.0.windows.1: exit 1, nothing restored), which is
-  // the common case (a repo with *.test.* files but no tests/ dir). Per-glob isolates each no-match
-  // (swallowed) so the matching globs still restore.
-  //   - checkout reverts TRACKED tests; a no-match glob exits non-zero, harmlessly swallowed.
-  //   - clean removes UNTRACKED NEW tests; testGlob-SCOPED so the run folder under .glissa/ and any new
-  //     in-scope SOURCE survive. `-f` (no `-d`) is sufficient: a scoped pathspec like '**/__tests__/**'
-  //     removes files inside a new untracked test dir and the now-empty dir (verified, same git); an
-  //     unscoped clean would delete the run folder + new source, so the scope is mandatory.
-  // No-op unless the project is a git repo with a captured baseSha and a non-empty testGlobs.
-  function restoreTests(args) {
-    return serialize(() => restoreTestsBody(args));
-  }
-  async function restoreTestsBody({ workspace, testGlobs = [] }) {
-    if (!workspace || !workspace.isGit || !testGlobs.length || !workspace.baseSha) return;
-    const wt = workspace.cwd;
-    // Per-glob, sequential: a single multi-glob checkout is atomic and aborts on any no-match, so each
-    // glob is isolated; sequential awaits preserve that one-call-per-glob atomicity contract.
-    for (const glob of testGlobs) await run(['checkout', workspace.baseSha, '--', glob], wt);
-    for (const glob of testGlobs) await run(['clean', '-f', '--', glob], wt);
-  }
-
   // True when a session worktree holds UNMERGED work that must NOT be destroyed on a restart: uncommitted
   // changes in the worktree, or commits on its branch not yet on the integration branch (a parked/
   // conflicted merge). Gitignored junctions/files never show in `status --porcelain`.
@@ -490,7 +391,7 @@ function createGitWorkspace(opts = {}) {
   }
 
   // List the SESSION worktrees (branch `glissa/session/<id>`) of a repo, each with its extracted session
-  // id and whether it holds unmerged work. Team worktrees (`glissa/<teamId>/*`) are excluded by namespace.
+  // id and whether it holds unmerged work. Other lanes (`glissa/pr-review/*`) are excluded by namespace.
   async function listSessionWorktrees({ projectPath, integrationBranch }) {
     const out = [];
     const inside = await run(['rev-parse', '--is-inside-work-tree'], projectPath);
@@ -525,19 +426,6 @@ function createGitWorkspace(opts = {}) {
     await run(['worktree', 'prune'], projectPath);
   }
 
-  // Remove orphaned SESSION worktrees, PRESERVING any that hold unmerged work, so a restart can never
-  // destroy a pending-review/parked session's changes. Scoped to `glissa/session/*` (team worktrees are
-  // never touched). Returns the removed branch names.
-  async function sweepSessionWorktrees({ projectPath, integrationBranch }) {
-    const removed = [];
-    for (const wt of await listSessionWorktrees({ projectPath, integrationBranch })) {
-      if (wt.hasWork) continue; // preserve unmerged work
-      await removeWorktreeByPath({ projectPath, cwd: wt.cwd, branch: wt.branch });
-      removed.push(wt.branch);
-    }
-    return removed;
-  }
-
   // Generic worktree enumeration for callers that need to know which branches are checked out
   // anywhere in a repo (e.g. the PR-review poller's branch-in-use precheck and its orphan prune).
   // Returns every worktree carrying a branch as { cwd, branch }; goes through this module so the
@@ -552,8 +440,8 @@ function createGitWorkspace(opts = {}) {
   }
 
   return {
-    create, integrate, discard, restoreTests, mergeBack, mergeKeep, populate,
-    sweepSessionWorktrees, listSessionWorktrees, listWorktreeBranches, removeWorktreeByPath,
+    create, discard, mergeBack, mergeKeep, populate,
+    listSessionWorktrees, listWorktreeBranches, removeWorktreeByPath,
   };
 }
 
@@ -662,23 +550,6 @@ async function populateWorktree(projectPath, wtDir, shareList) {
       await fsp.copyFile(src, dst);
     } catch { /* best-effort: the session runs without that piece */ }
   }
-}
-
-async function copyDirInto(src, dest) {
-  const exists = await fsp.access(src).then(() => true, () => false);
-  if (!exists) return;
-  await fsp.mkdir(path.dirname(dest), { recursive: true });
-  await fsp.cp(src, dest, { recursive: true });
-}
-
-async function defaultCopyPack(projectPath, wtDir, outputPath) {
-  // The project-level shared pack (.glissa/pack/) holds cross-team files (voice/avoid/brand) used by any
-  // team that declares them shared. It lives OUTSIDE outputPath, so copy it in independently of the
-  // team-local pack. Both copies stay UNSTAGED (integrate adds only the run folder + log + SHIP writeScope),
-  // so neither is committed back and both vanish with the worktree. Guarded so an absent dir is a no-op.
-  await copyDirInto(path.join(projectPath, SHARED_PACK_DIRNAME), path.join(wtDir, SHARED_PACK_DIRNAME));
-  if (!outputPath) return;
-  await copyDirInto(path.join(projectPath, outputPath, 'pack'), path.join(wtDir, outputPath, 'pack'));
 }
 
 module.exports = { createGitWorkspace, createGitWorkspaceSync };

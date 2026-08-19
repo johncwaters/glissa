@@ -144,6 +144,29 @@ test('buildHookSettings produces http hooks with glissaId + token in URL', () =>
   assert.ok(s.hooks.Notification && s.hooks.UserPromptSubmit && s.hooks.SessionStart);
 });
 
+// The deny-list branch is what bounds the PR-review and PostHog lanes (both spawn with
+// --dangerously-skip-permissions and pass their own settingsPermissions).
+test('buildHookSettings merges permissions.deny when provided, omits it otherwise', () => {
+  const base = { port: 1234, glissaId: 'g1', token: 't1' };
+  const permissions = { deny: ['Bash(gh pr merge:*)', 'Write(.github/workflows/**)'] };
+  const withDeny = buildHookSettings({ ...base, permissions });
+  assert.ok(withDeny.permissions && Array.isArray(withDeny.permissions.deny));
+  assert.ok(withDeny.permissions.deny.includes('Bash(gh pr merge:*)'));
+  assert.ok(withDeny.hooks, 'hooks still present');
+
+  const noDeny = buildHookSettings(base);
+  assert.equal(noDeny.permissions, undefined, 'user sessions get no permissions block');
+  assert.equal(buildHookSettings({ ...base, permissions: { deny: [] } }).permissions, undefined, 'an empty deny list adds nothing');
+});
+
+test('buildHookSettings adds enableAllProjectMcpServers only when opted in', () => {
+  const base = { port: 1234, glissaId: 'g1', token: 't1' };
+  assert.equal(buildHookSettings(base).enableAllProjectMcpServers, undefined, 'absent by default');
+  const on = buildHookSettings({ ...base, enableProjectMcp: true });
+  assert.equal(on.enableAllProjectMcpServers, true, 'pre-trusts project MCP when opted in');
+  assert.ok(on.hooks, 'hooks still present alongside the MCP flag');
+});
+
 test('writeSessionSettings writes file and cleanup removes it', () => {
   const baseDir = path.join(os.tmpdir(), `glissa-test-${Date.now()}`);
   const { settingsPath, dir, token, cleanup } = writeSessionSettings({

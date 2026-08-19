@@ -1,6 +1,6 @@
 // IO shell over form-factor-core.mjs. The stamp is live, not boot-only: a phone rotated past 768px
 // genuinely becomes the desktop layout, and the subscribers are what let the app hand the borrowed card,
-// sidebar and Teams panel across that flip instead of stranding them in a hidden subtree.
+// sidebar and Radar panel across that flip instead of stranding them in a hidden subtree.
 
 import { COARSE_POINTER_QUERY, decideLayout, PHONE_NARROW_QUERY } from './form-factor-core.mjs';
 

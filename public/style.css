@@ -100,7 +100,7 @@ html, body {
 body {
   display: flex;
   flex-direction: column;
-  /* The app owns ALL scrolling internally (rail, teams view, sidebar each overflow-y themselves).
+  /* The app owns ALL scrolling internally (rail, radar view, sidebar each overflow-y themselves).
      Never let stray overflow grow the document: a document scrollbar pushes the footer and the
      terminal's bottom edge below the visible screen. */
   overflow: hidden;
@@ -147,7 +147,7 @@ body {
   gap: 16px;
 }
 
-/* Persistent primary action - accent-outline language, matches team-run / dialog Confirm. */
+/* Persistent primary action - accent-outline language, matches the dialog Confirm. */
 .btn-add-header {
   display: inline-flex;
   align-items: center;
@@ -1786,8 +1786,8 @@ body {
 }
 
 /* ── PostHog radar view ──────────────────────────────────────── */
-/* A top-level tab panel, laid out like the Teams view: same scroll container and content column so
-   the two secondary views share one page rhythm. */
+/* A top-level tab panel: the same scroll container and content column the PRs view uses, so the two
+   secondary views share one page rhythm. */
 .radar-view {
   flex: 1;
   min-height: 0;
@@ -2491,7 +2491,7 @@ a.pr-title:hover {
   font-size: 11px;
 }
 
-/* ── Primary view tabs (Focus / Teams / Radar) ───────────────── */
+/* ── Primary view tabs (Focus / Radar / PRs) ───────────────── */
 .header-left {
   display: flex;
   align-items: center;
@@ -2566,751 +2566,6 @@ a.pr-title:hover {
 /* The session-card grid is never a navigable view now (Focus borrows cards out of it into the
    center); it stays mounted off-screen as the card home. Hide it unconditionally. */
 #sessions-container { display: none; }
-
-/* ── Teams view ──────────────────────────────────────────────── */
-.teams-view {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  width: 100%;
-  max-width: var(--content-max);
-  margin: 0 auto;
-  padding: clamp(16px, 2.5vw, 36px) clamp(12px, 2vw, 32px) 48px;
-}
-/* Centered console column: bound the field so the surface doesn't stretch across an ultrawide
-   monitor (header status floating to the edge, control row spread thin). Width lives on this inner
-   wrapper, not .teams-view, so the scrollbar stays at the viewport edge. */
-.teams-content {
-  max-width: 1080px;
-  margin: 0 auto;
-}
-.teams-intro {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  color: var(--text-muted);
-  letter-spacing: 0.02em;
-  line-height: 1.55;
-  margin: 0 0 18px;
-  max-width: 78ch;
-}
-.teams-loading,
-.teams-empty {
-  font-family: var(--font-mono);
-  font-size: 13px;
-  color: var(--text-muted);
-}
-
-/* Add-team bar: an inline, expanding form (roster + project), never a modal. */
-.teams-add { margin: 0 0 24px; }
-.teams-add-toggle {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  letter-spacing: 0.03em;
-  padding: 7px 14px;
-  color: var(--accent);
-  background: transparent;
-  border: 1px dashed var(--border-hover);
-  border-radius: var(--radius);
-  cursor: pointer;
-  transition: border-color var(--transition-med), color var(--transition-med);
-}
-.teams-add-toggle:hover { border-color: var(--accent); }
-.teams-add-toggle[aria-expanded="true"] { color: var(--text-muted); }
-.teams-add-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.teams-add-form {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  gap: 12px 16px;
-  margin-top: 14px;
-  padding: 16px 18px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  background: var(--bg-card);
-}
-.teams-add-field { display: flex; flex-direction: column; gap: 5px; }
-.teams-add-label {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--text-muted);
-}
-.teams-add-roster,
-.teams-add-project {
-  font-family: var(--font-mono);
-  font-size: 13px;
-  min-width: 200px;
-  padding: 7px 10px;
-  color: var(--text-head);
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-}
-.teams-add-roster:focus-visible,
-.teams-add-project:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-.teams-add-confirm {
-  font-family: var(--font-mono);
-  font-size: 13px;
-  padding: 8px 18px;
-  color: var(--accent);
-  background: transparent;
-  border: 1px solid var(--accent);
-  border-radius: var(--radius);
-  cursor: pointer;
-  transition: background var(--transition-med);
-}
-.teams-add-confirm:hover:not(:disabled) { background: color-mix(in oklab, var(--accent) 14%, transparent); }
-.teams-add-confirm:disabled { opacity: 0.4; cursor: not-allowed; }
-.teams-add-confirm:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.teams-add-cancel {
-  font-family: var(--font-mono);
-  font-size: 13px;
-  padding: 8px 12px;
-  color: var(--text-muted);
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: var(--radius);
-  cursor: pointer;
-}
-.teams-add-cancel:hover { color: var(--text-dim); }
-.teams-add-err { font-family: var(--font-mono); font-size: 11px; color: var(--state-failed); flex-basis: 100%; }
-
-/* First-run empty state: teach what an instance is, point at Add team. */
-.teams-empty-state {
-  border: 1px dashed var(--border);
-  border-radius: var(--radius-lg);
-  padding: 32px clamp(18px, 3vw, 40px);
-  background: color-mix(in oklab, var(--bg-card) 60%, transparent);
-}
-.teams-empty-title {
-  font-family: var(--font-mono);
-  font-size: 14px;
-  font-weight: 700;
-  color: var(--text-head);
-  margin: 0 0 8px;
-}
-.teams-empty-desc {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  line-height: 1.55;
-  color: var(--text-muted);
-  margin: 0;
-  max-width: 64ch;
-}
-
-/* Instance stack: one full-width panel per (roster, project), separated by space. */
-.teams-stack {
-  display: flex;
-  flex-direction: column;
-  gap: 22px;
-}
-.team-panel {
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  background: var(--bg-card);
-  padding: 20px clamp(16px, 2vw, 28px) 22px;
-}
-
-/* Band 1: header (scan line) - roster -> target, live status, next run. */
-.team-panel-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 16px;
-}
-.team-headline { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; min-width: 0; }
-.team-panel-name {
-  font-family: var(--font-mono);
-  font-size: 16px;
-  font-weight: 700;
-  letter-spacing: 0.03em;
-  color: var(--text-head);
-  margin: 0;
-}
-.team-target { display: inline-flex; align-items: baseline; gap: 5px; min-width: 0; }
-.team-target-arrow { color: var(--text-muted); }
-.team-target-name {
-  font-family: var(--font-mono);
-  font-size: 13px;
-  color: var(--accent);
-  letter-spacing: 0.02em;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.team-status-group { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; text-align: right; flex-shrink: 0; }
-.team-status {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  letter-spacing: 0.02em;
-  color: var(--text-dim);
-  white-space: nowrap;
-}
-.team-status[data-kind="run"] { color: var(--accent); }
-.team-status[data-kind="ok"] { color: var(--state-done); animation: team-status-done 1s ease-out; }
-.team-status[data-kind="fail"] { color: var(--state-failed); }
-/* One-shot "it landed" acknowledgement, scoped to the status word itself (not the panel or screen):
-   a brief brighten + glow that settles. Plays once on the run -> ok transition; the global
-   prefers-reduced-motion block collapses it to a no-op. */
-@keyframes team-status-done {
-  0%   { opacity: 0.45; text-shadow: 0 0 0 transparent; }
-  25%  { opacity: 1; text-shadow: 0 0 10px color-mix(in oklab, var(--state-done) 65%, transparent); }
-  100% { opacity: 1; text-shadow: 0 0 0 transparent; }
-}
-.team-next {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--text-muted);
-  white-space: nowrap;
-}
-.team-head-right { display: flex; align-items: flex-start; gap: 12px; flex-shrink: 0; }
-.team-collapse {
-  appearance: none;
-  background: none;
-  border: none;
-  cursor: pointer;
-  color: var(--text-muted);
-  font-size: 12px;
-  line-height: 1;
-  padding: 2px 4px;
-  border-radius: var(--radius);
-  transition: transform var(--transition-med), color var(--transition-med);
-}
-.team-collapse:hover { color: var(--text-head); }
-.team-collapse:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.team-panel:not(.collapsed) .team-collapse { transform: rotate(90deg); }
-
-/* Compact resting state: hide the lower bands so an idle team is header + Run; expand on the
-   chevron, when a run starts, or when the pack needs setup. */
-.team-panel.collapsed .team-desc,
-.team-panel.collapsed .team-pipeline,
-.team-panel.collapsed .team-sched-editor,
-.team-panel.collapsed .team-guardrails,
-.team-panel.collapsed .team-runs,
-.team-panel.collapsed .team-sched-group { display: none; }
-.team-panel.collapsed .team-panel-head { margin-bottom: 14px; }
-.team-panel.collapsed .team-control-row { margin-bottom: 0; }
-.team-desc {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  line-height: 1.55;
-  color: var(--text-dim);
-  margin: 0 0 16px;
-  max-width: 80ch;
-  /* Roster identity, not an essay: clamp to two lines (full text on hover via title). */
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  overflow: hidden;
-}
-
-/* Band 2: pipeline rail */
-.team-pipeline {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px 4px;
-  list-style: none;
-  margin: 0 0 18px;
-  padding: 0;
-}
-.pipeline-arrow {
-  color: var(--text-muted);
-  font-family: var(--font-mono);
-  font-size: 13px;
-  padding: 0 2px;
-  user-select: none;
-}
-.pipeline-stage {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 7px 11px;
-  border: 1px solid var(--border-dim);
-  border-radius: var(--radius);
-  background: var(--bg-surface);
-  font-family: var(--font-mono);
-  font-size: 12px;
-  transition: border-color var(--transition-med), background var(--transition-med);
-}
-.pipeline-stage .stage-glyph { color: var(--text-muted); font-size: 11px; }
-.pipeline-stage .stage-name { color: var(--text-dim); }
-.pipeline-stage .stage-model {
-  color: var(--text-muted);
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  padding: 1px 5px;
-  border: 1px solid var(--border-dim);
-  border-radius: 4px;
-}
-.pipeline-stage[data-state="active"] {
-  border-color: var(--accent);
-  background: color-mix(in oklab, var(--accent) 12%, var(--bg-surface));
-}
-.pipeline-stage[data-state="active"] .stage-glyph {
-  color: var(--accent);
-  animation: tab-pulse 1.2s ease-in-out infinite;
-}
-.pipeline-stage[data-state="active"] .stage-name { color: var(--text-head); }
-.pipeline-stage[data-state="done"] .stage-glyph { color: var(--state-done); }
-.pipeline-stage[data-state="done"] .stage-name { color: var(--text-dim); }
-.pipeline-stage[data-state="failed"] { border-color: var(--state-failed); }
-.pipeline-stage[data-state="failed"] .stage-glyph { color: var(--state-failed); }
-/* FIX revision re-run badge (e.g. "r1", "r2") on a stage that ran again this round. */
-.pipeline-stage[data-round]::after {
-  content: "r" attr(data-round);
-  color: var(--accent);
-  font-size: 10px;
-  font-variant-numeric: tabular-nums;
-  letter-spacing: 0.04em;
-  padding: 1px 5px;
-  border-radius: 4px;
-  background: color-mix(in oklab, var(--accent) 16%, transparent);
-}
-
-/* Band 3: control row */
-.team-control-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px 22px;
-  margin-bottom: 16px;
-}
-.team-run-group { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-.team-sched-group { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-/* Destructive action trails the schedule cluster with a touch more air, so it never sits flush
-   against Edit. */
-.team-remove-btn { margin-left: 4px; }
-.team-run-btn {
-  font-family: var(--font-mono);
-  font-size: 13px;
-  letter-spacing: 0.03em;
-  padding: 8px 18px;
-  color: var(--accent);
-  background: transparent;
-  border: 1px solid var(--accent);
-  border-radius: var(--radius);
-  cursor: pointer;
-  transition: background var(--transition-med);
-}
-.team-run-btn:hover:not(:disabled) { background: color-mix(in oklab, var(--accent) 14%, transparent); }
-.team-run-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-.team-run-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.team-cancel-btn {
-  font-family: var(--font-mono);
-  font-size: 13px;
-  letter-spacing: 0.03em;
-  padding: 8px 16px;
-  color: var(--state-failed);
-  background: transparent;
-  border: 1px solid var(--state-failed);
-  border-radius: var(--radius);
-  cursor: pointer;
-  transition: background var(--transition-med);
-}
-.team-cancel-btn:hover { background: color-mix(in oklab, var(--state-failed) 14%, transparent); }
-.team-cancel-btn:focus-visible { outline: 2px solid var(--state-failed); outline-offset: 2px; }
-.team-spinner {
-  width: 11px;
-  height: 11px;
-  flex-shrink: 0;
-  border: 2px solid var(--border-hover);
-  border-top-color: var(--accent);
-  border-radius: 50%;
-  display: none;
-  animation: spin 0.8s linear infinite;
-}
-.team-run-group.running .team-spinner { display: inline-block; }
-.team-elapsed {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--text-muted);
-  font-variant-numeric: tabular-nums;
-}
-.team-elapsed.over-budget { color: var(--state-waiting); }
-.team-sched-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  font-family: var(--font-mono);
-  font-size: 13px;
-  color: var(--text-dim);
-  cursor: pointer;
-}
-.team-sched-toggle input { accent-color: var(--accent); cursor: pointer; }
-.team-sched-summary {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--text-muted);
-  letter-spacing: 0.02em;
-}
-.team-sched-edit,
-.team-remove-btn {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  padding: 6px 12px;
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  cursor: pointer;
-  transition: border-color var(--transition-med), color var(--transition-med);
-}
-.team-sched-edit { color: var(--text-dim); }
-.team-sched-edit:hover { border-color: var(--border-hover); color: var(--text-head); }
-.team-remove-btn { color: var(--text-muted); }
-.team-remove-btn:hover { border-color: var(--state-failed); color: var(--state-failed); }
-.team-sched-edit:disabled,
-.team-remove-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-.team-sched-edit:focus-visible,
-.team-remove-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-
-/* While a run is active the schedule option is hidden (not actionable mid-run, confusing next to
-   Cancel). Driven by .run-active on the panel, mirroring the .collapsed idiom. Remove is intentionally
-   NOT listed: it stays visible-but-disabled. A state class is used rather than the .hidden property
-   because .team-sched-toggle has display:inline-flex, which would override the UA [hidden] rule. */
-.team-panel.run-active .team-sched-toggle,
-.team-panel.run-active .team-sched-summary,
-.team-panel.run-active .team-sched-edit,
-.team-panel.run-active .team-sched-editor { display: none; }
-
-/* Schedule editor (revealed by Edit) */
-.team-sched-editor {
-  margin: 0 0 16px;
-  padding: 16px;
-  border: 1px solid var(--border-dim);
-  border-radius: var(--radius);
-  background: var(--bg-surface);
-}
-.sched-days { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
-.sched-day {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  min-width: 44px;
-  padding: 6px 10px;
-  color: var(--text-muted);
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  cursor: pointer;
-  transition: border-color var(--transition-med), color var(--transition-med), background var(--transition-med);
-}
-.sched-day:hover { border-color: var(--border-hover); }
-.sched-day[aria-pressed="true"] {
-  color: var(--accent);
-  border-color: var(--accent);
-  background: color-mix(in oklab, var(--accent) 12%, transparent);
-}
-.sched-day:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.sched-fields { display: flex; flex-wrap: wrap; gap: 12px 18px; margin-bottom: 14px; }
-.sched-field { display: flex; flex-direction: column; gap: 5px; }
-.sched-field-label {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--text-muted);
-}
-.sched-time,
-.sched-tz {
-  font-family: var(--font-mono);
-  font-size: 13px;
-  padding: 7px 10px;
-  color: var(--text-head);
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-}
-.sched-tz { min-width: 200px; }
-.sched-time:focus-visible,
-.sched-tz:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-.sched-editor-actions { display: flex; align-items: center; gap: 12px; }
-.sched-save {
-  font-family: var(--font-mono);
-  font-size: 13px;
-  padding: 7px 16px;
-  color: var(--accent);
-  background: transparent;
-  border: 1px solid var(--accent);
-  border-radius: var(--radius);
-  cursor: pointer;
-  transition: background var(--transition-med);
-}
-.sched-save:hover { background: color-mix(in oklab, var(--accent) 14%, transparent); }
-.sched-save:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.sched-cancel {
-  font-family: var(--font-mono);
-  font-size: 13px;
-  padding: 7px 12px;
-  color: var(--text-muted);
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: var(--radius);
-  cursor: pointer;
-}
-.sched-cancel:hover { color: var(--text-dim); }
-.sched-err { font-family: var(--font-mono); font-size: 11px; color: var(--state-failed); }
-
-/* Setup callout: shown until the project's pack is filled. An amber attention block (a genuine
-   blocker, the team can't run yet) holding the "Set up automatically" action. */
-.team-setup {
-  margin: 0 0 16px;
-  padding: 13px 15px;
-  border: 1px solid color-mix(in oklab, var(--state-waiting) 32%, var(--border));
-  border-radius: var(--radius);
-  background: color-mix(in oklab, var(--state-waiting) 7%, var(--bg-surface));
-}
-.team-setup-head {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  letter-spacing: 0.02em;
-  color: var(--text-dim);
-  margin: 0 0 6px;
-}
-.team-setup-sub {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  line-height: 1.5;
-  color: var(--text-muted);
-  margin: 0 0 12px;
-  max-width: 70ch;
-}
-/* "Set up automatically" action: launches the guided interview session. */
-.team-setup-auto {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  font-weight: 600;
-  padding: 7px 15px;
-  margin: 0;
-  border: 1px solid var(--accent);
-  border-radius: var(--radius);
-  background: color-mix(in oklab, var(--accent) 16%, var(--bg-surface));
-  color: var(--accent);
-  cursor: pointer;
-  transition: background var(--transition-med), border-color var(--transition-med);
-}
-.team-setup-auto:hover { background: color-mix(in oklab, var(--accent) 26%, var(--bg-surface)); }
-.team-setup-auto:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.team-setup-auto:disabled { opacity: 0.55; cursor: default; }
-
-/* Guardrails: the trust posture as scannable chips, derived from the team deny-list. */
-.team-guardrails {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  margin: 0 0 18px;
-  padding-bottom: 16px;
-  border-bottom: 1px solid var(--border-dim);
-}
-.guardrail-chip {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  letter-spacing: 0.02em;
-  padding: 2px 8px;
-  border-radius: 2px;
-  color: var(--text-muted);
-  border: 1px solid var(--border-dim);
-  white-space: nowrap;
-}
-.guardrail-mode {
-  color: var(--perms-warn);
-  border-color: color-mix(in oklab, var(--perms-warn) 35%, var(--border));
-}
-/* The routine write-scope + deny-list as one quiet caption, not a row of boxes. */
-.guardrail-summary {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  letter-spacing: 0.02em;
-  color: var(--text-muted);
-}
-
-/* Band 4: recent runs - each row expands to its summary + artifact-open buttons. */
-/* Conversation pane: live feed (system lines + agent questions) + operator input. Non-terminal: a small
-   message log, not an xterm. */
-/* The conversation is part of a run, so it stays hidden on an idle panel (no dead, disabled input);
-   it appears when a run goes active. Finished transcripts open from a run's "Conversation" button. */
-.team-chat {
-  margin: 0 0 18px;
-  display: none;
-  flex-direction: column;
-  gap: 8px;
-}
-.team-panel.run-active .team-chat { display: flex; }
-.team-chat-log {
-  max-height: 220px;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 10px;
-  border: 1px solid var(--border-dim);
-  border-radius: var(--radius);
-  background: var(--bg-surface);
-  font-family: var(--font-mono);
-  font-size: 12px;
-}
-.team-chat-log:empty { display: none; }
-.chat-msg {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  max-width: 85%;
-}
-.chat-msg-meta {
-  font-size: 9px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--text-muted);
-}
-.chat-msg-text {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  padding: 6px 9px;
-  border-radius: var(--radius);
-  border: 1px solid var(--border-dim);
-  background: var(--bg-card);
-  color: var(--text);
-  line-height: 1.45;
-}
-.chat-msg[data-role="operator"] { align-self: flex-end; align-items: flex-end; }
-.chat-msg[data-role="operator"] .chat-msg-text {
-  background: color-mix(in oklab, var(--accent) 14%, var(--bg-card));
-  border-color: var(--accent-dim);
-}
-.chat-msg[data-role="agent"] { align-self: flex-start; }
-.chat-msg[data-role="system"] {
-  align-self: center;
-  max-width: 100%;
-}
-.chat-msg[data-role="system"] .chat-msg-text {
-  background: transparent;
-  border: none;
-  padding: 1px 0;
-  color: var(--text-muted);
-  font-size: 11px;
-  text-align: center;
-}
-.chat-pending-question {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  padding: 8px 10px;
-  border: 1px solid color-mix(in oklab, var(--state-waiting) 45%, var(--border));
-  border-radius: var(--radius);
-  background: color-mix(in oklab, var(--state-waiting) 10%, var(--bg-card));
-}
-.chat-pending-label {
-  font-family: var(--font-mono);
-  font-size: 9px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--state-waiting);
-}
-.chat-pending-text {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  color: var(--text);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-.team-chat-input {
-  display: flex;
-  gap: 8px;
-  align-items: flex-end;
-}
-.chat-input-field {
-  flex: 1;
-  resize: none;
-  min-height: 34px;
-  max-height: 120px;
-  padding: 8px 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--bg-surface);
-  color: var(--text);
-  font-family: var(--font-mono);
-  font-size: 12px;
-  line-height: 1.4;
-  transition: border-color var(--transition-fast);
-}
-.chat-input-field:focus { outline: none; border-color: var(--accent); }
-.chat-input-field.awaiting { border-color: color-mix(in oklab, var(--state-waiting) 55%, var(--border)); }
-.chat-input-field:disabled { opacity: 0.5; cursor: not-allowed; }
-.chat-send {
-  flex: none;
-  padding: 8px 14px;
-  border: 1px solid var(--accent-dim);
-  border-radius: var(--radius);
-  background: color-mix(in oklab, var(--accent) 12%, transparent);
-  color: var(--accent);
-  font-family: var(--font-mono);
-  font-size: 12px;
-  cursor: pointer;
-  transition: background var(--transition-fast), border-color var(--transition-fast);
-}
-.chat-send:hover { background: color-mix(in oklab, var(--accent) 18%, transparent); border-color: var(--accent); }
-
-.team-runs-title {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  color: var(--text-muted);
-  margin: 0 0 6px;
-}
-.team-runs-list { list-style: none; margin: 0; padding: 0; }
-.run-item { border-bottom: 1px solid var(--border-dim); }
-.run-item:last-child { border-bottom: none; }
-.run-row {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  width: 100%;
-  padding: 9px 2px;
-  font-family: var(--font-mono);
-  font-size: 12px;
-  text-align: left;
-  background: transparent;
-  border: none;
-  border-radius: var(--radius);
-  cursor: pointer;
-}
-.run-row:hover { background: color-mix(in oklab, var(--accent) 5%, transparent); }
-.run-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.run-verdict { font-weight: 600; letter-spacing: 0.04em; white-space: nowrap; }
-.run-verdict[data-verdict="ship"] { color: var(--state-done); }
-.run-verdict[data-verdict="fix"] { color: var(--state-waiting); }
-.run-verdict[data-verdict="block"],
-.run-verdict[data-verdict="failed"] { color: var(--state-failed); }
-.run-verdict[data-verdict="skipped"],
-.run-verdict[data-verdict="done"],
-.run-verdict[data-verdict="incomplete"] { color: var(--text-muted); }
-.run-topic { flex: 1; min-width: 0; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.run-date { color: var(--text-muted); font-size: 11px; white-space: nowrap; }
-.run-chevron { color: var(--text-muted); font-size: 10px; transition: transform var(--transition-med); }
-.run-item.open .run-chevron { transform: rotate(90deg); }
-.run-empty { color: var(--text-muted); padding: 9px 2px; font-family: var(--font-mono); font-size: 12px; }
-.run-detail {
-  padding: 2px 2px 14px 0;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.run-summary { color: var(--text-dim); font-size: 12px; line-height: 1.55; margin: 0; max-width: 80ch; }
-.run-platforms { color: var(--text-muted); font-size: 11px; margin: 0; }
-.run-reached { color: var(--text-muted); font-size: 10px; letter-spacing: 0.04em; margin: 0; }
-.run-noartifacts { color: var(--text-muted); font-size: 11px; font-style: italic; margin: 0; }
-.run-artifacts { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 2px; }
-.run-artifacts-label {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--text-muted);
-}
 
 /* ============================================================
    Focus view (experimental): roster rail + single-focus center
@@ -4090,27 +3345,9 @@ a.pr-title:hover {
 }
 .review-btn:disabled .review-shortcut { opacity: 0.6; }
 
-.run-artifact {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  padding: 4px 11px;
-  color: var(--text-dim);
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  cursor: pointer;
-  transition: border-color var(--transition-med), color var(--transition-med);
-}
-.run-artifact:hover { border-color: var(--accent); color: var(--accent); }
-.run-artifact:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-
 @media (prefers-reduced-motion: reduce) {
-  .tab-activity.active,
-  .pipeline-stage[data-state="active"] .stage-glyph,
-  .team-spinner { animation: none; }
-  .header-tab::after,
-  .run-chevron,
-  .sched-day { transition: none; }
+  .tab-activity.active { animation: none; }
+  .header-tab::after { transition: none; }
 }
 
 .health-table {
@@ -4256,13 +3493,6 @@ a.pr-title:hover {
    the Phone Layout section below instead. */
 @media (max-width: 768px) {
   .dialog-settings { width: 100%; }
-
-  /* Teams: long server strings must wrap rather than push the panel past the viewport. The status
-     column also has to be allowed to shrink - min-width:0 alone cannot, since it is flex-shrink:0. */
-  .team-status-group { min-width: 0; flex-shrink: 1; }
-  .team-status { white-space: normal; overflow-wrap: anywhere; }
-  .team-next { white-space: normal; overflow-wrap: anywhere; }
-  .sched-editor-actions { flex-wrap: wrap; }
 }
 
 /* ── Touch input corrections ──────────────────────────────────
@@ -4321,18 +3551,15 @@ a.pr-title:hover {
   /* .focus-pill-remove is deliberately absent: it is already position:absolute, and a same-specificity
      `relative` here would clobber that and drop it back into the pill's flow. Its ::after anchors to
      the absolute box just as well. */
-  .team-collapse,
   .focus-rail-group-add,
   .focus-rail-group-remove { position: relative; }
 
-  .team-collapse::after,
   .focus-rail-group-add::after,
   .focus-rail-group-remove::after,
   .focus-pill-remove::after {
     content: '';
     position: absolute;
   }
-  .team-collapse::after { inset: -12px; }
   /* 8px apart in the group header: 6px each side is the widest bleed that keeps them separate. */
   .focus-rail-group-add::after,
   .focus-rail-group-remove::after { inset: -13px -6px; }
@@ -4345,10 +3572,10 @@ a.pr-title:hover {
    [data-layout="phone"] (public/form-factor.js writes it; form-factor-core.mjs decides it), never on a
    bare max-width, so no desktop selector is overridden and no desktop pixel is at risk here.
 
-   The desktop shell is not rendered at all: the phone gets six screens (Board, Terminal, Review,
-   Teams, Radar, PRs) behind a bottom nav. Elements that own live state - the review sidebar, the
-   Teams/Radar/PRs panels, the header controls, a session's card - are re-parented into those screens
-   rather than rebuilt, so both layouts are one app with one state pipeline.
+   The desktop shell is not rendered at all: the phone gets five screens (Board, Terminal, Review,
+   Radar, PRs) behind a bottom nav. Elements that own live state - the review sidebar, the Radar and
+   PRs panels, the header controls, a session's card - are re-parented into those screens rather than
+   rebuilt, so both layouts are one app with one state pipeline.
 
    Design posture, per DESIGN.md: monospace throughout, orchid as the only accent (the active nav item
    and the lit attention count), flat surfaces separated by tonal steps and 1px borders, state carried
@@ -4659,9 +3886,8 @@ html[data-layout="phone"] .phone-shell[data-keyboard="open"] .phone-key-strip:no
 .phone-key:active { color: var(--text-head); border-color: var(--border-hover); }
 .phone-key:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-/* ── Review, Teams, Radar and PRs screens (adopted desktop panels) ── */
+/* ── Review, Radar and PRs screens (adopted desktop panels) ── */
 .phone-review,
-.phone-teams,
 .phone-radar,
 .phone-prs { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
 /* The docked column's fixed flex basis is meaningless as a full screen, and there is no neighbour to
@@ -4669,7 +3895,6 @@ html[data-layout="phone"] .phone-shell[data-keyboard="open"] .phone-key-strip:no
 .phone-review > .app-sidebar { flex: 1 1 auto; border-left: none; }
 html[data-layout="phone"] .review-resize-handle { display: none; }
 html[data-layout="phone"] .review-sidebar-body { overscroll-behavior: contain; }
-.phone-teams > .teams-view { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 .phone-radar > .radar-view,
 .phone-prs > .pr-view { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 /* ── Radar on a phone ──

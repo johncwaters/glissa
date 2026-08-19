@@ -45,9 +45,9 @@ function safeDirSegment(id) {
 }
 
 // Build the Claude Code settings object with HTTP hooks for one session. An optional
-// `permissions` ({ deny: [...] }) is merged in for team stages - the deny blacklist (mechanism M2;
-// efficacy under --dangerously-skip-permissions is the open Phase-0(b) question). Omitted for
-// ordinary user sessions, so their settings are byte-identical to before.
+// `permissions` ({ deny: [...] }) is merged in for the headless lanes - the PR-review and PostHog
+// deny-lists (efficacy under --dangerously-skip-permissions is why they are a guard, not the guard).
+// Omitted for ordinary user sessions, so their settings are byte-identical to before.
 function buildHookSettings({ port, glissaId, token, timeoutSec = DEFAULT_TIMEOUT_SEC, permissions = null, detectScheduledWakeups = true, enableProjectMcp = false }) {
   if (!port || !glissaId || !token) {
     throw new Error('buildHookSettings requires port, glissaId, token');
@@ -68,7 +68,7 @@ function buildHookSettings({ port, glissaId, token, timeoutSec = DEFAULT_TIMEOUT
   }
   // Headless (`-p`) sessions cannot answer the interactive "trust this .mcp.json server?" prompt, so a
   // project MCP server would otherwise never load. This flag pre-trusts every project-scoped server for
-  // the session. Added ONLY when opted in (app-runtime team stages), so ordinary sessions stay byte-identical.
+  // the session. Added ONLY when a lane opts in, so ordinary sessions stay byte-identical.
   if (enableProjectMcp) {
     settings.enableAllProjectMcpServers = true;
   }

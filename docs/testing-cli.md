@@ -257,6 +257,7 @@ npm pack --dry-run
 ```
 bin/glissa.js
 bin/path-doctor.js
+scripts/prepare-build.js
 scripts/postinstall-path-check.js
 dist/            (built frontend, excludes dist/AGENTS.md and dist/pictures/)
 server.js
@@ -264,20 +265,11 @@ server/
 session/
 notifications/
 detection/
-teamlib/team-registry.js
-teamlib/team-orchestrator.js
-teamlib/team-output.js
-teamlib/team-prompt.js
 teamlib/team-git.js
-teamlib/team-settings.js
-teamlib/team-setup.js
-teamlib/project-context.js
-teamlib/project-context-core.js
-teamlib/markdown.js
-teamlib/verdict.js
-teams/
 shared/states.js
 shared/states.esm.js
+shared/client-trust.js
+shared/client-trust.esm.js
 shared/notification-states.js
 shared/paths.js
 package.json

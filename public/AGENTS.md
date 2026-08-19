@@ -4,7 +4,7 @@
 # public
 
 ## Purpose
-The browser dashboard frontend: ES modules bundled by Vite (dev server with HMR on 5173, production build to `dist/`). Renders session cards with xterm.js terminals, a Focus view, a review sidebar, a Teams panel, dialogs, themes, and notifications. The server is a dumb pipe; ALL ANSI rendering happens here.
+The browser dashboard frontend: ES modules bundled by Vite (dev server with HMR on 5173, production build to `dist/`). Renders session cards with xterm.js terminals, a Focus view, a review sidebar, dialogs, themes, and notifications. The server is a dumb pipe; ALL ANSI rendering happens here.
 
 ## Key Files
 
@@ -15,8 +15,7 @@ The browser dashboard frontend: ES modules bundled by Vite (dev server with HMR 
 | `control-ws.js` | Control WebSocket client: connection, reconnect, request/response |
 | `reconnect-backoff.mjs` | Pure `nextReconnectDelayMs(attempt, random)`: the ONE retry delay for both WS clients (500ms doubling to a 30s cap, jittered to 50-100%) |
 | `dialogs.js` | Add Session and Settings dialog factories (HTML imported `?raw` from `components/`) |
-| `teams-panel.js` | Barrel for the Teams tab (re-exports the 4-symbol public API from `teams-panel/`) |
-| `render-scheduler.mjs` | Global xterm WRITE scheduler: callback-gated round-robin with per-frame budget (distinct from root `scheduler.js`, which is a cron) |
+| `render-scheduler.mjs` | Global xterm WRITE scheduler: callback-gated round-robin with per-frame budget |
 | `notifications.js` | Native Web Notifications (browser routes to Windows Action Center); replaces the server-side toast path |
 | `notify-dedupe-core.mjs` | Pure cross-tab claim (short-TTL localStorage) so exactly one open tab raises each notification |
 | `alert-sound.js` | Notification sounds: audio files from `audio/` + synth-beep fallback |
@@ -37,9 +36,8 @@ The browser dashboard frontend: ES modules bundled by Vite (dev server with HMR 
 | Directory | Purpose |
 |-----------|---------|
 | `session-card/` | Session card modules: terminal, lifecycle, DOM, naming, WebGL pool (see `session-card/AGENTS.md`) |
-| `teams-panel/` | Teams tab package: `lifecycle.js` orchestrator + registry, instance panel, pipeline, runs list, schedule editor, chat, setup banner, pure `format-core.mjs` |
 | `focus-view/` | Focus view: roster rail + centered card, attention queue (see `focus-view/AGENTS.md`) |
-| `phone/` | Phone layout: six screens + bottom nav, rendered only under `[data-layout="phone"]` (see `phone/AGENTS.md`) |
+| `phone/` | Phone layout: five screens + bottom nav, rendered only under `[data-layout="phone"]` (see `phone/AGENTS.md`) |
 | `sidebar/` | Review sidebar: diff rendering, selection, merge actions (see `sidebar/AGENTS.md`) |
 | `components/` | Static HTML fragments imported `?raw` (see `components/AGENTS.md`) |
 | `audio/` | Notification sound files (OGG) |

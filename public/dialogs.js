@@ -203,7 +203,6 @@ export function createSettingsDialog(initialTab) {
   const soundSelect = dialog.querySelector('#settings-sound');
   const notificationsCheckbox = dialog.querySelector('#settings-notifications');
   const notificationsHint = dialog.querySelector('#settings-notifications-hint');
-  const editorCommandInput = dialog.querySelector('#settings-editor-command');
   const themeSelect = dialog.querySelector('#settings-theme');
   const errorEl = dialog.querySelector('#settings-error');
   const btnCancel = dialog.querySelector('#settings-cancel');
@@ -438,7 +437,6 @@ export function createSettingsDialog(initialTab) {
       autoResume: autoResumeCheckbox.checked,
       debugMode: debugModeCheckbox.checked,
       telegramNotifications: telegramNotificationsCheckbox.checked,
-      editorCommand: editorCommandInput.value.trim(),
       repoRoots: repoRoots,
       prReview: {
         enabled: prEnabledCheckbox.checked,
@@ -502,7 +500,6 @@ export function createSettingsDialog(initialTab) {
       checkUpdatesCheckbox.checked = s.checkForUpdates !== false;
       autoResumeCheckbox.checked = s.autoResume !== false;
       debugModeCheckbox.checked = !!s.debugMode;
-      editorCommandInput.value = s.editorCommand ?? '';
       repoRoots = Array.isArray(s.repoRoots) ? [...s.repoRoots] : [];
       renderRootList();
 

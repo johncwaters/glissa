@@ -547,7 +547,7 @@ function refreshActivity() {
   _activityCallback(attentionCount() > 0);
 }
 
-// Mirrors the Teams tab's activity seam: the view owns the condition, app.js owns the dot element.
+// The tab-activity seam (defined in pr-panel.js): the view owns the condition, app.js owns the dot element.
 // The condition is now the FULL Radar attention count (issues + live anomalies + needs-action PRs),
 // so the desktop tab dot and the phone More dot, which both hang off this one callback, agree.
 export function setRadarActivityCallback(callback) {

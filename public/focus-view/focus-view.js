@@ -790,7 +790,7 @@ export function activateFocusView() {
   active = true;
   // releaseCenter returns any stray centered card home and clears focusedId, so this is always a clean
   // start. We then restore the last session the operator had open (restoreFocusedSession), so switching
-  // away to Teams and back returns to it. When nothing valid is saved the center stays on the
+  // away to Radar and back returns to it. When nothing valid is saved the center stays on the
   // intentional empty placeholder and the operator picks from the rail.
   releaseCenter();
   railTabStopId = null;

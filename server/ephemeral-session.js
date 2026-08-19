@@ -3,7 +3,7 @@
 // Register an ephemeral (never persisted) Session in its lane's map with guaranteed cleanup:
 // removal + data-client close on 'exit', and a wrapped destroy() because callers'
 // removeAllListeners can pre-empt the 'exit' cleanup (every orchestrator/poller finish path
-// calls destroy()). logPrefix names the lane in error logs (e.g. 'team', 'pr-review').
+// calls destroy()). logPrefix names the lane in error logs (e.g. 'pr-review', 'posthog').
 function registerEphemeralSession({ map, id, sess, closeSessionDataClients, logPrefix, name }) {
   map.set(id, sess);
   sess.on('error', (err) => console.error(`[${logPrefix} ${name}] error: ${err.message}`));

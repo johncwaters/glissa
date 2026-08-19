@@ -123,14 +123,14 @@ This system explicitly rejects the generic AI-SaaS dashboard (no gradient hero, 
 A near-monochrome violet-tinted dark palette with one iridescent accent and a strict, color-blind-safe vocabulary of semantic state colors. Phyrexian (the default theme) is documented here; Midnight, Golgari, and Compleated are alternate themes that swap the same token names to blue-purple, green-black, and a single light scheme respectively.
 
 ### Primary
-- **Iridescent Orchid** (#c084fc): The one accent. Primary actions, current selection, focus rings, the active tab underline, the wordmark glyph, connection and pipeline highlights. It appears on a small fraction of any screen on purpose.
+- **Iridescent Orchid** (#c084fc): The one accent. Primary actions, current selection, focus rings, the active tab underline, the wordmark glyph, connection highlights. It appears on a small fraction of any screen on purpose.
 - **Deep Orchid** (#9656d6): The accent's darker partner, for accent borders, CTA strokes, and pulse low-points where full orchid would shout.
 
 ### Neutral
 - **Near-Black Violet** (#0a0810): The base canvas behind everything.
 - **Ink Violet** (#100e18): Card and panel fills, the terminal pane background, one step up from the canvas.
 - **Shadow Violet** (#0c0a14): The sticky header bar.
-- **Deep Violet Slate** (#16122a): Inset surfaces, inputs, pipeline-stage chips, the next tonal step up.
+- **Deep Violet Slate** (#16122a): Inset surfaces, inputs, the next tonal step up.
 - **Violet Border** (#2a2440) / **Dim Violet Border** (#1e1a32) / **Lifted Violet Border** (#3e3660): The three-step border ramp. Dim for quiet internal dividers, base for component edges, lifted for hover and elevated surfaces (menus, tooltips, dialogs).
 - **Bright Lavender White** (#e8e0ff): Headings and emphasized text.
 - **Soft Lavender Grey** (#c8c0e0): Default body text.
@@ -202,7 +202,7 @@ Every interactive element ships default, hover, focus-visible, active, and disab
 ### Buttons
 - **Shape:** nearly square (4px radius). Tight corners reinforce the instrument feel.
 - **Primary (accent-outline):** transparent fill, Iridescent Orchid text and 1px orchid border, padding 8px 18px, uppercase-ish mono with light tracking. Used for Run, Add, Save, the empty-state CTA. Hover fills with a ~14% orchid wash; disabled drops to 0.4 opacity.
-- **Ghost / secondary:** transparent fill, Muted Lavender text, 1px base border, padding 6px 12px. Used for Edit, Remove, Cancel. Hover lifts the border (Remove hovers to Signal Red). 
+- **Ghost / secondary:** transparent fill, Muted Lavender text, 1px base border, padding 6px 12px. Used for Edit, Remove, Cancel. Hover lifts the border (Remove hovers to Signal Red).
 - **Icon action button:** 26x22 transparent square, glyph only. Maximize and the overflow (kebab) sit persistently in the card header; the kebab holds the secondary actions (rename, restart, remove), and the debug button appears only when debug mode is on. An invisible inset pseudo-element extends the touch target without changing the visual size. Active scales to 0.93 for tactile feedback.
 
 ### Inputs / Fields
@@ -219,7 +219,7 @@ Every interactive element ships default, hover, focus-visible, active, and disab
 - **Internal padding:** 20px to 28px on large panels; the session-card header and terminal pane carry their own rhythm.
 
 ### Navigation
-- **Primary tabs (Sessions / Teams):** mono 13px, 0.04em tracking, Muted Lavender at rest to Bright Lavender White when selected. The active tab draws a 2px orchid underline that animates in via `transform: scaleX` (ease-out-quart), never a layout shift. An optional activity dot pulses orchid when background work is running.
+- **Primary view tabs:** mono 13px, 0.04em tracking, Muted Lavender at rest to Bright Lavender White when selected. The active tab draws a 2px orchid underline that animates in via `transform: scaleX` (ease-out-quart), never a layout shift. An optional activity dot pulses orchid when background work is running.
 
 ### State Badge (signature)
 - Uppercase mono, 11px, 700, 0.08em tracking, colored by `data-state` and always preceded by a state glyph. The glyph plus the color plus the shape make state legible without relying on hue, satisfying the color-blind commitment. STARTING pulses.
@@ -232,12 +232,6 @@ The collapsed dock at the bottom of the screen. It sits in-flow below the sessio
 - **Minimized card:** a 120px chip at 4px radius and 0.85 opacity (1 on hover). The terminal is hidden; the header collapses to a centered name flanked by a single state dot.
 - **State at a glance:** badges are dropped; state rides the border color and the dot. Only two states get a loud treatment, RUNNING (saturated green border, a steady green dot with a soft glow) and WAITING (full amber border, amber-tinted fill, a breathing inset glow and a pulsing dot). Everything else is a quiet neutral dot at 0.45 opacity.
 - **Color-blind safe by construction:** amber-plus-motion versus green-plus-steady differ on hue, saturation, and animation at once. This is the Earned Signal and Flat-By-Default rules at miniature scale.
-
-### Schedule Editor (inline)
-Revealed in place by the Edit button on a team panel, never a modal. Deep Violet Slate surface, 1px dim border, 4px radius, 16px padding.
-- **Day toggles:** seven pill buttons (min-width 44px for the touch target). Selected (`aria-pressed="true"`) fills a 12% orchid wash with an orchid border and orchid text.
-- **Fields:** a native time input and a time-zone text input (with a datalist of presets), each under a 10px uppercase Label.
-- **Actions:** Save (accent-outline button), Cancel (ghost), and an inline Signal Red error. The whole pattern is the system's answer to "don't reach for a modal."
 
 ### Permissions Badge
 A small uppercase warning chip on any session spawned with skip-permissions. 11px, 700, 0.08em uppercase in the perms-warn amber-orange (#d97706), with a full 1px border and a 16% tinted fill at 2px radius. Quiet but unmistakable. Note the full border: it deliberately replaced an earlier colored `border-left`, per the side-stripe ban.
@@ -277,4 +271,4 @@ A 560px dialog that replaces a long scroll with a horizontal tab strip.
 - **Don't** apply a side-stripe accent (`border-left`/`border-right` > 1px as a colored stripe). Use full borders, background tints, or a leading glyph.
 - **Don't** give resting surfaces a drop shadow, and never a raw rgba(0,0,0) shadow. Shadows are violet-tinted and state- or overlay-driven only.
 - **Don't** add a second decorative accent hue, or spend a state color on anything that is not that state.
-- **Don't** reach for a modal when an inline or progressive disclosure will do (the Add-team and schedule editors are inline by design).
+- **Don't** reach for a modal when an inline or progressive disclosure will do.

@@ -113,8 +113,8 @@ function createLifecycle({
     // core/restart-strategy.js): under systemd the self-respawn silently bricks the service, so the
     // process exits NON-ZERO and lets `Restart=on-failure` start the unit again. Unsupervised, the
     // original respawn is the only thing that can bring Glissa back, so it is kept verbatim: detached
-    // so it outlives this process, windowsHide so it does NOT pop its own console window (mirrors the
-    // openInEditor spawn in backend.js). Shutdown stays exit 0 in BOTH worlds - "Shut Down" must stay
+    // so it outlives this process, windowsHide so it does NOT pop its own console window. Shutdown
+    // stays exit 0 in BOTH worlds - "Shut Down" must stay
     // down, and a zero exit is what keeps `Restart=on-failure` from reviving it.
     const strategy = decideRestartStrategy(env);
     let handedOff = false;

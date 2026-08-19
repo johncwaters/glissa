@@ -219,8 +219,8 @@ test('boot wiring: createBackend runs the reconcile (clean orphan removed, dirty
   let server = null;
   try {
     const gw = createGitWorkspace();
-    const cleanWorktree = await gw.create({ projectPath: repo, teamId: 'session', label: 'orphan-clean', baseBranch: 'develop', outputPath: '', worktreeBase });
-    const dirtyWorktree = await gw.create({ projectPath: repo, teamId: 'session', label: 'orphan-dirty', baseBranch: 'develop', outputPath: '', worktreeBase });
+    const cleanWorktree = await gw.create({ projectPath: repo, teamId: 'session', label: 'orphan-clean', baseBranch: 'develop', worktreeBase });
+    const dirtyWorktree = await gw.create({ projectPath: repo, teamId: 'session', label: 'orphan-dirty', baseBranch: 'develop', worktreeBase });
     fs.writeFileSync(path.join(dirtyWorktree.cwd, 'wip.js'), 'work in progress\n', 'utf8');
 
     const cfgPath = path.join(cfgDir, 'config.json');

@@ -27,7 +27,6 @@ function richConfig(overrides = {}) {
     port: 4123,
     autoRecoverSeconds: 3,
     cursorBlink: false,
-    editorCommand: '',
     repoRoots: ['/repo'],
     worktreeShare: ['node_modules'],
     remote: { enabled: false },
@@ -66,7 +65,7 @@ test('validateConfig accepts lenient partial configs and unknown keys', () => {
     port: 65535,
     autoRecoverSeconds: 0,
     cursorBlink: true,
-    editorCommand: 'code',
+    integrationBranch: 'develop',
     repoRoots: ['/repo'],
     worktreeShare: ['node_modules'],
     remote: {},
@@ -80,7 +79,7 @@ test('validateConfig rejects malformed known fields', () => {
     port: 70000,
     autoRecoverSeconds: Number.POSITIVE_INFINITY,
     cursorBlink: 'yes',
-    editorCommand: 3,
+    integrationBranch: 3,
     repoRoots: ['/repo', 5],
     worktreeShare: 'node_modules',
     remote: [],
@@ -90,7 +89,7 @@ test('validateConfig rejects malformed known fields', () => {
   assert.match(validation.errors.join('\n'), /port must be an integer/);
   assert.match(validation.errors.join('\n'), /autoRecoverSeconds must be a finite number/);
   assert.match(validation.errors.join('\n'), /cursorBlink must be a boolean/);
-  assert.match(validation.errors.join('\n'), /editorCommand must be a string/);
+  assert.match(validation.errors.join('\n'), /integrationBranch must be a string/);
   assert.match(validation.errors.join('\n'), /repoRoots must be an array of strings/);
   assert.match(validation.errors.join('\n'), /worktreeShare must be an array of strings/);
   assert.match(validation.errors.join('\n'), /remote must be a plain object/);
@@ -257,11 +256,11 @@ test('no settingsDefaults option keeps plain DEFAULT_CONFIG behavior', () => {
 
 test('applySettings coerces booleans and strings and applies timeouts', () => {
   withStore({ projects: [] }, (store) => {
-    store.applySettings({ cursorBlink: 1, debugMode: 0, autoRecoverSeconds: 7, editorCommand: 123 });
+    store.applySettings({ cursorBlink: 1, debugMode: 0, autoRecoverSeconds: 7, integrationBranch: 123 });
     assert.equal(store.config.cursorBlink, true, 'boolean coerced');
     assert.equal(store.config.debugMode, false, 'falsy boolean coerced');
     assert.equal(store.config.autoRecoverSeconds, 7, 'timeout applied');
-    assert.equal(store.config.editorCommand, '123', 'string coerced');
+    assert.equal(store.config.integrationBranch, '123', 'string coerced');
   });
 });
 

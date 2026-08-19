@@ -141,7 +141,7 @@
   <!-- [P3] Tailwind utility duplicates stripped - semantic classes in style.css are authoritative -->
   <!-- This is the DESKTOP layout. Under [data-layout="phone"] the whole shell is display:none and the
        phone shell (public/phone/phone-shell.js) renders instead, borrowing the header controls, the
-       review sidebar, the Teams panel and the focused session's card out of here. Sessions cards stay
+       review sidebar, the Radar and PRs panels and the focused session's card out of here. Sessions cards stay
        parented in #sessions-container either way: it is their one canonical home. -->
   <div class="app-shell">
     <header class="header">
@@ -150,7 +150,6 @@
           <h1 class="header-title">Glissa</h1>
           <nav class="header-tabs" id="header-tabs" role="tablist" aria-label="Primary views">
             <button class="header-tab" id="tab-focus" role="tab" aria-selected="true" aria-controls="view-focus" tabindex="0">Focus</button>
-            <button class="header-tab" id="tab-teams" role="tab" aria-selected="false" aria-controls="view-teams" tabindex="-1">Teams<span class="tab-activity" id="tab-teams-activity" aria-hidden="true"></span></button>
             <button class="header-tab" id="tab-radar" role="tab" aria-selected="false" aria-controls="view-radar" tabindex="-1">Radar<span class="tab-activity" id="tab-radar-activity" aria-hidden="true"></span></button>
             <button class="header-tab" id="tab-prs" role="tab" aria-selected="false" aria-controls="view-prs" tabindex="-1">PRs<span class="tab-activity" id="tab-prs-activity" aria-hidden="true"></span></button>
           </nav>
@@ -194,8 +193,6 @@
         <section class="sessions" id="sessions-container">
           <!-- Session cards injected here by app.js -->
         </section>
-        <!-- Teams view: dedicated tab space, mounted by teams-panel.js -->
-        <section class="teams-view" id="view-teams" role="tabpanel" aria-labelledby="tab-teams" hidden></section>
         <!-- Radar view: PostHog issue status, mounted by radar-panel.js -->
         <section class="radar-view" id="view-radar" role="tabpanel" aria-labelledby="tab-radar" hidden></section>
         <!-- PRs view: GitHub PR auto-review status, mounted by pr-panel.js -->
