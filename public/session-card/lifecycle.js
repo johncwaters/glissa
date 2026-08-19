@@ -10,7 +10,7 @@ import { setHealthMonitorVisible } from '../health-monitor.js';
 import { seedReviewMergeStatus, setReviewDiff, setReviewMergeStatus } from '../sidebar/review-sidebar.js';
 import { setSelectedId } from '../sidebar/selection.js';
 import { getSoundId, isSoundEnabled } from '../ui-prefs.js';
-import { sessionChipText } from '../usage-view-core.mjs';
+import { sessionChipText, sessionChipTitle } from '../usage-view-core.mjs';
 import { setRunningActivity } from './activity.js';
 import { computeAggregate } from './aggregate-core.mjs';
 import { buildCardDOM, closeDebugOverlay, isRenameInProgress, openDebugOverlay, setDebugMode, showConfirmDialog, startInlineRename } from './card-dom.js';
@@ -384,7 +384,10 @@ export function setSessionUsage(sessionId, usage) {
     return;
   }
   ui.card.dataset.usage = '';
-  if (badge) badge.textContent = text;
+  if (!badge) return;
+  badge.textContent = text;
+  // Claude's own figure and the scanner's estimate are computed differently, so the chip says which.
+  badge.title = sessionChipTitle(usage);
 }
 
 // Reflect the advisory pending-prompt-kind on the card (server session-prompt delta / snapshot

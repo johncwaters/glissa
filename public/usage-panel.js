@@ -14,6 +14,7 @@ import {
   DEFAULT_MODEL_SORT,
   DEFAULT_RANGE_VALUE,
   DEFAULT_SESSION_SORT,
+  PLAN_WINDOWS,
   RANGE_OPTIONS,
   USAGE_CAVEAT,
   USAGE_CAVEAT_SHORT,
@@ -31,6 +32,7 @@ import {
   formatPercent,
   formatTokens,
   formatUsd,
+  hasOfficialPlanLimits,
   hasUsageAttention,
   isGlissaSessionRow,
   isUsageUnavailable,
@@ -39,10 +41,16 @@ import {
   modelLabel,
   nextSortState,
   percentOfTotal,
+  planLimitAgeText,
+  planLimitStaleNote,
+  planWindowOf,
+  planWindowUsedText,
   pricingSourceLine,
   projectionLimitLine,
   projectionLine,
+  provenanceLabel,
   reportDayKey,
+  resetCountdownText,
   scanLine,
   sessionRowLabel,
   shareBasis,
@@ -52,6 +60,7 @@ import {
   sortModelRows,
   sortSessionRows,
   tokenLimitLine,
+  tokenLimitTone,
   usageErrorLine,
   usageWarningLine,
 } from './usage-view-core.mjs';
@@ -60,6 +69,7 @@ const REFRESH_STATUS_TIMEOUT_MS = 20000;
 
 let _report = null;
 let _sessions = null;
+let _planLimits = null;
 let _root = null;
 let _activityCallback = null;
 let _sendRequest = null;
@@ -80,6 +90,7 @@ const _expandedDays = new Set();
 let _reportAgeEl = null;
 let _sessionsTsEl = null;
 let _pricingEl = null;
+let _planAgeEl = null;
 let _blockElapsedEl = null;
 let _blockRemainingEl = null;
 let _blockMeterEl = null;
@@ -308,6 +319,63 @@ function buildHeaderSection() {
   return section;
 }
 
+// ── Plan limits ──
+// The official account rate limits, first on the page because they are the only hard ceiling here: every
+// other number is arithmetic about spend, this one is how much of the plan is gone. Kept visible when
+// stale, with its age, rather than hidden or silently swapped for the estimate.
+function buildPlanLimitsSection() {
+  if (!hasOfficialPlanLimits(_planLimits)) return null;
+  const section = buildSection('Plan limits', provenanceLabel('official'));
+  const stale = planLimitStaleNote(_planLimits?.ts);
+  if (stale) {
+    const note = el('p', 'usage-meta', stale);
+    note.dataset.tone = 'warn';
+    section.append(note);
+  }
+  const list = el('div', 'usage-plan');
+  for (const spec of PLAN_WINDOWS) {
+    const window = planWindowOf(_planLimits, spec.key);
+    if (!window) continue;
+    list.append(buildPlanWindow(spec, window));
+  }
+  section.append(list);
+  _planAgeEl = el('p', 'usage-meta', '');
+  section.append(_planAgeEl);
+  paintPlanAge();
+  _ticker.onTick(paintPlanAge);
+  return section;
+}
+
+function buildPlanWindow(spec, window) {
+  const row = el('div', 'usage-plan-window');
+  const head = el('div', 'usage-plan-head');
+  head.append(el('span', 'usage-plan-label', spec.label));
+  head.append(el('span', 'usage-plan-used', planWindowUsedText(window)));
+  const countdown = el('span', 'usage-plan-reset', '');
+  head.append(countdown);
+  row.append(head);
+  // No meter for a window that reported only a reset time: a zero-width bar would read as 0% used,
+  // which is the one thing an absent percentage does not mean.
+  if (Number.isFinite(window.pct)) {
+    row.append(buildMeter(window.pct, tokenLimitTone(window.pct), `${spec.label} plan limit used`));
+  }
+  // The countdown is the one part that moves on its own, so it rides the shared tick and reads the
+  // window it was built from.
+  const paint = () => {
+    if (!countdown.isConnected) return;
+    countdown.textContent = resetCountdownText(window.resetsAtMs);
+  };
+  paint();
+  _ticker.onTick(paint);
+  return row;
+}
+
+function paintPlanAge() {
+  if (!_planAgeEl?.isConnected) return;
+  const age = planLimitAgeText(_planLimits?.ts);
+  _planAgeEl.textContent = age ? `Reported ${age}.` : '';
+}
+
 // ── Current block ──
 // Promoted above the totals: "am I burning too fast right now" is the only question here with a clock
 // on it, and its two rate numbers get tile weight rather than a sentence.
@@ -320,7 +388,7 @@ function buildActiveBlockSection() {
     return section;
   }
 
-  const tone = blockAttentionTone(_report);
+  const tone = blockAttentionTone(_report, _planLimits);
   const tiles = el('div', 'usage-tiles');
   tiles.append(buildTile('block tokens', formatTokens(block.tokens ?? 0), formatUsd(block.costUSD ?? 0), tone).tile);
   for (const spec of burnTiles(block.burn)) {
@@ -351,15 +419,19 @@ function buildActiveBlockSection() {
 
   const limit = tokenLimitLine(_report?.tokenLimit);
   if (!limit) return section;
+  // The heuristic reference. Always labelled as the estimate it is, because with official plan limits on
+  // the page above it an unlabelled percentage would read as a second official ceiling.
   const currentPct = limitPct(_report?.tokenLimit);
-  section.append(buildMeter(currentPct, tone, 'Share of the largest completed block seen'));
+  const heuristicTone = blockAttentionTone(_report);
+  section.append(buildMeter(currentPct, heuristicTone, 'Share of the largest completed block seen, estimated'));
   const limitLine = el('p', 'usage-meta', limit);
-  limitLine.dataset.tone = tone;
+  limitLine.dataset.tone = heuristicTone;
   section.append(limitLine);
+  section.append(el('p', 'usage-provenance', provenanceLabel('estimated')));
   const projected = projectionLimitLine(block.projection, _report?.tokenLimit);
   if (projected) {
     const projectedEl = el('p', 'usage-meta', projected);
-    projectedEl.dataset.tone = tone;
+    projectedEl.dataset.tone = heuristicTone;
     section.append(projectedEl);
   }
   return section;
@@ -393,7 +465,7 @@ function buildTotalsSection() {
   const totals = _report?.totals || {};
   const today = dailyRowForDay(_report?.daily, reportDayKey(_report));
   const section = buildSection('Totals', _report?.tz ? `daily buckets in ${_report.tz}` : '');
-  const tone = blockAttentionTone(_report);
+  const tone = blockAttentionTone(_report, _planLimits);
   const tiles = el('div', 'usage-tiles');
   tiles.append(buildTile('today', formatTokens(today?.tokens ?? 0), formatUsd(today?.costUSD ?? 0), tone).tile);
   tiles.append(buildTile('all tokens', formatTokens(totals.tokens ?? 0), formatUsd(totals.costUSD ?? 0)).tile);
@@ -599,6 +671,7 @@ function clearRefs() {
   _reportAgeEl = null;
   _sessionsTsEl = null;
   _pricingEl = null;
+  _planAgeEl = null;
   _blockElapsedEl = null;
   _blockRemainingEl = null;
   _blockMeterEl = null;
@@ -640,6 +713,10 @@ function restoreFocusAfterRender() {
 
 function buildBody() {
   _root.append(buildHeaderSection());
+  // Plan limits come from the statusLine relay, not the transcript scan, so they are shown even when the
+  // report itself is missing or unavailable.
+  const plan = buildPlanLimitsSection();
+  if (plan) _root.append(plan);
   if (isUsageUnavailable(_report)) {
     _root.append(buildUnavailableSection());
     return;
@@ -657,7 +734,7 @@ function buildBody() {
 
 function refreshActivity() {
   if (!_activityCallback) return;
-  _activityCallback(hasUsageAttention(_report));
+  _activityCallback(hasUsageAttention(_report, _planLimits));
 }
 
 function applyRefreshPending() {
@@ -732,6 +809,14 @@ export function applyUsageSessions(msg) {
     return;
   }
   render();
+}
+
+// Official plan limits, broadcast only when a rounded percentage or a reset time actually moved, and
+// replayed on connect. Machine-wide, so there is nothing per session to reconcile here.
+export function applyPlanLimits(msg) {
+  _planLimits = msg;
+  render();
+  refreshActivity();
 }
 
 export function applyUsageReport(msg) {

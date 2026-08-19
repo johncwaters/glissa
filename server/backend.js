@@ -54,7 +54,7 @@ const { createIntegrationRefWatcher } = require('../detection/integration-ref-wa
 const { createIntegrationWatcherPool } = require('../detection/integration-watcher-pool');
 const { createPrReviewWiring } = require('./pr-review-wiring');
 const { createPosthogWiring } = require('./posthog-wiring');
-const { createUsageWiring } = require('./usage-wiring');
+const { createUsageWiring, resolveUsageConfig } = require('./usage-wiring');
 const { normalizeRemoteConfig, validateRemoteConfig, decideBindHost } = require('./core/remote-config');
 const { createClientPresence } = require('./core/client-presence');
 const { normalizePackNames } = require('./core/pack-core');
@@ -243,6 +243,13 @@ function isUserPromptSubmitEvent(event) {
   return String(event || '').toLowerCase() === 'userpromptsubmit';
 }
 
+// Telemetry, not a status signal: mapHookToSignal returns null for it (so HookRouter answers 200 with
+// no signal after validating the token exactly as it does for every other event), and the route hands
+// the payload to the usage lane instead of the detection path.
+function isStatuslineEvent(event) {
+  return String(event || '').toLowerCase() === 'statusline';
+}
+
 function bootError(message) {
   const err = new Error(message);
   err.glissaBoot = true;
@@ -312,6 +319,13 @@ function createBackend(httpServer, options = {}) {
     return null;
   }
 
+  // Both switches, in one place: the statusLine relay is part of the usage lane, so usage.enabled false
+  // must leave nothing injected even with planLimits left at its default.
+  function planLimitsEnabled(cfg) {
+    const usageCfg = resolveUsageConfig(cfg.usage);
+    return usageCfg.enabled && usageCfg.planLimits;
+  }
+
   function makeSession(project, cfg) {
     const session = new Session({
       id: project.id,
@@ -347,6 +361,9 @@ function createBackend(httpServer, options = {}) {
       packs: project.packs,
       // Pack read telemetry (config kill switch; undefined -> Session default true).
       packReadTelemetry: cfg.packReadTelemetry,
+      // Official plan-limit ingestion via a managed statusLine. Off whenever the usage lane itself is
+      // off, so one switch turns the whole lane inert.
+      planLimits: planLimitsEnabled(cfg),
     });
     // Signals-only by default (kill switch: config recordSignals); cfg.capture opts into raw PTY
     // bytes on top. See AGENTS.md, "Session Recording".
@@ -400,7 +417,18 @@ function createBackend(httpServer, options = {}) {
         token,
         payload,
       });
-      const body = { ok: out.status === 200, reason: out.reason };
+      // The managed statusLine relay's POST. Only an ACCEPTED callback is ingested (the token check is
+      // HookRouter's, shared with every other event), the payload is normalized and dropped rather than
+      // stored or recorded, and the reply below stays the plain ok JSON: the injection shape is
+      // UserPromptSubmit-only.
+      if (out.status === 200 && isStatuslineEvent(req.params.event)) {
+        usage.ingestStatusline(payload);
+      }
+      // NOT named `body`: this block also reads the accumulated request-body string of that name, and a
+      // same-name const here puts it in the temporal dead zone for the whole callback, so JSON.parse
+      // threw a ReferenceError that the tolerate-catch above swallowed and EVERY hook payload arrived
+      // as {} (dead session_id capture, dead background_tasks gate, dead Notification subtypes).
+      const reply = { ok: out.status === 200, reason: out.reason };
       // Live context-pack channel: a UserPromptSubmit reply MAY carry one Glissa-authored notice that
       // a pack this session spawned against has been rebuilt. Only this exact nesting with a matching
       // hookEventName injects anything (verified on Claude Code 2.1.235), only UserPromptSubmit is a
@@ -411,9 +439,9 @@ function createBackend(httpServer, options = {}) {
         ? sessions.get(req.params.glissaId)?.takePackNoticeContext() || null
         : null;
       if (packNotice) {
-        body.hookSpecificOutput = { hookEventName: 'UserPromptSubmit', additionalContext: packNotice };
+        reply.hookSpecificOutput = { hookEventName: 'UserPromptSubmit', additionalContext: packNotice };
       }
-      res.status(out.status).json(body);
+      res.status(out.status).json(reply);
     });
   });
 
@@ -1380,6 +1408,9 @@ function createBackend(httpServer, options = {}) {
     getUsageSessions: () => usage.getSessionsMessage(),
     getUsageReport: () => usage.getCachedReport(),
     requestUsageReport: (args) => usage.requestReport(args),
+    // Official plan limits are machine-wide, so the freshest snapshot is replayed to every client that
+    // connects rather than being rebuilt per session.
+    getPlanLimits: () => usage.getPlanLimitsMessage(),
   });
 
   // --- Data WebSocket ---
@@ -1669,6 +1700,9 @@ function createBackend(httpServer, options = {}) {
     // read-only way in for an embedder (and for the route tests, which have no other way to hold the
     // Session a request will act on).
     getSession: getSessionAny,
+    // The freshest official plan-limit snapshot, for the same reason getSession is exposed: a route
+    // test has no other way to observe what a hook callback stored.
+    getPlanLimits: () => usage.getPlanLimitsMessage(),
     bindHost: bindDecision.host,
     remote: {
       enabled: remote.enabled,

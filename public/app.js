@@ -25,7 +25,7 @@ import { showErrorToast } from './session-card/toast.js';
 import { forgetReviewSession, mergeSelectedSession, mountReviewSidebar, notifyWorktreeChanged, refreshReviewSidebar, resolveSelectedSession, resyncSelectedSession, setReviewBranchSync } from './sidebar/review-sidebar.js';
 import { applyTheme } from './theme.js';
 import { getActiveView, getThemeId, isSoundEnabled, setActiveView, setSoundEnabled } from './ui-prefs.js';
-import { applyUsageReport, applyUsageSessions, mountUsageView, refreshUsageView, requestUsageReport, setUsageActivityCallback, setUsageRequestSender } from './usage-panel.js';
+import { applyPlanLimits, applyUsageReport, applyUsageSessions, mountUsageView, refreshUsageView, requestUsageReport, setUsageActivityCallback, setUsageRequestSender } from './usage-panel.js';
 
 // ── Apply saved theme ─────────────────────────────────────────
 
@@ -201,7 +201,7 @@ function applyUsageSessionChips(rows) {
   for (const row of (Array.isArray(rows) ? rows : [])) {
     if (!row?.id) continue;
     seen.add(row.id);
-    const usage = { tokens: row.tokens, costUSD: row.costUSD };
+    const usage = { tokens: row.tokens, costUSD: row.costUSD, officialCostUSD: row.officialCostUSD };
     usageBySessionId.set(row.id, usage);
     setSessionUsage(row.id, usage);
   }
@@ -271,6 +271,8 @@ const messageHandlers = {
   'pr-status':          (msg) => { applyPrStatus(msg); applyRadarPrStatus(msg); },
   'usage-sessions':     (msg) => { applyUsageSessionChips(msg.sessions); applyUsageSessions(msg); requestUsageReportIfVisible(); },
   'usage-report':       (msg) => applyUsageReport(msg),
+  // Official account rate limits from the managed statusLine relay (machine-wide, not per session).
+  'plan-limits':        (msg) => applyPlanLimits(msg),
   'client-trust':       (msg) => applyClientTrust(msg.trust),
   'shutting-down':      () => {
     disableReconnect();

@@ -66,7 +66,7 @@ const POSTHOG_NUMERIC_RANGES = {
 const POSTHOG_BOOLEAN_KEYS = ['enabled', 'recurrenceDedupe', 'trafficSpikeEnabled'];
 const POSTHOG_STRING_KEYS = ['host', 'apiKey', 'repoPath'];
 
-const USAGE_BOOLEAN_KEYS = ['enabled', 'fetchPricing'];
+const USAGE_BOOLEAN_KEYS = ['enabled', 'fetchPricing', 'planLimits'];
 // Ranges and modes come from the lane itself so the wire validator and resolveUsageConfig's fallback
 // logic cannot drift apart.
 const { USAGE_INTEGER_RANGES, USAGE_COST_MODES } = require('./usage-wiring');
@@ -286,6 +286,7 @@ function registerControlHandlers(controlWss, deps) {
     getUsageSessions = null,
     getUsageReport = null,
     requestUsageReport = null,
+    getPlanLimits = null,
     // Replay of transient broadcasts missed across a reconnect gap (optional - undefined in
     // older callers/tests; connect then behaves as before, snapshot-only).
     controlReplayLog = null,
@@ -941,6 +942,12 @@ function registerControlHandlers(controlWss, deps) {
     const usageReport = typeof getUsageReport === 'function' ? getUsageReport() : null;
     if (usageReport) {
       ws.send(JSON.stringify(usageReport));
+    }
+    // Official plan limits: account-wide, and pushed only when a percentage actually moves, so a client
+    // that connects between statusLine callbacks would otherwise see nothing until the next turn.
+    const planLimits = typeof getPlanLimits === 'function' ? getPlanLimits() : null;
+    if (planLimits) {
+      ws.send(JSON.stringify(planLimits));
     }
 
     // Replay transient broadcasts missed while this client was disconnected. The client

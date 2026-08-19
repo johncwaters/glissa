@@ -204,6 +204,10 @@ class Session extends EventEmitter {
     // Count Read tool calls that land inside a delivered pack dir (config kill switch). Costs one
     // matcher-scoped PostToolUse hook, and only for a session that actually delivers packs.
     packReadTelemetry = true,
+    // Inject the managed statusLine relay so Claude Code publishes its OFFICIAL plan rate limits to
+    // Glissa (config usage.planLimits; see AGENTS.md "Usage Tracking"). The relay chains whatever
+    // statusLine the operator already had, because a managed one REPLACES it.
+    planLimits = false,
     // PTY spawner seam. Defaults to node-pty; tests inject a fake to assert the
     // spawn wiring (file/args) without launching a real process.
     ptySpawn = null,
@@ -388,6 +392,7 @@ class Session extends EventEmitter {
     // Consumption telemetry for those delivered packs: per-pack read counts, plus a since-notice
     // count armed the moment a staleness notice is taken (session/core/pack-read-tracker.js).
     this._packReadTelemetry = packReadTelemetry !== false;
+    this._planLimits = planLimits === true;
     this._packReads = packReadTracker.createPackReadState();
     this._ptySpawn = ptySpawn || ((file, args, opts) => pty.spawn(file, args, opts));
     // Async kill executor (taskkill). Default wraps execFile; the callback form keeps the call truly
@@ -2120,6 +2125,7 @@ class Session extends EventEmitter {
         packReadTelemetry: this._packReadTelemetry && this._deliveredPacks.length > 0,
         enableProjectMcp: this._enableProjectMcp,
         rtkPath: this._rtkPath,
+        planLimits: this._planLimits,
       });
       this._hookToken = this._settingsHandle.token;
       this._hookRouter.register(this.id, {

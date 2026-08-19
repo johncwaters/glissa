@@ -17,16 +17,28 @@
 const path = require('node:path');
 const { createUsageScanner } = require('./usage-scanner');
 const { loadPricing } = require('./usage-pricing');
+const {
+  buildPlanLimitsMessage,
+  normalizeStatuslinePayload,
+  shouldBroadcastPlanLimits,
+} = require('./core/usage-statusline-core');
 
 const DEFAULT_USAGE_CONFIG = Object.freeze({
   enabled: true,
   fetchPricing: true,
+  planLimits: true,
   scanIntervalMinutes: 5,
   retainDays: 90,
   sessionBlockHours: 5,
   costMode: 'auto',
   extraProjectsDirs: [],
 });
+
+/*
+ * Claude session ids seen in statusLine payloads, capped. Claude assigns a NEW id on every resume, so
+ * an uncapped map would grow for the life of the process on a machine that resumes often.
+ */
+const OFFICIAL_COST_CAP = 200;
 
 // The Claude transcript is flushed AFTER the Stop hook that ends the turn, so a scan fired on the
 // post-turn signal itself would miss the very entries it was triggered by.
@@ -76,6 +88,7 @@ function resolveUsageConfig(usage) {
   return {
     enabled: typeof source.enabled === 'boolean' ? source.enabled : DEFAULT_USAGE_CONFIG.enabled,
     fetchPricing: typeof source.fetchPricing === 'boolean' ? source.fetchPricing : DEFAULT_USAGE_CONFIG.fetchPricing,
+    planLimits: typeof source.planLimits === 'boolean' ? source.planLimits : DEFAULT_USAGE_CONFIG.planLimits,
     scanIntervalMinutes: integerWithin(source.scanIntervalMinutes, INTEGER_RANGES.scanIntervalMinutes, DEFAULT_USAGE_CONFIG.scanIntervalMinutes),
     retainDays: integerWithin(source.retainDays, INTEGER_RANGES.retainDays, DEFAULT_USAGE_CONFIG.retainDays),
     sessionBlockHours: integerWithin(source.sessionBlockHours, INTEGER_RANGES.sessionBlockHours, DEFAULT_USAGE_CONFIG.sessionBlockHours),
@@ -126,6 +139,10 @@ function createUsageWiring({
   let lastSessionsSignature = null;
   let lastReportMessage = null;
   let lastForcedPassMs = 0;
+  // Plan limits are a property of the ACCOUNT, not of a session, so one freshest snapshot serves every
+  // card and every connected client.
+  let planLimits = null;
+  const officialCostByClaudeId = new Map();
 
   function warn(message) {
     if (!logger || typeof logger.warn !== 'function') return;
@@ -253,7 +270,13 @@ function createUsageWiring({
       const claudeSessionId = sess.resumeSessionId;
       if (!claudeSessionId) continue;
       const bucket = totals.get(claudeSessionId) || { tokens: 0, costUSD: 0, lastTs: null };
-      rows.push({ id, tokens: bucket.tokens, costUSD: bucket.costUSD, lastTs: bucket.lastTs });
+      // Claude's own figure for this conversation when a statusLine callback has reported one. Kept
+      // beside the scanner's estimate rather than replacing it: they are computed differently, and the
+      // card labels which one it is showing.
+      const officialCostUSD = officialCostByClaudeId.has(claudeSessionId)
+        ? officialCostByClaudeId.get(claudeSessionId)
+        : null;
+      rows.push({ id, tokens: bucket.tokens, costUSD: bucket.costUSD, lastTs: bucket.lastTs, officialCostUSD });
     }
     return { type: 'usage-sessions', ts: nowFn(), pricingSource: pricing?.source || null, sessions: rows };
   }
@@ -273,6 +296,48 @@ function createUsageWiring({
   function refreshSessions() {
     if (stopped || !scanner) return;
     pushSessions();
+  }
+
+  /*
+   * One managed-statusLine callback. O(1) and allocation-light on purpose: this fires per assistant and
+   * tool step inside every live turn of every session, on the event loop they all share, so there is no
+   * fs, no scan, and no work at all beyond a normalize plus two map writes.
+   *
+   * The raw payload is deliberately neither stored nor recorded: it carries the transcript path, cwd and
+   * prompt id, and none of that is worth keeping to render two progress bars.
+   */
+  function ingestStatusline(payload) {
+    if (stopped || !cfg.planLimits) return;
+    const snapshot = normalizeStatuslinePayload(payload, nowFn());
+    if (!snapshot) return;
+    rememberOfficialCost(snapshot);
+    if (!snapshot.rateLimits) return;
+    // Latest wins. The ts is our own receive clock, so this only ever guards against a reordered pair.
+    if (planLimits && snapshot.ts < planLimits.ts) return;
+    const changed = shouldBroadcastPlanLimits(planLimits, snapshot);
+    planLimits = snapshot;
+    if (!changed) return;
+    const message = buildPlanLimitsMessage(snapshot);
+    if (message) broadcast(message);
+  }
+
+  // Claude's own cumulative estimate for one conversation, keyed by the Claude session id (the same key
+  // the per-card attribution already uses). Re-inserted rather than updated in place so the eviction
+  // below drops the least recently SEEN id, not the oldest one.
+  function rememberOfficialCost(snapshot) {
+    if (!snapshot.claudeSessionId || snapshot.sessionCostUSD === null) return;
+    officialCostByClaudeId.delete(snapshot.claudeSessionId);
+    officialCostByClaudeId.set(snapshot.claudeSessionId, snapshot.sessionCostUSD);
+    if (officialCostByClaudeId.size <= OFFICIAL_COST_CAP) return;
+    const oldest = officialCostByClaudeId.keys().next();
+    if (!oldest.done) officialCostByClaudeId.delete(oldest.value);
+  }
+
+  // Gated on the read as well as the write, so switching the lane off stops serving a snapshot it
+  // already holds (the cfg key covers `planLimits`, so a save re-resolves cfg through the restart).
+  function getPlanLimitsMessage() {
+    if (!cfg.planLimits) return null;
+    return buildPlanLimitsMessage(planLimits);
   }
 
   function unavailableReport(requestId, error) {
@@ -392,6 +457,8 @@ function createUsageWiring({
     getSessionsMessage,
     getCachedReport: () => lastReportMessage,
     requestReport,
+    ingestStatusline,
+    getPlanLimitsMessage,
   };
 }
 

@@ -273,16 +273,97 @@ export function projectionLimitLine(projection, tokenLimit) {
   return `On this burn rate the block ends at ${Math.round(pct)}% of that reference.`;
 }
 
-// One judge of whether usage is alarming, taking the worse of where the block IS and where it is
-// heading. Purely reactive alarms fire after the tokens are already spent.
-export function blockAttentionTone(report) {
+// ── Official plan limits ──
+// The rate limits Claude Code publishes through its statusLine payload: the same numbers `/usage`
+// shows, for the whole account rather than one session. When they are present they REPLACE the
+// largest-completed-block heuristic, which only ever existed because nothing official was reachable.
+
+// A snapshot older than this is still shown, labelled with its age, because a stale official number
+// beats no number and beats silently falling back to an estimate the operator did not ask for.
+export const PLAN_LIMIT_STALE_MS = 60 * 60 * 1000;
+
+export const PLAN_WINDOWS = Object.freeze([
+  { key: 'fiveHour', label: '5 hour' },
+  { key: 'sevenDay', label: '7 day' },
+]);
+
+export function planWindowOf(planLimits, key) {
+  const window = planLimits?.[key];
+  if (!window || typeof window !== 'object') return null;
+  const pct = finiteNumber(window.pct);
+  const resetsAtMs = finiteNumber(window.resetsAtMs);
+  if (pct === null && resetsAtMs === null) return null;
+  return { pct, resetsAtMs };
+}
+
+export function hasOfficialPlanLimits(planLimits) {
+  return PLAN_WINDOWS.some((window) => planWindowOf(planLimits, window.key) !== null);
+}
+
+export function officialFiveHourPct(planLimits) {
+  return planWindowOf(planLimits, 'fiveHour')?.pct ?? null;
+}
+
+// An estimate presented as a plan limit would be a claim Glissa cannot make, so every percentage on the
+// page is rendered next to the name of the thing it came from.
+export function provenanceLabel(source) {
+  if (source === 'official') return 'official, from Claude Code';
+  if (source === 'estimated') return 'estimated from the largest completed block';
+  return '';
+}
+
+/*
+ * One judge of whether usage is alarming. Official five-hour usage wins outright when it exists; only
+ * without it does this fall back to the heuristic, which takes the worse of where the block IS and where
+ * its burn rate lands it (a purely reactive alarm fires after the tokens are already spent).
+ */
+export function blockAttentionTone(report, planLimits = null) {
+  const official = officialFiveHourPct(planLimits);
+  if (official !== null) return tokenLimitTone(official);
   const current = tokenLimitTone(limitPct(report?.tokenLimit));
   if (current !== 'ok') return current;
   return tokenLimitTone(projectedLimitPct(report?.activeBlock?.projection, report?.tokenLimit));
 }
 
-export function hasUsageAttention(report) {
-  return blockAttentionTone(report) !== 'ok';
+export function hasUsageAttention(report, planLimits = null) {
+  return blockAttentionTone(report, planLimits) !== 'ok';
+}
+
+export function planWindowUsedText(window) {
+  const pct = finiteNumber(window?.pct);
+  if (pct === null) return NO_VALUE;
+  return `${formatPercent(pct)} used`;
+}
+
+// Counts DOWN, so it is repainted by the shared tick rather than being written once at build time.
+export function resetCountdownText(resetsAtMs, now = Date.now()) {
+  const resetsAt = finiteNumber(resetsAtMs);
+  if (resetsAt === null || resetsAt <= 0) return '';
+  const remainingMinutes = (resetsAt - now) / 60000;
+  if (remainingMinutes <= 0) return 'resetting now';
+  return `resets in ${formatMinutes(remainingMinutes)}`;
+}
+
+export function planLimitAgeText(ts, now = Date.now()) {
+  const stamped = finiteNumber(ts);
+  if (stamped === null || stamped <= 0) return '';
+  const minutes = Math.max(0, Math.round((now - stamped) / 60000));
+  return `${minutes}m old`;
+}
+
+export function isPlanLimitStale(ts, now = Date.now()) {
+  const stamped = finiteNumber(ts);
+  if (stamped === null || stamped <= 0) return true;
+  return now - stamped > PLAN_LIMIT_STALE_MS;
+}
+
+// The degradation line, matching what `/usage` itself does with a stale read: keep showing the numbers
+// and say how old they are.
+export function planLimitStaleNote(ts, now = Date.now()) {
+  if (!isPlanLimitStale(ts, now)) return '';
+  const age = planLimitAgeText(ts, now);
+  if (!age) return 'showing last-known usage';
+  return `showing last-known usage (${age})`;
 }
 
 export function pricingSourceLine(pricing, agoText = '') {
@@ -465,11 +546,28 @@ export function blockHistoryRows(blocks, limit = 8) {
   }));
 }
 
-// The per-card chip: tokens plus estimated cost for the conversation the card is currently in.
+// Claude's own cumulative figure for this conversation when a statusLine callback has reported one,
+// otherwise the scanner's list-price arithmetic. Official is preferred because it is the same number
+// Claude Code shows the operator, and the chip's title says which one is on screen.
+export function sessionChipCost(usage) {
+  const official = finiteNumber(usage?.officialCostUSD);
+  if (official !== null && official > 0) return { costUSD: official, source: 'official' };
+  const estimated = finiteNumber(usage?.costUSD);
+  if (estimated !== null && estimated > 0) return { costUSD: estimated, source: 'estimated' };
+  return { costUSD: null, source: null };
+}
+
+// The per-card chip: tokens plus cost for the conversation the card is currently in.
 export function sessionChipText(usage) {
   const tokens = Number(usage?.tokens);
   if (!Number.isFinite(tokens) || tokens <= 0) return '';
-  const cost = Number(usage?.costUSD);
-  if (!Number.isFinite(cost) || cost <= 0) return formatTokens(tokens);
-  return `${formatTokens(tokens)} ${formatUsd(cost)}`;
+  const { costUSD } = sessionChipCost(usage);
+  if (costUSD === null) return formatTokens(tokens);
+  return `${formatTokens(tokens)} ${formatUsd(costUSD)}`;
+}
+
+export function sessionChipTitle(usage) {
+  const { source } = sessionChipCost(usage);
+  if (source === 'official') return 'Tokens counted from the transcript; cost reported by Claude Code for this conversation';
+  return 'Tokens and estimated API list-price cost for this conversation';
 }

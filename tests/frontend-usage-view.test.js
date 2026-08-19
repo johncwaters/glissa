@@ -395,6 +395,99 @@ test('sessionChipText: tokens plus cost, tokens alone, or nothing to show', asyn
   assert.equal(sessionChipText(null), '');
 });
 
+// Claude's own figure for a conversation, when a statusLine callback reported one, beats the scanner's
+// list-price arithmetic; the chip title is what keeps the two from being confused.
+test('sessionChipCost: official cost wins over the estimate, and the title says which', async () => {
+  const { sessionChipCost, sessionChipText, sessionChipTitle } = await importCore();
+  assert.deepEqual(sessionChipCost({ costUSD: 0.42, officialCostUSD: 2.75 }), { costUSD: 2.75, source: 'official' });
+  assert.deepEqual(sessionChipCost({ costUSD: 0.42, officialCostUSD: null }), { costUSD: 0.42, source: 'estimated' });
+  assert.deepEqual(sessionChipCost({ costUSD: 0.42, officialCostUSD: 0 }), { costUSD: 0.42, source: 'estimated' });
+  assert.deepEqual(sessionChipCost({}), { costUSD: null, source: null });
+  assert.equal(sessionChipText({ tokens: 125000, costUSD: 0.42, officialCostUSD: 2.75 }), '125k $2.75');
+  assert.match(sessionChipTitle({ costUSD: 0.42, officialCostUSD: 2.75 }), /reported by Claude Code/);
+  assert.match(sessionChipTitle({ costUSD: 0.42 }), /estimated API list-price/);
+});
+
+// ── Official plan limits ──
+
+test('planWindowOf and hasOfficialPlanLimits: a window is absent unless it reported something', async () => {
+  const { planWindowOf, hasOfficialPlanLimits, officialFiveHourPct } = await importCore();
+  const limits = { fiveHour: { pct: 12, resetsAtMs: 1000 }, sevenDay: null };
+  assert.deepEqual(planWindowOf(limits, 'fiveHour'), { pct: 12, resetsAtMs: 1000 });
+  assert.equal(planWindowOf(limits, 'sevenDay'), null);
+  assert.equal(planWindowOf(null, 'fiveHour'), null);
+  assert.equal(planWindowOf({ fiveHour: {} }, 'fiveHour'), null);
+  // Absent stays distinct from zero: 0% used is a fact, a missing window is not.
+  assert.deepEqual(planWindowOf({ fiveHour: { pct: 0, resetsAtMs: null } }, 'fiveHour'), { pct: 0, resetsAtMs: null });
+  assert.equal(hasOfficialPlanLimits(limits), true);
+  assert.equal(hasOfficialPlanLimits({ fiveHour: null, sevenDay: null }), false);
+  assert.equal(hasOfficialPlanLimits(null), false);
+  assert.equal(officialFiveHourPct(limits), 12);
+  assert.equal(officialFiveHourPct({ fiveHour: null }), null);
+  assert.equal(officialFiveHourPct(null), null);
+});
+
+// The whole point of the lane: an official ceiling replaces a heuristic invented because nothing
+// official was reachable.
+test('blockAttentionTone: official five-hour usage outranks the largest-block estimate', async () => {
+  const { blockAttentionTone, hasUsageAttention } = await importCore();
+  // The estimate would be calm, the official number is not: official wins.
+  const calmEstimate = { tokenLimit: { max: 1000, pct: 0.1 }, activeBlock: { projection: { projectedTokens: 200 } } };
+  assert.equal(blockAttentionTone(calmEstimate), 'ok');
+  assert.equal(blockAttentionTone(calmEstimate, { fiveHour: { pct: 85 } }), 'warn');
+  assert.equal(blockAttentionTone(calmEstimate, { fiveHour: { pct: 100 } }), 'crit');
+  assert.equal(hasUsageAttention(calmEstimate, { fiveHour: { pct: 85 } }), true);
+  // And the reverse: an alarming estimate is overridden by an official number that says otherwise.
+  const hotEstimate = { tokenLimit: { max: 1000, pct: 0.95 } };
+  assert.equal(blockAttentionTone(hotEstimate), 'warn');
+  assert.equal(blockAttentionTone(hotEstimate, { fiveHour: { pct: 4 } }), 'ok');
+  assert.equal(hasUsageAttention(hotEstimate, { fiveHour: { pct: 4 } }), false);
+  // With no official data the heuristic still governs, exactly as before.
+  assert.equal(blockAttentionTone(hotEstimate, { fiveHour: null }), 'warn');
+  assert.equal(blockAttentionTone(hotEstimate, null), 'warn');
+});
+
+test('provenanceLabel: every percentage is rendered next to what it came from', async () => {
+  const { provenanceLabel } = await importCore();
+  assert.equal(provenanceLabel('official'), 'official, from Claude Code');
+  assert.equal(provenanceLabel('estimated'), 'estimated from the largest completed block');
+  assert.equal(provenanceLabel(null), '');
+});
+
+test('planWindowUsedText and resetCountdownText: the pair the strip renders per window', async () => {
+  const { planWindowUsedText, resetCountdownText, NO_VALUE } = await importCore();
+  const now = 1_800_000_000_000;
+  assert.equal(planWindowUsedText({ pct: 12 }), '12% used');
+  assert.equal(planWindowUsedText({ pct: 68.4 }), '68.4% used');
+  assert.equal(planWindowUsedText({ pct: 0 }), '0% used');
+  assert.equal(planWindowUsedText({ pct: null }), NO_VALUE);
+  assert.equal(planWindowUsedText(null), NO_VALUE);
+  assert.equal(resetCountdownText(now + 95 * 60000, now), 'resets in 1h 35m');
+  assert.equal(resetCountdownText(now + 30000, now), 'resets in 1m');
+  // A window whose reset moment has passed says so rather than counting backwards.
+  assert.equal(resetCountdownText(now - 1000, now), 'resetting now');
+  assert.equal(resetCountdownText(null, now), '');
+  assert.equal(resetCountdownText(0, now), '');
+});
+
+// The /usage degradation pattern: keep showing a stale official number, labelled with its age, rather
+// than hiding it or silently swapping in an estimate the operator did not ask for.
+test('plan limit staleness: shown with its age past the threshold, silent before it', async () => {
+  const { planLimitStaleNote, isPlanLimitStale, planLimitAgeText, PLAN_LIMIT_STALE_MS } = await importCore();
+  const now = 1_800_000_000_000;
+  assert.equal(PLAN_LIMIT_STALE_MS, 60 * 60 * 1000);
+  assert.equal(isPlanLimitStale(now - 60000, now), false);
+  assert.equal(planLimitStaleNote(now - 60000, now), '');
+  assert.equal(isPlanLimitStale(now - 90 * 60000, now), true);
+  assert.equal(planLimitStaleNote(now - 90 * 60000, now), 'showing last-known usage (90m old)');
+  assert.equal(planLimitAgeText(now - 5 * 60000, now), '5m old');
+  assert.equal(planLimitAgeText(now, now), '0m old');
+  assert.equal(planLimitAgeText(null, now), '');
+  // No timestamp at all counts as stale: it cannot be shown as current.
+  assert.equal(isPlanLimitStale(null, now), true);
+  assert.equal(planLimitStaleNote(null, now), 'showing last-known usage');
+});
+
 test('range options: the days the server validates, plus an unbounded default', async () => {
   const { RANGE_OPTIONS, DEFAULT_RANGE_VALUE } = await importCore();
   assert.equal(DEFAULT_RANGE_VALUE, 'all');
@@ -416,6 +509,7 @@ test('no produced string contains an em dash, en dash or ellipsis character', as
   const core = await importCore();
   const forbidden = [String.fromCharCode(0x2014), String.fromCharCode(0x2013), String.fromCharCode(0x2026)];
   const numbers = [0, 1, 0.004, 999, 1000, 1250, 999950, 1234567.89, 1.5e9, -42, Number.NaN, Infinity, null, undefined];
+  const now = 1_800_000_000_000;
 
   const produced = [core.USAGE_CAVEAT, core.USAGE_CAVEAT_SHORT, core.USAGE_DISABLED_HINT, core.NO_VALUE];
   for (const option of core.RANGE_OPTIONS) produced.push(option.label);
@@ -439,6 +533,13 @@ test('no produced string contains an em dash, en dash or ellipsis character', as
   produced.push(core.scanLine({ dirs: 1, files: 3, entries: 4, lastScanMs: 5 }));
   produced.push(core.usageWarningLine({ warning: 'nope' }), core.usageErrorLine({ error: 'off' }));
   produced.push(core.shareLabel('costUSD'), core.shareLabel('tokens'));
+  produced.push(core.provenanceLabel('official'), core.provenanceLabel('estimated'), core.provenanceLabel(null));
+  for (const window of core.PLAN_WINDOWS) produced.push(window.label);
+  for (const n of numbers) {
+    produced.push(core.planWindowUsedText({ pct: n }), core.resetCountdownText(n, now));
+    produced.push(core.planLimitAgeText(n, now), core.planLimitStaleNote(n, now));
+    produced.push(core.sessionChipTitle({ officialCostUSD: n }));
+  }
   produced.push(core.sessionRowLabel({}), core.sessionRowLabel({ id: 'x', label: 'name' }));
   produced.push(core.modelLabel({ model: null }), core.sessionChipText({ tokens: 125000, costUSD: 1.2 }));
 

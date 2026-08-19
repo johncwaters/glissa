@@ -2818,6 +2818,65 @@ a.pr-title:hover {
   font-variant-numeric: tabular-nums;
 }
 
+/* Official plan limits: the account's real 5 hour and 7 day windows, straight from Claude Code's
+   statusLine payload. First on the page and the only hard ceiling on it, so the two meters get more
+   height than the estimate bars below them. */
+.usage-plan {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.usage-plan-window {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.usage-plan-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.usage-plan-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  min-width: 7ch;
+}
+
+.usage-plan-used {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-head);
+  font-variant-numeric: tabular-nums;
+}
+
+.usage-plan-reset {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.usage-plan-reset:empty { display: none; }
+
+.usage-plan-window .usage-meter {
+  height: 6px;
+  border-radius: 3px;
+}
+
+/* Where a number came from, wherever one could be mistaken for the other. Quietest text on the page:
+   it qualifies a figure, it is not a figure. */
+.usage-provenance {
+  margin: 0;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
 /* Range + refresh. The report is PULLED, so these are the only controls on the page: a range the
    server already validates, and a hard re-read of every transcript. */
 .usage-controls {
@@ -4460,6 +4519,9 @@ html[data-layout="phone"] .usage-warning,
 html[data-layout="phone"] .usage-projection,
 html[data-layout="phone"] .usage-footnote,
 html[data-layout="phone"] .usage-empty { font-size: 12px; }
+/* The plan meters are the one thing worth reading at arm's length on a phone. */
+html[data-layout="phone"] .usage-plan-used { font-size: 15px; }
+html[data-layout="phone"] .usage-plan-window .usage-meter { height: 8px; }
 
 /* Thumb-sized controls: these are the only tappable things on the screen besides the sort headers and
    the per-day toggles, so they get a real target rather than the desktop's 2px padding. */

@@ -37,8 +37,53 @@ const WAKEUP_TOOL_MATCHER = 'ScheduleWakeup|CronCreate|CronDelete';
 // file stays byte-identical to the pre-telemetry one.
 const PACK_READ_TOOL_MATCHER = 'Read';
 
+// The managed statusLine relay, and the marker meaning "the operator had no statusLine of their own".
+const RELAY_PATH = path.resolve(__dirname, '..', 'session', 'statusline-relay.js');
+const NO_CHAIN = '-';
+
 function generateToken() {
   return crypto.randomBytes(32).toString('hex');
+}
+
+// Claude Code runs the statusLine command through git-bash on Windows, where a backslash path dies
+// silently with exit 127, so every path in the command string is forward-slashed.
+function toForwardSlashes(value) {
+  return String(value).replace(/\\/g, '/');
+}
+
+// Single-quote for that same shell. The relay path and the hook URL are ours, but the URL carries a
+// query string and the base64 carries + and /, so nothing goes in bare.
+function shellQuote(value) {
+  return `'${String(value).replace(/'/g, `'\\''`)}'`;
+}
+
+/*
+ * The statusLine the operator already had, read at spawn time from ~/.claude/settings.json. Best
+ * effort by design: absent, unreadable or malformed all mean "nothing to chain", which is a valid
+ * state, not an error. Only a command-type entry can be chained; any other type is left alone.
+ */
+function readUserStatuslineCommand(settingsPath) {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+    const entry = parsed?.statusLine;
+    if (!entry || typeof entry !== 'object') return null;
+    if (entry.type !== 'command') return null;
+    const command = typeof entry.command === 'string' ? entry.command.trim() : '';
+    return command || null;
+  } catch {
+    return null;
+  }
+}
+
+/*
+ * A statusLine in a per-session settings file REPLACES the global one rather than adding to it
+ * (live-verified, Claude Code 2.1.235), so the operator's own command is base64'd into our argv and the
+ * relay runs it. Base64 because a HUD command can contain quotes, spaces and shell metacharacters that
+ * would otherwise have to survive two levels of quoting.
+ */
+function buildStatuslineCommand({ relayPath = RELAY_PATH, postUrl, userCommand = null }) {
+  const encoded = userCommand ? Buffer.from(userCommand, 'utf8').toString('base64') : NO_CHAIN;
+  return `node ${shellQuote(toForwardSlashes(relayPath))} ${shellQuote(postUrl)} ${shellQuote(encoded)}`;
 }
 
 // Windows forbids < > : " / \ | ? * and control chars in a path segment, plus trailing dots/spaces.
@@ -55,7 +100,7 @@ function safeDirSegment(id) {
 // `permissions` ({ deny: [...] }) is merged in for the headless lanes - the PR-review and PostHog
 // deny-lists (efficacy under --dangerously-skip-permissions is why they are a guard, not the guard).
 // Omitted for ordinary user sessions, so their settings are byte-identical to before.
-function buildHookSettings({ port, glissaId, token, timeoutSec = DEFAULT_TIMEOUT_SEC, permissions = null, detectScheduledWakeups = true, packReadTelemetry = false, enableProjectMcp = false, rtkPath = null }) {
+function buildHookSettings({ port, glissaId, token, timeoutSec = DEFAULT_TIMEOUT_SEC, permissions = null, detectScheduledWakeups = true, packReadTelemetry = false, enableProjectMcp = false, rtkPath = null, planLimits = false, userSettingsPath = null, relayPath = RELAY_PATH }) {
   if (!port || !glissaId || !token) {
     throw new Error('buildHookSettings requires port, glissaId, token');
   }
@@ -85,16 +130,33 @@ function buildHookSettings({ port, glissaId, token, timeoutSec = DEFAULT_TIMEOUT
   if (enableProjectMcp) {
     settings.enableAllProjectMcpServers = true;
   }
+  /*
+   * Official plan-limit ingestion. The statusLine payload is the only place Claude Code publishes the
+   * `/usage` rate limits to anything outside itself, and it arrives on a change signal rather than a
+   * heartbeat (zero invocations while idle). Injected only when the lane is on, so an opted-out session
+   * writes a settings file byte-identical to the pre-statusline one.
+   */
+  if (planLimits) {
+    const statuslinePath = userSettingsPath || path.join(os.homedir(), '.claude', 'settings.json');
+    settings.statusLine = {
+      type: 'command',
+      command: buildStatuslineCommand({
+        relayPath,
+        postUrl: `${base}/statusline?t=${encodeURIComponent(token)}`,
+        userCommand: readUserStatuslineCommand(statuslinePath),
+      }),
+    };
+  }
   return settings;
 }
 
 // Write the per-session settings file. Returns { settingsPath, dir, token, cleanup }.
-function writeSessionSettings({ port, glissaId, token, baseDir = DEFAULT_BASE_DIR, timeoutSec = DEFAULT_TIMEOUT_SEC, permissions = null, detectScheduledWakeups = true, packReadTelemetry = false, enableProjectMcp = false, rtkPath = null }) {
+function writeSessionSettings({ port, glissaId, token, baseDir = DEFAULT_BASE_DIR, timeoutSec = DEFAULT_TIMEOUT_SEC, permissions = null, detectScheduledWakeups = true, packReadTelemetry = false, enableProjectMcp = false, rtkPath = null, planLimits = false, userSettingsPath = null, relayPath = RELAY_PATH }) {
   const tok = token || generateToken();
   const dir = path.join(baseDir, safeDirSegment(glissaId));
   fs.mkdirSync(dir, { recursive: true });
   const settingsPath = path.join(dir, 'settings.json');
-  const settings = buildHookSettings({ port, glissaId, token: tok, timeoutSec, permissions, detectScheduledWakeups, packReadTelemetry, enableProjectMcp, rtkPath });
+  const settings = buildHookSettings({ port, glissaId, token: tok, timeoutSec, permissions, detectScheduledWakeups, packReadTelemetry, enableProjectMcp, rtkPath, planLimits, userSettingsPath, relayPath });
   fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
   return {
     settingsPath,
@@ -142,9 +204,13 @@ module.exports = {
   sweepOrphans,
   generateToken,
   safeDirSegment,
+  buildStatuslineCommand,
+  readUserStatuslineCommand,
   HOOK_EVENTS,
   WAKEUP_TOOL_MATCHER,
   PACK_READ_TOOL_MATCHER,
   DEFAULT_BASE_DIR,
   DEFAULT_TIMEOUT_SEC,
+  RELAY_PATH,
+  NO_CHAIN,
 };
