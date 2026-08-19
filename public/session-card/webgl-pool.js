@@ -15,6 +15,7 @@ const MAX_WEBGL_CONTEXTS = window.matchMedia?.('(pointer: coarse)').matches ? 4 
 const _webglLru = new Map(); // ui -> true; insertion order = LRU, oldest first
 let getBorrowedWebglCardId = () => null;
 
+// Injected by card-host.js, which already imports this module; importing it back would cycle.
 export function setBorrowedWebglCardIdProvider(provider) {
   getBorrowedWebglCardId = typeof provider === 'function' ? provider : () => null;
 }
