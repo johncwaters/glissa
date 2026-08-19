@@ -1,7 +1,7 @@
 'use strict';
 
 // Unit tests for the pure spawn-environment builder extracted from Session._buildSpawnEnv.
-// Asserts the 5-var scrub, the copy semantics (input never mutated), and the
+// Asserts the 6-var scrub, the copy semantics (input never mutated), and the
 // no-flicker flag behavior - the invariants the live spawn path depends on.
 
 const test = require('node:test');
@@ -14,6 +14,7 @@ const SCRUBBED = [
   'CLAUDECODE',
   'CLAUDE_CODE_SSE_PORT',
   'CLAUDE_CODE_ENTRYPOINT',
+  'CLAUDE_CODE_CHILD_SESSION',
   'GLISSA_PORT',
   'GLISSA_CONFIG',
 ];
@@ -25,12 +26,14 @@ function fullBase() {
     CLAUDECODE: '1',
     CLAUDE_CODE_SSE_PORT: '7777',
     CLAUDE_CODE_ENTRYPOINT: 'cli',
+    // Inherited marker that disables transcript saving in the child (live-probed 2.1.235).
+    CLAUDE_CODE_CHILD_SESSION: '1',
     GLISSA_PORT: '3000',
     GLISSA_CONFIG: 'C:\\x\\config.json',
   };
 }
 
-test('scrubs all 5 inherited vars', () => {
+test('scrubs all 6 inherited vars', () => {
   const env = buildSpawnEnv(fullBase());
   for (const k of SCRUBBED) {
     assert.ok(!(k in env), `${k} must be deleted from the spawn env`);

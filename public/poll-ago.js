@@ -17,39 +17,52 @@ export function formatDuration(ms) {
 
 // Also used directly for one-shot "X ago" labels that do not tick (the Radar investigations inbox),
 // so the two surfaces cannot word the same elapsed time two different ways.
+// A zero or negative timestamp is not a real time on any clock, so it reads as never rather than as
+// however long it has been since the epoch.
 export function formatAgo(ts) {
-  if (!Number.isFinite(ts)) return 'never';
+  if (!Number.isFinite(ts) || ts <= 0) return 'never';
   return `${formatDuration(Date.now() - ts)} ago`;
 }
+
+const polledText = (ts) => `polled ${formatAgo(ts)}`;
 
 // One ticker per panel. `getRoot` hands back the panel's root (or null before mount); a hidden panel
 // skips its repaint entirely, and the string-compare guard keeps a visible one from touching the DOM
 // until the rendered minute actually changes.
 export function createPollAgoTicker(getRoot) {
   let tracked = [];
+  let painters = [];
   let unsubscribe = null;
 
-  const paint = (target, ts) => {
-    const next = `polled ${formatAgo(ts)}`;
-    if (target.textContent === next) return;
-    target.textContent = next;
+  const paint = (item) => {
+    const next = item.format(item.ts);
+    if (item.el.textContent === next) return;
+    item.el.textContent = next;
   };
 
   const refresh = () => {
     const root = getRoot();
     if (!root || root.closest('[hidden]')) return;
-    for (const item of tracked) paint(item.el, item.lastTickAt);
+    for (const item of tracked) paint(item);
+    for (const painter of painters) painter();
   };
 
   return {
-    // Paints immediately and keeps the element ticking until the next reset().
-    track(target, lastTickAt) {
-      paint(target, lastTickAt);
-      tracked.push({ el: target, lastTickAt });
+    // Paints immediately and keeps the element ticking until the next reset(). `format` covers a panel
+    // whose elapsed readouts are not all worded "polled X ago".
+    track(target, ts, format = polledText) {
+      const item = { el: target, ts, format };
+      paint(item);
+      tracked.push(item);
+    },
+    // For a readout that is not a single text node (a meter width, a pair of spans).
+    onTick(painter) {
+      painters.push(painter);
     },
     // Called at the top of a full re-render, before the old spans are discarded.
     reset() {
       tracked = [];
+      painters = [];
     },
     // Idempotent; the subscription lives for the page, matching the panels' own lifetime.
     ensure() {

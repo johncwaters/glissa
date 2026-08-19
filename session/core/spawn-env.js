@@ -38,6 +38,9 @@ function buildSpawnEnv(baseEnv, extraEnv, { additionalDirsClaudeMd = false, prep
   delete env.CLAUDECODE;
   delete env.CLAUDE_CODE_SSE_PORT;
   delete env.CLAUDE_CODE_ENTRYPOINT;
+  // Inherited child-session marker silently disables transcript saving (live-probed 2.1.235),
+  // which blinds the usage lane and breaks resume for every session Glissa spawns.
+  delete env.CLAUDE_CODE_CHILD_SESSION;
   delete env.GLISSA_PORT;
   delete env.GLISSA_CONFIG;
   env.CLAUDE_CODE_NO_FLICKER = "1";

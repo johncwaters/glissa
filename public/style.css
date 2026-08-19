@@ -668,6 +668,17 @@ body {
   flex: 1;
 }
 
+/* The badge strip. Shrinkable and clipping, next to a flex-shrink:0 action cluster, so a crowded header
+   drops its rightmost tags rather than pushing the buttons off the card. */
+.session-card-tags {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow: hidden;
+}
+
 /* The working heartbeat (breathe + per-chunk beat + "quiet" eyebrow) renders ONLY on the focus
    roster-rail pill - it would be redundant on the card and the centered terminal must stay calm.
    See the .focus-pill heartbeat block below; the shared working-breathe keyframes live here
@@ -2581,13 +2592,27 @@ a.pr-title:hover {
   color: var(--text-muted);
 }
 
-/* The estimates caveat. Deliberately the widest, plainest text on the page: every number below it is
-   list-price arithmetic, and that has to be readable before the totals are. */
+/* The estimates caveat, condensed to one line so the numbers clear the fold. The full sentence is the
+   title here and the footnote under the tables, so nothing about the honesty is lost. */
 .usage-caveat {
   margin: 0;
+  align-self: flex-start;
   max-width: 78ch;
   line-height: 1.55;
   color: var(--text);
+  border-bottom: 1px dotted var(--border-dim);
+  cursor: help;
+}
+
+/* The full text, once, at the end: readable for anyone who wants it, in nobody's way. */
+.usage-footnote {
+  margin: 0;
+  max-width: 78ch;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-dim);
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--text-muted);
 }
 
 .usage-meta {
@@ -2601,6 +2626,11 @@ a.pr-title:hover {
 .usage-meta[data-tone="warn"] { color: var(--state-waiting); }
 .usage-meta[data-tone="crit"] { color: var(--state-failed); }
 
+/* The tick-painted lines exist before they have anything to say, and the section is a flex column, so
+   an empty one would still spend a gap. */
+.usage-meta:empty,
+.usage-refresh-status:empty { display: none; }
+
 .usage-warning {
   margin: 0;
   max-width: 78ch;
@@ -2609,11 +2639,16 @@ a.pr-title:hover {
   color: var(--state-waiting);
 }
 
+/* Quiet at rest, toned only when the projection actually lands past the reference. An always-accent
+   line is decoration, and a state color that means nothing teaches the operator to ignore it. */
 .usage-projection {
   margin: 0;
   font-size: 11px;
-  color: var(--accent);
+  color: var(--text-dim);
 }
+
+.usage-projection[data-tone="warn"] { color: var(--state-waiting); }
+.usage-projection[data-tone="crit"] { color: var(--state-failed); }
 
 .usage-empty {
   margin: 0;
@@ -2660,6 +2695,20 @@ a.pr-title:hover {
   font-variant-numeric: tabular-nums;
 }
 
+/* Tone travels on the tile, the way .radar-stat carries it, so the block numbers at risk are colored
+   where the operator is already looking instead of only on a line further down. */
+.usage-tile[data-tone="warn"] {
+  border-color: color-mix(in oklab, var(--state-waiting) 55%, transparent);
+}
+
+.usage-tile[data-tone="warn"] .usage-tile-value { color: var(--state-waiting); }
+
+.usage-tile[data-tone="crit"] {
+  border-color: color-mix(in oklab, var(--state-failed) 55%, transparent);
+}
+
+.usage-tile[data-tone="crit"] .usage-tile-value { color: var(--state-failed); }
+
 /* Block progress and the token-limit bar. Tone comes from the data attribute, the fill width is the
    only inline style (it is the value, not the styling). */
 .usage-meter {
@@ -2678,9 +2727,18 @@ a.pr-title:hover {
 .usage-meter[data-tone="warn"] .usage-meter-fill { background: var(--state-waiting); }
 .usage-meter[data-tone="crit"] .usage-meter-fill { background: var(--state-failed); }
 
+/* Horizontal scroll needs to LOOK scrollable: the by-model table runs eight columns and a phone shows
+   four, with nothing otherwise telling the operator the rest exist. The two `local` gradients scroll
+   with the content and so mask the pinned `scroll` shadows exactly at each end, which makes the hint
+   appear only on the side there is actually more to see. */
 .usage-table-scroll {
   overflow-x: auto;
   overscroll-behavior-x: contain;
+  background:
+    linear-gradient(to right, var(--bg) 40%, transparent) left center / 34px 100% no-repeat local,
+    linear-gradient(to left, var(--bg) 40%, transparent) right center / 34px 100% no-repeat local,
+    radial-gradient(farthest-side at 0 50%, color-mix(in oklab, var(--accent) 30%, transparent), transparent) left center / 12px 100% no-repeat scroll,
+    radial-gradient(farthest-side at 100% 50%, color-mix(in oklab, var(--accent) 30%, transparent), transparent) right center / 12px 100% no-repeat scroll;
 }
 
 .usage-table {
@@ -2758,6 +2816,211 @@ a.pr-title:hover {
 .usage-model-value {
   color: var(--text-dim);
   font-variant-numeric: tabular-nums;
+}
+
+/* Range + refresh. The report is PULLED, so these are the only controls on the page: a range the
+   server already validates, and a hard re-read of every transcript. */
+.usage-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.usage-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.usage-control-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
+.usage-select {
+  border: 1px solid var(--border-dim);
+  border-radius: var(--radius);
+  background: var(--bg-surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 11px;
+  padding: 2px 6px;
+  cursor: pointer;
+}
+
+.usage-refresh {
+  border: 1px solid var(--border-dim);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+
+.usage-refresh:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--accent-dim);
+}
+
+.usage-refresh:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* Progress lives here, never on the button label (mirrors .radar-issue-action-status). */
+.usage-refresh-status {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+/* Sortable column header. The label is the column name and never changes; direction is carried by
+   aria-sort, which the triangle below is a pure response to. */
+.usage-sort {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-transform: inherit;
+  letter-spacing: inherit;
+  cursor: pointer;
+}
+
+.usage-sort:hover {
+  color: var(--text);
+}
+
+.usage-table th[aria-sort] .usage-sort::after {
+  content: '';
+  margin-left: 4px;
+  opacity: 0.5;
+}
+
+.usage-table th[aria-sort="ascending"] .usage-sort::after { content: '\25B4'; opacity: 1; }
+.usage-table th[aria-sort="descending"] .usage-sort::after { content: '\25BE'; opacity: 1; }
+
+/* Per-day model breakdown, collapsed by default: 90 retained days times an always-open chip row is a
+   wall, and the day totals are what the table is for. */
+.usage-toggle {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+}
+
+.usage-toggle:hover {
+  color: var(--text);
+}
+
+.usage-toggle::before {
+  content: '\25B8';
+  display: inline-block;
+  margin-right: 4px;
+}
+
+.usage-toggle[aria-expanded="true"]::before {
+  content: '\25BE';
+}
+
+/* Share of the whole, as a bar plus a number: an absolute cost cannot say which row to act on. */
+.usage-share {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.usage-share-bar {
+  flex: 0 0 auto;
+  width: 44px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border-dim);
+  overflow: hidden;
+}
+
+.usage-share-fill {
+  display: block;
+  height: 100%;
+  background: var(--text-dim);
+}
+
+.usage-share-text {
+  font-variant-numeric: tabular-nums;
+  min-width: 5ch;
+  text-align: right;
+}
+
+.usage-share-cell {
+  text-align: right;
+}
+
+.usage-ago {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Recent blocks: the trend the active block is part of, bars relative to the heaviest one shown. */
+.usage-blocks {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.usage-block {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.usage-block-label {
+  flex: 0 0 auto;
+  min-width: 13ch;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.usage-block-bar {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border-dim);
+  overflow: hidden;
+}
+
+.usage-block-fill {
+  display: block;
+  height: 100%;
+  background: var(--text-dim);
+}
+
+.usage-block-value {
+  flex: 0 0 auto;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The live one is the only row here with a state, so it is the only one that spends any accent. */
+.usage-block[data-active="true"] .usage-block-label,
+.usage-block[data-active="true"] .usage-block-value {
+  color: var(--text-head);
+}
+
+.usage-block[data-active="true"] .usage-block-fill {
+  background: var(--accent);
 }
 
 /* ── Primary view tabs (Focus / Radar / PRs / Usage) ───────── */
@@ -4195,7 +4458,20 @@ html[data-layout="phone"] .usage-tile { flex: 1 1 calc(50% - 8px); min-width: 0;
 html[data-layout="phone"] .usage-meta,
 html[data-layout="phone"] .usage-warning,
 html[data-layout="phone"] .usage-projection,
+html[data-layout="phone"] .usage-footnote,
 html[data-layout="phone"] .usage-empty { font-size: 12px; }
+
+/* Thumb-sized controls: these are the only tappable things on the screen besides the sort headers and
+   the per-day toggles, so they get a real target rather than the desktop's 2px padding. */
+html[data-layout="phone"] .usage-select,
+html[data-layout="phone"] .usage-refresh { min-height: 34px; padding: 4px 12px; font-size: 12px; }
+html[data-layout="phone"] .usage-sort,
+html[data-layout="phone"] .usage-toggle { min-height: 30px; font-size: 11px; }
+html[data-layout="phone"] .usage-table th { padding-bottom: 8px; }
+html[data-layout="phone"] .usage-table td { padding-top: 7px; padding-bottom: 7px; }
+/* The share bar costs width the four leading columns need more on a 390px screen. */
+html[data-layout="phone"] .usage-share-bar { display: none; }
+html[data-layout="phone"] .usage-block-label { min-width: 11ch; }
 /* Model ids and project names are long; on a phone they wrap instead of clipping to an unreadable stub. */
 html[data-layout="phone"] .usage-model-cell,
 html[data-layout="phone"] .usage-session-cell { max-width: 22ch; white-space: normal; overflow-wrap: anywhere; }

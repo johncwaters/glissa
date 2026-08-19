@@ -20,7 +20,16 @@ test('formatUsd: cents, thousands grouping, sub-cent precision and a missing val
   assert.equal(formatUsd(undefined), NO_VALUE);
 });
 
-test('formatTokens: plain under 1k, k and M abbreviation with trailing zeros trimmed', async () => {
+test('formatUsd: a nonzero cost below the last decimal never prints as $0.0000', async () => {
+  const { formatUsd } = await importCore();
+  assert.equal(formatUsd(0.000004), '<$0.0001');
+  assert.equal(formatUsd(0.00009), '<$0.0001');
+  assert.equal(formatUsd(-0.000004), '>-$0.0001');
+  // The boundary itself is representable, so it prints normally.
+  assert.equal(formatUsd(0.0001), '$0.0001');
+});
+
+test('formatTokens: plain under 1k, then k, M and B with trailing zeros trimmed', async () => {
   const { formatTokens, NO_VALUE } = await importCore();
   assert.equal(formatTokens(0), '0');
   assert.equal(formatTokens(999), '999');
@@ -35,11 +44,45 @@ test('formatTokens: plain under 1k, k and M abbreviation with trailing zeros tri
   assert.equal(formatTokens('nope'), NO_VALUE);
 });
 
+test('formatTokens: cache totals reach billions, so they get a B tier rather than reading 1000M', async () => {
+  const { formatTokens } = await importCore();
+  assert.equal(formatTokens(1e9), '1B');
+  assert.equal(formatTokens(12.5e9), '12.5B');
+  assert.equal(formatTokens(1.234e9), '1.23B');
+  // Same crossing rule one tier up: this already rounds to 1000.00M at M precision.
+  assert.equal(formatTokens(999995000), '1B');
+  assert.equal(formatTokens(999994000), '999.99M');
+  // A magnitude that rounds to zero must not carry a sign.
+  assert.equal(formatTokens(-0.4), '0');
+});
+
 test('formatCount: thousands grouping for scan stats', async () => {
   const { formatCount, NO_VALUE } = await importCore();
   assert.equal(formatCount(7), '7');
   assert.equal(formatCount(45231), '45,231');
   assert.equal(formatCount(null), NO_VALUE);
+});
+
+test('formatPercent and percentOfTotal: share of the whole, with a floor for the invisible slice', async () => {
+  const { formatPercent, percentOfTotal, NO_VALUE } = await importCore();
+  assert.equal(percentOfTotal(25, 100), 25);
+  assert.equal(percentOfTotal(1, 0), null);
+  assert.equal(percentOfTotal(1, null), null);
+  assert.equal(percentOfTotal('x', 100), null);
+  assert.equal(formatPercent(60), '60%');
+  assert.equal(formatPercent(12.34), '12.3%');
+  assert.equal(formatPercent(0), '0%');
+  assert.equal(formatPercent(0.04), '<0.1%');
+  assert.equal(formatPercent(null), NO_VALUE);
+});
+
+test('shareBasis: cost when there is any, tokens when every cost is zero', async () => {
+  const { shareBasis, shareLabel } = await importCore();
+  assert.equal(shareBasis({ costUSD: 12, tokens: 5 }), 'costUSD');
+  assert.equal(shareBasis({ costUSD: 0, tokens: 5 }), 'tokens');
+  assert.equal(shareBasis(null), 'tokens');
+  assert.equal(shareLabel('costUSD'), 'share of cost');
+  assert.equal(shareLabel('tokens'), 'share of tokens');
 });
 
 test('dayLabel and dayRangeLabel: month plus day, and a range worded "to"', async () => {
@@ -53,34 +96,48 @@ test('dayLabel and dayRangeLabel: month plus day, and a range worded "to"', asyn
   assert.equal(dayRangeLabel([{ day: '2026-08-19' }, { day: '2026-08-12' }]), 'Aug 12 to Aug 19');
 });
 
-test('localDayKey: local calendar day, not UTC', async () => {
-  const { localDayKey } = await importCore();
-  const date = new Date(2026, 7, 19, 23, 30);
-  assert.equal(localDayKey(date), '2026-08-19');
+// The daily buckets are keyed on the SERVER's clock, so the today tile has to be resolved in the
+// server's zone. Reading the browser's calendar day silently missed the bucket for any viewer in
+// another zone, which remote mode makes routine.
+test('reportDayKey: the report ts resolved in the report timezone, not the browser one', async () => {
+  const { reportDayKey } = await importCore();
+  const ts = Date.UTC(2026, 7, 19, 3, 30);
+  assert.equal(reportDayKey({ ts, tz: 'UTC' }), '2026-08-19');
+  assert.equal(reportDayKey({ ts, tz: 'Asia/Tokyo' }), '2026-08-19');
+  // Same instant, still the previous day in Los Angeles.
+  assert.equal(reportDayKey({ ts, tz: 'America/Los_Angeles' }), '2026-08-18');
+  // An unresolvable zone falls back to this machine's day rather than losing the tile.
+  assert.match(reportDayKey({ ts, tz: 'Not/AZone' }), /^\d{4}-\d{2}-\d{2}$/);
+  assert.equal(reportDayKey(null), '');
+  assert.equal(reportDayKey({ ts: 0, tz: 'UTC' }), '');
 });
 
-test('relativeAgo and formatMinutes: the shared elapsed ladders', async () => {
-  const { relativeAgo, formatMinutes, NO_VALUE } = await importCore();
-  const now = 1_000_000_000;
-  assert.equal(relativeAgo(now - 5000, now), '5s ago');
-  assert.equal(relativeAgo(now - 120000, now), '2m ago');
-  assert.equal(relativeAgo(now - 7200000, now), '2h ago');
-  assert.equal(relativeAgo(now - 172800000, now), '2d ago');
-  assert.equal(relativeAgo(null, now), 'never');
+test('formatMinutes: the elapsed ladder', async () => {
+  const { formatMinutes, NO_VALUE } = await importCore();
   assert.equal(formatMinutes(45), '45m');
   assert.equal(formatMinutes(120), '2h');
   assert.equal(formatMinutes(125), '2h 5m');
   assert.equal(formatMinutes(-1), NO_VALUE);
 });
 
-test('burnLine: every reported rate, and nothing at all without a burn block', async () => {
-  const { burnLine } = await importCore();
-  assert.equal(burnLine(null), '');
-  assert.equal(
-    burnLine({ tokensPerMinute: 12500, tokensPerMinuteExCache: 900, costPerHour: 3.5 }),
-    '12.5k tokens per minute, 900 excluding cache, $3.50 per hour',
-  );
-  assert.equal(burnLine({ tokensPerMinute: 60 }), '60 tokens per minute');
+test('blockLabel: the wall-clock start of a 5h window', async () => {
+  const { blockLabel, NO_VALUE } = await importCore();
+  const start = new Date(2026, 7, 19, 14, 0).getTime();
+  assert.equal(blockLabel(start), 'Aug 19 14:00');
+  assert.equal(blockLabel(0), NO_VALUE);
+  assert.equal(blockLabel(null), NO_VALUE);
+});
+
+test('burnTiles: the two rate numbers as tiles, with cache exclusion as the sub', async () => {
+  const { burnTiles } = await importCore();
+  assert.deepEqual(burnTiles(null), []);
+  assert.deepEqual(burnTiles({ tokensPerMinute: 12500, tokensPerMinuteExCache: 900, costPerHour: 3.5 }), [
+    { label: 'tokens per min', value: '12.5k', sub: '900 excluding cache' },
+    { label: 'cost per hour', value: '$3.50', sub: '' },
+  ]);
+  assert.deepEqual(burnTiles({ tokensPerMinute: 60 }), [
+    { label: 'tokens per min', value: '60', sub: '' },
+  ]);
 });
 
 test('projectionLine: uses the ASCII arrow, and degrades to whatever the server reported', async () => {
@@ -110,33 +167,77 @@ test('blockProgress: elapsed and remaining within the block window, clamped at b
   assert.equal(blockProgress(null), null);
 });
 
+// The wire carries tokenLimit.pct as a RATIO (server/core/usage-blocks-core.js builds
+// activeBlock.tokens / max, pinned by tests/usage-blocks-core.test.js). Treating it as a percentage
+// left the meter near empty, the line reading 0%, and the attention dot unable to fire at all.
+test('limitPct: the wire ratio converted to the percent every threshold works in', async () => {
+  const { limitPct } = await importCore();
+  assert.equal(limitPct({ max: 1000, pct: 0.8 }), 80);
+  assert.equal(limitPct({ max: 1000, pct: 1.25 }), 125);
+  assert.equal(limitPct({ max: 0, pct: 0.8 }), null);
+  assert.equal(limitPct({ max: 1000, pct: null }), null);
+  assert.equal(limitPct(null), null);
+});
+
 test('token limit: 80 percent warns, 100 is critical, and the line names the reference', async () => {
-  const { tokenLimitTone, tokenLimitLine, hasUsageAttention, TOKEN_LIMIT_WARN_PCT } = await importCore();
+  const { tokenLimitTone, tokenLimitLine, TOKEN_LIMIT_WARN_PCT } = await importCore();
   assert.equal(TOKEN_LIMIT_WARN_PCT, 80);
   assert.equal(tokenLimitTone(10), 'ok');
   assert.equal(tokenLimitTone(79.9), 'ok');
   assert.equal(tokenLimitTone(80), 'warn');
   assert.equal(tokenLimitTone(100), 'crit');
   assert.equal(tokenLimitTone(null), 'ok');
-  assert.equal(tokenLimitLine({ max: 1500000, pct: 42.4 }), '42% of 1.5M tokens, the largest completed block seen');
-  assert.equal(tokenLimitLine({ max: 0, pct: 10 }), '');
+  assert.equal(tokenLimitLine({ max: 1500000, pct: 0.424 }), '42% of 1.5M tokens, the largest completed block seen');
+  assert.equal(tokenLimitLine({ max: 0, pct: 0.1 }), '');
   assert.equal(tokenLimitLine(null), '');
-  assert.equal(hasUsageAttention({ tokenLimit: { max: 10, pct: 81 } }), true);
-  assert.equal(hasUsageAttention({ tokenLimit: { max: 10, pct: 12 } }), false);
+});
+
+test('projected limit: where the burn rate lands, not only where the block already is', async () => {
+  const { projectedLimitPct, projectionLimitLine, blockAttentionTone, hasUsageAttention } = await importCore();
+  const tokenLimit = { max: 1000, pct: 0.2 };
+  assert.equal(projectedLimitPct({ projectedTokens: 900 }, tokenLimit), 90);
+  assert.equal(projectedLimitPct({ projectedTokens: 900 }, { max: 0 }), null);
+  assert.equal(projectedLimitPct(null, tokenLimit), null);
+  assert.equal(
+    projectionLimitLine({ projectedTokens: 900 }, tokenLimit),
+    'On this burn rate the block ends at 90% of that reference.',
+  );
+  assert.equal(
+    projectionLimitLine({ projectedTokens: 1400 }, tokenLimit),
+    'On this burn rate the block ends past that reference, at 140% of it.',
+  );
+  assert.equal(projectionLimitLine(null, tokenLimit), '');
+
+  // A block only a fifth of the way in but heading past the reference is the whole point: a purely
+  // reactive alarm fires after the tokens are already spent.
+  const heading = { tokenLimit, activeBlock: { projection: { projectedTokens: 900 } } };
+  assert.equal(blockAttentionTone(heading), 'warn');
+  assert.equal(hasUsageAttention(heading), true);
+  const calm = { tokenLimit, activeBlock: { projection: { projectedTokens: 300 } } };
+  assert.equal(blockAttentionTone(calm), 'ok');
+  assert.equal(hasUsageAttention(calm), false);
+  // Already past the threshold, regardless of where it is heading.
+  assert.equal(blockAttentionTone({ tokenLimit: { max: 10, pct: 0.81 } }), 'warn');
+  assert.equal(blockAttentionTone({ tokenLimit: { max: 10, pct: 1.4 } }), 'crit');
+  assert.equal(hasUsageAttention({ tokenLimit: { max: 10, pct: 0.12 } }), false);
   assert.equal(hasUsageAttention({ tokenLimit: null }), false);
   assert.equal(hasUsageAttention(null), false);
 });
 
 test('pricing and scan lines: source, staleness, missing models and a partial pass', async () => {
   const { pricingSourceLine, missingPricingLine, scanLine } = await importCore();
-  const now = 1_000_000_000;
   assert.equal(
-    pricingSourceLine({ source: 'fetched', fetchedAt: now - 3600000 }, now),
+    pricingSourceLine({ source: 'fetched' }, '1h ago'),
     'Prices fetched from the public model price table, 1h ago.',
   );
-  assert.equal(pricingSourceLine({ source: 'fetched' }, now), 'Prices fetched from the public model price table.');
-  assert.equal(pricingSourceLine({ source: 'snapshot' }, now), 'Prices from the price table bundled with this Glissa build.');
-  assert.equal(pricingSourceLine(null, now), 'Pricing source not reported yet.');
+  assert.equal(pricingSourceLine({ source: 'fetched' }), 'Prices fetched from the public model price table.');
+  assert.equal(pricingSourceLine({ source: 'snapshot' }), 'Prices from the price table bundled with this Glissa build.');
+  // A failed pricing load is a reported state on the wire, not an unknown one.
+  assert.equal(
+    pricingSourceLine({ source: 'unavailable' }),
+    'Model prices could not be loaded, so every cost below counts as zero.',
+  );
+  assert.equal(pricingSourceLine(null), 'Pricing source not reported yet.');
 
   assert.equal(missingPricingLine([]), '');
   assert.equal(missingPricingLine(['weird-model']), 'No price for 1 model: weird-model. Their cost counts as zero here.');
@@ -150,6 +251,43 @@ test('pricing and scan lines: source, staleness, missing models and a partial pa
   const partial = scanLine({ dirs: 2, files: 4, entries: 9, lastScanMs: 5, partial: true });
   assert.match(partial, /^Scanned 2 transcript directories, /);
   assert.match(partial, /skipped this pass/);
+});
+
+// scan.dirs is an ARRAY of resolved directories on the wire (server/usage-scanner.js sends
+// dirs.slice()), so a finite-number check dropped the clause on every real report.
+test('scanLine: counts the dirs array the wire actually sends', async () => {
+  const { scanLine } = await importCore();
+  assert.match(scanLine({ dirs: ['/a', '/b'], files: 3, entries: 4 }), /^Scanned 2 transcript directories, /);
+  assert.match(scanLine({ dirs: ['/only'], files: 3, entries: 4 }), /^Scanned 1 transcript directory, /);
+  assert.match(scanLine({ dirs: [], files: 3, entries: 4 }), /^Scanned 0 transcript directories, /);
+});
+
+// An error report carries no totals, so rendering the normal sections against it printed a confident
+// zero for a lane that is switched off or cannot see its transcripts.
+test('unavailable reports: the reason is surfaced instead of a page of zeros', async () => {
+  const { isUsageUnavailable, usageErrorLine, usageWarningLine } = await importCore();
+  assert.equal(isUsageUnavailable({ error: 'Usage tracking is disabled' }), true);
+  assert.equal(usageErrorLine({ error: 'Usage tracking is disabled' }), 'Usage tracking is disabled');
+  assert.equal(isUsageUnavailable({ error: null, totals: {} }), false);
+  assert.equal(isUsageUnavailable({ error: '   ' }), false);
+  assert.equal(isUsageUnavailable(null), false);
+  assert.equal(usageErrorLine(null), '');
+  assert.equal(
+    usageWarningLine({ warning: 'CLAUDE_CONFIG_DIR is set but empty' }),
+    'Glissa could not read every transcript location: CLAUDE_CONFIG_DIR is set but empty',
+  );
+  assert.equal(usageWarningLine({ warning: null }), '');
+  assert.equal(usageWarningLine(null), '');
+});
+
+test('shouldApplyUsageReport: an unsolicited report always lands, a superseded reply never does', async () => {
+  const { shouldApplyUsageReport } = await importCore();
+  // The connect-time replay and any broadcast carry no id.
+  assert.equal(shouldApplyUsageReport({ requestId: null }, 'usage-4'), true);
+  assert.equal(shouldApplyUsageReport({}, 'usage-4'), true);
+  assert.equal(shouldApplyUsageReport({ requestId: 'usage-4' }, 'usage-4'), true);
+  assert.equal(shouldApplyUsageReport({ requestId: 'usage-3' }, 'usage-4'), false);
+  assert.equal(shouldApplyUsageReport(null, 'usage-4'), false);
 });
 
 test('sessionRowLabel: a managed session wears its name, anything else its project basename', async () => {
@@ -189,12 +327,64 @@ test('sortDailyRows and sortModelRows: newest day first, biggest model first', a
   assert.deepEqual(sortModelRows(null), []);
 });
 
+// The tables are sorted for whatever question the operator brought, so cost order has to be reachable:
+// the default recency order buries the expensive row.
+test('sortUsageRows: any column, either direction, with the header state helpers agreeing', async () => {
+  const { sortUsageRows, sortSessionRows, nextSortState, defaultSortDir, ariaSortValue, modelLabel } = await importCore();
+  const rows = [
+    { id: 'a', label: 'alpha', tokens: 10, costUSD: 9, lastTs: 900 },
+    { id: 'b', label: 'bravo', tokens: 90, costUSD: 1, lastTs: 100 },
+    { id: 'c', label: 'charlie', tokens: 50, costUSD: 5, lastTs: 500 },
+  ];
+  assert.deepEqual(sortUsageRows(rows, 'costUSD', 'desc').map((r) => r.id), ['a', 'c', 'b']);
+  assert.deepEqual(sortUsageRows(rows, 'costUSD', 'asc').map((r) => r.id), ['b', 'c', 'a']);
+  assert.deepEqual(sortUsageRows(rows, 'tokens', 'desc').map((r) => r.id), ['b', 'c', 'a']);
+  assert.deepEqual(sortUsageRows(rows, 'label', 'asc').map((r) => r.id), ['a', 'b', 'c']);
+  assert.deepEqual(sortUsageRows(rows, 'label', 'desc').map((r) => r.id), ['c', 'b', 'a']);
+  assert.deepEqual(sortSessionRows(rows, { key: 'costUSD', dir: 'desc' }).map((r) => r.id), ['a', 'c', 'b']);
+  // A model table tie-breaks on its own label, not a session one.
+  const models = [{ model: 'zeta', tokens: 5 }, { model: 'alpha', tokens: 5 }];
+  assert.deepEqual(sortUsageRows(models, 'tokens', 'desc', modelLabel).map((r) => r.model), ['alpha', 'zeta']);
+
+  assert.equal(defaultSortDir('tokens'), 'desc');
+  assert.equal(defaultSortDir('label'), 'asc');
+  // A date column leads with the newest, matching DEFAULT_DAY_SORT and the section's stated default.
+  assert.equal(defaultSortDir('day'), 'desc');
+  // Same column toggles; a new column takes its own default.
+  assert.deepEqual(nextSortState({ key: 'tokens', dir: 'desc' }, 'tokens'), { key: 'tokens', dir: 'asc' });
+  assert.deepEqual(nextSortState({ key: 'tokens', dir: 'asc' }, 'tokens'), { key: 'tokens', dir: 'desc' });
+  assert.deepEqual(nextSortState({ key: 'tokens', dir: 'asc' }, 'costUSD'), { key: 'costUSD', dir: 'desc' });
+  assert.deepEqual(nextSortState(null, 'label'), { key: 'label', dir: 'asc' });
+  assert.equal(ariaSortValue({ key: 'tokens', dir: 'desc' }, 'tokens'), 'descending');
+  assert.equal(ariaSortValue({ key: 'tokens', dir: 'asc' }, 'tokens'), 'ascending');
+  assert.equal(ariaSortValue({ key: 'tokens', dir: 'asc' }, 'costUSD'), 'none');
+});
+
 test('dailyRowForDay: exact day match or null', async () => {
   const { dailyRowForDay } = await importCore();
   const daily = [{ day: '2026-08-18', tokens: 1 }, { day: '2026-08-19', tokens: 2 }];
   assert.equal(dailyRowForDay(daily, '2026-08-19').tokens, 2);
   assert.equal(dailyRowForDay(daily, '2026-08-01'), null);
   assert.equal(dailyRowForDay(null, '2026-08-19'), null);
+});
+
+// A gap block is the ABSENCE of work; a row of zeros for it would read as a quiet block instead.
+test('blockHistoryRows: newest first, gaps dropped, active flagged, capped', async () => {
+  const { blockHistoryRows } = await importCore();
+  const blocks = [
+    { startTs: 100, tokens: 10, costUSD: 1, isGap: false, isActive: false },
+    { startTs: 200, tokens: 0, costUSD: 0, isGap: true, isActive: false },
+    { startTs: 300, tokens: 30, costUSD: 3, isGap: false, isActive: true },
+    { startTs: 250, tokens: 20, costUSD: 2, isGap: false, isActive: false },
+  ];
+  const rows = blockHistoryRows(blocks);
+  assert.deepEqual(rows.map((r) => r.startTs), [300, 250, 100]);
+  assert.equal(rows[0].isActive, true);
+  assert.equal(rows[1].isActive, false);
+  assert.equal(rows[1].tokens, 20);
+  assert.equal(blockHistoryRows(blocks, 2).length, 2);
+  assert.deepEqual(blockHistoryRows(null), []);
+  assert.deepEqual(blockHistoryRows([]), []);
 });
 
 test('sessionChipText: tokens plus cost, tokens alone, or nothing to show', async () => {
@@ -205,29 +395,50 @@ test('sessionChipText: tokens plus cost, tokens alone, or nothing to show', asyn
   assert.equal(sessionChipText(null), '');
 });
 
+test('range options: the days the server validates, plus an unbounded default', async () => {
+  const { RANGE_OPTIONS, DEFAULT_RANGE_VALUE } = await importCore();
+  assert.equal(DEFAULT_RANGE_VALUE, 'all');
+  assert.ok(RANGE_OPTIONS.some((option) => option.value === DEFAULT_RANGE_VALUE));
+  for (const option of RANGE_OPTIONS) {
+    assert.equal(typeof option.value, 'string');
+    assert.equal(typeof option.label, 'string');
+    if (option.days === null) continue;
+    assert.ok(Number.isInteger(option.days), `${option.value} days must be an integer`);
+    assert.ok(option.days > 0 && option.days <= 3650, `${option.value} days must be in the server range`);
+  }
+  // Exactly one unbounded entry, or the selector could not express "everything retained".
+  assert.equal(RANGE_OPTIONS.filter((option) => option.days === null).length, 1);
+});
+
 // House rule, and the reason every builder above is worded the way it is: no em dash, en dash or
 // ellipsis character may reach the DOM from this module.
 test('no produced string contains an em dash, en dash or ellipsis character', async () => {
   const core = await importCore();
   const forbidden = [String.fromCharCode(0x2014), String.fromCharCode(0x2013), String.fromCharCode(0x2026)];
-  const now = 1_000_000_000;
-  const numbers = [0, 1, 0.004, 999, 1000, 1250, 999950, 1234567.89, -42, Number.NaN, Infinity, null, undefined];
+  const numbers = [0, 1, 0.004, 999, 1000, 1250, 999950, 1234567.89, 1.5e9, -42, Number.NaN, Infinity, null, undefined];
 
-  const produced = [core.USAGE_CAVEAT, core.NO_VALUE];
+  const produced = [core.USAGE_CAVEAT, core.USAGE_CAVEAT_SHORT, core.USAGE_DISABLED_HINT, core.NO_VALUE];
+  for (const option of core.RANGE_OPTIONS) produced.push(option.label);
   for (const n of numbers) {
     produced.push(core.formatUsd(n), core.formatTokens(n), core.formatCount(n), core.formatMinutes(n));
-    produced.push(core.relativeAgo(n, now), core.tokenLimitTone(n));
-    produced.push(core.burnLine({ tokensPerMinute: n, tokensPerMinuteExCache: n, costPerHour: n }));
+    produced.push(core.formatPercent(n), core.tokenLimitTone(n), core.blockLabel(n));
     produced.push(core.projectionLine({ projectedTokens: n, projectedCostUSD: n, remainingMinutes: n }));
     produced.push(core.tokenLimitLine({ max: n, pct: n }));
+    produced.push(core.projectionLimitLine({ projectedTokens: n }, { max: n, pct: n }));
+    for (const tile of core.burnTiles({ tokensPerMinute: n, tokensPerMinuteExCache: n, costPerHour: n })) {
+      produced.push(tile.label, tile.value, tile.sub);
+    }
   }
   produced.push(core.dayLabel('2026-08-19'), core.dayLabel(''), core.dayLabel(null));
   produced.push(core.dayRangeLabel([{ day: '2026-08-12' }, { day: '2026-08-19' }]), core.dayRangeLabel([]));
-  produced.push(core.pricingSourceLine({ source: 'fetched', fetchedAt: now - 1000 }, now));
-  produced.push(core.pricingSourceLine({ source: 'snapshot' }, now), core.pricingSourceLine(null, now));
+  produced.push(core.pricingSourceLine({ source: 'fetched' }, '2m ago'));
+  produced.push(core.pricingSourceLine({ source: 'snapshot' }), core.pricingSourceLine({ source: 'unavailable' }));
+  produced.push(core.pricingSourceLine(null));
   produced.push(core.missingPricingLine(['a', 'b']), core.missingPricingLine([]));
-  produced.push(core.scanLine({ dirs: 2, files: 3, entries: 4, lastScanMs: 5, partial: true }));
+  produced.push(core.scanLine({ dirs: ['/a', '/b'], files: 3, entries: 4, lastScanMs: 5, partial: true }));
   produced.push(core.scanLine({ dirs: 1, files: 3, entries: 4, lastScanMs: 5 }));
+  produced.push(core.usageWarningLine({ warning: 'nope' }), core.usageErrorLine({ error: 'off' }));
+  produced.push(core.shareLabel('costUSD'), core.shareLabel('tokens'));
   produced.push(core.sessionRowLabel({}), core.sessionRowLabel({ id: 'x', label: 'name' }));
   produced.push(core.modelLabel({ model: null }), core.sessionChipText({ tokens: 125000, costUSD: 1.2 }));
 

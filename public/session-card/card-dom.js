@@ -172,10 +172,13 @@ export function buildCardDOM(sessionId, sessionName, initialState, options = {})
   // zone; the spacer then absorbs the clock's width changes, so the persistent tags + actions in
   // the RIGHT zone never reflow when the timer ticks. (Status is not shown here: it lives on the
   // Focus rail pill and the toolbar accent strip.)
-  const headerChildren = [nameEl, elapsedEl, spacer, worktreeBadge, resumeBadge, postTurnBadge, agentsBadge, usageBadge, packBadge, wakeupBadge, promptBadge];
-  if (permsBadge) headerChildren.push(permsBadge);
-  headerChildren.push(actions);
-  header.append(...headerChildren);
+  // The tags share one shrinkable, clipping strip so a narrow card sheds badges from the right instead
+  // of pushing the action cluster out of the box (eleven possible badges, and the actions must survive).
+  const tags = el('div', 'session-card-tags');
+  const tagChildren = [worktreeBadge, resumeBadge, postTurnBadge, agentsBadge, usageBadge, packBadge, wakeupBadge, promptBadge];
+  if (permsBadge) tagChildren.push(permsBadge);
+  tags.append(...tagChildren);
+  header.append(nameEl, elapsedEl, spacer, tags, actions);
 
   // The worktree review gate moved to the right review sidebar (sidebar/review-sidebar.js), the single
   // home for diff + merge/discard. The card keeps only data-merge (set by setSessionMergeStatus) for the

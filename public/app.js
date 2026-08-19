@@ -25,7 +25,7 @@ import { showErrorToast } from './session-card/toast.js';
 import { forgetReviewSession, mergeSelectedSession, mountReviewSidebar, notifyWorktreeChanged, refreshReviewSidebar, resolveSelectedSession, resyncSelectedSession, setReviewBranchSync } from './sidebar/review-sidebar.js';
 import { applyTheme } from './theme.js';
 import { getActiveView, getThemeId, isSoundEnabled, setActiveView, setSoundEnabled } from './ui-prefs.js';
-import { applyUsageReport, applyUsageSessions, mountUsageView, setUsageActivityCallback } from './usage-panel.js';
+import { applyUsageReport, applyUsageSessions, mountUsageView, refreshUsageView, requestUsageReport, setUsageActivityCallback, setUsageRequestSender } from './usage-panel.js';
 
 // ── Apply saved theme ─────────────────────────────────────────
 
@@ -131,6 +131,8 @@ function handleSnapshot(sessions, packVersions) {
     setSessionPrompt(s.id, s.pendingPromptKind);
     // The context packs this session was spawned against; stale once the mill rebuilds one.
     setSessionPacks(s.id, s.packs);
+    // Usage rides no snapshot field, so the chip is restored from the last push instead.
+    restoreUsageChip(s.id);
   }
   updateAggregateStatus();
 
@@ -161,6 +163,7 @@ function handleStateChange(msg) {
     const path = card ? card.dataset.path : undefined;
     removeSessionCard(msg.id);
     createSessionCard(msg.id, msg.session, STATES.DORMANT, { skipPerms, path });
+    restoreUsageChip(msg.id);
     if (isFocusActive()) refreshFocusRoster();
     refreshPhoneBoard();
     refreshReviewSidebar(msg.id);
@@ -188,27 +191,36 @@ function handleStateChange(msg) {
 // usage-sessions is a small push (and a connect-time replay); the full report is pulled, so it is
 // re-requested when the Usage surface is the one the operator is looking at and a delta says the
 // numbers moved. Off-surface deltas still update the per-card chips and the tab dot for free.
-const usageChipSessionIds = new Set();
+// The last payload, kept because a card is REBUILT (a DORMANT round-trip, session-modified) far more
+// often than the totals move, and an identical payload is suppressed server-side, so a rebuilt card
+// would otherwise wear no chip until its next real spend.
+const usageBySessionId = new Map();
 
 function applyUsageSessionChips(rows) {
   const seen = new Set();
   for (const row of (Array.isArray(rows) ? rows : [])) {
     if (!row?.id) continue;
     seen.add(row.id);
-    setSessionUsage(row.id, { tokens: row.tokens, costUSD: row.costUSD });
+    const usage = { tokens: row.tokens, costUSD: row.costUSD };
+    usageBySessionId.set(row.id, usage);
+    setSessionUsage(row.id, usage);
   }
   // A session the payload no longer accounts for (transcript pruned by retainDays, session removed)
   // must lose its chip rather than wear a frozen number forever.
-  for (const id of usageChipSessionIds) {
-    if (!seen.has(id)) setSessionUsage(id, null);
+  for (const id of [...usageBySessionId.keys()]) {
+    if (seen.has(id)) continue;
+    usageBySessionId.delete(id);
+    setSessionUsage(id, null);
   }
-  usageChipSessionIds.clear();
-  for (const id of seen) usageChipSessionIds.add(id);
 }
 
-function requestUsageReport() {
-  sendControlMsg({ type: 'request-usage-report' });
+function restoreUsageChip(sessionId) {
+  const usage = usageBySessionId.get(sessionId);
+  if (!usage) return;
+  setSessionUsage(sessionId, usage);
 }
+
+setUsageRequestSender((msg) => sendControlMsg(msg));
 
 function isUsageSurfaceVisible() {
   if (isPhoneShellActive()) return isPhoneScreenActive('usage');
@@ -228,10 +240,10 @@ const messageHandlers = {
   // The versions a spawn actually delivered, pushed as the session starts.
   'session-packs':      (msg) => setSessionPacks(msg.id, msg.packs),
   'state-change':       (msg) => handleStateChange(msg),
-  'session-added':      (msg) => { if (!msg.ephemeral) noteKnownProjectPath(msg.path); if (!hasSession(msg.id)) { createSessionCard(msg.id, msg.session, msg.state, { skipPerms: !!msg.skipPerms, worktree: !!msg.worktree, path: msg.path, resume: !!msg.resumeSessionId }); } if (isFocusActive()) refreshFocusRoster(); refreshPhoneBoard(); },
+  'session-added':      (msg) => { if (!msg.ephemeral) noteKnownProjectPath(msg.path); if (!hasSession(msg.id)) { createSessionCard(msg.id, msg.session, msg.state, { skipPerms: !!msg.skipPerms, worktree: !!msg.worktree, path: msg.path, resume: !!msg.resumeSessionId }); restoreUsageChip(msg.id); } if (isFocusActive()) refreshFocusRoster(); refreshPhoneBoard(); },
   'session-removed':    (msg) => { removeSessionCard(msg.id); forgetReviewSession(msg.id); if (isFocusActive()) refreshFocusRoster(); refreshPhoneBoard(); },
   'session-renamed':    (msg) => { renameSessionCard(msg.id, msg.newName); refreshPhoneBoard(); },
-  'session-modified':   (msg) => { if (!msg.ephemeral) noteKnownProjectPath(msg.path); removeSessionCard(msg.id); forgetReviewSession(msg.id); createSessionCard(msg.id, msg.session, msg.state, { skipPerms: !!msg.skipPerms, worktree: !!msg.worktree, path: msg.path, resume: !!msg.resumeSessionId }); if (isFocusActive()) refreshFocusRoster(); refreshPhoneBoard(); },
+  'session-modified':   (msg) => { if (!msg.ephemeral) noteKnownProjectPath(msg.path); removeSessionCard(msg.id); forgetReviewSession(msg.id); createSessionCard(msg.id, msg.session, msg.state, { skipPerms: !!msg.skipPerms, worktree: !!msg.worktree, path: msg.path, resume: !!msg.resumeSessionId }); restoreUsageChip(msg.id); if (isFocusActive()) refreshFocusRoster(); refreshPhoneBoard(); },
   'session-git':        (msg) => setSessionWorktree(msg.id, !!msg.worktree),
   'session-resume':     (msg) => setSessionResume(msg.id, msg.resumeSessionId),
   // The agent count and a delivered notification both move the decision trace without any
@@ -457,8 +469,11 @@ function activateView(view) {
   if (prev === 'focus' && view !== 'focus') deactivateFocusView();
   if (view === 'focus') activateFocusView();
   // The usage report is pulled, not pushed (it is far too big to broadcast on every scan), so opening
-  // the tab asks for a current one.
-  if (view === 'usage') requestUsageReport();
+  // the tab asks for a current one and repaints whatever arrived while the panel was hidden.
+  if (view === 'usage') {
+    refreshUsageView();
+    requestUsageReport();
+  }
 }
 
 for (let i = 0; i < VIEW_TABS.length; i++) {
@@ -493,7 +508,7 @@ mountPhoneShell({
   usagePanelEl: viewUsageEl,
   // Usage is the one screen that PULLS rather than being pushed to, so it asks for a fresh report the
   // moment it becomes visible; every other screen ignores this.
-  onScreenShown: (screenId) => { if (screenId === 'usage') requestUsageReport(); },
+  onScreenShown: (screenId) => { if (screenId === 'usage') { refreshUsageView(); requestUsageReport(); } },
   // The desktop header does not render under [data-layout="phone"], so its controls move to the Board's
   // top bar rather than being rebuilt there. Every listener, and the client-trust gating on Shut Down,
   // travels with them.
