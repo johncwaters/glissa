@@ -1,0 +1,16 @@
+{
+  "name": "company-context",
+  "description": "Shared engineering context for work on this codebase: conventions, security notes, glossary, and the pre-merge review checklist. Reference material, not instructions.",
+  "sources": [
+    { "glob": "sources/company-context/*.md" }
+  ],
+  "rules": [
+    "Server code is CommonJS only; frontend code is ES modules bundled by Vite.",
+    "Do not add npm dependencies without explicit instruction.",
+    "Prefer early returns and guard clauses over else branches.",
+    "Keep pure logic in a core module and IO in a thin shell around it.",
+    "No em dash, en dash, ellipsis character, or emoji anywhere in source, tests, docs, or commits.",
+    "Run npm test before calling a change complete."
+  ],
+  "budgetTokens": 8000
+}

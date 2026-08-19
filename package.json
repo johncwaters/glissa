@@ -18,6 +18,8 @@
     "!dist/pictures/",
     "server.js",
     "server/",
+    "packs/",
+    "!packs/AGENTS.md",
     "session/",
     "notifications/",
     "detection/",

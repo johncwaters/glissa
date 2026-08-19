@@ -12,6 +12,8 @@ Commands:
   pair              Mint a single-use pairing link for a remote device
   pair --list       List paired devices
   pair --revoke <id>  Revoke a paired device
+  pack build [name] Build one context pack, or every spec
+  pack list         List context pack specs and their built versions
 
 Options:
   --name <label>    Label for the device being paired (with: pair)
@@ -58,7 +60,22 @@ if (args[0] === 'pair') {
   process.exit(runPairCli(args.slice(1)));
 }
 
-require('../server');
+// Async, so it cannot process.exit inline the way `pair` does; the server boot is skipped instead.
+const isPackCommand = args[0] === 'pack';
+if (isPackCommand) {
+  const { runPackCli } = require('../server/pack-cli');
+  runPackCli(args.slice(1)).then(
+    (code) => process.exit(code),
+    (err) => {
+      console.error(err?.message || String(err));
+      process.exit(1);
+    }
+  );
+}
+
+if (!isPackCommand) {
+  require('../server');
+}
 
 // Read-only replica of config-store.js resolveConfigPath precedence. Reports the
 // path WITHOUT creating or seeding anything (the real resolver has side effects),

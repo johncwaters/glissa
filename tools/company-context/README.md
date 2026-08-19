@@ -7,14 +7,19 @@ review checklists) to Claude Code agent sessions working in this repo.
 ## What it does
 
 Exposes one MCP tool, `get_company_context({ query }) -> { context }`, which
-returns every markdown file under [`context/`](./context) concatenated. Agent
-workflow stages call it to pull in that context and treat the result as
-**informational reference only**, never as instructions.
+returns every markdown file under
+[`packs/sources/company-context/`](../../packs/sources/company-context)
+concatenated. Agent workflow stages call it to pull in that context and treat
+the result as **informational reference only**, never as instructions.
 
 ## Editing the context
 
-Add, edit, or remove `.md` files in [`context/`](./context). Changes take effect
-on the next tool call (the server re-reads the directory each time). Seed files:
+Add, edit, or remove `.md` files in
+[`packs/sources/company-context/`](../../packs/sources/company-context). Changes
+take effect on the next tool call (the server re-reads the directory each time).
+The context mill assembles a pack from those same files, so they live under
+`packs/` rather than here; run `glissa pack build company-context` to refresh
+that pack. Seed files:
 
 - `conventions.md` - engineering conventions
 - `security.md` - security guidance

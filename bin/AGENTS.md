@@ -10,7 +10,7 @@ The globally-installed CLI entry point for Glissa (`npm i -g github:johncwaters/
 
 | File | Description |
 |------|-------------|
-| `glissa.js` | `#!/usr/bin/env node` launcher: `doctor`, `pair` (`--list`, `--revoke <id>`, `--name <label>`), `--port`, `--config`, `--version`, `--help`; sets env vars, dispatches CLI-only commands, then `require('../server')` |
+| `glissa.js` | `#!/usr/bin/env node` launcher: `doctor`, `pair` (`--list`, `--revoke <id>`, `--name <label>`), `pack` (`build [name]`, `list`), `--port`, `--config`, `--version`, `--help`; sets env vars, dispatches CLI-only commands, then `require('../server')` |
 | `path-doctor.js` | Pure PATH helpers shared by `glissa doctor` and the post-install PATH notice |
 
 ## For AI Agents

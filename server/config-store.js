@@ -119,6 +119,11 @@ const STRING_KEYS = [
   'worktreeRoot',
 ];
 
+/** The one spelling of the directory Glissa keeps runtime state in (config, pairings, recordings, built packs). */
+function glissaHomeDir() {
+  return path.join(os.homedir(), '.glissa');
+}
+
 function resolveConfigPath() {
   // 1. Explicit --config flag (via env bridge from bin/glissa.js)
   if (process.env.GLISSA_CONFIG) {
@@ -133,12 +138,11 @@ function resolveConfigPath() {
   if (fs.existsSync(localConfig)) return localConfig;
 
   // 3. User home directory (~/.glissa/config.json) - installed CLI use
-  const homeConfig = path.join(os.homedir(), '.glissa', 'config.json');
+  const homeConfig = path.join(glissaHomeDir(), 'config.json');
   if (fs.existsSync(homeConfig)) return homeConfig;
 
   // 4. None found - seed default at ~/.glissa/config.json
-  const dir = path.join(os.homedir(), '.glissa');
-  fs.mkdirSync(dir, { recursive: true });
+  fs.mkdirSync(glissaHomeDir(), { recursive: true });
   fs.writeFileSync(homeConfig, JSON.stringify(DEFAULT_CONFIG, null, 2), 'utf8');
   console.log(`Created default config at ${homeConfig}`);
   return homeConfig;
@@ -505,6 +509,6 @@ function createConfigStore({ settingsDefaults } = {}) {
 }
 
 module.exports = {
-  createConfigStore, resolveConfigPath, generateProjectId, ensureProjectIds, validateConfig, loadConfigFile,
+  createConfigStore, resolveConfigPath, glissaHomeDir, generateProjectId, ensureProjectIds, validateConfig, loadConfigFile,
   TIMEOUT_KEYS, BOOLEAN_KEYS, STRING_KEYS, DEFAULT_CONFIG,
 };

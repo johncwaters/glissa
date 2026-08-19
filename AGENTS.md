@@ -17,6 +17,7 @@ Glissa is a lightweight Node.js background process that spawns and manages Claud
 | `notifications/notification-manager.js` | Notification lifecycle state machine (states in `shared/notification-states.js`) |
 | `session/session-recorder.js` | Always-on JSONL forensic recorder (v1 legacy, v2 structural-signal format). Signals (hook payloads + transitions) by default; raw PTY bytes opt-in. See "Session Recording" |
 | `server/spawn-gate.js` | Process-wide async serialization of `pty.spawn` initiation (ConPTY wedge avoidance) |
+| `server/pack-builder.js` | Context mill IO shell: walks a spec's source globs, calls the pure planner, publishes `~/.glissa/packs/built/<name>/current/` atomically. See "Context Packs" |
 | `server/ws-sender.js` | Data-WebSocket sender: batching, bufferedAmount backpressure, echo fast-flush |
 | `server/post-turn-checker.js` | Thin async IO runner for post-turn hygiene checks; applies pure rules from `session/core/post-turn-rules.js` to a session's git-changed files |
 | `vite.config.js` | Vite frontend build config + backend-attach plugin (ESM) |
@@ -35,6 +36,7 @@ Glissa is a lightweight Node.js background process that spawns and manages Claud
 | `server/` | Backend runtime: Express/WS wiring, control plane, config, shared server plumbing |
 | `session/` | Session domain: the stateful Session class, recorder, and pure cores in `session/core/` |
 | `notifications/` | Notification domain: lifecycle manager + delivery adapters (see `notifications/channels/AGENTS.md`) |
+| `packs/` | Context-pack specs and shared source material, version-controlled with Glissa (see `packs/AGENTS.md`) |
 | `detection/` | Status detection: hook + title sources, watchers, replay (see `detection/AGENTS.md`) |
 | `docs/` | Design docs, postmortems, plans (see `docs/AGENTS.md`) |
 | `public/` | Browser dashboard frontend, ES modules bundled by Vite (see `public/AGENTS.md`) |
@@ -126,6 +128,9 @@ server/            # Backend runtime (Express + WS wiring, control plane, shared
   remote-auth.js       # Remote-mode auth shell: cookie -> device lookup, /pair/:token redemption, HTTP gate
   pairings-store.js    # ~/.glissa/pairings.json (hashes only) + the display-only pairings-seen.json
   pair-cli.js          # `glissa pair` / --list / --revoke (in server/, not bin/, for the files whitelist)
+  pack-builder.js      # Context mill IO shell: source walk, atomic publish, current/previous rotation
+  pack-cli.js          # `glissa pack build [name]` / `pack list` (in server/, same whitelist reason as pair-cli)
+  core/pack-core.js    # Pure pack assembly: spec validation, glob matcher, token estimate, build plan + manifest
   core/restart-strategy.js  # Pure decideRestartStrategy(env): respawn, or exit non-zero so a supervisor restarts us
   core/remote-config.js   # Pure normalize/validate of config.remote + decideBindHost
   core/origin-policy.js   # Pure Origin allow-list (replaced backend.js isAllowedOrigin)
@@ -225,6 +230,9 @@ public/
     mobile-key-strip.js # Esc/Tab/Ctrl+C/arrows/Paste, the keys a soft keyboard cannot produce
   sidebar/         # Right-docked review sidebar: changed-files diffs + merge/discard actions
   audio/           # Notification sound files (OGG)
+packs/
+  specs/           # One <name>.pack.json per context pack (filename must match its name field)
+  sources/         # Shared source material packs assemble from (company-context lives here)
 shared/
   states.js        # Session states (CJS, server-side)
   states.esm.js    # Session states (ESM, browser-side via Vite)
@@ -316,6 +324,19 @@ Every real session writes a JSONL recording to `~/.glissa/recordings` (never a c
 - **`full` (opt-in, `capture: { enabled: true }`).** The above plus raw PTY bytes, user input and resizes. Bulky, and only replay-harness work (`detection/replay.js`, whose fixtures are v2 recordings) needs it.
 
 Bounds, because this runs unattended: the file opens LAZILY on the first record (a DORMANT session that never starts leaves nothing behind), rotates at `maxFileSizeMB`, and each `open()` kicks off a fire-and-forget async sweep that keeps the newest `retainFiles` (default 20) recordings PER SESSION and drops anything past `retainDays` (default 7). The sweep is fully async by design (all sessions share one event loop) and best-effort: a locked file is skipped, never retried. Nothing awaits it except tests (`recorder.retentionDone`).
+
+### Context Packs (the context mill, assembly stage)
+
+A pack gathers local context (docs, house rules, curated skills) into a versioned, token-budgeted directory that a session can be pointed at. Assembly only so far: nothing is delivered into a spawn yet, so a repo with no pack spec behaves exactly as before. Plan and milestones in `docs/plan-context-mill.md`.
+
+- **Specs and sources are version-controlled inside the install** (`packs/specs/<name>.pack.json`, `packs/sources/**`), built output is runtime state under `~/.glissa/packs/built/<name>/`. Relative source patterns resolve against `packs/`, so a spec reads the same from a checkout or a global install.
+- **`server/core/pack-core.js` is pure and holds every decision**: spec validation (unknown keys are an error, not a silent no-op), the `**`/`*`/`?` glob matcher the walker drives, the `chars/4` token estimate (named `tokenEstimateMethod` in the manifest so nobody mistakes it for a tokenizer), and `planPackBuild` returning the output file map plus `manifest.json`. It never reads a clock: `builtAt` is passed in, like the other cores take time.
+- **Deterministic by contract.** Same spec plus same content yields byte-identical output, which is what makes the version a hash and a rebuild diffable. The version hashes every DELIVERED file (sources, rules, description, skills), not just the source files, so an edited rule cannot ride out under an unchanged version; `manifest.json` is excluded because it carries `builtAt`. Nothing else in the output is stamped with a build time, deliberately.
+- **Budgets are hard gates, and a failed build writes nothing.** `budgetTokens` bounds the whole pack, and the always-loaded `CLAUDE.md` index has its own tighter cap (`MAX_INDEX_TOKENS`), because the discovery tier is the one context rot bites first. A source pattern that matched no file is also a build error rather than a silent hole.
+- **`server/pack-builder.js` is the thin IO shell**: async walk (skipping `.git`, `node_modules`, and any symlink, since a junction can point back up the tree), then publish into a tmp sibling dir, rotate `current/` to `previous/`, and rename the tmp in. A failed build leaves the last good `current/` untouched.
+- **Output layout targets `--add-dir`**: a thin `CLAUDE.md` index, one `.claude/rules/NN-<slug>.md` per source group, copied `.claude/skills/**`, and `manifest.json` carrying per-source hashes, version, `builtAt`, and the budget verdict.
+- **`glissa pack build [name]` / `glissa pack list`** (`server/pack-cli.js`, in `server/` for the same files-whitelist reason as `pair-cli.js`) are the manual trigger; auto-rebuild on source change is a later milestone.
+- **Sources are local files only.** Pack bytes land in `--dangerously-skip-permissions` sessions, so v1 keeps the trust boundary at "files the operator already controls"; remote sources stay out until they can go behind a scan gate.
 
 ### Security: Trust Boundary
 
