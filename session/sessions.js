@@ -37,6 +37,7 @@ const {
 } = require("../server/core/branch-sync-core");
 const { normalizePackNames } = require("../server/core/pack-core");
 const { defaultBuiltRoot, resolveBuiltPack } = require("../server/pack-builder");
+const { buildPackNotice, listStalePacks } = require("./core/pack-notice");
 const agentTracker = require("./core/agent-tracker");
 const { decideGateRelease, DEFAULT_GATE_RELEASE_SETTLE_MS } = require("./core/gate-release");
 const { pushDecision } = require("./core/decision-log");
@@ -375,6 +376,11 @@ class Session extends EventEmitter {
     this._packs = packNames.names;
     this._packsBuiltRoot = packsBuiltRoot;
     this._deliveredPacks = [];
+    // Live pack-notice channel: latest built version per pack the backend pushed after a rebuild, and
+    // whether the resulting staleness still owes this session one notice on its next UserPromptSubmit
+    // hook response (see notePackUpdate / takePackNoticeContext).
+    this._latestPackVersions = new Map();
+    this._packNoticePending = false;
     this._ptySpawn = ptySpawn || ((file, args, opts) => pty.spawn(file, args, opts));
     // Async kill executor (taskkill). Default wraps execFile; the callback form keeps the call truly
     // non-blocking. Injected in tests to assert the kill without spawning a real process.
@@ -1004,6 +1010,40 @@ class Session extends EventEmitter {
   // compare a reloaded project record against the live session without reaching into the private field.
   get packNames() {
     return [...this._packs];
+  }
+
+  // Record the version a pack was just rebuilt to (the backend's pack-updated fan-out). Only a pack
+  // this session actually SPAWNED against can arm a notice: a session that never delivered the pack
+  // has no stale context to warn about. Returns whether this call armed one, for the caller's logs.
+  notePackUpdate(name, version) {
+    if (typeof name !== "string" || typeof version !== "string" || version.length === 0) return false;
+    const delivered = this._deliveredPacks.find((pack) => pack.name === name);
+    if (!delivered) return false;
+    if (this._latestPackVersions.get(name) === version) return false;
+    this._latestPackVersions.set(name, version);
+    // A rebuild that landed back on the version this session runs on leaves nothing to say.
+    if (delivered.version === version) return false;
+    this._packNoticePending = true;
+    return true;
+  }
+
+  // The pack-staleness notice this session owes its next turn, or null. Consumed on read (the hook
+  // route injects it into ONE UserPromptSubmit response), and re-armed only when a newer version
+  // arrives through notePackUpdate - never once per turn for the same staleness.
+  takePackNoticeContext() {
+    if (!this._packNoticePending) return null;
+    this._packNoticePending = false;
+    const notice = buildPackNotice(this._deliveredPacks, this._latestPackVersions);
+    if (!notice) return null;
+    const names = listStalePacks(this._deliveredPacks, this._latestPackVersions).map((pack) => pack.name);
+    this._recordDecision({ kind: "pack", ts: Date.now(), decision: "notice", names });
+    return notice;
+  }
+
+  // A spawn re-resolves what is delivered, so notices owed by the previous spawn are void.
+  _clearPackNotice() {
+    this._latestPackVersions.clear();
+    this._packNoticePending = false;
   }
 
   toSnapshot() {
@@ -2059,6 +2099,7 @@ class Session extends EventEmitter {
   // Returns the --add-dir args and the { name, version } records toSnapshot reports.
   async _resolvePacks() {
     this._deliveredPacks = [];
+    this._clearPackNotice();
     if (this._packs.length === 0) return { args: [], packs: [] };
 
     const builtRoot = this._packsBuiltRoot || defaultBuiltRoot();
@@ -2129,6 +2170,8 @@ class Session extends EventEmitter {
     this._clearAgents();
     this._clearWakeups();
     this._setPendingPromptKind(null);
+    // The next spawn re-resolves its packs, so a notice owed by the dead one has no turn to ride.
+    this._clearPackNotice();
     this._cleanupHooks();
     this._ptyAlive = false;
     this.ptyProcess = null;
@@ -2478,6 +2521,7 @@ class Session extends EventEmitter {
     }
 
     this._clearGateHeldReady();
+    this._clearPackNotice();
 
     if (this._recorder) {
       this._recorder.close(); // Idempotent - safe if already closed by _handlePtyExit

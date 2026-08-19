@@ -233,6 +233,12 @@ function reconcileSessionWorktrees({ projects, sessions, gitWorkspaceSync, integ
   }
 }
 
+// The one hook event whose response can inject context into the turn it answers. Case-insensitive to
+// match mapHookToSignal, which reads the same route parameter.
+function isUserPromptSubmitEvent(event) {
+  return String(event || '').toLowerCase() === 'userpromptsubmit';
+}
+
 function bootError(message) {
   const err = new Error(message);
   err.glissaBoot = true;
@@ -388,7 +394,20 @@ function createBackend(httpServer, options = {}) {
         token,
         payload,
       });
-      res.status(out.status).json({ ok: out.status === 200, reason: out.reason });
+      const body = { ok: out.status === 200, reason: out.reason };
+      // Live context-pack channel: a UserPromptSubmit reply MAY carry one Glissa-authored notice that
+      // a pack this session spawned against has been rebuilt. Only this exact nesting with a matching
+      // hookEventName injects anything (verified on Claude Code 2.1.235), only UserPromptSubmit is a
+      // reliable per-turn injection point, and only an ACCEPTED callback may consume the notice, so a
+      // rejected token can never drain it. With nothing pending the body stays byte-identical to
+      // before the channel existed - pinned by tests/backend-pack-notice-hook.test.js.
+      const packNotice = out.status === 200 && isUserPromptSubmitEvent(req.params.event)
+        ? sessions.get(req.params.glissaId)?.takePackNoticeContext() || null
+        : null;
+      if (packNotice) {
+        body.hookSpecificOutput = { hookEventName: 'UserPromptSubmit', additionalContext: packNotice };
+      }
+      res.status(out.status).json(body);
     });
   });
 
@@ -810,11 +829,15 @@ function createBackend(httpServer, options = {}) {
   // Context-pack auto-rebuild (server/pack-service.js): watchers on each spec's source roots plus a
   // fallback sweep. Started at boot below unless config.packsAutoRebuild is false, stopped in
   // shutdown(). A published rebuild tells every dashboard the new version so a card whose session was
-  // spawned against an older one can say so; the session itself is left alone (its skills hot-reload
-  // from the pack dir, its CLAUDE.md and rules do not, and mid-turn notices are M4's channel).
+  // spawned against an older one can say so, and arms a next-turn notice on the live sessions running
+  // on the old build (its skills hot-reload from the pack dir, its CLAUDE.md and rules do not).
   const packService = createPackService();
   packService.on('pack-updated', ({ name, version }) => {
     broadcastControl({ type: 'pack-updated', name, version });
+    // Live channel: arm a next-turn notice on every session that SPAWNED against an older version of
+    // this pack (notePackUpdate ignores the rest). Nothing needs seeding at boot - a spawn resolves
+    // the built version it delivers, so delivered equals latest until a rebuild publishes.
+    for (const sess of sessions.values()) sess.notePackUpdate(name, version);
   });
 
   // --- Integration-branch watchers (event-driven cross-session gate liveness) ---

@@ -9,7 +9,8 @@
 //   gate         one decideGateRelease verdict with its inputs
 //   notify       one explainNotification decision at a state entry
 //   notify-state one NotificationManager lifecycle hop
-//   pack         one context pack delivered as an --add-dir, or skipped because it is not built
+//   pack         one context pack delivered as an --add-dir, skipped because it is not built, or a
+//                staleness notice taken by a UserPromptSubmit hook response (decision: "notice")
 //
 // Collapse: the gate re-evaluates on every drain and every TTL tick, so an unchanged verdict would
 // bury the interesting entries within seconds. Consecutive gate entries with the same decision and
