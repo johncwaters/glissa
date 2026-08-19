@@ -1,28 +1,12 @@
 'use strict';
 
-/*
- * Managed statusLine relay. Claude Code runs this as a standalone process (via git-bash on Windows)
- * once at startup and then per assistant/tool step, handing it the statusLine JSON blob on stdin. It is
- * NOT required by the server: the only thing it shares with Glissa is the URL it was given.
- *
- * Two jobs, run in PARALLEL, because this process sits in front of the operator's status line and any
- * delay here is a visible stall in the TUI:
- *
- *   1. Fire-and-forget the raw blob to Glissa's hook ingress on 127.0.0.1. Every failure is swallowed:
- *      Glissa being down, restarting, or slow must never cost the operator their status line.
- *   2. Chain the statusLine command the operator already had. A statusLine in a per-session --settings
- *      file REPLACES the one in ~/.claude/settings.json (live-verified, 2.1.235), so without this the
- *      feature would silently delete their HUD. The chained command inherits our stdout directly and we
- *      exit with its code.
- *
- * With no command to chain, a compact line is printed instead so the status line is never blank.
- */
+// Managed statusLine relay, run standalone by Claude Code per assistant/tool step, never required by
+// the server. In PARALLEL (any delay is a visible TUI stall): fire-and-forget the stdin blob to the
+// local hook ingress, and chain the statusLine command the operator already had, since a per-session
+// statusLine REPLACES the global one (live-verified 2.1.235) and must not delete their HUD.
 
 const http = require('node:http');
-// Through the shared wrapper, not node:child_process, for the reason that module exists: this spawns a
-// console child several times per turn, and windowsHide:true is what keeps each one from flashing its own
-// window. Requiring one leaf utility does not make the relay part of the server; it is still a standalone
-// process that the server never requires.
+// Via the shared wrapper: this spawns a console child several times per turn, windowsHide matters.
 const { spawn } = require('../server/child-process-safe');
 
 // Bounded hard: the POST is telemetry, and the status line is the operator's. Anything slower than
@@ -109,10 +93,7 @@ function decodeChainCommand(encoded) {
   }
 }
 
-/*
- * The fallback status line, used only when there is nothing to chain. Deliberately minimal: Glissa is
- * standing in for the operator's own status line here, not competing with it.
- */
+// Used only with nothing to chain; minimal because Glissa stands in for the HUD, not competing.
 function fallbackLine(payload) {
   const parts = [];
   const model = payload?.model?.display_name;

@@ -298,16 +298,11 @@ function createUsageWiring({
     pushSessions();
   }
 
-  /*
-   * One managed-statusLine callback. O(1) and allocation-light on purpose: this fires per assistant and
-   * tool step inside every live turn of every session, on the event loop they all share, so there is no
-   * fs, no scan, and no work at all beyond a normalize plus two map writes.
-   *
-   * The raw payload is deliberately neither stored nor recorded: it carries the transcript path, cwd and
-   * prompt id, and none of that is worth keeping to render two progress bars.
-   */
+  // Fires per assistant/tool step of every live turn on the shared event loop: O(1), no fs, and the
+  // raw payload is neither stored nor recorded (it carries transcript path, cwd, prompt id).
   function ingestStatusline(payload) {
-    if (stopped || !cfg.planLimits) return;
+    // usage.enabled false must silence sessions spawned before the flip, not just stop new injection.
+    if (stopped || !cfg.enabled || !cfg.planLimits) return;
     const snapshot = normalizeStatuslinePayload(payload, nowFn());
     if (!snapshot) return;
     rememberOfficialCost(snapshot);
@@ -336,7 +331,7 @@ function createUsageWiring({
   // Gated on the read as well as the write, so switching the lane off stops serving a snapshot it
   // already holds (the cfg key covers `planLimits`, so a save re-resolves cfg through the restart).
   function getPlanLimitsMessage() {
-    if (!cfg.planLimits) return null;
+    if (!cfg.enabled || !cfg.planLimits) return null;
     return buildPlanLimitsMessage(planLimits);
   }
 
