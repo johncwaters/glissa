@@ -72,3 +72,18 @@ test('returns a COPY - baseEnv is never mutated', () => {
   assert.ok(!('CLAUDE_CODE_NO_FLICKER' in base), 'flag must not leak back onto the source');
   assert.equal(env.CLAUDE_CODE_NO_FLICKER, '1', 'flag must be present on the output');
 });
+
+test('CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD is set only when a pack dir was added', () => {
+  const KEY = 'CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD';
+  // Default and explicit-false must both leave today's env untouched (no packs, no flag).
+  assert.equal(KEY in buildSpawnEnv(fullBase()), false);
+  assert.equal(KEY in buildSpawnEnv(fullBase(), null, {}), false);
+  assert.equal(KEY in buildSpawnEnv(fullBase(), null, { additionalDirsClaudeMd: false }), false);
+  assert.equal(buildSpawnEnv(fullBase(), null, { additionalDirsClaudeMd: true })[KEY], '1');
+});
+
+test('the pack flag lands on the copy, never on the source env', () => {
+  const base = fullBase();
+  buildSpawnEnv(base, null, { additionalDirsClaudeMd: true });
+  assert.ok(!('CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD' in base));
+});

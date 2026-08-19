@@ -25,6 +25,10 @@ const TOKEN_ESTIMATE_METHOD = 'chars-per-token-4';
 // so the thin index has its own cap on top of the per-pack budget.
 const MAX_INDEX_TOKENS = 1200;
 
+// Per-session ceiling on delivered packs. Each pack's index is always-loaded context, so the count is
+// the second budget the per-pack one cannot see; the overflow is dropped, never a refused spawn.
+const MAX_PACKS_PER_SESSION = 4;
+
 const MANIFEST_FILE = 'manifest.json';
 const INDEX_FILE = 'CLAUDE.md';
 const RULES_DIR = '.claude/rules';
@@ -187,6 +191,36 @@ function validatePackSpec(spec) {
   }
 
   return { ok: errors.length === 0, errors };
+}
+
+/**
+ * Normalize a project record's `packs` list into the names a spawn may deliver. Deliberately lenient:
+ * a hand-edited config is the M2 interface, and a malformed entry must cost that entry, never the spawn.
+ *
+ * @returns {{ names: string[], warnings: string[] }} names in config order, deduped and count-capped
+ */
+function normalizePackNames(value, { maxPacks = MAX_PACKS_PER_SESSION } = {}) {
+  if (value == null) return { names: [], warnings: [] };
+  if (!Array.isArray(value)) return { names: [], warnings: ['packs must be an array of pack names; ignoring it'] };
+
+  const names = [];
+  const warnings = [];
+  for (const [index, entry] of value.entries()) {
+    if (typeof entry !== 'string' || !PACK_NAME_RE.test(entry)) {
+      warnings.push(`packs[${index}] is not a valid pack name; ignoring it`);
+      continue;
+    }
+    if (names.includes(entry)) {
+      warnings.push(`packs[${index}] repeats "${entry}"; ignoring the duplicate`);
+      continue;
+    }
+    if (names.length >= maxPacks) {
+      warnings.push(`packs[${index}] ("${entry}") is over the ${maxPacks} pack per session cap; ignoring it`);
+      continue;
+    }
+    names.push(entry);
+  }
+  return { names, warnings };
 }
 
 function sourcePattern(source) {
@@ -401,12 +435,14 @@ module.exports = {
   INDEX_FILE,
   MANIFEST_FILE,
   MAX_INDEX_TOKENS,
+  MAX_PACKS_PER_SESSION,
   PACK_NAME_RE,
   RULES_DIR,
   SKILLS_DIR,
   TOKEN_ESTIMATE_METHOD,
   estimateTokens,
   matchesGlob,
+  normalizePackNames,
   planPackBuild,
   sha256,
   sourcePattern,

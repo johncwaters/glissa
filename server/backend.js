@@ -56,6 +56,7 @@ const { createPrReviewWiring } = require('./pr-review-wiring');
 const { createPosthogWiring } = require('./posthog-wiring');
 const { normalizeRemoteConfig, validateRemoteConfig, decideBindHost } = require('./core/remote-config');
 const { createClientPresence } = require('./core/client-presence');
+const { normalizePackNames } = require('./core/pack-core');
 const { classifyUpgradePath, dataSessionIdFromUrl } = require('./core/upgrade-route');
 const { classifyRequestOrigin, decideUpgradeAccess } = require('./core/request-trust');
 const { isApplicableViewerSize, pickSizeAfterDeparture } = require('./core/viewer-size-core');
@@ -330,6 +331,9 @@ function createBackend(httpServer, options = {}) {
       // Resume a prior Claude conversation on spawn (set by the per-card "Resume conversation" picker,
       // persisted on the project record). Null = fresh conversation. See control-handlers resume-conversation.
       resumeSessionId: project.resumeSessionId || null,
+      // Context packs delivered as --add-dir at spawn. Hand-edited on the project record in M2 (it is
+      // deliberately not a control-WS settable key); the Session validates the shape defensively.
+      packs: project.packs,
     });
     // Signals-only by default (kill switch: config recordSignals); cfg.capture opts into raw PTY
     // bytes on top. See AGENTS.md, "Session Recording".
@@ -1088,7 +1092,10 @@ function createBackend(httpServer, options = {}) {
       const newP = newMap.get(id);
       const pathChanged = newP.path !== sess.path;
       const permsChanged = projectSkipPerms(newP) !== sess.dangerouslySkipPermissions;
-      if (pathChanged || permsChanged) {
+      // Packs are read at spawn, so an edited list only reaches the session through a recreate - the
+      // same treatment permsChanged already gets for the same reason.
+      const packsChanged = JSON.stringify(normalizePackNames(newP.packs).names) !== JSON.stringify(sess.packNames);
+      if (pathChanged || permsChanged || packsChanged) {
         modified.push(newP);
         continue;
       }

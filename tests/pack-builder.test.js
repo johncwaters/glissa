@@ -10,7 +10,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { buildPack, buildPacks, listPackSpecs, readBuiltManifest } = require('../server/pack-builder');
+const { buildPack, buildPacks, listPackSpecs, readBuiltManifest, resolveBuiltPack } = require('../server/pack-builder');
 
 function writeFile(root, relPath, content) {
   const full = path.join(root, relPath);
@@ -322,4 +322,32 @@ test('the repo proof pack builds from its own spec', async () => {
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('resolveBuiltPack reports the current dir and version of a built pack', async () => {
+  await withFixture(async (ctx) => {
+    const built = await ctx.build();
+    const resolved = await resolveBuiltPack('demo', { builtRoot: ctx.builtRoot });
+    assert.equal(resolved.dir, ctx.currentDir);
+    assert.equal(resolved.version, built.version);
+    assert.equal(resolved.reason, null);
+  });
+});
+
+test('resolveBuiltPack skips an unbuilt pack, a manifest-less dir, and a path-escaping name', async () => {
+  await withFixture(async (ctx) => {
+    const unbuilt = await resolveBuiltPack('demo', { builtRoot: ctx.builtRoot });
+    assert.equal(unbuilt.dir, null);
+    assert.match(unbuilt.reason, /not built/);
+
+    await ctx.build();
+    fs.rmSync(path.join(ctx.currentDir, 'manifest.json'));
+    const manifestless = await resolveBuiltPack('demo', { builtRoot: ctx.builtRoot });
+    assert.equal(manifestless.dir, null);
+    assert.match(manifestless.reason, /manifest\.json/);
+
+    const escaping = await resolveBuiltPack('../../etc', { builtRoot: ctx.builtRoot });
+    assert.equal(escaping.dir, null);
+    assert.match(escaping.reason, /valid pack name/);
+  });
 });

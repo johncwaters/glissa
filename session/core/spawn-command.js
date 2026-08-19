@@ -86,8 +86,10 @@ const CLAUDE_CMD = resolveClaudeCommand();
 // Pure spawn-command builder (the unit-test seam). Decides whether to spawn the
 // resolved claude .exe directly or route through `cmd.exe /c claude`. Keeps the
 // shell path byte-identical to the historical behavior for shim/unresolved installs.
-function buildSpawnCommand({ platform, resolved, settingsArgs = [], claudeArgs = [] }) {
-  const childArgs = [...settingsArgs, ...claudeArgs];
+// packArgs (the context mill's --add-dir pairs) sits with the --settings block, ahead of claudeArgs,
+// whose last element may be the initial-prompt positional.
+function buildSpawnCommand({ platform, resolved, settingsArgs = [], packArgs = [], claudeArgs = [] }) {
+  const childArgs = [...settingsArgs, ...packArgs, ...claudeArgs];
   if (platform !== "win32") {
     return { file: "claude", args: childArgs };
   }

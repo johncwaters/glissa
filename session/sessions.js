@@ -35,6 +35,8 @@ const {
   decideResyncAction,
   firstGitErrorLine,
 } = require("../server/core/branch-sync-core");
+const { normalizePackNames } = require("../server/core/pack-core");
+const { defaultBuiltRoot, resolveBuiltPack } = require("../server/pack-builder");
 const agentTracker = require("./core/agent-tracker");
 const { decideGateRelease, DEFAULT_GATE_RELEASE_SETTLE_MS } = require("./core/gate-release");
 const { pushDecision } = require("./core/decision-log");
@@ -191,6 +193,12 @@ class Session extends EventEmitter {
     // interactive trust prompt it can never answer. Off by default; set by a headless lane that needs it.
     enableProjectMcp = false,
     rtkPath = null,
+    // Context packs delivered at spawn: names of built packs whose `current` dir becomes an
+    // --add-dir (see _resolvePacks and AGENTS.md "Context Packs"). Comes from the project record's
+    // `packs` array; the ephemeral lanes never set it, so they spawn exactly as before.
+    packs = [],
+    // Where built packs live. Defaults to ~/.glissa/packs/built; tests point it at a fixture root.
+    packsBuiltRoot = null,
     // PTY spawner seam. Defaults to node-pty; tests inject a fake to assert the
     // spawn wiring (file/args) without launching a real process.
     ptySpawn = null,
@@ -360,6 +368,13 @@ class Session extends EventEmitter {
     this._spawnEnv = spawnEnv;
     this._enableProjectMcp = !!enableProjectMcp;
     this._rtkPath = rtkPath || null;
+    // Configured pack names, and the versions actually delivered by the last spawn (empty until one
+    // resolves; a configured-but-unbuilt pack never appears here, only in the decision trace).
+    const packNames = normalizePackNames(packs);
+    for (const warning of packNames.warnings) console.warn(`[session:${name}] ${warning}`);
+    this._packs = packNames.names;
+    this._packsBuiltRoot = packsBuiltRoot;
+    this._deliveredPacks = [];
     this._ptySpawn = ptySpawn || ((file, args, opts) => pty.spawn(file, args, opts));
     // Async kill executor (taskkill). Default wraps execFile; the callback form keeps the call truly
     // non-blocking. Injected in tests to assert the kill without spawning a real process.
@@ -985,6 +1000,12 @@ class Session extends EventEmitter {
     return this._resumeSessionId;
   }
 
+  // Normalized pack names this session would deliver on its next spawn. Public so the backend can
+  // compare a reloaded project record against the live session without reaching into the private field.
+  get packNames() {
+    return [...this._packs];
+  }
+
   toSnapshot() {
     return {
       id: this.id,
@@ -997,6 +1018,7 @@ class Session extends EventEmitter {
       isWorktree: this.isWorktree,
       resumeSessionId: this._resumeSessionId,
       activeAgents: this._activeAgentCount(),
+      packs: this._deliveredPacks.map((pack) => ({ ...pack })),
       pendingWakeup: this._pendingWakeup(),
       pendingPromptKind: this._pendingPromptKind,
       mergeStatus: this.mergeStatus,
@@ -1839,6 +1861,11 @@ class Session extends EventEmitter {
     // must not let the spawn below proceed (the teardown mutex blocks lifecycle re-entry, but a direct
     // destroy() races this await window). Guards against a double-spawn / spawn-after-destroy.
     if (this._destroyed) return;
+    // Resolve context packs here, beside the provision await, so the state resets below stay in one
+    // synchronous run down to pty.spawn. Pack dirs live under ~/.glissa, outside every repo, so an
+    // isolated worktree needs no special casing.
+    const packDelivery = await this._resolvePacks();
+    if (this._destroyed) return;
     // Listen for changes in the (isolated) worktree so the review diff stays live without a manual
     // refresh. Idempotent across restart-reuse; a non-git in-place session has no worktreeDir to watch.
     if (this.worktreeDir) {
@@ -1871,7 +1898,7 @@ class Session extends EventEmitter {
     this._statusSource.reset();
     this._titleQuiet = false;
 
-    const env = this._buildSpawnEnv();
+    const env = this._buildSpawnEnv({ additionalDirsClaudeMd: packDelivery.packs.length > 0 });
 
     // Inject Claude Code hooks via a per-session managed settings file (HTTP hooks
     // POSTing to Glissa's localhost server). No repo modification; no shell command.
@@ -1908,6 +1935,7 @@ class Session extends EventEmitter {
       platform: process.platform,
       resolved: this._spawnCommand,
       settingsArgs,
+      packArgs: packDelivery.args,
       claudeArgs,
     });
 
@@ -1925,6 +1953,7 @@ class Session extends EventEmitter {
       });
     } catch (err) {
       this._cleanupHooks();
+      this._deliveredPacks = [];
       this.transition("spawn_fail", { error: err.message });
       this.emit("error", err);
       return;
@@ -2024,8 +2053,33 @@ class Session extends EventEmitter {
     this._hookToken = null;
   }
 
-  _buildSpawnEnv() {
-    return buildSpawnEnv(process.env, this._spawnEnv);
+  // Resolve each configured context pack to the built `current` dir this spawn adds. A pack that was
+  // never built, or whose manifest is unreadable, is SKIPPED with a decision-trace entry: pack
+  // delivery is additive context, so it must never block a session from starting or guess at a dir.
+  // Returns the --add-dir args and the { name, version } records toSnapshot reports.
+  async _resolvePacks() {
+    this._deliveredPacks = [];
+    if (this._packs.length === 0) return { args: [], packs: [] };
+
+    const builtRoot = this._packsBuiltRoot || defaultBuiltRoot();
+    const args = [];
+    for (const name of this._packs) {
+      const resolved = await resolveBuiltPack(name, { builtRoot });
+      const ts = Date.now();
+      if (!resolved.dir) {
+        console.warn(`[session:${this.name}] context pack "${name}" skipped: ${resolved.reason}`);
+        this._recordDecision({ kind: "pack", ts, name, decision: "skipped", reason: resolved.reason });
+        continue;
+      }
+      args.push("--add-dir", resolved.dir);
+      this._deliveredPacks.push({ name: resolved.name, version: resolved.version });
+      this._recordDecision({ kind: "pack", ts, name, decision: "delivered", version: resolved.version });
+    }
+    return { args, packs: this._deliveredPacks };
+  }
+
+  _buildSpawnEnv(options) {
+    return buildSpawnEnv(process.env, this._spawnEnv, options);
   }
 
   _handlePtyData(data) {
