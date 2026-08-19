@@ -19,7 +19,7 @@ import { applyPrStatus, mountPrView, setPrActivityCallback } from './pr-panel.js
 // while the health footer, the update banner and the PRs tab keep rendering each feed in full.
 import { applyHealthSnapshot as applyRadarHealth, applyPosthogStatus, applyPrStatus as applyRadarPrStatus, applyUpdateAvailable as applyRadarUpdate, mountRadarView, setRadarActivityCallback, setRadarNavigateToPrs } from './radar-panel.js';
 import { handleDebugStateRefresh, handleDebugStateResponse } from './session-card/card-dom.js';
-import { applyState, applyTerminalSettings, createSessionCard, getSessionCount, hasSession, removeSessionCard, renameSessionCard, seedSessionMergeStatus, setSessionAgents, setSessionDiff, setSessionEffectiveBase, setSessionMergeStatus, setSessionPostTurn, setSessionPrompt, setSessionResume, setSessionWakeup, setSessionWorktree, updateAggregateStatus } from './session-card/lifecycle.js';
+import { applyState, applyTerminalSettings, createSessionCard, getSessionCount, hasSession, notePackVersion, removeSessionCard, renameSessionCard, seedSessionMergeStatus, setLatestPackVersions, setSessionAgents, setSessionDiff, setSessionEffectiveBase, setSessionMergeStatus, setSessionPacks, setSessionPostTurn, setSessionPrompt, setSessionResume, setSessionWakeup, setSessionWorktree, updateAggregateStatus } from './session-card/lifecycle.js';
 import { reconnectDataWs } from './session-card/terminal.js';
 import { showErrorToast } from './session-card/toast.js';
 import { forgetReviewSession, mergeSelectedSession, mountReviewSidebar, notifyWorktreeChanged, refreshReviewSidebar, resolveSelectedSession, resyncSelectedSession, setReviewBranchSync } from './sidebar/review-sidebar.js';
@@ -105,7 +105,10 @@ setConnectionStateCallback((state, label) => {
 
 // ── Control message handlers ─────────────────────────────────
 
-function handleSnapshot(sessions) {
+function handleSnapshot(sessions, packVersions) {
+  // Before the per-session loop: the staleness chip compares each card's delivered pack versions
+  // against this map, so the baseline has to be in place when the cards are hydrated below.
+  setLatestPackVersions(packVersions);
   for (const s of (sessions || [])) {
     if (!s.ephemeral) noteKnownProjectPath(s.path); // remember the project so its rail group survives a last-session close
     const exists = hasSession(s.id);
@@ -122,6 +125,8 @@ function handleSnapshot(sessions) {
     setSessionWakeup(s.id, s.pendingWakeup);
     // Restore the advisory pending-prompt-kind chip the same way.
     setSessionPrompt(s.id, s.pendingPromptKind);
+    // The context packs this session was spawned against; stale once the mill rebuilds one.
+    setSessionPacks(s.id, s.packs);
   }
   updateAggregateStatus();
 
@@ -176,7 +181,12 @@ function handleStateChange(msg) {
 }
 
 const messageHandlers = {
-  'snapshot':           (msg) => handleSnapshot(msg.sessions),
+  'snapshot':           (msg) => handleSnapshot(msg.sessions, msg.packVersions),
+  // A context pack finished rebuilding: every session still running an older version of it is now
+  // stale. Nothing is done to the sessions themselves (see AGENTS.md "Context Packs").
+  'pack-updated':       (msg) => notePackVersion(msg.name, msg.version),
+  // The versions a spawn actually delivered, pushed as the session starts.
+  'session-packs':      (msg) => setSessionPacks(msg.id, msg.packs),
   'state-change':       (msg) => handleStateChange(msg),
   'session-added':      (msg) => { if (!msg.ephemeral) noteKnownProjectPath(msg.path); if (!hasSession(msg.id)) { createSessionCard(msg.id, msg.session, msg.state, { skipPerms: !!msg.skipPerms, worktree: !!msg.worktree, path: msg.path, resume: !!msg.resumeSessionId }); } if (isFocusActive()) refreshFocusRoster(); refreshPhoneBoard(); },
   'session-removed':    (msg) => { removeSessionCard(msg.id); forgetReviewSession(msg.id); if (isFocusActive()) refreshFocusRoster(); refreshPhoneBoard(); },

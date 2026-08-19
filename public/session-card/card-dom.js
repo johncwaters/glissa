@@ -108,6 +108,10 @@ export function buildCardDOM(sessionId, sessionName, initialState, options = {})
   // still running, so the card stays Working rather than flipping to Complete. Text filled there.
   const agentsBadge = el('span', 'agents-badge', '');
   agentsBadge.title = 'Background sub-agents still running';
+  // Context-pack staleness. Hidden unless the card carries data-pack-stale (set by setSessionPacks /
+  // the pack-updated broadcast): a pack this session was spawned against has been rebuilt since, so
+  // it is running older context than a fresh spawn would get. Title names the packs.
+  const packBadge = el('span', 'pack-badge', 'pack stale');
   // Pending scheduled revival. Hidden unless the card carries data-wakeup (set live by
   // setSessionWakeup on a session-wakeup delta / snapshot): the turn genuinely finished, but the
   // session scheduled its own revival (dynamic /loop ScheduleWakeup or a cron task), so the card
@@ -163,7 +167,7 @@ export function buildCardDOM(sessionId, sessionName, initialState, options = {})
   // zone; the spacer then absorbs the clock's width changes, so the persistent tags + actions in
   // the RIGHT zone never reflow when the timer ticks. (Status is not shown here: it lives on the
   // Focus rail pill and the toolbar accent strip.)
-  const headerChildren = [nameEl, elapsedEl, spacer, worktreeBadge, resumeBadge, postTurnBadge, agentsBadge, wakeupBadge, promptBadge];
+  const headerChildren = [nameEl, elapsedEl, spacer, worktreeBadge, resumeBadge, postTurnBadge, agentsBadge, packBadge, wakeupBadge, promptBadge];
   if (permsBadge) headerChildren.push(permsBadge);
   headerChildren.push(actions);
   header.append(...headerChildren);

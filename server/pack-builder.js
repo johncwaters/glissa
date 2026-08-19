@@ -96,6 +96,28 @@ async function walkFiles(rootDir, found = [], visitedRealDirs = new Set()) {
   return found;
 }
 
+/**
+ * Directories worth watching for one spec's inputs: each source pattern's glob-free root plus each
+ * skill dir (the parent when that root is a single file), deduped, existing ones only. The watch loop
+ * asks for these rather than re-deriving them, so the walk and the watch always agree on where a
+ * pack's sources live. A root that does not exist yet is simply absent; the interval sweep covers it.
+ */
+async function packWatchRoots(spec, { baseDir = DEFAULT_PACKS_DIR } = {}) {
+  const roots = new Set();
+  const addRoot = async (pattern) => {
+    if (typeof pattern !== 'string' || pattern.length === 0) return;
+    const { root } = literalRoot(resolvePattern(pattern, baseDir));
+    if (!root) return;
+    const stats = await statOrNull(root);
+    if (!stats) return;
+    const full = path.resolve(root);
+    roots.add(toPosix(stats.isDirectory() ? full : path.dirname(full)));
+  };
+  for (const source of Array.isArray(spec.sources) ? spec.sources : []) await addRoot(sourcePattern(source));
+  for (const skill of Array.isArray(spec.skills) ? spec.skills : []) await addRoot(skill.dir);
+  return [...roots].sort();
+}
+
 /** Display path for the manifest: relative to packs/ when the file lives under it, else the full path. */
 function displayPath(fullPosix, baseDir) {
   const relative = path.relative(baseDir, fullPosix);
@@ -222,6 +244,8 @@ function buildReport(name, specPath, overrides) {
     tokenEstimate: 0,
     budgetTokens: null,
     currentDir: null,
+    // True when the planned version already matched the published one, so nothing was written.
+    unchanged: false,
     ...overrides,
   };
 }
@@ -267,15 +291,23 @@ async function buildPack({ specPath, baseDir = DEFAULT_PACKS_DIR, builtRoot = de
   const plan = planPackBuild(spec, files, { builtAt: new Date(now()).toISOString() });
   if (!plan.ok) return failure(spec.name, specPath, plan.errors);
 
-  const currentDir = await publishBuild(builtRoot, spec.name, plan.outputs);
-  return buildReport(spec.name, specPath, {
+  const report = buildReport(spec.name, specPath, {
     ok: true,
     version: plan.manifest.version,
     fileCount: plan.outputs.length,
     tokenEstimate: plan.manifest.tokenEstimate,
     budgetTokens: plan.manifest.budgetTokens,
-    currentDir,
+    currentDir: path.join(builtRoot, spec.name, 'current'),
   });
+
+  // Publish only a version the built dir does not already carry. The watch loop rebuilds on any write
+  // under a source root, and Claude Code hot-reloads skills from a delivered pack dir, so rewriting
+  // identical bytes would poke every live session for nothing (and churn current/previous with it).
+  const published = await readBuiltManifest(spec.name, { builtRoot });
+  if (published && published.version === plan.manifest.version) return { ...report, unchanged: true };
+
+  await publishBuild(builtRoot, spec.name, plan.outputs);
+  return report;
 }
 
 /** Build every spec, or just the named one. Reports per pack; never throws. */
@@ -347,6 +379,7 @@ module.exports = {
   describePackSpec,
   listPackSpecs,
   loadPackSpec,
+  packWatchRoots,
   readBuiltManifest,
   resolveBuiltPack,
 };

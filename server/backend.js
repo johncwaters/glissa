@@ -57,6 +57,7 @@ const { createPosthogWiring } = require('./posthog-wiring');
 const { normalizeRemoteConfig, validateRemoteConfig, decideBindHost } = require('./core/remote-config');
 const { createClientPresence } = require('./core/client-presence');
 const { normalizePackNames } = require('./core/pack-core');
+const { createPackService } = require('./pack-service');
 const { classifyUpgradePath, dataSessionIdFromUrl } = require('./core/upgrade-route');
 const { classifyRequestOrigin, decideUpgradeAccess } = require('./core/request-trust');
 const { isApplicableViewerSize, pickSizeAfterDeparture } = require('./core/viewer-size-core');
@@ -806,6 +807,16 @@ function createBackend(httpServer, options = {}) {
     broadcast: (msg) => broadcastControl(msg),
   });
 
+  // Context-pack auto-rebuild (server/pack-service.js): watchers on each spec's source roots plus a
+  // fallback sweep. Started at boot below unless config.packsAutoRebuild is false, stopped in
+  // shutdown(). A published rebuild tells every dashboard the new version so a card whose session was
+  // spawned against an older one can say so; the session itself is left alone (its skills hot-reload
+  // from the pack dir, its CLAUDE.md and rules do not, and mid-turn notices are M4's channel).
+  const packService = createPackService();
+  packService.on('pack-updated', ({ name, version }) => {
+    broadcastControl({ type: 'pack-updated', name, version });
+  });
+
   // --- Integration-branch watchers (event-driven cross-session gate liveness) ---
   // Replaces the old 10s poll's one unique job: noticing that a session's integration branch moved
   // WITHOUT this session's own worktree changing (another session merged, or an out-of-band CLI merge),
@@ -887,6 +898,14 @@ function createBackend(httpServer, options = {}) {
         from, to, event,
         timestamp: Date.now()
       });
+
+      // A spawn resolves its context packs immediately before this event, so this is where a live
+      // dashboard learns which versions the session actually got. Without it the delivered versions
+      // would only ever arrive with a snapshot, and a session restarted under an open dashboard
+      // would keep showing the pre-restart (now wrong) staleness verdict.
+      if (event === 'spawn_success' || event === 'spawn_fail') {
+        broadcastControl({ type: 'session-packs', id: sess.id, packs: sess.toSnapshot().packs });
+      }
 
       // wasActive: the boot-time auto-resume signal (design B; decision logic in
       // decideWasActiveFlip). Flips only, so this writes config.json a handful of times per
@@ -1076,6 +1095,13 @@ function createBackend(httpServer, options = {}) {
 
   // --- PostHog monitoring poller (opt-in; inert unless config.posthog.enabled) ---
   posthog.startPoller();
+
+  // --- Context-pack auto-rebuild (on by default; config.packsAutoRebuild is the kill switch) ---
+  // Fire-and-forget like the other boot lanes: the first sweep walks every spec's sources and boot
+  // must not wait on it. Inert with no specs (start() installs nothing and returns).
+  if (config.packsAutoRebuild !== false) {
+    packService.start().catch((err) => console.warn(`[packs] auto-rebuild failed to start: ${err.message}`));
+  }
 
   function diffProjects(currentSessions, newProjects) {
     ensureProjectIds(newProjects);
@@ -1272,6 +1298,9 @@ function createBackend(httpServer, options = {}) {
     posthogArchiveInvestigation: (args) => posthog.archiveInvestigation(args),
     // Same for the PR auto-review lane.
     getPrStatus: () => prReview.getStatus(),
+    // Latest built version per pack, so a connecting client can tell which sessions were spawned
+    // against an older one. Empty while auto-rebuild is off: nothing then knows a pack moved.
+    getPackVersions: () => packService.getVersions(),
   });
 
   // --- Data WebSocket ---
@@ -1505,6 +1534,10 @@ function createBackend(httpServer, options = {}) {
       if (sess._killReap) pendingReaps.push(sess._killReap);
     }
     posthog.stopPoller();
+    // Closes the watchers and the sweep timer synchronously; the returned promise only drains an
+    // in-flight rebuild, and a build cut short leaves a tmp dir the next build sweeps, so exit does
+    // not wait on it (nothing here is a PTY reap).
+    void packService.stop();
     for (const [, sess] of investigationSessions) {
       sess.destroy();
       if (sess._killReap) pendingReaps.push(sess._killReap);

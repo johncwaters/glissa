@@ -468,6 +468,7 @@ body {
 .resume-badge,
 .post-turn-badge,
 .agents-badge,
+.pack-badge,
 .wakeup-badge,
 .prompt-badge {
   align-items: center;
@@ -555,6 +556,21 @@ body {
 }
 
 .session-card[data-agents] .agents-badge {
+  display: inline-flex;
+}
+
+/* Context-pack staleness. Hidden until the card carries data-pack-stale (toggled by setSessionPacks
+   and the pack-updated broadcast): a pack this session was spawned against has been rebuilt since,
+   so it holds older context than a fresh spawn would. Warning tone (mirrors the flagged post-turn
+   badge) rather than the accent chips: it is a "you may want to restart this" hint, not a status. */
+.pack-badge {
+  display: none;
+  color: var(--state-waiting);
+  border: 1px solid color-mix(in oklab, var(--state-waiting) 55%, transparent);
+  background: color-mix(in oklab, var(--state-waiting) 14%, transparent);
+}
+
+.session-card[data-pack-stale] .pack-badge {
   display: inline-flex;
 }
 
@@ -2982,6 +2998,7 @@ a.pr-title:hover {
 .focus-center .session-card.focus-centered .worktree-badge,
 .focus-center .session-card.focus-centered .resume-badge,
 .focus-center .session-card.focus-centered .agents-badge,
+.focus-center .session-card.focus-centered .pack-badge,
 .focus-center .session-card.focus-centered .wakeup-badge,
 .focus-center .session-card.focus-centered .prompt-badge,
 .focus-center .session-card.focus-centered .post-turn-badge {

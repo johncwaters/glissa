@@ -41,6 +41,10 @@ const DEFAULT_CONFIG = {
   // per-project gating (wasActive + resumeSessionId) lives in session/core/auto-resume.js pickAutoResume.
   // See .omc/plans/graceful-shutdown-auto-resume.md.
   autoResume: true,
+  // Rebuild context packs when their sources change (watchers) plus a 15 minute fallback sweep. Kill
+  // switch only, read once at boot: with it false no watcher and no timer is installed and packs are
+  // whatever `glissa pack build` last wrote. See server/pack-service.js and AGENTS.md "Context Packs".
+  packsAutoRebuild: true,
   // Lever B: append a fixed anti-slop note to each user session's system prompt at spawn
   // (session/core/anti-slop-prompt.js). OFF by default; user sessions only (the headless lane
   // sessions never receive it). Takes effect on the next session start/restart.
@@ -110,6 +114,9 @@ const BOOLEAN_KEYS = [
   'checkForUpdates',
   'autoResume',
   'telegramNotifications',
+  // Validated and reloadable like its neighbours, but deliberately absent from getSettings: M3 ships
+  // no Settings-dialog control for it, and the service reads it once at boot anyway.
+  'packsAutoRebuild',
 ];
 
 // Free-text settings persisted to config.json.

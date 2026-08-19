@@ -10,7 +10,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { buildPack, buildPacks, listPackSpecs, readBuiltManifest, resolveBuiltPack } = require('../server/pack-builder');
+const { buildPack, buildPacks, listPackSpecs, packWatchRoots, readBuiltManifest, resolveBuiltPack } = require('../server/pack-builder');
 
 function writeFile(root, relPath, content) {
   const full = path.join(root, relPath);
@@ -119,16 +119,21 @@ test('the manifest records the sources that were walked, with hashes', async () 
   });
 });
 
-test('rebuilding unchanged sources yields the same version and rotates the old build to previous/', async () => {
+test('rebuilding unchanged sources publishes nothing at all', async () => {
   await withFixture(async ({ build, currentDir, previousDir }) => {
     const first = await build();
-    assert.equal(fs.existsSync(previousDir), false);
+    assert.equal(first.unchanged, false);
+    const publishedAt = fs.statSync(path.join(currentDir, 'CLAUDE.md')).mtimeMs;
 
     const second = await build();
+    assert.equal(second.ok, true, second.errors.join('; '));
+    assert.equal(second.unchanged, true);
     assert.equal(second.version, first.version);
-    assert.ok(fs.existsSync(previousDir));
-    assert.equal(readManifest(previousDir).version, first.version);
-    assert.equal(readManifest(currentDir).version, second.version);
+    assert.equal(second.currentDir, currentDir, 'an unchanged build still reports where the pack lives');
+    // The whole point of the skip: Claude Code hot-reloads skills out of a delivered pack dir, so a
+    // rewrite of identical bytes would poke every live session.
+    assert.equal(fs.statSync(path.join(currentDir, 'CLAUDE.md')).mtimeMs, publishedAt);
+    assert.equal(fs.existsSync(previousDir), false, 'nothing was published, so nothing rotated');
   });
 });
 
@@ -138,6 +143,7 @@ test('an edited source changes the version and leaves the old build in previous/
     writeFile(packsDir, 'sources/demo/one.md', '# One\n\nfirst source, edited\n');
     const second = await build();
 
+    assert.equal(second.unchanged, false);
     assert.notEqual(second.version, first.version);
     assert.equal(readManifest(previousDir).version, first.version);
     assert.equal(readManifest(currentDir).version, second.version);
@@ -322,6 +328,39 @@ test('the repo proof pack builds from its own spec', async () => {
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('packWatchRoots resolves each source glob and skill dir to an existing directory', async () => {
+  await withFixture(
+    async ({ packsDir }) => {
+      const spec = baseSpec({
+        sources: [{ glob: 'sources/demo/**/*.md' }, { path: 'sources/notes/single.md' }],
+        skills: [{ dir: 'skills/voice-style' }],
+      });
+      const roots = await packWatchRoots(spec, { baseDir: packsDir });
+      const relative = roots.map((root) => root.slice(root.indexOf('/packs/') + '/packs/'.length));
+      // A file source watches its directory: fs.watch on a file stops seeing an editor's save-and-
+      // rename. Every entry is a directory that exists right now.
+      assert.deepEqual(relative.sort(), ['skills/voice-style', 'sources/demo', 'sources/notes']);
+      for (const root of roots) assert.ok(fs.statSync(root).isDirectory());
+    },
+    {
+      seed: (packsDir) => {
+        writeFile(packsDir, 'sources/demo/one.md', 'first\n');
+        writeFile(packsDir, 'sources/notes/single.md', 'note\n');
+        writeFile(packsDir, 'skills/voice-style/SKILL.md', 'skill\n');
+      },
+    }
+  );
+});
+
+test('packWatchRoots silently skips a root that does not exist yet', async () => {
+  await withFixture(async ({ packsDir }) => {
+    const spec = baseSpec({ sources: [{ glob: 'sources/demo/**/*.md' }, { glob: 'sources/later/**/*.md' }] });
+    const roots = await packWatchRoots(spec, { baseDir: packsDir });
+    assert.equal(roots.length, 1);
+    assert.match(roots[0], /sources\/demo$/);
+  });
 });
 
 test('resolveBuiltPack reports the current dir and version of a built pack', async () => {

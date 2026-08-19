@@ -225,6 +225,9 @@ function registerControlHandlers(controlWss, deps) {
     posthogArchiveInvestigation = null,
     // Cached last PR auto-review tick summary (optional - undefined in older callers/tests).
     getPrStatus,
+    // Latest built version per context pack (optional - {} in older callers/tests, which then just
+    // means no card can be judged stale).
+    getPackVersions = () => ({}),
     // Replay of transient broadcasts missed across a reconnect gap (optional - undefined in
     // older callers/tests; connect then behaves as before, snapshot-only).
     controlReplayLog = null,
@@ -270,7 +273,10 @@ function registerControlHandlers(controlWss, deps) {
     for (const [, sess] of sessions) {
       list.push(sess.toSnapshot());
     }
-    return { type: 'snapshot', sessions: list };
+    // packVersions rides the snapshot rather than a frame of its own: it is global (not per session),
+    // and the snapshot is exactly what repairs a client's view on reconnect, which is why the
+    // `pack-updated` broadcast needs no replay retention.
+    return { type: 'snapshot', sessions: list, packVersions: getPackVersions() };
   }
 
   const SESSION_NAME_RE = /^[a-zA-Z0-9_\-. ()]{1,64}$/;
