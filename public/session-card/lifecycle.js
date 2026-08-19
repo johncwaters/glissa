@@ -15,7 +15,7 @@ import { setRunningActivity } from './activity.js';
 import { computeAggregate } from './aggregate-core.mjs';
 import { buildCardDOM, closeDebugOverlay, isRenameInProgress, openDebugOverlay, setDebugMode, showConfirmDialog, startInlineRename } from './card-dom.js';
 import { aggregateEl, container, sessionUIs } from './card-registry.js';
-import { stalePackNames } from './pack-stale-core.mjs';
+import { readCountText, sinceNoticeCount, stalePackNames } from './pack-stale-core.mjs';
 import { openResumeDialog } from './resume-dialog.js';
 // Load-bearing import: evaluating session-tick.js installs the shared 1s tick (elapsed clock +
 // working-heartbeat poll) at module load.
@@ -344,9 +344,9 @@ export function notePackVersion(name, version) {
 // notice, once one has been injected). Server-side counters, so a pack never read reads as 0.
 function packReadsText(packs) {
   const rows = (Array.isArray(packs) ? packs : []).map((pack) => {
-    const reads = Number(pack.reads) || 0;
-    const since = pack.readsSinceNotice == null ? '' : `, ${Number(pack.readsSinceNotice) || 0} since notice`;
-    return `${pack.name}: ${reads} ${reads === 1 ? 'read' : 'reads'}${since}`;
+    const since = sinceNoticeCount(pack);
+    const suffix = since == null ? '' : `, ${since} since notice`;
+    return `${pack.name}: ${readCountText(pack)}${suffix}`;
   });
   return `Reads by this session: ${rows.join('; ')}`;
 }

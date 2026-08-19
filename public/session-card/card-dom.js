@@ -12,6 +12,7 @@ import { sendControlMsg } from '../control-ws.js';
 import { el, escapeHtml } from '../dom-helpers.js';
 import { sessionUIs } from './card-registry.js';
 import { createModalOverlay, trapFocus } from './modal.js';
+import { readCountText, sinceNoticeCount } from './pack-stale-core.mjs';
 import { showErrorToast } from './toast.js';
 
 // Debug overlay visibility - toggled by applyTerminalSettings (lifecycle) via
@@ -381,9 +382,9 @@ function renderDebugOverlay(ui, payload) {
   if (packs.length > 0) {
     html += `<div class="debug-section"><div class="debug-section-title">Packs</div>`;
     for (const pack of packs) {
-      const since = pack.readsSinceNotice == null ? '' : ` <span class="debug-dim">(${Number(pack.readsSinceNotice) || 0} since notice)</span>`;
-      const reads = Number(pack.reads) || 0;
-      html += `<div class="debug-field"><span class="debug-label">${escapeHtml(pack.name)}:</span> <span class="debug-value">${reads} ${reads === 1 ? 'read' : 'reads'}</span>${since}</div>`;
+      const sinceCount = sinceNoticeCount(pack);
+      const since = sinceCount == null ? '' : ` <span class="debug-dim">(${sinceCount} since notice)</span>`;
+      html += `<div class="debug-field"><span class="debug-label">${escapeHtml(pack.name)}:</span> <span class="debug-value">${readCountText(pack)}</span>${since}</div>`;
     }
     html += `</div>`;
   }
