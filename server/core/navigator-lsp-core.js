@@ -72,22 +72,40 @@ function parseBody(body) {
 }
 
 function resyncAfterBadHeader(state) {
-  const lowerBuffer = state.buffer.toString('ascii').toLowerCase();
-  const headerAt = lowerBuffer.indexOf(CONTENT_LENGTH_HEADER);
-  if (headerAt >= 0) {
-    state.buffer = state.buffer.subarray(headerAt);
-    return;
+  const lowerBuffer = state.buffer.toString('latin1').toLowerCase();
+  let headerAt = lowerBuffer.indexOf(CONTENT_LENGTH_HEADER);
+  while (headerAt >= 0) {
+    if (isHeaderBoundary(state.buffer, headerAt)) {
+      state.buffer = state.buffer.subarray(headerAt);
+      return;
+    }
+    headerAt = lowerBuffer.indexOf(CONTENT_LENGTH_HEADER, headerAt + 1);
   }
 
-  const maxSuffixLength = Math.min(state.buffer.length, CONTENT_LENGTH_HEADER.length - 1);
-  for (let suffixLength = maxSuffixLength; suffixLength > 0; suffixLength--) {
-    const suffix = lowerBuffer.slice(lowerBuffer.length - suffixLength);
-    if (!CONTENT_LENGTH_HEADER.startsWith(suffix)) continue;
-    state.buffer = state.buffer.subarray(state.buffer.length - suffixLength);
+  const suffixStart = headerSuffixStart(state.buffer, lowerBuffer);
+  if (suffixStart !== null) {
+    state.buffer = state.buffer.subarray(suffixStart);
     return;
   }
 
   state.buffer = Buffer.alloc(0);
+}
+
+function isHeaderBoundary(buffer, headerAt) {
+  if (headerAt === 0) return true;
+  return buffer[headerAt - 1] === 0x0a;
+}
+
+function headerSuffixStart(buffer, lowerBuffer) {
+  const maxSuffixLength = Math.min(buffer.length, CONTENT_LENGTH_HEADER.length - 1);
+  for (let suffixLength = maxSuffixLength; suffixLength > 0; suffixLength--) {
+    const suffixStart = buffer.length - suffixLength;
+    if (!isHeaderBoundary(buffer, suffixStart)) continue;
+    const suffix = lowerBuffer.slice(lowerBuffer.length - suffixLength);
+    if (!CONTENT_LENGTH_HEADER.startsWith(suffix)) continue;
+    return suffixStart;
+  }
+  return null;
 }
 
 function serializeFrame(messageObject) {

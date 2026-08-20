@@ -6,6 +6,12 @@ function createDocStore() {
   };
 }
 
+function uriOfParams(params) {
+  const uri = params?.textDocument?.uri;
+  if (typeof uri === 'string' && uri !== '') return uri;
+  return null;
+}
+
 function applyDidOpen(store, params) {
   const textDocument = params && params.textDocument;
   if (!textDocument || !textDocument.uri) return { applied: false, reason: 'invalid-params' };
@@ -101,6 +107,7 @@ function crlfAwareLineEnd(text, lineEnd) {
 
 module.exports = {
   createDocStore,
+  uriOfParams,
   applyDidOpen,
   applyDidChange,
   applyDidClose,

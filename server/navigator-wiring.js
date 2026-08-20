@@ -4,7 +4,7 @@
 
 const { WebSocketServer } = require('ws');
 const {
-  applyDidChange, applyDidClose, applyDidOpen, createDocStore, getDoc, listDocs,
+  applyDidChange, applyDidClose, applyDidOpen, createDocStore, getDoc, listDocs, uriOfParams,
 } = require('./core/navigator-buffer-core');
 const { sweepMarkdown } = require('./core/navigator-rules-core');
 
@@ -19,11 +19,6 @@ function isMarkdownDoc(doc) {
   if (doc.languageId === 'markdown') return true;
   const uri = typeof doc.uri === 'string' ? doc.uri.toLowerCase() : '';
   return MARKDOWN_EXTENSIONS.some((extension) => uri.endsWith(extension));
-}
-
-function uriOfParams(params) {
-  const uri = params?.textDocument?.uri;
-  return typeof uri === 'string' && uri !== '' ? uri : null;
 }
 
 // One relay frame, or the reason it is unusable.

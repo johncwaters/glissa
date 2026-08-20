@@ -10,6 +10,7 @@ const {
   createDocStore,
   getDoc,
   listDocs,
+  uriOfParams,
 } = require('../server/core/navigator-buffer-core');
 
 function openDoc(store, uri, text, version = 1) {
@@ -28,6 +29,12 @@ test('applyDidOpen stores snapshots and listDocs returns open docs', () => {
     text: 'hello',
   });
   assert.deepEqual(listDocs(store), [getDoc(store, 'file:///a.md')]);
+});
+
+test('uriOfParams returns a text document uri or null', () => {
+  assert.equal(uriOfParams({ textDocument: { uri: 'file:///a.md' } }), 'file:///a.md');
+  assert.equal(uriOfParams({ textDocument: { uri: '' } }), null);
+  assert.equal(uriOfParams({}), null);
 });
 
 test('applyDidChange applies incremental edits using UTF-16 positions', () => {

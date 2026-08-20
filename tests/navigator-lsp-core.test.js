@@ -80,7 +80,37 @@ test('feedFrameBytes reports malformed JSON and recovers for the next frame', ()
 test('feedFrameBytes reports missing Content-Length and recovers for the next frame', () => {
   const next = { jsonrpc: '2.0', method: 'next' };
   const badHeader = Buffer.from('Content-Type: application/vscode-jsonrpc; charset=utf-8\r\n\r\n');
-  const { messages } = feedAll([Buffer.concat([badHeader, Buffer.from('discard me'), serializeFrame(next)])]);
+  const { messages } = feedAll([Buffer.concat([badHeader, Buffer.from('discard me\n'), serializeFrame(next)])]);
+  assert.deepEqual(messages, [
+    {
+      parseError: true,
+      reason: 'missing-content-length',
+      raw: 'Content-Type: application/vscode-jsonrpc; charset=utf-8',
+    },
+    next,
+  ]);
+});
+
+test('feedFrameBytes does not recover from Content-Length text inside discarded body bytes', () => {
+  const next = { jsonrpc: '2.0', method: 'next', params: { text: 'body says Content-Length: but stays body text' } };
+  const badHeader = Buffer.from('Content-Type: application/vscode-jsonrpc; charset=utf-8\r\n\r\n');
+  const discardedBody = Buffer.from('{"text":"Content-Length:"}\n', 'utf8');
+  const { messages } = feedAll([Buffer.concat([badHeader, discardedBody, serializeFrame(next)])]);
+  assert.deepEqual(messages, [
+    {
+      parseError: true,
+      reason: 'missing-content-length',
+      raw: 'Content-Type: application/vscode-jsonrpc; charset=utf-8',
+    },
+    next,
+  ]);
+});
+
+test('feedFrameBytes recovers after multibyte bytes before the next header', () => {
+  const next = { jsonrpc: '2.0', method: 'next' };
+  const badHeader = Buffer.from('Content-Type: application/vscode-jsonrpc; charset=utf-8\r\n\r\n');
+  const discardedBody = Buffer.from('discard snowman \u2603\n', 'utf8');
+  const { messages } = feedAll([Buffer.concat([badHeader, discardedBody, serializeFrame(next)])]);
   assert.deepEqual(messages, [
     {
       parseError: true,

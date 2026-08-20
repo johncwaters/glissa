@@ -14,6 +14,7 @@ const {
   applyDidOpen,
   createDocStore,
   listDocs,
+  uriOfParams,
 } = require('../server/core/navigator-buffer-core');
 
 const DEFAULT_PORTS = [5173, 3000];
@@ -80,11 +81,6 @@ function editorNotification(method, params) {
 
 function daemonMessage(method, params) {
   return { type: 'lsp', method, params };
-}
-
-function uriOfParams(params) {
-  const uri = params?.textDocument?.uri;
-  return typeof uri === 'string' && uri !== '' ? uri : '<unknown>';
 }
 
 function replayDidOpenMessage(doc) {
@@ -207,7 +203,7 @@ function createRelay({
   function handleNotification(method, params) {
     if (MIRROR_METHODS.has(method)) {
       const mirrorUpdate = updateMirror(method, params);
-      if (!mirrorUpdate.applied) stderr.write(`[navigator-relay] mirror update failed method=${method} uri=${uriOfParams(params)} reason=${mirrorUpdate.reason}\n`);
+      if (!mirrorUpdate.applied) stderr.write(`[navigator-relay] mirror update failed method=${method} uri=${uriOfParams(params) || '<unknown>'} reason=${mirrorUpdate.reason}\n`);
     }
     if (FORWARDED_METHODS.has(method)) return sendWsJson(ws, daemonMessage(method, params));
     if (method === 'exit') return stop(0);
