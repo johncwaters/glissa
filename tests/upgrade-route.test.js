@@ -37,6 +37,20 @@ test('a path that merely starts with /control is not the control route', () => {
   assert.equal(classifyUpgradePath('/other/../control'), 'unknown', 'dot segments are not collapsed');
 });
 
+test('a navigator upgrade routes on its exact pathname only', () => {
+  assert.equal(classifyUpgradePath('/navigator'), 'navigator');
+  assert.equal(classifyUpgradePath('/navigator?v=1'), 'navigator', 'a query string is not part of the path');
+  assert.equal(classifyUpgradePath('/navigator#frag'), 'navigator');
+  assert.equal(classifyUpgradePath('/navigators'), 'unknown');
+  assert.equal(classifyUpgradePath('/navigator/extra'), 'unknown');
+  assert.equal(classifyUpgradePath('//host/navigator'), 'unknown', 'an authority is not reinterpreted');
+  assert.equal(classifyUpgradePath('/other/../navigator'), 'unknown', 'dot segments are not collapsed');
+});
+
+test('the navigator route never reads as a session id', () => {
+  assert.equal(dataSessionIdFromUrl('/navigator'), null);
+});
+
 test('a data upgrade routes with or without a query string', () => {
   assert.equal(classifyUpgradePath('/terminals/abc'), 'data');
   assert.equal(classifyUpgradePath('/terminals/abc?anything=1'), 'data');

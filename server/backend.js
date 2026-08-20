@@ -54,6 +54,7 @@ const { createIntegrationRefWatcher } = require('../detection/integration-ref-wa
 const { createIntegrationWatcherPool } = require('../detection/integration-watcher-pool');
 const { createPrReviewWiring } = require('./pr-review-wiring');
 const { createPosthogWiring } = require('./posthog-wiring');
+const { createNavigatorWiring } = require('./navigator-wiring');
 const { createUsageWiring, resolveUsageConfig } = require('./usage-wiring');
 const { createLaneLedger } = require('./usage-lane-ledger');
 const { INTERACTIVE_LANE } = require('./core/usage-lane-core');
@@ -877,6 +878,11 @@ function createBackend(httpServer, options = {}) {
     broadcast: (msg) => broadcastControl(msg),
   });
 
+  // Navigator lane: config-file only, absent config constructs nothing (docs/plan-navigator.md, "Wire and trust")
+  const navigatorLane = config.navigator && config.navigator.enabled === true
+    ? createNavigatorWiring({ logger: console })
+    : null;
+
   // Context-pack auto-rebuild (server/pack-service.js): watchers on each spec's source roots plus a
   // fallback sweep. Started at boot below unless config.packsAutoRebuild is false, stopped in
   // shutdown(). A published rebuild tells every dashboard the new version so a card whose session was
@@ -1584,11 +1590,18 @@ function createBackend(httpServer, options = {}) {
     const route = classifyUpgradePath(req.url);
     const trust = classifyRequestOrigin({ localPort: socket.localPort, remoteListenerPort });
 
-    if (route === 'unknown') {
+    // A navigator route with no lane constructed takes the unknown-path branch, byte-identical to before the lane existed
+    if (route === 'unknown' || (route === 'navigator' && !navigatorLane)) {
       // Locally, leave the socket alone so other upgrade listeners (Vite HMR) can claim it. On the
       // remote listener nothing else is listening, so returning would strand an authenticated-by-
       // nobody socket open with no timeout; close it instead.
       if (trust === 'remote') socket.destroy();
+      return;
+    }
+
+    // Live editor buffers never cross the remote listener in v1, paired device or not (docs/plan-navigator.md, Non-goals)
+    if (route === 'navigator' && trust === 'remote') {
+      socket.destroy();
       return;
     }
 
@@ -1618,6 +1631,10 @@ function createBackend(httpServer, options = {}) {
         ws.glissaTrust = trust;
         controlWss.emit('connection', ws, req);
       });
+      return;
+    }
+    if (route === 'navigator') {
+      navigatorLane.handleUpgrade(req, socket, head);
       return;
     }
     dataWss.handleUpgrade(req, socket, head, (ws) => {
@@ -1686,6 +1703,8 @@ function createBackend(httpServer, options = {}) {
       sess.destroy();
       if (sess._killReap) pendingReaps.push(sess._killReap);
     }
+    // Drops every mirrored buffer and its pending sweep timer; null whenever the lane is off.
+    if (navigatorLane) navigatorLane.stop();
     controlWss.close();
     dataWss.close();
     return pendingReaps;

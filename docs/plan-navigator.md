@@ -102,6 +102,35 @@ Config:
 
 Doc gate: the checkable claims in this plan are the milestone tests named above. As milestones land, their sections graduate into `AGENTS.md` and this doc heads to `docs/archive/`.
 
+## Running the MVP (M1 + M2, shipped)
+
+1. Enable the lane in config.json: `"navigator": { "enabled": true }` (config file only, not control-WS settable, restart Glissa).
+2. Point an editor's LSP client at the relay for markdown. Neovim 0.11+:
+
+```lua
+vim.lsp.config['glissa-navigator'] = {
+  cmd = { 'node', 'C:/Users/johnw/Projects/glissa/session/navigator-relay.js', '--port', '5173' },
+  filetypes = { 'markdown' },
+}
+vim.lsp.enable('glissa-navigator')
+```
+
+Helix (languages.toml):
+
+```toml
+[language-server.glissa-navigator]
+command = "node"
+args = ["C:/Users/johnw/Projects/glissa/session/navigator-relay.js", "--port", "5173"]
+
+[[language]]
+name = "markdown"
+language-servers = ["marksman", "glissa-navigator"]
+```
+
+Use `--port 5173` against `npm run dev` and `--port 3000` against `npm start`; with no flag the relay tries both. VS Code has no native generic LSP client, so it needs a thin extension wrapping vscode-languageclient: deferred, tracked as part of M2's remaining scope, and the reason M2 is not fully closed by the MVP.
+
+3. Type a repeated word in any .md file; a warning squiggle appears about 300ms after you pause. Stop the daemon and restart it mid-edit: the relay reconnects and replays open buffers.
+
 ## Non-goals (v1)
 
 - No own editor, no Electron surface, no browser extension (prose in hosted editors waits).

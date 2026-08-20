@@ -148,7 +148,11 @@ server/            # Backend runtime (Express + WS wiring, control plane, shared
   core/pairing-token.js   # Pure token/device minting, TTL, single-use and revocation rules
   core/request-trust.js   # Pure listener-port trust classification + HTTP/upgrade access decisions
   core/upload-core.js     # Pure image-upload rules: mime -> extension, size cap, filename, bracketed-paste framing, retention plan
-  core/upgrade-route.js   # Pure WS-upgrade classification (control/data/unknown) by PATHNAME, plus the data-route session id
+  core/upgrade-route.js   # Pure WS-upgrade classification (control/data/navigator/unknown) by PATHNAME, plus the data-route session id
+  navigator-wiring.js  # Navigator lane IO shell: the /navigator WS the editor relay connects on, a per-connection doc store, the per-document debounce, and the markdown diagnostics it publishes back. Constructed ONLY when config.navigator.enabled is true (config-file only, never control-WS settable); local listener only, refused on the remote one. See docs/plan-navigator.md
+  core/navigator-buffer-core.js  # Pure per-connection document store: didOpen/didChange (range + full-text)/didClose, version ordering
+  core/navigator-rules-core.js   # Pure markdown sweep -> LSP Diagnostic array (repeated word, heading skip, unclosed fence)
+  core/navigator-lsp-core.js     # Pure LSP Content-Length framing and message classification for the stdio relay
   core/usage-entry-core.js  # Pure usage line parsing, advisor expansion, transcript identity, dedup keys, replacement ordering, token totals
   core/usage-pricing-core.js  # Pure pricing table normalization, model lookup, cache pricing, fast labels, and long-context tier math
   core/usage-aggregate-core.js  # Pure usage rollups: totals, local daily buckets, model rows, session rows, retention prune
