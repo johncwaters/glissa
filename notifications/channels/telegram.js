@@ -36,8 +36,8 @@ function decideTelegramNotification({ enabled, botToken, chatId, connectionCount
 // category is what the browser toast conveys through its own grouping. Plain text, no parse_mode.
 function formatTelegramText(sessionName, category, message) {
   const body = message || `${sessionName} needs attention`;
-  if (!category) return `Glissa: ${body}`;
-  return `Glissa ${category}: ${body}`;
+  if (!category) return body;
+  return `${category}: ${body}`;
 }
 
 /**

@@ -18,11 +18,31 @@ function normalizePathEntry(entry) {
   return entry.replace(/\\/g, "/").toLowerCase();
 }
 
+function isWindowsDriveColon(value, index, entryStart) {
+  if (path.delimiter !== ":") return false;
+  if (index !== entryStart + 1) return false;
+  if (!/[A-Za-z]/.test(value[index - 1] || "")) return false;
+  return value[index + 1] === "\\" || value[index + 1] === "/";
+}
+
+function splitPathEntries(value) {
+  const entries = [];
+  let entryStart = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    if (value[index] !== path.delimiter) continue;
+    if (isWindowsDriveColon(value, index, entryStart)) continue;
+    entries.push(value.slice(entryStart, index));
+    entryStart = index + 1;
+  }
+  entries.push(value.slice(entryStart));
+  return entries.filter(Boolean);
+}
+
 function prependPathDir(env, prependPathDirValue) {
   if (!prependPathDirValue) return;
   const pathKey = Object.keys(env).find((key) => key.toLowerCase() === "path") || "PATH";
   const existingPath = env[pathKey] || "";
-  const pathEntries = existingPath.split(path.delimiter).filter(Boolean);
+  const pathEntries = splitPathEntries(existingPath);
   const normalizedPrependDir = normalizePathEntry(prependPathDirValue);
   const alreadyPresent = pathEntries.some((entry) => normalizePathEntry(entry) === normalizedPrependDir);
   if (alreadyPresent) return;

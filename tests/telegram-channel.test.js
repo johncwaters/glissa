@@ -37,10 +37,10 @@ test('opted in, configured, and nobody connected is the one sending case', () =>
 });
 
 test('the text mirrors the web notification: category plus the manager message', () => {
-  assert.equal(formatTelegramText('id-1', 'complete', 'api finished working'), 'Glissa complete: api finished working');
-  assert.equal(formatTelegramText('id-1', 'waiting', 'api needs your input'), 'Glissa waiting: api needs your input');
-  assert.equal(formatTelegramText('id-1', null, 'something'), 'Glissa: something');
-  assert.equal(formatTelegramText('id-1', 'complete', ''), 'Glissa complete: id-1 needs attention');
+  assert.equal(formatTelegramText('id-1', 'complete', 'api finished working'), 'complete: api finished working');
+  assert.equal(formatTelegramText('id-1', 'waiting', 'api needs your input'), 'waiting: api needs your input');
+  assert.equal(formatTelegramText('id-1', null, 'something'), 'something');
+  assert.equal(formatTelegramText('id-1', 'complete', ''), 'complete: id-1 needs attention');
 });
 
 function makeChannel(config, connectionCount) {
@@ -61,7 +61,7 @@ test('the channel sends with the shared credentials when the gate opens', () => 
   assert.deepEqual(sent[0], {
     botToken: 'TOK',
     chatId: '123',
-    text: 'Glissa complete: api finished working',
+    text: 'complete: api finished working',
     tag: 'channel:telegram',
   });
 });
@@ -96,7 +96,7 @@ test('config is read per delivery, so the toggle needs no re-registration', () =
   config.telegramNotifications = true;
   channel('sess-id', 'complete', 'second', {});
   assert.equal(sent.length, 1);
-  assert.equal(sent[0].text, 'Glissa complete: second');
+  assert.equal(sent[0].text, 'complete: second');
 });
 
 test('a missing config object does not throw the delivery loop', () => {

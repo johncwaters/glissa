@@ -20,9 +20,14 @@ function entry(timestampMs, sessionId, model, tokens, costUSD = 1) {
   };
 }
 
+function sessionProject(report, sessionId) {
+  return report.sessions.find((session) => session.id === sessionId).project;
+}
+
 test('buildUsageReport uses local date buckets and rolls up totals, models and sessions', () => {
   const first = entry(new Date(2026, 7, 18, 23, 59, 0).getTime(), 'session-a', 'claude-a', { input: 1, output: 2 }, 0.5);
   const second = entry(new Date(2026, 7, 19, 0, 1, 0).getTime(), 'session-b', 'claude-b', { cacheCreate: 3, cacheRead: 4 }, 1.5);
+  first.cwd = '/repo/alpha';
   const sessionsById = new Map([['session-a', { name: 'Alpha' }]]);
   const report = buildUsageReport([first, second], {
     now: new Date(2026, 7, 20).getTime(),
@@ -51,7 +56,27 @@ test('buildUsageReport uses local date buckets and rolls up totals, models and s
   assert.equal(report.models.find((model) => model.key === 'claude-a').tokens, 3);
   assert.equal(Object.hasOwn(report.models.find((model) => model.key === 'claude-a'), 'day'), false);
   assert.equal(report.sessions.find((session) => session.id === 'session-a').name, 'Alpha');
+  assert.equal(report.sessions.find((session) => session.id === 'session-a').project, '/repo/alpha');
   assert.equal(report.sessions.find((session) => session.id === 'session-b').tokens, 7);
+});
+
+test('session rows carry project from cwd, fallback project, or null', () => {
+  const now = Date.UTC(2026, 7, 20);
+  const cwdEntry = entry(now, 'session-cwd', 'claude-a', { input: 1 });
+  cwdEntry.cwd = '/worktrees/glissa';
+  cwdEntry.project = '-worktrees-glissa';
+  const projectEntry = entry(now + 1, 'session-project', 'claude-a', { input: 1 });
+  projectEntry.project = '-encoded-project';
+  const nullEntry = entry(now + 2, 'session-null', 'claude-a', { input: 1 });
+  const laterBackfill = entry(now + 3, 'session-null', 'claude-a', { input: 1 });
+  laterBackfill.cwd = '/later/project';
+  const report = buildUsageReport([cwdEntry, projectEntry, nullEntry], { now: now + 10, retainDays: 30 });
+  const backfilledReport = buildUsageReport([nullEntry, laterBackfill], { now: now + 10, retainDays: 30 });
+
+  assert.equal(sessionProject(report, 'session-cwd'), '/worktrees/glissa');
+  assert.equal(sessionProject(report, 'session-project'), '-encoded-project');
+  assert.equal(sessionProject(report, 'session-null'), null);
+  assert.equal(sessionProject(backfilledReport, 'session-null'), '/later/project');
 });
 
 test('pruneEntries keeps retained entries and returns removed dedup keys', () => {

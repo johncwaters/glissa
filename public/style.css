@@ -4726,7 +4726,7 @@ html[data-layout="phone"] .usage-share-bar { display: none; }
 html[data-layout="phone"] .usage-block-label { min-width: 11ch; }
 /* Model ids and project names are long; on a phone they wrap instead of clipping to an unreadable stub. */
 html[data-layout="phone"] .usage-model-cell,
-html[data-layout="phone"] .usage-session-cell { max-width: 22ch; white-space: normal; overflow-wrap: anywhere; }
+html[data-layout="phone"] .usage-session-cell { max-width: none; min-width: 18ch; white-space: normal; overflow-wrap: break-word; }
 /* ── Radar on a phone ──
    The desktop board is deliberately dense: one line per issue, controls at 35% opacity until the row
    is hovered. Neither half survives touch. There is no hover to reveal a control with, and a row of

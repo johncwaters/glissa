@@ -102,9 +102,11 @@ function addEntryToModelBucket(map, model, entry) {
 function addEntryToSessionBucket(map, entry, sessionsById) {
   const key = entry.sessionId || '<unknown>';
   const knownSession = typeof sessionsById.get === 'function' ? sessionsById.get(key) : null;
+  const entryProject = entry.cwd || entry.project || null;
   const bucket = map.get(key) || {
     id: key,
     name: knownSession?.name || key,
+    project: entryProject,
     // A session belongs to exactly one vendor, so this one is a scalar.
     vendor: vendorOf(entry),
     tokens: 0,
@@ -116,6 +118,7 @@ function addEntryToSessionBucket(map, entry, sessionsById) {
     entries: 0,
     lastTs: null,
   };
+  if (bucket.project === null && entryProject) bucket.project = entryProject;
   addEntryToTotals(bucket, entry);
   bucket.entries += 1;
   bucket.lastTs = Math.max(bucket.lastTs || 0, entry.timestampMs);
