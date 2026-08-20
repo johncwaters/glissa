@@ -19,6 +19,12 @@ Rules the tiers enforce: the navigator never moves the cursor, never inserts tex
 
 Alongside the tiers the navigator maintains an intent model: a short living statement of what it believes the carbon unit is building ("blog post arguing X for audience Y", "refactor of the spawn path to remove the cmd.exe hop"). It renders in the Navigator tab and is directly correctable there. Feedback quality is downstream of intent accuracy, so correcting the intent doc replaces prompt writing.
 
+## Markdown and prose are first-class targets
+
+LSP is filetype-agnostic: `didChange` carries text for whatever language id the editor attaches the server to, so markdown needs nothing special, only editor config mapping the `markdown` language id to the relay. Shipping precedent: marksman (markdown structure LSP), ltex-ls (LanguageTool grammar diagnostics over LSP), and grammarly-languageserver (Grammarly's official LSP server) all serve prose feedback through this exact transport today. Editors attach multiple servers per filetype, so the navigator runs beside them without conflict.
+
+Dogfood scenario, and the first real target: plan-doc review. A Claude session drafts a `docs/plan-*.md`, the carbon unit edits it in their editor, and the navigator watches the edits live: tier 2 when an edit contradicts another section, tier 3 when a milestone's acceptance criteria get weakened, intent model reading "reviewing the navigator plan, tightening scope". The navigator's own plan docs are the test corpus.
+
 ## Decision: where the LSP boundary lives (shim vs native vs rewrite)
 
 Something must speak LSP over stdio, because stdio is the transport every editor supports (VS Code, Neovim, Helix, Zed, JetBrains via plugin) and the only one Helix supports at all. Editors spawn their language server as a child process; they cannot spawn the Glissa daemon (single instance, already running), and socket-transport LSP support is uneven across editors. A separate spawned process at the editor boundary is therefore required by LSP's own topology. The design question is what that process is allowed to know.
