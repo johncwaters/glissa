@@ -34,7 +34,9 @@ function activate(context) {
 
   client = new LanguageClient("glissaNavigator", "Glissa Navigator", serverOptions, clientOptions);
   context.subscriptions.push(client);
-  client.start();
+  client.start().catch((startError) => {
+    vscode.window.showErrorMessage(`Glissa Navigator failed to start: ${startError.message}`);
+  });
 }
 
 function deactivate() {
