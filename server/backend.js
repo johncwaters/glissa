@@ -1546,7 +1546,7 @@ function createBackend(httpServer, options = {}) {
         if (isApplicableViewerSize(cols, rows)) {
           nextViewerResizeSeq += 1;
           viewerSizes.set(ws, { cols, rows, resizeSeq: nextViewerResizeSeq });
-          sess.resize(cols, rows);
+          sess.resize(cols, rows, { redraw: msg.redraw === true });
         }
         return;
       }

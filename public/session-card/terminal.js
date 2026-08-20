@@ -200,14 +200,17 @@ export function setupTerminal(termWrap, ui) {
     if (!ui.card.offsetParent) return;
     ui.fitAddon.fit();
     const { cols, rows } = ui.term;
-    if (cols !== lastFittedCols || rows !== lastFittedRows) {
+    const gridChanged = cols !== lastFittedCols || rows !== lastFittedRows;
+    if (gridChanged) {
       lastFittedCols = cols;
       lastFittedRows = rows;
       forceTerminalRepaint(ui, { force: true });
     }
-    if (cols === lastSentCols && rows === lastSentRows) return;
+    // A changed grid means this xterm's buffer holds frames drawn for another geometry, so the
+    // resize goes out even when the PTY already wears this size: redraw asks for a forced repaint.
+    if (!gridChanged && cols === lastSentCols && rows === lastSentRows) return;
     if (ui.dataWs?.readyState !== WebSocket.OPEN) return;
-    ui.dataWs.send(JSON.stringify({ type: 'resize', cols, rows }));
+    ui.dataWs.send(JSON.stringify({ type: 'resize', cols, rows, redraw: gridChanged }));
     lastSentCols = cols;
     lastSentRows = rows;
     hasClaimedViewerSize = true;

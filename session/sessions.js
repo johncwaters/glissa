@@ -2307,7 +2307,8 @@ class Session extends EventEmitter {
     }
   }
 
-  resize(cols, rows) {
+  resize(cols, rows, { redraw = false } = {}) {
+    const isUnchangedSize = this._lastCols === cols && this._lastRows === rows;
     // Remember the latest size so a restart respawns the PTY at this dimension
     // (see start()), rather than the 80x24 default that leaves Claude cramped.
     this._lastCols = cols;
@@ -2321,6 +2322,11 @@ class Session extends EventEmitter {
     // reflow does not change) and hooks are event-based, not output-based.
     if (this.ptyProcess) {
       try {
+        // A same-size resize is an OS-level no-op (no SIGWINCH), so a viewer asking for a redraw
+        // gets a one-row nudge first: the only portable way to make the TUI repaint its frame.
+        if (redraw && isUnchangedSize && rows > 1) {
+          this.ptyProcess.resize(cols, rows - 1);
+        }
         this.ptyProcess.resize(cols, rows);
       } catch {
         // PTY exited between our check and the resize call (Windows ConPTY race).
