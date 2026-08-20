@@ -2,6 +2,7 @@
 
 const HEADER_END = '\r\n\r\n';
 const CONTENT_LENGTH_RE = /^content-length:\s*(\d+)\s*$/i;
+const CONTENT_LENGTH_HEADER = 'content-length:';
 
 function createParserState() {
   return {
@@ -18,6 +19,11 @@ function feedFrameBytes(state, chunk) {
   while (true) {
     const bodyBytes = readNeededBodyBytes(nextState);
     if (bodyBytes === null) break;
+    if (bodyBytes.parseError) {
+      messages.push(bodyBytes);
+      nextState.neededBodyBytes = null;
+      continue;
+    }
     if (nextState.buffer.length < bodyBytes) break;
 
     const body = nextState.buffer.subarray(0, bodyBytes);
@@ -37,7 +43,12 @@ function readNeededBodyBytes(state) {
 
   const headerText = state.buffer.subarray(0, headerEndAt).toString('ascii');
   state.buffer = state.buffer.subarray(headerEndAt + HEADER_END.length);
-  state.neededBodyBytes = contentLengthFromHeader(headerText);
+  const contentLength = contentLengthFromHeader(headerText);
+  if (contentLength === null) {
+    resyncAfterBadHeader(state);
+    return { parseError: true, reason: 'missing-content-length', raw: headerText };
+  }
+  state.neededBodyBytes = contentLength;
   return state.neededBodyBytes;
 }
 
@@ -48,7 +59,7 @@ function contentLengthFromHeader(headerText) {
     if (!match) continue;
     return Number(match[1]);
   }
-  return 0;
+  return null;
 }
 
 function parseBody(body) {
@@ -58,6 +69,25 @@ function parseBody(body) {
   } catch {
     return { parseError: true, raw };
   }
+}
+
+function resyncAfterBadHeader(state) {
+  const lowerBuffer = state.buffer.toString('ascii').toLowerCase();
+  const headerAt = lowerBuffer.indexOf(CONTENT_LENGTH_HEADER);
+  if (headerAt >= 0) {
+    state.buffer = state.buffer.subarray(headerAt);
+    return;
+  }
+
+  const maxSuffixLength = Math.min(state.buffer.length, CONTENT_LENGTH_HEADER.length - 1);
+  for (let suffixLength = maxSuffixLength; suffixLength > 0; suffixLength--) {
+    const suffix = lowerBuffer.slice(lowerBuffer.length - suffixLength);
+    if (!CONTENT_LENGTH_HEADER.startsWith(suffix)) continue;
+    state.buffer = state.buffer.subarray(state.buffer.length - suffixLength);
+    return;
+  }
+
+  state.buffer = Buffer.alloc(0);
 }
 
 function serializeFrame(messageObject) {

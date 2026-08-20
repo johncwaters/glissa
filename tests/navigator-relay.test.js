@@ -16,10 +16,6 @@ const {
 const RELAY_PATH = path.join(__dirname, '..', 'session', 'navigator-relay.js');
 const TEST_TIMEOUT_MS = 6000;
 
-function wait(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 function withTimeout(promise, ms, label) {
   let timer = null;
   const timeout = new Promise((resolve, reject) => {

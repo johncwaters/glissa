@@ -1,19 +1,4 @@
-/*
- * Navigator lane wiring - the IO shell that binds the pure navigator cores (document store +
- * markdown rules) to the /navigator WebSocket the editor relay connects on.
- *
- * createBackend calls createNavigatorWiring once, and ONLY when config.navigator.enabled is true, so
- * an absent navigator block constructs nothing at all and the route stays byte-identical to an
- * unowned path (docs/plan-navigator.md, "Wire and trust").
- *
- * The relay (session/navigator-relay.js) speaks LSP stdio with the editor and forwards each
- * notification here as one JSON text frame { type: 'lsp', method, params }; diagnostics travel back on
- * the SAME socket as { type: 'publishDiagnostics', params: { uri, diagnostics } }. Buffer text lives
- * in memory per connection and is never written to disk in v1.
- *
- * Same shape as server/usage-wiring.js: deps injected (timers, sweep, logger) so the whole lane runs
- * on fake timers in a unit test, with the decisions themselves living in the pure cores.
- */
+// Navigator lane IO shell. Design rationale lives in docs/plan-navigator.md.
 
 'use strict';
 
@@ -23,11 +8,9 @@ const {
 } = require('./core/navigator-buffer-core');
 const { sweepMarkdown } = require('./core/navigator-rules-core');
 
-// Quiet window before a document is swept. Typing pauses, not keystrokes, are the boundary the plan
-// gates feedback on.
+// Quiet window before a document is swept.
 const NAVIGATOR_DEBOUNCE_MS = 300;
-// A didChange with no range carries the whole document, so the frame cap matches the data WS rather
-// than the control WS 16KB.
+// Whole-document didChange frames can carry editor buffers up to the data WS cap.
 const MAX_FRAME_BYTES = 2 * 1024 * 1024;
 const MARKDOWN_EXTENSIONS = ['.md', '.markdown'];
 
@@ -43,10 +26,7 @@ function uriOfParams(params) {
   return typeof uri === 'string' && uri !== '' ? uri : null;
 }
 
-/**
- * One relay frame, or the reason it is unusable. Never throws: the relay is a process the daemon does
- * not control, so a malformed frame is ordinary traffic to be dropped and logged.
- */
+// One relay frame, or the reason it is unusable.
 function readFrame(raw) {
   let parsed = null;
   try {
@@ -191,8 +171,7 @@ function createNavigatorWiring({
     return connection;
   }
 
-  // A frame handler throw would land in the ws 'message' emit with no uncaughtException handler above
-  // it, taking the whole daemon down over one editor's traffic.
+  // Catch frame handler faults before they reach the ws message emitter.
   function handleSocketData(connection, data) {
     try {
       connection.handleFrame(data.toString());
@@ -209,8 +188,7 @@ function createNavigatorWiring({
     });
   }
 
-  // An upgraded socket is detached from the HTTP server, so nothing else reaps a live relay connection
-  // at shutdown; closing them here is what lets the process exit.
+  // Close detached upgraded sockets so shutdown can exit.
   function stop() {
     for (const client of wss.clients) client.close(1001, 'Navigator stopped');
     for (const connection of [...connections]) connection.close();

@@ -77,6 +77,20 @@ test('feedFrameBytes reports malformed JSON and recovers for the next frame', ()
   assert.deepEqual(messages, [{ parseError: true, raw: '{"x":}' }, next]);
 });
 
+test('feedFrameBytes reports missing Content-Length and recovers for the next frame', () => {
+  const next = { jsonrpc: '2.0', method: 'next' };
+  const badHeader = Buffer.from('Content-Type: application/vscode-jsonrpc; charset=utf-8\r\n\r\n');
+  const { messages } = feedAll([Buffer.concat([badHeader, Buffer.from('discard me'), serializeFrame(next)])]);
+  assert.deepEqual(messages, [
+    {
+      parseError: true,
+      reason: 'missing-content-length',
+      raw: 'Content-Type: application/vscode-jsonrpc; charset=utf-8',
+    },
+    next,
+  ]);
+});
+
 test('classifyMessage separates requests notifications responses and invalid messages', () => {
   assert.deepEqual(classifyMessage({ method: 'm', id: 1 }), { kind: 'request', method: 'm', id: 1 });
   assert.deepEqual(classifyMessage({ method: 'm' }), { kind: 'notification', method: 'm', id: undefined });

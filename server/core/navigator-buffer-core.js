@@ -26,7 +26,8 @@ function applyDidChange(store, params) {
   if (!doc) return { applied: false, reason: 'unknown-uri' };
 
   const version = textDocument.version;
-  if (typeof version === 'number' && typeof doc.version === 'number' && version <= doc.version) {
+  if (!Number.isFinite(version)) return { applied: false, reason: 'invalid-version' };
+  if (typeof doc.version === 'number' && version <= doc.version) {
     return { applied: false, reason: 'stale-version' };
   }
 
@@ -87,10 +88,15 @@ function offsetAt(text, position) {
   }
 
   const lineEnd = text.indexOf('\n', offset);
-  const end = lineEnd === -1 ? text.length : lineEnd;
+  const end = lineEnd === -1 ? text.length : crlfAwareLineEnd(text, lineEnd);
   const target = offset + position.character;
   if (target > end) return null;
   return target;
+}
+
+function crlfAwareLineEnd(text, lineEnd) {
+  if (lineEnd > 0 && text[lineEnd - 1] === '\r') return lineEnd - 1;
+  return lineEnd;
 }
 
 module.exports = {

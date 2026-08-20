@@ -41,6 +41,17 @@ test('applyDidChange applies incremental edits using UTF-16 positions', () => {
   assert.equal(getDoc(store, 'file:///a.md').text, `alpha\nbEEa\nomega`);
 });
 
+test('applyDidChange applies incremental edits using CRLF line offsets', () => {
+  const store = createDocStore();
+  openDoc(store, 'file:///crlf.md', 'alpha\r\nbeta\r\nomega');
+  const change = applyDidChange(store, {
+    textDocument: { uri: 'file:///crlf.md', version: 2 },
+    contentChanges: [{ range: { start: { line: 1, character: 1 }, end: { line: 1, character: 3 } }, text: 'EE' }],
+  });
+  assert.deepEqual(change, { applied: true });
+  assert.equal(getDoc(store, 'file:///crlf.md').text, 'alpha\r\nbEEa\r\nomega');
+});
+
 test('applyDidChange keeps multibyte and astral UTF-16 offsets exact', () => {
   const store = createDocStore();
   openDoc(store, 'file:///emoji.md', 'a\ud83d\ude80b \u00e9clair');
@@ -88,6 +99,20 @@ test('applyDidChange drops stale versions and unknown uris', () => {
     textDocument: { uri: 'file:///missing.md', version: 1 },
     contentChanges: [{ text: 'missing' }],
   }), { applied: false, reason: 'unknown-uri' });
+  assert.equal(getDoc(store, 'file:///a.md').text, 'fresh');
+});
+
+test('applyDidChange rejects missing or nonnumeric versions', () => {
+  const store = createDocStore();
+  openDoc(store, 'file:///a.md', 'fresh', 5);
+  assert.deepEqual(applyDidChange(store, {
+    textDocument: { uri: 'file:///a.md' },
+    contentChanges: [{ text: 'missing version' }],
+  }), { applied: false, reason: 'invalid-version' });
+  assert.deepEqual(applyDidChange(store, {
+    textDocument: { uri: 'file:///a.md', version: '6' },
+    contentChanges: [{ text: 'string version' }],
+  }), { applied: false, reason: 'invalid-version' });
   assert.equal(getDoc(store, 'file:///a.md').text, 'fresh');
 });
 

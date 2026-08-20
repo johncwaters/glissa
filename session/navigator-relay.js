@@ -20,6 +20,8 @@ const DEFAULT_PORTS = [5173, 3000];
 const INITIAL_RETRY_MS = 500;
 const MAX_RETRY_MS = 5000;
 const METHOD_NOT_FOUND = -32601;
+const MIRROR_METHODS = new Set(['textDocument/didOpen', 'textDocument/didChange', 'textDocument/didClose']);
+const FORWARDED_METHODS = new Set([...MIRROR_METHODS, 'textDocument/didSave']);
 
 function parsePortValue(value) {
   const port = Number(value);
@@ -80,6 +82,11 @@ function daemonMessage(method, params) {
   return { type: 'lsp', method, params };
 }
 
+function uriOfParams(params) {
+  const uri = params?.textDocument?.uri;
+  return typeof uri === 'string' && uri !== '' ? uri : '<unknown>';
+}
+
 function replayDidOpenMessage(doc) {
   return daemonMessage('textDocument/didOpen', {
     textDocument: {
@@ -97,7 +104,13 @@ function sendWsJson(ws, payload) {
   return true;
 }
 
-function createRelay({ argv = process.argv.slice(2), env = process.env, stdin = process.stdin, stdout = process.stdout } = {}) {
+function createRelay({
+  argv = process.argv.slice(2),
+  env = process.env,
+  stdin = process.stdin,
+  stdout = process.stdout,
+  stderr = process.stderr,
+} = {}) {
   const portPlan = resolvePortPlan(argv, env);
   const docStore = createDocStore();
   let parserState = createParserState();
@@ -192,11 +205,11 @@ function createRelay({ argv = process.argv.slice(2), env = process.env, stdin = 
   }
 
   function handleNotification(method, params) {
-    updateMirror(method, params);
-    if (method === 'textDocument/didOpen') return sendWsJson(ws, daemonMessage(method, params));
-    if (method === 'textDocument/didChange') return sendWsJson(ws, daemonMessage(method, params));
-    if (method === 'textDocument/didClose') return sendWsJson(ws, daemonMessage(method, params));
-    if (method === 'textDocument/didSave') return sendWsJson(ws, daemonMessage(method, params));
+    if (MIRROR_METHODS.has(method)) {
+      const mirrorUpdate = updateMirror(method, params);
+      if (!mirrorUpdate.applied) stderr.write(`[navigator-relay] mirror update failed method=${method} uri=${uriOfParams(params)} reason=${mirrorUpdate.reason}\n`);
+    }
+    if (FORWARDED_METHODS.has(method)) return sendWsJson(ws, daemonMessage(method, params));
     if (method === 'exit') return stop(0);
     return false;
   }
