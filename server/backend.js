@@ -972,6 +972,11 @@ function createBackend(httpServer, options = {}) {
       usage.refreshSessions();
     });
 
+    sess.on('resume-cleared', () => {
+      persistProjectField('resumeSessionId', null);
+      broadcastControl({ type: 'session-resume', id: sess.id, resumeSessionId: null });
+    });
+
     sess.on('error', (err) => {
       console.error(`[${sess.name}] error: ${err.message}`);
     });

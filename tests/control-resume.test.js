@@ -38,7 +38,11 @@ function fakeSession(id) {
   let resume = null;
   return {
     id, name: id, path: 'C:/repo', ephemeral: false,
+    restartOptions: [],
+    forceRestartOptions: [],
     setResumeConversation(v) { resume = v || null; },
+    restart(options) { this.restartOptions.push(options); return true; },
+    forceRestart(options) { this.forceRestartOptions.push(options); return true; },
     get resumeSessionId() { return resume; },
     toSnapshot() { return { id: this.id, name: this.name, resumeSessionId: resume }; },
   };
@@ -90,4 +94,16 @@ test('resume-conversation on an unknown session replies with an error (no throw)
   assert.doesNotThrow(() => h.send({ type: 'resume-conversation', id: 'nope', conversationId: 'x'.repeat(12) }));
   const err = h.sent.find((m) => m.type === 'error');
   assert.ok(err && /not found/i.test(err.message));
+});
+
+test('restart passes only boolean true as the fresh flag', () => {
+  const s = fakeSession('p1');
+  const cfg = { projects: [{ id: 'p1', name: 'p1', path: 'C:/repo' }], teams: [] };
+  const h = harness(new Map([['p1', s]]), cfg);
+
+  h.send({ type: 'restart', id: 'p1', fresh: true });
+  h.send({ type: 'force-restart', id: 'p1', fresh: 'true' });
+
+  assert.deepEqual(s.restartOptions, [{ fresh: true }]);
+  assert.deepEqual(s.forceRestartOptions, [{ fresh: false }]);
 });

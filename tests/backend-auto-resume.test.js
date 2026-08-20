@@ -123,6 +123,14 @@ test('persistSessionField flips wasActive true/false', () => {
   });
 });
 
+test('persistSessionField clears resumeSessionId with null', () => {
+  withStore({ projects: [{ id: 'p1', name: 'proj', path: 'C:/proj', resumeSessionId: 'abcd1234-0000-0000-0000-abcdabcdabcd' }] }, (store, p) => {
+    persistSessionField(store, store.config, 'p1', 'resumeSessionId', null);
+    assert.equal(JSON.parse(fs.readFileSync(p, 'utf8')).projects[0].resumeSessionId, null);
+    assert.equal(store.config.projects[0].resumeSessionId, null, 'in-memory config cleared too');
+  });
+});
+
 // --- runAutoResume ---
 
 function fakePty(pid = 2147483646) {

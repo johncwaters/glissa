@@ -63,6 +63,7 @@ function updateButtonVisibility(ui) {
   const state = ui.currentState;
   const canRestart = KILLABLE_STATES.includes(state) || RESTARTABLE_STATES.includes(state);
   ui.btnRestart.classList.toggle('visible', canRestart);
+  ui.btnRestartFresh.classList.toggle('visible', canRestart);
   // Rename and Remove are always available
   ui.btnRename.classList.add('visible');
   ui.btnRemove.classList.add('visible');
@@ -99,6 +100,12 @@ function wireCardEvents(ui, sessionId) {
     ui.overflowMenu.classList.remove('open');
     const type = KILLABLE_STATES.includes(ui.currentState) ? 'force-restart' : 'restart';
     sendControlMsg({ type, id: sessionId });
+  });
+
+  ui.btnRestartFresh.addEventListener('click', () => {
+    ui.overflowMenu.classList.remove('open');
+    const type = KILLABLE_STATES.includes(ui.currentState) ? 'force-restart' : 'restart';
+    sendControlMsg({ type, id: sessionId, fresh: true });
   });
 
   ui.btnResume.addEventListener('click', () => {
@@ -244,6 +251,7 @@ export function createSessionCard(sessionId, sessionName, initialState, options 
     btnDebug: dom.btnDebug,
     btnRename: dom.btnRename,
     btnRestart: dom.btnRestart,
+    btnRestartFresh: dom.btnRestartFresh,
     btnResume: dom.btnResume,
     btnRemove: dom.btnRemove,
     debugOverlay: null,
@@ -617,4 +625,3 @@ export function applyState(sessionId, state) {
   // Reset the elapsed readout immediately on a state change (the tick handles the per-second advance).
   refreshElapsed(ui);
 }
-

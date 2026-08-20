@@ -371,6 +371,7 @@ class Session extends EventEmitter {
     this._initialPrompt = initialPrompt;
     this._extraClaudeArgs = Array.isArray(extraClaudeArgs) ? extraClaudeArgs : [];
     this._resumeSessionId = resumeSessionId || null;
+    this._suppressResumeCapture = false;
     this._antiSlopPrompt = !!antiSlopPrompt;
     this.ephemeral = !!ephemeral;
     this._settingsPermissions = settingsPermissions;
@@ -540,6 +541,7 @@ class Session extends EventEmitter {
   // emitted event to persist it to config.json. Emits only on an actual CHANGE: every hook now
   // feeds this, and each emission is a synchronous config.json write on a per-turn path.
   _captureClaudeSessionId(id, source) {
+    if (this._suppressResumeCapture) return;
     if (typeof id !== "string" || !RESUME_ID_RE.test(id)) return;
     if (id === this._resumeSessionId) return;
     this.setResumeConversation(id);
@@ -1027,6 +1029,14 @@ class Session extends EventEmitter {
 
   get resumeSessionId() {
     return this._resumeSessionId;
+  }
+
+  _prepareRestart(options = {}) {
+    if (options.fresh !== true) return;
+    // The dying PTY's late SessionEnd hook must not re-capture the id this fresh restart clears.
+    this._suppressResumeCapture = true;
+    this.setResumeConversation(null);
+    this.emit("resume-cleared", { id: this.id });
   }
 
   // Normalized pack names this session would deliver on its next spawn. Public so the backend can
@@ -2007,6 +2017,7 @@ class Session extends EventEmitter {
     // Resume a prior conversation (possibly from another worktree's project dir). Claude resolves the
     // id across the repo's linked worktrees, so the session continues that thread in THIS worktree's cwd.
     // Placed before any lane extraClaudeArgs / the initial-prompt positional (both null for user sessions).
+    this._suppressResumeCapture = false;
     if (this._resumeSessionId) {
       claudeArgs.push("--resume", this._resumeSessionId);
     }
@@ -2474,7 +2485,7 @@ class Session extends EventEmitter {
     return this.transition("user_kill");
   }
 
-  restart() {
+  restart(options = {}) {
     if (this._destroyed) return false;
     // A queued teardown (finish/force-restart) is mid-flight; respawning now would race its exit
     // handler. This is the load-bearing guard: once a finish/force-restart's killSession() flips the
@@ -2482,6 +2493,7 @@ class Session extends EventEmitter {
     // the mutex MUST live here too, not only in forceRestart.
     if (this._teardownPending()) return false;
     if (!RESTARTABLE_STATES.includes(this.state)) return false;
+    this._prepareRestart(options);
     this.transition("user_restart");
     this.start();
     return true;
@@ -2539,10 +2551,11 @@ class Session extends EventEmitter {
     return r;
   }
 
-  forceRestart() {
-    if (this._destroyed) return;
-    if (this._teardownPending()) return;
+  forceRestart(options = {}) {
+    if (this._destroyed) return false;
+    if (this._teardownPending()) return false;
     if (KILLABLE_STATES.includes(this.state)) {
+      this._prepareRestart(options);
       this._pendingRestart = true;
       this.once("exit", () => {
         this._pendingRestart = false;
@@ -2553,10 +2566,10 @@ class Session extends EventEmitter {
       });
       this.kill();
       this.transition("user_kill");
-      return;
+      return true;
     }
-    if (!RESTARTABLE_STATES.includes(this.state)) return;
-    this.restart();
+    if (!RESTARTABLE_STATES.includes(this.state)) return false;
+    return this.restart(options);
   }
 
   updateSettings(cfg) {

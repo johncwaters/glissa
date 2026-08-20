@@ -868,8 +868,8 @@ function registerControlHandlers(controlWss, deps) {
       const s = findSession(msg);
       if (s && s.state === STATES.DORMANT) s.start();
     },
-    'restart':          (msg) => { const s = findSession(msg); if (s) s.restart(); },
-    'force-restart':    (msg) => { const s = findSession(msg); if (s) s.forceRestart(); },
+    'restart':          (msg) => { const s = findSession(msg); if (s) s.restart({ fresh: msg.fresh === true }); },
+    'force-restart':    (msg) => { const s = findSession(msg); if (s) s.forceRestart({ fresh: msg.fresh === true }); },
     'dismiss':          (msg) => { const s = findSession(msg); if (s) s.dismiss(); },
     'sleep':            (msg) => { const s = findSession(msg); if (s) s.sleep(); },
     'wake':             (msg) => { const s = findSession(msg); if (s) s.wake(); },

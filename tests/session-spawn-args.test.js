@@ -8,10 +8,13 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const { Session } = require('../session/sessions');
+const { STATES } = require('../shared/states');
 
 function fakePty(pid = 2147483646) {
   return { pid, onData() {}, onExit() {}, write() {}, resize() {}, kill() {} };
 }
+
+const drain = () => new Promise((r) => setImmediate(r));
 
 test('start() appends extraClaudeArgs then the initialPrompt as the final positional arg', async () => {
   const calls = [];
@@ -58,6 +61,64 @@ test('a session with no team options spawns exactly as before (no extra args)', 
     await s.start();
     assert.deepEqual(calls[0].args, [], 'no settings, no perms, no team args');
     assert.equal(s.toSnapshot().ephemeral, false);
+  } finally {
+    s.destroy();
+  }
+});
+
+test('normal restart keeps the captured resume id in spawn args', async () => {
+  const calls = [];
+  const resumeSessionId = '4a3d4462-4cf7-4a23-8f00-ccec89a48ba5';
+  const s = new Session({
+    id: 'resume-restart',
+    name: 'resume-restart',
+    path: process.cwd(),
+    resumeSessionId,
+    spawnCommand: { path: process.execPath, kind: 'exe' },
+    ptySpawn: (file, args) => { calls.push({ file, args }); return fakePty(); },
+    killProc: (_args, _opts, cb) => cb(null, '', ''),
+  });
+  try {
+    await s.start();
+    s.state = STATES.DONE;
+
+    assert.equal(s.restart(), true, 'restart accepted');
+    await drain();
+    await drain();
+
+    const args = calls.at(-1).args;
+    const resumeIndex = args.indexOf('--resume');
+    assert.notEqual(resumeIndex, -1, 'restart spawned with --resume');
+    assert.equal(args[resumeIndex + 1], resumeSessionId);
+  } finally {
+    s.destroy();
+  }
+});
+
+test('fresh restart clears the resume id and spawns without --resume', async () => {
+  const calls = [];
+  const cleared = [];
+  const s = new Session({
+    id: 'fresh-restart',
+    name: 'fresh-restart',
+    path: process.cwd(),
+    resumeSessionId: '4a3d4462-4cf7-4a23-8f00-ccec89a48ba5',
+    spawnCommand: { path: process.execPath, kind: 'exe' },
+    ptySpawn: (file, args) => { calls.push({ file, args }); return fakePty(); },
+    killProc: (_args, _opts, cb) => cb(null, '', ''),
+  });
+  s.on('resume-cleared', (payload) => cleared.push(payload));
+  try {
+    await s.start();
+    s.state = STATES.DONE;
+
+    assert.equal(s.restart({ fresh: true }), true, 'fresh restart accepted');
+    await drain();
+    await drain();
+
+    assert.equal(s.resumeSessionId, null, 'live resume id cleared');
+    assert.deepEqual(cleared, [{ id: 'fresh-restart' }]);
+    assert.equal(calls.at(-1).args.includes('--resume'), false, 'fresh restart spawned without --resume');
   } finally {
     s.destroy();
   }

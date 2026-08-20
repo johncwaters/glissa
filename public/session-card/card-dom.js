@@ -154,13 +154,15 @@ export function buildCardDOM(sessionId, sessionName, initialState, options = {})
   btnRename.setAttribute('role', 'menuitem');
   const btnRestart = el('button', 'overflow-item overflow-restart', 'Restart');
   btnRestart.setAttribute('role', 'menuitem');
+  const btnRestartFresh = el('button', 'overflow-item overflow-restart-fresh', 'Restart fresh');
+  btnRestartFresh.setAttribute('role', 'menuitem');
   // Resume a prior Claude conversation (including one started in a different worktree) into this card.
   const btnResume = el('button', 'overflow-item overflow-resume', 'Resume conversation...');
   btnResume.setAttribute('role', 'menuitem');
 
   const btnRemove = el('button', 'overflow-item overflow-remove', 'Remove');
   btnRemove.setAttribute('role', 'menuitem');
-  overflowMenu.append(btnRename, btnRestart, btnResume, btnRemove);
+  overflowMenu.append(btnRename, btnRestart, btnRestartFresh, btnResume, btnRemove);
   overflow.append(btnOverflow, overflowMenu);
 
   const btnDebug = el('button', 'btn-action btn-debug', '\u2699');
@@ -187,7 +189,7 @@ export function buildCardDOM(sessionId, sessionName, initialState, options = {})
 
   card.append(header, termWrap);
 
-  return { card, header, nameEl, elapsedEl, btnRename, btnRestart, btnResume, btnRemove, btnDebug, btnOverflow, overflowMenu, termWrap };
+  return { card, header, nameEl, elapsedEl, btnRename, btnRestart, btnRestartFresh, btnResume, btnRemove, btnDebug, btnOverflow, overflowMenu, termWrap };
 }
 
 // ── Inline rename ────────────────────────────────────────────

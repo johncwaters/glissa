@@ -844,11 +844,13 @@ body {
   display: flex;
 }
 
-.overflow-restart {
+.overflow-restart,
+.overflow-restart-fresh {
   color: var(--accent);
 }
 
-.overflow-restart:hover {
+.overflow-restart:hover,
+.overflow-restart-fresh:hover {
   background: color-mix(in oklab, var(--accent) 10%, transparent);
 }
 
