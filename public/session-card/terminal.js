@@ -206,8 +206,7 @@ export function setupTerminal(termWrap, ui) {
       lastFittedRows = rows;
       forceTerminalRepaint(ui, { force: true });
     }
-    // A changed grid means this xterm's buffer holds frames drawn for another geometry, so the
-    // resize goes out even when the PTY already wears this size: redraw asks for a forced repaint.
+    // A changed grid holds frames drawn for another geometry: send even at an unchanged PTY size, tagged redraw.
     if (!gridChanged && cols === lastSentCols && rows === lastSentRows) return;
     if (ui.dataWs?.readyState !== WebSocket.OPEN) return;
     ui.dataWs.send(JSON.stringify({ type: 'resize', cols, rows, redraw: gridChanged }));

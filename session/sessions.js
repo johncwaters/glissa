@@ -2321,12 +2321,16 @@ class Session extends EventEmitter {
     // detection: the OSC-title source only reacts to the activity glyph (which a
     // reflow does not change) and hooks are event-based, not output-based.
     if (this.ptyProcess) {
-      try {
-        // A same-size resize is an OS-level no-op (no SIGWINCH), so a viewer asking for a redraw
-        // gets a one-row nudge first: the only portable way to make the TUI repaint its frame.
-        if (redraw && isUnchangedSize && rows > 1) {
-          this.ptyProcess.resize(cols, rows - 1);
+      // A same-size resize is an OS no-op (no SIGWINCH); nudge a row (or a col at one row) so the TUI repaints.
+      if (redraw && isUnchangedSize) {
+        try {
+          if (rows > 1) this.ptyProcess.resize(cols, rows - 1);
+          if (rows <= 1) this.ptyProcess.resize(cols + 1, rows);
+        } catch {
+          // A failed nudge must not block the real resize below.
         }
+      }
+      try {
         this.ptyProcess.resize(cols, rows);
       } catch {
         // PTY exited between our check and the resize call (Windows ConPTY race).
