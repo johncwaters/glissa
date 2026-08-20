@@ -93,8 +93,8 @@ function createLaneLedger({
     }
   }
 
-  // Synchronous by design: the scanner calls it while assembling a report, and an empty map before the first
-  // load simply means everything reads as `other` for that one report.
+  // Synchronous by design: the scanner calls it while assembling a report; an empty map before the
+  // first load hides the lanes section for that one report (buildLaneRows returns null on an empty map).
   function laneMap() {
     return laneMapFromLedger(entries);
   }

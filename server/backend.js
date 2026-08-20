@@ -861,7 +861,7 @@ function createBackend(httpServer, options = {}) {
     logger: console,
   });
   void laneLedger.load();
-  const recordLane = (claudeSessionId, lane) => laneLedger.record(claudeSessionId, lane);
+  const recordLane = laneLedger.record;
 
   const prReview = createPrReviewWiring({
     config, reviewSessions, closeSessionDataClients, hookRouter, getHookPort, spawnGate, gitWorkspace, recordLane,
