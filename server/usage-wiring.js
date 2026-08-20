@@ -168,6 +168,8 @@ function createUsageWiring({
   // Which budget thresholds have already fired this period. Beside the config file for the same reason the
   // warehouse is: a temp GLISSA_CONFIG must never write into the operator's real ~/.glissa.
   budgetStatePath = null,
+  // Read-only view of the lane ledger; the writes happen on the hook callback path in backend.js.
+  laneMap = null,
   sendTelegram = sendTelegramMessage,
   fsPromises = require('node:fs/promises'),
   createScanner = createUsageScanner,
@@ -242,6 +244,7 @@ function createUsageWiring({
         warehousePath,
         warehouseRetainDays: cfg.warehouseRetainDays,
         budget: cfg.budget,
+        laneMap,
         logger,
         ...scannerDeps,
       });

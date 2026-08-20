@@ -121,6 +121,8 @@ function writeStandaloneDenySettings() {
 function createDistillSpawn({
   sessions = new Map(), closeSessionDataClients = () => {}, hookRouter = null, getHookPort = null,
   spawnGate = null, replayBufferKB = undefined,
+  // Lane attribution: names this lane on the ledger when its headless session reports a Claude session id.
+  recordLane = null,
 } = {}) {
   return async function spawnDistill({ id, name, prompt, cwd, signal }) {
     // Required here, not at module load: the Session class resolves `claude` on PATH when it loads,
@@ -140,7 +142,7 @@ function createDistillSpawn({
       hookRouter,
       getHookPort,
     });
-    registerEphemeralSession({ map: sessions, id, sess, closeSessionDataClients, logPrefix: 'pack-distill', name });
+    registerEphemeralSession({ map: sessions, id, sess, closeSessionDataClients, logPrefix: 'pack-distill', name, recordLane });
 
     let onAbort = null;
     try {

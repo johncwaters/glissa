@@ -273,6 +273,47 @@ export function projectionLimitLine(projection, tokenLimit) {
   return `On this burn rate the block ends at ${Math.round(pct)}% of that reference.`;
 }
 
+// ── Glissa lanes ──
+// Which of Glissa's own automation lanes the spend belonged to. The join is exact (Glissa recorded spawning
+// the session), so `other` genuinely means "not spawned by Glissa" rather than "unrecognized".
+
+const LANE_LABELS = Object.freeze({
+  interactive: 'Interactive',
+  'pr-review': 'PR review',
+  'pack-distill': 'Pack distiller',
+  posthog: 'PostHog',
+  other: 'Other',
+});
+
+export const LANE_SCOPE_HINT = 'Claude sessions spawned by Glissa; terminal sessions count as other';
+
+export function laneLabel(lane) {
+  const key = typeof lane === 'string' ? lane.trim() : '';
+  if (!key) return LANE_LABELS.other;
+  return LANE_LABELS[key] || key;
+}
+
+export function laneRows(report) {
+  const rows = report?.byLane;
+  if (!Array.isArray(rows)) return [];
+  return rows.filter((row) => row && typeof row.lane === 'string');
+}
+
+/*
+ * The section is worth showing only once a lane OTHER than interactive-or-other has spend. A fresh install
+ * has nothing but the operator's own sessions, and a section that says "Interactive: everything" restates
+ * the totals directly above it.
+ */
+export function hasLaneAttribution(report) {
+  return laneRows(report).some((row) => row.lane !== 'interactive' && row.lane !== 'other');
+}
+
+export function laneSessionsText(sessions) {
+  const count = finiteNumber(sessions);
+  if (count === null || count <= 0) return '';
+  return `${formatCount(count)} ${count === 1 ? 'session' : 'sessions'}`;
+}
+
 // ── Spend budgets ──
 // The rows and their tones come from server/core/usage-budget-core.js, which owns the ladder; nothing is
 // recomputed here. These only format them, and decide when the tab dot is owed.

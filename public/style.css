@@ -2867,6 +2867,19 @@ a.pr-title:hover {
   border-radius: 3px;
 }
 
+/* Glissa lanes. The automation lanes are the actionable rows, so `other` (anything Glissa did not spawn)
+   recedes rather than competing with them. */
+.usage-lane-cell {
+  color: var(--text-head);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.usage-row[data-lane="other"] .usage-lane-cell {
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
 /* Spend budgets: the operator's own ceilings, under the totals they are measured against. Taller meters
    than the estimate bars, like the plan limits, because a ceiling is a harder fact than a trend. */
 .usage-budgets {

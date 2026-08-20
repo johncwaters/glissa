@@ -116,6 +116,8 @@ function prReviewPackNames(cfg) {
 function createPrReviewWiring({
   config, reviewSessions, closeSessionDataClients, hookRouter, getHookPort, spawnGate, gitWorkspace,
   getProjectPathById, getProjectNameById = () => null, broadcast = () => {},
+  // Lane attribution: names this lane on the ledger when its headless session reports a Claude session id.
+  recordLane = null,
 }) {
   // Build one headless (claude -p) PR-review session, registered in reviewSessions and auto-removed on
   // exit. Mirrors makeStageSession; not surfaced as a card (a -p session has no watchable TUI).
@@ -134,7 +136,7 @@ function createPrReviewWiring({
       hookRouter,
       getHookPort,
     });
-    registerEphemeralSession({ map: reviewSessions, id, sess, closeSessionDataClients, logPrefix: 'pr-review', name });
+    registerEphemeralSession({ map: reviewSessions, id, sess, closeSessionDataClients, logPrefix: 'pr-review', name, recordLane });
     return sess;
   }
 

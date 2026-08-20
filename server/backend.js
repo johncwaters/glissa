@@ -55,6 +55,8 @@ const { createIntegrationWatcherPool } = require('../detection/integration-watch
 const { createPrReviewWiring } = require('./pr-review-wiring');
 const { createPosthogWiring } = require('./posthog-wiring');
 const { createUsageWiring, resolveUsageConfig } = require('./usage-wiring');
+const { createLaneLedger } = require('./usage-lane-ledger');
+const { INTERACTIVE_LANE } = require('./core/usage-lane-core');
 const { normalizeRemoteConfig, validateRemoteConfig, decideBindHost } = require('./core/remote-config');
 const { createClientPresence } = require('./core/client-presence');
 const { normalizePackNames } = require('./core/pack-core');
@@ -846,8 +848,23 @@ function createBackend(httpServer, options = {}) {
   // GitHub PR auto-review lane (server/pr-review-wiring.js): inert unless config.prReview.enabled and
   // config.telegram are both set. Started at boot below, restarted on a prReview/telegram settings
   // change, stopped in shutdown().
+  /*
+   * Lane attribution ledger. Glissa spawns its own sessions, so it can say that a Claude session id WAS the
+   * PR-review lane rather than someone typing; that is the one usage question a transcript reader cannot
+   * answer. Beside the config file like the warehouse and the budget state, so a temp GLISSA_CONFIG stays
+   * out of the operator's real ~/.glissa. Loaded eagerly: a report built before the first read would
+   * attribute everything to `other`.
+   */
+  const laneLedger = createLaneLedger({
+    ledgerPath: configSiblingPath(configStore.configPath, 'usage-lanes.json'),
+    retainDays: resolveUsageConfig(config.usage).warehouseRetainDays,
+    logger: console,
+  });
+  void laneLedger.load();
+  const recordLane = (claudeSessionId, lane) => laneLedger.record(claudeSessionId, lane);
+
   const prReview = createPrReviewWiring({
-    config, reviewSessions, closeSessionDataClients, hookRouter, getHookPort, spawnGate, gitWorkspace,
+    config, reviewSessions, closeSessionDataClients, hookRouter, getHookPort, spawnGate, gitWorkspace, recordLane,
     getProjectPathById, getProjectNameById,
     broadcast: (msg) => broadcastControl(msg),
   });
@@ -856,7 +873,7 @@ function createBackend(httpServer, options = {}) {
   // config.telegram are both set. Same lifecycle as the PR lane - started at boot below, restarted on
   // a posthog/telegram settings change, stopped in shutdown().
   const posthog = createPosthogWiring({
-    config, investigationSessions, closeSessionDataClients, hookRouter, getHookPort, spawnGate,
+    config, investigationSessions, closeSessionDataClients, hookRouter, getHookPort, spawnGate, recordLane,
     broadcast: (msg) => broadcastControl(msg),
   });
 
@@ -884,6 +901,7 @@ function createBackend(httpServer, options = {}) {
     // Durable per-day history, beside the resolved config file like uploads and recordings, so a temp
     // GLISSA_CONFIG never writes into the operator's real ~/.glissa.
     warehousePath: configSiblingPath(configStore.configPath, 'usage-warehouse.json'),
+    laneMap: () => laneLedger.laneMap(),
     budgetStatePath: configSiblingPath(configStore.configPath, 'usage-budget-state.json'),
     ...(options.usageWiringOptions || {}),
   });
@@ -903,7 +921,7 @@ function createBackend(httpServer, options = {}) {
     intervalHours: config.packDistiller?.intervalHours || DEFAULT_INTERVAL_HOURS,
     timeoutSeconds: config.packDistiller?.timeoutSeconds || DEFAULT_TIMEOUT_SECONDS,
     spawnDistill: createDistillSpawn({
-      sessions: distillSessions, closeSessionDataClients, hookRouter, getHookPort, spawnGate,
+      sessions: distillSessions, closeSessionDataClients, hookRouter, getHookPort, spawnGate, recordLane,
       replayBufferKB: config.replayBufferKB,
     }),
   });
@@ -941,6 +959,8 @@ function createBackend(httpServer, options = {}) {
     // Resume-dialog binding (control-handlers.js handleResumeConversation) - same config field.
     sess.on('claude-session-id', ({ id }) => {
       persistProjectField('resumeSessionId', id);
+      // A managed card is the operator working: the lane every other lane is measured against.
+      recordLane(id, INTERACTIVE_LANE);
       // The card's usage totals are attributed through this id, so the mapping it just changed makes
       // the last usage-sessions payload wrong for this card.
       usage.refreshSessions();

@@ -189,6 +189,8 @@ function posthogPackNames(cfg) {
 function createPosthogWiring({
   config, investigationSessions, closeSessionDataClients, hookRouter, getHookPort, spawnGate,
   broadcast = () => {},
+  // Lane attribution: names this lane on the ledger when its headless session reports a Claude session id.
+  recordLane = null,
 }) {
   // Build one headless (claude -p) investigation session, registered in investigationSessions and
   // auto-removed on exit. Not surfaced as a card (a -p session has no watchable TUI).
@@ -209,7 +211,7 @@ function createPosthogWiring({
       getHookPort,
     });
     registerEphemeralSession({
-      map: investigationSessions, id, sess, closeSessionDataClients, logPrefix: 'posthog', name,
+      map: investigationSessions, id, sess, closeSessionDataClients, logPrefix: 'posthog', name, recordLane,
     });
     return sess;
   }

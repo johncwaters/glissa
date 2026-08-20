@@ -16,6 +16,7 @@ import {
   DEFAULT_RANGE_VALUE,
   DEFAULT_SESSION_SORT,
   HEATMAP_DAY_LABELS,
+  LANE_SCOPE_HINT,
   NO_ANOMALY_LINE,
   PERIOD_VIEWS,
   PLAN_WINDOWS,
@@ -44,6 +45,7 @@ import {
   formatTokens,
   formatUsd,
   hasAnomaly,
+  hasLaneAttribution,
   hasMultiVendorUsage,
   hasOfficialPlanLimits,
   hasUsageAttention,
@@ -52,6 +54,9 @@ import {
   historyNote,
   isGlissaSessionRow,
   isUsageUnavailable,
+  laneLabel,
+  laneRows,
+  laneSessionsText,
   limitPct,
   missingPricingLine,
   modelLabel,
@@ -399,6 +404,44 @@ function paintPlanAge() {
   if (!_planAgeEl?.isConnected) return;
   const age = planLimitAgeText(_planLimits?.ts);
   _planAgeEl.textContent = age ? `Reported ${age}.` : '';
+}
+
+/*
+ * Glissa lanes: what the automation cost, as opposed to what the operator cost. This is the one usage answer
+ * that needs a tool which SPAWNED the sessions, so it is the section with no equivalent anywhere else.
+ * Hidden entirely until a non-interactive lane has spend, since otherwise it just restates the totals.
+ */
+function buildLanesSection() {
+  if (!hasLaneAttribution(_report)) return null;
+  const rows = laneRows(_report);
+  const section = buildSection('Glissa lanes', LANE_SCOPE_HINT);
+  const totalCost = rows.reduce((sum, row) => sum + (Number.isFinite(row.costUSD) ? row.costUSD : 0), 0);
+  const { wrap, body } = buildTable(
+    [
+      { label: 'Lane' },
+      { label: 'Cost', numeric: true },
+      { label: 'Tokens', numeric: true },
+      { label: 'Sessions', numeric: true },
+      { label: 'Share', numeric: true },
+    ],
+    null,
+    () => {},
+    'lane',
+  );
+  for (const row of rows) {
+    const tr = el('tr', 'usage-row');
+    if (row.lane === 'other') tr.dataset.lane = 'other';
+    appendCells(tr, [
+      { text: laneLabel(row.lane), className: 'usage-lane-cell' },
+      { text: formatUsd(row.costUSD), numeric: true },
+      { text: formatTokens(row.tokens), numeric: true },
+      { text: laneSessionsText(row.sessions), numeric: true },
+      { node: buildShareCell(percentOfTotal(row.costUSD, totalCost)), className: 'usage-share-cell' },
+    ]);
+    body.append(tr);
+  }
+  section.append(wrap);
+  return section;
 }
 
 // ── Current block ──
@@ -885,6 +928,8 @@ function buildBody() {
     _root.append(el('p', 'usage-empty', 'Reading the local transcripts. The report lands on the next scan.'));
     return;
   }
+  const lanes = buildLanesSection();
+  if (lanes) _root.append(lanes);
   _root.append(buildActiveBlockSection());
   const history = buildBlockHistorySection();
   if (history) _root.append(history);

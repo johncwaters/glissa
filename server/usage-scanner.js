@@ -14,6 +14,7 @@ const { buildUsageReport, localDayKey, pruneEntries } = require('./core/usage-ag
 const { buildBlocks, burnRate, projectBlock } = require('./core/usage-blocks-core');
 const { dailyBaseline, detectBurnAnomaly, detectDailyAnomaly } = require('./core/usage-anomaly-core');
 const { budgetStanding, normalizeBudgetConfig } = require('./core/usage-budget-core');
+const { laneRollup } = require('./core/usage-lane-core');
 const {
   mergeWarehouse,
   pruneWarehouse,
@@ -70,6 +71,9 @@ function createUsageScanner(deps = {}) {
     // Spend budgets (config usage.budget). Absent means off, and every budget surface then reports
     // nothing at all rather than a zero ceiling.
     budget: budgetDep = null,
+    // Claude session id -> the Glissa lane that spawned it. A function rather than a snapshot so a report
+    // always joins against what the ledger knows NOW, not what it knew when the scanner was built.
+    laneMap = null,
     logger = noopLogger,
     byteBudget = DEFAULT_BYTE_BUDGET,
     chunkSize = DEFAULT_CHUNK_SIZE,
@@ -522,6 +526,18 @@ function createUsageScanner(deps = {}) {
     };
   }
 
+  /*
+   * Lane attribution over the LIVE window only. The ledger is durable, but the ENTRIES it joins against are
+   * not: the warehouse stores day-by-model rollups with no session id in them, so a history day cannot be
+   * split by lane. Fabricating history rows here would invent attribution that was never observed.
+   */
+  function buildLaneRows(reportRetainDays, now) {
+    if (typeof laneMap !== 'function') return null;
+    const lanes = laneMap();
+    if (!(lanes instanceof Map) || lanes.size === 0) return null;
+    return laneRollup(entriesWithinDays(entries, { now, retainDays: reportRetainDays }), lanes);
+  }
+
   function buildReport({ days } = {}) {
     const reportRetainDays = days == null ? retainDays : days;
     const rollups = cachedRollupsForDays(days, reportRetainDays);
@@ -554,6 +570,7 @@ function createUsageScanner(deps = {}) {
       activeBlock,
       anomaly: buildAnomaly(daily, blockSummary, activeBlock),
       budget: buildBudget(),
+      byLane: buildLaneRows(reportRetainDays, now),
       tokenLimit: blockSummary.tokenLimit,
       pricing: { missing: Array.from(missingModels).sort() },
       scan: { dirs: dirs.slice(), files: lastFileCount, entries: entries.length, lastScanMs, partial: lastPartial, resolutionError },
