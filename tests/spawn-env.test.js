@@ -121,6 +121,22 @@ test('prependPathDir does not duplicate an entry that differs only in slash dire
   assert.equal(env.PATH, existingPath);
 });
 
+test('prependPathDir keeps a Windows drive-letter entry whole in a colon-delimited PATH', () => {
+  const existingPath = `/usr/bin${path.delimiter}C:\\Users\\johnw\\.glissa\\bin`;
+  const env = buildSpawnEnv({ ...fullBase(), PATH: existingPath }, null, {
+    prependPathDir: 'C:\\Users\\johnw\\.glissa\\bin',
+  });
+  assert.equal(env.PATH, existingPath);
+});
+
+test('prependPathDir prepends ahead of a Windows drive-letter entry without splitting it', () => {
+  const existingPath = `/usr/bin${path.delimiter}C:\\Windows\\bin`;
+  const env = buildSpawnEnv({ ...fullBase(), PATH: existingPath }, null, {
+    prependPathDir: '/home/u/.glissa/bin',
+  });
+  assert.equal(env.PATH, `/home/u/.glissa/bin${path.delimiter}${existingPath}`);
+});
+
 test('prependPathDir sets PATH when no path variable exists', () => {
   const base = fullBase();
   delete base.PATH;

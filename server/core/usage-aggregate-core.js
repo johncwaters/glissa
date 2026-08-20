@@ -106,7 +106,7 @@ function addEntryToSessionBucket(map, entry, sessionsById) {
   const bucket = map.get(key) || {
     id: key,
     name: knownSession?.name || key,
-    project: entryProject,
+    project: null,
     // A session belongs to exactly one vendor, so this one is a scalar.
     vendor: vendorOf(entry),
     tokens: 0,
