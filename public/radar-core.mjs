@@ -25,6 +25,14 @@ const CHANGE_SEVERITY = {
 
 const UNKNOWN_RANK = 99;
 
+export function radarPlaceholder(status) {
+  if (!status) return 'Waiting for PostHog status from the server.';
+  const reason = typeof status.reason === 'string' ? status.reason.trim() : '';
+  if (status.configured === false && reason) return `PostHog monitoring is misconfigured: ${reason}. Open Settings and its PostHog tab.`;
+  if (status.configured === false) return 'PostHog monitoring is off. Open Settings and its PostHog tab to switch it on.';
+  return 'PostHog monitoring is on. Waiting for the first poll.';
+}
+
 export function severityFor(change) {
   return CHANGE_SEVERITY[change] || 'dim';
 }

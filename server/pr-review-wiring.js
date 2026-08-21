@@ -216,7 +216,11 @@ function createPrReviewWiring({
   // The last tick summary, replayed to a control client that connects between ticks (the same
   // cached-snapshot pattern the PostHog lane and the startup update check use).
   let lastStatus = null;
-  const getStatus = () => lastStatus;
+  function emptyPrStatus() {
+    const gate = prPollerShouldStart(config);
+    return { type: 'pr-status', ts: Date.now(), configured: gate.start, reason: gate.reason, projects: [] };
+  }
+  const getStatus = () => lastStatus || emptyPrStatus();
 
   let prPoller = null;
   let prPollerChain = Promise.resolve();
@@ -233,9 +237,12 @@ function createPrReviewWiring({
       }
       const gate = prPollerShouldStart(config);
       if (!gate.start) {
+        lastStatus = null;
+        broadcast(emptyPrStatus());
         if (gate.reason) console.warn(`[pr-poller] not starting: ${gate.reason}`);
         return;
       }
+      if (!lastStatus) broadcast(emptyPrStatus());
       prPoller = createPrPoller({
         projects: config.prReview.projects || [],
         getProjectPathById,
@@ -253,8 +260,8 @@ function createPrReviewWiring({
         maxConcurrentReviews: config.prReview.maxConcurrentReviews || 3,
         reviewTimeoutSeconds: config.prReview.reviewTimeoutSeconds || 900,
         onTickComplete: (summary) => {
-          lastStatus = summary;
-          broadcast(summary);
+          lastStatus = { ...summary, configured: true };
+          broadcast(lastStatus);
         },
       });
       await prPoller.start().catch((e) => console.warn(`[pr-poller] start failed: ${e.message}`));

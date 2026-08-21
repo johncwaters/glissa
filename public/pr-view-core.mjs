@@ -45,6 +45,14 @@ const UNKNOWN_RANK = 99;
 // a known state (nothing has happened), not an unrecognized one.
 export const PENDING_PHASE = 'pending';
 
+export function prStatusPlaceholder(status) {
+  if (!status) return 'Waiting for PR review status from the server.';
+  const reason = typeof status.reason === 'string' ? status.reason.trim() : '';
+  if (status.configured === false && reason) return `PR auto-review is misconfigured: ${reason}. Open Settings and its PR Review tab.`;
+  if (status.configured === false) return 'PR auto-review is off. Open Settings and its PR Review tab to switch it on.';
+  return 'PR auto-review is on. Waiting for the first poll.';
+}
+
 export function normalizePhase(phase) {
   return phase == null ? PENDING_PHASE : phase;
 }

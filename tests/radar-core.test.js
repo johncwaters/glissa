@@ -8,6 +8,34 @@ const importCore = () => import('../public/radar-core.mjs');
 
 const changesOf = (issues) => issues.map((i) => i.change);
 
+test('radarPlaceholder: waits for an initial server status', async () => {
+  const { radarPlaceholder } = await importCore();
+  assert.equal(radarPlaceholder(null), 'Waiting for PostHog status from the server.');
+  assert.equal(radarPlaceholder(undefined), 'Waiting for PostHog status from the server.');
+});
+
+test('radarPlaceholder: reports a misconfigured lane with the reason', async () => {
+  const { radarPlaceholder } = await importCore();
+  assert.equal(
+    radarPlaceholder({ configured: false, reason: 'apiKey missing' }),
+    'PostHog monitoring is misconfigured: apiKey missing. Open Settings and its PostHog tab.',
+  );
+});
+
+test('radarPlaceholder: reports a disabled lane without a reason', async () => {
+  const { radarPlaceholder } = await importCore();
+  assert.equal(
+    radarPlaceholder({ configured: false, reason: '' }),
+    'PostHog monitoring is off. Open Settings and its PostHog tab to switch it on.',
+  );
+});
+
+test('radarPlaceholder: reports configured or legacy statuses as waiting for first poll', async () => {
+  const { radarPlaceholder } = await importCore();
+  assert.equal(radarPlaceholder({ configured: true }), 'PostHog monitoring is on. Waiting for the first poll.');
+  assert.equal(radarPlaceholder({}), 'PostHog monitoring is on. Waiting for the first poll.');
+});
+
 test('sortIssuesByAttention: orders spiking, regressed, worsened, new, quiet', async () => {
   const { sortIssuesByAttention } = await importCore();
   const issues = [

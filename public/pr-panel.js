@@ -4,7 +4,7 @@
 // configured the PR lane still finds the surface and is told where to switch it on.
 
 import { el } from './dom-helpers.js';
-import { phaseLabel, severityFor as severity, sortPrsByAttention, summarizePrs } from './pr-view-core.mjs';
+import { phaseLabel, prStatusPlaceholder, severityFor as severity, sortPrsByAttention, summarizePrs } from './pr-view-core.mjs';
 import { createPollAgoTicker } from './poll-ago.js';
 
 let _latest = null;
@@ -106,7 +106,7 @@ function render() {
   _pollTicker.reset();
   const projects = projectsOf(_latest);
   if (projects.length === 0) {
-    _root.append(el('p', 'pr-unconfigured', 'PR auto-review is not configured, or has not ticked yet. Open Settings and its PR Review tab to set it up.'));
+    _root.append(el('p', 'pr-unconfigured', prStatusPlaceholder(_latest)));
     return;
   }
   for (const project of projects) _root.append(buildProject(project));

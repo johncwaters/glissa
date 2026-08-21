@@ -22,6 +22,7 @@ import {
   partitionRadarProjects,
   radarAttentionCount,
   radarDisplayName,
+  radarPlaceholder,
   severityFor as severity,
   shortHost,
   sortIssuesByAttention,
@@ -354,8 +355,6 @@ function attentionCount() {
   return radarAttentionCount({ posthog: _latest, health: _health, prs: _prs });
 }
 
-const UNCONFIGURED_TEXT = 'PostHog monitoring is not configured, or has not ticked yet. Open Settings and its PostHog tab to set it up.';
-
 function buildSection(title, hint) {
   const section = el('section', 'radar-section');
   const head = el('div', 'radar-section-head');
@@ -368,7 +367,7 @@ function buildSection(title, hint) {
 function buildErrorsSection(projects) {
   const section = buildSection('Errors');
   if (projects.length === 0) {
-    section.append(el('p', 'radar-unconfigured', UNCONFIGURED_TEXT));
+    section.append(el('p', 'radar-unconfigured', radarPlaceholder(_latest)));
     return section;
   }
   const globalTickEl = el('div', 'radar-global-tick');
@@ -527,7 +526,7 @@ function render() {
   // Nothing configured anywhere: the bare hint, with no section chrome to make an empty board look
   // like a broken one.
   if (projects.length === 0 && investigations.length === 0 && ops.length === 0 && prs.length === 0) {
-    _root.append(el('p', 'radar-unconfigured', UNCONFIGURED_TEXT));
+    _root.append(el('p', 'radar-unconfigured', radarPlaceholder(_latest)));
     return;
   }
   _root.append(buildErrorsSection(projects));
