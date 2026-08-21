@@ -2,12 +2,12 @@
 // Persists browser-side UI state to localStorage.
 // Schema: { soundEnabled: boolean, soundId: string, themeId: string, notificationsEnabled: boolean,
 //           activeView: string, lastFocusedSessionId: string|null, railWidth: number|null,
-//           keptProjects: string[] }
+//           keptProjects: string[], dismissedUpdate: string|null }
 
 import { getJSON, setJSON } from './local-store.js';
 
 const STORAGE_KEY = 'glissa-ui-prefs';
-const DEFAULT_PREFS = { soundEnabled: true, soundId: 'coins', themeId: 'phyrexian', notificationsEnabled: true, activeView: 'focus', lastFocusedSessionId: null, railWidth: null, keptProjects: [] };
+const DEFAULT_PREFS = { soundEnabled: true, soundId: 'coins', themeId: 'phyrexian', notificationsEnabled: true, activeView: 'focus', lastFocusedSessionId: null, railWidth: null, keptProjects: [], dismissedUpdate: null };
 
 function load() {
   const prefs = getJSON(STORAGE_KEY, DEFAULT_PREFS);
@@ -19,6 +19,7 @@ function load() {
   if (typeof prefs.lastFocusedSessionId !== 'string' && prefs.lastFocusedSessionId !== null) prefs.lastFocusedSessionId = null;
   if (!Number.isFinite(prefs.railWidth)) prefs.railWidth = null;
   prefs.keptProjects = Array.isArray(prefs.keptProjects) ? prefs.keptProjects.filter((p) => typeof p === 'string' && p) : [];
+  if (typeof prefs.dismissedUpdate !== 'string' || !prefs.dismissedUpdate) prefs.dismissedUpdate = null;
   return prefs;
 }
 
@@ -98,6 +99,19 @@ export function getKeptProjects() {
 export function setKeptProjects(paths) {
   const prefs = load();
   prefs.keptProjects = Array.isArray(paths) ? [...new Set(paths.filter((p) => typeof p === 'string' && p))] : [];
+  save(prefs);
+}
+
+// The identity of the update the operator dismissed (the latest commit sha, or the version string when
+// no sha is known). Persisted rather than page-scoped so a dismissed banner stays dismissed across
+// reloads until a NEWER tip arrives.
+export function getDismissedUpdate() {
+  return load().dismissedUpdate;
+}
+
+export function setDismissedUpdate(key) {
+  const prefs = load();
+  prefs.dismissedUpdate = typeof key === 'string' && key ? key : null;
   save(prefs);
 }
 

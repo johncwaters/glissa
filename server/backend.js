@@ -46,6 +46,7 @@ const { HookRouter } = require('../detection/hook-source');
 const { sweepOrphans } = require('../detection/settings-injector');
 const { getRtkPath } = require('../session/core/rtk-command');
 const { checkForUpdate: defaultCheckForUpdate } = require('./update-check');
+const { shortSha } = require('./core/update-core');
 const { createSpawnGate } = require('./spawn-gate');
 const { spawn } = require('./child-process-safe');
 const { createGitWorkspace, createGitWorkspaceSync } = require('./git-workspace');
@@ -82,6 +83,9 @@ const {
 // WAITING-state notification escalation cadence (fixed 5 minutes; previously the
 // configurable waitingEscalationSeconds setting).
 const ESCALATION_INTERVAL_MS = 300000;
+
+// How often a running server rechecks the branch tip after the boot check.
+const UPDATE_RECHECK_MS = 24 * 60 * 60 * 1000;
 
 /**
  * Create and wire the Glissa backend onto an existing HTTP server.
@@ -1407,9 +1411,12 @@ function createBackend(httpServer, options = {}) {
   // still gets the update-available replay (see the connection handler in control-handlers.js).
   let updateStatus = null;
   const getUpdateStatus = () => updateStatus;
-  // Abort handle for the in-flight startup registry request, so shutdown can cancel it instead of
-  // waiting out its timeout (see shutdown() and the update-check kickoff at the end of the factory).
-  const updateAbort = new AbortController();
+  // Abort handle for the in-flight update check, so shutdown can cancel it instead of waiting out its
+  // timeout. Per RUN, not shared: a timed-out boot check aborts its controller, and reusing that one
+  // would leave every daily recheck born aborted.
+  let updateAbort = null;
+  // Declared here so shutdown() (defined below the kickoff) can clear the periodic recheck.
+  let updateRecheckInterval = null;
 
   registerControlHandlers(controlWss, {
     sessions,
@@ -1671,7 +1678,8 @@ function createBackend(httpServer, options = {}) {
     // Same reason as stopConfigWatch: a leaked fs.watch keeps the event loop alive and hangs any
     // embedder that expects the process to exit.
     if (remoteAuth) remoteAuth.stop();
-    try { updateAbort.abort(); } catch { /* no in-flight update request */ }
+    try { if (updateAbort) updateAbort.abort(); } catch { /* no in-flight update request */ }
+    if (updateRecheckInterval) clearInterval(updateRecheckInterval);
     // INVARIANT: destroy NotificationManager BEFORE sessions - clears all timers globally
     notificationManager.destroy();
     integrationPool.stopAll();
@@ -1715,25 +1723,45 @@ function createBackend(httpServer, options = {}) {
     return pendingReaps;
   }
 
-  // --- Startup update check ---
+  // --- Update check ---
   // Fire-and-forget: NEVER awaited, so a slow/hung registry can't delay boot. The terminal .catch is
   // load-bearing - surface() calls console.log + broadcastControl, and this process has no
   // uncaughtException handler, so a throw here would become an unhandledRejection that crashes it.
-  // Primary dev-nag guard is the version compare itself (a dev at/ahead of latest never triggers a
-  // banner); isLocalConfig is a best-effort secondary skip. checkForUpdate is injectable so a boot
+  // Primary dev-nag guard is the commit compare itself (a dev already at the branch tip never triggers
+  // a banner); isLocalConfig is a best-effort secondary skip. checkForUpdate is injectable so a boot
   // test can drive it with a stub instead of hitting the network.
   const runUpdateCheck = options.checkForUpdate || defaultCheckForUpdate;
   function surfaceUpdate(result) {
     if (!result || !result.updateAvailable) return;
+    // A server left running for weeks rechecks daily; only a DIFFERENT tip is news, so the same update
+    // is logged and broadcast once. The cache still refreshes so a connect replay carries the latest.
+    const alreadySurfaced = Boolean(updateStatus)
+      && updateStatus.latestSha === result.latestSha
+      && updateStatus.latest === result.latest;
     updateStatus = result;
-    console.log(`[update] A newer glissa is available: ${result.current} -> ${result.latest}. Update: ${result.command}`);
+    if (alreadySurfaced) return;
+    const from = shortSha(result.currentSha) || result.current || 'unknown';
+    const to = shortSha(result.latestSha) || result.latest || 'unknown';
+    console.log(`[update] A newer glissa is available: ${from} -> ${to}. Update: ${result.command}`);
     broadcastControl({ type: 'update-available', ...result });
   }
   if (config.checkForUpdates !== false && !configStore.isLocalConfig) {
     const currentVersion = require('../package.json').version;
-    runUpdateCheck({ currentVersion, abortController: updateAbort })
-      .then(surfaceUpdate)
-      .catch(() => { /* advisory only - never let the update check affect the process */ });
+    const runAndSurfaceUpdate = () => {
+      updateAbort = new AbortController();
+      return runUpdateCheck({ currentVersion, abortController: updateAbort })
+        .then(surfaceUpdate)
+        .catch(() => { /* advisory only - never let the update check affect the process */ });
+    };
+    void runAndSurfaceUpdate();
+    // A long-lived server would otherwise report the tip it saw at boot forever. Skipped with no
+    // dashboard connected: nobody is there to read a banner, and the boot result already covers the
+    // next connect via getUpdateStatus.
+    updateRecheckInterval = setInterval(() => {
+      if (controlWss.clients.size === 0) return;
+      void runAndSurfaceUpdate();
+    }, UPDATE_RECHECK_MS);
+    updateRecheckInterval.unref();
   }
 
   // attach() wires the SAME Express app and upgrade handler onto the remote listener's HTTP server.

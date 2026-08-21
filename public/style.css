@@ -5044,6 +5044,16 @@ html[data-layout="phone"] .phone-shell[data-keyboard="open"] .phone-nav { displa
   color: var(--text-head);
 }
 
+.update-banner-link {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.update-banner-link[hidden] {
+  display: none;
+}
+
 .update-banner-cmd {
   font-family: var(--font-mono);
   font-size: 12px;

@@ -266,6 +266,30 @@ test('updateAvailableRow: needs both versions, carries the command', async () =>
   assert.equal(updateAvailableRow(null), null);
 });
 
+test('updateAvailableRow: the commit pair beats the version pair when both shas are known', async () => {
+  const { updateAvailableRow } = await importCore();
+  assert.deepEqual(
+    updateAvailableRow({
+      current: '1.2.0',
+      latest: '1.2.0',
+      currentSha: '0123456789abcdef0123456789abcdef01234567',
+      latestSha: 'FEDCBA9876543210fedcba9876543210fedcba98',
+      command: 'npm i -g glissa',
+    }),
+    { text: 'Update available: 0123456 -> fedcba9', command: 'npm i -g glissa' },
+  );
+  const versionFallback = updateAvailableRow({ current: '1.2.0', latest: '1.3.0', currentSha: 'not-a-sha', command: 'c' });
+  assert.equal(versionFallback.text, 'Update available: 1.2.0 -> 1.3.0');
+});
+
+test('shortSha: 7 lowercase chars for a hex sha, empty string otherwise', async () => {
+  const { shortSha } = await importCore();
+  assert.equal(shortSha('0123456789ABCDEF0123456789abcdef01234567'), '0123456');
+  assert.equal(shortSha('0123abc'), '0123abc');
+  assert.equal(shortSha('main'), '');
+  assert.equal(shortSha(null), '');
+});
+
 test('opsRows: the update line leads, then one row per live anomaly', async () => {
   const { opsRows } = await importCore();
   const rows = opsRows({

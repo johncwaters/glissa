@@ -43,7 +43,11 @@ test('replays exactly one update-available frame when an update is cached', () =
     updateAvailable: true,
     current: '0.16.0',
     latest: '0.17.0',
-    command: 'git pull && npm ci && npm run build',
+    currentSha: '0123456789abcdef0123456789abcdef01234567',
+    latestSha: 'fedcba9876543210fedcba9876543210fedcba98',
+    compareUrl: 'https://github.com/johncwaters/glissa/compare/0123456789abcdef0123456789abcdef01234567...main',
+    command: 'npm install -g github:johncwaters/glissa --allow-git=root',
+    flavor: 'npm-global',
   };
   const sent = connect({ getUpdateStatus: () => status });
   const updates = sent.filter((m) => m.type === 'update-available');

@@ -215,11 +215,25 @@ function textOr(value, fallback) {
   return typeof value === 'string' && value.trim() ? value.trim() : fallback;
 }
 
+// First 7 chars of a commit id, for display. Empty string for anything that is not a hex sha, so a
+// caller can treat "no short sha" and "no sha" the same way.
+export function shortSha(sha) {
+  const text = textOr(sha, '');
+  if (!/^[0-9a-f]{7,40}$/i.test(text)) return '';
+  return text.slice(0, 7).toLowerCase();
+}
+
+// The commit pair is the real signal (Glissa ships as a branch tip, so most updates carry no version
+// bump); the version pair is the fallback for an install whose commit could not be resolved.
 export function updateAvailableRow(update) {
+  const command = textOr(update?.command, '');
+  const currentSha = shortSha(update?.currentSha);
+  const latestSha = shortSha(update?.latestSha);
+  if (currentSha && latestSha) return { text: `Update available: ${currentSha} -> ${latestSha}`, command };
   const current = textOr(update?.current, '');
   const latest = textOr(update?.latest, '');
   if (!current || !latest) return null;
-  return { text: `Update available: ${current} -> ${latest}`, command: textOr(update?.command, '') };
+  return { text: `Update available: ${current} -> ${latest}`, command };
 }
 
 // One list so the panel renders ops in a fixed order regardless of which feed landed first: the

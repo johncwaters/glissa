@@ -17,6 +17,7 @@ import { activatePhoneShell, deactivatePhoneShell, getPhoneSessionId, isPhoneScr
 import { applyPrStatus, mountPrView, setPrActivityCallback } from './pr-panel.js';
 // Radar is a SECOND consumer of the health, update and PR feeds: it summarizes what needs the operator,
 // while the health footer, the update banner and the PRs tab keep rendering each feed in full.
+import { shortSha } from './radar-core.mjs';
 import { applyHealthSnapshot as applyRadarHealth, applyPosthogStatus, applyPrStatus as applyRadarPrStatus, applyUpdateAvailable as applyRadarUpdate, mountRadarView, setRadarActivityCallback, setRadarNavigateToPrs } from './radar-panel.js';
 import { handleDebugStateRefresh, handleDebugStateResponse } from './session-card/card-dom.js';
 import { applyState, applyTerminalSettings, createSessionCard, getSessionCount, hasSession, notePackVersion, removeSessionCard, renameSessionCard, seedSessionMergeStatus, setLatestPackVersions, setSessionAgents, setSessionDiff, setSessionEffectiveBase, setSessionMergeStatus, setSessionPacks, setSessionPostTurn, setSessionPrompt, setSessionResume, setSessionUsage, setSessionWakeup, setSessionWorktree, updateAggregateStatus } from './session-card/lifecycle.js';
@@ -24,7 +25,7 @@ import { reconnectDataWs } from './session-card/terminal.js';
 import { showErrorToast } from './session-card/toast.js';
 import { forgetReviewSession, mergeSelectedSession, mountReviewSidebar, notifyWorktreeChanged, refreshReviewSidebar, resolveSelectedSession, resyncSelectedSession, setReviewBranchSync } from './sidebar/review-sidebar.js';
 import { applyTheme } from './theme.js';
-import { getActiveView, getThemeId, isSoundEnabled, setActiveView, setSoundEnabled } from './ui-prefs.js';
+import { getActiveView, getDismissedUpdate, getThemeId, isSoundEnabled, setActiveView, setDismissedUpdate, setSoundEnabled } from './ui-prefs.js';
 import { applyPlanLimits, applyUsageReport, applyUsageSessions, mountUsageView, refreshUsageView, requestUsageReport, setUsageActivityCallback, setUsageRequestSender } from './usage-panel.js';
 
 // ── Apply saved theme ─────────────────────────────────────────
@@ -303,16 +304,42 @@ onControlMessage((msg) => {
   if (handler) handler(msg);
 });
 
-// Dismissible startup update notice. The banner is passive (never a desktop notification); it shows the
-// running -> latest versions and the copy-pasteable update command. Dismiss hides it for this page load;
-// it reappears on the next boot only while a newer version is still published.
+// Dismissible update notice. The banner is passive (never a desktop notification); it shows the running
+// -> latest commit, a compare link, and the copy-pasteable update command for this install flavor.
+// Dismiss is keyed on the latest commit and persisted, so it stays dismissed until a NEWER tip arrives.
+// The Radar ops row is deliberately not gated by the dismissal: that panel is where a dismissed advisory
+// remains findable.
 let updateBannerDismissed = false;
-function showUpdateBanner({ current, latest, command }) {
+
+// What a dismissal remembers. The commit is the identity of the update; the version string is the
+// fallback for an install whose commit could not be resolved.
+function updateIdentity({ latestSha, latest }) {
+  if (typeof latestSha === 'string' && latestSha) return latestSha;
+  if (typeof latest === 'string' && latest) return latest;
+  return null;
+}
+
+function updateBannerText({ current, latest, currentSha, latestSha }) {
+  const from = shortSha(currentSha);
+  const to = shortSha(latestSha);
+  if (!from || !to) return `Update available: ${current} -> ${latest}`;
+  const versionsDiffer = Boolean(current) && Boolean(latest) && current !== latest;
+  if (!versionsDiffer) return `Update available: ${from} -> ${to}`;
+  return `Update available: ${from} -> ${to} (${current} -> ${latest})`;
+}
+
+function showUpdateBanner(msg) {
   if (updateBannerDismissed) return;
+  const identity = updateIdentity(msg);
+  if (identity && getDismissedUpdate() === identity) return;
   const banner = document.getElementById('update-banner');
   if (!banner) return;
-  document.getElementById('update-banner-text').textContent = `Update available: ${current} -> ${latest}`;
+  const command = msg.command;
+  document.getElementById('update-banner-text').textContent = updateBannerText(msg);
   document.getElementById('update-banner-cmd').textContent = command;
+  const link = document.getElementById('update-banner-link');
+  link.hidden = !msg.compareUrl;
+  link.href = msg.compareUrl || '';
   banner.hidden = false;
 
   const copyBtn = document.getElementById('update-banner-copy');
@@ -332,6 +359,7 @@ function showUpdateBanner({ current, latest, command }) {
   };
   document.getElementById('update-banner-dismiss').onclick = () => {
     updateBannerDismissed = true;
+    setDismissedUpdate(identity);
     banner.hidden = true;
   };
 }
