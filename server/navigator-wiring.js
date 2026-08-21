@@ -6,6 +6,9 @@ const { WebSocketServer } = require('ws');
 const {
   applyDidChange, applyDidClose, applyDidOpen, createDocStore, getDoc, listDocs, uriOfParams,
 } = require('./core/navigator-buffer-core');
+const {
+  createDispatchState, decideDispatch, forgetUri, hashText, recordDispatch, resolveDispatchConfig,
+} = require('./core/navigator-dispatch-core');
 const { sweepMarkdown } = require('./core/navigator-rules-core');
 
 // Quiet window before a document is swept.
@@ -45,6 +48,11 @@ function createNavigatorWiring({
   maxPayload = MAX_FRAME_BYTES,
   logger = console,
   broadcast = null,
+  // Tier 3 model dispatch (docs/plan-navigator.md, M4). Absent config or no dispatch function means
+  // the lane behaves exactly as it did before M4: no dispatch timer is ever armed and nothing spawns.
+  dispatchConfig = null,
+  dispatch = null,
+  hashFn = hashText,
 } = {}) {
   const wss = new WebSocketServer({ noServer: true, maxPayload });
   const connections = new Set();
@@ -54,10 +62,26 @@ function createNavigatorWiring({
    * ABSENT rather than stored empty, so the map and the rendered sections always agree.
    */
   const findingsByUri = new Map();
+  /*
+   * Tier 3 model comments, keyed by uri beside the findings and on the same lifecycle: replaced whole
+   * by each dispatch, cleared on didClose. Separate from findingsByUri because a document can have one
+   * kind without the other, and the tab renders them as two different things.
+   */
+  const commentsByUri = new Map();
+  const dispatchSettings = resolveDispatchConfig(dispatchConfig);
+  const dispatchEnabled = dispatchSettings.enabled === true && typeof dispatch === 'function';
+  const dispatchState = createDispatchState();
+  // Concurrency 1, machine-wide: a dispatch while one is in flight is GATED, never queued.
+  let dispatchInFlight = false;
 
   function warn(message) {
     if (!logger || typeof logger.warn !== 'function') return;
     logger.warn(`[navigator] ${message}`);
+  }
+
+  function note(message) {
+    if (!logger || typeof logger.log !== 'function') return;
+    logger.log(`[navigator] ${message}`);
   }
 
   function broadcastFindings(uri, diagnostics) {
@@ -82,15 +106,61 @@ function createNavigatorWiring({
     return [...findingsByUri].map(([uri, diagnostics]) => ({ uri, diagnostics }));
   }
 
+  function broadcastComments(uri, comments) {
+    if (typeof broadcast !== 'function') return;
+    broadcast({ type: 'navigator-comments', uri, comments, ts: nowFn() });
+  }
+
+  // Wholesale replacement, like a sweep's findings: a uri with no comments is absent, never stored empty.
+  function recordComments(uri, comments) {
+    const list = Array.isArray(comments) ? comments : [];
+    if (list.length === 0) commentsByUri.delete(uri);
+    if (list.length > 0) commentsByUri.set(uri, list);
+    broadcastComments(uri, list);
+  }
+
+  function clearComments(uri) {
+    if (!commentsByUri.delete(uri)) return;
+    broadcastComments(uri, []);
+  }
+
+  // Every uri the tab has a section for: findings, comments, or both.
+  function documentsSnapshot() {
+    const uris = new Set([...findingsByUri.keys(), ...commentsByUri.keys()]);
+    return [...uris].map((uri) => ({
+      uri,
+      diagnostics: findingsByUri.get(uri) || [],
+      comments: commentsByUri.get(uri) || [],
+    }));
+  }
+
+  /*
+   * What a finished dispatch is allowed to change. An ERROR (no result file, unparsable, unknown
+   * verdict, timeout) leaves the standing comments exactly as they were: the lane says nothing rather
+   * than inventing something or blanking a section because one session fell over.
+   */
+  function applyDispatchResult(uri, result) {
+    if (result.verdict === 'ERROR') {
+      warn(`dispatch for ${uri} failed: ${result.reason || 'no reason given'}`);
+      return;
+    }
+    if (result.reason) note(`dispatch for ${uri}: ${result.reason}`);
+    recordComments(uri, result.verdict === 'COMMENTS' ? result.comments : []);
+  }
+
+  // The in-flight dispatch, so a test (and shutdown) can wait for the lane to go quiet.
+  let dispatchSettled = Promise.resolve();
+
   // Connect-time repair for the control WS: one current-state frame, not a replay of superseded ones.
   function snapshotMessage() {
-    return { type: 'navigator-snapshot', documents: findingsSnapshot(), ts: nowFn() };
+    return { type: 'navigator-snapshot', documents: documentsSnapshot(), ts: nowFn() };
   }
 
   // One document store per connection: an editor's buffers die with the relay that mirrored them.
   function openConnection({ send }) {
     const store = createDocStore();
     const sweepTimersByUri = new Map();
+    const dispatchTimersByUri = new Map();
     let closed = false;
 
     function cancelSweep(uri) {
@@ -98,6 +168,70 @@ function createNavigatorWiring({
       if (!timer) return;
       clearTimeoutFn(timer);
       sweepTimersByUri.delete(uri);
+    }
+
+    function cancelDispatch(uri) {
+      const timer = dispatchTimersByUri.get(uri);
+      if (!timer) return;
+      clearTimeoutFn(timer);
+      dispatchTimersByUri.delete(uri);
+    }
+
+    /**
+     * One dispatch attempt, already at a pause boundary. Every remaining question (has the buffer
+     * moved, is the cooldown up, is the hourly budget spent, is one already running) belongs to the
+     * pure gate, and a refusal costs exactly one log line naming the gate that held.
+     */
+    async function runDispatch(uri) {
+      if (!dispatchEnabled || closed) return;
+      const doc = getDoc(store, uri);
+      if (!isMarkdownDoc(doc)) return;
+      const text = typeof doc.text === 'string' ? doc.text : '';
+      const textHash = hashFn(text);
+      const decision = decideDispatch({
+        state: dispatchState, uri, textHash, now: nowFn(), config: dispatchSettings, inFlight: dispatchInFlight,
+      });
+      if (!decision.dispatch) {
+        note(`no dispatch for ${uri}: ${decision.gate}`);
+        return;
+      }
+      // Recorded before the await, so the cooldown and the hourly budget count attempts, not successes.
+      dispatchInFlight = true;
+      recordDispatch(dispatchState, { uri, textHash, now: nowFn() });
+      let result = null;
+      try {
+        result = await dispatch({ uri, text, findings: findingsByUri.get(uri) || [] });
+      } catch (error) {
+        warn(`dispatch for ${uri} threw: ${error.message}`);
+      } finally {
+        dispatchInFlight = false;
+      }
+      if (!result) return;
+      // The buffer can close while a session is thinking; its comments died with it.
+      if (closed || !getDoc(store, uri)) {
+        note(`dropped a dispatch result for ${uri}: the buffer is gone`);
+        return;
+      }
+      applyDispatchResult(uri, result);
+    }
+
+    function armDispatch(uri) {
+      if (!dispatchEnabled || closed || !uri) return;
+      cancelDispatch(uri);
+      const timer = setTimeoutFn(() => {
+        dispatchTimersByUri.delete(uri);
+        if (closed) return;
+        dispatchSettled = runDispatch(uri).catch((error) => warn(`dispatch loop failed: ${error.message}`));
+      }, dispatchSettings.quietMs);
+      if (timer && typeof timer.unref === 'function') timer.unref();
+      dispatchTimersByUri.set(uri, timer);
+    }
+
+    // Typing pushes the quiet window out; it never arms a window of its own, because a document with
+    // no published sweep behind it has nothing for a navigator to react to yet.
+    function rearmDispatch(uri) {
+      if (!dispatchTimersByUri.has(uri)) return;
+      armDispatch(uri);
     }
 
     function publishDiagnostics(uri) {
@@ -111,12 +245,15 @@ function createNavigatorWiring({
       }
       // Outside the try: the tab's state does not depend on the editor socket accepting the frame.
       recordFindings(uri, diagnostics);
+      // A published sweep is the pause boundary tier 3 waits behind; the quiet window starts here.
+      armDispatch(uri);
     }
 
     function scheduleSweep(uri) {
       if (closed || !uri) return;
       // Non-markdown documents are mirrored but never swept in v1, so they arm no timer either.
       if (!isMarkdownDoc(getDoc(store, uri))) return;
+      rearmDispatch(uri);
       cancelSweep(uri);
       const timer = setTimeoutFn(() => {
         sweepTimersByUri.delete(uri);
@@ -146,15 +283,21 @@ function createNavigatorWiring({
         if (!uri) return 'invalid-params';
         cancelSweep(uri);
         publishDiagnostics(uri);
+        // A save is the boundary itself: it evaluates the same gate now rather than waiting it out.
+        cancelDispatch(uri);
+        dispatchSettled = runDispatch(uri).catch((error) => warn(`dispatch loop failed: ${error.message}`));
         return null;
       },
       // The carbon unit closed the buffer, so its findings are gone rather than merely unrefreshed.
       'textDocument/didClose': (params) => {
         const uri = uriOfParams(params);
         cancelSweep(uri);
+        cancelDispatch(uri);
         const result = applyDidClose(store, params);
         if (!result.applied) return result.reason;
         clearFindings(uri);
+        clearComments(uri);
+        forgetUri(dispatchState, uri);
         return null;
       },
     };
@@ -181,6 +324,8 @@ function createNavigatorWiring({
       closed = true;
       for (const timer of sweepTimersByUri.values()) clearTimeoutFn(timer);
       sweepTimersByUri.clear();
+      for (const timer of dispatchTimersByUri.values()) clearTimeoutFn(timer);
+      dispatchTimersByUri.clear();
       for (const doc of listDocs(store)) applyDidClose(store, { textDocument: { uri: doc.uri } });
       connections.delete(connection);
     }
@@ -190,6 +335,7 @@ function createNavigatorWiring({
       close,
       get docCount() { return listDocs(store).length; },
       get pendingSweepCount() { return sweepTimersByUri.size; },
+      get pendingDispatchCount() { return dispatchTimersByUri.size; },
       get isClosed() { return closed; },
     };
     connections.add(connection);
@@ -239,8 +385,12 @@ function createNavigatorWiring({
     openConnection,
     stop,
     findingsSnapshot,
+    documentsSnapshot,
     snapshotMessage,
+    // Settles once the in-flight dispatch has been applied, which is how a test waits for the lane.
+    whenDispatchSettled: () => Promise.resolve(dispatchSettled),
     get connectionCount() { return connections.size; },
+    get dispatchEnabled() { return dispatchEnabled; },
   };
 }
 

@@ -3361,6 +3361,54 @@ a.pr-title:hover {
   color: var(--text);
 }
 
+/* Tier 3 is a card, not a row: a model comment is a paragraph offered at a pause, and it must never be
+   mistaken for the rule-based finding lines above it. The rail carries the distinction cheaply. */
+.navigator-comments {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.navigator-comment {
+  border-left: 2px solid var(--border);
+  border-radius: 0 3px 3px 0;
+  background: var(--bg-surface);
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.navigator-comment-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+/* Muted and lowercase: it names who is talking, it is not a badge asking to be read first. */
+.navigator-comment-chip {
+  padding: 1px 6px;
+  border: 1px solid var(--border-dim);
+  border-radius: 3px;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.navigator-comment-line {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.navigator-comment-message {
+  margin: 0;
+  color: var(--text);
+  line-height: 1.55;
+  max-width: 78ch;
+}
+
 .navigator-empty {
   margin: 0;
   color: var(--text-muted);

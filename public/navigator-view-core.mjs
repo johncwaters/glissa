@@ -36,9 +36,34 @@ export function basenameOfUri(uri) {
   }
 }
 
+function wholeCount(count) {
+  return Number.isFinite(count) ? Math.max(Math.floor(count), 0) : 0;
+}
+
 export function findingCountText(count) {
-  const total = Number.isFinite(count) ? Math.max(Math.floor(count), 0) : 0;
+  const total = wholeCount(count);
   return total === 1 ? '1 finding' : `${total} findings`;
+}
+
+export function commentCountText(count) {
+  const total = wholeCount(count);
+  return total === 1 ? '1 comment' : `${total} comments`;
+}
+
+// One head line for a section that can carry either kind, or both. A kind with nothing in it is left
+// out entirely rather than printed as a zero, so the head never pads a quiet document.
+export function sectionCountText(section) {
+  const findings = wholeCount(section?.findings?.length);
+  const comments = wholeCount(section?.comments?.length);
+  if (findings > 0 && comments > 0) return `${findingCountText(findings)}, ${commentCountText(comments)}`;
+  if (comments > 0) return commentCountText(comments);
+  return findingCountText(findings);
+}
+
+export function commentLineLabel(comment) {
+  const line = Number(comment?.line);
+  if (!Number.isFinite(line) || line < 1) return 'L?';
+  return `L${Math.floor(line)}`;
 }
 
 export function diagnosticsOfMessage(msg) {
@@ -64,6 +89,29 @@ export function applyFindingsMessage(findingsByUri, msg) {
   return next;
 }
 
+export function commentsOfMessage(msg) {
+  return Array.isArray(msg?.comments) ? msg.comments : [];
+}
+
+export function hasComments(msg) {
+  return commentsOfMessage(msg).length > 0;
+}
+
+// The model comments for one uri, replaced whole by each dispatch. Empty clears that uri, exactly as
+// an empty findings push does, so the map and the rendered sections stay the same statement.
+export function applyCommentsMessage(commentsByUri, msg) {
+  const next = new Map(commentsByUri);
+  const uri = typeof msg?.uri === 'string' ? msg.uri : '';
+  if (!uri) return next;
+  const comments = commentsOfMessage(msg);
+  if (comments.length === 0) {
+    next.delete(uri);
+    return next;
+  }
+  next.set(uri, comments);
+  return next;
+}
+
 // The connect-time repair frame: a full replacement, so a uri closed while this tab was disconnected
 // disappears instead of lingering.
 export function applyFindingsSnapshot(msg) {
@@ -78,22 +126,49 @@ export function applyFindingsSnapshot(msg) {
   return next;
 }
 
+// The same repair for the comments half of the snapshot; the frame carries both, so each half reads
+// the field it owns and a document that has only one kind still earns a section.
+export function applyCommentsSnapshot(msg) {
+  const next = new Map();
+  const documents = Array.isArray(msg?.documents) ? msg.documents : [];
+  for (const document of documents) {
+    const uri = typeof document?.uri === 'string' ? document.uri : '';
+    const comments = Array.isArray(document?.comments) ? document.comments : [];
+    if (!uri || comments.length === 0) continue;
+    next.set(uri, comments);
+  }
+  return next;
+}
+
 export function totalFindingCount(findingsByUri) {
   let total = 0;
   for (const diagnostics of findingsByUri.values()) total += diagnostics.length;
   return total;
 }
 
+export function totalCommentCount(commentsByUri) {
+  let total = 0;
+  for (const comments of commentsByUri.values()) total += comments.length;
+  return total;
+}
+
 // Sections by file name, because that is what the eye scans; the full uri breaks a tie between two files
-// of the same name in different directories, so the order is stable across repaints.
-export function findingSections(findingsByUri) {
+// of the same name in different directories, so the order is stable across repaints. A document earns a
+// section from either half: tier 2 findings, tier 3 comments, or both.
+export function navigatorSections(findingsByUri, commentsByUri = new Map()) {
   const sections = [];
-  for (const [uri, diagnostics] of findingsByUri) {
-    if (!Array.isArray(diagnostics) || diagnostics.length === 0) continue;
+  const uris = new Set([...findingsByUri.keys(), ...commentsByUri.keys()]);
+  for (const uri of uris) {
+    const diagnostics = findingsByUri.get(uri);
+    const comments = commentsByUri.get(uri);
+    const findings = Array.isArray(diagnostics) ? diagnostics : [];
+    const modelComments = Array.isArray(comments) ? comments : [];
+    if (findings.length === 0 && modelComments.length === 0) continue;
     sections.push({
       uri,
       name: basenameOfUri(uri) || uri,
-      findings: [...diagnostics].sort((a, b) => lineOf(a) - lineOf(b) || characterOf(a) - characterOf(b)),
+      findings: [...findings].sort((a, b) => lineOf(a) - lineOf(b) || characterOf(a) - characterOf(b)),
+      comments: [...modelComments].sort((a, b) => (Number(a?.line) || 0) - (Number(b?.line) || 0)),
     });
   }
   sections.sort((a, b) => compareText(a.name, b.name) || compareText(a.uri, b.uri));

@@ -48,26 +48,30 @@ function fakeTimers() {
       for (const job of jobs) job();
     },
     get pendingCount() { return pendingById.size; },
+    get pendingIds() { return [...pendingById.keys()]; },
   };
 }
 
 const FIXED_TS = 1700000000000;
 
-function drivenConnection() {
+function drivenConnection(options = {}) {
   const timers = fakeTimers();
   const warnings = [];
+  const notes = [];
   const sent = [];
   const broadcasts = [];
+  const clock = { now: FIXED_TS };
   const wiring = createNavigatorWiring({
     setTimeoutFn: timers.setTimeoutFn,
     clearTimeoutFn: timers.clearTimeoutFn,
-    nowFn: () => FIXED_TS,
-    logger: { warn: (message) => warnings.push(message) },
+    nowFn: () => clock.now,
+    logger: { warn: (message) => warnings.push(message), log: (message) => notes.push(message) },
     broadcast: (message) => broadcasts.push(message),
+    ...options,
   });
   const connection = wiring.openConnection({ send: (message) => sent.push(message) });
   const lsp = (method, params) => connection.handleFrame(JSON.stringify({ type: 'lsp', method, params }));
-  return { wiring, connection, timers, warnings, sent, broadcasts, lsp };
+  return { wiring, connection, timers, warnings, notes, sent, broadcasts, lsp, clock };
 }
 
 function didOpenParams(uri, languageId, text) {
@@ -259,7 +263,12 @@ test('the snapshot accessor carries every uri that currently has findings', (t) 
   const message = wiring.snapshotMessage();
   assert.equal(message.type, 'navigator-snapshot');
   assert.equal(message.ts, FIXED_TS);
-  assert.deepEqual(message.documents, snapshot);
+  assert.deepEqual(message.documents, wiring.documentsSnapshot());
+  assert.deepEqual(
+    message.documents,
+    [{ uri: MARKDOWN_URI, diagnostics: snapshot[0].diagnostics, comments: [] }],
+    'the comments field is additive: present and empty when tier 3 has said nothing',
+  );
 });
 
 // The relay replays its open buffers on reconnect (docs/plan-navigator.md, M1), so a dropped socket is a
@@ -295,6 +304,293 @@ test('a lane with no broadcast injected still sweeps and still tracks findings',
   timers.runPending();
   assert.equal(sent.length, 1);
   assert.deepEqual(wiring.findingsSnapshot().map((entry) => entry.uri), [MARKDOWN_URI]);
+});
+
+// --- Tier 3 model dispatch (docs/plan-navigator.md, M4), spawner injected ---
+
+const COMMENT = { line: 3, message: 'The repeat is a symptom; the sentence is doing two jobs.' };
+
+/**
+ * A lane whose dispatch is a fake: it records what it was asked and answers whatever the test says.
+ * NOTHING here spawns claude; the real spawn is covered by tests/navigator-dispatch.test.js.
+ */
+function dispatchingConnection({ dispatch: overrides = {}, respond = null } = {}) {
+  const calls = [];
+  const dispatchConfig = { enabled: true, ...overrides };
+  const dispatch = (args) => {
+    calls.push(args);
+    if (typeof respond === 'function') return respond(args, calls.length);
+    return Promise.resolve({ verdict: 'NONE', comments: [], reason: null });
+  };
+  return { ...drivenConnection({ dispatchConfig, dispatch }), calls };
+}
+
+// The publish arms the quiet window, so a lane driven by the fake timers needs two rounds: one for the
+// sweep, one for the dispatch that sweep armed.
+function runSweepThenDispatch(timers) {
+  timers.runPending();
+  timers.runPending();
+}
+
+test('a dispatch fires one quiet window after a sweep publishes, carrying the buffer and its findings', async (t) => {
+  const { wiring, timers, calls, lsp } = dispatchingConnection();
+  t.after(() => wiring.stop());
+
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  timers.runPending();
+  assert.equal(calls.length, 0, 'the publish is not the dispatch');
+  assert.equal(timers.pendingCount, 1, 'it armed the quiet window instead');
+
+  timers.runPending();
+  await wiring.whenDispatchSettled();
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].uri, MARKDOWN_URI);
+  assert.equal(calls[0].text, REPEATED_WORD_MARKDOWN);
+  assert.deepEqual(calls[0].findings.map((finding) => finding.code), ['repeated-word'], 'tier 2 rides along');
+});
+
+test('an edit restarts the quiet window rather than letting the armed one run out', async (t) => {
+  const { wiring, connection, timers, calls, lsp } = dispatchingConnection();
+  t.after(() => wiring.stop());
+
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  timers.runPending();
+  const armed = timers.pendingIds[0];
+
+  const edited = '# Title\n\nA line with with a repeat, still.\n';
+  lsp('textDocument/didChange', didChangeParams(MARKDOWN_URI, 2, edited));
+  assert.equal(connection.pendingDispatchCount, 1, 'still exactly one window');
+  assert.equal(timers.pendingIds.includes(armed), false, 'and it is a NEW one, so the carbon unit is not interrupted mid-flow');
+
+  runSweepThenDispatch(timers);
+  await wiring.whenDispatchSettled();
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].text, edited, 'the dispatch reads the buffer as it stands when the window expires');
+});
+
+test('a save evaluates the same gate at once instead of waiting out the quiet window', async (t) => {
+  const { wiring, calls, lsp } = dispatchingConnection();
+  t.after(() => wiring.stop());
+
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  lsp('textDocument/didSave', { textDocument: { uri: MARKDOWN_URI } });
+  await wiring.whenDispatchSettled();
+  assert.equal(calls.length, 1, 'a save IS the pause boundary');
+});
+
+test('a second boundary inside the cooldown is skipped with one line naming the gate', async (t) => {
+  const { wiring, timers, calls, notes, lsp, clock } = dispatchingConnection({ dispatch: { cooldownMs: 300000 } });
+  t.after(() => wiring.stop());
+
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  runSweepThenDispatch(timers);
+  await wiring.whenDispatchSettled();
+  assert.equal(calls.length, 1);
+
+  lsp('textDocument/didChange', didChangeParams(MARKDOWN_URI, 2, '# Title\n\nRewritten entirely, and and repeated.\n'));
+  lsp('textDocument/didSave', { textDocument: { uri: MARKDOWN_URI } });
+  await wiring.whenDispatchSettled();
+  assert.equal(calls.length, 1, 'the buffer moved, but the document is still cooling down');
+  assert.ok(notes.some((line) => line.includes('cooldown')), `expected a cooldown line, saw ${JSON.stringify(notes)}`);
+
+  clock.now += 300000;
+  lsp('textDocument/didSave', { textDocument: { uri: MARKDOWN_URI } });
+  await wiring.whenDispatchSettled();
+  assert.equal(calls.length, 2, 'once the cooldown is up, the same boundary dispatches');
+});
+
+test('an unchanged buffer is never dispatched twice, whatever the boundary', async (t) => {
+  const { wiring, timers, calls, notes, lsp, clock } = dispatchingConnection({ dispatch: { cooldownMs: 1 } });
+  t.after(() => wiring.stop());
+
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  runSweepThenDispatch(timers);
+  await wiring.whenDispatchSettled();
+
+  clock.now += 60000;
+  lsp('textDocument/didSave', { textDocument: { uri: MARKDOWN_URI } });
+  await wiring.whenDispatchSettled();
+  assert.equal(calls.length, 1);
+  assert.ok(notes.some((line) => line.includes('unchanged')));
+});
+
+test('a boundary reached while a dispatch is in flight is gated, not queued', async (t) => {
+  let release = null;
+  const held = new Promise((resolve) => { release = resolve; });
+  const { wiring, timers, calls, notes, lsp } = dispatchingConnection({
+    dispatch: { cooldownMs: 1 },
+    respond: (_args, callNumber) => (callNumber === 1 ? held : Promise.resolve({ verdict: 'NONE', comments: [] })),
+  });
+  t.after(() => wiring.stop());
+
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  runSweepThenDispatch(timers);
+  const inFlight = wiring.whenDispatchSettled();
+  assert.equal(calls.length, 1);
+
+  lsp('textDocument/didChange', didChangeParams(MARKDOWN_URI, 2, '# Title\n\nA whole new paragraph while it thinks.\n'));
+  lsp('textDocument/didSave', { textDocument: { uri: MARKDOWN_URI } });
+  await wiring.whenDispatchSettled();
+  assert.equal(calls.length, 1, 'concurrency is 1');
+  assert.ok(notes.some((line) => line.includes('in-flight')));
+
+  release({ verdict: 'COMMENTS', comments: [COMMENT], reason: null });
+  await inFlight;
+});
+
+test('the hourly budget is machine-wide: a second document is gated once it is spent', async (t) => {
+  const otherUri = 'file:///tmp/other.md';
+  const { wiring, timers, calls, notes, lsp } = dispatchingConnection({ dispatch: { cooldownMs: 1, maxPerHour: 1 } });
+  t.after(() => wiring.stop());
+
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  runSweepThenDispatch(timers);
+  await wiring.whenDispatchSettled();
+  assert.equal(calls.length, 1);
+
+  lsp('textDocument/didOpen', didOpenParams(otherUri, 'markdown', REPEATED_WORD_MARKDOWN));
+  runSweepThenDispatch(timers);
+  await wiring.whenDispatchSettled();
+  assert.equal(calls.length, 1, 'a different document, but the same hour');
+  assert.ok(notes.some((line) => line.includes('hour-cap')));
+});
+
+test('a COMMENTS result is broadcast for that uri and joins the connect-time snapshot', async (t) => {
+  const { wiring, timers, broadcasts, lsp } = dispatchingConnection({
+    respond: () => Promise.resolve({ verdict: 'COMMENTS', comments: [COMMENT], reason: null }),
+  });
+  t.after(() => wiring.stop());
+
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  runSweepThenDispatch(timers);
+  await wiring.whenDispatchSettled();
+
+  const comments = broadcasts.filter((message) => message.type === 'navigator-comments');
+  assert.equal(comments.length, 1);
+  assert.deepEqual(comments[0], {
+    type: 'navigator-comments', uri: MARKDOWN_URI, comments: [COMMENT], ts: FIXED_TS,
+  });
+  assert.deepEqual(wiring.documentsSnapshot(), [{
+    uri: MARKDOWN_URI,
+    diagnostics: wiring.findingsSnapshot()[0].diagnostics,
+    comments: [COMMENT],
+  }], 'one section carries both halves');
+});
+
+test('a NONE result clears that document rather than storing an empty section', async (t) => {
+  const results = [
+    { verdict: 'COMMENTS', comments: [COMMENT], reason: null },
+    { verdict: 'NONE', comments: [], reason: null },
+  ];
+  const { wiring, timers, broadcasts, lsp, clock } = dispatchingConnection({
+    dispatch: { cooldownMs: 1 },
+    respond: (_args, callNumber) => Promise.resolve(results[callNumber - 1]),
+  });
+  t.after(() => wiring.stop());
+
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  runSweepThenDispatch(timers);
+  await wiring.whenDispatchSettled();
+
+  clock.now += 1000;
+  lsp('textDocument/didChange', didChangeParams(MARKDOWN_URI, 2, CLEAN_MARKDOWN));
+  lsp('textDocument/didSave', { textDocument: { uri: MARKDOWN_URI } });
+  await wiring.whenDispatchSettled();
+
+  const comments = broadcasts.filter((message) => message.type === 'navigator-comments');
+  assert.deepEqual(comments[1].comments, []);
+  assert.deepEqual(wiring.documentsSnapshot(), [], 'no findings and no comments means no section at all');
+});
+
+test('an ERROR verdict warns and leaves the standing comments exactly as they were', async (t) => {
+  const results = [
+    { verdict: 'COMMENTS', comments: [COMMENT], reason: null },
+    { verdict: 'ERROR', comments: [], reason: 'no readable result file' },
+  ];
+  const { wiring, timers, broadcasts, warnings, lsp, clock } = dispatchingConnection({
+    dispatch: { cooldownMs: 1 },
+    respond: (_args, callNumber) => Promise.resolve(results[callNumber - 1]),
+  });
+  t.after(() => wiring.stop());
+
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  runSweepThenDispatch(timers);
+  await wiring.whenDispatchSettled();
+  const afterFirst = broadcasts.filter((message) => message.type === 'navigator-comments').length;
+
+  clock.now += 1000;
+  lsp('textDocument/didChange', didChangeParams(MARKDOWN_URI, 2, '# Title\n\nEdited again, with with a repeat.\n'));
+  lsp('textDocument/didSave', { textDocument: { uri: MARKDOWN_URI } });
+  await wiring.whenDispatchSettled();
+
+  assert.equal(broadcasts.filter((message) => message.type === 'navigator-comments').length, afterFirst, 'a failed session says nothing');
+  assert.deepEqual(wiring.documentsSnapshot()[0].comments, [COMMENT]);
+  assert.ok(warnings.some((line) => line.includes('no readable result file')));
+});
+
+test('didClose drops the comments with the findings and tells the tab about both', async (t) => {
+  const { wiring, timers, broadcasts, lsp } = dispatchingConnection({
+    respond: () => Promise.resolve({ verdict: 'COMMENTS', comments: [COMMENT], reason: null }),
+  });
+  t.after(() => wiring.stop());
+
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  runSweepThenDispatch(timers);
+  await wiring.whenDispatchSettled();
+
+  lsp('textDocument/didClose', { textDocument: { uri: MARKDOWN_URI } });
+  const last = broadcasts.slice(-2);
+  assert.deepEqual(last.map((message) => message.type), ['navigator-findings', 'navigator-comments']);
+  assert.deepEqual(last[1].comments, []);
+  assert.deepEqual(wiring.documentsSnapshot(), []);
+});
+
+test('a result that lands after its buffer closed is dropped rather than resurrecting a section', async (t) => {
+  let release = null;
+  const held = new Promise((resolve) => { release = resolve; });
+  const { wiring, timers, broadcasts, lsp } = dispatchingConnection({ respond: () => held });
+  t.after(() => wiring.stop());
+
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  runSweepThenDispatch(timers);
+  const inFlight = wiring.whenDispatchSettled();
+
+  lsp('textDocument/didClose', { textDocument: { uri: MARKDOWN_URI } });
+  release({ verdict: 'COMMENTS', comments: [COMMENT], reason: null });
+  await inFlight;
+
+  assert.deepEqual(wiring.documentsSnapshot(), []);
+  assert.equal(broadcasts.filter((message) => message.type === 'navigator-comments' && message.comments.length > 0).length, 0);
+});
+
+// The M3 lane, byte for byte: an absent config.navigator.dispatch must cost nothing at all.
+test('with no dispatch config the lane arms no dispatch timer and calls nothing', async (t) => {
+  const calls = [];
+  const { wiring, connection, timers, lsp } = drivenConnection({
+    dispatch: (args) => { calls.push(args); return Promise.resolve({ verdict: 'NONE', comments: [] }); },
+  });
+  t.after(() => wiring.stop());
+  assert.equal(wiring.dispatchEnabled, false);
+
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  timers.runPending();
+  assert.equal(connection.pendingDispatchCount, 0);
+  assert.equal(timers.pendingCount, 0, 'the publish armed nothing');
+
+  lsp('textDocument/didSave', { textDocument: { uri: MARKDOWN_URI } });
+  await wiring.whenDispatchSettled();
+  assert.deepEqual(calls, [], 'no boundary can reach a lane that was never given a dispatch config');
+  assert.deepEqual(wiring.documentsSnapshot()[0].comments, []);
+});
+
+test('a dispatch config that is present but not enabled is just as inert', () => {
+  const wiring = createNavigatorWiring({
+    logger: { warn: () => {} },
+    dispatchConfig: { enabled: false, quietMs: 10 },
+    dispatch: () => Promise.resolve({ verdict: 'COMMENTS', comments: [COMMENT] }),
+  });
+  assert.equal(wiring.dispatchEnabled, false);
+  wiring.stop();
 });
 
 // --- Real backend boots ---

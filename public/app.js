@@ -12,7 +12,7 @@ import { writeClipboardText } from './dom-helpers.js';
 import { activateFocusView, centerSessionQuietly, deactivateFocusView, focusAdjacentInRail, focusNextAttention, focusNthInRail, getFocusedSessionId, isFocusActive, mountFocusView, noteKnownProjectPath, refreshFocusRoster, restoreFocusedSession, setFocusMergeStatus } from './focus-view/focus-view.js';
 import { initFormFactor, isPhoneLayout, onLayoutChange } from './form-factor.js';
 import { applyHealthSnapshot, mountHealthMonitor } from './health-monitor.js';
-import { applyNavigatorFindings, applyNavigatorSnapshot, mountNavigatorView, refreshNavigatorView, setNavigatorActivityCallback } from './navigator-panel.js';
+import { applyNavigatorComments, applyNavigatorFindings, applyNavigatorSnapshot, mountNavigatorView, refreshNavigatorView, setNavigatorActivityCallback } from './navigator-panel.js';
 import { initNotifications, showDesktopNotification } from './notifications.js';
 import { activatePhoneShell, deactivatePhoneShell, getPhoneSessionId, isPhoneScreenActive, isPhoneShellActive, mountPhoneShell, refreshPhoneBoard, setPhoneScreenAttention, showPhoneScreen } from './phone/phone-shell.js';
 import { applyPrStatus, mountPrView, setPrActivityCallback } from './pr-panel.js';
@@ -287,6 +287,8 @@ const messageHandlers = {
   // Navigator lane. The per-uri push carries one document's current findings (empty clears it); the
   // snapshot is the whole map, sent on every connect so a reconnect repairs the tab in one frame.
   'navigator-findings': (msg) => applyNavigatorFindings(msg),
+  // Tier 3 model comments for one uri, pushed when a dispatch lands (empty clears that uri).
+  'navigator-comments': (msg) => applyNavigatorComments(msg),
   'navigator-snapshot': (msg) => applyNavigatorSnapshot(msg),
   'client-trust':       (msg) => applyClientTrust(msg.trust),
   'shutting-down':      () => {

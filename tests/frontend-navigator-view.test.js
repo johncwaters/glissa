@@ -87,7 +87,7 @@ test('the connect-time snapshot REPLACES the map, so a document closed during th
 });
 
 test('sections sort by file name, findings sort by position', async () => {
-  const { findingSections } = await importCore();
+  const { navigatorSections } = await importCore();
   const map = new Map([
     ['file:///deep/zebra.md', [finding(0, 0, 'repeated-word', 'z')]],
     ['file:///apple.md', [
@@ -97,7 +97,7 @@ test('sections sort by file name, findings sort by position', async () => {
     ]],
   ]);
 
-  const sections = findingSections(map);
+  const sections = navigatorSections(map);
   assert.deepEqual(sections.map((section) => section.name), ['apple.md', 'zebra.md']);
   assert.equal(sections[0].uri, 'file:///apple.md', 'the full uri stays with the section for the title');
   assert.deepEqual(sections[0].findings.map((f) => f.message), [
@@ -106,12 +106,12 @@ test('sections sort by file name, findings sort by position', async () => {
 });
 
 test('two files of the same name are ordered by their full uri, not left to insertion order', async () => {
-  const { findingSections } = await importCore();
+  const { navigatorSections } = await importCore();
   const map = new Map([
     ['file:///z/notes.md', [finding(0, 0, 'repeated-word', 'z')]],
     ['file:///a/notes.md', [finding(0, 0, 'repeated-word', 'a')]],
   ]);
-  assert.deepEqual(findingSections(map).map((section) => section.uri), ['file:///a/notes.md', 'file:///z/notes.md']);
+  assert.deepEqual(navigatorSections(map).map((section) => section.uri), ['file:///a/notes.md', 'file:///z/notes.md']);
 });
 
 test('the totals and the arrival test read the same feed', async () => {
@@ -126,4 +126,77 @@ test('the totals and the arrival test read the same feed', async () => {
   assert.equal(hasFindings({ diagnostics: [] }), false);
   assert.equal(hasFindings({}), false);
   assert.equal(NAVIGATOR_EMPTY_TEXT, 'No findings. Open a markdown file in a connected editor.');
+});
+
+// --- Tier 3 model comments (docs/plan-navigator.md, M4) ---
+
+function comment(line, message) {
+  return { line, message };
+}
+
+test('a comments push replaces that document, and an empty one clears it', async () => {
+  const { applyCommentsMessage } = await importCore();
+  const first = applyCommentsMessage(new Map(), {
+    type: 'navigator-comments', uri: 'file:///a.md', comments: [comment(3, 'name the audience')],
+  });
+  assert.deepEqual([...first.keys()], ['file:///a.md']);
+
+  const replaced = applyCommentsMessage(first, { uri: 'file:///a.md', comments: [comment(9, 'a different thought')] });
+  assert.deepEqual(replaced.get('file:///a.md'), [comment(9, 'a different thought')]);
+  assert.equal(first.get('file:///a.md').length, 1, 'the previous map is never mutated');
+
+  assert.equal(applyCommentsMessage(replaced, { uri: 'file:///a.md', comments: [] }).size, 0);
+  assert.deepEqual([...applyCommentsMessage(replaced, { comments: [] }).keys()], ['file:///a.md'], 'no uri changes nothing');
+});
+
+test('the snapshot carries both halves, and each half reads only its own field', async () => {
+  const { applyCommentsSnapshot, applyFindingsSnapshot } = await importCore();
+  const msg = {
+    type: 'navigator-snapshot',
+    documents: [
+      { uri: 'file:///both.md', diagnostics: [finding(0, 0, 'repeated-word', 'b')], comments: [comment(1, 'a thought')] },
+      { uri: 'file:///findings-only.md', diagnostics: [finding(1, 0, 'heading-skip', 'h')], comments: [] },
+      { uri: 'file:///comments-only.md', diagnostics: [], comments: [comment(2, 'another thought')] },
+    ],
+  };
+  assert.deepEqual([...applyFindingsSnapshot(msg).keys()], ['file:///both.md', 'file:///findings-only.md']);
+  assert.deepEqual([...applyCommentsSnapshot(msg).keys()], ['file:///both.md', 'file:///comments-only.md']);
+  assert.equal(applyCommentsSnapshot({}).size, 0, 'a malformed frame empties rather than throws');
+});
+
+test('a document earns a section from either half, and its comments sort by line', async () => {
+  const { navigatorSections } = await importCore();
+  const findings = new Map([['file:///apple.md', [finding(4, 0, 'repeated-word', 'a')]]]);
+  const comments = new Map([
+    ['file:///apple.md', [comment(9, 'later'), comment(2, 'earlier')]],
+    ['file:///zebra.md', [comment(1, 'comments only, no findings at all')]],
+  ]);
+
+  const sections = navigatorSections(findings, comments);
+  assert.deepEqual(sections.map((section) => section.name), ['apple.md', 'zebra.md']);
+  assert.deepEqual(sections[0].comments.map((entry) => entry.message), ['earlier', 'later']);
+  assert.deepEqual(sections[1].findings, [], 'a comments-only document still gets its section');
+  assert.deepEqual(navigatorSections(new Map(), new Map()), []);
+});
+
+test('the section head names what it actually has, and never pads with a zero', async () => {
+  const { commentCountText, sectionCountText } = await importCore();
+  assert.equal(commentCountText(1), '1 comment');
+  assert.equal(commentCountText(3), '3 comments');
+  assert.equal(sectionCountText({ findings: [1, 2], comments: [1] }), '2 findings, 1 comment');
+  assert.equal(sectionCountText({ findings: [], comments: [1, 2] }), '2 comments');
+  assert.equal(sectionCountText({ findings: [1], comments: [] }), '1 finding');
+  assert.equal(sectionCountText({}), '0 findings');
+});
+
+test('comment lines are already 1-based, unlike the LSP ranges beside them', async () => {
+  const { commentLineLabel, totalCommentCount, hasComments } = await importCore();
+  assert.equal(commentLineLabel(comment(1, 'x')), 'L1');
+  assert.equal(commentLineLabel(comment(12, 'x')), 'L12');
+  assert.equal(commentLineLabel({}), 'L?');
+  assert.equal(commentLineLabel(comment(0, 'x')), 'L?');
+
+  assert.equal(totalCommentCount(new Map([['a', [comment(1, 'x'), comment(2, 'y')]], ['b', [comment(1, 'z')]]])), 3);
+  assert.equal(hasComments({ comments: [comment(1, 'x')] }), true);
+  assert.equal(hasComments({}), false);
 });

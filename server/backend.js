@@ -56,6 +56,8 @@ const { createIntegrationWatcherPool } = require('../detection/integration-watch
 const { createPrReviewWiring } = require('./pr-review-wiring');
 const { createPosthogWiring } = require('./posthog-wiring');
 const { createNavigatorWiring } = require('./navigator-wiring');
+const { createNavigatorDispatcher, createNavigatorSpawn } = require('./navigator-dispatch');
+const { resolveDispatchConfig: resolveNavigatorDispatchConfig } = require('./core/navigator-dispatch-core');
 const { createUsageWiring, resolveUsageConfig } = require('./usage-wiring');
 const { createLaneLedger } = require('./usage-lane-ledger');
 const { INTERACTIVE_LANE } = require('./core/usage-lane-core');
@@ -653,7 +655,7 @@ function createBackend(httpServer, options = {}) {
     let listenerMismatch = false;
     let orphanPty = false;
     let destroyedReachable = false;
-    for (const sess of [...sessions.values(), ...reviewSessions.values(), ...investigationSessions.values(), ...distillSessions.values()]) {
+    for (const sess of [...sessions.values(), ...reviewSessions.values(), ...investigationSessions.values(), ...distillSessions.values(), ...navigatorSessions.values()]) {
       const stats = sess.getHealthStats();
       stats.detection = sess.getDetectionStats();
       stats.ephemeral = !!sess.ephemeral;
@@ -882,9 +884,32 @@ function createBackend(httpServer, options = {}) {
     broadcast: (msg) => broadcastControl(msg),
   });
 
-  // Navigator lane: config-file only, absent config constructs nothing (docs/plan-navigator.md, "Wire and trust")
+  /*
+   * Navigator lane: config-file only, absent config constructs nothing (docs/plan-navigator.md,
+   * "Wire and trust"). Its tier 3 model dispatch is a second opt-in inside that one: without
+   * config.navigator.dispatch.enabled the dispatcher is never constructed, so the lane arms no
+   * dispatch timer and can spawn nothing. Its sessions get their own ephemeral map for the same
+   * reasons as the PR and distill lanes, and it is that registration (logPrefix 'navigator') that
+   * puts the lane on the usage ledger.
+   */
+  const navigatorDispatchConfig = resolveNavigatorDispatchConfig(config.navigator ? config.navigator.dispatch : null);
+  const navigatorSessions = new Map();
   const navigatorLane = config.navigator && config.navigator.enabled === true
-    ? createNavigatorWiring({ logger: console, broadcast: (msg) => broadcastControl(msg) })
+    ? createNavigatorWiring({
+      logger: console,
+      broadcast: (msg) => broadcastControl(msg),
+      dispatchConfig: navigatorDispatchConfig,
+      dispatch: navigatorDispatchConfig.enabled
+        ? createNavigatorDispatcher({
+          spawnSession: createNavigatorSpawn({
+            sessions: navigatorSessions, closeSessionDataClients, hookRouter, getHookPort, spawnGate, recordLane,
+            replayBufferKB: config.replayBufferKB,
+          }),
+          timeoutSeconds: navigatorDispatchConfig.dispatchTimeoutSeconds,
+          model: navigatorDispatchConfig.model,
+        })
+        : null,
+    })
     : null;
 
   // Context-pack auto-rebuild (server/pack-service.js): watchers on each spec's source roots plus a
@@ -1730,6 +1755,10 @@ function createBackend(httpServer, options = {}) {
     }
     // Drops every mirrored buffer and its pending sweep timer; null whenever the lane is off.
     if (navigatorLane) navigatorLane.stop();
+    for (const [, sess] of navigatorSessions) {
+      sess.destroy();
+      if (sess._killReap) pendingReaps.push(sess._killReap);
+    }
     controlWss.close();
     dataWss.close();
     return pendingReaps;

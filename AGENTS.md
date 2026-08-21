@@ -150,6 +150,8 @@ server/            # Backend runtime (Express + WS wiring, control plane, shared
   core/upload-core.js     # Pure image-upload rules: mime -> extension, size cap, filename, bracketed-paste framing, retention plan
   core/upgrade-route.js   # Pure WS-upgrade classification (control/data/navigator/unknown) by PATHNAME, plus the data-route session id
   navigator-wiring.js  # Navigator lane IO shell: the /navigator WS the editor relay connects on, a per-connection doc store, the per-document debounce, and the markdown diagnostics it publishes back. Constructed ONLY when config.navigator.enabled is true (config-file only, never control-WS settable); local listener only, refused on the remote one. See docs/plan-navigator.md
+  navigator-dispatch.js  # Navigator tier 3 IO shell: one ephemeral headless `claude -p` per dispatch (narrow allow, NOT skip-permissions), hard timeout, result-file reading. Constructed ONLY when config.navigator.dispatch.enabled is true
+  core/navigator-dispatch-core.js  # Pure tier 3 dispatch decisions: the quiet/cooldown/hash/hourly gate, the prompt (buffer fenced as DATA), and the comment-contract validation
   core/navigator-buffer-core.js  # Pure per-connection document store: didOpen/didChange (range + full-text)/didClose, version ordering
   core/navigator-rules-core.js   # Pure markdown sweep -> LSP Diagnostic array (repeated word, heading skip, unclosed fence)
   core/navigator-lsp-core.js     # Pure LSP Content-Length framing and message classification for the stdio relay

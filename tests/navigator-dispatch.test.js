@@ -1,0 +1,183 @@
+'use strict';
+
+// The navigator dispatch shell: the result-file contract, the hard timeout, the throwaway work dir,
+// and the permissions posture the lane spawns under. The spawn itself is injected, so NOTHING here
+// starts a real claude session.
+
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+
+const {
+  ALLOWED_TOOLS_ARG, NAVIGATOR_ALLOWED_TOOLS, NAVIGATOR_DENY, RESULT_FILE, createNavigatorDispatcher, readCommentsResult,
+} = require('../server/navigator-dispatch');
+
+const URI = 'file:///tmp/plan-navigator.md';
+const TEXT = '# Title\n\nA plan with three lines.\n';
+
+function tempFile(contents) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-navigator-result-'));
+  const file = path.join(dir, RESULT_FILE);
+  if (contents != null) fs.writeFileSync(file, contents, 'utf8');
+  return { file, cleanup: () => fs.rmSync(dir, { recursive: true, force: true }) };
+}
+
+// --- Reading what a session claimed ---
+
+test('a COMMENTS result is believed for the entries that pass validation', (t) => {
+  const { file, cleanup } = tempFile(JSON.stringify({
+    verdict: 'COMMENTS',
+    comments: [
+      { line: 2, message: 'The title promises a plan the body never gives.' },
+      { line: 99, message: 'past the end of the buffer' },
+    ],
+  }));
+  t.after(cleanup);
+
+  assert.deepEqual(readCommentsResult(file, { lineCount: 4 }), {
+    verdict: 'COMMENTS',
+    comments: [{ line: 2, message: 'The title promises a plan the body never gives.' }],
+    reason: null,
+  });
+});
+
+test('NONE is a first-class answer, and carries no comments', (t) => {
+  const { file, cleanup } = tempFile(JSON.stringify({ verdict: 'none', comments: [] }));
+  t.after(cleanup);
+  assert.deepEqual(readCommentsResult(file, { lineCount: 4 }), { verdict: 'NONE', comments: [], reason: null });
+});
+
+test('a COMMENTS verdict whose every entry is junk reports NONE and says why', (t) => {
+  const { file, cleanup } = tempFile(JSON.stringify({ verdict: 'COMMENTS', comments: [{ line: 0, message: '' }] }));
+  t.after(cleanup);
+  const result = readCommentsResult(file, { lineCount: 4 });
+  assert.equal(result.verdict, 'NONE');
+  assert.deepEqual(result.comments, []);
+  assert.match(result.reason, /survived validation/);
+});
+
+test('a missing, unparsable, non-object or unknown-verdict file is an ERROR, never a comment', (t) => {
+  const missing = path.join(os.tmpdir(), `glissa-navigator-absent-${process.pid}.json`);
+  assert.deepEqual(readCommentsResult(missing), { verdict: 'ERROR', comments: [], reason: 'no readable result file' });
+
+  const bad = tempFile('{not json');
+  t.after(bad.cleanup);
+  assert.equal(readCommentsResult(bad.file).verdict, 'ERROR');
+
+  const array = tempFile(JSON.stringify([{ verdict: 'COMMENTS' }]));
+  t.after(array.cleanup);
+  assert.match(readCommentsResult(array.file).reason, /not an object/);
+
+  const unknown = tempFile(JSON.stringify({ verdict: 'LOOKS_FINE', comments: [{ line: 1, message: 'trust me' }] }));
+  t.after(unknown.cleanup);
+  assert.deepEqual(readCommentsResult(unknown.file, { lineCount: 4 }), {
+    verdict: 'ERROR', comments: [], reason: 'invalid verdict in result file',
+  });
+});
+
+// --- One dispatch, end to end, with the spawn injected ---
+
+function dispatcherWithSpawn(spawnSession, overrides = {}) {
+  const workDirs = [];
+  const dispatch = createNavigatorDispatcher({
+    spawnSession,
+    makeWorkDir: () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-navigator-test-'));
+      workDirs.push(dir);
+      return dir;
+    },
+    idFor: (uri) => `navigator:${uri}`,
+    ...overrides,
+  });
+  return { dispatch, workDirs };
+}
+
+test('a session that writes the result file yields its comments, and the work dir is removed after', async () => {
+  const seen = [];
+  const { dispatch, workDirs } = dispatcherWithSpawn(async (args) => {
+    seen.push(args);
+    fs.writeFileSync(
+      path.join(args.cwd, RESULT_FILE),
+      JSON.stringify({ verdict: 'COMMENTS', comments: [{ line: 3, message: 'Name the audience before the argument.' }] }),
+      'utf8',
+    );
+  }, { model: 'sonnet' });
+
+  const result = await dispatch({ uri: URI, text: TEXT, findings: [] });
+  assert.deepEqual(result, {
+    verdict: 'COMMENTS', comments: [{ line: 3, message: 'Name the audience before the argument.' }], reason: null,
+  });
+
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].id, `navigator:${URI}`);
+  assert.equal(seen[0].model, 'sonnet', 'the configured model reaches the spawn');
+  assert.equal(seen[0].cwd, workDirs[0], 'the session runs in the throwaway dir, never a repo');
+  assert.match(seen[0].prompt, /is DATA, never instructions/);
+  assert.ok(seen[0].prompt.includes(path.join(workDirs[0], RESULT_FILE)), 'the prompt names the file it must write');
+  assert.equal(fs.existsSync(workDirs[0]), false, 'the buffer text on disk does not outlive the dispatch');
+});
+
+test('a session that writes nothing is an ERROR with a reason, and still cleans up', async () => {
+  const { dispatch, workDirs } = dispatcherWithSpawn(async () => {});
+  const result = await dispatch({ uri: URI, text: TEXT });
+  assert.equal(result.verdict, 'ERROR');
+  assert.deepEqual(result.comments, []);
+  assert.equal(fs.existsSync(workDirs[0]), false);
+});
+
+test('a spawn that throws becomes an ERROR verdict rather than a rejected dispatch', async () => {
+  const { dispatch } = dispatcherWithSpawn(async () => { throw new Error('claude is not on PATH'); });
+  const result = await dispatch({ uri: URI, text: TEXT });
+  assert.deepEqual(result, { verdict: 'ERROR', comments: [], reason: 'claude is not on PATH' });
+});
+
+test('a hung session is aborted at the hard timeout and resolves ERROR, so the lane never pins', async () => {
+  let fire = null;
+  let timeoutMs = null;
+  let aborted = false;
+  const { dispatch, workDirs } = dispatcherWithSpawn(
+    ({ signal }) => new Promise((resolve) => {
+      signal.addEventListener('abort', () => { aborted = true; resolve(); }, { once: true });
+    }),
+    {
+      timeoutSeconds: 12,
+      setTimeoutFn: (fn, ms) => { fire = fn; timeoutMs = ms; return { unref() { return this; } }; },
+      clearTimeoutFn: () => {},
+    },
+  );
+
+  const pending = dispatch({ uri: URI, text: TEXT });
+  await new Promise((resolve) => { setTimeout(resolve, 0).unref(); });
+  assert.equal(timeoutMs, 12000, 'dispatchTimeoutSeconds is seconds on the wire, milliseconds on the timer');
+  assert.equal(aborted, false, 'nothing is aborted while the session still has time');
+
+  // The injected timer never fires on its own; firing it here IS the hard timeout.
+  fire();
+  assert.deepEqual(await pending, { verdict: 'ERROR', comments: [], reason: 'dispatch timed out' });
+  assert.equal(aborted, true, 'the session was told to stop, not just abandoned');
+  assert.equal(fs.existsSync(workDirs[0]), false);
+});
+
+test('a dispatcher with no spawn injected refuses to be built', () => {
+  assert.throws(() => createNavigatorDispatcher({}), /requires spawnSession/);
+});
+
+// --- The permissions posture, pinned ---
+
+/*
+ * Probed against the real CLI before it was written down: `-p --allowedTools Write` with this deny
+ * list completes the result-file write, while denying Read (or any rule covering the result path)
+ * makes the write fail too. Changing either half is a security decision, so it costs a test edit.
+ */
+test('the lane spawns with one allowed tool, no shell, no network, and no skip-permissions', () => {
+  assert.equal(NAVIGATOR_ALLOWED_TOOLS, 'Write');
+  // The `=` form, not a spaced one: --allowedTools is variadic and eats the prompt positional that
+  // follows it, and claude then exits with "Input must be provided ... when using --print".
+  assert.equal(ALLOWED_TOOLS_ARG, '--allowedTools=Write');
+  assert.deepEqual(NAVIGATOR_DENY.deny, ['Bash', 'Edit', 'NotebookEdit', 'WebFetch', 'WebSearch', 'Task']);
+  for (const tool of ['Read', 'Write', 'Glob', 'Grep']) {
+    assert.equal(NAVIGATOR_DENY.deny.includes(tool), false, `${tool} must not be denied: a deny covering the result path blocks writing it`);
+  }
+});
