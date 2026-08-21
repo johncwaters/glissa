@@ -55,8 +55,13 @@ test('buildReviewPrompt carries the human-readable comment format rules', () => 
   const p = buildReviewPrompt({ slug: 'me/repo', number: 12, baseRefName: 'main', conflicting: false, resultPath: '/tmp/r.json' });
   assert.match(p, /Comment format/);
   assert.match(p, /### Blocking/);
-  assert.match(p, /at most 3 short sentences/);
+  assert.match(p, /<!-- glissa-pr-review -->/);
+  assert.match(p, /Resolved since last review/);
+  assert.match(p, /https:\/\/github\.com\/me\/repo\/blob\/<full head sha>/);
+  assert.match(p, /Skip style and formatting nitpicks/);
+  assert.match(p, /at most 10 findings/);
   assert.match(p, /<details><summary>Details<\/summary>/);
+  assert.match(p, /Prompt for AI agents/);
   assert.match(p, /following the comment format above/);
 });
 
