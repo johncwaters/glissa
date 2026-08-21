@@ -173,7 +173,7 @@ function createPrPoller(deps) {
         entry.phase = 'done';
         entry.reason = 'touches workflow files, merge manually';
         if (!entry.pingedError) {
-          ping('error', { key, reason: 'touches workflow files, merge manually' });
+          ping('error', { key, reason: entry.reason });
           entry.pingedError = true;
         }
         return true;
@@ -191,13 +191,14 @@ function createPrPoller(deps) {
       }
       entry.reason = `merge failed: ${firstLine(m.err)}`;
       if (!entry.pingedError) {
-        ping('error', { key, reason: `merge failed: ${firstLine(m.err)}` });
+        ping('error', { key, reason: entry.reason });
         entry.pingedError = true;
         return true;
       }
       return false;
     }
 
+    // phase/reason land before the pingedError gate so the dashboard row keeps the current reason
     entry.phase = 'error';
     entry.reason = status === 'none' ? 'no CI checks; merge manually' : 'checks failing';
     if (entry.pingedError) return false;

@@ -2539,7 +2539,7 @@ a.pr-title:hover {
 
 .pr-reason {
   flex-basis: 100%;
-  margin-left: 121px;
+  margin-left: 121px; /* .pr-stripe 3px + row gap 10px + .pr-phase min-width 108px: aligns under the title */
   font-size: 10px;
   color: var(--text-muted);
 }
