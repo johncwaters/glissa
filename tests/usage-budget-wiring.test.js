@@ -33,7 +33,7 @@ function harness({ root, usage = {}, telegram = null, telegramNotifications = fa
   const scanner = {
     runPass: async () => ({ newEntries: 1, partial: false }),
     sessionTotals: () => new Map(),
-    buildReport: () => ({ ts: 0, totals: {}, daily: [], models: [], sessions: [], blocks: [], activeBlock: null, tokenLimit: null, pricing: { missing: [] }, scan: { dirs: [], files: 0, entries: 0, lastScanMs: 0, partial: false } }),
+    buildReport: () => ({ ts: 0, totals: {}, daily: [], models: [], sessions: [], blocks: [], activeBlock: null, tokenLimit: null, byLane: [{ lane: 'pr-review', costUSD: 4.2, tokens: 1000, sessions: 2 }], budget: { rows: [{ scope: 'daily', spentUsd: 12.4, budgetUsd: 16, pct: 77.5, tone: 'warn' }] }, pricing: { missing: [] }, scan: { dirs: [], files: 0, entries: 0, lastScanMs: 0, partial: false } }),
     stats: () => ({ resolutionError: null }),
     budgetSpend: () => ({ todayKey: TODAY, monthKey: MONTH, ...state.spend }),
   };
@@ -51,6 +51,9 @@ function harness({ root, usage = {}, telegram = null, telegramNotifications = fa
     logger: { warn: () => {} },
     budgetStatePath: path.join(root, '.glissa', 'usage-budget-state.json'),
     sendTelegram: async (args) => { telegrams.push(args); },
+    // This file is about budgets; an rtk reading here would exec a real binary on whatever machine runs
+    // the suite (tests/usage-savings-wiring.test.js owns that path).
+    rtkPathFn: () => null,
   });
   return {
     wiring,
@@ -277,6 +280,23 @@ test('budgetAlertText: the one wording, plain and dash free', () => {
   for (const glyph of [String.fromCharCode(0x2014), String.fromCharCode(0x2013), String.fromCharCode(0x2026)]) {
     assert.equal(budgetAlertText({ scope: 'daily', threshold: 50, spentUsd: 1, budgetUsd: 2 }).includes(glyph), false);
   }
+});
+
+/*
+ * requestReport re-projects the scanner's report field by field, so a field the scanner produces and the
+ * dashboard reads can go missing without anything failing: the budget meters and the Glissa lanes section
+ * simply never render. Both were dropped that way.
+ */
+test('byLane and budget reach the wire on a pulled report', async () => {
+  const root = await makeTempRoot();
+  const h = harness({ root });
+  const report = await h.wiring.requestReport({ requestId: 'r1' });
+  assert.equal(report.type, 'usage-report');
+  assert.deepEqual(report.byLane, [{ lane: 'pr-review', costUSD: 4.2, tokens: 1000, sessions: 2 }]);
+  assert.deepEqual(report.budget, { rows: [{ scope: 'daily', spentUsd: 12.4, budgetUsd: 16, pct: 77.5, tone: 'warn' }] });
+  // And on the cached copy a reconnecting client is replayed.
+  assert.deepEqual(h.wiring.getCachedReport().byLane, report.byLane);
+  assert.deepEqual(h.wiring.getCachedReport().budget, report.budget);
 });
 
 // An alert is a moment, not a state: replaying it on reconnect would re-alert a crossing that already

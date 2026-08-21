@@ -314,6 +314,67 @@ export function laneSessionsText(sessions) {
   return `${formatCount(count)} ${count === 1 ? 'session' : 'sessions'}`;
 }
 
+// ── Savings ──
+// What the token-saving systems around a session are worth. Two independent claims kept apart on purpose:
+// rtk counts compressed command output across the whole machine from its own records, while the cache
+// figure is Glissa's arithmetic over the same Claude model rows the cost estimate uses.
+
+export const SAVINGS_RTK_HINT = 'rtk figures are machine-wide, counted by the rtk CLI itself';
+export const SAVINGS_CACHE_HINT = 'cache savings estimate what those reads would have cost at uncached input list price, Claude only';
+
+export function rtkSavings(savings) {
+  const rtk = savings?.rtk;
+  if (!rtk || typeof rtk !== 'object' || rtk.available !== true) return null;
+  return rtk;
+}
+
+export function cacheSavings(savings) {
+  const cache = savings?.cache;
+  if (!cache || typeof cache !== 'object') return null;
+  return cache;
+}
+
+export function hasSavings(savings) {
+  return rtkSavings(savings) !== null || cacheSavings(savings) !== null;
+}
+
+// The headline is the tokens rtk never sent, because that is the figure with a unit an operator can
+// compare against the totals above it; the rate and the sample size qualify it underneath.
+export function rtkSavingsTile(savings) {
+  const rtk = rtkSavings(savings);
+  if (!rtk) return null;
+  const commands = finiteNumber(rtk.commands) ?? 0;
+  const noun = commands === 1 ? 'command' : 'commands';
+  return {
+    value: `${formatTokens(finiteNumber(rtk.savedTokens) ?? 0)} tokens`,
+    sub: `${formatPercent(finiteNumber(rtk.savingsPct) ?? 0)} avg across ${formatCount(commands)} ${noun}`,
+  };
+}
+
+export function cacheSavingsTile(savings) {
+  const cache = cacheSavings(savings);
+  if (!cache) return null;
+  const tokens = formatTokens(finiteNumber(cache.cacheReadTokens) ?? 0);
+  const unpriced = (Array.isArray(cache.unpricedModels) ? cache.unpricedModels : []).filter((model) => model);
+  const sub = `${tokens} cache read tokens`;
+  if (unpriced.length === 0) return { value: formatUsd(finiteNumber(cache.savedUSD) ?? 0), sub };
+  // Named as a floor rather than a total: an unpriced model's tokens are counted, its dollars are not.
+  const noun = unpriced.length === 1 ? 'model' : 'models';
+  return {
+    value: formatUsd(finiteNumber(cache.savedUSD) ?? 0),
+    sub: `${sub}, a floor (${unpriced.length} unpriced ${noun})`,
+  };
+}
+
+// Scope is the whole honesty of this section: one half counts work Glissa never did, the other prices
+// tokens against a list price nobody was billed.
+export function savingsHint(savings) {
+  const parts = [];
+  if (rtkSavings(savings)) parts.push(SAVINGS_RTK_HINT);
+  if (cacheSavings(savings)) parts.push(SAVINGS_CACHE_HINT);
+  return parts.join('; ');
+}
+
 // ── Spend budgets ──
 // The rows and their tones come from server/core/usage-budget-core.js, which owns the ladder; nothing is
 // recomputed here. These only format them, and decide when the tab dot is owed.
