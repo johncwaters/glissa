@@ -1,6 +1,8 @@
 // ── PR review view core (pure) ───────────────────────────────
 // Attention ordering and severity mapping for the PR auto-review rows. No DOM, no IO.
 
+import { lanePlaceholder } from './lane-placeholder-core.mjs';
+
 // Rank is attention-first and deliberately coarser than severity: an errored PR and one whose review
 // asked for changes both need the operator, but only the error is a lane failure.
 const PHASE_RANK = {
@@ -46,11 +48,7 @@ const UNKNOWN_RANK = 99;
 export const PENDING_PHASE = 'pending';
 
 export function prStatusPlaceholder(status) {
-  if (!status) return 'Waiting for PR review status from the server.';
-  const reason = typeof status.reason === 'string' ? status.reason.trim() : '';
-  if (status.configured === false && reason) return `PR auto-review is misconfigured: ${reason}. Open Settings and its PR Review tab.`;
-  if (status.configured === false) return 'PR auto-review is off. Open Settings and its PR Review tab to switch it on.';
-  return 'PR auto-review is on. Waiting for the first poll.';
+  return lanePlaceholder(status, { label: 'PR auto-review', tab: 'PR Review' });
 }
 
 export function normalizePhase(phase) {

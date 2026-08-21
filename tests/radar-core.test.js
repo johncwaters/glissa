@@ -10,8 +10,8 @@ const changesOf = (issues) => issues.map((i) => i.change);
 
 test('radarPlaceholder: waits for an initial server status', async () => {
   const { radarPlaceholder } = await importCore();
-  assert.equal(radarPlaceholder(null), 'Waiting for PostHog status from the server.');
-  assert.equal(radarPlaceholder(undefined), 'Waiting for PostHog status from the server.');
+  assert.equal(radarPlaceholder(null), 'Waiting for PostHog monitoring status from the server.');
+  assert.equal(radarPlaceholder(undefined), 'Waiting for PostHog monitoring status from the server.');
 });
 
 test('radarPlaceholder: reports a misconfigured lane with the reason', async () => {

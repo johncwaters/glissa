@@ -22,6 +22,7 @@ const { normalizePackNames } = require('./core/pack-core');
 const { createPrPoller } = require('./pr-poller');
 const { createPrGh } = require('./pr-gh');
 const { sendPrPing } = require('./pr-telegram');
+const { emptyLaneStatus } = require('./lane-status');
 
 // Belt-and-suspenders deny-list for the headless PR-review sessions (they run under
 // --dangerously-skip-permissions, so this is a guard, not the guard). Blocks the destructive/
@@ -216,10 +217,7 @@ function createPrReviewWiring({
   // The last tick summary, replayed to a control client that connects between ticks (the same
   // cached-snapshot pattern the PostHog lane and the startup update check use).
   let lastStatus = null;
-  function emptyPrStatus() {
-    const gate = prPollerShouldStart(config);
-    return { type: 'pr-status', ts: Date.now(), configured: gate.start, reason: gate.reason, projects: [] };
-  }
+  const emptyPrStatus = () => emptyLaneStatus('pr-status', prPollerShouldStart(config));
   const getStatus = () => lastStatus || emptyPrStatus();
 
   let prPoller = null;

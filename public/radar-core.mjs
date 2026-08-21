@@ -3,6 +3,7 @@
 // three outside-world feeds (PostHog issues, ops telemetry, PR auto-review) into Radar's sections and
 // its one attention count. No DOM, no IO.
 
+import { lanePlaceholder } from './lane-placeholder-core.mjs';
 import { normalizePhase, prNeedsAction, severityFor as prSeverityFor, sortPrsByAttention } from './pr-view-core.mjs';
 
 // Rank is attention-first, deliberately NOT the same grouping as severity: a brand new issue is
@@ -26,11 +27,7 @@ const CHANGE_SEVERITY = {
 const UNKNOWN_RANK = 99;
 
 export function radarPlaceholder(status) {
-  if (!status) return 'Waiting for PostHog status from the server.';
-  const reason = typeof status.reason === 'string' ? status.reason.trim() : '';
-  if (status.configured === false && reason) return `PostHog monitoring is misconfigured: ${reason}. Open Settings and its PostHog tab.`;
-  if (status.configured === false) return 'PostHog monitoring is off. Open Settings and its PostHog tab to switch it on.';
-  return 'PostHog monitoring is on. Waiting for the first poll.';
+  return lanePlaceholder(status, { label: 'PostHog monitoring', tab: 'PostHog' });
 }
 
 export function severityFor(change) {

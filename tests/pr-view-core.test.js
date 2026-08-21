@@ -10,8 +10,8 @@ const keysOf = (prs) => prs.map((pr) => pr.key);
 
 test('prStatusPlaceholder: waits for an initial server status', async () => {
   const { prStatusPlaceholder } = await importCore();
-  assert.equal(prStatusPlaceholder(null), 'Waiting for PR review status from the server.');
-  assert.equal(prStatusPlaceholder(undefined), 'Waiting for PR review status from the server.');
+  assert.equal(prStatusPlaceholder(null), 'Waiting for PR auto-review status from the server.');
+  assert.equal(prStatusPlaceholder(undefined), 'Waiting for PR auto-review status from the server.');
 });
 
 test('prStatusPlaceholder: reports a misconfigured lane with the reason', async () => {

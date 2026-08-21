@@ -22,6 +22,7 @@ const { normalizePackNames } = require('./core/pack-core');
 const { createPosthogPoller } = require('./posthog-poller');
 const { createPosthogApi } = require('./posthog-api');
 const { sendPosthogPing } = require('./posthog-telegram');
+const { emptyLaneStatus } = require('./lane-status');
 const { DEFAULT_POSTHOG_REPORT_DIR } = require('./posthog-report');
 
 // Belt-and-suspenders deny-list for the headless investigation sessions (they run under
@@ -308,10 +309,7 @@ function createPosthogWiring({
   // The last tick summary, replayed to a control client that connects between ticks (the same
   // cached-snapshot pattern backend.js uses for the startup update check).
   let lastStatus = null;
-  function emptyPosthogStatus() {
-    const gate = posthogShouldStart(config);
-    return { type: 'posthog-status', ts: Date.now(), configured: gate.start, reason: gate.reason, projects: [] };
-  }
+  const emptyPosthogStatus = () => emptyLaneStatus('posthog-status', posthogShouldStart(config));
   const getStatus = () => lastStatus || emptyPosthogStatus();
 
   // Started at boot and re-evaluated on every settings reload whose posthog/telegram key changed, so
