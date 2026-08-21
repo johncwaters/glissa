@@ -917,6 +917,11 @@ function createBackend(httpServer, options = {}) {
       config: ingestConfig,
       logger: console,
       broadcast: (msg) => broadcastLocalControl(msg),
+      // The agent-log source's feedback-loop exclusion (M7): a Claude session id this ledger attributes
+      // to one of Glissa's own ephemeral lanes never publishes, so navigator dispatch output cannot
+      // re-enter the next navigator prompt.
+      laneMap: () => laneLedger.laneMap(),
+      ...(options.ingestLaneOptions || {}),
     })
     : null;
 

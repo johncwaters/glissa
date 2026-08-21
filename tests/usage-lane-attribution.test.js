@@ -140,8 +140,8 @@ test('the ledger records a lane and persists it atomically', async () => {
   const ledger = createLaneLedger({ ledgerPath, nowFn: () => NOW });
   ledger.record('claude-1', 'pr-review');
   ledger.record('claude-2', INTERACTIVE_LANE);
-  // record() is fire and forget by design (it sits on the hook callback path), so settle before reading.
-  await new Promise((resolve) => setTimeout(resolve, 30));
+  // record() is fire and forget by design (it sits on the hook callback path); whenIdle is the settle seam.
+  await ledger.whenIdle();
 
   const stored = JSON.parse(await fs.readFile(ledgerPath, 'utf8'));
   assert.equal(stored.version, 1);
@@ -156,7 +156,7 @@ test('a fresh ledger reads what a previous process wrote', async () => {
   const ledgerPath = path.join(root, '.glissa', 'usage-lanes.json');
   const first = createLaneLedger({ ledgerPath, nowFn: () => NOW });
   first.record('claude-1', 'pack-distill');
-  await new Promise((resolve) => setTimeout(resolve, 30));
+  await first.whenIdle();
 
   const second = createLaneLedger({ ledgerPath, nowFn: () => NOW });
   await second.load();
@@ -168,10 +168,10 @@ test('re-recording the same id and lane does not rewrite the file', async () => 
   const ledgerPath = path.join(root, '.glissa', 'usage-lanes.json');
   const ledger = createLaneLedger({ ledgerPath, nowFn: () => NOW });
   ledger.record('claude-1', 'pr-review');
-  await new Promise((resolve) => setTimeout(resolve, 30));
+  await ledger.whenIdle();
   const before = await fs.readFile(ledgerPath, 'utf8');
   ledger.record('claude-1', 'pr-review');
-  await new Promise((resolve) => setTimeout(resolve, 30));
+  await ledger.whenIdle();
   assert.equal(await fs.readFile(ledgerPath, 'utf8'), before);
 });
 
@@ -188,7 +188,7 @@ test('retention is applied on write, not just on read', async () => {
   }));
   const ledger = createLaneLedger({ ledgerPath, nowFn: () => NOW, retainDays: 365 });
   ledger.record('new-one', 'posthog');
-  await new Promise((resolve) => setTimeout(resolve, 30));
+  await ledger.whenIdle();
   const stored = JSON.parse(await fs.readFile(ledgerPath, 'utf8'));
   assert.deepEqual(stored.entries.map((e) => e.claudeSessionId).sort(), ['new-one', 'recent']);
 });
@@ -204,7 +204,7 @@ test('a corrupt ledger starts empty, warns, and still records', async () => {
   assert.deepEqual(ledger.snapshot(), []);
   assert.ok(warnings.some((m) => m.includes('unreadable')), `warned: ${warnings.join(' | ')}`);
   ledger.record('claude-1', 'pr-review');
-  await new Promise((resolve) => setTimeout(resolve, 30));
+  await ledger.whenIdle();
   assert.equal(ledger.laneMap().get('claude-1'), 'pr-review');
 });
 
@@ -218,7 +218,7 @@ test('an unwritable ledger degrades to a warning and keeps working in memory', a
     fsPromises: { ...require('node:fs/promises'), writeFile: async () => { throw new Error('EACCES simulated'); } },
   });
   ledger.record('claude-1', 'pr-review');
-  await new Promise((resolve) => setTimeout(resolve, 30));
+  await ledger.whenIdle();
   assert.ok(warnings.some((m) => m.includes('write failed')), `warned: ${warnings.join(' | ')}`);
   // Attribution still works for this process; only durability was lost.
   assert.equal(ledger.laneMap().get('claude-1'), 'pr-review');

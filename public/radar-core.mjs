@@ -277,6 +277,7 @@ export function needsActionPrRows(snapshot) {
         title: textOr(pr?.title, 'Untitled pull request'),
         phase: normalizePhase(pr?.phase),
         severity: prSeverityFor(pr?.phase, { inFlight: !!pr?.inFlight, pingedError: !!pr?.pingedError }),
+        reason: textOr(pr?.reason, ''),
       });
     }
   }

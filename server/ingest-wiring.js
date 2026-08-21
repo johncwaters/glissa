@@ -15,6 +15,7 @@ const {
   DEFAULT_DIGEST_BUDGET_CHARS, buildContextDigest, createIngestStore, enabledSourceNames, publishEvent,
   resolveIngestConfig, ringStats, snapshotEvents,
 } = require('./core/ingest-core');
+const { createAgentLogIngest } = require('./ingest-agent-logs');
 const { createTerminalIngest } = require('./ingest-terminal');
 
 const BATCH_INTERVAL_MS = 1000;
@@ -25,6 +26,8 @@ function createIngestLane({
   config = null,
   broadcast = null,
   logger = console,
+  laneMap = null,
+  agentLogOptions = null,
   nowFn = Date.now,
   setIntervalFn = setInterval,
   clearIntervalFn = clearInterval,
@@ -121,6 +124,36 @@ function createIngestLane({
     : null;
   if (terminal) adapters.push(terminal);
 
+  const agentLogsEnabled = resolved.enabled === true && resolved.sources.agentLogs.enabled === true;
+  const agentLogs = agentLogsEnabled
+    ? createAgentLogIngest({
+      publish,
+      sourceConfig: resolved.sources.agentLogs,
+      // The feedback-loop exclusion: without it a navigator dispatch's own transcript rides into the
+      // next navigator prompt. See the mechanism note in ingest-agent-logs.js.
+      laneMap,
+      logger,
+      nowFn,
+      setIntervalFn,
+      clearIntervalFn,
+      setTimeoutFn,
+      clearTimeoutFn,
+      ...(agentLogOptions || {}),
+    })
+    : null;
+  if (agentLogs) adapters.push(agentLogs);
+
+  // Adapters that own their own discovery start themselves; the terminal source has nothing to start,
+  // since its taps arrive one session at a time from wireSessionEvents.
+  for (const adapter of adapters) {
+    if (typeof adapter.start !== 'function') continue;
+    try {
+      void adapter.start();
+    } catch (error) {
+      warn(`starting the ${adapter.name} source failed: ${error.message}`);
+    }
+  }
+
   // A no-op when the terminal source is off, so a caller never has to ask twice before wiring a session.
   function attachSessionTap(sess) {
     if (stopped || !terminal) return null;
@@ -166,6 +199,8 @@ function createIngestLane({
     sources,
     ringStats: () => ringStats(store),
     recentEvents: (limit = snapshotEventLimit) => snapshotEvents(store, { limit }),
+    get agentLogs() { return agentLogs; },
+    get agentLogsEnabled() { return agentLogsEnabled; },
     get terminalEnabled() { return terminalEnabled; },
     get tapCount() { return terminal ? terminal.tapCount : 0; },
     get pendingEventCount() { return pendingEvents.length; },

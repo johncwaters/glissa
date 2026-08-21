@@ -31,7 +31,7 @@ const { registerEphemeralSession } = require('../server/ephemeral-session');
 const INGEST_ON = { enabled: true, sources: { terminal: { enabled: true } } };
 const MESSAGE_WAIT_MS = 5000;
 
-function withBackend(configExtras, fn) {
+function withBackend(configExtras, fn, { backendOptions = null, seed = null } = {}) {
   return async () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-ingest-'));
     const projectDir = path.join(tmpDir, 'project');
@@ -45,15 +45,17 @@ function withBackend(configExtras, fn) {
     }, null, 2), 'utf8');
     const prevEnv = process.env.GLISSA_CONFIG;
     process.env.GLISSA_CONFIG = cfgPath;
+    const seeded = seed ? seed({ tmpDir, cfgPath }) : {};
 
     const server = http.createServer();
-    const backend = createBackend(server, { staticDir: null });
+    const backend = createBackend(server, { staticDir: null, ...(backendOptions ? backendOptions(seeded) : {}) });
     server.on('request', backend.app);
     await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
     const sockets = [];
     try {
       await fn({
         backend,
+        seeded,
         base: `ws://127.0.0.1:${server.address().port}`,
         track: (ws) => { sockets.push(ws); return ws; },
       });
@@ -185,6 +187,77 @@ test('the ingest tap does not trip the listener-mismatch anomaly, and a real lea
   ws.send(JSON.stringify({ type: 'request-health-snapshot' }));
   const leaked = await waitFor(received, (msg) => msg.type === 'health-snapshot' && received.indexOf(msg) >= mark);
   assert.equal(leaked.stats.anomalies.listenerMismatch, true);
+}));
+
+// --- The agent-log source and its ledger seam ------------------------------
+
+/*
+ * The agent-log source pointed at a throwaway Claude home, so a booted backend never reads the
+ * operator's real transcripts. What this proves that the adapter's own tests cannot is the SEAM: that
+ * backend.js hands the usage-lane ledger to the lane, which is the whole feedback-loop exclusion.
+ */
+const AGENT_LOGS_ON = { enabled: true, sources: { agentLogs: { enabled: true } } };
+
+function seedTranscripts({ tmpDir }) {
+  const claudeHome = path.join(tmpDir, 'claude-home');
+  const projects = path.join(claudeHome, 'projects');
+  const projectDir = path.join(projects, 'C--repo');
+  fs.mkdirSync(projectDir, { recursive: true });
+  const write = (sessionId) => {
+    const filePath = path.join(projectDir, `${sessionId}.jsonl`);
+    fs.writeFileSync(filePath, '', 'utf8');
+    return filePath;
+  };
+  // The ledger backend.js builds beside the config file, exactly as usage-lane-ledger.js writes it.
+  fs.writeFileSync(path.join(tmpDir, 'usage-lanes.json'), JSON.stringify({
+    version: 1,
+    updatedAt: new Date().toISOString(),
+    entries: [
+      { claudeSessionId: 'lane-session', lane: 'navigator', ts: Date.now() },
+      { claudeSessionId: 'card-session', lane: 'interactive', ts: Date.now() },
+    ],
+  }), 'utf8');
+  return { env: { CLAUDE_CONFIG_DIR: claudeHome, CODEX_HOME: path.join(tmpDir, 'no-codex'), GROK_HOME: path.join(tmpDir, 'no-grok') }, laneFile: write('lane-session'), cardFile: write('card-session') };
+}
+
+function assistantLine(text, sessionId) {
+  return `${JSON.stringify({
+    type: 'assistant',
+    message: { role: 'assistant', content: [{ type: 'text', text }] },
+    cwd: 'C:\\repo',
+    sessionId,
+    timestamp: new Date().toISOString(),
+  })}\n`;
+}
+
+test('a completed agent turn reaches the rings and the digest, and a lane session never does', withBackend(
+  { ingest: AGENT_LOGS_ON },
+  async ({ backend, seeded }) => {
+    const lane = backend.getIngestLane();
+    assert.equal(lane.agentLogsEnabled, true);
+    await lane.agentLogs.start();
+    // backend.js loads the ledger eagerly at boot but cannot await it from a synchronous factory, so
+    // give that one read a tick before asking it which lane spawned what.
+    await new Promise((resolve) => { setTimeout(resolve, 50).unref(); });
+
+    fs.appendFileSync(seeded.cardFile, assistantLine('Ran the suite and it is green.', 'card-session'), 'utf8');
+    fs.appendFileSync(seeded.laneFile, assistantLine('the navigator talking to itself', 'lane-session'), 'utf8');
+    await lane.agentLogs.poll();
+
+    const summaries = lane.recentEvents().map((event) => event.summary);
+    assert.deepEqual(summaries, ['claude: Ran the suite and it is green.']);
+    assert.ok(lane.buildDigest({}).includes('Ran the suite and it is green.'));
+  },
+  {
+    seed: seedTranscripts,
+    backendOptions: (seeded) => ({ ingestLaneOptions: { agentLogOptions: { env: seeded.env } } }),
+  },
+));
+
+test('the agentLogs source off builds no adapter, even with the lane on', withBackend({ ingest: INGEST_ON }, async ({ backend }) => {
+  const lane = backend.getIngestLane();
+  assert.equal(lane.agentLogsEnabled, false);
+  assert.equal(lane.agentLogs, null);
 }));
 
 // --- Wire ------------------------------------------------------------------

@@ -24,6 +24,7 @@ function createLaneLedger({
   let entries = [];
   let signature = null;
   let writeChain = Promise.resolve();
+  let opsChain = Promise.resolve();
   let loadPromise = null;
 
   function warn(message) {
@@ -62,13 +63,19 @@ function createLaneLedger({
    */
   function record(claudeSessionId, lane) {
     if (!ledgerPath || !claudeSessionId || !lane) return;
-    void (async () => {
+    // Serialized so records apply in arrival order and whenIdle() has one chain to settle on.
+    opsChain = opsChain.then(async () => {
       await load();
       const existing = entries.find((entry) => entry.claudeSessionId === claudeSessionId);
       if (existing && existing.lane === lane) return;
       entries = pruneLedger([...entries, { claudeSessionId, lane, ts: nowFn() }], { now: nowFn(), retainDays });
       await persist();
-    })().catch((error) => warn(`record failed: ${error.message}`));
+    }).catch((error) => warn(`record failed: ${error.message}`));
+  }
+
+  // Test seam: settles once every record accepted so far is applied and its write has landed.
+  function whenIdle() {
+    return opsChain.then(() => writeChain);
   }
 
   async function persist() {
@@ -103,7 +110,7 @@ function createLaneLedger({
     return entries.map((entry) => ({ ...entry }));
   }
 
-  return { load, record, laneMap, snapshot };
+  return { load, record, laneMap, snapshot, whenIdle };
 }
 
 module.exports = { createLaneLedger };

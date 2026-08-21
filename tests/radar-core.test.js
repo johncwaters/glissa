@@ -331,7 +331,7 @@ test('needsActionPrRows: keeps only attention-worthy PRs, flattened across proje
         repoSlug: 'me/one',
         prs: [
           { number: 4, title: 'Healthy', phase: 'awaiting-checks' },
-          { number: 5, title: 'Broken', phase: 'error' },
+          { number: 5, title: 'Broken', phase: 'error', reason: 'checks failing' },
         ],
       },
       {
@@ -344,6 +344,7 @@ test('needsActionPrRows: keeps only attention-worthy PRs, flattened across proje
   assert.deepEqual(rows.map((r) => r.number), [5, 9]);
   assert.deepEqual(rows.map((r) => r.projectLabel), ['me/one', 'Two']);
   assert.deepEqual(rows.map((r) => r.severity), ['crit', 'warn']);
+  assert.deepEqual(rows.map((r) => r.reason), ['checks failing', '']);
   assert.equal(rows[1].phase, 'conflicting');
 });
 
@@ -378,6 +379,7 @@ test('needsActionPrRows: malformed entries fall back rather than throwing', asyn
     title: 'Untitled pull request',
     phase: 'error',
     severity: 'crit',
+    reason: '',
   }]);
 });
 
