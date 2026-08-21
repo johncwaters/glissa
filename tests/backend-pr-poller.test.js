@@ -51,6 +51,15 @@ test('buildReviewPrompt (clean lane) forbids merge + self-review, omits the conf
   assert.doesNotMatch(p, /gh pr checkout/, 'no conflict-resolution step in the clean lane');
 });
 
+test('buildReviewPrompt carries the human-readable comment format rules', () => {
+  const p = buildReviewPrompt({ slug: 'me/repo', number: 12, baseRefName: 'main', conflicting: false, resultPath: '/tmp/r.json' });
+  assert.match(p, /Comment format/);
+  assert.match(p, /### Blocking/);
+  assert.match(p, /at most 3 short sentences/);
+  assert.match(p, /<details><summary>Details<\/summary>/);
+  assert.match(p, /following the comment format above/);
+});
+
 test('buildReviewPrompt (conflict lane) includes checkout+rebase+push and forbids a guessed resolution', () => {
   const p = buildReviewPrompt({ slug: 'me/repo', number: 7, baseRefName: 'develop', conflicting: true, resultPath: '/tmp/r.json' });
   assert.match(p, /gh pr checkout 7/);
