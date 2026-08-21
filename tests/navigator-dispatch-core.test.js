@@ -278,3 +278,36 @@ test('a document with no standing findings says so rather than leaving a blank l
   const prompt = buildNavigatorPrompt({ uri: URI, text: '# Title\n', findings: [], resultPath: '/tmp/r.json' });
   assert.match(prompt, /already shown in the editor \(do not repeat them\):\n- none/);
 });
+
+// --- The intent model in the prompt (docs/plan-navigator.md, M5) ---
+
+test('the working intent rides the prompt as context, and the result contract asks for an updated one', () => {
+  const prompt = buildNavigatorPrompt({
+    uri: URI,
+    text: '# Title\n',
+    intent: '  blog post arguing X for audience Y  ',
+    resultPath: '/tmp/r.json',
+  });
+  assert.match(prompt, /Current working intent \(operator-corrected when locked\): blog post arguing X for audience Y/);
+  assert.match(prompt, /"intent":"what this document is being written for"/);
+  assert.match(prompt, /The "intent" field is OPTIONAL/);
+  assert.match(prompt, /at most 300 characters, naming what you believe/);
+});
+
+test('no intent means no intent block at all, rather than an empty or "none" line', () => {
+  for (const intent of ['', '   ', null, undefined, 42]) {
+    const prompt = buildNavigatorPrompt({
+      uri: URI, text: '# Title\n', intent, resultPath: '/tmp/r.json',
+    });
+    assert.equal(prompt.includes('Current working intent'), false, `${JSON.stringify(intent)} must leave the block out`);
+    assert.match(prompt, /The "intent" field is OPTIONAL/, 'the model may still propose one');
+  }
+});
+
+test('an over-long intent is capped before it reaches the prompt', () => {
+  const prompt = buildNavigatorPrompt({
+    uri: URI, text: '# Title\n', intent: 'y'.repeat(500), resultPath: '/tmp/r.json',
+  });
+  assert.ok(prompt.includes(`Current working intent (operator-corrected when locked): ${'y'.repeat(300)}\n`));
+  assert.equal(prompt.includes('y'.repeat(301)), false);
+});

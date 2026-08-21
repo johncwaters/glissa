@@ -563,6 +563,132 @@ test('a result that lands after its buffer closed is dropped rather than resurre
   assert.equal(broadcasts.filter((message) => message.type === 'navigator-comments' && message.comments.length > 0).length, 0);
 });
 
+// --- The intent model (docs/plan-navigator.md, M5) ---
+
+function intentBroadcasts(broadcasts) {
+  return broadcasts.filter((message) => message.type === 'navigator-intent');
+}
+
+test('a model proposal is broadcast once and joins the connect-time snapshot', (t) => {
+  const { wiring, broadcasts } = drivenConnection();
+  t.after(() => wiring.stop());
+
+  assert.equal(wiring.applyModelIntent('reviewing the navigator plan, tightening scope'), true);
+  assert.deepEqual(intentBroadcasts(broadcasts), [{
+    type: 'navigator-intent',
+    intent: {
+      text: 'reviewing the navigator plan, tightening scope', source: 'model', locked: false, ts: FIXED_TS,
+    },
+    ts: FIXED_TS,
+  }]);
+  assert.deepEqual(wiring.snapshotMessage().intent, {
+    text: 'reviewing the navigator plan, tightening scope', source: 'model', locked: false, ts: FIXED_TS,
+  });
+});
+
+test('a proposal that changes nothing is not broadcast', (t) => {
+  const { wiring, broadcasts } = drivenConnection();
+  t.after(() => wiring.stop());
+
+  wiring.applyModelIntent('one belief');
+  assert.equal(wiring.applyModelIntent('one belief'), false);
+  assert.equal(wiring.applyModelIntent(''), false, 'a model with nothing to say says nothing');
+  assert.equal(intentBroadcasts(broadcasts).length, 1);
+});
+
+test('an operator correction locks the statement, and a later proposal is rejected with no broadcast', (t) => {
+  const { wiring, broadcasts } = drivenConnection();
+  t.after(() => wiring.stop());
+
+  wiring.setOperatorIntent('  rewriting the merge gate, not the spawn path  ');
+  assert.deepEqual(wiring.getIntent(), {
+    text: 'rewriting the merge gate, not the spawn path', source: 'operator', locked: true, ts: FIXED_TS,
+  });
+
+  assert.equal(wiring.applyModelIntent('a plan doc about spawning'), false);
+  assert.equal(intentBroadcasts(broadcasts).length, 1, 'the rejected proposal reaches no client');
+  assert.equal(wiring.getIntent().text, 'rewriting the merge gate, not the spawn path');
+});
+
+test('an empty correction clears the statement and hands control back to the model', (t) => {
+  const { wiring, broadcasts } = drivenConnection();
+  t.after(() => wiring.stop());
+
+  wiring.setOperatorIntent('mine for now');
+  assert.equal(wiring.setOperatorIntent('   '), true);
+  assert.deepEqual(wiring.getIntent(), {
+    text: '', source: null, locked: false, ts: 0,
+  });
+  assert.deepEqual(intentBroadcasts(broadcasts).at(-1).intent.text, '');
+
+  assert.equal(wiring.applyModelIntent('the model may speak again'), true);
+  assert.equal(wiring.getIntent().source, 'model');
+});
+
+test('an empty lane still carries an intent field on its snapshot', (t) => {
+  const { wiring } = drivenConnection();
+  t.after(() => wiring.stop());
+  assert.deepEqual(wiring.snapshotMessage().intent, {
+    text: '', source: null, locked: false, ts: 0,
+  });
+});
+
+test('the standing intent rides the dispatch, and the result updates it after the comments', async (t) => {
+  const { wiring, timers, calls, broadcasts, lsp } = dispatchingConnection({
+    respond: () => Promise.resolve({
+      verdict: 'COMMENTS', comments: [COMMENT], intent: 'a plan doc for the navigator intent model', reason: null,
+    }),
+  });
+  t.after(() => wiring.stop());
+
+  wiring.applyModelIntent('an early guess');
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  runSweepThenDispatch(timers);
+  await wiring.whenDispatchSettled();
+
+  assert.equal(calls[0].intent, 'an early guess', 'the prompt is built from what the lane currently believes');
+  assert.equal(wiring.getIntent().text, 'a plan doc for the navigator intent model');
+  const order = broadcasts.filter((message) => ['navigator-comments', 'navigator-intent'].includes(message.type));
+  assert.deepEqual(order.map((message) => message.type), ['navigator-intent', 'navigator-comments', 'navigator-intent'],
+    'the dispatch result lands comments first, then the belief it came with');
+});
+
+test('a locked intent survives a dispatch that proposes another one', async (t) => {
+  const { wiring, timers, calls, broadcasts, lsp } = dispatchingConnection({
+    respond: () => Promise.resolve({
+      verdict: 'NONE', comments: [], intent: 'what the model would rather believe', reason: null,
+    }),
+  });
+  t.after(() => wiring.stop());
+
+  wiring.setOperatorIntent('what I am actually doing');
+  const beforeDispatch = intentBroadcasts(broadcasts).length;
+
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  runSweepThenDispatch(timers);
+  await wiring.whenDispatchSettled();
+
+  assert.equal(calls[0].intent, 'what I am actually doing');
+  assert.deepEqual(wiring.getIntent(), {
+    text: 'what I am actually doing', source: 'operator', locked: true, ts: FIXED_TS,
+  });
+  assert.equal(intentBroadcasts(broadcasts).length, beforeDispatch, 'the merge refused it, so no client hears about it');
+});
+
+test('a result with no intent field leaves the statement exactly as it was', async (t) => {
+  const { wiring, timers, lsp } = dispatchingConnection({
+    respond: () => Promise.resolve({ verdict: 'NONE', comments: [], reason: null }),
+  });
+  t.after(() => wiring.stop());
+
+  wiring.applyModelIntent('still the current belief');
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  runSweepThenDispatch(timers);
+  await wiring.whenDispatchSettled();
+
+  assert.equal(wiring.getIntent().text, 'still the current belief');
+});
+
 // The M3 lane, byte for byte: an absent config.navigator.dispatch must cost nothing at all.
 test('with no dispatch config the lane arms no dispatch timer and calls nothing', async (t) => {
   const calls = [];

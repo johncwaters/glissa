@@ -39,6 +39,7 @@ test('a COMMENTS result is believed for the entries that pass validation', async
   assert.deepEqual(await readCommentsResult(file, { lineCount: 4 }), {
     verdict: 'COMMENTS',
     comments: [{ line: 2, message: 'The title promises a plan the body never gives.' }],
+    intent: null,
     reason: null,
   });
 });
@@ -46,7 +47,9 @@ test('a COMMENTS result is believed for the entries that pass validation', async
 test('NONE is a first-class answer, and carries no comments', async (t) => {
   const { file, cleanup } = tempFile(JSON.stringify({ verdict: 'none', comments: [] }));
   t.after(cleanup);
-  assert.deepEqual(await readCommentsResult(file, { lineCount: 4 }), { verdict: 'NONE', comments: [], reason: null });
+  assert.deepEqual(await readCommentsResult(file, { lineCount: 4 }), {
+    verdict: 'NONE', comments: [], intent: null, reason: null,
+  });
 });
 
 test('a COMMENTS verdict whose every entry is junk reports NONE and says why', async (t) => {
@@ -60,7 +63,9 @@ test('a COMMENTS verdict whose every entry is junk reports NONE and says why', a
 
 test('a missing, unparsable, non-object or unknown-verdict file is an ERROR, never a comment', async (t) => {
   const missing = path.join(os.tmpdir(), `glissa-navigator-absent-${process.pid}.json`);
-  assert.deepEqual(await readCommentsResult(missing), { verdict: 'ERROR', comments: [], reason: 'no readable result file' });
+  assert.deepEqual(await readCommentsResult(missing), {
+    verdict: 'ERROR', comments: [], intent: null, reason: 'no readable result file',
+  });
 
   const bad = tempFile('{not json');
   t.after(bad.cleanup);
@@ -73,8 +78,39 @@ test('a missing, unparsable, non-object or unknown-verdict file is an ERROR, nev
   const unknown = tempFile(JSON.stringify({ verdict: 'LOOKS_FINE', comments: [{ line: 1, message: 'trust me' }] }));
   t.after(unknown.cleanup);
   assert.deepEqual(await readCommentsResult(unknown.file, { lineCount: 4 }), {
-    verdict: 'ERROR', comments: [], reason: 'invalid verdict in result file',
+    verdict: 'ERROR', comments: [], intent: null, reason: 'invalid verdict in result file',
   });
+});
+
+// --- The optional intent field (docs/plan-navigator.md, M5) ---
+
+test('an intent claim is read, trimmed and capped, whatever the verdict says', async (t) => {
+  const withComments = tempFile(JSON.stringify({
+    verdict: 'COMMENTS',
+    comments: [{ line: 1, message: 'Name the audience.' }],
+    intent: '  a plan doc for the navigator intent model  ',
+  }));
+  t.after(withComments.cleanup);
+  assert.equal((await readCommentsResult(withComments.file, { lineCount: 4 })).intent, 'a plan doc for the navigator intent model');
+
+  // A session with nothing to comment on can still have moved its belief.
+  const quiet = tempFile(JSON.stringify({ verdict: 'NONE', comments: [], intent: 'a quieter belief' }));
+  t.after(quiet.cleanup);
+  assert.equal((await readCommentsResult(quiet.file, { lineCount: 4 })).intent, 'a quieter belief');
+
+  const long = tempFile(JSON.stringify({ verdict: 'NONE', comments: [], intent: 'z'.repeat(700) }));
+  t.after(long.cleanup);
+  assert.equal((await readCommentsResult(long.file, { lineCount: 4 })).intent.length, 300);
+});
+
+test('an invalid intent claim is ignored rather than believed or thrown over', async (t) => {
+  for (const intent of ['', '   ', 42, { text: 'nope' }, ['nope'], null]) {
+    const { file, cleanup } = tempFile(JSON.stringify({ verdict: 'NONE', comments: [], intent }));
+    t.after(cleanup);
+    const result = await readCommentsResult(file, { lineCount: 4 });
+    assert.equal(result.intent, null, `${JSON.stringify(intent)} is not an updated belief`);
+    assert.equal(result.verdict, 'NONE', 'and it never invalidates the rest of the result');
+  }
 });
 
 // --- One dispatch, end to end, with the spawn injected ---
@@ -105,12 +141,18 @@ test('a session that writes the result file yields its comments, and the work di
     );
   }, { model: 'sonnet' });
 
-  const result = await dispatch({ uri: URI, text: TEXT, findings: [] });
+  const result = await dispatch({
+    uri: URI, text: TEXT, findings: [], intent: 'a plan doc about the spawn path',
+  });
   assert.deepEqual(result, {
-    verdict: 'COMMENTS', comments: [{ line: 3, message: 'Name the audience before the argument.' }], reason: null,
+    verdict: 'COMMENTS',
+    comments: [{ line: 3, message: 'Name the audience before the argument.' }],
+    intent: null,
+    reason: null,
   });
 
   assert.equal(seen.length, 1);
+  assert.match(seen[0].prompt, /Current working intent \(operator-corrected when locked\): a plan doc about the spawn path/);
   assert.equal(seen[0].id, `navigator:${URI}`);
   assert.equal(seen[0].model, 'sonnet', 'the configured model reaches the spawn');
   assert.equal(seen[0].cwd, workDirs[0], 'the session runs in the throwaway dir, never a repo');
@@ -130,7 +172,9 @@ test('a session that writes nothing is an ERROR with a reason, and still cleans 
 test('a spawn that throws becomes an ERROR verdict rather than a rejected dispatch', async () => {
   const { dispatch } = dispatcherWithSpawn(async () => { throw new Error('claude is not on PATH'); });
   const result = await dispatch({ uri: URI, text: TEXT });
-  assert.deepEqual(result, { verdict: 'ERROR', comments: [], reason: 'claude is not on PATH' });
+  assert.deepEqual(result, {
+    verdict: 'ERROR', comments: [], intent: null, reason: 'claude is not on PATH',
+  });
 });
 
 test('a hung session is aborted at the hard timeout and resolves ERROR, so the lane never pins', async () => {
@@ -157,7 +201,9 @@ test('a hung session is aborted at the hard timeout and resolves ERROR, so the l
 
   // The injected timer never fires on its own; firing it here IS the hard timeout.
   fire();
-  assert.deepEqual(await pending, { verdict: 'ERROR', comments: [], reason: 'dispatch timed out' });
+  assert.deepEqual(await pending, {
+    verdict: 'ERROR', comments: [], intent: null, reason: 'dispatch timed out',
+  });
   await new Promise((resolve) => { setTimeout(resolve, 0).unref(); });
   assert.equal(aborted, true, 'the session was told to stop, not just abandoned');
   assert.equal(readAttempts, 0, 'a timeout never reads from the removed work dir');

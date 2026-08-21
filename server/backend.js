@@ -1478,6 +1478,9 @@ function createBackend(httpServer, options = {}) {
     // Official plan limits are machine-wide, so the freshest snapshot is replayed to every client that
     // connects rather than being rebuilt per session.
     getPlanLimits: () => usage.getPlanLimitsMessage(),
+    // Navigator lane, for the intent correction the tab sends. Null whenever the lane is off, which is
+    // what that handler refuses on.
+    navigatorLane,
   });
 
   // Navigator connect-time repair: findings are current state, so one snapshot beats replay retention (plan-limits precedent); registered after registerControlHandlers so the snapshot frame stays first
@@ -1820,6 +1823,9 @@ function createBackend(httpServer, options = {}) {
     // The freshest official plan-limit snapshot, for the same reason getSession is exposed: a route
     // test has no other way to observe what a hook callback stored.
     getPlanLimits: () => usage.getPlanLimitsMessage(),
+    // The navigator lane itself (null when off), exposed for the same reason getSession is: a booted
+    // backend gives a test no other way to drive what a dispatch result would do to the intent model.
+    getNavigatorLane: () => navigatorLane,
     bindHost: bindDecision.host,
     remote: {
       enabled: remote.enabled,

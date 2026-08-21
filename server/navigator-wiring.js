@@ -9,6 +9,12 @@ const {
 const {
   createDispatchState, decideDispatch, forgetUri, hashText, recordDispatch, resolveDispatchConfig,
 } = require('./core/navigator-dispatch-core');
+const {
+  applyModelIntent: mergeModelIntent,
+  applyOperatorIntent: mergeOperatorIntent,
+  createIntentState,
+  intentPayload,
+} = require('./core/navigator-intent-core');
 const { sweepMarkdown } = require('./core/navigator-rules-core');
 
 // Quiet window before a document is swept.
@@ -68,6 +74,12 @@ function createNavigatorWiring({
    * kind without the other, and the tab renders them as two different things.
    */
   const commentsByUri = new Map();
+  /*
+   * The intent model (docs/plan-navigator.md, M5): ONE statement for the machine, not one per uri,
+   * because it says what the carbon unit is building rather than what a buffer contains. In memory
+   * only in v1, so a daemon restart starts from nothing.
+   */
+  let intentState = createIntentState();
   const dispatchSettings = resolveDispatchConfig(dispatchConfig);
   const dispatchEnabled = dispatchSettings.enabled === true && typeof dispatch === 'function';
   const dispatchState = createDispatchState();
@@ -134,6 +146,30 @@ function createNavigatorWiring({
     }));
   }
 
+  function broadcastIntent() {
+    if (typeof broadcast !== 'function') return;
+    broadcast({ type: 'navigator-intent', intent: intentPayload(intentState), ts: nowFn() });
+  }
+
+  // Every write goes through the pure merge, so the lock rule is enforced in one place and a merge
+  // that changes nothing costs no broadcast.
+  function commitIntent(merged) {
+    if (!merged.changed) return false;
+    intentState = merged.state;
+    broadcastIntent();
+    return true;
+  }
+
+  // A model's updated belief. The merge, not this caller, is what keeps it off a locked statement.
+  function applyModelIntent(text) {
+    return commitIntent(mergeModelIntent(intentState, { text, now: nowFn() }));
+  }
+
+  // The tab's correction. Empty text clears the statement and hands control back to the model.
+  function setOperatorIntent(text) {
+    return commitIntent(mergeOperatorIntent(intentState, { text, now: nowFn() }));
+  }
+
   /*
    * What a finished dispatch is allowed to change. An ERROR (no result file, unparsable, unknown
    * verdict, timeout) leaves the standing comments exactly as they were: the lane says nothing rather
@@ -153,7 +189,9 @@ function createNavigatorWiring({
 
   // Connect-time repair for the control WS: one current-state frame, not a replay of superseded ones.
   function snapshotMessage() {
-    return { type: 'navigator-snapshot', documents: documentsSnapshot(), ts: nowFn() };
+    return {
+      type: 'navigator-snapshot', documents: documentsSnapshot(), intent: intentPayload(intentState), ts: nowFn(),
+    };
   }
 
   // One document store per connection: an editor's buffers die with the relay that mirrored them.
@@ -200,7 +238,9 @@ function createNavigatorWiring({
       recordDispatch(dispatchState, { uri, textHash, now: nowFn() });
       let result = null;
       try {
-        result = await dispatch({ uri, text, findings: findingsByUri.get(uri) || [] });
+        result = await dispatch({
+          uri, text, findings: findingsByUri.get(uri) || [], intent: intentState.text,
+        });
       } catch (error) {
         warn(`dispatch for ${uri} threw: ${error.message}`);
       } finally {
@@ -213,6 +253,8 @@ function createNavigatorWiring({
         return;
       }
       applyDispatchResult(uri, result);
+      // After the comments, and through the merge: a locked operator intent survives this untouched.
+      applyModelIntent(result.intent);
     }
 
     function armDispatch(uri) {
@@ -387,6 +429,9 @@ function createNavigatorWiring({
     findingsSnapshot,
     documentsSnapshot,
     snapshotMessage,
+    applyModelIntent,
+    setOperatorIntent,
+    getIntent: () => intentPayload(intentState),
     // Settles once the in-flight dispatch has been applied, which is how a test waits for the lane.
     whenDispatchSettled: () => Promise.resolve(dispatchSettled),
     get connectionCount() { return connections.size; },

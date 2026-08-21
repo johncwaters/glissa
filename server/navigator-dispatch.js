@@ -24,6 +24,7 @@ const { registerEphemeralSession } = require('./ephemeral-session');
 const {
   DEFAULT_TIMEOUT_SECONDS, buildNavigatorPrompt, countLines, sanitizeComments,
 } = require('./core/navigator-dispatch-core');
+const { sanitizeIntentText } = require('./core/navigator-intent-core');
 
 const RESULT_VERDICTS = new Set(['COMMENTS', 'NONE', 'ERROR']);
 const RESULT_FILE = 'navigator-result.json';
@@ -52,21 +53,24 @@ async function readCommentsResult(resultPath, { lineCount = 0 } = {}) {
   try {
     parsed = JSON.parse(await fs.readFile(resultPath, 'utf8'));
   } catch {
-    return { verdict: 'ERROR', comments: [], reason: 'no readable result file' };
+    return { verdict: 'ERROR', comments: [], intent: null, reason: 'no readable result file' };
   }
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    return { verdict: 'ERROR', comments: [], reason: 'result file is not an object' };
+    return { verdict: 'ERROR', comments: [], intent: null, reason: 'result file is not an object' };
   }
   const verdict = String(parsed.verdict || '').toUpperCase();
   if (!RESULT_VERDICTS.has(verdict)) {
-    return { verdict: 'ERROR', comments: [], reason: 'invalid verdict in result file' };
+    return { verdict: 'ERROR', comments: [], intent: null, reason: 'invalid verdict in result file' };
   }
-  if (verdict !== 'COMMENTS') return { verdict, comments: [], reason: null };
+  // Optional, and validated exactly like a comment message: a non-string or empty claim is simply not
+  // an updated belief, so it is dropped rather than clearing the standing statement.
+  const intent = sanitizeIntentText(parsed.intent) || null;
+  if (verdict !== 'COMMENTS') return { verdict, comments: [], intent, reason: null };
   const comments = sanitizeComments(parsed.comments, { lineCount });
   if (comments.length === 0) {
-    return { verdict: 'NONE', comments: [], reason: 'no comment in the result file survived validation' };
+    return { verdict: 'NONE', comments: [], intent, reason: 'no comment in the result file survived validation' };
   }
-  return { verdict, comments, reason: null };
+  return { verdict, comments, intent, reason: null };
 }
 
 /**
@@ -147,7 +151,9 @@ function createNavigatorDispatcher({
       handle = setTimeoutFn(() => {
         aborted = true;
         controller.abort();
-        resolve({ verdict: 'ERROR', comments: [], reason: 'dispatch timed out' });
+        resolve({
+          verdict: 'ERROR', comments: [], intent: null, reason: 'dispatch timed out',
+        });
       }, timeoutSeconds * 1000);
       if (handle && typeof handle.unref === 'function') handle.unref();
     });
@@ -156,25 +162,33 @@ function createNavigatorDispatcher({
         if (aborted) return undefined;
         return readResult(resultPath, { lineCount });
       })
-      .catch((error) => ({ verdict: 'ERROR', comments: [], reason: firstLine(error.message) }));
+      .catch((error) => ({
+        verdict: 'ERROR', comments: [], intent: null, reason: firstLine(error.message),
+      }));
     const result = await Promise.race([run, timeout]);
     if (handle) clearTimeoutFn(handle);
-    return result || { verdict: 'ERROR', comments: [], reason: 'no verdict' };
+    return result || {
+      verdict: 'ERROR', comments: [], intent: null, reason: 'no verdict',
+    };
   }
 
-  return async function dispatch({ uri, text, findings = [] }) {
+  return async function dispatch({ uri, text, findings = [], intent = '' }) {
     let workDir = null;
     try {
       workDir = await makeWorkDir();
     } catch (error) {
-      return { verdict: 'ERROR', comments: [], reason: `no work dir: ${firstLine(error.message)}` };
+      return {
+        verdict: 'ERROR', comments: [], intent: null, reason: `no work dir: ${firstLine(error.message)}`,
+      };
     }
     const resultPath = path.join(workDir, RESULT_FILE);
     try {
       return await spawnWithTimeout({
         id: idFor(uri),
         name: `navigator ${uri}`,
-        prompt: buildNavigatorPrompt({ uri, text, findings, resultPath }),
+        prompt: buildNavigatorPrompt({
+          uri, text, findings, intent, resultPath,
+        }),
         cwd: workDir,
         resultPath,
         lineCount: countLines(text),

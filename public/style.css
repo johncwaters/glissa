@@ -3293,6 +3293,95 @@ a.pr-title:hover {
   gap: 22px;
 }
 
+/* The intent model sits above the feed because everything below it is downstream of being right. It is
+   the only writable thing in this view, so it gets a surface and the documents stay bare rows. */
+.navigator-intent {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-dim);
+  border-radius: 4px;
+  background: var(--bg-surface);
+}
+
+.navigator-intent-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.navigator-intent-title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-head);
+}
+
+.navigator-intent-meta {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.navigator-intent-text {
+  margin: 0;
+  color: var(--text);
+  line-height: 1.55;
+  max-width: 78ch;
+}
+
+/* The empty state is a hint, not a statement, so it reads at hint weight. */
+.navigator-intent-none {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.navigator-intent-form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.navigator-intent-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 5px 8px;
+  border: 1px solid var(--border-dim);
+  border-radius: 3px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.navigator-intent-input:focus {
+  outline: none;
+  border-color: var(--border);
+}
+
+.navigator-intent-submit {
+  flex: 0 0 auto;
+  padding: 5px 12px;
+  border: 1px solid var(--border-dim);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.navigator-intent-submit:hover {
+  color: var(--text);
+  border-color: var(--border);
+}
+
+.navigator-feed {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
 .navigator-doc {
   display: flex;
   flex-direction: column;

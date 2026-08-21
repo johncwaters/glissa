@@ -6,6 +6,8 @@
 
 'use strict';
 
+const { MAX_INTENT_CHARS, sanitizeIntentText } = require('./navigator-intent-core');
+
 const DEFAULT_QUIET_MS = 30000;
 const DEFAULT_COOLDOWN_MS = 300000;
 const DEFAULT_MAX_PER_HOUR = 6;
@@ -161,10 +163,18 @@ function bufferMarker(text) {
  * rewrite), the buffer fenced and named as DATA, and exactly one JSON result file as the only action
  * the session is asked to take. Pure string building; the wiring owns the file it names.
  */
-function buildNavigatorPrompt({ uri, text, findings = [], resultPath, maxComments = MAX_COMMENTS, maxMessageChars = MAX_MESSAGE_CHARS }) {
+function buildNavigatorPrompt({
+  uri, text, findings = [], intent = '', resultPath,
+  maxComments = MAX_COMMENTS, maxMessageChars = MAX_MESSAGE_CHARS, maxIntentChars = MAX_INTENT_CHARS,
+}) {
   const buffer = typeof text === 'string' ? text : '';
   const marker = bufferMarker(buffer);
   const standing = findingLines(findings);
+  // Context, not an instruction: an empty statement leaves the block out rather than saying "none".
+  const workingIntent = sanitizeIntentText(intent, { maxChars: maxIntentChars });
+  const intentLines = workingIntent
+    ? [`Current working intent (operator-corrected when locked): ${workingIntent}`, '']
+    : [];
   const lines = [
     'You are the Glissa navigator: a pair-programming navigator reading a live editor buffer at a pause in the typing.',
     'Tier 3 only. You offer suggestions and directions. You never rewrite, never restate the text back, and never take the keyboard.',
@@ -179,6 +189,7 @@ function buildNavigatorPrompt({ uri, text, findings = [], resultPath, maxComment
     `Document uri: ${uri}`,
     'Line numbers are 1-based, counting from the first line of the buffer below.',
     '',
+    ...intentLines,
     'Standing tier 2 findings already shown in the editor (do not repeat them):',
     ...(standing.length > 0 ? standing : ['- none']),
     '',
@@ -187,11 +198,12 @@ function buildNavigatorPrompt({ uri, text, findings = [], resultPath, maxComment
     `>>>${marker}`,
     '',
     `Write EXACTLY one file, ${resultPath}, whose entire content is this JSON:`,
-    '{"verdict":"COMMENTS","comments":[{"line":12,"message":"one specific suggestion"}]}',
+    '{"verdict":"COMMENTS","comments":[{"line":12,"message":"one specific suggestion"}],"intent":"what this document is being written for"}',
     'Verdicts:',
     `- COMMENTS with 1 to ${maxComments} entries when you have something worth saying.`,
     '- NONE with an empty comments array when you do not.',
     '- ERROR with an empty comments array when you could not do the work.',
+    `The "intent" field is OPTIONAL and works with any verdict: one sentence, at most ${maxIntentChars} characters, naming what you believe the carbon unit is building. Include it when your belief has moved, and leave it out when the working intent above already says it.`,
     'Write no other file, and print no answer other than the fact that you wrote it.',
   ];
   return lines.join('\n');
