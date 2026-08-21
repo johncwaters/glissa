@@ -297,3 +297,46 @@ test('no dashboard connected costs the lane nothing: publishing still fills the 
   lane.publish({ source: 'terminal', kind: 'output', summary: 'nobody is watching', scope: { root: '/repo' } });
   assert.equal(lane.recentEvents().length, 1);
 }));
+
+// --- Activity-driven dispatch, both halves of the seam (docs/plan-ingestion.md, M7.5) ---
+
+/*
+ * Dispatch stays OFF in every boot below, because an enabled one spawns a real headless claude the
+ * moment a gate passes. What a booted backend can prove that the unit tests cannot is the wiring itself:
+ * that the ingest batch reaches the navigator lane, and that the gate's movement signal IS this lane's
+ * seq. The arming and the dispatch behind that poke are pinned in tests/navigator-wiring.test.js.
+ */
+const BOTH_LANES = { ingest: INGEST_ON, navigator: { enabled: true } };
+
+test('an ingest batch pokes the navigator lane, and its gate reads this lane seq', withBackend(BOTH_LANES, async ({ backend }) => {
+  const lane = backend.getIngestLane();
+  const navigator = backend.getNavigatorLane();
+  assert.ok(navigator, 'both lanes are constructed');
+  assert.equal(navigator.latestContextSeq(), 0, 'wired, and nothing has happened on the machine yet');
+
+  let pokes = 0;
+  navigator.noteActivity = () => { pokes += 1; };
+  lane.publish({ source: 'terminal', kind: 'output', summary: 'a command ran here', scope: { root: '/repo' } });
+  assert.ok(lane.latestSeq() > 0);
+  assert.equal(navigator.latestContextSeq(), lane.latestSeq(), 'one signal, read from the lane that owns it');
+
+  // The poke rides the lane's own 1s batch, so this waits out one real interval and no new timer.
+  await new Promise((resolve) => { setTimeout(resolve, 1400).unref(); });
+  assert.equal(pokes, 1, 'one poke for the batch, however many events it carried');
+}));
+
+test('with ingest off the navigator lane is wired to no movement signal at all', withBackend({ navigator: { enabled: true } }, async ({ backend }) => {
+  assert.equal(backend.getIngestLane(), null);
+  assert.equal(
+    backend.getNavigatorLane().latestContextSeq(), null,
+    'a null seq is what makes every gate decision the pre-M7.5 one',
+  );
+}));
+
+test('with the navigator lane off the ingest lane batches with nothing to poke', withBackend({ ingest: INGEST_ON }, async ({ backend }) => {
+  const lane = backend.getIngestLane();
+  assert.equal(backend.getNavigatorLane(), null);
+  lane.publish({ source: 'terminal', kind: 'output', summary: 'nobody to tell', scope: { root: '/repo' } });
+  await new Promise((resolve) => { setTimeout(resolve, 1400).unref(); });
+  assert.equal(lane.pendingEventCount, 0, 'the batch flushed rather than falling over on a lane that is not there');
+}));

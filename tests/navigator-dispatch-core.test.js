@@ -8,6 +8,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
+  DEFAULT_ACTIVITY_MAX_PER_HOUR,
   DEFAULT_COOLDOWN_MS,
   DEFAULT_MAX_PER_HOUR,
   DEFAULT_QUIET_MS,
@@ -46,34 +47,79 @@ test('enabled: true resolves the documented defaults', () => {
     quietMs: DEFAULT_QUIET_MS,
     cooldownMs: DEFAULT_COOLDOWN_MS,
     maxPerHour: DEFAULT_MAX_PER_HOUR,
+    activityMaxPerHour: DEFAULT_ACTIVITY_MAX_PER_HOUR,
     dispatchTimeoutSeconds: DEFAULT_TIMEOUT_SECONDS,
     model: null,
   });
   assert.equal(DEFAULT_QUIET_MS, 30000);
   assert.equal(DEFAULT_COOLDOWN_MS, 300000);
   assert.equal(DEFAULT_MAX_PER_HOUR, 6);
+  assert.equal(DEFAULT_ACTIVITY_MAX_PER_HOUR, 2);
   assert.equal(DEFAULT_TIMEOUT_SECONDS, 180);
 });
 
 test('every numeric key is overridable, and a nonsense value falls back rather than disabling the gate', () => {
   const tuned = resolveDispatchConfig({
-    enabled: true, quietMs: 1000, cooldownMs: 2000, maxPerHour: 2, dispatchTimeoutSeconds: 30, model: '  sonnet  ',
+    enabled: true,
+    quietMs: 1000,
+    cooldownMs: 2000,
+    maxPerHour: 4,
+    activityMaxPerHour: 1,
+    dispatchTimeoutSeconds: 30,
+    model: '  sonnet  ',
   });
   assert.deepEqual(tuned, {
-    enabled: true, quietMs: 1000, cooldownMs: 2000, maxPerHour: 2, dispatchTimeoutSeconds: 30, model: 'sonnet',
+    enabled: true,
+    quietMs: 1000,
+    cooldownMs: 2000,
+    maxPerHour: 4,
+    activityMaxPerHour: 1,
+    dispatchTimeoutSeconds: 30,
+    model: 'sonnet',
   });
 
   const junk = resolveDispatchConfig({
-    enabled: true, quietMs: 0, cooldownMs: -5, maxPerHour: 'six', dispatchTimeoutSeconds: null, model: '   ',
+    enabled: true,
+    quietMs: 0,
+    cooldownMs: -5,
+    maxPerHour: 'six',
+    activityMaxPerHour: 'two',
+    dispatchTimeoutSeconds: null,
+    model: '   ',
   });
   assert.deepEqual(junk, {
     enabled: true,
     quietMs: DEFAULT_QUIET_MS,
     cooldownMs: DEFAULT_COOLDOWN_MS,
     maxPerHour: DEFAULT_MAX_PER_HOUR,
+    activityMaxPerHour: DEFAULT_ACTIVITY_MAX_PER_HOUR,
     dispatchTimeoutSeconds: DEFAULT_TIMEOUT_SECONDS,
     model: null,
   });
+});
+
+// The quota exists so a machine that never stops moving cannot spend what a save is going to need.
+test('the activity quota is clamped strictly below the total budget', () => {
+  assert.equal(resolveDispatchConfig({ enabled: true }).activityMaxPerHour, 2);
+  assert.equal(resolveDispatchConfig({ enabled: true, activityMaxPerHour: 99 }).activityMaxPerHour, 5);
+  assert.equal(resolveDispatchConfig({ enabled: true, maxPerHour: 3, activityMaxPerHour: 9 }).activityMaxPerHour, 2);
+  assert.equal(
+    resolveDispatchConfig({ enabled: true, maxPerHour: 1 }).activityMaxPerHour, 0,
+    'a budget of one belongs to the carbon unit',
+  );
+  assert.equal(
+    resolveDispatchConfig({ enabled: true, activityMaxPerHour: 0 }).activityMaxPerHour, 0,
+    'zero is a real setting for this key: activity dispatch off, with the edit budget left whole',
+  );
+  // null, '' and false all coerce to a zero that would silently mean "activity dispatch off".
+  for (const nonsense of [-3, 'two', '0', null, false, '', [], Number.NaN]) {
+    assert.equal(
+      resolveDispatchConfig({ enabled: true, activityMaxPerHour: nonsense }).activityMaxPerHour,
+      DEFAULT_ACTIVITY_MAX_PER_HOUR,
+      `${JSON.stringify(nonsense)} must fall back rather than resolve to a quota`,
+    );
+  }
+  assert.equal(resolveDispatchConfig(null).activityMaxPerHour, DEFAULT_ACTIVITY_MAX_PER_HOUR);
 });
 
 // --- The gate ---
@@ -82,14 +128,14 @@ test('a first look at a moved document passes every gate', () => {
   const state = createDispatchState();
   assert.deepEqual(
     decideDispatch({ state, uri: URI, textHash: hashText('# Title\n'), now: NOW, config: enabledConfig() }),
-    { dispatch: true, gate: null },
+    { dispatch: true, gate: null, trigger: 'edit' },
   );
 });
 
 test('the lane is disabled when the config says so, whatever else is true', () => {
   const state = createDispatchState();
   const decision = decideDispatch({ state, uri: URI, textHash: 'abc', now: NOW, config: resolveDispatchConfig(null) });
-  assert.deepEqual(decision, { dispatch: false, gate: 'disabled' });
+  assert.deepEqual(decision, { dispatch: false, gate: 'disabled', trigger: null });
 });
 
 test('an empty buffer and a missing uri are refused before anything else is considered', () => {
@@ -104,7 +150,7 @@ test('a dispatch while one is in flight is gated, never queued', () => {
   const decision = decideDispatch({
     state, uri: URI, textHash: 'abc', now: NOW, config: enabledConfig(), inFlight: true,
   });
-  assert.deepEqual(decision, { dispatch: false, gate: 'in-flight' });
+  assert.deepEqual(decision, { dispatch: false, gate: 'in-flight', trigger: null });
 });
 
 test('the same text is never dispatched twice, even long after the cooldown', () => {
@@ -148,7 +194,7 @@ test('the hourly budget is machine-wide and counts a trailing hour, not a calend
   assert.equal(countRecentDispatches(state, NOW + 2000), 2);
 
   const decision = decideDispatch({ state, uri: 'file:///c.md', textHash: 'c', now: NOW + 2000, config });
-  assert.deepEqual(decision, { dispatch: false, gate: 'hour-cap' });
+  assert.deepEqual(decision, { dispatch: false, gate: 'hour-cap', trigger: 'edit' });
 
   // The first of the two ages out an hour after it happened, and the budget has room again.
   const afterFirstAged = NOW + HOUR_MS + 1;
@@ -172,6 +218,356 @@ test('closing a document forgets its cooldown and its hash, and keeps the hourly
 
   assert.equal(decideDispatch({ state, uri: URI, textHash, now: NOW + 1, config }).dispatch, true);
   assert.equal(countRecentDispatches(state, NOW + 1), 1, 'the budget is machine-wide, so it survives a close');
+});
+
+// --- Movement from the ingest lane (docs/plan-ingestion.md, M7.5) ---
+
+test('an advanced context seq re-opens a document the buffer alone would have held shut', () => {
+  const state = createDispatchState();
+  const config = enabledConfig({ cooldownMs: 1 });
+  const textHash = hashText('# Title\n\nUntouched all day.\n');
+  recordDispatch(state, { uri: URI, textHash, now: NOW, contextSeq: 12 });
+
+  const later = NOW + 1000;
+  assert.equal(
+    decideDispatch({ state, uri: URI, textHash, now: later, config, contextSeq: 12 }).gate, 'unchanged',
+    'the same seq is the same machine state, whatever the digest would now read',
+  );
+  assert.deepEqual(
+    decideDispatch({ state, uri: URI, textHash, now: later, config, contextSeq: 13 }),
+    { dispatch: true, gate: null, trigger: 'activity' },
+    'one new event is what movement means, and the machine is what it is charged to',
+  );
+});
+
+test('a context seq that went backwards or arrived as junk is no movement at all', () => {
+  const state = createDispatchState();
+  const config = enabledConfig({ cooldownMs: 1 });
+  const textHash = hashText('# Title\n');
+  recordDispatch(state, { uri: URI, textHash, now: NOW, contextSeq: 12 });
+
+  for (const contextSeq of [11, 0, Number.NaN, '13', null, undefined]) {
+    assert.equal(
+      decideDispatch({
+        state, uri: URI, textHash, now: NOW + 1000, config, contextSeq,
+      }).gate,
+      'unchanged',
+      `${JSON.stringify(contextSeq)} must not pass for movement`,
+    );
+  }
+});
+
+test('the seq is per document, so activity re-opens each buffer on its own record', () => {
+  const state = createDispatchState();
+  const config = enabledConfig({ cooldownMs: 1 });
+  const other = 'file:///tmp/other.md';
+  const textHash = hashText('# Title\n');
+  recordDispatch(state, { uri: URI, textHash, now: NOW, contextSeq: 5 });
+  recordDispatch(state, { uri: other, textHash, now: NOW, contextSeq: 9 });
+
+  assert.equal(decideDispatch({
+    state, uri: URI, textHash, now: NOW + 1000, config, contextSeq: 7,
+  }).dispatch, true);
+  assert.equal(decideDispatch({
+    state, uri: other, textHash, now: NOW + 1000, config, contextSeq: 7,
+  }).gate, 'unchanged');
+});
+
+test('a uri last dispatched with no lane behind it counts as moved once the lane is wired', () => {
+  const state = createDispatchState();
+  const config = enabledConfig({ cooldownMs: 1 });
+  const textHash = hashText('# Title\n');
+  recordDispatch(state, { uri: URI, textHash, now: NOW });
+  assert.equal(state.lastSeqByUri.has(URI), false, 'no seq is recorded rather than a stale one kept');
+
+  assert.equal(decideDispatch({
+    state, uri: URI, textHash, now: NOW + 1000, config, contextSeq: 4,
+  }).dispatch, true);
+});
+
+test('movement is checked before the cooldown, never instead of it', () => {
+  const state = createDispatchState();
+  const config = enabledConfig({ cooldownMs: 300000 });
+  const textHash = hashText('# Title\n');
+  recordDispatch(state, { uri: URI, textHash, now: NOW, contextSeq: 1 });
+
+  assert.equal(
+    decideDispatch({
+      state, uri: URI, textHash, now: NOW + 299999, config, contextSeq: 400,
+    }).gate,
+    'cooldown',
+    'a busy machine cannot buy more than one dispatch per cooldown window',
+  );
+  assert.equal(decideDispatch({
+    state, uri: URI, textHash, now: NOW + 300000, config, contextSeq: 400,
+  }).dispatch, true);
+});
+
+test('the hourly budget still bounds a machine that never stops moving', () => {
+  const state = createDispatchState();
+  const config = enabledConfig({ cooldownMs: 1, maxPerHour: 2 });
+  const textHash = hashText('# Title\n');
+  recordDispatch(state, { uri: 'file:///a.md', textHash, now: NOW, contextSeq: 1 });
+  recordDispatch(state, { uri: URI, textHash, now: NOW + 1000, contextSeq: 2 });
+
+  assert.equal(decideDispatch({
+    state, uri: URI, textHash, now: NOW + 2000, config, contextSeq: 3,
+  }).gate, 'hour-cap');
+});
+
+test('closing a document forgets its seq mark with the rest of its record', () => {
+  const state = createDispatchState();
+  const textHash = hashText('# Title\n');
+  recordDispatch(state, { uri: URI, textHash, now: NOW, contextSeq: 7 });
+  assert.equal(state.lastSeqByUri.get(URI), 7);
+
+  forgetUri(state, URI);
+  assert.equal(state.lastSeqByUri.has(URI), false);
+});
+
+// --- The activity quota inside the hourly budget (docs/plan-ingestion.md, M7.5) ---
+
+/*
+ * The reviewer's scenario, exactly: six markdown buffers open, nobody typing, and one poke reaching all
+ * of them. Without a quota that poke spends the whole machine-wide budget and the next real save is
+ * refused with hour-cap; with it, the machine spends its own share and the save still passes.
+ */
+test('a poke across six open documents cannot spend the budget a save is going to need', () => {
+  const state = createDispatchState();
+  const config = enabledConfig({ cooldownMs: 1 });
+  const textHash = hashText('# Title\n');
+  const uris = Array.from({ length: 6 }, (_unused, index) => `file:///tmp/doc-${index}.md`);
+  // Each buffer was read once when it was opened, over an hour ago: the budget is clean and unspent.
+  for (const uri of uris) {
+    recordDispatch(state, {
+      uri, textHash, now: NOW - HOUR_MS - 1, contextSeq: 1, trigger: 'edit',
+    });
+  }
+
+  let dispatched = 0;
+  for (const uri of uris) {
+    const decision = decideDispatch({
+      state, uri, textHash, now: NOW, config, contextSeq: 9,
+    });
+    assert.equal(decision.trigger, 'activity', 'nobody typed, so every one of these is the machine');
+    if (!decision.dispatch) {
+      assert.equal(decision.gate, 'activity-cap');
+      continue;
+    }
+    dispatched += 1;
+    recordDispatch(state, {
+      uri, textHash, now: NOW, contextSeq: 9, trigger: decision.trigger,
+    });
+  }
+  assert.equal(dispatched, config.activityMaxPerHour, 'the machine spends its own quota and no more');
+  assert.equal(countRecentDispatches(state, NOW), 2);
+
+  const typed = hashText('# Title\n\nA sentence they just typed.\n');
+  assert.deepEqual(
+    decideDispatch({
+      state, uri: uris[0], textHash: typed, now: NOW + 1000, config, contextSeq: 9,
+    }),
+    { dispatch: true, gate: null, trigger: 'edit' },
+    'the edit-driven budget survives any amount of machine noise',
+  );
+});
+
+/*
+ * The same six buffers, but COLD: a daemon or editor restart with nothing dispatched yet, so no uri has
+ * a recorded hash for the gate to read. Without the arming hint every one of these reads as a carbon
+ * unit typing, and the budget is gone before anyone touches a key.
+ */
+test('a cold start with six open buffers and nobody typing spends only the activity quota', () => {
+  const state = createDispatchState();
+  const config = enabledConfig({ cooldownMs: 1 });
+  const textHash = hashText('# Title\n');
+  const uris = Array.from({ length: 6 }, (_unused, index) => `file:///tmp/fresh-${index}.md`);
+
+  let dispatched = 0;
+  for (const uri of uris) {
+    const decision = decideDispatch({
+      state, uri, textHash, now: NOW, config, contextSeq: 3, armedBy: 'activity',
+    });
+    assert.equal(decision.trigger, 'activity', 'no hash to read, and a poke is what opened the window');
+    if (!decision.dispatch) {
+      assert.equal(decision.gate, 'activity-cap');
+      continue;
+    }
+    dispatched += 1;
+    recordDispatch(state, {
+      uri, textHash, now: NOW, contextSeq: 3, trigger: decision.trigger,
+    });
+  }
+  assert.equal(dispatched, config.activityMaxPerHour);
+  assert.equal(countRecentDispatches(state, NOW), 2);
+
+  // The first thing the carbon unit actually does after the restart.
+  assert.deepEqual(
+    decideDispatch({
+      state,
+      uri: uris[5],
+      textHash: hashText('# Title\n\nThe first thing they typed.\n'),
+      now: NOW + 1000,
+      config,
+      contextSeq: 3,
+    }),
+    { dispatch: true, gate: null, trigger: 'edit' },
+    'the budget a restart used to burn is still there',
+  );
+});
+
+test('the arming hint breaks a cold-start tie only, never a state the gate can read', () => {
+  const state = createDispatchState();
+  const config = enabledConfig({ cooldownMs: 1, activityMaxPerHour: 0 });
+  const first = hashText('# Title\n');
+
+  assert.equal(decideDispatch({
+    state, uri: URI, textHash: first, now: NOW, config, armedBy: 'activity',
+  }).trigger, 'activity');
+  assert.equal(decideDispatch({
+    state, uri: URI, textHash: first, now: NOW, config,
+  }).trigger, 'edit', 'an absent hint is an edit, which is every pre-M7.5 arming path');
+
+  recordDispatch(state, {
+    uri: URI, textHash: first, now: NOW, contextSeq: 1, trigger: 'edit',
+  });
+
+  assert.equal(
+    decideDispatch({
+      state, uri: URI, textHash: hashText('# Title\n\nTyped.\n'), now: NOW + 1000, config, contextSeq: 1, armedBy: 'activity',
+    }).trigger,
+    'edit',
+    'the text moved, so the hint does not get to call it activity',
+  );
+  assert.equal(
+    decideDispatch({
+      state, uri: URI, textHash: first, now: NOW + 1000, config, contextSeq: 9, armedBy: 'edit',
+    }).trigger,
+    'activity',
+    'the text stood and the seq moved, so the hint does not get to call it an edit',
+  );
+});
+
+test('an edit can still spend the whole budget, because only activity answers to the quota', () => {
+  const state = createDispatchState();
+  const config = enabledConfig({ cooldownMs: 1, maxPerHour: 4 });
+  const uris = Array.from({ length: 4 }, (_unused, index) => `file:///tmp/typed-${index}.md`);
+  for (const [index, uri] of uris.entries()) {
+    const decision = decideDispatch({
+      state, uri, textHash: hashText(`# ${index}\n`), now: NOW + index, config, contextSeq: 3,
+    });
+    assert.deepEqual(decision, { dispatch: true, gate: null, trigger: 'edit' });
+    recordDispatch(state, {
+      uri, textHash: hashText(`# ${index}\n`), now: NOW + index, contextSeq: 3, trigger: decision.trigger,
+    });
+  }
+  assert.equal(countRecentDispatches(state, NOW + 10), 4, 'four edits, the whole hourly budget');
+  assert.equal(countRecentDispatches(state, NOW + 10, 'activity'), 0);
+});
+
+test('once the machine has spent its quota it is refused by name, and typing is not', () => {
+  const state = createDispatchState();
+  const config = enabledConfig({ cooldownMs: 1, activityMaxPerHour: 1 });
+  const textHash = hashText('# Title\n');
+  const other = 'file:///tmp/other.md';
+  // One buffer already spent the machine's quota; the other has been read once and is sitting still.
+  recordDispatch(state, {
+    uri: URI, textHash, now: NOW, contextSeq: 1, trigger: 'activity',
+  });
+  recordDispatch(state, {
+    uri: other, textHash, now: NOW, contextSeq: 1, trigger: 'edit',
+  });
+
+  assert.equal(
+    decideDispatch({
+      state, uri: other, textHash, now: NOW + 1000, config, contextSeq: 2,
+    }).gate,
+    'activity-cap',
+    'the quota is machine-wide, exactly like the total it sits inside',
+  );
+  assert.equal(decideDispatch({
+    state, uri: other, textHash: hashText('# Other\n'), now: NOW + 1000, config, contextSeq: 2,
+  }).dispatch, true);
+});
+
+test('a buffer that moved is an edit even when the machine moved with it', () => {
+  const state = createDispatchState();
+  const config = enabledConfig({ cooldownMs: 1, activityMaxPerHour: 1 });
+  const first = hashText('# Title\n');
+  recordDispatch(state, {
+    uri: URI, textHash: first, now: NOW, contextSeq: 1, trigger: 'activity',
+  });
+
+  assert.deepEqual(
+    decideDispatch({
+      state, uri: URI, textHash: hashText('# Title\n\nEdited.\n'), now: NOW + 1000, config, contextSeq: 5,
+    }),
+    { dispatch: true, gate: null, trigger: 'edit' },
+    'the quota is already spent, so a misclassification here would refuse a real edit',
+  );
+});
+
+test('a quota clamped to zero refuses every poke and leaves the whole budget to edits', () => {
+  const state = createDispatchState();
+  const config = enabledConfig({ maxPerHour: 1, cooldownMs: 1 });
+  assert.equal(config.activityMaxPerHour, 0);
+  const textHash = hashText('# Title\n');
+  recordDispatch(state, {
+    uri: URI, textHash, now: NOW - HOUR_MS - 1, contextSeq: 1, trigger: 'edit',
+  });
+
+  assert.equal(decideDispatch({
+    state, uri: URI, textHash, now: NOW, config, contextSeq: 4,
+  }).gate, 'activity-cap');
+  assert.equal(decideDispatch({
+    state, uri: URI, textHash: hashText('# Typed\n'), now: NOW, config, contextSeq: 4,
+  }).dispatch, true);
+});
+
+test('the trigger a dispatch was recorded under is what its budget is counted against', () => {
+  const state = createDispatchState();
+  recordDispatch(state, {
+    uri: URI, textHash: 'a', now: NOW, contextSeq: 1, trigger: 'activity',
+  });
+  recordDispatch(state, { uri: URI, textHash: 'b', now: NOW + 1 });
+  recordDispatch(state, {
+    uri: URI, textHash: 'c', now: NOW + 2, trigger: 'nonsense',
+  });
+
+  assert.deepEqual(state.dispatchTimes.map((entry) => entry.trigger), ['activity', 'edit', 'edit'],
+    'an unnamed or unknown trigger is an edit, which is the budget that was already there');
+  assert.equal(countRecentDispatches(state, NOW + 10), 3);
+  assert.equal(countRecentDispatches(state, NOW + 10, 'activity'), 1);
+  assert.equal(countRecentDispatches(state, NOW + HOUR_MS + 10, 'activity'), 0, 'the quota window trails an hour too');
+});
+
+// The pre-M7.5 lane, decision for decision: a caller that never passes a seq must be gated identically.
+test('with no context seq anywhere, every gate decision is the buffer-only one', () => {
+  const withSeqArgument = createDispatchState();
+  const without = createDispatchState();
+  const config = enabledConfig({ cooldownMs: 1000 });
+  const first = hashText('# Title\n');
+  const second = hashText('# Title\n\nEdited.\n');
+
+  const steps = [
+    { textHash: first, now: NOW },
+    { textHash: first, now: NOW + 2000 },
+    { textHash: second, now: NOW + 2500 },
+    { textHash: second, now: NOW + 9000 },
+  ];
+  for (const step of steps) {
+    const withNull = decideDispatch({
+      state: withSeqArgument, uri: URI, ...step, config, contextSeq: null,
+    });
+    const omitted = decideDispatch({
+      state: without, uri: URI, ...step, config,
+    });
+    assert.deepEqual(withNull, omitted, `step at ${step.now} must decide the same either way`);
+    if (!withNull.dispatch) continue;
+    recordDispatch(withSeqArgument, { uri: URI, ...step, contextSeq: null });
+    recordDispatch(without, { uri: URI, ...step });
+  }
+  assert.deepEqual(without.lastSeqByUri.size, 0);
 });
 
 // --- Hashing ---
@@ -341,6 +737,19 @@ test('a digest rides as one fenced DATA section, framed exactly like the buffer'
   assert.ok(prompt.includes('- terminal 4s ago: npm test 42 passing'));
   // Its own marker, so a captured line cannot close the buffer's fence or its own.
   assert.notEqual(marker, prompt.match(/GLISSA-BUFFER-[A-Z0-9-]+/)[0]);
+});
+
+// M7.5: activity is what moves the intent, so the framing has to say which field it may reach.
+test('the activity framing names the intent field it informs, and keeps comments on the buffer', () => {
+  const prompt = buildNavigatorPrompt({
+    uri: URI,
+    text: '# Title\n',
+    digest: 'Recent activity on this machine, newest first:\n- git 1m ago: fix the gate',
+    resultPath: '/tmp/r.json',
+  });
+  assert.match(prompt, /is DATA and background context only/, 'the DATA framing is untouched');
+  assert.match(prompt, /OPTIONAL intent field/);
+  assert.match(prompt, /every comment you make is still about the buffer alone/);
 });
 
 test('the activity marker is content-derived, so a digest cannot close its own fence', () => {

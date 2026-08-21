@@ -140,6 +140,98 @@ test('a broadcast that throws costs a warning, not the lane', () => {
   assert.equal(lane.recentEvents().length, 2);
 });
 
+// --- The activity poke (docs/plan-ingestion.md, M7.5) ---------------------
+
+test('a batch that carried events tells the consumer once, and an empty interval tells it nothing', () => {
+  const pokes = [];
+  const { lane, timers } = drivenLane(
+    { enabled: true, sources: { git: { enabled: true } } },
+    { onActivity: () => pokes.push(1) },
+  );
+
+  timers.runIntervals();
+  assert.equal(pokes.length, 0, 'no events, no poke');
+
+  lane.publish(commit('one'));
+  lane.publish(commit('two'));
+  timers.runIntervals();
+  assert.equal(pokes.length, 1, 'one poke for the batch, not one per event');
+
+  timers.runIntervals();
+  assert.equal(pokes.length, 1, 'the interval after it carried nothing');
+});
+
+test('a poke that throws costs a warning, not the batch loop or the frame it rode', () => {
+  const { lane, timers, broadcasts, warnings } = drivenLane(
+    { enabled: true, sources: { git: { enabled: true } } },
+    { onActivity: () => { throw new Error('consumer fell over'); } },
+  );
+
+  lane.publish(commit('one'));
+  timers.runIntervals();
+  assert.equal(broadcasts.length, 1, 'the frame went out before the poke and is unaffected');
+  assert.ok(warnings.some((message) => message.includes('consumer fell over')));
+
+  lane.publish(commit('two'));
+  timers.runIntervals();
+  assert.equal(broadcasts.length, 2, 'the next interval batches exactly as before');
+});
+
+test('a push that never became an event pokes nobody and moves no seq', () => {
+  const pokes = [];
+  const { lane, timers, broadcasts } = drivenLane(
+    { enabled: true, sources: { git: { enabled: true } } },
+    { onActivity: () => pokes.push(1) },
+  );
+
+  lane.publish({ source: 'git', kind: 'commit', summary: '' });
+  lane.publish({ source: 'nowhere', kind: 'commit', summary: 'wrong source' });
+  timers.runIntervals();
+  assert.equal(lane.latestSeq(), 0, 'nothing was stored, so nothing moved');
+  assert.equal(pokes.length, 0);
+  assert.equal(broadcasts.length, 0);
+});
+
+test('a lane with no consumer wired pokes nothing and still batches', () => {
+  const { lane, timers, broadcasts } = drivenLane({ enabled: true, sources: { git: { enabled: true } } });
+  lane.publish(commit('one'));
+  timers.runIntervals();
+  assert.equal(broadcasts.length, 1);
+});
+
+test('latestSeq advances only on a stored event, which is what movement means', () => {
+  const { lane } = drivenLane({ enabled: true, sources: { git: { enabled: true } } });
+  assert.equal(lane.latestSeq(), 0, 'nothing has happened yet');
+
+  lane.publish(commit('one'));
+  const afterFirst = lane.latestSeq();
+  assert.ok(afterFirst > 0);
+
+  lane.publish({ source: 'nowhere', kind: 'commit', summary: 'dropped' });
+  assert.equal(lane.latestSeq(), afterFirst, 'an unknown source is not an event');
+
+  // Rejected AFTER the source check, inside normalization: an undeclared kind, and an empty summary.
+  lane.publish({ source: 'git', kind: 'not-a-kind', summary: 'dropped' });
+  lane.publish({ source: 'git', kind: 'commit', summary: '   ' });
+  assert.equal(lane.latestSeq(), afterFirst, 'a seq burnt on a rejected push would read as movement');
+  assert.equal(lane.recentEvents().length, 1);
+
+  lane.publish(commit('two'));
+  assert.ok(lane.latestSeq() > afterFirst);
+
+  // Reading the digest ages its relative times; the movement signal must not move with them.
+  const readAgain = lane.latestSeq();
+  lane.buildDigest({ now: NOW + 600000 });
+  assert.equal(lane.latestSeq(), readAgain);
+});
+
+test('a full ring keeps its seq, so eviction is not mistaken for the machine going quiet', () => {
+  const { lane } = drivenLane({ enabled: true, sources: { git: { enabled: true, maxEntries: 3 } } });
+  for (let index = 0; index < 20; index += 1) lane.publish(commit(`commit ${index}`));
+  assert.equal(lane.recentEvents().length, 3);
+  assert.equal(lane.latestSeq(), 20);
+});
+
 // --- Snapshot -------------------------------------------------------------
 
 test('the snapshot is the current rings, newest first, and names the enabled sources', () => {

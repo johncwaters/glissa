@@ -63,6 +63,9 @@ function createNavigatorWiring({
   // Cross-source context digest from the ingest lane (docs/plan-ingestion.md, M6). Absent by default
   // and then never called, which is what keeps a dispatch prompt with no ingest lane byte-identical.
   contextDigest = null,
+  // The ingest lane's newest seq (docs/plan-ingestion.md, M7.5): the movement signal that lets the gate
+  // see activity the buffer never showed. Absent means null, and the gate is then the pre-M7.5 one.
+  contextSeq = null,
   digestBudgetChars = DIGEST_BUDGET_CHARS,
   hashFn = hashText,
 } = {}) {
@@ -89,6 +92,12 @@ function createNavigatorWiring({
   const dispatchSettings = resolveDispatchConfig(dispatchConfig);
   const dispatchEnabled = dispatchSettings.enabled === true && typeof dispatch === 'function';
   const dispatchState = createDispatchState();
+  /*
+   * The last gate LOGGED per uri. Activity arms a window as often as the machine moves, so an
+   * undeduped refusal line is one log entry per open document per quiet window, forever. A refusal is
+   * news when the gate CHANGES; the same gate holding again is the steady state, not an event.
+   */
+  const lastGateByUri = new Map();
   // Concurrency 1, machine-wide: a dispatch while one is in flight is GATED, never queued.
   let dispatchInFlight = false;
 
@@ -100,6 +109,18 @@ function createNavigatorWiring({
   function note(message) {
     if (!logger || typeof logger.log !== 'function') return;
     logger.log(`[navigator] ${message}`);
+  }
+
+  /*
+   * Keyed by trigger AND gate, never the gate alone: a poke and a save can be refused by the same cap
+   * for entirely different reasons, and the operator's own save being turned away is exactly the line
+   * that must not be swallowed by the machine's. A dispatch clears the mark, so the next refusal is news.
+   */
+  function noteGate(uri, { gate, trigger }) {
+    const key = `${trigger}:${gate}`;
+    if (lastGateByUri.get(uri) === key) return;
+    lastGateByUri.set(uri, key);
+    note(`no dispatch for ${uri}: ${gate}${trigger ? ` (${trigger})` : ''}`);
   }
 
   function broadcastFindings(uri, diagnostics) {
@@ -206,6 +227,22 @@ function createNavigatorWiring({
     }
   }
 
+  /*
+   * The same contract as the digest and read on the same path: once per dispatch, guarded, and a
+   * provider that throws costs this dispatch its movement signal rather than the dispatch itself. Null
+   * whenever no lane is wired, which is what makes every gate decision identical to the pre-M7.5 one.
+   */
+  function readContextSeq() {
+    if (typeof contextSeq !== 'function') return null;
+    try {
+      const seq = contextSeq();
+      return Number.isFinite(seq) ? seq : null;
+    } catch (error) {
+      warn(`context seq failed: ${error.message}`);
+      return null;
+    }
+  }
+
   // The in-flight dispatch, so a test (and shutdown) can wait for the lane to go quiet.
   let dispatchSettled = Promise.resolve();
 
@@ -240,24 +277,37 @@ function createNavigatorWiring({
     /**
      * One dispatch attempt, already at a pause boundary. Every remaining question (has the buffer
      * moved, is the cooldown up, is the hourly budget spent, is one already running) belongs to the
-     * pure gate, and a refusal costs exactly one log line naming the gate that held.
+     * pure gate, and a refusal costs exactly one log line naming the gate that held. `armedBy` says
+     * which boundary opened this window, and the gate uses it only to classify a buffer it has no
+     * recorded hash for.
      */
-    async function runDispatch(uri) {
+    async function runDispatch(uri, armedBy = 'edit') {
       if (!dispatchEnabled || closed) return;
       const doc = getDoc(store, uri);
       if (!isMarkdownDoc(doc)) return;
       const text = typeof doc.text === 'string' ? doc.text : '';
       const textHash = hashFn(text);
+      const seq = readContextSeq();
       const decision = decideDispatch({
-        state: dispatchState, uri, textHash, now: nowFn(), config: dispatchSettings, inFlight: dispatchInFlight,
+        state: dispatchState,
+        uri,
+        textHash,
+        now: nowFn(),
+        config: dispatchSettings,
+        inFlight: dispatchInFlight,
+        contextSeq: seq,
+        armedBy,
       });
       if (!decision.dispatch) {
-        note(`no dispatch for ${uri}: ${decision.gate}`);
+        noteGate(uri, decision);
         return;
       }
+      lastGateByUri.delete(uri);
       // Recorded before the await, so the cooldown and the hourly budget count attempts, not successes.
       dispatchInFlight = true;
-      recordDispatch(dispatchState, { uri, textHash, now: nowFn() });
+      recordDispatch(dispatchState, {
+        uri, textHash, now: nowFn(), contextSeq: seq, trigger: decision.trigger,
+      });
       let result = null;
       try {
         result = await dispatch({
@@ -283,23 +333,38 @@ function createNavigatorWiring({
       applyModelIntent(result.intent);
     }
 
-    function armDispatch(uri) {
+    function armDispatch(uri, armedBy) {
       if (!dispatchEnabled || closed || !uri) return;
       cancelDispatch(uri);
       const timer = setTimeoutFn(() => {
         dispatchTimersByUri.delete(uri);
         if (closed) return;
-        dispatchSettled = runDispatch(uri).catch((error) => warn(`dispatch loop failed: ${error.message}`));
+        dispatchSettled = runDispatch(uri, armedBy).catch((error) => warn(`dispatch loop failed: ${error.message}`));
       }, dispatchSettings.quietMs);
       if (timer && typeof timer.unref === 'function') timer.unref();
       dispatchTimersByUri.set(uri, timer);
     }
 
-    // Typing pushes the quiet window out; it never arms a window of its own, because a document with
-    // no published sweep behind it has nothing for a navigator to react to yet.
+    // Typing pushes an armed quiet window out and never opens one, because a document with no published
+    // sweep behind it has nothing to react to yet; noteActivity below is the only other armer.
     function rearmDispatch(uri) {
       if (!dispatchTimersByUri.has(uri)) return;
-      armDispatch(uri);
+      armDispatch(uri, 'edit');
+    }
+
+    /*
+     * Machine activity reached the lane (docs/plan-ingestion.md, M7.5). It ARMS an idle document and
+     * never touches an armed one: a continuous stream of activity that kept pushing the window out would
+     * starve dispatch forever, which is the opposite of what the poke exists for. A window this arms
+     * that races a dispatch is simply refused by the gate, at the cost of one log line.
+     */
+    function noteActivity() {
+      if (!dispatchEnabled || closed) return;
+      for (const doc of listDocs(store)) {
+        if (!isMarkdownDoc(doc)) continue;
+        if (dispatchTimersByUri.has(doc.uri)) continue;
+        armDispatch(doc.uri, 'activity');
+      }
     }
 
     function publishDiagnostics(uri) {
@@ -314,7 +379,7 @@ function createNavigatorWiring({
       // Outside the try: the tab's state does not depend on the editor socket accepting the frame.
       recordFindings(uri, diagnostics);
       // A published sweep is the pause boundary tier 3 waits behind; the quiet window starts here.
-      armDispatch(uri);
+      armDispatch(uri, 'edit');
     }
 
     function scheduleSweep(uri) {
@@ -353,7 +418,7 @@ function createNavigatorWiring({
         publishDiagnostics(uri);
         // A save is the boundary itself: it evaluates the same gate now rather than waiting it out.
         cancelDispatch(uri);
-        dispatchSettled = runDispatch(uri).catch((error) => warn(`dispatch loop failed: ${error.message}`));
+        dispatchSettled = runDispatch(uri, 'edit').catch((error) => warn(`dispatch loop failed: ${error.message}`));
         return null;
       },
       // The carbon unit closed the buffer, so its findings are gone rather than merely unrefreshed.
@@ -366,6 +431,7 @@ function createNavigatorWiring({
         clearFindings(uri);
         clearComments(uri);
         forgetUri(dispatchState, uri);
+        lastGateByUri.delete(uri);
         return null;
       },
     };
@@ -401,6 +467,7 @@ function createNavigatorWiring({
     const connection = {
       handleFrame,
       close,
+      noteActivity,
       get docCount() { return listDocs(store).length; },
       get pendingSweepCount() { return sweepTimersByUri.size; },
       get pendingDispatchCount() { return dispatchTimersByUri.size; },
@@ -432,6 +499,16 @@ function createNavigatorWiring({
     }
   }
 
+  /*
+   * The ingest lane's poke: the machine moved, so every open markdown buffer gets the same quiet window
+   * an edit would have armed. Nothing dispatches here; the gate still decides when the window expires,
+   * and a lane with dispatch off does nothing at all.
+   */
+  function noteActivity() {
+    if (!dispatchEnabled) return;
+    for (const connection of connections) connection.noteActivity();
+  }
+
   wss.on('connection', (ws) => { attach(ws); });
 
   function handleUpgrade(req, socket, head) {
@@ -457,7 +534,10 @@ function createNavigatorWiring({
     snapshotMessage,
     applyModelIntent,
     setOperatorIntent,
+    noteActivity,
     getIntent: () => intentPayload(intentState),
+    // The movement signal the next gate will read, so a caller can see whether a lane is wired at all.
+    latestContextSeq: readContextSeq,
     // Settles once the in-flight dispatch has been applied, which is how a test waits for the lane.
     whenDispatchSettled: () => Promise.resolve(dispatchSettled),
     get connectionCount() { return connections.size; },

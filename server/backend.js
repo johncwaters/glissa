@@ -912,6 +912,7 @@ function createBackend(httpServer, options = {}) {
    * Constructed BEFORE the navigator lane because that lane takes this one's digest as a dependency.
    */
   const ingestConfig = resolveIngestConfig(config.ingest);
+  const navigatorEnabled = config.navigator && config.navigator.enabled === true;
   const ingestLane = ingestConfig.enabled
     ? createIngestLane({
       ...(options.ingestLaneOptions || {}),
@@ -920,6 +921,12 @@ function createBackend(httpServer, options = {}) {
       broadcast: (msg) => broadcastLocalControl(msg),
       // Feeds the M7 feedback-loop exclusion; rationale at the consuming site in ingest-wiring.js.
       laneMap: () => laneLedger.laneMap(),
+      /*
+       * The other half of activity-driven dispatch (docs/plan-ingestion.md, M7.5), wired only when BOTH
+       * lanes exist. Late-binding on purpose: the navigator lane is constructed below, and the first
+       * poke can only arrive a batch interval after both are up.
+       */
+      onActivity: navigatorEnabled ? () => navigatorLane.noteActivity() : null,
     })
     : null;
 
@@ -933,7 +940,7 @@ function createBackend(httpServer, options = {}) {
    */
   const navigatorDispatchConfig = resolveNavigatorDispatchConfig(config.navigator ? config.navigator.dispatch : null);
   const navigatorSessions = new Map();
-  const navigatorLane = config.navigator && config.navigator.enabled === true
+  const navigatorLane = navigatorEnabled
     ? createNavigatorWiring({
       logger: console,
       broadcast: (msg) => broadcastControl(msg),
@@ -951,6 +958,9 @@ function createBackend(httpServer, options = {}) {
       // One cross-source context section in the dispatch prompt. Null with no ingest lane, and the
       // prompt is then byte-identical to the pre-M6 one.
       contextDigest: ingestLane ? ingestLane.buildDigest : null,
+      // The movement signal beside it: new events, never aging timestamps. Null with no ingest lane, and
+      // the gate then decides exactly what it decided before M7.5.
+      contextSeq: ingestLane ? ingestLane.latestSeq : null,
     })
     : null;
 

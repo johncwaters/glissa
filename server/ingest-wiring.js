@@ -12,8 +12,8 @@
 'use strict';
 
 const {
-  DEFAULT_DIGEST_BUDGET_CHARS, buildContextDigest, createIngestStore, enabledSourceNames, publishEvent,
-  resolveIngestConfig, ringStats, snapshotEvents,
+  DEFAULT_DIGEST_BUDGET_CHARS, buildContextDigest, createIngestStore, enabledSourceNames, latestSeq,
+  publishEvent, resolveIngestConfig, ringStats, snapshotEvents,
 } = require('./core/ingest-core');
 const { createAgentLogIngest } = require('./ingest-agent-logs');
 const { createTerminalIngest } = require('./ingest-terminal');
@@ -28,6 +28,9 @@ function createIngestLane({
   logger = console,
   laneMap = null,
   agentLogOptions = null,
+  // Told once per batch that carried events, so a consumer learns the machine moved without polling
+  // (docs/plan-ingestion.md, M7.5). Absent by default, and then nothing is ever called.
+  onActivity = null,
   nowFn = Date.now,
   setIntervalFn = setInterval,
   clearIntervalFn = clearInterval,
@@ -58,6 +61,17 @@ function createIngestLane({
     }
   }
 
+  // Rides the batch the lane already pays for, so no new timer exists and a throwing consumer costs one
+  // warning rather than the frame that carried it.
+  function pokeActivity() {
+    if (typeof onActivity !== 'function') return;
+    try {
+      onActivity();
+    } catch (error) {
+      warn(`activity callback failed: ${error.message}`);
+    }
+  }
+
   /**
    * One frame per interval at most. The NEWEST events survive an overflow, because the feed reads
    * newest-first and a count is a better answer than a stale page: everything the count stands for is
@@ -76,6 +90,7 @@ function createIngestLane({
       ts: nowFn(),
     };
     emit(message);
+    pokeActivity();
     return message;
   }
 
@@ -198,6 +213,8 @@ function createIngestLane({
     stop,
     sources,
     ringStats: () => ringStats(store),
+    // The lane-level movement signal: the newest seq stamped, 0 before anything has been published.
+    latestSeq: () => latestSeq(store),
     recentEvents: (limit = snapshotEventLimit) => snapshotEvents(store, { limit }),
     get agentLogs() { return agentLogs; },
     get agentLogsEnabled() { return agentLogsEnabled; },

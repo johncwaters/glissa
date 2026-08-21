@@ -236,10 +236,23 @@ function publishEvent(store, raw, now) {
   if (!source) return null;
   const ring = store.rings.get(source);
   if (!ring) return null;
-  store.seq += 1;
-  const event = normalizeEvent(raw, { seq: store.seq, now });
+  // Stamped only once the event is known to be storable: a seq burnt on a rejected push would read as
+  // machine movement to anyone gating on latestSeq.
+  const event = normalizeEvent(raw, { seq: store.seq + 1, now });
   if (!event) return null;
+  store.seq += 1;
   return pushToRing(ring, event);
+}
+
+/*
+ * The newest seq the store has stamped, 0 before anything is published. This is the machine's movement
+ * signal (docs/plan-ingestion.md, M7.5): seq only ever advances on a NEW event, so a consumer gating on
+ * it cannot be fooled by a digest whose relative times merely aged.
+ */
+function latestSeq(store) {
+  const seq = Number(store?.seq);
+  if (!Number.isFinite(seq)) return 0;
+  return seq;
 }
 
 // Newest first across every ring, which is the order both the feed and the digest read in.
@@ -343,6 +356,7 @@ module.exports = {
   buildContextDigest,
   createIngestStore,
   enabledSourceNames,
+  latestSeq,
   normalizeEvent,
   publishEvent,
   resolveIngestConfig,

@@ -314,7 +314,9 @@ const COMMENT = { line: 3, message: 'The repeat is a symptom; the sentence is do
  * A lane whose dispatch is a fake: it records what it was asked and answers whatever the test says.
  * NOTHING here spawns claude; the real spawn is covered by tests/navigator-dispatch.test.js.
  */
-function dispatchingConnection({ dispatch: overrides = {}, respond = null, contextDigest = null } = {}) {
+function dispatchingConnection({
+  dispatch: overrides = {}, respond = null, contextDigest = null, contextSeq = null,
+} = {}) {
   const calls = [];
   const dispatchConfig = { enabled: true, ...overrides };
   const dispatch = (args) => {
@@ -322,7 +324,12 @@ function dispatchingConnection({ dispatch: overrides = {}, respond = null, conte
     if (typeof respond === 'function') return respond(args, calls.length);
     return Promise.resolve({ verdict: 'NONE', comments: [], reason: null });
   };
-  return { ...drivenConnection({ dispatchConfig, dispatch, contextDigest }), calls };
+  return {
+    ...drivenConnection({
+      dispatchConfig, dispatch, contextDigest, contextSeq,
+    }),
+    calls,
+  };
 }
 
 // The publish arms the quiet window, so a lane driven by the fake timers needs two rounds: one for the
@@ -995,4 +1002,345 @@ test('a digest that is not a string is treated as absent rather than stringified
   await wiring.whenDispatchSettled();
 
   assert.equal(calls[0].digest, '');
+});
+
+// --- Activity-driven dispatch (docs/plan-ingestion.md, M7.5) ---
+
+/*
+ * The lane as it stands on the operator's machine when the bug bites: one markdown buffer open, nobody
+ * typing, and the only thing still moving is the ingest timeline. `machine.seq` stands in for the ingest
+ * lane's latestSeq(), and noteActivity() for the poke its batch delivers.
+ */
+function pokableConnection({ dispatch: overrides = {}, respond = null } = {}) {
+  const machine = { seq: 0 };
+  const context = dispatchingConnection({
+    dispatch: { cooldownMs: 1, ...overrides },
+    respond,
+    contextSeq: () => machine.seq,
+  });
+  return { ...context, machine };
+}
+
+test('a poke arms one quiet window per open markdown buffer and leaves other documents alone', async (t) => {
+  const otherUri = 'file:///tmp/other.markdown';
+  const {
+    wiring, connection, timers, lsp,
+  } = pokableConnection();
+  t.after(() => wiring.stop());
+
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  lsp('textDocument/didOpen', didOpenParams(otherUri, 'markdown', REPEATED_WORD_MARKDOWN));
+  lsp('textDocument/didOpen', didOpenParams(SCRIPT_URI, 'javascript', 'const the the = 1;\n'));
+  runSweepThenDispatch(timers);
+  await wiring.whenDispatchSettled();
+  assert.equal(timers.pendingCount, 0, 'the editor-driven windows have all run out');
+
+  wiring.noteActivity();
+  assert.equal(connection.pendingDispatchCount, 2, 'the code buffer is not a navigator document in v1');
+  assert.equal(timers.pendingCount, 2);
+});
+
+test('a stream of activity never resets an armed window, or a busy machine would starve dispatch', async (t) => {
+  const { wiring, timers, lsp } = pokableConnection();
+  t.after(() => wiring.stop());
+
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  runSweepThenDispatch(timers);
+  await wiring.whenDispatchSettled();
+
+  wiring.noteActivity();
+  const armed = timers.pendingIds;
+  assert.equal(armed.length, 1);
+  wiring.noteActivity();
+  wiring.noteActivity();
+  assert.deepEqual(timers.pendingIds, armed, 'the same window, not a fresh one pushed further out');
+});
+
+test('a closed connection is poked no more than a closed buffer is', async (t) => {
+  const {
+    wiring, connection, timers, lsp,
+  } = pokableConnection();
+  t.after(() => wiring.stop());
+
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  runSweepThenDispatch(timers);
+  await wiring.whenDispatchSettled();
+
+  connection.close();
+  wiring.noteActivity();
+  assert.equal(connection.pendingDispatchCount, 0);
+  assert.equal(timers.pendingCount, 0);
+});
+
+test('activity alone re-dispatches an untouched buffer, and the belief it comes back with lands', async (t) => {
+  const {
+    wiring, timers, calls, lsp, clock, machine,
+  } = pokableConnection({
+    respond: () => Promise.resolve({
+      verdict: 'NONE', comments: [], intent: 'wiring the ingest lane into the navigator gate', reason: null,
+    }),
+  });
+  t.after(() => wiring.stop());
+
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  runSweepThenDispatch(timers);
+  await wiring.whenDispatchSettled();
+  assert.equal(calls.length, 1);
+
+  // Nobody typed: the buffer is the same text, and only the machine around it moved.
+  clock.now += 60000;
+  machine.seq = 4;
+  wiring.noteActivity();
+  timers.runPending();
+  await wiring.whenDispatchSettled();
+
+  assert.equal(calls.length, 2, 'new events are what re-open a document nobody is editing');
+  assert.equal(calls[1].text, REPEATED_WORD_MARKDOWN);
+  assert.equal(wiring.getIntent().text, 'wiring the ingest lane into the navigator gate');
+});
+
+test('a poke with no new events behind it is refused, so an aging digest cannot buy a dispatch', async (t) => {
+  const {
+    wiring, timers, calls, notes, lsp, clock, machine,
+  } = pokableConnection();
+  t.after(() => wiring.stop());
+
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  runSweepThenDispatch(timers);
+  await wiring.whenDispatchSettled();
+
+  clock.now += 60000;
+  machine.seq = 3;
+  wiring.noteActivity();
+  timers.runPending();
+  await wiring.whenDispatchSettled();
+  assert.equal(calls.length, 2, 'the first poke after real activity dispatches');
+
+  clock.now += 60000;
+  wiring.noteActivity();
+  timers.runPending();
+  await wiring.whenDispatchSettled();
+  assert.equal(calls.length, 2, 'the seq stood still, so nothing about the machine has moved');
+  assert.ok(notes.some((line) => line.includes('unchanged')));
+});
+
+test('the cooldown still holds a document a busy machine keeps poking', async (t) => {
+  const {
+    wiring, timers, calls, notes, lsp, clock, machine,
+  } = pokableConnection({ dispatch: { cooldownMs: 300000 } });
+  t.after(() => wiring.stop());
+
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  runSweepThenDispatch(timers);
+  await wiring.whenDispatchSettled();
+
+  for (let event = 1; event <= 5; event += 1) {
+    clock.now += 1000;
+    machine.seq += 1;
+    wiring.noteActivity();
+    timers.runPending();
+    await wiring.whenDispatchSettled();
+  }
+  assert.equal(calls.length, 1, 'at most one dispatch per cooldown window, however loud the machine is');
+  assert.ok(notes.some((line) => line.includes('cooldown')));
+});
+
+test('with no ingest lane wired a poke changes nothing about what the gate decides', async (t) => {
+  const {
+    wiring, calls, notes, timers, lsp, clock,
+  } = dispatchingConnection({ dispatch: { cooldownMs: 1 } });
+  t.after(() => wiring.stop());
+  assert.equal(wiring.latestContextSeq(), null);
+
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  runSweepThenDispatch(timers);
+  await wiring.whenDispatchSettled();
+
+  clock.now += 60000;
+  wiring.noteActivity();
+  timers.runPending();
+  await wiring.whenDispatchSettled();
+  assert.equal(calls.length, 1, 'the buffer-only gate, exactly as it was before M7.5');
+  assert.ok(notes.some((line) => line.includes('unchanged')));
+});
+
+test('a lane with dispatch off arms nothing at all when the machine moves', (t) => {
+  const { wiring, connection, timers, lsp } = drivenConnection({ contextSeq: () => 9 });
+  t.after(() => wiring.stop());
+
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  timers.runPending();
+  wiring.noteActivity();
+  assert.equal(connection.pendingDispatchCount, 0);
+  assert.equal(timers.pendingCount, 0);
+});
+
+test('a seq provider that throws costs the movement signal, never the dispatch', async (t) => {
+  const { wiring, timers, calls, warnings, lsp } = dispatchingConnection({
+    contextSeq: () => { throw new Error('rings unavailable'); },
+  });
+  t.after(() => wiring.stop());
+
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  runSweepThenDispatch(timers);
+  await wiring.whenDispatchSettled();
+
+  assert.equal(calls.length, 1, 'the edit-driven dispatch still happened');
+  assert.ok(warnings.some((message) => message.includes('rings unavailable')));
+  assert.equal(wiring.latestContextSeq(), null);
+});
+
+test('the machine cannot poke its way past its own quota, and typing still gets through', async (t) => {
+  const {
+    wiring, timers, calls, notes, lsp, clock, machine,
+  } = pokableConnection({ dispatch: { activityMaxPerHour: 1 } });
+  t.after(() => wiring.stop());
+
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  runSweepThenDispatch(timers);
+  await wiring.whenDispatchSettled();
+  assert.equal(calls.length, 1, 'the buffer was read once when it was opened');
+
+  for (let event = 1; event <= 3; event += 1) {
+    clock.now += 1000;
+    machine.seq += 1;
+    wiring.noteActivity();
+    timers.runPending();
+    await wiring.whenDispatchSettled();
+  }
+  assert.equal(calls.length, 2, 'one activity dispatch, which is the whole quota');
+  assert.ok(notes.some((line) => line.includes('activity-cap')));
+
+  // What the quota exists to protect: the carbon unit saves, and the budget is still there for them.
+  clock.now += 1000;
+  lsp('textDocument/didChange', didChangeParams(MARKDOWN_URI, 2, '# Title\n\nA sentence they just typed.\n'));
+  lsp('textDocument/didSave', { textDocument: { uri: MARKDOWN_URI } });
+  await wiring.whenDispatchSettled();
+  assert.equal(calls.length, 3, 'an edit answers to the total budget only');
+});
+
+/*
+ * The cold start at the wiring altitude: a buffer whose first sweep-armed window was turned away has no
+ * recorded hash, so when a poke later arms it the gate has nothing to read but the arming reason. The
+ * quota is zero here, which makes the classification directly visible: 'activity-cap' can only be
+ * reached by a dispatch classified as the machine's, and 'hour-cap' is what a misread would say.
+ */
+test('a buffer first read after a poke is charged to the machine, not to nobody typing', async (t) => {
+  const otherUri = 'file:///tmp/other.md';
+  const {
+    wiring, timers, calls, notes, lsp, clock, machine,
+  } = pokableConnection({ dispatch: { maxPerHour: 1 } });
+  t.after(() => wiring.stop());
+
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  runSweepThenDispatch(timers);
+  await wiring.whenDispatchSettled();
+  assert.equal(calls.length, 1, 'the first buffer spends the whole budget');
+
+  lsp('textDocument/didOpen', didOpenParams(otherUri, 'markdown', REPEATED_WORD_MARKDOWN));
+  runSweepThenDispatch(timers);
+  await wiring.whenDispatchSettled();
+  assert.equal(calls.length, 1);
+  assert.ok(notes.some((line) => line.includes('hour-cap')), 'its sweep-armed window was turned away, so it recorded no hash');
+
+  // Only the second buffer stays open, so the poke below reaches exactly one document.
+  lsp('textDocument/didClose', { textDocument: { uri: MARKDOWN_URI } });
+  clock.now += 1000;
+  machine.seq = 5;
+  wiring.noteActivity();
+  timers.runPending();
+  await wiring.whenDispatchSettled();
+
+  assert.equal(calls.length, 1);
+  assert.ok(
+    notes.some((line) => line.includes('activity-cap')),
+    `a poke-armed first read must be classified as activity, saw ${JSON.stringify(notes)}`,
+  );
+});
+
+test('a refusal is logged when the gate changes, not once per quiet window forever', async (t) => {
+  const {
+    wiring, timers, calls, notes, lsp, clock, machine,
+  } = pokableConnection();
+  t.after(() => wiring.stop());
+  const unchangedLines = () => notes.filter((line) => line.includes('unchanged')).length;
+
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  runSweepThenDispatch(timers);
+  await wiring.whenDispatchSettled();
+
+  for (let poke = 0; poke < 4; poke += 1) {
+    clock.now += 1000;
+    wiring.noteActivity();
+    timers.runPending();
+    await wiring.whenDispatchSettled();
+  }
+  assert.equal(calls.length, 1, 'nothing moved, so nothing dispatched');
+  assert.equal(unchangedLines(), 1, 'the same gate holding again is the steady state, not news');
+
+  clock.now += 1000;
+  machine.seq = 9;
+  wiring.noteActivity();
+  timers.runPending();
+  await wiring.whenDispatchSettled();
+  assert.equal(calls.length, 2);
+
+  clock.now += 1000;
+  wiring.noteActivity();
+  timers.runPending();
+  await wiring.whenDispatchSettled();
+  assert.equal(unchangedLines(), 2, 'a dispatch happened in between, so the next refusal is news again');
+});
+
+// The operator's own save being turned away is the one refusal that must always reach the log, even
+// when a poke was already refused by the same cap moments earlier.
+test('a save refused by the same cap as a poke is logged, not swallowed as a repeat', async (t) => {
+  const otherUri = 'file:///tmp/other.md';
+  const {
+    wiring, timers, calls, notes, lsp, clock, machine,
+  } = pokableConnection({ dispatch: { maxPerHour: 2, activityMaxPerHour: 1 } });
+  t.after(() => wiring.stop());
+
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  runSweepThenDispatch(timers);
+  await wiring.whenDispatchSettled();
+  lsp('textDocument/didOpen', didOpenParams(otherUri, 'markdown', REPEATED_WORD_MARKDOWN));
+  runSweepThenDispatch(timers);
+  await wiring.whenDispatchSettled();
+  assert.equal(calls.length, 2, 'two buffers read once each, and the hourly budget is spent');
+  lsp('textDocument/didClose', { textDocument: { uri: otherUri } });
+
+  clock.now += 1000;
+  machine.seq = 5;
+  wiring.noteActivity();
+  timers.runPending();
+  await wiring.whenDispatchSettled();
+
+  clock.now += 1000;
+  lsp('textDocument/didChange', didChangeParams(MARKDOWN_URI, 2, '# Title\n\nA sentence they just typed.\n'));
+  lsp('textDocument/didSave', { textDocument: { uri: MARKDOWN_URI } });
+  await wiring.whenDispatchSettled();
+
+  const hourCapLines = notes.filter((line) => line.includes('hour-cap'));
+  assert.equal(hourCapLines.length, 2, `both refusals are news, saw ${JSON.stringify(notes)}`);
+  assert.ok(hourCapLines.some((line) => line.includes('(activity)')));
+  assert.ok(hourCapLines.some((line) => line.includes('(edit)')));
+});
+
+test('a seq that is not a finite number is read as no lane rather than as movement', async (t) => {
+  const {
+    wiring, timers, calls, lsp, clock,
+  } = dispatchingConnection({ dispatch: { cooldownMs: 1 }, contextSeq: () => '12' });
+  t.after(() => wiring.stop());
+
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  runSweepThenDispatch(timers);
+  await wiring.whenDispatchSettled();
+
+  clock.now += 60000;
+  wiring.noteActivity();
+  timers.runPending();
+  await wiring.whenDispatchSettled();
+  assert.equal(calls.length, 1);
+  assert.equal(wiring.latestContextSeq(), null);
 });
