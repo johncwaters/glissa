@@ -11,6 +11,7 @@
 
 const { safeNumber, stringOrNull } = require('./usage-number-core');
 const { lookupModelPrice, ratesForPrice } = require('./usage-pricing-core');
+const { vendorOf } = require('./usage-aggregate-core');
 
 const DAY_KEY_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -56,13 +57,6 @@ function normalizeRtkDaily(daily) {
   return rows;
 }
 
-// Matches server/core/usage-aggregate-core.js vendorOf: an absent vendor is Claude, so a row from an
-// older report still counts.
-function isClaudeRow(row) {
-  const vendor = typeof row?.vendor === 'string' ? row.vendor.trim() : '';
-  return vendor === '' || vendor === 'claude';
-}
-
 /*
  * What the prompt cache saved against paying full input list price for the same tokens. A FLAT-rate
  * estimate: the above-200k tier is deliberately ignored, because the report's model rows carry no
@@ -70,17 +64,17 @@ function isClaudeRow(row) {
  * have. A model with no price contributes its TOKENS but no dollars, and is named so the figure reads as
  * a floor rather than a total.
  */
-function computeCacheSavings(modelRows, pricingTable, lookupDeps = {}) {
+function computeCacheSavings(modelRows, pricingTable) {
   const rows = Array.isArray(modelRows) ? modelRows : [];
   let savedUSD = 0;
   let cacheReadTokens = 0;
   const unpricedModels = [];
   for (const row of rows) {
-    if (!isClaudeRow(row)) continue;
+    if (vendorOf(row) !== 'claude') continue;
     const cacheRead = safeNumber(row?.cacheRead);
     if (cacheRead <= 0) continue;
     cacheReadTokens += cacheRead;
-    const resolved = lookupModelPrice(pricingTable, row?.model, lookupDeps);
+    const resolved = lookupModelPrice(pricingTable, row?.model, {});
     if (!resolved) {
       const name = stringOrNull(row?.model);
       if (name !== null && !unpricedModels.includes(name)) unpricedModels.push(name);
