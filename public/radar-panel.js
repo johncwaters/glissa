@@ -497,7 +497,7 @@ function buildPrRow(row) {
   item.tabIndex = 0;
   item.setAttribute('role', 'button');
   item.setAttribute('aria-label', `Open the pull requests view for ${numbered}`);
-  item.title = 'Open the pull requests view';
+  item.title = row.reason || 'Open the pull requests view';
   item.addEventListener('click', () => openPrsView());
   item.addEventListener('keydown', (event) => {
     if (event.target !== item) return;

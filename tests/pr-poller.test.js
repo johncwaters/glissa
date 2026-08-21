@@ -179,6 +179,19 @@ test('a hung review session is force-resolved to ERROR by the timeout and frees 
   assert.match(pings[0], /error on me\/repo#7/);
 });
 
+test('ERROR verdict stores the first reason line and broadcasts it', async () => {
+  const { poller, summaries } = harness({
+    gh: { listPrs: async () => [ownPr()] },
+    spawnReview: async () => ({ verdict: 'ERROR', summary: 'review failed\nfull details' }),
+  });
+  await poller.start();
+  await flush();
+  await poller.tick();
+  await flush();
+  assert.equal(poller._state()['me/repo#7'].reason, 'review failed');
+  assert.equal(summaries.at(-1).projects[0].prs[0].reason, 'review failed');
+});
+
 test('conflict lane: branch checked out locally -> ERROR, no worktree, no spawn', async () => {
   let created = 0;
   let spawned = 0;
@@ -257,12 +270,13 @@ test('merge-on-green: green + no workflow files -> rebase merge + merged ping', 
   await flush();
   assert.deepEqual(merged, { n: 7, m: 'rebase' });
   assert.equal(poller._state()['me/repo#7'].phase, 'merged');
+  assert.equal(poller._state()['me/repo#7'].reason, undefined);
   assert.match(pings[0], /merged me\/repo#7/);
 });
 
 test('merge gate: none (no checks) is non-mergeable -> error ping once, never merges', async () => {
   let mergeCalls = 0;
-  const { poller, pings } = harness({
+  const { poller, pings, summaries } = harness({
     initialState: AWAITING,
     gh: { listPrs: async () => [ownPr()], checksStatus: async () => 'none', merge: async () => { mergeCalls += 1; return { ok: true }; } },
   });
@@ -273,6 +287,8 @@ test('merge gate: none (no checks) is non-mergeable -> error ping once, never me
   assert.equal(mergeCalls, 0, 'never merged a no-checks PR');
   assert.equal(pings.length, 1, 'error pinged once, not per tick');
   assert.match(pings[0], /no CI checks/);
+  assert.equal(poller._state()['me/repo#7'].reason, 'no CI checks; merge manually');
+  assert.equal(summaries.at(-1).projects[0].prs[0].reason, 'no CI checks; merge manually');
 });
 
 test('merge gate: failing checks -> no merge, error ping once', async () => {
@@ -310,7 +326,25 @@ test('merge gate: green but touches workflow files -> no merge, downgrade to don
   await flush();
   assert.equal(mergeCalls, 0);
   assert.equal(poller._state()['me/repo#7'].phase, 'done');
+  assert.equal(poller._state()['me/repo#7'].reason, 'touches workflow files, merge manually');
   assert.match(pings[0], /workflow/);
+});
+
+test('merge gate: successful merge clears a stored reason', async () => {
+  const { poller, summaries } = harness({
+    initialState: { 'me/repo#7': { phase: 'awaiting-checks', reviewedHead: 'sha1', reason: 'old failure' } },
+    gh: {
+      listPrs: async () => [ownPr()],
+      checksStatus: async () => 'green',
+      touchesWorkflows: async () => false,
+      merge: async () => ({ ok: true, err: '' }),
+    },
+  });
+  await poller.start();
+  await flush();
+  assert.equal(poller._state()['me/repo#7'].phase, 'merged');
+  assert.equal(poller._state()['me/repo#7'].reason, undefined);
+  assert.equal(summaries.at(-1).projects[0].prs[0].reason, null);
 });
 
 test('merge gate: a head advanced past the reviewed head is NOT merged (re-reviewed instead)', async () => {
@@ -330,6 +364,20 @@ test('merge gate: a head advanced past the reviewed head is NOT merged (re-revie
   await flush();
   assert.equal(mergeCalls, 0, 'never merges an unreviewed head');
   assert.equal(spawned, 1, 're-reviews the new head instead');
+});
+
+test('starting a fresh review clears a stored reason', async () => {
+  let releaseReview;
+  const { poller, summaries } = harness({
+    initialState: { 'me/repo#7': { phase: 'error', reviewedHead: 'sha1', reason: 'old failure', pingedError: true } },
+    gh: { listPrs: async () => [ownPr({ headRefOid: 'sha2' })] },
+    spawnReview: () => new Promise((resolve) => { releaseReview = resolve; }),
+  });
+  await poller.start();
+  assert.equal(poller._state()['me/repo#7'].reason, undefined);
+  assert.equal(summaries.at(-1).projects[0].prs[0].reason, null);
+  releaseReview({ verdict: 'CLEAN' });
+  await flush();
 });
 
 test('merge gate: an unknown workflow-files result (gh error) fails closed - no merge, no downgrade', async () => {
@@ -425,6 +473,7 @@ test('onTickComplete emits the dashboard broadcast payload', async () => {
     inFlight: true,
     wasConflicting: false,
     pingedError: false,
+    reason: null,
   }], 'the snapshot describes the tick, so the review is still in flight');
 });
 

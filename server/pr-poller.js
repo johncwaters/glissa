@@ -76,6 +76,8 @@ function createPrPoller(deps) {
     entry.wasConflicting = wasConflicting;
     entry.pingedError = verdict === 'ERROR';
     entry.reviewedHead = ctx.head || pr.headRefOid;
+    if (verdict === 'ERROR') entry.reason = firstLine(ctx.reason || ctx.summary || '');
+    if (verdict !== 'ERROR') delete entry.reason;
     state[key] = entry;
     const kindByVerdict = { CLEAN: 'clean', RESOLVED: 'resolved', CHANGES: 'changes', ERROR: 'error' };
     ping(kindByVerdict[verdict] || 'error', { key, summary: ctx.summary, reason: ctx.reason });
@@ -169,6 +171,7 @@ function createPrPoller(deps) {
       if (wf === null) return false; // gh files query failed: fail closed, defer to next tick, never merge blind
       if (wf) {
         entry.phase = 'done';
+        entry.reason = 'touches workflow files, merge manually';
         if (!entry.pingedError) {
           ping('error', { key, reason: 'touches workflow files, merge manually' });
           entry.pingedError = true;
@@ -178,6 +181,7 @@ function createPrPoller(deps) {
       const m = await gh.merge(pr.number, mergeMethod);
       if (m.ok) {
         entry.phase = 'merged';
+        delete entry.reason;
         ping('merged', { key, summary: mergeMethod });
         return true;
       }
@@ -185,6 +189,7 @@ function createPrPoller(deps) {
         delete state[key];
         return true;
       }
+      entry.reason = `merge failed: ${firstLine(m.err)}`;
       if (!entry.pingedError) {
         ping('error', { key, reason: `merge failed: ${firstLine(m.err)}` });
         entry.pingedError = true;
@@ -193,9 +198,10 @@ function createPrPoller(deps) {
       return false;
     }
 
-    if (entry.pingedError) return false;
     entry.phase = 'error';
-    ping('error', { key, reason: status === 'none' ? 'no CI checks; merge manually' : 'checks failing' });
+    entry.reason = status === 'none' ? 'no CI checks; merge manually' : 'checks failing';
+    if (entry.pingedError) return false;
+    ping('error', { key, reason: entry.reason });
     entry.pingedError = true;
     return true;
   }
@@ -227,6 +233,7 @@ function createPrPoller(deps) {
         inFlight: entry.inFlight === true,
         wasConflicting: entry.wasConflicting === true,
         pingedError: entry.pingedError === true,
+        reason: entry.reason || null,
       };
     });
   }
@@ -255,6 +262,7 @@ function createPrPoller(deps) {
       if (stopped) break;
       const entry = state[pr.key] || {};
       entry.inFlight = true;
+      delete entry.reason;
       state[pr.key] = entry;
       dirty = true;
       slots -= 1;

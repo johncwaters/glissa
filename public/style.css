@@ -2463,6 +2463,7 @@ a.radar-issue-title:hover {
 .pr-row {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 10px;
   min-width: 0;
   padding: 3px 0;
@@ -2533,6 +2534,13 @@ a.pr-title:hover {
 
 .pr-chip[data-tone="dim"] {
   border-color: var(--border-dim);
+  color: var(--text-muted);
+}
+
+.pr-reason {
+  flex-basis: 100%;
+  margin-left: 121px;
+  font-size: 10px;
   color: var(--text-muted);
 }
 

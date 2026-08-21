@@ -54,6 +54,8 @@ function buildPrRow(pr) {
     chip.dataset.tone = 'dim';
     row.append(chip);
   }
+  const reason = typeof pr.reason === 'string' ? pr.reason.trim() : '';
+  if (reason) row.append(el('div', 'pr-reason', reason));
   return row;
 }
 
