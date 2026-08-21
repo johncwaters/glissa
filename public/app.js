@@ -12,6 +12,7 @@ import { writeClipboardText } from './dom-helpers.js';
 import { activateFocusView, centerSessionQuietly, deactivateFocusView, focusAdjacentInRail, focusNextAttention, focusNthInRail, getFocusedSessionId, isFocusActive, mountFocusView, noteKnownProjectPath, refreshFocusRoster, restoreFocusedSession, setFocusMergeStatus } from './focus-view/focus-view.js';
 import { initFormFactor, isPhoneLayout, onLayoutChange } from './form-factor.js';
 import { applyHealthSnapshot, mountHealthMonitor } from './health-monitor.js';
+import { applyNavigatorFindings, applyNavigatorSnapshot, mountNavigatorView, refreshNavigatorView, setNavigatorActivityCallback } from './navigator-panel.js';
 import { initNotifications, showDesktopNotification } from './notifications.js';
 import { activatePhoneShell, deactivatePhoneShell, getPhoneSessionId, isPhoneScreenActive, isPhoneShellActive, mountPhoneShell, refreshPhoneBoard, setPhoneScreenAttention, showPhoneScreen } from './phone/phone-shell.js';
 import { applyPrStatus, mountPrView, setPrActivityCallback } from './pr-panel.js';
@@ -283,6 +284,10 @@ const messageHandlers = {
     message: msg.text,
     ignoreFocus: true,
   }),
+  // Navigator lane. The per-uri push carries one document's current findings (empty clears it); the
+  // snapshot is the whole map, sent on every connect so a reconnect repairs the tab in one frame.
+  'navigator-findings': (msg) => applyNavigatorFindings(msg),
+  'navigator-snapshot': (msg) => applyNavigatorSnapshot(msg),
   'client-trust':       (msg) => applyClientTrust(msg.trust),
   'shutting-down':      () => {
     disableReconnect();
@@ -414,19 +419,22 @@ document.getElementById('btn-help').addEventListener('click', () => {
   createSettingsDialog('shortcuts');
 });
 
-// ── Primary view tabs (Focus / Radar / PRs / Usage) ────────
+// ── Primary view tabs (Focus / Radar / PRs / Usage / Navigator) ────────
 
 const viewFocusEl = document.getElementById('view-focus');
 const viewRadarEl = document.getElementById('view-radar');
 const viewPrsEl = document.getElementById('view-prs');
 const viewUsageEl = document.getElementById('view-usage');
+const viewNavigatorEl = document.getElementById('view-navigator');
 const tabFocus = document.getElementById('tab-focus');
 const tabRadar = document.getElementById('tab-radar');
 const tabPrs = document.getElementById('tab-prs');
 const tabUsage = document.getElementById('tab-usage');
+const tabNavigator = document.getElementById('tab-navigator');
 const tabRadarActivityEl = document.getElementById('tab-radar-activity');
 const tabPrsActivityEl = document.getElementById('tab-prs-activity');
 const tabUsageActivityEl = document.getElementById('tab-usage-activity');
+const tabNavigatorActivityEl = document.getElementById('tab-navigator-activity');
 
 setRadarActivityCallback((active) => {
   tabRadarActivityEl.classList.toggle('active', active);
@@ -439,6 +447,11 @@ setPrActivityCallback((active) => {
 setUsageActivityCallback((active) => {
   tabUsageActivityEl.classList.toggle('active', active);
   setPhoneScreenAttention('usage', active);
+});
+// No phone counterpart to raise: the Navigator tab is desktop only in v1, so there is no screen to
+// attach attention to.
+setNavigatorActivityCallback((active) => {
+  tabNavigatorActivityEl.classList.toggle('active', active);
 });
 // A Radar PR row points at the full PR view: the phone screen when that layout owns the panel, the
 // desktop tab otherwise. Radar never navigates itself.
@@ -468,6 +481,10 @@ mountPrView(viewPrsEl);
 // from wherever they are.
 mountUsageView(viewUsageEl);
 
+// Eager for the same reason again: a navigator-findings push (or the connect-time snapshot) can land
+// while another tab is active, and the dot has to say so from wherever the operator is.
+mountNavigatorView(viewNavigatorEl);
+
 // Primary views in tab-strip order. Adding a view = adding an entry here (N-way, not a boolean).
 // Focus leads as the default landing view; the session-card grid (#sessions-container) stays mounted
 // off-screen as the canonical card home Focus borrows from - it is no longer a navigable view.
@@ -476,6 +493,7 @@ const VIEW_TABS = [
   { view: 'radar', tab: tabRadar, el: viewRadarEl },
   { view: 'prs', tab: tabPrs, el: viewPrsEl },
   { view: 'usage', tab: tabUsage, el: viewUsageEl },
+  { view: 'navigator', tab: tabNavigator, el: viewNavigatorEl },
 ];
 
 let _activeView = 'focus';
@@ -504,6 +522,8 @@ function activateView(view) {
     refreshUsageView();
     requestUsageReport();
   }
+  // Navigator is pushed, not pulled, so opening it asks for nothing; looking at it is what clears the dot.
+  if (view === 'navigator') refreshNavigatorView();
 }
 
 for (let i = 0; i < VIEW_TABS.length; i++) {

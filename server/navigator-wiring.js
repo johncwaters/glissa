@@ -40,16 +40,55 @@ function createNavigatorWiring({
   debounceMs = NAVIGATOR_DEBOUNCE_MS,
   setTimeoutFn = setTimeout,
   clearTimeoutFn = clearTimeout,
+  nowFn = Date.now,
   sweep = sweepMarkdown,
   maxPayload = MAX_FRAME_BYTES,
   logger = console,
+  broadcast = null,
 } = {}) {
   const wss = new WebSocketServer({ noServer: true, maxPayload });
   const connections = new Set();
+  /*
+   * Findings the Navigator tab is currently showing, keyed by uri and shared across relays: the tab is a
+   * view of what is open in the editors, not of which socket mirrored it. A uri with no findings is
+   * ABSENT rather than stored empty, so the map and the rendered sections always agree.
+   */
+  const findingsByUri = new Map();
 
   function warn(message) {
     if (!logger || typeof logger.warn !== 'function') return;
     logger.warn(`[navigator] ${message}`);
+  }
+
+  function broadcastFindings(uri, diagnostics) {
+    if (typeof broadcast !== 'function') return;
+    try {
+      broadcast({ type: 'navigator-findings', uri, diagnostics, ts: nowFn() });
+    } catch (error) {
+      warn(`could not broadcast findings for ${uri}: ${error.message}`);
+    }
+  }
+
+  function recordFindings(uri, diagnostics) {
+    const findings = Array.isArray(diagnostics) ? diagnostics : [];
+    if (findings.length === 0) findingsByUri.delete(uri);
+    if (findings.length > 0) findingsByUri.set(uri, findings);
+    broadcastFindings(uri, findings);
+  }
+
+  // A uri the tab never had a section for needs no message telling it to forget one.
+  function clearFindings(uri) {
+    if (!findingsByUri.delete(uri)) return;
+    broadcastFindings(uri, []);
+  }
+
+  function findingsSnapshot() {
+    return [...findingsByUri].map(([uri, diagnostics]) => ({ uri, diagnostics }));
+  }
+
+  // Connect-time repair for the control WS: one current-state frame, not a replay of superseded ones.
+  function snapshotMessage() {
+    return { type: 'navigator-snapshot', documents: findingsSnapshot(), ts: nowFn() };
   }
 
   // One document store per connection: an editor's buffers die with the relay that mirrored them.
@@ -68,11 +107,14 @@ function createNavigatorWiring({
     function publishDiagnostics(uri) {
       const doc = getDoc(store, uri);
       if (!isMarkdownDoc(doc)) return;
+      const diagnostics = sweep(doc.text);
       try {
-        send({ type: 'publishDiagnostics', params: { uri, diagnostics: sweep(doc.text) } });
+        send({ type: 'publishDiagnostics', params: { uri, diagnostics } });
       } catch (error) {
         warn(`could not publish diagnostics for ${uri}: ${error.message}`);
       }
+      // Outside the try: the tab's state does not depend on the editor socket accepting the frame.
+      recordFindings(uri, diagnostics);
     }
 
     function scheduleSweep(uri) {
@@ -110,10 +152,13 @@ function createNavigatorWiring({
         publishDiagnostics(uri);
         return null;
       },
+      // The carbon unit closed the buffer, so its findings are gone rather than merely unrefreshed.
       'textDocument/didClose': (params) => {
-        cancelSweep(uriOfParams(params));
+        const uri = uriOfParams(params);
+        cancelSweep(uri);
         const result = applyDidClose(store, params);
         if (!result.applied) return result.reason;
+        clearFindings(uri);
         return null;
       },
     };
@@ -133,6 +178,8 @@ function createNavigatorWiring({
       warn(`ignored ${frame.method}: ${reason}`);
     }
 
+    // Findings deliberately survive a dropped relay: the shim replays its open buffers on reconnect, so
+    // wiping the tab here would blank it for the length of a Vite restart and then refill it unchanged.
     function close() {
       if (closed) return;
       closed = true;
@@ -195,6 +242,8 @@ function createNavigatorWiring({
     attach,
     openConnection,
     stop,
+    findingsSnapshot,
+    snapshotMessage,
     get connectionCount() { return connections.size; },
   };
 }

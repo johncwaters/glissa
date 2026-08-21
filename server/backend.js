@@ -884,7 +884,7 @@ function createBackend(httpServer, options = {}) {
 
   // Navigator lane: config-file only, absent config constructs nothing (docs/plan-navigator.md, "Wire and trust")
   const navigatorLane = config.navigator && config.navigator.enabled === true
-    ? createNavigatorWiring({ logger: console })
+    ? createNavigatorWiring({ logger: console, broadcast: (msg) => broadcastControl(msg) })
     : null;
 
   // Context-pack auto-rebuild (server/pack-service.js): watchers on each spec's source roots plus a
@@ -1454,6 +1454,22 @@ function createBackend(httpServer, options = {}) {
     // connects rather than being rebuilt per session.
     getPlanLimits: () => usage.getPlanLimitsMessage(),
   });
+
+  /*
+   * Navigator connect-time repair. Findings are the CURRENT state of each open buffer, not one-shot
+   * events, so they are not on the control-replay retention list (server/control-replay-core.js keeps
+   * that list for broadcasts with no standing state to rebuild from): replaying a gap's worth of
+   * superseded per-uri messages would repaint the same sections several times and still could not
+   * express a uri whose clearing frame aged out of the ring. One snapshot replaces the tab's whole map
+   * instead, which is the plan-limits/posthog-status precedent. Registered after registerControlHandlers
+   * so the `snapshot` frame stays the first one of a (re)connect.
+   */
+  if (navigatorLane) {
+    controlWss.on('connection', (ws) => {
+      if (ws.readyState !== 1) return;
+      ws.send(JSON.stringify(navigatorLane.snapshotMessage()));
+    });
+  }
 
   // --- Data WebSocket ---
 

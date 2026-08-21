@@ -30,3 +30,6 @@ ita-test/
 
 # compiled-commit runner scratch
 .compiled-commit-tmp/
+
+# Packaged VS Code extension artifact (tools/vscode-navigator); rebuilt by vsce, never committed
+*.vsix

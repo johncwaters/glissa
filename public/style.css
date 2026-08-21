@@ -3268,7 +3268,108 @@ a.pr-title:hover {
   background: var(--accent);
 }
 
-/* ── Primary view tabs (Focus / Radar / PRs / Usage) ───────── */
+/* ── Navigator view ─────────────────────────────────────────── */
+/* Same page rhythm and tokens as the Radar, PR and Usage views. Its own selectors because a finding is a
+   three-part line (where, which rule, what) rather than an attention row or a numeric cell. Desktop only
+   in v1: the phone layout hides the tab strip, so there is no [data-layout="phone"] counterpart. */
+.navigator-view {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  width: 100%;
+  max-width: var(--content-max);
+  margin: 0 auto;
+  padding: clamp(16px, 2.5vw, 36px) clamp(12px, 2vw, 32px) 48px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.navigator-content {
+  max-width: 1080px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.navigator-doc {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.navigator-doc-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  border-bottom: 1px solid var(--border-dim);
+  padding-bottom: 6px;
+}
+
+/* The file name is the thing being scanned for, so it takes the weight; the full uri is the title. */
+.navigator-doc-name {
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-head);
+}
+
+.navigator-doc-count {
+  flex: 0 0 auto;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.navigator-findings {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.navigator-finding {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 3px 0;
+  line-height: 1.5;
+}
+
+/* Fixed width and tabular figures so the line numbers form a column the eye can run down. */
+.navigator-finding-line {
+  flex: 0 0 auto;
+  min-width: 4ch;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.navigator-finding-code {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border: 1px solid var(--border-dim);
+  border-radius: 3px;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.navigator-finding-message {
+  min-width: 0;
+  color: var(--text);
+}
+
+.navigator-empty {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.55;
+  max-width: 78ch;
+}
+
+/* ── Primary view tabs (Focus / Radar / PRs / Usage / Navigator) ───────── */
 .header-left {
   display: flex;
   align-items: center;

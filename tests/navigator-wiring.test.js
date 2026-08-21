@@ -51,18 +51,25 @@ function fakeTimers() {
   };
 }
 
+const FIXED_TS = 1700000000000;
+
 function drivenConnection() {
   const timers = fakeTimers();
   const warnings = [];
   const sent = [];
+  const broadcasts = [];
   const wiring = createNavigatorWiring({
     setTimeoutFn: timers.setTimeoutFn,
     clearTimeoutFn: timers.clearTimeoutFn,
+    nowFn: () => FIXED_TS,
     logger: { warn: (message) => warnings.push(message) },
+    broadcast: (message) => broadcasts.push(message),
   });
   const connection = wiring.openConnection({ send: (message) => sent.push(message) });
   const lsp = (method, params) => connection.handleFrame(JSON.stringify({ type: 'lsp', method, params }));
-  return { wiring, connection, timers, warnings, sent, lsp };
+  return {
+    wiring, connection, timers, warnings, sent, broadcasts, lsp,
+  };
 }
 
 function didOpenParams(uri, languageId, text) {
@@ -173,6 +180,123 @@ test('malformed frames are dropped with a log line, never a throw', (t) => {
   lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
   timers.runPending();
   assert.equal(sent.length, 1, 'the connection still works afterwards');
+});
+
+// --- Tab feed: the control-WS broadcast and the connect-time snapshot ---
+
+test('a sweep that publishes also broadcasts the findings for that uri', (t) => {
+  const { wiring, timers, broadcasts, sent, lsp } = drivenConnection();
+  t.after(() => wiring.stop());
+
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  assert.deepEqual(broadcasts, [], 'nothing before the quiet window');
+
+  timers.runPending();
+  assert.equal(broadcasts.length, 1);
+  assert.deepEqual(Object.keys(broadcasts[0]).sort(), ['diagnostics', 'ts', 'type', 'uri']);
+  assert.equal(broadcasts[0].type, 'navigator-findings');
+  assert.equal(broadcasts[0].uri, MARKDOWN_URI);
+  assert.equal(broadcasts[0].ts, FIXED_TS, 'the ts comes from the injected clock');
+  assert.deepEqual(broadcasts[0].diagnostics, sent[0].params.diagnostics, 'the tab sees what the editor sees');
+});
+
+test('an edit that fixes the last finding broadcasts an empty array and drops the uri', (t) => {
+  const { wiring, timers, broadcasts, lsp } = drivenConnection();
+  t.after(() => wiring.stop());
+
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  timers.runPending();
+  assert.equal(wiring.findingsSnapshot().length, 1);
+
+  lsp('textDocument/didChange', didChangeParams(MARKDOWN_URI, 2, CLEAN_MARKDOWN));
+  timers.runPending();
+  assert.equal(broadcasts.length, 2);
+  assert.deepEqual(broadcasts[1], {
+    type: 'navigator-findings', uri: MARKDOWN_URI, diagnostics: [], ts: FIXED_TS,
+  });
+  assert.deepEqual(wiring.findingsSnapshot(), [], 'a uri with no findings is absent, never stored empty');
+});
+
+test('didClose clears the uri and tells the tab to forget its section', (t) => {
+  const { wiring, timers, broadcasts, lsp } = drivenConnection();
+  t.after(() => wiring.stop());
+
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  timers.runPending();
+
+  lsp('textDocument/didClose', { textDocument: { uri: MARKDOWN_URI } });
+  assert.equal(broadcasts.length, 2);
+  assert.deepEqual(broadcasts[1], {
+    type: 'navigator-findings', uri: MARKDOWN_URI, diagnostics: [], ts: FIXED_TS,
+  });
+  assert.deepEqual(wiring.findingsSnapshot(), []);
+});
+
+test('closing a document that never had findings says nothing at all', (t) => {
+  const { wiring, timers, broadcasts, lsp } = drivenConnection();
+  t.after(() => wiring.stop());
+
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', CLEAN_MARKDOWN));
+  timers.runPending();
+  const afterSweep = broadcasts.length;
+
+  lsp('textDocument/didClose', { textDocument: { uri: MARKDOWN_URI } });
+  assert.equal(broadcasts.length, afterSweep, 'no section existed, so there is nothing to clear');
+});
+
+test('the snapshot accessor carries every uri that currently has findings', (t) => {
+  const { wiring, timers, lsp } = drivenConnection();
+  t.after(() => wiring.stop());
+
+  const otherUri = 'file:///tmp/other.markdown';
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  lsp('textDocument/didOpen', didOpenParams(otherUri, 'markdown', CLEAN_MARKDOWN));
+  lsp('textDocument/didOpen', didOpenParams(SCRIPT_URI, 'javascript', 'const the the = 1;\n'));
+  timers.runPending();
+
+  const snapshot = wiring.findingsSnapshot();
+  assert.deepEqual(snapshot.map((entry) => entry.uri), [MARKDOWN_URI], 'clean and non-markdown documents earn no entry');
+  assert.deepEqual(snapshot[0].diagnostics.map((d) => d.code), ['repeated-word']);
+
+  const message = wiring.snapshotMessage();
+  assert.equal(message.type, 'navigator-snapshot');
+  assert.equal(message.ts, FIXED_TS);
+  assert.deepEqual(message.documents, snapshot);
+});
+
+// The relay replays its open buffers on reconnect (docs/plan-navigator.md, M1), so a dropped socket is a
+// gap in the feed, not news that the carbon unit closed anything.
+test('a relay disconnect keeps the findings the tab is showing', (t) => {
+  const { wiring, connection, timers, broadcasts, lsp } = drivenConnection();
+  t.after(() => wiring.stop());
+
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  timers.runPending();
+  const afterSweep = broadcasts.length;
+
+  connection.close();
+  assert.equal(connection.docCount, 0, 'the mirrored buffer is gone with the socket');
+  assert.equal(broadcasts.length, afterSweep, 'but the tab is told nothing');
+  assert.deepEqual(wiring.findingsSnapshot().map((entry) => entry.uri), [MARKDOWN_URI]);
+});
+
+test('a lane with no broadcast injected still sweeps and still tracks findings', (t) => {
+  const timers = fakeTimers();
+  const sent = [];
+  const wiring = createNavigatorWiring({
+    setTimeoutFn: timers.setTimeoutFn,
+    clearTimeoutFn: timers.clearTimeoutFn,
+    logger: { warn: () => {} },
+  });
+  t.after(() => wiring.stop());
+  const connection = wiring.openConnection({ send: (message) => sent.push(message) });
+
+  connection.handleFrame(JSON.stringify({
+    type: 'lsp', method: 'textDocument/didOpen', params: didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN),
+  }));
+  timers.runPending();
+  assert.equal(sent.length, 1);
+  assert.deepEqual(wiring.findingsSnapshot().map((entry) => entry.uri), [MARKDOWN_URI]);
 });
 
 // --- Real backend boots ---
