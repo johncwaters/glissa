@@ -23,7 +23,9 @@ const SOURCE_DEFAULTS = Object.freeze({
     windowBytes: 64 * 1024,
   }),
   agentLogs: Object.freeze({ maxEntries: 200, maxBytes: 128 * 1024, digestQuota: 8, pollMs: 2000 }),
-  git: Object.freeze({ maxEntries: 100, maxBytes: 64 * 1024, digestQuota: 6 }),
+  git: Object.freeze({
+    maxEntries: 100, maxBytes: 64 * 1024, digestQuota: 6, debounceMs: 1000, pollMs: 60000,
+  }),
   fs: Object.freeze({ maxEntries: 500, maxBytes: 128 * 1024, digestQuota: 8 }),
   shellHistory: Object.freeze({ maxEntries: 100, maxBytes: 32 * 1024, digestQuota: 6 }),
   editor: Object.freeze({ maxEntries: 100, maxBytes: 32 * 1024, digestQuota: 6 }),

@@ -27,6 +27,7 @@ const WebSocket = require('ws');
 const { createBackend } = require('../server/backend');
 const { createReplayLog } = require('../server/control-replay-core');
 const { registerEphemeralSession } = require('../server/ephemeral-session');
+const { hasGit, git } = require('./helpers/git-fixture');
 
 const INGEST_ON = { enabled: true, sources: { terminal: { enabled: true } } };
 const MESSAGE_WAIT_MS = 5000;
@@ -93,6 +94,26 @@ function waitFor(received, match) {
       }
       if (Date.now() > deadline) {
         reject(new Error('timed out waiting for a matching control message'));
+        return;
+      }
+      setTimeout(poll, 20).unref();
+    };
+    poll();
+  });
+}
+
+// Waits on a condition a boot-time async pass will satisfy, for the cases where asking the backend to do
+// the work itself would be the very thing under test.
+function until(predicate, message) {
+  const deadline = Date.now() + MESSAGE_WAIT_MS;
+  return new Promise((resolve, reject) => {
+    const poll = () => {
+      if (predicate()) {
+        resolve();
+        return;
+      }
+      if (Date.now() > deadline) {
+        reject(new Error(message));
         return;
       }
       setTimeout(poll, 20).unref();
@@ -168,6 +189,73 @@ test('an ephemeral lane session is NOT tapped, which is what keeps the navigator
   await new Promise((resolve) => { setTimeout(resolve, 700).unref(); });
   assert.equal(lane.recentEvents().length, 0);
 }));
+
+// --- The git watch set and its exclusion ----------------------------------
+
+const GIT_ON = { enabled: true, sources: { git: { enabled: true } } };
+
+/*
+ * Two rules at once, both of which a booted backend is the only place to see.
+ *
+ * The watch set has to be POPULATED at boot. The lane is constructed before the session-construction loop
+ * runs (the navigator lane below it takes this one's digest as a dependency), so the source's provider
+ * would see an empty map and the source would sit inert until its first 60s poll, whose first read of each
+ * repo is a baseline: a commit made in that window would be absorbed and never reported. Nothing here
+ * calls reconcile(), deliberately, so removing backend.js's boot poke fails this test.
+ *
+ * And the set is derived from the persisted `sessions` map and nothing else, which is what keeps every
+ * ephemeral lane's checkout outside it BY CONSTRUCTION: a pr-review worktree and a navigator dispatch
+ * workdir belong to sessions registered through registerEphemeralSession, which never enter that map.
+ * Same mechanism as the terminal tap's placement in wireSessionEvents above, pinned here because a filter
+ * added later would be the wrong fix.
+ */
+test('the git watch set is populated at boot, and never by an ephemeral lane session', { skip: !hasGit() }, withBackend(
+  { ingest: GIT_ON },
+  async ({ backend, seeded }) => {
+    const lane = backend.getIngestLane();
+    assert.equal(lane.gitEnabled, true);
+    const projectGitDir = fs.realpathSync.native(path.join(seeded.projectDir, '.git'));
+    await until(() => lane.git.repoCount === 1, 'the boot poke should have derived the watch set');
+    assert.deepEqual(lane.git.repoKeys, [projectGitDir]);
+
+    const ephemeral = new EventEmitter();
+    ephemeral.id = 'pr-review:42';
+    ephemeral.path = seeded.laneDir;
+    ephemeral.worktreeDir = seeded.laneDir;
+    ephemeral.destroy = () => {};
+    registerEphemeralSession({
+      map: new Map(),
+      id: ephemeral.id,
+      sess: ephemeral,
+      closeSessionDataClients: () => {},
+      logPrefix: 'pr-review',
+      name: 'pr review',
+    });
+
+    // The same seam a real worktree-ready uses, so the re-derivation is genuine rather than assumed.
+    await lane.noteRepos();
+    assert.deepEqual(
+      lane.git.repoKeys,
+      [projectGitDir],
+      'a lane session in a real repo of its own must not widen the watch set',
+    );
+  },
+  {
+    seed: ({ tmpDir }) => {
+      const projectDir = path.join(tmpDir, 'project');
+      const laneDir = path.join(tmpDir, 'lane-repo');
+      fs.mkdirSync(laneDir);
+      for (const dir of [projectDir, laneDir]) {
+        try {
+          git(['init', '-b', 'main'], dir);
+        } catch {
+          git(['init'], dir);
+        }
+      }
+      return { projectDir, laneDir };
+    },
+  },
+));
 
 // --- Health anomaly --------------------------------------------------------
 

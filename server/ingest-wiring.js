@@ -16,6 +16,7 @@ const {
   publishEvent, resolveIngestConfig, ringStats, snapshotEvents,
 } = require('./core/ingest-core');
 const { createAgentLogIngest } = require('./ingest-agent-logs');
+const { createGitIngest } = require('./ingest-git');
 const { createTerminalIngest } = require('./ingest-terminal');
 
 const BATCH_INTERVAL_MS = 1000;
@@ -28,6 +29,9 @@ function createIngestLane({
   logger = console,
   laneMap = null,
   agentLogOptions = null,
+  // The git watch-set rule lives with the caller that can see live sessions (server/backend.js), not
+  // here: this lane only ever knows which directories it was handed.
+  repoRoots = null,
   // Told once per batch that carried events, so a consumer learns the machine moved without polling
   // (docs/plan-ingestion.md, M7.5). Absent by default, and then nothing is ever called.
   onActivity = null,
@@ -158,6 +162,22 @@ function createIngestLane({
     : null;
   if (agentLogs) adapters.push(agentLogs);
 
+  const gitEnabled = resolved.enabled === true && resolved.sources.git.enabled === true;
+  const git = gitEnabled
+    ? createGitIngest({
+      publish,
+      sourceConfig: resolved.sources.git,
+      reposProvider: repoRoots,
+      logger,
+      nowFn,
+      setIntervalFn,
+      clearIntervalFn,
+      setTimeoutFn,
+      clearTimeoutFn,
+    })
+    : null;
+  if (git) adapters.push(git);
+
   // Adapters that own their own discovery start themselves; the terminal source has nothing to start,
   // since its taps arrive one session at a time from wireSessionEvents.
   for (const adapter of adapters) {
@@ -167,6 +187,20 @@ function createIngestLane({
     } catch (error) {
       warn(`starting the ${adapter.name} source failed: ${error.message}`);
     }
+  }
+
+  /**
+   * Re-derive the git watch set now. Two callers, both load-bearing: backend.js calls it once the session
+   * map is POPULATED, because this lane is constructed before that loop runs and the source would
+   * otherwise see an empty watch set until its first poll (and that poll's first read is a baseline, so a
+   * commit made in the boot window would be absorbed and never reported); and again on `worktree-ready`,
+   * because a worktree provisioned a second ago is about to take the session's first commit.
+   *
+   * Returns the pass so a caller can await it; the source's own guard never rejects.
+   */
+  function noteRepos() {
+    if (stopped || !git) return Promise.resolve();
+    return git.reconcile();
   }
 
   // A no-op when the terminal source is off, so a caller never has to ask twice before wiring a session.
@@ -209,6 +243,7 @@ function createIngestLane({
     attachSessionTap,
     detachSessionTap,
     hasSessionTap,
+    noteRepos,
     flushBatch,
     stop,
     sources,
@@ -218,6 +253,8 @@ function createIngestLane({
     recentEvents: (limit = snapshotEventLimit) => snapshotEvents(store, { limit }),
     get agentLogs() { return agentLogs; },
     get agentLogsEnabled() { return agentLogsEnabled; },
+    get git() { return git; },
+    get gitEnabled() { return gitEnabled; },
     get terminalEnabled() { return terminalEnabled; },
     get tapCount() { return terminal ? terminal.tapCount : 0; },
     get pendingEventCount() { return pendingEvents.length; },

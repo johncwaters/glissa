@@ -913,6 +913,27 @@ function createBackend(httpServer, options = {}) {
    */
   const ingestConfig = resolveIngestConfig(config.ingest);
   const navigatorEnabled = config.navigator && config.navigator.enabled === true;
+  /*
+   * The git source's watch set (docs/plan-ingestion.md, M8): the checkouts glissa's OWN project sessions
+   * are working in, which is the same session-following rule the plan gives the fs source. Both halves of
+   * a worktree session count, because a session commits in its worktree while merges land in the project
+   * checkout, and neither is visible from the other's HEAD.
+   *
+   * The exclusion rides the map, not a filter: ephemeral lane sessions (pr-review, navigator dispatch,
+   * posthog, pack-distill) are registered in their own maps and never enter `sessions`, so a pr-review
+   * worktree and a navigator dispatch's throwaway workdir are outside the watch set BY CONSTRUCTION,
+   * exactly as the terminal tap's placement in wireSessionEvents excludes them there.
+   */
+  const gitRepoRoots = () => {
+    const dirs = [];
+    for (const sess of sessions.values()) {
+      for (const dir of [sess.path, sess.worktreeDir]) {
+        if (typeof dir !== 'string' || !dir || dirs.includes(dir)) continue;
+        dirs.push(dir);
+      }
+    }
+    return dirs;
+  };
   const ingestLane = ingestConfig.enabled
     ? createIngestLane({
       ...(options.ingestLaneOptions || {}),
@@ -921,6 +942,7 @@ function createBackend(httpServer, options = {}) {
       broadcast: (msg) => broadcastLocalControl(msg),
       // Feeds the M7 feedback-loop exclusion; rationale at the consuming site in ingest-wiring.js.
       laneMap: () => laneLedger.laneMap(),
+      repoRoots: gitRepoRoots,
       /*
        * The other half of activity-driven dispatch (docs/plan-ingestion.md, M7.5), wired only when BOTH
        * lanes exist. Late-binding on purpose: the navigator lane is constructed below, and the first
@@ -1242,6 +1264,9 @@ function createBackend(httpServer, options = {}) {
       // this (and every sibling) worktree's merge gate, with no poll. commonGitDir is set on the session
       // before this event fires (in _provisionWorktree).
       integrationPool.ensure(sess);
+      // The worktree that will take this session's commits exists only as of now, so the git ingest
+      // source is told to re-derive its watch set rather than finding it up to a poll interval later.
+      if (ingestLane) void ingestLane.noteRepos();
     });
 
     // On an in-place restart (restart()/forceRestart()/sleep-kill auto-restart) the
@@ -1272,6 +1297,15 @@ function createBackend(httpServer, options = {}) {
     wireSessionEvents(sess);
   }
 
+  /*
+   * The git watch set is derived from the map the loop above just filled, and the ingest lane is
+   * constructed well before that loop (the navigator lane below it takes this one's digest as a
+   * dependency). Without this poke the source starts with an empty set and stays inert until its first
+   * 60s poll, whose first read of each repo is a BASELINE, so a commit or branch switch made in that
+   * window is absorbed and never reported. Pinned by tests/ingest-backend.test.js.
+   */
+  if (ingestLane) void ingestLane.noteRepos();
+
   // Reconcile the on-disk session worktrees a prior run/crash/shutdown left behind (decision table and
   // rationale on reconcileSessionWorktrees). Once per distinct repo root, best-effort.
   try {
@@ -1289,6 +1323,9 @@ function createBackend(httpServer, options = {}) {
   } catch (err) {
     console.warn(`[worktree] worktree reconcile failed: ${err.message}`);
   }
+  // Explicit, not emergent: adoption above sets worktreeDir on sessions the poke before it already read,
+  // and it only reaches the watch set today because that poke is still in flight when it does.
+  if (ingestLane) void ingestLane.noteRepos();
 
   let pendingAutoResumeOnListening = null;
   const startAutoResume = () => {
@@ -1409,6 +1446,9 @@ function createBackend(httpServer, options = {}) {
       sess.start();
       console.log(`[config] Added session: ${project.name}`);
     }
+    // A project added by a config reload is a new checkout to watch, and waiting for the 60s poll would
+    // baseline whatever was done in it meanwhile.
+    if (ingestLane) void ingestLane.noteRepos();
   }
 
   function _modifyChangedSessions(modified, newConfig) {
