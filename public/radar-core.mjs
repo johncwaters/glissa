@@ -236,6 +236,18 @@ export function updateAvailableRow(update) {
   return { text: `Update available: ${current} -> ${latest}`, command };
 }
 
+// The banner's line: the same sha-first headline as updateAvailableRow, plus the version pair in
+// parentheses when it moved too. Beside the row builder so the sha-prefix format cannot drift.
+export function updateBannerText(update) {
+  const from = shortSha(update?.currentSha);
+  const to = shortSha(update?.latestSha);
+  const current = textOr(update?.current, '');
+  const latest = textOr(update?.latest, '');
+  if (!from || !to) return `Update available: ${current} -> ${latest}`;
+  if (!current || !latest || current === latest) return `Update available: ${from} -> ${to}`;
+  return `Update available: ${from} -> ${to} (${current} -> ${latest})`;
+}
+
 // One list so the panel renders ops in a fixed order regardless of which feed landed first: the
 // advisory update line, then every live anomaly.
 export function opsRows({ update, health } = {}) {

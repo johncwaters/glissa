@@ -282,6 +282,17 @@ test('updateAvailableRow: the commit pair beats the version pair when both shas 
   assert.equal(versionFallback.text, 'Update available: 1.2.0 -> 1.3.0');
 });
 
+test('updateBannerText: sha headline, version pair in parentheses only when it moved', async () => {
+  const { updateBannerText } = await importCore();
+  const shas = {
+    currentSha: '0123456789abcdef0123456789abcdef01234567',
+    latestSha: 'fedcba9876543210fedcba9876543210fedcba98',
+  };
+  assert.equal(updateBannerText({ ...shas, current: '1.2.0', latest: '1.2.0' }), 'Update available: 0123456 -> fedcba9');
+  assert.equal(updateBannerText({ ...shas, current: '1.2.0', latest: '1.3.0' }), 'Update available: 0123456 -> fedcba9 (1.2.0 -> 1.3.0)');
+  assert.equal(updateBannerText({ current: '1.2.0', latest: '1.3.0' }), 'Update available: 1.2.0 -> 1.3.0');
+});
+
 test('shortSha: 7 lowercase chars for a hex sha, empty string otherwise', async () => {
   const { shortSha } = await importCore();
   assert.equal(shortSha('0123456789ABCDEF0123456789abcdef01234567'), '0123456');

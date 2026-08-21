@@ -17,7 +17,7 @@ import { activatePhoneShell, deactivatePhoneShell, getPhoneSessionId, isPhoneScr
 import { applyPrStatus, mountPrView, setPrActivityCallback } from './pr-panel.js';
 // Radar is a SECOND consumer of the health, update and PR feeds: it summarizes what needs the operator,
 // while the health footer, the update banner and the PRs tab keep rendering each feed in full.
-import { shortSha } from './radar-core.mjs';
+import { updateBannerText } from './radar-core.mjs';
 import { applyHealthSnapshot as applyRadarHealth, applyPosthogStatus, applyPrStatus as applyRadarPrStatus, applyUpdateAvailable as applyRadarUpdate, mountRadarView, setRadarActivityCallback, setRadarNavigateToPrs } from './radar-panel.js';
 import { handleDebugStateRefresh, handleDebugStateResponse } from './session-card/card-dom.js';
 import { applyState, applyTerminalSettings, createSessionCard, getSessionCount, hasSession, notePackVersion, removeSessionCard, renameSessionCard, seedSessionMergeStatus, setLatestPackVersions, setSessionAgents, setSessionDiff, setSessionEffectiveBase, setSessionMergeStatus, setSessionPacks, setSessionPostTurn, setSessionPrompt, setSessionResume, setSessionUsage, setSessionWakeup, setSessionWorktree, updateAggregateStatus } from './session-card/lifecycle.js';
@@ -317,15 +317,6 @@ function updateIdentity({ latestSha, latest }) {
   if (typeof latestSha === 'string' && latestSha) return latestSha;
   if (typeof latest === 'string' && latest) return latest;
   return null;
-}
-
-function updateBannerText({ current, latest, currentSha, latestSha }) {
-  const from = shortSha(currentSha);
-  const to = shortSha(latestSha);
-  if (!from || !to) return `Update available: ${current} -> ${latest}`;
-  const versionsDiffer = Boolean(current) && Boolean(latest) && current !== latest;
-  if (!versionsDiffer) return `Update available: ${from} -> ${to}`;
-  return `Update available: ${from} -> ${to} (${current} -> ${latest})`;
 }
 
 function showUpdateBanner(msg) {
