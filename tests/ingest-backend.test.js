@@ -167,6 +167,26 @@ test('an ephemeral lane session is NOT tapped, which is what keeps the navigator
   assert.equal(lane.recentEvents().length, 0);
 }));
 
+// --- Health anomaly --------------------------------------------------------
+
+// The tap is a server-side `data` listener with no data-WS client behind it. Before the health
+// snapshot learned about it, every tapped session tripped listenerMismatch permanently, which lit
+// the Radar attention dot on an otherwise healthy install.
+test('the ingest tap does not trip the listener-mismatch anomaly, and a real leak still does', withBackend({ ingest: INGEST_ON }, async ({ backend, base, track }) => {
+  assert.equal(backend.getIngestLane().tapCount, 1);
+  const { ws, received } = await openRecordingSocket(`${base}/control`);
+  track(ws);
+  const snapshot = await waitFor(received, (msg) => msg.type === 'health-snapshot');
+  assert.equal(snapshot.stats.anomalies.listenerMismatch, false, 'a tapped session with zero data clients is healthy');
+
+  // A listener nothing accounts for is still a leak worth flagging.
+  backend.getSession('p1').on('data', () => {});
+  const mark = received.length;
+  ws.send(JSON.stringify({ type: 'request-health-snapshot' }));
+  const leaked = await waitFor(received, (msg) => msg.type === 'health-snapshot' && received.indexOf(msg) >= mark);
+  assert.equal(leaked.stats.anomalies.listenerMismatch, true);
+}));
+
 // --- Wire ------------------------------------------------------------------
 
 test('a connecting dashboard is repaired with one ingest snapshot', withBackend({ ingest: INGEST_ON }, async ({ backend, base, track }) => {

@@ -133,6 +133,12 @@ function createIngestLane({
     return terminal.detachSessionTap(sess);
   }
 
+  // False whenever the terminal source is off, so the health snapshot can ask unconditionally.
+  function hasSessionTap(sess) {
+    if (!terminal) return false;
+    return terminal.hasSessionTap(sess);
+  }
+
   function stop() {
     if (stopped) return;
     stopped = true;
@@ -154,6 +160,7 @@ function createIngestLane({
     buildDigest,
     attachSessionTap,
     detachSessionTap,
+    hasSessionTap,
     flushBatch,
     stop,
     sources,

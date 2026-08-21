@@ -154,6 +154,13 @@ function createTerminalIngest({
     return true;
   }
 
+  // Whether THIS session object currently carries a tap (its `data` listener), so the health
+  // snapshot's listener-count invariant can account for it instead of flagging a false leak.
+  function hasSessionTap(sess) {
+    if (!sess || !sess.id) return false;
+    return tapsBySessionId.get(sess.id)?.session === sess;
+  }
+
   function stop() {
     for (const tap of [...tapsBySessionId.values()]) tap.detach();
     tapsBySessionId.clear();
@@ -163,6 +170,7 @@ function createTerminalIngest({
     name: 'terminal',
     attachSessionTap,
     detachSessionTap,
+    hasSessionTap,
     stop,
     get tapCount() { return tapsBySessionId.size; },
   };

@@ -688,7 +688,9 @@ function createBackend(httpServer, options = {}) {
       // tear down fast, so they are excluded to avoid false-positive listenerMismatch/orphanPty.
       if (!sess.ephemeral) {
         const clientCount = sessionDataClients.get(stats.id)?.size || 0;
-        if (stats.dataListenerCount !== clientCount) listenerMismatch = true;
+        // The ingest lane's terminal tap is a server-side `data` listener the client map cannot see.
+        const ingestTapCount = ingestLane?.hasSessionTap(sess) ? 1 : 0;
+        if (stats.dataListenerCount !== clientCount + ingestTapCount) listenerMismatch = true;
         if (stats.hasPty && (stats.state === STATES.DONE || stats.state === STATES.FAILED || stats.state === STATES.DORMANT)) {
           orphanPty = true;
         }
