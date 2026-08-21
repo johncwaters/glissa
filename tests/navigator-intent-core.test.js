@@ -11,7 +11,6 @@ const assert = require('node:assert/strict');
 
 const {
   MAX_INTENT_CHARS,
-  ageMs,
   applyModelIntent,
   applyOperatorIntent,
   createIntentState,
@@ -133,21 +132,6 @@ test('text is trimmed, capped, and strings only, on both paths', () => {
   assert.equal(sanitizeIntentText(long).length, MAX_INTENT_CHARS);
   assert.equal(applyModelIntent(createIntentState(), { text: long, now: NOW }).state.text.length, MAX_INTENT_CHARS);
   assert.equal(applyOperatorIntent(createIntentState(), { text: `  ${long}  `, now: NOW }).state.text.length, MAX_INTENT_CHARS);
-});
-
-// --- Staleness is derived ---
-
-test('age is computed from the timestamp, never stored on the state', () => {
-  const state = applyModelIntent(createIntentState(), { text: 'a belief', now: NOW }).state;
-  assert.equal(ageMs(state, NOW + 90000), 90000);
-  assert.equal(ageMs(state, NOW), 0);
-  assert.equal(ageMs(state, NOW - 5000), 0, 'a clock that went backwards is not a negative age');
-  assert.equal(Object.hasOwn(state, 'age'), false);
-});
-
-test('an empty statement has no age at all', () => {
-  assert.equal(ageMs(createIntentState(), NOW), null);
-  assert.equal(ageMs(null, NOW), null);
 });
 
 // --- The wire shape ---

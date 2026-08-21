@@ -48,19 +48,23 @@ function firstLine(text) {
   return String(text == null ? '' : text).split('\n')[0].trim();
 }
 
+function errorResult(reason) {
+  return { verdict: 'ERROR', comments: [], intent: null, reason };
+}
+
 async function readCommentsResult(resultPath, { lineCount = 0 } = {}) {
   let parsed = null;
   try {
     parsed = JSON.parse(await fs.readFile(resultPath, 'utf8'));
   } catch {
-    return { verdict: 'ERROR', comments: [], intent: null, reason: 'no readable result file' };
+    return errorResult('no readable result file');
   }
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    return { verdict: 'ERROR', comments: [], intent: null, reason: 'result file is not an object' };
+    return errorResult('result file is not an object');
   }
   const verdict = String(parsed.verdict || '').toUpperCase();
   if (!RESULT_VERDICTS.has(verdict)) {
-    return { verdict: 'ERROR', comments: [], intent: null, reason: 'invalid verdict in result file' };
+    return errorResult('invalid verdict in result file');
   }
   // Optional, and validated exactly like a comment message: a non-string or empty claim is simply not
   // an updated belief, so it is dropped rather than clearing the standing statement.
@@ -151,9 +155,7 @@ function createNavigatorDispatcher({
       handle = setTimeoutFn(() => {
         aborted = true;
         controller.abort();
-        resolve({
-          verdict: 'ERROR', comments: [], intent: null, reason: 'dispatch timed out',
-        });
+        resolve(errorResult('dispatch timed out'));
       }, timeoutSeconds * 1000);
       if (handle && typeof handle.unref === 'function') handle.unref();
     });
@@ -162,14 +164,10 @@ function createNavigatorDispatcher({
         if (aborted) return undefined;
         return readResult(resultPath, { lineCount });
       })
-      .catch((error) => ({
-        verdict: 'ERROR', comments: [], intent: null, reason: firstLine(error.message),
-      }));
+      .catch((error) => errorResult(firstLine(error.message)));
     const result = await Promise.race([run, timeout]);
     if (handle) clearTimeoutFn(handle);
-    return result || {
-      verdict: 'ERROR', comments: [], intent: null, reason: 'no verdict',
-    };
+    return result || errorResult('no verdict');
   }
 
   return async function dispatch({ uri, text, findings = [], intent = '' }) {
@@ -177,9 +175,7 @@ function createNavigatorDispatcher({
     try {
       workDir = await makeWorkDir();
     } catch (error) {
-      return {
-        verdict: 'ERROR', comments: [], intent: null, reason: `no work dir: ${firstLine(error.message)}`,
-      };
+      return errorResult(`no work dir: ${firstLine(error.message)}`);
     }
     const resultPath = path.join(workDir, RESULT_FILE);
     try {

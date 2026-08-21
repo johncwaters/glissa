@@ -27,16 +27,6 @@ function isEmptyIntent(state) {
   return !state || !state.text;
 }
 
-// Staleness is DERIVED, never stored: a statement does not change by getting older.
-function ageMs(state, now) {
-  if (isEmptyIntent(state)) return null;
-  const stamp = Number(state.ts);
-  if (!Number.isFinite(stamp) || stamp <= 0) return null;
-  const age = Number(now) - stamp;
-  if (!Number.isFinite(age)) return null;
-  return Math.max(0, age);
-}
-
 function sameIntent(left, right) {
   return left.text === right.text && left.source === right.source && left.locked === right.locked;
 }
@@ -88,7 +78,6 @@ module.exports = {
   MAX_INTENT_CHARS,
   MODEL_SOURCE,
   OPERATOR_SOURCE,
-  ageMs,
   applyModelIntent,
   applyOperatorIntent,
   createIntentState,
