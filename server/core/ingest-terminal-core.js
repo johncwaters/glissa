@@ -1,11 +1,18 @@
 /*
- * Pure core of the terminal ingest source (docs/plan-ingestion.md, M6): the per-session accumulator,
- * ANSI stripping, coalescing into one bounded event per flush window, and the drop-not-queue byte
- * budget that keeps a multi-MB burst off the event loop every session shares.
+ * Pure core of the terminal ingest source (docs/plan-ingestion.md, M6 and the TUI repaint filtering
+ * decision record): the per-session accumulator, repaint segmentation, ANSI stripping, coalescing into
+ * one bounded event per flush window, and the drop-not-queue byte budget that keeps a multi-MB burst
+ * off the event loop every session shares.
  *
  * The processing here is MECHANICAL only. Nothing in this file tokenizes terminal bytes for meaning:
  * the standing prohibition on parsing PTY content for state detection is untouched, and the model is
  * what interprets the text, exactly as it does buffer text today.
+ *
+ * A glissa session runs the Claude Code TUI, which PAINTS a screen rather than appending output.
+ * Stripping the escape sequences out of a painted frame keeps every character the sequences were
+ * positioning and loses the positions, so the frame arrives as shredded fragments. Segmentation is the
+ * answer, and it reads ANSI STRUCTURE only: where the cursor was moved, and whether a run of text was
+ * newline-terminated. It never looks at what the characters say.
  */
 
 'use strict';
@@ -39,6 +46,145 @@ const ANSI_PATTERN = new RegExp(
 // tab at 0x09 and newline at 0x0A. Written as escapes for the same reason the sequences above are.
 const CONTROL_RANGES = ['\\u0000-\\u0008', '\\u000B-\\u001F', '\\u007F'];
 const CONTROL_PATTERN = new RegExp(`[${CONTROL_RANGES.join('')}]`, 'g');
+
+/*
+ * The segmentation alphabet. Only two things about a sequence matter here: does it MOVE the cursor
+ * somewhere a linear reader cannot predict, and does it erase text that was already written.
+ *
+ * Motion finals, in ANSI order: CUU/CUD/CUF/CUB (A-D), CNL/CPL (E,F), CHA (G), CUP (H), CHT (I),
+ * CBT (Z), SU/SD (S,T), HVP (f), VPA (d), HPA (backtick), HPR (a), CBT-alt (b), VPR (e), DECSTBM (r),
+ * SCP/RCP (s,u). J and K are deliberately absent: they erase, they do not move.
+ */
+const CSI_INTRO = '(?:\\u001B\\[|\\u009B)';
+const MOTION_FINALS = 'A-GHIZSTabdef\\u0060rsu';
+const CURSOR_MOTION_SEQUENCE = `${CSI_INTRO}[0-9;]*[${MOTION_FINALS}]`;
+// Entering or leaving the alternate screen replaces everything on it, so it counts as motion too.
+const ALT_SCREEN_SEQUENCE = `${CSI_INTRO}\\?(?:1049|1047|47)[hl]`;
+// DECSC and DECRC save and restore the cursor, which is a jump the linear stream cannot follow.
+const SAVE_RESTORE_SEQUENCE = '\\u001B[78]';
+const ERASE_DISPLAY_SEQUENCE = `${CSI_INTRO}[0-9;]*J`;
+const ERASE_LINE_SEQUENCE = `${CSI_INTRO}[0-9;]*K`;
+
+/*
+ * One pass over the raw window, every alternative in its own group so the walker can tell a jump from a
+ * colour change. Order is significant: the erase and motion forms are more specific than the general
+ * CSI catch-all that follows them, and OSC comes first because its payload can contain anything.
+ */
+const SEGMENT_PATTERN = new RegExp([
+  `(${OSC_SEQUENCE})`,
+  `(${ALT_SCREEN_SEQUENCE})`,
+  `(${ERASE_DISPLAY_SEQUENCE})`,
+  `(${ERASE_LINE_SEQUENCE})`,
+  `(${CURSOR_MOTION_SEQUENCE})`,
+  `(${SAVE_RESTORE_SEQUENCE})`,
+  `(?:${CSI_SEQUENCE}|${CHARSET_SEQUENCE}|${SIMPLE_ESCAPE})`,
+].join('|'), 'g');
+
+const GROUP_ALT_SCREEN = 2;
+const GROUP_ERASE_DISPLAY = 3;
+const GROUP_ERASE_LINE = 4;
+const GROUP_MOTION = 5;
+const GROUP_SAVE_RESTORE = 6;
+
+/*
+ * An erase with no parameter, or parameter 0, reaches FORWARD from the cursor and leaves what was
+ * already written alone; 1, 2 and 3 reach back over it. That distinction is why a plain `ESC[K` at the
+ * end of a coloured line does not cost the line, while a status bar rewriting itself with `ESC[2K`
+ * loses what it just overwrote. It is read off the parameter, never guessed.
+ */
+function erasesBehindCursor(sequence) {
+  const digits = /([0-9]+)/.exec(sequence);
+  if (!digits) return false;
+  return Number(digits[1]) >= 1;
+}
+
+/**
+ * Split a raw flush window into the COMPLETE lines of genuine linear output it contained, plus the
+ * unterminated tail to carry into the next window.
+ *
+ * The rule is mechanical and has two halves. Text written after the cursor was moved, with no newline
+ * since, is a repaint fragment and is dropped along with whatever else was on that line: a painted
+ * screen writes cells at positions, so its characters never form a line. Text that reaches a newline
+ * having never been repositioned is linear output and is kept. A newline restores a known position, so
+ * it clears the suspicion; a lone carriage return rewrites the line, so it drops what was on it.
+ */
+function segmentLines(raw) {
+  const text = String(raw == null ? '' : raw).replace(/\r\n/g, '\n');
+  const lines = [];
+  let line = '';
+  let repositioned = false;
+  let poisoned = false;
+
+  function endLine() {
+    if (!poisoned && line) lines.push(line);
+    line = '';
+    poisoned = false;
+    repositioned = false;
+  }
+
+  function writeRun(run) {
+    // Split on lone carriage returns: each one restarts the line in place, the progress-bar idiom.
+    const rewrites = run.split('\r');
+    for (let index = 0; index < rewrites.length; index += 1) {
+      if (index > 0) {
+        line = '';
+        poisoned = false;
+      }
+      const piece = rewrites[index];
+      if (!piece) continue;
+      if (repositioned) {
+        poisoned = true;
+        continue;
+      }
+      line += piece;
+    }
+  }
+
+  function consumeText(chunk) {
+    if (!chunk) return;
+    const parts = chunk.split('\n');
+    for (let index = 0; index < parts.length; index += 1) {
+      writeRun(parts[index]);
+      if (index < parts.length - 1) endLine();
+    }
+  }
+
+  function applyToken(match) {
+    if (match[GROUP_MOTION] || match[GROUP_SAVE_RESTORE]) {
+      repositioned = true;
+      return;
+    }
+    if (match[GROUP_ALT_SCREEN]) {
+      repositioned = true;
+      line = '';
+      poisoned = false;
+      return;
+    }
+    const erase = match[GROUP_ERASE_DISPLAY] || match[GROUP_ERASE_LINE];
+    if (!erase || !erasesBehindCursor(erase)) return;
+    line = '';
+    poisoned = false;
+  }
+
+  SEGMENT_PATTERN.lastIndex = 0;
+  let cursor = 0;
+  let match = SEGMENT_PATTERN.exec(text);
+  while (match) {
+    consumeText(text.slice(cursor, match.index));
+    applyToken(match);
+    cursor = match.index + match[0].length;
+    match = SEGMENT_PATTERN.exec(text);
+  }
+  consumeText(text.slice(cursor));
+  /*
+   * The carry is the RAW tail after the last newline, and the walk always reaches that newline with
+   * both flags cleared, so re-reading the carry from a clean state next window reproduces exactly this
+   * window's treatment of it. That is what lets the carry travel as bytes with no state beside it.
+   */
+  const lastBreak = text.lastIndexOf('\n');
+  const carry = lastBreak === -1 ? text : text.slice(lastBreak + 1);
+  return { lines, carry };
+}
 
 function positiveInt(value, fallback) {
   const number = Number(value);
@@ -105,6 +251,8 @@ function createTerminalAccumulator({
     windowBytesSeen: 0,
     droppedBytes: 0,
     truncated: false,
+    // A repainting TUI settles on the same screen over and over; publishing it once is enough.
+    lastPublishedText: '',
   };
 }
 
@@ -169,27 +317,40 @@ function rebaseline(state) {
 }
 
 /**
- * One flush window drained into at most one event. A window whose bytes cleaned away to nothing
- * publishes nothing at all rather than an empty event, and the window budget resets either way.
+ * One flush window drained into at most one event. A window whose bytes were all repaint, or all
+ * escape sequence, or an unfinished line, publishes nothing at all rather than an empty event.
+ *
+ * The window BUDGET resets either way, because it measures backpressure over a flush interval. The
+ * truncation flags do not: they describe the text still waiting in the accumulator, so they travel with
+ * it until the line they belong to actually goes out.
  */
 function flushAccumulator(state, { now = Date.now() } = {}) {
-  const raw = state.pending;
+  const { lines, carry } = segmentLines(state.pending);
+  // Only COMPLETE lines publish. The unterminated tail waits for the newline that finishes it, which is
+  // also why a TUI that paints cells and never emits a newline publishes nothing at all.
+  state.pending = carry;
+  state.pendingBytes = Buffer.byteLength(carry, 'utf8');
+  state.windowBytesSeen = 0;
   const truncated = state.truncated;
   const droppedBytes = state.droppedBytes;
-  rebaseline(state);
   /*
    * SCRUB BEFORE ANY SLICING. summarize() and the detail tail below both cut from the FRONT, and a cut
    * through `api_key=secret` strips the very name the scrub matches on, so scrubbing afterwards lets
    * the bare value through into the ring, the activity feed and the dispatch prompt's digest. The
    * publish-time scrub in ingest-core still runs behind this one; it cannot repair a cut already made.
    */
-  const text = scrubText(cleanOutput(raw));
+  const text = scrubText(cleanOutput(lines.join('\n')));
   if (!text) return null;
+  // A screen that settles on what it already said is the same screen, not new output.
+  if (text === state.lastPublishedText) return null;
   // The note is budgeted INTO the summary and appended after the slice, never past it: the ring's own
   // cap slices from the front and would otherwise cut the note off the one event that needed it.
   const note = truncated ? ` [${TRUNCATION_NOTE}]` : '';
   const summary = summarize(text, state.maxSummaryChars - note.length);
   if (!summary) return null;
+  state.lastPublishedText = text;
+  state.truncated = false;
+  state.droppedBytes = 0;
   return {
     source: 'terminal',
     kind: 'output',
@@ -215,6 +376,7 @@ module.exports = {
   createTerminalAccumulator,
   flushAccumulator,
   rebaseline,
+  segmentLines,
   stripAnsi,
   summarize,
 };

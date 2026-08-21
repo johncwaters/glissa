@@ -209,7 +209,7 @@ test('a secret straddling the summary cut is scrubbed end to end, through the ta
   const sess = new FakeSession();
   lane.attachSessionTap(sess);
   // The offset that put the 400-char summary tail INSIDE the assignment, past the name the scrub needs.
-  sess.emit('data', `${'x'.repeat(200)} api_key=sk-live-DEADBEEFCAFEBABE${'z'.repeat(376)}`);
+  sess.emit('data', `${'x'.repeat(200)} api_key=sk-live-DEADBEEFCAFEBABE${'z'.repeat(376)}\n`);
   timers.runTimeouts();
   const [event] = lane.recentEvents();
   assert.ok(!event.summary.includes('sk-live-DEADBEEFCAFEBABE'), `leaked: ${event.summary.slice(0, 60)}`);

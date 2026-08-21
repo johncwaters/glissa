@@ -109,6 +109,10 @@ function createTerminalIngest({
     const onExit = () => {
       cancelFlush();
       flush();
+      // The dead process will never finish the line it was halfway through, and the accumulator now
+      // HOLDS an unterminated line rather than publishing it, so that remnant would otherwise prefix
+      // the first line the restarted process writes.
+      rebaseline(state);
     };
 
     function detach() {
