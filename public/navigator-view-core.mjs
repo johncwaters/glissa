@@ -36,25 +36,25 @@ export function basenameOfUri(uri) {
   }
 }
 
-function wholeCount(count) {
+function boundedCount(count) {
   return Number.isFinite(count) ? Math.max(Math.floor(count), 0) : 0;
 }
 
 export function findingCountText(count) {
-  const total = wholeCount(count);
+  const total = boundedCount(count);
   return total === 1 ? '1 finding' : `${total} findings`;
 }
 
 export function commentCountText(count) {
-  const total = wholeCount(count);
+  const total = boundedCount(count);
   return total === 1 ? '1 comment' : `${total} comments`;
 }
 
 // One head line for a section that can carry either kind, or both. A kind with nothing in it is left
 // out entirely rather than printed as a zero, so the head never pads a quiet document.
 export function sectionCountText(section) {
-  const findings = wholeCount(section?.findings?.length);
-  const comments = wholeCount(section?.comments?.length);
+  const findings = boundedCount(section?.findings?.length);
+  const comments = boundedCount(section?.comments?.length);
   if (findings > 0 && comments > 0) return `${findingCountText(findings)}, ${commentCountText(comments)}`;
   if (comments > 0) return commentCountText(comments);
   return findingCountText(findings);

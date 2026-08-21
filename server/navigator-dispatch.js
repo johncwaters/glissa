@@ -1,9 +1,7 @@
 /*
- * Navigator tier 3 dispatch: the IO half of docs/plan-navigator.md M4. One ephemeral headless
- * `claude -p` session per dispatch, seeded with the buffer as DATA, answering through a RESULT FILE
- * (the PR lane's contract), raced against a hard timeout so a hung session cannot pin the lane.
+ * Navigator tier 3 dispatch: the IO half of docs/plan-navigator.md M4.
  *
- * Permissions posture, live-probed against the real CLI (2.x) rather than assumed:
+ * Permissions posture, live-probed against the real CLI (2.x):
  *   - NO --dangerously-skip-permissions. The prompt embeds arbitrary buffer text, so the session gets
  *     the least capability that still lets it write its result file.
  *   - `--allowedTools=Write` pre-approves exactly one tool; every other tool needs an approval no
@@ -18,7 +16,7 @@
 
 'use strict';
 
-const fs = require('node:fs');
+const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 
@@ -49,15 +47,10 @@ function firstLine(text) {
   return String(text == null ? '' : text).split('\n')[0].trim();
 }
 
-/**
- * Read what a dispatch session claimed. Missing file, unparsable JSON, or an unknown verdict is an
- * ERROR carrying a reason, never fabricated comments; a COMMENTS verdict is believed only for the
- * entries that survive validation against the buffer that was sent.
- */
-function readCommentsResult(resultPath, { lineCount = 0 } = {}) {
+async function readCommentsResult(resultPath, { lineCount = 0 } = {}) {
   let parsed = null;
   try {
-    parsed = JSON.parse(fs.readFileSync(resultPath, 'utf8'));
+    parsed = JSON.parse(await fs.readFile(resultPath, 'utf8'));
   } catch {
     return { verdict: 'ERROR', comments: [], reason: 'no readable result file' };
   }
@@ -139,8 +132,8 @@ function createNavigatorDispatcher({
   model = null,
   setTimeoutFn = setTimeout,
   clearTimeoutFn = clearTimeout,
-  makeWorkDir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-navigator-')),
-  removeWorkDir = (dir) => { try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best-effort */ } },
+  makeWorkDir = () => fs.mkdtemp(path.join(os.tmpdir(), 'glissa-navigator-')),
+  removeWorkDir = async (dir) => { try { await fs.rm(dir, { recursive: true, force: true }); } catch { /* best-effort */ } },
   readResult = readCommentsResult,
   idFor = (uri) => `navigator:${uri}:${Date.now()}`,
 } = {}) {
@@ -149,15 +142,20 @@ function createNavigatorDispatcher({
   async function spawnWithTimeout({ id, name, prompt, cwd, resultPath, lineCount }) {
     const controller = new AbortController();
     let handle = null;
+    let aborted = false;
     const timeout = new Promise((resolve) => {
       handle = setTimeoutFn(() => {
+        aborted = true;
         controller.abort();
         resolve({ verdict: 'ERROR', comments: [], reason: 'dispatch timed out' });
       }, timeoutSeconds * 1000);
       if (handle && typeof handle.unref === 'function') handle.unref();
     });
     const run = Promise.resolve(spawnSession({ id, name, prompt, cwd, model, signal: controller.signal }))
-      .then(() => readResult(resultPath, { lineCount }))
+      .then(() => {
+        if (aborted) return undefined;
+        return readResult(resultPath, { lineCount });
+      })
       .catch((error) => ({ verdict: 'ERROR', comments: [], reason: firstLine(error.message) }));
     const result = await Promise.race([run, timeout]);
     if (handle) clearTimeoutFn(handle);
@@ -167,7 +165,7 @@ function createNavigatorDispatcher({
   return async function dispatch({ uri, text, findings = [] }) {
     let workDir = null;
     try {
-      workDir = makeWorkDir();
+      workDir = await makeWorkDir();
     } catch (error) {
       return { verdict: 'ERROR', comments: [], reason: `no work dir: ${firstLine(error.message)}` };
     }
@@ -182,7 +180,7 @@ function createNavigatorDispatcher({
         lineCount: countLines(text),
       });
     } finally {
-      removeWorkDir(workDir);
+      await removeWorkDir(workDir);
     }
   };
 }

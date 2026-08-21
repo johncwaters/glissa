@@ -70,24 +70,20 @@ function countRecentDispatches(state, now) {
   return state.dispatchTimes.filter((ts) => ts > cutoff).length;
 }
 
-function skip(gate) {
-  return { dispatch: false, gate };
-}
-
 /**
  * The one gate. It passes only when the lane is on, nothing is in flight, the document actually moved
  * since its last dispatch, its cooldown has elapsed, and the machine-wide hourly budget has room. A
  * refusal names the gate that held so the wiring can log exactly one line about it.
  */
 function decideDispatch({ state, uri, textHash, now, config, inFlight = false }) {
-  if (!config || config.enabled !== true) return skip('disabled');
-  if (!uri) return skip('no-uri');
-  if (!textHash) return skip('empty-document');
-  if (inFlight) return skip('in-flight');
-  if (state.lastHashByUri.get(uri) === textHash) return skip('unchanged');
+  if (!config || config.enabled !== true) return { dispatch: false, gate: 'disabled' };
+  if (!uri) return { dispatch: false, gate: 'no-uri' };
+  if (!textHash) return { dispatch: false, gate: 'empty-document' };
+  if (inFlight) return { dispatch: false, gate: 'in-flight' };
+  if (state.lastHashByUri.get(uri) === textHash) return { dispatch: false, gate: 'unchanged' };
   const lastAt = state.lastAtByUri.get(uri);
-  if (Number.isFinite(lastAt) && now - lastAt < config.cooldownMs) return skip('cooldown');
-  if (countRecentDispatches(state, now) >= config.maxPerHour) return skip('hour-cap');
+  if (Number.isFinite(lastAt) && now - lastAt < config.cooldownMs) return { dispatch: false, gate: 'cooldown' };
+  if (countRecentDispatches(state, now) >= config.maxPerHour) return { dispatch: false, gate: 'hour-cap' };
   return { dispatch: true, gate: null };
 }
 
@@ -111,7 +107,9 @@ function forgetUri(state, uri) {
 function countLines(text) {
   const value = typeof text === 'string' ? text : '';
   if (!value) return 0;
-  return value.split('\n').length;
+  const counted = value.endsWith('\n') ? value.slice(0, -1) : value;
+  if (!counted) return 1;
+  return counted.split('\n').length;
 }
 
 /**

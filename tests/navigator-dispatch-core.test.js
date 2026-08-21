@@ -236,7 +236,12 @@ test('with no line count known, a line is only checked for being a positive numb
 test('lines are counted the way the prompt promises', () => {
   assert.equal(countLines(''), 0);
   assert.equal(countLines('one line'), 1);
-  assert.equal(countLines('one\ntwo\n'), 3, 'a trailing newline opens a last, empty line');
+  assert.equal(countLines('one\ntwo\n'), 2, 'a trailing newline does not add a phantom line');
+});
+
+test('a trailing-newline phantom line cannot accept a model comment', () => {
+  const text = 'one\ntwo\n';
+  assert.deepEqual(sanitizeComments([{ line: 3, message: 'phantom line' }], { lineCount: countLines(text) }), []);
 });
 
 // --- The prompt ---

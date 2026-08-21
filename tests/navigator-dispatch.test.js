@@ -26,7 +26,7 @@ function tempFile(contents) {
 
 // --- Reading what a session claimed ---
 
-test('a COMMENTS result is believed for the entries that pass validation', (t) => {
+test('a COMMENTS result is believed for the entries that pass validation', async (t) => {
   const { file, cleanup } = tempFile(JSON.stringify({
     verdict: 'COMMENTS',
     comments: [
@@ -36,43 +36,43 @@ test('a COMMENTS result is believed for the entries that pass validation', (t) =
   }));
   t.after(cleanup);
 
-  assert.deepEqual(readCommentsResult(file, { lineCount: 4 }), {
+  assert.deepEqual(await readCommentsResult(file, { lineCount: 4 }), {
     verdict: 'COMMENTS',
     comments: [{ line: 2, message: 'The title promises a plan the body never gives.' }],
     reason: null,
   });
 });
 
-test('NONE is a first-class answer, and carries no comments', (t) => {
+test('NONE is a first-class answer, and carries no comments', async (t) => {
   const { file, cleanup } = tempFile(JSON.stringify({ verdict: 'none', comments: [] }));
   t.after(cleanup);
-  assert.deepEqual(readCommentsResult(file, { lineCount: 4 }), { verdict: 'NONE', comments: [], reason: null });
+  assert.deepEqual(await readCommentsResult(file, { lineCount: 4 }), { verdict: 'NONE', comments: [], reason: null });
 });
 
-test('a COMMENTS verdict whose every entry is junk reports NONE and says why', (t) => {
+test('a COMMENTS verdict whose every entry is junk reports NONE and says why', async (t) => {
   const { file, cleanup } = tempFile(JSON.stringify({ verdict: 'COMMENTS', comments: [{ line: 0, message: '' }] }));
   t.after(cleanup);
-  const result = readCommentsResult(file, { lineCount: 4 });
+  const result = await readCommentsResult(file, { lineCount: 4 });
   assert.equal(result.verdict, 'NONE');
   assert.deepEqual(result.comments, []);
   assert.match(result.reason, /survived validation/);
 });
 
-test('a missing, unparsable, non-object or unknown-verdict file is an ERROR, never a comment', (t) => {
+test('a missing, unparsable, non-object or unknown-verdict file is an ERROR, never a comment', async (t) => {
   const missing = path.join(os.tmpdir(), `glissa-navigator-absent-${process.pid}.json`);
-  assert.deepEqual(readCommentsResult(missing), { verdict: 'ERROR', comments: [], reason: 'no readable result file' });
+  assert.deepEqual(await readCommentsResult(missing), { verdict: 'ERROR', comments: [], reason: 'no readable result file' });
 
   const bad = tempFile('{not json');
   t.after(bad.cleanup);
-  assert.equal(readCommentsResult(bad.file).verdict, 'ERROR');
+  assert.equal((await readCommentsResult(bad.file)).verdict, 'ERROR');
 
   const array = tempFile(JSON.stringify([{ verdict: 'COMMENTS' }]));
   t.after(array.cleanup);
-  assert.match(readCommentsResult(array.file).reason, /not an object/);
+  assert.match((await readCommentsResult(array.file)).reason, /not an object/);
 
   const unknown = tempFile(JSON.stringify({ verdict: 'LOOKS_FINE', comments: [{ line: 1, message: 'trust me' }] }));
   t.after(unknown.cleanup);
-  assert.deepEqual(readCommentsResult(unknown.file, { lineCount: 4 }), {
+  assert.deepEqual(await readCommentsResult(unknown.file, { lineCount: 4 }), {
     verdict: 'ERROR', comments: [], reason: 'invalid verdict in result file',
   });
 });
@@ -83,7 +83,7 @@ function dispatcherWithSpawn(spawnSession, overrides = {}) {
   const workDirs = [];
   const dispatch = createNavigatorDispatcher({
     spawnSession,
-    makeWorkDir: () => {
+    makeWorkDir: async () => {
       const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-navigator-test-'));
       workDirs.push(dir);
       return dir;
@@ -137,6 +137,7 @@ test('a hung session is aborted at the hard timeout and resolves ERROR, so the l
   let fire = null;
   let timeoutMs = null;
   let aborted = false;
+  let readAttempts = 0;
   const { dispatch, workDirs } = dispatcherWithSpawn(
     ({ signal }) => new Promise((resolve) => {
       signal.addEventListener('abort', () => { aborted = true; resolve(); }, { once: true });
@@ -145,6 +146,7 @@ test('a hung session is aborted at the hard timeout and resolves ERROR, so the l
       timeoutSeconds: 12,
       setTimeoutFn: (fn, ms) => { fire = fn; timeoutMs = ms; return { unref() { return this; } }; },
       clearTimeoutFn: () => {},
+      readResult: async () => { readAttempts += 1; return { verdict: 'NONE', comments: [], reason: null }; },
     },
   );
 
@@ -156,7 +158,9 @@ test('a hung session is aborted at the hard timeout and resolves ERROR, so the l
   // The injected timer never fires on its own; firing it here IS the hard timeout.
   fire();
   assert.deepEqual(await pending, { verdict: 'ERROR', comments: [], reason: 'dispatch timed out' });
+  await new Promise((resolve) => { setTimeout(resolve, 0).unref(); });
   assert.equal(aborted, true, 'the session was told to stop, not just abandoned');
+  assert.equal(readAttempts, 0, 'a timeout never reads from the removed work dir');
   assert.equal(fs.existsSync(workDirs[0]), false);
 });
 
