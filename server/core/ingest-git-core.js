@@ -15,11 +15,14 @@
 
 const crypto = require('node:crypto');
 const path = require('node:path');
+const { SOURCE_DEFAULTS } = require('./ingest-core');
 
 const SOURCE = 'git';
 
-const DEFAULT_DEBOUNCE_MS = 1000;
-const DEFAULT_POLL_MS = 60000;
+// The config resolver owns these numbers; re-exporting them here keeps the shell's direct-construction
+// fallback from ever drifting from what a resolved config carries.
+const DEFAULT_DEBOUNCE_MS = SOURCE_DEFAULTS.git.debounceMs;
+const DEFAULT_POLL_MS = SOURCE_DEFAULTS.git.pollMs;
 
 const MAX_SUBJECT_CHARS = 160;
 const SHORT_SHA_CHARS = 7;
