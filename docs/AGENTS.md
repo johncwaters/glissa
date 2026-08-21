@@ -15,6 +15,7 @@ Design documents, postmortems, and operator guides. Background reading for why t
 | `testing-cli.md` | Manual CLI test scenarios (`--help`, `--version`, `--port`, `--config`, `doctor`, `npm pack`) to run before a release |
 | `plan-context-mill.md` | Executed plan for the automated context-pack system (successor direction to the removed Teams product): current-injection inventory, live-verified CC 2.1.235 delivery levers, pack spec/build/delivery design, automation loops |
 | `plan-navigator.md` | Plan for the real-time AI pair-navigator lane: LSP transport-only shim decision (shim vs native vs rewrite), tiered feedback ladder, intent model, module seams, milestones M1-M5 |
+| `plan-agent-adapters.md` | Plan for harness-agnostic Glissa: full CC coupling inventory, live-probed Codex 0.146.0 / Grok 0.2.111 hook and OSC surfaces, AgentAdapter seam design, hook-relay transport, capability gating, milestones M1-M6 |
 
 ## Subdirectories
 
