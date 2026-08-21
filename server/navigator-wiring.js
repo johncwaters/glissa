@@ -22,6 +22,8 @@ const NAVIGATOR_DEBOUNCE_MS = 300;
 // Whole-document didChange frames can carry editor buffers up to the data WS cap.
 const MAX_FRAME_BYTES = 2 * 1024 * 1024;
 const MARKDOWN_EXTENSIONS = ['.md', '.markdown'];
+// What one dispatch prompt will spend on recent activity, beside a buffer that can be far larger.
+const DIGEST_BUDGET_CHARS = 2000;
 
 function isMarkdownDoc(doc) {
   if (!doc) return false;
@@ -58,6 +60,10 @@ function createNavigatorWiring({
   // the lane behaves exactly as it did before M4: no dispatch timer is ever armed and nothing spawns.
   dispatchConfig = null,
   dispatch = null,
+  // Cross-source context digest from the ingest lane (docs/plan-ingestion.md, M6). Absent by default
+  // and then never called, which is what keeps a dispatch prompt with no ingest lane byte-identical.
+  contextDigest = null,
+  digestBudgetChars = DIGEST_BUDGET_CHARS,
   hashFn = hashText,
 } = {}) {
   const wss = new WebSocketServer({ noServer: true, maxPayload });
@@ -184,6 +190,22 @@ function createNavigatorWiring({
     recordComments(uri, result.verdict === 'COMMENTS' ? result.comments : []);
   }
 
+  /*
+   * The ingest lane's digest, read once per dispatch and never on any other path. Synchronous by its own
+   * contract, so it cannot describe two moments at once; a lane that throws costs this prompt its
+   * context section and nothing else, because additive context must never fail a dispatch.
+   */
+  function readContextDigest() {
+    if (typeof contextDigest !== 'function') return '';
+    try {
+      const digest = contextDigest({ scopes: null, budgetChars: digestBudgetChars, now: nowFn() });
+      return typeof digest === 'string' ? digest : '';
+    } catch (error) {
+      warn(`context digest failed: ${error.message}`);
+      return '';
+    }
+  }
+
   // The in-flight dispatch, so a test (and shutdown) can wait for the lane to go quiet.
   let dispatchSettled = Promise.resolve();
 
@@ -239,7 +261,11 @@ function createNavigatorWiring({
       let result = null;
       try {
         result = await dispatch({
-          uri, text, findings: findingsByUri.get(uri) || [], intent: intentState.text,
+          uri,
+          text,
+          findings: findingsByUri.get(uri) || [],
+          intent: intentState.text,
+          digest: readContextDigest(),
         });
       } catch (error) {
         warn(`dispatch for ${uri} threw: ${error.message}`);
@@ -443,5 +469,6 @@ module.exports = {
   createNavigatorWiring,
   isMarkdownDoc,
   readFrame,
+  DIGEST_BUDGET_CHARS,
   NAVIGATOR_DEBOUNCE_MS,
 };

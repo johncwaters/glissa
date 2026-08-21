@@ -255,3 +255,129 @@ function compareText(left, right) {
   if (left > right) return 1;
   return 0;
 }
+
+// ── Ingest activity feed (docs/plan-ingestion.md, M6) ─────────
+// The cross-source timeline the ingest lane publishes, rendered under the navigator's own findings
+// because it is the same question from the other side: what the navigator can currently see.
+
+export const INGEST_EMPTY_TEXT = 'No activity yet. The ingest lane reports what your sessions and tools are doing.';
+// The DOM is bounded, not the rings: the server keeps far more than a scrolling list should ever hold.
+export const MAX_RENDERED_ACTIVITY = 100;
+
+const SOURCE_LABELS = {
+  terminal: 'terminal',
+  agentLogs: 'agent',
+  git: 'git',
+  fs: 'files',
+  shellHistory: 'shell',
+  editor: 'editor',
+};
+
+export function activitySourceLabel(source) {
+  const name = typeof source === 'string' ? source : '';
+  return SOURCE_LABELS[name] || name || 'source';
+}
+
+// Seconds matter here in a way they never do for the intent statement: a terminal event is interesting
+// precisely because it just happened.
+export function activityAgeText(ts, now = Date.now()) {
+  const stamp = Number(ts);
+  if (!Number.isFinite(stamp) || stamp <= 0) return '';
+  const seconds = Math.max(0, Math.floor((Number(now) - stamp) / 1000));
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
+
+// One wire event, normalized. Anything without a seq and a summary is not an event this list can order
+// or show, so it is dropped rather than rendered as a blank row.
+export function normalizeActivityEvent(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const seq = Number(raw.seq);
+  if (!Number.isFinite(seq)) return null;
+  const summary = typeof raw.summary === 'string' ? raw.summary.trim() : '';
+  if (!summary) return null;
+  const ts = Number(raw.ts);
+  const scope = raw.scope && typeof raw.scope === 'object' ? raw.scope : {};
+  return {
+    seq: Math.floor(seq),
+    source: typeof raw.source === 'string' ? raw.source : '',
+    kind: typeof raw.kind === 'string' ? raw.kind : '',
+    ts: Number.isFinite(ts) && ts > 0 ? ts : 0,
+    summary,
+    root: typeof scope.root === 'string' && scope.root ? scope.root : null,
+    sessionId: typeof scope.sessionId === 'string' && scope.sessionId ? scope.sessionId : null,
+  };
+}
+
+export function eventsOfMessage(msg) {
+  const raw = Array.isArray(msg?.events) ? msg.events : [];
+  const events = [];
+  for (const entry of raw) {
+    const event = normalizeActivityEvent(entry);
+    if (event) events.push(event);
+  }
+  return events;
+}
+
+export function activityOverflowCount(msg) {
+  const overflow = Number(msg?.overflow);
+  if (!Number.isFinite(overflow) || overflow <= 0) return 0;
+  return Math.floor(overflow);
+}
+
+// The frame said more happened than it carried. Everything the count stands for is still on the server,
+// so the wording says what was skipped rather than implying anything was lost.
+export function activityOverflowText(count) {
+  const total = boundedCount(count);
+  if (total <= 0) return '';
+  if (total === 1) return '1 more event not shown';
+  return `${total} more events not shown`;
+}
+
+function sortedAndCapped(events, max) {
+  return [...events]
+    .sort((left, right) => right.seq - left.seq)
+    .slice(0, Math.max(0, Math.floor(max)));
+}
+
+/**
+ * One batched delta merged into the standing list: newest first, deduped by seq (a snapshot and a
+ * delta can legitimately carry the same event), and capped so the rendered list stays bounded no matter
+ * how long the tab is left open.
+ */
+export function applyActivityMessage(events, msg, { max = MAX_RENDERED_ACTIVITY } = {}) {
+  const arriving = eventsOfMessage(msg);
+  if (arriving.length === 0) return sortedAndCapped(events, max);
+  const bySeq = new Map();
+  for (const event of events) bySeq.set(event.seq, event);
+  for (const event of arriving) bySeq.set(event.seq, event);
+  return sortedAndCapped([...bySeq.values()], max);
+}
+
+// Connect-time repair: the server's current rings REPLACE this tab's list rather than merging into it,
+// so an event evicted while the tab was away disappears instead of lingering.
+export function applyActivitySnapshot(msg, { max = MAX_RENDERED_ACTIVITY } = {}) {
+  return sortedAndCapped(eventsOfMessage(msg), max);
+}
+
+export function hasActivity(msg) {
+  return eventsOfMessage(msg).length > 0;
+}
+
+export function activityCountText(count) {
+  const total = boundedCount(count);
+  return total === 1 ? '1 event' : `${total} events`;
+}
+
+// An event with no root belongs to no project (shell history is the source that can never know one), and
+// the row says so rather than letting a reader assume this project produced it.
+export function activityScopeText(event) {
+  if (!event?.root) return 'machine';
+  const root = event.root.replace(/[\\/]+$/, '');
+  const lastSeparator = Math.max(root.lastIndexOf('/'), root.lastIndexOf('\\'));
+  return lastSeparator === -1 ? root : root.slice(lastSeparator + 1);
+}

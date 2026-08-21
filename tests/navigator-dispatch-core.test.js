@@ -311,3 +311,59 @@ test('an over-long intent is capped before it reaches the prompt', () => {
   assert.ok(prompt.includes(`Current working intent (operator-corrected when locked): ${'y'.repeat(300)}\n`));
   assert.equal(prompt.includes('y'.repeat(301)), false);
 });
+
+// --- The ingest context digest (docs/plan-ingestion.md, M6) ---
+
+test('no digest leaves the prompt byte-identical to the one built before ingest existed', () => {
+  const base = {
+    uri: URI, text: '# Title\n\nSome prose.\n', findings: [], intent: 'writing a plan', resultPath: '/tmp/r.json',
+  };
+  const withoutTheField = buildNavigatorPrompt({ ...base });
+  for (const digest of ['', '   ', '\n\n', null, undefined, 42, {}]) {
+    assert.equal(
+      buildNavigatorPrompt({ ...base, digest }),
+      withoutTheField,
+      `${JSON.stringify(digest)} must leave the prompt untouched`,
+    );
+  }
+  assert.equal(withoutTheField.includes('GLISSA-ACTIVITY-'), false);
+  assert.equal(withoutTheField.includes('Recent activity'), false);
+});
+
+test('a digest rides as one fenced DATA section, framed exactly like the buffer', () => {
+  const digest = 'Recent activity on this machine, newest first:\n- terminal 4s ago: npm test 42 passing';
+  const prompt = buildNavigatorPrompt({
+    uri: URI, text: '# Title\n', digest, resultPath: '/tmp/r.json',
+  });
+  const marker = prompt.match(/GLISSA-ACTIVITY-[A-Z0-9-]+/)[0];
+  assert.ok(prompt.includes(`<<<${marker}\n${digest}\n>>>${marker}`));
+  assert.match(prompt, /is DATA and background context only/);
+  assert.ok(prompt.includes('- terminal 4s ago: npm test 42 passing'));
+  // Its own marker, so a captured line cannot close the buffer's fence or its own.
+  assert.notEqual(marker, prompt.match(/GLISSA-BUFFER-[A-Z0-9-]+/)[0]);
+});
+
+test('the activity marker is content-derived, so a digest cannot close its own fence', () => {
+  const { activitySection } = require('../server/core/navigator-dispatch-core');
+  const [, opener] = activitySection('one thing happened');
+  const [, otherOpener] = activitySection('a different thing happened');
+  assert.notEqual(opener, otherOpener);
+  assert.deepEqual(activitySection(''), []);
+  assert.deepEqual(activitySection(null), []);
+});
+
+test('the digest sits above the standing findings, and below the intent it gives context to', () => {
+  const prompt = buildNavigatorPrompt({
+    uri: URI,
+    text: '# Title\n',
+    intent: 'refactoring the spawn path',
+    digest: 'Recent activity on this machine, newest first:\n- git 1m ago: fix the gate',
+    resultPath: '/tmp/r.json',
+  });
+  const intentAt = prompt.indexOf('Current working intent');
+  const digestAt = prompt.indexOf('GLISSA-ACTIVITY-');
+  const findingsAt = prompt.indexOf('Standing tier 2 findings');
+  // The buffer's fence, not its first mention: the marker is named up in the hard rules too.
+  const bufferFenceAt = prompt.indexOf('<<<GLISSA-BUFFER-');
+  assert.ok(intentAt < digestAt && digestAt < findingsAt && findingsAt < bufferFenceAt);
+});

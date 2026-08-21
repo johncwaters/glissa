@@ -13,9 +13,18 @@
 import { sendControlMsg } from './control-ws.js';
 import { el } from './dom-helpers.js';
 import {
+  INGEST_EMPTY_TEXT,
   NAVIGATOR_EMPTY_TEXT,
   NAVIGATOR_INTENT_EMPTY_TEXT,
   NAVIGATOR_INTENT_MAX_CHARS,
+  activityAgeText,
+  activityCountText,
+  activityOverflowCount,
+  activityOverflowText,
+  activityScopeText,
+  activitySourceLabel,
+  applyActivityMessage,
+  applyActivitySnapshot,
   applyCommentsMessage,
   applyCommentsSnapshot,
   applyFindingsMessage,
@@ -23,6 +32,7 @@ import {
   commentLineLabel,
   emptyIntent,
   findingLineLabel,
+  hasActivity,
   hasComments,
   hasFindings,
   hasIntentChanged,
@@ -46,6 +56,11 @@ let _intentUI = null;
 // The statement the field last adopted, which is what tells a pristine field from a started draft.
 let _adoptedIntentText = '';
 let _activityCallback = null;
+// The ingest lane's cross-source timeline, newest first and already capped by the view core.
+let _activityEvents = [];
+// What the last batched frame could not fit. A count, never the events themselves.
+let _activityOverflow = 0;
+let _activityUI = null;
 // Findings that landed while the operator was looking at another tab. Cleared when this one is shown,
 // which is the whole point of the dot: it says "something arrived since you last looked".
 let _unseen = false;
@@ -180,6 +195,54 @@ function render({ force = false } = {}) {
   for (const section of sections) _feed.append(buildSection(section));
 }
 
+/*
+ * The ingest activity feed: one section under the findings, one row per normalized event, newest first.
+ * It carries no controls, so nothing here has a label to keep constant; the head's count is status text
+ * beside the title rather than anything clickable.
+ */
+function buildActivityBlock() {
+  const section = el('section', 'navigator-activity');
+  const head = el('div', 'navigator-activity-head');
+  head.append(el('h2', 'navigator-activity-title', 'Activity'));
+  const count = el('span', 'navigator-activity-count');
+  head.append(count);
+  section.append(head);
+  const list = el('div', 'navigator-activity-list');
+  section.append(list);
+  const overflow = el('p', 'navigator-activity-overflow');
+  section.append(overflow);
+  _activityUI = { count, list, overflow };
+  return section;
+}
+
+function buildActivityRow(event, now) {
+  const row = el('div', 'navigator-activity-row');
+  row.append(el('span', 'navigator-activity-source', activitySourceLabel(event.source)));
+  row.append(el('span', 'navigator-activity-age', activityAgeText(event.ts, now)));
+  row.append(el('span', 'navigator-activity-scope', activityScopeText(event)));
+  // Captured output about whatever the carbon unit was doing: built as text, never markup.
+  const summary = el('span', 'navigator-activity-summary');
+  summary.textContent = event.summary;
+  row.append(summary);
+  return row;
+}
+
+function renderActivity({ force = false } = {}) {
+  if (!_activityUI) return;
+  if (!force && isHidden()) return;
+  const { count, list, overflow } = _activityUI;
+  count.textContent = activityCountText(_activityEvents.length);
+  list.textContent = '';
+  if (_activityEvents.length === 0) {
+    list.append(el('p', 'navigator-empty', INGEST_EMPTY_TEXT));
+    overflow.textContent = '';
+    return;
+  }
+  const now = Date.now();
+  for (const event of _activityEvents) list.append(buildActivityRow(event, now));
+  overflow.textContent = activityOverflowText(_activityOverflow);
+}
+
 function refreshActivity() {
   if (!_activityCallback) return;
   _activityCallback(_unseen);
@@ -203,11 +266,13 @@ export function mountNavigatorView(parent) {
   root.append(buildIntentBlock());
   const feed = el('div', 'navigator-feed');
   root.append(feed);
+  root.append(buildActivityBlock());
   parent.appendChild(root);
   _root = root;
   _feed = feed;
   renderIntent();
   render({ force: true });
+  renderActivity({ force: true });
   return root;
 }
 
@@ -217,6 +282,7 @@ export function refreshNavigatorView() {
   refreshActivity();
   renderIntent();
   render({ force: true });
+  renderActivity({ force: true });
 }
 
 export function applyNavigatorFindings(msg) {
@@ -244,6 +310,27 @@ export function applyNavigatorIntent(msg) {
   _intent = next;
   noteArrival(moved && next.source === 'model' && !!next.text);
   renderIntent();
+  refreshActivity();
+}
+
+/*
+ * One batched ingest frame (docs/plan-ingestion.md, M6). The lane sends at most one per second carrying
+ * at most 50 events, and what it could not fit rides as a count rather than as more rows.
+ */
+export function applyIngestActivity(msg) {
+  _activityEvents = applyActivityMessage(_activityEvents, msg);
+  _activityOverflow = activityOverflowCount(msg);
+  noteArrival(hasActivity(msg));
+  renderActivity();
+  refreshActivity();
+}
+
+// Connect-time repair for the feed: the rings as they stand now, replacing this tab's list.
+export function applyIngestSnapshot(msg) {
+  _activityEvents = applyActivitySnapshot(msg);
+  _activityOverflow = 0;
+  noteArrival(_activityEvents.length > 0);
+  renderActivity();
   refreshActivity();
 }
 

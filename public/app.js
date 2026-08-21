@@ -12,7 +12,7 @@ import { writeClipboardText } from './dom-helpers.js';
 import { activateFocusView, centerSessionQuietly, deactivateFocusView, focusAdjacentInRail, focusNextAttention, focusNthInRail, getFocusedSessionId, isFocusActive, mountFocusView, noteKnownProjectPath, refreshFocusRoster, restoreFocusedSession, setFocusMergeStatus } from './focus-view/focus-view.js';
 import { initFormFactor, isPhoneLayout, onLayoutChange } from './form-factor.js';
 import { applyHealthSnapshot, mountHealthMonitor } from './health-monitor.js';
-import { applyNavigatorComments, applyNavigatorFindings, applyNavigatorIntent, applyNavigatorSnapshot, mountNavigatorView, refreshNavigatorView, setNavigatorActivityCallback } from './navigator-panel.js';
+import { applyIngestActivity, applyIngestSnapshot, applyNavigatorComments, applyNavigatorFindings, applyNavigatorIntent, applyNavigatorSnapshot, mountNavigatorView, refreshNavigatorView, setNavigatorActivityCallback } from './navigator-panel.js';
 import { initNotifications, showDesktopNotification } from './notifications.js';
 import { activatePhoneShell, deactivatePhoneShell, getPhoneSessionId, isPhoneScreenActive, isPhoneShellActive, mountPhoneShell, refreshPhoneBoard, setPhoneScreenAttention, showPhoneScreen } from './phone/phone-shell.js';
 import { applyPrStatus, mountPrView, setPrActivityCallback } from './pr-panel.js';
@@ -292,6 +292,11 @@ const messageHandlers = {
   // The machine-wide intent statement, pushed whenever it actually moves (model proposal or correction).
   'navigator-intent':   (msg) => applyNavigatorIntent(msg),
   'navigator-snapshot': (msg) => applyNavigatorSnapshot(msg),
+  // Ingest lane. One batched delta per second at most (overflow inside the window arrives as a count),
+  // and a snapshot on every connect: like the navigator's, the deltas are deliberately not replayable,
+  // because the snapshot repairs the whole feed in one frame.
+  'ingest-activity':    (msg) => applyIngestActivity(msg),
+  'ingest-snapshot':    (msg) => applyIngestSnapshot(msg),
   'client-trust':       (msg) => applyClientTrust(msg.trust),
   'shutting-down':      () => {
     disableReconnect();

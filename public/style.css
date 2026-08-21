@@ -3506,6 +3506,82 @@ a.pr-title:hover {
   max-width: 78ch;
 }
 
+/* The ingest activity feed sits below the findings: what the navigator can currently SEE, under what it
+   currently has to say about it. Rows are bounded in the panel, so this list never grows without end. */
+.navigator-activity {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.navigator-activity-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border-dim);
+}
+
+.navigator-activity-title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-head);
+}
+
+.navigator-activity-count {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.navigator-activity-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.navigator-activity-row {
+  display: grid;
+  grid-template-columns: 64px 56px 96px 1fr;
+  align-items: baseline;
+  gap: 8px;
+  padding: 3px 0;
+  line-height: 1.5;
+}
+
+.navigator-activity-source {
+  font-size: 10px;
+  color: var(--text-muted);
+  letter-spacing: 0.04em;
+}
+
+.navigator-activity-age {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.navigator-activity-scope {
+  font-size: 10px;
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Captured output is often one long line; it wraps rather than widening the panel. */
+.navigator-activity-summary {
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.navigator-activity-overflow {
+  margin: 0;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
 /* ── Primary view tabs (Focus / Radar / PRs / Usage / Navigator) ───────── */
 .header-left {
   display: flex;

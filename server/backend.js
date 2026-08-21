@@ -58,6 +58,8 @@ const { createPosthogWiring } = require('./posthog-wiring');
 const { createNavigatorWiring } = require('./navigator-wiring');
 const { createNavigatorDispatcher, createNavigatorSpawn } = require('./navigator-dispatch');
 const { resolveDispatchConfig: resolveNavigatorDispatchConfig } = require('./core/navigator-dispatch-core');
+const { createIngestLane } = require('./ingest-wiring');
+const { resolveIngestConfig } = require('./core/ingest-core');
 const { createUsageWiring, resolveUsageConfig } = require('./usage-wiring');
 const { createLaneLedger } = require('./usage-lane-ledger');
 const { INTERACTIVE_LANE } = require('./core/usage-lane-core');
@@ -639,6 +641,23 @@ function createBackend(httpServer, options = {}) {
     }
   }
 
+  /*
+   * The same broadcast, refused to remote-trust sockets. Ingest frames carry captured terminal output
+   * and (later) shell history, which the plan keeps on the machine that produced it exactly as the
+   * navigator lane keeps live buffers off the remote listener. Trust comes from the listener port
+   * stamped on the connection at upgrade, never from anything the client sent; absent trust reads as
+   * local, so behavior with remote mode off is unchanged.
+   */
+  function broadcastLocalControl(msg) {
+    controlReplayLog.stamp(msg);
+    const payload = JSON.stringify(msg);
+    for (const client of controlWss.clients) {
+      if (client.readyState !== 1) continue;
+      if (client.glissaTrust === 'remote') continue;
+      client.send(payload);
+    }
+  }
+
   // --- Health snapshot ---
   // Periodic memory/leak telemetry. Sampled rather than per-event because
   // process.memoryUsage() walks the V8 heap and shouldn't run on hot paths.
@@ -885,6 +904,21 @@ function createBackend(httpServer, options = {}) {
   });
 
   /*
+   * Ingest lane: config-file only, absent config constructs nothing (docs/plan-ingestion.md, M6), the
+   * same shape as the navigator lane below it. Every source is individually opt-in ON TOP of the lane
+   * flag, so a lane whose sources are all off builds no adapter, holds no ring and taps nothing.
+   * Constructed BEFORE the navigator lane because that lane takes this one's digest as a dependency.
+   */
+  const ingestConfig = resolveIngestConfig(config.ingest);
+  const ingestLane = ingestConfig.enabled
+    ? createIngestLane({
+      config: ingestConfig,
+      logger: console,
+      broadcast: (msg) => broadcastLocalControl(msg),
+    })
+    : null;
+
+  /*
    * Navigator lane: config-file only, absent config constructs nothing (docs/plan-navigator.md,
    * "Wire and trust"). Its tier 3 model dispatch is a second opt-in inside that one: without
    * config.navigator.dispatch.enabled the dispatcher is never constructed, so the lane arms no
@@ -909,6 +943,9 @@ function createBackend(httpServer, options = {}) {
           model: navigatorDispatchConfig.model,
         })
         : null,
+      // One cross-source context section in the dispatch prompt. Null with no ingest lane, and the
+      // prompt is then byte-identical to the pre-M6 one.
+      contextDigest: ingestLane ? ingestLane.buildDigest : null,
     })
     : null;
 
@@ -1200,6 +1237,15 @@ function createBackend(httpServer, options = {}) {
     // through the connect path above. Server-only; the client is unchanged. Harmless
     // no-op when no data clients are attached (e.g. the first start()).
     sess.on('rebaseline', () => closeSessionDataClients(sess.id));
+
+    /*
+     * Terminal ingest tap (docs/plan-ingestion.md, M6). Its PLACEMENT is the load-bearing part: only
+     * project sessions pass through wireSessionEvents, so an ephemeral lane session (navigator,
+     * pr-review, posthog, pack-distill) registered through registerEphemeralSession is excluded BY
+     * CONSTRUCTION. Without that, the navigator's own dispatch output would feed straight back into its
+     * next prompt. Pinned by tests/ingest-backend.test.js.
+     */
+    if (ingestLane?.terminalEnabled) ingestLane.attachSessionTap(sess);
   }
 
   // Sessions are constructed dormant - no PTY spawns on boot. The user starts
@@ -1313,6 +1359,9 @@ function createBackend(httpServer, options = {}) {
     closeSessionDataClients(id);
     notificationManager.acknowledge(id);
     integrationPool.release(sess);
+    // Before destroy(): this session is leaving for good, and destroy() emits no 'exit', so nothing
+    // else would ever take its ingest tap off the lane's roster.
+    if (ingestLane) ingestLane.detachSessionTap(sess);
     sess.destroy();
     // Explicit removal -> throw the worktree away (junction-safe), but only AFTER destroy() has killed the
     // PTY and its reap settles: `git worktree remove --force` fails while the live process still holds the
@@ -1491,6 +1540,21 @@ function createBackend(httpServer, options = {}) {
         ws.send(JSON.stringify(navigatorLane.snapshotMessage()));
       } catch (sendError) {
         console.warn(`[navigator] connect-time snapshot send failed: ${sendError.message}`);
+      }
+    });
+  }
+
+  // Ingest connect-time repair, same reasoning and same shape: the activity deltas are deliberately not
+  // replayable (server/control-replay-core.js), so one snapshot of the current rings repairs any client
+  // that missed frames. Refused to a remote-trust socket for the same reason the deltas are.
+  if (ingestLane) {
+    controlWss.on('connection', (ws) => {
+      if (ws.readyState !== 1) return;
+      if (ws.glissaTrust === 'remote') return;
+      try {
+        ws.send(JSON.stringify(ingestLane.snapshotMessage()));
+      } catch (sendError) {
+        console.warn(`[ingest] connect-time snapshot send failed: ${sendError.message}`);
       }
     });
   }
@@ -1756,6 +1820,9 @@ function createBackend(httpServer, options = {}) {
       sess.destroy();
       if (sess._killReap) pendingReaps.push(sess._killReap);
     }
+    // Cancels the batch timer and detaches every session tap; null whenever the lane is off. Ahead of
+    // the navigator lane only because the taps ride sessions already destroyed above.
+    if (ingestLane) ingestLane.stop();
     // Drops every mirrored buffer and its pending sweep timer; null whenever the lane is off.
     if (navigatorLane) navigatorLane.stop();
     for (const [, sess] of navigatorSessions) {
@@ -1826,6 +1893,9 @@ function createBackend(httpServer, options = {}) {
     // The navigator lane itself (null when off), exposed for the same reason getSession is: a booted
     // backend gives a test no other way to drive what a dispatch result would do to the intent model.
     getNavigatorLane: () => navigatorLane,
+    // The ingest lane (null when off), exposed for the same reason: a booted backend gives a test no
+    // other way to observe what a session tap put in the rings.
+    getIngestLane: () => ingestLane,
     bindHost: bindDecision.host,
     remote: {
       enabled: remote.enabled,

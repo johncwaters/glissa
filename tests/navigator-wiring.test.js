@@ -19,7 +19,7 @@ const WebSocket = require('ws');
 
 const { createBackend } = require('../server/backend');
 const { createConfigStore, BOOLEAN_KEYS, STRING_KEYS, TIMEOUT_KEYS } = require('../server/config-store');
-const { createNavigatorWiring, NAVIGATOR_DEBOUNCE_MS } = require('../server/navigator-wiring');
+const { DIGEST_BUDGET_CHARS, createNavigatorWiring, NAVIGATOR_DEBOUNCE_MS } = require('../server/navigator-wiring');
 
 const MARKDOWN_URI = 'file:///tmp/plan-navigator.md';
 const SCRIPT_URI = 'file:///tmp/app.js';
@@ -314,7 +314,7 @@ const COMMENT = { line: 3, message: 'The repeat is a symptom; the sentence is do
  * A lane whose dispatch is a fake: it records what it was asked and answers whatever the test says.
  * NOTHING here spawns claude; the real spawn is covered by tests/navigator-dispatch.test.js.
  */
-function dispatchingConnection({ dispatch: overrides = {}, respond = null } = {}) {
+function dispatchingConnection({ dispatch: overrides = {}, respond = null, contextDigest = null } = {}) {
   const calls = [];
   const dispatchConfig = { enabled: true, ...overrides };
   const dispatch = (args) => {
@@ -322,7 +322,7 @@ function dispatchingConnection({ dispatch: overrides = {}, respond = null } = {}
     if (typeof respond === 'function') return respond(args, calls.length);
     return Promise.resolve({ verdict: 'NONE', comments: [], reason: null });
   };
-  return { ...drivenConnection({ dispatchConfig, dispatch }), calls };
+  return { ...drivenConnection({ dispatchConfig, dispatch, contextDigest }), calls };
 }
 
 // The publish arms the quiet window, so a lane driven by the fake timers needs two rounds: one for the
@@ -923,4 +923,76 @@ test('navigator is in none of the settable key lists and is never echoed by getS
     if (previousEnv != null) process.env.GLISSA_CONFIG = previousEnv;
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// --- The ingest context digest (docs/plan-ingestion.md, M6) ---
+
+test('with no ingest lane injected the dispatch carries an empty digest and nothing is ever called', async (t) => {
+  const { wiring, timers, calls, lsp } = dispatchingConnection();
+  t.after(() => wiring.stop());
+
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  runSweepThenDispatch(timers);
+  await wiring.whenDispatchSettled();
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].digest, '');
+});
+
+test('the digest is read once per dispatch and rides into the prompt builder', async (t) => {
+  const digestCalls = [];
+  const { wiring, timers, calls, lsp } = dispatchingConnection({
+    contextDigest: (args) => {
+      digestCalls.push(args);
+      return 'Recent activity on this machine, newest first:\n- terminal 4s ago: npm test';
+    },
+  });
+  t.after(() => wiring.stop());
+
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  runSweepThenDispatch(timers);
+  await wiring.whenDispatchSettled();
+
+  assert.equal(digestCalls.length, 1, 'exactly once per dispatch, never on publish');
+  assert.equal(digestCalls[0].budgetChars, DIGEST_BUDGET_CHARS);
+  assert.equal(digestCalls[0].now, FIXED_TS);
+  assert.ok(calls[0].digest.includes('- terminal 4s ago: npm test'));
+});
+
+test('a sweep that never dispatches never asks the ingest lane for a digest', async (t) => {
+  const digestCalls = [];
+  const { wiring, timers, lsp } = drivenConnection({ contextDigest: () => { digestCalls.push(1); return 'x'; } });
+  t.after(() => wiring.stop());
+
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  timers.runPending();
+  timers.runPending();
+
+  assert.equal(digestCalls.length, 0);
+});
+
+test('a throwing ingest lane costs the prompt its context section, never the dispatch', async (t) => {
+  const { wiring, timers, calls, warnings, lsp } = dispatchingConnection({
+    contextDigest: () => { throw new Error('rings unavailable'); },
+  });
+  t.after(() => wiring.stop());
+
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  runSweepThenDispatch(timers);
+  await wiring.whenDispatchSettled();
+
+  assert.equal(calls.length, 1, 'the dispatch still happened');
+  assert.equal(calls[0].digest, '');
+  assert.ok(warnings.some((message) => message.includes('rings unavailable')));
+});
+
+test('a digest that is not a string is treated as absent rather than stringified into the prompt', async (t) => {
+  const { wiring, timers, calls, lsp } = dispatchingConnection({ contextDigest: () => ({ oops: true }) });
+  t.after(() => wiring.stop());
+
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  runSweepThenDispatch(timers);
+  await wiring.whenDispatchSettled();
+
+  assert.equal(calls[0].digest, '');
 });

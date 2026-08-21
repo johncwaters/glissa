@@ -170,7 +170,7 @@ function createNavigatorDispatcher({
     return result || errorResult('no verdict');
   }
 
-  return async function dispatch({ uri, text, findings = [], intent = '' }) {
+  return async function dispatch({ uri, text, findings = [], intent = '', digest = '' }) {
     let workDir = null;
     try {
       workDir = await makeWorkDir();
@@ -183,7 +183,7 @@ function createNavigatorDispatcher({
         id: idFor(uri),
         name: `navigator ${uri}`,
         prompt: buildNavigatorPrompt({
-          uri, text, findings, intent, resultPath,
+          uri, text, findings, intent, digest, resultPath,
         }),
         cwd: workDir,
         resultPath,
