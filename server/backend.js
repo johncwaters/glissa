@@ -1455,19 +1455,15 @@ function createBackend(httpServer, options = {}) {
     getPlanLimits: () => usage.getPlanLimitsMessage(),
   });
 
-  /*
-   * Navigator connect-time repair. Findings are the CURRENT state of each open buffer, not one-shot
-   * events, so they are not on the control-replay retention list (server/control-replay-core.js keeps
-   * that list for broadcasts with no standing state to rebuild from): replaying a gap's worth of
-   * superseded per-uri messages would repaint the same sections several times and still could not
-   * express a uri whose clearing frame aged out of the ring. One snapshot replaces the tab's whole map
-   * instead, which is the plan-limits/posthog-status precedent. Registered after registerControlHandlers
-   * so the `snapshot` frame stays the first one of a (re)connect.
-   */
+  // Navigator connect-time repair: findings are current state, so one snapshot beats replay retention (plan-limits precedent); registered after registerControlHandlers so the snapshot frame stays first
   if (navigatorLane) {
     controlWss.on('connection', (ws) => {
       if (ws.readyState !== 1) return;
-      ws.send(JSON.stringify(navigatorLane.snapshotMessage()));
+      try {
+        ws.send(JSON.stringify(navigatorLane.snapshotMessage()));
+      } catch (sendError) {
+        console.warn(`[navigator] connect-time snapshot send failed: ${sendError.message}`);
+      }
     });
   }
 

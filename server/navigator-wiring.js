@@ -62,11 +62,7 @@ function createNavigatorWiring({
 
   function broadcastFindings(uri, diagnostics) {
     if (typeof broadcast !== 'function') return;
-    try {
-      broadcast({ type: 'navigator-findings', uri, diagnostics, ts: nowFn() });
-    } catch (error) {
-      warn(`could not broadcast findings for ${uri}: ${error.message}`);
-    }
+    broadcast({ type: 'navigator-findings', uri, diagnostics, ts: nowFn() });
   }
 
   function recordFindings(uri, diagnostics) {

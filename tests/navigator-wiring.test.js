@@ -67,9 +67,7 @@ function drivenConnection() {
   });
   const connection = wiring.openConnection({ send: (message) => sent.push(message) });
   const lsp = (method, params) => connection.handleFrame(JSON.stringify({ type: 'lsp', method, params }));
-  return {
-    wiring, connection, timers, warnings, sent, broadcasts, lsp,
-  };
+  return { wiring, connection, timers, warnings, sent, broadcasts, lsp };
 }
 
 function didOpenParams(uri, languageId, text) {
