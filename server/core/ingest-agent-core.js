@@ -33,11 +33,8 @@ const TOOL_TARGET_KEYS = Object.freeze([
  * session's transcript directory after that cwd with every separator collapsed to one dash. Matching
  * the marker as a segment therefore catches both the raw cwd and the encoded directory name.
  */
-const DISPATCH_WORKDIR_PREFIXES = Object.freeze(['glissa-navigator-']);
-const DISPATCH_WORKDIR_PATTERN = new RegExp(
-  `(^|[\\\\/-])(${DISPATCH_WORKDIR_PREFIXES.map((prefix) => prefix.replace(/-$/, '')).join('|')})-`,
-  'i',
-);
+const DISPATCH_WORKDIR_MARKER = 'glissa-navigator';
+const DISPATCH_WORKDIR_PATTERN = new RegExp(`(^|[\\\\/-])${DISPATCH_WORKDIR_MARKER}-`, 'i');
 
 function isDispatchWorkdir(candidate) {
   if (typeof candidate !== 'string' || !candidate) return false;
@@ -274,7 +271,6 @@ function mapAgentLine({ vendor, rawLine, ctx = {}, vendorState = null } = {}) {
 }
 
 module.exports = {
-  DISPATCH_WORKDIR_PREFIXES,
   MAX_SUMMARY_CHARS,
   MAX_TARGET_CHARS,
   VENDORS,
