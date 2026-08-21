@@ -420,6 +420,23 @@ test('the duplicate gate is per accumulator, so one session cannot mute another'
   assert.ok(flushAccumulator(second, { now: NOW }));
 });
 
+/*
+ * The gate exists to suppress a screen repainting ITSELF. A rebaseline says that screen is gone (an
+ * in-place restart, a PTY exit), so the dead stream's last line must not mute the identical first line
+ * the new one writes, which is exactly the line that says the session came back up.
+ */
+test('a rebaseline clears the duplicate gate, so the restarted process publishes its first line', () => {
+  const state = accumulator();
+  appendChunk(state, 'watching for changes\n');
+  assert.equal(flushAccumulator(state, { now: NOW }).detail.text, 'watching for changes');
+
+  rebaseline(state);
+  appendChunk(state, 'watching for changes\n');
+  const event = flushAccumulator(state, { now: NOW });
+  assert.ok(event, 'the new stream must not be gated on the dead one');
+  assert.equal(event.detail.text, 'watching for changes');
+});
+
 // --- The segmenter on its own ----------------------------------------------
 
 test('segmentLines keeps linear lines, drops repositioned fragments, and carries the tail', () => {
@@ -458,4 +475,81 @@ test('every erase mode is read off its parameter rather than guessed', () => {
 test('the line a repaint fragment landed on is dropped whole, fragment and all', () => {
   const segmented = segmentLines(`${cup(3, 7)}fragment and then real output\nthe next line\n`);
   assert.deepEqual(segmented.lines, ['the next line']);
+});
+
+// --- Reading the erase parameter, not any digit in the sequence -------------
+
+test('an omitted first erase parameter is mode 0, however many digits follow it', () => {
+  // ESC[;2K is "erase forward" with the mode defaulted: a scan for any digit reads the 2 and is wrong.
+  assert.deepEqual(segmentLines(`kept${ESC}[;2K\n`).lines, ['kept']);
+  assert.deepEqual(segmentLines(`kept${ESC}[;3J\n`).lines, ['kept']);
+  assert.deepEqual(segmentLines(`kept${ESC}[0;2K\n`).lines, ['kept'], 'an explicit 0 is still forward');
+  assert.deepEqual(segmentLines(`gone${ESC}[2;0K\n`).lines, [], 'and a leading 2 still reaches back');
+});
+
+// --- Every token class the walker distinguishes ----------------------------
+
+test('each segmentation token keeps its own meaning with an OSC in the same window', () => {
+  // An OSC leads the alternation, so a token class read by position rather than by name would shift.
+  const osc = `${ESC}]0;claude working${BELL}`;
+  assert.deepEqual(segmentLines(`${osc}plain line\n`).lines, ['plain line'], 'OSC alone is not motion');
+  assert.deepEqual(segmentLines(`${osc}${cup(4, 2)}moved\n`).lines, [], 'motion still poisons');
+  assert.deepEqual(segmentLines(`${osc}saved${ESC}7moved\n`).lines, [], 'DECSC still poisons');
+  assert.deepEqual(segmentLines(`${osc}gone${ed(2)}\n`).lines, [], 'erase display still clears');
+  assert.deepEqual(segmentLines(`${osc}gone${el(2)}\n`).lines, [], 'erase line still clears');
+  assert.deepEqual(segmentLines(`${osc}gone${ESC}[?1049h\n`).lines, [], 'alt screen still clears');
+  assert.deepEqual(segmentLines(`${osc}${ESC}[32mcoloured\n`).lines, ['coloured'], 'SGR taints nothing');
+});
+
+// --- Blank lines ------------------------------------------------------------
+
+test('a blank line is real output, but a line something erased is not', () => {
+  assert.deepEqual(segmentLines('first\n\nsecond\n').lines, ['first', '', 'second']);
+  assert.deepEqual(segmentLines(`first\ngone${el(2)}\nsecond\n`).lines, ['first', 'second']);
+  const RETURN = String.fromCharCode(13);
+  assert.deepEqual(segmentLines(`10%${RETURN}${el(2)}\n`).lines, [], 'a line rewritten away is gone');
+});
+
+test('a paragraph break in a build log survives to the published text', () => {
+  const state = accumulator();
+  appendChunk(state, 'FAIL tests/app.test.js\n\n  expected 1 to equal 2\n');
+  const event = flushAccumulator(state, { now: NOW });
+  assert.equal(event.detail.text, 'FAIL tests/app.test.js\n\n  expected 1 to equal 2');
+});
+
+test('a window of nothing but blank lines still publishes nothing', () => {
+  const state = accumulator();
+  appendChunk(state, '\n\n\n\n');
+  assert.equal(flushAccumulator(state, { now: NOW }), null);
+});
+
+// --- The carry is cut where the WALK saw the newline ------------------------
+
+/*
+ * The OSC form deliberately stops at a newline so an unterminated one resyncs rather than eating the
+ * stream, which means a payload carrying a literal LF has its tail read as text. That shape is known;
+ * what is pinned here is that the flush boundary cannot change it. The carry is cut at the newline the
+ * walk consumed AS TEXT, so the same bytes split anywhere publish the same output.
+ */
+test('an OSC payload holding a literal newline reads the same however the flush window splits it', () => {
+  const raw = `${ESC}]133;C;cmd\nline two\nline three${BELL}after the osc\n`;
+
+  const whole = accumulator();
+  appendChunk(whole, raw);
+  const expected = flushAccumulator(whole, { now: NOW }).detail.text;
+  assert.equal(expected, 'line two\nline threeafter the osc');
+
+  for (let split = 1; split < raw.length; split += 1) {
+    const state = accumulator();
+    const published = flushAll(state, [raw.slice(0, split), raw.slice(split)])
+      .map((event) => event.detail.text)
+      .join('\n');
+    assert.equal(published, expected, `split at ${split} changed the output`);
+  }
+});
+
+test('the carry never begins inside a sequence the walker matched', () => {
+  const segmented = segmentLines(`${ESC}]0;title${BELL}done\n${ESC}]0;half a title`);
+  assert.deepEqual(segmented.lines, ['done']);
+  assert.equal(segmented.carry, `${ESC}]0;half a title`);
 });

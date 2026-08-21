@@ -66,36 +66,38 @@ const ERASE_DISPLAY_SEQUENCE = `${CSI_INTRO}[0-9;]*J`;
 const ERASE_LINE_SEQUENCE = `${CSI_INTRO}[0-9;]*K`;
 
 /*
- * One pass over the raw window, every alternative in its own group so the walker can tell a jump from a
- * colour change. Order is significant: the erase and motion forms are more specific than the general
- * CSI catch-all that follows them, and OSC comes first because its payload can contain anything.
+ * One pass over the raw window, each alternative the walker acts on in a NAMED group so it can tell a
+ * jump from a colour change without any alternative knowing its own position: adding or reordering one
+ * cannot silently retarget another, which a table of numeric indices beside this pattern could not
+ * promise. Order is still significant for MATCHING: the erase and motion forms are more specific than
+ * the general CSI catch-all that follows them, and OSC comes first because its payload can contain
+ * anything. The two forms the walker ignores stay uncaptured.
  */
 const SEGMENT_PATTERN = new RegExp([
-  `(${OSC_SEQUENCE})`,
-  `(${ALT_SCREEN_SEQUENCE})`,
-  `(${ERASE_DISPLAY_SEQUENCE})`,
-  `(${ERASE_LINE_SEQUENCE})`,
-  `(${CURSOR_MOTION_SEQUENCE})`,
-  `(${SAVE_RESTORE_SEQUENCE})`,
+  `(?:${OSC_SEQUENCE})`,
+  `(?<altScreen>${ALT_SCREEN_SEQUENCE})`,
+  `(?<eraseDisplay>${ERASE_DISPLAY_SEQUENCE})`,
+  `(?<eraseLine>${ERASE_LINE_SEQUENCE})`,
+  `(?<motion>${CURSOR_MOTION_SEQUENCE})`,
+  `(?<saveRestore>${SAVE_RESTORE_SEQUENCE})`,
   `(?:${CSI_SEQUENCE}|${CHARSET_SEQUENCE}|${SIMPLE_ESCAPE})`,
 ].join('|'), 'g');
 
-const GROUP_ALT_SCREEN = 2;
-const GROUP_ERASE_DISPLAY = 3;
-const GROUP_ERASE_LINE = 4;
-const GROUP_MOTION = 5;
-const GROUP_SAVE_RESTORE = 6;
+// The parameter list of an erase, taken off the sequence the walker matched rather than scanned for.
+const ERASE_PARAMETERS = new RegExp(`^${CSI_INTRO}(?<parameters>[0-9;]*)[JK]$`);
 
 /*
  * An erase with no parameter, or parameter 0, reaches FORWARD from the cursor and leaves what was
  * already written alone; 1, 2 and 3 reach back over it. That distinction is why a plain `ESC[K` at the
  * end of a coloured line does not cost the line, while a status bar rewriting itself with `ESC[2K`
- * loses what it just overwrote. It is read off the parameter, never guessed.
+ * loses what it just overwrote. It is read off the FIRST parameter, never guessed: an omitted parameter
+ * is 0 by the ANSI default, which is what `ESC[;2K` means and what a scan for any digit gets wrong.
  */
 function erasesBehindCursor(sequence) {
-  const digits = /([0-9]+)/.exec(sequence);
-  if (!digits) return false;
-  return Number(digits[1]) >= 1;
+  const match = ERASE_PARAMETERS.exec(sequence);
+  if (!match) return false;
+  const firstParameter = match.groups.parameters.split(';')[0];
+  return Number(firstParameter || 0) >= 1;
 }
 
 /**
@@ -107,6 +109,9 @@ function erasesBehindCursor(sequence) {
  * screen writes cells at positions, so its characters never form a line. Text that reaches a newline
  * having never been repositioned is linear output and is kept. A newline restores a known position, so
  * it clears the suspicion; a lone carriage return rewrites the line, so it drops what was on it.
+ *
+ * A line left empty because something ERASED it contributed nothing and does not publish; a line that
+ * was simply blank is real output and does, which is what keeps a paragraph break in a build log.
  */
 function segmentLines(raw) {
   const text = String(raw == null ? '' : raw).replace(/\r\n/g, '\n');
@@ -114,12 +119,15 @@ function segmentLines(raw) {
   let line = '';
   let repositioned = false;
   let poisoned = false;
+  let erased = false;
+  let carryStart = 0;
 
   function endLine() {
-    if (!poisoned && line) lines.push(line);
+    if (!poisoned && (line || !erased)) lines.push(line);
     line = '';
     poisoned = false;
     repositioned = false;
+    erased = false;
   }
 
   function writeRun(run) {
@@ -129,6 +137,7 @@ function segmentLines(raw) {
       if (index > 0) {
         line = '';
         poisoned = false;
+        erased = true;
       }
       const piece = rewrites[index];
       if (!piece) continue;
@@ -137,53 +146,64 @@ function segmentLines(raw) {
         continue;
       }
       line += piece;
+      erased = false;
     }
   }
 
-  function consumeText(chunk) {
+  // The offset is the chunk's position in the raw text, so the carry can be cut where the walk itself
+  // saw the last newline rather than wherever a blind scan finds one.
+  function consumeText(chunk, offset) {
     if (!chunk) return;
     const parts = chunk.split('\n');
+    let consumed = 0;
     for (let index = 0; index < parts.length; index += 1) {
       writeRun(parts[index]);
-      if (index < parts.length - 1) endLine();
+      consumed += parts[index].length;
+      if (index === parts.length - 1) continue;
+      endLine();
+      consumed += 1;
+      carryStart = offset + consumed;
     }
   }
 
   function applyToken(match) {
-    if (match[GROUP_MOTION] || match[GROUP_SAVE_RESTORE]) {
+    const groups = match.groups;
+    if (groups.motion || groups.saveRestore) {
       repositioned = true;
       return;
     }
-    if (match[GROUP_ALT_SCREEN]) {
+    if (groups.altScreen) {
       repositioned = true;
       line = '';
       poisoned = false;
+      erased = true;
       return;
     }
-    const erase = match[GROUP_ERASE_DISPLAY] || match[GROUP_ERASE_LINE];
+    const erase = groups.eraseDisplay || groups.eraseLine;
     if (!erase || !erasesBehindCursor(erase)) return;
     line = '';
     poisoned = false;
+    erased = true;
   }
 
   SEGMENT_PATTERN.lastIndex = 0;
   let cursor = 0;
   let match = SEGMENT_PATTERN.exec(text);
   while (match) {
-    consumeText(text.slice(cursor, match.index));
+    consumeText(text.slice(cursor, match.index), cursor);
     applyToken(match);
     cursor = match.index + match[0].length;
     match = SEGMENT_PATTERN.exec(text);
   }
-  consumeText(text.slice(cursor));
+  consumeText(text.slice(cursor), cursor);
   /*
-   * The carry is the RAW tail after the last newline, and the walk always reaches that newline with
-   * both flags cleared, so re-reading the carry from a clean state next window reproduces exactly this
-   * window's treatment of it. That is what lets the carry travel as bytes with no state beside it.
+   * The carry is the RAW tail after the last newline the walk CONSUMED AS TEXT, and the walk always
+   * reaches that newline with every flag cleared, so re-reading the carry from a clean state next window
+   * reproduces exactly this window's treatment of it. That is what lets the carry travel as bytes with
+   * no state beside it. Taking the offset from the walk rather than scanning the raw text keeps the two
+   * from disagreeing if a sequence ever comes to span a newline.
    */
-  const lastBreak = text.lastIndexOf('\n');
-  const carry = lastBreak === -1 ? text : text.slice(lastBreak + 1);
-  return { lines, carry };
+  return { lines, carry: text.slice(carryStart) };
 }
 
 function positiveInt(value, fallback) {
@@ -313,6 +333,9 @@ function rebaseline(state) {
   state.windowBytesSeen = 0;
   state.droppedBytes = 0;
   state.truncated = false;
+  // The gate suppresses a screen REPAINTING itself; a rewritten screen is a new stream, and the dead
+  // one's last line must not mute the identical first line the restarted process writes.
+  state.lastPublishedText = '';
   return state;
 }
 
