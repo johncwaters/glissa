@@ -257,6 +257,129 @@ test('the git watch set is populated at boot, and never by an ephemeral lane ses
   },
 ));
 
+// --- The fs watch set and its exclusion -----------------------------------
+
+const FS_ON = { enabled: true, sources: { fs: { enabled: true } } };
+
+/*
+ * A stub @parcel/watcher, because what a booted backend is the only place to see is the ROOT DERIVATION:
+ * which sessions contribute a root, and on which lifecycle edges. The real native subscription is covered
+ * in tests/ingest-fs.test.js, and installing one here would leave a live OS handle on the temp directory
+ * the harness deletes on the way out.
+ */
+function stubWatcher() {
+  const subscribed = [];
+  const unsubscribed = [];
+  return {
+    subscribed,
+    unsubscribed,
+    module: {
+      subscribe: async (root) => {
+        subscribed.push(root);
+        return { unsubscribe: async () => { unsubscribed.push(root); } };
+      },
+    },
+  };
+}
+
+const withStubWatcher = {
+  seed: ({ tmpDir }) => ({ projectDir: path.join(tmpDir, 'project'), watcher: stubWatcher() }),
+  backendOptions: (seeded) => ({
+    ingestLaneOptions: { fsOptions: { loadWatcher: () => seeded.watcher.module } },
+  }),
+};
+
+// The transition a real spawn drives, minus the PTY: the backend's own state-change listener is what
+// turns it into a watched root, so nothing here calls the source directly.
+function transition(sess, to) {
+  const from = sess.state;
+  sess.state = to;
+  sess.emit('state-change', { from, to, event: 'test', detail: null });
+}
+
+/*
+ * The fs source follows LIVE sessions, which is the difference between it and the git source: git watches
+ * the checkouts of every persisted session, while an fs watcher on an idle project would cost a recursive
+ * subscription for a session nobody started. So the root arrives on the start edge and leaves on the exit
+ * edge, and a machine with nothing running watches nothing at all.
+ */
+test('an fs root appears when a session starts and leaves when it exits', withBackend(
+  { ingest: FS_ON },
+  async ({ backend, seeded }) => {
+    const lane = backend.getIngestLane();
+    assert.equal(lane.fsEnabled, true);
+    const projectRoot = fs.realpathSync.native(seeded.projectDir);
+    assert.deepEqual(lane.fs.roots, [], 'a dormant session has started nothing to watch');
+
+    const sess = backend.getSession('p1');
+    transition(sess, 'STARTING');
+    await lane.fs.settle();
+    assert.deepEqual(lane.fs.roots, [projectRoot]);
+    assert.deepEqual(seeded.watcher.subscribed, [projectRoot]);
+
+    // Every transition in between re-registers the same root, and must cost nothing.
+    transition(sess, 'RUNNING');
+    transition(sess, 'IDLE');
+    transition(sess, 'COMPLETE');
+    await lane.fs.settle();
+    assert.deepEqual(seeded.watcher.subscribed, [projectRoot], 'a live session never resubscribes its root');
+
+    transition(sess, 'DONE');
+    await lane.fs.settle();
+    assert.deepEqual(lane.fs.roots, []);
+    assert.deepEqual(seeded.watcher.unsubscribed, [projectRoot]);
+  },
+  withStubWatcher,
+));
+
+// The lane's own rule, and the reason the edge is a gated listener rather than an optional-chained one:
+// a source that is off owes a session zero listeners, not a no-op listener per transition.
+test('with the fs source off a session carries no extra state-change listener', withBackend(
+  { ingest: INGEST_ON },
+  async ({ backend }) => {
+    const lane = backend.getIngestLane();
+    assert.equal(lane.fsEnabled, false);
+    assert.equal(lane.fs, null);
+    assert.equal(backend.getSession('p1').listenerCount('state-change'), 1, 'only the pre-existing handler');
+  },
+));
+
+/*
+ * Same mechanism as the terminal tap and the git watch set, pinned for the same reason: ephemeral lane
+ * sessions (pr-review, navigator dispatch, posthog, pack-distill) register through their own seam and
+ * never pass through wireSessionEvents, which is where the fs root edge lives. A navigator dispatch
+ * workdir entering the watch set would feed the dispatch's own file writes back into its next prompt.
+ */
+test('an ephemeral lane session never contributes an fs root', withBackend(
+  { ingest: FS_ON },
+  async ({ backend, seeded }) => {
+    const lane = backend.getIngestLane();
+    const ephemeral = new EventEmitter();
+    ephemeral.id = 'navigator:file:///tmp/plan.md';
+    ephemeral.path = seeded.projectDir;
+    ephemeral.worktreeDir = seeded.projectDir;
+    ephemeral.state = 'DORMANT';
+    ephemeral.destroy = () => {};
+    registerEphemeralSession({
+      map: new Map(),
+      id: ephemeral.id,
+      sess: ephemeral,
+      closeSessionDataClients: () => {},
+      logPrefix: 'navigator',
+      name: 'navigator dispatch',
+    });
+
+    // Even driven all the way through a live lifecycle, it reaches no listener that could widen the set.
+    transition(ephemeral, 'STARTING');
+    transition(ephemeral, 'RUNNING');
+    await lane.fs.settle();
+
+    assert.deepEqual(lane.fs.roots, [], 'no lane session may put a root on the watch set');
+    assert.deepEqual(seeded.watcher.subscribed, []);
+  },
+  withStubWatcher,
+));
+
 // --- Health anomaly --------------------------------------------------------
 
 // The tap is a server-side `data` listener with no data-WS client behind it. Before the health

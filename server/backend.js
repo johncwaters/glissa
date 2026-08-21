@@ -943,6 +943,10 @@ function createBackend(httpServer, options = {}) {
       // Feeds the M7 feedback-loop exclusion; rationale at the consuming site in ingest-wiring.js.
       laneMap: () => laneLedger.laneMap(),
       repoRoots: gitRepoRoots,
+      // The fs source ignores the state files the daemon writes beside this path. It matters most in a
+      // dev checkout, where the resolved config file is the repo's own config.json and every
+      // resumeSessionId save would otherwise look like project activity.
+      configPath: configStore.configPath,
       /*
        * The other half of activity-driven dispatch (docs/plan-ingestion.md, M7.5), wired only when BOTH
        * lanes exist. Late-binding on purpose: the navigator lane is constructed below, and the first
@@ -1194,6 +1198,16 @@ function createBackend(httpServer, options = {}) {
       }
     });
 
+    /*
+     * The fs ingest source's ref-counted roots (docs/plan-ingestion.md, M9). Its own listener rather than
+     * a branch inside the big state-change handler above, because it shares nothing with the notification
+     * and persistence decisions there: the source watches a root while a session in it is alive, and the
+     * state machine is the authority on which sessions those are. Idempotent by contract, so firing on
+     * every transition costs a compare rather than a resubscribe. Registered only when the source is on,
+     * because a lane that is off owes this session zero listeners.
+     */
+    if (ingestLane?.fsEnabled) sess.on('state-change', () => ingestLane.noteSessionRoots(sess));
+
     // An authoritative UserPromptSubmit always resets the notify cycle, even when the racing
     // title 'working' signal won the IDLE/COMPLETE->RUNNING transition (both are immediate in
     // status-source.js, so the transition's detail.signal is not a reliable "was this user-
@@ -1267,6 +1281,9 @@ function createBackend(httpServer, options = {}) {
       // The worktree that will take this session's commits exists only as of now, so the git ingest
       // source is told to re-derive its watch set rather than finding it up to a poll interval later.
       if (ingestLane) void ingestLane.noteRepos();
+      // Same reason for the fs source, which has no poll at all: the directory this session will do its
+      // editing in did not exist when its first state-change fired.
+      if (ingestLane?.fsEnabled) ingestLane.noteSessionRoots(sess);
     });
 
     // On an in-place restart (restart()/forceRestart()/sleep-kill auto-restart) the
@@ -1411,9 +1428,10 @@ function createBackend(httpServer, options = {}) {
     closeSessionDataClients(id);
     notificationManager.acknowledge(id);
     integrationPool.release(sess);
-    // Before destroy(): this session is leaving for good, and destroy() emits no 'exit', so nothing
-    // else would ever take its ingest tap off the lane's roster.
+    // Before destroy(): this session is leaving for good, and destroy() emits no 'exit' and no final
+    // state-change, so nothing else would ever take its ingest tap or its fs root off the lane's roster.
     if (ingestLane) ingestLane.detachSessionTap(sess);
+    if (ingestLane) ingestLane.releaseSessionRoots(sess);
     sess.destroy();
     // Explicit removal -> throw the worktree away (junction-safe), but only AFTER destroy() has killed the
     // PTY and its reap settles: `git worktree remove --force` fails while the live process still holds the
