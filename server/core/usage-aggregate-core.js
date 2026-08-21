@@ -162,4 +162,6 @@ module.exports = {
   // The daily bucket key, exported so anything asking "which day is it" (the anomaly baseline's
   // exclude-today, the warehouse prune cutoff) uses the same local-clock rule the buckets were keyed on.
   localDayKey: localDay,
+  // The one statement of "absent vendor is Claude", exported so the savings core cannot drift from it.
+  vendorOf,
 };

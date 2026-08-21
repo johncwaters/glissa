@@ -66,7 +66,7 @@ const POSTHOG_NUMERIC_RANGES = {
 const POSTHOG_BOOLEAN_KEYS = ['enabled', 'recurrenceDedupe', 'trafficSpikeEnabled'];
 const POSTHOG_STRING_KEYS = ['host', 'apiKey', 'repoPath'];
 
-const USAGE_BOOLEAN_KEYS = ['enabled', 'fetchPricing', 'planLimits'];
+const USAGE_BOOLEAN_KEYS = ['enabled', 'fetchPricing', 'planLimits', 'rtkSavings'];
 // Ranges and modes come from the lane itself so the wire validator and resolveUsageConfig's fallback
 // logic cannot drift apart.
 const { USAGE_INTEGER_RANGES, USAGE_COST_MODES, USAGE_VENDOR_KEYS, USAGE_BUDGET_KEYS } = require('./usage-wiring');

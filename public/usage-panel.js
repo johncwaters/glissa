@@ -38,6 +38,7 @@ import {
   budgetRows,
   budgetScopeLabel,
   burnTiles,
+  cacheSavingsTile,
   dailyRowForDay,
   dayRangeLabel,
   formatMinutes,
@@ -48,6 +49,7 @@ import {
   hasLaneAttribution,
   hasMultiVendorUsage,
   hasOfficialPlanLimits,
+  hasSavings,
   hasUsageAttention,
   heatmapCellTitle,
   heatmapCells,
@@ -76,6 +78,8 @@ import {
   provenanceLabel,
   reportDayKey,
   resetCountdownText,
+  rtkSavingsTile,
+  savingsHint,
   scanLine,
   sessionRowLabel,
   shareBasis,
@@ -580,6 +584,24 @@ function buildTotalsSection() {
 }
 
 /*
+ * What the token-saving systems are worth, beside what was spent. Absent entirely when neither half has
+ * anything to report, and each tile is omitted on its own: a machine without rtk still gets the cache
+ * figure, and an rtk figure is shown on a machine whose Claude rows carry no cache reads.
+ */
+function buildSavingsSection() {
+  const savings = _report?.savings;
+  if (!hasSavings(savings)) return null;
+  const section = buildSection('Savings', savingsHint(savings));
+  const tiles = el('div', 'usage-tiles');
+  const rtk = rtkSavingsTile(savings);
+  if (rtk) tiles.append(buildTile('rtk compression', rtk.value, rtk.sub).tile);
+  const cache = cacheSavingsTile(savings);
+  if (cache) tiles.append(buildTile('Prompt cache', cache.value, cache.sub).tile);
+  section.append(tiles);
+  return section;
+}
+
+/*
  * The operator's own spend ceilings. Absent entirely with no budget configured: an unset budget must not
  * render as a zero one. Tones come from usage-budget-core, so the meter colour and the alert ladder agree.
  */
@@ -933,7 +955,10 @@ function buildBody() {
   _root.append(buildActiveBlockSection());
   const history = buildBlockHistorySection();
   if (history) _root.append(history);
-  _root.append(buildTotalsSection(), buildDailySection(), buildModelsSection(), buildSessionsSection());
+  _root.append(buildTotalsSection());
+  const savings = buildSavingsSection();
+  if (savings) _root.append(savings);
+  _root.append(buildDailySection(), buildModelsSection(), buildSessionsSection());
   _root.append(buildFootnote());
 }
 

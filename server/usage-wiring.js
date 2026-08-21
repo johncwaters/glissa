@@ -15,9 +15,12 @@
 'use strict';
 
 const path = require('node:path');
+const { promisify } = require('node:util');
 const { createUsageScanner } = require('./usage-scanner');
 const { loadPricing } = require('./usage-pricing');
+const { execFile } = require('./child-process-safe');
 const { evaluateBudget, normalizeBudgetConfig } = require('./core/usage-budget-core');
+const { computeCacheSavings, normalizeRtkGain } = require('./core/usage-savings-core');
 const { decideTelegramNotification } = require('../notifications/channels/telegram');
 const { sendTelegramMessage } = require('./telegram-transport');
 const {
@@ -30,6 +33,9 @@ const DEFAULT_USAGE_CONFIG = Object.freeze({
   enabled: true,
   fetchPricing: true,
   planLimits: true,
+  // rtk's own machine-wide compression stats, read from its CLI. Independent of `config.rtk`, which only
+  // governs whether Glissa injects rtk's hook into the sessions it spawns.
+  rtkSavings: true,
   scanIntervalMinutes: 5,
   retainDays: 90,
   // Durable history retention, independent of transcript retention: the point of the warehouse is to
@@ -69,6 +75,22 @@ const NUDGE_DEBOUNCE_MS = 2000;
  */
 const PARTIAL_CONTINUE_MS = 15000;
 const FORCE_PASS_MIN_INTERVAL_MS = 3000;
+/*
+ * rtk keeps its own durable stats, so a reading is only as stale as this window and a dashboard pulling a
+ * report on every turn end does not spawn a process per pull. Failures are NOT cached: an rtk installed
+ * (or repaired) mid-session should show up on the next pull rather than after a restart.
+ */
+const RTK_SAVINGS_TTL_MS = 60000;
+const RTK_GAIN_ARGS = Object.freeze(['gain', '--daily', '--format', 'json']);
+const RTK_GAIN_TIMEOUT_MS = 5000;
+const RTK_GAIN_MAX_BUFFER = 4 * 1024 * 1024;
+const RTK_UNAVAILABLE = Object.freeze({ available: false });
+
+// Required lazily: session/core/rtk-command.js pulls in spawn-command, which resolves `claude` at module
+// load, and control-handlers.js requires this module on a path that has no business probing for it.
+function defaultRtkPath() {
+  return require('../session/core/rtk-command').getRtkPath();
+}
 // Shared with control-handlers' validateUsage/sanitizeUsage: one source of truth for the ranges the
 // wire validator enforces and the fallback resolver tolerates, so the two cannot drift apart.
 const USAGE_COST_MODES = Object.freeze(['auto', 'calculate', 'display']);
@@ -106,6 +128,7 @@ function resolveUsageConfig(usage) {
     enabled: typeof source.enabled === 'boolean' ? source.enabled : DEFAULT_USAGE_CONFIG.enabled,
     fetchPricing: typeof source.fetchPricing === 'boolean' ? source.fetchPricing : DEFAULT_USAGE_CONFIG.fetchPricing,
     planLimits: typeof source.planLimits === 'boolean' ? source.planLimits : DEFAULT_USAGE_CONFIG.planLimits,
+    rtkSavings: typeof source.rtkSavings === 'boolean' ? source.rtkSavings : DEFAULT_USAGE_CONFIG.rtkSavings,
     scanIntervalMinutes: integerWithin(source.scanIntervalMinutes, INTEGER_RANGES.scanIntervalMinutes, DEFAULT_USAGE_CONFIG.scanIntervalMinutes),
     retainDays: integerWithin(source.retainDays, INTEGER_RANGES.retainDays, DEFAULT_USAGE_CONFIG.retainDays),
     warehouseRetainDays: integerWithin(source.warehouseRetainDays, INTEGER_RANGES.warehouseRetainDays, DEFAULT_USAGE_CONFIG.warehouseRetainDays),
@@ -174,6 +197,10 @@ function createUsageWiring({
   fsPromises = require('node:fs/promises'),
   createScanner = createUsageScanner,
   loadPricingFn = loadPricing,
+  // rtk reports machine-wide compression stats through its own CLI; both seams are injected so the
+  // savings path is testable without an rtk install.
+  execFileAsync = promisify(execFile),
+  rtkPathFn = defaultRtkPath,
   scannerDeps = {},
   nowFn = Date.now,
   partialContinueMs = PARTIAL_CONTINUE_MS,
@@ -204,6 +231,9 @@ function createUsageWiring({
   let budgetFiredState = {};
   let budgetStateLoaded = false;
   let budgetStateSignature = null;
+  let rtkSavingsCache = null;
+  let rtkSavingsCacheMs = 0;
+  let warnedRtkGain = false;
 
   function warn(message) {
     if (!logger || typeof logger.warn !== 'function') return;
@@ -494,6 +524,57 @@ function createUsageWiring({
     })).catch(() => {});
   }
 
+  // ── Savings ──
+  // What the token-saving systems around a session are worth. Both halves degrade to absent rather than
+  // to a zero, because "rtk saved nothing" and "Glissa could not ask rtk" are different claims.
+
+  /*
+   * rtk's own machine-wide figures. Every failure mode (opted out, no binary, exec error, garbage JSON)
+   * ends at the same `{ available: false }`: the panel's job is to show a number rtk vouches for, and
+   * there is no partial version of that worth rendering.
+   */
+  async function fetchRtkSavings() {
+    if (!cfg.rtkSavings) return RTK_UNAVAILABLE;
+    const rtkPath = rtkPathFn();
+    if (!rtkPath) return RTK_UNAVAILABLE;
+    if (rtkSavingsCache && nowFn() - rtkSavingsCacheMs < RTK_SAVINGS_TTL_MS) return rtkSavingsCache;
+    try {
+      const { stdout } = await execFileAsync(rtkPath, [...RTK_GAIN_ARGS], {
+        timeout: RTK_GAIN_TIMEOUT_MS,
+        maxBuffer: RTK_GAIN_MAX_BUFFER,
+        encoding: 'utf8',
+      });
+      const normalized = normalizeRtkGain(JSON.parse(stdout));
+      if (!normalized) return warnRtkOnce('rtk gain reported an unrecognized shape');
+      rtkSavingsCache = { available: true, ...normalized };
+      rtkSavingsCacheMs = nowFn();
+      return rtkSavingsCache;
+    } catch (error) {
+      return warnRtkOnce(`rtk gain failed: ${error.message}`);
+    }
+  }
+
+  // Once per process: an rtk that cannot answer will not answer on the next pull either, and a report is
+  // pulled on every turn end while the tab is open.
+  function warnRtkOnce(message) {
+    if (!warnedRtkGain) {
+      warnedRtkGain = true;
+      warn(message);
+    }
+    return RTK_UNAVAILABLE;
+  }
+
+  // Never allowed to cost the report: savings are additive insight, and a report of real totals beats no
+  // report because one optional figure could not be computed.
+  async function buildSavings(report) {
+    try {
+      return { rtk: await fetchRtkSavings(), cache: computeCacheSavings(report.models, pricing?.table) };
+    } catch (error) {
+      warn(`savings unavailable: ${error.message}`);
+      return { rtk: RTK_UNAVAILABLE, cache: null };
+    }
+  }
+
   function unavailableReport(requestId, error) {
     return { type: 'usage-report', requestId: requestId || null, ts: nowFn(), error };
   }
@@ -519,6 +600,7 @@ function createUsageWiring({
       return unavailableReport(requestId, `Usage report failed: ${error.message}`);
     }
     const scanStats = scanner.stats();
+    const savings = await buildSavings(report);
     const cached = {
       type: 'usage-report',
       requestId: null,
@@ -532,6 +614,9 @@ function createUsageWiring({
       blocks: report.blocks,
       activeBlock: report.activeBlock,
       anomaly: report.anomaly,
+      byLane: report.byLane,
+      budget: report.budget,
+      savings,
       tokenLimit: report.tokenLimit,
       pricing: { source: pricing.source, fetchedAt: pricing.fetchedAt, missing: report.pricing.missing },
       scan: {
@@ -625,6 +710,7 @@ module.exports = {
   DEFAULT_USAGE_CONFIG,
   NUDGE_DEBOUNCE_MS,
   PARTIAL_CONTINUE_MS,
+  RTK_SAVINGS_TTL_MS,
   USAGE_INTEGER_RANGES,
   USAGE_COST_MODES,
   USAGE_VENDOR_KEYS,

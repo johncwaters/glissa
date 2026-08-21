@@ -142,4 +142,5 @@ module.exports = {
   costForEntry,
   lookupModelPrice,
   normalizePricingTable,
+  ratesForPrice,
 };

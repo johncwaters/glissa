@@ -112,8 +112,20 @@ test('a non-object usage is rejected with settings-error', () => {
   }
 });
 
-test('a non-boolean enabled or fetchPricing is rejected', () => {
-  for (const key of ['enabled', 'fetchPricing']) {
+// A usage key that is absent from USAGE_BOOLEAN_KEYS validates fine and is then silently dropped by
+// sanitizeUsage, so the round trip is what proves the key is actually wired.
+test('rtkSavings round trips through validate and sanitize', () => {
+  for (const rtkSavings of [true, false]) {
+    const h = sendUsage({ rtkSavings });
+    assert.equal(errorFrom(h), undefined);
+    assert.deepEqual(h.cfg.usage, { rtkSavings }, `${rtkSavings} persisted`);
+    const echoed = h.sent.find((m) => m.type === 'settings-updated');
+    assert.equal(echoed.settings.usage.rtkSavings, rtkSavings);
+  }
+});
+
+test('a non-boolean enabled, fetchPricing or rtkSavings is rejected', () => {
+  for (const key of ['enabled', 'fetchPricing', 'rtkSavings']) {
     const h = sendUsage({ [key]: 'yes' });
     const err = errorFrom(h);
     assert.ok(err && new RegExp(`usage.${key} must be a boolean`).test(err.message), `rejected ${key}`);
