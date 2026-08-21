@@ -11,6 +11,9 @@
 //   notify-state one NotificationManager lifecycle hop
 //   pack         one context pack delivered as an --add-dir, skipped because it is not built, or a
 //                staleness notice taken by a UserPromptSubmit hook response (decision: "notice")
+//   rebase       one eager auto-rebase onto a moved integration branch: "auto-rebased" (with the shas
+//                and whether rerere carried it), "conflict" (with the conflicting files), or
+//                "state-moved" (a turn started while the rebase was rewriting the worktree)
 //
 // Collapse: the gate re-evaluates on every drain and every TTL tick, so an unchanged verdict would
 // bury the interesting entries within seconds. Consecutive gate entries with the same decision and

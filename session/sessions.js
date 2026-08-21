@@ -28,6 +28,7 @@ const { decideExitTransition } = require("./core/exit-transition");
 const { buildMergePrompt } = require("./core/merge-prompt");
 const { createOutputRing } = require("./core/output-ring");
 const { decideSignatureDemotion, decideDiffSelfHeal } = require("./core/merge-gate");
+const { decideAutoRebase, AUTO_REBASE_STATES } = require("./core/rebase-gate");
 const {
   parseLeftRightCount,
   decideBranchSyncState,
@@ -220,6 +221,10 @@ class Session extends EventEmitter {
     // merges back on review. Absent (unit tests, no-git) -> runs in place at `path` exactly as before.
     gitWorkspace = null,
     integrationBranch = null,
+    // Rebase a quiescent, clean worktree onto the integration branch as soon as that branch moves
+    // (config worktreeAutoRebase). Read at construction like every other spawn-time option, so a
+    // settings change applies to the next construction of this session, not to the live one.
+    autoRebase = true,
     // Session worktree location + the gitignored local context to bring in (see _provisionWorktree).
     worktreeRoot = null,
     worktreeShare = null,
@@ -403,6 +408,9 @@ class Session extends EventEmitter {
     // -- Worktree isolation state (see _provisionWorktree / _settleWorktreeOnExit) --
     this._gitWorkspace = gitWorkspace;
     this._integrationBranch = integrationBranch;
+    this._autoRebase = autoRebase !== false;
+    this._autoRebasing = false;    // re-entry mutex: one auto-rebase per session at a time
+    this._rebaseConflictKey = null; // head::target the last auto-rebase conflicted on (see _maybeAutoRebase)
     this._effectiveBase = null;    // cached result of _resolveEffectiveBase(); null until first diff
     this._resyncPromise = null;    // in-flight resyncBranch() call, so a second click rides the same one
     this._worktreeRoot = worktreeRoot;
@@ -1534,7 +1542,8 @@ class Session extends EventEmitter {
   // A CHEAP fingerprint of the worktree's reviewable state: uncommitted+untracked (porcelain), the
   // HEAD sha (commits), and how far HEAD is ahead of the integration branch (the merge gate, which a
   // cross-session merge into develop can move WITHOUT touching this worktree). One `git status` + a
-  // couple of rev-parses, all timeout-bounded. Returns { sig, dirty, ahead } or null with no worktree.
+  // couple of rev-parses, all timeout-bounded. Returns { sig, dirty, ahead, behind, rebaseInProgress,
+  // headSha, targetSha } or null with no worktree.
   // This is the funnel's truth; the heavy getDiff() is only fetched for the selected session.
   async _computeWorktreeSignature() {
     if (!this.worktreeDir) return null;
@@ -1542,7 +1551,7 @@ class Session extends EventEmitter {
     // --no-optional-locks: this runs on background event nudges (watchers / turn-end), so it must NEVER
     // take git's index lock and contend with the session's own `git add` / `git commit` in the worktree.
     const run = (args) => gitStrict(["--no-optional-locks", ...args], opts);
-    let status, head, ahead = "0", behind = "0", rebaseInProgress = false;
+    let status, head, ahead = "0", behind = "0", rebaseInProgress = false, targetSha = null;
     try {
       status = await run(["status", "--porcelain"]);
       head = (await run(["rev-parse", "HEAD"])).trim();
@@ -1561,7 +1570,11 @@ class Session extends EventEmitter {
       // merge would do. The two counts deliberately use different bases.
       try {
         const mergeTarget = this._integrationBranch || (this._workspace?.base) || this.baseSha;
-        if (mergeTarget && (await run(["rev-parse", "--verify", "--quiet", mergeTarget])).trim()) {
+        // The verify probe already RESOLVES the target, so the auto-rebase cooldown key gets its half
+        // of the fingerprint for free rather than costing another rev-parse on this recurring path.
+        const resolvedTarget = mergeTarget ? (await run(["rev-parse", "--verify", "--quiet", mergeTarget])).trim() : "";
+        if (resolvedTarget) {
+          targetSha = resolvedTarget;
           behind = (await run(["rev-list", "--count", `HEAD..${mergeTarget}`])).trim();
         }
       } catch { /* no merge target; behind stays "0" */ }
@@ -1579,7 +1592,7 @@ class Session extends EventEmitter {
     }
     // behind/rebaseInProgress are demotion-condition inputs only; the change-detection hash is unchanged.
     const sig = crypto.createHash("sha1").update(`${status} ${head} ${ahead}`).digest("hex");
-    return { sig, dirty: status.trim() !== "", ahead, behind, rebaseInProgress };
+    return { sig, dirty: status.trim() !== "", ahead, behind, rebaseInProgress, headSha: head, targetSha };
   }
 
   // The funnel every change TRIGGER converges on (turn-end hook, gitdir fs.watch, integration-ref watcher):
@@ -1591,6 +1604,10 @@ class Session extends EventEmitter {
   async checkWorktreeChange() {
     if (this._destroyed || !this.worktreeDir) return;
     if (this.mergeStatus === "merging") return;
+    // Same reason as the merging guard: mid-rebase the worktree reads clean and detached with ahead 0,
+    // which decideSignatureDemotion would self-heal a real pending-review/parked gate to 'none' on, with
+    // nothing left to re-arm it. _maybeAutoRebase always ends its window with one final recheck.
+    if (this._autoRebasing) return;
     const sig = await this._computeWorktreeSignature();
     // Re-check liveness after the await: the session may have been destroyed or entered a merge while
     // the git probe ran, in which case a stale broadcast/demotion must not fire.
@@ -1603,9 +1620,80 @@ class Session extends EventEmitter {
     const next = decideSignatureDemotion(this.mergeStatus, sig);
     const demoted = next !== null;
     if (demoted) this._setMergeStatus(next);
+    // Evaluated BEFORE the signature dedup, because the trigger it exists for leaves the signature
+    // byte-identical: `behind` is not part of the hash, so an integration branch that moved under an
+    // otherwise untouched worktree would never get past the early return below.
+    await this._maybeAutoRebase(sig);
+    if (this._destroyed || this.mergeStatus === "merging") return;
     if (sig.sig === this._lastWorktreeSig && !demoted) return;
     this._lastWorktreeSig = sig.sig;
     this.emit("worktree-changed", { id: this.id, sig: sig.sig });
+  }
+
+  // Eager conflict avoidance: when the integration branch has moved ahead of a worktree that is clean,
+  // quiescent and not mid-anything, replay this session's commits on top of it right now. Paying the
+  // drift off in small pieces as it appears is what keeps a long-lived session from meeting one large
+  // conflict at merge time. The decision itself is pure (session/core/rebase-gate.js); this is the thin
+  // shell that runs it, holds the re-entry mutex, and records what happened.
+  //
+  // A conflict is NOT escalated: the status gate, the notification and the operator handoff all stay
+  // where they were, on the eventual Merge click, which hits the same conflict and parks exactly as it
+  // does today. All this records is a cooldown key, so the same doomed rebase is not retried on every
+  // watcher nudge; head or target moving is what makes it worth another attempt.
+  async _maybeAutoRebase(sig) {
+    if (this._autoRebasing) return;
+    const currentKey = `${sig.headSha || ""}::${sig.targetSha || ""}`;
+    const verdict = decideAutoRebase({
+      enabled: this._autoRebase && Boolean(this._gitWorkspace && this._workspace),
+      state: this.state,
+      mergeStatus: this.mergeStatus,
+      dirty: sig.dirty,
+      behind: sig.behind,
+      rebaseInProgress: sig.rebaseInProgress,
+      teardownPending: this._teardownPending(),
+      currentKey,
+      lastConflictKey: this._rebaseConflictKey,
+    });
+    if (verdict.action !== "rebase") return;
+    this._autoRebasing = true;
+    try {
+      const r = await this._gitWorkspace.rebaseOnly({
+        projectPath: this.path,
+        workspace: this._workspace,
+        targetBranch: this._integrationBranch,
+      });
+      // The gate cleared this rebase against a quiescent session, but a turn can start while it runs.
+      // Nothing can be undone at this point, so record it: an agent that comes back confused about its
+      // own files has the rewrite and the state it landed in sitting next to each other in the trace.
+      if (!AUTO_REBASE_STATES.includes(this.state)) {
+        this._recordDecision({ kind: "rebase", ts: Date.now(), decision: "state-moved", state: this.state });
+      }
+      if (r?.ok && r.rebased) {
+        this._rebaseConflictKey = null;
+        if (r.baseSha) { this.baseSha = r.baseSha; this._workspace.baseSha = r.baseSha; }
+        this._recordDecision({
+          kind: "rebase", ts: Date.now(), decision: "auto-rebased",
+          from: sig.headSha || null, to: r.headSha || null, rerereReplayed: r.rerereReplayed === true,
+        });
+        return;
+      }
+      // 'rebase-failed' (a rebase that never started) is deliberately NOT cooled down: it is transient,
+      // and the debounce already bounds how often a later event can retry it.
+      if (r?.reason === "rebase-conflict") {
+        this._rebaseConflictKey = currentKey;
+        this._recordDecision({
+          kind: "rebase", ts: Date.now(), decision: "conflict", conflicts: r.conflicts || [],
+        });
+      }
+    } catch (err) {
+      // Additive hygiene: an engine failure must never break the change funnel it rides on.
+      console.warn(`[session ${this.id}] auto-rebase failed: ${err.message}`);
+    } finally {
+      this._autoRebasing = false;
+      // Every outcome, including a conflict and a throw: this method suppressed the funnel while it ran,
+      // so it owes it one recheck to re-establish the signature and the gate it may have skipped.
+      this._scheduleWorktreeCheck();
+    }
   }
 
   // Debounced entry for the IMMEDIATE triggers (fs.watch onChange + the `ready` turn-end). Collapses a

@@ -74,6 +74,8 @@ function initRepoMainWithDevelop() {
 //   - `rev-list --count <target>..<branch>` returns opts.ahead (the count of commits to merge; '0' = none)
 //   - `status --porcelain` (in the worktree) returns opts.dirty ('' = clean, non-empty = uncommitted work)
 //   - `rev-parse --verify --quiet refs/heads/<t>` throws when the target is absent (opts.targetExists)
+//   - `rev-parse --verify --quiet REBASE_HEAD` throws unless opts.conflicts is non-empty: REBASE_HEAD is
+//     how the engine tells a rebase STOPPED on a conflict from one that never started
 //   - `rebase <target>` throws {status:1} on conflict (opts.rebaseFails)
 //   - `merge --ff-only` / `fetch` throw {status:1} on a lost fast-forward (opts.ffFails)
 //   - `rev-parse --abbrev-ref HEAD` returns opts.head (the projectPath checkout); a bare `rev-parse <t>`
@@ -81,11 +83,18 @@ function initRepoMainWithDevelop() {
 function fakeSessionGit(cmds, opts = {}) {
   const { ahead = '1', dirty = '', rebaseFails = false, ffFails = false, targetExists = true, head = 'develop', conflicts = [] } = opts;
   const fail = (msg) => { const e = new Error(msg); e.status = 1; throw e; };
-  return (args) => {
-    cmds.push(args.join(' '));
+  return (rawArgs) => {
+    cmds.push(rawArgs.join(' '));
+    // Every rebase Glissa drives carries a `-c rerere.autoUpdate=true` prefix; strip it so the branches
+    // below keep matching on the git SUBCOMMAND, while `cmds` still records the real invocation.
+    const args = rawArgs[0] === '-c' ? rawArgs.slice(2) : rawArgs;
     if (args[0] === 'rev-list') return ahead;       // rev-list --count target..branch
     if (args[0] === 'status') return dirty;          // status --porcelain
     if (args[0] === 'diff') return (conflicts || []).join('\n'); // diff --name-only --diff-filter=U (conflict capture)
+    if (args[0] === 'rev-parse' && args.includes('REBASE_HEAD')) {
+      if (!conflicts.length) fail('no REBASE_HEAD');
+      return 'rebasehead';
+    }
     if (args[0] === 'rev-parse' && args.includes('--verify')) {
       if (!targetExists) fail('no ref');
       return 'targetsha';
@@ -104,6 +113,11 @@ function fakeSessionGit(cmds, opts = {}) {
   };
 }
 
+// Every rebase Glissa drives is prefixed with `-c rerere.autoUpdate=true`, so assert on the tail rather
+// than pinning the exact prefix in a dozen places.
+const ranRebaseOnto = (cmds, target) => cmds.some((c) => c.endsWith(`rebase ${target}`));
+const ranNoRebase = (cmds) => !cmds.some((c) => c.includes('rebase'));
+
 // --- Injected-git command-sequence tests ------------------------------------------------
 
 test('mergeBack (injected): committed-only rebase + ff-only merge when target is checked out, then junction-safe teardown', async () => {
@@ -119,7 +133,7 @@ test('mergeBack (injected): committed-only rebase + ff-only merge when target is
   assert.ok(!cmds.includes('add -A'), 'committed-only: never stages the whole working tree');
   assert.ok(!cmds.some((c) => c.startsWith('commit')), 'committed-only: never creates a commit');
   assert.ok(!cmds.some((c) => c.startsWith('stash')), 'a clean tree needs no stash');
-  assert.ok(cmds.includes('rebase develop'), 'rebases onto the integration branch');
+  assert.ok(ranRebaseOnto(cmds, 'develop'), 'rebases onto the integration branch');
   assert.ok(cmds.includes('merge --ff-only glissa/session/abc'), 'ff-only merge into the checked-out target');
   assert.ok(cmds.includes('worktree remove --force /wt'));
   assert.ok(cmds.includes('branch -D glissa/session/abc'));
@@ -133,7 +147,7 @@ test('mergeBack (injected): updates the target ref via ff-only fetch when the ta
   const r = await gw.mergeBack({ projectPath: '/repo', workspace: ws, targetBranch: 'develop' });
 
   assert.equal(r.merged, true);
-  assert.ok(cmds.includes('rebase develop'));
+  assert.ok(ranRebaseOnto(cmds, 'develop'));
   assert.ok(cmds.includes('fetch . refs/heads/glissa/session/abc:refs/heads/develop'), 'ff-only ref update, no checkout needed');
   assert.ok(!cmds.some((c) => c.startsWith('merge --ff-only')), 'no working-tree merge when target not checked out');
   assert.ok(cmds.includes('worktree remove --force /wt'));
@@ -179,7 +193,7 @@ test('mergeBack (injected): nothing committed + a clean tree -> discards the emp
   assert.equal(r.committed, false);
   assert.equal(r.reason, 'nothing-to-commit');
   assert.equal(r.branch, null);
-  assert.ok(!cmds.some((c) => c.startsWith('rebase')), 'no rebase when there is nothing to merge');
+  assert.ok(ranNoRebase(cmds), 'no rebase when there is nothing to merge');
   assert.ok(cmds.includes('worktree remove --force /wt'));
   assert.ok(cmds.includes('branch -D glissa/session/abc'));
 });
@@ -197,7 +211,7 @@ test('mergeBack (injected): a DIRTY worktree is refused and PARKED, never torn d
   assert.equal(r.parked, true);
   assert.equal(r.reason, 'uncommitted-changes');
   assert.equal(r.branch, 'glissa/session/abc', 'branch retained so the uncommitted work is not lost');
-  assert.ok(!cmds.some((c) => c.startsWith('rebase')), 'dirty: nothing is merged');
+  assert.ok(ranNoRebase(cmds), 'dirty: nothing is merged');
   assert.ok(!cmds.some((c) => c.startsWith('stash')), 'dirty: nothing is stashed/dropped');
   assert.ok(!cmds.some((c) => c.startsWith('worktree remove')), 'uncommitted work is never destroyed');
   assert.ok(!cmds.some((c) => c.startsWith('branch -D')), 'branch kept');
@@ -229,7 +243,7 @@ test('mergeKeep (injected): committed-only rebase + ff, then KEEPS the worktree 
   assert.equal(r.baseSha, 'newbase', 'reports the new integration tip the worktree sits on');
   assert.ok(!cmds.includes('add -A'), 'committed-only: never stages the whole working tree');
   assert.ok(!cmds.some((c) => c.startsWith('commit')), 'committed-only: never creates a commit');
-  assert.ok(cmds.includes('rebase develop'), 'rebases the worktree onto develop');
+  assert.ok(ranRebaseOnto(cmds, 'develop'), 'rebases the worktree onto develop');
   assert.ok(cmds.includes('merge --ff-only glissa/session/abc'), 'ff-only merge into develop');
   assert.ok(!cmds.some((c) => c.startsWith('worktree remove')), 'worktree is NOT torn down');
   assert.ok(!cmds.some((c) => c.startsWith('branch -D')), 'branch is NOT deleted');
@@ -259,7 +273,7 @@ test('mergeKeep (injected): nothing committed is a no-op that KEEPS the worktree
   assert.equal(r.reason, 'nothing-to-commit');
   assert.equal(r.kept, true);
   assert.equal(r.branch, 'glissa/session/abc', 'branch retained (the live session continues)');
-  assert.ok(!cmds.some((c) => c.startsWith('rebase')), 'no rebase when there is nothing to merge');
+  assert.ok(ranNoRebase(cmds), 'no rebase when there is nothing to merge');
   assert.ok(!cmds.some((c) => c.startsWith('worktree remove')), 'worktree kept on nothing-to-commit');
 });
 
@@ -272,7 +286,7 @@ test('mergeKeep (injected): uncommitted work is STASHED around the rebase, then 
   assert.equal(r.merged, true);
   assert.equal(r.restoreConflict, false);
   assert.ok(cmds.includes('stash push --include-untracked -m glissa-merge'), 'stashes the uncommitted work');
-  assert.ok(cmds.includes('rebase develop'), 'rebases on the now-clean tree');
+  assert.ok(ranRebaseOnto(cmds, 'develop'), 'rebases on the now-clean tree');
   assert.ok(cmds.includes('stash pop'), 'restores the uncommitted work onto the rebased worktree');
   assert.ok(!cmds.includes('stash drop'), 'mergeKeep restores rather than drops');
 });

@@ -351,6 +351,9 @@ function createBackend(httpServer, options = {}) {
       // receive this and run as they did before.
       gitWorkspace,
       integrationBranch: cfg.integrationBranch || 'develop',
+      // Eager conflict avoidance (config kill switch). Like every other construction-time option, a
+      // settings change reaches a session on its NEXT construction, not the live one.
+      autoRebase: cfg.worktreeAutoRebase !== false,
       // Worktree root: a `.glissa-worktrees` sibling of THIS repo by default (attached to the repo,
       // outside its tree - no nested biome/eslint config, clean main git status). A configured
       // worktreeRoot overrides. Plus the gitignored local context to bring in, so the spawned agent
@@ -855,7 +858,9 @@ function createBackend(httpServer, options = {}) {
   const spawnGate = createSpawnGate();
   // Every isolated lane (a session, a PR review) executes in a git worktree on a dedicated branch,
   // fast-forwarded back on success (see git-workspace.js), so it never dirties the user's working tree.
-  const gitWorkspace = createGitWorkspace();
+  // rerere is enabled per repo the first time a worktree is created there, so a conflict resolved once
+  // is replayed on every later rebase of every linked worktree (config kill switch, read once at boot).
+  const gitWorkspace = createGitWorkspace({ rerere: config.worktreeRerere !== false });
 
   // On-disk session worktrees from a prior run are reconciled AFTER the boot session loop below, so a
   // worktree holding unmerged work can be re-adopted onto its session instead of swept (see the

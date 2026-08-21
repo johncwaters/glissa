@@ -55,13 +55,20 @@ function createGitWorkspace(opts = {}) {
   // err.stderr attached, which run()'s catch reads exactly as the sync execFileSync error did. A test
   // may inject a sync fake (returns a string or throws); `await` resolves the string and a sync throw
   // rejects the awaited expression into the same catch, so sync fakes stay valid unchanged.
-  const git = opts.git || (async (args, cwd) => {
+  // `extra.env` overlays the inherited environment for the one call that needs it (GIT_EDITOR on a
+  // rebase --continue). An injected fake simply ignores the third argument.
+  const git = opts.git || (async (args, cwd, extra) => {
     const { stdout } = await execFileP('git', args, {
       cwd, encoding: 'utf8', timeout: 20000,
+      ...(extra?.env ? { env: { ...process.env, ...extra.env } } : {}),
     });
     return stdout;
   });
   const mkdtemp = opts.mkdtemp || ((prefix) => fs.mkdtempSync(prefix));
+  // Share recorded conflict resolutions across every linked worktree of a repo (git's rr-cache lives in
+  // the COMMON gitdir, so the sharing is free once rerere.enabled is set). False switches off both the
+  // config write and every replay attempt, leaving the merge paths exactly as they were.
+  const rerereEnabled = opts.rerere !== false;
 
   // Engine-level serialization queue. ALL sessions share ONE gitWorkspace instance, and the old
   // synchronous engine was a de-facto global lock (two merges in one process never interleaved). Making
@@ -77,8 +84,8 @@ function createGitWorkspace(opts = {}) {
     return r;
   };
 
-  async function run(args, cwd) {
-    try { return okResult(await git(args, cwd)); }
+  async function run(args, cwd, extra) {
+    try { return okResult(await git(args, cwd, extra)); }
     catch (err) { return errResult(err); }
   }
   function sanitize(s) { return String(s || '').replace(/[^\w.-]+/g, '-').replace(/^-+|-+$/g, ''); }
@@ -120,6 +127,14 @@ function createGitWorkspace(opts = {}) {
     if (!inside.ok || inside.out !== 'true') return { cwd: projectPath, isGit: false };
     const head = await run(['rev-parse', 'HEAD'], projectPath);
     if (!head.ok) return { cwd: projectPath, isGit: false }; // no commits yet - nothing to branch from
+    // Set here rather than per merge so a worktree that ends up ADOPTED (branch-in-use, below) is
+    // covered too, and only when the key is UNSET: an operator who wrote `rerere.enabled = false`
+    // means it, and gets no replay. autoUpdate is never written, only forced per invocation
+    // (withAutoUpdate), so the operator's own merges keep git's default staging behavior.
+    if (rerereEnabled) {
+      const configured = await run(['config', '--get', 'rerere.enabled'], projectPath);
+      if (!configured.ok || configured.out === '') await run(['config', 'rerere.enabled', 'true'], projectPath);
+    }
     let baseSha = head.out;
     let base = (await run(['rev-parse', '--abbrev-ref', 'HEAD'], projectPath)).out || 'HEAD';
     if (baseBranch) {
@@ -226,6 +241,71 @@ function createGitWorkspace(opts = {}) {
     return (await run(['merge', '--ff-only', branch], projectPath)).ok;
   }
 
+  // The files git left unmerged in `wt` right now.
+  async function unmergedPaths(wt) {
+    return (await run(['diff', '--name-only', '--diff-filter=U'], wt)).out
+      .split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+  }
+
+  // Every path that gives up on a conflicted rebase captures the unmerged files BEFORE aborting (the
+  // abort restores a clean tree and loses them), so the parked-merge handoff prompt can name exactly
+  // what overlaps.
+  async function abortRebaseWithConflicts(wt) {
+    const conflicts = await unmergedPaths(wt);
+    await run(['rebase', '--abort'], wt);
+    return conflicts;
+  }
+
+  // True while a rebase is STOPPED on a commit (REBASE_HEAD names it), which is what separates a rebase
+  // that hit a conflict from one that never started (an index lock, a hook, an unreadable ref).
+  async function rebaseStopped(wt) {
+    return (await run(['rev-parse', '--verify', '--quiet', 'REBASE_HEAD'], wt)).ok;
+  }
+
+  // Forced per invocation and NEVER written to the repo config, so the operator's own merges keep git's
+  // default (autoUpdate unset) while every rebase Glissa drives has rerere STAGE what it resolved. That
+  // staging is the entire completeness proof in replayRecordedResolutions, so it may not be dropped.
+  const withAutoUpdate = (args) => (rerereEnabled ? ['-c', 'rerere.autoUpdate=true', ...args] : args);
+
+  // One rebase step forward. `--skip` rather than `--continue` when the replayed resolution left the
+  // patch empty (the change is already upstream), which `--continue` refuses and would strand mid-rebase.
+  // GIT_EDITOR=true so no editor can ever hang an unattended loop. `ok` on the step means the whole
+  // rebase finished; a non-zero exit with unmerged files means it stopped on the NEXT conflict.
+  async function advanceRebaseStep(wt) {
+    const staged = await run(['diff', '--cached', '--quiet'], wt);
+    const step = staged.ok ? '--skip' : '--continue';
+    const r = await run(withAutoUpdate(['rebase', step]), wt, { env: { GIT_EDITOR: 'true' } });
+    if (r.ok) return { done: true };
+    return { done: false, conflicted: (await unmergedPaths(wt)).length > 0 };
+  }
+  // Replay a conflicted rebase out of the shared rr-cache, one conflicted step at a time. Because the
+  // rebase and every --continue run with rerere.autoUpdate forced on, rerere stages exactly what it
+  // resolved, so "no unmerged paths remain" is a sound proof that this step is fully resolved.
+  //
+  // `git rerere remaining` is NOT such a proof and must never be used as one: rerere does not track
+  // BINARY content conflicts at all (any file with a NUL in its first 8k), so it prints nothing while a
+  // binary path is still unmerged. Staging and continuing there commits git's target-side copy over the
+  // session's work, and when the staged tree then equals HEAD the step is silently --skipped, dropping
+  // the whole commit. Which paths rerere replayed is deliberately NOT reported: git drops a path from
+  // MERGE_RR as it resolves it, so by the time the rebase returns, `rerere status` and `rerere remaining`
+  // are both empty and no honest per-path list can be recovered (verified against git 2.44).
+  //
+  // Leaves the conflicted state untouched for the caller's capture-then-abort whenever it cannot finish.
+  // Returns { ok, steps }.
+  const RERERE_STEP_CAP = 50;
+  async function replayRecordedResolutions(wt) {
+    let steps = 0;
+    for (; steps < RERERE_STEP_CAP; steps += 1) {
+      if ((await unmergedPaths(wt)).length) return { ok: false, steps };
+      const staged = await run(['add', '-u'], wt);
+      if (!staged.ok) return { ok: false, steps }; // the caller aborts; a half-staged step never continues
+      const advanced = await advanceRebaseStep(wt);
+      if (advanced.done) return { ok: true, steps: steps + 1 };
+      if (!advanced.conflicted) return { ok: false, steps };
+    }
+    return { ok: false, steps };
+  }
+
   // The shared merge core (COMMITTED-ONLY): merge the commits already on `branch` into `target` via
   // rebase-then-FF, leaving UNCOMMITTED working-tree changes out of the merge. Uncommitted edits are never
   // swept in (the operator's "commit it first" boundary, and what the review sidebar draws its committed/
@@ -236,7 +316,7 @@ function createGitWorkspace(opts = {}) {
   // wrapped), so two merges into the same target never interleave: the first advances the target before
   // the second reads it. A rebase conflict ABORTS and reports parked; nothing is ever auto-resolved.
   // `committed` means "there were commits to merge", not that this function made one.
-  // Returns { committed, merged, reason, parked?, restoreConflict? }.
+  // Returns { committed, merged, reason, parked?, restoreConflict?, rerereReplayed? }.
   async function rebaseFfBranch({ projectPath, wt, branch, target }) {
     // Commits on the branch but not yet on the target = exactly what merging would bring in. None means
     // there is nothing committed to merge (uncommitted-only work is left for the operator to commit).
@@ -251,15 +331,20 @@ function createGitWorkspace(opts = {}) {
     const dirty = (await run(['status', '--porcelain'], wt)).out !== '';
     const stashed = dirty && (await run(['stash', 'push', '--include-untracked', '-m', 'glissa-merge'], wt)).ok;
 
-    // Rebase onto the integration branch; a conflict aborts and reports parked (caller keeps the branch).
-    if (!(await run(['rebase', target], wt)).ok) {
-      // Capture the conflicting files BEFORE aborting (the abort restores a clean tree and loses them).
-      // They are reported up so the parked-merge handoff prompt can name exactly what overlaps.
-      const conflicts = (await run(['diff', '--name-only', '--diff-filter=U'], wt)).out
-        .split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
-      await run(['rebase', '--abort'], wt);
-      if (stashed) await run(['stash', 'pop'], wt); // hand the operator their uncommitted work back, un-rebased
-      return { committed: true, merged: false, reason: 'rebase-conflict', parked: true, conflicts };
+    // Rebase onto the integration branch. A conflict git has ALREADY seen resolved once (shared rr-cache)
+    // is replayed and the rebase carries on as an ordinary success; anything else aborts and reports
+    // parked (caller keeps the branch), exactly as before rerere existed.
+    let rerereReplayed = false;
+    if (!(await run(withAutoUpdate(['rebase', target]), wt)).ok) {
+      const replay = rerereEnabled && (await rebaseStopped(wt))
+        ? await replayRecordedResolutions(wt)
+        : { ok: false };
+      if (!replay.ok) {
+        const conflicts = await abortRebaseWithConflicts(wt);
+        if (stashed) await run(['stash', 'pop'], wt); // hand the operator their uncommitted work back, un-rebased
+        return { committed: true, merged: false, reason: 'rebase-conflict', parked: true, conflicts };
+      }
+      rerereReplayed = true;
     }
 
     // Fast-forward the integration branch to the rebased session branch.
@@ -267,13 +352,13 @@ function createGitWorkspace(opts = {}) {
     const merged = await fastForwardTarget(projectPath, branch, target, head === target);
     if (!merged) {
       if (stashed) await run(['stash', 'pop'], wt);
-      return { committed: true, merged: false, reason: 'not-fast-forward', parked: true };
+      return { committed: true, merged: false, reason: 'not-fast-forward', parked: true, rerereReplayed };
     }
 
     // Merged. Restore the uncommitted work onto the rebased worktree. A `stash pop` that conflicts leaves
     // markers for the operator and is reported (restoreConflict), never auto-resolved.
     const restoreConflict = stashed ? !(await run(['stash', 'pop'], wt)).ok : false;
-    return { committed: true, merged: true, reason: null, restoreConflict };
+    return { committed: true, merged: true, reason: null, restoreConflict, rerereReplayed };
   }
 
   // Shared guard preamble for the merge-back paths (mergeBack/mergeKeep): validate the workspace and
@@ -324,7 +409,7 @@ function createGitWorkspace(opts = {}) {
       return { merged: false, committed: true, branch, base: target, reason: r.reason, parked: true, conflicts: r.conflicts || [] };
     }
     await tearDownWorktree(projectPath, wt, branch);
-    return { merged: true, committed: true, branch: null, base: target, reason: null };
+    return { merged: true, committed: true, branch: null, base: target, reason: null, rerereReplayed: r.rerereReplayed === true };
   }
 
   // Like mergeBack, but KEEPS the worktree alive on success: after the rebase-then-FF, the worktree
@@ -353,7 +438,55 @@ function createGitWorkspace(opts = {}) {
     // Merged AND kept: record the new integration tip the worktree now sits on top of. restoreConflict
     // flags that the stashed uncommitted work reapplied with conflict markers for the operator to resolve.
     const baseSha = (await run(['rev-parse', target], projectPath)).out || workspace.baseSha || null;
-    return { merged: true, committed: true, branch, base: target, baseSha, kept: true, reason: null, restoreConflict: r.restoreConflict || false };
+    return {
+      merged: true, committed: true, branch, base: target, baseSha, kept: true, reason: null,
+      restoreConflict: r.restoreConflict || false, rerereReplayed: r.rerereReplayed === true,
+    };
+  }
+
+  // Eager conflict avoidance: replay this worktree's own commits on top of a moved integration branch
+  // WITHOUT merging anything back, so the drift a long-lived session accumulates is paid off in small
+  // pieces instead of as one large conflict at merge time. Automatic and unattended, so it refuses far
+  // more than the merge paths do: a dirty tree is REFUSED rather than stashed (stashing underneath a live
+  // agent is exactly the risk this feature exists to avoid), and a conflict rerere cannot replay aborts
+  // and leaves the worktree byte-identical to how it was found - the operator's eventual Merge then hits
+  // the same conflict and the existing parked handoff takes over. Returns { ok, upToDate?, rebased?,
+  // headSha?, baseSha?, rerereReplayed?, reason?, conflicts? }.
+  function rebaseOnly(args) {
+    return serialize(() => rebaseOnlyBody(args));
+  }
+  async function rebaseOnlyBody({ projectPath, workspace, targetBranch }) {
+    const g = await resolveMergeBack({ projectPath, workspace, targetBranch });
+    if (g.error) return { ok: false, reason: g.error.reason };
+    const { wt, target } = g;
+
+    const status = await run(['status', '--porcelain'], wt);
+    if (!status.ok) return { ok: false, reason: 'unreadable' };
+    if (status.out !== '') return { ok: false, reason: 'dirty' };
+
+    // Nothing on the target this worktree does not already have: a rebase would be a no-op, so skip the
+    // ref churn (and the hot-reload poke a rewritten worktree costs a live session) entirely.
+    const behind = await run(['rev-list', '--count', `HEAD..${target}`], wt);
+    if (!behind.ok) return { ok: false, reason: 'unreadable' };
+    if (behind.out === '' || behind.out === '0') return { ok: true, upToDate: true };
+
+    let rerereReplayed = false;
+    if (!(await run(withAutoUpdate(['rebase', target]), wt)).ok) {
+      // A rebase that never STARTED (an index lock, a hook, an unreadable ref) is transient: there is
+      // nothing to abort and nothing an operator could resolve, so it is reported apart from a real
+      // conflict and deliberately does not arm the caller's conflict cooldown.
+      if (!(await rebaseStopped(wt))) return { ok: false, reason: 'rebase-failed' };
+      const replay = rerereEnabled ? await replayRecordedResolutions(wt) : { ok: false };
+      if (!replay.ok) return { ok: false, reason: 'rebase-conflict', conflicts: await abortRebaseWithConflicts(wt) };
+      rerereReplayed = true;
+    }
+    return {
+      ok: true,
+      rebased: true,
+      headSha: (await run(['rev-parse', 'HEAD'], wt)).out || null,
+      baseSha: (await run(['rev-parse', target], wt)).out || null,
+      rerereReplayed,
+    };
   }
 
   // Throw away a worktree and its branch (cancelled runs): nothing is committed or merged.
@@ -441,7 +574,7 @@ function createGitWorkspace(opts = {}) {
   }
 
   return {
-    create, discard, mergeBack, mergeKeep, populate,
+    create, discard, mergeBack, mergeKeep, rebaseOnly, populate,
     listSessionWorktrees, listWorktreeBranches, removeWorktreeByPath,
   };
 }

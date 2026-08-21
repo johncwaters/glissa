@@ -78,6 +78,13 @@ const DEFAULT_CONFIG = {
   // Gitignored local context brought into each session worktree so the agent sees a complete, recognizable
   // project. Dirs are junctioned (shared, never merged); files are copied; committed/absent entries skipped.
   worktreeShare: ['node_modules', '.env', '.env.local', '.claude', '.omc'],
+  // Rebase a session worktree onto the integration branch as soon as that branch moves, while the tree
+  // is clean and the session quiescent (see AGENTS.md "Worktree auto-rebase"). Read at session
+  // construction, so a change applies to the next construction rather than to a live session.
+  worktreeAutoRebase: true,
+  // Enable git rerere per repo, so a conflict resolved once is replayed automatically on every later
+  // rebase of every linked worktree. Read once when the worktree engine is built (server restart).
+  worktreeRerere: true,
   repoRoots: [],
   // Deterministic post-turn auto-fix checks (see post-turn-checker.js). ON by
   // default: the runner's own DEFAULTS govern behavior even when this key is
@@ -133,6 +140,11 @@ const BOOLEAN_KEYS = [
   // Absent from getSettings for the same reason as packsAutoRebuild: the mill ships no Settings
   // control, and a session reads this once at spawn.
   'packReadTelemetry',
+  // Both worktree conflict-avoidance switches, absent from getSettings for the same reason
+  // (precedent: usage.rtkSavings). Validated and reloadable; each takes effect on the next session
+  // construction / server restart respectively.
+  'worktreeAutoRebase',
+  'worktreeRerere',
 ];
 
 // Free-text settings persisted to config.json.
