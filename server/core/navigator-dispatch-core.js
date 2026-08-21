@@ -153,15 +153,18 @@ function findingLines(findings) {
   return lines;
 }
 
-// Content-derived, so no buffer can close its own fence and be read as instructions.
-function bufferMarker(text) {
-  return `GLISSA-BUFFER-${hashText(text).toUpperCase()}`;
+// Content-derived, so no fenced text can close its own fence and be read as instructions.
+function contentMarker(prefix, text) {
+  return `GLISSA-${prefix}-${hashText(text).toUpperCase()}`;
 }
 
-// Same rule for the ingest digest: its own content-derived marker, so a captured line of terminal
-// output cannot close the buffer's fence or its own.
+function bufferMarker(text) {
+  return contentMarker('BUFFER', text);
+}
+
+// Same rule for the ingest digest: a captured line of terminal output cannot close either fence.
 function activityMarker(text) {
-  return `GLISSA-ACTIVITY-${hashText(text).toUpperCase()}`;
+  return contentMarker('ACTIVITY', text);
 }
 
 /*

@@ -139,7 +139,6 @@ function createTerminalIngest({
       detach,
       flushNow: flush,
       get isDetached() { return detached; },
-      get hasPendingFlush() { return flushTimer !== null; },
     };
     tapsBySessionId.set(sess.id, tap);
     return tap;
