@@ -22,11 +22,18 @@ Version-controlled input to the context mill: pack specs and the shared source m
   "sources": [{ "glob": "sources/company-context/*.md", "exclude": ["**/archive/**"] }],
   "rules": ["hand-written policy lines folded into the index"],
   "skills": [{ "dir": "skills/voice-style" }],
+  "distill": [{
+    "output": "sources/company-context/derived/brief.md",
+    "sources": [{ "glob": "sources/company-context/*.md" }],
+    "instructions": "Regenerate a short brief from the source files."
+  }],
   "budgetTokens": 8000
 }
 ```
 
-Every key is validated by `validatePackSpec` in `../server/core/pack-core.js`; unknown keys are a build error, not a silent no-op. A source sets exactly one of `path` (a file or a directory taken whole) or `glob` (`**`, `*`, `?`). Relative patterns resolve against this directory, so a spec reads the same from a repo checkout or a global install; absolute patterns are allowed. `budgetTokens` is a hard gate: over budget means no output at all.
+Every key is validated by `validatePackSpec` in `../server/core/pack-core.js`; unknown keys are a build error, not a silent no-op. A source sets exactly one of `path` (a file or a directory taken whole) or `glob` (`**`, `*`, `?`). Relative patterns resolve against this directory, so a spec reads the same from a repo checkout or a global install; absolute patterns are allowed. `optional: true` is allowed only on a source and means a missing match is skipped instead of failing the build, for derived files the distiller has not written yet. `budgetTokens` is a hard gate: over budget means no output at all.
+
+`distill` is optional. Each entry declares one derived output path under `packs/`, the local source files to summarize, and carbon-unit written `instructions`. The distiller writes only the output file, stamps line 1 with the source hashes, and reports `DISTILLED`, `NO_CHANGE`, or `ERROR` through its result file. The scheduled lane is gated by `config.packDistiller`; manual `glissa pack distill [name] [--dry-run]` is always allowed.
 
 ## For AI Agents
 

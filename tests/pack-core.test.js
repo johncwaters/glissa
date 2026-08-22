@@ -12,6 +12,7 @@ const {
   MAX_INDEX_TOKENS,
   MAX_PACKS_PER_SESSION,
   estimateTokens,
+  isPackRelativePath,
   matchesGlob,
   normalizePackNames,
   planPackBuild,
@@ -357,10 +358,95 @@ test('normalizePackNames caps the per-session pack count', () => {
   assert.ok(result.warnings.every((w) => w.includes('cap')));
 });
 
-test('a source that matched no file is a build error', () => {
+// ---------------------------------------------------------------------------
+// optional sources and the distill spec field (M5)
+// ---------------------------------------------------------------------------
+
+test('a source may declare optional, and only as a boolean', () => {
+  assert.equal(validatePackSpec(validSpec({ sources: [{ path: 'derived/brief.md', optional: true }] })).ok, true);
+  const wrongType = validatePackSpec(validSpec({ sources: [{ path: 'a.md', optional: 'yes' }] }));
+  assert.equal(wrongType.ok, false);
+  assert.ok(wrongType.errors.some((e) => e.includes('optional')));
+});
+
+test('an optional source that matched no file is skipped instead of failing the build', () => {
+  const spec = validSpec({ sources: [{ glob: 'sources/demo/*.md' }, { path: 'derived/brief.md', optional: true }] });
+  const plan = planPackBuild(spec, [sourceFile('sources/demo/a.md', 'alpha')], { builtAt: BUILT_AT });
+
+  assert.equal(plan.ok, true, plan.errors.join('; '));
+  assert.equal(plan.manifest.sources.length, 1, 'only the group that matched files is in the manifest');
+  assert.equal(outputByPath(plan, '.claude/rules/02-brief.md'), undefined);
+});
+
+test('a NON-optional source that matched no file is still a build error', () => {
   const spec = validSpec({ sources: [{ glob: 'sources/demo/*.md' }, { path: 'derived/brief.md' }] });
   const plan = planPackBuild(spec, [sourceFile('sources/demo/a.md', 'alpha')], { builtAt: BUILT_AT });
 
   assert.equal(plan.ok, false);
   assert.ok(plan.errors.some((e) => e.includes('matched no files')));
+});
+
+test('an optional source that DID match files is grouped like any other', () => {
+  const spec = validSpec({ sources: [{ glob: 'sources/demo/*.md' }, { path: 'derived/brief.md', optional: true }] });
+  const plan = planPackBuild(spec, [
+    sourceFile('sources/demo/a.md', 'alpha'),
+    sourceFile('derived/brief.md', 'the brief', 1),
+  ], { builtAt: BUILT_AT });
+
+  assert.equal(plan.ok, true, plan.errors.join('; '));
+  assert.match(outputByPath(plan, '.claude/rules/02-brief.md').content, /the brief/);
+});
+
+function distillEntry(overrides = {}) {
+  return {
+    output: 'sources/demo/derived/brief.md',
+    sources: [{ glob: 'sources/demo/*.md' }],
+    instructions: 'summarize the sources',
+    ...overrides,
+  };
+}
+
+test('a well-formed distill entry validates', () => {
+  assert.deepEqual(validatePackSpec(validSpec({ distill: [distillEntry()] })), { ok: true, errors: [] });
+});
+
+test('a distill output that escapes the packs directory is rejected', () => {
+  for (const output of ['../outside.md', 'a/../../outside.md', '/etc/passwd', 'C:/Windows/x.md', '\\\\server\\share.md', '']) {
+    const result = validatePackSpec(validSpec({ distill: [distillEntry({ output })] }));
+    assert.equal(result.ok, false, output);
+    assert.ok(result.errors.some((e) => e.includes('output')), output);
+  }
+});
+
+test('a distill entry needs sources and instructions, and rejects unknown keys', () => {
+  const noSources = validatePackSpec(validSpec({ distill: [distillEntry({ sources: [] })] }));
+  assert.equal(noSources.ok, false);
+  assert.ok(noSources.errors.some((e) => e.includes('sources')));
+
+  const noInstructions = validatePackSpec(validSpec({ distill: [distillEntry({ instructions: '  ' })] }));
+  assert.equal(noInstructions.ok, false);
+  assert.ok(noInstructions.errors.some((e) => e.includes('instructions')));
+
+  const unknown = validatePackSpec(validSpec({ distill: [{ ...distillEntry(), model: 'opus' }] }));
+  assert.equal(unknown.ok, false);
+  assert.ok(unknown.errors.some((e) => e.includes('unknown key')));
+});
+
+test('distill sources are validated as ordinary source objects', () => {
+  const bad = validatePackSpec(validSpec({ distill: [distillEntry({ sources: [{ path: 'a', glob: 'b' }] })] }));
+  assert.equal(bad.ok, false);
+  assert.ok(bad.errors.some((e) => e.includes('distill[0].sources[0]')));
+});
+
+test('distill must be an array when present, and is optional', () => {
+  assert.equal(validatePackSpec(validSpec({ distill: 'brief' })).ok, false);
+  assert.equal(validatePackSpec(validSpec()).ok, true);
+});
+
+test('isPackRelativePath accepts a plain relative path and nothing that escapes', () => {
+  assert.equal(isPackRelativePath('sources/glissa/derived/brief.md'), true);
+  assert.equal(isPackRelativePath('brief.md'), true);
+  for (const value of ['../brief.md', '/brief.md', 'C:/brief.md', '', null, 42, 'a/../../b.md']) {
+    assert.equal(isPackRelativePath(value), false, String(value));
+  }
 });

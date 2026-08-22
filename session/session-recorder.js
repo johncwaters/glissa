@@ -39,8 +39,9 @@
  *   Resize (`full` only):
  *     {"type":"resize","ts":epoch,"cols":N,"rows":N}
  *
- *   Footer (session end):
- *     {"type":"footer","ts":epoch,"reason":"...","exitCode":N}
+ *   Footer (session end; `packReads` only when context packs were delivered):
+ *     {"type":"footer","ts":epoch,"reason":"...","exitCode":N,
+ *      "packReads":[{"name":"..","version":"..","reads":N,"lastReadAt":epoch,"readsSinceNotice":N}]}
  */
 
 const fs = require('node:fs');
@@ -157,8 +158,14 @@ class SessionRecorder {
     this._write({ type: 'resize', ts: Date.now(), cols, rows });
   }
 
-  writeFooter(reason, exitCode) {
-    this._write({ type: 'footer', ts: Date.now(), reason, exitCode: exitCode != null ? exitCode : null });
+  // `packReads` is the whole-session aggregate of the context-pack read telemetry. It rides the
+  // footer because the per-read hook callbacks are deliberately NOT recorded at the signals level
+  // (one record per Read would bury everything else); see sessions.js ingestHookSignal.
+  writeFooter(reason, exitCode, summary) {
+    const record = { type: 'footer', ts: Date.now(), reason, exitCode: exitCode != null ? exitCode : null };
+    const packReads = summary && Array.isArray(summary.packReads) ? summary.packReads : [];
+    if (packReads.length > 0) record.packReads = packReads;
+    this._write(record);
   }
 
   /** Idempotent close - safe to call multiple times. */

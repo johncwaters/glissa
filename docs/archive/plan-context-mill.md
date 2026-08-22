@@ -1,12 +1,5 @@
 # Plan: Glissa Context Mill (automated context packs)
 
-> SUPERSEDED IN PART, 2026-08-22. The shipped system is now assembly plus auto-rebuild plus spawn
-> delivery, and nothing else. Four planned pieces were built and then deleted: the live per-turn
-> `UserPromptSubmit` notice channel, the pack-staleness chip and its `pack-updated` / `packVersions`
-> fan-out, the per-Read pack telemetry, and the distiller lane (`distill` spec key,
-> `config.packDistiller`, `glissa pack distill`). Read `AGENTS.md`'s "Context Packs" section for
-> current behavior; everything below is design rationale, not a description of the code.
-
 Status: EXECUTED, 2026-08-19. Research inputs: live-verified Claude Code 2.1.235 injection probes, the public PostHog/context-mill repo, prior-art survey (Repomix, Context7, Mintlify, GitMCP, DeepWiki, llms.txt), and a full inventory of Glissa's current spawn injections.
 
 ## Goal

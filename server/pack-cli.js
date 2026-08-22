@@ -16,6 +16,8 @@ const USAGE = [
   'Commands:',
   '  build [name]     Build one pack, or every spec when no name is given',
   '  list             Show every spec and the version currently built from it',
+  '  distill [name]   Regenerate derived pack sources whose sources drifted',
+  '                   --dry-run reports what would be distilled and spawns nothing',
 ].join('\n');
 
 function shortVersion(version) {
@@ -77,14 +79,64 @@ async function runList() {
   return 0;
 }
 
+const DISTILL_STATUS_LABEL = {
+  current: 'current',
+  stale: 'STALE (dry run, nothing spawned)',
+  distilled: 'distilled',
+  error: 'ERROR',
+};
+
+// The manual trigger, always allowed: config.packDistiller.enabled gates the scheduled lane only, and
+// an operator running this command IS the authorization. `claude` must be resolvable for a real run;
+// a dry run only reads and hashes, so it works on a machine without it.
+async function runDistill(name, { dryRun }, makeDistiller) {
+  if (!dryRun) {
+    const { CLAUDE_CMD } = require('../session/core/spawn-command');
+    if (!CLAUDE_CMD || !CLAUDE_CMD.path) {
+      console.error("Cannot distill: 'claude' is not resolvable on PATH. Install Claude Code, or use --dry-run.");
+      return 1;
+    }
+  }
+
+  const distiller = makeDistiller();
+  const reports = await distiller.runOnce({ name, dryRun });
+  await distiller.stop();
+
+  if (reports.length === 0) {
+    console.log(name ? `No distill entries in a spec named "${name}".` : 'No pack spec declares a distill entry.');
+    return 0;
+  }
+  let failed = 0;
+  for (const report of reports) {
+    const label = DISTILL_STATUS_LABEL[report.status] || report.status;
+    console.log(`${String(report.pack).padEnd(24)}${label}  ${report.output || ''}`.trimEnd());
+    if (report.reason) console.log(`  ${report.reason}`);
+    if (report.summary) console.log(`  ${report.summary}`);
+    if (report.status === 'error') failed += 1;
+  }
+  if (failed > 0) {
+    console.error(`\n${failed} distill entr(y/ies) failed. Nothing was accepted for those.`);
+    return 1;
+  }
+  return 0;
+}
+
 /**
  * @param {string[]} args argv after the `pack` subcommand
+ * @param {{makeDistiller?: () => {runOnce: Function, stop: Function}}} deps test seam for the lane
  * @returns {Promise<number>} process exit code
  */
-async function runPackCli(args) {
+async function runPackCli(args, deps = {}) {
+  // Required lazily: server/pack-distiller.js pulls in the Session class, which resolves `claude` on
+  // PATH at module load, and `glissa pack list` has no business paying for that.
+  const { makeDistiller = () => require('./pack-distiller').createPackDistiller({ enabled: true }) } = deps;
   const command = args[0];
-  if (command === 'build') return runBuild(args[1] || null);
+  const rest = args.slice(1).filter((arg) => arg !== '--dry-run');
+  if (command === 'build') return runBuild(rest[0] || null);
   if (command === 'list') return runList();
+  if (command === 'distill') {
+    return runDistill(rest[0] || null, { dryRun: args.includes('--dry-run') }, makeDistiller);
+  }
   console.error(USAGE);
   return 1;
 }

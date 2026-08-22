@@ -67,6 +67,9 @@ const { normalizeRemoteConfig, validateRemoteConfig, decideBindHost } = require(
 const { createClientPresence } = require('./core/client-presence');
 const { normalizePackNames } = require('./core/pack-core');
 const { createPackService } = require('./pack-service');
+const {
+  DEFAULT_INTERVAL_HOURS, DEFAULT_TIMEOUT_SECONDS, createDistillSpawn, createPackDistiller,
+} = require('./pack-distiller');
 const { classifyUpgradePath, dataSessionIdFromUrl } = require('./core/upgrade-route');
 const { classifyRequestOrigin, decideUpgradeAccess } = require('./core/request-trust');
 const { isApplicableViewerSize, pickSizeAfterDeparture } = require('./core/viewer-size-core');
@@ -245,6 +248,12 @@ function reconcileSessionWorktrees({ projects, sessions, gitWorkspaceSync, integ
   }
 }
 
+// The one hook event whose response can inject context into the turn it answers. Case-insensitive to
+// match mapHookToSignal, which reads the same route parameter.
+function isUserPromptSubmitEvent(event) {
+  return String(event || '').toLowerCase() === 'userpromptsubmit';
+}
+
 // Telemetry, not a status signal: mapHookToSignal returns null for it (so HookRouter answers 200 with
 // no signal after validating the token exactly as it does for every other event), and the route hands
 // the payload to the usage lane instead of the detection path.
@@ -364,6 +373,8 @@ function createBackend(httpServer, options = {}) {
       // Context packs delivered as --add-dir at spawn. Hand-edited on the project record in M2 (it is
       // deliberately not a control-WS settable key); the Session validates the shape defensively.
       packs: project.packs,
+      // Pack read telemetry (config kill switch; undefined -> Session default true).
+      packReadTelemetry: cfg.packReadTelemetry,
       // Official plan-limit ingestion via a managed statusLine. Off whenever the usage lane itself is
       // off, so one switch turns the whole lane inert.
       planLimits: planLimitsEnabled(cfg),
@@ -432,6 +443,18 @@ function createBackend(httpServer, options = {}) {
       // threw a ReferenceError that the tolerate-catch above swallowed and EVERY hook payload arrived
       // as {} (dead session_id capture, dead background_tasks gate, dead Notification subtypes).
       const reply = { ok: out.status === 200, reason: out.reason };
+      // Live context-pack channel: a UserPromptSubmit reply MAY carry one Glissa-authored notice that
+      // a pack this session spawned against has been rebuilt. Only this exact nesting with a matching
+      // hookEventName injects anything (verified on Claude Code 2.1.235), only UserPromptSubmit is a
+      // reliable per-turn injection point, and only an ACCEPTED callback may consume the notice, so a
+      // rejected token can never drain it. With nothing pending the body stays byte-identical to
+      // before the channel existed - pinned by tests/backend-pack-notice-hook.test.js.
+      const packNotice = out.status === 200 && isUserPromptSubmitEvent(req.params.event)
+        ? sessions.get(req.params.glissaId)?.takePackNoticeContext() || null
+        : null;
+      if (packNotice) {
+        reply.hookSpecificOutput = { hookEventName: 'UserPromptSubmit', additionalContext: packNotice };
+      }
       res.status(out.status).json(reply);
     });
   });
@@ -654,7 +677,7 @@ function createBackend(httpServer, options = {}) {
     let listenerMismatch = false;
     let orphanPty = false;
     let destroyedReachable = false;
-    for (const sess of [...sessions.values(), ...reviewSessions.values(), ...investigationSessions.values(), ...navigatorSessions.values()]) {
+    for (const sess of [...sessions.values(), ...reviewSessions.values(), ...investigationSessions.values(), ...distillSessions.values(), ...navigatorSessions.values()]) {
       const stats = sess.getHealthStats();
       stats.detection = sess.getDetectionStats();
       stats.ephemeral = !!sess.ephemeral;
@@ -903,7 +926,7 @@ function createBackend(httpServer, options = {}) {
    * checkout, and neither is visible from the other's HEAD.
    *
    * The exclusion rides the map, not a filter: ephemeral lane sessions (pr-review, navigator dispatch,
-   * posthog) are registered in their own maps and never enter `sessions`, so a pr-review
+   * posthog, pack-distill) are registered in their own maps and never enter `sessions`, so a pr-review
    * worktree and a navigator dispatch's throwaway workdir are outside the watch set BY CONSTRUCTION,
    * exactly as the terminal tap's placement in wireSessionEvents excludes them there.
    */
@@ -944,7 +967,7 @@ function createBackend(httpServer, options = {}) {
    * "Wire and trust"). Its tier 3 model dispatch is a second opt-in inside that one: without
    * config.navigator.dispatch.enabled the dispatcher is never constructed, so the lane arms no
    * dispatch timer and can spawn nothing. Its sessions get their own ephemeral map for the same
-   * reasons as the PR-review lane, and it is that registration (logPrefix 'navigator') that
+   * reasons as the PR and distill lanes, and it is that registration (logPrefix 'navigator') that
    * puts the lane on the usage ledger.
    */
   const navigatorDispatchConfig = resolveNavigatorDispatchConfig(config.navigator ? config.navigator.dispatch : null);
@@ -974,10 +997,18 @@ function createBackend(httpServer, options = {}) {
     : null;
 
   // Context-pack auto-rebuild (server/pack-service.js): watchers on each spec's source roots plus a
-  // fallback sweep, so the built dir a spawn delivers is current. Started at boot below unless
-  // config.packsAutoRebuild is false, stopped in shutdown(). A live session keeps the dir it was
-  // spawned against; a rebuild reaches it on its next spawn.
+  // fallback sweep. Started at boot below unless config.packsAutoRebuild is false, stopped in
+  // shutdown(). A published rebuild tells every dashboard the new version so a card whose session was
+  // spawned against an older one can say so, and arms a next-turn notice on the live sessions running
+  // on the old build (its skills hot-reload from the pack dir, its CLAUDE.md and rules do not).
   const packService = createPackService();
+  packService.on('pack-updated', ({ name, version }) => {
+    broadcastControl({ type: 'pack-updated', name, version });
+    // Live channel: arm a next-turn notice on every session that SPAWNED against an older version of
+    // this pack (notePackUpdate ignores the rest). Nothing needs seeding at boot - a spawn resolves
+    // the built version it delivers, so delivered equals latest until a rebuild publishes.
+    for (const sess of sessions.values()) sess.notePackUpdate(name, version);
+  });
 
   // Usage tracking lane (server/usage-wiring.js): on by default, but started LAZILY on the first
   // control connection (the initial transcript scan is the expensive pass and nobody is watching at
@@ -993,6 +1024,21 @@ function createBackend(httpServer, options = {}) {
   // the presence listener above, which is declared before `usage` exists (temporal dead zone).
   controlWss.on('connection', () => {
     void usage.start();
+  });
+
+  // Context-pack distiller (server/pack-distiller.js): opt-in, off by default, regenerates a pack's
+  // DERIVED source files when what they distill has drifted. It writes only under packs/, so the pack
+  // service's own watcher sees the written file and rebuilds that pack: the two loops compose without
+  // either knowing about the other. Its sessions live in their own ephemeral map, reaped in shutdown().
+  const distillSessions = new Map();
+  const packDistiller = createPackDistiller({
+    enabled: config.packDistiller ? config.packDistiller.enabled === true : false,
+    intervalHours: config.packDistiller?.intervalHours || DEFAULT_INTERVAL_HOURS,
+    timeoutSeconds: config.packDistiller?.timeoutSeconds || DEFAULT_TIMEOUT_SECONDS,
+    spawnDistill: createDistillSpawn({
+      sessions: distillSessions, closeSessionDataClients, hookRouter, getHookPort, spawnGate, recordLane,
+      replayBufferKB: config.replayBufferKB,
+    }),
   });
 
   // --- Integration-branch watchers (event-driven cross-session gate liveness) ---
@@ -1091,6 +1137,14 @@ function createBackend(httpServer, options = {}) {
         from, to, event,
         timestamp: Date.now()
       });
+
+      // A spawn resolves its context packs immediately before this event, so this is where a live
+      // dashboard learns which versions the session actually got. Without it the delivered versions
+      // would only ever arrive with a snapshot, and a session restarted under an open dashboard
+      // would keep showing the pre-restart (now wrong) staleness verdict.
+      if (event === 'spawn_success' || event === 'spawn_fail') {
+        broadcastControl({ type: 'session-packs', id: sess.id, packs: sess.toSnapshot().packs });
+      }
 
       // wasActive: the boot-time auto-resume signal (design B; decision logic in
       // decideWasActiveFlip). Flips only, so this writes config.json a handful of times per
@@ -1246,7 +1300,7 @@ function createBackend(httpServer, options = {}) {
     /*
      * Terminal ingest tap (docs/plan-ingestion.md, M6). Its PLACEMENT is the load-bearing part: only
      * project sessions pass through wireSessionEvents, so an ephemeral lane session (navigator,
-     * pr-review, posthog) registered through registerEphemeralSession is excluded BY
+     * pr-review, posthog, pack-distill) registered through registerEphemeralSession is excluded BY
      * CONSTRUCTION. Without that, the navigator's own dispatch output would feed straight back into its
      * next prompt. Pinned by tests/ingest-backend.test.js.
      */
@@ -1324,6 +1378,11 @@ function createBackend(httpServer, options = {}) {
   if (config.packsAutoRebuild !== false) {
     packService.start().catch((err) => console.warn(`[packs] auto-rebuild failed to start: ${err.message}`));
   }
+
+  // --- Context-pack distiller (opt-in; inert unless config.packDistiller.enabled) ---
+  // Fire-and-forget: start() runs one drift pass immediately (a source edited while Glissa was down is
+  // the case worth catching) and then every intervalHours. Disabled is a no-op returning at once.
+  packDistiller.start().catch((err) => console.warn(`[distill] failed to start: ${err.message}`));
 
   function diffProjects(currentSessions, newProjects) {
     ensureProjectIds(newProjects);
@@ -1532,6 +1591,9 @@ function createBackend(httpServer, options = {}) {
     posthogArchiveInvestigation: (args) => posthog.archiveInvestigation(args),
     // Same for the PR auto-review lane.
     getPrStatus: () => prReview.getStatus(),
+    // Latest built version per pack, so a connecting client can tell which sessions were spawned
+    // against an older one. Empty while auto-rebuild is off: nothing then knows a pack moved.
+    getPackVersions: () => packService.getVersions(),
     // Usage lane: the small per-card payload is rebuilt live on connect, the large report is replayed
     // from its cache, and a report request is served on demand.
     getUsageSessions: () => usage.getSessionsMessage(),
@@ -1822,6 +1884,13 @@ function createBackend(httpServer, options = {}) {
     // Fire-and-forget like the pollers above: the process is exiting and nothing awaits it. Stopping
     // clears the scan interval and the pending nudge so a leaked timer cannot outlive the server.
     void usage.stop();
+    // Same treatment as the pack service: the timer goes synchronously, the returned promise only
+    // drains an in-flight distill, and the session below is destroyed regardless.
+    void packDistiller.stop();
+    for (const [, sess] of distillSessions) {
+      sess.destroy();
+      if (sess._killReap) pendingReaps.push(sess._killReap);
+    }
     for (const [, sess] of investigationSessions) {
       sess.destroy();
       if (sess._killReap) pendingReaps.push(sess._killReap);

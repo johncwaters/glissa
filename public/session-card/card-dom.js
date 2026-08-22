@@ -12,6 +12,7 @@ import { sendControlMsg } from '../control-ws.js';
 import { el, escapeHtml } from '../dom-helpers.js';
 import { sessionUIs } from './card-registry.js';
 import { createModalOverlay, trapFocus } from './modal.js';
+import { readCountText, sinceNoticeCount } from './pack-stale-core.mjs';
 import { showErrorToast } from './toast.js';
 
 // Debug overlay visibility - toggled by applyTerminalSettings (lifecycle) via
@@ -108,6 +109,10 @@ export function buildCardDOM(sessionId, sessionName, initialState, options = {})
   // still running, so the card stays Working rather than flipping to Complete. Text filled there.
   const agentsBadge = el('span', 'agents-badge', '');
   agentsBadge.title = 'Background sub-agents still running';
+  // Context-pack staleness. Hidden unless the card carries data-pack-stale (set by setSessionPacks /
+  // the pack-updated broadcast): a pack this session was spawned against has been rebuilt since, so
+  // it is running older context than a fresh spawn would get. Title names the packs.
+  const packBadge = el('span', 'pack-badge', 'pack stale');
   // Token and estimated-cost readout for the conversation this card is currently in. Hidden unless the
   // card carries data-usage (set live by setSessionUsage on a usage-sessions delta). Text filled there.
   const usageBadge = el('span', 'usage-badge', '');
@@ -172,7 +177,7 @@ export function buildCardDOM(sessionId, sessionName, initialState, options = {})
   // The tags share one shrinkable, clipping strip so a narrow card sheds badges from the right instead
   // of pushing the action cluster out of the box (eleven possible badges, and the actions must survive).
   const tags = el('div', 'session-card-tags');
-  const tagChildren = [worktreeBadge, resumeBadge, postTurnBadge, agentsBadge, usageBadge, wakeupBadge, promptBadge];
+  const tagChildren = [worktreeBadge, resumeBadge, postTurnBadge, agentsBadge, usageBadge, packBadge, wakeupBadge, promptBadge];
   if (permsBadge) tagChildren.push(permsBadge);
   tags.append(...tagChildren);
   header.append(nameEl, elapsedEl, spacer, tags, actions);
@@ -376,12 +381,15 @@ function renderDebugOverlay(ui, payload) {
   html += `<div class="debug-field"><span class="debug-label">Gate:</span> <span class="debug-value">${escapeHtml(gateText)}</span></div>`;
   html += `</div>`;
 
-  // Context packs this spawn delivered, and the built version each one carried.
+  // Context packs: whether the delivered context was ever actually opened, and whether a staleness
+  // notice made the agent re-open it. Absent entirely for a session that delivers no packs.
   const packs = Array.isArray(p.packs) ? p.packs : [];
   if (packs.length > 0) {
     html += `<div class="debug-section"><div class="debug-section-title">Packs</div>`;
     for (const pack of packs) {
-      html += `<div class="debug-field"><span class="debug-label">${escapeHtml(pack.name)}:</span> <span class="debug-value">${escapeHtml(String(pack.version || '').slice(0, 12))}</span></div>`;
+      const sinceCount = sinceNoticeCount(pack);
+      const since = sinceCount == null ? '' : ` <span class="debug-dim">(${sinceCount} since notice)</span>`;
+      html += `<div class="debug-field"><span class="debug-label">${escapeHtml(pack.name)}:</span> <span class="debug-value">${readCountText(pack)}</span>${since}</div>`;
     }
     html += `</div>`;
   }
