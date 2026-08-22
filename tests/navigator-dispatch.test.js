@@ -115,6 +115,12 @@ test('an invalid intent claim is ignored rather than believed or thrown over', a
 
 // --- One dispatch, end to end, with the spawn injected ---
 
+// Ref'd on purpose: the timeout test injects every timer the dispatcher arms, so an unref'd handle
+// would be the only thing left in the loop and node exits before it can fire.
+function eventLoopTurn() {
+  return new Promise((resolve) => { setImmediate(resolve); });
+}
+
 function dispatcherWithSpawn(spawnSession, overrides = {}) {
   const workDirs = [];
   const dispatch = createNavigatorDispatcher({
@@ -195,7 +201,7 @@ test('a hung session is aborted at the hard timeout and resolves ERROR, so the l
   );
 
   const pending = dispatch({ uri: URI, text: TEXT });
-  await new Promise((resolve) => { setTimeout(resolve, 0).unref(); });
+  await eventLoopTurn();
   assert.equal(timeoutMs, 12000, 'dispatchTimeoutSeconds is seconds on the wire, milliseconds on the timer');
   assert.equal(aborted, false, 'nothing is aborted while the session still has time');
 
@@ -204,7 +210,7 @@ test('a hung session is aborted at the hard timeout and resolves ERROR, so the l
   assert.deepEqual(await pending, {
     verdict: 'ERROR', comments: [], intent: null, reason: 'dispatch timed out',
   });
-  await new Promise((resolve) => { setTimeout(resolve, 0).unref(); });
+  await eventLoopTurn();
   assert.equal(aborted, true, 'the session was told to stop, not just abandoned');
   assert.equal(readAttempts, 0, 'a timeout never reads from the removed work dir');
   assert.equal(fs.existsSync(workDirs[0]), false);
