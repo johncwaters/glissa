@@ -19,8 +19,9 @@ function runCapture(cmd) {
 }
 
 function hasCommand(cmd) {
+  const probe = process.platform === 'win32' ? `where ${cmd}` : `command -v ${cmd}`;
   try {
-    execSync(`where ${cmd}`, { stdio: 'ignore' });
+    execSync(probe, { stdio: 'ignore' });
     return true;
   } catch {
     return false;

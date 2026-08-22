@@ -1,6 +1,6 @@
 # Release profile for the /release skill. Derived 2026-07-23 from repo survey; rewritten 2026-08-09 when
 # distribution moved off the npm registry to the claude-setup repo (see docs/distribution.md).
-type: git_tag
+type: other
 versioning:
   scheme: semver
   version_file: package.json        # hand-edited; lockfile synced in same commit
