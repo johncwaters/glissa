@@ -1,6 +1,8 @@
 // ── PR review view core (pure) ───────────────────────────────
 // Attention ordering and severity mapping for the PR auto-review rows. No DOM, no IO.
 
+import { lanePlaceholder } from './lane-placeholder-core.mjs';
+
 // Rank is attention-first and deliberately coarser than severity: an errored PR and one whose review
 // asked for changes both need the operator, but only the error is a lane failure.
 const PHASE_RANK = {
@@ -44,6 +46,10 @@ const UNKNOWN_RANK = 99;
 // The lane has no state entry for a PR it has not reached yet, and sends a null phase for it. That is
 // a known state (nothing has happened), not an unrecognized one.
 export const PENDING_PHASE = 'pending';
+
+export function prStatusPlaceholder(status) {
+  return lanePlaceholder(status, { label: 'PR auto-review', tab: 'PR Review' });
+}
 
 export function normalizePhase(phase) {
   return phase == null ? PENDING_PHASE : phase;

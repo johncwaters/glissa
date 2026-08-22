@@ -19,9 +19,9 @@
       font-family: 'Segoe UI', system-ui, sans-serif;
     }
 
-    /* Hide app shell until styles are ready */
+    /* Hide app shell until ready; phone excluded since style.css's @layer components rule can't outrank this inline one. */
     .app-shell { display: none; }
-    .app-ready .app-shell { display: contents; }
+    html:not([data-layout="phone"]) .app-ready .app-shell { display: contents; }
 
     /* Loading screen */
     .loading-screen {

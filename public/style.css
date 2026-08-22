@@ -4696,9 +4696,7 @@ a.pr-title:hover {
    by glyph + label + color together, and motion spent on exactly one thing (a blocked session's
    glyph). Reduced motion is covered by the global rule at the top of this file. */
 
-/* Higher specificity than index.html's `.app-ready .app-shell { display: contents }` gate, so it wins
-   regardless of source order. #sessions-container stays inside the hidden shell as every card's
-   canonical home; the Terminal screen borrows one card out at a time (public/card-host.js). */
+/* Reinforces index.html's unlayered gate (this @layer rule alone can't beat it); #sessions-container stays the shell's canonical home, Terminal screen borrows a card out (public/card-host.js). */
 html[data-layout="phone"] .app-shell { display: none; }
 
 .phone-shell { display: none; }

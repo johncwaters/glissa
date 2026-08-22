@@ -22,6 +22,7 @@ const { normalizePackNames } = require('./core/pack-core');
 const { createPrPoller } = require('./pr-poller');
 const { createPrGh } = require('./pr-gh');
 const { sendPrPing } = require('./pr-telegram');
+const { emptyLaneStatus } = require('./lane-status');
 
 // Belt-and-suspenders deny-list for the headless PR-review sessions (they run under
 // --dangerously-skip-permissions, so this is a guard, not the guard). Blocks the destructive/
@@ -216,7 +217,8 @@ function createPrReviewWiring({
   // The last tick summary, replayed to a control client that connects between ticks (the same
   // cached-snapshot pattern the PostHog lane and the startup update check use).
   let lastStatus = null;
-  const getStatus = () => lastStatus;
+  const emptyPrStatus = () => emptyLaneStatus('pr-status', prPollerShouldStart(config));
+  const getStatus = () => lastStatus || emptyPrStatus();
 
   let prPoller = null;
   let prPollerChain = Promise.resolve();
@@ -233,9 +235,12 @@ function createPrReviewWiring({
       }
       const gate = prPollerShouldStart(config);
       if (!gate.start) {
+        lastStatus = null;
+        broadcast(emptyPrStatus());
         if (gate.reason) console.warn(`[pr-poller] not starting: ${gate.reason}`);
         return;
       }
+      if (!lastStatus) broadcast(emptyPrStatus());
       prPoller = createPrPoller({
         projects: config.prReview.projects || [],
         getProjectPathById,
@@ -253,8 +258,8 @@ function createPrReviewWiring({
         maxConcurrentReviews: config.prReview.maxConcurrentReviews || 3,
         reviewTimeoutSeconds: config.prReview.reviewTimeoutSeconds || 900,
         onTickComplete: (summary) => {
-          lastStatus = summary;
-          broadcast(summary);
+          lastStatus = { ...summary, configured: true };
+          broadcast(lastStatus);
         },
       });
       await prPoller.start().catch((e) => console.warn(`[pr-poller] start failed: ${e.message}`));

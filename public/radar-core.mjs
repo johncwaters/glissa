@@ -3,6 +3,7 @@
 // three outside-world feeds (PostHog issues, ops telemetry, PR auto-review) into Radar's sections and
 // its one attention count. No DOM, no IO.
 
+import { lanePlaceholder } from './lane-placeholder-core.mjs';
 import { normalizePhase, prNeedsAction, severityFor as prSeverityFor, sortPrsByAttention } from './pr-view-core.mjs';
 
 // Rank is attention-first, deliberately NOT the same grouping as severity: a brand new issue is
@@ -24,6 +25,10 @@ const CHANGE_SEVERITY = {
 };
 
 const UNKNOWN_RANK = 99;
+
+export function radarPlaceholder(status) {
+  return lanePlaceholder(status, { label: 'PostHog monitoring', tab: 'PostHog' });
+}
 
 export function severityFor(change) {
   return CHANGE_SEVERITY[change] || 'dim';

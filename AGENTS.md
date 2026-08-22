@@ -83,6 +83,7 @@ Glissa is a lightweight Node.js background process that spawns and manages Claud
 - `express` - HTTP server and static file serving
 - `ws` - WebSocket server (no Socket.IO, ever)
 - `node-pty` - Pseudo-terminal for spawning Claude Code with real PTY support (requires VS Build Tools on Windows)
+- `@parcel/watcher` - Recursive filesystem watcher for the fs ingest source only (`server/ingest-fs.js`). Applies ignores BEFORE watch registration, which is what keeps a `node_modules` tree from exhausting `fs.inotify.max_user_watches` on Linux; ships 12 platform prebuilds as optionalDependencies plus a wasm fallback, so no compile step in practice. A load failure disables that one source with a warning and nothing else. See `docs/plan-ingestion.md`, "File watching"
 - `@xterm/xterm` - Terminal emulator (loaded in browser via ES modules, not in Node.js)
 - `@xterm/addon-fit` - xterm.js addon for fitting terminal to container (browser only)
 - `@xterm/addon-webgl` - xterm.js addon for WebGL rendering (browser only)

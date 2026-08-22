@@ -53,6 +53,46 @@ test('posthogShouldStart: fully configured -> starts', () => {
   assert.deepEqual(posthogShouldStart({ posthog: ENABLED, telegram: TELEGRAM }), { start: true, reason: null });
 });
 
+function assertPosthogStatusShape(status, { configured, reason }) {
+  assert.equal(status.type, 'posthog-status');
+  assert.equal(status.configured, configured);
+  assert.equal(status.reason, reason);
+  assert.deepEqual(status.projects, []);
+  assert.equal(Number.isFinite(status.ts), true);
+}
+
+test('PostHog getStatus: disabled config synthesizes an off status', () => {
+  withFakeSession('../server/posthog-wiring', ({ createPosthogWiring }) => {
+    const wiring = createPosthogWiring({
+      config: { posthog: { enabled: false }, replayBufferKB: 256 },
+      investigationSessions: new Map(),
+      closeSessionDataClients() {},
+      hookRouter: null,
+      getHookPort: null,
+      spawnGate: null,
+    });
+    assertPosthogStatusShape(wiring.getStatus(), { configured: false, reason: null });
+  });
+});
+
+test('PostHog getStatus: enabled without telegram synthesizes a misconfigured status', () => {
+  withFakeSession('../server/posthog-wiring', ({ createPosthogWiring }) => {
+    const wiring = createPosthogWiring({
+      config: { posthog: ENABLED, replayBufferKB: 256 },
+      investigationSessions: new Map(),
+      closeSessionDataClients() {},
+      hookRouter: null,
+      getHookPort: null,
+      spawnGate: null,
+    });
+    const status = wiring.getStatus();
+    assertPosthogStatusShape(status, {
+      configured: false,
+      reason: 'posthog.enabled but telegram botToken/chatId missing',
+    });
+  });
+});
+
 // --- makeResolveProjects: project display naming ---
 
 function fakeApi({ orgs, projectsByOrg }) {

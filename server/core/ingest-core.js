@@ -23,8 +23,10 @@ const SOURCE_DEFAULTS = Object.freeze({
     windowBytes: 64 * 1024,
   }),
   agentLogs: Object.freeze({ maxEntries: 200, maxBytes: 128 * 1024, digestQuota: 8, pollMs: 2000 }),
-  git: Object.freeze({ maxEntries: 100, maxBytes: 64 * 1024, digestQuota: 6 }),
-  fs: Object.freeze({ maxEntries: 500, maxBytes: 128 * 1024, digestQuota: 8 }),
+  git: Object.freeze({
+    maxEntries: 100, maxBytes: 64 * 1024, digestQuota: 6, debounceMs: 1000, pollMs: 60000,
+  }),
+  fs: Object.freeze({ maxEntries: 500, maxBytes: 128 * 1024, digestQuota: 8, batchMs: 500 }),
   shellHistory: Object.freeze({ maxEntries: 100, maxBytes: 32 * 1024, digestQuota: 6 }),
   editor: Object.freeze({ maxEntries: 100, maxBytes: 32 * 1024, digestQuota: 6 }),
 });
@@ -55,8 +57,27 @@ function positiveInt(value, fallback) {
 
 // --- Config ---------------------------------------------------------------
 
+/*
+ * The one non-numeric source option: `sources.fs.roots`, a list of directories to widen the fs source
+ * beyond the projects with active sessions. It needs its own branch because every other option resolves
+ * through positiveInt, which would silently turn a configured list back into the empty default.
+ */
+const LIST_KEYS = Object.freeze({ fs: 'roots' });
+
+function stringList(raw) {
+  if (!Array.isArray(raw)) return [];
+  const values = [];
+  for (const entry of raw) {
+    if (typeof entry !== 'string' || !entry.trim() || values.includes(entry.trim())) continue;
+    values.push(entry.trim());
+  }
+  return values;
+}
+
 function disabledSource(name) {
-  return { enabled: false, ...SOURCE_DEFAULTS[name] };
+  const source = { enabled: false, ...SOURCE_DEFAULTS[name] };
+  if (LIST_KEYS[name]) source[LIST_KEYS[name]] = [];
+  return source;
 }
 
 function disabledConfig() {
@@ -70,6 +91,7 @@ function resolveSource(name, raw) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return disabledSource(name);
   const resolved = { enabled: raw.enabled === true };
   for (const [key, value] of Object.entries(defaults)) resolved[key] = positiveInt(raw[key], value);
+  if (LIST_KEYS[name]) resolved[LIST_KEYS[name]] = stringList(raw[LIST_KEYS[name]]);
   return resolved;
 }
 

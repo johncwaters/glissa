@@ -15,7 +15,10 @@ const {
   DEFAULT_DIGEST_BUDGET_CHARS, buildContextDigest, createIngestStore, enabledSourceNames, latestSeq,
   publishEvent, resolveIngestConfig, ringStats, snapshotEvents,
 } = require('./core/ingest-core');
+const { deriveSessionRoots, isActiveSessionState } = require('./core/ingest-fs-core');
 const { createAgentLogIngest } = require('./ingest-agent-logs');
+const { createFsIngest } = require('./ingest-fs');
+const { createGitIngest } = require('./ingest-git');
 const { createTerminalIngest } = require('./ingest-terminal');
 
 const BATCH_INTERVAL_MS = 1000;
@@ -28,6 +31,13 @@ function createIngestLane({
   logger = console,
   laneMap = null,
   agentLogOptions = null,
+  fsOptions = null,
+  // The daemon's own resolved config path, so the fs source can ignore the state files glissa writes
+  // beside it; rationale at the consuming site in ingest-fs.js.
+  configPath = null,
+  // The git watch-set rule lives with the caller that can see live sessions (server/backend.js), not
+  // here: this lane only ever knows which directories it was handed.
+  repoRoots = null,
   // Told once per batch that carried events, so a consumer learns the machine moved without polling
   // (docs/plan-ingestion.md, M7.5). Absent by default, and then nothing is ever called.
   onActivity = null,
@@ -158,6 +168,37 @@ function createIngestLane({
     : null;
   if (agentLogs) adapters.push(agentLogs);
 
+  const gitEnabled = resolved.enabled === true && resolved.sources.git.enabled === true;
+  const git = gitEnabled
+    ? createGitIngest({
+      publish,
+      sourceConfig: resolved.sources.git,
+      reposProvider: repoRoots,
+      logger,
+      nowFn,
+      setIntervalFn,
+      clearIntervalFn,
+      setTimeoutFn,
+      clearTimeoutFn,
+    })
+    : null;
+  if (git) adapters.push(git);
+
+  const fsEnabled = resolved.enabled === true && resolved.sources.fs.enabled === true;
+  const fsSource = fsEnabled
+    ? createFsIngest({
+      publish,
+      sourceConfig: resolved.sources.fs,
+      configPath,
+      logger,
+      nowFn,
+      setTimeoutFn,
+      clearTimeoutFn,
+      ...(fsOptions || {}),
+    })
+    : null;
+  if (fsSource) adapters.push(fsSource);
+
   // Adapters that own their own discovery start themselves; the terminal source has nothing to start,
   // since its taps arrive one session at a time from wireSessionEvents.
   for (const adapter of adapters) {
@@ -167,6 +208,43 @@ function createIngestLane({
     } catch (error) {
       warn(`starting the ${adapter.name} source failed: ${error.message}`);
     }
+  }
+
+  /**
+   * Re-derive the git watch set now. Two callers, both load-bearing: backend.js calls it once the session
+   * map is POPULATED, because this lane is constructed before that loop runs and the source would
+   * otherwise see an empty watch set until its first poll (and that poll's first read is a baseline, so a
+   * commit made in the boot window would be absorbed and never reported); and again on `worktree-ready`,
+   * because a worktree provisioned a second ago is about to take the session's first commit.
+   *
+   * Returns the pass so a caller can await it; the source's own guard never rejects.
+   */
+  function noteRepos() {
+    if (stopped || !git) return Promise.resolve();
+    return git.reconcile();
+  }
+
+  /**
+   * The fs source's ref-counting edge, driven by the session state machine rather than by a start hook:
+   * a session is a live checkout worth watching from the moment it is INITIALIZING until it exits, and
+   * that is exactly what `to` already says. Callable on every transition, because a repeat naming the
+   * same directories costs a compare in the source and nothing else.
+   *
+   * Only project sessions ever reach here (backend.js calls it from wireSessionEvents), so an ephemeral
+   * lane session's throwaway workdir is outside the watch set BY CONSTRUCTION, the same mechanism that
+   * keeps the terminal tap and the git watch set off them.
+   */
+  function noteSessionRoots(sess) {
+    if (stopped || !fsSource || !sess?.id) return false;
+    if (!isActiveSessionState(sess.state)) return fsSource.releaseHolder(sess.id);
+    return fsSource.addRoots(sess.id, deriveSessionRoots(sess));
+  }
+
+  // The other half: a session that exited, or is being torn down for good, drops its hold and the root
+  // goes unwatched once nothing else holds it.
+  function releaseSessionRoots(sess) {
+    if (!fsSource || !sess?.id) return false;
+    return fsSource.releaseHolder(sess.id);
   }
 
   // A no-op when the terminal source is off, so a caller never has to ask twice before wiring a session.
@@ -209,6 +287,9 @@ function createIngestLane({
     attachSessionTap,
     detachSessionTap,
     hasSessionTap,
+    noteRepos,
+    noteSessionRoots,
+    releaseSessionRoots,
     flushBatch,
     stop,
     sources,
@@ -218,6 +299,10 @@ function createIngestLane({
     recentEvents: (limit = snapshotEventLimit) => snapshotEvents(store, { limit }),
     get agentLogs() { return agentLogs; },
     get agentLogsEnabled() { return agentLogsEnabled; },
+    get git() { return git; },
+    get gitEnabled() { return gitEnabled; },
+    get fs() { return fsSource; },
+    get fsEnabled() { return fsEnabled; },
     get terminalEnabled() { return terminalEnabled; },
     get tapCount() { return terminal ? terminal.tapCount : 0; },
     get pendingEventCount() { return pendingEvents.length; },

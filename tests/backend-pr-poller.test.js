@@ -39,6 +39,47 @@ test('prPollerShouldStart: enabled + telegram configured -> starts', () => {
   assert.deepEqual(r, { start: true, reason: null });
 });
 
+function assertPrStatusShape(status, { configured, reason }) {
+  assert.equal(status.type, 'pr-status');
+  assert.equal(status.configured, configured);
+  assert.equal(status.reason, reason);
+  assert.deepEqual(status.projects, []);
+  assert.equal(Number.isFinite(status.ts), true);
+}
+
+test('PR review getStatus: disabled config synthesizes an off status', () => {
+  withFakeSession('../server/pr-review-wiring', ({ createPrReviewWiring }) => {
+    const wiring = createPrReviewWiring({
+      config: { prReview: { enabled: false }, replayBufferKB: 256 },
+      reviewSessions: new Map(),
+      closeSessionDataClients() {},
+      hookRouter: null,
+      getHookPort: null,
+      spawnGate: null,
+      gitWorkspace: null,
+      getProjectPathById: () => null,
+    });
+    assertPrStatusShape(wiring.getStatus(), { configured: false, reason: null });
+  });
+});
+
+test('PR review getStatus: enabled without telegram synthesizes a misconfigured status', () => {
+  withFakeSession('../server/pr-review-wiring', ({ createPrReviewWiring }) => {
+    const wiring = createPrReviewWiring({
+      config: { prReview: { enabled: true }, replayBufferKB: 256 },
+      reviewSessions: new Map(),
+      closeSessionDataClients() {},
+      hookRouter: null,
+      getHookPort: null,
+      spawnGate: null,
+      gitWorkspace: null,
+      getProjectPathById: () => null,
+    });
+    const status = wiring.getStatus();
+    assertPrStatusShape(status, { configured: false, reason: 'prReview.enabled but telegram botToken/chatId missing' });
+  });
+});
+
 // --- buildReviewPrompt: clean vs conflict lane ---
 
 test('buildReviewPrompt (clean lane) forbids merge + self-review, omits the conflict step', () => {

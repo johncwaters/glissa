@@ -22,6 +22,7 @@ const { normalizePackNames } = require('./core/pack-core');
 const { createPosthogPoller } = require('./posthog-poller');
 const { createPosthogApi } = require('./posthog-api');
 const { sendPosthogPing } = require('./posthog-telegram');
+const { emptyLaneStatus } = require('./lane-status');
 const { DEFAULT_POSTHOG_REPORT_DIR } = require('./posthog-report');
 
 // Belt-and-suspenders deny-list for the headless investigation sessions (they run under
@@ -308,7 +309,8 @@ function createPosthogWiring({
   // The last tick summary, replayed to a control client that connects between ticks (the same
   // cached-snapshot pattern backend.js uses for the startup update check).
   let lastStatus = null;
-  const getStatus = () => lastStatus;
+  const emptyPosthogStatus = () => emptyLaneStatus('posthog-status', posthogShouldStart(config));
+  const getStatus = () => lastStatus || emptyPosthogStatus();
 
   // Started at boot and re-evaluated on every settings reload whose posthog/telegram key changed, so
   // toggling the lane hot-applies without a server restart. Restarts are serialized through
@@ -345,9 +347,12 @@ function createPosthogWiring({
       }
       const gate = posthogShouldStart(config);
       if (!gate.start) {
+        lastStatus = null;
+        broadcast(emptyPosthogStatus());
         if (gate.reason) console.warn(`[posthog-poller] not starting: ${gate.reason}`);
         return;
       }
+      if (!lastStatus) broadcast(emptyPosthogStatus());
       const api = createPosthogApi({ host: config.posthog.host, apiKey: config.posthog.apiKey });
       poller = createPosthogPoller({
         api,
@@ -371,8 +376,8 @@ function createPosthogWiring({
         trafficSpikeCooldownMinutes: config.posthog.trafficSpikeCooldownMinutes,
         trafficSpikeBaselineDays: config.posthog.trafficSpikeBaselineDays,
         onTickComplete: (summary) => {
-          lastStatus = summary;
-          broadcast(summary);
+          lastStatus = { ...summary, configured: true };
+          broadcast(lastStatus);
         },
       });
       await poller.start().catch((e) => console.warn(`[posthog-poller] start failed: ${e.message}`));
@@ -410,7 +415,7 @@ function createPosthogWiring({
     if (!poller) return { ok: false, error: 'PostHog monitoring is not running' };
     const res = await poller.archiveInvestigation(id);
     if (!res.ok) return { ok: false, error: res.error };
-    const base = lastStatus || { type: 'posthog-status', ts: Date.now(), projects: [] };
+    const base = lastStatus || emptyPosthogStatus();
     lastStatus = { ...base, investigations: res.investigations };
     broadcast(lastStatus);
     return { ok: true };

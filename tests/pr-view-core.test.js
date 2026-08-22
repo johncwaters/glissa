@@ -8,6 +8,34 @@ const importCore = () => import('../public/pr-view-core.mjs');
 
 const keysOf = (prs) => prs.map((pr) => pr.key);
 
+test('prStatusPlaceholder: waits for an initial server status', async () => {
+  const { prStatusPlaceholder } = await importCore();
+  assert.equal(prStatusPlaceholder(null), 'Waiting for PR auto-review status from the server.');
+  assert.equal(prStatusPlaceholder(undefined), 'Waiting for PR auto-review status from the server.');
+});
+
+test('prStatusPlaceholder: reports a misconfigured lane with the reason', async () => {
+  const { prStatusPlaceholder } = await importCore();
+  assert.equal(
+    prStatusPlaceholder({ configured: false, reason: 'telegram missing' }),
+    'PR auto-review is misconfigured: telegram missing. Open Settings and its PR Review tab.',
+  );
+});
+
+test('prStatusPlaceholder: reports a disabled lane without a reason', async () => {
+  const { prStatusPlaceholder } = await importCore();
+  assert.equal(
+    prStatusPlaceholder({ configured: false, reason: '' }),
+    'PR auto-review is off. Open Settings and its PR Review tab to switch it on.',
+  );
+});
+
+test('prStatusPlaceholder: reports configured or legacy statuses as waiting for first poll', async () => {
+  const { prStatusPlaceholder } = await importCore();
+  assert.equal(prStatusPlaceholder({ configured: true }), 'PR auto-review is on. Waiting for the first poll.');
+  assert.equal(prStatusPlaceholder({}), 'PR auto-review is on. Waiting for the first poll.');
+});
+
 test('severityFor: crit for error, warn for changes and conflicts, info for checks, ok for merged', async () => {
   const { severityFor } = await importCore();
   assert.equal(severityFor('error'), 'crit');
