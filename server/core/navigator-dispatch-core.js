@@ -216,6 +216,41 @@ function sanitizeComments(raw, { lineCount = 0, max = MAX_COMMENTS, maxMessageCh
   return comments;
 }
 
+function sanitizeModelDiagnostics(raw, options = {}) {
+  return sanitizeComments(raw, options);
+}
+
+function lineTextsOf(text) {
+  const value = typeof text === 'string' ? text : '';
+  const counted = value.endsWith('\n') ? value.slice(0, -1) : value;
+  if (!counted) return [];
+  return counted.split('\n');
+}
+
+function modelDiagnosticsToLsp(raw, { text = '', lineCount = countLines(text) } = {}) {
+  const lines = lineTextsOf(text);
+  return sanitizeModelDiagnostics(raw, { lineCount }).map((entry) => {
+    const lineIndex = Math.min(Math.max(entry.line - 1, 0), Math.max(lineCount - 1, 0));
+    const lineText = lines[lineIndex] || '';
+    return {
+      range: {
+        start: { line: lineIndex, character: 0 },
+        end: { line: lineIndex, character: Math.max(lineText.length, 1) },
+      },
+      severity: 2,
+      source: 'glissa-navigator',
+      code: 'model',
+      message: entry.message,
+    };
+  });
+}
+
+function mergeDiagnostics(ruleDiagnostics, modelDiagnostics) {
+  const rules = Array.isArray(ruleDiagnostics) ? ruleDiagnostics : [];
+  const models = Array.isArray(modelDiagnostics) ? modelDiagnostics : [];
+  return [...rules, ...models];
+}
+
 // The standing tier 2 findings, as the one-line-each summary the prompt carries.
 function findingLines(findings) {
   const list = Array.isArray(findings) ? findings : [];
@@ -297,11 +332,12 @@ function buildNavigatorPrompt({
     `>>>${marker}`,
     '',
     `Write EXACTLY one file, ${resultPath}, whose entire content is this JSON:`,
-    '{"verdict":"COMMENTS","comments":[{"line":12,"message":"one specific suggestion"}],"intent":"what this document is being written for","hand":"one rare structural concern about the whole document"}',
+    '{"verdict":"COMMENTS","comments":[{"line":12,"message":"one specific suggestion"}],"diagnostics":[{"line":12,"message":"one factual issue"}],"intent":"what this document is being written for","hand":"one rare structural concern about the whole document"}',
     'Verdicts:',
     `- COMMENTS with 1 to ${maxComments} entries when you have something worth saying.`,
     '- NONE with an empty comments array when you do not.',
     '- ERROR with an empty comments array when you could not do the work.',
+    `The "diagnostics" field is OPTIONAL and rare: up to ${maxComments} factual, mechanical issues tied to one line, each with {"line":12,"message":"one factual issue"}, distinct from comments (suggestions) and hand (whole-document structure).`,
     `The "intent" field is OPTIONAL and works with any verdict: one sentence, at most ${maxIntentChars} characters, naming what you believe the carbon unit is building. Include it when your belief has moved, and leave it out when the working intent above already says it.`,
     `The "hand" field is OPTIONAL and works with any verdict: one sentence, at most ${maxHandChars} characters, for a rare structural concern about the document as a whole. Omit it otherwise.`,
     'Write no other file, and print no answer other than the fact that you wrote it.',
@@ -325,8 +361,11 @@ module.exports = {
   decideDispatch,
   forgetUri,
   hashText,
+  mergeDiagnostics,
+  modelDiagnosticsToLsp,
   recordDispatch,
   resolveDispatchConfig,
   resolveNavigatorConfig,
   sanitizeComments,
+  sanitizeModelDiagnostics,
 };

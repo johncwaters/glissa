@@ -7,7 +7,7 @@ const {
   applyDidChange, applyDidClose, applyDidOpen, createDocStore, formatRange, getDoc, listDocs, uriOfParams,
 } = require('./core/navigator-buffer-core');
 const {
-  createDispatchState, decideDispatch, forgetUri, hashText, recordDispatch, resolveDispatchConfig,
+  createDispatchState, decideDispatch, forgetUri, hashText, mergeDiagnostics, modelDiagnosticsToLsp, recordDispatch, resolveDispatchConfig,
 } = require('./core/navigator-dispatch-core');
 const {
   applyModelIntent: mergeModelIntent,
@@ -129,6 +129,8 @@ function createNavigatorWiring({
    * ABSENT rather than stored empty, so the map and the rendered sections always agree.
    */
   const findingsByUri = new Map();
+  const ruleFindingsByUri = new Map();
+  const modelDiagnosticsByUri = new Map();
   /*
    * Tier 3 model comments, keyed by uri beside the findings and on the same lifecycle: replaced whole
    * by each dispatch, cleared on didClose. Separate from findingsByUri because a document can have one
@@ -189,10 +191,41 @@ function createNavigatorWiring({
     broadcastFindings(uri, findings);
   }
 
+  function unionDiagnosticsFor(uri) {
+    return mergeDiagnostics(ruleFindingsByUri.get(uri) || [], modelDiagnosticsByUri.get(uri) || []);
+  }
+
+  function recordRuleFindings(uri, diagnostics) {
+    const findings = Array.isArray(diagnostics) ? diagnostics : [];
+    if (findings.length === 0) ruleFindingsByUri.delete(uri);
+    if (findings.length > 0) ruleFindingsByUri.set(uri, findings);
+  }
+
   // A uri the tab never had a section for needs no message telling it to forget one.
   function clearFindings(uri) {
+    ruleFindingsByUri.delete(uri);
     if (!findingsByUri.delete(uri)) return;
     broadcastFindings(uri, []);
+  }
+
+  function publishDiagnosticsFrame(send, uri, diagnostics) {
+    try {
+      send({ type: 'publishDiagnostics', params: { uri, diagnostics } });
+    } catch (error) {
+      warn(`could not publish diagnostics for ${uri}: ${error.message}`);
+    }
+  }
+
+  function recordModelDiagnostics(uri, result, doc) {
+    const diagnostics = modelDiagnosticsToLsp(result?.diagnostics, { text: doc?.text || '' });
+    const hadDiagnostics = modelDiagnosticsByUri.has(uri);
+    if (diagnostics.length === 0) modelDiagnosticsByUri.delete(uri);
+    if (diagnostics.length > 0) modelDiagnosticsByUri.set(uri, diagnostics);
+    return { changed: hadDiagnostics || diagnostics.length > 0, diagnostics: unionDiagnosticsFor(uri) };
+  }
+
+  function dropModelDiagnostics(uri) {
+    modelDiagnosticsByUri.delete(uri);
   }
 
   function broadcastComments(uri, comments) {
@@ -309,12 +342,17 @@ function createNavigatorWiring({
    * verdict, timeout) leaves the standing comments exactly as they were: the lane says nothing rather
    * than inventing something or blanking a section because one session fell over.
    */
-  function applyDispatchResult(uri, result) {
+  function applyDispatchResult(uri, result, doc, send) {
     if (result.verdict === 'ERROR') {
       warn(`dispatch for ${uri} failed: ${result.reason || 'no reason given'}`);
       return false;
     }
     if (result.reason) note(`dispatch for ${uri}: ${result.reason}`);
+    const modelUpdate = recordModelDiagnostics(uri, result, doc);
+    if (modelUpdate.changed) {
+      publishDiagnosticsFrame(send, uri, modelUpdate.diagnostics);
+      recordFindings(uri, modelUpdate.diagnostics);
+    }
     recordComments(uri, result.verdict === 'COMMENTS' ? result.comments : []);
     recordHand(uri, handFromResult(result));
     return true;
@@ -441,7 +479,7 @@ function createNavigatorWiring({
         note(`dropped a dispatch result for ${uri}: the buffer is gone`);
         return;
       }
-      const recorded = applyDispatchResult(uri, result);
+      const recorded = applyDispatchResult(uri, result, getDoc(store, uri), send);
       // After the comments, and through the merge: a locked operator intent survives this untouched.
       const intentMoved = applyModelIntent(result.intent);
       if (!recorded) return;
@@ -571,13 +609,10 @@ function createNavigatorWiring({
       const doc = getDoc(store, uri);
       if (!isMarkdownDoc(doc)) return;
       const { diagnostics, fixes } = readSweepResult(sweep(doc.text));
-      try {
-        send({ type: 'publishDiagnostics', params: { uri, diagnostics } });
-      } catch (error) {
-        warn(`could not publish diagnostics for ${uri}: ${error.message}`);
-      }
-      // Outside the try: the tab's state does not depend on the editor socket accepting the frame.
-      recordFindings(uri, diagnostics);
+      recordRuleFindings(uri, diagnostics);
+      const mergedDiagnostics = unionDiagnosticsFor(uri);
+      publishDiagnosticsFrame(send, uri, mergedDiagnostics);
+      recordFindings(uri, mergedDiagnostics);
       recordFixes(uri, fixes, hashFn(doc.text));
       requestAutoFix(uri, doc);
       if (armedBy === 'save') note(`swept ${uri} on save: ${diagnostics.length} findings`);
@@ -616,6 +651,7 @@ function createNavigatorWiring({
         const version = params?.textDocument?.version;
         const result = applyDidChange(store, params);
         if (!result.applied) return changeFailureReason(uri, version, result);
+        dropModelDiagnostics(uri);
         // Debug only: this fires once per keystroke burst on every open buffer.
         debugNote(() => `didChange ${uri} v${version} (${result.changeCount} changes, ${result.size} chars)`);
         scheduleSweep(uri);
@@ -640,6 +676,7 @@ function createNavigatorWiring({
         const result = applyDidClose(store, params);
         if (!result.applied) return result.reason;
         note(`didClose ${uri} (${listDocs(store).length} open)`);
+        dropModelDiagnostics(uri);
         clearFindings(uri);
         clearComments(uri);
         clearHand(uri);

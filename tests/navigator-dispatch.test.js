@@ -39,6 +39,7 @@ test('a COMMENTS result is believed for the entries that pass validation', async
   assert.deepEqual(await readCommentsResult(file, { lineCount: 4 }), {
     verdict: 'COMMENTS',
     comments: [{ line: 2, message: 'The title promises a plan the body never gives.' }],
+    diagnostics: [],
     intent: null,
     hand: null,
     reason: null,
@@ -49,7 +50,7 @@ test('NONE is a first-class answer, and carries no comments', async (t) => {
   const { file, cleanup } = tempFile(JSON.stringify({ verdict: 'none', comments: [] }));
   t.after(cleanup);
   assert.deepEqual(await readCommentsResult(file, { lineCount: 4 }), {
-    verdict: 'NONE', comments: [], intent: null, hand: null, reason: null,
+    verdict: 'NONE', comments: [], diagnostics: [], intent: null, hand: null, reason: null,
   });
 });
 
@@ -65,7 +66,7 @@ test('a COMMENTS verdict whose every entry is junk reports NONE and says why', a
 test('a missing, unparsable, non-object or unknown-verdict file is an ERROR, never a comment', async (t) => {
   const missing = path.join(os.tmpdir(), `glissa-navigator-absent-${process.pid}.json`);
   assert.deepEqual(await readCommentsResult(missing), {
-    verdict: 'ERROR', comments: [], intent: null, hand: null, reason: 'no readable result file',
+    verdict: 'ERROR', comments: [], diagnostics: [], intent: null, hand: null, reason: 'no readable result file',
   });
 
   const bad = tempFile('{not json');
@@ -79,7 +80,7 @@ test('a missing, unparsable, non-object or unknown-verdict file is an ERROR, nev
   const unknown = tempFile(JSON.stringify({ verdict: 'LOOKS_FINE', comments: [{ line: 1, message: 'trust me' }] }));
   t.after(unknown.cleanup);
   assert.deepEqual(await readCommentsResult(unknown.file, { lineCount: 4 }), {
-    verdict: 'ERROR', comments: [], intent: null, hand: null, reason: 'invalid verdict in result file',
+    verdict: 'ERROR', comments: [], diagnostics: [], intent: null, hand: null, reason: 'invalid verdict in result file',
   });
 });
 
@@ -91,7 +92,7 @@ test('onBytesRead reports what was read without changing the result shape', asyn
 
   const sizes = [];
   assert.deepEqual(await readCommentsResult(file, { lineCount: 4, onBytesRead: (bytes) => sizes.push(bytes) }), {
-    verdict: 'NONE', comments: [], intent: null, hand: null, reason: null,
+    verdict: 'NONE', comments: [], diagnostics: [], intent: null, hand: null, reason: null,
   });
   assert.deepEqual(sizes, [Buffer.byteLength(content)]);
 
@@ -163,6 +164,33 @@ test('an invalid or absent hand claim is ignored rather than believed or thrown 
   }
 });
 
+test('diagnostics are read, validated and capped independently from comments', async (t) => {
+  const { file, cleanup } = tempFile(JSON.stringify({
+    verdict: 'COMMENTS',
+    comments: [{ line: 1, message: 'Name the audience.' }],
+    diagnostics: [
+      { line: 2, message: '  a factual issue  ' },
+      { line: 99, message: 'past the end' },
+      { line: 3, message: 'z'.repeat(500) },
+    ],
+  }));
+  t.after(cleanup);
+
+  const result = await readCommentsResult(file, { lineCount: 4 });
+  assert.deepEqual(result.diagnostics, [
+    { line: 2, message: 'a factual issue' },
+    { line: 3, message: 'z'.repeat(300) },
+  ]);
+});
+
+test('absent or non-array diagnostics read as empty', async (t) => {
+  for (const diagnostics of [undefined, null, { line: 1, message: 'not a list' }, 'nope']) {
+    const { file, cleanup } = tempFile(JSON.stringify({ verdict: 'NONE', comments: [], diagnostics }));
+    t.after(cleanup);
+    assert.deepEqual((await readCommentsResult(file, { lineCount: 4 })).diagnostics, []);
+  }
+});
+
 // --- One dispatch, end to end, with the spawn injected ---
 
 // Ref'd on purpose: the timeout test injects every timer the dispatcher arms, so an unref'd handle
@@ -203,6 +231,7 @@ test('a session that writes the result file yields its comments, and the work di
   assert.deepEqual(result, {
     verdict: 'COMMENTS',
     comments: [{ line: 3, message: 'Name the audience before the argument.' }],
+    diagnostics: [],
     intent: null,
     hand: null,
     reason: null,
@@ -230,7 +259,7 @@ test('a spawn that throws becomes an ERROR verdict rather than a rejected dispat
   const { dispatch } = dispatcherWithSpawn(async () => { throw new Error('claude is not on PATH'); });
   const result = await dispatch({ uri: URI, text: TEXT });
   assert.deepEqual(result, {
-    verdict: 'ERROR', comments: [], intent: null, hand: null, reason: 'claude is not on PATH',
+    verdict: 'ERROR', comments: [], diagnostics: [], intent: null, hand: null, reason: 'claude is not on PATH',
   });
 });
 
@@ -259,7 +288,7 @@ test('a hung session is aborted at the hard timeout and resolves ERROR, so the l
   // The injected timer never fires on its own; firing it here IS the hard timeout.
   fire();
   assert.deepEqual(await pending, {
-    verdict: 'ERROR', comments: [], intent: null, hand: null, reason: 'dispatch timed out',
+    verdict: 'ERROR', comments: [], diagnostics: [], intent: null, hand: null, reason: 'dispatch timed out',
   });
   await eventLoopTurn();
   assert.equal(aborted, true, 'the session was told to stop, not just abandoned');

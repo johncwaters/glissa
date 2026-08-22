@@ -436,6 +436,7 @@ test('a lane with no broadcast injected still sweeps and still tracks findings',
 // --- Tier 3 model dispatch (docs/archive/plan-navigator.md, M4), spawner injected ---
 
 const COMMENT = { line: 3, message: 'The repeat is a symptom; the sentence is doing two jobs.' };
+const MODEL_DIAGNOSTIC = { line: 1, message: 'The title is missing a concrete noun.' };
 
 /**
  * A lane whose dispatch is a fake: it records what it was asked and answers whatever the test says.
@@ -610,6 +611,154 @@ test('a COMMENTS result is broadcast for that uri and joins the connect-time sna
     comments: [COMMENT],
     hand: null,
   }], 'one section carries both halves');
+});
+
+test('a dispatch with no model diagnostics leaves the rule-only publish stream unchanged', async (t) => {
+  const { wiring, timers, broadcasts, sent, lsp } = dispatchingConnection({
+    respond: () => Promise.resolve({ verdict: 'NONE', comments: [], reason: null }),
+  });
+  t.after(() => wiring.stop());
+
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  runSweepThenDispatch(timers);
+  await wiring.whenDispatchSettled();
+
+  assert.equal(sent.filter((message) => message.type === 'publishDiagnostics').length, 1);
+  assert.equal(broadcasts.filter((message) => message.type === 'navigator-findings').length, 1);
+  assert.deepEqual(wiring.documentsSnapshot()[0].diagnostics.map((diagnostic) => diagnostic.code), ['repeated-word']);
+});
+
+test('model diagnostics publish and broadcast as a union after rule diagnostics', async (t) => {
+  const { wiring, timers, broadcasts, sent, lsp } = dispatchingConnection({
+    respond: () => Promise.resolve({ verdict: 'NONE', comments: [], diagnostics: [MODEL_DIAGNOSTIC], reason: null }),
+  });
+  t.after(() => wiring.stop());
+
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  runSweepThenDispatch(timers);
+  await wiring.whenDispatchSettled();
+
+  const published = sent.filter((message) => message.type === 'publishDiagnostics');
+  assert.deepEqual(published.at(-1).params.diagnostics.map((diagnostic) => diagnostic.code), ['repeated-word', 'model']);
+  assert.equal(published.at(-1).params.diagnostics[1].range.end.character, '# Title'.length);
+  const findings = broadcasts.filter((message) => message.type === 'navigator-findings');
+  assert.deepEqual(findings.at(-1).diagnostics, published.at(-1).params.diagnostics);
+  assert.deepEqual(wiring.documentsSnapshot()[0].diagnostics.map((diagnostic) => diagnostic.code), ['repeated-word', 'model']);
+});
+
+test('model diagnostics are replaced wholesale by each dispatch', async (t) => {
+  let seq = 1;
+  const results = [
+    { verdict: 'NONE', comments: [], diagnostics: [{ line: 1, message: 'first' }], reason: null },
+    { verdict: 'NONE', comments: [], diagnostics: [{ line: 3, message: 'second' }], reason: null },
+  ];
+  const { wiring, timers, sent, lsp, clock } = dispatchingConnection({
+    dispatch: { cooldownMs: 1 },
+    contextSeq: () => seq,
+    respond: (_args, callNumber) => Promise.resolve(results[callNumber - 1]),
+  });
+  t.after(() => wiring.stop());
+
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  runSweepThenDispatch(timers);
+  await wiring.whenDispatchSettled();
+
+  seq += 1;
+  clock.now += 1000;
+  lsp('textDocument/didSave', { textDocument: { uri: MARKDOWN_URI } });
+  await wiring.whenDispatchSettled();
+
+  const diagnostics = sent.filter((message) => message.type === 'publishDiagnostics').at(-1).params.diagnostics;
+  assert.deepEqual(diagnostics.map((diagnostic) => diagnostic.message), [
+    'Repeated word "with"',
+    'second',
+  ]);
+  assert.equal(diagnostics.filter((diagnostic) => diagnostic.code === 'model').length, 1);
+});
+
+test('absent model diagnostics clear the standing model diagnostics', async (t) => {
+  let seq = 1;
+  const results = [
+    { verdict: 'NONE', comments: [], diagnostics: [MODEL_DIAGNOSTIC], reason: null },
+    { verdict: 'NONE', comments: [], reason: null },
+  ];
+  const { wiring, timers, sent, lsp, clock } = dispatchingConnection({
+    dispatch: { cooldownMs: 1 },
+    contextSeq: () => seq,
+    respond: (_args, callNumber) => Promise.resolve(results[callNumber - 1]),
+  });
+  t.after(() => wiring.stop());
+
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  runSweepThenDispatch(timers);
+  await wiring.whenDispatchSettled();
+
+  seq += 1;
+  clock.now += 1000;
+  lsp('textDocument/didSave', { textDocument: { uri: MARKDOWN_URI } });
+  await wiring.whenDispatchSettled();
+
+  const diagnostics = sent.filter((message) => message.type === 'publishDiagnostics').at(-1).params.diagnostics;
+  assert.deepEqual(diagnostics.map((diagnostic) => diagnostic.code), ['repeated-word']);
+  assert.deepEqual(wiring.documentsSnapshot()[0].diagnostics.map((diagnostic) => diagnostic.code), ['repeated-word']);
+});
+
+test('didChange drops model diagnostics before the next rule-only publish', async (t) => {
+  const { wiring, timers, sent, lsp } = dispatchingConnection({
+    respond: () => Promise.resolve({ verdict: 'NONE', comments: [], diagnostics: [MODEL_DIAGNOSTIC], reason: null }),
+  });
+  t.after(() => wiring.stop());
+
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  runSweepThenDispatch(timers);
+  await wiring.whenDispatchSettled();
+
+  lsp('textDocument/didChange', didChangeParams(MARKDOWN_URI, 2, '# Title\n\nA changed line with with a repeat.\n'));
+  timers.runPending();
+
+  const diagnostics = sent.filter((message) => message.type === 'publishDiagnostics').at(-1).params.diagnostics;
+  assert.deepEqual(diagnostics.map((diagnostic) => diagnostic.code), ['repeated-word']);
+});
+
+test('didClose clears standing model diagnostics', async (t) => {
+  const { wiring, timers, lsp } = dispatchingConnection({
+    respond: () => Promise.resolve({ verdict: 'NONE', comments: [], diagnostics: [MODEL_DIAGNOSTIC], reason: null }),
+  });
+  t.after(() => wiring.stop());
+
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', CLEAN_MARKDOWN));
+  runSweepThenDispatch(timers);
+  await wiring.whenDispatchSettled();
+  assert.deepEqual(wiring.documentsSnapshot()[0].diagnostics.map((diagnostic) => diagnostic.code), ['model']);
+
+  lsp('textDocument/didClose', { textDocument: { uri: MARKDOWN_URI } });
+  assert.deepEqual(wiring.documentsSnapshot(), []);
+});
+
+test('an ERROR verdict leaves standing model diagnostics untouched', async (t) => {
+  let seq = 1;
+  const results = [
+    { verdict: 'NONE', comments: [], diagnostics: [MODEL_DIAGNOSTIC], reason: null },
+    { verdict: 'ERROR', comments: [], diagnostics: [], reason: 'no readable result file' },
+  ];
+  const { wiring, timers, warnings, lsp, clock } = dispatchingConnection({
+    dispatch: { cooldownMs: 1 },
+    contextSeq: () => seq,
+    respond: (_args, callNumber) => Promise.resolve(results[callNumber - 1]),
+  });
+  t.after(() => wiring.stop());
+
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', CLEAN_MARKDOWN));
+  runSweepThenDispatch(timers);
+  await wiring.whenDispatchSettled();
+
+  seq += 1;
+  clock.now += 1000;
+  lsp('textDocument/didSave', { textDocument: { uri: MARKDOWN_URI } });
+  await wiring.whenDispatchSettled();
+
+  assert.deepEqual(wiring.documentsSnapshot()[0].diagnostics.map((diagnostic) => diagnostic.code), ['model']);
+  assert.ok(warnings.some((line) => line.includes('no readable result file')));
 });
 
 test('a NONE result clears that document rather than storing an empty section', async (t) => {
