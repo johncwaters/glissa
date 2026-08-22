@@ -17,7 +17,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **Distribution moved to GitHub installs**: Glissa is no longer published to the npm registry; standalone installs now use `npm install -g github:johncwaters/glissa`, and release/update docs now point at GitHub tags and the `main` branch package metadata.
-- **Lane-attribution ledger retention is now 90 days**, matching the shorter-lived usage data it supports.
 
 ### Fixed
 
@@ -26,12 +25,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
-- **Usage savings, budget, and anomaly surfaces were removed**: the Usage tab no longer shows savings tiles, budget meters, budget alerts, or the anomaly line, and Settings no longer includes budget fields.
-- **Usage history views were simplified**: the usage heatmap and week/month views were removed.
-- **Codex and Grok vendor usage parsing was removed**, along with the Settings toggles that controlled it.
-- **Durable usage storage was removed**: Glissa no longer keeps the usage warehouse or related budget state files.
-- **PostHog Radar escalation was simplified**: recurrence dedupe, the escalation ladder, traffic-spike analytics and its Settings block, the escalation-threshold Settings field, directory-guessed session auto-creation, and archive tombstones were removed. Related config keys, including `posthog.userEscalationThreshold` and `trafficSpike*`, are now ignored.
-- **Pack automation surfaces were removed**: `glissa pack distill`, `config.packDistiller`, pack read telemetry, `config.packReadTelemetry`, the live pack staleness notice injected into turns, and the pack-stale card chip are gone.
 - **Navigator LSP sync was simplified**: the relay now advertises full-text document sync, so incremental range updates and the framer's malformed-header resync are gone.
 
 ## [0.21.0] - 2026-08-05

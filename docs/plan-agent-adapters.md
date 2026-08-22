@@ -4,7 +4,7 @@ Status: drafted 2026-08-21 from a full coupling sweep plus live probes of Codex 
 
 ## What this is
 
-Glissa today supervises exactly one agent CLI: Claude Code. The state machine, PTY plumbing, WebSockets, notifications, recorder, and most of the usage lane are already agent-neutral; the coupling is concentrated in four seams (spawn, hook detection, OSC title glyphs, session identity/resume) plus a handful of CC-only features (packs delivery, statusLine plan limits, the background-agent completion gate, rtk injection). This plan introduces an AgentAdapter seam so a project record can say `agent: "codex"` or `agent: "grok"` and get a supervised card with honest, labelled detection quality, while `agent: "claude-code"` (the default, and the only value in v1) stays byte-identical to today.
+Glissa today supervises exactly one agent CLI: Claude Code. The state machine, PTY plumbing, WebSockets, notifications, recorder, and most of the usage lane are already agent-neutral; the coupling is concentrated in four seams (spawn, hook detection, OSC title glyphs, session identity/resume) plus a handful of CC-only features (packs delivery, pack notices, statusLine plan limits, the background-agent completion gate, rtk injection). This plan introduces an AgentAdapter seam so a project record can say `agent: "codex"` or `agent: "grok"` and get a supervised card with honest, labelled detection quality, while `agent: "claude-code"` (the default, and the only value in v1) stays byte-identical to today.
 
 The usage lane is the in-repo precedent: `usage-scan-core` / `usage-codex-core` / `usage-grok-core` already run three vendors through one pipeline with pure per-vendor cores, vendor-namespaced identity, and additive wire fields. The adapter seam applies the same shape to spawning and detection.
 
@@ -62,7 +62,7 @@ An adapter (`session/adapters/<id>.js`) provides:
 | `sessionIdOf(payload)` | Identity capture (`session_id` / `sessionId`), id regex, and a `stableAcrossResume` flag (false for CC, true for Codex and Grok, which retires the re-capture churn there) |
 | `resumeArgs(id)` | `--resume` / `exec resume` / `-r` |
 | `titleProfile` | Working codepoint sets, idle predicate (glyph for CC, bare-prefix for Codex, session-name for Grok), awaiting-input marker (Codex `Action Required`, Grok U+26A0 item), drop rules (ConPTY first-title artifact, `cmd.exe` leading-ASCII rule) |
-| `capabilities` | The gate: `{ hooks, awaitingInput, backgroundAgents, resume, packs, statusLine, rtk, antiSlop, compactQuiet, skipPermissionsFlag, headless }` |
+| `capabilities` | The gate: `{ hooks, awaitingInput, backgroundAgents, resume, packs, packNotice, statusLine, rtk, antiSlop, compactQuiet, skipPermissionsFlag, headless }` |
 
 Everything downstream keys behavior on `capabilities`, never on `adapter.id`. A capability an adapter lacks means the feature is inert for that session and the card says so; nothing is faked.
 
@@ -95,7 +95,7 @@ Grok's `events.jsonl` (`turn_started`/`turn_ended`, `phase_changed` incl. `permi
 
 ## What stays Claude-only (v1 non-goals)
 
-- Packs delivery. Codex/Grok pack delivery has plausible paths (both read AGENTS.md conventions; Grok's `[compat.claude]` even loads `.claude` rules/skills) but none is verified. Capability-gated off; a project with packs plus a non-CC agent gets a decision-trace entry and no `--add-dir`.
+- Packs delivery, pack notices, pack read telemetry. Codex/Grok pack delivery has plausible paths (both read AGENTS.md conventions; Grok's `[compat.claude]` even loads `.claude` rules/skills) but none is verified, and the notice channel's injection shape is CC's alone. Capability-gated off; a project with packs plus a non-CC agent gets a decision-trace entry and no `--add-dir`.
 - statusLine relay / plan limits: no equivalent exists. Codex `exec --json` per-turn `usage` and Grok's `total_cost_usd` already reach the usage lane via transcripts.
 - Anti-slop `--append-system-prompt`: no exact Codex/Grok equivalent probed; capability off (their AGENTS.md files already carry the standing style rules).
 - Headless lanes (pr-review, posthog, distiller, navigator dispatch) keep spawning Claude Code. Routing a lane to `codex exec` is attractive (flat-rate plan, `--output-last-message` matches the result-file contract) but is a cost-policy feature, not an agnosticism prerequisite. Explicitly out of scope here; noted for a later plan.
