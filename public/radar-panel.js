@@ -16,7 +16,6 @@ import {
   healthAnomalyRows,
   hostsDiffer,
   investigationRows,
-  retainKnownInvestigationIds,
   needsActionPrRows,
   opsRows,
   partitionRadarProjects,
@@ -49,20 +48,11 @@ const SVG_NS = 'http://www.w3.org/2000/svg';
 // why it owns its own timer).
 const _hold = createRenderHold({ render });
 
-// Records the operator archived in THIS page session. The server drops an archived record from the
-// next payload, so this set is normally redundant - but it is the one thing that does not depend on
-// a broadcast arriving, in the right order, and winning the render-hold race. A row the operator
-// dismissed must not be able to come back from a snapshot, and the connect-time replay of a cached
-// posthog-status can hand a reconnecting tab exactly that. Pruned on every snapshot that no longer
-// carries the record, so it cannot grow for the life of the page.
-const _archivedLocally = new Set();
-
 const _pollTicker = createPollAgoTicker(() => _root);
 
 const CHANGE_LABEL = {
   spiking: 'spiking',
   regressed: 'regressed',
-  worsened: 'worsened',
   new: 'new',
   quiet: 'quiet',
 };
@@ -138,10 +128,7 @@ function createActionCluster() {
     return button;
   };
 
-  // `onOk` is the seam for a request whose success the panel must remember beyond the reply (the
-  // archive: see _archivedLocally). It runs before the outcome line is written, so the repaint the
-  // hold releases already sees it.
-  const request = (token, type, payload, pendingText, describe, onOk = null) => {
+  const request = (token, type, payload, pendingText, describe) => {
     _hold.begin(token);
     setBusy(true);
     status.dataset.tone = 'busy';
@@ -157,7 +144,6 @@ function createActionCluster() {
         settle('error', msg.error || 'Request failed');
         return;
       }
-      if (onOk) onOk(msg);
       settle('ok', describe(msg));
     };
     sendControlRequest(type, payload)
@@ -379,7 +365,7 @@ function buildErrorsSection(projects) {
 }
 
 // ── Investigations inbox ─────────────────────────────────────
-// One row per completed, unarchived investigation. Deliberately independent of the Errors section: a
+// One row per completed investigation. Deliberately independent of the Errors section: a
 // resolved issue's row is gone from there, and this is where its verdict survives. Quiet review
 // material by design, so it contributes nothing to the attention count.
 function buildInvestigationActions(row) {
@@ -397,7 +383,6 @@ function buildInvestigationActions(row) {
       { id: row.id },
       'Archiving',
       () => 'Archived',
-      () => _archivedLocally.add(row.id),
     );
   });
 
@@ -532,7 +517,7 @@ function render() {
   _root.textContent = '';
   _pollTicker.reset();
   const projects = projectsOf(_latest);
-  const investigations = investigationRows(_latest, _archivedLocally);
+  const investigations = investigationRows(_latest);
   const ops = opsRows({ update: _update, health: _health });
   const prs = needsActionPrRows(_prs);
   // Nothing configured anywhere: the bare hint, with no section chrome to make an empty board look
@@ -584,9 +569,6 @@ export function mountRadarView(parent) {
 
 export function applyPosthogStatus(msg) {
   _latest = msg;
-  // Forget the ids this payload no longer carries: the server has confirmed the archive, so the
-  // local guard has nothing left to guard and the set stays bounded.
-  retainKnownInvestigationIds(msg, _archivedLocally);
   renderOrDefer();
   refreshActivity();
 }

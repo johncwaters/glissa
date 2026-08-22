@@ -235,14 +235,8 @@ export function createSettingsDialog(initialTab) {
   const posthogMaxInvestigationsInput = dialog.querySelector('#settings-posthog-max-investigations');
   const posthogTimeoutInput = dialog.querySelector('#settings-posthog-timeout');
   const posthogMinUsersInput = dialog.querySelector('#settings-posthog-min-users');
-  const posthogEscalationInput = dialog.querySelector('#settings-posthog-escalation');
   const posthogAutoFixCheckbox = dialog.querySelector('#settings-posthog-auto-fix');
   const posthogFixTimeoutInput = dialog.querySelector('#settings-posthog-fix-timeout');
-  const posthogTrafficEnabledCheckbox = dialog.querySelector('#settings-posthog-traffic-enabled');
-  const posthogTrafficMultiplierInput = dialog.querySelector('#settings-posthog-traffic-multiplier');
-  const posthogTrafficMinUsersInput = dialog.querySelector('#settings-posthog-traffic-min-users');
-  const posthogTrafficCooldownInput = dialog.querySelector('#settings-posthog-traffic-cooldown');
-  const posthogTrafficBaselineInput = dialog.querySelector('#settings-posthog-traffic-baseline');
 
   // The panel's fields are always populated with defaults, so saving them unconditionally would
   // materialize a posthog block into config.json for every operator who never opens this tab.
@@ -430,13 +424,10 @@ export function createSettingsDialog(initialTab) {
 
   const POSTHOG_NUMERIC_INPUTS = () => [
     posthogIntervalInput, posthogMaxInvestigationsInput, posthogTimeoutInput,
-    posthogMinUsersInput, posthogEscalationInput, posthogFixTimeoutInput,
-    posthogTrafficMultiplierInput, posthogTrafficMinUsersInput,
-    posthogTrafficCooldownInput, posthogTrafficBaselineInput,
+    posthogMinUsersInput, posthogFixTimeoutInput,
   ];
 
-  // Each field's own min/max attributes are the bounds, so a field that legitimately accepts zero
-  // (the spike cooldown, meaning never mute) does not need a second list to be exempted from.
+  // Each field's own min/max attributes are the bounds.
   function validateTimeouts() {
     errorEl.textContent = '';
     const inputs = [replayBufferInput, prIntervalInput, prMaxReviewsInput, prTimeoutInput];
@@ -512,14 +503,8 @@ export function createSettingsDialog(initialTab) {
         maxConcurrentInvestigations: Number(posthogMaxInvestigationsInput.value),
         investigationTimeoutSeconds: Number(posthogTimeoutInput.value),
         minUsersToInvestigate: Number(posthogMinUsersInput.value),
-        userEscalationThreshold: Number(posthogEscalationInput.value),
         autoFix: posthogAutoFixCheckbox.checked,
         fixTimeoutSeconds: Number(posthogFixTimeoutInput.value),
-        trafficSpikeEnabled: posthogTrafficEnabledCheckbox.checked,
-        trafficSpikeMultiplier: Number(posthogTrafficMultiplierInput.value),
-        trafficSpikeMinUsers: Number(posthogTrafficMinUsersInput.value),
-        trafficSpikeCooldownMinutes: Number(posthogTrafficCooldownInput.value),
-        trafficSpikeBaselineDays: Number(posthogTrafficBaselineInput.value),
       };
     }
 
@@ -587,16 +572,9 @@ export function createSettingsDialog(initialTab) {
       posthogMaxInvestigationsInput.value = ph.maxConcurrentInvestigations ?? 2;
       posthogTimeoutInput.value = ph.investigationTimeoutSeconds ?? 900;
       posthogMinUsersInput.value = ph.minUsersToInvestigate ?? 1;
-      posthogEscalationInput.value = ph.userEscalationThreshold ?? 25;
       // Absent means off: this lane pushes branches, so it is opted into, never defaulted into.
       posthogAutoFixCheckbox.checked = ph.autoFix === true;
       posthogFixTimeoutInput.value = ph.fixTimeoutSeconds ?? 1800;
-      // Absent means on, matching how the poller reads the key.
-      posthogTrafficEnabledCheckbox.checked = ph.trafficSpikeEnabled !== false;
-      posthogTrafficMultiplierInput.value = ph.trafficSpikeMultiplier ?? 3;
-      posthogTrafficMinUsersInput.value = ph.trafficSpikeMinUsers ?? 10;
-      posthogTrafficCooldownInput.value = ph.trafficSpikeCooldownMinutes ?? 360;
-      posthogTrafficBaselineInput.value = ph.trafficSpikeBaselineDays ?? 7;
 
       usageHydrated = s.usage && typeof s.usage === 'object' ? s.usage : null;
       const usage = usageHydrated || {};

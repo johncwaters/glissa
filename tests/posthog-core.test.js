@@ -47,7 +47,6 @@ function makeEntry(overrides = {}) {
     lastUsers: 5,
     lastSeen: '2026-08-08T00:00:00Z',
     investigatedAt: null,
-    investigatedUsers: null,
     verdict: null,
     inFlight: false,
     pingedPhases: [],
@@ -87,24 +86,6 @@ test('classifyIssueChange: no prior entry but already resolved is quiet', () => 
   assert.equal(classifyIssueChange(undefined, makeIssue({ status: 'resolved' }), new Set(), {}), 'quiet');
 });
 
-test('classifyIssueChange: crossing the user threshold after a verdict is worsened', () => {
-  const prev = makeEntry({ verdict: 'ROOT_CAUSE', investigatedUsers: 4 });
-  const change = classifyIssueChange(prev, makeIssue({ users: 40 }), new Set(), { userEscalationThreshold: 25 });
-  assert.equal(change, 'worsened');
-});
-
-test('classifyIssueChange: crossing the threshold without a prior verdict is quiet', () => {
-  const prev = makeEntry({ verdict: null, investigatedUsers: 4 });
-  const change = classifyIssueChange(prev, makeIssue({ users: 40 }), new Set(), { userEscalationThreshold: 25 });
-  assert.equal(change, 'quiet');
-});
-
-test('classifyIssueChange: already over the threshold when investigated does not re-fire worsened', () => {
-  const prev = makeEntry({ verdict: 'NEEDS_HUMAN', investigatedUsers: 30 });
-  const change = classifyIssueChange(prev, makeIssue({ users: 40 }), new Set(), { userEscalationThreshold: 25 });
-  assert.equal(change, 'quiet');
-});
-
 test('classifyIssueChange: an unchanged known issue is quiet', () => {
   assert.equal(classifyIssueChange(makeEntry(), makeIssue(), new Set(), {}), 'quiet');
 });
@@ -113,7 +94,6 @@ test('planInvestigations: every escalation is investigated regardless of user co
   const changes = [
     { key: 'k1', change: 'spiking', issue: makeIssue({ users: 0 }) },
     { key: 'k2', change: 'regressed', issue: makeIssue({ users: 0 }) },
-    { key: 'k3', change: 'worsened', issue: makeIssue({ users: 0 }) },
   ];
   assert.deepEqual(planInvestigations(changes, {}, { minUsersToInvestigate: 5 }), changes);
 });
@@ -143,20 +123,14 @@ test('planInvestigations: an entry already inFlight is skipped', () => {
 // unconditional re-investigation was one Claude session per interval, forever, per issue.
 test('planInvestigations: an already diagnosed spiking issue is not re-investigated', () => {
   const change = { key: 'k1', change: 'spiking', issue: makeIssue({ users: 8 }) };
-  const state = { k1: makeEntry({ verdict: 'ROOT_CAUSE', investigatedUsers: 8 }) };
-  assert.deepEqual(planInvestigations([change], state, { userEscalationThreshold: 25 }), []);
-});
-
-test('planInvestigations: a diagnosed spiking issue crossing the threshold IS re-investigated', () => {
-  const change = { key: 'k1', change: 'spiking', issue: makeIssue({ users: 40 }) };
-  const state = { k1: makeEntry({ verdict: 'ROOT_CAUSE', investigatedUsers: 8 }) };
-  assert.deepEqual(planInvestigations([change], state, { userEscalationThreshold: 25 }), [change]);
+  const state = { k1: makeEntry({ verdict: 'ROOT_CAUSE' }) };
+  assert.deepEqual(planInvestigations([change], state, {}), []);
 });
 
 test('planInvestigations: a spiking issue with no verdict yet is always investigated', () => {
   const change = { key: 'k1', change: 'spiking', issue: makeIssue({ users: 0 }) };
   const state = { k1: makeEntry({ verdict: null }) };
-  assert.deepEqual(planInvestigations([change], state, { userEscalationThreshold: 25 }), [change]);
+  assert.deepEqual(planInvestigations([change], state, {}), [change]);
 });
 
 // --- decideVanishedEntry: absence from one top-50 query is not death ---
@@ -197,37 +171,28 @@ test('isMajorIssue: a new issue is major regardless of how many users it hit', (
   assert.equal(isMajorIssue('new'), true);
 });
 
-test('isMajorIssue: worsened and quiet are never major', () => {
-  assert.equal(isMajorIssue('worsened'), false);
+test('isMajorIssue: a quiet issue is never major', () => {
   assert.equal(isMajorIssue('quiet'), false);
   assert.equal(isMajorIssue(undefined), false);
 });
 
-test('decideJobMode: a major issue with the opt-in and a repo earns a fix', () => {
-  const change = { change: 'spiking', issue: makeIssue() };
-  assert.equal(decideJobMode(change, { autoFix: true }), 'fix');
-  assert.equal(decideJobMode(change, { autoFix: true, hasRepo: true }), 'fix');
+test('decideJobMode: a major issue with the opt-in earns a fix', () => {
+  assert.equal(decideJobMode({ change: 'spiking', issue: makeIssue() }, { autoFix: true }), 'fix');
 });
 
 test('decideJobMode: without the opt-in every change stays an investigation', () => {
-  for (const change of ['spiking', 'regressed', 'new', 'worsened', 'quiet']) {
+  for (const change of ['spiking', 'regressed', 'new', 'quiet']) {
     assert.equal(decideJobMode({ change, issue: makeIssue({ users: 500 }) }, {}), 'investigate');
     assert.equal(decideJobMode({ change, issue: makeIssue({ users: 500 }) }, { autoFix: false }), 'investigate');
   }
 });
 
 test('decideJobMode: a non-major change never earns a fix even with the opt-in on', () => {
-  assert.equal(decideJobMode({ change: 'worsened', issue: makeIssue({ users: 500 }) }, { autoFix: true }), 'investigate');
   assert.equal(decideJobMode({ change: 'quiet', issue: makeIssue({ users: 500 }) }, { autoFix: true }), 'investigate');
 });
 
-test('decideJobMode: a new issue below the escalation threshold still earns a fix', () => {
+test('decideJobMode: a new issue with a tiny blast radius still earns a fix', () => {
   assert.equal(decideJobMode({ change: 'new', issue: makeIssue({ users: 2 }) }, { autoFix: true }), 'fix');
-});
-
-test('decideJobMode: a workspace that is not a repo downgrades to an investigation', () => {
-  const change = { change: 'regressed', issue: makeIssue() };
-  assert.equal(decideJobMode(change, { autoFix: true, hasRepo: false }), 'investigate');
 });
 
 test('normalizeJobMode: anything unrecognized reads as an investigation', () => {
@@ -428,24 +393,22 @@ test('nextState: a malformed stored fix record is normalized, never trusted', ()
 });
 
 test('nextState: an observation records the aggregates and carries prior verdict fields forward', () => {
-  const prev = makeEntry({ verdict: 'ROOT_CAUSE', investigatedAt: 111, investigatedUsers: 5, pingedPhases: ['needs_human'] });
+  const prev = makeEntry({ verdict: 'ROOT_CAUSE', investigatedAt: 111, pingedPhases: ['needs_human'] });
   const entry = nextState(prev, makeIssue({ occurrences: 300, users: 12 }), {});
   assert.equal(entry.lastOccurrences, 300);
   assert.equal(entry.lastUsers, 12);
   assert.equal(entry.status, 'active');
   assert.equal(entry.verdict, 'ROOT_CAUSE', 'a plain observation does not clear the verdict');
   assert.equal(entry.investigatedAt, 111);
-  assert.equal(entry.investigatedUsers, 5);
   assert.equal(entry.inFlight, false);
   assert.deepEqual(entry.pingedPhases, ['needs_human']);
 });
 
-test('nextState: a verdict stamps investigatedAt/investigatedUsers from the passed clock', () => {
+test('nextState: a verdict stamps investigatedAt from the passed clock', () => {
   const entry = nextState(makeEntry(), makeIssue({ users: 12 }), { verdict: 'NEEDS_HUMAN', summaryLine: 'needs a carbon unit', at: 999 });
   assert.equal(entry.verdict, 'NEEDS_HUMAN');
   assert.equal(entry.summaryLine, 'needs a carbon unit');
   assert.equal(entry.investigatedAt, 999);
-  assert.equal(entry.investigatedUsers, 12);
 });
 
 test('nextState: inFlight is opt-in and pingedPhases can be replaced', () => {
@@ -458,7 +421,6 @@ test('nextState: a first sighting with no prior entry defaults cleanly', () => {
   const entry = nextState(undefined, makeIssue(), {});
   assert.equal(entry.verdict, null);
   assert.equal(entry.investigatedAt, null);
-  assert.equal(entry.investigatedUsers, null);
   assert.deepEqual(entry.pingedPhases, []);
   assert.deepEqual(entry.history, []);
 });
@@ -626,15 +588,11 @@ const {
   investigationId,
   buildInvestigationRecord,
   appendInvestigation,
-  markInvestigationArchived,
-  pruneInvestigations,
-  unarchivedInvestigations,
+  removeInvestigation,
+  sortedInvestigations,
   validateInvestigationId,
   INVESTIGATION_LOG_CAP,
-  DEFAULT_ARCHIVED_RETENTION_DAYS,
 } = require('../server/core/posthog-core');
-
-const ARCHIVED_RETENTION_MS = DEFAULT_ARCHIVED_RETENTION_DAYS * 86400000;
 
 const RECORD_ARGS = {
   key: 'ph.test/1#iss-1',
@@ -665,7 +623,6 @@ test('buildInvestigationRecord is deterministic and carries the full row shape',
     mode: 'investigate',
     prUrl: null,
     at: 1700,
-    archived: false,
   });
   assert.deepEqual(buildInvestigationRecord(RECORD_ARGS), record, 'no clock, no randomness inside');
 });
@@ -715,76 +672,29 @@ test('appendInvestigation does not mutate the input and tolerates junk entries',
   assert.deepEqual(appendInvestigation(undefined, record, { cap: 10 }), [record]);
 });
 
-test('markInvestigationArchived flips one record, is idempotent, and refuses an unknown id', () => {
+test('removeInvestigation drops one record and refuses an unknown id', () => {
   const first = buildInvestigationRecord({ ...RECORD_ARGS, issueId: 'iss-1', at: 100 });
   const second = buildInvestigationRecord({ ...RECORD_ARGS, issueId: 'iss-2', at: 200 });
   const log = appendInvestigation(appendInvestigation([], first), second);
 
-  const once = markInvestigationArchived(log, 'iss-1@100', 5000);
+  const once = removeInvestigation(log, 'iss-1@100');
   assert.equal(once.ok, true);
-  assert.equal(once.log[0].archived, true);
-  assert.equal(once.log[0].archivedAt, 5000, 'the archive time is stamped, not the completion time');
-  assert.equal(once.log[1].archived, false, 'only the named record moved');
-  assert.equal(once.log[1].archivedAt, undefined);
-  assert.equal(log[0].archived, false, 'the input log is not mutated');
+  assert.deepEqual(once.log.map((r) => r.issueId), ['iss-2']);
+  assert.equal(log.length, 2, 'the input log is not mutated');
 
-  const twice = markInvestigationArchived(once.log, 'iss-1@100');
-  assert.equal(twice.ok, true, 'archiving an archived record is idempotent');
-  assert.equal(twice.log[0].archived, true);
-
-  const missing = markInvestigationArchived(log, 'nope@1');
+  const missing = removeInvestigation(once.log, 'iss-1@100');
   assert.equal(missing.ok, false);
   assert.equal(missing.error, 'Unknown investigation');
 });
 
-test('unarchivedInvestigations returns unarchived only, newest first', () => {
+test('sortedInvestigations returns every record newest first', () => {
   const log = [
     buildInvestigationRecord({ ...RECORD_ARGS, issueId: 'old', at: 100 }),
     buildInvestigationRecord({ ...RECORD_ARGS, issueId: 'new', at: 300 }),
-    { ...buildInvestigationRecord({ ...RECORD_ARGS, issueId: 'gone', at: 200 }), archived: true },
+    buildInvestigationRecord({ ...RECORD_ARGS, issueId: 'mid', at: 200 }),
   ];
-  assert.deepEqual(unarchivedInvestigations(log).map((r) => r.issueId), ['new', 'old']);
-  assert.deepEqual(unarchivedInvestigations(undefined), []);
-});
-
-test('pruneInvestigations drops archived records at the retention boundary and never unarchived ones', () => {
-  const now = 10 * ARCHIVED_RETENTION_MS;
-  const archivedAt = (stamp) => ({
-    ...buildInvestigationRecord({ ...RECORD_ARGS, issueId: `iss-${stamp}`, at: 1 }),
-    id: `iss-${stamp}@1`,
-    archived: true,
-    archivedAt: stamp,
-  });
-  const justInside = archivedAt(now - ARCHIVED_RETENTION_MS + 1);
-  const exactlyAtTheBoundary = archivedAt(now - ARCHIVED_RETENTION_MS);
-  const wellPast = archivedAt(now - (ARCHIVED_RETENTION_MS * 3));
-  const live = buildInvestigationRecord({ ...RECORD_ARGS, issueId: 'live', at: 1 });
-
-  const kept = pruneInvestigations([justInside, exactlyAtTheBoundary, wellPast, live], now);
-  assert.deepEqual(kept.map((r) => r.id), [justInside.id, live.id], 'age >= the window is dropped');
-  assert.equal(live.archived, false, 'an unarchived record survives regardless of how old it is');
-});
-
-test('pruneInvestigations ages a record without archivedAt from its completion time', () => {
-  const now = 10 * ARCHIVED_RETENTION_MS;
-  const legacy = (at) => {
-    const record = { ...buildInvestigationRecord({ ...RECORD_ARGS, issueId: 'legacy', at }), archived: true };
-    delete record.archivedAt;
-    return record;
-  };
-  const fresh = legacy(now - 1000);
-  const stale = legacy(now - ARCHIVED_RETENTION_MS - 1000);
-  assert.deepEqual(pruneInvestigations([fresh], now).length, 1, 'a recent pre-stamp record is tolerated');
-  assert.deepEqual(pruneInvestigations([stale], now).length, 0, 'and an old one still ages out');
-});
-
-test('pruneInvestigations honours an overridden window and does not mutate the input', () => {
-  const record = { ...buildInvestigationRecord(RECORD_ARGS), archived: true, archivedAt: 1000 };
-  const log = [record];
-  assert.equal(pruneInvestigations(log, 1000 + 86400000, { archivedRetentionDays: 2 }).length, 1);
-  assert.equal(pruneInvestigations(log, 1000 + (2 * 86400000), { archivedRetentionDays: 2 }).length, 0);
-  assert.equal(log.length, 1, 'input untouched');
-  assert.deepEqual(pruneInvestigations(undefined, 1000), []);
+  assert.deepEqual(sortedInvestigations(log).map((r) => r.issueId), ['new', 'mid', 'old']);
+  assert.deepEqual(sortedInvestigations(undefined), []);
 });
 
 test('validateInvestigationId enforces the id shape', () => {
@@ -795,84 +705,4 @@ test('validateInvestigationId enforces the id shape', () => {
   assert.equal(validateInvestigationId('iss 1@1700').ok, false);
   assert.equal(validateInvestigationId('../etc@1700').ok, false);
   assert.equal(validateInvestigationId('iss-1@later').ok, false);
-});
-
-// --- Auto-creating the Glissa project a Radar row wants when none is mapped ---
-
-const {
-  slugKey,
-  isAbsolutePathish,
-  projectParentDirs,
-  pickDirectoryForProjectName,
-  sanitizeSessionName,
-} = require('../server/core/posthog-core');
-
-test('slugKey compares on alphanumerics only', () => {
-  assert.equal(slugKey('CardHarbor'), slugKey('card-harbor'));
-  assert.equal(slugKey('Keeplings'), slugKey('keeplings'));
-  assert.equal(slugKey('My App v2'), 'myappv2');
-  assert.equal(slugKey('---'), '');
-  assert.equal(slugKey(null), '');
-});
-
-test('isAbsolutePathish accepts posix, drive-letter and UNC paths', () => {
-  assert.equal(isAbsolutePathish('/home/jw/Projects/app'), true);
-  assert.equal(isAbsolutePathish('C:/code/app'), true);
-  assert.equal(isAbsolutePathish('C:\\code\\app'), true);
-  assert.equal(isAbsolutePathish('\\\\server\\share'), true);
-  assert.equal(isAbsolutePathish('web-app'), false, 'a bare display name is not a path');
-  assert.equal(isAbsolutePathish('./relative'), false);
-  assert.equal(isAbsolutePathish(''), false);
-  assert.equal(isAbsolutePathish(undefined), false);
-});
-
-test('projectParentDirs dedupes the folders the operator already keeps repos in', () => {
-  const dirs = projectParentDirs([
-    { path: '/home/jw/Projects/glissa' },
-    { path: '/home/jw/Projects/card-harbor/' },
-    { path: 'C:\\code\\keeplings' },
-    { path: '/home/jw/PROJECTS/other' },
-    null,
-    { path: '' },
-    { path: 'bare' },
-  ]);
-  assert.deepEqual(dirs, ['/home/jw/Projects', 'C:\\code']);
-});
-
-test('pickDirectoryForProjectName matches a display name against directory names', () => {
-  const candidates = [
-    { name: 'glissa', path: '/p/glissa' },
-    { name: 'card-harbor', path: '/p/card-harbor' },
-  ];
-  assert.deepEqual(pickDirectoryForProjectName('CardHarbor', candidates), {
-    name: 'card-harbor', path: '/p/card-harbor',
-  });
-  assert.equal(pickDirectoryForProjectName('nothing-here', candidates), null);
-  assert.equal(pickDirectoryForProjectName('', candidates), null);
-  assert.equal(pickDirectoryForProjectName('glissa', undefined), null);
-});
-
-test('pickDirectoryForProjectName refuses an ambiguous match but tolerates a duplicate path', () => {
-  const twoRepos = [
-    { name: 'card-harbor', path: '/a/card-harbor' },
-    { name: 'CardHarbor', path: '/b/CardHarbor' },
-  ];
-  assert.equal(pickDirectoryForProjectName('cardharbor', twoRepos), null, 'guessing a repo is worse than refusing');
-
-  const sameDirTwice = [
-    { name: 'card-harbor', path: '/a/card-harbor' },
-    { name: 'card-harbor', path: '/a/card-harbor/' },
-  ];
-  assert.equal(pickDirectoryForProjectName('CardHarbor', sameDirTwice).path, '/a/card-harbor');
-});
-
-test('sanitizeSessionName produces a name the control handler accepts', () => {
-  const SESSION_NAME_RE = /^[a-zA-Z0-9_\-. ()]{1,64}$/;
-  for (const raw of ['card-harbor', 'My App (v2)', 'weird/name:here', 'a'.repeat(200)]) {
-    assert.match(sanitizeSessionName(raw), SESSION_NAME_RE, `sanitized "${raw}"`);
-  }
-  assert.equal(sanitizeSessionName('weird/name:here'), 'weird-name-here');
-  assert.equal(sanitizeSessionName('  spaced  '), 'spaced');
-  assert.equal(sanitizeSessionName('///'), null);
-  assert.equal(sanitizeSessionName(''), null);
 });

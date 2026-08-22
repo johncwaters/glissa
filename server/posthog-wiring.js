@@ -719,15 +719,6 @@ function createPosthogWiring({
         autoFix: config.posthog.autoFix === true,
         fixTimeoutSeconds: config.posthog.fixTimeoutSeconds || 1800,
         minUsersToInvestigate: config.posthog.minUsersToInvestigate,
-        userEscalationThreshold: config.posthog.userEscalationThreshold,
-        recurrenceDedupe: config.posthog.recurrenceDedupe,
-        recurrenceWindowDays: config.posthog.recurrenceWindowDays,
-        transientRecurrenceLimit: config.posthog.transientRecurrenceLimit,
-        trafficSpikeEnabled: config.posthog.trafficSpikeEnabled,
-        trafficSpikeMultiplier: config.posthog.trafficSpikeMultiplier,
-        trafficSpikeMinUsers: config.posthog.trafficSpikeMinUsers,
-        trafficSpikeCooldownMinutes: config.posthog.trafficSpikeCooldownMinutes,
-        trafficSpikeBaselineDays: config.posthog.trafficSpikeBaselineDays,
         onTickComplete: (summary) => {
           lastStatus = { ...summary, configured: true };
           broadcast(lastStatus);
@@ -758,8 +749,8 @@ function createPosthogWiring({
   }
 
   /*
-   * Archive one investigations-inbox record. Deliberately NOT a forced tick: archiving edits one
-   * boolean in the state file and changes nothing a poll would discover, so the cached status is
+   * Archive one investigations-inbox record. Deliberately NOT a forced tick: archiving drops one
+   * record from the state file and changes nothing a poll would discover, so the cached status is
    * patched in place and rebroadcast. A tick would re-query PostHog (and could re-spawn work) for
    * what is a list edit. lastStatus can still be null here (archiving from a client that connected
    * before the first tick), so the patch seeds a minimal payload rather than dropping the update.
