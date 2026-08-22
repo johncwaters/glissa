@@ -1,7 +1,7 @@
 /*
  * Pure core of the ingestion pipeline (docs/plan-ingestion.md, M6): the config resolver, event
  * normalization, the publish-time scrub, the per-source bounded rings, and the context digest the
- * visions's dispatch prompt carries. No IO, no timers, no clock: the caller passes `now` in and gets
+ * Visions lane's dispatch prompt carries. No IO, no timers, no clock: the caller passes `now` in and gets
  * a verdict, an event, or a string back.
  *
  * The scrub runs HERE, at publish time, before ring insertion, so a secret never sits in a ring, a
