@@ -22,6 +22,7 @@
 const fsNode = require('node:fs');
 const path = require('node:path');
 
+const { canonicalizePath } = require('../shared/paths');
 const {
   HEAD_SAMPLE_BYTES, MAX_CATCH_UP_BYTES, applyRead, createTailState, headChanged, headSample,
   pickStaleByMtime, planRead,
@@ -260,7 +261,10 @@ function createShellHistoryIngest({
 
   function installWatch(dir) {
     try {
-      const watcher = watchFn(dir, { persistent: false }, (eventType, filename) => {
+      // Canonical path required: fs.watch on an 8.3 short path aborts the process from native code,
+      // past this catch (see canonicalizePath in shared/paths.js). Only the WATCHED spelling is
+      // canonicalized; `dir` stays the spelling reachableDirs and every tracked file is keyed by.
+      const watcher = watchFn(canonicalizePath(dir), { persistent: false }, (eventType, filename) => {
         onWatchEvent(eventType, filename);
       });
       if (watcher && typeof watcher.on === 'function') {

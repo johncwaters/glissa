@@ -23,6 +23,7 @@
 const fsNode = require('node:fs');
 const path = require('node:path');
 
+const { canonicalizePath } = require('../shared/paths');
 const { claudeProjectsDir } = require('../session/core/conversation-history');
 const {
   codexHomes, codexRootCandidates, codexSessionIdFromPath, grokHomes, grokRootCandidates, isUsageFile,
@@ -417,7 +418,10 @@ function createAgentLogIngest({
 
   function installWatch(dir) {
     try {
-      const watcher = watchFn(dir, { persistent: false }, (eventType, filename) => {
+      // Canonical path required: fs.watch on an 8.3 short path aborts the process from native code,
+      // past this catch (see canonicalizePath in shared/paths.js). Only the WATCHED spelling is
+      // canonicalized; `dir` stays the spelling every tail, listing and probe is keyed by.
+      const watcher = watchFn(canonicalizePath(dir), { persistent: false }, (eventType, filename) => {
         onWatchEvent(dir, eventType, filename);
       });
       if (watcher && typeof watcher.on === 'function') {
