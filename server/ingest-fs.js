@@ -26,6 +26,7 @@ const {
   isIgnoredChange, normalizeRoots, recordChange, relativeWithin,
 } = require('./core/ingest-fs-core');
 const { positiveInt } = require('./core/ingest-number-core');
+const { createLaneLog } = require('./lane-log');
 
 const DEFAULT_MAX_ROOTS = 8;
 // The holder every `fs.roots` entry is registered under. A string no session id can collide with, since
@@ -92,15 +93,7 @@ function createFsIngest({
     return running && !disabled;
   }
 
-  function warn(message) {
-    if (!logger || typeof logger.warn !== 'function') return;
-    logger.warn(`[ingest] ${message}`);
-  }
-
-  function note(message) {
-    if (!logger || typeof logger.log !== 'function') return;
-    logger.log(`[ingest] ${message}`);
-  }
+  const { note, warn } = createLaneLog({ prefix: '[ingest]', logger });
 
   // One logged warning and the source goes quiet; the lane and every other source keep running, and a
   // restart re-arms everything (docs/plan-ingestion.md, "Adapter failure").

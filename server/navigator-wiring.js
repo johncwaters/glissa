@@ -16,6 +16,7 @@ const {
   intentPayload,
 } = require('./core/navigator-intent-core');
 const { sweepMarkdown } = require('./core/navigator-rules-core');
+const { createLaneLog } = require('./lane-log');
 
 // Quiet window before a document is swept.
 const NAVIGATOR_DEBOUNCE_MS = 300;
@@ -82,14 +83,8 @@ function createNavigatorWiring({
   contextSeq = null,
   digestBudgetChars = DIGEST_BUDGET_CHARS,
   hashFn = hashText,
-  /*
-   * Per-keystroke chatter, off unless the operator turned debugMode on (a boolean or a getter, since
-   * that setting is live-settable while this lane is constructed once at boot).
-   *
-   * PRIVACY RULE for every line this lane logs, debug-gated or not: buffer content, terminal output,
-   * command text and event summaries NEVER reach the log. Sizes, counts, uris, verdicts and reasons do.
-   * The rings are bounded and their summaries are scrubbed at publish time; a log file is neither.
-   */
+  // Per-keystroke chatter, off unless the operator turned debugMode on. Boolean or getter, and the
+  // privacy rule every line here obeys lives with the helper in server/lane-log.js.
   debug = false,
 } = {}) {
   const wss = new WebSocketServer({ noServer: true, maxPayload });
@@ -124,30 +119,7 @@ function createNavigatorWiring({
   // Concurrency 1, machine-wide: a dispatch while one is in flight is GATED, never queued.
   let dispatchInFlight = false;
 
-  function warn(message) {
-    if (!logger || typeof logger.warn !== 'function') return;
-    logger.warn(`[navigator] ${message}`);
-  }
-
-  function note(message) {
-    if (!logger || typeof logger.log !== 'function') return;
-    logger.log(`[navigator] ${message}`);
-  }
-
-  // A getter that throws reads as debug off: a logging decision must never fault the frame it rode in on.
-  function isDebug() {
-    if (typeof debug !== 'function') return debug === true;
-    try {
-      return debug() === true;
-    } catch {
-      return false;
-    }
-  }
-
-  function debugNote(buildMessage) {
-    if (!isDebug()) return;
-    note(buildMessage());
-  }
+  const { debugNote, note, warn } = createLaneLog({ prefix: '[navigator]', logger, debugFlag: debug });
 
   /*
    * Keyed by trigger AND gate, never the gate alone: a poke and a save can be refused by the same cap

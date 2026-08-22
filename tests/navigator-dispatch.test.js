@@ -82,6 +82,25 @@ test('a missing, unparsable, non-object or unknown-verdict file is an ERROR, nev
   });
 });
 
+// The size the caller logs comes from the read this already did, never from a second stat of the file.
+test('onBytesRead reports what was read without changing the result shape', async (t) => {
+  const content = JSON.stringify({ verdict: 'NONE', comments: [] });
+  const { file, cleanup } = tempFile(content);
+  t.after(cleanup);
+
+  const sizes = [];
+  assert.deepEqual(await readCommentsResult(file, { lineCount: 4, onBytesRead: (bytes) => sizes.push(bytes) }), {
+    verdict: 'NONE', comments: [], intent: null, reason: null,
+  });
+  assert.deepEqual(sizes, [Buffer.byteLength(content)]);
+
+  // A file that could not be read reports nothing at all, so the caller's count stays 0.
+  const missing = path.join(os.tmpdir(), `glissa-navigator-absent-${process.pid}.json`);
+  const missed = [];
+  assert.equal((await readCommentsResult(missing, { onBytesRead: (bytes) => missed.push(bytes) })).verdict, 'ERROR');
+  assert.deepEqual(missed, []);
+});
+
 // --- The optional intent field (docs/archive/plan-navigator.md, M5) ---
 
 test('an intent claim is read, trimmed and capped, whatever the verdict says', async (t) => {

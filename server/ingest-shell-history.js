@@ -30,6 +30,7 @@ const {
   parseHistoryLines,
 } = require('./core/ingest-shell-core');
 const { positiveInt } = require('./core/ingest-number-core');
+const { createLaneLog } = require('./lane-log');
 
 const DEFAULT_POLL_MS = 2000;
 const DEFAULT_DISCOVER_MS = 30000;
@@ -73,6 +74,8 @@ function createShellHistoryIngest({
   // would be a second place to set it and, since the resolver materializes the key from its defaults, a
   // silently dead one.
   const pollMs = positiveInt(sourceConfig.pollMs, DEFAULT_POLL_MS);
+  // Ahead of the rejected-shell check below, which warns during construction.
+  const { note, warn } = createLaneLog({ prefix: '[ingest]', logger });
   const locations = historyLocations({ shells: sourceConfig.shells, env, platform });
   /*
    * A configured name that matches no known shell is a typo in the one source that must be asked for
@@ -107,16 +110,6 @@ function createShellHistoryIngest({
   // Every pass re-reads this after each await: stop() must not be undone by work already in flight.
   function alive() {
     return running && !disabled;
-  }
-
-  function warn(message) {
-    if (!logger || typeof logger.warn !== 'function') return;
-    logger.warn(`[ingest] ${message}`);
-  }
-
-  function note(message) {
-    if (!logger || typeof logger.log !== 'function') return;
-    logger.log(`[ingest] ${message}`);
   }
 
   function closeWatcher(watcher) {

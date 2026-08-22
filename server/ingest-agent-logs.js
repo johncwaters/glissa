@@ -34,6 +34,7 @@ const {
 } = require('./core/ingest-tail-core');
 const { isDispatchWorkdir, mapAgentLine } = require('./core/ingest-agent-core');
 const { positiveInt } = require('./core/ingest-number-core');
+const { createLaneLog } = require('./lane-log');
 
 const DEFAULT_POLL_MS = 2000;
 const DEFAULT_DISCOVER_MS = 30000;
@@ -116,10 +117,7 @@ function createAgentLogIngest({
     return running && !disabled;
   }
 
-  function warn(message) {
-    if (!logger || typeof logger.warn !== 'function') return;
-    logger.warn(`[ingest] ${message}`);
-  }
+  const { warn } = createLaneLog({ prefix: '[ingest]', logger });
 
   function closeWatcher(watcher) {
     try {

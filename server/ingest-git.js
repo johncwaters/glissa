@@ -33,6 +33,7 @@ const {
   shouldReadCommit,
 } = require('./core/ingest-git-core');
 const { positiveInt } = require('./core/ingest-number-core');
+const { createLaneLog } = require('./lane-log');
 
 const DEFAULT_MAX_REPOS = 16;
 const DEFAULT_GIT_TIMEOUT_MS = 15000;
@@ -103,15 +104,7 @@ function createGitIngest({
     return running && !disabled;
   }
 
-  function warn(message) {
-    if (!logger || typeof logger.warn !== 'function') return;
-    logger.warn(`[ingest] ${message}`);
-  }
-
-  function note(message) {
-    if (!logger || typeof logger.log !== 'function') return;
-    logger.log(`[ingest] ${message}`);
-  }
+  const { note, warn } = createLaneLog({ prefix: '[ingest]', logger });
 
   function teardown() {
     if (pollTimer) clearIntervalFn(pollTimer);

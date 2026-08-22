@@ -21,6 +21,7 @@ const { createFsIngest } = require('./ingest-fs');
 const { createGitIngest } = require('./ingest-git');
 const { createShellHistoryIngest } = require('./ingest-shell-history');
 const { createTerminalIngest } = require('./ingest-terminal');
+const { createLaneLog } = require('./lane-log');
 
 const BATCH_INTERVAL_MS = 1000;
 const MAX_EVENTS_PER_FRAME = 50;
@@ -51,12 +52,8 @@ function createIngestLane({
   batchIntervalMs = BATCH_INTERVAL_MS,
   maxEventsPerFrame = MAX_EVENTS_PER_FRAME,
   snapshotEventLimit = SNAPSHOT_EVENT_LIMIT,
-  /*
-   * Per-batch chatter, off unless the operator turned debugMode on (a boolean or a getter, since that
-   * setting is live-settable while this lane is constructed once at boot). The privacy rule stated at
-   * the navigator lane's flag holds here too, and harder: an event SUMMARY is captured terminal output
-   * or command text, so no line at any level ever carries one. Sources, counts, seqs and roots only.
-   */
+  // Per-batch chatter, off unless the operator turned debugMode on. Boolean or getter, and the privacy
+  // rule (which bites hardest here, since an event summary IS captured output) lives in server/lane-log.js.
   debug = false,
 } = {}) {
   const resolved = config?.sources ? config : resolveIngestConfig(config);
@@ -66,30 +63,7 @@ function createIngestLane({
   let pendingEvents = [];
   let stopped = false;
 
-  function warn(message) {
-    if (!logger || typeof logger.warn !== 'function') return;
-    logger.warn(`[ingest] ${message}`);
-  }
-
-  function note(message) {
-    if (!logger || typeof logger.log !== 'function') return;
-    logger.log(`[ingest] ${message}`);
-  }
-
-  // A getter that throws reads as debug off: a logging decision must never fault the batch it rode in on.
-  function isDebug() {
-    if (typeof debug !== 'function') return debug === true;
-    try {
-      return debug() === true;
-    } catch {
-      return false;
-    }
-  }
-
-  function debugNote(buildMessage) {
-    if (!isDebug()) return;
-    note(buildMessage());
-  }
+  const { debugNote, note, warn } = createLaneLog({ prefix: '[ingest]', logger, debugFlag: debug });
 
   function emit(message) {
     if (typeof broadcast !== 'function') return;
@@ -260,8 +234,8 @@ function createIngestLane({
   for (const adapter of adapters) {
     if (typeof adapter.start !== 'function') continue;
     try {
-      // "starting", not "started": start() is async, so its failure arrives as the source's own
-      // degradation warn long after this line.
+      // "starting", not "started": a synchronous throw is caught just below, and an async failure only
+      // surfaces later as the source's own degradation warn.
       void adapter.start();
       note(`starting the ${adapter.name} source`);
     } catch (error) {

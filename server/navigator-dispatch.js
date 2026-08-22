@@ -27,6 +27,7 @@ const {
   DEFAULT_TIMEOUT_SECONDS, buildNavigatorPrompt, countLines, sanitizeComments,
 } = require('./core/navigator-dispatch-core');
 const { sanitizeIntentText } = require('./core/navigator-intent-core');
+const { createLaneLog } = require('./lane-log');
 
 const RESULT_VERDICTS = new Set(['COMMENTS', 'NONE', 'ERROR']);
 const RESULT_FILE = 'navigator-result.json';
@@ -50,10 +51,17 @@ function errorResult(reason) {
   return { verdict: 'ERROR', comments: [], intent: null, reason };
 }
 
-async function readCommentsResult(resultPath, { lineCount = 0 } = {}) {
+/**
+ * The result contract, read once. `onBytesRead` reports what the session actually wrote, so the caller
+ * can log a size without a second stat of a file this already has in hand; it rides the options bag
+ * rather than the returned shape, which several callers compare field for field.
+ */
+async function readCommentsResult(resultPath, { lineCount = 0, onBytesRead = null } = {}) {
   let parsed = null;
   try {
-    parsed = JSON.parse(await fs.readFile(resultPath, 'utf8'));
+    const raw = await fs.readFile(resultPath, 'utf8');
+    if (typeof onBytesRead === 'function') onBytesRead(Buffer.byteLength(raw));
+    parsed = JSON.parse(raw);
   } catch {
     return errorResult('no readable result file');
   }
@@ -128,24 +136,7 @@ function createNavigatorDispatcher({
 } = {}) {
   if (typeof spawnSession !== 'function') throw new Error('createNavigatorDispatcher requires spawnSession');
 
-  function note(message) {
-    if (!logger || typeof logger.log !== 'function') return;
-    logger.log(`[navigator] ${message}`);
-  }
-
-  function warn(message) {
-    if (!logger || typeof logger.warn !== 'function') return;
-    logger.warn(`[navigator] ${message}`);
-  }
-
-  // Best effort and never on the result path: a size the session already wrote, or nothing to say.
-  async function resultBytes(resultPath) {
-    try {
-      return (await fs.stat(resultPath)).size;
-    } catch {
-      return 0;
-    }
-  }
+  const { note, warn } = createLaneLog({ prefix: '[navigator]', logger });
 
   function spawnWithTimeout({
     id, name, prompt, cwd, uri, resultPath, lineCount,
@@ -169,8 +160,10 @@ function createNavigatorDispatcher({
             note(`dispatch for ${uri} was aborted after ${elapsed()}ms`);
             return undefined;
           }
-          const result = await readResult(resultPath, { lineCount });
-          note(`dispatch result for ${uri}: ${result.verdict} (${await resultBytes(resultPath)} bytes, ${elapsed()}ms)`);
+          // Zero whenever the read never got that far, or an injected reader does not report it.
+          let bytesRead = 0;
+          const result = await readResult(resultPath, { lineCount, onBytesRead: (bytes) => { bytesRead = bytes; } });
+          note(`dispatch result for ${uri}: ${result.verdict} (${bytesRead} bytes, ${elapsed()}ms)`);
           return result;
         })
         .catch((error) => errorResult(firstLine(error.message))),

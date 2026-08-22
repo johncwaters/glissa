@@ -58,7 +58,8 @@ function isPositionShape(position) {
 // the single break character.
 function lineEndBeforeBreak(text, nextLineStart) {
   const breakIndex = nextLineStart - 1;
-  if (text[breakIndex] === '\n' && breakIndex > 0 && text[breakIndex - 1] === '\r') return breakIndex - 1;
+  // The bounds check is index math, not CR semantics: index 0 simply has no character before it.
+  if (breakIndex > 0 && text[breakIndex] === '\n' && text[breakIndex - 1] === '\r') return breakIndex - 1;
   return breakIndex;
 }
 

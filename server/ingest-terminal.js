@@ -14,6 +14,7 @@
 const {
   DEFAULT_FLUSH_MS, appendChunk, createTerminalAccumulator, flushAccumulator, rebaseline,
 } = require('./core/ingest-terminal-core');
+const { createLaneLog } = require('./lane-log');
 
 function createTerminalIngest({
   publish,
@@ -29,15 +30,7 @@ function createTerminalIngest({
     : DEFAULT_FLUSH_MS;
   const tapsBySessionId = new Map();
 
-  function warn(message) {
-    if (!logger || typeof logger.warn !== 'function') return;
-    logger.warn(`[ingest] ${message}`);
-  }
-
-  function note(message) {
-    if (!logger || typeof logger.log !== 'function') return;
-    logger.log(`[ingest] ${message}`);
-  }
+  const { note, warn } = createLaneLog({ prefix: '[ingest]', logger });
 
   // The session's cwd is the project root this output belongs to; a session that cannot answer leaves
   // the event machine-scoped rather than guessing at a root.

@@ -132,6 +132,7 @@ server/            # Backend runtime (Express + WS wiring, control plane, shared
   spawn-gate.js        # Concurrent-spawn limiter (exports the shared createSerialQueue promise chain)
   json-file.js         # Atomic tmp+rename JSON/text writes (sync + async) + the signature-gated chain-serialized state writer
   lane-runner.js       # Shared lane scaffolding: createLaneRunner (restart-on-config-change poller lifecycle) + createTickLoop (interval tick, re-entry guard, drain-on-stop)
+  lane-log.js          # THE shared logger wrapper for every lane and lane source: createLaneLog({ prefix, logger, debugFlag }) -> note/warn/debugNote, with the throw-safe debug getter and the lane logging PRIVACY RULE stated once
   text-format.js       # Tiny shared CLI formatters (shortVersion, formatTimestamp)
   git-workspace.js     # THE ONLY module allowed to run `git worktree`: per-session worktree isolation + fast-forward merge back; rebaseOnly (eager auto-rebase) + the shared rerere replay; generic listWorktreeBranches (used by the PR poller)
   config-store.js      # config.json load/save/merge (dev resolves the in-repo config.json via __dirname/..; see Key Files for the full resolution order)
