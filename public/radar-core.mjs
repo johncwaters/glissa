@@ -3,6 +3,7 @@
 // three outside-world feeds (PostHog issues, ops telemetry, PR auto-review) into Radar's sections and
 // its one attention count. No DOM, no IO.
 
+import { attentionSignature } from './attention-ack-core.mjs';
 import { lanePlaceholder } from './lane-placeholder-core.mjs';
 import { normalizePhase, prNeedsAction, severityFor as prSeverityFor, sortPrsByAttention } from './pr-view-core.mjs';
 
@@ -307,16 +308,36 @@ export function needsActionPrRows(snapshot) {
   return rows;
 }
 
-// ── Attention count ──────────────────────────────────────────
-// The single number behind the desktop tab dot and the phone More dot. An available update is
-// advisory and deliberately contributes nothing; anomalies and needs-action PRs each count once.
-export function radarAttentionCount({ posthog, health, prs } = {}) {
+// ── Attention ────────────────────────────────────────────────
+// One derivation, two readings: the count for anything that wants a number, and the signature the dot
+// is acknowledged against. An available update is advisory and contributes nothing.
+//
+// PR facts are deliberately ABSENT. Radar still renders its PR section, but a single failing PR used to
+// light Radar, PRs and the phone More dot at once, so one fact read as three places needing attention.
+// The PRs surfaces own that fact; Radar owns PostHog issues and live health anomalies.
+function radarAttentionParts({ posthog, health } = {}) {
+  const parts = [];
   const projects = Array.isArray(posthog?.projects) ? posthog.projects : [];
-  const issues = projects.reduce((total, project) => {
-    const counts = summarizeIssues(project?.issues);
-    return total + counts.spiking + counts.needsHuman;
-  }, 0);
-  return issues + healthAnomalyRows(health).length + needsActionPrRows(prs).length;
+  for (const project of projects) {
+    const projectId = textOr(project?.projectId, textOr(project?.name, 'project'));
+    const issues = Array.isArray(project?.issues) ? project.issues : [];
+    for (let index = 0; index < issues.length; index++) {
+      const issue = issues[index];
+      const issueId = textOr(issue?.issueId, textOr(issue?.title, `#${index}`));
+      if (issue?.change === 'spiking') parts.push(`issue:${projectId}/${issueId}:spiking`);
+      if (issue?.verdict === 'NEEDS_HUMAN') parts.push(`issue:${projectId}/${issueId}:needs-human`);
+    }
+  }
+  for (const row of healthAnomalyRows(health)) parts.push(`health:${row.key}`);
+  return parts;
+}
+
+export function radarAttentionCount(input) {
+  return radarAttentionParts(input).length;
+}
+
+export function radarAttentionSignature(input) {
+  return attentionSignature(radarAttentionParts(input));
 }
 
 function rankFor(change) {

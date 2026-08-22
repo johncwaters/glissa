@@ -224,6 +224,46 @@ test('projected limit: where the burn rate lands, not only where the block alrea
   assert.equal(hasUsageAttention(null), false);
 });
 
+test('usageAttentionSignature: names which arbiter fires, at a coarse bucket', async () => {
+  const { usageAttentionSignature } = await importCore();
+  assert.equal(usageAttentionSignature({ tokenLimit: { max: 10, pct: 0.85 } }), 'block:warn');
+  assert.equal(usageAttentionSignature({ tokenLimit: { max: 10, pct: 1.4 } }), 'block:crit');
+  assert.equal(usageAttentionSignature({ anomaly: { daily: { ratio: 3 }, burn: null } }), 'anomaly:daily');
+  assert.equal(usageAttentionSignature({ anomaly: { daily: null, burn: { ratio: 2 } } }), 'anomaly:burn');
+  assert.equal(
+    usageAttentionSignature({ budget: { rows: [{ scope: 'daily', budgetUsd: 2, pct: 95 }, { scope: 'monthly', budgetUsd: 50, pct: 120 }] } }),
+    'budget:daily:near|budget:monthly:over',
+  );
+});
+
+test('usageAttentionSignature: a wobbling percentage keeps its bucket, a crossed threshold does not', async () => {
+  const { usageAttentionSignature } = await importCore();
+  const at = (pct) => usageAttentionSignature({ tokenLimit: { max: 10, pct } });
+  assert.equal(at(0.91), at(0.92), 'a percentage drifting inside its bucket must not re-light the dot');
+  assert.notEqual(at(0.91), at(1.05), 'warn to crit is a new thing to say');
+  const budgetAt = (pct) => usageAttentionSignature({ budget: { rows: [{ scope: 'daily', budgetUsd: 2, pct }] } });
+  assert.equal(budgetAt(91), budgetAt(92));
+  assert.notEqual(budgetAt(91), budgetAt(101));
+});
+
+test('usageAttentionSignature: a calm report is the empty signature, and hasUsageAttention agrees with it', async () => {
+  const { usageAttentionSignature, hasUsageAttention } = await importCore();
+  const calm = { tokenLimit: { max: 10, pct: 0.1 }, anomaly: null, budget: null };
+  assert.equal(usageAttentionSignature(calm), '');
+  assert.equal(hasUsageAttention(calm), false);
+  assert.equal(usageAttentionSignature(null), '');
+  const alarming = { tokenLimit: { max: 10, pct: 0.95 }, anomaly: { burn: { ratio: 2 } } };
+  assert.equal(usageAttentionSignature(alarming), 'anomaly:burn|block:warn');
+  assert.equal(hasUsageAttention(alarming), true);
+});
+
+test('usageAttentionSignature: official plan limits drive the block bucket when they exist', async () => {
+  const { usageAttentionSignature } = await importCore();
+  const calmEstimate = { tokenLimit: { max: 1000, pct: 0.1 } };
+  assert.equal(usageAttentionSignature(calmEstimate, { fiveHour: { pct: 85 } }), 'block:warn');
+  assert.equal(usageAttentionSignature({ tokenLimit: { max: 10, pct: 0.95 } }, { fiveHour: { pct: 4 } }), '');
+});
+
 test('pricing and scan lines: source, staleness, missing models and a partial pass', async () => {
   const { pricingSourceLine, missingPricingLine, scanLine } = await importCore();
   assert.equal(

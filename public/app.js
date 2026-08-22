@@ -15,11 +15,11 @@ import { applyHealthSnapshot, mountHealthMonitor } from './health-monitor.js';
 import { applyIngestActivity, applyIngestSnapshot, applyNavigatorComments, applyNavigatorFindings, applyNavigatorIntent, applyNavigatorSnapshot, mountNavigatorView, refreshNavigatorView, setNavigatorActivityCallback } from './navigator-panel.js';
 import { initNotifications, showDesktopNotification } from './notifications.js';
 import { activatePhoneShell, deactivatePhoneShell, getPhoneSessionId, isPhoneScreenActive, isPhoneShellActive, mountPhoneShell, refreshPhoneBoard, setPhoneScreenAttention, showPhoneScreen } from './phone/phone-shell.js';
-import { applyPrStatus, mountPrView, setPrActivityCallback } from './pr-panel.js';
+import { acknowledgePrAttention, applyPrStatus, mountPrView, setPrActivityCallback } from './pr-panel.js';
 // Radar is a SECOND consumer of the health, update and PR feeds: it summarizes what needs the operator,
 // while the health footer, the update banner and the PRs tab keep rendering each feed in full.
 import { updateBannerText } from './radar-core.mjs';
-import { applyHealthSnapshot as applyRadarHealth, applyPosthogStatus, applyPrStatus as applyRadarPrStatus, applyUpdateAvailable as applyRadarUpdate, mountRadarView, setRadarActivityCallback, setRadarNavigateToPrs } from './radar-panel.js';
+import { acknowledgeRadarAttention, applyHealthSnapshot as applyRadarHealth, applyPosthogStatus, applyPrStatus as applyRadarPrStatus, applyUpdateAvailable as applyRadarUpdate, mountRadarView, setRadarActivityCallback, setRadarNavigateToPrs } from './radar-panel.js';
 import { handleDebugStateRefresh, handleDebugStateResponse } from './session-card/card-dom.js';
 import { applyState, applyTerminalSettings, createSessionCard, getSessionCount, hasSession, notePackVersion, removeSessionCard, renameSessionCard, seedSessionMergeStatus, setLatestPackVersions, setSessionAgents, setSessionDiff, setSessionEffectiveBase, setSessionMergeStatus, setSessionPacks, setSessionPostTurn, setSessionPrompt, setSessionResume, setSessionUsage, setSessionWakeup, setSessionWorktree, updateAggregateStatus } from './session-card/lifecycle.js';
 import { openConfirmDialog } from './session-card/modal.js';
@@ -28,7 +28,7 @@ import { showErrorToast } from './session-card/toast.js';
 import { forgetReviewSession, mergeSelectedSession, mountReviewSidebar, notifyWorktreeChanged, refreshReviewSidebar, resolveSelectedSession, resyncSelectedSession, setReviewBranchSync } from './sidebar/review-sidebar.js';
 import { applyTheme } from './theme.js';
 import { getActiveView, getDismissedUpdate, getThemeId, isSoundEnabled, setActiveView, setDismissedUpdate, setSoundEnabled } from './ui-prefs.js';
-import { applyPlanLimits, applyUsageReport, applyUsageSessions, mountUsageView, refreshUsageView, requestUsageReport, setUsageActivityCallback, setUsageRequestSender } from './usage-panel.js';
+import { acknowledgeUsageAttention, applyPlanLimits, applyUsageReport, applyUsageSessions, mountUsageView, refreshUsageView, requestUsageReport, setUsageActivityCallback, setUsageRequestSender } from './usage-panel.js';
 
 // ── Apply saved theme ─────────────────────────────────────────
 
@@ -507,6 +507,16 @@ const VIEW_TABS = [
 
 let _activeView = 'focus';
 
+// Looking at a surface is what clears its dot, on either layout: a desktop tab activation and a phone
+// screen becoming visible mean the same thing, and the screen ids match the view ids. The panel stores
+// what it showed and re-runs its own activity callback, so the desktop tab dot, the phone row dot and
+// the More aggregate all update through the seams that already exist.
+function acknowledgeViewAttention(view) {
+  if (view === 'radar') acknowledgeRadarAttention();
+  if (view === 'prs') acknowledgePrAttention();
+  if (view === 'usage') acknowledgeUsageAttention();
+}
+
 function activateView(view) {
   const prev = _activeView;
   _activeView = view;
@@ -533,6 +543,7 @@ function activateView(view) {
   }
   // Navigator is pushed, not pulled, so opening it asks for nothing; looking at it is what clears the dot.
   if (view === 'navigator') refreshNavigatorView();
+  acknowledgeViewAttention(view);
 }
 
 for (let i = 0; i < VIEW_TABS.length; i++) {
@@ -567,7 +578,10 @@ mountPhoneShell({
   usagePanelEl: viewUsageEl,
   // Usage is the one screen that PULLS rather than being pushed to, so it asks for a fresh report the
   // moment it becomes visible; every other screen ignores this.
-  onScreenShown: (screenId) => { if (screenId === 'usage') { refreshUsageView(); requestUsageReport(); } },
+  onScreenShown: (screenId) => {
+    if (screenId === 'usage') { refreshUsageView(); requestUsageReport(); }
+    acknowledgeViewAttention(screenId);
+  },
   // The desktop header does not render under [data-layout="phone"], so its controls move to the Board's
   // top bar rather than being rebuilt there. Every listener, and the client-trust gating on Shut Down,
   // travels with them.

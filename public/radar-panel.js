@@ -6,12 +6,14 @@
 // them and rendering them in full. The tab is always present; only its content varies, so an operator
 // who has configured none of the lanes still finds the surface and is told where to switch them on.
 
-import { buildPanelSection, buildStatChip, el, projectsOf } from './dom-helpers.js';
+import { decideAttention } from './attention-ack-core.mjs';
+import { buildPanelSection, buildStatChip, el, isPanelHidden, projectsOf } from './dom-helpers.js';
 import { createPosthogReportDialog } from './dialogs.js';
 import { sendControlRequest } from './control-ws.js';
 import { createPollAgoTicker, formatAgo, formatDuration } from './poll-ago.js';
 import { phaseLabel } from './pr-view-core.mjs';
 import { createRenderHold } from './radar-hold-core.mjs';
+import { getRadarAttentionAck, setRadarAttentionAck } from './ui-prefs.js';
 import {
   healthAnomalyRows,
   hostsDiffer,
@@ -20,7 +22,7 @@ import {
   needsActionPrRows,
   opsRows,
   partitionRadarProjects,
-  radarAttentionCount,
+  radarAttentionSignature,
   radarDisplayName,
   radarPlaceholder,
   severityFor as severity,
@@ -41,6 +43,7 @@ let _update = null;
 let _prs = null;
 let _root = null;
 let _activityCallback = null;
+let _ack = getRadarAttentionAck();
 let _navigateToPrs = null;
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
@@ -336,8 +339,10 @@ function buildQuietRow(entry, showHost) {
   return row;
 }
 
-function attentionCount() {
-  return radarAttentionCount({ posthog: _latest, health: _health, prs: _prs });
+function storeAck(signature) {
+  if (signature === _ack) return;
+  _ack = signature;
+  setRadarAttentionAck(signature);
 }
 
 const buildSection = (title, hint) => buildPanelSection('radar', title, hint);
@@ -537,14 +542,26 @@ function renderOrDefer() {
   _hold.request();
 }
 
+// An issue or anomaly that arrives while the board is on screen is already being looked at, so it
+// acknowledges itself rather than lighting a dot over the surface showing it (the rule
+// navigator-panel.js applies to its own unseen latch).
 function refreshActivity() {
   if (!_activityCallback) return;
-  _activityCallback(attentionCount() > 0);
+  const signature = radarAttentionSignature({ posthog: _latest, health: _health });
+  const decision = decideAttention(signature, isPanelHidden(_root) ? _ack : signature);
+  storeAck(decision.acknowledged);
+  _activityCallback(decision.shown);
+}
+
+// Called when the Radar surface becomes visible (desktop tab, phone screen): seeing it is what clears the dot.
+export function acknowledgeRadarAttention() {
+  storeAck(radarAttentionSignature({ posthog: _latest, health: _health }));
+  refreshActivity();
 }
 
 // The tab-activity seam (defined in pr-panel.js): the view owns the condition, app.js owns the dot element.
-// The condition is now the FULL Radar attention count (issues + live anomalies + needs-action PRs),
-// so the desktop tab dot and the phone More dot, which both hang off this one callback, agree.
+// PR facts are deliberately not part of it (see radarAttentionSignature): the PRs tab and the phone PRS
+// row own them, so one failing PR raises one dot rather than three.
 export function setRadarActivityCallback(callback) {
   _activityCallback = callback;
   refreshActivity();

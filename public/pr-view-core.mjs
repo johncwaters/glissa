@@ -1,6 +1,7 @@
 // ── PR review view core (pure) ───────────────────────────────
 // Attention ordering and severity mapping for the PR auto-review rows. No DOM, no IO.
 
+import { attentionSignature } from './attention-ack-core.mjs';
 import { lanePlaceholder } from './lane-placeholder-core.mjs';
 
 // Rank is attention-first and deliberately coarser than severity: an errored PR and one whose review
@@ -75,6 +76,12 @@ export function severityFor(phase, { inFlight = false, pingedError = false } = {
   return 'dim';
 }
 
+// THE errors predicate: what the summary line counts and what the attention signature is built from,
+// so the stat and the dot cannot come to disagree about which PR is broken.
+export function prHasError(pr) {
+  return Boolean(pr?.pingedError) || pr?.phase === 'error';
+}
+
 // One pass for the per-project summary line and the tab attention dot.
 export function summarizePrs(prs) {
   const list = Array.isArray(prs) ? prs : [];
@@ -82,9 +89,26 @@ export function summarizePrs(prs) {
   let errors = 0;
   for (const pr of list) {
     if (pr?.inFlight) inReview += 1;
-    if (pr?.pingedError || pr?.phase === 'error') errors += 1;
+    if (prHasError(pr)) errors += 1;
   }
   return { open: list.length, inReview, errors };
+}
+
+// What the PRs dot is acknowledged against: which PRs are broken, and how. Identity plus phase, so a
+// resolved error empties the signature and a new one (or the same PR moving to a different broken
+// phase) re-lights the dot the operator already cleared.
+export function prAttentionSignature(snapshot) {
+  const projects = Array.isArray(snapshot?.projects) ? snapshot.projects : [];
+  const parts = [];
+  for (const project of projects) {
+    const label = textOr(project?.repoSlug, textOr(project?.projectId, 'project'));
+    const prs = Array.isArray(project?.prs) ? project.prs : [];
+    for (const pr of prs) {
+      if (!prHasError(pr)) continue;
+      parts.push(`${label}#${numberOr(pr?.number, '?')}:${normalizePhase(pr?.phase)}`);
+    }
+  }
+  return attentionSignature(parts);
 }
 
 // Phases that mean a carbon unit has to do something: the lane failed, the review asked for changes,
@@ -103,6 +127,10 @@ function rankFor(pr) {
   if (pr?.pingedError) return PHASE_RANK.error;
   const rank = PHASE_RANK[normalizePhase(pr?.phase)];
   return rank == null ? UNKNOWN_RANK : rank;
+}
+
+function textOr(value, fallback) {
+  return typeof value === 'string' && value.trim() ? value.trim() : fallback;
 }
 
 function numberOr(value, fallback) {

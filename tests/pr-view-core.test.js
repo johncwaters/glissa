@@ -207,6 +207,50 @@ test('prNeedsAction: every PR the tab dot counts as an error also needs action',
   assert.equal(prs.filter((pr) => prNeedsAction(pr)).length, 2);
 });
 
+test('prAttentionSignature: names each broken PR by repo, number and phase', async () => {
+  const { prAttentionSignature } = await importCore();
+  const snapshot = { projects: [{ repoSlug: 'me/app', prs: [
+    { number: 7, phase: 'error' },
+    { number: 8, phase: 'merged', pingedError: true },
+    { number: 9, phase: 'awaiting-checks' },
+  ] }] };
+  assert.equal(prAttentionSignature(snapshot), 'me/app#7:error|me/app#8:merged');
+});
+
+test('prAttentionSignature: a phase change on the same PR is a different signature', async () => {
+  const { prAttentionSignature } = await importCore();
+  const withPhase = (phase) => prAttentionSignature({ projects: [{ repoSlug: 'me/app', prs: [{ number: 7, phase, pingedError: true }] }] });
+  assert.notEqual(withPhase('error'), withPhase('conflicting'));
+});
+
+test('prAttentionSignature: healthy PRs and absent feeds are the empty signature, never a throw', async () => {
+  const { prAttentionSignature } = await importCore();
+  assert.equal(prAttentionSignature({ projects: [{ repoSlug: 'me/app', prs: [{ number: 7, phase: 'merged' }] }] }), '');
+  assert.equal(prAttentionSignature(null), '');
+  assert.equal(prAttentionSignature({}), '');
+  assert.equal(prAttentionSignature({ projects: [null, { prs: null }] }), '');
+});
+
+test('prAttentionSignature: the same broken PRs in a different order are the same signature', async () => {
+  const { prAttentionSignature } = await importCore();
+  const rows = [{ number: 7, phase: 'error' }, { number: 8, phase: 'error' }];
+  const one = prAttentionSignature({ projects: [{ repoSlug: 'me/app', prs: rows }] });
+  const other = prAttentionSignature({ projects: [{ repoSlug: 'me/app', prs: [...rows].reverse() }] });
+  assert.equal(one, other);
+});
+
+test('prAttentionSignature: an unlabelled project falls back to its id, a numberless PR to a placeholder', async () => {
+  const { prAttentionSignature } = await importCore();
+  assert.equal(prAttentionSignature({ projects: [{ projectId: 'p1', prs: [{ phase: 'error' }] }] }), 'p1#?:error');
+});
+
+test('prAttentionSignature: every PR the tab dot counts as an error is named', async () => {
+  const { prAttentionSignature, summarizePrs } = await importCore();
+  const prs = [{ number: 1, phase: 'error' }, { number: 2, pingedError: true }, { number: 3, phase: 'in-review' }];
+  const signature = prAttentionSignature({ projects: [{ repoSlug: 'me/app', prs }] });
+  assert.equal(signature.split('|').length, summarizePrs(prs).errors);
+});
+
 test('phaseLabel: known phases read in words, an unknown one keeps its raw string', async () => {
   const { phaseLabel } = await importCore();
   assert.deepEqual(phaseLabel('done'), { label: 'changes requested', known: true });

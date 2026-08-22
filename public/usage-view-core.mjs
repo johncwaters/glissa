@@ -4,6 +4,8 @@
 // value reads as the ASCII placeholder below, ranges read "Aug 12 to Aug 19", and a projection reads
 // "->" (tests/frontend-usage-view.test.js pins that).
 
+import { attentionSignature } from './attention-ack-core.mjs';
+
 export const NO_VALUE = '-';
 
 // The honesty line, in two lengths. The short one leads the panel so the numbers are above the fold;
@@ -779,14 +781,28 @@ export function blockAttentionTone(report, planLimits = null) {
   return tokenLimitTone(projectedLimitPct(report?.activeBlock?.projection, report?.tokenLimit));
 }
 
-// A flagged anomaly raises the tab dot on its own: it is the one usage fact that appears without any
-// threshold being crossed, so nothing else would surface it.
+// What the Usage dot is acknowledged against: which arbiters fire, at a COARSE bucket each. A flagged
+// anomaly counts on its own (it is the one usage fact that appears without any threshold being crossed),
+// and a budget is the operator's OWN ceiling, independent of the plan limit and the anomaly check. The
+// buckets are deliberately coarse so a percentage drifting 91 to 92 does not re-light a dot the operator
+// just cleared, while warn to crit (or near-budget to over-budget) does.
+export function usageAttentionSignature(report, planLimits = null) {
+  const parts = [];
+  const tone = blockAttentionTone(report, planLimits);
+  if (tone !== 'ok') parts.push(`block:${tone}`);
+  if (report?.anomaly?.daily) parts.push('anomaly:daily');
+  if (report?.anomaly?.burn) parts.push('anomaly:burn');
+  for (const row of budgetRows(report)) {
+    const pct = budgetRowPct(row);
+    if (pct < BUDGET_ATTENTION_PCT) continue;
+    const scope = typeof row?.scope === 'string' && row.scope ? row.scope : 'budget';
+    parts.push(`budget:${scope}:${pct >= 100 ? 'over' : 'near'}`);
+  }
+  return attentionSignature(parts);
+}
+
 export function hasUsageAttention(report, planLimits = null) {
-  if (blockAttentionTone(report, planLimits) !== 'ok') return true;
-  if (hasAnomaly(report?.anomaly)) return true;
-  // A budget is the operator's OWN ceiling, so it earns the dot independently of the plan limit and the
-  // anomaly check, both of which measure something else.
-  return hasBudgetAttention(report);
+  return usageAttentionSignature(report, planLimits) !== '';
 }
 
 export function planWindowUsedText(window) {

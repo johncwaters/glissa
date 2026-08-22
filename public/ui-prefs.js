@@ -31,6 +31,9 @@ const PREFS = {
   railWidth: asNullableNumber,
   keptProjects: asStringList,
   dismissedUpdate: asNullableString,
+  radarAttentionAck: asString(''),
+  prsAttentionAck: asString(''),
+  usageAttentionAck: asString(''),
 };
 
 function load() {
@@ -83,6 +86,18 @@ export const setKeptProjects = (paths) => write('keptProjects', paths);
 // reloads until a NEWER tip arrives.
 export const getDismissedUpdate = () => read('dismissedUpdate');
 export const setDismissedUpdate = (key) => write('dismissedUpdate', key);
+
+// The attention signature (public/attention-ack-core.mjs) each dot was last acknowledged against, one
+// key per surface. Persisted rather than page-scoped: a dot the operator cleared must stay clear across
+// a reload until the facts behind it change.
+export const getRadarAttentionAck = () => read('radarAttentionAck');
+export const setRadarAttentionAck = (signature) => write('radarAttentionAck', signature);
+
+export const getPrsAttentionAck = () => read('prsAttentionAck');
+export const setPrsAttentionAck = (signature) => write('prsAttentionAck', signature);
+
+export const getUsageAttentionAck = () => read('usageAttentionAck');
+export const setUsageAttentionAck = (signature) => write('usageAttentionAck', signature);
 
 export const getLastFocusedSessionId = () => read('lastFocusedSessionId');
 export const setLastFocusedSessionId = (id) => write('lastFocusedSessionId', id);

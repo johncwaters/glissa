@@ -430,10 +430,10 @@ test('radarAttentionCount: each live anomaly counts once', async () => {
   assert.equal(radarAttentionCount({ health: { anomalies: { orphanPty: false } } }), 0);
 });
 
-test('radarAttentionCount: each needs-action PR counts once, healthy ones never', async () => {
+test('radarAttentionCount: PR facts belong to the PRs surfaces and add nothing here', async () => {
   const { radarAttentionCount } = await importCore();
   const prs = { projects: [{ projectId: 'p', prs: [{ phase: 'error' }, { phase: 'done' }, { phase: 'awaiting-checks' }] }] };
-  assert.equal(radarAttentionCount({ prs }), 2);
+  assert.equal(radarAttentionCount({ prs }), 0, 'one failing PR must raise one dot, not three');
 });
 
 test('radarAttentionCount: an available update is advisory and adds nothing', async () => {
@@ -443,7 +443,7 @@ test('radarAttentionCount: an available update is advisory and adds nothing', as
   assert.equal(radarAttentionCount({ posthog: posthogWith([{ change: 'spiking' }]), update }), 1);
 });
 
-test('radarAttentionCount: the three sources sum', async () => {
+test('radarAttentionCount: the two sources sum', async () => {
   const { radarAttentionCount } = await importCore();
   const total = radarAttentionCount({
     posthog: posthogWith([{ change: 'spiking' }, { change: 'quiet', verdict: 'NEEDS_HUMAN' }]),
@@ -451,7 +451,7 @@ test('radarAttentionCount: the three sources sum', async () => {
     prs: { projects: [{ projectId: 'p', prs: [{ phase: 'conflicting' }] }] },
     update: { current: '1.0.0', latest: '2.0.0' },
   });
-  assert.equal(total, 4);
+  assert.equal(total, 3);
 });
 
 test('radarAttentionCount: every feed absent is zero, never a throw', async () => {
@@ -459,6 +459,56 @@ test('radarAttentionCount: every feed absent is zero, never a throw', async () =
   assert.equal(radarAttentionCount(), 0);
   assert.equal(radarAttentionCount({}), 0);
   assert.equal(radarAttentionCount({ posthog: null, health: null, prs: null }), 0);
+});
+
+test('radarAttentionSignature: names each attention issue by project, id and why', async () => {
+  const { radarAttentionSignature } = await importCore();
+  const posthog = { projects: [{ projectId: 'ph', issues: [
+    { issueId: 'i1', change: 'spiking' },
+    { issueId: 'i2', verdict: 'NEEDS_HUMAN' },
+    { issueId: 'i3', change: 'quiet' },
+  ] }] };
+  assert.equal(radarAttentionSignature({ posthog }), 'issue:ph/i1:spiking|issue:ph/i2:needs-human');
+});
+
+test('radarAttentionSignature: one issue that is both spiking and needs-human names both facts', async () => {
+  const { radarAttentionSignature } = await importCore();
+  const posthog = { projects: [{ projectId: 'ph', issues: [{ issueId: 'i1', change: 'spiking', verdict: 'NEEDS_HUMAN' }] }] };
+  assert.equal(radarAttentionSignature({ posthog }), 'issue:ph/i1:needs-human|issue:ph/i1:spiking');
+});
+
+test('radarAttentionSignature: live anomalies are named by key, quiet ones are absent', async () => {
+  const { radarAttentionSignature } = await importCore();
+  assert.equal(radarAttentionSignature({ health: { anomalies: { orphanPty: true, destroyedReachable: false } } }), 'health:orphanPty');
+  assert.equal(radarAttentionSignature({ health: { anomalies: { orphanPty: false } } }), '');
+});
+
+test('radarAttentionSignature: PR facts are absent, and feed order never changes it', async () => {
+  const { radarAttentionSignature } = await importCore();
+  const prs = { projects: [{ projectId: 'p', prs: [{ number: 7, phase: 'error' }] }] };
+  const posthog = { projects: [{ projectId: 'ph', issues: [{ issueId: 'i1', change: 'spiking' }] }] };
+  assert.equal(radarAttentionSignature({ prs }), '');
+  assert.equal(
+    radarAttentionSignature({ posthog, health: { anomalies: { orphanPty: true } }, prs }),
+    radarAttentionSignature({ health: { anomalies: { orphanPty: true } }, posthog }),
+  );
+});
+
+test('radarAttentionSignature: quiet or absent feeds are the empty signature, never a throw', async () => {
+  const { radarAttentionSignature } = await importCore();
+  assert.equal(radarAttentionSignature(), '');
+  assert.equal(radarAttentionSignature({ posthog: null, health: null }), '');
+  assert.equal(radarAttentionSignature({ posthog: posthogWith([{ change: 'quiet' }]) }), '');
+});
+
+test('radarAttentionSignature: an issue with no id still counts, keyed by title then position', async () => {
+  const { radarAttentionCount, radarAttentionSignature } = await importCore();
+  const posthog = { projects: [{ projectId: 'ph', issues: [
+    { title: 'Cannot read length', change: 'spiking' },
+    { change: 'spiking' },
+  ] }] };
+  assert.equal(radarAttentionCount({ posthog }), 2);
+  assert.equal(radarAttentionSignature({ posthog }), 'issue:ph/#1:spiking|issue:ph/Cannot read length:spiking');
 });
 
 // --- Investigations inbox rows ---
