@@ -170,6 +170,10 @@
       Min users to investigate
       <input type="number" class="dialog-input" id="settings-posthog-min-users" min="1" step="1" autocomplete="off">
     </label>
+    <label class="dialog-label">
+      Escalation threshold (users)
+      <input type="number" class="dialog-input" id="settings-posthog-escalation" min="1" step="1" autocomplete="off">
+    </label>
   </div>
   <label class="dialog-label dialog-checkbox-label">
     <input type="checkbox" class="dialog-checkbox" id="settings-posthog-auto-fix">
@@ -180,6 +184,29 @@
     <label class="dialog-label">
       Fix timeout (seconds)
       <input type="number" class="dialog-input" id="settings-posthog-fix-timeout" min="60" max="21600" step="1" autocomplete="off">
+    </label>
+  </div>
+  <label class="dialog-label dialog-checkbox-label">
+    <input type="checkbox" class="dialog-checkbox" id="settings-posthog-traffic-enabled">
+    Traffic spike alerts
+    <span class="dialog-hint">Pings when a project's unique users in the last hour run far above its own hourly baseline.</span>
+  </label>
+  <div class="settings-timeout-grid">
+    <label class="dialog-label">
+      Spike multiplier
+      <input type="number" class="dialog-input" id="settings-posthog-traffic-multiplier" min="1" step="1" autocomplete="off">
+    </label>
+    <label class="dialog-label">
+      Min users to alert
+      <input type="number" class="dialog-input" id="settings-posthog-traffic-min-users" min="1" step="1" autocomplete="off">
+    </label>
+    <label class="dialog-label">
+      Spike cooldown (minutes)
+      <input type="number" class="dialog-input" id="settings-posthog-traffic-cooldown" min="0" step="1" autocomplete="off">
+    </label>
+    <label class="dialog-label">
+      Baseline window (days)
+      <input type="number" class="dialog-input" id="settings-posthog-traffic-baseline" min="1" max="30" step="1" autocomplete="off">
     </label>
   </div>
 </div>

@@ -11,14 +11,18 @@
  * The headless investigation sessions never get to call it: they are deny-listed from the issues
  * endpoint (POSTHOG_DENY in server/posthog-wiring.js) and only Glissa itself holds this client.
  *
- * TODO (live probe): the issues-query request body and the spike endpoint below are modeled on the
- * PostHog MCP tool layer and have NOT been verified against a live instance or the public REST docs.
- * Everything that consumes a response goes through the normalizers below, so an unexpected shape
- * degrades to zeroes rather than a crash, but the paths themselves need confirming.
+ * TODO (live probe): the issues-query request body and the spike/recommendation endpoints below are
+ * modeled on the PostHog MCP tool layer and have NOT been verified against a live instance or the
+ * public REST docs. Everything that consumes a response goes through the defensive normalizers at
+ * the bottom of this file, so an unexpected shape degrades to zeroes rather than a crash, but the
+ * paths themselves need confirming before the lane is trusted unattended.
  */
 
 const DEFAULT_ISSUE_LIMIT = 50;
 const DEFAULT_DATE_RANGE_HOURS = 24;
+const DEFAULT_BASELINE_DAYS = 7;
+const MAX_BASELINE_DAYS = 30;
+const CURRENT_WINDOW_MINUTES = 60;
 
 function toCount(value, fallback = 0) {
   const n = Number(value);
@@ -33,14 +37,24 @@ function firstDefined(...values) {
   return undefined;
 }
 
-// Rows arrive either as a bare array (REST list endpoints) or wrapped in a results list. Both are
-// flattened to plain objects here so every normalizer below only ever sees one shape.
+// Rows can arrive as objects (REST list endpoints) or as a HogQL-style { columns, results } matrix
+// where each result is a positional array. Both are flattened to plain objects here so every
+// normalizer below only ever sees one shape.
 function extractRows(body) {
   if (!body) return [];
   if (Array.isArray(body)) return body.filter((r) => r && typeof r === 'object');
-  const results = body.results || body.issues;
+  const results = body.results || body.issues || body.data;
   if (!Array.isArray(results)) return [];
-  return results.filter((r) => r && typeof r === 'object');
+  const columns = Array.isArray(body.columns) ? body.columns : null;
+  return results
+    .map((row) => {
+      if (!Array.isArray(row)) return row;
+      if (!columns) return null;
+      const obj = {};
+      columns.forEach((name, i) => { obj[String(name)] = row[i]; });
+      return obj;
+    })
+    .filter((r) => r && typeof r === 'object');
 }
 
 /** Map one raw issue row into the lane's internal shape. Unknown numeric fields default to 0. */
@@ -53,6 +67,7 @@ function normalizeIssue(raw) {
     status: String(firstDefined(row.status, 'active')),
     occurrences: toCount(firstDefined(agg.occurrences, agg.events, agg.count), 0),
     users: toCount(firstDefined(agg.users, agg.unique_users, agg.distinct_users), 0),
+    firstSeen: firstDefined(row.first_seen, row.firstSeen, agg.first_seen) ?? null,
     lastSeen: firstDefined(row.last_seen, row.lastSeen, agg.last_seen) ?? null,
   };
 }
@@ -81,6 +96,15 @@ function parseSpikeIssueIds(body, sinceTs = 0) {
     ids.add(String(id));
   }
   return ids;
+}
+
+// The traffic query is the one place a config value reaches SQL text, so it is reduced to a whole
+// number inside a fixed range first: anything unparseable becomes the default, never an expression.
+function clampBaselineDays(value) {
+  if (value == null || value === '') return DEFAULT_BASELINE_DAYS;
+  const n = Math.trunc(Number(value));
+  if (!Number.isFinite(n)) return DEFAULT_BASELINE_DAYS;
+  return Math.min(MAX_BASELINE_DAYS, Math.max(1, n));
 }
 
 function createPosthogApi({ host, apiKey, fetchFn } = {}) {
@@ -128,8 +152,45 @@ function createPosthogApi({ host, apiKey, fetchFn } = {}) {
     });
   }
 
+  function runHogQL(projectId, query) {
+    return request(`/api/projects/${encodeURIComponent(projectId)}/query/`, {
+      method: 'POST',
+      body: { query: { kind: 'HogQLQuery', query } },
+    });
+  }
+
+  // Two small queries avoid adding a synthetic marker column just to split series from scalar.
+  async function queryTrafficBuckets(projectId, { baselineDays = DEFAULT_BASELINE_DAYS } = {}) {
+    const days = clampBaselineDays(baselineDays);
+    const bucketsRes = await runHogQL(projectId, [
+      'SELECT toStartOfHour(timestamp) AS bucket, count(DISTINCT person_id) AS users',
+      'FROM events',
+      `WHERE timestamp >= now() - INTERVAL ${days} DAY AND timestamp < toStartOfHour(now())`,
+      'GROUP BY bucket ORDER BY bucket',
+    ].join(' '));
+    if (!bucketsRes.ok) return bucketsRes;
+    const currentRes = await runHogQL(projectId, [
+      'SELECT count(DISTINCT person_id) AS users',
+      'FROM events',
+      `WHERE timestamp >= now() - INTERVAL ${CURRENT_WINDOW_MINUTES} MINUTE`,
+    ].join(' '));
+    if (!currentRes.ok) return currentRes;
+    return {
+      ok: true,
+      buckets: extractRows(bucketsRes.body).map((row) => ({
+        bucket: firstDefined(row.bucket, row.hour, null) ?? null,
+        users: toCount(row.users, 0),
+      })),
+      currentUsers: toCount(extractRows(currentRes.body)[0]?.users, 0),
+    };
+  }
+
   function listSpikeEvents(projectId) {
     return request(`/api/projects/${encodeURIComponent(projectId)}/error_tracking/spikes/`);
+  }
+
+  function listRecommendations(projectId) {
+    return request(`/api/projects/${encodeURIComponent(projectId)}/error_tracking/recommendations/`);
   }
 
   /*
@@ -149,7 +210,9 @@ function createPosthogApi({ host, apiKey, fetchFn } = {}) {
     listOrganizations,
     listProjects,
     queryIssues,
+    queryTrafficBuckets,
     listSpikeEvents,
+    listRecommendations,
     updateIssueStatus,
   };
 }
@@ -160,4 +223,7 @@ module.exports = {
   normalizeIssues,
   parseSpikeIssueIds,
   extractRows,
+  clampBaselineDays,
+  DEFAULT_BASELINE_DAYS,
+  MAX_BASELINE_DAYS,
 };

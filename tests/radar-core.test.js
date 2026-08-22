@@ -36,15 +36,16 @@ test('radarPlaceholder: reports configured or legacy statuses as waiting for fir
   assert.equal(radarPlaceholder({}), 'PostHog monitoring is on. Waiting for the first poll.');
 });
 
-test('sortIssuesByAttention: orders spiking, regressed, new, quiet', async () => {
+test('sortIssuesByAttention: orders spiking, regressed, worsened, new, quiet', async () => {
   const { sortIssuesByAttention } = await importCore();
   const issues = [
     { issueId: 'a', change: 'quiet' },
     { issueId: 'b', change: 'new' },
     { issueId: 'c', change: 'regressed' },
+    { issueId: 'd', change: 'worsened' },
     { issueId: 'e', change: 'spiking' },
   ];
-  assert.deepEqual(changesOf(sortIssuesByAttention(issues)), ['spiking', 'regressed', 'new', 'quiet']);
+  assert.deepEqual(changesOf(sortIssuesByAttention(issues)), ['spiking', 'regressed', 'worsened', 'new', 'quiet']);
 });
 
 test('sortIssuesByAttention: does not mutate the input array', async () => {
@@ -103,10 +104,11 @@ test('sortIssuesByAttention: a non-array input returns an empty array', async ()
   assert.deepEqual(sortIssuesByAttention(null), []);
 });
 
-test('severityFor: crit for spiking and regressed, warn for new, dim otherwise', async () => {
+test('severityFor: crit for spiking and regressed, warn for worsened and new, dim otherwise', async () => {
   const { severityFor } = await importCore();
   assert.equal(severityFor('spiking'), 'crit');
   assert.equal(severityFor('regressed'), 'crit');
+  assert.equal(severityFor('worsened'), 'warn');
   assert.equal(severityFor('new'), 'warn');
   assert.equal(severityFor('quiet'), 'dim');
   assert.equal(severityFor('sideways'), 'dim');
@@ -473,6 +475,7 @@ const investigationRecord = (over = {}) => ({
   verdict: 'ROOT_CAUSE',
   summaryLine: 'null deref in the retry path',
   at: 1700,
+  archived: false,
   ...over,
 });
 
@@ -483,16 +486,50 @@ test('investigationRows: absent field renders nothing (older server payload)', a
   assert.deepEqual(investigationRows({ investigations: 'nope' }), []);
 });
 
-test('investigationRows: orders newest first', async () => {
+test('investigationRows: drops archived records and orders newest first', async () => {
   const { investigationRows } = await importCore();
   const rows = investigationRows({
     investigations: [
       investigationRecord({ id: 'a@100', at: 100 }),
       investigationRecord({ id: 'c@300', at: 300 }),
-      investigationRecord({ id: 'b@200', at: 200 }),
+      investigationRecord({ id: 'b@200', at: 200, archived: true }),
     ],
   });
-  assert.deepEqual(rows.map((row) => row.id), ['c@300', 'b@200', 'a@100']);
+  assert.deepEqual(rows.map((row) => row.id), ['c@300', 'a@100']);
+});
+
+test('investigationRows: a locally archived id stays gone even when the payload still carries it', async () => {
+  const { investigationRows } = await importCore();
+  // Exactly the shape a cached/replayed snapshot has: the server built it before the archive, so the
+  // record is present and unarchived. The row must not come back.
+  const snapshot = {
+    investigations: [
+      investigationRecord({ id: 'a@100', at: 100 }),
+      investigationRecord({ id: 'b@200', at: 200 }),
+    ],
+  };
+  assert.deepEqual(investigationRows(snapshot, new Set(['b@200'])).map((row) => row.id), ['a@100']);
+  assert.deepEqual(investigationRows(snapshot, new Set()).map((row) => row.id), ['b@200', 'a@100']);
+  assert.deepEqual(investigationRows(snapshot).map((row) => row.id), ['b@200', 'a@100'], 'the argument is optional');
+});
+
+test('retainKnownInvestigationIds: forgets an id the payload no longer carries', async () => {
+  const { retainKnownInvestigationIds } = await importCore();
+  const ids = new Set(['a@100', 'b@200']);
+  retainKnownInvestigationIds({ investigations: [investigationRecord({ id: 'a@100' })] }, ids);
+  assert.deepEqual([...ids], ['a@100'], 'the server confirmed b, so the local guard drops it');
+
+  retainKnownInvestigationIds({ investigations: [] }, ids);
+  assert.deepEqual([...ids], [], 'the set can never grow for the life of the page');
+  assert.doesNotThrow(() => retainKnownInvestigationIds(null, ids));
+  assert.doesNotThrow(() => retainKnownInvestigationIds({ investigations: 'nope' }, new Set(['x'])));
+});
+
+test('retainKnownInvestigationIds: an archived-but-still-sent record keeps its guard', async () => {
+  const { retainKnownInvestigationIds } = await importCore();
+  const ids = new Set(['a@100']);
+  retainKnownInvestigationIds({ investigations: [investigationRecord({ id: 'a@100', archived: true })] }, ids);
+  assert.deepEqual([...ids], ['a@100'], 'still on the wire, so the guard is still load-bearing');
 });
 
 test('investigationRows: normalizes one record into a renderable row', async () => {
@@ -568,7 +605,7 @@ test('investigationRows: a non-https prUrl is dropped', async () => {
   }
 });
 
-test('investigationRows: an inbox record never moves the attention count', async () => {
+test('investigationRows: an unarchived record never moves the attention count', async () => {
   const { investigationRows, radarAttentionCount } = await importCore();
   const posthog = { projects: [], investigations: [investigationRecord()] };
   assert.equal(investigationRows(posthog).length, 1);
