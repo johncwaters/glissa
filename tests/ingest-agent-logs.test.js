@@ -6,7 +6,7 @@
  * digest, the EOF start, the config gate, and the feedback-loop exclusion.
  *
  * The exclusion is the load-bearing rule this file exists for. A visions dispatch is a headless Claude
- * session that writes a transcript exactly like any other, so ingesting it would feed the visions's
+ * session that writes a transcript exactly like any other, so ingesting it would feed the Visions lane's
  * own output back into its next prompt. Its two INDEPENDENT layers are pinned separately, each on a
  * fixture the other would not catch: the ledger (primary) on an ordinary project directory, and the
  * dispatch-workdir shape with no ledger present at all.

@@ -1,5 +1,5 @@
 /*
- * Pure decisions for the visions's tier 1 silent fixes (docs/plan-visions-2.md, M6): which fixes may
+ * Pure decisions for the Visions lane's tier 1 silent fixes (docs/archive/plan-navigator-2.md, M6): which fixes may
  * be applied without asking, which of them a codeAction request is asking about, what the LSP payloads
  * carrying them look like, and when a stored fix set has gone stale. No IO, no clock, no timers.
  */
@@ -85,7 +85,7 @@ function filterFixesByRange(fixes, range) {
 }
 
 function fixTitle(fix) {
-  return FIX_TITLES[fix?.code] || (fix?.message ? String(fix.message) : 'Apply the visions fix');
+  return FIX_TITLES[fix?.code] || (fix?.message ? String(fix.message) : 'Apply the Visions fix');
 }
 
 // The diagnostic the fix answers, rebuilt from what the fix carries so a code action can point at it.

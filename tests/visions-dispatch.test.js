@@ -103,7 +103,7 @@ test('onBytesRead reports what was read without changing the result shape', asyn
   assert.deepEqual(missed, []);
 });
 
-// --- The optional intent field (docs/archive/plan-visions.md, M5) ---
+// --- The optional intent field (docs/archive/plan-navigator.md, M5) ---
 
 test('an intent claim is read, trimmed and capped, whatever the verdict says', async (t) => {
   const withComments = tempFile(JSON.stringify({
@@ -134,7 +134,7 @@ test('an invalid intent claim is ignored rather than believed or thrown over', a
   }
 });
 
-// --- The optional raised-hand field (docs/plan-visions-2.md, M7) ---
+// --- The optional raised-hand field (docs/archive/plan-navigator-2.md, M7) ---
 
 test('a hand claim is read, trimmed and capped, whatever the verdict says', async (t) => {
   const withComments = tempFile(JSON.stringify({

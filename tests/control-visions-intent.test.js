@@ -1,7 +1,7 @@
 'use strict';
 
 /*
- * The one inbound message the Visions tab sends: `visions-set-intent` (docs/archive/plan-visions.md, M5).
+ * The one inbound message the Visions tab sends: `visions-set-intent` (docs/archive/plan-navigator.md, M5).
  * The handler validates and delegates, nothing more: what a correction DOES to the standing statement
  * is decided by the merge in server/core/visions-intent-core.js. With the lane off (config.visions
  * absent) it must refuse the way every other absent-lane handler does rather than crash the dispatch.
@@ -68,7 +68,7 @@ test('a non-string text is refused rather than coerced', () => {
   assert.match(h.sent[0].message, /must be a string/);
 });
 
-test('with the visions lane off the correction is refused, and nothing crashes', () => {
+test('with the Visions lane off the correction is refused, and nothing crashes', () => {
   const h = harness();
   assert.doesNotThrow(() => h.send({ type: 'visions-set-intent', text: 'anything at all' }));
   assert.equal(h.sent.length, 1);

@@ -242,7 +242,7 @@ test('editor scratch and OS droppings never reach the batcher', () => {
 /*
  * The feedback loop this closes: in a dev checkout the resolved config file IS the repo's own
  * config.json, and the daemon writes it on every hook that carries a Claude session id. Since M7.5 every
- * published event advances the visions's movement signal, so glissa's own bookkeeping would poke the
+ * published event advances the Visions lane's movement signal, so glissa's own bookkeeping would poke the
  * next dispatch, once per turn, forever.
  */
 test('the daemon\'s own writes beside its config file are not project activity', () => {

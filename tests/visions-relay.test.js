@@ -235,7 +235,7 @@ test('unknown request returns MethodNotFound', async () => {
   });
 });
 
-// --- The request path in both directions (docs/plan-visions-2.md, M6) ---
+// --- The request path in both directions (docs/archive/plan-navigator-2.md, M6) ---
 
 const CODE_ACTION_PARAMS = {
   textDocument: { uri: 'file:///note.md' },

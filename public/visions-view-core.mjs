@@ -4,7 +4,7 @@
 
 export const VISIONS_EMPTY_TEXT = 'No findings. Open a markdown file in a connected editor.';
 
-// The intent model (docs/archive/plan-visions.md, M5): one machine-wide statement of what the visions
+// The intent model (docs/archive/plan-navigator.md, M5): one machine-wide statement of what the visions
 // believes is being built. Empty is a first-class state, and the hint says how it stops being empty.
 export const VISIONS_INTENT_EMPTY_TEXT = 'No intent yet. The visions proposes one after its first pass; typing here sets it directly.';
 export const VISIONS_INTENT_MAX_CHARS = 300;
@@ -303,7 +303,7 @@ function compareText(left, right) {
   return 0;
 }
 
-// ── Tier 1 fix changelog (docs/plan-visions-2.md, M6) ───────
+// ── Tier 1 fix changelog (docs/archive/plan-navigator-2.md, M6) ───────
 // What the lane actually touched, applied and refused alike. A refused edit is as much of an audit line
 // as an applied one: it says the lane tried and the buffer had already moved.
 
@@ -374,8 +374,8 @@ export function applyFixSnapshot(msg, { max = MAX_RENDERED_FIXES } = {}) {
 }
 
 // ── Ingest activity feed (docs/plan-ingestion.md, M6) ─────────
-// The cross-source timeline the ingest lane publishes, rendered under the visions's own findings
-// because it is the same question from the other side: what the visions can currently see.
+// The cross-source timeline the ingest lane publishes, rendered under the Visions lane's own findings
+// because it is the same question from the other side: what the Visions lane can currently see.
 
 export const INGEST_EMPTY_TEXT = 'No activity yet. The ingest lane reports what your sessions and tools are doing.';
 // The DOM is bounded, not the rings: the server keeps far more than a scrolling list should ever hold.

@@ -14,7 +14,7 @@
  * spawn would mean six `git status` runs for one commit: every trigger arms one 1s debounce per repo, the
  * settled read runs on that repo's own promise chain so two triggers can never interleave spawns, and the
  * second spawn (`git log -1`) happens only when HEAD actually moved. A read that finds nothing new
- * publishes nothing at all, which matters more since M7.5 made every published event the visions's
+ * publishes nothing at all, which matters more since M7.5 made every published event the Visions lane's
  * movement signal.
  *
  * This module never shells `git worktree` (tests/no-direct-git-worktree.test.js pins that

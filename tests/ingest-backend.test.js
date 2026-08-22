@@ -6,7 +6,7 @@
  * ephemeral-session exclusion.
  *
  * That exclusion is the whole reason the tap lives in wireSessionEvents: visions dispatch sessions are
- * PTY sessions too, and tapping one feeds the visions's own output back into its next prompt. This
+ * PTY sessions too, and tapping one feeds the Visions lane's own output back into its next prompt. This
  * file pins BOTH halves of the rule, because either alone would pass while the bug is present: a project
  * session that goes through wireSessionEvents IS tapped, and a session registered through
  * registerEphemeralSession (the one seam every lane uses) is NOT.
@@ -198,7 +198,7 @@ const GIT_ON = { enabled: true, sources: { git: { enabled: true } } };
  * Two rules at once, both of which a booted backend is the only place to see.
  *
  * The watch set has to be POPULATED at boot. The lane is constructed before the session-construction loop
- * runs (the visions lane below it takes this one's digest as a dependency), so the source's provider
+ * runs (the Visions lane below it takes this one's digest as a dependency), so the source's provider
  * would see an empty map and the source would sit inert until its first 60s poll, whose first read of each
  * repo is a baseline: a commit made in that window would be absorbed and never reported. Nothing here
  * calls reconcile(), deliberately, so removing backend.js's boot poke fails this test.
@@ -586,12 +586,12 @@ test('no dashboard connected costs the lane nothing: publishing still fills the 
 /*
  * Dispatch stays OFF in every boot below, because an enabled one spawns a real headless claude the
  * moment a gate passes. What a booted backend can prove that the unit tests cannot is the wiring itself:
- * that the ingest batch reaches the visions lane, and that the gate's movement signal IS this lane's
+ * that the ingest batch reaches the Visions lane, and that the gate's movement signal IS this lane's
  * seq. The arming and the dispatch behind that poke are pinned in tests/visions-wiring.test.js.
  */
 const BOTH_LANES = { ingest: INGEST_ON, visions: { enabled: true } };
 
-test('an ingest batch pokes the visions lane, and its gate reads this lane seq', withBackend(BOTH_LANES, async ({ backend }) => {
+test('an ingest batch pokes the Visions lane, and its gate reads this lane seq', withBackend(BOTH_LANES, async ({ backend }) => {
   const lane = backend.getIngestLane();
   const visions = backend.getVisionsLane();
   assert.ok(visions, 'both lanes are constructed');
@@ -608,7 +608,7 @@ test('an ingest batch pokes the visions lane, and its gate reads this lane seq',
   assert.equal(pokes, 1, 'one poke for the batch, however many events it carried');
 }));
 
-test('with ingest off the visions lane is wired to no movement signal at all', withBackend({ visions: { enabled: true } }, async ({ backend }) => {
+test('with ingest off the Visions lane is wired to no movement signal at all', withBackend({ visions: { enabled: true } }, async ({ backend }) => {
   assert.equal(backend.getIngestLane(), null);
   assert.equal(
     backend.getVisionsLane().latestContextSeq(), null,
@@ -616,7 +616,7 @@ test('with ingest off the visions lane is wired to no movement signal at all', w
   );
 }));
 
-test('with the visions lane off the ingest lane batches with nothing to poke', withBackend({ ingest: INGEST_ON }, async ({ backend }) => {
+test('with the Visions lane off the ingest lane batches with nothing to poke', withBackend({ ingest: INGEST_ON }, async ({ backend }) => {
   const lane = backend.getIngestLane();
   assert.equal(backend.getVisionsLane(), null);
   lane.publish({ source: 'terminal', kind: 'output', summary: 'nobody to tell', scope: { root: '/repo' } });

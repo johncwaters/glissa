@@ -921,7 +921,7 @@ function registerControlHandlers(controlWss, deps) {
   }
 
   /*
-   * The intent model's correction path (docs/archive/plan-visions.md, M5): the Visions tab's one writable
+   * The intent model's correction path (docs/archive/plan-navigator.md, M5): the Visions tab's one writable
    * field. EMPTY text is meaningful (it clears the statement and hands control back to the model), so
    * an absent `text` is a clear rather than an error. What the correction then DOES to the standing
    * statement is decided by the merge in server/core/visions-intent-core.js, never here, and the

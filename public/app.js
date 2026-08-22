@@ -296,7 +296,7 @@ const messageHandlers = {
   'visions-fix':      (msg) => applyVisionsFix(msg),
   'visions-snapshot': (msg) => applyVisionsSnapshot(msg),
   // Ingest lane. One batched delta per second at most (overflow inside the window arrives as a count),
-  // and a snapshot on every connect: like the visions's, the deltas are deliberately not replayable,
+  // and a snapshot on every connect: like the Visions lane's, the deltas are deliberately not replayable,
   // because the snapshot repairs the whole feed in one frame.
   'ingest-activity':    (msg) => applyIngestActivity(msg),
   'ingest-snapshot':    (msg) => applyIngestSnapshot(msg),

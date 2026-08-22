@@ -9,7 +9,7 @@
  * machine scope rather than letting a reader assume this project ran it (redline finding).
  *
  * The noise rules are dispatch-budget load-bearing, not cosmetics. Since M7.5 every published event
- * advances the visions's movement signal, so a shell that writes a line per Enter press (PSReadLine
+ * advances the Visions lane's movement signal, so a shell that writes a line per Enter press (PSReadLine
  * does, repeats included) would spend real dispatch budget on a carbon unit pressing up-arrow.
  */
 

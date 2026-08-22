@@ -1,5 +1,5 @@
 /*
- * Pure document store for the visions lane. Both LSP sync kinds land here: a contentChange with no
+ * Pure document store for the Visions lane. Both LSP sync kinds land here: a contentChange with no
  * range replaces the whole buffer, one with a range splices UTF-16 code units between two positions,
  * and a batch applies in order with each change reading the text the previous one left behind.
  *

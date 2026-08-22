@@ -1,6 +1,6 @@
 'use strict';
 
-// Tier 1 silent fixes (docs/plan-visions-2.md, M6), at the altitude where every decision lives: what a
+// Tier 1 silent fixes (docs/archive/plan-navigator-2.md, M6), at the altitude where every decision lives: what a
 // detector's fix edits, which of them may be applied unasked, which ones a selection is asking about, and
 // what the LSP payloads carrying them look like.
 

@@ -136,7 +136,7 @@ function createIngestLane({
     };
   }
 
-  // Synchronous by contract: the visions builds this exactly once per dispatch, and a digest that
+  // Synchronous by contract: the Visions lane builds this exactly once per dispatch, and a digest that
   // awaited between ring reads could describe two different moments.
   function buildDigest({ scopes = null, budgetChars = DEFAULT_DIGEST_BUDGET_CHARS, now = null } = {}) {
     return buildContextDigest(store, { scopes, budgetChars, now: now == null ? nowFn() : now });

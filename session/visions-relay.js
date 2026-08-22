@@ -26,7 +26,7 @@ const MIRROR_METHODS = new Set(['textDocument/didOpen', 'textDocument/didChange'
 const FORWARDED_METHODS = new Set([...MIRROR_METHODS, 'textDocument/didSave']);
 // The one editor request the daemon answers. Everything else is still method-not-found.
 const CODE_ACTION_METHOD = 'textDocument/codeAction';
-// The one request the daemon initiates, which is what makes tier 1 silent (docs/plan-visions-2.md, M6).
+// The one request the daemon initiates, which is what makes tier 1 silent (docs/archive/plan-navigator-2.md, M6).
 const APPLY_EDIT_METHOD = 'workspace/applyEdit';
 // A daemon that never answers must not hang the editor: past this the relay answers "no actions" itself.
 const CODE_ACTION_TIMEOUT_MS = 2000;

@@ -942,9 +942,9 @@ function createBackend(httpServer, options = {}) {
 
   /*
    * Ingest lane: config-file only, absent config constructs nothing (docs/plan-ingestion.md, M6), the
-   * same shape as the visions lane below it. Every source is individually opt-in ON TOP of the lane
+   * same shape as the Visions lane below it. Every source is individually opt-in ON TOP of the lane
    * flag, so a lane whose sources are all off builds no adapter, holds no ring and taps nothing.
-   * Constructed BEFORE the visions lane because that lane takes this one's digest as a dependency.
+   * Constructed BEFORE the Visions lane because that lane takes this one's digest as a dependency.
    */
   const ingestConfig = resolveIngestConfig(config.ingest);
   const visionsConfig = resolveVisionsConfig(config.visions);
@@ -988,7 +988,7 @@ function createBackend(httpServer, options = {}) {
       debug: () => configStore.getSettings().debugMode === true,
       /*
        * The other half of activity-driven dispatch (docs/plan-ingestion.md, M7.5), wired only when BOTH
-       * lanes exist. Late-binding on purpose: the visions lane is constructed below, and the first
+       * lanes exist. Late-binding on purpose: the Visions lane is constructed below, and the first
        * poke can only arrive a batch interval after both are up.
        */
       onActivity: visionsEnabled ? () => visionsLane.noteActivity() : null,
@@ -996,7 +996,7 @@ function createBackend(httpServer, options = {}) {
     : null;
 
   /*
-   * Visions lane: absent config constructs nothing (docs/archive/plan-visions.md, "Wire and
+   * Visions lane: absent config constructs nothing (docs/archive/plan-navigator.md, "Wire and
    * trust"). The Settings dialog can persist config.visions, but this lane is constructed only at
    * boot, so changes take effect after server restart. Its tier 3 model dispatch is a second opt-in
    * inside that one: without config.visions.dispatch.enabled the dispatcher is never constructed, so
@@ -1329,7 +1329,7 @@ function createBackend(httpServer, options = {}) {
      * Terminal ingest tap (docs/plan-ingestion.md, M6). Its PLACEMENT is the load-bearing part: only
      * project sessions pass through wireSessionEvents, so an ephemeral lane session (visions,
      * pr-review, posthog, pack-distill) registered through registerEphemeralSession is excluded BY
-     * CONSTRUCTION. Without that, the visions's own dispatch output would feed straight back into its
+     * CONSTRUCTION. Without that, the Visions lane's own dispatch output would feed straight back into its
      * next prompt. Pinned by tests/ingest-backend.test.js.
      */
     if (ingestLane?.terminalEnabled) ingestLane.attachSessionTap(sess);
@@ -1346,7 +1346,7 @@ function createBackend(httpServer, options = {}) {
 
   /*
    * The git watch set is derived from the map the loop above just filled, and the ingest lane is
-   * constructed well before that loop (the visions lane below it takes this one's digest as a
+   * constructed well before that loop (the Visions lane below it takes this one's digest as a
    * dependency). Without this poke the source starts with an empty set and stays inert until its first
    * 60s poll, whose first read of each repo is a BASELINE, so a commit or branch switch made in that
    * window is absorbed and never reported. Pinned by tests/ingest-backend.test.js.
@@ -1812,7 +1812,7 @@ function createBackend(httpServer, options = {}) {
       return;
     }
 
-    // Live editor buffers never cross the remote listener in v1, paired device or not (docs/archive/plan-visions.md, Non-goals)
+    // Live editor buffers never cross the remote listener in v1, paired device or not (docs/archive/plan-navigator.md, Non-goals)
     if (route === 'visions' && trust === 'remote') {
       socket.destroy();
       return;
@@ -1917,7 +1917,7 @@ function createBackend(httpServer, options = {}) {
       if (sess._killReap) pendingReaps.push(sess._killReap);
     }
     // Cancels the batch timer and detaches every session tap; null whenever the lane is off. Ahead of
-    // the visions lane only because the taps ride sessions already destroyed above.
+    // the Visions lane only because the taps ride sessions already destroyed above.
     if (ingestLane) ingestLane.stop();
     // Drops every mirrored buffer and its pending sweep timer; null whenever the lane is off.
     if (visionsLane) visionsLane.stop();

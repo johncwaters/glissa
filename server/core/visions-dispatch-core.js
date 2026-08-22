@@ -1,5 +1,5 @@
 /*
- * Pure decisions for the visions's tier 3 model dispatch (docs/archive/plan-visions.md, M4): when a
+ * Pure decisions for the Visions lane's tier 3 model dispatch (docs/archive/plan-navigator.md, M4): when a
  * dispatch is allowed, what the session is told, and what of its answer is believed. No IO, no timers,
  * no clock: the wiring passes `now`, the hash and the config in, and gets a verdict back.
  */
@@ -122,7 +122,7 @@ function countRecentDispatches(state, now, trigger = null) {
 /*
  * What woke this dispatch, read from the state rather than from whichever timer fired: the text moved,
  * so a carbon unit typed ('edit'), or the text stood and only the ingest seq moved, so the machine did
- * ('activity'). Text and seq both moving is an edit, because the buffer is what the visions answers
+ * ('activity'). Text and seq both moving is an edit, because the buffer is what the Visions lane answers
  * about. A uri with NO recorded hash has no state to read, which is every buffer after a restart, so
  * there and only there `armedBy` breaks the tie: without it a poke-armed cold start reads as six carbon
  * units typing at once and drains the budget a real save was going to need.

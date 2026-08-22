@@ -420,7 +420,7 @@ test('the snapshot accessor carries every uri that currently has findings', (t) 
   );
 });
 
-// The relay replays its open buffers on reconnect (docs/archive/plan-visions.md, M1), so a dropped socket is a
+// The relay replays its open buffers on reconnect (docs/archive/plan-navigator.md, M1), so a dropped socket is a
 // gap in the feed, not news that the carbon unit closed anything.
 test('a relay disconnect keeps the findings the tab is showing', (t) => {
   const { wiring, connection, timers, broadcasts, lsp } = drivenConnection();
@@ -455,7 +455,7 @@ test('a lane with no broadcast injected still sweeps and still tracks findings',
   assert.deepEqual(findingSections(wiring).map((entry) => entry.uri), [MARKDOWN_URI]);
 });
 
-// --- Tier 3 model dispatch (docs/archive/plan-visions.md, M4), spawner injected ---
+// --- Tier 3 model dispatch (docs/archive/plan-navigator.md, M4), spawner injected ---
 
 const COMMENT = { line: 3, message: 'The repeat is a symptom; the sentence is doing two jobs.' };
 const MODEL_DIAGNOSTIC = { line: 1, message: 'The title is missing a concrete noun.' };
@@ -1043,7 +1043,7 @@ test('didClose clears a standing hand', async (t) => {
   assert.deepEqual(wiring.documentsSnapshot(), []);
 });
 
-// --- The intent model (docs/archive/plan-visions.md, M5) ---
+// --- The intent model (docs/archive/plan-navigator.md, M5) ---
 
 function intentBroadcasts(broadcasts) {
   return broadcasts.filter((message) => message.type === 'visions-intent');
@@ -1283,7 +1283,7 @@ test('a dispatch config that is present but not enabled is just as inert', () =>
   wiring.stop();
 });
 
-// --- Tier 1 silent fixes (docs/plan-visions-2.md, M6) ---
+// --- Tier 1 silent fixes (docs/archive/plan-navigator-2.md, M6) ---
 
 const TWO_REPEATS_AND_A_FENCE = '# Title\n\nA line with with a repeat.\n\nAnd a a second one.\n\n```js\nconst answer = 42;\n';
 

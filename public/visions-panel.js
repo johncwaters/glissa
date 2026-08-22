@@ -1,5 +1,5 @@
 // ── Visions view ───────────────────────────────────────────
-// What the visions lane currently believes and currently sees: the intent model at the top (the one
+// What the Visions lane currently believes and currently sees: the intent model at the top (the one
 // statement of what is being built, correctable right there), then one section per open document that has
 // something to say: one row per tier 2 finding, one card per tier 3 model comment. Fed by four control-WS
 // messages, `visions-findings` and `visions-comments` (one uri each, pushed whenever a sweep publishes
