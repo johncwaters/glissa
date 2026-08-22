@@ -15,6 +15,7 @@ Design documents, postmortems, and operator guides. Background reading for why t
 | `testing-cli.md` | Manual CLI test scenarios (`--help`, `--version`, `--port`, `--config`, `doctor`, `npm pack`) to run before a release |
 | `plan-ingestion.md` | Plan for the multi-source ingestion lane (terminal, agent logs, git, fs, shell history): M6-M10 shipped, M11 digest quality pass half open (per-source quota tuning outstanding) |
 | `plan-agent-adapters.md` | Plan for harness-agnostic Glissa: full CC coupling inventory, live-probed Codex 0.146.0 / Grok 0.2.111 hook and OSC surfaces, AgentAdapter seam design, hook-relay transport, capability gating, milestones M1-M6 |
+| `plan-navigator-2.md` | Plan for the remaining navigator tiers: M6 tier 1 code actions + workspace/applyEdit, M7 tier 4 raised hand, M8 model tier 2 diagnostics, M9 blank-line boundary, M10 per-project scoping, M11 durable intent |
 
 ## Subdirectories
 
