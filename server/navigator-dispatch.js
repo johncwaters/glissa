@@ -24,7 +24,7 @@ const {
   awaitSessionExit, firstLine, raceWithAbort, registerEphemeralSession,
 } = require('./ephemeral-session');
 const {
-  DEFAULT_TIMEOUT_SECONDS, MAX_HAND_CHARS, buildNavigatorPrompt, countLines, sanitizeComments, sanitizeModelDiagnostics,
+  DEFAULT_TIMEOUT_SECONDS, MAX_HAND_CHARS, buildNavigatorPrompt, countLines, sanitizeComments,
 } = require('./core/navigator-dispatch-core');
 const { sanitizeIntentText } = require('./core/navigator-intent-core');
 const { createLaneLog } = require('./lane-log');
@@ -78,7 +78,7 @@ async function readCommentsResult(resultPath, { lineCount = 0, onBytesRead = nul
   // an updated belief, so it is dropped rather than clearing the standing statement.
   const intent = sanitizeIntentText(parsed.intent) || null;
   const hand = sanitizeIntentText(parsed.hand, { maxChars: MAX_HAND_CHARS }) || null;
-  const diagnostics = sanitizeModelDiagnostics(parsed.diagnostics, { lineCount });
+  const diagnostics = sanitizeComments(parsed.diagnostics, { lineCount });
   if (verdict !== 'COMMENTS') {
     return {
       verdict, comments: [], diagnostics, intent, hand, reason: null,

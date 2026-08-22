@@ -27,7 +27,6 @@ const {
   resolveDispatchConfig,
   resolveNavigatorConfig,
   sanitizeComments,
-  sanitizeModelDiagnostics,
 } = require('../server/core/navigator-dispatch-core');
 
 const URI = 'file:///tmp/plan-navigator.md';
@@ -665,7 +664,7 @@ test('a trailing-newline phantom line cannot accept a model comment', () => {
 });
 
 test('valid model diagnostics survive with their line and message intact', () => {
-  const diagnostics = sanitizeModelDiagnostics([
+  const diagnostics = sanitizeComments([
     { line: 1, message: '  the heading has no noun  ' },
     { line: 2.9, message: 'The list marker is malformed.' },
   ], { lineCount: 3 });
@@ -676,7 +675,7 @@ test('valid model diagnostics survive with their line and message intact', () =>
 });
 
 test('invalid model diagnostics are dropped and caps match comments', () => {
-  const diagnostics = sanitizeModelDiagnostics([
+  const diagnostics = sanitizeComments([
     null,
     ['array'],
     { line: 0, message: 'zero' },
@@ -691,7 +690,7 @@ test('invalid model diagnostics are dropped and caps match comments', () => {
   ], { lineCount: 3 });
   assert.equal(diagnostics.length, 5);
   assert.equal(diagnostics[0].message.length, 300);
-  assert.deepEqual(sanitizeModelDiagnostics({ line: 1, message: 'not a list' }, { lineCount: 3 }), []);
+  assert.deepEqual(sanitizeComments({ line: 1, message: 'not a list' }, { lineCount: 3 }), []);
 });
 
 test('model diagnostics convert to LSP ranges over whole one-based lines', () => {

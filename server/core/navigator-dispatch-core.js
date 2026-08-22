@@ -216,10 +216,6 @@ function sanitizeComments(raw, { lineCount = 0, max = MAX_COMMENTS, maxMessageCh
   return comments;
 }
 
-function sanitizeModelDiagnostics(raw, options = {}) {
-  return sanitizeComments(raw, options);
-}
-
 function lineTextsOf(text) {
   const value = typeof text === 'string' ? text : '';
   const counted = value.endsWith('\n') ? value.slice(0, -1) : value;
@@ -229,8 +225,8 @@ function lineTextsOf(text) {
 
 function modelDiagnosticsToLsp(raw, { text = '', lineCount = countLines(text) } = {}) {
   const lines = lineTextsOf(text);
-  return sanitizeModelDiagnostics(raw, { lineCount }).map((entry) => {
-    const lineIndex = Math.min(Math.max(entry.line - 1, 0), Math.max(lineCount - 1, 0));
+  return sanitizeComments(raw, { lineCount }).map((entry) => {
+    const lineIndex = entry.line - 1;
     const lineText = lines[lineIndex] || '';
     return {
       range: {
@@ -367,5 +363,4 @@ module.exports = {
   resolveDispatchConfig,
   resolveNavigatorConfig,
   sanitizeComments,
-  sanitizeModelDiagnostics,
 };
