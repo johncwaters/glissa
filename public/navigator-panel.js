@@ -1,22 +1,17 @@
 // ── Navigator view ───────────────────────────────────────────
-// What the navigator lane currently believes and currently sees: the intent model at the top (the one
-// statement of what is being built, correctable right there), then one section per open document that has
-// something to say: one row per tier 2 finding, one card per tier 3 model comment. Fed by four control-WS
-// messages, `navigator-findings` and `navigator-comments` (one uri each, pushed whenever a sweep publishes
-// or a dispatch lands, an empty array clearing that uri), `navigator-intent` (the whole statement, pushed
-// whenever it moves) and `navigator-snapshot` (the whole map plus the intent, sent to every client on
-// connect so a reconnect repairs rather than accumulates).
+// What the navigator lane currently sees: one section per open document that has something to say, one
+// row per tier 2 finding and one card per tier 3 model comment. Fed by three control-WS messages,
+// `navigator-findings` and `navigator-comments` (one uri each, pushed whenever a sweep publishes or a
+// dispatch lands, an empty array clearing that uri), and `navigator-snapshot` (the whole map, sent to
+// every client on connect so a reconnect repairs rather than accumulates).
 //
 // Desktop only in v1: the phone layout hides the tab strip entirely, so no phone screen borrows this panel.
 // The panel is DOM only; the grouping, ordering and wording live in navigator-view-core.mjs.
 
-import { sendControlMsg } from './control-ws.js';
 import { el } from './dom-helpers.js';
 import {
   INGEST_EMPTY_TEXT,
   NAVIGATOR_EMPTY_TEXT,
-  NAVIGATOR_INTENT_EMPTY_TEXT,
-  NAVIGATOR_INTENT_MAX_CHARS,
   activityAgeText,
   activityCountText,
   activityOverflowCount,
@@ -30,31 +25,20 @@ import {
   applyFindingsMessage,
   applyFindingsSnapshot,
   commentLineLabel,
-  emptyIntent,
   findingLineLabel,
   hasActivity,
   hasComments,
   hasFindings,
-  hasIntentChanged,
-  intentMetaText,
-  intentOfMessage,
   navigatorSections,
   sectionCountText,
-  shouldAdoptIntentText,
   totalCommentCount,
   totalFindingCount,
 } from './navigator-view-core.mjs';
 
 let _findingsByUri = new Map();
 let _commentsByUri = new Map();
-let _intent = emptyIntent();
 let _root = null;
 let _feed = null;
-// The intent block's live nodes, built once: the field can hold a half-typed correction, so it is
-// updated in place rather than rebuilt under the operator.
-let _intentUI = null;
-// The statement the field last adopted, which is what tells a pristine field from a started draft.
-let _adoptedIntentText = '';
 let _activityCallback = null;
 // The ingest lane's cross-source timeline, newest first and already capped by the view core.
 let _activityEvents = [];
@@ -67,68 +51,6 @@ let _unseen = false;
 
 function isHidden() {
   return !_root || !!_root.closest('[hidden]');
-}
-
-/*
- * The intent block: the statement, who set it and how old it is, and the one field that corrects it.
- * The button label is constant for the control's whole lifecycle (house convention), because the
- * action is always the same one; submitting an EMPTY field is the documented way to clear the
- * statement and hand control back to the model.
- */
-function buildIntentBlock() {
-  const section = el('section', 'navigator-intent');
-  const head = el('div', 'navigator-intent-head');
-  head.append(el('h2', 'navigator-intent-title', 'Intent'));
-  const meta = el('span', 'navigator-intent-meta');
-  head.append(meta);
-  section.append(head);
-
-  // Model text and operator text alike: built as text, never markup.
-  const statement = el('p', 'navigator-intent-text');
-  section.append(statement);
-
-  const form = el('form', 'navigator-intent-form');
-  const input = el('input', 'navigator-intent-input');
-  input.type = 'text';
-  input.maxLength = NAVIGATOR_INTENT_MAX_CHARS;
-  input.placeholder = 'What are you building?';
-  input.setAttribute('aria-label', 'Working intent');
-  const submit = el('button', 'navigator-intent-submit', 'Set intent');
-  submit.type = 'submit';
-  form.append(input, submit);
-  form.addEventListener('submit', (event) => {
-    event.preventDefault();
-    submitIntent();
-  });
-  section.append(form);
-
-  _intentUI = { meta, statement, input };
-  return section;
-}
-
-// The server decides what the correction does; this only reports what was typed, empty included.
-function submitIntent() {
-  if (!_intentUI) return;
-  const text = _intentUI.input.value;
-  _adoptedIntentText = text;
-  sendControlMsg({ type: 'navigator-set-intent', text });
-}
-
-function renderIntent() {
-  if (!_intentUI) return;
-  const { meta, statement, input } = _intentUI;
-  meta.textContent = intentMetaText(_intent);
-  statement.textContent = _intent.text || NAVIGATOR_INTENT_EMPTY_TEXT;
-  statement.classList.toggle('navigator-intent-none', !_intent.text);
-  const adopt = shouldAdoptIntentText({
-    focused: document.activeElement === input,
-    currentValue: input.value,
-    previousText: _adoptedIntentText,
-    nextText: _intent.text,
-  });
-  if (!adopt) return;
-  input.value = _intent.text;
-  _adoptedIntentText = _intent.text;
 }
 
 function buildSection(section) {
@@ -263,14 +185,12 @@ export function setNavigatorActivityCallback(callback) {
 export function mountNavigatorView(parent) {
   if (_root) return _root;
   const root = el('div', 'navigator-content');
-  root.append(buildIntentBlock());
   const feed = el('div', 'navigator-feed');
   root.append(feed);
   root.append(buildActivityBlock());
   parent.appendChild(root);
   _root = root;
   _feed = feed;
-  renderIntent();
   render({ force: true });
   renderActivity({ force: true });
   return root;
@@ -280,7 +200,6 @@ export function mountNavigatorView(parent) {
 export function refreshNavigatorView() {
   _unseen = false;
   refreshActivity();
-  renderIntent();
   render({ force: true });
   renderActivity({ force: true });
 }
@@ -297,19 +216,6 @@ export function applyNavigatorComments(msg) {
   _commentsByUri = applyCommentsMessage(_commentsByUri, msg);
   noteArrival(hasComments(msg));
   render();
-  refreshActivity();
-}
-
-/*
- * The intent model moved. A model proposal is navigator output and raises the dot; the operator's own
- * correction is not news to the operator, so it does not.
- */
-export function applyNavigatorIntent(msg) {
-  const next = intentOfMessage(msg);
-  const moved = hasIntentChanged(_intent, next);
-  _intent = next;
-  noteArrival(moved && next.source === 'model' && !!next.text);
-  renderIntent();
   refreshActivity();
 }
 
@@ -338,9 +244,7 @@ export function applyIngestSnapshot(msg) {
 export function applyNavigatorSnapshot(msg) {
   _findingsByUri = applyFindingsSnapshot(msg);
   _commentsByUri = applyCommentsSnapshot(msg);
-  _intent = intentOfMessage(msg);
   noteArrival(totalFindingCount(_findingsByUri) + totalCommentCount(_commentsByUri) > 0);
-  renderIntent();
   render();
   refreshActivity();
 }

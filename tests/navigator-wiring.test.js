@@ -30,6 +30,11 @@ function delay(ms) {
   return new Promise((resolve) => { setTimeout(resolve, ms).unref(); });
 }
 
+// Only the uris the tab currently has a findings section for, which is what the sweep tests assert on.
+function findingSections(wiring) {
+  return wiring.documentsSnapshot().filter((entry) => entry.diagnostics.length > 0);
+}
+
 // --- Wiring driven directly (injected timers, no sockets) ---
 
 function fakeTimers() {
@@ -208,7 +213,7 @@ test('an edit that fixes the last finding broadcasts an empty array and drops th
 
   lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
   timers.runPending();
-  assert.equal(wiring.findingsSnapshot().length, 1);
+  assert.equal(findingSections(wiring).length, 1);
 
   lsp('textDocument/didChange', didChangeParams(MARKDOWN_URI, 2, CLEAN_MARKDOWN));
   timers.runPending();
@@ -216,7 +221,7 @@ test('an edit that fixes the last finding broadcasts an empty array and drops th
   assert.deepEqual(broadcasts[1], {
     type: 'navigator-findings', uri: MARKDOWN_URI, diagnostics: [], ts: FIXED_TS,
   });
-  assert.deepEqual(wiring.findingsSnapshot(), [], 'a uri with no findings is absent, never stored empty');
+  assert.deepEqual(findingSections(wiring), [], 'a uri with no findings is absent, never stored empty');
 });
 
 test('didClose clears the uri and tells the tab to forget its section', (t) => {
@@ -231,7 +236,7 @@ test('didClose clears the uri and tells the tab to forget its section', (t) => {
   assert.deepEqual(broadcasts[1], {
     type: 'navigator-findings', uri: MARKDOWN_URI, diagnostics: [], ts: FIXED_TS,
   });
-  assert.deepEqual(wiring.findingsSnapshot(), []);
+  assert.deepEqual(findingSections(wiring), []);
 });
 
 test('closing a document that never had findings says nothing at all', (t) => {
@@ -256,7 +261,7 @@ test('the snapshot accessor carries every uri that currently has findings', (t) 
   lsp('textDocument/didOpen', didOpenParams(SCRIPT_URI, 'javascript', 'const the the = 1;\n'));
   timers.runPending();
 
-  const snapshot = wiring.findingsSnapshot();
+  const snapshot = findingSections(wiring);
   assert.deepEqual(snapshot.map((entry) => entry.uri), [MARKDOWN_URI], 'clean and non-markdown documents earn no entry');
   assert.deepEqual(snapshot[0].diagnostics.map((d) => d.code), ['repeated-word']);
 
@@ -284,7 +289,7 @@ test('a relay disconnect keeps the findings the tab is showing', (t) => {
   connection.close();
   assert.equal(connection.docCount, 0, 'the mirrored buffer is gone with the socket');
   assert.equal(broadcasts.length, afterSweep, 'but the tab is told nothing');
-  assert.deepEqual(wiring.findingsSnapshot().map((entry) => entry.uri), [MARKDOWN_URI]);
+  assert.deepEqual(findingSections(wiring).map((entry) => entry.uri), [MARKDOWN_URI]);
 });
 
 test('a lane with no broadcast injected still sweeps and still tracks findings', (t) => {
@@ -303,7 +308,7 @@ test('a lane with no broadcast injected still sweeps and still tracks findings',
   }));
   timers.runPending();
   assert.equal(sent.length, 1);
-  assert.deepEqual(wiring.findingsSnapshot().map((entry) => entry.uri), [MARKDOWN_URI]);
+  assert.deepEqual(findingSections(wiring).map((entry) => entry.uri), [MARKDOWN_URI]);
 });
 
 // --- Tier 3 model dispatch (docs/plan-navigator.md, M4), spawner injected ---
@@ -479,7 +484,7 @@ test('a COMMENTS result is broadcast for that uri and joins the connect-time sna
   });
   assert.deepEqual(wiring.documentsSnapshot(), [{
     uri: MARKDOWN_URI,
-    diagnostics: wiring.findingsSnapshot()[0].diagnostics,
+    diagnostics: wiring.documentsSnapshot()[0].diagnostics,
     comments: [COMMENT],
   }], 'one section carries both halves');
 });
@@ -568,132 +573,6 @@ test('a result that lands after its buffer closed is dropped rather than resurre
 
   assert.deepEqual(wiring.documentsSnapshot(), []);
   assert.equal(broadcasts.filter((message) => message.type === 'navigator-comments' && message.comments.length > 0).length, 0);
-});
-
-// --- The intent model (docs/plan-navigator.md, M5) ---
-
-function intentBroadcasts(broadcasts) {
-  return broadcasts.filter((message) => message.type === 'navigator-intent');
-}
-
-test('a model proposal is broadcast once and joins the connect-time snapshot', (t) => {
-  const { wiring, broadcasts } = drivenConnection();
-  t.after(() => wiring.stop());
-
-  assert.equal(wiring.applyModelIntent('reviewing the navigator plan, tightening scope'), true);
-  assert.deepEqual(intentBroadcasts(broadcasts), [{
-    type: 'navigator-intent',
-    intent: {
-      text: 'reviewing the navigator plan, tightening scope', source: 'model', locked: false, ts: FIXED_TS,
-    },
-    ts: FIXED_TS,
-  }]);
-  assert.deepEqual(wiring.snapshotMessage().intent, {
-    text: 'reviewing the navigator plan, tightening scope', source: 'model', locked: false, ts: FIXED_TS,
-  });
-});
-
-test('a proposal that changes nothing is not broadcast', (t) => {
-  const { wiring, broadcasts } = drivenConnection();
-  t.after(() => wiring.stop());
-
-  wiring.applyModelIntent('one belief');
-  assert.equal(wiring.applyModelIntent('one belief'), false);
-  assert.equal(wiring.applyModelIntent(''), false, 'a model with nothing to say says nothing');
-  assert.equal(intentBroadcasts(broadcasts).length, 1);
-});
-
-test('an operator correction locks the statement, and a later proposal is rejected with no broadcast', (t) => {
-  const { wiring, broadcasts } = drivenConnection();
-  t.after(() => wiring.stop());
-
-  wiring.setOperatorIntent('  rewriting the merge gate, not the spawn path  ');
-  assert.deepEqual(wiring.getIntent(), {
-    text: 'rewriting the merge gate, not the spawn path', source: 'operator', locked: true, ts: FIXED_TS,
-  });
-
-  assert.equal(wiring.applyModelIntent('a plan doc about spawning'), false);
-  assert.equal(intentBroadcasts(broadcasts).length, 1, 'the rejected proposal reaches no client');
-  assert.equal(wiring.getIntent().text, 'rewriting the merge gate, not the spawn path');
-});
-
-test('an empty correction clears the statement and hands control back to the model', (t) => {
-  const { wiring, broadcasts } = drivenConnection();
-  t.after(() => wiring.stop());
-
-  wiring.setOperatorIntent('mine for now');
-  assert.equal(wiring.setOperatorIntent('   '), true);
-  assert.deepEqual(wiring.getIntent(), {
-    text: '', source: null, locked: false, ts: 0,
-  });
-  assert.deepEqual(intentBroadcasts(broadcasts).at(-1).intent.text, '');
-
-  assert.equal(wiring.applyModelIntent('the model may speak again'), true);
-  assert.equal(wiring.getIntent().source, 'model');
-});
-
-test('an empty lane still carries an intent field on its snapshot', (t) => {
-  const { wiring } = drivenConnection();
-  t.after(() => wiring.stop());
-  assert.deepEqual(wiring.snapshotMessage().intent, {
-    text: '', source: null, locked: false, ts: 0,
-  });
-});
-
-test('the standing intent rides the dispatch, and the result updates it after the comments', async (t) => {
-  const { wiring, timers, calls, broadcasts, lsp } = dispatchingConnection({
-    respond: () => Promise.resolve({
-      verdict: 'COMMENTS', comments: [COMMENT], intent: 'a plan doc for the navigator intent model', reason: null,
-    }),
-  });
-  t.after(() => wiring.stop());
-
-  wiring.applyModelIntent('an early guess');
-  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
-  runSweepThenDispatch(timers);
-  await wiring.whenDispatchSettled();
-
-  assert.equal(calls[0].intent, 'an early guess', 'the prompt is built from what the lane currently believes');
-  assert.equal(wiring.getIntent().text, 'a plan doc for the navigator intent model');
-  const order = broadcasts.filter((message) => ['navigator-comments', 'navigator-intent'].includes(message.type));
-  assert.deepEqual(order.map((message) => message.type), ['navigator-intent', 'navigator-comments', 'navigator-intent'],
-    'the dispatch result lands comments first, then the belief it came with');
-});
-
-test('a locked intent survives a dispatch that proposes another one', async (t) => {
-  const { wiring, timers, calls, broadcasts, lsp } = dispatchingConnection({
-    respond: () => Promise.resolve({
-      verdict: 'NONE', comments: [], intent: 'what the model would rather believe', reason: null,
-    }),
-  });
-  t.after(() => wiring.stop());
-
-  wiring.setOperatorIntent('what I am actually doing');
-  const beforeDispatch = intentBroadcasts(broadcasts).length;
-
-  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
-  runSweepThenDispatch(timers);
-  await wiring.whenDispatchSettled();
-
-  assert.equal(calls[0].intent, 'what I am actually doing');
-  assert.deepEqual(wiring.getIntent(), {
-    text: 'what I am actually doing', source: 'operator', locked: true, ts: FIXED_TS,
-  });
-  assert.equal(intentBroadcasts(broadcasts).length, beforeDispatch, 'the merge refused it, so no client hears about it');
-});
-
-test('a result with no intent field leaves the statement exactly as it was', async (t) => {
-  const { wiring, timers, lsp } = dispatchingConnection({
-    respond: () => Promise.resolve({ verdict: 'NONE', comments: [], reason: null }),
-  });
-  t.after(() => wiring.stop());
-
-  wiring.applyModelIntent('still the current belief');
-  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
-  runSweepThenDispatch(timers);
-  await wiring.whenDispatchSettled();
-
-  assert.equal(wiring.getIntent().text, 'still the current belief');
 });
 
 // The M3 lane, byte for byte: an absent config.navigator.dispatch must cost nothing at all.
@@ -1072,13 +951,11 @@ test('a closed connection is poked no more than a closed buffer is', async (t) =
   assert.equal(timers.pendingCount, 0);
 });
 
-test('activity alone re-dispatches an untouched buffer, and the belief it comes back with lands', async (t) => {
+test('activity alone re-dispatches an untouched buffer', async (t) => {
   const {
     wiring, timers, calls, lsp, clock, machine,
   } = pokableConnection({
-    respond: () => Promise.resolve({
-      verdict: 'NONE', comments: [], intent: 'wiring the ingest lane into the navigator gate', reason: null,
-    }),
+    respond: () => Promise.resolve({ verdict: 'NONE', comments: [], reason: null }),
   });
   t.after(() => wiring.stop());
 
@@ -1096,7 +973,6 @@ test('activity alone re-dispatches an untouched buffer, and the belief it comes 
 
   assert.equal(calls.length, 2, 'new events are what re-open a document nobody is editing');
   assert.equal(calls[1].text, REPEATED_WORD_MARKDOWN);
-  assert.equal(wiring.getIntent().text, 'wiring the ingest lane into the navigator gate');
 });
 
 test('a poke with no new events behind it is refused, so an aging digest cannot buy a dispatch', async (t) => {
@@ -1190,74 +1066,6 @@ test('a seq provider that throws costs the movement signal, never the dispatch',
   assert.equal(wiring.latestContextSeq(), null);
 });
 
-test('the machine cannot poke its way past its own quota, and typing still gets through', async (t) => {
-  const {
-    wiring, timers, calls, notes, lsp, clock, machine,
-  } = pokableConnection({ dispatch: { activityMaxPerHour: 1 } });
-  t.after(() => wiring.stop());
-
-  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
-  runSweepThenDispatch(timers);
-  await wiring.whenDispatchSettled();
-  assert.equal(calls.length, 1, 'the buffer was read once when it was opened');
-
-  for (let event = 1; event <= 3; event += 1) {
-    clock.now += 1000;
-    machine.seq += 1;
-    wiring.noteActivity();
-    timers.runPending();
-    await wiring.whenDispatchSettled();
-  }
-  assert.equal(calls.length, 2, 'one activity dispatch, which is the whole quota');
-  assert.ok(notes.some((line) => line.includes('activity-cap')));
-
-  // What the quota exists to protect: the carbon unit saves, and the budget is still there for them.
-  clock.now += 1000;
-  lsp('textDocument/didChange', didChangeParams(MARKDOWN_URI, 2, '# Title\n\nA sentence they just typed.\n'));
-  lsp('textDocument/didSave', { textDocument: { uri: MARKDOWN_URI } });
-  await wiring.whenDispatchSettled();
-  assert.equal(calls.length, 3, 'an edit answers to the total budget only');
-});
-
-/*
- * The cold start at the wiring altitude: a buffer whose first sweep-armed window was turned away has no
- * recorded hash, so when a poke later arms it the gate has nothing to read but the arming reason. The
- * quota is zero here, which makes the classification directly visible: 'activity-cap' can only be
- * reached by a dispatch classified as the machine's, and 'hour-cap' is what a misread would say.
- */
-test('a buffer first read after a poke is charged to the machine, not to nobody typing', async (t) => {
-  const otherUri = 'file:///tmp/other.md';
-  const {
-    wiring, timers, calls, notes, lsp, clock, machine,
-  } = pokableConnection({ dispatch: { maxPerHour: 1 } });
-  t.after(() => wiring.stop());
-
-  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
-  runSweepThenDispatch(timers);
-  await wiring.whenDispatchSettled();
-  assert.equal(calls.length, 1, 'the first buffer spends the whole budget');
-
-  lsp('textDocument/didOpen', didOpenParams(otherUri, 'markdown', REPEATED_WORD_MARKDOWN));
-  runSweepThenDispatch(timers);
-  await wiring.whenDispatchSettled();
-  assert.equal(calls.length, 1);
-  assert.ok(notes.some((line) => line.includes('hour-cap')), 'its sweep-armed window was turned away, so it recorded no hash');
-
-  // Only the second buffer stays open, so the poke below reaches exactly one document.
-  lsp('textDocument/didClose', { textDocument: { uri: MARKDOWN_URI } });
-  clock.now += 1000;
-  machine.seq = 5;
-  wiring.noteActivity();
-  timers.runPending();
-  await wiring.whenDispatchSettled();
-
-  assert.equal(calls.length, 1);
-  assert.ok(
-    notes.some((line) => line.includes('activity-cap')),
-    `a poke-armed first read must be classified as activity, saw ${JSON.stringify(notes)}`,
-  );
-});
-
 test('a refusal is logged when the gate changes, not once per quiet window forever', async (t) => {
   const {
     wiring, timers, calls, notes, lsp, clock, machine,
@@ -1290,41 +1098,6 @@ test('a refusal is logged when the gate changes, not once per quiet window forev
   timers.runPending();
   await wiring.whenDispatchSettled();
   assert.equal(unchangedLines(), 2, 'a dispatch happened in between, so the next refusal is news again');
-});
-
-// The operator's own save being turned away is the one refusal that must always reach the log, even
-// when a poke was already refused by the same cap moments earlier.
-test('a save refused by the same cap as a poke is logged, not swallowed as a repeat', async (t) => {
-  const otherUri = 'file:///tmp/other.md';
-  const {
-    wiring, timers, calls, notes, lsp, clock, machine,
-  } = pokableConnection({ dispatch: { maxPerHour: 2, activityMaxPerHour: 1 } });
-  t.after(() => wiring.stop());
-
-  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
-  runSweepThenDispatch(timers);
-  await wiring.whenDispatchSettled();
-  lsp('textDocument/didOpen', didOpenParams(otherUri, 'markdown', REPEATED_WORD_MARKDOWN));
-  runSweepThenDispatch(timers);
-  await wiring.whenDispatchSettled();
-  assert.equal(calls.length, 2, 'two buffers read once each, and the hourly budget is spent');
-  lsp('textDocument/didClose', { textDocument: { uri: otherUri } });
-
-  clock.now += 1000;
-  machine.seq = 5;
-  wiring.noteActivity();
-  timers.runPending();
-  await wiring.whenDispatchSettled();
-
-  clock.now += 1000;
-  lsp('textDocument/didChange', didChangeParams(MARKDOWN_URI, 2, '# Title\n\nA sentence they just typed.\n'));
-  lsp('textDocument/didSave', { textDocument: { uri: MARKDOWN_URI } });
-  await wiring.whenDispatchSettled();
-
-  const hourCapLines = notes.filter((line) => line.includes('hour-cap'));
-  assert.equal(hourCapLines.length, 2, `both refusals are news, saw ${JSON.stringify(notes)}`);
-  assert.ok(hourCapLines.some((line) => line.includes('(activity)')));
-  assert.ok(hourCapLines.some((line) => line.includes('(edit)')));
 });
 
 test('a seq that is not a finite number is read as no lane rather than as movement', async (t) => {

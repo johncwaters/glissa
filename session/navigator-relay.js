@@ -50,7 +50,8 @@ function initializeResult() {
     capabilities: {
       textDocumentSync: {
         openClose: true,
-        change: 2,
+        // FULL: the daemon re-sweeps the whole document on every change, so ranges buy it nothing.
+        change: 1,
       },
     },
     serverInfo: {

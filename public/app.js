@@ -12,7 +12,7 @@ import { writeClipboardText } from './dom-helpers.js';
 import { activateFocusView, centerSessionQuietly, deactivateFocusView, focusAdjacentInRail, focusNextAttention, focusNthInRail, getFocusedSessionId, isFocusActive, mountFocusView, noteKnownProjectPath, refreshFocusRoster, restoreFocusedSession, setFocusMergeStatus } from './focus-view/focus-view.js';
 import { initFormFactor, isPhoneLayout, onLayoutChange } from './form-factor.js';
 import { applyHealthSnapshot, mountHealthMonitor } from './health-monitor.js';
-import { applyIngestActivity, applyIngestSnapshot, applyNavigatorComments, applyNavigatorFindings, applyNavigatorIntent, applyNavigatorSnapshot, mountNavigatorView, refreshNavigatorView, setNavigatorActivityCallback } from './navigator-panel.js';
+import { applyIngestActivity, applyIngestSnapshot, applyNavigatorComments, applyNavigatorFindings, applyNavigatorSnapshot, mountNavigatorView, refreshNavigatorView, setNavigatorActivityCallback } from './navigator-panel.js';
 import { initNotifications, showDesktopNotification } from './notifications.js';
 import { activatePhoneShell, deactivatePhoneShell, getPhoneSessionId, isPhoneScreenActive, isPhoneShellActive, mountPhoneShell, refreshPhoneBoard, setPhoneScreenAttention, showPhoneScreen } from './phone/phone-shell.js';
 import { applyPrStatus, mountPrView, setPrActivityCallback } from './pr-panel.js';
@@ -280,8 +280,6 @@ const messageHandlers = {
   'navigator-findings': (msg) => applyNavigatorFindings(msg),
   // Tier 3 model comments for one uri, pushed when a dispatch lands (empty clears that uri).
   'navigator-comments': (msg) => applyNavigatorComments(msg),
-  // The machine-wide intent statement, pushed whenever it actually moves (model proposal or correction).
-  'navigator-intent':   (msg) => applyNavigatorIntent(msg),
   'navigator-snapshot': (msg) => applyNavigatorSnapshot(msg),
   // Ingest lane. One batched delta per second at most (overflow inside the window arrives as a count),
   // and a snapshot on every connect: like the navigator's, the deltas are deliberately not replayable,

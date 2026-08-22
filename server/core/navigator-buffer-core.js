@@ -1,3 +1,9 @@
+/*
+ * Pure document store for the navigator lane. The relay advertises FULL textDocumentSync, so a
+ * didChange carries the whole buffer and there are no ranges to splice: the wiring re-sweeps the whole
+ * document on every applied change anyway, so incremental offsets only bought CRLF edge cases.
+ */
+
 'use strict';
 
 function createDocStore() {
@@ -40,18 +46,7 @@ function applyDidChange(store, params) {
   const changes = Array.isArray(params.contentChanges) ? params.contentChanges : [];
   let text = doc.text;
   for (const change of changes) {
-    const changedText = typeof change.text === 'string' ? change.text : '';
-    if (!change.range) {
-      text = changedText;
-      continue;
-    }
-
-    const start = offsetAt(text, change.range.start);
-    const end = offsetAt(text, change.range.end);
-    if (start === null || end === null || end < start) {
-      return { applied: false, reason: 'invalid-range' };
-    }
-    text = text.slice(0, start) + changedText + text.slice(end);
+    text = typeof change.text === 'string' ? change.text : '';
   }
 
   store.docsByUri[uri] = {
@@ -79,30 +74,6 @@ function getDoc(store, uri) {
 
 function listDocs(store) {
   return Object.keys(store.docsByUri).map((uri) => getDoc(store, uri));
-}
-
-function offsetAt(text, position) {
-  if (!position || position.line < 0 || position.character < 0) return null;
-
-  let line = 0;
-  let offset = 0;
-  while (line < position.line) {
-    const nextNewline = text.indexOf('\n', offset);
-    if (nextNewline === -1) return null;
-    offset = nextNewline + 1;
-    line++;
-  }
-
-  const lineEnd = text.indexOf('\n', offset);
-  const end = lineEnd === -1 ? text.length : crlfAwareLineEnd(text, lineEnd);
-  const target = offset + position.character;
-  if (target > end) return null;
-  return target;
-}
-
-function crlfAwareLineEnd(text, lineEnd) {
-  if (lineEnd > 0 && text[lineEnd - 1] === '\r') return lineEnd - 1;
-  return lineEnd;
 }
 
 module.exports = {

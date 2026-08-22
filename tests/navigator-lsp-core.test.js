@@ -10,8 +10,8 @@ const {
   serializeFrame,
 } = require('../server/core/navigator-lsp-core');
 
-function feedAll(chunks) {
-  let state = createParserState();
+function feedAll(chunks, startState = null) {
+  let state = startState || createParserState();
   const messages = [];
   for (const chunk of chunks) {
     const frame = feedFrameBytes(state, chunk);
@@ -77,48 +77,25 @@ test('feedFrameBytes reports malformed JSON and recovers for the next frame', ()
   assert.deepEqual(messages, [{ parseError: true, raw: '{"x":}' }, next]);
 });
 
-test('feedFrameBytes reports missing Content-Length and recovers for the next frame', () => {
+/*
+ * A headerless block is unframeable and an editor's own LSP client never sends one, so the buffered
+ * bytes are dropped rather than scanned for a header that might follow them.
+ */
+test('feedFrameBytes reports a missing Content-Length and drops what it cannot frame', () => {
   const next = { jsonrpc: '2.0', method: 'next' };
   const badHeader = Buffer.from('Content-Type: application/vscode-jsonrpc; charset=utf-8\r\n\r\n');
-  const { messages } = feedAll([Buffer.concat([badHeader, Buffer.from('discard me\n'), serializeFrame(next)])]);
+  const { state, messages } = feedAll([Buffer.concat([badHeader, Buffer.from('discard me\n'), serializeFrame(next)])]);
   assert.deepEqual(messages, [
     {
       parseError: true,
       reason: 'missing-content-length',
       raw: 'Content-Type: application/vscode-jsonrpc; charset=utf-8',
     },
-    next,
   ]);
-});
+  assert.equal(state.buffer.length, 0);
 
-test('feedFrameBytes does not recover from Content-Length text inside discarded body bytes', () => {
-  const next = { jsonrpc: '2.0', method: 'next', params: { text: 'body says Content-Length: but stays body text' } };
-  const badHeader = Buffer.from('Content-Type: application/vscode-jsonrpc; charset=utf-8\r\n\r\n');
-  const discardedBody = Buffer.from('{"text":"Content-Length:"}\n', 'utf8');
-  const { messages } = feedAll([Buffer.concat([badHeader, discardedBody, serializeFrame(next)])]);
-  assert.deepEqual(messages, [
-    {
-      parseError: true,
-      reason: 'missing-content-length',
-      raw: 'Content-Type: application/vscode-jsonrpc; charset=utf-8',
-    },
-    next,
-  ]);
-});
-
-test('feedFrameBytes recovers after multibyte bytes before the next header', () => {
-  const next = { jsonrpc: '2.0', method: 'next' };
-  const badHeader = Buffer.from('Content-Type: application/vscode-jsonrpc; charset=utf-8\r\n\r\n');
-  const discardedBody = Buffer.from('discard snowman \u2603\n', 'utf8');
-  const { messages } = feedAll([Buffer.concat([badHeader, discardedBody, serializeFrame(next)])]);
-  assert.deepEqual(messages, [
-    {
-      parseError: true,
-      reason: 'missing-content-length',
-      raw: 'Content-Type: application/vscode-jsonrpc; charset=utf-8',
-    },
-    next,
-  ]);
+  // The stream reads cleanly again from the next well-formed frame.
+  assert.deepEqual(feedAll([serializeFrame(next)], state).messages, [next]);
 });
 
 test('classifyMessage separates requests notifications responses and invalid messages', () => {
