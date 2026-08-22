@@ -1,6 +1,6 @@
 # Glissa CLI Testing Guide
 
-Test scenarios for Glissa's CLI functionality. Run these before cutting a release, since a tagged commit is what a `npm install -g github:johncwaters/glissa` and a `claude-setup` server update both pull. See `distribution.md` for the shipping model.
+Test scenarios for Glissa's CLI functionality. Run these before cutting a release, since the startup update check keys on the `vX.Y.Z` release tag. See `distribution.md` for the shipping model.
 
 ## Prerequisites
 

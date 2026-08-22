@@ -244,29 +244,18 @@ export function shortSha(sha) {
   return text.slice(0, 7).toLowerCase();
 }
 
-// The commit pair is the real signal (Glissa ships as a branch tip, so most updates carry no version
-// bump); the version pair is the fallback for an install whose commit could not be resolved.
 export function updateAvailableRow(update) {
   const command = textOr(update?.command, '');
-  const currentSha = shortSha(update?.currentSha);
-  const latestSha = shortSha(update?.latestSha);
-  if (currentSha && latestSha) return { text: `Update available: ${currentSha} -> ${latestSha}`, command };
   const current = textOr(update?.current, '');
   const latest = textOr(update?.latest, '');
   if (!current || !latest) return null;
   return { text: `Update available: ${current} -> ${latest}`, command };
 }
 
-// The banner's line: the same sha-first headline as updateAvailableRow, plus the version pair in
-// parentheses when it moved too. Beside the row builder so the sha-prefix format cannot drift.
 export function updateBannerText(update) {
-  const from = shortSha(update?.currentSha);
-  const to = shortSha(update?.latestSha);
   const current = textOr(update?.current, '');
   const latest = textOr(update?.latest, '');
-  if (!from || !to) return `Update available: ${current} -> ${latest}`;
-  if (!current || !latest || current === latest) return `Update available: ${from} -> ${to}`;
-  return `Update available: ${from} -> ${to} (${current} -> ${latest})`;
+  return `Update available: ${current} -> ${latest}`;
 }
 
 // One list so the panel renders ops in a fixed order regardless of which feed landed first: the

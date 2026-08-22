@@ -34,7 +34,7 @@ const DEFAULT_CONFIG = {
   // post-mortem needs. Raw PTY byte capture is a separate opt-in (`capture.enabled`, bulky,
   // replay-harness work only). See AGENTS.md, "Session Recording", and session-recorder.js.
   recordSignals: true,
-  // Check GitHub once at startup (the main branch's package.json) for a newer glissa and surface the
+  // Check GitHub once at startup for a newer glissa release tag and surface the
   // update command (dashboard banner + console line). Advisory, fail-open, off-switchable.
   // See server/update-check.js.
   checkForUpdates: true,

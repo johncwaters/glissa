@@ -20,9 +20,9 @@ gates:
   post_release:
     - git ls-remote --tags origin vX.Y.Z           # GitHub has the tag
     - gh release view vX.Y.Z
-    - "curl -s https://raw.githubusercontent.com/johncwaters/glissa/main/package.json"   # the version the startup update check serves
-    - sync main: git fetch . develop:main && git push origin main   # close the standing main-drift; also what makes the update check see the new version
-  evidence: [git_tag, github_release_url, raw_main_package_version]
+    - git ls-remote --tags origin vX.Y.Z^{}        # the startup update check can see the peeled release tag
+    - sync main: git fetch . develop:main && git push origin main   # close the standing main-drift for clone updates
+  evidence: [git_tag, github_release_url, remote_release_tag]
 publish:
   trigger: local_script
   detail:

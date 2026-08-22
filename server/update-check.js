@@ -1,9 +1,7 @@
 'use strict';
 
-// Self-update check: compare the commit this install was built from against the tip of the main branch,
-// and surface the command that updates THIS flavor of install. Glissa ships as a branch tip (an npm git
-// install or a clone), so the old semver-only check saw an update only on release commits and missed
-// nearly everything; the version pair survives as the label, not the signal.
+// Self-update check: compare the running version against the latest GitHub release tag, and surface the
+// command that updates THIS flavor of install.
 // Advisory only - every failure path resolves null or degrades to the semver compare, never rejects, so
 // a boot is never blocked, delayed past the timeout, or crashed by this check. Notify only: nothing here
 // runs an update (on Windows the running server holds node_modules/node-pty open).
@@ -20,16 +18,15 @@ const {
   decideInstallFlavor,
   decideUpdateStatus,
   isCheckFresh,
-  parseLatestVersion,
-  parseLsRemoteSha,
+  parseLatestReleaseTag,
+  parseLsRemoteTags,
   parseResolvedSha,
   normalizeSha,
 } = require('./core/update-core');
 
-const GITHUB_PACKAGE_JSON_URL = 'https://raw.githubusercontent.com/johncwaters/glissa/main/package.json';
 const GIT_REMOTE_URL = 'https://github.com/johncwaters/glissa.git';
-const GITHUB_SHA_API_URL = 'https://api.github.com/repos/johncwaters/glissa/commits/main';
-// Budget for the WHOLE check (up to three network legs), not per request.
+const GITHUB_LATEST_RELEASE_URL = 'https://api.github.com/repos/johncwaters/glissa/releases/latest';
+// Budget for the WHOLE check, not per request.
 const DEFAULT_TIMEOUT_MS = 8000;
 const GIT_HEAD_TIMEOUT_MS = 3000;
 const LS_REMOTE_TIMEOUT_MS = 5000;
@@ -99,33 +96,20 @@ async function resolveInstalledIdentity({ packageRoot, runCommand, signal }) {
   return { flavor: 'clone', installedSha: normalizeSha(stdout) };
 }
 
-// The tip of main. `git ls-remote` is primary because it is the same protocol an update would use and
-// needs no API budget; the GitHub API is the fallback for a host with no git on PATH.
-async function resolveRemoteSha({ runCommand, fetchFn, signal }) {
-  const stdout = await runGitStdout(runCommand, ['ls-remote', GIT_REMOTE_URL, 'refs/heads/main'], {
+async function resolveLatestRelease({ runCommand, fetchFn, signal }) {
+  const stdout = await runGitStdout(runCommand, ['ls-remote', '--tags', GIT_REMOTE_URL], {
     timeout: LS_REMOTE_TIMEOUT_MS,
     signal,
   });
-  const fromLsRemote = parseLsRemoteSha(stdout);
+  const fromLsRemote = parseLsRemoteTags(stdout);
   if (fromLsRemote) return fromLsRemote;
   try {
-    const res = await fetchFn(GITHUB_SHA_API_URL, {
+    const res = await fetchFn(GITHUB_LATEST_RELEASE_URL, {
       signal,
-      headers: { Accept: 'application/vnd.github.sha', 'User-Agent': 'glissa-update-check' },
+      headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'glissa-update-check' },
     });
     if (!res || !res.ok) return null;
-    return normalizeSha(await res.text());
-  } catch {
-    return null;
-  }
-}
-
-// The published version string, kept purely as the label beside the commit pair.
-async function resolveLatestVersion({ fetchFn, packageJsonUrl, signal }) {
-  try {
-    const res = await fetchFn(packageJsonUrl, { signal });
-    if (!res || !res.ok) return null;
-    return parseLatestVersion(await res.json());
+    return parseLatestReleaseTag(await res.json());
   } catch {
     return null;
   }
@@ -147,9 +131,9 @@ function writeCheckState(statePath, state) {
 
 /**
  * Decide whether a newer Glissa exists. Resolves:
- *   { updateAvailable, current, latest, currentSha, latestSha, compareUrl, command, flavor }
- *     when a comparison was possible (either both commits are known, or a remote version was read)
- *   null when nothing at all could be read (no remote commit AND no remote version)
+ *   { updateAvailable, current, latest, currentSha, latestSha, releaseUrl, command, flavor }
+ *     when a comparison was possible
+ *   null when no latest release version could be read
  * Never rejects. The abort timer is deliberately NOT unref'd: it is the only thing that settles the
  * promise when a request hangs, so an unref'd timer lets the loop drain and leaves the caller awaiting
  * forever instead of resolving null. It is cleared in every exit path, so it pins the loop only while a
@@ -160,7 +144,6 @@ async function checkForUpdate({
   currentVersion,
   fetchFn = fetch,
   timeoutMs = DEFAULT_TIMEOUT_MS,
-  packageJsonUrl = GITHUB_PACKAGE_JSON_URL,
   abortController = new AbortController(),
   packageRoot = path.join(__dirname, '..'),
   runCommand = execFileAsync,
@@ -174,17 +157,18 @@ async function checkForUpdate({
     const installed = await resolveInstalledIdentity({ packageRoot, runCommand, signal });
     const cached = readCheckState(statePath);
     if (cached && isCheckFresh(cached.lastCheckAt, now, ttlMs)) {
-      return finish(installed, normalizeSha(cached.latestSha), cached.latestVersion || null, currentVersion);
+      return finish(installed, { version: cached.latestVersion || null, sha: cached.latestSha || null }, currentVersion);
     }
     signal.throwIfAborted();
-    const remoteSha = await resolveRemoteSha({ runCommand, fetchFn, signal });
-    // A leg that consumed the budget must not start the next: a fetchFn only rejects an abort it observes.
-    signal.throwIfAborted();
-    const latestVersion = await resolveLatestVersion({ fetchFn, packageJsonUrl, signal });
-    if (remoteSha || latestVersion) {
-      writeCheckState(statePath, { lastCheckAt: now, latestSha: remoteSha, latestVersion });
+    const latestRelease = await resolveLatestRelease({ runCommand, fetchFn, signal });
+    if (latestRelease?.version) {
+      writeCheckState(statePath, {
+        lastCheckAt: now,
+        latestVersion: latestRelease.version,
+        latestSha: normalizeSha(latestRelease.sha),
+      });
     }
-    return finish(installed, remoteSha, latestVersion, currentVersion);
+    return finish(installed, latestRelease, currentVersion);
   } catch {
     return null;
   } finally {
@@ -192,14 +176,12 @@ async function checkForUpdate({
   }
 }
 
-// A verdict needs something to compare: either both commits, or a remote version for the semver
-// fallback. With neither there is nothing to report, which is the null contract the caller relies on.
-function finish(installed, remoteSha, latestVersion, currentVersion) {
-  const canCompareSha = Boolean(installed.installedSha && remoteSha);
-  if (!canCompareSha && !latestVersion) return null;
+function finish(installed, latestRelease, currentVersion) {
+  const latestVersion = latestRelease?.version || null;
+  if (!latestVersion) return null;
   return decideUpdateStatus({
     installedSha: installed.installedSha,
-    remoteSha,
+    latestSha: latestRelease?.sha,
     currentVersion,
     latestVersion,
     flavor: installed.flavor,
@@ -208,8 +190,7 @@ function finish(installed, remoteSha, latestVersion, currentVersion) {
 
 module.exports = {
   checkForUpdate,
-  GITHUB_PACKAGE_JSON_URL,
-  GITHUB_SHA_API_URL,
+  GITHUB_LATEST_RELEASE_URL,
   GIT_REMOTE_URL,
   STATE_FILE_NAME,
   STATE_TTL_MS,

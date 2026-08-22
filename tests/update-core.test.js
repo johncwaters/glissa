@@ -1,34 +1,26 @@
 'use strict';
 
-// Unit tests for the pure update-check decisions (server/core/update-core.js). The load-bearing
-// guarantees: a commit comparison is exact (any difference from the branch tip is an update), a missing
-// commit degrades to the semver compare rather than guessing, and every parse fails closed to null so an
-// unreadable install identity can never fabricate an update nudge.
-
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
-  NPM_GLOBAL_COMMAND,
   CLONE_COMMAND,
   shortSha,
   parseResolvedSha,
-  parseLsRemoteSha,
+  parseTagVersion,
+  parseLsRemoteTags,
+  parseLatestReleaseTag,
   decideInstallFlavor,
   buildUpdateCommand,
-  buildCompareUrl,
+  buildReleaseUrl,
   compareSemver,
-  parseLatestVersion,
   decideUpdateStatus,
   isCheckFresh,
 } = require('../server/core/update-core');
 
 const SHA_A = '0123456789abcdef0123456789abcdef01234567';
 const SHA_B = 'fedcba9876543210fedcba9876543210fedcba98';
-
-// ---------------------------------------------------------------------------
-// parseResolvedSha
-// ---------------------------------------------------------------------------
+const SHA_C = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 
 test('parseResolvedSha reads the commit fragment of an npm git spec', () => {
   assert.equal(parseResolvedSha(`git+https://github.com/johncwaters/glissa.git#${SHA_A}`), SHA_A);
@@ -44,21 +36,43 @@ test('parseResolvedSha returns null without a usable commit fragment', () => {
   assert.equal(parseResolvedSha(42), null);
 });
 
-// ---------------------------------------------------------------------------
-// parseLsRemoteSha
-// ---------------------------------------------------------------------------
-
-test('parseLsRemoteSha takes the sha field of the first usable line', () => {
-  assert.equal(parseLsRemoteSha(`${SHA_A}\trefs/heads/main\n`), SHA_A);
-  assert.equal(parseLsRemoteSha(`\n  ${SHA_B}   refs/heads/main`), SHA_B);
-  assert.equal(parseLsRemoteSha('fatal: could not read from remote repository'), null);
-  assert.equal(parseLsRemoteSha(''), null);
-  assert.equal(parseLsRemoteSha(undefined), null);
+test('parseTagVersion accepts only v-prefixed strict numeric semver tags', () => {
+  assert.equal(parseTagVersion('refs/tags/v0.20.0'), '0.20.0');
+  assert.equal(parseTagVersion('refs/tags/v0.20.0^{}'), '0.20.0');
+  assert.equal(parseTagVersion('v1.2.3'), '1.2.3');
+  assert.equal(parseTagVersion('0.1.0'), null);
+  assert.equal(parseTagVersion('refs/tags/0.1.0'), null);
+  assert.equal(parseTagVersion('refs/tags/v0.20.0-rc.1'), null);
+  assert.equal(parseTagVersion('refs/tags/v0.20.0+build.1'), null);
+  assert.equal(parseTagVersion('refs/tags/v0.20'), null);
+  assert.equal(parseTagVersion(null), null);
 });
 
-// ---------------------------------------------------------------------------
-// decideInstallFlavor
-// ---------------------------------------------------------------------------
+test('parseLsRemoteTags returns the latest semver tag and prefers peeled shas', () => {
+  const stdout = [
+    `${SHA_A}\trefs/tags/v0.9.1`,
+    `${SHA_B}\trefs/tags/v0.10.0`,
+    `${SHA_C}\trefs/tags/v0.10.0^{}`,
+    `${SHA_A}\trefs/tags/0.99.0`,
+    `${SHA_B}\trefs/tags/v9.9.9-rc.1`,
+  ].join('\n');
+  assert.deepEqual(parseLsRemoteTags(stdout), { version: '0.10.0', sha: SHA_C });
+});
+
+test('parseLsRemoteTags returns null when no valid release tag is present', () => {
+  assert.equal(parseLsRemoteTags(`${SHA_A}\trefs/tags/0.1.0\n${SHA_B}\trefs/heads/main`), null);
+  assert.equal(parseLsRemoteTags('fatal: could not read from remote repository'), null);
+  assert.equal(parseLsRemoteTags(''), null);
+  assert.equal(parseLsRemoteTags(undefined), null);
+});
+
+test('parseLatestReleaseTag reads tag_name and leaves sha null', () => {
+  assert.deepEqual(parseLatestReleaseTag({ tag_name: 'v0.21.0' }), { version: '0.21.0', sha: null });
+  assert.equal(parseLatestReleaseTag({ tag_name: '0.21.0' }), null);
+  assert.equal(parseLatestReleaseTag({ tag_name: 'v0.21.0-rc.1' }), null);
+  assert.equal(parseLatestReleaseTag({ name: 'v0.21.0' }), null);
+  assert.equal(parseLatestReleaseTag(null), null);
+});
 
 test('decideInstallFlavor prefers the lockfile commit, then gitHead, then a clone', () => {
   assert.deepEqual(
@@ -69,10 +83,7 @@ test('decideInstallFlavor prefers the lockfile commit, then gitHead, then a clon
     decideInstallFlavor({ lockfileSha: null, gitHeadSha: SHA_B, hasGitDir: true }),
     { flavor: 'npm-global', installedSha: SHA_B },
   );
-  assert.deepEqual(
-    decideInstallFlavor({ hasGitDir: true }),
-    { flavor: 'clone', installedSha: null },
-  );
+  assert.deepEqual(decideInstallFlavor({ hasGitDir: true }), { flavor: 'clone', installedSha: null });
   assert.deepEqual(decideInstallFlavor({}), { flavor: 'unknown', installedSha: null });
   assert.deepEqual(decideInstallFlavor(), { flavor: 'unknown', installedSha: null });
 });
@@ -84,23 +95,16 @@ test('decideInstallFlavor ignores a truncated or non-hex commit', () => {
   );
 });
 
-// ---------------------------------------------------------------------------
-// buildUpdateCommand / buildCompareUrl / shortSha
-// ---------------------------------------------------------------------------
-
-test('buildUpdateCommand matches the install flavor, unknown falling back to the clone command', () => {
-  assert.equal(buildUpdateCommand('npm-global'), NPM_GLOBAL_COMMAND);
-  assert.equal(buildUpdateCommand('npm-global'), 'npm install -g github:johncwaters/glissa --allow-git=root');
-  assert.equal(buildUpdateCommand('clone'), CLONE_COMMAND);
-  assert.equal(buildUpdateCommand('clone'), 'git pull --ff-only && npm ci && npm run build');
-  assert.equal(buildUpdateCommand('unknown'), CLONE_COMMAND);
-  assert.equal(buildUpdateCommand(undefined), CLONE_COMMAND);
+test('buildUpdateCommand pins npm-global to the latest tag and keeps clone commands unchanged', () => {
+  assert.equal(buildUpdateCommand('npm-global', '0.21.0'), 'npm install -g github:johncwaters/glissa#v0.21.0 --allow-git=root');
+  assert.equal(buildUpdateCommand('npm-global', null), 'npm install -g github:johncwaters/glissa --allow-git=root');
+  assert.equal(buildUpdateCommand('clone', '0.21.0'), CLONE_COMMAND);
+  assert.equal(buildUpdateCommand('unknown', '0.21.0'), CLONE_COMMAND);
 });
 
-test('buildCompareUrl points at the GitHub compare view, null without a commit', () => {
-  assert.equal(buildCompareUrl(SHA_A), `https://github.com/johncwaters/glissa/compare/${SHA_A}...main`);
-  assert.equal(buildCompareUrl(null), null);
-  assert.equal(buildCompareUrl('main'), null);
+test('buildReleaseUrl points at the release tag page', () => {
+  assert.equal(buildReleaseUrl('0.21.0'), 'https://github.com/johncwaters/glissa/releases/tag/v0.21.0');
+  assert.equal(buildReleaseUrl(null), null);
 });
 
 test('shortSha shortens a known commit and returns empty otherwise', () => {
@@ -109,10 +113,6 @@ test('shortSha shortens a known commit and returns empty otherwise', () => {
   assert.equal(shortSha('nope'), '');
   assert.equal(shortSha(null), '');
 });
-
-// ---------------------------------------------------------------------------
-// compareSemver / parseLatestVersion (moved verbatim from update-check.js)
-// ---------------------------------------------------------------------------
 
 test('compareSemver orders by major/minor/patch', () => {
   assert.equal(compareSemver('0.17.0', '0.16.0'), 1);
@@ -128,88 +128,51 @@ test('compareSemver tolerates leading v and trailing prerelease/build', () => {
   assert.equal(compareSemver('0.17.0+build.5', '0.17.0'), 0);
 });
 
-test('compareSemver fails open (returns 0) on unparseable input', () => {
+test('compareSemver fails open on unparseable input', () => {
   assert.equal(compareSemver('not-a-version', '0.16.0'), 0);
   assert.equal(compareSemver('0.16', '0.16.0'), 0);
   assert.equal(compareSemver(undefined, '0.16.0'), 0);
   assert.equal(compareSemver('0.16.0', null), 0);
 });
 
-test('parseLatestVersion reads .version, null on mismatch', () => {
-  assert.equal(parseLatestVersion({ version: '0.17.0' }), '0.17.0');
-  assert.equal(parseLatestVersion({ name: 'glissa' }), null);
-  assert.equal(parseLatestVersion({ version: 17 }), null);
-  assert.equal(parseLatestVersion(null), null);
-  assert.equal(parseLatestVersion('0.17.0'), null);
-});
-
-// ---------------------------------------------------------------------------
-// decideUpdateStatus
-// ---------------------------------------------------------------------------
-
-test('decideUpdateStatus reports an update when the commits differ, version bump or not', () => {
-  const status = decideUpdateStatus({
+test('decideUpdateStatus reports updates by version only', () => {
+  const newerWithSameSha = decideUpdateStatus({
     installedSha: SHA_A,
-    remoteSha: SHA_B,
-    currentVersion: '0.21.0',
+    latestSha: SHA_A,
+    currentVersion: '0.20.0',
     latestVersion: '0.21.0',
     flavor: 'npm-global',
   });
-  assert.deepEqual(status, {
+  assert.deepEqual(newerWithSameSha, {
     updateAvailable: true,
-    current: '0.21.0',
+    current: '0.20.0',
     latest: '0.21.0',
     currentSha: SHA_A,
-    latestSha: SHA_B,
-    compareUrl: `https://github.com/johncwaters/glissa/compare/${SHA_A}...main`,
-    command: NPM_GLOBAL_COMMAND,
+    latestSha: SHA_A,
+    releaseUrl: 'https://github.com/johncwaters/glissa/releases/tag/v0.21.0',
+    command: 'npm install -g github:johncwaters/glissa#v0.21.0 --allow-git=root',
     flavor: 'npm-global',
   });
-});
 
-test('decideUpdateStatus reports no update at the branch tip even when the version looks older', () => {
-  const status = decideUpdateStatus({
+  const sameVersionWithDifferentSha = decideUpdateStatus({
     installedSha: SHA_A,
-    remoteSha: SHA_A,
-    currentVersion: '0.20.0',
+    latestSha: SHA_B,
+    currentVersion: '0.21.0',
     latestVersion: '0.21.0',
     flavor: 'clone',
   });
-  assert.equal(status.updateAvailable, false);
-  assert.equal(status.command, CLONE_COMMAND);
+  assert.equal(sameVersionWithDifferentSha.updateAvailable, false);
+  assert.equal(sameVersionWithDifferentSha.command, CLONE_COMMAND);
 });
 
-test('decideUpdateStatus falls back to the semver compare when either commit is unknown', () => {
-  const behind = decideUpdateStatus({ remoteSha: SHA_B, currentVersion: '0.20.0', latestVersion: '0.21.0' });
-  assert.equal(behind.updateAvailable, true);
-  assert.equal(behind.currentSha, null);
-  assert.equal(behind.compareUrl, null);
-
-  const current = decideUpdateStatus({ installedSha: SHA_A, currentVersion: '0.21.0', latestVersion: '0.21.0' });
-  assert.equal(current.updateAvailable, false);
-
-  const ahead = decideUpdateStatus({ currentVersion: '0.22.0', latestVersion: '0.21.0' });
-  assert.equal(ahead.updateAvailable, false);
-});
-
-test('decideUpdateStatus fails open on unparseable versions with no commits', () => {
-  const status = decideUpdateStatus({ currentVersion: 'dev', latestVersion: 'nightly' });
+test('decideUpdateStatus fails open on unparseable versions and normalizes flavor', () => {
+  const status = decideUpdateStatus({ currentVersion: 'dev', latestVersion: 'nightly', flavor: 'sideloaded' });
   assert.equal(status.updateAvailable, false);
   assert.equal(status.current, 'dev');
   assert.equal(status.latest, 'nightly');
-});
-
-test('decideUpdateStatus normalizes an unknown flavor and absent fields to null', () => {
-  const status = decideUpdateStatus({ remoteSha: SHA_B, latestVersion: '0.21.0', flavor: 'sideloaded' });
   assert.equal(status.flavor, 'unknown');
-  assert.equal(status.current, null);
-  assert.equal(status.currentSha, null);
   assert.equal(status.command, CLONE_COMMAND);
 });
-
-// ---------------------------------------------------------------------------
-// isCheckFresh
-// ---------------------------------------------------------------------------
 
 test('isCheckFresh is true strictly inside the ttl', () => {
   assert.equal(isCheckFresh(1000, 1000, 100), true);

@@ -86,7 +86,7 @@ const {
 // configurable waitingEscalationSeconds setting).
 const ESCALATION_INTERVAL_MS = 300000;
 
-// How often a running server rechecks the branch tip after the boot check.
+// How often a running server rechecks the latest release after the boot check.
 const UPDATE_RECHECK_MS = 24 * 60 * 60 * 1000;
 
 /**
@@ -1899,21 +1899,18 @@ function createBackend(httpServer, options = {}) {
   // Fire-and-forget: NEVER awaited, so a slow/hung registry can't delay boot. The terminal .catch is
   // load-bearing - surface() calls console.log + broadcastControl, and this process has no
   // uncaughtException handler, so a throw here would become an unhandledRejection that crashes it.
-  // Primary dev-nag guard is the commit compare itself (a dev already at the branch tip never triggers
-  // a banner); isLocalConfig is a best-effort secondary skip. checkForUpdate is injectable so a boot
-  // test can drive it with a stub instead of hitting the network.
+  // Primary dev-nag guard is the release compare itself; isLocalConfig is a best-effort secondary skip.
+  // checkForUpdate is injectable so a boot test can drive it with a stub instead of hitting the network.
   const runUpdateCheck = options.checkForUpdate || defaultCheckForUpdate;
   function surfaceUpdate(result) {
     if (!result || !result.updateAvailable) return;
-    // A server left running for weeks rechecks daily; only a DIFFERENT tip is news, so the same update
-    // is logged and broadcast once. The cache still refreshes so a connect replay carries the latest.
+    // A server left running for weeks rechecks daily; only a different release is news.
     const alreadySurfaced = Boolean(updateStatus)
-      && updateStatus.latestSha === result.latestSha
-      && updateStatus.latest === result.latest;
+      && (updateStatus.latest || updateStatus.latestSha) === (result.latest || result.latestSha);
     updateStatus = result;
     if (alreadySurfaced) return;
-    const from = shortSha(result.currentSha) || result.current || 'unknown';
-    const to = shortSha(result.latestSha) || result.latest || 'unknown';
+    const from = result.current || 'unknown';
+    const to = result.latest || shortSha(result.latestSha) || 'unknown';
     console.log(`[update] A newer glissa is available: ${from} -> ${to}. Update: ${result.command}`);
     broadcastControl({ type: 'update-available', ...result });
   }

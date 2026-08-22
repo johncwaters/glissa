@@ -319,17 +319,15 @@ onControlMessage((msg) => {
 });
 
 // Dismissible update notice. The banner is passive (never a desktop notification); it shows the running
-// -> latest commit, a compare link, and the copy-pasteable update command for this install flavor.
-// Dismiss is keyed on the latest commit and persisted, so it stays dismissed until a NEWER tip arrives.
+// -> latest version, release link, and the copy-pasteable update command for this install flavor.
+// Dismiss is keyed on the latest version and persisted, so it stays dismissed until a newer release.
 // The Radar ops row is deliberately not gated by the dismissal: that panel is where a dismissed advisory
 // remains findable.
 let updateBannerDismissed = false;
 
-// What a dismissal remembers. The commit is the identity of the update; the version string is the
-// fallback for an install whose commit could not be resolved.
 function updateIdentity({ latestSha, latest }) {
-  if (typeof latestSha === 'string' && latestSha) return latestSha;
   if (typeof latest === 'string' && latest) return latest;
+  if (typeof latestSha === 'string' && latestSha) return latestSha;
   return null;
 }
 
@@ -343,8 +341,8 @@ function showUpdateBanner(msg) {
   document.getElementById('update-banner-text').textContent = updateBannerText(msg);
   document.getElementById('update-banner-cmd').textContent = command;
   const link = document.getElementById('update-banner-link');
-  link.hidden = !msg.compareUrl;
-  link.href = msg.compareUrl || '';
+  link.hidden = !msg.releaseUrl;
+  link.href = msg.releaseUrl || '';
   banner.hidden = false;
 
   const copyBtn = document.getElementById('update-banner-copy');

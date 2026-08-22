@@ -23,7 +23,7 @@ Backend runtime: the Express + WebSocket server factory and its control plane, p
 | `git-workspace.js` | THE ONLY module allowed to run `git worktree` (enforced by `tests/no-direct-git-worktree.test.js`); per-session worktree isolation + merge-back, also used by the PR-review lane |
 | `config-store.js` | Runtime config load/save/defaults; resolves the repo-root `config.json` via `__dirname/..` |
 | `child-process-safe.js` | THE ONLY module allowed to import `node:child_process` (enforced by `tests/no-direct-child-process.test.js`) |
-| `update-check.js` | Startup GitHub version check against the `main` branch `package.json` (abortable, advisory only) behind `config.checkForUpdates` |
+| `update-check.js` | Startup GitHub release-tag check (abortable, advisory only) behind `config.checkForUpdates` |
 | `pr-review-wiring.js` | PR auto-review IO shell: review-session/spawn plumbing, poller start/restart/stop, plus the pure prompt builder, result reader, start gate, and config key |
 | `ephemeral-session.js` | Shared ephemeral-Session registration: map insert, exit cleanup, destroy() wrap (used by the PR-review and PostHog investigation lanes) |
 | `pr-poller.js` | GitHub PR auto-review poller (opt-in): lists/filters/reviews/merges own PRs; IO-free, deps injected |

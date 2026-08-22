@@ -175,8 +175,8 @@ server/            # Backend runtime (Express + WS wiring, control plane, shared
   core/usage-number-core.js  # Shared finite-number and non-empty-string coercion helpers for usage cores
   core/usage-statusline-core.js  # Pure statusLine payload normalization: official plan limits, session cost, context fill, plus the broadcast throttle
   core/usage-savings-core.js  # Pure savings arithmetic: rtk gain JSON normalization, plus flat-rate prompt-cache savings from the report's Claude model rows
-  update-check.js      # Commit-freshness update check IO shell (installed sha vs main tip; abortable, advisory only, 6h throttle state) behind config.checkForUpdates
-  core/update-core.js  # Pure update decisions: sha normalize/parse, install flavor + per-flavor command, compare URL, verdict, throttle freshness
+  update-check.js      # Release-tag update check IO shell (installed identity, latest vX.Y.Z tag, abortable, advisory only, 6h throttle state) behind config.checkForUpdates
+  core/update-core.js  # Pure update decisions: sha/tag parsing, install flavor + per-flavor command, release URL, verdict, throttle freshness
   ephemeral-session.js # Shared ephemeral-Session registration: map insert, exit cleanup, destroy() wrap; used by the PR-review and PostHog investigation lanes
   pr-poller.js         # GitHub PR auto-review poller (opt-in): lists/filters/reviews/merges own PRs; IO-free, deps injected
   pr-gh.js             # gh/git wrappers for the PR poller (via child-process-safe); pure classifyChecks (four-way)

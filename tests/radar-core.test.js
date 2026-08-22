@@ -294,30 +294,30 @@ test('updateAvailableRow: needs both versions, carries the command', async () =>
   assert.equal(updateAvailableRow(null), null);
 });
 
-test('updateAvailableRow: the commit pair beats the version pair when both shas are known', async () => {
+test('updateAvailableRow: ignores shas and renders the version pair', async () => {
   const { updateAvailableRow } = await importCore();
   assert.deepEqual(
     updateAvailableRow({
       current: '1.2.0',
-      latest: '1.2.0',
+      latest: '1.3.0',
       currentSha: '0123456789abcdef0123456789abcdef01234567',
       latestSha: 'FEDCBA9876543210fedcba9876543210fedcba98',
       command: 'npm i -g glissa',
     }),
-    { text: 'Update available: 0123456 -> fedcba9', command: 'npm i -g glissa' },
+    { text: 'Update available: 1.2.0 -> 1.3.0', command: 'npm i -g glissa' },
   );
   const versionFallback = updateAvailableRow({ current: '1.2.0', latest: '1.3.0', currentSha: 'not-a-sha', command: 'c' });
   assert.equal(versionFallback.text, 'Update available: 1.2.0 -> 1.3.0');
 });
 
-test('updateBannerText: sha headline, version pair in parentheses only when it moved', async () => {
+test('updateBannerText: renders only the version pair', async () => {
   const { updateBannerText } = await importCore();
   const shas = {
     currentSha: '0123456789abcdef0123456789abcdef01234567',
     latestSha: 'fedcba9876543210fedcba9876543210fedcba98',
   };
-  assert.equal(updateBannerText({ ...shas, current: '1.2.0', latest: '1.2.0' }), 'Update available: 0123456 -> fedcba9');
-  assert.equal(updateBannerText({ ...shas, current: '1.2.0', latest: '1.3.0' }), 'Update available: 0123456 -> fedcba9 (1.2.0 -> 1.3.0)');
+  assert.equal(updateBannerText({ ...shas, current: '1.2.0', latest: '1.2.0' }), 'Update available: 1.2.0 -> 1.2.0');
+  assert.equal(updateBannerText({ ...shas, current: '1.2.0', latest: '1.3.0' }), 'Update available: 1.2.0 -> 1.3.0');
   assert.equal(updateBannerText({ current: '1.2.0', latest: '1.3.0' }), 'Update available: 1.2.0 -> 1.3.0');
 });
 

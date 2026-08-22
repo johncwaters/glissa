@@ -1,8 +1,6 @@
 'use strict';
 
-// Pure decisions behind the self-update check. Glissa is distributed as a GitHub BRANCH TIP (an npm git
-// install or a clone), so package.json's version only moves on release commits and is a label, not the
-// freshness signal: the signal is the commit the install was built from versus the main branch head.
+// Pure decisions behind the self-update check. The freshness signal is the latest GitHub release tag.
 // Everything here is IO-free and clock-free (the caller passes `now`), so the shell in
 // server/update-check.js stays a thin wrapper around these rules.
 
@@ -12,6 +10,7 @@ const NPM_GLOBAL_COMMAND = `npm install -g github:${REPO_SLUG} --allow-git=root`
 const CLONE_COMMAND = 'git pull --ff-only && npm ci && npm run build';
 const SHORT_SHA_LENGTH = 7;
 const INSTALL_FLAVORS = new Set(['npm-global', 'clone', 'unknown']);
+const TAG_VERSION_RE = /^v(\d+\.\d+\.\d+)$/;
 
 // A commit id, lowercased, or null for anything that is not a full 40-hex sha. Every sha entering the
 // comparison goes through here, so a short sha, a ref name, or a truncated read can never compare equal
@@ -40,15 +39,38 @@ function parseResolvedSha(resolved) {
   return normalizeSha(resolved.slice(fragmentAt + 1));
 }
 
-// First field of the first `git ls-remote` line, which is the sha the ref points at.
-function parseLsRemoteSha(stdout) {
+function parseTagVersion(ref) {
+  if (typeof ref !== 'string') return null;
+  const normalized = ref.trim().replace(/^refs\/tags\//, '').replace(/\^\{\}$/, '');
+  const matched = TAG_VERSION_RE.exec(normalized);
+  if (!matched) return null;
+  return matched[1];
+}
+
+function parseLsRemoteTags(stdout) {
   if (typeof stdout !== 'string') return null;
+  const tagsByVersion = new Map();
   for (const line of stdout.split('\n')) {
-    const field = line.trim().split(/\s+/)[0];
-    const sha = normalizeSha(field);
-    if (sha) return sha;
+    const fields = line.trim().split(/\s+/);
+    if (fields.length < 2) continue;
+    const sha = normalizeSha(fields[0]);
+    if (!sha) continue;
+    const ref = fields[1];
+    const version = parseTagVersion(ref);
+    if (!version) continue;
+    const existing = tagsByVersion.get(version);
+    if (existing && !ref.endsWith('^{}')) continue;
+    tagsByVersion.set(version, { version, sha });
   }
-  return null;
+  let latest = null;
+  for (const entry of tagsByVersion.values()) {
+    if (!latest) {
+      latest = entry;
+      continue;
+    }
+    if (compareSemver(entry.version, latest.version) > 0) latest = entry;
+  }
+  return latest;
 }
 
 // How this copy of Glissa was installed, and the commit it was built from where that is knowable from a
@@ -66,17 +88,18 @@ function decideInstallFlavor({ lockfileSha, gitHeadSha, hasGitDir } = {}) {
 
 // The command that actually updates THIS install. An unknown flavor gets the clone command: it is the
 // safe guess for a checkout, and it fails loudly rather than reinstalling over the wrong thing.
-function buildUpdateCommand(flavor) {
+function buildUpdateCommand(flavor, latestVersion) {
+  if (flavor === 'npm-global' && textOrNull(latestVersion)) {
+    return `npm install -g github:${REPO_SLUG}#v${latestVersion} --allow-git=root`;
+  }
   if (flavor === 'npm-global') return NPM_GLOBAL_COMMAND;
   return CLONE_COMMAND;
 }
 
-// GitHub compare view from the installed commit to the branch tip, so the operator can read what an
-// update would bring before running it. Null when the installed commit is unknown.
-function buildCompareUrl(installedSha) {
-  const sha = normalizeSha(installedSha);
-  if (!sha) return null;
-  return `https://github.com/${REPO_SLUG}/compare/${sha}...main`;
+function buildReleaseUrl(version) {
+  const releaseVersion = textOrNull(version);
+  if (!releaseVersion) return null;
+  return `https://github.com/${REPO_SLUG}/releases/tag/v${releaseVersion}`;
 }
 
 function parseVersionTriple(version) {
@@ -106,11 +129,11 @@ function compareSemver(a, b) {
   return 0;
 }
 
-// Pull `.version` from the remote package.json document. Null on any shape mismatch.
-function parseLatestVersion(doc) {
+function parseLatestReleaseTag(doc) {
   if (!doc || typeof doc !== 'object') return null;
-  if (typeof doc.version !== 'string') return null;
-  return doc.version;
+  const version = parseTagVersion(doc.tag_name);
+  if (!version) return null;
+  return { version, sha: null };
 }
 
 function textOrNull(value) {
@@ -125,24 +148,19 @@ function normalizeFlavor(flavor) {
   return 'unknown';
 }
 
-// The whole verdict, in one place. Both commits known is the real signal (any difference from the branch
-// tip is an update, including a commit that carries no version bump); with either commit unknown it
-// degrades to the old semver compare, which fails open. Version strings stay in the result either way as
-// the human-readable label.
-function decideUpdateStatus({ installedSha, remoteSha, currentVersion, latestVersion, flavor } = {}) {
+function decideUpdateStatus({ installedSha, latestSha: remoteSha, remoteSha: legacyRemoteSha, currentVersion, latestVersion, flavor } = {}) {
   const currentSha = normalizeSha(installedSha);
-  const latestSha = normalizeSha(remoteSha);
+  const latestSha = normalizeSha(remoteSha || legacyRemoteSha);
   const current = textOrNull(currentVersion);
   const latest = textOrNull(latestVersion);
-  const bothShasKnown = Boolean(currentSha && latestSha);
   return {
-    updateAvailable: bothShasKnown ? currentSha !== latestSha : compareSemver(latest, current) > 0,
+    updateAvailable: compareSemver(latest, current) > 0,
     current,
     latest,
     currentSha,
     latestSha,
-    compareUrl: buildCompareUrl(currentSha),
-    command: buildUpdateCommand(flavor),
+    releaseUrl: buildReleaseUrl(latest),
+    command: buildUpdateCommand(flavor, latest),
     flavor: normalizeFlavor(flavor),
   };
 }
@@ -165,12 +183,13 @@ module.exports = {
   normalizeSha,
   shortSha,
   parseResolvedSha,
-  parseLsRemoteSha,
+  parseTagVersion,
+  parseLsRemoteTags,
   decideInstallFlavor,
   buildUpdateCommand,
-  buildCompareUrl,
+  buildReleaseUrl,
   compareSemver,
-  parseLatestVersion,
+  parseLatestReleaseTag,
   decideUpdateStatus,
   isCheckFresh,
 };

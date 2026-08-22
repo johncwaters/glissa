@@ -33,13 +33,13 @@ npm packs the repo before installing from a GitHub spec, so `package.json`'s `fi
 
 ## Releases
 
-A release is a version bump plus a `CHANGELOG.md` entry plus an annotated tag pushed to GitHub (`scripts/release.js`, `npm run release`). Nothing is published anywhere. Update visibility does not wait for a release: the running server's update check compares the commit this install was built from (the hidden npm lockfile's resolved sha, `package.json` `gitHead`, or `git rev-parse HEAD` for a clone) against the tip of `main` (`git ls-remote`, GitHub API fallback), so any merged commit makes clients see an update; the version pair is only the label beside the commit pair. The check is advisory and notify-only, rechecks daily while a dashboard is connected, and persists a 6h throttle in `~/.glissa/update-check.json`.
+A release is a version bump plus a `CHANGELOG.md` entry plus an annotated `vX.Y.Z` tag pushed to GitHub (`scripts/release.js`, `npm run release`). Nothing is published anywhere. The running server's update check keys on the latest valid release tag, not on the tip of `main`, so unreleased commits do not trigger the banner. The npm-global update command pins that tag (`github:johncwaters/glissa#vX.Y.Z`); clone updates still use `git pull --ff-only && npm ci && npm run build`. The check is advisory and notify-only, rechecks daily while a dashboard is connected, and persists a 6h throttle in `~/.glissa/update-check.json`.
 
 ## What is enforced, and where
 
 Per the repo's docs-must-be-enforceable norm, these claims are pinned by tests rather than by this page:
 
-- The update check (installed-commit resolution, remote-tip sources, advisory-only failure paths, the per-flavor update command, the persisted throttle): `tests/update-check.test.js` and `tests/update-core.test.js`, part of `npm test`.
+- The update check (installed identity, latest release sources, advisory-only failure paths, the per-flavor update command, the persisted throttle): `tests/update-check.test.js` and `tests/update-core.test.js`, part of `npm test`.
 - The `files` whitelist covering every module the entry points require: `scripts/check-package-files.js`, run as a gate by `npm run release`. It is a script, not a unit test, so it does not run in CI.
 
 The provisioning flow itself (clone path, systemd unit, tailscale serve, apply script) is pinned by `claude-setup`'s own test suite, not by anything in this repo. Treat the steps above as a description of that repo's behavior, and change them there.
