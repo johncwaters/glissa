@@ -11,9 +11,9 @@ export function el(tag, className, text) {
 }
 
 // A link when there is somewhere to go, otherwise the same text as a plain span.
-export function externalLink(className, text, url) {
+export function externalLink(className, text, url, title = text) {
   const node = url ? el('a', className, text) : el('span', className, text);
-  node.title = text;
+  node.title = title;
   if (!url) return node;
   node.href = url;
   node.target = '_blank';

@@ -211,9 +211,8 @@ function buildIssueRow(issue, projectId) {
   const change = el('span', 'radar-change', CHANGE_LABEL[issue.change] || String(issue.change || 'unknown'));
 
   // Issue titles come from a third-party service: built as text, never markup.
-  const title = externalLink('radar-issue-title', issue.title || 'Untitled issue', issue.url);
   // A placeholder title is not worth a tooltip that repeats it.
-  title.title = issue.title || '';
+  const title = externalLink('radar-issue-title', issue.title || 'Untitled issue', issue.url, issue.title || '');
 
   const occurrences = el('span', 'radar-metric');
   occurrences.append(el('span', 'radar-metric-value', formatCount(issue.occurrences)), el('span', 'radar-metric-label', 'occ'));
