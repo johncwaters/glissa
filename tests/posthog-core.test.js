@@ -189,20 +189,18 @@ test('decideVanishedEntry: a missing entry is prunable', () => {
 // --- isMajorIssue / decideJobMode: which issues earn the auto-fix dispatch ---
 
 test('isMajorIssue: spiking and regressed are major regardless of blast radius', () => {
-  assert.equal(isMajorIssue('spiking', makeIssue({ users: 1 })), true);
-  assert.equal(isMajorIssue('regressed', makeIssue({ users: 0 })), true);
+  assert.equal(isMajorIssue('spiking'), true);
+  assert.equal(isMajorIssue('regressed'), true);
 });
 
-test('isMajorIssue: a new issue is major only at or above the escalation threshold', () => {
-  assert.equal(isMajorIssue('new', makeIssue({ users: 24 })), false);
-  assert.equal(isMajorIssue('new', makeIssue({ users: 25 })), true);
-  assert.equal(isMajorIssue('new', makeIssue({ users: 3 }), { userEscalationThreshold: 3 }), true);
+test('isMajorIssue: a new issue is major regardless of how many users it hit', () => {
+  assert.equal(isMajorIssue('new'), true);
 });
 
 test('isMajorIssue: worsened and quiet are never major', () => {
-  assert.equal(isMajorIssue('worsened', makeIssue({ users: 9000 })), false);
-  assert.equal(isMajorIssue('quiet', makeIssue({ users: 9000 })), false);
-  assert.equal(isMajorIssue(undefined, undefined), false);
+  assert.equal(isMajorIssue('worsened'), false);
+  assert.equal(isMajorIssue('quiet'), false);
+  assert.equal(isMajorIssue(undefined), false);
 });
 
 test('decideJobMode: a major issue with the opt-in and a repo earns a fix', () => {
@@ -220,7 +218,11 @@ test('decideJobMode: without the opt-in every change stays an investigation', ()
 
 test('decideJobMode: a non-major change never earns a fix even with the opt-in on', () => {
   assert.equal(decideJobMode({ change: 'worsened', issue: makeIssue({ users: 500 }) }, { autoFix: true }), 'investigate');
-  assert.equal(decideJobMode({ change: 'new', issue: makeIssue({ users: 2 }) }, { autoFix: true }), 'investigate');
+  assert.equal(decideJobMode({ change: 'quiet', issue: makeIssue({ users: 500 }) }, { autoFix: true }), 'investigate');
+});
+
+test('decideJobMode: a new issue below the escalation threshold still earns a fix', () => {
+  assert.equal(decideJobMode({ change: 'new', issue: makeIssue({ users: 2 }) }, { autoFix: true }), 'fix');
 });
 
 test('decideJobMode: a workspace that is not a repo downgrades to an investigation', () => {

@@ -322,7 +322,7 @@ function createPosthogPoller(deps) {
   // concurrency slot, the same never-rejecting tracking promise, and the same state bookkeeping.
   // A fix job and an investigation are indistinguishable here on purpose: one slot pool, one drain.
   function startInvestigation(change, decision = null) {
-    const mode = core.decideJobMode(change, { autoFix, userEscalationThreshold });
+    const mode = core.decideJobMode(change, { autoFix });
     state[change.key].inFlight = true;
     if (decision?.matchKey) state[change.key].recurrenceOf = decision.matchKey;
     const investigation = runInvestigation(change, mode).catch((e) => {

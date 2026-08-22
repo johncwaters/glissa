@@ -504,7 +504,7 @@ test('start() clears a stale inFlight left by a crash so the issue is re-investi
 // --- Auto-fix dispatch: a MAJOR issue gets an agent that reproduces and repairs, not one that only
 // diagnoses. Opt-in, and it rides the same slots, the same inFlight bookkeeping and the same drain.
 
-// The default row is a first sighting with 8 users, so a threshold of 5 makes it 'new' AND major.
+// The default row is a first sighting with 8 users, so a threshold of 5 also makes it high impact.
 const MAJOR = { autoFix: true, userEscalationThreshold: 5 };
 
 function fixResult(over = {}) {
@@ -544,7 +544,7 @@ test('autoFix off keeps every dispatch an investigation on the investigation tim
   assert.equal(calls[0].timeoutMs, 900000);
 });
 
-test('autoFix leaves a non-major issue on the diagnose-only path', async () => {
+test('autoFix dispatches a fix for a new issue under the escalation threshold', async () => {
   const calls = [];
   const { poller } = harness({
     autoFix: true,
@@ -552,7 +552,7 @@ test('autoFix leaves a non-major issue on the diagnose-only path', async () => {
   });
   await poller.start();
   await flush();
-  assert.equal(calls[0].mode, 'investigate', '8 users is under the default escalation threshold');
+  assert.equal(calls[0].mode, 'fix', 'blast radius gates the ping, not the fix');
 });
 
 test('a fix job takes a shared concurrency slot, never a second pool', async () => {

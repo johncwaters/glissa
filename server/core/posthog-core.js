@@ -193,19 +193,16 @@ function planInvestigations(changes, state = {}, opts = {}) {
   });
 }
 
-// Deliberately the exact set that already fires an observation ping, so auto-fix can never trigger on an issue the operator was never told about.
-function isMajorIssue(change, issue, opts = {}) {
-  const threshold = opts.userEscalationThreshold ?? DEFAULT_USER_ESCALATION_THRESHOLD;
-  if (change === 'spiking' || change === 'regressed') return true;
-  if (change !== 'new') return false;
-  return toCount(issue?.users, 0) >= threshold;
+// Blast radius gates the observation ping, never the fix: a brand-new active issue is worth fixing on its own, and a completed fix pings FIXED regardless.
+function isMajorIssue(change) {
+  return change === 'spiking' || change === 'regressed' || change === 'new';
 }
 
 // 'fix' needs the autoFix opt-in, a major issue, and hasRepo true; hasRepo is the caller's IO-resolved answer, absent defaults to investigate.
 function decideJobMode(change, opts = {}) {
   if (opts.autoFix !== true) return JOB_MODES.investigate;
   if (opts.hasRepo === false) return JOB_MODES.investigate;
-  if (!isMajorIssue(change?.change, change?.issue, opts)) return JOB_MODES.investigate;
+  if (!isMajorIssue(change?.change)) return JOB_MODES.investigate;
   return JOB_MODES.fix;
 }
 
