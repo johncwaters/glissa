@@ -1,8 +1,8 @@
 'use strict';
 
 // The context mill's automation loop with every side effect faked: which pack a watch fire rebuilds,
-// what the fallback sweep covers, when `pack-updated` is (and is not) emitted, and that stop() closes
-// the watchers, kills the timer and drains an in-flight rebuild. No fs, no timers, no real builds.
+// what the fallback sweep covers, which rebuilds actually published, and that stop() closes the
+// watchers, kills the timer and drains an in-flight rebuild. No fs, no timers, no real builds.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -37,6 +37,7 @@ function okReport(name, overrides = {}) {
 function harness({ specs = SPECS, reportFor = (name) => okReport(name) } = {}) {
   const watchers = [];
   const builds = [];
+  const published = [];
   let intervalCallback = null;
   let intervalMs = null;
   let intervalCleared = 0;
@@ -57,14 +58,12 @@ function harness({ specs = SPECS, reportFor = (name) => okReport(name) } = {}) {
     },
     setIntervalFn: (fn, ms) => { intervalCallback = fn; intervalMs = ms; return { unref() {} }; },
     clearIntervalFn: () => { intervalCleared += 1; },
-    log: { log() {}, warn() {} },
+    // A published rebuild is observable only through its log line; an unchanged one says nothing.
+    log: { log: (line) => published.push(line), warn() {} },
   });
 
-  const updates = [];
-  service.on('pack-updated', (payload) => updates.push(payload));
-
   return {
-    service, watchers, builds, updates,
+    service, watchers, builds, published,
     fireWatch: (dir) => watchers.find((w) => w.dir === dir).onChange(),
     tickInterval: () => intervalCallback(),
     get intervalMs() { return intervalMs; },
@@ -106,22 +105,21 @@ test('the interval sweep rebuilds every spec', async () => {
   await h.service.stop();
 });
 
-test('a published rebuild emits pack-updated; an unchanged one is silent', async () => {
+test('a rebuild that published says so; an unchanged one is silent', async () => {
   const versions = { alpha: 'v1', beta: 'v1' };
   const unchanged = { alpha: true, beta: true };
   const h = harness({ reportFor: (name) => okReport(name, { version: versions[name], unchanged: unchanged[name] }) });
 
   await h.service.start();
-  assert.deepEqual(h.updates, [], 'a sweep that found nothing new must not broadcast a heartbeat');
-  assert.deepEqual(h.service.getVersions(), { alpha: 'v1', beta: 'v1' }, 'an unchanged build still reports the live version');
+  assert.deepEqual(h.published, [], 'a sweep that found nothing new must not announce a heartbeat');
 
   versions.alpha = 'v2';
   unchanged.alpha = false;
   h.fireWatch('/packs/sources/alpha');
   await settle();
 
-  assert.deepEqual(h.updates, [{ name: 'alpha', version: 'v2' }]);
-  assert.deepEqual(h.service.getVersions(), { alpha: 'v2', beta: 'v1' });
+  assert.equal(h.published.length, 1);
+  assert.match(h.published[0], /alpha rebuilt/);
   await h.service.stop();
 });
 
@@ -134,15 +132,16 @@ test('a failed build emits nothing and leaves the loop running', async () => {
 
   await h.service.start();
 
-  assert.deepEqual(h.updates.map((u) => u.name), ['beta'], 'beta still built after alpha failed');
-  assert.equal(h.service.getVersions().alpha, undefined, 'a failed build never becomes the staleness baseline');
+  assert.equal(h.published.length, 1, 'beta still published after alpha failed');
+  assert.match(h.published[0], /beta rebuilt/);
   await h.service.stop();
 });
 
 test('a build that throws is caught, so one bad pack cannot kill the loop', async () => {
   const h = harness({ reportFor: (name) => { if (name === 'alpha') throw new Error('disk gone'); return okReport(name); } });
   await assert.doesNotReject(h.service.start());
-  assert.deepEqual(h.updates.map((u) => u.name), ['beta']);
+  assert.equal(h.published.length, 1);
+  assert.match(h.published[0], /beta rebuilt/);
   await h.service.stop();
 });
 
@@ -213,14 +212,14 @@ test('a rebuild queued after stop() does not run', async () => {
   const h = harness();
   await h.service.start();
   h.builds.length = 0;
-  h.updates.length = 0;
+  h.published.length = 0;
 
   await h.service.stop();
   h.fireWatch('/packs/sources/alpha');
   await settle();
 
   assert.deepEqual(h.builds, []);
-  assert.deepEqual(h.updates, []);
+  assert.deepEqual(h.published, []);
 });
 
 test('an install with no specs is fully inert: no watcher, no timer, no build', async () => {

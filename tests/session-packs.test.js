@@ -60,9 +60,7 @@ test('a built pack spawns as --add-dir, sets the CLAUDE.md env flag, and rides t
     const packDir = path.join(builtRoot, 'company-context', 'current');
     assert.deepEqual(calls[0].args, ['--add-dir', packDir]);
     assert.equal(calls[0].opts.env[CLAUDE_MD_ENV], '1');
-    // `reads` rides every delivered entry from the start: 0 means "delivered and never opened",
-    // which is exactly the measurable (see tests/session-pack-reads.test.js).
-    assert.deepEqual(s.toSnapshot().packs, [{ name: 'company-context', version: 'v-abc', reads: 0 }]);
+    assert.deepEqual(s.toSnapshot().packs, [{ name: 'company-context', version: 'v-abc' }]);
     const delivered = s.getDebugState().decisions.filter((d) => d.kind === 'pack');
     assert.equal(delivered.length, 1);
     assert.equal(delivered[0].decision, 'delivered');

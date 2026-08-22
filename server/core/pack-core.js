@@ -13,10 +13,9 @@ const crypto = require('node:crypto');
 // A pack name becomes a directory name under <packsRoot>/built, so it stays a plain segment.
 const PACK_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
-const SPEC_KEYS = new Set(['name', 'description', 'sources', 'rules', 'skills', 'budgetTokens', 'distill']);
-const SOURCE_KEYS = new Set(['path', 'glob', 'exclude', 'optional']);
+const SPEC_KEYS = new Set(['name', 'description', 'sources', 'rules', 'skills', 'budgetTokens']);
+const SOURCE_KEYS = new Set(['path', 'glob', 'exclude']);
 const SKILL_KEYS = new Set(['dir']);
-const DISTILL_KEYS = new Set(['output', 'sources', 'instructions']);
 
 // The heuristic, named in the manifest so nobody mistakes it for a tokenizer.
 const CHARS_PER_TOKEN = 4;
@@ -107,7 +106,8 @@ function unknownKeyErrors(obj, allowed, label) {
   return errors;
 }
 
-function validateSource(source, index, errors, label = `sources[${index}]`) {
+function validateSource(source, index, errors) {
+  const label = `sources[${index}]`;
   if (!isPlainObject(source)) {
     errors.push(`${label} must be an object`);
     return;
@@ -118,10 +118,6 @@ function validateSource(source, index, errors, label = `sources[${index}]`) {
   const hasGlob = typeof source.glob === 'string' && source.glob.length > 0;
   if (hasPath && hasGlob) errors.push(`${label} must set exactly one of "path" or "glob", not both`);
   if (!hasPath && !hasGlob) errors.push(`${label} must set a non-empty "path" or "glob"`);
-
-  if (source.optional !== undefined && typeof source.optional !== 'boolean') {
-    errors.push(`${label}.optional must be a boolean`);
-  }
 
   if (source.exclude === undefined) return;
   if (!Array.isArray(source.exclude)) {
@@ -144,45 +140,6 @@ function validateSkill(skill, index, errors) {
   errors.push(...unknownKeyErrors(skill, SKILL_KEYS, label));
   if (typeof skill.dir !== 'string' || skill.dir.length === 0) {
     errors.push(`${label}.dir must be a non-empty string`);
-  }
-}
-
-/**
- * A distilled file is WRITTEN by an LLM lane, so its path is checked before that lane ever runs: it
- * must land under the packs directory, which means relative, no drive letter, no root anchor and no
- * `..` segment. The distiller re-checks the resolved path too; this is the gate that keeps a spec
- * carrying an escaping path from being loadable at all.
- */
-function isPackRelativePath(value) {
-  if (typeof value !== 'string' || value.length === 0) return false;
-  if (/^[A-Za-z]:/.test(value)) return false;
-  if (value.startsWith('/') || value.startsWith('\\')) return false;
-  const segments = splitSegments(value);
-  if (segments.length === 0) return false;
-  return !segments.includes('..');
-}
-
-function validateDistillEntry(entry, index, errors) {
-  const label = `distill[${index}]`;
-  if (!isPlainObject(entry)) {
-    errors.push(`${label} must be an object`);
-    return;
-  }
-  errors.push(...unknownKeyErrors(entry, DISTILL_KEYS, label));
-
-  if (!isPackRelativePath(entry.output)) {
-    errors.push(`${label}.output must be a relative path inside the packs directory (no absolute path, no ".." segment)`);
-  }
-  if (!Array.isArray(entry.sources) || entry.sources.length === 0) {
-    errors.push(`${label}.sources must be a non-empty array of source objects`);
-  }
-  if (Array.isArray(entry.sources)) {
-    for (const [i, source] of entry.sources.entries()) {
-      validateSource(source, i, errors, `${label}.sources[${i}]`);
-    }
-  }
-  if (typeof entry.instructions !== 'string' || entry.instructions.trim().length === 0) {
-    errors.push(`${label}.instructions must be a non-empty string`);
   }
 }
 
@@ -226,15 +183,6 @@ function validatePackSpec(spec) {
     }
     if (Array.isArray(spec.skills)) {
       for (const [index, skill] of spec.skills.entries()) validateSkill(skill, index, errors);
-    }
-  }
-
-  if (spec.distill !== undefined) {
-    if (!Array.isArray(spec.distill)) {
-      errors.push('distill must be an array of { output, sources, instructions } objects');
-    }
-    if (Array.isArray(spec.distill)) {
-      for (const [index, entry] of spec.distill.entries()) validateDistillEntry(entry, index, errors);
     }
   }
 
@@ -353,10 +301,9 @@ function groupSourceFiles(spec, files, errors) {
     const pattern = sourcePattern(source);
     const matched = files.filter((file) => file.sourceIndex === index).sort(byRelPath);
     if (matched.length === 0) {
-      // A source that matched nothing is a build error, because a silent hole in a pack is worse than
-      // a loud failure. `optional: true` is the one exemption, for a file a distill lane has not
-      // written yet: the pack still builds, just without that group.
-      if (source.optional !== true) errors.push(`sources[${index}] (${pattern}) matched no files`);
+      // A source that matched nothing is a build error: a silent hole in a pack is worse than a loud
+      // failure.
+      errors.push(`sources[${index}] (${pattern}) matched no files`);
       continue;
     }
     const slug = sourceSlug(pattern, index);
@@ -486,21 +433,15 @@ function planPackBuild(spec, files, { builtAt } = {}) {
 }
 
 module.exports = {
-  CHARS_PER_TOKEN,
   INDEX_FILE,
   MANIFEST_FILE,
   MAX_INDEX_TOKENS,
   MAX_PACKS_PER_SESSION,
   PACK_NAME_RE,
-  RULES_DIR,
-  SKILLS_DIR,
-  TOKEN_ESTIMATE_METHOD,
   estimateTokens,
-  isPackRelativePath,
   matchesGlob,
   normalizePackNames,
   planPackBuild,
-  sha256,
   sourcePattern,
   sourceSlug,
   validatePackSpec,
