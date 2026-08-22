@@ -307,18 +307,14 @@ class Session extends EventEmitter {
     // prompt); pruned to the declared snapshot on each refresh; an id is removed when a
     // TaskCreated reactivates it; cleared with the rest on PTY exit/(re)start.
     this._idleTaskIds = new Set();
-    // teammate_name -> task_id learned from TaskCreated, because TeammateIdle carries only
-    // the name. Cleared on PTY exit/(re)start.
-    this._teammateTasks = new Map();
-    // Teammates known idle BY NAME when no TaskCreated mapping resolved them (declared entries
-    // can NOT be matched to a name; a teammate's `description` is the spawn prompt, live-
-    // verified). Map<name, ts>, insertion-ordered; a nameless payload gets a synthetic key
-    // (same collision-free scheme as _trackWakeup). Persists across resume (an idle teammate
-    // stays declared by every later Stop); subtracted from the declared teammate count in
-    // agent-tracker.declaredActiveCount, clamped there to the live teammate count. Re-gated by
-    // TaskCreated (reactivation) or a SubagentStart whose agent_id embeds the name
-    // (`a<name>-<hex>`, the only signal for a teammate the lead re-wakes via mailbox, since no
-    // TaskCreated ever fires for a named-agent teammate). TTL-pruned lazily in
+    // Teammates known idle BY NAME: a TeammateIdle payload carries only the name, and a declared
+    // entry can NOT be matched to one (a teammate's `description` is the spawn prompt, live-
+    // verified), so the drain is count-based rather than per-id. Map<name, ts>, insertion-ordered.
+    // Persists across resume (an idle teammate stays declared by every later Stop); subtracted
+    // from the declared teammate count in agent-tracker.declaredActiveCount, clamped there to the
+    // live teammate count. Re-gated by TaskCreated (reactivation) or a SubagentStart whose
+    // agent_id embeds the name (`a<name>-<hex>`, the only signal for a teammate the lead re-wakes
+    // via mailbox, since no TaskCreated ever fires for a named-agent teammate). TTL-pruned lazily in
     // _activeAgentCount so a stale name can never mask a future same-named teammate forever.
     this._idleTeammateNames = new Map();
     // The teammate-entry ids seen in the last background_tasks snapshot. Persists across resume
@@ -339,15 +335,11 @@ class Session extends EventEmitter {
     // (session/core/gate-release.js) instead of trusting a drained count alone.
     this._gateHeldReady = null;
     this._gateHeldReadyTimer = null;
-    // Earliest timestamp from which the hold has been continuously eligible to release: pushed
-    // forward every time an evaluation still finds live background work, so the quiet window is
-    // measured from the last moment the gate was actually gating.
-    this._gateQuietSince = 0;
-    // Active count the previous gate evaluation observed. Evaluations are event/TTL driven, so
-    // the first look after a drain must start the settle window itself: the gate was gating at
-    // every earlier look, and trusting a stale quiet timestamp released a held ready instantly
-    // at the drain, before the mailbox wake could disprove it (false COMPLETE, 2026-08-14).
-    this._gateLastObservedActive = 0;
+    // When the hold was first observed free of background work, or null while it is still gating.
+    // Evaluations are event/TTL driven, so the first look that SEES the drain is what starts the
+    // settle window: carrying a timestamp from the last still-gated look released a held ready
+    // instantly at the drain, before the mailbox wake could disprove it (false COMPLETE, 2026-08-14).
+    this._gateQuietSince = null;
     // Arrival order of the signals reaching _onStatus, and the sequence number of the last
     // non-ready (activity) one. A hold stashed BEFORE that activity is stale: the main agent
     // opened a new turn, so it must never complete the card (incident 2026-07-30; see
@@ -574,7 +566,10 @@ class Session extends EventEmitter {
     if (!this._detectBackgroundAgents) return;
     const entries = agentTracker.extractBackgroundTasks(payload);
     if (entries === null) return;
-    const before = this._activeAgentCount();
+    this._withAgentCount(() => this._reconcileDeclared(entries));
+  }
+
+  _reconcileDeclared(entries) {
     this._bgDeclared = entries;
     this._bgDeclaredTs = Date.now();
     const declaredIds = new Set(entries.map((e) => e.id).filter(Boolean));
@@ -601,42 +596,37 @@ class Session extends EventEmitter {
     // a live counted agent_id gets wiped out from under a still-running turn.
     const rawDeclaredActive = agentTracker.declaredActiveCount(entries, this._idleTaskIds);
     if (rawDeclaredActive === 0 && this._activeAgents.size > 0) this._activeAgents.clear();
-    if (this._activeAgentCount() !== before) this._emitAgentsChange();
   }
 
   _clearBgDeclared() {
     if (this._bgDeclared === null) return;
-    const before = this._activeAgentCount();
-    this._bgDeclared = null;
-    this._bgDeclaredTs = 0;
-    if (this._activeAgentCount() !== before) this._emitAgentsChange();
+    this._withAgentCount(() => {
+      this._bgDeclared = null;
+      this._bgDeclaredTs = 0;
+    });
   }
 
-  // Apply one TaskCreated/TaskCompleted/TeammateIdle signal to the idle-id bookkeeping.
+  // Apply one TaskCreated/TaskCompleted/TeammateIdle signal to the idle bookkeeping.
   // Never a transition; a drain can release a gate-held ready via _emitAgentsChange.
   _trackTaskLifecycle(raw) {
     if (!this._detectBackgroundAgents) return;
+    this._withAgentCount(() => this._applyTaskLifecycle(raw));
+  }
+
+  _applyTaskLifecycle(raw) {
     const p = raw.payload || {};
     const taskId = typeof p.task_id === "string" && p.task_id ? p.task_id : null;
+    const name = typeof p.teammate_name === "string" ? p.teammate_name : "";
     if (raw.signal === "task-created") {
       // New background work: like subagent-start, it invalidates a held ready, and a
       // reactivated teammate (new task) must gate again.
       this._clearGateHeldReady();
       // A reactivated teammate cancels any idle-by-name record for it, even on a payload
       // with no task_id (the name map is independent of the id bookkeeping).
-      if (typeof p.teammate_name === "string" && p.teammate_name) {
-        this._idleTeammateNames.delete(p.teammate_name);
-      }
-      if (!taskId) return;
-      if (typeof p.teammate_name === "string" && p.teammate_name) {
-        this._teammateTasks.set(p.teammate_name, taskId);
-      }
-      const before = this._activeAgentCount();
-      this._idleTaskIds.delete(taskId);
-      if (this._activeAgentCount() !== before) this._emitAgentsChange();
+      if (name) this._idleTeammateNames.delete(name);
+      if (taskId) this._idleTaskIds.delete(taskId);
       return;
     }
-    const before = this._activeAgentCount();
     if (raw.signal === "task-completed") {
       if (!taskId) return;
       this._idleTaskIds.add(taskId);
@@ -644,31 +634,18 @@ class Session extends EventEmitter {
       agentTracker.removeAgent(this._activeAgents, taskId);
       // A payload that carries both an id and a name must drain by id only ONCE: leaving the
       // name behind would also subtract it from a different, still-live teammate.
-      if (typeof p.teammate_name === "string" && p.teammate_name) {
-        this._idleTeammateNames.delete(p.teammate_name);
-      }
-      if (this._activeAgentCount() !== before) this._emitAgentsChange();
+      if (name) this._idleTeammateNames.delete(name);
       return;
     }
-    // teammate-idle: name only, no task_id. Resolve via the TaskCreated mapping only -
-    // declared entries can NOT be matched to a name (their `description` is the spawn prompt,
-    // live-verified). An unresolved idle is recorded BY NAME instead: agent-tracker's
-    // declaredActiveCount subtracts the idle-name count from the declared teammate count, so
-    // several simultaneous idle teammates each drain the gate without needing a per-id match.
-    const name = typeof p.teammate_name === "string" ? p.teammate_name : "";
-    const resolved = name && this._teammateTasks.get(name);
-    if (resolved) {
-      this._idleTaskIds.add(resolved);
-      this._idleTeammateNames.delete(name); // no double-count against the same teammate
-      if (this._activeAgentCount() !== before) this._emitAgentsChange();
-      return;
-    }
-    // A nameless payload can never be re-gated (no TaskCreated match, no a<name>- prefix match),
-    // so recording it would be a pure false-drain vector with no way back. Ground truth says the
-    // payload always carries teammate_name; drop it rather than guess a synthetic key.
+    // teammate-idle: name only, no task_id, and a declared entry can NOT be matched to a name
+    // (its `description` is the spawn prompt, live-verified), so the idle is recorded BY NAME:
+    // agent-tracker's declaredActiveCount subtracts the idle-name count from the declared
+    // teammate count, so several simultaneous idle teammates each drain the gate by one.
+    // A nameless payload can never be re-gated (no a<name>- prefix match), so recording it would
+    // be a pure false-drain vector with no way back. Ground truth says the payload always carries
+    // teammate_name; drop it rather than guess a synthetic key.
     if (!name) return;
     this._idleTeammateNames.set(name, Date.now());
-    if (this._activeAgentCount() !== before) this._emitAgentsChange();
   }
 
   // Apply one subagent-start/stop signal to the live set. Off (kill switch) or a payload with no
@@ -685,17 +662,17 @@ class Session extends EventEmitter {
       // only re-gating signal for a teammate the lead wakes via mailbox: no TaskCreated ever
       // fires for a named-agent teammate (memory: named-agent-teammate-hook-sequence).
       if (typeof agentId === "string") {
-        const before = this._activeAgentCount();
-        for (const name of this._idleTeammateNames.keys()) {
-          const prefix = `a${name}-`;
-          // The remainder after the prefix must be pure hex: without this check, idle name
-          // "foo" would be falsely re-gated by a DIFFERENT teammate "foo-bar" starting
-          // (agent_id "afoo-bar-1a2b" also starts with "afoo-").
-          if (agentId.startsWith(prefix) && /^[0-9a-f]+$/i.test(agentId.slice(prefix.length))) {
-            this._idleTeammateNames.delete(name);
+        this._withAgentCount(() => {
+          for (const name of this._idleTeammateNames.keys()) {
+            const prefix = `a${name}-`;
+            // The remainder after the prefix must be pure hex: without this check, idle name
+            // "foo" would be falsely re-gated by a DIFFERENT teammate "foo-bar" starting
+            // (agent_id "afoo-bar-1a2b" also starts with "afoo-").
+            if (agentId.startsWith(prefix) && /^[0-9a-f]+$/i.test(agentId.slice(prefix.length))) {
+              this._idleTeammateNames.delete(name);
+            }
           }
-        }
-        if (this._activeAgentCount() !== before) this._emitAgentsChange();
+        });
       }
     }
     if (agentId) {
@@ -765,6 +742,15 @@ class Session extends EventEmitter {
     this._evaluateGateHeldReady();
   }
 
+  // Run one piece of background-work bookkeeping and emit a single 'agents-change' delta only if
+  // the live count actually moved. Every mutator of the counted map, the declared snapshot and the
+  // idle sets goes through here, so the emit rule lives in one place.
+  _withAgentCount(mutate) {
+    const before = this._activeAgentCount();
+    mutate();
+    if (this._activeAgentCount() !== before) this._emitAgentsChange();
+  }
+
   // Hold a main-agent ready that only the background-agent gate suppressed;
   // decideGateRelease (session/core/gate-release.js) decides whether it may ever fire.
   // The latch re-open makes "activity since the stash" observable at all, since the
@@ -780,9 +766,8 @@ class Session extends EventEmitter {
       ts: now,
       seq: this._signalSeq,
     };
-    this._gateQuietSince = now;
     // Each hold's settle tracking starts clean; the first evaluation below observes the real count.
-    this._gateLastObservedActive = 0;
+    this._gateQuietSince = null;
     this._titleSource.resyncWorkingLatch();
     this._evaluateGateHeldReady();
   }
@@ -819,7 +804,7 @@ class Session extends EventEmitter {
 
   _clearGateHeldReady() {
     this._gateHeldReady = null;
-    this._gateLastObservedActive = 0;
+    this._gateQuietSince = null;
     if (!this._gateHeldReadyTimer) return;
     clearTimeout(this._gateHeldReadyTimer);
     this._gateHeldReadyTimer = null;
@@ -833,9 +818,8 @@ class Session extends EventEmitter {
     if (!held || this._destroyed) return;
     const now = Date.now();
     const activeAgents = this._activeAgentCount();
-    // First look after a drain: the settle window runs from HERE, not from the stale last-gated look.
-    if (activeAgents === 0 && this._gateLastObservedActive > 0) this._gateQuietSince = now;
-    this._gateLastObservedActive = activeAgents;
+    // First look that sees the drain: the settle window runs from HERE, never from an earlier look.
+    if (activeAgents === 0 && this._gateQuietSince === null) this._gateQuietSince = now;
     const { decision, waitMs } = decideGateRelease({
       heldState: held.state,
       currentState: this.state,
@@ -843,7 +827,7 @@ class Session extends EventEmitter {
       stashSeq: held.seq,
       lastActivitySeq: this._lastActivitySeq,
       stashTs: held.ts,
-      quietSince: this._gateQuietSince,
+      quietSince: this._gateQuietSince || 0,
       now,
       settleMs: this._gateReleaseSettleMs,
     });
@@ -864,8 +848,8 @@ class Session extends EventEmitter {
       return;
     }
     if (decision === "gated") {
-      // Still gating right now, so the quiet window cannot have started earlier than this.
-      this._gateQuietSince = now;
+      // Still gating, so no quiet window has started yet; the look that sees the drain starts it.
+      this._gateQuietSince = null;
       this._armGateTimer(this._gateRecheckMs(now));
       return;
     }
@@ -886,10 +870,18 @@ class Session extends EventEmitter {
     this._bgDeclared = null;
     this._bgDeclaredTs = 0;
     this._idleTaskIds.clear();
-    this._teammateTasks.clear();
     this._idleTeammateNames.clear();
     this._declaredTeammateIds.clear();
     if (had) this._emitAgentsChange();
+  }
+
+  // The full background-work reset a PTY start or exit needs. Order matters: a pending held ready
+  // must go FIRST, because _clearAgents emits an agents-change that would otherwise release it.
+  _clearDetectionTracking() {
+    this._clearGateHeldReady();
+    this._clearAgents();
+    this._clearWakeups();
+    this._setPendingPromptKind(null);
   }
 
   // Apply one scheduled-revival signal to the pending-wakeup set. ADVISORY metadata only: a Stop
@@ -2068,12 +2060,8 @@ class Session extends EventEmitter {
     }
     this._receivedFirstOutput = false;
     this._sleeping = false;
-    // A (re)started PTY begins with no live background sub-agents; drop any stale ids from a prior
-    // run. Pending ready first: the clear below emits agents-change, which must not release it.
-    this._clearGateHeldReady();
-    this._clearAgents();
-    this._clearWakeups();
-    this._setPendingPromptKind(null);
+    // A (re)started PTY begins with no live background sub-agents; drop any stale ids from a prior run.
+    this._clearDetectionTracking();
     this._autoKilled = false;
     this._outputRing.reset();
     // A restarted PTY re-bases its monotonic output offset at 0. Signal the backend so
@@ -2324,12 +2312,8 @@ class Session extends EventEmitter {
     this._titleSource.reset();
     this._statusSource.reset();
     this._titleQuiet = false;
-    // Pending ready first: _clearAgents emits agents-change, and a drain-release here would
-    // fire a COMPLETE ahead of the process_exit transition below.
-    this._clearGateHeldReady();
-    this._clearAgents();
-    this._clearWakeups();
-    this._setPendingPromptKind(null);
+    // A drain-release here would fire a COMPLETE ahead of the process_exit transition below.
+    this._clearDetectionTracking();
     // The next spawn re-resolves its packs, so a notice owed by the dead one has no turn to ride.
     this._clearPackNotice();
     this._cleanupHooks();
