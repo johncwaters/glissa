@@ -38,8 +38,6 @@ const {
 } = require("../server/core/branch-sync-core");
 const { normalizePackNames } = require("../server/core/pack-core");
 const { defaultBuiltRoot, resolveBuiltPack } = require("../server/pack-builder");
-const { buildPackNotice, listStalePacks } = require("./core/pack-notice");
-const packReadTracker = require("./core/pack-read-tracker");
 const agentTracker = require("./core/agent-tracker");
 const { decideGateRelease, DEFAULT_GATE_RELEASE_SETTLE_MS } = require("./core/gate-release");
 const { pushDecision } = require("./core/decision-log");
@@ -202,9 +200,6 @@ class Session extends EventEmitter {
     packs = [],
     // Where built packs live. Defaults to ~/.glissa/packs/built; tests point it at a fixture root.
     packsBuiltRoot = null,
-    // Count Read tool calls that land inside a delivered pack dir (config kill switch). Costs one
-    // matcher-scoped PostToolUse hook, and only for a session that actually delivers packs.
-    packReadTelemetry = true,
     // Inject the managed statusLine relay so Claude Code publishes its OFFICIAL plan rate limits to
     // Glissa (config usage.planLimits; see AGENTS.md "Usage Tracking"). The relay chains whatever
     // statusLine the operator already had, because a managed one REPLACES it.
@@ -382,16 +377,7 @@ class Session extends EventEmitter {
     this._packs = packNames.names;
     this._packsBuiltRoot = packsBuiltRoot;
     this._deliveredPacks = [];
-    // Live pack-notice channel: latest built version per pack the backend pushed after a rebuild, and
-    // whether the resulting staleness still owes this session one notice on its next UserPromptSubmit
-    // hook response (see notePackUpdate / takePackNoticeContext).
-    this._latestPackVersions = new Map();
-    this._packNoticePending = false;
-    // Consumption telemetry for those delivered packs: per-pack read counts, plus a since-notice
-    // count armed the moment a staleness notice is taken (session/core/pack-read-tracker.js).
-    this._packReadTelemetry = packReadTelemetry !== false;
     this._planLimits = planLimits === true;
-    this._packReads = packReadTracker.createPackReadState();
     this._ptySpawn = ptySpawn || ((file, args, opts) => pty.spawn(file, args, opts));
     // Async kill executor (taskkill). Default wraps execFile; the callback form keeps the call truly
     // non-blocking. Injected in tests to assert the kill without spawning a real process.
@@ -451,11 +437,7 @@ class Session extends EventEmitter {
   ingestHookSignal(raw) {
     if (this._destroyed) return;
     this._hookSeen = true;
-    // Pack-read telemetry fires once per Read tool call, so recording each callback would bury a
-    // signals recording under them; the footer's aggregate carries it instead (a `full` capture,
-    // whose whole point is the raw stream, still keeps every callback).
-    const quietRead = raw?.signal === "pack-read" && this._recorder && !this._recorder.recordsData;
-    if (this._recorder && raw && raw.event && !quietRead) {
+    if (this._recorder && raw && raw.event) {
       this._recorder.writeHook(raw.event, raw.payload);
     }
     // Background sub-agent lifecycle is COUNTED, not a state transition: it never reaches the
@@ -478,12 +460,6 @@ class Session extends EventEmitter {
     // StatusSource (a pending wakeup is metadata, not a state signal).
     if (raw && (raw.signal === "wakeup-scheduled" || raw.signal === "cron-created" || raw.signal === "cron-deleted")) {
       this._trackWakeup(raw);
-      return;
-    }
-    // Pack reads are consumption telemetry, not detection: they must never reach the StatusSource
-    // (a Read mid-turn says nothing about whether the turn finished).
-    if (raw && raw.signal === "pack-read") {
-      this._trackPackRead(raw);
       return;
     }
     // Keys off whichever main-agent hook arrives, never one event name: Claude Code does not
@@ -1045,60 +1021,6 @@ class Session extends EventEmitter {
     return [...this._packs];
   }
 
-  // Record the version a pack was just rebuilt to (the backend's pack-updated fan-out). Only a pack
-  // this session actually SPAWNED against can arm a notice: a session that never delivered the pack
-  // has no stale context to warn about. Returns whether this call armed one, for the caller's logs.
-  notePackUpdate(name, version) {
-    if (typeof name !== "string" || typeof version !== "string" || version.length === 0) return false;
-    const delivered = this._deliveredPacks.find((pack) => pack.name === name);
-    if (!delivered) return false;
-    if (this._latestPackVersions.get(name) === version) return false;
-    this._latestPackVersions.set(name, version);
-    // A rebuild that landed back on the version this session runs on leaves nothing to say.
-    if (delivered.version === version) return false;
-    this._packNoticePending = true;
-    return true;
-  }
-
-  // The pack-staleness notice this session owes its next turn, or null. Consumed on read (the hook
-  // route injects it into ONE UserPromptSubmit response), and re-armed only when a newer version
-  // arrives through notePackUpdate - never once per turn for the same staleness.
-  takePackNoticeContext() {
-    if (!this._packNoticePending) return null;
-    this._packNoticePending = false;
-    const notice = buildPackNotice(this._deliveredPacks, this._latestPackVersions);
-    if (!notice) return null;
-    const names = listStalePacks(this._deliveredPacks, this._latestPackVersions).map((pack) => pack.name);
-    const ts = Date.now();
-    // Restart the per-pack count here, so the next reads answer whether the notice actually made the
-    // agent re-open the pack it was told had changed.
-    packReadTracker.armNoticeCounter(this._packReads, ts);
-    this._recordDecision({ kind: "pack", ts, decision: "notice", names });
-    return notice;
-  }
-
-  // Count one Read tool call against the delivered pack whose dir contains it. Tracking-only, and
-  // silent for every other path: the hook is matcher-scoped to Read, so most callbacks describe
-  // ordinary repo files the session was going to read anyway.
-  _trackPackRead(raw) {
-    if (!this._packReadTelemetry || this._deliveredPacks.length === 0) return;
-    const name = packReadTracker.packForPath(raw?.payload?.tool_input?.file_path, this._deliveredPacks);
-    if (!name) return;
-    packReadTracker.notePackRead(this._packReads, name, raw.ts || Date.now());
-  }
-
-  // Per-pack read counters for the delivered packs, newest state: the debug overlay and the
-  // recording footer report this shape.
-  packReadSummary() {
-    return packReadTracker.summarizePackReads(this._packReads, this._deliveredPacks);
-  }
-
-  // A spawn re-resolves what is delivered, so notices owed by the previous spawn are void.
-  _clearPackNotice() {
-    this._latestPackVersions.clear();
-    this._packNoticePending = false;
-  }
-
   toSnapshot() {
     return {
       id: this.id,
@@ -1111,14 +1033,7 @@ class Session extends EventEmitter {
       isWorktree: this.isWorktree,
       resumeSessionId: this._resumeSessionId,
       activeAgents: this._activeAgentCount(),
-      // Delivered packs plus what the agent has actually read of them. Built field by field, not
-      // spread: the resolved `dir` is a server-side absolute path a paired remote client has no use for.
-      packs: this._deliveredPacks.map((pack) => {
-        const stats = packReadTracker.packReadStats(this._packReads, pack.name);
-        const entry = { name: pack.name, version: pack.version, reads: stats.reads };
-        if (stats.readsSinceNotice !== null) entry.readsSinceNotice = stats.readsSinceNotice;
-        return entry;
-      }),
+      packs: this._deliveredPacks.map((pack) => ({ name: pack.name, version: pack.version })),
       pendingWakeup: this._pendingWakeup(),
       pendingPromptKind: this._pendingPromptKind,
       mergeStatus: this.mergeStatus,
@@ -1913,7 +1828,7 @@ class Session extends EventEmitter {
           ? { heldForMs: Date.now() - held.ts, seq: held.seq, lastActivitySeq: this._lastActivitySeq }
           : null,
       },
-      packs: this.packReadSummary(),
+      packs: this._deliveredPacks.map((pack) => ({ name: pack.name, version: pack.version })),
       decisions: this._decisionLog.slice(-15),
     };
   }
@@ -2207,9 +2122,6 @@ class Session extends EventEmitter {
         baseDir: this._hooksBaseDir,
         permissions: this._settingsPermissions,
         detectScheduledWakeups: this._detectScheduledWakeups,
-        // Only a session that actually delivered a pack can attribute a Read to one, so nothing else
-        // pays for the extra matcher (and its settings file stays byte-identical to the pre-telemetry one).
-        packReadTelemetry: this._packReadTelemetry && this._deliveredPacks.length > 0,
         enableProjectMcp: this._enableProjectMcp,
         rtkPath: this._rtkPath,
         planLimits: this._planLimits,
@@ -2244,8 +2156,6 @@ class Session extends EventEmitter {
   // Returns the --add-dir args and the { name, version } records toSnapshot reports.
   async _resolvePacks() {
     this._deliveredPacks = [];
-    this._clearPackNotice();
-    packReadTracker.clearPackReads(this._packReads);
     if (this._packs.length === 0) return { args: [], packs: [] };
 
     const builtRoot = this._packsBuiltRoot || defaultBuiltRoot();
@@ -2259,9 +2169,7 @@ class Session extends EventEmitter {
         continue;
       }
       args.push("--add-dir", resolved.dir);
-      // `dir` rides the delivered record so the read tracker can classify a path against it; it is
-      // server-side only (toSnapshot rebuilds its entries without it).
-      this._deliveredPacks.push({ name: resolved.name, version: resolved.version, dir: resolved.dir });
+      this._deliveredPacks.push({ name: resolved.name, version: resolved.version });
       this._recordDecision({ kind: "pack", ts, name, decision: "delivered", version: resolved.version });
     }
     return { args, packs: this._deliveredPacks };
@@ -2314,8 +2222,6 @@ class Session extends EventEmitter {
     this._titleQuiet = false;
     // A drain-release here would fire a COMPLETE ahead of the process_exit transition below.
     this._clearDetectionTracking();
-    // The next spawn re-resolves its packs, so a notice owed by the dead one has no turn to ride.
-    this._clearPackNotice();
     this._cleanupHooks();
     this._ptyAlive = false;
     this.ptyProcess = null;
@@ -2344,7 +2250,7 @@ class Session extends EventEmitter {
     catch { /* best-effort: settle failed, but the exit MUST still propagate (anti-deadlock) */ }
 
     if (this._recorder) {
-      this._recorder.writeFooter("pty_exit", exitCode, { packReads: this.packReadSummary() });
+      this._recorder.writeFooter("pty_exit", exitCode);
       this._recorder.close();
     }
 
@@ -2677,7 +2583,6 @@ class Session extends EventEmitter {
     }
 
     this._clearGateHeldReady();
-    this._clearPackNotice();
 
     if (this._recorder) {
       this._recorder.close(); // Idempotent - safe if already closed by _handlePtyExit

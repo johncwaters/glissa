@@ -12,7 +12,7 @@ const crypto = require('node:crypto');
 const path = require('node:path');
 
 const { glissaHomeDir } = require('./config-store');
-const { PACK_NAME_RE, isPackRelativePath, matchesGlob, planPackBuild, sha256, sourcePattern, validatePackSpec } = require('./core/pack-core');
+const { PACK_NAME_RE, matchesGlob, planPackBuild, sourcePattern, validatePackSpec } = require('./core/pack-core');
 
 const SPEC_SUFFIX = '.pack.json';
 // Source patterns resolve against packs/, so a shared spec reads the same whether it runs from a repo
@@ -134,7 +134,7 @@ async function candidatesFor(resolvedPattern) {
   return { candidates: [toPosix(path.resolve(root))], isLiteral };
 }
 
-async function readFilesForSource(source, sourceIndex, baseDir, { keepFullPath = false } = {}) {
+async function readFilesForSource(source, sourceIndex, baseDir) {
   const resolved = resolvePattern(sourcePattern(source), baseDir);
   const excludes = (source.exclude || []).map((pattern) => resolvePattern(pattern, baseDir));
   const { candidates, isLiteral } = await candidatesFor(resolved);
@@ -146,14 +146,11 @@ async function readFilesForSource(source, sourceIndex, baseDir, { keepFullPath =
 
   const files = [];
   for (const full of matched) {
-    const file = {
+    files.push({
       relPath: displayPath(full, baseDir),
       content: await fsp.readFile(full, 'utf8'),
       sourceIndex,
-    };
-    // Only the distiller asks for this; a build's file records stay the shape planPackBuild documents.
-    if (keepFullPath) file.fullPath = full;
-    files.push(file);
+    });
   }
   return files;
 }
@@ -169,41 +166,6 @@ async function readFilesForSkill(skill, skillIndex, baseDir) {
     });
   }
   return files;
-}
-
-/**
- * Absolute path of a distill entry's output, or null when it would land outside the packs directory.
- * The spec validator already rejects an escaping `output`; this is the resolved-path re-check, because
- * the value names a file an LLM lane is about to write.
- */
-function distillOutputPath(output, { baseDir = DEFAULT_PACKS_DIR } = {}) {
-  if (!isPackRelativePath(output)) return null;
-  const full = path.resolve(baseDir, output);
-  const relative = path.relative(baseDir, full);
-  if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) return null;
-  return full;
-}
-
-/**
- * Content hashes of one distill entry's sources, walked and hashed through the SAME reader and the
- * same sha256 a build uses, so a drift check and a build can never disagree about what a source says.
- * `path` is the stamped identity (relative to the install root when the file lives inside it, so a
- * stamp committed on one machine still reads as current on another); `fullPath` is what the distill
- * session is told to read.
- *
- * @returns {Promise<Array<{path: string, fullPath: string, sha256: string}>>} sorted, deduped
- */
-async function distillSourceHashes(entry, { baseDir = DEFAULT_PACKS_DIR } = {}) {
-  const installRoot = path.resolve(baseDir, '..');
-  const byStampPath = new Map();
-  const sources = Array.isArray(entry.sources) ? entry.sources : [];
-  for (const [index, source] of sources.entries()) {
-    for (const file of await readFilesForSource(source, index, baseDir, { keepFullPath: true })) {
-      const stampPath = displayPath(file.fullPath, installRoot);
-      byStampPath.set(stampPath, { path: stampPath, fullPath: file.fullPath, sha256: sha256(file.content) });
-    }
-  }
-  return [...byStampPath.values()].sort((a, b) => (a.path === b.path ? 0 : a.path < b.path ? -1 : 1));
 }
 
 async function writeOutputs(targetDir, outputs) {
@@ -415,8 +377,6 @@ module.exports = {
   defaultBuiltRoot,
   defaultSpecsDir,
   describePackSpec,
-  distillOutputPath,
-  distillSourceHashes,
   listPackSpecs,
   loadPackSpec,
   packWatchRoots,

@@ -92,10 +92,6 @@ function mapHookToSignal(event, payload) {
       if (tool === 'ScheduleWakeup') return 'wakeup-scheduled';
       if (tool === 'CronCreate') return 'cron-created';
       if (tool === 'CronDelete') return 'cron-deleted';
-      // Pack read telemetry, subscribed with its own Read matcher and only for a session that
-      // delivers context packs (settings-injector.PACK_READ_TOOL_MATCHER). Tracking-only like the
-      // wakeups above: never a transition, never confidence-bearing.
-      if (tool === 'Read') return 'pack-read';
       return null;
     }
     case 'notification': {

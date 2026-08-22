@@ -15,7 +15,6 @@ import { setRunningActivity } from './activity.js';
 import { computeAggregate } from './aggregate-core.mjs';
 import { buildCardDOM, closeDebugOverlay, isRenameInProgress, openDebugOverlay, setDebugMode, showConfirmDialog, startInlineRename } from './card-dom.js';
 import { aggregateEl, container, sessionUIs } from './card-registry.js';
-import { readCountText, sinceNoticeCount, stalePackNames } from './pack-stale-core.mjs';
 import { openResumeDialog } from './resume-dialog.js';
 // Load-bearing import: evaluating session-tick.js installs the shared 1s tick (elapsed clock +
 // working-heartbeat poll) at module load.
@@ -39,10 +38,6 @@ const AGGREGATE_GLYPHS = {
 // Last rendered aggregate summary - gates DOM writes + the aria-live re-announce.
 let _lastAggregateText = null;
 let _lastAggregateSeverity = null;
-
-// Latest built version per context pack (server-wide, not per session): the baseline each card's
-// delivered versions are judged against. See setLatestPackVersions / pack-stale-core.mjs.
-const latestPackVersions = new Map();
 
 // ── State ────────────────────────────────────────────────────
 
@@ -320,61 +315,6 @@ export function setSessionAgents(sessionId, activeAgents) {
   }
   delete ui.card.dataset.agents;
   if (badge) badge.textContent = '';
-}
-
-// Reflect the context packs a session was spawned against, and whether the mill has rebuilt any of
-// them since. The delivered versions ride the snapshot (sessions[].packs); the latest versions come
-// from the same snapshot's packVersions plus every later pack-updated broadcast, so both sides are
-// kept here and the chip is recomputed whenever either moves. Advisory only: a stale pack still
-// works, it is just older context than a fresh spawn would get.
-export function setSessionPacks(sessionId, packs) {
-  const ui = sessionUIs.get(sessionId);
-  if (!ui) return;
-  ui.packs = Array.isArray(packs) ? packs : [];
-  applyPackStaleness(ui);
-}
-
-// Latest built version per pack name, replaced wholesale by a snapshot and patched by each
-// pack-updated broadcast.
-export function setLatestPackVersions(versions) {
-  latestPackVersions.clear();
-  for (const [name, version] of Object.entries(versions || {})) latestPackVersions.set(name, version);
-  refreshPackStaleness();
-}
-
-export function notePackVersion(name, version) {
-  if (typeof name !== 'string' || typeof version !== 'string') return;
-  latestPackVersions.set(name, version);
-  refreshPackStaleness();
-}
-
-// One line of read telemetry per delivered pack: "name: N reads" (plus the count since the staleness
-// notice, once one has been injected). Server-side counters, so a pack never read reads as 0.
-function packReadsText(packs) {
-  const rows = (Array.isArray(packs) ? packs : []).map((pack) => {
-    const since = sinceNoticeCount(pack);
-    const suffix = since == null ? '' : `, ${since} since notice`;
-    return `${pack.name}: ${readCountText(pack)}${suffix}`;
-  });
-  return `Reads by this session: ${rows.join('; ')}`;
-}
-
-function applyPackStaleness(ui) {
-  const stale = stalePackNames(ui.packs, latestPackVersions);
-  const badge = ui.card.querySelector('.pack-badge');
-  if (stale.length === 0) {
-    delete ui.card.dataset.packStale;
-    if (badge) badge.title = '';
-    return;
-  }
-  ui.card.dataset.packStale = '';
-  // Reads ride the same tooltip rather than a chip of their own: "rebuilt, and this session read it
-  // N times" is one thought, and the chip only renders while a pack is stale anyway.
-  if (badge) badge.title = `Rebuilt since this session started: ${stale.join(', ')}. Restart it to pick up the new context.\n${packReadsText(ui.packs)}`;
-}
-
-function refreshPackStaleness() {
-  for (const [, ui] of sessionUIs) applyPackStaleness(ui);
 }
 
 // Reflect this conversation's token spend on the card (server usage-sessions delta). `usage` is

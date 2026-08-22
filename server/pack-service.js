@@ -12,10 +12,10 @@
 //   sweep     - a `.unref()`ed interval that rebuilds every spec. Cheap, because a build whose plan
 //               matches the published version writes nothing and reports `unchanged`.
 //
-// A rebuild that actually published emits `pack-updated`; an unchanged one is silent, which is what
-// keeps the interval from broadcasting a heartbeat every 15 minutes.
-
-const { EventEmitter } = require('node:events');
+// A rebuild that actually published logs one line; an unchanged one is silent, which is what keeps
+// the interval from logging a heartbeat every 15 minutes. A live session keeps the pack dir it was
+// spawned against: its skills hot-reload from that dir, its CLAUDE.md and rules reach it on the next
+// spawn, so a rebuild never disturbs a running session.
 
 const { buildPack, listPackSpecs, loadPackSpec, packWatchRoots } = require('./pack-builder');
 const { createPackWatcher } = require('./pack-watch');
@@ -43,11 +43,7 @@ function createPackService(deps = {}) {
     log = console,
   } = deps;
 
-  const service = new EventEmitter();
   const watchers = [];
-  // Latest known version per pack, including the ones a sweep found unchanged: this is what the
-  // dashboard compares a session's DELIVERED version against.
-  const versionsByName = new Map();
   let sweepTimer = null;
   let sweepRunning = false;
   let stopped = false;
@@ -62,10 +58,8 @@ function createPackService(deps = {}) {
       log.warn(`[packs] ${name} rebuild failed: ${report?.errors?.join('; ') || 'no report'}`);
       return report || null;
     }
-    versionsByName.set(report.name, report.version);
     if (report.unchanged) return report;
     log.log(`[packs] ${name} rebuilt: version ${shortVersion(report.version)}`);
-    service.emit('pack-updated', { name: report.name, version: report.version });
     return report;
   }
 
@@ -135,13 +129,7 @@ function createPackService(deps = {}) {
     await buildChain.catch(() => {});
   }
 
-  service.start = start;
-  service.stop = stop;
-  service.sweep = sweep;
-  /** Latest built version per pack name, the staleness baseline the dashboard compares against. */
-  service.getVersions = () => Object.fromEntries(versionsByName);
-  service._watcherCount = () => watchers.length;
-  return service;
+  return { start, stop, sweep, _watcherCount: () => watchers.length };
 }
 
 module.exports = { createPackService, DEFAULT_SWEEP_MINUTES, DEFAULT_DEBOUNCE_MS };
