@@ -18,7 +18,6 @@ Status detection and change watching. Session status is derived from machine-emi
 | `worktree-watch.js` | fs.watch on the per-worktree gitdir; nudges `sessions.js` to recompute the diff when git state moves. Watch-only, no parsing |
 | `integration-ref-watch.js` | Reflog-based listener for integration-branch movement (e.g. another session merged into develop) that no local worktree event would surface |
 | `watch-debounce.js` | Shared debounce-into-trailing-call + stop lifecycle used by `worktree-watch.js` and `integration-ref-watch.js` (both single-directory fs.watch listeners) |
-| `integration-watcher-pool.js` | Ref-counted pool: at most one fs.watch per (commonGitDir, branch), fanned out to every sibling session; factory/registry/recheck injected for testability |
 
 ## For AI Agents
 
@@ -30,7 +29,7 @@ Status detection and change watching. Session status is derived from machine-emi
 - The signal x state transition matrix lives in `session/core/status-mapper.js` and is documented in `docs/postmortem-terminal-detection.md`.
 
 ### Testing Requirements
-- Unit tests: `tests/status-source.test.js`, `hook-source.test.js`, `osc-title-source.test.js`, `worktree-watch.test.js`, `integration-ref-watch.test.js`, `integration-watcher-pool.test.js`.
+- Unit tests: `tests/status-source.test.js`, `hook-source.test.js`, `osc-title-source.test.js`, `worktree-watch.test.js`, `integration-ref-watch.test.js`.
 - Detection behavior changes must keep `tests/replay-harness.test.js` green against the `tests/fixtures/*.jsonl` recordings; add a fixture for a new signal scenario.
 
 ### Common Patterns

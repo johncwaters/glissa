@@ -41,6 +41,25 @@ function findWorktreeForBranch(porcelain, branch) {
   return hit ? hit.cwd : null;
 }
 
+// The SESSION lane's branch namespace; other lanes (`glissa/pr-review/*`) are excluded by it.
+const SESSION_BRANCH_PREFIX = 'glissa/session/';
+const sessionIdFromBranch = (branch) =>
+  (branch.startsWith(SESSION_BRANCH_PREFIX) ? branch.slice(SESSION_BRANCH_PREFIX.length) : null);
+
+// The one statement of "this worktree holds UNMERGED work that must NOT be destroyed on a restart":
+// uncommitted changes in the worktree, or commits on its branch not yet on the integration branch (a
+// parked/conflicted merge). Gitignored junctions/files never show in `status --porcelain`. Pure, over
+// the two already-fetched git outputs, so the async and sync engines cannot drift on the rule.
+const isDirtyResult = (dirty) => dirty.ok && dirty.out !== '';
+function hasWorkFrom(dirty, ahead) {
+  if (isDirtyResult(dirty)) return true;
+  return !!(ahead?.ok && ahead.out && ahead.out !== '0');
+}
+
+// The fork-base target stamped on a branch at create time (see createBody), so a worktree's integration
+// branch is resolved from its own git config instead of assuming the caller's live config never changed.
+const markerFrom = (result) => (result.ok && result.out ? result.out : null);
+
 // Run each isolated lane (a session, a PR review) inside a throwaway git worktree on a dedicated
 // branch, so its writes never touch the user's working tree or current branch during the
 // (multi-minute) run. On a terminal outcome the work is fast-forwarded back into the base branch when
@@ -83,6 +102,7 @@ function createGitWorkspace(opts = {}) {
     tail = r.catch(() => {});
     return r;
   };
+  const serialized = (body) => (args) => serialize(() => body(args));
 
   async function run(args, cwd, extra) {
     try { return okResult(await git(args, cwd, extra)); }
@@ -119,9 +139,6 @@ function createGitWorkspace(opts = {}) {
   // Create an isolated worktree on `glissa/<teamId>/<label>`. `teamId` names the LANE ("session",
   // "pr-review"); the segment name is on-disk branch shape that boot reconciliation matches, so it
   // stays. Returns { cwd, isGit, branch, base, baseSha }; falls back to { cwd: projectPath, isGit: false }.
-  function create(args) {
-    return serialize(() => createBody(args));
-  }
   async function createBody({ projectPath, teamId, label, baseBranch, worktreeBase, shareList }) {
     const inside = await run(['rev-parse', '--is-inside-work-tree'], projectPath);
     if (!inside.ok || inside.out !== 'true') return { cwd: projectPath, isGit: false };
@@ -211,15 +228,6 @@ function createGitWorkspace(opts = {}) {
     }
     if (!ignored.length) return;
     try { await populateWorktree(projectPath, wtDir, ignored); } catch { /* best-effort */ }
-  }
-
-  // Public re-share entry for a caller that adopts an existing worktree outside create() (the
-  // branch-in-use self-adopt in sessions.js). Serialized like every other engine method that touches
-  // a worktree, so it never interleaves with a live merge/remove. createBody must keep calling the
-  // inner populateShare directly: calling this serialized wrapper from inside the serialize chain
-  // would deadlock (the inner call would chain onto a tail that includes the in-flight create).
-  function populate(args) {
-    return serialize(() => populateShare(args));
   }
 
   // Junction-safe teardown of a worktree (+ its branch): the node_modules junction is removed BEFORE
@@ -382,9 +390,6 @@ function createGitWorkspace(opts = {}) {
   // rebase conflict / lost FF PARKS the branch (worktree + branch preserved) for a manual merge. Returns
   // { merged, committed, branch, base, reason, parked? }; `branch` is null once merged (deleted) or
   // discarded, else the parked branch.
-  function mergeBack(args) {
-    return serialize(() => mergeBackBody(args));
-  }
   async function mergeBackBody({ projectPath, workspace, targetBranch }) {
     const g = await resolveMergeBack({ projectPath, workspace, targetBranch });
     if (g.error) return g.error;
@@ -419,9 +424,6 @@ function createGitWorkspace(opts = {}) {
   // preserved); nothing-to-commit is a harmless no-op that keeps the worktree. Returns { merged,
   // committed, branch, base, baseSha?, kept, reason, parked? }; `branch` is retained (non-null) whenever
   // the worktree is kept, and baseSha is the new integration tip the worktree was rebased onto.
-  function mergeKeep(args) {
-    return serialize(() => mergeKeepBody(args));
-  }
   async function mergeKeepBody({ projectPath, workspace, targetBranch }) {
     const g = await resolveMergeBack({ projectPath, workspace, targetBranch });
     if (g.error) return g.error;
@@ -452,9 +454,6 @@ function createGitWorkspace(opts = {}) {
   // and leaves the worktree byte-identical to how it was found - the operator's eventual Merge then hits
   // the same conflict and the existing parked handoff takes over. Returns { ok, upToDate?, rebased?,
   // headSha?, baseSha?, rerereReplayed?, reason?, conflicts? }.
-  function rebaseOnly(args) {
-    return serialize(() => rebaseOnlyBody(args));
-  }
   async function rebaseOnlyBody({ projectPath, workspace, targetBranch }) {
     const g = await resolveMergeBack({ projectPath, workspace, targetBranch });
     if (g.error) return { ok: false, reason: g.error.reason };
@@ -490,9 +489,6 @@ function createGitWorkspace(opts = {}) {
   }
 
   // Throw away a worktree and its branch (cancelled runs): nothing is committed or merged.
-  function discard(args) {
-    return serialize(() => discardBody(args));
-  }
   async function discardBody({ projectPath, workspace }) {
     if (!workspace || !workspace.isGit) return;
     if (workspace.cwd) {
@@ -503,29 +499,8 @@ function createGitWorkspace(opts = {}) {
     await run(['worktree', 'prune'], projectPath);
   }
 
-  // True when a session worktree holds UNMERGED work that must NOT be destroyed on a restart: uncommitted
-  // changes in the worktree, or commits on its branch not yet on the integration branch (a parked/
-  // conflicted merge). Gitignored junctions/files never show in `status --porcelain`.
-  async function worktreeHasWork(cwd, branch, projectPath, integrationBranch) {
-    const dirty = await run(['status', '--porcelain'], cwd);
-    if (dirty.ok && dirty.out !== '') return true;
-    if (integrationBranch && branch) {
-      const ahead = await run(['rev-list', '--count', `${integrationBranch}..${branch}`], projectPath);
-      if (ahead.ok && ahead.out && ahead.out !== '0') return true;
-    }
-    return false;
-  }
-
-  // Read the fork-base target stamped on `branch` at create time (see createBody), so a worktree's
-  // integration branch is resolved from its own git config instead of assuming the caller's live config
-  // never changed. Returns null when unset (older worktree, or the stamp failed).
-  async function readIntegrationMarker(projectPath, branch) {
-    const r = await run(['config', '--get', `branch.${branch}.glissa-integration`], projectPath);
-    return r.ok && r.out ? r.out : null;
-  }
-
   // List the SESSION worktrees (branch `glissa/session/<id>`) of a repo, each with its extracted session
-  // id and whether it holds unmerged work. Other lanes (`glissa/pr-review/*`) are excluded by namespace.
+  // id and whether it holds unmerged work.
   async function listSessionWorktrees({ projectPath, integrationBranch }) {
     const out = [];
     const inside = await run(['rev-parse', '--is-inside-work-tree'], projectPath);
@@ -533,13 +508,20 @@ function createGitWorkspace(opts = {}) {
     const listed = await run(['worktree', 'list', '--porcelain'], projectPath);
     if (!listed.ok) return out;
     for (const { cwd: wt, branch: name } of parseWorktreeBranches(listed.out)) {
-      if (!name.startsWith('glissa/session/')) continue;
+      const id = sessionIdFromBranch(name);
+      if (id === null) continue;
       // The marker is the authority for THIS worktree's integration branch; the passed integrationBranch
       // is only the fallback for a worktree created before the marker existed.
-      const resolvedIntegrationBranch = (await readIntegrationMarker(projectPath, name)) || integrationBranch;
+      const marker = await run(['config', '--get', `branch.${name}.glissa-integration`], projectPath);
+      const resolvedIntegrationBranch = markerFrom(marker) || integrationBranch;
+      // The ahead-count is only asked for when the working tree is clean: a dirty tree already holds work.
+      const dirty = await run(['status', '--porcelain'], wt);
+      const ahead = !isDirtyResult(dirty) && resolvedIntegrationBranch
+        ? await run(['rev-list', '--count', `${resolvedIntegrationBranch}..${name}`], projectPath)
+        : null;
       out.push({
-        cwd: wt, branch: name, id: name.slice('glissa/session/'.length),
-        hasWork: await worktreeHasWork(wt, name, projectPath, resolvedIntegrationBranch),
+        cwd: wt, branch: name, id,
+        hasWork: hasWorkFrom(dirty, ahead),
         integrationBranch: resolvedIntegrationBranch,
       });
     }
@@ -548,9 +530,6 @@ function createGitWorkspace(opts = {}) {
 
   // Junction-safe removal of a single worktree by path (+ its branch), then prune. A mutator, so it is
   // serialized too (the async engine never races it against a live merge into the same target).
-  function removeWorktreeByPath(args) {
-    return serialize(() => removeWorktreeByPathBody(args));
-  }
   async function removeWorktreeByPathBody({ projectPath, cwd, branch }) {
     if (cwd) {
       removeWorktreeLinks(cwd);
@@ -573,9 +552,18 @@ function createGitWorkspace(opts = {}) {
     return parseWorktreeBranches(listed.out);
   }
 
+  // Every ref/worktree-MUTATING method is the same shape: run its body on the serialize queue. populate
+  // is the one whose inner half stays reachable unwrapped (createBody calls populateShare directly;
+  // chaining from inside the queue would deadlock on a tail that includes the in-flight create).
   return {
-    create, discard, mergeBack, mergeKeep, rebaseOnly, populate,
-    listSessionWorktrees, listWorktreeBranches, removeWorktreeByPath,
+    create: serialized(createBody),
+    discard: serialized(discardBody),
+    mergeBack: serialized(mergeBackBody),
+    mergeKeep: serialized(mergeKeepBody),
+    rebaseOnly: serialized(rebaseOnlyBody),
+    populate: serialized(populateShare),
+    removeWorktreeByPath: serialized(removeWorktreeByPathBody),
+    listSessionWorktrees, listWorktreeBranches,
   };
 }
 
@@ -594,22 +582,8 @@ function createGitWorkspaceSync(opts = {}) {
     catch (err) { return errResult(err); }
   }
 
-  function worktreeHasWork(cwd, branch, projectPath, integrationBranch) {
-    const dirty = run(['status', '--porcelain'], cwd);
-    if (dirty.ok && dirty.out !== '') return true;
-    if (integrationBranch && branch) {
-      const ahead = run(['rev-list', '--count', `${integrationBranch}..${branch}`], projectPath);
-      if (ahead.ok && ahead.out && ahead.out !== '0') return true;
-    }
-    return false;
-  }
-
-  // Mirrors the async engine's readIntegrationMarker (see createGitWorkspace) for the sync boot path.
-  function readIntegrationMarker(projectPath, branch) {
-    const r = run(['config', '--get', `branch.${branch}.glissa-integration`], projectPath);
-    return r.ok && r.out ? r.out : null;
-  }
-
+  // The async engine's listSessionWorktrees, step for step, over the sync runner: same git calls in the
+  // same order, and the same shared marker/hasWork rules, so the two cannot report a worktree differently.
   function listSessionWorktrees({ projectPath, integrationBranch }) {
     const out = [];
     const inside = run(['rev-parse', '--is-inside-work-tree'], projectPath);
@@ -617,11 +591,17 @@ function createGitWorkspaceSync(opts = {}) {
     const listed = run(['worktree', 'list', '--porcelain'], projectPath);
     if (!listed.ok) return out;
     for (const { cwd: wt, branch: name } of parseWorktreeBranches(listed.out)) {
-      if (!name.startsWith('glissa/session/')) continue;
-      const resolvedIntegrationBranch = readIntegrationMarker(projectPath, name) || integrationBranch;
+      const id = sessionIdFromBranch(name);
+      if (id === null) continue;
+      const marker = run(['config', '--get', `branch.${name}.glissa-integration`], projectPath);
+      const resolvedIntegrationBranch = markerFrom(marker) || integrationBranch;
+      const dirty = run(['status', '--porcelain'], wt);
+      const ahead = !isDirtyResult(dirty) && resolvedIntegrationBranch
+        ? run(['rev-list', '--count', `${resolvedIntegrationBranch}..${name}`], projectPath)
+        : null;
       out.push({
-        cwd: wt, branch: name, id: name.slice('glissa/session/'.length),
-        hasWork: worktreeHasWork(wt, name, projectPath, resolvedIntegrationBranch),
+        cwd: wt, branch: name, id,
+        hasWork: hasWorkFrom(dirty, ahead),
         integrationBranch: resolvedIntegrationBranch,
       });
     }

@@ -11,7 +11,7 @@ Tests are named `<module>.test.js` after the module under test. Notable clusters
 
 | Cluster | Files |
 |---------|-------|
-| Detection | `status-source`, `hook-source`, `osc-title-source`, `replay-harness`, `worktree-detection`, `worktree-watch`, `integration-ref-watch`, `integration-watcher-pool`, `title-latch-recovery` |
+| Detection | `status-source`, `hook-source`, `osc-title-source`, `replay-harness`, `worktree-detection`, `worktree-watch`, `integration-ref-watch`, `title-latch-recovery` |
 | Session core | `state-machine`, `status-mapper` (via `sessions-detection`), `agent-tracker`, `wakeup-tracker` (via `pending-wakeup`), `spawn-command`, `spawn-env`, `spawn-gate`, `spawn-integration`, `merge-prompt`, `anti-slop-prompt`, `post-turn-rules`, `slop-code-patterns`, `post-turn-checker` |
 | Session/server | `sessions-buffer`, `sessions-worktree`, `session-resize`, `session-write-guard`, `ws-sender`, `control-worktree` |
 | Worktrees | `git-workspace-session`, `git-workspace-rebase`, `rebase-gate`, `sessions-auto-rebase`, `session-spawn-args`, `no-direct-git-worktree`, `backend-worktree-reconcile` |
