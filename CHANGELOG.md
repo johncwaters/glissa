@@ -31,6 +31,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Codex and Grok vendor usage parsing was removed**, along with the Settings toggles that controlled it.
 - **Durable usage storage was removed**: Glissa no longer keeps the usage warehouse or related budget state files.
 - **The shell-history activity source was removed**, so ingestion no longer reads command history as navigator context.
+- **PostHog Radar escalation was simplified**: recurrence dedupe, the escalation ladder, traffic-spike analytics and its Settings block, the escalation-threshold Settings field, directory-guessed session auto-creation, and archive tombstones were removed. Related config keys, including `posthog.userEscalationThreshold` and `trafficSpike*`, are now ignored.
+- **Pack automation surfaces were removed**: `glissa pack distill`, `config.packDistiller`, pack read telemetry, `config.packReadTelemetry`, the live pack staleness notice injected into turns, and the pack-stale card chip are gone.
+- **Navigator intent controls were removed**: the intent model and its Navigator tab block, the `navigator-set-intent` control message, and `config.navigator.dispatch.activityMaxPerHour` are now ignored.
 
 ## [0.21.0] - 2026-08-05
 

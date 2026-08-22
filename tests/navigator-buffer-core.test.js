@@ -48,6 +48,23 @@ test('applyDidChange supports full text replacement', () => {
   assert.equal(getDoc(store, 'file:///a.md').text, 'new text');
 });
 
+test('applyDidChange rejects ranged changes', () => {
+  const store = createDocStore();
+  openDoc(store, 'file:///a.md', 'original');
+  assert.deepEqual(applyDidChange(store, {
+    textDocument: { uri: 'file:///a.md', version: 2 },
+    contentChanges: [{
+      range: {
+        start: { line: 0, character: 0 },
+        end: { line: 0, character: 8 },
+      },
+      text: 'corrupt',
+    }],
+  }), { applied: false, reason: 'invalid-range' });
+  assert.equal(getDoc(store, 'file:///a.md').text, 'original');
+  assert.equal(getDoc(store, 'file:///a.md').version, 1);
+});
+
 test('applyDidChange drops stale versions and unknown uris', () => {
   const store = createDocStore();
   openDoc(store, 'file:///a.md', 'fresh', 5);

@@ -6,9 +6,8 @@
 // oversize request does not kill the server (backend req.on('error') listener).
 //
 // SAFETY: createBackend resolves its config store and runs a boot worktree reconcile against the
-// configured projects. It is pointed at a throwaway temp config with ZERO projects via GLISSA_CONFIG,
-// so it can never touch a real repo or remove a real worktree (memory: booting the backend against
-// the real config once destroyed an active worktree). Keep projects [] in this file.
+// configured projects. It is pointed at a throwaway temp config with a single non-git temp project via
+// GLISSA_CONFIG, so it can never touch a real repo or remove a real worktree.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -19,16 +18,28 @@ const path = require('node:path');
 
 const { createBackend } = require('../server/backend');
 
+const SESSION_ID = 'hook-route-session';
+
 let tmpDir = null;
 let prevEnv = null;
 let server = null;
 let backend = null;
 let base = null;
+let session = null;
+let token = null;
 
 test.before(async () => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-hookroute-'));
+  const projectDir = path.join(tmpDir, 'project');
+  fs.mkdirSync(projectDir);
   const cfgPath = path.join(tmpDir, 'config.json');
-  fs.writeFileSync(cfgPath, JSON.stringify({ projects: [], teams: [], repoRoots: [] }, null, 2), 'utf8');
+  fs.writeFileSync(cfgPath, JSON.stringify({
+    projects: [{ id: SESSION_ID, name: 'hook route', path: projectDir }],
+    teams: [],
+    repoRoots: [],
+    packsAutoRebuild: false,
+    autoResume: false,
+  }, null, 2), 'utf8');
   prevEnv = process.env.GLISSA_CONFIG;
   process.env.GLISSA_CONFIG = cfgPath;
 
@@ -38,6 +49,12 @@ test.before(async () => {
   server.on('request', backend.app);
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   base = `http://127.0.0.1:${server.address().port}`;
+
+  session = backend.getSession(SESSION_ID);
+  assert.ok(session, 'the boot loop created the configured session');
+  session._injectHooks();
+  token = session._hookToken;
+  assert.ok(token, 'hook injection produced a token');
 });
 
 test.after(async () => {
@@ -60,11 +77,24 @@ test('unknown session id is rejected 404 with ok:false', async () => {
   assert.equal(body.reason, 'unknown-session');
 });
 
-test('missing and bad tokens are rejected (no session ever spawns in this file, so any id is unknown; the token gate itself is unit-tested in hook-source.test.js)', async () => {
+test('missing and bad tokens are rejected', async () => {
   const noToken = await fetch(`${base}/hook/any/Stop`, { method: 'POST', body: '{}' });
   assert.notEqual(noToken.status, 200, 'no token never yields 200');
   const badToken = await fetch(`${base}/hook/any/Stop?t=wrong-token`, { method: 'POST', body: '{}' });
   assert.notEqual(badToken.status, 200, 'bad token never yields 200');
+});
+
+test('successful hook callbacks answer only ok and reason', async () => {
+  const res = await fetch(`${base}/hook/${SESSION_ID}/NotARealHook?t=${encodeURIComponent(token)}`, {
+    method: 'POST',
+    body: '{}',
+    headers: { 'content-type': 'application/json' },
+  });
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.deepEqual(Object.keys(body).sort(), ['ok', 'reason']);
+  assert.equal(body.ok, true);
+  assert.equal(body.reason, 'ignored-event');
 });
 
 test('malformed JSON body is tolerated (route answers, does not throw)', async () => {

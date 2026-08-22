@@ -46,6 +46,7 @@ function applyDidChange(store, params) {
   const changes = Array.isArray(params.contentChanges) ? params.contentChanges : [];
   let text = doc.text;
   for (const change of changes) {
+    if (change && change.range) return { applied: false, reason: 'invalid-range' };
     text = typeof change.text === 'string' ? change.text : '';
   }
 
