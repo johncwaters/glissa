@@ -156,6 +156,25 @@ test('releases/latest is the fallback when git ls-remote tags fails', async () =
   assert.equal(requested[0].headers.Accept, 'application/vnd.github+json');
 });
 
+test('releases/latest is the fallback when git ls-remote has no valid release tag', async () => {
+  const fixture = makeTempRoot();
+  const result = await checkForUpdate(baseOptions(fixture, {
+    runCommand: fakeGit({ tags: `${SHA_RELEASE_TAG}\trefs/heads/main\nnot ls remote output` }),
+    fetchFn: fakeFetch({ version: '0.21.0' }),
+  }));
+  assert.equal(result.latest, '0.21.0');
+  assert.equal(result.latestSha, null);
+});
+
+test('resolves null when the releases/latest fallback body is not JSON', async () => {
+  const fixture = makeTempRoot();
+  const result = await checkForUpdate(baseOptions(fixture, {
+    runCommand: fakeGit({}),
+    fetchFn: async () => ({ ok: true, json: async () => { throw new Error('not json'); } }),
+  }));
+  assert.equal(result, null);
+});
+
 test('same version is no update even when shas differ', async () => {
   const fixture = makeTempRoot();
   writeLockfile(fixture.packageRoot, `git+https://github.com/johncwaters/glissa.git#${SHA_LOCAL}`);
@@ -184,6 +203,16 @@ test('resolves null on a non-200 latest release response', async () => {
     fetchFn: fakeFetch({ version: '0.21.0', ok: false }),
   }));
   assert.equal(result, null);
+});
+
+test('does not write throttle state when no release version resolves', async () => {
+  const fixture = makeTempRoot();
+  const result = await checkForUpdate(baseOptions(fixture, {
+    runCommand: fakeGit({}),
+    fetchFn: fakeFetch({ ok: false }),
+  }));
+  assert.equal(result, null);
+  assert.equal(fs.existsSync(fixture.statePath), false);
 });
 
 test('resolves null when the request times out', async () => {
@@ -300,6 +329,22 @@ test('a corrupt state file is ignored rather than fatal', async () => {
   const fixture = makeTempRoot();
   writeLockfile(fixture.packageRoot, `git+https://github.com/johncwaters/glissa.git#${SHA_LOCAL}`);
   fs.writeFileSync(fixture.statePath, 'not json', 'utf8');
+  let lsRemoteCalls = 0;
+  const runCommand = async (file, args, options) => {
+    if (args[0] === 'ls-remote') lsRemoteCalls += 1;
+    return fakeGit({ tags: tagsStdout() })(file, args, options);
+  };
+  const result = await checkForUpdate(baseOptions(fixture, { runCommand }));
+  assert.equal(lsRemoteCalls, 1);
+  assert.equal(result.latestSha, SHA_RELEASE_COMMIT);
+});
+
+test('a corrupt state file is replaced after a successful check', async () => {
+  const fixture = makeTempRoot();
+  writeLockfile(fixture.packageRoot, `git+https://github.com/johncwaters/glissa.git#${SHA_LOCAL}`);
+  fs.writeFileSync(fixture.statePath, 'not json', 'utf8');
   const result = await checkForUpdate(baseOptions(fixture));
   assert.equal(result.latestSha, SHA_RELEASE_COMMIT);
+  const state = JSON.parse(fs.readFileSync(fixture.statePath, 'utf8'));
+  assert.equal(state.latestVersion, '0.21.0');
 });

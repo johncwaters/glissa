@@ -48,6 +48,15 @@ test('parseTagVersion accepts only v-prefixed strict numeric semver tags', () =>
   assert.equal(parseTagVersion(null), null);
 });
 
+test('parseTagVersion trims refs and rejects malformed or non-string tags', () => {
+  assert.equal(parseTagVersion('  refs/tags/v1.2.3  '), '1.2.3');
+  assert.equal(parseTagVersion('refs/tags/v1.2.3^{}'), '1.2.3');
+  assert.equal(parseTagVersion('v1.2'), null);
+  assert.equal(parseTagVersion('v1.2.3.4'), null);
+  assert.equal(parseTagVersion('v01.2.3'), '01.2.3');
+  assert.equal(parseTagVersion(42), null);
+});
+
 test('parseLsRemoteTags returns the latest semver tag and prefers peeled shas', () => {
   const stdout = [
     `${SHA_A}\trefs/tags/v0.9.1`,
@@ -57,6 +66,23 @@ test('parseLsRemoteTags returns the latest semver tag and prefers peeled shas', 
     `${SHA_B}\trefs/tags/v9.9.9-rc.1`,
   ].join('\n');
   assert.deepEqual(parseLsRemoteTags(stdout), { version: '0.10.0', sha: SHA_C });
+});
+
+test('parseLsRemoteTags tolerates garbage, CRLF, peeled-first order and duplicate versions', () => {
+  const stdout = [
+    'not a valid ls-remote row',
+    `${SHA_A}\trefs/heads/main`,
+    `${SHA_C}\trefs/tags/v0.10.0^{}`,
+    `${SHA_A}\trefs/tags/v0.10.0`,
+    `${SHA_B}\trefs/tags/v0.9.1`,
+    `${SHA_A}\trefs/tags/v0.10.0`,
+  ].join('\r\n');
+  assert.deepEqual(parseLsRemoteTags(stdout), { version: '0.10.0', sha: SHA_C });
+});
+
+test('parseLsRemoteTags accepts lightweight tags and ignores non-tag-only output', () => {
+  assert.deepEqual(parseLsRemoteTags(`${SHA_A}\trefs/tags/v0.8.0`), { version: '0.8.0', sha: SHA_A });
+  assert.equal(parseLsRemoteTags(`${SHA_A}\trefs/heads/main\r\n${SHA_B}\trefs/heads/develop`), null);
 });
 
 test('parseLsRemoteTags returns null when no valid release tag is present', () => {
@@ -72,6 +98,7 @@ test('parseLatestReleaseTag reads tag_name and leaves sha null', () => {
   assert.equal(parseLatestReleaseTag({ tag_name: 'v0.21.0-rc.1' }), null);
   assert.equal(parseLatestReleaseTag({ name: 'v0.21.0' }), null);
   assert.equal(parseLatestReleaseTag(null), null);
+  assert.equal(parseLatestReleaseTag([]), null);
 });
 
 test('decideInstallFlavor prefers the lockfile commit, then gitHead, then a clone', () => {
@@ -98,6 +125,7 @@ test('decideInstallFlavor ignores a truncated or non-hex commit', () => {
 test('buildUpdateCommand pins npm-global to the latest tag and keeps clone commands unchanged', () => {
   assert.equal(buildUpdateCommand('npm-global', '0.21.0'), 'npm install -g github:johncwaters/glissa#v0.21.0 --allow-git=root');
   assert.equal(buildUpdateCommand('npm-global', null), 'npm install -g github:johncwaters/glissa --allow-git=root');
+  assert.equal(buildUpdateCommand('npm-global', ''), 'npm install -g github:johncwaters/glissa --allow-git=root');
   assert.equal(buildUpdateCommand('clone', '0.21.0'), CLONE_COMMAND);
   assert.equal(buildUpdateCommand('unknown', '0.21.0'), CLONE_COMMAND);
 });
@@ -120,6 +148,8 @@ test('compareSemver orders by major/minor/patch', () => {
   assert.equal(compareSemver('1.0.0', '0.99.99'), 1);
   assert.equal(compareSemver('0.16.1', '0.16.0'), 1);
   assert.equal(compareSemver('0.16.0', '0.16.0'), 0);
+  assert.equal(compareSemver('0.10.0', '0.9.1'), 1);
+  assert.equal(compareSemver('0.9.1', '0.10.0'), -1);
 });
 
 test('compareSemver tolerates leading v and trailing prerelease/build', () => {
@@ -163,6 +193,21 @@ test('decideUpdateStatus reports updates by version only', () => {
   });
   assert.equal(sameVersionWithDifferentSha.updateAvailable, false);
   assert.equal(sameVersionWithDifferentSha.command, CLONE_COMMAND);
+});
+
+test('decideUpdateStatus reports no update when current is equal, newer or latest is missing', () => {
+  const equal = decideUpdateStatus({ currentVersion: '0.21.0', latestVersion: '0.21.0', flavor: 'npm-global' });
+  assert.equal(equal.updateAvailable, false);
+  assert.equal(equal.releaseUrl, 'https://github.com/johncwaters/glissa/releases/tag/v0.21.0');
+
+  const currentAhead = decideUpdateStatus({ currentVersion: '0.22.0', latestVersion: '0.21.0', flavor: 'clone' });
+  assert.equal(currentAhead.updateAvailable, false);
+  assert.equal(currentAhead.releaseUrl, 'https://github.com/johncwaters/glissa/releases/tag/v0.21.0');
+
+  const missingLatest = decideUpdateStatus({ currentVersion: '0.22.0', latestVersion: null, flavor: 'unknown' });
+  assert.equal(missingLatest.updateAvailable, false);
+  assert.equal(missingLatest.latest, null);
+  assert.equal(missingLatest.releaseUrl, null);
 });
 
 test('decideUpdateStatus fails open on unparseable versions and normalizes flavor', () => {
