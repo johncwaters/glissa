@@ -1,8 +1,11 @@
 # Plan: Navigator part 2 (the remaining tiers)
 
-Status: drafted 2026-08-22. Predecessor: `docs/archive/plan-navigator.md` (M1 to M5, shipped).
-`AGENTS.md` and the code win over this doc; shipped sections graduate there and this doc heads to
-`docs/archive/` per convention.
+> Archived 2026-08-22: all milestones (M6 to M11) shipped the same day. Current behavior is
+> documented in the root `AGENTS.md` (navigator entries under Key Files and File Structure); this
+> doc is kept for design rationale only.
+
+Status: drafted 2026-08-22; M6 to M11 shipped. Predecessor: `docs/archive/plan-navigator.md`
+(M1 to M5, shipped). `AGENTS.md` and the code win over this doc.
 
 ## What is left
 
