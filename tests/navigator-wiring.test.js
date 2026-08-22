@@ -87,6 +87,128 @@ function didChangeParams(uri, version, text) {
   return { textDocument: { uri, version }, contentChanges: [{ text }] };
 }
 
+function rangedChangeParams(uri, version, contentChanges) {
+  return { textDocument: { uri, version }, contentChanges };
+}
+
+/*
+ * The staleness defect this pins: an incremental didChange used to be refused outright, so the mirrored
+ * buffer stayed frozen at its didOpen text, no sweep was ever scheduled, and every tier below read a
+ * document the carbon unit had already moved on from.
+ */
+test('a didChange carrying ranges is applied and sweeps the spliced text', (t) => {
+  const { wiring, timers, sent, warnings, lsp } = drivenConnection();
+  t.after(() => wiring.stop());
+
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', '# Title\n\nA line with a repeat.\n'));
+  timers.runPending();
+  assert.deepEqual(sent[0].params.diagnostics, [], 'the opened text is clean');
+
+  lsp('textDocument/didChange', rangedChangeParams(MARKDOWN_URI, 2, [
+    { range: { start: { line: 2, character: 12 }, end: { line: 2, character: 12 } }, text: 'with ' },
+  ]));
+  assert.equal(timers.pendingCount, 1, 'the applied change schedules a sweep');
+
+  timers.runPending();
+  assert.equal(sent.length, 2);
+  assert.deepEqual(sent[1].params.diagnostics.map((d) => d.code), ['repeated-word'], 'the sweep read the spliced text');
+  assert.deepEqual(warnings, [], 'and nothing was refused');
+});
+
+test('a malformed range is refused with the uri, version, change index and range in the line', (t) => {
+  const { wiring, timers, sent, warnings, lsp } = drivenConnection();
+  t.after(() => wiring.stop());
+
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  timers.runPending();
+
+  lsp('textDocument/didChange', rangedChangeParams(MARKDOWN_URI, 7, [
+    { range: { start: { line: 0, character: 0 } }, text: 'ignored' },
+    { range: { start: { line: 3, character: 1 }, end: { line: 0, character: 0 } }, text: 'corrupt' },
+  ]));
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /ignored textDocument\/didChange: invalid-range/);
+  assert.match(warnings[0], /uri=file:\/\/\/tmp\/plan-navigator\.md/);
+  assert.match(warnings[0], /version=7/);
+  assert.match(warnings[0], /change=0/);
+  assert.match(warnings[0], /range=0:0-\?/);
+  assert.equal(sent.length, 1, 'a refused frame publishes nothing new');
+});
+
+// Per-keystroke chatter is debug-gated, and even then it carries SIZES: buffer content never reaches
+// a log line, at any level.
+test('the didChange and debounced-sweep lines are debug-gated and name sizes rather than text', (t) => {
+  const secret = '# Title\n\nA sentence nothing should ever log.\n';
+  const quiet = drivenConnection();
+  t.after(() => quiet.wiring.stop());
+  quiet.lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', CLEAN_MARKDOWN));
+  quiet.lsp('textDocument/didChange', didChangeParams(MARKDOWN_URI, 2, secret));
+  quiet.timers.runPending();
+  assert.equal(quiet.notes.some((line) => line.includes('didChange')), false, 'nothing per keystroke with debug off');
+  assert.equal(quiet.notes.some((line) => line.includes('swept')), false, 'the debounced sweep runs at the same cadence');
+
+  const loud = drivenConnection({ debug: () => true });
+  t.after(() => loud.wiring.stop());
+  loud.lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', CLEAN_MARKDOWN));
+  loud.lsp('textDocument/didChange', didChangeParams(MARKDOWN_URI, 2, secret));
+  loud.timers.runPending();
+  const changeLine = loud.notes.find((line) => line.includes('didChange'));
+  assert.match(changeLine, new RegExp(`v2 \\(1 changes, ${secret.length} chars\\)`));
+  assert.ok(loud.notes.some((line) => line.includes('swept')), 'and the sweep line appears with debug on');
+  assert.equal(loud.notes.some((line) => line.includes('nothing should ever log')), false);
+});
+
+// A logging decision must never fault the frame it rode in on.
+test('a debug getter that throws reads as debug off rather than dropping the frame', (t) => {
+  const { wiring, timers, sent, warnings, notes, lsp } = drivenConnection({
+    debug: () => { throw new Error('settings unavailable'); },
+  });
+  t.after(() => wiring.stop());
+
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', CLEAN_MARKDOWN));
+  lsp('textDocument/didChange', didChangeParams(MARKDOWN_URI, 2, REPEATED_WORD_MARKDOWN));
+  timers.runPending();
+  assert.deepEqual(warnings, [], 'the throw never reaches the frame handler');
+  assert.equal(notes.some((line) => line.includes('didChange')), false, 'and it reads as off');
+  assert.equal(sent.length, 1, 'the sweep still published');
+});
+
+// A save is operator-paced, so it keeps the one always-visible sweep marker.
+test('a save sweep is reported at note level even with debug off', (t) => {
+  const { wiring, notes, lsp } = drivenConnection();
+  t.after(() => wiring.stop());
+
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  lsp('textDocument/didSave', { textDocument: { uri: MARKDOWN_URI } });
+  assert.ok(notes.some((line) => line.includes(`swept ${MARKDOWN_URI} on save: 1 findings`)), `saw ${JSON.stringify(notes)}`);
+});
+
+/*
+ * The intent is model-authored from the buffer and the digest, and the operator variant is typed text,
+ * so logging either verbatim would put content in the log by the back door. Source and size only.
+ */
+test('intent lines name the source and the size, never the sentence', (t) => {
+  const statement = 'a plan doc nobody should find quoted in a log file';
+  const { wiring, notes } = drivenConnection();
+  t.after(() => wiring.stop());
+
+  wiring.setOperatorIntent(statement);
+  wiring.applyModelIntent('');
+  const intentLines = notes.filter((line) => line.includes('intent '));
+  assert.deepEqual(intentLines, [`[navigator] intent operator-set (${statement.length} chars)`]);
+  assert.equal(notes.some((line) => line.includes('nobody should find')), false);
+});
+
+test('a stale didChange names both versions in the line it logs', (t) => {
+  const { wiring, warnings, lsp } = drivenConnection();
+  t.after(() => wiring.stop());
+
+  lsp('textDocument/didOpen', { textDocument: { uri: MARKDOWN_URI, languageId: 'markdown', version: 9, text: CLEAN_MARKDOWN } });
+  lsp('textDocument/didChange', didChangeParams(MARKDOWN_URI, 4, REPEATED_WORD_MARKDOWN));
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /stale-version \(uri=.+ incoming=4 current=9\)/);
+});
+
 test('a burst of markdown edits coalesces into one sweep of the final text', (t) => {
   const { wiring, timers, sent, lsp } = drivenConnection();
   t.after(() => wiring.stop());

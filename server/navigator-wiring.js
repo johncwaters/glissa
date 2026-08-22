@@ -4,7 +4,7 @@
 
 const { WebSocketServer } = require('ws');
 const {
-  applyDidChange, applyDidClose, applyDidOpen, createDocStore, getDoc, listDocs, uriOfParams,
+  applyDidChange, applyDidClose, applyDidOpen, createDocStore, formatRange, getDoc, listDocs, uriOfParams,
 } = require('./core/navigator-buffer-core');
 const {
   createDispatchState, decideDispatch, forgetUri, hashText, recordDispatch, resolveDispatchConfig,
@@ -47,6 +47,20 @@ function readFrame(raw) {
   return { ok: true, method: parsed.method, params };
 }
 
+/*
+ * What a refused didChange needs beside its reason for the log line to answer the next question by
+ * itself: which buffer, which frame, and which change in the batch was the malformed one.
+ */
+function changeFailureReason(uri, version, result) {
+  if (result.reason === 'invalid-range' || result.reason === 'invalid-text') {
+    return `${result.reason} (uri=${uri} version=${version} change=${result.index} range=${formatRange(result.range)})`;
+  }
+  if (result.reason === 'stale-version') {
+    return `stale-version (uri=${uri} incoming=${result.version} current=${result.currentVersion})`;
+  }
+  return `${result.reason} (uri=${uri} version=${version})`;
+}
+
 function createNavigatorWiring({
   debounceMs = NAVIGATOR_DEBOUNCE_MS,
   setTimeoutFn = setTimeout,
@@ -68,6 +82,15 @@ function createNavigatorWiring({
   contextSeq = null,
   digestBudgetChars = DIGEST_BUDGET_CHARS,
   hashFn = hashText,
+  /*
+   * Per-keystroke chatter, off unless the operator turned debugMode on (a boolean or a getter, since
+   * that setting is live-settable while this lane is constructed once at boot).
+   *
+   * PRIVACY RULE for every line this lane logs, debug-gated or not: buffer content, terminal output,
+   * command text and event summaries NEVER reach the log. Sizes, counts, uris, verdicts and reasons do.
+   * The rings are bounded and their summaries are scrubbed at publish time; a log file is neither.
+   */
+  debug = false,
 } = {}) {
   const wss = new WebSocketServer({ noServer: true, maxPayload });
   const connections = new Set();
@@ -109,6 +132,21 @@ function createNavigatorWiring({
   function note(message) {
     if (!logger || typeof logger.log !== 'function') return;
     logger.log(`[navigator] ${message}`);
+  }
+
+  // A getter that throws reads as debug off: a logging decision must never fault the frame it rode in on.
+  function isDebug() {
+    if (typeof debug !== 'function') return debug === true;
+    try {
+      return debug() === true;
+    } catch {
+      return false;
+    }
+  }
+
+  function debugNote(buildMessage) {
+    if (!isDebug()) return;
+    note(buildMessage());
   }
 
   /*
@@ -185,12 +223,18 @@ function createNavigatorWiring({
 
   // A model's updated belief. The merge, not this caller, is what keeps it off a locked statement.
   function applyModelIntent(text) {
-    return commitIntent(mergeModelIntent(intentState, { text, now: nowFn() }));
+    const changed = commitIntent(mergeModelIntent(intentState, { text, now: nowFn() }));
+    // The source and the size, never the sentence: a model-authored intent is derived from the buffer
+    // and the digest, so logging it verbatim would put buffer content in the log by the back door.
+    if (changed) note(`intent model-set (${(intentState.text || '').length} chars)`);
+    return changed;
   }
 
   // The tab's correction. Empty text clears the statement and hands control back to the model.
   function setOperatorIntent(text) {
-    return commitIntent(mergeOperatorIntent(intentState, { text, now: nowFn() }));
+    const changed = commitIntent(mergeOperatorIntent(intentState, { text, now: nowFn() }));
+    if (changed) note(`intent operator-set (${(intentState.text || '').length} chars)`);
+    return changed;
   }
 
   /*
@@ -201,10 +245,11 @@ function createNavigatorWiring({
   function applyDispatchResult(uri, result) {
     if (result.verdict === 'ERROR') {
       warn(`dispatch for ${uri} failed: ${result.reason || 'no reason given'}`);
-      return;
+      return false;
     }
     if (result.reason) note(`dispatch for ${uri}: ${result.reason}`);
     recordComments(uri, result.verdict === 'COMMENTS' ? result.comments : []);
+    return true;
   }
 
   /*
@@ -244,8 +289,10 @@ function createNavigatorWiring({
 
   // Connect-time repair for the control WS: one current-state frame, not a replay of superseded ones.
   function snapshotMessage() {
+    const documents = documentsSnapshot();
+    note(`snapshot served: ${documents.length} documents`);
     return {
-      type: 'navigator-snapshot', documents: documentsSnapshot(), intent: intentPayload(intentState), ts: nowFn(),
+      type: 'navigator-snapshot', documents, intent: intentPayload(intentState), ts: nowFn(),
     };
   }
 
@@ -324,9 +371,11 @@ function createNavigatorWiring({
         note(`dropped a dispatch result for ${uri}: the buffer is gone`);
         return;
       }
-      applyDispatchResult(uri, result);
+      const recorded = applyDispatchResult(uri, result);
       // After the comments, and through the merge: a locked operator intent survives this untouched.
-      applyModelIntent(result.intent);
+      const intentMoved = applyModelIntent(result.intent);
+      if (!recorded) return;
+      note(`dispatch for ${uri} applied: ${result.verdict}, ${(commentsByUri.get(uri) || []).length} comments, intent-moved=${intentMoved ? 'yes' : 'no'}`);
     }
 
     function armDispatch(uri, armedBy) {
@@ -339,6 +388,8 @@ function createNavigatorWiring({
       }, dispatchSettings.quietMs);
       if (timer && typeof timer.unref === 'function') timer.unref();
       dispatchTimersByUri.set(uri, timer);
+      // Debug only: a busy machine re-arms this as often as it moves.
+      debugNote(() => `dispatch armed for ${uri} by ${armedBy} in ${dispatchSettings.quietMs}ms`);
     }
 
     // Typing pushes an armed quiet window out and never opens one, because a document with no published
@@ -363,7 +414,12 @@ function createNavigatorWiring({
       }
     }
 
-    function publishDiagnostics(uri) {
+    /*
+     * `armedBy` is also what decides how loudly the sweep is reported. A debounced sweep runs at typing
+     * cadence, so it is debug-gated exactly like the didChange line that drives it; a save is
+     * operator-paced, so that one stays the always-visible marker.
+     */
+    function publishDiagnostics(uri, armedBy = 'edit') {
       const doc = getDoc(store, uri);
       if (!isMarkdownDoc(doc)) return;
       const diagnostics = sweep(doc.text);
@@ -374,6 +430,8 @@ function createNavigatorWiring({
       }
       // Outside the try: the tab's state does not depend on the editor socket accepting the frame.
       recordFindings(uri, diagnostics);
+      if (armedBy === 'save') note(`swept ${uri} on save: ${diagnostics.length} findings`);
+      if (armedBy !== 'save') debugNote(() => `swept ${uri}: ${diagnostics.length} findings`);
       // A published sweep is the pause boundary tier 3 waits behind; the quiet window starts here.
       armDispatch(uri, 'edit');
     }
@@ -397,13 +455,20 @@ function createNavigatorWiring({
       'textDocument/didOpen': (params) => {
         const result = applyDidOpen(store, params);
         if (!result.applied) return result.reason;
-        scheduleSweep(uriOfParams(params));
+        const uri = uriOfParams(params);
+        const doc = uri ? getDoc(store, uri) : null;
+        if (doc) note(`didOpen ${uri} (${doc.text.length} chars, ${listDocs(store).length} open)`);
+        scheduleSweep(uri);
         return null;
       },
       'textDocument/didChange': (params) => {
+        const uri = uriOfParams(params);
+        const version = params?.textDocument?.version;
         const result = applyDidChange(store, params);
-        if (!result.applied) return result.reason;
-        scheduleSweep(uriOfParams(params));
+        if (!result.applied) return changeFailureReason(uri, version, result);
+        // Debug only: this fires once per keystroke burst on every open buffer.
+        debugNote(() => `didChange ${uri} v${version} (${result.changeCount} changes, ${result.size} chars)`);
+        scheduleSweep(uri);
         return null;
       },
       // A save IS a pause boundary, so it sweeps without waiting out the quiet window.
@@ -411,7 +476,7 @@ function createNavigatorWiring({
         const uri = uriOfParams(params);
         if (!uri) return 'invalid-params';
         cancelSweep(uri);
-        publishDiagnostics(uri);
+        publishDiagnostics(uri, 'save');
         // A save is the boundary itself: it evaluates the same gate now rather than waiting it out.
         cancelDispatch(uri);
         dispatchSettled = runDispatch(uri, 'edit').catch((error) => warn(`dispatch loop failed: ${error.message}`));
@@ -424,6 +489,7 @@ function createNavigatorWiring({
         cancelDispatch(uri);
         const result = applyDidClose(store, params);
         if (!result.applied) return result.reason;
+        note(`didClose ${uri} (${listDocs(store).length} open)`);
         clearFindings(uri);
         clearComments(uri);
         forgetUri(dispatchState, uri);
@@ -456,8 +522,10 @@ function createNavigatorWiring({
       sweepTimersByUri.clear();
       for (const timer of dispatchTimersByUri.values()) clearTimeoutFn(timer);
       dispatchTimersByUri.clear();
-      for (const doc of listDocs(store)) applyDidClose(store, { textDocument: { uri: doc.uri } });
+      const dropped = listDocs(store);
+      for (const doc of dropped) applyDidClose(store, { textDocument: { uri: doc.uri } });
       connections.delete(connection);
+      note(`connection closed: ${dropped.length} mirrored documents dropped, ${connections.size} connections remain`);
     }
 
     const connection = {
@@ -470,6 +538,7 @@ function createNavigatorWiring({
       get isClosed() { return closed; },
     };
     connections.add(connection);
+    note(`connection opened: ${connections.size} connections, dispatch ${dispatchEnabled ? 'on' : 'off'}`);
     return connection;
   }
 

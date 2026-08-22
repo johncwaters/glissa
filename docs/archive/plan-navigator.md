@@ -40,7 +40,7 @@ Considered:
 **Decision: transport-only shim, brain in the daemon.**
 
 - The shim (`session/navigator-relay.js`, following the `statusline-relay.js` precedent: a standalone process Glissa code never requires) speaks LSP stdio with the editor and forwards frames over a loopback WS to the daemon. It makes zero navigator decisions.
-- The one state it holds is a mirror of open documents (uri, version, text), maintained by applying didChange locally, solely so it can replay didOpen snapshots when the daemon connection drops and returns (the Vite dev-restart case; LSP has no server-initiated "resend everything" request, so the editor cannot be asked). Replay is mechanical, still transport. Sync is FULL (`change: 1`): the daemon re-sweeps the whole document on every applied change, so incremental ranges bought nothing but an offset walker with CRLF edge cases.
+- The one state it holds is a mirror of open documents (uri, version, text), maintained by applying didChange locally, solely so it can replay didOpen snapshots when the daemon connection drops and returns (the Vite dev-restart case; LSP has no server-initiated "resend everything" request, so the editor cannot be asked). Replay is mechanical, still transport. Sync is INCREMENTAL (`change: 2`): fewer bytes per keystroke on a large buffer, and the buffer store still applies whole-text changes, so a Full-sync client keeps working unchanged.
 - Everything else lives in the daemon: protocol interpretation, buffer store, debounce, tier engine, intent model, model dispatch, persistence.
 
 This is not a bandaid by the project's own standard: the shim is an adapter at a protocol boundary, the same role `statusline-relay.js` plays for the statusLine channel, with all logic behind it in testable pure cores.
@@ -117,9 +117,11 @@ Config:
 The lane was trimmed with a delete-first pass. What is gone, why it went, and why it can stay gone
 (the same shape as the "Removed" section in docs/plan-ingestion.md):
 
-- **Incremental LSP sync.** The relay advertises `change: 1` (FULL) and the buffer store takes whole
-  text. The daemon re-sweeps the whole document on every applied change, so the line/character offset
-  walker and its CRLF handling were cost with no consumer.
+- **Incremental LSP sync.** REINSTATED on 2026-08-22, same day: a long-lived VS Code language client
+  that had negotiated Incremental against the pre-deletion relay kept sending ranges, the buffer store
+  refused every one of them WITHOUT scheduling a sweep, and the mirrored buffer froze at its didOpen
+  text while tier 2 and tier 3 read it as current. The store now applies both sync kinds and the relay
+  advertises `change: 2`; the refusal is reserved for genuinely malformed shapes.
 - **Malformed-header resync in the LSP framer**, and the test-only `findingsSnapshot()` accessor.
 
 Also fixed here: `tests/navigator-dispatch.test.js` awaited unref'd timers, so node could resolve the

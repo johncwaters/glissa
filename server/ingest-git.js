@@ -108,6 +108,11 @@ function createGitIngest({
     logger.warn(`[ingest] ${message}`);
   }
 
+  function note(message) {
+    if (!logger || typeof logger.log !== 'function') return;
+    logger.log(`[ingest] ${message}`);
+  }
+
   function teardown() {
     if (pollTimer) clearIntervalFn(pollTimer);
     pollTimer = null;
@@ -172,7 +177,7 @@ function createGitIngest({
     try {
       raw = reposProvider();
     } catch (error) {
-      warn(`repo provider failed: ${error.message}`);
+      warn(`git source: the repo provider failed: ${error.message}`);
       return [];
     }
     if (!Array.isArray(raw)) return [];
@@ -243,6 +248,7 @@ function createGitIngest({
     repo.timer = null;
     for (const handle of repo.watchers.values()) handle.stop();
     repo.watchers.clear();
+    note(`git source: dropped ${repo.root} (${repos.size} repos watched)`);
   }
 
   /**
@@ -275,7 +281,7 @@ function createGitIngest({
     if (repo.watchers.size > 0 || repo.warnedNoWatch) return;
     // Graded and per repo: no watcher means latency, not blindness, because the poll still recomputes.
     repo.warnedNoWatch = true;
-    warn(`no git directory could be watched for ${repo.root}; the ${pollIntervalMs}ms poll is its only trigger`);
+    warn(`git source: no git directory could be watched for ${repo.root}; the ${pollIntervalMs}ms poll is its only trigger`);
   }
 
   async function addRepo(dir, layout) {
@@ -295,6 +301,7 @@ function createGitIngest({
     };
     repos.set(repo.key, repo);
     installWatchers(repo);
+    note(`git source: added ${repo.root} (${repos.size} repos watched, ${repo.watchers.size} directories)`);
     // The first read is a baseline and publishes nothing, so a daemon start never announces history.
     await scheduleRead(repo);
   }
@@ -379,7 +386,7 @@ function createGitIngest({
     if (statusOut === null) {
       if (repo.warnedRead) return;
       repo.warnedRead = true;
-      warn(`git status failed for ${repo.root}; retrying on the next trigger`);
+      warn(`git source: git status failed for ${repo.root}; retrying on the next trigger`);
       return;
     }
     repo.warnedRead = false;
@@ -411,7 +418,7 @@ function createGitIngest({
       if (!alive() || !repos.has(repo.key)) return;
       await readRepo(repo);
     }).catch((error) => {
-      warn(`reading ${repo.root} failed: ${error.message}`);
+      warn(`git source: reading ${repo.root} failed: ${error.message}`);
     });
     return repo.chain;
   }

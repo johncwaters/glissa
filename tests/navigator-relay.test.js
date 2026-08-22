@@ -12,6 +12,7 @@ const {
   feedFrameBytes,
   serializeFrame,
 } = require('../server/core/navigator-lsp-core');
+const { SYNC_KIND_INCREMENTAL } = require('../session/navigator-relay');
 
 const RELAY_PATH = path.join(__dirname, '..', 'session', 'navigator-relay.js');
 const TEST_TIMEOUT_MS = 6000;
@@ -127,7 +128,7 @@ test('initialize handshake returns navigator capabilities', async () => {
       capabilities: {
         textDocumentSync: {
           openClose: true,
-          change: 1,
+          change: SYNC_KIND_INCREMENTAL,
         },
       },
       serverInfo: {

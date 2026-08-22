@@ -97,6 +97,11 @@ function createFsIngest({
     logger.warn(`[ingest] ${message}`);
   }
 
+  function note(message) {
+    if (!logger || typeof logger.log !== 'function') return;
+    logger.log(`[ingest] ${message}`);
+  }
+
   // One logged warning and the source goes quiet; the lane and every other source keep running, and a
   // restart re-arms everything (docs/plan-ingestion.md, "Adapter failure").
   function disable(reason) {
@@ -182,13 +187,16 @@ function createFsIngest({
       subscriptions.delete(root);
       if (!failedRoots.has(root)) {
         failedRoots.add(root);
-        warn(`watching ${root} failed (${error.message}); that root reports nothing until a restart`);
+        warn(`fs source: watching ${root} failed (${error.message}); that root reports nothing until a restart`);
       }
       return;
     }
     // stop() landing mid-subscribe: the entry is gone by now, so the handle it just returned is the one
     // thing nothing else would ever close.
-    if (subscriptions.get(root) === entry && alive()) return;
+    if (subscriptions.get(root) === entry && alive()) {
+      note(`fs source: subscribed ${root} (${subscriptions.size} roots watched)`);
+      return;
+    }
     subscriptions.delete(root);
     await closeSubscription(entry, root);
   }
@@ -202,7 +210,7 @@ function createFsIngest({
     try {
       await handle.unsubscribe();
     } catch (error) {
-      warn(`unsubscribing ${root} failed: ${error.message}`);
+      warn(`fs source: unsubscribing ${root} failed: ${error.message}`);
     }
   }
 
@@ -211,6 +219,7 @@ function createFsIngest({
     if (!entry) return;
     subscriptions.delete(root);
     await closeSubscription(entry, root);
+    note(`fs source: unsubscribed ${root} (${subscriptions.size} roots watched)`);
   }
 
   // Once per key, not once per reconcile: the wanted set stays full for as long as the sessions do.

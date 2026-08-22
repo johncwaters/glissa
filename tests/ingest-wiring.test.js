@@ -65,11 +65,12 @@ function drivenLane(rawConfig = { enabled: true, sources: { terminal: { enabled:
   const timers = fakeTimers();
   const broadcasts = [];
   const warnings = [];
+  const notes = [];
   const clock = { now: NOW };
   const lane = createIngestLane({
     config: resolveIngestConfig(rawConfig),
     broadcast: (message) => broadcasts.push(message),
-    logger: { warn: (message) => warnings.push(message) },
+    logger: { warn: (message) => warnings.push(message), log: (message) => notes.push(message) },
     nowFn: () => clock.now,
     setIntervalFn: timers.setIntervalFn,
     clearIntervalFn: timers.clearIntervalFn,
@@ -77,12 +78,48 @@ function drivenLane(rawConfig = { enabled: true, sources: { terminal: { enabled:
     clearTimeoutFn: timers.clearTimeoutFn,
     ...overrides,
   });
-  return { lane, timers, broadcasts, warnings, clock };
+  return { lane, timers, broadcasts, warnings, notes, clock };
 }
 
 function commit(summary) {
   return { source: 'git', kind: 'commit', summary, scope: { root: '/repo' } };
 }
+
+// --- Lane logging ---------------------------------------------------------
+
+test('the lane names its enabled sources at start and says starting, not started', () => {
+  const { notes } = drivenLane({ enabled: true, sources: { git: { enabled: true }, terminal: { enabled: true } } });
+  assert.ok(notes.some((line) => line === '[ingest] lane started: terminal, git'), `saw ${JSON.stringify(notes)}`);
+  // start() is async, so a line claiming "started" would outrun any failure it could report.
+  assert.ok(notes.some((line) => line === '[ingest] starting the git source'));
+  assert.equal(notes.some((line) => line.includes('source started')), false);
+});
+
+// Counts and seqs, never an event summary: a summary is captured terminal output or command text.
+test('the batch-flush line is debug-gated and carries counts rather than summaries', () => {
+  const quiet = drivenLane({ enabled: true, sources: { git: { enabled: true } } });
+  quiet.lane.publish(commit('a secret command nobody should read in a log'));
+  quiet.timers.runIntervals();
+  assert.equal(quiet.notes.some((line) => line.includes('batch flushed')), false);
+
+  const loud = drivenLane({ enabled: true, sources: { git: { enabled: true } } }, { debug: () => true });
+  loud.lane.publish(commit('a secret command nobody should read in a log'));
+  loud.timers.runIntervals();
+  const flushLine = loud.notes.find((line) => line.includes('batch flushed'));
+  assert.match(flushLine, /1 events \(seq \d+-\d+\), 0 overflowed/);
+  assert.equal(loud.notes.some((line) => line.includes('nobody should read')), false);
+});
+
+test('a debug getter that throws reads as debug off rather than failing the batch', () => {
+  const { lane, timers, broadcasts, warnings } = drivenLane(
+    { enabled: true, sources: { git: { enabled: true } } },
+    { debug: () => { throw new Error('settings unavailable'); } },
+  );
+  lane.publish(commit('one'));
+  timers.runIntervals();
+  assert.equal(broadcasts.length, 1, 'the frame still went out');
+  assert.deepEqual(warnings, []);
+});
 
 // --- Publish and batching -------------------------------------------------
 

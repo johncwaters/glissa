@@ -955,6 +955,9 @@ function createBackend(httpServer, options = {}) {
       // dev checkout, where the resolved config file is the repo's own config.json and every
       // resumeSessionId save would otherwise look like project activity.
       configPath: configStore.configPath,
+      // Read per line rather than captured, because debugMode is settable from the dashboard while this
+      // lane is constructed once at boot.
+      debug: () => configStore.getSettings().debugMode === true,
       /*
        * The other half of activity-driven dispatch (docs/plan-ingestion.md, M7.5), wired only when BOTH
        * lanes exist. Late-binding on purpose: the navigator lane is constructed below, and the first
@@ -978,6 +981,8 @@ function createBackend(httpServer, options = {}) {
     ? createNavigatorWiring({
       logger: console,
       broadcast: (msg) => broadcastControl(msg),
+      // Same reason as the ingest lane above: the setting moves, the lane is built once.
+      debug: () => configStore.getSettings().debugMode === true,
       dispatchConfig: navigatorDispatchConfig,
       dispatch: navigatorDispatchConfig.enabled
         ? createNavigatorDispatcher({

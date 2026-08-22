@@ -117,6 +117,8 @@ function createNavigatorDispatcher({
   spawnSession,
   timeoutSeconds = DEFAULT_TIMEOUT_SECONDS,
   model = null,
+  logger = console,
+  nowFn = Date.now,
   setTimeoutFn = setTimeout,
   clearTimeoutFn = clearTimeout,
   makeWorkDir = () => fs.mkdtemp(path.join(os.tmpdir(), 'glissa-navigator-')),
@@ -126,17 +128,50 @@ function createNavigatorDispatcher({
 } = {}) {
   if (typeof spawnSession !== 'function') throw new Error('createNavigatorDispatcher requires spawnSession');
 
-  function spawnWithTimeout({ id, name, prompt, cwd, resultPath, lineCount }) {
+  function note(message) {
+    if (!logger || typeof logger.log !== 'function') return;
+    logger.log(`[navigator] ${message}`);
+  }
+
+  function warn(message) {
+    if (!logger || typeof logger.warn !== 'function') return;
+    logger.warn(`[navigator] ${message}`);
+  }
+
+  // Best effort and never on the result path: a size the session already wrote, or nothing to say.
+  async function resultBytes(resultPath) {
+    try {
+      return (await fs.stat(resultPath)).size;
+    } catch {
+      return 0;
+    }
+  }
+
+  function spawnWithTimeout({
+    id, name, prompt, cwd, uri, resultPath, lineCount,
+  }) {
+    const startedAt = nowFn();
+    const elapsed = () => nowFn() - startedAt;
     return raceWithAbort({
       timeoutMs: timeoutSeconds * 1000,
       setTimeoutFn,
       clearTimeoutFn,
-      onTimeout: () => errorResult('dispatch timed out'),
+      onTimeout: () => {
+        warn(`dispatch for ${uri} timed out after ${elapsed()}ms`);
+        return errorResult('dispatch timed out');
+      },
       onEmpty: () => errorResult('no verdict'),
-      start: (signal) => Promise.resolve(spawnSession({ id, name, prompt, cwd, model, signal }))
-        .then(() => {
-          if (signal.aborted) return undefined;
-          return readResult(resultPath, { lineCount });
+      start: (signal) => Promise.resolve(spawnSession({
+        id, name, prompt, cwd, model, signal,
+      }))
+        .then(async () => {
+          if (signal.aborted) {
+            note(`dispatch for ${uri} was aborted after ${elapsed()}ms`);
+            return undefined;
+          }
+          const result = await readResult(resultPath, { lineCount });
+          note(`dispatch result for ${uri}: ${result.verdict} (${await resultBytes(resultPath)} bytes, ${elapsed()}ms)`);
+          return result;
         })
         .catch((error) => errorResult(firstLine(error.message))),
     });
@@ -158,6 +193,7 @@ function createNavigatorDispatcher({
           uri, text, findings, intent, digest, resultPath,
         }),
         cwd: workDir,
+        uri,
         resultPath,
         lineCount: countLines(text),
       });

@@ -34,6 +34,11 @@ function createTerminalIngest({
     logger.warn(`[ingest] ${message}`);
   }
 
+  function note(message) {
+    if (!logger || typeof logger.log !== 'function') return;
+    logger.log(`[ingest] ${message}`);
+  }
+
   // The session's cwd is the project root this output belongs to; a session that cannot answer leaves
   // the event machine-scoped rather than guessing at a root.
   function rootOf(sess) {
@@ -130,6 +135,7 @@ function createTerminalIngest({
         warn(`detach for session ${sess.id} failed: ${error.message}`);
       }
       if (tapsBySessionId.get(sess.id) === tap) tapsBySessionId.delete(sess.id);
+      note(`terminal source: detached the tap on session ${sess.id} (${tapsBySessionId.size} tapped)`);
     }
 
     sess.on('data', onData);
@@ -145,6 +151,7 @@ function createTerminalIngest({
       get isDetached() { return detached; },
     };
     tapsBySessionId.set(sess.id, tap);
+    note(`terminal source: attached a tap to session ${sess.id} (${tapsBySessionId.size} tapped)`);
     return tap;
   }
 

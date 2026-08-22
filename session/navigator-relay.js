@@ -13,6 +13,7 @@ const {
   applyDidClose,
   applyDidOpen,
   createDocStore,
+  formatRange,
   listDocs,
   uriOfParams,
 } = require('../server/core/navigator-buffer-core');
@@ -45,13 +46,16 @@ function nextDelayMs(currentDelayMs) {
   return Math.min(currentDelayMs * 2, MAX_RETRY_MS);
 }
 
+// LSP TextDocumentSyncKind. Incremental is fewer bytes per keystroke on a large buffer, and the store
+// still takes whole-text changes, so a client that only speaks Full sync keeps working unchanged.
+const SYNC_KIND_INCREMENTAL = 2;
+
 function initializeResult() {
   return {
     capabilities: {
       textDocumentSync: {
         openClose: true,
-        // FULL: the daemon re-sweeps the whole document on every change, so ranges buy it nothing.
-        change: 1,
+        change: SYNC_KIND_INCREMENTAL,
       },
     },
     serverInfo: {
@@ -82,6 +86,13 @@ function editorNotification(method, params) {
 
 function daemonMessage(method, params) {
   return { type: 'lsp', method, params };
+}
+
+// What a refused mirror update needs beside its reason to be diagnosable from one log line.
+function mirrorFailureDetail(update) {
+  if (update.reason === 'invalid-range' || update.reason === 'invalid-text') return ` change=${update.index} range=${formatRange(update.range)}`;
+  if (update.reason === 'stale-version') return ` version=${update.version} current=${update.currentVersion}`;
+  return '';
 }
 
 function replayDidOpenMessage(doc) {
@@ -117,6 +128,11 @@ function createRelay({
   let nextPortIndex = 0;
   let isStopping = false;
 
+  // stdout carries the LSP protocol, so every line the relay says about itself goes to stderr.
+  function note(message) {
+    stderr.write(`[navigator-relay] ${message}\n`);
+  }
+
   function writeEditorMessage(message) {
     stdout.write(serializeFrame(message));
   }
@@ -133,8 +149,9 @@ function createRelay({
     retryTimer = null;
   }
 
-  function scheduleReconnect() {
+  function scheduleReconnect(port) {
     if (isStopping || retryTimer) return;
+    note(`lost the daemon on port ${port}; reconnecting in ${retryMs}ms`);
     retryTimer = setTimeout(() => {
       retryTimer = null;
       connect();
@@ -144,9 +161,11 @@ function createRelay({
   }
 
   function replayMirror() {
-    for (const doc of listDocs(docStore)) {
+    const docs = listDocs(docStore);
+    for (const doc of docs) {
       sendWsJson(ws, replayDidOpenMessage(doc));
     }
+    return docs.length;
   }
 
   function connect() {
@@ -158,7 +177,8 @@ function createRelay({
     socket.on('open', () => {
       if (ws !== socket) return;
       retryMs = INITIAL_RETRY_MS;
-      replayMirror();
+      const replayed = replayMirror();
+      note(`connected to the daemon on port ${port} (replayed ${replayed} mirrored documents)`);
     });
 
     socket.on('message', (data, isBinary) => {
@@ -170,13 +190,14 @@ function createRelay({
 
     socket.on('close', () => {
       if (ws === socket) ws = null;
-      scheduleReconnect();
+      scheduleReconnect(port);
     });
   }
 
   function stop(exitCode = 0) {
     if (isStopping) return;
     isStopping = true;
+    note(`shutting down (exit ${exitCode})`);
     clearRetryTimer();
     stdin.pause();
     if (ws) ws.close();
@@ -204,7 +225,7 @@ function createRelay({
   function handleNotification(method, params) {
     if (MIRROR_METHODS.has(method)) {
       const mirrorUpdate = updateMirror(method, params);
-      if (!mirrorUpdate.applied) stderr.write(`[navigator-relay] mirror update failed method=${method} uri=${uriOfParams(params) || '<unknown>'} reason=${mirrorUpdate.reason}\n`);
+      if (!mirrorUpdate.applied) note(`mirror update failed method=${method} uri=${uriOfParams(params) || '<unknown>'} reason=${mirrorUpdate.reason}${mirrorFailureDetail(mirrorUpdate)}`);
     }
     if (FORWARDED_METHODS.has(method)) return sendWsJson(ws, daemonMessage(method, params));
     if (method === 'exit') return stop(0);
@@ -212,8 +233,14 @@ function createRelay({
   }
 
   function handleRequest(id, method) {
-    if (method === 'initialize') return writeEditorMessage(responseMessage(id, initializeResult()));
-    if (method === 'shutdown') return writeEditorMessage(responseMessage(id, null));
+    if (method === 'initialize') {
+      note(`initialize answered: textDocumentSync change=${SYNC_KIND_INCREMENTAL} (incremental)`);
+      return writeEditorMessage(responseMessage(id, initializeResult()));
+    }
+    if (method === 'shutdown') {
+      note('shutdown requested by the editor');
+      return writeEditorMessage(responseMessage(id, null));
+    }
     return writeEditorMessage(methodNotFoundResponse(id, method));
   }
 
@@ -256,6 +283,7 @@ if (require.main === module) {
 }
 
 module.exports = {
+  SYNC_KIND_INCREMENTAL,
   createRelay,
   daemonMessage,
   initializeResult,

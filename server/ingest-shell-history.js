@@ -82,7 +82,7 @@ function createShellHistoryIngest({
   const rejectedShells = normalizeShells(sourceConfig.shells).rejected;
   if (rejectedShells.length > 0) {
     const nothing = locations.length === 0 ? '; no history file is tailed' : '';
-    warn(`unknown shell(s) in sources.shellHistory.shells: ${rejectedShells.join(', ')}${nothing}`);
+    warn(`shell-history source: unknown shell(s) in sources.shellHistory.shells: ${rejectedShells.join(', ')}${nothing}`);
   }
 
   const tails = new Map();
@@ -112,6 +112,11 @@ function createShellHistoryIngest({
   function warn(message) {
     if (!logger || typeof logger.warn !== 'function') return;
     logger.warn(`[ingest] ${message}`);
+  }
+
+  function note(message) {
+    if (!logger || typeof logger.log !== 'function') return;
+    logger.log(`[ingest] ${message}`);
   }
 
   function closeWatcher(watcher) {
@@ -174,6 +179,7 @@ function createShellHistoryIngest({
     if (tails.has(filePath)) return;
     tails.set(filePath, createTailState(stat, { path: filePath }));
     contexts.set(filePath, { shell: location.shell, parseState: createParseState(), previous: null });
+    note(`shell-history source: tracking ${filePath} (${location.shell}, ${tails.size} files)`);
   }
 
   async function trackNamedFile(location, seen) {
@@ -206,8 +212,9 @@ function createShellHistoryIngest({
   }
 
   function forgetFile(filePath) {
-    tails.delete(filePath);
+    if (!tails.delete(filePath)) return;
     contexts.delete(filePath);
+    note(`shell-history source: dropped ${filePath} (${tails.size} files)`);
   }
 
   function pruneTracked() {
@@ -272,7 +279,7 @@ function createShellHistoryIngest({
        */
       if (warnedWatchFailure) return null;
       warnedWatchFailure = true;
-      warn(`watching ${dir} failed (${error.message}); the ${pollMs}ms stat poll covers it`);
+      warn(`shell-history source: watching ${dir} failed (${error.message}); the ${pollMs}ms stat poll covers it`);
       return null;
     }
   }

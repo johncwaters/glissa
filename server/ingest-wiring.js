@@ -51,6 +51,13 @@ function createIngestLane({
   batchIntervalMs = BATCH_INTERVAL_MS,
   maxEventsPerFrame = MAX_EVENTS_PER_FRAME,
   snapshotEventLimit = SNAPSHOT_EVENT_LIMIT,
+  /*
+   * Per-batch chatter, off unless the operator turned debugMode on (a boolean or a getter, since that
+   * setting is live-settable while this lane is constructed once at boot). The privacy rule stated at
+   * the navigator lane's flag holds here too, and harder: an event SUMMARY is captured terminal output
+   * or command text, so no line at any level ever carries one. Sources, counts, seqs and roots only.
+   */
+  debug = false,
 } = {}) {
   const resolved = config?.sources ? config : resolveIngestConfig(config);
   const store = createIngestStore(resolved);
@@ -62,6 +69,26 @@ function createIngestLane({
   function warn(message) {
     if (!logger || typeof logger.warn !== 'function') return;
     logger.warn(`[ingest] ${message}`);
+  }
+
+  function note(message) {
+    if (!logger || typeof logger.log !== 'function') return;
+    logger.log(`[ingest] ${message}`);
+  }
+
+  // A getter that throws reads as debug off: a logging decision must never fault the batch it rode in on.
+  function isDebug() {
+    if (typeof debug !== 'function') return debug === true;
+    try {
+      return debug() === true;
+    } catch {
+      return false;
+    }
+  }
+
+  function debugNote(buildMessage) {
+    if (!isDebug()) return;
+    note(buildMessage());
   }
 
   function emit(message) {
@@ -77,6 +104,8 @@ function createIngestLane({
   // warning rather than the frame that carried it.
   function pokeActivity() {
     if (typeof onActivity !== 'function') return;
+    // Debug only: one line per batch that carried anything, which is once a second on a busy machine.
+    debugNote(() => 'activity poke');
     try {
       onActivity();
     } catch (error) {
@@ -102,6 +131,8 @@ function createIngestLane({
       ts: nowFn(),
     };
     emit(message);
+    // Debug only, and counts rather than content: a summary is captured output and never reaches a log.
+    debugNote(() => `batch flushed: ${events.length} events (seq ${events[events.length - 1].seq}-${events[0].seq}), ${message.overflow} overflowed`);
     pokeActivity();
     return message;
   }
@@ -224,10 +255,15 @@ function createIngestLane({
 
   // Adapters that own their own discovery start themselves; the terminal source has nothing to start,
   // since its taps arrive one session at a time from wireSessionEvents.
+  note(`lane started: ${sources.length > 0 ? sources.join(', ') : 'no sources enabled'}`);
+
   for (const adapter of adapters) {
     if (typeof adapter.start !== 'function') continue;
     try {
+      // "starting", not "started": start() is async, so its failure arrives as the source's own
+      // degradation warn long after this line.
       void adapter.start();
+      note(`starting the ${adapter.name} source`);
     } catch (error) {
       warn(`starting the ${adapter.name} source failed: ${error.message}`);
     }
@@ -297,10 +333,12 @@ function createIngestLane({
     for (const adapter of adapters) {
       try {
         adapter.stop();
+        note(`the ${adapter.name} source stopped`);
       } catch (error) {
         warn(`stopping the ${adapter.name} source failed: ${error.message}`);
       }
     }
+    note('lane stopped');
   }
 
   return {
