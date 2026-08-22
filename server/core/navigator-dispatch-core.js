@@ -66,11 +66,15 @@ function resolveDispatchConfig(raw) {
  */
 function resolveNavigatorConfig(raw) {
   const block = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  const projects = Array.isArray(block.projects)
+    ? [...new Set(block.projects.filter((projectId) => typeof projectId === 'string' && projectId.trim()).map((projectId) => projectId.trim()))]
+    : [];
   return {
     enabled: block.enabled === true,
     // Tier 1 edits land in the carbon unit's buffer unasked, so nothing short of an explicit true opts in.
     autoFix: block.autoFix === true,
     dispatch: resolveDispatchConfig(block.dispatch),
+    projects: projects.length > 0 ? projects : null,
   };
 }
 
@@ -137,10 +141,11 @@ function classifyTrigger({ textStood, hashRecorded, armedBy }) {
  * line about it, and every classified verdict carries the trigger the caller must record it under.
  */
 function decideDispatch({
-  state, uri, textHash, now, config, inFlight = false, contextSeq = null, armedBy = 'edit',
+  state, uri, textHash, now, config, inFlight = false, contextSeq = null, armedBy = 'edit', inScope = true,
 }) {
   if (!config || config.enabled !== true) return { dispatch: false, gate: 'disabled', trigger: null };
   if (!uri) return { dispatch: false, gate: 'no-uri', trigger: null };
+  if (inScope === false) return { dispatch: false, gate: 'out-of-scope', trigger: null };
   if (!textHash) return { dispatch: false, gate: 'empty-document', trigger: null };
   if (inFlight) return { dispatch: false, gate: 'in-flight', trigger: null };
   const recordedHash = state.lastHashByUri.get(uri);

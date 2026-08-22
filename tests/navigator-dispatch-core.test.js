@@ -64,6 +64,13 @@ test('tier 1 silent edits need their own explicit true, never the lane flag alon
   );
 });
 
+test('navigator project ids normalize to a unique non-empty list or null', () => {
+  assert.equal(resolveNavigatorConfig({ enabled: true }).projects, null);
+  assert.equal(resolveNavigatorConfig({ enabled: true, projects: 'p1' }).projects, null);
+  assert.equal(resolveNavigatorConfig({ enabled: true, projects: ['', '   ', 7] }).projects, null);
+  assert.deepEqual(resolveNavigatorConfig({ enabled: true, projects: ['p1', ' p2 ', 'p1'] }).projects, ['p1', 'p2']);
+});
+
 test('enabled: true resolves the documented defaults', () => {
   assert.deepEqual(resolveDispatchConfig({ enabled: true }), {
     enabled: true,
@@ -166,6 +173,15 @@ test('an empty buffer and a missing uri are refused before anything else is cons
   const config = enabledConfig();
   assert.equal(decideDispatch({ state, uri: '', textHash: 'abc', now: NOW, config }).gate, 'no-uri');
   assert.equal(decideDispatch({ state, uri: URI, textHash: '', now: NOW, config }).gate, 'empty-document');
+});
+
+test('out-of-scope sits after disabled and no-uri, before document-content gates', () => {
+  const state = createDispatchState();
+  const config = enabledConfig();
+  assert.equal(decideDispatch({ state, uri: URI, textHash: 'abc', now: NOW, config: resolveDispatchConfig(null), inScope: false }).gate, 'disabled');
+  assert.equal(decideDispatch({ state, uri: '', textHash: 'abc', now: NOW, config, inScope: false }).gate, 'no-uri');
+  assert.equal(decideDispatch({ state, uri: URI, textHash: '', now: NOW, config, inScope: false }).gate, 'out-of-scope');
+  assert.equal(decideDispatch({ state, uri: URI, textHash: 'abc', now: NOW, config, inScope: false, inFlight: true }).gate, 'out-of-scope');
 });
 
 test('a dispatch while one is in flight is gated, never queued', () => {

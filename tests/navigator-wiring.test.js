@@ -443,7 +443,7 @@ const MODEL_DIAGNOSTIC = { line: 1, message: 'The title is missing a concrete no
  * NOTHING here spawns claude; the real spawn is covered by tests/navigator-dispatch.test.js.
  */
 function dispatchingConnection({
-  dispatch: overrides = {}, respond = null, contextDigest = null, contextSeq = null,
+  dispatch: overrides = {}, respond = null, contextDigest = null, contextSeq = null, scopePaths = null,
 } = {}) {
   const calls = [];
   const dispatchConfig = { enabled: true, ...overrides };
@@ -454,7 +454,7 @@ function dispatchingConnection({
   };
   return {
     ...drivenConnection({
-      dispatchConfig, dispatch, contextDigest, contextSeq,
+      dispatchConfig, dispatch, contextDigest, contextSeq, scopePaths,
     }),
     calls,
   };
@@ -482,6 +482,37 @@ test('a dispatch fires one quiet window after a sweep publishes, carrying the bu
   assert.equal(calls[0].uri, MARKDOWN_URI);
   assert.equal(calls[0].text, REPEATED_WORD_MARKDOWN);
   assert.deepEqual(calls[0].findings.map((finding) => finding.code), ['repeated-word'], 'tier 2 rides along');
+});
+
+test('a scoped navigator skips sweep and refuses dispatch for an out-of-scope document', async (t) => {
+  const uri = 'file:///other/plan-navigator.md';
+  const { wiring, timers, sent, calls, notes, lsp } = dispatchingConnection({ scopePaths: ['/tmp/project'] });
+  t.after(() => wiring.stop());
+
+  lsp('textDocument/didOpen', didOpenParams(uri, 'markdown', '# Title\n\nOutside'));
+  assert.equal(timers.pendingCount, 0, 'out-of-scope open does not arm a sweep');
+  assert.equal(sent.length, 0, 'out-of-scope open publishes nothing');
+
+  lsp('textDocument/didChange', rangedChangeParams(uri, 2, [
+    { range: { start: { line: 2, character: 7 }, end: { line: 2, character: 7 } }, text: '\n' },
+  ]));
+  await wiring.whenDispatchSettled();
+  assert.equal(calls.length, 0, 'out-of-scope dispatch does not call the model');
+  assert.ok(notes.some((line) => line.includes('out-of-scope')));
+  assert.deepEqual(findingSections(wiring), []);
+});
+
+test('a scoped navigator sweeps and dispatches an in-scope document normally', async (t) => {
+  const { wiring, timers, sent, calls, lsp } = dispatchingConnection({ scopePaths: ['/tmp'] });
+  t.after(() => wiring.stop());
+
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  assert.equal(timers.pendingCount, 1);
+
+  runSweepThenDispatch(timers);
+  await wiring.whenDispatchSettled();
+  assert.equal(sent.filter((message) => message.type === 'publishDiagnostics').length, 1);
+  assert.equal(calls.length, 1);
 });
 
 test('an edit restarts the quiet window rather than letting the armed one run out', async (t) => {

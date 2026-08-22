@@ -225,6 +225,9 @@ const NAVIGATOR_SCHEMA = {
   name: 'navigator',
   rules: [
     blockRules.booleans(['enabled', 'autoFix']),
+    (navigator) => (navigator.projects != null && (!Array.isArray(navigator.projects) || !navigator.projects.every(p => typeof p === 'string'))
+      ? 'navigator.projects must be an array of strings'
+      : null),
     (navigator) => validateBlock(navigator.dispatch, NAVIGATOR_DISPATCH_SCHEMA),
   ],
 };
@@ -297,7 +300,7 @@ function sanitizePrReview(pr) {
 }
 
 function sanitizeNavigator(navigator) {
-  const out = sanitizeBlock(navigator, { booleans: ['enabled', 'autoFix'] });
+  const out = sanitizeBlock(navigator, { booleans: ['enabled', 'autoFix'], verbatim: ['projects'] });
   if (isPlainObject(navigator.dispatch)) {
     const dispatch = sanitizeBlock(navigator.dispatch, {
       booleans: ['enabled'],

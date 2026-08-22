@@ -9,6 +9,7 @@ const {
 const {
   createDispatchState, decideDispatch, forgetUri, hashText, mergeDiagnostics, modelDiagnosticsToLsp, recordDispatch, resolveDispatchConfig,
 } = require('./core/navigator-dispatch-core');
+const { isUriInProjects } = require('./core/navigator-scope-core');
 const {
   applyModelIntent: mergeModelIntent,
   applyOperatorIntent: mergeOperatorIntent,
@@ -115,6 +116,7 @@ function createNavigatorWiring({
   // The ingest lane's newest seq (docs/plan-ingestion.md, M7.5): the movement signal that lets the gate
   // see activity the buffer never showed. Absent means null, and the gate is then the pre-M7.5 one.
   contextSeq = null,
+  scopePaths = null,
   digestBudgetChars = DIGEST_BUDGET_CHARS,
   hashFn = hashText,
   // Per-keystroke chatter, off unless the operator turned debugMode on. Boolean or getter, and the
@@ -155,6 +157,7 @@ function createNavigatorWiring({
   let intentState = createIntentState();
   const dispatchSettings = resolveDispatchConfig(dispatchConfig);
   const dispatchEnabled = dispatchSettings.enabled === true && typeof dispatch === 'function';
+  const activeScopePaths = Array.isArray(scopePaths) && scopePaths.length > 0 ? scopePaths : null;
   const dispatchState = createDispatchState();
   /*
    * The last gate LOGGED per uri. Activity arms a window as often as the machine moves, so an
@@ -177,6 +180,11 @@ function createNavigatorWiring({
     if (lastGateByUri.get(uri) === key) return;
     lastGateByUri.set(uri, key);
     note(`no dispatch for ${uri}: ${gate}${trigger ? ` (${trigger})` : ''}`);
+  }
+
+  function isUriInScope(uri) {
+    if (!activeScopePaths) return true;
+    return isUriInProjects(uri, activeScopePaths);
   }
 
   function broadcastFindings(uri, diagnostics) {
@@ -448,6 +456,7 @@ function createNavigatorWiring({
         inFlight: dispatchInFlight,
         contextSeq: seq,
         armedBy,
+        inScope: isUriInScope(uri),
       });
       if (!decision.dispatch) {
         noteGate(uri, decision);
@@ -608,6 +617,7 @@ function createNavigatorWiring({
     function publishDiagnostics(uri, armedBy = 'edit') {
       const doc = getDoc(store, uri);
       if (!isMarkdownDoc(doc)) return;
+      if (!isUriInScope(uri)) return;
       const { diagnostics, fixes } = readSweepResult(sweep(doc.text));
       recordRuleFindings(uri, diagnostics);
       const mergedDiagnostics = unionDiagnosticsFor(uri);
@@ -625,6 +635,7 @@ function createNavigatorWiring({
       if (closed || !uri) return;
       // Non-markdown documents are mirrored but never swept in v1, so they arm no timer either.
       if (!isMarkdownDoc(getDoc(store, uri))) return;
+      if (!isUriInScope(uri)) return;
       rearmDispatch(uri);
       cancelSweep(uri);
       const timer = setTimeoutFn(() => {

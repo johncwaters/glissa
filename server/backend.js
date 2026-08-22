@@ -56,6 +56,7 @@ const { createPosthogWiring } = require('./posthog-wiring');
 const { createNavigatorWiring } = require('./navigator-wiring');
 const { createNavigatorDispatcher, createNavigatorSpawn } = require('./navigator-dispatch');
 const { resolveNavigatorConfig } = require('./core/navigator-dispatch-core');
+const { normalizeProjectPath } = require('./core/navigator-scope-core');
 const { createIngestLane } = require('./ingest-wiring');
 const { resolveIngestConfig } = require('./core/ingest-core');
 const { createUsageWiring, resolveUsageConfig } = require('./usage-wiring');
@@ -131,6 +132,28 @@ function decideWasActiveFlip(to, event, pendingRestart) {
   if (to === STATES.STARTING || to === STATES.RUNNING) return true;
   if (!pendingRestart && (event === 'user_kill' || to === STATES.DONE || to === STATES.FAILED)) return false;
   return null;
+}
+
+function resolveNavigatorScopePaths(projectIds, projects, warn = console.warn) {
+  if (!Array.isArray(projectIds) || projectIds.length === 0) return null;
+  const projectsById = new Map();
+  for (const project of Array.isArray(projects) ? projects : []) {
+    if (!project || typeof project.id !== 'string') continue;
+    projectsById.set(project.id, project);
+  }
+  const scopePaths = [];
+  for (const projectId of projectIds) {
+    const project = projectsById.get(projectId);
+    if (!project) {
+      warn(`[navigator] configured project id not found: ${projectId}`);
+      continue;
+    }
+    const normalizedPath = normalizeProjectPath(project.path);
+    if (!normalizedPath || scopePaths.includes(normalizedPath)) continue;
+    scopePaths.push(normalizedPath);
+  }
+  if (scopePaths.length === 0) return null;
+  return scopePaths;
 }
 
 // A config modify (path or permission change) replaces the Session OBJECT, but destroy() leaves the
@@ -978,6 +1001,9 @@ function createBackend(httpServer, options = {}) {
    * that puts the lane on the usage ledger.
    */
   const navigatorDispatchConfig = navigatorConfig.dispatch;
+  const navigatorScopePaths = navigatorEnabled
+    ? resolveNavigatorScopePaths(navigatorConfig.projects, config.projects, (message) => console.warn(message))
+    : null;
   const navigatorSessions = new Map();
   const navigatorLane = navigatorEnabled
     ? createNavigatorWiring({
@@ -1004,6 +1030,7 @@ function createBackend(httpServer, options = {}) {
       // The movement signal beside it: new events, never aging timestamps. Null with no ingest lane, and
       // the gate then decides exactly what it decided before M7.5.
       contextSeq: ingestLane ? ingestLane.latestSeq : null,
+      scopePaths: navigatorScopePaths,
     })
     : null;
 

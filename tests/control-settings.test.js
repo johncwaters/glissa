@@ -136,6 +136,23 @@ test('a valid navigator payload persists and echoes in settings-updated', () => 
   const navigator = {
     enabled: true,
     autoFix: true,
+    projects: ['p1', 'p2'],
+    junk: 'drop-me',
+    dispatch: {
+      enabled: true,
+      quietMs: 30000,
+      cooldownMs: 300000,
+      maxPerHour: 6,
+      activityMaxPerHour: 2,
+      dispatchTimeoutSeconds: 180,
+      model: 'claude-sonnet-4-20250514',
+      junk: 'drop-me',
+    },
+  };
+  const sanitized = {
+    enabled: true,
+    autoFix: true,
+    projects: ['p1', 'p2'],
     dispatch: {
       enabled: true,
       quietMs: 30000,
@@ -149,10 +166,10 @@ test('a valid navigator payload persists and echoes in settings-updated', () => 
 
   h.send({ type: 'update-settings', settings: { navigator } });
 
-  assert.deepEqual(h.cfg.navigator, navigator);
+  assert.deepEqual(h.cfg.navigator, sanitized);
   const updated = h.sent.find((m) => m.type === 'settings-updated');
   assert.ok(updated, 'replied settings-updated');
-  assert.deepEqual(updated.settings.navigator, navigator);
+  assert.deepEqual(updated.settings.navigator, sanitized);
   assert.equal(h.reloadCalls.length, 1, 'settings reload still runs once');
 });
 
@@ -160,6 +177,8 @@ test('navigator validation rejects wrong scalar types and ranges', () => {
   const cases = [
     [{ enabled: 'yes' }, /navigator.enabled must be a boolean/],
     [{ autoFix: 'yes' }, /navigator.autoFix must be a boolean/],
+    [{ projects: 'p1' }, /navigator.projects must be an array of strings/],
+    [{ projects: ['p1', 7] }, /navigator.projects must be an array of strings/],
     [{ dispatch: 'on' }, /navigator.dispatch must be an object/],
     [{ dispatch: { enabled: 'yes' } }, /navigator.dispatch.enabled must be a boolean/],
     [{ dispatch: { quietMs: 0 } }, /navigator.dispatch.quietMs must be a positive number/],
