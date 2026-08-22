@@ -11,6 +11,7 @@ let controlRetryTimer = null;
 let controlRetryAttempt = 0;
 const pendingRequests = new Map(); // requestId -> { resolve, timer }
 let livenessProbePromise = null;
+let connectingSince = 0;
 
 // Highest control-broadcast seq seen so far. Survives across reconnects (unlike the server,
 // which holds no per-connection state) so a reconnect can declare `?since=<lastSeq>` and
@@ -66,6 +67,7 @@ export function connectControl() {
   const url = buildWebSocketUrl(location, `/control${since}`);
   const ws = new WebSocket(url);
   controlWs = ws;
+  connectingSince = Date.now();
 
   ws.addEventListener('open', () => {
     controlRetryAttempt = 0;
@@ -134,6 +136,7 @@ export async function checkControlLiveness() {
     hasSocket: !!controlWs,
     readyState: controlWs?.readyState,
     retryPending: controlRetryTimer !== null,
+    connectingAgeMs: Date.now() - connectingSince,
   });
   if (action === 'retry-now') {
     clearTimeout(controlRetryTimer);
@@ -143,6 +146,9 @@ export async function checkControlLiveness() {
     return 'reconnecting';
   }
   if (action === 'connect') {
+    // Abort a wedged CONNECTING/CLOSING socket first; its close event is ignored by the
+    // active-socket guard once connectControl has replaced it.
+    controlWs?.close();
     controlRetryAttempt = 0;
     connectControl();
     return 'reconnecting';

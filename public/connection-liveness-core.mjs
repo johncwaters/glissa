@@ -1,14 +1,16 @@
 const READY_STATE_CONNECTING = 0;
 const READY_STATE_OPEN = 1;
-const READY_STATE_CLOSING = 2;
-const READY_STATE_CLOSED = 3;
 
-export function decideLivenessAction({ hasSocket, readyState, retryPending }) {
+// A CONNECTING socket older than this is treated as wedged (a dead proxy path can black-hole the
+// handshake without ever erroring) and replaced instead of waited on.
+export const CONNECTING_WEDGE_MS = 10000;
+
+export function decideLivenessAction({ hasSocket, readyState, retryPending, connectingAgeMs = 0 }) {
   if (retryPending) return 'retry-now';
   if (!hasSocket) return 'connect';
-  if (readyState === READY_STATE_CONNECTING) return 'wait';
+  if (readyState === READY_STATE_CONNECTING) {
+    return connectingAgeMs > CONNECTING_WEDGE_MS ? 'connect' : 'wait';
+  }
   if (readyState === READY_STATE_OPEN) return 'probe';
-  if (readyState === READY_STATE_CLOSING) return 'connect';
-  if (readyState === READY_STATE_CLOSED) return 'connect';
   return 'connect';
 }
