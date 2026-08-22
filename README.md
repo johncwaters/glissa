@@ -130,6 +130,8 @@ The install succeeded, but the directory where npm placed the `glissa` command i
 - Image upload from the phone key strip: pick an image, and its saved path is pasted into that session's prompt for you to send
 - Keyboard navigation: jump between sessions, step through the ones needing attention, and merge or resolve from the keyboard
 - GitHub PR auto-review (opt-in): reviews your own open PRs headlessly, comments its findings, and auto-merges only the clean PRs whose checks are green
+- Radar error monitoring (opt-in): polls PostHog error tracking, pings Telegram the moment an issue spikes, regresses, or first appears, and sends a headless agent to diagnose it and write a report
+- Radar auto-fix (opt-in): a spiking, regressed, or new issue gets an agent that reproduces the bug first, repairs it in a throwaway worktree, and hands back a pull request Glissa opens for you; the agent can never push or merge
 - Auto-resume by default: sessions that were live when Glissa stopped come back on the next start with their Claude conversation resumed
 - Configurable themes, hot-reloadable configuration
 
@@ -155,6 +157,7 @@ Every session also writes a JSONL forensic recording by default (hook payloads a
 - `node:test` suite in `tests/`, zero test-framework dependency.
 - Table-driven state machines, e.g. `session/core/state-machine.js`.
 - Fail-closed PR auto-review merge gate: `server/core/pr-review-core.js` only merges a clean, non-stale, green-checks PR; anything ambiguous (no checks, a `gh` error, a touched workflow file) blocks instead of guessing.
+- Server-side fix handoff in the Radar lane: the fix agent may only commit locally (`git push` and every `gh` call are denied it, because a prefix deny-list cannot constrain a push target), so `server/posthog-wiring.js` does the push and opens the pull request from arguments it built itself, refusing any diff that touches `.github/workflows/`.
 - Bounded-retention session recorder: `session/session-recorder.js`, capped by file size, file count, and age so it can run unattended indefinitely.
 
 ## Focus
@@ -179,7 +182,7 @@ On first run, Glissa creates `~/.glissa/config.json` with defaults. You can also
 }
 ```
 
-This is a minimal starting example. The full key list (`integrationBranch`, `autoResume`, `prReview`, `detectBackgroundAgents`, `recordSignals`, and more) is documented in the dashboard's Settings dialog and can also be edited directly in `config.json`.
+This is a minimal starting example. The full key list (`integrationBranch`, `autoResume`, `prReview`, `posthog`, `detectBackgroundAgents`, `recordSignals`, and more) is documented in the dashboard's Settings dialog and can also be edited directly in `config.json`.
 
 ## Requirements
 
