@@ -148,17 +148,11 @@ test('activeness is a window around the caller-supplied now, never a clock read 
   assert.equal(isActiveMtime(NOW - 9000, { now: NOW, withinMs: 5000 }), false);
 });
 
-/*
- * A listing may only be trusted once the directory's mtime is older than the coarse clock that stamped
- * it. Read inside that window, an equality check can never invalidate the listing again, because a child
- * created in the same tick leaves the mtime exactly where the cache already recorded it.
- */
 test('a listing taken while its directory mtime was still fresh is never trusted', () => {
   assert.equal(canTrustCachedListing({ mtimeMs: NOW, listedAtMs: NOW }), false);
   assert.equal(canTrustCachedListing({ mtimeMs: NOW, listedAtMs: NOW + LISTING_SETTLE_MS - 1 }), false);
   assert.equal(canTrustCachedListing({ mtimeMs: NOW, listedAtMs: NOW + LISTING_SETTLE_MS }), true);
-  // A directory stamped into the future by a clock skew or a restored backup settles by waiting, not by
-  // being trusted early.
+  // Future-stamped mtime (clock skew, restored backup) settles by waiting, never trusted early.
   assert.equal(canTrustCachedListing({ mtimeMs: NOW + 60000, listedAtMs: NOW }), false);
   assert.equal(canTrustCachedListing({}), false);
   assert.equal(canTrustCachedListing(), false);

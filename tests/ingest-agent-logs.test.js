@@ -518,14 +518,7 @@ test('a new transcript among finished ones is still found, whether or not creati
   assert.deepEqual(events.map((event) => event.summary), ['claude: a new session in an old project']);
 }));
 
-/*
- * The listing cache is validated by mtime EQUALITY, and a directory mtime comes off a coarse clock (4ms
- * on a stock Linux tick, a whole second on ext3 and FAT). A transcript created inside the tick the sweep
- * already read therefore leaves the mtime exactly where the cache recorded it, and equality alone would
- * never list that directory again: not on the next sweep, not ever, because nothing about it will move.
- * Freezing the clock and forcing the mtime back reproduces that collision on any filesystem, rather than
- * racing for it the way the two sweeps below do.
- */
+// Frozen clock + forced-back mtime reproduce the same-tick mtime collision deterministically on any filesystem.
 test('a transcript born in the tick the last listing read is still found, not lost for the life of the daemon', withHomes(async ({ projects, build }) => {
   const tick = Math.floor(Date.now() / 1000) * 1000;
   const dir = path.join(projects, 'C--same-tick');
