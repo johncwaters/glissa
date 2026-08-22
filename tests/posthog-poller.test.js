@@ -28,7 +28,6 @@ function makeApi(over = {}) {
     listSpikeEvents: async () => ({ ok: true, body: { results: [] } }),
     listOrganizations: async () => ({ ok: true, body: { results: [] } }),
     listProjects: async () => ({ ok: true, body: { results: [] } }),
-    listRecommendations: async () => ({ ok: true, body: { results: [] } }),
     ...over,
   };
 }
@@ -59,17 +58,8 @@ function harness(over = {}) {
     intervalMinutes: 15,
     maxConcurrentInvestigations: over.maxConcurrentInvestigations || 2,
     minUsersToInvestigate: over.minUsersToInvestigate ?? 1,
-    userEscalationThreshold: over.userEscalationThreshold ?? 25,
     autoFix: over.autoFix,
     fixTimeoutSeconds: over.fixTimeoutSeconds,
-    recurrenceDedupe: over.recurrenceDedupe,
-    recurrenceWindowDays: over.recurrenceWindowDays,
-    transientRecurrenceLimit: over.transientRecurrenceLimit,
-    trafficSpikeEnabled: over.trafficSpikeEnabled,
-    trafficSpikeMultiplier: over.trafficSpikeMultiplier,
-    trafficSpikeMinUsers: over.trafficSpikeMinUsers,
-    trafficSpikeCooldownMinutes: over.trafficSpikeCooldownMinutes,
-    trafficSpikeBaselineDays: over.trafficSpikeBaselineDays,
   };
   return { deps, pings, summaries, stateStore, poller: createPosthogPoller(deps) };
 }
@@ -149,21 +139,6 @@ test('a persistently spiking diagnosed issue pings once and spends no further se
   assert.equal(pings.length, 1, 'pingedPhases dedups the spike ping across ticks');
 });
 
-test('a diagnosed spiking issue whose blast radius crosses the threshold is re-investigated', async () => {
-  let spawned = 0;
-  const { poller } = harness({
-    initialState: { [KEY]: { status: 'active', verdict: 'ROOT_CAUSE', investigatedUsers: 8, pingedPhases: ['spike'] } },
-    api: {
-      ...SPIKING_API,
-      queryIssues: async () => ({ ok: true, body: { results: [issueRow({ aggregations: { occurrences: 900, users: 60 } })] } }),
-    },
-    spawnInvestigation: async () => { spawned += 1; return { verdict: 'NEEDS_HUMAN' }; },
-  });
-  await poller.start();
-  await flush();
-  assert.equal(spawned, 1, 'a worsened spike still earns a fresh diagnosis');
-});
-
 test('a resolved issue turning active again pings as a regression', async () => {
   const { poller, pings } = harness({
     initialState: { [KEY]: { status: 'resolved', lastUsers: 8, verdict: 'ROOT_CAUSE', pingedPhases: [] } },
@@ -189,11 +164,10 @@ test('a new issue pings NEW ISSUE once, not per tick', async () => {
 });
 
 // The detection ping follows the auto-fix major predicate: the issue itself qualifies, blast radius
-// is irrelevant, so a new issue far below userEscalationThreshold still announces itself once.
-test('a new issue below the escalation threshold still pings NEW ISSUE', async () => {
+// is irrelevant, so a new issue affecting one user still announces itself once.
+test('a new issue with a tiny blast radius still pings NEW ISSUE', async () => {
   const { poller, pings } = harness({
     api: { queryIssues: async () => ({ ok: true, body: { results: [issueRow({ aggregations: { occurrences: 3, users: 1 } })] } }) },
-    userEscalationThreshold: 25,
     spawnInvestigation: async () => ({ verdict: 'ROOT_CAUSE' }),
   });
   await poller.start();
@@ -519,8 +493,8 @@ test('start() clears a stale inFlight left by a crash so the issue is re-investi
 // --- Auto-fix dispatch: a MAJOR issue gets an agent that reproduces and repairs, not one that only
 // diagnoses. Opt-in, and it rides the same slots, the same inFlight bookkeeping and the same drain.
 
-// The default row is a first sighting with 8 users, so a threshold of 5 also makes it high impact.
-const MAJOR = { autoFix: true, userEscalationThreshold: 5 };
+// The default row is a first sighting, which is major on its own.
+const MAJOR = { autoFix: true };
 
 function fixResult(over = {}) {
   return {
@@ -550,7 +524,6 @@ test('autoFix dispatches a fix job for a major issue, with the fix timeout', asy
 test('autoFix off keeps every dispatch an investigation on the investigation timeout', async () => {
   const calls = [];
   const { poller } = harness({
-    userEscalationThreshold: 5,
     spawnInvestigation: async (a) => { calls.push(a); return { verdict: 'ROOT_CAUSE' }; },
   });
   await poller.start();
@@ -559,7 +532,7 @@ test('autoFix off keeps every dispatch an investigation on the investigation tim
   assert.equal(calls[0].timeoutMs, 900000);
 });
 
-test('autoFix dispatches a fix for a new issue under the escalation threshold', async () => {
+test('autoFix dispatches a fix for a brand-new issue whatever its blast radius', async () => {
   const calls = [];
   const { poller } = harness({
     autoFix: true,
@@ -786,12 +759,11 @@ test('a completed investigation appends one record to the persisted log', async 
     mode: 'investigate',
     prUrl: null,
     at: 4200,
-    archived: false,
   });
   assert.deepEqual(summaries.at(-1).investigations.map((r) => r.id), ['iss-1@4200'], 'and rides the broadcast');
 });
 
-test('archiveInvestigation hides one record, persists it, and is idempotent', async () => {
+test('archiveInvestigation removes one record and persists the removal', async () => {
   const { poller, stateStore } = harness({
     spawnInvestigation: async () => ({ verdict: 'NEEDS_HUMAN', summary: 'needs a carbon unit' }),
     now: () => 1000,
@@ -801,80 +773,13 @@ test('archiveInvestigation hides one record, persists it, and is idempotent', as
 
   const res = await poller.archiveInvestigation('iss-1@1000');
   assert.equal(res.ok, true);
-  assert.deepEqual(res.investigations, [], 'the archived record leaves the broadcast list');
+  assert.deepEqual(res.investigations, [], 'the removed record leaves the broadcast list');
   await flush();
-  assert.equal(stateStore.value._investigations[0].archived, true, 'persisted');
+  assert.deepEqual(stateStore.value._investigations, [], 'persisted');
 
-  assert.equal((await poller.archiveInvestigation('iss-1@1000')).ok, true, 'idempotent');
+  const again = await poller.archiveInvestigation('iss-1@1000');
+  assert.deepEqual(again, { ok: false, error: 'Unknown investigation' }, 'it is gone, not hidden');
   assert.deepEqual(poller.investigations(), []);
-});
-
-test('archiveInvestigation stamps archivedAt so the record ages from the operator action', async () => {
-  let clock = 1000;
-  const { poller, stateStore } = harness({
-    spawnInvestigation: async () => ({ verdict: 'ROOT_CAUSE' }),
-    now: () => clock,
-  });
-  await poller.start();
-  await flush();
-
-  clock = 777000;
-  await poller.archiveInvestigation('iss-1@1000');
-  await flush();
-  assert.equal(stateStore.value._investigations[0].archivedAt, 777000);
-});
-
-test('the 7-day purge runs on state load and on the tick persist, and spares unarchived records', async () => {
-  const day = 86400000;
-  const bootAt = 100 * day;
-  const record = (id, over = {}) => ({
-    id, key: KEY, projectId: 1, projectName: 'web', host: HOST, issueId: 'iss-1',
-    title: 'boom', url: '', verdict: 'ROOT_CAUSE', summaryLine: null, at: 1, archived: false, ...over,
-  });
-  const { poller, stateStore } = harness({
-    initialState: {
-      _investigations: [
-        record('stale@1', { archived: true, archivedAt: bootAt - (8 * day) }),
-        record('recent@2', { archived: true, archivedAt: bootAt - day }),
-        // Archived by a deploy that predates the archivedAt stamp: aged from `at` instead.
-        record('legacy@3', { archived: true, at: bootAt - (9 * day) }),
-        record('live@4', { at: 1 }),
-      ],
-    },
-    now: () => bootAt,
-  });
-  await poller.start();
-  await flush();
-
-  const ids = stateStore.value._investigations.map((r) => r.id);
-  assert.ok(!ids.includes('stale@1'), 'an archived record past the window is gone from the file');
-  assert.ok(!ids.includes('legacy@3'), 'and so is one with no archivedAt but an old completion time');
-  assert.ok(ids.includes('recent@2'), 'a recently archived record is kept');
-  assert.ok(ids.includes('live@4'), 'an unarchived record is never purged by age');
-});
-
-test('a purge on an otherwise clean tick still persists', async () => {
-  const day = 86400000;
-  let clock = 1000;
-  const { poller, stateStore } = harness({
-    initialState: {
-      _investigations: [{
-        id: 'old@1', key: KEY, projectId: 1, projectName: 'web', host: HOST, issueId: 'iss-1',
-        title: 'boom', url: '', verdict: 'ROOT_CAUSE', summaryLine: null, at: 1,
-        archived: true, archivedAt: 1000,
-      }],
-    },
-    api: { queryIssues: async () => ({ ok: false, error: 'down' }) },
-    now: () => clock,
-  });
-  await poller.start();
-  await flush();
-  assert.equal(stateStore.value._investigations.length, 1, 'still inside the window at boot');
-
-  clock = 1000 + (8 * day);
-  await poller.tick();
-  await flush();
-  assert.deepEqual(stateStore.value._investigations, [], 'the tick persisted the purge with no other change');
 });
 
 test('archiveInvestigation refuses an unknown or malformed id', async () => {
@@ -924,406 +829,4 @@ test('the investigations log is never treated as an issue entry', async () => {
   await flush();
   assert.ok(Array.isArray(goneStore.value._investigations), 'still a plain array');
   assert.equal(goneStore.value._investigations.length, 1, 'the record outlives its issue');
-  assert.equal(goneStore.value._investigations[0].archived, false);
-});
-
-// --- recurrence dedupe and escalation (server/core/posthog-recurrence.js) ---
-//
-// PostHog mints a new issue id whenever an error's grouping fingerprint shifts, so one non-event
-// bought two full investigations hours apart, both concluding TRANSIENT. These cover the lane's
-// cross-issue memory: the second id costs nothing, and a pattern that changes stops trusting it.
-
-const CHUNK_A = 'TypeError: Failed to fetch dynamically imported module: https://shop.example.com/assets/maplibre-gl-B3nQ.js';
-const CHUNK_B = 'TypeError: Failed to fetch dynamically imported module: https://shop.example.com/assets/maplibre-gl-Zk91.js';
-const CHUNK_SUMMARY = 'A crawler failed to lazy-load the map chunk; no code defect.';
-
-function chunkRow(id, name, users = 1) {
-  return issueRow({ id, name, aggregations: { occurrences: 4, users } });
-}
-
-// A cluster as the lane would have written it after one TRANSIENT verdict on iss-1.
-function seedCluster(over = {}) {
-  return {
-    _signatures: {
-      'ph.test/1#iss-1': {
-        projectId: '1',
-        issueId: 'iss-1',
-        title: CHUNK_A,
-        summaryLine: CHUNK_SUMMARY,
-        firstAt: 1000,
-        lastAt: 1000,
-        recurrences: 0,
-        escalated: false,
-        recurredIssueIds: [],
-        ...over,
-      },
-    },
-  };
-}
-
-test('a fresh issue id for an already-diagnosed transient is deduped, not investigated', async () => {
-  let issues = [chunkRow('iss-1', CHUNK_A)];
-  const spawned = [];
-  const { poller, stateStore, pings } = harness({
-    api: { queryIssues: async () => ({ ok: true, body: { results: issues } }) },
-    spawnInvestigation: async (a) => {
-      spawned.push(a.issue.issueId);
-      return { verdict: 'TRANSIENT', summary: CHUNK_SUMMARY };
-    },
-    now: () => 1000,
-  });
-  await poller.start();
-  await flush();
-  assert.deepEqual(spawned, ['iss-1'], 'the first sighting is investigated normally');
-  assert.equal(stateStore.value._signatures['ph.test/1#iss-1'].recurrences, 0, 'the transient opened a cluster');
-
-  issues = [chunkRow('iss-2', CHUNK_B)];
-  await poller.tick();
-  await flush();
-
-  const key = 'ph.test/1#iss-2';
-  assert.deepEqual(spawned, ['iss-1'], 'the twin issue never spawned a session');
-  assert.equal(poller._state()[key].verdict, 'TRANSIENT');
-  assert.match(poller._state()[key].summaryLine, /matches prior transient issue iss-1/);
-  assert.equal(poller._state()[key].recurrenceOf, 'ph.test/1#iss-1');
-  assert.equal(stateStore.value._signatures['ph.test/1#iss-1'].recurrences, 1, 'the counter lives on the prior');
-  assert.deepEqual(stateStore.value._signatures['ph.test/1#iss-1'].recurredIssueIds, ['iss-2']);
-  assert.equal(stateStore.value._investigations.length, 2, 'the deduped verdict still reaches the inbox');
-  assert.equal(stateStore.value._investigations[1].verdict, 'TRANSIENT');
-  assert.deepEqual(pings.filter((p) => /RECURRING/.test(p)), [], 'a first repeat is not worth a phone buzz');
-});
-
-test('a deduped issue is quiet on the next tick: the verdict is its own now', async () => {
-  let spawned = 0;
-  const { poller } = harness({
-    initialState: seedCluster(),
-    api: { queryIssues: async () => ({ ok: true, body: { results: [chunkRow('iss-2', CHUNK_B)] } }) },
-    spawnInvestigation: async () => { spawned += 1; return { verdict: 'TRANSIENT', summary: CHUNK_SUMMARY }; },
-    now: () => 2000,
-  });
-  await poller.start();
-  await flush();
-  await poller.tick();
-  await flush();
-  assert.equal(spawned, 0, 'no session, on either tick');
-  assert.equal(poller._state()._signatures['ph.test/1#iss-1'].recurrences, 1, 'counted exactly once');
-});
-
-test('the configured repeat escalates: a real investigation runs and the phone hears about it', async () => {
-  const spawned = [];
-  const { poller, pings } = harness({
-    initialState: seedCluster({ recurrences: 2 }),
-    api: { queryIssues: async () => ({ ok: true, body: { results: [chunkRow('iss-4', CHUNK_B)] } }) },
-    spawnInvestigation: async (a) => { spawned.push(a.issue.issueId); return { verdict: 'ROOT_CAUSE', summary: 'real defect' }; },
-    now: () => 2000,
-  });
-  await poller.start();
-  await flush();
-
-  assert.deepEqual(spawned, ['iss-4'], 'the third repeat is paid for');
-  const recurring = pings.filter((p) => /RECURRING/.test(p));
-  assert.equal(recurring.length, 1);
-  assert.match(recurring[0], /^\[glissa\/posthog\] RECURRING web$/m);
-  assert.match(recurring[0], /recurring transient escalated: repeat 3 within 7 days of issue iss-1/);
-  const cluster = poller._state()._signatures['ph.test/1#iss-1'];
-  assert.equal(cluster.escalated, true, 'the cluster stops being reusable');
-  assert.equal(cluster.recurrences, 3);
-  assert.equal(poller._state()['ph.test/1#iss-4'].verdict, 'ROOT_CAUSE');
-});
-
-test('an escalated cluster never dedupes again and never re-pings', async () => {
-  const spawned = [];
-  const { poller, pings } = harness({
-    initialState: seedCluster({ recurrences: 3, escalated: true }),
-    api: { queryIssues: async () => ({ ok: true, body: { results: [chunkRow('iss-5', CHUNK_B)] } }) },
-    spawnInvestigation: async (a) => { spawned.push(a.issue.issueId); return { verdict: 'TRANSIENT', summary: CHUNK_SUMMARY }; },
-    now: () => 2000,
-  });
-  await poller.start();
-  await flush();
-  assert.deepEqual(spawned, ['iss-5']);
-  assert.deepEqual(pings.filter((p) => /RECURRING/.test(p)), [], 'the escalation ping already fired for this cluster');
-});
-
-test('two same-cluster escalations planned in one tick fire one ping, not two', async () => {
-  const spawned = [];
-  const { poller, pings } = harness({
-    initialState: seedCluster({ recurrences: 2 }),
-    api: {
-      queryIssues: async () => ({
-        ok: true,
-        body: { results: [chunkRow('iss-6', CHUNK_B), chunkRow('iss-7', CHUNK_A)] },
-      }),
-    },
-    spawnInvestigation: async (a) => { spawned.push(a.issue.issueId); return { verdict: 'ROOT_CAUSE', summary: 'real defect' }; },
-    now: () => 2000,
-  });
-  await poller.start();
-  await flush();
-  assert.deepEqual(spawned.sort(), ['iss-6', 'iss-7'], 'both escalated twins are investigated');
-  assert.equal(pings.filter((p) => /RECURRING/.test(p)).length, 1, 'the cluster escalates once');
-});
-
-test('a repeat affecting more than one user escalates on its first sighting', async () => {
-  const spawned = [];
-  const { poller, pings } = harness({
-    initialState: seedCluster(),
-    api: { queryIssues: async () => ({ ok: true, body: { results: [chunkRow('iss-3', CHUNK_B, 4)] } }) },
-    spawnInvestigation: async (a) => { spawned.push(a.issue.issueId); return { verdict: 'NEEDS_HUMAN', summary: 'wider than a crawler' }; },
-    now: () => 2000,
-  });
-  await poller.start();
-  await flush();
-
-  assert.deepEqual(spawned, ['iss-3'], 'a blast radius past one carbon unit is not a transient');
-  const escalation = pings.find((p) => /RECURRING web/.test(p));
-  assert.match(escalation, /now affecting more than one user/);
-  assert.equal(poller._state()._signatures['ph.test/1#iss-1'].escalated, true);
-});
-
-test('a spiking repeat escalates rather than reusing the old verdict', async () => {
-  const spawned = [];
-  const { poller, pings } = harness({
-    initialState: seedCluster(),
-    api: {
-      queryIssues: async () => ({ ok: true, body: { results: [chunkRow('iss-6', CHUNK_B)] } }),
-      listSpikeEvents: async () => ({ ok: true, body: { results: [{ issue_id: 'iss-6', timestamp: '2099-01-01T00:00:00Z' }] } }),
-    },
-    spawnInvestigation: async (a) => { spawned.push(a.issue.issueId); return { verdict: 'ROOT_CAUSE', summary: 'real defect' }; },
-    now: () => 2000,
-  });
-  await poller.start();
-  await flush();
-
-  assert.deepEqual(spawned, ['iss-6']);
-  assert.ok(pings.some((p) => /RECURRING web/.test(p) && /spiking/.test(p)), 'the escalation names the spike');
-});
-
-test('an unrelated error is never deduped into an existing cluster', async () => {
-  const spawned = [];
-  const { poller } = harness({
-    initialState: seedCluster(),
-    api: {
-      queryIssues: async () => ({
-        ok: true,
-        body: { results: [chunkRow('iss-7', 'RangeError: invoice pagination cursor out of bounds')] },
-      }),
-    },
-    spawnInvestigation: async (a) => { spawned.push(a.issue.issueId); return { verdict: 'ROOT_CAUSE', summary: 'off by one' }; },
-    now: () => 2000,
-  });
-  await poller.start();
-  await flush();
-  assert.deepEqual(spawned, ['iss-7']);
-});
-
-test('the recurrenceDedupe kill switch restores the prior behavior exactly', async () => {
-  const spawned = [];
-  const { poller, stateStore, pings } = harness({
-    recurrenceDedupe: false,
-    initialState: seedCluster(),
-    api: { queryIssues: async () => ({ ok: true, body: { results: [chunkRow('iss-2', CHUNK_B)] } }) },
-    spawnInvestigation: async (a) => { spawned.push(a.issue.issueId); return { verdict: 'TRANSIENT', summary: CHUNK_SUMMARY }; },
-    now: () => 2000,
-  });
-  await poller.start();
-  await flush();
-
-  assert.deepEqual(spawned, ['iss-2'], 'every issue is investigated, as before');
-  assert.deepEqual(pings.filter((p) => /RECURRING/.test(p)), []);
-  assert.equal(stateStore.value._signatures['ph.test/1#iss-1'].recurrences, 0, 'no cluster bookkeeping happens');
-  assert.equal(stateStore.value._signatures['ph.test/1#iss-2'], undefined, 'and the transient verdict opens none');
-});
-
-test('a state file written before recurrence memory existed loads and behaves as before', async () => {
-  const spawned = [];
-  const { poller, stateStore } = harness({
-    // An old file records a TRANSIENT verdict on iss-1 with no cluster anywhere, and iss-1 has since
-    // been assumed resolved, so its reappearance is a regression.
-    initialState: {
-      'ph.test/1#iss-1': {
-        status: 'resolved', lastOccurrences: 4, lastUsers: 1, verdict: 'TRANSIENT', summaryLine: CHUNK_SUMMARY, pingedPhases: [],
-      },
-    },
-    api: { queryIssues: async () => ({ ok: true, body: { results: [chunkRow('iss-1', CHUNK_A), chunkRow('iss-2', CHUNK_B)] } }) },
-    spawnInvestigation: async (a) => { spawned.push(a.issue.issueId); return { verdict: 'ROOT_CAUSE', summary: 'real defect' }; },
-    now: () => 1000,
-  });
-  await poller.start();
-  await flush();
-  assert.deepEqual(spawned.sort(), ['iss-1', 'iss-2'], 'an old verdict with no cluster dedupes nothing');
-  assert.equal(stateStore.value._signatures, undefined, 'a non-transient verdict writes no registry');
-});
-
-test('a cluster past the recurrence window is pruned and stops deduping', async () => {
-  const day = 86400000;
-  const spawned = [];
-  const { poller, stateStore } = harness({
-    initialState: seedCluster({ lastAt: 1000 }),
-    api: { queryIssues: async () => ({ ok: true, body: { results: [chunkRow('iss-8', CHUNK_B)] } }) },
-    spawnInvestigation: async (a) => { spawned.push(a.issue.issueId); return { verdict: 'ROOT_CAUSE', summary: 'real defect' }; },
-    now: () => 1000 + (8 * day),
-  });
-  await poller.start();
-  await flush();
-  assert.deepEqual(spawned, ['iss-8'], 'a week-old transient is not evidence');
-  assert.deepEqual(stateStore.value._signatures, {}, 'and the dead cluster went with the tick');
-});
-
-test('the signature registry is never treated as an issue entry', async () => {
-  const { poller } = harness({
-    initialState: seedCluster(),
-    api: { queryIssues: async () => ({ ok: true, body: { results: [] } }) },
-    now: () => 2000,
-  });
-  await poller.start();
-  await flush();
-  assert.ok(poller._state()._signatures['ph.test/1#iss-1'], 'reconcileVanished skipped the underscore key');
-});
-
-// ---------------------------------------------------------------------------
-// The traffic spike lane: same tick, its own state slice, failure-isolated from issue triage.
-// ---------------------------------------------------------------------------
-
-const HOUR_MS = 3600000;
-
-// A flat baseline of `users` per hour over two days, i.e. a project with a very stable normal.
-function trafficBody(currentUsers, baselineUsers = 10, hours = 48) {
-  return {
-    ok: true,
-    buckets: Array.from({ length: hours }, (_, i) => ({ bucket: `h${i}`, users: baselineUsers })),
-    currentUsers,
-  };
-}
-
-// A poller harness whose api answers the traffic query from a queue of bodies (one per tick).
-function trafficHarness(bodies, over = {}) {
-  const trafficCalls = [];
-  const built = harness({
-    ...over,
-    api: {
-      queryIssues: async () => ({ ok: true, body: { results: [] } }),
-      queryTrafficBuckets: async (projectId, opts) => {
-        trafficCalls.push({ projectId, opts });
-        const body = bodies[Math.min(trafficCalls.length - 1, bodies.length - 1)];
-        if (typeof body === 'function') return body();
-        return body;
-      },
-      ...over.api,
-    },
-  });
-  return { ...built, trafficCalls };
-}
-
-test('a traffic spike pings once and persists its state slice', async () => {
-  const { poller, pings, stateStore } = trafficHarness([trafficBody(87)], { now: () => HOUR_MS });
-  await poller.start();
-  await flush();
-
-  assert.equal(pings.length, 1);
-  assert.match(pings[0], /^\[glissa\/posthog\] TRAFFIC SPIKE web$/m);
-  assert.match(pings[0], /87 users in the last hour, ~8\.7x normal \(p90 10\)/);
-  assert.equal(pings[0].includes('occurrences'), false, 'a project-level ping carries no issue counts');
-  assert.deepEqual(stateStore.value._traffic['1'], {
-    active: true, lastPingAt: HOUR_MS, lastPingedUsers: 87, peakUsers: 87,
-  });
-});
-
-test('a spike that persists across ticks is not re-pinged', async () => {
-  const { poller, pings } = trafficHarness([trafficBody(87), trafficBody(90)], { now: () => HOUR_MS });
-  await poller.start();
-  await flush();
-  await poller.tick();
-  await flush();
-
-  assert.equal(pings.length, 1, 'the second tick saw the same spike, already reported');
-  assert.equal(poller._state()._traffic['1'].peakUsers, 90);
-});
-
-test('a spike that doubles again escalates with its own label', async () => {
-  const { poller, pings } = trafficHarness([trafficBody(87), trafficBody(200)], { now: () => HOUR_MS });
-  await poller.start();
-  await flush();
-  await poller.tick();
-  await flush();
-
-  assert.equal(pings.length, 2);
-  assert.match(pings[1], /^\[glissa\/posthog\] TRAFFIC CLIMBING web$/m);
-  assert.match(pings[1], /200 users in the last hour/);
-  assert.equal(poller._state()._traffic['1'].lastPingedUsers, 200);
-});
-
-test('traffic falling back to normal clears the state without a ping', async () => {
-  const { poller, pings } = trafficHarness([trafficBody(87), trafficBody(11)], { now: () => HOUR_MS });
-  await poller.start();
-  await flush();
-  await poller.tick();
-  await flush();
-
-  assert.equal(pings.length, 1, 'spike over is not news');
-  assert.equal(poller._state()._traffic['1'].active, false);
-});
-
-test('a baseline shorter than a day never pings', async () => {
-  const { poller, pings } = trafficHarness([trafficBody(500, 2, 12)], { now: () => HOUR_MS });
-  await poller.start();
-  await flush();
-  assert.deepEqual(pings, []);
-});
-
-test('a traffic query that throws leaves issue triage untouched and never pings', async () => {
-  const spawned = [];
-  const { poller, pings } = trafficHarness([() => { throw new Error('no query scope'); }], {
-    api: { queryIssues: async () => ({ ok: true, body: { results: [issueRow()] } }) },
-    spawnInvestigation: async (a) => { spawned.push(a.issue.issueId); return { verdict: 'ROOT_CAUSE' }; },
-  });
-  await poller.start();
-  await flush();
-
-  assert.deepEqual(spawned, ['iss-1'], 'the issue lane ran to completion');
-  assert.equal(poller._state()[KEY].verdict, 'ROOT_CAUSE');
-  assert.deepEqual(pings.filter((p) => /TRAFFIC/.test(p)), [], 'a broken traffic query never buzzes the operator');
-  assert.equal(poller._state()._traffic, undefined, 'and wrote no state slice');
-});
-
-test('a failed traffic response is logged, not thrown, and leaves the slice alone', async () => {
-  const { poller, pings } = trafficHarness([{ ok: false, error: 'HTTP 403' }]);
-  await poller.start();
-  await flush();
-  assert.deepEqual(pings, []);
-  assert.equal(poller._state()._traffic, undefined);
-});
-
-test('the traffic slice is never treated as an issue entry', async () => {
-  const { poller } = trafficHarness([trafficBody(87)], { now: () => HOUR_MS });
-  await poller.start();
-  await flush();
-  await poller.tick();
-  await flush();
-  assert.ok(poller._state()._traffic['1'], 'reconcileVanished skipped the underscore key');
-});
-
-test('the configured baseline window reaches the query', async () => {
-  const { poller, trafficCalls } = trafficHarness([trafficBody(1)], { trafficSpikeBaselineDays: 14 });
-  await poller.start();
-  await flush();
-  assert.equal(trafficCalls[0].opts.baselineDays, 14);
-});
-
-test('trafficSpikeEnabled: false makes zero traffic calls', async () => {
-  const { poller, pings, trafficCalls } = trafficHarness([trafficBody(87)], {
-    trafficSpikeEnabled: false, now: () => HOUR_MS,
-  });
-  await poller.start();
-  await flush();
-  assert.equal(trafficCalls.length, 0);
-  assert.deepEqual(pings, []);
-  assert.equal(poller._state()._traffic, undefined);
-});
-
-test('an api with no traffic method (an older client) is skipped rather than crashed on', async () => {
-  const { poller, pings } = harness({ api: { queryIssues: async () => ({ ok: true, body: { results: [] } }) } });
-  await poller.start();
-  await flush();
-  assert.deepEqual(pings, []);
 });

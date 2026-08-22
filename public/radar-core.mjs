@@ -11,15 +11,13 @@ import { normalizePhase, prNeedsAction, severityFor as prSeverityFor, sortPrsByA
 const CHANGE_RANK = {
   spiking: 0,
   regressed: 1,
-  worsened: 2,
-  new: 3,
-  quiet: 4,
+  new: 2,
+  quiet: 3,
 };
 
 const CHANGE_SEVERITY = {
   spiking: 'crit',
   regressed: 'crit',
-  worsened: 'warn',
   new: 'warn',
   quiet: 'dim',
 };
@@ -165,17 +163,13 @@ export function partitionRadarProjects(projects, nowTs, opts = {}) {
 // The persisted log of completed investigations (server/core/posthog-core.js), carried on the same
 // posthog-status broadcast. Rows survive their issue: a resolved issue leaves the Errors section
 // immediately, and its verdict would leave with it. An absent field renders nothing, so an older
-// server keeps behaving exactly as before.
-// `locallyArchivedIds` is the panel's own record of what the operator archived in this page session.
-// It is a SECOND filter, not a replacement for `archived`: a payload the server built before (or a
-// cached one it replayed after) the archive still carries the record, and the row must stay gone.
-export function investigationRows(snapshot, locallyArchivedIds = null) {
+// server keeps behaving exactly as before. Archiving REMOVES the record server-side, so there is
+// nothing here to filter out.
+export function investigationRows(snapshot) {
   const list = Array.isArray(snapshot?.investigations) ? snapshot.investigations : [];
   return list
     .filter((record) => record && typeof record === 'object')
     .filter((record) => typeof record.id === 'string' && record.id)
-    .filter((record) => record.archived !== true)
-    .filter((record) => !locallyArchivedIds?.has(record.id))
     .map((record) => ({
       id: record.id,
       issueId: textOr(record.issueId, ''),
@@ -192,24 +186,6 @@ export function investigationRows(snapshot, locallyArchivedIds = null) {
       at: Number.isFinite(Number(record.at)) ? Number(record.at) : 0,
     }))
     .sort((a, b) => b.at - a.at);
-}
-
-// Drop, IN PLACE, every remembered id this payload no longer carries at all. Once the server stops
-// sending a record (the archive round-tripped, or the retention purge dropped it) there is nothing
-// left to suppress, so the caller's guard set can never grow without bound. Returns the same set so
-// a caller can chain; mutating in place is deliberate, the panel holds one long-lived set.
-export function retainKnownInvestigationIds(snapshot, ids) {
-  if (!ids || ids.size === 0) return ids;
-  const list = Array.isArray(snapshot?.investigations) ? snapshot.investigations : [];
-  const present = new Set();
-  for (const record of list) {
-    if (record && typeof record === 'object' && typeof record.id === 'string') present.add(record.id);
-  }
-  for (const id of [...ids]) {
-    if (present.has(id)) continue;
-    ids.delete(id);
-  }
-  return ids;
 }
 
 // ── Ops section ──────────────────────────────────────────────

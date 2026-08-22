@@ -1,8 +1,6 @@
 'use strict';
 
 const core = require('./core/posthog-core');
-const recurrence = require('./core/posthog-recurrence');
-const traffic = require('./core/traffic-spike-core');
 const { normalizeIssues, parseSpikeIssueIds } = require('./posthog-api');
 
 /*
@@ -11,7 +9,7 @@ const { normalizeIssues, parseSpikeIssueIds } = require('./posthog-api');
  * whole tick is unit-testable with fakes.
  *
  * Per-issue lifecycle (state persisted across ticks, keyed by `<host>/<projectId>#<issueId>`):
- *   new / spiking / regressed / worsened -> spawn one headless investigation session -> a verdict of
+ *   new / spiking / regressed -> spawn one headless investigation session -> a verdict of
  *   ROOT_CAUSE (quiet), NEEDS_HUMAN (ping once) or ERROR (ping once) is recorded on the entry.
  *   quiet   -> observed only; costs nothing.
  * An issue that vanishes from the active list is marked resolved and aged out (see reconcileVanished).
@@ -20,15 +18,6 @@ const { normalizeIssues, parseSpikeIssueIds } = require('./posthog-api');
  * The only write in the lane is the carbon unit's explicit resolve/suppress click, which goes
  * through posthog-wiring.js, never through here.
  */
-
-// Observation-level pings (fired from the classification, before any investigation runs).
-// A regression is naturally once-per-occurrence: it stops matching as soon as the entry's status is
-// written back as active. A SPIKE is not - the same issue can classify spiking on every tick for as
-// long as the spike endpoint keeps naming it - so it is deduped through the entry's pingedPhases.
-const OBSERVATION_PINGS = {
-  spiking: { kind: 'spike', dedupe: true },
-  regressed: { kind: 'regression', dedupe: false },
-};
 
 // Investigation-verdict pings. ROOT_CAUSE is absent on purpose: a diagnosed issue is digest
 // material, not a phone buzz (core.pingFor returns null for it either way). FIXED belongs to the
@@ -42,13 +31,6 @@ const VERDICT_PING_KIND = {
 
 // The one verdict ping that is NOT deduped per issue phase (see finishInvestigation).
 const FIX_PING_KIND = 'fixed';
-
-// Traffic-lane verdicts that reach Telegram. 'clear' is absent on purpose: traffic falling back to
-// normal re-arms the state silently, it is not news.
-const TRAFFIC_PING_KIND = {
-  ping: 'traffic_spike',
-  escalate: 'traffic_spike_growth',
-};
 
 const META_KEY = '_meta';
 
@@ -84,22 +66,8 @@ function createPosthogPoller(deps) {
   // ride the SAME concurrency slots as investigations: one cap governs what the lane costs.
   const fixTimeoutSeconds = deps.fixTimeoutSeconds || 1800;
   const minUsersToInvestigate = deps.minUsersToInvestigate ?? core.DEFAULT_MIN_USERS_TO_INVESTIGATE;
-  const userEscalationThreshold = deps.userEscalationThreshold ?? core.DEFAULT_USER_ESCALATION_THRESHOLD;
   const dateRangeHours = deps.dateRangeHours || 24;
   const entryRetentionDays = deps.entryRetentionDays ?? core.DEFAULT_ENTRY_RETENTION_DAYS;
-  const archivedRetentionDays = deps.archivedRetentionDays ?? core.DEFAULT_ARCHIVED_RETENTION_DAYS;
-  // Recurrence dedupe is ON unless explicitly disabled: a repeat of a diagnosed non-event is the
-  // common case, and the kill switch exists for an operator who would rather pay than ever miss one.
-  const recurrenceDedupe = deps.recurrenceDedupe !== false;
-  const recurrenceWindowDays = deps.recurrenceWindowDays ?? recurrence.DEFAULT_RECURRENCE_WINDOW_DAYS;
-  const transientRecurrenceLimit = deps.transientRecurrenceLimit ?? recurrence.DEFAULT_TRANSIENT_RECURRENCE_LIMIT;
-  // Traffic spike detection rides the same tick and is ON unless explicitly disabled: it costs two
-  // read-only HogQL queries per project and answers the one question error triage cannot.
-  const trafficSpikeEnabled = deps.trafficSpikeEnabled !== false;
-  const trafficSpikeMultiplier = deps.trafficSpikeMultiplier ?? traffic.DEFAULT_TRAFFIC_SPIKE_MULTIPLIER;
-  const trafficSpikeMinUsers = deps.trafficSpikeMinUsers ?? traffic.DEFAULT_TRAFFIC_SPIKE_MIN_USERS;
-  const trafficSpikeCooldownMinutes = deps.trafficSpikeCooldownMinutes ?? traffic.DEFAULT_TRAFFIC_SPIKE_COOLDOWN_MINUTES;
-  const trafficSpikeBaselineDays = deps.trafficSpikeBaselineDays ?? traffic.DEFAULT_TRAFFIC_BASELINE_DAYS;
 
   let state = {};
   let timer = null;
@@ -182,19 +150,6 @@ function createPosthogPoller(deps) {
     return res || { verdict: 'ERROR', summary: 'no verdict' };
   }
 
-  // Open or refresh the signature cluster after a TRANSIENT verdict; recurrenceOf folds a matched
-  // issue back into its cluster rather than opening a rival one.
-  function recordTransientCluster(change, prev, summaryLine, at) {
-    state[recurrence.SIGNATURES_KEY] = recurrence.recordTransientSignature(state, {
-      key: prev.recurrenceOf || change.key,
-      projectId: change.projectId,
-      issueId: change.issue.issueId,
-      title: change.issue.title,
-      summaryLine,
-      at,
-    });
-  }
-
   /*
    * `plannedMode` is what the tick decided; `result.mode` is what actually ran. They differ when the
    * wiring downgraded a fix to an investigation (no repository to commit in), and the entry, the ping
@@ -221,13 +176,9 @@ function createPosthogPoller(deps) {
       if (kind === FIX_PING_KIND) pingAlways(kind, ctx);
       if (kind !== FIX_PING_KIND) pingOnce(kind, ctx, phases);
     }
-    const summaryLine = core.summaryLineFromReportText(result?.summary);
-    if (recurrenceDedupe && verdict === 'TRANSIENT') {
-      recordTransientCluster(change, prev, summaryLine, completedAt);
-    }
     state[change.key] = core.nextState(prev, change.issue, {
       verdict,
-      summaryLine,
+      summaryLine: core.summaryLineFromReportText(result?.summary),
       at: completedAt,
       inFlight: false,
       pingedPhases: phases,
@@ -255,43 +206,17 @@ function createPosthogPoller(deps) {
   }
 
   function currentInvestigations() {
-    return core.unarchivedInvestigations(state[core.INVESTIGATIONS_KEY]);
+    return core.sortedInvestigations(state[core.INVESTIGATIONS_KEY]);
   }
 
   /*
-   * Drop archived records past the retention window. Runs at the two seams that already touch the
-   * log - the state load and each tick, just before its persist - so the cleanup needs no timer of
-   * its own and rides the write that was happening anyway. Returns whether anything went, so the
-   * tick can persist a purge that happened on an otherwise clean cycle.
-   */
-  function pruneInvestigationLog() {
-    const log = state[core.INVESTIGATIONS_KEY];
-    if (!Array.isArray(log) || log.length === 0) return false;
-    const pruned = core.pruneInvestigations(log, now(), { archivedRetentionDays });
-    if (pruned.length === log.length) return false;
-    state[core.INVESTIGATIONS_KEY] = pruned;
-    return true;
-  }
-
-  // Age out clusters past the window, at the same two seams as the investigations-log prune.
-  function pruneSignatureRegistry() {
-    const before = Object.keys(recurrence.signatureRecords(state)).length;
-    if (before === 0) return false;
-    const pruned = recurrence.pruneSignatures(state, now(), { recurrenceWindowDays });
-    if (Object.keys(pruned).length === before) return false;
-    state[recurrence.SIGNATURES_KEY] = pruned;
-    return true;
-  }
-
-  /*
-   * Operator-driven archive of one inbox record. Purely a state edit: nothing is polled, nothing is
-   * written to PostHog, and the record stays in the log (archived) rather than being deleted, so the
-   * cap keeps behaving as a plain newest-N window.
+   * Operator-driven removal of one inbox record. Purely a state edit: nothing is polled and nothing
+   * is written to PostHog.
    */
   async function archiveInvestigation(id) {
     const ref = core.validateInvestigationId(id);
     if (!ref.ok) return { ok: false, error: ref.error };
-    const res = core.markInvestigationArchived(state[core.INVESTIGATIONS_KEY], ref.id, now());
+    const res = core.removeInvestigation(state[core.INVESTIGATIONS_KEY], ref.id);
     if (!res.ok) return { ok: false, error: res.error };
     state[core.INVESTIGATIONS_KEY] = res.log;
     await persist();
@@ -317,51 +242,16 @@ function createPosthogPoller(deps) {
     }
   }
 
-  // Mark an issue in-flight and launch its job, tracked so stop() drains it. Shared by the tick's
-  // planned investigations and the operator's manual re-investigation, so both take the same
-  // concurrency slot, the same never-rejecting tracking promise, and the same state bookkeeping.
-  // A fix job and an investigation are indistinguishable here on purpose: one slot pool, one drain.
-  function startInvestigation(change, decision = null) {
+  // Mark an issue in-flight and launch its job, tracked so stop() drains it. A fix job and an
+  // investigation are indistinguishable here on purpose: one slot pool, one drain.
+  function startInvestigation(change) {
     const mode = core.decideJobMode(change, { autoFix });
     state[change.key].inFlight = true;
-    if (decision?.matchKey) state[change.key].recurrenceOf = decision.matchKey;
     const investigation = runInvestigation(change, mode).catch((e) => {
       log.warn(`[posthog-poller] investigation crashed for ${change.key}: ${e.message}`);
     });
     running.add(investigation);
     investigation.finally(() => running.delete(investigation));
-  }
-
-  // A would-be investigation the recurrence memory already answered: nothing spawns, but the normal
-  // completion path still runs, and the counter grows on the PRIOR record, which outlives this entry.
-  function applyDedupe(item) {
-    const { change, recurrence: decision } = item;
-    state[recurrence.SIGNATURES_KEY] = recurrence.noteRecurrence(state, decision.matchKey, {
-      at: now(),
-      issueId: change.issue.issueId,
-    });
-    const entry = state[change.key] || core.nextState(undefined, change.issue, {});
-    entry.recurrenceOf = decision.matchKey;
-    state[change.key] = entry;
-    return finishInvestigation(change, {
-      verdict: 'TRANSIENT',
-      summary: recurrence.recurrenceSummaryLine(decision),
-    });
-  }
-
-  // Stop trusting a cluster's verdict: the escalated latch keeps later issues out of the dedupe
-  // path, and the ping surfaces what a silent dedupe would have buried.
-  function applyEscalation(item) {
-    const { change, recurrence: decision } = item;
-    state[recurrence.SIGNATURES_KEY] = recurrence.noteRecurrence(state, decision.matchKey, {
-      at: now(),
-      issueId: change.issue.issueId,
-      escalated: true,
-    });
-    pingAlways('recurrence_escalated', {
-      ...pingContext(change),
-      detail: recurrence.escalationDetail({ ...decision, recurrenceWindowDays }),
-    });
   }
 
   // Absence from one tick is NOT death: queryIssues returns only the top-50 active issues of the last
@@ -389,51 +279,6 @@ function createPosthogPoller(deps) {
     const res = await api.listSpikeEvents(projectId).catch(() => null);
     if (!res || !res.ok) return new Set();
     return parseSpikeIssueIds(res.body, sinceTs);
-  }
-
-  function trafficState() {
-    const slice = state[traffic.TRAFFIC_KEY];
-    if (!slice || typeof slice !== 'object' || Array.isArray(slice)) state[traffic.TRAFFIC_KEY] = {};
-    return state[traffic.TRAFFIC_KEY];
-  }
-
-  // Traffic query failures warn only, because a broken query would otherwise buzz a carbon unit every interval.
-  async function tickTraffic(projectId, projectName, nowTs) {
-    if (!trafficSpikeEnabled) return;
-    if (typeof api.queryTrafficBuckets !== 'function') return;
-    try {
-      const res = await api.queryTrafficBuckets(projectId, { baselineDays: trafficSpikeBaselineDays });
-      if (!res || !res.ok) {
-        log.warn(`[posthog-poller] traffic query failed for ${projectName}: ${(res?.error) || 'no response'}`);
-        return;
-      }
-      const baseline = traffic.computeBaseline(res.buckets);
-      const key = String(projectId);
-      const verdict = traffic.decideTrafficSpike({
-        currentUsers: res.currentUsers,
-        baseline,
-        prev: trafficState()[key],
-        now: nowTs,
-        cfg: {
-          multiplier: trafficSpikeMultiplier,
-          minUsers: trafficSpikeMinUsers,
-          cooldownMinutes: trafficSpikeCooldownMinutes,
-        },
-      });
-      trafficState()[key] = verdict.nextState;
-      const kind = TRAFFIC_PING_KIND[verdict.action];
-      if (!kind) return;
-      pingAlways(kind, {
-        projectName,
-        title: traffic.spikeSummaryLine({
-          currentUsers: res.currentUsers,
-          baseline,
-          multiple: verdict.multiple,
-        }),
-      });
-    } catch (e) {
-      log.warn(`[posthog-poller] traffic check failed for ${projectName}: ${e.message}`);
-    }
   }
 
   async function tickProject(project) {
@@ -472,9 +317,7 @@ function createPosthogPoller(deps) {
       projectId,
       projectName,
       url: core.issueUrl(host, projectId, issue.issueId),
-      change: core.classifyIssueChange(state[core.issueKey(host, projectId, issue.issueId)], issue, spikeIssueIds, {
-        userEscalationThreshold,
-      }),
+      change: core.classifyIssueChange(state[core.issueKey(host, projectId, issue.issueId)], issue, spikeIssueIds),
     }));
 
     reconcileVanished(core.issueKey(host, projectId, ''), new Set(changes.map((c) => c.key)), tickStartedAt);
@@ -482,13 +325,12 @@ function createPosthogPoller(deps) {
     for (const change of changes) {
       const prev = state[change.key] || {};
       const phases = [...(prev.pingedPhases || [])];
-      const observation = OBSERVATION_PINGS[change.change];
-      if (observation?.dedupe) pingOnce(observation.kind, pingContext(change), phases);
-      if (observation && !observation.dedupe) pingAlways(observation.kind, pingContext(change));
-      // Same rule as the auto-fix major predicate: the issue itself qualifies, blast radius does not.
-      if (change.change === 'new' && !prev.verdict) {
-        pingOnce('new_issue', pingContext(change), phases);
-      }
+      // A regression is naturally once-per-occurrence (it stops matching as soon as the entry's
+      // status is written back as active); a spike and a first sighting are not, so both dedupe
+      // through the entry's pingedPhases.
+      if (change.change === 'spiking') pingOnce('spike', pingContext(change), phases);
+      if (change.change === 'regressed') pingAlways('regression', pingContext(change));
+      if (change.change === 'new' && !prev.verdict) pingOnce('new_issue', pingContext(change), phases);
       state[change.key] = core.nextState(prev, change.issue, {
         observedAt: tickStartedAt,
         inFlight: prev.inFlight === true,
@@ -496,35 +338,13 @@ function createPosthogPoller(deps) {
       });
     }
 
-    // One planning call decides everything about a change: whether it earns attention at all, and
-    // whether the lane's recurrence memory already knows the answer. Deduped items still get a
-    // verdict and an inbox record, they just never spawn a session.
-    const plan = recurrence.planIssueActions(changes, state, {
-      minUsersToInvestigate,
-      userEscalationThreshold,
-      recurrenceDedupe,
-      recurrenceWindowDays,
-      transientRecurrenceLimit,
-      now: tickStartedAt,
-    });
-    for (const item of plan.dedupe) {
-      await applyDedupe(item);
-    }
-
     let slots = maxConcurrentInvestigations - inFlightCount();
-    for (const item of plan.investigate) {
+    for (const change of core.planInvestigations(changes, state, { minUsersToInvestigate })) {
       if (slots <= 0) break;
       if (stopped) break;
       slots -= 1;
-      // Latch-and-ping only alongside the spawn it justifies; the latch re-check keeps two
-      // same-cluster escalations planned from one pre-tick snapshot down to a single ping.
-      const escalating = item.recurrence.action === 'escalate'
-        && recurrence.signatureRecords(state)[item.recurrence.matchKey]?.escalated !== true;
-      if (escalating) applyEscalation(item);
-      startInvestigation(item.change, item.recurrence);
+      startInvestigation(change);
     }
-
-    await tickTraffic(projectId, projectName, tickStartedAt);
 
     // The stamp itself is state, and the next tick's spike cutoff depends on it surviving a restart,
     // so a project that got as far as querying always persists.
@@ -572,8 +392,6 @@ function createPosthogPoller(deps) {
         if (res.dirty) dirty = true;
         summaries.push(res.summary);
       }
-      if (pruneInvestigationLog()) dirty = true;
-      if (pruneSignatureRegistry()) dirty = true;
       if (dirty) await persist();
       onTickComplete({
         type: 'posthog-status',
@@ -596,8 +414,6 @@ function createPosthogPoller(deps) {
       if (!isIssueKey(key)) continue;
       if (state[key]) state[key].inFlight = false;
     }
-    pruneInvestigationLog();
-    pruneSignatureRegistry();
     await tick();
     timer = setIntervalFn(() => { void tick(); }, intervalMinutes * 60000);
     if (timer && typeof timer.unref === 'function') timer.unref();

@@ -45,30 +45,16 @@ const POSTHOG_NUMERIC_KEYS = [
   'investigationTimeoutSeconds',
   'fixTimeoutSeconds',
   'minUsersToInvestigate',
-  'userEscalationThreshold',
-  'recurrenceWindowDays',
-  'transientRecurrenceLimit',
-  'trafficSpikeMultiplier',
-  'trafficSpikeMinUsers',
-  'trafficSpikeCooldownMinutes',
-  'trafficSpikeBaselineDays',
 ];
-// Listed keys override the default positive floor, allowing zero cooldown and capping baseline days.
+// Listed keys override the default positive floor.
 const POSTHOG_NUMERIC_RANGES = {
   // A fix reproduces, repairs, runs a suite and opens a PR, so a one-minute floor is the only value
   // that could not possibly be meant; the ceiling is six hours, past which a hung job is the bug.
   fixTimeoutSeconds: { min: 60, max: 21600, label: 'between 60 and 21600' },
-  trafficSpikeMultiplier: { min: 1, label: 'at least 1' },
-  trafficSpikeMinUsers: { min: 1, label: 'at least 1' },
-  trafficSpikeCooldownMinutes: { min: 0, label: 'zero or more' },
-  trafficSpikeBaselineDays: { min: 1, max: 30, label: 'between 1 and 30' },
 };
-// `recurrenceDedupe` is the recurrence-dedupe kill switch and defaults to ON, so absence means
-// enabled; the poller reads it as `!== false`. allowStatusWrites/dailyDigest were validated and
-// persisted here while no module in the lane ever read them, which promised behavior (PostHog writes,
-// a digest) that does not exist; a key earns a place in this list when something consumes it.
-// `autoFix` is the auto-fix dispatch opt-in and defaults to OFF, so absence means diagnose-only.
-const POSTHOG_BOOLEAN_KEYS = ['enabled', 'recurrenceDedupe', 'trafficSpikeEnabled', 'autoFix'];
+// A key earns a place in this list when something in the lane consumes it. `autoFix` is the auto-fix
+// dispatch opt-in and defaults to OFF, so absence means diagnose-only.
+const POSTHOG_BOOLEAN_KEYS = ['enabled', 'autoFix'];
 const POSTHOG_STRING_KEYS = ['host', 'apiKey', 'repoPath'];
 
 const USAGE_BOOLEAN_KEYS = ['enabled', 'fetchPricing', 'planLimits'];
@@ -678,62 +664,6 @@ function registerControlHandlers(controlWss, deps) {
     ws.send(JSON.stringify({ type, requestId: msg.requestId || null, ...payload }));
   }
 
-  function isExistingDirectory(candidate) {
-    try {
-      return fs.statSync(candidate).isDirectory();
-    } catch {
-      return false;
-    }
-  }
-
-  // Everything one level inside the folders the operator already keeps repos in. One-shot cold path
-  // (an operator click that is about to spawn a Claude session), so sync readdir is fine.
-  function listSiblingRepoDirs() {
-    const entries = [];
-    for (const parent of posthogCore.projectParentDirs(config.projects)) {
-      try {
-        for (const dirent of fs.readdirSync(parent, { withFileTypes: true })) {
-          if (!dirent.isDirectory() || dirent.name.startsWith('.') || dirent.name === 'node_modules') continue;
-          entries.push({ name: dirent.name, path: path.join(parent, dirent.name) });
-        }
-      } catch (err) {
-        // A parent that is simply gone is ordinary (a project path from another machine), not news.
-        if (err.code === 'ENOENT' || err.code === 'ENOTDIR') continue;
-        console.warn(`[control] posthog auto-create: cannot read ${parent}: ${err.code || err.message}`);
-      }
-    }
-    return entries;
-  }
-
-  /**
-   * Create the Glissa project a Radar row wants when none is mapped yet, or null when the repo
-   * cannot be resolved CONFIDENTLY. Refusing to guess is the point: an auto-created session points a
-   * permissionless Claude at a directory, so a wrong directory is worse than the mapping error.
-   */
-  function autoCreatePosthogProject(projectId, posthogProjectName) {
-    const mapped = String(config.posthog?.projectMap?.[String(projectId)] ?? '').trim();
-    const mappedDir = posthogCore.isAbsolutePathish(mapped) && isExistingDirectory(mapped) ? mapped : null;
-    const match = mappedDir ? null : posthogCore.pickDirectoryForProjectName(posthogProjectName, listSiblingRepoDirs());
-    const repoDir = mappedDir || (match && isExistingDirectory(match.path) ? match.path : null);
-    if (!repoDir) return null;
-
-    const resolvedPath = path.resolve(repoDir);
-    const name = posthogCore.sanitizeSessionName(path.basename(resolvedPath))
-      || posthogCore.sanitizeSessionName(posthogProjectName);
-    if (!name) return null;
-    for (const [, sess] of sessions) {
-      if (sess.name === name) return null;
-    }
-
-    const project = { id: generateProjectId(), name, path: resolvedPath };
-    const freshConfig = configStore.save(cfg => {
-      cfg.projects.push(project);
-    });
-    if (freshConfig) applyConfigReload(freshConfig);
-    console.log(`[control] posthog-open-session auto-created session: ${name} (${resolvedPath})`);
-    return project;
-  }
-
   // Open (or wake) the Glissa session mapped to this PostHog project and paste an investigation
   // prompt into it, WITHOUT a trailing CR: the operator reads the draft and presses Enter.
   function handlePosthogOpenSession(msg, ws) {
@@ -742,8 +672,7 @@ function registerControlHandlers(controlWss, deps) {
     if (!ref.ok) { reply({ error: ref.error }); return; }
     const found = findPosthogIssue(ref.projectId, ref.issueId);
     if (!found) { reply({ error: 'That issue is not in the latest PostHog poll' }); return; }
-    const project = posthogCore.resolveIssueProject(config.posthog, config.projects, ref.projectId)
-      || autoCreatePosthogProject(ref.projectId, found.projectName);
+    const project = posthogCore.resolveIssueProject(config.posthog, config.projects, ref.projectId);
     if (!project) {
       reply({ error: 'No Glissa session is mapped to this PostHog project (set posthog.projectMap)' });
       return;
@@ -777,8 +706,8 @@ function registerControlHandlers(controlWss, deps) {
     reply({ ok: res.ok === true, error: res.error || null, status: res.status || null });
   }
 
-  // Archive one investigations-inbox record. The id is a log key, not an issue reference: the record
-  // it names routinely outlives the issue row it came from, which is the point of the inbox.
+  // Drop one investigations-inbox record. The id is a log key, not an issue reference: the record it
+  // names routinely outlives the issue row it came from, which is the point of the inbox.
   async function handlePosthogArchiveInvestigation(msg, ws) {
     const reply = (payload) => replyTo(ws, msg, 'posthog-archive-investigation-result', { ok: false, error: null, ...payload });
     const ref = posthogCore.validateInvestigationId(msg.id);

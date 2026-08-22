@@ -147,15 +147,9 @@ function posthogPayload(over = {}) {
     maxConcurrentInvestigations: 2,
     investigationTimeoutSeconds: 900,
     minUsersToInvestigate: 1,
-    userEscalationThreshold: 25,
     repoPath: '/repo/web',
     autoFix: false,
     fixTimeoutSeconds: 1800,
-    trafficSpikeEnabled: true,
-    trafficSpikeMultiplier: 3,
-    trafficSpikeMinUsers: 10,
-    trafficSpikeCooldownMinutes: 360,
-    trafficSpikeBaselineDays: 7,
     ...over,
   };
 }
@@ -229,57 +223,11 @@ test('posthog.projects rejects a non-integer or non-positive id', () => {
 });
 
 test('a non-positive posthog numeric field is rejected with settings-error', () => {
-  for (const key of ['intervalMinutes', 'maxConcurrentInvestigations', 'investigationTimeoutSeconds', 'minUsersToInvestigate', 'userEscalationThreshold', 'recurrenceWindowDays', 'transientRecurrenceLimit']) {
+  for (const key of ['intervalMinutes', 'maxConcurrentInvestigations', 'investigationTimeoutSeconds', 'minUsersToInvestigate']) {
     const h = harness({ projects: [], teams: [] });
     h.send({ type: 'update-settings', settings: { posthog: posthogPayload({ [key]: 0 }) } });
     assert.ok(h.sent.find((m) => m.type === 'settings-error' && new RegExp(key).test(m.message)), `rejected ${key}: 0`);
   }
-});
-
-// The traffic spike lane's keys. They ride the same whitelist as the rest of the posthog block, but
-// their bounds are their own: a spike multiplier under 1 would fire on every quiet hour, and the
-// baseline window has to stay inside what the HogQL query clamps to.
-test('a traffic spike multiplier below 1 is rejected', () => {
-  const h = harness({ projects: [], teams: [] });
-  h.send({ type: 'update-settings', settings: { posthog: posthogPayload({ trafficSpikeMultiplier: 0.5 }) } });
-  assert.ok(h.sent.find((m) => m.type === 'settings-error' && /trafficSpikeMultiplier/.test(m.message)));
-  assert.equal(h.cfg.posthog, undefined);
-});
-
-test('a traffic spike cooldown of zero is accepted (never mute a spike)', () => {
-  const h = harness({ projects: [], teams: [] });
-  h.send({ type: 'update-settings', settings: { posthog: posthogPayload({ trafficSpikeCooldownMinutes: 0 }) } });
-  assert.equal(h.cfg.posthog.trafficSpikeCooldownMinutes, 0);
-});
-
-test('a negative traffic spike cooldown is rejected', () => {
-  const h = harness({ projects: [], teams: [] });
-  h.send({ type: 'update-settings', settings: { posthog: posthogPayload({ trafficSpikeCooldownMinutes: -1 }) } });
-  assert.ok(h.sent.find((m) => m.type === 'settings-error' && /trafficSpikeCooldownMinutes/.test(m.message)));
-});
-
-test('a traffic baseline window outside 1..30 days is rejected', () => {
-  for (const days of [0, 31, 365]) {
-    const h = harness({ projects: [], teams: [] });
-    h.send({ type: 'update-settings', settings: { posthog: posthogPayload({ trafficSpikeBaselineDays: days }) } });
-    assert.ok(
-      h.sent.find((m) => m.type === 'settings-error' && /trafficSpikeBaselineDays/.test(m.message)),
-      `rejected ${days} days`,
-    );
-  }
-});
-
-test('a non-boolean trafficSpikeEnabled is rejected rather than coerced', () => {
-  const h = harness({ projects: [], teams: [] });
-  h.send({ type: 'update-settings', settings: { posthog: posthogPayload({ trafficSpikeEnabled: 'yes' }) } });
-  assert.ok(h.sent.find((m) => m.type === 'settings-error' && /trafficSpikeEnabled/.test(m.message)));
-  assert.equal(h.cfg.posthog, undefined);
-});
-
-test('trafficSpikeEnabled: false persists rather than being dropped as falsy', () => {
-  const h = harness({ projects: [], teams: [] });
-  h.send({ type: 'update-settings', settings: { posthog: posthogPayload({ trafficSpikeEnabled: false }) } });
-  assert.equal(h.cfg.posthog.trafficSpikeEnabled, false);
 });
 
 // The auto-fix dispatch. It pushes branches and opens pull requests, so it is opted into explicitly
@@ -333,27 +281,6 @@ test('retired posthog keys are dropped rather than persisted', () => {
   });
   assert.equal('allowStatusWrites' in h.cfg.posthog, false);
   assert.equal('dailyDigest' in h.cfg.posthog, false);
-});
-
-// The recurrence-dedupe keys are hand-edited today (the dialog does not render them), so they have to
-// survive a save that never mentions them: the dialog spreads the hydrated object, and only a
-// whitelisted key makes it back through sanitizePosthog.
-test('the recurrence dedupe keys round-trip, and the kill switch is validated as a boolean', () => {
-  const h = harness({ projects: [], teams: [] });
-  h.send({
-    type: 'update-settings',
-    settings: {
-      posthog: posthogPayload({ recurrenceDedupe: false, recurrenceWindowDays: 14, transientRecurrenceLimit: 5 }),
-    },
-  });
-  assert.equal(h.cfg.posthog.recurrenceDedupe, false);
-  assert.equal(h.cfg.posthog.recurrenceWindowDays, 14);
-  assert.equal(h.cfg.posthog.transientRecurrenceLimit, 5);
-
-  const bad = harness({ projects: [], teams: [] });
-  bad.send({ type: 'update-settings', settings: { posthog: posthogPayload({ recurrenceDedupe: 'no' }) } });
-  assert.ok(bad.sent.find((m) => m.type === 'settings-error' && /recurrenceDedupe/.test(m.message)));
-  assert.equal(bad.cfg.posthog, undefined);
 });
 
 test('posthog.repoPath persists and is trimmed; a non-string is rejected', () => {
