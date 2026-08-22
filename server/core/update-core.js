@@ -148,9 +148,9 @@ function normalizeFlavor(flavor) {
   return 'unknown';
 }
 
-function decideUpdateStatus({ installedSha, latestSha: remoteSha, remoteSha: legacyRemoteSha, currentVersion, latestVersion, flavor } = {}) {
+function decideUpdateStatus({ installedSha, latestSha: remoteSha, currentVersion, latestVersion, flavor } = {}) {
   const currentSha = normalizeSha(installedSha);
-  const latestSha = normalizeSha(remoteSha || legacyRemoteSha);
+  const latestSha = normalizeSha(remoteSha);
   const current = textOrNull(currentVersion);
   const latest = textOrNull(latestVersion);
   return {
