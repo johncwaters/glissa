@@ -235,7 +235,7 @@ test('a burst past the file threshold publishes one summarized event', async (t)
   timers.runTimeouts();
 
   assert.equal(published.length, 1);
-  assert.match(published[0].summary, new RegExp(`^${MAX_FILES_PER_BATCH + 1} files changed`));
+  assert.equal(published[0].detail.files, MAX_FILES_PER_BATCH + 1);
 });
 
 // --- Ref-counted roots ----------------------------------------------------
@@ -677,7 +677,7 @@ test('a real @parcel/watcher subscription reports a real write and refuses an ig
    */
   assert.ok(published.length >= 1, 'the real subscription delivered nothing');
   for (const event of published) {
-    assert.ok(event.summary.endsWith(' notes.md'), `an ignored tree leaked through: ${event.summary}`);
+    assert.equal(event.detail.path, 'notes.md', `an ignored tree leaked through: ${event.summary}`);
     assert.equal(event.scope.root, dir);
   }
 });

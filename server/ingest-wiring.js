@@ -12,13 +12,14 @@
 'use strict';
 
 const {
-  DEFAULT_DIGEST_BUDGET_CHARS, buildContextDigest, createIngestStore, enabledSourceNames,
-  publishEvent, resolveIngestConfig, snapshotEvents,
+  DEFAULT_DIGEST_BUDGET_CHARS, buildContextDigest, createIngestStore, enabledSourceNames, latestSeq,
+  publishEvent, resolveIngestConfig, ringStats, snapshotEvents,
 } = require('./core/ingest-core');
 const { deriveSessionRoots, isActiveSessionState } = require('./core/ingest-fs-core');
 const { createAgentLogIngest } = require('./ingest-agent-logs');
 const { createFsIngest } = require('./ingest-fs');
 const { createGitIngest } = require('./ingest-git');
+const { createShellHistoryIngest } = require('./ingest-shell-history');
 const { createTerminalIngest } = require('./ingest-terminal');
 
 const BATCH_INTERVAL_MS = 1000;
@@ -32,6 +33,7 @@ function createIngestLane({
   laneMap = null,
   agentLogOptions = null,
   fsOptions = null,
+  shellHistoryOptions = null,
   // The daemon's own resolved config path, so the fs source can ignore the state files glissa writes
   // beside it; rationale at the consuming site in ingest-fs.js.
   configPath = null,
@@ -135,26 +137,90 @@ function createIngestLane({
     return buildContextDigest(store, { scopes, budgetChars, now: now == null ? nowFn() : now });
   }
 
-  const timers = {
-    logger, nowFn, setIntervalFn, clearIntervalFn, setTimeoutFn, clearTimeoutFn,
-  };
-  // Each source is built only when the lane AND its own flag are on, so a disabled source costs no
-  // construction, no listener and no timer.
-  function build(name, create, extra = null) {
-    if (resolved.enabled !== true || resolved.sources[name].enabled !== true) return null;
-    return create({
-      publish, sourceConfig: resolved.sources[name], ...timers, ...(extra || {}),
-    });
-  }
+  const adapters = [];
+  const terminalEnabled = resolved.enabled === true && resolved.sources.terminal.enabled === true;
+  const terminal = terminalEnabled
+    ? createTerminalIngest({
+      publish,
+      sourceConfig: resolved.sources.terminal,
+      logger,
+      nowFn,
+      setTimeoutFn,
+      clearTimeoutFn,
+    })
+    : null;
+  if (terminal) adapters.push(terminal);
 
-  const terminal = build('terminal', createTerminalIngest);
-  // laneMap is the feedback-loop exclusion: without it a navigator dispatch's own transcript rides into
-  // the next navigator prompt. See the mechanism note in ingest-agent-logs.js.
-  const agentLogs = build('agentLogs', createAgentLogIngest, { laneMap, ...(agentLogOptions || {}) });
-  // The git watch set comes from the caller that can see live sessions, never from this lane.
-  const git = build('git', createGitIngest, { reposProvider: repoRoots });
-  const fsSource = build('fs', createFsIngest, { configPath, ...(fsOptions || {}) });
-  const adapters = [terminal, agentLogs, git, fsSource].filter(Boolean);
+  const agentLogsEnabled = resolved.enabled === true && resolved.sources.agentLogs.enabled === true;
+  const agentLogs = agentLogsEnabled
+    ? createAgentLogIngest({
+      publish,
+      sourceConfig: resolved.sources.agentLogs,
+      // The feedback-loop exclusion: without it a navigator dispatch's own transcript rides into the
+      // next navigator prompt. See the mechanism note in ingest-agent-logs.js.
+      laneMap,
+      logger,
+      nowFn,
+      setIntervalFn,
+      clearIntervalFn,
+      setTimeoutFn,
+      clearTimeoutFn,
+      ...(agentLogOptions || {}),
+    })
+    : null;
+  if (agentLogs) adapters.push(agentLogs);
+
+  const gitEnabled = resolved.enabled === true && resolved.sources.git.enabled === true;
+  const git = gitEnabled
+    ? createGitIngest({
+      publish,
+      sourceConfig: resolved.sources.git,
+      reposProvider: repoRoots,
+      logger,
+      nowFn,
+      setIntervalFn,
+      clearIntervalFn,
+      setTimeoutFn,
+      clearTimeoutFn,
+    })
+    : null;
+  if (git) adapters.push(git);
+
+  const fsEnabled = resolved.enabled === true && resolved.sources.fs.enabled === true;
+  const fsSource = fsEnabled
+    ? createFsIngest({
+      publish,
+      sourceConfig: resolved.sources.fs,
+      configPath,
+      logger,
+      nowFn,
+      setTimeoutFn,
+      clearTimeoutFn,
+      ...(fsOptions || {}),
+    })
+    : null;
+  if (fsSource) adapters.push(fsSource);
+
+  /*
+   * The one source reading data created OUTSIDE glissa's own surfaces, so it needs `enabled: true` of
+   * its own even with the lane on and every other source running (docs/plan-ingestion.md, "Config").
+   * The resolver already defaults it off; this construction gate is what makes that cost zero.
+   */
+  const shellHistoryEnabled = resolved.enabled === true && resolved.sources.shellHistory.enabled === true;
+  const shellHistory = shellHistoryEnabled
+    ? createShellHistoryIngest({
+      publish,
+      sourceConfig: resolved.sources.shellHistory,
+      logger,
+      nowFn,
+      setIntervalFn,
+      clearIntervalFn,
+      setTimeoutFn,
+      clearTimeoutFn,
+      ...(shellHistoryOptions || {}),
+    })
+    : null;
+  if (shellHistory) adapters.push(shellHistory);
 
   // Adapters that own their own discovery start themselves; the terminal source has nothing to start,
   // since its taps arrive one session at a time from wireSessionEvents.
@@ -250,16 +316,19 @@ function createIngestLane({
     flushBatch,
     stop,
     sources,
+    ringStats: () => ringStats(store),
     // The lane-level movement signal: the newest seq stamped, 0 before anything has been published.
-    latestSeq: () => store.seq,
+    latestSeq: () => latestSeq(store),
     recentEvents: (limit = snapshotEventLimit) => snapshotEvents(store, { limit }),
     get agentLogs() { return agentLogs; },
-    get agentLogsEnabled() { return agentLogs !== null; },
+    get agentLogsEnabled() { return agentLogsEnabled; },
     get git() { return git; },
-    get gitEnabled() { return git !== null; },
+    get gitEnabled() { return gitEnabled; },
     get fs() { return fsSource; },
-    get fsEnabled() { return fsSource !== null; },
-    get terminalEnabled() { return terminal !== null; },
+    get fsEnabled() { return fsEnabled; },
+    get shellHistory() { return shellHistory; },
+    get shellHistoryEnabled() { return shellHistoryEnabled; },
+    get terminalEnabled() { return terminalEnabled; },
     get tapCount() { return terminal ? terminal.tapCount : 0; },
     get pendingEventCount() { return pendingEvents.length; },
     get isStopped() { return stopped; },

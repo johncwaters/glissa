@@ -16,12 +16,12 @@ const assert = require('node:assert/strict');
 const path = require('node:path');
 
 const {
-  IGNORED_DIR_NAMES, MAX_FILES_PER_BATCH, MAX_TRACKED_FILES, TRUNCATED_SUFFIX,
-  buildIgnorePatterns, createBatch, daemonWriteRules, decideFsEvents, dedupeRoots,
+  IGNORED_DIR_NAMES, MAX_FILES_PER_BATCH, MAX_TRACKED_FILES, MAX_UNTRACKED_KEYS, TRUNCATED_SUFFIX,
+  batchSize, buildIgnorePatterns, createBatch, daemonWriteRules, decideFsEvents, dedupeRoots,
   deriveSessionRoots, isActiveSessionState, isIgnoredChange, isPathInside, mergeChange, normalizeRoots,
   recordChange, relativeWithin,
 } = require('../server/core/ingest-fs-core');
-const { createIngestStore, publishEvent, resolveIngestConfig } = require('../server/core/ingest-core');
+const { createIngestStore, publishEvent, resolveIngestConfig, ringStats } = require('../server/core/ingest-core');
 
 const WIN = process.platform === 'win32';
 const ROOT = WIN ? 'C:\\work\\project' : '/work/project';
@@ -37,7 +37,7 @@ test('twenty writes to one file in one window are one event', () => {
   recordChange(batch, 'src/app.js', 'create');
   for (let write = 0; write < 19; write += 1) recordChange(batch, 'src/app.js', 'update');
 
-  assert.equal(batch.files.size, 1);
+  assert.equal(batchSize(batch), 1);
   const events = decided(batch);
   assert.equal(events.length, 1);
   assert.equal(events[0].source, 'fs');
@@ -73,6 +73,8 @@ test('a window under the file threshold publishes a line per file, and one over 
   const events = decided(big);
   assert.equal(events.length, 1, 'one file past the threshold collapses the whole window');
   assert.equal(events[0].summary, `${MAX_FILES_PER_BATCH + 1} files changed: ${MAX_FILES_PER_BATCH + 1} updated`);
+  assert.equal(events[0].detail.files, MAX_FILES_PER_BATCH + 1);
+  assert.equal(events[0].detail.updated, MAX_FILES_PER_BATCH + 1);
 });
 
 test('an empty window owes nothing, and the batch refuses what it cannot describe', () => {
@@ -90,33 +92,53 @@ test('an empty window owes nothing, and the batch refuses what it cannot describ
  * rings inside their caps AND leave the digest as roughly one line, which is two separate claims: the
  * batch collapses 5000 files into one event, and even if it did not, the ring evicts to its bound.
  */
-test('a 5000-file storm stays inside the tracked-file bound and publishes one floored event', () => {
+test('a 5000-file storm stays inside the tracked-file bound and publishes one event', () => {
   const batch = createBatch();
   for (let file = 0; file < 5000; file += 1) recordChange(batch, `packages/app/gen/file-${file}.ts`, 'create');
 
-  assert.equal(batch.files.size, MAX_TRACKED_FILES, 'the batch holds at its bound rather than growing');
-  assert.equal(batch.floored, true);
+  assert.equal(batch.files.size, MAX_TRACKED_FILES, 'past the bound the batch counts without remembering names');
+  assert.equal(batchSize(batch), 5000, 'the count is still the truth');
 
   const events = decided(batch);
   assert.equal(events.length, 1);
-  // Past the bound the batch can no longer tell a new path from a repeat, so it reports a floor it can
-  // stand behind rather than a total that would be quietly short.
-  assert.equal(events[0].summary, `at least ${MAX_TRACKED_FILES} files changed: ${MAX_TRACKED_FILES} created`);
+  assert.equal(events[0].summary, '5000 files changed: 2000 created');
+  assert.equal(events[0].detail.files, 5000);
+  assert.equal(events[0].detail.atLeast, false);
+  assert.ok(events[0].detail.sample.startsWith('packages/app/gen/file-0.ts'));
 });
 
 /*
- * Under the bound the count has to be of distinct FILES, not of events. @parcel/watcher reports a create
- * AND an update for one written file, so counting events reported a 500-file checkout as 1000: a number
- * the digest states as fact and that is wrong by the factor of how often the watcher saw each path.
+ * The count past the tracked bound has to be of distinct FILES, not of events. @parcel/watcher reports a
+ * create AND an update for one written file, so counting events reported a 3000-file checkout as 6000: a
+ * number the digest states as fact and that is wrong by exactly the factor of how many times the watcher
+ * happened to see each path.
  */
-test('a file written twice inside one window is still one file', () => {
+test('past the tracked bound a file written twice is still one file', () => {
   const batch = createBatch();
-  for (let file = 0; file < 500; file += 1) {
+  for (let file = 0; file < 3000; file += 1) {
     recordChange(batch, `gen/file-${file}.ts`, 'create');
     recordChange(batch, `gen/file-${file}.ts`, 'update');
   }
-  assert.equal(batch.files.size, 500, 'create plus update on one path is one file, not two');
-  assert.equal(decided(batch)[0].summary, '500 files changed: 500 created');
+  assert.equal(batchSize(batch), 3000, 'create plus update on one path is one file, not two');
+  assert.equal(decided(batch)[0].detail.files, 3000);
+});
+
+/*
+ * Past the untracked bound the batch can no longer tell a new path from a repeat, so it stops claiming a
+ * total. Reporting a floor it can stand behind beats reporting a number that is quietly short.
+ */
+test('a storm past the untracked bound reports its total as a floor and says so', () => {
+  const batch = createBatch();
+  const distinct = MAX_TRACKED_FILES + MAX_UNTRACKED_KEYS + 500;
+  for (let file = 0; file < distinct; file += 1) recordChange(batch, `gen/file-${file}.ts`, 'create');
+
+  const ceiling = MAX_TRACKED_FILES + MAX_UNTRACKED_KEYS;
+  assert.equal(batch.floored, true);
+  assert.equal(batchSize(batch), ceiling, 'the batch holds at its bound rather than growing');
+  const [event] = decided(batch);
+  assert.equal(event.summary, `at least ${ceiling} files changed: ${MAX_TRACKED_FILES} created`);
+  assert.equal(event.detail.files, ceiling);
+  assert.equal(event.detail.atLeast, true, 'the number is marked as a floor, never as a count');
 });
 
 /*
@@ -131,13 +153,14 @@ test('a truncated path says it is truncated', () => {
 
   const [event] = decided(batch);
   assert.ok(event.summary.endsWith(TRUNCATED_SUFFIX), `summary must show the truncation: ${event.summary}`);
-  assert.ok(event.summary.length < longPath.length);
-  assert.ok(longPath.startsWith(event.summary.slice('updated '.length, -TRUNCATED_SUFFIX.length)), 'the kept prefix is real');
+  assert.ok(event.detail.path.endsWith(TRUNCATED_SUFFIX));
+  assert.ok(event.detail.path.length < longPath.length);
+  assert.ok(longPath.startsWith(event.detail.path.slice(0, -TRUNCATED_SUFFIX.length)), 'the kept prefix is real');
 
   // A path that fits is untouched, so the marker only ever appears where something was actually cut.
   const short = createBatch();
   recordChange(short, 'src/app.js', 'update');
-  assert.equal(decided(short)[0].summary, 'updated src/app.js');
+  assert.equal(decided(short)[0].detail.path, 'src/app.js');
 });
 
 /*
@@ -151,13 +174,13 @@ test('a path the scrub shrank back inside the bound is published without the tru
   recordChange(batch, `src/token=${'a'.repeat(400)}/app.js`, 'update');
 
   const [event] = decided(batch);
-  assert.equal(event.summary, 'updated src/token=[scrubbed]', event.summary);
+  assert.equal(event.detail.path, 'src/token=[scrubbed]', event.detail.path);
   assert.ok(!event.summary.endsWith(TRUNCATED_SUFFIX), `nothing was cut: ${event.summary}`);
 
   // A path still over the bound after the scrub keeps saying so.
   const stillLong = createBatch();
   recordChange(stillLong, `src/${'b'.repeat(400)}/app.js`, 'update');
-  assert.ok(decided(stillLong)[0].summary.endsWith(TRUNCATED_SUFFIX));
+  assert.ok(decided(stillLong)[0].detail.path.endsWith(TRUNCATED_SUFFIX));
 });
 
 test('a secret-shaped path never reaches the fs ring unscrubbed', () => {
@@ -180,9 +203,9 @@ test('even unbatched, a storm of per-file events cannot push the fs ring past it
       source: 'fs', kind: 'file-change', scope: { root: ROOT }, summary: `updated gen/file-${file}.ts`,
     }, 1000);
   }
-  const ring = store.rings.get('fs');
-  assert.ok(ring.entries.length <= config.sources.fs.maxEntries, `ring held ${ring.entries.length} entries`);
-  assert.ok(ring.totalBytes <= config.sources.fs.maxBytes, `ring held ${ring.totalBytes} bytes`);
+  const [stats] = ringStats(store).filter((entry) => entry.source === 'fs');
+  assert.ok(stats.events <= config.sources.fs.maxEntries, `ring held ${stats.events} entries`);
+  assert.ok(stats.bytes <= config.sources.fs.maxBytes, `ring held ${stats.bytes} bytes`);
 });
 
 // --- Ignore rules ---------------------------------------------------------

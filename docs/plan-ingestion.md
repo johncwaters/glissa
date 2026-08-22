@@ -1,11 +1,11 @@
 # Plan: multi-source ingestion pipeline
 
-Status: M6, M7, M8, M9 shipped; M7.5 half shipped (the poke and the movement gate survive, its separate
-activity quota was deleted with the 2026-08-22 navigator simplification pass, see the milestone); M11
-partially shipped (its scrub half is done; its per-source quota tuning waits on live dispatch
-transcripts, see the milestone). M10, the shell-history source, was shipped and then DELETED (see
-"Removed" below). Continues the navigator plan (docs/plan-navigator.md, M1 to M4 shipped; its M5 intent
-model was shipped and then deleted); milestone numbering continues from there.
+Status: redlined draft (two independent reviews applied); M6, M7, M8, M9 and M10 shipped; M7.5 half
+shipped (the poke and the movement gate survive, its separate activity quota was deleted with the
+2026-08-22 navigator simplification pass, see the milestone); M11 partially shipped (its scrub half is
+done; its per-source quota tuning waits on live dispatch transcripts, see the milestone). Continues the
+navigator plan (docs/plan-navigator.md, M1 to M4 shipped; its M5 intent model was shipped and then
+deleted); milestone numbering continues from there.
 
 ## Goal
 
@@ -23,7 +23,7 @@ Decision: `@parcel/watcher` is the only recursive watcher. If it fails to load o
 
 As shipped in M9, seven points landed differently from that sketch:
 
-- **A window past its file threshold publishes ONE summarized event, not a line per file.** Per-file coalescing alone does not bound a `git checkout` of a large tree or a build that regenerates a package: those are one action, and since M7.5 every published event advances the navigator's movement signal, so thousands of per-file publishes would spend real dispatch budget on one command. The threshold is the fs digest quota (8): a window that produced more per-file events than the digest could ever render is pure ring churn, and a carbon unit saving a file does not touch nine of them at once. Under the threshold every file still gets its own line, which is what keeps an ordinary edit readable. A second bound sits beneath it: a window stops recording at 2000 distinct files and reports its total as a FLOOR (`at least 2000 files changed`), because a number the batch cannot stand behind is worse than an honest floor and a 50000-file checkout must not cost 50000 map entries. Counting DISTINCT FILES rather than events is load-bearing and was a review finding: the watcher reports a create and an update for one written file, so counting events reported a 3000-file checkout as 6000. A path too long to hold in full is truncated with a visible marker, since two files sharing a 200-char prefix merge either way and the failure worth avoiding is a truncated path reading as a real one.
+- **A window past its file threshold publishes ONE summarized event, not a line per file.** Per-file coalescing alone does not bound a `git checkout` of a large tree or a build that regenerates a package: those are one action, and since M7.5 every published event advances the navigator's movement signal, so thousands of per-file publishes would spend real dispatch budget on one command. The threshold is the fs digest quota (8): a window that produced more per-file events than the digest could ever render is pure ring churn, and a carbon unit saving a file does not touch nine of them at once. The burst event carries the counts and a five-name sample. Under the threshold every file still gets its own line, which is what keeps an ordinary edit readable. A second bound sits beneath it: past 2000 distinct files a window keeps counting but stops remembering names, holding a short hash per path instead, so a 50000-file checkout costs one number rather than a map of every path in it. Counting DISTINCT FILES there rather than events is load-bearing and was a review finding: the watcher reports a create and an update for one written file, so counting events reported a 3000-file checkout as 6000. The hash set is itself capped at 10000, past which the batch can no longer tell a new path from a repeat and says so, reporting `at least N files changed` rather than a total it cannot stand behind. A path too long to hold in full is truncated with a visible marker, since two files sharing a 200-char prefix merge either way and the failure worth avoiding is a truncated path reading as a real one.
 - **A bare directory name in `ignore` only matches at the watched root.** Verified against 2.6.0: `ignore: ['node_modules']` lets a nested `pkg/node_modules` through untouched, which is the exact storm the ignore exists to stop. Every ignored name therefore ships in three shapes (`name`, `**/name`, `**/name/**`), and the ignore rules also run a second time on arrival, in the pure core, which is what covers a platform whose glob matching differs and is where the daemon-path rules below live.
 - **The ignore list goes beyond `.git` and `node_modules`.** Generated and vendored trees are the same failure as a dependency tree with a different name, and on Linux each of their subdirectories also costs an inotify watch: `dist`, `build`, `target`, `coverage`, `.next`, `.nuxt`, `.svelte-kit`, `.turbo`, `.cache`, `.parcel-cache`, `__pycache__`, `.venv`, `.pytest_cache`, `.mypy_cache`, `.ruff_cache`, `.gradle`, `.tox`, `.idea`, plus editor scratch (`*.swp`, `*~`, `*.tmp`, `*.lock`) and OS droppings (`.DS_Store`, `Thumbs.db`). `.vscode` is deliberately NOT ignored: an edit there is a real config change, unlike `.idea`, which is continuous IDE state churn.
 - **The daemon's own writes are ignored from the resolved config path, by exact sibling AND by name prefix.** `.glissa` covers the installed layout, but a dev checkout resolves the config file to the repo's OWN `config.json`, and the backend persists `resumeSessionId` there from every hook that carries a Claude session id. Without this, glissa's bookkeeping would publish a file-change event once per turn, and that event would poke the next navigator dispatch: a feedback loop M7.5 made expensive rather than merely noisy. The fs source is handed `configStore.configPath` and ignores that file plus the state files and directories glissa writes beside it (`usage-lanes.json`, `pr-review-state.json`, `pairings.json`, `pairings-seen.json`, `litellm-pricing.json`, `update-check.json`, `recordings/`, `uploads/`). An exact list alone was NOT enough, and that was a review finding: `config-store.js` also writes `<config>.bak` on every content-changing save, `<config>.boot.bak` at boot, `<config>.invalid.bak` on a parse failure, and stages every save through `<config>.tmp.<pid>`, whose name is new each run. None of those is inside the config file, so an exact-match rule let a `wasActive` flip publish `updated config.json.bak` (measured: one flip published three events). The rule is therefore also a name prefix, `<basename>.` anchored to the config file's own directory, which covers all four while leaving a repo file named `configuration.json`, `config.json5` or `fixtures/config.json.bak` publishing normally. Ignoring the config DIRECTORY was rejected: in dev that directory is the whole repo.
@@ -34,6 +34,43 @@ As shipped in M9, seven points landed differently from that sketch:
 ### Tailing: compose the exported usage-scan-core helpers, do not touch usage-scanner
 
 Both reviews flagged the original claim ("reuse `usage-scanner.js scanFile()`") as false: `scanFile` is a private closure inside `createUsageScanner`, coupled to pricing, dedup, and warehouse state. The correct seam is one level down: the pure decision pieces are already exported from `server/core/usage-scan-core.js` (`decideFileRead` for offset/truncation/restart decisions, `splitLines` for carry-aware line splitting). `ingest-tail-core.js` composes those exports with its own per-file state; the usage lane is not refactored and the offset rules are not duplicated. Tails start at end-of-file on first sight: ingestion is about recent activity, and replaying a 200MB history file into the rings on daemon start is exactly the cost this plan exists to avoid.
+
+### Shell history: tail where the shell already writes incrementally, rc snippet where it does not
+
+- PowerShell (PSReadLine) defaults to `SaveIncrementally`: the history file is appended on every accepted command, no config needed. PSReadLine also scrubs lines matching password/token/secret patterns before writing, which is a privacy win we inherit for free.
+- fish writes history incrementally by default with timestamps.
+- bash and zsh write only on shell exit by default; incremental capture requires a per-carbon-unit rc change (`PROMPT_COMMAND='history -a'` / `INC_APPEND_HISTORY`).
+
+Decision: v1 tails history files for PowerShell and fish (works with zero setup) and documents the one-line rc snippet for bash and zsh. History events carry machine scope only: the files record no cwd, exit code, or duration, so commands cannot be correlated to a project, and the digest labels them accordingly (redline finding). An atuin-style preexec hook writing structured JSONL (command, cwd, duration, exit code, hence real correlation) is the recorded future path, not v1: it modifies the carbon unit's shell config, which needs an explicit install step, not a default.
+
+As shipped in M10, eight points landed differently from that sketch:
+
+- **A rewrite RE-BASELINES; it never replays.** PSReadLine rewrites the whole file when it trims to `MaximumHistoryCount` (4096 by default), and the shared tail core reads a size shrink as a truncation to be re-read from zero. Doing that here would publish thousands of commands the operator ran weeks ago, and since M7.5 every one of them would advance the navigator's movement signal. So a reset re-seeds the tail at end of file and publishes nothing at all. The cost is at most the one command that landed in the same rewrite, once per 4096, which is a far better trade than a ring full of history on every trim. A file deleted and recreated at the same path takes the same path for the same reason.
+- **The tail keeps the EMPTY lines a transcript read is right to drop.** PSReadLine writes an embedded newline as a trailing backtick, so a command ENDING in a newline finishes on an empty physical line; `splitLines` drops empty lines, which is correct for JSONL and here glues that command to the next one. `ingest-tail-core.applyRead` therefore takes a `keepEmptyLines` option that is `splitLines` minus its filter and nothing else, so the carry rule stays in one place. Verified against a live `ConsoleHost_history.txt`, two of whose entries end exactly that way.
+- **PSReadLine is a DIRECTORY of files, not one file.** It names its history file after the HOST, so `ConsoleHost_history.txt` sits beside `Visual Studio Code Host_history.txt`, and each is a real shell the operator typed into. The PowerShell location is therefore a suffix match over its directory rather than one path, which also costs nothing extra: the shared tail mechanics already watch the parent directory. Windows PowerShell 5.1 and pwsh 7 on Windows share that directory exactly, which is why locations dedupe on the resolved path before anything is tailed; naming them separately would publish every command twice.
+- **bash and zsh are opt-in BY NAME, through `sources.shellHistory.shells`.** Empty (the default) is the zero-setup pair; an explicit list names exactly which shells to tail, so an operator who added the rc snippet opts bash in and one who lives in fish opts PowerShell out. `HISTFILE` is honored only when exactly one of bash and zsh is configured, since one variable cannot name two shells' files; the snippet below therefore pins it explicitly rather than relying on the shell's own default (zsh has none at all). The snippet is documentation only and is never installed by glissa. An EMPTY list keeps meaning the zero-setup pair, but a non-empty list naming no known shell resolves to NOTHING and warns once with the rejected entries: this is the one source that must be asked for explicitly, so a typo has to cost the operator their configuration rather than silently widening what glissa reads to shells they never named.
+- **Four formats are parsed, not two.** Discovery without parsing is useless, so each shell's real line shape is read and pinned: PSReadLine's trailing-backtick continuation, fish's `- cmd:` / `when:` pairs with `\n` and `\\` escapes undone in one left-to-right pass, bash's `#<epoch>` comment timestamps (nine digits or more, so an ordinary `#5` comment stays a command), and zsh's `: <epoch>:<elapsed>;` extended-history prefix with backslash continuation. A continuation that never terminates is closed at 64 lines or 4000 characters, so a corrupt or half-written file cannot build one unbounded string.
+- **The source publishes its command text RAW, and that continuation bound is the only thing bounding it.** `normalizeEvent` scrubs, then folds to one line, then slices to the ring's 400 characters, and the plan's own reason for that order applies here more sharply than anywhere else: a source that sliced first would cut the closing quote off a quoted secret sitting past the slice point, leaving the scrub's quoted alternative unmatched and its bare-token alternative taking only the first WORD of the value, so the rest of the secret would publish. Measured on `echo <195 chars> --password "hunter two three four five six"`: slicing at the edge stored `--password [scrubbed] two three four five` in the ring, and handing the text on whole stores `--password [scrubbed]`. Folding early is wrong for the same reason in the other direction, since the scrub's value patterns stop at a line break on purpose. The consecutive-duplicate gate therefore compares the folded but UNSLICED text, so two long commands that first differ past a shared prefix stay two commands.
+- **A watcher that cannot be installed costs one warning and nothing else.** The agent-log source disables itself when no transcript directory can be watched, and that is right there because its files are found by walking. A history file is stat-polled every 2s regardless, so a platform refusing the watch costs latency, not ingestion, and disabling would throw working ingestion away to avoid losing a wakeup optimization. A shell whose history directory does not exist at all is silently absent, never an error (the vendor-home rule), and a file created later is picked up by the directory watch or the 30s sweep.
+- **The noise rules drop more than they keep on an idle machine, and that is the point.** Consecutive duplicates collapse per file, because PSReadLine records every Enter press including a repeat and an up-arrow rerun is not new information; bare navigation and screen clearing (`ls`, `l`, `ll`, `la`, `dir`, `cd`, `cd ..`, `cd -`, `cd ~`, `cd /`, `pwd`, `cls`, `clear`, `exit`, `q`, `history`) never publish, matched EXACTLY and lowercased so `ls -R src` is untouched. Both are dispatch-budget rules rather than cosmetics: every published event advances the navigator's movement signal, so a carbon unit clearing the screen would otherwise buy a model dispatch.
+
+#### The bash and zsh rc snippet (documentation only, never installed)
+
+Both shells write their history at shell EXIT by default, so tailing them without this reports a whole session at once, hours late. Add the line for your shell, then name the shell in config; the parsers are pinned against exactly the formats these produce (`tests/ingest-shell-core.test.js`).
+
+```sh
+# ~/.bashrc
+HISTFILE=~/.bash_history; PROMPT_COMMAND="history -a${PROMPT_COMMAND:+; $PROMPT_COMMAND}"
+```
+
+```sh
+# ~/.zshrc  (EXTENDED_HISTORY is what gives glissa the per-command timestamp)
+HISTFILE=~/.zsh_history; setopt INC_APPEND_HISTORY EXTENDED_HISTORY
+```
+
+```json
+"ingest": { "sources": { "shellHistory": { "enabled": true, "shells": ["powershell", "fish", "bash"] } } }
+```
 
 ### Git activity: watchers accelerate, the poll is the correctness floor
 
@@ -52,7 +89,7 @@ As shipped in M8, six points landed differently from that sketch:
 
 ### Storage: bounded in-memory rings, no database
 
-The consumers need recent context, not history queries. Every source gets a ring bounded by both entry count and total bytes (table below); eviction is drop-oldest. No SQLite (a second native dep with no v1 consumer), no warehouse, no spool.
+The consumers need recent context, not history queries. Every source gets a ring bounded by both entry count and total bytes (table below); eviction is drop-oldest. No SQLite (a second native dep with no v1 consumer), no warehouse. An optional JSONL debug spool (off by default) exists solely for diagnosing an adapter; it writes post-scrub events only, and for the terminal and shellHistory sources it requires its own explicit config flag on top of the spool flag.
 
 ### Terminal output: ingestion layer only, honoring the detection prohibition
 
@@ -81,7 +118,7 @@ Known cost, accepted deliberately: the first line to finish after a reposition i
 
 ### Event granularity: summarize at the edge
 
-Adapters push small normalized events, never raw payloads (the one exception: terminal chunks, which are capped and coalesced as above). A 400MB `npm install` fs storm must arrive as coalesced per-file events and leave the digest as one line. Cost is bounded at the adapter boundary, not at the consumer. Concretely, per source: terminal publishes one coalesced tail-of-output event per flush window, carrying only the COMPLETE lines of linear output that window contained (see "TUI repaint filtering"), and nothing at all for a window that was only repaint; agent logs publish one event per completed turn or tool call, never per token; git publishes one signature-deduped status event per settled change; fs publishes per-file coalesced change events, collapsing a whole window into one summarized event once its file count says a burst happened rather than an edit (see "File watching").
+Adapters push small normalized events, never raw payloads (the one exception: terminal chunks, which are capped and coalesced as above). A 400MB `npm install` fs storm must arrive as coalesced per-file events and leave the digest as one line. Cost is bounded at the adapter boundary, not at the consumer. Concretely, per source: terminal publishes one coalesced tail-of-output event per flush window, carrying only the COMPLETE lines of linear output that window contained (see "TUI repaint filtering"), and nothing at all for a window that was only repaint; agent logs publish one event per completed turn or tool call, never per token; git publishes one signature-deduped status event per settled change; fs publishes per-file coalesced change events, collapsing a whole window into one summarized event once its file count says a burst happened rather than an edit (see "File watching"); shell history publishes one event per accepted command; editor publishes save and open/close markers (content already lives in the navigator lane).
 
 ### Activity-driven dispatch (intent refresh)
 
@@ -98,11 +135,12 @@ No feedback loop is possible: navigator dispatch sessions are excluded from inge
 ## Architecture
 
 ```
+ editor (LSP relay)        [exists: navigator lane]
  attachSessionTap      --\
  @parcel/watcher       ---\   adapters (IO shells,        server/core/ingest-core.js
  .git watchers + poll  ----&gt;  one per source,      ---&gt;   normalize + SCRUB -&gt; per-source ring
  usage-scan-core tails ---/   each config-gated)          -&gt; seq-stamped timeline
-                                                                  |
+ history file tails    --/                                        |
                                                     +-------------+--------------+
                                               buildContextDigest()        ingest-snapshot +
                                               (pure, char-budgeted,       batched ingest-activity
@@ -113,9 +151,9 @@ No feedback loop is possible: navigator dispatch sessions are excluded from inge
 
 One lane (`ingest-wiring.js`), navigator-shaped: constructed only when `config.ingest.enabled === true`, `broadcast` injected, `snapshotMessage()` sent from a post-`registerControlHandlers` connection listener, deltas kept out of `REPLAYABLE_EXACT` (the snapshot repairs everything). No new event bus: adapters call the lane's `publish(event)` directly.
 
-Normalized event: `{ source, kind, ts, seq, scope, summary }`, and those six fields are the whole shape: both consumers read exactly them, so an adapter has nothing else to fill in. `scope` is structured, `{ root, sessionId }`: `root` is the canonicalized project root (null where the source cannot name one, which the digest labels machine scope), `sessionId` present where a session is involved. This gives every source one comparable correlation key instead of four incomparable ones (redline finding). `seq`, stamped by the core at publish, is the sole ordering key; `ts` is display-only, because source clocks disagree (git commit time vs tail arrival time vs PTY arrival time). `summary` is one bounded line.
+Normalized event: `{ source, kind, ts, seq, scope, summary, detail }`. `scope` is structured, `{ root, sessionId }`: `root` is the canonicalized project root (null only for shellHistory, which cannot know one), `sessionId` present where a session is involved. This gives every source one comparable correlation key instead of four incomparable ones (redline finding). `seq`, stamped by the core at publish, is the sole ordering key; `ts` is display-only, because source clocks disagree (git commit time vs tail arrival time vs PTY arrival time). `summary` is one bounded line; `detail` is optional, small, structured.
 
-Scrubbing happens in the pure normalizer at publish time, before ring insertion, so a secret never sits in a ring, a snapshot or an activity delta (redline finding; both reviews independently demanded this move). Pattern list follows PSReadLine's own sensitive-word list (password/token/key/secret assignments) plus common bearer/URL-credential shapes. `buildContextDigest` applies the same scrub again as defense in depth.
+Scrubbing happens in the pure normalizer at publish time, before ring insertion, so a secret never sits in a ring, a snapshot, an activity delta, or the debug spool (redline finding; both reviews independently demanded this move). Pattern list follows PSReadLine's (password/token/key/secret assignments) plus common bearer/URL-credential shapes. `buildContextDigest` applies the same scrub again as defense in depth.
 
 `buildContextDigest({ scopes, budgetChars, now })` is pure and synchronous: one snapshot pass over the rings with no await between reads, newest-first by `seq`, per-source quotas so one noisy source cannot starve the rest, hard char budget, stable text shape. It is built exactly once per navigator dispatch, never on publish. It becomes one fenced DATA section in `buildNavigatorPrompt`, framed exactly like buffer text.
 
@@ -138,20 +176,22 @@ Wire amplification is capped (redline finding): `publish` never broadcasts direc
 | agentLogs | `agent-turn`, `agent-tool` | decoded project dir root | 200 / 128KB | tail wakeup + 2s stat backstop; EOF start | `usage-scan-core` `decideFileRead`/`splitLines`, `conversation-history` dir encoding |
 | git | `commit`, `status-change`, `branch-change` | checkout toplevel | 100 / 64KB | 1s debounce; 60s poll; signature dedupe | `child-process-safe`, `createWatchDebounce`, `canonicalizePath` |
 | fs | `file-change` | watched root | 500 / 128KB | C++ coalescing + 500ms batch; one event per file, or one summarized event once a window passes 8 files | `canonicalizePath`, watcher-pool pattern |
+| shellHistory | `command` | machine (root null) | 100 / 32KB | tail wakeup + 2s stat backstop; 30s discovery sweep; EOF start, rewrite re-baselines | shared tail core |
+| editor | `doc-save`, `doc-open`, `doc-close` | file uri root | 100 / 32KB | immediate (debounced upstream) | navigator lane (exists) |
 
 Ring caps and timing values are defaults resolved in the pure config resolver, overridable per source in config; they are the load-bearing bound, not tuning suggestions.
 
-Tail mechanics (agentLogs): watch the parent directory, not the file (rename/rotation safety), read from last offset on wakeup, treat size shrink as truncation, 2s stat-poll backstop for Windows write-event coalescing, first sight starts at EOF.
+Shared tail mechanics (agentLogs and shellHistory): watch the parent directory, not the file (rename/rotation safety), read from last offset on wakeup, treat size shrink as truncation, 2s stat-poll backstop for Windows write-event coalescing, first sight starts at EOF.
 
 ## Module placement
 
 | Module | Kind | Holds |
 |---|---|---|
 | `server/core/ingest-core.js` | pure | event normalization, scrub, rings, seq, digest builder, config resolver |
-| `server/core/ingest-agent-core.js` | pure | one vendor transcript line -> the events it produced |
 | `server/core/ingest-git-core.js` | pure | porcelain v2 + log parsing, watch-set derivation, status signatures |
 | `server/core/ingest-fs-core.js` | pure | ignore set (watcher globs + the arrival-side predicate), root normalization/canonical dedupe/nesting collapse, session-to-root derivation, per-file coalescing, batch decisions |
-| `server/core/ingest-tail-core.js` | pure | tail state composing `usage-scan-core` exports, rotation decisions, line splitting |
+| `server/core/ingest-tail-core.js` | pure | tail state composing `usage-scan-core` exports, rotation decisions, the two line-splitting shapes |
+| `server/core/ingest-shell-core.js` | pure | history-file discovery per shell and platform, the four line formats, the noise rules, the machine-scope event |
 | `server/core/ingest-number-core.js` | pure | the one shared `positiveInt` bound coercion every ingest core and shell resolves options through |
 | `server/core/ingest-terminal-core.js` | pure | accumulator, ANSI strip, coalescing, caps |
 | `server/ingest-wiring.js` | IO shell | lane lifecycle, publish, batched broadcast, snapshot, stop |
@@ -159,6 +199,7 @@ Tail mechanics (agentLogs): watch the parent directory, not the file (rename/rot
 | `server/ingest-git.js` | IO shell | watchers + per-repo promise chain + git spawns + poll |
 | `server/ingest-terminal.js` | IO shell | attachSessionTap, flush timers, detach |
 | `server/ingest-agent-logs.js` | IO shell | tail-driven reader over vendor roots |
+| `server/ingest-shell-history.js` | IO shell | history file tails |
 | `public/navigator-view-core.mjs` / `navigator-panel.js` | frontend | activity feed section in the existing Navigator tab (no new tab in v1) |
 
 ## Config
@@ -172,18 +213,19 @@ Config-file only, never control-WS settable (the navigator rule, same reasoning:
     "terminal": { "enabled": true },
     "agentLogs": { "enabled": true },
     "git": { "enabled": true },
-    "fs": { "enabled": true, "roots": [] }
+    "fs": { "enabled": true, "roots": [] },
+    "shellHistory": { "enabled": false, "shells": [] }
   }
 }
 ```
 
-`fs.roots` empty means "roots of projects with active sessions", the cheap default; explicit roots widen it.
+`shellHistory` defaults off even when ingest is on: it is the one source reading data created outside glissa's own surfaces. `fs.roots` empty means "roots of projects with active sessions", the cheap default; explicit roots widen it. `shellHistory.shells` empty means the two shells that need no setup (`powershell`, `fish`); an explicit list names exactly which of `powershell`, `fish`, `bash` and `zsh` to tail, and the last two are only meaningful after the rc snippet above.
 
 ## Privacy and trust posture
 
-Everything stays on the machine: rings are in-memory, the digest leaves the daemon only inside a navigator dispatch prompt, which already frames untrusted text as DATA and runs under the `--allowedTools=Write` + deny-list posture with a throwaway cwd. Terminal output can contain secrets, so the scrub runs at publish time in the pure normalizer (nothing unscrubbed ever sits in a ring or crosses the control WS), with a second pass in the digest builder as defense in depth. Ephemeral lane sessions (navigator, pr-review, posthog, pack-distill) are never tapped, which both keeps their output out of prompts and prevents the navigator-ingests-itself feedback loop. The ingest lane is refused to remote-trust sockets exactly like the navigator lane.
+Everything stays on the machine: rings are in-memory, the digest leaves the daemon only inside a navigator dispatch prompt, which already frames untrusted text as DATA and runs under the `--allowedTools=Write` + deny-list posture with a throwaway cwd. Terminal output and shell history can contain secrets, so the scrub runs at publish time in the pure normalizer (nothing unscrubbed ever sits in a ring, crosses the control WS, or reaches the spool), with a second pass in the digest builder as defense in depth. Ephemeral lane sessions (navigator, pr-review, posthog, pack-distill) are never tapped, which both keeps their output out of prompts and prevents the navigator-ingests-itself feedback loop. The ingest lane is refused to remote-trust sockets exactly like the navigator lane.
 
-**No source may cut its own text before the scrub has seen it.** This is one rule with one reason, and it has cost four separate fixes (M6 terminal, M10 shell history, M11 agentLogs and git). `normalizeEvent` scrubs, THEN folds, THEN slices to 400. A cut taken ahead of that order strips a quoted value out of its closing quote, which leaves the scrub's quoted alternative unmatched and its bare-token alternative taking only the first WORD of the value, so the REST of the secret publishes as ordinary words: measured, `--password "hunter two three four five six"` cut at the edge stored `--password [scrubbed] two three four five`. Folding early is wrong in the other direction, since every value pattern stops at a line break on purpose and a fold would let one line's pattern eat the innocent line beneath it. An adapter may therefore keep only bounds that protect MEMORY, and the safe shape of such a bound is a LINE-ALIGNED cut, because no value pattern can span a break.
+**No source may cut its own text before the scrub has seen it.** This is one rule with one reason, and it has now cost four separate fixes (M6 terminal, M10 shellHistory, M11 agentLogs and git). `normalizeEvent` scrubs, THEN folds, THEN slices to 400. A cut taken ahead of that order strips a quoted value out of its closing quote, which leaves the scrub's quoted alternative unmatched and its bare-token alternative taking only the first WORD of the value, so the REST of the secret publishes as ordinary words: measured, `--password "hunter two three four five six"` cut at the edge stored `--password [scrubbed] two three four five`. Folding early is wrong in the other direction, since every value pattern stops at a line break on purpose and a fold would let one line's pattern eat the innocent line beneath it. An adapter may therefore keep only bounds that protect MEMORY, and the safe shape of such a bound is a LINE-ALIGNED cut, because no value pattern can span a break.
 
 Known limits, deliberately documented rather than written as patterns, because each of them can only be caught by something that also eats innocent text:
 
@@ -204,13 +246,14 @@ Each milestone is test-gated, committed through the runner, and lands visible va
 - M7.5: activity-driven dispatch. `latestSeq()` on the lane, `contextSeq` through the navigator gate and `recordDispatch`, the `onActivity` poke on the existing batch, `noteActivity()` arming idle markdown buffers, and both halves wired in backend.js only when both lanes exist. Acceptance: with one untouched markdown doc open, fresh ingest activity produces at most one dispatch per cooldown window; digest wording changes alone (relative times aging) never re-dispatch; a config with ingest disabled produces byte-identical prompts and gate decisions to pre-M7.5. The separate activity quota this milestone also shipped was deleted in the 2026-08-22 navigator simplification pass.
 - **M8 git source (shipped).** `server/core/ingest-git-core.js` (porcelain v2 and log parsing, watch-set derivation, the working-tree signature, the one-event decision) and `server/ingest-git.js` (reconcile, watchers, per-repo promise chain, git spawns, poll), wired through `ingest-wiring.js` behind `sources.git.enabled` with `debounceMs`/`pollMs` resolved beside the ring caps. Acceptance met: a commit through the debounce publishes one `commit` event with its branch and subject, and a 25-trigger no-op storm over real gitdir files publishes nothing. Tests: `tests/ingest-git-core.test.js` (pure) and `tests/ingest-git.test.js` (real temp repos for event content, injected git for the cost rules). Six things landed differently from the sketch above, each recorded in "Git activity" below: the watch-set rule, `--no-optional-locks`, one event per settle, `rev-parse` in place of `resolveWorktreeGitDir`, pruned caches instead of a size cap (with the repo cap moved after dedupe), and the boot poke that populates the watch set once the session map exists.
 - **M9 fs source (shipped).** `server/core/ingest-fs-core.js` (the ignore set in both of its shapes, root normalization and the canonical nesting collapse, session-to-root derivation, the per-file coalescing state machine, the batch decision) and `server/ingest-fs.js` (one @parcel/watcher subscription per ref-counted root, the batch window, the two grades of degradation), wired through `ingest-wiring.js` behind `sources.fs.enabled` with `batchMs` resolved beside the ring caps and `roots` as the one non-numeric source option. The `@parcel/watcher` dependency landed here per this plan's own watcher decision record; the Windows prebuild loads with no compile step. Acceptance met: a write outside the editor surfaces one coalesced event (create-plus-update from a single save arrives as one line), and 200 writes inside `node_modules` in a watched root publish nothing at all, verified against a real subscription. Tests: `tests/ingest-fs-core.test.js` (pure, including a 5000-file storm through a real ring), `tests/ingest-fs.test.js` (injected watcher for every timing and lifecycle rule, plus one real @parcel/watcher smoke test with a skip guard) and two cases in `tests/ingest-backend.test.js` for the root edges. Seven things landed differently from the sketch above, each recorded in "File watching" below: the burst rule and its two batch bounds, `**/`-globbed ignores, the ignore list beyond the minimum, the daemon's own write paths (exact siblings plus the config-name prefix), live-session roots driven by the state machine, a terminal stop(), and the per-root subscription cap.
+- **M10 shell history source (shipped).** `server/core/ingest-shell-core.js` (history-file discovery per shell and platform, the four line formats, the noise rules, the machine-scope event) and `server/ingest-shell-history.js` (the discovery sweep, per-file tails on the shared tail core, the 2s stat backstop and both degradations), wired through `ingest-wiring.js` behind `sources.shellHistory.enabled` with `pollMs` resolved beside the ring caps and `shells` as this source's one non-numeric option. `ingest-tail-core.js` gained `keepEmptyLines`, and `server/core/ingest-number-core.js` was extracted here so the six byte-identical copies of `positiveInt` became one. Acceptance met: a command accepted in an external PowerShell lands as a `command` event with no shell config change, carrying `root: null` so the digest labels it machine scope, and a pre-existing history file publishes nothing. Tests: `tests/ingest-shell-core.test.js` (pure), `tests/ingest-shell-history.test.js` (real temp history files for every format, timing and lifecycle rule) and three cases in `tests/ingest-backend.test.js` for the default-off pin and the digest labelling, plus shell-shaped scrub fixtures in `tests/ingest-core.test.js`. Eight things landed differently from the sketch above, each recorded in "Shell history" below: the rewrite re-baseline, kept empty lines, PSReadLine as a directory of host files, `shells` as the bash/zsh opt-in, four parsed formats, a raw command text so the publish-time scrub sees whole values, a watcher failure that degrades rather than disables, and the two noise rules.
 - **M11 digest quality pass (PARTIALLY shipped: the scrub half).** This milestone has two independent halves and only one of them could land now.
-  - **Scrub hardening (shipped).** The publish-time scrub in `server/core/ingest-core.js` grew a second pattern list (issued-credential SHAPES, whose whole match goes because they carry no name to keep) beside the named-value list, and the fixture corpus that pins both halves of every shape lives in `tests/ingest-core.test.js`: each secret row driven through `publishEvent` into a real ring, and beside it the nearest innocent look-alike, which must reach the ring byte for byte. The raw-publish rule was extended to every source that cut its own text: `ingest-agent-core` publishes turn text and tool targets RAW under one memory bound (`MAX_RAW_CHARS`, line-aligned wherever a break exists), `ingest-git-core` no longer slices a commit subject, and `ingest-fs-core` scrubs a pathological path BEFORE truncating it. `ingest-terminal-core`'s M6 scrub-before-any-cut ordering was re-verified and is still pinned at every offset the cut can land on.
-  - **Per-source quota tuning (NOT shipped, waiting on data).** Tuning the digest quotas needs real dispatch transcripts with every source active, and the sources that would dominate a live digest (fs, agentLogs) only started publishing on this machine with M9. The daemon restart that arms them is what begins accumulating that evidence, so no quota default was touched here: changing one against synthetic fixtures would be tuning against the fixtures. Remaining acceptance for this half: a recorded before/after comparison of digest sections from live transcripts stays within budget with every source active, and this doc records the default-on decision per source.
+  - **Scrub hardening (shipped).** The publish-time scrub in `server/core/ingest-core.js` grew a second pattern list (issued-credential SHAPES, whose whole match goes because they carry no name to keep) beside the named-value list, and the fixture corpus that pins both halves of every shape lives in `tests/ingest-core.test.js`: each secret row driven through `publishEvent` into a real ring, and beside it the nearest innocent look-alike, which must reach the ring byte for byte. The raw-publish rule the shell source established in M10 was extended to every remaining source that cut its own text: `ingest-agent-core` publishes turn text and tool targets RAW under one memory bound (`MAX_RAW_CHARS`, line-aligned wherever a break exists), `ingest-git-core` no longer slices a commit subject, and `ingest-fs-core` scrubs a pathological path BEFORE truncating it. `ingest-terminal-core`'s M6 scrub-before-any-cut ordering was re-verified and is still pinned at every offset the cut can land on. The shell source's own drain also stopped slicing ahead of its dup collapse, so `context.previous` describes what actually happened rather than what survived the bound.
+  - **Per-source quota tuning (NOT shipped, waiting on data).** Tuning the digest quotas needs real dispatch transcripts with every source active, and the sources that would dominate a live digest (fs, shellHistory, agentLogs) only started publishing on this machine with M9 and M10. The daemon restart that arms them is what begins accumulating that evidence, so no quota default was touched here: changing one against synthetic fixtures would be tuning against the fixtures. Remaining acceptance for this half: a recorded before/after comparison of digest sections from live transcripts stays within budget with every source active, and this doc records the default-on decision per source.
 
 ## Non-goals
 
-- Capturing output of terminals glissa does not own. Nothing reaches outside glissa's own PTYs and the local agent CLIs' transcripts.
+- Capturing output of terminals glissa does not own (only history files reach outside glissa's PTYs).
 - Semantic parsing of terminal bytes for state detection (the standing prohibition is untouched).
 - A queryable history store, cross-machine sync, or any cloud component.
 - Editor-specific integrations beyond the existing LSP relay (IDE agnosticism is already carried by it).
@@ -223,30 +266,6 @@ Each milestone is test-gated, committed through the runner, and lands visible va
 - Windows event coalescing and missed file-change events: every tail carries a stat-poll backstop; watchers are treated as lossy wakeups with the owner recomputing truth (the repo's standing invariant); the git poll is the correctness floor.
 - Packed refs and nested branch dirs silencing git ref watches: the 60s poll.
 - Prebuild coverage gaps for @parcel/watcher: wasm fallback exists; the fs source degrades to disabled with a logged warning rather than failing the lane.
-- Secret leakage via terminal text into prompts: publish-time scrub plus digest-time second pass, sources individually opt-in, ephemeral sessions never tapped.
+- Secret leakage via terminal/history text into prompts: publish-time scrub plus digest-time second pass, sources individually opt-in, shellHistory default-off, ephemeral sessions never tapped.
 - 8.3 short paths crashing native watchers: every watched path goes through `canonicalizePath` first, no exceptions.
 - Event-loop cost of terminal bursts: pre-strip accumulator cap and drop-not-queue budget, verified by a burst test in M6 acceptance.
-
-## Removed
-
-A delete-first pass took out everything the two consumers never read. What is gone, and why it can stay
-gone:
-
-- **The shellHistory source (M10), entirely**: `ingest-shell-history.js`, `ingest-shell-core.js`, their
-  two test files, the `sources.shellHistory` config keys and the tail core's `keepEmptyLines` branch. It
-  was off by default even with the lane on, it was the only source reading data created outside glissa's
-  own surfaces, and a history file records no cwd, so every one of its events was machine scope and
-  landed in every project's digest unfiltered. Four bespoke history-file parsers, a `HISTFILE` resolver
-  and an rc snippet the operator had to install by hand bought one weakly-correlated digest line.
-  Reviving it means reviving the parsers; the git history holds them.
-- **The `editor` source**: declared in the source table and both label maps, never published by any
-  adapter. The navigator lane it was meant to come from does not call `publish`.
-- **`event.detail`**: every source built one, the core scrubbed it, the wire carried it, and no consumer
-  ever read a field of it. The digest renders `summary`; `normalizeActivityEvent` in the frontend drops
-  everything else. With it went the fs burst sample, the terminal event's duplicate `text` copy and its
-  dropped-byte accounting, and the git and agent per-event metadata.
-- **The fs burst hash set**: a sha1 per path, kept only to count distinct files exactly between 2000 and
-  10000 inside a window that already publishes ONE summarized line. Past `MAX_TRACKED_FILES` a batch now
-  reports `at least 2000 files changed`, which is a floor it can stand behind, and a storm costs no
-  hashing at all.
-- **`ringStats`, `latestSeq(store)` and a dozen test-only exports and constructor knobs.**

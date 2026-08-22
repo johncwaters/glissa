@@ -244,6 +244,7 @@ test('a commit publishes one commit event with its branch and subject', { skip: 
   assert.equal(event.kind, 'commit');
   assert.equal(event.scope.root, dir);
   assert.match(event.summary, /^commit [0-9a-f]{7} on main: add the feature flag$/);
+  assert.equal(event.detail.branch, 'main');
 });
 
 test('touching gitdir files without changing anything publishes nothing', { skip: !GIT }, async (t) => {

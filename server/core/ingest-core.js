@@ -12,7 +12,7 @@
 
 const { positiveInt } = require('./ingest-number-core');
 
-const SOURCE_NAMES = ['terminal', 'agentLogs', 'git', 'fs'];
+const SOURCE_NAMES = ['terminal', 'agentLogs', 'git', 'fs', 'shellHistory', 'editor'];
 
 // The Sources table in docs/plan-ingestion.md. These are the load-bearing bound, not tuning hints.
 const SOURCE_DEFAULTS = Object.freeze({
@@ -29,6 +29,10 @@ const SOURCE_DEFAULTS = Object.freeze({
     maxEntries: 100, maxBytes: 64 * 1024, digestQuota: 6, debounceMs: 1000, pollMs: 60000,
   }),
   fs: Object.freeze({ maxEntries: 500, maxBytes: 128 * 1024, digestQuota: 8, batchMs: 500 }),
+  shellHistory: Object.freeze({
+    maxEntries: 100, maxBytes: 32 * 1024, digestQuota: 6, pollMs: 2000,
+  }),
+  editor: Object.freeze({ maxEntries: 100, maxBytes: 32 * 1024, digestQuota: 6 }),
 });
 
 // A source may only publish the kinds it declared, so a typo becomes a dropped event rather than a
@@ -38,9 +42,13 @@ const KINDS_BY_SOURCE = Object.freeze({
   agentLogs: Object.freeze(['agent-turn', 'agent-tool']),
   git: Object.freeze(['commit', 'status-change', 'branch-change']),
   fs: Object.freeze(['file-change']),
+  shellHistory: Object.freeze(['command']),
+  editor: Object.freeze(['doc-save', 'doc-open', 'doc-close']),
 });
 
 const MAX_SUMMARY_CHARS = 400;
+const MAX_DETAIL_CHARS = 1000;
+const MAX_DETAIL_KEYS = 12;
 const DEFAULT_DIGEST_BUDGET_CHARS = 2000;
 const SCRUB_PLACEHOLDER = '[scrubbed]';
 const DIGEST_HEADER = 'Recent activity on this machine, newest first:';
@@ -48,10 +56,13 @@ const DIGEST_HEADER = 'Recent activity on this machine, newest first:';
 // --- Config ---------------------------------------------------------------
 
 /*
- * The one non-numeric source option: `sources.fs.roots`, a list of directories widening the fs source
- * beyond the projects with active sessions. It needs its own branch because every other option resolves
- * through positiveInt, which would silently turn a configured list back into the empty default.
+ * The two non-numeric source options: `sources.fs.roots`, a list of directories widening the fs source
+ * beyond the projects with active sessions, and `sources.shellHistory.shells`, naming which shells to
+ * tail. They need their own branch because every other option resolves through positiveInt, which would
+ * silently turn a configured list back into the empty default.
  */
+const LIST_KEYS = Object.freeze({ fs: 'roots', shellHistory: 'shells' });
+
 function stringList(raw) {
   if (!Array.isArray(raw)) return [];
   const values = [];
@@ -62,20 +73,25 @@ function stringList(raw) {
   return values;
 }
 
-function resolveSource(name, raw) {
-  const usable = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
-  const resolved = { enabled: usable.enabled === true };
-  for (const [key, value] of Object.entries(SOURCE_DEFAULTS[name])) {
-    resolved[key] = positiveInt(usable[key], value);
-  }
-  if (name === 'fs') resolved.roots = stringList(usable.roots);
-  return resolved;
+function disabledSource(name) {
+  const source = { enabled: false, ...SOURCE_DEFAULTS[name] };
+  if (LIST_KEYS[name]) source[LIST_KEYS[name]] = [];
+  return source;
 }
 
 function disabledConfig() {
   const sources = {};
-  for (const name of SOURCE_NAMES) sources[name] = resolveSource(name, null);
+  for (const name of SOURCE_NAMES) sources[name] = disabledSource(name);
   return { enabled: false, sources };
+}
+
+function resolveSource(name, raw) {
+  const defaults = SOURCE_DEFAULTS[name];
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return disabledSource(name);
+  const resolved = { enabled: raw.enabled === true };
+  for (const [key, value] of Object.entries(defaults)) resolved[key] = positiveInt(raw[key], value);
+  if (LIST_KEYS[name]) resolved[LIST_KEYS[name]] = stringList(raw[LIST_KEYS[name]]);
+  return resolved;
 }
 
 /**
@@ -193,6 +209,24 @@ function scrubText(text) {
   return scrubbed;
 }
 
+// Detail is small and structured by contract, so one shallow pass covers it.
+function scrubDetail(detail) {
+  if (!detail || typeof detail !== 'object' || Array.isArray(detail)) return null;
+  const scrubbed = {};
+  let keys = 0;
+  for (const [key, value] of Object.entries(detail)) {
+    if (keys >= MAX_DETAIL_KEYS) break;
+    keys += 1;
+    if (typeof value === 'string') {
+      scrubbed[key] = scrubText(value).slice(0, MAX_DETAIL_CHARS);
+      continue;
+    }
+    if (typeof value === 'number' && Number.isFinite(value)) scrubbed[key] = value;
+    if (typeof value === 'boolean') scrubbed[key] = value;
+  }
+  return scrubbed;
+}
+
 // --- Events ---------------------------------------------------------------
 
 function nonEmptyString(value) {
@@ -207,8 +241,7 @@ function normalizeScope(raw) {
 /**
  * One raw adapter push, checked and scrubbed. An unknown source, an undeclared kind, or an empty
  * summary is rejected (null) rather than stored half-formed: the rings only ever hold the one shape
- * every consumer reads, which is exactly these six fields. `seq` is stamped by the caller and is the
- * sole ordering key; `ts` is display.
+ * every consumer reads. `seq` is stamped by the caller and is the sole ordering key; `ts` is display.
  */
 function normalizeEvent(raw, { seq, now }) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
@@ -235,6 +268,7 @@ function normalizeEvent(raw, { seq, now }) {
     seq,
     scope: normalizeScope(raw.scope),
     summary,
+    detail: scrubDetail(raw.detail),
   };
 }
 
@@ -290,6 +324,17 @@ function publishEvent(store, raw, now) {
   return pushToRing(ring, event);
 }
 
+/*
+ * The newest seq the store has stamped, 0 before anything is published. This is the machine's movement
+ * signal (docs/plan-ingestion.md, M7.5): seq only ever advances on a NEW event, so a consumer gating on
+ * it cannot be fooled by a digest whose relative times merely aged.
+ */
+function latestSeq(store) {
+  const seq = Number(store?.seq);
+  if (!Number.isFinite(seq)) return 0;
+  return seq;
+}
+
 // Newest first across every ring, which is the order both the feed and the digest read in.
 function snapshotEvents(store, { limit = 200 } = {}) {
   const all = [];
@@ -300,10 +345,23 @@ function snapshotEvents(store, { limit = 200 } = {}) {
   return all.slice(0, Math.max(0, Math.floor(limit)));
 }
 
+function ringStats(store) {
+  const stats = [];
+  for (const [source, ring] of store.rings) {
+    stats.push({ source, events: ring.entries.length, bytes: ring.totalBytes });
+  }
+  return stats;
+}
+
 // --- Digest ---------------------------------------------------------------
 
 const SOURCE_LABELS = Object.freeze({
-  terminal: 'terminal', agentLogs: 'agent', git: 'git', fs: 'files',
+  terminal: 'terminal',
+  agentLogs: 'agent',
+  git: 'git',
+  fs: 'files',
+  shellHistory: 'shell',
+  editor: 'editor',
 });
 
 // Coarse on purpose and derived from `now`, because source clocks disagree and the reader only needs to
@@ -318,8 +376,10 @@ function ageText(ts, now) {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
-// An event whose source could not name a project (a session with no resolvable cwd) says so rather than
-// letting a reader assume this project produced it.
+/*
+ * shellHistory records no cwd, so its events cannot be correlated to a project and the line says so
+ * rather than letting a reader assume this project ran the command (docs/plan-ingestion.md redline).
+ */
 function digestLine(event, now) {
   const label = SOURCE_LABELS[event.source] || event.source;
   const scope = event.scope.root ? '' : ' (machine scope)';
@@ -376,9 +436,11 @@ module.exports = {
   buildContextDigest,
   createIngestStore,
   enabledSourceNames,
+  latestSeq,
   normalizeEvent,
   publishEvent,
   resolveIngestConfig,
+  ringStats,
   scrubText,
   snapshotEvents,
 };

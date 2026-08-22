@@ -122,6 +122,8 @@ test('past the window budget a chunk is DROPPED, never queued, and the event say
   assert.ok(!state.pending.includes('b'));
   const event = flushAccumulator(state, { now: NOW });
   assert.ok(event.summary.endsWith(`[${TRUNCATION_NOTE}]`));
+  assert.equal(event.detail.truncated, true);
+  assert.ok(event.detail.droppedBytes >= 5000);
 });
 
 test('a flush inside every bound carries no truncation note', () => {
@@ -129,6 +131,8 @@ test('a flush inside every bound carries no truncation note', () => {
   appendChunk(state, 'npm test\n42 passing\n');
   const event = flushAccumulator(state, { now: NOW });
   assert.equal(event.summary, 'npm test 42 passing');
+  assert.equal(event.detail.truncated, false);
+  assert.equal(event.detail.droppedBytes, 0);
   assert.ok(!event.summary.includes(TRUNCATION_NOTE));
 });
 
@@ -142,7 +146,7 @@ test('one flush window coalesces into exactly one event carrying the session and
   assert.equal(event.kind, 'output');
   assert.equal(event.ts, NOW);
   assert.deepEqual(event.scope, { root: '/repo', sessionId: 's1' });
-  assert.equal(event.summary, 'first second third');
+  assert.equal(event.detail.text, 'first\nsecond\nthird');
   assert.equal(flushAccumulator(state, { now: NOW }), null, 'a drained window publishes nothing');
 });
 
@@ -185,7 +189,8 @@ test('a multi-MB burst stays inside both caps and yields one bounded event', () 
   assert.ok(state.windowBytesSeen > DEFAULT_WINDOW_BYTES);
   const event = flushAccumulator(state, { now: NOW });
   assert.ok(event.summary.length <= 420, `summary is ${event.summary.length} chars`);
-  assert.ok(event.summary.endsWith(`[${TRUNCATION_NOTE}]`));
+  assert.ok(event.detail.text.length <= 1000, `detail text is ${event.detail.text.length} chars`);
+  assert.equal(event.detail.truncated, true);
   assert.equal(state.pendingBytes, 0);
 });
 
@@ -199,7 +204,7 @@ test('a secret straddling the summary cut is scrubbed, not decapitated into a ba
   appendChunk(state, `${'x'.repeat(200)} api_key=sk-live-DEADBEEFCAFEBABE${'z'.repeat(376)}\n`);
   const event = flushAccumulator(state, { now: NOW });
   assert.ok(!event.summary.includes('sk-live-DEADBEEFCAFEBABE'), `leaked: ${event.summary.slice(0, 60)}`);
-  assert.ok(!event.summary.includes('sk-live-DEADBEEFCAFEBABE'));
+  assert.ok(!event.detail.text.includes('sk-live-DEADBEEFCAFEBABE'));
 });
 
 test('the secret is scrubbed at EVERY offset the cut could land on', () => {
@@ -210,7 +215,7 @@ test('the secret is scrubbed at EVERY offset the cut could land on', () => {
     appendChunk(state, `${'x'.repeat(lead)} api_key=sk-live-DEADBEEFCAFEBABE ${'z'.repeat(30)}\n`);
     const event = flushAccumulator(state, { now: NOW });
     assert.ok(!event.summary.includes('sk-live-DEADBEEFCAFEBABE'), `leaked in summary at lead=${lead}`);
-    assert.ok(!event.summary.includes('sk-live-DEADBEEFCAFEBABE'), `leaked at lead=${lead}`);
+    assert.ok(!event.detail.text.includes('sk-live-DEADBEEFCAFEBABE'), `leaked in detail at lead=${lead}`);
   }
 });
 
@@ -232,7 +237,7 @@ test('the accumulator cap cuts on a line boundary, so a secret line is dropped w
   assert.equal(state.pending.startsWith('sk-live-'), false, 'the cut must not orphan a bare value');
   const event = flushAccumulator(state, { now: NOW });
   assert.ok(!event.summary.includes('sk-live-DEADBEEFCAFEBABE'));
-  assert.ok(!event.summary.includes('sk-live-DEADBEEFCAFEBABE'));
+  assert.ok(!event.detail.text.includes('sk-live-DEADBEEFCAFEBABE'));
 });
 
 /*
@@ -349,7 +354,7 @@ test('a mixed window publishes the clean lines and none of the repaint around th
     cup(2, 3), SPINNER,
   ].join(''));
   const event = flushAccumulator(state, { now: NOW });
-  assert.equal(event.summary, 'npm run build > glissa@1.0.0 build built in 4.2s');
+  assert.equal(event.detail.text, 'npm run build\n> glissa@1.0.0 build\nbuilt in 4.2s');
   assert.equal(event.summary, 'npm run build > glissa@1.0.0 build built in 4.2s');
   // The trailing spinner is unterminated, so it waits in the accumulator and never becomes a line.
   assert.ok(state.pendingBytes > 0);
@@ -360,27 +365,27 @@ test('plain CRLF shell output is untouched by any of this', () => {
   const state = accumulator();
   appendChunk(state, 'ls -la\r\ntotal 48\r\ndrwxr-xr-x  8 johnw  staff  256 Aug 21 10:00 .\r\n');
   const event = flushAccumulator(state, { now: NOW });
-  assert.equal(event.summary, 'ls -la total 48 drwxr-xr-x 8 johnw staff 256 Aug 21 10:00 .');
+  assert.equal(event.detail.text, 'ls -la\ntotal 48\ndrwxr-xr-x  8 johnw  staff  256 Aug 21 10:00 .');
 });
 
 test('colour sequences are not motion, so a coloured build log publishes in full', () => {
   const state = accumulator();
   appendChunk(state, `${ESC}[32mPASS${ESC}[0m tests/app.test.js\n${ESC}[31mFAIL${ESC}[0m tests/b.test.js\n`);
   const event = flushAccumulator(state, { now: NOW });
-  assert.equal(event.summary, 'PASS tests/app.test.js FAIL tests/b.test.js');
+  assert.equal(event.detail.text, 'PASS tests/app.test.js\nFAIL tests/b.test.js');
 });
 
 test('an erase that reaches forward from the cursor does not cost the line it ends', () => {
   const state = accumulator();
   // A bare ESC[K before the newline is how a great deal of ordinary coloured output ends its lines.
   appendChunk(state, `${ESC}[32mPASS${ESC}[0m tests/app.test.js${el(0)}\n`);
-  assert.equal(flushAccumulator(state, { now: NOW }).summary, 'PASS tests/app.test.js');
+  assert.equal(flushAccumulator(state, { now: NOW }).detail.text, 'PASS tests/app.test.js');
 });
 
 test('a progress bar rewriting its line in place publishes the line it settled on', () => {
   const state = accumulator();
   appendChunk(state, `\r${el(2)}downloading 10%\r${el(2)}downloading 60%\r${el(2)}downloading 100%\n`);
-  assert.equal(flushAccumulator(state, { now: NOW }).summary, 'downloading 100%');
+  assert.equal(flushAccumulator(state, { now: NOW }).detail.text, 'downloading 100%');
 });
 
 test('an alternate screen switch drops whatever was being collected, because that screen is gone', () => {
@@ -394,16 +399,16 @@ test('an alternate screen switch drops whatever was being collected, because tha
 test('a window that settles on the text already published does not publish it again', () => {
   const state = accumulator();
   appendChunk(state, 'watching for changes\n');
-  assert.equal(flushAccumulator(state, { now: NOW }).summary, 'watching for changes');
+  assert.equal(flushAccumulator(state, { now: NOW }).detail.text, 'watching for changes');
 
   appendChunk(state, 'watching for changes\n');
   assert.equal(flushAccumulator(state, { now: NOW }), null, 'the same screen is not new output');
 
   appendChunk(state, 'rebuilding\n');
-  assert.equal(flushAccumulator(state, { now: NOW }).summary, 'rebuilding');
+  assert.equal(flushAccumulator(state, { now: NOW }).detail.text, 'rebuilding');
   // The gate follows the NEWEST event, so earlier text can legitimately be reported again later.
   appendChunk(state, 'watching for changes\n');
-  assert.equal(flushAccumulator(state, { now: NOW }).summary, 'watching for changes');
+  assert.equal(flushAccumulator(state, { now: NOW }).detail.text, 'watching for changes');
 });
 
 test('the duplicate gate is per accumulator, so one session cannot mute another', () => {
@@ -423,13 +428,13 @@ test('the duplicate gate is per accumulator, so one session cannot mute another'
 test('a rebaseline clears the duplicate gate, so the restarted process publishes its first line', () => {
   const state = accumulator();
   appendChunk(state, 'watching for changes\n');
-  assert.equal(flushAccumulator(state, { now: NOW }).summary, 'watching for changes');
+  assert.equal(flushAccumulator(state, { now: NOW }).detail.text, 'watching for changes');
 
   rebaseline(state);
   appendChunk(state, 'watching for changes\n');
   const event = flushAccumulator(state, { now: NOW });
   assert.ok(event, 'the new stream must not be gated on the dead one');
-  assert.equal(event.summary, 'watching for changes');
+  assert.equal(event.detail.text, 'watching for changes');
 });
 
 // --- The segmenter on its own ----------------------------------------------
@@ -509,7 +514,7 @@ test('a paragraph break in a build log survives to the published text', () => {
   const state = accumulator();
   appendChunk(state, 'FAIL tests/app.test.js\n\n  expected 1 to equal 2\n');
   const event = flushAccumulator(state, { now: NOW });
-  assert.equal(event.summary, 'FAIL tests/app.test.js expected 1 to equal 2');
+  assert.equal(event.detail.text, 'FAIL tests/app.test.js\n\n  expected 1 to equal 2');
 });
 
 test('a window of nothing but blank lines still publishes nothing', () => {
@@ -531,14 +536,14 @@ test('an OSC payload holding a literal newline reads the same however the flush 
 
   const whole = accumulator();
   appendChunk(whole, raw);
-  const expected = flushAccumulator(whole, { now: NOW }).summary;
-  assert.equal(expected, 'line two line threeafter the osc');
+  const expected = flushAccumulator(whole, { now: NOW }).detail.text;
+  assert.equal(expected, 'line two\nline threeafter the osc');
 
   for (let split = 1; split < raw.length; split += 1) {
     const state = accumulator();
     const published = flushAll(state, [raw.slice(0, split), raw.slice(split)])
-      .map((event) => event.summary)
-      .join(' ');
+      .map((event) => event.detail.text)
+      .join('\n');
     assert.equal(published, expected, `split at ${split} changed the output`);
   }
 });

@@ -413,4 +413,8 @@ function createFsIngest({
   };
 }
 
-module.exports = { createFsIngest };
+module.exports = {
+  CONFIG_HOLDER,
+  DEFAULT_MAX_ROOTS,
+  createFsIngest,
+};

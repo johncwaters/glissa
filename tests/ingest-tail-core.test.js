@@ -13,8 +13,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
-  LISTING_SETTLE_MS, MAX_CATCH_UP_BYTES, applyRead, canTrustCachedListing, createTailState, isActiveMtime,
-  pickStaleByMtime, planRead,
+  LISTING_SETTLE_MS, MAX_CATCH_UP_BYTES, applyRead, canTrustCachedListing, createTailState, fileIdentity,
+  isActiveMtime, pickStaleByMtime, planRead,
 } = require('../server/core/ingest-tail-core');
 const {
   MAX_RAW_CHARS, isDispatchWorkdir, mapAgentLine, parseTimestamp, toolTarget,
@@ -67,6 +67,37 @@ test('a line split across two reads arrives whole exactly once', () => {
   assert.equal(state.carry, '');
 });
 
+/*
+ * The shellHistory source asks for the empty lines a transcript read is right to drop: PSReadLine
+ * writes an embedded newline as a trailing backtick, so a command ending in a newline finishes on an
+ * empty physical line, and losing it glues that command to the next one (docs/plan-ingestion.md, M10).
+ */
+test('keepEmptyLines preserves the interior empty lines the transcript read drops', () => {
+  const stat = fakeStat({ size: 20, mtimeMs: 2000 });
+  const dropped = createTailState(fakeStat({ size: 0 }));
+  assert.deepEqual(applyRead(dropped, { text: 'a`\n\nb\n', end: 20, stat }), ['a`', 'b']);
+
+  const kept = createTailState(fakeStat({ size: 0 }));
+  assert.deepEqual(
+    applyRead(kept, { text: 'a`\n\nb\n', end: 20, stat, keepEmptyLines: true }),
+    ['a`', '', 'b'],
+  );
+  assert.equal(kept.carry, '', 'a text ending in a break leaves no carry either way');
+});
+
+test('keepEmptyLines carries an unterminated tail exactly like the transcript read does', () => {
+  const state = createTailState(fakeStat({ size: 0 }));
+  const first = applyRead(state, {
+    text: 'one\n\ntw', end: 7, stat: fakeStat({ size: 7, mtimeMs: 2000 }), keepEmptyLines: true,
+  });
+  assert.deepEqual(first, ['one', '']);
+  assert.equal(state.carry, 'tw');
+  const second = applyRead(state, {
+    text: 'o\n', end: 9, stat: fakeStat({ size: 9, mtimeMs: 3000 }), keepEmptyLines: true,
+  });
+  assert.deepEqual(second, ['two']);
+});
+
 test('CRLF line endings split the same as bare newlines', () => {
   const state = createTailState(fakeStat({ size: 0 }));
   const lines = applyRead(state, {
@@ -95,6 +126,7 @@ test('a file recreated at the same path is a new file, not a continuation of the
   state.vendorState = { pendingText: 'from the file that is gone' };
   // Same size and mtime as the old file, so only the identity says this is a different file.
   const recreated = fakeStat({ size: 500, ino: 9, birthtimeMs: 900 });
+  assert.notEqual(fileIdentity(recreated), state.identity);
 
   const plan = planRead(state, recreated);
   assert.equal(plan.action, 'read');
@@ -103,7 +135,7 @@ test('a file recreated at the same path is a new file, not a continuation of the
 
   applyRead(state, { text: '{"new":1}\n', end: 500, stat: recreated, reset: true });
   assert.equal(state.vendorState, null, 'vendor state from the previous file must not carry over');
-  assert.equal(state.identity, createTailState(recreated).identity, 'the state now describes the new file');
+  assert.equal(state.identity, fileIdentity(recreated));
 });
 
 test('a read never spans more than the catch-up bound, and drops the line it cut into', () => {
@@ -200,6 +232,7 @@ test('each tool use in a message becomes its own agent-tool naming a bounded tar
   assert.deepEqual(mapped.events.map((event) => event.kind), ['agent-turn', 'agent-tool', 'agent-tool']);
   assert.equal(mapped.events[1].summary, 'claude: Read C:\\repo\\server\\backend.js');
   assert.equal(mapped.events[2].summary, 'claude: Bash npm test');
+  assert.deepEqual(mapped.events[1].detail, { vendor: 'claude', tool: 'Read' });
 });
 
 test('thinking blocks are not the turn, so a message with only thinking publishes nothing', () => {

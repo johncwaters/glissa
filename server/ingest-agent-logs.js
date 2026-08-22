@@ -40,9 +40,6 @@ const DEFAULT_DISCOVER_MS = 30000;
 const DEFAULT_ACTIVE_WITHIN_MS = 10 * 60 * 1000;
 const WATCH_POLL_DEBOUNCE_MS = 100;
 const WATCH_SWEEP_DEBOUNCE_MS = 500;
-// Bounds on one sweep: how many directories it may stat, and how many of them keep a watcher.
-const MAX_SCAN_DIRS = 2000;
-const MAX_WATCHED_DIRS = 48;
 // A Codex rollout names its cwd only in the session_meta and turn_context lines at its head, and the
 // first of those carries the whole system prompt, so the bounded head read has to clear that.
 const CODEX_HEAD_BYTES = 128 * 1024;
@@ -74,6 +71,7 @@ function createAgentLogIngest({
   clearIntervalFn = clearInterval,
   setTimeoutFn = setTimeout,
   clearTimeoutFn = clearTimeout,
+  pollIntervalMs = DEFAULT_POLL_MS,
   discoverIntervalMs = DEFAULT_DISCOVER_MS,
   activeWithinMs = DEFAULT_ACTIVE_WITHIN_MS,
   maxActiveFiles = 32,
@@ -81,13 +79,15 @@ function createAgentLogIngest({
   // Generous on purpose: evicting a listing costs a re-stat of every file in it, so this is a guard
   // against pathological growth rather than a working set. A real projects root sits well inside it.
   maxCachedDirs = 4096,
+  maxWatchedDirs = 48,
+  maxScanDirs = 2000,
   maxStatsPerSweep = 400,
   maxLinesPerDrain = 200,
   maxCatchUpBytes = MAX_CATCH_UP_BYTES,
   vendors = null,
 } = {}) {
   if (typeof publish !== 'function') throw new Error('createAgentLogIngest requires publish');
-  const pollMs = positiveInt(sourceConfig.pollMs, DEFAULT_POLL_MS);
+  const pollMs = positiveInt(sourceConfig.pollMs, positiveInt(pollIntervalMs, DEFAULT_POLL_MS));
   const wanted = vendors && typeof vendors === 'object' ? vendors : {};
 
   const tails = new Map();
@@ -436,7 +436,7 @@ function createAgentLogIngest({
   function reconcileWatchers(roots, found) {
     if (!alive()) return;
     const keep = new Set(roots.map((root) => root.dir));
-    for (const entry of found.slice(0, MAX_WATCHED_DIRS)) keep.add(entry.dir);
+    for (const entry of found.slice(0, Math.max(0, maxWatchedDirs))) keep.add(entry.dir);
     for (const [dir, watcher] of [...watchers]) {
       if (keep.has(dir)) continue;
       closeWatcher(watcher);
@@ -492,7 +492,7 @@ function createAgentLogIngest({
     const roots = await resolveRoots();
     if (!alive()) return;
     const found = [];
-    let budget = MAX_SCAN_DIRS;
+    let budget = positiveInt(maxScanDirs, 2000);
     for (const root of roots) {
       budget = await walk(root, root.dir, 0, found, budget);
       if (!alive()) return;
@@ -561,12 +561,13 @@ function createAgentLogIngest({
       for (const event of mapped.events) {
         /*
          * agentLogs never publishes machine scope. A null root reads as "belongs to no project" in the
-         * digest, and a rootless agent event would be labelled wrong AND admitted into every project's
-         * filtered digest.
+         * digest, which is the shellHistory contract, and a rootless agent event would be labelled wrong
+         * AND admitted into every project's filtered digest.
          */
         if (!event.scope.root) continue;
         if (droppedLines > 0) {
           event.summary = `${event.summary} [${droppedLines} earlier lines dropped]`;
+          event.detail = { ...event.detail, droppedLines };
           droppedLines = 0;
         }
         publish(event);
@@ -745,4 +746,10 @@ function createAgentLogIngest({
   };
 }
 
-module.exports = { createAgentLogIngest };
+module.exports = {
+  CODEX_HEAD_BYTES,
+  DEFAULT_ACTIVE_WITHIN_MS,
+  DEFAULT_DISCOVER_MS,
+  DEFAULT_POLL_MS,
+  createAgentLogIngest,
+};

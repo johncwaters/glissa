@@ -4,8 +4,8 @@
  * call, never one per token or per line of streaming, which is what keeps an agent session's chatter
  * from becoming the whole ring.
  *
- * It sits beside ingest-tail-core rather than inside it because that core owns where the next read
- * starts and nothing about what a line says.
+ * It sits beside ingest-tail-core rather than inside it because that core is the shared tail machinery
+ * the plan also hands to the shellHistory source, and vendor transcript shapes are not shared.
  *
  * Every mapper is a function of its line plus a context, returning the events plus the context values
  * the line revised, so the IO shell owns all the mutable state and this file owns none.
@@ -14,6 +14,7 @@
 'use strict';
 
 const SOURCE = 'agentLogs';
+const VENDORS = Object.freeze(['claude', 'codex', 'grok']);
 /*
  * A MEMORY bound and nothing else (docs/plan-ingestion.md, M11). Summarizing is the ring's job:
  * `normalizeEvent` scrubs, THEN folds, THEN slices to 400, and a cut taken here would run ahead of the
@@ -121,7 +122,12 @@ function turnEvent({ ts, root, sessionId, vendor, text }) {
   const summary = boundRaw(text).trim();
   if (!summary) return null;
   return {
-    source: SOURCE, kind: 'agent-turn', ts, scope: { root, sessionId }, summary: `${vendor}: ${summary}`,
+    source: SOURCE,
+    kind: 'agent-turn',
+    ts,
+    scope: { root, sessionId },
+    summary: `${vendor}: ${summary}`,
+    detail: { vendor },
   };
 }
 
@@ -129,7 +135,12 @@ function toolEvent({ ts, root, sessionId, vendor, name, target }) {
   const tool = boundRaw(str(name) || 'tool');
   const suffix = target ? ` ${target}` : '';
   return {
-    source: SOURCE, kind: 'agent-tool', ts, scope: { root, sessionId }, summary: `${vendor}: ${tool}${suffix}`,
+    source: SOURCE,
+    kind: 'agent-tool',
+    ts,
+    scope: { root, sessionId },
+    summary: `${vendor}: ${tool}${suffix}`,
+    detail: { vendor, tool },
   };
 }
 
@@ -288,6 +299,7 @@ function mapAgentLine({ vendor, rawLine, ctx = {}, vendorState = null } = {}) {
 
 module.exports = {
   MAX_RAW_CHARS,
+  VENDORS,
   isDispatchWorkdir,
   mapAgentLine,
   parseTimestamp,

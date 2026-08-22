@@ -51,6 +51,7 @@ test('source labels are the short names the rows show, and an unknown source kee
   const { activitySourceLabel } = await importCore();
   assert.equal(activitySourceLabel('terminal'), 'terminal');
   assert.equal(activitySourceLabel('agentLogs'), 'agent');
+  assert.equal(activitySourceLabel('shellHistory'), 'shell');
   assert.equal(activitySourceLabel('fs'), 'files');
   assert.equal(activitySourceLabel('somethingNew'), 'somethingNew');
   assert.equal(activitySourceLabel(undefined), 'source');

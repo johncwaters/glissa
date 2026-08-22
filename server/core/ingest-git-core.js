@@ -267,22 +267,60 @@ function subjectSuffix(commit) {
   return `: ${commit.subject}`;
 }
 
-// ts is ARRIVAL time, never the commit's own: a rebase replays week-old author dates, and the digest
-// renders ts as an age, so trusting the record would print a stale age for something that just happened.
-function gitEvent(kind, root, now, summary) {
+function commitEvent({ status, commit, root, now }) {
+  const sha = shortSha(commit?.sha || status.oid);
   return {
-    source: SOURCE, kind, ts: now, scope: { root, sessionId: null }, summary,
+    source: SOURCE,
+    kind: 'commit',
+    // ARRIVAL time, not the commit's own: a rebase replays week-old author dates, and the digest renders
+    // ts as an age, so trusting the record would print a stale age for something that just happened.
+    ts: now,
+    scope: { root, sessionId: null },
+    summary: `commit ${sha} on ${branchLabel(status)}${subjectSuffix(commit)}`,
+    detail: {
+      sha: commit?.sha || status.oid,
+      branch: status.branch || null,
+      author: commit?.author || null,
+      committedAt: commit?.committedAt || null,
+    },
   };
 }
 
-function workingTreeSummary(status) {
+function branchChangeEvent({ status, commit, root, now }) {
+  const sha = shortSha(commit?.sha || status.oid);
+  const at = sha ? ` at ${sha}` : '';
+  return {
+    source: SOURCE,
+    kind: 'branch-change',
+    ts: now,
+    scope: { root, sessionId: null },
+    summary: `switched to ${branchLabel(status)}${at}${subjectSuffix(commit)}`,
+    detail: { branch: status.branch || null, detached: status.detached, oid: status.oid },
+  };
+}
+
+function statusChangeEvent({ status, root, now }) {
   const { counts } = status;
   const parts = [];
   if (counts.staged) parts.push(`${counts.staged} staged`);
   if (counts.unstaged) parts.push(`${counts.unstaged} modified`);
   if (counts.untracked) parts.push(`${counts.untracked} untracked`);
   if (counts.conflicted) parts.push(`${counts.conflicted} conflicted`);
-  return `working tree on ${branchLabel(status)}: ${parts.length > 0 ? parts.join(', ') : 'clean'}`;
+  return {
+    source: SOURCE,
+    kind: 'status-change',
+    ts: now,
+    scope: { root, sessionId: null },
+    summary: `working tree on ${branchLabel(status)}: ${parts.length > 0 ? parts.join(', ') : 'clean'}`,
+    detail: { ...counts, branch: status.branch || null },
+  };
+}
+
+function pickEvent({ previous, status, commit, root, now }) {
+  if (previous.branch !== status.branch) return branchChangeEvent({ status, commit, root, now });
+  if (status.oid && previous.oid !== status.oid) return commitEvent({ status, commit, root, now });
+  if (previous.signature !== status.signature) return statusChangeEvent({ status, root, now });
+  return null;
 }
 
 /**
@@ -304,20 +342,8 @@ function decideGitEvents({ previous, status, commit = null, root = null, now = 0
     signature: status.signature,
   };
   if (!previous || previous.initialized !== true) return { events: [], next };
-  const sha = shortSha(commit?.sha || status.oid);
-  if (previous.branch !== status.branch) {
-    const at = sha ? ` at ${sha}` : '';
-    const summary = `switched to ${branchLabel(status)}${at}${subjectSuffix(commit)}`;
-    return { events: [gitEvent('branch-change', root, now, summary)], next };
-  }
-  if (status.oid && previous.oid !== status.oid) {
-    const summary = `commit ${sha} on ${branchLabel(status)}${subjectSuffix(commit)}`;
-    return { events: [gitEvent('commit', root, now, summary)], next };
-  }
-  if (previous.signature !== status.signature) {
-    return { events: [gitEvent('status-change', root, now, workingTreeSummary(status))], next };
-  }
-  return { events: [], next };
+  const event = pickEvent({ previous, status, commit, root, now });
+  return { events: event ? [event] : [], next };
 }
 
 module.exports = {
