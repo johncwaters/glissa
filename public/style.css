@@ -310,19 +310,6 @@ body {
   flex-direction: column;
 }
 
-/* ── Sessions grid ────────────────────────────────────────── */
-.sessions {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 640px), 1fr));
-  grid-auto-rows: minmax(0, 1fr);
-  gap: 16px;
-  padding: 12px clamp(12px, 2vw, 32px) 0;
-  max-width: var(--content-max);
-  margin: 0;
-  flex: 1;
-  min-height: 0;
-}
-
 /* ── Session card ─────────────────────────────────────────── */
 .session-card {
   background: var(--bg-card);
@@ -4330,20 +4317,6 @@ a.pr-title:hover {
 }
 
 /* ── Responsive ──────────────────────────────────────────── */
-
-/* Narrow desktop / small laptop - tighter gaps, single-col split fallback */
-@media (max-width: 960px) {
-  .sessions {
-    gap: 12px;
-  }
-}
-
-/* Very narrow window - compact grid gaps */
-@media (max-width: 640px) {
-  .sessions {
-    gap: 8px;
-  }
-}
 
 /* Narrow viewport, ANY pointer: content that must wrap rather than push a panel past the edge. These
    are corrections to the desktop layout at a small window, not a layout of their own; the phone gets

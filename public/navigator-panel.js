@@ -8,7 +8,7 @@
 // Desktop only in v1: the phone layout hides the tab strip entirely, so no phone screen borrows this panel.
 // The panel is DOM only; the grouping, ordering and wording live in navigator-view-core.mjs.
 
-import { el } from './dom-helpers.js';
+import { el, isPanelHidden } from './dom-helpers.js';
 import {
   INGEST_EMPTY_TEXT,
   NAVIGATOR_EMPTY_TEXT,
@@ -48,10 +48,6 @@ let _activityUI = null;
 // Findings that landed while the operator was looking at another tab. Cleared when this one is shown,
 // which is the whole point of the dot: it says "something arrived since you last looked".
 let _unseen = false;
-
-function isHidden() {
-  return !_root || !!_root.closest('[hidden]');
-}
 
 function buildSection(section) {
   const wrap = el('section', 'navigator-doc');
@@ -106,7 +102,7 @@ function buildFindingRow(finding) {
 // what the dot is for. The lane sweeps on every pause boundary, so this is not a rare path.
 function render({ force = false } = {}) {
   if (!_feed) return;
-  if (!force && isHidden()) return;
+  if (!force && isPanelHidden(_root)) return;
   _feed.textContent = '';
   const sections = navigatorSections(_findingsByUri, _commentsByUri);
   // The bare hint, with no section chrome to make an idle lane look like a broken one (Radar's precedent).
@@ -151,7 +147,7 @@ function buildActivityRow(event, now) {
 
 function renderActivity({ force = false } = {}) {
   if (!_activityUI) return;
-  if (!force && isHidden()) return;
+  if (!force && isPanelHidden(_root)) return;
   const { count, list, overflow } = _activityUI;
   count.textContent = activityCountText(_activityEvents.length);
   list.textContent = '';
@@ -172,7 +168,7 @@ function refreshActivity() {
 
 function noteArrival(arrived) {
   if (!arrived) return;
-  if (!isHidden()) return;
+  if (!isPanelHidden(_root)) return;
   _unseen = true;
 }
 

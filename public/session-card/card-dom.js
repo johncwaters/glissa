@@ -1,17 +1,16 @@
 // Session-card DOM construction and per-card chrome: the card builder, the
-// state badge, the inline rename flow, the inline confirm dialog, and the debug
-// overlay. These build or mutate a single card's DOM; cross-card lifecycle
-// (create/remove/applyState) lives in lifecycle.js.
+// state badge, the inline rename flow, and the debug overlay. These build or
+// mutate a single card's DOM; cross-card lifecycle (create/remove/applyState)
+// lives in lifecycle.js.
 //
-// Must NOT import dialogs.js. dialogs.js imports naming helpers from this
-// package, so the showConfirmDialog below is an inline confirm that keeps the
-// card-dom.js <-> dialogs.js edge from becoming a cycle.
+// Must NOT import dialogs.js: dialogs.js imports naming helpers from this
+// package. The confirm prompt every card action needs therefore lives in
+// session-card/modal.js, which both sides can reach without a cycle.
 
 import { STATES } from '/shared/states.mjs';
 import { sendControlMsg } from '../control-ws.js';
 import { el, escapeHtml } from '../dom-helpers.js';
 import { sessionUIs } from './card-registry.js';
-import { createModalOverlay, trapFocus } from './modal.js';
 import { showErrorToast } from './toast.js';
 
 // Debug overlay visibility - toggled by applyTerminalSettings (lifecycle) via
@@ -21,49 +20,6 @@ let _debugMode = false;
 export function setDebugMode(on) {
   _debugMode = !!on;
   updateDebugVisibility();
-}
-
-// ── Helpers (private) ────────────────────────────────────────
-
-// Inline confirm dialog - avoids circular dep with dialogs.js (card-dom.js <-> dialogs.js).
-export function showConfirmDialog({ title, message, confirmLabel = 'Confirm', onConfirm }) {
-  const { dialog, close } = createModalOverlay();
-
-  const titleId = `sc-confirm-${Math.random().toString(36).slice(2)}`;
-
-  const titleEl = document.createElement('h3');
-  titleEl.id = titleId;
-  titleEl.className = 'dialog-title';
-  titleEl.textContent = title;
-
-  const msgEl = document.createElement('p');
-  msgEl.className = 'dialog-message';
-  msgEl.textContent = message;
-
-  const actions = document.createElement('div');
-  actions.className = 'dialog-actions';
-
-  const btnCancel = document.createElement('button');
-  btnCancel.className = 'btn-dialog btn-dialog-cancel';
-  btnCancel.textContent = 'Cancel';
-
-  const btnConfirm = document.createElement('button');
-  btnConfirm.className = 'btn-dialog btn-dialog-confirm';
-  btnConfirm.textContent = confirmLabel;
-
-  actions.append(btnCancel, btnConfirm);
-  dialog.append(titleEl, msgEl, actions);
-
-  dialog.setAttribute('role', 'dialog');
-  dialog.setAttribute('aria-modal', 'true');
-  dialog.setAttribute('aria-labelledby', titleId);
-
-  trapFocus(dialog);
-
-  btnCancel.addEventListener('click', close);
-  btnConfirm.addEventListener('click', () => { close(); onConfirm?.(); });
-
-  requestAnimationFrame(() => btnCancel.focus());
 }
 
 // ── Card DOM builder ─────────────────────────────────────────

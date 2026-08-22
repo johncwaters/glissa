@@ -13,8 +13,9 @@ import { getSoundId, isSoundEnabled } from '../ui-prefs.js';
 import { sessionChipText, sessionChipTitle } from '../usage-view-core.mjs';
 import { setRunningActivity } from './activity.js';
 import { computeAggregate } from './aggregate-core.mjs';
-import { buildCardDOM, closeDebugOverlay, isRenameInProgress, openDebugOverlay, setDebugMode, showConfirmDialog, startInlineRename } from './card-dom.js';
+import { buildCardDOM, closeDebugOverlay, isRenameInProgress, openDebugOverlay, setDebugMode, startInlineRename } from './card-dom.js';
 import { aggregateEl, container, sessionUIs } from './card-registry.js';
+import { openConfirmDialog } from './modal.js';
 import { openResumeDialog } from './resume-dialog.js';
 // Load-bearing import: evaluating session-tick.js installs the shared 1s tick (elapsed clock +
 // working-heartbeat poll) at module load.
@@ -115,7 +116,7 @@ function wireCardEvents(ui, sessionId) {
     // removing the session throws it away, so give the operator a chance to merge/review first.
     const merge = ui.card.dataset.merge;
     const unmerged = merge === 'pending-review' || merge === 'parked';
-    showConfirmDialog({
+    openConfirmDialog({
       title: 'Remove Session',
       message: unmerged
         ? `"${name}" has unmerged worktree changes that will be permanently discarded if you remove it. Merge or review them first to keep them. Remove anyway?`

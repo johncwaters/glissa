@@ -8,6 +8,39 @@ export function el(tag, className, text) {
   return e;
 }
 
+// ── Panel chrome ─────────────────────────────────────────────
+// The four tab panels (Radar, PRs, Usage, Navigator) share a section head and a summary stat chip that
+// differ only in their class prefix, and each used to carry its own copy. `prefix` names the panel so
+// the existing per-panel CSS is unchanged.
+
+export function buildPanelSection(prefix, title, hint) {
+  const section = el('section', `${prefix}-section`);
+  const head = el('div', `${prefix}-section-head`);
+  head.append(el('h2', `${prefix}-section-title`, title));
+  if (hint) head.append(el('span', `${prefix}-section-hint`, hint));
+  section.append(head);
+  return section;
+}
+
+export function buildStatChip(prefix, label, value, tone) {
+  const wrap = el('span', `${prefix}-stat`);
+  if (tone) wrap.dataset.tone = tone;
+  wrap.append(el('span', `${prefix}-stat-value`, value), el('span', `${prefix}-stat-label`, label));
+  return wrap;
+}
+
+// A panel's projects array, or an empty one. The poller broadcasts arrive before any lane is
+// configured, so every panel guards this the same way.
+export function projectsOf(snapshot) {
+  return Array.isArray(snapshot?.projects) ? snapshot.projects : [];
+}
+
+// Whether a mounted panel is inside a hidden tabpanel or phone screen. Panels are mounted eagerly (a
+// broadcast must be able to raise a tab dot from anywhere), so each one asks this before repainting.
+export function isPanelHidden(root) {
+  return !root || !!root.closest('[hidden]');
+}
+
 // Returns the write promise, or null when the Clipboard API is absent
 // (insecure context): callers decide whether silence or a toast fits.
 export function writeClipboardText(text) {

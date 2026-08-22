@@ -23,12 +23,12 @@ The browser dashboard frontend: ES modules bundled by Vite (dev server with HMR 
 | `usage-panel.js` | Usage tab DOM shell fed by `usage-sessions` pushes and `request-usage-report` replies |
 | `usage-view-core.mjs` | Pure Usage tab formatting, sorting, caveat text, warning text, and per-card chip text |
 | `theme.js` | Theme definitions applied as CSS custom properties; terminal theme derived at runtime |
-| `ui-prefs.js` / `local-store.js` | localStorage persistence for UI state (sound, theme, active view) with quota-safe wrappers |
+| `ui-prefs.js` / `local-store.js` | THE localStorage home for UI state (sound, theme, active view, rail and sidebar widths), over quota-safe wrappers. Each key is declared once in `ui-prefs.js`'s `PREFS` table with its default and normalizer; the accessors are one line each. The review sidebar's width keeps its own storage key so an existing install's saved width survives |
 | `shortcuts.mjs` | Pure display catalog of keyboard shortcuts for the Settings dialog; handlers live in `app.js` and `session-card/terminal.js`, keep in sync |
 | `form-factor-core.mjs` | Pure `decideLayout({ coarse, narrowWidth })` -> `'phone' \| 'desktop'`: the one predicate choosing between the two first-class layouts |
 | `form-factor.js` | Its IO shell: evaluates the two media queries, stamps `<html data-layout>`, notifies subscribers on a live flip |
 | `card-host.js` | THE session-card re-parenting seam (`borrowCard` / `releaseCard`), single borrower GLOBALLY; shared by the Focus center and the phone Terminal screen |
-| `dom-helpers.js` | `el()` / `escapeHtml()` DOM utilities, plus `adoptElement()` / `releaseElement()` (move a live element and put it back) |
+| `dom-helpers.js` | `el()` / `escapeHtml()` DOM utilities, `adoptElement()` / `releaseElement()` (move a live element and put it back), and the chrome the four tab panels share: `buildPanelSection()` / `buildStatChip()` (class prefix parameterized, so the per-panel CSS is unchanged), `projectsOf()` and `isPanelHidden()` |
 | `style.css` | Component styles, `[data-state]` rules, animations, `::before` pseudo-elements |
 | `tailwind.css` | Tailwind v4 entry: `@theme` block mapping colors, fonts, radii |
 | `perf.html` / `perf-harness.js` / `perf-corpus.mjs` | Dev-only manual perf harness (K xterm terminals under dense ANSI load); never bundled into production |
@@ -52,7 +52,9 @@ The browser dashboard frontend: ES modules bundled by Vite (dev server with HMR 
 - TWO first-class layouts, chosen by `form-factor-core.mjs` and stamped on `<html data-layout>`. Phone styling keys off `[data-layout="phone"]`, never a `max-width` override of a desktop selector; a bare `max-width` block is only for content that must wrap in a narrow DESKTOP window. Neither layout duplicates the other's DOM: elements owning live state are re-parented (`adoptElement` / `card-host.js`).
 - All terminal writes go through `render-scheduler.mjs`; never call `term.write` with unbounded data outside it.
 - Use `id` (stable UUID) for any session keying; `name` is display only.
-- New persistent UI state goes through `ui-prefs.js`, not raw localStorage.
+- New persistent UI state goes through `ui-prefs.js`, not raw localStorage: add a key to its `PREFS` table and a one-line accessor pair, never a second load/mutate/save copy.
+- A confirm prompt comes from `session-card/modal.js` `openConfirmDialog`, never a hand-rolled overlay.
+- Section heads, stat chips, `projectsOf` and `isPanelHidden` come from `dom-helpers.js`; a new tab panel passes its class prefix rather than copying the builders.
 
 ### Testing Requirements
 - Pure `.mjs` cores have node:test coverage (`tests/frontend-*.test.js`, `shortcuts-core`, `render-scheduler`, `roster-groups-core`, `focus-shortcuts-core`); DOM modules are verified manually via `npm run dev`.

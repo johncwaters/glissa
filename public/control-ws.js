@@ -134,8 +134,4 @@ export function connectControl() {
     controlRetryAttempt += 1;
     controlRetryTimer = setTimeout(connectControl, retryDelayMs);
   });
-
-  ws.addEventListener('error', () => {
-    // close fires next
-  });
 }

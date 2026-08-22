@@ -7,7 +7,7 @@ import './tailwind.css';
 import { shouldShowServerAction } from '/shared/client-trust.mjs';
 import { STATES } from '/shared/states.mjs';
 import { connectControl, disableReconnect, onControlMessage, sendControlMsg, sendControlRequest, setConnectionStateCallback } from './control-ws.js';
-import { createAddSessionDialog, createConfirmDialog, createSettingsDialog } from './dialogs.js';
+import { createAddSessionDialog, createSettingsDialog } from './dialogs.js';
 import { writeClipboardText } from './dom-helpers.js';
 import { activateFocusView, centerSessionQuietly, deactivateFocusView, focusAdjacentInRail, focusNextAttention, focusNthInRail, getFocusedSessionId, isFocusActive, mountFocusView, noteKnownProjectPath, refreshFocusRoster, restoreFocusedSession, setFocusMergeStatus } from './focus-view/focus-view.js';
 import { initFormFactor, isPhoneLayout, onLayoutChange } from './form-factor.js';
@@ -22,6 +22,7 @@ import { updateBannerText } from './radar-core.mjs';
 import { applyHealthSnapshot as applyRadarHealth, applyPosthogStatus, applyPrStatus as applyRadarPrStatus, applyUpdateAvailable as applyRadarUpdate, mountRadarView, setRadarActivityCallback, setRadarNavigateToPrs } from './radar-panel.js';
 import { handleDebugStateRefresh, handleDebugStateResponse } from './session-card/card-dom.js';
 import { applyState, applyTerminalSettings, createSessionCard, getSessionCount, hasSession, removeSessionCard, renameSessionCard, seedSessionMergeStatus, setSessionAgents, setSessionDiff, setSessionEffectiveBase, setSessionMergeStatus, setSessionPostTurn, setSessionPrompt, setSessionResume, setSessionUsage, setSessionWakeup, setSessionWorktree, updateAggregateStatus } from './session-card/lifecycle.js';
+import { openConfirmDialog } from './session-card/modal.js';
 import { reconnectDataWs } from './session-card/terminal.js';
 import { showErrorToast } from './session-card/toast.js';
 import { forgetReviewSession, mergeSelectedSession, mountReviewSidebar, notifyWorktreeChanged, refreshReviewSidebar, resolveSelectedSession, resyncSelectedSession, setReviewBranchSync } from './sidebar/review-sidebar.js';
@@ -245,7 +246,6 @@ const messageHandlers = {
   'session-prompt':     (msg) => setSessionPrompt(msg.id, msg.pendingPromptKind),
   'session-merge-status': (msg) => { setSessionMergeStatus(msg.id, msg.mergeStatus); setFocusMergeStatus(msg.id, msg.mergeStatus); refreshPhoneBoard(); },
   'session-worktree-blocked': (msg) => { showErrorToast(`${msg.session}: ${msg.notice || 'integration branch not found'}`, { persist: true }); },
-  'session-worktree-ready': () => {},
   'session-diff':       (msg) => { setSessionDiff(msg.id, { committed: msg.committed, uncommitted: msg.uncommitted, hasCommits: msg.hasCommits }); },
   'branch-sync-status': (msg) => setReviewBranchSync(msg.id, { branch: msg.branch, upstream: msg.upstream, state: msg.state, ahead: msg.ahead, behind: msg.behind, fetched: msg.fetched, action: msg.action, error: msg.error }),
   'session-changed':    (msg) => notifyWorktreeChanged(msg.id),
@@ -568,8 +568,8 @@ function applyFormFactorLayout(layout) {
   const carriedSessionId = getPhoneSessionId();
   deactivatePhoneShell();
   activateView(_activeView); // re-activates the saved view now that the desktop DOM is whole
-  // Quietly, NOT via focusSessionInCenter: that path is the operator activating a pill, so it sends
-  // start-session for a DORMANT target and dismiss for a COMPLETE one. A rotation is a layout event,
+  // Quietly, NOT via the pill-activation path: that one is the operator making a selection, so it
+  // sends start-session for a DORMANT target and dismiss for a COMPLETE one. A rotation is a layout event,
   // and treating it as a selection would respawn a session the operator just killed or acknowledge away
   // a COMPLETE they never read.
   if (carriedSessionId) centerSessionQuietly(carriedSessionId);
@@ -586,7 +586,7 @@ document.getElementById('btn-restart').addEventListener('click', () => {
   const message = count > 0
     ? `Kill ${count} session${suffix} and restart the server?`
     : 'Restart the server?';
-  createConfirmDialog({
+  openConfirmDialog({
     title: 'Restart Server',
     message,
     confirmLabel: 'Restart',
@@ -612,7 +612,7 @@ document.getElementById('btn-shutdown').addEventListener('click', () => {
   const message = count > 0
     ? `Kill ${count} session${suffix} and shut down the server?`
     : 'Shut down the server?';
-  createConfirmDialog({
+  openConfirmDialog({
     title: 'Shut Down Server',
     message,
     confirmLabel: 'Shut Down',

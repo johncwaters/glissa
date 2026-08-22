@@ -27,17 +27,13 @@ function applyLayout(next) {
   }
 }
 
-// Stamp the initial layout and start listening. Call once at boot, BEFORE anything reads getLayout().
+// Stamp the initial layout and start listening. Call once at boot, BEFORE anything reads the layout.
 export function initFormFactor() {
   currentLayout = evaluateLayout();
   document.documentElement.dataset.layout = currentLayout;
   const reevaluate = () => applyLayout(evaluateLayout());
   coarsePointerQuery?.addEventListener?.('change', reevaluate);
   narrowWidthQuery?.addEventListener?.('change', reevaluate);
-  return currentLayout;
-}
-
-export function getLayout() {
   return currentLayout;
 }
 

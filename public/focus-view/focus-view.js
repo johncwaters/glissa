@@ -16,8 +16,8 @@ import { borrowCard, getBorrowedCardId, releaseCard } from '../card-host.js';
 import { sendControlMsg } from '../control-ws.js';
 import { el } from '../dom-helpers.js';
 import { setActivityRenderer } from '../session-card/activity.js';
-import { showConfirmDialog } from '../session-card/card-dom.js';
 import { sessionUIs } from '../session-card/card-registry.js';
+import { openConfirmDialog } from '../session-card/modal.js';
 import { suggestSessionName } from '../session-card/naming.js';
 import { setSelectedId } from '../sidebar/selection.js';
 import { getKeptProjects, getLastFocusedSessionId, getRailWidth, setKeptProjects, setLastFocusedSessionId, setRailWidth } from '../ui-prefs.js';
@@ -212,7 +212,7 @@ function removeSession(id) {
     return;
   }
   const name = sessionName(ui);
-  showConfirmDialog({
+  openConfirmDialog({
     title: 'Remove Session',
     message: `"${name}" has unmerged worktree changes that will be permanently discarded if you remove it. Merge or review them first to keep them. Remove anyway?`,
     confirmLabel: 'Discard & Remove',
@@ -732,14 +732,6 @@ function updateCenter() {
 export function setFocusMergeStatus(id, mergeStatus) {
   mergeStatusById.set(id, mergeStatus || 'none');
   if (active) refreshFocusRoster();
-}
-
-// Focus a specific session into the center on demand. Used by the guided-setup handler (an interactive
-// setup session the operator must answer) now that Focus is the only session destination. Delegates to
-// onPillActivate (which guards a missing id and starts a DORMANT target first); the active guard keeps a
-// hidden view from spawning a dormant session as a side effect, so the caller must switch to Focus first.
-export function focusSessionInCenter(id) {
-  if (active) onPillActivate(id);
 }
 
 // Center a session WITHOUT the operator-selection side effects: no start-session for a DORMANT target,

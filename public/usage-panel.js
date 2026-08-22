@@ -7,7 +7,7 @@
 // The tab is always present, so an operator who has switched usage tracking off still finds the surface
 // and is told where to switch it back on.
 
-import { el } from './dom-helpers.js';
+import { buildPanelSection, el, isPanelHidden } from './dom-helpers.js';
 import { createPollAgoTicker, formatAgo } from './poll-ago.js';
 import {
   DEFAULT_DAY_SORT,
@@ -110,14 +110,7 @@ const _ticker = createPollAgoTicker(() => _root);
 
 // ── Small builders ──
 
-function buildSection(title, hint) {
-  const section = el('section', 'usage-section');
-  const head = el('div', 'usage-section-head');
-  head.append(el('h2', 'usage-section-title', title));
-  if (hint) head.append(el('span', 'usage-section-hint', hint));
-  section.append(head);
-  return section;
-}
+const buildSection = (title, hint) => buildPanelSection('usage', title, hint);
 
 function buildTile(label, value, sub, tone) {
   const tile = el('div', 'usage-tile');
@@ -746,16 +739,12 @@ function clearRefs() {
   _refreshStatusEl = null;
 }
 
-function isHidden() {
-  return !_root || !!_root.closest('[hidden]');
-}
-
 // A push while another tab is open is dropped; the surface rebuilds when it is next looked at, which is
 // also when it asks for a fresh report. Scroll position has to be carried across a rebuild by hand:
 // emptying the content collapses the scroller, so the browser clamps it back to the top.
 function render({ force = false } = {}) {
   if (!_root) return;
-  if (!force && isHidden()) return;
+  if (!force && isPanelHidden(_root)) return;
   const scroller = _root.parentElement;
   const scrollTop = scroller ? scroller.scrollTop : 0;
   _ticker.reset();
