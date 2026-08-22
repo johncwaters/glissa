@@ -193,14 +193,7 @@ function planInvestigations(changes, state = {}, opts = {}) {
   });
 }
 
-/**
- * Is this the kind of issue an operator gets woken for?
- *
- * Deliberately the EXACT set that already fires an observation ping: spiking ('spike'), regressed
- * ('regression'), and a first sighting over the escalation threshold ('new_high_impact'). Tying the
- * auto-fix trigger to a second, private notion of severity would mean the lane could dispatch a fix
- * for something it never told the operator about, or stay quiet about one it did.
- */
+// Deliberately the exact set that already fires an observation ping, so auto-fix can never trigger on an issue the operator was never told about.
 function isMajorIssue(change, issue, opts = {}) {
   const threshold = opts.userEscalationThreshold ?? DEFAULT_USER_ESCALATION_THRESHOLD;
   if (change === 'spiking' || change === 'regressed') return true;
@@ -208,11 +201,7 @@ function isMajorIssue(change, issue, opts = {}) {
   return toCount(issue?.users, 0) >= threshold;
 }
 
-/**
- * Which job a planned change earns. 'fix' needs the opt-in AND a major issue AND somewhere to commit:
- * `hasRepo` is the caller's answer to the last part (the workspace resolution is IO), and an absent
- * answer means "not known to be a repo", so the default is the diagnose-only job either way.
- */
+// 'fix' needs the autoFix opt-in, a major issue, and hasRepo true; hasRepo is the caller's IO-resolved answer, absent defaults to investigate.
 function decideJobMode(change, opts = {}) {
   if (opts.autoFix !== true) return JOB_MODES.investigate;
   if (opts.hasRepo === false) return JOB_MODES.investigate;
@@ -220,25 +209,14 @@ function decideJobMode(change, opts = {}) {
   return JOB_MODES.fix;
 }
 
-/**
- * Normalize whatever a caller claims a job's mode was; anything unrecognized is an investigation.
- * The hasOwn guard is what keeps '__proto__' and 'constructor' from reading as a mode: this value
- * arrives from an agent's own result JSON and from a hand-editable state file.
- */
+// hasOwn guards against '__proto__'/'constructor' reading as a mode; this value arrives from an agent's own result JSON and a hand-editable state file.
 function normalizeJobMode(mode) {
   const key = String(mode ?? '').toLowerCase();
   if (!Object.hasOwn(JOB_MODES, key)) return JOB_MODES.investigate;
   return JOB_MODES[key];
 }
 
-/**
- * May the server push this fix branch and open a pull request for it?
- *
- * The agent can only commit inside its throwaway worktree, so this is the gate that turns two prompt
- * promises into properties of the lane: a diff touching `.github/workflows/` is REFUSED (a fix that
- * edits the CI which would judge it is a carbon unit's call, never an automatic push), and a FIXED
- * verdict with nothing committed is an ERROR rather than an empty branch nobody asked for.
- */
+// Refuses a diff touching .github/workflows/ (CI changes are a carbon unit's call) and errors a FIXED verdict that committed nothing.
 function decideFixHandoff({ changedFiles, commitsAhead } = {}) {
   const files = Array.isArray(changedFiles)
     ? changedFiles.map((file) => String(file ?? '').trim()).filter(Boolean)
@@ -257,28 +235,20 @@ function decideFixHandoff({ changedFiles, commitsAhead } = {}) {
   return { ok: true };
 }
 
-/**
- * The pull request url, read from `gh pr create`'s own stdout rather than from the agent. Held to
- * https plus no whitespace because it reaches a Telegram message and an href; gh prints the url last,
- * so the last matching line wins over any warning gh printed ahead of it.
- */
+// Reads gh pr create's own stdout; the last https-looking line wins since gh may print warnings before the url.
 function normalizePrUrl(text) {
   const lines = String(text ?? '').split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   const hit = [...lines].reverse().find((line) => PR_URL_RE.test(line));
   return hit || null;
 }
 
-/** The agent-written pull request title: one line, no control characters, capped. */
 function normalizePrTitle(text) {
   const flat = String(text ?? '').replace(CONTROL_CHARS_RE, ' ').replace(/\s+/g, ' ').trim();
   if (!flat) return null;
   return flat.slice(0, MAX_PR_TITLE_CHARS);
 }
 
-/**
- * The agent-written pull request body. Multi-line by nature, so newlines survive; every other control
- * character does not, and the whole thing is capped so a runaway body cannot ride into a gh argument.
- */
+// Newlines survive since a pr body is multi-line by nature; other control chars are stripped and the whole is capped so a runaway body cannot reach a gh argument.
 function normalizePrBody(text) {
   const cleaned = String(text ?? '')
     .replace(/\r\n?/g, '\n')
@@ -343,8 +313,7 @@ function nextState(prevEntry, current, verdictInfo = {}) {
     inFlight: info.inFlight === true,
     pingedPhases: Array.isArray(info.pingedPhases) ? [...info.pingedPhases] : [...(prev.pingedPhases || [])],
     recurrenceOf: info.recurrenceOf ?? prev.recurrenceOf ?? null,
-    // The last auto-fix attempt, carried forward so a completed one stays visible to the dashboard and
-    // to a carbon unit reading the state file long after the issue itself went quiet.
+    // The last auto-fix attempt, carried forward so it stays visible in the dashboard and state file after the issue goes quiet.
     fix: normalizeFixRecord(prev.fix),
     history,
   };

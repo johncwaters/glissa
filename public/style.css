@@ -2143,14 +2143,6 @@ a.radar-issue-title:hover {
   border-color: color-mix(in oklab, var(--state-complete) 50%, var(--border-dim));
 }
 
-.radar-investigation-pr {
-  flex: 0 0 auto;
-  color: var(--accent);
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
 .radar-verdict[data-verdict="ERROR"] {
   color: var(--state-failed);
   border-color: color-mix(in oklab, var(--state-failed) 50%, var(--border-dim));
@@ -2159,6 +2151,19 @@ a.radar-issue-title:hover {
 .radar-verdict[data-verdict="INVESTIGATING"] {
   color: var(--accent);
   border-color: var(--accent-dim);
+}
+
+.radar-verdict[data-mode="fix"] {
+  color: var(--accent-dim);
+  border-color: color-mix(in oklab, var(--accent-dim) 50%, var(--border-dim));
+}
+
+.radar-investigation-pr {
+  flex: 0 0 auto;
+  color: var(--accent);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
 /* Per-issue actions. Muted until the row is hovered or something inside it holds focus, so a long

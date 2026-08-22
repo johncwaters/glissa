@@ -26,9 +26,7 @@ const CHANGE_SEVERITY = {
 
 const UNKNOWN_RANK = 99;
 
-// Verdict chip wording, shared by the issue rows and the investigations inbox so one verdict can never
-// read two ways. FIXED comes from the auto-fix job: it is the only verdict that already shipped
-// something, so it reads as done rather than as a finding.
+// Shared by the issue rows and the investigations inbox so one verdict can never read two ways.
 const VERDICT_LABEL = {
   ROOT_CAUSE: 'root cause',
   NEEDS_HUMAN: 'needs you',
