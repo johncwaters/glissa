@@ -5054,10 +5054,11 @@ html[data-layout="phone"] .radar-project { padding: 12px; }
 /* The project head and its stat row are short facts, not a table: wrapping keeps the stale/error
    reason on screen instead of pushing it past the right edge. */
 html[data-layout="phone"] .radar-project-head { flex-wrap: wrap; gap: 2px 10px; }
-html[data-layout="phone"] .radar-project-host { flex: 1 1 100%; }
+html[data-layout="phone"] .radar-project-host { flex: 1 1 100%; white-space: normal; overflow-wrap: anywhere; }
 html[data-layout="phone"] .radar-project-summary { flex-wrap: wrap; gap: 6px 14px; margin-bottom: 8px; }
 html[data-layout="phone"] .radar-quiet { padding: 4px 12px; }
-html[data-layout="phone"] .radar-quiet-row { padding: 5px 0; font-size: 12px; }
+html[data-layout="phone"] .radar-quiet-row { padding: 5px 0; font-size: 12px; flex-wrap: wrap; }
+html[data-layout="phone"] .radar-quiet-name { flex: 1 1 auto; white-space: normal; overflow-wrap: anywhere; }
 
 /* Rows become cards-without-chrome: a hairline between them replaces the 2px gap, because a stacked
    row needs a visible boundary to read as one item. */
@@ -5134,7 +5135,58 @@ html[data-layout="phone"] .radar-ops-detail {
   white-space: normal;
   overflow-wrap: anywhere;
 }
-html[data-layout="phone"] .radar-pr-title { flex: 1 1 calc(100% - 130px); }
+/* A PR title is a sentence, so it takes the whole line under the phase chip and wraps there rather
+   than sharing a line and ending in an ellipsis. */
+html[data-layout="phone"] .radar-pr-title {
+  flex: 1 1 100%;
+  white-space: normal;
+  overflow: visible;
+  overflow-wrap: anywhere;
+}
+html[data-layout="phone"] .radar-investigation-project {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+/* ── PRs screen ──
+   The desktop PR row is one dense line (phase, title, sha, chips) with the reason indented under the
+   title. On a phone that line has room for the phase and about a third of a title, so the row becomes
+   the same small stack the Radar rows use: phase, then the full title on its own wrapping line, then
+   the metadata, then the reason at the left edge instead of behind a 121px indent. */
+html[data-layout="phone"] .pr-view {
+  padding: 14px 12px 24px;
+  font-size: 13px;
+}
+html[data-layout="phone"] .pr-content { gap: 22px; }
+html[data-layout="phone"] .pr-project { padding: 12px; }
+html[data-layout="phone"] .pr-project-head { flex-wrap: wrap; gap: 2px 10px; }
+html[data-layout="phone"] .pr-project-repo {
+  flex: 1 1 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+html[data-layout="phone"] .pr-project-summary { flex-wrap: wrap; gap: 6px 14px; margin-bottom: 8px; }
+html[data-layout="phone"] .pr-project-tick { margin-left: 0; }
+html[data-layout="phone"] .pr-rows { gap: 0; }
+html[data-layout="phone"] .pr-row {
+  gap: 4px 8px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border-dim);
+}
+html[data-layout="phone"] .pr-row:last-child { border-bottom: none; }
+html[data-layout="phone"] .pr-title {
+  flex: 1 1 100%;
+  white-space: normal;
+  overflow: visible;
+  overflow-wrap: anywhere;
+}
+html[data-layout="phone"] .pr-reason {
+  margin-left: 0;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+html[data-layout="phone"] .pr-unconfigured { font-size: 13px; }
 
 /* ── Empty states ── */
 .phone-empty { margin: auto; padding: 24px; text-align: center; color: var(--text-dim); }
