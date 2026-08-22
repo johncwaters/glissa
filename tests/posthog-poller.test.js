@@ -60,6 +60,8 @@ function harness(over = {}) {
     maxConcurrentInvestigations: over.maxConcurrentInvestigations || 2,
     minUsersToInvestigate: over.minUsersToInvestigate ?? 1,
     userEscalationThreshold: over.userEscalationThreshold ?? 25,
+    autoFix: over.autoFix,
+    fixTimeoutSeconds: over.fixTimeoutSeconds,
     recurrenceDedupe: over.recurrenceDedupe,
     recurrenceWindowDays: over.recurrenceWindowDays,
     transientRecurrenceLimit: over.transientRecurrenceLimit,
@@ -499,6 +501,250 @@ test('start() clears a stale inFlight left by a crash so the issue is re-investi
   assert.equal(spawned, 1, 'a stale in-flight marker does not wedge the issue forever');
 });
 
+// --- Auto-fix dispatch: a MAJOR issue gets an agent that reproduces and repairs, not one that only
+// diagnoses. Opt-in, and it rides the same slots, the same inFlight bookkeeping and the same drain.
+
+// The default row is a first sighting with 8 users, so a threshold of 5 makes it 'new' AND major.
+const MAJOR = { autoFix: true, userEscalationThreshold: 5 };
+
+function fixResult(over = {}) {
+  return {
+    verdict: 'FIXED',
+    summary: 'guarded the null socket',
+    reproduced: true,
+    prUrl: 'https://github.com/o/r/pull/7',
+    mode: 'fix',
+    ...over,
+  };
+}
+
+test('autoFix dispatches a fix job for a major issue, with the fix timeout', async () => {
+  const calls = [];
+  const { poller } = harness({
+    ...MAJOR,
+    fixTimeoutSeconds: 1800,
+    spawnInvestigation: async (a) => { calls.push(a); return fixResult(); },
+  });
+  await poller.start();
+  await flush();
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].mode, 'fix');
+  assert.equal(calls[0].timeoutMs, 1800000, 'a fix gets its own ceiling, not the investigation one');
+});
+
+test('autoFix off keeps every dispatch an investigation on the investigation timeout', async () => {
+  const calls = [];
+  const { poller } = harness({
+    userEscalationThreshold: 5,
+    spawnInvestigation: async (a) => { calls.push(a); return { verdict: 'ROOT_CAUSE' }; },
+  });
+  await poller.start();
+  await flush();
+  assert.equal(calls[0].mode, 'investigate');
+  assert.equal(calls[0].timeoutMs, 900000);
+});
+
+test('autoFix leaves a non-major issue on the diagnose-only path', async () => {
+  const calls = [];
+  const { poller } = harness({
+    autoFix: true,
+    spawnInvestigation: async (a) => { calls.push(a); return { verdict: 'ROOT_CAUSE' }; },
+  });
+  await poller.start();
+  await flush();
+  assert.equal(calls[0].mode, 'investigate', '8 users is under the default escalation threshold');
+});
+
+test('a fix job takes a shared concurrency slot, never a second pool', async () => {
+  let spawned = 0;
+  const { poller } = harness({
+    ...MAJOR,
+    api: {
+      queryIssues: async () => ({
+        ok: true,
+        body: { results: [issueRow({ id: 'iss-1' }), issueRow({ id: 'iss-2' })] },
+      }),
+    },
+    spawnInvestigation: () => { spawned += 1; return new Promise(() => {}); },
+    maxConcurrentInvestigations: 1,
+  });
+  await poller.start();
+  await flush();
+  assert.equal(spawned, 1);
+});
+
+test('a FIXED verdict pings once with the repro status and the pull request', async () => {
+  const { poller, pings } = harness({ ...MAJOR, spawnInvestigation: async () => fixResult() });
+  await poller.start();
+  await flush();
+  // The high-impact observation ping fires first: a major issue is announced when it is SEEN, and the
+  // fix verdict is a second, differently-kinded ping rather than a replacement for it.
+  assert.equal(pings.length, 2);
+  assert.match(pings[0], /^\[glissa\/posthog\] HIGH IMPACT web$/m);
+  assert.match(pings[1], /^\[glissa\/posthog\] FIXED web$/m);
+  assert.match(pings[1], /reproduced, then fixed/);
+  assert.match(pings[1], /PR: https:\/\/github\.com\/o\/r\/pull\/7/);
+});
+
+test('a completed fix is folded onto the entry and into the inbox record', async () => {
+  const { poller, stateStore } = harness({
+    ...MAJOR, spawnInvestigation: async () => fixResult(), now: () => 4200,
+  });
+  await poller.start();
+  await flush();
+  const entry = poller._state()[KEY];
+  assert.equal(entry.verdict, 'FIXED');
+  assert.equal(entry.inFlight, false);
+  assert.deepEqual(entry.fix, {
+    at: 4200,
+    verdict: 'FIXED',
+    reproduced: true,
+    prUrl: 'https://github.com/o/r/pull/7',
+  });
+  const record = stateStore.value._investigations[0];
+  assert.equal(record.mode, 'fix');
+  assert.equal(record.prUrl, 'https://github.com/o/r/pull/7');
+});
+
+test('a completed fix is not redispatched on the next tick', async () => {
+  let spawned = 0;
+  const { poller, pings } = harness({
+    ...MAJOR,
+    spawnInvestigation: async () => { spawned += 1; return fixResult(); },
+  });
+  await poller.start();
+  await flush();
+  await poller.tick();
+  await flush();
+  await poller.tick();
+  await flush();
+  assert.equal(spawned, 1, 'the fixed issue is quiet now and costs nothing per tick');
+  assert.equal(pings.filter((p) => p.includes('FIXED')).length, 1, 'and it pings once, not once per tick');
+});
+
+// The spike endpoint keeps naming an issue for as long as the spike lasts, so a redispatch keyed on
+// the classification alone would spend a fix session every interval on an issue that already has one.
+test('a fixed issue that keeps spiking with growing users is not redispatched every tick', async () => {
+  let users = 8;
+  let spawned = 0;
+  const { poller } = harness({
+    ...MAJOR,
+    api: {
+      ...SPIKING_API,
+      queryIssues: async () => ({
+        ok: true,
+        body: { results: [issueRow({ aggregations: { occurrences: 120, users } })] },
+      }),
+    },
+    spawnInvestigation: async () => { spawned += 1; return fixResult(); },
+  });
+  await poller.start();
+  await flush();
+  for (const grown of [40, 400]) {
+    users = grown;
+    await poller.tick();
+    await flush();
+  }
+  assert.equal(spawned, 1, 'the blast radius was already past the threshold when the fix ran');
+});
+
+// The other half of the churn rule: a fix that did not hold must be allowed to run again, and its
+// pull request must not be opened in silence (pingedPhases is carried forward forever, so the fix
+// ping is deliberately not deduped through it).
+test('an issue that regresses after a fix is fixed again, and pings again', async () => {
+  let present = true;
+  let spawned = 0;
+  const { poller, pings } = harness({
+    ...MAJOR,
+    api: { queryIssues: async () => ({ ok: true, body: { results: present ? [issueRow()] : [] } }) },
+    spawnInvestigation: async () => { spawned += 1; return fixResult(); },
+  });
+  await poller.start();
+  await flush();
+  present = false;
+  await poller.tick();
+  await flush();
+  assert.equal(poller._state()[KEY].status, 'resolved', 'absence is assumed resolution');
+  present = true;
+  await poller.tick();
+  await flush();
+  assert.equal(spawned, 2, 'a genuine regression earns a second fix');
+  assert.equal(pings.filter((p) => p.includes('FIXED')).length, 2);
+});
+
+// A fix job unwinds through its worktree discard, and on the TIMEOUT path the race that freed the
+// slot has already resolved. stop() must still wait for that unwind, or a shutdown (or a settings
+// restart) leaves the throwaway checkout behind for the next instance to trip over.
+test('stop() waits for a timed-out fix job to finish discarding its worktree', async () => {
+  const order = [];
+  const gitWorkspace = {
+    create: async () => { order.push('create'); return { cwd: '/wt', isGit: true, branch: 'b' }; },
+    discard: async () => {
+      await new Promise((resolve) => { setTimeout(resolve, 20); });
+      order.push('discard');
+    },
+  };
+  const { poller } = harness({
+    ...MAJOR,
+    setTimeoutFn: (cb) => { cb(); return { unref() {} }; },
+    spawnInvestigation: async ({ signal }) => {
+      const workspace = await gitWorkspace.create();
+      try {
+        await new Promise((resolve) => {
+          if (signal.aborted) { resolve(); return; }
+          signal.addEventListener('abort', () => resolve(), { once: true });
+        });
+        return { verdict: 'ERROR', summary: 'fix timed out', mode: 'fix' };
+      } finally {
+        await gitWorkspace.discard({ workspace });
+      }
+    },
+  });
+  await poller.start();
+  await poller.stop();
+  order.push('stopped');
+  assert.deepEqual(order, ['create', 'discard', 'stopped']);
+});
+
+test('a fix that only needs a carbon unit reuses the needs_human ping and records no PR', async () => {
+  const { poller, pings, stateStore } = harness({
+    ...MAJOR,
+    spawnInvestigation: async () => fixResult({ verdict: 'NEEDS_HUMAN', prUrl: null, reproduced: false }),
+  });
+  await poller.start();
+  await flush();
+  assert.match(pings.at(-1), /^\[glissa\/posthog\] NEEDS HUMAN web$/m);
+  assert.doesNotMatch(pings.at(-1), /PR:/);
+  assert.equal(stateStore.value._investigations[0].prUrl, null);
+  assert.equal(poller._state()[KEY].fix.verdict, 'NEEDS_HUMAN');
+});
+
+test('a hung fix is force-resolved to ERROR, freeing its slot and naming the mode', async () => {
+  const { poller, pings } = harness({
+    ...MAJOR,
+    spawnInvestigation: () => new Promise(() => {}),
+    setTimeoutFn: (cb) => { cb(); return { unref() {} }; },
+    maxConcurrentInvestigations: 1,
+  });
+  await poller.start();
+  await flush();
+  assert.equal(poller._state()[KEY].verdict, 'ERROR');
+  assert.equal(poller._state()[KEY].inFlight, false, 'slot freed');
+  assert.equal(poller._state()[KEY].fix.verdict, 'ERROR', 'the failed attempt is still recorded');
+  assert.match(pings.at(-1), /^\[glissa\/posthog\] ERROR web$/m);
+});
+
+test('a fix the wiring downgraded is recorded as the investigation it actually was', async () => {
+  const { poller, stateStore } = harness({
+    ...MAJOR,
+    spawnInvestigation: async () => ({ verdict: 'ROOT_CAUSE', summary: 'no repo to fix in', mode: 'investigate' }),
+  });
+  await poller.start();
+  await flush();
+  assert.equal(poller._state()[KEY].fix, null, 'nothing was fixed, so nothing claims to have been');
+  assert.equal(stateStore.value._investigations[0].mode, 'investigate');
+});
+
 // --- Investigations inbox: the persisted log the Radar review section renders ---
 
 test('a completed investigation appends one record to the persisted log', async () => {
@@ -522,6 +768,8 @@ test('a completed investigation appends one record to the persisted log', async 
     url: 'https://ph.test/project/1/error_tracking/iss-1',
     verdict: 'TRANSIENT',
     summaryLine: 'one-off dependency blip',
+    mode: 'investigate',
+    prUrl: null,
     at: 4200,
     archived: false,
   });

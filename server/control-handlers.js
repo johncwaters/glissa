@@ -43,6 +43,7 @@ const POSTHOG_NUMERIC_KEYS = [
   'intervalMinutes',
   'maxConcurrentInvestigations',
   'investigationTimeoutSeconds',
+  'fixTimeoutSeconds',
   'minUsersToInvestigate',
   'userEscalationThreshold',
   'recurrenceWindowDays',
@@ -54,6 +55,9 @@ const POSTHOG_NUMERIC_KEYS = [
 ];
 // Listed keys override the default positive floor, allowing zero cooldown and capping baseline days.
 const POSTHOG_NUMERIC_RANGES = {
+  // A fix reproduces, repairs, runs a suite and opens a PR, so a one-minute floor is the only value
+  // that could not possibly be meant; the ceiling is six hours, past which a hung job is the bug.
+  fixTimeoutSeconds: { min: 60, max: 21600, label: 'between 60 and 21600' },
   trafficSpikeMultiplier: { min: 1, label: 'at least 1' },
   trafficSpikeMinUsers: { min: 1, label: 'at least 1' },
   trafficSpikeCooldownMinutes: { min: 0, label: 'zero or more' },
@@ -63,7 +67,8 @@ const POSTHOG_NUMERIC_RANGES = {
 // enabled; the poller reads it as `!== false`. allowStatusWrites/dailyDigest were validated and
 // persisted here while no module in the lane ever read them, which promised behavior (PostHog writes,
 // a digest) that does not exist; a key earns a place in this list when something consumes it.
-const POSTHOG_BOOLEAN_KEYS = ['enabled', 'recurrenceDedupe', 'trafficSpikeEnabled'];
+// `autoFix` is the auto-fix dispatch opt-in and defaults to OFF, so absence means diagnose-only.
+const POSTHOG_BOOLEAN_KEYS = ['enabled', 'recurrenceDedupe', 'trafficSpikeEnabled', 'autoFix'];
 const POSTHOG_STRING_KEYS = ['host', 'apiKey', 'repoPath'];
 
 const USAGE_BOOLEAN_KEYS = ['enabled', 'fetchPricing', 'planLimits', 'rtkSavings'];

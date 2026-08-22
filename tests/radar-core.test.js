@@ -544,6 +544,8 @@ test('investigationRows: normalizes one record into a renderable row', async () 
     summaryLine: 'null deref in the retry path',
     url: 'https://ph.test/project/1/error_tracking/iss-1',
     verdict: 'NEEDS_HUMAN',
+    mode: 'investigate',
+    prUrl: '',
     at: 1700,
   });
 });
@@ -563,8 +565,44 @@ test('investigationRows: survives a partial record and skips one with no id', as
     summaryLine: '',
     url: '',
     verdict: 'ERROR',
+    mode: 'investigate',
+    prUrl: '',
     at: 0,
   });
+});
+
+test('verdictLabel: every verdict has wording, including the auto-fix one', async () => {
+  const { verdictLabel } = await importCore();
+  assert.equal(verdictLabel('ROOT_CAUSE'), 'root cause');
+  assert.equal(verdictLabel('NEEDS_HUMAN'), 'needs you');
+  assert.equal(verdictLabel('TRANSIENT'), 'transient');
+  assert.equal(verdictLabel('FIXED'), 'fixed');
+  assert.equal(verdictLabel('ERROR'), 'error');
+});
+
+test('verdictLabel: an unknown verdict falls back to its own lowercased text', async () => {
+  const { verdictLabel } = await importCore();
+  assert.equal(verdictLabel('SOMETHING_NEW'), 'something_new');
+  assert.equal(verdictLabel(undefined), '');
+});
+
+test('investigationRows: a fix record carries its mode and its pull request link', async () => {
+  const { investigationRows } = await importCore();
+  const [row] = investigationRows({
+    investigations: [investigationRecord({ verdict: 'FIXED', mode: 'fix', prUrl: 'https://github.com/o/r/pull/4' })],
+  });
+  assert.equal(row.mode, 'fix');
+  assert.equal(row.prUrl, 'https://github.com/o/r/pull/4');
+});
+
+// The url is rendered as an href, so anything that is not plainly https is dropped here rather than
+// handed to the DOM.
+test('investigationRows: a non-https prUrl is dropped', async () => {
+  const { investigationRows } = await importCore();
+  for (const prUrl of ['javascript:alert(1)', 'http://insecure/pr/1', 'https://x/1 with space', 42]) {
+    const [row] = investigationRows({ investigations: [investigationRecord({ prUrl })] });
+    assert.equal(row.prUrl, '', `dropped: ${String(prUrl)}`);
+  }
 });
 
 test('investigationRows: an unarchived record never moves the attention count', async () => {

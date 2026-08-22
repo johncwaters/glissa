@@ -2137,9 +2137,18 @@ a.radar-issue-title:hover {
   border-color: color-mix(in oklab, var(--state-waiting) 50%, var(--border-dim));
 }
 
-.radar-verdict[data-verdict="ROOT_CAUSE"] {
+.radar-verdict[data-verdict="ROOT_CAUSE"],
+.radar-verdict[data-verdict="FIXED"] {
   color: var(--state-complete);
   border-color: color-mix(in oklab, var(--state-complete) 50%, var(--border-dim));
+}
+
+.radar-investigation-pr {
+  flex: 0 0 auto;
+  color: var(--accent);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
 .radar-verdict[data-verdict="ERROR"] {

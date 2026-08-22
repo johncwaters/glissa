@@ -26,6 +26,22 @@ const CHANGE_SEVERITY = {
 
 const UNKNOWN_RANK = 99;
 
+// Verdict chip wording, shared by the issue rows and the investigations inbox so one verdict can never
+// read two ways. FIXED comes from the auto-fix job: it is the only verdict that already shipped
+// something, so it reads as done rather than as a finding.
+const VERDICT_LABEL = {
+  ROOT_CAUSE: 'root cause',
+  NEEDS_HUMAN: 'needs you',
+  TRANSIENT: 'transient',
+  FIXED: 'fixed',
+  ERROR: 'error',
+};
+
+export function verdictLabel(verdict) {
+  const key = typeof verdict === 'string' ? verdict.toUpperCase() : '';
+  return VERDICT_LABEL[key] || String(verdict ?? '').toLowerCase();
+}
+
 export function radarPlaceholder(status) {
   return lanePlaceholder(status, { label: 'PostHog monitoring', tab: 'PostHog' });
 }
@@ -171,6 +187,10 @@ export function investigationRows(snapshot, locallyArchivedIds = null) {
       summaryLine: textOr(record.summaryLine, ''),
       url: textOr(record.url, ''),
       verdict: textOr(record.verdict, 'ERROR').toUpperCase(),
+      mode: textOr(record.mode, 'investigate'),
+      // Only ever rendered as an href, so anything that is not an https url is dropped here rather
+      // than being handed to the DOM and hoped about.
+      prUrl: /^https:\/\/[^\s"'<>]{1,300}$/.test(textOr(record.prUrl, '')) ? textOr(record.prUrl, '') : '',
       at: Number.isFinite(Number(record.at)) ? Number(record.at) : 0,
     }))
     .sort((a, b) => b.at - a.at);

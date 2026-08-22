@@ -907,6 +907,8 @@ function createBackend(httpServer, options = {}) {
   // a posthog/telegram settings change, stopped in shutdown().
   const posthog = createPosthogWiring({
     config, investigationSessions, closeSessionDataClients, hookRouter, getHookPort, spawnGate, recordLane,
+    // Only the opt-in auto-fix job uses it, and only to isolate its throwaway worktree.
+    gitWorkspace,
     broadcast: (msg) => broadcastControl(msg),
   });
 

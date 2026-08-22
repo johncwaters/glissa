@@ -67,7 +67,22 @@ const PING_LABELS = {
   recurrence_escalated: 'RECURRING',
   traffic_spike: 'TRAFFIC SPIKE',
   traffic_spike_growth: 'TRAFFIC CLIMBING',
+  fixed: 'FIXED',
 };
+
+// The two jobs one dispatched session can be. 'investigate' diagnoses and writes a report; 'fix'
+// reproduces, repairs, and hands a pull request back. A job is never anything else.
+const JOB_MODES = Object.freeze({ investigate: 'investigate', fix: 'fix' });
+// Verdicts a fix job may report, distinct from an investigation's: a fix either committed a repair,
+// needs a carbon unit, was a non-event, or failed.
+const FIX_VERDICTS = Object.freeze(['FIXED', 'NEEDS_HUMAN', 'TRANSIENT', 'ERROR']);
+// The one path prefix a fix may never touch: the CI that would judge the pull request.
+const WORKFLOW_PATH_PREFIX = '.github/workflows/';
+// Both reach a `gh pr create` argument, so both are bounded. The title also reaches a list view.
+const MAX_PR_TITLE_CHARS = 120;
+const MAX_PR_BODY_CHARS = 4000;
+// The pull request url reaches a Telegram message and an href in the dashboard.
+const PR_URL_RE = /^https:\/\/[^\s"'<>]{1,300}$/;
 
 function stripProtocol(host) {
   return String(host || '').replace(/^https?:\/\//i, '').replace(/\/+$/, '');
@@ -179,6 +194,109 @@ function planInvestigations(changes, state = {}, opts = {}) {
 }
 
 /**
+ * Is this the kind of issue an operator gets woken for?
+ *
+ * Deliberately the EXACT set that already fires an observation ping: spiking ('spike'), regressed
+ * ('regression'), and a first sighting over the escalation threshold ('new_high_impact'). Tying the
+ * auto-fix trigger to a second, private notion of severity would mean the lane could dispatch a fix
+ * for something it never told the operator about, or stay quiet about one it did.
+ */
+function isMajorIssue(change, issue, opts = {}) {
+  const threshold = opts.userEscalationThreshold ?? DEFAULT_USER_ESCALATION_THRESHOLD;
+  if (change === 'spiking' || change === 'regressed') return true;
+  if (change !== 'new') return false;
+  return toCount(issue?.users, 0) >= threshold;
+}
+
+/**
+ * Which job a planned change earns. 'fix' needs the opt-in AND a major issue AND somewhere to commit:
+ * `hasRepo` is the caller's answer to the last part (the workspace resolution is IO), and an absent
+ * answer means "not known to be a repo", so the default is the diagnose-only job either way.
+ */
+function decideJobMode(change, opts = {}) {
+  if (opts.autoFix !== true) return JOB_MODES.investigate;
+  if (opts.hasRepo === false) return JOB_MODES.investigate;
+  if (!isMajorIssue(change?.change, change?.issue, opts)) return JOB_MODES.investigate;
+  return JOB_MODES.fix;
+}
+
+/**
+ * Normalize whatever a caller claims a job's mode was; anything unrecognized is an investigation.
+ * The hasOwn guard is what keeps '__proto__' and 'constructor' from reading as a mode: this value
+ * arrives from an agent's own result JSON and from a hand-editable state file.
+ */
+function normalizeJobMode(mode) {
+  const key = String(mode ?? '').toLowerCase();
+  if (!Object.hasOwn(JOB_MODES, key)) return JOB_MODES.investigate;
+  return JOB_MODES[key];
+}
+
+/**
+ * May the server push this fix branch and open a pull request for it?
+ *
+ * The agent can only commit inside its throwaway worktree, so this is the gate that turns two prompt
+ * promises into properties of the lane: a diff touching `.github/workflows/` is REFUSED (a fix that
+ * edits the CI which would judge it is a carbon unit's call, never an automatic push), and a FIXED
+ * verdict with nothing committed is an ERROR rather than an empty branch nobody asked for.
+ */
+function decideFixHandoff({ changedFiles, commitsAhead } = {}) {
+  const files = Array.isArray(changedFiles)
+    ? changedFiles.map((file) => String(file ?? '').trim()).filter(Boolean)
+    : [];
+  const workflow = files.find((file) => file.replace(/\\/g, '/').startsWith(WORKFLOW_PATH_PREFIX));
+  if (workflow) {
+    return {
+      ok: false,
+      verdict: 'NEEDS_HUMAN',
+      summary: `fix not pushed: it edits ${displayTitle(workflow)}, and this lane never pushes a workflow change`,
+    };
+  }
+  if (toCount(commitsAhead, 0) <= 0) {
+    return { ok: false, verdict: 'ERROR', summary: 'fix reported FIXED but committed nothing' };
+  }
+  return { ok: true };
+}
+
+/**
+ * The pull request url, read from `gh pr create`'s own stdout rather than from the agent. Held to
+ * https plus no whitespace because it reaches a Telegram message and an href; gh prints the url last,
+ * so the last matching line wins over any warning gh printed ahead of it.
+ */
+function normalizePrUrl(text) {
+  const lines = String(text ?? '').split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const hit = [...lines].reverse().find((line) => PR_URL_RE.test(line));
+  return hit || null;
+}
+
+/** The agent-written pull request title: one line, no control characters, capped. */
+function normalizePrTitle(text) {
+  const flat = String(text ?? '').replace(CONTROL_CHARS_RE, ' ').replace(/\s+/g, ' ').trim();
+  if (!flat) return null;
+  return flat.slice(0, MAX_PR_TITLE_CHARS);
+}
+
+/**
+ * The agent-written pull request body. Multi-line by nature, so newlines survive; every other control
+ * character does not, and the whole thing is capped so a runaway body cannot ride into a gh argument.
+ */
+function normalizePrBody(text) {
+  const cleaned = String(text ?? '')
+    .replace(/\r\n?/g, '\n')
+    .split('\n')
+    .map((line) => line.replace(CONTROL_CHARS_RE, ' ').replace(/[ \t]+$/, ''))
+    .join('\n')
+    .trim();
+  if (!cleaned) return null;
+  return cleaned.slice(0, MAX_PR_BODY_CHARS);
+}
+
+/** The fix ping's second line: whether the agent proved the bug before repairing it. */
+function fixDetailLine(reproduced) {
+  if (reproduced === true) return 'reproduced, then fixed';
+  return 'fixed without a local reproduction';
+}
+
+/**
  * Build the Telegram text for one ping kind, or null when the kind never pings. The lane tag comes
  * first so a shared chat can be filtered by lane (mirrors the PR lane's messages). `ctx.detail` is an
  * optional extra line, flattened like the title so no line of a ping may forge another.
@@ -196,6 +314,8 @@ function pingFor(kind, ctx = {}) {
     lines.push(`${toCount(ctx.occurrences, 0)} occurrences / ${toCount(ctx.users, 0)} users`);
   }
   if (ctx.url) lines.push(String(ctx.url));
+  // Agent-written, so it is flattened like the title rather than trusted as a single line.
+  if (ctx.prUrl) lines.push(`PR: ${displayTitle(ctx.prUrl)}`);
   return lines.join('\n');
 }
 
@@ -223,6 +343,9 @@ function nextState(prevEntry, current, verdictInfo = {}) {
     inFlight: info.inFlight === true,
     pingedPhases: Array.isArray(info.pingedPhases) ? [...info.pingedPhases] : [...(prev.pingedPhases || [])],
     recurrenceOf: info.recurrenceOf ?? prev.recurrenceOf ?? null,
+    // The last auto-fix attempt, carried forward so a completed one stays visible to the dashboard and
+    // to a carbon unit reading the state file long after the issue itself went quiet.
+    fix: normalizeFixRecord(prev.fix),
     history,
   };
   if (!info.verdict) return entry;
@@ -230,7 +353,21 @@ function nextState(prevEntry, current, verdictInfo = {}) {
   entry.summaryLine = info.summaryLine ?? null;
   entry.investigatedAt = info.at ?? null;
   entry.investigatedUsers = toCount(current.users, 0);
+  if (info.fix) entry.fix = normalizeFixRecord({ ...info.fix, at: info.fix.at ?? info.at });
   return entry;
+}
+
+// Defensive because it is read back from a hand-editable state file: a missing or malformed field
+// costs that field, never the entry. There is deliberately no branch field: the server picks the
+// branch name and pushes it, so recording it here would only duplicate what the pull request states.
+function normalizeFixRecord(fix) {
+  if (!fix || typeof fix !== 'object') return null;
+  return {
+    at: stampOf(fix.at),
+    verdict: String(fix.verdict || 'ERROR').toUpperCase(),
+    reproduced: fix.reproduced === true,
+    prUrl: fix.prUrl ? String(fix.prUrl) : null,
+  };
 }
 
 function stampOf(at) {
@@ -253,7 +390,7 @@ function normalizeInvestigations(log) {
  * and capped exactly as the Telegram path flattens them: both are attacker-influenced free text.
  */
 function buildInvestigationRecord({
-  key, projectId, projectName, host, issueId, title, url, verdict, summaryLine, at,
+  key, projectId, projectName, host, issueId, title, url, verdict, summaryLine, at, mode, prUrl,
 } = {}) {
   const stamp = stampOf(at);
   return {
@@ -267,6 +404,8 @@ function buildInvestigationRecord({
     url: String(url ?? ''),
     verdict: String(verdict || 'ERROR').toUpperCase(),
     summaryLine: summaryLineFromReportText(summaryLine),
+    mode: normalizeJobMode(mode),
+    prUrl: prUrl ? String(prUrl) : null,
     at: stamp,
     archived: false,
   };
@@ -556,6 +695,14 @@ module.exports = {
   issueUrl,
   classifyIssueChange,
   planInvestigations,
+  isMajorIssue,
+  decideJobMode,
+  normalizeJobMode,
+  decideFixHandoff,
+  normalizePrUrl,
+  normalizePrTitle,
+  normalizePrBody,
+  fixDetailLine,
   decideVanishedEntry,
   pingFor,
   nextState,
@@ -580,6 +727,8 @@ module.exports = {
   scrubForPaste,
   buildIssueSessionPrompt,
   ISSUE_ACTION_STATUS,
+  JOB_MODES,
+  FIX_VERDICTS,
   INVESTIGATIONS_KEY,
   INVESTIGATION_LOG_CAP,
   DEFAULT_ARCHIVED_RETENTION_DAYS,
@@ -589,4 +738,7 @@ module.exports = {
   ISSUE_HISTORY_CAP,
   MAX_PING_TITLE_CHARS,
   MAX_SUMMARY_LINE_CHARS,
+  MAX_PR_TITLE_CHARS,
+  MAX_PR_BODY_CHARS,
+  WORKFLOW_PATH_PREFIX,
 };

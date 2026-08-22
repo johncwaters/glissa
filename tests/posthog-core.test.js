@@ -8,6 +8,14 @@ const {
   issueUrl,
   classifyIssueChange,
   planInvestigations,
+  isMajorIssue,
+  decideJobMode,
+  normalizeJobMode,
+  decideFixHandoff,
+  normalizePrUrl,
+  normalizePrTitle,
+  normalizePrBody,
+  fixDetailLine,
   decideVanishedEntry,
   pingFor,
   nextState,
@@ -178,6 +186,120 @@ test('decideVanishedEntry: a missing entry is prunable', () => {
   assert.equal(decideVanishedEntry(undefined, 1000, {}), 'prune');
 });
 
+// --- isMajorIssue / decideJobMode: which issues earn the auto-fix dispatch ---
+
+test('isMajorIssue: spiking and regressed are major regardless of blast radius', () => {
+  assert.equal(isMajorIssue('spiking', makeIssue({ users: 1 })), true);
+  assert.equal(isMajorIssue('regressed', makeIssue({ users: 0 })), true);
+});
+
+test('isMajorIssue: a new issue is major only at or above the escalation threshold', () => {
+  assert.equal(isMajorIssue('new', makeIssue({ users: 24 })), false);
+  assert.equal(isMajorIssue('new', makeIssue({ users: 25 })), true);
+  assert.equal(isMajorIssue('new', makeIssue({ users: 3 }), { userEscalationThreshold: 3 }), true);
+});
+
+test('isMajorIssue: worsened and quiet are never major', () => {
+  assert.equal(isMajorIssue('worsened', makeIssue({ users: 9000 })), false);
+  assert.equal(isMajorIssue('quiet', makeIssue({ users: 9000 })), false);
+  assert.equal(isMajorIssue(undefined, undefined), false);
+});
+
+test('decideJobMode: a major issue with the opt-in and a repo earns a fix', () => {
+  const change = { change: 'spiking', issue: makeIssue() };
+  assert.equal(decideJobMode(change, { autoFix: true }), 'fix');
+  assert.equal(decideJobMode(change, { autoFix: true, hasRepo: true }), 'fix');
+});
+
+test('decideJobMode: without the opt-in every change stays an investigation', () => {
+  for (const change of ['spiking', 'regressed', 'new', 'worsened', 'quiet']) {
+    assert.equal(decideJobMode({ change, issue: makeIssue({ users: 500 }) }, {}), 'investigate');
+    assert.equal(decideJobMode({ change, issue: makeIssue({ users: 500 }) }, { autoFix: false }), 'investigate');
+  }
+});
+
+test('decideJobMode: a non-major change never earns a fix even with the opt-in on', () => {
+  assert.equal(decideJobMode({ change: 'worsened', issue: makeIssue({ users: 500 }) }, { autoFix: true }), 'investigate');
+  assert.equal(decideJobMode({ change: 'new', issue: makeIssue({ users: 2 }) }, { autoFix: true }), 'investigate');
+});
+
+test('decideJobMode: a workspace that is not a repo downgrades to an investigation', () => {
+  const change = { change: 'regressed', issue: makeIssue() };
+  assert.equal(decideJobMode(change, { autoFix: true, hasRepo: false }), 'investigate');
+});
+
+test('normalizeJobMode: anything unrecognized reads as an investigation', () => {
+  assert.equal(normalizeJobMode('FIX'), 'fix');
+  assert.equal(normalizeJobMode('investigate'), 'investigate');
+  assert.equal(normalizeJobMode('merge'), 'investigate');
+  assert.equal(normalizeJobMode(undefined), 'investigate');
+});
+
+// The value arrives from an agent's result JSON and from a hand-editable state file, so a prototype
+// key must not read as a mode (an unguarded lookup returns the Function constructor for it).
+test('normalizeJobMode: a prototype key is not a mode', () => {
+  assert.equal(normalizeJobMode('__proto__'), 'investigate');
+  assert.equal(normalizeJobMode('constructor'), 'investigate');
+  assert.equal(normalizeJobMode('toString'), 'investigate');
+});
+
+// --- decideFixHandoff: what the SERVER refuses to push, whatever the agent claimed ---
+
+test('decideFixHandoff: an ordinary diff with commits behind it is pushable', () => {
+  assert.deepEqual(decideFixHandoff({ changedFiles: ['src/app.js'], commitsAhead: 1 }), { ok: true });
+});
+
+test('decideFixHandoff: a workflow-touching diff needs a carbon unit and names the file', () => {
+  const res = decideFixHandoff({ changedFiles: ['src/app.js', '.github/workflows/ci.yml'], commitsAhead: 2 });
+  assert.equal(res.ok, false);
+  assert.equal(res.verdict, 'NEEDS_HUMAN');
+  assert.match(res.summary, /\.github\/workflows\/ci\.yml/);
+  const backslashed = decideFixHandoff({ changedFiles: ['.github\\workflows\\ci.yml'], commitsAhead: 2 });
+  assert.equal(backslashed.verdict, 'NEEDS_HUMAN', 'a windows-shaped path is the same path');
+});
+
+test('decideFixHandoff: a FIXED verdict with nothing committed is an ERROR, not an empty branch', () => {
+  for (const commitsAhead of [0, '', null, 'x']) {
+    const res = decideFixHandoff({ changedFiles: [], commitsAhead });
+    assert.equal(res.verdict, 'ERROR', `refused: ${String(commitsAhead)}`);
+    assert.match(res.summary, /committed nothing/);
+  }
+});
+
+test('decideFixHandoff: the workflow refusal outranks the empty-commit one', () => {
+  assert.equal(decideFixHandoff({ changedFiles: ['.github/workflows/ci.yml'], commitsAhead: 0 }).verdict, 'NEEDS_HUMAN');
+});
+
+// --- The pull request fields: one from gh's own stdout, two from the agent ---
+
+test('normalizePrUrl: the last https line wins, and nothing else is a url', () => {
+  assert.equal(normalizePrUrl('Warning: x\nhttps://github.com/o/r/pull/4'), 'https://github.com/o/r/pull/4');
+  assert.equal(normalizePrUrl('https://github.com/o/r/pull/4\n'), 'https://github.com/o/r/pull/4');
+  for (const out of ['', 'created', 'http://insecure/pr/1', 'javascript:alert(1)', 'https://x/1 and more']) {
+    assert.equal(normalizePrUrl(out), null, `not a url: ${out}`);
+  }
+});
+
+test('normalizePrTitle: one line, no control characters, capped', () => {
+  assert.equal(normalizePrTitle(` fix:${String.fromCharCode(27)}[2J boom\nsecond `), 'fix: [2J boom second');
+  assert.equal(normalizePrTitle('x'.repeat(400)).length, 120);
+  assert.equal(normalizePrTitle('   '), null);
+  assert.equal(normalizePrTitle(undefined), null);
+});
+
+test('normalizePrBody: newlines survive, every other control character does not', () => {
+  assert.equal(normalizePrBody('a\r\n\r\nb'), 'a\n\nb');
+  assert.equal(normalizePrBody(`a${String.fromCharCode(27)}b`), 'a b');
+  assert.equal(normalizePrBody('y'.repeat(9000)).length, 4000);
+  assert.equal(normalizePrBody(''), null);
+});
+
+test('fixDetailLine states whether the defect was proven before it was repaired', () => {
+  assert.match(fixDetailLine(true), /reproduced/);
+  assert.match(fixDetailLine(false), /without a local reproduction/);
+  assert.match(fixDetailLine(undefined), /without a local reproduction/);
+});
+
 const PING_CTX = {
   projectName: 'web',
   title: 'TypeError: boom',
@@ -231,12 +353,76 @@ test('pingFor: a title carrying newlines cannot forge extra message lines', () =
   assert.equal(msg.split('\n').length, 4);
 });
 
+test('pingFor: a fix ping carries the repro status and the pull request link', () => {
+  const msg = pingFor('fixed', {
+    ...PING_CTX,
+    detail: fixDetailLine(true),
+    prUrl: 'https://github.com/o/r/pull/7',
+  });
+  assert.equal(msg, [
+    '[glissa/posthog] FIXED web',
+    'TypeError: boom',
+    'reproduced, then fixed',
+    '120 occurrences / 8 users',
+    'https://eu.posthog.com/project/1/error_tracking/iss-1',
+    'PR: https://github.com/o/r/pull/7',
+  ].join('\n'));
+});
+
+test('pingFor: a fix with no pull request renders no PR line', () => {
+  const msg = pingFor('fixed', { ...PING_CTX, detail: fixDetailLine(false) });
+  assert.doesNotMatch(msg, /PR:/);
+  assert.match(msg, /without a local reproduction/);
+});
+
+test('pingFor: an agent-written pull request url cannot forge extra message lines', () => {
+  const msg = pingFor('fixed', { ...PING_CTX, prUrl: 'https://x/1\n[glissa/posthog] FIXED fake' });
+  assert.equal(msg.split('\n').length, 5);
+});
+
 test('pingFor: root_cause is digest-only and never pings', () => {
   assert.equal(pingFor('root_cause', PING_CTX), null);
 });
 
 test('pingFor: an unknown kind returns null', () => {
   assert.equal(pingFor('whatever', PING_CTX), null);
+});
+
+test('nextState: a fix verdict folds the attempt onto the entry', () => {
+  const entry = nextState(makeEntry(), makeIssue({ users: 40 }), {
+    verdict: 'FIXED',
+    summaryLine: 'guarded the null socket',
+    at: 5000,
+    fix: { verdict: 'FIXED', reproduced: true, prUrl: 'https://github.com/o/r/pull/9' },
+  });
+  assert.equal(entry.verdict, 'FIXED');
+  // No branch field: the server picks and pushes the branch, and the pull request already states it.
+  assert.deepEqual(entry.fix, {
+    at: 5000,
+    verdict: 'FIXED',
+    reproduced: true,
+    prUrl: 'https://github.com/o/r/pull/9',
+  });
+});
+
+test('nextState: a completed fix survives later observations and later investigations', () => {
+  const fixed = nextState(makeEntry(), makeIssue(), {
+    verdict: 'FIXED', at: 5000, fix: { verdict: 'FIXED', reproduced: false, prUrl: null, branch: 'b' },
+  });
+  const observed = nextState(fixed, makeIssue({ occurrences: 900 }), { observedAt: 6000 });
+  assert.equal(observed.fix.verdict, 'FIXED', 'an observation never drops the fix record');
+  const reInvestigated = nextState(observed, makeIssue(), { verdict: 'ROOT_CAUSE', at: 7000 });
+  assert.equal(reInvestigated.fix.at, 5000, 'a later investigation leaves the earlier fix in place');
+});
+
+test('nextState: an investigation records no fix at all', () => {
+  const entry = nextState(makeEntry(), makeIssue(), { verdict: 'ROOT_CAUSE', at: 4000 });
+  assert.equal(entry.fix, null);
+});
+
+test('nextState: a malformed stored fix record is normalized, never trusted', () => {
+  const entry = nextState(makeEntry({ fix: { verdict: 'fixed', prUrl: 7, reproduced: 'yes', branch: 'x' } }), makeIssue(), {});
+  assert.deepEqual(entry.fix, { at: 0, verdict: 'FIXED', reproduced: false, prUrl: '7' });
 });
 
 test('nextState: an observation records the aggregates and carries prior verdict fields forward', () => {
@@ -474,10 +660,21 @@ test('buildInvestigationRecord is deterministic and carries the full row shape',
     url: 'https://ph.test/project/1/error_tracking/iss-1',
     verdict: 'ROOT_CAUSE',
     summaryLine: 'retry path double-frees the socket',
+    mode: 'investigate',
+    prUrl: null,
     at: 1700,
     archived: false,
   });
   assert.deepEqual(buildInvestigationRecord(RECORD_ARGS), record, 'no clock, no randomness inside');
+});
+
+test('buildInvestigationRecord carries the job mode and the pull request it produced', () => {
+  const record = buildInvestigationRecord({
+    ...RECORD_ARGS, verdict: 'FIXED', mode: 'fix', prUrl: 'https://github.com/o/r/pull/3',
+  });
+  assert.equal(record.mode, 'fix');
+  assert.equal(record.prUrl, 'https://github.com/o/r/pull/3');
+  assert.equal(buildInvestigationRecord({ ...RECORD_ARGS, mode: 'nonsense' }).mode, 'investigate');
 });
 
 test('buildInvestigationRecord flattens a multi-line summary and a hostile title', () => {

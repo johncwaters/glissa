@@ -149,6 +149,8 @@ function posthogPayload(over = {}) {
     minUsersToInvestigate: 1,
     userEscalationThreshold: 25,
     repoPath: '/repo/web',
+    autoFix: false,
+    fixTimeoutSeconds: 1800,
     trafficSpikeEnabled: true,
     trafficSpikeMultiplier: 3,
     trafficSpikeMinUsers: 10,
@@ -278,6 +280,41 @@ test('trafficSpikeEnabled: false persists rather than being dropped as falsy', (
   const h = harness({ projects: [], teams: [] });
   h.send({ type: 'update-settings', settings: { posthog: posthogPayload({ trafficSpikeEnabled: false }) } });
   assert.equal(h.cfg.posthog.trafficSpikeEnabled, false);
+});
+
+// The auto-fix dispatch. It pushes branches and opens pull requests, so it is opted into explicitly
+// and its longer ceiling is bounded on both sides rather than left as a bare positive number.
+test('posthog.autoFix persists both ways and is rejected when it is not a boolean', () => {
+  const on = harness({ projects: [], teams: [] });
+  on.send({ type: 'update-settings', settings: { posthog: posthogPayload({ autoFix: true }) } });
+  assert.equal(on.cfg.posthog.autoFix, true);
+
+  const off = harness({ projects: [], teams: [] });
+  off.send({ type: 'update-settings', settings: { posthog: posthogPayload({ autoFix: false }) } });
+  assert.equal(off.cfg.posthog.autoFix, false, 'false persists rather than being dropped as falsy');
+
+  const bad = harness({ projects: [], teams: [] });
+  bad.send({ type: 'update-settings', settings: { posthog: posthogPayload({ autoFix: 'yes' }) } });
+  assert.ok(bad.sent.find((m) => m.type === 'settings-error' && /autoFix/.test(m.message)));
+  assert.equal(bad.cfg.posthog, undefined);
+});
+
+test('posthog.fixTimeoutSeconds outside 60..21600 is rejected', () => {
+  for (const seconds of [0, 59, 21601]) {
+    const h = harness({ projects: [], teams: [] });
+    h.send({ type: 'update-settings', settings: { posthog: posthogPayload({ fixTimeoutSeconds: seconds }) } });
+    assert.ok(
+      h.sent.find((m) => m.type === 'settings-error' && /fixTimeoutSeconds/.test(m.message)),
+      `rejected ${seconds}s`,
+    );
+    assert.equal(h.cfg.posthog, undefined);
+  }
+});
+
+test('posthog.fixTimeoutSeconds inside the range persists', () => {
+  const h = harness({ projects: [], teams: [] });
+  h.send({ type: 'update-settings', settings: { posthog: posthogPayload({ fixTimeoutSeconds: 3600 }) } });
+  assert.equal(h.cfg.posthog.fixTimeoutSeconds, 3600);
 });
 
 test('a non-object posthog.projectMap is rejected with settings-error', () => {

@@ -246,6 +246,8 @@ export function createSettingsDialog(initialTab) {
   const posthogTimeoutInput = dialog.querySelector('#settings-posthog-timeout');
   const posthogMinUsersInput = dialog.querySelector('#settings-posthog-min-users');
   const posthogEscalationInput = dialog.querySelector('#settings-posthog-escalation');
+  const posthogAutoFixCheckbox = dialog.querySelector('#settings-posthog-auto-fix');
+  const posthogFixTimeoutInput = dialog.querySelector('#settings-posthog-fix-timeout');
   const posthogTrafficEnabledCheckbox = dialog.querySelector('#settings-posthog-traffic-enabled');
   const posthogTrafficMultiplierInput = dialog.querySelector('#settings-posthog-traffic-multiplier');
   const posthogTrafficMinUsersInput = dialog.querySelector('#settings-posthog-traffic-min-users');
@@ -442,7 +444,7 @@ export function createSettingsDialog(initialTab) {
 
   const POSTHOG_NUMERIC_INPUTS = () => [
     posthogIntervalInput, posthogMaxInvestigationsInput, posthogTimeoutInput,
-    posthogMinUsersInput, posthogEscalationInput,
+    posthogMinUsersInput, posthogEscalationInput, posthogFixTimeoutInput,
     posthogTrafficMultiplierInput, posthogTrafficMinUsersInput,
     posthogTrafficCooldownInput, posthogTrafficBaselineInput,
   ];
@@ -525,6 +527,8 @@ export function createSettingsDialog(initialTab) {
         investigationTimeoutSeconds: Number(posthogTimeoutInput.value),
         minUsersToInvestigate: Number(posthogMinUsersInput.value),
         userEscalationThreshold: Number(posthogEscalationInput.value),
+        autoFix: posthogAutoFixCheckbox.checked,
+        fixTimeoutSeconds: Number(posthogFixTimeoutInput.value),
         trafficSpikeEnabled: posthogTrafficEnabledCheckbox.checked,
         trafficSpikeMultiplier: Number(posthogTrafficMultiplierInput.value),
         trafficSpikeMinUsers: Number(posthogTrafficMinUsersInput.value),
@@ -602,6 +606,9 @@ export function createSettingsDialog(initialTab) {
       posthogTimeoutInput.value = ph.investigationTimeoutSeconds ?? 900;
       posthogMinUsersInput.value = ph.minUsersToInvestigate ?? 1;
       posthogEscalationInput.value = ph.userEscalationThreshold ?? 25;
+      // Absent means off: this lane pushes branches, so it is opted into, never defaulted into.
+      posthogAutoFixCheckbox.checked = ph.autoFix === true;
+      posthogFixTimeoutInput.value = ph.fixTimeoutSeconds ?? 1800;
       // Absent means on, matching how the poller reads the key.
       posthogTrafficEnabledCheckbox.checked = ph.trafficSpikeEnabled !== false;
       posthogTrafficMultiplierInput.value = ph.trafficSpikeMultiplier ?? 3;

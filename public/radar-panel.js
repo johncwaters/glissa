@@ -28,6 +28,7 @@ import {
   sortIssuesByAttention,
   sparklinePoints,
   summarizeIssues,
+  verdictLabel,
 } from './radar-core.mjs';
 
 let _latest = null;
@@ -64,13 +65,6 @@ const CHANGE_LABEL = {
   worsened: 'worsened',
   new: 'new',
   quiet: 'quiet',
-};
-
-const VERDICT_LABEL = {
-  ROOT_CAUSE: 'root cause',
-  NEEDS_HUMAN: 'needs you',
-  TRANSIENT: 'transient',
-  ERROR: 'error',
 };
 
 function formatCount(n) {
@@ -260,7 +254,7 @@ function buildIssueRow(issue, projectId) {
     row.append(chip);
   }
   if (!issue.inFlight && issue.verdict) {
-    const chip = el('span', 'radar-verdict', VERDICT_LABEL[issue.verdict] || String(issue.verdict).toLowerCase());
+    const chip = el('span', 'radar-verdict', verdictLabel(issue.verdict));
     chip.dataset.verdict = issue.verdict;
     row.append(chip);
     if (issueReportId(issue)) {
@@ -413,7 +407,7 @@ function buildInvestigationActions(row) {
 function buildInvestigationRow(row) {
   const item = el('div', 'radar-investigation');
 
-  const verdict = el('span', 'radar-verdict', VERDICT_LABEL[row.verdict] || row.verdict.toLowerCase());
+  const verdict = el('span', 'radar-verdict', verdictLabel(row.verdict));
   verdict.dataset.verdict = row.verdict;
 
   // Titles and summaries come from a third-party service and a headless agent: text, never markup.
@@ -433,8 +427,26 @@ function buildInvestigationRow(row) {
     summary.textContent = row.summaryLine;
     copy.append(summary);
   }
+  // An auto-fix job's durable output. The url is validated in radar-core, so an absent one means the
+  // job opened no pull request rather than that the link was dropped.
+  if (row.prUrl) {
+    const pr = el('a', 'radar-investigation-pr', 'fix PR');
+    pr.href = row.prUrl;
+    pr.target = '_blank';
+    pr.rel = 'noopener';
+    pr.title = row.prUrl;
+    copy.append(pr);
+  }
 
-  item.append(verdict, copy);
+  item.append(verdict);
+  // Which job produced this row. Only the fix lane is tagged: an investigation is the default job and
+  // labelling every row with it would say nothing.
+  if (row.mode === 'fix') {
+    const mode = el('span', 'radar-verdict', 'fix');
+    mode.dataset.mode = 'fix';
+    item.append(mode);
+  }
+  item.append(copy);
   if (row.projectLabel) {
     const project = el('span', 'radar-investigation-project');
     project.textContent = row.projectLabel;

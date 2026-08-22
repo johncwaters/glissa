@@ -31,11 +31,17 @@ const OBSERVATION_PINGS = {
 };
 
 // Investigation-verdict pings. ROOT_CAUSE is absent on purpose: a diagnosed issue is digest
-// material, not a phone buzz (core.pingFor returns null for it either way).
+// material, not a phone buzz (core.pingFor returns null for it either way). FIXED belongs to the
+// auto-fix job and DOES ping: a shipped pull request is the one verdict that asks for a carbon unit.
+// TRANSIENT stays silent in both modes.
 const VERDICT_PING_KIND = {
   NEEDS_HUMAN: 'needs_human',
   ERROR: 'error',
+  FIXED: 'fixed',
 };
+
+// The one verdict ping that is NOT deduped per issue phase (see finishInvestigation).
+const FIX_PING_KIND = 'fixed';
 
 // Traffic-lane verdicts that reach Telegram. 'clear' is absent on purpose: traffic falling back to
 // normal re-arms the state silently, it is not news.
@@ -71,6 +77,12 @@ function createPosthogPoller(deps) {
   const intervalMinutes = deps.intervalMinutes || 15;
   const maxConcurrentInvestigations = deps.maxConcurrentInvestigations || 2;
   const investigationTimeoutSeconds = deps.investigationTimeoutSeconds || 900;
+  // Auto-fix is OFF unless explicitly enabled: a lane that diagnoses is a monitor, a lane that pushes
+  // branches is a contributor, and the operator opts into the second one deliberately.
+  const autoFix = deps.autoFix === true;
+  // A fix reproduces, repairs and runs a suite, so it gets its own (longer) ceiling. Fix jobs still
+  // ride the SAME concurrency slots as investigations: one cap governs what the lane costs.
+  const fixTimeoutSeconds = deps.fixTimeoutSeconds || 1800;
   const minUsersToInvestigate = deps.minUsersToInvestigate ?? core.DEFAULT_MIN_USERS_TO_INVESTIGATE;
   const userEscalationThreshold = deps.userEscalationThreshold ?? core.DEFAULT_USER_ESCALATION_THRESHOLD;
   const dateRangeHours = deps.dateRangeHours || 24;
@@ -152,12 +164,19 @@ function createPosthogPoller(deps) {
     const timeout = new Promise((resolve) => {
       timeoutHandle = setTimeoutFn(() => {
         controller.abort();
-        resolve({ verdict: 'ERROR', summary: 'investigation timed out' });
+        const what = args.mode === core.JOB_MODES.fix ? 'fix' : 'investigation';
+        resolve({ verdict: 'ERROR', summary: `${what} timed out`, mode: args.mode });
       }, args.timeoutMs);
       if (timeoutHandle && typeof timeoutHandle.unref === 'function') timeoutHandle.unref();
     });
     const run = Promise.resolve(spawnInvestigation({ ...args, signal: controller.signal }))
       .catch((e) => ({ verdict: 'ERROR', summary: firstLine(e.message) }));
+    // Tracked on its own, not only through the race: on the TIMEOUT path the race resolves and the
+    // slot frees while the spawn is still unwinding, and a fix job unwinds through its worktree
+    // discard. Without this, stop() (a shutdown, or a settings-triggered restart) could return
+    // before that discard ran and leave the throwaway checkout behind for the next instance.
+    running.add(run);
+    run.finally(() => running.delete(run));
     const res = await Promise.race([run, timeout]);
     if (timeoutHandle) clearTimeoutFn(timeoutHandle);
     return res || { verdict: 'ERROR', summary: 'no verdict' };
@@ -176,14 +195,31 @@ function createPosthogPoller(deps) {
     });
   }
 
-  function finishInvestigation(change, result) {
+  /*
+   * `plannedMode` is what the tick decided; `result.mode` is what actually ran. They differ when the
+   * wiring downgraded a fix to an investigation (no repository to commit in), and the entry, the ping
+   * and the inbox record must all describe the job that happened, not the one that was planned.
+   */
+  function finishInvestigation(change, result, plannedMode = core.JOB_MODES.investigate) {
     const prev = state[change.key] || {};
     const phases = [...(prev.pingedPhases || [])];
     const verdict = String((result?.verdict) || 'ERROR').toUpperCase();
+    const mode = core.normalizeJobMode(result?.mode || plannedMode);
+    const isFix = mode === core.JOB_MODES.fix;
     const completedAt = now();
     const kind = VERDICT_PING_KIND[verdict];
     if (kind) {
-      pingOnce(kind, { ...pingContext(change), summary: result?.summary }, phases);
+      const ctx = {
+        ...pingContext(change),
+        summary: result?.summary,
+        detail: isFix && verdict === 'FIXED' ? core.fixDetailLine(result?.reproduced) : undefined,
+        prUrl: isFix ? result?.prUrl : undefined,
+      };
+      // A completed fix is per JOB, not per issue phase: pingedPhases is carried forward forever, so
+      // deduping it meant the SECOND fix (after a regression) opened a pull request in silence. The
+      // dispatch gates already decide when a second fix may run at all.
+      if (kind === FIX_PING_KIND) pingAlways(kind, ctx);
+      if (kind !== FIX_PING_KIND) pingOnce(kind, ctx, phases);
     }
     const summaryLine = core.summaryLineFromReportText(result?.summary);
     if (recurrenceDedupe && verdict === 'TRANSIENT') {
@@ -195,6 +231,9 @@ function createPosthogPoller(deps) {
       at: completedAt,
       inFlight: false,
       pingedPhases: phases,
+      fix: isFix
+        ? { at: completedAt, verdict, reproduced: result?.reproduced === true, prUrl: result?.prUrl }
+        : null,
     });
     // The inbox entry is written HERE, at the same seam as the verdict, so it exists whether or not
     // the verdict pinged and whether or not the issue survives in the active list.
@@ -209,6 +248,8 @@ function createPosthogPoller(deps) {
       verdict,
       summaryLine: result?.summary,
       at: completedAt,
+      mode,
+      prUrl: isFix ? result?.prUrl : null,
     }));
     return persist();
   }
@@ -257,7 +298,8 @@ function createPosthogPoller(deps) {
     return { ok: true, investigations: currentInvestigations() };
   }
 
-  async function runInvestigation(change) {
+  async function runInvestigation(change, mode) {
+    const isFix = mode === core.JOB_MODES.fix;
     try {
       const res = await spawnWithTimeout({
         key: change.key,
@@ -266,21 +308,24 @@ function createPosthogPoller(deps) {
         projectName: change.projectName,
         host,
         url: change.url,
-        timeoutMs: investigationTimeoutSeconds * 1000,
+        mode,
+        timeoutMs: (isFix ? fixTimeoutSeconds : investigationTimeoutSeconds) * 1000,
       });
-      await finishInvestigation(change, res);
+      await finishInvestigation(change, res, mode);
     } catch (e) {
-      await finishInvestigation(change, { verdict: 'ERROR', summary: firstLine(e.message) });
+      await finishInvestigation(change, { verdict: 'ERROR', summary: firstLine(e.message) }, mode);
     }
   }
 
-  // Mark an issue in-flight and launch its investigation, tracked so stop() drains it. Shared by the
-  // tick's planned investigations and the operator's manual re-investigation, so both take the same
+  // Mark an issue in-flight and launch its job, tracked so stop() drains it. Shared by the tick's
+  // planned investigations and the operator's manual re-investigation, so both take the same
   // concurrency slot, the same never-rejecting tracking promise, and the same state bookkeeping.
+  // A fix job and an investigation are indistinguishable here on purpose: one slot pool, one drain.
   function startInvestigation(change, decision = null) {
+    const mode = core.decideJobMode(change, { autoFix, userEscalationThreshold });
     state[change.key].inFlight = true;
     if (decision?.matchKey) state[change.key].recurrenceOf = decision.matchKey;
-    const investigation = runInvestigation(change).catch((e) => {
+    const investigation = runInvestigation(change, mode).catch((e) => {
       log.warn(`[posthog-poller] investigation crashed for ${change.key}: ${e.message}`);
     });
     running.add(investigation);

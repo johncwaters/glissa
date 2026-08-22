@@ -176,6 +176,17 @@
     </label>
   </div>
   <label class="dialog-label dialog-checkbox-label">
+    <input type="checkbox" class="dialog-checkbox" id="settings-posthog-auto-fix">
+    Attempt fixes for major issues
+    <span class="dialog-hint">A spiking, regressed or high-impact issue gets an agent that reproduces it, fixes it in an isolated worktree, and opens a pull request. It never merges.</span>
+  </label>
+  <div class="settings-timeout-grid">
+    <label class="dialog-label">
+      Fix timeout (seconds)
+      <input type="number" class="dialog-input" id="settings-posthog-fix-timeout" min="60" max="21600" step="1" autocomplete="off">
+    </label>
+  </div>
+  <label class="dialog-label dialog-checkbox-label">
     <input type="checkbox" class="dialog-checkbox" id="settings-posthog-traffic-enabled">
     Traffic spike alerts
     <span class="dialog-hint">Pings when a project's unique users in the last hour run far above its own hourly baseline.</span>
