@@ -15,6 +15,7 @@ export const USAGE_DISABLED_HINT = 'Open Settings and its Usage tab to switch to
 
 // ccusage's own warning threshold, applied to both the block so far and where it is projected to land.
 export const TOKEN_LIMIT_WARN_PCT = 80;
+export const SESSION_ROW_LIMIT = 10;
 
 // What a range control may ask for. `days` of null means "whatever the lane retains", which is the
 // server's own default when the field is omitted.
@@ -559,6 +560,22 @@ export const DEFAULT_DAY_SORT = Object.freeze({ key: 'day', dir: 'desc' });
 
 export function sortSessionRows(rows, sort = DEFAULT_SESSION_SORT) {
   return sortUsageRows(rows, sort.key, sort.dir, sessionRowLabel);
+}
+
+export function visibleSessionRows(sortedRows, expanded, limit = SESSION_ROW_LIMIT) {
+  if (!Array.isArray(sortedRows)) return { rows: [], hiddenCount: 0 };
+  const maxRows = Number.isFinite(limit) ? Math.max(0, Math.floor(limit)) : SESSION_ROW_LIMIT;
+  if (expanded || sortedRows.length <= maxRows) return { rows: sortedRows, hiddenCount: 0 };
+  return {
+    rows: sortedRows.slice(0, maxRows),
+    hiddenCount: sortedRows.length - maxRows,
+  };
+}
+
+export function sessionOverflowText(hiddenCount, limit = SESSION_ROW_LIMIT) {
+  const hidden = Number(hiddenCount);
+  if (!Number.isFinite(hidden) || hidden <= 0) return '';
+  return `Showing the top ${formatCount(limit)} sessions. ${formatCount(hidden)} more are hidden.`;
 }
 
 export function sortModelRows(models, sort = DEFAULT_MODEL_SORT) {
