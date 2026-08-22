@@ -5135,9 +5135,9 @@ html[data-layout="phone"] .radar-ops-detail {
   white-space: normal;
   overflow-wrap: anywhere;
 }
-/* A PR title is a sentence, so it takes the whole line under the phase chip and wraps there rather
-   than sharing a line and ending in an ellipsis. */
-html[data-layout="phone"] .radar-pr-title {
+/* A PR title is a sentence: full wrapping line under the phase chip, never an ellipsis. */
+html[data-layout="phone"] .radar-pr-title,
+html[data-layout="phone"] .pr-title {
   flex: 1 1 100%;
   white-space: normal;
   overflow: visible;
@@ -5149,11 +5149,7 @@ html[data-layout="phone"] .radar-investigation-project {
   overflow-wrap: anywhere;
 }
 
-/* ── PRs screen ──
-   The desktop PR row is one dense line (phase, title, sha, chips) with the reason indented under the
-   title. On a phone that line has room for the phase and about a third of a title, so the row becomes
-   the same small stack the Radar rows use: phase, then the full title on its own wrapping line, then
-   the metadata, then the reason at the left edge instead of behind a 121px indent. */
+/* ── PRs screen ── the desktop one-line PR row restacks like the Radar rows on a phone. */
 html[data-layout="phone"] .pr-view {
   padding: 14px 12px 24px;
   font-size: 13px;
@@ -5175,12 +5171,6 @@ html[data-layout="phone"] .pr-row {
   border-bottom: 1px solid var(--border-dim);
 }
 html[data-layout="phone"] .pr-row:last-child { border-bottom: none; }
-html[data-layout="phone"] .pr-title {
-  flex: 1 1 100%;
-  white-space: normal;
-  overflow: visible;
-  overflow-wrap: anywhere;
-}
 html[data-layout="phone"] .pr-reason {
   margin-left: 0;
   font-size: 11px;
