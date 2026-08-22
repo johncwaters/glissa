@@ -60,7 +60,7 @@ export function initNotifications() {
  * escalation re-fire replace the previous toast instead of stacking.
  * @param {{ session?: string, category?: string, message?: string }} msg
  */
-export function showDesktopNotification({ session, category, message, ignoreFocus = false } = {}) {
+export function showDesktopNotification({ session, category, message } = {}) {
   const notificationApi = getNotificationApi();
   if (!notificationApi || !isNotificationsEnabled()) return;
   if (notificationApi.permission !== 'granted') return;
@@ -69,10 +69,7 @@ export function showDesktopNotification({ session, category, message, ignoreFocu
   // notifications meant for the other screen. Decline here: the operator is already looking at this
   // window. This must run BEFORE the cross-tab claim below, or this tab would win the claim and then
   // stay silent, muting every other tab with it.
-  // `ignoreFocus` is for an alert the server does NOT focus-suppress (a usage budget threshold): the
-  // dashboard being focused says nothing about whether the operator is looking at the Usage tab, so
-  // declining here would drop the alert entirely rather than avoid a duplicate.
-  if (!ignoreFocus && typeof document !== 'undefined' && typeof document.hasFocus === 'function' && document.hasFocus()) return;
+  if (typeof document !== 'undefined' && typeof document.hasFocus === 'function' && document.hasFocus()) return;
   // Cross-tab claim: every open tab receives the broadcast, and with renotify each
   // construction re-alerts, so only the tab that wins the short-TTL localStorage
   // claim raises the toast (see notify-dedupe-core.mjs). Fail-open on storage errors.

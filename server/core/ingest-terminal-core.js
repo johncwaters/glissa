@@ -344,10 +344,10 @@ function flushAccumulator(state, { now = Date.now() } = {}) {
   state.windowBytesSeen = 0;
   const truncated = state.truncated;
   /*
-   * SCRUB BEFORE ANY SLICING. summarize() and the detail tail below both cut from the FRONT, and a cut
-   * through `api_key=secret` strips the very name the scrub matches on, so scrubbing afterwards lets
-   * the bare value through into the ring, the activity feed and the dispatch prompt's digest. The
-   * publish-time scrub in ingest-core still runs behind this one; it cannot repair a cut already made.
+   * SCRUB BEFORE ANY SLICING. summarize() cuts from the FRONT, and a cut through `api_key=secret`
+   * strips the very name the scrub matches on, so scrubbing afterwards lets the bare value through into
+   * the ring, the activity feed and the dispatch prompt's digest. The publish-time scrub in ingest-core
+   * still runs behind this one; it cannot repair a cut already made.
    */
   const text = scrubText(cleanOutput(lines.join('\n')));
   if (!text) return null;

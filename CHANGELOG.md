@@ -17,11 +17,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **Distribution moved to GitHub installs**: Glissa is no longer published to the npm registry; standalone installs now use `npm install -g github:johncwaters/glissa`, and release/update docs now point at GitHub tags and the `main` branch package metadata.
+- **Lane-attribution ledger retention is now 90 days**, matching the shorter-lived usage data it supports.
 
 ### Fixed
 
 - **WebSocket upgrades are routed by pathname**: control and data upgrades are classified before handoff, unknown local upgrades are left for Vite, remote unknown upgrades are closed, and both control and terminal clients now use jittered reconnect backoff instead of reconnecting in lockstep.
 - **Server lifecycle and install diagnostics are quieter and more reliable**: service-managed restarts now exit non-zero under systemd so the supervisor restarts Glissa, pairing writes dedupe stored devices, and PATH diagnostics dedupe duplicate Claude command matches.
+
+### Removed
+
+- **Usage savings, budget, and anomaly surfaces were removed**: the Usage tab no longer shows savings tiles, budget meters, budget alerts, or the anomaly line, and Settings no longer includes budget fields.
+- **Usage history views were simplified**: the usage heatmap and week/month views were removed.
+- **Codex and Grok vendor usage parsing was removed**, along with the Settings toggles that controlled it.
+- **Durable usage storage was removed**: Glissa no longer keeps the usage warehouse or related budget state files.
+- **The shell-history activity source was removed**, so ingestion no longer reads command history as navigator context.
 
 ## [0.21.0] - 2026-08-05
 
