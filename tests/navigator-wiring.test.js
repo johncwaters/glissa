@@ -1035,9 +1035,7 @@ test('/navigator is refused on the remote listener even with the lane enabled', 
   );
 });
 
-// The remote-mode precedent (tests/control-settings-remote.test.js): a control-WS-settable navigator
-// block would let any local process point the lane at buffers, so it is config-file only.
-test('navigator is in none of the settable key lists and is never echoed by getSettings', () => {
+test('navigator is echoed by getSettings and applied as a restart-required settings block', () => {
   assert.equal(BOOLEAN_KEYS.includes('navigator'), false);
   assert.equal(STRING_KEYS.includes('navigator'), false);
   assert.equal(TIMEOUT_KEYS.includes('navigator'), false);
@@ -1049,9 +1047,9 @@ test('navigator is in none of the settable key lists and is never echoed by getS
   process.env.GLISSA_CONFIG = configPath;
   try {
     const store = createConfigStore();
-    assert.equal('navigator' in store.getSettings(), false);
+    assert.deepEqual(store.getSettings().navigator, { enabled: true });
     store.applySettings({ projects: [], navigator: { enabled: false } });
-    assert.deepEqual(store.config.navigator, { enabled: true }, 'applySettings never reads it');
+    assert.deepEqual(store.config.navigator, { enabled: false });
   } finally {
     if (previousEnv == null) delete process.env.GLISSA_CONFIG;
     if (previousEnv != null) process.env.GLISSA_CONFIG = previousEnv;

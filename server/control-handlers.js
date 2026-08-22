@@ -40,6 +40,10 @@ function scanRepoRoots(roots) {
 
 const PR_REVIEW_NUMERIC_KEYS = ['intervalMinutes', 'maxConcurrentReviews', 'reviewTimeoutSeconds'];
 const PR_REVIEW_MERGE_METHODS = new Set(['rebase', 'squash', 'merge']);
+const NAVIGATOR_DISPATCH_NUMERIC_KEYS = ['quietMs', 'cooldownMs', 'maxPerHour', 'activityMaxPerHour', 'dispatchTimeoutSeconds'];
+const NAVIGATOR_DISPATCH_NUMERIC_RANGES = {
+  activityMaxPerHour: { min: 0, label: 'zero or more' },
+};
 const POSTHOG_NUMERIC_KEYS = [
   'intervalMinutes',
   'maxConcurrentInvestigations',
@@ -208,6 +212,23 @@ const PR_REVIEW_SCHEMA = {
   ],
 };
 
+const NAVIGATOR_DISPATCH_SCHEMA = {
+  name: 'navigator.dispatch',
+  rules: [
+    blockRules.booleans(['enabled']),
+    blockRules.strings(['model']),
+    blockRules.rangedNumbers(NAVIGATOR_DISPATCH_NUMERIC_KEYS, NAVIGATOR_DISPATCH_NUMERIC_RANGES),
+  ],
+};
+
+const NAVIGATOR_SCHEMA = {
+  name: 'navigator',
+  rules: [
+    blockRules.booleans(['enabled']),
+    (navigator) => validateBlock(navigator.dispatch, NAVIGATOR_DISPATCH_SCHEMA),
+  ],
+};
+
 const POSTHOG_SCHEMA = {
   name: 'posthog',
   rules: [
@@ -247,6 +268,7 @@ const TELEGRAM_SCHEMA = {
 };
 
 const validatePrReview = (pr) => validateBlock(pr, PR_REVIEW_SCHEMA);
+const validateNavigator = (navigator) => validateBlock(navigator, NAVIGATOR_SCHEMA);
 const validatePosthog = (ph) => validateBlock(ph, POSTHOG_SCHEMA);
 const validateUsage = (u) => validateBlock(u, USAGE_SCHEMA);
 const validateTelegram = (t) => validateBlock(t, TELEGRAM_SCHEMA);
@@ -272,6 +294,19 @@ function sanitizePrReview(pr) {
     booleans: ['enabled'],
     verbatim: ['projects', 'intervalMinutes', 'mergeMethod', 'maxConcurrentReviews', 'reviewTimeoutSeconds'],
   });
+}
+
+function sanitizeNavigator(navigator) {
+  const out = sanitizeBlock(navigator, { booleans: ['enabled'] });
+  if (isPlainObject(navigator.dispatch)) {
+    const dispatch = sanitizeBlock(navigator.dispatch, {
+      booleans: ['enabled'],
+      trimmedStrings: ['model'],
+      verbatim: NAVIGATOR_DISPATCH_NUMERIC_KEYS,
+    });
+    if (Object.keys(dispatch).length > 0) out.dispatch = dispatch;
+  }
+  return out;
 }
 
 // projectMap is a free-form id -> display-name map owned by the dashboard, so it passes through
@@ -640,6 +675,12 @@ function registerControlHandlers(controlWss, deps) {
       return;
     }
 
+    const navigatorError = validateNavigator(s.navigator);
+    if (navigatorError) {
+      sendError(ws, navigatorError, { type: 'settings-error', requestId: msg.requestId || null });
+      return;
+    }
+
     const posthogError = validatePosthog(s.posthog);
     if (posthogError) {
       sendError(ws, posthogError, { type: 'settings-error', requestId: msg.requestId || null });
@@ -675,6 +716,7 @@ function registerControlHandlers(controlWss, deps) {
       }
       if (s.repoRoots != null) cfg.repoRoots = s.repoRoots;
       if (s.prReview != null) cfg.prReview = sanitizePrReview(s.prReview);
+      if (s.navigator != null) cfg.navigator = sanitizeNavigator(s.navigator);
       if (s.posthog != null) cfg.posthog = sanitizePosthog(s.posthog);
       if (s.usage != null) cfg.usage = sanitizeUsage(s.usage);
       if (s.telegram != null) {

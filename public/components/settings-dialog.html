@@ -6,6 +6,7 @@
   <button type="button" class="settings-tab" role="tab" id="settings-tab-advanced" aria-controls="settings-panel-advanced" aria-selected="false" data-tab="advanced" tabindex="-1">Advanced</button>
   <button type="button" class="settings-tab" role="tab" id="settings-tab-telegram" aria-controls="settings-panel-telegram" aria-selected="false" data-tab="telegram" tabindex="-1">Telegram</button>
   <button type="button" class="settings-tab" role="tab" id="settings-tab-pr-review" aria-controls="settings-panel-pr-review" aria-selected="false" data-tab="pr-review" tabindex="-1">PR Review</button>
+  <button type="button" class="settings-tab" role="tab" id="settings-tab-navigator" aria-controls="settings-panel-navigator" aria-selected="false" data-tab="navigator" tabindex="-1">Navigator</button>
   <button type="button" class="settings-tab" role="tab" id="settings-tab-posthog" aria-controls="settings-panel-posthog" aria-selected="false" data-tab="posthog" tabindex="-1">PostHog</button>
   <button type="button" class="settings-tab" role="tab" id="settings-tab-usage" aria-controls="settings-panel-usage" aria-selected="false" data-tab="usage" tabindex="-1">Usage</button>
   <button type="button" class="settings-tab" role="tab" id="settings-tab-shortcuts" aria-controls="settings-panel-shortcuts" aria-selected="false" data-tab="shortcuts" tabindex="-1">Shortcuts</button>
@@ -130,6 +131,46 @@
       <option value="squash">Squash</option>
       <option value="merge">Merge</option>
     </select>
+  </label>
+</div>
+
+<div class="settings-panel" id="settings-panel-navigator" role="tabpanel" aria-labelledby="settings-tab-navigator" data-panel="navigator" hidden>
+  <label class="dialog-label dialog-checkbox-label">
+    <input type="checkbox" class="dialog-checkbox" id="settings-navigator-enabled">
+    Enable Navigator
+    <span class="dialog-hint">Accepts local editor buffers on the Navigator WebSocket and shows findings in the Navigator view. Changes take effect after server restart.</span>
+  </label>
+  <label class="dialog-label dialog-checkbox-label">
+    <input type="checkbox" class="dialog-checkbox" id="settings-navigator-dispatch-enabled">
+    Enable model comments
+    <span class="dialog-hint">Starts bounded Navigator review sessions for local editor buffers. Changes take effect after server restart.</span>
+  </label>
+  <div class="settings-timeout-grid">
+    <label class="dialog-label">
+      Quiet delay (ms)
+      <input type="number" class="dialog-input" id="settings-navigator-quiet-ms" min="1" step="1" autocomplete="off">
+    </label>
+    <label class="dialog-label">
+      Cooldown (ms)
+      <input type="number" class="dialog-input" id="settings-navigator-cooldown-ms" min="1" step="1" autocomplete="off">
+    </label>
+    <label class="dialog-label">
+      Max per hour
+      <input type="number" class="dialog-input" id="settings-navigator-max-per-hour" min="1" step="1" autocomplete="off">
+    </label>
+    <label class="dialog-label">
+      Activity max per hour
+      <input type="number" class="dialog-input" id="settings-navigator-activity-max-per-hour" min="0" step="1" autocomplete="off">
+    </label>
+    <label class="dialog-label">
+      Dispatch timeout (seconds)
+      <input type="number" class="dialog-input" id="settings-navigator-dispatch-timeout" min="1" step="1" autocomplete="off">
+    </label>
+  </div>
+  <label class="dialog-label">
+    Model override
+    <input type="text" class="dialog-input" id="settings-navigator-model" placeholder="default" autocomplete="off" spellcheck="false">
+    <span class="dialog-hint">Leave blank to use the configured Claude Code default.</span>
   </label>
 </div>
 

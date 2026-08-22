@@ -7,8 +7,8 @@
 // whenever it moves) and `navigator-snapshot` (the whole map plus the intent, sent to every client on
 // connect so a reconnect repairs rather than accumulates).
 //
-// Desktop only in v1: the phone layout hides the tab strip entirely, so no phone screen borrows this panel.
-// The panel is DOM only; the grouping, ordering and wording live in navigator-view-core.mjs.
+// The phone layout borrows this panel as its Navigator screen. The grouping, ordering and wording live
+// in navigator-view-core.mjs.
 
 import { sendControlMsg } from './control-ws.js';
 import { el, isPanelHidden } from './dom-helpers.js';

@@ -21,6 +21,7 @@ function fakeConfigStore(cfg) {
     isUnchosenLaunchDefault: () => false, // no launch-default overlay in these fixtures
     getSettings: () => ({
       prReview: cfg.prReview || null,
+      navigator: cfg.navigator || null,
       posthog: cfg.posthog || null,
       telegram: cfg.telegram || null,
       projectChoices: (cfg.projects || []).map((p) => ({ id: p.id, name: p.name })),
@@ -128,6 +129,48 @@ test('empty telegram strings persist as-is (means unset), key is not deleted', (
   h.send({ type: 'update-settings', settings: { telegram: { botToken: '', chatId: '' } } });
 
   assert.deepEqual(h.cfg.telegram, { botToken: '', chatId: '' });
+});
+
+test('a valid navigator payload persists and echoes in settings-updated', () => {
+  const h = harness({ projects: [], teams: [] });
+  const navigator = {
+    enabled: true,
+    dispatch: {
+      enabled: true,
+      quietMs: 30000,
+      cooldownMs: 300000,
+      maxPerHour: 6,
+      activityMaxPerHour: 2,
+      dispatchTimeoutSeconds: 180,
+      model: 'claude-sonnet-4-20250514',
+    },
+  };
+
+  h.send({ type: 'update-settings', settings: { navigator } });
+
+  assert.deepEqual(h.cfg.navigator, navigator);
+  const updated = h.sent.find((m) => m.type === 'settings-updated');
+  assert.ok(updated, 'replied settings-updated');
+  assert.deepEqual(updated.settings.navigator, navigator);
+  assert.equal(h.reloadCalls.length, 1, 'settings reload still runs once');
+});
+
+test('navigator validation rejects wrong scalar types and ranges', () => {
+  const cases = [
+    [{ enabled: 'yes' }, /navigator.enabled must be a boolean/],
+    [{ dispatch: 'on' }, /navigator.dispatch must be an object/],
+    [{ dispatch: { enabled: 'yes' } }, /navigator.dispatch.enabled must be a boolean/],
+    [{ dispatch: { quietMs: 0 } }, /navigator.dispatch.quietMs must be a positive number/],
+    [{ dispatch: { activityMaxPerHour: -1 } }, /navigator.dispatch.activityMaxPerHour must be zero or more/],
+    [{ dispatch: { model: 42 } }, /navigator.dispatch.model must be a string/],
+  ];
+  for (const [navigator, pattern] of cases) {
+    const h = harness({ projects: [], teams: [] });
+    h.send({ type: 'update-settings', settings: { navigator } });
+    const err = h.sent.find((m) => m.type === 'settings-error');
+    assert.ok(pattern.test(err?.message || ''), `rejected ${JSON.stringify(navigator)}`);
+    assert.equal(h.cfg.navigator, undefined);
+  }
 });
 
 // ---------------------------------------------------------------------------

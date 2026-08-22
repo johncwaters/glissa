@@ -438,10 +438,9 @@ setUsageActivityCallback((active) => {
   tabUsageActivityEl.classList.toggle('active', active);
   setPhoneScreenAttention('usage', active);
 });
-// No phone counterpart to raise: the Navigator tab is desktop only in v1, so there is no screen to
-// attach attention to.
 setNavigatorActivityCallback((active) => {
   tabNavigatorActivityEl.classList.toggle('active', active);
+  setPhoneScreenAttention('navigator', active);
 });
 // A Radar PR row points at the full PR view: the phone screen when that layout owns the panel, the
 // desktop tab otherwise. Radar never navigates itself.
@@ -496,6 +495,7 @@ function acknowledgeViewAttention(view) {
   if (view === 'radar') acknowledgeRadarAttention();
   if (view === 'prs') acknowledgePrAttention();
   if (view === 'usage') acknowledgeUsageAttention();
+  if (view === 'navigator') refreshNavigatorView();
 }
 
 function activateView(view) {
@@ -522,8 +522,6 @@ function activateView(view) {
     refreshUsageView();
     requestUsageReport();
   }
-  // Navigator is pushed, not pulled, so opening it asks for nothing; looking at it is what clears the dot.
-  if (view === 'navigator') refreshNavigatorView();
   acknowledgeViewAttention(view);
 }
 
@@ -557,10 +555,12 @@ mountPhoneShell({
   radarPanelEl: viewRadarEl,
   prsPanelEl: viewPrsEl,
   usagePanelEl: viewUsageEl,
+  navigatorPanelEl: viewNavigatorEl,
   // Usage is the one screen that PULLS rather than being pushed to, so it asks for a fresh report the
   // moment it becomes visible; every other screen ignores this.
   onScreenShown: (screenId) => {
     if (screenId === 'usage') { refreshUsageView(); requestUsageReport(); }
+    if (screenId === 'navigator') refreshNavigatorView();
     acknowledgeViewAttention(screenId);
   },
   // The desktop header does not render under [data-layout="phone"], so its controls move to the Board's

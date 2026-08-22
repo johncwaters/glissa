@@ -968,12 +968,13 @@ function createBackend(httpServer, options = {}) {
     : null;
 
   /*
-   * Navigator lane: config-file only, absent config constructs nothing (docs/archive/plan-navigator.md,
-   * "Wire and trust"). Its tier 3 model dispatch is a second opt-in inside that one: without
-   * config.navigator.dispatch.enabled the dispatcher is never constructed, so the lane arms no
-   * dispatch timer and can spawn nothing. Its sessions get their own ephemeral map for the same
-   * reasons as the PR and distill lanes, and it is that registration (logPrefix 'navigator') that
-   * puts the lane on the usage ledger.
+   * Navigator lane: absent config constructs nothing (docs/archive/plan-navigator.md, "Wire and
+   * trust"). The Settings dialog can persist config.navigator, but this lane is constructed only at
+   * boot, so changes take effect after server restart. Its tier 3 model dispatch is a second opt-in
+   * inside that one: without config.navigator.dispatch.enabled the dispatcher is never constructed, so
+   * the lane arms no dispatch timer and can spawn nothing. Its sessions get their own ephemeral map for
+   * the same reasons as the PR and distill lanes, and it is that registration (logPrefix 'navigator')
+   * that puts the lane on the usage ledger.
    */
   const navigatorDispatchConfig = resolveNavigatorDispatchConfig(config.navigator ? config.navigator.dispatch : null);
   const navigatorSessions = new Map();

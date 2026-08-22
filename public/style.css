@@ -3279,8 +3279,7 @@ a.pr-title:hover {
 
 /* ── Navigator view ─────────────────────────────────────────── */
 /* Same page rhythm and tokens as the Radar, PR and Usage views. Its own selectors because a finding is a
-   three-part line (where, which rule, what) rather than an attention row or a numeric cell. Desktop only
-   in v1: the phone layout hides the tab strip, so there is no [data-layout="phone"] counterpart. */
+   three-part line (where, which rule, what) rather than an attention row or a numeric cell. */
 .navigator-view {
   flex: 1;
   min-height: 0;
@@ -4989,7 +4988,8 @@ html[data-layout="phone"] .phone-shell[data-keyboard="open"] .phone-key-strip:no
 .phone-review,
 .phone-radar,
 .phone-prs,
-.phone-usage { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.phone-usage,
+.phone-navigator { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
 /* The docked column's fixed flex basis is meaningless as a full screen, and there is no neighbour to
    resize against or border off. */
 .phone-review > .app-sidebar { flex: 1 1 auto; border-left: none; }
@@ -4997,7 +4997,8 @@ html[data-layout="phone"] .review-resize-handle { display: none; }
 html[data-layout="phone"] .review-sidebar-body { overscroll-behavior: contain; }
 .phone-radar > .radar-view,
 .phone-prs > .pr-view,
-.phone-usage > .usage-view { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.phone-usage > .usage-view,
+.phone-navigator > .navigator-view { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 /* ── Usage on a phone ──
    The desktop page is numeric tables at 11px, which is unreadable on a phone but does not need
    restructuring the way the Radar rows did: each table already scrolls inside its own box, so the phone
@@ -5036,6 +5037,25 @@ html[data-layout="phone"] .usage-block-label { min-width: 11ch; }
 /* Model ids and project names are long; on a phone they wrap instead of clipping to an unreadable stub. */
 html[data-layout="phone"] .usage-model-cell,
 html[data-layout="phone"] .usage-session-cell { max-width: 28ch; min-width: 18ch; white-space: normal; overflow-wrap: break-word; }
+html[data-layout="phone"] .navigator-view {
+  max-width: none;
+  padding: 14px 12px 24px;
+  font-size: 12px;
+}
+html[data-layout="phone"] .navigator-content { gap: 18px; }
+html[data-layout="phone"] .navigator-intent { padding: 12px; }
+html[data-layout="phone"] .navigator-intent-head,
+html[data-layout="phone"] .navigator-doc-head,
+html[data-layout="phone"] .navigator-activity-head { flex-wrap: wrap; gap: 4px 8px; }
+html[data-layout="phone"] .navigator-intent-title,
+html[data-layout="phone"] .navigator-doc-name,
+html[data-layout="phone"] .navigator-activity-title { font-size: 12px; }
+html[data-layout="phone"] .navigator-intent-form { flex-direction: column; align-items: stretch; }
+html[data-layout="phone"] .navigator-intent-submit { min-height: 36px; }
+html[data-layout="phone"] .navigator-doc { padding: 12px; }
+html[data-layout="phone"] .navigator-finding { grid-template-columns: minmax(44px, auto) minmax(0, auto) minmax(0, 1fr); gap: 6px; }
+html[data-layout="phone"] .navigator-activity-row { grid-template-columns: minmax(44px, auto) minmax(42px, auto) minmax(0, 1fr); gap: 6px; }
+html[data-layout="phone"] .navigator-activity-summary { grid-column: 1 / -1; }
 /* ── Radar on a phone ──
    The desktop board is deliberately dense: one line per issue, controls at 35% opacity until the row
    is hovered. Neither half survives touch. There is no hover to reveal a control with, and a row of
