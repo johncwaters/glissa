@@ -659,7 +659,7 @@ function createNavigatorWiring({
         scheduleSweep(uri);
         if (!isMarkdownDoc(doc)) return null;
         if (!detectBlankLineBoundary({
-          previousText: previousDoc ? previousDoc.text : '',
+          previousText: previousDoc.text,
           nextText: doc.text,
           changes: params?.contentChanges,
         })) return null;
