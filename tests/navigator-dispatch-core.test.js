@@ -23,6 +23,7 @@ const {
   hashText,
   recordDispatch,
   resolveDispatchConfig,
+  resolveNavigatorConfig,
   sanitizeComments,
 } = require('../server/core/navigator-dispatch-core');
 
@@ -39,6 +40,26 @@ test('an absent or half-hearted dispatch config resolves to the disabled shape',
   for (const raw of [undefined, null, {}, [], 'yes', { enabled: 'true' }, { enabled: 1 }, { enabled: false }]) {
     assert.equal(resolveDispatchConfig(raw).enabled, false, `${JSON.stringify(raw)} must not enable the lane`);
   }
+});
+
+test('an absent navigator config resolves to a lane that is off in every half', () => {
+  for (const raw of [undefined, null, {}, [], 'yes', { enabled: 'true' }]) {
+    const resolved = resolveNavigatorConfig(raw);
+    assert.equal(resolved.enabled, false, `${JSON.stringify(raw)} must not enable the lane`);
+    assert.equal(resolved.autoFix, false);
+    assert.equal(resolved.dispatch.enabled, false);
+  }
+});
+
+test('tier 1 silent edits need their own explicit true, never the lane flag alone', () => {
+  assert.equal(resolveNavigatorConfig({ enabled: true }).autoFix, false);
+  assert.equal(resolveNavigatorConfig({ enabled: true, autoFix: 'yes' }).autoFix, false);
+  assert.equal(resolveNavigatorConfig({ enabled: true, autoFix: true }).autoFix, true);
+  assert.deepEqual(
+    resolveNavigatorConfig({ enabled: true, dispatch: { enabled: true } }).dispatch,
+    resolveDispatchConfig({ enabled: true }),
+    'the dispatch half is the same normalizer, not a second copy of it',
+  );
 });
 
 test('enabled: true resolves the documented defaults', () => {

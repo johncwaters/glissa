@@ -280,3 +280,79 @@ test('the correction field adopts the statement only when it holds no draft of i
     focused: false, currentValue: 'same', previousText: 'same', nextText: 'same',
   }), false, 'nothing to adopt');
 });
+
+// --- Tier 1 fix changelog (docs/plan-navigator-2.md, M6) ---
+
+const APPLIED_FIX = {
+  type: 'navigator-fix',
+  uri: 'file:///tmp/plan.md',
+  fix: {
+    code: 'repeated-word', line: 4, message: 'Repeated word "the"', applied: true,
+  },
+  ts: NOW,
+};
+
+test('a fix row reads as a one-based line and says plainly whether it landed', async () => {
+  const { fixLineLabel, fixOutcomeText, fixCountText } = await importCore();
+  assert.equal(fixLineLabel({ line: 4 }), 'L5');
+  assert.equal(fixLineLabel({ line: 0 }), 'L1');
+  assert.equal(fixLineLabel({}), 'L?');
+  assert.equal(fixOutcomeText({ applied: true }), 'applied');
+  assert.equal(fixOutcomeText({ applied: false }), 'refused');
+  assert.equal(fixOutcomeText(null), 'refused', 'anything short of a real success reads as refused');
+  assert.equal(fixCountText(0), '0 fixes');
+  assert.equal(fixCountText(1), '1 fix');
+  assert.equal(fixCountText(7), '7 fixes');
+});
+
+test('one broadcast becomes one row, taking the uri and the stamp off the frame around it', async () => {
+  const { applyFixMessage, fixEntryOfMessage, hasFix } = await importCore();
+  assert.equal(hasFix(APPLIED_FIX), true);
+  assert.deepEqual(fixEntryOfMessage(APPLIED_FIX), {
+    uri: 'file:///tmp/plan.md',
+    code: 'repeated-word',
+    line: 4,
+    message: 'Repeated word "the"',
+    applied: true,
+    ts: NOW,
+  });
+
+  const rows = applyFixMessage([], APPLIED_FIX);
+  assert.equal(rows.length, 1);
+  assert.equal(applyFixMessage(rows, { ...APPLIED_FIX, ts: NOW + 1 })[0].ts, NOW + 1, 'newest first');
+});
+
+test('a frame with nothing to say leaves the list exactly as it was', async () => {
+  const { applyFixMessage, hasFix } = await importCore();
+  const rows = applyFixMessage([], APPLIED_FIX);
+  assert.equal(hasFix({ type: 'navigator-fix', uri: 'file:///tmp/plan.md' }), false);
+  assert.deepEqual(applyFixMessage(rows, { type: 'navigator-fix', fix: { message: '   ' } }), rows);
+});
+
+test('the snapshot ring replaces the tab list rather than merging into it', async () => {
+  const { applyFixSnapshot } = await importCore();
+  const rows = applyFixSnapshot({
+    type: 'navigator-snapshot',
+    fixes: [
+      {
+        uri: 'file:///tmp/plan.md', code: 'repeated-word', line: 4, message: 'Repeated word "the"', applied: true, ts: NOW,
+      },
+      { uri: 'file:///tmp/plan.md', code: '', line: -3, message: 'refused one', applied: false },
+      { uri: 'file:///tmp/plan.md', message: '' },
+    ],
+  });
+  assert.equal(rows.length, 2, 'a record with no message is not a row this list can show');
+  assert.equal(rows[1].line, 0, 'a line off the bottom of the buffer reads as the first one');
+  assert.equal(rows[1].applied, false);
+  assert.deepEqual(applyFixSnapshot({ type: 'navigator-snapshot' }), []);
+});
+
+test('the rendered changelog is capped, however long the tab is left open', async () => {
+  const { MAX_RENDERED_FIXES, applyFixMessage } = await importCore();
+  let rows = [];
+  for (let index = 0; index < MAX_RENDERED_FIXES + 5; index++) {
+    rows = applyFixMessage(rows, { ...APPLIED_FIX, fix: { ...APPLIED_FIX.fix, line: index } });
+  }
+  assert.equal(rows.length, MAX_RENDERED_FIXES);
+  assert.equal(rows[0].line, MAX_RENDERED_FIXES + 4);
+});

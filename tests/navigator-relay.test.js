@@ -12,7 +12,7 @@ const {
   feedFrameBytes,
   serializeFrame,
 } = require('../server/core/navigator-lsp-core');
-const { SYNC_KIND_INCREMENTAL } = require('../session/navigator-relay');
+const { CODE_ACTION_TIMEOUT_MS, SYNC_KIND_INCREMENTAL } = require('../session/navigator-relay');
 
 const RELAY_PATH = path.join(__dirname, '..', 'session', 'navigator-relay.js');
 const TEST_TIMEOUT_MS = 6000;
@@ -130,6 +130,7 @@ test('initialize handshake returns navigator capabilities', async () => {
           openClose: true,
           change: SYNC_KIND_INCREMENTAL,
         },
+        codeActionProvider: true,
       },
       serverInfo: {
         name: 'glissa-navigator',
@@ -231,6 +232,102 @@ test('unknown request returns MethodNotFound', async () => {
     assert.equal(response.id, 77);
     assert.equal(response.error.code, -32601);
     assert.equal(response.error.message, 'Method not found');
+  });
+});
+
+// --- The request path in both directions (docs/plan-navigator-2.md, M6) ---
+
+const CODE_ACTION_PARAMS = {
+  textDocument: { uri: 'file:///note.md' },
+  range: { start: { line: 2, character: 12 }, end: { line: 2, character: 16 } },
+  context: { diagnostics: [] },
+};
+
+test('a codeAction request reaches the daemon under the editor own id and its answer comes back', async () => {
+  await runRelayScenario(async ({ daemon, initialSocket, relay }) => {
+    writeLsp(relay.child, {
+      jsonrpc: '2.0', id: 21, method: 'textDocument/codeAction', params: CODE_ACTION_PARAMS,
+    });
+
+    const forwarded = await daemon.messages.next('codeAction not forwarded');
+    assert.deepEqual(forwarded, {
+      type: 'lsp-request', id: 21, method: 'textDocument/codeAction', params: CODE_ACTION_PARAMS,
+    });
+
+    const actions = [{ title: 'Delete the repeated word', kind: 'quickfix' }];
+    initialSocket.send(JSON.stringify({ type: 'lsp-response', id: 21, result: actions }));
+
+    const response = await relay.stdoutMessages.next('codeAction response missing');
+    assert.deepEqual(response, { jsonrpc: '2.0', id: 21, result: actions });
+  });
+});
+
+test('a daemon that never answers costs the editor a short wait and then no actions', async () => {
+  await runRelayScenario(async ({ daemon, relay }) => {
+    writeLsp(relay.child, {
+      jsonrpc: '2.0', id: 22, method: 'textDocument/codeAction', params: CODE_ACTION_PARAMS,
+    });
+    await daemon.messages.next('codeAction not forwarded');
+
+    const startedAt = Date.now();
+    const response = await relay.stdoutMessages.next('the timed out request was never answered');
+    assert.deepEqual(response, { jsonrpc: '2.0', id: 22, result: null });
+    assert.ok(Date.now() - startedAt >= CODE_ACTION_TIMEOUT_MS - 200, 'it waited for the daemon first');
+  });
+});
+
+test('with the daemon socket down the answer is no actions rather than a hang', async () => {
+  await runRelayScenario(async ({ daemon, relay }) => {
+    await daemon.close();
+    await new Promise((resolve) => { setTimeout(resolve, 150).unref(); });
+
+    writeLsp(relay.child, {
+      jsonrpc: '2.0', id: 23, method: 'textDocument/codeAction', params: CODE_ACTION_PARAMS,
+    });
+    const response = await relay.stdoutMessages.next('the disconnected request was never answered');
+    assert.deepEqual(response, { jsonrpc: '2.0', id: 23, result: null });
+  });
+});
+
+test('a daemon applyEdit is forwarded under a relay id and the editor answer routes back to the daemon id', async () => {
+  await runRelayScenario(async ({ daemon, initialSocket, relay }) => {
+    const params = {
+      label: 'Navigator: 1 silent fix',
+      edit: {
+        documentChanges: [{
+          textDocument: { uri: 'file:///note.md', version: 4 },
+          edits: [{ range: CODE_ACTION_PARAMS.range, newText: '' }],
+        }],
+      },
+    };
+    initialSocket.send(JSON.stringify({
+      type: 'lsp-request', id: 'navigator-fix-1', method: 'workspace/applyEdit', params,
+    }));
+
+    const request = await relay.stdoutMessages.next('applyEdit not forwarded to the editor');
+    assert.equal(request.method, 'workspace/applyEdit');
+    assert.deepEqual(request.params, params);
+    assert.notEqual(request.id, 'navigator-fix-1', 'the editor sees an id the relay minted');
+
+    writeLsp(relay.child, { jsonrpc: '2.0', id: request.id, result: { applied: true } });
+    const answer = await daemon.messages.next('applyEdit answer not routed back');
+    assert.deepEqual(answer, { type: 'lsp-response', id: 'navigator-fix-1', result: { applied: true } });
+  });
+});
+
+test('an editor that errors on an applyEdit is reported to the daemon as a refusal', async () => {
+  await runRelayScenario(async ({ daemon, initialSocket, relay }) => {
+    initialSocket.send(JSON.stringify({
+      type: 'lsp-request', id: 'navigator-fix-9', method: 'workspace/applyEdit', params: { edit: {} },
+    }));
+    const request = await relay.stdoutMessages.next('applyEdit not forwarded to the editor');
+
+    // A response for an id the relay never minted is consumed and dropped, not routed anywhere.
+    writeLsp(relay.child, { jsonrpc: '2.0', id: 'not-a-relay-id', result: { applied: true } });
+    writeLsp(relay.child, { jsonrpc: '2.0', id: request.id, error: { code: -32603, message: 'no' } });
+
+    const answer = await daemon.messages.next('the refusal was never routed back');
+    assert.deepEqual(answer, { type: 'lsp-response', id: 'navigator-fix-9', result: { applied: false } });
   });
 });
 

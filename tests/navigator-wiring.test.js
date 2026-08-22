@@ -853,6 +853,257 @@ test('a dispatch config that is present but not enabled is just as inert', () =>
   wiring.stop();
 });
 
+// --- Tier 1 silent fixes (docs/plan-navigator-2.md, M6) ---
+
+const TWO_REPEATS_AND_A_FENCE = '# Title\n\nA line with with a repeat.\n\nAnd a a second one.\n\n```js\nconst answer = 42;\n';
+
+function sendRequest(connection, id, method, params) {
+  connection.handleFrame(JSON.stringify({
+    type: 'lsp-request', id, method, params,
+  }));
+}
+
+function answerRequest(connection, id, result) {
+  connection.handleFrame(JSON.stringify({ type: 'lsp-response', id, result }));
+}
+
+function requestCodeActions(harness, { id = 'ca-1', uri = MARKDOWN_URI, range = null } = {}) {
+  sendRequest(harness.connection, id, 'textDocument/codeAction', { textDocument: { uri }, range });
+  const answer = harness.sent.filter((message) => message.type === 'lsp-response' && message.id === id).pop();
+  return answer ? answer.result : undefined;
+}
+
+function applyEditRequests(harness) {
+  return harness.sent.filter((message) => message.type === 'lsp-request' && message.method === 'workspace/applyEdit');
+}
+
+function fixBroadcasts(harness) {
+  return harness.broadcasts.filter((message) => message.type === 'navigator-fix');
+}
+
+test('a code action is answered from what the last sweep computed, never from a fresh sweep', (t) => {
+  const harness = drivenConnection();
+  t.after(() => harness.wiring.stop());
+
+  harness.lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  harness.timers.runPending();
+
+  const actions = requestCodeActions(harness);
+  assert.equal(actions.length, 1);
+  assert.equal(actions[0].kind, 'quickfix');
+  assert.equal(actions[0].diagnostics[0].code, 'repeated-word');
+  assert.deepEqual(actions[0].edit.documentChanges[0].textDocument, { uri: MARKDOWN_URI, version: 1 });
+});
+
+test('each sweep replaces the stored fixes, so a corrected buffer offers nothing', (t) => {
+  const harness = drivenConnection();
+  t.after(() => harness.wiring.stop());
+
+  harness.lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  harness.timers.runPending();
+  assert.equal(requestCodeActions(harness, { id: 'ca-before' }).length, 1);
+
+  harness.lsp('textDocument/didChange', didChangeParams(MARKDOWN_URI, 2, CLEAN_MARKDOWN));
+  harness.timers.runPending();
+  assert.deepEqual(requestCodeActions(harness, { id: 'ca-after' }), []);
+});
+
+test('a selection is answered with the fixes it touches and nothing else', (t) => {
+  const harness = drivenConnection();
+  t.after(() => harness.wiring.stop());
+
+  harness.lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', TWO_REPEATS_AND_A_FENCE));
+  harness.timers.runPending();
+
+  assert.equal(requestCodeActions(harness, { id: 'ca-all' }).length, 3, 'the whole document offers every fix');
+  const onLineFour = requestCodeActions(harness, {
+    id: 'ca-line-4', range: { start: { line: 4, character: 0 }, end: { line: 4, character: 18 } },
+  });
+  assert.deepEqual(onLineFour.map((action) => action.diagnostics[0].code), ['repeated-word']);
+  assert.equal(onLineFour[0].diagnostics[0].range.start.line, 4);
+});
+
+test('a fix set is never served against text the buffer has already moved on from', (t) => {
+  const harness = drivenConnection();
+  t.after(() => harness.wiring.stop());
+
+  harness.lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  harness.timers.runPending();
+  assert.equal(requestCodeActions(harness, { id: 'ca-fresh' }).length, 1);
+
+  // The keystroke landed; its sweep has not run yet, so the stored set describes text that is gone.
+  harness.lsp('textDocument/didChange', didChangeParams(MARKDOWN_URI, 2, `${REPEATED_WORD_MARKDOWN}More.\n`));
+  assert.deepEqual(requestCodeActions(harness, { id: 'ca-stale' }), []);
+});
+
+test('a code action for a document the lane never mirrored is empty rather than an error', (t) => {
+  const harness = drivenConnection();
+  t.after(() => harness.wiring.stop());
+
+  assert.deepEqual(requestCodeActions(harness, { id: 'ca-unknown', uri: 'file:///tmp/never-opened.md' }), []);
+});
+
+test('an unknown request method is answered null, never dropped for the relay to time out on', (t) => {
+  const harness = drivenConnection();
+  t.after(() => harness.wiring.stop());
+
+  sendRequest(harness.connection, 'req-9', 'textDocument/formatting', {});
+  assert.deepEqual(harness.sent, [{ type: 'lsp-response', id: 'req-9', result: null }]);
+  assert.deepEqual(harness.warnings, []);
+});
+
+test('a request frame with no id is refused as malformed rather than answered into the void', (t) => {
+  const harness = drivenConnection();
+  t.after(() => harness.wiring.stop());
+
+  harness.connection.handleFrame(JSON.stringify({ type: 'lsp-request', method: 'textDocument/codeAction' }));
+  assert.deepEqual(harness.sent, []);
+  assert.equal(harness.warnings.length, 1);
+  assert.match(harness.warnings[0], /missing id/);
+});
+
+test('with autoFix off a sweep offers its fixes and asks for nothing', (t) => {
+  const harness = drivenConnection();
+  t.after(() => harness.wiring.stop());
+
+  harness.lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', TWO_REPEATS_AND_A_FENCE));
+  harness.timers.runPending();
+
+  assert.deepEqual(applyEditRequests(harness), []);
+  assert.deepEqual(fixBroadcasts(harness), []);
+  assert.equal(requestCodeActions(harness, { id: 'ca-off' }).length, 3);
+});
+
+test('with autoFix on one sweep asks for one versioned edit carrying only the auto-safe fixes', (t) => {
+  const harness = drivenConnection({ autoFix: true });
+  t.after(() => harness.wiring.stop());
+
+  harness.lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', TWO_REPEATS_AND_A_FENCE));
+  harness.timers.runPending();
+
+  const requests = applyEditRequests(harness);
+  assert.equal(requests.length, 1, 'one request per sweep, not one per fix');
+  const [change] = requests[0].params.edit.documentChanges;
+  assert.deepEqual(change.textDocument, { uri: MARKDOWN_URI, version: 1 }, 'versioned, so a racing keystroke refuses it');
+  assert.equal(change.edits.length, 2, 'both repeated words, and never the fence guess');
+  assert.deepEqual(change.edits.map((edit) => edit.newText), ['', '']);
+  assert.equal(requests[0].params.label, 'Navigator: 2 silent fixes');
+});
+
+test('an applied edit is logged and broadcast once per fix, and joins the snapshot', (t) => {
+  const harness = drivenConnection({ autoFix: true });
+  t.after(() => harness.wiring.stop());
+
+  harness.lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', TWO_REPEATS_AND_A_FENCE));
+  harness.timers.runPending();
+  answerRequest(harness.connection, applyEditRequests(harness)[0].id, { applied: true });
+
+  const broadcasts = fixBroadcasts(harness);
+  assert.equal(broadcasts.length, 2);
+  assert.deepEqual(broadcasts[0], {
+    type: 'navigator-fix',
+    uri: MARKDOWN_URI,
+    fix: {
+      code: 'repeated-word', line: 2, message: 'Repeated word "with"', applied: true,
+    },
+    ts: FIXED_TS,
+  });
+
+  const { fixes } = harness.wiring.snapshotMessage();
+  assert.equal(fixes.length, 2);
+  assert.equal(fixes[0].line, 4, 'newest first');
+  assert.deepEqual(fixes.map((entry) => entry.applied), [true, true]);
+  assert.equal(fixes[0].uri, MARKDOWN_URI);
+});
+
+test('a refused edit is logged exactly as loudly and is never retried', (t) => {
+  const harness = drivenConnection({ autoFix: true });
+  t.after(() => harness.wiring.stop());
+
+  harness.lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  harness.timers.runPending();
+  answerRequest(harness.connection, applyEditRequests(harness)[0].id, { applied: false });
+
+  assert.deepEqual(fixBroadcasts(harness).map((message) => message.fix.applied), [false]);
+  assert.equal(harness.wiring.snapshotMessage().fixes[0].applied, false);
+  assert.equal(applyEditRequests(harness).length, 1, 'the refusal buys no second attempt');
+  assert.equal(requestCodeActions(harness, { id: 'ca-after-refusal' }).length, 1, 'and the fix stays on offer');
+});
+
+test('an editor that never answers is logged as a refusal once the wait is up', (t) => {
+  const harness = drivenConnection({ autoFix: true });
+  t.after(() => harness.wiring.stop());
+
+  harness.lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  harness.timers.runPending();
+  assert.deepEqual(fixBroadcasts(harness), [], 'nothing is logged while the editor is still deciding');
+
+  harness.timers.runPending();
+  assert.deepEqual(fixBroadcasts(harness).map((message) => message.fix.applied), [false]);
+  assert.match(harness.notes.join('\n'), /auto-fix refused/);
+});
+
+test('an answer for an id the lane never asked about changes nothing', (t) => {
+  const harness = drivenConnection({ autoFix: true });
+  t.after(() => harness.wiring.stop());
+
+  harness.lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  harness.timers.runPending();
+  answerRequest(harness.connection, 'navigator-fix-999', { applied: true });
+
+  assert.deepEqual(fixBroadcasts(harness), []);
+  assert.deepEqual(harness.wiring.snapshotMessage().fixes, []);
+});
+
+test('the changelog is capped, so an unattended lane cannot grow it without end', (t) => {
+  const harness = drivenConnection({ autoFix: true });
+  t.after(() => harness.wiring.stop());
+
+  harness.lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  harness.timers.runPending();
+  answerRequest(harness.connection, applyEditRequests(harness)[0].id, { applied: true });
+
+  for (let round = 0; round < 25; round++) {
+    harness.lsp('textDocument/didChange', didChangeParams(MARKDOWN_URI, round + 2, `A line with with repeat ${round}.\n`));
+    harness.timers.runPending();
+    answerRequest(harness.connection, applyEditRequests(harness).pop().id, { applied: true });
+  }
+
+  const { fixes } = harness.wiring.snapshotMessage();
+  assert.equal(fixes.length, 20);
+  assert.equal(fixes[0].message, 'Repeated word "with"');
+});
+
+test('didClose drops the stored fixes and settles the edit the buffer will never answer', (t) => {
+  const harness = drivenConnection({ autoFix: true });
+  t.after(() => harness.wiring.stop());
+
+  harness.lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  harness.timers.runPending();
+  harness.lsp('textDocument/didClose', { textDocument: { uri: MARKDOWN_URI } });
+
+  assert.deepEqual(fixBroadcasts(harness).map((message) => message.fix.applied), [false]);
+  assert.deepEqual(requestCodeActions(harness, { id: 'ca-closed' }), []);
+});
+
+test('a relay that drops mid-edit settles it rather than owing the changelog a line forever', (t) => {
+  const harness = drivenConnection({ autoFix: true });
+  t.after(() => harness.wiring.stop());
+
+  harness.lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  harness.timers.runPending();
+  harness.connection.close();
+
+  assert.deepEqual(fixBroadcasts(harness).map((message) => message.fix.applied), [false]);
+  assert.match(harness.notes.join('\n'), /the relay disconnected/);
+});
+
+test('an empty lane still carries a fixes field on its snapshot', (t) => {
+  const harness = drivenConnection();
+  t.after(() => harness.wiring.stop());
+  assert.deepEqual(harness.wiring.snapshotMessage().fixes, []);
+});
+
 // --- Real backend boots ---
 
 const booted = [];

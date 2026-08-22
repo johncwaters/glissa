@@ -55,7 +55,7 @@ const { createPrReviewWiring } = require('./pr-review-wiring');
 const { createPosthogWiring } = require('./posthog-wiring');
 const { createNavigatorWiring } = require('./navigator-wiring');
 const { createNavigatorDispatcher, createNavigatorSpawn } = require('./navigator-dispatch');
-const { resolveDispatchConfig: resolveNavigatorDispatchConfig } = require('./core/navigator-dispatch-core');
+const { resolveNavigatorConfig } = require('./core/navigator-dispatch-core');
 const { createIngestLane } = require('./ingest-wiring');
 const { resolveIngestConfig } = require('./core/ingest-core');
 const { createUsageWiring, resolveUsageConfig } = require('./usage-wiring');
@@ -920,7 +920,8 @@ function createBackend(httpServer, options = {}) {
    * Constructed BEFORE the navigator lane because that lane takes this one's digest as a dependency.
    */
   const ingestConfig = resolveIngestConfig(config.ingest);
-  const navigatorEnabled = config.navigator && config.navigator.enabled === true;
+  const navigatorConfig = resolveNavigatorConfig(config.navigator);
+  const navigatorEnabled = navigatorConfig.enabled;
   /*
    * The git source's watch set (docs/plan-ingestion.md, M8): the checkouts glissa's OWN project sessions
    * are working in, which is the same session-following rule the plan gives the fs source. Both halves of
@@ -976,7 +977,7 @@ function createBackend(httpServer, options = {}) {
    * the same reasons as the PR and distill lanes, and it is that registration (logPrefix 'navigator')
    * that puts the lane on the usage ledger.
    */
-  const navigatorDispatchConfig = resolveNavigatorDispatchConfig(config.navigator ? config.navigator.dispatch : null);
+  const navigatorDispatchConfig = navigatorConfig.dispatch;
   const navigatorSessions = new Map();
   const navigatorLane = navigatorEnabled
     ? createNavigatorWiring({
@@ -985,6 +986,8 @@ function createBackend(httpServer, options = {}) {
       // Same reason as the ingest lane above: the setting moves, the lane is built once.
       debug: () => configStore.getSettings().debugMode === true,
       dispatchConfig: navigatorDispatchConfig,
+      // Tier 1's push half only; the codeAction pull half is always on with the lane.
+      autoFix: navigatorConfig.autoFix,
       dispatch: navigatorDispatchConfig.enabled
         ? createNavigatorDispatcher({
           spawnSession: createNavigatorSpawn({

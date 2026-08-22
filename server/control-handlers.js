@@ -224,7 +224,7 @@ const NAVIGATOR_DISPATCH_SCHEMA = {
 const NAVIGATOR_SCHEMA = {
   name: 'navigator',
   rules: [
-    blockRules.booleans(['enabled']),
+    blockRules.booleans(['enabled', 'autoFix']),
     (navigator) => validateBlock(navigator.dispatch, NAVIGATOR_DISPATCH_SCHEMA),
   ],
 };
@@ -297,7 +297,7 @@ function sanitizePrReview(pr) {
 }
 
 function sanitizeNavigator(navigator) {
-  const out = sanitizeBlock(navigator, { booleans: ['enabled'] });
+  const out = sanitizeBlock(navigator, { booleans: ['enabled', 'autoFix'] });
   if (isPlainObject(navigator.dispatch)) {
     const dispatch = sanitizeBlock(navigator.dispatch, {
       booleans: ['enabled'],

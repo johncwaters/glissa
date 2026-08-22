@@ -24,6 +24,12 @@ const MAX_RETRY_MS = 5000;
 const METHOD_NOT_FOUND = -32601;
 const MIRROR_METHODS = new Set(['textDocument/didOpen', 'textDocument/didChange', 'textDocument/didClose']);
 const FORWARDED_METHODS = new Set([...MIRROR_METHODS, 'textDocument/didSave']);
+// The one editor request the daemon answers. Everything else is still method-not-found.
+const CODE_ACTION_METHOD = 'textDocument/codeAction';
+// The one request the daemon initiates, which is what makes tier 1 silent (docs/plan-navigator-2.md, M6).
+const APPLY_EDIT_METHOD = 'workspace/applyEdit';
+// A daemon that never answers must not hang the editor: past this the relay answers "no actions" itself.
+const CODE_ACTION_TIMEOUT_MS = 2000;
 
 function parsePortValue(value) {
   const port = Number(value);
@@ -57,6 +63,7 @@ function initializeResult() {
         openClose: true,
         change: SYNC_KIND_INCREMENTAL,
       },
+      codeActionProvider: true,
     },
     serverInfo: {
       name: 'glissa-navigator',
@@ -86,6 +93,18 @@ function editorNotification(method, params) {
 
 function daemonMessage(method, params) {
   return { type: 'lsp', method, params };
+}
+
+function daemonRequest(id, method, params) {
+  return { type: 'lsp-request', id, method, params };
+}
+
+function daemonResponse(id, result) {
+  return { type: 'lsp-response', id, result };
+}
+
+function editorRequest(id, method, params) {
+  return { jsonrpc: '2.0', id, method, params };
 }
 
 // What a refused mirror update needs beside its reason to be diagnosable from one log line.
@@ -127,6 +146,11 @@ function createRelay({
   let retryMs = INITIAL_RETRY_MS;
   let nextPortIndex = 0;
   let isStopping = false;
+  // Editor request id -> its expiry timer, for the codeAction requests the daemon is answering.
+  const pendingCodeActionById = new Map();
+  // Editor-facing id -> the daemon id it answers for, for the applyEdit direction.
+  const applyEditDaemonIdByEditorId = new Map();
+  let nextEditorRequestId = 1;
 
   // stdout carries the LSP protocol, so every line the relay says about itself goes to stderr.
   function note(message) {
@@ -190,8 +214,51 @@ function createRelay({
 
     socket.on('close', () => {
       if (ws === socket) ws = null;
+      // A daemon that went away answers nothing, so the editor gets the "no actions" answer now.
+      failPendingCodeActions();
+      applyEditDaemonIdByEditorId.clear();
       scheduleReconnect(port);
     });
+  }
+
+  function settleCodeAction(id, result) {
+    if (!pendingCodeActionById.has(id)) return false;
+    const timer = pendingCodeActionById.get(id);
+    pendingCodeActionById.delete(id);
+    if (timer) clearTimeout(timer);
+    writeEditorMessage(responseMessage(id, result));
+    return true;
+  }
+
+  function failPendingCodeActions() {
+    for (const id of [...pendingCodeActionById.keys()]) settleCodeAction(id, null);
+  }
+
+  // The editor's own id travels to the daemon and back, so this direction mints nothing.
+  function forwardCodeAction(id, params) {
+    if (!sendWsJson(ws, daemonRequest(id, CODE_ACTION_METHOD, params))) {
+      writeEditorMessage(responseMessage(id, null));
+      return;
+    }
+    const timer = setTimeout(() => settleCodeAction(id, null), CODE_ACTION_TIMEOUT_MS);
+    timer.unref?.();
+    pendingCodeActionById.set(id, timer);
+  }
+
+  // The other direction needs an id the editor has never seen, hence the one prefix the relay mints.
+  function forwardApplyEdit(daemonId, params) {
+    const editorId = `glissa-navigator-${nextEditorRequestId}`;
+    nextEditorRequestId += 1;
+    applyEditDaemonIdByEditorId.set(editorId, daemonId);
+    writeEditorMessage(editorRequest(editorId, APPLY_EDIT_METHOD, params));
+  }
+
+  // A client error answering an applyEdit is a refusal, which is exactly what the daemon logs it as.
+  function handleEditorResponse(editorId, msg) {
+    if (!applyEditDaemonIdByEditorId.has(editorId)) return;
+    const daemonId = applyEditDaemonIdByEditorId.get(editorId);
+    applyEditDaemonIdByEditorId.delete(editorId);
+    sendWsJson(ws, daemonResponse(daemonId, msg.error ? { applied: false } : msg.result));
   }
 
   function stop(exitCode = 0) {
@@ -211,8 +278,16 @@ function createRelay({
     } catch {
       return;
     }
-    if (!msg || msg.type !== 'publishDiagnostics') return;
-    writeEditorMessage(editorNotification('textDocument/publishDiagnostics', msg.params));
+    if (!msg || typeof msg !== 'object') return;
+    if (msg.type === 'publishDiagnostics') {
+      writeEditorMessage(editorNotification('textDocument/publishDiagnostics', msg.params));
+      return;
+    }
+    if (msg.type === 'lsp-response') {
+      settleCodeAction(msg.id, msg.result);
+      return;
+    }
+    if (msg.type === 'lsp-request' && msg.method === APPLY_EDIT_METHOD) forwardApplyEdit(msg.id, msg.params);
   }
 
   function updateMirror(method, params) {
@@ -232,7 +307,8 @@ function createRelay({
     return false;
   }
 
-  function handleRequest(id, method) {
+  function handleRequest(id, method, params) {
+    if (method === CODE_ACTION_METHOD) return forwardCodeAction(id, params);
     if (method === 'initialize') {
       note(`initialize answered: textDocumentSync change=${SYNC_KIND_INCREMENTAL} (incremental)`);
       return writeEditorMessage(responseMessage(id, initializeResult()));
@@ -246,8 +322,9 @@ function createRelay({
 
   function handleEditorMessage(msg) {
     const classification = classifyMessage(msg);
-    if (classification.kind === 'request') return handleRequest(classification.id, classification.method);
+    if (classification.kind === 'request') return handleRequest(classification.id, classification.method, msg.params);
     if (classification.kind === 'notification') return handleNotification(classification.method, msg.params);
+    if (classification.kind === 'response') return handleEditorResponse(classification.id, msg);
     return undefined;
   }
 
@@ -283,6 +360,9 @@ if (require.main === module) {
 }
 
 module.exports = {
+  APPLY_EDIT_METHOD,
+  CODE_ACTION_METHOD,
+  CODE_ACTION_TIMEOUT_MS,
   SYNC_KIND_INCREMENTAL,
   createRelay,
   daemonMessage,

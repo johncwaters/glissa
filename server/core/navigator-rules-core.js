@@ -2,12 +2,18 @@
 
 const WARNING = 2;
 const SOURCE = 'glissa-navigator';
+const FENCE = '```';
 const FENCE_RE = /^(\s*)```/;
 const HEADING_RE = /^( {0,3})(#{1,6})(?:\s|$)/;
 const WORD_RE = /[A-Za-z][A-Za-z0-9']*/g;
 
 function sweepMarkdown(text) {
+  return sweepMarkdownWithFixes(text).diagnostics;
+}
+
+function sweepMarkdownWithFixes(text) {
   const diagnostics = [];
+  const fixes = [];
   const lines = splitLines(text);
   let isInFence = false;
   let lastFence = null;
@@ -24,7 +30,7 @@ function sweepMarkdown(text) {
 
     if (isInFence) continue;
 
-    addRepeatedWordDiagnostics(diagnostics, line, lineIndex);
+    addRepeatedWordDiagnostics(diagnostics, fixes, line, lineIndex);
 
     const headingMatch = line.match(HEADING_RE);
     if (!headingMatch) continue;
@@ -44,24 +50,26 @@ function sweepMarkdown(text) {
   }
 
   if (isInFence && lastFence) {
-    diagnostics.push(diagnostic(
+    const unclosed = diagnostic(
       lastFence.line,
       lastFence.character,
       lastFence.line,
-      lastFence.character + 3,
+      lastFence.character + FENCE.length,
       'unclosed-fence',
       'Fence is not closed',
-    ));
+    );
+    diagnostics.push(unclosed);
+    fixes.push(closingFenceFix(unclosed, lines));
   }
 
-  return diagnostics;
+  return { diagnostics, fixes };
 }
 
 function splitLines(text) {
   return String(text).split(/\r?\n/);
 }
 
-function addRepeatedWordDiagnostics(diagnostics, line, lineIndex) {
+function addRepeatedWordDiagnostics(diagnostics, fixes, line, lineIndex) {
   const inlineCodeMask = maskInlineCode(line);
   let previousWord = null;
 
@@ -80,17 +88,25 @@ function addRepeatedWordDiagnostics(diagnostics, line, lineIndex) {
 
     const normalizedWord = word.toLowerCase();
     if (previousWord && previousWord.normalizedWord === normalizedWord) {
-      diagnostics.push(diagnostic(
-        lineIndex,
-        start,
-        lineIndex,
-        end,
-        'repeated-word',
-        `Repeated word "${word}"`,
-      ));
+      const repeated = diagnostic(lineIndex, start, lineIndex, end, 'repeated-word', `Repeated word "${word}"`);
+      diagnostics.push(repeated);
+      fixes.push(repeatedWordFix(repeated, lineIndex, previousWord.end, end));
     }
-    previousWord = { normalizedWord };
+    previousWord = { normalizedWord, end };
   }
+}
+
+// The separator goes with the word, or deleting "with" out of "with with a" leaves a double space.
+function repeatedWordFix(repeated, lineIndex, previousEnd, end) {
+  return fix(repeated, range(lineIndex, previousEnd, lineIndex, end), '');
+}
+
+// A guess at WHERE the fence should close, which is why this one is never auto-applied.
+function closingFenceFix(unclosed, lines) {
+  const lastLine = Math.max(lines.length - 1, 0);
+  const character = (lines[lastLine] || '').length;
+  const separator = character > 0 ? '\n' : '';
+  return fix(unclosed, range(lastLine, character, lastLine, character), `${separator}${FENCE}\n`);
 }
 
 function maskInlineCode(line) {
@@ -117,12 +133,16 @@ function isMasked(mask, start, end) {
   return false;
 }
 
+function range(startLine, startCharacter, endLine, endCharacter) {
+  return {
+    start: { line: startLine, character: startCharacter },
+    end: { line: endLine, character: endCharacter },
+  };
+}
+
 function diagnostic(startLine, startCharacter, endLine, endCharacter, code, message) {
   return {
-    range: {
-      start: { line: startLine, character: startCharacter },
-      end: { line: endLine, character: endCharacter },
-    },
+    range: range(startLine, startCharacter, endLine, endCharacter),
     severity: WARNING,
     source: SOURCE,
     code,
@@ -130,4 +150,16 @@ function diagnostic(startLine, startCharacter, endLine, endCharacter, code, mess
   };
 }
 
-module.exports = { sweepMarkdown };
+function fix(sourceDiagnostic, editRange, newText) {
+  return {
+    code: sourceDiagnostic.code,
+    message: sourceDiagnostic.message,
+    range: sourceDiagnostic.range,
+    editRange,
+    newText,
+  };
+}
+
+module.exports = {
+  SOURCE, WARNING, sweepMarkdown, sweepMarkdownWithFixes,
+};

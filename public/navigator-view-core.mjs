@@ -256,6 +256,75 @@ function compareText(left, right) {
   return 0;
 }
 
+// ── Tier 1 fix changelog (docs/plan-navigator-2.md, M6) ───────
+// What the lane actually touched, applied and refused alike. A refused edit is as much of an audit line
+// as an applied one: it says the lane tried and the buffer had already moved.
+
+export const NAVIGATOR_FIXES_EMPTY_TEXT = 'No fixes yet. Silent fixes appear here once the lane applies or is refused one.';
+export const MAX_RENDERED_FIXES = 20;
+
+export function fixCountText(count) {
+  const total = boundedCount(count);
+  return total === 1 ? '1 fix' : `${total} fixes`;
+}
+
+// Zero-based on the wire like the diagnostic it came from, one-based here like every other line label.
+export function fixLineLabel(entry) {
+  const line = Number(entry?.line);
+  if (!Number.isFinite(line) || line < 0) return 'L?';
+  return `L${Math.floor(line) + 1}`;
+}
+
+export function fixOutcomeText(entry) {
+  return entry?.applied === true ? 'applied' : 'refused';
+}
+
+// One entry, however it arrived: the per-fix broadcast splits uri and ts off the fix, the snapshot ring
+// carries whole records. Anything without a message is not a line this list can show.
+export function normalizeFixEntry(raw, { uri = '', ts = 0 } = {}) {
+  if (!raw || typeof raw !== 'object') return null;
+  const message = typeof raw.message === 'string' ? raw.message.trim() : '';
+  if (!message) return null;
+  const line = Number(raw.line);
+  const stamp = Number(raw.ts ?? ts);
+  return {
+    uri: typeof raw.uri === 'string' && raw.uri ? raw.uri : uri,
+    code: typeof raw.code === 'string' ? raw.code : '',
+    line: Number.isFinite(line) && line > 0 ? Math.floor(line) : 0,
+    message,
+    applied: raw.applied === true,
+    ts: Number.isFinite(stamp) && stamp > 0 ? stamp : 0,
+  };
+}
+
+export function fixEntryOfMessage(msg) {
+  const uri = typeof msg?.uri === 'string' ? msg.uri : '';
+  const ts = Number(msg?.ts);
+  return normalizeFixEntry(msg?.fix, { uri, ts: Number.isFinite(ts) ? ts : 0 });
+}
+
+export function hasFix(msg) {
+  return fixEntryOfMessage(msg) !== null;
+}
+
+// Newest first, and capped: the server ring is already bounded, so this only keeps the two agreeing.
+export function applyFixMessage(entries, msg, { max = MAX_RENDERED_FIXES } = {}) {
+  const entry = fixEntryOfMessage(msg);
+  if (!entry) return [...entries];
+  return [entry, ...entries].slice(0, Math.max(0, Math.floor(max)));
+}
+
+// Connect-time repair: the server's ring REPLACES this tab's list, in the order the server keeps it.
+export function applyFixSnapshot(msg, { max = MAX_RENDERED_FIXES } = {}) {
+  const raw = Array.isArray(msg?.fixes) ? msg.fixes : [];
+  const entries = [];
+  for (const record of raw) {
+    const entry = normalizeFixEntry(record);
+    if (entry) entries.push(entry);
+  }
+  return entries.slice(0, Math.max(0, Math.floor(max)));
+}
+
 // ── Ingest activity feed (docs/plan-ingestion.md, M6) ─────────
 // The cross-source timeline the ingest lane publishes, rendered under the navigator's own findings
 // because it is the same question from the other side: what the navigator can currently see.

@@ -3514,6 +3514,92 @@ a.pr-title:hover {
   max-width: 78ch;
 }
 
+/* The tier 1 changelog sits between the findings and the activity feed: what the lane silently changed,
+   under what it has to say and above what it can see. A refused row is dimmed, never hidden. */
+.navigator-fixes {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.navigator-fixes-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border-dim);
+}
+
+.navigator-fixes-title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-head);
+}
+
+.navigator-fixes-count {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.navigator-fixes-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.navigator-fix-row {
+  display: grid;
+  grid-template-columns: 96px 40px 56px 96px 1fr;
+  align-items: baseline;
+  gap: 8px;
+  padding: 3px 0;
+  line-height: 1.5;
+}
+
+.navigator-fix-row[data-applied='no'] {
+  opacity: 0.65;
+}
+
+.navigator-fix-file {
+  font-size: 10px;
+  color: var(--text-dim);
+  grid-column: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.navigator-fix-line {
+  font-size: 10px;
+  color: var(--text-muted);
+  grid-column: 2;
+  font-variant-numeric: tabular-nums;
+}
+
+.navigator-fix-outcome {
+  font-size: 10px;
+  color: var(--text-muted);
+  grid-column: 3;
+  letter-spacing: 0.04em;
+}
+
+.navigator-fix-code {
+  font-size: 10px;
+  color: var(--text-muted);
+  grid-column: 4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.navigator-fix-message {
+  color: var(--text);
+  grid-column: 5;
+  overflow-wrap: anywhere;
+}
+
 /* The ingest activity feed sits below the findings: what the navigator can currently SEE, under what it
    currently has to say about it. Rows are bounded in the panel, so this list never grows without end. */
 .navigator-activity {

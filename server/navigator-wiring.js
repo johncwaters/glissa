@@ -15,7 +15,19 @@ const {
   createIntentState,
   intentPayload,
 } = require('./core/navigator-intent-core');
-const { sweepMarkdown } = require('./core/navigator-rules-core');
+const { sweepMarkdownWithFixes } = require('./core/navigator-rules-core');
+const {
+  DEFAULT_FIX_LOG_MAX,
+  appendFixLog,
+  autoSafeFixes,
+  buildApplyEditParams,
+  buildCodeActions,
+  filterFixesByRange,
+  fixLogEntry,
+  fixPayload,
+  isFixSetFresh,
+  readSweepResult,
+} = require('./core/navigator-fix-core');
 const { createLaneLog } = require('./lane-log');
 
 // Quiet window before a document is swept.
@@ -25,12 +37,22 @@ const MAX_FRAME_BYTES = 2 * 1024 * 1024;
 const MARKDOWN_EXTENSIONS = ['.md', '.markdown'];
 // What one dispatch prompt will spend on recent activity, beside a buffer that can be far larger.
 const DIGEST_BUDGET_CHARS = 2000;
+const CODE_ACTION_METHOD = 'textDocument/codeAction';
+const APPLY_EDIT_METHOD = 'workspace/applyEdit';
+// An editor that never answers an applyEdit leaves a slot and a changelog line owed; this bounds both.
+const APPLY_EDIT_TIMEOUT_MS = 2000;
+const FRAME_TYPES = new Set(['lsp', 'lsp-request', 'lsp-response']);
 
 function isMarkdownDoc(doc) {
   if (!doc) return false;
   if (doc.languageId === 'markdown') return true;
   const uri = typeof doc.uri === 'string' ? doc.uri.toLowerCase() : '';
   return MARKDOWN_EXTENSIONS.some((extension) => uri.endsWith(extension));
+}
+
+// A null id is JSON-RPC for "no id", which is exactly as unroutable here as an absent one.
+function hasId(parsed) {
+  return parsed.id !== null && parsed.id !== undefined;
 }
 
 // One relay frame, or the reason it is unusable.
@@ -42,10 +64,17 @@ function readFrame(raw) {
     return { ok: false, reason: 'unparsable JSON' };
   }
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return { ok: false, reason: 'not an object' };
-  if (parsed.type !== 'lsp') return { ok: false, reason: `unsupported frame type ${JSON.stringify(parsed.type)}` };
+  if (!FRAME_TYPES.has(parsed.type)) return { ok: false, reason: `unsupported frame type ${JSON.stringify(parsed.type)}` };
+  if (parsed.type === 'lsp-response') {
+    if (!hasId(parsed)) return { ok: false, reason: 'missing id' };
+    return { ok: true, type: parsed.type, id: parsed.id, result: parsed.result };
+  }
   if (typeof parsed.method !== 'string') return { ok: false, reason: 'missing method' };
   const params = parsed.params && typeof parsed.params === 'object' ? parsed.params : {};
-  return { ok: true, method: parsed.method, params };
+  if (parsed.type === 'lsp-request' && !hasId(parsed)) return { ok: false, reason: 'missing id' };
+  return {
+    ok: true, type: parsed.type, id: parsed.id, method: parsed.method, params,
+  };
 }
 
 /*
@@ -67,8 +96,13 @@ function createNavigatorWiring({
   setTimeoutFn = setTimeout,
   clearTimeoutFn = clearTimeout,
   nowFn = Date.now,
-  sweep = sweepMarkdown,
+  sweep = sweepMarkdownWithFixes,
   maxPayload = MAX_FRAME_BYTES,
+  // Tier 1 silent fixes (docs/plan-navigator-2.md, M6). The pull half is always on with the lane; this
+  // flag governs only the push half, where an edit lands in the buffer without being asked for.
+  autoFix = false,
+  fixLogMax = DEFAULT_FIX_LOG_MAX,
+  applyEditTimeoutMs = APPLY_EDIT_TIMEOUT_MS,
   logger = console,
   broadcast = null,
   // Tier 3 model dispatch (docs/archive/plan-navigator.md, M4). Absent config or no dispatch function means
@@ -101,6 +135,15 @@ function createNavigatorWiring({
    * kind without the other, and the tab renders them as two different things.
    */
   const commentsByUri = new Map();
+  /*
+   * Tier 1 fixes from the last sweep of each uri, stored WITH the text hash they were computed against.
+   * A code action is offered only while that hash still describes the buffer, so a fix can never be
+   * served against text the carbon unit has already moved on from.
+   */
+  const fixesByUri = new Map();
+  // What the lane has actually touched, applied and refused alike: the tab's audit of tier 1.
+  let fixLog = [];
+  let nextApplyEditId = 1;
   /*
    * The intent model (docs/archive/plan-navigator.md, M5): ONE statement for the machine, not one per uri,
    * because it says what the carbon unit is building rather than what a buffer contains. In memory
@@ -167,6 +210,31 @@ function createNavigatorWiring({
   function clearComments(uri) {
     if (!commentsByUri.delete(uri)) return;
     broadcastComments(uri, []);
+  }
+
+  // Replaced wholesale by each sweep, like the findings they were derived from.
+  function recordFixes(uri, fixes, textHash) {
+    if (fixes.length === 0) {
+      fixesByUri.delete(uri);
+      return;
+    }
+    fixesByUri.set(uri, { fixes, textHash });
+  }
+
+  /*
+   * One changelog line per fix the lane touched. A refusal is logged exactly as loudly as a success and
+   * is never retried: the fix stays on offer through the pull half, which is where a carbon unit who
+   * wanted it asks for it.
+   */
+  function logFix(uri, fix, applied) {
+    const entry = fixLogEntry({
+      uri, fix, applied, ts: nowFn(),
+    });
+    fixLog = appendFixLog(fixLog, entry, fixLogMax);
+    if (typeof broadcast !== 'function') return;
+    broadcast({
+      type: 'navigator-fix', uri, fix: fixPayload(entry), ts: entry.ts,
+    });
   }
 
   // Every uri the tab has a section for: findings, comments, or both.
@@ -264,7 +332,7 @@ function createNavigatorWiring({
     const documents = documentsSnapshot();
     note(`snapshot served: ${documents.length} documents`);
     return {
-      type: 'navigator-snapshot', documents, intent: intentPayload(intentState), ts: nowFn(),
+      type: 'navigator-snapshot', documents, intent: intentPayload(intentState), fixes: fixLog, ts: nowFn(),
     };
   }
 
@@ -273,6 +341,8 @@ function createNavigatorWiring({
     const store = createDocStore();
     const sweepTimersByUri = new Map();
     const dispatchTimersByUri = new Map();
+    // applyEdit requests this relay owes an answer for, keyed by the id the lane minted for each.
+    const pendingApplyEditById = new Map();
     let closed = false;
 
     function cancelSweep(uri) {
@@ -386,6 +456,84 @@ function createNavigatorWiring({
       }
     }
 
+    function sendResponse(id, result) {
+      try {
+        send({ type: 'lsp-response', id, result });
+      } catch (error) {
+        warn(`could not answer request ${id}: ${error.message}`);
+      }
+    }
+
+    /*
+     * The pull half never re-sweeps: it filters what the last sweep of this buffer already computed, and
+     * offers nothing at all once the stored hash stops describing the mirrored text.
+     */
+    function codeActionsFor(params) {
+      const uri = params?.textDocument?.uri;
+      if (typeof uri !== 'string' || !uri) return [];
+      const doc = getDoc(store, uri);
+      if (!doc) return [];
+      const entry = fixesByUri.get(uri);
+      if (!isFixSetFresh(entry, hashFn(doc.text))) return [];
+      return buildCodeActions(filterFixesByRange(entry.fixes, params?.range), { uri, version: doc.version });
+    }
+
+    // Answered, never dropped: the relay times an unanswered request out and the editor pays that wait.
+    function handleRequestFrame(frame) {
+      if (frame.method !== CODE_ACTION_METHOD) {
+        sendResponse(frame.id, null);
+        return;
+      }
+      sendResponse(frame.id, codeActionsFor(frame.params));
+    }
+
+    function settleApplyEdit(id, result, reason) {
+      if (!pendingApplyEditById.has(id)) return;
+      const pending = pendingApplyEditById.get(id);
+      pendingApplyEditById.delete(id);
+      if (pending.timer) clearTimeoutFn(pending.timer);
+      const applied = !!result && result.applied === true;
+      for (const fix of pending.fixes) logFix(pending.uri, fix, applied);
+      if (applied) note(`auto-fixed ${pending.uri}: ${pending.fixes.length} edits applied`);
+      if (!applied) note(`auto-fix refused for ${pending.uri}: ${reason}`);
+    }
+
+    function handleResponseFrame(frame) {
+      settleApplyEdit(frame.id, frame.result, 'the editor refused the edit');
+    }
+
+    function failPendingApplyEdits(reason, uri = null) {
+      for (const id of [...pendingApplyEditById.keys()]) {
+        const pending = pendingApplyEditById.get(id);
+        if (uri && pending.uri !== uri) continue;
+        settleApplyEdit(id, { applied: false }, reason);
+      }
+    }
+
+    /*
+     * The push half, gated on autoFix. One request per sweep carrying that sweep's auto-safe edits as one
+     * versioned WorkspaceEdit, so an edit racing a keystroke is refused by the editor rather than landing
+     * on moved text, and a refusal costs one changelog line rather than a retry.
+     */
+    function requestAutoFix(uri, doc) {
+      if (!autoFix) return;
+      const entry = fixesByUri.get(uri);
+      const safe = autoSafeFixes(entry ? entry.fixes : []);
+      if (safe.length === 0) return;
+      const id = `navigator-fix-${nextApplyEditId}`;
+      nextApplyEditId += 1;
+      const timer = setTimeoutFn(() => settleApplyEdit(id, { applied: false }, 'no answer from the editor'), applyEditTimeoutMs);
+      if (timer && typeof timer.unref === 'function') timer.unref();
+      pendingApplyEditById.set(id, { uri, fixes: safe, timer });
+      try {
+        send({
+          type: 'lsp-request', id, method: APPLY_EDIT_METHOD, params: buildApplyEditParams(safe, { uri, version: doc.version }),
+        });
+      } catch (error) {
+        settleApplyEdit(id, { applied: false }, `the frame could not be sent (${error.message})`);
+      }
+    }
+
     /*
      * `armedBy` is also what decides how loudly the sweep is reported. A debounced sweep runs at typing
      * cadence, so it is debug-gated exactly like the didChange line that drives it; a save is
@@ -394,7 +542,7 @@ function createNavigatorWiring({
     function publishDiagnostics(uri, armedBy = 'edit') {
       const doc = getDoc(store, uri);
       if (!isMarkdownDoc(doc)) return;
-      const diagnostics = sweep(doc.text);
+      const { diagnostics, fixes } = readSweepResult(sweep(doc.text));
       try {
         send({ type: 'publishDiagnostics', params: { uri, diagnostics } });
       } catch (error) {
@@ -402,6 +550,8 @@ function createNavigatorWiring({
       }
       // Outside the try: the tab's state does not depend on the editor socket accepting the frame.
       recordFindings(uri, diagnostics);
+      recordFixes(uri, fixes, hashFn(doc.text));
+      requestAutoFix(uri, doc);
       if (armedBy === 'save') note(`swept ${uri} on save: ${diagnostics.length} findings`);
       if (armedBy !== 'save') debugNote(() => `swept ${uri}: ${diagnostics.length} findings`);
       // A published sweep is the pause boundary tier 3 waits behind; the quiet window starts here.
@@ -464,6 +614,8 @@ function createNavigatorWiring({
         note(`didClose ${uri} (${listDocs(store).length} open)`);
         clearFindings(uri);
         clearComments(uri);
+        fixesByUri.delete(uri);
+        failPendingApplyEdits('the buffer closed', uri);
         forgetUri(dispatchState, uri);
         lastGateByUri.delete(uri);
         return null;
@@ -477,6 +629,8 @@ function createNavigatorWiring({
         warn(`dropped a frame: ${frame.reason}`);
         return;
       }
+      if (frame.type === 'lsp-request') return handleRequestFrame(frame);
+      if (frame.type === 'lsp-response') return handleResponseFrame(frame);
       const handler = handlersByMethod[frame.method];
       // Every other LSP notification (initialize, workspace events) is simply not part of v1.
       if (!handler) return;
@@ -494,6 +648,7 @@ function createNavigatorWiring({
       sweepTimersByUri.clear();
       for (const timer of dispatchTimersByUri.values()) clearTimeoutFn(timer);
       dispatchTimersByUri.clear();
+      failPendingApplyEdits('the relay disconnected');
       const dropped = listDocs(store);
       for (const doc of dropped) applyDidClose(store, { textDocument: { uri: doc.uri } });
       connections.delete(connection);
@@ -585,6 +740,7 @@ module.exports = {
   createNavigatorWiring,
   isMarkdownDoc,
   readFrame,
+  APPLY_EDIT_TIMEOUT_MS,
   DIGEST_BUDGET_CHARS,
   NAVIGATOR_DEBOUNCE_MS,
 };

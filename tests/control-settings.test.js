@@ -135,6 +135,7 @@ test('a valid navigator payload persists and echoes in settings-updated', () => 
   const h = harness({ projects: [], teams: [] });
   const navigator = {
     enabled: true,
+    autoFix: true,
     dispatch: {
       enabled: true,
       quietMs: 30000,
@@ -158,6 +159,7 @@ test('a valid navigator payload persists and echoes in settings-updated', () => 
 test('navigator validation rejects wrong scalar types and ranges', () => {
   const cases = [
     [{ enabled: 'yes' }, /navigator.enabled must be a boolean/],
+    [{ autoFix: 'yes' }, /navigator.autoFix must be a boolean/],
     [{ dispatch: 'on' }, /navigator.dispatch must be an object/],
     [{ dispatch: { enabled: 'yes' } }, /navigator.dispatch.enabled must be a boolean/],
     [{ dispatch: { quietMs: 0 } }, /navigator.dispatch.quietMs must be a positive number/],

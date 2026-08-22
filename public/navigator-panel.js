@@ -15,6 +15,7 @@ import { el, isPanelHidden } from './dom-helpers.js';
 import {
   INGEST_EMPTY_TEXT,
   NAVIGATOR_EMPTY_TEXT,
+  NAVIGATOR_FIXES_EMPTY_TEXT,
   NAVIGATOR_INTENT_EMPTY_TEXT,
   NAVIGATOR_INTENT_MAX_CHARS,
   activityAgeText,
@@ -27,14 +28,21 @@ import {
   applyActivitySnapshot,
   applyCommentsMessage,
   applyCommentsSnapshot,
+  basenameOfUri,
   applyFindingsMessage,
   applyFindingsSnapshot,
+  applyFixMessage,
+  applyFixSnapshot,
   commentLineLabel,
   emptyIntent,
   findingLineLabel,
+  fixCountText,
+  fixLineLabel,
+  fixOutcomeText,
   hasActivity,
   hasComments,
   hasFindings,
+  hasFix,
   hasIntentChanged,
   intentMetaText,
   intentOfMessage,
@@ -61,6 +69,9 @@ let _activityEvents = [];
 // What the last batched frame could not fit. A count, never the events themselves.
 let _activityOverflow = 0;
 let _activityUI = null;
+// The tier 1 changelog, newest first and already capped by the view core.
+let _fixEntries = [];
+let _fixUI = null;
 // Findings that landed while the operator was looking at another tab. Cleared when this one is shown,
 // which is the whole point of the dot: it says "something arrived since you last looked".
 let _unseen = false;
@@ -239,6 +250,54 @@ function renderActivity({ force = false } = {}) {
   overflow.textContent = activityOverflowText(_activityOverflow);
 }
 
+/*
+ * The tier 1 changelog: what the lane silently changed, and what it tried to change and was refused.
+ * It carries no controls either, so the head's count is status text beside the title.
+ */
+function buildFixesBlock() {
+  const section = el('section', 'navigator-fixes');
+  const head = el('div', 'navigator-fixes-head');
+  head.append(el('h2', 'navigator-fixes-title', 'Fixes'));
+  const count = el('span', 'navigator-fixes-count');
+  head.append(count);
+  section.append(head);
+  const list = el('div', 'navigator-fixes-list');
+  section.append(list);
+  _fixUI = { count, list };
+  return section;
+}
+
+function buildFixRow(entry) {
+  const row = el('div', 'navigator-fix-row');
+  row.dataset.applied = entry.applied ? 'yes' : 'no';
+  // Buffer paths come from an editor: built as text, never markup.
+  const file = el('span', 'navigator-fix-file');
+  file.textContent = basenameOfUri(entry.uri) || entry.uri;
+  file.title = entry.uri;
+  row.append(file);
+  row.append(el('span', 'navigator-fix-line', fixLineLabel(entry)));
+  row.append(el('span', 'navigator-fix-outcome', fixOutcomeText(entry)));
+  if (entry.code) row.append(el('span', 'navigator-fix-code', entry.code));
+  // Rule messages quote the carbon unit's own prose back at them: text, never markup.
+  const message = el('span', 'navigator-fix-message');
+  message.textContent = entry.message;
+  row.append(message);
+  return row;
+}
+
+function renderFixes({ force = false } = {}) {
+  if (!_fixUI) return;
+  if (!force && isPanelHidden(_root)) return;
+  const { count, list } = _fixUI;
+  count.textContent = fixCountText(_fixEntries.length);
+  list.textContent = '';
+  if (_fixEntries.length === 0) {
+    list.append(el('p', 'navigator-empty', NAVIGATOR_FIXES_EMPTY_TEXT));
+    return;
+  }
+  for (const entry of _fixEntries) list.append(buildFixRow(entry));
+}
+
 function refreshActivity() {
   if (!_activityCallback) return;
   _activityCallback(_unseen);
@@ -262,12 +321,14 @@ export function mountNavigatorView(parent) {
   root.append(buildIntentBlock());
   const feed = el('div', 'navigator-feed');
   root.append(feed);
+  root.append(buildFixesBlock());
   root.append(buildActivityBlock());
   parent.appendChild(root);
   _root = root;
   _feed = feed;
   renderIntent();
   render({ force: true });
+  renderFixes({ force: true });
   renderActivity({ force: true });
   return root;
 }
@@ -278,7 +339,16 @@ export function refreshNavigatorView() {
   refreshActivity();
   renderIntent();
   render({ force: true });
+  renderFixes({ force: true });
   renderActivity({ force: true });
+}
+
+// Tier 1: one edit the lane applied, or tried to and was refused. Both are news worth the dot.
+export function applyNavigatorFix(msg) {
+  _fixEntries = applyFixMessage(_fixEntries, msg);
+  noteArrival(hasFix(msg));
+  renderFixes();
+  refreshActivity();
 }
 
 export function applyNavigatorFindings(msg) {
@@ -335,8 +405,10 @@ export function applyNavigatorSnapshot(msg) {
   _findingsByUri = applyFindingsSnapshot(msg);
   _commentsByUri = applyCommentsSnapshot(msg);
   _intent = intentOfMessage(msg);
+  _fixEntries = applyFixSnapshot(msg);
   noteArrival(totalFindingCount(_findingsByUri) + totalCommentCount(_commentsByUri) > 0);
   renderIntent();
   render();
+  renderFixes();
   refreshActivity();
 }

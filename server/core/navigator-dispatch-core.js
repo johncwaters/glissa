@@ -59,6 +59,20 @@ function resolveDispatchConfig(raw) {
   };
 }
 
+/**
+ * config.navigator, normalized. It lives beside resolveDispatchConfig because the two answer the same
+ * question one level apart, and the lane reads them together at its single construction site.
+ */
+function resolveNavigatorConfig(raw) {
+  const block = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  return {
+    enabled: block.enabled === true,
+    // Tier 1 edits land in the carbon unit's buffer unasked, so nothing short of an explicit true opts in.
+    autoFix: block.autoFix === true,
+    dispatch: resolveDispatchConfig(block.dispatch),
+  };
+}
+
 // Identity of a buffer for the "has it actually moved" gate: FNV-1a over the text plus its length, so
 // an edit that returns the buffer to a dispatched state is correctly seen as unchanged.
 function hashText(text) {
@@ -309,5 +323,6 @@ module.exports = {
   hashText,
   recordDispatch,
   resolveDispatchConfig,
+  resolveNavigatorConfig,
   sanitizeComments,
 };
