@@ -34,7 +34,7 @@ test('pathOfFileUri rejects non-file, empty and malformed uris', () => {
   assert.equal(pathOfFileUri(null), null);
 });
 
-test('normalizeProjectPath uses the same shape folding as uri paths', () => {
+test('normalizeShapePath uses the same shape folding as uri paths', () => {
   assert.equal(normalizeShapePath('C:\\Repo\\Sub\\'), 'c:/repo/sub');
   assert.equal(normalizeShapePath('\\\\Server\\Share\\Repo\\'), '//server/share/repo');
   assert.equal(normalizeShapePath('/home/me/Repo'), '/home/me/Repo');
