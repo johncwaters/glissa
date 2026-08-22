@@ -79,6 +79,28 @@ function drivenConnection(options = {}) {
   return { wiring, connection, timers, warnings, notes, sent, broadcasts, lsp, clock };
 }
 
+function tempIntentStatePath(t) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-navigator-intent-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  return path.join(dir, 'navigator-intent.json');
+}
+
+function countingFsPromises() {
+  const writes = [];
+  return {
+    writes,
+    fsPromises: {
+      mkdir: (...args) => fs.promises.mkdir(...args),
+      writeFile: (...args) => {
+        writes.push(args);
+        return fs.promises.writeFile(...args);
+      },
+      rename: (...args) => fs.promises.rename(...args),
+      rm: (...args) => fs.promises.rm(...args),
+    },
+  };
+}
+
 function didOpenParams(uri, languageId, text) {
   return { textDocument: { uri, languageId, version: 1, text } };
 }
@@ -1089,6 +1111,90 @@ test('an empty lane still carries an intent field on its snapshot', (t) => {
   assert.deepEqual(wiring.snapshotMessage().intent, {
     text: '', source: null, locked: false, ts: 0,
   });
+});
+
+test('operator intent persists on change only and revives locked on the next wiring', async (t) => {
+  const intentStatePath = tempIntentStatePath(t);
+  const counted = countingFsPromises();
+  const { wiring } = drivenConnection({ intentStatePath, fsPromises: counted.fsPromises });
+  t.after(() => wiring.stop());
+
+  assert.equal(wiring.setOperatorIntent('  durable correction  '), true);
+  await wiring.whenIntentPersistenceIdle();
+  assert.equal(counted.writes.length, 1);
+  assert.deepEqual(JSON.parse(fs.readFileSync(intentStatePath, 'utf8')), {
+    text: 'durable correction', source: 'operator', locked: true, ts: FIXED_TS,
+  });
+
+  assert.equal(wiring.setOperatorIntent('durable correction'), false);
+  await wiring.whenIntentPersistenceIdle();
+  assert.equal(counted.writes.length, 1);
+
+  const revived = drivenConnection({ intentStatePath });
+  t.after(() => revived.wiring.stop());
+  assert.deepEqual(revived.wiring.getIntent(), {
+    text: 'durable correction', source: 'operator', locked: true, ts: FIXED_TS,
+  });
+});
+
+test('model intent and cleared intent both persist', async (t) => {
+  const intentStatePath = tempIntentStatePath(t);
+  const counted = countingFsPromises();
+  const { wiring } = drivenConnection({ intentStatePath, fsPromises: counted.fsPromises });
+  t.after(() => wiring.stop());
+
+  assert.equal(wiring.applyModelIntent('durable model belief'), true);
+  await wiring.whenIntentPersistenceIdle();
+  assert.deepEqual(JSON.parse(fs.readFileSync(intentStatePath, 'utf8')), {
+    text: 'durable model belief', source: 'model', locked: false, ts: FIXED_TS,
+  });
+
+  assert.equal(wiring.setOperatorIntent(''), true);
+  await wiring.whenIntentPersistenceIdle();
+  assert.equal(counted.writes.length, 2);
+  assert.deepEqual(JSON.parse(fs.readFileSync(intentStatePath, 'utf8')), {
+    text: '', source: null, locked: false, ts: 0,
+  });
+});
+
+test('a corrupt intent file starts empty and warns once', (t) => {
+  const intentStatePath = tempIntentStatePath(t);
+  fs.writeFileSync(intentStatePath, '{', 'utf8');
+
+  const { wiring, warnings } = drivenConnection({ intentStatePath });
+  t.after(() => wiring.stop());
+
+  assert.deepEqual(wiring.getIntent(), {
+    text: '', source: null, locked: false, ts: 0,
+  });
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /intent state unreadable, starting empty/);
+});
+
+test('without an intent path the lane keeps the same in-memory behavior and touches no storage', async (t) => {
+  const fsFns = { readFileSync: () => { throw new Error('must not read'); } };
+  const fsPromises = {
+    mkdir: () => Promise.reject(new Error('must not write')),
+    writeFile: () => Promise.reject(new Error('must not write')),
+    rename: () => Promise.reject(new Error('must not write')),
+    rm: () => Promise.reject(new Error('must not write')),
+  };
+  const { wiring, broadcasts, warnings } = drivenConnection({ fsFns, fsPromises });
+  t.after(() => wiring.stop());
+
+  assert.deepEqual(wiring.snapshotMessage().intent, {
+    text: '', source: null, locked: false, ts: 0,
+  });
+  assert.equal(wiring.applyModelIntent('memory only'), true);
+  await wiring.whenIntentPersistenceIdle();
+  assert.deepEqual(intentBroadcasts(broadcasts), [{
+    type: 'navigator-intent',
+    intent: {
+      text: 'memory only', source: 'model', locked: false, ts: FIXED_TS,
+    },
+    ts: FIXED_TS,
+  }]);
+  assert.deepEqual(warnings, []);
 });
 
 test('the standing intent rides the dispatch, and the result updates it after the comments', async (t) => {

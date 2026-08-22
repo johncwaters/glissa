@@ -1018,6 +1018,7 @@ function createBackend(httpServer, options = {}) {
       dispatchConfig: navigatorDispatchConfig,
       // Tier 1's push half only; the codeAction pull half is always on with the lane.
       autoFix: navigatorConfig.autoFix,
+      intentStatePath: configSiblingPath(configStore.configPath, 'navigator-intent.json'),
       dispatch: navigatorDispatchConfig.enabled
         ? createNavigatorDispatcher({
           spawnSession: createNavigatorSpawn({

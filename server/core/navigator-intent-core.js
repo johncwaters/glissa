@@ -23,6 +23,20 @@ function sanitizeIntentText(raw, { maxChars = MAX_INTENT_CHARS } = {}) {
   return raw.trim().slice(0, maxChars).trim();
 }
 
+function reviveIntentState(raw, { maxChars = MAX_INTENT_CHARS } = {}) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return createIntentState();
+  const text = sanitizeIntentText(raw.text, { maxChars });
+  if (!text) return createIntentState();
+  if (raw.source !== MODEL_SOURCE && raw.source !== OPERATOR_SOURCE) return createIntentState();
+  const locked = raw.locked === true;
+  if (locked && raw.source !== OPERATOR_SOURCE) return createIntentState();
+  if (Object.hasOwn(raw, 'ts') && (!Number.isFinite(raw.ts) || raw.ts < 0)) return createIntentState();
+  const ts = Number.isFinite(raw.ts) ? raw.ts : 0;
+  return {
+    text, source: raw.source, locked, ts,
+  };
+}
+
 function isEmptyIntent(state) {
   return !state || !state.text;
 }
@@ -81,5 +95,6 @@ module.exports = {
   createIntentState,
   intentPayload,
   isEmptyIntent,
+  reviveIntentState,
   sanitizeIntentText,
 };

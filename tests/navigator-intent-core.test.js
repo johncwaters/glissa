@@ -16,6 +16,7 @@ const {
   createIntentState,
   intentPayload,
   isEmptyIntent,
+  reviveIntentState,
   sanitizeIntentText,
 } = require('../server/core/navigator-intent-core');
 
@@ -132,6 +133,48 @@ test('text is trimmed, capped, and strings only, on both paths', () => {
   assert.equal(sanitizeIntentText(long).length, MAX_INTENT_CHARS);
   assert.equal(applyModelIntent(createIntentState(), { text: long, now: NOW }).state.text.length, MAX_INTENT_CHARS);
   assert.equal(applyOperatorIntent(createIntentState(), { text: `  ${long}  `, now: NOW }).state.text.length, MAX_INTENT_CHARS);
+});
+
+// --- Durable revival ---
+
+test('a persisted operator-locked intent revives with sanitized text and its timestamp', () => {
+  const revived = reviveIntentState({
+    text: '  durable operator statement  ', source: 'operator', locked: true, ts: NOW,
+  });
+  assert.deepEqual(revived, {
+    text: 'durable operator statement', source: 'operator', locked: true, ts: NOW,
+  });
+});
+
+test('a persisted model intent revives unlocked and can default a missing timestamp to zero', () => {
+  assert.deepEqual(reviveIntentState({
+    text: 'durable model statement', source: 'model', locked: false,
+  }), {
+    text: 'durable model statement', source: 'model', locked: false, ts: 0,
+  });
+  assert.deepEqual(reviveIntentState({
+    text: 'operator source without a boolean lock', source: 'operator', locked: 'true', ts: NOW,
+  }), {
+    text: 'operator source without a boolean lock', source: 'operator', locked: false, ts: NOW,
+  });
+});
+
+test('revival resets invalid persisted states to empty', () => {
+  const invalidStates = [
+    { text: 'has no domain', source: 'system', locked: false, ts: NOW },
+    { text: 'model cannot be locked', source: 'model', locked: true, ts: NOW },
+    { text: 'bad timestamp', source: 'operator', locked: true, ts: Number.POSITIVE_INFINITY },
+    { text: 'negative timestamp', source: 'operator', locked: true, ts: -1 },
+    { text: '   ', source: 'operator', locked: true, ts: NOW },
+  ];
+  for (const raw of invalidStates) assert.deepEqual(reviveIntentState(raw), createIntentState());
+});
+
+test('revival never throws on junk persisted values', () => {
+  for (const raw of [null, undefined, 42, true, [], ['text'], 'intent']) {
+    assert.doesNotThrow(() => reviveIntentState(raw));
+    assert.deepEqual(reviveIntentState(raw), createIntentState());
+  }
 });
 
 // --- The wire shape ---

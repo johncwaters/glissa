@@ -2,6 +2,8 @@
 
 'use strict';
 
+const fs = require('node:fs');
+const fsPromisesDefault = require('node:fs/promises');
 const { WebSocketServer } = require('ws');
 const {
   applyDidChange, applyDidClose, applyDidOpen, createDocStore, detectBlankLineBoundary, formatRange, getDoc, listDocs, uriOfParams,
@@ -15,6 +17,7 @@ const {
   applyOperatorIntent: mergeOperatorIntent,
   createIntentState,
   intentPayload,
+  reviveIntentState,
 } = require('./core/navigator-intent-core');
 const { sweepMarkdownWithFixes } = require('./core/navigator-rules-core');
 const {
@@ -29,6 +32,7 @@ const {
   isFixSetFresh,
   readSweepResult,
 } = require('./core/navigator-fix-core');
+const { createJsonStateWriter } = require('./json-file');
 const { createLaneLog } = require('./lane-log');
 
 // Quiet window before a document is swept.
@@ -78,6 +82,34 @@ function readFrame(raw) {
   };
 }
 
+function shouldWarnForInvalidIntentFile(raw, revived) {
+  if (revived.text) return false;
+  const isPersistedEmpty = raw && typeof raw === 'object' && !Array.isArray(raw)
+    && raw.text === '' && raw.source === null && raw.locked === false && raw.ts === 0;
+  return !isPersistedEmpty;
+}
+
+function loadIntentState({ intentStatePath, fsFns, warn }) {
+  if (!intentStatePath) return createIntentState();
+  let rawText = '';
+  try {
+    rawText = fsFns.readFileSync(intentStatePath, 'utf8');
+  } catch (error) {
+    if (error && error.code === 'ENOENT') return createIntentState();
+    warn(`intent state unreadable, starting empty: ${error.message}`);
+    return createIntentState();
+  }
+  try {
+    const parsed = JSON.parse(rawText);
+    const revived = reviveIntentState(parsed);
+    if (shouldWarnForInvalidIntentFile(parsed, revived)) warn('intent state invalid, starting empty');
+    return revived;
+  } catch (error) {
+    warn(`intent state unreadable, starting empty: ${error.message}`);
+    return createIntentState();
+  }
+}
+
 /*
  * What a refused didChange needs beside its reason for the log line to answer the next question by
  * itself: which buffer, which frame, and which change in the batch was the malformed one.
@@ -117,6 +149,9 @@ function createNavigatorWiring({
   // see activity the buffer never showed. Absent means null, and the gate is then the pre-M7.5 one.
   contextSeq = null,
   scopePaths = null,
+  intentStatePath = null,
+  fsFns = fs,
+  fsPromises = fsPromisesDefault,
   digestBudgetChars = DIGEST_BUDGET_CHARS,
   hashFn = hashText,
   // Per-keystroke chatter, off unless the operator turned debugMode on. Boolean or getter, and the
@@ -125,6 +160,7 @@ function createNavigatorWiring({
 } = {}) {
   const wss = new WebSocketServer({ noServer: true, maxPayload });
   const connections = new Set();
+  const { debugNote, note, warn } = createLaneLog({ prefix: '[navigator]', logger, debugFlag: debug });
   /*
    * Findings the Navigator tab is currently showing, keyed by uri and shared across relays: the tab is a
    * view of what is open in the editors, not of which socket mirrored it. A uri with no findings is
@@ -154,7 +190,14 @@ function createNavigatorWiring({
    * because it says what the carbon unit is building rather than what a buffer contains. In memory
    * only in v1, so a daemon restart starts from nothing.
    */
-  let intentState = createIntentState();
+  let intentState = loadIntentState({ intentStatePath, fsFns, warn });
+  const intentStateWriter = intentStatePath
+    ? createJsonStateWriter({
+      filePath: intentStatePath,
+      fsPromises,
+      warn: (error) => warn(`intent state write failed: ${error.message}`),
+    })
+    : null;
   const dispatchSettings = resolveDispatchConfig(dispatchConfig);
   const dispatchEnabled = dispatchSettings.enabled === true && typeof dispatch === 'function';
   const dispatchState = createDispatchState();
@@ -166,8 +209,6 @@ function createNavigatorWiring({
   const lastGateByUri = new Map();
   // Concurrency 1, machine-wide: a dispatch while one is in flight is GATED, never queued.
   let dispatchInFlight = false;
-
-  const { debugNote, note, warn } = createLaneLog({ prefix: '[navigator]', logger, debugFlag: debug });
 
   /*
    * Keyed by trigger AND gate, never the gate alone: a poke and a save can be refused by the same cap
@@ -323,6 +364,9 @@ function createNavigatorWiring({
   function commitIntent(merged) {
     if (!merged.changed) return false;
     intentState = merged.state;
+    if (intentStateWriter) {
+      intentStateWriter.write(intentPayload(intentState), () => JSON.stringify(intentPayload(intentState), null, 2));
+    }
     broadcastIntent();
     return true;
   }
@@ -812,6 +856,7 @@ function createNavigatorWiring({
     setOperatorIntent,
     noteActivity,
     getIntent: () => intentPayload(intentState),
+    whenIntentPersistenceIdle: () => (intentStateWriter ? intentStateWriter.idle() : Promise.resolve()),
     // The movement signal the next gate will read, so a caller can see whether a lane is wired at all.
     latestContextSeq: readContextSeq,
     // Settles once the in-flight dispatch has been applied, which is how a test waits for the lane.
