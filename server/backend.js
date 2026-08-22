@@ -1540,6 +1540,9 @@ function createBackend(httpServer, options = {}) {
     // Official plan limits are machine-wide, so the freshest snapshot is replayed to every client that
     // connects rather than being rebuilt per session.
     getPlanLimits: () => usage.getPlanLimitsMessage(),
+    // Navigator lane, for the intent correction the tab sends. Null whenever the lane is off, which is
+    // what that handler refuses on.
+    navigatorLane,
   });
 
   // Navigator connect-time repair: findings are current state, so one snapshot beats replay retention (plan-limits precedent); registered after registerControlHandlers so the snapshot frame stays first

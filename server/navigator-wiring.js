@@ -9,6 +9,12 @@ const {
 const {
   createDispatchState, decideDispatch, forgetUri, hashText, recordDispatch, resolveDispatchConfig,
 } = require('./core/navigator-dispatch-core');
+const {
+  applyModelIntent: mergeModelIntent,
+  applyOperatorIntent: mergeOperatorIntent,
+  createIntentState,
+  intentPayload,
+} = require('./core/navigator-intent-core');
 const { sweepMarkdown } = require('./core/navigator-rules-core');
 
 // Quiet window before a document is swept.
@@ -77,6 +83,12 @@ function createNavigatorWiring({
    * kind without the other, and the tab renders them as two different things.
    */
   const commentsByUri = new Map();
+  /*
+   * The intent model (docs/plan-navigator.md, M5): ONE statement for the machine, not one per uri,
+   * because it says what the carbon unit is building rather than what a buffer contains. In memory
+   * only in v1, so a daemon restart starts from nothing.
+   */
+  let intentState = createIntentState();
   const dispatchSettings = resolveDispatchConfig(dispatchConfig);
   const dispatchEnabled = dispatchSettings.enabled === true && typeof dispatch === 'function';
   const dispatchState = createDispatchState();
@@ -99,12 +111,16 @@ function createNavigatorWiring({
     logger.log(`[navigator] ${message}`);
   }
 
-  // A refusal is news when the gate CHANGES; the same gate holding again is the steady state, and an
-  // undeduped line would be one log entry per open document per quiet window, forever.
-  function noteGate(uri, gate) {
-    if (lastGateByUri.get(uri) === gate) return;
-    lastGateByUri.set(uri, gate);
-    note(`no dispatch for ${uri}: ${gate}`);
+  /*
+   * Keyed by trigger AND gate, never the gate alone: a poke and a save can be refused by the same cap
+   * for entirely different reasons, and the operator's own save being turned away is exactly the line
+   * that must not be swallowed by the machine's. A dispatch clears the mark, so the next refusal is news.
+   */
+  function noteGate(uri, { gate, trigger }) {
+    const key = `${trigger}:${gate}`;
+    if (lastGateByUri.get(uri) === key) return;
+    lastGateByUri.set(uri, key);
+    note(`no dispatch for ${uri}: ${gate}${trigger ? ` (${trigger})` : ''}`);
   }
 
   function broadcastFindings(uri, diagnostics) {
@@ -151,6 +167,30 @@ function createNavigatorWiring({
       diagnostics: findingsByUri.get(uri) || [],
       comments: commentsByUri.get(uri) || [],
     }));
+  }
+
+  function broadcastIntent() {
+    if (typeof broadcast !== 'function') return;
+    broadcast({ type: 'navigator-intent', intent: intentPayload(intentState), ts: nowFn() });
+  }
+
+  // Every write goes through the pure merge, so the lock rule is enforced in one place and a merge
+  // that changes nothing costs no broadcast.
+  function commitIntent(merged) {
+    if (!merged.changed) return false;
+    intentState = merged.state;
+    broadcastIntent();
+    return true;
+  }
+
+  // A model's updated belief. The merge, not this caller, is what keeps it off a locked statement.
+  function applyModelIntent(text) {
+    return commitIntent(mergeModelIntent(intentState, { text, now: nowFn() }));
+  }
+
+  // The tab's correction. Empty text clears the statement and hands control back to the model.
+  function setOperatorIntent(text) {
+    return commitIntent(mergeOperatorIntent(intentState, { text, now: nowFn() }));
   }
 
   /*
@@ -204,7 +244,9 @@ function createNavigatorWiring({
 
   // Connect-time repair for the control WS: one current-state frame, not a replay of superseded ones.
   function snapshotMessage() {
-    return { type: 'navigator-snapshot', documents: documentsSnapshot(), ts: nowFn() };
+    return {
+      type: 'navigator-snapshot', documents: documentsSnapshot(), intent: intentPayload(intentState), ts: nowFn(),
+    };
   }
 
   // One document store per connection: an editor's buffers die with the relay that mirrored them.
@@ -231,9 +273,11 @@ function createNavigatorWiring({
     /**
      * One dispatch attempt, already at a pause boundary. Every remaining question (has the buffer
      * moved, is the cooldown up, is the hourly budget spent, is one already running) belongs to the
-     * pure gate, and a refusal costs exactly one log line naming the gate that held.
+     * pure gate, and a refusal costs exactly one log line naming the gate that held. `armedBy` says
+     * which boundary opened this window, and the gate uses it only to classify a buffer it has no
+     * recorded hash for.
      */
-    async function runDispatch(uri) {
+    async function runDispatch(uri, armedBy = 'edit') {
       if (!dispatchEnabled || closed) return;
       const doc = getDoc(store, uri);
       if (!isMarkdownDoc(doc)) return;
@@ -248,16 +292,17 @@ function createNavigatorWiring({
         config: dispatchSettings,
         inFlight: dispatchInFlight,
         contextSeq: seq,
+        armedBy,
       });
       if (!decision.dispatch) {
-        noteGate(uri, decision.gate);
+        noteGate(uri, decision);
         return;
       }
       lastGateByUri.delete(uri);
       // Recorded before the await, so the cooldown and the hourly budget count attempts, not successes.
       dispatchInFlight = true;
       recordDispatch(dispatchState, {
-        uri, textHash, now: nowFn(), contextSeq: seq,
+        uri, textHash, now: nowFn(), contextSeq: seq, trigger: decision.trigger,
       });
       let result = null;
       try {
@@ -265,6 +310,7 @@ function createNavigatorWiring({
           uri,
           text,
           findings: findingsByUri.get(uri) || [],
+          intent: intentState.text,
           digest: readContextDigest(),
         });
       } catch (error) {
@@ -279,15 +325,17 @@ function createNavigatorWiring({
         return;
       }
       applyDispatchResult(uri, result);
+      // After the comments, and through the merge: a locked operator intent survives this untouched.
+      applyModelIntent(result.intent);
     }
 
-    function armDispatch(uri) {
+    function armDispatch(uri, armedBy) {
       if (!dispatchEnabled || closed || !uri) return;
       cancelDispatch(uri);
       const timer = setTimeoutFn(() => {
         dispatchTimersByUri.delete(uri);
         if (closed) return;
-        dispatchSettled = runDispatch(uri).catch((error) => warn(`dispatch loop failed: ${error.message}`));
+        dispatchSettled = runDispatch(uri, armedBy).catch((error) => warn(`dispatch loop failed: ${error.message}`));
       }, dispatchSettings.quietMs);
       if (timer && typeof timer.unref === 'function') timer.unref();
       dispatchTimersByUri.set(uri, timer);
@@ -297,7 +345,7 @@ function createNavigatorWiring({
     // sweep behind it has nothing to react to yet; noteActivity below is the only other armer.
     function rearmDispatch(uri) {
       if (!dispatchTimersByUri.has(uri)) return;
-      armDispatch(uri);
+      armDispatch(uri, 'edit');
     }
 
     /*
@@ -311,7 +359,7 @@ function createNavigatorWiring({
       for (const doc of listDocs(store)) {
         if (!isMarkdownDoc(doc)) continue;
         if (dispatchTimersByUri.has(doc.uri)) continue;
-        armDispatch(doc.uri);
+        armDispatch(doc.uri, 'activity');
       }
     }
 
@@ -327,7 +375,7 @@ function createNavigatorWiring({
       // Outside the try: the tab's state does not depend on the editor socket accepting the frame.
       recordFindings(uri, diagnostics);
       // A published sweep is the pause boundary tier 3 waits behind; the quiet window starts here.
-      armDispatch(uri);
+      armDispatch(uri, 'edit');
     }
 
     function scheduleSweep(uri) {
@@ -366,7 +414,7 @@ function createNavigatorWiring({
         publishDiagnostics(uri);
         // A save is the boundary itself: it evaluates the same gate now rather than waiting it out.
         cancelDispatch(uri);
-        dispatchSettled = runDispatch(uri).catch((error) => warn(`dispatch loop failed: ${error.message}`));
+        dispatchSettled = runDispatch(uri, 'edit').catch((error) => warn(`dispatch loop failed: ${error.message}`));
         return null;
       },
       // The carbon unit closed the buffer, so its findings are gone rather than merely unrefreshed.
@@ -479,7 +527,10 @@ function createNavigatorWiring({
     stop,
     documentsSnapshot,
     snapshotMessage,
+    applyModelIntent,
+    setOperatorIntent,
     noteActivity,
+    getIntent: () => intentPayload(intentState),
     // The movement signal the next gate will read, so a caller can see whether a lane is wired at all.
     latestContextSeq: readContextSeq,
     // Settles once the in-flight dispatch has been applied, which is how a test waits for the lane.

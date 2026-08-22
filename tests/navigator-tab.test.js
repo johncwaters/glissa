@@ -132,6 +132,71 @@ test('a sweep reaches every connected dashboard, and a later one is repaired by 
   assert.deepEqual(emptyRepair.documents, []);
 }));
 
+/*
+ * The intent model's round trip (docs/plan-navigator.md, M5), over the real control WS: a correction
+ * goes up, the broadcast comes back to every dashboard, a model proposal (what a dispatch result feeds
+ * in) is refused by the lock, and the next client's repair frame carries the statement that survived.
+ * The dispatch itself is faked at the lane seam: no test in this repo spawns claude.
+ */
+test('an operator correction locks the intent, survives a dispatch, and rides the snapshot repair', withNavigatorBackend(async ({ base, backend, track }) => {
+  const dashboard = await openRecordingSocket(`${base}/control`);
+  track(dashboard.ws);
+  const firstSnapshot = await waitFor(dashboard.received, (msg) => msg.type === 'navigator-snapshot');
+  assert.deepEqual(firstSnapshot.intent, {
+    text: '', source: null, locked: false, ts: 0,
+  }, 'a fresh daemon believes nothing yet');
+
+  dashboard.ws.send(JSON.stringify({ type: 'navigator-set-intent', text: '  rewriting the merge gate  ' }));
+  const corrected = await waitFor(dashboard.received, (msg) => msg.type === 'navigator-intent');
+  assert.equal(corrected.intent.text, 'rewriting the merge gate', 'trimmed by the merge, not by the tab');
+  assert.equal(corrected.intent.source, 'operator');
+  assert.equal(corrected.intent.locked, true);
+
+  // What a tier 3 result does when it lands: the lane's model-proposal path, which the lock outranks.
+  const lane = backend.getNavigatorLane();
+  assert.equal(lane.applyModelIntent('a plan doc about spawning'), false, 'the merge refuses it, so nothing is broadcast');
+  assert.equal(lane.getIntent().text, 'rewriting the merge gate');
+
+  const reconnected = await openRecordingSocket(`${base}/control`);
+  track(reconnected.ws);
+  const repaired = await waitFor(reconnected.received, (msg) => msg.type === 'navigator-snapshot');
+  assert.equal(repaired.intent.text, 'rewriting the merge gate');
+  assert.equal(repaired.intent.locked, true);
+
+  // And clearing it hands control back: the same model proposal now lands.
+  reconnected.ws.send(JSON.stringify({ type: 'navigator-set-intent', text: '' }));
+  await waitFor(dashboard.received, (msg) => msg.type === 'navigator-intent' && msg.intent.text === '');
+  assert.equal(lane.applyModelIntent('a plan doc about spawning'), true);
+  assert.equal(lane.getIntent().source, 'model');
+}));
+
+test('a control client connecting with the lane off is told nothing about the navigator', async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-navigator-off-'));
+  const cfgPath = path.join(tmpDir, 'config.json');
+  fs.writeFileSync(cfgPath, JSON.stringify({ projects: [], teams: [], repoRoots: [] }, null, 2), 'utf8');
+  const prevEnv = process.env.GLISSA_CONFIG;
+  process.env.GLISSA_CONFIG = cfgPath;
+
+  const server = http.createServer();
+  const backend = createBackend(server, { staticDir: null });
+  server.on('request', backend.app);
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+
+  try {
+    const { ws, received } = await openRecordingSocket(`ws://127.0.0.1:${server.address().port}/control`);
+    await waitFor(received, (msg) => msg.type === 'client-trust');
+    assert.equal(received.some((msg) => msg.type.startsWith('navigator-')), false, 'an absent lane adds no frame');
+    ws.close();
+  } finally {
+    backend.shutdown();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+    if (prevEnv == null) delete process.env.GLISSA_CONFIG;
+    if (prevEnv != null) process.env.GLISSA_CONFIG = prevEnv;
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 // The other half of the decision, stated where it can fail: adding either navigator type to
 // REPLAYABLE_EXACT would break this and force the choice to be made again on purpose.
 test('navigator messages are not on the control replay retention list', () => {

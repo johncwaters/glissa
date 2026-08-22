@@ -201,5 +201,82 @@ test('comment lines are already 1-based, unlike the LSP ranges beside them', asy
   assert.equal(hasComments({}), false);
 });
 
+// --- The intent block (docs/plan-navigator.md, M5) ---
 
 const NOW = 1700000000000;
+
+test('an intent message is normalized, and anything malformed reads as no intent', async () => {
+  const { emptyIntent, intentOfMessage } = await importCore();
+  assert.deepEqual(intentOfMessage({
+    intent: {
+      text: 'refactor of the spawn path', source: 'operator', locked: true, ts: NOW,
+    },
+  }), {
+    text: 'refactor of the spawn path', source: 'operator', locked: true, ts: NOW,
+  });
+
+  assert.deepEqual(intentOfMessage({}), emptyIntent());
+  assert.deepEqual(intentOfMessage({ intent: null }), emptyIntent());
+  assert.deepEqual(intentOfMessage({ intent: 'a bare string' }), emptyIntent());
+  assert.deepEqual(intentOfMessage({ intent: { text: 'x', source: 'somebody else', ts: 'soon' } }), {
+    text: 'x', source: null, locked: false, ts: 0,
+  });
+});
+
+test('the source line says who owns the statement, in the second person', async () => {
+  const { intentSourceText } = await importCore();
+  assert.equal(intentSourceText({ text: 'x', source: 'operator' }), 'set by you');
+  assert.equal(intentSourceText({ text: 'x', source: 'model' }), 'proposed by navigator');
+  assert.equal(intentSourceText({ text: '', source: 'model' }), '', 'no statement, nobody to credit');
+});
+
+test('the age reads coarsely, because the question is minutes or days and never seconds', async () => {
+  const { intentAgeText } = await importCore();
+  assert.equal(intentAgeText(NOW, NOW + 20000), 'just now');
+  assert.equal(intentAgeText(NOW, NOW + 60000), '1 minute ago');
+  assert.equal(intentAgeText(NOW, NOW + 45 * 60000), '45 minutes ago');
+  assert.equal(intentAgeText(NOW, NOW + 3600000), '1 hour ago');
+  assert.equal(intentAgeText(NOW, NOW + 5 * 3600000), '5 hours ago');
+  assert.equal(intentAgeText(NOW, NOW + 26 * 3600000), '1 day ago');
+  assert.equal(intentAgeText(NOW, NOW + 3 * 24 * 3600000), '3 days ago');
+  assert.equal(intentAgeText(NOW, NOW - 5000), 'just now', 'a clock that went backwards is not a future statement');
+  assert.equal(intentAgeText(0, NOW), '');
+});
+
+test('the meta line joins the two, and says nothing at all when there is no statement', async () => {
+  const { emptyIntent, intentMetaText } = await importCore();
+  assert.equal(intentMetaText({ text: 'x', source: 'operator', ts: NOW }, NOW + 120000), 'set by you, 2 minutes ago');
+  assert.equal(intentMetaText({ text: 'x', source: 'model', ts: 0 }, NOW), 'proposed by navigator');
+  assert.equal(intentMetaText(emptyIntent(), NOW), '');
+});
+
+test('only text, source or lock moving counts as a change, so a repaint never fires on age alone', async () => {
+  const { emptyIntent, hasIntentChanged } = await importCore();
+  const standing = {
+    text: 'x', source: 'model', locked: false, ts: NOW,
+  };
+  assert.equal(hasIntentChanged(standing, { ...standing, ts: NOW + 90000 }), false);
+  assert.equal(hasIntentChanged(standing, { ...standing, text: 'y' }), true);
+  assert.equal(hasIntentChanged(standing, { ...standing, source: 'operator', locked: true }), true);
+  assert.equal(hasIntentChanged(emptyIntent(), standing), true);
+  assert.equal(hasIntentChanged(null, emptyIntent()), false);
+});
+
+test('the correction field adopts the statement only when it holds no draft of its own', async () => {
+  const { shouldAdoptIntentText } = await importCore();
+  assert.equal(shouldAdoptIntentText({
+    focused: false, currentValue: '', previousText: '', nextText: 'a new belief',
+  }), true, 'a pristine field mirrors the statement, so a correction is an edit rather than a retype');
+
+  assert.equal(shouldAdoptIntentText({
+    focused: true, currentValue: '', previousText: '', nextText: 'a new belief',
+  }), false, 'never while the operator has the field');
+
+  assert.equal(shouldAdoptIntentText({
+    focused: false, currentValue: 'half a thought', previousText: '', nextText: 'a new belief',
+  }), false, 'a started draft is never eaten by a push');
+
+  assert.equal(shouldAdoptIntentText({
+    focused: false, currentValue: 'same', previousText: 'same', nextText: 'same',
+  }), false, 'nothing to adopt');
+});

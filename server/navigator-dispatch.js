@@ -24,6 +24,7 @@ const { registerEphemeralSession } = require('./ephemeral-session');
 const {
   DEFAULT_TIMEOUT_SECONDS, buildNavigatorPrompt, countLines, sanitizeComments,
 } = require('./core/navigator-dispatch-core');
+const { sanitizeIntentText } = require('./core/navigator-intent-core');
 
 const RESULT_VERDICTS = new Set(['COMMENTS', 'NONE', 'ERROR']);
 const RESULT_FILE = 'navigator-result.json';
@@ -48,7 +49,7 @@ function firstLine(text) {
 }
 
 function errorResult(reason) {
-  return { verdict: 'ERROR', comments: [], reason };
+  return { verdict: 'ERROR', comments: [], intent: null, reason };
 }
 
 async function readCommentsResult(resultPath, { lineCount = 0 } = {}) {
@@ -65,12 +66,15 @@ async function readCommentsResult(resultPath, { lineCount = 0 } = {}) {
   if (!RESULT_VERDICTS.has(verdict)) {
     return errorResult('invalid verdict in result file');
   }
-  if (verdict !== 'COMMENTS') return { verdict, comments: [], reason: null };
+  // Optional, and validated exactly like a comment message: a non-string or empty claim is simply not
+  // an updated belief, so it is dropped rather than clearing the standing statement.
+  const intent = sanitizeIntentText(parsed.intent) || null;
+  if (verdict !== 'COMMENTS') return { verdict, comments: [], intent, reason: null };
   const comments = sanitizeComments(parsed.comments, { lineCount });
   if (comments.length === 0) {
-    return { verdict: 'NONE', comments: [], reason: 'no comment in the result file survived validation' };
+    return { verdict: 'NONE', comments: [], intent, reason: 'no comment in the result file survived validation' };
   }
-  return { verdict, comments, reason: null };
+  return { verdict, comments, intent, reason: null };
 }
 
 /**
@@ -166,7 +170,7 @@ function createNavigatorDispatcher({
     return result || errorResult('no verdict');
   }
 
-  return async function dispatch({ uri, text, findings = [], digest = '' }) {
+  return async function dispatch({ uri, text, findings = [], intent = '', digest = '' }) {
     let workDir = null;
     try {
       workDir = await makeWorkDir();
@@ -179,7 +183,7 @@ function createNavigatorDispatcher({
         id: idFor(uri),
         name: `navigator ${uri}`,
         prompt: buildNavigatorPrompt({
-          uri, text, findings, digest, resultPath,
+          uri, text, findings, intent, digest, resultPath,
         }),
         cwd: workDir,
         resultPath,
