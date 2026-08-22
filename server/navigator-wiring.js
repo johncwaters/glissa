@@ -84,8 +84,9 @@ function readFrame(raw) {
 
 function shouldWarnForInvalidIntentFile(raw, revived) {
   if (revived.text) return false;
+  const empty = createIntentState();
   const isPersistedEmpty = raw && typeof raw === 'object' && !Array.isArray(raw)
-    && raw.text === '' && raw.source === null && raw.locked === false && raw.ts === 0;
+    && raw.text === empty.text && raw.source === empty.source && raw.locked === empty.locked && raw.ts === empty.ts;
   return !isPersistedEmpty;
 }
 
@@ -365,7 +366,8 @@ function createNavigatorWiring({
     if (!merged.changed) return false;
     intentState = merged.state;
     if (intentStateWriter) {
-      intentStateWriter.write(intentPayload(intentState), () => JSON.stringify(intentPayload(intentState), null, 2));
+      const payload = intentPayload(intentState);
+      intentStateWriter.write(payload, () => JSON.stringify(payload, null, 2));
     }
     broadcastIntent();
     return true;
