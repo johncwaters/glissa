@@ -324,7 +324,7 @@ test('pingFor: each pinging kind renders its own label', () => {
   assert.match(pingFor('regression', PING_CTX), /^\[glissa\/posthog\] REGRESSED web$/m);
   assert.match(pingFor('needs_human', PING_CTX), /^\[glissa\/posthog\] NEEDS HUMAN web$/m);
   assert.match(pingFor('error', PING_CTX), /^\[glissa\/posthog\] ERROR web$/m);
-  assert.match(pingFor('new_high_impact', PING_CTX), /^\[glissa\/posthog\] HIGH IMPACT web$/m);
+  assert.match(pingFor('new_issue', PING_CTX), /^\[glissa\/posthog\] NEW ISSUE web$/m);
 });
 
 // A title is an end-user error message reaching Telegram verbatim, so it is flattened (a newline

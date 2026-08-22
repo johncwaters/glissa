@@ -91,7 +91,8 @@ test('start() investigates a new issue, arms an unref-d interval, stop() clears 
   assert.equal(spawnCalls[0].url, 'https://ph.test/project/1/error_tracking/iss-1');
   assert.equal(poller._state()[KEY].verdict, 'ROOT_CAUSE');
   assert.equal(poller._state()[KEY].inFlight, false);
-  assert.deepEqual(pings, [], 'a ROOT_CAUSE verdict is digest-only, never a ping');
+  assert.equal(pings.length, 1, 'a ROOT_CAUSE verdict is digest-only, so only the new-issue ping fires');
+  assert.match(pings[0], /^\[glissa\/posthog\] NEW ISSUE web$/m);
   assert.equal(typeof intervalCb, 'function', 'interval armed');
 
   await poller.stop();
@@ -174,7 +175,7 @@ test('a resolved issue turning active again pings as a regression', async () => 
   assert.equal(poller._state()[KEY].status, 'active', 'the entry is written back active, so it cannot re-ping');
 });
 
-test('a new issue already over the escalation threshold pings HIGH IMPACT once, not per tick', async () => {
+test('a new issue pings NEW ISSUE once, not per tick', async () => {
   const { poller, pings } = harness({
     api: { queryIssues: async () => ({ ok: true, body: { results: [issueRow({ aggregations: { occurrences: 900, users: 60 } })] } }) },
     spawnInvestigation: async () => ({ verdict: 'ROOT_CAUSE' }),
@@ -183,8 +184,21 @@ test('a new issue already over the escalation threshold pings HIGH IMPACT once, 
   await flush();
   await poller.tick();
   await flush();
-  const highImpact = pings.filter((p) => /HIGH IMPACT/.test(p));
-  assert.equal(highImpact.length, 1, 'pingedPhases dedups the high-impact ping across ticks');
+  const newIssue = pings.filter((p) => /NEW ISSUE/.test(p));
+  assert.equal(newIssue.length, 1, 'pingedPhases dedups the new-issue ping across ticks');
+});
+
+// The detection ping follows the auto-fix major predicate: the issue itself qualifies, blast radius
+// is irrelevant, so a new issue far below userEscalationThreshold still announces itself once.
+test('a new issue below the escalation threshold still pings NEW ISSUE', async () => {
+  const { poller, pings } = harness({
+    api: { queryIssues: async () => ({ ok: true, body: { results: [issueRow({ aggregations: { occurrences: 3, users: 1 } })] } }) },
+    userEscalationThreshold: 25,
+    spawnInvestigation: async () => ({ verdict: 'ROOT_CAUSE' }),
+  });
+  await poller.start();
+  await flush();
+  assert.equal(pings.filter((p) => /NEW ISSUE/.test(p)).length, 1);
 });
 
 test('a NEEDS_HUMAN verdict pings once; a later re-investigation does not re-ping it', async () => {
@@ -281,8 +295,9 @@ test('a hung investigation is force-resolved to ERROR by the timeout and frees i
   await flush();
   assert.equal(poller._state()[KEY].verdict, 'ERROR');
   assert.equal(poller._state()[KEY].inFlight, false, 'slot freed');
-  assert.equal(pings.length, 1);
-  assert.match(pings[0], /^\[glissa\/posthog\] ERROR web$/m);
+  assert.equal(pings.length, 2);
+  assert.match(pings[0], /^\[glissa\/posthog\] NEW ISSUE web$/m);
+  assert.match(pings[1], /^\[glissa\/posthog\] ERROR web$/m);
 });
 
 // queryIssues returns only the top-50 active issues of the last 24h, so absence is not death: the
@@ -577,10 +592,10 @@ test('a FIXED verdict pings once with the repro status and the pull request', as
   const { poller, pings } = harness({ ...MAJOR, spawnInvestigation: async () => fixResult() });
   await poller.start();
   await flush();
-  // The high-impact observation ping fires first: a major issue is announced when it is SEEN, and the
-  // fix verdict is a second, differently-kinded ping rather than a replacement for it.
+  // The observation ping fires first: a new issue is announced when it is SEEN, and the fix verdict
+  // is a second, differently-kinded ping rather than a replacement for it.
   assert.equal(pings.length, 2);
-  assert.match(pings[0], /^\[glissa\/posthog\] HIGH IMPACT web$/m);
+  assert.match(pings[0], /^\[glissa\/posthog\] NEW ISSUE web$/m);
   assert.match(pings[1], /^\[glissa\/posthog\] FIXED web$/m);
   assert.match(pings[1], /reproduced, then fixed/);
   assert.match(pings[1], /PR: https:\/\/github\.com\/o\/r\/pull\/7/);
@@ -975,7 +990,7 @@ test('a fresh issue id for an already-diagnosed transient is deduped, not invest
   assert.deepEqual(stateStore.value._signatures['ph.test/1#iss-1'].recurredIssueIds, ['iss-2']);
   assert.equal(stateStore.value._investigations.length, 2, 'the deduped verdict still reaches the inbox');
   assert.equal(stateStore.value._investigations[1].verdict, 'TRANSIENT');
-  assert.deepEqual(pings, [], 'a first repeat is not worth a phone buzz');
+  assert.deepEqual(pings.filter((p) => /RECURRING/.test(p)), [], 'a first repeat is not worth a phone buzz');
 });
 
 test('a deduped issue is quiet on the next tick: the verdict is its own now', async () => {
@@ -1006,9 +1021,10 @@ test('the configured repeat escalates: a real investigation runs and the phone h
   await flush();
 
   assert.deepEqual(spawned, ['iss-4'], 'the third repeat is paid for');
-  assert.equal(pings.length, 1);
-  assert.match(pings[0], /^\[glissa\/posthog\] RECURRING web$/m);
-  assert.match(pings[0], /recurring transient escalated: repeat 3 within 7 days of issue iss-1/);
+  const recurring = pings.filter((p) => /RECURRING/.test(p));
+  assert.equal(recurring.length, 1);
+  assert.match(recurring[0], /^\[glissa\/posthog\] RECURRING web$/m);
+  assert.match(recurring[0], /recurring transient escalated: repeat 3 within 7 days of issue iss-1/);
   const cluster = poller._state()._signatures['ph.test/1#iss-1'];
   assert.equal(cluster.escalated, true, 'the cluster stops being reusable');
   assert.equal(cluster.recurrences, 3);
@@ -1026,7 +1042,7 @@ test('an escalated cluster never dedupes again and never re-pings', async () => 
   await poller.start();
   await flush();
   assert.deepEqual(spawned, ['iss-5']);
-  assert.deepEqual(pings, [], 'the escalation ping already fired for this cluster');
+  assert.deepEqual(pings.filter((p) => /RECURRING/.test(p)), [], 'the escalation ping already fired for this cluster');
 });
 
 test('two same-cluster escalations planned in one tick fire one ping, not two', async () => {
@@ -1045,7 +1061,7 @@ test('two same-cluster escalations planned in one tick fire one ping, not two', 
   await poller.start();
   await flush();
   assert.deepEqual(spawned.sort(), ['iss-6', 'iss-7'], 'both escalated twins are investigated');
-  assert.equal(pings.length, 1, 'the cluster escalates once');
+  assert.equal(pings.filter((p) => /RECURRING/.test(p)).length, 1, 'the cluster escalates once');
 });
 
 test('a repeat affecting more than one user escalates on its first sighting', async () => {
@@ -1060,8 +1076,8 @@ test('a repeat affecting more than one user escalates on its first sighting', as
   await flush();
 
   assert.deepEqual(spawned, ['iss-3'], 'a blast radius past one carbon unit is not a transient');
-  assert.match(pings[0], /RECURRING web/);
-  assert.match(pings[0], /now affecting more than one user/);
+  const escalation = pings.find((p) => /RECURRING web/.test(p));
+  assert.match(escalation, /now affecting more than one user/);
   assert.equal(poller._state()._signatures['ph.test/1#iss-1'].escalated, true);
 });
 
@@ -1114,7 +1130,7 @@ test('the recurrenceDedupe kill switch restores the prior behavior exactly', asy
   await flush();
 
   assert.deepEqual(spawned, ['iss-2'], 'every issue is investigated, as before');
-  assert.deepEqual(pings, []);
+  assert.deepEqual(pings.filter((p) => /RECURRING/.test(p)), []);
   assert.equal(stateStore.value._signatures['ph.test/1#iss-1'].recurrences, 0, 'no cluster bookkeeping happens');
   assert.equal(stateStore.value._signatures['ph.test/1#iss-2'], undefined, 'and the transient verdict opens none');
 });
@@ -1266,7 +1282,7 @@ test('a traffic query that throws leaves issue triage untouched and never pings'
 
   assert.deepEqual(spawned, ['iss-1'], 'the issue lane ran to completion');
   assert.equal(poller._state()[KEY].verdict, 'ROOT_CAUSE');
-  assert.deepEqual(pings, [], 'a broken traffic query never buzzes the operator');
+  assert.deepEqual(pings.filter((p) => /TRAFFIC/.test(p)), [], 'a broken traffic query never buzzes the operator');
   assert.equal(poller._state()._traffic, undefined, 'and wrote no state slice');
 });
 

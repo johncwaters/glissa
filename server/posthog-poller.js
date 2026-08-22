@@ -485,10 +485,9 @@ function createPosthogPoller(deps) {
       const observation = OBSERVATION_PINGS[change.change];
       if (observation?.dedupe) pingOnce(observation.kind, pingContext(change), phases);
       if (observation && !observation.dedupe) pingAlways(observation.kind, pingContext(change));
-      // A brand-new issue already over the escalation threshold is worth a ping before any
-      // investigation finishes: the operator should not wait ~15 minutes to learn it exists.
-      if (change.change === 'new' && !prev.verdict && change.issue.users >= userEscalationThreshold) {
-        pingOnce('new_high_impact', pingContext(change), phases);
+      // Same rule as the auto-fix major predicate: the issue itself qualifies, blast radius does not.
+      if (change.change === 'new' && !prev.verdict) {
+        pingOnce('new_issue', pingContext(change), phases);
       }
       state[change.key] = core.nextState(prev, change.issue, {
         observedAt: tickStartedAt,

@@ -63,7 +63,7 @@ const PING_LABELS = {
   regression: 'REGRESSED',
   needs_human: 'NEEDS HUMAN',
   error: 'ERROR',
-  new_high_impact: 'HIGH IMPACT',
+  new_issue: 'NEW ISSUE',
   recurrence_escalated: 'RECURRING',
   traffic_spike: 'TRAFFIC SPIKE',
   traffic_spike_growth: 'TRAFFIC CLIMBING',
