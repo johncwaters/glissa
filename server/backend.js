@@ -51,8 +51,6 @@ const { createSpawnGate } = require('./spawn-gate');
 const { spawn } = require('./child-process-safe');
 const { createGitWorkspace, createGitWorkspaceSync } = require('./git-workspace');
 const { runPostTurnChecks, resolveCheckConfig } = require('./post-turn-checker');
-const { createIntegrationRefWatcher } = require('../detection/integration-ref-watch');
-const { createIntegrationWatcherPool } = require('../detection/integration-watcher-pool');
 const { createPrReviewWiring } = require('./pr-review-wiring');
 const { createPosthogWiring } = require('./posthog-wiring');
 const { createNavigatorWiring } = require('./navigator-wiring');
@@ -354,6 +352,9 @@ function createBackend(httpServer, options = {}) {
       // Eager conflict avoidance (config kill switch). Like every other construction-time option, a
       // settings change reaches a session on its NEXT construction, not the live one.
       autoRebase: cfg.worktreeAutoRebase !== false,
+      // Master kill switch for the live cross-session review liveness (the integration-branch reflog
+      // watcher each worktree session runs beside its own gitdir watch).
+      liveWorktreeReview: cfg.liveWorktreeReview !== false,
       // Worktree root: a `.glissa-worktrees` sibling of THIS repo by default (attached to the repo,
       // outside its tree - no nested biome/eslint config, clean main git status). A configured
       // worktreeRoot overrides. Plus the gitignored local context to bring in, so the spawned agent
@@ -1046,21 +1047,6 @@ function createBackend(httpServer, options = {}) {
     }),
   });
 
-  // --- Integration-branch watchers (event-driven cross-session gate liveness) ---
-  // Replaces the old 10s poll's one unique job: noticing that a session's integration branch moved
-  // WITHOUT this session's own worktree changing (another session merged, or an out-of-band CLI merge),
-  // which shifts that session's merge gate (its ahead-count vs the branch) with no local gitdir/turn
-  // event. The pool keeps at most one reflog fs.watch per (commonGitDir, integration branch) and, on a
-  // branch move, re-checks every sibling worktree session on that repo. Unlike the poll this fires only
-  // on an actual branch move (no recurring git), and runs server-side regardless of whether a dashboard
-  // is open, so gates stay fresh across reconnects. (Ref-count/fan-out logic + tests: integration-watcher-pool.js.)
-  const integrationPool = createIntegrationWatcherPool({
-    sessions,
-    createWatcher: createIntegrationRefWatcher,
-    recheck: (s) => s.checkWorktreeChange().catch(() => { /* best-effort; the gitdir watch + turn-end retry */ }),
-    isEnabled: () => config.liveWorktreeReview !== false, // master kill-switch for live cross-session review
-  });
-
   function wireSessionEvents(sess) {
     // All closures read sess.id (stable) and sess.name (current) dynamically.
     let ptDebounce = null; // post-turn-check debounce timer (per session closure)
@@ -1281,10 +1267,6 @@ function createBackend(httpServer, options = {}) {
       // here, mirroring the merge-status handler, so the worktree badge turns on for a freshly spawned
       // worktree without waiting for a page reload.
       broadcastControl({ type: 'session-git', id: sess.id, worktree: !!sess.isWorktree });
-      // Watch the integration branch's reflog so a cross-session / out-of-band merge into it re-checks
-      // this (and every sibling) worktree's merge gate, with no poll. commonGitDir is set on the session
-      // before this event fires (in _provisionWorktree).
-      integrationPool.ensure(sess);
       // The worktree that will take this session's commits exists only as of now, so the git ingest
       // source is told to re-derive its watch set rather than finding it up to a poll interval later.
       if (ingestLane) void ingestLane.noteRepos();
@@ -1341,8 +1323,6 @@ function createBackend(httpServer, options = {}) {
       sessions,
       gitWorkspaceSync: createGitWorkspaceSync(),
       integrationBranch: config.integrationBranch || 'develop',
-      // adopt sets commonGitDir; watch the integration branch for this re-adopted worktree too
-      onAdopt: (sess) => integrationPool.ensure(sess),
     });
   } catch (err) {
     console.warn(`[worktree] worktree reconcile failed: ${err.message}`);
@@ -1434,7 +1414,6 @@ function createBackend(httpServer, options = {}) {
     if (!sess) return false;
     closeSessionDataClients(id);
     notificationManager.acknowledge(id);
-    integrationPool.release(sess);
     // Before destroy(): this session is leaving for good, and destroy() emits no 'exit' and no final
     // state-change, so nothing else would ever take its ingest tap or its fs root off the lane's roster.
     if (ingestLane) ingestLane.detachSessionTap(sess);
@@ -1482,7 +1461,6 @@ function createBackend(httpServer, options = {}) {
       closeSessionDataClients(project.id);
       // INVARIANT: acknowledge BEFORE destroy - destroy() calls removeAllListeners()
       notificationManager.acknowledge(project.id);
-      integrationPool.release(oldSess);
       oldSess.destroy();
       const newSess = makeSession(project, { ...config, ...newConfig });
       sessions.set(project.id, newSess);
@@ -1491,8 +1469,6 @@ function createBackend(httpServer, options = {}) {
       // pending-review (the boot reconcile wires-then-adopts in this same order).
       wireSessionEvents(newSess);
       carryWorktreeAcrossRecreate(oldSess, newSess);
-      // adopt (same path) sets commonGitDir; watch the integration ref for the carried worktree too.
-      if (newSess.worktreeDir) integrationPool.ensure(newSess);
       // Broadcast BEFORE start() - see _addNewSessions for rationale.
       broadcastControl({ type: 'session-modified', id: project.id, session: project.name, path: project.path, state: newSess.state, skipPerms: !!newSess.dangerouslySkipPermissions, worktree: !!newSess.isWorktree, resumeSessionId: newSess.resumeSessionId || null });
       newSess.start();
@@ -1866,7 +1842,6 @@ function createBackend(httpServer, options = {}) {
     if (updateRecheckInterval) clearInterval(updateRecheckInterval);
     // INVARIANT: destroy NotificationManager BEFORE sessions - clears all timers globally
     notificationManager.destroy();
-    integrationPool.stopAll();
     // Collect each session's in-flight PTY reap (set by kill() on win32, see sessions.js) so the
     // lifecycle can await them before exit/respawn; a DORMANT session has no PTY and no reap.
     const pendingReaps = [];

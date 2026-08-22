@@ -9,6 +9,7 @@ const { isSameDirectoryPath } = require("../shared/paths");
 const { createOscTitleSource } = require("../detection/osc-title-source");
 const { createStatusSource } = require("../detection/status-source");
 const { createWorktreeWatcher } = require("../detection/worktree-watch");
+const { createIntegrationRefWatcher } = require("../detection/integration-ref-watch");
 const { writeSessionSettings } = require("../detection/settings-injector");
 const {
   classifyClaudeKind,
@@ -60,12 +61,21 @@ const PASTE_READY_STATES = new Set([
 // Trailing debounce for the worktree-change funnel: a single `git commit` touches
 // several gitdir files and a turn-end can race the fs.watch, so collapse a burst
 // into one signature recompute. The triggers are all event-driven (no poll): the per-worktree gitdir
-// fs.watch, the turn-end hook, and the backend's integration-ref watcher fan-out.
+// fs.watch, the turn-end hook, and the integration-branch reflog fs.watch.
 const WORKTREE_CHECK_DEBOUNCE_MS = 400;
 
+// Stop one fs.watch listener and hand back the null its field should hold. Best-effort: a watcher whose
+// directory already vanished throws from close(), which must never break a teardown.
+function stopWatcher(watcher) {
+  if (watcher) {
+    try { watcher.stop(); } catch { /* already gone */ }
+  }
+  return null;
+}
+
 // Async git. The review-gate probes (signature, diff) run on hot, recurring paths
-// (every turn-end, every gitdir fs.watch nudge, and the backend's integration-ref
-// watcher fan-out). The synchronous execFileSync they used to call BLOCKS the single Node
+// (every turn-end, every gitdir fs.watch nudge, and every integration-branch reflog
+// nudge). The synchronous execFileSync they used to call BLOCKS the single Node
 // event loop for the whole subprocess - on a slower machine, with several sessions,
 // that stalls every session's PTY streaming and keystroke handling at once. execFile
 // runs git in a child process while the loop keeps pumping that I/O.
@@ -225,6 +235,9 @@ class Session extends EventEmitter {
     // (config worktreeAutoRebase). Read at construction like every other spawn-time option, so a
     // settings change applies to the next construction of this session, not to the live one.
     autoRebase = true,
+    // Master kill switch for the live cross-session review liveness: with it false the integration-ref
+    // watcher is never started, so a branch move reaches this session only via the turn-end recheck.
+    liveWorktreeReview = true,
     // Session worktree location + the gitignored local context to bring in (see _provisionWorktree).
     worktreeRoot = null,
     worktreeShare = null,
@@ -401,6 +414,7 @@ class Session extends EventEmitter {
     this._gitWorkspace = gitWorkspace;
     this._integrationBranch = integrationBranch;
     this._autoRebase = autoRebase !== false;
+    this._liveWorktreeReview = liveWorktreeReview !== false;
     this._autoRebasing = false;    // re-entry mutex: one auto-rebase per session at a time
     this._rebaseConflictKey = null; // head::target the last auto-rebase conflicted on (see _maybeAutoRebase)
     this._effectiveBase = null;    // cached result of _resolveEffectiveBase(); null until first diff
@@ -410,7 +424,7 @@ class Session extends EventEmitter {
     this.worktreeDir = null;     // active session worktree cwd (null = in-place at this.path)
     this._startPending = null;   // in-flight start() promise (single-flight; see start())
     this.commonGitDir = null;    // shared gitdir all linked worktrees write refs into (git rev-parse
-                                 // --git-common-dir); the key the backend groups integration-ref watchers by
+                                 // --git-common-dir); where the integration branch's reflog is watched
     this.baseSha = null;         // integration-branch SHA the worktree forked from
     this._workspace = null;      // opaque git-workspace handle for merge/discard
     this.mergeStatus = 'none';   // none | pending-review | merging | parked | merged
@@ -423,6 +437,7 @@ class Session extends EventEmitter {
     // is the fast fs.watch nudge; _lastWorktreeSig dedups the cheap signature so only real deltas
     // broadcast; the debounce timer coalesces a write/turn-end burst into one recompute.
     this._worktreeWatcher = null;
+    this._integrationWatcher = null;
     this._worktreeCheckTimer = null;
     this._lastWorktreeSig = null;
 
@@ -1145,14 +1160,8 @@ class Session extends EventEmitter {
     return this.worktreeDir || this.path;
   }
 
-  // The integration branch this session forks from / merges into. Public read accessor so the backend
-  // can group sessions for the shared integration-ref watcher without reaching into the private field.
-  get integrationBranch() {
-    return this._integrationBranch;
-  }
-
   // Resolve the SHARED gitdir (git rev-parse --git-common-dir) of this session's worktree: the dir every
-  // linked worktree writes refs/reflogs into, and the key the backend groups integration-ref watchers by.
+  // linked worktree writes refs/reflogs into, and where this session watches its integration branch's reflog.
   // One-shot on the cold provision/adopt path, so sync git is fine (MEMORY single-event-loop-no-sync-git:
   // keep one-shot cold paths sync). Absolute-ized against the worktree; null off a worktree / on failure.
   _resolveCommonGitDir() {
@@ -1702,30 +1711,56 @@ class Session extends EventEmitter {
     if (this._worktreeCheckTimer.unref) this._worktreeCheckTimer.unref();
   }
 
-  // (Re)start the fs.watch over this session's gitdir. Idempotent: a fresh watcher replaces any prior
-  // one, so it is safe to call on every provision/adopt/restart. A non-worktree (in-place) session has
-  // no gitdir, so start() declines; an in-place session has no review worktree to track anyway.
+  // (Re)start the two fs.watches this session's review gate rides on. Idempotent: fresh watchers replace
+  // any prior ones, so it is safe to call on every provision/adopt/restart. A non-worktree (in-place)
+  // session has no gitdir, so both decline; it has no review worktree to track anyway.
   // _lastWorktreeSig is reset so the first post-(re)start check re-establishes the baseline.
+  //
+  //   - this worktree's OWN gitdir: a commit/stage/reset inside it.
+  //   - the integration branch's REFLOG in the shared gitdir: the branch moving WITHOUT this worktree
+  //     changing (a sibling session merged, or the operator merged out-of-band), which shifts this
+  //     session's merge gate with no local event. Both funnel into the same debounced recheck.
   _startWorktreeWatcher() {
     this._stopWorktreeWatcher();
     if (this._destroyed || !this.worktreeDir) return;
-    this._worktreeWatcher = createWorktreeWatcher({
-      worktreeDir: this.worktreeDir,
-      onChange: () => this._scheduleWorktreeCheck(),
-    });
+    const onChange = () => this._scheduleWorktreeCheck();
+    this._worktreeWatcher = createWorktreeWatcher({ worktreeDir: this.worktreeDir, onChange });
     this._worktreeWatcher.start();
+    if (!this._liveWorktreeReview || !this.commonGitDir || !this._integrationBranch) return;
+    this._integrationWatcher = createIntegrationRefWatcher({
+      commonGitDir: this.commonGitDir,
+      branch: this._integrationBranch,
+      onChange,
+    });
+    this._integrationWatcher.start();
   }
 
   _stopWorktreeWatcher() {
-    if (this._worktreeWatcher) {
-      try { this._worktreeWatcher.stop(); } catch { /* best-effort */ }
-      this._worktreeWatcher = null;
-    }
+    this._worktreeWatcher = stopWatcher(this._worktreeWatcher);
+    this._integrationWatcher = stopWatcher(this._integrationWatcher);
     if (this._worktreeCheckTimer) {
       clearTimeout(this._worktreeCheckTimer);
       this._worktreeCheckTimer = null;
     }
     this._lastWorktreeSig = null;
+  }
+
+  // The half both merge entry points share: arm the 'merging' gate, run one engine method against this
+  // session's workspace, and turn a thrown engine into the pending-review fallback. Returns { result }
+  // or { failure }, the caller's own return value, so a throw needs no second catch at each call site.
+  async _runMergeEngine(method) {
+    this._setMergeStatus("merging");
+    try {
+      const result = await this._gitWorkspace[method]({
+        projectPath: this.path,
+        workspace: this._workspace,
+        targetBranch: this._integrationBranch,
+      });
+      return { result };
+    } catch (err) {
+      this._setMergeStatus("pending-review", { reason: err.message });
+      return { failure: { merged: false, reason: err.message } };
+    }
   }
 
   // Operator action: rebase-then-FF merge the session's worktree into the integration branch, then
@@ -1740,18 +1775,8 @@ class Session extends EventEmitter {
     // the same worktree. Keyed STRICTLY on 'merging' so it never blocks the legitimate finish path, which
     // calls mergeWorktree while mergeStatus is 'pending-review' (settled-on-exit) or 'none'.
     if (this.mergeStatus === "merging") return { merged: false, refused: true, reason: "merge-in-progress" };
-    this._setMergeStatus("merging");
-    let r;
-    try {
-      r = await this._gitWorkspace.mergeBack({
-        projectPath: this.path,
-        workspace: this._workspace,
-        targetBranch: this._integrationBranch,
-      });
-    } catch (err) {
-      this._setMergeStatus("pending-review", { reason: err.message });
-      return { merged: false, reason: err.message };
-    }
+    const { result: r, failure } = await this._runMergeEngine("mergeBack");
+    if (failure) return failure;
     if (r.merged) {
       this._stopWorktreeWatcher();
       this._workspace = null;
@@ -1791,18 +1816,8 @@ class Session extends EventEmitter {
     }
     // Re-entry guard (see mergeWorktree): refuse a second concurrent merge on the same worktree.
     if (this.mergeStatus === "merging") return { merged: false, refused: true, reason: "merge-in-progress" };
-    this._setMergeStatus("merging");
-    let r;
-    try {
-      r = await this._gitWorkspace.mergeKeep({
-        projectPath: this.path,
-        workspace: this._workspace,
-        targetBranch: this._integrationBranch,
-      });
-    } catch (err) {
-      this._setMergeStatus("pending-review", { reason: err.message });
-      return { merged: false, reason: err.message };
-    }
+    const { result: r, failure } = await this._runMergeEngine("mergeKeep");
+    if (failure) return failure;
     if (r.merged) {
       // Worktree kept alive on its branch (now == the integration tip); track the new base it sits on.
       if (r.baseSha) { this.baseSha = r.baseSha; this._workspace.baseSha = r.baseSha; }

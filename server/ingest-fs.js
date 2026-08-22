@@ -3,10 +3,11 @@
  * watched root, batched into per-file coalesced change events. Nothing here decides what a change MEANS,
  * which files are noise, or how many events a window owes; that is server/core/ingest-fs-core.js.
  *
- * ROOTS are ref counted, following detection/integration-watcher-pool.js. With `fs.roots` empty (the
- * default) the watched set is the checkouts of projects whose sessions are ALIVE: a root is subscribed
- * when its first session starts and unsubscribed when its last one exits, so a machine with nothing
- * running watches nothing. Explicit `fs.roots` entries are held by a permanent holder on top of that.
+ * ROOTS are ref counted: one subscription per root, held by however many holders want it, torn down when
+ * the last holder releases it. With `fs.roots` empty (the default) the watched set is the checkouts of
+ * projects whose sessions are ALIVE: a root is subscribed when its first session starts and unsubscribed
+ * when its last one exits, so a machine with nothing running watches nothing. Explicit `fs.roots` entries
+ * are held by a permanent holder on top of that.
  * Overlapping roots collapse before subscribing (the core's nesting rule), because a project root and a
  * session subdirectory of it are one watch and two subscriptions would report every change twice.
  *
