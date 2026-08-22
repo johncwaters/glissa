@@ -17,6 +17,7 @@ import {
   LANE_SCOPE_HINT,
   PLAN_WINDOWS,
   RANGE_OPTIONS,
+  SESSION_ROW_LIMIT,
   USAGE_CAVEAT,
   USAGE_CAVEAT_SHORT,
   USAGE_DISABLED_HINT,
@@ -58,6 +59,7 @@ import {
   resetCountdownText,
   scanLine,
   sessionRowLabel,
+  sessionOverflowText,
   shareBasis,
   shareLabel,
   shouldApplyUsageReport,
@@ -68,6 +70,7 @@ import {
   tokenLimitTone,
   usageErrorLine,
   usageWarningLine,
+  visibleSessionRows,
 } from './usage-view-core.mjs';
 
 const REFRESH_STATUS_TIMEOUT_MS = 20000;
@@ -87,6 +90,7 @@ let _refreshTimer = null;
 let _daySort = DEFAULT_DAY_SORT;
 let _modelSort = DEFAULT_MODEL_SORT;
 let _sessionSort = DEFAULT_SESSION_SORT;
+let _sessionsExpanded = false;
 let _focusAfterRender = null;
 const _expandedDays = new Set();
 
@@ -653,6 +657,7 @@ function buildModelsSection() {
 // hidden.
 function buildSessionsSection() {
   const rows = sortSessionRows(_report?.sessions, _sessionSort);
+  const visible = visibleSessionRows(rows, _sessionsExpanded);
   const totals = _report?.totals || {};
   const basis = shareBasis(totals);
   const section = buildSection('By session', shareLabel(basis));
@@ -675,7 +680,7 @@ function buildSessionsSection() {
     },
     'session',
   );
-  for (const row of rows) {
+  for (const row of visible.rows) {
     const tr = el('tr', 'usage-row');
     if (isGlissaSessionRow(row)) tr.dataset.managed = 'true';
     const label = sessionRowLabel(row);
@@ -691,7 +696,27 @@ function buildSessionsSection() {
     body.append(tr);
   }
   section.append(wrap);
+  if (rows.length > SESSION_ROW_LIMIT) {
+    section.append(buildSessionsOverflow(visible.hiddenCount));
+  }
   return section;
+}
+
+function buildSessionsOverflow(hiddenCount) {
+  const wrap = el('div', 'usage-overflow');
+  const text = sessionOverflowText(hiddenCount);
+  if (text) wrap.append(el('p', 'usage-meta', text));
+  const button = el('button', 'usage-toggle', 'All sessions');
+  button.type = 'button';
+  button.dataset.usageSessionsToggle = 'true';
+  button.setAttribute('aria-expanded', _sessionsExpanded ? 'true' : 'false');
+  button.addEventListener('click', () => {
+    _focusAfterRender = { kind: 'sessions-toggle' };
+    _sessionsExpanded = !_sessionsExpanded;
+    render();
+  });
+  wrap.append(button);
+  return wrap;
 }
 
 // ── Unavailable ──
@@ -754,6 +779,7 @@ function restoreFocusAfterRender() {
 
 function selectorForFocusTarget(target) {
   if (target.kind === 'day') return `.usage-toggle[data-usage-day="${CSS.escape(target.day)}"]`;
+  if (target.kind === 'sessions-toggle') return '.usage-toggle[data-usage-sessions-toggle="true"]';
   if (target.kind === 'sort') return `[data-usage-table="${CSS.escape(target.table)}"] .usage-sort[data-sort-key="${CSS.escape(target.key)}"]`;
   return null;
 }

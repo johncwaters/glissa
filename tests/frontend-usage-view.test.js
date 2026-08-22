@@ -316,6 +316,36 @@ test('sortSessionRows: last activity first, then tokens, then label; input is no
   assert.deepEqual(rows.map((r) => r.id), ['a', 'b', 'c', 'd', 'e', 'f']);
 });
 
+test('visibleSessionRows: caps collapsed session rows and reports hidden count', async () => {
+  const { SESSION_ROW_LIMIT, visibleSessionRows } = await importCore();
+  const underLimit = Array.from({ length: SESSION_ROW_LIMIT - 1 }, (_, index) => ({ id: String(index) }));
+  const overLimit = Array.from({ length: SESSION_ROW_LIMIT + 3 }, (_, index) => ({ id: String(index) }));
+
+  assert.deepEqual(visibleSessionRows(underLimit, false), { rows: underLimit, hiddenCount: 0 });
+  assert.deepEqual(visibleSessionRows(overLimit, false), {
+    rows: overLimit.slice(0, SESSION_ROW_LIMIT),
+    hiddenCount: 3,
+  });
+  assert.deepEqual(visibleSessionRows(overLimit, true), { rows: overLimit, hiddenCount: 0 });
+  assert.deepEqual(visibleSessionRows(null, false), { rows: [], hiddenCount: 0 });
+});
+
+test('sessionOverflowText: only positive hidden counts produce copy', async () => {
+  const { SESSION_ROW_LIMIT, sessionOverflowText } = await importCore();
+  const forbidden = [String.fromCharCode(0x2014), String.fromCharCode(0x2013), String.fromCharCode(0x2026)];
+
+  assert.equal(sessionOverflowText(0), '');
+  assert.equal(sessionOverflowText(-1), '');
+  assert.equal(sessionOverflowText(Number.NaN), '');
+
+  const text = sessionOverflowText(42);
+  assert.match(text, new RegExp(String(SESSION_ROW_LIMIT)));
+  assert.match(text, /42/);
+  for (const glyph of forbidden) {
+    assert.equal(text.includes(glyph), false);
+  }
+});
+
 test('sortDailyRows and sortModelRows: newest day first, biggest model first', async () => {
   const { sortDailyRows, sortModelRows, modelLabel } = await importCore();
   const daily = [{ day: '2026-08-12' }, { day: '2026-08-19' }, { day: '2026-08-15' }];
@@ -541,6 +571,7 @@ test('no produced string contains an em dash, en dash or ellipsis character', as
     produced.push(core.sessionChipTitle({ officialCostUSD: n }));
   }
   produced.push(core.sessionRowLabel({}), core.sessionRowLabel({ id: 'x', label: 'name' }));
+  produced.push(core.sessionOverflowText(42), core.sessionOverflowText(0));
   produced.push(core.modelLabel({ model: null }), core.sessionChipText({ tokens: 125000, costUSD: 1.2 }));
 
   for (const value of produced) {

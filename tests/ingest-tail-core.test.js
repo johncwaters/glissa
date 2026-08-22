@@ -13,7 +13,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
-  MAX_CATCH_UP_BYTES, applyRead, createTailState, isActiveMtime, pickStaleByMtime, planRead,
+  LISTING_SETTLE_MS, MAX_CATCH_UP_BYTES, applyRead, canTrustCachedListing, createTailState, isActiveMtime,
+  pickStaleByMtime, planRead,
 } = require('../server/core/ingest-tail-core');
 const {
   MAX_RAW_CHARS, isDispatchWorkdir, mapAgentLine, parseTimestamp, toolTarget,
@@ -145,6 +146,16 @@ test('the tracked map is bounded, evicting the files nothing has appended to in 
 test('activeness is a window around the caller-supplied now, never a clock read here', () => {
   assert.equal(isActiveMtime(NOW - 1000, { now: NOW, withinMs: 5000 }), true);
   assert.equal(isActiveMtime(NOW - 9000, { now: NOW, withinMs: 5000 }), false);
+});
+
+test('a listing taken while its directory mtime was still fresh is never trusted', () => {
+  assert.equal(canTrustCachedListing({ mtimeMs: NOW, listedAtMs: NOW }), false);
+  assert.equal(canTrustCachedListing({ mtimeMs: NOW, listedAtMs: NOW + LISTING_SETTLE_MS - 1 }), false);
+  assert.equal(canTrustCachedListing({ mtimeMs: NOW, listedAtMs: NOW + LISTING_SETTLE_MS }), true);
+  // Future-stamped mtime (clock skew, restored backup) settles by waiting, never trusted early.
+  assert.equal(canTrustCachedListing({ mtimeMs: NOW + 60000, listedAtMs: NOW }), false);
+  assert.equal(canTrustCachedListing({}), false);
+  assert.equal(canTrustCachedListing(), false);
 });
 
 // --- Claude mapping -------------------------------------------------------

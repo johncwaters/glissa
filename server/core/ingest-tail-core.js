@@ -19,6 +19,8 @@ const { decideFileRead, splitLines } = require('./usage-scan-core');
 // bounded read of its newest bytes rather than a stall on the event loop every session shares.
 const MAX_CATCH_UP_BYTES = 256 * 1024;
 const DEFAULT_MAX_TRACKED = 256;
+// Directory mtimes come off a COARSE clock (4ms on a stock Linux tick, a whole second on ext3 and FAT), so a child created in the tick a listing already read leaves an mtime that never moves again.
+const LISTING_SETTLE_MS = 2000;
 
 function finiteOr(value, fallback) {
   const number = Number(value);
@@ -109,6 +111,10 @@ function isActiveMtime(mtimeMs, { now, withinMs }) {
   return finiteOr(mtimeMs, 0) >= finiteOr(now, 0) - Math.max(0, finiteOr(withinMs, 0));
 }
 
+function canTrustCachedListing({ mtimeMs, listedAtMs } = {}) {
+  return finiteOr(listedAtMs, 0) - finiteOr(mtimeMs, 0) >= LISTING_SETTLE_MS;
+}
+
 /**
  * Which keys of an mtime-stamped map to forget once it outgrows its bound, oldest first: the entry
  * nothing has touched in the longest is the one least likely to matter again. Used for both the tail
@@ -123,8 +129,10 @@ function pickStaleByMtime(entriesByKey, { maxTracked = DEFAULT_MAX_TRACKED } = {
 }
 
 module.exports = {
+  LISTING_SETTLE_MS,
   MAX_CATCH_UP_BYTES,
   applyRead,
+  canTrustCachedListing,
   createTailState,
   isActiveMtime,
   pickStaleByMtime,

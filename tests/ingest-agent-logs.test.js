@@ -495,7 +495,7 @@ test('a big finished directory cannot starve a live session in a lower-sorting o
   assert.deepEqual(events.map((event) => event.summary), ['claude: the live session finally publishes']);
 }));
 
-test('a new transcript in a settled directory is still found, because creating it moves the dir mtime', withHomes(async ({ projects, events, build }) => {
+test('a new transcript among finished ones is still found, whether or not creating it moved the dir mtime', withHomes(async ({ projects, events, build }) => {
   const longAgo = Date.now() - (60 * 60 * 1000);
   const dir = path.join(projects, 'C--settled');
   fs.mkdirSync(dir, { recursive: true });
@@ -516,6 +516,22 @@ test('a new transcript in a settled directory is still found, because creating i
   append(fresh, claudeAssistant({ text: 'a new session in an old project', sessionId: 'brand-new' }));
   await adapter.poll();
   assert.deepEqual(events.map((event) => event.summary), ['claude: a new session in an old project']);
+}));
+
+// Frozen clock + forced-back mtime reproduce the same-tick mtime collision deterministically on any filesystem.
+test('a transcript born in the tick the last listing read is still found, not lost for the life of the daemon', withHomes(async ({ projects, build }) => {
+  const tick = Math.floor(Date.now() / 1000) * 1000;
+  const dir = path.join(projects, 'C--same-tick');
+  fs.mkdirSync(dir, { recursive: true });
+  setMtime(dir, tick);
+  const adapter = build({ nowFn: () => tick });
+  await adapter.start();
+  assert.equal(adapter.trackedCount, 0);
+
+  fs.writeFileSync(path.join(dir, 'sess-same-tick.jsonl'), '', 'utf8');
+  setMtime(dir, tick);
+  await adapter.discover();
+  assert.equal(adapter.trackedCount, 1, 'an unsettled listing must be re-read rather than trusted');
 }));
 
 test('the directory listing cache is bounded rather than growing with the tree', withHomes(async ({ projects, build }) => {
