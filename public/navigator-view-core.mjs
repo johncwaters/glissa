@@ -135,7 +135,7 @@ export function sectionCountText(section) {
   if (findings > 0) parts.push(findingCountText(findings));
   if (comments > 0) parts.push(commentCountText(comments));
   if (parts.length > 0) return parts.join(', ');
-  return '0 findings';
+  return findingCountText(0);
 }
 
 export function navigatorHandText(hand) {
