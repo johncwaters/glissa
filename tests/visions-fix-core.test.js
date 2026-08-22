@@ -1,13 +1,13 @@
 'use strict';
 
-// Tier 1 silent fixes (docs/plan-navigator-2.md, M6), at the altitude where every decision lives: what a
+// Tier 1 silent fixes (docs/plan-visions-2.md, M6), at the altitude where every decision lives: what a
 // detector's fix edits, which of them may be applied unasked, which ones a selection is asking about, and
 // what the LSP payloads carrying them look like.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { sweepMarkdown, sweepMarkdownWithFixes } = require('../server/core/navigator-rules-core');
+const { sweepMarkdown, sweepMarkdownWithFixes } = require('../server/core/visions-rules-core');
 const {
   AUTO_SAFE_CODES,
   appendFixLog,
@@ -21,7 +21,7 @@ const {
   isFixSetFresh,
   rangesOverlap,
   readSweepResult,
-} = require('../server/core/navigator-fix-core');
+} = require('../server/core/visions-fix-core');
 
 const REPEAT_TEXT = '# Title\n\nA line with with a repeat.\n';
 const FENCE_TEXT = '# Title\n\n```js\nconst answer = 42;\n';
@@ -121,7 +121,7 @@ test('a code action is a quickfix carrying its diagnostic and one versioned docu
   assert.equal(action.title, 'Delete the repeated word');
   assert.equal(action.kind, 'quickfix');
   assert.deepEqual(action.diagnostics, [{
-    range: fix.range, severity: 2, source: 'glissa-navigator', code: 'repeated-word', message: 'Repeated word "with"',
+    range: fix.range, severity: 2, source: 'glissa-visions', code: 'repeated-word', message: 'Repeated word "with"',
   }]);
   assert.deepEqual(action.edit, {
     documentChanges: [{
@@ -141,11 +141,11 @@ test('an applyEdit batches one sweep into a single versioned change, labelled by
   const fixes = sweepMarkdownWithFixes('a a b\n\nc c d\n').fixes;
   const params = buildApplyEditParams(fixes, { uri: 'file:///note.md', version: 3 });
 
-  assert.equal(params.label, 'Navigator: 2 silent fixes');
+  assert.equal(params.label, 'Visions: 2 silent fixes');
   assert.equal(params.edit.documentChanges.length, 1, 'one document, one change entry');
   assert.deepEqual(params.edit.documentChanges[0].textDocument, { uri: 'file:///note.md', version: 3 });
   assert.deepEqual(params.edit.documentChanges[0].edits, fixes.map((fix) => ({ range: fix.editRange, newText: '' })));
-  assert.equal(buildApplyEditParams([fixes[0]], { uri: 'file:///note.md', version: 3 }).label, 'Navigator: 1 silent fix');
+  assert.equal(buildApplyEditParams([fixes[0]], { uri: 'file:///note.md', version: 3 }).label, 'Visions: 1 silent fix');
 });
 
 test('a stored fix set is served only against the hash it was swept from', () => {

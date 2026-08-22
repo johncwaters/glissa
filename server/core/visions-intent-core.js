@@ -1,6 +1,6 @@
 /*
- * Pure intent-model state for the navigator lane (docs/archive/plan-navigator.md, M5): the short living
- * statement of what the navigator believes the carbon unit is building. Every merge is decided HERE,
+ * Pure intent-model state for the visions lane (docs/archive/plan-visions.md, M5): the short living
+ * statement of what the visions believes the carbon unit is building. Every merge is decided HERE,
  * so no caller has to remember that a locked (operator-corrected) statement outranks a model
  * proposal. No IO and no clock: the caller passes `now` in and gets the next state back.
  */

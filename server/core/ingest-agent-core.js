@@ -33,12 +33,12 @@ const TOOL_TARGET_KEYS = Object.freeze([
 
 /*
  * Second, independent layer of the feedback-loop exclusion. The ledger is primary, but it depends on a
- * hook callback having landed, so this covers the same transcripts by SHAPE: a navigator dispatch runs
- * in a throwaway temp workdir (server/navigator-dispatch.js makeWorkDir), and Claude names that
+ * hook callback having landed, so this covers the same transcripts by SHAPE: a visions dispatch runs
+ * in a throwaway temp workdir (server/visions-dispatch.js makeWorkDir), and Claude names that
  * session's transcript directory after that cwd with every separator collapsed to one dash. Matching
  * the marker as a segment therefore catches both the raw cwd and the encoded directory name.
  */
-const DISPATCH_WORKDIR_MARKER = 'glissa-navigator';
+const DISPATCH_WORKDIR_MARKER = 'glissa-visions';
 const DISPATCH_WORKDIR_PATTERN = new RegExp(`(^|[\\\\/-])${DISPATCH_WORKDIR_MARKER}-`, 'i');
 
 function isDispatchWorkdir(candidate) {

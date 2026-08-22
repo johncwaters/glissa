@@ -1,12 +1,12 @@
 /*
- * Pure decisions for the navigator's tier 1 silent fixes (docs/plan-navigator-2.md, M6): which fixes may
+ * Pure decisions for the visions's tier 1 silent fixes (docs/plan-visions-2.md, M6): which fixes may
  * be applied without asking, which of them a codeAction request is asking about, what the LSP payloads
  * carrying them look like, and when a stored fix set has gone stale. No IO, no clock, no timers.
  */
 
 'use strict';
 
-const { SOURCE, WARNING } = require('./navigator-rules-core');
+const { SOURCE, WARNING } = require('./visions-rules-core');
 
 /*
  * The whole auto-safe judgement, in one place. A deleted repeated word is recoverable by undo and cannot
@@ -85,7 +85,7 @@ function filterFixesByRange(fixes, range) {
 }
 
 function fixTitle(fix) {
-  return FIX_TITLES[fix?.code] || (fix?.message ? String(fix.message) : 'Apply the navigator fix');
+  return FIX_TITLES[fix?.code] || (fix?.message ? String(fix.message) : 'Apply the visions fix');
 }
 
 // The diagnostic the fix answers, rebuilt from what the fix carries so a code action can point at it.
@@ -132,7 +132,7 @@ function buildCodeActions(fixes, { uri, version } = {}) {
 }
 
 function applyEditLabel(count) {
-  return count === 1 ? 'Navigator: 1 silent fix' : `Navigator: ${count} silent fixes`;
+  return count === 1 ? 'Visions: 1 silent fix' : `Visions: ${count} silent fixes`;
 }
 
 function buildApplyEditParams(fixes, { uri, version } = {}) {

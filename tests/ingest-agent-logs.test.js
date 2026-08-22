@@ -5,8 +5,8 @@
  * Claude, Codex and Grok transcripts written to disk and driven end to end into the rings and the
  * digest, the EOF start, the config gate, and the feedback-loop exclusion.
  *
- * The exclusion is the load-bearing rule this file exists for. A navigator dispatch is a headless Claude
- * session that writes a transcript exactly like any other, so ingesting it would feed the navigator's
+ * The exclusion is the load-bearing rule this file exists for. A visions dispatch is a headless Claude
+ * session that writes a transcript exactly like any other, so ingesting it would feed the visions's
  * own output back into its next prompt. Its two INDEPENDENT layers are pinned separately, each on a
  * fixture the other would not catch: the ledger (primary) on an ordinary project directory, and the
  * dispatch-workdir shape with no ledger present at all.
@@ -342,17 +342,17 @@ test('a Grok session publishes its completed turn once, not its chunks', withHom
  * ordinary project directory that no shape rule would catch, and the shape cases carry no ledger at all.
  */
 
-test('layer 1, the ledger: a navigator-lane transcript in an ordinary project dir is never opened', withHomes(async ({ projects, events, build }) => {
-  const filePath = seedClaudeTranscript(projects, { dirName: 'C--repo', sessionId: 'navigator-session' });
-  const adapter = build({ laneMap: () => new Map([['navigator-session', 'navigator']]) });
+test('layer 1, the ledger: a visions-lane transcript in an ordinary project dir is never opened', withHomes(async ({ projects, events, build }) => {
+  const filePath = seedClaudeTranscript(projects, { dirName: 'C--repo', sessionId: 'visions-session' });
+  const adapter = build({ laneMap: () => new Map([['visions-session', 'visions']]) });
   await adapter.start();
   assert.equal(adapter.trackedCount, 0, 'a lane transcript costs not even a tail');
 
-  append(filePath, claudeAssistant({ text: 'the navigator talking to itself', sessionId: 'navigator-session' }));
+  append(filePath, claudeAssistant({ text: 'the visions talking to itself', sessionId: 'visions-session' }));
   await adapter.poll();
   await adapter.discover();
   await adapter.poll();
-  assert.deepEqual(events, [], 'navigator dispatch output must never re-enter the next navigator prompt');
+  assert.deepEqual(events, [], 'visions dispatch output must never re-enter the next visions prompt');
 }));
 
 test('layer 1, the ledger: a record landing AFTER the sweep still stops the lane publishing', withHomes(async ({ projects, events, build }) => {
@@ -372,10 +372,10 @@ test('layer 1, the ledger: a record landing AFTER the sweep still stops the lane
 }));
 
 test('layer 2, the workdir shape: a dispatch transcript is excluded with NO ledger at all', withHomes(async ({ projects, events, build }) => {
-  const workDir = path.join(os.tmpdir(), 'glissa-navigator-abc123');
+  const workDir = path.join(os.tmpdir(), 'glissa-visions-abc123');
   const filePath = seedClaudeTranscript(projects, {
     dirName: encodeProjectDir(workDir),
-    sessionId: 'unrecorded-navigator',
+    sessionId: 'unrecorded-visions',
   });
   // No laneMap: the ledger never heard of this session, which is the single point of failure this
   // layer exists to remove.
@@ -384,7 +384,7 @@ test('layer 2, the workdir shape: a dispatch transcript is excluded with NO ledg
   assert.equal(adapter.trackedCount, 0, 'a dispatch workdir is not even listed');
   assert.equal(adapter.watchCount, 3, 'and it earns no watcher either, only the three vendor roots');
 
-  append(filePath, claudeAssistant({ text: 'unrecorded dispatch output', sessionId: 'unrecorded-navigator', cwd: workDir }));
+  append(filePath, claudeAssistant({ text: 'unrecorded dispatch output', sessionId: 'unrecorded-visions', cwd: workDir }));
   await adapter.poll();
   await adapter.discover();
   await adapter.poll();
@@ -392,13 +392,13 @@ test('layer 2, the workdir shape: a dispatch transcript is excluded with NO ledg
 }));
 
 test('layer 2, the workdir shape: a cwd revealed by a LINE is caught even from an ordinary dir', withHomes(async ({ projects, events, build }) => {
-  const workDir = path.join(os.tmpdir(), 'glissa-navigator-xyz789');
-  const filePath = seedClaudeTranscript(projects, { dirName: 'C--repo', sessionId: 'moved-navigator' });
+  const workDir = path.join(os.tmpdir(), 'glissa-visions-xyz789');
+  const filePath = seedClaudeTranscript(projects, { dirName: 'C--repo', sessionId: 'moved-visions' });
   const adapter = build();
   await adapter.start();
   assert.equal(adapter.trackedCount, 1, 'the directory name gave nothing away');
 
-  append(filePath, claudeAssistant({ text: 'dispatch output naming its own workdir', sessionId: 'moved-navigator', cwd: workDir }));
+  append(filePath, claudeAssistant({ text: 'dispatch output naming its own workdir', sessionId: 'moved-visions', cwd: workDir }));
   await adapter.poll();
   assert.deepEqual(events, [], 'the cwd on the line is the second place the shape can show up');
 }));
@@ -429,7 +429,7 @@ test('a session the ledger calls interactive is the operator working, and publis
 test('every ephemeral lane is excluded by the same rule, with no lane-name list to drift', withHomes(async ({ projects, events, build }) => {
   const lanes = new Map();
   const files = [];
-  for (const lane of ['navigator', 'pr-review', 'posthog', 'pack-distill']) {
+  for (const lane of ['visions', 'pr-review', 'posthog', 'pack-distill']) {
     lanes.set(`${lane}-session`, lane);
     files.push(seedClaudeTranscript(projects, { dirName: `C--lane-${lane}`, sessionId: `${lane}-session` }));
   }

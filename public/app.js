@@ -12,7 +12,7 @@ import { observeHeaderHeight, writeClipboardText } from './dom-helpers.js';
 import { activateFocusView, centerSessionQuietly, deactivateFocusView, focusAdjacentInRail, focusNextAttention, focusNthInRail, getFocusedSessionId, isFocusActive, mountFocusView, noteKnownProjectPath, refreshFocusRoster, restoreFocusedSession, setFocusMergeStatus } from './focus-view/focus-view.js';
 import { initFormFactor, isPhoneLayout, onLayoutChange } from './form-factor.js';
 import { applyHealthSnapshot, mountHealthMonitor } from './health-monitor.js';
-import { applyIngestActivity, applyIngestSnapshot, applyNavigatorComments, applyNavigatorFindings, applyNavigatorFix, applyNavigatorHand, applyNavigatorIntent, applyNavigatorSnapshot, mountNavigatorView, refreshNavigatorView, setNavigatorActivityCallback } from './navigator-panel.js';
+import { applyIngestActivity, applyIngestSnapshot, applyVisionsComments, applyVisionsFindings, applyVisionsFix, applyVisionsHand, applyVisionsIntent, applyVisionsSnapshot, mountVisionsView, refreshVisionsView, setVisionsActivityCallback } from './visions-panel.js';
 import { initNotifications, showDesktopNotification } from './notifications.js';
 import { activatePhoneShell, deactivatePhoneShell, getPhoneSessionId, isPhoneScreenActive, isPhoneShellActive, mountPhoneShell, refreshPhoneBoard, setPhoneScreenAttention, showPhoneScreen } from './phone/phone-shell.js';
 import { acknowledgePrAttention, applyPrStatus, mountPrView, setPrActivityCallback } from './pr-panel.js';
@@ -284,19 +284,19 @@ const messageHandlers = {
     message: msg.text,
     ignoreFocus: true,
   }),
-  // Navigator lane. The per-uri push carries one document's current findings (empty clears it); the
+  // Visions lane. The per-uri push carries one document's current findings (empty clears it); the
   // snapshot is the whole map, sent on every connect so a reconnect repairs the tab in one frame.
-  'navigator-findings': (msg) => applyNavigatorFindings(msg),
+  'visions-findings': (msg) => applyVisionsFindings(msg),
   // Tier 3 model comments for one uri, pushed when a dispatch lands (empty clears that uri).
-  'navigator-comments': (msg) => applyNavigatorComments(msg),
-  'navigator-hand':     (msg) => applyNavigatorHand(msg),
+  'visions-comments': (msg) => applyVisionsComments(msg),
+  'visions-hand':     (msg) => applyVisionsHand(msg),
   // The machine-wide intent statement, pushed whenever it actually moves (model proposal or correction).
-  'navigator-intent':   (msg) => applyNavigatorIntent(msg),
+  'visions-intent':   (msg) => applyVisionsIntent(msg),
   // Tier 1: one silent fix the lane applied or was refused, appended to the tab's changelog.
-  'navigator-fix':      (msg) => applyNavigatorFix(msg),
-  'navigator-snapshot': (msg) => applyNavigatorSnapshot(msg),
+  'visions-fix':      (msg) => applyVisionsFix(msg),
+  'visions-snapshot': (msg) => applyVisionsSnapshot(msg),
   // Ingest lane. One batched delta per second at most (overflow inside the window arrives as a count),
-  // and a snapshot on every connect: like the navigator's, the deltas are deliberately not replayable,
+  // and a snapshot on every connect: like the visions's, the deltas are deliberately not replayable,
   // because the snapshot repairs the whole feed in one frame.
   'ingest-activity':    (msg) => applyIngestActivity(msg),
   'ingest-snapshot':    (msg) => applyIngestSnapshot(msg),
@@ -410,22 +410,22 @@ document.getElementById('btn-help').addEventListener('click', () => {
   createSettingsDialog('shortcuts');
 });
 
-// ── Primary view tabs (Focus / Radar / PRs / Usage / Navigator) ────────
+// ── Primary view tabs (Focus / Radar / PRs / Usage / Visions) ────────
 
 const viewFocusEl = document.getElementById('view-focus');
 const viewRadarEl = document.getElementById('view-radar');
 const viewPrsEl = document.getElementById('view-prs');
 const viewUsageEl = document.getElementById('view-usage');
-const viewNavigatorEl = document.getElementById('view-navigator');
+const viewVisionsEl = document.getElementById('view-visions');
 const tabFocus = document.getElementById('tab-focus');
 const tabRadar = document.getElementById('tab-radar');
 const tabPrs = document.getElementById('tab-prs');
 const tabUsage = document.getElementById('tab-usage');
-const tabNavigator = document.getElementById('tab-navigator');
+const tabVisions = document.getElementById('tab-visions');
 const tabRadarActivityEl = document.getElementById('tab-radar-activity');
 const tabPrsActivityEl = document.getElementById('tab-prs-activity');
 const tabUsageActivityEl = document.getElementById('tab-usage-activity');
-const tabNavigatorActivityEl = document.getElementById('tab-navigator-activity');
+const tabVisionsActivityEl = document.getElementById('tab-visions-activity');
 
 setRadarActivityCallback((active) => {
   tabRadarActivityEl.classList.toggle('active', active);
@@ -439,9 +439,9 @@ setUsageActivityCallback((active) => {
   tabUsageActivityEl.classList.toggle('active', active);
   setPhoneScreenAttention('usage', active);
 });
-setNavigatorActivityCallback((active) => {
-  tabNavigatorActivityEl.classList.toggle('active', active);
-  setPhoneScreenAttention('navigator', active);
+setVisionsActivityCallback((active) => {
+  tabVisionsActivityEl.classList.toggle('active', active);
+  setPhoneScreenAttention('visions', active);
 });
 // A Radar PR row points at the full PR view: the phone screen when that layout owns the panel, the
 // desktop tab otherwise. Radar never navigates itself.
@@ -471,9 +471,9 @@ mountPrView(viewPrsEl);
 // from wherever they are.
 mountUsageView(viewUsageEl);
 
-// Eager for the same reason again: a navigator-findings push (or the connect-time snapshot) can land
+// Eager for the same reason again: a visions-findings push (or the connect-time snapshot) can land
 // while another tab is active, and the dot has to say so from wherever the operator is.
-mountNavigatorView(viewNavigatorEl);
+mountVisionsView(viewVisionsEl);
 
 // Primary views in tab-strip order. Adding a view = adding an entry here (N-way, not a boolean).
 // Focus leads as the default landing view; the session-card grid (#sessions-container) stays mounted
@@ -483,7 +483,7 @@ const VIEW_TABS = [
   { view: 'radar', tab: tabRadar, el: viewRadarEl },
   { view: 'prs', tab: tabPrs, el: viewPrsEl },
   { view: 'usage', tab: tabUsage, el: viewUsageEl },
-  { view: 'navigator', tab: tabNavigator, el: viewNavigatorEl },
+  { view: 'visions', tab: tabVisions, el: viewVisionsEl },
 ];
 
 let _activeView = 'focus';
@@ -496,7 +496,7 @@ function acknowledgeViewAttention(view) {
   if (view === 'radar') acknowledgeRadarAttention();
   if (view === 'prs') acknowledgePrAttention();
   if (view === 'usage') acknowledgeUsageAttention();
-  if (view === 'navigator') refreshNavigatorView();
+  if (view === 'visions') refreshVisionsView();
 }
 
 function activateView(view) {
@@ -556,7 +556,7 @@ mountPhoneShell({
   radarPanelEl: viewRadarEl,
   prsPanelEl: viewPrsEl,
   usagePanelEl: viewUsageEl,
-  navigatorPanelEl: viewNavigatorEl,
+  visionsPanelEl: viewVisionsEl,
   // Usage is the one screen that PULLS rather than being pushed to, so it asks for a fresh report the
   // moment it becomes visible; every other screen ignores this.
   onScreenShown: (screenId) => {

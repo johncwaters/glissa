@@ -1,8 +1,8 @@
 'use strict';
 
-// The navigator lane, at both altitudes: the wiring driven directly on injected timers (debounce
+// The visions lane, at both altitudes: the wiring driven directly on injected timers (debounce
 // coalescing, save boundary, cleanup, malformed frames), and a REAL backend boot proving the
-// /navigator upgrade is served on the local listener when enabled, inert when the config says nothing,
+// /visions upgrade is served on the local listener when enabled, inert when the config says nothing,
 // and refused on the remote listener even when enabled.
 //
 // SAFETY: every boot points at a throwaway temp config with ZERO projects via GLISSA_CONFIG, like
@@ -19,9 +19,9 @@ const WebSocket = require('ws');
 
 const { createBackend } = require('../server/backend');
 const { createConfigStore, BOOLEAN_KEYS, STRING_KEYS, TIMEOUT_KEYS } = require('../server/config-store');
-const { DIGEST_BUDGET_CHARS, createNavigatorWiring, NAVIGATOR_DEBOUNCE_MS } = require('../server/navigator-wiring');
+const { DIGEST_BUDGET_CHARS, createVisionsWiring, VISIONS_DEBOUNCE_MS } = require('../server/visions-wiring');
 
-const MARKDOWN_URI = 'file:///tmp/plan-navigator.md';
+const MARKDOWN_URI = 'file:///tmp/plan-visions.md';
 const SCRIPT_URI = 'file:///tmp/app.js';
 const CLEAN_MARKDOWN = '# Title\n\nA line with nothing wrong.\n';
 const REPEATED_WORD_MARKDOWN = '# Title\n\nA line with with a repeat.\n';
@@ -66,7 +66,7 @@ function drivenConnection(options = {}) {
   const sent = [];
   const broadcasts = [];
   const clock = { now: FIXED_TS };
-  const wiring = createNavigatorWiring({
+  const wiring = createVisionsWiring({
     setTimeoutFn: timers.setTimeoutFn,
     clearTimeoutFn: timers.clearTimeoutFn,
     nowFn: () => clock.now,
@@ -80,9 +80,9 @@ function drivenConnection(options = {}) {
 }
 
 function tempIntentStatePath(t) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-navigator-intent-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-visions-intent-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-  return path.join(dir, 'navigator-intent.json');
+  return path.join(dir, 'visions-intent.json');
 }
 
 function countingFsPromises() {
@@ -150,7 +150,7 @@ test('a malformed range is refused with the uri, version, change index and range
   ]));
   assert.equal(warnings.length, 1);
   assert.match(warnings[0], /ignored textDocument\/didChange: invalid-range/);
-  assert.match(warnings[0], /uri=file:\/\/\/tmp\/plan-navigator\.md/);
+  assert.match(warnings[0], /uri=file:\/\/\/tmp\/plan-visions\.md/);
   assert.match(warnings[0], /version=7/);
   assert.match(warnings[0], /change=0/);
   assert.match(warnings[0], /range=0:0-\?/);
@@ -217,7 +217,7 @@ test('intent lines name the source and the size, never the sentence', (t) => {
   wiring.setOperatorIntent(statement);
   wiring.applyModelIntent('');
   const intentLines = notes.filter((line) => line.includes('intent '));
-  assert.deepEqual(intentLines, [`[navigator] intent operator-set (${statement.length} chars)`]);
+  assert.deepEqual(intentLines, [`[visions] intent operator-set (${statement.length} chars)`]);
   assert.equal(notes.some((line) => line.includes('nobody should find')), false);
 });
 
@@ -345,7 +345,7 @@ test('a sweep that publishes also broadcasts the findings for that uri', (t) => 
   timers.runPending();
   assert.equal(broadcasts.length, 1);
   assert.deepEqual(Object.keys(broadcasts[0]).sort(), ['diagnostics', 'ts', 'type', 'uri']);
-  assert.equal(broadcasts[0].type, 'navigator-findings');
+  assert.equal(broadcasts[0].type, 'visions-findings');
   assert.equal(broadcasts[0].uri, MARKDOWN_URI);
   assert.equal(broadcasts[0].ts, FIXED_TS, 'the ts comes from the injected clock');
   assert.deepEqual(broadcasts[0].diagnostics, sent[0].params.diagnostics, 'the tab sees what the editor sees');
@@ -363,7 +363,7 @@ test('an edit that fixes the last finding broadcasts an empty array and drops th
   timers.runPending();
   assert.equal(broadcasts.length, 2);
   assert.deepEqual(broadcasts[1], {
-    type: 'navigator-findings', uri: MARKDOWN_URI, diagnostics: [], ts: FIXED_TS,
+    type: 'visions-findings', uri: MARKDOWN_URI, diagnostics: [], ts: FIXED_TS,
   });
   assert.deepEqual(findingSections(wiring), [], 'a uri with no findings is absent, never stored empty');
 });
@@ -378,7 +378,7 @@ test('didClose clears the uri and tells the tab to forget its section', (t) => {
   lsp('textDocument/didClose', { textDocument: { uri: MARKDOWN_URI } });
   assert.equal(broadcasts.length, 2);
   assert.deepEqual(broadcasts[1], {
-    type: 'navigator-findings', uri: MARKDOWN_URI, diagnostics: [], ts: FIXED_TS,
+    type: 'visions-findings', uri: MARKDOWN_URI, diagnostics: [], ts: FIXED_TS,
   });
   assert.deepEqual(findingSections(wiring), []);
 });
@@ -410,7 +410,7 @@ test('the snapshot accessor carries every uri that currently has findings', (t) 
   assert.deepEqual(snapshot[0].diagnostics.map((d) => d.code), ['repeated-word']);
 
   const message = wiring.snapshotMessage();
-  assert.equal(message.type, 'navigator-snapshot');
+  assert.equal(message.type, 'visions-snapshot');
   assert.equal(message.ts, FIXED_TS);
   assert.deepEqual(message.documents, wiring.documentsSnapshot());
   assert.deepEqual(
@@ -420,7 +420,7 @@ test('the snapshot accessor carries every uri that currently has findings', (t) 
   );
 });
 
-// The relay replays its open buffers on reconnect (docs/archive/plan-navigator.md, M1), so a dropped socket is a
+// The relay replays its open buffers on reconnect (docs/archive/plan-visions.md, M1), so a dropped socket is a
 // gap in the feed, not news that the carbon unit closed anything.
 test('a relay disconnect keeps the findings the tab is showing', (t) => {
   const { wiring, connection, timers, broadcasts, lsp } = drivenConnection();
@@ -439,7 +439,7 @@ test('a relay disconnect keeps the findings the tab is showing', (t) => {
 test('a lane with no broadcast injected still sweeps and still tracks findings', (t) => {
   const timers = fakeTimers();
   const sent = [];
-  const wiring = createNavigatorWiring({
+  const wiring = createVisionsWiring({
     setTimeoutFn: timers.setTimeoutFn,
     clearTimeoutFn: timers.clearTimeoutFn,
     logger: { warn: () => {} },
@@ -455,14 +455,14 @@ test('a lane with no broadcast injected still sweeps and still tracks findings',
   assert.deepEqual(findingSections(wiring).map((entry) => entry.uri), [MARKDOWN_URI]);
 });
 
-// --- Tier 3 model dispatch (docs/archive/plan-navigator.md, M4), spawner injected ---
+// --- Tier 3 model dispatch (docs/archive/plan-visions.md, M4), spawner injected ---
 
 const COMMENT = { line: 3, message: 'The repeat is a symptom; the sentence is doing two jobs.' };
 const MODEL_DIAGNOSTIC = { line: 1, message: 'The title is missing a concrete noun.' };
 
 /**
  * A lane whose dispatch is a fake: it records what it was asked and answers whatever the test says.
- * NOTHING here spawns claude; the real spawn is covered by tests/navigator-dispatch.test.js.
+ * NOTHING here spawns claude; the real spawn is covered by tests/visions-dispatch.test.js.
  */
 function dispatchingConnection({
   dispatch: overrides = {}, respond = null, contextDigest = null, contextSeq = null, scopePaths = null,
@@ -506,8 +506,8 @@ test('a dispatch fires one quiet window after a sweep publishes, carrying the bu
   assert.deepEqual(calls[0].findings.map((finding) => finding.code), ['repeated-word'], 'tier 2 rides along');
 });
 
-test('a scoped navigator skips sweep and refuses dispatch for an out-of-scope document', async (t) => {
-  const uri = 'file:///other/plan-navigator.md';
+test('a scoped visions skips sweep and refuses dispatch for an out-of-scope document', async (t) => {
+  const uri = 'file:///other/plan-visions.md';
   const { wiring, timers, sent, calls, notes, lsp } = dispatchingConnection({ scopePaths: ['/tmp/project'] });
   t.after(() => wiring.stop());
 
@@ -524,7 +524,7 @@ test('a scoped navigator skips sweep and refuses dispatch for an out-of-scope do
   assert.deepEqual(findingSections(wiring), []);
 });
 
-test('a scoped navigator sweeps and dispatches an in-scope document normally', async (t) => {
+test('a scoped visions sweeps and dispatches an in-scope document normally', async (t) => {
   const { wiring, timers, sent, calls, lsp } = dispatchingConnection({ scopePaths: ['/tmp'] });
   t.after(() => wiring.stop());
 
@@ -700,10 +700,10 @@ test('a COMMENTS result is broadcast for that uri and joins the connect-time sna
   runSweepThenDispatch(timers);
   await wiring.whenDispatchSettled();
 
-  const comments = broadcasts.filter((message) => message.type === 'navigator-comments');
+  const comments = broadcasts.filter((message) => message.type === 'visions-comments');
   assert.equal(comments.length, 1);
   assert.deepEqual(comments[0], {
-    type: 'navigator-comments', uri: MARKDOWN_URI, comments: [COMMENT], ts: FIXED_TS,
+    type: 'visions-comments', uri: MARKDOWN_URI, comments: [COMMENT], ts: FIXED_TS,
   });
   assert.deepEqual(wiring.documentsSnapshot(), [{
     uri: MARKDOWN_URI,
@@ -724,7 +724,7 @@ test('a dispatch with no model diagnostics leaves the rule-only publish stream u
   await wiring.whenDispatchSettled();
 
   assert.equal(sent.filter((message) => message.type === 'publishDiagnostics').length, 1);
-  assert.equal(broadcasts.filter((message) => message.type === 'navigator-findings').length, 1);
+  assert.equal(broadcasts.filter((message) => message.type === 'visions-findings').length, 1);
   assert.deepEqual(wiring.documentsSnapshot()[0].diagnostics.map((diagnostic) => diagnostic.code), ['repeated-word']);
 });
 
@@ -741,7 +741,7 @@ test('model diagnostics publish and broadcast as a union after rule diagnostics'
   const published = sent.filter((message) => message.type === 'publishDiagnostics');
   assert.deepEqual(published.at(-1).params.diagnostics.map((diagnostic) => diagnostic.code), ['repeated-word', 'model']);
   assert.equal(published.at(-1).params.diagnostics[1].range.end.character, '# Title'.length);
-  const findings = broadcasts.filter((message) => message.type === 'navigator-findings');
+  const findings = broadcasts.filter((message) => message.type === 'visions-findings');
   assert.deepEqual(findings.at(-1).diagnostics, published.at(-1).params.diagnostics);
   assert.deepEqual(wiring.documentsSnapshot()[0].diagnostics.map((diagnostic) => diagnostic.code), ['repeated-word', 'model']);
 });
@@ -881,7 +881,7 @@ test('a NONE result clears that document rather than storing an empty section', 
   lsp('textDocument/didSave', { textDocument: { uri: MARKDOWN_URI } });
   await wiring.whenDispatchSettled();
 
-  const comments = broadcasts.filter((message) => message.type === 'navigator-comments');
+  const comments = broadcasts.filter((message) => message.type === 'visions-comments');
   assert.deepEqual(comments[1].comments, []);
   assert.deepEqual(wiring.documentsSnapshot(), [], 'no findings and no comments means no section at all');
 });
@@ -900,14 +900,14 @@ test('an ERROR verdict warns and leaves the standing comments exactly as they we
   lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
   runSweepThenDispatch(timers);
   await wiring.whenDispatchSettled();
-  const afterFirst = broadcasts.filter((message) => message.type === 'navigator-comments').length;
+  const afterFirst = broadcasts.filter((message) => message.type === 'visions-comments').length;
 
   clock.now += 1000;
   lsp('textDocument/didChange', didChangeParams(MARKDOWN_URI, 2, '# Title\n\nEdited again, with with a repeat.\n'));
   lsp('textDocument/didSave', { textDocument: { uri: MARKDOWN_URI } });
   await wiring.whenDispatchSettled();
 
-  assert.equal(broadcasts.filter((message) => message.type === 'navigator-comments').length, afterFirst, 'a failed session says nothing');
+  assert.equal(broadcasts.filter((message) => message.type === 'visions-comments').length, afterFirst, 'a failed session says nothing');
   assert.deepEqual(wiring.documentsSnapshot()[0].comments, [COMMENT]);
   assert.ok(warnings.some((line) => line.includes('no readable result file')));
 });
@@ -924,7 +924,7 @@ test('didClose drops the comments with the findings and tells the tab about both
 
   lsp('textDocument/didClose', { textDocument: { uri: MARKDOWN_URI } });
   const last = broadcasts.slice(-2);
-  assert.deepEqual(last.map((message) => message.type), ['navigator-findings', 'navigator-comments']);
+  assert.deepEqual(last.map((message) => message.type), ['visions-findings', 'visions-comments']);
   assert.deepEqual(last[1].comments, []);
   assert.deepEqual(wiring.documentsSnapshot(), []);
 });
@@ -944,7 +944,7 @@ test('a result that lands after its buffer closed is dropped rather than resurre
   await inFlight;
 
   assert.deepEqual(wiring.documentsSnapshot(), []);
-  assert.equal(broadcasts.filter((message) => message.type === 'navigator-comments' && message.comments.length > 0).length, 0);
+  assert.equal(broadcasts.filter((message) => message.type === 'visions-comments' && message.comments.length > 0).length, 0);
 });
 
 test('a hand is broadcast only when it changes and joins the connect-time snapshot', async (t) => {
@@ -973,16 +973,16 @@ test('a hand is broadcast only when it changes and joins the connect-time snapsh
   lsp('textDocument/didSave', { textDocument: { uri: MARKDOWN_URI } });
   await wiring.whenDispatchSettled();
 
-  const hands = broadcasts.filter((message) => message.type === 'navigator-hand');
+  const hands = broadcasts.filter((message) => message.type === 'visions-hand');
   assert.deepEqual(hands, [
     {
-      type: 'navigator-hand',
+      type: 'visions-hand',
       uri: MARKDOWN_URI,
       hand: 'the doc mixes migration plan and incident review',
       ts: FIXED_TS,
     },
     {
-      type: 'navigator-hand',
+      type: 'visions-hand',
       uri: MARKDOWN_URI,
       hand: 'the conclusion answers a different question',
       ts: FIXED_TS + 2000,
@@ -1018,7 +1018,7 @@ test('a handless dispatch clears the standing hand and an ERROR leaves it alone'
   lsp('textDocument/didSave', { textDocument: { uri: MARKDOWN_URI } });
   await wiring.whenDispatchSettled();
 
-  const hands = broadcasts.filter((message) => message.type === 'navigator-hand');
+  const hands = broadcasts.filter((message) => message.type === 'visions-hand');
   assert.deepEqual(hands.map((message) => message.hand), ['the document has no single reader', null]);
   assert.deepEqual(wiring.documentsSnapshot(), []);
 });
@@ -1036,33 +1036,33 @@ test('didClose clears a standing hand', async (t) => {
   await wiring.whenDispatchSettled();
 
   lsp('textDocument/didClose', { textDocument: { uri: MARKDOWN_URI } });
-  const hand = broadcasts.filter((message) => message.type === 'navigator-hand').at(-1);
+  const hand = broadcasts.filter((message) => message.type === 'visions-hand').at(-1);
   assert.deepEqual(hand, {
-    type: 'navigator-hand', uri: MARKDOWN_URI, hand: null, ts: FIXED_TS,
+    type: 'visions-hand', uri: MARKDOWN_URI, hand: null, ts: FIXED_TS,
   });
   assert.deepEqual(wiring.documentsSnapshot(), []);
 });
 
-// --- The intent model (docs/archive/plan-navigator.md, M5) ---
+// --- The intent model (docs/archive/plan-visions.md, M5) ---
 
 function intentBroadcasts(broadcasts) {
-  return broadcasts.filter((message) => message.type === 'navigator-intent');
+  return broadcasts.filter((message) => message.type === 'visions-intent');
 }
 
 test('a model proposal is broadcast once and joins the connect-time snapshot', (t) => {
   const { wiring, broadcasts } = drivenConnection();
   t.after(() => wiring.stop());
 
-  assert.equal(wiring.applyModelIntent('reviewing the navigator plan, tightening scope'), true);
+  assert.equal(wiring.applyModelIntent('reviewing the visions plan, tightening scope'), true);
   assert.deepEqual(intentBroadcasts(broadcasts), [{
-    type: 'navigator-intent',
+    type: 'visions-intent',
     intent: {
-      text: 'reviewing the navigator plan, tightening scope', source: 'model', locked: false, ts: FIXED_TS,
+      text: 'reviewing the visions plan, tightening scope', source: 'model', locked: false, ts: FIXED_TS,
     },
     ts: FIXED_TS,
   }]);
   assert.deepEqual(wiring.snapshotMessage().intent, {
-    text: 'reviewing the navigator plan, tightening scope', source: 'model', locked: false, ts: FIXED_TS,
+    text: 'reviewing the visions plan, tightening scope', source: 'model', locked: false, ts: FIXED_TS,
   });
 });
 
@@ -1188,7 +1188,7 @@ test('without an intent path the lane keeps the same in-memory behavior and touc
   assert.equal(wiring.applyModelIntent('memory only'), true);
   await wiring.whenIntentPersistenceIdle();
   assert.deepEqual(intentBroadcasts(broadcasts), [{
-    type: 'navigator-intent',
+    type: 'visions-intent',
     intent: {
       text: 'memory only', source: 'model', locked: false, ts: FIXED_TS,
     },
@@ -1200,7 +1200,7 @@ test('without an intent path the lane keeps the same in-memory behavior and touc
 test('the standing intent rides the dispatch, and the result updates it after the comments', async (t) => {
   const { wiring, timers, calls, broadcasts, lsp } = dispatchingConnection({
     respond: () => Promise.resolve({
-      verdict: 'COMMENTS', comments: [COMMENT], intent: 'a plan doc for the navigator intent model', reason: null,
+      verdict: 'COMMENTS', comments: [COMMENT], intent: 'a plan doc for the visions intent model', reason: null,
     }),
   });
   t.after(() => wiring.stop());
@@ -1211,9 +1211,9 @@ test('the standing intent rides the dispatch, and the result updates it after th
   await wiring.whenDispatchSettled();
 
   assert.equal(calls[0].intent, 'an early guess', 'the prompt is built from what the lane currently believes');
-  assert.equal(wiring.getIntent().text, 'a plan doc for the navigator intent model');
-  const order = broadcasts.filter((message) => ['navigator-comments', 'navigator-intent'].includes(message.type));
-  assert.deepEqual(order.map((message) => message.type), ['navigator-intent', 'navigator-comments', 'navigator-intent'],
+  assert.equal(wiring.getIntent().text, 'a plan doc for the visions intent model');
+  const order = broadcasts.filter((message) => ['visions-comments', 'visions-intent'].includes(message.type));
+  assert.deepEqual(order.map((message) => message.type), ['visions-intent', 'visions-comments', 'visions-intent'],
     'the dispatch result lands comments first, then the belief it came with');
 });
 
@@ -1253,7 +1253,7 @@ test('a result with no intent field leaves the statement exactly as it was', asy
   assert.equal(wiring.getIntent().text, 'still the current belief');
 });
 
-// The M3 lane, byte for byte: an absent config.navigator.dispatch must cost nothing at all.
+// The M3 lane, byte for byte: an absent config.visions.dispatch must cost nothing at all.
 test('with no dispatch config the lane arms no dispatch timer and calls nothing', async (t) => {
   const calls = [];
   const { wiring, connection, timers, lsp } = drivenConnection({
@@ -1274,7 +1274,7 @@ test('with no dispatch config the lane arms no dispatch timer and calls nothing'
 });
 
 test('a dispatch config that is present but not enabled is just as inert', () => {
-  const wiring = createNavigatorWiring({
+  const wiring = createVisionsWiring({
     logger: { warn: () => {} },
     dispatchConfig: { enabled: false, quietMs: 10 },
     dispatch: () => Promise.resolve({ verdict: 'COMMENTS', comments: [COMMENT] }),
@@ -1283,7 +1283,7 @@ test('a dispatch config that is present but not enabled is just as inert', () =>
   wiring.stop();
 });
 
-// --- Tier 1 silent fixes (docs/plan-navigator-2.md, M6) ---
+// --- Tier 1 silent fixes (docs/plan-visions-2.md, M6) ---
 
 const TWO_REPEATS_AND_A_FENCE = '# Title\n\nA line with with a repeat.\n\nAnd a a second one.\n\n```js\nconst answer = 42;\n';
 
@@ -1308,7 +1308,7 @@ function applyEditRequests(harness) {
 }
 
 function fixBroadcasts(harness) {
-  return harness.broadcasts.filter((message) => message.type === 'navigator-fix');
+  return harness.broadcasts.filter((message) => message.type === 'visions-fix');
 }
 
 test('a code action is answered from what the last sweep computed, never from a fresh sweep', (t) => {
@@ -1417,7 +1417,7 @@ test('with autoFix on one sweep asks for one versioned edit carrying only the au
   assert.deepEqual(change.textDocument, { uri: MARKDOWN_URI, version: 1 }, 'versioned, so a racing keystroke refuses it');
   assert.equal(change.edits.length, 2, 'both repeated words, and never the fence guess');
   assert.deepEqual(change.edits.map((edit) => edit.newText), ['', '']);
-  assert.equal(requests[0].params.label, 'Navigator: 2 silent fixes');
+  assert.equal(requests[0].params.label, 'Visions: 2 silent fixes');
 });
 
 test('an applied edit is logged and broadcast once per fix, and joins the snapshot', (t) => {
@@ -1431,7 +1431,7 @@ test('an applied edit is logged and broadcast once per fix, and joins the snapsh
   const broadcasts = fixBroadcasts(harness);
   assert.equal(broadcasts.length, 2);
   assert.deepEqual(broadcasts[0], {
-    type: 'navigator-fix',
+    type: 'visions-fix',
     uri: MARKDOWN_URI,
     fix: {
       code: 'repeated-word', line: 2, message: 'Repeated word "with"', applied: true,
@@ -1479,7 +1479,7 @@ test('an answer for an id the lane never asked about changes nothing', (t) => {
 
   harness.lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
   harness.timers.runPending();
-  answerRequest(harness.connection, 'navigator-fix-999', { applied: true });
+  answerRequest(harness.connection, 'visions-fix-999', { applied: true });
 
   assert.deepEqual(fixBroadcasts(harness), []);
   assert.deepEqual(harness.wiring.snapshotMessage().fixes, []);
@@ -1550,7 +1550,7 @@ function reserveFreePort() {
 }
 
 async function bootBackend(configPatch, { remotePort = null } = {}) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-navigator-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-visions-'));
   const configPath = path.join(dir, 'config.json');
   fs.writeFileSync(configPath, JSON.stringify({ projects: [], teams: [], repoRoots: [], ...configPatch }, null, 2), 'utf8');
   const previousEnv = process.env.GLISSA_CONFIG;
@@ -1588,8 +1588,8 @@ test.after(async () => {
   }
 });
 
-function navigatorClient(port) {
-  const ws = new WebSocket(`ws://127.0.0.1:${port}/navigator`);
+function visionsClient(port) {
+  const ws = new WebSocket(`ws://127.0.0.1:${port}/visions`);
   const frames = [];
   ws.on('message', (data) => frames.push(JSON.parse(data.toString())));
   const opened = new Promise((resolve, reject) => {
@@ -1650,9 +1650,9 @@ function backendDestroyedUpgrade(server, port, requestPath) {
   });
 }
 
-test('an enabled lane serves /navigator on the local listener and publishes markdown diagnostics', async (t) => {
-  const { port } = await bootBackend({ navigator: { enabled: true } });
-  const client = navigatorClient(port);
+test('an enabled lane serves /visions on the local listener and publishes markdown diagnostics', async (t) => {
+  const { port } = await bootBackend({ visions: { enabled: true } });
+  const client = visionsClient(port);
   t.after(() => client.close());
   assert.equal(await client.opened, 'open');
 
@@ -1662,30 +1662,30 @@ test('an enabled lane serves /navigator on the local listener and publishes mark
   const frame = await waitForDiagnostics(client, MARKDOWN_URI);
   assert.ok(frame, 'a publishDiagnostics frame arrives on the same socket');
   assert.deepEqual(frame.params.diagnostics.map((d) => d.code), ['repeated-word']);
-  assert.equal(frame.params.diagnostics[0].source, 'glissa-navigator');
+  assert.equal(frame.params.diagnostics[0].source, 'glissa-visions');
   assert.equal(frame.params.diagnostics[0].range.start.line, 2);
 });
 
 test('a non-markdown document over the same socket yields no diagnostics, and a garbage frame kills nothing', async (t) => {
-  const { port } = await bootBackend({ navigator: { enabled: true } });
-  const client = navigatorClient(port);
+  const { port } = await bootBackend({ visions: { enabled: true } });
+  const client = visionsClient(port);
   t.after(() => client.close());
   assert.equal(await client.opened, 'open');
 
   client.sendRaw('this is not a frame');
   client.sendLsp('textDocument/didOpen', didOpenParams(SCRIPT_URI, 'javascript', 'const the the = 1;\n'));
   client.sendLsp('textDocument/didChange', didChangeParams(SCRIPT_URI, 2, 'const the the = 2;\n'));
-  await delay(NAVIGATOR_DEBOUNCE_MS * 4);
+  await delay(VISIONS_DEBOUNCE_MS * 4);
   assert.deepEqual(client.frames, [], 'v1 says nothing about code buffers');
 
   client.sendLsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
   assert.ok(await waitForDiagnostics(client, MARKDOWN_URI), 'the connection survived the malformed frame');
 });
 
-test('a default config leaves /navigator exactly where an unowned path is left', async () => {
+test('a default config leaves /visions exactly where an unowned path is left', async () => {
   const { server, port } = await bootBackend({});
   assert.equal(
-    await backendDestroyedUpgrade(server, port, '/navigator'), false,
+    await backendDestroyedUpgrade(server, port, '/visions'), false,
     'untouched on the local listener, so Vite HMR can still claim it',
   );
   assert.equal(
@@ -1694,43 +1694,43 @@ test('a default config leaves /navigator exactly where an unowned path is left',
   );
 });
 
-test('a config with navigator present but not enabled stays inert', async () => {
-  const { server, port } = await bootBackend({ navigator: { enabled: false } });
-  assert.equal(await backendDestroyedUpgrade(server, port, '/navigator'), false);
+test('a config with visions present but not enabled stays inert', async () => {
+  const { server, port } = await bootBackend({ visions: { enabled: false } });
+  assert.equal(await backendDestroyedUpgrade(server, port, '/visions'), false);
 });
 
-test('/navigator is refused on the remote listener even with the lane enabled', async () => {
+test('/visions is refused on the remote listener even with the lane enabled', async () => {
   const remotePort = await reserveFreePort();
   const { server, port, remoteServer } = await bootBackend({
-    navigator: { enabled: true },
+    visions: { enabled: true },
     remote: { enabled: true, port: remotePort, publicHost: 'glissa.test', allowedOrigins: ['https://glissa.test'] },
   }, { remotePort });
 
   assert.equal(
-    await backendDestroyedUpgrade(remoteServer, remotePort, '/navigator'), true,
+    await backendDestroyedUpgrade(remoteServer, remotePort, '/visions'), true,
     'buffer text never crosses the remote boundary in v1',
   );
   assert.equal(
-    await backendDestroyedUpgrade(server, port, '/navigator'), false,
+    await backendDestroyedUpgrade(server, port, '/visions'), false,
     'the same lane is served on the local listener',
   );
 });
 
-test('navigator is echoed by getSettings and applied as a restart-required settings block', () => {
-  assert.equal(BOOLEAN_KEYS.includes('navigator'), false);
-  assert.equal(STRING_KEYS.includes('navigator'), false);
-  assert.equal(TIMEOUT_KEYS.includes('navigator'), false);
+test('visions is echoed by getSettings and applied as a restart-required settings block', () => {
+  assert.equal(BOOLEAN_KEYS.includes('visions'), false);
+  assert.equal(STRING_KEYS.includes('visions'), false);
+  assert.equal(TIMEOUT_KEYS.includes('visions'), false);
 
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-navigator-settings-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-visions-settings-'));
   const configPath = path.join(dir, 'config.json');
-  fs.writeFileSync(configPath, JSON.stringify({ projects: [], teams: [], navigator: { enabled: true } }, null, 2), 'utf8');
+  fs.writeFileSync(configPath, JSON.stringify({ projects: [], teams: [], visions: { enabled: true } }, null, 2), 'utf8');
   const previousEnv = process.env.GLISSA_CONFIG;
   process.env.GLISSA_CONFIG = configPath;
   try {
     const store = createConfigStore();
-    assert.deepEqual(store.getSettings().navigator, { enabled: true });
-    store.applySettings({ projects: [], navigator: { enabled: false } });
-    assert.deepEqual(store.config.navigator, { enabled: false });
+    assert.deepEqual(store.getSettings().visions, { enabled: true });
+    store.applySettings({ projects: [], visions: { enabled: false } });
+    assert.deepEqual(store.config.visions, { enabled: false });
   } finally {
     if (previousEnv == null) delete process.env.GLISSA_CONFIG;
     if (previousEnv != null) process.env.GLISSA_CONFIG = previousEnv;
@@ -1842,7 +1842,7 @@ test('a poke arms one quiet window per open markdown buffer and leaves other doc
   assert.equal(timers.pendingCount, 0, 'the editor-driven windows have all run out');
 
   wiring.noteActivity();
-  assert.equal(connection.pendingDispatchCount, 2, 'the code buffer is not a navigator document in v1');
+  assert.equal(connection.pendingDispatchCount, 2, 'the code buffer is not a visions document in v1');
   assert.equal(timers.pendingCount, 2);
 });
 
@@ -1883,7 +1883,7 @@ test('activity alone re-dispatches an untouched buffer, and the belief it comes 
     wiring, timers, calls, lsp, clock, machine,
   } = pokableConnection({
     respond: () => Promise.resolve({
-      verdict: 'NONE', comments: [], intent: 'wiring the ingest lane into the navigator gate', reason: null,
+      verdict: 'NONE', comments: [], intent: 'wiring the ingest lane into the visions gate', reason: null,
     }),
   });
   t.after(() => wiring.stop());
@@ -1902,7 +1902,7 @@ test('activity alone re-dispatches an untouched buffer, and the belief it comes 
 
   assert.equal(calls.length, 2, 'new events are what re-open a document nobody is editing');
   assert.equal(calls[1].text, REPEATED_WORD_MARKDOWN);
-  assert.equal(wiring.getIntent().text, 'wiring the ingest lane into the navigator gate');
+  assert.equal(wiring.getIntent().text, 'wiring the ingest lane into the visions gate');
 });
 
 test('a poke with no new events behind it is refused, so an aging digest cannot buy a dispatch', async (t) => {

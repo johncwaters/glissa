@@ -53,10 +53,10 @@ const { createGitWorkspace, createGitWorkspaceSync } = require('./git-workspace'
 const { runPostTurnChecks, resolveCheckConfig } = require('./post-turn-checker');
 const { createPrReviewWiring } = require('./pr-review-wiring');
 const { createPosthogWiring } = require('./posthog-wiring');
-const { createNavigatorWiring } = require('./navigator-wiring');
-const { createNavigatorDispatcher, createNavigatorSpawn } = require('./navigator-dispatch');
-const { resolveNavigatorConfig } = require('./core/navigator-dispatch-core');
-const { normalizeShapePath } = require('./core/navigator-scope-core');
+const { createVisionsWiring } = require('./visions-wiring');
+const { createVisionsDispatcher, createVisionsSpawn } = require('./visions-dispatch');
+const { resolveVisionsConfig } = require('./core/visions-dispatch-core');
+const { normalizeShapePath } = require('./core/visions-scope-core');
 const { createIngestLane } = require('./ingest-wiring');
 const { resolveIngestConfig } = require('./core/ingest-core');
 const { createUsageWiring, resolveUsageConfig } = require('./usage-wiring');
@@ -134,7 +134,7 @@ function decideWasActiveFlip(to, event, pendingRestart) {
   return null;
 }
 
-function resolveNavigatorScopePaths(projectIds, projects, warn = console.warn) {
+function resolveVisionsScopePaths(projectIds, projects, warn = console.warn) {
   if (!Array.isArray(projectIds) || projectIds.length === 0) return null;
   const projectsById = new Map();
   for (const project of Array.isArray(projects) ? projects : []) {
@@ -145,12 +145,12 @@ function resolveNavigatorScopePaths(projectIds, projects, warn = console.warn) {
   for (const projectId of projectIds) {
     const project = projectsById.get(projectId);
     if (!project) {
-      warn(`[navigator] configured project id not found: ${projectId}`);
+      warn(`[visions] configured project id not found: ${projectId}`);
       continue;
     }
     const normalizedPath = normalizeShapePath(project.path);
     if (!normalizedPath) {
-      warn(`[navigator] configured project has no usable path: ${projectId}`);
+      warn(`[visions] configured project has no usable path: ${projectId}`);
       continue;
     }
     if (scopePaths.includes(normalizedPath)) continue;
@@ -675,7 +675,7 @@ function createBackend(httpServer, options = {}) {
   /*
    * The same broadcast, refused to remote-trust sockets. Ingest frames carry captured terminal output
    * and (later) shell history, which the plan keeps on the machine that produced it exactly as the
-   * navigator lane keeps live buffers off the remote listener. Trust comes from the listener port
+   * visions lane keeps live buffers off the remote listener. Trust comes from the listener port
    * stamped on the connection at upgrade, never from anything the client sent; absent trust reads as
    * local, so behavior with remote mode off is unchanged.
    */
@@ -705,7 +705,7 @@ function createBackend(httpServer, options = {}) {
     let listenerMismatch = false;
     let orphanPty = false;
     let destroyedReachable = false;
-    for (const sess of [...sessions.values(), ...reviewSessions.values(), ...investigationSessions.values(), ...distillSessions.values(), ...navigatorSessions.values()]) {
+    for (const sess of [...sessions.values(), ...reviewSessions.values(), ...investigationSessions.values(), ...distillSessions.values(), ...visionsSessions.values()]) {
       const stats = sess.getHealthStats();
       stats.detection = sess.getDetectionStats();
       stats.ephemeral = !!sess.ephemeral;
@@ -942,22 +942,22 @@ function createBackend(httpServer, options = {}) {
 
   /*
    * Ingest lane: config-file only, absent config constructs nothing (docs/plan-ingestion.md, M6), the
-   * same shape as the navigator lane below it. Every source is individually opt-in ON TOP of the lane
+   * same shape as the visions lane below it. Every source is individually opt-in ON TOP of the lane
    * flag, so a lane whose sources are all off builds no adapter, holds no ring and taps nothing.
-   * Constructed BEFORE the navigator lane because that lane takes this one's digest as a dependency.
+   * Constructed BEFORE the visions lane because that lane takes this one's digest as a dependency.
    */
   const ingestConfig = resolveIngestConfig(config.ingest);
-  const navigatorConfig = resolveNavigatorConfig(config.navigator);
-  const navigatorEnabled = navigatorConfig.enabled;
+  const visionsConfig = resolveVisionsConfig(config.visions);
+  const visionsEnabled = visionsConfig.enabled;
   /*
    * The git source's watch set (docs/plan-ingestion.md, M8): the checkouts glissa's OWN project sessions
    * are working in, which is the same session-following rule the plan gives the fs source. Both halves of
    * a worktree session count, because a session commits in its worktree while merges land in the project
    * checkout, and neither is visible from the other's HEAD.
    *
-   * The exclusion rides the map, not a filter: ephemeral lane sessions (pr-review, navigator dispatch,
+   * The exclusion rides the map, not a filter: ephemeral lane sessions (pr-review, visions dispatch,
    * posthog, pack-distill) are registered in their own maps and never enter `sessions`, so a pr-review
-   * worktree and a navigator dispatch's throwaway workdir are outside the watch set BY CONSTRUCTION,
+   * worktree and a visions dispatch's throwaway workdir are outside the watch set BY CONSTRUCTION,
    * exactly as the terminal tap's placement in wireSessionEvents excludes them there.
    */
   const gitRepoRoots = () => {
@@ -988,45 +988,45 @@ function createBackend(httpServer, options = {}) {
       debug: () => configStore.getSettings().debugMode === true,
       /*
        * The other half of activity-driven dispatch (docs/plan-ingestion.md, M7.5), wired only when BOTH
-       * lanes exist. Late-binding on purpose: the navigator lane is constructed below, and the first
+       * lanes exist. Late-binding on purpose: the visions lane is constructed below, and the first
        * poke can only arrive a batch interval after both are up.
        */
-      onActivity: navigatorEnabled ? () => navigatorLane.noteActivity() : null,
+      onActivity: visionsEnabled ? () => visionsLane.noteActivity() : null,
     })
     : null;
 
   /*
-   * Navigator lane: absent config constructs nothing (docs/archive/plan-navigator.md, "Wire and
-   * trust"). The Settings dialog can persist config.navigator, but this lane is constructed only at
+   * Visions lane: absent config constructs nothing (docs/archive/plan-visions.md, "Wire and
+   * trust"). The Settings dialog can persist config.visions, but this lane is constructed only at
    * boot, so changes take effect after server restart. Its tier 3 model dispatch is a second opt-in
-   * inside that one: without config.navigator.dispatch.enabled the dispatcher is never constructed, so
+   * inside that one: without config.visions.dispatch.enabled the dispatcher is never constructed, so
    * the lane arms no dispatch timer and can spawn nothing. Its sessions get their own ephemeral map for
-   * the same reasons as the PR and distill lanes, and it is that registration (logPrefix 'navigator')
+   * the same reasons as the PR and distill lanes, and it is that registration (logPrefix 'visions')
    * that puts the lane on the usage ledger.
    */
-  const navigatorDispatchConfig = navigatorConfig.dispatch;
-  const navigatorScopePaths = navigatorEnabled
-    ? resolveNavigatorScopePaths(navigatorConfig.projects, config.projects)
+  const visionsDispatchConfig = visionsConfig.dispatch;
+  const visionsScopePaths = visionsEnabled
+    ? resolveVisionsScopePaths(visionsConfig.projects, config.projects)
     : null;
-  const navigatorSessions = new Map();
-  const navigatorLane = navigatorEnabled
-    ? createNavigatorWiring({
+  const visionsSessions = new Map();
+  const visionsLane = visionsEnabled
+    ? createVisionsWiring({
       logger: console,
       broadcast: (msg) => broadcastControl(msg),
       // Same reason as the ingest lane above: the setting moves, the lane is built once.
       debug: () => configStore.getSettings().debugMode === true,
-      dispatchConfig: navigatorDispatchConfig,
+      dispatchConfig: visionsDispatchConfig,
       // Tier 1's push half only; the codeAction pull half is always on with the lane.
-      autoFix: navigatorConfig.autoFix,
-      intentStatePath: configSiblingPath(configStore.configPath, 'navigator-intent.json'),
-      dispatch: navigatorDispatchConfig.enabled
-        ? createNavigatorDispatcher({
-          spawnSession: createNavigatorSpawn({
-            sessions: navigatorSessions, closeSessionDataClients, hookRouter, getHookPort, spawnGate, recordLane,
+      autoFix: visionsConfig.autoFix,
+      intentStatePath: configSiblingPath(configStore.configPath, 'visions-intent.json'),
+      dispatch: visionsDispatchConfig.enabled
+        ? createVisionsDispatcher({
+          spawnSession: createVisionsSpawn({
+            sessions: visionsSessions, closeSessionDataClients, hookRouter, getHookPort, spawnGate, recordLane,
             replayBufferKB: config.replayBufferKB,
           }),
-          timeoutSeconds: navigatorDispatchConfig.dispatchTimeoutSeconds,
-          model: navigatorDispatchConfig.model,
+          timeoutSeconds: visionsDispatchConfig.dispatchTimeoutSeconds,
+          model: visionsDispatchConfig.model,
         })
         : null,
       // One cross-source context section in the dispatch prompt. Null with no ingest lane, and the
@@ -1035,7 +1035,7 @@ function createBackend(httpServer, options = {}) {
       // The movement signal beside it: new events, never aging timestamps. Null with no ingest lane, and
       // the gate then decides exactly what it decided before M7.5.
       contextSeq: ingestLane ? ingestLane.latestSeq : null,
-      scopePaths: navigatorScopePaths,
+      scopePaths: visionsScopePaths,
     })
     : null;
 
@@ -1327,9 +1327,9 @@ function createBackend(httpServer, options = {}) {
 
     /*
      * Terminal ingest tap (docs/plan-ingestion.md, M6). Its PLACEMENT is the load-bearing part: only
-     * project sessions pass through wireSessionEvents, so an ephemeral lane session (navigator,
+     * project sessions pass through wireSessionEvents, so an ephemeral lane session (visions,
      * pr-review, posthog, pack-distill) registered through registerEphemeralSession is excluded BY
-     * CONSTRUCTION. Without that, the navigator's own dispatch output would feed straight back into its
+     * CONSTRUCTION. Without that, the visions's own dispatch output would feed straight back into its
      * next prompt. Pinned by tests/ingest-backend.test.js.
      */
     if (ingestLane?.terminalEnabled) ingestLane.attachSessionTap(sess);
@@ -1346,7 +1346,7 @@ function createBackend(httpServer, options = {}) {
 
   /*
    * The git watch set is derived from the map the loop above just filled, and the ingest lane is
-   * constructed well before that loop (the navigator lane below it takes this one's digest as a
+   * constructed well before that loop (the visions lane below it takes this one's digest as a
    * dependency). Without this poke the source starts with an empty set and stays inert until its first
    * 60s poll, whose first read of each repo is a BASELINE, so a commit or branch switch made in that
    * window is absorbed and never reported. Pinned by tests/ingest-backend.test.js.
@@ -1624,19 +1624,19 @@ function createBackend(httpServer, options = {}) {
     // Official plan limits are machine-wide, so the freshest snapshot is replayed to every client that
     // connects rather than being rebuilt per session.
     getPlanLimits: () => usage.getPlanLimitsMessage(),
-    // Navigator lane, for the intent correction the tab sends. Null whenever the lane is off, which is
+    // Visions lane, for the intent correction the tab sends. Null whenever the lane is off, which is
     // what that handler refuses on.
-    navigatorLane,
+    visionsLane,
   });
 
-  // Navigator connect-time repair: findings are current state, so one snapshot beats replay retention (plan-limits precedent); registered after registerControlHandlers so the snapshot frame stays first
-  if (navigatorLane) {
+  // Visions connect-time repair: findings are current state, so one snapshot beats replay retention (plan-limits precedent); registered after registerControlHandlers so the snapshot frame stays first
+  if (visionsLane) {
     controlWss.on('connection', (ws) => {
       if (ws.readyState !== 1) return;
       try {
-        ws.send(JSON.stringify(navigatorLane.snapshotMessage()));
+        ws.send(JSON.stringify(visionsLane.snapshotMessage()));
       } catch (sendError) {
-        console.warn(`[navigator] connect-time snapshot send failed: ${sendError.message}`);
+        console.warn(`[visions] connect-time snapshot send failed: ${sendError.message}`);
       }
     });
   }
@@ -1803,8 +1803,8 @@ function createBackend(httpServer, options = {}) {
     const route = classifyUpgradePath(req.url);
     const trust = classifyRequestOrigin({ localPort: socket.localPort, remoteListenerPort });
 
-    // A navigator route with no lane constructed takes the unknown-path branch, byte-identical to before the lane existed
-    if (route === 'unknown' || (route === 'navigator' && !navigatorLane)) {
+    // A visions route with no lane constructed takes the unknown-path branch, byte-identical to before the lane existed
+    if (route === 'unknown' || (route === 'visions' && !visionsLane)) {
       // Locally, leave the socket alone so other upgrade listeners (Vite HMR) can claim it. On the
       // remote listener nothing else is listening, so returning would strand an authenticated-by-
       // nobody socket open with no timeout; close it instead.
@@ -1812,8 +1812,8 @@ function createBackend(httpServer, options = {}) {
       return;
     }
 
-    // Live editor buffers never cross the remote listener in v1, paired device or not (docs/archive/plan-navigator.md, Non-goals)
-    if (route === 'navigator' && trust === 'remote') {
+    // Live editor buffers never cross the remote listener in v1, paired device or not (docs/archive/plan-visions.md, Non-goals)
+    if (route === 'visions' && trust === 'remote') {
       socket.destroy();
       return;
     }
@@ -1846,8 +1846,8 @@ function createBackend(httpServer, options = {}) {
       });
       return;
     }
-    if (route === 'navigator') {
-      navigatorLane.handleUpgrade(req, socket, head);
+    if (route === 'visions') {
+      visionsLane.handleUpgrade(req, socket, head);
       return;
     }
     dataWss.handleUpgrade(req, socket, head, (ws) => {
@@ -1917,11 +1917,11 @@ function createBackend(httpServer, options = {}) {
       if (sess._killReap) pendingReaps.push(sess._killReap);
     }
     // Cancels the batch timer and detaches every session tap; null whenever the lane is off. Ahead of
-    // the navigator lane only because the taps ride sessions already destroyed above.
+    // the visions lane only because the taps ride sessions already destroyed above.
     if (ingestLane) ingestLane.stop();
     // Drops every mirrored buffer and its pending sweep timer; null whenever the lane is off.
-    if (navigatorLane) navigatorLane.stop();
-    for (const [, sess] of navigatorSessions) {
+    if (visionsLane) visionsLane.stop();
+    for (const [, sess] of visionsSessions) {
       sess.destroy();
       if (sess._killReap) pendingReaps.push(sess._killReap);
     }
@@ -1983,9 +1983,9 @@ function createBackend(httpServer, options = {}) {
     // The freshest official plan-limit snapshot, for the same reason getSession is exposed: a route
     // test has no other way to observe what a hook callback stored.
     getPlanLimits: () => usage.getPlanLimitsMessage(),
-    // The navigator lane itself (null when off), exposed for the same reason getSession is: a booted
+    // The visions lane itself (null when off), exposed for the same reason getSession is: a booted
     // backend gives a test no other way to drive what a dispatch result would do to the intent model.
-    getNavigatorLane: () => navigatorLane,
+    getVisionsLane: () => visionsLane,
     // The ingest lane (null when off), exposed for the same reason: a booted backend gives a test no
     // other way to observe what a session tap put in the rings.
     getIngestLane: () => ingestLane,

@@ -1,7 +1,7 @@
 'use strict';
 
 /*
- * The navigator's intent model (docs/archive/plan-navigator.md, M5), at the only altitude the rules live at:
+ * The visions's intent model (docs/archive/plan-visions.md, M5), at the only altitude the rules live at:
  * who may replace the statement, what a lock does, how control comes back to the model, and what is
  * done to the text on the way in. Every case here is a decision the wiring must NOT be making.
  */
@@ -18,7 +18,7 @@ const {
   isEmptyIntent,
   reviveIntentState,
   sanitizeIntentText,
-} = require('../server/core/navigator-intent-core');
+} = require('../server/core/visions-intent-core');
 
 const NOW = 1700000000000;
 

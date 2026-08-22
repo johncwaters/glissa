@@ -1,5 +1,5 @@
 /*
- * Navigator tier 3 dispatch: the IO half of docs/archive/plan-navigator.md M4.
+ * Visions tier 3 dispatch: the IO half of docs/archive/plan-visions.md M4.
  *
  * Permissions posture, live-probed against the real CLI (2.x):
  *   - NO --dangerously-skip-permissions. The prompt embeds arbitrary buffer text, so the session gets
@@ -24,13 +24,13 @@ const {
   awaitSessionExit, firstLine, raceWithAbort, registerEphemeralSession,
 } = require('./ephemeral-session');
 const {
-  DEFAULT_TIMEOUT_SECONDS, MAX_HAND_CHARS, buildNavigatorPrompt, countLines, sanitizeComments,
-} = require('./core/navigator-dispatch-core');
-const { sanitizeIntentText } = require('./core/navigator-intent-core');
+  DEFAULT_TIMEOUT_SECONDS, MAX_HAND_CHARS, buildVisionsPrompt, countLines, sanitizeComments,
+} = require('./core/visions-dispatch-core');
+const { sanitizeIntentText } = require('./core/visions-intent-core');
 const { createLaneLog } = require('./lane-log');
 
 const RESULT_VERDICTS = new Set(['COMMENTS', 'NONE', 'ERROR']);
-const RESULT_FILE = 'navigator-result.json';
+const RESULT_FILE = 'visions-result.json';
 
 /*
  * The one tool the session is pre-approved for, and the only action the prompt asks it to take. The
@@ -38,12 +38,12 @@ const RESULT_FILE = 'navigator-result.json';
  * prompt that follows it as another tool name and claude exits with "Input must be provided either
  * through stdin or as a prompt argument" (live-probed).
  */
-const NAVIGATOR_ALLOWED_TOOLS = 'Write';
-const ALLOWED_TOOLS_ARG = `--allowedTools=${NAVIGATOR_ALLOWED_TOOLS}`;
+const VISIONS_ALLOWED_TOOLS = 'Write';
+const ALLOWED_TOOLS_ARG = `--allowedTools=${VISIONS_ALLOWED_TOOLS}`;
 
-// Verbs a navigator never needs: no shell, no editing, no network, no sub-agents. Bare tool names,
+// Verbs a visions never needs: no shell, no editing, no network, no sub-agents. Bare tool names,
 // because a path-scoped rule here would also cover the result file (see the header).
-const NAVIGATOR_DENY = {
+const VISIONS_DENY = {
   deny: ['Bash', 'Edit', 'NotebookEdit', 'WebFetch', 'WebSearch', 'Task'],
 };
 
@@ -97,14 +97,14 @@ async function readCommentsResult(resultPath, { lineCount = 0, onBytesRead = nul
 
 /**
  * The real spawn: one ephemeral headless session registered through the shared seam, which is what
- * puts a `navigator` row on the Usage tab's lane ledger with no ledger code of its own. Never
+ * puts a `visions` row on the Usage tab's lane ledger with no ledger code of its own. Never
  * rejects on an abort; the caller has already resolved that race.
  */
-function createNavigatorSpawn({
+function createVisionsSpawn({
   sessions = new Map(), closeSessionDataClients = () => {}, hookRouter = null, getHookPort = null,
   spawnGate = null, replayBufferKB = undefined, recordLane = null,
 } = {}) {
-  return async function spawnNavigatorSession({ id, name, prompt, cwd, model = null, signal = null }) {
+  return async function spawnVisionsSession({ id, name, prompt, cwd, model = null, signal = null }) {
     // Required here, not at module load: an inert lane must not pay for resolving `claude` on PATH.
     const { Session } = require('../session/sessions');
     const extraClaudeArgs = ['-p', ALLOWED_TOOLS_ARG];
@@ -117,12 +117,12 @@ function createNavigatorSpawn({
       extraClaudeArgs,
       initialPrompt: prompt,
       ephemeral: true,
-      settingsPermissions: NAVIGATOR_DENY,
+      settingsPermissions: VISIONS_DENY,
       replayBufferKB,
       hookRouter,
       getHookPort,
     });
-    registerEphemeralSession({ map: sessions, id, sess, closeSessionDataClients, logPrefix: 'navigator', name, recordLane });
+    registerEphemeralSession({ map: sessions, id, sess, closeSessionDataClients, logPrefix: 'visions', name, recordLane });
 
     await awaitSessionExit(sess, { signal, spawnGate });
   };
@@ -133,7 +133,7 @@ function createNavigatorSpawn({
  * file. Returns { verdict, comments, reason } and never throws, so the wiring's gate logic has a
  * single shape to handle.
  */
-function createNavigatorDispatcher({
+function createVisionsDispatcher({
   spawnSession,
   timeoutSeconds = DEFAULT_TIMEOUT_SECONDS,
   model = null,
@@ -141,14 +141,14 @@ function createNavigatorDispatcher({
   nowFn = Date.now,
   setTimeoutFn = setTimeout,
   clearTimeoutFn = clearTimeout,
-  makeWorkDir = () => fs.mkdtemp(path.join(os.tmpdir(), 'glissa-navigator-')),
+  makeWorkDir = () => fs.mkdtemp(path.join(os.tmpdir(), 'glissa-visions-')),
   removeWorkDir = async (dir) => { try { await fs.rm(dir, { recursive: true, force: true }); } catch { /* best-effort */ } },
   readResult = readCommentsResult,
-  idFor = (uri) => `navigator:${uri}:${Date.now()}`,
+  idFor = (uri) => `visions:${uri}:${Date.now()}`,
 } = {}) {
-  if (typeof spawnSession !== 'function') throw new Error('createNavigatorDispatcher requires spawnSession');
+  if (typeof spawnSession !== 'function') throw new Error('createVisionsDispatcher requires spawnSession');
 
-  const { note, warn } = createLaneLog({ prefix: '[navigator]', logger });
+  const { note, warn } = createLaneLog({ prefix: '[visions]', logger });
 
   function spawnWithTimeout({
     id, name, prompt, cwd, uri, resultPath, lineCount,
@@ -193,8 +193,8 @@ function createNavigatorDispatcher({
     try {
       return await spawnWithTimeout({
         id: idFor(uri),
-        name: `navigator ${uri}`,
-        prompt: buildNavigatorPrompt({
+        name: `visions ${uri}`,
+        prompt: buildVisionsPrompt({
           uri, text, findings, intent, digest, resultPath,
         }),
         cwd: workDir,
@@ -210,10 +210,10 @@ function createNavigatorDispatcher({
 
 module.exports = {
   ALLOWED_TOOLS_ARG,
-  NAVIGATOR_ALLOWED_TOOLS,
-  NAVIGATOR_DENY,
+  VISIONS_ALLOWED_TOOLS,
+  VISIONS_DENY,
   RESULT_FILE,
-  createNavigatorDispatcher,
-  createNavigatorSpawn,
+  createVisionsDispatcher,
+  createVisionsSpawn,
   readCommentsResult,
 };

@@ -362,7 +362,7 @@ function createAgentLogIngest({
   /*
    * Feedback-loop exclusion, primary mechanism: the usage-lane ledger (server/usage-lane-ledger.js).
    * A Claude session id Glissa RECORDED spawning under one of its own ephemeral lanes never publishes,
-   * or navigator dispatch output would re-enter the next navigator prompt. The ledger is primary rather
+   * or visions dispatch output would re-enter the next visions prompt. The ledger is primary rather
    * than the throwaway-workdir shape because it is the only one that separates the in-place PR-review
    * lane, which runs in the operator's real project directory, from the operator's own work in that
    * same directory; isDispatchWorkdir is the independent second layer for when the ledger has not heard.

@@ -1,18 +1,18 @@
 'use strict';
 
-// The Navigator tab's pure half: which sections exist, in what order, and what the counts read as.
+// The Visions tab's pure half: which sections exist, in what order, and what the counts read as.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-// navigator-view-core is ESM (.mjs); dynamic-import it from this CJS test file.
-const importCore = () => import('../public/navigator-view-core.mjs');
+// visions-view-core is ESM (.mjs); dynamic-import it from this CJS test file.
+const importCore = () => import('../public/visions-view-core.mjs');
 
 function finding(line, character, code, message) {
   return {
     range: { start: { line, character }, end: { line, character: character + 1 } },
     severity: 2,
-    source: 'glissa-navigator',
+    source: 'glissa-visions',
     code,
     message,
   };
@@ -20,7 +20,7 @@ function finding(line, character, code, message) {
 
 test('a file uri renders as its decoded basename and keeps the raw uri reachable', async () => {
   const { basenameOfUri } = await importCore();
-  assert.equal(basenameOfUri('file:///tmp/plan-navigator.md'), 'plan-navigator.md');
+  assert.equal(basenameOfUri('file:///tmp/plan-visions.md'), 'plan-visions.md');
   assert.equal(basenameOfUri('file:///c%3A/Users/johnw/My%20Docs/notes.md'), 'notes.md');
   assert.equal(basenameOfUri('untitled:Untitled-1'), 'untitled:Untitled-1');
   assert.equal(basenameOfUri(''), '');
@@ -48,10 +48,10 @@ test('the count reads as a sentence, singular included', async () => {
 test('a per-uri push replaces that document and leaves the others alone', async () => {
   const { applyFindingsMessage } = await importCore();
   const first = applyFindingsMessage(new Map(), {
-    type: 'navigator-findings', uri: 'file:///a.md', diagnostics: [finding(0, 0, 'repeated-word', 'a')],
+    type: 'visions-findings', uri: 'file:///a.md', diagnostics: [finding(0, 0, 'repeated-word', 'a')],
   });
   const second = applyFindingsMessage(first, {
-    type: 'navigator-findings', uri: 'file:///b.md', diagnostics: [finding(1, 0, 'heading-skip', 'b')],
+    type: 'visions-findings', uri: 'file:///b.md', diagnostics: [finding(1, 0, 'heading-skip', 'b')],
   });
 
   assert.deepEqual([...second.keys()], ['file:///a.md', 'file:///b.md']);
@@ -76,7 +76,7 @@ test('a message with no uri changes nothing', async () => {
 test('the connect-time snapshot REPLACES the map, so a document closed during the gap disappears', async () => {
   const { applyFindingsSnapshot } = await importCore();
   const repaired = applyFindingsSnapshot({
-    type: 'navigator-snapshot',
+    type: 'visions-snapshot',
     documents: [
       { uri: 'file:///b.md', diagnostics: [finding(0, 0, 'repeated-word', 'b')] },
       { uri: 'file:///empty.md', diagnostics: [] },
@@ -87,7 +87,7 @@ test('the connect-time snapshot REPLACES the map, so a document closed during th
 });
 
 test('sections sort by file name, findings sort by position', async () => {
-  const { navigatorSections } = await importCore();
+  const { visionsSections } = await importCore();
   const map = new Map([
     ['file:///deep/zebra.md', [finding(0, 0, 'repeated-word', 'z')]],
     ['file:///apple.md', [
@@ -97,7 +97,7 @@ test('sections sort by file name, findings sort by position', async () => {
     ]],
   ]);
 
-  const sections = navigatorSections(map);
+  const sections = visionsSections(map);
   assert.deepEqual(sections.map((section) => section.name), ['apple.md', 'zebra.md']);
   assert.equal(sections[0].uri, 'file:///apple.md', 'the full uri stays with the section for the title');
   assert.deepEqual(sections[0].findings.map((f) => f.message), [
@@ -106,16 +106,16 @@ test('sections sort by file name, findings sort by position', async () => {
 });
 
 test('two files of the same name are ordered by their full uri, not left to insertion order', async () => {
-  const { navigatorSections } = await importCore();
+  const { visionsSections } = await importCore();
   const map = new Map([
     ['file:///z/notes.md', [finding(0, 0, 'repeated-word', 'z')]],
     ['file:///a/notes.md', [finding(0, 0, 'repeated-word', 'a')]],
   ]);
-  assert.deepEqual(navigatorSections(map).map((section) => section.uri), ['file:///a/notes.md', 'file:///z/notes.md']);
+  assert.deepEqual(visionsSections(map).map((section) => section.uri), ['file:///a/notes.md', 'file:///z/notes.md']);
 });
 
 test('the totals and the arrival test read the same feed', async () => {
-  const { totalFindingCount, hasFindings, NAVIGATOR_EMPTY_TEXT } = await importCore();
+  const { totalFindingCount, hasFindings, VISIONS_EMPTY_TEXT } = await importCore();
   const map = new Map([
     ['file:///a.md', [finding(0, 0, 'x', 'a'), finding(1, 0, 'x', 'b')]],
     ['file:///b.md', [finding(0, 0, 'x', 'c')]],
@@ -125,10 +125,10 @@ test('the totals and the arrival test read the same feed', async () => {
   assert.equal(hasFindings({ diagnostics: [finding(0, 0, 'x', 'a')] }), true);
   assert.equal(hasFindings({ diagnostics: [] }), false);
   assert.equal(hasFindings({}), false);
-  assert.equal(NAVIGATOR_EMPTY_TEXT, 'No findings. Open a markdown file in a connected editor.');
+  assert.equal(VISIONS_EMPTY_TEXT, 'No findings. Open a markdown file in a connected editor.');
 });
 
-// --- Tier 3 model comments (docs/archive/plan-navigator.md, M4) ---
+// --- Tier 3 model comments (docs/archive/plan-visions.md, M4) ---
 
 function comment(line, message) {
   return { line, message };
@@ -137,7 +137,7 @@ function comment(line, message) {
 test('a comments push replaces that document, and an empty one clears it', async () => {
   const { applyCommentsMessage } = await importCore();
   const first = applyCommentsMessage(new Map(), {
-    type: 'navigator-comments', uri: 'file:///a.md', comments: [comment(3, 'name the audience')],
+    type: 'visions-comments', uri: 'file:///a.md', comments: [comment(3, 'name the audience')],
   });
   assert.deepEqual([...first.keys()], ['file:///a.md']);
 
@@ -152,7 +152,7 @@ test('a comments push replaces that document, and an empty one clears it', async
 test('the snapshot carries both halves, and each half reads only its own field', async () => {
   const { applyCommentsSnapshot, applyFindingsSnapshot, applyHandSnapshot } = await importCore();
   const msg = {
-    type: 'navigator-snapshot',
+    type: 'visions-snapshot',
     documents: [
       {
         uri: 'file:///both.md',
@@ -172,12 +172,12 @@ test('the snapshot carries both halves, and each half reads only its own field',
 });
 
 test('a hand push replaces that document, and a null one clears it', async () => {
-  const { applyHandMessage, hasHand, navigatorHandText } = await importCore();
+  const { applyHandMessage, hasHand, visionsHandText } = await importCore();
   const first = applyHandMessage(new Map(), {
-    type: 'navigator-hand', uri: 'file:///a.md', hand: '  the outline and conclusion argue different plans  ',
+    type: 'visions-hand', uri: 'file:///a.md', hand: '  the outline and conclusion argue different plans  ',
   });
   assert.equal(first.get('file:///a.md'), 'the outline and conclusion argue different plans');
-  assert.equal(navigatorHandText(first.get('file:///a.md')), 'Raised hand: the outline and conclusion argue different plans');
+  assert.equal(visionsHandText(first.get('file:///a.md')), 'Raised hand: the outline and conclusion argue different plans');
   assert.equal(hasHand({ uri: 'file:///a.md', hand: 'a structural issue' }), true);
   assert.equal(hasHand({ uri: 'file:///a.md', hand: null }), false);
 
@@ -187,11 +187,11 @@ test('a hand push replaces that document, and a null one clears it', async () =>
 
   assert.equal(applyHandMessage(replaced, { uri: 'file:///a.md', hand: null }).size, 0);
   assert.deepEqual([...applyHandMessage(replaced, { hand: null }).keys()], ['file:///a.md'], 'no uri changes nothing');
-  assert.equal(navigatorHandText(null), '');
+  assert.equal(visionsHandText(null), '');
 });
 
-test('a document earns a section from any navigator surface, and hand renders first', async () => {
-  const { navigatorSections } = await importCore();
+test('a document earns a section from any visions surface, and hand renders first', async () => {
+  const { visionsSections } = await importCore();
   const findings = new Map([['file:///apple.md', [finding(4, 0, 'repeated-word', 'a')]]]);
   const comments = new Map([
     ['file:///apple.md', [comment(9, 'later'), comment(2, 'earlier')]],
@@ -202,13 +202,13 @@ test('a document earns a section from any navigator surface, and hand renders fi
     ['file:///middle.md', 'the section order hides the decision'],
   ]);
 
-  const sections = navigatorSections(findings, comments, hands);
+  const sections = visionsSections(findings, comments, hands);
   assert.deepEqual(sections.map((section) => section.name), ['apple.md', 'middle.md', 'zebra.md']);
   assert.equal(sections[0].hand, 'the document has two centers');
   assert.deepEqual(sections[0].comments.map((entry) => entry.message), ['earlier', 'later']);
   assert.equal(sections[1].hand, 'the section order hides the decision');
   assert.deepEqual(sections[2].findings, [], 'a comments-only document still gets its section');
-  assert.deepEqual(navigatorSections(new Map(), new Map(), new Map()), []);
+  assert.deepEqual(visionsSections(new Map(), new Map(), new Map()), []);
 });
 
 test('the section head names what it actually has, and never pads with a zero', async () => {
@@ -234,7 +234,7 @@ test('comment lines are already 1-based, unlike the LSP ranges beside them', asy
   assert.equal(hasComments({}), false);
 });
 
-// --- The intent block (docs/archive/plan-navigator.md, M5) ---
+// --- The intent block (docs/archive/plan-visions.md, M5) ---
 
 const NOW = 1700000000000;
 
@@ -259,7 +259,7 @@ test('an intent message is normalized, and anything malformed reads as no intent
 test('the source line says who owns the statement, in the second person', async () => {
   const { intentSourceText } = await importCore();
   assert.equal(intentSourceText({ text: 'x', source: 'operator' }), 'set by you');
-  assert.equal(intentSourceText({ text: 'x', source: 'model' }), 'proposed by navigator');
+  assert.equal(intentSourceText({ text: 'x', source: 'model' }), 'proposed by visions');
   assert.equal(intentSourceText({ text: '', source: 'model' }), '', 'no statement, nobody to credit');
 });
 
@@ -279,7 +279,7 @@ test('the age reads coarsely, because the question is minutes or days and never 
 test('the meta line joins the two, and says nothing at all when there is no statement', async () => {
   const { emptyIntent, intentMetaText } = await importCore();
   assert.equal(intentMetaText({ text: 'x', source: 'operator', ts: NOW }, NOW + 120000), 'set by you, 2 minutes ago');
-  assert.equal(intentMetaText({ text: 'x', source: 'model', ts: 0 }, NOW), 'proposed by navigator');
+  assert.equal(intentMetaText({ text: 'x', source: 'model', ts: 0 }, NOW), 'proposed by visions');
   assert.equal(intentMetaText(emptyIntent(), NOW), '');
 });
 
@@ -314,10 +314,10 @@ test('the correction field adopts the statement only when it holds no draft of i
   }), false, 'nothing to adopt');
 });
 
-// --- Tier 1 fix changelog (docs/plan-navigator-2.md, M6) ---
+// --- Tier 1 fix changelog (docs/plan-visions-2.md, M6) ---
 
 const APPLIED_FIX = {
-  type: 'navigator-fix',
+  type: 'visions-fix',
   uri: 'file:///tmp/plan.md',
   fix: {
     code: 'repeated-word', line: 4, message: 'Repeated word "the"', applied: true,
@@ -358,14 +358,14 @@ test('one broadcast becomes one row, taking the uri and the stamp off the frame 
 test('a frame with nothing to say leaves the list exactly as it was', async () => {
   const { applyFixMessage, hasFix } = await importCore();
   const rows = applyFixMessage([], APPLIED_FIX);
-  assert.equal(hasFix({ type: 'navigator-fix', uri: 'file:///tmp/plan.md' }), false);
-  assert.deepEqual(applyFixMessage(rows, { type: 'navigator-fix', fix: { message: '   ' } }), rows);
+  assert.equal(hasFix({ type: 'visions-fix', uri: 'file:///tmp/plan.md' }), false);
+  assert.deepEqual(applyFixMessage(rows, { type: 'visions-fix', fix: { message: '   ' } }), rows);
 });
 
 test('the snapshot ring replaces the tab list rather than merging into it', async () => {
   const { applyFixSnapshot } = await importCore();
   const rows = applyFixSnapshot({
-    type: 'navigator-snapshot',
+    type: 'visions-snapshot',
     fixes: [
       {
         uri: 'file:///tmp/plan.md', code: 'repeated-word', line: 4, message: 'Repeated word "the"', applied: true, ts: NOW,
@@ -377,7 +377,7 @@ test('the snapshot ring replaces the tab list rather than merging into it', asyn
   assert.equal(rows.length, 2, 'a record with no message is not a row this list can show');
   assert.equal(rows[1].line, 0, 'a line off the bottom of the buffer reads as the first one');
   assert.equal(rows[1].applied, false);
-  assert.deepEqual(applyFixSnapshot({ type: 'navigator-snapshot' }), []);
+  assert.deepEqual(applyFixSnapshot({ type: 'visions-snapshot' }), []);
 });
 
 test('the rendered changelog is capped, however long the tab is left open', async () => {

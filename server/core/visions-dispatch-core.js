@@ -1,5 +1,5 @@
 /*
- * Pure decisions for the navigator's tier 3 model dispatch (docs/archive/plan-navigator.md, M4): when a
+ * Pure decisions for the visions's tier 3 model dispatch (docs/archive/plan-visions.md, M4): when a
  * dispatch is allowed, what the session is told, and what of its answer is believed. No IO, no timers,
  * no clock: the wiring passes `now`, the hash and the config in, and gets a verdict back.
  */
@@ -7,7 +7,7 @@
 'use strict';
 
 const { positiveInt } = require('./ingest-number-core');
-const { MAX_INTENT_CHARS, sanitizeIntentText } = require('./navigator-intent-core');
+const { MAX_INTENT_CHARS, sanitizeIntentText } = require('./visions-intent-core');
 
 const DEFAULT_QUIET_MS = 30000;
 const DEFAULT_COOLDOWN_MS = 300000;
@@ -39,7 +39,7 @@ const DISABLED_CONFIG = Object.freeze({
 });
 
 /**
- * config.navigator.dispatch, normalized. Absent, malformed, or anything other than `enabled: true`
+ * config.visions.dispatch, normalized. Absent, malformed, or anything other than `enabled: true`
  * resolves to the disabled shape, which is what makes the lane cost nothing until it is asked for.
  */
 function resolveDispatchConfig(raw) {
@@ -61,10 +61,10 @@ function resolveDispatchConfig(raw) {
 }
 
 /**
- * config.navigator, normalized. It lives beside resolveDispatchConfig because the two answer the same
+ * config.visions, normalized. It lives beside resolveDispatchConfig because the two answer the same
  * question one level apart, and the lane reads them together at its single construction site.
  */
-function resolveNavigatorConfig(raw) {
+function resolveVisionsConfig(raw) {
   const block = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
   const projects = Array.isArray(block.projects)
     ? [...new Set(block.projects.filter((projectId) => typeof projectId === 'string' && projectId.trim()).map((projectId) => projectId.trim()))]
@@ -122,7 +122,7 @@ function countRecentDispatches(state, now, trigger = null) {
 /*
  * What woke this dispatch, read from the state rather than from whichever timer fired: the text moved,
  * so a carbon unit typed ('edit'), or the text stood and only the ingest seq moved, so the machine did
- * ('activity'). Text and seq both moving is an edit, because the buffer is what the navigator answers
+ * ('activity'). Text and seq both moving is an edit, because the buffer is what the visions answers
  * about. A uri with NO recorded hash has no state to read, which is every buffer after a restart, so
  * there and only there `armedBy` breaks the tie: without it a poke-armed cold start reads as six carbon
  * units typing at once and drains the budget a real save was going to need.
@@ -239,7 +239,7 @@ function modelDiagnosticsToLsp(raw, { text = '', lineCount = countLines(text) } 
         end: { line: lineIndex, character: Math.max(lineText.length, 1) },
       },
       severity: 2,
-      source: 'glissa-navigator',
+      source: 'glissa-visions',
       code: 'model',
       message: entry.message,
     };
@@ -292,11 +292,11 @@ function activitySection(digest) {
 }
 
 /**
- * The seed prompt for one navigator dispatch. Tier 3 only (suggestions and directions, never a
+ * The seed prompt for one visions dispatch. Tier 3 only (suggestions and directions, never a
  * rewrite), the buffer fenced and named as DATA, and exactly one JSON result file as the only action
  * the session is asked to take. Pure string building; the wiring owns the file it names.
  */
-function buildNavigatorPrompt({
+function buildVisionsPrompt({
   uri, text, findings = [], intent = '', digest = '', resultPath,
   maxComments = MAX_COMMENTS, maxMessageChars = MAX_MESSAGE_CHARS, maxIntentChars = MAX_INTENT_CHARS, maxHandChars = MAX_HAND_CHARS,
 }) {
@@ -309,7 +309,7 @@ function buildNavigatorPrompt({
     ? [`Current working intent (operator-corrected when locked): ${workingIntent}`, '']
     : [];
   const lines = [
-    'You are the Glissa navigator: a pair-programming navigator reading a live editor buffer at a pause in the typing.',
+    'You are the Glissa visions: a pair-programming visions reading a live editor buffer at a pause in the typing.',
     'Tier 3 only. You offer suggestions and directions. You never rewrite, never restate the text back, and never take the keyboard.',
     '',
     'Hard rules:',
@@ -355,7 +355,7 @@ module.exports = {
   DEFAULT_TIMEOUT_SECONDS,
   HOUR_MS,
   activitySection,
-  buildNavigatorPrompt,
+  buildVisionsPrompt,
   countLines,
   countRecentDispatches,
   createDispatchState,
@@ -366,6 +366,6 @@ module.exports = {
   modelDiagnosticsToLsp,
   recordDispatch,
   resolveDispatchConfig,
-  resolveNavigatorConfig,
+  resolveVisionsConfig,
   sanitizeComments,
 };

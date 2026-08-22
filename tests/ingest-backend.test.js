@@ -5,8 +5,8 @@
  * config constructs nothing at all), the connect-time snapshot on the control WS, and the load-bearing
  * ephemeral-session exclusion.
  *
- * That exclusion is the whole reason the tap lives in wireSessionEvents: navigator dispatch sessions are
- * PTY sessions too, and tapping one feeds the navigator's own output back into its next prompt. This
+ * That exclusion is the whole reason the tap lives in wireSessionEvents: visions dispatch sessions are
+ * PTY sessions too, and tapping one feeds the visions's own output back into its next prompt. This
  * file pins BOTH halves of the rule, because either alone would pass while the bug is present: a project
  * session that goes through wireSessionEvents IS tapped, and a session registered through
  * registerEphemeralSession (the one seam every lane uses) is NOT.
@@ -163,29 +163,29 @@ test('a project session is tapped, because it goes through wireSessionEvents', w
   assert.ok(lane.buildDigest({}).includes('a command ran here'));
 }));
 
-test('an ephemeral lane session is NOT tapped, which is what keeps the navigator out of its own prompt', withBackend({ ingest: INGEST_ON }, async ({ backend }) => {
+test('an ephemeral lane session is NOT tapped, which is what keeps the visions out of its own prompt', withBackend({ ingest: INGEST_ON }, async ({ backend }) => {
   const lane = backend.getIngestLane();
   assert.equal(lane.tapCount, 1, 'only the project session');
 
   // Exactly how every ephemeral lane registers its session: the one seam, and it never touches
   // wireSessionEvents, which is where the tap lives.
   const ephemeral = new EventEmitter();
-  ephemeral.id = 'navigator:file:///tmp/plan.md';
+  ephemeral.id = 'visions:file:///tmp/plan.md';
   ephemeral.destroy = () => {};
   registerEphemeralSession({
     map: new Map(),
     id: ephemeral.id,
     sess: ephemeral,
     closeSessionDataClients: () => {},
-    logPrefix: 'navigator',
-    name: 'navigator dispatch',
+    logPrefix: 'visions',
+    name: 'visions dispatch',
   });
 
   assert.equal(ephemeral.listenerCount('data'), 0, 'no ingest tap may ride an ephemeral session');
   assert.equal(lane.tapCount, 1, 'the tap count must not have moved');
 
   // And its output goes nowhere even if something does emit it.
-  ephemeral.emit('data', 'the navigator talking to itself\n');
+  ephemeral.emit('data', 'the visions talking to itself\n');
   await new Promise((resolve) => { setTimeout(resolve, 700).unref(); });
   assert.equal(lane.recentEvents().length, 0);
 }));
@@ -198,13 +198,13 @@ const GIT_ON = { enabled: true, sources: { git: { enabled: true } } };
  * Two rules at once, both of which a booted backend is the only place to see.
  *
  * The watch set has to be POPULATED at boot. The lane is constructed before the session-construction loop
- * runs (the navigator lane below it takes this one's digest as a dependency), so the source's provider
+ * runs (the visions lane below it takes this one's digest as a dependency), so the source's provider
  * would see an empty map and the source would sit inert until its first 60s poll, whose first read of each
  * repo is a baseline: a commit made in that window would be absorbed and never reported. Nothing here
  * calls reconcile(), deliberately, so removing backend.js's boot poke fails this test.
  *
  * And the set is derived from the persisted `sessions` map and nothing else, which is what keeps every
- * ephemeral lane's checkout outside it BY CONSTRUCTION: a pr-review worktree and a navigator dispatch
+ * ephemeral lane's checkout outside it BY CONSTRUCTION: a pr-review worktree and a visions dispatch
  * workdir belong to sessions registered through registerEphemeralSession, which never enter that map.
  * Same mechanism as the terminal tap's placement in wireSessionEvents above, pinned here because a filter
  * added later would be the wrong fix.
@@ -346,8 +346,8 @@ test('with the fs source off a session carries no extra state-change listener', 
 
 /*
  * Same mechanism as the terminal tap and the git watch set, pinned for the same reason: ephemeral lane
- * sessions (pr-review, navigator dispatch, posthog, pack-distill) register through their own seam and
- * never pass through wireSessionEvents, which is where the fs root edge lives. A navigator dispatch
+ * sessions (pr-review, visions dispatch, posthog, pack-distill) register through their own seam and
+ * never pass through wireSessionEvents, which is where the fs root edge lives. A visions dispatch
  * workdir entering the watch set would feed the dispatch's own file writes back into its next prompt.
  */
 test('an ephemeral lane session never contributes an fs root', withBackend(
@@ -355,7 +355,7 @@ test('an ephemeral lane session never contributes an fs root', withBackend(
   async ({ backend, seeded }) => {
     const lane = backend.getIngestLane();
     const ephemeral = new EventEmitter();
-    ephemeral.id = 'navigator:file:///tmp/plan.md';
+    ephemeral.id = 'visions:file:///tmp/plan.md';
     ephemeral.path = seeded.projectDir;
     ephemeral.worktreeDir = seeded.projectDir;
     ephemeral.state = 'DORMANT';
@@ -365,8 +365,8 @@ test('an ephemeral lane session never contributes an fs root', withBackend(
       id: ephemeral.id,
       sess: ephemeral,
       closeSessionDataClients: () => {},
-      logPrefix: 'navigator',
-      name: 'navigator dispatch',
+      logPrefix: 'visions',
+      name: 'visions dispatch',
     });
 
     // Even driven all the way through a live lifecycle, it reaches no listener that could widen the set.
@@ -424,7 +424,7 @@ function seedTranscripts({ tmpDir }) {
     version: 1,
     updatedAt: new Date().toISOString(),
     entries: [
-      { claudeSessionId: 'lane-session', lane: 'navigator', ts: Date.now() },
+      { claudeSessionId: 'lane-session', lane: 'visions', ts: Date.now() },
       { claudeSessionId: 'card-session', lane: 'interactive', ts: Date.now() },
     ],
   }), 'utf8');
@@ -452,7 +452,7 @@ test('a completed agent turn reaches the rings and the digest, and a lane sessio
     await new Promise((resolve) => { setTimeout(resolve, 50).unref(); });
 
     fs.appendFileSync(seeded.cardFile, assistantLine('Ran the suite and it is green.', 'card-session'), 'utf8');
-    fs.appendFileSync(seeded.laneFile, assistantLine('the navigator talking to itself', 'lane-session'), 'utf8');
+    fs.appendFileSync(seeded.laneFile, assistantLine('the visions talking to itself', 'lane-session'), 'utf8');
     await lane.agentLogs.poll();
 
     const summaries = lane.recentEvents().map((event) => event.summary);
@@ -586,39 +586,39 @@ test('no dashboard connected costs the lane nothing: publishing still fills the 
 /*
  * Dispatch stays OFF in every boot below, because an enabled one spawns a real headless claude the
  * moment a gate passes. What a booted backend can prove that the unit tests cannot is the wiring itself:
- * that the ingest batch reaches the navigator lane, and that the gate's movement signal IS this lane's
- * seq. The arming and the dispatch behind that poke are pinned in tests/navigator-wiring.test.js.
+ * that the ingest batch reaches the visions lane, and that the gate's movement signal IS this lane's
+ * seq. The arming and the dispatch behind that poke are pinned in tests/visions-wiring.test.js.
  */
-const BOTH_LANES = { ingest: INGEST_ON, navigator: { enabled: true } };
+const BOTH_LANES = { ingest: INGEST_ON, visions: { enabled: true } };
 
-test('an ingest batch pokes the navigator lane, and its gate reads this lane seq', withBackend(BOTH_LANES, async ({ backend }) => {
+test('an ingest batch pokes the visions lane, and its gate reads this lane seq', withBackend(BOTH_LANES, async ({ backend }) => {
   const lane = backend.getIngestLane();
-  const navigator = backend.getNavigatorLane();
-  assert.ok(navigator, 'both lanes are constructed');
-  assert.equal(navigator.latestContextSeq(), 0, 'wired, and nothing has happened on the machine yet');
+  const visions = backend.getVisionsLane();
+  assert.ok(visions, 'both lanes are constructed');
+  assert.equal(visions.latestContextSeq(), 0, 'wired, and nothing has happened on the machine yet');
 
   let pokes = 0;
-  navigator.noteActivity = () => { pokes += 1; };
+  visions.noteActivity = () => { pokes += 1; };
   lane.publish({ source: 'terminal', kind: 'output', summary: 'a command ran here', scope: { root: '/repo' } });
   assert.ok(lane.latestSeq() > 0);
-  assert.equal(navigator.latestContextSeq(), lane.latestSeq(), 'one signal, read from the lane that owns it');
+  assert.equal(visions.latestContextSeq(), lane.latestSeq(), 'one signal, read from the lane that owns it');
 
   // The poke rides the lane's own 1s batch, so this waits out one real interval and no new timer.
   await new Promise((resolve) => { setTimeout(resolve, 1400).unref(); });
   assert.equal(pokes, 1, 'one poke for the batch, however many events it carried');
 }));
 
-test('with ingest off the navigator lane is wired to no movement signal at all', withBackend({ navigator: { enabled: true } }, async ({ backend }) => {
+test('with ingest off the visions lane is wired to no movement signal at all', withBackend({ visions: { enabled: true } }, async ({ backend }) => {
   assert.equal(backend.getIngestLane(), null);
   assert.equal(
-    backend.getNavigatorLane().latestContextSeq(), null,
+    backend.getVisionsLane().latestContextSeq(), null,
     'a null seq is what makes every gate decision the pre-M7.5 one',
   );
 }));
 
-test('with the navigator lane off the ingest lane batches with nothing to poke', withBackend({ ingest: INGEST_ON }, async ({ backend }) => {
+test('with the visions lane off the ingest lane batches with nothing to poke', withBackend({ ingest: INGEST_ON }, async ({ backend }) => {
   const lane = backend.getIngestLane();
-  assert.equal(backend.getNavigatorLane(), null);
+  assert.equal(backend.getVisionsLane(), null);
   lane.publish({ source: 'terminal', kind: 'output', summary: 'nobody to tell', scope: { root: '/repo' } });
   await new Promise((resolve) => { setTimeout(resolve, 1400).unref(); });
   assert.equal(lane.pendingEventCount, 0, 'the batch flushed rather than falling over on a lane that is not there');

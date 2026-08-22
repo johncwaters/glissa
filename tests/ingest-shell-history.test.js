@@ -7,7 +7,7 @@
  *
  * The EOF start is the rule this file exists for. A real ConsoleHost_history.txt holds thousands of
  * commands going back months, so a source that read from byte zero would fill its whole ring with a
- * machine's history on every daemon start, then spend the navigator's movement signal announcing it.
+ * machine's history on every daemon start, then spend the visions's movement signal announcing it.
  *
  * SAFETY: every path is a throwaway temp directory injected through APPDATA, HOME and XDG_DATA_HOME, and
  * `platform` is passed explicitly, so no test here ever reads the operator's real shell history.

@@ -1,7 +1,7 @@
 'use strict';
 
 /*
- * The scaffolding every ephemeral lane (pr-review, posthog, pack-distill, navigator) shares: the map
+ * The scaffolding every ephemeral lane (pr-review, posthog, pack-distill, visions) shares: the map
  * registration, the wait-for-exit, the hard-timeout race, and the file-borne verdict reader. Each lane
  * keeps its own prompts, verdict sets and fallback wording; only the mechanics live here.
  */

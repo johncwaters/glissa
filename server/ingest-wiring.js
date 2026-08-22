@@ -1,5 +1,5 @@
 /*
- * Ingest lane IO shell (docs/plan-ingestion.md, M6), navigator-shaped: constructed only when
+ * Ingest lane IO shell (docs/plan-ingestion.md, M6), visions-shaped: constructed only when
  * config.ingest.enabled is true, `broadcast` injected, one connect-time snapshot repairing any client,
  * and a stop() that cancels every timer and detaches every tap.
  *
@@ -136,7 +136,7 @@ function createIngestLane({
     };
   }
 
-  // Synchronous by contract: the navigator builds this exactly once per dispatch, and a digest that
+  // Synchronous by contract: the visions builds this exactly once per dispatch, and a digest that
   // awaited between ring reads could describe two different moments.
   function buildDigest({ scopes = null, budgetChars = DEFAULT_DIGEST_BUDGET_CHARS, now = null } = {}) {
     return buildContextDigest(store, { scopes, budgetChars, now: now == null ? nowFn() : now });
@@ -161,8 +161,8 @@ function createIngestLane({
     ? createAgentLogIngest({
       publish,
       sourceConfig: resolved.sources.agentLogs,
-      // The feedback-loop exclusion: without it a navigator dispatch's own transcript rides into the
-      // next navigator prompt. See the mechanism note in ingest-agent-logs.js.
+      // The feedback-loop exclusion: without it a visions dispatch's own transcript rides into the
+      // next visions prompt. See the mechanism note in ingest-agent-logs.js.
       laneMap,
       logger,
       nowFn,

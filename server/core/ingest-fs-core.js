@@ -6,7 +6,7 @@
  *
  * COALESCING is the load-bearing piece. @parcel/watcher already coalesces in C++, but one `npm install`
  * still touches thousands of paths and one `git checkout` rewrites a working tree, and since M7.5 every
- * published event advances the navigator's movement signal, so a per-event publish would spend real
+ * published event advances the visions's movement signal, so a per-event publish would spend real
  * dispatch budget on churn nobody typed. Two bounds therefore sit here: one event per FILE per window,
  * and one event for the whole WINDOW once its file count says a burst happened rather than an edit.
  *
@@ -99,7 +99,7 @@ const IGNORED_FILE_NAMES = Object.freeze(['.DS_Store', 'Thumbs.db', 'desktop.ini
  * What the daemon itself writes beside its resolved config file. In a dev checkout that file IS the
  * in-repo config.json, so these sit inside a root a glissa session is working in, and the config save
  * that persists `resumeSessionId` fires on every hook of every turn. Without this the daemon's own
- * bookkeeping would publish an event that pokes the next navigator dispatch, which is the feedback loop
+ * bookkeeping would publish an event that pokes the next visions dispatch, which is the feedback loop
  * M7.5 made expensive rather than merely noisy.
  */
 const DAEMON_CONFIG_SIBLINGS = Object.freeze([
@@ -440,7 +440,7 @@ function sampleOf(batch) {
  * Under the file threshold each file gets its own line, which is what makes an ordinary edit readable.
  * Over it the window was a burst (an install, a checkout, a build), and one summarized event carries it:
  * the alternative is thousands of ring entries evicting everything else in the fs ring and thousands of
- * seq stamps telling the navigator the machine moved thousands of times for one action.
+ * seq stamps telling the visions the machine moved thousands of times for one action.
  */
 function decideFsEvents(batch, { root = null, now = 0 } = {}) {
   const total = batchSize(batch);

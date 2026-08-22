@@ -486,10 +486,10 @@ test('a Grok turn that completed with nothing held still says the turn ended', (
 // --- The workdir shape rule -----------------------------------------------
 
 test('a dispatch workdir is recognized as a raw cwd, an encoded dir name, and a percent-encoded one', () => {
-  const workDir = 'C:\\Users\\johnw\\AppData\\Local\\Temp\\glissa-navigator-AbC123';
+  const workDir = 'C:\\Users\\johnw\\AppData\\Local\\Temp\\glissa-visions-AbC123';
   assert.equal(isDispatchWorkdir(workDir), true, 'the raw cwd a line carries');
   assert.equal(
-    isDispatchWorkdir('C--Users-johnw-AppData-Local-Temp-glissa-navigator-AbC123'),
+    isDispatchWorkdir('C--Users-johnw-AppData-Local-Temp-glissa-visions-AbC123'),
     true,
     'the Claude project directory name, every separator collapsed to one dash',
   );
@@ -501,8 +501,8 @@ test('the shape rule is a segment match, so ordinary glissa paths are untouched'
     'C:\\Users\\johnw\\Projects\\glissa',
     'C--Users-johnw-Projects-glissa',
     'C--Users-johnw-Projects--glissa-worktrees-glissa-nC0h6B',
-    '/home/dev/glissa-navigator',
-    'glissanavigator-x',
+    '/home/dev/glissa-visions',
+    'glissavisions-x',
     null,
     '',
   ]) {

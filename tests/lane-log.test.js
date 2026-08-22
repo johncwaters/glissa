@@ -29,12 +29,12 @@ test('note and warn carry the prefix and go to their own logger channel', () => 
 // Every lane injects its own logger, and a partial one must not fault the caller.
 test('a logger missing a channel silently drops that level', () => {
   const notes = [];
-  const log = createLaneLog({ prefix: '[navigator]', logger: { log: (message) => notes.push(message) } });
+  const log = createLaneLog({ prefix: '[visions]', logger: { log: (message) => notes.push(message) } });
   log.warn('nowhere to go');
   log.note('kept');
-  assert.deepEqual(notes, ['[navigator] kept']);
+  assert.deepEqual(notes, ['[visions] kept']);
 
-  const silent = createLaneLog({ prefix: '[navigator]', logger: null });
+  const silent = createLaneLog({ prefix: '[visions]', logger: null });
   silent.note('no logger at all');
   silent.warn('no logger at all');
 });

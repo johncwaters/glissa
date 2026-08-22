@@ -21,7 +21,7 @@ function fakeConfigStore(cfg) {
     isUnchosenLaunchDefault: () => false, // no launch-default overlay in these fixtures
     getSettings: () => ({
       prReview: cfg.prReview || null,
-      navigator: cfg.navigator || null,
+      visions: cfg.visions || null,
       posthog: cfg.posthog || null,
       telegram: cfg.telegram || null,
       projectChoices: (cfg.projects || []).map((p) => ({ id: p.id, name: p.name })),
@@ -131,9 +131,9 @@ test('empty telegram strings persist as-is (means unset), key is not deleted', (
   assert.deepEqual(h.cfg.telegram, { botToken: '', chatId: '' });
 });
 
-test('a valid navigator payload persists and echoes in settings-updated', () => {
+test('a valid visions payload persists and echoes in settings-updated', () => {
   const h = harness({ projects: [], teams: [] });
-  const navigator = {
+  const visions = {
     enabled: true,
     autoFix: true,
     projects: ['p1', 'p2'],
@@ -164,33 +164,33 @@ test('a valid navigator payload persists and echoes in settings-updated', () => 
     },
   };
 
-  h.send({ type: 'update-settings', settings: { navigator } });
+  h.send({ type: 'update-settings', settings: { visions } });
 
-  assert.deepEqual(h.cfg.navigator, sanitized);
+  assert.deepEqual(h.cfg.visions, sanitized);
   const updated = h.sent.find((m) => m.type === 'settings-updated');
   assert.ok(updated, 'replied settings-updated');
-  assert.deepEqual(updated.settings.navigator, sanitized);
+  assert.deepEqual(updated.settings.visions, sanitized);
   assert.equal(h.reloadCalls.length, 1, 'settings reload still runs once');
 });
 
-test('navigator validation rejects wrong scalar types and ranges', () => {
+test('visions validation rejects wrong scalar types and ranges', () => {
   const cases = [
-    [{ enabled: 'yes' }, /navigator.enabled must be a boolean/],
-    [{ autoFix: 'yes' }, /navigator.autoFix must be a boolean/],
-    [{ projects: 'p1' }, /navigator.projects must be an array of strings/],
-    [{ projects: ['p1', 7] }, /navigator.projects must be an array of strings/],
-    [{ dispatch: 'on' }, /navigator.dispatch must be an object/],
-    [{ dispatch: { enabled: 'yes' } }, /navigator.dispatch.enabled must be a boolean/],
-    [{ dispatch: { quietMs: 0 } }, /navigator.dispatch.quietMs must be a positive number/],
-    [{ dispatch: { activityMaxPerHour: -1 } }, /navigator.dispatch.activityMaxPerHour must be zero or more/],
-    [{ dispatch: { model: 42 } }, /navigator.dispatch.model must be a string/],
+    [{ enabled: 'yes' }, /visions.enabled must be a boolean/],
+    [{ autoFix: 'yes' }, /visions.autoFix must be a boolean/],
+    [{ projects: 'p1' }, /visions.projects must be an array of strings/],
+    [{ projects: ['p1', 7] }, /visions.projects must be an array of strings/],
+    [{ dispatch: 'on' }, /visions.dispatch must be an object/],
+    [{ dispatch: { enabled: 'yes' } }, /visions.dispatch.enabled must be a boolean/],
+    [{ dispatch: { quietMs: 0 } }, /visions.dispatch.quietMs must be a positive number/],
+    [{ dispatch: { activityMaxPerHour: -1 } }, /visions.dispatch.activityMaxPerHour must be zero or more/],
+    [{ dispatch: { model: 42 } }, /visions.dispatch.model must be a string/],
   ];
-  for (const [navigator, pattern] of cases) {
+  for (const [visions, pattern] of cases) {
     const h = harness({ projects: [], teams: [] });
-    h.send({ type: 'update-settings', settings: { navigator } });
+    h.send({ type: 'update-settings', settings: { visions } });
     const err = h.sent.find((m) => m.type === 'settings-error');
-    assert.ok(pattern.test(err?.message || ''), `rejected ${JSON.stringify(navigator)}`);
-    assert.equal(h.cfg.navigator, undefined);
+    assert.ok(pattern.test(err?.message || ''), `rejected ${JSON.stringify(visions)}`);
+    assert.equal(h.cfg.visions, undefined);
   }
 });
 

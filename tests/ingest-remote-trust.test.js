@@ -2,7 +2,7 @@
 
 /*
  * Ingest frames never cross the remote listener (docs/plan-ingestion.md, "Privacy and trust posture":
- * the ingest lane is refused to remote-trust sockets exactly like the navigator lane). Captured
+ * the ingest lane is refused to remote-trust sockets exactly like the visions lane). Captured
  * terminal output is the most sensitive thing this daemon holds in memory, and a paired phone is a
  * device that is not the machine the output came from.
  *

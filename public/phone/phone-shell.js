@@ -11,10 +11,10 @@
 //   Radar    - the real Radar panel, re-parented in as a full screen
 //   PRs      - the real PRs panel, re-parented in as a full screen
 //   Usage    - the real Usage panel, re-parented in as a full screen
-//   Navigator - the real Navigator panel, re-parented in as a full screen
+//   Visions - the real Visions panel, re-parented in as a full screen
 //
 // Six elements are BORROWED from the desktop DOM rather than rebuilt: the review sidebar, the Radar,
-// PRs, Usage and Navigator panels, and the header controls the Board top bar adopts. Rebuilding any of
+// PRs, Usage and Visions panels, and the header controls the Board top bar adopts. Rebuilding any of
 // them would mean a second state pipeline for the same facts.
 
 import { STATES } from '/shared/states.mjs';
@@ -39,7 +39,7 @@ const SCREENS = Object.freeze([
   { id: 'radar', label: 'Radar', glyph: '◎', nested: true }, // ringed circle: a scan sweep
   { id: 'prs', label: 'PRs', glyph: '⇅', nested: true },     // opposed arrows: push and pull
   { id: 'usage', label: 'Usage', glyph: '◔', nested: true }, // part-filled circle: a consumption gauge
-  { id: 'navigator', label: 'Navigator', glyph: '◇', nested: true },
+  { id: 'visions', label: 'Visions', glyph: '◇', nested: true },
 ]);
 const MORE = 'more';
 
@@ -56,8 +56,8 @@ let prsMountEl = null;
 let prsPanelEl = null;
 let usageMountEl = null;
 let usagePanelEl = null;
-let navigatorMountEl = null;
-let navigatorPanelEl = null;
+let visionsMountEl = null;
+let visionsPanelEl = null;
 let moreButtonEl = null;
 let moreMenuEl = null;
 const menuButtonById = new Map();
@@ -230,7 +230,7 @@ function build() {
   radarMountEl = el('div', 'phone-radar');
   prsMountEl = el('div', 'phone-prs');
   usageMountEl = el('div', 'phone-usage');
-  navigatorMountEl = el('div', 'phone-navigator');
+  visionsMountEl = el('div', 'phone-visions');
 
   const screens = el('div', 'phone-screens');
   const contentByScreenId = {
@@ -240,7 +240,7 @@ function build() {
     radar: radarMountEl,
     prs: prsMountEl,
     usage: usageMountEl,
-    navigator: navigatorMountEl,
+    visions: visionsMountEl,
   };
   for (const screen of SCREENS) {
     screens.appendChild(wrapScreen(screen.id, screen.label, contentByScreenId[screen.id]));
@@ -402,7 +402,7 @@ export function mountPhoneShell(options) {
   radarPanelEl = hooks.radarPanelEl || null;
   prsPanelEl = hooks.prsPanelEl || null;
   usagePanelEl = hooks.usagePanelEl || null;
-  navigatorPanelEl = hooks.navigatorPanelEl || null;
+  visionsPanelEl = hooks.visionsPanelEl || null;
 }
 
 // `sessionId` is the session the desktop Focus center was holding, if any. It is pre-loaded into the
@@ -424,8 +424,8 @@ export function activatePhoneShell({ sessionId } = {}) {
   if (prsPanelEl) prsPanelEl.hidden = false;
   adoptElement(usagePanelEl, usageMountEl);
   if (usagePanelEl) usagePanelEl.hidden = false;
-  adoptElement(navigatorPanelEl, navigatorMountEl);
-  if (navigatorPanelEl) navigatorPanelEl.hidden = false;
+  adoptElement(visionsPanelEl, visionsMountEl);
+  if (visionsPanelEl) visionsPanelEl.hidden = false;
   syncVisualViewport();
   if (sessionId) terminalScreen.show(sessionId);
   // Reconcile history BEFORE opening a screen, so the flag and the stack agree from the first tap.
@@ -444,7 +444,7 @@ export function deactivatePhoneShell() {
   releaseElement(radarPanelEl);
   releaseElement(prsPanelEl);
   releaseElement(usagePanelEl);
-  releaseElement(navigatorPanelEl);
+  releaseElement(visionsPanelEl);
   for (const control of (hooks.headerControls || [])) releaseElement(control);
   setMoreMenuOpen(false);
   shellEl.hidden = true;

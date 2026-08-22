@@ -3,7 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { sweepMarkdown } = require('../server/core/navigator-rules-core');
+const { sweepMarkdown } = require('../server/core/visions-rules-core');
 
 function byCode(diagnostics, code) {
   return diagnostics.filter((diagnostic) => diagnostic.code === code);
@@ -18,7 +18,7 @@ test('sweepMarkdown reports repeated second word with an exact range', () => {
     end: { line: 0, character: 15 },
   });
   assert.equal(repeated[0].severity, 2);
-  assert.equal(repeated[0].source, 'glissa-navigator');
+  assert.equal(repeated[0].source, 'glissa-visions');
 });
 
 test('sweepMarkdown skips repeated words in inline code spans', () => {

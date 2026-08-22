@@ -3,7 +3,7 @@
  * through, mirroring server/core/usage-number-core.js for the usage lane. Six modules held a
  * byte-identical four-line copy of this before it was extracted.
  *
- * server/core/navigator-dispatch-core.js requires it too: the navigator gate resolves its quotas the
+ * server/core/visions-dispatch-core.js requires it too: the visions gate resolves its quotas the
  * same way, and one shared helper beats a seventh copy in a neighbouring lane.
  */
 

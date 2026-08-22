@@ -242,7 +242,7 @@ test('editor scratch and OS droppings never reach the batcher', () => {
 /*
  * The feedback loop this closes: in a dev checkout the resolved config file IS the repo's own
  * config.json, and the daemon writes it on every hook that carries a Claude session id. Since M7.5 every
- * published event advances the navigator's movement signal, so glissa's own bookkeeping would poke the
+ * published event advances the visions's movement signal, so glissa's own bookkeeping would poke the
  * next dispatch, once per turn, forever.
  */
 test('the daemon\'s own writes beside its config file are not project activity', () => {
@@ -273,7 +273,7 @@ test('the daemon\'s own writes beside its config file are not project activity',
  * content-changing save writes `<config>.bak`, boot writes `<config>.boot.bak`, a parse failure writes
  * `<config>.invalid.bak`, and every save stages through `<config>.tmp.<pid>`, whose pid is new each run.
  * `config.json.bak` is not INSIDE `config.json`, so before the prefix rule a wasActive flip published
- * "updated config.json.bak" and spent navigator movement signal once per turn in a dev checkout.
+ * "updated config.json.bak" and spent visions movement signal once per turn in a dev checkout.
  */
 test('the backup and temp files config-store derives from the config name are refused too', () => {
   const daemonRules = daemonWriteRules(path.join(ROOT, 'config.json'));

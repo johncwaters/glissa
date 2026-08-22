@@ -1,7 +1,7 @@
 /*
  * Pure core of the ingestion pipeline (docs/plan-ingestion.md, M6): the config resolver, event
  * normalization, the publish-time scrub, the per-source bounded rings, and the context digest the
- * navigator's dispatch prompt carries. No IO, no timers, no clock: the caller passes `now` in and gets
+ * visions's dispatch prompt carries. No IO, no timers, no clock: the caller passes `now` in and gets
  * a verdict, an event, or a string back.
  *
  * The scrub runs HERE, at publish time, before ring insertion, so a secret never sits in a ring, a
@@ -95,7 +95,7 @@ function resolveSource(name, raw) {
 }
 
 /**
- * config.ingest, normalized, navigator-style: absent, malformed, or anything other than
+ * config.ingest, normalized, visions-style: absent, malformed, or anything other than
  * `enabled: true` resolves to the disabled shape, and each source needs its own `enabled: true` on top
  * of that. This is what makes the lane cost nothing until it is asked for.
  */
@@ -394,7 +394,7 @@ function matchesScopes(event, scopes) {
 }
 
 /**
- * The cross-source context section, built exactly once per navigator dispatch. Synchronous and pure:
+ * The cross-source context section, built exactly once per visions dispatch. Synchronous and pure:
  * one pass over the rings with no await between reads, newest first by seq, a per-source quota so one
  * noisy source cannot starve the rest, and a hard char budget. Empty rings produce an empty string,
  * which every consumer renders as absent.

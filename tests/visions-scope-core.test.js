@@ -7,7 +7,7 @@ const {
   pathOfFileUri,
   normalizeShapePath,
   isUriInProjects,
-} = require('../server/core/navigator-scope-core');
+} = require('../server/core/visions-scope-core');
 
 test('pathOfFileUri normalizes plain and percent-encoded file uris', () => {
   assert.equal(pathOfFileUri('file:///home/me/project/README.md'), '/home/me/project/README.md');

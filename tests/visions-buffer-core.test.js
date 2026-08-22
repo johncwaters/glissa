@@ -12,7 +12,7 @@ const {
   getDoc,
   listDocs,
   uriOfParams,
-} = require('../server/core/navigator-buffer-core');
+} = require('../server/core/visions-buffer-core');
 
 function openDoc(store, uri, text, version = 1) {
   return applyDidOpen(store, {

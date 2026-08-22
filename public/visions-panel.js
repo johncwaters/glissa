@@ -1,23 +1,23 @@
-// ── Navigator view ───────────────────────────────────────────
-// What the navigator lane currently believes and currently sees: the intent model at the top (the one
+// ── Visions view ───────────────────────────────────────────
+// What the visions lane currently believes and currently sees: the intent model at the top (the one
 // statement of what is being built, correctable right there), then one section per open document that has
 // something to say: one row per tier 2 finding, one card per tier 3 model comment. Fed by four control-WS
-// messages, `navigator-findings` and `navigator-comments` (one uri each, pushed whenever a sweep publishes
-// or a dispatch lands, an empty array clearing that uri), `navigator-intent` (the whole statement, pushed
-// whenever it moves) and `navigator-snapshot` (the whole map plus the intent, sent to every client on
+// messages, `visions-findings` and `visions-comments` (one uri each, pushed whenever a sweep publishes
+// or a dispatch lands, an empty array clearing that uri), `visions-intent` (the whole statement, pushed
+// whenever it moves) and `visions-snapshot` (the whole map plus the intent, sent to every client on
 // connect so a reconnect repairs rather than accumulates).
 //
-// The phone layout borrows this panel as its Navigator screen. The grouping, ordering and wording live
-// in navigator-view-core.mjs.
+// The phone layout borrows this panel as its Visions screen. The grouping, ordering and wording live
+// in visions-view-core.mjs.
 
 import { sendControlMsg } from './control-ws.js';
 import { el, isPanelHidden } from './dom-helpers.js';
 import {
   INGEST_EMPTY_TEXT,
-  NAVIGATOR_EMPTY_TEXT,
-  NAVIGATOR_FIXES_EMPTY_TEXT,
-  NAVIGATOR_INTENT_EMPTY_TEXT,
-  NAVIGATOR_INTENT_MAX_CHARS,
+  VISIONS_EMPTY_TEXT,
+  VISIONS_FIXES_EMPTY_TEXT,
+  VISIONS_INTENT_EMPTY_TEXT,
+  VISIONS_INTENT_MAX_CHARS,
   activityAgeText,
   activityCountText,
   activityOverflowCount,
@@ -49,14 +49,14 @@ import {
   hasIntentChanged,
   intentMetaText,
   intentOfMessage,
-  navigatorHandText,
-  navigatorSections,
+  visionsHandText,
+  visionsSections,
   sectionCountText,
   shouldAdoptIntentText,
   totalCommentCount,
   totalFindingCount,
   totalHandCount,
-} from './navigator-view-core.mjs';
+} from './visions-view-core.mjs';
 
 let _findingsByUri = new Map();
 let _commentsByUri = new Map();
@@ -89,24 +89,24 @@ let _unseen = false;
  * statement and hand control back to the model.
  */
 function buildIntentBlock() {
-  const section = el('section', 'navigator-intent');
-  const head = el('div', 'navigator-intent-head');
-  head.append(el('h2', 'navigator-intent-title', 'Intent'));
-  const meta = el('span', 'navigator-intent-meta');
+  const section = el('section', 'visions-intent');
+  const head = el('div', 'visions-intent-head');
+  head.append(el('h2', 'visions-intent-title', 'Intent'));
+  const meta = el('span', 'visions-intent-meta');
   head.append(meta);
   section.append(head);
 
   // Model text and operator text alike: built as text, never markup.
-  const statement = el('p', 'navigator-intent-text');
+  const statement = el('p', 'visions-intent-text');
   section.append(statement);
 
-  const form = el('form', 'navigator-intent-form');
-  const input = el('input', 'navigator-intent-input');
+  const form = el('form', 'visions-intent-form');
+  const input = el('input', 'visions-intent-input');
   input.type = 'text';
-  input.maxLength = NAVIGATOR_INTENT_MAX_CHARS;
+  input.maxLength = VISIONS_INTENT_MAX_CHARS;
   input.placeholder = 'What are you building?';
   input.setAttribute('aria-label', 'Working intent');
-  const submit = el('button', 'navigator-intent-submit', 'Set intent');
+  const submit = el('button', 'visions-intent-submit', 'Set intent');
   submit.type = 'submit';
   form.append(input, submit);
   form.addEventListener('submit', (event) => {
@@ -124,15 +124,15 @@ function submitIntent() {
   if (!_intentUI) return;
   const text = _intentUI.input.value;
   _adoptedIntentText = text;
-  sendControlMsg({ type: 'navigator-set-intent', text });
+  sendControlMsg({ type: 'visions-set-intent', text });
 }
 
 function renderIntent() {
   if (!_intentUI) return;
   const { meta, statement, input } = _intentUI;
   meta.textContent = intentMetaText(_intent);
-  statement.textContent = _intent.text || NAVIGATOR_INTENT_EMPTY_TEXT;
-  statement.classList.toggle('navigator-intent-none', !_intent.text);
+  statement.textContent = _intent.text || VISIONS_INTENT_EMPTY_TEXT;
+  statement.classList.toggle('visions-intent-none', !_intent.text);
   const adopt = shouldAdoptIntentText({
     focused: document.activeElement === input,
     currentValue: input.value,
@@ -145,23 +145,23 @@ function renderIntent() {
 }
 
 function buildSection(section) {
-  const wrap = el('section', 'navigator-doc');
-  const head = el('div', 'navigator-doc-head');
+  const wrap = el('section', 'visions-doc');
+  const head = el('div', 'visions-doc-head');
   // Buffer paths come from an editor: built as text, never markup.
-  const name = el('h2', 'navigator-doc-name');
+  const name = el('h2', 'visions-doc-name');
   name.textContent = section.name;
   name.title = section.uri;
-  head.append(name, el('span', 'navigator-doc-count', sectionCountText(section)));
+  head.append(name, el('span', 'visions-doc-count', sectionCountText(section)));
   wrap.append(head);
 
   if (section.hand) wrap.append(buildHandBanner(section.hand));
   if (section.findings.length > 0) {
-    const list = el('div', 'navigator-findings');
+    const list = el('div', 'visions-findings');
     for (const finding of section.findings) list.append(buildFindingRow(finding));
     wrap.append(list);
   }
   if (section.comments.length > 0) {
-    const cards = el('div', 'navigator-comments');
+    const cards = el('div', 'visions-comments');
     for (const comment of section.comments) cards.append(buildCommentCard(comment));
     wrap.append(cards);
   }
@@ -169,32 +169,32 @@ function buildSection(section) {
 }
 
 function buildHandBanner(hand) {
-  const banner = el('div', 'navigator-hand');
-  banner.textContent = navigatorHandText(hand);
+  const banner = el('div', 'visions-hand');
+  banner.textContent = visionsHandText(hand);
   return banner;
 }
 
 // A tier 3 card, deliberately unlike a tier 2 row: a chip naming who is talking, then a sentence.
 function buildCommentCard(comment) {
-  const card = el('div', 'navigator-comment');
-  const head = el('div', 'navigator-comment-head');
-  head.append(el('span', 'navigator-comment-chip', 'navigator'));
-  head.append(el('span', 'navigator-comment-line', commentLineLabel(comment)));
+  const card = el('div', 'visions-comment');
+  const head = el('div', 'visions-comment-head');
+  head.append(el('span', 'visions-comment-chip', 'visions'));
+  head.append(el('span', 'visions-comment-line', commentLineLabel(comment)));
   card.append(head);
   // Model text about the carbon unit's own prose: built as text, never markup.
-  const message = el('p', 'navigator-comment-message');
+  const message = el('p', 'visions-comment-message');
   message.textContent = comment?.message == null ? '' : String(comment.message);
   card.append(message);
   return card;
 }
 
 function buildFindingRow(finding) {
-  const row = el('div', 'navigator-finding');
-  row.append(el('span', 'navigator-finding-line', findingLineLabel(finding)));
+  const row = el('div', 'visions-finding');
+  row.append(el('span', 'visions-finding-line', findingLineLabel(finding)));
   const code = finding?.code == null ? '' : String(finding.code);
-  if (code) row.append(el('span', 'navigator-finding-code', code));
+  if (code) row.append(el('span', 'visions-finding-code', code));
   // Rule messages quote the carbon unit's own prose back at them: text, never markup.
-  const message = el('span', 'navigator-finding-message');
+  const message = el('span', 'visions-finding-message');
   message.textContent = finding?.message == null ? '' : String(finding.message);
   row.append(message);
   return row;
@@ -206,10 +206,10 @@ function render({ force = false } = {}) {
   if (!_feed) return;
   if (!force && isPanelHidden(_root)) return;
   _feed.textContent = '';
-  const sections = navigatorSections(_findingsByUri, _commentsByUri, _handsByUri);
+  const sections = visionsSections(_findingsByUri, _commentsByUri, _handsByUri);
   // The bare hint, with no section chrome to make an idle lane look like a broken one (Radar's precedent).
   if (sections.length === 0) {
-    _feed.append(el('p', 'navigator-empty', NAVIGATOR_EMPTY_TEXT));
+    _feed.append(el('p', 'visions-empty', VISIONS_EMPTY_TEXT));
     return;
   }
   for (const section of sections) _feed.append(buildSection(section));
@@ -221,27 +221,27 @@ function render({ force = false } = {}) {
  * beside the title rather than anything clickable.
  */
 function buildActivityBlock() {
-  const section = el('section', 'navigator-activity');
-  const head = el('div', 'navigator-activity-head');
-  head.append(el('h2', 'navigator-activity-title', 'Activity'));
-  const count = el('span', 'navigator-activity-count');
+  const section = el('section', 'visions-activity');
+  const head = el('div', 'visions-activity-head');
+  head.append(el('h2', 'visions-activity-title', 'Activity'));
+  const count = el('span', 'visions-activity-count');
   head.append(count);
   section.append(head);
-  const list = el('div', 'navigator-activity-list');
+  const list = el('div', 'visions-activity-list');
   section.append(list);
-  const overflow = el('p', 'navigator-activity-overflow');
+  const overflow = el('p', 'visions-activity-overflow');
   section.append(overflow);
   _activityUI = { count, list, overflow };
   return section;
 }
 
 function buildActivityRow(event, now) {
-  const row = el('div', 'navigator-activity-row');
-  row.append(el('span', 'navigator-activity-source', activitySourceLabel(event.source)));
-  row.append(el('span', 'navigator-activity-age', activityAgeText(event.ts, now)));
-  row.append(el('span', 'navigator-activity-scope', activityScopeText(event)));
+  const row = el('div', 'visions-activity-row');
+  row.append(el('span', 'visions-activity-source', activitySourceLabel(event.source)));
+  row.append(el('span', 'visions-activity-age', activityAgeText(event.ts, now)));
+  row.append(el('span', 'visions-activity-scope', activityScopeText(event)));
   // Captured output about whatever the carbon unit was doing: built as text, never markup.
-  const summary = el('span', 'navigator-activity-summary');
+  const summary = el('span', 'visions-activity-summary');
   summary.textContent = event.summary;
   row.append(summary);
   return row;
@@ -254,7 +254,7 @@ function renderActivity({ force = false } = {}) {
   count.textContent = activityCountText(_activityEvents.length);
   list.textContent = '';
   if (_activityEvents.length === 0) {
-    list.append(el('p', 'navigator-empty', INGEST_EMPTY_TEXT));
+    list.append(el('p', 'visions-empty', INGEST_EMPTY_TEXT));
     overflow.textContent = '';
     return;
   }
@@ -268,31 +268,31 @@ function renderActivity({ force = false } = {}) {
  * It carries no controls either, so the head's count is status text beside the title.
  */
 function buildFixesBlock() {
-  const section = el('section', 'navigator-fixes');
-  const head = el('div', 'navigator-fixes-head');
-  head.append(el('h2', 'navigator-fixes-title', 'Fixes'));
-  const count = el('span', 'navigator-fixes-count');
+  const section = el('section', 'visions-fixes');
+  const head = el('div', 'visions-fixes-head');
+  head.append(el('h2', 'visions-fixes-title', 'Fixes'));
+  const count = el('span', 'visions-fixes-count');
   head.append(count);
   section.append(head);
-  const list = el('div', 'navigator-fixes-list');
+  const list = el('div', 'visions-fixes-list');
   section.append(list);
   _fixUI = { count, list };
   return section;
 }
 
 function buildFixRow(entry) {
-  const row = el('div', 'navigator-fix-row');
+  const row = el('div', 'visions-fix-row');
   row.dataset.applied = entry.applied ? 'yes' : 'no';
   // Buffer paths come from an editor: built as text, never markup.
-  const file = el('span', 'navigator-fix-file');
+  const file = el('span', 'visions-fix-file');
   file.textContent = basenameOfUri(entry.uri) || entry.uri;
   file.title = entry.uri;
   row.append(file);
-  row.append(el('span', 'navigator-fix-line', fixLineLabel(entry)));
-  row.append(el('span', 'navigator-fix-outcome', fixOutcomeText(entry)));
-  row.append(el('span', 'navigator-fix-code', entry.code || ''));
+  row.append(el('span', 'visions-fix-line', fixLineLabel(entry)));
+  row.append(el('span', 'visions-fix-outcome', fixOutcomeText(entry)));
+  row.append(el('span', 'visions-fix-code', entry.code || ''));
   // Rule messages quote the carbon unit's own prose back at them: text, never markup.
-  const message = el('span', 'navigator-fix-message');
+  const message = el('span', 'visions-fix-message');
   message.textContent = entry.message;
   row.append(message);
   return row;
@@ -305,7 +305,7 @@ function renderFixes({ force = false } = {}) {
   count.textContent = fixCountText(_fixEntries.length);
   list.textContent = '';
   if (_fixEntries.length === 0) {
-    list.append(el('p', 'navigator-empty', NAVIGATOR_FIXES_EMPTY_TEXT));
+    list.append(el('p', 'visions-empty', VISIONS_FIXES_EMPTY_TEXT));
     return;
   }
   for (const entry of _fixEntries) list.append(buildFixRow(entry));
@@ -323,16 +323,16 @@ function noteArrival(arrived) {
 }
 
 // The tab-activity seam (defined in pr-panel.js): the view owns the condition, app.js owns the dot element.
-export function setNavigatorActivityCallback(callback) {
+export function setVisionsActivityCallback(callback) {
   _activityCallback = callback;
   refreshActivity();
 }
 
-export function mountNavigatorView(parent) {
+export function mountVisionsView(parent) {
   if (_root) return _root;
-  const root = el('div', 'navigator-content');
+  const root = el('div', 'visions-content');
   root.append(buildIntentBlock());
-  const feed = el('div', 'navigator-feed');
+  const feed = el('div', 'visions-feed');
   root.append(feed);
   root.append(buildFixesBlock());
   root.append(buildActivityBlock());
@@ -346,8 +346,8 @@ export function mountNavigatorView(parent) {
   return root;
 }
 
-// Called when the Navigator surface becomes visible: seeing the findings is what clears the dot.
-export function refreshNavigatorView() {
+// Called when the Visions surface becomes visible: seeing the findings is what clears the dot.
+export function refreshVisionsView() {
   _unseen = false;
   refreshActivity();
   renderIntent();
@@ -357,29 +357,29 @@ export function refreshNavigatorView() {
 }
 
 // Tier 1: one edit the lane applied, or tried to and was refused. Both are news worth the dot.
-export function applyNavigatorFix(msg) {
+export function applyVisionsFix(msg) {
   _fixEntries = applyFixMessage(_fixEntries, msg);
   noteArrival(hasFix(msg));
   renderFixes();
   refreshActivity();
 }
 
-export function applyNavigatorFindings(msg) {
+export function applyVisionsFindings(msg) {
   _findingsByUri = applyFindingsMessage(_findingsByUri, msg);
   noteArrival(hasFindings(msg));
   render();
   refreshActivity();
 }
 
-// Tier 3: what a navigator dispatch had to say about one buffer, replacing that uri's cards whole.
-export function applyNavigatorComments(msg) {
+// Tier 3: what a visions dispatch had to say about one buffer, replacing that uri's cards whole.
+export function applyVisionsComments(msg) {
   _commentsByUri = applyCommentsMessage(_commentsByUri, msg);
   noteArrival(hasComments(msg));
   render();
   refreshActivity();
 }
 
-export function applyNavigatorHand(msg) {
+export function applyVisionsHand(msg) {
   _handsByUri = applyHandMessage(_handsByUri, msg);
   noteArrival(hasHand(msg));
   render();
@@ -387,10 +387,10 @@ export function applyNavigatorHand(msg) {
 }
 
 /*
- * The intent model moved. A model proposal is navigator output and raises the dot; the operator's own
+ * The intent model moved. A model proposal is visions output and raises the dot; the operator's own
  * correction is not news to the operator, so it does not.
  */
-export function applyNavigatorIntent(msg) {
+export function applyVisionsIntent(msg) {
   const next = intentOfMessage(msg);
   const moved = hasIntentChanged(_intent, next);
   _intent = next;
@@ -421,7 +421,7 @@ export function applyIngestSnapshot(msg) {
 }
 
 // Connect-time repair: the server's whole current map, replacing this tab's rather than merging into it.
-export function applyNavigatorSnapshot(msg) {
+export function applyVisionsSnapshot(msg) {
   _findingsByUri = applyFindingsSnapshot(msg);
   _commentsByUri = applyCommentsSnapshot(msg);
   _handsByUri = applyHandSnapshot(msg);

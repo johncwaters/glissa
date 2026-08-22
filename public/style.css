@@ -3277,10 +3277,10 @@ a.pr-title:hover {
   background: var(--accent);
 }
 
-/* ── Navigator view ─────────────────────────────────────────── */
+/* ── Visions view ─────────────────────────────────────────── */
 /* Same page rhythm and tokens as the Radar, PR and Usage views. Its own selectors because a finding is a
    three-part line (where, which rule, what) rather than an attention row or a numeric cell. */
-.navigator-view {
+.visions-view {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
@@ -3293,7 +3293,7 @@ a.pr-title:hover {
   color: var(--text-dim);
 }
 
-.navigator-content {
+.visions-content {
   max-width: 1080px;
   margin: 0 auto;
   display: flex;
@@ -3303,7 +3303,7 @@ a.pr-title:hover {
 
 /* The intent model sits above the feed because everything below it is downstream of being right. It is
    the only writable thing in this view, so it gets a surface and the documents stay bare rows. */
-.navigator-intent {
+.visions-intent {
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -3313,25 +3313,25 @@ a.pr-title:hover {
   background: var(--bg-surface);
 }
 
-.navigator-intent-head {
+.visions-intent-head {
   display: flex;
   align-items: baseline;
   gap: 10px;
 }
 
-.navigator-intent-title {
+.visions-intent-title {
   margin: 0;
   font-size: 12px;
   font-weight: 600;
   color: var(--text-head);
 }
 
-.navigator-intent-meta {
+.visions-intent-meta {
   font-size: 10px;
   color: var(--text-muted);
 }
 
-.navigator-intent-text {
+.visions-intent-text {
   margin: 0;
   color: var(--text);
   line-height: 1.55;
@@ -3339,18 +3339,18 @@ a.pr-title:hover {
 }
 
 /* The empty state is a hint, not a statement, so it reads at hint weight. */
-.navigator-intent-none {
+.visions-intent-none {
   color: var(--text-muted);
   font-size: 11px;
 }
 
-.navigator-intent-form {
+.visions-intent-form {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-.navigator-intent-input {
+.visions-intent-input {
   flex: 1 1 auto;
   min-width: 0;
   padding: 5px 8px;
@@ -3362,12 +3362,12 @@ a.pr-title:hover {
   font-size: 12px;
 }
 
-.navigator-intent-input:focus {
+.visions-intent-input:focus {
   outline: none;
   border-color: var(--border);
 }
 
-.navigator-intent-submit {
+.visions-intent-submit {
   flex: 0 0 auto;
   padding: 5px 12px;
   border: 1px solid var(--border-dim);
@@ -3379,24 +3379,24 @@ a.pr-title:hover {
   cursor: pointer;
 }
 
-.navigator-intent-submit:hover {
+.visions-intent-submit:hover {
   color: var(--text);
   border-color: var(--border);
 }
 
-.navigator-feed {
+.visions-feed {
   display: flex;
   flex-direction: column;
   gap: 22px;
 }
 
-.navigator-doc {
+.visions-doc {
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
-.navigator-doc-head {
+.visions-doc-head {
   display: flex;
   align-items: baseline;
   gap: 8px;
@@ -3405,7 +3405,7 @@ a.pr-title:hover {
 }
 
 /* The file name is the thing being scanned for, so it takes the weight; the full uri is the title. */
-.navigator-doc-name {
+.visions-doc-name {
   margin: 0;
   min-width: 0;
   overflow: hidden;
@@ -3416,13 +3416,13 @@ a.pr-title:hover {
   color: var(--text-head);
 }
 
-.navigator-doc-count {
+.visions-doc-count {
   flex: 0 0 auto;
   font-size: 10px;
   color: var(--text-muted);
 }
 
-.navigator-hand {
+.visions-hand {
   border: 1px solid color-mix(in oklab, var(--accent) 48%, var(--border));
   border-left: 3px solid var(--accent);
   border-radius: 4px;
@@ -3433,13 +3433,13 @@ a.pr-title:hover {
   line-height: 1.5;
 }
 
-.navigator-findings {
+.visions-findings {
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
 
-.navigator-finding {
+.visions-finding {
   display: flex;
   align-items: baseline;
   gap: 10px;
@@ -3448,14 +3448,14 @@ a.pr-title:hover {
 }
 
 /* Fixed width and tabular figures so the line numbers form a column the eye can run down. */
-.navigator-finding-line {
+.visions-finding-line {
   flex: 0 0 auto;
   min-width: 4ch;
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
 }
 
-.navigator-finding-code {
+.visions-finding-code {
   flex: 0 0 auto;
   padding: 1px 6px;
   border: 1px solid var(--border-dim);
@@ -3464,21 +3464,21 @@ a.pr-title:hover {
   color: var(--text-muted);
 }
 
-.navigator-finding-message {
+.visions-finding-message {
   min-width: 0;
   color: var(--text);
 }
 
 /* Tier 3 is a card, not a row: a model comment is a paragraph offered at a pause, and it must never be
    mistaken for the rule-based finding lines above it. The rail carries the distinction cheaply. */
-.navigator-comments {
+.visions-comments {
   display: flex;
   flex-direction: column;
   gap: 8px;
   margin-top: 4px;
 }
 
-.navigator-comment {
+.visions-comment {
   border-left: 2px solid var(--border);
   border-radius: 0 3px 3px 0;
   background: var(--bg-surface);
@@ -3488,14 +3488,14 @@ a.pr-title:hover {
   gap: 4px;
 }
 
-.navigator-comment-head {
+.visions-comment-head {
   display: flex;
   align-items: baseline;
   gap: 8px;
 }
 
 /* Muted and lowercase: it names who is talking, it is not a badge asking to be read first. */
-.navigator-comment-chip {
+.visions-comment-chip {
   padding: 1px 6px;
   border: 1px solid var(--border-dim);
   border-radius: 3px;
@@ -3504,20 +3504,20 @@ a.pr-title:hover {
   color: var(--text-muted);
 }
 
-.navigator-comment-line {
+.visions-comment-line {
   font-size: 10px;
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
 }
 
-.navigator-comment-message {
+.visions-comment-message {
   margin: 0;
   color: var(--text);
   line-height: 1.55;
   max-width: 78ch;
 }
 
-.navigator-empty {
+.visions-empty {
   margin: 0;
   color: var(--text-muted);
   font-size: 11px;
@@ -3527,13 +3527,13 @@ a.pr-title:hover {
 
 /* The tier 1 changelog sits between the findings and the activity feed: what the lane silently changed,
    under what it has to say and above what it can see. A refused row is dimmed, never hidden. */
-.navigator-fixes {
+.visions-fixes {
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
-.navigator-fixes-head {
+.visions-fixes-head {
   display: flex;
   align-items: baseline;
   gap: 10px;
@@ -3541,26 +3541,26 @@ a.pr-title:hover {
   border-bottom: 1px solid var(--border-dim);
 }
 
-.navigator-fixes-title {
+.visions-fixes-title {
   margin: 0;
   font-size: 12px;
   font-weight: 600;
   color: var(--text-head);
 }
 
-.navigator-fixes-count {
+.visions-fixes-count {
   font-size: 10px;
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
 }
 
-.navigator-fixes-list {
+.visions-fixes-list {
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
 
-.navigator-fix-row {
+.visions-fix-row {
   display: grid;
   grid-template-columns: 96px 40px 56px 96px 1fr;
   align-items: baseline;
@@ -3569,11 +3569,11 @@ a.pr-title:hover {
   line-height: 1.5;
 }
 
-.navigator-fix-row[data-applied='no'] {
+.visions-fix-row[data-applied='no'] {
   opacity: 0.65;
 }
 
-.navigator-fix-file {
+.visions-fix-file {
   font-size: 10px;
   color: var(--text-dim);
   grid-column: 1;
@@ -3582,21 +3582,21 @@ a.pr-title:hover {
   white-space: nowrap;
 }
 
-.navigator-fix-line {
+.visions-fix-line {
   font-size: 10px;
   color: var(--text-muted);
   grid-column: 2;
   font-variant-numeric: tabular-nums;
 }
 
-.navigator-fix-outcome {
+.visions-fix-outcome {
   font-size: 10px;
   color: var(--text-muted);
   grid-column: 3;
   letter-spacing: 0.04em;
 }
 
-.navigator-fix-code {
+.visions-fix-code {
   font-size: 10px;
   color: var(--text-muted);
   grid-column: 4;
@@ -3605,21 +3605,21 @@ a.pr-title:hover {
   white-space: nowrap;
 }
 
-.navigator-fix-message {
+.visions-fix-message {
   color: var(--text);
   grid-column: 5;
   overflow-wrap: anywhere;
 }
 
-/* The ingest activity feed sits below the findings: what the navigator can currently SEE, under what it
+/* The ingest activity feed sits below the findings: what the visions can currently SEE, under what it
    currently has to say about it. Rows are bounded in the panel, so this list never grows without end. */
-.navigator-activity {
+.visions-activity {
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
-.navigator-activity-head {
+.visions-activity-head {
   display: flex;
   align-items: baseline;
   gap: 10px;
@@ -3627,26 +3627,26 @@ a.pr-title:hover {
   border-bottom: 1px solid var(--border-dim);
 }
 
-.navigator-activity-title {
+.visions-activity-title {
   margin: 0;
   font-size: 12px;
   font-weight: 600;
   color: var(--text-head);
 }
 
-.navigator-activity-count {
+.visions-activity-count {
   font-size: 10px;
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
 }
 
-.navigator-activity-list {
+.visions-activity-list {
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
 
-.navigator-activity-row {
+.visions-activity-row {
   display: grid;
   grid-template-columns: 64px 56px 96px 1fr;
   align-items: baseline;
@@ -3655,19 +3655,19 @@ a.pr-title:hover {
   line-height: 1.5;
 }
 
-.navigator-activity-source {
+.visions-activity-source {
   font-size: 10px;
   color: var(--text-muted);
   letter-spacing: 0.04em;
 }
 
-.navigator-activity-age {
+.visions-activity-age {
   font-size: 10px;
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
 }
 
-.navigator-activity-scope {
+.visions-activity-scope {
   font-size: 10px;
   color: var(--text-dim);
   overflow: hidden;
@@ -3676,18 +3676,18 @@ a.pr-title:hover {
 }
 
 /* Captured output is often one long line; it wraps rather than widening the panel. */
-.navigator-activity-summary {
+.visions-activity-summary {
   color: var(--text);
   overflow-wrap: anywhere;
 }
 
-.navigator-activity-overflow {
+.visions-activity-overflow {
   margin: 0;
   font-size: 10px;
   color: var(--text-muted);
 }
 
-/* ── Primary view tabs (Focus / Radar / PRs / Usage / Navigator) ───────── */
+/* ── Primary view tabs (Focus / Radar / PRs / Usage / Visions) ───────── */
 .header-left {
   display: flex;
   align-items: center;
@@ -5086,7 +5086,7 @@ html[data-layout="phone"] .phone-shell[data-keyboard="open"] .phone-key-strip:no
 .phone-radar,
 .phone-prs,
 .phone-usage,
-.phone-navigator { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.phone-visions { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
 /* The docked column's fixed flex basis is meaningless as a full screen, and there is no neighbour to
    resize against or border off. */
 .phone-review > .app-sidebar { flex: 1 1 auto; border-left: none; }
@@ -5095,7 +5095,7 @@ html[data-layout="phone"] .review-sidebar-body { overscroll-behavior: contain; }
 .phone-radar > .radar-view,
 .phone-prs > .pr-view,
 .phone-usage > .usage-view,
-.phone-navigator > .navigator-view { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.phone-visions > .visions-view { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 /* ── Usage on a phone ──
    The desktop page is numeric tables at 11px, which is unreadable on a phone but does not need
    restructuring the way the Radar rows did: each table already scrolls inside its own box, so the phone
@@ -5134,25 +5134,25 @@ html[data-layout="phone"] .usage-block-label { min-width: 11ch; }
 /* Model ids and project names are long; on a phone they wrap instead of clipping to an unreadable stub. */
 html[data-layout="phone"] .usage-model-cell,
 html[data-layout="phone"] .usage-session-cell { max-width: 28ch; min-width: 18ch; white-space: normal; overflow-wrap: break-word; }
-html[data-layout="phone"] .navigator-view {
+html[data-layout="phone"] .visions-view {
   max-width: none;
   padding: 14px 12px 24px;
   font-size: 12px;
 }
-html[data-layout="phone"] .navigator-content { gap: 18px; }
-html[data-layout="phone"] .navigator-intent { padding: 12px; }
-html[data-layout="phone"] .navigator-intent-head,
-html[data-layout="phone"] .navigator-doc-head,
-html[data-layout="phone"] .navigator-activity-head { flex-wrap: wrap; gap: 4px 8px; }
-html[data-layout="phone"] .navigator-intent-title,
-html[data-layout="phone"] .navigator-doc-name,
-html[data-layout="phone"] .navigator-activity-title { font-size: 12px; }
-html[data-layout="phone"] .navigator-intent-form { flex-direction: column; align-items: stretch; }
-html[data-layout="phone"] .navigator-intent-submit { min-height: 36px; }
-html[data-layout="phone"] .navigator-doc { padding: 12px; }
-html[data-layout="phone"] .navigator-finding { grid-template-columns: minmax(44px, auto) minmax(0, auto) minmax(0, 1fr); gap: 6px; }
-html[data-layout="phone"] .navigator-activity-row { grid-template-columns: minmax(44px, auto) minmax(42px, auto) minmax(0, 1fr); gap: 6px; }
-html[data-layout="phone"] .navigator-activity-summary { grid-column: 1 / -1; }
+html[data-layout="phone"] .visions-content { gap: 18px; }
+html[data-layout="phone"] .visions-intent { padding: 12px; }
+html[data-layout="phone"] .visions-intent-head,
+html[data-layout="phone"] .visions-doc-head,
+html[data-layout="phone"] .visions-activity-head { flex-wrap: wrap; gap: 4px 8px; }
+html[data-layout="phone"] .visions-intent-title,
+html[data-layout="phone"] .visions-doc-name,
+html[data-layout="phone"] .visions-activity-title { font-size: 12px; }
+html[data-layout="phone"] .visions-intent-form { flex-direction: column; align-items: stretch; }
+html[data-layout="phone"] .visions-intent-submit { min-height: 36px; }
+html[data-layout="phone"] .visions-doc { padding: 12px; }
+html[data-layout="phone"] .visions-finding { grid-template-columns: minmax(44px, auto) minmax(0, auto) minmax(0, 1fr); gap: 6px; }
+html[data-layout="phone"] .visions-activity-row { grid-template-columns: minmax(44px, auto) minmax(42px, auto) minmax(0, 1fr); gap: 6px; }
+html[data-layout="phone"] .visions-activity-summary { grid-column: 1 / -1; }
 /* ── Radar on a phone ──
    The desktop board is deliberately dense: one line per issue, controls at 35% opacity until the row
    is hovered. Neither half survives touch. There is no hover to reveal a control with, and a row of

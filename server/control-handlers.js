@@ -40,8 +40,8 @@ function scanRepoRoots(roots) {
 
 const PR_REVIEW_NUMERIC_KEYS = ['intervalMinutes', 'maxConcurrentReviews', 'reviewTimeoutSeconds'];
 const PR_REVIEW_MERGE_METHODS = new Set(['rebase', 'squash', 'merge']);
-const NAVIGATOR_DISPATCH_NUMERIC_KEYS = ['quietMs', 'cooldownMs', 'maxPerHour', 'activityMaxPerHour', 'dispatchTimeoutSeconds'];
-const NAVIGATOR_DISPATCH_NUMERIC_RANGES = {
+const VISIONS_DISPATCH_NUMERIC_KEYS = ['quietMs', 'cooldownMs', 'maxPerHour', 'activityMaxPerHour', 'dispatchTimeoutSeconds'];
+const VISIONS_DISPATCH_NUMERIC_RANGES = {
   activityMaxPerHour: { min: 0, label: 'zero or more' },
 };
 const POSTHOG_NUMERIC_KEYS = [
@@ -212,23 +212,23 @@ const PR_REVIEW_SCHEMA = {
   ],
 };
 
-const NAVIGATOR_DISPATCH_SCHEMA = {
-  name: 'navigator.dispatch',
+const VISIONS_DISPATCH_SCHEMA = {
+  name: 'visions.dispatch',
   rules: [
     blockRules.booleans(['enabled']),
     blockRules.strings(['model']),
-    blockRules.rangedNumbers(NAVIGATOR_DISPATCH_NUMERIC_KEYS, NAVIGATOR_DISPATCH_NUMERIC_RANGES),
+    blockRules.rangedNumbers(VISIONS_DISPATCH_NUMERIC_KEYS, VISIONS_DISPATCH_NUMERIC_RANGES),
   ],
 };
 
-const NAVIGATOR_SCHEMA = {
-  name: 'navigator',
+const VISIONS_SCHEMA = {
+  name: 'visions',
   rules: [
     blockRules.booleans(['enabled', 'autoFix']),
-    (navigator) => (navigator.projects != null && (!Array.isArray(navigator.projects) || !navigator.projects.every(p => typeof p === 'string'))
-      ? 'navigator.projects must be an array of strings'
+    (visions) => (visions.projects != null && (!Array.isArray(visions.projects) || !visions.projects.every(p => typeof p === 'string'))
+      ? 'visions.projects must be an array of strings'
       : null),
-    (navigator) => validateBlock(navigator.dispatch, NAVIGATOR_DISPATCH_SCHEMA),
+    (visions) => validateBlock(visions.dispatch, VISIONS_DISPATCH_SCHEMA),
   ],
 };
 
@@ -271,7 +271,7 @@ const TELEGRAM_SCHEMA = {
 };
 
 const validatePrReview = (pr) => validateBlock(pr, PR_REVIEW_SCHEMA);
-const validateNavigator = (navigator) => validateBlock(navigator, NAVIGATOR_SCHEMA);
+const validateVisions = (visions) => validateBlock(visions, VISIONS_SCHEMA);
 const validatePosthog = (ph) => validateBlock(ph, POSTHOG_SCHEMA);
 const validateUsage = (u) => validateBlock(u, USAGE_SCHEMA);
 const validateTelegram = (t) => validateBlock(t, TELEGRAM_SCHEMA);
@@ -299,13 +299,13 @@ function sanitizePrReview(pr) {
   });
 }
 
-function sanitizeNavigator(navigator) {
-  const out = sanitizeBlock(navigator, { booleans: ['enabled', 'autoFix'], verbatim: ['projects'] });
-  if (isPlainObject(navigator.dispatch)) {
-    const dispatch = sanitizeBlock(navigator.dispatch, {
+function sanitizeVisions(visions) {
+  const out = sanitizeBlock(visions, { booleans: ['enabled', 'autoFix'], verbatim: ['projects'] });
+  if (isPlainObject(visions.dispatch)) {
+    const dispatch = sanitizeBlock(visions.dispatch, {
       booleans: ['enabled'],
       trimmedStrings: ['model'],
-      verbatim: NAVIGATOR_DISPATCH_NUMERIC_KEYS,
+      verbatim: VISIONS_DISPATCH_NUMERIC_KEYS,
     });
     if (Object.keys(dispatch).length > 0) out.dispatch = dispatch;
   }
@@ -403,9 +403,9 @@ function registerControlHandlers(controlWss, deps) {
     // Replay of transient broadcasts missed across a reconnect gap (optional - undefined in
     // older callers/tests; connect then behaves as before, snapshot-only).
     controlReplayLog = null,
-    // Navigator lane (optional - null whenever config.navigator is absent or off, which is what makes
+    // Visions lane (optional - null whenever config.visions is absent or off, which is what makes
     // the intent correction refuse instead of crashing).
-    navigatorLane = null,
+    visionsLane = null,
   } = deps;
 
   function buildSettingsPayload() {
@@ -678,9 +678,9 @@ function registerControlHandlers(controlWss, deps) {
       return;
     }
 
-    const navigatorError = validateNavigator(s.navigator);
-    if (navigatorError) {
-      sendError(ws, navigatorError, { type: 'settings-error', requestId: msg.requestId || null });
+    const visionsError = validateVisions(s.visions);
+    if (visionsError) {
+      sendError(ws, visionsError, { type: 'settings-error', requestId: msg.requestId || null });
       return;
     }
 
@@ -719,7 +719,7 @@ function registerControlHandlers(controlWss, deps) {
       }
       if (s.repoRoots != null) cfg.repoRoots = s.repoRoots;
       if (s.prReview != null) cfg.prReview = sanitizePrReview(s.prReview);
-      if (s.navigator != null) cfg.navigator = sanitizeNavigator(s.navigator);
+      if (s.visions != null) cfg.visions = sanitizeVisions(s.visions);
       if (s.posthog != null) cfg.posthog = sanitizePosthog(s.posthog);
       if (s.usage != null) cfg.usage = sanitizeUsage(s.usage);
       if (s.telegram != null) {
@@ -921,22 +921,22 @@ function registerControlHandlers(controlWss, deps) {
   }
 
   /*
-   * The intent model's correction path (docs/archive/plan-navigator.md, M5): the Navigator tab's one writable
+   * The intent model's correction path (docs/archive/plan-visions.md, M5): the Visions tab's one writable
    * field. EMPTY text is meaningful (it clears the statement and hands control back to the model), so
    * an absent `text` is a clear rather than an error. What the correction then DOES to the standing
-   * statement is decided by the merge in server/core/navigator-intent-core.js, never here, and the
+   * statement is decided by the merge in server/core/visions-intent-core.js, never here, and the
    * lane broadcasts the result to every client itself.
    */
-  function handleNavigatorSetIntent(msg, ws) {
-    if (!navigatorLane) {
-      sendError(ws, 'The navigator lane is not running');
+  function handleVisionsSetIntent(msg, ws) {
+    if (!visionsLane) {
+      sendError(ws, 'The visions lane is not running');
       return;
     }
     if (msg.text != null && typeof msg.text !== 'string') {
-      sendError(ws, 'navigator intent text must be a string');
+      sendError(ws, 'visions intent text must be a string');
       return;
     }
-    navigatorLane.setOperatorIntent(typeof msg.text === 'string' ? msg.text : '');
+    visionsLane.setOperatorIntent(typeof msg.text === 'string' ? msg.text : '');
   }
 
   function handleShutdown() {
@@ -972,7 +972,7 @@ function registerControlHandlers(controlWss, deps) {
     'posthog-issue-action': handlePosthogIssueAction,
     'posthog-archive-investigation': handlePosthogArchiveInvestigation,
     'request-usage-report': handleRequestUsageReport,
-    'navigator-set-intent': handleNavigatorSetIntent,
+    'visions-set-intent': handleVisionsSetIntent,
     'kill':             (msg) => { const s = findSession(msg); if (s) s.killSession(); },
     'start-session':    (msg) => {
       const s = findSession(msg);

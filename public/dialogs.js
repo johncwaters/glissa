@@ -207,21 +207,21 @@ export function createSettingsDialog(initialTab) {
   const prTimeoutInput = dialog.querySelector('#settings-pr-timeout');
   const prMergeMethodSelect = dialog.querySelector('#settings-pr-merge-method');
 
-  const navigatorPanel = dialog.querySelector('#settings-panel-navigator');
-  const navigatorEnabledCheckbox = dialog.querySelector('#settings-navigator-enabled');
-  const navigatorDispatchEnabledCheckbox = dialog.querySelector('#settings-navigator-dispatch-enabled');
-  const navigatorQuietMsInput = dialog.querySelector('#settings-navigator-quiet-ms');
-  const navigatorCooldownMsInput = dialog.querySelector('#settings-navigator-cooldown-ms');
-  const navigatorMaxPerHourInput = dialog.querySelector('#settings-navigator-max-per-hour');
-  const navigatorActivityMaxPerHourInput = dialog.querySelector('#settings-navigator-activity-max-per-hour');
-  const navigatorDispatchTimeoutInput = dialog.querySelector('#settings-navigator-dispatch-timeout');
-  const navigatorModelInput = dialog.querySelector('#settings-navigator-model');
+  const visionsPanel = dialog.querySelector('#settings-panel-visions');
+  const visionsEnabledCheckbox = dialog.querySelector('#settings-visions-enabled');
+  const visionsDispatchEnabledCheckbox = dialog.querySelector('#settings-visions-dispatch-enabled');
+  const visionsQuietMsInput = dialog.querySelector('#settings-visions-quiet-ms');
+  const visionsCooldownMsInput = dialog.querySelector('#settings-visions-cooldown-ms');
+  const visionsMaxPerHourInput = dialog.querySelector('#settings-visions-max-per-hour');
+  const visionsActivityMaxPerHourInput = dialog.querySelector('#settings-visions-activity-max-per-hour');
+  const visionsDispatchTimeoutInput = dialog.querySelector('#settings-visions-dispatch-timeout');
+  const visionsModelInput = dialog.querySelector('#settings-visions-model');
 
-  let navigatorHydrated = null;
-  let navigatorTouched = false;
-  navigatorPanel.addEventListener('input', () => { navigatorTouched = true; });
-  navigatorPanel.addEventListener('change', () => { navigatorTouched = true; });
-  const shouldSaveNavigator = () => navigatorTouched || navigatorHydrated !== null;
+  let visionsHydrated = null;
+  let visionsTouched = false;
+  visionsPanel.addEventListener('input', () => { visionsTouched = true; });
+  visionsPanel.addEventListener('change', () => { visionsTouched = true; });
+  const shouldSaveVisions = () => visionsTouched || visionsHydrated !== null;
 
   const posthogPanel = dialog.querySelector('#settings-panel-posthog');
   const posthogEnabledCheckbox = dialog.querySelector('#settings-posthog-enabled');
@@ -415,9 +415,9 @@ export function createSettingsDialog(initialTab) {
     posthogTrafficCooldownInput, posthogTrafficBaselineInput,
   ];
 
-  const NAVIGATOR_NUMERIC_INPUTS = () => [
-    navigatorQuietMsInput, navigatorCooldownMsInput, navigatorMaxPerHourInput,
-    navigatorActivityMaxPerHourInput, navigatorDispatchTimeoutInput,
+  const VISIONS_NUMERIC_INPUTS = () => [
+    visionsQuietMsInput, visionsCooldownMsInput, visionsMaxPerHourInput,
+    visionsActivityMaxPerHourInput, visionsDispatchTimeoutInput,
   ];
 
   // Each field's own min/max attributes are the bounds, so a field that legitimately accepts zero
@@ -425,7 +425,7 @@ export function createSettingsDialog(initialTab) {
   function validateTimeouts() {
     errorEl.textContent = '';
     const inputs = [replayBufferInput, prIntervalInput, prMaxReviewsInput, prTimeoutInput];
-    if (shouldSaveNavigator()) inputs.push(...NAVIGATOR_NUMERIC_INPUTS());
+    if (shouldSaveVisions()) inputs.push(...VISIONS_NUMERIC_INPUTS());
     if (shouldSavePosthog()) inputs.push(...POSTHOG_NUMERIC_INPUTS());
     if (shouldSaveUsage()) inputs.push(usageScanIntervalInput, usageRetainDaysInput);
     for (const input of inputs) {
@@ -481,19 +481,19 @@ export function createSettingsDialog(initialTab) {
       };
     }
 
-    if (shouldSaveNavigator()) {
-      settings.navigator = {
-        ...(navigatorHydrated || {}),
-        enabled: navigatorEnabledCheckbox.checked,
+    if (shouldSaveVisions()) {
+      settings.visions = {
+        ...(visionsHydrated || {}),
+        enabled: visionsEnabledCheckbox.checked,
         dispatch: {
-          ...((navigatorHydrated && typeof navigatorHydrated.dispatch === 'object') ? navigatorHydrated.dispatch : {}),
-          enabled: navigatorDispatchEnabledCheckbox.checked,
-          quietMs: Number(navigatorQuietMsInput.value),
-          cooldownMs: Number(navigatorCooldownMsInput.value),
-          maxPerHour: Number(navigatorMaxPerHourInput.value),
-          activityMaxPerHour: Number(navigatorActivityMaxPerHourInput.value),
-          dispatchTimeoutSeconds: Number(navigatorDispatchTimeoutInput.value),
-          model: navigatorModelInput.value.trim(),
+          ...((visionsHydrated && typeof visionsHydrated.dispatch === 'object') ? visionsHydrated.dispatch : {}),
+          enabled: visionsDispatchEnabledCheckbox.checked,
+          quietMs: Number(visionsQuietMsInput.value),
+          cooldownMs: Number(visionsCooldownMsInput.value),
+          maxPerHour: Number(visionsMaxPerHourInput.value),
+          activityMaxPerHour: Number(visionsActivityMaxPerHourInput.value),
+          dispatchTimeoutSeconds: Number(visionsDispatchTimeoutInput.value),
+          model: visionsModelInput.value.trim(),
         },
       };
     }
@@ -582,17 +582,17 @@ export function createSettingsDialog(initialTab) {
       prProjectChoices = Array.isArray(s.projectChoices) ? s.projectChoices : [];
       renderPrProjects(pr.projects || []);
 
-      navigatorHydrated = s.navigator && typeof s.navigator === 'object' ? s.navigator : null;
-      const navigator = navigatorHydrated || {};
-      const dispatch = navigator.dispatch && typeof navigator.dispatch === 'object' ? navigator.dispatch : {};
-      navigatorEnabledCheckbox.checked = !!navigator.enabled;
-      navigatorDispatchEnabledCheckbox.checked = !!dispatch.enabled;
-      navigatorQuietMsInput.value = dispatch.quietMs ?? 30000;
-      navigatorCooldownMsInput.value = dispatch.cooldownMs ?? 300000;
-      navigatorMaxPerHourInput.value = dispatch.maxPerHour ?? 6;
-      navigatorActivityMaxPerHourInput.value = dispatch.activityMaxPerHour ?? 2;
-      navigatorDispatchTimeoutInput.value = dispatch.dispatchTimeoutSeconds ?? 180;
-      navigatorModelInput.value = dispatch.model ?? '';
+      visionsHydrated = s.visions && typeof s.visions === 'object' ? s.visions : null;
+      const visions = visionsHydrated || {};
+      const dispatch = visions.dispatch && typeof visions.dispatch === 'object' ? visions.dispatch : {};
+      visionsEnabledCheckbox.checked = !!visions.enabled;
+      visionsDispatchEnabledCheckbox.checked = !!dispatch.enabled;
+      visionsQuietMsInput.value = dispatch.quietMs ?? 30000;
+      visionsCooldownMsInput.value = dispatch.cooldownMs ?? 300000;
+      visionsMaxPerHourInput.value = dispatch.maxPerHour ?? 6;
+      visionsActivityMaxPerHourInput.value = dispatch.activityMaxPerHour ?? 2;
+      visionsDispatchTimeoutInput.value = dispatch.dispatchTimeoutSeconds ?? 180;
+      visionsModelInput.value = dispatch.model ?? '';
 
       posthogHydrated = s.posthog && typeof s.posthog === 'object' ? s.posthog : null;
       const ph = posthogHydrated || {};

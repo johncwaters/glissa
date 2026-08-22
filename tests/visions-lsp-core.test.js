@@ -8,7 +8,7 @@ const {
   createParserState,
   feedFrameBytes,
   serializeFrame,
-} = require('../server/core/navigator-lsp-core');
+} = require('../server/core/visions-lsp-core');
 
 function feedAll(chunks, startState = null) {
   let state = startState || createParserState();

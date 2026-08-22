@@ -5,12 +5,12 @@ const { LanguageClient, TransportKind } = require("vscode-languageclient/node");
 let client;
 
 function activate(context) {
-  const config = vscode.workspace.getConfiguration("glissaNavigator");
+  const config = vscode.workspace.getConfiguration("glissaVisions");
   const relayPath = config.get("relayPath", "");
   const port = config.get("port", 0);
 
   if (!relayPath || !fs.existsSync(relayPath)) {
-    vscode.window.showErrorMessage("Set glissaNavigator.relayPath to session/navigator-relay.js before starting Glissa Navigator.");
+    vscode.window.showErrorMessage("Set glissaVisions.relayPath to session/visions-relay.js before starting Glissa Visions.");
     return;
   }
 
@@ -32,10 +32,10 @@ function activate(context) {
     ]
   };
 
-  client = new LanguageClient("glissaNavigator", "Glissa Navigator", serverOptions, clientOptions);
+  client = new LanguageClient("glissaVisions", "Glissa Visions", serverOptions, clientOptions);
   context.subscriptions.push(client);
   client.start().catch((startError) => {
-    vscode.window.showErrorMessage(`Glissa Navigator failed to start: ${startError.message}`);
+    vscode.window.showErrorMessage(`Glissa Visions failed to start: ${startError.message}`);
   });
 }
 

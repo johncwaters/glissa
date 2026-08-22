@@ -1,4 +1,4 @@
-// Navigator lane IO shell. Design rationale lives in docs/archive/plan-navigator.md.
+// Visions lane IO shell. Design rationale lives in docs/archive/plan-visions.md.
 
 'use strict';
 
@@ -7,19 +7,19 @@ const fsPromisesDefault = require('node:fs/promises');
 const { WebSocketServer } = require('ws');
 const {
   applyDidChange, applyDidClose, applyDidOpen, createDocStore, detectBlankLineBoundary, formatRange, getDoc, listDocs, uriOfParams,
-} = require('./core/navigator-buffer-core');
+} = require('./core/visions-buffer-core');
 const {
   createDispatchState, decideDispatch, forgetUri, hashText, mergeDiagnostics, modelDiagnosticsToLsp, recordDispatch, resolveDispatchConfig,
-} = require('./core/navigator-dispatch-core');
-const { isUriInProjects } = require('./core/navigator-scope-core');
+} = require('./core/visions-dispatch-core');
+const { isUriInProjects } = require('./core/visions-scope-core');
 const {
   applyModelIntent: mergeModelIntent,
   applyOperatorIntent: mergeOperatorIntent,
   createIntentState,
   intentPayload,
   reviveIntentState,
-} = require('./core/navigator-intent-core');
-const { sweepMarkdownWithFixes } = require('./core/navigator-rules-core');
+} = require('./core/visions-intent-core');
+const { sweepMarkdownWithFixes } = require('./core/visions-rules-core');
 const {
   DEFAULT_FIX_LOG_MAX,
   appendFixLog,
@@ -31,12 +31,12 @@ const {
   fixPayload,
   isFixSetFresh,
   readSweepResult,
-} = require('./core/navigator-fix-core');
+} = require('./core/visions-fix-core');
 const { createJsonStateWriter } = require('./json-file');
 const { createLaneLog } = require('./lane-log');
 
 // Quiet window before a document is swept.
-const NAVIGATOR_DEBOUNCE_MS = 300;
+const VISIONS_DEBOUNCE_MS = 300;
 // Whole-document didChange frames can carry editor buffers up to the data WS cap.
 const MAX_FRAME_BYTES = 2 * 1024 * 1024;
 const MARKDOWN_EXTENSIONS = ['.md', '.markdown'];
@@ -125,21 +125,21 @@ function changeFailureReason(uri, version, result) {
   return `${result.reason} (uri=${uri} version=${version})`;
 }
 
-function createNavigatorWiring({
-  debounceMs = NAVIGATOR_DEBOUNCE_MS,
+function createVisionsWiring({
+  debounceMs = VISIONS_DEBOUNCE_MS,
   setTimeoutFn = setTimeout,
   clearTimeoutFn = clearTimeout,
   nowFn = Date.now,
   sweep = sweepMarkdownWithFixes,
   maxPayload = MAX_FRAME_BYTES,
-  // Tier 1 silent fixes (docs/plan-navigator-2.md, M6). The pull half is always on with the lane; this
+  // Tier 1 silent fixes (docs/plan-visions-2.md, M6). The pull half is always on with the lane; this
   // flag governs only the push half, where an edit lands in the buffer without being asked for.
   autoFix = false,
   fixLogMax = DEFAULT_FIX_LOG_MAX,
   applyEditTimeoutMs = APPLY_EDIT_TIMEOUT_MS,
   logger = console,
   broadcast = null,
-  // Tier 3 model dispatch (docs/archive/plan-navigator.md, M4). Absent config or no dispatch function means
+  // Tier 3 model dispatch (docs/archive/plan-visions.md, M4). Absent config or no dispatch function means
   // the lane behaves exactly as it did before M4: no dispatch timer is ever armed and nothing spawns.
   dispatchConfig = null,
   dispatch = null,
@@ -161,9 +161,9 @@ function createNavigatorWiring({
 } = {}) {
   const wss = new WebSocketServer({ noServer: true, maxPayload });
   const connections = new Set();
-  const { debugNote, note, warn } = createLaneLog({ prefix: '[navigator]', logger, debugFlag: debug });
+  const { debugNote, note, warn } = createLaneLog({ prefix: '[visions]', logger, debugFlag: debug });
   /*
-   * Findings the Navigator tab is currently showing, keyed by uri and shared across relays: the tab is a
+   * Findings the Visions tab is currently showing, keyed by uri and shared across relays: the tab is a
    * view of what is open in the editors, not of which socket mirrored it. A uri with no findings is
    * ABSENT rather than stored empty, so the map and the rendered sections always agree.
    */
@@ -187,7 +187,7 @@ function createNavigatorWiring({
   let fixLog = [];
   let nextApplyEditId = 1;
   /*
-   * The intent model (docs/archive/plan-navigator.md, M5): ONE statement for the machine, not one per uri,
+   * The intent model (docs/archive/plan-visions.md, M5): ONE statement for the machine, not one per uri,
    * because it says what the carbon unit is building rather than what a buffer contains. In memory
    * only in v1, so a daemon restart starts from nothing.
    */
@@ -229,7 +229,7 @@ function createNavigatorWiring({
 
   function broadcastFindings(uri, diagnostics) {
     if (typeof broadcast !== 'function') return;
-    broadcast({ type: 'navigator-findings', uri, diagnostics, ts: nowFn() });
+    broadcast({ type: 'visions-findings', uri, diagnostics, ts: nowFn() });
   }
 
   function recordFindings(uri, diagnostics) {
@@ -278,7 +278,7 @@ function createNavigatorWiring({
 
   function broadcastComments(uri, comments) {
     if (typeof broadcast !== 'function') return;
-    broadcast({ type: 'navigator-comments', uri, comments, ts: nowFn() });
+    broadcast({ type: 'visions-comments', uri, comments, ts: nowFn() });
   }
 
   // Wholesale replacement, like a sweep's findings: a uri with no comments is absent, never stored empty.
@@ -302,7 +302,7 @@ function createNavigatorWiring({
   function broadcastHand(uri, hand) {
     if (typeof broadcast !== 'function') return;
     broadcast({
-      type: 'navigator-hand', uri, hand, ts: nowFn(),
+      type: 'visions-hand', uri, hand, ts: nowFn(),
     });
   }
 
@@ -340,7 +340,7 @@ function createNavigatorWiring({
     fixLog = appendFixLog(fixLog, entry, fixLogMax);
     if (typeof broadcast !== 'function') return;
     broadcast({
-      type: 'navigator-fix', uri, fix: fixPayload(entry), ts: entry.ts,
+      type: 'visions-fix', uri, fix: fixPayload(entry), ts: entry.ts,
     });
   }
 
@@ -357,7 +357,7 @@ function createNavigatorWiring({
 
   function broadcastIntent() {
     if (typeof broadcast !== 'function') return;
-    broadcast({ type: 'navigator-intent', intent: intentPayload(intentState), ts: nowFn() });
+    broadcast({ type: 'visions-intent', intent: intentPayload(intentState), ts: nowFn() });
   }
 
   // Every write goes through the pure merge, so the lock rule is enforced in one place and a merge
@@ -450,7 +450,7 @@ function createNavigatorWiring({
     const documents = documentsSnapshot();
     note(`snapshot served: ${documents.length} documents`);
     return {
-      type: 'navigator-snapshot', documents, intent: intentPayload(intentState), fixes: fixLog, ts: nowFn(),
+      type: 'visions-snapshot', documents, intent: intentPayload(intentState), fixes: fixLog, ts: nowFn(),
     };
   }
 
@@ -639,7 +639,7 @@ function createNavigatorWiring({
       const entry = fixesByUri.get(uri);
       const safe = autoSafeFixes(entry ? entry.fixes : []);
       if (safe.length === 0) return;
-      const id = `navigator-fix-${nextApplyEditId}`;
+      const id = `visions-fix-${nextApplyEditId}`;
       nextApplyEditId += 1;
       const timer = setTimeoutFn(() => settleApplyEdit(id, { applied: false }, 'no answer from the editor'), applyEditTimeoutMs);
       if (timer && typeof timer.unref === 'function') timer.unref();
@@ -842,7 +842,7 @@ function createNavigatorWiring({
 
   // Close detached upgraded sockets so shutdown can exit.
   function stop() {
-    for (const client of wss.clients) client.close(1001, 'Navigator stopped');
+    for (const client of wss.clients) client.close(1001, 'Visions stopped');
     for (const connection of [...connections]) connection.close();
     wss.close();
   }
@@ -869,10 +869,10 @@ function createNavigatorWiring({
 }
 
 module.exports = {
-  createNavigatorWiring,
+  createVisionsWiring,
   isMarkdownDoc,
   readFrame,
   APPLY_EDIT_TIMEOUT_MS,
   DIGEST_BUDGET_CHARS,
-  NAVIGATOR_DEBOUNCE_MS,
+  VISIONS_DEBOUNCE_MS,
 };

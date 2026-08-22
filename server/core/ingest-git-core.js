@@ -7,7 +7,7 @@
  * The SIGNATURE is the load-bearing piece. Watchers say look again and the owner recomputes (the repo's
  * standing invariant), so a `.git` write burst, the 60s poll and a linked worktree's own churn all funnel
  * into the same recompute; without a signature to compare against, each of those paths would publish the
- * same unchanged working tree again. Since M7.5 every published event is also the navigator's movement
+ * same unchanged working tree again. Since M7.5 every published event is also the visions's movement
  * signal, so a no-op event costs dispatch budget, not just a ring slot.
  */
 

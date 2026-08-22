@@ -1,6 +1,6 @@
 {
-  "name": "glissa-navigator",
-  "displayName": "Glissa Navigator",
+  "name": "glissa-visions",
+  "displayName": "Glissa Visions",
   "publisher": "johnwaters",
   "version": "0.1.0",
   "private": true,
@@ -13,14 +13,14 @@
   ],
   "contributes": {
     "configuration": {
-      "title": "Glissa Navigator",
+      "title": "Glissa Visions",
       "properties": {
-        "glissaNavigator.relayPath": {
+        "glissaVisions.relayPath": {
           "type": "string",
           "default": "",
-          "description": "Absolute path to session/navigator-relay.js."
+          "description": "Absolute path to session/visions-relay.js."
         },
-        "glissaNavigator.port": {
+        "glissaVisions.port": {
           "type": "number",
           "default": 0,
           "description": "Relay port. Use 0 to let the relay choose its fallback."

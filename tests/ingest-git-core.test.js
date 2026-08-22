@@ -7,7 +7,7 @@
  *
  * The signature tests are the load-bearing ones. A signature that moved when the tree did not would make
  * every `.git` write burst and every 60s poll publish the same unchanged working tree again, and since
- * M7.5 each of those is also the navigator's movement signal, so it would spend dispatch budget on
+ * M7.5 each of those is also the visions's movement signal, so it would spend dispatch budget on
  * nothing.
  */
 

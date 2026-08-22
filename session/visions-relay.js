@@ -7,7 +7,7 @@ const {
   createParserState,
   feedFrameBytes,
   serializeFrame,
-} = require('../server/core/navigator-lsp-core');
+} = require('../server/core/visions-lsp-core');
 const {
   applyDidChange,
   applyDidClose,
@@ -16,7 +16,7 @@ const {
   formatRange,
   listDocs,
   uriOfParams,
-} = require('../server/core/navigator-buffer-core');
+} = require('../server/core/visions-buffer-core');
 
 const DEFAULT_PORTS = [5173, 3000];
 const INITIAL_RETRY_MS = 500;
@@ -26,7 +26,7 @@ const MIRROR_METHODS = new Set(['textDocument/didOpen', 'textDocument/didChange'
 const FORWARDED_METHODS = new Set([...MIRROR_METHODS, 'textDocument/didSave']);
 // The one editor request the daemon answers. Everything else is still method-not-found.
 const CODE_ACTION_METHOD = 'textDocument/codeAction';
-// The one request the daemon initiates, which is what makes tier 1 silent (docs/plan-navigator-2.md, M6).
+// The one request the daemon initiates, which is what makes tier 1 silent (docs/plan-visions-2.md, M6).
 const APPLY_EDIT_METHOD = 'workspace/applyEdit';
 // A daemon that never answers must not hang the editor: past this the relay answers "no actions" itself.
 const CODE_ACTION_TIMEOUT_MS = 2000;
@@ -66,7 +66,7 @@ function initializeResult() {
       codeActionProvider: true,
     },
     serverInfo: {
-      name: 'glissa-navigator',
+      name: 'glissa-visions',
     },
   };
 }
@@ -154,7 +154,7 @@ function createRelay({
 
   // stdout carries the LSP protocol, so every line the relay says about itself goes to stderr.
   function note(message) {
-    stderr.write(`[navigator-relay] ${message}\n`);
+    stderr.write(`[visions-relay] ${message}\n`);
   }
 
   function writeEditorMessage(message) {
@@ -195,7 +195,7 @@ function createRelay({
   function connect() {
     if (isStopping) return;
     const port = currentPort();
-    const socket = new WebSocket(`ws://127.0.0.1:${port}/navigator`);
+    const socket = new WebSocket(`ws://127.0.0.1:${port}/visions`);
     ws = socket;
 
     socket.on('open', () => {
@@ -247,7 +247,7 @@ function createRelay({
 
   // The other direction needs an id the editor has never seen, hence the one prefix the relay mints.
   function forwardApplyEdit(daemonId, params) {
-    const editorId = `glissa-navigator-${nextEditorRequestId}`;
+    const editorId = `glissa-visions-${nextEditorRequestId}`;
     nextEditorRequestId += 1;
     applyEditDaemonIdByEditorId.set(editorId, daemonId);
     writeEditorMessage(editorRequest(editorId, APPLY_EDIT_METHOD, params));

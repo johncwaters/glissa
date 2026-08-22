@@ -28,7 +28,7 @@ function upgradePathname(rawUrl) {
 function classifyUpgradePath(rawUrl) {
   const pathname = upgradePathname(rawUrl);
   if (pathname === '/control') return 'control';
-  if (pathname === '/navigator') return 'navigator';
+  if (pathname === '/visions') return 'visions';
   if (pathname.startsWith(DATA_PATH_PREFIX)) return 'data';
   return 'unknown';
 }

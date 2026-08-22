@@ -1,13 +1,13 @@
-// ── Navigator view: pure grouping, ordering and wording ───────
-// Every decision the Navigator tab makes about WHICH sections exist, in what order, and what the counts
-// read as, so navigator-panel.js is DOM only. No literal em dash, en dash or ellipsis is produced here.
+// ── Visions view: pure grouping, ordering and wording ───────
+// Every decision the Visions tab makes about WHICH sections exist, in what order, and what the counts
+// read as, so visions-panel.js is DOM only. No literal em dash, en dash or ellipsis is produced here.
 
-export const NAVIGATOR_EMPTY_TEXT = 'No findings. Open a markdown file in a connected editor.';
+export const VISIONS_EMPTY_TEXT = 'No findings. Open a markdown file in a connected editor.';
 
-// The intent model (docs/archive/plan-navigator.md, M5): one machine-wide statement of what the navigator
+// The intent model (docs/archive/plan-visions.md, M5): one machine-wide statement of what the visions
 // believes is being built. Empty is a first-class state, and the hint says how it stops being empty.
-export const NAVIGATOR_INTENT_EMPTY_TEXT = 'No intent yet. The navigator proposes one after its first pass; typing here sets it directly.';
-export const NAVIGATOR_INTENT_MAX_CHARS = 300;
+export const VISIONS_INTENT_EMPTY_TEXT = 'No intent yet. The visions proposes one after its first pass; typing here sets it directly.';
+export const VISIONS_INTENT_MAX_CHARS = 300;
 
 export function emptyIntent() {
   return { text: '', source: null, locked: false, ts: 0 };
@@ -32,7 +32,7 @@ export function intentOfMessage(msg) {
 export function intentSourceText(intent) {
   if (!intent?.text) return '';
   if (intent.source === 'operator') return 'set by you';
-  return 'proposed by navigator';
+  return 'proposed by visions';
 }
 
 // Coarse on purpose: the statement is a living belief, so the question is whether it is minutes or
@@ -138,7 +138,7 @@ export function sectionCountText(section) {
   return findingCountText(0);
 }
 
-export function navigatorHandText(hand) {
+export function visionsHandText(hand) {
   const text = typeof hand === 'string' ? hand.trim() : '';
   if (!text) return '';
   return `Raised hand: ${text}`;
@@ -275,7 +275,7 @@ export function totalCommentCount(commentsByUri) {
 }
 
 // Sections by file name, with full uri as the tie-breaker so order is stable across repaints.
-export function navigatorSections(findingsByUri, commentsByUri = new Map(), handsByUri = new Map()) {
+export function visionsSections(findingsByUri, commentsByUri = new Map(), handsByUri = new Map()) {
   const sections = [];
   const uris = new Set([...findingsByUri.keys(), ...commentsByUri.keys(), ...handsByUri.keys()]);
   for (const uri of uris) {
@@ -303,12 +303,12 @@ function compareText(left, right) {
   return 0;
 }
 
-// ── Tier 1 fix changelog (docs/plan-navigator-2.md, M6) ───────
+// ── Tier 1 fix changelog (docs/plan-visions-2.md, M6) ───────
 // What the lane actually touched, applied and refused alike. A refused edit is as much of an audit line
 // as an applied one: it says the lane tried and the buffer had already moved.
 
-export const NAVIGATOR_FIXES_EMPTY_TEXT = 'No fixes yet. Silent fixes appear here once the lane applies or is refused one.';
-// Must agree with DEFAULT_FIX_LOG_MAX in server/core/navigator-fix-core.js (CJS/ESM split forbids one import).
+export const VISIONS_FIXES_EMPTY_TEXT = 'No fixes yet. Silent fixes appear here once the lane applies or is refused one.';
+// Must agree with DEFAULT_FIX_LOG_MAX in server/core/visions-fix-core.js (CJS/ESM split forbids one import).
 export const MAX_RENDERED_FIXES = 20;
 
 export function fixCountText(count) {
@@ -374,8 +374,8 @@ export function applyFixSnapshot(msg, { max = MAX_RENDERED_FIXES } = {}) {
 }
 
 // ── Ingest activity feed (docs/plan-ingestion.md, M6) ─────────
-// The cross-source timeline the ingest lane publishes, rendered under the navigator's own findings
-// because it is the same question from the other side: what the navigator can currently see.
+// The cross-source timeline the ingest lane publishes, rendered under the visions's own findings
+// because it is the same question from the other side: what the visions can currently see.
 
 export const INGEST_EMPTY_TEXT = 'No activity yet. The ingest lane reports what your sessions and tools are doing.';
 // The DOM is bounded, not the rings: the server keeps far more than a scrolling list should ever hold.
