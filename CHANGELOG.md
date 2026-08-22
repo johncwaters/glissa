@@ -7,21 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-08-22
+
 ### Added
 
 - **First-class phone layout**: the dashboard now has dedicated Board, Terminal, Review, Radar, PRs, and Usage screens on phones, with bottom navigation, live element re-parenting, attention-first triage, and soft-keyboard handling that routes phone text input around xterm's fragile IME path.
 - **Phone image upload**: the phone key strip can upload an image into the active session, saving the file under Glissa's upload area and bracket-pasting the path into the PTY for the operator to send.
 - **Radar error monitoring**: an opt-in lane that polls PostHog error tracking, classifies every issue against the last poll (spiking, regressed, new, worsened, quiet), pings Telegram for the ones that matter, and dispatches headless agents that diagnose them into a report and an investigations inbox on the dashboard.
 - **Radar auto-fix**: with `posthog.autoFix` on, a spiking, regressed, or new issue in a project that maps to a real git checkout dispatches a reproduce-then-fix agent instead of the diagnose-only investigation. The agent works in an isolated throwaway worktree and may only commit locally; Glissa pushes the branch and opens the pull request itself, refuses a diff that touches `.github/workflows/`, and never merges. A finished fix pings Telegram with the pull request link and whether the bug was reproduced first; a fix that needs a decision or failed outright pings too, and a non-event stays silent.
+- **Navigator model diagnostics (tier 2)**: dispatch results may carry model-proposed diagnostics, validated and capped by the same rules as comments and published as a union with the deterministic rule sweep. They are cleared on any edit or close, and an ERROR verdict never blanks a standing set.
 
 ### Changed
 
 - **Distribution moved to GitHub installs**: Glissa is no longer published to the npm registry; standalone installs now use `npm install -g github:johncwaters/glissa`, and release/update docs now point at GitHub tags and the `main` branch package metadata.
+- **The update check keys on releases, not commits**: the update banner now fires only when a newer `vX.Y.Z` GitHub release exists (resolved from `git ls-remote --tags`, with the GitHub releases API as fallback) instead of on every commit that reaches `main`. The npm-global update command pins the release tag and the banner links the release page instead of a commit compare.
 
 ### Fixed
 
 - **WebSocket upgrades are routed by pathname**: control and data upgrades are classified before handoff, unknown local upgrades are left for Vite, remote unknown upgrades are closed, and both control and terminal clients now use jittered reconnect backoff instead of reconnecting in lockstep.
 - **Server lifecycle and install diagnostics are quieter and more reliable**: service-managed restarts now exit non-zero under systemd so the supervisor restarts Glissa, pairing writes dedupe stored devices, and PATH diagnostics dedupe duplicate Claude command matches.
+- **Shell-history tail survives same-path rewrites**: a history file rewritten in place (PSReadLine trimming to its cap) or deleted and recreated reusing its inode no longer replays from a stale offset, which could publish mid-command fragments into the ring. A 512-byte head sample now proves the file is still the one the tail was reading, and a changed head re-baselines instead of publishing.
+- **Windows short-path watcher abort, again**: the agent-log and shell-history ingest watchers bypassed the 0.21.0 `canonicalizePath` seam, so watching an 8.3 short path (CI temp dirs) aborted the whole process from native code. Both are wrapped now, and a repo-wide guardrail test fails any future `fs.watch` call whose target is not canonicalized.
+- **GitHub release creation from non-Windows hosts**: `scripts/release.js` probed for the `gh` CLI with the Windows-only `where`, silently skipping the GitHub release when run from Linux.
 
 ### Removed
 
