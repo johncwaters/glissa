@@ -19,7 +19,6 @@
 
 'use strict';
 
-const crypto = require('node:crypto');
 const path = require('node:path');
 const { SOURCE_DEFAULTS, scrubText } = require('./ingest-core');
 
@@ -37,21 +36,12 @@ const DEFAULT_BATCH_MS = SOURCE_DEFAULTS.fs.batchMs;
  */
 const MAX_FILES_PER_BATCH = SOURCE_DEFAULTS.fs.digestQuota;
 /*
- * The per-window bound on DISTINCT tracked files. Past it the batch keeps counting but stops remembering
- * names, so a checkout of a 50000-file tree costs one number rather than a map of every path in it.
+ * The per-window bound on DISTINCT tracked files. A window this large already publishes ONE summarized
+ * line, so past the bound the batch stops recording anything and reports its total as a floor: a
+ * 50000-file checkout costs one number and 2000 map entries rather than a map of every path in it.
  */
 const MAX_TRACKED_FILES = 2000;
-/*
- * Past MAX_TRACKED_FILES the count still has to be of DISTINCT FILES, not of events: @parcel/watcher
- * reports a create and an update for one written file, so counting events would report a 3000-file
- * checkout as 6000. Names are no longer worth holding at that scale, so what is held is a short hash per
- * path, itself capped: past this many the batch can no longer tell a new file from a repeat, and says so
- * by reporting its total as a floor rather than a count.
- */
-const MAX_UNTRACKED_KEYS = 10000;
-const UNTRACKED_KEY_CHARS = 16;
 const MAX_ROOT_ENTRIES = 32;
-const MAX_SAMPLE_FILES = 5;
 const MAX_REL_PATH_CHARS = 200;
 /*
  * Appended to a path this batch had to truncate. Two files sharing a 200-char prefix still merge, which
@@ -319,14 +309,7 @@ function isActiveSessionState(state) {
 // --- Batching -------------------------------------------------------------
 
 function createBatch() {
-  return { files: new Map(), untracked: new Set(), floored: false };
-}
-
-// A short digest of a path, held instead of the path itself once a window is past the point where names
-// are worth keeping. 64 bits over at most 10000 entries makes a collision (one file counted as a repeat)
-// vanishingly unlikely, and the consequence of one would be a burst total off by one.
-function untrackedKey(relPath) {
-  return crypto.createHash('sha1').update(relPath, 'utf8').digest('hex').slice(0, UNTRACKED_KEY_CHARS);
+  return { files: new Map(), floored: false };
 }
 
 // A path too long to hold in full, marked as truncated so the published summary cannot be read as naming
@@ -378,60 +361,19 @@ function recordChange(batch, relPath, type) {
     return true;
   }
   if (batch.files.size >= MAX_TRACKED_FILES) {
-    // Distinct FILES, never events: one written file arrives as a create and an update, and counting
-    // both would report a 3000-file checkout as 6000.
-    const digest = untrackedKey(key);
-    if (batch.untracked.has(digest)) return true;
-    if (batch.untracked.size >= MAX_UNTRACKED_KEYS) {
-      batch.floored = true;
-      return true;
-    }
-    batch.untracked.add(digest);
+    // Past the bound the batch can no longer tell a new file from a repeat, so its total becomes a floor
+    // rather than a count that would be quietly short.
+    batch.floored = true;
     return true;
   }
   batch.files.set(key, kind);
   return true;
 }
 
-function batchSize(batch) {
-  return batch.files.size + batch.untracked.size;
-}
-
-function fileChangeEvent({ root, relPath, change, now }) {
+function fsEvent({ root, now, summary }) {
   return {
-    source: SOURCE,
-    kind: KIND,
-    ts: now,
-    scope: { root, sessionId: null },
-    summary: `${CHANGE_VERBS[change]} ${relPath}`,
-    detail: { path: relPath, change },
+    source: SOURCE, kind: KIND, ts: now, scope: { root, sessionId: null }, summary,
   };
-}
-
-function countByKind(batch) {
-  const counts = { create: 0, update: 0, delete: 0 };
-  for (const change of batch.files.values()) counts[change] += 1;
-  return counts;
-}
-
-function burstSummary(batch) {
-  const counts = countByKind(batch);
-  const parts = [];
-  if (counts.create) parts.push(`${counts.create} created`);
-  if (counts.update) parts.push(`${counts.update} updated`);
-  if (counts.delete) parts.push(`${counts.delete} deleted`);
-  const total = batchSize(batch);
-  const tail = parts.length > 0 ? `: ${parts.join(', ')}` : '';
-  // Past the untracked bound the batch can no longer tell a new file from a repeat, so it reports what it
-  // can still stand behind: a floor, said out loud rather than a total that is quietly short.
-  const lead = batch.floored ? `at least ${total}` : `${total}`;
-  return { summary: `${lead} files changed${tail}`, counts, total };
-}
-
-// Newest names are no better than oldest ones here, so insertion order is kept: it is the order the
-// watcher reported, which is the closest thing to the order the work happened in.
-function sampleOf(batch) {
-  return [...batch.files.keys()].slice(0, MAX_SAMPLE_FILES).join(', ');
 }
 
 /**
@@ -443,45 +385,30 @@ function sampleOf(batch) {
  * seq stamps telling the navigator the machine moved thousands of times for one action.
  */
 function decideFsEvents(batch, { root = null, now = 0 } = {}) {
-  const total = batchSize(batch);
+  const total = batch.files.size;
   if (total === 0) return [];
-  if (total <= MAX_FILES_PER_BATCH && batch.untracked.size === 0) {
-    const events = [];
-    for (const [relPath, change] of batch.files) events.push(fileChangeEvent({ root, relPath, change, now }));
-    return events;
+  if (total <= MAX_FILES_PER_BATCH && !batch.floored) {
+    return [...batch.files].map(
+      ([relPath, change]) => fsEvent({ root, now, summary: `${CHANGE_VERBS[change]} ${relPath}` }),
+    );
   }
-  const { summary, counts } = burstSummary(batch);
-  return [{
-    source: SOURCE,
-    kind: KIND,
-    ts: now,
-    scope: { root, sessionId: null },
-    summary,
-    detail: {
-      files: total,
-      // True means `files` is a floor rather than a count, so a reader is never told an exact number the
-      // batch could not stand behind.
-      atLeast: batch.floored,
-      created: counts.create,
-      updated: counts.update,
-      deleted: counts.delete,
-      sample: sampleOf(batch),
-    },
-  }];
+  const counts = { create: 0, update: 0, delete: 0 };
+  for (const change of batch.files.values()) counts[change] += 1;
+  const parts = [];
+  if (counts.create) parts.push(`${counts.create} created`);
+  if (counts.update) parts.push(`${counts.update} updated`);
+  if (counts.delete) parts.push(`${counts.delete} deleted`);
+  const lead = batch.floored ? `at least ${total}` : `${total}`;
+  const tail = parts.length > 0 ? `: ${parts.join(', ')}` : '';
+  return [fsEvent({ root, now, summary: `${lead} files changed${tail}` })];
 }
 
 module.exports = {
   DEFAULT_BATCH_MS,
   IGNORED_DIR_NAMES,
-  IGNORED_FILE_NAMES,
-  IGNORED_FILE_SUFFIXES,
-  KIND,
   MAX_FILES_PER_BATCH,
   MAX_TRACKED_FILES,
-  MAX_UNTRACKED_KEYS,
-  SOURCE,
   TRUNCATED_SUFFIX,
-  batchSize,
   buildIgnorePatterns,
   createBatch,
   daemonWriteRules,

@@ -8,8 +8,7 @@
  * First sight of a file starts at END OF FILE. Ingestion is about recent activity, and replaying a
  * 200MB history file into the rings on daemon start is exactly the cost this plan exists to avoid.
  *
- * Nothing here knows what a line MEANS: this is the shared tail machinery the plan also hands to the
- * shellHistory source, so vendor transcript shapes live next door in ingest-agent-core.js.
+ * Nothing here knows what a line MEANS: vendor transcript shapes live next door in ingest-agent-core.js.
  */
 
 'use strict';
@@ -79,21 +78,6 @@ function planRead(state, stat, { maxCatchUpBytes = MAX_CATCH_UP_BYTES } = {}) {
   return { action: 'read', start, end, reset, dropPartial };
 }
 
-/*
- * splitLines drops empty lines, which is right for a JSONL transcript and wrong for a shell history
- * file: PSReadLine writes an embedded newline as a trailing backtick, so a command ENDING in a newline
- * finishes on an empty physical line, and dropping it glues that command to the next one. The carry rule
- * is identical either way, so this is splitLines minus the filter and nothing else.
- */
-function splitKeepingEmpty(carry, chunkText) {
-  const text = `${carry || ''}${chunkText || ''}`;
-  const lines = text.split(/\r?\n/);
-  // Doubles as both pops: a text ending in a break splits to a trailing empty (carry '') and one that
-  // does not splits to its unterminated tail.
-  const nextCarry = lines.pop();
-  return { lines, carry: nextCarry || '' };
-}
-
 // Everything before the first break belongs to a line whose start was skipped past, so it goes rather
 // than riding into a prompt as half a sentence. A chunk holding no break at all was all one such line.
 function afterFirstBreak(text) {
@@ -107,12 +91,12 @@ function afterFirstBreak(text) {
  * becomes the carry, which the next read prepends, so a line split across two reads arrives whole once.
  */
 function applyRead(state, {
-  text = '', end = 0, stat = null, reset = false, dropPartial = false, keepEmptyLines = false,
+  text = '', end = 0, stat = null, reset = false, dropPartial = false,
 } = {}) {
   if (reset || dropPartial) state.carry = '';
   if (reset) state.vendorState = null;
   const body = dropPartial ? afterFirstBreak(text) : text;
-  const split = keepEmptyLines ? splitKeepingEmpty(state.carry, body) : splitLines(state.carry, body);
+  const split = splitLines(state.carry, body);
   state.carry = split.carry;
   state.offset = Math.max(0, Math.floor(finiteOr(end, state.offset)));
   state.size = Math.max(state.offset, Math.floor(finiteOr(stat?.size, state.offset)));
@@ -139,11 +123,9 @@ function pickStaleByMtime(entriesByKey, { maxTracked = DEFAULT_MAX_TRACKED } = {
 }
 
 module.exports = {
-  DEFAULT_MAX_TRACKED,
   MAX_CATCH_UP_BYTES,
   applyRead,
   createTailState,
-  fileIdentity,
   isActiveMtime,
   pickStaleByMtime,
   planRead,

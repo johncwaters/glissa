@@ -216,10 +216,8 @@ test('a moved HEAD on the same branch publishes one commit carrying its branch a
   assert.equal(events[0].source, 'git');
   assert.equal(events[0].scope.root, '/repo');
   assert.equal(events[0].summary, 'commit 9f8e7d6 on main: add the feature flag');
-  assert.equal(events[0].detail.sha, OTHER_SHA);
   // Arrival time, not the record's own, so a rebase's replayed author dates cannot age the digest line.
   assert.equal(events[0].ts, NOW);
-  assert.equal(events[0].detail.committedAt, NOW - 5000);
 });
 
 test('a changed branch publishes branch-change, and wins over the commit and status moves it caused', () => {

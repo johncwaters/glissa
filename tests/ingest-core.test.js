@@ -18,7 +18,6 @@ const {
   normalizeEvent,
   publishEvent,
   resolveIngestConfig,
-  ringStats,
   scrubText,
   snapshotEvents,
 } = require('../server/core/ingest-core');
@@ -50,7 +49,7 @@ test('absent, malformed and not-exactly-true config all resolve disabled', () =>
 test('a source needs its own enabled true on top of the lane flag', () => {
   const resolved = resolveIngestConfig({
     enabled: true,
-    sources: { terminal: { enabled: true }, git: { enabled: false }, fs: {}, shellHistory: { enabled: 'true' } },
+    sources: { terminal: { enabled: true }, git: { enabled: false }, fs: {}, agentLogs: { enabled: 'true' } },
   });
   assert.equal(resolved.enabled, true);
   assert.deepEqual(enabledSourceNames(resolved), ['terminal']);
@@ -72,27 +71,6 @@ test('ring caps and timings default to the plan Sources table and are overridabl
   // A non-positive override is not a cap of zero; it falls back to the default.
   assert.equal(tuned.sources.terminal.maxBytes, 256 * 1024);
   assert.equal(tuned.sources.terminal.flushMs, 500);
-});
-
-test('shellHistory is off even with the lane on and every other source enabled', () => {
-  const sources = {};
-  for (const name of SOURCE_NAMES) sources[name] = { enabled: true };
-  delete sources.shellHistory;
-  const resolved = resolveIngestConfig({ enabled: true, sources });
-  assert.equal(resolved.sources.shellHistory.enabled, false);
-  assert.ok(!enabledSourceNames(resolved).includes('shellHistory'));
-});
-
-test('the shells list is resolved as a list, not coerced to a number like every other source option', () => {
-  const resolved = resolveIngestConfig({
-    enabled: true, sources: { shellHistory: { enabled: true, shells: ['fish', ' bash ', 'fish', 7], pollMs: 500 } },
-  });
-  assert.deepEqual(resolved.sources.shellHistory.shells, ['fish', 'bash']);
-  assert.equal(resolved.sources.shellHistory.pollMs, 500);
-
-  const bare = resolveIngestConfig({ enabled: true, sources: { shellHistory: { enabled: true } } });
-  assert.deepEqual(bare.sources.shellHistory.shells, [], 'empty means the zero-setup pair, decided downstream');
-  assert.equal(bare.sources.shellHistory.pollMs, SOURCE_DEFAULTS.shellHistory.pollMs);
 });
 
 // --- Scrub ----------------------------------------------------------------
@@ -117,12 +95,8 @@ test('every secret shape in the fixture set is scrubbed, and the surrounding tex
   }
 });
 
-/*
- * Shell history is the source that reads what a carbon unit typed at a prompt, which is where these
- * shapes actually live (docs/plan-ingestion.md, M10). PSReadLine scrubs its own sensitive lines before
- * writing, so this is the second line of defence, not the first, and the publish-time scrub is what
- * makes it hold for fish, bash and zsh too, none of which scrub anything.
- */
+// A tapped terminal carries what a carbon unit typed at a prompt, which is where these shapes actually
+// live, so the publish-time scrub is what keeps them out of the ring the digest reads.
 test('the secret shapes a shell command line carries are scrubbed, and the command still reads', () => {
   const fixtures = [
     ['$env:GITHUB_TOKEN = "ghp_aaaabbbbccccdddd"', '$env:GITHUB_TOKEN = ', 'ghp_aaaabbbbccccdddd'],
@@ -253,7 +227,7 @@ const INNOCENT_CORPUS = [
 
 function storedCommand(raw) {
   const store = createIngestStore(allSourcesOn());
-  publishEvent(store, { source: 'shellHistory', kind: 'command', summary: raw, scope: { root: null } }, NOW);
+  publishEvent(store, terminalEvent(raw), NOW);
   return snapshotEvents(store)[0].summary;
 }
 
@@ -288,27 +262,10 @@ test('the whole fixture corpus scrubs idempotently, so a second pass can never w
   }
 });
 
-test('an ordinary shell command with no secret in it is published exactly as typed', () => {
+test('an ordinary command line with no secret in it is published exactly as typed', () => {
   const store = createIngestStore(allSourcesOn());
-  publishEvent(store, {
-    source: 'shellHistory', kind: 'command', summary: 'powershell: npm run build -- --mode production', scope: { root: null },
-  }, NOW);
-  assert.equal(snapshotEvents(store)[0].summary, 'powershell: npm run build -- --mode production');
-});
-
-test('a secret in a shell command never reaches a ring entry', () => {
-  const store = createIngestStore(allSourcesOn());
-  publishEvent(store, {
-    source: 'shellHistory',
-    kind: 'command',
-    summary: 'powershell: $env:GITHUB_TOKEN = "ghp_aaaabbbbccccdddd"',
-    scope: { root: null },
-    detail: { shell: 'powershell', text: 'export API_KEY=sk-live-1234' },
-  }, NOW);
-  const [stored] = snapshotEvents(store);
-  assert.ok(!stored.summary.includes('ghp_aaaabbbbccccdddd'), stored.summary);
-  assert.ok(!stored.detail.text.includes('sk-live-1234'), stored.detail.text);
-  assert.ok(stored.summary.includes(SCRUB_PLACEHOLDER));
+  publishEvent(store, terminalEvent('npm run build -- --mode production'), NOW);
+  assert.equal(snapshotEvents(store)[0].summary, 'npm run build -- --mode production');
 });
 
 test('a multiline chunk loses each secret value and keeps every other line intact', () => {
@@ -348,19 +305,6 @@ test('a secret in terminal output never reaches a ring entry', () => {
   assert.ok(stored.summary.includes(SCRUB_PLACEHOLDER));
 });
 
-test('detail strings are scrubbed too, and unsupported detail value types are dropped', () => {
-  const store = createIngestStore(allSourcesOn());
-  publishEvent(store, terminalEvent('ran a command', {
-    detail: { text: 'api_key=abc123', truncated: true, droppedBytes: 12, nested: { deep: 'x' }, list: [1] },
-  }), NOW);
-  const [stored] = snapshotEvents(store);
-  assert.ok(stored.detail.text.includes(SCRUB_PLACEHOLDER));
-  assert.equal(stored.detail.truncated, true);
-  assert.equal(stored.detail.droppedBytes, 12);
-  assert.ok(!('nested' in stored.detail));
-  assert.ok(!('list' in stored.detail));
-});
-
 // --- Normalization --------------------------------------------------------
 
 test('an unknown source, an undeclared kind or an empty summary is rejected rather than stored', () => {
@@ -387,7 +331,7 @@ test('a publish to a disabled source is dropped and consumes no ring', () => {
   const store = createIngestStore(config);
   assert.equal(publishEvent(store, { source: 'git', kind: 'commit', summary: 'nope' }, NOW), null);
   assert.equal(publishEvent(store, { source: 'nonsense', kind: 'output', summary: 'nope' }, NOW), null);
-  assert.deepEqual(ringStats(store).map((row) => row.source), ['terminal']);
+  assert.deepEqual([...store.rings.keys()], ['terminal']);
 });
 
 // --- Rings ----------------------------------------------------------------
@@ -417,9 +361,9 @@ test('the byte bound evicts oldest first even while the entry count still has ro
   });
   const store = createIngestStore(config);
   for (let index = 1; index <= 20; index += 1) publishEvent(store, terminalEvent(`${index}: ${'x'.repeat(100)}`), NOW);
-  const [stats] = ringStats(store);
-  assert.ok(stats.events < 20, 'the byte bound should have evicted');
-  assert.ok(stats.bytes <= 700, `ring holds ${stats.bytes} bytes`);
+  const ring = store.rings.get('terminal');
+  assert.ok(ring.entries.length < 20, 'the byte bound should have evicted');
+  assert.ok(ring.totalBytes <= 700, `ring holds ${ring.totalBytes} bytes`);
   assert.equal(snapshotEvents(store)[0].summary.startsWith('20: '), true);
 });
 
@@ -487,18 +431,18 @@ test('scopes filter by project root, and a machine-scope event is never filtered
   const store = createIngestStore(allSourcesOn());
   publishEvent(store, terminalEvent('in this repo', { scope: { root: '/repo', sessionId: 's1' } }), NOW);
   publishEvent(store, terminalEvent('somewhere else', { scope: { root: '/other', sessionId: 's2' } }), NOW);
-  publishEvent(store, { source: 'shellHistory', kind: 'command', summary: 'ls -la' }, NOW);
+  publishEvent(store, terminalEvent('no cwd to name', { scope: { root: null, sessionId: 's3' } }), NOW);
   const digest = buildContextDigest(store, { now: NOW, scopes: ['/repo'] });
   assert.ok(digest.includes('in this repo'));
   assert.ok(!digest.includes('somewhere else'));
-  assert.ok(digest.includes('- shell 0s ago (machine scope): ls -la'));
+  assert.ok(digest.includes('- terminal 0s ago (machine scope): no cwd to name'));
 });
 
 test('the digest is deterministic: the same store and the same now build the same string', () => {
   const store = createIngestStore(allSourcesOn());
   publishEvent(store, terminalEvent('one'), NOW);
   publishEvent(store, { source: 'fs', kind: 'file-change', summary: 'edited app.js', scope: { root: '/repo' } }, NOW);
-  publishEvent(store, { source: 'editor', kind: 'doc-save', summary: 'saved plan.md', scope: { root: '/repo' } }, NOW);
+  publishEvent(store, { source: 'agentLogs', kind: 'agent-turn', summary: 'claude: done', scope: { root: '/repo' } }, NOW);
   const first = buildContextDigest(store, { now: NOW + 120000 });
   const second = buildContextDigest(store, { now: NOW + 120000 });
   assert.equal(first, second);
