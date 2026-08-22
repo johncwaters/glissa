@@ -13,8 +13,9 @@
  *
  * SCALE is the constraint that shapes the sweep. A real projects root holds hundreds of directories and
  * thousands of finished transcripts, so no pass here may cost one stat per transcript: a directory is
- * listed only when its mtime moved, and a FILE is promotion-checked only once, because an append moves
- * neither. Anything that walks the whole tree every sweep starves the live session it exists to find.
+ * listed only when its mtime moved or has yet to settle, and a FILE is promotion-checked only once,
+ * because an append moves neither. Anything that walks the whole tree every sweep starves the live
+ * session it exists to find.
  */
 
 'use strict';
@@ -28,7 +29,8 @@ const {
 } = require('./core/usage-scan-core');
 const { INTERACTIVE_LANE } = require('./core/usage-lane-core');
 const {
-  MAX_CATCH_UP_BYTES, applyRead, createTailState, isActiveMtime, pickStaleByMtime, planRead,
+  MAX_CATCH_UP_BYTES, applyRead, canTrustCachedListing, createTailState, isActiveMtime, pickStaleByMtime,
+  planRead,
 } = require('./core/ingest-tail-core');
 const { isDispatchWorkdir, mapAgentLine } = require('./core/ingest-agent-core');
 const { positiveInt } = require('./core/ingest-number-core');
@@ -281,7 +283,7 @@ function createAgentLogIngest({
       forgetFile(path.join(dir, name));
     }
     const entry = {
-      mtimeMs, root, dirs: listed.dirs, files: listed.files, pending,
+      mtimeMs, listedAtMs: nowFn(), root, dirs: listed.dirs, files: listed.files, pending,
     };
     dirCache.set(dir, entry);
     return entry;
@@ -297,7 +299,7 @@ function createAgentLogIngest({
       return remaining;
     }
     let cached = dirCache.get(dir);
-    if (!cached || cached.mtimeMs !== stat.mtimeMs) {
+    if (!cached || cached.mtimeMs !== stat.mtimeMs || !canTrustCachedListing(cached)) {
       const listed = await listDir(dir, root.vendor);
       if (!alive() || !listed) return remaining;
       cached = cacheListing(dir, root, cached, listed, stat.mtimeMs);
