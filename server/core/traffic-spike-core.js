@@ -86,6 +86,10 @@ function verdict(action, reason, nextState, multiple) {
   return { action, reason, nextState, multiple };
 }
 
+function nextTrafficState(state, users, overrides = {}) {
+  return { ...state, peakUsers: Math.max(state.peakUsers, users), ...overrides };
+}
+
 // The clear action is silent downstream: it only re-arms future spike pings.
 function decideTrafficSpike({ currentUsers, baseline, prev, now, cfg } = {}) {
   const options = cfg && typeof cfg === 'object' ? cfg : {};
@@ -107,25 +111,14 @@ function decideTrafficSpike({ currentUsers, baseline, prev, now, cfg } = {}) {
 
   if (state.active) {
     if (state.lastPingedUsers > 0 && users >= ESCALATION_GROWTH_FACTOR * state.lastPingedUsers) {
-      return verdict('escalate', 'still-climbing', {
-        active: true,
-        lastPingAt: nowMs,
-        lastPingedUsers: users,
-        peakUsers: Math.max(state.peakUsers, users),
-      }, multiple);
+      const escalated = nextTrafficState(state, users, { active: true, lastPingAt: nowMs, lastPingedUsers: users });
+      return verdict('escalate', 'still-climbing', escalated, multiple);
     }
     if (users < (multiplier / 2) * floor) {
-      return verdict('clear', 'back-to-normal', {
-        active: false,
-        lastPingAt: state.lastPingAt,
-        lastPingedUsers: 0,
-        peakUsers: 0,
-      }, multiple);
+      const cleared = nextTrafficState(state, users, { active: false, lastPingedUsers: 0, peakUsers: 0 });
+      return verdict('clear', 'back-to-normal', cleared, multiple);
     }
-    return verdict('none', 'already-reported', {
-      ...state,
-      peakUsers: Math.max(state.peakUsers, users),
-    }, multiple);
+    return verdict('none', 'already-reported', nextTrafficState(state, users), multiple);
   }
 
   if (!isSpiking) return verdict('none', 'no-spike', state, multiple);
@@ -133,20 +126,12 @@ function decideTrafficSpike({ currentUsers, baseline, prev, now, cfg } = {}) {
   // Inside the cooldown the spike is still recorded as active, so the tick it ends still clears and
   // the next genuine takeoff pings; only the buzz is withheld.
   if (state.lastPingAt > 0 && nowMs - state.lastPingAt < cooldownMinutes * 60000) {
-    return verdict('none', 'cooldown', {
-      active: true,
-      lastPingAt: state.lastPingAt,
-      lastPingedUsers: users,
-      peakUsers: Math.max(state.peakUsers, users),
-    }, multiple);
+    const held = nextTrafficState(state, users, { active: true, lastPingedUsers: users });
+    return verdict('none', 'cooldown', held, multiple);
   }
 
-  return verdict('ping', 'spike-started', {
-    active: true,
-    lastPingAt: nowMs,
-    lastPingedUsers: users,
-    peakUsers: Math.max(state.peakUsers, users),
-  }, multiple);
+  const started = nextTrafficState(state, users, { active: true, lastPingAt: nowMs, lastPingedUsers: users });
+  return verdict('ping', 'spike-started', started, multiple);
 }
 
 module.exports = {
@@ -157,7 +142,6 @@ module.exports = {
   spikeSummaryLine,
   TRAFFIC_KEY,
   MIN_BASELINE_SAMPLE_HOURS,
-  ESCALATION_GROWTH_FACTOR,
   DEFAULT_TRAFFIC_SPIKE_MULTIPLIER,
   DEFAULT_TRAFFIC_SPIKE_MIN_USERS,
   DEFAULT_TRAFFIC_SPIKE_COOLDOWN_MINUTES,

@@ -7,7 +7,7 @@
 // who has configured none of the lanes still finds the surface and is told where to switch them on.
 
 import { createAttentionAck } from './attention-ack-core.mjs';
-import { buildPanelSection, buildStatChip, el, isPanelHidden, projectsOf } from './dom-helpers.js';
+import { buildPanelSection, buildStatChip, el, externalLink, isPanelHidden, projectsOf } from './dom-helpers.js';
 import { createPosthogReportDialog } from './dialogs.js';
 import { sendControlRequest } from './control-ws.js';
 import { createPollAgoTicker, formatAgo, formatDuration } from './poll-ago.js';
@@ -211,14 +211,9 @@ function buildIssueRow(issue, projectId) {
   const change = el('span', 'radar-change', CHANGE_LABEL[issue.change] || String(issue.change || 'unknown'));
 
   // Issue titles come from a third-party service: built as text, never markup.
-  const title = issue.url ? el('a', 'radar-issue-title') : el('span', 'radar-issue-title');
-  title.textContent = issue.title || 'Untitled issue';
+  const title = externalLink('radar-issue-title', issue.title || 'Untitled issue', issue.url);
+  // A placeholder title is not worth a tooltip that repeats it.
   title.title = issue.title || '';
-  if (issue.url) {
-    title.href = issue.url;
-    title.target = '_blank';
-    title.rel = 'noopener';
-  }
 
   const occurrences = el('span', 'radar-metric');
   occurrences.append(el('span', 'radar-metric-value', formatCount(issue.occurrences)), el('span', 'radar-metric-label', 'occ'));
@@ -399,14 +394,7 @@ function buildInvestigationRow(row) {
   verdict.dataset.verdict = row.verdict;
 
   // Titles and summaries come from a third-party service and a headless agent: text, never markup.
-  const title = row.url ? el('a', 'radar-issue-title') : el('span', 'radar-issue-title');
-  title.textContent = row.title;
-  title.title = row.title;
-  if (row.url) {
-    title.href = row.url;
-    title.target = '_blank';
-    title.rel = 'noopener';
-  }
+  const title = externalLink('radar-issue-title', row.title, row.url);
 
   const copy = el('span', 'radar-issue-copy');
   copy.append(title);

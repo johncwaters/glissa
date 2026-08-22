@@ -31,27 +31,34 @@ const path = require('node:path');
 
 const { createWatchDebounce } = require('./watch-debounce');
 
-// Resolve a linked worktree's per-worktree git metadata dir from its `.git`
-// pointer file (`gitdir: <path>`), or null when `dir` is not a linked worktree
-// (a normal checkout has a `.git` DIRECTORY; a submodule points at `modules/`).
-// The pointer may be absolute or, on Git 2.48+ `--relative-paths`, relative to
-// the worktree dir - both are resolved to an absolute path. fs-only, never throws.
-function resolveWorktreeGitDir(dir) {
+// The raw `gitdir: <path>` pointer inside a linked worktree's `.git` FILE, or null when `dir` is not
+// a linked worktree. A normal checkout has a `.git` DIRECTORY; a submodule ALSO uses a `.git` file but
+// points at `.../.git/modules/<name>`, so a `worktrees/` path segment is required - the `(^|[/\\])`
+// anchor also catches relative pointers (Git 2.48+ `--relative-paths`, e.g. `../.git/worktrees/x` or a
+// bare `worktrees/x`), and the separator class keeps the test agnostic of the slash git wrote. .trim()
+// drops the trailing CR of a CRLF `.git` file (the form git writes on Windows). fs-only: no subprocess,
+// no dependency, in keeping with the "structural signals, no scraping" rule. Never throws.
+function readWorktreeGitdirPointer(dir) {
   if (!dir) return null;
   try {
     const dotGit = path.join(dir, '.git');
     if (!fs.statSync(dotGit).isFile()) return null;
     const m = /^gitdir:\s*(.+)$/m.exec(fs.readFileSync(dotGit, 'utf8'));
     if (!m) return null;
-    // .trim() drops a CRLF tail; require a `worktrees/` segment (separator-agnostic)
-    // so a submodule's `modules/` pointer is rejected, mirroring detectLinkedWorktree.
     const raw = m[1].trim();
-    if (!/(^|[/\\])worktrees[/\\]/.test(raw)) return null;
-    const resolved = path.resolve(dir, raw);
-    return fs.existsSync(resolved) ? resolved : null;
+    return /(^|[/\\])worktrees[/\\]/.test(raw) ? raw : null;
   } catch {
     return null;
   }
+}
+
+// Absolute path of that worktree's per-worktree git metadata dir, or null when there is no pointer or
+// its target is gone. Unlike the pointer read, an fs.watch target must actually EXIST.
+function resolveWorktreeGitDir(dir) {
+  const raw = readWorktreeGitdirPointer(dir);
+  if (!raw) return null;
+  const resolved = path.resolve(dir, raw);
+  return fs.existsSync(resolved) ? resolved : null;
 }
 
 // A one-directory, debounced fs.watch over a worktree's gitdir.
@@ -77,4 +84,4 @@ function createWorktreeWatcher({ worktreeDir, onChange, debounceMs = 400 }) {
   return { start, stop: w.stop, get active() { return w.active; } };
 }
 
-module.exports = { createWorktreeWatcher, resolveWorktreeGitDir };
+module.exports = { createWorktreeWatcher, resolveWorktreeGitDir, readWorktreeGitdirPointer };

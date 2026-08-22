@@ -160,7 +160,6 @@ function isCheckFresh(lastCheckAt, nowMs, ttlMs) {
 }
 
 module.exports = {
-  REPO_SLUG,
   NPM_GLOBAL_COMMAND,
   CLONE_COMMAND,
   normalizeSha,

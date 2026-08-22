@@ -36,6 +36,7 @@ const {
   resolveProjectsDirs,
   splitLines,
 } = require('./core/usage-scan-core');
+const { createJsonStateWriter } = require('./json-file');
 const { codexDedupIdentity, createCodexUsageState, parseCodexUsageLine } = require('./core/usage-codex-core');
 const { grokDedupIdentity, parseGrokUsageLine } = require('./core/usage-grok-core');
 
@@ -102,8 +103,14 @@ function createUsageScanner(deps = {}) {
   let currentFileJournal = null;
   let warehouseRecords = [];
   let warehouseLoaded = false;
-  let warehouseSignature = null;
-  let warehouseWriteChain = Promise.resolve();
+  // tmp + rename, so a crash mid-write can never leave a half-written history file behind.
+  const warehouseWriter = warehousePath
+    ? createJsonStateWriter({
+      filePath: warehousePath,
+      fsPromises,
+      warn: (error) => warn(logger, `usage warehouse write failed: ${error.message}`),
+    })
+    : null;
 
   function runPass({ force = false } = {}) {
     if (activePass) {
@@ -382,7 +389,7 @@ function createUsageScanner(deps = {}) {
       const parsed = JSON.parse(text);
       const records = Array.isArray(parsed?.records) ? parsed.records : [];
       warehouseRecords = pruneWarehouse(records, { retainDays: warehouseRetainDays, todayKey: todayDayKey() });
-      warehouseSignature = null;
+      warehouseWriter.reset();
     } catch (error) {
       // A corrupt file starts empty rather than crashing the lane: the transcripts are still the source of
       // truth for everything inside live coverage, and the next complete pass rebuilds what it can see.
@@ -397,33 +404,17 @@ function createUsageScanner(deps = {}) {
    * is fresher), while a day the transcripts no longer have survives untouched.
    */
   async function persistWarehouse() {
-    if (!warehousePath) return;
+    if (!warehouseWriter) return;
     await loadWarehouse();
     const rollups = cachedRollupsForDays(undefined, retainDays);
     const liveDays = rollups.daily.map((row) => row.day);
     const merged = mergeWarehouse(warehouseRecords, rollupFromReport(rollups.daily), { liveDays });
     warehouseRecords = pruneWarehouse(merged, { retainDays: warehouseRetainDays, todayKey: todayDayKey() });
-    const payload = `${JSON.stringify({ version: 1, updatedAt: new Date(nowFn()).toISOString(), records: warehouseRecords }, null, 2)}\n`;
-    const signature = JSON.stringify(warehouseRecords);
     // Nothing moved: an idle machine rescanning on its interval should not rewrite the same bytes.
-    if (signature === warehouseSignature) return;
-    warehouseSignature = signature;
-    // Not redundant: writeWarehouseFile's own catch can throw (bad logger), which must not fail the pass.
-    warehouseWriteChain = warehouseWriteChain.then(() => writeWarehouseFile(payload)).catch(() => {});
-    await warehouseWriteChain;
-  }
-
-  // tmp + rename, so a crash mid-write can never leave a half-written history file behind.
-  async function writeWarehouseFile(payload) {
-    const tmpPath = `${warehousePath}.tmp`;
-    try {
-      await fsPromises.mkdir(path.dirname(warehousePath), { recursive: true });
-      await fsPromises.writeFile(tmpPath, payload);
-      await fsPromises.rename(tmpPath, warehousePath);
-    } catch (error) {
-      warn(logger, `usage warehouse write failed: ${error.message}`);
-      warehouseSignature = null;
-    }
+    await warehouseWriter.write(
+      warehouseRecords,
+      () => `${JSON.stringify({ version: 1, updatedAt: new Date(nowFn()).toISOString(), records: warehouseRecords }, null, 2)}\n`,
+    );
   }
 
   function todayDayKey() {
@@ -550,7 +541,7 @@ function createUsageScanner(deps = {}) {
     const blockEntries = entriesWithinDays(entries, { now, retainDays: reportRetainDays })
       .filter((entry) => isClaudeEntry(entry));
     const blockSummary = buildBlocks(blockEntries, { blockHours, now });
-    const activeBurn = burnRate(blockSummary.activeBlock, now);
+    const activeBurn = burnRate(blockSummary.activeBlock);
     const activeBlock = blockSummary.activeBlock
       ? { ...blockSummary.activeBlock, burn: activeBurn, projection: projectBlock(blockSummary.activeBlock, activeBurn, now) }
       : null;

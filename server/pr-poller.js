@@ -1,6 +1,8 @@
 'use strict';
 
 const core = require('./core/pr-review-core');
+const { firstLine, raceWithAbort } = require('./ephemeral-session');
+const { createTickLoop } = require('./lane-runner');
 
 // The GitHub PR auto-review poller. IO-FREE by construction: every side effect (gh/git calls,
 // worktree ops, session spawn, telegram, state persistence, timers) is injected, so the tick logic
@@ -41,20 +43,17 @@ function createPrPoller(deps) {
   const reviewTimeoutSeconds = deps.reviewTimeoutSeconds || 900;
 
   let state = {};
-  let timer = null;
-  let tickRunning = false;
-  let stopped = false;
-  let persistChain = Promise.resolve();
-  // In-flight runReview() calls, tracked so stop() can drain them before a caller reuses the
-  // dependencies (result-file paths, gitWorkspace, state file) for a fresh poller instance.
-  const running = new Set();
 
-  function persist() {
-    persistChain = persistChain.then(() => writeState(state)).catch((e) => {
-      log.warn(`[pr-poller] state write failed: ${e.message}`);
-    });
-    return persistChain;
-  }
+  const loop = createTickLoop({
+    tag: 'pr-poller',
+    intervalMs: intervalMinutes * 60000,
+    tick: () => runTick(),
+    writeState: () => writeState(state),
+    setIntervalFn,
+    clearIntervalFn,
+    log,
+  });
+  const persist = () => loop.persist();
 
   function inFlightCount() {
     return Object.values(state).filter((e) => e?.inFlight).length;
@@ -63,10 +62,6 @@ function createPrPoller(deps) {
   function ping(kind, ctx) {
     const msg = core.pingFor(kind, ctx);
     if (msg) telegram(msg);
-  }
-
-  function firstLine(s) {
-    return String(s || '').split(/\r?\n/)[0].trim();
   }
 
   function finishReview(key, verdict, ctx, pr, wasConflicting) {
@@ -84,24 +79,16 @@ function createPrPoller(deps) {
     return persist();
   }
 
-  // Race the injected spawnReview against a hard timeout so a hung `claude -p` session can never pin
-  // a PR in-flight forever (critic finding #1). On timeout the review is aborted (backend destroys the
-  // session on the signal) and resolved to ERROR, freeing the concurrency slot.
-  async function spawnWithTimeout(args) {
-    const controller = new AbortController();
-    let timeoutHandle = null;
-    const timeout = new Promise((resolve) => {
-      timeoutHandle = setTimeoutFn(() => {
-        controller.abort();
-        resolve({ verdict: 'ERROR', summary: 'review timed out' });
-      }, args.timeoutMs);
-      if (timeoutHandle && typeof timeoutHandle.unref === 'function') timeoutHandle.unref();
+  function spawnWithTimeout(args) {
+    return raceWithAbort({
+      timeoutMs: args.timeoutMs,
+      setTimeoutFn,
+      clearTimeoutFn,
+      onTimeout: () => ({ verdict: 'ERROR', summary: 'review timed out' }),
+      onEmpty: () => ({ verdict: 'ERROR', summary: 'no verdict' }),
+      start: (signal) => Promise.resolve(spawnReview({ ...args, signal }))
+        .catch((e) => ({ verdict: 'ERROR', summary: firstLine(e.message) })),
     });
-    const run = Promise.resolve(spawnReview({ ...args, signal: controller.signal }))
-      .catch((e) => ({ verdict: 'ERROR', summary: firstLine(e.message) }));
-    const res = await Promise.race([run, timeout]);
-    if (timeoutHandle) clearTimeoutFn(timeoutHandle);
-    return res || { verdict: 'ERROR', summary: 'no verdict' };
   }
 
   async function requeryHead(gh, number, oldHead) {
@@ -260,7 +247,7 @@ function createPrPoller(deps) {
     let slots = maxConcurrentReviews - inFlightCount();
     for (const pr of core.planReviews(actionable, state)) {
       if (slots <= 0) break;
-      if (stopped) break;
+      if (loop.isStopped()) break;
       const entry = state[pr.key] || {};
       entry.inFlight = true;
       delete entry.reason;
@@ -269,11 +256,9 @@ function createPrPoller(deps) {
       slots -= 1;
       // runReview's finally block awaits gitWorkspace.discard, which can reject; the .catch here keeps
       // this a never-rejecting tracking promise so stop()'s Promise.allSettled always resolves promptly.
-      const reviewPromise = runReview(gh, projectPath, slug, pr).catch((e) => {
+      loop.track(runReview(gh, projectPath, slug, pr).catch((e) => {
         log.warn(`[pr-poller] review crashed for ${pr.key}: ${e.message}`);
-      });
-      running.add(reviewPromise);
-      reviewPromise.finally(() => running.delete(reviewPromise));
+      }));
     }
 
     return {
@@ -288,26 +273,20 @@ function createPrPoller(deps) {
     };
   }
 
-  async function tick() {
-    if (tickRunning || stopped) return;
-    tickRunning = true;
-    try {
-      let dirty = false;
-      const summaries = [];
-      for (const projectId of projects) {
-        const res = await tickProject(projectId).catch((e) => {
-          log.warn(`[pr-poller] tick failed for ${projectId}: ${e.message}`);
-          return null;
-        });
-        if (!res) continue;
-        if (res.dirty) dirty = true;
-        summaries.push(res.summary);
-      }
-      if (dirty) await persist();
-      onTickComplete({ type: 'pr-status', ts: now(), projects: summaries });
-    } finally {
-      tickRunning = false;
+  async function runTick() {
+    let dirty = false;
+    const summaries = [];
+    for (const projectId of projects) {
+      const res = await tickProject(projectId).catch((e) => {
+        log.warn(`[pr-poller] tick failed for ${projectId}: ${e.message}`);
+        return null;
+      });
+      if (!res) continue;
+      if (res.dirty) dirty = true;
+      summaries.push(res.summary);
     }
+    if (dirty) await persist();
+    onTickComplete({ type: 'pr-status', ts: now(), projects: summaries });
   }
 
   async function pruneOrphanWorktrees() {
@@ -335,31 +314,17 @@ function createPrPoller(deps) {
   }
 
   async function start() {
-    stopped = false;
-    state = (await readState()) || {};
-    for (const k of Object.keys(state)) {
-      if (state[k]) state[k].inFlight = false;
-    }
-    await pruneOrphanWorktrees().catch(() => {});
-    await probeAuth().catch(() => {});
-    await tick();
-    timer = setIntervalFn(() => { void tick(); }, intervalMinutes * 60000);
-    if (timer && typeof timer.unref === 'function') timer.unref();
+    await loop.start(async () => {
+      state = (await readState()) || {};
+      for (const k of Object.keys(state)) {
+        if (state[k]) state[k].inFlight = false;
+      }
+      await pruneOrphanWorktrees().catch(() => {});
+      await probeAuth().catch(() => {});
+    });
   }
 
-  // Async so a caller that restarts the poller (backend.js startPrPoller) can await it: the old
-  // instance's in-flight reviews (up to reviewTimeoutSeconds) and pending state writes must drain
-  // BEFORE a new instance reuses the same result-file paths, gitWorkspace, and state file, or a
-  // duplicate review races the old one and pruneOrphanWorktrees can remove its live worktree.
-  async function stop() {
-    stopped = true;
-    if (timer) clearIntervalFn(timer);
-    timer = null;
-    await Promise.allSettled([...running]);
-    await persistChain;
-  }
-
-  return { start, stop, tick, _state: () => state };
+  return { start, stop: loop.stop, tick: loop.tick, _state: () => state };
 }
 
 module.exports = { createPrPoller };

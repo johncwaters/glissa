@@ -8,7 +8,7 @@ const { STATES, MERGEABLE_LIVE_STATES, KILLABLE_STATES, RESTARTABLE_STATES } = r
 const { isSameDirectoryPath } = require("../shared/paths");
 const { createOscTitleSource } = require("../detection/osc-title-source");
 const { createStatusSource } = require("../detection/status-source");
-const { createWorktreeWatcher } = require("../detection/worktree-watch");
+const { createWorktreeWatcher, readWorktreeGitdirPointer } = require("../detection/worktree-watch");
 const { createIntegrationRefWatcher } = require("../detection/integration-ref-watch");
 const { writeSessionSettings } = require("../detection/settings-injector");
 const {
@@ -57,6 +57,9 @@ const SLEEP_KILL_TIMEOUT_MS = 15 * 60 * 1000;
 const PASTE_READY_STATES = new Set([
   STATES.IDLE, STATES.RUNNING, STATES.WAITING, STATES.COMPLETE,
 ]);
+
+// The two states an operator can dismiss a card out of: an unanswered prompt and an unopened result.
+const DISMISSIBLE_STATES = new Set([STATES.WAITING, STATES.COMPLETE]);
 
 // Trailing debounce for the worktree-change funnel: a single `git commit` touches
 // several gitdir files and a turn-end can race the fs.watch, so collapse a burst
@@ -114,27 +117,10 @@ const RESYNC_COMMANDS = {
 // session/core/state-machine.js; the transition() engine below consumes them.
 // ---------------------------------------------------------------------------
 
-// A linked git worktree marks its working dir with a `.git` FILE containing
-// `gitdir: .../.git/worktrees/<name>`, whereas a normal checkout has a `.git`
-// DIRECTORY. A submodule also uses a `.git` file, but it points at
-// `.../.git/modules/<name>`, so we require a `worktrees/` path segment to avoid
-// flagging submodules as worktrees. The `(^|/)` anchor also catches relative
-// pointers (Git 2.48+ `--relative-paths`, e.g. `../.git/worktrees/x` or a bare
-// `worktrees/x`). fs-only: no subprocess, no dependency, in keeping with the
-// "structural signals, no scraping" rule.
+// The card marker only asks whether this cwd IS a linked worktree, so a pointer at all is the whole
+// answer (unlike the watch target, which must also still exist on disk).
 function detectLinkedWorktree(dir) {
-  if (!dir) return false;
-  try {
-    const dotGit = path.join(dir, ".git");
-    if (!fs.statSync(dotGit).isFile()) return false;
-    const m = /^gitdir:\s*(.+)$/m.exec(fs.readFileSync(dotGit, "utf8"));
-    // .trim() drops the trailing CR from a CRLF `.git` file (the form git writes
-    // on Windows); .replace normalizes Windows backslash gitdir paths to forward
-    // slashes so the `worktrees/` segment test is separator-agnostic.
-    return !!m && /(^|\/)worktrees\//.test(m[1].trim().replace(/\\/g, "/"));
-  } catch {
-    return false;
-  }
+  return readWorktreeGitdirPointer(dir) !== null;
 }
 
 class Session extends EventEmitter {
@@ -459,6 +445,25 @@ class Session extends EventEmitter {
     this._recorder = recorder;
   }
 
+  // -- Private timer fields (one shape: replace any pending timer, null the field from inside the
+  // callback, unref only where named). The kill and sleep-kill timers deliberately do NOT unref: the
+  // process must stay alive long enough to finish the kill they drive.
+
+  _armTimer(field, ms, fn, { unref = false } = {}) {
+    this._clearTimer(field);
+    this[field] = setTimeout(() => {
+      this[field] = null;
+      fn();
+    }, ms);
+    if (unref && typeof this[field].unref === "function") this[field].unref();
+  }
+
+  _clearTimer(field) {
+    if (!this[field]) return;
+    clearTimeout(this[field]);
+    this[field] = null;
+  }
+
   // -- Detection signal handling (replaces all content scraping) --
 
   // Push a hook callback's normalized signal into the StatusSource. Called by the
@@ -543,9 +548,7 @@ class Session extends EventEmitter {
     const payload = raw.payload || {};
     const src = String(payload.source || "").toLowerCase();
     if (src !== "clear" && src !== "compact") return;
-    this._statusSource.reset();
-    this._titleSource.reset();
-    this._titleQuiet = true;
+    this._resetDetectionSources({ quiet: true });
     this._clearGateHeldReady();
     this._setPendingPromptKind(null);
   }
@@ -788,12 +791,7 @@ class Session extends EventEmitter {
   }
 
   _armGateTimer(ms) {
-    if (this._gateHeldReadyTimer) clearTimeout(this._gateHeldReadyTimer);
-    this._gateHeldReadyTimer = setTimeout(() => {
-      this._gateHeldReadyTimer = null;
-      this._evaluateGateHeldReady();
-    }, ms);
-    if (typeof this._gateHeldReadyTimer.unref === "function") this._gateHeldReadyTimer.unref();
+    this._armTimer("_gateHeldReadyTimer", ms, () => this._evaluateGateHeldReady(), { unref: true });
   }
 
   // How long a still-gated hold should wait before re-checking. The TTLs it waits on age from
@@ -820,9 +818,7 @@ class Session extends EventEmitter {
   _clearGateHeldReady() {
     this._gateHeldReady = null;
     this._gateQuietSince = null;
-    if (!this._gateHeldReadyTimer) return;
-    clearTimeout(this._gateHeldReadyTimer);
-    this._gateHeldReadyTimer = null;
+    this._clearTimer("_gateHeldReadyTimer");
   }
 
   // Re-validate the held ready and act on the verdict. Runs whenever the background count changes
@@ -888,6 +884,18 @@ class Session extends EventEmitter {
     this._idleTeammateNames.clear();
     this._declaredTeammateIds.clear();
     if (had) this._emitAgentsChange();
+  }
+
+  // Drop both signal sources back to a clean stream, and optionally latch the title source quiet or
+  // clear the background-work bookkeeping with them. Called from a PTY (re)start, a PTY exit, /clear
+  // and sleep. `quiet` omitted leaves the latch alone (sleep freezes state, it does not re-open a turn).
+  _resetDetectionSources({ quiet, clearTracking = false } = {}) {
+    this._titleSource.reset();
+    this._statusSource.reset();
+    if (quiet !== undefined) this._titleQuiet = quiet;
+    // Ahead of the caller's transition, never after: a drain-release here would fire a COMPLETE
+    // before the process_exit that follows it.
+    if (clearTracking) this._clearDetectionTracking();
   }
 
   // The full background-work reset a PTY start or exit needs. Order matters: a pending held ready
@@ -1397,12 +1405,13 @@ class Session extends EventEmitter {
     // in-place, non-isolated sessions, where baseSha (or the worktree-vs-HEAD diff) is all we have.
     let base = "";
     let aheadCount = "0";
-    const baseRef = await this._resolveEffectiveBase(opts);
-    if (baseRef && (await g(["rev-parse", "--verify", "--quiet", baseRef])).trim()) {
+    const { ref: baseRef, verified } = await this._resolveVerifiedBaseRef(g, opts);
+    if (verified) {
       base = (await g(["merge-base", baseRef, "HEAD"])).trim();
       aheadCount = (await g(["rev-list", "--count", `${baseRef}..HEAD`])).trim();
-    } else if (this.baseSha) {
-      base = this.baseSha;
+    }
+    if (!verified && baseRef) {
+      base = baseRef;
       aheadCount = (await g(["rev-list", "--count", `${base}..HEAD`])).trim();
     }
     const committed = base
@@ -1434,6 +1443,23 @@ class Session extends EventEmitter {
     }
     this._effectiveBase = this._integrationBranch || null;
     return this._integrationBranch || null;
+  }
+
+  // The base ref both git probes measure against: the effective base above once it actually resolves
+  // in this worktree, otherwise the stored fork SHA, otherwise null. `verified` says which of the two
+  // the caller got, since only a resolved REF is worth a merge-base. `swallowResolveError` is the
+  // signature probe's: a missing integration branch is EXPECTED there and must not be mistaken for
+  // the unreadable worktree its outer catch reports as UNKNOWN.
+  async _resolveVerifiedBaseRef(run, opts, { swallowResolveError = false } = {}) {
+    let verifiedRef = null;
+    try {
+      const candidate = await this._resolveEffectiveBase(opts);
+      if (candidate && (await run(["rev-parse", "--verify", "--quiet", candidate])).trim()) verifiedRef = candidate;
+    } catch (err) {
+      if (!swallowResolveError) throw err;
+    }
+    if (verifiedRef) return { ref: verifiedRef, verified: true };
+    return { ref: this.baseSha || null, verified: false };
   }
 
   // Ahead/behind of the project's LOCAL base branch (this._integrationBranch, e.g. develop) against
@@ -1556,14 +1582,7 @@ class Session extends EventEmitter {
     try {
       status = await run(["status", "--porcelain"]);
       head = (await run(["rev-parse", "HEAD"])).trim();
-      // A missing integration branch is EXPECTED (this probe exits non-zero); swallow only that, so it
-      // never counts as the worktree being unreadable.
-      let baseRef = null;
-      try {
-        const resolved = await this._resolveEffectiveBase(opts);
-        if (resolved && (await run(["rev-parse", "--verify", "--quiet", resolved])).trim()) baseRef = resolved;
-      } catch { /* no integration branch / upstream */ }
-      if (!baseRef && this.baseSha) baseRef = this.baseSha;
+      const { ref: baseRef } = await this._resolveVerifiedBaseRef(run, opts, { swallowResolveError: true });
       if (baseRef) ahead = (await run(["rev-list", "--count", `${baseRef}..HEAD`])).trim();
       // `behind` is measured against the MERGE TARGET (the local branch the merge engine fast-forwards),
       // NOT the effective/display base above: HEAD@{upstream} can sit at a stale commit while the local
@@ -1702,13 +1721,11 @@ class Session extends EventEmitter {
   // backend's integration-ref watcher fan-out calls checkWorktreeChange() directly (its nudge is coarse).
   _scheduleWorktreeCheck() {
     if (this._destroyed || !this.worktreeDir || this._worktreeCheckTimer) return;
-    this._worktreeCheckTimer = setTimeout(() => {
-      this._worktreeCheckTimer = null;
-      // Fire-and-forget: checkWorktreeChange catches its own git errors (returns a null signature),
-      // so the only thing to guard here is an unexpected rejection becoming an unhandledRejection.
+    // Fire-and-forget: checkWorktreeChange catches its own git errors (returns a null signature), so
+    // the only thing to guard is an unexpected rejection becoming an unhandledRejection.
+    this._armTimer("_worktreeCheckTimer", WORKTREE_CHECK_DEBOUNCE_MS, () => {
       this.checkWorktreeChange().catch(() => { /* best-effort; the watch + a later nudge retry */ });
-    }, WORKTREE_CHECK_DEBOUNCE_MS);
-    if (this._worktreeCheckTimer.unref) this._worktreeCheckTimer.unref();
+    }, { unref: true });
   }
 
   // (Re)start the two fs.watches this session's review gate rides on. Idempotent: fresh watchers replace
@@ -1738,10 +1755,7 @@ class Session extends EventEmitter {
   _stopWorktreeWatcher() {
     this._worktreeWatcher = stopWatcher(this._worktreeWatcher);
     this._integrationWatcher = stopWatcher(this._integrationWatcher);
-    if (this._worktreeCheckTimer) {
-      clearTimeout(this._worktreeCheckTimer);
-      this._worktreeCheckTimer = null;
-    }
+    this._clearTimer("_worktreeCheckTimer");
     this._lastWorktreeSig = null;
   }
 
@@ -1763,6 +1777,27 @@ class Session extends EventEmitter {
     }
   }
 
+  // Forget the worktree this session was running in and report the gate it lands on. The caller stops
+  // the watchers first: an fs.watch on a dir the engine is about to remove would ENOENT.
+  _clearWorktreeState(status) {
+    this._workspace = null;
+    this.worktreeDir = null;
+    this.commonGitDir = null;
+    this.isWorktree = false;
+    this._setMergeStatus(status);
+  }
+
+  // The tail both merge paths share once the merge itself did not succeed: a conflicted/lost-FF rebase
+  // PARKS with its context, anything else falls back to pending-review.
+  _applyParkedOrPending(r) {
+    if (r.parked) {
+      this._setMergeStatus("parked", { reason: r.reason || null, conflicts: r.conflicts || [] });
+      return r;
+    }
+    this._setMergeStatus("pending-review", { reason: r.reason || null });
+    return r;
+  }
+
   // Operator action: rebase-then-FF merge the session's worktree into the integration branch, then
   // tear it down. On a conflict/lost-FF the branch PARKS (worktree preserved). Returns the engine result.
   // `refused: true` on the early returns here (and in mergeAndContinue) marks a guard that fired BEFORE
@@ -1779,19 +1814,10 @@ class Session extends EventEmitter {
     if (failure) return failure;
     if (r.merged) {
       this._stopWorktreeWatcher();
-      this._workspace = null;
-      this.worktreeDir = null;
-      this.commonGitDir = null;
-      this.isWorktree = false;
-      this._setMergeStatus("merged");
+      this._clearWorktreeState("merged");
       return r;
     }
-    if (r.parked) {
-      this._setMergeStatus("parked", { reason: r.reason || null, conflicts: r.conflicts || [] });
-      return r;
-    }
-    this._setMergeStatus("pending-review", { reason: r.reason || null });
-    return r;
+    return this._applyParkedOrPending(r);
   }
 
   // Operator action behind the sidebar's "Merge" on a LIVE quiescent session (WAITING/IDLE/COMPLETE):
@@ -1831,16 +1857,11 @@ class Session extends EventEmitter {
       this._setMergeStatus("pending-review", { reason: "restore-conflict" });
       return r;
     }
-    if (r.parked) {
-      this._setMergeStatus("parked", { reason: r.reason || null, conflicts: r.conflicts || [] });
-      return r;
-    }
-    if (r.reason === "nothing-to-commit") {
+    if (!r.parked && r.reason === "nothing-to-commit") {
       this._setMergeStatus("none");
       return r;
     }
-    this._setMergeStatus("pending-review", { reason: r.reason || null });
-    return r;
+    return this._applyParkedOrPending(r);
   }
 
   // Re-adopt an existing on-disk session worktree at boot (e.g. a pending-review/parked session that
@@ -1868,11 +1889,7 @@ class Session extends EventEmitter {
     if (this._gitWorkspace && this._workspace) {
       try { await this._gitWorkspace.discard({ projectPath: this.path, workspace: this._workspace }); } catch { /* best-effort */ }
     }
-    this._workspace = null;
-    this.worktreeDir = null;
-    this.commonGitDir = null;
-    this.isWorktree = false;
-    this._setMergeStatus("none");
+    this._clearWorktreeState("none");
   }
 
   getDetectionStats() {
@@ -2086,9 +2103,7 @@ class Session extends EventEmitter {
     // start()); harmless no-op on the first start() (no data clients attached yet).
     // See backend.js wireSessionEvents -> closeSessionDataClients.
     this.emit("rebaseline");
-    this._titleSource.reset();
-    this._statusSource.reset();
-    this._titleQuiet = false;
+    this._resetDetectionSources({ quiet: false });
 
     const env = this._buildSpawnEnv({
       additionalDirsClaudeMd: packDelivery.packs.length > 0,
@@ -2324,11 +2339,7 @@ class Session extends EventEmitter {
 
   async _handlePtyExit(exitCode, signal) {
     const pid = this.ptyProcess ? this.ptyProcess.pid : null;
-    this._titleSource.reset();
-    this._statusSource.reset();
-    this._titleQuiet = false;
-    // A drain-release here would fire a COMPLETE ahead of the process_exit transition below.
-    this._clearDetectionTracking();
+    this._resetDetectionSources({ quiet: false, clearTracking: true });
     // The next spawn re-resolves its packs, so a notice owed by the dead one has no turn to ride.
     this._clearPackNotice();
     this._cleanupHooks();
@@ -2437,6 +2448,11 @@ class Session extends EventEmitter {
     });
   }
 
+  // An 'error' emit with no listener is an uncaught throw, and every kill path is best-effort.
+  _emitError(err) {
+    if (this.listenerCount("error") > 0) this.emit("error", err);
+  }
+
   kill() {
     if (!this.ptyProcess) return;
 
@@ -2447,18 +2463,15 @@ class Session extends EventEmitter {
     const pid = this.ptyProcess.pid;
     const ptyProcess = this.ptyProcess;
 
-    const emitIfListened = (err) => {
-      if (this.listenerCount("error") > 0) this.emit("error", err);
-    };
     if (process.platform === "win32") {
       // Retain the reap promise so the server lifecycle can await it before exit/respawn (orphan fix).
       // The .catch keeps the error-emission behavior; awaiters use Promise.allSettled so a reject is fine.
       this._killReap = this._taskkill(pid);
-      this._killReap.catch(emitIfListened);
+      this._killReap.catch((err) => this._emitError(err));
     }
     if (process.platform !== "win32") {
       this._killReap = Promise.resolve(); // SIGKILL is synchronous; nothing async to await
-      try { ptyProcess.kill(); } catch (err) { emitIfListened(err); }
+      try { ptyProcess.kill(); } catch (err) { this._emitError(err); }
     }
 
     this._forceKillAfterTimeout(pid);
@@ -2476,7 +2489,6 @@ class Session extends EventEmitter {
 
     let elapsed = 0;
     const poll = () => {
-      this._killPollTimer = null;
       if (this._destroyed) return;
       if (!checkAlive()) return;
       elapsed += KILL_POLL_INTERVAL_MS;
@@ -2484,32 +2496,25 @@ class Session extends EventEmitter {
         // Terminal branch: the process outlived the poll budget. Force-kill async on Windows; the
         // non-win32 SIGKILL stays synchronous (already a non-blocking signal).
         if (process.platform === "win32") {
-          this._taskkill(pid).catch((err) => {
-            if (this.listenerCount("error") > 0) this.emit("error", err);
-          });
+          this._taskkill(pid).catch((err) => this._emitError(err));
           return;
         }
         try {
           process.kill(pid, "SIGKILL");
         } catch (err) {
-          if (this.listenerCount("error") > 0) {
-            this.emit("error", err);
-          }
+          this._emitError(err);
         }
         return;
       }
-      this._killPollTimer = setTimeout(poll, KILL_POLL_INTERVAL_MS);
+      this._armTimer("_killPollTimer", KILL_POLL_INTERVAL_MS, poll);
     };
 
-    this._killPollTimer = setTimeout(poll, KILL_POLL_INTERVAL_MS);
+    this._armTimer("_killPollTimer", KILL_POLL_INTERVAL_MS, poll);
   }
 
   dismiss() {
-    if (this.state === STATES.WAITING) {
-      return this.transition("user_dismiss");
-    }
-    if (this.state === STATES.COMPLETE) return this.transition("user_dismiss");
-    return false;
+    if (!DISMISSIBLE_STATES.has(this.state)) return false;
+    return this.transition("user_dismiss");
   }
 
   sleep() {
@@ -2519,8 +2524,7 @@ class Session extends EventEmitter {
     // can still continue.
     if (!RESTARTABLE_STATES.includes(this.state)) return;
     this._sleeping = true;
-    this._titleSource.reset();
-    this._statusSource.reset();
+    this._resetDetectionSources();
     this._scheduleSleepKill();
     this.emit("sleep");
   }
@@ -2554,26 +2558,18 @@ class Session extends EventEmitter {
   }
 
   _scheduleSleepKill() {
-    this._clearSleepKill();
-    this._sleepKillTimer = setTimeout(() => {
-      this._sleepKillTimer = null;
+    this._armTimer("_sleepKillTimer", SLEEP_KILL_TIMEOUT_MS, () => {
       if (!this._sleeping) return;
-      const wasActive = this.state === STATES.RUNNING
-        || this.state === STATES.WAITING
-        || this.state === STATES.IDLE
-        || this.state === STATES.COMPLETE;
+      const wasActive = KILLABLE_STATES.includes(this.state);
       this.killSession();
       if (wasActive && RESTARTABLE_STATES.includes(this.state)) {
         this._autoKilled = true;
       }
-    }, SLEEP_KILL_TIMEOUT_MS);
+    });
   }
 
   _clearSleepKill() {
-    if (this._sleepKillTimer !== null) {
-      clearTimeout(this._sleepKillTimer);
-      this._sleepKillTimer = null;
-    }
+    this._clearTimer("_sleepKillTimer");
   }
 
   killSession() {
@@ -2686,10 +2682,7 @@ class Session extends EventEmitter {
 
     this.kill();
 
-    if (this._killPollTimer !== null) {
-      clearTimeout(this._killPollTimer);
-      this._killPollTimer = null;
-    }
+    this._clearTimer("_killPollTimer");
 
     this._clearGateHeldReady();
     this._clearPackNotice();

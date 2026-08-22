@@ -1,10 +1,11 @@
 'use strict';
 
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
 
-const DEFAULT_POSTHOG_REPORT_DIR = path.join(os.homedir(), '.glissa', 'posthog-reports');
+const { glissaHomeDir } = require('./config-store');
+
+const DEFAULT_POSTHOG_REPORT_DIR = path.join(glissaHomeDir(), 'posthog-reports');
 const POSTHOG_REPORT_ID_RE = /^[A-Za-z0-9_-]{1,128}$/;
 
 // Same traversal guard as control-handlers.js confinePath: resolve under the base dir and refuse a

@@ -1,11 +1,52 @@
 // ── DOM helpers ──────────────────────────────────────────────
 // Shared utility for creating DOM elements.
 
+import { BADGE_LABELS, STATE_GLYPHS } from '/shared/states.mjs';
+
 export function el(tag, className, text) {
   const e = document.createElement(tag);
   if (className) e.className = className;
   if (text != null) e.textContent = text;
   return e;
+}
+
+// A link when there is somewhere to go, otherwise the same text as a plain span.
+export function externalLink(className, text, url) {
+  const node = url ? el('a', className, text) : el('span', className, text);
+  node.title = text;
+  if (!url) return node;
+  node.href = url;
+  node.target = '_blank';
+  node.rel = 'noopener';
+  return node;
+}
+
+// ── State display ────────────────────────────────────────────
+// Here rather than in focus-view/attention-core.mjs: that core is dynamic-imported by a node test and
+// must stay free of the bundler-only /shared alias.
+
+export const MERGE_TAGS = { 'pending-review': 'REVIEW', parked: 'PARKED', merging: 'MERGING' };
+
+export function stateChip(state) {
+  return { glyph: STATE_GLYPHS[state] || '', label: (BADGE_LABELS[state] || state).toUpperCase() };
+}
+
+// ── Header height token ──────────────────────────────────────
+// --header-h anchors the notice region below whichever top bar is rendered; a bar measuring zero is the
+// hidden one, and writing its height would drop every toast on top of the bar that IS on screen.
+
+export function observeHeaderHeight(barEl) {
+  if (!barEl) return;
+  let pendingRaf = null;
+  const syncHeaderHeight = () => {
+    pendingRaf = null;
+    const height = barEl.offsetHeight;
+    if (height > 0) document.documentElement.style.setProperty('--header-h', `${height}px`);
+  };
+  new ResizeObserver(() => {
+    if (pendingRaf !== null) return;
+    pendingRaf = requestAnimationFrame(syncHeaderHeight);
+  }).observe(barEl);
 }
 
 // ── Panel chrome ─────────────────────────────────────────────

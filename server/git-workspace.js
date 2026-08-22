@@ -3,10 +3,9 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { execFile, execFileSync } = require('../server/child-process-safe');
-const { promisify } = require('node:util');
+const { execFileAsync, execFileSync } = require('../server/child-process-safe');
+const { createSerialQueue } = require('./spawn-gate');
 
-const execFileP = promisify(execFile);
 const fsp = fs.promises;
 
 // Shared {ok,out}/{ok:false,out,err} result shaping for the sync and async `run()` git helpers below.
@@ -77,7 +76,7 @@ function createGitWorkspace(opts = {}) {
   // `extra.env` overlays the inherited environment for the one call that needs it (GIT_EDITOR on a
   // rebase --continue). An injected fake simply ignores the third argument.
   const git = opts.git || (async (args, cwd, extra) => {
-    const { stdout } = await execFileP('git', args, {
+    const { stdout } = await execFileAsync('git', args, {
       cwd, encoding: 'utf8', timeout: 20000,
       ...(extra?.env ? { env: { ...process.env, ...extra.env } } : {}),
     });
@@ -93,15 +92,9 @@ function createGitWorkspace(opts = {}) {
   // synchronous engine was a de-facto global lock (two merges in one process never interleaved). Making
   // the engine async dissolves that implicit lock, so two different sessions merging into the SAME
   // integration branch could interleave their rev-list/stash/rebase/merge sequences across await gaps.
-  // serialize() chains the ref/worktree-MUTATING method bodies so they run strictly one at a time. The
-  // .catch on the tail keeps the queue from wedging on a rejection; the returned promise still carries
-  // the real result/rejection to the caller.
-  let tail = Promise.resolve();
-  const serialize = (fn) => {
-    const r = tail.then(fn);
-    tail = r.catch(() => {});
-    return r;
-  };
+  // serialize() chains the ref/worktree-MUTATING method bodies so they run strictly one at a time.
+  const engineQueue = createSerialQueue();
+  const serialize = (fn) => engineQueue.run(fn);
   const serialized = (body) => (args) => serialize(() => body(args));
 
   async function run(args, cwd, extra) {
@@ -655,7 +648,7 @@ async function populateWorktree(projectPath, wtDir, shareList) {
       await fsp.mkdir(path.dirname(dst), { recursive: true });
       if (srcStat.isDirectory()) {
         if (process.platform === 'win32') {
-          await execFileP('cmd', ['/c', 'mklink', '/J', dst, src]);
+          await execFileAsync('cmd', ['/c', 'mklink', '/J', dst, src]);
           continue;
         }
         await fsp.symlink(src, dst, 'dir');

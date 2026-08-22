@@ -153,10 +153,7 @@ class NotificationManager extends EventEmitter {
         this._deliverViaChannels(sessionName, entry);
         // Start escalation timer ONLY for 'waiting' category
         if (entry.category === 'waiting') {
-          entry.timer = setTimeout(() => {
-            entry.timer = null;
-            this._transition(sessionName, 'escalation_tick');
-          }, this._escalationIntervalMs);
+          this._armEscalation(sessionName, entry);
         }
         break;
 
@@ -165,10 +162,7 @@ class NotificationManager extends EventEmitter {
         entry.escalationCount++;
         this._deliverViaChannels(sessionName, entry);
         // Schedule next tick to ping-pong back to DELIVERED
-        entry.timer = setTimeout(() => {
-          entry.timer = null;
-          this._transition(sessionName, 'escalation_tick');
-        }, this._escalationIntervalMs);
+        this._armEscalation(sessionName, entry);
         break;
 
       case NS.ACKNOWLEDGED:
@@ -183,6 +177,13 @@ class NotificationManager extends EventEmitter {
         this._entries.delete(sessionName);
         break;
     }
+  }
+
+  _armEscalation(sessionName, entry) {
+    entry.timer = setTimeout(() => {
+      entry.timer = null;
+      this._transition(sessionName, 'escalation_tick');
+    }, this._escalationIntervalMs);
   }
 
   _exitHook(_sessionName, entry, state) {

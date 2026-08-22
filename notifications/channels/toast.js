@@ -23,26 +23,23 @@ function findBurntToastViaPowerShell() {
   return null;
 }
 
-function findBurntToastByPath() {
+// Both PowerShell editions keep user modules under <root>\<edition>\Modules; the search order is
+// per-user first (redirected to OneDrive on a synced Documents folder), machine-wide last.
+const POWERSHELL_EDITIONS = ['PowerShell', 'WindowsPowerShell'];
+
+function burntToastModuleRoots() {
   const home = process.env.USERPROFILE || process.env.HOME;
-  const candidates = [
-    path.join(home, 'Documents', 'PowerShell', 'Modules', 'BurntToast'),
-    path.join(home, 'Documents', 'WindowsPowerShell', 'Modules', 'BurntToast'),
-    ...(process.env.OneDrive
-      ? [
-          path.join(process.env.OneDrive, 'Documents', 'PowerShell', 'Modules', 'BurntToast'),
-          path.join(process.env.OneDrive, 'Documents', 'WindowsPowerShell', 'Modules', 'BurntToast'),
-        ]
-      : []),
-    ...(process.env.OneDriveCommercial
-      ? [
-          path.join(process.env.OneDriveCommercial, 'Documents', 'PowerShell', 'Modules', 'BurntToast'),
-          path.join(process.env.OneDriveCommercial, 'Documents', 'WindowsPowerShell', 'Modules', 'BurntToast'),
-        ]
-      : []),
-    path.join(process.env.ProgramFiles || 'C:\\Program Files', 'PowerShell', 'Modules', 'BurntToast'),
-    path.join(process.env.ProgramFiles || 'C:\\Program Files', 'WindowsPowerShell', 'Modules', 'BurntToast'),
-  ];
+  return [
+    home && path.join(home, 'Documents'),
+    process.env.OneDrive && path.join(process.env.OneDrive, 'Documents'),
+    process.env.OneDriveCommercial && path.join(process.env.OneDriveCommercial, 'Documents'),
+    process.env.ProgramFiles || 'C:\\Program Files',
+  ].filter(Boolean);
+}
+
+function findBurntToastByPath() {
+  const candidates = burntToastModuleRoots().flatMap((root) =>
+    POWERSHELL_EDITIONS.map((edition) => path.join(root, edition, 'Modules', 'BurntToast')));
 
   for (const candidate of candidates) {
     try {

@@ -4,7 +4,7 @@
 // configured the PR lane still finds the surface and is told where to switch it on.
 
 import { createAttentionAck } from './attention-ack-core.mjs';
-import { buildStatChip, el, isPanelHidden, projectsOf } from './dom-helpers.js';
+import { buildStatChip, el, externalLink, isPanelHidden, projectsOf } from './dom-helpers.js';
 import { phaseLabel, prAttentionSignature, prStatusPlaceholder, severityFor as severity, sortPrsByAttention, summarizePrs } from './pr-view-core.mjs';
 import { createPollAgoTicker } from './poll-ago.js';
 import { getPrsAttentionAck, setPrsAttentionAck } from './ui-prefs.js';
@@ -36,17 +36,10 @@ function buildPrRow(pr) {
   const phase = el('span', 'pr-phase', phaseText);
   if (!phaseKnown) phase.dataset.unknown = 'true';
 
-  // PR titles come from GitHub: built as text, never markup.
-  const title = pr.url ? el('a', 'pr-title') : el('span', 'pr-title');
   const label = pr.title || 'Untitled pull request';
   const numbered = Number.isFinite(pr.number) ? `#${pr.number} ${label}` : label;
-  title.textContent = numbered;
-  title.title = numbered;
-  if (pr.url) {
-    title.href = pr.url;
-    title.target = '_blank';
-    title.rel = 'noopener';
-  }
+  // PR titles come from GitHub: built as text, never markup.
+  const title = externalLink('pr-title', numbered, pr.url);
 
   row.append(stripe, phase, title);
 

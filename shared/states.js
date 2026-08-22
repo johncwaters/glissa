@@ -2,7 +2,9 @@
 
 // Canonical state definitions - single source of truth for server and browser.
 // Server-side: require('./shared/states')
-// Browser-side: served dynamically as ESM via GET /shared/states.mjs
+// Browser-side: /shared/states.mjs, GENERATED from these exports (the Vite plugin in vite.config.js
+// for a build, the route in server/backend.js for the no-build path). Constants only: both generators
+// serialize with JSON.stringify.
 
 const STATES = Object.freeze({
   DORMANT:      'DORMANT',

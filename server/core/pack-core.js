@@ -9,6 +9,7 @@
 // outputs, which is what makes the pack version a hash and a rebuild diffable.
 
 const crypto = require('node:crypto');
+const { isPlainObject } = require('./usage-number-core');
 
 // A pack name becomes a directory name under <packsRoot>/built, so it stays a plain segment.
 const PACK_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
@@ -94,11 +95,6 @@ function matchesGlob(pattern, filePath) {
   return matchSegments(splitSegments(pattern), 0, splitSegments(filePath), 0);
 }
 
-function isPlainObject(value) {
-  if (value == null || Array.isArray(value)) return false;
-  return typeof value === 'object';
-}
-
 function unknownKeyErrors(obj, allowed, label) {
   const errors = [];
   for (const key of Object.keys(obj)) {
@@ -133,6 +129,21 @@ function validateSource(source, index, errors, label = `sources[${index}]`) {
       errors.push(`${label}.exclude[${i}] must be a non-empty string`);
     }
   }
+}
+
+function validateOptionalArray(spec, key, notAnArrayMessage, validateItem, errors) {
+  const value = spec[key];
+  if (value === undefined) return;
+  if (!Array.isArray(value)) {
+    errors.push(notAnArrayMessage);
+    return;
+  }
+  for (const [index, item] of value.entries()) validateItem(item, index, errors);
+}
+
+function validateRule(rule, index, errors) {
+  if (typeof rule === 'string' && rule.trim().length > 0) return;
+  errors.push(`rules[${index}] must be a non-empty string`);
 }
 
 function validateSkill(skill, index, errors) {
@@ -207,36 +218,9 @@ function validatePackSpec(spec) {
     for (const [index, source] of spec.sources.entries()) validateSource(source, index, errors);
   }
 
-  if (spec.rules !== undefined) {
-    if (!Array.isArray(spec.rules)) {
-      errors.push('rules must be an array of strings');
-    }
-    if (Array.isArray(spec.rules)) {
-      for (const [index, rule] of spec.rules.entries()) {
-        if (typeof rule !== 'string' || rule.trim().length === 0) {
-          errors.push(`rules[${index}] must be a non-empty string`);
-        }
-      }
-    }
-  }
-
-  if (spec.skills !== undefined) {
-    if (!Array.isArray(spec.skills)) {
-      errors.push('skills must be an array of { dir } objects');
-    }
-    if (Array.isArray(spec.skills)) {
-      for (const [index, skill] of spec.skills.entries()) validateSkill(skill, index, errors);
-    }
-  }
-
-  if (spec.distill !== undefined) {
-    if (!Array.isArray(spec.distill)) {
-      errors.push('distill must be an array of { output, sources, instructions } objects');
-    }
-    if (Array.isArray(spec.distill)) {
-      for (const [index, entry] of spec.distill.entries()) validateDistillEntry(entry, index, errors);
-    }
-  }
+  validateOptionalArray(spec, 'rules', 'rules must be an array of strings', validateRule, errors);
+  validateOptionalArray(spec, 'skills', 'skills must be an array of { dir } objects', validateSkill, errors);
+  validateOptionalArray(spec, 'distill', 'distill must be an array of { output, sources, instructions } objects', validateDistillEntry, errors);
 
   if (!Number.isInteger(spec.budgetTokens) || spec.budgetTokens <= 0) {
     errors.push('budgetTokens must be a positive integer');
@@ -486,15 +470,11 @@ function planPackBuild(spec, files, { builtAt } = {}) {
 }
 
 module.exports = {
-  CHARS_PER_TOKEN,
   INDEX_FILE,
   MANIFEST_FILE,
   MAX_INDEX_TOKENS,
   MAX_PACKS_PER_SESSION,
   PACK_NAME_RE,
-  RULES_DIR,
-  SKILLS_DIR,
-  TOKEN_ESTIMATE_METHOD,
   estimateTokens,
   isPackRelativePath,
   matchesGlob,

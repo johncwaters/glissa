@@ -10,9 +10,9 @@
 // the top bar's name, since the card header does not render on this screen), and the hover-revealed
 // remove "x" is the kebab's Remove.
 
-import { BADGE_LABELS, STATE_GLYPHS, STATES } from '/shared/states.mjs';
+import { STATES } from '/shared/states.mjs';
 import { borrowCard, getBorrowedCardId, releaseCard } from '../card-host.js';
-import { adoptElement, el, releaseElement } from '../dom-helpers.js';
+import { adoptElement, el, releaseElement, stateChip } from '../dom-helpers.js';
 import { isRenameInProgress } from '../session-card/card-dom.js';
 import { sessionUIs } from '../session-card/card-registry.js';
 import { onSessionTick, sessionElapsedText } from '../session-card/session-tick.js';
@@ -108,8 +108,9 @@ export function createTerminalScreen({ onBack }) {
     // mid-edit and lose what the operator typed. The predicate belongs to the rename seam that owns the
     // field's lifecycle (card-dom.js), not to a class name spelled out again here.
     if (!isRenameInProgress(nameEl)) nameEl.textContent = ui.card?.dataset.session || shownId;
-    glyphEl.textContent = STATE_GLYPHS[state] || '';
-    labelEl.textContent = (BADGE_LABELS[state] || state).toUpperCase();
+    const { glyph, label } = stateChip(state);
+    glyphEl.textContent = glyph;
+    labelEl.textContent = label;
     elapsedEl.textContent = sessionElapsedText(ui);
   }
 

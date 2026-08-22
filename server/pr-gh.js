@@ -1,9 +1,6 @@
 'use strict';
 
-const { promisify } = require('node:util');
-const { execFile } = require('./child-process-safe');
-
-const execFileP = promisify(execFile);
+const { execFileAsync } = require('./child-process-safe');
 
 // The gh/git shell-outs the PR-review poller needs, all through child-process-safe (windowsHide).
 // No `git worktree` here (that stays in server/git-workspace.js behind the worktree guard); this module
@@ -12,7 +9,7 @@ const execFileP = promisify(execFile);
 
 async function run(cmd, args, cwd) {
   try {
-    const { stdout } = await execFileP(cmd, args, { cwd, encoding: 'utf8', timeout: 30000 });
+    const { stdout } = await execFileAsync(cmd, args, { cwd, encoding: 'utf8', timeout: 30000 });
     return { ok: true, out: String(stdout || '').trim(), err: '' };
   } catch (err) {
     return { ok: false, out: String(err.stdout || '').trim(), err: String(err.stderr || err.message || '') };

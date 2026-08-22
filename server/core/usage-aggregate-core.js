@@ -1,6 +1,6 @@
 'use strict';
 
-const { dedupKeys, totalTokensOf } = require('./usage-entry-core');
+const { addEntryToTotals, dedupKeys, emptyTotals, totalTokensOf } = require('./usage-entry-core');
 const { safeNumber } = require('./usage-number-core');
 
 function buildUsageReport(entries, { now = Date.now(), blockHours = 5, retainDays = 90, sessionsById = new Map(), tz = null } = {}) {
@@ -73,12 +73,7 @@ function pruneEntries(entries, { now = Date.now(), retainDays = 90 } = {}) {
 function addEntryToDailyBucket(map, day, entry) {
   const bucket = map.get(day) || {
     day,
-    tokens: 0,
-    costUSD: 0,
-    input: 0,
-    output: 0,
-    cacheCreate: 0,
-    cacheRead: 0,
+    ...emptyTotals(),
     entries: 0,
     modelByName: new Map(),
     vendorSet: new Set(),
@@ -93,7 +88,7 @@ function addEntryToDailyBucket(map, day, entry) {
 // Keyed by model name alone, unchanged: no two vendors ship a model of the same name, so the vendor is a
 // property OF the bucket rather than part of its identity, and Claude's grouping is untouched.
 function addEntryToModelBucket(map, model, entry) {
-  const bucket = map.get(model) || { key: model, model, vendor: vendorOf(entry), tokens: 0, costUSD: 0, input: 0, output: 0, cacheCreate: 0, cacheRead: 0, entries: 0 };
+  const bucket = map.get(model) || { key: model, model, vendor: vendorOf(entry), ...emptyTotals(), entries: 0 };
   addEntryToTotals(bucket, entry);
   bucket.entries += 1;
   map.set(model, bucket);
@@ -109,12 +104,7 @@ function addEntryToSessionBucket(map, entry, sessionsById) {
     project: null,
     // A session belongs to exactly one vendor, so this one is a scalar.
     vendor: vendorOf(entry),
-    tokens: 0,
-    costUSD: 0,
-    input: 0,
-    output: 0,
-    cacheCreate: 0,
-    cacheRead: 0,
+    ...emptyTotals(),
     entries: 0,
     lastTs: null,
   };
@@ -132,19 +122,6 @@ function serializeDailyBucket(bucket) {
   wireBucket.models = Array.from(modelByName.values()).sort((a, b) => b.tokens - a.tokens);
   wireBucket.vendors = Array.from(vendorSet || []).sort();
   return wireBucket;
-}
-
-function addEntryToTotals(totals, entry) {
-  totals.input += safeNumber(entry.input);
-  totals.output += safeNumber(entry.output);
-  totals.cacheCreate += safeNumber(entry.cacheCreate);
-  totals.cacheRead += safeNumber(entry.cacheRead);
-  totals.tokens += totalTokensOf(entry);
-  totals.costUSD += safeNumber(entry.costUSD);
-}
-
-function emptyTotals() {
-  return { tokens: 0, costUSD: 0, input: 0, output: 0, cacheCreate: 0, cacheRead: 0 };
 }
 
 function localDay(timestampMs) {

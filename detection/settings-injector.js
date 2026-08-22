@@ -12,6 +12,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 
 const { buildRtkHookEntry } = require('../session/core/rtk-command');
+const { safePathSegment } = require('../shared/paths');
 
 const DEFAULT_BASE_DIR = path.join(os.tmpdir(), 'glissa-hooks');
 const DEFAULT_TIMEOUT_SEC = 5; // short: handler returns 200 immediately; never stall Claude
@@ -86,16 +87,6 @@ function buildStatuslineCommand({ relayPath = RELAY_PATH, postUrl, userCommand =
   return `node ${shellQuote(toForwardSlashes(relayPath))} ${shellQuote(postUrl)} ${shellQuote(encoded)}`;
 }
 
-// Windows forbids < > : " / \ | ? * and control chars in a path segment, plus trailing dots/spaces.
-// Session ids can be namespaced with colons (e.g. setup:marketing:<uuid>) - legal as map keys and
-// URL-encoded in the hook URL, but illegal as an on-disk dir name. Sanitize ONLY the dir segment;
-// the real glissaId still flows verbatim into the hook URL and HookRouter registration, so routing
-// is unaffected. The uuid suffix keeps the sanitized name unique.
-function safeDirSegment(id) {
-  // eslint-disable-next-line no-control-regex
-  return String(id).replace(/[<>:"/\\|?*\x00-\x1f]/g, '-').replace(/[. ]+$/, '') || '_';
-}
-
 // Build the Claude Code settings object with HTTP hooks for one session. An optional
 // `permissions` ({ deny: [...] }) is merged in for the headless lanes - the PR-review and PostHog
 // deny-lists (efficacy under --dangerously-skip-permissions is why they are a guard, not the guard).
@@ -151,12 +142,13 @@ function buildHookSettings({ port, glissaId, token, timeoutSec = DEFAULT_TIMEOUT
 }
 
 // Write the per-session settings file. Returns { settingsPath, dir, token, cleanup }.
-function writeSessionSettings({ port, glissaId, token, baseDir = DEFAULT_BASE_DIR, timeoutSec = DEFAULT_TIMEOUT_SEC, permissions = null, detectScheduledWakeups = true, packReadTelemetry = false, enableProjectMcp = false, rtkPath = null, planLimits = false, userSettingsPath = null, relayPath = RELAY_PATH }) {
+// Everything this does not use itself is forwarded to buildHookSettings, which owns those defaults.
+function writeSessionSettings({ glissaId, token, baseDir = DEFAULT_BASE_DIR, ...rest }) {
   const tok = token || generateToken();
-  const dir = path.join(baseDir, safeDirSegment(glissaId));
+  const dir = path.join(baseDir, safePathSegment(glissaId));
   fs.mkdirSync(dir, { recursive: true });
   const settingsPath = path.join(dir, 'settings.json');
-  const settings = buildHookSettings({ port, glissaId, token: tok, timeoutSec, permissions, detectScheduledWakeups, packReadTelemetry, enableProjectMcp, rtkPath, planLimits, userSettingsPath, relayPath });
+  const settings = buildHookSettings({ ...rest, glissaId, token: tok });
   fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
   return {
     settingsPath,
@@ -203,7 +195,7 @@ module.exports = {
   writeSessionSettings,
   sweepOrphans,
   generateToken,
-  safeDirSegment,
+  safeDirSegment: safePathSegment,
   buildStatuslineCommand,
   readUserStatuslineCommand,
   HOOK_EVENTS,

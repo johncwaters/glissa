@@ -473,9 +473,6 @@ function decideFsEvents(batch, { root = null, now = 0 } = {}) {
 module.exports = {
   DEFAULT_BATCH_MS,
   IGNORED_DIR_NAMES,
-  IGNORED_FILE_NAMES,
-  IGNORED_FILE_SUFFIXES,
-  KIND,
   MAX_FILES_PER_BATCH,
   MAX_TRACKED_FILES,
   MAX_UNTRACKED_KEYS,

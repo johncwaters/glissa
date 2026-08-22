@@ -8,6 +8,29 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
 const pkg = require('./package.json');
 
+// The browser's ESM view of shared/states.js, generated from the CJS module rather than kept as a
+// hand-copied twin. Mirrors the /shared/states.mjs route in server/backend.js (the no-build path), and
+// works only because that module exports nothing but constants.
+const STATES_MODULE_ID = '/shared/states.mjs';
+const STATES_VIRTUAL_ID = '\0glissa:shared-states';
+
+function glissaSharedStatesPlugin() {
+  return {
+    name: 'glissa-shared-states',
+    enforce: 'pre',
+    resolveId(source) {
+      return source === STATES_MODULE_ID ? STATES_VIRTUAL_ID : null;
+    },
+    load(id) {
+      if (id !== STATES_VIRTUAL_ID) return null;
+      const states = require('./shared/states');
+      return Object.entries(states)
+        .map(([key, val]) => `export const ${key} = ${JSON.stringify(val)};`)
+        .join('\n');
+    },
+  };
+}
+
 function glissaBackendPlugin() {
   let backend = null;
 
@@ -41,7 +64,7 @@ function glissaBackendPlugin() {
 }
 
 export default defineConfig({
-  plugins: [tailwindcss(), glissaBackendPlugin()],
+  plugins: [tailwindcss(), glissaSharedStatesPlugin(), glissaBackendPlugin()],
 
   // Bake the package version in at build time so the dashboard's help surface can show what is running.
   // Replaced as a string literal in both dev and the dist bundle; the browser never reads package.json.
@@ -53,7 +76,6 @@ export default defineConfig({
 
   resolve: {
     alias: {
-      '/shared/states.mjs': path.resolve(__dirname, 'shared/states.esm.js'),
       '/shared/client-trust.mjs': path.resolve(__dirname, 'shared/client-trust.esm.js'),
     },
   },

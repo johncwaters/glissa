@@ -15,7 +15,12 @@ function stringOrNull(value) {
   return value;
 }
 
+function isPlainObject(value) {
+  return value != null && typeof value === 'object' && !Array.isArray(value);
+}
+
 module.exports = {
+  isPlainObject,
   numberOrNull,
   safeNumber,
   stringOrNull,

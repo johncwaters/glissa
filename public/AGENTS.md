@@ -66,7 +66,7 @@ The browser dashboard frontend: ES modules bundled by Vite (dev server with HMR 
 ## Dependencies
 
 ### Internal
-- `../shared/states.esm.js` (served as `/shared/states.mjs`)
+- `/shared/states.mjs` (generated from `shared/states.js`: a Vite virtual module in the bundle, a backend-generated route in no-build mode)
 - `../backend.js` - the WS endpoints this client speaks to
 
 ### External

@@ -11,8 +11,8 @@
  * and it grows per session rather than per project.
  */
 
-const path = require('node:path');
 const { laneMapFromLedger, pruneLedger } = require('./core/usage-lane-core');
+const { createJsonStateWriter } = require('./json-file');
 
 function createLaneLedger({
   ledgerPath = null,
@@ -22,8 +22,6 @@ function createLaneLedger({
   logger = null,
 } = {}) {
   let entries = [];
-  let signature = null;
-  let writeChain = Promise.resolve();
   let opsChain = Promise.resolve();
   let loadPromise = null;
 
@@ -31,6 +29,11 @@ function createLaneLedger({
     if (!logger || typeof logger.warn !== 'function') return;
     logger.warn(`[usage-lanes] ${message}`);
   }
+
+  // tmp + rename, so a crash mid-write cannot leave a half-written ledger.
+  const writer = ledgerPath
+    ? createJsonStateWriter({ filePath: ledgerPath, fsPromises, warn: (error) => warn(`write failed: ${error.message}`) })
+    : null;
 
   function load() {
     if (!ledgerPath) return Promise.resolve();
@@ -75,29 +78,12 @@ function createLaneLedger({
 
   // Test seam: settles once every record accepted so far is applied and its write has landed.
   function whenIdle() {
-    return opsChain.then(() => writeChain);
+    return opsChain.then(() => (writer ? writer.idle() : undefined));
   }
 
   async function persist() {
-    const next = JSON.stringify(entries);
-    if (next === signature) return;
-    signature = next;
-    const payload = `${JSON.stringify({ version: 1, updatedAt: new Date(nowFn()).toISOString(), entries }, null, 2)}\n`;
-    writeChain = writeChain.then(() => writeFile(payload)).catch(() => {});
-    await writeChain;
-  }
-
-  // tmp + rename, so a crash mid-write cannot leave a half-written ledger.
-  async function writeFile(payload) {
-    const tmpPath = `${ledgerPath}.tmp`;
-    try {
-      await fsPromises.mkdir(path.dirname(ledgerPath), { recursive: true });
-      await fsPromises.writeFile(tmpPath, payload);
-      await fsPromises.rename(tmpPath, ledgerPath);
-    } catch (error) {
-      warn(`write failed: ${error.message}`);
-      signature = null;
-    }
+    if (!writer) return;
+    await writer.write(entries, () => `${JSON.stringify({ version: 1, updatedAt: new Date(nowFn()).toISOString(), entries }, null, 2)}\n`);
   }
 
   // Synchronous by design: the scanner calls it while assembling a report; an empty map before the

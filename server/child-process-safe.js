@@ -62,8 +62,8 @@ function execFile(file, ...rest) {
 }
 
 // Preserve child_process.execFile's PROMISIFIED contract: resolve { stdout,
-// stderr }, reject with an Error carrying .stdout/.stderr. server/git-workspace.js
-// consumes this via promisify(execFile); a default-promisified wrapper would
+// stderr }, reject with an Error carrying .stdout/.stderr. Every async caller
+// consumes this via execFileAsync below; a default-promisified wrapper would
 // resolve with stdout only and break it. Built by hand (not by copying cp's
 // custom symbol) so cp.execFile is still called at call time WITH windowsHide.
 execFile[promisify.custom] = (file, ...rest) =>
@@ -99,4 +99,8 @@ function spawn(file, ...rest) {
   return cp.spawn(file, hide(options));
 }
 
-module.exports = { execFile, execFileSync, execSync, spawn, hide };
+// The promisified form every async caller wants, built once here so no call site has to remember that
+// execFile carries a custom promisify contract ({ stdout, stderr }, not stdout alone).
+const execFileAsync = promisify(execFile);
+
+module.exports = { execFile, execFileAsync, execFileSync, execSync, spawn, hide };

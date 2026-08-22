@@ -692,7 +692,6 @@ module.exports = {
   sanitizeSessionName,
   scrubForPaste,
   buildIssueSessionPrompt,
-  ISSUE_ACTION_STATUS,
   JOB_MODES,
   FIX_VERDICTS,
   INVESTIGATIONS_KEY,
@@ -704,7 +703,4 @@ module.exports = {
   ISSUE_HISTORY_CAP,
   MAX_PING_TITLE_CHARS,
   MAX_SUMMARY_LINE_CHARS,
-  MAX_PR_TITLE_CHARS,
-  MAX_PR_BODY_CHARS,
-  WORKFLOW_PATH_PREFIX,
 };

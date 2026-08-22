@@ -63,7 +63,7 @@ test('burnRate returns token and cost rates, and projection extends to block end
   const startTs = Date.UTC(2026, 7, 18, 10, 0);
   const now = Date.UTC(2026, 7, 18, 11, 0);
   const block = buildBlocks([entry(startTs, 60, 0, 2), entry(now, 0, 30, 1)], { blockHours: 5, now }).activeBlock;
-  const burn = burnRate(block, now);
+  const burn = burnRate(block);
   assert.equal(burn.tokensPerMinute, 1.5);
   assert.equal(burn.tokensPerMinuteExCache, 1);
   assert.equal(burn.costPerHour, 3);
@@ -72,7 +72,7 @@ test('burnRate returns token and cost rates, and projection extends to block end
     projectedCostUSD: 15,
     remainingMinutes: 240,
   });
-  assert.equal(burnRate({ firstEntryTs: now, lastEntryTs: now, tokens: 1, input: 1, output: 0, costUSD: 1 }, now), null);
+  assert.equal(burnRate({ firstEntryTs: now, lastEntryTs: now, tokens: 1, input: 1, output: 0, costUSD: 1 }), null);
 });
 
 test('burnRate uses first-to-last entry span for past blocks', () => {
@@ -81,7 +81,7 @@ test('burnRate uses first-to-last entry span for past blocks', () => {
     entry(startTs, 600, 0, 1),
     entry(startTs + 2 * 60 * 1000, 600, 0, 1),
   ], { blockHours: 5, now: Date.UTC(2026, 7, 19) }).blocks[0];
-  const burn = burnRate(block, Date.UTC(2026, 7, 19));
+  const burn = burnRate(block);
   assert.equal(burn.tokensPerMinute, 600);
 });
 

@@ -14,7 +14,6 @@
 'use strict';
 
 const SOURCE = 'agentLogs';
-const VENDORS = Object.freeze(['claude', 'codex', 'grok']);
 /*
  * A MEMORY bound and nothing else (docs/plan-ingestion.md, M11). Summarizing is the ring's job:
  * `normalizeEvent` scrubs, THEN folds, THEN slices to 400, and a cut taken here would run ahead of the
@@ -299,7 +298,6 @@ function mapAgentLine({ vendor, rawLine, ctx = {}, vendorState = null } = {}) {
 
 module.exports = {
   MAX_RAW_CHARS,
-  VENDORS,
   isDispatchWorkdir,
   mapAgentLine,
   parseTimestamp,

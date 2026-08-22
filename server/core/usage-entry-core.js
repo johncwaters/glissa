@@ -19,8 +19,9 @@ const NULL_REJECT_FIELDS = Object.freeze([
   ['message', 'usage', 'cache_creation_input_tokens'],
 ]);
 
-function parseUsageLine(line, { versionPrefix } = {}) {
-  if (typeof line !== 'string' || !line.includes('"usage":{')) return null;
+function parseJsonLine(line, requiredSubstring) {
+  if (typeof line !== 'string') return null;
+  if (requiredSubstring && !line.includes(requiredSubstring)) return null;
   let parsed;
   try {
     parsed = JSON.parse(line);
@@ -28,6 +29,12 @@ function parseUsageLine(line, { versionPrefix } = {}) {
     return null;
   }
   if (!parsed || typeof parsed !== 'object') return null;
+  return parsed;
+}
+
+function parseUsageLine(line, { versionPrefix } = {}) {
+  const parsed = parseJsonLine(line, '"usage":{');
+  if (!parsed) return null;
   if (hasExplicitNull(parsed)) return null;
   if (!versionIsAccepted(parsed.version, versionPrefix)) return null;
   if (hasPresentEmptyIdentity(parsed)) return null;
@@ -43,8 +50,6 @@ function parseUsageLine(line, { versionPrefix } = {}) {
 
   const rawModel = message.model === '<synthetic>' ? null : stringOrNull(message.model);
   const speed = stringOrNull(usage.speed);
-  const model = rawModel && speed === 'fast' && !rawModel.endsWith('-fast') ? `${rawModel}-fast` : rawModel;
-  const tokenCounts = tokenCountsFromUsage(usage);
 
   return {
     timestamp: new Date(timestampMs).toISOString(),
@@ -54,17 +59,12 @@ function parseUsageLine(line, { versionPrefix } = {}) {
     sessionId: stringOrNull(parsed.sessionId),
     requestId: stringOrNull(parsed.requestId),
     messageId: stringOrNull(message.id),
-    model,
+    model: modelWithSpeed(rawModel, speed),
     rawModel,
     speed,
     isSidechain: parsed.isSidechain === true,
     costUSD: numberOrNull(parsed.costUSD) ?? numberOrNull(usage.costUSD),
-    input: tokenCounts.input,
-    output: tokenCounts.output,
-    cacheCreate: tokenCounts.cacheCreate,
-    cacheCreation5m: tokenCounts.cacheCreation5m,
-    cacheCreation1h: tokenCounts.cacheCreation1h,
-    cacheRead: tokenCounts.cacheRead,
+    ...tokenCountsFromUsage(usage),
     iterations: Array.isArray(usage.iterations) ? usage.iterations : [],
   };
 }
@@ -77,25 +77,18 @@ function expandAdvisorIterations(entry) {
     if (!iteration || iteration.type !== 'advisor_message') continue;
     const usage = iteration.usage || iteration.message?.usage || iteration;
     if (!usage || typeof usage !== 'object') continue;
-    const tokenCounts = tokenCountsFromUsage(usage);
     const rawModel = iteration.message?.model === '<synthetic>'
       ? null
       : stringOrNull(iteration.message?.model) || entry.rawModel;
     const speed = stringOrNull(usage.speed) || entry.speed;
-    const model = rawModel && speed === 'fast' && !rawModel.endsWith('-fast') ? `${rawModel}-fast` : rawModel;
     advisorEntries.push({
       ...entry,
       messageId: entry.messageId ? `${entry.messageId}:advisor:${iterationIndex}` : null,
-      model,
+      model: modelWithSpeed(rawModel, speed),
       rawModel,
       speed,
       costUSD: null,
-      input: tokenCounts.input,
-      output: tokenCounts.output,
-      cacheCreate: tokenCounts.cacheCreate,
-      cacheCreation5m: tokenCounts.cacheCreation5m,
-      cacheCreation1h: tokenCounts.cacheCreation1h,
-      cacheRead: tokenCounts.cacheRead,
+      ...tokenCountsFromUsage(usage),
       iterations: [],
       isAdvisor: true,
     });
@@ -136,6 +129,46 @@ function shouldReplace(existing, candidate) {
 function totalTokensOf(entry) {
   if (!entry) return 0;
   return safeNumber(entry.input) + safeNumber(entry.output) + safeNumber(entry.cacheCreate) + safeNumber(entry.cacheRead);
+}
+
+function emptyTotals() {
+  return { tokens: 0, costUSD: 0, input: 0, output: 0, cacheCreate: 0, cacheRead: 0 };
+}
+
+function addEntryToTotals(totals, entry, tokens = totalTokensOf(entry)) {
+  totals.input += safeNumber(entry.input);
+  totals.output += safeNumber(entry.output);
+  totals.cacheCreate += safeNumber(entry.cacheCreate);
+  totals.cacheRead += safeNumber(entry.cacheRead);
+  totals.tokens += tokens;
+  totals.costUSD += safeNumber(entry.costUSD);
+}
+
+function vendorUsageEntry({
+  timestampMs, sessionId, model, input, output, cacheCreate, cacheRead, costUSD, vendor, messageId = null,
+}) {
+  return {
+    timestamp: new Date(timestampMs).toISOString(),
+    timestampMs,
+    sessionId,
+    model,
+    input,
+    output,
+    cacheCreate,
+    cacheCreation5m: 0,
+    cacheCreation1h: 0,
+    cacheRead,
+    costUSD,
+    vendor,
+    messageId,
+    requestId: null,
+    isSidechain: false,
+  };
+}
+
+function modelWithSpeed(rawModel, speed) {
+  if (!rawModel || speed !== 'fast' || rawModel.endsWith('-fast')) return rawModel;
+  return `${rawModel}-fast`;
 }
 
 function tokenCountsFromUsage(usage) {
@@ -185,10 +218,14 @@ function presentEmpty(value) {
 }
 
 module.exports = {
+  addEntryToTotals,
   dedupKeys,
+  emptyTotals,
   expandAdvisorIterations,
   identityFromRelPath,
+  parseJsonLine,
   parseUsageLine,
   shouldReplace,
   totalTokensOf,
+  vendorUsageEntry,
 };

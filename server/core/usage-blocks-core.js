@@ -1,7 +1,6 @@
 'use strict';
 
-const { totalTokensOf } = require('./usage-entry-core');
-const { safeNumber } = require('./usage-number-core');
+const { addEntryToTotals, emptyTotals } = require('./usage-entry-core');
 
 const HOUR_MS = 60 * 60 * 1000;
 
@@ -47,7 +46,7 @@ function buildBlocks(entriesAsc, { blockHours = 5, now = Date.now() } = {}) {
   return { blocks, activeBlock, tokenLimit };
 }
 
-function burnRate(block, now = Date.now()) {
+function burnRate(block) {
   if (!block) return null;
   const elapsedMs = block.lastEntryTs - block.firstEntryTs;
   if (elapsedMs <= 0) return null;
@@ -70,21 +69,7 @@ function projectBlock(block, burn, now = Date.now()) {
 }
 
 function addGapAndNewBlock(blocks, previousEntryTs, entryTs, duration) {
-  blocks.push({
-    startTs: previousEntryTs + duration,
-    endTs: entryTs,
-    isGap: true,
-    isActive: false,
-    tokens: 0,
-    costUSD: 0,
-    input: 0,
-    output: 0,
-    cacheCreate: 0,
-    cacheRead: 0,
-    entries: 0,
-    firstEntryTs: null,
-    lastEntryTs: null,
-  });
+  blocks.push({ ...newUsageBlock(previousEntryTs + duration, duration), endTs: entryTs, isGap: true });
   const block = newUsageBlock(hourFloor(entryTs), duration);
   blocks.push(block);
   return block;
@@ -96,12 +81,7 @@ function newUsageBlock(startTs, duration) {
     endTs: startTs + duration,
     isGap: false,
     isActive: false,
-    tokens: 0,
-    costUSD: 0,
-    input: 0,
-    output: 0,
-    cacheCreate: 0,
-    cacheRead: 0,
+    ...emptyTotals(),
     entries: 0,
     firstEntryTs: null,
     lastEntryTs: null,
@@ -109,12 +89,7 @@ function newUsageBlock(startTs, duration) {
 }
 
 function addEntry(block, entry) {
-  block.tokens += totalTokensOf(entry);
-  block.costUSD += safeNumber(entry.costUSD);
-  block.input += safeNumber(entry.input);
-  block.output += safeNumber(entry.output);
-  block.cacheCreate += safeNumber(entry.cacheCreate);
-  block.cacheRead += safeNumber(entry.cacheRead);
+  addEntryToTotals(block, entry);
   block.entries += 1;
   block.firstEntryTs = block.firstEntryTs === null ? entry.timestampMs : block.firstEntryTs;
   block.lastEntryTs = entry.timestampMs;

@@ -126,11 +126,11 @@ function appendGlyphAndLabel(btn, glyph, label) {
   btn.append(glyphEl, labelEl);
 }
 
-function buildNavButton(label, glyph) {
-  const btn = el('button', 'phone-nav-item');
+function buildNavButton(label, glyph, itemClass = 'phone-nav-item', dotClass = 'phone-nav-dot') {
+  const btn = el('button', itemClass);
   btn.type = 'button';
   appendGlyphAndLabel(btn, glyph, label);
-  const dot = el('span', 'phone-nav-dot');
+  const dot = el('span', dotClass);
   dot.setAttribute('aria-hidden', 'true');
   dot.hidden = true;
   btn.appendChild(dot);
@@ -162,14 +162,8 @@ function buildMoreMenu() {
   menu.hidden = true;
   for (const screen of SCREENS) {
     if (!screen.nested) continue;
-    const btn = el('button', 'phone-nav-menu-item');
-    btn.type = 'button';
+    const btn = buildNavButton(screen.label, screen.glyph, 'phone-nav-menu-item', 'phone-nav-dot phone-nav-menu-dot');
     btn.dataset.screen = screen.id;
-    appendGlyphAndLabel(btn, screen.glyph, screen.label);
-    const dot = el('span', 'phone-nav-dot phone-nav-menu-dot');
-    dot.setAttribute('aria-hidden', 'true');
-    dot.hidden = true;
-    btn.appendChild(dot);
     btn.addEventListener('click', () => {
       setMoreMenuOpen(false);
       showScreen(screen.id);
@@ -352,6 +346,16 @@ function onPopState(event) {
   applyScreen(target && screenElById.has(target) ? target : BOARD);
 }
 
+function syncCurrent(buttonById, screenId) {
+  for (const [id, btn] of buttonById) {
+    if (id === screenId) {
+      btn.setAttribute('aria-current', 'page');
+      continue;
+    }
+    btn.removeAttribute('aria-current');
+  }
+}
+
 function applyScreen(screenId) {
   activeScreen = screenId;
   setMoreMenuOpen(false);
@@ -361,24 +365,12 @@ function applyScreen(screenId) {
   for (const [id, section] of screenElById) {
     section.hidden = id !== screenId;
   }
-  for (const [id, btn] of navButtonById) {
-    if (id === screenId) {
-      btn.setAttribute('aria-current', 'page');
-      continue;
-    }
-    btn.removeAttribute('aria-current');
-  }
+  syncCurrent(navButtonById, screenId);
   // A nested screen lights the More item, since it has no nav item of its own.
   const isNestedActive = menuButtonById.has(screenId);
   if (isNestedActive) moreButtonEl.setAttribute('aria-current', 'page');
   if (!isNestedActive) moreButtonEl.removeAttribute('aria-current');
-  for (const [id, btn] of menuButtonById) {
-    if (id === screenId) {
-      btn.setAttribute('aria-current', 'page');
-      continue;
-    }
-    btn.removeAttribute('aria-current');
-  }
+  syncCurrent(menuButtonById, screenId);
   // A hidden terminal had no measurable box, and one that never left the slot has unchanged dimensions
   // that make applyFit early-return; reveal() forces the fit + repaint either way.
   if (screenId === 'terminal') {

@@ -17,12 +17,15 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { Session } = require('../session/sessions');
-const { registerEphemeralSession } = require('./ephemeral-session');
+const { awaitSessionExit, readResultFile, registerEphemeralSession } = require('./ephemeral-session');
 const { normalizePackNames } = require('./core/pack-core');
 const { createPrPoller } = require('./pr-poller');
 const { createPrGh } = require('./pr-gh');
 const { sendPrPing } = require('./pr-telegram');
 const { emptyLaneStatus } = require('./lane-status');
+const { createLaneRunner } = require('./lane-runner');
+const { writeJsonAtomicSync } = require('./json-file');
+const { glissaHomeDir } = require('./config-store');
 
 // Belt-and-suspenders deny-list for the headless PR-review sessions (they run under
 // --dangerously-skip-permissions, so this is a guard, not the guard). Blocks the destructive/
@@ -87,18 +90,10 @@ function buildReviewPrompt({ slug, number, baseRefName, conflicting, resultPath 
   return lines.join('\n');
 }
 
-// Read the verdict a review session wrote to its result file. Missing/invalid file -> ERROR, so a
-// crashed or confused session never masquerades as a clean pass.
+const REVIEW_VERDICTS = new Set(['CLEAN', 'RESOLVED', 'CHANGES', 'ERROR']);
+
 function readReviewResult(resultPath) {
-  const allowed = new Set(['CLEAN', 'RESOLVED', 'CHANGES', 'ERROR']);
-  try {
-    const obj = JSON.parse(fs.readFileSync(resultPath, 'utf8'));
-    const verdict = String(obj.verdict || '').toUpperCase();
-    if (!allowed.has(verdict)) return { verdict: 'ERROR', summary: 'invalid verdict in result file' };
-    return { verdict, summary: String(obj.summary || '') };
-  } catch {
-    return { verdict: 'ERROR', summary: 'no result file' };
-  }
+  return readResultFile(resultPath, REVIEW_VERDICTS);
 }
 
 // Pure gate for the opt-in poller: start only when enabled AND telegram is configured (pings must be
@@ -168,123 +163,65 @@ function createPrReviewWiring({
     const id = `pr-review:${slug}#${pr.number}`;
     const sess = makeReviewSession({ id, name: `PR review ${slug}#${pr.number}`, path: cwd, initialPrompt: prompt });
 
-    let onAbort = null;
     try {
-      await new Promise((resolve, reject) => {
-        let settled = false;
-        const done = () => { if (settled) return; settled = true; resolve(); };
-        const fail = (e) => { if (settled) return; settled = true; reject(e); };
-        sess.on('exit', done);
-        sess.on('error', fail);
-        if (signal) {
-          onAbort = () => { try { sess.destroy(); } catch { /* already gone */ } done(); };
-          if (signal.aborted) onAbort();
-          if (!signal.aborted) signal.addEventListener('abort', onAbort, { once: true });
-        }
-        spawnGate.run(() => (signal?.aborted ? undefined : sess.start())).catch(fail);
-      });
+      await awaitSessionExit(sess, { signal, spawnGate });
       return readReviewResult(resultPath);
     } catch (e) {
       return { verdict: 'ERROR', summary: String(e.message || e) };
     } finally {
-      if (signal && onAbort) { try { signal.removeEventListener('abort', onAbort); } catch { /* noop */ } }
       try { fs.rmSync(resultPath, { force: true }); } catch { /* best-effort */ }
     }
   }
 
   // State lives in one cross-project file under the user config dir, written atomically (tmp+rename).
-  const prStatePath = path.join(os.homedir(), '.glissa', 'pr-review-state.json');
+  const prStatePath = path.join(glissaHomeDir(), 'pr-review-state.json');
   async function readPrState() {
     try { return JSON.parse(fs.readFileSync(prStatePath, 'utf8')); }
     catch { return {}; }
   }
   async function writePrState(state) {
-    try { fs.mkdirSync(path.dirname(prStatePath), { recursive: true }); } catch { /* exists */ }
-    const tmp = `${prStatePath}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(state, null, 2));
-    fs.renameSync(tmp, prStatePath);
+    writeJsonAtomicSync(prStatePath, state, { mkdir: true });
   }
 
   // Started at boot and re-evaluated on every settings reload whose prReview/telegram key changed
   // (restartIfConfigChanged, gated by prReviewCfgKey), so toggling config.prReview / config.telegram
-  // via the Settings dialog or a config.json hand-edit hot-applies without a server restart.
-  //
-  // Restarts are serialized through prPollerChain so a stop-drain-start never overlaps a prior one: the
-  // old instance's in-flight reviews (up to reviewTimeoutSeconds) and pending state writes finish before
-  // a new instance reuses the same result-file paths, gitWorkspace, and state file. A settings save that
-  // lands mid-drain just queues another restart on the chain; that coalesces naturally. startPoller
-  // itself stays synchronous from its callers' perspective (it only appends to the chain).
-  // The last tick summary, replayed to a control client that connects between ticks (the same
-  // cached-snapshot pattern the PostHog lane and the startup update check use).
-  let lastStatus = null;
-  const emptyPrStatus = () => emptyLaneStatus('pr-status', prPollerShouldStart(config));
-  const getStatus = () => lastStatus || emptyPrStatus();
-
-  let prPoller = null;
-  let prPollerChain = Promise.resolve();
-  let prPollerStopped = false;
-  let prReviewLastKey = null;
-  function startPoller() {
-    prReviewLastKey = prReviewCfgKey(config);
-    prPollerChain = prPollerChain.then(async () => {
-      if (prPollerStopped) return;
-      if (prPoller) {
-        const old = prPoller;
-        prPoller = null;
-        await old.stop();
-      }
-      const gate = prPollerShouldStart(config);
-      if (!gate.start) {
-        lastStatus = null;
-        broadcast(emptyPrStatus());
-        if (gate.reason) console.warn(`[pr-poller] not starting: ${gate.reason}`);
-        return;
-      }
-      if (!lastStatus) broadcast(emptyPrStatus());
-      prPoller = createPrPoller({
-        projects: config.prReview.projects || [],
-        getProjectPathById,
-        getProjectNameById,
-        makePrGh: (projectPath) => createPrGh(projectPath),
-        gitWorkspace,
-        getWorktreeBase: (projectPath) => config.worktreeRoot
-          || path.join(path.dirname(path.resolve(projectPath)), '.glissa-worktrees'),
-        spawnReview: prReviewSpawn,
-        telegram: (text) => sendPrPing(config.telegram.botToken, config.telegram.chatId, text),
-        readState: readPrState,
-        writeState: writePrState,
-        intervalMinutes: config.prReview.intervalMinutes || 15,
-        mergeMethod: config.prReview.mergeMethod || 'rebase',
-        maxConcurrentReviews: config.prReview.maxConcurrentReviews || 3,
-        reviewTimeoutSeconds: config.prReview.reviewTimeoutSeconds || 900,
-        onTickComplete: (summary) => {
-          lastStatus = { ...summary, configured: true };
-          broadcast(lastStatus);
-        },
-      });
-      await prPoller.start().catch((e) => console.warn(`[pr-poller] start failed: ${e.message}`));
-    }).catch((e) => console.warn(`[pr-poller] restart failed: ${e.message}`));
-  }
-
-  // The poller closure captures config.prReview/telegram at creation time, so a restart (stop+start,
-  // gated by prPollerShouldStart) is how a config change actually takes effect. Only restart when the
-  // prReview/telegram key actually changed: an unrelated settings save (cursorBlink, etc.) must never
-  // interrupt a review that may be in flight (see prReviewCfgKey / prReviewLastKey above).
-  function restartIfConfigChanged() {
-    if (prReviewCfgKey(config) !== prReviewLastKey) startPoller();
-  }
-
-  // Blocks a restart still queued on prPollerChain (e.g. a settings save that raced shutdown) from
-  // starting a fresh poller after the process has begun tearing down. stop() is async, but fire-and-
-  // forget here is deliberate: the process is exiting, nothing awaits it.
-  function stopPoller() {
-    prPollerStopped = true;
-    if (prPoller) prPoller.stop();
-  }
+  // via the Settings dialog or a config.json hand-edit hot-applies without a server restart. The
+  // restart serialization and the cached last status live in server/lane-runner.js.
+  const runner = createLaneRunner({
+    tag: 'pr-poller',
+    gate: () => prPollerShouldStart(config),
+    cfgKey: () => prReviewCfgKey(config),
+    emptyStatus: () => emptyLaneStatus('pr-status', prPollerShouldStart(config)),
+    broadcast,
+    createPoller: ({ onTickComplete }) => createPrPoller({
+      projects: config.prReview.projects || [],
+      getProjectPathById,
+      getProjectNameById,
+      makePrGh: (projectPath) => createPrGh(projectPath),
+      gitWorkspace,
+      getWorktreeBase: (projectPath) => config.worktreeRoot
+        || path.join(path.dirname(path.resolve(projectPath)), '.glissa-worktrees'),
+      spawnReview: prReviewSpawn,
+      telegram: (text) => sendPrPing(config.telegram.botToken, config.telegram.chatId, text),
+      readState: readPrState,
+      writeState: writePrState,
+      intervalMinutes: config.prReview.intervalMinutes || 15,
+      mergeMethod: config.prReview.mergeMethod || 'rebase',
+      maxConcurrentReviews: config.prReview.maxConcurrentReviews || 3,
+      reviewTimeoutSeconds: config.prReview.reviewTimeoutSeconds || 900,
+      onTickComplete,
+    }),
+  });
 
   // Exposed for tests only (the pack-service `_watcherCount` precedent): the session factory is the
   // one place the lane's Session options are assembled, and pinning them needs no live poller.
-  return { startPoller, restartIfConfigChanged, stopPoller, getStatus, _makeReviewSession: makeReviewSession };
+  return {
+    startPoller: runner.startPoller,
+    restartIfConfigChanged: runner.restartIfConfigChanged,
+    stopPoller: runner.stopPoller,
+    getStatus: runner.getStatus,
+    _makeReviewSession: makeReviewSession,
+  };
 }
 
 module.exports = {

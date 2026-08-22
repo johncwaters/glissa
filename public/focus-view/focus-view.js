@@ -11,10 +11,10 @@
 // State lives here (view-local); it reads sessions from the shared card registry. The borrowed card is
 // returned to its exact home slot in the off-screen grid on leave/swap.
 
-import { BADGE_LABELS, STATE_GLYPHS, STATES } from '/shared/states.mjs';
+import { STATES } from '/shared/states.mjs';
 import { borrowCard, getBorrowedCardId, releaseCard } from '../card-host.js';
 import { sendControlMsg } from '../control-ws.js';
-import { el } from '../dom-helpers.js';
+import { el, MERGE_TAGS, stateChip } from '../dom-helpers.js';
 import { setActivityRenderer } from '../session-card/activity.js';
 import { sessionUIs } from '../session-card/card-registry.js';
 import { openConfirmDialog } from '../session-card/modal.js';
@@ -469,13 +469,13 @@ function paintPill(pill, id, ui) {
   if (state !== STATES.COMPLETE) pill.removeAttribute('data-unseen');
   if (state === STATES.COMPLETE && prev && prev !== STATES.COMPLETE) pill.dataset.unseen = '';
   pill.dataset.state = state;
-  pill._refs.glyph.textContent = STATE_GLYPHS[state] || '';
-  pill._refs.label.textContent = (BADGE_LABELS[state] || state).toUpperCase();
+  const { glyph, label } = stateChip(state);
+  pill._refs.glyph.textContent = glyph;
+  pill._refs.label.textContent = label;
   pill._refs.name.textContent = sessionName(ui);
   const ms = mergeStatusById.get(id) || 'none';
   pill.dataset.merge = ms === 'none' ? '' : ms;
-  pill._refs.merge.textContent =
-    ms === 'pending-review' ? 'REVIEW' : ms === 'parked' ? 'PARKED' : ms === 'merging' ? 'MERGING' : '';
+  pill._refs.merge.textContent = MERGE_TAGS[ms] || '';
   // Mirror the working heartbeat flag so a re-render keeps the breathe/quiet treatment without
   // waiting for the next signal (activity.js parks the live value on ui._activity).
   pill.dataset.activity = ui._activity || '';
@@ -645,16 +645,19 @@ export function focusNextAttention() {
   focusSession(nextId);
   pillById.get(nextId)?.scrollIntoView({ block: 'nearest' });
   if (alreadyCentered) flashAttention(nextId);
-  // Drop the cursor into the centered terminal so the operator types right away. Deferred a double
-  // rAF (the same idiom as focusSessionCard): borrowToCenter just re-parented the card and may have
-  // woken or built its terminal, so the fit + repaint must settle before .focus() can land on the
-  // live xterm helper textarea. Re-check the target still holds the center, in case a later press
-  // advanced past it, so we never steal focus to a stale session.
-  if (ui) {
-    requestAnimationFrame(() => requestAnimationFrame(() => {
-      if (active && focusedId === nextId) ui.term?.focus();
-    }));
-  }
+  focusTerminalAfterSettle(ui, nextId);
+}
+
+// Drop the cursor into the centered terminal so the operator types right away. Deferred a double rAF
+// (the same idiom as focusSessionCard): borrowToCenter just re-parented the card and may have woken or
+// built its terminal, so the fit + repaint must settle before .focus() can land on the live xterm
+// helper textarea. Re-check the target still holds the center, in case a later press advanced past it,
+// so we never steal focus to a stale session.
+function focusTerminalAfterSettle(ui, id) {
+  if (!ui) return;
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    if (active && focusedId === id) ui.term?.focus();
+  }));
 }
 
 // One-shot "you are already here" pulse for an Alt+W press that resolves to the centered session, so
@@ -765,16 +768,7 @@ export function focusAdjacentInRail(dir) {
   if (id == null) return;
   onPillActivate(id); // centers; starts a DORMANT target first, exactly like a pill click
   pillById.get(id)?.scrollIntoView({ block: 'nearest' });
-  // Drop the cursor into the centered terminal so the next Alt+Up/Down (or typing) lands without a
-  // click. Double rAF, like focusNextAttention: borrowToCenter just re-parented and may have built the
-  // xterm, so the fit/repaint must settle before .focus() can reach the live helper textarea. Re-check
-  // the target still holds the center in case a later press advanced past it.
-  const ui = sessionUIs.get(id);
-  if (ui) {
-    requestAnimationFrame(() => requestAnimationFrame(() => {
-      if (active && focusedId === id) ui.term?.focus();
-    }));
-  }
+  focusTerminalAfterSettle(sessionUIs.get(id), id);
 }
 
 export function activateFocusView() {

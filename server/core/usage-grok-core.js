@@ -1,16 +1,11 @@
 'use strict';
 
+const { parseJsonLine, vendorUsageEntry } = require('./usage-entry-core');
 const { numberOrNull, safeNumber, stringOrNull } = require('./usage-number-core');
 
 function parseGrokUsageLine(line) {
-  if (typeof line !== 'string' || !line.includes('"turn_completed"')) return null;
-  let parsed;
-  try {
-    parsed = JSON.parse(line);
-  } catch {
-    return null;
-  }
-  if (!parsed || typeof parsed !== 'object') return null;
+  const parsed = parseJsonLine(line, '"turn_completed"');
+  if (!parsed) return null;
 
   const update = parsed.params?.update;
   if (!update || update.sessionUpdate !== 'turn_completed') return null;
@@ -31,25 +26,21 @@ function parseGrokUsageLine(line) {
   const cacheCreate = safeNumber(modelCounts.cacheCreationTokens);
   const costUsdTicks = numberOrNull(modelCounts.costUsdTicks) ?? numberOrNull(usage.costUsdTicks);
   const uncachedInput = Math.max(0, inputTokens - cacheRead - cacheCreate);
-  return {
-    timestamp: new Date(timestampMs).toISOString(),
+  const outputTokens = safeNumber(modelCounts.outputTokens);
+  return vendorUsageEntry({
     timestampMs,
     sessionId: stringOrNull(parsed.params?.sessionId),
     model,
     input: uncachedInput,
-    output: safeNumber(modelCounts.outputTokens),
+    output: outputTokens,
     cacheCreate,
-    cacheCreation5m: 0,
-    cacheCreation1h: 0,
     cacheRead,
     costUSD: costUsdTicks === null
-      ? grokFallbackCostUSD(model, uncachedInput, safeNumber(modelCounts.outputTokens), cacheRead, cacheCreate)
+      ? grokFallbackCostUSD(model, uncachedInput, outputTokens, cacheRead, cacheCreate)
       : costUsdTicks / 10000000000,
     vendor: 'grok',
     messageId: stringOrNull(update.prompt_id),
-    requestId: null,
-    isSidechain: false,
-  };
+  });
 }
 
 function grokDedupIdentity(entry) {

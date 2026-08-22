@@ -18,7 +18,10 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { registerEphemeralSession } = require('./ephemeral-session');
+const {
+  awaitSessionExit, firstLine, raceWithAbort, readResultFile, registerEphemeralSession,
+} = require('./ephemeral-session');
+const { createSerialQueue } = require('./spawn-gate');
 const { buildDistillPrompt, buildStampLine, needsDistill } = require('./core/distill-core');
 const { validatePackSpec } = require('./core/pack-core');
 const {
@@ -35,6 +38,11 @@ const INSTALL_ROOT = path.resolve(__dirname, '..');
 // contract plus the post-verify below: a verdict is only believed once the written file parses to a
 // stamp matching the sources that were read. The deny syntax cannot express "nothing outside packs/",
 // so the write denials name the install root's own directories one by one, plus its root files.
+const PACK_DISTILL_WRITE_DENY_DIRS = [
+  '.github', '.claude', 'bin', 'detection', 'docs', 'notifications', 'public', 'scripts', 'server',
+  'session', 'shared', 'tests', 'tools', 'packs/specs',
+];
+
 const PACK_DISTILL_DENY = {
   deny: [
     'Bash(git commit:*)',
@@ -45,58 +53,14 @@ const PACK_DISTILL_DENY = {
     'Bash(npm publish:*)',
     'Edit(*)',
     'Write(*)',
-    'Edit(.github/**)',
-    'Write(.github/**)',
-    'Edit(.claude/**)',
-    'Write(.claude/**)',
-    'Edit(bin/**)',
-    'Write(bin/**)',
-    'Edit(detection/**)',
-    'Write(detection/**)',
-    'Edit(docs/**)',
-    'Write(docs/**)',
-    'Edit(notifications/**)',
-    'Write(notifications/**)',
-    'Edit(public/**)',
-    'Write(public/**)',
-    'Edit(scripts/**)',
-    'Write(scripts/**)',
-    'Edit(server/**)',
-    'Write(server/**)',
-    'Edit(session/**)',
-    'Write(session/**)',
-    'Edit(shared/**)',
-    'Write(shared/**)',
-    'Edit(tests/**)',
-    'Write(tests/**)',
-    'Edit(tools/**)',
-    'Write(tools/**)',
-    'Edit(packs/specs/**)',
-    'Write(packs/specs/**)',
+    ...PACK_DISTILL_WRITE_DENY_DIRS.flatMap((dir) => [`Edit(${dir}/**)`, `Write(${dir}/**)`]),
   ],
 };
 
 const RESULT_VERDICTS = new Set(['DISTILLED', 'NO_CHANGE', 'ERROR']);
 
-function firstLine(text) {
-  return String(text == null ? '' : text).split('\n')[0].trim();
-}
-
-/**
- * Read the verdict a distill session wrote to its result file. Missing or invalid means ERROR, so a
- * crashed or confused session never masquerades as a finished distill. The file is removed either way.
- */
 function readDistillResult(resultPath) {
-  try {
-    const parsed = JSON.parse(fs.readFileSync(resultPath, 'utf8'));
-    const verdict = String(parsed.verdict || '').toUpperCase();
-    if (!RESULT_VERDICTS.has(verdict)) return { verdict: 'ERROR', summary: 'invalid verdict in result file' };
-    return { verdict, summary: firstLine(parsed.summary) };
-  } catch {
-    return { verdict: 'ERROR', summary: 'no result file' };
-  } finally {
-    try { fs.rmSync(resultPath, { force: true }); } catch { /* best-effort */ }
-  }
+  return readResultFile(resultPath, RESULT_VERDICTS, (parsed) => ({ summary: firstLine(parsed.summary) }));
 }
 
 // A Session only writes its `--settings` file when it has a hook router to point the hooks at, so the
@@ -144,25 +108,9 @@ function createDistillSpawn({
     });
     registerEphemeralSession({ map: sessions, id, sess, closeSessionDataClients, logPrefix: 'pack-distill', name, recordLane });
 
-    let onAbort = null;
     try {
-      await new Promise((resolve, reject) => {
-        let settled = false;
-        const done = () => { if (settled) return; settled = true; resolve(); };
-        const fail = (err) => { if (settled) return; settled = true; reject(err); };
-        sess.on('exit', done);
-        sess.on('error', fail);
-        if (signal) {
-          onAbort = () => { try { sess.destroy(); } catch { /* already gone */ } done(); };
-          if (signal.aborted) onAbort();
-          if (!signal.aborted) signal.addEventListener('abort', onAbort, { once: true });
-        }
-        const run = () => (signal?.aborted ? undefined : sess.start());
-        const started = spawnGate ? spawnGate.run(run) : Promise.resolve().then(run);
-        started.catch(fail);
-      });
+      await awaitSessionExit(sess, { signal, spawnGate });
     } finally {
-      if (signal && onAbort) { try { signal.removeEventListener('abort', onAbort); } catch { /* noop */ } }
       if (standalone) standalone.cleanup();
     }
   };
@@ -199,13 +147,14 @@ function createPackDistiller(deps = {}) {
   let timer = null;
   let stopped = false;
   let tickRunning = false;
-  // One chain, so an interval tick and a manual runOnce can never have two distill sessions writing
+  // One queue, so an interval tick and a manual runOnce can never have two distill sessions writing
   // under packs/ at the same time. Distills are serialized by construction, never raced.
-  let chain = Promise.resolve();
+  const distillQueue = createSerialQueue();
+  let idle = Promise.resolve();
 
   function queue(task) {
-    const run = chain.then(() => task());
-    chain = run.catch(() => {});
+    const run = distillQueue.run(task);
+    idle = run.catch(() => {});
     return run;
   }
 
@@ -213,24 +162,17 @@ function createPackDistiller(deps = {}) {
     return { pack, output, status: 'error', verdict: null, reason: null, summary: '', ...overrides };
   }
 
-  // Race the spawn against a hard timeout, so a hung `claude -p` can never pin the lane. On timeout the
-  // session is aborted (the spawn destroys it on the signal) and the entry resolves to ERROR.
-  async function spawnWithTimeout(spawnArgs, resultPath) {
-    const controller = new AbortController();
-    let handle = null;
-    const timeout = new Promise((resolve) => {
-      handle = setTimeoutFn(() => {
-        controller.abort();
-        resolve({ verdict: 'ERROR', summary: 'distill timed out' });
-      }, timeoutSeconds * 1000);
-      if (handle && typeof handle.unref === 'function') handle.unref();
+  function spawnWithTimeout(spawnArgs, resultPath) {
+    return raceWithAbort({
+      timeoutMs: timeoutSeconds * 1000,
+      setTimeoutFn,
+      clearTimeoutFn,
+      onTimeout: () => ({ verdict: 'ERROR', summary: 'distill timed out' }),
+      onEmpty: () => ({ verdict: 'ERROR', summary: 'no verdict' }),
+      start: (signal) => Promise.resolve(spawnDistill({ ...spawnArgs, signal }))
+        .then(() => readResult(resultPath))
+        .catch((err) => ({ verdict: 'ERROR', summary: firstLine(err.message) })),
     });
-    const run = Promise.resolve(spawnDistill({ ...spawnArgs, signal: controller.signal }))
-      .then(() => readResult(resultPath))
-      .catch((err) => ({ verdict: 'ERROR', summary: firstLine(err.message) }));
-    const result = await Promise.race([run, timeout]);
-    if (handle) clearTimeoutFn(handle);
-    return result || { verdict: 'ERROR', summary: 'no verdict' };
   }
 
   async function distillEntry(spec, entry, index, { dryRun }) {
@@ -360,7 +302,7 @@ function createPackDistiller(deps = {}) {
     stopped = true;
     if (timer) clearIntervalFn(timer);
     timer = null;
-    await chain.catch(() => {});
+    await idle;
   }
 
   return { start, stop, runOnce, isEnabled: () => enabled === true };

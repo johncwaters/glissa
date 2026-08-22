@@ -20,7 +20,9 @@ const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 
-const { registerEphemeralSession } = require('./ephemeral-session');
+const {
+  awaitSessionExit, firstLine, raceWithAbort, registerEphemeralSession,
+} = require('./ephemeral-session');
 const {
   DEFAULT_TIMEOUT_SECONDS, buildNavigatorPrompt, countLines, sanitizeComments,
 } = require('./core/navigator-dispatch-core');
@@ -43,10 +45,6 @@ const ALLOWED_TOOLS_ARG = `--allowedTools=${NAVIGATOR_ALLOWED_TOOLS}`;
 const NAVIGATOR_DENY = {
   deny: ['Bash', 'Edit', 'NotebookEdit', 'WebFetch', 'WebSearch', 'Task'],
 };
-
-function firstLine(text) {
-  return String(text == null ? '' : text).split('\n')[0].trim();
-}
 
 function errorResult(reason) {
   return { verdict: 'ERROR', comments: [], intent: null, reason };
@@ -106,26 +104,7 @@ function createNavigatorSpawn({
     });
     registerEphemeralSession({ map: sessions, id, sess, closeSessionDataClients, logPrefix: 'navigator', name, recordLane });
 
-    let onAbort = null;
-    try {
-      await new Promise((resolve, reject) => {
-        let settled = false;
-        const done = () => { if (settled) return; settled = true; resolve(); };
-        const fail = (error) => { if (settled) return; settled = true; reject(error); };
-        sess.on('exit', done);
-        sess.on('error', fail);
-        if (signal) {
-          onAbort = () => { try { sess.destroy(); } catch { /* already gone */ } done(); };
-          if (signal.aborted) onAbort();
-          if (!signal.aborted) signal.addEventListener('abort', onAbort, { once: true });
-        }
-        const run = () => (signal?.aborted ? undefined : sess.start());
-        const started = spawnGate ? spawnGate.run(run) : Promise.resolve().then(run);
-        started.catch(fail);
-      });
-    } finally {
-      if (signal && onAbort) { try { signal.removeEventListener('abort', onAbort); } catch { /* noop */ } }
-    }
+    await awaitSessionExit(sess, { signal, spawnGate });
   };
 }
 
@@ -147,27 +126,20 @@ function createNavigatorDispatcher({
 } = {}) {
   if (typeof spawnSession !== 'function') throw new Error('createNavigatorDispatcher requires spawnSession');
 
-  async function spawnWithTimeout({ id, name, prompt, cwd, resultPath, lineCount }) {
-    const controller = new AbortController();
-    let handle = null;
-    let aborted = false;
-    const timeout = new Promise((resolve) => {
-      handle = setTimeoutFn(() => {
-        aborted = true;
-        controller.abort();
-        resolve(errorResult('dispatch timed out'));
-      }, timeoutSeconds * 1000);
-      if (handle && typeof handle.unref === 'function') handle.unref();
+  function spawnWithTimeout({ id, name, prompt, cwd, resultPath, lineCount }) {
+    return raceWithAbort({
+      timeoutMs: timeoutSeconds * 1000,
+      setTimeoutFn,
+      clearTimeoutFn,
+      onTimeout: () => errorResult('dispatch timed out'),
+      onEmpty: () => errorResult('no verdict'),
+      start: (signal) => Promise.resolve(spawnSession({ id, name, prompt, cwd, model, signal }))
+        .then(() => {
+          if (signal.aborted) return undefined;
+          return readResult(resultPath, { lineCount });
+        })
+        .catch((error) => errorResult(firstLine(error.message))),
     });
-    const run = Promise.resolve(spawnSession({ id, name, prompt, cwd, model, signal: controller.signal }))
-      .then(() => {
-        if (aborted) return undefined;
-        return readResult(resultPath, { lineCount });
-      })
-      .catch((error) => errorResult(firstLine(error.message)));
-    const result = await Promise.race([run, timeout]);
-    if (handle) clearTimeoutFn(handle);
-    return result || errorResult('no verdict');
   }
 
   return async function dispatch({ uri, text, findings = [], intent = '', digest = '' }) {

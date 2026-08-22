@@ -15,10 +15,10 @@
 'use strict';
 
 const path = require('node:path');
-const { promisify } = require('node:util');
 const { createUsageScanner } = require('./usage-scanner');
 const { loadPricing } = require('./usage-pricing');
-const { execFile } = require('./child-process-safe');
+const { execFileAsync: defaultExecFileAsync } = require('./child-process-safe');
+const { createJsonStateWriter } = require('./json-file');
 const { evaluateBudget, normalizeBudgetConfig } = require('./core/usage-budget-core');
 const { computeCacheSavings, normalizeRtkGain } = require('./core/usage-savings-core');
 const { decideTelegramNotification } = require('../notifications/channels/telegram');
@@ -199,7 +199,7 @@ function createUsageWiring({
   loadPricingFn = loadPricing,
   // rtk reports machine-wide compression stats through its own CLI; both seams are injected so the
   // savings path is testable without an rtk install.
-  execFileAsync = promisify(execFile),
+  execFileAsync = defaultExecFileAsync,
   rtkPathFn = defaultRtkPath,
   scannerDeps = {},
   nowFn = Date.now,
@@ -230,7 +230,13 @@ function createUsageWiring({
   const officialCostByClaudeId = new Map();
   let budgetFiredState = {};
   let budgetStateLoaded = false;
-  let budgetStateSignature = null;
+  const budgetStateWriter = budgetStatePath
+    ? createJsonStateWriter({
+      filePath: budgetStatePath,
+      fsPromises,
+      warn: (error) => warn(`budget state write failed: ${error.message}`),
+    })
+    : null;
   let rtkSavingsCache = null;
   let rtkSavingsCacheMs = 0;
   let warnedRtkGain = false;
@@ -488,20 +494,11 @@ function createUsageWiring({
   }
 
   async function saveBudgetState() {
-    if (!budgetStatePath) return;
-    const payload = `${JSON.stringify({ version: 1, fired: budgetFiredState }, null, 2)}\n`;
-    const signature = JSON.stringify(budgetFiredState);
-    if (signature === budgetStateSignature) return;
-    budgetStateSignature = signature;
-    const tmpPath = `${budgetStatePath}.tmp`;
-    try {
-      await fsPromises.mkdir(path.dirname(budgetStatePath), { recursive: true });
-      await fsPromises.writeFile(tmpPath, payload);
-      await fsPromises.rename(tmpPath, budgetStatePath);
-    } catch (error) {
-      warn(`budget state write failed: ${error.message}`);
-      budgetStateSignature = null;
-    }
+    if (!budgetStateWriter) return;
+    await budgetStateWriter.write(
+      budgetFiredState,
+      () => `${JSON.stringify({ version: 1, fired: budgetFiredState }, null, 2)}\n`,
+    );
   }
 
   /*

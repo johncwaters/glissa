@@ -1,5 +1,6 @@
 'use strict';
 
+const { addEntryToTotals, emptyTotals } = require('./usage-entry-core');
 const { safeNumber, stringOrNull } = require('./usage-number-core');
 
 function rollupFromReport(daily) {
@@ -104,12 +105,8 @@ function cutoffDayKey(todayKey, retainDays) {
 }
 
 function addRecordToDailyBucket(bucket, record) {
-  bucket.input += record.input;
-  bucket.output += record.output;
-  bucket.cacheCreate += record.cacheCreate;
-  bucket.cacheRead += record.cacheRead;
-  bucket.tokens += record.tokens;
-  bucket.costUSD += record.costUSD;
+  // A stored record carries its own token total, so it is passed rather than re-derived from the counts.
+  addEntryToTotals(bucket, record, record.tokens);
   bucket.models.push({
     key: record.model,
     model: record.model,
@@ -123,16 +120,7 @@ function addRecordToDailyBucket(bucket, record) {
 }
 
 function newDailyBucket(day) {
-  return {
-    day,
-    tokens: 0,
-    costUSD: 0,
-    input: 0,
-    output: 0,
-    cacheCreate: 0,
-    cacheRead: 0,
-    models: [],
-  };
+  return { day, ...emptyTotals(), models: [] };
 }
 
 function recordKey(record) {

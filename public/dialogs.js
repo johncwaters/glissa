@@ -6,20 +6,20 @@ import addSessionHTML from './components/add-session-dialog.html?raw';
 import settingsHTML from './components/settings-dialog.html?raw';
 import { sendControlMsg, sendControlRequest } from './control-ws.js';
 import { ensureNotificationPermission, notificationPermission, notificationsSupported } from './notifications.js';
-import { createModalOverlay, trapFocus } from './session-card/modal.js';
+import { el } from './dom-helpers.js';
+import { applyDialogAria, buildDialogShell, createModalOverlay } from './session-card/modal.js';
 import { countSessionsByName, suggestSessionName } from './session-card/naming.js';
 import { SHORTCUT_GROUPS } from './shortcuts.mjs';
 import { applyTheme, getThemeList } from './theme.js';
 import { getSoundId, getThemeId, isNotificationsEnabled, setNotificationsEnabled, setSoundId, setThemeId } from './ui-prefs.js';
 import { usageStatusLines } from './usage-panel.js';
 
-// ── Shared dialog ARIA + focus trap helpers ──────────────────
-
-function applyDialogAria(dialog, titleId) {
-  dialog.setAttribute('role', 'dialog');
-  dialog.setAttribute('aria-modal', 'true');
-  dialog.setAttribute('aria-labelledby', titleId);
-  trapFocus(dialog);
+function option(text, { value, disabled = false, selected = false } = {}) {
+  const opt = el('option', null, text);
+  if (value != null) opt.value = value;
+  if (disabled) opt.disabled = true;
+  if (selected) opt.selected = true;
+  return opt;
 }
 
 // ── Add Session dialog ────────────────────────────────────────
@@ -27,13 +27,6 @@ function applyDialogAria(dialog, titleId) {
 export function createAddSessionDialog() {
   const { dialog, close } = createModalOverlay();
   dialog.innerHTML = addSessionHTML;
-
-  // Ensure title id exists for aria-labelledby
-  let titleEl = dialog.querySelector('#add-session-title');
-  if (!titleEl) {
-    titleEl = dialog.querySelector('h2, h3, [class*="title"]');
-    if (titleEl && !titleEl.id) titleEl.id = 'add-session-title';
-  }
   applyDialogAria(dialog, 'add-session-title');
 
   const pickerEl = dialog.querySelector('#add-session-picker');
@@ -59,26 +52,19 @@ export function createAddSessionDialog() {
   sendControlRequest('scan-repo-roots', {})
     .then((msg) => {
       pickerEl.innerHTML = '';
-      const defaultOpt = document.createElement('option');
-      defaultOpt.value = '';
-      defaultOpt.textContent = '-- Select a project --';
-      defaultOpt.disabled = true;
-      defaultOpt.selected = true;
-      pickerEl.appendChild(defaultOpt);
+      pickerEl.appendChild(option('-- Select a project --', { value: '', disabled: true, selected: true }));
 
       let hasProjects = false;
       for (const dir of (msg.directories || [])) {
         if (dir.projects.length === 0) continue;
-        const group = document.createElement('optgroup');
+        const group = el('optgroup');
         group.label = dir.root;
         for (const proj of dir.projects) {
-          const opt = document.createElement('option');
-          opt.value = JSON.stringify({ name: proj.name, path: proj.path });
           // Show "(N open)" suffix so users see at a glance which projects
           // already have sessions; selecting still works to spawn another.
           const existing = countSessionsByName(proj.name);
-          opt.textContent = existing > 0 ? `${proj.name} (${existing} open)` : proj.name;
-          group.appendChild(opt);
+          const label = existing > 0 ? `${proj.name} (${existing} open)` : proj.name;
+          group.appendChild(option(label, { value: JSON.stringify({ name: proj.name, path: proj.path }) }));
           hasProjects = true;
         }
         pickerEl.appendChild(group);
@@ -86,20 +72,12 @@ export function createAddSessionDialog() {
 
       if (!hasProjects) {
         pickerEl.innerHTML = '';
-        const emptyOpt = document.createElement('option');
-        emptyOpt.disabled = true;
-        emptyOpt.selected = true;
-        emptyOpt.textContent = 'No projects found (configure repo roots in Settings)';
-        pickerEl.appendChild(emptyOpt);
+        pickerEl.appendChild(option('No projects found (configure repo roots in Settings)', { disabled: true, selected: true }));
       }
     })
     .catch(() => {
       pickerEl.innerHTML = '';
-      const failOpt = document.createElement('option');
-      failOpt.disabled = true;
-      failOpt.selected = true;
-      failOpt.textContent = 'Scan failed';
-      pickerEl.appendChild(failOpt);
+      pickerEl.appendChild(option('Scan failed', { disabled: true, selected: true }));
     });
 
   pickerEl.addEventListener('change', () => {
@@ -161,13 +139,6 @@ function budgetFieldValue(input) {
 export function createSettingsDialog(initialTab) {
   const { dialog, close } = createModalOverlay({ dialogClass: 'dialog dialog-settings' });
   dialog.innerHTML = settingsHTML;
-
-  // Ensure title id exists for aria-labelledby
-  let titleEl = dialog.querySelector('#settings-title');
-  if (!titleEl) {
-    titleEl = dialog.querySelector('h2, h3, [class*="title"]');
-    if (titleEl && !titleEl.id) titleEl.id = 'settings-title';
-  }
   applyDialogAria(dialog, 'settings-title');
 
   // Tab switching
@@ -287,9 +258,7 @@ export function createSettingsDialog(initialTab) {
   // Read-only readout of what the last usage report said, sourced from the panel rather than a second
   // request: the panel is mounted eagerly and already holds it.
   for (const line of usageStatusLines()) {
-    const row = document.createElement('div');
-    row.textContent = line;
-    usageStatusEl.appendChild(row);
+    usageStatusEl.appendChild(el('div', null, line));
   }
 
   // Same materialization guard for the credentials: an operator who never opens this tab does not get
@@ -302,10 +271,7 @@ export function createSettingsDialog(initialTab) {
 
   // Populate sound picker
   for (const opt of SOUND_OPTIONS) {
-    const option = document.createElement('option');
-    option.value = opt.id;
-    option.textContent = opt.label;
-    soundSelect.appendChild(option);
+    soundSelect.appendChild(option(opt.label, { value: opt.id }));
   }
   soundSelect.value = getSoundId();
 
@@ -341,10 +307,7 @@ export function createSettingsDialog(initialTab) {
 
   // Populate theme picker
   for (const theme of getThemeList()) {
-    const option = document.createElement('option');
-    option.value = theme.id;
-    option.textContent = theme.label;
-    themeSelect.appendChild(option);
+    themeSelect.appendChild(option(theme.label, { value: theme.id }));
   }
   themeSelect.value = getThemeId();
 
@@ -372,22 +335,14 @@ export function createSettingsDialog(initialTab) {
   function renderRootList() {
     rootListEl.innerHTML = '';
     if (repoRoots.length === 0) {
-      const empty = document.createElement('div');
-      empty.className = 'settings-empty';
-      empty.textContent = 'No repository roots configured. Add a path to enable project discovery.';
-      rootListEl.appendChild(empty);
+      rootListEl.appendChild(el('div', 'settings-empty', 'No repository roots configured. Add a path to enable project discovery.'));
       return;
     }
     for (let i = 0; i < repoRoots.length; i++) {
-      const item = document.createElement('div');
-      item.className = 'settings-root-item';
-      const pathSpan = document.createElement('span');
-      pathSpan.className = 'settings-root-path';
-      pathSpan.textContent = repoRoots[i];
+      const item = el('div', 'settings-root-item');
+      const pathSpan = el('span', 'settings-root-path', repoRoots[i]);
       pathSpan.title = repoRoots[i];
-      const removeBtn = document.createElement('button');
-      removeBtn.className = 'btn-settings-remove';
-      removeBtn.textContent = '\u00d7';
+      const removeBtn = el('button', 'btn-settings-remove', '\u00d7');
       removeBtn.title = 'Remove';
       removeBtn.addEventListener('click', () => {
         repoRoots.splice(i, 1);
@@ -417,19 +372,14 @@ export function createSettingsDialog(initialTab) {
   function renderPrProjects(checkedIds) {
     prProjectsEl.textContent = '';
     if (prProjectChoices.length === 0) {
-      const empty = document.createElement('div');
-      empty.className = 'settings-empty';
-      empty.textContent = 'No projects configured. Add a session to pick a project here.';
-      prProjectsEl.appendChild(empty);
+      prProjectsEl.appendChild(el('div', 'settings-empty', 'No projects configured. Add a session to pick a project here.'));
       return;
     }
     const checked = new Set(checkedIds);
     for (const proj of prProjectChoices) {
-      const label = document.createElement('label');
-      label.className = 'dialog-label dialog-checkbox-label';
-      const input = document.createElement('input');
+      const label = el('label', 'dialog-label dialog-checkbox-label');
+      const input = el('input', 'dialog-checkbox');
       input.type = 'checkbox';
-      input.className = 'dialog-checkbox';
       input.dataset.projectId = proj.id;
       input.checked = checked.has(proj.id);
       label.appendChild(input);
@@ -663,83 +613,47 @@ export function createSettingsDialog(initialTab) {
 function renderShortcutGroups(container) {
   container.textContent = '';
   for (const group of SHORTCUT_GROUPS) {
-    const groupEl = document.createElement('div');
-    groupEl.className = 'shortcut-group';
-    const titleEl = document.createElement('div');
-    titleEl.className = 'shortcut-group-title';
-    titleEl.textContent = group.title;
-    groupEl.appendChild(titleEl);
+    const groupEl = el('div', 'shortcut-group');
+    groupEl.appendChild(el('div', 'shortcut-group-title', group.title));
 
-    const dl = document.createElement('dl');
-    dl.className = 'shortcut-rows';
+    const dl = el('dl', 'shortcut-rows');
     for (const item of group.items) {
-      const dt = document.createElement('dt');
-      dt.className = 'shortcut-keys';
+      const dt = el('dt', 'shortcut-keys');
       item.combos.forEach((chord, ci) => {
-        if (ci > 0) dt.appendChild(shortcutSep('/'));
+        if (ci > 0) dt.appendChild(el('span', 'shortcut-sep', '/'));
         chord.forEach((cap, ki) => {
-          if (ki > 0) dt.appendChild(shortcutSep('+'));
-          const kbd = document.createElement('kbd');
-          kbd.className = 'kbd';
-          kbd.textContent = cap;
-          dt.appendChild(kbd);
+          if (ki > 0) dt.appendChild(el('span', 'shortcut-sep', '+'));
+          dt.appendChild(el('kbd', 'kbd', cap));
         });
       });
-      const dd = document.createElement('dd');
-      dd.className = 'shortcut-label';
-      dd.textContent = item.label;
       dl.appendChild(dt);
-      dl.appendChild(dd);
+      dl.appendChild(el('dd', 'shortcut-label', item.label));
     }
     groupEl.appendChild(dl);
     container.appendChild(groupEl);
   }
 }
 
-function shortcutSep(ch) {
-  const s = document.createElement('span');
-  s.className = 'shortcut-sep';
-  s.textContent = ch;
-  return s;
-}
-
 export function createPosthogReportDialog({ issueId, issueTitle, format, content, message, error }) {
-  const { dialog, close } = createModalOverlay({ dialogClass: 'dialog dialog-report' });
-  const titleId = `posthog-report-title-${Math.random().toString(36).slice(2)}`;
+  const { dialog, close, actions, btnCancel: btnClose } = buildDialogShell({
+    title: 'Investigation report',
+    dialogClass: 'dialog dialog-report',
+    cancelLabel: 'Close',
+  });
 
-  const titleEl = document.createElement('h3');
-  titleEl.id = titleId;
-  titleEl.className = 'dialog-title';
-  titleEl.textContent = 'Investigation report';
-
-  const metaEl = document.createElement('div');
-  metaEl.className = 'dialog-report-meta';
-  metaEl.textContent = issueTitle || issueId || '';
+  const metaEl = el('div', 'dialog-report-meta', issueTitle || issueId || '');
 
   let bodyEl = null;
   if (format === 'html' && !error && !message) {
-    bodyEl = document.createElement('iframe');
-    bodyEl.className = 'dialog-report-frame';
+    bodyEl = el('iframe', 'dialog-report-frame');
     bodyEl.setAttribute('sandbox', '');
     bodyEl.srcdoc = content || '';
   }
   if (!bodyEl) {
-    bodyEl = document.createElement('pre');
-    bodyEl.className = error ? 'dialog-report-body dialog-report-error' : 'dialog-report-body';
-    bodyEl.textContent = error || message || content || '';
+    bodyEl = el('pre', error ? 'dialog-report-body dialog-report-error' : 'dialog-report-body', error || message || content || '');
   }
 
-  const actions = document.createElement('div');
-  actions.className = 'dialog-actions';
-
-  const btnClose = document.createElement('button');
-  btnClose.className = 'btn-dialog btn-dialog-cancel';
-  btnClose.textContent = 'Close';
-
-  actions.append(btnClose);
-  dialog.append(titleEl, metaEl, bodyEl, actions);
-
-  applyDialogAria(dialog, titleId);
+  dialog.append(metaEl, bodyEl, actions);
 
   btnClose.addEventListener('click', close);
   requestAnimationFrame(() => btnClose.focus());

@@ -6,6 +6,8 @@ const path = require('node:path');
 const os = require('node:os');
 
 const { canonicalizePath, equalsIgnoringCaseOnWindows } = require('../shared/paths');
+const { isPlainObject } = require('./core/usage-number-core');
+const { writeJsonAtomicSync, writeTextAtomicSync } = require('./json-file');
 
 const DEFAULT_CONFIG = {
   port: 3000,
@@ -189,11 +191,6 @@ function generateProjectId() {
   return crypto.randomUUID();
 }
 
-function isPlainObject(value) {
-  if (value == null || Array.isArray(value)) return false;
-  return Object.getPrototypeOf(value) === Object.prototype;
-}
-
 function validateConfig(candidate) {
   const errors = [];
   if (!isPlainObject(candidate)) {
@@ -333,9 +330,7 @@ function createConfigStore({ settingsDefaults } = {}) {
   // Auto-assign stable IDs to any projects missing them
   if (Array.isArray(config.projects) && ensureProjectIds(config.projects)) {
     try {
-      const tmpPath = `${configPath}.tmp.${process.pid}`;
-      fs.writeFileSync(tmpPath, JSON.stringify(config, null, 2), 'utf8');
-      fs.renameSync(tmpPath, configPath);
+      writeJsonAtomicSync(configPath, config);
       console.log('[config] Auto-assigned IDs to projects missing them');
     } catch (err) {
       console.warn('[config] Failed to persist auto-assigned project IDs:', err.message);
@@ -379,11 +374,9 @@ function createConfigStore({ settingsDefaults } = {}) {
     }
     _lastSelfWriteTs = Date.now();
     try {
-      const tmpPath = `${configPath}.tmp.${process.pid}`;
       const nextContent = JSON.stringify(freshConfig, null, 2);
       if (freshContent !== nextContent) writeBackupContent(`${configPath}.bak`, freshContent);
-      fs.writeFileSync(tmpPath, nextContent, 'utf8');
-      fs.renameSync(tmpPath, configPath);
+      writeTextAtomicSync(configPath, nextContent);
     } catch (err) {
       console.warn('[config] Failed to write config.json:', err.code || err.message);
       return null;

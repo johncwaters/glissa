@@ -299,8 +299,6 @@ module.exports = {
   DEFAULT_QUIET_MS,
   DEFAULT_TIMEOUT_SECONDS,
   HOUR_MS,
-  MAX_COMMENTS,
-  MAX_MESSAGE_CHARS,
   activitySection,
   buildNavigatorPrompt,
   countLines,

@@ -166,5 +166,4 @@ module.exports = {
   codexSessionIdFromPath,
   dedupeCodexFiles,
   isUsageFile,
-  GROK_USAGE_FILENAME,
 };

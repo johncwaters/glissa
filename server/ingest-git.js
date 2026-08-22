@@ -24,9 +24,7 @@
 
 'use strict';
 
-const { promisify } = require('node:util');
-
-const { execFile } = require('./child-process-safe');
+const { execFileAsync } = require('./child-process-safe');
 const { createWatchDebounce } = require('../detection/watch-debounce');
 const { canonicalizePath } = require('../shared/paths');
 const {
@@ -35,8 +33,6 @@ const {
   shouldReadCommit,
 } = require('./core/ingest-git-core');
 const { positiveInt } = require('./core/ingest-number-core');
-
-const execFileAsync = promisify(execFile);
 
 const DEFAULT_MAX_REPOS = 16;
 const DEFAULT_GIT_TIMEOUT_MS = 15000;

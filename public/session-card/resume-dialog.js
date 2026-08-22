@@ -9,7 +9,7 @@
 
 import { sendControlMsg, sendControlRequest } from '../control-ws.js';
 import { el, escapeHtml } from '../dom-helpers.js';
-import { createModalOverlay, trapFocus } from './modal.js';
+import { buildDialogShell } from './modal.js';
 import { showErrorToast } from './toast.js';
 
 const DORMANT = 'DORMANT';
@@ -47,30 +47,22 @@ function buildItem(conv, currentId, onPick) {
 export function openResumeDialog(sessionId, opts = {}) {
   const isDormant = (opts.currentState || '') === DORMANT;
 
-  const { overlay, dialog, close } = createModalOverlay({ dialogClass: 'dialog resume-dialog' });
-  const titleId = `resume-title-${Math.random().toString(36).slice(2)}`;
+  const { overlay, dialog, close, actions, btnCancel } = buildDialogShell({
+    title: 'Resume a conversation',
+    dialogClass: 'dialog resume-dialog',
+  });
 
-  const titleEl = el('h3', 'dialog-title', 'Resume a conversation');
-  titleEl.id = titleId;
   const hint = el('p', 'dialog-message', 'Pick a Claude conversation from this repo (any worktree) to continue in this card.');
   const listEl = el('div', 'resume-list');
   listEl.setAttribute('role', 'listbox');
   listEl.setAttribute('aria-label', 'Resumable conversations');
   listEl.append(el('div', 'resume-empty', 'Loading conversations...'));
 
-  const actions = el('div', 'dialog-actions');
   const btnClear = el('button', 'btn-dialog btn-dialog-cancel', 'Start fresh');
   btnClear.title = 'Clear any resume binding so this card starts a new conversation';
-  const btnCancel = el('button', 'btn-dialog btn-dialog-cancel', 'Cancel');
-  actions.append(btnClear, btnCancel);
+  actions.prepend(btnClear);
 
-  dialog.append(titleEl, hint, listEl, actions);
-
-  dialog.setAttribute('role', 'dialog');
-  dialog.setAttribute('aria-modal', 'true');
-  dialog.setAttribute('aria-labelledby', titleId);
-
-  trapFocus(dialog);
+  dialog.append(hint, listEl, actions);
 
   // Bind (or clear) the conversation, then surface the result. A DORMANT card is started so the
   // conversation loads now; a live card keeps running and picks up the binding on its next restart.

@@ -1,7 +1,7 @@
 // ── Session card module ───────────────────────────────────────
 // Owns session card DOM lifecycle, terminal setup, and per-session state.
 
-// Vite alias - resolves to shared/states.esm.js
+// Virtual module generated from shared/states.js (Vite plugin in dev/build, backend route in no-build)
 import { KILLABLE_STATES, RESTARTABLE_STATES, STATES } from '/shared/states.mjs';
 import { playAlertSound } from '../alert-sound.js';
 import { sendControlMsg } from '../control-ws.js';
@@ -65,8 +65,11 @@ function updateButtonVisibility(ui) {
   const canRestart = KILLABLE_STATES.includes(state) || RESTARTABLE_STATES.includes(state);
   ui.btnRestart.classList.toggle('visible', canRestart);
   ui.btnRestartFresh.classList.toggle('visible', canRestart);
-  // Rename and Remove are always available
+  // Rename, Resume and Remove are always available. Resume binds a conversation for the NEXT start, so
+  // it is meaningful in every state (resume-dialog.js starts a DORMANT card, and tells a live one the
+  // binding applies on its next restart).
   ui.btnRename.classList.add('visible');
+  ui.btnResume.classList.add('visible');
   ui.btnRemove.classList.add('visible');
 }
 
@@ -304,6 +307,24 @@ export function setSessionResume(sessionId, resumeSessionId) {
   delete ui.card.dataset.resume;
 }
 
+// One paint for every card chip: the card's data-* attribute drives the CSS, the badge element carries
+// the text. `on: false` clears both. A badge whose tooltip is fixed at build time (card-dom.js
+// TAG_BADGES) passes no `title` and keeps it; one that owns its tooltip passes it in both directions.
+function paintCardBadge(ui, selector, datasetKey, { on, value = '', text, title }) {
+  const badge = ui.card.querySelector(selector);
+  if (!on) {
+    delete ui.card.dataset[datasetKey];
+    if (!badge) return;
+    if (text !== undefined) badge.textContent = '';
+    if (title !== undefined) badge.removeAttribute('title');
+    return;
+  }
+  ui.card.dataset[datasetKey] = value;
+  if (!badge) return;
+  if (text !== undefined) badge.textContent = text;
+  if (title !== undefined) badge.title = title;
+}
+
 // Reflect the live background sub-agent count on the card. n > 0 shows an "N agents" chip and sets
 // data-agents (drives the CSS, mirroring data-worktree); 0 hides it. This is why a card can stay
 // Working after the main turn's Stop: background sub-agents are still running (see backend
@@ -313,14 +334,11 @@ export function setSessionAgents(sessionId, activeAgents) {
   if (!ui) return;
   const n = Math.max(0, Number(activeAgents) || 0);
   ui.activeAgents = n;
-  const badge = ui.card.querySelector('.agents-badge');
-  if (n > 0) {
-    ui.card.dataset.agents = String(n);
-    if (badge) badge.textContent = n === 1 ? '1 agent' : `${n} agents`;
-    return;
-  }
-  delete ui.card.dataset.agents;
-  if (badge) badge.textContent = '';
+  paintCardBadge(ui, '.agents-badge', 'agents', {
+    on: n > 0,
+    value: String(n),
+    text: n === 1 ? '1 agent' : `${n} agents`,
+  });
 }
 
 // Reflect the context packs a session was spawned against, and whether the mill has rebuilt any of
@@ -362,16 +380,14 @@ function packReadsText(packs) {
 
 function applyPackStaleness(ui) {
   const stale = stalePackNames(ui.packs, latestPackVersions);
-  const badge = ui.card.querySelector('.pack-badge');
-  if (stale.length === 0) {
-    delete ui.card.dataset.packStale;
-    if (badge) badge.title = '';
-    return;
-  }
-  ui.card.dataset.packStale = '';
-  // Reads ride the same tooltip rather than a chip of their own: "rebuilt, and this session read it
-  // N times" is one thought, and the chip only renders while a pack is stale anyway.
-  if (badge) badge.title = `Rebuilt since this session started: ${stale.join(', ')}. Restart it to pick up the new context.\n${packReadsText(ui.packs)}`;
+  paintCardBadge(ui, '.pack-badge', 'packStale', {
+    on: stale.length > 0,
+    // Reads ride the same tooltip rather than a chip of their own: "rebuilt, and this session read it
+    // N times" is one thought, and the chip only renders while a pack is stale anyway.
+    title: stale.length > 0
+      ? `Rebuilt since this session started: ${stale.join(', ')}. Restart it to pick up the new context.\n${packReadsText(ui.packs)}`
+      : '',
+  });
 }
 
 function refreshPackStaleness() {
@@ -385,18 +401,14 @@ function refreshPackStaleness() {
 export function setSessionUsage(sessionId, usage) {
   const ui = sessionUIs.get(sessionId);
   if (!ui) return;
-  const badge = ui.card.querySelector('.usage-badge');
   const text = sessionChipText(usage);
-  if (!text) {
-    delete ui.card.dataset.usage;
-    if (badge) badge.textContent = '';
-    return;
-  }
-  ui.card.dataset.usage = '';
-  if (!badge) return;
-  badge.textContent = text;
-  // Claude's own figure and the scanner's estimate are computed differently, so the chip says which.
-  badge.title = sessionChipTitle(usage);
+  paintCardBadge(ui, '.usage-badge', 'usage', {
+    on: !!text,
+    text: text || '',
+    // Claude's own figure and the scanner's estimate are computed differently, so the chip says which.
+    // Clearing leaves the title alone so the build-time tooltip survives a hide/show cycle.
+    title: text ? sessionChipTitle(usage) : undefined,
+  });
 }
 
 // Reflect the advisory pending-prompt-kind on the card (server session-prompt delta / snapshot
@@ -406,15 +418,11 @@ export function setSessionUsage(sessionId, usage) {
 export function setSessionPrompt(sessionId, kind) {
   const ui = sessionUIs.get(sessionId);
   if (!ui) return;
-  const badge = ui.card.querySelector('.prompt-badge');
-  if (!kind) {
-    delete ui.card.dataset.prompt;
-    if (badge) badge.textContent = '';
-    return;
-  }
-  ui.card.dataset.prompt = kind;
-  if (!badge) return;
-  badge.textContent = kind === 'permission' ? 'permission' : 'input';
+  paintCardBadge(ui, '.prompt-badge', 'prompt', {
+    on: !!kind,
+    value: kind,
+    text: kind === 'permission' ? 'permission' : 'input',
+  });
 }
 
 // "sleeping until ~HH:MM" (one-shot with a fire time) or "scheduled" (cron, no time computed).
@@ -433,19 +441,12 @@ function formatWakeupChip(at) {
 export function setSessionWakeup(sessionId, wakeup) {
   const ui = sessionUIs.get(sessionId);
   if (!ui) return;
-  const badge = ui.card.querySelector('.wakeup-badge');
-  if (!wakeup) {
-    delete ui.card.dataset.wakeup;
-    if (badge) {
-      badge.textContent = '';
-      badge.title = '';
-    }
-    return;
-  }
-  ui.card.dataset.wakeup = wakeup.kind || 'wakeup';
-  if (!badge) return;
-  badge.textContent = formatWakeupChip(wakeup.at);
-  badge.title = wakeup.reason ? `Scheduled revival: ${wakeup.reason}` : 'Scheduled revival pending';
+  paintCardBadge(ui, '.wakeup-badge', 'wakeup', {
+    on: !!wakeup,
+    value: wakeup?.kind || 'wakeup',
+    text: formatWakeupChip(wakeup?.at),
+    title: wakeup?.reason ? `Scheduled revival: ${wakeup.reason}` : 'Scheduled revival pending',
+  });
 }
 
 // Reflect a post-turn-check result on the card. `report` is the server broadcast
@@ -455,8 +456,6 @@ export function setSessionWakeup(sessionId, wakeup) {
 export function setSessionPostTurn(sessionId, report) {
   const ui = sessionUIs.get(sessionId);
   if (!ui) return;
-  const badge = ui.card.querySelector('.post-turn-badge');
-  if (!badge) return;
   const r = report || {};
   const findings = Array.isArray(r.findings) ? r.findings : [];
   const fixed = r.filesFixed || 0;
@@ -470,20 +469,17 @@ export function setSessionPostTurn(sessionId, report) {
     kind = 'flagged';
     count = new Set(findings.map((f) => f.file)).size;
   }
-  if (!kind) {
-    delete ui.card.dataset.pt;
-    badge.textContent = '';
-    badge.removeAttribute('title');
-    return;
-  }
-  ui.card.dataset.pt = kind;
-  const glyph = kind === 'fixed' ? '✓' : '⚠'; // check mark / warning sign
-  badge.textContent = `${glyph} ${count}`;
   const perRule = {};
   for (const f of findings) perRule[f.rule] = (perRule[f.rule] || 0) + (f.count || 0);
   const detail = Object.keys(perRule).map((k) => `${k}: ${perRule[k]}`).join(', ');
   const verb = kind === 'fixed' ? 'auto-fixed' : 'flagged';
-  badge.title = `Post-turn ${verb} ${count} file(s)${detail ? ` (${detail})` : ''}`;
+  const glyph = kind === 'fixed' ? '✓' : '⚠'; // check mark / warning sign
+  paintCardBadge(ui, '.post-turn-badge', 'pt', {
+    on: !!kind,
+    value: kind,
+    text: `${glyph} ${count}`,
+    title: `Post-turn ${verb} ${count} file(s)${detail ? ` (${detail})` : ''}`,
+  });
 }
 
 // Reflect the worktree merge lifecycle. `mergeStatus` is the server's session-merge-status

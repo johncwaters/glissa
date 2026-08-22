@@ -8,7 +8,9 @@
 // with another's settle/teardown window, every spawn-initiation runs through this single gate.
 // See .omc/plans/marketing-team-pipeline.md section 3.9.
 
-function createSpawnGate() {
+// The chain-onto-tail serializer itself, named for what it does rather than for the one caller above:
+// the worktree engine and the distiller lane serialize their own work with the same queue.
+function createSerialQueue() {
   // `tail` is the promise chain; each run() links after the previous, so only one runs at a time.
   let tail = Promise.resolve();
 
@@ -26,4 +28,6 @@ function createSpawnGate() {
   return { run };
 }
 
-module.exports = { createSpawnGate };
+const createSpawnGate = createSerialQueue;
+
+module.exports = { createSerialQueue, createSpawnGate };

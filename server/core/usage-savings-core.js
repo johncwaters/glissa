@@ -9,15 +9,11 @@
  * rows against the same price table the cost estimate uses.
  */
 
-const { safeNumber, stringOrNull } = require('./usage-number-core');
+const { isPlainObject, safeNumber, stringOrNull } = require('./usage-number-core');
 const { lookupModelPrice, ratesForPrice } = require('./usage-pricing-core');
 const { vendorOf } = require('./usage-aggregate-core');
 
 const DAY_KEY_RE = /^\d{4}-\d{2}-\d{2}$/;
-
-function isPlainObject(value) {
-  return value != null && typeof value === 'object' && !Array.isArray(value);
-}
 
 /*
  * `rtk gain --daily --format json` -> the wire shape, or null when the payload is unusable. A missing

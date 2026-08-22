@@ -19,15 +19,12 @@ const { EventEmitter } = require('node:events');
 
 const { buildPack, listPackSpecs, loadPackSpec, packWatchRoots } = require('./pack-builder');
 const { createPackWatcher } = require('./pack-watch');
+const { shortVersion } = require('./text-format');
 
 const DEFAULT_SWEEP_MINUTES = 15;
 // Long enough to swallow an editor's save-plus-rename burst, short enough that a rebuilt pack's
 // skills hot-reload into a live session while the operator is still looking at the edit.
 const DEFAULT_DEBOUNCE_MS = 500;
-
-function shortVersion(version) {
-  return typeof version === 'string' ? version.slice(0, 12) : '-';
-}
 
 function createPackService(deps = {}) {
   const {

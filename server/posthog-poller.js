@@ -4,6 +4,8 @@ const core = require('./core/posthog-core');
 const recurrence = require('./core/posthog-recurrence');
 const traffic = require('./core/traffic-spike-core');
 const { normalizeIssues, parseSpikeIssueIds } = require('./posthog-api');
+const { firstLine, raceWithAbort } = require('./ephemeral-session');
+const { createTickLoop } = require('./lane-runner');
 
 /*
  * The PostHog monitoring poller. IO-FREE by construction, exactly like server/pr-poller.js: the
@@ -102,20 +104,17 @@ function createPosthogPoller(deps) {
   const trafficSpikeBaselineDays = deps.trafficSpikeBaselineDays ?? traffic.DEFAULT_TRAFFIC_BASELINE_DAYS;
 
   let state = {};
-  let timer = null;
-  let tickRunning = false;
-  let stopped = false;
-  let persistChain = Promise.resolve();
-  // In-flight runInvestigation() calls, tracked so stop() can drain them before a caller reuses the
-  // dependencies (result-file paths, report dir, state file) for a fresh poller instance.
-  const running = new Set();
 
-  function persist() {
-    persistChain = persistChain.then(() => writeState(state)).catch((e) => {
-      log.warn(`[posthog-poller] state write failed: ${e.message}`);
-    });
-    return persistChain;
-  }
+  const loop = createTickLoop({
+    tag: 'posthog-poller',
+    intervalMs: intervalMinutes * 60000,
+    tick: () => runTick(),
+    writeState: () => writeState(state),
+    setIntervalFn,
+    clearIntervalFn,
+    log,
+  });
+  const persist = () => loop.persist();
 
   function meta() {
     if (!state[META_KEY]) state[META_KEY] = { lastTickAt: {} };
@@ -125,10 +124,6 @@ function createPosthogPoller(deps) {
 
   function inFlightCount() {
     return Object.keys(state).filter((k) => isIssueKey(k) && state[k] && state[k].inFlight).length;
-  }
-
-  function firstLine(s) {
-    return String(s || '').split(/\r?\n/)[0].trim();
   }
 
   // Fire a ping once per phase per issue. `phases` is the entry's own pingedPhases array, mutated in
@@ -155,31 +150,23 @@ function createPosthogPoller(deps) {
     };
   }
 
-  // Race the injected spawnInvestigation against a hard timeout so a hung `claude -p` session can
-  // never pin an issue in-flight forever (same guarantee as pr-poller.spawnWithTimeout). On timeout
-  // the session is aborted and the verdict resolves to ERROR, freeing the concurrency slot.
-  async function spawnWithTimeout(args) {
-    const controller = new AbortController();
-    let timeoutHandle = null;
-    const timeout = new Promise((resolve) => {
-      timeoutHandle = setTimeoutFn(() => {
-        controller.abort();
+  function spawnWithTimeout(args) {
+    return raceWithAbort({
+      timeoutMs: args.timeoutMs,
+      setTimeoutFn,
+      clearTimeoutFn,
+      onTimeout: () => {
         const what = args.mode === core.JOB_MODES.fix ? 'fix' : 'investigation';
-        resolve({ verdict: 'ERROR', summary: `${what} timed out`, mode: args.mode });
-      }, args.timeoutMs);
-      if (timeoutHandle && typeof timeoutHandle.unref === 'function') timeoutHandle.unref();
+        return { verdict: 'ERROR', summary: `${what} timed out`, mode: args.mode };
+      },
+      onEmpty: () => ({ verdict: 'ERROR', summary: 'no verdict' }),
+      // Tracked on its own, not only through the race: on the TIMEOUT path the race resolves and the
+      // slot frees while the spawn is still unwinding, and a fix job unwinds through its worktree
+      // discard. Without this, stop() (a shutdown, or a settings-triggered restart) could return
+      // before that discard ran and leave the throwaway checkout behind for the next instance.
+      start: (signal) => loop.track(Promise.resolve(spawnInvestigation({ ...args, signal }))
+        .catch((e) => ({ verdict: 'ERROR', summary: firstLine(e.message) }))),
     });
-    const run = Promise.resolve(spawnInvestigation({ ...args, signal: controller.signal }))
-      .catch((e) => ({ verdict: 'ERROR', summary: firstLine(e.message) }));
-    // Tracked on its own, not only through the race: on the TIMEOUT path the race resolves and the
-    // slot frees while the spawn is still unwinding, and a fix job unwinds through its worktree
-    // discard. Without this, stop() (a shutdown, or a settings-triggered restart) could return
-    // before that discard ran and leave the throwaway checkout behind for the next instance.
-    running.add(run);
-    run.finally(() => running.delete(run));
-    const res = await Promise.race([run, timeout]);
-    if (timeoutHandle) clearTimeoutFn(timeoutHandle);
-    return res || { verdict: 'ERROR', summary: 'no verdict' };
   }
 
   // Open or refresh the signature cluster after a TRANSIENT verdict; recurrenceOf folds a matched
@@ -325,11 +312,9 @@ function createPosthogPoller(deps) {
     const mode = core.decideJobMode(change, { autoFix });
     state[change.key].inFlight = true;
     if (decision?.matchKey) state[change.key].recurrenceOf = decision.matchKey;
-    const investigation = runInvestigation(change, mode).catch((e) => {
+    loop.track(runInvestigation(change, mode).catch((e) => {
       log.warn(`[posthog-poller] investigation crashed for ${change.key}: ${e.message}`);
-    });
-    running.add(investigation);
-    investigation.finally(() => running.delete(investigation));
+    }));
   }
 
   // A would-be investigation the recurrence memory already answered: nothing spawns, but the normal
@@ -514,7 +499,7 @@ function createPosthogPoller(deps) {
     let slots = maxConcurrentInvestigations - inFlightCount();
     for (const item of plan.investigate) {
       if (slots <= 0) break;
-      if (stopped) break;
+      if (loop.isStopped()) break;
       slots -= 1;
       // Latch-and-ping only alongside the spawn it justifies; the latch re-check keeps two
       // same-cluster escalations planned from one pre-tick snapshot down to a single ping.
@@ -553,69 +538,50 @@ function createPosthogPoller(deps) {
     };
   }
 
-  async function tick() {
-    if (tickRunning || stopped) return;
-    tickRunning = true;
-    try {
-      const projects = await resolveProjects().catch((e) => {
-        log.warn(`[posthog-poller] project resolution failed: ${e.message}`);
-        return [];
+  async function runTick() {
+    const projects = await resolveProjects().catch((e) => {
+      log.warn(`[posthog-poller] project resolution failed: ${e.message}`);
+      return [];
+    });
+    let dirty = false;
+    const summaries = [];
+    for (const project of projects) {
+      const res = await tickProject(project).catch((e) => {
+        log.warn(`[posthog-poller] tick failed for ${project?.projectId}: ${e.message}`);
+        return null;
       });
-      let dirty = false;
-      const summaries = [];
-      for (const project of projects) {
-        const res = await tickProject(project).catch((e) => {
-          log.warn(`[posthog-poller] tick failed for ${project?.projectId}: ${e.message}`);
-          return null;
-        });
-        if (!res) continue;
-        if (res.dirty) dirty = true;
-        summaries.push(res.summary);
-      }
-      if (pruneInvestigationLog()) dirty = true;
-      if (pruneSignatureRegistry()) dirty = true;
-      if (dirty) await persist();
-      onTickComplete({
-        type: 'posthog-status',
-        ts: now(),
-        // The dashboard's staleness threshold is two missed polls, which it cannot compute without
-        // knowing how often we poll.
-        intervalMinutes,
-        projects: summaries,
-        investigations: currentInvestigations(),
-      });
-    } finally {
-      tickRunning = false;
+      if (!res) continue;
+      if (res.dirty) dirty = true;
+      summaries.push(res.summary);
     }
+    if (pruneInvestigationLog()) dirty = true;
+    if (pruneSignatureRegistry()) dirty = true;
+    if (dirty) await persist();
+    onTickComplete({
+      type: 'posthog-status',
+      ts: now(),
+      // The dashboard's staleness threshold is two missed polls, which it cannot compute without
+      // knowing how often we poll.
+      intervalMinutes,
+      projects: summaries,
+      investigations: currentInvestigations(),
+    });
   }
 
   async function start() {
-    stopped = false;
-    state = (await readState()) || {};
-    for (const key of Object.keys(state)) {
-      if (!isIssueKey(key)) continue;
-      if (state[key]) state[key].inFlight = false;
-    }
-    pruneInvestigationLog();
-    pruneSignatureRegistry();
-    await tick();
-    timer = setIntervalFn(() => { void tick(); }, intervalMinutes * 60000);
-    if (timer && typeof timer.unref === 'function') timer.unref();
-  }
-
-  // Async for the same reason as pr-poller.stop(): a caller that restarts the poller must let the old
-  // instance's in-flight investigations (up to investigationTimeoutSeconds) and pending state writes
-  // drain BEFORE a new instance reuses the same result-file paths, report dir, and state file.
-  async function stop() {
-    stopped = true;
-    if (timer) clearIntervalFn(timer);
-    timer = null;
-    await Promise.allSettled([...running]);
-    await persistChain;
+    await loop.start(async () => {
+      state = (await readState()) || {};
+      for (const key of Object.keys(state)) {
+        if (!isIssueKey(key)) continue;
+        if (state[key]) state[key].inFlight = false;
+      }
+      pruneInvestigationLog();
+      pruneSignatureRegistry();
+    });
   }
 
   return {
-    start, stop, tick, archiveInvestigation,
+    start, stop: loop.stop, tick: loop.tick, archiveInvestigation,
     investigations: currentInvestigations,
     _state: () => state,
   };

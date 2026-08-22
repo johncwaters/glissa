@@ -25,6 +25,30 @@ export function setDebugMode(on) {
 
 // ── Card DOM builder ─────────────────────────────────────────
 
+// The persistent tag strip, in render order. Every badge is always built and stays hidden until the
+// card carries its matching data-* attribute (set live by the setSessionX handlers in lifecycle.js),
+// so a delta never has to rebuild the header.
+const TAG_BADGES = [
+  { cls: 'worktree-badge', text: 'worktree', title: 'Running in a linked git worktree', ariaLabel: 'Linked git worktree' },
+  { cls: 'resume-badge', text: 'resumed', title: 'Resumes a saved conversation on next start', ariaLabel: 'Resumes a saved conversation' },
+  { cls: 'post-turn-badge', ariaHidden: true },
+  // Why a card can stay Working after the main turn's Stop: background sub-agents are still running.
+  { cls: 'agents-badge', title: 'Background sub-agents still running' },
+  { cls: 'usage-badge', title: 'Tokens and estimated API list-price cost for this conversation' },
+  { cls: 'pack-badge', text: 'pack stale' },
+  // Advisory and self-expiring: an Esc-cancelled wakeup fires no hook, so the chip ages out.
+  { cls: 'wakeup-badge' },
+  { cls: 'prompt-badge', title: 'Waiting on a permission or input prompt' },
+];
+
+function buildTagBadge({ cls, text = '', title, ariaLabel, ariaHidden }) {
+  const badge = el('span', cls, text);
+  if (title) badge.title = title;
+  if (ariaLabel) badge.setAttribute('aria-label', ariaLabel);
+  if (ariaHidden) badge.setAttribute('aria-hidden', 'true');
+  return badge;
+}
+
 export function buildCardDOM(sessionId, sessionName, initialState, options = {}) {
   const state = initialState || STATES.INITIALIZING;
   const card = el('div', 'session-card');
@@ -45,45 +69,6 @@ export function buildCardDOM(sessionId, sessionName, initialState, options = {})
   const nameEl = el('span', 'session-name', sessionName);
   const permsBadge = options.skipPerms ? el('span', 'perms-badge', 'YOLO') : null;
   if (permsBadge) permsBadge.title = 'Running with --dangerously-skip-permissions';
-  // Always built; shown only when the card carries data-worktree (toggled live by
-  // setSessionWorktree on the session-git delta), so the badge needs no rebuild.
-  const worktreeBadge = el('span', 'worktree-badge', 'worktree');
-  worktreeBadge.title = 'Running in a linked git worktree';
-  worktreeBadge.setAttribute('aria-label', 'Linked git worktree');
-  // Resumed-conversation marker. Shown only when the card carries data-resume (set at build time from
-  // the snapshot, toggled live by setSessionResume on the session-resume delta): the card will resume a
-  // saved conversation on its next start rather than beginning a fresh one.
-  const resumeBadge = el('span', 'resume-badge', 'resumed');
-  resumeBadge.title = 'Resumes a saved conversation on next start';
-  resumeBadge.setAttribute('aria-label', 'Resumes a saved conversation');
-  // Post-turn auto-fix marker. Hidden unless the card carries data-pt (set live by
-  // setSessionPostTurn on a post-turn-result delta). Text/title are filled there.
-  const postTurnBadge = el('span', 'post-turn-badge', '');
-  postTurnBadge.setAttribute('aria-hidden', 'true');
-  // Live background sub-agent count. Hidden unless the card carries data-agents (set live by
-  // setSessionAgents on a session-agents delta): the main turn ended but N background sub-agents are
-  // still running, so the card stays Working rather than flipping to Complete. Text filled there.
-  const agentsBadge = el('span', 'agents-badge', '');
-  agentsBadge.title = 'Background sub-agents still running';
-  // Context-pack staleness. Hidden unless the card carries data-pack-stale (set by setSessionPacks /
-  // the pack-updated broadcast): a pack this session was spawned against has been rebuilt since, so
-  // it is running older context than a fresh spawn would get. Title names the packs.
-  const packBadge = el('span', 'pack-badge', 'pack stale');
-  // Token and estimated-cost readout for the conversation this card is currently in. Hidden unless the
-  // card carries data-usage (set live by setSessionUsage on a usage-sessions delta). Text filled there.
-  const usageBadge = el('span', 'usage-badge', '');
-  usageBadge.title = 'Tokens and estimated API list-price cost for this conversation';
-  // Pending scheduled revival. Hidden unless the card carries data-wakeup (set live by
-  // setSessionWakeup on a session-wakeup delta / snapshot): the turn genuinely finished, but the
-  // session scheduled its own revival (dynamic /loop ScheduleWakeup or a cron task), so the card
-  // says "sleeping until ~HH:MM" instead of just looking done. Advisory and self-expiring:
-  // Esc-cancel fires no hook, so the chip ages out rather than being authoritative.
-  const wakeupBadge = el('span', 'wakeup-badge', '');
-  // Advisory pending-prompt-kind marker. Hidden unless the card carries data-prompt (set live by
-  // setSessionPrompt on a session-prompt delta / snapshot): shows WHAT a WAITING session is
-  // waiting on (permission vs elicitation). Text filled there.
-  const promptBadge = el('span', 'prompt-badge', '');
-  promptBadge.title = 'Waiting on a permission or input prompt';
   const spacer = el('span', 'session-header-spacer');
 
   // Time-in-current-state readout on the card header (trailing the name), shown in the Focus center:
@@ -133,7 +118,7 @@ export function buildCardDOM(sessionId, sessionName, initialState, options = {})
   // The tags share one shrinkable, clipping strip so a narrow card sheds badges from the right instead
   // of pushing the action cluster out of the box (eleven possible badges, and the actions must survive).
   const tags = el('div', 'session-card-tags');
-  const tagChildren = [worktreeBadge, resumeBadge, postTurnBadge, agentsBadge, usageBadge, packBadge, wakeupBadge, promptBadge];
+  const tagChildren = TAG_BADGES.map((spec) => buildTagBadge(spec));
   if (permsBadge) tagChildren.push(permsBadge);
   tags.append(...tagChildren);
   header.append(nameEl, elapsedEl, spacer, tags, actions);

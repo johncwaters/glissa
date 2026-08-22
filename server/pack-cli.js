@@ -9,6 +9,7 @@
 const path = require('node:path');
 
 const { buildPacks, defaultBuiltRoot, defaultSpecsDir, describePackSpec, listPackSpecs, readBuiltManifest } = require('./pack-builder');
+const { formatTimestamp, shortVersion } = require('./text-format');
 
 const USAGE = [
   'Usage: glissa pack <command>',
@@ -19,15 +20,6 @@ const USAGE = [
   '  distill [name]   Regenerate derived pack sources whose sources drifted',
   '                   --dry-run reports what would be distilled and spawns nothing',
 ].join('\n');
-
-function shortVersion(version) {
-  return typeof version === 'string' ? version.slice(0, 12) : '-';
-}
-
-function formatTimestamp(iso) {
-  if (typeof iso !== 'string') return '-';
-  return iso.replace('T', ' ').slice(0, 19);
-}
 
 function reportLine(report) {
   const name = report.name.padEnd(24);

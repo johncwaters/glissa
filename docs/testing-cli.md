@@ -266,7 +266,6 @@ session/
 notifications/
 detection/
 shared/states.js
-shared/states.esm.js
 shared/client-trust.js
 shared/client-trust.esm.js
 shared/notification-states.js

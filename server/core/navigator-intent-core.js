@@ -76,8 +76,6 @@ function intentPayload(state) {
 
 module.exports = {
   MAX_INTENT_CHARS,
-  MODEL_SOURCE,
-  OPERATOR_SOURCE,
   applyModelIntent,
   applyOperatorIntent,
   createIntentState,

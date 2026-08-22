@@ -11,8 +11,8 @@
 // connection chip, "+ Session", the help button, the hamburger with Mute / Settings / Restart / Shut
 // Down), so the client-trust gating and every existing listener come along untouched.
 
-import { BADGE_LABELS, STATE_GLYPHS, STATES } from '/shared/states.mjs';
-import { el } from '../dom-helpers.js';
+import { STATES } from '/shared/states.mjs';
+import { el, MERGE_TAGS, observeHeaderHeight, stateChip } from '../dom-helpers.js';
 import { attentionSummaryText, countSessionsNeedingAttention, orderRoster } from '../focus-view/attention-core.mjs';
 import { sessionUIs } from '../session-card/card-registry.js';
 import { onSessionTick, sessionElapsedText } from '../session-card/session-tick.js';
@@ -47,18 +47,7 @@ export function createBoardScreen({ onSelectSession }) {
   const rowById = new Map();
   let attentionCount = 0;
 
-  // The board's own --header-h, so toasts land below the phone top bar exactly as they land below the
-  // desktop header. Same guard as the desktop observer: a hidden bar measures 0 and must not clobber
-  // the live value written by whichever bar IS on screen.
-  let headerSizeRaf = null;
-  new ResizeObserver(() => {
-    if (headerSizeRaf !== null) return;
-    headerSizeRaf = requestAnimationFrame(() => {
-      headerSizeRaf = null;
-      const height = topBar.offsetHeight;
-      if (height > 0) document.documentElement.style.setProperty('--header-h', `${height}px`);
-    });
-  }).observe(topBar);
+  observeHeaderHeight(topBar);
 
   function buildRow(id) {
     const row = el('button', 'phone-row');
@@ -94,19 +83,17 @@ export function createBoardScreen({ onSelectSession }) {
     return ui.card?.dataset.session || ui.nameEl?.textContent || '';
   }
 
-  // Merge status is read off the card's data-merge, which lifecycle.js already maintains for the
-  // remove-warning. Reusing it keeps the board off any pipeline of its own.
-  const MERGE_TAGS = { 'pending-review': 'REVIEW', parked: 'PARKED', merging: 'MERGING' };
-
   function paintRow(row, entry) {
     const { ui, state, unseen } = entry;
-    const label = (BADGE_LABELS[state] || state).toUpperCase();
+    const { glyph, label } = stateChip(state);
     const name = entry.name;
     row.dataset.state = state;
     row.toggleAttribute('data-unseen', unseen);
-    row._refs.glyph.textContent = STATE_GLYPHS[state] || '';
+    row._refs.glyph.textContent = glyph;
     row._refs.name.textContent = name;
     row._refs.badge.textContent = label;
+    // Merge status is read off the card's data-merge, which lifecycle.js already maintains for the
+    // remove-warning. Reusing it keeps the board off any pipeline of its own.
     const merge = ui.card?.dataset.merge || '';
     row.dataset.merge = merge;
     row._refs.merge.textContent = MERGE_TAGS[merge] || '';

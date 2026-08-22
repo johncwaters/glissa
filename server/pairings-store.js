@@ -23,9 +23,10 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const os = require('node:os');
 
 const { canonicalizePath, equalsIgnoringCaseOnWindows } = require('../shared/paths');
+const { glissaHomeDir } = require('./config-store');
+const { writeJsonAtomic, writeJsonAtomicSync } = require('./json-file');
 const {
   hashSecret, mintPairingToken, decideRedemption, mintDeviceCredential,
 } = require('./core/pairing-token');
@@ -63,7 +64,7 @@ function emptyDoc() {
 /** A sibling of an explicitly configured config.json, or the fallback under ~/.glissa. */
 function configSiblingPath(configPath, name) {
   if (configPath) return path.join(path.dirname(configPath), name);
-  return path.join(os.homedir(), '.glissa', name);
+  return path.join(glissaHomeDir(), name);
 }
 
 function defaultPairingsPath(configPath) {
@@ -190,9 +191,7 @@ function createPairingsStore({ filePath, now = Date.now, randomBytes, warn = con
         snapshot = doc;
         return doc;
       }
-      const tmpPath = `${pairingsPath}.tmp.${process.pid}`;
-      fs.writeFileSync(tmpPath, JSON.stringify(doc, null, 2), { encoding: 'utf8', mode: 0o600 });
-      fs.renameSync(tmpPath, pairingsPath);
+      writeJsonAtomicSync(pairingsPath, doc, { mode: 0o600 });
       snapshot = doc;
       return doc;
     } catch (err) {
@@ -362,7 +361,6 @@ function createPairingsStore({ filePath, now = Date.now, randomBytes, warn = con
 function createSeenStore({ filePath, throttleMs = 60000, now = Date.now } = {}) {
   const lastWriteByDevice = new Map();
   let pending = null;
-  let tmpCounter = 0;
 
   function readAll() {
     try {
@@ -385,11 +383,7 @@ function createSeenStore({ filePath, throttleMs = 60000, now = Date.now } = {}) 
     if (last != null && at - last < throttleMs) return;
     lastWriteByDevice.set(deviceId, at);
     doc[deviceId] = at;
-    tmpCounter += 1;
-    const tmpPath = `${filePath}.tmp.${process.pid}.${tmpCounter}`;
-    pending = fs.promises
-      .writeFile(tmpPath, JSON.stringify(doc, null, 2), { encoding: 'utf8', mode: 0o600 })
-      .then(() => fs.promises.rename(tmpPath, filePath))
+    pending = writeJsonAtomic(filePath, doc, { mode: 0o600 })
       .catch(() => { /* display-only telemetry, never fatal */ });
   }
 

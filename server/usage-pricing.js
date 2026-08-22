@@ -1,7 +1,7 @@
 'use strict';
 
-const os = require('node:os');
 const path = require('node:path');
+const { glissaHomeDir } = require('./config-store');
 const { normalizePricingTable } = require('./core/usage-pricing-core');
 const pricingSnapshot = require('./data/claude-pricing.json');
 
@@ -27,7 +27,7 @@ async function loadPricing({
   fetchEnabled,
   fsPromises = require('node:fs/promises'),
   fetchFn = global.fetch,
-  cachePath = path.join(os.homedir(), '.glissa', 'litellm-pricing.json'),
+  cachePath = path.join(glissaHomeDir(), 'litellm-pricing.json'),
   nowFn = Date.now,
   timeoutMs = 15000,
   logger = null,

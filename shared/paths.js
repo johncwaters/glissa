@@ -40,4 +40,14 @@ function isSameDirectoryPath(a, b) {
   return equalsIgnoringCaseOnWindows(canonicalizePath(resolvedA), canonicalizePath(resolvedB));
 }
 
-module.exports = { canonicalizePath, equalsIgnoringCaseOnWindows, isSameDirectoryPath };
+// Windows forbids < > : " / \ | ? * and control chars in a path segment, plus trailing dots/spaces.
+// Session ids can be namespaced with colons (e.g. setup:marketing:<uuid>) and session names are
+// operator-supplied, both legal as map keys and in a hook URL but illegal on disk. Callers sanitize
+// ONLY the segment, so the real id still flows verbatim into the hook URL and HookRouter registration
+// and routing is unaffected.
+function safePathSegment(value) {
+  // eslint-disable-next-line no-control-regex
+  return String(value).replace(/[<>:"/\\|?*\x00-\x1f]/g, '-').replace(/[. ]+$/, '') || '_';
+}
+
+module.exports = { canonicalizePath, equalsIgnoringCaseOnWindows, isSameDirectoryPath, safePathSegment };

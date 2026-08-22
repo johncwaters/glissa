@@ -1,20 +1,15 @@
 'use strict';
 
+const { parseJsonLine, vendorUsageEntry } = require('./usage-entry-core');
 const { safeNumber, stringOrNull } = require('./usage-number-core');
 
 function createCodexUsageState() {
-  return { model: null, serviceTier: null, totalTokenUsage: null };
+  return { model: null, totalTokenUsage: null };
 }
 
 function parseCodexUsageLine(line, state = createCodexUsageState(), { sessionId = null } = {}) {
-  if (typeof line !== 'string') return null;
-  let parsed;
-  try {
-    parsed = JSON.parse(line);
-  } catch {
-    return null;
-  }
-  if (!parsed || typeof parsed !== 'object') return null;
+  const parsed = parseJsonLine(line);
+  if (!parsed) return null;
   if (parsed.type === 'turn_context') return recordTurnContext(parsed, state);
   if (parsed.payload?.type === 'thread_settings_applied') return recordThreadSettings(parsed, state);
   if (parsed.payload?.type !== 'token_count') return null;
@@ -32,23 +27,17 @@ function parseCodexUsageLine(line, state = createCodexUsageState(), { sessionId 
 
   const inputTokens = safeNumber(tokenUsage.input_tokens);
   const cacheRead = safeNumber(tokenUsage.cached_input_tokens);
-  return {
-    timestamp: new Date(timestampMs).toISOString(),
+  return vendorUsageEntry({
     timestampMs,
     sessionId: stringOrNull(sessionId),
     model: state.model,
     input: Math.max(0, inputTokens - cacheRead),
     output: safeNumber(tokenUsage.output_tokens),
     cacheCreate: safeNumber(tokenUsage.cache_write_input_tokens),
-    cacheCreation5m: 0,
-    cacheCreation1h: 0,
     cacheRead,
     costUSD: null,
     vendor: 'codex',
-    messageId: null,
-    requestId: null,
-    isSidechain: false,
-  };
+  });
 }
 
 function codexDedupIdentity(entry) {
@@ -75,7 +64,6 @@ function recordThreadSettings(parsed, state) {
   const threadSettings = parsed.payload.thread_settings;
   if (!threadSettings || typeof threadSettings !== 'object') return null;
   state.model = stringOrNull(threadSettings.model) || state.model;
-  state.serviceTier = stringOrNull(threadSettings.service_tier);
   return null;
 }
 

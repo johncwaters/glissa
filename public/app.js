@@ -8,7 +8,7 @@ import { shouldShowServerAction } from '/shared/client-trust.mjs';
 import { STATES } from '/shared/states.mjs';
 import { connectControl, disableReconnect, onControlMessage, sendControlMsg, sendControlRequest, setConnectionStateCallback } from './control-ws.js';
 import { createAddSessionDialog, createSettingsDialog } from './dialogs.js';
-import { writeClipboardText } from './dom-helpers.js';
+import { observeHeaderHeight, writeClipboardText } from './dom-helpers.js';
 import { activateFocusView, centerSessionQuietly, deactivateFocusView, focusAdjacentInRail, focusNextAttention, focusNthInRail, getFocusedSessionId, isFocusActive, mountFocusView, noteKnownProjectPath, refreshFocusRoster, restoreFocusedSession, setFocusMergeStatus } from './focus-view/focus-view.js';
 import { initFormFactor, isPhoneLayout, onLayoutChange } from './form-factor.js';
 import { applyHealthSnapshot, mountHealthMonitor } from './health-monitor.js';
@@ -396,26 +396,7 @@ document.addEventListener('click', (e) => {
   }
 });
 
-// ── Header height token ──────────────────────────────────────
-// --header-h positions the notice region (and anything else anchored below the header). The desktop
-// header is a fixed 52px strip until a theme font or a narrow window changes its height, at which point
-// a stale token drops every toast on top of it. Measure the real height instead; the stylesheet value
-// stays as the pre-JS fallback. The phone Board's top bar measures itself the same way (board-screen.js);
-// only one of the two bars is ever rendered, and each skips the write while it measures zero.
-
-const headerEl = document.querySelector('.header');
-if (headerEl) {
-  let headerSizeRaf = null;
-  const syncHeaderHeight = () => {
-    headerSizeRaf = null;
-    const h = headerEl.offsetHeight;
-    if (h > 0) document.documentElement.style.setProperty('--header-h', `${h}px`);
-  };
-  new ResizeObserver(() => {
-    if (headerSizeRaf !== null) return;
-    headerSizeRaf = requestAnimationFrame(syncHeaderHeight);
-  }).observe(headerEl);
-}
+observeHeaderHeight(document.querySelector('.header'));
 
 document.getElementById('btn-settings').addEventListener('click', () => {
   headerMenu.classList.remove('open');

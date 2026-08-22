@@ -6,6 +6,7 @@ const { TIMEOUT_KEYS, BOOLEAN_KEYS, STRING_KEYS } = require('./config-store');
 const { STATES } = require('../shared/states');
 const { listRepoConversations } = require('../session/core/conversation-history');
 const { normalizeClientTrust } = require('./core/request-trust');
+const { isPlainObject } = require('./core/usage-number-core');
 const { readPosthogReport } = require('./posthog-report');
 const posthogCore = require('./core/posthog-core');
 const { getRtkPath } = require('../session/core/rtk-command');
@@ -93,62 +94,71 @@ const SETTINGS_VALIDATORS = [
   { keys: STRING_KEYS, isValid: (v) => typeof v === 'string', label: 'a string' },
 ];
 
-// Validate the optional nested prReview settings object. Returns an error message, or null when valid
-// (a missing/null prReview is valid: the tab was never touched).
-function validatePrReview(pr) {
-  if (pr == null) return null;
-  if (typeof pr !== 'object' || Array.isArray(pr)) return 'prReview must be an object';
-  if (pr.enabled != null && typeof pr.enabled !== 'boolean') return 'prReview.enabled must be a boolean';
-  if (pr.projects != null && (!Array.isArray(pr.projects) || !pr.projects.every(p => typeof p === 'string'))) {
-    return 'prReview.projects must be an array of strings';
-  }
-  for (const key of PR_REVIEW_NUMERIC_KEYS) {
-    if (pr[key] != null && (typeof pr[key] !== 'number' || !Number.isFinite(pr[key]) || pr[key] <= 0)) {
-      return `prReview.${key} must be a positive number`;
+/*
+ * Every optional nested settings block (prReview, posthog, usage, telegram) is validated the same way:
+ * a missing/null block is valid (its tab was never touched), a non-object is rejected by name, then an
+ * ORDERED rule list runs and the first message wins. A wrong type is REJECTED rather than coerced, so a
+ * checkbox that somehow sends the string 'no' cannot silently enable a lane. The order is part of the
+ * contract: the messages are asserted verbatim by tests/control-settings-*.test.js.
+ */
+const blockRules = {
+  booleans: (keys) => (block, name) => {
+    for (const key of keys) {
+      if (block[key] != null && typeof block[key] !== 'boolean') return `${name}.${key} must be a boolean`;
     }
-  }
-  if (pr.mergeMethod != null && !PR_REVIEW_MERGE_METHODS.has(pr.mergeMethod)) {
-    return 'prReview.mergeMethod must be one of rebase, squash, merge';
-  }
-  return null;
-}
-
-function isPlainObject(value) {
-  return value != null && typeof value === 'object' && !Array.isArray(value);
-}
-
-// Validate the optional nested posthog settings object. Returns an error message, or null when valid
-// (a missing/null posthog is valid: the tab was never touched). Same shape and strictness as
-// validatePrReview - a wrong type is REJECTED rather than coerced, so a checkbox that somehow sends
-// the string 'no' cannot silently enable the lane.
-function validatePosthog(ph) {
-  if (ph == null) return null;
-  if (!isPlainObject(ph)) return 'posthog must be an object';
-  for (const key of POSTHOG_BOOLEAN_KEYS) {
-    if (ph[key] != null && typeof ph[key] !== 'boolean') return `posthog.${key} must be a boolean`;
-  }
-  // Empty means unset (same rule as telegram's credentials), so only a non-empty host is URL-checked.
-  if (ph.host != null && typeof ph.host !== 'string') return 'posthog.host must be a string';
-  if (typeof ph.host === 'string' && ph.host.trim() && !/^https?:\/\//i.test(ph.host.trim())) {
-    return 'posthog.host must be an http(s) URL';
-  }
-  if (ph.apiKey != null && typeof ph.apiKey !== 'string') return 'posthog.apiKey must be a string';
-  if (ph.repoPath != null && typeof ph.repoPath !== 'string') return 'posthog.repoPath must be a string';
-  if (ph.projects != null && !isValidPosthogProjects(ph.projects)) {
-    return 'posthog.projects must be "all" or an array of positive integer project ids';
-  }
-  for (const key of POSTHOG_NUMERIC_KEYS) {
-    if (ph[key] == null) continue;
-    if (typeof ph[key] !== 'number' || !Number.isFinite(ph[key])) return `posthog.${key} must be a positive number`;
-    const range = POSTHOG_NUMERIC_RANGES[key];
-    if (!range) {
-      if (ph[key] <= 0) return `posthog.${key} must be a positive number`;
-      continue;
+    return null;
+  },
+  strings: (keys) => (block, name) => {
+    for (const key of keys) {
+      if (block[key] != null && typeof block[key] !== 'string') return `${name}.${key} must be a string`;
     }
-    if (ph[key] < range.min) return `posthog.${key} must be ${range.label}`;
-    if (range.max != null && ph[key] > range.max) return `posthog.${key} must be ${range.label}`;
+    return null;
+  },
+  positiveNumbers: (keys, label = 'a positive number') => (block, name) => {
+    for (const key of keys) {
+      const value = block[key];
+      if (value == null) continue;
+      if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+        return `${name}.${key} must be ${label}`;
+      }
+    }
+    return null;
+  },
+  // A listed range overrides the default positive floor and supplies its own wording.
+  rangedNumbers: (keys, ranges) => (block, name) => {
+    for (const key of keys) {
+      const value = block[key];
+      if (value == null) continue;
+      if (typeof value !== 'number' || !Number.isFinite(value)) return `${name}.${key} must be a positive number`;
+      const range = ranges[key];
+      if (!range) {
+        if (value <= 0) return `${name}.${key} must be a positive number`;
+        continue;
+      }
+      if (value < range.min) return `${name}.${key} must be ${range.label}`;
+      if (range.max != null && value > range.max) return `${name}.${key} must be ${range.label}`;
+    }
+    return null;
+  },
+  integerRanges: (ranges) => (block, name) => {
+    for (const [key, range] of Object.entries(ranges)) {
+      const value = block[key];
+      if (value == null) continue;
+      if (!Number.isInteger(value) || value < range.min || value > range.max) {
+        return `${name}.${key} must be an integer between ${range.min} and ${range.max}`;
+      }
+    }
+    return null;
+  },
+};
+
+function validateBlock(block, schema) {
+  if (block == null) return null;
+  if (!isPlainObject(block)) return `${schema.name} must be an object`;
+  for (const rule of schema.rules) {
+    const error = rule(block, schema.name);
+    if (error) return error;
   }
-  if (ph.projectMap != null && !isPlainObject(ph.projectMap)) return 'posthog.projectMap must be an object';
   return null;
 }
 
@@ -159,45 +169,10 @@ function isValidPosthogProjects(projects) {
 }
 
 /*
- * Validate the optional nested usage settings object. Returns an error message, or null when valid (a
- * missing/null usage is valid: the tab was never touched, and an absent block means enabled-with-
- * defaults in server/usage-wiring.js resolveUsageConfig). Same reject-rather-than-coerce strictness as
- * validatePosthog. extraProjectsDirs must be ABSOLUTE: the scanner walks whatever it is given, and a
- * relative entry would resolve against the server's cwd, which is not a directory the operator picked.
+ * extraProjectsDirs must be ABSOLUTE: the scanner walks whatever it is given, and a relative entry
+ * would resolve against the server's cwd, which is not a directory the operator picked.
  */
-function validateUsage(u) {
-  if (u == null) return null;
-  if (!isPlainObject(u)) return 'usage must be an object';
-  for (const key of USAGE_BOOLEAN_KEYS) {
-    if (u[key] != null && typeof u[key] !== 'boolean') return `usage.${key} must be a boolean`;
-  }
-  for (const [key, range] of Object.entries(USAGE_INTEGER_RANGES)) {
-    if (u[key] == null) continue;
-    if (!Number.isInteger(u[key]) || u[key] < range.min || u[key] > range.max) {
-      return `usage.${key} must be an integer between ${range.min} and ${range.max}`;
-    }
-  }
-  if (u.costMode != null && !USAGE_COST_MODES.includes(u.costMode)) {
-    return `usage.costMode must be one of ${USAGE_COST_MODES.join(', ')}`;
-  }
-  if (u.vendors != null) {
-    if (!isPlainObject(u.vendors)) return 'usage.vendors must be an object';
-    for (const key of USAGE_VENDOR_KEYS) {
-      if (u.vendors[key] != null && typeof u.vendors[key] !== 'boolean') return `usage.vendors.${key} must be a boolean`;
-    }
-  }
-  if (u.budget != null) {
-    if (!isPlainObject(u.budget)) return 'usage.budget must be an object';
-    for (const key of USAGE_BUDGET_KEYS) {
-      const value = u.budget[key];
-      if (value == null) continue;
-      // Null and absent both mean "no ceiling"; a present value has to be a real positive amount, because a
-      // zero or negative budget would put every surface permanently over its limit.
-      if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
-        return `usage.budget.${key} must be a positive number or null`;
-      }
-    }
-  }
+function validateExtraProjectsDirs(u) {
   if (u.extraProjectsDirs == null) return null;
   if (!Array.isArray(u.extraProjectsDirs)) return 'usage.extraProjectsDirs must be an array of absolute paths';
   for (const dir of u.extraProjectsDirs) {
@@ -207,72 +182,134 @@ function validateUsage(u) {
   return null;
 }
 
-// Validate the optional nested telegram settings object. Empty strings are allowed (they mean unset).
-function validateTelegram(t) {
-  if (t == null) return null;
-  if (typeof t !== 'object' || Array.isArray(t)) return 'telegram must be an object';
-  if (t.botToken != null && typeof t.botToken !== 'string') return 'telegram.botToken must be a string';
-  if (t.chatId != null && typeof t.chatId !== 'string') return 'telegram.chatId must be a string';
-  return null;
+const USAGE_VENDORS_SCHEMA = {
+  name: 'usage.vendors',
+  rules: [blockRules.booleans(USAGE_VENDOR_KEYS)],
+};
+
+const USAGE_BUDGET_SCHEMA = {
+  name: 'usage.budget',
+  // Null and absent both mean "no ceiling"; a present value has to be a real positive amount, because a
+  // zero or negative budget would put every surface permanently over its limit.
+  rules: [blockRules.positiveNumbers(USAGE_BUDGET_KEYS, 'a positive number or null')],
+};
+
+const PR_REVIEW_SCHEMA = {
+  name: 'prReview',
+  rules: [
+    blockRules.booleans(['enabled']),
+    (pr) => (pr.projects != null && (!Array.isArray(pr.projects) || !pr.projects.every(p => typeof p === 'string'))
+      ? 'prReview.projects must be an array of strings'
+      : null),
+    blockRules.positiveNumbers(PR_REVIEW_NUMERIC_KEYS),
+    (pr) => (pr.mergeMethod != null && !PR_REVIEW_MERGE_METHODS.has(pr.mergeMethod)
+      ? 'prReview.mergeMethod must be one of rebase, squash, merge'
+      : null),
+  ],
+};
+
+const POSTHOG_SCHEMA = {
+  name: 'posthog',
+  rules: [
+    blockRules.booleans(POSTHOG_BOOLEAN_KEYS),
+    blockRules.strings(['host']),
+    // Empty means unset (same rule as telegram's credentials), so only a non-empty host is URL-checked.
+    (ph) => (typeof ph.host === 'string' && ph.host.trim() && !/^https?:\/\//i.test(ph.host.trim())
+      ? 'posthog.host must be an http(s) URL'
+      : null),
+    blockRules.strings(['apiKey', 'repoPath']),
+    (ph) => (ph.projects != null && !isValidPosthogProjects(ph.projects)
+      ? 'posthog.projects must be "all" or an array of positive integer project ids'
+      : null),
+    blockRules.rangedNumbers(POSTHOG_NUMERIC_KEYS, POSTHOG_NUMERIC_RANGES),
+    (ph) => (ph.projectMap != null && !isPlainObject(ph.projectMap) ? 'posthog.projectMap must be an object' : null),
+  ],
+};
+
+// An absent usage block means enabled-with-defaults in server/usage-wiring.js resolveUsageConfig.
+const USAGE_SCHEMA = {
+  name: 'usage',
+  rules: [
+    blockRules.booleans(USAGE_BOOLEAN_KEYS),
+    blockRules.integerRanges(USAGE_INTEGER_RANGES),
+    (u) => (u.costMode != null && !USAGE_COST_MODES.includes(u.costMode)
+      ? `usage.costMode must be one of ${USAGE_COST_MODES.join(', ')}`
+      : null),
+    (u) => validateBlock(u.vendors, USAGE_VENDORS_SCHEMA),
+    (u) => validateBlock(u.budget, USAGE_BUDGET_SCHEMA),
+    validateExtraProjectsDirs,
+  ],
+};
+
+const TELEGRAM_SCHEMA = {
+  name: 'telegram',
+  rules: [blockRules.strings(['botToken', 'chatId'])],
+};
+
+const validatePrReview = (pr) => validateBlock(pr, PR_REVIEW_SCHEMA);
+const validatePosthog = (ph) => validateBlock(ph, POSTHOG_SCHEMA);
+const validateUsage = (u) => validateBlock(u, USAGE_SCHEMA);
+const validateTelegram = (t) => validateBlock(t, TELEGRAM_SCHEMA);
+
+// Keep only the known fields of a block, dropping anything unrecognized (a stray projectChoices echo,
+// the read-only pricing-source line the Usage tab renders next to its toggles).
+function sanitizeBlock(block, { booleans = [], trimmedStrings = [], verbatim = [] }) {
+  const out = {};
+  for (const key of booleans) {
+    if (block[key] != null) out[key] = !!block[key];
+  }
+  for (const key of trimmedStrings) {
+    if (block[key] != null) out[key] = String(block[key]).trim();
+  }
+  for (const key of verbatim) {
+    if (block[key] != null) out[key] = block[key];
+  }
+  return out;
 }
 
-// Keep only the known prReview fields (drops anything unrecognized, e.g. a stray projectChoices echo).
 function sanitizePrReview(pr) {
-  const out = {};
-  if (pr.enabled != null) out.enabled = !!pr.enabled;
-  if (pr.projects != null) out.projects = pr.projects;
-  if (pr.intervalMinutes != null) out.intervalMinutes = pr.intervalMinutes;
-  if (pr.mergeMethod != null) out.mergeMethod = pr.mergeMethod;
-  if (pr.maxConcurrentReviews != null) out.maxConcurrentReviews = pr.maxConcurrentReviews;
-  if (pr.reviewTimeoutSeconds != null) out.reviewTimeoutSeconds = pr.reviewTimeoutSeconds;
-  return out;
+  return sanitizeBlock(pr, {
+    booleans: ['enabled'],
+    verbatim: ['projects', 'intervalMinutes', 'mergeMethod', 'maxConcurrentReviews', 'reviewTimeoutSeconds'],
+  });
 }
 
-// Keep only the known posthog fields (drops anything unrecognized). projectMap is a free-form
-// id -> display-name map owned by the dashboard, so it passes through untouched once it is an object.
+// projectMap is a free-form id -> display-name map owned by the dashboard, so it passes through
+// untouched once it is an object.
 function sanitizePosthog(ph) {
-  const out = {};
-  for (const key of POSTHOG_BOOLEAN_KEYS) {
-    if (ph[key] != null) out[key] = !!ph[key];
-  }
-  for (const key of POSTHOG_STRING_KEYS) {
-    if (ph[key] != null) out[key] = String(ph[key]).trim();
-  }
-  if (ph.projects != null) out.projects = ph.projects;
+  const out = sanitizeBlock(ph, {
+    booleans: POSTHOG_BOOLEAN_KEYS,
+    trimmedStrings: POSTHOG_STRING_KEYS,
+    verbatim: ['projects'],
+  });
   if (isPlainObject(ph.projectMap)) out.projectMap = ph.projectMap;
-  for (const key of POSTHOG_NUMERIC_KEYS) {
-    if (ph[key] != null) out[key] = ph[key];
-  }
-  return out;
+  return Object.assign(out, sanitizeBlock(ph, { verbatim: POSTHOG_NUMERIC_KEYS }));
 }
 
-// Keep only the known usage fields (drops anything unrecognized, e.g. the read-only pricing-source
-// and scan-stats line the Usage tab renders next to the toggles).
 function sanitizeUsage(u) {
-  const out = {};
-  for (const key of USAGE_BOOLEAN_KEYS) {
-    if (u[key] != null) out[key] = !!u[key];
-  }
-  for (const key of Object.keys(USAGE_INTEGER_RANGES)) {
-    if (u[key] != null) out[key] = u[key];
-  }
+  const out = sanitizeBlock(u, {
+    booleans: USAGE_BOOLEAN_KEYS,
+    verbatim: Object.keys(USAGE_INTEGER_RANGES),
+  });
   if (u.costMode != null) out.costMode = String(u.costMode);
   if (isPlainObject(u.vendors)) {
-    const vendors = {};
-    for (const key of USAGE_VENDOR_KEYS) {
-      if (u.vendors[key] != null) vendors[key] = !!u.vendors[key];
-    }
+    const vendors = sanitizeBlock(u.vendors, { booleans: USAGE_VENDOR_KEYS });
     if (Object.keys(vendors).length > 0) out.vendors = vendors;
   }
   if (isPlainObject(u.budget)) {
-    const budget = {};
-    for (const key of USAGE_BUDGET_KEYS) {
-      if (u.budget[key] === null) budget[key] = null;
-      if (typeof u.budget[key] === 'number') budget[key] = u.budget[key];
-    }
+    const budget = sanitizeBudget(u.budget);
     if (Object.keys(budget).length > 0) out.budget = budget;
   }
   if (Array.isArray(u.extraProjectsDirs)) out.extraProjectsDirs = u.extraProjectsDirs.map((dir) => String(dir).trim());
+  return out;
+}
+
+function sanitizeBudget(budget) {
+  const out = {};
+  for (const key of USAGE_BUDGET_KEYS) {
+    if (budget[key] === null) out[key] = null;
+    if (typeof budget[key] === 'number') out[key] = budget[key];
+  }
   return out;
 }
 

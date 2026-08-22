@@ -692,39 +692,54 @@ function renderFile(f, kind) {
   return sec;
 }
 
+// One shape for every action in this row: an optional id, an optional key hint rendered as a <kbd>
+// chip, and a label that never varies with state (the sibling reason line carries progress).
+function actionButton({ id, label, shortcut, title, disabled = false, danger = false, onClick }) {
+  const btn = el('button', danger ? 'review-btn review-btn-danger' : 'review-btn review-btn-primary');
+  btn.type = 'button';
+  if (id) btn.id = id;
+  if (title) btn.title = title;
+  btn.disabled = disabled;
+  btn.innerHTML = shortcut
+    ? `${label} <kbd class="review-shortcut" aria-hidden="true">${shortcut}</kbd>`
+    : label;
+  btn.addEventListener('click', onClick);
+  return btn;
+}
+
 function renderActions(id, { status, reviewable, mergeEnabled, live, state, sync, resyncing }) {
   const actions = el('div', 'review-actions');
 
   // Suppress Merge when parked: Resolve is the only path forward until the conflict clears.
   // When not parked, Merge always leads so the operator knows exactly where it lives.
   if (status !== 'parked') {
-    const merge = el('button', 'review-btn review-btn-primary');
-    merge.type = 'button';
-    merge.id = 'review-merge-btn';
-    merge.title = 'Merge into develop and rebase this worktree, then keep working (alt+m)';
-    merge.disabled = !mergeEnabled;
-    merge.innerHTML = 'Merge <kbd class="review-shortcut" aria-hidden="true">alt+m</kbd>';
-    merge.addEventListener('click', () => sendMergeContinue(id, state));
-    actions.append(merge);
+    actions.append(actionButton({
+      id: 'review-merge-btn',
+      label: 'Merge',
+      shortcut: 'alt+m',
+      title: 'Merge into develop and rebase this worktree, then keep working (alt+m)',
+      disabled: !mergeEnabled,
+      onClick: () => sendMergeContinue(id, state),
+    }));
   }
 
   // Parked: the auto rebase-then-FF could not complete due to a conflict. Paste a context-rich
   // resolve prompt into the session so the agent can finish the merge; operator re-runs Merge after.
   const resolveShown = status === 'parked' && live;
   if (resolveShown) {
-    const resolve = el('button', 'review-btn review-btn-primary');
-    resolve.type = 'button';
-    resolve.title = 'Paste a resolve prompt into this session so the agent can finish the merge (alt+r)';
-    resolve.innerHTML = 'Resolve <kbd class="review-shortcut" aria-hidden="true">alt+r</kbd>';
-    resolve.addEventListener('click', () => {
-      sendControlMsg({ type: 'resolve-session-merge', id });
-      resolveJustSent = true;
-      resolveJustSentFor = id;
-      clearTimeout(resolveSentTimer);
-      resolveSentTimer = setTimeout(() => { resolveJustSent = false; resolveJustSentFor = null; render(); }, 3000);
-      render();
-    });
-    actions.append(resolve);
+    actions.append(actionButton({
+      label: 'Resolve',
+      shortcut: 'alt+r',
+      title: 'Paste a resolve prompt into this session so the agent can finish the merge (alt+r)',
+      onClick: () => {
+        sendControlMsg({ type: 'resolve-session-merge', id });
+        resolveJustSent = true;
+        resolveJustSentFor = id;
+        clearTimeout(resolveSentTimer);
+        resolveSentTimer = setTimeout(() => { resolveJustSent = false; resolveJustSentFor = null; render(); }, 3000);
+        render();
+      },
+    }));
   }
 
   // Resync: fetch + fast-forward/push the project's LOCAL base branch against its remote upstream.
@@ -733,36 +748,35 @@ function renderActions(id, { status, reviewable, mergeEnabled, live, state, sync
   // reason (in flight, error, success) - progress/outcome live in the sibling reason line render()
   // appends after the actions row, per the button-label rule. When Resolve is also shown, Alt+R goes to
   // it first (see app.js), so the shortcut hint is suppressed here to avoid implying a false tie.
-  const resync = el('button', 'review-btn review-btn-primary');
-  resync.type = 'button';
-  resync.id = 'review-resync-btn';
-  resync.disabled = resyncing || !!resyncDisabledReason(sync, resyncing);
-  resync.title = resolveShown
-    ? 'Fetch and fast-forward/push the local base branch against its remote upstream'
-    : 'Fetch and fast-forward/push the local base branch against its remote upstream (alt+r)';
-  resync.innerHTML = resolveShown
-    ? 'Resync'
-    : 'Resync <kbd class="review-shortcut" aria-hidden="true">alt+r</kbd>';
-  resync.addEventListener('click', () => requestResyncBranch(id));
-  actions.append(resync);
+  actions.append(actionButton({
+    id: 'review-resync-btn',
+    label: 'Resync',
+    shortcut: resolveShown ? null : 'alt+r',
+    title: resolveShown
+      ? 'Fetch and fast-forward/push the local base branch against its remote upstream'
+      : 'Fetch and fast-forward/push the local base branch against its remote upstream (alt+r)',
+    disabled: resyncing || !!resyncDisabledReason(sync, resyncing),
+    onClick: () => requestResyncBranch(id),
+  }));
 
   // Discard throws the worktree away unmerged. Gated on NO live PTY (never destroy a worktree a
   // running session is sitting in).
   if (reviewable && !live) {
-    const discard = el('button', 'review-btn review-btn-danger', 'Discard');
-    discard.type = 'button';
-    discard.disabled = status === 'merging';
-    discard.addEventListener('click', () => {
-      const ui = sessionUIs.get(id);
-      const nm = sessionName(ui, id);
-      openConfirmDialog({
-        title: 'Discard worktree',
-        message: `Throw away the worktree changes for "${nm}"? This cannot be undone.`,
-        confirmLabel: 'Discard',
-        onConfirm: () => sendControlMsg({ type: 'discard-session-worktree', id }),
-      });
-    });
-    actions.append(discard);
+    actions.append(actionButton({
+      label: 'Discard',
+      danger: true,
+      disabled: status === 'merging',
+      onClick: () => {
+        const ui = sessionUIs.get(id);
+        const nm = sessionName(ui, id);
+        openConfirmDialog({
+          title: 'Discard worktree',
+          message: `Throw away the worktree changes for "${nm}"? This cannot be undone.`,
+          confirmLabel: 'Discard',
+          onConfirm: () => sendControlMsg({ type: 'discard-session-worktree', id }),
+        });
+      },
+    }));
   }
   return actions;
 }

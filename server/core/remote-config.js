@@ -9,8 +9,6 @@
 // header, so the only thing that can widen the trust boundary is a bind address change - which is
 // exactly what decideBindHost gates.
 
-const DEFAULT_REMOTE = { enabled: false, port: null, publicHost: '', allowedOrigins: [] };
-
 function toPort(value) {
   if (Number.isInteger(value)) return value;
   if (typeof value === 'string' && /^\d+$/.test(value.trim())) return Number.parseInt(value.trim(), 10);
@@ -87,7 +85,6 @@ function decideBindHost({ envHost, insecureBind } = {}) {
 }
 
 module.exports = {
-  DEFAULT_REMOTE,
   normalizeRemoteConfig,
   validateRemoteConfig,
   isLoopbackHost,

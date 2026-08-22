@@ -49,6 +49,8 @@ const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 
+const { safePathSegment } = require('../shared/paths');
+
 // Recordings live beside config.json, never under the process cwd: recording is on by default now,
 // and a cwd-relative directory would scatter forensic logs through whichever repo the server
 // happened to be launched from.
@@ -58,11 +60,6 @@ const DEFAULT_RETAIN_DAYS = 7;
 // Per-session file cap, the bound that actually matters for a default-on recorder: one file per
 // session start, so a session restarted all day cannot accumulate without limit.
 const DEFAULT_RETAIN_FILES = 20;
-
-// Session names are operator-supplied and become a filename segment.
-function safeFileSegment(name) {
-  return String(name).replace(/[<>:"/\\|?*\x00-\x1f]/g, '-').replace(/[. ]+$/, '') || '_';
-}
 
 class SessionRecorder {
   /**
@@ -76,7 +73,7 @@ class SessionRecorder {
    */
   constructor({ name, baseDir, recordData = false, maxFileSize, retainDays, retainFiles }) {
     this._name = name;
-    this._safeName = safeFileSegment(name);
+    this._safeName = safePathSegment(name);
     this._baseDir = baseDir || DEFAULT_BASE_DIR;
     this._recordData = !!recordData;
     this._maxFileSize = maxFileSize || DEFAULT_MAX_FILE_SIZE;

@@ -133,8 +133,6 @@ function buildDistillPrompt({ outputPath, sources, instructions, resultPath, sta
 
 module.exports = {
   STAMP_HASH_CHARS,
-  STAMP_PREFIX,
-  STAMP_SUFFIX,
   buildDistillPrompt,
   buildStampLine,
   needsDistill,

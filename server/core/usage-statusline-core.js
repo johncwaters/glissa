@@ -4,7 +4,7 @@
 // (live-probed 2.1.235: rate_limits absent at startup and on non-subscription plans, each window
 // independently absent), so absent stays null, never zero: a 0% plan limit is a claim Claude made.
 
-const { numberOrNull } = require('./usage-number-core');
+const { isPlainObject, numberOrNull } = require('./usage-number-core');
 
 // Reported percentages carry binary-float noise, so round before comparing or rendering.
 const PCT_DECIMALS = 1;
@@ -24,10 +24,6 @@ function resetsAtMs(value) {
   if (numeric === null || numeric <= 0) return null;
   if (numeric > SECONDS_CEILING) return Math.round(numeric);
   return Math.round(numeric * 1000);
-}
-
-function isPlainObject(value) {
-  return value != null && typeof value === 'object' && !Array.isArray(value);
 }
 
 // A window with neither usable field is absent, not empty: a 0% bar for it would invent a fact.
@@ -96,5 +92,4 @@ module.exports = {
   shouldBroadcastPlanLimits,
   buildPlanLimitsMessage,
   planLimitsSignature,
-  PCT_DECIMALS,
 };

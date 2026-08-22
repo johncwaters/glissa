@@ -12,10 +12,10 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { promisify } = require('node:util');
 
-const { execFile } = require('./child-process-safe');
+const { execFileAsync } = require('./child-process-safe');
 const { glissaHomeDir } = require('./config-store');
+const { writeJsonAtomicSync } = require('./json-file');
 const {
   decideInstallFlavor,
   decideUpdateStatus,
@@ -25,8 +25,6 @@ const {
   parseResolvedSha,
   normalizeSha,
 } = require('./core/update-core');
-
-const execFileAsync = promisify(execFile);
 
 const GITHUB_PACKAGE_JSON_URL = 'https://raw.githubusercontent.com/johncwaters/glissa/main/package.json';
 const GIT_REMOTE_URL = 'https://github.com/johncwaters/glissa.git';
@@ -141,10 +139,7 @@ function readCheckState(statePath) {
 
 function writeCheckState(statePath, state) {
   try {
-    fs.mkdirSync(path.dirname(statePath), { recursive: true });
-    const tmpPath = `${statePath}.tmp.${process.pid}`;
-    fs.writeFileSync(tmpPath, JSON.stringify(state, null, 2), 'utf8');
-    fs.renameSync(tmpPath, statePath);
+    writeJsonAtomicSync(statePath, state, { mkdir: true });
   } catch {
     // Throttle state is an optimization; losing it costs one extra network check.
   }

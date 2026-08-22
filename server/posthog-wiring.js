@@ -16,16 +16,18 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
-const { promisify } = require('node:util');
-const { execFile } = require('./child-process-safe');
+const { execFileAsync } = require('./child-process-safe');
 const { Session } = require('../session/sessions');
-const { registerEphemeralSession } = require('./ephemeral-session');
+const { awaitSessionExit, readResultFile, registerEphemeralSession } = require('./ephemeral-session');
 const core = require('./core/posthog-core');
 const { normalizePackNames } = require('./core/pack-core');
 const { createPosthogPoller } = require('./posthog-poller');
 const { createPosthogApi } = require('./posthog-api');
 const { sendPosthogPing } = require('./posthog-telegram');
 const { emptyLaneStatus } = require('./lane-status');
+const { createLaneRunner } = require('./lane-runner');
+const { writeJsonAtomicSync } = require('./json-file');
+const { glissaHomeDir } = require('./config-store');
 const { DEFAULT_POSTHOG_REPORT_DIR } = require('./posthog-report');
 
 // Belt-and-suspenders deny-list for the headless investigation sessions (they run under
@@ -71,7 +73,7 @@ const FIX_DENY = {
 const REPORT_DIR = DEFAULT_POSTHOG_REPORT_DIR;
 // Fallback cwd for an investigation with no repo to read: a per-issue scratch directory. Never the
 // operator's home, which is the one directory where a confused agent can do the most damage.
-const WORK_DIR = path.join(os.homedir(), '.glissa', 'posthog-work');
+const WORK_DIR = path.join(glissaHomeDir(), 'posthog-work');
 // Reports are keyed by issue id, so this is a per-issue cap in practice; it bounds an unbounded
 // directory the way the recorder bounds its own (newest-N, swept async, best-effort).
 const REPORT_RETAIN_FILES = 20;
@@ -275,24 +277,6 @@ async function sweepReports(dir = REPORT_DIR, retain = REPORT_RETAIN_FILES) {
   } catch { /* best-effort: a missing or locked dir is not worth a retry */ }
 }
 
-// Read the verdict a dispatched session wrote to its result file. Missing/invalid -> ERROR, so a
-// crashed or confused session never masquerades as a diagnosis or a fix. The file is removed either
-// way. `decorate` adds the per-mode extra fields from the same parsed object.
-function readResultFile(resultPath, allowed, decorate = null) {
-  try {
-    const obj = JSON.parse(fs.readFileSync(resultPath, 'utf8'));
-    const verdict = String(obj.verdict || '').toUpperCase();
-    if (!allowed.has(verdict)) return { verdict: 'ERROR', summary: 'invalid verdict in result file' };
-    const result = { verdict, summary: String(obj.summary || '') };
-    if (!decorate) return result;
-    return { ...result, ...decorate(obj) };
-  } catch {
-    return { verdict: 'ERROR', summary: 'no result file' };
-  } finally {
-    try { fs.rmSync(resultPath, { force: true }); } catch { /* best-effort */ }
-  }
-}
-
 const INVESTIGATION_VERDICTS = new Set(['ROOT_CAUSE', 'NEEDS_HUMAN', 'TRANSIENT', 'ERROR']);
 const FIX_RESULT_VERDICTS = new Set(core.FIX_VERDICTS);
 
@@ -313,10 +297,9 @@ function readFixResult(resultPath) {
 
 // One normalized {ok,out,err} shell-out, through child-process-safe like server/pr-gh.js. Never
 // throws, so the handoff below branches on ok instead of try/catch at each step.
-const execFileP = promisify(execFile);
 async function runCli(cmd, args, cwd) {
   try {
-    const { stdout } = await execFileP(cmd, args, { cwd, encoding: 'utf8', timeout: 120000 });
+    const { stdout } = await execFileAsync(cmd, args, { cwd, encoding: 'utf8', timeout: 120000 });
     return { ok: true, out: String(stdout || '').trim(), err: '' };
   } catch (err) {
     return { ok: false, out: String(err.stdout || '').trim(), err: String(err.stderr || err.message || '') };
@@ -488,28 +471,8 @@ function createPosthogWiring({
     return config.worktreeRoot || path.join(path.dirname(path.resolve(repoPath)), '.glissa-worktrees');
   }
 
-  // The shared half of both dispatch paths: wait for the seeded session to exit, honoring the poller's
-  // hard-timeout AbortSignal by destroying it. Rejects only when the Session itself errors.
-  async function awaitSessionExit(sess, signal) {
-    let onAbort = null;
-    try {
-      await new Promise((resolve, reject) => {
-        let settled = false;
-        const done = () => { if (settled) return; settled = true; resolve(); };
-        const fail = (e) => { if (settled) return; settled = true; reject(e); };
-        sess.on('exit', done);
-        sess.on('error', fail);
-        if (signal) {
-          onAbort = () => { try { sess.destroy(); } catch { /* already gone */ } done(); };
-          if (signal.aborted) onAbort();
-          if (!signal.aborted) signal.addEventListener('abort', onAbort, { once: true });
-        }
-        spawnGate.run(() => (signal?.aborted ? undefined : sess.start())).catch(fail);
-      });
-    } finally {
-      if (signal && onAbort) { try { signal.removeEventListener('abort', onAbort); } catch { /* noop */ } }
-    }
-  }
+  // The shared half of both dispatch paths.
+  const waitForExit = (sess, signal) => awaitSessionExit(sess, { signal, spawnGate });
 
   /*
    * The auto-fix job: reproduce, repair, COMMIT. Returns null when there is nothing to fix IN, which
@@ -560,7 +523,7 @@ function createPosthogWiring({
         spawnEnv: { POSTHOG_API_KEY: config.posthog.apiKey, POSTHOG_HOST: config.posthog.host },
         permissions: FIX_DENY,
       });
-      await awaitSessionExit(sess, signal);
+      await waitForExit(sess, signal);
       const result = readFixResult(resultPath);
       // A timed-out job is already an ERROR to the poller, and its half-written FIXED must not open a
       // pull request nothing recorded. The worktree still goes in the finally below.
@@ -634,7 +597,7 @@ function createPosthogWiring({
     });
 
     try {
-      await awaitSessionExit(sess, signal);
+      await waitForExit(sess, signal);
       const result = readInvestigationResult(resultPath);
       return { ...result, url, mode: core.JOB_MODES.investigate };
     } catch (e) {
@@ -644,32 +607,15 @@ function createPosthogWiring({
   }
 
   // State lives in one cross-project file under the user config dir, written atomically (tmp+rename).
-  const posthogStatePath = path.join(os.homedir(), '.glissa', 'posthog-state.json');
+  const posthogStatePath = path.join(glissaHomeDir(), 'posthog-state.json');
   async function readPosthogState() {
     try { return JSON.parse(fs.readFileSync(posthogStatePath, 'utf8')); }
     catch { return {}; }
   }
   async function writePosthogState(state) {
-    try { fs.mkdirSync(path.dirname(posthogStatePath), { recursive: true }); } catch { /* exists */ }
-    const tmp = `${posthogStatePath}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(state, null, 2));
-    fs.renameSync(tmp, posthogStatePath);
+    writeJsonAtomicSync(posthogStatePath, state, { mkdir: true });
   }
 
-  // The last tick summary, replayed to a control client that connects between ticks (the same
-  // cached-snapshot pattern backend.js uses for the startup update check).
-  let lastStatus = null;
-  const emptyPosthogStatus = () => emptyLaneStatus('posthog-status', posthogShouldStart(config));
-  const getStatus = () => lastStatus || emptyPosthogStatus();
-
-  // Started at boot and re-evaluated on every settings reload whose posthog/telegram key changed, so
-  // toggling the lane hot-applies without a server restart. Restarts are serialized through
-  // posthogPollerChain: the old instance's in-flight investigations and pending state writes finish
-  // before a new instance reuses the same result-file paths, report dir, and state file.
-  let poller = null;
-  let pollerChain = Promise.resolve();
-  let pollerStopped = false;
-  let lastKey = null;
   let forcedTickTimer = null;
   function clearForcedTickTimer() {
     if (!forcedTickTimer) return;
@@ -680,31 +626,27 @@ function createPosthogWiring({
     clearForcedTickTimer();
     forcedTickTimer = setTimeout(() => {
       forcedTickTimer = null;
-      if (pollerStopped) return;
+      if (runner.isStopped()) return;
+      const poller = runner.getPoller();
       if (!poller) return;
       void poller.tick();
     }, FORCE_TICK_DEBOUNCE_MS);
     if (typeof forcedTickTimer.unref === 'function') forcedTickTimer.unref();
   }
-  function startPoller() {
-    lastKey = posthogCfgKey(config);
-    pollerChain = pollerChain.then(async () => {
-      if (pollerStopped) return;
-      if (poller) {
-        const old = poller;
-        poller = null;
-        await old.stop();
-      }
-      const gate = posthogShouldStart(config);
-      if (!gate.start) {
-        lastStatus = null;
-        broadcast(emptyPosthogStatus());
-        if (gate.reason) console.warn(`[posthog-poller] not starting: ${gate.reason}`);
-        return;
-      }
-      if (!lastStatus) broadcast(emptyPosthogStatus());
+
+  // Started at boot and re-evaluated on every settings reload whose posthog/telegram key changed, so
+  // toggling the lane hot-applies without a server restart. The restart serialization and the cached
+  // last status live in server/lane-runner.js.
+  const runner = createLaneRunner({
+    tag: 'posthog-poller',
+    gate: () => posthogShouldStart(config),
+    cfgKey: () => posthogCfgKey(config),
+    emptyStatus: () => emptyLaneStatus('posthog-status', posthogShouldStart(config)),
+    broadcast,
+    beforeStop: clearForcedTickTimer,
+    createPoller: ({ onTickComplete }) => {
       const api = createPosthogApi({ host: config.posthog.host, apiKey: config.posthog.apiKey });
-      poller = createPosthogPoller({
+      return createPosthogPoller({
         api,
         host: config.posthog.host,
         resolveProjects: makeResolveProjects(api, config),
@@ -728,14 +670,10 @@ function createPosthogWiring({
         trafficSpikeMinUsers: config.posthog.trafficSpikeMinUsers,
         trafficSpikeCooldownMinutes: config.posthog.trafficSpikeCooldownMinutes,
         trafficSpikeBaselineDays: config.posthog.trafficSpikeBaselineDays,
-        onTickComplete: (summary) => {
-          lastStatus = { ...summary, configured: true };
-          broadcast(lastStatus);
-        },
+        onTickComplete,
       });
-      await poller.start().catch((e) => console.warn(`[posthog-poller] start failed: ${e.message}`));
-    }).catch((e) => console.warn(`[posthog-poller] restart failed: ${e.message}`));
-  }
+    },
+  });
 
   /*
    * Operator-driven issue status change (Radar's resolve/suppress). The lane's own ticks stay
@@ -747,7 +685,7 @@ function createPosthogWiring({
   async function setIssueStatus({ projectId, issueId, action }) {
     const decision = core.decideIssueAction(action);
     if (!decision.ok) return decision;
-    if (!poller) return { ok: false, error: 'PostHog monitoring is not running' };
+    if (!runner.getPoller()) return { ok: false, error: 'PostHog monitoring is not running' };
     const api = createPosthogApi({ host: config.posthog.host, apiKey: config.posthog.apiKey });
     const res = await api.updateIssueStatus(projectId, issueId, decision.status);
     // The error string can carry an HTTP status but never a credential: request() builds it from the
@@ -765,31 +703,21 @@ function createPosthogWiring({
    * before the first tick), so the patch seeds a minimal payload rather than dropping the update.
    */
   async function archiveInvestigation({ id } = {}) {
+    const poller = runner.getPoller();
     if (!poller) return { ok: false, error: 'PostHog monitoring is not running' };
     const res = await poller.archiveInvestigation(id);
     if (!res.ok) return { ok: false, error: res.error };
-    const base = lastStatus || emptyPosthogStatus();
-    lastStatus = { ...base, investigations: res.investigations };
-    broadcast(lastStatus);
+    runner.patchStatus({ investigations: res.investigations });
     return { ok: true };
   }
 
-  function restartIfConfigChanged() {
-    if (posthogCfgKey(config) !== lastKey) startPoller();
-  }
-
-  // Blocks a restart still queued on pollerChain (e.g. a settings save that raced shutdown) from
-  // starting a fresh poller after the process has begun tearing down. stop() is async, but
-  // fire-and-forget here is deliberate: the process is exiting, nothing awaits it.
-  function stopPoller() {
-    pollerStopped = true;
-    clearForcedTickTimer();
-    if (poller) poller.stop();
-  }
-
   return {
-    startPoller, restartIfConfigChanged, stopPoller, getStatus,
-    setIssueStatus, archiveInvestigation,
+    startPoller: runner.startPoller,
+    restartIfConfigChanged: runner.restartIfConfigChanged,
+    stopPoller: runner.stopPoller,
+    getStatus: runner.getStatus,
+    setIssueStatus,
+    archiveInvestigation,
     // Exposed for tests only (the pack-service `_watcherCount` precedent): the session factory is the
     // one place the lane's Session options are assembled, and pinning them needs no live poller.
     _makeInvestigationSession: makeInvestigationSession,

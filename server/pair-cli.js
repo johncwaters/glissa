@@ -12,6 +12,7 @@
 const fs = require('node:fs');
 
 const { resolveConfigPath } = require('./config-store');
+const { formatTimestamp } = require('./text-format');
 const { normalizeRemoteConfig } = require('./core/remote-config');
 const {
   createPairingsStore, createSeenStore, defaultPairingsPath, defaultSeenPath,
@@ -37,11 +38,6 @@ function argValue(args, flag) {
   const idx = args.indexOf(flag);
   if (idx === -1 || idx + 1 >= args.length) return null;
   return args[idx + 1];
-}
-
-function formatTimestamp(ms) {
-  if (typeof ms !== 'number' || !Number.isFinite(ms)) return '-';
-  return new Date(ms).toISOString().replace('T', ' ').slice(0, 19);
 }
 
 function buildPairUrl(remote, token) {
