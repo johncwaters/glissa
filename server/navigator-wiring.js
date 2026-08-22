@@ -4,7 +4,7 @@
 
 const { WebSocketServer } = require('ws');
 const {
-  applyDidChange, applyDidClose, applyDidOpen, createDocStore, formatRange, getDoc, listDocs, uriOfParams,
+  applyDidChange, applyDidClose, applyDidOpen, createDocStore, detectBlankLineBoundary, formatRange, getDoc, listDocs, uriOfParams,
 } = require('./core/navigator-buffer-core');
 const {
   createDispatchState, decideDispatch, forgetUri, hashText, mergeDiagnostics, modelDiagnosticsToLsp, recordDispatch, resolveDispatchConfig,
@@ -649,12 +649,22 @@ function createNavigatorWiring({
       'textDocument/didChange': (params) => {
         const uri = uriOfParams(params);
         const version = params?.textDocument?.version;
+        const previousDoc = uri ? getDoc(store, uri) : null;
         const result = applyDidChange(store, params);
         if (!result.applied) return changeFailureReason(uri, version, result);
+        const doc = uri ? getDoc(store, uri) : null;
         dropModelDiagnostics(uri);
         // Debug only: this fires once per keystroke burst on every open buffer.
         debugNote(() => `didChange ${uri} v${version} (${result.changeCount} changes, ${result.size} chars)`);
         scheduleSweep(uri);
+        if (!isMarkdownDoc(doc)) return null;
+        if (!detectBlankLineBoundary({
+          previousText: previousDoc ? previousDoc.text : '',
+          nextText: doc.text,
+          changes: params?.contentChanges,
+        })) return null;
+        cancelDispatch(uri);
+        dispatchSettled = runDispatch(uri, 'edit').catch((error) => warn(`dispatch loop failed: ${error.message}`));
         return null;
       },
       // A save IS a pause boundary, so it sweeps without waiting out the quiet window.

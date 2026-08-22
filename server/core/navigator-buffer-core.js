@@ -146,6 +146,74 @@ function applyDidChange(store, params) {
   return { applied: true, changeCount: changes.length, size: text.length };
 }
 
+function isNewlineWithOptionalIndent(text) {
+  return typeof text === 'string' && /^\r?\n[ \t]*$/.test(text);
+}
+
+function isLineBlankAtOffset(text, offset) {
+  const lineStarts = lineStartOffsets(text);
+  let lineIndex = lineStarts.length - 1;
+  for (let index = 0; index < lineStarts.length; index += 1) {
+    const nextLineStart = lineStarts[index + 1];
+    if (nextLineStart !== undefined && offset >= nextLineStart) continue;
+    lineIndex = index;
+    break;
+  }
+  const lineStart = lineStarts[lineIndex];
+  const nextLineStart = lineStarts[lineIndex + 1];
+  const lineEnd = nextLineStart === undefined ? text.length : lineEndBeforeBreak(text, nextLineStart);
+  return /^[ \t]*$/.test(text.slice(lineStart, lineEnd));
+}
+
+function isBoundaryInsertion(previousText, nextText, insertionOffset, insertedText) {
+  if (!isNewlineWithOptionalIndent(insertedText)) return false;
+  if (nextText !== previousText.slice(0, insertionOffset) + insertedText + previousText.slice(insertionOffset)) {
+    return false;
+  }
+  return isLineBlankAtOffset(nextText, insertionOffset + insertedText.length);
+}
+
+function insertionFromWholeTextChange(previousText, nextText) {
+  if (nextText.length <= previousText.length) return null;
+  let prefixLength = 0;
+  while (
+    prefixLength < previousText.length
+    && prefixLength < nextText.length
+    && previousText[prefixLength] === nextText[prefixLength]
+  ) {
+    prefixLength += 1;
+  }
+  let suffixLength = 0;
+  while (
+    suffixLength < previousText.length - prefixLength
+    && suffixLength < nextText.length - prefixLength
+    && previousText[previousText.length - 1 - suffixLength] === nextText[nextText.length - 1 - suffixLength]
+  ) {
+    suffixLength += 1;
+  }
+  const insertedText = nextText.slice(prefixLength, nextText.length - suffixLength);
+  if (previousText !== nextText.slice(0, prefixLength) + nextText.slice(nextText.length - suffixLength)) return null;
+  return { offset: prefixLength, text: insertedText };
+}
+
+function detectBlankLineBoundary({ previousText, nextText, changes }) {
+  if (typeof previousText !== 'string' || typeof nextText !== 'string') return false;
+  if (previousText === nextText) return false;
+  if (!Array.isArray(changes) || changes.length !== 1) return false;
+  const [change] = changes;
+  if (!change || typeof change !== 'object') return false;
+  if (change.range === undefined || change.range === null) {
+    const insertion = insertionFromWholeTextChange(previousText, nextText);
+    if (!insertion) return false;
+    return isBoundaryInsertion(previousText, nextText, insertion.offset, insertion.text);
+  }
+  const { range } = change;
+  if (typeof range !== 'object' || !isPositionShape(range.start) || !isPositionShape(range.end)) return false;
+  if (range.start.line !== range.end.line || range.start.character !== range.end.character) return false;
+  const insertionOffset = offsetOfPosition(previousText, lineStartOffsets(previousText), range.start);
+  return isBoundaryInsertion(previousText, nextText, insertionOffset, change.text);
+}
+
 function applyDidClose(store, params) {
   const textDocument = params && params.textDocument;
   const uri = textDocument && textDocument.uri;
@@ -166,6 +234,7 @@ function listDocs(store) {
 
 module.exports = {
   createDocStore,
+  detectBlankLineBoundary,
   uriOfParams,
   applyContentChange,
   applyDidOpen,

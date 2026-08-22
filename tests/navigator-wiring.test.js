@@ -513,6 +513,53 @@ test('a save evaluates the same gate at once instead of waiting out the quiet wi
   assert.equal(calls.length, 1, 'a save IS the pause boundary');
 });
 
+test('a blank-line didChange evaluates the dispatch gate without waiting out the quiet window', async (t) => {
+  const { wiring, timers, calls, lsp } = dispatchingConnection();
+  t.after(() => wiring.stop());
+
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', '# Title\n\nA thought'));
+  lsp('textDocument/didChange', rangedChangeParams(MARKDOWN_URI, 2, [
+    { range: { start: { line: 2, character: 9 }, end: { line: 2, character: 9 } }, text: '\n' },
+  ]));
+  await wiring.whenDispatchSettled();
+  assert.equal(calls.length, 1, 'the typed blank line is the pause boundary');
+  assert.equal(timers.pendingCount, 1, 'the normal sweep still waits out its debounce');
+});
+
+test('a blank-line didChange still obeys dispatch gates', async (t) => {
+  const { wiring, calls, notes, lsp } = dispatchingConnection({ dispatch: { cooldownMs: 300000 } });
+  t.after(() => wiring.stop());
+
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', '# Title\n\nA thought'));
+  lsp('textDocument/didChange', rangedChangeParams(MARKDOWN_URI, 2, [
+    { range: { start: { line: 2, character: 9 }, end: { line: 2, character: 9 } }, text: '\n' },
+  ]));
+  await wiring.whenDispatchSettled();
+  assert.equal(calls.length, 1);
+
+  lsp('textDocument/didChange', rangedChangeParams(MARKDOWN_URI, 3, [
+    { range: { start: { line: 3, character: 0 }, end: { line: 3, character: 0 } }, text: '\n' },
+  ]));
+  await wiring.whenDispatchSettled();
+  assert.equal(calls.length, 1, 'cooldown still wins');
+  assert.ok(notes.some((line) => line.includes('cooldown')));
+});
+
+test('a non-boundary didChange only arms the normal quiet window', async (t) => {
+  const { wiring, timers, calls, lsp } = dispatchingConnection();
+  t.after(() => wiring.stop());
+
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  lsp('textDocument/didChange', didChangeParams(MARKDOWN_URI, 2, '# Title\n\nA rewritten line with with a repeat.\n'));
+  await wiring.whenDispatchSettled();
+  assert.equal(calls.length, 0, 'no immediate dispatch for ordinary edits');
+  assert.equal(timers.pendingCount, 1, 'the quiet window is armed');
+
+  runSweepThenDispatch(timers);
+  await wiring.whenDispatchSettled();
+  assert.equal(calls.length, 1);
+});
+
 test('a second boundary inside the cooldown is skipped with one line naming the gate', async (t) => {
   const { wiring, timers, calls, notes, lsp, clock } = dispatchingConnection({ dispatch: { cooldownMs: 300000 } });
   t.after(() => wiring.stop());

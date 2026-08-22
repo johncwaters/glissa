@@ -8,6 +8,7 @@ const {
   applyDidClose,
   applyDidOpen,
   createDocStore,
+  detectBlankLineBoundary,
   getDoc,
   listDocs,
   uriOfParams,
@@ -92,6 +93,10 @@ function change(store, uri, contentChanges, version = 2) {
   return applyDidChange(store, { textDocument: { uri, version }, contentChanges });
 }
 
+function boundary(previousText, nextText, changes) {
+  return detectBlankLineBoundary({ previousText, nextText, changes });
+}
+
 function textAfter(store, uri, contentChanges, opened) {
   openDoc(store, uri, opened);
   const result = change(store, uri, contentChanges);
@@ -105,6 +110,47 @@ test('a single character insert splices at the range and leaves the rest alone',
   ], '# Title\nhello world\n');
   assert.equal(result.applied, true);
   assert.equal(text, '# Title\nhelloX world\n');
+});
+
+test('detectBlankLineBoundary accepts typed newline inserts that leave a blank cursor line', () => {
+  assert.equal(boundary('A thought', 'A thought\n', [
+    { range: range(0, 9, 0, 9), text: '\n' },
+  ]), true);
+  assert.equal(boundary('A thought', 'A thought\r\n', [
+    { range: range(0, 9, 0, 9), text: '\r\n' },
+  ]), true);
+  assert.equal(boundary('A thought', 'A thought\n  ', [
+    { range: range(0, 9, 0, 9), text: '\n  ' },
+  ]), true);
+});
+
+test('detectBlankLineBoundary accepts whole-text newline insertions that leave a blank cursor line', () => {
+  assert.equal(boundary('A thought', 'A thought\n', [{ text: 'A thought\n' }]), true);
+  assert.equal(boundary('A thought', 'A thought\r\n', [{ text: 'A thought\r\n' }]), true);
+  assert.equal(boundary('A thought', 'A thought\n\t', [{ text: 'A thought\n\t' }]), true);
+});
+
+test('detectBlankLineBoundary rejects edits that are not typed blank-line boundaries', () => {
+  assert.equal(boundary('A thought', 'A thXought', [
+    { range: range(0, 4, 0, 4), text: 'X' },
+  ]), false, 'mid-line edit');
+  assert.equal(boundary('A thought', 'A ', [
+    { range: range(0, 2, 0, 9), text: '' },
+  ]), false, 'deletion');
+  assert.equal(boundary('A thought', 'A thought\n\nPasted block', [
+    { range: range(0, 9, 0, 9), text: '\n\nPasted block' },
+  ]), false, 'multi-line paste');
+  assert.equal(boundary('A thought', 'A \nthought', [
+    { range: range(0, 2, 0, 2), text: '\n' },
+  ]), false, 'enter created a non-empty line');
+  assert.equal(boundary('A thought', 'A thought\n\n', [
+    { range: range(0, 9, 0, 9), text: '\n' },
+    { range: range(1, 0, 1, 0), text: '\n' },
+  ]), false, 'multiple changes');
+  assert.equal(boundary('A thought', 'A thought', [
+    { range: range(0, 9, 0, 9), text: '' },
+  ]), false, 'unchanged text');
+  assert.equal(boundary('A thought', 'A thought\nNext', [{ text: 'A thought\nNext' }]), false, 'whole-text non-empty line');
 });
 
 test('changes in one batch apply in order, each against the text the previous one left', () => {
