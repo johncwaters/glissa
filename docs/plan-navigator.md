@@ -105,8 +105,8 @@ Config:
 
 ## What was removed (2026-08-22 simplification pass)
 
-The lane was trimmed with a delete-first pass; `DELETION-PLAN-navigator.md` at the repo root carries the
-full reasoning. What is gone, and will not come back without a fresh case for it:
+The lane was trimmed with a delete-first pass. What is gone, why it went, and why it can stay gone
+(the same shape as the "Removed" section in docs/plan-ingestion.md):
 
 - **The intent model (the whole of M5).** One machine-wide sentence, in memory only and reset by every
   daemon restart, carrying a proposal-vs-correction merge with a lock, derived staleness, a
