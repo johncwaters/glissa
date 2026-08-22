@@ -169,8 +169,6 @@ function createShellHistoryIngest({
 
   // --- Discovery -----------------------------------------------------------
 
-  // The head sample is taken HERE because a drain can only compare against one it already had, and a
-  // rewrite is most likely to land before this tail has read a byte (server/core/ingest-tail-core.js).
   async function trackFile(location, filePath, stat) {
     if (tails.has(filePath)) return;
     const head = await readHead(filePath);
@@ -327,14 +325,13 @@ function createShellHistoryIngest({
     return buffer.subarray(0, bytesRead);
   }
 
-  // One open for both reads: the appended range, and the head sample that proves the range belongs to
-  // the file this tail has been reading.
+  // The head is sampled AFTER the range, so a rewrite landing between the two reads is caught by the head rather than published as the range.
   async function readWindow(filePath, { start = 0, length = 0, sampleHead = false } = {}) {
     let handle = null;
     try {
       handle = await fsPromises.open(filePath, 'r');
-      const head = sampleHead ? headSample(await readAt(handle, 0, HEAD_SAMPLE_BYTES)) : null;
       const bytes = await readAt(handle, start, length);
+      const head = sampleHead ? headSample(await readAt(handle, 0, HEAD_SAMPLE_BYTES)) : null;
       return { text: bytes.toString('utf8'), end: start + bytes.length, head };
     } catch {
       // A history file the shell holds locked mid-write leaves the offset where it was, so the next poll
@@ -413,12 +410,6 @@ function createShellHistoryIngest({
       start: plan.start, length: plan.end - plan.start, sampleHead: plan.sampleHead,
     });
     if (!alive() || !read) return;
-    /*
-     * A rewrite that left the file LARGER reaches here looking exactly like an append: no shrink for
-     * decideFileRead to catch, and on Linux the same inode and creation time, so the stat identity holds
-     * too. Its head does not, and reading from the old offset would publish a fragment starting
-     * mid-command out of a file this tail has never read. So it re-baselines like any other rewrite.
-     */
     if (headChanged(state, read.head)) {
       await reseed(filePath, stat);
       return;

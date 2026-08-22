@@ -138,13 +138,6 @@ test('a file recreated at the same path is a new file, not a continuation of the
   assert.equal(state.identity, fileIdentity(recreated));
 });
 
-/*
- * The stat identity is a NEGATIVE test only, which is what this fixture exists to state. Linux reuses
- * the inode of a file deleted and recreated in the same directory and stamps the new one off the
- * kernel's coarse tick, so a recreation inside one tick keeps BOTH halves and reaches the tail looking
- * exactly like an append. Reading from the old offset then published a fragment starting mid-command
- * ("rf /", out of a recreated `sudo rm -rf /`), which is the failure this head sample closes.
- */
 test('a recreation that kept its inode and creation time is caught by the head sample', () => {
   const before = fakeStat({ size: 9, ino: 7, birthtimeMs: 500 });
   const state = createTailState(before, { head: headSample(Buffer.from('npm test\n')) });
@@ -174,12 +167,7 @@ test('a head shorter than the recorded one is a rewrite, never a shorter read of
   assert.equal(headChanged(state, headSample(Buffer.from('command-1\n'))), true);
 });
 
-/*
- * The agent-log source hands no head at all, so every branch here has to reach the byte-identical
- * decision it reached before the sample existed: nothing recorded proves nothing, and a head that could
- * not be read is a failed read, not evidence of a rotation.
- */
-test('a tail with no head sample recorded never claims a rotation', () => {
+test('a tail with no head sample recorded never claims a rotation, as the agent-log source relies on', () => {
   const state = createTailState(fakeStat({ size: 10 }));
   assert.equal(state.head, null);
   assert.equal(headChanged(state, headSample(Buffer.from('anything at all'))), false);
@@ -192,7 +180,6 @@ test('a tail with no head sample recorded never claims a rotation', () => {
 test('the head sample is a bounded window of raw bytes, so no decoding can shift it', () => {
   const long = Buffer.alloc(HEAD_SAMPLE_BYTES + 100, 0x61);
   assert.equal(headSample(long).length, HEAD_SAMPLE_BYTES);
-  // One character, two bytes: a latin1 window cuts on the byte and compares on the byte either way.
   const twoByte = Buffer.from('é');
   assert.equal(headSample(twoByte).length, 2);
   assert.equal(headSample('not a buffer'), null);
