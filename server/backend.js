@@ -884,13 +884,12 @@ function createBackend(httpServer, options = {}) {
   /*
    * Lane attribution ledger. Glissa spawns its own sessions, so it can say that a Claude session id WAS the
    * PR-review lane rather than someone typing; that is the one usage question a transcript reader cannot
-   * answer. Beside the config file like the warehouse and the budget state, so a temp GLISSA_CONFIG stays
-   * out of the operator's real ~/.glissa. Loaded eagerly: a report built before the first read would
-   * attribute everything to `other`.
+   * answer. Beside the config file, so a temp GLISSA_CONFIG stays out of the operator's real ~/.glissa.
+   * Loaded eagerly: a report built before the first read would attribute everything to `other`.
    */
   const laneLedger = createLaneLedger({
     ledgerPath: configSiblingPath(configStore.configPath, 'usage-lanes.json'),
-    retainDays: resolveUsageConfig(config.usage).warehouseRetainDays,
+    retainDays: resolveUsageConfig(config.usage).retainDays,
     logger: console,
   });
   void laneLedger.load();
@@ -1018,11 +1017,7 @@ function createBackend(httpServer, options = {}) {
     config, sessions,
     broadcast: (msg) => broadcastControl(msg),
     controlClientCount: () => controlWss.clients.size,
-    // Durable per-day history, beside the resolved config file like uploads and recordings, so a temp
-    // GLISSA_CONFIG never writes into the operator's real ~/.glissa.
-    warehousePath: configSiblingPath(configStore.configPath, 'usage-warehouse.json'),
     laneMap: () => laneLedger.laneMap(),
-    budgetStatePath: configSiblingPath(configStore.configPath, 'usage-budget-state.json'),
     ...(options.usageWiringOptions || {}),
   });
   // Deferred boot pass: idempotent, so only the first connection pays for it. Registered here, not in

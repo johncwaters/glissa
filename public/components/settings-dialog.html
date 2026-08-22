@@ -218,16 +218,6 @@
     <span class="dialog-hint">Reads the Claude Code transcripts already on this machine and rolls them up into the Usage tab and the per-card chips. Costs are API list-price estimates, not a bill: a Claude subscription does not charge per token.</span>
   </label>
   <label class="dialog-label dialog-checkbox-label">
-    <input type="checkbox" class="dialog-checkbox" id="settings-usage-codex">
-    Track Codex usage
-    <span class="dialog-hint">Reads the Codex CLI session transcripts under CODEX_HOME (or ~/.codex) and folds their tokens and estimated cost into the Usage tab. Costs use published OpenAI list prices.</span>
-  </label>
-  <label class="dialog-label dialog-checkbox-label">
-    <input type="checkbox" class="dialog-checkbox" id="settings-usage-grok">
-    Track Grok usage
-    <span class="dialog-hint">Reads the Grok CLI session transcripts under GROK_HOME (or ~/.grok). Grok records its own cost per turn, so those figures come from the transcript rather than a price table.</span>
-  </label>
-  <label class="dialog-label dialog-checkbox-label">
     <input type="checkbox" class="dialog-checkbox" id="settings-usage-fetch-pricing">
     Fetch current model prices
     <span class="dialog-hint">Refreshes the price table from the public source once a day. Off means the table bundled with this Glissa build is used, which drifts as new models ship.</span>
@@ -251,17 +241,6 @@
     </select>
     <span class="dialog-hint">Auto uses the cost a transcript recorded and computes the rest; Calculate always computes from the price table; Display shows only recorded costs, which a subscription leaves empty.</span>
   </label>
-  <div class="settings-timeout-grid">
-    <label class="dialog-label">
-      Daily budget (USD)
-      <input type="number" class="dialog-input" id="settings-usage-budget-daily" min="0" step="0.01" autocomplete="off" placeholder="off">
-    </label>
-    <label class="dialog-label">
-      Monthly budget (USD)
-      <input type="number" class="dialog-input" id="settings-usage-budget-monthly" min="0" step="0.01" autocomplete="off" placeholder="off">
-    </label>
-  </div>
-  <span class="dialog-hint">Spend ceilings in US dollars, measured against the same estimated costs shown in the Usage tab. Leave a field empty, or set it to zero or below, for no budget. Each of 50%, 75% and 100% alerts once per day or month.</span>
   <div class="settings-section">
     <div class="settings-section-title">Last report</div>
     <div class="settings-readonly" id="settings-usage-status"></div>
