@@ -560,7 +560,6 @@ mountPhoneShell({
   // moment it becomes visible; every other screen ignores this.
   onScreenShown: (screenId) => {
     if (screenId === 'usage') { refreshUsageView(); requestUsageReport(); }
-    if (screenId === 'navigator') refreshNavigatorView();
     acknowledgeViewAttention(screenId);
   },
   // The desktop header does not render under [data-layout="phone"], so its controls move to the Board's
