@@ -336,24 +336,30 @@ function createShellHistoryIngest({
     if (!context) return;
     const parsed = parseHistoryLines({ shell: context.shell, lines, state: context.parseState });
     context.parseState = parsed.state;
-    const bound = positiveInt(maxCommandsPerDrain, DEFAULT_MAX_COMMANDS_PER_DRAIN);
-    const recent = parsed.commands.slice(-bound);
-    // The offset already moved past them, so a silent drop would be an invisible hole; the note rides
-    // the first surviving event exactly as the agent-log source's dropped-lines note rides its drain.
-    let dropped = parsed.commands.length - recent.length;
-    for (const command of recent) {
+    /*
+     * EVERY parsed command goes through the noise pipeline, and the drain bound is applied to what
+     * survived it. Slicing first left `context.previous` describing a command the drain had dropped, so
+     * a survivor identical to the one just above it published as new and a real change was judged
+     * against the wrong predecessor.
+     */
+    const events = [];
+    for (const command of parsed.commands) {
       const decided = decideCommandEvent({
         shell: context.shell, command, previous: context.previous, now: nowFn(),
       });
       context.previous = decided.previous;
-      if (!decided.event) continue;
-      if (dropped > 0) {
-        decided.event.summary = `${decided.event.summary} [${dropped} earlier commands dropped]`;
-        decided.event.detail = { ...decided.event.detail, droppedCommands: dropped };
-        dropped = 0;
-      }
-      publish(decided.event);
+      if (decided.event) events.push(decided.event);
     }
+    const bound = positiveInt(maxCommandsPerDrain, DEFAULT_MAX_COMMANDS_PER_DRAIN);
+    const recent = events.slice(-bound);
+    // The offset already moved past them, so a silent drop would be an invisible hole; the note rides
+    // the first surviving event exactly as the agent-log source's dropped-lines note rides its drain.
+    const dropped = events.length - recent.length;
+    if (dropped > 0) {
+      recent[0].summary = `${recent[0].summary} [${dropped} earlier commands dropped]`;
+      recent[0].detail = { ...recent[0].detail, droppedCommands: dropped };
+    }
+    for (const event of recent) publish(event);
   }
 
   function reseed(filePath, stat) {

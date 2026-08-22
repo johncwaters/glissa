@@ -21,7 +21,7 @@
 
 const crypto = require('node:crypto');
 const path = require('node:path');
-const { SOURCE_DEFAULTS } = require('./ingest-core');
+const { SOURCE_DEFAULTS, scrubText } = require('./ingest-core');
 
 const SOURCE = 'fs';
 const KIND = 'file-change';
@@ -333,7 +333,13 @@ function untrackedKey(relPath) {
 // an exact file. Paths this long are pathological; the marker is what keeps one from lying quietly.
 function truncatePath(relPath) {
   if (relPath.length <= MAX_REL_PATH_CHARS) return relPath;
-  return `${relPath.slice(0, MAX_REL_PATH_CHARS)}${TRUNCATED_SUFFIX}`;
+  // Scrubbed BEFORE the cut, and only here: a cut taken ahead of the publish-time scrub can split a
+  // quoted value out of its closing quote, and the common path pays nothing for this.
+  const scrubbed = scrubText(relPath);
+  // The scrub can shrink a path back inside the bound, and a marker on a path nothing cut would say this
+  // names no exact file when it names one exactly.
+  if (scrubbed.length <= MAX_REL_PATH_CHARS) return scrubbed;
+  return `${scrubbed.slice(0, MAX_REL_PATH_CHARS)}${TRUNCATED_SUFFIX}`;
 }
 
 function normalizeChangeKind(type) {

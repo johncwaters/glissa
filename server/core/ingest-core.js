@@ -125,27 +125,86 @@ const QUOTED_OR_BARE = '(?:"[^"\\r\\n]*"|\'[^\'\\r\\n]*\'|[^\\s\\r\\n]+)';
 // Horizontal whitespace only. A plain \s would let the gap between the name and its value swallow a
 // newline, and one secret assignment would then scrub the innocent line under it.
 const GAP = '[^\\S\\r\\n]';
+/*
+ * How far a command-anchored pattern may reach for its flag. Some short flags are a credential in one
+ * command and a port, a listing or a uid everywhere else (`-p`, `-u`), so the COMMAND NAME is what makes
+ * them safe to match at all; the reach is bounded so the lazy walk can never cost a whole line per start.
+ *
+ * It stops at a command SEPARATOR, which is what keeps `curl ... | sh && docker run -u 1000:1000` from
+ * handing curl's anchor to a flag on the other side of the pipe. A separator can only appear inside a
+ * credential value when the value is quoted, and a quoted value is matched by its own alternative, which
+ * reaches through all three characters happily.
+ */
+const FLAG_REACH = '[^\\r\\n;&|]{0,200}?';
+const MYSQL_TOOLS = '(?:mysql|mysqldump|mysqladmin|mysqlshow|mariadb|mariadb-dump)';
 
 const SCRUB_PATTERNS = [
-  // name = value, name: value, name => value
+  // name = value, name: value, name => value. Also covers npm `:_authToken=`, `aws_secret_access_key=`,
+  // `set NAME=value`, and an assignment quoted inside an `echo "token=abc" > .env`.
   new RegExp(`(${SECRET_WORD}${GAP}*(?:=>|[:=])${GAP}*)${QUOTED_OR_BARE}`, 'gi'),
-  // --token value, -Password value
+  // --token value, -Password value, docker login --password value
   new RegExp(`((?:^|\\s)--?${SECRET_WORD}${GAP}+)${QUOTED_OR_BARE}`, 'gi'),
+  /*
+   * -pwSecret, -pw secret, -pw=secret. Single dash only, so `--password value` stays with the pattern
+   * above it, and the lookahead is what makes `-pw`/`-pwd` a COMPLETE flag: without it `-pwfile` reads as
+   * `-pw` plus a value and a bare `-pwd` backtracks into `-pw` plus `d`. Case sensitive, because under an
+   * `i` flag that lookahead would also refuse the uppercase start of `-pwSecret`; the separated forms of
+   * `pwd` are covered case-insensitively by the two patterns above regardless.
+   */
+  new RegExp(`((?:^|\\s)-(?:pwd|pw)(?![a-z])${GAP}*=?${GAP}*)${QUOTED_OR_BARE}`, 'g'),
   // PowerShell's own plaintext-credential idiom
   new RegExp(`(-AsPlainText${GAP}+)${QUOTED_OR_BARE}`, 'gi'),
+  // Windows `setx NAME value`, whose value is positional where `set NAME=value` is an assignment.
+  new RegExp(`((?:^|\\s)setx${GAP}+[^\\s\\r\\n]*${SECRET_WORD}[^\\s\\r\\n]*${GAP}+)${QUOTED_OR_BARE}`, 'gi'),
   // Authorization: Bearer <token>
   new RegExp(`(\\bBearer${GAP}+)[A-Za-z0-9._~+/=-]{8,}`, 'gi'),
+  // Authorization: Basic <base64>. The header is the anchor, because `Basic` alone opens ordinary prose.
+  new RegExp(`(\\bauthorization${GAP}*:${GAP}*Basic${GAP}+)[A-Za-z0-9+/=_-]{8,}`, 'gi'),
+  // `docker login -p secret`: -p is a port mapping everywhere else in docker, so `login` is the anchor.
+  // Both separators, since pflag takes `-p=secret` as readily as `-p secret`.
+  new RegExp(`(\\bdocker${GAP}+login\\b${FLAG_REACH}${GAP}-p(?:${GAP}+|=))${QUOTED_OR_BARE}`, 'gi'),
+  // `curl -u user:pass`: -u is a uid:gid in docker and a plain username elsewhere, so curl is the anchor.
+  new RegExp(`(\\bcurl\\b${FLAG_REACH}${GAP}(?:--user|-u)(?:${GAP}+|=)[^\\s:\\r\\n]+:)${QUOTED_OR_BARE}`, 'gi'),
+  /*
+   * `mysql -pHunter2`: this family attaches the password to -p with no space. Case SENSITIVE on purpose,
+   * because -P is that same family's port flag and a case-insensitive match would eat the port number.
+   */
+  new RegExp(`(\\b${MYSQL_TOOLS}\\b${FLAG_REACH}${GAP}-p)${QUOTED_OR_BARE}`, 'g'),
   // scheme://user:password@host
   /\b([a-z][a-z0-9+.-]*:\/\/[^\s:/@]+:)[^\s@/]+(?=@)/gi,
 ];
 
-// Every pattern keeps its leading group (the name, the flag, the scheme) and replaces only the value.
+/*
+ * Shapes that ARE the secret. These carry no name to anchor on, so there is no prefix to keep and the
+ * whole match goes; every one of them is an issued-credential shape whose own prefix identifies its
+ * issuer, which is what keeps a git sha, a UUID or a bare `eyJ` out of them.
+ */
+const SECRET_SHAPE_PATTERNS = [
+  // AWS access key id
+  /\bAKIA[0-9A-Z]{16}\b/g,
+  // GitHub: ghp_ (personal), gho_ (oauth), ghu_/ghs_ (app), ghr_ (refresh), plus the fine-grained shape
+  /\bgh[pousr]_[A-Za-z0-9]{16,}\b/g,
+  /\bgithub_pat_[A-Za-z0-9_]{20,}\b/g,
+  // Slack bot, user, app and legacy tokens
+  /\bxox[abprs]-[A-Za-z0-9-]{10,}\b/g,
+  // A JWT is the period-separated triplet, never a bare eyJ
+  /\beyJ[A-Za-z0-9_=-]{6,}\.[A-Za-z0-9_=-]{6,}\.[A-Za-z0-9_=-]{4,}/g,
+  // The header announcing a private key. Its BODY is a documented limit, not a pattern.
+  /-----BEGIN(?:[A-Z0-9 ]+)? PRIVATE KEY-----/g,
+];
+
+// Named patterns keep their leading group (the name, the flag, the scheme) and replace only the value;
+// a shape pattern is the value, so the match goes whole.
 function scrubText(text) {
   if (typeof text !== 'string' || !text) return typeof text === 'string' ? text : '';
   let scrubbed = text;
   for (const pattern of SCRUB_PATTERNS) {
     pattern.lastIndex = 0;
     scrubbed = scrubbed.replace(pattern, (_match, prefix) => `${prefix}${SCRUB_PLACEHOLDER}`);
+  }
+  for (const pattern of SECRET_SHAPE_PATTERNS) {
+    pattern.lastIndex = 0;
+    scrubbed = scrubbed.replace(pattern, SCRUB_PLACEHOLDER);
   }
   return scrubbed;
 }

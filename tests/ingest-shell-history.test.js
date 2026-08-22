@@ -293,6 +293,31 @@ test('a catch-up past the read bound publishes the newest commands and says how 
   assert.ok(!events[4].summary.includes('dropped'), 'the note rides the first surviving event only');
 }));
 
+/*
+ * The drain bound applies to what SURVIVED the noise pipeline, never to the parsed lines ahead of it.
+ * Slicing first left `context.previous` describing a command the drain had already dropped, so a survivor
+ * identical to the one above it published as new: this fixture reported one lone `npm run watch` and
+ * called the nine real commands before it dropped.
+ */
+test('the dup collapse sees every parsed command, so the drain bound cannot resurrect a repeat', withHome(async ({ psDir, events, build }) => {
+  const filePath = seedPsReadLine(psDir, { lines: ['npm test'] });
+  const adapter = build();
+  await adapter.start();
+
+  const distinct = Array.from({ length: 9 }, (_, index) => `git commit -m fix-${index}`);
+  const repeated = Array.from({ length: 51 }, () => 'npm run watch');
+  append(filePath, [...distinct, ...repeated].map((line) => `${line}\n`).join(''));
+  await adapter.poll();
+
+  const published = summaries(events);
+  assert.equal(published.length, 10, `nine real commands plus one watch: ${published.join(' | ')}`);
+  assert.equal(published.filter((line) => line.endsWith('npm run watch')).length, 1);
+  for (const command of distinct) {
+    assert.ok(published.includes(`powershell: ${command}`), `${command} was dropped by the bound`);
+  }
+  assert.ok(!published.some((line) => line.includes('earlier commands dropped')), 'nothing publishable was dropped');
+}));
+
 // --- Discovery -------------------------------------------------------------
 
 test('a shell with no history directory at all is silently absent, never an error', withHome(async ({ events, warnings, build }) => {

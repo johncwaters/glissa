@@ -163,6 +163,38 @@ test('a truncated path says it is truncated', () => {
   assert.equal(decided(short)[0].detail.path, 'src/app.js');
 });
 
+/*
+ * An over-long path is scrubbed BEFORE it is cut, since a cut taken ahead of the publish-time scrub can
+ * split a quoted value out of its closing quote. The scrub can then shrink the path back inside the
+ * bound, and the marker must follow what was actually published: claiming a truncation that did not
+ * happen tells a reader this names no exact file when it names one exactly.
+ */
+test('a path the scrub shrank back inside the bound is published without the truncation marker', () => {
+  const batch = createBatch();
+  recordChange(batch, `src/token=${'a'.repeat(400)}/app.js`, 'update');
+
+  const [event] = decided(batch);
+  assert.equal(event.detail.path, 'src/token=[scrubbed]', event.detail.path);
+  assert.ok(!event.summary.endsWith(TRUNCATED_SUFFIX), `nothing was cut: ${event.summary}`);
+
+  // A path still over the bound after the scrub keeps saying so.
+  const stillLong = createBatch();
+  recordChange(stillLong, `src/${'b'.repeat(400)}/app.js`, 'update');
+  assert.ok(decided(stillLong)[0].detail.path.endsWith(TRUNCATED_SUFFIX));
+});
+
+test('a secret-shaped path never reaches the fs ring unscrubbed', () => {
+  const config = resolveIngestConfig({ enabled: true, sources: { fs: { enabled: true } } });
+  const store = createIngestStore(config);
+  const batch = createBatch();
+  recordChange(batch, `src/${'c'.repeat(190)}/password="hunter two three".txt`, 'update');
+  for (const event of decided(batch)) publishEvent(store, event, 1000);
+
+  const [stored] = store.rings.get('fs').entries.map((entry) => entry.event);
+  assert.ok(!stored.summary.includes('hunter'), stored.summary);
+  assert.ok(!stored.summary.includes('two three'), stored.summary);
+});
+
 test('even unbatched, a storm of per-file events cannot push the fs ring past its caps', () => {
   const config = resolveIngestConfig({ enabled: true, sources: { fs: { enabled: true } } });
   const store = createIngestStore(config);

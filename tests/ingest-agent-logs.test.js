@@ -867,6 +867,68 @@ test('a secret in an agent transcript is scrubbed by the publish-time pass, with
   }
 }));
 
+/*
+ * The scrub-ordering regression, pinned at ring level against the real path and in the shape the shell
+ * source's own fix pinned. This source must hand its text on RAW so normalizeEvent can scrub before it
+ * folds and slices: when the mapper sliced first (240 chars of turn text, 120 of tool target), a quoted
+ * secret straddling the cut lost its closing quote, the scrub's quoted alternative stopped matching, and
+ * its bare-token alternative took only the first WORD of the value, publishing the rest as ordinary text.
+ * A tool target carries a `command`, so `Bash export TOKEN="..."` is the exact live shape.
+ */
+test('a secret past a long prefix in a tool command is scrubbed whole, never down to its first word', withHomes(async (homes) => {
+  const filePath = seedClaudeTranscript(homes.projects, { sessionId: 'sess-target' });
+  const { lane } = laneWith(homes, { enabled: true, sources: { agentLogs: { enabled: true } } });
+  try {
+    await lane.agentLogs.start();
+    append(filePath, claudeAssistant({
+      text: 'Exporting it now.',
+      sessionId: 'sess-target',
+      tools: [{
+        name: 'Bash',
+        input: { command: `echo ${'a'.repeat(90)} --password "hunter two three four five six"` },
+      }],
+    }));
+    await lane.agentLogs.poll();
+
+    const tool = lane.recentEvents().find((event) => event.kind === 'agent-tool');
+    assert.ok(tool.summary.startsWith('claude: Bash '), `the M7 vendor prefix is gone: ${tool.summary}`);
+    assert.ok(tool.summary.includes('--password [scrubbed]'), tool.summary);
+    for (const word of ['hunter', 'two three four five', 'six']) {
+      assert.ok(!tool.summary.includes(word), `leaked ${word}: ${tool.summary}`);
+    }
+  } finally {
+    lane.stop();
+  }
+}));
+
+test('a secret past a long prefix in a turn summary is scrubbed whole, and the ring is the only slice', withHomes(async (homes) => {
+  const filePath = seedClaudeTranscript(homes.projects, { sessionId: 'sess-turn-secret' });
+  const { lane } = laneWith(homes, { enabled: true, sources: { agentLogs: { enabled: true } } });
+  try {
+    await lane.agentLogs.start();
+    append(filePath, claudeAssistant({
+      text: `I ran ${'w'.repeat(200)} with --password "hunter two three four five six"`,
+      sessionId: 'sess-turn-secret',
+    }));
+    append(filePath, claudeAssistant({ text: `a very long turn ${'z'.repeat(900)}`, sessionId: 'sess-turn-secret' }));
+    await lane.agentLogs.poll();
+
+    const events = lane.recentEvents();
+    const secret = events.find((event) => event.summary.includes('--password'));
+    assert.ok(secret.summary.startsWith('claude: I ran '), secret.summary);
+    assert.ok(secret.summary.endsWith('--password [scrubbed]'), secret.summary);
+    for (const word of ['hunter', 'two three four five', 'six']) {
+      assert.ok(!secret.summary.includes(word), `leaked ${word}: ${secret.summary}`);
+    }
+    // The vendor prefix is composed before publish, so the ring's 400 covers the whole composed line.
+    const long = events.find((event) => event.summary.includes('a very long turn'));
+    assert.equal(long.summary.length, 400, 'the ring bound is the one slice in the pipeline');
+    assert.ok(long.summary.startsWith('claude: '), long.summary);
+  } finally {
+    lane.stop();
+  }
+}));
+
 test('the agentLogs source off constructs no adapter at all', withHomes(async (homes) => {
   const { lane } = laneWith(homes, { enabled: true, sources: { terminal: { enabled: true } } });
   try {

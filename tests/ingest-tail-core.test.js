@@ -16,7 +16,7 @@ const {
   MAX_CATCH_UP_BYTES, applyRead, createTailState, fileIdentity, isActiveMtime, pickStaleByMtime, planRead,
 } = require('../server/core/ingest-tail-core');
 const {
-  isDispatchWorkdir, mapAgentLine, parseTimestamp, toolTarget,
+  MAX_RAW_CHARS, isDispatchWorkdir, mapAgentLine, parseTimestamp, toolTarget,
 } = require('../server/core/ingest-agent-core');
 
 const NOW = 1700000000000;
@@ -331,6 +331,21 @@ test('Grok message chunks accumulate and only the completed turn publishes', () 
   assert.equal(done.vendorState, null, 'the held text is spent, not carried into the next turn');
 });
 
+/*
+ * The held text is bounded by the INCOMING chunk being cut to the remaining budget, not by a check taken
+ * after it landed. One chunk is one transcript line's text, which nothing bounds below the tail's own
+ * catch-up read, so a bound checked afterwards would overshoot by a whole one of those.
+ */
+test('a Grok chunk larger than the whole bound cannot push the held text past it', () => {
+  const chunk = (text) => grokLine({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text } });
+  let vendorState = mapAgentLine({ vendor: 'grok', rawLine: chunk('x'.repeat(MAX_RAW_CHARS * 3)), ctx: ctx() }).vendorState;
+  assert.ok(vendorState.pendingText.length <= MAX_RAW_CHARS, `held ${vendorState.pendingText.length} chars`);
+
+  vendorState = mapAgentLine({ vendor: 'grok', rawLine: chunk('y'.repeat(5000)), ctx: ctx(), vendorState }).vendorState;
+  assert.ok(vendorState.pendingText.length <= MAX_RAW_CHARS, `held ${vendorState.pendingText.length} chars`);
+  assert.ok(!vendorState.pendingText.includes('y'), 'a full accumulator holds the OPENING text, not the newest');
+});
+
 test('a Grok tool_call publishes once and its streaming updates publish nothing', () => {
   const call = mapAgentLine({
     vendor: 'grok',
@@ -438,10 +453,26 @@ test('timestamps arrive as ISO strings from two vendors and whole seconds from t
   assert.equal(parseTimestamp(null), null);
 });
 
-test('a tool target is the first meaningful input field, folded to one bounded line', () => {
+/*
+ * The target leaves here RAW: unfolded and unsliced. normalizeEvent scrubs, THEN folds, THEN slices to
+ * 400, and a cut taken here would run ahead of the scrub, which is how a quoted secret in a `command`
+ * target loses its closing quote and publishes the rest of its value (docs/plan-ingestion.md, M11). Only
+ * the memory bound survives, and it prefers a LINE break, which no value pattern can span.
+ */
+test('a tool target is the first meaningful input field, handed on raw under one memory bound', () => {
   assert.equal(toolTarget({ file_path: 'a.js', command: 'rm -rf' }), 'a.js');
-  assert.equal(toolTarget({ command: 'npm run\n  build' }), 'npm run build');
-  assert.equal(toolTarget({ command: 'x'.repeat(500) }).length, 120);
+  assert.equal(toolTarget({ command: 'npm run\n  build' }), 'npm run\n  build');
+  assert.equal(toolTarget({ command: 'x'.repeat(500) }).length, 500, 'nothing here slices a target');
+  assert.equal(toolTarget({ command: 'x'.repeat(MAX_RAW_CHARS + 500) }).length, MAX_RAW_CHARS);
+  const lines = `${'x'.repeat(MAX_RAW_CHARS - 10)}\n${'y'.repeat(500)}`;
+  assert.equal(toolTarget({ command: lines }).length, MAX_RAW_CHARS - 10, 'the bound cuts at the line break');
+  // Both break characters count: a bare carriage return is a line boundary, and a CRLF cut on the
+  // newline alone would leave the carriage return dangling on the end of the summary.
+  const returns = `${'x'.repeat(MAX_RAW_CHARS - 10)}\r${'y'.repeat(500)}`;
+  assert.equal(toolTarget({ command: returns }).length, MAX_RAW_CHARS - 10, 'a bare CR is a line break too');
+  const crlf = `${'x'.repeat(MAX_RAW_CHARS - 11)}\r\n${'y'.repeat(500)}`;
+  assert.equal(toolTarget({ command: crlf }).length, MAX_RAW_CHARS - 11);
+  assert.ok(!toolTarget({ command: crlf }).endsWith('\r'), 'no dangling carriage return');
   assert.equal(toolTarget({ unknown_field: 'value' }), '');
   assert.equal(toolTarget(null), '');
 });

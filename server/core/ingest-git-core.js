@@ -24,7 +24,6 @@ const SOURCE = 'git';
 const DEFAULT_DEBOUNCE_MS = SOURCE_DEFAULTS.git.debounceMs;
 const DEFAULT_POLL_MS = SOURCE_DEFAULTS.git.pollMs;
 
-const MAX_SUBJECT_CHARS = 160;
 const SHORT_SHA_CHARS = 7;
 const CLEAN_SIGNATURE = 'clean';
 
@@ -47,8 +46,14 @@ const STATUS_ARGS = Object.freeze(['--no-optional-locks', 'status', '--porcelain
 const LOG_FIELD_SEPARATOR = String.fromCharCode(31);
 const LOG_ARGS = Object.freeze(['log', '-1', '--no-color', '--format=%H%x1f%an%x1f%at%x1f%s']);
 
-function oneLine(text, max) {
-  return String(text == null ? '' : text).replace(/\s+/g, ' ').trim().slice(0, max);
+/*
+ * A commit subject is `%s`, which is one line already, so this trims and nothing else. It deliberately
+ * does NOT slice: a cut taken before the publish-time scrub can split a quoted secret out of its closing
+ * quote and publish the rest of the value as innocent words (docs/plan-ingestion.md, M11), and the ring's
+ * own 400-char bound already slices the composed summary AFTER the scrub has seen it whole.
+ */
+function commitSubject(text) {
+  return String(text == null ? '' : text).trim();
 }
 
 function shortSha(sha) {
@@ -230,7 +235,7 @@ function parseCommitLine(stdout) {
     sha,
     author: (fields[1] || '').trim() || null,
     committedAt: Number.isFinite(seconds) && seconds > 0 ? Math.floor(seconds * 1000) : null,
-    subject: oneLine(fields.slice(3).join(LOG_FIELD_SEPARATOR), MAX_SUBJECT_CHARS),
+    subject: commitSubject(fields.slice(3).join(LOG_FIELD_SEPARATOR)),
   };
 }
 

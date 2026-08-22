@@ -15,9 +15,15 @@
 
 const SOURCE = 'agentLogs';
 const VENDORS = Object.freeze(['claude', 'codex', 'grok']);
-// Comfortably inside the ring's own 400-char summary bound, so a summary is never cut twice.
-const MAX_SUMMARY_CHARS = 240;
-const MAX_TARGET_CHARS = 120;
+/*
+ * A MEMORY bound and nothing else (docs/plan-ingestion.md, M11). Summarizing is the ring's job:
+ * `normalizeEvent` scrubs, THEN folds, THEN slices to 400, and a cut taken here would run ahead of the
+ * scrub. That is how a quoted secret loses its closing quote, leaving the scrub's quoted alternative
+ * unmatched and its bare-token alternative taking only the first WORD of the value, so the rest of it
+ * publishes as innocent words. An agent tool target carries a `command`, so `Bash export TOKEN="..."`
+ * leaks exactly the way the shell source's own pre-slice did.
+ */
+const MAX_RAW_CHARS = 4000;
 
 // The first of these a tool's input carries becomes its bounded target, so `Read` reads as the file it
 // opened rather than as a bare verb.
@@ -56,9 +62,21 @@ function str(value) {
   return trimmed;
 }
 
-function oneLine(text, max) {
-  const folded = String(text == null ? '' : text).replace(/\s+/g, ' ').trim();
-  return folded.slice(0, max);
+/**
+ * The one bound left on text heading for a ring, and it never folds. A scrub value pattern stops at a
+ * line break by construction, so a LINE-ALIGNED cut is the one cut that cannot split a value; the
+ * character cut below it is the fallback for a single line longer than the whole bound, and it is the
+ * known limit this source accepts (docs/plan-ingestion.md, "Privacy and trust posture").
+ *
+ * BOTH break characters count. A vendor writing bare carriage returns would otherwise fall straight to
+ * the character cut, and a CRLF cut on the newline alone would leave the carriage return dangling.
+ */
+function boundRaw(value, max = MAX_RAW_CHARS) {
+  const text = String(value == null ? '' : value);
+  if (text.length <= max) return text;
+  const lastBreak = Math.max(text.lastIndexOf('\n', max), text.lastIndexOf('\r', max));
+  if (lastBreak > 0) return text.slice(0, lastBreak).replace(/[\r\n]+$/, '');
+  return text.slice(0, max);
 }
 
 // Grok stamps whole seconds; Claude and Codex ship ISO strings.
@@ -91,7 +109,7 @@ function toolTarget(input) {
   for (const key of TOOL_TARGET_KEYS) {
     const value = str(input[key]);
     if (!value) continue;
-    return oneLine(value, MAX_TARGET_CHARS);
+    return boundRaw(value);
   }
   return '';
 }
@@ -99,7 +117,9 @@ function toolTarget(input) {
 // --- Events ---------------------------------------------------------------
 
 function turnEvent({ ts, root, sessionId, vendor, text }) {
-  const summary = oneLine(text, MAX_SUMMARY_CHARS);
+  // The M7 vendor prefix is composed here and bounded downstream: normalizeEvent's 400 covers the whole
+  // composed line, prefix included.
+  const summary = boundRaw(text).trim();
   if (!summary) return null;
   return {
     source: SOURCE,
@@ -112,7 +132,7 @@ function turnEvent({ ts, root, sessionId, vendor, text }) {
 }
 
 function toolEvent({ ts, root, sessionId, vendor, name, target }) {
-  const tool = oneLine(str(name) || 'tool', 60);
+  const tool = boundRaw(str(name) || 'tool');
   const suffix = target ? ` ${target}` : '';
   return {
     source: SOURCE,
@@ -201,9 +221,16 @@ function appendPending(vendorState, text) {
   const addition = str(text);
   const pendingText = typeof vendorState?.pendingText === 'string' ? vendorState.pendingText : '';
   if (!addition) return { pendingText };
-  // The OPENING text is what the summary wants, so once there is enough of it the rest is not held.
-  if (pendingText.length >= MAX_SUMMARY_CHARS) return { pendingText };
-  return { pendingText: `${pendingText} ${addition}`.slice(0, MAX_SUMMARY_CHARS * 2) };
+  /*
+   * The OPENING text is what the summary wants, so once there is enough of it the rest is not held. The
+   * budget is applied to the INCOMING chunk rather than checked after it landed: one chunk is one
+   * transcript line's text, and nothing bounds that below the tail's own catch-up read (256KB), so a
+   * bound checked afterwards would overshoot by a whole one of those. boundRaw is what does the cutting,
+   * so what it cuts is still line-aligned wherever the chunk holds a break.
+   */
+  const remaining = MAX_RAW_CHARS - pendingText.length - 1;
+  if (remaining <= 0) return { pendingText };
+  return { pendingText: `${pendingText} ${boundRaw(addition, remaining)}` };
 }
 
 /*
@@ -271,8 +298,7 @@ function mapAgentLine({ vendor, rawLine, ctx = {}, vendorState = null } = {}) {
 }
 
 module.exports = {
-  MAX_SUMMARY_CHARS,
-  MAX_TARGET_CHARS,
+  MAX_RAW_CHARS,
   VENDORS,
   isDispatchWorkdir,
   mapAgentLine,
