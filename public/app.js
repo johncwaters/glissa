@@ -6,7 +6,7 @@ import './tailwind.css';
 
 import { shouldShowServerAction } from '/shared/client-trust.mjs';
 import { STATES } from '/shared/states.mjs';
-import { connectControl, disableReconnect, onControlMessage, sendControlMsg, sendControlRequest, setConnectionStateCallback } from './control-ws.js';
+import { checkControlLiveness, connectControl, onControlMessage, sendControlMsg, sendControlRequest, setConnectionStateCallback } from './control-ws.js';
 import { createAddSessionDialog, createSettingsDialog } from './dialogs.js';
 import { observeHeaderHeight, writeClipboardText } from './dom-helpers.js';
 import { activateFocusView, centerSessionQuietly, deactivateFocusView, focusAdjacentInRail, focusNextAttention, focusNthInRail, getFocusedSessionId, isFocusActive, mountFocusView, noteKnownProjectPath, refreshFocusRoster, restoreFocusedSession, setFocusMergeStatus } from './focus-view/focus-view.js';
@@ -21,6 +21,7 @@ import { acknowledgePrAttention, applyPrStatus, mountPrView, setPrActivityCallba
 import { updateBannerText } from './radar-core.mjs';
 import { acknowledgeRadarAttention, applyHealthSnapshot as applyRadarHealth, applyPosthogStatus, applyPrStatus as applyRadarPrStatus, applyUpdateAvailable as applyRadarUpdate, mountRadarView, setRadarActivityCallback, setRadarNavigateToPrs } from './radar-panel.js';
 import { handleDebugStateRefresh, handleDebugStateResponse } from './session-card/card-dom.js';
+import { sessionUIs } from './session-card/card-registry.js';
 import { applyState, applyTerminalSettings, createSessionCard, getSessionCount, hasSession, notePackVersion, removeSessionCard, renameSessionCard, seedSessionMergeStatus, setLatestPackVersions, setSessionAgents, setSessionDiff, setSessionEffectiveBase, setSessionMergeStatus, setSessionPacks, setSessionPostTurn, setSessionPrompt, setSessionResume, setSessionUsage, setSessionWakeup, setSessionWorktree, updateAggregateStatus } from './session-card/lifecycle.js';
 import { openConfirmDialog } from './session-card/modal.js';
 import { reconnectDataWs } from './session-card/terminal.js';
@@ -91,15 +92,6 @@ setConnectionStateCallback((state, label) => {
         applyTerminalSettings(msg.settings);
       })
       .catch(() => {});
-    return;
-  }
-  if (state === 'shutdown') {
-    if (appRevealed) {
-      shutdownStatus.textContent = 'Server shut down';
-      shutdownScreen.classList.add('done');
-      return;
-    }
-    loadingStatus.textContent = 'Server shut down';
     return;
   }
   if (state === 'disconnected' && shutdownScreen.classList.contains('active')) {
@@ -302,7 +294,6 @@ const messageHandlers = {
   'ingest-snapshot':    (msg) => applyIngestSnapshot(msg),
   'client-trust':       (msg) => applyClientTrust(msg.trust),
   'shutting-down':      () => {
-    disableReconnect();
     connectionEl.dataset.state = 'shutdown';
     connectionLabel.textContent = 'Shutting down...';
     document.getElementById('btn-menu').disabled = true;
@@ -766,6 +757,30 @@ function sendFocusState() {
 window.addEventListener('focus', sendFocusState);
 window.addEventListener('blur', sendFocusState);
 document.addEventListener('visibilitychange', sendFocusState);
+
+let _wakeLivenessCheckRunning = false;
+
+async function checkWakeLiveness() {
+  if (_wakeLivenessCheckRunning) return;
+  _wakeLivenessCheckRunning = true;
+  try {
+    const state = await checkControlLiveness();
+    if (state !== 'dead') return;
+    for (const id of sessionUIs.keys()) reconnectDataWs(id);
+  } finally {
+    _wakeLivenessCheckRunning = false;
+  }
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') return;
+  checkWakeLiveness();
+});
+window.addEventListener('online', checkWakeLiveness);
+window.addEventListener('pageshow', (event) => {
+  if (!event.persisted) return;
+  checkWakeLiveness();
+});
 
 // ── Health monitor ──────────────────────────────────────────
 

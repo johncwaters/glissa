@@ -654,6 +654,11 @@ function registerControlHandlers(controlWss, deps) {
     }));
   }
 
+  function handlePing(msg, ws) {
+    if (!msg.requestId) return;
+    ws.send(JSON.stringify({ type: 'pong', requestId: msg.requestId }));
+  }
+
   function handleUpdateSettings(msg, ws) {
     const s = msg.settings || {};
 
@@ -964,6 +969,7 @@ function registerControlHandlers(controlWss, deps) {
     'remove-session':   handleRemoveSession,
     'rename-session':   handleRenameSession,
     'reorder-sessions': handleReorderSessions,
+    'ping':             handlePing,
     'get-settings':     handleGetSettings,
     'update-settings':  handleUpdateSettings,
     'scan-repo-roots':  handleScanRepoRoots,

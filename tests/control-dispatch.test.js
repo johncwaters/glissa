@@ -56,6 +56,18 @@ test('non-object payloads are ignored', () => {
   assert.equal(h.sent.length, 0, 'nothing sent back');
 });
 
+test('ping with requestId replies pong on the requesting socket only', () => {
+  const h = harness();
+  h.send({ type: 'ping', requestId: 'r1' });
+  assert.deepEqual(h.sent, [{ type: 'pong', requestId: 'r1' }]);
+});
+
+test('ping without requestId sends no reply', () => {
+  const h = harness();
+  h.send({ type: 'ping' });
+  assert.equal(h.sent.length, 0, 'nothing sent back');
+});
+
 // Item D: control-WS replay of transient broadcasts missed across a reconnect gap.
 // This harness wires a real createReplayLog through broadcastControl (mirroring backend.js's
 // stamp-then-fanout) and lets a test connect a fresh ws with an explicit `?since=` cursor,

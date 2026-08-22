@@ -2,14 +2,15 @@
 // Owns the control WebSocket connection, reconnect logic, and request/response.
 
 import { nextReconnectDelayMs } from './reconnect-backoff.mjs';
+import { decideLivenessAction } from './connection-liveness-core.mjs';
 import { buildWebSocketUrl } from './ws-url-core.mjs';
 
 let controlWs = null;
 let controlRetryTimer = null;
 // Consecutive failed attempts since the last connection that actually opened; drives the backoff.
 let controlRetryAttempt = 0;
-let reconnectDisabled = false;
 const pendingRequests = new Map(); // requestId -> { resolve, timer }
+let livenessProbePromise = null;
 
 // Highest control-broadcast seq seen so far. Survives across reconnects (unlike the server,
 // which holds no per-connection state) so a reconnect can declare `?since=<lastSeq>` and
@@ -27,14 +28,6 @@ export function setConnectionStateCallback(fn) {
 
 export function onControlMessage(handler) {
   _messageHandler = handler;
-}
-
-export function disableReconnect() {
-  reconnectDisabled = true;
-  if (controlRetryTimer !== null) {
-    clearTimeout(controlRetryTimer);
-    controlRetryTimer = null;
-  }
 }
 
 export function sendControlMsg(msg) {
@@ -117,6 +110,9 @@ export function connectControl() {
   });
 
   ws.addEventListener('close', () => {
+    // A liveness check may have already replaced a CLOSING socket; the superseded close must not
+    // null the live socket or schedule a duplicate reconnect. Its pendings age out on their timeout.
+    if (controlWs !== ws) return;
     controlWs = null;
     // A response can never arrive on a dead socket; failing fast beats each caller waiting out its
     // 5s request timeout.
@@ -125,13 +121,42 @@ export function connectControl() {
       pending.reject(new Error('Connection closed'));
     }
     pendingRequests.clear();
-    if (reconnectDisabled) {
-      if (_connectionStateCallback) _connectionStateCallback('shutdown', 'Server shut down');
-      return;
-    }
     if (_connectionStateCallback) _connectionStateCallback('disconnected', 'Reconnecting');
     const retryDelayMs = nextReconnectDelayMs(controlRetryAttempt);
     controlRetryAttempt += 1;
     controlRetryTimer = setTimeout(connectControl, retryDelayMs);
   });
+}
+
+export async function checkControlLiveness() {
+  if (livenessProbePromise) return livenessProbePromise;
+  const action = decideLivenessAction({
+    hasSocket: !!controlWs,
+    readyState: controlWs?.readyState,
+    retryPending: controlRetryTimer !== null,
+  });
+  if (action === 'retry-now') {
+    clearTimeout(controlRetryTimer);
+    controlRetryTimer = null;
+    controlRetryAttempt = 0;
+    connectControl();
+    return 'reconnecting';
+  }
+  if (action === 'connect') {
+    controlRetryAttempt = 0;
+    connectControl();
+    return 'reconnecting';
+  }
+  if (action === 'wait') return 'reconnecting';
+  const probedSocket = controlWs;
+  livenessProbePromise = sendControlRequest('ping', {})
+    .then(() => 'ok')
+    .catch(() => {
+      if (controlWs === probedSocket) probedSocket.close();
+      return 'dead';
+    })
+    .finally(() => {
+      livenessProbePromise = null;
+    });
+  return livenessProbePromise;
 }
