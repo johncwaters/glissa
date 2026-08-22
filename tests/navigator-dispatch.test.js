@@ -40,6 +40,7 @@ test('a COMMENTS result is believed for the entries that pass validation', async
     verdict: 'COMMENTS',
     comments: [{ line: 2, message: 'The title promises a plan the body never gives.' }],
     intent: null,
+    hand: null,
     reason: null,
   });
 });
@@ -48,7 +49,7 @@ test('NONE is a first-class answer, and carries no comments', async (t) => {
   const { file, cleanup } = tempFile(JSON.stringify({ verdict: 'none', comments: [] }));
   t.after(cleanup);
   assert.deepEqual(await readCommentsResult(file, { lineCount: 4 }), {
-    verdict: 'NONE', comments: [], intent: null, reason: null,
+    verdict: 'NONE', comments: [], intent: null, hand: null, reason: null,
   });
 });
 
@@ -64,7 +65,7 @@ test('a COMMENTS verdict whose every entry is junk reports NONE and says why', a
 test('a missing, unparsable, non-object or unknown-verdict file is an ERROR, never a comment', async (t) => {
   const missing = path.join(os.tmpdir(), `glissa-navigator-absent-${process.pid}.json`);
   assert.deepEqual(await readCommentsResult(missing), {
-    verdict: 'ERROR', comments: [], intent: null, reason: 'no readable result file',
+    verdict: 'ERROR', comments: [], intent: null, hand: null, reason: 'no readable result file',
   });
 
   const bad = tempFile('{not json');
@@ -78,7 +79,7 @@ test('a missing, unparsable, non-object or unknown-verdict file is an ERROR, nev
   const unknown = tempFile(JSON.stringify({ verdict: 'LOOKS_FINE', comments: [{ line: 1, message: 'trust me' }] }));
   t.after(unknown.cleanup);
   assert.deepEqual(await readCommentsResult(unknown.file, { lineCount: 4 }), {
-    verdict: 'ERROR', comments: [], intent: null, reason: 'invalid verdict in result file',
+    verdict: 'ERROR', comments: [], intent: null, hand: null, reason: 'invalid verdict in result file',
   });
 });
 
@@ -90,7 +91,7 @@ test('onBytesRead reports what was read without changing the result shape', asyn
 
   const sizes = [];
   assert.deepEqual(await readCommentsResult(file, { lineCount: 4, onBytesRead: (bytes) => sizes.push(bytes) }), {
-    verdict: 'NONE', comments: [], intent: null, reason: null,
+    verdict: 'NONE', comments: [], intent: null, hand: null, reason: null,
   });
   assert.deepEqual(sizes, [Buffer.byteLength(content)]);
 
@@ -128,6 +129,36 @@ test('an invalid intent claim is ignored rather than believed or thrown over', a
     t.after(cleanup);
     const result = await readCommentsResult(file, { lineCount: 4 });
     assert.equal(result.intent, null, `${JSON.stringify(intent)} is not an updated belief`);
+    assert.equal(result.verdict, 'NONE', 'and it never invalidates the rest of the result');
+  }
+});
+
+// --- The optional raised-hand field (docs/plan-navigator-2.md, M7) ---
+
+test('a hand claim is read, trimmed and capped, whatever the verdict says', async (t) => {
+  const withComments = tempFile(JSON.stringify({
+    verdict: 'COMMENTS',
+    comments: [{ line: 1, message: 'Name the audience.' }],
+    hand: '  the middle sections argue at different altitudes  ',
+  }));
+  t.after(withComments.cleanup);
+  assert.equal((await readCommentsResult(withComments.file, { lineCount: 4 })).hand, 'the middle sections argue at different altitudes');
+
+  const quiet = tempFile(JSON.stringify({ verdict: 'NONE', comments: [], hand: 'the document has two competing goals' }));
+  t.after(quiet.cleanup);
+  assert.equal((await readCommentsResult(quiet.file, { lineCount: 4 })).hand, 'the document has two competing goals');
+
+  const long = tempFile(JSON.stringify({ verdict: 'NONE', comments: [], hand: 'z'.repeat(700) }));
+  t.after(long.cleanup);
+  assert.equal((await readCommentsResult(long.file, { lineCount: 4 })).hand.length, 300);
+});
+
+test('an invalid or absent hand claim is ignored rather than believed or thrown over', async (t) => {
+  for (const hand of [undefined, '', '   ', 42, { text: 'nope' }, ['nope'], null]) {
+    const { file, cleanup } = tempFile(JSON.stringify({ verdict: 'NONE', comments: [], hand }));
+    t.after(cleanup);
+    const result = await readCommentsResult(file, { lineCount: 4 });
+    assert.equal(result.hand, null, `${JSON.stringify(hand)} is not a raised hand`);
     assert.equal(result.verdict, 'NONE', 'and it never invalidates the rest of the result');
   }
 });
@@ -173,6 +204,7 @@ test('a session that writes the result file yields its comments, and the work di
     verdict: 'COMMENTS',
     comments: [{ line: 3, message: 'Name the audience before the argument.' }],
     intent: null,
+    hand: null,
     reason: null,
   });
 
@@ -198,7 +230,7 @@ test('a spawn that throws becomes an ERROR verdict rather than a rejected dispat
   const { dispatch } = dispatcherWithSpawn(async () => { throw new Error('claude is not on PATH'); });
   const result = await dispatch({ uri: URI, text: TEXT });
   assert.deepEqual(result, {
-    verdict: 'ERROR', comments: [], intent: null, reason: 'claude is not on PATH',
+    verdict: 'ERROR', comments: [], intent: null, hand: null, reason: 'claude is not on PATH',
   });
 });
 
@@ -227,7 +259,7 @@ test('a hung session is aborted at the hard timeout and resolves ERROR, so the l
   // The injected timer never fires on its own; firing it here IS the hard timeout.
   fire();
   assert.deepEqual(await pending, {
-    verdict: 'ERROR', comments: [], intent: null, reason: 'dispatch timed out',
+    verdict: 'ERROR', comments: [], intent: null, hand: null, reason: 'dispatch timed out',
   });
   await eventLoopTurn();
   assert.equal(aborted, true, 'the session was told to stop, not just abandoned');

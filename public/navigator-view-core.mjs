@@ -125,14 +125,61 @@ export function commentCountText(count) {
   return total === 1 ? '1 comment' : `${total} comments`;
 }
 
-// One head line for a section that can carry either kind, or both. A kind with nothing in it is left
-// out entirely rather than printed as a zero, so the head never pads a quiet document.
+// One head line for a section, omitting quiet kinds rather than padding with zeroes.
 export function sectionCountText(section) {
   const findings = boundedCount(section?.findings?.length);
   const comments = boundedCount(section?.comments?.length);
-  if (findings > 0 && comments > 0) return `${findingCountText(findings)}, ${commentCountText(comments)}`;
-  if (comments > 0) return commentCountText(comments);
-  return findingCountText(findings);
+  const hand = typeof section?.hand === 'string' && section.hand ? 1 : 0;
+  const parts = [];
+  if (hand > 0) parts.push('raised hand');
+  if (findings > 0) parts.push(findingCountText(findings));
+  if (comments > 0) parts.push(commentCountText(comments));
+  if (parts.length > 0) return parts.join(', ');
+  return '0 findings';
+}
+
+export function navigatorHandText(hand) {
+  const text = typeof hand === 'string' ? hand.trim() : '';
+  if (!text) return '';
+  return `Raised hand: ${text}`;
+}
+
+export function handOfMessage(msg) {
+  const hand = typeof msg?.hand === 'string' ? msg.hand.trim() : '';
+  return hand || null;
+}
+
+export function hasHand(msg) {
+  return handOfMessage(msg) !== null;
+}
+
+export function applyHandMessage(handsByUri, msg) {
+  const next = new Map(handsByUri);
+  const uri = typeof msg?.uri === 'string' ? msg.uri : '';
+  if (!uri) return next;
+  const hand = handOfMessage(msg);
+  if (!hand) {
+    next.delete(uri);
+    return next;
+  }
+  next.set(uri, hand);
+  return next;
+}
+
+export function applyHandSnapshot(msg) {
+  const next = new Map();
+  const documents = Array.isArray(msg?.documents) ? msg.documents : [];
+  for (const document of documents) {
+    const uri = typeof document?.uri === 'string' ? document.uri : '';
+    const hand = typeof document?.hand === 'string' ? document.hand.trim() : '';
+    if (!uri || !hand) continue;
+    next.set(uri, hand);
+  }
+  return next;
+}
+
+export function totalHandCount(handsByUri) {
+  return handsByUri.size;
 }
 
 export function commentLineLabel(comment) {
@@ -227,21 +274,21 @@ export function totalCommentCount(commentsByUri) {
   return total;
 }
 
-// Sections by file name, because that is what the eye scans; the full uri breaks a tie between two files
-// of the same name in different directories, so the order is stable across repaints. A document earns a
-// section from either half: tier 2 findings, tier 3 comments, or both.
-export function navigatorSections(findingsByUri, commentsByUri = new Map()) {
+// Sections by file name, with full uri as the tie-breaker so order is stable across repaints.
+export function navigatorSections(findingsByUri, commentsByUri = new Map(), handsByUri = new Map()) {
   const sections = [];
-  const uris = new Set([...findingsByUri.keys(), ...commentsByUri.keys()]);
+  const uris = new Set([...findingsByUri.keys(), ...commentsByUri.keys(), ...handsByUri.keys()]);
   for (const uri of uris) {
     const diagnostics = findingsByUri.get(uri);
     const comments = commentsByUri.get(uri);
+    const hand = handsByUri.get(uri) || null;
     const findings = Array.isArray(diagnostics) ? diagnostics : [];
     const modelComments = Array.isArray(comments) ? comments : [];
-    if (findings.length === 0 && modelComments.length === 0) continue;
+    if (findings.length === 0 && modelComments.length === 0 && !hand) continue;
     sections.push({
       uri,
       name: basenameOfUri(uri) || uri,
+      hand,
       findings: [...findings].sort((a, b) => lineOf(a) - lineOf(b) || characterOf(a) - characterOf(b)),
       comments: [...modelComments].sort((a, b) => (Number(a?.line) || 0) - (Number(b?.line) || 0)),
     });

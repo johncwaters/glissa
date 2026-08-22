@@ -393,8 +393,8 @@ test('the snapshot accessor carries every uri that currently has findings', (t) 
   assert.deepEqual(message.documents, wiring.documentsSnapshot());
   assert.deepEqual(
     message.documents,
-    [{ uri: MARKDOWN_URI, diagnostics: snapshot[0].diagnostics, comments: [] }],
-    'the comments field is additive: present and empty when tier 3 has said nothing',
+    [{ uri: MARKDOWN_URI, diagnostics: snapshot[0].diagnostics, comments: [], hand: null }],
+    'the comments and hand fields are additive: present and empty when tier 3 has said nothing',
   );
 });
 
@@ -608,6 +608,7 @@ test('a COMMENTS result is broadcast for that uri and joins the connect-time sna
     uri: MARKDOWN_URI,
     diagnostics: wiring.documentsSnapshot()[0].diagnostics,
     comments: [COMMENT],
+    hand: null,
   }], 'one section carries both halves');
 });
 
@@ -695,6 +696,102 @@ test('a result that lands after its buffer closed is dropped rather than resurre
 
   assert.deepEqual(wiring.documentsSnapshot(), []);
   assert.equal(broadcasts.filter((message) => message.type === 'navigator-comments' && message.comments.length > 0).length, 0);
+});
+
+test('a hand is broadcast only when it changes and joins the connect-time snapshot', async (t) => {
+  const results = [
+    { verdict: 'NONE', comments: [], hand: 'the doc mixes migration plan and incident review', reason: null },
+    { verdict: 'NONE', comments: [], hand: 'the doc mixes migration plan and incident review', reason: null },
+    { verdict: 'NONE', comments: [], hand: 'the conclusion answers a different question', reason: null },
+  ];
+  const { wiring, timers, broadcasts, lsp, clock } = dispatchingConnection({
+    dispatch: { cooldownMs: 1 },
+    respond: (_args, callNumber) => Promise.resolve(results[callNumber - 1]),
+  });
+  t.after(() => wiring.stop());
+
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  runSweepThenDispatch(timers);
+  await wiring.whenDispatchSettled();
+
+  clock.now += 1000;
+  lsp('textDocument/didChange', didChangeParams(MARKDOWN_URI, 2, '# Title\n\nA changed line with with a repeat.\n'));
+  lsp('textDocument/didSave', { textDocument: { uri: MARKDOWN_URI } });
+  await wiring.whenDispatchSettled();
+
+  clock.now += 1000;
+  lsp('textDocument/didChange', didChangeParams(MARKDOWN_URI, 3, '# Title\n\nAnother changed line with with a repeat.\n'));
+  lsp('textDocument/didSave', { textDocument: { uri: MARKDOWN_URI } });
+  await wiring.whenDispatchSettled();
+
+  const hands = broadcasts.filter((message) => message.type === 'navigator-hand');
+  assert.deepEqual(hands, [
+    {
+      type: 'navigator-hand',
+      uri: MARKDOWN_URI,
+      hand: 'the doc mixes migration plan and incident review',
+      ts: FIXED_TS,
+    },
+    {
+      type: 'navigator-hand',
+      uri: MARKDOWN_URI,
+      hand: 'the conclusion answers a different question',
+      ts: FIXED_TS + 2000,
+    },
+  ]);
+  assert.equal(wiring.documentsSnapshot()[0].hand, 'the conclusion answers a different question');
+});
+
+test('a handless dispatch clears the standing hand and an ERROR leaves it alone', async (t) => {
+  const results = [
+    { verdict: 'NONE', comments: [], hand: 'the document has no single reader', reason: null },
+    { verdict: 'ERROR', comments: [], reason: 'no readable result file' },
+    { verdict: 'NONE', comments: [], reason: null },
+  ];
+  const { wiring, timers, broadcasts, lsp, clock } = dispatchingConnection({
+    dispatch: { cooldownMs: 1 },
+    respond: (_args, callNumber) => Promise.resolve(results[callNumber - 1]),
+  });
+  t.after(() => wiring.stop());
+
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  runSweepThenDispatch(timers);
+  await wiring.whenDispatchSettled();
+
+  clock.now += 1000;
+  lsp('textDocument/didChange', didChangeParams(MARKDOWN_URI, 2, '# Title\n\nA second line with with a repeat.\n'));
+  lsp('textDocument/didSave', { textDocument: { uri: MARKDOWN_URI } });
+  await wiring.whenDispatchSettled();
+  assert.equal(wiring.documentsSnapshot()[0].hand, 'the document has no single reader');
+
+  clock.now += 1000;
+  lsp('textDocument/didChange', didChangeParams(MARKDOWN_URI, 3, CLEAN_MARKDOWN));
+  lsp('textDocument/didSave', { textDocument: { uri: MARKDOWN_URI } });
+  await wiring.whenDispatchSettled();
+
+  const hands = broadcasts.filter((message) => message.type === 'navigator-hand');
+  assert.deepEqual(hands.map((message) => message.hand), ['the document has no single reader', null]);
+  assert.deepEqual(wiring.documentsSnapshot(), []);
+});
+
+test('didClose clears a standing hand', async (t) => {
+  const { wiring, timers, broadcasts, lsp } = dispatchingConnection({
+    respond: () => Promise.resolve({
+      verdict: 'NONE', comments: [], hand: 'the document has two incompatible structures', reason: null,
+    }),
+  });
+  t.after(() => wiring.stop());
+
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  runSweepThenDispatch(timers);
+  await wiring.whenDispatchSettled();
+
+  lsp('textDocument/didClose', { textDocument: { uri: MARKDOWN_URI } });
+  const hand = broadcasts.filter((message) => message.type === 'navigator-hand').at(-1);
+  assert.deepEqual(hand, {
+    type: 'navigator-hand', uri: MARKDOWN_URI, hand: null, ts: FIXED_TS,
+  });
+  assert.deepEqual(wiring.documentsSnapshot(), []);
 });
 
 // --- The intent model (docs/archive/plan-navigator.md, M5) ---

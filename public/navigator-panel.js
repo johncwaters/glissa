@@ -32,6 +32,8 @@ import {
   applyFindingsSnapshot,
   applyFixMessage,
   applyFixSnapshot,
+  applyHandMessage,
+  applyHandSnapshot,
   basenameOfUri,
   commentLineLabel,
   emptyIntent,
@@ -43,18 +45,22 @@ import {
   hasComments,
   hasFindings,
   hasFix,
+  hasHand,
   hasIntentChanged,
   intentMetaText,
   intentOfMessage,
+  navigatorHandText,
   navigatorSections,
   sectionCountText,
   shouldAdoptIntentText,
   totalCommentCount,
   totalFindingCount,
+  totalHandCount,
 } from './navigator-view-core.mjs';
 
 let _findingsByUri = new Map();
 let _commentsByUri = new Map();
+let _handsByUri = new Map();
 let _intent = emptyIntent();
 let _root = null;
 let _feed = null;
@@ -148,6 +154,7 @@ function buildSection(section) {
   head.append(name, el('span', 'navigator-doc-count', sectionCountText(section)));
   wrap.append(head);
 
+  if (section.hand) wrap.append(buildHandBanner(section.hand));
   if (section.findings.length > 0) {
     const list = el('div', 'navigator-findings');
     for (const finding of section.findings) list.append(buildFindingRow(finding));
@@ -159,6 +166,12 @@ function buildSection(section) {
     wrap.append(cards);
   }
   return wrap;
+}
+
+function buildHandBanner(hand) {
+  const banner = el('div', 'navigator-hand');
+  banner.textContent = navigatorHandText(hand);
+  return banner;
 }
 
 // A tier 3 card, deliberately unlike a tier 2 row: a chip naming who is talking, then a sentence.
@@ -193,7 +206,7 @@ function render({ force = false } = {}) {
   if (!_feed) return;
   if (!force && isPanelHidden(_root)) return;
   _feed.textContent = '';
-  const sections = navigatorSections(_findingsByUri, _commentsByUri);
+  const sections = navigatorSections(_findingsByUri, _commentsByUri, _handsByUri);
   // The bare hint, with no section chrome to make an idle lane look like a broken one (Radar's precedent).
   if (sections.length === 0) {
     _feed.append(el('p', 'navigator-empty', NAVIGATOR_EMPTY_TEXT));
@@ -366,6 +379,13 @@ export function applyNavigatorComments(msg) {
   refreshActivity();
 }
 
+export function applyNavigatorHand(msg) {
+  _handsByUri = applyHandMessage(_handsByUri, msg);
+  noteArrival(hasHand(msg));
+  render();
+  refreshActivity();
+}
+
 /*
  * The intent model moved. A model proposal is navigator output and raises the dot; the operator's own
  * correction is not news to the operator, so it does not.
@@ -404,9 +424,10 @@ export function applyIngestSnapshot(msg) {
 export function applyNavigatorSnapshot(msg) {
   _findingsByUri = applyFindingsSnapshot(msg);
   _commentsByUri = applyCommentsSnapshot(msg);
+  _handsByUri = applyHandSnapshot(msg);
   _intent = intentOfMessage(msg);
   _fixEntries = applyFixSnapshot(msg);
-  noteArrival(totalFindingCount(_findingsByUri) + totalCommentCount(_commentsByUri) > 0);
+  noteArrival(totalFindingCount(_findingsByUri) + totalCommentCount(_commentsByUri) + totalHandCount(_handsByUri) > 0);
   renderIntent();
   render();
   renderFixes();

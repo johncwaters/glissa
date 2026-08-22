@@ -135,6 +135,7 @@ function createNavigatorWiring({
    * kind without the other, and the tab renders them as two different things.
    */
   const commentsByUri = new Map();
+  const handsByUri = new Map();
   /*
    * Tier 1 fixes from the last sweep of each uri, stored WITH the text hash they were computed against.
    * A code action is offered only while that hash still describes the buffer, so a fix can never be
@@ -212,6 +213,31 @@ function createNavigatorWiring({
     broadcastComments(uri, []);
   }
 
+  function handFromResult(result) {
+    const hand = typeof result?.hand === 'string' ? result.hand.trim() : '';
+    return hand || null;
+  }
+
+  function broadcastHand(uri, hand) {
+    if (typeof broadcast !== 'function') return;
+    broadcast({
+      type: 'navigator-hand', uri, hand, ts: nowFn(),
+    });
+  }
+
+  function recordHand(uri, hand) {
+    const next = typeof hand === 'string' && hand ? hand : null;
+    const previous = handsByUri.get(uri) || null;
+    if (previous === next) return;
+    if (!next) handsByUri.delete(uri);
+    if (next) handsByUri.set(uri, next);
+    broadcastHand(uri, next);
+  }
+
+  function clearHand(uri) {
+    recordHand(uri, null);
+  }
+
   // Replaced wholesale by each sweep, like the findings they were derived from.
   function recordFixes(uri, fixes, textHash) {
     if (fixes.length === 0) {
@@ -239,11 +265,12 @@ function createNavigatorWiring({
 
   // Every uri the tab has a section for: findings, comments, or both.
   function documentsSnapshot() {
-    const uris = new Set([...findingsByUri.keys(), ...commentsByUri.keys()]);
+    const uris = new Set([...findingsByUri.keys(), ...commentsByUri.keys(), ...handsByUri.keys()]);
     return [...uris].map((uri) => ({
       uri,
       diagnostics: findingsByUri.get(uri) || [],
       comments: commentsByUri.get(uri) || [],
+      hand: handsByUri.get(uri) || null,
     }));
   }
 
@@ -289,6 +316,7 @@ function createNavigatorWiring({
     }
     if (result.reason) note(`dispatch for ${uri}: ${result.reason}`);
     recordComments(uri, result.verdict === 'COMMENTS' ? result.comments : []);
+    recordHand(uri, handFromResult(result));
     return true;
   }
 
@@ -417,7 +445,7 @@ function createNavigatorWiring({
       // After the comments, and through the merge: a locked operator intent survives this untouched.
       const intentMoved = applyModelIntent(result.intent);
       if (!recorded) return;
-      note(`dispatch for ${uri} applied: ${result.verdict}, ${(commentsByUri.get(uri) || []).length} comments, intent-moved=${intentMoved ? 'yes' : 'no'}`);
+      note(`dispatch for ${uri} applied: ${result.verdict}, ${(commentsByUri.get(uri) || []).length} comments, hand=${handsByUri.has(uri) ? 'yes' : 'no'}, intent-moved=${intentMoved ? 'yes' : 'no'}`);
     }
 
     function armDispatch(uri, armedBy) {
@@ -614,6 +642,7 @@ function createNavigatorWiring({
         note(`didClose ${uri} (${listDocs(store).length} open)`);
         clearFindings(uri);
         clearComments(uri);
+        clearHand(uri);
         fixesByUri.delete(uri);
         failPendingApplyEdits('the buffer closed', uri);
         forgetUri(dispatchState, uri);

@@ -150,42 +150,75 @@ test('a comments push replaces that document, and an empty one clears it', async
 });
 
 test('the snapshot carries both halves, and each half reads only its own field', async () => {
-  const { applyCommentsSnapshot, applyFindingsSnapshot } = await importCore();
+  const { applyCommentsSnapshot, applyFindingsSnapshot, applyHandSnapshot } = await importCore();
   const msg = {
     type: 'navigator-snapshot',
     documents: [
-      { uri: 'file:///both.md', diagnostics: [finding(0, 0, 'repeated-word', 'b')], comments: [comment(1, 'a thought')] },
+      {
+        uri: 'file:///both.md',
+        diagnostics: [finding(0, 0, 'repeated-word', 'b')],
+        comments: [comment(1, 'a thought')],
+        hand: 'the structure shifts halfway through',
+      },
       { uri: 'file:///findings-only.md', diagnostics: [finding(1, 0, 'heading-skip', 'h')], comments: [] },
       { uri: 'file:///comments-only.md', diagnostics: [], comments: [comment(2, 'another thought')] },
+      { uri: 'file:///hand-only.md', diagnostics: [], comments: [], hand: 'the premise and outline disagree' },
     ],
   };
   assert.deepEqual([...applyFindingsSnapshot(msg).keys()], ['file:///both.md', 'file:///findings-only.md']);
   assert.deepEqual([...applyCommentsSnapshot(msg).keys()], ['file:///both.md', 'file:///comments-only.md']);
+  assert.deepEqual([...applyHandSnapshot(msg).keys()], ['file:///both.md', 'file:///hand-only.md']);
   assert.equal(applyCommentsSnapshot({}).size, 0, 'a malformed frame empties rather than throws');
 });
 
-test('a document earns a section from either half, and its comments sort by line', async () => {
+test('a hand push replaces that document, and a null one clears it', async () => {
+  const { applyHandMessage, hasHand, navigatorHandText } = await importCore();
+  const first = applyHandMessage(new Map(), {
+    type: 'navigator-hand', uri: 'file:///a.md', hand: '  the outline and conclusion argue different plans  ',
+  });
+  assert.equal(first.get('file:///a.md'), 'the outline and conclusion argue different plans');
+  assert.equal(navigatorHandText(first.get('file:///a.md')), 'Raised hand: the outline and conclusion argue different plans');
+  assert.equal(hasHand({ uri: 'file:///a.md', hand: 'a structural issue' }), true);
+  assert.equal(hasHand({ uri: 'file:///a.md', hand: null }), false);
+
+  const replaced = applyHandMessage(first, { uri: 'file:///a.md', hand: 'the document has two audiences' });
+  assert.equal(replaced.get('file:///a.md'), 'the document has two audiences');
+  assert.equal(first.get('file:///a.md'), 'the outline and conclusion argue different plans');
+
+  assert.equal(applyHandMessage(replaced, { uri: 'file:///a.md', hand: null }).size, 0);
+  assert.deepEqual([...applyHandMessage(replaced, { hand: null }).keys()], ['file:///a.md'], 'no uri changes nothing');
+  assert.equal(navigatorHandText(null), '');
+});
+
+test('a document earns a section from any navigator surface, and hand renders first', async () => {
   const { navigatorSections } = await importCore();
   const findings = new Map([['file:///apple.md', [finding(4, 0, 'repeated-word', 'a')]]]);
   const comments = new Map([
     ['file:///apple.md', [comment(9, 'later'), comment(2, 'earlier')]],
     ['file:///zebra.md', [comment(1, 'comments only, no findings at all')]],
   ]);
+  const hands = new Map([
+    ['file:///apple.md', 'the document has two centers'],
+    ['file:///middle.md', 'the section order hides the decision'],
+  ]);
 
-  const sections = navigatorSections(findings, comments);
-  assert.deepEqual(sections.map((section) => section.name), ['apple.md', 'zebra.md']);
+  const sections = navigatorSections(findings, comments, hands);
+  assert.deepEqual(sections.map((section) => section.name), ['apple.md', 'middle.md', 'zebra.md']);
+  assert.equal(sections[0].hand, 'the document has two centers');
   assert.deepEqual(sections[0].comments.map((entry) => entry.message), ['earlier', 'later']);
-  assert.deepEqual(sections[1].findings, [], 'a comments-only document still gets its section');
-  assert.deepEqual(navigatorSections(new Map(), new Map()), []);
+  assert.equal(sections[1].hand, 'the section order hides the decision');
+  assert.deepEqual(sections[2].findings, [], 'a comments-only document still gets its section');
+  assert.deepEqual(navigatorSections(new Map(), new Map(), new Map()), []);
 });
 
 test('the section head names what it actually has, and never pads with a zero', async () => {
   const { commentCountText, sectionCountText } = await importCore();
   assert.equal(commentCountText(1), '1 comment');
   assert.equal(commentCountText(3), '3 comments');
-  assert.equal(sectionCountText({ findings: [1, 2], comments: [1] }), '2 findings, 1 comment');
+  assert.equal(sectionCountText({ hand: 'whole doc issue', findings: [1, 2], comments: [1] }), 'raised hand, 2 findings, 1 comment');
   assert.equal(sectionCountText({ findings: [], comments: [1, 2] }), '2 comments');
   assert.equal(sectionCountText({ findings: [1], comments: [] }), '1 finding');
+  assert.equal(sectionCountText({ hand: 'whole doc issue', findings: [], comments: [] }), 'raised hand');
   assert.equal(sectionCountText({}), '0 findings');
 });
 

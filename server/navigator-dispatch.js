@@ -24,7 +24,7 @@ const {
   awaitSessionExit, firstLine, raceWithAbort, registerEphemeralSession,
 } = require('./ephemeral-session');
 const {
-  DEFAULT_TIMEOUT_SECONDS, buildNavigatorPrompt, countLines, sanitizeComments,
+  DEFAULT_TIMEOUT_SECONDS, MAX_HAND_CHARS, buildNavigatorPrompt, countLines, sanitizeComments,
 } = require('./core/navigator-dispatch-core');
 const { sanitizeIntentText } = require('./core/navigator-intent-core');
 const { createLaneLog } = require('./lane-log');
@@ -48,7 +48,9 @@ const NAVIGATOR_DENY = {
 };
 
 function errorResult(reason) {
-  return { verdict: 'ERROR', comments: [], intent: null, reason };
+  return {
+    verdict: 'ERROR', comments: [], intent: null, hand: null, reason,
+  };
 }
 
 /**
@@ -75,12 +77,21 @@ async function readCommentsResult(resultPath, { lineCount = 0, onBytesRead = nul
   // Optional, and validated exactly like a comment message: a non-string or empty claim is simply not
   // an updated belief, so it is dropped rather than clearing the standing statement.
   const intent = sanitizeIntentText(parsed.intent) || null;
-  if (verdict !== 'COMMENTS') return { verdict, comments: [], intent, reason: null };
+  const hand = sanitizeIntentText(parsed.hand, { maxChars: MAX_HAND_CHARS }) || null;
+  if (verdict !== 'COMMENTS') {
+    return {
+      verdict, comments: [], intent, hand, reason: null,
+    };
+  }
   const comments = sanitizeComments(parsed.comments, { lineCount });
   if (comments.length === 0) {
-    return { verdict: 'NONE', comments: [], intent, reason: 'no comment in the result file survived validation' };
+    return {
+      verdict: 'NONE', comments: [], intent, hand, reason: 'no comment in the result file survived validation',
+    };
   }
-  return { verdict, comments, intent, reason: null };
+  return {
+    verdict, comments, intent, hand, reason: null,
+  };
 }
 
 /**

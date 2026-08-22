@@ -3422,6 +3422,17 @@ a.pr-title:hover {
   color: var(--text-muted);
 }
 
+.navigator-hand {
+  border: 1px solid color-mix(in oklab, var(--accent) 48%, var(--border));
+  border-left: 3px solid var(--accent);
+  border-radius: 4px;
+  background: color-mix(in oklab, var(--accent) 10%, var(--bg-surface));
+  padding: 8px 10px;
+  color: var(--text-head);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .navigator-findings {
   display: flex;
   flex-direction: column;

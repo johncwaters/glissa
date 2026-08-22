@@ -711,6 +711,18 @@ test('the working intent rides the prompt as context, and the result contract as
   assert.match(prompt, /at most 300 characters, naming what you believe/);
 });
 
+test('the prompt defines the optional tier 4 raised hand', () => {
+  const prompt = buildNavigatorPrompt({
+    uri: URI,
+    text: '# Title\n',
+    resultPath: '/tmp/r.json',
+  });
+  assert.match(prompt, /Tier 4 raised hand is only for a structural concern about the document as a whole/);
+  assert.match(prompt, /"hand":"one rare structural concern about the whole document"/);
+  assert.match(prompt, /The "hand" field is OPTIONAL/);
+  assert.match(prompt, /Omit it otherwise/);
+});
+
 test('no intent means no intent block at all, rather than an empty or "none" line', () => {
   for (const intent of ['', '   ', null, undefined, 42]) {
     const prompt = buildNavigatorPrompt({
