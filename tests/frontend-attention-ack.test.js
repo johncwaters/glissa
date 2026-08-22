@@ -48,3 +48,54 @@ test('decideAttention: a missing or corrupt stored acknowledgement still shows a
   assert.equal(decideAttention('a', 42).shown, true);
   assert.deepEqual(decideAttention(null, 'a'), { shown: false, acknowledged: '' });
 });
+
+function fakeSurface(stored = '') {
+  const state = { stored, signature: '', looking: false, writes: 0 };
+  return { state, deps: {
+    getAck: () => state.stored,
+    setAck: (value) => { state.stored = value; state.writes += 1; },
+    signature: () => state.signature,
+    isLooking: () => state.looking,
+  } };
+}
+
+test('createAttentionAck: an unseen fact shows the dot, and looking at the surface clears it', async () => {
+  const { createAttentionAck } = await importCore();
+  const surface = fakeSurface();
+  const attention = createAttentionAck(surface.deps);
+  surface.state.signature = 'a';
+  assert.equal(attention.refresh(), true);
+  attention.acknowledge();
+  assert.equal(surface.state.stored, 'a');
+  assert.equal(attention.refresh(), false);
+});
+
+test('createAttentionAck: a fact arriving while the surface is on screen acknowledges itself', async () => {
+  const { createAttentionAck } = await importCore();
+  const surface = fakeSurface();
+  const attention = createAttentionAck(surface.deps);
+  surface.state.looking = true;
+  surface.state.signature = 'a';
+  assert.equal(attention.refresh(), false);
+  assert.equal(surface.state.stored, 'a');
+});
+
+test('createAttentionAck: the condition clearing drops the stored acknowledgement, so a recurrence re-arms', async () => {
+  const { createAttentionAck } = await importCore();
+  const surface = fakeSurface('a');
+  const attention = createAttentionAck(surface.deps);
+  assert.equal(attention.refresh(), false);
+  assert.equal(surface.state.stored, '');
+  surface.state.signature = 'a';
+  assert.equal(attention.refresh(), true);
+});
+
+test('createAttentionAck: an unchanged signature never rewrites the stored acknowledgement', async () => {
+  const { createAttentionAck } = await importCore();
+  const surface = fakeSurface('a');
+  const attention = createAttentionAck(surface.deps);
+  surface.state.signature = 'a';
+  attention.acknowledge();
+  attention.refresh();
+  assert.equal(surface.state.writes, 0);
+});

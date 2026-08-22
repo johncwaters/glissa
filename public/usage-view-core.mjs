@@ -412,10 +412,6 @@ export function budgetRowMeterLabel(row) {
   return `${budgetScopeLabel(row?.scope)} spend against budget`;
 }
 
-export function hasBudgetAttention(report) {
-  return budgetRows(report).some((row) => budgetRowPct(row) >= BUDGET_ATTENTION_PCT);
-}
-
 // ── Period rollups ──
 // Week and month views are derived HERE, from the daily rows the report already ships, rather than being
 // three more arrays on the wire: the merged daily series is the single source, so a period total can never

@@ -4,6 +4,7 @@
 // its one attention count. No DOM, no IO.
 
 import { attentionSignature } from './attention-ack-core.mjs';
+import { numberOr, textOr } from './coerce-core.mjs';
 import { lanePlaceholder } from './lane-placeholder-core.mjs';
 import { normalizePhase, prNeedsAction, severityFor as prSeverityFor, sortPrsByAttention } from './pr-view-core.mjs';
 
@@ -235,10 +236,6 @@ export function healthAnomalyRows(snapshot) {
   return rows;
 }
 
-function textOr(value, fallback) {
-  return typeof value === 'string' && value.trim() ? value.trim() : fallback;
-}
-
 // First 7 chars of a commit id, for display. Empty string for anything that is not a hex sha, so a
 // caller can treat "no short sha" and "no sha" the same way.
 export function shortSha(sha) {
@@ -343,10 +340,6 @@ export function radarAttentionSignature(input) {
 function rankFor(change) {
   const rank = CHANGE_RANK[change];
   return rank == null ? UNKNOWN_RANK : rank;
-}
-
-function numberOr(value, fallback) {
-  return Number.isFinite(value) ? value : fallback;
 }
 
 // Returns a new array; the input is never mutated. Ties fall back to blast radius (users, then

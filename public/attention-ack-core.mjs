@@ -20,3 +20,24 @@ export function decideAttention(signature, acknowledged) {
   if (current === '') return { shown: false, acknowledged: '' };
   return { shown: current !== seen, acknowledged: seen };
 }
+
+// Shared ack rule for Radar/PRs/Usage: a fact seen while the surface is on screen acknowledges itself.
+export function createAttentionAck({ getAck, setAck, signature, isLooking }) {
+  let acknowledged = getAck();
+  const store = (next) => {
+    if (next === acknowledged) return;
+    acknowledged = next;
+    setAck(next);
+  };
+  return {
+    refresh() {
+      const current = signature();
+      const decision = decideAttention(current, isLooking() ? current : acknowledged);
+      store(decision.acknowledged);
+      return decision.shown;
+    },
+    acknowledge() {
+      store(signature());
+    },
+  };
+}

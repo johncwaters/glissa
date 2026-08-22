@@ -3,7 +3,7 @@
 // dashboard tab. The tab is always present; only its content varies, so an operator who has not
 // configured the PR lane still finds the surface and is told where to switch it on.
 
-import { decideAttention } from './attention-ack-core.mjs';
+import { createAttentionAck } from './attention-ack-core.mjs';
 import { buildStatChip, el, isPanelHidden, projectsOf } from './dom-helpers.js';
 import { phaseLabel, prAttentionSignature, prStatusPlaceholder, severityFor as severity, sortPrsByAttention, summarizePrs } from './pr-view-core.mjs';
 import { createPollAgoTicker } from './poll-ago.js';
@@ -12,8 +12,13 @@ import { getPrsAttentionAck, setPrsAttentionAck } from './ui-prefs.js';
 let _latest = null;
 let _root = null;
 let _activityCallback = null;
-let _ack = getPrsAttentionAck();
 const _pollTicker = createPollAgoTicker(() => _root);
+const _attention = createAttentionAck({
+  getAck: getPrsAttentionAck,
+  setAck: setPrsAttentionAck,
+  signature: () => prAttentionSignature(_latest),
+  isLooking: () => !isPanelHidden(_root),
+});
 
 function shortSha(sha) {
   if (typeof sha !== 'string') return '';
@@ -90,26 +95,13 @@ function buildProject(project) {
   return wrap;
 }
 
-function storeAck(signature) {
-  if (signature === _ack) return;
-  _ack = signature;
-  setPrsAttentionAck(signature);
-}
-
-// A broken PR that arrives while the panel is on screen is already being looked at, so it acknowledges
-// itself rather than lighting a dot over the surface showing it (the rule navigator-panel.js applies to
-// its own unseen latch).
 function refreshActivity() {
   if (!_activityCallback) return;
-  const signature = prAttentionSignature(_latest);
-  const decision = decideAttention(signature, isPanelHidden(_root) ? _ack : signature);
-  storeAck(decision.acknowledged);
-  _activityCallback(decision.shown);
+  _activityCallback(_attention.refresh());
 }
 
-// Called when the PRs surface becomes visible (desktop tab, phone screen): seeing it is what clears the dot.
 export function acknowledgePrAttention() {
-  storeAck(prAttentionSignature(_latest));
+  _attention.acknowledge();
   refreshActivity();
 }
 

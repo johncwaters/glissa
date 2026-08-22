@@ -6,7 +6,7 @@
 // them and rendering them in full. The tab is always present; only its content varies, so an operator
 // who has configured none of the lanes still finds the surface and is told where to switch them on.
 
-import { decideAttention } from './attention-ack-core.mjs';
+import { createAttentionAck } from './attention-ack-core.mjs';
 import { buildPanelSection, buildStatChip, el, isPanelHidden, projectsOf } from './dom-helpers.js';
 import { createPosthogReportDialog } from './dialogs.js';
 import { sendControlRequest } from './control-ws.js';
@@ -43,9 +43,14 @@ let _update = null;
 let _prs = null;
 let _root = null;
 let _activityCallback = null;
-let _ack = getRadarAttentionAck();
 let _navigateToPrs = null;
 const SVG_NS = 'http://www.w3.org/2000/svg';
+const _attention = createAttentionAck({
+  getAck: getRadarAttentionAck,
+  setAck: setRadarAttentionAck,
+  signature: () => radarAttentionSignature({ posthog: _latest, health: _health }),
+  isLooking: () => !isPanelHidden(_root),
+});
 
 // Rows are rebuilt wholesale on every broadcast and a row action's outcome line lives inside a row,
 // so a broadcast landing mid-request is held (see radar-hold-core.mjs for the whole state machine and
@@ -339,12 +344,6 @@ function buildQuietRow(entry, showHost) {
   return row;
 }
 
-function storeAck(signature) {
-  if (signature === _ack) return;
-  _ack = signature;
-  setRadarAttentionAck(signature);
-}
-
 const buildSection = (title, hint) => buildPanelSection('radar', title, hint);
 
 function buildErrorsSection(projects) {
@@ -542,20 +541,13 @@ function renderOrDefer() {
   _hold.request();
 }
 
-// An issue or anomaly that arrives while the board is on screen is already being looked at, so it
-// acknowledges itself rather than lighting a dot over the surface showing it (the rule
-// navigator-panel.js applies to its own unseen latch).
 function refreshActivity() {
   if (!_activityCallback) return;
-  const signature = radarAttentionSignature({ posthog: _latest, health: _health });
-  const decision = decideAttention(signature, isPanelHidden(_root) ? _ack : signature);
-  storeAck(decision.acknowledged);
-  _activityCallback(decision.shown);
+  _activityCallback(_attention.refresh());
 }
 
-// Called when the Radar surface becomes visible (desktop tab, phone screen): seeing it is what clears the dot.
 export function acknowledgeRadarAttention() {
-  storeAck(radarAttentionSignature({ posthog: _latest, health: _health }));
+  _attention.acknowledge();
   refreshActivity();
 }
 

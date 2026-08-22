@@ -303,13 +303,13 @@ test('budget row formatting: a position, not a bare percentage', async () => {
 });
 
 test('a budget at or past 90 percent raises the tab dot on its own', async () => {
-  const { hasBudgetAttention, hasUsageAttention, BUDGET_ATTENTION_PCT } = await importCore();
+  const { hasUsageAttention, BUDGET_ATTENTION_PCT } = await importCore();
   assert.equal(BUDGET_ATTENTION_PCT, 90);
   const at = (pct) => ({ tokenLimit: null, anomaly: null, budget: { rows: [{ scope: 'daily', spentUsd: 1, budgetUsd: 2, pct, tone: 'crit' }] } });
-  assert.equal(hasBudgetAttention(at(89.9)), false);
-  assert.equal(hasBudgetAttention(at(90)), true);
-  assert.equal(hasBudgetAttention(at(150)), true);
-  assert.equal(hasBudgetAttention({ budget: null }), false);
+  assert.equal(hasUsageAttention(at(89.9)), false);
+  assert.equal(hasUsageAttention(at(90)), true);
+  assert.equal(hasUsageAttention(at(150)), true);
+  assert.equal(hasUsageAttention({ budget: null }), false);
   // It composes with the other two arbiters rather than replacing either.
   assert.equal(hasUsageAttention(at(95)), true);
   assert.equal(hasUsageAttention(at(10)), false);

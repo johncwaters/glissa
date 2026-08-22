@@ -2,6 +2,7 @@
 // Attention ordering and severity mapping for the PR auto-review rows. No DOM, no IO.
 
 import { attentionSignature } from './attention-ack-core.mjs';
+import { numberOr, textOr } from './coerce-core.mjs';
 import { lanePlaceholder } from './lane-placeholder-core.mjs';
 
 // Rank is attention-first and deliberately coarser than severity: an errored PR and one whose review
@@ -127,14 +128,6 @@ function rankFor(pr) {
   if (pr?.pingedError) return PHASE_RANK.error;
   const rank = PHASE_RANK[normalizePhase(pr?.phase)];
   return rank == null ? UNKNOWN_RANK : rank;
-}
-
-function textOr(value, fallback) {
-  return typeof value === 'string' && value.trim() ? value.trim() : fallback;
-}
-
-function numberOr(value, fallback) {
-  return Number.isFinite(value) ? value : fallback;
 }
 
 // Returns a new array; the input is never mutated. Ties fall to the newest PR first, then to the order

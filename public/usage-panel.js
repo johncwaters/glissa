@@ -7,7 +7,7 @@
 // The tab is always present, so an operator who has switched usage tracking off still finds the surface
 // and is told where to switch it back on.
 
-import { decideAttention } from './attention-ack-core.mjs';
+import { createAttentionAck } from './attention-ack-core.mjs';
 import { buildPanelSection, el, isPanelHidden } from './dom-helpers.js';
 import { createPollAgoTicker, formatAgo } from './poll-ago.js';
 import { getUsageAttentionAck, setUsageAttentionAck } from './ui-prefs.js';
@@ -107,7 +107,6 @@ let _sessions = null;
 let _planLimits = null;
 let _root = null;
 let _activityCallback = null;
-let _ack = getUsageAttentionAck();
 let _sendRequest = null;
 let _requestSeq = 0;
 let _latestRequestId = null;
@@ -122,6 +121,12 @@ let _sessionsExpanded = false;
 let _focusAfterRender = null;
 let _periodView = DEFAULT_PERIOD_VIEW;
 const _expandedDays = new Set();
+const _attention = createAttentionAck({
+  getAck: getUsageAttentionAck,
+  setAck: setUsageAttentionAck,
+  signature: () => usageAttentionSignature(_report, _planLimits),
+  isLooking: () => !isPanelHidden(_root),
+});
 
 // Elements the shared tick repaints in place, so a report that has not changed is never rebuilt just to
 // advance a clock.
@@ -980,27 +985,13 @@ function buildBody() {
   _root.append(buildFootnote());
 }
 
-function storeAck(signature) {
-  if (signature === _ack) return;
-  _ack = signature;
-  setUsageAttentionAck(signature);
-}
-
-// A report that lands while the panel is on screen is already being looked at, so it acknowledges itself
-// rather than lighting a dot over the surface showing it (the rule navigator-panel.js applies to its own
-// unseen latch). It matters most here: opening Usage PULLS a fresh report, which arrives a moment after
-// the operator looked.
 function refreshActivity() {
   if (!_activityCallback) return;
-  const signature = usageAttentionSignature(_report, _planLimits);
-  const decision = decideAttention(signature, isPanelHidden(_root) ? _ack : signature);
-  storeAck(decision.acknowledged);
-  _activityCallback(decision.shown);
+  _activityCallback(_attention.refresh());
 }
 
-// Called when the Usage surface becomes visible (desktop tab, phone screen): seeing it is what clears the dot.
 export function acknowledgeUsageAttention() {
-  storeAck(usageAttentionSignature(_report, _planLimits));
+  _attention.acknowledge();
   refreshActivity();
 }
 
