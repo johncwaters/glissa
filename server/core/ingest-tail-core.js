@@ -31,30 +31,17 @@ function finiteOr(value, fallback) {
   return number;
 }
 
-/*
- * A NEGATIVE test only: an identity that moved proves the path holds a different file, but an identity
- * that held proves nothing. Linux hands a delete-and-recreate in the same directory the same inode back,
- * and stamps the new file's creation time off the kernel's coarse tick, so both halves survive a
- * recreation that lands inside one tick (measured on 6.1: 200 of 200 recreations kept both). The
- * positive proof that a path still holds the file a tail has been reading is headChanged below.
- */
+// A negative test only: Linux reuses the inode and the coarse-tick creation time of a file recreated in the same directory (measured on 6.1: 200 of 200 kept both), so only headChanged proves sameness.
 function fileIdentity(stat) {
   return `${Math.floor(finiteOr(stat?.ino, 0))}:${Math.floor(finiteOr(stat?.birthtimeMs, 0))}`;
 }
 
-// latin1 so the prefix comparison in headChanged is byte-exact: a multi-byte character straddling the
-// window edge would otherwise decode one way in a short read and another in a longer one.
+// latin1 so the prefix comparison in headChanged is byte-exact whatever the window cut through.
 function headSample(bytes) {
   if (!Buffer.isBuffer(bytes)) return null;
   return bytes.subarray(0, HEAD_SAMPLE_BYTES).toString('latin1');
 }
 
-/**
- * Whether the bytes this tail already consumed are still the bytes on disk. An append leaves the head
- * of a file alone, so a head that no longer starts with the recorded one is a file recreated or
- * rewritten at that path, and its earlier offset now points into content nobody has read. With nothing
- * recorded there is nothing to prove, and a tail that never samples its head keeps the old behavior.
- */
 function headChanged(state, head) {
   const recorded = state?.head;
   if (typeof recorded !== 'string' || recorded.length === 0) return false;
