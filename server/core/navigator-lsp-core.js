@@ -2,7 +2,6 @@
 
 const HEADER_END = '\r\n\r\n';
 const CONTENT_LENGTH_RE = /^content-length:\s*(\d+)\s*$/i;
-const CONTENT_LENGTH_HEADER = 'content-length:';
 
 function createParserState() {
   return {
@@ -44,8 +43,9 @@ function readNeededBodyBytes(state) {
   const headerText = state.buffer.subarray(0, headerEndAt).toString('ascii');
   state.buffer = state.buffer.subarray(headerEndAt + HEADER_END.length);
   const contentLength = contentLengthFromHeader(headerText);
+  // Nothing after a headerless block can be framed, and an editor's own LSP client does not send one.
   if (contentLength === null) {
-    resyncAfterBadHeader(state);
+    state.buffer = Buffer.alloc(0);
     return { parseError: true, reason: 'missing-content-length', raw: headerText };
   }
   state.neededBodyBytes = contentLength;
@@ -69,43 +69,6 @@ function parseBody(body) {
   } catch {
     return { parseError: true, raw };
   }
-}
-
-function resyncAfterBadHeader(state) {
-  const lowerBuffer = state.buffer.toString('latin1').toLowerCase();
-  let headerAt = lowerBuffer.indexOf(CONTENT_LENGTH_HEADER);
-  while (headerAt >= 0) {
-    if (isHeaderBoundary(state.buffer, headerAt)) {
-      state.buffer = state.buffer.subarray(headerAt);
-      return;
-    }
-    headerAt = lowerBuffer.indexOf(CONTENT_LENGTH_HEADER, headerAt + 1);
-  }
-
-  const suffixStart = headerSuffixStart(state.buffer, lowerBuffer);
-  if (suffixStart !== null) {
-    state.buffer = state.buffer.subarray(suffixStart);
-    return;
-  }
-
-  state.buffer = Buffer.alloc(0);
-}
-
-function isHeaderBoundary(buffer, headerAt) {
-  if (headerAt === 0) return true;
-  return buffer[headerAt - 1] === 0x0a;
-}
-
-function headerSuffixStart(buffer, lowerBuffer) {
-  const maxSuffixLength = Math.min(buffer.length, CONTENT_LENGTH_HEADER.length - 1);
-  for (let suffixLength = maxSuffixLength; suffixLength > 0; suffixLength--) {
-    const suffixStart = buffer.length - suffixLength;
-    if (!isHeaderBoundary(buffer, suffixStart)) continue;
-    const suffix = lowerBuffer.slice(lowerBuffer.length - suffixLength);
-    if (!CONTENT_LENGTH_HEADER.startsWith(suffix)) continue;
-    return suffixStart;
-  }
-  return null;
 }
 
 function serializeFrame(messageObject) {

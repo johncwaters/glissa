@@ -4,81 +4,6 @@
 
 export const NAVIGATOR_EMPTY_TEXT = 'No findings. Open a markdown file in a connected editor.';
 
-// The intent model (docs/plan-navigator.md, M5): one machine-wide statement of what the navigator
-// believes is being built. Empty is a first-class state, and the hint says how it stops being empty.
-export const NAVIGATOR_INTENT_EMPTY_TEXT = 'No intent yet. The navigator proposes one after its first pass; typing here sets it directly.';
-export const NAVIGATOR_INTENT_MAX_CHARS = 300;
-
-export function emptyIntent() {
-  return { text: '', source: null, locked: false, ts: 0 };
-}
-
-// One intent, however it arrived (its own push or the connect-time snapshot), normalized to the shape
-// the panel renders. Anything malformed reads as no intent rather than as a half-rendered one.
-export function intentOfMessage(msg) {
-  const raw = msg?.intent;
-  if (!raw || typeof raw !== 'object') return emptyIntent();
-  const text = typeof raw.text === 'string' ? raw.text : '';
-  const ts = Number(raw.ts);
-  return {
-    text,
-    source: raw.source === 'operator' || raw.source === 'model' ? raw.source : null,
-    locked: raw.locked === true,
-    ts: Number.isFinite(ts) && ts > 0 ? ts : 0,
-  };
-}
-
-// Who the statement belongs to, in the second person, because the correction field is right below it.
-export function intentSourceText(intent) {
-  if (!intent?.text) return '';
-  if (intent.source === 'operator') return 'set by you';
-  return 'proposed by navigator';
-}
-
-// Coarse on purpose: the statement is a living belief, so the question is whether it is minutes or
-// days old, never how many seconds.
-export function intentAgeText(ts, now = Date.now()) {
-  const stamp = Number(ts);
-  if (!Number.isFinite(stamp) || stamp <= 0) return '';
-  const minutes = Math.floor(Math.max(0, Number(now) - stamp) / 60000);
-  if (minutes < 1) return 'just now';
-  if (minutes === 1) return '1 minute ago';
-  if (minutes < 60) return `${minutes} minutes ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours === 1) return '1 hour ago';
-  if (hours < 24) return `${hours} hours ago`;
-  const days = Math.floor(hours / 24);
-  if (days === 1) return '1 day ago';
-  return `${days} days ago`;
-}
-
-export function intentMetaText(intent, now = Date.now()) {
-  const source = intentSourceText(intent);
-  if (!source) return '';
-  const age = intentAgeText(intent?.ts, now);
-  if (!age) return source;
-  return `${source}, ${age}`;
-}
-
-// Whether a push actually moved the statement. The timestamp alone is not a move: the panel repaints
-// on this, and repainting for an unchanged statement would fight the field the operator is typing in.
-export function hasIntentChanged(previous, next) {
-  const before = previous || emptyIntent();
-  const after = next || emptyIntent();
-  return before.text !== after.text || before.source !== after.source || before.locked !== after.locked;
-}
-
-/**
- * Whether the correction field should adopt the standing statement, so a correction is an edit rather
- * than a retype. Never while the field has focus, and never over a draft the operator already started:
- * an intent landing mid-edit must not eat what they typed.
- */
-export function shouldAdoptIntentText({ focused = false, currentValue = '', previousText = '', nextText = '' } = {}) {
-  if (focused) return false;
-  if (currentValue !== previousText) return false;
-  return currentValue !== nextText;
-}
-
 // LSP counts lines from zero; editors and carbon units count from one.
 export function findingLineLabel(finding) {
   const line = Number(finding?.range?.start?.line);
@@ -273,8 +198,7 @@ export function activitySourceLabel(source) {
   return SOURCE_LABELS[name] || name || 'source';
 }
 
-// Seconds matter here in a way they never do for the intent statement: a terminal event is interesting
-// precisely because it just happened.
+// Seconds matter here: a terminal event is interesting precisely because it just happened.
 export function activityAgeText(ts, now = Date.now()) {
   const stamp = Number(ts);
   if (!Number.isFinite(stamp) || stamp <= 0) return '';

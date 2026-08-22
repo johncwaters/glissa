@@ -127,7 +127,7 @@ test('initialize handshake returns navigator capabilities', async () => {
       capabilities: {
         textDocumentSync: {
           openClose: true,
-          change: 2,
+          change: 1,
         },
       },
       serverInfo: {

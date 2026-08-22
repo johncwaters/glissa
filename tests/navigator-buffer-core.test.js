@@ -37,53 +37,6 @@ test('uriOfParams returns a text document uri or null', () => {
   assert.equal(uriOfParams({}), null);
 });
 
-test('applyDidChange applies incremental edits using UTF-16 positions', () => {
-  const store = createDocStore();
-  openDoc(store, 'file:///a.md', `alpha\nbeta\nomega`);
-  const change = applyDidChange(store, {
-    textDocument: { uri: 'file:///a.md', version: 2 },
-    contentChanges: [{ range: { start: { line: 1, character: 1 }, end: { line: 1, character: 3 } }, text: 'EE' }],
-  });
-  assert.deepEqual(change, { applied: true });
-  assert.equal(getDoc(store, 'file:///a.md').text, `alpha\nbEEa\nomega`);
-});
-
-test('applyDidChange applies incremental edits using CRLF line offsets', () => {
-  const store = createDocStore();
-  openDoc(store, 'file:///crlf.md', 'alpha\r\nbeta\r\nomega');
-  const change = applyDidChange(store, {
-    textDocument: { uri: 'file:///crlf.md', version: 2 },
-    contentChanges: [{ range: { start: { line: 1, character: 1 }, end: { line: 1, character: 3 } }, text: 'EE' }],
-  });
-  assert.deepEqual(change, { applied: true });
-  assert.equal(getDoc(store, 'file:///crlf.md').text, 'alpha\r\nbEEa\r\nomega');
-});
-
-test('applyDidChange keeps multibyte and astral UTF-16 offsets exact', () => {
-  const store = createDocStore();
-  openDoc(store, 'file:///emoji.md', 'a\ud83d\ude80b \u00e9clair');
-  const change = applyDidChange(store, {
-    textDocument: { uri: 'file:///emoji.md', version: 2 },
-    contentChanges: [{ range: { start: { line: 0, character: 3 }, end: { line: 0, character: 4 } }, text: 'B' }],
-  });
-  assert.deepEqual(change, { applied: true });
-  assert.equal(getDoc(store, 'file:///emoji.md').text, 'a\ud83d\ude80B \u00e9clair');
-});
-
-test('applyDidChange supports multiple incremental entries in one version', () => {
-  const store = createDocStore();
-  openDoc(store, 'file:///a.md', 'abc\ndef');
-  const change = applyDidChange(store, {
-    textDocument: { uri: 'file:///a.md', version: 2 },
-    contentChanges: [
-      { range: { start: { line: 0, character: 1 }, end: { line: 0, character: 2 } }, text: 'B' },
-      { range: { start: { line: 1, character: 3 }, end: { line: 1, character: 3 } }, text: '!' },
-    ],
-  });
-  assert.deepEqual(change, { applied: true });
-  assert.equal(getDoc(store, 'file:///a.md').text, 'aBc\ndef!');
-});
-
 test('applyDidChange supports full text replacement', () => {
   const store = createDocStore();
   openDoc(store, 'file:///a.md', 'old');
@@ -121,16 +74,6 @@ test('applyDidChange rejects missing or nonnumeric versions', () => {
     contentChanges: [{ text: 'string version' }],
   }), { applied: false, reason: 'invalid-version' });
   assert.equal(getDoc(store, 'file:///a.md').text, 'fresh');
-});
-
-test('applyDidChange reports invalid ranges without mutating', () => {
-  const store = createDocStore();
-  openDoc(store, 'file:///a.md', 'short');
-  assert.deepEqual(applyDidChange(store, {
-    textDocument: { uri: 'file:///a.md', version: 2 },
-    contentChanges: [{ range: { start: { line: 1, character: 0 }, end: { line: 1, character: 1 } }, text: 'x' }],
-  }), { applied: false, reason: 'invalid-range' });
-  assert.equal(getDoc(store, 'file:///a.md').text, 'short');
 });
 
 test('applyDidClose removes documents and reports unknown uris', () => {

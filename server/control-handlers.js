@@ -278,9 +278,6 @@ function registerControlHandlers(controlWss, deps) {
     // Replay of transient broadcasts missed across a reconnect gap (optional - undefined in
     // older callers/tests; connect then behaves as before, snapshot-only).
     controlReplayLog = null,
-    // Navigator lane (optional - null whenever config.navigator is absent or off, which is what makes
-    // the intent correction refuse instead of crashing).
-    navigatorLane = null,
   } = deps;
 
   function buildSettingsPayload() {
@@ -728,25 +725,6 @@ function registerControlHandlers(controlWss, deps) {
     ws.send(JSON.stringify(report));
   }
 
-  /*
-   * The intent model's correction path (docs/plan-navigator.md, M5): the Navigator tab's one writable
-   * field. EMPTY text is meaningful (it clears the statement and hands control back to the model), so
-   * an absent `text` is a clear rather than an error. What the correction then DOES to the standing
-   * statement is decided by the merge in server/core/navigator-intent-core.js, never here, and the
-   * lane broadcasts the result to every client itself.
-   */
-  function handleNavigatorSetIntent(msg, ws) {
-    if (!navigatorLane) {
-      sendError(ws, 'The navigator lane is not running');
-      return;
-    }
-    if (msg.text != null && typeof msg.text !== 'string') {
-      sendError(ws, 'navigator intent text must be a string');
-      return;
-    }
-    navigatorLane.setOperatorIntent(typeof msg.text === 'string' ? msg.text : '');
-  }
-
   function handleShutdown() {
     console.log('[control] Shutdown requested via UI');
     broadcastControl({ type: 'shutting-down' });
@@ -780,7 +758,6 @@ function registerControlHandlers(controlWss, deps) {
     'posthog-issue-action': handlePosthogIssueAction,
     'posthog-archive-investigation': handlePosthogArchiveInvestigation,
     'request-usage-report': handleRequestUsageReport,
-    'navigator-set-intent': handleNavigatorSetIntent,
     'kill':             (msg) => { const s = findSession(msg); if (s) s.killSession(); },
     'start-session':    (msg) => {
       const s = findSession(msg);
