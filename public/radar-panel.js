@@ -6,7 +6,7 @@
 // them and rendering them in full. The tab is always present; only its content varies, so an operator
 // who has configured none of the lanes still finds the surface and is told where to switch them on.
 
-import { el } from './dom-helpers.js';
+import { buildPanelSection, buildStatChip, el, projectsOf } from './dom-helpers.js';
 import { createPosthogReportDialog } from './dialogs.js';
 import { sendControlRequest } from './control-ws.js';
 import { createPollAgoTicker, formatAgo, formatDuration } from './poll-ago.js';
@@ -80,10 +80,6 @@ function occurrenceHistoryValues(history) {
       return Number(entry?.occurrences);
     })
     .filter((value) => Number.isFinite(value));
-}
-
-function projectsOf(snapshot) {
-  return Array.isArray(snapshot?.projects) ? snapshot.projects : [];
 }
 
 function issueReportId(issue) {
@@ -280,12 +276,7 @@ function buildIssueRow(issue, projectId) {
   return row;
 }
 
-function summaryStat(label, value, tone) {
-  const wrap = el('span', 'radar-stat');
-  if (tone) wrap.dataset.tone = tone;
-  wrap.append(el('span', 'radar-stat-value', value), el('span', 'radar-stat-label', label));
-  return wrap;
-}
+const summaryStat = (label, value, tone) => buildStatChip('radar', label, value, tone);
 
 // The only per-project time still rendered, and only for the projects that earned a card by being
 // stale or errored: the section's one global clock covers the healthy case.
@@ -349,14 +340,7 @@ function attentionCount() {
   return radarAttentionCount({ posthog: _latest, health: _health, prs: _prs });
 }
 
-function buildSection(title, hint) {
-  const section = el('section', 'radar-section');
-  const head = el('div', 'radar-section-head');
-  head.append(el('h2', 'radar-section-title', title));
-  if (hint) head.append(el('span', 'radar-section-hint', hint));
-  section.append(head);
-  return section;
-}
+const buildSection = (title, hint) => buildPanelSection('radar', title, hint);
 
 function buildErrorsSection(projects) {
   const section = buildSection('Errors');

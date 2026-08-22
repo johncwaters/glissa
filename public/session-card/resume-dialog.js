@@ -5,7 +5,7 @@
 //
 // Standalone leaf module (imports only control-ws + dom-helpers + the toast leaf, plus the shared
 // modal scaffold) so it adds no edge to the card-dom.js <-> dialogs.js boundary. Shares its overlay
-// and focus-trap mechanics with card-dom.js showConfirmDialog via modal.js rather than duplicating them.
+// and focus-trap mechanics with the shared confirm prompt in modal.js rather than duplicating them.
 
 import { sendControlMsg, sendControlRequest } from '../control-ws.js';
 import { el, escapeHtml } from '../dom-helpers.js';

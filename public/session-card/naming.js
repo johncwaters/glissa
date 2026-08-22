@@ -4,7 +4,7 @@
 //
 // Must NOT import dialogs.js: dialogs.js imports countSessionsByName /
 // suggestSessionName from here, so keeping this edge one-way avoids the cycle the
-// inline showConfirmDialog in card-dom.js also exists to avoid.
+// confirm prompt's home in session-card/modal.js also exists to avoid.
 
 import { sessionUIs } from './card-registry.js';
 import { countAutoNames, nextSuggestedName } from './naming-core.mjs';

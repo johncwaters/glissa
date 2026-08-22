@@ -21,7 +21,7 @@ Session card modules, decomposed from the old monolithic session-card.js. Each s
 | `naming.js` / `naming-core.mjs` | Session name suggestion; pure core: `nextSuggestedName`, `countAutoNames`, `isAutoNameOf` |
 | `webgl-pool.js` / `webgl-core.mjs` | WebGL context pool with LRU cap; pure core: `pickEvictionVictims` |
 | `toast.js` | `showErrorToast` - leaf, no local deps |
-| `modal.js` | Shared modal overlay scaffold (overlay, Escape-to-close, backdrop click, opener refocus); used by `card-dom.js` and `dialogs.js` |
+| `modal.js` | Shared modal overlay scaffold (overlay, Escape-to-close, backdrop click, opener refocus) plus `openConfirmDialog`, THE confirm prompt every destructive action uses. It lives here, not in `dialogs.js`, because `card-dom.js` may not import that file; before the fold both sides carried their own copy of the same builder |
 
 ## For AI Agents
 

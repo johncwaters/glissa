@@ -240,9 +240,9 @@ public/
   usage-panel.js     # Usage tab DOM shell fed by usage-sessions pushes and request-usage-report replies
   usage-view-core.mjs  # Pure Usage tab formatting, sorting, caveat text, warning text, and per-card chip text
   theme.js         # Theme definitions applied as CSS custom properties
-  ui-prefs.js / local-store.js  # localStorage persistence for UI state, quota-safe wrappers
+  ui-prefs.js / local-store.js  # THE localStorage home for UI state: one PREFS table of defaults + normalizers, one-line accessors, quota-safe wrappers
   shortcuts.mjs    # Pure display catalog of keyboard shortcuts for the Settings dialog
-  dom-helpers.js   # el() / escapeHtml() DOM utilities
+  dom-helpers.js   # el() / escapeHtml() DOM utilities, adopt/release, and the panel chrome the four tabs share (buildPanelSection, buildStatChip, projectsOf, isPanelHidden)
   components/      # Static HTML dialog fragments, imported by dialogs.js via Vite ?raw
   session-card/    # Session card modules (decomposed from session-card.js)
     card-registry.js   # Shared state owner: sessionUIs Map + 2 DOM singletons
@@ -251,7 +251,8 @@ public/
     naming-core.mjs    # Pure: nextSuggestedName, countAutoNames, isAutoNameOf
     webgl-pool.js      # WebGL context pool with LRU cap (wraps webgl-core.mjs)
     webgl-core.mjs     # Pure: pickEvictionVictims
-    card-dom.js        # Card builder, badge, inline rename, confirm dialog, debug overlay
+    card-dom.js        # Card builder, badge, inline rename, debug overlay
+    modal.js           # Shared overlay scaffold + openConfirmDialog, THE confirm prompt (here, not dialogs.js, so card-dom.js can reach it without a cycle)
     terminal.js        # xterm.js setup, data WebSocket, OSC-52 clipboard, phone soft-keyboard takeover
     ime-core.mjs       # Pure: bytesForSoftKeyboardEdit (shared-prefix textarea diff), isTypedInputType, isImeProcessingKeydown
     touch-scroll.js    # Phone touch-drag scrollback: term.scrollLines in the normal buffer, synthetic wheel notches on term.element in the alternate one (xterm 6.0.0 ships no touch path)

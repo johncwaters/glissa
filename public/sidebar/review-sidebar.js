@@ -21,8 +21,9 @@
 import { MERGEABLE_LIVE_STATES, STATES } from '/shared/states.mjs';
 import { sendControlMsg } from '../control-ws.js';
 import { adoptElement, el, releaseElement } from '../dom-helpers.js';
-import { showConfirmDialog } from '../session-card/card-dom.js';
 import { sessionUIs } from '../session-card/card-registry.js';
+import { openConfirmDialog } from '../session-card/modal.js';
+import { getSidebarWidth, setSidebarWidth } from '../ui-prefs.js';
 import { parseUnifiedDiff, shouldDropDiffCache, summarizeFiles } from './diff-core.mjs';
 import { getSelectedId, onSelectionChange, setSelectedId } from './selection.js';
 
@@ -82,7 +83,7 @@ export function mountReviewSidebar({ panel }) {
   controlsEl = el('div', 'review-controls');
   bodyEl = el('div', 'review-sidebar-body');
 
-  // Resize handle: drag left edge to widen, right to narrow. Width persisted to localStorage. Pointer
+  // Resize handle: drag left edge to widen, right to narrow. Width persisted via ui-prefs. Pointer
   // events (not mouse) with capture, so the drag survives the cursor leaving the 6px strip and a pen
   // or trackpad drives it identically; CSS hides the handle under [data-layout="phone"], where the
   // panel is a full-width screen and there is nothing to resize against.
@@ -92,11 +93,16 @@ export function mountReviewSidebar({ panel }) {
 
   let dragStartX = 0, dragStartWidth = 0;
 
+  const applyWidth = (px) => {
+    const w = Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, px));
+    if (!Number.isFinite(w)) return null;
+    panelEl.style.setProperty('--sidebar-width', `${w}px`);
+    return w;
+  };
+
   const onDrag = (e) => {
     if (!handle.hasPointerCapture(e.pointerId)) return;
-    const delta = dragStartX - e.clientX; // drag left = wider (sidebar is right-docked)
-    const w = Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, dragStartWidth + delta));
-    panelEl.style.setProperty('--sidebar-width', `${w}px`);
+    applyWidth(dragStartWidth + (dragStartX - e.clientX)); // drag left = wider (sidebar is right-docked)
   };
 
   // Teardown runs from pointerup AND from lostpointercapture, which is the only signal for a capture
@@ -112,7 +118,7 @@ export function mountReviewSidebar({ panel }) {
     document.documentElement.style.cursor = '';
     document.documentElement.style.userSelect = '';
     const w = panelEl.style.getPropertyValue('--sidebar-width');
-    if (w) { try { localStorage.setItem('glissa:sidebar-width', parseInt(w, 10)); } catch (_) {} }
+    if (w) setSidebarWidth(parseInt(w, 10));
   };
 
   handle.addEventListener('pointerdown', (e) => {
@@ -130,13 +136,8 @@ export function mountReviewSidebar({ panel }) {
   handle.addEventListener('pointercancel', stopDrag);
   handle.addEventListener('lostpointercapture', stopDrag);
 
-  try {
-    const stored = localStorage.getItem('glissa:sidebar-width');
-    if (stored) {
-      const w = Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, parseInt(stored, 10)));
-      if (Number.isFinite(w)) panelEl.style.setProperty('--sidebar-width', `${w}px`);
-    }
-  } catch (_) {}
+  const storedWidth = getSidebarWidth();
+  if (storedWidth !== null) applyWidth(storedWidth);
 
   onSelectionChange((id) => {
     // Per-session: don't carry one session's open/expanded files into the next (start minimized).
@@ -346,7 +347,7 @@ function sendMergeContinue(id, state) {
     sendControlMsg({ type: 'merge-continue-session', id });
     return;
   }
-  showConfirmDialog({
+  openConfirmDialog({
     title: 'Merge while working',
     message: 'This session still looks like it is working. Merging rebases its worktree under it. Merge anyway?',
     confirmLabel: 'Merge anyway',
@@ -754,7 +755,7 @@ function renderActions(id, { status, reviewable, mergeEnabled, live, state, sync
     discard.addEventListener('click', () => {
       const ui = sessionUIs.get(id);
       const nm = sessionName(ui, id);
-      showConfirmDialog({
+      openConfirmDialog({
         title: 'Discard worktree',
         message: `Throw away the worktree changes for "${nm}"? This cannot be undone.`,
         confirmLabel: 'Discard',

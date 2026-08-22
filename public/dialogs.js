@@ -621,7 +621,6 @@ export function createSettingsDialog(initialTab) {
       // Absent means on, matching how the lane reads the key.
       usageEnabledCheckbox.checked = usage.enabled !== false;
       usageFetchPricingCheckbox.checked = usage.fetchPricing !== false;
-      // Only an explicit false opts a vendor out, matching resolveUsageConfig.
       usageCodexCheckbox.checked = usage.vendors?.codex !== false;
       usageGrokCheckbox.checked = usage.vendors?.grok !== false;
       usageBudgetDailyInput.value = usage.budget?.dailyUsd ?? '';
@@ -702,47 +701,6 @@ function shortcutSep(ch) {
   s.className = 'shortcut-sep';
   s.textContent = ch;
   return s;
-}
-
-// ── Confirm dialog ───────────────────────────────────────────
-
-export function createConfirmDialog({ title, message, confirmLabel = 'Confirm', danger = false, onConfirm }) {
-  const { dialog, close } = createModalOverlay();
-
-  const titleId = `confirm-dialog-title-${Math.random().toString(36).slice(2)}`;
-
-  const titleEl = document.createElement('h3');
-  titleEl.id = titleId;
-  titleEl.className = 'dialog-title';
-  titleEl.textContent = title;
-
-  const msgEl = document.createElement('p');
-  msgEl.className = 'dialog-message';
-  msgEl.textContent = message;
-
-  const actions = document.createElement('div');
-  actions.className = 'dialog-actions';
-
-  const btnCancel = document.createElement('button');
-  btnCancel.className = 'btn-dialog btn-dialog-cancel';
-  btnCancel.textContent = 'Cancel';
-
-  const btnConfirm = document.createElement('button');
-  btnConfirm.className = danger ? 'btn-dialog btn-dialog-confirm btn-dialog-danger' : 'btn-dialog btn-dialog-confirm';
-  btnConfirm.textContent = confirmLabel;
-
-  actions.append(btnCancel, btnConfirm);
-  dialog.append(titleEl, msgEl, actions);
-
-  applyDialogAria(dialog, titleId);
-
-  btnCancel.addEventListener('click', close);
-  btnConfirm.addEventListener('click', () => {
-    close();
-    onConfirm?.();
-  });
-
-  requestAnimationFrame(() => btnCancel.focus());
 }
 
 export function createPosthogReportDialog({ issueId, issueTitle, format, content, message, error }) {

@@ -3,7 +3,7 @@
 // dashboard tab. The tab is always present; only its content varies, so an operator who has not
 // configured the PR lane still finds the surface and is told where to switch it on.
 
-import { el } from './dom-helpers.js';
+import { buildStatChip, el, projectsOf } from './dom-helpers.js';
 import { phaseLabel, prStatusPlaceholder, severityFor as severity, sortPrsByAttention, summarizePrs } from './pr-view-core.mjs';
 import { createPollAgoTicker } from './poll-ago.js';
 
@@ -15,10 +15,6 @@ const _pollTicker = createPollAgoTicker(() => _root);
 function shortSha(sha) {
   if (typeof sha !== 'string') return '';
   return sha.slice(0, 7);
-}
-
-function projectsOf(snapshot) {
-  return Array.isArray(snapshot?.projects) ? snapshot.projects : [];
 }
 
 function buildPrRow(pr) {
@@ -59,12 +55,7 @@ function buildPrRow(pr) {
   return row;
 }
 
-function summaryStat(label, value, tone) {
-  const wrap = el('span', 'pr-stat');
-  if (tone) wrap.dataset.tone = tone;
-  wrap.append(el('span', 'pr-stat-value', value), el('span', 'pr-stat-label', label));
-  return wrap;
-}
+const summaryStat = (label, value, tone) => buildStatChip('pr', label, value, tone);
 
 function buildProject(project) {
   const wrap = el('div', 'pr-project');
