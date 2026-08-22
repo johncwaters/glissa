@@ -1,6 +1,6 @@
 # Distributing Glissa
 
-Glissa is not published to the npm registry. `package.json` is `"private": true`, and the GitHub repo (`github.com/johncwaters/glissa`) is the only source of truth. The registry versions published before the switch (up to 0.20.0) are deprecated on npmjs.com, so a bare `npm install -g glissa` warns and installs a stale build; the `github:` spec below is the only supported install. The npm-registry runbook that used to live here is archived at `archive/publishing-npm.md`.
+Glissa is not an npm package. Nothing is published to any registry (`package.json` is `"private": true`), and the GitHub repo (`github.com/johncwaters/glissa`) is the only source of truth. npm appears below purely as the install tool: a `github:` spec install clones this repo and packs it locally, never touching a registry.
 
 ## Server machines
 
