@@ -261,9 +261,7 @@ function createShellHistoryIngest({
 
   function installWatch(dir) {
     try {
-      // Canonical path required: fs.watch on an 8.3 short path aborts the process from native code,
-      // past this catch (see canonicalizePath in shared/paths.js). Only the WATCHED spelling is
-      // canonicalized; `dir` stays the spelling reachableDirs and every tracked file is keyed by.
+      // Watched spelling only: an 8.3 short path aborts node in native code (shared/paths.js); `dir` keeps keying reachableDirs and tails.
       const watcher = watchFn(canonicalizePath(dir), { persistent: false }, (eventType, filename) => {
         onWatchEvent(eventType, filename);
       });
