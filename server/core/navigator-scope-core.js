@@ -8,6 +8,7 @@ function collapseDotSegments(value) {
       out.pop();
       continue;
     }
+    if (part === '..' && out.length === 1 && out[0] === '') continue;
     out.push(part);
   }
   return out.join('/');
@@ -47,10 +48,6 @@ function pathOfFileUri(uri) {
   return normalizeShapePath(pathname);
 }
 
-function normalizeProjectPath(projectPath) {
-  return normalizeShapePath(projectPath);
-}
-
 function isWithin(scopePath, uriPath) {
   if (!scopePath || !uriPath) return false;
   if (uriPath === scopePath) return true;
@@ -67,6 +64,6 @@ function isUriInProjects(uri, normalizedProjectPaths) {
 
 module.exports = {
   pathOfFileUri,
-  normalizeProjectPath,
+  normalizeShapePath,
   isUriInProjects,
 };

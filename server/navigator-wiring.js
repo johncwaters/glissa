@@ -157,7 +157,6 @@ function createNavigatorWiring({
   let intentState = createIntentState();
   const dispatchSettings = resolveDispatchConfig(dispatchConfig);
   const dispatchEnabled = dispatchSettings.enabled === true && typeof dispatch === 'function';
-  const activeScopePaths = Array.isArray(scopePaths) && scopePaths.length > 0 ? scopePaths : null;
   const dispatchState = createDispatchState();
   /*
    * The last gate LOGGED per uri. Activity arms a window as often as the machine moves, so an
@@ -183,8 +182,7 @@ function createNavigatorWiring({
   }
 
   function isUriInScope(uri) {
-    if (!activeScopePaths) return true;
-    return isUriInProjects(uri, activeScopePaths);
+    return isUriInProjects(uri, scopePaths);
   }
 
   function broadcastFindings(uri, diagnostics) {

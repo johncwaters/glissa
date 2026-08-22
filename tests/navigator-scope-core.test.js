@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 
 const {
   pathOfFileUri,
-  normalizeProjectPath,
+  normalizeShapePath,
   isUriInProjects,
 } = require('../server/core/navigator-scope-core');
 
@@ -35,9 +35,9 @@ test('pathOfFileUri rejects non-file, empty and malformed uris', () => {
 });
 
 test('normalizeProjectPath uses the same shape folding as uri paths', () => {
-  assert.equal(normalizeProjectPath('C:\\Repo\\Sub\\'), 'c:/repo/sub');
-  assert.equal(normalizeProjectPath('\\\\Server\\Share\\Repo\\'), '//server/share/repo');
-  assert.equal(normalizeProjectPath('/home/me/Repo'), '/home/me/Repo');
+  assert.equal(normalizeShapePath('C:\\Repo\\Sub\\'), 'c:/repo/sub');
+  assert.equal(normalizeShapePath('\\\\Server\\Share\\Repo\\'), '//server/share/repo');
+  assert.equal(normalizeShapePath('/home/me/Repo'), '/home/me/Repo');
 });
 
 test('isUriInProjects accepts exact and nested paths only on a segment boundary', () => {
@@ -49,8 +49,8 @@ test('isUriInProjects accepts exact and nested paths only on a segment boundary'
 });
 
 test('isUriInProjects folds slashes and case for Windows and UNC shapes', () => {
-  assert.equal(isUriInProjects('file:///C:/Repo/Sub/Doc.md', [normalizeProjectPath('c:\\repo')]), true);
-  assert.equal(isUriInProjects('file://SERVER/Share/Repo/Doc.md', [normalizeProjectPath('\\\\server\\share\\repo')]), true);
+  assert.equal(isUriInProjects('file:///C:/Repo/Sub/Doc.md', [normalizeShapePath('c:\\repo')]), true);
+  assert.equal(isUriInProjects('file://SERVER/Share/Repo/Doc.md', [normalizeShapePath('\\\\server\\share\\repo')]), true);
 });
 
 test('isUriInProjects treats null and empty lists as unscoped', () => {

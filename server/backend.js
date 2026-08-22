@@ -56,7 +56,7 @@ const { createPosthogWiring } = require('./posthog-wiring');
 const { createNavigatorWiring } = require('./navigator-wiring');
 const { createNavigatorDispatcher, createNavigatorSpawn } = require('./navigator-dispatch');
 const { resolveNavigatorConfig } = require('./core/navigator-dispatch-core');
-const { normalizeProjectPath } = require('./core/navigator-scope-core');
+const { normalizeShapePath } = require('./core/navigator-scope-core');
 const { createIngestLane } = require('./ingest-wiring');
 const { resolveIngestConfig } = require('./core/ingest-core');
 const { createUsageWiring, resolveUsageConfig } = require('./usage-wiring');
@@ -148,8 +148,12 @@ function resolveNavigatorScopePaths(projectIds, projects, warn = console.warn) {
       warn(`[navigator] configured project id not found: ${projectId}`);
       continue;
     }
-    const normalizedPath = normalizeProjectPath(project.path);
-    if (!normalizedPath || scopePaths.includes(normalizedPath)) continue;
+    const normalizedPath = normalizeShapePath(project.path);
+    if (!normalizedPath) {
+      warn(`[navigator] configured project has no usable path: ${projectId}`);
+      continue;
+    }
+    if (scopePaths.includes(normalizedPath)) continue;
     scopePaths.push(normalizedPath);
   }
   if (scopePaths.length === 0) return null;
@@ -1002,7 +1006,7 @@ function createBackend(httpServer, options = {}) {
    */
   const navigatorDispatchConfig = navigatorConfig.dispatch;
   const navigatorScopePaths = navigatorEnabled
-    ? resolveNavigatorScopePaths(navigatorConfig.projects, config.projects, (message) => console.warn(message))
+    ? resolveNavigatorScopePaths(navigatorConfig.projects, config.projects)
     : null;
   const navigatorSessions = new Map();
   const navigatorLane = navigatorEnabled
