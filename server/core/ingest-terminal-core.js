@@ -26,7 +26,6 @@ const DEFAULT_FLUSH_MS = SOURCE_DEFAULTS.terminal.flushMs;
 // Taken from the ring's own bound so the two cannot drift: a summary built longer than the ring keeps
 // would be sliced from the front at publish time, which is exactly where the truncation note lives.
 const MAX_SUMMARY_CHARS = RING_SUMMARY_CHARS;
-const MAX_TEXT_CHARS = 1000;
 const TRUNCATION_NOTE = 'output truncated';
 
 /*
@@ -252,7 +251,6 @@ function createTerminalAccumulator({
   accumulatorBytes = DEFAULT_ACCUMULATOR_BYTES,
   windowBytes = DEFAULT_WINDOW_BYTES,
   maxSummaryChars = MAX_SUMMARY_CHARS,
-  maxTextChars = MAX_TEXT_CHARS,
 } = {}) {
   return {
     sessionId,
@@ -260,11 +258,9 @@ function createTerminalAccumulator({
     maxAccumulatorBytes: positiveInt(accumulatorBytes, DEFAULT_ACCUMULATOR_BYTES),
     maxWindowBytes: positiveInt(windowBytes, DEFAULT_WINDOW_BYTES),
     maxSummaryChars: positiveInt(maxSummaryChars, MAX_SUMMARY_CHARS),
-    maxTextChars: positiveInt(maxTextChars, MAX_TEXT_CHARS),
     pending: '',
     pendingBytes: 0,
     windowBytesSeen: 0,
-    droppedBytes: 0,
     truncated: false,
     // A repainting TUI settles on the same screen over and over; publishing it once is enough.
     lastPublishedText: '',
@@ -302,7 +298,6 @@ function appendChunk(state, chunk) {
   const bytes = Buffer.byteLength(text, 'utf8');
   if (state.windowBytesSeen >= state.maxWindowBytes) {
     state.windowBytesSeen += bytes;
-    state.droppedBytes += bytes;
     state.truncated = true;
     return state;
   }
@@ -316,7 +311,6 @@ function appendChunk(state, chunk) {
   );
   state.pending = dropPartialFirstLine(kept.toString('utf8'));
   state.pendingBytes = Buffer.byteLength(state.pending, 'utf8');
-  state.droppedBytes += heldBytes - state.pendingBytes;
   state.truncated = true;
   return state;
 }
@@ -326,7 +320,6 @@ function rebaseline(state) {
   state.pending = '';
   state.pendingBytes = 0;
   state.windowBytesSeen = 0;
-  state.droppedBytes = 0;
   state.truncated = false;
   // The gate suppresses a screen REPAINTING itself; a rewritten screen is a new stream, and the dead
   // one's last line must not mute the identical first line the restarted process writes.
@@ -350,7 +343,6 @@ function flushAccumulator(state, { now = Date.now() } = {}) {
   state.pendingBytes = Buffer.byteLength(carry, 'utf8');
   state.windowBytesSeen = 0;
   const truncated = state.truncated;
-  const droppedBytes = state.droppedBytes;
   /*
    * SCRUB BEFORE ANY SLICING. summarize() and the detail tail below both cut from the FRONT, and a cut
    * through `api_key=secret` strips the very name the scrub matches on, so scrubbing afterwards lets
@@ -368,18 +360,12 @@ function flushAccumulator(state, { now = Date.now() } = {}) {
   if (!summary) return null;
   state.lastPublishedText = text;
   state.truncated = false;
-  state.droppedBytes = 0;
   return {
     source: 'terminal',
     kind: 'output',
     ts: now,
     scope: { root: state.root, sessionId: state.sessionId },
     summary: `${summary}${note}`,
-    detail: {
-      text: text.length > state.maxTextChars ? text.slice(text.length - state.maxTextChars) : text,
-      truncated,
-      droppedBytes,
-    },
   };
 }
 

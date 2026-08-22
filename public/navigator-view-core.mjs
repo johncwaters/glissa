@@ -265,12 +265,7 @@ export const INGEST_EMPTY_TEXT = 'No activity yet. The ingest lane reports what 
 export const MAX_RENDERED_ACTIVITY = 100;
 
 const SOURCE_LABELS = {
-  terminal: 'terminal',
-  agentLogs: 'agent',
-  git: 'git',
-  fs: 'files',
-  shellHistory: 'shell',
-  editor: 'editor',
+  terminal: 'terminal', agentLogs: 'agent', git: 'git', fs: 'files',
 };
 
 export function activitySourceLabel(source) {

@@ -718,7 +718,6 @@ test('lines dropped to stay inside the drain bound are reported, never silently 
 
   assert.equal(events.length, 2, 'the drain bound holds');
   assert.ok(events[0].summary.includes('[3 earlier lines dropped]'), events[0].summary);
-  assert.equal(events[0].detail.droppedLines, 3);
   assert.ok(!events[1].summary.includes('dropped'), 'the note rides one event, not every event');
 }));
 

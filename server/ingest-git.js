@@ -496,9 +496,4 @@ function createGitIngest({
   };
 }
 
-module.exports = {
-  DEFAULT_GIT_TIMEOUT_MS,
-  DEFAULT_MAX_REPOS,
-  MAX_GIT_BUFFER_BYTES,
-  createGitIngest,
-};
+module.exports = { createGitIngest };
