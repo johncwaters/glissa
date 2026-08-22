@@ -104,6 +104,8 @@ const IGNORED_FILE_NAMES = Object.freeze(['.DS_Store', 'Thumbs.db', 'desktop.ini
  */
 const DAEMON_CONFIG_SIBLINGS = Object.freeze([
   'usage-lanes.json',
+  'usage-warehouse.json',
+  'usage-budget-state.json',
   'pr-review-state.json',
   'pairings.json',
   'pairings-seen.json',

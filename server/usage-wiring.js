@@ -15,8 +15,14 @@
 'use strict';
 
 const path = require('node:path');
+const { promisify } = require('node:util');
 const { createUsageScanner } = require('./usage-scanner');
 const { loadPricing } = require('./usage-pricing');
+const { execFile } = require('./child-process-safe');
+const { evaluateBudget, normalizeBudgetConfig } = require('./core/usage-budget-core');
+const { computeCacheSavings, normalizeRtkGain } = require('./core/usage-savings-core');
+const { decideTelegramNotification } = require('../notifications/channels/telegram');
+const { sendTelegramMessage } = require('./telegram-transport');
 const {
   buildPlanLimitsMessage,
   normalizeStatuslinePayload,
@@ -27,12 +33,28 @@ const DEFAULT_USAGE_CONFIG = Object.freeze({
   enabled: true,
   fetchPricing: true,
   planLimits: true,
+  // rtk's own machine-wide compression stats, read from its CLI. Independent of `config.rtk`, which only
+  // governs whether Glissa injects rtk's hook into the sessions it spawns.
+  rtkSavings: true,
   scanIntervalMinutes: 5,
   retainDays: 90,
+  // Durable history retention, independent of transcript retention: the point of the warehouse is to
+  // outlive the ~30 days Claude Code keeps its transcripts for.
+  warehouseRetainDays: 365,
   sessionBlockHours: 5,
   costMode: 'auto',
   extraProjectsDirs: [],
+  // Spend ceilings in USD. Absent (the default) means no budget at all: no meters, no alerts.
+  budget: { dailyUsd: null, monthlyUsd: null },
+  // Other CLI vendors whose local transcripts are read alongside Claude's. On by default; a false here
+  // means that vendor's tree is never walked at all.
+  vendors: { codex: true, grok: true },
 });
+
+const USAGE_VENDOR_KEYS = Object.freeze(['codex', 'grok']);
+// Shared with control-handlers' validateUsage, like the ranges and vendor keys: one source of truth for
+// which budget fields exist.
+const USAGE_BUDGET_KEYS = Object.freeze(['dailyUsd', 'monthlyUsd']);
 
 /*
  * Claude session ids seen in statusLine payloads, capped. Claude assigns a NEW id on every resume, so
@@ -53,7 +75,22 @@ const NUDGE_DEBOUNCE_MS = 2000;
  */
 const PARTIAL_CONTINUE_MS = 15000;
 const FORCE_PASS_MIN_INTERVAL_MS = 3000;
+/*
+ * rtk keeps its own durable stats, so a reading is only as stale as this window and a dashboard pulling a
+ * report on every turn end does not spawn a process per pull. Failures are NOT cached: an rtk installed
+ * (or repaired) mid-session should show up on the next pull rather than after a restart.
+ */
+const RTK_SAVINGS_TTL_MS = 60000;
+const RTK_GAIN_ARGS = Object.freeze(['gain', '--daily', '--format', 'json']);
+const RTK_GAIN_TIMEOUT_MS = 5000;
+const RTK_GAIN_MAX_BUFFER = 4 * 1024 * 1024;
+const RTK_UNAVAILABLE = Object.freeze({ available: false });
 
+// Required lazily: session/core/rtk-command.js pulls in spawn-command, which resolves `claude` at module
+// load, and control-handlers.js requires this module on a path that has no business probing for it.
+function defaultRtkPath() {
+  return require('../session/core/rtk-command').getRtkPath();
+}
 // Shared with control-handlers' validateUsage/sanitizeUsage: one source of truth for the ranges the
 // wire validator enforces and the fallback resolver tolerates, so the two cannot drift apart.
 const USAGE_COST_MODES = Object.freeze(['auto', 'calculate', 'display']);
@@ -61,6 +98,7 @@ const COST_MODES = new Set(USAGE_COST_MODES);
 const USAGE_INTEGER_RANGES = Object.freeze({
   scanIntervalMinutes: { min: 1, max: 1440 },
   retainDays: { min: 1, max: 3650 },
+  warehouseRetainDays: { min: 30, max: 3650 },
   sessionBlockHours: { min: 1, max: 24 },
 });
 const INTEGER_RANGES = USAGE_INTEGER_RANGES;
@@ -90,12 +128,27 @@ function resolveUsageConfig(usage) {
     enabled: typeof source.enabled === 'boolean' ? source.enabled : DEFAULT_USAGE_CONFIG.enabled,
     fetchPricing: typeof source.fetchPricing === 'boolean' ? source.fetchPricing : DEFAULT_USAGE_CONFIG.fetchPricing,
     planLimits: typeof source.planLimits === 'boolean' ? source.planLimits : DEFAULT_USAGE_CONFIG.planLimits,
+    rtkSavings: typeof source.rtkSavings === 'boolean' ? source.rtkSavings : DEFAULT_USAGE_CONFIG.rtkSavings,
     scanIntervalMinutes: integerWithin(source.scanIntervalMinutes, INTEGER_RANGES.scanIntervalMinutes, DEFAULT_USAGE_CONFIG.scanIntervalMinutes),
     retainDays: integerWithin(source.retainDays, INTEGER_RANGES.retainDays, DEFAULT_USAGE_CONFIG.retainDays),
+    warehouseRetainDays: integerWithin(source.warehouseRetainDays, INTEGER_RANGES.warehouseRetainDays, DEFAULT_USAGE_CONFIG.warehouseRetainDays),
     sessionBlockHours: integerWithin(source.sessionBlockHours, INTEGER_RANGES.sessionBlockHours, DEFAULT_USAGE_CONFIG.sessionBlockHours),
     costMode: COST_MODES.has(source.costMode) ? source.costMode : DEFAULT_USAGE_CONFIG.costMode,
     extraProjectsDirs: absoluteDirList(source.extraProjectsDirs),
+    vendors: resolveVendors(source.vendors),
+    budget: normalizeBudgetConfig(source.budget),
   };
+}
+
+// Defensive like every other key here: only an explicit `false` opts a vendor out, so a hand-edited
+// garbage value leaves the vendor on rather than silently hiding its usage.
+function resolveVendors(vendors) {
+  const source = vendors != null && typeof vendors === 'object' && !Array.isArray(vendors) ? vendors : {};
+  const resolved = {};
+  for (const key of USAGE_VENDOR_KEYS) {
+    resolved[key] = source[key] !== false;
+  }
+  return resolved;
 }
 
 // Pure gate for the lane. No credential can be missing here (the data is local transcript files), so
@@ -110,15 +163,44 @@ function usageCfgKey(cfg) {
   return JSON.stringify({ usage: cfg?.usage || null });
 }
 
+/*
+ * The one wording for a budget alert, built here and shipped ON the broadcast so the browser notification
+ * and the Telegram message are the same string by construction rather than by two implementations
+ * agreeing. Plain text, no dash characters.
+ */
+function budgetAlertText({ scope, threshold, spentUsd, budgetUsd }) {
+  const period = scope === 'monthly' ? 'monthly' : 'daily';
+  return `Usage budget: ${period} spend ${formatBudgetUsd(spentUsd)} reached ${threshold}% of ${formatBudgetUsd(budgetUsd)}`;
+}
+
+// Not the panel's formatUsd: budgets are never sub-cent, and Telegram text must be byte-identical
+// across hosts, so this stays locale-free two-decimals (alert reads $5000.00, panel $5,000.00).
+function formatBudgetUsd(value) {
+  const number = Number.isFinite(value) ? value : 0;
+  return `$${number.toFixed(2)}`;
+}
+
 function createUsageWiring({
   config,
   sessions = new Map(),
   broadcast = () => {},
   controlClientCount = () => 0,
+  // Beside the resolved config file, so a temp GLISSA_CONFIG keeps its history in the temp dir too (the
+  // same rule uploads and recordings follow). Null disables the warehouse entirely.
+  warehousePath = null,
+  // Which budget thresholds have already fired this period. Beside the config file for the same reason the
+  // warehouse is: a temp GLISSA_CONFIG must never write into the operator's real ~/.glissa.
+  budgetStatePath = null,
   // Read-only view of the lane ledger; the writes happen on the hook callback path in backend.js.
   laneMap = null,
+  sendTelegram = sendTelegramMessage,
+  fsPromises = require('node:fs/promises'),
   createScanner = createUsageScanner,
   loadPricingFn = loadPricing,
+  // rtk reports machine-wide compression stats through its own CLI; both seams are injected so the
+  // savings path is testable without an rtk install.
+  execFileAsync = promisify(execFile),
+  rtkPathFn = defaultRtkPath,
   scannerDeps = {},
   nowFn = Date.now,
   partialContinueMs = PARTIAL_CONTINUE_MS,
@@ -146,6 +228,12 @@ function createUsageWiring({
   // card and every connected client.
   let planLimits = null;
   const officialCostByClaudeId = new Map();
+  let budgetFiredState = {};
+  let budgetStateLoaded = false;
+  let budgetStateSignature = null;
+  let rtkSavingsCache = null;
+  let rtkSavingsCacheMs = 0;
+  let warnedRtkGain = false;
 
   function warn(message) {
     if (!logger || typeof logger.warn !== 'function') return;
@@ -182,6 +270,10 @@ function createUsageWiring({
         blockHours: cfg.sessionBlockHours,
         retainDays: cfg.retainDays,
         extraProjectsDirs: cfg.extraProjectsDirs,
+        vendors: cfg.vendors,
+        warehousePath,
+        warehouseRetainDays: cfg.warehouseRetainDays,
+        budget: cfg.budget,
         laneMap,
         logger,
         ...scannerDeps,
@@ -222,6 +314,10 @@ function createUsageWiring({
     // The first pass pushes unconditionally so a dashboard learns the pricing source and an empty
     // baseline even on a machine with no transcripts yet.
     if (lastSessionsMessage === null || (result && result.newEntries > 0)) pushSessions();
+    // Budgets are evaluated only on a COMPLETE pass, for the same reason the warehouse only writes on one:
+    // a partial pass has seen an arbitrary slice of the tree, and firing a once-per-period alert off an
+    // undercount would burn that threshold for the rest of the period.
+    if (result && !result.partial) await evaluateBudgets();
     if (result?.partial) scheduleContinuation();
     return result;
   }
@@ -339,6 +435,146 @@ function createUsageWiring({
     return buildPlanLimitsMessage(planLimits);
   }
 
+  // ── Budgets ──
+  // A threshold fires once per period. The fired state is on disk because the alternative is re-alerting
+  // 50/75/100 on every restart, which is exactly how an alert channel teaches its operator to ignore it.
+
+  async function loadBudgetState() {
+    if (budgetStateLoaded || !budgetStatePath) return;
+    budgetStateLoaded = true;
+    let text = null;
+    try {
+      text = await fsPromises.readFile(budgetStatePath, 'utf8');
+    } catch {
+      // No file yet is the ordinary first-run case.
+      return;
+    }
+    try {
+      const parsed = JSON.parse(text);
+      budgetFiredState = parsed && typeof parsed === 'object' && parsed.fired && typeof parsed.fired === 'object' ? parsed.fired : {};
+    } catch (error) {
+      // Starting empty can only ever RE-fire an alert, never suppress a real one, so this fails toward noise
+      // rather than silence.
+      warn(`budget state unreadable, starting empty: ${error.message}`);
+      budgetFiredState = {};
+    }
+  }
+
+  async function evaluateBudgets() {
+    if (stopped || !scanner || !budgetStatePath) return;
+    // cfg.budget is already normalized by resolveUsageConfig, which is this module's own edge.
+    if (cfg.budget.dailyUsd === null && cfg.budget.monthlyUsd === null) return;
+    await loadBudgetState();
+    const spend = scanner.budgetSpend();
+    const { alerts, firedState } = evaluateBudget({
+      budget: cfg.budget,
+      todayUsd: spend.todayUsd,
+      monthUsd: spend.monthUsd,
+      todayKey: spend.todayKey,
+      monthKey: spend.monthKey,
+    }, budgetFiredState);
+    budgetFiredState = firedState;
+    if (alerts.length === 0) {
+      // The prune inside evaluateBudget drops last period's marks, so a rollover still needs a write.
+      await saveBudgetState();
+      return;
+    }
+    for (const alert of alerts) {
+      const message = { type: 'usage-budget-alert', ...alert, text: budgetAlertText(alert), ts: nowFn() };
+      broadcast(message);
+      deliverBudgetTelegram(alert);
+    }
+    await saveBudgetState();
+  }
+
+  async function saveBudgetState() {
+    if (!budgetStatePath) return;
+    const payload = `${JSON.stringify({ version: 1, fired: budgetFiredState }, null, 2)}\n`;
+    const signature = JSON.stringify(budgetFiredState);
+    if (signature === budgetStateSignature) return;
+    budgetStateSignature = signature;
+    const tmpPath = `${budgetStatePath}.tmp`;
+    try {
+      await fsPromises.mkdir(path.dirname(budgetStatePath), { recursive: true });
+      await fsPromises.writeFile(tmpPath, payload);
+      await fsPromises.rename(tmpPath, budgetStatePath);
+    } catch (error) {
+      warn(`budget state write failed: ${error.message}`);
+      budgetStateSignature = null;
+    }
+  }
+
+  /*
+   * Same rule the session channel applies: ping the phone only when nobody would see the browser
+   * notification. The gate itself is decideTelegramNotification, reused rather than reimplemented, so the
+   * two channels cannot drift on what "nobody is watching" means.
+   */
+  function deliverBudgetTelegram(alert) {
+    const decision = decideTelegramNotification({
+      enabled: config.telegramNotifications === true,
+      botToken: config.telegram?.botToken,
+      chatId: config.telegram?.chatId,
+      connectionCount: controlClientCount(),
+    });
+    if (!decision.send) return;
+    void Promise.resolve(sendTelegram({
+      botToken: config.telegram.botToken,
+      chatId: config.telegram.chatId,
+      text: budgetAlertText(alert),
+    })).catch(() => {});
+  }
+
+  // ── Savings ──
+  // What the token-saving systems around a session are worth. Both halves degrade to absent rather than
+  // to a zero, because "rtk saved nothing" and "Glissa could not ask rtk" are different claims.
+
+  /*
+   * rtk's own machine-wide figures. Every failure mode (opted out, no binary, exec error, garbage JSON)
+   * ends at the same `{ available: false }`: the panel's job is to show a number rtk vouches for, and
+   * there is no partial version of that worth rendering.
+   */
+  async function fetchRtkSavings() {
+    if (!cfg.rtkSavings) return RTK_UNAVAILABLE;
+    const rtkPath = rtkPathFn();
+    if (!rtkPath) return RTK_UNAVAILABLE;
+    if (rtkSavingsCache && nowFn() - rtkSavingsCacheMs < RTK_SAVINGS_TTL_MS) return rtkSavingsCache;
+    try {
+      const { stdout } = await execFileAsync(rtkPath, [...RTK_GAIN_ARGS], {
+        timeout: RTK_GAIN_TIMEOUT_MS,
+        maxBuffer: RTK_GAIN_MAX_BUFFER,
+        encoding: 'utf8',
+      });
+      const normalized = normalizeRtkGain(JSON.parse(stdout));
+      if (!normalized) return warnRtkOnce('rtk gain reported an unrecognized shape');
+      rtkSavingsCache = { available: true, ...normalized };
+      rtkSavingsCacheMs = nowFn();
+      return rtkSavingsCache;
+    } catch (error) {
+      return warnRtkOnce(`rtk gain failed: ${error.message}`);
+    }
+  }
+
+  // Once per process: an rtk that cannot answer will not answer on the next pull either, and a report is
+  // pulled on every turn end while the tab is open.
+  function warnRtkOnce(message) {
+    if (!warnedRtkGain) {
+      warnedRtkGain = true;
+      warn(message);
+    }
+    return RTK_UNAVAILABLE;
+  }
+
+  // Never allowed to cost the report: savings are additive insight, and a report of real totals beats no
+  // report because one optional figure could not be computed.
+  async function buildSavings(report) {
+    try {
+      return { rtk: await fetchRtkSavings(), cache: computeCacheSavings(report.models, pricing?.table) };
+    } catch (error) {
+      warn(`savings unavailable: ${error.message}`);
+      return { rtk: RTK_UNAVAILABLE, cache: null };
+    }
+  }
+
   function unavailableReport(requestId, error) {
     return { type: 'usage-report', requestId: requestId || null, ts: nowFn(), error };
   }
@@ -364,6 +600,7 @@ function createUsageWiring({
       return unavailableReport(requestId, `Usage report failed: ${error.message}`);
     }
     const scanStats = scanner.stats();
+    const savings = await buildSavings(report);
     const cached = {
       type: 'usage-report',
       requestId: null,
@@ -376,7 +613,10 @@ function createUsageWiring({
       sessions: report.sessions,
       blocks: report.blocks,
       activeBlock: report.activeBlock,
+      anomaly: report.anomaly,
       byLane: report.byLane,
+      budget: report.budget,
+      savings,
       tokenLimit: report.tokenLimit,
       pricing: { source: pricing.source, fetchedAt: pricing.fetchedAt, missing: report.pricing.missing },
       scan: {
@@ -470,6 +710,10 @@ module.exports = {
   DEFAULT_USAGE_CONFIG,
   NUDGE_DEBOUNCE_MS,
   PARTIAL_CONTINUE_MS,
+  RTK_SAVINGS_TTL_MS,
   USAGE_INTEGER_RANGES,
   USAGE_COST_MODES,
+  USAGE_VENDOR_KEYS,
+  USAGE_BUDGET_KEYS,
+  budgetAlertText,
 };

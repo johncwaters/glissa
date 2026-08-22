@@ -251,6 +251,8 @@ test('the daemon\'s own writes beside its config file are not project activity',
   const cases = [
     ['config.json', true],
     ['usage-lanes.json', true],
+    ['usage-warehouse.json', true],
+    ['usage-budget-state.json', true],
     ['pairings.json', true],
     ['recordings/session-abc.jsonl', true],
     ['uploads/p1/shot.png', true],

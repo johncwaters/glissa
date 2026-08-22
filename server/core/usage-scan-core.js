@@ -78,9 +78,10 @@ function uniqueStrings(values) {
   return Array.from(new Set(values));
 }
 
-// ── Other agent CLIs ──
-// Codex and Grok keep their transcripts in their own homes, in their own layouts. The usage lane reads
-// Claude only; these are here for the INGEST lane (server/ingest-agent-logs.js), which tails all three.
+// ── Other vendors ──
+// Codex and Grok keep their transcripts in their own homes, in their own layouts. These build the
+// CANDIDATE roots; the scanner decides which exist, and a vendor whose home is absent contributes
+// nothing rather than erroring (unlike CLAUDE_CONFIG_DIR, which is an explicit claim that a dir exists).
 
 // The env override is comma-split like CLAUDE_CONFIG_DIR, so several homes can be scanned.
 function vendorHomes(env, varName, defaultDirName) {
@@ -97,6 +98,8 @@ function grokHomes(env = process.env) {
   return vendorHomes(env, 'GROK_HOME', '.grok');
 }
 
+// ccusage's Codex root rule: sessions/ and archived_sessions/ when present, else the home itself as
+// a flat JSONL dir (a real ~/.codex also holds history.jsonl and plugin fixtures, which are not usage).
 function codexRootCandidates(homes) {
   const candidates = [];
   for (const home of homes) {
@@ -106,6 +109,11 @@ function codexRootCandidates(homes) {
   return candidates;
 }
 
+function codexFallbackRoots(homes, survivingRoots) {
+  const covered = new Set(survivingRoots.map((root) => root.home));
+  return homes.filter((home) => !covered.has(home)).map((home) => ({ dir: home, kind: 'flat', home }));
+}
+
 // Grok stores one updates.jsonl per session under sessions/<encoded-cwd>/<session-id>/.
 function grokRootCandidates(homes) {
   return homes.map((home) => ({ dir: path.join(home, 'sessions'), kind: 'active', home }));
@@ -113,16 +121,31 @@ function grokRootCandidates(homes) {
 
 const GROK_USAGE_FILENAME = 'updates.jsonl';
 
-// Which files in a vendor's tree carry turns at all. Grok is the narrow one: everything else in its
-// session dir is transcript detail nothing reads.
+// Which files in a vendor's tree are usage at all. Grok is the narrow one: everything else in its
+// session dir is transcript detail we never read.
 function isUsageFile(vendor, fileName) {
   if (typeof fileName !== 'string') return false;
   if (vendor === 'grok') return fileName === GROK_USAGE_FILENAME;
   return fileName.endsWith('.jsonl');
 }
 
+// ccusage's active-over-archived rule, keyed on basename: the active copy is still being appended to.
+function dedupeCodexFiles(files) {
+  const byName = new Map();
+  for (const file of files) {
+    const name = path.basename(file.file);
+    const existing = byName.get(name);
+    if (!existing) {
+      byName.set(name, file);
+      continue;
+    }
+    if (existing.kind === 'archived' && file.kind !== 'archived') byName.set(name, file);
+  }
+  return Array.from(byName.values());
+}
+
 // The Codex session id is the trailing uuid of a rollout file name; the basename is the fallback for
-// any other layout.
+// any other layout. Codex token_count lines carry no session id of their own.
 function codexSessionIdFromPath(filePath) {
   const base = path.basename(String(filePath || ''), '.jsonl');
   const match = /([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$/.exec(base);
@@ -138,8 +161,10 @@ module.exports = {
   codexHomes,
   grokHomes,
   codexRootCandidates,
+  codexFallbackRoots,
   grokRootCandidates,
   codexSessionIdFromPath,
+  dedupeCodexFiles,
   isUsageFile,
   GROK_USAGE_FILENAME,
 };

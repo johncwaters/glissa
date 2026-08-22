@@ -99,7 +99,8 @@ function overlaySnapshot(models) {
   return { models: { ...(pricingSnapshot.models || {}), ...(models || {}) } };
 }
 
-const FETCH_PROVIDERS = new Set(['anthropic']);
+// Only providers the snapshot covers get through a fetch; Grok is absent on purpose (it prices itself).
+const FETCH_PROVIDERS = new Set(['anthropic', 'openai']);
 
 function trimAnthropicModels(raw) {
   const sourceModels = raw?.models && typeof raw.models === 'object' ? raw.models : raw;

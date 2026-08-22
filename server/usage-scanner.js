@@ -10,21 +10,42 @@ const {
   shouldReplace,
   totalTokensOf,
 } = require('./core/usage-entry-core');
-const { buildUsageReport, pruneEntries } = require('./core/usage-aggregate-core');
+const { buildUsageReport, localDayKey, pruneEntries } = require('./core/usage-aggregate-core');
 const { buildBlocks, burnRate, projectBlock } = require('./core/usage-blocks-core');
+const { dailyBaseline, detectBurnAnomaly, detectDailyAnomaly } = require('./core/usage-anomaly-core');
+const { budgetStanding, normalizeBudgetConfig } = require('./core/usage-budget-core');
 const { laneRollup } = require('./core/usage-lane-core');
+const {
+  mergeWarehouse,
+  pruneWarehouse,
+  rollupFromReport,
+  warehouseDailyRows,
+} = require('./core/usage-warehouse-core');
 const { costForEntry, lookupModelPrice } = require('./core/usage-pricing-core');
 const {
+  codexFallbackRoots,
+  codexHomes,
+  codexRootCandidates,
+  codexSessionIdFromPath,
+  dedupeCodexFiles,
   decideFileRead,
+  grokHomes,
+  grokRootCandidates,
+  isUsageFile,
   projectDirCandidates,
   resolveProjectsDirs,
   splitLines,
 } = require('./core/usage-scan-core');
+const { codexDedupIdentity, createCodexUsageState, parseCodexUsageLine } = require('./core/usage-codex-core');
+const { grokDedupIdentity, parseGrokUsageLine } = require('./core/usage-grok-core');
 
 const DEFAULT_BYTE_BUDGET = 64 * 1024 * 1024;
 const DEFAULT_CHUNK_SIZE = 1024 * 1024;
 const LINE_YIELD_INTERVAL = 5000;
 const SYNTHETIC_PRIMARY = Symbol('syntheticPrimary');
+// The anomaly baseline is the trailing month, NOT the whole retained series: a sparse multi-month mean
+// makes an ordinary day look like a spike (and a heavy month makes a real spike look ordinary).
+const ANOMALY_BASELINE_DAYS = 30;
 
 const noopLogger = Object.freeze({ warn: () => {} });
 
@@ -39,6 +60,17 @@ function createUsageScanner(deps = {}) {
     blockHours = 5,
     retainDays = 90,
     extraProjectsDirs = [],
+    // Which non-Claude vendors to walk. A disabled vendor contributes no roots at all, so its tree is
+    // never read and an all-Claude machine behaves exactly as before.
+    vendors = { codex: true, grok: true },
+    // Durable per-day-per-model history. Claude Code deletes transcripts after about 30 days, so without
+    // this the daily series silently truncates and every longer view is quietly wrong. Absent path (older
+    // callers, unit tests) means the warehouse is inert: nothing is read, nothing is written.
+    warehousePath = null,
+    warehouseRetainDays = 365,
+    // Spend budgets (config usage.budget). Absent means off, and every budget surface then reports
+    // nothing at all rather than a zero ceiling.
+    budget: budgetDep = null,
     // Claude session id -> the Glissa lane that spawned it. A function rather than a snapshot so a report
     // always joins against what the ledger knows NOW, not what it knew when the scanner was built.
     laneMap = null,
@@ -47,11 +79,16 @@ function createUsageScanner(deps = {}) {
     chunkSize = DEFAULT_CHUNK_SIZE,
   } = deps;
 
+  // Normalized once at this module's seam; nothing downstream re-normalizes.
+  const budget = normalizeBudgetConfig(budgetDep);
   const fileStates = new Map();
   const primaryIndex = new Map();
   const collisionIndex = new Map();
   const entries = [];
   const missingModels = new Set();
+  // `claudeDirs` drives Claude identity (relPath -> project + session id) and the resolution error;
+  // `dirs` is every transcript root scanned, which is what the report reports.
+  let claudeDirs = [];
   let dirs = [];
   let lastFileCount = 0;
   let lastScanMs = null;
@@ -63,6 +100,10 @@ function createUsageScanner(deps = {}) {
   const cachedRollupsByDays = new Map();
   let cachedSessionTotals = null;
   let currentFileJournal = null;
+  let warehouseRecords = [];
+  let warehouseLoaded = false;
+  let warehouseSignature = null;
+  let warehouseWriteChain = Promise.resolve();
 
   function runPass({ force = false } = {}) {
     if (activePass) {
@@ -95,9 +136,15 @@ function createUsageScanner(deps = {}) {
     let bytesReadThisPass = 0;
     if (force) resetStore();
     const resolved = await resolveProjectsDirsAsync({ fsPromises, env, extraProjectsDirs, logger });
-    dirs = resolved.dirs;
+    claudeDirs = resolved.dirs;
     resolutionError = resolved.error;
-    const files = await walkSourceFiles(dirs, fsPromises, logger);
+    const vendorRoots = await resolveVendorRootsAsync({ fsPromises, env, vendors });
+    const roots = [
+      ...claudeDirs.map((dir) => ({ vendor: 'claude', dir, kind: 'active' })),
+      ...vendorRoots,
+    ];
+    dirs = roots.map((root) => root.dir);
+    const files = await walkSourceFiles(roots, fsPromises, logger);
     lastFileCount = files.length;
 
     for (const file of files) {
@@ -108,14 +155,15 @@ function createUsageScanner(deps = {}) {
       }
       let fileNewEntryCount = 0;
       const fileResult = await scanFile({
-        file,
+        file: file.file,
+        vendor: file.vendor,
         fsPromises,
         force,
         maxBytes: remainingBudget,
         chunkSize,
-        onLine: (line, lineOrdinal) => {
+        onLine: (line, lineOrdinal, vendorState) => {
           parsedLineCount += 1;
-          fileNewEntryCount += ingestLine({ line, file, dirs, lineOrdinal });
+          fileNewEntryCount += ingestLine({ line, file: file.file, vendor: file.vendor, vendorState, dirs: claudeDirs, lineOrdinal });
         },
         shouldYieldAfterLine: () => parsedLineCount % LINE_YIELD_INTERVAL === 0,
         logger,
@@ -133,6 +181,12 @@ function createUsageScanner(deps = {}) {
     lastScanMs = nowFn();
     lastPartial = partial;
     if (newEntryCount > 0) markDirty();
+    /*
+     * Only a COMPLETE pass may write history. A partial pass has seen an arbitrary slice of the tree, so
+     * merging its day totals would persist an undercount as durable truth; that is also why continuation
+     * storms cost no writes at all rather than needing a timer to coalesce them.
+     */
+    if (!partial) await persistWarehouse();
     return {
       files: lastFileCount,
       entries: entries.length,
@@ -142,7 +196,7 @@ function createUsageScanner(deps = {}) {
     };
   }
 
-  async function scanFile({ file, fsPromises, force, maxBytes, chunkSize, onLine, shouldYieldAfterLine, logger }) {
+  async function scanFile({ file, vendor, fsPromises, force, maxBytes, chunkSize, onLine, shouldYieldAfterLine, logger }) {
     let stat;
     try {
       stat = await fsPromises.stat(file);
@@ -156,10 +210,17 @@ function createUsageScanner(deps = {}) {
     const decision = decideFileRead(prior, { size: stat.size, mtimeMs: stat.mtimeMs });
     if (decision.action === 'skip') return { bytesRead: 0, partial: false };
 
+    /*
+     * Codex token_count lines report CUMULATIVE totals and name their model in a separate earlier line,
+     * so an appended read has to continue from the same running snapshot or it would re-count the whole
+     * session as one delta. That is what vendorState carries, per file, beside offset and carry.
+     */
     const state = decision.action === 'restart'
-      ? { size: stat.size, mtimeMs: stat.mtimeMs, offset: 0, carry: '', lineOrdinal: 0 }
-      : { ...(prior || {}), size: stat.size, mtimeMs: stat.mtimeMs, offset: decision.readFrom, carry: prior?.carry || '' };
-    const priorSnapshot = prior ? { ...prior } : null;
+      ? { size: stat.size, mtimeMs: stat.mtimeMs, offset: 0, carry: '', lineOrdinal: 0, vendorState: createVendorState(vendor) }
+      : { ...(prior || {}), size: stat.size, mtimeMs: stat.mtimeMs, offset: decision.readFrom, carry: prior?.carry || '', vendorState: prior?.vendorState || createVendorState(vendor) };
+    // The parsers MUTATE vendorState, so the rollback snapshot needs its own copy or a failed read would
+    // leave the running Codex totals advanced past the entries that were just rolled back.
+    const priorSnapshot = prior ? { ...prior, vendorState: cloneVendorState(prior.vendorState) } : null;
     fileStates.set(file, state);
 
     let handle;
@@ -195,7 +256,7 @@ function createUsageScanner(deps = {}) {
         state.carry = split.carry;
         for (const line of split.lines) {
           state.lineOrdinal = (state.lineOrdinal || 0) + 1;
-          onLine(line, state.lineOrdinal);
+          onLine(line, state.lineOrdinal, state.vendorState);
           if (shouldYieldAfterLine()) await yieldNow();
         }
       }
@@ -208,7 +269,7 @@ function createUsageScanner(deps = {}) {
         state.carry = split.carry;
         for (const line of split.lines) {
           state.lineOrdinal = (state.lineOrdinal || 0) + 1;
-          onLine(line, state.lineOrdinal);
+          onLine(line, state.lineOrdinal, state.vendorState);
         }
       }
       state.size = stat.size;
@@ -224,7 +285,9 @@ function createUsageScanner(deps = {}) {
     return { bytesRead, partial, failed: false };
   }
 
-  function ingestLine({ line, file, dirs, lineOrdinal }) {
+  function ingestLine({ line, file, vendor, vendorState, dirs, lineOrdinal }) {
+    if (vendor === 'codex') return ingestVendorLine(parseCodexUsageLine(line, vendorState, { sessionId: codexSessionIdFromPath(file) }), file);
+    if (vendor === 'grok') return ingestVendorLine(parseGrokUsageLine(line), file);
     const parsed = parseUsageLine(line);
     if (!parsed) return 0;
     const relPath = relativeToProjects(file, dirs);
@@ -247,7 +310,22 @@ function createUsageScanner(deps = {}) {
     return accepted;
   }
 
+  /*
+   * A non-Claude entry, already in the shared entry shape. Its own core owns identity and (for Grok)
+   * cost, and there is no advisor expansion or transcript-path identity to derive: the project is the
+   * vendor's session dir, and attribution to a Glissa card is deliberately not attempted (cards are keyed
+   * by CLAUDE session id).
+   */
+  function ingestVendorLine(parsed, file) {
+    if (!parsed) return 0;
+    const entry = stripIngestFields(priceEntry({ ...parsed, project: path.dirname(file) }));
+    return storeEntry(entry) ? 1 : 0;
+  }
+
   function priceEntry(entry) {
+    // Grok reports its own cost in the transcript (billing ticks, or the parser's published rate card),
+    // so it is authoritative here and never routed through the price table or the missing-price warning.
+    if (entry.vendor === 'grok') return entry;
     const resolved = lookupModelPrice(pricingTable, entry.model, { aliases });
     const priced = costForEntry(entry, resolved?.price || null, { costMode });
     if (shouldTrackMissingModel({ entry, resolved, priced, costMode })) missingModels.add(entry.model);
@@ -279,7 +357,7 @@ function createUsageScanner(deps = {}) {
   }
 
   function pruneStoredEntries() {
-    const pruned = pruneEntries(entries, { now: nowFn(), retainDays });
+    const pruned = pruneEntries(entries, { now: nowFn(), retainDays: entryRetentionDays() });
     if (pruned.kept.length === entries.length) return;
     entries.length = 0;
     entries.push(...pruned.kept);
@@ -288,9 +366,170 @@ function createUsageScanner(deps = {}) {
     markDirty();
   }
 
+  // ── Warehouse ──
+
+  async function loadWarehouse() {
+    if (warehouseLoaded || !warehousePath) return;
+    warehouseLoaded = true;
+    let text = null;
+    try {
+      text = await fsPromises.readFile(warehousePath, 'utf8');
+    } catch {
+      // No file yet is the ordinary first-run case, not a problem to report.
+      return;
+    }
+    try {
+      const parsed = JSON.parse(text);
+      const records = Array.isArray(parsed?.records) ? parsed.records : [];
+      warehouseRecords = pruneWarehouse(records, { retainDays: warehouseRetainDays, todayKey: todayDayKey() });
+      warehouseSignature = null;
+    } catch (error) {
+      // A corrupt file starts empty rather than crashing the lane: the transcripts are still the source of
+      // truth for everything inside live coverage, and the next complete pass rebuilds what it can see.
+      warn(logger, `usage warehouse unreadable, starting empty: ${error.message}`);
+      warehouseRecords = [];
+    }
+  }
+
   /*
-   * Lane attribution: which of Glissa's own automation lanes the spend belonged to. The join is exact (a
-   * session id is attributed only because Glissa recorded spawning it), so anything else is `other`.
+   * Merge this pass's live day rollups into durable history and write atomically. `liveDays` is what the
+   * scan actually produced, so a day the live scan covers always WINS over the stored copy (the live read
+   * is fresher), while a day the transcripts no longer have survives untouched.
+   */
+  async function persistWarehouse() {
+    if (!warehousePath) return;
+    await loadWarehouse();
+    const rollups = cachedRollupsForDays(undefined, retainDays);
+    const liveDays = rollups.daily.map((row) => row.day);
+    const merged = mergeWarehouse(warehouseRecords, rollupFromReport(rollups.daily), { liveDays });
+    warehouseRecords = pruneWarehouse(merged, { retainDays: warehouseRetainDays, todayKey: todayDayKey() });
+    const payload = `${JSON.stringify({ version: 1, updatedAt: new Date(nowFn()).toISOString(), records: warehouseRecords }, null, 2)}\n`;
+    const signature = JSON.stringify(warehouseRecords);
+    // Nothing moved: an idle machine rescanning on its interval should not rewrite the same bytes.
+    if (signature === warehouseSignature) return;
+    warehouseSignature = signature;
+    // Not redundant: writeWarehouseFile's own catch can throw (bad logger), which must not fail the pass.
+    warehouseWriteChain = warehouseWriteChain.then(() => writeWarehouseFile(payload)).catch(() => {});
+    await warehouseWriteChain;
+  }
+
+  // tmp + rename, so a crash mid-write can never leave a half-written history file behind.
+  async function writeWarehouseFile(payload) {
+    const tmpPath = `${warehousePath}.tmp`;
+    try {
+      await fsPromises.mkdir(path.dirname(warehousePath), { recursive: true });
+      await fsPromises.writeFile(tmpPath, payload);
+      await fsPromises.rename(tmpPath, warehousePath);
+    } catch (error) {
+      warn(logger, `usage warehouse write failed: ${error.message}`);
+      warehouseSignature = null;
+    }
+  }
+
+  function todayDayKey() {
+    return localDayKey(nowFn());
+  }
+
+  /*
+   * Spend for the two budget periods, over the MERGED daily series so it matches what the panel shows
+   * (history included). One definition, used both for the report's standing meters and for the wiring's
+   * once-per-period alert evaluation, so a meter and an alert can never disagree about what was spent.
+   */
+  function budgetSpend() {
+    const todayKey = todayDayKey();
+    const monthKey = todayKey.slice(0, 7);
+    const daily = mergedDailyRows(budgetRollups().daily);
+    let todayUsd = 0;
+    let monthUsd = 0;
+    for (const row of daily) {
+      const cost = Number.isFinite(row.costUSD) ? row.costUSD : 0;
+      if (row.day === todayKey) todayUsd += cost;
+      if (String(row.day).startsWith(monthKey)) monthUsd += cost;
+    }
+    return { todayKey, monthKey, todayUsd, monthUsd };
+  }
+
+  /*
+   * The daily series the report ships: live rows, plus history for days OLDER than live coverage. Strictly
+   * older, so a day the live scan is still filling in is never topped up from a stale stored copy. Each
+   * history row is marked, because a row Glissa remembers is a different claim from one it can still see.
+   */
+  function mergedDailyRows(liveDaily) {
+    if (warehouseRecords.length === 0) return liveDaily;
+    const liveDays = liveDaily.map((row) => row.day).filter(Boolean);
+    const earliestLive = liveDays.length > 0 ? liveDays.slice().sort()[0] : null;
+    const historyRows = warehouseDailyRows(warehouseRecords)
+      .filter((row) => (earliestLive === null ? true : row.day < earliestLive))
+      .map((row) => ({ ...row, models: sortedModels(row.models), vendors: [], source: 'history' }));
+    if (historyRows.length === 0) return liveDaily;
+    return [...historyRows, ...liveDaily].sort((a, b) => a.day.localeCompare(b.day));
+  }
+
+  function sortedModels(models) {
+    return (models || []).slice().sort((a, b) => b.tokens - a.tokens);
+  }
+
+  // ── Anomaly ──
+  // Machine level only. A per-session baseline is a different data model (sessions are short and unevenly
+  // sampled), so it is deliberately out of scope here.
+  function buildAnomaly(daily, blockSummary, activeBlock) {
+    const todayKey = todayDayKey();
+    const ordered = daily.slice().sort((a, b) => a.day.localeCompare(b.day));
+    const trailing = ordered.slice(-(ANOMALY_BASELINE_DAYS + 1));
+    const baseline = dailyBaseline(trailing, { excludeDay: todayKey });
+    const todayRow = ordered.find((row) => row.day === todayKey) || null;
+    const daily30 = detectDailyAnomaly({
+      todayUsd: todayRow?.costUSD,
+      todayTokens: todayRow?.tokens,
+      baseline,
+    });
+    const burn = detectBurnAnomaly({
+      currentTokensPerMinute: activeBlock?.burn?.tokensPerMinute,
+      completedBlocks: (blockSummary.blocks || []).filter((block) => !block.isGap && !block.isActive),
+    });
+    return {
+      daily: daily30 ? { ...daily30, baselineDays: baseline.days } : null,
+      burn,
+    };
+  }
+
+  function daysElapsedThisMonth() {
+    const day = Number(todayDayKey().slice(8, 10));
+    return Number.isFinite(day) ? day : 1;
+  }
+
+  // A monthly budget is measured against the whole month, so with one configured the entry store keeps
+  // at least the elapsed month (pruning runs before aggregation, so widening later cannot recover days).
+  function entryRetentionDays() {
+    if (budget.monthlyUsd === null) return retainDays;
+    return Math.max(retainDays, daysElapsedThisMonth());
+  }
+
+  // Matches the retention floor; a widened window needs its own cache key (memoized on the first arg).
+  function budgetRollups() {
+    const lookback = entryRetentionDays();
+    if (lookback === retainDays) return cachedRollupsForDays(undefined, retainDays);
+    return cachedRollupsForDays(lookback, lookback);
+  }
+
+  /*
+   * The standing meters. Computed here rather than client-side because usage-budget-core owns the tone
+   * ladder, and a second implementation in the browser core would be a second place for it to drift.
+   */
+  function buildBudget() {
+    if (budget.dailyUsd === null && budget.monthlyUsd === null) return null;
+    const spend = budgetSpend();
+    return {
+      dailyUsd: budget.dailyUsd,
+      monthlyUsd: budget.monthlyUsd,
+      rows: budgetStanding({ budget, todayUsd: spend.todayUsd, monthUsd: spend.monthUsd }),
+    };
+  }
+
+  /*
+   * Lane attribution over the LIVE window only. The ledger is durable, but the ENTRIES it joins against are
+   * not: the warehouse stores day-by-model rollups with no session id in them, so a history day cannot be
+   * split by lane. Fabricating history rows here would invent attribution that was never observed.
    */
   function buildLaneRows(reportRetainDays, now) {
     if (typeof laneMap !== 'function') return null;
@@ -303,22 +542,34 @@ function createUsageScanner(deps = {}) {
     const reportRetainDays = days == null ? retainDays : days;
     const rollups = cachedRollupsForDays(days, reportRetainDays);
     const now = nowFn();
-    const blockEntries = entriesWithinDays(entries, { now, retainDays: reportRetainDays });
+    /*
+     * Blocks, burn rate and the token-limit reference are CLAUDE-ONLY. The 5h window is a Claude
+     * subscription concept, and mixing another vendor's tokens into it would produce a number that looks
+     * like a plan limit and is not one.
+     */
+    const blockEntries = entriesWithinDays(entries, { now, retainDays: reportRetainDays })
+      .filter((entry) => isClaudeEntry(entry));
     const blockSummary = buildBlocks(blockEntries, { blockHours, now });
     const activeBurn = burnRate(blockSummary.activeBlock, now);
     const activeBlock = blockSummary.activeBlock
       ? { ...blockSummary.activeBlock, burn: activeBurn, projection: projectBlock(blockSummary.activeBlock, activeBurn, now) }
       : null;
+    // Only the DAILY series is extended with history (and what the dashboard derives from it: the week and
+    // month views, the heatmap, the anomaly baseline). Totals, models, sessions and blocks stay live-only,
+    // because the warehouse stores day-by-model rollups and nothing finer.
+    const daily = mergedDailyRows(cloneValue(rollups.daily));
     return {
       ts: now,
       tz: rollups.tz,
       blockHours: rollups.blockHours,
       totals: cloneValue(rollups.totals),
-      daily: cloneValue(rollups.daily),
+      daily,
       models: cloneValue(rollups.models),
       sessions: cloneValue(rollups.sessions),
       blocks: blockSummary.blocks,
       activeBlock,
+      anomaly: buildAnomaly(daily, blockSummary, activeBlock),
+      budget: buildBudget(),
       byLane: buildLaneRows(reportRetainDays, now),
       tokenLimit: blockSummary.tokenLimit,
       pricing: { missing: Array.from(missingModels).sort() },
@@ -330,6 +581,8 @@ function createUsageScanner(deps = {}) {
     if (cachedSessionTotals && !isReportDirty) return cloneSessionTotals(cachedSessionTotals);
     const totalsBySession = new Map();
     for (const entry of entries) {
+      // Per-card attribution is by CLAUDE session id, so other vendors never reach a card chip.
+      if (!isClaudeEntry(entry)) continue;
       if (!entry.inlineSessionId) continue;
       const bucket = totalsBySession.get(entry.inlineSessionId) || { tokens: 0, costUSD: 0, lastTs: null };
       bucket.tokens += totalTokensOf(entry);
@@ -430,7 +683,7 @@ function createUsageScanner(deps = {}) {
     cachedSessionTotals = null;
   }
 
-  const api = { runPass, buildReport, sessionTotals, stats };
+  const api = { runPass, buildReport, sessionTotals, stats, budgetSpend };
   Object.defineProperty(api, '_entriesForTest', {
     value: () => entries.map((entry) => entry),
     enumerable: false,
@@ -458,13 +711,55 @@ async function resolveProjectsDirsAsync({ fsPromises, env, extraProjectsDirs, lo
   }
 }
 
-async function walkSourceFiles(dirs, fsPromises, logger) {
-  const files = [];
-  for (const dir of dirs) await walkDir(dir, fsPromises, files, logger);
-  return files.sort((left, right) => left.localeCompare(right));
+/*
+ * Codex and Grok roots that actually exist. A missing home is silently absent, NOT an error: unlike
+ * CLAUDE_CONFIG_DIR (an explicit claim that a directory is there), these are opportunistic. A vendor
+ * switched off in config contributes no candidates at all, so its tree is never even stat'ed.
+ */
+async function resolveVendorRootsAsync({ fsPromises, env, vendors }) {
+  const roots = [];
+  if (vendors?.codex !== false) {
+    const homes = codexHomes(env);
+    const surviving = await existingRoots(codexRootCandidates(homes), fsPromises);
+    // Only when neither sessions/ nor archived_sessions/ exists does the home itself count as a flat
+    // JSONL dir; a real ~/.codex also holds history.jsonl and plugin fixtures, which are not usage.
+    const fallback = await existingRoots(codexFallbackRoots(homes, surviving), fsPromises);
+    for (const root of [...surviving, ...fallback]) roots.push({ vendor: 'codex', dir: root.dir, kind: root.kind });
+  }
+  if (vendors?.grok !== false) {
+    const surviving = await existingRoots(grokRootCandidates(grokHomes(env)), fsPromises);
+    for (const root of surviving) roots.push({ vendor: 'grok', dir: root.dir, kind: root.kind });
+  }
+  return roots;
 }
 
-async function walkDir(dir, fsPromises, files, logger) {
+async function existingRoots(candidates, fsPromises) {
+  const checks = await Promise.all(candidates.map(async (candidate) => {
+    try {
+      const stat = await fsPromises.stat(candidate.dir);
+      return stat.isDirectory() ? candidate : null;
+    } catch {
+      return null;
+    }
+  }));
+  return checks.filter(Boolean);
+}
+
+async function walkSourceFiles(roots, fsPromises, logger) {
+  const files = [];
+  for (const root of roots) {
+    const found = [];
+    await walkDir(root.dir, root.vendor, fsPromises, found, logger);
+    for (const file of found) files.push({ file, vendor: root.vendor, kind: root.kind });
+  }
+  // The same Codex rollout can exist under both sessions/ and archived_sessions/; the active copy wins,
+  // since it is the one still being appended to.
+  const codexFiles = dedupeCodexFiles(files.filter((entry) => entry.vendor === 'codex'));
+  const others = files.filter((entry) => entry.vendor !== 'codex');
+  return [...others, ...codexFiles].sort((left, right) => left.file.localeCompare(right.file));
+}
+
+async function walkDir(dir, vendor, fsPromises, files, logger) {
   let entries;
   try {
     entries = await fsPromises.readdir(dir, { withFileTypes: true });
@@ -475,11 +770,11 @@ async function walkDir(dir, fsPromises, files, logger) {
   for (const entry of entries) {
     const fullPath = path.join(dir, entry.name);
     if (entry.isDirectory()) {
-      await walkDir(fullPath, fsPromises, files, logger);
+      await walkDir(fullPath, vendor, fsPromises, files, logger);
       continue;
     }
     if (!entry.isFile()) continue;
-    if (!entry.name.endsWith('.jsonl')) continue;
+    if (!isUsageFile(vendor, entry.name)) continue;
     files.push(fullPath);
   }
 }
@@ -490,9 +785,27 @@ function relativeToProjects(file, dirs) {
   return path.relative(owner, file);
 }
 
+/*
+ * Dedup identity, per vendor. Each vendor's own core owns its rule (Codex has no message id, Grok has a
+ * prompt id), and both cores put the vendor name in the first segment of the key they return, so a
+ * Claude key can never collide with a Codex or Grok one. Pinned by a test.
+ */
 function keysForEntry(entry, syntheticPrimary = null) {
+  if (entry?.vendor === 'codex') return { primary: codexDedupIdentity(entry), collision: null };
+  if (entry?.vendor === 'grok') return { primary: grokDedupIdentity(entry), collision: null };
   const keys = dedupKeys(entry);
   return { primary: keys.primary || syntheticPrimary || entry?.[SYNTHETIC_PRIMARY] || null, collision: keys.collision };
+}
+
+// Only Codex carries state across lines within a file; the others are line-local.
+function createVendorState(vendor) {
+  if (vendor === 'codex') return createCodexUsageState();
+  return null;
+}
+
+function cloneVendorState(vendorState) {
+  if (!vendorState) return vendorState;
+  return { ...vendorState };
 }
 
 function deleteIndexKeys(keys, primaryIndex, collisionIndex) {
@@ -506,11 +819,20 @@ function stripIngestFields(entry) {
 }
 
 function shouldTrackMissingModel({ entry, resolved, priced, costMode }) {
+  // Grok prices itself, so a Grok model missing from the price table is not a gap in the report.
+  if (entry?.vendor === 'grok') return false;
   if (costMode === 'display') return false;
   if (resolved) return false;
   if (priced.priced) return false;
   if (!entry.model) return false;
   return totalTokensOf(entry) > 0;
+}
+
+// Absent vendor means Claude: the field was added when other vendors were, and every pre-existing entry
+// shape is a Claude one.
+function isClaudeEntry(entry) {
+  const vendor = typeof entry?.vendor === 'string' ? entry.vendor.trim() : '';
+  return vendor === '' || vendor === 'claude';
 }
 
 function entriesWithinDays(sourceEntries, { now, retainDays }) {

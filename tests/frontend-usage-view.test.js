@@ -438,6 +438,49 @@ test('sessionChipCost: official cost wins over the estimate, and the title says 
   assert.match(sessionChipTitle({ costUSD: 0.42 }), /estimated API list-price/);
 });
 
+// ── Vendors ──
+// Everything vendor-aware is additive: an all-Claude machine must render exactly as it did before, so
+// each of these is gated on a non-Claude vendor actually having data.
+
+test('vendorTotalsRows and hasMultiVendorUsage: biggest first, and silent on an all-Claude machine', async () => {
+  const { vendorTotalsRows, hasMultiVendorUsage, vendorLabel } = await importCore();
+  const totals = {
+    byVendor: {
+      claude: { tokens: 1000, costUSD: 5 },
+      codex: { tokens: 3000, costUSD: 2 },
+      grok: { tokens: 20, costUSD: 0.1 },
+    },
+  };
+  assert.deepEqual(vendorTotalsRows(totals).map((row) => row.vendor), ['codex', 'claude', 'grok']);
+  assert.deepEqual(vendorTotalsRows(totals)[0], { vendor: 'codex', label: 'Codex', tokens: 3000, costUSD: 2 });
+  assert.equal(hasMultiVendorUsage(totals), true);
+  // One vendor, and it is Claude: nothing to split.
+  assert.equal(hasMultiVendorUsage({ byVendor: { claude: { tokens: 5, costUSD: 1 } } }), false);
+  // One vendor that is NOT Claude is still worth naming.
+  assert.equal(hasMultiVendorUsage({ byVendor: { codex: { tokens: 5, costUSD: 1 } } }), true);
+  assert.equal(hasMultiVendorUsage({ byVendor: {} }), false);
+  assert.equal(hasMultiVendorUsage({}), false);
+  assert.equal(hasMultiVendorUsage(null), false);
+  assert.deepEqual(vendorTotalsRows(null), []);
+  assert.equal(vendorLabel('codex'), 'Codex');
+  assert.equal(vendorLabel('grok'), 'Grok');
+  assert.equal(vendorLabel('claude'), 'Claude');
+  assert.equal(vendorLabel(''), 'Claude', 'an absent vendor is Claude');
+  assert.equal(vendorLabel('something-new'), 'something-new');
+});
+
+test('modelRowPrefix and claudeOnlyHint: only shown once another vendor is on the page', async () => {
+  const { modelRowPrefix, claudeOnlyHint, CLAUDE_ONLY_HINT } = await importCore();
+  const multi = { byVendor: { claude: { tokens: 1, costUSD: 1 }, codex: { tokens: 1, costUSD: 1 } } };
+  const single = { byVendor: { claude: { tokens: 1, costUSD: 1 } } };
+  assert.equal(modelRowPrefix({ vendor: 'codex' }, multi), 'Codex');
+  assert.equal(modelRowPrefix({ vendor: 'claude' }, multi), 'Claude');
+  assert.equal(modelRowPrefix({ vendor: 'codex' }, single), '', 'no prefix when nothing to disambiguate');
+  assert.equal(claudeOnlyHint(multi), CLAUDE_ONLY_HINT);
+  assert.equal(claudeOnlyHint(single), '', 'no clause needed when every number is Claude');
+  assert.equal(claudeOnlyHint(null), '');
+});
+
 // ── Official plan limits ──
 
 test('planWindowOf and hasOfficialPlanLimits: a window is absent unless it reported something', async () => {
@@ -535,6 +578,73 @@ test('range options: the days the server validates, plus an unbounded default', 
 
 // House rule, and the reason every builder above is worded the way it is: no em dash, en dash or
 // ellipsis character may reach the DOM from this module.
+// ── Savings ──
+// Two independent halves: either can be absent without hiding the other, and neither may read as a zero
+// when it is simply unavailable.
+
+const RTK_SAVINGS = Object.freeze({
+  available: true,
+  commands: 250,
+  inputTokens: 921837,
+  outputTokens: 52209,
+  savedTokens: 869660,
+  savingsPct: 94.34,
+  daily: [{ date: '2026-08-21', commands: 191, savedTokens: 241780, savingsPct: 86.41 }],
+});
+
+test('hasSavings: true once either half has something, false when neither does', async () => {
+  const { hasSavings } = await importCore();
+  assert.equal(hasSavings({ rtk: RTK_SAVINGS, cache: { savedUSD: 2.7, cacheReadTokens: 1000, unpricedModels: [] } }), true);
+  assert.equal(hasSavings({ rtk: RTK_SAVINGS, cache: null }), true);
+  assert.equal(hasSavings({ rtk: { available: false }, cache: { savedUSD: 2.7, cacheReadTokens: 1000, unpricedModels: [] } }), true);
+  assert.equal(hasSavings({ rtk: { available: false }, cache: null }), false);
+  assert.equal(hasSavings(null), false);
+  assert.equal(hasSavings(undefined), false);
+  // An rtk half that forgot its flag is unavailable, not available-by-omission.
+  assert.equal(hasSavings({ rtk: { savedTokens: 5 }, cache: null }), false);
+});
+
+test('rtkSavingsTile: saved tokens lead, the rate and sample size qualify them', async () => {
+  const { rtkSavingsTile } = await importCore();
+  const tile = rtkSavingsTile({ rtk: RTK_SAVINGS });
+  assert.equal(tile.value, '869.7k tokens');
+  assert.equal(tile.sub, '94.3% avg across 250 commands');
+  // One command reads as one command.
+  assert.equal(rtkSavingsTile({ rtk: { ...RTK_SAVINGS, commands: 1 } }).sub, '94.3% avg across 1 command');
+  assert.equal(rtkSavingsTile({ rtk: { available: false } }), null);
+  assert.equal(rtkSavingsTile(null), null);
+});
+
+test('cacheSavingsTile: dollars lead, the tokens behind them qualify', async () => {
+  const { cacheSavingsTile } = await importCore();
+  const tile = cacheSavingsTile({ cache: { savedUSD: 2.7, cacheReadTokens: 1_000_000, unpricedModels: [] } });
+  assert.equal(tile.value, '$2.70');
+  assert.equal(tile.sub, '1M cache read tokens');
+  assert.equal(cacheSavingsTile({ cache: null }), null);
+  assert.equal(cacheSavingsTile(null), null);
+});
+
+// An unpriced model's tokens are counted and its dollars are not, so the figure is a floor and says so.
+test('cacheSavingsTile: unpriced models turn the figure into a floor', async () => {
+  const { cacheSavingsTile } = await importCore();
+  const one = cacheSavingsTile({ cache: { savedUSD: 2.7, cacheReadTokens: 1_500_000, unpricedModels: ['zzz'] } });
+  assert.equal(one.sub, '1.5M cache read tokens, a floor (1 unpriced model)');
+  const many = cacheSavingsTile({ cache: { savedUSD: 2.7, cacheReadTokens: 1_500_000, unpricedModels: ['zzz', 'yyy'] } });
+  assert.equal(many.sub, '1.5M cache read tokens, a floor (2 unpriced models)');
+});
+
+test('savingsHint: each half states its own scope, and only when it is on the page', async () => {
+  const { savingsHint, SAVINGS_RTK_HINT, SAVINGS_CACHE_HINT } = await importCore();
+  const cache = { savedUSD: 2.7, cacheReadTokens: 1000, unpricedModels: [] };
+  assert.equal(savingsHint({ rtk: RTK_SAVINGS, cache }), `${SAVINGS_RTK_HINT}; ${SAVINGS_CACHE_HINT}`);
+  assert.equal(savingsHint({ rtk: RTK_SAVINGS, cache: null }), SAVINGS_RTK_HINT);
+  assert.equal(savingsHint({ rtk: { available: false }, cache }), SAVINGS_CACHE_HINT);
+  assert.equal(savingsHint({ rtk: { available: false }, cache: null }), '');
+  // The rtk figure counts work Glissa never did, so the scope has to be said out loud.
+  assert.match(SAVINGS_RTK_HINT, /machine-wide/);
+  assert.match(SAVINGS_CACHE_HINT, /Claude only/);
+});
+
 test('no produced string contains an em dash, en dash or ellipsis character', async () => {
   const core = await importCore();
   const forbidden = [String.fromCharCode(0x2014), String.fromCharCode(0x2013), String.fromCharCode(0x2026)];
@@ -542,7 +652,14 @@ test('no produced string contains an em dash, en dash or ellipsis character', as
   const now = 1_800_000_000_000;
 
   const produced = [core.USAGE_CAVEAT, core.USAGE_CAVEAT_SHORT, core.USAGE_DISABLED_HINT, core.NO_VALUE];
+  produced.push(core.SAVINGS_RTK_HINT, core.SAVINGS_CACHE_HINT);
   for (const option of core.RANGE_OPTIONS) produced.push(option.label);
+  for (const n of numbers) {
+    const rtkTile = core.rtkSavingsTile({ rtk: { available: true, savedTokens: n, savingsPct: n, commands: n } });
+    produced.push(rtkTile.value, rtkTile.sub);
+    const cacheTile = core.cacheSavingsTile({ cache: { savedUSD: n, cacheReadTokens: n, unpricedModels: ['a', 'b'] } });
+    produced.push(cacheTile.value, cacheTile.sub);
+  }
   for (const n of numbers) {
     produced.push(core.formatUsd(n), core.formatTokens(n), core.formatCount(n), core.formatMinutes(n));
     produced.push(core.formatPercent(n), core.tokenLimitTone(n), core.blockLabel(n));
@@ -564,6 +681,8 @@ test('no produced string contains an em dash, en dash or ellipsis character', as
   produced.push(core.usageWarningLine({ warning: 'nope' }), core.usageErrorLine({ error: 'off' }));
   produced.push(core.shareLabel('costUSD'), core.shareLabel('tokens'));
   produced.push(core.provenanceLabel('official'), core.provenanceLabel('estimated'), core.provenanceLabel(null));
+  produced.push(core.CLAUDE_ONLY_HINT, core.vendorLabel('codex'), core.vendorLabel('grok'), core.vendorLabel(''));
+  produced.push(core.claudeOnlyHint({ byVendor: { claude: {}, codex: { tokens: 1 } } }));
   for (const window of core.PLAN_WINDOWS) produced.push(window.label);
   for (const n of numbers) {
     produced.push(core.planWindowUsedText({ pct: n }), core.resetCountdownText(n, now));

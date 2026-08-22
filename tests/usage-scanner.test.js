@@ -436,6 +436,50 @@ test('stats reports dirs, files, entries and lastScanMs', async () => {
   assert.equal(stats.lastScanMs, Date.parse('2026-08-19T12:00:00.000Z'));
 });
 
+// Without the retention floor, retainDays: 7 compares a month's ceiling against seven days of spend.
+test('budgetSpend sees the whole month even when retainDays is shorter than it', async () => {
+  const root = await makeTempRoot();
+  const projectsDir = await makeProjectsDir(root);
+  const transcript = path.join(projectsDir, 'C--repo', 'session-a.jsonl');
+  // Three days spread across the month, two of them outside a 7 day window ending Aug 19.
+  await writeLines(transcript, [
+    usageLine({ messageId: 'm-early', requestId: 'r1', input: 1000, timestamp: '2026-08-02T10:00:00.000Z' }),
+    usageLine({ messageId: 'm-mid', requestId: 'r2', input: 1000, timestamp: '2026-08-09T10:00:00.000Z' }),
+    usageLine({ messageId: 'm-today', requestId: 'r3', input: 1000, timestamp: '2026-08-19T10:00:00.000Z' }),
+  ]);
+  const scanner = makeScanner(root, { retainDays: 7, budget: { monthlyUsd: 100 } });
+  await scanner.runPass();
+
+  const spend = scanner.budgetSpend();
+  assert.equal(spend.todayKey, '2026-08-19');
+  assert.equal(spend.monthKey, '2026-08');
+  // Every day of the month counts, not just the ones inside the 7 day transcript window.
+  assert.equal(spend.monthUsd > spend.todayUsd, true, `month ${spend.monthUsd} should exceed today ${spend.todayUsd}`);
+  assert.equal(Math.round(spend.monthUsd / spend.todayUsd), 3, 'all three days');
+  // The report itself still honors retainDays: widening is for the budget lookback alone.
+  assert.equal(scanner.buildReport({}).daily.length, 1, 'the report window is untouched');
+
+  // Without a monthly budget the operator's retention choice is honored exactly.
+  const narrow = makeScanner(root, { retainDays: 7 });
+  await narrow.runPass();
+  assert.equal(narrow.budgetSpend().monthUsd, narrow.budgetSpend().todayUsd, 'no budget, no widening');
+});
+
+test('budgetSpend shares the report rollups when retainDays already covers the month', async () => {
+  const root = await makeTempRoot();
+  const projectsDir = await makeProjectsDir(root);
+  await writeLines(path.join(projectsDir, 'C--repo', 'session-a.jsonl'), [
+    usageLine({ messageId: 'm1', requestId: 'r1', input: 1000, timestamp: '2026-08-19T10:00:00.000Z' }),
+  ]);
+  // The default retainDays (90) is always longer than a month, so nothing is widened and no second
+  // aggregate pass is computed.
+  const scanner = makeScanner(root);
+  await scanner.runPass();
+  const spend = scanner.budgetSpend();
+  assert.equal(spend.todayUsd, spend.monthUsd);
+  assert.equal(spend.monthUsd > 0, true);
+});
+
 function makeScanner(root, overrides = {}) {
   return createUsageScanner({
     env: { HOME: root },
