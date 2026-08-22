@@ -140,9 +140,8 @@ const BOOLEAN_KEYS = [
   // Absent from getSettings for the same reason as packsAutoRebuild: the mill ships no Settings
   // control, and a session reads this once at spawn.
   'packReadTelemetry',
-  // Both worktree conflict-avoidance switches, absent from getSettings for the same reason
-  // (precedent: usage.rtkSavings). Validated and reloadable; each takes effect on the next session
-  // construction / server restart respectively.
+  // Both worktree conflict-avoidance switches, absent from getSettings for the same reason.
+  // Validated and reloadable; each takes effect on the next session construction / server restart.
   'worktreeAutoRebase',
   'worktreeRerere',
 ];

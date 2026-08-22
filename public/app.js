@@ -275,15 +275,6 @@ const messageHandlers = {
   'usage-report':       (msg) => applyUsageReport(msg),
   // Official account rate limits from the managed statusLine relay (machine-wide, not per session).
   'plan-limits':        (msg) => applyPlanLimits(msg),
-  // A budget threshold was crossed. A moment, not a state: deliberately absent from the control replay log
-  // (server/control-replay-core.js REPLAYABLE_EXACT), so a reconnect never re-alerts a past crossing. The
-  // claim key is scope + period + threshold, so every open tab raises it at most once.
-  'usage-budget-alert': (msg) => showDesktopNotification({
-    session: `budget-${msg.scope}-${msg.periodKey}`,
-    category: `threshold-${msg.threshold}`,
-    message: msg.text,
-    ignoreFocus: true,
-  }),
   // Navigator lane. The per-uri push carries one document's current findings (empty clears it); the
   // snapshot is the whole map, sent on every connect so a reconnect repairs the tab in one frame.
   'navigator-findings': (msg) => applyNavigatorFindings(msg),

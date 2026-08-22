@@ -12,48 +12,30 @@ import { createPollAgoTicker, formatAgo } from './poll-ago.js';
 import {
   DEFAULT_DAY_SORT,
   DEFAULT_MODEL_SORT,
-  DEFAULT_PERIOD_VIEW,
   DEFAULT_RANGE_VALUE,
   DEFAULT_SESSION_SORT,
-  HEATMAP_DAY_LABELS,
   LANE_SCOPE_HINT,
-  NO_ANOMALY_LINE,
-  PERIOD_VIEWS,
   PLAN_WINDOWS,
   RANGE_OPTIONS,
   USAGE_CAVEAT,
   USAGE_CAVEAT_SHORT,
   USAGE_DISABLED_HINT,
-  anomalyLine,
-  anomalyTone,
   ariaSortValue,
-  claudeOnlyHint,
   blockAttentionTone,
   blockHistoryRows,
   blockLabel,
   blockProgress,
-  budgetRowMeterLabel,
-  budgetRowPct,
-  budgetRowText,
-  budgetRows,
-  budgetScopeLabel,
   burnTiles,
-  cacheSavingsTile,
   dailyRowForDay,
+  dayLabel,
   dayRangeLabel,
   formatMinutes,
   formatPercent,
   formatTokens,
   formatUsd,
-  hasAnomaly,
   hasLaneAttribution,
-  hasMultiVendorUsage,
   hasOfficialPlanLimits,
-  hasSavings,
   hasUsageAttention,
-  heatmapCellTitle,
-  heatmapCells,
-  historyNote,
   isGlissaSessionRow,
   isUsageUnavailable,
   laneLabel,
@@ -62,12 +44,8 @@ import {
   limitPct,
   missingPricingLine,
   modelLabel,
-  modelRowPrefix,
   nextSortState,
   percentOfTotal,
-  periodHint,
-  periodLabel,
-  periodRows,
   planLimitAgeText,
   planLimitStaleNote,
   planWindowOf,
@@ -78,8 +56,6 @@ import {
   provenanceLabel,
   reportDayKey,
   resetCountdownText,
-  rtkSavingsTile,
-  savingsHint,
   scanLine,
   sessionRowLabel,
   shareBasis,
@@ -92,7 +68,6 @@ import {
   tokenLimitTone,
   usageErrorLine,
   usageWarningLine,
-  vendorTotalsRows,
 } from './usage-view-core.mjs';
 
 const REFRESH_STATUS_TIMEOUT_MS = 20000;
@@ -113,7 +88,6 @@ let _daySort = DEFAULT_DAY_SORT;
 let _modelSort = DEFAULT_MODEL_SORT;
 let _sessionSort = DEFAULT_SESSION_SORT;
 let _focusAfterRender = null;
-let _periodView = DEFAULT_PERIOD_VIEW;
 const _expandedDays = new Set();
 
 // Elements the shared tick repaints in place, so a report that has not changed is never rebuilt just to
@@ -356,10 +330,7 @@ function buildHeaderSection() {
 // stale, with its age, rather than hidden or silently swapped for the estimate.
 function buildPlanLimitsSection() {
   if (!hasOfficialPlanLimits(_planLimits)) return null;
-  const claudeOnly = claudeOnlyHint(_report?.totals);
-  const section = buildSection('Plan limits', claudeOnly
-    ? `${provenanceLabel('official')}, ${claudeOnly}`
-    : provenanceLabel('official'));
+  const section = buildSection('Plan limits', provenanceLabel('official'));
   const stale = planLimitStaleNote(_planLimits?.ts);
   if (stale) {
     const note = el('p', 'usage-meta', stale);
@@ -454,10 +425,7 @@ function buildLanesSection() {
 function buildActiveBlockSection() {
   const block = _report?.activeBlock;
   const hours = Number.isFinite(_report?.blockHours) ? _report.blockHours : 5;
-  // The 5h window is a Claude subscription concept, so the block numbers exclude other vendors. Said out
-  // loud, because otherwise they read as inconsistent with the multi-vendor totals below.
-  const claudeOnly = claudeOnlyHint(_report?.totals);
-  const section = buildSection('Current block', claudeOnly ? `${hours}h window, ${claudeOnly}` : `${hours}h window`);
+  const section = buildSection('Current block', `${hours}h window`);
   if (!block) {
     section.append(el('p', 'usage-empty', 'No block is active. The window opens again with the next turn.'));
     return section;
@@ -491,7 +459,6 @@ function buildActiveBlockSection() {
     projectionEl.dataset.tone = tone;
     section.append(projectionEl);
   }
-  section.append(buildAnomalyLine());
 
   const limit = tokenLimitLine(_report?.tokenLimit);
   if (!limit) return section;
@@ -513,25 +480,11 @@ function buildActiveBlockSection() {
   return section;
 }
 
-/*
- * Whether today (or this block) is out of line with the recent past. Present either way: a quiet
- * confirmation is worth one muted line, because an alarm that only ever appears cannot be trusted to be
- * working. Compared against a 30 day baseline server-side; the wording always names the comparison.
- */
-function buildAnomalyLine() {
-  const anomaly = _report?.anomaly;
-  if (!hasAnomaly(anomaly)) return el('p', 'usage-meta', NO_ANOMALY_LINE);
-  const line = el('p', 'usage-meta', anomalyLine(anomaly));
-  line.dataset.tone = anomalyTone(anomaly);
-  return line;
-}
-
 // ── Block history ──
 function buildBlockHistorySection() {
   const rows = blockHistoryRows(_report?.blocks);
   if (rows.length === 0) return null;
-  const claudeOnly = claudeOnlyHint(_report?.totals);
-  const section = buildSection('Recent blocks', claudeOnly ? `newest first, ${claudeOnly}` : 'newest first');
+  const section = buildSection('Recent blocks', 'newest first');
   const list = el('div', 'usage-blocks');
   const peak = rows.reduce((best, row) => Math.max(best, row.tokens), 0);
   for (const row of rows) {
@@ -564,18 +517,6 @@ function buildTotalsSection() {
   tiles.append(buildTile('cache write', formatTokens(totals.cacheCreate ?? 0)).tile);
   tiles.append(buildTile('cache read', formatTokens(totals.cacheRead ?? 0)).tile);
   section.append(tiles);
-  // The per-vendor split, only once a non-Claude vendor has data: on an all-Claude machine it would just
-  // restate the totals above.
-  const vendorRows = hasMultiVendorUsage(totals) ? vendorTotalsRows(totals) : [];
-  if (vendorRows.length > 0) {
-    const vendorTiles = el('div', 'usage-tiles usage-vendor-tiles');
-    for (const row of vendorRows) {
-      vendorTiles.append(buildTile(row.label, formatTokens(row.tokens), formatUsd(row.costUSD)).tile);
-    }
-    section.append(vendorTiles);
-  }
-  const budget = buildBudgetMeters();
-  if (budget) section.append(budget);
   _sessionsTsEl = el('p', 'usage-meta', '');
   section.append(_sessionsTsEl);
   paintSessionsTs();
@@ -583,65 +524,17 @@ function buildTotalsSection() {
   return section;
 }
 
-/*
- * What the token-saving systems are worth, beside what was spent. Absent entirely when neither half has
- * anything to report, and each tile is omitted on its own: a machine without rtk still gets the cache
- * figure, and an rtk figure is shown on a machine whose Claude rows carry no cache reads.
- */
-function buildSavingsSection() {
-  const savings = _report?.savings;
-  if (!hasSavings(savings)) return null;
-  const section = buildSection('Savings', savingsHint(savings));
-  const tiles = el('div', 'usage-tiles');
-  const rtk = rtkSavingsTile(savings);
-  if (rtk) tiles.append(buildTile('rtk compression', rtk.value, rtk.sub).tile);
-  const cache = cacheSavingsTile(savings);
-  if (cache) tiles.append(buildTile('Prompt cache', cache.value, cache.sub).tile);
-  section.append(tiles);
-  return section;
-}
-
-/*
- * The operator's own spend ceilings. Absent entirely with no budget configured: an unset budget must not
- * render as a zero one. Tones come from usage-budget-core, so the meter colour and the alert ladder agree.
- */
-function buildBudgetMeters() {
-  const rows = budgetRows(_report);
-  if (rows.length === 0) return null;
-  const wrap = el('div', 'usage-budgets');
-  for (const row of rows) {
-    const item = el('div', 'usage-budget');
-    const head = el('div', 'usage-budget-head');
-    head.append(el('span', 'usage-budget-label', budgetScopeLabel(row.scope)));
-    head.append(el('span', 'usage-budget-value', budgetRowText(row)));
-    head.append(el('span', 'usage-budget-pct', formatPercent(budgetRowPct(row))));
-    item.append(head);
-    item.append(buildMeter(budgetRowPct(row), row.tone, budgetRowMeterLabel(row)));
-    wrap.append(item);
-  }
-  return wrap;
-}
-
 // ── Over time ──
-// One table, three period views, all derived from the same merged daily series so a week total can never
-// disagree with the days under it. Sorting and the per-period model breakdown carry across the switch.
 function buildDailySection() {
-  const daily = _report?.daily || [];
-  const periodView = _periodView;
-  const rows = sortDailyRows(periodRows(daily, periodView), _daySort);
-  const columnLabel = PERIOD_VIEWS.find((view) => view.value === periodView)?.label || 'Day';
-  const hints = [periodHint(periodView), historyNote(daily)].filter(Boolean);
-  const section = buildSection('Over time', hints.join(', '));
-  section.append(buildPeriodSwitch());
+  const rows = sortDailyRows(_report?.daily || [], _daySort);
+  const section = buildSection('Over time', 'newest first by default');
   if (rows.length === 0) {
     section.append(el('p', 'usage-empty', 'No usage recorded yet.'));
     return section;
   }
-  const heatmap = buildHeatmap(daily);
-  if (heatmap) section.append(heatmap);
   const { wrap, body } = buildTable(
     [
-      { label: columnLabel, key: 'day' },
+      { label: 'Day', key: 'day' },
       { label: 'Tokens', numeric: true, key: 'tokens' },
       { label: 'Cost', numeric: true, key: 'costUSD' },
       { label: 'Models' },
@@ -656,80 +549,20 @@ function buildDailySection() {
   for (const row of rows) {
     const day = String(row.day ?? '');
     const tr = el('tr', 'usage-row');
-    if (row.source === 'history') tr.dataset.source = 'history';
     const models = sortModelRows(row.models);
-    // Namespaced by view: weeks are keyed by their Monday, the same string as that day's Day-view key.
-    const expandKey = `${periodView}:${day}`;
-    const toggle = buildBreakdownToggle(expandKey, models.length);
     appendCells(tr, [
-      { node: buildPeriodCell(row, periodView), title: day },
+      { text: dayLabel(day), title: day },
       { text: formatTokens(row.tokens), numeric: true },
       { text: formatUsd(row.costUSD), numeric: true },
-      { node: toggle, className: 'usage-toggle-cell' },
+      { node: buildBreakdownToggle(day, models.length), className: 'usage-toggle-cell' },
     ]);
     body.append(tr);
     if (models.length === 0) continue;
-    if (!_expandedDays.has(expandKey)) continue;
+    if (!_expandedDays.has(day)) continue;
     body.append(buildBreakdownRow(models));
   }
   section.append(wrap);
   return section;
-}
-
-// Three stable labels with aria-pressed, not one control that renames itself: the pressed state is the
-// indicator, and every button always says which view it selects.
-function buildPeriodSwitch() {
-  const group = el('div', 'usage-period');
-  group.setAttribute('role', 'group');
-  group.setAttribute('aria-label', 'Period');
-  for (const view of PERIOD_VIEWS) {
-    const button = el('button', 'usage-period-button', view.label);
-    button.type = 'button';
-    button.dataset.periodView = view.value;
-    button.setAttribute('aria-pressed', view.value === _periodView ? 'true' : 'false');
-    button.addEventListener('click', () => {
-      if (_periodView === view.value) return;
-      _periodView = view.value;
-      _focusAfterRender = { kind: 'period', view: view.value };
-      render();
-    });
-    group.append(button);
-  }
-  return group;
-}
-
-// A remembered row reads differently from an observed one, so history is tagged in the table too.
-function buildPeriodCell(row, periodView) {
-  const wrap = el('span', 'usage-period-cell');
-  wrap.append(el('span', null, periodLabel(row.day, periodView)));
-  if (row.source === 'history') wrap.append(el('span', 'usage-history-tag', 'history'));
-  return wrap;
-}
-
-// ── Heatmap ──
-// A CSS grid, one column per week, Monday to Sunday down each column. No canvas and no library: the whole
-// thing is 112 spans whose only variable is a tone attribute.
-function buildHeatmap(daily) {
-  const { cells, max } = heatmapCells(daily);
-  if (cells.length === 0 || max <= 0) return null;
-  const wrap = el('div', 'usage-heatmap-scroll');
-  const grid = el('div', 'usage-heatmap');
-  grid.setAttribute('role', 'img');
-  grid.setAttribute('aria-label', `Daily usage for the trailing ${Math.max(...cells.map((cell) => cell.week)) + 1} weeks`);
-  const labels = el('div', 'usage-heatmap-days');
-  for (const label of HEATMAP_DAY_LABELS) labels.append(el('span', 'usage-heatmap-day', label));
-  for (const cell of cells) {
-    const box = el('span', 'usage-heatmap-cell');
-    box.dataset.tone = String(cell.tone);
-    if (cell.noData) box.dataset.noData = 'true';
-    if (cell.source === 'history') box.dataset.source = 'history';
-    box.style.gridColumn = String(cell.week + 1);
-    box.style.gridRow = String(cell.weekday + 1);
-    box.title = heatmapCellTitle(cell);
-    grid.append(box);
-  }
-  wrap.append(labels, grid);
-  return wrap;
 }
 
 // Stable label, state on aria-expanded (the chevron is a CSS response to that attribute), so the
@@ -769,16 +602,6 @@ function buildBreakdownRow(models) {
   return breakdown;
 }
 
-// A muted vendor prefix, added only once the page shows more than one vendor: "gpt-5.5" alone does not
-// say where it came from, and on an all-Claude machine the prefix would be on every row for nothing.
-function buildModelCell(row, totals) {
-  const wrap = el('span', 'usage-model-name-wrap');
-  const prefix = modelRowPrefix(row, totals);
-  if (prefix) wrap.append(el('span', 'usage-vendor-tag', prefix));
-  wrap.append(el('span', null, modelLabel(row)));
-  return wrap;
-}
-
 // ── Per model ──
 function buildModelsSection() {
   const rows = sortModelRows(_report?.models, _modelSort);
@@ -810,7 +633,7 @@ function buildModelsSection() {
   for (const row of rows) {
     const tr = el('tr', 'usage-row');
     appendCells(tr, [
-      { node: buildModelCell(row, totals), className: 'usage-model-cell', title: modelLabel(row) },
+      { text: modelLabel(row), className: 'usage-model-cell', title: modelLabel(row) },
       { text: formatTokens(row.tokens), numeric: true },
       { text: formatUsd(row.costUSD), numeric: true },
       { node: buildShareCell(percentOfTotal(row[basis], totals[basis])), className: 'usage-share-cell' },
@@ -931,7 +754,6 @@ function restoreFocusAfterRender() {
 
 function selectorForFocusTarget(target) {
   if (target.kind === 'day') return `.usage-toggle[data-usage-day="${CSS.escape(target.day)}"]`;
-  if (target.kind === 'period') return `.usage-period-button[data-period-view="${CSS.escape(target.view)}"]`;
   if (target.kind === 'sort') return `[data-usage-table="${CSS.escape(target.table)}"] .usage-sort[data-sort-key="${CSS.escape(target.key)}"]`;
   return null;
 }
@@ -956,8 +778,6 @@ function buildBody() {
   const history = buildBlockHistorySection();
   if (history) _root.append(history);
   _root.append(buildTotalsSection());
-  const savings = buildSavingsSection();
-  if (savings) _root.append(savings);
   _root.append(buildDailySection(), buildModelsSection(), buildSessionsSection());
   _root.append(buildFootnote());
 }
