@@ -662,9 +662,9 @@ function createBackend(httpServer, options = {}) {
   // recover exactly what it missed (see control-handlers.js connection handler).
   const controlReplayLog = createReplayLog();
 
+  // Stamp a copy: lane runners cache msg for later replay, so stamping in place leaves a stale seq.
   function broadcastControl(msg) {
-    controlReplayLog.stamp(msg);
-    const payload = JSON.stringify(msg);
+    const payload = JSON.stringify(controlReplayLog.stamp({ ...msg }));
     for (const client of controlWss.clients) {
       if (client.readyState === 1) {
         client.send(payload);
@@ -680,8 +680,7 @@ function createBackend(httpServer, options = {}) {
    * local, so behavior with remote mode off is unchanged.
    */
   function broadcastLocalControl(msg) {
-    controlReplayLog.stamp(msg);
-    const payload = JSON.stringify(msg);
+    const payload = JSON.stringify(controlReplayLog.stamp({ ...msg }));
     for (const client of controlWss.clients) {
       if (client.readyState !== 1) continue;
       if (client.glissaTrust === 'remote') continue;

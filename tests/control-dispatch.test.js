@@ -91,7 +91,7 @@ function harnessWithReplay(replayLog) {
     config: { projects: [], teams: [] },
     configStore: { save: (fn) => fn({ projects: [], teams: [] }), getSettings: () => ({}) },
     applyConfigReload: () => {},
-    broadcastControl: (msg) => replayLog.stamp(msg),
+    broadcastControl: (msg) => replayLog.stamp({ ...msg }),
     controlReplayLog: replayLog,
   });
   return { connect };
@@ -109,6 +109,35 @@ test('a reconnect with ?since replays only the missed replayable broadcasts, aft
   assert.equal(client.sent.length, 2, 'snapshot then exactly one replayed notify');
   assert.equal(client.sent[0].type, 'snapshot');
   assert.equal(client.sent[1].type, 'notify');
+});
+
+// Stale seq on a cached object silently drops it behind a younger lane's replay.
+test('a cached lane status replayed on connect carries no stale seq', () => {
+  const replayLog = createReplayLog();
+  const broadcastControl = (msg) => replayLog.stamp({ ...msg });
+  const posthogStatus = { type: 'posthog-status', configured: true };
+  const prStatus = { type: 'pr-status', configured: true };
+  broadcastControl(prStatus);
+  broadcastControl(posthogStatus);
+
+  const controlWss = new EventEmitter();
+  registerControlHandlers(controlWss, {
+    sessions: new Map(),
+    config: { projects: [], teams: [] },
+    configStore: { save: (fn) => fn({ projects: [], teams: [] }), getSettings: () => ({}) },
+    applyConfigReload: () => {},
+    broadcastControl,
+    controlReplayLog: replayLog,
+    getPosthogStatus: () => posthogStatus,
+    getPrStatus: () => prStatus,
+  });
+  const sent = [];
+  const ws = { send: (s) => sent.push(JSON.parse(s)), on: () => {} };
+  controlWss.emit('connection', ws, { url: '/control' });
+
+  const replayed = sent.filter((m) => m.type === 'posthog-status' || m.type === 'pr-status');
+  assert.equal(replayed.length, 2, 'both cached lane statuses replayed');
+  for (const msg of replayed) assert.equal(msg.seq, undefined, `${msg.type} must be seq-less`);
 });
 
 test('no ?since param (first connect) replays nothing', () => {
