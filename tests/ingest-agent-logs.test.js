@@ -565,6 +565,13 @@ test('a tail pushed out of the active set by newer work is picked back up when i
   assert.equal(adapter.activeCount, 1, 'only one file may be polled');
 
   append(quiet, claudeAssistant({ text: 'the evicted session woke up', sessionId: 'sess-pushed-out' }));
+  /*
+   * The active set is ordered by mtime, and two appends microseconds apart can land on the SAME
+   * filesystem timestamp, which makes the eviction order arbitrary and this test a coin flip. A session
+   * that genuinely wakes up later has a later mtime; this says so instead of hoping for one.
+   */
+  const wokeAt = new Date(Date.now() + 1000);
+  fs.utimesSync(quiet, wokeAt, wokeAt);
   await adapter.discover();
   await adapter.poll();
   assert.ok(
@@ -722,6 +729,14 @@ test('a deleted transcript stops costing a stat on every poll', withHomes(async 
   assert.equal(adapter.trackedCount, 1);
 
   fs.rmSync(filePath);
+  /*
+   * A directory is re-listed only when its mtime moved, which is the whole scale rule. Creating and
+   * deleting inside one millisecond can leave that mtime where it was, so the sweep would skip the
+   * listing and the test would flake on timer resolution rather than on the behavior it pins. Any real
+   * deletion has elapsed time behind it; this says so explicitly.
+   */
+  const deletedAt = new Date(Date.now() + 1000);
+  fs.utimesSync(path.dirname(filePath), deletedAt, deletedAt);
   await adapter.discover();
   await adapter.poll();
   assert.equal(adapter.trackedCount, 0, 'a transcript its directory no longer names is gone for good');

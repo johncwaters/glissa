@@ -10,6 +10,8 @@
 
 'use strict';
 
+const { positiveInt } = require('./ingest-number-core');
+
 const SOURCE_NAMES = ['terminal', 'agentLogs', 'git', 'fs', 'shellHistory', 'editor'];
 
 // The Sources table in docs/plan-ingestion.md. These are the load-bearing bound, not tuning hints.
@@ -27,7 +29,9 @@ const SOURCE_DEFAULTS = Object.freeze({
     maxEntries: 100, maxBytes: 64 * 1024, digestQuota: 6, debounceMs: 1000, pollMs: 60000,
   }),
   fs: Object.freeze({ maxEntries: 500, maxBytes: 128 * 1024, digestQuota: 8, batchMs: 500 }),
-  shellHistory: Object.freeze({ maxEntries: 100, maxBytes: 32 * 1024, digestQuota: 6 }),
+  shellHistory: Object.freeze({
+    maxEntries: 100, maxBytes: 32 * 1024, digestQuota: 6, pollMs: 2000,
+  }),
   editor: Object.freeze({ maxEntries: 100, maxBytes: 32 * 1024, digestQuota: 6 }),
 });
 
@@ -49,20 +53,15 @@ const DEFAULT_DIGEST_BUDGET_CHARS = 2000;
 const SCRUB_PLACEHOLDER = '[scrubbed]';
 const DIGEST_HEADER = 'Recent activity on this machine, newest first:';
 
-function positiveInt(value, fallback) {
-  const number = Number(value);
-  if (!Number.isFinite(number) || number <= 0) return fallback;
-  return Math.floor(number);
-}
-
 // --- Config ---------------------------------------------------------------
 
 /*
- * The one non-numeric source option: `sources.fs.roots`, a list of directories to widen the fs source
- * beyond the projects with active sessions. It needs its own branch because every other option resolves
- * through positiveInt, which would silently turn a configured list back into the empty default.
+ * The two non-numeric source options: `sources.fs.roots`, a list of directories widening the fs source
+ * beyond the projects with active sessions, and `sources.shellHistory.shells`, naming which shells to
+ * tail. They need their own branch because every other option resolves through positiveInt, which would
+ * silently turn a configured list back into the empty default.
  */
-const LIST_KEYS = Object.freeze({ fs: 'roots' });
+const LIST_KEYS = Object.freeze({ fs: 'roots', shellHistory: 'shells' });
 
 function stringList(raw) {
   if (!Array.isArray(raw)) return [];

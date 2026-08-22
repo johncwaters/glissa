@@ -31,6 +31,7 @@ const {
   MAX_CATCH_UP_BYTES, applyRead, createTailState, isActiveMtime, pickStaleByMtime, planRead,
 } = require('./core/ingest-tail-core');
 const { isDispatchWorkdir, mapAgentLine } = require('./core/ingest-agent-core');
+const { positiveInt } = require('./core/ingest-number-core');
 
 const DEFAULT_POLL_MS = 2000;
 const DEFAULT_DISCOVER_MS = 30000;
@@ -40,12 +41,6 @@ const WATCH_SWEEP_DEBOUNCE_MS = 500;
 // A Codex rollout names its cwd only in the session_meta and turn_context lines at its head, and the
 // first of those carries the whole system prompt, so the bounded head read has to clear that.
 const CODEX_HEAD_BYTES = 128 * 1024;
-
-function positiveInt(value, fallback) {
-  const number = Number(value);
-  if (!Number.isFinite(number) || number <= 0) return fallback;
-  return Math.floor(number);
-}
 
 function unrefTimer(timer) {
   if (timer && typeof timer.unref === 'function') timer.unref();

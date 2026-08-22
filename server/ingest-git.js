@@ -34,6 +34,7 @@ const {
   decideGitEvents, deriveWatchDirs, isNoiseGitFile, parseCommitLine, parsePorcelainStatus, parseRevParse,
   shouldReadCommit,
 } = require('./core/ingest-git-core');
+const { positiveInt } = require('./core/ingest-number-core');
 
 const execFileAsync = promisify(execFile);
 
@@ -42,12 +43,6 @@ const DEFAULT_GIT_TIMEOUT_MS = 15000;
 // A status listing this large means an unignored dependency tree; the read is abandoned rather than
 // pulled into the event loop, and the repo simply reports nothing until its tree is sane again.
 const MAX_GIT_BUFFER_BYTES = 8 * 1024 * 1024;
-
-function positiveInt(value, fallback) {
-  const number = Number(value);
-  if (!Number.isFinite(number) || number <= 0) return fallback;
-  return Math.floor(number);
-}
 
 function unrefTimer(timer) {
   if (timer && typeof timer.unref === 'function') timer.unref();

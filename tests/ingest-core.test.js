@@ -74,6 +74,27 @@ test('ring caps and timings default to the plan Sources table and are overridabl
   assert.equal(tuned.sources.terminal.flushMs, 500);
 });
 
+test('shellHistory is off even with the lane on and every other source enabled', () => {
+  const sources = {};
+  for (const name of SOURCE_NAMES) sources[name] = { enabled: true };
+  delete sources.shellHistory;
+  const resolved = resolveIngestConfig({ enabled: true, sources });
+  assert.equal(resolved.sources.shellHistory.enabled, false);
+  assert.ok(!enabledSourceNames(resolved).includes('shellHistory'));
+});
+
+test('the shells list is resolved as a list, not coerced to a number like every other source option', () => {
+  const resolved = resolveIngestConfig({
+    enabled: true, sources: { shellHistory: { enabled: true, shells: ['fish', ' bash ', 'fish', 7], pollMs: 500 } },
+  });
+  assert.deepEqual(resolved.sources.shellHistory.shells, ['fish', 'bash']);
+  assert.equal(resolved.sources.shellHistory.pollMs, 500);
+
+  const bare = resolveIngestConfig({ enabled: true, sources: { shellHistory: { enabled: true } } });
+  assert.deepEqual(bare.sources.shellHistory.shells, [], 'empty means the zero-setup pair, decided downstream');
+  assert.equal(bare.sources.shellHistory.pollMs, SOURCE_DEFAULTS.shellHistory.pollMs);
+});
+
 // --- Scrub ----------------------------------------------------------------
 
 test('every secret shape in the fixture set is scrubbed, and the surrounding text survives', () => {
@@ -94,6 +115,53 @@ test('every secret shape in the fixture set is scrubbed, and the surrounding tex
     assert.ok(scrubbed.includes(SCRUB_PLACEHOLDER), `no placeholder in: ${scrubbed}`);
     assert.ok(scrubbed.startsWith(raw.slice(0, raw.indexOf(keptPrefix) + keptPrefix.length)), scrubbed);
   }
+});
+
+/*
+ * Shell history is the source that reads what a carbon unit typed at a prompt, which is where these
+ * shapes actually live (docs/plan-ingestion.md, M10). PSReadLine scrubs its own sensitive lines before
+ * writing, so this is the second line of defence, not the first, and the publish-time scrub is what
+ * makes it hold for fish, bash and zsh too, none of which scrub anything.
+ */
+test('the secret shapes a shell command line carries are scrubbed, and the command still reads', () => {
+  const fixtures = [
+    ['$env:GITHUB_TOKEN = "ghp_aaaabbbbccccdddd"', '$env:GITHUB_TOKEN = ', 'ghp_aaaabbbbccccdddd'],
+    ['export ANTHROPIC_API_KEY=sk-ant-api03-xyz', 'export ANTHROPIC_API_KEY=', 'sk-ant-api03-xyz'],
+    ['psql postgresql://app:hunter2@db.internal:5432/app', 'psql postgresql://app:', 'hunter2'],
+    ['gh auth login --token ghp_zzzzzzzzzzzz', 'gh auth login --token ', 'ghp_zzzzzzzzzzzz'],
+    ['curl -H "Authorization: Bearer eyJhbGciOiJIUzI1NiJ9" https://api', 'Bearer ', 'eyJhbGciOiJIUzI1NiJ9'],
+    ['docker login -u me --password s3cr3tpw registry.io', '--password ', 's3cr3tpw'],
+    ['$secure = ConvertTo-SecureString -AsPlainText P@ssw0rd -Force', '-AsPlainText ', 'P@ssw0rd'],
+    ['setx CONNECTION_STRING "Server=db;Password=hunter2"', 'Password=', 'hunter2'],
+  ];
+  for (const [raw, keptPrefix, secret] of fixtures) {
+    const scrubbed = scrubText(raw);
+    assert.ok(!scrubbed.includes(secret), `secret survived: ${scrubbed}`);
+    assert.ok(scrubbed.startsWith(raw.slice(0, raw.indexOf(keptPrefix) + keptPrefix.length)), scrubbed);
+  }
+});
+
+test('an ordinary shell command with no secret in it is published exactly as typed', () => {
+  const store = createIngestStore(allSourcesOn());
+  publishEvent(store, {
+    source: 'shellHistory', kind: 'command', summary: 'powershell: npm run build -- --mode production', scope: { root: null },
+  }, NOW);
+  assert.equal(snapshotEvents(store)[0].summary, 'powershell: npm run build -- --mode production');
+});
+
+test('a secret in a shell command never reaches a ring entry', () => {
+  const store = createIngestStore(allSourcesOn());
+  publishEvent(store, {
+    source: 'shellHistory',
+    kind: 'command',
+    summary: 'powershell: $env:GITHUB_TOKEN = "ghp_aaaabbbbccccdddd"',
+    scope: { root: null },
+    detail: { shell: 'powershell', text: 'export API_KEY=sk-live-1234' },
+  }, NOW);
+  const [stored] = snapshotEvents(store);
+  assert.ok(!stored.summary.includes('ghp_aaaabbbbccccdddd'), stored.summary);
+  assert.ok(!stored.detail.text.includes('sk-live-1234'), stored.detail.text);
+  assert.ok(stored.summary.includes(SCRUB_PLACEHOLDER));
 });
 
 test('a multiline chunk loses each secret value and keeps every other line intact', () => {

@@ -24,17 +24,12 @@ const {
   DEFAULT_BATCH_MS, buildIgnorePatterns, createBatch, daemonWriteRules, decideFsEvents, dedupeRoots,
   isIgnoredChange, normalizeRoots, recordChange, relativeWithin,
 } = require('./core/ingest-fs-core');
+const { positiveInt } = require('./core/ingest-number-core');
 
 const DEFAULT_MAX_ROOTS = 8;
 // The holder every `fs.roots` entry is registered under. A string no session id can collide with, since
 // session ids are UUIDs.
 const CONFIG_HOLDER = 'config:fs.roots';
-
-function positiveInt(value, fallback) {
-  const number = Number(value);
-  if (!Number.isFinite(number) || number <= 0) return fallback;
-  return Math.floor(number);
-}
 
 function unrefTimer(timer) {
   if (timer && typeof timer.unref === 'function') timer.unref();

@@ -19,6 +19,7 @@ const { deriveSessionRoots, isActiveSessionState } = require('./core/ingest-fs-c
 const { createAgentLogIngest } = require('./ingest-agent-logs');
 const { createFsIngest } = require('./ingest-fs');
 const { createGitIngest } = require('./ingest-git');
+const { createShellHistoryIngest } = require('./ingest-shell-history');
 const { createTerminalIngest } = require('./ingest-terminal');
 
 const BATCH_INTERVAL_MS = 1000;
@@ -32,6 +33,7 @@ function createIngestLane({
   laneMap = null,
   agentLogOptions = null,
   fsOptions = null,
+  shellHistoryOptions = null,
   // The daemon's own resolved config path, so the fs source can ignore the state files glissa writes
   // beside it; rationale at the consuming site in ingest-fs.js.
   configPath = null,
@@ -199,6 +201,27 @@ function createIngestLane({
     : null;
   if (fsSource) adapters.push(fsSource);
 
+  /*
+   * The one source reading data created OUTSIDE glissa's own surfaces, so it needs `enabled: true` of
+   * its own even with the lane on and every other source running (docs/plan-ingestion.md, "Config").
+   * The resolver already defaults it off; this construction gate is what makes that cost zero.
+   */
+  const shellHistoryEnabled = resolved.enabled === true && resolved.sources.shellHistory.enabled === true;
+  const shellHistory = shellHistoryEnabled
+    ? createShellHistoryIngest({
+      publish,
+      sourceConfig: resolved.sources.shellHistory,
+      logger,
+      nowFn,
+      setIntervalFn,
+      clearIntervalFn,
+      setTimeoutFn,
+      clearTimeoutFn,
+      ...(shellHistoryOptions || {}),
+    })
+    : null;
+  if (shellHistory) adapters.push(shellHistory);
+
   // Adapters that own their own discovery start themselves; the terminal source has nothing to start,
   // since its taps arrive one session at a time from wireSessionEvents.
   for (const adapter of adapters) {
@@ -303,6 +326,8 @@ function createIngestLane({
     get gitEnabled() { return gitEnabled; },
     get fs() { return fsSource; },
     get fsEnabled() { return fsEnabled; },
+    get shellHistory() { return shellHistory; },
+    get shellHistoryEnabled() { return shellHistoryEnabled; },
     get terminalEnabled() { return terminalEnabled; },
     get tapCount() { return terminal ? terminal.tapCount : 0; },
     get pendingEventCount() { return pendingEvents.length; },

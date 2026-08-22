@@ -6,6 +6,7 @@
 
 'use strict';
 
+const { positiveInt } = require('./ingest-number-core');
 const { MAX_INTENT_CHARS, sanitizeIntentText } = require('./navigator-intent-core');
 
 const DEFAULT_QUIET_MS = 30000;
@@ -17,12 +18,6 @@ const MAX_COMMENTS = 5;
 const MAX_MESSAGE_CHARS = 300;
 const MAX_FINDING_LINES = 20;
 const HOUR_MS = 3600000;
-
-function positiveInt(value, fallback) {
-  const number = Number(value);
-  if (!Number.isFinite(number) || number <= 0) return fallback;
-  return Math.floor(number);
-}
 
 // For the one key where zero is a real setting rather than a typo: it turns activity dispatch off.
 // Stricter about type than positiveInt has to be, because null, '' and false all coerce to a zero that

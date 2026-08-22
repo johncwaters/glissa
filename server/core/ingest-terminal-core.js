@@ -18,6 +18,7 @@
 'use strict';
 
 const { MAX_SUMMARY_CHARS: RING_SUMMARY_CHARS, SOURCE_DEFAULTS, scrubText } = require('./ingest-core');
+const { positiveInt } = require('./ingest-number-core');
 
 const DEFAULT_ACCUMULATOR_BYTES = SOURCE_DEFAULTS.terminal.accumulatorBytes;
 const DEFAULT_WINDOW_BYTES = SOURCE_DEFAULTS.terminal.windowBytes;
@@ -204,12 +205,6 @@ function segmentLines(raw) {
    * from disagreeing if a sequence ever comes to span a newline.
    */
   return { lines, carry: text.slice(carryStart) };
-}
-
-function positiveInt(value, fallback) {
-  const number = Number(value);
-  if (!Number.isFinite(number) || number <= 0) return fallback;
-  return Math.floor(number);
 }
 
 function stripAnsi(text) {

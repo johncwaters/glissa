@@ -66,6 +66,37 @@ test('a line split across two reads arrives whole exactly once', () => {
   assert.equal(state.carry, '');
 });
 
+/*
+ * The shellHistory source asks for the empty lines a transcript read is right to drop: PSReadLine
+ * writes an embedded newline as a trailing backtick, so a command ending in a newline finishes on an
+ * empty physical line, and losing it glues that command to the next one (docs/plan-ingestion.md, M10).
+ */
+test('keepEmptyLines preserves the interior empty lines the transcript read drops', () => {
+  const stat = fakeStat({ size: 20, mtimeMs: 2000 });
+  const dropped = createTailState(fakeStat({ size: 0 }));
+  assert.deepEqual(applyRead(dropped, { text: 'a`\n\nb\n', end: 20, stat }), ['a`', 'b']);
+
+  const kept = createTailState(fakeStat({ size: 0 }));
+  assert.deepEqual(
+    applyRead(kept, { text: 'a`\n\nb\n', end: 20, stat, keepEmptyLines: true }),
+    ['a`', '', 'b'],
+  );
+  assert.equal(kept.carry, '', 'a text ending in a break leaves no carry either way');
+});
+
+test('keepEmptyLines carries an unterminated tail exactly like the transcript read does', () => {
+  const state = createTailState(fakeStat({ size: 0 }));
+  const first = applyRead(state, {
+    text: 'one\n\ntw', end: 7, stat: fakeStat({ size: 7, mtimeMs: 2000 }), keepEmptyLines: true,
+  });
+  assert.deepEqual(first, ['one', '']);
+  assert.equal(state.carry, 'tw');
+  const second = applyRead(state, {
+    text: 'o\n', end: 9, stat: fakeStat({ size: 9, mtimeMs: 3000 }), keepEmptyLines: true,
+  });
+  assert.deepEqual(second, ['two']);
+});
+
 test('CRLF line endings split the same as bare newlines', () => {
   const state = createTailState(fakeStat({ size: 0 }));
   const lines = applyRead(state, {

@@ -471,6 +471,78 @@ test('the agentLogs source off builds no adapter, even with the lane on', withBa
   assert.equal(lane.agentLogs, null);
 }));
 
+/*
+ * The shell-history source (docs/plan-ingestion.md, M10). It is the one source reading data created
+ * OUTSIDE glissa's own surfaces, so the default-off rule is the load-bearing one here: it must stay
+ * inert with the lane on and every other source running, and only an explicit `enabled: true` builds it.
+ *
+ * SAFETY: the PSReadLine directory is a throwaway temp path injected through APPDATA with an explicit
+ * `platform`, so no test here reads the operator's real shell history.
+ */
+const SHELL_HISTORY_ON = { enabled: true, sources: { shellHistory: { enabled: true } } };
+
+function seedShellHistory({ tmpDir }) {
+  const appData = path.join(tmpDir, 'AppData', 'Roaming');
+  const psDir = path.join(appData, 'Microsoft', 'Windows', 'PowerShell', 'PSReadLine');
+  fs.mkdirSync(psDir, { recursive: true });
+  const historyFile = path.join(psDir, 'ConsoleHost_history.txt');
+  fs.writeFileSync(historyFile, 'npm install\ngit push\n', 'utf8');
+  return { historyFile, env: { APPDATA: appData, HOME: tmpDir, USERPROFILE: tmpDir } };
+}
+
+const withSeededShell = {
+  seed: seedShellHistory,
+  backendOptions: (seeded) => ({
+    ingestLaneOptions: { shellHistoryOptions: { env: seeded.env, platform: 'win32' } },
+  }),
+};
+
+test('shellHistory stays off with the lane on and another source running', withBackend({ ingest: INGEST_ON }, async ({ backend }) => {
+  const lane = backend.getIngestLane();
+  assert.equal(lane.shellHistoryEnabled, false, 'it is the one source that never rides the lane flag');
+  assert.equal(lane.shellHistory, null);
+  assert.ok(!lane.sources.includes('shellHistory'));
+}));
+
+test('a command accepted in an external shell reaches the feed and the digest as machine scope', withBackend(
+  { ingest: SHELL_HISTORY_ON },
+  async ({ backend, seeded }) => {
+    const lane = backend.getIngestLane();
+    assert.equal(lane.shellHistoryEnabled, true);
+    await lane.shellHistory.start();
+    assert.equal(lane.shellHistory.trackedCount, 1, 'the seeded history file is tailed');
+
+    fs.appendFileSync(seeded.historyFile, 'npm run deploy\n', 'utf8');
+    await lane.shellHistory.poll();
+
+    const [event] = lane.recentEvents();
+    assert.equal(event.summary, 'powershell: npm run deploy');
+    assert.deepEqual(event.scope, { root: null, sessionId: null });
+    /*
+     * The M7 contract drops a null-root agentLogs event precisely because machine scope belongs to this
+     * source; here the digest must render it, labelled, rather than silently omitting it.
+     */
+    const digest = lane.buildDigest({});
+    assert.ok(digest.includes('- shell '), digest);
+    assert.ok(digest.includes('(machine scope): powershell: npm run deploy'), digest);
+  },
+  withSeededShell,
+));
+
+test('a machine-scope command survives a project-scoped digest, since it belongs to no project', withBackend(
+  { ingest: SHELL_HISTORY_ON },
+  async ({ backend, seeded }) => {
+    const lane = backend.getIngestLane();
+    await lane.shellHistory.start();
+    fs.appendFileSync(seeded.historyFile, 'cargo build --release\n', 'utf8');
+    await lane.shellHistory.poll();
+
+    const scoped = lane.buildDigest({ scopes: ['C:\\some\\other\\repo'] });
+    assert.ok(scoped.includes('cargo build --release'), scoped);
+  },
+  withSeededShell,
+));
+
 // --- Wire ------------------------------------------------------------------
 
 test('a connecting dashboard is repaired with one ingest snapshot', withBackend({ ingest: INGEST_ON }, async ({ backend, base, track }) => {
