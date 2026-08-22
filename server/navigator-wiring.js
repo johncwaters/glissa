@@ -1,4 +1,4 @@
-// Navigator lane IO shell. Design rationale lives in docs/plan-navigator.md.
+// Navigator lane IO shell. Design rationale lives in docs/archive/plan-navigator.md.
 
 'use strict';
 
@@ -56,7 +56,7 @@ function createNavigatorWiring({
   maxPayload = MAX_FRAME_BYTES,
   logger = console,
   broadcast = null,
-  // Tier 3 model dispatch (docs/plan-navigator.md, M4). Absent config or no dispatch function means
+  // Tier 3 model dispatch (docs/archive/plan-navigator.md, M4). Absent config or no dispatch function means
   // the lane behaves exactly as it did before M4: no dispatch timer is ever armed and nothing spawns.
   dispatchConfig = null,
   dispatch = null,
@@ -84,7 +84,7 @@ function createNavigatorWiring({
    */
   const commentsByUri = new Map();
   /*
-   * The intent model (docs/plan-navigator.md, M5): ONE statement for the machine, not one per uri,
+   * The intent model (docs/archive/plan-navigator.md, M5): ONE statement for the machine, not one per uri,
    * because it says what the carbon unit is building rather than what a buffer contains. In memory
    * only in v1, so a daemon restart starts from nothing.
    */

@@ -133,7 +133,7 @@ test('a sweep reaches every connected dashboard, and a later one is repaired by 
 }));
 
 /*
- * The intent model's round trip (docs/plan-navigator.md, M5), over the real control WS: a correction
+ * The intent model's round trip (docs/archive/plan-navigator.md, M5), over the real control WS: a correction
  * goes up, the broadcast comes back to every dashboard, a model proposal (what a dispatch result feeds
  * in) is refused by the lock, and the next client's repair frame carries the statement that survived.
  * The dispatch itself is faked at the lane seam: no test in this repo spawns claude.

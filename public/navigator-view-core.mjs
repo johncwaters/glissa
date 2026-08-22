@@ -4,7 +4,7 @@
 
 export const NAVIGATOR_EMPTY_TEXT = 'No findings. Open a markdown file in a connected editor.';
 
-// The intent model (docs/plan-navigator.md, M5): one machine-wide statement of what the navigator
+// The intent model (docs/archive/plan-navigator.md, M5): one machine-wide statement of what the navigator
 // believes is being built. Empty is a first-class state, and the hint says how it stops being empty.
 export const NAVIGATOR_INTENT_EMPTY_TEXT = 'No intent yet. The navigator proposes one after its first pass; typing here sets it directly.';
 export const NAVIGATOR_INTENT_MAX_CHARS = 300;

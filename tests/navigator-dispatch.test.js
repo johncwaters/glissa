@@ -82,7 +82,7 @@ test('a missing, unparsable, non-object or unknown-verdict file is an ERROR, nev
   });
 });
 
-// --- The optional intent field (docs/plan-navigator.md, M5) ---
+// --- The optional intent field (docs/archive/plan-navigator.md, M5) ---
 
 test('an intent claim is read, trimmed and capped, whatever the verdict says', async (t) => {
   const withComments = tempFile(JSON.stringify({

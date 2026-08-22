@@ -1,5 +1,5 @@
 /*
- * Navigator tier 3 dispatch: the IO half of docs/plan-navigator.md M4.
+ * Navigator tier 3 dispatch: the IO half of docs/archive/plan-navigator.md M4.
  *
  * Permissions posture, live-probed against the real CLI (2.x):
  *   - NO --dangerously-skip-permissions. The prompt embeds arbitrary buffer text, so the session gets

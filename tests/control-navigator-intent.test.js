@@ -1,7 +1,7 @@
 'use strict';
 
 /*
- * The one inbound message the Navigator tab sends: `navigator-set-intent` (docs/plan-navigator.md, M5).
+ * The one inbound message the Navigator tab sends: `navigator-set-intent` (docs/archive/plan-navigator.md, M5).
  * The handler validates and delegates, nothing more: what a correction DOES to the standing statement
  * is decided by the merge in server/core/navigator-intent-core.js. With the lane off (config.navigator
  * absent) it must refuse the way every other absent-lane handler does rather than crash the dispatch.

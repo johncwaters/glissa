@@ -1,6 +1,6 @@
 # Plan: multi-source ingestion pipeline
 
-Status: redlined draft (two independent reviews applied); M6, M7, M7.5, M8, M9 and M10 shipped, M11 partially shipped (its scrub half is done; its per-source quota tuning waits on live dispatch transcripts, see the milestone). Continues the navigator plan (docs/plan-navigator.md, M1 to M5 shipped); milestone numbering continues from there.
+Status: redlined draft (two independent reviews applied); M6, M7, M7.5, M8, M9 and M10 shipped, M11 partially shipped (its scrub half is done; its per-source quota tuning waits on live dispatch transcripts, see the milestone). Continues the navigator plan (docs/archive/plan-navigator.md, M1 to M5 shipped); milestone numbering continues from there.
 
 ## Goal
 

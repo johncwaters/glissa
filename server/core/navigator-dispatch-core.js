@@ -1,5 +1,5 @@
 /*
- * Pure decisions for the navigator's tier 3 model dispatch (docs/plan-navigator.md, M4): when a
+ * Pure decisions for the navigator's tier 3 model dispatch (docs/archive/plan-navigator.md, M4): when a
  * dispatch is allowed, what the session is told, and what of its answer is believed. No IO, no timers,
  * no clock: the wiring passes `now`, the hash and the config in, and gets a verdict back.
  */

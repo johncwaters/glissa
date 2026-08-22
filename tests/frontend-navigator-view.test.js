@@ -128,7 +128,7 @@ test('the totals and the arrival test read the same feed', async () => {
   assert.equal(NAVIGATOR_EMPTY_TEXT, 'No findings. Open a markdown file in a connected editor.');
 });
 
-// --- Tier 3 model comments (docs/plan-navigator.md, M4) ---
+// --- Tier 3 model comments (docs/archive/plan-navigator.md, M4) ---
 
 function comment(line, message) {
   return { line, message };
@@ -201,7 +201,7 @@ test('comment lines are already 1-based, unlike the LSP ranges beside them', asy
   assert.equal(hasComments({}), false);
 });
 
-// --- The intent block (docs/plan-navigator.md, M5) ---
+// --- The intent block (docs/archive/plan-navigator.md, M5) ---
 
 const NOW = 1700000000000;
 

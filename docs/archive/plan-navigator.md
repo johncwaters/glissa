@@ -1,5 +1,7 @@
 # Plan: Navigator (real-time AI pair navigator)
 
+> Archived 2026-08-22: all milestones (M1 to M5) shipped. Current behavior is documented in the root `AGENTS.md` (navigator entries under Key Files and File Structure); this doc is kept for design rationale only. Known drift: the module table below names `navigator-pause-core.js` and `navigator-tier-core.js`, which shipped folded into `navigator-wiring.js` and as `navigator-rules-core.js` respectively.
+
 Status: drafted 2026-08-20; M1 to M5 shipped. `AGENTS.md` and the code win over this doc, and superseded sections move to `docs/archive/` per convention.
 
 ## What this is

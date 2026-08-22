@@ -965,7 +965,7 @@ function createBackend(httpServer, options = {}) {
     : null;
 
   /*
-   * Navigator lane: config-file only, absent config constructs nothing (docs/plan-navigator.md,
+   * Navigator lane: config-file only, absent config constructs nothing (docs/archive/plan-navigator.md,
    * "Wire and trust"). Its tier 3 model dispatch is a second opt-in inside that one: without
    * config.navigator.dispatch.enabled the dispatcher is never constructed, so the lane arms no
    * dispatch timer and can spawn nothing. Its sessions get their own ephemeral map for the same
@@ -1771,7 +1771,7 @@ function createBackend(httpServer, options = {}) {
       return;
     }
 
-    // Live editor buffers never cross the remote listener in v1, paired device or not (docs/plan-navigator.md, Non-goals)
+    // Live editor buffers never cross the remote listener in v1, paired device or not (docs/archive/plan-navigator.md, Non-goals)
     if (route === 'navigator' && trust === 'remote') {
       socket.destroy();
       return;

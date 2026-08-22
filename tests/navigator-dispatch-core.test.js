@@ -1,6 +1,6 @@
 'use strict';
 
-// The navigator's tier 3 dispatch decisions (docs/plan-navigator.md, M4): the gate that decides
+// The navigator's tier 3 dispatch decisions (docs/archive/plan-navigator.md, M4): the gate that decides
 // whether a model call happens at all, the contract validation applied to what comes back, and the
 // prompt that fences the buffer as data. Pure: no timers, no clock, no spawn.
 
@@ -675,7 +675,7 @@ test('a document with no standing findings says so rather than leaving a blank l
   assert.match(prompt, /already shown in the editor \(do not repeat them\):\n- none/);
 });
 
-// --- The intent model in the prompt (docs/plan-navigator.md, M5) ---
+// --- The intent model in the prompt (docs/archive/plan-navigator.md, M5) ---
 
 test('the working intent rides the prompt as context, and the result contract asks for an updated one', () => {
   const prompt = buildNavigatorPrompt({
