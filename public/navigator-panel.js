@@ -28,11 +28,11 @@ import {
   applyActivitySnapshot,
   applyCommentsMessage,
   applyCommentsSnapshot,
-  basenameOfUri,
   applyFindingsMessage,
   applyFindingsSnapshot,
   applyFixMessage,
   applyFixSnapshot,
+  basenameOfUri,
   commentLineLabel,
   emptyIntent,
   findingLineLabel,
@@ -277,7 +277,7 @@ function buildFixRow(entry) {
   row.append(file);
   row.append(el('span', 'navigator-fix-line', fixLineLabel(entry)));
   row.append(el('span', 'navigator-fix-outcome', fixOutcomeText(entry)));
-  if (entry.code) row.append(el('span', 'navigator-fix-code', entry.code));
+  row.append(el('span', 'navigator-fix-code', entry.code || ''));
   // Rule messages quote the carbon unit's own prose back at them: text, never markup.
   const message = el('span', 'navigator-fix-message');
   message.textContent = entry.message;
