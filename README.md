@@ -124,7 +124,7 @@ The install succeeded, but the directory where npm placed the `glissa` command i
 - Structural status detection: hooks as the authoritative signal, an OSC-0 title fallback, never screen scraping (see below)
 - Background sub-agent completion gate: a session with live background agents or tasks stays out of Complete until they finish
 - Native browser notifications when a session needs input, finishes, or fails (opt-in Windows toast fallback)
-- Phone layout as a first-class second layout, not a squeezed desktop: Board, Terminal, Review, Radar and PRs screens, attention-first ordering, and soft-keyboard handling that resizes the terminal instead of covering it
+- Phone layout as a first-class second layout, not a squeezed desktop: Board, Terminal, Review, Radar, PRs and Usage screens, attention-first ordering, and soft-keyboard handling that resizes the terminal instead of covering it
 - Remote mode (opt-in): a separate listener with single-use device pairing and cookie auth (see [Remote access](#remote-access))
 - Telegram notifications (opt-in): pings your phone only when no dashboard tab is open anywhere, so it fills the gap instead of duplicating the browser notification
 - Image upload from the phone key strip: pick an image, and its saved path is pasted into that session's prompt for you to send
