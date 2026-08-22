@@ -20,6 +20,8 @@ const { decideFileRead, splitLines } = require('./usage-scan-core');
 // bounded read of its newest bytes rather than a stall on the event loop every session shares.
 const MAX_CATCH_UP_BYTES = 256 * 1024;
 const DEFAULT_MAX_TRACKED = 256;
+// Enough to span the first line of any history or transcript file, small enough to re-read on every drain.
+const HEAD_SAMPLE_BYTES = 512;
 // Directory mtimes come off a COARSE clock (4ms on a stock Linux tick, a whole second on ext3 and FAT), so a child created in the tick a listing already read leaves an mtime that never moves again.
 const LISTING_SETTLE_MS = 2000;
 
@@ -30,15 +32,37 @@ function finiteOr(value, fallback) {
 }
 
 /*
- * A path is the same file only while its inode and creation time both hold. Node fills in both on
- * Windows and POSIX, and a path whose file was deleted and recreated is a NEW file whose earlier offset
- * describes bytes that no longer exist.
+ * A NEGATIVE test only: an identity that moved proves the path holds a different file, but an identity
+ * that held proves nothing. Linux hands a delete-and-recreate in the same directory the same inode back,
+ * and stamps the new file's creation time off the kernel's coarse tick, so both halves survive a
+ * recreation that lands inside one tick (measured on 6.1: 200 of 200 recreations kept both). The
+ * positive proof that a path still holds the file a tail has been reading is headChanged below.
  */
 function fileIdentity(stat) {
   return `${Math.floor(finiteOr(stat?.ino, 0))}:${Math.floor(finiteOr(stat?.birthtimeMs, 0))}`;
 }
 
-function createTailState(stat, { path: filePath = null } = {}) {
+// latin1 so the prefix comparison in headChanged is byte-exact: a multi-byte character straddling the
+// window edge would otherwise decode one way in a short read and another in a longer one.
+function headSample(bytes) {
+  if (!Buffer.isBuffer(bytes)) return null;
+  return bytes.subarray(0, HEAD_SAMPLE_BYTES).toString('latin1');
+}
+
+/**
+ * Whether the bytes this tail already consumed are still the bytes on disk. An append leaves the head
+ * of a file alone, so a head that no longer starts with the recorded one is a file recreated or
+ * rewritten at that path, and its earlier offset now points into content nobody has read. With nothing
+ * recorded there is nothing to prove, and a tail that never samples its head keeps the old behavior.
+ */
+function headChanged(state, head) {
+  const recorded = state?.head;
+  if (typeof recorded !== 'string' || recorded.length === 0) return false;
+  if (typeof head !== 'string') return false;
+  return !head.startsWith(recorded);
+}
+
+function createTailState(stat, { path: filePath = null, head = null } = {}) {
   const size = Math.max(0, Math.floor(finiteOr(stat?.size, 0)));
   return {
     path: filePath,
@@ -47,22 +71,30 @@ function createTailState(stat, { path: filePath = null } = {}) {
     mtimeMs: finiteOr(stat?.mtimeMs, 0),
     offset: size,
     carry: '',
+    head: typeof head === 'string' ? head : null,
     vendorState: null,
   };
 }
 
 function skipPlan(state) {
-  return { action: 'skip', start: state.offset, end: state.offset, reset: false, dropPartial: false };
+  return {
+    action: 'skip', start: state.offset, end: state.offset, reset: false, dropPartial: false, sampleHead: false,
+  };
 }
 
 /**
  * What the next read of this file should be. `reset` means the state no longer describes the bytes on
  * disk (a truncation, or a file recreated at the same path), so the carry and any vendor state go with
  * it. `dropPartial` means the read skipped ahead to stay inside the catch-up bound, so its first line
- * starts mid-sentence and is discarded.
+ * starts mid-sentence and is discarded. `sampleHead` asks the caller for the file's first bytes beside
+ * the range, which is what headChanged judges and what keeps the recorded head growing with the file.
  */
 function planRead(state, stat, { maxCatchUpBytes = MAX_CATCH_UP_BYTES } = {}) {
-  if (!state) return { action: 'seed', start: 0, end: 0, reset: true, dropPartial: false };
+  if (!state) {
+    return {
+      action: 'seed', start: 0, end: 0, reset: true, dropPartial: false, sampleHead: false,
+    };
+  }
   if (!stat || typeof stat.size !== 'number') return skipPlan(state);
   const rotated = fileIdentity(stat) !== state.identity;
   const decision = decideFileRead({ size: state.size, mtimeMs: state.mtimeMs, offset: state.offset }, stat);
@@ -77,8 +109,14 @@ function planRead(state, stat, { maxCatchUpBytes = MAX_CATCH_UP_BYTES } = {}) {
     start = end - bound;
     dropPartial = true;
   }
-  if (end <= start) return { action: 'reset', start, end, reset, dropPartial: false };
-  return { action: 'read', start, end, reset, dropPartial };
+  if (end <= start) {
+    return {
+      action: 'reset', start, end, reset, dropPartial: false, sampleHead: false,
+    };
+  }
+  return {
+    action: 'read', start, end, reset, dropPartial, sampleHead: !reset,
+  };
 }
 
 /*
@@ -109,10 +147,14 @@ function afterFirstBreak(text) {
  * becomes the carry, which the next read prepends, so a line split across two reads arrives whole once.
  */
 function applyRead(state, {
-  text = '', end = 0, stat = null, reset = false, dropPartial = false, keepEmptyLines = false,
+  text = '', end = 0, stat = null, head = null, reset = false, dropPartial = false, keepEmptyLines = false,
 } = {}) {
   if (reset || dropPartial) state.carry = '';
-  if (reset) state.vendorState = null;
+  if (reset) {
+    state.vendorState = null;
+    state.head = null;
+  }
+  if (typeof head === 'string' && head.length > 0) state.head = head;
   const body = dropPartial ? afterFirstBreak(text) : text;
   const split = keepEmptyLines ? splitKeepingEmpty(state.carry, body) : splitLines(state.carry, body);
   state.carry = split.carry;
@@ -146,12 +188,15 @@ function pickStaleByMtime(entriesByKey, { maxTracked = DEFAULT_MAX_TRACKED } = {
 
 module.exports = {
   DEFAULT_MAX_TRACKED,
+  HEAD_SAMPLE_BYTES,
   LISTING_SETTLE_MS,
   MAX_CATCH_UP_BYTES,
   applyRead,
   canTrustCachedListing,
   createTailState,
   fileIdentity,
+  headChanged,
+  headSample,
   isActiveMtime,
   pickStaleByMtime,
   planRead,

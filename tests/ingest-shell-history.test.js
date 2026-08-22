@@ -70,16 +70,18 @@ function recordingTimers() {
 }
 
 // Holds the drain open inside its first open(), so a test can call stop() with a read genuinely in
-// flight rather than hoping to hit the window.
+// flight rather than hoping to hit the window. Armed after start(), whose discovery reads each file's
+// head sample and would otherwise be the read that gets held.
 function gatedFs() {
   let release = null;
-  const gate = new Promise((resolve) => { release = resolve; });
+  let gate = null;
   return {
+    arm: () => { gate = new Promise((resolve) => { release = resolve; }); },
     release: () => release(),
     fsPromises: {
       ...fs.promises,
       open: async (target, flags) => {
-        await gate;
+        if (gate) await gate;
         return fs.promises.open(target, flags);
       },
     },
@@ -444,6 +446,7 @@ test('stop() lands mid-read without publishing, and nothing in flight repopulate
   const gate = gatedFs();
   const stalled = build({ fsPromises: gate.fsPromises });
   await stalled.start();
+  gate.arm();
   append(filePath, 'npm run other\n');
   const draining = stalled.poll();
   const stopped = stalled.stop();

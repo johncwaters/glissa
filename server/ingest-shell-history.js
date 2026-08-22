@@ -23,7 +23,8 @@ const fsNode = require('node:fs');
 const path = require('node:path');
 
 const {
-  MAX_CATCH_UP_BYTES, applyRead, createTailState, pickStaleByMtime, planRead,
+  HEAD_SAMPLE_BYTES, MAX_CATCH_UP_BYTES, applyRead, createTailState, headChanged, headSample,
+  pickStaleByMtime, planRead,
 } = require('./core/ingest-tail-core');
 const {
   createParseState, decideCommandEvent, historyLocations, matchesLocation, normalizeShells,
@@ -168,9 +169,13 @@ function createShellHistoryIngest({
 
   // --- Discovery -----------------------------------------------------------
 
-  function trackFile(location, filePath, stat) {
+  // The head sample is taken HERE because a drain can only compare against one it already had, and a
+  // rewrite is most likely to land before this tail has read a byte (server/core/ingest-tail-core.js).
+  async function trackFile(location, filePath, stat) {
     if (tails.has(filePath)) return;
-    tails.set(filePath, createTailState(stat, { path: filePath }));
+    const head = await readHead(filePath);
+    if (!alive() || tails.has(filePath)) return;
+    tails.set(filePath, createTailState(stat, { path: filePath, head }));
     contexts.set(filePath, { shell: location.shell, parseState: createParseState(), previous: null });
     note(`shell-history source: tracking ${filePath} (${location.shell}, ${tails.size} files)`);
   }
@@ -180,7 +185,7 @@ function createShellHistoryIngest({
     const stat = await statOrNull(filePath);
     if (!alive() || !stat || !stat.isFile()) return;
     seen.add(filePath);
-    trackFile(location, filePath, stat);
+    await trackFile(location, filePath, stat);
   }
 
   async function trackMatchingFiles(location, seen) {
@@ -200,7 +205,7 @@ function createShellHistoryIngest({
       const stat = await statOrNull(filePath);
       if (!alive()) return;
       if (!stat || !stat.isFile()) continue;
-      trackFile(location, filePath, stat);
+      await trackFile(location, filePath, stat);
     }
   }
 
@@ -315,13 +320,22 @@ function createShellHistoryIngest({
 
   // --- Tailing -------------------------------------------------------------
 
-  async function readRange(filePath, start, length) {
+  async function readAt(handle, position, length) {
+    if (length <= 0) return Buffer.alloc(0);
+    const buffer = Buffer.alloc(length);
+    const { bytesRead } = await handle.read(buffer, 0, length, position);
+    return buffer.subarray(0, bytesRead);
+  }
+
+  // One open for both reads: the appended range, and the head sample that proves the range belongs to
+  // the file this tail has been reading.
+  async function readWindow(filePath, { start = 0, length = 0, sampleHead = false } = {}) {
     let handle = null;
     try {
       handle = await fsPromises.open(filePath, 'r');
-      const buffer = Buffer.alloc(length);
-      const { bytesRead } = await handle.read(buffer, 0, length, start);
-      return { text: buffer.subarray(0, bytesRead).toString('utf8'), end: start + bytesRead };
+      const head = sampleHead ? headSample(await readAt(handle, 0, HEAD_SAMPLE_BYTES)) : null;
+      const bytes = await readAt(handle, start, length);
+      return { text: bytes.toString('utf8'), end: start + bytes.length, head };
     } catch {
       // A history file the shell holds locked mid-write leaves the offset where it was, so the next poll
       // retries the same bytes rather than skipping them.
@@ -329,6 +343,12 @@ function createShellHistoryIngest({
     } finally {
       if (handle) await handle.close().catch(() => {});
     }
+  }
+
+  async function readHead(filePath) {
+    const read = await readWindow(filePath, { sampleHead: true });
+    if (!read) return null;
+    return read.head;
   }
 
   function publishCommands(filePath, lines) {
@@ -362,10 +382,12 @@ function createShellHistoryIngest({
     for (const event of recent) publish(event);
   }
 
-  function reseed(filePath, stat) {
+  async function reseed(filePath, stat) {
     const context = contexts.get(filePath);
     if (!context) return;
-    tails.set(filePath, createTailState(stat, { path: filePath }));
+    const head = await readHead(filePath);
+    if (!alive() || !contexts.has(filePath)) return;
+    tails.set(filePath, createTailState(stat, { path: filePath, head }));
     contexts.set(filePath, { shell: context.shell, parseState: createParseState(), previous: null });
   }
 
@@ -384,15 +406,28 @@ function createShellHistoryIngest({
      * The cost is at most the one command that landed in the same rewrite, once per 4096.
      */
     if (plan.reset) {
-      reseed(filePath, stat);
+      await reseed(filePath, stat);
       return;
     }
-    const read = await readRange(filePath, plan.start, plan.end - plan.start);
+    const read = await readWindow(filePath, {
+      start: plan.start, length: plan.end - plan.start, sampleHead: plan.sampleHead,
+    });
     if (!alive() || !read) return;
+    /*
+     * A rewrite that left the file LARGER reaches here looking exactly like an append: no shrink for
+     * decideFileRead to catch, and on Linux the same inode and creation time, so the stat identity holds
+     * too. Its head does not, and reading from the old offset would publish a fragment starting
+     * mid-command out of a file this tail has never read. So it re-baselines like any other rewrite.
+     */
+    if (headChanged(state, read.head)) {
+      await reseed(filePath, stat);
+      return;
+    }
     const lines = applyRead(state, {
       text: read.text,
       end: read.end,
       stat,
+      head: read.head,
       dropPartial: plan.dropPartial,
       // PSReadLine finishes a command that ends in a newline on an EMPTY physical line; dropping it
       // would glue that command to the next one. Rationale in full at splitKeepingEmpty.

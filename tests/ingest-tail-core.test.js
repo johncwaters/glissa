@@ -13,8 +13,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
-  LISTING_SETTLE_MS, MAX_CATCH_UP_BYTES, applyRead, canTrustCachedListing, createTailState, fileIdentity,
-  isActiveMtime, pickStaleByMtime, planRead,
+  HEAD_SAMPLE_BYTES, LISTING_SETTLE_MS, MAX_CATCH_UP_BYTES, applyRead, canTrustCachedListing,
+  createTailState, fileIdentity, headChanged, headSample, isActiveMtime, pickStaleByMtime, planRead,
 } = require('../server/core/ingest-tail-core');
 const {
   MAX_RAW_CHARS, isDispatchWorkdir, mapAgentLine, parseTimestamp, toolTarget,
@@ -136,6 +136,75 @@ test('a file recreated at the same path is a new file, not a continuation of the
   applyRead(state, { text: '{"new":1}\n', end: 500, stat: recreated, reset: true });
   assert.equal(state.vendorState, null, 'vendor state from the previous file must not carry over');
   assert.equal(state.identity, fileIdentity(recreated));
+});
+
+/*
+ * The stat identity is a NEGATIVE test only, which is what this fixture exists to state. Linux reuses
+ * the inode of a file deleted and recreated in the same directory and stamps the new one off the
+ * kernel's coarse tick, so a recreation inside one tick keeps BOTH halves and reaches the tail looking
+ * exactly like an append. Reading from the old offset then published a fragment starting mid-command
+ * ("rf /", out of a recreated `sudo rm -rf /`), which is the failure this head sample closes.
+ */
+test('a recreation that kept its inode and creation time is caught by the head sample', () => {
+  const before = fakeStat({ size: 9, ino: 7, birthtimeMs: 500 });
+  const state = createTailState(before, { head: headSample(Buffer.from('npm test\n')) });
+  const recreated = fakeStat({ size: 21, mtimeMs: 2000, ino: 7, birthtimeMs: 500 });
+  assert.equal(fileIdentity(recreated), state.identity, 'the stat cannot tell these two files apart');
+
+  const plan = planRead(state, recreated);
+  assert.equal(plan.action, 'read');
+  assert.equal(plan.start, 9, 'the offset still points into the file that is gone');
+  assert.equal(plan.reset, false);
+  assert.equal(plan.sampleHead, true, 'so the caller is asked for the head that settles it');
+  assert.equal(headChanged(state, headSample(Buffer.from('sudo rm -rf /\nnpm ci\n'))), true);
+});
+
+test('an append leaves the head alone, and the recorded head grows with the file', () => {
+  const state = createTailState(fakeStat({ size: 9 }), { head: headSample(Buffer.from('npm test\n')) });
+  const grown = fakeStat({ size: 24, mtimeMs: 2000 });
+  const head = headSample(Buffer.from('npm test\nnpm run dev\n'));
+  assert.equal(headChanged(state, head), false);
+
+  applyRead(state, { text: 'npm run dev\n', end: 24, stat: grown, head });
+  assert.equal(state.head, head, 'the freshest sighting is what the next drain compares against');
+});
+
+test('a head shorter than the recorded one is a rewrite, never a shorter read of the same file', () => {
+  const state = createTailState(fakeStat({ size: 40 }), { head: headSample(Buffer.from('command-0\ncommand-1\n')) });
+  assert.equal(headChanged(state, headSample(Buffer.from('command-1\n'))), true);
+});
+
+/*
+ * The agent-log source hands no head at all, so every branch here has to reach the byte-identical
+ * decision it reached before the sample existed: nothing recorded proves nothing, and a head that could
+ * not be read is a failed read, not evidence of a rotation.
+ */
+test('a tail with no head sample recorded never claims a rotation', () => {
+  const state = createTailState(fakeStat({ size: 10 }));
+  assert.equal(state.head, null);
+  assert.equal(headChanged(state, headSample(Buffer.from('anything at all'))), false);
+  assert.equal(headChanged(state, null), false);
+
+  const withHead = createTailState(fakeStat({ size: 10 }), { head: headSample(Buffer.from('npm test\n')) });
+  assert.equal(headChanged(withHead, null), false, 'a read that failed says nothing about the file');
+});
+
+test('the head sample is a bounded window of raw bytes, so no decoding can shift it', () => {
+  const long = Buffer.alloc(HEAD_SAMPLE_BYTES + 100, 0x61);
+  assert.equal(headSample(long).length, HEAD_SAMPLE_BYTES);
+  // One character, two bytes: a latin1 window cuts on the byte and compares on the byte either way.
+  const twoByte = Buffer.from('é');
+  assert.equal(headSample(twoByte).length, 2);
+  assert.equal(headSample('not a buffer'), null);
+  assert.equal(headSample(null), null);
+});
+
+test('a reset drops the head with the carry, since it describes bytes that are gone', () => {
+  const state = createTailState(fakeStat({ size: 100 }), { head: headSample(Buffer.from('the old contents\n')) });
+  const shrunk = fakeStat({ size: 20, mtimeMs: 2000 });
+  assert.equal(planRead(state, shrunk).sampleHead, false, 'a reset re-baselines without needing proof');
+  applyRead(state, { text: '{"fresh":true}\n', end: 20, stat: shrunk, reset: true });
+  assert.equal(state.head, null);
 });
 
 test('a read never spans more than the catch-up bound, and drops the line it cut into', () => {
