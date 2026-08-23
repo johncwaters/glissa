@@ -404,7 +404,10 @@ function createTaskRegistry({
       });
     },
 
-    /** Everything, on PTY exit/restart/destroy. Returns whether anything was being gated. */
+    /**
+     * Everything, on PTY exit/restart/destroy. Returns nothing: whether anything WAS gated is the
+     * caller's question (it decides whether to emit a delta) and it asks activeCount() before this.
+     */
     clear() {
       countedAgents.clear();
       declaredEntries = null;

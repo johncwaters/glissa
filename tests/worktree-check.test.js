@@ -121,19 +121,35 @@ test('the output tail is capped so a chatty runner cannot fill a tooltip', async
   assert.equal(result.tail.length, 2000);
 });
 
-test('resolve reads the worktree package.json without running anything', () => {
+// ASYNC, and read that way on purpose: resolve() runs on the watcher-driven rebase path, and all
+// sessions share one event loop (AGENTS.md, no sync fs on recurring paths).
+test('resolve reads the worktree package.json without running anything', async () => {
   let spawned = 0;
   const check = createWorktreeCheck({
     spawnFn: () => { spawned += 1; return fakeChild(); },
-    readFile: () => JSON.stringify({ scripts: { test: 'node --test' } }),
+    readFile: async () => JSON.stringify({ scripts: { test: 'node --test' } }),
   });
-  assert.deepEqual(check.resolve({ cwd: '/w' }), { command: 'npm test', source: 'package-json' });
+  assert.deepEqual(await check.resolve({ cwd: '/w' }), { command: 'npm test', source: 'package-json' });
   assert.equal(spawned, 0);
 });
 
-test('an unreadable package.json resolves to nothing rather than throwing', () => {
-  const check = createWorktreeCheck({ readFile: () => { throw new Error('ENOENT'); } });
-  assert.deepEqual(check.resolve({ cwd: '/w' }), { command: null, source: 'none' });
+test('an unreadable package.json resolves to nothing rather than throwing', async () => {
+  const check = createWorktreeCheck({ readFile: async () => { throw new Error('ENOENT'); } });
+  assert.deepEqual(await check.resolve({ cwd: '/w' }), { command: null, source: 'none' });
+});
+
+// The two command sources stay separate all the way down, so `source` names the one that supplied it.
+test('resolve reports which source the command actually came from', async () => {
+  const check = createWorktreeCheck({ readFile: async () => JSON.stringify({ scripts: { test: 'vitest' } }) });
+  assert.deepEqual(
+    await check.resolve({ cwd: '/w', projectCheckCommand: 'cargo test', configCheckCommand: 'make check' }),
+    { command: 'cargo test', source: 'project' }
+  );
+  assert.deepEqual(
+    await check.resolve({ cwd: '/w', configCheckCommand: 'make check' }),
+    { command: 'make check', source: 'config' }
+  );
+  assert.deepEqual(await check.resolve({ cwd: '/w' }), { command: 'npm test', source: 'package-json' });
 });
 
 // --- what the operator reads ---
@@ -154,4 +170,57 @@ test('the chip says green or red, and the detail says it decides nothing', () =>
   assert.match(detail, /exit 1/);
   assert.match(detail, /advisory only, it does not block the merge/);
   assert.match(detail, /2 failing/);
+});
+
+// A shell-spawned check on Windows is cmd.exe with npm.cmd, node and the test runner UNDER it.
+// child.kill() signals only cmd, and the tree survives holding open handles inside the worktree: the
+// timeout then reports a verdict while the run keeps writing there, and the next auto-rebase fails on
+// those handles. Same taskkill /T /F reap the PTY path uses.
+test('a win32 timeout reaps the whole process tree, not just the shell', async () => {
+  const child = fakeChild();
+  child.pid = 4321;
+  const killed = [];
+  const check = createWorktreeCheck({
+    spawnFn: () => child,
+    timeoutMs: 20,
+    platform: 'win32',
+    killTree: (args, _opts, cb) => { killed.push(args); cb(null); },
+  });
+  const running = check.run({ cwd: '/w', command: 'npm test' });
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  assert.deepEqual(killed, [['/PID', '4321', '/T', '/F']]);
+  assert.equal(child.killed, false, 'the shell is not signalled separately; the tree kill covers it');
+  child.emit('close', null);
+  assert.equal((await running).status, 'timeout');
+});
+
+test('off win32 the timeout still uses child.kill', async () => {
+  const child = fakeChild();
+  child.pid = 99;
+  const killed = [];
+  const check = createWorktreeCheck({
+    spawnFn: () => child,
+    timeoutMs: 20,
+    platform: 'linux',
+    killTree: (args, _opts, cb) => { killed.push(args); cb(null); },
+  });
+  const running = check.run({ cwd: '/w', command: 'npm test' });
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  assert.equal(child.killed, true);
+  assert.deepEqual(killed, [], 'taskkill is a Windows tool');
+  child.emit('close', null);
+  assert.equal((await running).status, 'timeout');
+});
+
+test('a win32 child with no pid yet falls back to child.kill rather than reaping nothing', async () => {
+  const child = fakeChild();
+  child.pid = undefined;
+  const check = createWorktreeCheck({
+    spawnFn: () => child, timeoutMs: 20, platform: 'win32', killTree: (_a, _o, cb) => cb(null),
+  });
+  const running = check.run({ cwd: '/w', command: 'npm test' });
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  assert.equal(child.killed, true);
+  child.emit('close', null);
+  assert.equal((await running).status, 'timeout');
 });

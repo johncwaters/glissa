@@ -36,9 +36,14 @@ class NotificationManager extends EventEmitter {
    * @param {boolean} [opts.offDashboard] this channel reaches the operator when no dashboard would.
    *   Only these carry the ladder's last rung, so a phone escalation does not re-toast a browser that
    *   already showed the notification once and was ignored.
+   * @param {() => boolean} [opts.canEscalate] whether this channel WOULD deliver an escalation right
+   *   now, read live. The Telegram channel is registered unconditionally and decides per delivery, so
+   *   without this the ladder armed a five-minute timer per notification on installs that have
+   *   Telegram switched off or never configured - a timer that can only ever fire into a channel that
+   *   drops it.
    */
-  registerChannel(name, fn, { offDashboard = false } = {}) {
-    this._channels.push({ name, fn, offDashboard });
+  registerChannel(name, fn, { offDashboard = false, canEscalate = () => true } = {}) {
+    this._channels.push({ name, fn, offDashboard, canEscalate });
   }
 
   setFocusSuppressed(val) {
@@ -237,11 +242,17 @@ class NotificationManager extends EventEmitter {
     if (entry.phoneEscalated) return;
     if (entry.phoneTimer !== null) return;
     if (!(this._phoneEscalationMs > 0)) return;
-    if (!this._channels.some((channel) => channel.offDashboard)) return;
+    // Not just "an off-dashboard channel exists" but "one would actually deliver", read live: the
+    // Telegram channel is registered unconditionally and gates per delivery, so an install with it
+    // switched off would otherwise arm a timer per notification for a channel that drops every one.
+    if (!this._channels.some((channel) => channel.offDashboard && channel.canEscalate())) return;
     entry.phoneTimer = setTimeout(() => {
       entry.phoneTimer = null;
       this._transition(sessionName, 'phone_escalation');
     }, this._phoneEscalationMs);
+    // unref'd: a pending escalation is advisory, and it must never be the reason the process stays
+    // alive for five minutes after everything else has shut down.
+    if (entry.phoneTimer.unref) entry.phoneTimer.unref();
   }
 
   _exitHook(_sessionName, entry, state) {

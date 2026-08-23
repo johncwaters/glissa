@@ -23,6 +23,9 @@ test('past the high-water mark only the periodic pushes drop', () => {
   const bufferedAmount = DEFAULT_HIGH_WATER_MARK;
   assert.equal(decideControlSend({ bufferedAmount, type: 'health-snapshot' }).action, 'drop');
   assert.equal(decideControlSend({ bufferedAmount, type: 'usage-sessions' }).action, 'drop');
+  // usage-report is deliberately NOT here: it is a per-connection reply to request-usage-report, sent
+  // through ws.send directly, so it never reaches this policy and listing it was dead classification.
+  assert.equal(decideControlSend({ bufferedAmount, type: 'usage-report' }).action, 'send');
   assert.equal(decideControlSend({ bufferedAmount, type: 'notify' }).action, 'send');
   assert.equal(decideControlSend({ bufferedAmount, type: 'session-error' }).action, 'send');
   assert.equal(decideControlSend({ bufferedAmount, type: 'usage-budget-alert' }).action, 'send');

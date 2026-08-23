@@ -229,7 +229,11 @@ class Session extends EventEmitter {
     // shell (server/worktree-check.js) and is absent for every session that has no worktree to check;
     // `checkCommand` is the operator's config-file string, resolved by the shell when it is null.
     worktreeCheck = null,
+    // The two command sources stay SEPARATE all the way down, so the resolved `source` says which one
+    // actually supplied it (collapsing them with `||` in the caller made every config-level command
+    // report itself as a per-project one).
     checkCommand = null,
+    projectCheckCommand = null,
     postRebaseCheck = true,
     // Master kill switch for the live cross-session review liveness: with it false the integration-ref
     // watcher is never started, so a branch move reaches this session only via the turn-end recheck.
@@ -388,6 +392,7 @@ class Session extends EventEmitter {
     this._autoRebase = autoRebase !== false;
     this._worktreeCheck = worktreeCheck;
     this._checkCommand = checkCommand;
+    this._projectCheckCommand = projectCheckCommand;
     this._postRebaseCheck = postRebaseCheck !== false;
     // The last advisory check verdict, or null until one has run. Rides toSnapshot so a reconnecting
     // dashboard sees it without a frame of its own.
@@ -1593,6 +1598,7 @@ class Session extends EventEmitter {
       state: this.state,
       mergeStatus: this.mergeStatus,
       dirty: sig.dirty,
+      checkRunning: this._checkRunning(),
       behind: sig.behind,
       rebaseInProgress: sig.rebaseInProgress,
       teardownPending: this._teardownPending(),
@@ -1651,12 +1657,29 @@ class Session extends EventEmitter {
    * and puts the answer on the card BEFORE that click. It never blocks the merge, and a red verdict
    * changes no gate: it becomes load-bearing only the day the merge click itself is automated.
    */
+  // True while an advisory check is running in this worktree. Both a second check and a second
+  // auto-rebase refuse on it: the check is a real test suite running in the tree, so a rebase under it
+  // rewrites files it is reading (and on Windows its open handles can fail the rebase outright).
+  _checkRunning() {
+    return this.checkStatus?.status === "running";
+  }
+
   _schedulePostRebaseCheck() {
     if (!this._worktreeCheck || !this.worktreeDir) return;
-    const resolved = this._worktreeCheck.resolve({
+    if (this._checkRunning()) return;
+    // Fire-and-forget: nothing downstream may wait on a check, and neither resolve() nor run() rejects.
+    void this._resolveAndRunPostRebaseCheck();
+  }
+
+  async _resolveAndRunPostRebaseCheck() {
+    const resolved = await this._worktreeCheck.resolve({
       cwd: this.worktreeDir,
-      projectCheckCommand: this._checkCommand,
+      projectCheckCommand: this._projectCheckCommand,
+      configCheckCommand: this._checkCommand,
     });
+    // Re-checked after the await: the worktree can be merged away, and a second rebase can start a
+    // check of its own, while the package.json read is in flight.
+    if (this._destroyed || !this.worktreeDir || this._checkRunning()) return;
     const verdict = decidePostRebaseCheck({
       enabled: this._postRebaseCheck,
       command: resolved.command,
@@ -1664,8 +1687,7 @@ class Session extends EventEmitter {
       destroyed: this._destroyed,
     });
     if (!verdict.run) return;
-    // Fire-and-forget: run() never rejects, and nothing downstream may wait on a check.
-    void this._runPostRebaseCheck(resolved);
+    await this._runPostRebaseCheck(resolved);
   }
 
   async _runPostRebaseCheck({ command, source }) {

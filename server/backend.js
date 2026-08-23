@@ -37,7 +37,7 @@ const { createLifecycle } = require('./server-lifecycle');
 const { NotificationManager } = require('../notifications/notification-manager');
 const { createNotifyGate, explainNotification } = require('../session/core/notify-gate');
 const { pickAutoResume } = require('../session/core/auto-resume');
-const { createTelegramChannel } = require('../notifications/channels/telegram');
+const { createTelegramChannel, decideTelegramNotification } = require('../notifications/channels/telegram');
 const { createTelegramOutbox } = require('../notifications/telegram-outbox');
 const { sendTelegramMessage } = require('./telegram-transport');
 const { createToastChannel } = require('../notifications/channels/toast');
@@ -96,6 +96,10 @@ const {
 // WAITING-state notification escalation cadence (fixed 5 minutes; previously the
 // configurable waitingEscalationSeconds setting).
 const ESCALATION_INTERVAL_MS = 300000;
+
+// Fallback for the escalation ladder's last rung when config.json names no phoneEscalationMs. Same
+// five minutes, so an install that never touches the key behaves as it did.
+const DEFAULT_PHONE_ESCALATION_MS = 300000;
 
 // How often a running server rechecks the latest release after the boot check.
 const UPDATE_RECHECK_MS = 24 * 60 * 60 * 1000;
@@ -440,7 +444,8 @@ function createBackend(httpServer, options = {}) {
       // The advisory post-rebase check. The command is config-file only (never a control-WS settable
       // key): it is arbitrary code running unattended in a worktree, so its provenance is the guard.
       worktreeCheck,
-      checkCommand: project.checkCommand || cfg.checkCommand || null,
+      projectCheckCommand: project.checkCommand || null,
+      checkCommand: cfg.checkCommand || null,
       postRebaseCheck: cfg.worktreePostRebaseCheck !== false,
       // Master kill switch for the live cross-session review liveness (the integration-branch reflog
       // watcher each worktree session runs beside its own gitdir watch).
@@ -899,9 +904,14 @@ function createBackend(httpServer, options = {}) {
 
   const clientPresence = createClientPresence();
 
+  // The ladder's last rung reads its delay from config like every other timeout (0 switches it off).
+  const phoneEscalationMs = () => (
+    config.phoneEscalationMs == null ? DEFAULT_PHONE_ESCALATION_MS : config.phoneEscalationMs
+  );
   const notificationManager = new NotificationManager({
     escalationIntervalMs: ESCALATION_INTERVAL_MS,
     debounceMs: config.notifyDebounceMs || 3000,
+    phoneEscalationMs: phoneEscalationMs(),
   });
   // Primary channel: native browser notifications over the existing control WS.
   // No external deps, no PowerShell, works on every machine that can open the
@@ -938,7 +948,19 @@ function createBackend(httpServer, options = {}) {
     getConfig: () => config,
     getConnectionCount: () => clientPresence.connectionCount(),
     outbox: telegramOutbox,
-  }), { offDashboard: true });
+  }), {
+    offDashboard: true,
+    // Read live, and through the SAME gate the delivery itself uses, so the ladder cannot arm a timer
+    // for a channel that would drop what it fires. A zero connection count is passed because that
+    // clause is not what an escalation turns on: only the opt-in and the credentials decide here.
+    canEscalate: () => decideTelegramNotification({
+      enabled: config.telegramNotifications === true,
+      botToken: config.telegram?.botToken,
+      chatId: config.telegram?.chatId,
+      connectionCount: 0,
+      phoneEscalation: true,
+    }).send,
+  });
   // Replay whatever a previous process queued but never confirmed. Fire-and-forget: it never rejects,
   // and a boot must not wait on the network.
   void telegramOutbox.replay();
@@ -1716,6 +1738,7 @@ function createBackend(httpServer, options = {}) {
     notificationManager.updateSettings({
       escalationIntervalMs: ESCALATION_INTERVAL_MS,
       debounceMs: config.notifyDebounceMs || 3000,
+      phoneEscalationMs: phoneEscalationMs(),
     });
     // No-op unless this save actually changed config.prReview/telegram; the restart itself is
     // serialized and drains in-flight reviews (see pr-review-wiring.js).

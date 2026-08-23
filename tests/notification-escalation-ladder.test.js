@@ -151,3 +151,49 @@ test('the escalation bypasses the dashboard-open gate and nothing else', () => {
     { send: false, reason: 'not-configured' }
   );
 });
+
+// The Telegram channel is registered UNCONDITIONALLY and decides per delivery, so "an off-dashboard
+// channel exists" is not the same question as "one would deliver this". Arming on the former put a
+// five-minute timer on every notification of every install that has Telegram off or unconfigured,
+// firing into a channel that drops it.
+test('no timer is armed when the off-dashboard channel would not deliver', async (t) => {
+  const manager = new NotificationManager({ escalationIntervalMs: 60000, debounceMs: 0, phoneEscalationMs: PHONE_MS });
+  t.after(() => manager.destroy());
+  const phone = [];
+  let telegramEnabled = false;
+  manager.registerChannel('web', () => {});
+  manager.registerChannel('telegram', (session, category, message, context) => {
+    phone.push({ session, category, message, context });
+  }, { offDashboard: true, canEscalate: () => telegramEnabled });
+
+  manager.trigger('sess-1', 'complete', 'build finished');
+  await settle();
+  assert.equal(manager.getNotificationState('sess-1'), NS.DELIVERED, 'nothing to escalate to');
+  assert.equal(phone.filter((d) => d.context.phoneEscalation === true).length, 0);
+
+  // The operator turns Telegram on; the NEXT notification arms, with no restart.
+  telegramEnabled = true;
+  manager.trigger('sess-2', 'complete', 'other build finished');
+  await settle();
+  assert.equal(manager.getNotificationState('sess-2'), NS.ESCALATED_PHONE);
+});
+
+// A pending escalation is advisory. It must never be the reason the process stays alive for five
+// minutes after everything else has shut down.
+test('the escalation timer is unref\'d', async (t) => {
+  const { manager } = makeManager({ phoneEscalationMs: 60_000 });
+  t.after(() => manager.destroy());
+  manager.trigger('sess-1', 'complete', 'build finished');
+  const entry = manager._entries.get('sess-1');
+  assert.notEqual(entry.phoneTimer, null, 'a timer was armed');
+  assert.equal(entry.phoneTimer.hasRef(), false, 'and it does not hold the event loop open');
+});
+
+test('the ladder delay is configurable through updateSettings', async (t) => {
+  const { manager, escalations } = makeManager({ phoneEscalationMs: 60_000 });
+  t.after(() => manager.destroy());
+  manager.updateSettings({ phoneEscalationMs: PHONE_MS });
+  manager.trigger('sess-1', 'complete', 'build finished');
+  await settle();
+  assert.equal(escalations().length, 1, 'the new delay is what the next notification arms with');
+});

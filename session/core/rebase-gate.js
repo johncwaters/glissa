@@ -39,6 +39,7 @@ function decideAutoRebase({
   state,
   mergeStatus,
   dirty,
+  checkRunning,
   behind,
   rebaseInProgress,
   teardownPending,
@@ -52,6 +53,11 @@ function decideAutoRebase({
   if (!AUTO_REBASE_STATES.includes(state)) return skip("busy");
   if (rebaseInProgress) return skip("rebase-in-progress");
   if (dirty) return skip("dirty");
+  // Beside `dirty` because it is the same class of reason: something is USING this worktree. The
+  // advisory post-rebase check runs a real test suite in it, so a second rebase here would rewrite the
+  // tree under a live run (and on Windows the run's open handles can fail the rebase itself). Two
+  // integration-branch moves minutes apart is all it takes.
+  if (checkRunning) return skip("check-running");
   if (isZeroCount(behind)) return skip("current");
   if (currentKey && currentKey === lastConflictKey) return skip("conflict-cooldown");
   return { action: "rebase" };

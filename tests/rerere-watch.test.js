@@ -97,3 +97,30 @@ test('a recorded resolution clears a live cooldown and nothing else', () => {
     { clear: false, reason: 'teardown' }
   );
 });
+
+// The handover must not disarm the watcher when it FAILS. Some platforms deliver the directory event
+// with a null filename, which the outer listener treats as "maybe ours" and fires on, so the callback
+// can arrive while rr-cache still does not exist. Stopping there latched `stopped` and lost the
+// trigger for the rest of the session's life.
+test('an outer event that fires before rr-cache exists does not disarm the watch', async (t) => {
+  const gitDir = tempGitDir();
+  t.after(() => fs.rmSync(gitDir, { recursive: true, force: true }));
+
+  const counter = { count: 0 };
+  const watcher = createRerereWatcher({ commonGitDir: gitDir, onChange: () => { counter.count += 1; }, debounceMs: 20 });
+  t.after(() => watcher.stop());
+  assert.equal(watcher.start(), true);
+
+  // A sibling file appearing in the common gitdir: the listener fires, rr-cache is still absent.
+  fs.writeFileSync(path.join(gitDir, 'HEAD'), 'ref: refs/heads/main\n', 'utf8');
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  assert.equal(counter.count, 0, 'nothing to hand over to, so nothing is reported');
+
+  // The real thing, later. It must still be seen.
+  const cacheDir = path.join(gitDir, RR_CACHE_DIR);
+  fs.mkdirSync(cacheDir);
+  assert.equal(await waitForCalls(counter, 1), 1, 'the watch was still armed');
+
+  fs.mkdirSync(path.join(cacheDir, 'a1b2c3'));
+  assert.equal(await waitForCalls(counter, 2), 2, 'and the handover to the cache itself happened');
+});

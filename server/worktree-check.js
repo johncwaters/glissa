@@ -18,7 +18,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-const { spawn } = require('./child-process-safe');
+const { execFile, spawn } = require('./child-process-safe');
 const { resolveCheckCommand, summarizeCheckResult } = require('../session/core/check-gate');
 
 const DEFAULT_TIMEOUT_MS = 300_000;
@@ -26,29 +26,54 @@ const DEFAULT_TIMEOUT_MS = 300_000;
 // card tooltip or into a recording.
 const MAX_TAIL_CHARS = 2000;
 
-function readPackageJson(cwd, readFile) {
+// ASYNC: resolve() runs on the watcher-driven rebase path, and all sessions share one event loop, so
+// a synchronous read here would stall every other session for the duration (AGENTS.md, no sync fs on
+// recurring paths).
+async function readPackageJson(cwd, readFile) {
   try {
-    return JSON.parse(readFile(path.join(cwd, 'package.json'), 'utf8'));
+    return JSON.parse(await readFile(path.join(cwd, 'package.json'), 'utf8'));
   } catch {
     return null;
   }
 }
 
+/*
+ * Killing a shell-spawned check on Windows. `child.kill()` signals cmd.exe alone, and the tree under
+ * it - npm.cmd, node, the test runner - survives, holding open handles INSIDE the worktree: the
+ * timeout then reports a verdict while the run it timed out on keeps writing there, and the next
+ * auto-rebase fails on those handles. This is the same taskkill /T /F reap the PTY path uses
+ * (sessions.js _taskkill). Every other platform keeps child.kill(), where killing the process group
+ * is not this problem.
+ */
+function reapTree(child, { platform, killTree }) {
+  if (platform !== 'win32' || !child.pid) {
+    try { child.kill(); } catch { /* already gone */ }
+    return;
+  }
+  killTree(['/PID', String(child.pid), '/T', '/F'], {}, () => {
+    // Best-effort: an already-dead tree is the normal case, and the close handler is what settles the
+    // verdict either way.
+  });
+}
+
 function createWorktreeCheck({
   spawnFn = spawn,
-  readFile = fs.readFileSync,
+  readFile = fs.promises.readFile,
   timeoutMs = DEFAULT_TIMEOUT_MS,
   now = Date.now,
+  platform = process.platform,
+  killTree = (args, opts, cb) => execFile('taskkill', args, opts, cb),
 } = {}) {
   /**
-   * @returns {{ command: string|null, source: string }} what would run in this worktree, without
-   *   running it. Separate from run() so a caller can decide (and record) before spending anything.
+   * @returns {Promise<{ command: string|null, source: string }>} what would run in this worktree,
+   *   without running it. Separate from run() so a caller can decide (and record) before spending
+   *   anything.
    */
-  function resolve({ cwd, projectCheckCommand, configCheckCommand }) {
+  async function resolve({ cwd, projectCheckCommand, configCheckCommand }) {
     return resolveCheckCommand({
       projectCheckCommand,
       configCheckCommand,
-      packageJson: readPackageJson(cwd, readFile),
+      packageJson: await readPackageJson(cwd, readFile),
     });
   }
 
@@ -74,7 +99,7 @@ function createWorktreeCheck({
 
       const timer = setTimeout(() => {
         timedOut = true;
-        try { child.kill(); } catch { /* already gone */ }
+        reapTree(child, { platform, killTree });
       }, overrideTimeoutMs || timeoutMs);
       if (timer.unref) timer.unref();
 

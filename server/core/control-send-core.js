@@ -32,7 +32,6 @@ const { isReplayable } = require('../control-replay-core');
 const REFRESHABLE_TYPES = new Set([
   'health-snapshot',
   'usage-sessions',
-  'usage-report',
   'plan-limits',
   'ingest-activity',
   'ingest-snapshot',

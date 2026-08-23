@@ -444,3 +444,65 @@ test('a self-write is still suppressed, however many events it produces', async 
     }
   });
 });
+
+// The signature must not outlive the state it describes. A hand-edit reload changes memory without
+// writing anything, so a signature still naming the LAST WRITTEN bytes made an operator's revert back
+// to exactly those bytes look like Glissa's own echo: silently dropped, with memory and file left
+// disagreeing and no way to notice.
+test('reverting a hand-edit back to previously written bytes still reloads', async () => {
+  await withStoreAsync({ projects: [] }, async (store, p) => {
+    const reloads = [];
+    const stop = store.watchForChanges((cfg) => { reloads.push(cfg); });
+    try {
+      store.save((cfg) => { cfg.projects.push({ id: 'from-save', name: 's', path: 'C:/s' }); });
+      await sleep(1200);
+      assert.equal(reloads.length, 0, 'the save itself is suppressed');
+      const written = fs.readFileSync(p, 'utf8');
+
+      // The operator edits away from what Glissa wrote...
+      fs.writeFileSync(p, JSON.stringify({
+        projects: [{ id: 'from-save', name: 's', path: 'C:/s' }], port: 4321,
+      }, null, 2), 'utf8');
+      await waitFor(() => reloads.length > 0, 'the hand-edit never reloaded');
+
+      // ...and then reverts, byte for byte, to what Glissa had written earlier.
+      fs.writeFileSync(p, written, 'utf8');
+      await waitFor(() => reloads.length > 1, 'the revert was swallowed as a stale self-write');
+      assert.equal(reloads[reloads.length - 1].port, undefined, 'the reverted content is what was applied');
+    } finally {
+      stop();
+    }
+  });
+});
+
+test('a duplicate event for content already applied is not re-applied', async () => {
+  await withStoreAsync({ projects: [] }, async (store, p) => {
+    const reloads = [];
+    const stop = store.watchForChanges((cfg) => { reloads.push(cfg); });
+    try {
+      const edited = JSON.stringify({ projects: [{ id: 'hand', name: 'h', path: 'C:/h' }] }, null, 2);
+      fs.writeFileSync(p, edited, 'utf8');
+      await waitFor(() => reloads.length > 0, 'the hand-edit never reloaded');
+      // Same bytes again: a second fs event for one logical edit changes nothing.
+      fs.writeFileSync(p, edited, 'utf8');
+      await sleep(1200);
+      assert.equal(reloads.length, 1);
+    } finally {
+      stop();
+    }
+  });
+});
+
+// The escalation ladder's delay is an operator-facing timeout like every other one, not a constant
+// buried in the manager.
+test('phoneEscalationMs is a settable timeout key with the five-minute default', async () => {
+  const { TIMEOUT_KEYS, DEFAULT_CONFIG } = require('../server/config-store');
+  assert.equal(TIMEOUT_KEYS.includes('phoneEscalationMs'), true);
+  assert.equal(DEFAULT_CONFIG.phoneEscalationMs, 300000);
+
+  await withStoreAsync({ projects: [] }, async (store) => {
+    assert.equal(store.getSettings().phoneEscalationMs, 300000, 'an absent key reports the default');
+    store.applySettings({ phoneEscalationMs: 0 });
+    assert.equal(store.config.phoneEscalationMs, 0, 'and zero, which switches the rung off, survives');
+  });
+});

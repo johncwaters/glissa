@@ -15,6 +15,9 @@ const DEFAULT_CONFIG = {
   inputGraceSeconds: 5,
   promptDetectionMs: 1500,
   notifyDebounceMs: 3000,
+  // How long an unacknowledged notification waits before the escalation ladder's last rung reaches
+  // the off-dashboard channel (see notifications/notification-manager.js). 0 switches the rung off.
+  phoneEscalationMs: 300000,
   cursorBlink: false,
   debugMode: false,
   // Hold a session out of COMPLETE while it still has background sub-agents running (Task
@@ -122,6 +125,7 @@ const TIMEOUT_KEYS = [
   'inputGraceSeconds',
   'promptDetectionMs',
   'notifyDebounceMs',
+  'phoneEscalationMs',
   'replayBufferKB',
 ];
 
@@ -338,14 +342,27 @@ function createConfigStore({ settingsDefaults } = {}) {
   }
 
   /*
-   * The exact bytes of the last write Glissa made to config.json, so the watcher can tell its own
-   * write apart from a hand-edit BY CONTENT rather than by clock. It used to be a 500ms window, and
-   * the window is the bug: an operator editing config.json within 500ms of a hook-driven persist (the
-   * resumeSessionId write happens on every hook payload carrying a new session id) had their edit
-   * silently dropped until they saved again. A signature suppresses exactly the echo and nothing else.
-   * A hand-edit that reproduces those bytes byte for byte is a no-op edit, so suppressing it is right.
+   * Telling Glissa's own write apart from an operator's edit. This was a 500ms window, and the window
+   * WAS the bug: an edit landing within 500ms of a hook-driven persist (resumeSessionId is written on
+   * every hook payload carrying a new session id) was silently dropped until the operator saved again.
+   *
+   * Two exact-byte signatures replace it, and a reload is skipped only when it would genuinely change
+   * nothing:
+   *   _lastWrittenContent - what save() just wrote. Its echo is not news. CLEARED the moment a reload
+   *     is applied, which is the only way memory can start disagreeing with it: without that, an
+   *     operator who hand-edits and then REVERTS to the previously-written bytes has the revert
+   *     silently dropped while memory still holds the edit.
+   *   _lastAppliedContent - what was last read and applied. One write is several fs events, so an
+   *     identical re-read is a re-apply of state already live.
+   *
+   * Deliberately NOT compared against JSON.stringify(config): save() mutates a freshly-read copy and
+   * never writes the mutation back into the in-memory object (that is what makes a per-project field
+   * like resumeSessionId a disk-only persist), so live memory does not serialize to the bytes on disk
+   * even immediately after a save. Suppression keyed on that would never match, and every save would
+   * reload its own write back through the whole settings-reload path.
    */
-  let _lastSelfWriteContent = null;
+  let _lastWrittenContent = null;
+  let _lastAppliedContent = null;
 
   /**
    * Atomic read-modify-write: reads current config.json, passes it to mutatorFn
@@ -385,7 +402,7 @@ function createConfigStore({ settingsDefaults } = {}) {
       if (freshContent !== nextContent) writeBackupContent(`${configPath}.bak`, freshContent);
       // Stamped BEFORE the write: fs.watch can deliver the event while writeTextAtomicSync is still
       // returning, and a signature recorded afterwards would miss its own echo.
-      _lastSelfWriteContent = nextContent;
+      _lastWrittenContent = nextContent;
       writeTextAtomicSync(configPath, nextContent);
     } catch (err) {
       console.warn('[config] Failed to write config.json:', err.code || err.message);
@@ -402,6 +419,7 @@ function createConfigStore({ settingsDefaults } = {}) {
       inputGraceSeconds: config.inputGraceSeconds,
       promptDetectionMs: config.promptDetectionMs,
       notifyDebounceMs: config.notifyDebounceMs,
+      phoneEscalationMs: config.phoneEscalationMs ?? DEFAULT_CONFIG.phoneEscalationMs,
       replayBufferKB: config.replayBufferKB,
       cursorBlink: config.cursorBlink ?? effectiveDefaults.cursorBlink,
       debugMode: config.debugMode ?? effectiveDefaults.debugMode,
@@ -488,10 +506,10 @@ function createConfigStore({ settingsDefaults } = {}) {
         console.warn('[config] Failed to read config.json:', err.code);
         return;
       }
-      // Our own write coming back. Compared by CONTENT, not by clock: a time window also swallowed a
-      // hand-edit that landed inside it. fs.watch can report one write twice, so the signature is
-      // kept rather than consumed.
-      if (_lastSelfWriteContent !== null && data === _lastSelfWriteContent) return;
+      // Our own write coming back, or a duplicate event for something already applied. Either way the
+      // reload would change nothing.
+      if (_lastWrittenContent !== null && data === _lastWrittenContent) return;
+      if (_lastAppliedContent !== null && data === _lastAppliedContent) return;
       let newConfig;
       try {
         newConfig = JSON.parse(data);
@@ -508,6 +526,10 @@ function createConfigStore({ settingsDefaults } = {}) {
         warnSuspectedWipe('reload config.json');
         return;
       }
+      _lastAppliedContent = data;
+      // The write signature no longer describes live state, and holding it would drop an operator's
+      // revert BACK to those bytes.
+      _lastWrittenContent = null;
       callback(newConfig);
       console.log('[config] Reloaded config.json');
     }

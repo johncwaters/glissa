@@ -40,9 +40,17 @@ function createRerereWatcher({ commonGitDir, onChange, debounceMs = 400 }) {
   function startOuter() {
     outer = createWatchDebounce({
       onChange: () => {
-        // rr-cache just appeared: take over the real watch, and treat its creation as the first
-        // recorded resolution, which is exactly the event this exists for.
-        if (watchCache()) onChange();
+        /*
+         * rr-cache just appeared: take over the real watch, and treat its creation as the first
+         * recorded resolution, which is exactly the event this exists for.
+         *
+         * A handover that FAILS must not stop the outer watch. Some platforms deliver the directory
+         * event with a null filename, which this listener treats as "maybe ours" and fires on, so the
+         * callback can arrive while rr-cache still does not exist. Stopping here would latch `stopped`
+         * and lose the trigger for the rest of the session's life.
+         */
+        if (!watchCache()) return;
+        onChange();
         outer.stop();
       },
       debounceMs,

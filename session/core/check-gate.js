@@ -8,9 +8,14 @@
 // there and put the answer on the card BEFORE the operator clicks Merge. It never blocks the merge -
 // it becomes a load-bearing gate only the day the merge click itself is automated.
 //
-// It is deliberately hard to turn on by accident. A check command is arbitrary code running unattended
-// in a worktree, so it comes from config.json only (never the control WS, like `packs` and `remote`),
-// and the npm fallback applies only to a project that actually declares a test script.
+// ON BY DEFAULT, and worth being plain about since a check command is arbitrary code running
+// unattended in a worktree: any project whose worktree declares a package.json test script gets
+// `npm test` after an auto-rebase without configuring anything. That is the useful default (the repos
+// this runs in are the ones with tests), and three things bound it: the command comes from config.json
+// only and never from the control WS (like `packs` and `remote`), a repo that declares no test script
+// and configures no command runs NOTHING rather than failing every check, and `worktreePostRebaseCheck`
+// switches the whole thing off. An earlier draft of this comment claimed it was hard to enable by
+// accident, which was simply wrong about its own fallback.
 
 const CHECK_STATUSES = Object.freeze(["pass", "fail", "timeout", "error"]);
 
