@@ -14,6 +14,7 @@ const {
 const { isUriInProjects, projectForUri, scopePathsOf } = require('./core/visions-scope-core');
 const {
   applyModelIntent: mergeModelIntent,
+  createIntentSlot,
   createIntentState,
   intentPayload,
   intentSlotFor,
@@ -88,6 +89,8 @@ function readFrame(raw) {
 
 function isPersistedEmptyIntentFile(raw) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return false;
+  const legacyEmpty = createIntentSlot();
+  if (raw.text === legacyEmpty.text && raw.source === legacyEmpty.source && raw.ts === legacyEmpty.ts) return true;
   const byProject = raw.byProject;
   const hasEmptyMap = byProject && typeof byProject === 'object' && !Array.isArray(byProject)
     && Object.keys(byProject).length === 0;
@@ -199,12 +202,7 @@ function createVisionsWiring({
   // What the lane has actually touched, applied and refused alike: the tab's audit of tier 1.
   let fixLog = [];
   let nextApplyEditId = 1;
-  /*
-   * The intent model (docs/archive/plan-navigator.md, M5): one statement PER PROJECT, not one per uri,
-   * because it says what the carbon unit is building rather than what a buffer contains, and not every
-   * project is being built toward the same thing. A uri no configured project owns lands on the global
-   * slot, which is also what a project with no statement of its own reads.
-   */
+  // The intent model (docs/archive/plan-navigator.md, M5), one statement per project.
   const scopePaths = scopePathsOf(scopeProjects);
   let intentState = loadIntentState({
     intentStatePath, fsFns, warn, knownProjectIds,

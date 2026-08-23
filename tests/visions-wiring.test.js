@@ -1237,6 +1237,17 @@ test('a model intent persists without a locked field', async (t) => {
   });
 });
 
+test('a legacy flat empty intent file is not a corrupt one', (t) => {
+  const intentStatePath = tempIntentStatePath(t);
+  fs.writeFileSync(intentStatePath, JSON.stringify({ text: '', source: null, ts: 0 }), 'utf8');
+
+  const { wiring, warnings } = drivenConnection({ intentStatePath });
+  t.after(() => wiring.stop());
+
+  assert.deepEqual(wiring.getIntent(), { global: null, byProject: {} });
+  assert.deepEqual(warnings, [], 'a file that only ever said nothing says nothing on every boot');
+});
+
 test('a corrupt intent file starts empty and warns once', (t) => {
   const intentStatePath = tempIntentStatePath(t);
   fs.writeFileSync(intentStatePath, '{', 'utf8');

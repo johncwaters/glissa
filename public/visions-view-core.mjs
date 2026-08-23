@@ -61,10 +61,6 @@ export function intentProjectLabel(projectId, namesById = null) {
   return typeof name === 'string' && name ? name : projectId;
 }
 
-/*
- * Global first, then one row per project that has a statement. The global row is dropped once a project
- * speaks for itself, except when nothing has been said anywhere: that row is then the empty state.
- */
 export function intentRows(state, namesById = null, now = Date.now()) {
   const current = state || emptyIntentState();
   const projects = Object.entries(current.byProject || {})

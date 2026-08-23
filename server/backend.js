@@ -158,7 +158,6 @@ function resolveVisionsScopeProjects(projectIds, projects, warn = console.warn) 
     projectsById.set(project.id, project);
   }
   const scopeProjects = [];
-  const seenPaths = new Set();
   for (const projectId of projectIds) {
     const project = projectsById.get(projectId);
     if (!project) {
@@ -170,8 +169,7 @@ function resolveVisionsScopeProjects(projectIds, projects, warn = console.warn) 
       warn(`[visions] configured project has no usable path: ${projectId}`);
       continue;
     }
-    if (seenPaths.has(normalizedPath)) continue;
-    seenPaths.add(normalizedPath);
+    // Every pair is kept: two projects legitimately share one path (same repo, different sessions).
     scopeProjects.push({ id: projectId, path: normalizedPath });
   }
   if (scopeProjects.length === 0) return null;

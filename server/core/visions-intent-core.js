@@ -31,10 +31,7 @@ function reviveIntentSlot(raw, { maxChars = MAX_INTENT_CHARS } = {}) {
   return { text, source: MODEL_SOURCE, ts };
 }
 
-/*
- * Project ids are the stable UUIDs ensureProjectIds assigns, so a rename or a moved path never orphans
- * a slot; only a deleted project does, and its statement is dropped rather than kept forever.
- */
+// Ids are the stable UUIDs ensureProjectIds assigns, so only a deletion orphans a slot, never a rename.
 function pruneIntentProjects(state, projectIds) {
   const current = state || createIntentState();
   if (!Array.isArray(projectIds)) return current;

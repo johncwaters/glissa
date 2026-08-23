@@ -74,6 +74,12 @@ test('projectForUri gives a nested root its own files, not the root above it', (
   assert.equal(projectForUri('file:///a/b/plan.md', projects), 'outer');
 });
 
+test('two projects on one path resolve to the first in config order, always the same one', () => {
+  const projects = [{ id: 'first', path: '/a/b' }, { id: 'second', path: '/a/b/' }];
+  assert.equal(projectForUri('file:///a/b/plan.md', projects), 'first');
+  assert.equal(projectForUri('file:///a/b/plan.md', [...projects].reverse()), 'second');
+});
+
 test('projectForUri folds path shape the same way the scope check does', () => {
   const projects = [{ id: 'win', path: 'C:\\Repo' }, { id: 'unc', path: '\\\\server\\share\\repo' }];
   assert.equal(projectForUri('file:///c:/Repo/Sub/Doc.md', projects), 'win');
