@@ -6,9 +6,11 @@ const crypto = require('node:crypto');
 
 const { scrubText } = require('./ingest-core');
 
-const MEMORY_KINDS = Object.freeze(['intent', 'feedback', 'knowledge', 'preference', 'tombstone']);
+const MEMORY_KINDS = Object.freeze(['intent', 'feedback', 'knowledge', 'preference', 'prompt', 'tombstone']);
 const PROJECTED_KINDS = Object.freeze(['intent', 'knowledge', 'preference', 'feedback']);
 const MEMORY_LAYERS = Object.freeze(['episodic', 'semantic']);
+// Pasted-secret density is highest here, so a prompt may be remembered only as raw episodic material.
+const USER_PROMPT_DENIED_KINDS = Object.freeze(['knowledge', 'preference']);
 const SOURCE_KINDS = Object.freeze(['operator', 'action', 'reported', 'model']);
 const SOURCE_VENDORS = Object.freeze(['claude', 'codex', 'grok', 'glissa']);
 
@@ -241,10 +243,16 @@ function makeRecordId({ ts, kind, sourceKind, project, text }) {
 }
 
 function buildMemoryRecord(input, { now, maxChars = MAX_RECORD_CHARS } = {}) {
-  const at = finiteNumber(now);
-  if (at === null) return { ok: false, reason: 'no-clock', record: null };
   const raw = input && typeof input === 'object' && !Array.isArray(input) ? input : {};
+  // An observed record is stamped with the moment it describes, which is also what makes a re-ingest of
+  // the same transcript line derive the same id instead of a duplicate.
+  const observed = finiteNumber(raw.ts);
+  const at = observed !== null && observed > 0 ? observed : finiteNumber(now);
+  if (at === null) return { ok: false, reason: 'no-clock', record: null };
   if (!MEMORY_KINDS.includes(raw.kind)) return { ok: false, reason: 'bad-kind', record: null };
+  if (raw.fromUserPrompt === true && USER_PROMPT_DENIED_KINDS.includes(raw.kind)) {
+    return { ok: false, reason: 'user-prompt-kind', record: null };
+  }
   const layer = MEMORY_LAYERS.includes(raw.layer) ? raw.layer : 'episodic';
   const source = normalizeSource(raw.source);
   if (!source) return { ok: false, reason: 'bad-source', record: null };
@@ -683,6 +691,7 @@ module.exports = {
   SIGNED_FIELDS,
   SOURCE_KINDS,
   SOURCE_VENDORS,
+  USER_PROMPT_DENIED_KINDS,
   absolutizeDates,
   applySupersessions,
   buildMemoryRecord,

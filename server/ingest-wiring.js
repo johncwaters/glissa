@@ -32,6 +32,8 @@ function createIngestLane({
   broadcast = null,
   logger = console,
   laneMap = null,
+  // The M14 fan-out, forwarded untouched: one source serves both consumers rather than two sources existing.
+  agentLogConsumers = [],
   agentLogOptions = null,
   fsOptions = null,
   shellHistoryOptions = null,
@@ -164,6 +166,7 @@ function createIngestLane({
       // The feedback-loop exclusion: without it a visions dispatch's own transcript rides into the
       // next visions prompt. See the mechanism note in ingest-agent-logs.js.
       laneMap,
+      consumers: agentLogConsumers,
       logger,
       nowFn,
       setIntervalFn,

@@ -62,6 +62,7 @@ const { normalizeShapePath } = require('./core/visions-scope-core');
 const { createIngestLane } = require('./ingest-wiring');
 const { resolveIngestConfig } = require('./core/ingest-core');
 const { createMemoryStore } = require('./memory-store');
+const { createMemoryIngest } = require('./memory-ingest-wiring');
 const { resolveMemoryConfig } = require('./core/memory-core');
 const { createUsageWiring, resolveUsageConfig } = require('./usage-wiring');
 const { createLaneLedger } = require('./usage-lane-ledger');
@@ -1124,6 +1125,35 @@ function createBackend(httpServer, options = {}) {
     }
     return dirs;
   };
+  /*
+   * Long-term memory store (docs/plan-visions-3.md, M12): config-file only and DEFAULT OFF, because the
+   * lane durably persists distilled transcript content. Off constructs nothing: no object, no timer, no
+   * fs touch. It is constructed BEFORE the Visions lane because that lane's M13 writers take it as a
+   * dep; the M16 delivery hangs off the same handle. It is constructed ABOVE the ingest lane because
+   * that lane's agent-log source fans out to this store's ingest consumer (M14).
+   */
+  const memoryConfig = resolveMemoryConfig(config.memory);
+  const memoryStore = memoryConfig.enabled
+    ? createMemoryStore({
+      dir: configSiblingPath(configStore.configPath, 'memory'),
+      config: memoryConfig,
+      logger: console,
+      // Same reason as the ingest and visions lanes: the setting moves, the store is built once.
+      debug: () => configStore.getSettings().debugMode === true,
+    })
+    : null;
+
+  // The M14 ingest consumer: it taps the source's MAPPED events and stamps them `reported`. Null with memory off.
+  const memoryIngest = memoryStore
+    ? createMemoryIngest({
+      store: memoryStore,
+      logger: console,
+      // The same ledger the ring consumer reads: an ephemeral lane's own transcript is never remembered.
+      laneMap: () => laneLedger.laneMap(),
+      debug: () => configStore.getSettings().debugMode === true,
+    })
+    : null;
+
   const ingestLane = ingestConfig.enabled
     ? createIngestLane({
       ...(options.ingestLaneOptions || {}),
@@ -1132,6 +1162,8 @@ function createBackend(httpServer, options = {}) {
       broadcast: (msg) => broadcastLocalControl(msg),
       // Feeds the M7 feedback-loop exclusion; rationale at the consuming site in ingest-wiring.js.
       laneMap: () => laneLedger.laneMap(),
+      // The M14 fan-out. Empty with memory off, and the lane is then byte-identical to the pre-M14 one.
+      agentLogConsumers: memoryIngest ? [memoryIngest.consumer] : [],
       repoRoots: gitRepoRoots,
       // The fs source ignores the state files the daemon writes beside this path. It matters most in a
       // dev checkout, where the resolved config file is the repo's own config.json and every
@@ -1150,23 +1182,6 @@ function createBackend(httpServer, options = {}) {
     : null;
 
   /*
-   * Long-term memory store (docs/plan-visions-3.md, M12): config-file only and DEFAULT OFF, because the
-   * lane durably persists distilled transcript content. Off constructs nothing: no object, no timer, no
-   * fs touch. It is constructed BEFORE the Visions lane because that lane's M13 writers take it as a
-   * dep; the M16 delivery hangs off the same handle.
-   */
-  const memoryConfig = resolveMemoryConfig(config.memory);
-  const memoryStore = memoryConfig.enabled
-    ? createMemoryStore({
-      dir: configSiblingPath(configStore.configPath, 'memory'),
-      config: memoryConfig,
-      logger: console,
-      // Same reason as the ingest and visions lanes: the setting moves, the store is built once.
-      debug: () => configStore.getSettings().debugMode === true,
-    })
-    : null;
-
-  /*
    * Visions lane: absent config constructs nothing (docs/archive/plan-navigator.md, "Wire and
    * trust"). The Settings dialog can persist config.visions, but this lane is constructed only at
    * boot, so changes take effect after server restart. Its tier 3 model dispatch is a second opt-in
@@ -1175,6 +1190,9 @@ function createBackend(httpServer, options = {}) {
    * the same reasons as the PR and distill lanes, and it is that registration (logPrefix 'visions')
    * that puts the lane on the usage ledger.
    */
+  // `memory.enabled` implies the SOURCE only, so with the ingest lane off the consumer builds its own.
+  if (memoryIngest && !ingestLane?.agentLogsEnabled) memoryIngest.startOwnSource();
+
   const visionsDispatchConfig = visionsConfig.dispatch;
   const visionsScopeProjects = visionsEnabled
     ? resolveVisionsScopeProjects(visionsConfig.projects, config.projects)
@@ -1583,6 +1601,11 @@ function createBackend(httpServer, options = {}) {
     httpServer.once('listening', pendingAutoResumeOnListening);
   };
   scheduleAutoResume();
+
+  // Budgeted and resumable, so a year of transcripts costs one bounded pass per boot rather than a stall.
+  if (memoryIngest) {
+    memoryIngest.backfill().catch((err) => console.warn(`[memory-ingest] backfill failed: ${err.message}`));
+  }
 
   // --- GitHub PR auto-review poller (opt-in; inert unless config.prReview.enabled) ---
   prReview.startPoller();
@@ -2149,6 +2172,8 @@ function createBackend(httpServer, options = {}) {
     if (ingestLane) stoppers.add('ingest', () => ingestLane.stop());
     // Drops every mirrored buffer and its pending sweep timer; null whenever the lane is off.
     if (visionsLane) stoppers.add('visions', () => visionsLane.stop());
+    // Before the store: it drains its queued writes THROUGH that store.
+    if (memoryIngest) stoppers.add('memory-ingest', () => memoryIngest.stop());
     // Drains the pending append and projection writes; null whenever memory is off.
     if (memoryStore) stoppers.add('memory-store', () => memoryStore.stop());
     // Not a lane, but the same rule: an outbox write still in flight is what makes a queued phone ping
@@ -2223,6 +2248,8 @@ function createBackend(httpServer, options = {}) {
     // The ingest lane (null when off), exposed for the same reason: a booted backend gives a test no
     // other way to observe what a session tap put in the rings.
     getIngestLane: () => ingestLane,
+    // The memory ingest consumer (null when off), same reason as the two handles beside it.
+    getMemoryIngest: () => memoryIngest,
     // The memory store (null when off), exposed for the same reason: a booted backend gives a test no
     // other way to observe that a default config constructed nothing.
     getMemoryStore: () => memoryStore,

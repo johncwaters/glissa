@@ -10,7 +10,7 @@ const USAGE = [
   '',
   'Commands:',
   '  forget <id|pattern>  Expunge a remembered record, or the matched text in every record',
-  '  backfill             Re-run the cold-start transcript backfill',
+  '  backfill             Read the gap since the last pass out of the local agent transcripts',
 ].join('\n');
 
 function defaultMakeStore() {
@@ -56,16 +56,49 @@ async function runForget(needle, makeStore) {
   }
 }
 
-function runBackfill() {
-  console.log('glissa memory backfill is not yet available: transcript ingestion ships in M14.');
-  return 1;
+// The lane ledger is loaded before the pass, not during it: an ephemeral lane's transcript must be
+// excluded on the FIRST file this reads, not once an async load happens to land.
+async function defaultMakeIngest(store) {
+  const { createMemoryIngest } = require('./memory-ingest-wiring');
+  const { createLaneLedger } = require('./usage-lane-ledger');
+  const { resolveConfigPath } = require('./config-store');
+  const { configSiblingPath } = require('./pairings-store');
+  const ledger = createLaneLedger({ ledgerPath: configSiblingPath(resolveConfigPath(), 'usage-lanes.json') });
+  await ledger.load();
+  return createMemoryIngest({ store, laneMap: () => ledger.laneMap() });
+}
+
+async function runBackfill(makeStore, makeIngest) {
+  const store = makeStore();
+  const ingest = await makeIngest(store);
+  try {
+    const result = await ingest.backfill();
+    // A live server takes the same lock for its pass, and two passes over one tail-state file double-read.
+    if (result.reason === 'locked') {
+      console.error('Another process holds the memory store lock, most likely a running Glissa. Nothing was read.');
+      return 1;
+    }
+    if (!result.ok) {
+      console.error(`The backfill did not run: ${result.reason}.`);
+      return 1;
+    }
+    const stats = ingest.stats();
+    console.log(`Read ${result.bytesRead} byte(s) across ${result.files} transcript(s).`);
+    console.log(`Remembered ${stats.written} record(s); ${stats.rejected} were refused by the write gates.`);
+    if (result.partial) console.log('The byte budget was reached: run it again to continue where it stopped.');
+    console.log(`Offsets: ${ingest.statePath}`);
+    return 0;
+  } finally {
+    await ingest.stop();
+    await store.stop();
+  }
 }
 
 async function runMemoryCli(args, deps = {}) {
-  const { makeStore = defaultMakeStore } = deps;
+  const { makeStore = defaultMakeStore, makeIngest = defaultMakeIngest } = deps;
   const command = args[0];
   if (command === 'forget') return runForget(args[1], makeStore);
-  if (command === 'backfill') return runBackfill();
+  if (command === 'backfill') return runBackfill(makeStore, makeIngest);
   console.error(USAGE);
   return 1;
 }

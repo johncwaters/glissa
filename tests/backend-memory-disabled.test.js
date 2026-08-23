@@ -15,6 +15,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const { createBackend } = require('../server/backend');
+const { isolateTranscriptHomes } = require('./helpers/transcript-homes');
 const { BOOLEAN_KEYS, STRING_KEYS, TIMEOUT_KEYS } = require('../server/config-store');
 
 async function bootWithConfig(memory) {
@@ -24,6 +25,8 @@ async function bootWithConfig(memory) {
   fs.writeFileSync(configPath, JSON.stringify(memory === undefined ? base : { ...base, memory }, null, 2), 'utf8');
   const previousConfig = process.env.GLISSA_CONFIG;
   process.env.GLISSA_CONFIG = configPath;
+  // memory.enabled implies the agent-log source, so the vendor homes go somewhere empty first.
+  const restoreHomes = isolateTranscriptHomes(dir);
   const server = http.createServer();
   const backend = createBackend(server, { staticDir: null });
   server.on('request', backend.app);
@@ -35,6 +38,7 @@ async function bootWithConfig(memory) {
       backend.shutdown();
       server.closeAllConnections();
       await new Promise((resolve) => server.close(resolve));
+      restoreHomes();
       if (previousConfig == null) delete process.env.GLISSA_CONFIG;
       if (previousConfig != null) process.env.GLISSA_CONFIG = previousConfig;
       fs.rmSync(dir, { recursive: true, force: true });

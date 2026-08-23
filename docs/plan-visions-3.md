@@ -344,7 +344,23 @@ version; only an APPLIED tier 1 fix is remembered, because the editor also refus
 or a timeout and neither is an operator verdict; and the intent chain head per slot is seeded at
 first write from the loaded canon, so a restart continues the chain instead of forking a new one.
 
-### M14: transcript ingestion (honest scope)
+### M14: transcript ingestion (honest scope) [SHIPPED]
+
+Shipped 2026-08-23 on the M12 file substrate. The pure decisions are in
+`server/core/memory-ingest-core.js`; `server/memory-ingest-wiring.js` is the IO shell that owns the
+consumer, its tail-state file, the batching and the backfill, and `server/ingest-wiring.js` gained only
+one forwarded `agentLogConsumers` option, so it stayed thin. Three details the milestone text below did
+not settle, decided in the build:
+
+- A user prompt is a `prompt` record, a KIND added to `memory-core` and deliberately left out of
+  `PROJECTED_KINDS`, plus a `fromUserPrompt` flag `buildMemoryRecord` refuses as `knowledge` or
+  `preference`. Writing prompts as `intent` records instead would have put raw operator quotes into the
+  projection, which is exactly what "the distiller writes claims, not quotes" rules out.
+- The mapped `agent-prompt` event kind is absent from `ingest-core.KINDS_BY_SOURCE`, so `publishEvent`
+  rejects it outright: the per-consumer routing is the rule, and that absence is the second layer under it.
+- Idempotency is a record property rather than a bookkeeping one: an observed record's ts is the moment it
+  describes, so its derived id is stable and the store refuses an id it already holds. A backfill cut short
+  by its byte budget is therefore safe to re-run, which is what "resumable" needed to mean.
 
 This is fan-out plumbing plus a scrub decision, not a mapper tweak:
 

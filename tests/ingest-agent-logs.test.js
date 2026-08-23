@@ -149,6 +149,18 @@ function claudeAssistant({ text = null, tools = [], sessionId, cwd = 'C:\\repo' 
   })}\n`;
 }
 
+// A prompt as Claude Code writes it. A tool RESULT arrives on a `user` line too, which is why the
+// mapper reads the content blocks rather than the line type alone.
+function claudeUser({ text, sessionId, cwd = 'C:\\repo', ts = null }) {
+  return `${JSON.stringify({
+    type: 'user',
+    message: { role: 'user', content: [{ type: 'text', text }] },
+    cwd,
+    sessionId,
+    timestamp: ts || new Date().toISOString(),
+  })}\n`;
+}
+
 function seedClaudeTranscript(projects, { dirName = 'C--repo', sessionId = 'sess-live', lines = [] } = {}) {
   const dir = path.join(projects, dirName);
   fs.mkdirSync(dir, { recursive: true });
@@ -832,12 +844,13 @@ test('a missing vendor home is silently absent rather than an error', withHomes(
 
 // --- Through the lane ------------------------------------------------------
 
-function laneWith(homes, rawConfig, overrides = {}) {
+function laneWith(homes, rawConfig, overrides = {}, consumers = []) {
   const broadcasts = [];
   const lane = createIngestLane({
     config: resolveIngestConfig(rawConfig),
     broadcast: (message) => broadcasts.push(message),
     logger: { warn: () => {} },
+    agentLogConsumers: consumers,
     ...inertTimers(),
     agentLogOptions: { env: homes.env, ...overrides },
   });
@@ -964,4 +977,105 @@ test('lane stop tears the agent-log source down with it', withHomes(async (homes
   lane.stop();
   assert.equal(lane.agentLogs.watchCount, 0);
   assert.equal(lane.agentLogs.trackedCount, 0);
+}));
+
+// --- The M14 publish fan-out ----------------------------------------------
+
+// The negative pin: with ingest on and memory off, prompt text reaches neither the rings nor the control WS.
+test('with nothing asking for them, user prompts reach neither the rings nor a broadcast', withHomes(async (homes) => {
+  const filePath = seedClaudeTranscript(homes.projects, { sessionId: 'sess-prompt' });
+  const { lane, broadcasts } = laneWith(homes, { enabled: true, sources: { agentLogs: { enabled: true } } });
+  try {
+    await lane.agentLogs.start();
+    append(filePath, claudeUser({ text: 'the staging password is hunter2', sessionId: 'sess-prompt' }));
+    append(filePath, claudeAssistant({ text: 'Understood.', sessionId: 'sess-prompt' }));
+    await lane.agentLogs.poll();
+    lane.flushBatch();
+
+    assert.deepEqual(lane.recentEvents().map((event) => event.kind), ['agent-turn']);
+    const wire = JSON.stringify(broadcasts);
+    assert.equal(wire.includes('hunter2'), false, 'operator prompt text must never reach the wire');
+    assert.equal(wire.includes('agent-prompt'), false);
+  } finally {
+    lane.stop();
+  }
+}));
+
+test('adding a consumer that wants prompts leaves the ring and the broadcast byte-identical', withHomes(async (homes) => {
+  const filePath = seedClaudeTranscript(homes.projects, { sessionId: 'sess-both' });
+  const consumed = [];
+  const plain = laneWith(homes, { enabled: true, sources: { agentLogs: { enabled: true } } });
+  const withConsumer = laneWith(
+    homes,
+    { enabled: true, sources: { agentLogs: { enabled: true } } },
+    {},
+    [{ name: 'memory', userPrompts: true, publish: (event) => consumed.push(event) }],
+  );
+  try {
+    await plain.lane.agentLogs.start();
+    await withConsumer.lane.agentLogs.start();
+    const stamp = '2026-08-20T10:00:00.000Z';
+    append(filePath, claudeUser({ text: 'ship it', sessionId: 'sess-both', ts: stamp }));
+    append(filePath, claudeAssistant({ text: 'Shipped.', sessionId: 'sess-both', ts: stamp }));
+    await plain.lane.agentLogs.poll();
+    await withConsumer.lane.agentLogs.poll();
+    plain.lane.flushBatch();
+    withConsumer.lane.flushBatch();
+
+    assert.deepEqual(withConsumer.lane.recentEvents(), plain.lane.recentEvents());
+    assert.deepEqual(
+      withConsumer.broadcasts.map((message) => message.events),
+      plain.broadcasts.map((message) => message.events),
+    );
+    assert.deepEqual(consumed.map((event) => event.kind), ['agent-prompt', 'agent-turn']);
+  } finally {
+    plain.lane.stop();
+    withConsumer.lane.stop();
+  }
+}));
+
+test('the feedback-loop exclusion covers every target, not just the ring', withHomes(async ({ projects, env }) => {
+  const filePath = seedClaudeTranscript(projects, { sessionId: 'sess-visions' });
+  const ringEvents = [];
+  const consumed = [];
+  const adapter = createAgentLogIngest({
+    publish: (event) => ringEvents.push(event),
+    consumers: [{ name: 'memory', userPrompts: true, publish: (event) => consumed.push(event) }],
+    laneMap: () => new Map([['sess-visions', 'visions']]),
+    env,
+    ...inertTimers(),
+  });
+  try {
+    await adapter.start();
+    append(filePath, claudeUser({ text: 'a dispatch prompt', sessionId: 'sess-visions' }));
+    append(filePath, claudeAssistant({ text: 'a dispatch answer', sessionId: 'sess-visions' }));
+    await adapter.poll();
+    assert.deepEqual(ringEvents, []);
+    assert.deepEqual(consumed, [], 'the lane must never remember what the lane itself said');
+  } finally {
+    adapter.stop();
+  }
+}));
+
+test('a throwing target costs one warning, never the drain or the target beside it', withHomes(async ({ projects, env, warnings }) => {
+  const filePath = seedClaudeTranscript(projects, { sessionId: 'sess-throw' });
+  const ringEvents = [];
+  const adapter = createAgentLogIngest({
+    publish: (event) => ringEvents.push(event),
+    consumers: [{ name: 'memory', userPrompts: true, publish: () => { throw new Error('store is down'); } }],
+    env,
+    logger: { warn: (message) => warnings.push(message) },
+    ...inertTimers(),
+  });
+  try {
+    await adapter.start();
+    append(filePath, claudeAssistant({ text: 'still tailing', sessionId: 'sess-throw' }));
+    await adapter.poll();
+    assert.equal(adapter.isDisabled, false);
+    assert.equal(ringEvents.length, 1);
+    assert.equal(warnings.length, 1);
+    assert.match(warnings[0], /memory target failed/);
+  } finally {
+    adapter.stop();
+  }
 }));

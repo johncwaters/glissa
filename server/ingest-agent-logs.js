@@ -33,7 +33,7 @@ const {
   MAX_CATCH_UP_BYTES, applyRead, canTrustCachedListing, createTailState, isActiveMtime, pickStaleByMtime,
   planRead,
 } = require('./core/ingest-tail-core');
-const { isDispatchWorkdir, mapAgentLine } = require('./core/ingest-agent-core');
+const { PROMPT_KIND, isDispatchWorkdir, mapAgentLine } = require('./core/ingest-agent-core');
 const { positiveInt } = require('./core/ingest-number-core');
 const { createLaneLog } = require('./lane-log');
 
@@ -60,8 +60,82 @@ function decodeGrokRoot(name) {
   }
 }
 
+function sessionIdFromPath(vendor, dir, filePath) {
+  if (vendor === 'claude') return path.basename(filePath, '.jsonl');
+  if (vendor === 'grok') return path.basename(dir);
+  return codexSessionIdFromPath(filePath);
+}
+
+function rootFromPath(vendor, dir) {
+  if (vendor === 'grok') return decodeGrokRoot(path.basename(path.dirname(dir)));
+  // A Claude line carries its own cwd; the raw transcript directory stands in until one arrives.
+  if (vendor === 'claude') return dir;
+  return null;
+}
+
+// Codex nests its rollouts under date directories that name no project, so the cwd is read once from
+// the head of the file. Without it every event of a session joined mid-file would be machine scope.
+async function readCodexRoot(filePath, fsPromises = fsNode.promises) {
+  let handle = null;
+  try {
+    handle = await fsPromises.open(filePath, 'r');
+    const buffer = Buffer.alloc(CODEX_HEAD_BYTES);
+    const { bytesRead } = await handle.read(buffer, 0, CODEX_HEAD_BYTES, 0);
+    const text = buffer.subarray(0, bytesRead).toString('utf8');
+    const lines = text.split(/\r?\n/);
+    if (bytesRead === CODEX_HEAD_BYTES) lines.pop();
+    for (const line of lines) {
+      if (!line) continue;
+      let parsed = null;
+      try {
+        parsed = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      const cwd = parsed?.payload?.cwd;
+      if (typeof cwd === 'string' && cwd.trim()) return cwd.trim();
+    }
+    return null;
+  } catch {
+    return null;
+  } finally {
+    if (handle) await handle.close().catch(() => {});
+  }
+}
+
+/**
+ * Every transcript root the usage lane already knows how to resolve, reused rather than re-derived so the
+ * two lanes can never disagree about where a vendor keeps its sessions. Pure: it names candidates, and
+ * the caller decides which of them exist.
+ */
+function transcriptRootCandidates(env = process.env, wanted = {}) {
+  const candidates = [];
+  if (wanted.claude !== false) {
+    candidates.push({ vendor: 'claude', dir: claudeProjectsDir(env), maxDepth: 1 });
+  }
+  if (wanted.codex !== false) {
+    /*
+     * The active sessions root only. An archived rollout is a session Codex already finished moving
+     * away, so it can never append, and skipping it also removes the active-over-archived dedupe the
+     * usage lane needs and this one does not.
+     */
+    for (const candidate of codexRootCandidates(codexHomes(env))) {
+      if (candidate.kind !== 'active') continue;
+      candidates.push({ vendor: 'codex', dir: candidate.dir, home: candidate.home, maxDepth: 3 });
+    }
+  }
+  if (wanted.grok !== false) {
+    for (const candidate of grokRootCandidates(grokHomes(env))) {
+      candidates.push({ vendor: 'grok', dir: candidate.dir, maxDepth: 2 });
+    }
+  }
+  return candidates;
+}
+
 function createAgentLogIngest({
-  publish,
+  publish = null,
+  // The M14 fan-out: every target sees the MAPPED event, and user prompts reach only the targets that asked.
+  consumers = [],
   sourceConfig = {},
   laneMap = null,
   logger = console,
@@ -88,7 +162,19 @@ function createAgentLogIngest({
   maxCatchUpBytes = MAX_CATCH_UP_BYTES,
   vendors = null,
 } = {}) {
-  if (typeof publish !== 'function') throw new Error('createAgentLogIngest requires publish');
+  const targets = [];
+  if (typeof publish === 'function') targets.push({ name: 'ring', publish, userPrompts: false });
+  for (const consumer of Array.isArray(consumers) ? consumers : []) {
+    if (typeof consumer?.publish !== 'function') continue;
+    targets.push({
+      name: consumer.name || 'consumer',
+      publish: consumer.publish,
+      noteTail: typeof consumer.noteTail === 'function' ? consumer.noteTail : null,
+      userPrompts: consumer.userPrompts === true,
+    });
+  }
+  if (targets.length === 0) throw new Error('createAgentLogIngest requires a publish target');
+  const wantsUserPrompts = targets.some((target) => target.userPrompts);
   const pollMs = positiveInt(sourceConfig.pollMs, positiveInt(pollIntervalMs, DEFAULT_POLL_MS));
   const wanted = vendors && typeof vendors === 'object' ? vendors : {};
 
@@ -178,34 +264,10 @@ function createAgentLogIngest({
     }
   }
 
-  function rootCandidates() {
-    const candidates = [];
-    if (wanted.claude !== false) {
-      candidates.push({ vendor: 'claude', dir: claudeProjectsDir(env), maxDepth: 1 });
-    }
-    if (wanted.codex !== false) {
-      /*
-       * The active sessions root only. An archived rollout is a session Codex already finished moving
-       * away, so it can never append, and skipping it also removes the active-over-archived dedupe the
-       * usage lane needs and this one does not.
-       */
-      for (const candidate of codexRootCandidates(codexHomes(env))) {
-        if (candidate.kind !== 'active') continue;
-        candidates.push({ vendor: 'codex', dir: candidate.dir, home: candidate.home, maxDepth: 3 });
-      }
-    }
-    if (wanted.grok !== false) {
-      for (const candidate of grokRootCandidates(grokHomes(env))) {
-        candidates.push({ vendor: 'grok', dir: candidate.dir, maxDepth: 2 });
-      }
-    }
-    return candidates;
-  }
-
   async function resolveRoots() {
     const roots = [];
     const codexHomesCovered = new Set();
-    for (const candidate of rootCandidates()) {
+    for (const candidate of transcriptRootCandidates(env, wanted)) {
       const stat = await statOrNull(candidate.dir);
       if (!alive()) return roots;
       if (!stat || !stat.isDirectory()) continue;
@@ -316,48 +378,6 @@ function createAgentLogIngest({
     return left;
   }
 
-  function sessionIdFromPath(vendor, dir, filePath) {
-    if (vendor === 'claude') return path.basename(filePath, '.jsonl');
-    if (vendor === 'grok') return path.basename(dir);
-    return codexSessionIdFromPath(filePath);
-  }
-
-  function rootFromPath(vendor, dir) {
-    if (vendor === 'grok') return decodeGrokRoot(path.basename(path.dirname(dir)));
-    // A Claude line carries its own cwd; the raw transcript directory stands in until one arrives.
-    if (vendor === 'claude') return dir;
-    return null;
-  }
-
-  // Codex nests its rollouts under date directories that name no project, so the cwd is read once from
-  // the head of the file. Without it every event of a session joined mid-file would be machine scope.
-  async function readCodexRoot(filePath) {
-    let handle = null;
-    try {
-      handle = await fsPromises.open(filePath, 'r');
-      const buffer = Buffer.alloc(CODEX_HEAD_BYTES);
-      const { bytesRead } = await handle.read(buffer, 0, CODEX_HEAD_BYTES, 0);
-      const text = buffer.subarray(0, bytesRead).toString('utf8');
-      const lines = text.split(/\r?\n/);
-      if (bytesRead === CODEX_HEAD_BYTES) lines.pop();
-      for (const line of lines) {
-        if (!line) continue;
-        let parsed = null;
-        try {
-          parsed = JSON.parse(line);
-        } catch {
-          continue;
-        }
-        const cwd = parsed?.payload?.cwd;
-        if (typeof cwd === 'string' && cwd.trim()) return cwd.trim();
-      }
-      return null;
-    } catch {
-      return null;
-    } finally {
-      if (handle) await handle.close().catch(() => {});
-    }
-  }
 
   /*
    * Feedback-loop exclusion, primary mechanism: the usage-lane ledger (server/usage-lane-ledger.js).
@@ -383,7 +403,7 @@ function createAgentLogIngest({
     const sessionId = sessionIdFromPath(root.vendor, dir, filePath);
     if (isEphemeralLane(lanes, sessionId)) return;
     let scopeRoot = rootFromPath(root.vendor, dir);
-    if (root.vendor === 'codex') scopeRoot = await readCodexRoot(filePath);
+    if (root.vendor === 'codex') scopeRoot = await readCodexRoot(filePath, fsPromises);
     if (!alive()) return;
     if (isDispatchWorkdir(scopeRoot)) return;
     tails.set(filePath, createTailState(stat, { path: filePath }));
@@ -536,6 +556,42 @@ function createAgentLogIngest({
     }
   }
 
+  // A throwing target must not reach the source's guard, which would read it as a platform failure.
+  function deliver(event, tail) {
+    for (const target of targets) {
+      if (event.kind === PROMPT_KIND && !target.userPrompts) continue;
+      try {
+        target.publish(event, tail);
+      } catch (error) {
+        warn(`the ${target.name} target failed: ${error.message}`);
+      }
+    }
+  }
+
+  function noteTail(tail) {
+    for (const target of targets) {
+      if (!target.noteTail) continue;
+      try {
+        target.noteTail(tail);
+      } catch (error) {
+        warn(`the ${target.name} target failed: ${error.message}`);
+      }
+    }
+  }
+
+  // What a durable-offset consumer needs to resume this file: the identity keys plus where the read ended.
+  function tailSnapshot(filePath, context, state) {
+    return {
+      path: filePath,
+      vendor: context.vendor,
+      root: context.root,
+      sessionId: context.sessionId,
+      size: state.size,
+      mtimeMs: state.mtimeMs,
+      offset: state.offset,
+    };
+  }
+
   function publishLines(filePath, lines, lanes) {
     const context = contexts.get(filePath);
     const state = tails.get(filePath);
@@ -551,6 +607,7 @@ function createAgentLogIngest({
         rawLine,
         ctx: { root: context.root, sessionId: context.sessionId, now: nowFn() },
         vendorState: state.vendorState,
+        includeUserPrompts: wantsUserPrompts,
       });
       state.vendorState = mapped.vendorState;
       context.root = mapped.root;
@@ -570,7 +627,7 @@ function createAgentLogIngest({
           event.detail = { ...event.detail, droppedLines };
           droppedLines = 0;
         }
-        publish(event);
+        deliver(event, tailSnapshot(filePath, context, state));
       }
     }
   }
@@ -619,6 +676,9 @@ function createAgentLogIngest({
     const lines = applyRead(state, { text, end, stat, reset: plan.reset, dropPartial: plan.dropPartial });
     if (lines.length === 0) return;
     publishLines(filePath, lines, lanes);
+    const context = contexts.get(filePath);
+    // After the events, so a consumer that defers its offset until its own writes land has already seen them.
+    if (context) noteTail(tailSnapshot(filePath, context, state));
   }
 
   /*
@@ -752,4 +812,8 @@ module.exports = {
   DEFAULT_DISCOVER_MS,
   DEFAULT_POLL_MS,
   createAgentLogIngest,
+  readCodexRoot,
+  rootFromPath,
+  sessionIdFromPath,
+  transcriptRootCandidates,
 };

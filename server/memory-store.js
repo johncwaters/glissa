@@ -28,6 +28,9 @@ const CANON_LOCK_FILE = 'canon.lock';
 const LOCK_RETRY_MS = 50;
 const LOCK_MAX_ATTEMPTS = 10;
 const LOCK_STALE_MS = 5000;
+// Comfortably inside LOCK_STALE_MS, so a long pass keeps a lock nobody may treat as abandoned.
+const LOCK_REFRESH_MS = 1500;
+const MAX_DELIVERED_HASHES = 2000;
 const CANON_WATCH_DEBOUNCE_MS = 200;
 // The longest an unbroken event stream may defer the trailing refresh; without it a storm defers forever.
 const CANON_WATCH_MAX_WAIT_MS = 1000;
@@ -348,6 +351,11 @@ function createMemoryStore(deps = {}) {
         log.debugNote(() => `record rejected: ${built.reason}`);
         return null;
       }
+      // The id is the moment plus the text, so a re-read of the same transcript bytes is idempotent.
+      if (records.some((record) => record.id === built.record.id)) {
+        log.debugNote(() => 'record already remembered');
+        return null;
+      }
       const signed = core.withSignature(built.record, signingKey);
       await appendSigned(signed);
       return signed;
@@ -536,6 +544,39 @@ function createMemoryStore(deps = {}) {
     await writeProjection().catch(() => log.warn('projection write failed during shutdown'));
   }
 
+  // Echo suppression's delivery half: M16 registers what it hands out, the ingest consumer drops those lines.
+  const deliveredHashes = new Set();
+
+  function noteDelivered(text) {
+    for (const hash of core.deliveredLineHashes(text)) {
+      deliveredHashes.delete(hash);
+      deliveredHashes.add(hash);
+    }
+    while (deliveredHashes.size > MAX_DELIVERED_HASHES) {
+      const oldest = deliveredHashes.values().next().value;
+      deliveredHashes.delete(oldest);
+    }
+    return deliveredHashes.size;
+  }
+
+  // Held for a whole pass, mtime refreshed, so the staleness rule cannot hand the lock to a second copy.
+  async function withCanonLock(work) {
+    if (!await acquireCanonLock()) return { locked: false, result: null };
+    const refresh = setInterval(() => {
+      try {
+        const at = new Date();
+        fs.utimesSync(lockPath, at, at);
+      } catch {}
+    }, LOCK_REFRESH_MS);
+    if (typeof refresh.unref === 'function') refresh.unref();
+    try {
+      return { locked: true, result: await work() };
+    } finally {
+      clearInterval(refresh);
+      releaseCanonLock();
+    }
+  }
+
   function stats() {
     const byKind = {};
     for (const record of records) byKind[record.kind] = (byKind[record.kind] || 0) + 1;
@@ -547,15 +588,18 @@ function createMemoryStore(deps = {}) {
 
   return {
     append,
+    deliveredHashes: () => deliveredHashes,
     dir,
     distDir,
     flushProjection,
     forget,
+    noteDelivered,
     projectionPath: path.join(distDir, GLOBAL_PROJECTION_FILE),
     records: () => records.slice(),
     retrieve: (options) => core.retrieveMemories(records, { now: now(), ...options }),
     stats,
     stop,
+    withCanonLock,
   };
 }
 

@@ -14,6 +14,8 @@
 'use strict';
 
 const SOURCE = 'agentLogs';
+// Absent from ingest-core's KINDS_BY_SOURCE on purpose, so no routing slip puts prompt text on the wire.
+const PROMPT_KIND = 'agent-prompt';
 /*
  * A MEMORY bound and nothing else (docs/plan-ingestion.md, M11). Summarizing is the ring's job:
  * `normalizeEvent` scrubs, THEN folds, THEN slices to 400, and a cut taken here would run ahead of the
@@ -130,6 +132,19 @@ function turnEvent({ ts, root, sessionId, vendor, text }) {
   };
 }
 
+function promptEvent({ ts, root, sessionId, vendor, text }) {
+  const summary = boundRaw(text).trim();
+  if (!summary) return null;
+  return {
+    source: SOURCE,
+    kind: PROMPT_KIND,
+    ts,
+    scope: { root, sessionId },
+    summary: `${vendor} prompt: ${summary}`,
+    detail: { vendor },
+  };
+}
+
 function toolEvent({ ts, root, sessionId, vendor, name, target }) {
   const tool = boundRaw(str(name) || 'tool');
   const suffix = target ? ` ${target}` : '';
@@ -160,7 +175,31 @@ function firstTextBlock(content) {
   return null;
 }
 
+// A tool result and an isMeta reminder arrive on `user` lines too, and neither is anything a carbon unit typed.
+function claudeUserText(line) {
+  if (line.isMeta === true || line.isCompactSummary === true) return null;
+  const content = line.message?.content;
+  if (typeof content === 'string') return str(content);
+  if (!Array.isArray(content)) return null;
+  for (const block of content) {
+    if (block?.type === 'tool_result') return null;
+  }
+  return firstTextBlock(content);
+}
+
+function mapClaudeUserLine(line, ctx) {
+  const text = claudeUserText(line);
+  if (!text) return null;
+  const root = str(line.cwd) || ctx.root;
+  const sessionId = str(line.sessionId) || ctx.sessionId;
+  const prompt = promptEvent({
+    ts: parseTimestamp(line.timestamp) || ctx.now, root, sessionId, vendor: 'claude', text,
+  });
+  return result(prompt ? [prompt] : [], root, sessionId, ctx.vendorState);
+}
+
 function mapClaudeLine(line, ctx) {
+  if (line.type === 'user') return ctx.includeUserPrompts ? mapClaudeUserLine(line, ctx) : null;
   if (line.type !== 'assistant') return null;
   const content = line.message?.content;
   if (!Array.isArray(content)) return null;
@@ -195,6 +234,11 @@ function mapCodexLine(line, ctx) {
     return result([], str(payload.cwd) || ctx.root, str(payload.session_id) || ctx.sessionId, ctx.vendorState);
   }
   const base = { ts, root: ctx.root, sessionId: ctx.sessionId, vendor: 'codex' };
+  if (ctx.includeUserPrompts && line.type === 'event_msg' && payload.type === 'user_message') {
+    const prompt = promptEvent({ ...base, text: payload.message });
+    if (!prompt) return null;
+    return result([prompt], ctx.root, ctx.sessionId, ctx.vendorState);
+  }
   // agent_message is the completed message; the response_item/message stream beside it carries the raw
   // request items, including the whole system prompt.
   if (line.type === 'event_msg' && payload.type === 'agent_message') {
@@ -239,6 +283,16 @@ function appendPending(vendorState, text) {
  */
 const GROK_TURN_BOUNDARIES = Object.freeze(['user_message_chunk', 'retry_state']);
 
+// Nothing marks the end of a chunked user message, so the first non-user update is what proves it complete.
+function appendPendingUser(vendorState, text) {
+  const addition = str(text);
+  const pendingUserText = typeof vendorState?.pendingUserText === 'string' ? vendorState.pendingUserText : '';
+  if (!addition) return { pendingUserText };
+  const remaining = MAX_RAW_CHARS - pendingUserText.length - 1;
+  if (remaining <= 0) return { pendingUserText };
+  return { pendingUserText: `${pendingUserText} ${boundRaw(addition, remaining)}` };
+}
+
 function grokToolName(update) {
   const meta = update._meta && typeof update._meta === 'object' ? update._meta['x.ai/tool'] : null;
   return str(meta?.name) || str(update.title) || 'tool';
@@ -251,24 +305,32 @@ function mapGrokLine(line, ctx) {
   const ts = parseTimestamp(line.timestamp) || ctx.now;
   const base = { ts, root: ctx.root, sessionId, vendor: 'grok' };
   const kind = str(update.sessionUpdate);
-  if (GROK_TURN_BOUNDARIES.includes(kind)) return result([], ctx.root, sessionId, null);
+  if (kind === 'user_message_chunk' && ctx.includeUserPrompts) {
+    return result([], ctx.root, sessionId, appendPendingUser(ctx.vendorState, update.content?.text));
+  }
+  const heldPrompt = str(ctx.vendorState?.pendingUserText);
+  const prompt = heldPrompt ? promptEvent({ ...base, text: heldPrompt }) : null;
+  const held = prompt ? [prompt] : [];
+  const carried = heldPrompt ? { pendingText: str(ctx.vendorState?.pendingText) || '' } : ctx.vendorState;
+  if (GROK_TURN_BOUNDARIES.includes(kind)) return result(held, ctx.root, sessionId, null);
   if (kind === 'agent_message_chunk') {
-    return result([], ctx.root, sessionId, appendPending(ctx.vendorState, update.content?.text));
+    return result(held, ctx.root, sessionId, appendPending(carried, update.content?.text));
   }
   if (kind === 'turn_completed') {
-    const pending = str(ctx.vendorState?.pendingText);
+    const pending = str(carried?.pendingText);
     const stopReason = str(update.stop_reason);
     const text = pending || `turn complete${stopReason ? ` (${stopReason})` : ''}`;
     const turn = turnEvent({ ...base, text });
-    if (!turn) return result([], ctx.root, sessionId, null);
-    return result([turn], ctx.root, sessionId, null);
+    if (!turn) return result(held, ctx.root, sessionId, null);
+    return result([...held, turn], ctx.root, sessionId, null);
   }
   // tool_call is the call; tool_call_update is its streaming progress, and there are four of those per
   // call in a live transcript.
   if (kind === 'tool_call') {
     const target = toolTarget(update.rawInput);
-    return result([toolEvent({ ...base, name: grokToolName(update), target })], ctx.root, sessionId, ctx.vendorState);
+    return result([...held, toolEvent({ ...base, name: grokToolName(update), target })], ctx.root, sessionId, carried);
   }
+  if (prompt) return result(held, ctx.root, sessionId, carried);
   return null;
 }
 
@@ -281,7 +343,7 @@ const MAPPERS = Object.freeze({ claude: mapClaudeLine, codex: mapCodexLine, grok
  * an unknown vendor, and a line the vendor's mapper has no interest in all resolve to no events and an
  * unchanged context, so the shell never has to branch on any of those.
  */
-function mapAgentLine({ vendor, rawLine, ctx = {}, vendorState = null } = {}) {
+function mapAgentLine({ vendor, rawLine, ctx = {}, vendorState = null, includeUserPrompts = false } = {}) {
   const root = ctx.root == null ? null : ctx.root;
   const sessionId = ctx.sessionId == null ? null : ctx.sessionId;
   const unchanged = result([], root, sessionId, vendorState);
@@ -290,7 +352,8 @@ function mapAgentLine({ vendor, rawLine, ctx = {}, vendorState = null } = {}) {
   const line = parseJson(rawLine);
   if (!line) return unchanged;
   const mapped = mapper(line, {
-    root, sessionId, vendorState, now: Number.isFinite(ctx.now) ? ctx.now : 0,
+    root, sessionId, vendorState, includeUserPrompts: includeUserPrompts === true,
+    now: Number.isFinite(ctx.now) ? ctx.now : 0,
   });
   if (!mapped) return unchanged;
   return mapped;
@@ -298,6 +361,7 @@ function mapAgentLine({ vendor, rawLine, ctx = {}, vendorState = null } = {}) {
 
 module.exports = {
   MAX_RAW_CHARS,
+  PROMPT_KIND,
   isDispatchWorkdir,
   mapAgentLine,
   parseTimestamp,
