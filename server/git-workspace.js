@@ -224,17 +224,7 @@ function createGitWorkspace(opts = {}) {
     await refuseTrackableLinks(wtDir, ignored);
   }
 
-  /*
-   * The probe above asks the PROJECT, where a shared dir is a real directory. In the worktree it is a
-   * LINK, and a trailing-slash pattern (`node_modules/`, `.omc/`) matches directories only: to git a
-   * symlink is a blob, so on POSIX the very entries the probe cleared come back stageable, and one
-   * `git add -A` commits a link pointing outside the repo into the integration branch. A Windows
-   * junction IS a real directory to git, which is why the leak guard held there and only there.
-   *
-   * The link is dropped rather than kept, matching what an entry the first probe refused already gets:
-   * the session runs without that piece, and nothing shared can reach a commit. The operator's fix is a
-   * slash-free ignore entry, which is what the warning says.
-   */
+  // Re-probe in the WORKTREE: a share is a symlink there (a blob to git, unlike a Windows junction), so a trailing-slash ignore pattern stops matching it and `git add -A` could commit it; an unignored link is dropped, same cost as a first-probe refusal.
   async function refuseTrackableLinks(wtDir, entries) {
     for (const rel of entries) {
       if ((await run(['check-ignore', '-q', '--', rel], wtDir)).ok) continue;

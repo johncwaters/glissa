@@ -37,26 +37,16 @@ async function readPackageJson(cwd, readFile) {
   }
 }
 
-/*
- * Killing a shell-spawned check is a TREE problem on every platform. `child.kill()` reaches the shell
- * alone (cmd.exe, or /bin/sh), and the tree under it - npm, node, the test runner - survives, holding
- * open handles INSIDE the worktree: the timeout then reports a verdict while the run it timed out on
- * keeps writing there, and the next auto-rebase fails on those handles. Windows uses the same
- * taskkill /T /F reap the PTY path uses (sessions.js _taskkill); off it the child is spawned detached, so
- * it leads its own process group and one signal to the NEGATIVE pid reaches everything under it. A child
- * with no pid (a spawn that never got that far) is all there is to kill, so it keeps child.kill().
- */
+// TREE kill: child.kill() reaches only the shell while npm and the runner keep handles inside the worktree, so win32 reuses the PTY path's taskkill /T /F and POSIX group-signals the detached child (-pid).
 function reapTree(child, { platform, killTree, killGroup }) {
   const killChildOnly = () => {
     try { child.kill(); } catch { /* already gone */ }
   };
   if (platform !== 'win32') {
-    // Same refusal the PTY kill seam applies (sessions.js signalablePid): NEGATED, pid 0 is our OWN
-    // process group and pid 1 is every process this user can signal, so neither may be negated here.
-    // Then the child itself is all there is to signal, and that can only ever hit the child.
+    // signalablePid rule (sessions.js): negated, pid 0 is our OWN group and pid 1 is everything this user can signal, so below 2 only the child itself is signalled.
     const groupPid = Number.isInteger(child.pid) && child.pid > 1 ? child.pid : null;
     if (groupPid === null) return killChildOnly();
-    try { killGroup(-groupPid, 'SIGKILL'); } catch { /* ESRCH: the group is already gone */ }
+    try { killGroup(-groupPid, 'SIGKILL'); } catch { /* best-effort: any signal failure is treated as already gone */ }
     return;
   }
   // Windows negates nothing (taskkill takes the pid as given), so it needs no such guard.

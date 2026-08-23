@@ -9,23 +9,12 @@ const assert = require('node:assert/strict');
 
 const { Session } = require('../session/sessions');
 const { STATES } = require('../shared/states');
+const { waitFor } = require('./helpers/wait-for');
 
 function fakePty(pid = 2147483646) {
   return { pid, onData() {}, onExit() {}, write() {}, resize() {}, kill() {} };
 }
 
-// Bounded wait on an observable fact (the respawn landing), the shape backend-auto-resume.test.js uses.
-// Counting turns instead read the FIRST spawn's args on Linux, where start()'s prior-PTY reap takes a
-// different number of turns than the win32 taskkill it was tuned to; the resume assertion below then
-// passed for the wrong reason, since the stale first spawn also carried --resume.
-async function waitFor(predicate) {
-  const deadline = Date.now() + 1000;
-  while (Date.now() < deadline) {
-    if (predicate()) return;
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-  assert.ok(predicate(), 'condition became true');
-}
 
 test('start() appends extraClaudeArgs then the initialPrompt as the final positional arg', async () => {
   const calls = [];

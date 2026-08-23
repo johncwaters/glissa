@@ -39,43 +39,45 @@ function dedupePathMatches(matches, platform = process.platform) {
   return unique;
 }
 
-// Resolve `claude` once at module load. On Windows we prefer spawning the resolved
-// .exe directly (node-pty -> CreateProcess), falling back to `cmd.exe /c claude` only
-// for .cmd/.bat/.ps1 shim installs or when resolution fails. Resolving here also
-// surfaces a Bun shim shadowing claude.exe in the boot log instead of at runtime.
-function resolveCommandMatches(command, exec, platform) {
-  const out = exec(command, {
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "ignore"],
-    timeout: 2000,
-  });
-  return dedupePathMatches(out.split(/\r?\n/).filter((s) => s.trim()), platform);
-}
-
-function resolvePosixClaudeMatches(exec) {
+// THE shared PATH-lookup for external binaries (claude here, rtk in rtk-command.js): `where` on
+// Windows, `which -a` on POSIX with a `command -v` fallback since minimal distros ship no `which`.
+// Never throws; a failed or empty lookup is []. Multi-match order is preserved (first match wins).
+function resolvePathCommandMatches(name, { platform, exec }) {
+  const run = (command) => {
+    const out = exec(command, {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 2000,
+    });
+    return dedupePathMatches(out.split(/\r?\n/).filter((s) => s.trim()), platform);
+  };
+  if (platform === "win32") {
+    try {
+      return run(`where ${name}`);
+    } catch {
+      return [];
+    }
+  }
   let matches = [];
   try {
-    matches = resolveCommandMatches("which -a claude", exec, "linux");
+    matches = run(`which -a ${name}`);
   } catch {
     matches = [];
   }
   if (matches.length > 0) return matches;
-
   try {
-    return resolveCommandMatches('sh -c "command -v claude"', exec, "linux");
+    return run(`sh -c "command -v ${name}"`);
   } catch {
     return [];
   }
 }
 
+// Resolve `claude` once at module load. On Windows we prefer spawning the resolved
+// .exe directly (node-pty -> CreateProcess), falling back to `cmd.exe /c claude` only
+// for .cmd/.bat/.ps1 shim installs or when resolution fails. Resolving here also
+// surfaces a Bun shim shadowing claude.exe in the boot log instead of at runtime.
 function resolveClaudeCommand({ platform = process.platform, exec = execSync } = {}) {
-  let matches = [];
-  try {
-    if (platform === "win32") matches = resolveCommandMatches("where claude", exec, platform);
-    if (platform !== "win32") matches = resolvePosixClaudeMatches(exec);
-  } catch {
-    matches = [];
-  }
+  const matches = resolvePathCommandMatches("claude", { platform, exec });
   if (matches.length === 0) {
     console.warn(`[glissa] could not resolve 'claude' on PATH`);
     return { path: null, kind: "unresolved" };
@@ -123,6 +125,7 @@ function buildSpawnCommand({ platform, resolved, settingsArgs = [], packArgs = [
 module.exports = {
   classifyClaudeKind,
   dedupePathMatches,
+  resolvePathCommandMatches,
   resolveClaudeCommand,
   buildSpawnCommand,
   CLAUDE_CMD,

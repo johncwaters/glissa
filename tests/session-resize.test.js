@@ -16,6 +16,7 @@ const assert = require('node:assert/strict');
 
 const { Session } = require('../session/sessions');
 const { STATES } = require('../shared/states');
+const { waitFor } = require('./helpers/wait-for');
 
 function fakePty(resizes) {
   return {
@@ -29,15 +30,6 @@ function fakePty(resizes) {
   };
 }
 
-// Bounded wait on an observable fact, the shape tests/backend-auto-resume.test.js already uses.
-async function waitFor(predicate) {
-  const deadline = Date.now() + 1000;
-  while (Date.now() < deadline) {
-    if (predicate()) return;
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-  assert.ok(predicate(), 'condition became true');
-}
 
 async function startedSession(resizes) {
   const s = new Session({

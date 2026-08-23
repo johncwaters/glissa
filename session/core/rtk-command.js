@@ -5,7 +5,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const { execSync } = require('../../server/child-process-safe');
-const { dedupePathMatches } = require('./spawn-command');
+const { resolvePathCommandMatches } = require('./spawn-command');
 
 function firstExistingFile(candidates, fsApi = fs) {
   for (const candidate of candidates) {
@@ -31,32 +31,9 @@ function resolveRtkPath({
   const bundled = firstExistingFile(bundledCandidates, fsApi);
   if (bundled) return bundled;
 
-  const resolvePathMatches = (command) => {
-    const out = exec(command, {
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-      timeout: 2000,
-    });
-    return dedupePathMatches(out.split(/\r?\n/).filter((line) => line.trim()), platform);
-  };
-
-  try {
-    const command = platform === 'win32' ? 'where rtk' : 'which -a rtk';
-    const matches = resolvePathMatches(command);
-    if (matches.length === 0 && platform === 'win32') return null;
-    if (matches.length === 0) throw new Error('no PATH matches');
-    return path.resolve(matches[0]);
-  } catch {
-    if (platform === 'win32') return null;
-  }
-
-  try {
-    const matches = resolvePathMatches('sh -c "command -v rtk"');
-    if (matches.length === 0) return null;
-    return path.resolve(matches[0]);
-  } catch {
-    return null;
-  }
+  const matches = resolvePathCommandMatches('rtk', { platform, exec });
+  if (matches.length === 0) return null;
+  return path.resolve(matches[0]);
 }
 
 function quoteCommandPath(commandPath) {
