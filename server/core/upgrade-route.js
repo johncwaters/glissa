@@ -47,4 +47,28 @@ function dataSessionIdFromUrl(rawUrl) {
   }
 }
 
-module.exports = { upgradePathname, classifyUpgradePath, dataSessionIdFromUrl };
+/**
+ * The page token a dashboard socket presents, or null. A browser cannot set a header on a WebSocket
+ * handshake, so the query string is the only channel; it follows the hook route's `?t=` precedent, and
+ * the value never leaves this machine. Hand-parsed for the same reason the pathname is: no throwing,
+ * whatever the target looks like.
+ */
+function upgradeTokenFromUrl(rawUrl) {
+  if (typeof rawUrl !== 'string') return null;
+  const queryAt = rawUrl.indexOf('?');
+  if (queryAt === -1) return null;
+  const query = rawUrl.slice(queryAt + 1).split('#')[0];
+  for (const pair of query.split('&')) {
+    const eq = pair.indexOf('=');
+    if (eq === -1) continue;
+    if (pair.slice(0, eq) !== 'token') continue;
+    try {
+      return decodeURIComponent(pair.slice(eq + 1));
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+module.exports = { upgradePathname, classifyUpgradePath, dataSessionIdFromUrl, upgradeTokenFromUrl };

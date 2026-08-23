@@ -25,6 +25,7 @@ const { EventEmitter } = require('node:events');
 const WebSocket = require('ws');
 
 const { createBackend } = require('../server/backend');
+const { dashboardClient } = require('./helpers/dashboard-ws');
 const { createReplayLog } = require('../server/control-replay-core');
 const { registerEphemeralSession } = require('../server/ephemeral-session');
 const { hasGit, git } = require('./helpers/git-fixture');
@@ -57,7 +58,7 @@ function withBackend(configExtras, fn, { backendOptions = null, seed = null } = 
       await fn({
         backend,
         seeded,
-        base: `ws://127.0.0.1:${server.address().port}`,
+        dash: await dashboardClient(server.address().port),
         track: (ws) => { sockets.push(ws); return ws; },
       });
     } finally {
@@ -73,8 +74,8 @@ function withBackend(configExtras, fn, { backendOptions = null, seed = null } = 
 }
 
 // Recording starts before 'open' resolves: the connect frames land the instant the socket does.
-function openRecordingSocket(url) {
-  const ws = new WebSocket(url);
+function openRecordingSocket(dash, pathAndSearch = '/control') {
+  const ws = new WebSocket(dash.url(pathAndSearch), dash.options);
   const received = [];
   ws.on('message', (raw) => received.push(JSON.parse(raw.toString())));
   return new Promise((resolve, reject) => {
@@ -385,9 +386,9 @@ test('an ephemeral lane session never contributes an fs root', withBackend(
 // The tap is a server-side `data` listener with no data-WS client behind it. Before the health
 // snapshot learned about it, every tapped session tripped listenerMismatch permanently, which lit
 // the Radar attention dot on an otherwise healthy install.
-test('the ingest tap does not trip the listener-mismatch anomaly, and a real leak still does', withBackend({ ingest: INGEST_ON }, async ({ backend, base, track }) => {
+test('the ingest tap does not trip the listener-mismatch anomaly, and a real leak still does', withBackend({ ingest: INGEST_ON }, async ({ backend, dash, track }) => {
   assert.equal(backend.getIngestLane().tapCount, 1);
-  const { ws, received } = await openRecordingSocket(`${base}/control`);
+  const { ws, received } = await openRecordingSocket(dash);
   track(ws);
   const snapshot = await waitFor(received, (msg) => msg.type === 'health-snapshot');
   assert.equal(snapshot.stats.anomalies.listenerMismatch, false, 'a tapped session with zero data clients is healthy');
@@ -545,19 +546,19 @@ test('a machine-scope command survives a project-scoped digest, since it belongs
 
 // --- Wire ------------------------------------------------------------------
 
-test('a connecting dashboard is repaired with one ingest snapshot', withBackend({ ingest: INGEST_ON }, async ({ backend, base, track }) => {
+test('a connecting dashboard is repaired with one ingest snapshot', withBackend({ ingest: INGEST_ON }, async ({ backend, dash, track }) => {
   const lane = backend.getIngestLane();
   lane.publish({ source: 'terminal', kind: 'output', summary: 'earlier output', scope: { root: '/repo' } });
 
-  const { ws, received } = await openRecordingSocket(`${base}/control`);
+  const { ws, received } = await openRecordingSocket(dash);
   track(ws);
   const snapshot = await waitFor(received, (msg) => msg.type === 'ingest-snapshot');
   assert.deepEqual(snapshot.events.map((event) => event.summary), ['earlier output']);
   assert.deepEqual(snapshot.sources, ['terminal']);
 }));
 
-test('a batched activity delta reaches the dashboard, and is deliberately not replayable', withBackend({ ingest: INGEST_ON }, async ({ backend, base, track }) => {
-  const { ws, received } = await openRecordingSocket(`${base}/control`);
+test('a batched activity delta reaches the dashboard, and is deliberately not replayable', withBackend({ ingest: INGEST_ON }, async ({ backend, dash, track }) => {
+  const { ws, received } = await openRecordingSocket(dash);
   track(ws);
   await waitFor(received, (msg) => msg.type === 'ingest-snapshot');
 

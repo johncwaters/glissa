@@ -45,9 +45,12 @@ function assertSpawnStrategy(target) {
 async function main() {
   const httpServer = http.createServer();
   const backend = createBackend(httpServer, { staticDir: null });
+  // The app has to be mounted to reach /control-token: the dashboard channels need the page token.
+  httpServer.on('request', backend.app);
   await new Promise(r => httpServer.listen(PORT, '127.0.0.1', r));
 
-  const ws = new WebSocket(`ws://127.0.0.1:${PORT}/control`);
+  const { token } = await (await fetch(`http://127.0.0.1:${PORT}/control-token`)).json();
+  const ws = new WebSocket(`ws://127.0.0.1:${PORT}/control?token=${token}`, { origin: `http://127.0.0.1:${PORT}` });
   const events = [];
   ws.on('message', (raw) => {
     try { events.push(JSON.parse(raw)); } catch {}

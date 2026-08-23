@@ -17,6 +17,34 @@ const { safePathSegment } = require('../shared/paths');
 const DEFAULT_BASE_DIR = path.join(os.tmpdir(), 'glissa-hooks');
 const DEFAULT_TIMEOUT_SEC = 5; // short: handler returns 200 immediately; never stall Claude
 
+// This file carries a live session's hook bearer token, and it lives in the SHARED system temp dir on
+// POSIX hosts. Written with default modes, any other user on a multi-user box could read every live
+// token and forge hook callbacks (false COMPLETE, false WAITING, draining the pack-notice channel), so
+// the directory and the file take the same 0700/0600 discipline the pairings store and uploads use.
+// No-ops on Windows, where the ACL is what matters and node ignores the mode.
+const DIR_MODE = 0o700;
+const FILE_MODE = 0o600;
+
+/**
+ * A directory an attacker pre-created (or replaced with a symlink) in shared /tmp turns the spawn-time
+ * write into an arbitrary-file write as the server account, so a base dir Glissa did not just create
+ * has to prove it is a real directory this user owns before anything is written under it. mkdir with
+ * recursive:true does not apply the mode to a path that already exists, hence the explicit chmod.
+ */
+function ensureOwnedDir(dir, mode) {
+  fs.mkdirSync(dir, { recursive: true, mode });
+  const stat = fs.lstatSync(dir);
+  if (!stat.isDirectory()) throw new Error(`refusing to write hook settings: ${dir} is not a directory`);
+  if (typeof process.getuid === 'function' && stat.uid !== process.getuid()) {
+    throw new Error(`refusing to write hook settings: ${dir} is owned by another user`);
+  }
+  try {
+    fs.chmodSync(dir, mode);
+  } catch {
+    // Windows: modes are advisory and chmod on a directory is a no-op that can still throw.
+  }
+}
+
 // Hook events Glissa subscribes to. Notification covers idle_prompt (=>ready) and
 // permission_prompt (=>awaiting-input); see hook-source.mapHookToSignal. SubagentStart/
 // SubagentStop are not state transitions: they track the live background sub-agent count so a
@@ -146,10 +174,18 @@ function buildHookSettings({ port, glissaId, token, timeoutSec = DEFAULT_TIMEOUT
 function writeSessionSettings({ glissaId, token, baseDir = DEFAULT_BASE_DIR, ...rest }) {
   const tok = token || generateToken();
   const dir = path.join(baseDir, safePathSegment(glissaId));
-  fs.mkdirSync(dir, { recursive: true });
+  ensureOwnedDir(baseDir, DIR_MODE);
+  ensureOwnedDir(dir, DIR_MODE);
   const settingsPath = path.join(dir, 'settings.json');
   const settings = buildHookSettings({ ...rest, glissaId, token: tok });
-  fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+  // mode on writeFileSync only applies to a file it CREATES, so a settings file left behind by an
+  // earlier run keeps whatever mode it had; the chmod is what makes the 0600 claim true either way.
+  fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2), { mode: FILE_MODE });
+  try {
+    fs.chmodSync(settingsPath, FILE_MODE);
+  } catch {
+    // Windows again: advisory, and a failure here must not cost the spawn.
+  }
   return {
     settingsPath,
     dir,
@@ -203,6 +239,8 @@ module.exports = {
   PACK_READ_TOOL_MATCHER,
   DEFAULT_BASE_DIR,
   DEFAULT_TIMEOUT_SEC,
+  DIR_MODE,
+  FILE_MODE,
   RELAY_PATH,
   NO_CHAIN,
 };

@@ -18,6 +18,7 @@ const path = require('node:path');
 const WebSocket = require('ws');
 
 const { createBackend } = require('../server/backend');
+const { dashboardClient } = require('./helpers/dashboard-ws');
 
 let tmpDir = null;
 let prevEnv = null;
@@ -81,7 +82,8 @@ test('the hook route still answers exactly as before (404 unknown-session, not 4
 });
 
 test('a control upgrade with no cookie connects and receives a snapshot', async () => {
-  const ws = new WebSocket(`ws://127.0.0.1:${boundPort}/control`);
+  const client = await dashboardClient(boundPort);
+  const ws = new WebSocket(client.url('/control'), client.options);
   const snapshot = await new Promise((resolve, reject) => {
     ws.on('message', (data) => {
       const msg = JSON.parse(data.toString());
@@ -94,8 +96,9 @@ test('a control upgrade with no cookie connects and receives a snapshot', async 
   ws.close();
 });
 
-test('a localhost Origin is still accepted on the control upgrade', async () => {
-  const ws = new WebSocket(`ws://127.0.0.1:${boundPort}/control`, { origin: `http://localhost:${boundPort}` });
+test('a localhost Origin on the listener port is accepted on the control upgrade', async () => {
+  const { token } = await dashboardClient(boundPort);
+  const ws = new WebSocket(`ws://127.0.0.1:${boundPort}/control?token=${token}`, { origin: `http://localhost:${boundPort}` });
   await new Promise((resolve, reject) => {
     ws.on('open', resolve);
     ws.on('error', reject);
@@ -163,7 +166,8 @@ test('a disabled remote block with a publicHost grants no extra origin', async (
 });
 
 test('a data-terminal upgrade for an unknown session is still refused after the origin check', async () => {
-  const ws = new WebSocket(`ws://127.0.0.1:${boundPort}/terminals/no-such-session`);
+  const client = await dashboardClient(boundPort);
+  const ws = new WebSocket(client.url('/terminals/no-such-session'), client.options);
   const outcome = await new Promise((resolve) => {
     ws.on('open', () => resolve('open'));
     ws.on('error', () => resolve('error'));

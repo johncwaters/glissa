@@ -22,6 +22,7 @@ const path = require('node:path');
 const WebSocket = require('ws');
 
 const { createBackend } = require('../server/backend');
+const { dashboardClient } = require('./helpers/dashboard-ws');
 
 const SESSION_ID = 'a0000000-0000-4000-8000-000000000002';
 
@@ -29,7 +30,7 @@ let tmpDir = null;
 let prevEnv = null;
 let server = null;
 let backend = null;
-let base = null;
+let client = null;
 let session = null;
 let ptyResizes = [];
 
@@ -40,7 +41,7 @@ function attachFakePty() {
 }
 
 async function openViewer() {
-  const ws = new WebSocket(`${base}/terminals/${SESSION_ID}`);
+  const ws = new WebSocket(client.url(`/terminals/${SESSION_ID}`), client.options);
   await new Promise((resolve, reject) => {
     ws.once('open', resolve);
     ws.once('error', reject);
@@ -80,7 +81,7 @@ test.before(async () => {
   // createBackend registers its own 'upgrade' listener; only 'request' is the embedder's to wire.
   server.on('request', backend.app);
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-  base = `ws://127.0.0.1:${server.address().port}`;
+  client = await dashboardClient(server.address().port);
 
   session = backend.getSession(SESSION_ID);
   assert.ok(session, 'the configured project is a session in the backend map');

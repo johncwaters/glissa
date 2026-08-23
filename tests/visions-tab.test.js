@@ -23,6 +23,7 @@ const path = require('node:path');
 const WebSocket = require('ws');
 
 const { createBackend } = require('../server/backend');
+const { dashboardClient } = require('./helpers/dashboard-ws');
 const { createReplayLog } = require('../server/control-replay-core');
 
 const MARKDOWN_URI = 'file:///tmp/plan-visions.md';
@@ -43,11 +44,11 @@ function withVisionsBackend(fn) {
     const backend = createBackend(server, { staticDir: null });
     server.on('request', backend.app);
     await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-    const base = `ws://127.0.0.1:${server.address().port}`;
+    const dash = await dashboardClient(server.address().port);
     const sockets = [];
 
     try {
-      await fn({ base, backend, track: (ws) => { sockets.push(ws); return ws; } });
+      await fn({ dash, backend, track: (ws) => { sockets.push(ws); return ws; } });
     } finally {
       for (const ws of sockets) ws.close();
       backend.shutdown();
@@ -62,8 +63,8 @@ function withVisionsBackend(fn) {
 
 // Recording starts before 'open' resolves: the server sends its connect frames the instant the socket
 // lands, and a listener attached after awaiting 'open' can miss them (backend-control-reconnect.test.js).
-function openRecordingSocket(url) {
-  const ws = new WebSocket(url);
+function openRecordingSocket(dash, pathAndSearch) {
+  const ws = new WebSocket(dash.url(pathAndSearch), dash.options);
   const received = [];
   ws.on('message', (raw) => received.push(JSON.parse(raw.toString())));
   return new Promise((resolve, reject) => {
@@ -95,13 +96,13 @@ function sendLsp(ws, method, params) {
   ws.send(JSON.stringify({ type: 'lsp', method, params }));
 }
 
-test('a sweep reaches every connected dashboard, and a later one is repaired by the snapshot', withVisionsBackend(async ({ base, track }) => {
-  const dashboard = await openRecordingSocket(`${base}/control`);
+test('a sweep reaches every connected dashboard, and a later one is repaired by the snapshot', withVisionsBackend(async ({ dash, track }) => {
+  const dashboard = await openRecordingSocket(dash, '/control');
   track(dashboard.ws);
   const snapshotOnFirstConnect = await waitFor(dashboard.received, (msg) => msg.type === 'visions-snapshot');
   assert.deepEqual(snapshotOnFirstConnect.documents, [], 'nothing is open yet, so the repair frame is empty');
 
-  const relay = await openRecordingSocket(`${base}/visions`);
+  const relay = await openRecordingSocket(dash, '/visions');
   track(relay.ws);
   sendLsp(relay.ws, 'textDocument/didOpen', {
     textDocument: {
@@ -115,7 +116,7 @@ test('a sweep reaches every connected dashboard, and a later one is repaired by 
   assert.ok(Number.isFinite(pushed.ts) && pushed.ts > 0);
 
   // The reconnect: a second dashboard connects after the sweep and is told the current state in one frame.
-  const reconnected = await openRecordingSocket(`${base}/control`);
+  const reconnected = await openRecordingSocket(dash, '/control');
   track(reconnected.ws);
   const repaired = await waitFor(reconnected.received, (msg) => msg.type === 'visions-snapshot');
   assert.deepEqual(repaired.documents.map((doc) => doc.uri), [MARKDOWN_URI]);
@@ -126,7 +127,7 @@ test('a sweep reaches every connected dashboard, and a later one is repaired by 
   const cleared = await waitFor(dashboard.received, (msg) => msg.type === 'visions-findings' && msg.diagnostics.length === 0);
   assert.equal(cleared.uri, MARKDOWN_URI);
 
-  const afterClose = await openRecordingSocket(`${base}/control`);
+  const afterClose = await openRecordingSocket(dash, '/control');
   track(afterClose.ws);
   const emptyRepair = await waitFor(afterClose.received, (msg) => msg.type === 'visions-snapshot');
   assert.deepEqual(emptyRepair.documents, []);
@@ -138,8 +139,8 @@ test('a sweep reaches every connected dashboard, and a later one is repaired by 
  * in) is refused by the lock, and the next client's repair frame carries the statement that survived.
  * The dispatch itself is faked at the lane seam: no test in this repo spawns claude.
  */
-test('an operator correction locks the intent, survives a dispatch, and rides the snapshot repair', withVisionsBackend(async ({ base, backend, track }) => {
-  const dashboard = await openRecordingSocket(`${base}/control`);
+test('an operator correction locks the intent, survives a dispatch, and rides the snapshot repair', withVisionsBackend(async ({ dash, backend, track }) => {
+  const dashboard = await openRecordingSocket(dash, '/control');
   track(dashboard.ws);
   const firstSnapshot = await waitFor(dashboard.received, (msg) => msg.type === 'visions-snapshot');
   assert.deepEqual(firstSnapshot.intent, {
@@ -157,7 +158,7 @@ test('an operator correction locks the intent, survives a dispatch, and rides th
   assert.equal(lane.applyModelIntent('a plan doc about spawning'), false, 'the merge refuses it, so nothing is broadcast');
   assert.equal(lane.getIntent().text, 'rewriting the merge gate');
 
-  const reconnected = await openRecordingSocket(`${base}/control`);
+  const reconnected = await openRecordingSocket(dash, '/control');
   track(reconnected.ws);
   const repaired = await waitFor(reconnected.received, (msg) => msg.type === 'visions-snapshot');
   assert.equal(repaired.intent.text, 'rewriting the merge gate');
@@ -183,7 +184,8 @@ test('a control client connecting with the lane off is told nothing about the vi
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
 
   try {
-    const { ws, received } = await openRecordingSocket(`ws://127.0.0.1:${server.address().port}/control`);
+    const dash = await dashboardClient(server.address().port);
+    const { ws, received } = await openRecordingSocket(dash, '/control');
     await waitFor(received, (msg) => msg.type === 'client-trust');
     assert.equal(received.some((msg) => msg.type.startsWith('visions-')), false, 'an absent lane adds no frame');
     ws.close();

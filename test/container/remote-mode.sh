@@ -103,8 +103,12 @@ assert 6 403 "$(status "$REMOTE/pair/$TOKEN")" "replaying the pairing link is re
 
 WS_NO_COOKIE="$(node test/container/ws-check.js ws://127.0.0.1:3001/control | cut -d' ' -f1)"
 assert 7 REJECTED "$WS_NO_COOKIE" "control WS on the remote listener is refused without a cookie"
-WS_COOKIE="$(node test/container/ws-check.js ws://127.0.0.1:3001/control --cookie "$COOKIE" | cut -d' ' -f1)"
+# An Origin is mandatory on the dashboard channels since the 2026-08 security pass, so the paired
+# device sends the one it was configured with (a browser always does).
+WS_COOKIE="$(node test/container/ws-check.js ws://127.0.0.1:3001/control --cookie "$COOKIE" --origin https://glissa.test | cut -d' ' -f1)"
 assert 7 OK "$WS_COOKIE" "control WS with the paired cookie connects and receives a snapshot"
+WS_NO_ORIGIN="$(node test/container/ws-check.js ws://127.0.0.1:3001/control --cookie "$COOKIE" | cut -d' ' -f1)"
+assert 7b REJECTED "$WS_NO_ORIGIN" "a control WS with no Origin at all is refused"
 
 WS_EVIL="$(node test/container/ws-check.js ws://127.0.0.1:3001/control --cookie "$COOKIE" --origin https://evil.example | cut -d' ' -f1)"
 assert 8 REJECTED "$WS_EVIL" "a foreign Origin is refused even with a valid cookie"

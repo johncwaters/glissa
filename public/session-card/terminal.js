@@ -11,6 +11,7 @@ import { nextReconnectDelayMs } from '../reconnect-backoff.mjs';
 import { renderScheduler } from '../render-scheduler.mjs';
 import { getTerminalTheme } from '../theme.js';
 import { buildWebSocketUrl } from '../ws-url-core.mjs';
+import { withPageToken } from '../ws-token.js';
 import { noteSessionOutput } from './activity.js';
 import { sessionUIs } from './card-registry.js';
 import {
@@ -61,7 +62,9 @@ function reportClipboardFailure(source, err) {
 // ── Data WebSocket ───────────────────────────────────────────
 
 function connectDataWs(sessionId, ui, term) {
-  const url = buildWebSocketUrl(location, `/terminals/${encodeURIComponent(sessionId)}`);
+  // The data socket carries the same page token as the control socket; by the time a card exists the
+  // control socket has already delivered a snapshot, so the token is always loaded here.
+  const url = buildWebSocketUrl(location, withPageToken(`/terminals/${encodeURIComponent(sessionId)}`));
   const ws = new WebSocket(url);
   ui.dataWs = ws;
 

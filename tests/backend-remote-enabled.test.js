@@ -210,3 +210,22 @@ test('a paired device may reconnect with a replay cursor on the remote listener'
   assert.equal(first.type, 'snapshot', 'the cursor-carrying reconnect reached the control route');
   await new Promise((resolve) => { ws.once('close', resolve); ws.close(); });
 });
+
+// The 2026-08 review pass reproduced this: express.static percent-decodes and resolves dot segments,
+// so an un-normalized "/pair/" prefix check exempted "/pair/%2e%2e/index.html" from the pairing gate
+// while express served the dashboard bundle under it. Impact was limited to static assets, but every
+// later app.use handler would have inherited the hole.
+test('a traversal dressed as a pair path does not escape the pairing gate', async () => {
+  const plain = await fetch(`http://127.0.0.1:${remotePort}/index.html`);
+  assert.equal(plain.status, 401, 'the baseline: an unpaired device gets nothing');
+
+  for (const target of ['/pair/%2e%2e/index.html', '/pair/../index.html', '/pair/%2e%2e%2findex.html']) {
+    const res = await fetch(`http://127.0.0.1:${remotePort}${target}`);
+    assert.equal(res.status, 401, `${target} must be judged as the resource it resolves to`);
+  }
+});
+
+test('a real pairing path is still reachable without a cookie', async () => {
+  const res = await fetch(`http://127.0.0.1:${remotePort}/pair/some-made-up-token`);
+  assert.equal(res.status, 403, '403 from the redeem route, not 401 from the gate');
+});

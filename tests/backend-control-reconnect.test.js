@@ -22,6 +22,7 @@ const path = require('node:path');
 const WebSocket = require('ws');
 
 const { createBackend } = require('../server/backend');
+const { dashboardClient } = require('./helpers/dashboard-ws');
 
 const SESSION_ID = 'reconnect-test-session';
 // Over the 16384-char input cap the data-WS handler enforces, so the server answers with a
@@ -45,10 +46,12 @@ function withBackend(fn) {
     const backend = createBackend(server, { staticDir: null });
     server.on('request', backend.app);
     await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-    const base = `ws://127.0.0.1:${server.address().port}`;
+    // The dashboard channels require a browser Origin and the page token; the client helper is the
+    // one place that handshake lives.
+    const client = await dashboardClient(server.address().port);
 
     try {
-      await fn(t, base);
+      await fn(t, client);
     } finally {
       backend.shutdown();
       server.closeAllConnections();
@@ -68,8 +71,8 @@ function withBackend(fn) {
  * emits 'open' and 'message' synchronously within it. A listener attached after awaiting 'open' misses
  * the snapshot entirely.
  */
-function openRecordingSocket(url) {
-  const ws = new WebSocket(url);
+function openRecordingSocket(client, pathAndSearch) {
+  const ws = new WebSocket(client.url(pathAndSearch), client.options);
   const received = [];
   ws.on('message', (raw) => received.push(JSON.parse(raw.toString())));
   return new Promise((resolve, reject) => {
@@ -78,9 +81,9 @@ function openRecordingSocket(url) {
   });
 }
 
-function openSocket(url) {
+function openSocket(client, pathAndSearch) {
   return new Promise((resolve, reject) => {
-    const ws = new WebSocket(url);
+    const ws = new WebSocket(client.url(pathAndSearch), client.options);
     ws.once('open', () => resolve(ws));
     ws.once('error', reject);
   });
@@ -105,14 +108,14 @@ async function waitForMessage(received, predicate) {
 
 const isSessionError = (m) => m.type === 'session-error';
 
-test('a control reconnect carrying a replay cursor connects and gets snapshot then replay', withBackend(async (_t, base) => {
-  const first = await openRecordingSocket(`${base}/control`);
+test('a control reconnect carrying a replay cursor connects and gets snapshot then replay', withBackend(async (_t, client) => {
+  const first = await openRecordingSocket(client, '/control');
   const snapshot = await waitForMessage(first.received, (m) => m.type === 'snapshot');
   assert.deepEqual(snapshot.sessions.map((s) => s.id), [SESSION_ID]);
 
   // A query string on the data route must route AND not leak into the session id: the broadcast below
   // is only reachable through a socket that resolved to this exact session.
-  const dataConnection = await openSocket(`${base}/terminals/${SESSION_ID}?probe=1`);
+  const dataConnection = await openSocket(client, `/terminals/${SESSION_ID}?probe=1`);
   const dataCloseCode = new Promise((resolve) => dataConnection.once('close', resolve));
 
   dataConnection.send(JSON.stringify({ type: 'input', data: OVERSIZED_INPUT }));
@@ -126,7 +129,7 @@ test('a control reconnect carrying a replay cursor connects and gets snapshot th
   await closeSocket(first.ws);
 
   // The reconnect the old exact-match router dropped on the floor.
-  const reconnected = await openRecordingSocket(`${base}/control?since=${beforeCursor.seq}`);
+  const reconnected = await openRecordingSocket(client, `/control?since=${beforeCursor.seq}`);
   const replayedError = await waitForMessage(reconnected.received, isSessionError);
   assert.equal(reconnected.received[0].type, 'snapshot', 'the snapshot is still the first frame of a reconnect');
   assert.equal(replayedError.seq, afterCursor.seq, 'exactly the broadcasts past the cursor are replayed');
@@ -137,8 +140,8 @@ test('a control reconnect carrying a replay cursor connects and gets snapshot th
   assert.notEqual(await dataCloseCode, 1008, 'the data socket was never refused as an unknown session');
 }));
 
-test('a data socket whose id does not exist is still refused', withBackend(async (_t, base) => {
-  const ws = await openSocket(`${base}/terminals/no-such-session?probe=1`);
+test('a data socket whose id does not exist is still refused', withBackend(async (_t, client) => {
+  const ws = await openSocket(client, '/terminals/no-such-session?probe=1');
   const code = await new Promise((resolve) => ws.once('close', resolve));
   assert.equal(code, 1008);
 }));

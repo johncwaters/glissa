@@ -7,7 +7,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { upgradePathname, classifyUpgradePath, dataSessionIdFromUrl } = require('../server/core/upgrade-route');
+const { upgradePathname, classifyUpgradePath, dataSessionIdFromUrl, upgradeTokenFromUrl } = require('../server/core/upgrade-route');
 
 test('upgradePathname strips a query string and a fragment', () => {
   assert.equal(upgradePathname('/control'), '/control');
@@ -73,4 +73,20 @@ test('the data session id is null when there is none to read', () => {
   assert.equal(dataSessionIdFromUrl('/terminals/?since=7'), null);
   assert.equal(dataSessionIdFromUrl('/control'), null);
   assert.equal(dataSessionIdFromUrl('/terminals/%'), null, 'an undecodable id is refused, never thrown');
+});
+
+test('the page token is read from the query string, whatever else rides there', () => {
+  assert.equal(upgradeTokenFromUrl('/control?token=abc123'), 'abc123');
+  assert.equal(upgradeTokenFromUrl('/control?since=7&token=abc123'), 'abc123');
+  assert.equal(upgradeTokenFromUrl('/control?token=a%2Bb'), 'a+b');
+  assert.equal(upgradeTokenFromUrl('/terminals/x?token=abc123#frag'), 'abc123');
+});
+
+test('an absent, malformed or lookalike token reads as null, never as a throw', () => {
+  assert.equal(upgradeTokenFromUrl('/control'), null);
+  assert.equal(upgradeTokenFromUrl('/control?since=7'), null);
+  assert.equal(upgradeTokenFromUrl('/control?token'), null);
+  assert.equal(upgradeTokenFromUrl('/control?mytoken=abc'), null, 'a suffix match is not the token param');
+  assert.equal(upgradeTokenFromUrl('/control?token=%'), null);
+  assert.equal(upgradeTokenFromUrl(undefined), null);
 });

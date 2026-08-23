@@ -1,13 +1,24 @@
 'use strict';
 
 // Pure Origin-header policy for WebSocket upgrades. Replaces the inline isAllowedOrigin that used to
-// live in backend.js; with an empty allow-list it reproduces that function's decisions exactly, which
-// is what keeps the default (remote-disabled) build behaving byte-identically.
+// live in backend.js.
 //
 // The Origin header is the ONE browser-supplied value that is load-bearing here, and only in the
 // restrictive direction: a forged Origin can lose access, never gain it, because the device cookie is
-// checked separately. A missing Origin is allowed because non-browser clients (curl, a ws CLI, the
-// container test harness) never send one and cannot be CSRF'd.
+// checked separately.
+//
+// TWO DELIBERATE DIVERGENCES from the original isAllowedOrigin, both from the 2026-08 security pass:
+//
+// 1. A loopback origin is admitted only on a LISTENER port. The old rule admitted any localhost or
+//    127.0.0.1 origin whatever its port, so any other web app on the machine (a dev server, a
+//    notebook, Grafana) or an XSS in one could open /control and spawn a permissionless session. That
+//    is not the accepted "any local process is trusted" tradeoff: it extends it to any page the
+//    operator visits on another local port. The caller passes the port the socket actually landed on.
+// 2. A missing Origin can be refused. Non-browser clients (curl, a ws CLI, the editor relay) never
+//    send one, so the caller opts in per route: the dashboard channels (control, data) require it,
+//    while the HTTP ingresses and the Visions relay keep accepting an absent Origin.
+
+const LOOPBACK_ORIGIN_HOSTS = new Set(['localhost', '127.0.0.1']);
 
 const DEFAULT_PORT_BY_SCHEME = { http: '80', https: '443', ws: '80', wss: '443' };
 const ORIGIN_RE = /^([a-z][a-z0-9+.-]*):\/\/([^/?#]+)$/i;
@@ -73,17 +84,37 @@ function wildcardMatches(allowed, candidate) {
   return a.scheme === c.scheme && a.port === c.port;
 }
 
+// The port a browser actually connected to, with the scheme's default filled in for an origin that
+// carries none ("http://localhost" is port 80, and is a listener origin only on a server bound there).
+function portNumberOf(normalized) {
+  const { scheme, port } = schemeAndPortOf(normalized);
+  const effective = port === '' ? DEFAULT_PORT_BY_SCHEME[scheme] : port;
+  if (!effective) return null;
+  return Number.parseInt(effective, 10);
+}
+
+function isListenerPort(listenerPorts, port) {
+  if (port == null) return false;
+  const list = Array.isArray(listenerPorts) ? listenerPorts : [listenerPorts];
+  return list.some((candidate) => Number(candidate) === port);
+}
+
 /**
  * @param {string|undefined|null} originHeader raw Origin header
  * @param {string[]} allowedOrigins configured remote origins (may be empty)
+ * @param {object} [options]
+ * @param {number[]|number} [options.listenerPorts] ports this server is reachable on; a loopback
+ *   origin on any other port falls through to the allow-list instead of being admitted outright
+ * @param {boolean} [options.requireOrigin] refuse a request that carries no Origin at all
  */
-function decideOriginAllowed(originHeader, allowedOrigins) {
-  if (originHeader == null || originHeader === '') return true;
+function decideOriginAllowed(originHeader, allowedOrigins, { listenerPorts = [], requireOrigin = false } = {}) {
+  if (originHeader == null || originHeader === '') return !requireOrigin;
   const candidate = normalizeOrigin(originHeader);
   if (!candidate) return false;
   const host = hostOf(candidate);
-  // Preserved verbatim from the old isAllowedOrigin: the dashboard is a localhost app first.
-  if (host === 'localhost' || host === '127.0.0.1') return true;
+  // Port-exact, and a mismatch falls through rather than refusing: an operator may legitimately list
+  // "http://localhost:8080" for a local reverse proxy, and that entry must still win.
+  if (LOOPBACK_ORIGIN_HOSTS.has(host) && isListenerPort(listenerPorts, portNumberOf(candidate))) return true;
   const list = Array.isArray(allowedOrigins) ? allowedOrigins : [];
   for (const entry of list) {
     const allowed = normalizeOrigin(entry);
@@ -94,4 +125,11 @@ function decideOriginAllowed(originHeader, allowedOrigins) {
   return false;
 }
 
-module.exports = { normalizeOrigin, decideOriginAllowed };
+// The host an allow-list entry names, for the Host policy: one configured "https://*.ts.net" then
+// means the same thing to both checks instead of being restated as a bare hostname somewhere else.
+function hostOfOrigin(str) {
+  const normalized = normalizeOrigin(str);
+  return normalized ? hostOf(normalized) : '';
+}
+
+module.exports = { normalizeOrigin, decideOriginAllowed, hostOfOrigin };

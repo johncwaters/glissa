@@ -4,6 +4,7 @@
 import { nextReconnectDelayMs } from './reconnect-backoff.mjs';
 import { decideLivenessAction } from './connection-liveness-core.mjs';
 import { buildWebSocketUrl } from './ws-url-core.mjs';
+import { loadPageToken, pageToken, withPageToken } from './ws-token.js';
 
 let controlWs = null;
 let controlRetryTimer = null;
@@ -12,6 +13,9 @@ let controlRetryAttempt = 0;
 const pendingRequests = new Map(); // requestId -> { resolve, timer }
 let livenessProbePromise = null;
 let connectingSince = 0;
+// True while the page token is being fetched: connectControl has no socket yet and must not open a
+// second one when the liveness probe (which sees a null socket) asks it to connect again.
+let tokenFetchPending = false;
 
 // Highest control-broadcast seq seen so far. Survives across reconnects (unlike the server,
 // which holds no per-connection state) so a reconnect can declare `?since=<lastSeq>` and
@@ -60,11 +64,23 @@ export function connectControl() {
     clearTimeout(controlRetryTimer);
     controlRetryTimer = null;
   }
+  // The server refuses a tokenless control socket, so the first connect of a page load fetches the
+  // token and comes back here. A failed fetch still connects (and is refused), which lands on the
+  // normal close/backoff path rather than a tight retry loop.
+  if (!pageToken() && !tokenFetchPending) {
+    tokenFetchPending = true;
+    void loadPageToken().finally(() => {
+      tokenFetchPending = false;
+      connectControl();
+    });
+    return;
+  }
+  if (tokenFetchPending) return;
 
   // lastSeq > 0 only once a message has actually been processed, which never happens before
   // the first connection - so this doubles as "is this a reconnect" without a separate flag.
   const since = lastSeq > 0 ? `?since=${lastSeq}` : '';
-  const url = buildWebSocketUrl(location, `/control${since}`);
+  const url = buildWebSocketUrl(location, withPageToken(`/control${since}`));
   const ws = new WebSocket(url);
   controlWs = ws;
   connectingSince = Date.now();

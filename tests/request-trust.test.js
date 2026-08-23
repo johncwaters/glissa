@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
-  classifyRequestOrigin, decideRequestAccess, decideUpgradeAccess, isPairPath,
+  classifyRequestOrigin, decideRequestAccess, decideUpgradeAccess, isPairPath, normalizePathname,
   normalizeClientTrust,
 } = require('../server/core/request-trust');
 
@@ -35,6 +35,33 @@ test('isPairPath covers /pair and everything under it, and nothing that merely s
   assert.equal(isPairPath('/pairing'), false);
   assert.equal(isPairPath('/'), false);
   assert.equal(isPairPath(undefined), false);
+});
+
+test('normalizePathname decodes once, drops the query, and flags every dot segment', () => {
+  assert.deepEqual(normalizePathname('/pair/abc?x=1#frag'), { pathname: '/pair/abc', suspicious: false });
+  assert.deepEqual(normalizePathname('/pair/%61bc'), { pathname: '/pair/abc', suspicious: false });
+  assert.equal(normalizePathname('/pair/%2e%2e/index.html').suspicious, true);
+  assert.equal(normalizePathname('/pair/../index.html').suspicious, true);
+  assert.equal(normalizePathname('/pair/./index.html').suspicious, true);
+  // Encoded twice: the decode leaves a live %2e behind, which is not a path anyone legitimately asks for.
+  assert.equal(normalizePathname('/pair/%252e%252e/index.html').suspicious, true);
+  // A lone % throws in decodeURIComponent; that is a refusal, not an exception.
+  assert.equal(normalizePathname('/pair/%').suspicious, true);
+});
+
+// The reviewer's reproduction: express.static decodes and resolves dot segments, so an un-normalized
+// prefix check read "/pair/%2e%2e/index.html" as the pair page while express served the dashboard
+// bundle to an unpaired remote device.
+test('a traversal dressed as a pair path is not a pair path', () => {
+  assert.equal(isPairPath('/pair/%2e%2e/index.html'), false);
+  assert.equal(isPairPath('/pair/../index.html'), false);
+  assert.equal(isPairPath('/pair/%2e%2e%2findex.html'), false);
+  assert.deepEqual(
+    decideRequestAccess({
+      remoteEnabled: true, trust: 'remote', pathname: normalizePathname('/pair/%2e%2e/index.html').pathname, authenticated: false,
+    }),
+    { allow: false, action: 'unauthorized' }
+  );
 });
 
 // Full matrix: remoteEnabled x trust x authenticated x path.
@@ -121,14 +148,57 @@ test('upgrade: a refused origin loses on both listeners, before any auth conside
 
 test('upgrade: with remote disabled, an allowed origin passes without a cookie', () => {
   assert.deepEqual(
-    decideUpgradeAccess({ remoteEnabled: false, trust: 'local', origin: 'http://localhost:3000', allowedOrigins: [], authenticated: false }),
+    decideUpgradeAccess({ remoteEnabled: false, trust: 'local', origin: 'http://localhost:3000', allowedOrigins: [], authenticated: false, listenerPorts: [3000] }),
     { allow: true, reason: null }
   );
 });
 
 test('upgrade: the local listener never needs a cookie even with remote enabled', () => {
   assert.deepEqual(
-    decideUpgradeAccess({ remoteEnabled: true, trust: 'local', origin: 'http://localhost:3000', allowedOrigins: ['https://glissa.test'], authenticated: false }),
+    decideUpgradeAccess({ remoteEnabled: true, trust: 'local', origin: 'http://localhost:3000', allowedOrigins: ['https://glissa.test'], authenticated: false, listenerPorts: [3000] }),
+    { allow: true, reason: null }
+  );
+});
+
+// The dashboard-only rules (2026-08 security pass). control and data carry them; every other route
+// (the Visions editor relay) keeps the pre-existing shape, which is what lets a non-browser client
+// still open one.
+test('upgrade: a dashboard route needs an Origin and the page token', () => {
+  const base = {
+    remoteEnabled: false, trust: 'local', allowedOrigins: [], listenerPorts: [3000], dashboardRoute: true,
+  };
+  assert.deepEqual(
+    decideUpgradeAccess({ ...base, origin: 'http://localhost:3000', tokenOk: true }),
+    { allow: true, reason: null }
+  );
+  assert.deepEqual(
+    decideUpgradeAccess({ ...base, origin: 'http://localhost:3000', tokenOk: false }),
+    { allow: false, reason: 'token' }
+  );
+  assert.deepEqual(
+    decideUpgradeAccess({ ...base, origin: undefined, tokenOk: true }),
+    { allow: false, reason: 'origin' }
+  );
+  // tokenOk must be strictly true, like authenticated.
+  assert.deepEqual(
+    decideUpgradeAccess({ ...base, origin: 'http://localhost:3000', tokenOk: 'yes' }),
+    { allow: false, reason: 'token' }
+  );
+});
+
+test('upgrade: a non-dashboard route still accepts a tokenless client with no Origin', () => {
+  assert.deepEqual(
+    decideUpgradeAccess({ remoteEnabled: false, trust: 'local', origin: undefined, allowedOrigins: [], listenerPorts: [3000] }),
+    { allow: true, reason: null }
+  );
+});
+
+test('upgrade: a paired remote device needs no page token (its cookie is the credential)', () => {
+  assert.deepEqual(
+    decideUpgradeAccess({
+      remoteEnabled: true, trust: 'remote', origin: 'https://glissa.test', allowedOrigins: ['https://glissa.test'],
+      authenticated: true, dashboardRoute: true, tokenOk: false,
+    }),
     { allow: true, reason: null }
   );
 });

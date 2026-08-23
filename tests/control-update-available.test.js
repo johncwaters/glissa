@@ -15,6 +15,7 @@ const path = require('node:path');
 const WebSocket = require('ws');
 
 const { createBackend } = require('../server/backend');
+const { dashboardClient } = require('./helpers/dashboard-ws');
 const { registerControlHandlers } = require('../server/control-handlers');
 
 function connect(deps) {
@@ -158,8 +159,8 @@ test('surfaceUpdate broadcasts once for a version and again for a newer version'
     });
     server.on('request', backend.app);
     await new Promise((resolve) => { server.listen(0, '127.0.0.1', resolve); });
-    const { port } = server.address();
-    ws = new WebSocket(`ws://127.0.0.1:${port}/control`);
+    const dash = await dashboardClient(server.address().port);
+    ws = new WebSocket(dash.url('/control'), dash.options);
     await withTimeout(waitForOpen(ws), 'control socket did not open');
 
     firstCheck.resolve(makeUpdateStatus('0.17.0'));

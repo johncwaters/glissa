@@ -71,8 +71,10 @@ const { createPackService } = require('./pack-service');
 const {
   DEFAULT_INTERVAL_HOURS, DEFAULT_TIMEOUT_SECONDS, createDistillSpawn, createPackDistiller,
 } = require('./pack-distiller');
-const { classifyUpgradePath, dataSessionIdFromUrl } = require('./core/upgrade-route');
+const { classifyUpgradePath, dataSessionIdFromUrl, upgradeTokenFromUrl } = require('./core/upgrade-route');
 const { classifyRequestOrigin, decideUpgradeAccess } = require('./core/request-trust');
+const { decideHostAllowed } = require('./core/host-policy');
+const { decideOriginAllowed, hostOfOrigin } = require('./core/origin-policy');
 const { isApplicableViewerSize, pickSizeAfterDeparture } = require('./core/viewer-size-core');
 const { createRemoteAuth } = require('./remote-auth');
 const { configSiblingPath, createPairingsStore, createSeenStore, defaultPairingsPath, defaultSeenPath } = require('./pairings-store');
@@ -317,6 +319,41 @@ function createBackend(httpServer, options = {}) {
   const bindDecision = decideBindHost({ envHost: process.env.GLISSA_HOST, insecureBind });
   const remoteListenerPort = remote.enabled ? remote.port : null;
 
+  // --- Dashboard page token (layer 3 of the localhost defense) ---
+  // "Any local PROCESS can spawn a permissionless session" is the accepted tradeoff; any local WEB
+  // PAGE is not, and the port-exact Origin rule alone leans on one header. This token is minted per
+  // process, handed to the page over same-origin GET /control-token, and required to open the control
+  // and data sockets from a local client. A page on another origin can issue that fetch but cannot
+  // READ the response (no CORS headers on it), so it never learns the token.
+  const pageToken = crypto.randomBytes(32).toString('hex');
+  const pageTokenBuffer = Buffer.from(pageToken, 'utf8');
+
+  function tokenMatches(presented) {
+    if (typeof presented !== 'string' || presented.length !== pageToken.length) return false;
+    try {
+      return crypto.timingSafeEqual(Buffer.from(presented, 'utf8'), pageTokenBuffer);
+    } catch {
+      return false;
+    }
+  }
+
+  // The port a socket landed on IS the listener port: nothing a client sends can change it, and it is
+  // the only port the page could have been loaded from, so it is what a loopback Origin must match.
+  function listenerPortsFor(socket) {
+    const port = socket && typeof socket.localPort === 'number' ? socket.localPort : null;
+    return port == null ? [] : [port];
+  }
+
+  // Hostnames a Host header may legitimately carry beyond the loopback literals: the remote listener's
+  // public name, and whatever the operator allow-listed as an origin (the two are the same names, so
+  // deriving them keeps one configured list instead of a second hand-maintained one).
+  // Disabled means empty, the same rule normalizeRemoteConfig applies to allowedOrigins: a leftover
+  // publicHost in a switched-off remote block must not widen anything.
+  const allowedHosts = (remote.enabled
+    ? [remote.publicHost, ...remote.allowedOrigins.map(hostOfOrigin)]
+    : []
+  ).filter((host) => typeof host === 'string' && host !== '');
+
   const remoteAuth = remote.enabled
     ? createRemoteAuth({
       remote,
@@ -423,12 +460,39 @@ function createBackend(httpServer, options = {}) {
 
   const app = express();
 
+  // Host allow-list, ahead of even the remote gate. Defense in depth against DNS rebinding: the
+  // upgrade path already refuses a rebound page on Origin, so what this covers is the HTTP surface
+  // (static assets, /hook, /upload). Loopback literals always pass, so the local dashboard, curl and
+  // every hook POST are unaffected.
+  app.use((req, res, next) => {
+    if (decideHostAllowed(req.headers.host, allowedHosts)) {
+      next();
+      return;
+    }
+    res.status(403).type('text/plain').send('Host not allowed');
+  });
+
   // Remote gate FIRST, ahead of every route including /hook: a remote-classified request is refused
   // before any handler sees it. The middleware self-exempts /pair/*, which mountPairRoutes serves.
   if (remoteAuth) {
     app.use(remoteAuth.httpMiddleware);
     remoteAuth.mountPairRoutes(app);
   }
+
+  // The page token, delivered same-origin to the dashboard that just loaded. Mounted AFTER the remote
+  // gate, so an unpaired remote device gets a 401 here exactly as it does for the page itself. A
+  // cross-origin fetch of this is refused outright rather than relying on the browser to withhold the
+  // body: a same-origin GET carries no Origin header at all, so the presence of a disallowed one is
+  // itself the tell.
+  app.get('/control-token', (req, res) => {
+    const origin = req.headers.origin;
+    if (origin && !decideOriginAllowed(origin, remote.allowedOrigins, { listenerPorts: listenerPortsFor(req.socket) })) {
+      res.status(403).json({ error: 'origin not allowed' });
+      return;
+    }
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ token: pageToken });
+  });
 
   // Hook ingress: Claude Code HTTP hooks POST here (injected via --settings at
   // spawn). Localhost-only + per-session bearer token (validated in HookRouter).
@@ -1835,13 +1899,27 @@ function createBackend(httpServer, options = {}) {
       return;
     }
 
+    // Host rides along here too: the middleware above covers only the request path, and an upgrade
+    // never reaches it.
+    if (!decideHostAllowed(req.headers.host, allowedHosts)) {
+      socket.destroy();
+      return;
+    }
+
     const authenticated = trust === 'remote' && remoteAuth ? remoteAuth.isUpgradeAuthorized(req) : false;
+    // control and data are the two channels only the dashboard page opens, so they carry the extra
+    // browser-shaped requirements: a mandatory Origin and the page token. The Visions relay is an
+    // editor extension, not a browser, and keeps the old rules.
+    const dashboardRoute = route === 'control' || route === 'data';
     const decision = decideUpgradeAccess({
       remoteEnabled: remote.enabled,
       trust,
       origin: req.headers.origin,
       allowedOrigins: remote.allowedOrigins,
       authenticated,
+      listenerPorts: listenerPortsFor(socket),
+      dashboardRoute,
+      tokenOk: dashboardRoute ? tokenMatches(upgradeTokenFromUrl(req.url)) : false,
     });
     if (!decision.allow) {
       // A bare destroy() is what a rejected origin has always got, and remote-disabled builds must

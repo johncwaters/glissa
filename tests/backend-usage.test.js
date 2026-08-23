@@ -26,6 +26,7 @@ const path = require('node:path');
 const WebSocket = require('ws');
 
 const { createBackend } = require('../server/backend');
+const { dashboardClient } = require('./helpers/dashboard-ws');
 const { createUsageWiring } = require('../server/usage-wiring');
 const { createUsageScanner } = require('../server/usage-scanner');
 const { loadPricing } = require('../server/usage-pricing');
@@ -119,10 +120,10 @@ function withBackend({ usage } = {}, fn) {
     const backend = createBackend(server, { staticDir: null, usageWiringOptions: probe.options });
     server.on('request', backend.app);
     await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-    const base = `ws://127.0.0.1:${server.address().port}`;
+    const dash = await dashboardClient(server.address().port);
 
     try {
-      await fn(t, { base, counts: probe.counts, cfgPath });
+      await fn(t, { dash, counts: probe.counts, cfgPath });
     } finally {
       backend.shutdown();
       server.closeAllConnections();
@@ -136,8 +137,8 @@ function withBackend({ usage } = {}, fn) {
 
 // Recording starts before 'open' resolves: the server sends the snapshot the instant the connection
 // lands, and ws can emit 'open' and 'message' within one socket read.
-function openRecordingSocket(url) {
-  const ws = new WebSocket(url);
+function openRecordingSocket(dash, pathAndSearch = '/control') {
+  const ws = new WebSocket(dash.url(pathAndSearch), dash.options);
   const received = [];
   ws.on('message', (raw) => received.push(JSON.parse(raw.toString())));
   return new Promise((resolve, reject) => {
@@ -173,19 +174,19 @@ function settle(ms = 250) {
 
 const isUsageSessions = (m) => m.type === 'usage-sessions';
 
-test('no transcript is read until the first control connection, then the boot pass runs once', withBackend({}, async (_t, { base, counts }) => {
+test('no transcript is read until the first control connection, then the boot pass runs once', withBackend({}, async (_t, { dash, counts }) => {
   await settle();
   assert.equal(counts.scanners, 0, 'cold boot constructs no scanner');
   assert.equal(counts.readdir, 0, 'cold boot walks no directory');
   assert.equal(counts.open, 0, 'cold boot reads no transcript');
 
-  const first = await openRecordingSocket(`${base}/control`);
+  const first = await openRecordingSocket(dash);
   await waitForMessage(first.received, isUsageSessions, 'the first usage-sessions push');
   assert.equal(counts.scanners, 1);
   assert.ok(counts.readdir > 0, 'the deferred boot pass walked the transcript tree');
   assert.ok(counts.open > 0, 'the deferred boot pass read the transcript');
 
-  const second = await openRecordingSocket(`${base}/control`);
+  const second = await openRecordingSocket(dash);
   await waitForMessage(second.received, isUsageSessions, 'usage-sessions replayed to a later client');
   assert.equal(counts.scanners, 1, 'a second connection reuses the warm scanner');
 
@@ -193,8 +194,8 @@ test('no transcript is read until the first control connection, then the boot pa
   await closeSocket(second.ws);
 }));
 
-test('usage-sessions attributes the fixture transcript to the card through its live Claude session id', withBackend({}, async (_t, { base }) => {
-  const client = await openRecordingSocket(`${base}/control`);
+test('usage-sessions attributes the fixture transcript to the card through its live Claude session id', withBackend({}, async (_t, { dash }) => {
+  const client = await openRecordingSocket(dash);
   const message = await waitForMessage(client.received, isUsageSessions, 'usage-sessions');
 
   assert.equal(message.pricingSource, 'snapshot');
@@ -208,10 +209,10 @@ test('usage-sessions attributes the fixture transcript to the card through its l
   await closeSocket(client.ws);
 }));
 
-test('request-usage-report replies to the requesting socket only, with the full report shape', withBackend({}, async (_t, { base }) => {
-  const asker = await openRecordingSocket(`${base}/control`);
+test('request-usage-report replies to the requesting socket only, with the full report shape', withBackend({}, async (_t, { dash }) => {
+  const asker = await openRecordingSocket(dash);
   await waitForMessage(asker.received, isUsageSessions, 'the boot push');
-  const bystander = await openRecordingSocket(`${base}/control`);
+  const bystander = await openRecordingSocket(dash);
   await waitForMessage(bystander.received, isUsageSessions, 'the bystander connect replay');
   bystander.received.length = 0;
 
@@ -241,7 +242,7 @@ test('request-usage-report replies to the requesting socket only, with the full 
   assert.equal(bystander.received.filter((m) => m.type === 'usage-report').length, 0, 'the report is replied, never broadcast');
 
   // A client connecting after a report exists gets it replayed, with no requestId of its own.
-  const latecomer = await openRecordingSocket(`${base}/control`);
+  const latecomer = await openRecordingSocket(dash);
   const replayed = await waitForMessage(latecomer.received, (m) => m.type === 'usage-report', 'the replayed report');
   assert.equal(replayed.requestId, null);
   assert.equal(replayed.totals.tokens, 375);
@@ -251,8 +252,8 @@ test('request-usage-report replies to the requesting socket only, with the full 
   await closeSocket(latecomer.ws);
 }));
 
-test('usage.enabled false: no scanner, no messages, and a refused report request', withBackend({ usage: { enabled: false } }, async (_t, { base, counts }) => {
-  const client = await openRecordingSocket(`${base}/control`);
+test('usage.enabled false: no scanner, no messages, and a refused report request', withBackend({ usage: { enabled: false } }, async (_t, { dash, counts }) => {
+  const client = await openRecordingSocket(dash);
   await waitForMessage(client.received, (m) => m.type === 'snapshot', 'the snapshot');
   await settle();
 
@@ -270,8 +271,8 @@ test('usage.enabled false: no scanner, no messages, and a refused report request
   await closeSocket(client.ws);
 }));
 
-test('a settings save restarts the lane only when the usage block actually changed', withBackend({}, async (_t, { base, counts }) => {
-  const client = await openRecordingSocket(`${base}/control`);
+test('a settings save restarts the lane only when the usage block actually changed', withBackend({}, async (_t, { dash, counts }) => {
+  const client = await openRecordingSocket(dash);
   await waitForMessage(client.received, isUsageSessions, 'the boot push');
   assert.equal(counts.scanners, 1);
 
@@ -360,8 +361,8 @@ test('stop() cancels a pending continuation', async () => {
   assert.equal(passes.length, 1, 'no pass runs after stop');
 });
 
-test('a config with no usage block never materializes one on an unrelated save', withBackend({}, async (_t, { base, cfgPath }) => {
-  const client = await openRecordingSocket(`${base}/control`);
+test('a config with no usage block never materializes one on an unrelated save', withBackend({}, async (_t, { dash, cfgPath }) => {
+  const client = await openRecordingSocket(dash);
   await waitForMessage(client.received, (m) => m.type === 'snapshot', 'the snapshot');
 
   client.ws.send(JSON.stringify({ type: 'update-settings', requestId: 'u1', settings: { cursorBlink: false } }));

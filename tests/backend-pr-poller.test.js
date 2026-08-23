@@ -16,6 +16,7 @@ const WebSocket = require('ws');
 
 const { buildReviewPrompt, readReviewResult, prPollerShouldStart } = require('../server/pr-review-wiring');
 const { createBackend } = require('../server/backend');
+const { dashboardClient } = require('./helpers/dashboard-ws');
 
 const { withFakeSession } = require('./helpers/fake-session');
 
@@ -224,10 +225,10 @@ function withBackend(fn) {
     const backend = createBackend(server, { staticDir: null });
     server.on('request', backend.app);
     await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-    const base = `ws://127.0.0.1:${server.address().port}`;
+    const dash = await dashboardClient(server.address().port);
 
     try {
-      await fn(t, base);
+      await fn(t, dash);
     } finally {
       backend.shutdown();
       server.closeAllConnections();
@@ -239,9 +240,9 @@ function withBackend(fn) {
   };
 }
 
-function connectControl(base) {
+function connectControl(dash) {
   return new Promise((resolve, reject) => {
-    const ws = new WebSocket(`${base}/control`);
+    const ws = new WebSocket(dash.url('/control'), dash.options);
     ws.once('open', () => resolve(ws));
     ws.once('error', reject);
   });
@@ -276,9 +277,9 @@ function prPollerWarns(warnSpy) {
   return warnSpy.mock.calls.filter((c) => /pr-poller/i.test(String(c.arguments[0])));
 }
 
-test('update-settings hot-applies the poller only when prReview/telegram actually changed', withBackend(async (t, base) => {
+test('update-settings hot-applies the poller only when prReview/telegram actually changed', withBackend(async (t, dash) => {
   const warnSpy = t.mock.method(console, 'warn');
-  const ws = await connectControl(base);
+  const ws = await connectControl(dash);
 
   await sendAndWait(ws, { type: 'get-settings', requestId: '1' }, 'settings');
 

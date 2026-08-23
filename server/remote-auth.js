@@ -18,7 +18,7 @@ const {
 const {
   hashSecret, decideDeviceAuth, deviceNameFromUserAgent, DEFAULT_DEVICE_MAX_AGE_MS,
 } = require('./core/pairing-token');
-const { classifyRequestOrigin, decideRequestAccess } = require('./core/request-trust');
+const { classifyRequestOrigin, decideRequestAccess, normalizePathname } = require('./core/request-trust');
 
 const DEVICE_COOKIE_MAX_AGE_SECONDS = Math.floor(DEFAULT_DEVICE_MAX_AGE_MS / 1000);
 
@@ -56,12 +56,6 @@ function hashesMatch(a, b) {
   } catch {
     return false;
   }
-}
-
-function pathnameOf(url) {
-  const raw = typeof url === 'string' ? url : '';
-  const q = raw.indexOf('?');
-  return q === -1 ? raw : raw.slice(0, q);
 }
 
 /**
@@ -107,10 +101,12 @@ function createRemoteAuth({
     // The crypto compare only runs for remote-classified sockets; the local listener keeps its
     // existing zero-overhead path.
     const authenticated = trust === 'remote' ? authenticate(req).ok : false;
+    // The DECODED pathname, so the /pair/* exemption is judged on the same string express.static will
+    // resolve; a traversal that survives the decode comes back suspicious and can never read as /pair/.
     const decision = decideRequestAccess({
       remoteEnabled: Boolean(remote?.enabled),
       trust,
-      pathname: pathnameOf(req.url),
+      pathname: normalizePathname(req.url).pathname,
       authenticated,
     });
     if (decision.allow) {

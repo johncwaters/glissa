@@ -25,6 +25,7 @@ const WebSocket = require('ws');
 
 const { createBackend } = require('../server/backend');
 const { createPairingsStore } = require('../server/pairings-store');
+const { dashboardClient, dashboardOrigin } = require('./helpers/dashboard-ws');
 
 let tmpDir = null;
 let prevEnv = null;
@@ -133,7 +134,8 @@ test('the connect-time ingest snapshot goes to a local dashboard and not to a pa
   const remote = await openRecordingSocket(`ws://127.0.0.1:${remotePort}/control`, {
     headers: { Cookie: cookie }, origin: 'https://glissa.test',
   });
-  const local = await openRecordingSocket(`ws://127.0.0.1:${localPort}/control`);
+  const localDash = await dashboardClient(localPort);
+  const local = await openRecordingSocket(localDash.url('/control'), localDash.options);
 
   try {
     // The paired device IS receiving: it gets the ordinary connect snapshot and is told its own trust.
@@ -155,7 +157,8 @@ test('a batched activity delta reaches a local dashboard and not a paired device
   const remote = await openRecordingSocket(`ws://127.0.0.1:${remotePort}/control`, {
     headers: { Cookie: cookie }, origin: 'https://glissa.test',
   });
-  const local = await openRecordingSocket(`ws://127.0.0.1:${localPort}/control`);
+  const localDash = await dashboardClient(localPort);
+  const local = await openRecordingSocket(localDash.url('/control'), localDash.options);
 
   try {
     await waitFor(remote.received, (msg) => msg.type === 'snapshot');
