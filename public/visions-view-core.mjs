@@ -1,20 +1,11 @@
-// ── Visions view: pure grouping, ordering and wording ───────
-// Every decision the Visions tab makes about WHICH sections exist, in what order, and what the counts
-// read as, so visions-panel.js is DOM only. No literal em dash, en dash or ellipsis is produced here.
-
 export const VISIONS_EMPTY_TEXT = 'No findings. Open a markdown file in a connected editor.';
 
-// The intent model (docs/archive/plan-navigator.md, M5): one machine-wide statement of what the visions
-// believes is being built. Empty is a first-class state, and the hint says how it stops being empty.
-export const VISIONS_INTENT_EMPTY_TEXT = 'No intent yet. The visions proposes one after its first pass; typing here sets it directly.';
-export const VISIONS_INTENT_MAX_CHARS = 300;
+export const VISIONS_INTENT_EMPTY_TEXT = 'No intent yet. The visions proposes one after its first pass.';
 
 export function emptyIntent() {
-  return { text: '', source: null, locked: false, ts: 0 };
+  return { text: '', source: null, ts: 0 };
 }
 
-// One intent, however it arrived (its own push or the connect-time snapshot), normalized to the shape
-// the panel renders. Anything malformed reads as no intent rather than as a half-rendered one.
 export function intentOfMessage(msg) {
   const raw = msg?.intent;
   if (!raw || typeof raw !== 'object') return emptyIntent();
@@ -22,16 +13,13 @@ export function intentOfMessage(msg) {
   const ts = Number(raw.ts);
   return {
     text,
-    source: raw.source === 'operator' || raw.source === 'model' ? raw.source : null,
-    locked: raw.locked === true,
+    source: raw.source === 'model' ? raw.source : null,
     ts: Number.isFinite(ts) && ts > 0 ? ts : 0,
   };
 }
 
-// Who the statement belongs to, in the second person, because the correction field is right below it.
 export function intentSourceText(intent) {
   if (!intent?.text) return '';
-  if (intent.source === 'operator') return 'set by you';
   return 'proposed by visions';
 }
 
@@ -60,23 +48,10 @@ export function intentMetaText(intent, now = Date.now()) {
   return `${source}, ${age}`;
 }
 
-// Whether a push actually moved the statement. The timestamp alone is not a move: the panel repaints
-// on this, and repainting for an unchanged statement would fight the field the operator is typing in.
 export function hasIntentChanged(previous, next) {
   const before = previous || emptyIntent();
   const after = next || emptyIntent();
-  return before.text !== after.text || before.source !== after.source || before.locked !== after.locked;
-}
-
-/**
- * Whether the correction field should adopt the standing statement, so a correction is an edit rather
- * than a retype. Never while the field has focus, and never over a draft the operator already started:
- * an intent landing mid-edit must not eat what they typed.
- */
-export function shouldAdoptIntentText({ focused = false, currentValue = '', previousText = '', nextText = '' } = {}) {
-  if (focused) return false;
-  if (currentValue !== previousText) return false;
-  return currentValue !== nextText;
+  return before.text !== after.text || before.source !== after.source;
 }
 
 // LSP counts lines from zero; editors and carbon units count from one.

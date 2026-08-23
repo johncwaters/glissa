@@ -403,12 +403,12 @@ function registerControlHandlers(controlWss, deps) {
     getUsageReport = null,
     requestUsageReport = null,
     getPlanLimits = null,
+    // Context mill report accessors (optional - undefined in older callers/tests, which then replay
+    // nothing and refuse a report request).
+    millReport = null,
     // Replay of transient broadcasts missed across a reconnect gap (optional - undefined in
     // older callers/tests; connect then behaves as before, snapshot-only).
     controlReplayLog = null,
-    // Visions lane (optional - null whenever config.visions is absent or off, which is what makes
-    // the intent correction refuse instead of crashing).
-    visionsLane = null,
   } = deps;
 
   function buildSettingsPayload() {
@@ -936,22 +936,18 @@ function registerControlHandlers(controlWss, deps) {
   }
 
   /*
-   * The intent model's correction path (docs/archive/plan-navigator.md, M5): the Visions tab's one writable
-   * field. EMPTY text is meaningful (it clears the statement and hands control back to the model), so
-   * an absent `text` is a clear rather than an error. What the correction then DOES to the standing
-   * statement is decided by the merge in server/core/visions-intent-core.js, never here, and the
-   * lane broadcasts the result to every client itself.
+   * The Mill tab's pull: one report per request, assembled on demand from the pack specs, their
+   * manifests and the live sessions. Replied to the requesting socket only, like the usage report.
    */
-  function handleVisionsSetIntent(msg, ws) {
-    if (!visionsLane) {
-      sendError(ws, 'The visions lane is not running');
+  function handleRequestMillReport(msg, ws) {
+    if (!millReport) {
+      ws.send(JSON.stringify({ type: 'mill-report', requestId: typeof msg.requestId === 'string' ? msg.requestId : null, error: 'The context mill is not running' }));
       return;
     }
-    if (msg.text != null && typeof msg.text !== 'string') {
-      sendError(ws, 'visions intent text must be a string');
-      return;
-    }
-    visionsLane.setOperatorIntent(typeof msg.text === 'string' ? msg.text : '');
+    // The build is async, so the asking socket may be gone by the time it lands.
+    return millReport.requestReport(msg, (payload) => {
+      if (ws.readyState === 1) ws.send(JSON.stringify(payload));
+    });
   }
 
   function handleShutdown() {
@@ -988,7 +984,7 @@ function registerControlHandlers(controlWss, deps) {
     'posthog-issue-action': handlePosthogIssueAction,
     'posthog-archive-investigation': handlePosthogArchiveInvestigation,
     'request-usage-report': handleRequestUsageReport,
-    'visions-set-intent': handleVisionsSetIntent,
+    'request-mill-report': handleRequestMillReport,
     'kill':             (msg) => { const s = findSession(msg); if (s) s.killSession(); },
     'start-session':    (msg) => {
       const s = findSession(msg);
@@ -1101,6 +1097,12 @@ function registerControlHandlers(controlWss, deps) {
     const usageReport = typeof getUsageReport === 'function' ? getUsageReport() : null;
     if (usageReport) {
       ws.send(JSON.stringify(usageReport));
+    }
+    // Context mill: replayed from its cache only, for the same reason the usage report is. A client
+    // connecting before anyone has asked gets nothing and pulls its own.
+    const millCached = millReport ? millReport.getCachedReport() : null;
+    if (millCached) {
+      ws.send(JSON.stringify(millCached));
     }
     // Official plan limits: account-wide, and pushed only when a percentage actually moves, so a client
     // that connects between statusLine callbacks would otherwise see nothing until the next turn.

@@ -205,19 +205,14 @@ test('a save sweep is reported at note level even with debug off', (t) => {
   assert.ok(notes.some((line) => line.includes(`swept ${MARKDOWN_URI} on save: 1 findings`)), `saw ${JSON.stringify(notes)}`);
 });
 
-/*
- * The intent is model-authored from the buffer and the digest, and the operator variant is typed text,
- * so logging either verbatim would put content in the log by the back door. Source and size only.
- */
 test('intent lines name the source and the size, never the sentence', (t) => {
   const statement = 'a plan doc nobody should find quoted in a log file';
   const { wiring, notes } = drivenConnection();
   t.after(() => wiring.stop());
 
-  wiring.setOperatorIntent(statement);
-  wiring.applyModelIntent('');
+  wiring.applyModelIntent(statement);
   const intentLines = notes.filter((line) => line.includes('intent '));
-  assert.deepEqual(intentLines, [`[visions] intent operator-set (${statement.length} chars)`]);
+  assert.deepEqual(intentLines, [`[visions] intent model-set (${statement.length} chars)`]);
   assert.equal(notes.some((line) => line.includes('nobody should find')), false);
 });
 
@@ -465,7 +460,7 @@ const MODEL_DIAGNOSTIC = { line: 1, message: 'The title is missing a concrete no
  * NOTHING here spawns claude; the real spawn is covered by tests/visions-dispatch.test.js.
  */
 function dispatchingConnection({
-  dispatch: overrides = {}, respond = null, contextDigest = null, contextSeq = null, scopePaths = null,
+  dispatch: overrides = {}, respond = null, contextDigest = null, contextSeq = null, scopePaths = null, debug = false,
 } = {}) {
   const calls = [];
   const dispatchConfig = { enabled: true, ...overrides };
@@ -476,7 +471,7 @@ function dispatchingConnection({
   };
   return {
     ...drivenConnection({
-      dispatchConfig, dispatch, contextDigest, contextSeq, scopePaths,
+      dispatchConfig, dispatch, contextDigest, contextSeq, scopePaths, debug,
     }),
     calls,
   };
@@ -730,7 +725,9 @@ test('a dispatch with no model diagnostics leaves the rule-only publish stream u
 
 test('model diagnostics publish and broadcast as a union after rule diagnostics', async (t) => {
   const { wiring, timers, broadcasts, sent, lsp } = dispatchingConnection({
-    respond: () => Promise.resolve({ verdict: 'NONE', comments: [], diagnostics: [MODEL_DIAGNOSTIC], reason: null }),
+    respond: () => Promise.resolve({
+      verdict: 'NONE', comments: [], diagnostics: [{ ...MODEL_DIAGNOSTIC, severity: 1 }], reason: null,
+    }),
   });
   t.after(() => wiring.stop());
 
@@ -741,9 +738,38 @@ test('model diagnostics publish and broadcast as a union after rule diagnostics'
   const published = sent.filter((message) => message.type === 'publishDiagnostics');
   assert.deepEqual(published.at(-1).params.diagnostics.map((diagnostic) => diagnostic.code), ['repeated-word', 'model']);
   assert.equal(published.at(-1).params.diagnostics[1].range.end.character, '# Title'.length);
+  assert.equal(published.at(-1).params.diagnostics[1].severity, 4);
   const findings = broadcasts.filter((message) => message.type === 'visions-findings');
   assert.deepEqual(findings.at(-1).diagnostics, published.at(-1).params.diagnostics);
   assert.deepEqual(wiring.documentsSnapshot()[0].diagnostics.map((diagnostic) => diagnostic.code), ['repeated-word', 'model']);
+});
+
+test('lint-domain model diagnostics are dropped with a debug count only', async (t) => {
+  const { wiring, timers, sent, notes, lsp } = dispatchingConnection({
+    debug: () => true,
+    respond: () => Promise.resolve({
+      verdict: 'NONE',
+      comments: [],
+      diagnostics: [
+        { line: 1, rule: 'no-unused-imports', message: 'Unused import.' },
+        { line: 3, message: 'The chosen type of migration conflicts with the rollback plan.' },
+      ],
+      reason: null,
+    }),
+  });
+  t.after(() => wiring.stop());
+
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  runSweepThenDispatch(timers);
+  await wiring.whenDispatchSettled();
+
+  const diagnostics = sent.filter((message) => message.type === 'publishDiagnostics').at(-1).params.diagnostics;
+  assert.deepEqual(diagnostics.map((diagnostic) => diagnostic.message), [
+    'Repeated word "with"',
+    'The chosen type of migration conflicts with the rollback plan.',
+  ]);
+  assert.ok(notes.some((line) => line.includes('dropped 1 model diagnostics in the toolchain domain')));
+  assert.equal(notes.some((line) => line.includes('Unused import')), false);
 });
 
 test('model diagnostics are replaced wholesale by each dispatch', async (t) => {
@@ -1057,12 +1083,12 @@ test('a model proposal is broadcast once and joins the connect-time snapshot', (
   assert.deepEqual(intentBroadcasts(broadcasts), [{
     type: 'visions-intent',
     intent: {
-      text: 'reviewing the visions plan, tightening scope', source: 'model', locked: false, ts: FIXED_TS,
+      text: 'reviewing the visions plan, tightening scope', source: 'model', ts: FIXED_TS,
     },
     ts: FIXED_TS,
   }]);
   assert.deepEqual(wiring.snapshotMessage().intent, {
-    text: 'reviewing the visions plan, tightening scope', source: 'model', locked: false, ts: FIXED_TS,
+    text: 'reviewing the visions plan, tightening scope', source: 'model', ts: FIXED_TS,
   });
 });
 
@@ -1076,68 +1102,70 @@ test('a proposal that changes nothing is not broadcast', (t) => {
   assert.equal(intentBroadcasts(broadcasts).length, 1);
 });
 
-test('an operator correction locks the statement, and a later proposal is rejected with no broadcast', (t) => {
+test('a later model proposal replaces the standing statement', (t) => {
   const { wiring, broadcasts } = drivenConnection();
   t.after(() => wiring.stop());
 
-  wiring.setOperatorIntent('  rewriting the merge gate, not the spawn path  ');
+  wiring.applyModelIntent('rewriting the merge gate, not the spawn path');
   assert.deepEqual(wiring.getIntent(), {
-    text: 'rewriting the merge gate, not the spawn path', source: 'operator', locked: true, ts: FIXED_TS,
+    text: 'rewriting the merge gate, not the spawn path', source: 'model', ts: FIXED_TS,
   });
 
-  assert.equal(wiring.applyModelIntent('a plan doc about spawning'), false);
-  assert.equal(intentBroadcasts(broadcasts).length, 1, 'the rejected proposal reaches no client');
-  assert.equal(wiring.getIntent().text, 'rewriting the merge gate, not the spawn path');
-});
-
-test('an empty correction clears the statement and hands control back to the model', (t) => {
-  const { wiring, broadcasts } = drivenConnection();
-  t.after(() => wiring.stop());
-
-  wiring.setOperatorIntent('mine for now');
-  assert.equal(wiring.setOperatorIntent('   '), true);
-  assert.deepEqual(wiring.getIntent(), {
-    text: '', source: null, locked: false, ts: 0,
-  });
-  assert.deepEqual(intentBroadcasts(broadcasts).at(-1).intent.text, '');
-
-  assert.equal(wiring.applyModelIntent('the model may speak again'), true);
-  assert.equal(wiring.getIntent().source, 'model');
+  assert.equal(wiring.applyModelIntent('a plan doc about spawning'), true);
+  assert.equal(intentBroadcasts(broadcasts).length, 2);
+  assert.equal(wiring.getIntent().text, 'a plan doc about spawning');
 });
 
 test('an empty lane still carries an intent field on its snapshot', (t) => {
   const { wiring } = drivenConnection();
   t.after(() => wiring.stop());
   assert.deepEqual(wiring.snapshotMessage().intent, {
-    text: '', source: null, locked: false, ts: 0,
+    text: '', source: null, ts: 0,
   });
 });
 
-test('operator intent persists on change only and revives locked on the next wiring', async (t) => {
+test('model intent persists on change only and revives on the next wiring', async (t) => {
   const intentStatePath = tempIntentStatePath(t);
   const counted = countingFsPromises();
   const { wiring } = drivenConnection({ intentStatePath, fsPromises: counted.fsPromises });
   t.after(() => wiring.stop());
 
-  assert.equal(wiring.setOperatorIntent('  durable correction  '), true);
+  assert.equal(wiring.applyModelIntent('  durable belief  '), true);
   await wiring.whenIntentPersistenceIdle();
   assert.equal(counted.writes.length, 1);
   assert.deepEqual(JSON.parse(fs.readFileSync(intentStatePath, 'utf8')), {
-    text: 'durable correction', source: 'operator', locked: true, ts: FIXED_TS,
+    text: 'durable belief', source: 'model', ts: FIXED_TS,
   });
 
-  assert.equal(wiring.setOperatorIntent('durable correction'), false);
+  assert.equal(wiring.applyModelIntent('durable belief'), false);
   await wiring.whenIntentPersistenceIdle();
   assert.equal(counted.writes.length, 1);
 
   const revived = drivenConnection({ intentStatePath });
   t.after(() => revived.wiring.stop());
   assert.deepEqual(revived.wiring.getIntent(), {
-    text: 'durable correction', source: 'operator', locked: true, ts: FIXED_TS,
+    text: 'durable belief', source: 'model', ts: FIXED_TS,
   });
 });
 
-test('model intent and cleared intent both persist', async (t) => {
+test('a legacy locked intent file revives with model ownership', async (t) => {
+  const intentStatePath = tempIntentStatePath(t);
+  fs.writeFileSync(intentStatePath, JSON.stringify({
+    text: 'durable correction', source: 'operator', locked: true, ts: FIXED_TS,
+  }), 'utf8');
+  const { wiring } = drivenConnection({ intentStatePath });
+  t.after(() => wiring.stop());
+
+  assert.deepEqual(wiring.getIntent(), {
+    text: 'durable correction', source: 'model', ts: FIXED_TS,
+  });
+  assert.equal(wiring.applyModelIntent('durable model belief'), true);
+  assert.deepEqual(wiring.getIntent(), {
+    text: 'durable model belief', source: 'model', ts: FIXED_TS,
+  });
+});
+
+test('a model intent persists without a locked field', async (t) => {
   const intentStatePath = tempIntentStatePath(t);
   const counted = countingFsPromises();
   const { wiring } = drivenConnection({ intentStatePath, fsPromises: counted.fsPromises });
@@ -1145,15 +1173,9 @@ test('model intent and cleared intent both persist', async (t) => {
 
   assert.equal(wiring.applyModelIntent('durable model belief'), true);
   await wiring.whenIntentPersistenceIdle();
+  assert.equal(counted.writes.length, 1);
   assert.deepEqual(JSON.parse(fs.readFileSync(intentStatePath, 'utf8')), {
-    text: 'durable model belief', source: 'model', locked: false, ts: FIXED_TS,
-  });
-
-  assert.equal(wiring.setOperatorIntent(''), true);
-  await wiring.whenIntentPersistenceIdle();
-  assert.equal(counted.writes.length, 2);
-  assert.deepEqual(JSON.parse(fs.readFileSync(intentStatePath, 'utf8')), {
-    text: '', source: null, locked: false, ts: 0,
+    text: 'durable model belief', source: 'model', ts: FIXED_TS,
   });
 });
 
@@ -1165,7 +1187,7 @@ test('a corrupt intent file starts empty and warns once', (t) => {
   t.after(() => wiring.stop());
 
   assert.deepEqual(wiring.getIntent(), {
-    text: '', source: null, locked: false, ts: 0,
+    text: '', source: null, ts: 0,
   });
   assert.equal(warnings.length, 1);
   assert.match(warnings[0], /intent state unreadable, starting empty/);
@@ -1183,14 +1205,14 @@ test('without an intent path the lane keeps the same in-memory behavior and touc
   t.after(() => wiring.stop());
 
   assert.deepEqual(wiring.snapshotMessage().intent, {
-    text: '', source: null, locked: false, ts: 0,
+    text: '', source: null, ts: 0,
   });
   assert.equal(wiring.applyModelIntent('memory only'), true);
   await wiring.whenIntentPersistenceIdle();
   assert.deepEqual(intentBroadcasts(broadcasts), [{
     type: 'visions-intent',
     intent: {
-      text: 'memory only', source: 'model', locked: false, ts: FIXED_TS,
+      text: 'memory only', source: 'model', ts: FIXED_TS,
     },
     ts: FIXED_TS,
   }]);
@@ -1217,7 +1239,7 @@ test('the standing intent rides the dispatch, and the result updates it after th
     'the dispatch result lands comments first, then the belief it came with');
 });
 
-test('a locked intent survives a dispatch that proposes another one', async (t) => {
+test('a dispatch intent result replaces the standing intent', async (t) => {
   const { wiring, timers, calls, broadcasts, lsp } = dispatchingConnection({
     respond: () => Promise.resolve({
       verdict: 'NONE', comments: [], intent: 'what the model would rather believe', reason: null,
@@ -1225,7 +1247,7 @@ test('a locked intent survives a dispatch that proposes another one', async (t) 
   });
   t.after(() => wiring.stop());
 
-  wiring.setOperatorIntent('what I am actually doing');
+  wiring.applyModelIntent('what I am actually doing');
   const beforeDispatch = intentBroadcasts(broadcasts).length;
 
   lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
@@ -1234,9 +1256,9 @@ test('a locked intent survives a dispatch that proposes another one', async (t) 
 
   assert.equal(calls[0].intent, 'what I am actually doing');
   assert.deepEqual(wiring.getIntent(), {
-    text: 'what I am actually doing', source: 'operator', locked: true, ts: FIXED_TS,
+    text: 'what the model would rather believe', source: 'model', ts: FIXED_TS,
   });
-  assert.equal(intentBroadcasts(broadcasts).length, beforeDispatch, 'the merge refused it, so no client hears about it');
+  assert.equal(intentBroadcasts(broadcasts).length, beforeDispatch + 1);
 });
 
 test('a result with no intent field leaves the statement exactly as it was', async (t) => {

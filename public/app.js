@@ -13,6 +13,7 @@ import { activateFocusView, centerSessionQuietly, deactivateFocusView, focusAdja
 import { initFormFactor, isPhoneLayout, onLayoutChange } from './form-factor.js';
 import { applyHealthSnapshot, mountHealthMonitor } from './health-monitor.js';
 import { applyIngestActivity, applyIngestSnapshot, applyVisionsComments, applyVisionsFindings, applyVisionsFix, applyVisionsHand, applyVisionsIntent, applyVisionsSnapshot, mountVisionsView, refreshVisionsView, setVisionsActivityCallback } from './visions-panel.js';
+import { acknowledgeMillAttention, applyMillReport, mountMillView, refreshMillView, requestMillReport, setMillActivityCallback, setMillRequestSender } from './mill-panel.js';
 import { initNotifications, showDesktopNotification } from './notifications.js';
 import { activatePhoneShell, deactivatePhoneShell, getPhoneSessionId, isPhoneScreenActive, isPhoneShellActive, mountPhoneShell, refreshPhoneBoard, setPhoneScreenAttention, showPhoneScreen } from './phone/phone-shell.js';
 import { acknowledgePrAttention, applyPrStatus, mountPrView, setPrActivityCallback } from './pr-panel.js';
@@ -229,6 +230,7 @@ function restoreUsageChip(sessionId) {
 }
 
 setUsageRequestSender(sendControlMsg);
+setMillRequestSender(sendControlMsg);
 
 function isUsageSurfaceVisible() {
   if (isPhoneShellActive()) return isPhoneScreenActive('usage');
@@ -240,11 +242,27 @@ function requestUsageReportIfVisible() {
   requestUsageReport();
 }
 
+// One sweep republishes every pack it rebuilt, so the pulls are coalesced into a trailing one rather
+// than costing a full spec walk per pack. The snapshot-time pull stays immediate: it is one event.
+const MILL_PULL_DEBOUNCE_MS = 500;
+let millPullTimer = null;
+
+function requestMillReportSoon() {
+  if (millPullTimer) clearTimeout(millPullTimer);
+  millPullTimer = setTimeout(() => {
+    millPullTimer = null;
+    requestMillReport();
+  }, MILL_PULL_DEBOUNCE_MS);
+}
+
 const messageHandlers = {
-  'snapshot':           (msg) => { noteServerBuild(msg.serverBuild); handleSnapshot(msg.sessions, msg.packVersions); },
+  'snapshot':           (msg) => { noteServerBuild(msg.serverBuild); handleSnapshot(msg.sessions, msg.packVersions); requestMillReport(); },
   // A context pack finished rebuilding: every session still running an older version of it is now
-  // stale. Nothing is done to the sessions themselves (see AGENTS.md "Context Packs").
-  'pack-updated':       (msg) => notePackVersion(msg.name, msg.version),
+  // stale. Nothing is done to the sessions themselves (see AGENTS.md "Context Packs"). The Mill report
+  // is pulled from wherever the operator is, not only while its tab is open: the report is cheap, and a
+  // rebuild is exactly what turns a delivery stale, which is what the dot exists to say.
+  'pack-updated':       (msg) => { notePackVersion(msg.name, msg.version); requestMillReportSoon(); },
+  'mill-report':        (msg) => applyMillReport(msg),
   // The versions a spawn actually delivered, pushed as the session starts.
   'session-packs':      (msg) => setSessionPacks(msg.id, msg.packs),
   // Advisory post-rebase check verdict: the card chip and the review sidebar row read the same fact.
@@ -416,21 +434,24 @@ document.getElementById('btn-help').addEventListener('click', () => {
   createSettingsDialog('shortcuts');
 });
 
-// ── Primary view tabs (Focus / Radar / PRs / Usage / Visions) ────────
+// ── Primary view tabs (Focus / Radar / PRs / Usage / Mill / Visions) ────────
 
 const viewFocusEl = document.getElementById('view-focus');
 const viewRadarEl = document.getElementById('view-radar');
 const viewPrsEl = document.getElementById('view-prs');
 const viewUsageEl = document.getElementById('view-usage');
+const viewMillEl = document.getElementById('view-mill');
 const viewVisionsEl = document.getElementById('view-visions');
 const tabFocus = document.getElementById('tab-focus');
 const tabRadar = document.getElementById('tab-radar');
 const tabPrs = document.getElementById('tab-prs');
 const tabUsage = document.getElementById('tab-usage');
+const tabMill = document.getElementById('tab-mill');
 const tabVisions = document.getElementById('tab-visions');
 const tabRadarActivityEl = document.getElementById('tab-radar-activity');
 const tabPrsActivityEl = document.getElementById('tab-prs-activity');
 const tabUsageActivityEl = document.getElementById('tab-usage-activity');
+const tabMillActivityEl = document.getElementById('tab-mill-activity');
 const tabVisionsActivityEl = document.getElementById('tab-visions-activity');
 
 setRadarActivityCallback((active) => {
@@ -444,6 +465,10 @@ setPrActivityCallback((active) => {
 setUsageActivityCallback((active) => {
   tabUsageActivityEl.classList.toggle('active', active);
   setPhoneScreenAttention('usage', active);
+});
+setMillActivityCallback((active) => {
+  tabMillActivityEl.classList.toggle('active', active);
+  setPhoneScreenAttention('mill', active);
 });
 setVisionsActivityCallback((active) => {
   tabVisionsActivityEl.classList.toggle('active', active);
@@ -477,6 +502,10 @@ mountPrView(viewPrsEl);
 // from wherever they are.
 mountUsageView(viewUsageEl);
 
+// Eager for the same reason again: a pack-updated broadcast pulls a fresh mill report from wherever the
+// operator is, and its stale-delivery dot has to light without them ever opening Mill.
+mountMillView(viewMillEl);
+
 // Eager for the same reason again: a visions-findings push (or the connect-time snapshot) can land
 // while another tab is active, and the dot has to say so from wherever the operator is.
 mountVisionsView(viewVisionsEl);
@@ -489,6 +518,7 @@ const VIEW_TABS = [
   { view: 'radar', tab: tabRadar, el: viewRadarEl },
   { view: 'prs', tab: tabPrs, el: viewPrsEl },
   { view: 'usage', tab: tabUsage, el: viewUsageEl },
+  { view: 'mill', tab: tabMill, el: viewMillEl },
   { view: 'visions', tab: tabVisions, el: viewVisionsEl },
 ];
 
@@ -502,6 +532,7 @@ function acknowledgeViewAttention(view) {
   if (view === 'radar') acknowledgeRadarAttention();
   if (view === 'prs') acknowledgePrAttention();
   if (view === 'usage') acknowledgeUsageAttention();
+  if (view === 'mill') acknowledgeMillAttention();
   if (view === 'visions') refreshVisionsView();
 }
 
@@ -528,6 +559,12 @@ function activateView(view) {
   if (view === 'usage') {
     refreshUsageView();
     requestUsageReport();
+  }
+  // Same pull shape for the mill: nothing about a pack changes on its own, so the report is assembled
+  // when the surface is looked at rather than broadcast.
+  if (view === 'mill') {
+    refreshMillView();
+    requestMillReport();
   }
   acknowledgeViewAttention(view);
 }
@@ -562,11 +599,13 @@ mountPhoneShell({
   radarPanelEl: viewRadarEl,
   prsPanelEl: viewPrsEl,
   usagePanelEl: viewUsageEl,
+  millPanelEl: viewMillEl,
   visionsPanelEl: viewVisionsEl,
-  // Usage is the one screen that PULLS rather than being pushed to, so it asks for a fresh report the
-  // moment it becomes visible; every other screen ignores this.
+  // Usage and Mill are the two screens that PULL rather than being pushed to, so each asks for a fresh
+  // report the moment it becomes visible; every other screen ignores this.
   onScreenShown: (screenId) => {
     if (screenId === 'usage') { refreshUsageView(); requestUsageReport(); }
+    if (screenId === 'mill') { refreshMillView(); requestMillReport(); }
     acknowledgeViewAttention(screenId);
   },
   // The desktop header does not render under [data-layout="phone"], so its controls move to the Board's

@@ -1,4 +1,4 @@
-// The phone layout's shell: seven screens, one visible at a time, behind a bottom nav.
+// The phone layout's shell: eight screens, one visible at a time, behind a bottom nav.
 //
 // This is a first-class layout, not a narrowed desktop. The desktop DOM (header, focus view, docked
 // sidebar) is not rendered at all under [data-layout="phone"]; the shell is only built the first time
@@ -11,11 +11,12 @@
 //   Radar    - the real Radar panel, re-parented in as a full screen
 //   PRs      - the real PRs panel, re-parented in as a full screen
 //   Usage    - the real Usage panel, re-parented in as a full screen
+//   Mill     - the real Mill panel, re-parented in as a full screen
 //   Visions - the real Visions panel, re-parented in as a full screen
 //
-// Six elements are BORROWED from the desktop DOM rather than rebuilt: the review sidebar, the Radar,
-// PRs, Usage and Visions panels, and the header controls the Board top bar adopts. Rebuilding any of
-// them would mean a second state pipeline for the same facts.
+// Seven elements are BORROWED from the desktop DOM rather than rebuilt: the review sidebar, the Radar,
+// PRs, Usage, Mill and Visions panels, and the header controls the Board top bar adopts. Rebuilding any
+// of them would mean a second state pipeline for the same facts.
 
 import { STATES } from '/shared/states.mjs';
 import { sendControlMsg } from '../control-ws.js';
@@ -39,6 +40,7 @@ const SCREENS = Object.freeze([
   { id: 'radar', label: 'Radar', glyph: '◎', nested: true }, // ringed circle: a scan sweep
   { id: 'prs', label: 'PRs', glyph: '⇅', nested: true },     // opposed arrows: push and pull
   { id: 'usage', label: 'Usage', glyph: '◔', nested: true }, // part-filled circle: a consumption gauge
+  { id: 'mill', label: 'Mill', glyph: '▦', nested: true }, // square with quadrants: assembled parts
   { id: 'visions', label: 'Visions', glyph: '◇', nested: true },
 ]);
 const MORE = 'more';
@@ -56,6 +58,8 @@ let prsMountEl = null;
 let prsPanelEl = null;
 let usageMountEl = null;
 let usagePanelEl = null;
+let millMountEl = null;
+let millPanelEl = null;
 let visionsMountEl = null;
 let visionsPanelEl = null;
 let moreButtonEl = null;
@@ -230,6 +234,7 @@ function build() {
   radarMountEl = el('div', 'phone-radar');
   prsMountEl = el('div', 'phone-prs');
   usageMountEl = el('div', 'phone-usage');
+  millMountEl = el('div', 'phone-mill');
   visionsMountEl = el('div', 'phone-visions');
 
   const screens = el('div', 'phone-screens');
@@ -240,6 +245,7 @@ function build() {
     radar: radarMountEl,
     prs: prsMountEl,
     usage: usageMountEl,
+    mill: millMountEl,
     visions: visionsMountEl,
   };
   for (const screen of SCREENS) {
@@ -402,6 +408,7 @@ export function mountPhoneShell(options) {
   radarPanelEl = hooks.radarPanelEl || null;
   prsPanelEl = hooks.prsPanelEl || null;
   usagePanelEl = hooks.usagePanelEl || null;
+  millPanelEl = hooks.millPanelEl || null;
   visionsPanelEl = hooks.visionsPanelEl || null;
 }
 
@@ -424,6 +431,8 @@ export function activatePhoneShell({ sessionId } = {}) {
   if (prsPanelEl) prsPanelEl.hidden = false;
   adoptElement(usagePanelEl, usageMountEl);
   if (usagePanelEl) usagePanelEl.hidden = false;
+  adoptElement(millPanelEl, millMountEl);
+  if (millPanelEl) millPanelEl.hidden = false;
   adoptElement(visionsPanelEl, visionsMountEl);
   if (visionsPanelEl) visionsPanelEl.hidden = false;
   syncVisualViewport();
@@ -444,6 +453,7 @@ export function deactivatePhoneShell() {
   releaseElement(radarPanelEl);
   releaseElement(prsPanelEl);
   releaseElement(usagePanelEl);
+  releaseElement(millPanelEl);
   releaseElement(visionsPanelEl);
   for (const control of (hooks.headerControls || [])) releaseElement(control);
   setMoreMenuOpen(false);
