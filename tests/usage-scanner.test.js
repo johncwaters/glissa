@@ -261,7 +261,7 @@ test('stored entries strip ingest-only iteration payloads', async () => {
   const scanner = makeScanner(root);
 
   await scanner.runPass();
-  assert.equal(Object.prototype.hasOwnProperty.call(scanner._entriesForTest()[0], 'iterations'), false);
+  assert.equal(Object.hasOwn(scanner._entriesForTest()[0], 'iterations'), false);
 });
 
 test('force requested during an active pass chains a rebuild pass', async () => {

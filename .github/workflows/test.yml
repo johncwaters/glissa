@@ -9,7 +9,13 @@ on:
 
 jobs:
   test:
-    runs-on: windows-latest
+    # Windows is the development host; the ubuntu leg is what keeps the POSIX-gated paths (symlinked
+    # worktree shares, file modes) from rotting, since they skip on every Windows run.
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5

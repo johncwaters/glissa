@@ -194,33 +194,94 @@ test('a win32 timeout reaps the whole process tree, not just the shell', async (
   assert.equal((await running).status, 'timeout');
 });
 
-test('off win32 the timeout still uses child.kill', async () => {
+// The same failure off Windows: child.kill() SIGTERMs /bin/sh alone while npm and the test runner keep
+// running inside the worktree. The child is spawned detached, so it leads its own process group and one
+// signal to the negative pid reaches all of it.
+test('off win32 the timeout kills the process group, not just the shell', async () => {
   const child = fakeChild();
   child.pid = 99;
   const killed = [];
+  const groupSignals = [];
   const check = createWorktreeCheck({
     spawnFn: () => child,
     timeoutMs: 20,
     platform: 'linux',
     killTree: (args, _opts, cb) => { killed.push(args); cb(null); },
+    killGroup: (pid, signal) => groupSignals.push([pid, signal]),
   });
   const running = check.run({ cwd: '/w', command: 'npm test' });
   await new Promise((resolve) => setTimeout(resolve, 60));
-  assert.equal(child.killed, true);
+  assert.deepEqual(groupSignals, [[-99, 'SIGKILL']]);
+  assert.equal(child.killed, false, 'the shell is not signalled separately; the group kill covers it');
   assert.deepEqual(killed, [], 'taskkill is a Windows tool');
   child.emit('close', null);
   assert.equal((await running).status, 'timeout');
 });
 
-test('a win32 child with no pid yet falls back to child.kill rather than reaping nothing', async () => {
+// A group signal to a group that already died is the ordinary outcome, and must not throw out of the
+// timer callback (which is nobody's catch).
+test('an already-dead group off win32 is swallowed, and the verdict still lands', async () => {
   const child = fakeChild();
-  child.pid = undefined;
+  child.pid = 99;
   const check = createWorktreeCheck({
-    spawnFn: () => child, timeoutMs: 20, platform: 'win32', killTree: (_a, _o, cb) => cb(null),
+    spawnFn: () => child,
+    timeoutMs: 20,
+    platform: 'linux',
+    killGroup: () => { throw Object.assign(new Error('ESRCH'), { code: 'ESRCH' }); },
   });
   const running = check.run({ cwd: '/w', command: 'npm test' });
   await new Promise((resolve) => setTimeout(resolve, 60));
-  assert.equal(child.killed, true);
   child.emit('close', null);
   assert.equal((await running).status, 'timeout');
+});
+
+// detached is what makes the group kill above possible; on Windows it would open a console window and
+// taskkill /T needs nothing from us.
+test('the child is spawned detached off win32 and never on it', async () => {
+  const seen = [];
+  const spawnFn = (_command, options) => { seen.push(options); return fakeChild(); };
+  createWorktreeCheck({ spawnFn, platform: 'linux' }).run({ cwd: '/w', command: 'npm test' });
+  createWorktreeCheck({ spawnFn, platform: 'win32' }).run({ cwd: '/w', command: 'npm test' });
+  assert.equal(seen[0].detached, true);
+  assert.equal(seen[0].shell, true);
+  assert.equal(seen[1].detached, false);
+});
+
+// pid 0 negated is our OWN process group and pid 1 is every process this user can signal, so neither
+// may reach the group kill; the child itself is still signalled.
+test('a pid below 2 falls back to child.kill and never reaches the group kill', async () => {
+  for (const pid of [0, 1]) {
+    const child = fakeChild();
+    child.pid = pid;
+    const check = createWorktreeCheck({
+      spawnFn: () => child,
+      timeoutMs: 20,
+      platform: 'linux',
+      killGroup: () => assert.fail(`pid ${pid} must never be signalled as a group`),
+    });
+    const running = check.run({ cwd: '/w', command: 'npm test' });
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    assert.equal(child.killed, true);
+    child.emit('close', null);
+    assert.equal((await running).status, 'timeout');
+  }
+});
+
+test('a child with no pid yet falls back to child.kill rather than reaping nothing', async () => {
+  for (const platform of ['win32', 'linux']) {
+    const child = fakeChild();
+    child.pid = undefined;
+    const check = createWorktreeCheck({
+      spawnFn: () => child,
+      timeoutMs: 20,
+      platform,
+      killTree: (_a, _o, cb) => cb(null),
+      killGroup: () => assert.fail('a pid-less child has no group to signal'),
+    });
+    const running = check.run({ cwd: '/w', command: 'npm test' });
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    assert.equal(child.killed, true);
+    child.emit('close', null);
+    assert.equal((await running).status, 'timeout');
+  }
 });

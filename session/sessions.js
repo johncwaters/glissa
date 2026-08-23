@@ -51,7 +51,23 @@ const { RESUME_ID_RE } = require("./core/auto-resume");
 
 const KILL_POLL_INTERVAL_MS = 200;
 const KILL_MAX_WAIT_MS = 3000;
+// The POSIX reap's own budget, deliberately SHORTER than KILL_MAX_WAIT_MS and separate from it. The
+// shutdown coordinator awaits these reaps under a 3000ms cap (server-lifecycle.js awaitTeardown), so a
+// reap that also ran to 3000ms plus timer drift would overrun the very bound it exists to settle inside;
+// 12 poll ticks leave that headroom. The force-kill escalation keeps KILL_MAX_WAIT_MS, so the win32 path
+// is unchanged.
+const KILL_REAP_MAX_WAIT_MS = 2400;
 const SLEEP_KILL_TIMEOUT_MS = 15 * 60 * 1000;
+
+// Nothing below 2 may ever be signalled: NEGATED (the process-group form), pid 0 is our OWN group and
+// pid 1 is every process this user can signal, so a pty object carrying a missing or absurd pid would
+// take the server, or the box, down with the session. No child of ours is ever numbered that low.
+function signalablePid(pid) {
+  const parsed = Number(pid);
+  if (!Number.isInteger(parsed)) return null;
+  if (parsed < 2) return null;
+  return parsed;
+}
 
 // States in which Claude's TUI is up and reading input, so a bracketed paste actually lands. A
 // deferred paste (pasteTextWhenReady) waits for the session to enter one of these; INITIALIZING and
@@ -216,6 +232,13 @@ class Session extends EventEmitter {
     // the kill args (['/PID', pid, '/T', '/F']) without spawning a real taskkill. Mirrors ptySpawn/
     // spawnCommand injection. Signature: (args, opts, cb) -> matches child_process.execFile.
     killProc = null,
+    // Process-signal seam (POSIX group kill, liveness probe). Defaults to process.kill; tests inject a
+    // fake so a group SIGKILL is asserted rather than delivered. Signature: (pid, signal) -> void, where
+    // a NEGATIVE pid means "the process group", exactly as process.kill reads it.
+    signalProc = null,
+    // The platform this session spawns and kills for. Defaults to the real one; tests pass it explicitly
+    // so both the win32 taskkill branch and the POSIX group-kill branch run on a single host.
+    platform = process.platform,
     // Worktree isolation (injected by backend). When gitWorkspace + integrationBranch are present and
     // `path` is a git repo, the session runs in a throwaway worktree forked off integrationBranch and
     // merges back on review. Absent (unit tests, no-git) -> runs in place at `path` exactly as before.
@@ -258,9 +281,13 @@ class Session extends EventEmitter {
     // eviction, monotonic-total, and offset semantics).
     this._outputRing = createOutputRing(replayBufferKB * 1024);
     this._killPollTimer = null;
-    // In-flight reap (taskkill) promise from the most recent kill(), or null. The server lifecycle
-    // (shutdown -> requestRestart/requestShutdown) awaits these before exit/respawn so the PTY tree
-    // (cmd/claude/conhost) is reaped instead of orphaned. Set in kill(); never gates a transition.
+    this._killReapTimer = null;
+    // Settles the in-flight POSIX reap below, so a destroy() (or a second kill) can never strand it.
+    this._resolveKillReap = null;
+    // In-flight reap promise from the most recent kill(), or null: the taskkill on Windows, the bounded
+    // process-gone poll after a group SIGKILL off it. The server lifecycle (shutdown ->
+    // requestRestart/requestShutdown) awaits these before exit/respawn so the PTY tree (cmd/claude/conhost
+    // there, the setsid'd process group here) is reaped instead of orphaned. Never gates a transition.
     this._killReap = null;
     this._sleeping = false;
     this._sleepKillTimer = null;
@@ -385,6 +412,8 @@ class Session extends EventEmitter {
     // Async kill executor (taskkill). Default wraps execFile; the callback form keeps the call truly
     // non-blocking. Injected in tests to assert the kill without spawning a real process.
     this._killProc = killProc || ((args, opts, cb) => execFile("taskkill", args, opts, cb));
+    this._signalProc = signalProc || ((pid, signal) => process.kill(pid, signal));
+    this._platform = platform;
 
     // -- Worktree isolation state (see _provisionWorktree / _settleWorktreeOnExit) --
     this._gitWorkspace = gitWorkspace;
@@ -2079,14 +2108,15 @@ class Session extends EventEmitter {
     if (this.ptyProcess) {
       console.warn(`[session:${this.name}] start() called while PTY exists - killing previous PTY first`);
       const oldPid = this.ptyProcess.pid;
-      const oldPty = this.ptyProcess;
-      if (process.platform === "win32") {
+      if (this._platform === "win32") {
         // Await the reap (bounded by a 2s timeout) so the new PTY is not spawned until the old one is
         // gone, preserving the "kill previous first" intent now that start() is async.
         await this._taskkill(oldPid, { timeout: 2000 }).catch(() => { /* already dead/unkillable/timed out - proceed */ });
       }
-      if (process.platform !== "win32") {
-        try { oldPty.kill(); } catch { /* already dead - proceed */ }
+      if (this._platform !== "win32") {
+        // Same intent, same bound: a single-pid SIGHUP here returned instantly and left the old tree
+        // running alongside the fresh spawn.
+        await this._reapProcessGroup(oldPid, { maxWaitMs: 2000 });
       }
       this.ptyProcess = null;
     }
@@ -2167,7 +2197,7 @@ class Session extends EventEmitter {
       claudeArgs.push(this._initialPrompt);
     }
     const { file, args } = buildSpawnCommand({
-      platform: process.platform,
+      platform: this._platform,
       resolved: this._spawnCommand,
       settingsArgs,
       packArgs: packDelivery.args,
@@ -2195,6 +2225,7 @@ class Session extends EventEmitter {
     }
     this._ptyAlive = true;
     this._guardPtyInputSocket();
+    this._guardUnixPtySocket();
 
     this.transition("spawn_success");
 
@@ -2238,6 +2269,35 @@ class Session extends EventEmitter {
     } catch {
       // node-pty internal shape differs (version/backend): non-fatal.
     }
+  }
+
+  // node-pty's unix backend RETHROWS an unexpected pty socket error out of its own socket handler
+  // (unixTerminal.js: `if (this.listeners('error').length < 2) throw err`), and there is deliberately no
+  // uncaughtException handler here, so one read error on one session took the whole server down.
+  // ONE listener closes it: Terminal.on and Terminal.listeners both delegate to the pty socket
+  // (terminal.js, node-pty 1.1.0), so node-pty's own handler is already listener #1 and ours makes 2.
+  // Ours is registered second, so it also RUNS second, after that handler has decided not to throw.
+  // win32 is left untouched: its ConPTY input-socket guard above is the failure that happens there.
+  _guardUnixPtySocket() {
+    if (this._platform === "win32") return;
+    try {
+      this.ptyProcess?.on?.("error", (err) => this._handlePtySocketError(err));
+    } catch {
+      // node-pty internal shape differs (version/backend): non-fatal.
+    }
+  }
+
+  // Same filtering node-pty applies before it rethrows: EAGAIN is normal startup noise on its read
+  // stream, and EIO means the child closed the pty, which the exit callback already reports. Anything
+  // else has broken this PTY for good: kill the tree and let the ORDINARY exit path report it, rather
+  // than calling _handlePtyExit here and racing node-pty's own exit callback into a second one.
+  _handlePtySocketError(err) {
+    const code = String(err?.code || "");
+    if (code.includes("EAGAIN")) return;
+    if (code.includes("EIO") || code.includes("errno 5")) return;
+    if (!this._ptyAlive) return;
+    console.warn(`[session ${this.id}] pty socket error: ${err?.message} - killing the session`);
+    this.kill();
   }
 
   // Write the per-session hook settings file and register with the shared
@@ -2370,10 +2430,15 @@ class Session extends EventEmitter {
     this._ptyAlive = false;
     this.ptyProcess = null;
 
-    // Reap orphan grandchildren on Windows. Fire-and-forget: the PTY is already nulled and the settle/emit
+    // Reap orphan grandchildren. Fire-and-forget: the PTY is already nulled and the settle/emit
     // sequence below does not depend on the reap completing, so swallow any error (pid already exited).
-    if (pid && process.platform === "win32") {
+    if (pid && this._platform === "win32") {
       this._taskkill(pid).catch(() => { /* pid already exited or taskkill unavailable - nothing to do */ });
+    }
+    // Off Windows the dead pty child's own process group is where those grandchildren still sit, holding
+    // handles inside the worktree; an empty group answers ESRCH, which is the ordinary case here.
+    if (pid && this._platform !== "win32") {
+      this._killProcessGroup(pid);
     }
 
     const { event, detail } = decideExitTransition(this.state, exitCode, signal, this._receivedFirstOutput);
@@ -2477,57 +2542,107 @@ class Session extends EventEmitter {
     if (this.listenerCount("error") > 0) this.emit("error", err);
   }
 
+  // The POSIX answer to taskkill /T /F. node-pty setsid()s its unix child, so the child's pgid IS its pid
+  // and one signal to the NEGATIVE pid reaches the whole tree; ptyProcess.kill() is a single-pid SIGHUP
+  // that leaves every background bash task, MCP server and teammate under it orphaned. A grandchild that
+  // setsid'd itself out of the group escapes, which is the same parity taskkill has with a re-parented
+  // process. ESRCH is the ordinary outcome (the tree is already gone), never an error worth surfacing.
+  _killProcessGroup(pid, signal = "SIGKILL") {
+    const target = signalablePid(pid);
+    if (target === null) return;
+    try {
+      this._signalProc(-target, signal);
+    } catch (err) {
+      if (err && err.code !== "ESRCH") this._emitError(err);
+    }
+  }
+
+  _isProcessAlive(pid) {
+    const target = signalablePid(pid);
+    if (target === null) return false;
+    try {
+      this._signalProc(target, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  // Kill the group and hand back the same awaitable reap the win32 taskkill gives: signalling is instant,
+  // but the tree's death is not, and restart / shutdown / the ephemeral-lane worktree discard all act on
+  // what that tree still holds open. Never rejects - an awaiter only needs to know the wait is over. A
+  // zombie keeps answering signal 0 until node-pty waitpid()s it, which is what the budget bounds.
+  _reapProcessGroup(pid, { maxWaitMs = KILL_REAP_MAX_WAIT_MS } = {}) {
+    this._killProcessGroup(pid);
+    return this._awaitProcessGone(pid, maxWaitMs);
+  }
+
+  _awaitProcessGone(pid, maxWaitMs) {
+    // One timer field serves one wait: settle any earlier one first, or arming over it would strand that
+    // promise unresolved for whoever is awaiting it.
+    if (this._resolveKillReap) this._resolveKillReap();
+    return new Promise((resolve) => {
+      const settle = () => {
+        this._clearTimer("_killReapTimer");
+        this._resolveKillReap = null;
+        resolve();
+      };
+      this._resolveKillReap = settle;
+      let waited = 0;
+      // Deliberately runs past destroy(): the ephemeral lanes destroy a session and then discard its
+      // worktree, and a reap that resolved early on teardown would hand them a tree still holding
+      // handles in it. The budget below is what bounds the wait instead.
+      const poll = () => {
+        if (!this._isProcessAlive(pid)) return settle();
+        waited += KILL_POLL_INTERVAL_MS;
+        if (waited >= maxWaitMs) return settle();
+        this._armTimer("_killReapTimer", KILL_POLL_INTERVAL_MS, poll);
+      };
+      // Probe FIRST, arm a timer only if something is still alive. Waiting out a poll interval before
+      // the first look charged every restart 200ms of dead time for a tree that was usually already
+      // gone (restart only fires from DONE/FAILED), where the win32 taskkill returns as fast as it can.
+      poll();
+    });
+  }
+
   kill() {
     if (!this.ptyProcess) return;
 
     // Stop writing the instant we kill: the conin pipe peer dies with the child,
     // so any further write() would hit the dead pipe (see _guardPtyInputSocket).
-    // The flip and the force-kill scheduling stay SYNCHRONOUS and in order; only the taskkill is async.
+    // The flip and the force-kill scheduling stay SYNCHRONOUS and in order; only the REAP is async (the
+    // taskkill on Windows, the process-gone poll after the group signal off it).
     this._ptyAlive = false;
     const pid = this.ptyProcess.pid;
-    const ptyProcess = this.ptyProcess;
 
-    if (process.platform === "win32") {
+    if (this._platform === "win32") {
       // Retain the reap promise so the server lifecycle can await it before exit/respawn (orphan fix).
       // The .catch keeps the error-emission behavior; awaiters use Promise.allSettled so a reject is fine.
       this._killReap = this._taskkill(pid);
       this._killReap.catch((err) => this._emitError(err));
     }
-    if (process.platform !== "win32") {
-      this._killReap = Promise.resolve(); // SIGKILL is synchronous; nothing async to await
-      try { ptyProcess.kill(); } catch (err) { this._emitError(err); }
+    if (this._platform !== "win32") {
+      // The group SIGKILL covers the pty child itself, so node-pty's own single-pid kill() adds nothing.
+      this._killReap = this._reapProcessGroup(pid);
     }
 
     this._forceKillAfterTimeout(pid);
   }
 
   _forceKillAfterTimeout(pid) {
-    const checkAlive = () => {
-      try {
-        process.kill(pid, 0);
-        return true;
-      } catch {
-        return false;
-      }
-    };
-
     let elapsed = 0;
     const poll = () => {
       if (this._destroyed) return;
-      if (!checkAlive()) return;
+      if (!this._isProcessAlive(pid)) return;
       elapsed += KILL_POLL_INTERVAL_MS;
       if (elapsed >= KILL_MAX_WAIT_MS) {
-        // Terminal branch: the process outlived the poll budget. Force-kill async on Windows; the
-        // non-win32 SIGKILL stays synchronous (already a non-blocking signal).
-        if (process.platform === "win32") {
+        // Terminal branch: the process outlived the poll budget. Force-kill async on Windows; off it the
+        // group SIGKILL stays synchronous (already a non-blocking signal) and covers the whole tree.
+        if (this._platform === "win32") {
           this._taskkill(pid).catch((err) => this._emitError(err));
           return;
         }
-        try {
-          process.kill(pid, "SIGKILL");
-        } catch (err) {
-          this._emitError(err);
-        }
+        this._killProcessGroup(pid);
         return;
       }
       this._armTimer("_killPollTimer", KILL_POLL_INTERVAL_MS, poll);
@@ -2707,6 +2822,8 @@ class Session extends EventEmitter {
     this.kill();
 
     this._clearTimer("_killPollTimer");
+    // _killReapTimer is deliberately NOT cleared here: it is driving the reap a shutdown or an ephemeral
+    // lane's worktree discard is about to await, and it settles itself inside the kill budget.
 
     this._clearGateHeldReady();
     this._clearPackNotice();

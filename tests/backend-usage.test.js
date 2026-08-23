@@ -400,7 +400,7 @@ test('a settings restart during an in-flight start arms the NEW interval cadence
     controlClientCount: () => 1,
     createScanner: () => scanner,
     loadPricingFn: async () => ({ table: {}, source: 'snapshot', fetchedAt: null }),
-    setIntervalFn: (fn, ms) => { const handle = { ms }; armed.push(handle); return handle; },
+    setIntervalFn: (_fn, ms) => { const handle = { ms }; armed.push(handle); return handle; },
     clearIntervalFn: (handle) => { cleared.push(handle); },
     logger: { warn: () => {} },
   });

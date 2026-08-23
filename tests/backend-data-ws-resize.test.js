@@ -36,7 +36,9 @@ let ptyResizes = [];
 
 function attachFakePty() {
   ptyResizes = [];
-  session.ptyProcess = { write() {}, resize: (cols, rows) => ptyResizes.push({ cols, rows }), pid: 4243 };
+  // Past every platform's pid_max on purpose: shutdown() destroys this session, and off Windows that
+  // kill signals the pid's process GROUP, which must never name a real one on the host.
+  session.ptyProcess = { write() {}, resize: (cols, rows) => ptyResizes.push({ cols, rows }), pid: 2147483646 };
   session._ptyAlive = true;
 }
 

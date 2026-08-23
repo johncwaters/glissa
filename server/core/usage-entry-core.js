@@ -192,7 +192,7 @@ function hasNullAtPath(value, fieldPath) {
   let current = value;
   for (const part of fieldPath) {
     if (!current || typeof current !== 'object') return false;
-    if (!Object.prototype.hasOwnProperty.call(current, part)) return false;
+    if (!Object.hasOwn(current, part)) return false;
     current = current[part];
   }
   return current === null;

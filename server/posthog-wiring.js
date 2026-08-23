@@ -13,12 +13,13 @@
 'use strict';
 
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { execFileAsync } = require('./child-process-safe');
 const { Session } = require('../session/sessions');
-const { awaitSessionExit, readResultFile, registerEphemeralSession } = require('./ephemeral-session');
+const {
+  awaitSessionExit, createJobResultFile, readResultFile, registerEphemeralSession,
+} = require('./ephemeral-session');
 const core = require('./core/posthog-core');
 const { normalizePackNames } = require('./core/pack-core');
 const { createPosthogPoller } = require('./posthog-poller');
@@ -99,9 +100,10 @@ function promptIssueUrl(host, projectId, issueId) {
   return `${base}/project/${safeIssueId(projectId)}/error_tracking/${safeIssueId(issueId)}`;
 }
 
-// Result files are named after ids that reach fs.rmSync, so both are scrubbed, not just the issue id.
-function resultPathFor(kind, projectId, issueId) {
-  return path.join(os.tmpdir(), `glissa-posthog-${kind}${safeIssueId(projectId)}-${safeIssueId(issueId)}-${process.pid}.json`);
+// The job's result file, in a private directory of its own (createJobResultFile explains why a
+// predictable name in shared temp is not safe). Ids reach a filesystem path, so both are scrubbed.
+function createResultFileFor(kind, projectId, issueId) {
+  return createJobResultFile(`glissa-posthog-${kind}${safeIssueId(projectId)}-${safeIssueId(issueId)}`);
 }
 
 /*
@@ -503,10 +505,12 @@ function createPosthogWiring({
     });
     if (!workspace || !workspace.isGit) return null;
 
-    const resultPath = resultPathFor('fix-', projectId, issueId);
     const promptUrl = promptIssueUrl(config.posthog.host, projectId, issue.issueId);
-    try { fs.rmSync(resultPath, { force: true }); } catch { /* fresh file */ }
+    // Created INSIDE the try: a throw between minting the directory and entering the guarded region
+    // would strand it, and the finally below is the only thing that removes it.
+    let resultFile = null;
     try {
+      resultFile = await createResultFileFor('fix-', projectId, issueId);
       const sess = makeInvestigationSession({
         id: `posthog-fix:${projectId}#${issue.issueId}`,
         name: `PostHog fix ${projectName} #${issue.issueId}`,
@@ -515,7 +519,7 @@ function createPosthogWiring({
           issueId: issue.issueId,
           projectId,
           host: config.posthog.host,
-          resultPath,
+          resultPath: resultFile.path,
           repoPath: workspace.cwd,
           branch: workspace.branch,
           baseBranch: workspace.base,
@@ -524,7 +528,7 @@ function createPosthogWiring({
         permissions: FIX_DENY,
       });
       await waitForExit(sess, signal);
-      const result = readFixResult(resultPath);
+      const result = readFixResult(resultFile.path);
       // A timed-out job is already an ERROR to the poller, and its half-written FIXED must not open a
       // pull request nothing recorded. The worktree still goes in the finally below.
       if (signal?.aborted) {
@@ -551,7 +555,6 @@ function createPosthogWiring({
         mode: core.JOB_MODES.fix,
       };
     } catch (e) {
-      try { fs.rmSync(resultPath, { force: true }); } catch { /* best-effort */ }
       return {
         verdict: 'ERROR',
         summary: String(e.message || e),
@@ -561,6 +564,7 @@ function createPosthogWiring({
         mode: core.JOB_MODES.fix,
       };
     } finally {
+      if (resultFile) await resultFile.cleanup();
       await Promise.resolve(gitWorkspace.discard({ projectPath: repoPath, workspace }))
         .catch((e) => console.warn(`[posthog-poller] fix worktree discard failed: ${e.message}`));
     }
@@ -575,34 +579,36 @@ function createPosthogWiring({
       if (fixed) return fixed;
     }
     const issueId = safeIssueId(issue.issueId);
-    const resultPath = resultPathFor('', projectId, issueId);
-    try { fs.rmSync(resultPath, { force: true }); } catch { /* fresh file */ }
     try { fs.mkdirSync(REPORT_DIR, { recursive: true }); } catch { /* exists */ }
     void sweepReports();
-    const { cwd, repoPath } = resolveInvestigationWorkspace(projectId, issueId);
-    const prompt = buildInvestigationPrompt({
-      issueId: issue.issueId,
-      projectId,
-      host: config.posthog.host,
-      resultPath,
-      repoPath,
-    });
-    const id = `posthog:${projectId}#${issue.issueId}`;
-    const sess = makeInvestigationSession({
-      id,
-      name: `PostHog ${projectName} #${issue.issueId}`,
-      path: cwd,
-      initialPrompt: prompt,
-      spawnEnv: { POSTHOG_API_KEY: config.posthog.apiKey, POSTHOG_HOST: config.posthog.host },
-    });
-
+    // Same rule as the fix path: nothing between the mkdtemp and the guarded region, so the workspace
+    // resolution, the prompt builder and the Session constructor cannot strand the directory either.
+    let resultFile = null;
     try {
+      resultFile = await createResultFileFor('', projectId, issueId);
+      const { cwd, repoPath } = resolveInvestigationWorkspace(projectId, issueId);
+      const prompt = buildInvestigationPrompt({
+        issueId: issue.issueId,
+        projectId,
+        host: config.posthog.host,
+        resultPath: resultFile.path,
+        repoPath,
+      });
+      const id = `posthog:${projectId}#${issue.issueId}`;
+      const sess = makeInvestigationSession({
+        id,
+        name: `PostHog ${projectName} #${issue.issueId}`,
+        path: cwd,
+        initialPrompt: prompt,
+        spawnEnv: { POSTHOG_API_KEY: config.posthog.apiKey, POSTHOG_HOST: config.posthog.host },
+      });
       await waitForExit(sess, signal);
-      const result = readInvestigationResult(resultPath);
+      const result = readInvestigationResult(resultFile.path);
       return { ...result, url, mode: core.JOB_MODES.investigate };
     } catch (e) {
-      try { fs.rmSync(resultPath, { force: true }); } catch { /* best-effort */ }
       return { verdict: 'ERROR', summary: String(e.message || e), mode: core.JOB_MODES.investigate };
+    } finally {
+      if (resultFile) await resultFile.cleanup();
     }
   }
 

@@ -7,12 +7,18 @@
  */
 
 const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 
 const { awaitBounded } = require('./core/shutdown-core');
 
+// The fixed name inside a job's private result directory: the directory is already unique, so the file
+// inside it carries no identity and never has to be told apart from anything.
+const JOB_RESULT_FILENAME = 'result.json';
+
 // How long a timeout-abort waits for the killed PTY tree to actually die before giving up on it. Same
-// order as the lifecycle's own reap bound: long enough for taskkill, short enough that a child which
-// resists kill cannot pin a lane's concurrency slot.
+// order as the lifecycle's own reap bound: long enough for a taskkill or a signalled group to settle,
+// short enough that a child which resists kill cannot pin a lane's concurrency slot.
 const ABORT_REAP_CAP_MS = 3000;
 
 function firstLine(text) {
@@ -36,11 +42,13 @@ async function awaitSessionExit(sess, { signal = null, spawnGate = null, reapCap
       if (signal) {
         /*
          * A timeout-abort must not resolve before the PTY tree it just killed is REAPED. The caller's
-         * finally block discards the job's worktree, and on Windows a surviving claude/cmd/conhost
-         * holding a handle in that directory makes the discard fail, leaking the checkout and the
-         * branch. destroy() starts the taskkill and parks the promise on `_killReap` (sessions.js), so
-         * that is what is awaited here - bounded, because a child that resists kill must cost a delay,
-         * never the lane's concurrency slot.
+         * finally block discards the job's worktree, and a survivor still inside it is a problem on
+         * either platform: on Windows a claude/cmd/conhost holding a handle makes the discard fail
+         * outright, leaking the checkout and the branch, while on POSIX it can still be writing into a
+         * tree being removed under it. destroy() starts the kill (taskkill /T /F on Windows, SIGKILL to
+         * the process group plus a liveness poll on POSIX) and parks either one on `_killReap`
+         * (sessions.js), so that is what is awaited here - bounded, because a child that resists kill
+         * must cost a delay, never the lane's concurrency slot.
          */
         onAbort = () => {
           try { sess.destroy(); } catch { /* already gone */ }
@@ -92,8 +100,9 @@ async function raceWithAbort({
 
 /**
  * Wait for an aborted job's start promise to settle before cleaning up under it. awaitSessionExit is
- * what makes that mean "the killed PTY tree has been reaped", which on Windows is what keeps a
- * surviving claude/cmd/conhost from holding a handle in the worktree the caller is about to discard.
+ * what makes that mean "the killed PTY tree has been reaped", which is what keeps a survivor out of the
+ * worktree the caller is about to discard: a held handle fails the discard outright on Windows, and a
+ * process still writing into a tree being removed is no better on POSIX.
  *
  * Bounded on REAL timers, deliberately not a lane's injected timeout seam: that seam is a JOB deadline
  * a test drives by hand, so routing this through it would leave the drain waiting for a callback
@@ -102,6 +111,29 @@ async function raceWithAbort({
 function drainPending(pending, { capMs = ABORT_REAP_CAP_MS + 500 } = {}) {
   if (!pending) return Promise.resolve();
   return awaitBounded([pending], { capMs }).then(() => {});
+}
+
+/*
+ * A private directory for one dispatched job's result file. The agent is TOLD this path, so a
+ * predictable name directly under the system temp dir is a symlink-plant target wherever that dir is
+ * shared: on a multi-user POSIX host another account can pre-create the path and redirect the write.
+ * mkdtemp mints a fresh 0700 directory nobody else can have claimed, and the informative name that used
+ * to be the filename rides its prefix instead.
+ *
+ * cleanup() must run on EVERY exit path of the job, and it is the ONLY way to remove what this minted:
+ * the closure is what carries ownership of the directory. A helper taking the path back and deciding
+ * from its shape whether the parent is ours would recursively delete any caller-supplied directory
+ * whose file happened to be named result.json, which is a trap nobody reading the call site would see.
+ */
+async function createJobResultFile(prefix) {
+  const safePrefix = String(prefix).replace(/[^\w.-]+/g, '-');
+  const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), `${safePrefix}-`));
+  return {
+    path: path.join(dir, JOB_RESULT_FILENAME),
+    async cleanup() {
+      try { await fs.promises.rm(dir, { recursive: true, force: true }); } catch { /* best-effort */ }
+    },
+  };
 }
 
 /**
@@ -152,5 +184,6 @@ function registerEphemeralSession({ map, id, sess, closeSessionDataClients, logP
 }
 
 module.exports = {
-  awaitSessionExit, drainPending, firstLine, raceWithAbort, readResultFile, registerEphemeralSession,
+  awaitSessionExit, createJobResultFile, drainPending, firstLine, raceWithAbort, readResultFile,
+  registerEphemeralSession, JOB_RESULT_FILENAME,
 };

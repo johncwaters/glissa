@@ -35,7 +35,7 @@ On an older npm, run the same install through npm 12 without upgrading:
 npx npm@12 install -g github:johncwaters/glissa --allow-git=root
 ```
 
-The npm 12 floor is hard, not advisory: npm 11 global installs from git specs are broken outright ([npm/cli#9406](https://github.com/npm/cli/issues/9406), the package lands as a link into npm's cache temp clone, which npm then deletes). npm 12 also skips the packages' install scripts by default and warns that it did; that is fine here, the dashboard frontend is prebuilt during packing and node-pty loads its shipped prebuilds.
+The npm 12 floor is hard, not advisory: npm 11 global installs from git specs are broken outright ([npm/cli#9406](https://github.com/npm/cli/issues/9406), the package lands as a link into npm's cache temp clone, which npm then deletes). npm 12 also skips the packages' install scripts by default and warns that it did. That is fine for the dashboard frontend because `prepare` builds `dist/` during packing, and node-pty has shipped prebuilds for Windows and macOS. On Linux, node-pty compiles through node-gyp at install time, so an install path that skips scripts breaks the native module until you run `npm rebuild node-pty`.
 
 Or clone and run it in place:
 
@@ -189,6 +189,7 @@ This is a minimal starting example. The full key list (`integrationBranch`, `aut
 - **Node.js** >= 18
 - **Windows 11 or Linux**
 - **Claude Code CLI** installed and available on PATH
+- **Linux build tools for node-pty:** `sudo apt install build-essential python3`
 
 ## Development
 

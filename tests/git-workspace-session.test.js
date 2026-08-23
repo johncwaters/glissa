@@ -747,6 +747,130 @@ test('populate re-shares stripped junctions into a surviving worktree (adopt-aft
   }
 });
 
+// --- POSIX mirror of the two share tests above: symlinks where Windows uses junctions ---------------
+//
+// populateWorktree branches on process.platform, so the fsp.symlink half never runs on the development
+// host and only the ubuntu CI leg exercises these. Same three properties the junction tests pin: the
+// link is created, teardown strips it instead of following it into the operator's real directory, and
+// git never stages it.
+
+// Seed a repo whose local context (node_modules, .omc, .env) is gitignored and present, which is what
+// makes it shareable at all - populateShare refuses an entry git does not ignore. The ignore text is a
+// parameter because its SHAPE is what decides whether a symlinked share is safe: git matches a
+// trailing-slash pattern against directories only, and a symlink is not one.
+function initRepoWithLocalContext(ignoreText = 'node_modules\n.omc\n.env\n') {
+  const repo = initRepoOnDevelop();
+  fs.writeFileSync(path.join(repo, '.gitignore'), ignoreText, 'utf8');
+  git(['add', '.gitignore'], repo);
+  git(['commit', '-m', 'ignore local context'], repo);
+  fs.mkdirSync(path.join(repo, 'node_modules'), { recursive: true });
+  fs.writeFileSync(path.join(repo, 'node_modules', 'dep.txt'), 'real dep\n', 'utf8');
+  fs.mkdirSync(path.join(repo, '.omc'), { recursive: true });
+  fs.writeFileSync(path.join(repo, '.omc', 'memory.json'), '{"k":1}\n', 'utf8');
+  fs.writeFileSync(path.join(repo, '.env'), 'SECRET=1\n', 'utf8');
+  fs.writeFileSync(path.join(repo, 'tracked.txt'), 'tracked\n', 'utf8');
+  return repo;
+}
+
+test('create (worktreeBase + shareList, POSIX): dirs are SYMLINKED in, files copied, and teardown never follows the link', { skip: !GIT || WIN }, async () => {
+  const repo = initRepoWithLocalContext();
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-wtroot-'));
+  try {
+    const gw = createGitWorkspace();
+    const ws = await gw.create({
+      projectPath: repo, teamId: 'session', label: 'posixctx', baseBranch: 'develop',
+      worktreeBase: base, shareList: ['node_modules', '.omc', '.env', 'tracked.txt', '.absent'],
+    });
+    assert.equal(ws.isGit, true);
+    assert.ok(ws.cwd.startsWith(base), 'worktree lives under the configured base');
+
+    const linked = path.join(ws.cwd, 'node_modules');
+    assert.equal(fs.lstatSync(linked).isSymbolicLink(), true, 'a shared DIR is a symlink, not a copy');
+    assert.equal(fs.realpathSync(linked), fs.realpathSync(path.join(repo, 'node_modules')), 'and it points at the real one');
+    assert.ok(fs.existsSync(path.join(linked, 'dep.txt')), 'the link resolves to the real content');
+    assert.equal(fs.lstatSync(path.join(ws.cwd, '.omc')).isSymbolicLink(), true, '.omc symlinked in');
+    assert.equal(fs.lstatSync(path.join(ws.cwd, '.env')).isSymbolicLink(), false, 'a shared FILE is copied, never linked');
+    assert.equal(fs.readFileSync(path.join(ws.cwd, '.env'), 'utf8'), 'SECRET=1\n', '.env copied in');
+    assert.ok(!fs.existsSync(path.join(ws.cwd, 'tracked.txt')), 'a NON-ignored entry is refused (no merge leak)');
+
+    await gw.discard({ projectPath: repo, workspace: ws });
+
+    assert.ok(!fs.existsSync(ws.cwd), 'worktree removed');
+    assert.ok(fs.existsSync(path.join(repo, 'node_modules', 'dep.txt')), 'the REAL node_modules survived teardown');
+    assert.ok(fs.existsSync(path.join(repo, '.omc', 'memory.json')), 'the REAL .omc survived teardown');
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+// The leak the whole check-ignore gate exists to prevent, on the platform where a share is a symlink:
+// a staged symlink becomes a committed blob pointing at an absolute path outside the repo, and mergeBack
+// carries it onto the integration branch.
+test('mergeBack (POSIX): the shared symlink is never staged by `git add -A`, and the real dir survives the merge', { skip: !GIT || WIN }, async () => {
+  const repo = initRepoWithLocalContext();
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-wtroot-'));
+  try {
+    const gw = createGitWorkspace();
+    const ws = await gw.create({
+      projectPath: repo, teamId: 'session', label: 'posixstage', baseBranch: 'develop',
+      worktreeBase: base, shareList: ['node_modules', '.omc'],
+    });
+    assert.equal(fs.lstatSync(path.join(ws.cwd, 'node_modules')).isSymbolicLink(), true, 'symlink in place');
+
+    fs.writeFileSync(path.join(ws.cwd, 'feature.js'), 'x\n', 'utf8');
+    git(['add', '-A'], ws.cwd);
+    assert.equal(git(['ls-files', 'node_modules', '.omc'], ws.cwd).trim(), '', '`git add -A` staged neither symlink');
+    git(['commit', '-m', 'feat'], ws.cwd);
+
+    const r = await gw.mergeBack({ projectPath: repo, workspace: ws, targetBranch: 'develop' });
+    assert.equal(r.merged, true);
+    assert.ok(fs.existsSync(path.join(repo, 'feature.js')), 'the feature landed on develop');
+    assert.equal(git(['ls-files', 'node_modules', '.omc'], repo).trim(), '', 'nothing symlinked was ever committed');
+    assert.ok(!fs.existsSync(ws.cwd), 'worktree removed');
+    assert.ok(fs.existsSync(path.join(repo, 'node_modules', 'dep.txt')), 'real node_modules survived the merge teardown');
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+// The Linux-only hole the two tests above would otherwise miss: `node_modules/` and `.omc/` (the shape
+// most Node repos ship, and the one Glissa's own .gitignore uses for .omc) clear the check-ignore probe
+// in the PROJECT, where those are real directories, then fail to match the symlink in the worktree. The
+// share is dropped rather than left one `git add -A` away from the integration branch.
+test('create (shareList, POSIX): a trailing-slash ignore pattern cannot cover a symlink, so the share is refused', { skip: !GIT || WIN }, async () => {
+  const repo = initRepoWithLocalContext('node_modules/\n.omc/\n.env\n');
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-wtroot-'));
+  const warnings = [];
+  const originalWarn = console.warn;
+  console.warn = (...args) => warnings.push(args.join(' '));
+  try {
+    const gw = createGitWorkspace();
+    const ws = await gw.create({
+      projectPath: repo, teamId: 'session', label: 'posixslash', baseBranch: 'develop',
+      worktreeBase: base, shareList: ['node_modules', '.omc', '.env'],
+    });
+    assert.equal(ws.isGit, true);
+    assert.ok(!fs.existsSync(path.join(ws.cwd, 'node_modules')), 'the unignorable link is removed, not left to be committed');
+    assert.ok(!fs.existsSync(path.join(ws.cwd, '.omc')), 'same for .omc');
+    assert.equal(fs.readFileSync(path.join(ws.cwd, '.env'), 'utf8'), 'SECRET=1\n', 'a COPIED file is unaffected: the pattern matches it either way');
+    assert.equal(warnings.filter((w) => w.includes('not sharing')).length, 2, 'each refusal is named so the operator can fix their .gitignore');
+
+    fs.writeFileSync(path.join(ws.cwd, 'feature.js'), 'x\n', 'utf8');
+    git(['add', '-A'], ws.cwd);
+    assert.equal(git(['ls-files', 'node_modules', '.omc'], ws.cwd).trim(), '', 'nothing outside the repo can be staged');
+
+    await gw.discard({ projectPath: repo, workspace: ws });
+    assert.ok(fs.existsSync(path.join(repo, 'node_modules', 'dep.txt')), 'the real node_modules is untouched by the refusal');
+    assert.ok(fs.existsSync(path.join(repo, '.omc', 'memory.json')), 'and so is the real .omc');
+  } finally {
+    console.warn = originalWarn;
+    fs.rmSync(repo, { recursive: true, force: true });
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
 // --- Restart safety: listSessionWorktrees flags work so boot reconcile PRESERVES it (no data loss) ---
 
 test('listSessionWorktrees flags uncommitted work; removeWorktreeByPath removes a specific worktree', { skip: !GIT }, async () => {

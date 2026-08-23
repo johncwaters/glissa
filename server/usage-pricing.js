@@ -117,7 +117,7 @@ function trimAnthropicModels(raw) {
 function trimModel(model) {
   const trimmed = {};
   for (const field of SNAPSHOT_FIELDS) {
-    if (!Object.prototype.hasOwnProperty.call(model, field)) continue;
+    if (!Object.hasOwn(model, field)) continue;
     trimmed[field] = model[field];
   }
   return trimmed;

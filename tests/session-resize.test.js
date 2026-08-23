@@ -29,6 +29,16 @@ function fakePty(resizes) {
   };
 }
 
+// Bounded wait on an observable fact, the shape tests/backend-auto-resume.test.js already uses.
+async function waitFor(predicate) {
+  const deadline = Date.now() + 1000;
+  while (Date.now() < deadline) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.ok(predicate(), 'condition became true');
+}
+
 async function startedSession(resizes) {
   const s = new Session({
     id: 'resize-test',
@@ -73,8 +83,9 @@ test('restart respawns the PTY at the last resized dimensions', async () => {
       spawnOpts.push({ cols: opts.cols, rows: opts.rows });
       return fakePty([]);
     },
-    // Restart funnels through start()'s prior-PTY kill, now an AWAITED async taskkill; the fake resolves
-    // immediately so the awaited reap does not spawn a real taskkill and the respawn lands on the next tick.
+    // Restart funnels through start()'s prior-PTY kill, an AWAITED reap: the fake resolves immediately so
+    // no real taskkill is spawned. The POSIX branch of that reap signals a process group instead, which
+    // the out-of-range pid above makes a no-op.
     killProc: (_args, _opts, cb) => cb(null, '', ''),
   });
   try {
@@ -84,12 +95,13 @@ test('restart respawns the PTY at the last resized dimensions', async () => {
 
     s.resize(120, 40);
 
-    // restart() only fires from DONE/FAILED. It calls the async start() fire-and-forget, and start()
-    // awaits the prior-PTY reap then provision before spawning, so yield twice for the respawn to land.
+    // restart() only fires from DONE/FAILED and calls the async start() fire-and-forget, so wait for the
+    // respawn to actually LAND rather than counting turns: how many turns start() takes before it spawns
+    // depends on the platform's reap shape, and a fixed count read the first spawn's opts on Linux. That
+    // the reap adds no delay of its own is pinned separately, in tests/session-killproc.test.js.
     s.state = STATES.DONE;
     s.restart();
-    await new Promise((r) => setImmediate(r));
-    await new Promise((r) => setImmediate(r));
+    await waitFor(() => spawnOpts.length === 2);
     assert.deepEqual(spawnOpts.at(-1), { cols: 120, rows: 40 },
       'restart should respawn at the last resized size, not 80x24');
   } finally {

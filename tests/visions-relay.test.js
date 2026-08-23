@@ -19,7 +19,7 @@ const TEST_TIMEOUT_MS = 6000;
 
 function withTimeout(promise, ms, label) {
   let timer = null;
-  const timeout = new Promise((resolve, reject) => {
+  const timeout = new Promise((_resolve, reject) => {
     timer = setTimeout(() => reject(new Error(label)), ms);
   });
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));

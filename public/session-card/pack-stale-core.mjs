@@ -30,7 +30,7 @@ export function hasStalePack(deliveredPacks, latestVersionsByName) {
 
 /** "N read"/"N reads" for a pack snapshot entry; the one owner of that coercion and pluralization. */
 export function readCountText(pack) {
-  const reads = Number(pack && pack.reads) || 0;
+  const reads = Number(pack?.reads) || 0;
   return `${reads} ${reads === 1 ? 'read' : 'reads'}`;
 }
 

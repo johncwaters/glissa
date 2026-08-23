@@ -41,7 +41,9 @@ let ptyWrites = [];
 // the route can observe. No real `claude` process ever launches in this file.
 function attachFakePty() {
   ptyWrites = [];
-  session.ptyProcess = { write: (data) => ptyWrites.push(data), pid: 4242 };
+  // The pid is deliberately past every platform's pid_max: shutdown() destroys this session, and off
+  // Windows that kill signals the pid's process GROUP, which must never name a real one on the host.
+  session.ptyProcess = { write: (data) => ptyWrites.push(data), pid: 2147483646 };
   session._ptyAlive = true;
 }
 

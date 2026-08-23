@@ -2097,8 +2097,9 @@ function createBackend(httpServer, options = {}) {
     if (updateRecheckInterval) clearInterval(updateRecheckInterval);
     // INVARIANT: destroy NotificationManager BEFORE sessions - clears all timers globally
     notificationManager.destroy();
-    // Collect each session's in-flight PTY reap (set by kill() on win32, see sessions.js) so the
-    // lifecycle can await them before exit/respawn; a DORMANT session has no PTY and no reap.
+    // Collect each session's in-flight PTY reap (set by kill() on every platform, see sessions.js: the
+    // taskkill on win32, the bounded process-gone poll after a group SIGKILL off it) so the lifecycle
+    // can await them before exit/respawn; a DORMANT session has no PTY and no reap.
     const pendingReaps = [];
     for (const [, sess] of sessions) {
       sess.destroy();

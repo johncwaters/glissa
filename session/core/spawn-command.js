@@ -43,18 +43,38 @@ function dedupePathMatches(matches, platform = process.platform) {
 // .exe directly (node-pty -> CreateProcess), falling back to `cmd.exe /c claude` only
 // for .cmd/.bat/.ps1 shim installs or when resolution fails. Resolving here also
 // surfaces a Bun shim shadowing claude.exe in the boot log instead of at runtime.
-function resolveClaudeCommand() {
+function resolveCommandMatches(command, exec, platform) {
+  const out = exec(command, {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
+    timeout: 2000,
+  });
+  return dedupePathMatches(out.split(/\r?\n/).filter((s) => s.trim()), platform);
+}
+
+function resolvePosixClaudeMatches(exec) {
   let matches = [];
   try {
-    const cmd = process.platform === "win32" ? "where claude" : "which -a claude";
-    const out = execSync(cmd, {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-      timeout: 2000,
-    });
-    matches = dedupePathMatches(out.split(/\r?\n/).filter((s) => s.trim()));
+    matches = resolveCommandMatches("which -a claude", exec, "linux");
   } catch {
-    // fall through to "could not resolve" warning below
+    matches = [];
+  }
+  if (matches.length > 0) return matches;
+
+  try {
+    return resolveCommandMatches('sh -c "command -v claude"', exec, "linux");
+  } catch {
+    return [];
+  }
+}
+
+function resolveClaudeCommand({ platform = process.platform, exec = execSync } = {}) {
+  let matches = [];
+  try {
+    if (platform === "win32") matches = resolveCommandMatches("where claude", exec, platform);
+    if (platform !== "win32") matches = resolvePosixClaudeMatches(exec);
+  } catch {
+    matches = [];
   }
   if (matches.length === 0) {
     console.warn(`[glissa] could not resolve 'claude' on PATH`);
@@ -72,7 +92,7 @@ function resolveClaudeCommand() {
     );
   }
   const kind = classifyClaudeKind(resolvedPath);
-  if (process.platform === "win32") {
+  if (platform === "win32") {
     console.log(
       `[glissa] claude spawn strategy: ${kind === "exe" ? "direct exe" : "cmd.exe shim fallback"}`,
     );

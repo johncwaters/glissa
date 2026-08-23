@@ -230,9 +230,9 @@ test('fetch receives AbortSignal and timeout falls back to snapshot', async () =
     fetchEnabled: true,
     fsPromises: fakeFs(),
     timeoutMs: 1,
-    fetchFn: async (url, options) => {
+    fetchFn: async (_url, options) => {
       receivedSignal = options.signal;
-      await new Promise((resolve, reject) => {
+      await new Promise((_resolve, reject) => {
         options.signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
       });
     },

@@ -85,12 +85,16 @@ function harness({
         concurrent -= 1;
       }
     },
-    resultPathFor: (packName, index) => `/tmp/${packName}-${index}.json`,
+    // One dep carrying its own cleanup: the closure owns the directory, so nothing has to infer
+    // ownership from the path (see createJobResultFile in server/ephemeral-session.js).
+    createResultFile: (packName, index) => {
+      const resultPath = `/tmp/${packName}-${index}.json`;
+      return { path: resultPath, cleanup: () => removed.push(resultPath) };
+    },
     readResult: async () => {
       const verdict = verdicts.shift() || 'ERROR';
       return { verdict, summary: `summary for ${verdict}` };
     },
-    removeResult: (resultPath) => removed.push(resultPath),
     setIntervalFn: (fn, ms) => { intervals.push({ fn, ms }); return { unref() { this.unrefed = true; } }; },
     clearIntervalFn: (handle) => { handle.cleared = true; },
     setTimeoutFn: (fn, ms) => { timeouts.push({ fn, ms }); return { unref() {} }; },
@@ -122,6 +126,20 @@ test('a missing output spawns one distill session and reports the written file',
   assert.equal(report.status, 'distilled');
   assert.equal(report.verdict, 'DISTILLED');
   assert.equal(report.output, 'sources/glissa/derived/brief.md');
+});
+
+// The result directory is a real mkdtemp in production, so a distill that skips its cleanup leaks one
+// per entry per pass. It is minted INSIDE the guarded region and released in a finally, so the verdict
+// cannot decide whether it happens.
+test('every distill releases its result file, on a clean verdict and on ERROR alike', async () => {
+  const distilled = harness({ onSpawn: (files) => { files['/packs/sources/glissa/derived/brief.md'] = stampedFile(); } });
+  await distilled.distiller.runOnce();
+  assert.deepEqual(distilled.removed, ['/tmp/glissa-0.json'], 'released after a DISTILLED verdict');
+
+  const failed = harness({ verdicts: ['ERROR'] });
+  const [report] = await failed.distiller.runOnce();
+  assert.equal(report.verdict, 'ERROR');
+  assert.deepEqual(failed.removed, ['/tmp/glissa-0.json'], 'and after an ERROR one');
 });
 
 test('an edited source spawns a distill even though the output exists', async () => {

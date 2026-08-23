@@ -38,18 +38,29 @@ async function readPackageJson(cwd, readFile) {
 }
 
 /*
- * Killing a shell-spawned check on Windows. `child.kill()` signals cmd.exe alone, and the tree under
- * it - npm.cmd, node, the test runner - survives, holding open handles INSIDE the worktree: the
- * timeout then reports a verdict while the run it timed out on keeps writing there, and the next
- * auto-rebase fails on those handles. This is the same taskkill /T /F reap the PTY path uses
- * (sessions.js _taskkill). Every other platform keeps child.kill(), where killing the process group
- * is not this problem.
+ * Killing a shell-spawned check is a TREE problem on every platform. `child.kill()` reaches the shell
+ * alone (cmd.exe, or /bin/sh), and the tree under it - npm, node, the test runner - survives, holding
+ * open handles INSIDE the worktree: the timeout then reports a verdict while the run it timed out on
+ * keeps writing there, and the next auto-rebase fails on those handles. Windows uses the same
+ * taskkill /T /F reap the PTY path uses (sessions.js _taskkill); off it the child is spawned detached, so
+ * it leads its own process group and one signal to the NEGATIVE pid reaches everything under it. A child
+ * with no pid (a spawn that never got that far) is all there is to kill, so it keeps child.kill().
  */
-function reapTree(child, { platform, killTree }) {
-  if (platform !== 'win32' || !child.pid) {
+function reapTree(child, { platform, killTree, killGroup }) {
+  const killChildOnly = () => {
     try { child.kill(); } catch { /* already gone */ }
+  };
+  if (platform !== 'win32') {
+    // Same refusal the PTY kill seam applies (sessions.js signalablePid): NEGATED, pid 0 is our OWN
+    // process group and pid 1 is every process this user can signal, so neither may be negated here.
+    // Then the child itself is all there is to signal, and that can only ever hit the child.
+    const groupPid = Number.isInteger(child.pid) && child.pid > 1 ? child.pid : null;
+    if (groupPid === null) return killChildOnly();
+    try { killGroup(-groupPid, 'SIGKILL'); } catch { /* ESRCH: the group is already gone */ }
     return;
   }
+  // Windows negates nothing (taskkill takes the pid as given), so it needs no such guard.
+  if (!child.pid) return killChildOnly();
   killTree(['/PID', String(child.pid), '/T', '/F'], {}, () => {
     // Best-effort: an already-dead tree is the normal case, and the close handler is what settles the
     // verdict either way.
@@ -63,6 +74,7 @@ function createWorktreeCheck({
   now = Date.now,
   platform = process.platform,
   killTree = (args, opts, cb) => execFile('taskkill', args, opts, cb),
+  killGroup = (pid, signal) => process.kill(pid, signal),
 } = {}) {
   /**
    * @returns {Promise<{ command: string|null, source: string }>} what would run in this worktree,
@@ -83,7 +95,9 @@ function createWorktreeCheck({
     return new Promise((resolve_) => {
       let child;
       try {
-        child = spawnFn(command, { cwd, shell: true });
+        // detached off Windows so the shell leads its own process group and reapTree can signal the whole
+        // tree; on Windows it would open a console window, and taskkill /T needs nothing from us.
+        child = spawnFn(command, { cwd, shell: true, detached: platform !== 'win32' });
       } catch (error) {
         resolve_({ ...summarizeCheckResult({ error }), command, durationMs: now() - startedAt });
         return;
@@ -99,7 +113,7 @@ function createWorktreeCheck({
 
       const timer = setTimeout(() => {
         timedOut = true;
-        reapTree(child, { platform, killTree });
+        reapTree(child, { platform, killTree, killGroup });
       }, overrideTimeoutMs || timeoutMs);
       if (timer.unref) timer.unref();
 

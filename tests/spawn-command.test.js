@@ -7,7 +7,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const { buildSpawnCommand, classifyClaudeKind } = require('../session/sessions');
-const { dedupePathMatches } = require('../session/core/spawn-command');
+const { dedupePathMatches, resolveClaudeCommand } = require('../session/core/spawn-command');
 
 const SETTINGS = ['--settings', 'C:\\tmp\\glissa\\settings.json'];
 const DANGER = ['--dangerously-skip-permissions'];
@@ -148,6 +148,37 @@ test('dedupePathMatches is case-insensitive on win32 only, and preserves the cas
 test('dedupePathMatches leaves an empty or single-entry list alone', () => {
   assert.deepEqual(dedupePathMatches([], 'linux'), []);
   assert.deepEqual(dedupePathMatches(['/usr/bin/claude'], 'linux'), ['/usr/bin/claude']);
+});
+
+test('resolveClaudeCommand falls back to command -v when which is missing on posix', () => {
+  const commands = [];
+  const resolved = resolveClaudeCommand({
+    platform: 'linux',
+    exec(command) {
+      commands.push(command);
+      if (command === 'which -a claude') throw new Error('which missing');
+      assert.equal(command, 'sh -c "command -v claude"');
+      return '/home/u/.local/bin/claude\n';
+    },
+  });
+
+  assert.deepEqual(commands, ['which -a claude', 'sh -c "command -v claude"']);
+  assert.deepEqual(resolved, { path: '/home/u/.local/bin/claude', kind: 'shim' });
+});
+
+test('resolveClaudeCommand falls back to command -v when which returns no matches', () => {
+  const commands = [];
+  const resolved = resolveClaudeCommand({
+    platform: 'linux',
+    exec(command) {
+      commands.push(command);
+      if (command === 'which -a claude') return '\n';
+      return '/usr/local/bin/claude\n';
+    },
+  });
+
+  assert.deepEqual(commands, ['which -a claude', 'sh -c "command -v claude"']);
+  assert.deepEqual(resolved, { path: '/usr/local/bin/claude', kind: 'shim' });
 });
 
 test('classifyClaudeKind maps extensions correctly', () => {

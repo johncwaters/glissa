@@ -70,10 +70,23 @@ function resolveBurntToastModulePath() {
 /**
  * Create a toast channel adapter for NotificationManager.
  * Dumb delivery pipe - no debounce, no suppression logic.
+ *
+ * Windows-only by construction (BurntToast, with `msg` as the fallback). Elsewhere it degrades to a
+ * no-op after ONE warning: config.osToast is a plain boolean an operator can carry to a Linux box, and
+ * shelling powershell per notification there costs a spawn and a warning line for every delivery.
+ * `platform` is injectable so a test can exercise both halves on either host.
+ *
  * @returns {(sessionName: string, category: string, message: string, context: object) => void}
  */
-function createToastChannel() {
+function createToastChannel({ platform = process.platform } = {}) {
+  let warnedUnsupported = false;
   return function toastChannel(_sessionName, _category, message, _context) {
+    if (platform !== 'win32') {
+      if (warnedUnsupported) return;
+      warnedUnsupported = true;
+      console.warn(`[channel:toast] osToast is Windows-only; OS toasts are skipped on ${platform}`);
+      return;
+    }
     // Lazy BurntToast discovery on first call
     if (burntToastModulePath === null) {
       burntToastModulePath = resolveBurntToastModulePath();

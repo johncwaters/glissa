@@ -1,0 +1,2 @@
+# test/container/remote-mode.sh must use LF because test/container/Dockerfile copies the working tree, and CRLF from core.autocrlf=true breaks bash.
+*.sh text eol=lf

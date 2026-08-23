@@ -536,3 +536,19 @@ test('reverting to bytes that were applied before a save still reloads', async (
     }
   });
 });
+
+// config.json holds the telegram bot token and the PostHog API key. Seeded and saved with no mode, it
+// inherited the umask (0644 on a typical Linux box), so every account on a shared host could read those
+// credentials. The modes are advisory on Windows, hence the gate.
+test('a saved config.json, and its backup, are owner-only', { skip: process.platform === 'win32' }, async () => {
+  const { CONFIG_FILE_MODE } = require('../server/config-store');
+  await withStoreAsync(richConfig(), async (store, p) => {
+    fs.chmodSync(p, 0o644); // as an older Glissa (or an operator's editor) would have left it
+    assert.ok(store.save((cfg) => { cfg.port = 4999; }), 'the save succeeded');
+
+    assert.equal(fs.statSync(p).mode & 0o777, CONFIG_FILE_MODE, 'the save repairs a world-readable config');
+    assert.equal(fs.statSync(`${p}.bak`).mode & 0o777, CONFIG_FILE_MODE, 'the backup carries the same bytes, so the same mode');
+    assert.equal(fs.statSync(`${p}.boot.bak`).mode & 0o777, CONFIG_FILE_MODE, 'and so does the boot backup');
+    assert.equal(JSON.parse(fs.readFileSync(p, 'utf8')).port, 4999, 'and the content still landed');
+  });
+});

@@ -14,10 +14,11 @@
 'use strict';
 
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
 const { Session } = require('../session/sessions');
-const { awaitSessionExit, readResultFile, registerEphemeralSession } = require('./ephemeral-session');
+const {
+  awaitSessionExit, createJobResultFile, readResultFile, registerEphemeralSession,
+} = require('./ephemeral-session');
 const { normalizePackNames } = require('./core/pack-core');
 const { createPrPoller } = require('./pr-poller');
 const { createPrGh } = require('./pr-gh');
@@ -157,21 +158,23 @@ function createPrReviewWiring({
   // is ignored. Never rejects: any failure resolves to an ERROR verdict.
   async function prReviewSpawn({ cwd, pr, slug, conflicting, signal }) {
     const safeSlug = String(slug).replace(/[^\w.-]+/g, '-');
-    const resultPath = path.join(os.tmpdir(), `glissa-pr-${safeSlug}-${pr.number}-${process.pid}-${pr.headRefOid}.json`);
-    try { fs.rmSync(resultPath, { force: true }); } catch { /* fresh file */ }
-    const prompt = buildReviewPrompt({
-      slug, number: pr.number, baseRefName: pr.baseRefName, conflicting, resultPath,
-    });
-    const id = `pr-review:${slug}#${pr.number}`;
-    const sess = makeReviewSession({ id, name: `PR review ${slug}#${pr.number}`, path: cwd, initialPrompt: prompt });
-
+    // Everything after the result directory exists runs INSIDE the try, so a throw from the prompt
+    // builder or the Session constructor cannot strand it, and the "never rejects" contract above holds
+    // for those two as well.
+    let resultFile = null;
     try {
+      resultFile = await createJobResultFile(`glissa-pr-${safeSlug}-${pr.number}-${pr.headRefOid}`);
+      const prompt = buildReviewPrompt({
+        slug, number: pr.number, baseRefName: pr.baseRefName, conflicting, resultPath: resultFile.path,
+      });
+      const id = `pr-review:${slug}#${pr.number}`;
+      const sess = makeReviewSession({ id, name: `PR review ${slug}#${pr.number}`, path: cwd, initialPrompt: prompt });
       await awaitSessionExit(sess, { signal, spawnGate });
-      return readReviewResult(resultPath);
+      return readReviewResult(resultFile.path);
     } catch (e) {
       return { verdict: 'ERROR', summary: String(e.message || e) };
     } finally {
-      try { fs.rmSync(resultPath, { force: true }); } catch { /* best-effort */ }
+      if (resultFile) await resultFile.cleanup();
     }
   }
 

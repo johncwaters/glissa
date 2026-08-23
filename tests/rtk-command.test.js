@@ -69,6 +69,41 @@ test('resolveRtkPath falls back to the first PATH match', () => {
   assert.equal(resolved, path.resolve('C:\\tools\\rtk.exe'));
 });
 
+test('resolveRtkPath falls back to command -v when which is missing on posix', () => {
+  const commands = [];
+  const resolved = resolveRtkPath({
+    homeDir: '/home/jw',
+    platform: 'linux',
+    fsApi: fsWithFiles([]),
+    exec(command) {
+      commands.push(command);
+      if (command === 'which -a rtk') throw new Error('which missing');
+      assert.equal(command, 'sh -c "command -v rtk"');
+      return '/home/jw/.local/bin/rtk\n';
+    },
+  });
+
+  assert.deepEqual(commands, ['which -a rtk', 'sh -c "command -v rtk"']);
+  assert.equal(resolved, path.resolve('/home/jw/.local/bin/rtk'));
+});
+
+test('resolveRtkPath falls back to command -v when which returns no matches', () => {
+  const commands = [];
+  const resolved = resolveRtkPath({
+    homeDir: '/home/jw',
+    platform: 'linux',
+    fsApi: fsWithFiles([]),
+    exec(command) {
+      commands.push(command);
+      if (command === 'which -a rtk') return '\n';
+      return '/usr/local/bin/rtk\n';
+    },
+  });
+
+  assert.deepEqual(commands, ['which -a rtk', 'sh -c "command -v rtk"']);
+  assert.equal(resolved, path.resolve('/usr/local/bin/rtk'));
+});
+
 test('resolveRtkPath returns null when neither managed bin nor PATH resolves', () => {
   const resolved = resolveRtkPath({
     homeDir: 'C:\\Users\\johnw',

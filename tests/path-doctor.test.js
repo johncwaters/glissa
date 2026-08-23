@@ -53,6 +53,21 @@ test('npmGlobalBinDir: posix uses <prefix>/bin', () => {
   assert.equal(dir, path.join('/usr/local', 'bin'));
 });
 
+test('npmGlobalBinDir: posix uses a resolved prefix when npm_config_prefix is absent', () => {
+  const dir = npmGlobalBinDir({ env: {}, platform: 'linux', homedir: '/home/u', resolvedPrefix: '/opt/node' });
+  assert.equal(dir, path.join('/opt/node', 'bin'));
+});
+
+test('npmGlobalBinDir: posix env prefix wins over resolved prefix', () => {
+  const dir = npmGlobalBinDir({
+    env: { npm_config_prefix: '/usr/local' },
+    platform: 'linux',
+    homedir: '/home/u',
+    resolvedPrefix: '/opt/node',
+  });
+  assert.equal(dir, path.join('/usr/local', 'bin'));
+});
+
 test('pnpmGlobalBinDir: PNPM_HOME wins', () => {
   assert.equal(
     pnpmGlobalBinDir({ env: { PNPM_HOME: 'C:\\pnpm' }, platform: 'win32', homedir: 'C:\\Users\\me' }),

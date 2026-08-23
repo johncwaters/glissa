@@ -24,7 +24,7 @@ function uriOfParams(params) {
 }
 
 function applyDidOpen(store, params) {
-  const textDocument = params && params.textDocument;
+  const textDocument = params?.textDocument;
   if (!textDocument || !textDocument.uri) return { applied: false, reason: 'invalid-params' };
 
   store.docsByUri[textDocument.uri] = {
@@ -112,8 +112,8 @@ function formatPosition(position) {
 }
 
 function applyDidChange(store, params) {
-  const textDocument = params && params.textDocument;
-  const uri = textDocument && textDocument.uri;
+  const textDocument = params?.textDocument;
+  const uri = textDocument?.uri;
   const doc = uri ? store.docsByUri[uri] : null;
   if (!doc) return { applied: false, reason: 'unknown-uri' };
 
@@ -215,8 +215,8 @@ function detectBlankLineBoundary({ previousText, nextText, changes }) {
 }
 
 function applyDidClose(store, params) {
-  const textDocument = params && params.textDocument;
-  const uri = textDocument && textDocument.uri;
+  const textDocument = params?.textDocument;
+  const uri = textDocument?.uri;
   if (!uri || !store.docsByUri[uri]) return { applied: false, reason: 'unknown-uri' };
   delete store.docsByUri[uri];
   return { applied: true };

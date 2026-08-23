@@ -162,6 +162,23 @@ const STRING_KEYS = [
   'worktreeRoot',
 ];
 
+// config.json carries the telegram bot token and the PostHog API key, and its .bak siblings carry the
+// same bytes, so on a multi-user POSIX host they take the 0700/0600 discipline the pairings store and
+// the hook settings file already use rather than whatever the umask happens to be. Advisory on Windows,
+// where the ACL is what matters and node ignores the mode.
+const CONFIG_DIR_MODE = 0o700;
+const CONFIG_FILE_MODE = 0o600;
+
+// A mode passed to writeFileSync only applies to a file it CREATES, so an existing config or backup
+// keeps whatever mode it had; the chmod is what makes the 0600 claim true either way.
+function restrictMode(target, mode) {
+  try {
+    fs.chmodSync(target, mode);
+  } catch {
+    // Windows: modes are advisory there and chmod on a directory is a no-op that can still throw.
+  }
+}
+
 /** The one spelling of the directory Glissa keeps runtime state in (config, pairings, recordings, built packs). */
 function glissaHomeDir() {
   return path.join(os.homedir(), '.glissa');
@@ -185,8 +202,11 @@ function resolveConfigPath() {
   if (fs.existsSync(homeConfig)) return homeConfig;
 
   // 4. None found - seed default at ~/.glissa/config.json
-  fs.mkdirSync(glissaHomeDir(), { recursive: true });
-  fs.writeFileSync(homeConfig, JSON.stringify(DEFAULT_CONFIG, null, 2), 'utf8');
+  const homeDir = glissaHomeDir();
+  fs.mkdirSync(homeDir, { recursive: true, mode: CONFIG_DIR_MODE });
+  restrictMode(homeDir, CONFIG_DIR_MODE);
+  fs.writeFileSync(homeConfig, JSON.stringify(DEFAULT_CONFIG, null, 2), { encoding: 'utf8', mode: CONFIG_FILE_MODE });
+  restrictMode(homeConfig, CONFIG_FILE_MODE);
   console.log(`Created default config at ${homeConfig}`);
   return homeConfig;
 }
@@ -249,7 +269,8 @@ function validateConfig(candidate) {
 
 function writeBackupContent(backupPath, content) {
   try {
-    fs.writeFileSync(backupPath, content, 'utf8');
+    fs.writeFileSync(backupPath, content, { encoding: 'utf8', mode: CONFIG_FILE_MODE });
+    restrictMode(backupPath, CONFIG_FILE_MODE);
   } catch (err) {
     console.warn(`[config] Failed to write backup ${backupPath}:`, err.code || err.message);
   }
@@ -263,7 +284,8 @@ function loadConfigFile(configPath, { exitOnError = true } = {}) {
   } catch (err) {
     const invalidBackupPath = `${configPath}.invalid.bak`;
     try {
-      fs.writeFileSync(invalidBackupPath, loadedContent, 'utf8');
+      fs.writeFileSync(invalidBackupPath, loadedContent, { encoding: 'utf8', mode: CONFIG_FILE_MODE });
+      restrictMode(invalidBackupPath, CONFIG_FILE_MODE);
     } catch (backupErr) {
       console.warn(`[config] Failed to save invalid config copy ${invalidBackupPath}:`, backupErr.code || backupErr.message);
     }
@@ -334,7 +356,7 @@ function createConfigStore({ settingsDefaults } = {}) {
   // Auto-assign stable IDs to any projects missing them
   if (Array.isArray(config.projects) && ensureProjectIds(config.projects)) {
     try {
-      writeJsonAtomicSync(configPath, config);
+      writeJsonAtomicSync(configPath, config, { mode: CONFIG_FILE_MODE });
       console.log('[config] Auto-assigned IDs to projects missing them');
     } catch (err) {
       console.warn('[config] Failed to persist auto-assigned project IDs:', err.message);
@@ -410,7 +432,9 @@ function createConfigStore({ settingsDefaults } = {}) {
       // Live state has moved relative to whatever was last applied, so that signature no longer
       // describes anything true. Leaving it would drop an operator's revert back to those bytes.
       _lastAppliedContent = null;
-      writeTextAtomicSync(configPath, nextContent);
+      // The tmp file is always freshly created, so the mode lands on it and survives the rename: a save
+      // also REPAIRS a config.json an older Glissa left world-readable.
+      writeTextAtomicSync(configPath, nextContent, { mode: CONFIG_FILE_MODE });
     } catch (err) {
       console.warn('[config] Failed to write config.json:', err.code || err.message);
       return null;
@@ -586,5 +610,5 @@ function createConfigStore({ settingsDefaults } = {}) {
 
 module.exports = {
   createConfigStore, resolveConfigPath, glissaHomeDir, generateProjectId, ensureProjectIds, validateConfig, loadConfigFile,
-  TIMEOUT_KEYS, BOOLEAN_KEYS, STRING_KEYS, DEFAULT_CONFIG,
+  TIMEOUT_KEYS, BOOLEAN_KEYS, STRING_KEYS, DEFAULT_CONFIG, CONFIG_DIR_MODE, CONFIG_FILE_MODE,
 };

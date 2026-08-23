@@ -31,14 +31,27 @@ function resolveRtkPath({
   const bundled = firstExistingFile(bundledCandidates, fsApi);
   if (bundled) return bundled;
 
-  try {
-    const command = platform === 'win32' ? 'where rtk' : 'which -a rtk';
+  const resolvePathMatches = (command) => {
     const out = exec(command, {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
       timeout: 2000,
     });
-    const matches = dedupePathMatches(out.split(/\r?\n/).filter((line) => line.trim()), platform);
+    return dedupePathMatches(out.split(/\r?\n/).filter((line) => line.trim()), platform);
+  };
+
+  try {
+    const command = platform === 'win32' ? 'where rtk' : 'which -a rtk';
+    const matches = resolvePathMatches(command);
+    if (matches.length === 0 && platform === 'win32') return null;
+    if (matches.length === 0) throw new Error('no PATH matches');
+    return path.resolve(matches[0]);
+  } catch {
+    if (platform === 'win32') return null;
+  }
+
+  try {
+    const matches = resolvePathMatches('sh -c "command -v rtk"');
     if (matches.length === 0) return null;
     return path.resolve(matches[0]);
   } catch {

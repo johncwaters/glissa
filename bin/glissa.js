@@ -114,6 +114,7 @@ function runDoctor() {
   const os = require('node:os');
   const path = require('node:path');
   const fs = require('node:fs');
+  const { execSync } = require('../server/child-process-safe');
   const pkg = require('../package.json');
   const { npmGlobalBinDir, pnpmGlobalBinDir, onPath, formatPathNotice } = require('./path-doctor');
 
@@ -134,7 +135,9 @@ function runDoctor() {
   line('package dir', path.resolve(__dirname, '..'));
 
   console.log('\nPATH registration');
-  const npmBin = npmGlobalBinDir({ env: process.env, platform, homedir });
+  // Resolved lazily, and only when the env alone cannot answer: `npm prefix -g` can stall ~2s cold.
+  const envNpmBin = npmGlobalBinDir({ env: process.env, platform, homedir });
+  const npmBin = envNpmBin || npmGlobalBinDir({ env: process.env, platform, homedir, resolvedPrefix: resolveNpmGlobalPrefix(execSync) });
   const npmOn = npmBin ? onPath(npmBin, { pathEnv, platform }) : false;
   line('npm global bin', npmBin || '(unknown)');
   line('on PATH', npmBin ? (npmOn ? 'yes' : 'NO') : 'unknown');
@@ -152,7 +155,7 @@ function runDoctor() {
     const reason = (err?.message ? err.message : String(err)).split('\n')[0];
     line('node-pty', 'FAILED to load');
     line('reason', reason);
-    line('hint', 'reinstall, or force a rebuild: npm install -g github:johncwaters/glissa --build-from-source');
+    line('hint', nodePtyRebuildHint(platform));
   }
 
   console.log('\nConfig');
@@ -161,4 +164,25 @@ function runDoctor() {
   if (npmBin && !npmOn) {
     console.log(`\n${formatPathNotice({ installedBinDir: npmBin, onPathFlag: false, platform })}`);
   }
+}
+
+function resolveNpmGlobalPrefix(exec) {
+  try {
+    const out = exec('npm prefix -g', {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: 2000,
+    });
+    const prefix = String(out || '').trim();
+    if (prefix) return prefix;
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function nodePtyRebuildHint(platform) {
+  if (platform === 'linux') return 'install build tools: sudo apt install build-essential python3; then rebuild: npm rebuild node-pty';
+  if (platform === 'win32') return 'install Visual Studio Build Tools, then rebuild: npm rebuild node-pty';
+  return 'install the native build tools for this platform, then rebuild: npm rebuild node-pty';
 }

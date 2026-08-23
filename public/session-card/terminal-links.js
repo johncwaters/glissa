@@ -23,7 +23,7 @@ function openOnThisDevice(url) {
 
 export function osc8LinkHandler() {
   return {
-    activate(event, uri) {
+    activate(_event, uri) {
       openOnThisDevice(uri);
     },
     allowNonHttpProtocols: false,
@@ -71,7 +71,7 @@ export function registerUrlLinkProvider(term) {
       const links = findUrls(text).map(({ start, end, url }) => ({
         range: { start: cellAt[start], end: cellAt[end - 1] },
         text: url,
-        activate(event, matched) {
+        activate(_event, matched) {
           openOnThisDevice(matched);
         },
       }));

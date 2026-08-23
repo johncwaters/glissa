@@ -14,7 +14,18 @@ function fakePty(pid = 2147483646) {
   return { pid, onData() {}, onExit() {}, write() {}, resize() {}, kill() {} };
 }
 
-const drain = () => new Promise((r) => setImmediate(r));
+// Bounded wait on an observable fact (the respawn landing), the shape backend-auto-resume.test.js uses.
+// Counting turns instead read the FIRST spawn's args on Linux, where start()'s prior-PTY reap takes a
+// different number of turns than the win32 taskkill it was tuned to; the resume assertion below then
+// passed for the wrong reason, since the stale first spawn also carried --resume.
+async function waitFor(predicate) {
+  const deadline = Date.now() + 1000;
+  while (Date.now() < deadline) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.ok(predicate(), 'condition became true');
+}
 
 test('start() appends extraClaudeArgs then the initialPrompt as the final positional arg', async () => {
   const calls = [];
@@ -83,8 +94,7 @@ test('normal restart keeps the captured resume id in spawn args', async () => {
     s.state = STATES.DONE;
 
     assert.equal(s.restart(), true, 'restart accepted');
-    await drain();
-    await drain();
+    await waitFor(() => calls.length === 2);
 
     const args = calls.at(-1).args;
     const resumeIndex = args.indexOf('--resume');
@@ -113,8 +123,7 @@ test('fresh restart clears the resume id and spawns without --resume', async () 
     s.state = STATES.DONE;
 
     assert.equal(s.restart({ fresh: true }), true, 'fresh restart accepted');
-    await drain();
-    await drain();
+    await waitFor(() => calls.length === 2);
 
     assert.equal(s.resumeSessionId, null, 'live resume id cleared');
     assert.deepEqual(cleared, [{ id: 'fresh-restart' }]);

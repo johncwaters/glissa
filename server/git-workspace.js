@@ -221,6 +221,29 @@ function createGitWorkspace(opts = {}) {
     }
     if (!ignored.length) return;
     try { await populateWorktree(projectPath, wtDir, ignored); } catch { /* best-effort */ }
+    await refuseTrackableLinks(wtDir, ignored);
+  }
+
+  /*
+   * The probe above asks the PROJECT, where a shared dir is a real directory. In the worktree it is a
+   * LINK, and a trailing-slash pattern (`node_modules/`, `.omc/`) matches directories only: to git a
+   * symlink is a blob, so on POSIX the very entries the probe cleared come back stageable, and one
+   * `git add -A` commits a link pointing outside the repo into the integration branch. A Windows
+   * junction IS a real directory to git, which is why the leak guard held there and only there.
+   *
+   * The link is dropped rather than kept, matching what an entry the first probe refused already gets:
+   * the session runs without that piece, and nothing shared can reach a commit. The operator's fix is a
+   * slash-free ignore entry, which is what the warning says.
+   */
+  async function refuseTrackableLinks(wtDir, entries) {
+    for (const rel of entries) {
+      if ((await run(['check-ignore', '-q', '--', rel], wtDir)).ok) continue;
+      const target = path.join(wtDir, rel);
+      const stat = await fsp.lstat(target).catch(() => null);
+      if (!stat || !stat.isSymbolicLink()) continue;
+      console.warn(`[git-workspace] not sharing ${rel}: git does not ignore it as a link, so a commit in the worktree would carry it (use a slash-free .gitignore entry)`);
+      try { await fsp.rm(target, { force: true }); } catch { /* best-effort */ }
+    }
   }
 
   // Junction-safe teardown of a worktree (+ its branch): the node_modules junction is removed BEFORE

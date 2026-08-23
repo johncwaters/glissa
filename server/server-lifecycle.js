@@ -8,8 +8,8 @@
 // WHY this exists: a menu restart used to spawn the replacement DETACHED with no windowsHide (its own
 // console window, separate process group => invisible and unkillable by closing the visible window),
 // with no re-entry guard (two restart messages => two replacements => a config-reload respawn storm),
-// and it exited BEFORE the async taskkill reaped the PTY tree (orphaned cmd/claude/conhost). The guard
-// + windowsHide + awaited reap below close all three.
+// and it exited BEFORE the async kill reaped the PTY tree (orphaned cmd/claude/conhost on Windows, an
+// orphaned process group off it). The guard + windowsHide + awaited reap below close all three.
 
 const { decideRestartStrategy, SUPERVISED_RESTART_EXIT_CODE } = require('./core/restart-strategy');
 const {
@@ -17,8 +17,9 @@ const {
 } = require('./core/shutdown-core');
 
 // Bounded wait for the pending PTY reaps a shutdown started, so the process does not exit (or respawn)
-// before taskkill has reaped the cmd/claude/conhost tree. Capped so a child that resists kill cannot
-// hang the lifecycle. Returns a promise that always resolves.
+// before the tree is reaped: taskkill's cmd/claude/conhost on Windows, the killed process group off it.
+// Capped so a child that resists kill cannot hang the lifecycle; the POSIX reap's own budget is set
+// below that cap (sessions.js KILL_REAP_MAX_WAIT_MS). Returns a promise that always resolves.
 function awaitReaps(pendingReaps, options = {}) {
   return awaitBounded(pendingReaps, options).then(() => {});
 }

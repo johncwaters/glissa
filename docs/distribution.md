@@ -7,9 +7,10 @@ Glissa is not an npm package. Nothing is published to any registry (`package.jso
 Provisioning and updating are owned by the `claude-setup` repo (`github:johncwaters/claude-setup`). Its server profile:
 
 1. Clones `https://github.com/johncwaters/glissa.git` to `~/Projects/glissa`.
-2. Runs `npm ci` then `npm run build`.
-3. Installs a systemd user unit (`glissa.service`, `ExecStart` = `node server.js`, `Restart=on-failure`) and enables linger so it survives logout.
-4. Fronts the remote listener with `tailscale serve`.
+2. Ensures Linux has the node-pty build tools: `sudo apt install build-essential python3`.
+3. Runs `npm ci` then `npm run build`.
+4. Installs a systemd user unit (`glissa.service`, `ExecStart` = `node server.js`, `Restart=on-failure`) and enables linger so it survives logout.
+5. Fronts the remote listener with `tailscale serve`.
 
 To update a server, re-run the `claude-setup` apply script; it does `git pull --ff-only`, `npm ci`, `npm run build`, and restarts the service. By hand, the same sequence is:
 
@@ -27,7 +28,7 @@ For a machine that only needs the `glissa` command (npm 12 or newer required):
 npm install -g github:johncwaters/glissa --allow-git=root
 ```
 
-On an older npm, run it through npm 12 instead: `npx npm@12 install -g github:johncwaters/glissa --allow-git=root`. The floor is hard: npm 11 global installs from git specs land as a link into npm's cache temp clone, which npm then deletes (npm/cli#9406, fixed by pacote 22 which ships in npm 12). The `--allow-git=root` flag is npm 12's opt-in for git dependencies, scoped to the root package. npm 12 skips install scripts by default and warns about it; harmless here, since `prepare` builds `dist/` during packing and node-pty runs from its shipped prebuilds.
+On an older npm, run it through npm 12 instead: `npx npm@12 install -g github:johncwaters/glissa --allow-git=root`. The floor is hard: npm 11 global installs from git specs land as a link into npm's cache temp clone, which npm then deletes (npm/cli#9406, fixed by pacote 22 which ships in npm 12). The `--allow-git=root` flag is npm 12's opt-in for git dependencies, scoped to the root package. npm 12 skips install scripts by default and warns about it. That is harmless for `dist/`, since `prepare` builds it during packing, and node-pty has shipped prebuilds for Windows and macOS. On Linux, node-pty needs install scripts so node-gyp can compile it; if scripts were skipped, run `npm rebuild node-pty`.
 
 npm packs the repo before installing from a GitHub spec, so `package.json`'s `files` whitelist still bounds exactly what lands in the install.
 

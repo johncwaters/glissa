@@ -81,7 +81,7 @@ function classifyMessage(msg) {
   if (!msg || typeof msg !== 'object') return { kind: 'invalid', method: undefined, id: undefined };
 
   const hasMethod = typeof msg.method === 'string';
-  const hasId = Object.prototype.hasOwnProperty.call(msg, 'id');
+  const hasId = Object.hasOwn(msg, 'id');
   if (hasMethod && hasId) return { kind: 'request', method: msg.method, id: msg.id };
   if (hasMethod) return { kind: 'notification', method: msg.method, id: undefined };
   if (hasId) return { kind: 'response', method: undefined, id: msg.id };

@@ -43,8 +43,6 @@ const SCREENS = Object.freeze([
   { id: 'mill', label: 'Mill', glyph: '▦', nested: true }, // square with quadrants: assembled parts
   { id: 'visions', label: 'Visions', glyph: '◇', nested: true },
 ]);
-const MORE = 'more';
-
 let shellEl = null;
 const navButtonById = new Map();
 const screenElById = new Map();

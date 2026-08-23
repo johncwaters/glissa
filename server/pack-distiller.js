@@ -19,7 +19,8 @@ const os = require('node:os');
 const path = require('node:path');
 
 const {
-  awaitSessionExit, firstLine, raceWithAbort, readResultFile, registerEphemeralSession,
+  awaitSessionExit, createJobResultFile, firstLine, raceWithAbort, readResultFile,
+  registerEphemeralSession,
 } = require('./ephemeral-session');
 const { createSerialQueue } = require('./spawn-gate');
 const { buildDistillPrompt, buildStampLine, needsDistill } = require('./core/distill-core');
@@ -131,9 +132,12 @@ function createPackDistiller(deps = {}) {
       try { return await fs.promises.readFile(fullPath, 'utf8'); } catch { return null; }
     },
     spawnDistill = createDistillSpawn(),
-    resultPathFor = (packName, index) => path.join(os.tmpdir(), `glissa-distill-${packName}-${index}-${process.pid}.json`),
+    // Each distill gets a private result directory rather than a predictable name in shared temp (see
+    // createJobResultFile). ONE dep, returning { path, cleanup }, because the cleanup closure is what
+    // owns the directory: a separate remove-by-path dep would have to guess from the string whether the
+    // parent is ours to delete, and an injected path would then take its directory down with it.
+    createResultFile = (packName, index) => createJobResultFile(`glissa-distill-${packName}-${index}`),
     readResult = readDistillResult,
-    removeResult = (resultPath) => { try { fs.rmSync(resultPath, { force: true }); } catch { /* best-effort */ } },
     cwd = INSTALL_ROOT,
     intervalHours = DEFAULT_INTERVAL_HOURS,
     timeoutSeconds = DEFAULT_TIMEOUT_SECONDS,
@@ -193,26 +197,26 @@ function createPackDistiller(deps = {}) {
     if (!drift.stale) return base({ status: 'current' });
     if (dryRun) return base({ status: 'stale', reason: drift.reason });
 
-    const resultPath = resultPathFor(spec.name, index);
-    removeResult(resultPath);
-    const prompt = buildDistillPrompt({
-      outputPath,
-      sources: hashes,
-      instructions: entry.instructions,
-      resultPath,
-      stampLine: buildStampLine(hashes),
-    });
-
     let result;
+    // The prompt builder runs inside the try too, so a throw there cannot strand the directory.
+    let resultFile = null;
     try {
+      resultFile = await createResultFile(spec.name, index);
+      const prompt = buildDistillPrompt({
+        outputPath,
+        sources: hashes,
+        instructions: entry.instructions,
+        resultPath: resultFile.path,
+        stampLine: buildStampLine(hashes),
+      });
       result = await spawnWithTimeout({
         id: `pack-distill:${spec.name}#${index}`,
         name: `distill ${spec.name} ${entry.output}`,
         prompt,
         cwd,
-      }, resultPath);
+      }, resultFile.path);
     } finally {
-      removeResult(resultPath);
+      if (resultFile) await resultFile.cleanup();
     }
     if (result.verdict === 'ERROR') return base({ verdict: 'ERROR', reason: result.summary || 'distill failed' });
 

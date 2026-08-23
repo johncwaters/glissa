@@ -44,8 +44,8 @@ function onPath(dir, { pathEnv, platform } = {}) {
 // Where npm places global command shims. On Windows the global PREFIX directory
 // itself holds the .cmd/.ps1/.exe shims (there is no bin/ subdir); on POSIX it is
 // <prefix>/bin. Falls back to the official-installer default on Windows.
-function npmGlobalBinDir({ env = {}, platform, homedir } = {}) {
-  const prefix = env.npm_config_prefix || null;
+function npmGlobalBinDir({ env = {}, platform, homedir, resolvedPrefix } = {}) {
+  const prefix = env.npm_config_prefix || resolvedPrefix || null;
   if (isWin(platform)) {
     if (prefix) return prefix;
     if (homedir) return path.join(homedir, 'AppData', 'Roaming', 'npm');
