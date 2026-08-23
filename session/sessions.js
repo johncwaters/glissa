@@ -31,7 +31,6 @@ const { buildMergePrompt } = require("./core/merge-prompt");
 const { createOutputRing } = require("./core/output-ring");
 const { decideSignatureDemotion, decideDiffSelfHeal } = require("./core/merge-gate");
 const { decideAutoRebase, decideRerereCooldownClear, AUTO_REBASE_STATES } = require("./core/rebase-gate");
-const { decidePostRebaseCheck } = require("./core/check-gate");
 const {
   parseLeftRightCount,
   decideBranchSyncState,
@@ -248,16 +247,6 @@ class Session extends EventEmitter {
     // (config worktreeAutoRebase). Read at construction like every other spawn-time option, so a
     // settings change applies to the next construction of this session, not to the live one.
     autoRebase = true,
-    // The advisory post-rebase check (2026-08 review, section 4). `worktreeCheck` is the injected IO
-    // shell (server/worktree-check.js) and is absent for every session that has no worktree to check;
-    // `checkCommand` is the operator's config-file string, resolved by the shell when it is null.
-    worktreeCheck = null,
-    // The two command sources stay SEPARATE all the way down, so the resolved `source` says which one
-    // actually supplied it (collapsing them with `||` in the caller made every config-level command
-    // report itself as a per-project one).
-    checkCommand = null,
-    projectCheckCommand = null,
-    postRebaseCheck = true,
     // Master kill switch for the live cross-session review liveness: with it false the integration-ref
     // watcher is never started, so a branch move reaches this session only via the turn-end recheck.
     liveWorktreeReview = true,
@@ -419,13 +408,6 @@ class Session extends EventEmitter {
     this._gitWorkspace = gitWorkspace;
     this._integrationBranch = integrationBranch;
     this._autoRebase = autoRebase !== false;
-    this._worktreeCheck = worktreeCheck;
-    this._checkCommand = checkCommand;
-    this._projectCheckCommand = projectCheckCommand;
-    this._postRebaseCheck = postRebaseCheck !== false;
-    // The last advisory check verdict, or null until one has run. Rides toSnapshot so a reconnecting
-    // dashboard sees it without a frame of its own.
-    this.checkStatus = null;
     this._liveWorktreeReview = liveWorktreeReview !== false;
     this._autoRebasing = false;    // re-entry mutex: one auto-rebase per session at a time
     this._rebaseConflictKey = null; // head::target the last auto-rebase conflicted on (see _maybeAutoRebase)
@@ -1101,9 +1083,6 @@ class Session extends EventEmitter {
       pendingWakeup: this._pendingWakeup(),
       pendingPromptKind: this._pendingPromptKind,
       mergeStatus: this.mergeStatus,
-      // Advisory only: what the project's own check said about the worktree after the last unattended
-      // rebase. Never gates the merge (see session/core/check-gate.js).
-      checkStatus: this.checkStatus,
       worktreeNotice: this.worktreeNotice,
       effectiveBase: (this._effectiveBase || this._integrationBranch || null)
         ?.replace(/^[^/]+\//, "") ?? null,
@@ -1627,7 +1606,6 @@ class Session extends EventEmitter {
       state: this.state,
       mergeStatus: this.mergeStatus,
       dirty: sig.dirty,
-      checkRunning: this._checkRunning(),
       behind: sig.behind,
       rebaseInProgress: sig.rebaseInProgress,
       teardownPending: this._teardownPending(),
@@ -1655,9 +1633,6 @@ class Session extends EventEmitter {
           kind: "rebase", ts: Date.now(), decision: "auto-rebased",
           from: sig.headSha || null, to: r.headSha || null, rerereReplayed: r.rerereReplayed === true,
         });
-        // Advisory, and deliberately NOT awaited inside the rebase mutex: the check can take minutes,
-        // and holding _autoRebasing for it would suppress the change funnel that whole time.
-        this._schedulePostRebaseCheck();
         return;
       }
       // 'rebase-failed' (a rebase that never started) is deliberately NOT cooled down: it is transient,
@@ -1677,71 +1652,6 @@ class Session extends EventEmitter {
       // so it owes it one recheck to re-establish the signature and the gate it may have skipped.
       this._scheduleWorktreeCheck();
     }
-  }
-
-  /*
-   * The advisory half of a merge queue's check gate (2026-08 review, section 4). A merge queue runs
-   * the project's tests against the candidate as it would land; Glissa's merge click is the operator's,
-   * so this runs the project's own check in the worktree right after an unattended rebase rewrote it
-   * and puts the answer on the card BEFORE that click. It never blocks the merge, and a red verdict
-   * changes no gate: it becomes load-bearing only the day the merge click itself is automated.
-   */
-  // True while an advisory check is running in this worktree. Both a second check and a second
-  // auto-rebase refuse on it: the check is a real test suite running in the tree, so a rebase under it
-  // rewrites files it is reading (and on Windows its open handles can fail the rebase outright).
-  _checkRunning() {
-    return this.checkStatus?.status === "running";
-  }
-
-  _schedulePostRebaseCheck() {
-    if (!this._worktreeCheck || !this.worktreeDir) return;
-    if (this._checkRunning()) return;
-    // Fire-and-forget: nothing downstream may wait on a check, and neither resolve() nor run() rejects.
-    void this._resolveAndRunPostRebaseCheck();
-  }
-
-  async _resolveAndRunPostRebaseCheck() {
-    const resolved = await this._worktreeCheck.resolve({
-      cwd: this.worktreeDir,
-      projectCheckCommand: this._projectCheckCommand,
-      configCheckCommand: this._checkCommand,
-    });
-    // Re-checked after the await: the worktree can be merged away, and a second rebase can start a
-    // check of its own, while the package.json read is in flight.
-    if (this._destroyed || !this.worktreeDir || this._checkRunning()) return;
-    const verdict = decidePostRebaseCheck({
-      enabled: this._postRebaseCheck,
-      command: resolved.command,
-      teardownPending: this._teardownPending(),
-      destroyed: this._destroyed,
-    });
-    if (!verdict.run) return;
-    await this._runPostRebaseCheck(resolved);
-  }
-
-  async _runPostRebaseCheck({ command, source }) {
-    this._setCheckStatus({ status: "running", command, source, at: Date.now() });
-    const result = await this._worktreeCheck.run({ cwd: this.worktreeDir, command });
-    // The worktree may have been merged, discarded or destroyed while the check ran; a verdict about a
-    // tree that no longer exists is worse than no verdict.
-    if (this._destroyed || !this.worktreeDir) return;
-    this._recordDecision({
-      kind: "check", ts: Date.now(), decision: result.status, command, durationMs: result.durationMs,
-    });
-    this._setCheckStatus({
-      status: result.status,
-      command,
-      source,
-      at: Date.now(),
-      exitCode: result.exitCode,
-      durationMs: result.durationMs,
-      tail: result.tail || "",
-    });
-  }
-
-  _setCheckStatus(next) {
-    this.checkStatus = next;
-    this.emit("worktree-check", { id: this.id, check: next });
   }
 
   /*

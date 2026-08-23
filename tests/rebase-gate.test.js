@@ -17,7 +17,6 @@ function eligible(extra = {}) {
     state: STATES.IDLE,
     mergeStatus: 'none',
     dirty: false,
-    checkRunning: false,
     behind: '2',
     rebaseInProgress: false,
     teardownPending: false,
@@ -41,7 +40,6 @@ test('every skip reason fires for its own condition', () => {
   assert.equal(reasonFor({ state: STATES.RUNNING }), 'busy');
   assert.equal(reasonFor({ rebaseInProgress: true }), 'rebase-in-progress');
   assert.equal(reasonFor({ dirty: true }), 'dirty');
-  assert.equal(reasonFor({ checkRunning: true }), 'check-running');
   assert.equal(reasonFor({ behind: '0' }), 'current');
   assert.equal(reasonFor({ lastConflictKey: 'headsha::targetsha' }), 'conflict-cooldown');
 });
@@ -67,8 +65,6 @@ test('guard order: the most specific reason wins when several conditions hold at
   assert.equal(reasonFor({ state: STATES.RUNNING, dirty: true }), 'busy');
   assert.equal(reasonFor({ rebaseInProgress: true, dirty: true }), 'rebase-in-progress');
   assert.equal(reasonFor({ dirty: true, behind: '0' }), 'dirty');
-  assert.equal(reasonFor({ checkRunning: true, behind: '0' }), 'check-running');
-  assert.equal(reasonFor({ dirty: true, checkRunning: true }), 'dirty', 'dirty is still read first');
   assert.equal(reasonFor({ behind: '0', lastConflictKey: 'headsha::targetsha' }), 'current');
 });
 
@@ -97,27 +93,4 @@ test('the cooldown holds only while the key is unchanged and non-empty', () => {
 
 test('a call with no arguments at all is a disabled skip, never a rebase', () => {
   assert.deepEqual(decideAutoRebase(), { action: 'skip', reason: 'disabled' });
-});
-
-// The advisory post-rebase check runs a real test suite INSIDE the worktree, so a second rebase while
-// it runs rewrites the files that run is reading - and on Windows the run's open handles can fail the
-// rebase outright. Two integration-branch moves minutes apart is all it takes.
-test('a worktree with an advisory check running is not rebased under it', () => {
-  assert.deepEqual(
-    decideAutoRebase(eligible({ checkRunning: true })),
-    { action: 'skip', reason: 'check-running' }
-  );
-  assert.deepEqual(decideAutoRebase(eligible({ checkRunning: false })), { action: 'rebase' });
-});
-
-test('checkRunning sits beside dirty in the order: both are "something is using this worktree"', () => {
-  // Everything ABOVE dirty still wins over it, exactly as it does over dirty itself.
-  assert.equal(reasonFor({ checkRunning: true, enabled: false }), 'disabled');
-  assert.equal(reasonFor({ checkRunning: true, teardownPending: true }), 'teardown');
-  assert.equal(reasonFor({ checkRunning: true, mergeStatus: 'merging' }), 'merging');
-  assert.equal(reasonFor({ checkRunning: true, mergeStatus: 'parked' }), 'parked');
-  assert.equal(reasonFor({ checkRunning: true, state: STATES.RUNNING }), 'busy');
-  assert.equal(reasonFor({ checkRunning: true, rebaseInProgress: true }), 'rebase-in-progress');
-  // And it wins over everything below.
-  assert.equal(reasonFor({ checkRunning: true, lastConflictKey: 'headsha::targetsha' }), 'check-running');
 });

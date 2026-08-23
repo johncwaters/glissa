@@ -23,7 +23,6 @@ import { sendControlMsg } from '../control-ws.js';
 import { adoptElement, el, releaseElement } from '../dom-helpers.js';
 import { sessionUIs } from '../session-card/card-registry.js';
 import { openConfirmDialog } from '../session-card/modal.js';
-import { checkChipText, checkDetailText, checkTone } from '../check-status-core.mjs';
 import { getSidebarWidth, setSidebarWidth } from '../ui-prefs.js';
 import { parseUnifiedDiff, shouldDropDiffCache, summarizeFiles } from './diff-core.mjs';
 import { getSelectedId, onSelectionChange, setSelectedId } from './selection.js';
@@ -34,8 +33,6 @@ const SIDEBAR_MIN = 260;    // resize bounds (px)
 const SIDEBAR_MAX = 700;
 
 const statusById = new Map(); // id -> mergeStatus ('none'|'pending-review'|'merging'|'parked'|'merged')
-// id -> the advisory post-rebase check verdict, undefined until one has run for that session.
-const checkById = new Map();
 const diffById = new Map();   // id -> { committed, uncommitted, hasCommits } (null until fetched)
 // id -> branch-sync payload; null while a request is in flight, undefined if never requested.
 const syncById = new Map();
@@ -213,13 +210,6 @@ export function setReviewDiff(id, payload) {
 // behind, fetched } for a plain refresh, plus { action, error } for a resync outcome. `action` is only
 // ever present on a resync-branch reply (getBranchSync never sets it), so that field's presence is what
 // tells a shared reply apart from a plain one.
-export function setReviewCheckStatus(id, check) {
-  if (!id) return;
-  if (!check) checkById.delete(id);
-  if (check) checkById.set(id, check);
-  if (id === getSelectedId()) render();
-}
-
 export function setReviewBranchSync(id, payload) {
   syncById.set(id, payload || null);
   if (payload && payload.action !== undefined) applyResyncResult(id, payload);
@@ -470,10 +460,6 @@ function render() {
   if (branchSyncEl) {
     const row = renderBranchSync(id);
     if (row) branchSyncEl.append(row);
-    // Advisory, and next to the branch-sync row rather than inside the merge controls, because that is
-    // exactly what it is not: a fact about the worktree, never a condition on the Merge button.
-    const check = renderCheckStatus(id);
-    if (check) branchSyncEl.append(check);
   }
 
   const status = statusById.get(id) || 'none';
@@ -587,19 +573,6 @@ function renderEmpty(title, desc) {
 // null (nothing requested yet, e.g. a session card that hasn't been selected since page load). Clicking
 // the rendered line is the operator's explicit "refresh" action (the only other trigger is selecting
 // the session, in onSelectionChange - never a timer, since this includes a `git fetch`).
-// The advisory post-rebase check verdict (2026-08 review, section 4): what the project's own check
-// thought of the worktree after the last unattended rebase rewrote it. It gates nothing, and the
-// tooltip says so.
-function renderCheckStatus(id) {
-  const check = checkById.get(id);
-  const label = checkChipText(check);
-  if (!label) return null;
-  const row = el('span', 'review-check-status', label);
-  row.dataset.checkTone = checkTone(check) || '';
-  row.title = checkDetailText(check);
-  return row;
-}
-
 function renderBranchSync(id) {
   const sync = syncById.get(id);
   if (sync === undefined) return null;

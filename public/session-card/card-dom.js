@@ -36,8 +36,6 @@ const TAG_BADGES = [
   { cls: 'agents-badge', title: 'Background sub-agents still running' },
   { cls: 'usage-badge', title: 'Tokens and estimated API list-price cost for this conversation' },
   { cls: 'pack-badge', text: 'pack stale' },
-  // Advisory only: what the project's own check said about the worktree after the last auto-rebase.
-  { cls: 'check-badge' },
   // Advisory and self-expiring: an Esc-cancelled wakeup fires no hook, so the chip ages out.
   { cls: 'wakeup-badge' },
   { cls: 'prompt-badge', title: 'Waiting on a permission or input prompt' },

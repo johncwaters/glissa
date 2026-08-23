@@ -23,11 +23,11 @@ import { updateBannerText } from './radar-core.mjs';
 import { acknowledgeRadarAttention, applyHealthSnapshot as applyRadarHealth, applyPosthogStatus, applyPrStatus as applyRadarPrStatus, applyUpdateAvailable as applyRadarUpdate, mountRadarView, setRadarActivityCallback, setRadarNavigateToPrs } from './radar-panel.js';
 import { handleDebugStateRefresh, handleDebugStateResponse } from './session-card/card-dom.js';
 import { sessionUIs } from './session-card/card-registry.js';
-import { applyState, applyTerminalSettings, createSessionCard, getSessionCount, hasSession, notePackVersion, removeSessionCard, renameSessionCard, seedSessionMergeStatus, setLatestPackVersions, setSessionAgents, setSessionDiff, setSessionEffectiveBase, setSessionMergeStatus, setSessionCheck, setSessionPacks, setSessionPostTurn, setSessionPrompt, setSessionResume, setSessionUsage, setSessionWakeup, setSessionWorktree, updateAggregateStatus } from './session-card/lifecycle.js';
+import { applyState, applyTerminalSettings, createSessionCard, getSessionCount, hasSession, notePackVersion, removeSessionCard, renameSessionCard, seedSessionMergeStatus, setLatestPackVersions, setSessionAgents, setSessionDiff, setSessionEffectiveBase, setSessionMergeStatus, setSessionPacks, setSessionPostTurn, setSessionPrompt, setSessionResume, setSessionUsage, setSessionWakeup, setSessionWorktree, updateAggregateStatus } from './session-card/lifecycle.js';
 import { openConfirmDialog } from './session-card/modal.js';
 import { reconnectDataWs } from './session-card/terminal.js';
 import { showErrorToast } from './session-card/toast.js';
-import { forgetReviewSession, mergeSelectedSession, mountReviewSidebar, notifyWorktreeChanged, refreshReviewSidebar, resolveSelectedSession, resyncSelectedSession, setReviewBranchSync, setReviewCheckStatus } from './sidebar/review-sidebar.js';
+import { forgetReviewSession, mergeSelectedSession, mountReviewSidebar, notifyWorktreeChanged, refreshReviewSidebar, resolveSelectedSession, resyncSelectedSession, setReviewBranchSync } from './sidebar/review-sidebar.js';
 import { decideReloadOnBuild } from './server-build-core.mjs';
 import { applyTheme } from './theme.js';
 import { getActiveView, getDismissedUpdate, getThemeId, isSoundEnabled, setActiveView, setDismissedUpdate, setSoundEnabled } from './ui-prefs.js';
@@ -138,8 +138,6 @@ function handleSnapshot(sessions, packVersions) {
     setSessionPrompt(s.id, s.pendingPromptKind);
     // The context packs this session was spawned against; stale once the mill rebuilds one.
     setSessionPacks(s.id, s.packs);
-    setSessionCheck(s.id, s.checkStatus);
-    setReviewCheckStatus(s.id, s.checkStatus);
     // Usage rides no snapshot field, so the chip is restored from the last push instead.
     restoreUsageChip(s.id);
   }
@@ -265,8 +263,6 @@ const messageHandlers = {
   'mill-report':        (msg) => applyMillReport(msg),
   // The versions a spawn actually delivered, pushed as the session starts.
   'session-packs':      (msg) => setSessionPacks(msg.id, msg.packs),
-  // Advisory post-rebase check verdict: the card chip and the review sidebar row read the same fact.
-  'session-check':      (msg) => { setSessionCheck(msg.id, msg.check); setReviewCheckStatus(msg.id, msg.check); },
   'state-change':       (msg) => handleStateChange(msg),
   'session-added':      (msg) => { if (!msg.ephemeral) noteKnownProjectPath(msg.path); if (!hasSession(msg.id)) { createSessionCard(msg.id, msg.session, msg.state, { skipPerms: !!msg.skipPerms, worktree: !!msg.worktree, path: msg.path, resume: !!msg.resumeSessionId }); restoreUsageChip(msg.id); } if (isFocusActive()) refreshFocusRoster(); refreshPhoneBoard(); },
   'session-removed':    (msg) => { removeSessionCard(msg.id); forgetReviewSession(msg.id); if (isFocusActive()) refreshFocusRoster(); refreshPhoneBoard(); },
