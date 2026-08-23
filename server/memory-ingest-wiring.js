@@ -131,9 +131,6 @@ function createMemoryIngest({
    */
   function persistTailState() {
     if (!writer) return Promise.resolve();
-    if (typeof store.withCanonLock !== 'function') {
-      return writer.write(tailState, () => `${JSON.stringify(tailState, null, 2)}\n`);
-    }
     const payload = tailState;
     return store.withCanonLock(
       () => writer.write(payload, () => `${JSON.stringify(payload, null, 2)}\n`),
@@ -394,9 +391,6 @@ function createMemoryIngest({
   // Refuses to run beside another process doing the same job over the same tail-state file.
   async function backfill({ budgetBytes = backfillByteBudget } = {}) {
     if (stopped) return { ok: false, reason: 'stopped', files: 0, bytesRead: 0, partial: false };
-    if (typeof store.withCanonLock !== 'function') {
-      return { ok: false, reason: 'unsupported', files: 0, bytesRead: 0, partial: false };
-    }
     const held = await store.withCanonLock(() => runBackfill(budgetBytes));
     if (!held.locked) {
       log.warn('another process holds the memory store lock: no backfill ran');
