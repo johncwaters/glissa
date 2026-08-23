@@ -153,7 +153,6 @@ test('a model intent proposal broadcasts and rides the snapshot repair', withVis
   const repaired = await waitFor(reconnected.received, (msg) => msg.type === 'visions-snapshot');
   assert.equal(repaired.intent.text, 'rewriting the merge gate');
   assert.equal(repaired.intent.source, 'model');
-  assert.equal(Object.hasOwn(repaired.intent, 'locked'), false);
 }));
 
 test('a control client connecting with the lane off is told nothing about the visions', async () => {

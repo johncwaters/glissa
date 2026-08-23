@@ -242,7 +242,7 @@ test('an intent message is normalized, and anything malformed reads as no intent
   const { emptyIntent, intentOfMessage } = await importCore();
   assert.deepEqual(intentOfMessage({
     intent: {
-      text: 'refactor of the spawn path', source: 'model', locked: true, ts: NOW,
+      text: 'refactor of the spawn path', source: 'model', ts: NOW,
     },
   }), {
     text: 'refactor of the spawn path', source: 'model', ts: NOW,

@@ -1641,8 +1641,6 @@ function createBackend(httpServer, options = {}) {
     // Official plan limits are machine-wide, so the freshest snapshot is replayed to every client that
     // connects rather than being rebuilt per session.
     getPlanLimits: () => usage.getPlanLimitsMessage(),
-    // Visions lane. Null whenever the lane is off.
-    visionsLane,
   });
 
   // Visions connect-time repair: findings are current state, so one snapshot beats replay retention (plan-limits precedent); registered after registerControlHandlers so the snapshot frame stays first
