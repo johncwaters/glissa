@@ -77,6 +77,7 @@ const { decideHostAllowed } = require('./core/host-policy');
 const { decideOriginAllowed, hostOfOrigin } = require('./core/origin-policy');
 const { isApplicableViewerSize, pickSizeAfterDeparture } = require('./core/viewer-size-core');
 const { createRemoteAuth } = require('./remote-auth');
+const { createStopperCollector } = require('./core/shutdown-core');
 const { configSiblingPath, createPairingsStore, createSeenStore, defaultPairingsPath, defaultSeenPath } = require('./pairings-store');
 const {
   buildUploadFilename,
@@ -1963,8 +1964,13 @@ function createBackend(httpServer, options = {}) {
   let shuttingDown = false;
 
   function shutdown() {
-    if (shuttingDown) return [];
+    if (shuttingDown) return { reaps: [], stoppers: [] };
     shuttingDown = true;
+    // Every lane's async stop(), named and collected so server-lifecycle can AWAIT it under a bound
+    // instead of firing it into the void. The stops still run synchronously from here (each clears its
+    // timers and watchers on the spot), which is what keeps a caller that tears the backend down with
+    // no coordinator - the Vite dev plugin, every backend test - behaving exactly as before.
+    const stoppers = createStopperCollector();
     if (pendingAutoResumeOnListening) {
       httpServer.off('listening', pendingAutoResumeOnListening);
       pendingAutoResumeOnListening = null;
@@ -1986,23 +1992,23 @@ function createBackend(httpServer, options = {}) {
       if (sess._killReap) pendingReaps.push(sess._killReap);
     }
     // Blocks a restart still queued on the poller's restart chain (e.g. a settings save that raced
-    // shutdown) from starting a fresh poller after the process has begun tearing down.
-    prReview.stopPoller();
+    // shutdown) from starting a fresh poller after the process has begun tearing down, and hands back
+    // the in-flight drain (a review still discarding its worktree) for the coordinator to await.
+    stoppers.add('pr-review', () => prReview.stopPoller());
     for (const [, sess] of reviewSessions) {
       sess.destroy();
       if (sess._killReap) pendingReaps.push(sess._killReap);
     }
-    posthog.stopPoller();
-    // Closes the watchers and the sweep timer synchronously; the returned promise only drains an
-    // in-flight rebuild, and a build cut short leaves a tmp dir the next build sweeps, so exit does
-    // not wait on it (nothing here is a PTY reap).
-    void packService.stop();
-    // Fire-and-forget like the pollers above: the process is exiting and nothing awaits it. Stopping
-    // clears the scan interval and the pending nudge so a leaked timer cannot outlive the server.
-    void usage.stop();
-    // Same treatment as the pack service: the timer goes synchronously, the returned promise only
-    // drains an in-flight distill, and the session below is destroyed regardless.
-    void packDistiller.stop();
+    stoppers.add('posthog', () => posthog.stopPoller());
+    // Closes the watchers and the sweep timer synchronously; the returned promise drains an in-flight
+    // rebuild, which a restart must not race over the same published pack directory.
+    stoppers.add('pack-service', () => packService.stop());
+    // Clears the scan interval and the pending nudge, then drains whatever pass is mid-write: the
+    // warehouse and budget-state files are exactly what a fresh backend would reopen.
+    stoppers.add('usage', () => usage.stop());
+    // Same treatment as the pack service: the timer goes synchronously, the returned promise drains an
+    // in-flight distill, and the session below is destroyed regardless.
+    stoppers.add('pack-distiller', () => packDistiller.stop());
     for (const [, sess] of distillSessions) {
       sess.destroy();
       if (sess._killReap) pendingReaps.push(sess._killReap);
@@ -2013,18 +2019,18 @@ function createBackend(httpServer, options = {}) {
     }
     // Cancels the batch timer and detaches every session tap; null whenever the lane is off. Ahead of
     // the Visions lane only because the taps ride sessions already destroyed above.
-    if (ingestLane) ingestLane.stop();
+    if (ingestLane) stoppers.add('ingest', () => ingestLane.stop());
     // Drops every mirrored buffer and its pending sweep timer; null whenever the lane is off.
-    if (visionsLane) visionsLane.stop();
+    if (visionsLane) stoppers.add('visions', () => visionsLane.stop());
     // Drains the pending append and projection writes; null whenever memory is off.
-    if (memoryStore) void memoryStore.stop();
+    if (memoryStore) stoppers.add('memory-store', () => memoryStore.stop());
     for (const [, sess] of visionsSessions) {
       sess.destroy();
       if (sess._killReap) pendingReaps.push(sess._killReap);
     }
     controlWss.close();
     dataWss.close();
-    return pendingReaps;
+    return { reaps: pendingReaps, stoppers: stoppers.entries() };
   }
 
   // --- Update check ---

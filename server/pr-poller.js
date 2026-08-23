@@ -1,7 +1,7 @@
 'use strict';
 
 const core = require('./core/pr-review-core');
-const { firstLine, raceWithAbort } = require('./ephemeral-session');
+const { drainPending, firstLine, raceWithAbort } = require('./ephemeral-session');
 const { createTickLoop } = require('./lane-runner');
 
 // The GitHub PR auto-review poller. IO-FREE by construction: every side effect (gh/git calls,
@@ -79,11 +79,12 @@ function createPrPoller(deps) {
     return persist();
   }
 
-  function spawnWithTimeout(args) {
+  function spawnWithTimeout(args, { onPending = null } = {}) {
     return raceWithAbort({
       timeoutMs: args.timeoutMs,
       setTimeoutFn,
       clearTimeoutFn,
+      onPending,
       onTimeout: () => ({ verdict: 'ERROR', summary: 'review timed out' }),
       onEmpty: () => ({ verdict: 'ERROR', summary: 'no verdict' }),
       start: (signal) => Promise.resolve(spawnReview({ ...args, signal }))
@@ -125,10 +126,11 @@ function createPrPoller(deps) {
       cwd = ws.cwd;
     }
 
+    let pendingSpawn = null;
     try {
       const res = await spawnWithTimeout({
         projectPath, cwd, pr, slug, conflicting, timeoutMs: reviewTimeoutSeconds * 1000,
-      });
+      }, { onPending: (promise) => { pendingSpawn = promise; } });
       let head = pr.headRefOid;
       if (res.verdict === 'RESOLVED') head = await requeryHead(gh, pr.number, pr.headRefOid);
       await finishReview(key, res.verdict, { summary: res.summary, head }, pr, conflicting);
@@ -136,6 +138,10 @@ function createPrPoller(deps) {
       await finishReview(key, 'ERROR', { reason: firstLine(e.message) }, pr, conflicting);
     } finally {
       if (workspace) {
+        // A timeout resolves the verdict while the aborted session is still being killed, and a
+        // surviving process holding a handle inside the worktree makes the discard fail (leaking the
+        // checkout and the branch). Bounded, so a session that resists kill costs a delay, not a leak.
+        await drainPending(pendingSpawn);
         await gitWorkspace.discard({ projectPath, workspace });
         await gh.deleteBranch(pr.headRefName);
       }

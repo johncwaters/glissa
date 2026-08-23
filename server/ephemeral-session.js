@@ -8,6 +8,13 @@
 
 const fs = require('node:fs');
 
+const { awaitBounded } = require('./core/shutdown-core');
+
+// How long a timeout-abort waits for the killed PTY tree to actually die before giving up on it. Same
+// order as the lifecycle's own reap bound: long enough for taskkill, short enough that a child which
+// resists kill cannot pin a lane's concurrency slot.
+const ABORT_REAP_CAP_MS = 3000;
+
 function firstLine(text) {
   return String(text == null ? '' : text).split(/\r?\n/)[0].trim();
 }
@@ -17,7 +24,7 @@ function firstLine(text) {
  * Rejects only when the Session itself errors. With no spawn gate the start still runs off a microtask,
  * so a synchronous throw reaches the same rejection path.
  */
-async function awaitSessionExit(sess, { signal = null, spawnGate = null } = {}) {
+async function awaitSessionExit(sess, { signal = null, spawnGate = null, reapCapMs = ABORT_REAP_CAP_MS } = {}) {
   let onAbort = null;
   try {
     await new Promise((resolve, reject) => {
@@ -27,7 +34,19 @@ async function awaitSessionExit(sess, { signal = null, spawnGate = null } = {}) 
       sess.on('exit', done);
       sess.on('error', fail);
       if (signal) {
-        onAbort = () => { try { sess.destroy(); } catch { /* already gone */ } done(); };
+        /*
+         * A timeout-abort must not resolve before the PTY tree it just killed is REAPED. The caller's
+         * finally block discards the job's worktree, and on Windows a surviving claude/cmd/conhost
+         * holding a handle in that directory makes the discard fail, leaking the checkout and the
+         * branch. destroy() starts the taskkill and parks the promise on `_killReap` (sessions.js), so
+         * that is what is awaited here - bounded, because a child that resists kill must cost a delay,
+         * never the lane's concurrency slot.
+         */
+        onAbort = () => {
+          try { sess.destroy(); } catch { /* already gone */ }
+          if (!sess._killReap) { done(); return; }
+          void awaitBounded([sess._killReap], { capMs: reapCapMs }).then(done, done);
+        };
         if (signal.aborted) onAbort();
         if (!signal.aborted) signal.addEventListener('abort', onAbort, { once: true });
       }
@@ -47,6 +66,7 @@ async function awaitSessionExit(sess, { signal = null, spawnGate = null } = {}) 
  */
 async function raceWithAbort({
   start, timeoutMs, onTimeout, onEmpty, setTimeoutFn = setTimeout, clearTimeoutFn = clearTimeout,
+  onPending = null,
 }) {
   const controller = new AbortController();
   let handle = null;
@@ -57,9 +77,31 @@ async function raceWithAbort({
     }, timeoutMs);
     if (handle && typeof handle.unref === 'function') handle.unref();
   });
-  const result = await Promise.race([start(controller.signal), timeout]);
+  const started = start(controller.signal);
+  /*
+   * A timeout resolves the VERDICT the moment it fires, which is the point: a hung job must free its
+   * concurrency slot at once, not one reap later. But the aborted session is still being killed for a
+   * moment afterwards, so a caller with cleanup that cannot run under a live process - discarding the
+   * job's worktree - takes the start promise here and drains it first, with drainPending below.
+   */
+  if (typeof onPending === 'function') onPending(started);
+  const result = await Promise.race([started, timeout]);
   if (handle) clearTimeoutFn(handle);
   return result || onEmpty();
+}
+
+/**
+ * Wait for an aborted job's start promise to settle before cleaning up under it. awaitSessionExit is
+ * what makes that mean "the killed PTY tree has been reaped", which on Windows is what keeps a
+ * surviving claude/cmd/conhost from holding a handle in the worktree the caller is about to discard.
+ *
+ * Bounded on REAL timers, deliberately not a lane's injected timeout seam: that seam is a JOB deadline
+ * a test drives by hand, so routing this through it would leave the drain waiting for a callback
+ * nobody fires. The bound also has to outlast the reap wait inside awaitSessionExit.
+ */
+function drainPending(pending, { capMs = ABORT_REAP_CAP_MS + 500 } = {}) {
+  if (!pending) return Promise.resolve();
+  return awaitBounded([pending], { capMs }).then(() => {});
 }
 
 /**
@@ -110,5 +152,5 @@ function registerEphemeralSession({ map, id, sess, closeSessionDataClients, logP
 }
 
 module.exports = {
-  awaitSessionExit, firstLine, raceWithAbort, readResultFile, registerEphemeralSession,
+  awaitSessionExit, drainPending, firstLine, raceWithAbort, readResultFile, registerEphemeralSession,
 };

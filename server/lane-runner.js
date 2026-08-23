@@ -127,12 +127,16 @@ function createLaneRunner({
   }
 
   // Blocks a restart still queued on the chain (a settings save that raced shutdown) from starting a
-  // fresh poller after teardown began. stop() is async, but fire-and-forget here is deliberate: the
-  // process is exiting, nothing awaits it.
+  // fresh poller after teardown began. Returns the drain so the shutdown coordinator can AWAIT it
+  // under its bound: a poller stopped but not awaited can still be discarding a worktree or writing
+  // its state file while a restart brings a fresh backend up against the same paths. The restart chain
+  // is awaited alongside the poller, so a queued restart has settled (into a no-op, since `stopped` is
+  // already latched) before the caller believes the lane is down.
   function stopPoller() {
     stopped = true;
     beforeStop();
-    if (poller) poller.stop();
+    const draining = poller ? poller.stop() : Promise.resolve();
+    return Promise.allSettled([draining, chain]).then(() => {});
   }
 
   // For a lane edit that changes nothing a poll would discover: patch the cached status in place and

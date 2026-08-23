@@ -23,6 +23,17 @@ function fakeHttpServer() {
   return { closes: 0, close(cb) { this.closes++; if (cb) cb(); } };
 }
 
+function deferredResolve() {
+  let resolve;
+  const promise = new Promise((res) => { resolve = res; });
+  return { promise, resolve };
+}
+
+// One macrotask, long enough for every already-settled microtask chain to run.
+function tick() {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
 function fakeSpawn() {
   const calls = [];
   const fn = (file, args, opts) => { calls.push({ file, args, opts }); return { unref() {} }; };
@@ -214,4 +225,111 @@ test('awaitReaps with no pending reaps resolves immediately', async () => {
   await awaitReaps([]);
   await awaitReaps(undefined);
   assert.ok(true);
+});
+
+// The shutdown coordinator (2026-08 review, section 6). Two independent review passes named the
+// unawaited lane stops as the biggest systemic risk in the codebase: a restart could bring a fresh
+// backend up while the old one was still discarding a worktree or writing the same state file.
+test('the lifecycle awaits every named lane stopper before releasing the listener', async () => {
+  const order = [];
+  const laneStopped = deferredResolve();
+  const lc = createLifecycle({
+    shutdown: () => ({
+      reaps: [],
+      stoppers: [{ name: 'pr-review', promise: laneStopped.promise.then(() => order.push('lane drained')) }],
+    }),
+    httpServer: { closes: 0, close(cb) { order.push('listener closed'); if (cb) cb(); } },
+    onRestart: null,
+    env: UNSUPERVISED,
+    spawn: fakeSpawn(),
+    exit: () => order.push('exit'),
+  });
+  const shuttingDown = lc.requestShutdown();
+  await tick();
+  assert.deepEqual(order, [], 'nothing proceeds while the lane is still draining');
+  laneStopped.resolve();
+  await shuttingDown;
+  assert.deepEqual(order, ['lane drained', 'listener closed', 'exit']);
+});
+
+test('a wedged lane costs the bound and one warning, never the exit', async () => {
+  const warnings = [];
+  const exits = [];
+  const lc = createLifecycle({
+    shutdown: () => ({ reaps: [], stoppers: [{ name: 'usage', promise: new Promise(() => {}) }] }),
+    httpServer: fakeHttpServer(),
+    onRestart: null,
+    env: UNSUPERVISED,
+    spawn: fakeSpawn(),
+    exit: (code) => exits.push(code),
+    log: (line) => warnings.push(line),
+    capMs: 20,
+  });
+  await lc.requestShutdown();
+  assert.deepEqual(exits, [0], 'the process still exits');
+  assert.equal(warnings.some((line) => line.includes('lane shutdown exceeded')), true);
+});
+
+test('a lane whose stop rejects is named rather than swallowed', async () => {
+  const warnings = [];
+  const lc = createLifecycle({
+    shutdown: () => ({ reaps: [], stoppers: [{ name: 'pack-service', promise: Promise.reject(new Error('rename failed')) }] }),
+    httpServer: fakeHttpServer(),
+    onRestart: null,
+    env: UNSUPERVISED,
+    spawn: fakeSpawn(),
+    exit: () => {},
+    log: (line) => warnings.push(line),
+  });
+  await lc.requestShutdown();
+  assert.equal(
+    warnings.some((line) => line.includes('pack-service failed to stop cleanly: rename failed')),
+    true
+  );
+});
+
+test('a restart awaits the lane drains too, not only the PTY reaps', async () => {
+  const order = [];
+  const laneStopped = deferredResolve();
+  const spawn = fakeSpawn();
+  const lc = createLifecycle({
+    shutdown: () => ({
+      reaps: [Promise.resolve().then(() => order.push('reaped'))],
+      stoppers: [{ name: 'posthog', promise: laneStopped.promise.then(() => order.push('lane drained')) }],
+    }),
+    httpServer: fakeHttpServer(),
+    onRestart: null,
+    env: UNSUPERVISED,
+    spawn,
+    exit: () => order.push('exit'),
+    getArgv: () => ['node', 'server.js'],
+  });
+  const restarting = lc.requestRestart();
+  await tick();
+  assert.equal(spawn.calls.length, 0, 'no replacement while the old lane still owns the worktree');
+  laneStopped.resolve();
+  await restarting;
+  assert.deepEqual(order, ['reaped', 'lane drained', 'exit']);
+  assert.equal(spawn.calls.length, 1);
+});
+
+// The historical shape (a bare array of PTY reaps) still works, so a caller or test that predates the
+// coordinator needs no change.
+test('a shutdown that returns a plain reap array is still awaited', async () => {
+  const order = [];
+  const reap = deferredResolve();
+  const lc = createLifecycle({
+    shutdown: () => [reap.promise.then(() => order.push('reaped'))],
+    httpServer: fakeHttpServer(),
+    onRestart: null,
+    env: UNSUPERVISED,
+    spawn: fakeSpawn(),
+    exit: () => order.push('exit'),
+  });
+  const shuttingDown = lc.requestShutdown();
+  await tick();
+  assert.deepEqual(order, []);
+  reap.resolve();
+  await shuttingDown;
+  assert.deepEqual(order, ['reaped', 'exit']);
 });

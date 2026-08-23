@@ -12,26 +12,48 @@
 // + windowsHide + awaited reap below close all three.
 
 const { decideRestartStrategy, SUPERVISED_RESTART_EXIT_CODE } = require('./core/restart-strategy');
+const {
+  awaitBounded, normalizeShutdownResult, summarizeStopOutcomes,
+} = require('./core/shutdown-core');
 
 // Bounded wait for the pending PTY reaps a shutdown started, so the process does not exit (or respawn)
 // before taskkill has reaped the cmd/claude/conhost tree. Capped so a child that resists kill cannot
 // hang the lifecycle. Returns a promise that always resolves.
-// The cap timer is deliberately NOT unref'd: when a reap hangs it is the only thing that settles the
-// returned promise, so an unref'd timer lets the loop drain and leaves the awaiting caller hanging
-// instead of proceeding. It is cleared as soon as the race settles, so it pins the loop only while a
-// reap is genuinely outstanding, bounded by capMs.
-function awaitReaps(pendingReaps, { capMs = 3000, setTimeoutFn = setTimeout, clearTimeoutFn = clearTimeout } = {}) {
-  if (!Array.isArray(pendingReaps) || pendingReaps.length === 0) return Promise.resolve();
-  let timer;
-  const cap = new Promise((resolve) => {
-    timer = setTimeoutFn(resolve, capMs);
-  });
-  return Promise.race([Promise.allSettled(pendingReaps), cap]).then(() => clearTimeoutFn(timer));
+function awaitReaps(pendingReaps, options = {}) {
+  return awaitBounded(pendingReaps, options).then(() => {});
+}
+
+/**
+ * Bounded wait for the lanes' async stop() drains, the sibling of awaitReaps. Awaited CONCURRENTLY
+ * with the reaps, not after them: they bound different things (a PTY tree that resists kill, a lane
+ * still writing state) and serializing would double the worst-case exit delay for no benefit.
+ *
+ * A lane that fails or overruns the bound is reported and then left behind. The process is exiting; a
+ * shutdown that hangs waiting for a wedged lane is strictly worse than one that says so and goes.
+ */
+function awaitStoppers(stoppers, { capMs = 3000, warn = console.warn, ...timerOptions } = {}) {
+  const entries = Array.isArray(stoppers) ? stoppers : [];
+  if (entries.length === 0) return Promise.resolve();
+  return awaitBounded(entries.map((entry) => entry.promise), { capMs, ...timerOptions })
+    .then((outcome) => {
+      const summary = summarizeStopOutcomes(entries, outcome);
+      if (summary.timedOut) warn(`[lifecycle] lane shutdown exceeded ${capMs}ms - exiting anyway`);
+      for (const { name, reason } of summary.failed) {
+        warn(`[lifecycle] ${name} failed to stop cleanly: ${reason && reason.message ? reason.message : reason}`);
+      }
+    });
+}
+
+// Everything shutdown() started, awaited under its own bound. Always resolves.
+function awaitTeardown(result, options) {
+  const { reaps, stoppers } = normalizeShutdownResult(result);
+  return Promise.all([awaitReaps(reaps, options), awaitStoppers(stoppers, options)]).then(() => {});
 }
 
 // Build the restart/shutdown handlers. Every side effect is injected so the ordering and flags can be
 // asserted without launching a real process:
-//   shutdown      - tears the backend down; returns an array of in-flight PTY reap promises to await.
+//   shutdown      - tears the backend down; returns { reaps, stoppers } (or, historically, just the
+//                   array of in-flight PTY reap promises) for awaitTeardown to await under its bound.
 //   httpServer    - { close(cb) }: closes the listener, then runs cb (spawn-and-exit / exit).
 //   onRestart     - dev (Vite) restarts in-process via this; when null, production respawns detached.
 //   spawn         - child_process.spawn (the production respawn); defaults to require at call sites.
@@ -73,8 +95,7 @@ function createLifecycle({
   async function requestShutdown() {
     if (requested) return;
     requested = true;
-    const pendingReaps = shutdown() || [];
-    await awaitReaps(pendingReaps, { capMs });
+    await awaitTeardown(shutdown(), { capMs, warn: log });
     closeExtraServers(extraServers);
     let exited = false;
     const doExit = () => {
@@ -92,8 +113,7 @@ function createLifecycle({
   async function requestRestart() {
     if (requested) return;
     requested = true;
-    const pendingReaps = shutdown() || [];
-    await awaitReaps(pendingReaps, { capMs });
+    await awaitTeardown(shutdown(), { capMs, warn: log });
     closeExtraServers(extraServers);
     // Dev mode (Vite) restarts the server in-process; no detached respawn, no new console window.
     // Release the guard and rethrow if the in-process restart throws, so a thrown onRestart does not
@@ -143,4 +163,4 @@ function createLifecycle({
   return { requestShutdown, requestRestart };
 }
 
-module.exports = { awaitReaps, createLifecycle };
+module.exports = { awaitReaps, awaitStoppers, awaitTeardown, createLifecycle };
