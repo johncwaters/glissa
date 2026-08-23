@@ -23,6 +23,7 @@ const path = require('node:path');
 const WebSocket = require('ws');
 
 const { createBackend } = require('../server/backend');
+const { dashboardClient } = require('./helpers/dashboard-ws');
 
 const SESSION_ID = 'd0000000-0000-4000-8000-000000000001';
 const MESSAGE_WAIT_MS = 5000;
@@ -93,7 +94,8 @@ function withBackend(fn) {
     await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
 
     try {
-      await fn(t, { base: `ws://127.0.0.1:${server.address().port}` });
+      const dash = await dashboardClient(server.address().port);
+      await fn(t, { dash });
     } finally {
       backend.shutdown();
       server.closeAllConnections();
@@ -105,8 +107,8 @@ function withBackend(fn) {
   };
 }
 
-function openRecordingSocket(url) {
-  const ws = new WebSocket(url);
+function openRecordingSocket(dash, pathAndSearch) {
+  const ws = new WebSocket(dash.url(pathAndSearch), dash.options);
   const received = [];
   ws.on('message', (raw) => received.push(JSON.parse(raw.toString())));
   return new Promise((resolve, reject) => {
@@ -134,9 +136,9 @@ async function waitForMessage(received, matches, label) {
 
 const isMillReport = (m) => m.type === 'mill-report';
 
-test('request-mill-report replies to the requesting socket only, with both specs described', withBackend(async (_t, { base }) => {
-  const asker = await openRecordingSocket(`${base}/control`);
-  const bystander = await openRecordingSocket(`${base}/control`);
+test('request-mill-report replies to the requesting socket only, with both specs described', withBackend(async (_t, { dash }) => {
+  const asker = await openRecordingSocket(dash, '/control');
+  const bystander = await openRecordingSocket(dash, '/control');
   bystander.received.length = 0;
 
   asker.ws.send(JSON.stringify({ type: 'request-mill-report', requestId: 'm1' }));
@@ -170,12 +172,12 @@ test('request-mill-report replies to the requesting socket only, with both specs
   await closeSocket(bystander.ws);
 }));
 
-test('the last report is replayed to a client that connects after it was built', withBackend(async (_t, { base }) => {
-  const first = await openRecordingSocket(`${base}/control`);
+test('the last report is replayed to a client that connects after it was built', withBackend(async (_t, { dash }) => {
+  const first = await openRecordingSocket(dash, '/control');
   first.ws.send(JSON.stringify({ type: 'request-mill-report', requestId: 'm1' }));
   await waitForMessage(first.received, isMillReport, 'the first mill-report');
 
-  const later = await openRecordingSocket(`${base}/control`);
+  const later = await openRecordingSocket(dash, '/control');
   const replayed = await waitForMessage(later.received, isMillReport, 'the connect replay');
   assert.equal(replayed.requestId, null, 'a replay answers no request');
   assert.equal(replayed.totals.packCount, 2);
@@ -184,8 +186,8 @@ test('the last report is replayed to a client that connects after it was built',
   await closeSocket(later.ws);
 }));
 
-test('a control client with no prior request gets no mill report until it asks', withBackend(async (_t, { base }) => {
-  const client = await openRecordingSocket(`${base}/control`);
+test('a control client with no prior request gets no mill report until it asks', withBackend(async (_t, { dash }) => {
+  const client = await openRecordingSocket(dash, '/control');
   await new Promise((resolve) => setTimeout(resolve, 200));
   assert.equal(client.received.filter(isMillReport).length, 0);
   await closeSocket(client.ws);
