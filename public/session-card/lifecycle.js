@@ -248,8 +248,8 @@ export function createSessionCard(sessionId, sessionName, initialState, options 
     elapsedEl: dom.elapsedEl,
     // Project root (for the Focus rail's project grouping). '' when unknown -> the rail's (no path) group.
     path: options.path || '',
-    // Wall-clock of the latest state entry; session-tick.js renders "time in this state".
-    stateSince: Date.now(),
+    // Wall-clock of the latest state entry, authored by the server so a page reload does not rebase it.
+    stateSince: Number.isFinite(options.stateSince) ? options.stateSince : Date.now(),
     btnOverflow: dom.btnOverflow,
     overflowMenu: dom.overflowMenu,
     termWrap: dom.termWrap,
@@ -573,7 +573,7 @@ function _handleRestartTransition(ui, prevState) {
   }
 }
 
-export function applyState(sessionId, state) {
+export function applyState(sessionId, state, stateSince) {
   const ui = sessionUIs.get(sessionId);
   if (!ui) return;
 
@@ -584,7 +584,7 @@ export function applyState(sessionId, state) {
   // and tears down on exit (only real transitions, so a redundant RUNNING apply can't re-arm
   // the quiet countdown).
   if (state !== prevState) {
-    ui.stateSince = Date.now();
+    ui.stateSince = Number.isFinite(stateSince) ? stateSince : Date.now();
     setRunningActivity(ui, state === STATES.RUNNING);
   }
 

@@ -1752,7 +1752,7 @@ function createBackend(httpServer, options = {}) {
       // Broadcast BEFORE start(): sess.start() emits state-change synchronously,
       // and handleStateChange creates a card if one doesn't exist yet - without
       // skipPerms (state-change messages don't carry it), dropping the YOLO badge.
-      broadcastControl({ type: 'session-added', id: project.id, session: project.name, path: project.path, state: sess.state, skipPerms: !!sess.dangerouslySkipPermissions, worktree: !!sess.isWorktree, resumeSessionId: sess.resumeSessionId || null });
+      broadcastControl({ type: 'session-added', id: project.id, session: project.name, path: project.path, state: sess.state, stateSince: sess.stateSince, skipPerms: !!sess.dangerouslySkipPermissions, worktree: !!sess.isWorktree, resumeSessionId: sess.resumeSessionId || null });
       sess.start();
       console.log(`[config] Added session: ${project.name}`);
     }
@@ -1777,7 +1777,7 @@ function createBackend(httpServer, options = {}) {
       wireSessionEvents(newSess);
       carryWorktreeAcrossRecreate(oldSess, newSess);
       // Broadcast BEFORE start() - see _addNewSessions for rationale.
-      broadcastControl({ type: 'session-modified', id: project.id, session: project.name, path: project.path, state: newSess.state, skipPerms: !!newSess.dangerouslySkipPermissions, worktree: !!newSess.isWorktree, resumeSessionId: newSess.resumeSessionId || null });
+      broadcastControl({ type: 'session-modified', id: project.id, session: project.name, path: project.path, state: newSess.state, stateSince: newSess.stateSince, skipPerms: !!newSess.dangerouslySkipPermissions, worktree: !!newSess.isWorktree, resumeSessionId: newSess.resumeSessionId || null });
       if (!wasDormant) newSess.start();
       console.log(`[config] Modified session: ${project.name}${wasDormant ? ' (left dormant)' : ''}`);
     }

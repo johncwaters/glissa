@@ -268,6 +268,7 @@ class Session extends EventEmitter {
     this.dangerouslySkipPermissions = dangerouslySkipPermissions;
     this.ptyProcess = null;
     this.state = STATES.DORMANT;
+    this.stateSince = Date.now();
     this.auditLog = [];
     this._receivedFirstOutput = false;
     // Ring buffer of recent PTY chunks (see session/core/output-ring.js for the
@@ -1093,6 +1094,7 @@ class Session extends EventEmitter {
       path: this.path,
       agent: this.agentId,
       state: this.state,
+      stateSince: this.stateSince,
       sleeping: this._sleeping,
       dangerouslySkipPermissions: this.dangerouslySkipPermissions,
       ephemeral: this.ephemeral,
@@ -2008,12 +2010,14 @@ class Session extends EventEmitter {
     }
 
     // Record in audit log (capped to prevent unbounded growth)
+    const enteredAt = Date.now();
+    this.stateSince = enteredAt;
     this._pushAuditEntry({
       from,
       to,
       event,
       detail: detail || null,
-      timestamp: Date.now(),
+      timestamp: enteredAt,
     });
 
     // Record state transition

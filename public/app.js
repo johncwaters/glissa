@@ -125,8 +125,8 @@ function handleSnapshot(sessions, packVersions) {
   for (const s of (sessions || [])) {
     if (!s.ephemeral) noteKnownProjectPath(s.path); // remember the project so its rail group survives a last-session close
     const exists = hasSession(s.id);
-    if (exists) applyState(s.id, s.state);
-    if (!exists) createSessionCard(s.id, s.name, s.state, { skipPerms: !!s.dangerouslySkipPermissions, worktree: !!s.isWorktree, path: s.path, resume: !!s.resumeSessionId });
+    if (exists) applyState(s.id, s.state, s.stateSince);
+    if (!exists) createSessionCard(s.id, s.name, s.state, { skipPerms: !!s.dangerouslySkipPermissions, worktree: !!s.isWorktree, path: s.path, resume: !!s.resumeSessionId, stateSince: s.stateSince });
     // The agent CLI this session supervises; chip-less for the default one.
     setSessionAgent(s.id, s.agent);
     // Restore the "resumed" marker on reconnect (the binding lives on the server; the badge does not).
@@ -158,7 +158,7 @@ function handleSnapshot(sessions, packVersions) {
 
 function handleStateChange(msg) {
   if (!hasSession(msg.id)) {
-    createSessionCard(msg.id, msg.session, msg.to, { skipPerms: !!msg.skipPerms });
+    createSessionCard(msg.id, msg.session, msg.to, { skipPerms: !!msg.skipPerms, stateSince: msg.timestamp });
     return;
   }
 
@@ -173,7 +173,7 @@ function handleStateChange(msg) {
     // round-trip would otherwise drop the session into the rail's (no path) group.
     const path = card ? card.dataset.path : undefined;
     removeSessionCard(msg.id);
-    createSessionCard(msg.id, msg.session, STATES.DORMANT, { skipPerms, path });
+    createSessionCard(msg.id, msg.session, STATES.DORMANT, { skipPerms, path, stateSince: msg.timestamp });
     restoreUsageChip(msg.id);
     if (isFocusActive()) refreshFocusRoster();
     refreshPhoneBoard();
@@ -181,7 +181,7 @@ function handleStateChange(msg) {
     return;
   }
 
-  applyState(msg.id, msg.to);
+  applyState(msg.id, msg.to, msg.timestamp);
   // Re-evaluate the review sidebar's merge gate: it is state-dependent (isMergeableLive), so a turn
   // ending RUNNING -> COMPLETE must surface the Merge button without the operator clicking a file, and
   // COMPLETE -> RUNNING must withdraw it. No-op unless this session is selected.
@@ -274,10 +274,10 @@ const messageHandlers = {
   // The versions a spawn actually delivered, pushed as the session starts.
   'session-packs':      (msg) => setSessionPacks(msg.id, msg.packs),
   'state-change':       (msg) => handleStateChange(msg),
-  'session-added':      (msg) => { if (!msg.ephemeral) noteKnownProjectPath(msg.path); if (!hasSession(msg.id)) { createSessionCard(msg.id, msg.session, msg.state, { skipPerms: !!msg.skipPerms, worktree: !!msg.worktree, path: msg.path, resume: !!msg.resumeSessionId }); restoreUsageChip(msg.id); } if (isFocusActive()) refreshFocusRoster(); refreshPhoneBoard(); },
+  'session-added':      (msg) => { if (!msg.ephemeral) noteKnownProjectPath(msg.path); if (!hasSession(msg.id)) { createSessionCard(msg.id, msg.session, msg.state, { skipPerms: !!msg.skipPerms, worktree: !!msg.worktree, path: msg.path, resume: !!msg.resumeSessionId, stateSince: msg.stateSince }); restoreUsageChip(msg.id); } if (isFocusActive()) refreshFocusRoster(); refreshPhoneBoard(); },
   'session-removed':    (msg) => { removeSessionCard(msg.id); forgetReviewSession(msg.id); if (isFocusActive()) refreshFocusRoster(); refreshPhoneBoard(); },
   'session-renamed':    (msg) => { renameSessionCard(msg.id, msg.newName); refreshPhoneBoard(); },
-  'session-modified':   (msg) => { if (!msg.ephemeral) noteKnownProjectPath(msg.path); removeSessionCard(msg.id); forgetReviewSession(msg.id); createSessionCard(msg.id, msg.session, msg.state, { skipPerms: !!msg.skipPerms, worktree: !!msg.worktree, path: msg.path, resume: !!msg.resumeSessionId }); restoreUsageChip(msg.id); if (isFocusActive()) refreshFocusRoster(); refreshPhoneBoard(); },
+  'session-modified':   (msg) => { if (!msg.ephemeral) noteKnownProjectPath(msg.path); removeSessionCard(msg.id); forgetReviewSession(msg.id); createSessionCard(msg.id, msg.session, msg.state, { skipPerms: !!msg.skipPerms, worktree: !!msg.worktree, path: msg.path, resume: !!msg.resumeSessionId, stateSince: msg.stateSince }); restoreUsageChip(msg.id); if (isFocusActive()) refreshFocusRoster(); refreshPhoneBoard(); },
   'session-git':        (msg) => setSessionWorktree(msg.id, !!msg.worktree),
   'session-resume':     (msg) => setSessionResume(msg.id, msg.resumeSessionId),
   // The agent count and a delivered notification both move the decision trace without any
