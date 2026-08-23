@@ -35,6 +35,11 @@ back into future work. Four kinds of remembered fact:
   disk) by an agent Glissa did not spawn. That requirement is satisfied by the projection file
   itself plus one operator-authored import line; it does not require the pack mill (see
   Delivery).
+- **Automatic after one switch** (operator decision 2026-08-22): the system should be
+  automatic and almost never thought about. `memory.enabled: true` is the ONLY required
+  touch; ingestion, backfill, distillation, projection, pack rebuild and delivery all run
+  themselves from there. The remaining operator touches are inherently operator acts (an
+  intent lock, `forget`, the rare locked-diff review), not maintenance.
 
 ## Research summary (2026-08-22)
 
@@ -249,8 +254,12 @@ This is fan-out plumbing plus a scrub decision, not a mapper tweak:
   memory alone never widens what reaches the control WS or a prompt digest. One switch
   instead of three; the lane-log states which lane the source was constructed for.
 - **Event-loop budget**: ingestion writes are batched per tick with an explicit per-tick
-  record cap and a yield between segments; the cold-start backfill stays a manual
-  `glissa memory backfill` command, never automatic.
+  record cap and a yield between segments. The cold-start backfill runs AUTOMATICALLY on
+  first enable as a background pass under the same byte budget and yields (the usage
+  scanner's budgeted-partial-pass pattern), resumable via the durable offsets; `glissa
+  memory backfill` remains as a manual re-run, not the primary path. The reviewer concern
+  was event-loop blocking, which the budget answers; requiring a manual command answered it
+  by friction instead, and the operating principle above rules that out.
 
 Raw transcript lines are episodic material, bounded and scrubbed; semantic facts are formed
 only by M15, in the background, never on the hot path.
@@ -342,7 +351,8 @@ In no committed order:
 - No inferred rejections (reviewed and cut): feedback is served events plus explicit
   dismissals only.
 - No MCP memory facade (possible later access layer; the store does not depend on it).
-- No automatic historical backfill at enable time; backfill is a manual cold-path command.
+- No unbudgeted work on the shared event loop: backfill and ingestion are automatic but
+  always byte-budgeted, batched, and yielding.
 
 ## Testing
 
