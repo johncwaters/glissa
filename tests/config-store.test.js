@@ -406,3 +406,41 @@ test('watchForChanges returns a closer that releases the fs.watch handle', () =>
     assert.doesNotThrow(stop, 'idempotent');
   });
 });
+
+// The self-write suppression was a 500ms window, and the window WAS the bug: an operator editing
+// config.json right after a hook-driven persist (resumeSessionId is written on every hook payload
+// carrying a new session id) had their edit silently dropped until they saved again. Suppression is
+// now by written-content signature, so it swallows exactly the echo (2026-08 review, section 7).
+test('a hand-edit landing immediately after a self-write is applied, not swallowed', async () => {
+  await withStoreAsync({ projects: [] }, async (store, p) => {
+    const reloads = [];
+    const stop = store.watchForChanges((cfg) => { reloads.push(cfg); });
+    try {
+      store.save((cfg) => { cfg.projects.push({ id: 'from-save', name: 's', path: 'C:/s' }); });
+      // No pause at all: this is the race the time window lost.
+      fs.writeFileSync(p, JSON.stringify({
+        projects: [{ id: 'from-save', name: 's', path: 'C:/s' }], port: 4321,
+      }, null, 2), 'utf8');
+      await waitFor(() => reloads.length > 0, 'the hand-edit was swallowed as a self-write');
+      assert.equal(reloads[reloads.length - 1].port, 4321);
+    } finally {
+      stop();
+    }
+  });
+});
+
+test('a self-write is still suppressed, however many events it produces', async () => {
+  await withStoreAsync({ projects: [] }, async (store) => {
+    const reloads = [];
+    const stop = store.watchForChanges((cfg) => { reloads.push(cfg); });
+    try {
+      store.save((cfg) => { cfg.projects.push({ id: 'a', name: 'a', path: 'C:/a' }); });
+      await sleep(1200);
+      store.save((cfg) => { cfg.projects.push({ id: 'b', name: 'b', path: 'C:/b' }); });
+      await sleep(1200);
+      assert.deepEqual(reloads, [], 'a save must never reload its own write back through the settings path');
+    } finally {
+      stop();
+    }
+  });
+});

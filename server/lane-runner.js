@@ -1,5 +1,9 @@
 'use strict';
 
+const {
+  nextBackoffMs, shouldSkipTick, DEFAULT_BASE_MS, DEFAULT_MAX_MS,
+} = require('./core/lane-backoff');
+
 /*
  * The two scaffolds the polling lanes (pr-review, posthog) share.
  *
@@ -11,6 +15,12 @@
 /**
  * @param {object} deps `tick` is the lane's tick body; `writeState` persists whatever the lane calls
  *   its state. Both are injected, so the loop stays IO-free like the pollers it serves.
+ *
+ * A tick body may report a failed poll by returning `{ failed: true, retryAfterMs? }`, which opens a
+ * full-jitter backoff window (server/core/lane-backoff.js) that later ticks are SKIPPED inside. The
+ * interval timer itself is untouched, so the lane's cadence, its re-entrancy guard and its
+ * drain-on-stop all behave as before; an outage costs skipped ticks rather than a rescheduled chain.
+ * A body that returns nothing (every lane before this) never backs off.
  */
 function createTickLoop({
   tag,
@@ -19,12 +29,19 @@ function createTickLoop({
   writeState = async () => {},
   setIntervalFn = setInterval,
   clearIntervalFn = clearInterval,
+  backoffBaseMs = Math.max(intervalMs, DEFAULT_BASE_MS),
+  backoffMaxMs = DEFAULT_MAX_MS,
+  now = Date.now,
+  random = Math.random,
   log = console,
 }) {
   let timer = null;
   let stopped = false;
   let tickRunning = false;
   let persistChain = Promise.resolve();
+  // Open backoff window (a timestamp) and how many consecutive failures produced it.
+  let backoffUntil = 0;
+  let failureStreak = 0;
   // In-flight lane jobs, tracked so stop() can drain them before a caller reuses the dependencies
   // (result-file paths, worktrees, the state file) for a fresh poller instance.
   const running = new Set();
@@ -44,9 +61,25 @@ function createTickLoop({
 
   async function tick() {
     if (tickRunning || stopped) return;
+    if (shouldSkipTick({ now: now(), backoffUntil })) return;
     tickRunning = true;
     try {
-      await tickBody();
+      const outcome = await tickBody();
+      if (!outcome || outcome.failed !== true) {
+        failureStreak = 0;
+        backoffUntil = 0;
+        return;
+      }
+      failureStreak += 1;
+      const waitMs = nextBackoffMs({
+        attempt: failureStreak,
+        baseMs: backoffBaseMs,
+        maxMs: backoffMaxMs,
+        retryAfterMs: outcome.retryAfterMs,
+        random,
+      });
+      backoffUntil = now() + waitMs;
+      log.warn(`[${tag}] poll failed (${failureStreak} in a row) - backing off ${Math.round(waitMs / 1000)}s`);
     } finally {
       tickRunning = false;
     }
@@ -65,13 +98,15 @@ function createTickLoop({
   // result-file paths, worktrees and state file, or a duplicate job races the old one.
   async function stop() {
     stopped = true;
+    backoffUntil = 0;
+    failureStreak = 0;
     if (timer) clearIntervalFn(timer);
     timer = null;
     await Promise.allSettled([...running]);
     await persistChain;
   }
 
-  return { start, stop, tick, persist, track, isStopped: () => stopped };
+  return { start, stop, tick, persist, track, isStopped: () => stopped, backoffUntil: () => backoffUntil };
 }
 
 /**

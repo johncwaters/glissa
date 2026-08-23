@@ -281,10 +281,12 @@ function createPrPoller(deps) {
 
   async function runTick() {
     let dirty = false;
+    let failures = 0;
     const summaries = [];
     for (const projectId of projects) {
       const res = await tickProject(projectId).catch((e) => {
         log.warn(`[pr-poller] tick failed for ${projectId}: ${e.message}`);
+        failures += 1;
         return null;
       });
       if (!res) continue;
@@ -293,6 +295,11 @@ function createPrPoller(deps) {
     }
     if (dirty) await persist();
     onTickComplete({ type: 'pr-status', ts: now(), projects: summaries });
+    // EVERY project failing is a gh or network outage, not one bad repo, and re-polling it at full
+    // cadence for the length of the outage is what the backoff exists to stop. One project failing
+    // among several is that repo's problem and must not slow the others down.
+    if (projects.length > 0 && failures === projects.length) return { failed: true };
+    return null;
   }
 
   async function pruneOrphanWorktrees() {

@@ -390,3 +390,36 @@ test('resolveBuiltPack skips an unbuilt pack, a manifest-less dir, and a path-es
     assert.match(escaping.reason, /valid pack name/);
   });
 });
+
+// Publishing rotates through two renames, so a crash between them leaves no current/ at all - the
+// "atomic publish" claim overstated it (2026-08 review, section 8). What closes it is delivering the
+// PREVIOUS build in that window rather than skipping the pack, which would silently cost a session
+// its context over a window nobody caused.
+test('a crash mid-rotation still delivers the previous build', async () => {
+  await withFixture(async (ctx) => {
+    await ctx.build();
+    const first = await resolveBuiltPack('demo', { builtRoot: ctx.builtRoot });
+    assert.equal(first.dir, ctx.currentDir);
+
+    // Exactly the state a crash between the two renames leaves behind.
+    const packDir = path.dirname(ctx.currentDir);
+    fs.renameSync(ctx.currentDir, path.join(packDir, 'previous'));
+
+    const fallback = await resolveBuiltPack('demo', { builtRoot: ctx.builtRoot });
+    assert.equal(fallback.dir, path.join(packDir, 'previous'));
+    assert.equal(fallback.version, first.version);
+    assert.equal(fallback.reason, null);
+  });
+});
+
+test('with neither slot readable the skip still names what was wrong with current', async () => {
+  await withFixture(async (ctx) => {
+    await ctx.build();
+    const packDir = path.dirname(ctx.currentDir);
+    fs.rmSync(ctx.currentDir, { recursive: true, force: true });
+    fs.mkdirSync(path.join(packDir, 'previous'), { recursive: true });
+    const skipped = await resolveBuiltPack('demo', { builtRoot: ctx.builtRoot });
+    assert.equal(skipped.dir, null);
+    assert.match(skipped.reason, /not built/);
+  });
+});

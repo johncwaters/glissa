@@ -26,7 +26,7 @@ const { createPosthogApi } = require('./posthog-api');
 const { sendPosthogPing } = require('./posthog-telegram');
 const { emptyLaneStatus } = require('./lane-status');
 const { createLaneRunner } = require('./lane-runner');
-const { writeJsonAtomicSync } = require('./json-file');
+const { writeJsonAtomic } = require('./json-file');
 const { glissaHomeDir } = require('./config-store');
 const { DEFAULT_POSTHOG_REPORT_DIR } = require('./posthog-report');
 
@@ -612,8 +612,10 @@ function createPosthogWiring({
     try { return JSON.parse(fs.readFileSync(posthogStatePath, 'utf8')); }
     catch { return {}; }
   }
+  // ASYNC for the same reason as the PR lane's state write: a recurring write on the one shared event
+  // loop must not be synchronous. The tick loop's persist chain already serializes it.
   async function writePosthogState(state) {
-    writeJsonAtomicSync(posthogStatePath, state, { mkdir: true });
+    await writeJsonAtomic(posthogStatePath, state, { mkdir: true });
   }
 
   let forcedTickTimer = null;

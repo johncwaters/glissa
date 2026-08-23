@@ -227,7 +227,18 @@ async function clearStaleTmpDirs(packDir) {
   }
 }
 
-/** Publish a finished build: write into a tmp sibling, rotate current to previous, then rename in. */
+/*
+ * Publish a finished build: write into a tmp sibling, rotate current to previous, then rename in.
+ *
+ * The rotation is TWO renames, so there is a window in which no `current/` exists at all - a crash
+ * there used to leave the pack unresolvable, which "atomic publish" overstated (2026-08 review,
+ * section 8). It cannot be collapsed into one visible swap: Windows cannot atomically replace a
+ * non-empty directory by rename. What closes it is the other half of the review's suggestion, in
+ * resolveBuiltPack: during that window `previous/` holds the last good build (this rename just put it
+ * there), so a delivery that finds no `current/` falls back to it rather than skipping the pack. The
+ * order below is deliberate - current is retired to previous BEFORE the tmp goes in - because it is
+ * what makes that fallback point at the last good build rather than at nothing.
+ */
 async function publishBuild(builtRoot, name, outputs) {
   const packDir = path.join(builtRoot, name);
   await fsp.mkdir(packDir, { recursive: true });
@@ -377,9 +388,9 @@ async function describePackSpec(specPath) {
 }
 
 /** The manifest of a pack's current build, or null when it has never been built. */
-async function readBuiltManifest(name, { builtRoot = defaultBuiltRoot() } = {}) {
+async function readBuiltManifest(name, { builtRoot = defaultBuiltRoot(), slot = 'current' } = {}) {
   try {
-    const raw = await fsp.readFile(path.join(builtRoot, name, 'current', 'manifest.json'), 'utf8');
+    const raw = await fsp.readFile(path.join(builtRoot, name, slot, 'manifest.json'), 'utf8');
     return JSON.parse(raw);
   } catch {
     return null;
@@ -398,13 +409,32 @@ async function resolveBuiltPack(name, { builtRoot = defaultBuiltRoot() } = {}) {
   // though the caller normalizes: a `..` segment would resolve outside the built root.
   if (typeof name !== 'string' || !PACK_NAME_RE.test(name)) return skip('not a valid pack name');
 
+  /*
+   * `current` first, `previous` as the crash fallback. Publishing rotates through two renames, so a
+   * crash between them leaves no `current/` while `previous/` still holds the last good build; a
+   * delivery that skipped the pack there would silently cost a session its context over a window that
+   * is nobody's fault. Delivering the previous build instead is honest and self-healing: the next
+   * rebuild republishes `current/` and the staleness chip already reports the version gap.
+   */
   const currentDir = path.join(builtRoot, name, 'current');
-  const stats = await statOrNull(currentDir);
-  if (!stats || !stats.isDirectory()) return skip(`not built (no ${currentDir})`);
-
-  const manifest = await readBuiltManifest(name, { builtRoot });
-  if (!manifest || typeof manifest.version !== 'string') return skip(`manifest.json missing or unreadable in ${currentDir}`);
-  return { name, dir: currentDir, version: manifest.version, reason: null };
+  let firstRefusal = null;
+  for (const slot of ['current', 'previous']) {
+    const dir = path.join(builtRoot, name, slot);
+    const stats = await statOrNull(dir);
+    if (!stats || !stats.isDirectory()) {
+      firstRefusal = firstRefusal || `not built (no ${currentDir})`;
+      continue;
+    }
+    const manifest = await readBuiltManifest(name, { builtRoot, slot });
+    if (!manifest || typeof manifest.version !== 'string') {
+      firstRefusal = firstRefusal || `manifest.json missing or unreadable in ${dir}`;
+      continue;
+    }
+    return { name, dir, version: manifest.version, reason: null };
+  }
+  // The reason names what was wrong with `current`, which is what an operator is looking for: the
+  // previous slot is a crash fallback, not a thing they configured.
+  return skip(firstRefusal);
 }
 
 module.exports = {

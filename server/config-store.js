@@ -337,7 +337,15 @@ function createConfigStore({ settingsDefaults } = {}) {
     }
   }
 
-  let _lastSelfWriteTs = 0;
+  /*
+   * The exact bytes of the last write Glissa made to config.json, so the watcher can tell its own
+   * write apart from a hand-edit BY CONTENT rather than by clock. It used to be a 500ms window, and
+   * the window is the bug: an operator editing config.json within 500ms of a hook-driven persist (the
+   * resumeSessionId write happens on every hook payload carrying a new session id) had their edit
+   * silently dropped until they saved again. A signature suppresses exactly the echo and nothing else.
+   * A hand-edit that reproduces those bytes byte for byte is a no-op edit, so suppressing it is right.
+   */
+  let _lastSelfWriteContent = null;
 
   /**
    * Atomic read-modify-write: reads current config.json, passes it to mutatorFn
@@ -372,10 +380,12 @@ function createConfigStore({ settingsDefaults } = {}) {
       warnInvalidConfig('save config.json', mutatedValidation);
       return null;
     }
-    _lastSelfWriteTs = Date.now();
     try {
       const nextContent = JSON.stringify(freshConfig, null, 2);
       if (freshContent !== nextContent) writeBackupContent(`${configPath}.bak`, freshContent);
+      // Stamped BEFORE the write: fs.watch can deliver the event while writeTextAtomicSync is still
+      // returning, and a signature recorded afterwards would miss its own echo.
+      _lastSelfWriteContent = nextContent;
       writeTextAtomicSync(configPath, nextContent);
     } catch (err) {
       console.warn('[config] Failed to write config.json:', err.code || err.message);
@@ -478,6 +488,10 @@ function createConfigStore({ settingsDefaults } = {}) {
         console.warn('[config] Failed to read config.json:', err.code);
         return;
       }
+      // Our own write coming back. Compared by CONTENT, not by clock: a time window also swallowed a
+      // hand-edit that landed inside it. fs.watch can report one write twice, so the signature is
+      // kept rather than consumed.
+      if (_lastSelfWriteContent !== null && data === _lastSelfWriteContent) return;
       let newConfig;
       try {
         newConfig = JSON.parse(data);
@@ -509,14 +523,11 @@ function createConfigStore({ settingsDefaults } = {}) {
       // seeing hand-edits after the first save. Windows watches the directory either way.
       watcher = fs.watch(watchDir, (_event, filename) => {
         if (filename != null && !equalsIgnoringCaseOnWindows(path.basename(String(filename)), targetName)) return;
-        // Stamped when the EVENT arrives, not when the debounce fires: the two windows are both
-        // 500ms, so measuring at fire time always reads as "500ms since the self-write" and every
-        // save() (one per persisted session field) would reload its own write back through the
-        // whole settings-reload path.
-        const eventTs = Date.now();
+        // The debounce stays: one write is several fs events, and an editor's save is a burst. What
+        // it no longer does is DECIDE anything - the self-write test moved to a content signature in
+        // handleConfigChange, so an edit landing inside this window is read and applied like any other.
         clearTimeout(reloadTimer);
         reloadTimer = setTimeout(() => {
-          if (eventTs - _lastSelfWriteTs < 500) return;
           fs.readFile(configPath, 'utf8', handleConfigChange);
         }, 500);
       });

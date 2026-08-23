@@ -68,6 +68,8 @@ const DISMISSIBLE_STATES = new Set([STATES.WAITING, STATES.COMPLETE]);
 // into one signature recompute. The triggers are all event-driven (no poll): the per-worktree gitdir
 // fs.watch, the turn-end hook, and the integration-branch reflog fs.watch.
 const WORKTREE_CHECK_DEBOUNCE_MS = 400;
+// Transitions kept per session for the debug overlay. Bounded because a session lives for days.
+const AUDIT_LOG_MAX = 200;
 
 // Stop one fs.watch listener and hand back the null its field should hold. Best-effort: a watcher whose
 // directory already vanished throws from close(), which must never break a teardown.
@@ -657,6 +659,20 @@ class Session extends EventEmitter {
     const active = this._tasks.activeCount();
     this._agentBreakdown = this._tasks.getBreakdown();
     return active;
+  }
+
+  /*
+   * The ONE append path for the audit log, so the cap cannot be bypassed. It was: the ordinary
+   * transition trimmed after pushing, while the SELF-transition branch above pushed and returned, so
+   * a session repeating a self-transition (a restart loop firing process_exit_fail against an already
+   * FAILED state) grew the array without limit until something else transitioned. Found by the 2026-08
+   * review pass.
+   */
+  _pushAuditEntry(entry) {
+    this.auditLog.push(entry);
+    if (this.auditLog.length > AUDIT_LOG_MAX) {
+      this.auditLog.splice(0, this.auditLog.length - AUDIT_LOG_MAX);
+    }
   }
 
   // Append one decision-trace entry. Mirrored to the forensic recorder only when it is genuinely
@@ -1957,7 +1973,7 @@ class Session extends EventEmitter {
 
     // Self-transition: record but skip hooks
     if (from === to) {
-      this.auditLog.push({
+      this._pushAuditEntry({
         from,
         to,
         event,
@@ -2002,17 +2018,13 @@ class Session extends EventEmitter {
     }
 
     // Record in audit log (capped to prevent unbounded growth)
-    const entry = {
+    this._pushAuditEntry({
       from,
       to,
       event,
       detail: detail || null,
       timestamp: Date.now(),
-    };
-    this.auditLog.push(entry);
-    if (this.auditLog.length > 200) {
-      this.auditLog.splice(0, this.auditLog.length - 200);
-    }
+    });
 
     // Record state transition
     if (this._recorder) {

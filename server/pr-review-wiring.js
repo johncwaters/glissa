@@ -24,7 +24,7 @@ const { createPrGh } = require('./pr-gh');
 const { sendPrPing } = require('./pr-telegram');
 const { emptyLaneStatus } = require('./lane-status');
 const { createLaneRunner } = require('./lane-runner');
-const { writeJsonAtomicSync } = require('./json-file');
+const { writeJsonAtomic } = require('./json-file');
 const { glissaHomeDir } = require('./config-store');
 
 // Belt-and-suspenders deny-list for the headless PR-review sessions (they run under
@@ -181,8 +181,12 @@ function createPrReviewWiring({
     try { return JSON.parse(fs.readFileSync(prStatePath, 'utf8')); }
     catch { return {}; }
   }
+  // ASYNC on purpose: this is a recurring path (every tick that changes a PR's phase), and all
+  // sessions share one event loop, so a synchronous whole-file write here stalls hook replies, PTY
+  // streaming and control traffic for its duration. Serialization is the tick loop's persist chain
+  // (server/lane-runner.js), which already awaits this, so ordering is unchanged.
   async function writePrState(state) {
-    writeJsonAtomicSync(prStatePath, state, { mkdir: true });
+    await writeJsonAtomic(prStatePath, state, { mkdir: true });
   }
 
   // Started at boot and re-evaluated on every settings reload whose prReview/telegram key changed
