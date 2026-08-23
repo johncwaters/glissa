@@ -28,14 +28,13 @@ const {
   createBoundedKeySet,
   dismissFeedbackInput,
   dispatchMemoryInputs,
-  displayLineOfFix,
-  findingIdOf,
   fixFeedbackInput,
   intentMemoryInput,
   latestIntentHeads,
   projectTagFor,
   readDismissParams,
   servedFeedbackInput,
+  servedFindingOf,
   servedKey,
   slotKeyOf,
 } = require('./core/visions-memory-core');
@@ -272,7 +271,7 @@ function createVisionsWiring({
   function queueMemoryWrite(work) {
     const store = memoryStoreOf();
     if (!store) return;
-    memoryChain = memoryChain.then(() => work(store)).catch((error) => warn(`memory write failed: ${error.message}`));
+    memoryChain = memoryChain.then(() => work(store)).catch((error) => warn(`memory write failed: ${String(error?.message || error)}`));
   }
 
   function projectTagForUri(uri) {
@@ -305,9 +304,12 @@ function createVisionsWiring({
     queueMemoryWrite(async (store) => {
       seedIntentHeads(store);
       const key = slotKeyOf(projectTag);
-      const record = await store.append(intentMemoryInput({
+      const input = intentMemoryInput({
         text, project: projectTag, supersedes: intentHeadByProject.get(key) || null,
-      }));
+      });
+      // Nothing to remember is not a refusal, so it leaves the chain head exactly where it was.
+      if (!input) return;
+      const record = await store.append(input);
       // A refused write leaves the chain naming a head no later record could resolve, so it starts over.
       if (!record) intentHeadByProject.delete(key);
       if (record) intentHeadByProject.set(key, record.id);
@@ -319,10 +321,10 @@ function createVisionsWiring({
     const project = projectTagForUri(uri);
     const inputs = [];
     for (const fix of fixes) {
-      const id = findingIdOf(fix);
+      const { id, line } = servedFindingOf(fix);
       if (!servedFindingKeys.add(servedKey({ uri, version, id }))) continue;
       inputs.push(servedFeedbackInput({
-        uri, project, id, line: displayLineOfFix(fix),
+        uri, project, id, line,
       }));
     }
     rememberRecords(inputs);

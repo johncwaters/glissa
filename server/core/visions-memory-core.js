@@ -69,9 +69,14 @@ function characterOfFix(fix) {
 }
 
 // Fixes carry no id of their own, so the served identity is the rule plus where it sits.
-function findingIdOf(fix) {
+function servedFindingOf(fix) {
   const code = sanitizeOneLine(fix?.code == null ? 'finding' : fix.code, 60) || 'finding';
-  return `${code}@${displayLineOfFix(fix)}:${characterOfFix(fix)}`;
+  const line = displayLineOfFix(fix);
+  return { id: `${code}@${line}:${characterOfFix(fix)}`, line };
+}
+
+function findingIdOf(fix) {
+  return servedFindingOf(fix).id;
 }
 
 function servedKey({ uri, version, id }) {
@@ -227,6 +232,7 @@ module.exports = {
   readDismissParams,
   sanitizeOneLine,
   servedFeedbackInput,
+  servedFindingOf,
   servedKey,
   slotKeyOf,
 };

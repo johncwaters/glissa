@@ -178,6 +178,22 @@ test('a refused intent write restarts the chain rather than naming a head that d
   assert.deepEqual(store.appended.map((input) => input.supersedes), [null, null]);
 });
 
+test('an intent proposal with nothing to remember leaves the chain head where it was', async (t) => {
+  const store = fakeMemoryStore();
+  const driver = harness({ store });
+  t.after(() => driver.wiring.stop());
+
+  driver.wiring.applyModelIntent('first', PROJECT_ID);
+  driver.wiring.applyModelIntent('   ', PROJECT_ID);
+  driver.wiring.applyModelIntent('second', PROJECT_ID);
+  await driver.wiring.whenMemoryIdle();
+
+  assert.deepEqual(store.appended.map((input) => [input.text, input.supersedes]), [
+    ['first', null],
+    ['second', 'm-1'],
+  ]);
+});
+
 test('dispatch comments and the tier 4 hand are remembered as episodic model knowledge', async (t) => {
   const store = fakeMemoryStore();
   const driver = dispatchingHarness(store, () => dispatchResult({ intent: null }));
@@ -329,6 +345,18 @@ test('every writer is inert when no memory store is configured', async (t) => {
 
   assert.deepEqual(driver.warnings, []);
   assert.equal(driver.wiring.getIntentFor(PROJECT_ID).text, 'nothing to write to');
+});
+
+test('a store rejecting with a non-Error still names something in its one warning', async (t) => {
+  const store = fakeMemoryStore();
+  store.append = () => Promise.reject('the canon is unwritable');
+  const driver = harness({ store });
+  t.after(() => driver.wiring.stop());
+
+  driver.wiring.applyModelIntent('a statement', PROJECT_ID);
+  await driver.wiring.whenMemoryIdle();
+
+  assert.deepEqual(driver.warnings, ['[visions] memory write failed: the canon is unwritable']);
 });
 
 test('a store that throws costs one warning and never reaches the relay or the dispatch path', async (t) => {
