@@ -68,6 +68,7 @@ const { normalizeRemoteConfig, validateRemoteConfig, decideBindHost } = require(
 const { createClientPresence } = require('./core/client-presence');
 const { normalizePackNames } = require('./core/pack-core');
 const { createPackService } = require('./pack-service');
+const { createMillWiring } = require('./mill-wiring');
 const {
   DEFAULT_INTERVAL_HOURS, DEFAULT_TIMEOUT_SECONDS, createDistillSpawn, createPackDistiller,
 } = require('./pack-distiller');
@@ -1070,6 +1071,16 @@ function createBackend(httpServer, options = {}) {
     for (const sess of sessions.values()) sess.notePackUpdate(name, version);
   });
 
+  // Mill tab (server/mill-wiring.js): a pull surface over the same specs and built packs the service
+  // above maintains. No timer, no durable state and nothing constructed per session, so it is always
+  // wired: the cost is one spec walk per request, and only when a dashboard asks.
+  const mill = createMillWiring({
+    config,
+    listSessions: () => [...sessions.values()].map((sess) => sess.toSnapshot()),
+    getWatcherCount: () => packService._watcherCount(),
+    ...(options.millWiringOptions || {}),
+  });
+
   // Usage tracking lane (server/usage-wiring.js): on by default, but started LAZILY on the first
   // control connection (the initial transcript scan is the expensive pass and nobody is watching at
   // cold boot). Spawns nothing: it reads the Claude Code JSONL transcripts and nothing else.
@@ -1641,6 +1652,8 @@ function createBackend(httpServer, options = {}) {
     // Official plan limits are machine-wide, so the freshest snapshot is replayed to every client that
     // connects rather than being rebuilt per session.
     getPlanLimits: () => usage.getPlanLimitsMessage(),
+    // Context mill: assembled on demand, and the last one replayed to a connecting client.
+    millReport: mill,
   });
 
   // Visions connect-time repair: findings are current state, so one snapshot beats replay retention (plan-limits precedent); registered after registerControlHandlers so the snapshot frame stays first

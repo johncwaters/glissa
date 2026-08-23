@@ -400,6 +400,9 @@ function registerControlHandlers(controlWss, deps) {
     getUsageReport = null,
     requestUsageReport = null,
     getPlanLimits = null,
+    // Context mill report accessors (optional - undefined in older callers/tests, which then replay
+    // nothing and refuse a report request).
+    millReport = null,
     // Replay of transient broadcasts missed across a reconnect gap (optional - undefined in
     // older callers/tests; connect then behaves as before, snapshot-only).
     controlReplayLog = null,
@@ -922,6 +925,22 @@ function registerControlHandlers(controlWss, deps) {
     ws.send(JSON.stringify(report));
   }
 
+  /*
+   * The Mill tab's pull: one report per request, assembled on demand from the pack specs, their
+   * manifests and the live sessions. Replied to the requesting socket only, like the usage report.
+   */
+  function handleRequestMillReport(msg, ws) {
+    if (!millReport) {
+      ws.send(JSON.stringify({ type: 'mill-report', requestId: msg.requestId || null, error: 'The context mill is not running' }));
+      return;
+    }
+    // The build is async, so the asking socket may be gone by the time it lands.
+    return millReport.requestReport(msg, (payload) => {
+      if (ws.readyState === 1) ws.send(JSON.stringify(payload));
+    });
+  }
+
+
   function handleShutdown() {
     console.log('[control] Shutdown requested via UI');
     broadcastControl({ type: 'shutting-down' });
@@ -956,6 +975,7 @@ function registerControlHandlers(controlWss, deps) {
     'posthog-issue-action': handlePosthogIssueAction,
     'posthog-archive-investigation': handlePosthogArchiveInvestigation,
     'request-usage-report': handleRequestUsageReport,
+    'request-mill-report': handleRequestMillReport,
     'kill':             (msg) => { const s = findSession(msg); if (s) s.killSession(); },
     'start-session':    (msg) => {
       const s = findSession(msg);
@@ -1068,6 +1088,12 @@ function registerControlHandlers(controlWss, deps) {
     const usageReport = typeof getUsageReport === 'function' ? getUsageReport() : null;
     if (usageReport) {
       ws.send(JSON.stringify(usageReport));
+    }
+    // Context mill: replayed from its cache only, for the same reason the usage report is. A client
+    // connecting before anyone has asked gets nothing and pulls its own.
+    const millCached = millReport ? millReport.getCachedReport() : null;
+    if (millCached) {
+      ws.send(JSON.stringify(millCached));
     }
     // Official plan limits: account-wide, and pushed only when a percentage actually moves, so a client
     // that connects between statusLine callbacks would otherwise see nothing until the next turn.

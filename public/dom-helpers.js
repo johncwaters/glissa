@@ -50,7 +50,7 @@ export function observeHeaderHeight(barEl) {
 }
 
 // ── Panel chrome ─────────────────────────────────────────────
-// The four tab panels (Radar, PRs, Usage, Visions) share a section head and a summary stat chip that
+// The five tab panels (Radar, PRs, Usage, Mill, Visions) share a section head and a summary stat chip that
 // differ only in their class prefix, and each used to carry its own copy. `prefix` names the panel so
 // the existing per-panel CSS is unchanged.
 

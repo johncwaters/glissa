@@ -34,6 +34,7 @@ const PREFS = {
   radarAttentionAck: asString(''),
   prsAttentionAck: asString(''),
   usageAttentionAck: asString(''),
+  millAttentionAck: asString(''),
 };
 
 function load() {
@@ -98,6 +99,9 @@ export const setPrsAttentionAck = (signature) => write('prsAttentionAck', signat
 
 export const getUsageAttentionAck = () => read('usageAttentionAck');
 export const setUsageAttentionAck = (signature) => write('usageAttentionAck', signature);
+
+export const getMillAttentionAck = () => read('millAttentionAck');
+export const setMillAttentionAck = (signature) => write('millAttentionAck', signature);
 
 export const getLastFocusedSessionId = () => read('lastFocusedSessionId');
 export const setLastFocusedSessionId = (id) => write('lastFocusedSessionId', id);

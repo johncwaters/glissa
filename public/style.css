@@ -2550,6 +2550,206 @@ a.pr-title:hover {
   font-size: 11px;
 }
 
+/* ── Mill view ──────────────────────────────────────────────── */
+/* The context mill: one section per pack, each a short stack of lines plus a budget meter and two row
+   lists (deliveries, drifted derived files). Same page rhythm and tokens as the Usage view, without its
+   table machinery: nothing here is a sortable numeric grid. */
+.mill-view {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  width: 100%;
+  max-width: var(--content-max);
+  margin: 0 auto;
+  padding: clamp(16px, 2.5vw, 36px) clamp(12px, 2vw, 32px) 48px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.mill-content {
+  max-width: 1080px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.mill-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mill-section-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  border-bottom: 1px solid var(--border-dim);
+  padding-bottom: 6px;
+}
+
+.mill-section-title {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-dim);
+}
+
+.mill-section-hint {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.mill-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+}
+
+.mill-stat {
+  white-space: nowrap;
+  color: var(--text);
+}
+
+.mill-stat-value {
+  font-variant-numeric: tabular-nums;
+}
+
+.mill-stat[data-tone="warn"] .mill-stat-value {
+  color: var(--state-waiting);
+  font-weight: 600;
+}
+
+.mill-stat[data-tone="crit"] .mill-stat-value {
+  color: var(--state-failed);
+  font-weight: 600;
+}
+
+.mill-stat-label {
+  color: var(--text-muted);
+  margin-left: 5px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.mill-meta {
+  margin: 0;
+  max-width: 78ch;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.mill-meta[data-tone="warn"] { color: var(--state-waiting); }
+.mill-meta[data-tone="crit"] { color: var(--state-failed); }
+
+/* A line with nothing to say still spends a gap in a flex column. */
+.mill-meta:empty { display: none; }
+
+.mill-warning {
+  margin: 0;
+  max-width: 78ch;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--state-waiting);
+}
+
+.mill-empty {
+  margin: 0;
+  max-width: 78ch;
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--text-muted);
+}
+
+.mill-budget {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.mill-meter {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border-dim);
+  overflow: hidden;
+}
+
+.mill-meter-fill {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+
+.mill-meter[data-tone="warn"] .mill-meter-fill { background: var(--state-waiting); }
+.mill-meter[data-tone="crit"] .mill-meter-fill { background: var(--state-failed); }
+
+.mill-deliveries,
+.mill-distills,
+.mill-outputs {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border-dim);
+  border-radius: var(--radius);
+  background: color-mix(in oklab, var(--bg) 60%, transparent);
+}
+
+.mill-delivery,
+.mill-distill,
+.mill-output {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  padding: 5px 12px;
+  font-size: 11px;
+  border-bottom: 1px solid var(--border-dim);
+}
+
+.mill-delivery:last-child,
+.mill-distill:last-child,
+.mill-output:last-child { border-bottom: none; }
+
+.mill-delivery-name,
+.mill-distill-output,
+.mill-output-path {
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.mill-delivery-detail,
+.mill-distill-status,
+.mill-output-tokens {
+  margin-left: auto;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The one thing on a delivery row worth spotting from across the page. */
+.mill-delivery-tag {
+  padding: 0 6px;
+  border-radius: var(--radius);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--state-waiting);
+  border: 1px solid color-mix(in oklab, var(--state-waiting) 55%, transparent);
+}
+
+.mill-delivery[data-tone="warn"] .mill-delivery-detail,
+.mill-distill[data-tone="warn"] .mill-distill-status { color: var(--state-waiting); }
+
+/* A row list long enough to bury the sections under it scrolls in place instead. */
+.mill-outputs {
+  max-height: 220px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
 /* ── Usage view ─────────────────────────────────────────────── */
 /* Same page rhythm and tokens as the Radar and PR views. Its own selectors because usage is the one
    surface built out of dense numeric TABLES rather than attention rows, so it needs tabular alignment
@@ -5039,11 +5239,12 @@ html[data-layout="phone"] .phone-shell[data-keyboard="open"] .phone-key-strip:no
 .phone-key:active { color: var(--text-head); border-color: var(--border-hover); }
 .phone-key:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-/* ── Review, Radar, PRs and Usage screens (adopted desktop panels) ── */
+/* ── Review, Radar, PRs, Usage, Mill and Visions screens (adopted desktop panels) ── */
 .phone-review,
 .phone-radar,
 .phone-prs,
 .phone-usage,
+.phone-mill,
 .phone-visions { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
 /* The docked column's fixed flex basis is meaningless as a full screen, and there is no neighbour to
    resize against or border off. */
@@ -5053,6 +5254,7 @@ html[data-layout="phone"] .review-sidebar-body { overscroll-behavior: contain; }
 .phone-radar > .radar-view,
 .phone-prs > .pr-view,
 .phone-usage > .usage-view,
+.phone-mill > .mill-view,
 .phone-visions > .visions-view { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 /* ── Usage on a phone ──
    The desktop page is numeric tables at 11px, which is unreadable on a phone but does not need
@@ -5077,6 +5279,23 @@ html[data-layout="phone"] .usage-heatmap-days { grid-template-rows: repeat(7, 13
 html[data-layout="phone"] .usage-heatmap-cell { width: 13px; height: 13px; }
 html[data-layout="phone"] .usage-heatmap-day { line-height: 13px; }
 html[data-layout="phone"] .usage-plan-window .usage-meter { height: 8px; }
+
+/* ── Mill on a phone ──
+   Same treatment as Usage: grow the type, and let each row list wrap rather than pushing its detail
+   column off the right edge. */
+html[data-layout="phone"] .mill-view { padding: 14px 12px 24px; font-size: 13px; }
+html[data-layout="phone"] .mill-content { gap: 24px; }
+html[data-layout="phone"] .mill-section-title { font-size: 12px; }
+html[data-layout="phone"] .mill-meta,
+html[data-layout="phone"] .mill-warning,
+html[data-layout="phone"] .mill-empty { font-size: 12px; }
+html[data-layout="phone"] .mill-delivery,
+html[data-layout="phone"] .mill-distill,
+html[data-layout="phone"] .mill-output { font-size: 12px; }
+html[data-layout="phone"] .mill-delivery-detail,
+html[data-layout="phone"] .mill-distill-status,
+html[data-layout="phone"] .mill-output-tokens { margin-left: 0; }
+html[data-layout="phone"] .mill-meter { height: 8px; }
 
 /* Thumb-sized controls: these are the only tappable things on the screen besides the sort headers and
    the per-day toggles, so they get a real target rather than the desktop's 2px padding. */
