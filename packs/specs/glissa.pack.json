@@ -1,8 +1,7 @@
 {
   "name": "glissa",
-  "description": "Glissa's own design docs plus a distilled architecture brief, for an agent working on this repo.",
+  "description": "A distilled architecture brief of Glissa, for an agent working on this repo. The raw docs stay in the checkout; this pack carries only the distilled orientation.",
   "sources": [
-    { "glob": "../docs/*.md", "exclude": ["**/archive/**", "**/plan-*.md"] },
     { "path": "sources/glissa/derived/architecture-brief.md", "optional": true }
   ],
   "rules": [
@@ -21,5 +20,5 @@
       "instructions": "Write a one to two page architecture brief of Glissa for an agent seeing this repo for the first time. Cover: what Glissa is and the problem it solves; the subsystems (server, session, detection, notifications, packs, public dashboard) and what each owns; the key seams (pure core plus thin IO shell, EventEmitter between modules, the dual WebSocket transport, the spawn path through node-pty); the status detection design in brief (hooks are authoritative, the OSC-0 title is a fallback, the background-agent completion gate exists and why); and the opt-in lanes (PR auto-review, PostHog investigation, context packs). Close with a short pointer list naming which file or doc to read for each subsystem. Be specific and terse: name real files and real constants. Do not restate the source docs at length, and do not invent behavior the sources do not describe."
     }
   ],
-  "budgetTokens": 12000
+  "budgetTokens": 6000
 }
