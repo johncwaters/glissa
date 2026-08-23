@@ -37,6 +37,18 @@ function yieldTick() {
   return new Promise((resolve) => { setImmediate(resolve); });
 }
 
+// The oldest moment the lane ledger can speak for, or null when it holds nothing to speak with.
+function earliestLaneEntryMs(ledger) {
+  if (!ledger || typeof ledger.snapshot !== 'function') return null;
+  let earliest = null;
+  for (const entry of ledger.snapshot()) {
+    const ts = Number(entry?.ts);
+    if (!Number.isFinite(ts)) continue;
+    if (earliest === null || ts < earliest) earliest = ts;
+  }
+  return earliest;
+}
+
 function createMemoryIngest({
   store,
   stateDir = store?.dir || null,
@@ -45,6 +57,14 @@ function createMemoryIngest({
   env = process.env,
   fsPromises = nodeFs.promises,
   laneMap = null,
+  /*
+   * The oldest moment the lane ledger can speak for. A transcript last written BEFORE it is one the
+   * ledger has no entry for and never will, so the live tail's primary feedback-loop exclusion cannot
+   * judge it; a pr-review or Radar session from before the ledger existed would otherwise be remembered
+   * as the operator's own work. Absent (no ledger, or an empty one) skips nothing, which is the
+   * behavior of a machine that has never run one of those lanes.
+   */
+  laneFloorMs = null,
   nowFn = Date.now,
   setTimeoutFn = setTimeout,
   clearTimeoutFn = clearTimeout,
@@ -67,7 +87,7 @@ function createMemoryIngest({
     : null;
 
   const counts = {
-    seen: 0, queued: 0, written: 0, rejected: 0, dropped: 0,
+    seen: 0, queued: 0, written: 0, rejected: 0, dropped: 0, offsetsSkipped: 0, laneSkipped: 0,
   };
   let queued = [];
   // Offsets a queued batch has not written yet: committing early would lose those records on a crash.
@@ -102,9 +122,27 @@ function createMemoryIngest({
     return loadPromise;
   }
 
+  /*
+   * Under the canon lock, always. Two processes write this file (a live server's consumer and the
+   * `glissa memory backfill` CLI) and both write it WHOLE, so an unlocked last-writer-wins could move an
+   * offset forward over a range the loser had not read and lose that transcript range for good. The hold
+   * is one atomic write long, and it is `reentrant` so a write inside a backfill rides the lock that pass
+   * already holds. A write that cannot take the lock is SKIPPED, which costs a re-read and never a range.
+   */
   function persistTailState() {
     if (!writer) return Promise.resolve();
-    return writer.write(tailState, () => `${JSON.stringify(tailState, null, 2)}\n`);
+    if (typeof store.withCanonLock !== 'function') {
+      return writer.write(tailState, () => `${JSON.stringify(tailState, null, 2)}\n`);
+    }
+    const payload = tailState;
+    return store.withCanonLock(
+      () => writer.write(payload, () => `${JSON.stringify(payload, null, 2)}\n`),
+      { reentrant: true },
+    ).then((held) => {
+      if (held.locked) return;
+      counts.offsetsSkipped += 1;
+      log.debugNote(() => `tail state write skipped: the canon lock was held (${statePath})`);
+    });
   }
 
   function commitTail(tail) {
@@ -246,6 +284,8 @@ function createMemoryIngest({
     }
     let left = budget - 1;
     for (const entry of entries) {
+      // Inside the loop, not only on entry: one directory of ten thousand transcripts is the whole cap.
+      if (found.length >= maxBackfillFiles) return left;
       if (entry.isFile() && isUsageFile(root.vendor, entry.name)) {
         found.push({ root, dir, file: path.join(dir, entry.name) });
         continue;
@@ -290,9 +330,24 @@ function createMemoryIngest({
   }
 
   // Cut at the last newline IN BYTES, so a chunk boundary inside a multi-byte character corrupts nothing.
-  async function backfillFile(entry, budgetBytes, lanes) {
+  function readLaneFloor() {
+    if (typeof laneFloorMs !== 'function') return null;
+    try {
+      const floor = laneFloorMs();
+      return Number.isFinite(floor) ? floor : null;
+    } catch (error) {
+      log.warn(`lane floor failed: ${error.message}`);
+      return null;
+    }
+  }
+
+  async function backfillFile(entry, budgetBytes, lanes, floorMs) {
     const stat = await statOrNull(entry.file);
     if (!stat || !stat.isFile()) return { bytesRead: 0, partial: false, missing: true };
+    if (floorMs !== null && stat.mtimeMs < floorMs) {
+      counts.laneSkipped += 1;
+      return { bytesRead: 0, partial: false, missing: false };
+    }
     const resume = core.decideResumeRead(tailState.files[entry.file], stat);
     if (resume.action !== 'resume' && resume.action !== 'cold') {
       commitTail({ path: entry.file, size: stat.size, mtimeMs: stat.mtimeMs, offset: resume.start });
@@ -353,6 +408,7 @@ function createMemoryIngest({
   async function runBackfill(budgetBytes) {
     await loadTailState();
     const lanes = typeof laneMap === 'function' ? laneMap() : null;
+    const floorMs = readLaneFloor();
     const found = [];
     let dirBudget = maxBackfillDirs;
     for (const root of await backfillRoots()) {
@@ -369,7 +425,7 @@ function createMemoryIngest({
         partial = true;
         break;
       }
-      const outcome = await backfillFile(entry, remaining, lanes);
+      const outcome = await backfillFile(entry, remaining, lanes, floorMs);
       if (outcome.missing) gone.push(entry.file);
       bytesRead += outcome.bytesRead;
       files += 1;
@@ -381,7 +437,8 @@ function createMemoryIngest({
     await whenIdle();
     log.note(
       `backfill read ${bytesRead} byte(s) across ${files} file(s): `
-      + `${counts.written} written, ${counts.rejected} rejected${partial ? ', budget reached' : ''}`
+      + `${counts.written} written, ${counts.rejected} rejected, `
+      + `${counts.laneSkipped} predating the lane ledger${partial ? ', budget reached' : ''}`
     );
     return { ok: true, reason: null, files, bytesRead, partial };
   }
@@ -412,6 +469,7 @@ function createMemoryIngest({
 
 module.exports = {
   DEFAULT_BACKFILL_BYTE_BUDGET,
+  earliestLaneEntryMs,
   DEFAULT_BACKFILL_CHUNK_BYTES,
   TAIL_STATE_FILE,
   createMemoryIngest,

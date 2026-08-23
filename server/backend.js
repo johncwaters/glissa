@@ -62,7 +62,7 @@ const { normalizeShapePath } = require('./core/visions-scope-core');
 const { createIngestLane } = require('./ingest-wiring');
 const { resolveIngestConfig } = require('./core/ingest-core');
 const { createMemoryStore } = require('./memory-store');
-const { createMemoryIngest } = require('./memory-ingest-wiring');
+const { createMemoryIngest, earliestLaneEntryMs } = require('./memory-ingest-wiring');
 const { resolveMemoryConfig } = require('./core/memory-core');
 const { createUsageWiring, resolveUsageConfig } = require('./usage-wiring');
 const { createLaneLedger } = require('./usage-lane-ledger');
@@ -1150,6 +1150,8 @@ function createBackend(httpServer, options = {}) {
       logger: console,
       // The same ledger the ring consumer reads: an ephemeral lane's own transcript is never remembered.
       laneMap: () => laneLedger.laneMap(),
+      // How far back that exclusion can actually speak, so the backfill skips transcripts predating it.
+      laneFloorMs: () => earliestLaneEntryMs(laneLedger),
       debug: () => configStore.getSettings().debugMode === true,
     })
     : null;

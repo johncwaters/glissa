@@ -16,14 +16,7 @@
 const SOURCE = 'agentLogs';
 // Absent from ingest-core's KINDS_BY_SOURCE on purpose, so no routing slip puts prompt text on the wire.
 const PROMPT_KIND = 'agent-prompt';
-/*
- * A MEMORY bound and nothing else (docs/plan-ingestion.md, M11). Summarizing is the ring's job:
- * `normalizeEvent` scrubs, THEN folds, THEN slices to 400, and a cut taken here would run ahead of the
- * scrub. That is how a quoted secret loses its closing quote, leaving the scrub's quoted alternative
- * unmatched and its bare-token alternative taking only the first WORD of the value, so the rest of it
- * publishes as innocent words. An agent tool target carries a `command`, so `Bash export TOKEN="..."`
- * leaks exactly the way the shell source's own pre-slice did.
- */
+// The line-aligned window boundRaw cuts within; a line longer than it is handed on whole, never split.
 const MAX_RAW_CHARS = 4000;
 
 // The first of these a tool's input carries becomes its bounded target, so `Read` reads as the file it
@@ -40,8 +33,16 @@ const TOOL_TARGET_KEYS = Object.freeze([
  * session's transcript directory after that cwd with every separator collapsed to one dash. Matching
  * the marker as a segment therefore catches both the raw cwd and the encoded directory name.
  */
-const DISPATCH_WORKDIR_MARKER = 'glissa-visions';
-const DISPATCH_WORKDIR_PATTERN = new RegExp(`(^|[\\\\/-])${DISPATCH_WORKDIR_MARKER}-`, 'i');
+/*
+ * The lane markers, all of them: a visions dispatch runs in `glissa-visions-<hex>` (visions-dispatch.js
+ * makeWorkDir) and the PR-review and Radar fix lanes run in `glissa-wt-<lane>-<hex>` (git-workspace.js
+ * createBody). HONEST LIMIT: those two lanes pass a `worktreeBase` in production, and the directory is
+ * then named after the REPO exactly like an operator's own session worktree, so no shape rule can tell
+ * them apart. The usage-lane ledger is what excludes those, which is why it is the primary mechanism and
+ * this is the second layer.
+ */
+const DISPATCH_WORKDIR_MARKERS = Object.freeze(['glissa-visions', 'glissa-wt-pr-review', 'glissa-wt-radar-fix']);
+const DISPATCH_WORKDIR_PATTERN = new RegExp(`(^|[\\\\/-])(${DISPATCH_WORKDIR_MARKERS.join('|')})-`, 'i');
 
 function isDispatchWorkdir(candidate) {
   if (typeof candidate !== 'string' || !candidate) return false;
@@ -64,20 +65,24 @@ function str(value) {
 }
 
 /**
- * The one bound left on text heading for a ring, and it never folds. A scrub value pattern stops at a
- * line break by construction, so a LINE-ALIGNED cut is the one cut that cannot split a value; the
- * character cut below it is the fallback for a single line longer than the whole bound, and it is the
- * known limit this source accepts (docs/plan-ingestion.md, "Privacy and trust posture").
+ * LINE-ALIGNED only, and it never folds. A scrub value pattern stops at a line break by construction, so
+ * a line-aligned cut is the one cut that cannot split a value. There used to be a character cut under it
+ * for a single line longer than the bound, and that cut ran AHEAD of every scrub downstream: it is how a
+ * quoted secret loses its closing quote, leaving the scrub's quoted alternative unmatched and its bare
+ * token alternative taking only the first WORD of the value. So a line with no break to cut at is handed
+ * on WHOLE and cut after the scrub instead, line-aligned, by ingest-core for the ring and by
+ * memory-core's capTextLineAligned for a durable record. It is still bounded, by the tail's own
+ * catch-up read, and a caller that needs a hard bound drops the value rather than splitting it.
  *
- * BOTH break characters count. A vendor writing bare carriage returns would otherwise fall straight to
- * the character cut, and a CRLF cut on the newline alone would leave the carriage return dangling.
+ * BOTH break characters count. A vendor writing bare carriage returns would otherwise never cut at all,
+ * and a CRLF cut on the newline alone would leave the carriage return dangling.
  */
 function boundRaw(value, max = MAX_RAW_CHARS) {
   const text = String(value == null ? '' : value);
   if (text.length <= max) return text;
   const lastBreak = Math.max(text.lastIndexOf('\n', max), text.lastIndexOf('\r', max));
   if (lastBreak > 0) return text.slice(0, lastBreak).replace(/[\r\n]+$/, '');
-  return text.slice(0, max);
+  return text;
 }
 
 // Grok stamps whole seconds; Claude and Codex ship ISO strings.
@@ -279,7 +284,10 @@ function appendChunk(vendorState, text, field) {
   if (!addition) return { [field]: held };
   const remaining = MAX_RAW_CHARS - held.length - 1;
   if (remaining <= 0) return { [field]: held };
-  return { [field]: `${held} ${boundRaw(addition, remaining)}` };
+  const bounded = boundRaw(addition, remaining);
+  // An accumulator has to stay bounded, and dropping a chunk beats splitting a value mid-line to fit it.
+  if (bounded.length > remaining) return { [field]: held };
+  return { [field]: `${held} ${bounded}` };
 }
 
 /*
@@ -382,6 +390,7 @@ function mapAgentLine({ vendor, rawLine, ctx = {}, vendorState = null, includeUs
 }
 
 module.exports = {
+  DISPATCH_WORKDIR_MARKERS,
   MAX_RAW_CHARS,
   PROMPT_KIND,
   isDispatchWorkdir,

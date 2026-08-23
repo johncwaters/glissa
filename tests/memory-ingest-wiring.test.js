@@ -22,7 +22,7 @@ const path = require('node:path');
 const { createAgentLogIngest } = require('../server/ingest-agent-logs');
 const { createMemoryIngest } = require('../server/memory-ingest-wiring');
 const { createMemoryStore } = require('../server/memory-store');
-const { resolveMemoryConfig } = require('../server/core/memory-core');
+const { hashMemoryLine, resolveMemoryConfig } = require('../server/core/memory-core');
 
 function makeHomes() {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-memingest-'));
@@ -67,7 +67,11 @@ function fakeStore(dir) {
       return { id: `m-${appended.length}` };
     },
     deliveredHashes: () => delivered,
-    withCanonLock: async (work) => ({ locked: true, result: await work() }),
+    locks: [],
+    withCanonLock: async function withCanonLock(work, options = {}) {
+      this.locks.push(options.reentrant === true ? 'reentrant' : 'exclusive');
+      return { locked: true, result: await work() };
+    },
   };
 }
 
@@ -160,7 +164,6 @@ test('the consumer sees user prompts, which the ring target never does', withHom
 
 test('a line the store already delivered is not remembered again', withHomes(async ({ projects, memoryDir, env, cleanups }) => {
   const store = fakeStore(memoryDir);
-  const { hashMemoryLine } = require('../server/core/memory-core');
   store.delivered.add(hashMemoryLine('claude: quoting its own memory'));
   const ingest = createMemoryIngest({ store, env });
   cleanups.push(() => ingest.stop());
@@ -293,4 +296,161 @@ test('a backfill refuses to run while another process holds the canon lock', wit
   const result = await ingest.backfill();
   assert.equal(result.ok, false);
   assert.equal(result.reason, 'locked');
+}));
+
+// --- The tail-state write race --------------------------------------------
+
+/*
+ * Two processes write this file WHOLE (a live server's consumer and the CLI backfill), so an unlocked
+ * last-writer-wins could move an offset forward over a range the loser had not read. Every write goes
+ * through the canon lock; the short ones piggyback on a pass that already holds it.
+ */
+test('the live consumer writes its offsets under the canon lock', withHomes(async ({ projects, memoryDir, env, cleanups }) => {
+  const store = fakeStore(memoryDir);
+  fs.mkdirSync(memoryDir, { recursive: true });
+  const ingest = createMemoryIngest({ store, env });
+  cleanups.push(() => ingest.stop());
+  const source = createAgentLogIngest({ consumers: [ingest.consumer], env, ...inertTimers() });
+  cleanups.push(() => source.stop());
+
+  const filePath = seedTranscript(projects, { lines: [] });
+  await source.start();
+  fs.appendFileSync(filePath, claudeAssistant({ text: 'one turn' }), 'utf8');
+  await source.poll();
+  await ingest.whenIdle();
+
+  assert.ok(store.locks.length > 0, 'no tail-state write escaped the lock');
+  assert.ok(store.locks.every((kind) => kind === 'reentrant'), 'a short write piggybacks rather than blocking');
+  assert.ok(fs.existsSync(path.join(memoryDir, 'tail-state.json')));
+}));
+
+test('a write that cannot take the lock is skipped, which costs a re-read and never a range', withHomes(async ({ projects, memoryDir, env, cleanups }) => {
+  const store = fakeStore(memoryDir);
+  fs.mkdirSync(memoryDir, { recursive: true });
+  store.withCanonLock = async () => ({ locked: false, result: null });
+  const ingest = createMemoryIngest({ store, env });
+  cleanups.push(() => ingest.stop());
+  const source = createAgentLogIngest({ consumers: [ingest.consumer], env, ...inertTimers() });
+  cleanups.push(() => source.stop());
+
+  const filePath = seedTranscript(projects, { lines: [] });
+  await source.start();
+  fs.appendFileSync(filePath, claudeAssistant({ text: 'one turn' }), 'utf8');
+  await source.poll();
+  await ingest.whenIdle();
+
+  assert.equal(store.appended.length, 1, 'the record still landed');
+  assert.ok(ingest.stats().offsetsSkipped > 0);
+  assert.equal(fs.existsSync(path.join(memoryDir, 'tail-state.json')), false);
+}));
+
+// --- Backfill bounds and the lane floor -----------------------------------
+
+test('the file cap is enforced inside a directory, not only between directories', withHomes(async ({ projects, memoryDir, env, cleanups }) => {
+  const dir = path.join(projects, 'C--repo');
+  fs.mkdirSync(dir, { recursive: true });
+  for (let index = 0; index < 12; index += 1) {
+    fs.writeFileSync(
+      path.join(dir, `sess-${index}.jsonl`),
+      claudeAssistant({ text: `turn ${index}`, sessionId: `sess-${index}`, ts: '2026-08-20T10:00:00.000Z' }),
+      'utf8',
+    );
+  }
+  const store = realStore(memoryDir);
+  cleanups.push(() => store.stop());
+  const ingest = createMemoryIngest({ store, env, maxBackfillFiles: 3 });
+  cleanups.push(() => ingest.stop());
+
+  const result = await ingest.backfill();
+  assert.equal(result.files, 3, 'one directory of twelve cannot walk past the cap');
+}));
+
+test('a transcript older than the lane ledger is skipped, since nothing can vouch for its lane', withHomes(async ({ projects, memoryDir, env, cleanups }) => {
+  const filePath = seedTranscript(projects, {
+    sessionId: 'sess-ancient',
+    lines: [claudeAssistant({ text: 'a pr-review turn from before the ledger', ts: '2026-08-20T10:00:00.000Z' })],
+  });
+  const longAgo = new Date(Date.now() - 90 * 86400000);
+  fs.utimesSync(filePath, longAgo, longAgo);
+  const store = realStore(memoryDir);
+  cleanups.push(() => store.stop());
+  const ingest = createMemoryIngest({ store, env, laneFloorMs: () => Date.now() - 86400000 });
+  cleanups.push(() => ingest.stop());
+
+  await ingest.backfill();
+  assert.deepEqual(store.records(), []);
+  assert.equal(ingest.stats().laneSkipped, 1);
+}));
+
+test('with no ledger to speak of, the floor skips nothing', withHomes(async ({ projects, memoryDir, env, cleanups }) => {
+  const filePath = seedTranscript(projects, {
+    sessionId: 'sess-old',
+    lines: [claudeAssistant({ text: 'an ordinary old turn', ts: '2026-08-20T10:00:00.000Z' })],
+  });
+  const longAgo = new Date(Date.now() - 90 * 86400000);
+  fs.utimesSync(filePath, longAgo, longAgo);
+  const store = realStore(memoryDir);
+  cleanups.push(() => store.stop());
+  const ingest = createMemoryIngest({ store, env, laneFloorMs: () => null });
+  cleanups.push(() => ingest.stop());
+
+  await ingest.backfill();
+  assert.equal(store.records().length, 1);
+  assert.equal(ingest.stats().laneSkipped, 0);
+}));
+
+test('a lane worktree caught by shape is excluded from the backfill too', withHomes(async ({ projects, memoryDir, env, cleanups }) => {
+  const dir = path.join(projects, '-tmp-glissa-wt-pr-review-ab12cd');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, 'sess-pr.jsonl'),
+    claudeAssistant({
+      text: 'a pr-review verdict', sessionId: 'sess-pr', cwd: '/tmp/glissa-wt-pr-review-ab12cd', ts: '2026-08-20T10:00:00.000Z',
+    }),
+    'utf8',
+  );
+  const store = realStore(memoryDir);
+  cleanups.push(() => store.stop());
+  const ingest = createMemoryIngest({ store, env });
+  cleanups.push(() => ingest.stop());
+
+  await ingest.backfill();
+  assert.deepEqual(store.records(), [], 'the lane must never remember what the lane itself said');
+}));
+
+// --- The pre-scrub cut ----------------------------------------------------
+
+/*
+ * The 4000-char pre-cut used to run AHEAD of every scrub, and on a single unbroken line it cut mid-value:
+ * the quoted alternative then went unmatched and the bare-token one took only the first WORD, so the rest
+ * of the secret published as innocent words. The whole line now reaches the scrub, which cuts after.
+ */
+test('a secret past the old pre-cut is scrubbed rather than split mid-value', withHomes(async ({ projects, memoryDir, env, cleanups }) => {
+  const store = createMemoryStore({
+    dir: memoryDir,
+    config: { ...resolveMemoryConfig(null), enabled: true, maxRecordChars: 12000 },
+    logger: { log: () => {}, warn: () => {} },
+    watchCanon: false,
+  });
+  cleanups.push(() => store.stop());
+  const ingest = createMemoryIngest({ store, env });
+  cleanups.push(() => ingest.stop());
+  const source = createAgentLogIngest({ consumers: [ingest.consumer], env, ...inertTimers() });
+  cleanups.push(() => source.stop());
+
+  const filePath = seedTranscript(projects, { lines: [] });
+  await source.start();
+  // One unbroken line whose assignment sits past 4000 characters, which is where the old cut landed.
+  const padding = 'a lot of ordinary prose. '.repeat(220);
+  fs.appendFileSync(filePath, claudeAssistant({
+    text: `${padding} export API_TOKEN="s3cret-value-nobody-should-remember"`,
+  }), 'utf8');
+  await source.poll();
+  await ingest.whenIdle();
+
+  const remembered = store.records().map((record) => record.text).join('\n');
+  assert.ok(remembered.length > 4000, 'the whole line reached the record, so the cut is genuinely tested');
+  assert.equal(remembered.includes('s3cret-value-nobody-should-remember'), false, remembered.slice(-160));
+  assert.equal(remembered.includes('value-nobody-should-remember'), false, 'no tail of the value survives either');
+  assert.ok(remembered.includes('[scrubbed]'), 'the scrub reached it rather than the cut hiding it');
 }));

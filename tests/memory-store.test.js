@@ -643,3 +643,91 @@ test('the store resolves a supersession ancestry rather than letting a writer sk
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// --- The canon write lock -------------------------------------------------
+
+/*
+ * Two processes can both judge one lock stale. Without the nonce the second unlink deletes the FRESH
+ * lock the first had just taken, and both then believe they hold it: the lock file is the only thing
+ * standing between a live server's consumer and a CLI backfill rewriting one tail-state file.
+ */
+function ageLockFile(lockPath, ms) {
+  const at = new Date(Date.now() - ms);
+  fs.utimesSync(lockPath, at, at);
+}
+
+test('a genuinely stale lock is removed and the pass takes it', async () => {
+  const dir = tempDir();
+  const store = openStore(dir);
+  const lockPath = path.join(dir, 'canon.lock');
+  fs.writeFileSync(lockPath, 'someone-else\n');
+  ageLockFile(lockPath, 60000);
+
+  const held = await store.withCanonLock(async () => 'ran');
+  assert.equal(held.locked, true);
+  assert.equal(held.result, 'ran');
+  assert.equal(fs.existsSync(lockPath), false, 'the pass released what it took');
+});
+
+test('a lock re-taken between the staleness read and the unlink is left alone', async () => {
+  const dir = tempDir();
+  const lockPath = path.join(dir, 'canon.lock');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(lockPath, 'stale-holder\n');
+  ageLockFile(lockPath, 60000);
+
+  /*
+   * Stands in for another process re-taking the lock inside the window, on every attempt. The MTIME is
+   * left old throughout, so the age check alone would unlink on the first attempt; only the re-read of
+   * the nonce stops it. Without that re-read this deletes a lock somebody else is holding.
+   */
+  let reads = 0;
+  const store = openStore(dir, {
+    extra: {
+      watchCanon: false,
+      fs: {
+        ...fs,
+        readFileSync: (target, encoding) => {
+          if (String(target) !== lockPath) return fs.readFileSync(target, encoding);
+          reads += 1;
+          return `holder-${reads}\n`;
+        },
+      },
+    },
+  });
+
+  const held = await store.withCanonLock(async () => 'ran');
+  assert.equal(held.locked, false, 'a lock whose holder changed under us is respected, not deleted');
+  assert.ok(reads >= 2, 'the nonce is read again immediately before the unlink');
+  assert.equal(fs.existsSync(lockPath), true, 'nothing unlinked it');
+  fs.rmSync(lockPath, { force: true });
+});
+
+test('a nested reentrant hold rides the outer lock instead of deadlocking on it', async () => {
+  const dir = tempDir();
+  const store = openStore(dir);
+  const lockPath = path.join(dir, 'canon.lock');
+  let innerRan = false;
+
+  const held = await store.withCanonLock(async () => {
+    assert.equal(fs.existsSync(lockPath), true, 'the outer pass holds a real lock file');
+    const inner = await store.withCanonLock(async () => { innerRan = true; return 'inner'; }, { reentrant: true });
+    assert.deepEqual(inner, { locked: true, result: 'inner' });
+    return 'outer';
+  });
+  assert.equal(held.result, 'outer');
+  assert.equal(innerRan, true);
+  assert.equal(fs.existsSync(lockPath), false);
+});
+
+test('a long pass never inherits a hold, so only the short writes piggyback', async () => {
+  const dir = tempDir();
+  const store = openStore(dir);
+  fs.mkdirSync(dir, { recursive: true });
+  const lockPath = path.join(dir, 'canon.lock');
+  fs.writeFileSync(lockPath, 'another-process\n', { flag: 'wx' });
+
+  const held = await store.withCanonLock(async () => 'should not run');
+  assert.equal(held.locked, false, 'a non-reentrant acquire waits for a real lock and refuses');
+  fs.rmSync(lockPath, { force: true });
+});

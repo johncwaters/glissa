@@ -231,12 +231,36 @@ function createMemoryStore(deps = {}) {
   }
 
   const lockPath = path.join(dir, CANON_LOCK_FILE);
+  let canonLockDepth = 0;
 
-  // Real wall clock, not the injected now(): this is compared against a filesystem mtime.
+  function readLockNonce() {
+    try {
+      return fs.readFileSync(lockPath, 'utf8');
+    } catch {
+      return null;
+    }
+  }
+
+  /*
+   * Real wall clock, not the injected now(): this is compared against a filesystem mtime. The nonce is
+   * what makes the removal safe under a race: two processes can both judge one lock stale, and without
+   * re-reading, the second unlink deletes the FRESH lock the first had just taken. Only the exact holder
+   * judged stale is removed, and a lock whose nonce or mtime moved in between is left alone.
+   */
   function removeStaleLock() {
+    const nonce = readLockNonce();
+    if (nonce === null) return true;
+    let staleAtMs = 0;
     try {
       const stat = fs.statSync(lockPath);
       if (Date.now() - stat.mtimeMs <= LOCK_STALE_MS) return false;
+      staleAtMs = stat.mtimeMs;
+    } catch {
+      return true;
+    }
+    try {
+      if (readLockNonce() !== nonce) return false;
+      if (fs.statSync(lockPath).mtimeMs !== staleAtMs) return false;
       fs.unlinkSync(lockPath);
       log.warn('removed a stale canon write lock left by an earlier process');
       return true;
@@ -248,7 +272,10 @@ function createMemoryStore(deps = {}) {
   async function acquireCanonLock() {
     for (let attempt = 0; attempt < LOCK_MAX_ATTEMPTS; attempt += 1) {
       try {
-        fs.closeSync(fs.openSync(lockPath, 'wx', FILE_MODE));
+        const handle = fs.openSync(lockPath, 'wx', FILE_MODE);
+        // The holder's identity, so a stale-lock removal can prove it is deleting the lock it judged.
+        fs.writeSync(handle, `${process.pid}:${randomBytes(8).toString('hex')}\n`);
+        fs.closeSync(handle);
         return true;
       } catch (error) {
         if (error.code !== 'EEXIST') {
@@ -345,7 +372,7 @@ function createMemoryStore(deps = {}) {
   function append(input) {
     return queue(async () => {
       const built = core.buildMemoryRecord(withResolvedAncestors(input), {
-        now: now(), maxChars: config.maxRecordChars,
+        now: now(), maxChars: config.maxRecordChars, retainDays: config.retainDays,
       });
       if (!built.ok) {
         log.debugNote(() => `record rejected: ${built.reason}`);
@@ -559,9 +586,17 @@ function createMemoryStore(deps = {}) {
     return deliveredHashes.size;
   }
 
-  // Held for a whole pass, mtime refreshed, so the staleness rule cannot hand the lock to a second copy.
-  async function withCanonLock(work) {
+  /*
+   * Held for a whole pass, mtime refreshed, so the staleness rule cannot hand the lock to a second copy.
+   * `reentrant` piggybacks on a hold this process already has, which is what lets a tail-state write
+   * inside a backfill take the same lock the backfill is holding without deadlocking on it. Only the
+   * short writes pass it: a long pass always takes a REAL lock, so it can never inherit one that a
+   * millisecond-long write is about to release.
+   */
+  async function withCanonLock(work, { reentrant = false } = {}) {
+    if (reentrant && canonLockDepth > 0) return { locked: true, result: await work() };
     if (!await acquireCanonLock()) return { locked: false, result: null };
+    canonLockDepth += 1;
     const refresh = setInterval(() => {
       try {
         const at = new Date();
@@ -575,6 +610,7 @@ function createMemoryStore(deps = {}) {
     try {
       return { locked: true, result: await work() };
     } finally {
+      canonLockDepth -= 1;
       clearInterval(refresh);
       releaseCanonLock();
     }

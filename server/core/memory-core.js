@@ -31,6 +31,8 @@ const MAX_RETRIEVAL_TERMS = 24;
 const DEFAULT_RETRIEVAL_LIMIT = 10;
 const DEFAULT_RECENCY_HALF_LIFE_DAYS = 30;
 const MS_PER_DAY = 86400000;
+// Clock skew between the machine that wrote a transcript line and this one. Minutes, not hours.
+const MAX_OBSERVED_TS_SKEW_MS = 5 * 60 * 1000;
 
 const CANON_FILE_PREFIX = 'canon-';
 const CANON_FILE_SUFFIX = '.jsonl';
@@ -238,16 +240,33 @@ function normalizeSource(raw) {
   return { kind, vendor, sessionId: nonEmptyString(raw.sessionId) };
 }
 
+/**
+ * An observed ts is transcript-supplied, so it is third-party input on a field that decides which monthly
+ * segment a record lands in. A future-dated one lands in a segment `expiredSegmentKeys` will never prune
+ * and heads every recency ranking forever, and one older than retention writes a segment the next boot
+ * drops. Outside the window the record is stamped with the clock instead, which costs the observed time
+ * and, for that record only, the stable id a re-read would otherwise derive.
+ */
+function clampObservedTs(observed, { now, retainDays = DEFAULT_MEMORY_RETAIN_DAYS, skewMs = MAX_OBSERVED_TS_SKEW_MS } = {}) {
+  const at = finiteNumber(now);
+  if (at === null) return null;
+  const candidate = finiteNumber(observed);
+  if (candidate === null || candidate <= 0) return at;
+  const days = Number.isInteger(retainDays) ? retainDays : DEFAULT_MEMORY_RETAIN_DAYS;
+  if (candidate > at + Math.max(0, skewMs)) return at;
+  if (candidate < at - days * MS_PER_DAY) return at;
+  return candidate;
+}
+
 function makeRecordId({ ts, kind, sourceKind, project, text }) {
   return `m-${sha256Hex(JSON.stringify([ts, kind, sourceKind, project, text])).slice(0, 16)}`;
 }
 
-function buildMemoryRecord(input, { now, maxChars = MAX_RECORD_CHARS } = {}) {
+function buildMemoryRecord(input, { now, maxChars = MAX_RECORD_CHARS, retainDays = DEFAULT_MEMORY_RETAIN_DAYS } = {}) {
   const raw = input && typeof input === 'object' && !Array.isArray(input) ? input : {};
-  // An observed record is stamped with the moment it describes, which is also what makes a re-ingest of
-  // the same transcript line derive the same id instead of a duplicate.
-  const observed = finiteNumber(raw.ts);
-  const at = observed !== null && observed > 0 ? observed : finiteNumber(now);
+  // An observed record is stamped with the moment it describes (clamped, since that moment is untrusted
+  // input), which is also what makes a re-ingest of the same transcript line derive the same id.
+  const at = clampObservedTs(raw.ts, { now, retainDays });
   if (at === null) return { ok: false, reason: 'no-clock', record: null };
   if (!MEMORY_KINDS.includes(raw.kind)) return { ok: false, reason: 'bad-kind', record: null };
   if (raw.fromUserPrompt === true && USER_PROMPT_DENIED_KINDS.includes(raw.kind)) {
@@ -681,6 +700,7 @@ module.exports = {
   DEFAULT_RETRIEVAL_LIMIT,
   FORGET_PLACEHOLDER,
   MAX_RECORDS_PER_KIND,
+  MAX_OBSERVED_TS_SKEW_MS,
   MAX_RECORD_CHARS,
   MEMORY_KINDS,
   MEMORY_LAYERS,
@@ -697,6 +717,7 @@ module.exports = {
   buildMemoryRecord,
   canonicalSignaturePayload,
   capTextLineAligned,
+  clampObservedTs,
   computeLineage,
   decideForget,
   decideSupersession,

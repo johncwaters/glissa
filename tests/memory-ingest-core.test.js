@@ -18,7 +18,9 @@ const {
   planIngestBatch, recordTailOffset, tailStateForget,
 } = require('../server/core/memory-ingest-core');
 const { PROMPT_KIND } = require('../server/core/ingest-agent-core');
-const { buildMemoryRecord, hashMemoryLine } = require('../server/core/memory-core');
+const {
+  DEFAULT_MEMORY_RETAIN_DAYS, buildMemoryRecord, clampObservedTs, hashMemoryLine, segmentKeyForTs,
+} = require('../server/core/memory-core');
 
 function event(overrides = {}) {
   return {
@@ -221,4 +223,46 @@ test('an exhausted budget reads nothing and stays partial', () => {
   const plan = planBackfillRead({ start: 0, size: 500, budgetBytes: 0, maxChunkBytes: 4096 });
   assert.equal(plan.action, 'skip');
   assert.equal(plan.partial, true);
+});
+
+// --- The observed ts is untrusted input -----------------------------------
+
+/*
+ * A transcript line supplies its own timestamp, and that field decides which monthly segment a record
+ * lands in. A future-dated one lands in a segment expiredSegmentKeys can never prune and heads every
+ * recency ranking forever, so the window is the gate.
+ */
+const NOW = 1766400000000;
+const DAY = 86400000;
+
+test('an in-window observed ts is kept exactly, so the ordinary record is unchanged', () => {
+  assert.equal(clampObservedTs(NOW - 3 * DAY, { now: NOW }), NOW - 3 * DAY);
+  assert.equal(clampObservedTs(NOW, { now: NOW }), NOW);
+});
+
+test('a future-dated ts falls back to the clock rather than outrunning retention', () => {
+  assert.equal(clampObservedTs(NOW + 400 * DAY, { now: NOW }), NOW);
+  assert.equal(clampObservedTs(Number.MAX_SAFE_INTEGER, { now: NOW }), NOW);
+});
+
+test('a small forward skew is tolerated, because two machines never agree exactly', () => {
+  assert.equal(clampObservedTs(NOW + 60000, { now: NOW }), NOW + 60000);
+});
+
+test('a ts older than retention falls back too, so no record writes a segment the next boot drops', () => {
+  assert.equal(clampObservedTs(NOW - (DEFAULT_MEMORY_RETAIN_DAYS + 5) * DAY, { now: NOW }), NOW);
+  assert.equal(clampObservedTs(NOW - 40 * DAY, { now: NOW, retainDays: 30 }), NOW);
+});
+
+test('a record built from a future-dated transcript line lands in the CURRENT segment', () => {
+  const built = buildMemoryRecord({
+    kind: 'knowledge',
+    ts: NOW + 900 * DAY,
+    source: { kind: 'reported', vendor: 'claude', sessionId: null },
+    text: 'claude: a line stamped in the far future',
+  }, { now: NOW });
+  assert.equal(built.ok, true);
+  assert.equal(built.record.ts, NOW);
+  assert.equal(built.record.validFrom, NOW);
+  assert.equal(segmentKeyForTs(built.record.ts), segmentKeyForTs(NOW));
 });

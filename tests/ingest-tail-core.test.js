@@ -523,14 +523,19 @@ test('timestamps arrive as ISO strings from two vendors and whole seconds from t
 /*
  * The target leaves here RAW: unfolded and unsliced. normalizeEvent scrubs, THEN folds, THEN slices to
  * 400, and a cut taken here would run ahead of the scrub, which is how a quoted secret in a `command`
- * target loses its closing quote and publishes the rest of its value (docs/plan-ingestion.md, M11). Only
- * the memory bound survives, and it prefers a LINE break, which no value pattern can span.
+ * target loses its closing quote and publishes the rest of its value (docs/plan-ingestion.md, M11). The
+ * one bound left prefers a LINE break, which no value pattern can span, and a line with no break to cut
+ * at is handed on WHOLE rather than split mid-value: every consumer cuts line-aligned after its scrub.
  */
-test('a tool target is the first meaningful input field, handed on raw under one memory bound', () => {
+test('a tool target is the first meaningful input field, handed on raw under one line-aligned bound', () => {
   assert.equal(toolTarget({ file_path: 'a.js', command: 'rm -rf' }), 'a.js');
   assert.equal(toolTarget({ command: 'npm run\n  build' }), 'npm run\n  build');
   assert.equal(toolTarget({ command: 'x'.repeat(500) }).length, 500, 'nothing here slices a target');
-  assert.equal(toolTarget({ command: 'x'.repeat(MAX_RAW_CHARS + 500) }).length, MAX_RAW_CHARS);
+  assert.equal(
+    toolTarget({ command: 'x'.repeat(MAX_RAW_CHARS + 500) }).length,
+    MAX_RAW_CHARS + 500,
+    'no line break to cut at means no cut, because a mid-line cut is what defeats the scrub',
+  );
   const lines = `${'x'.repeat(MAX_RAW_CHARS - 10)}\n${'y'.repeat(500)}`;
   assert.equal(toolTarget({ command: lines }).length, MAX_RAW_CHARS - 10, 'the bound cuts at the line break');
   // Both break characters count: a bare carriage return is a line boundary, and a CRLF cut on the

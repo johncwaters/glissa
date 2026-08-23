@@ -59,13 +59,17 @@ async function runForget(needle, makeStore) {
 // The lane ledger is loaded before the pass, not during it: an ephemeral lane's transcript must be
 // excluded on the FIRST file this reads, not once an async load happens to land.
 async function defaultMakeIngest(store) {
-  const { createMemoryIngest } = require('./memory-ingest-wiring');
+  const { createMemoryIngest, earliestLaneEntryMs } = require('./memory-ingest-wiring');
   const { createLaneLedger } = require('./usage-lane-ledger');
   const { resolveConfigPath } = require('./config-store');
   const { configSiblingPath } = require('./pairings-store');
   const ledger = createLaneLedger({ ledgerPath: configSiblingPath(resolveConfigPath(), 'usage-lanes.json') });
   await ledger.load();
-  return createMemoryIngest({ store, laneMap: () => ledger.laneMap() });
+  return createMemoryIngest({
+    store,
+    laneMap: () => ledger.laneMap(),
+    laneFloorMs: () => earliestLaneEntryMs(ledger),
+  });
 }
 
 async function runBackfill(makeStore, makeIngest) {
