@@ -13,7 +13,7 @@ const path = require('node:path');
 
 const { needsDistill } = require('./core/distill-core');
 const { buildMillReport } = require('./core/mill-core');
-const { packConsumerSources } = require('./core/pack-core');
+const { packConsumerSources, packVariantProjects, planPackVariants } = require('./core/pack-core');
 const { isPlainObject } = require('./core/usage-number-core');
 const {
   defaultBuiltRoot,
@@ -122,10 +122,41 @@ function createMillWiring(deps = {}) {
     return rows;
   }
 
+  /*
+   * A per-project variant is its own top-level pack, so it gets its own row rather than a field on the
+   * group's: same manifest read, same delivery join, plus the `group` and project it was derived for.
+   * The drift check is the group's alone: a variant shares its spec, so re-running it per project would
+   * multiply the one expensive thing this surface does.
+   */
+  async function variantEntries(entry) {
+    if (entry.spec?.perProjectVariants !== true) return [];
+    const projects = packVariantProjects(config);
+    const labelById = new Map(projects.map((project) => [project.id, project.name]));
+    const rows = [];
+    for (const build of planPackVariants(entry.spec, projects).builds) {
+      const projectSlug = build.variant?.projectSlug;
+      if (!projectSlug) continue;
+      const manifest = await readBuiltManifest(build.name, { builtRoot: resolvedBuiltRoot() });
+      const resolved = manifest ? null : await resolveBuiltPack(build.name, { builtRoot: resolvedBuiltRoot() });
+      rows.push({
+        name: build.name,
+        spec: entry.spec,
+        specError: entry.specError,
+        group: entry.name,
+        variantProject: { id: build.variant.projectId, label: labelById.get(build.variant.projectId) || 'project' },
+        manifest,
+        builtReason: resolved ? resolved.reason : null,
+        distill: [],
+      });
+    }
+    return rows;
+  }
+
   async function buildReport() {
     const specs = [];
     for (const spec of await listPackSpecs({ specsDir: resolvedSpecsDir() })) {
-      specs.push(await readSpecEntry(spec));
+      const entry = await readSpecEntry(spec);
+      specs.push(entry, ...(await variantEntries(entry)));
     }
     return buildMillReport({
       ts: now(),

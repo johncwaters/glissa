@@ -503,3 +503,140 @@ test('a source whose root IS the config directory resolves as inside it', async 
     assert.equal(fs.existsSync(path.join(currentDir, 'data', '01-glissahome', 'memory/dist/current/MEMORY.md')), true);
   }, { spec: memorySpec(), seed: () => {} });
 });
+
+// ---- Per-project variants: one derived top-level pack per consuming project ----
+
+const { projectVariantSlug } = require('../server/core/pack-core');
+
+const SLUG_A = projectVariantSlug('/repos/a/glissa');
+const SLUG_B = projectVariantSlug('/repos/b/other');
+const VARIANT_PROJECTS = [
+  { id: 'p1', name: 'glissa', path: '/repos/a/glissa', packs: ['memory'] },
+  { id: 'p2', name: 'other', path: '/repos/b/other', packs: ['memory'] },
+];
+
+function variantMemorySpec(overrides = {}) {
+  return memorySpec({
+    perProjectVariants: true,
+    sources: [
+      { path: '{{glissaHome}}/memory/dist/current/MEMORY.md', data: true, optional: true },
+      { path: '{{glissaHome}}/memory/dist/current/projects/{{projectSlug}}.md', data: true, optional: true },
+    ],
+    ...overrides,
+  });
+}
+
+test('a group build publishes its base plus one independent pack per consuming project', async () => {
+  await withFixture(async ({ root, build, builtRoot }) => {
+    const glissaHome = seedGlissaHome(root);
+    writeFile(glissaHome, `memory/dist/current/projects/${SLUG_A}.md`, '# glissa\n\n- [m-abcdef0123456789] (model) project a layer\n');
+
+    const report = await build({ glissaHome, projects: VARIANT_PROJECTS });
+    assert.equal(report.ok, true, report.errors.join('; '));
+    assert.deepEqual(report.variants.map((variant) => variant.name), [`memory-${SLUG_A}`, `memory-${SLUG_B}`]);
+    assert.equal(report.variants.every((variant) => variant.ok), true);
+
+    // Every derived name is a real pack: its own dir, its own version, its own manifest.
+    const variantManifest = readManifest(path.join(builtRoot, `memory-${SLUG_A}`, 'current'));
+    assert.equal(variantManifest.name, `memory-${SLUG_A}`);
+    assert.equal(variantManifest.group, 'memory');
+    assert.equal(variantManifest.projectId, 'p1');
+    assert.notEqual(variantManifest.version, readManifest(path.join(builtRoot, 'memory', 'current')).version);
+
+    // The project layer rides its OWN variant and nothing else.
+    const ownLayer = path.join(builtRoot, `memory-${SLUG_A}`, 'current', 'data', `02-${SLUG_A}`, `${SLUG_A}.md`);
+    assert.equal(fs.existsSync(ownLayer), true);
+    assert.equal(fs.existsSync(path.join(builtRoot, 'memory', 'current', 'data', `02-${SLUG_A}`)), false);
+    assert.equal(fs.existsSync(path.join(builtRoot, `memory-${SLUG_B}`, 'current', 'data', `02-${SLUG_A}`)), false);
+  }, { spec: variantMemorySpec(), seed: () => {} });
+});
+
+test('a project with no layer yet still gets a variant: a missing per-project source is skipped, not an error', async () => {
+  await withFixture(async ({ root, build, builtRoot }) => {
+    const glissaHome = seedGlissaHome(root);
+    const report = await build({ glissaHome, projects: VARIANT_PROJECTS });
+
+    assert.equal(report.ok, true, report.errors.join('; '));
+    assert.equal(report.variants.every((variant) => variant.ok), true, report.variants.map((v) => v.errors.join('; ')).join(' | '));
+    const manifest = readManifest(path.join(builtRoot, `memory-${SLUG_B}`, 'current'));
+    assert.deepEqual(manifest.sources.map((source) => source.dataDir), ['data/01-memory']);
+  }, { spec: variantMemorySpec(), seed: () => {} });
+});
+
+test('the group base declares perProjectVariants, which is what a spawn resolves a variant from', async () => {
+  await withFixture(async ({ root, build, builtRoot }) => {
+    const glissaHome = seedGlissaHome(root);
+    await build({ glissaHome, projects: VARIANT_PROJECTS });
+
+    const base = await resolveBuiltPack('memory', { builtRoot });
+    assert.equal(base.perProjectVariants, true);
+    assert.equal(base.group, null);
+    const variant = await resolveBuiltPack(`memory-${SLUG_A}`, { builtRoot });
+    assert.equal(variant.perProjectVariants, false);
+    assert.equal(variant.group, 'memory');
+  }, { spec: variantMemorySpec(), seed: () => {} });
+});
+
+test('a project that does not name the group derives no variant at all', async () => {
+  await withFixture(async ({ root, build, builtRoot }) => {
+    const glissaHome = seedGlissaHome(root);
+    const report = await build({ glissaHome, projects: [{ id: 'p3', name: 'nope', path: '/repos/c/nope', packs: [] }] });
+
+    assert.deepEqual(report.variants, []);
+    assert.equal(fs.existsSync(path.join(builtRoot, 'memory', 'current')), true);
+  }, { spec: variantMemorySpec(), seed: () => {} });
+});
+
+test('a rebuild that changes nothing republishes no variant either', async () => {
+  await withFixture(async ({ root, build, builtRoot }) => {
+    const glissaHome = seedGlissaHome(root);
+    writeFile(glissaHome, `memory/dist/current/projects/${SLUG_A}.md`, '# glissa\n\n- [m-abcdef0123456789] (model) project a layer\n');
+    await build({ glissaHome, projects: VARIANT_PROJECTS });
+    const again = await build({ glissaHome, projects: VARIANT_PROJECTS });
+
+    assert.equal(again.unchanged, true);
+    assert.equal(again.variants.every((variant) => variant.unchanged), true);
+    assert.equal(fs.existsSync(path.join(builtRoot, `memory-${SLUG_A}`, 'previous')), false);
+  }, { spec: variantMemorySpec(), seed: () => {} });
+});
+
+test('buildPacks lists every derived pack beside its group', async () => {
+  await withFixture(async ({ root, packsDir, specsDir, builtRoot }) => {
+    const glissaHome = seedGlissaHome(root);
+    const reports = await buildPacks({ specsDir, baseDir: packsDir, builtRoot, glissaHome, projects: VARIANT_PROJECTS });
+    assert.deepEqual(reports.map((report) => report.name), ['memory', `memory-${SLUG_A}`, `memory-${SLUG_B}`]);
+  }, { spec: variantMemorySpec(), seed: () => {} });
+});
+
+test('a per-project pattern is watched as a wildcard, so a first layer file is seen', async () => {
+  await withFixture(async ({ root }) => {
+    const glissaHome = seedGlissaHome(root);
+    fs.mkdirSync(path.join(glissaHome, 'memory/dist/current/projects'), { recursive: true });
+    const roots = await packWatchRoots(variantMemorySpec(), { baseDir: path.join(root, 'packs'), glissaHome });
+    assert.deepEqual(roots, [
+      path.join(glissaHome, 'memory/dist/current').replace(/\\/g, '/'),
+      path.join(glissaHome, 'memory/dist/current/projects').replace(/\\/g, '/'),
+    ]);
+  }, { spec: variantMemorySpec(), seed: () => {} });
+});
+
+test('a variant that would carry another project layer fails and publishes nothing', async () => {
+  const spec = memorySpec({
+    perProjectVariants: true,
+    sources: [
+      { path: '{{glissaHome}}/memory/dist/current/projects/{{projectSlug}}.md', data: true, optional: true },
+      { glob: '{{glissaHome}}/memory/dist/current/projects/*.md', data: true, optional: true },
+    ],
+  });
+  await withFixture(async ({ root, build, builtRoot }) => {
+    const glissaHome = seedGlissaHome(root);
+    writeFile(glissaHome, `memory/dist/current/projects/${SLUG_A}.md`, '# a\n\nlayer a\n');
+    writeFile(glissaHome, `memory/dist/current/projects/${SLUG_B}.md`, '# b\n\nlayer b\n');
+
+    const report = await build({ glissaHome, projects: VARIANT_PROJECTS });
+    const variant = report.variants.find((entry) => entry.name === `memory-${SLUG_A}`);
+    assert.equal(variant.ok, false);
+    assert.equal(variant.errors.some((error) => error.includes(SLUG_B)), true);
+    assert.equal(fs.existsSync(path.join(builtRoot, `memory-${SLUG_A}`, 'current')), false);
+  }, { spec, seed: () => {} });
+});

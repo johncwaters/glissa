@@ -988,7 +988,9 @@ function registerControlHandlers(controlWss, deps) {
     // Built BEFORE the reload: the respawn resolves packs at spawn, and a first delivery is never yet built.
     if (msg.deliver && ensurePacksBuilt) {
       try {
-        await ensurePacksBuilt([pack]);
+        // The saved config, not the in-memory one: a per-project pack VARIANT is derived from the
+        // assignment this write just landed, and the reload that would publish it runs below.
+        await ensurePacksBuilt([pack], freshConfig);
       } catch (err) {
         console.warn(`[control] set-project-packs: build of "${pack}" failed: ${err.message}`);
       }

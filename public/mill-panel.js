@@ -32,6 +32,7 @@ import {
   deliveryLabel,
   deliveryStaleText,
   deliveryTargets,
+  variantNote,
   deliveryTone,
   distillText,
   distillTone,
@@ -198,6 +199,8 @@ function buildOutputsBlock(built) {
 
 function buildPackSection(pack) {
   const section = buildSection(pack.name, pack.description);
+  const variant = variantNote(pack);
+  if (variant) section.append(buildLine('mill-meta', variant));
   if (!pack.specValid) section.append(buildLine('mill-warning', specErrorLine(pack)));
   section.append(buildLine('mill-meta', builtLine(pack), builtTone(pack)));
   if (pack.built) section.append(buildBudgetBlock(pack));
@@ -208,7 +211,7 @@ function buildPackSection(pack) {
   const outputs = buildOutputsBlock(pack.built);
   if (outputs) section.append(outputs);
   section.append(buildLine('mill-meta', consumerLine(pack)));
-  section.append(buildDeliverToBlock(pack));
+  if (!variant) section.append(buildDeliverToBlock(pack));
   return section;
 }
 

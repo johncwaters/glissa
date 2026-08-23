@@ -166,7 +166,8 @@ function specErrorsFor(entry) {
   if (!isPlainObject(entry.spec)) return { valid: false, errors: ['spec file could not be read'] };
   const check = validatePackSpec(entry.spec);
   const errors = asArray(check.errors).map(String);
-  const fileName = stringOrNull(entry.name);
+  // A derived variant is named after its group plus a project, never after a spec file of its own.
+  const fileName = stringOrNull(entry.group) === null ? stringOrNull(entry.name) : stringOrNull(entry.spec.name);
   const declared = stringOrNull(entry.spec.name);
   if (fileName !== null && declared !== null && declared !== fileName) {
     errors.push(`spec name "${declared}" does not match its filename`);
@@ -181,14 +182,25 @@ function buildPackRow(entry, { consumers, sessionRows }) {
   const { valid, errors } = specErrorsFor(entry || {});
   const built = builtFrom(manifest);
   const deliveredTo = deliveriesFor(name, sessionRows, built ? built.version : null);
+  const group = stringOrNull(entry?.group);
+  // A variant's consumer is exactly the project it was derived for; nothing else may ever be handed it.
+  const variantProject = group === null ? null : (entry?.variantProject || null);
   const namedBy = {
-    projects: consumers.projectsByPack.get(name) || [],
+    projects: group === null
+      ? (consumers.projectsByPack.get(name) || [])
+      : [stringOrNull(variantProject?.label) || 'project'],
     // Which LANES name it, carried as the kinds pack-core enumerated rather than a fixed pair of
     // booleans, so adding a pack-naming config key there reaches this row with no change here.
-    lanes: consumers.lanes.filter((lane) => lane.names.includes(name)).map((lane) => ({ kind: lane.kind, label: lane.label })),
+    lanes: group === null
+      ? consumers.lanes.filter((lane) => lane.names.includes(name)).map((lane) => ({ kind: lane.kind, label: lane.label }))
+      : [],
   };
   return {
     name,
+    // The group this row was derived from, or null for an ordinary pack. A group's own row keeps
+    // `group` null: it is the base build and the fallback, not a variant of itself.
+    group,
+    projectId: stringOrNull(variantProject?.id),
     description: stringOrNull(spec?.description) || stringOrNull(manifest?.description) || '',
     specValid: valid,
     specErrors: errors,
@@ -210,6 +222,7 @@ function buildPackRow(entry, { consumers, sessionRows }) {
 function totalsFrom(packs) {
   return {
     packCount: packs.length,
+    variantCount: packs.filter((pack) => pack.group !== null).length,
     builtCount: packs.filter((pack) => pack.built !== null).length,
     unconsumed: packs.filter((pack) => !pack.hasConsumers).length,
     invalidSpecs: packs.filter((pack) => !pack.specValid).length,
@@ -228,7 +241,8 @@ function buildMillReport(input) {
   const specs = asArray(input?.specs);
   const sessionRows = asArray(input?.sessionRows);
   const packs = specs.map((entry) => buildPackRow(entry, { consumers, sessionRows }));
-  const knownNames = new Set(packs.map((pack) => pack.name));
+  // A group name is what a project assigns, so a variant name never counts as a known consumer target.
+  const knownNames = new Set(packs.filter((pack) => pack.group === null).map((pack) => pack.name));
   return {
     type: 'mill-report',
     requestId: stringOrNull(input?.requestId),

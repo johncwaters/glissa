@@ -18,10 +18,15 @@ const {
   matchesGlob,
   normalizePackNames,
   packConsumerSources,
+  packVariantProjects,
   planPackBuild,
+  planPackVariants,
+  projectVariantSlug,
   sourceSlug,
   validatePackSpec,
+  variantPackName,
 } = require('../server/core/pack-core');
+const { normalizeProjectTag, projectFileSlug } = require('../server/core/memory-core');
 
 const BUILT_AT = '2026-08-19T00:00:00.000Z';
 
@@ -618,9 +623,211 @@ test('a data build stays deterministic: the same bytes plan the same version', (
 });
 
 test('the shipped memory spec is a valid spec named after its file', () => {
-  const specPath = require('node:path').join(__dirname, '..', 'packs', 'specs', 'memory.pack.json');
-  const spec = JSON.parse(require('node:fs').readFileSync(specPath, 'utf8'));
+  const spec = shippedMemorySpec();
   assert.equal(spec.name, 'memory');
   assert.deepEqual(validatePackSpec(spec), { ok: true, errors: [] });
   assert.equal(spec.sources.every((source) => source.data === true), true);
 });
+
+// ---- Per-project variants: flattened into independent top-level packs, PostHog's context-mill shape ----
+
+function shippedMemorySpec() {
+  const specPath = require('node:path').join(__dirname, '..', 'packs', 'specs', 'memory.pack.json');
+  return JSON.parse(require('node:fs').readFileSync(specPath, 'utf8'));
+}
+
+function variantSpec(overrides = {}) {
+  return validSpec({
+    perProjectVariants: true,
+    rules: undefined,
+    sources: [
+      { path: '{{glissaHome}}/memory/dist/current/MEMORY.md', data: true, optional: true },
+      { path: '{{glissaHome}}/memory/dist/current/projects/{{projectSlug}}.md', data: true },
+    ],
+    ...overrides,
+  });
+}
+
+function project(id, projectPath, packs) {
+  return { id, name: id, path: projectPath, packs };
+}
+
+test('the shipped memory spec declares per-project variants and a project-scoped source', () => {
+  const spec = shippedMemorySpec();
+  assert.equal(spec.perProjectVariants, true);
+  const perProject = spec.sources.filter((source) => String(source.path).includes('{{projectSlug}}'));
+  assert.equal(perProject.length, 1);
+  assert.equal(perProject[0].data, true);
+  assert.equal(perProject[0].optional, true);
+});
+
+test('{{projectSlug}} is refused unless the spec declares perProjectVariants', () => {
+  const check = validatePackSpec(variantSpec({ perProjectVariants: undefined }));
+  assert.equal(check.ok, false);
+  assert.equal(check.errors.some((error) => error.includes('perProjectVariants')), true);
+});
+
+test('a {{projectSlug}} source must declare itself data, like every other runtime path', () => {
+  const spec = variantSpec({
+    sources: [{ path: '{{glissaHome}}/memory/dist/current/projects/{{projectSlug}}.md' }],
+  });
+  const check = validatePackSpec(spec);
+  assert.equal(check.ok, false);
+  assert.equal(check.errors.some((error) => error.includes('"data": true')), true);
+});
+
+test('{{projectSlug}} may not anchor a pattern and may not carry a .. segment', () => {
+  const anchored = validatePackSpec(variantSpec({
+    sources: [{ path: '{{projectSlug}}/notes.md', data: true }],
+  }));
+  assert.equal(anchored.ok, false);
+  assert.equal(anchored.errors.some((error) => error.includes('never the pattern')), true);
+
+  const escaping = validatePackSpec(variantSpec({
+    sources: [{ path: '{{glissaHome}}/memory/../../{{projectSlug}}.md', data: true }],
+  }));
+  assert.equal(escaping.ok, false);
+  assert.equal(escaping.errors.some((error) => error.includes('".." segment')), true);
+});
+
+test('perProjectVariants without a project-scoped source is a spec error, not N identical packs', () => {
+  const check = validatePackSpec(variantSpec({
+    sources: [{ path: '{{glissaHome}}/memory/dist/current/MEMORY.md', data: true }],
+  }));
+  assert.equal(check.ok, false);
+  assert.equal(check.errors.some((error) => error.includes('no source names')), true);
+});
+
+test('a distill entry may not name {{projectSlug}}: a distill lane has no variant to resolve it for', () => {
+  const check = validatePackSpec(variantSpec({
+    distill: [{
+      output: 'sources/derived.md',
+      sources: [{ path: '{{glissaHome}}/memory/dist/current/projects/{{projectSlug}}.md', data: true }],
+      instructions: 'summarize',
+    }],
+  }));
+  assert.equal(check.ok, false);
+  assert.equal(check.errors.some((error) => error.includes('distill[0].sources[0] names "{{projectSlug}}"')), true);
+});
+
+test('the variant slug IS the memory projection slug, so a variant resolves its own project layer', () => {
+  const slug = projectVariantSlug('/repos/a/glissa');
+  assert.equal(slug, projectFileSlug(normalizeProjectTag('/repos/a/glissa')));
+  assert.notEqual(slug, projectVariantSlug('/repos/b/glissa'));
+  assert.equal(projectVariantSlug(''), null);
+  assert.equal(variantPackName('memory', slug), `memory-${slug}`);
+  assert.equal(variantPackName('memory', null), null);
+});
+
+test('a plain spec plans exactly one build of itself', () => {
+  const plan = planPackVariants(validSpec(), [project('p1', '/repos/a', ['demo'])]);
+  assert.equal(plan.isGroup, false);
+  assert.equal(plan.builds.length, 1);
+  assert.equal(plan.builds[0].name, 'demo');
+  assert.equal(plan.builds[0].variant, null);
+});
+
+test('a group plans its base plus one flattened pack per CONSUMING project', () => {
+  const projects = [
+    project('p1', '/repos/a/glissa', ['demo']),
+    project('p2', '/repos/b/other', ['demo']),
+    project('p3', '/repos/c/nope', ['something-else']),
+  ];
+  const plan = planPackVariants(variantSpec(), projects);
+  const slugA = projectVariantSlug('/repos/a/glissa');
+  const slugB = projectVariantSlug('/repos/b/other');
+  assert.deepEqual(plan.builds.map((build) => build.name), ['demo', `demo-${slugA}`, `demo-${slugB}`]);
+
+  // The base carries the global layer only, so nothing project-scoped rides into every consumer.
+  assert.equal(plan.builds[0].spec.sources.length, 1);
+  assert.equal(plan.builds[0].spec.perProjectVariants, undefined);
+  assert.equal(plan.builds[0].variant.isGroupBase, true);
+
+  const variant = plan.builds[1];
+  assert.equal(variant.spec.sources[1].path.includes(slugA), true);
+  assert.equal(variant.spec.sources[1].path.includes('{{projectSlug}}'), false);
+  assert.equal(variant.spec.sources[1].optional, true);
+  assert.deepEqual(variant.variant.foreignSlugs, [slugB]);
+  assert.equal(variant.variant.projectId, 'p1');
+});
+
+test('a consuming project with no usable path is warned about and delivered the base pack', () => {
+  const plan = planPackVariants(variantSpec(), [project('p1', '', ['demo'])]);
+  assert.deepEqual(plan.builds.map((build) => build.name), ['demo']);
+  assert.equal(plan.warnings.length, 1);
+  assert.equal(plan.warnings[0].includes('base "demo" pack'), true);
+});
+
+test('two projects on one path derive one variant, not two racing builds of the same name', () => {
+  const plan = planPackVariants(variantSpec(), [
+    project('p1', '/repos/a/glissa', ['demo']),
+    project('p2', '/repos/a/glissa', ['demo']),
+  ]);
+  assert.equal(plan.builds.length, 2);
+});
+
+test('packVariantProjects normalizes each project pack list the way a spawn would', () => {
+  const projects = packVariantProjects({
+    projects: [{ id: 'p1', name: 'glissa', path: '/repos/a', packs: ['demo', 'demo', 7] }],
+  });
+  assert.deepEqual(projects, [{ id: 'p1', name: 'glissa', path: '/repos/a', packs: ['demo'] }]);
+});
+
+test('a variant carrying another project layer fails the build, publishing nothing', () => {
+  const slugA = projectVariantSlug('/repos/a/glissa');
+  const slugB = projectVariantSlug('/repos/b/other');
+  const spec = validSpec({ name: `demo-${slugA}`, rules: undefined, sources: [{ glob: 'projects/*.md', data: true }] });
+  const ours = { relPath: `${slugA}.md`, content: '- [m-0123456789abcdef] (model) ours\n', sourceIndex: 0 };
+  const theirs = { relPath: `${slugB}.md`, content: '- [m-0123456789abcdef] (model) theirs\n', sourceIndex: 0 };
+  const variant = { group: 'demo', isGroupBase: false, projectId: 'p1', projectSlug: slugA, foreignSlugs: [slugB] };
+
+  const plan = planPackBuild(spec, [ours, theirs], { builtAt: BUILT_AT, variant });
+  assert.equal(plan.ok, false);
+  assert.deepEqual(plan.outputs, []);
+  assert.equal(plan.errors.some((error) => error.includes(slugB)), true);
+
+  // The same source with only its own project's layer publishes exactly as it always did.
+  assert.equal(planPackBuild(spec, [ours], { builtAt: BUILT_AT, variant }).ok, true);
+});
+
+test('the base build refuses any project layer at all: it is the pack every consumer shares', () => {
+  const slugA = projectVariantSlug('/repos/a/glissa');
+  const spec = validSpec({ rules: undefined, sources: [{ glob: 'projects/*.md', data: true }] });
+  const files = [{ relPath: `${slugA}.md`, content: '- [m-0123456789abcdef] (model) ours\n', sourceIndex: 0 }];
+  const plan = planPackBuild(spec, files, {
+    builtAt: BUILT_AT,
+    variant: { group: 'demo', isGroupBase: true, projectId: null, projectSlug: null, foreignSlugs: [slugA] },
+  });
+  assert.equal(plan.ok, false);
+  assert.equal(plan.errors.some((error) => error.includes(slugA)), true);
+});
+
+test('a group base manifest says so and a variant manifest names its group and project', () => {
+  const spec = validSpec({ rules: undefined });
+  const base = planPackBuild(spec, [sourceFile('a.md', 'x')], {
+    builtAt: BUILT_AT,
+    variant: { group: 'demo', isGroupBase: true, projectId: null, projectSlug: null, foreignSlugs: [] },
+  });
+  assert.equal(base.manifest.perProjectVariants, true);
+  assert.equal(base.manifest.group, undefined);
+
+  const variant = planPackBuild(validSpec({ name: 'demo-glissa-12345678', rules: undefined }), [sourceFile('a.md', 'x')], {
+    builtAt: BUILT_AT,
+    variant: { group: 'demo', isGroupBase: false, projectId: 'p1', projectSlug: 'glissa-12345678', foreignSlugs: [] },
+  });
+  assert.equal(variant.manifest.perProjectVariants, undefined);
+  assert.equal(variant.manifest.group, 'demo');
+  assert.equal(variant.manifest.projectId, 'p1');
+  assert.equal(variant.manifest.projectSlug, 'glissa-12345678');
+});
+
+test('a plain build is byte-identical to the pre-variant one: no variant fields, same version', () => {
+  const spec = validSpec();
+  const files = [sourceFile('one.md', '# one\n')];
+  const plan = planPackBuild(spec, files, { builtAt: BUILT_AT });
+  assert.equal(plan.manifest.perProjectVariants, undefined);
+  assert.equal(plan.manifest.group, undefined);
+  assert.equal(plan.manifest.projectSlug, undefined);
+  assert.equal(plan.manifest.version, planPackBuild(spec, files, { builtAt: BUILT_AT, variant: null }).manifest.version);
+});
+

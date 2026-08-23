@@ -12,7 +12,7 @@ const crypto = require('node:crypto');
 const path = require('node:path');
 
 const { glissaHomeDir, resolveConfigPath } = require('./config-store');
-const { GLISSA_HOME_PLACEHOLDER, PACK_NAME_RE, isDataSource, isPackRelativePath, matchesGlob, planPackBuild, sha256, sourcePattern, validatePackSpec } = require('./core/pack-core');
+const { GLISSA_HOME_PLACEHOLDER, PACK_NAME_RE, PROJECT_SLUG_PLACEHOLDER, isDataSource, isPackRelativePath, matchesGlob, planPackBuild, planPackVariants, sha256, sourcePattern, validatePackSpec } = require('./core/pack-core');
 
 const SPEC_SUFFIX = '.pack.json';
 // Source patterns resolve against packs/, so a shared spec reads the same whether it runs from a repo
@@ -44,15 +44,20 @@ function defaultGlissaHome() {
   return path.dirname(resolveConfigPath());
 }
 
-function expandPlaceholders(pattern, glissaHome) {
-  if (!pattern.includes(GLISSA_HOME_PLACEHOLDER)) return pattern;
-  const home = toPosix(path.resolve(glissaHome || defaultGlissaHome()));
-  return pattern.split(GLISSA_HOME_PLACEHOLDER).join(home);
+function expandPlaceholders(pattern, glissaHome, projectSlug = null) {
+  let expanded = pattern;
+  if (expanded.includes(GLISSA_HOME_PLACEHOLDER)) {
+    const home = toPosix(path.resolve(glissaHome || defaultGlissaHome()));
+    expanded = expanded.split(GLISSA_HOME_PLACEHOLDER).join(home);
+  }
+  // Resolved once per DERIVED pack, so a built pack dir holds no placeholder and no delivery-time lookup.
+  if (projectSlug) expanded = expanded.split(PROJECT_SLUG_PLACEHOLDER).join(projectSlug);
+  return expanded;
 }
 
 /** A pattern starting with `**` is a suffix matcher and stays as written; anything else is anchored to baseDir. */
-function resolvePattern(rawPattern, baseDir, glissaHome = null) {
-  const pattern = expandPlaceholders(rawPattern, glissaHome);
+function resolvePattern(rawPattern, baseDir, glissaHome = null, projectSlug = null) {
+  const pattern = expandPlaceholders(rawPattern, glissaHome, projectSlug);
   if (pattern.startsWith('**')) return pattern;
   if (path.isAbsolute(pattern)) return toPosix(path.resolve(pattern));
   return toPosix(path.resolve(baseDir, pattern));
@@ -149,7 +154,9 @@ async function packWatchRoots(spec, { baseDir = DEFAULT_PACKS_DIR, glissaHome = 
   const roots = new Set();
   const addRoot = async (pattern) => {
     if (typeof pattern !== 'string' || pattern.length === 0) return;
-    const { root } = literalRoot(resolvePattern(pattern, baseDir, glissaHome));
+    // A per-project pattern is watched as a WILDCARD: the roots are the same for every variant, and a
+    // slug-shaped literal would resolve to one project's file and watch nothing when it is absent.
+    const { root } = literalRoot(resolvePattern(pattern, baseDir, glissaHome, '*'));
     if (!root) return;
     const stats = await statOrNull(root);
     if (!stats) return;
@@ -341,6 +348,9 @@ function buildReport(name, specPath, overrides) {
     currentDir: null,
     // True when the planned version already matched the published one, so nothing was written.
     unchanged: false,
+    // Derived per-project packs this spec also built (see planPackVariants); empty for a plain spec.
+    variants: [],
+    warnings: [],
     ...overrides,
   };
 }
@@ -355,7 +365,7 @@ function failure(name, specPath, errors) {
  * @returns {Promise<{ok: boolean, name: string, specPath: string, errors: string[], version: string|null,
  *   fileCount: number, tokenEstimate: number, budgetTokens: number|null, currentDir: string|null}>}
  */
-async function buildPack({ specPath, baseDir = DEFAULT_PACKS_DIR, builtRoot = defaultBuiltRoot(), glissaHome = null, now = Date.now } = {}) {
+async function buildPack({ specPath, baseDir = DEFAULT_PACKS_DIR, builtRoot = defaultBuiltRoot(), glissaHome = null, projects = [], now = Date.now } = {}) {
   const fallbackName = path.basename(specPath).replace(/\.pack\.json$/, '');
 
   let spec;
@@ -371,6 +381,21 @@ async function buildPack({ specPath, baseDir = DEFAULT_PACKS_DIR, builtRoot = de
     return failure(fallbackName, specPath, [`spec name "${spec.name}" does not match its filename`]);
   }
 
+  // A plain spec plans exactly one build of itself; a perProjectVariants group plans its base plus one
+  // derived pack per consuming project, each an independent top-level pack with its own version.
+  const plan = planPackVariants(spec, projects);
+  const reports = [];
+  for (const entry of plan.builds) {
+    reports.push(await buildOnePack(entry, { specPath, baseDir, builtRoot, glissaHome, now }));
+  }
+  const [base, ...variants] = reports;
+  return { ...base, variants, warnings: plan.warnings };
+}
+
+// One pack's read-plan-publish, run once per entry planPackVariants produced.
+async function buildOnePack(entry, { specPath, baseDir, builtRoot, glissaHome, now }) {
+  const spec = entry.spec;
+
   const files = [];
   try {
     for (const [index, source] of spec.sources.entries()) {
@@ -380,33 +405,33 @@ async function buildPack({ specPath, baseDir = DEFAULT_PACKS_DIR, builtRoot = de
       files.push(...(await readFilesForSkill(skill, index, baseDir, { glissaHome })));
     }
   } catch (err) {
-    return failure(spec.name, specPath, [`could not read sources: ${err.message}`]);
+    return failure(entry.name, specPath, [`could not read sources: ${err.message}`]);
   }
 
-  const plan = planPackBuild(spec, files, { builtAt: new Date(now()).toISOString() });
-  if (!plan.ok) return failure(spec.name, specPath, plan.errors);
+  const built = planPackBuild(spec, files, { builtAt: new Date(now()).toISOString(), variant: entry.variant });
+  if (!built.ok) return failure(entry.name, specPath, built.errors);
 
-  const report = buildReport(spec.name, specPath, {
+  const report = buildReport(entry.name, specPath, {
     ok: true,
-    version: plan.manifest.version,
-    fileCount: plan.outputs.length,
-    tokenEstimate: plan.manifest.tokenEstimate,
-    budgetTokens: plan.manifest.budgetTokens,
-    currentDir: path.join(builtRoot, spec.name, 'current'),
+    version: built.manifest.version,
+    fileCount: built.outputs.length,
+    tokenEstimate: built.manifest.tokenEstimate,
+    budgetTokens: built.manifest.budgetTokens,
+    currentDir: path.join(builtRoot, entry.name, 'current'),
   });
 
   // Publish only a version the built dir does not already carry. The watch loop rebuilds on any write
   // under a source root, and Claude Code hot-reloads skills from a delivered pack dir, so rewriting
   // identical bytes would poke every live session for nothing (and churn current/previous with it).
-  const published = await readBuiltManifest(spec.name, { builtRoot });
-  if (published && published.version === plan.manifest.version) return { ...report, unchanged: true };
+  const published = await readBuiltManifest(entry.name, { builtRoot });
+  if (published && published.version === built.manifest.version) return { ...report, unchanged: true };
 
-  await publishBuild(builtRoot, spec.name, plan.outputs);
+  await publishBuild(builtRoot, entry.name, built.outputs);
   return report;
 }
 
 /** Build every spec, or just the named one. Reports per pack; never throws. */
-async function buildPacks({ name = null, specsDir = defaultSpecsDir(), baseDir = DEFAULT_PACKS_DIR, builtRoot = defaultBuiltRoot(), glissaHome = null, now = Date.now } = {}) {
+async function buildPacks({ name = null, specsDir = defaultSpecsDir(), baseDir = DEFAULT_PACKS_DIR, builtRoot = defaultBuiltRoot(), glissaHome = null, projects = [], now = Date.now } = {}) {
   const specs = await listPackSpecs({ specsDir });
   const wanted = name ? specs.filter((spec) => spec.name === name) : specs;
   if (name && wanted.length === 0) {
@@ -414,7 +439,10 @@ async function buildPacks({ name = null, specsDir = defaultSpecsDir(), baseDir =
   }
   const reports = [];
   for (const spec of wanted) {
-    reports.push(await buildPack({ specPath: spec.specPath, baseDir, builtRoot, glissaHome, now }));
+    const report = await buildPack({ specPath: spec.specPath, baseDir, builtRoot, glissaHome, projects, now });
+    // Derived packs are reported beside their group: each one is its own pack, so a caller listing
+    // build results lists them rather than hiding them inside the group's row.
+    reports.push(report, ...report.variants);
   }
   return reports;
 }
@@ -450,7 +478,7 @@ async function readBuiltManifest(name, { builtRoot = defaultBuiltRoot(), slot = 
  * @returns {Promise<{name: string, dir: string|null, version: string|null, reason: string|null}>}
  */
 async function resolveBuiltPack(name, { builtRoot = defaultBuiltRoot() } = {}) {
-  const skip = (reason) => ({ name, dir: null, version: null, reason });
+  const skip = (reason) => ({ name, dir: null, version: null, reason, perProjectVariants: false, group: null });
   // A pack name comes from config.json and becomes a path segment here, so it is re-checked even
   // though the caller normalizes: a `..` segment would resolve outside the built root.
   if (typeof name !== 'string' || !PACK_NAME_RE.test(name)) return skip('not a valid pack name');
@@ -476,7 +504,16 @@ async function resolveBuiltPack(name, { builtRoot = defaultBuiltRoot() } = {}) {
       firstRefusal = firstRefusal || `manifest.json missing or unreadable in ${dir}`;
       continue;
     }
-    return { name, dir, version: manifest.version, reason: null };
+    return {
+      name,
+      dir,
+      version: manifest.version,
+      reason: null,
+      // A group's base build declares itself, which is what tells a spawn to look for this project's
+      // variant before settling for the base.
+      perProjectVariants: manifest.perProjectVariants === true,
+      group: typeof manifest.group === 'string' ? manifest.group : null,
+    };
   }
   // The reason names what was wrong with `current`, which is what an operator is looking for: the
   // previous slot is a crash fallback, not a thing they configured.

@@ -74,7 +74,7 @@ const { normalizeRemoteConfig, validateRemoteConfig, decideBindHost } = require(
 const { createClientPresence } = require('./core/client-presence');
 const { decideControlSend } = require('./core/control-send-core');
 const { createHeartbeat } = require('./ws-heartbeat');
-const { consumedPackNames, normalizePackNames } = require('./core/pack-core');
+const { consumedPackNames, normalizePackNames, packVariantProjects, projectVariantSlug } = require('./core/pack-core');
 const { createPackService } = require('./pack-service');
 const { createMillWiring } = require('./mill-wiring');
 const {
@@ -467,6 +467,9 @@ function createBackend(httpServer, options = {}) {
       // Context packs delivered as --add-dir at spawn. Hand-edited on the project record in M2 (it is
       // deliberately not a control-WS settable key); the Session validates the shape defensively.
       packs: project.packs,
+      // Which per-project variant this project's spawns resolve first (see Session._resolvePacks).
+      // The SAME slug the memory projection names its per-project file by.
+      packVariantSlug: projectVariantSlug(project.path),
       // Pack read telemetry (config kill switch; undefined -> Session default true).
       packReadTelemetry: cfg.packReadTelemetry,
       // Official plan-limit ingestion via a managed statusLine. Off whenever the usage lane itself is
@@ -1274,6 +1277,8 @@ function createBackend(httpServer, options = {}) {
   // assigning a pack from the Mill tab (or by hand) starts that work without a restart.
   const packService = createPackService({
     consumedPackNames: () => consumedPackNames(config),
+    // Read live like the consumer set: a project's path or pack list is what derives its pack variants.
+    variantProjects: () => packVariantProjects(config),
     ...(options.packServiceOptions || {}),
   });
   packService.on('pack-updated', ({ name, version }) => {
@@ -1893,7 +1898,9 @@ function createBackend(httpServer, options = {}) {
     listPackNames: () => mill.listPackNames(),
     // Build a newly delivered pack before the assignment's reload recreates the session. Gated on the
     // same switch as the loops: with auto-rebuild off, a pack is whatever `glissa pack build` last wrote.
-    ensurePacksBuilt: (names) => (packsAutoRebuildEnabled ? packService.ensureBuilt(names) : Promise.resolve()),
+    ensurePacksBuilt: (names, savedConfig) => (packsAutoRebuildEnabled
+      ? packService.ensureBuilt(names, { projects: packVariantProjects(savedConfig || config) })
+      : Promise.resolve()),
   });
 
   // Visions connect-time repair: findings are current state, so one snapshot beats replay retention (plan-limits precedent); registered after registerControlHandlers so the snapshot frame stays first

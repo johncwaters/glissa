@@ -246,3 +246,71 @@ test('a spec no project and no lane names is reported as having no consumers', a
   assert.equal(replies[0].packs[0].hasConsumers, false);
   assert.equal(replies[0].totals.unconsumed, 1);
 });
+
+// ---- Per-project variants: the shell enumerates a group's derived packs beside it ----
+
+const { projectVariantSlug } = require('../server/core/pack-core');
+
+function writeVariantFixture() {
+  const fixture = writeFixture();
+  writeSpec(fixture.specsDir, 'memory', JSON.stringify({
+    name: 'memory',
+    description: 'Recorded observation',
+    perProjectVariants: true,
+    sources: [
+      { path: 'sources/good', data: true },
+      { path: 'sources/good/projects/{{projectSlug}}.md', data: true, optional: true },
+    ],
+    budgetTokens: 8000,
+  }));
+  return fixture;
+}
+
+function variantConfig() {
+  return { projects: [{ id: 'p1', name: 'glissa', path: '/repos/a/glissa', packs: ['memory'] }] };
+}
+
+test('a group spec reports its base row plus one row per consuming project', async () => {
+  const fixture = writeVariantFixture();
+  const slug = projectVariantSlug('/repos/a/glissa');
+  try {
+    const { wiring } = makeWiring(fixture, { config: variantConfig() });
+    const { replies, done } = pull(wiring, 'r1');
+    await done;
+
+    const names = replies[0].packs.map((pack) => pack.name);
+    assert.deepEqual(names, ['good', 'memory', `memory-${slug}`]);
+    const variant = replies[0].packs.find((pack) => pack.name === `memory-${slug}`);
+    assert.equal(variant.group, 'memory');
+    assert.equal(variant.projectId, 'p1');
+    // Never built yet, which is a plain "not built" like any other pack, with no server path on the wire.
+    assert.equal(variant.built, null);
+    assert.equal(variant.builtReason, 'not built');
+  } finally {
+    fs.rmSync(fixture.tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('a group with no consuming project reports only its base row', async () => {
+  const fixture = writeVariantFixture();
+  try {
+    const { wiring } = makeWiring(fixture, { config: { projects: [] } });
+    const { replies, done } = pull(wiring, 'r1');
+    await done;
+
+    assert.deepEqual(replies[0].packs.map((pack) => pack.name), ['good', 'memory']);
+    assert.equal(replies[0].totals.variantCount, 0);
+  } finally {
+    fs.rmSync(fixture.tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('a group name is what a project may be assigned; a variant name is not offered', async () => {
+  const fixture = writeVariantFixture();
+  try {
+    const { wiring } = makeWiring(fixture, { config: variantConfig() });
+    assert.deepEqual(await wiring.listPackNames(), ['good', 'memory']);
+  } finally {
+    fs.rmSync(fixture.tmpDir, { recursive: true, force: true });
+  }
+});

@@ -38,7 +38,7 @@ const {
   decideResyncAction,
   firstGitErrorLine,
 } = require("../server/core/branch-sync-core");
-const { normalizePackNames } = require("../server/core/pack-core");
+const { normalizePackNames, variantPackName } = require("../server/core/pack-core");
 const { defaultBuiltRoot, resolveBuiltPack } = require("../server/pack-builder");
 const { buildPackNotice, listStalePacks } = require("./core/pack-notice");
 const packReadTracker = require("./core/pack-read-tracker");
@@ -217,6 +217,9 @@ class Session extends EventEmitter {
     packs = [],
     // Where built packs live. Defaults to ~/.glissa/packs/built; tests point it at a fixture root.
     packsBuiltRoot = null,
+    // The per-project variant slug this project resolves first (server/core/pack-core.js
+    // projectVariantSlug). Null for a lane session, which is delivered the base pack.
+    packVariantSlug = null,
     // Count Read tool calls that land inside a delivered pack dir (config kill switch). Costs one
     // matcher-scoped PostToolUse hook, and only for a session that actually delivers packs.
     packReadTelemetry = true,
@@ -386,6 +389,7 @@ class Session extends EventEmitter {
     for (const warning of packNames.warnings) console.warn(`[session:${name}] ${warning}`);
     this._packs = packNames.names;
     this._packsBuiltRoot = packsBuiltRoot;
+    this._packVariantSlug = typeof packVariantSlug === "string" && packVariantSlug ? packVariantSlug : null;
     this._deliveredPacks = [];
     // Live pack-notice channel: latest built version per pack the backend pushed after a rebuild, and
     // whether the resulting staleness still owes this session one notice on its next UserPromptSubmit
@@ -2277,7 +2281,7 @@ class Session extends EventEmitter {
     const builtRoot = this._packsBuiltRoot || defaultBuiltRoot();
     const args = [];
     for (const name of this._packs) {
-      const resolved = await resolveBuiltPack(name, { builtRoot });
+      const resolved = await this._resolvePackVariant(name, builtRoot);
       const ts = Date.now();
       if (!resolved.dir) {
         console.warn(`[session:${this.name}] context pack "${name}" skipped: ${resolved.reason}`);
@@ -2287,10 +2291,34 @@ class Session extends EventEmitter {
       args.push("--add-dir", resolved.dir);
       // `dir` rides the delivered record so the read tracker can classify a path against it; it is
       // server-side only (toSnapshot rebuilds its entries without it).
+      // The RESOLVED name is what is recorded, so the staleness chip compares this delivery against the
+      // version of the pack that was actually handed over rather than its group's.
       this._deliveredPacks.push({ name: resolved.name, version: resolved.version, dir: resolved.dir });
-      this._recordDecision({ kind: "pack", ts, name, decision: "delivered", version: resolved.version });
+      this._recordDecision({ kind: "pack", ts, name: resolved.name, decision: "delivered", version: resolved.version });
     }
     return { args, packs: this._deliveredPacks };
+  }
+
+  /*
+   * A pack whose spec declares per-project variants is FLATTENED into independent packs at build time
+   * (`<group>-<projectSlug>`), so delivery is one extra lookup and no version arithmetic: this
+   * project's variant when it is built, the group's base build otherwise. A project with nothing
+   * recorded yet, or a variant a rebuild has not published, is delivered the base rather than nothing.
+   */
+  async _resolvePackVariant(name, builtRoot) {
+    const base = await resolveBuiltPack(name, { builtRoot });
+    if (!this._packVariantSlug || !base.perProjectVariants) return base;
+    const variantName = variantPackName(name, this._packVariantSlug);
+    const variant = variantName ? await resolveBuiltPack(variantName, { builtRoot }) : null;
+    if (variant?.dir) return variant;
+    this._recordDecision({
+      kind: "pack",
+      ts: Date.now(),
+      name,
+      decision: "variant-fallback",
+      reason: variant ? variant.reason : "no valid variant name for this project",
+    });
+    return base;
   }
 
   _buildSpawnEnv(options) {

@@ -251,3 +251,34 @@ test('the assignment hint quotes the cap the server shipped, and says nothing wi
   assert.ok(deliverToCapHint({ maxPacksPerProject: 4 }).startsWith('Up to 4 packs per project.'));
   assert.equal(deliverToCapHint({}), '');
 });
+
+// ---- Per-project variants: separate packs, read as one pack's story ----
+
+test('a pack keeps its variants beside it, and the family is ranked by its worst row', async () => {
+  const { sortPackRows } = await importCore();
+  const rows = [
+    pack({ name: 'zulu' }),
+    pack({ name: 'memory-other-87654321', group: 'memory' }),
+    pack({ name: 'alpha' }),
+    pack({ name: 'memory' }),
+    pack({ name: 'memory-glissa-12345678', group: 'memory', staleDeliveries: 1 }),
+  ];
+  assert.deepEqual(sortPackRows(rows).map((row) => row.name), [
+    'memory', 'memory-glissa-12345678', 'memory-other-87654321', 'alpha', 'zulu',
+  ]);
+});
+
+test('a variant row says what it is; an ordinary pack says nothing extra', async () => {
+  const { variantNote } = await importCore();
+  const note = variantNote(pack({ name: 'memory-glissa-12345678', group: 'memory', consumers: { projects: ['glissa'], lanes: [] } }));
+  assert.match(note, /variant of "memory"/);
+  assert.match(note, /glissa/);
+  assert.equal(variantNote(pack()), '');
+});
+
+test('a variant is never assignable: the project assigns the group and the mill derives the rest', async () => {
+  const { deliveryTargets } = await importCore();
+  const report = { maxPacksPerProject: 4, projects: [{ id: 'p1', name: 'glissa', packs: ['memory'] }] };
+  assert.deepEqual(deliveryTargets(report, pack({ name: 'memory-glissa-12345678', group: 'memory' })), []);
+  assert.equal(deliveryTargets(report, pack({ name: 'memory' })).length, 1);
+});

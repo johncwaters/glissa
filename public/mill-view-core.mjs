@@ -36,19 +36,45 @@ export function hasStaleWork(pack) {
   return (Array.isArray(pack?.distill) ? pack.distill : []).some((row) => row.stale === true);
 }
 
+function familyOf(pack) {
+  return typeof pack?.group === 'string' && pack.group ? pack.group : String(pack?.name ?? '');
+}
+
 // Invalid specs first (nothing downstream of them is trustworthy), then anything stale, then by name so
-// a quiet mill reads as a stable list rather than reshuffling on every pull.
+// a quiet mill reads as a stable list rather than reshuffling on every pull. A pack's per-project
+// variants stay with it: they are separate packs, but they are the same pack's story.
 export function sortPackRows(packs) {
   const rank = (pack) => {
     if (!pack.specValid) return 0;
     if (hasStaleWork(pack)) return 1;
     return 2;
   };
-  return [...(Array.isArray(packs) ? packs : [])].sort((a, b) => {
-    const byRank = rank(a) - rank(b);
+  const rows = [...(Array.isArray(packs) ? packs : [])];
+  const familyRank = new Map();
+  for (const pack of rows) {
+    const family = familyOf(pack);
+    const worst = Math.min(rank(pack), familyRank.has(family) ? familyRank.get(family) : rank(pack));
+    familyRank.set(family, worst);
+  }
+  return rows.sort((a, b) => {
+    const familyA = familyOf(a);
+    const familyB = familyOf(b);
+    const byRank = familyRank.get(familyA) - familyRank.get(familyB);
     if (byRank !== 0) return byRank;
+    if (familyA !== familyB) return familyA.localeCompare(familyB);
+    const byVariant = (a.group ? 1 : 0) - (b.group ? 1 : 0);
+    if (byVariant !== 0) return byVariant;
     return String(a.name).localeCompare(String(b.name));
   });
+}
+
+/** One line saying what a derived row is, or '' for an ordinary pack. */
+export function variantNote(pack) {
+  const group = typeof pack?.group === 'string' && pack.group ? pack.group : '';
+  if (!group) return '';
+  const projects = Array.isArray(pack?.consumers?.projects) ? pack.consumers.projects : [];
+  const project = projects.length > 0 ? projects[0] : 'its project';
+  return `Per-project variant of "${group}", built for ${project} and delivered in place of the base pack.`;
 }
 
 export function budgetPct(pack) {
@@ -203,6 +229,8 @@ function packCap(report) {
  * list rather than describing a delta).
  */
 export function deliveryTargets(report, pack) {
+  // A variant is never assigned: a project assigns the GROUP, and the mill derives the variant from it.
+  if (typeof pack?.group === 'string' && pack.group) return [];
   const name = typeof pack?.name === 'string' ? pack.name : '';
   const cap = packCap(report);
   const targets = [];

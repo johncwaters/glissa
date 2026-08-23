@@ -36,11 +36,14 @@ function createPackService(deps = {}) {
     listSpecs = () => listPackSpecs(),
     loadSpec = (specPath) => loadPackSpec(specPath),
     watchRootsForSpec = (spec) => packWatchRoots(spec),
-    build = ({ specPath }) => buildPack({ specPath }),
+    build = ({ specPath, projects }) => buildPack({ specPath, projects }),
     createWatcher = createPackWatcher,
     // Names something would actually be spawned against. null (the default) means "no filter", which
     // is what an existing caller injecting nothing gets; the backend always supplies it.
     consumedPackNames = null,
+    // The project records a perProjectVariants spec derives its variants from. A variant's consumer is
+    // exactly its project, so this set moving is a consumer change like any other.
+    variantProjects = () => [],
     setIntervalFn = setInterval,
     clearIntervalFn = clearInterval,
     sweepMinutes = DEFAULT_SWEEP_MINUTES,
@@ -69,7 +72,10 @@ function createPackService(deps = {}) {
   // null (no filter) is also the initial lastConsumerKey, so an unfiltered service never restarts.
   function consumerKey() {
     if (!consumedPackNames) return null;
-    return JSON.stringify(consumedNames());
+    // The derived variant set is keyed too: a project's path or pack list moving changes which packs
+    // exist, not just which specs are worth sweeping.
+    const projects = variantProjects().map((project) => [project?.id ?? null, project?.path ?? null, project?.packs ?? null]);
+    return JSON.stringify([consumedNames(), projects]);
   }
 
   function consumedNames() {
@@ -88,22 +94,35 @@ function createPackService(deps = {}) {
     return specs.filter((spec) => consumed.has(spec.name));
   }
 
-  async function runBuild(name, specPath) {
-    if (stopped) return null;
-    const report = await build({ specPath, name });
-    if (!report || !report.ok) {
-      log.warn(`[packs] ${name} rebuild failed: ${report?.errors?.join('; ') || 'no report'}`);
-      return report || null;
+  // A group spec publishes its base AND one derived pack per consuming project, each a top-level pack
+  // with its own version, so every one of them is recorded and announced in its own right.
+  function notePublished(report) {
+    if (!report) return;
+    if (!report.ok) {
+      log.warn(`[packs] ${report.name} rebuild failed: ${report.errors?.join('; ') || 'no report'}`);
+      return;
     }
     versionsByName.set(report.name, report.version);
-    if (report.unchanged) return report;
-    log.log(`[packs] ${name} rebuilt: version ${shortVersion(report.version)}`);
+    if (report.unchanged) return;
+    log.log(`[packs] ${report.name} rebuilt: version ${shortVersion(report.version)}`);
     service.emit('pack-updated', { name: report.name, version: report.version });
+  }
+
+  async function runBuild(name, specPath, projects) {
+    if (stopped) return null;
+    const report = await build({ specPath, name, projects: projects || variantProjects() });
+    if (!report) {
+      log.warn(`[packs] ${name} rebuild failed: no report`);
+      return null;
+    }
+    for (const warning of Array.isArray(report.warnings) ? report.warnings : []) log.warn(`[packs] ${name}: ${warning}`);
+    notePublished(report);
+    for (const variant of Array.isArray(report.variants) ? report.variants : []) notePublished(variant);
     return report;
   }
 
-  function queueBuild(name, specPath) {
-    buildChain = buildChain.then(() => runBuild(name, specPath)).catch((err) => {
+  function queueBuild(name, specPath, projects = null) {
+    buildChain = buildChain.then(() => runBuild(name, specPath, projects)).catch((err) => {
       log.warn(`[packs] ${name} rebuild crashed: ${err.message}`);
       return null;
     });
@@ -223,12 +242,14 @@ function createPackService(deps = {}) {
    * built, and a session resolves its packs at spawn, so a build that waits for the reload arrives after
    * the spawn that needed it. Runs on the build chain, so it cannot publish under a concurrent rebuild.
    */
-  async function ensureBuilt(names) {
+  async function ensureBuilt(names, { projects = null } = {}) {
     if (torndown || stopped) return;
     const wanted = new Set(Array.isArray(names) ? names : []);
     if (wanted.size === 0) return;
     for (const spec of (await listSpecs()).filter((entry) => wanted.has(entry.name))) {
-      await queueBuild(spec.name, spec.specPath);
+      // The projects come from the config that was just SAVED, not the one still in memory: the
+      // assignment is what derives the project's variant, and it has not been reloaded yet.
+      await queueBuild(spec.name, spec.specPath, projects);
     }
   }
 

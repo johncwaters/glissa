@@ -34,21 +34,24 @@ function okReport(name, overrides = {}) {
 
 // A fake service: fake watchers (recording the dir they claimed and their onChange), a fake interval,
 // and a build that returns whatever the test queued for that pack name.
-function harness({ specs = SPECS, reportFor = (name) => okReport(name), consumedPackNames = null } = {}) {
+function harness({ specs = SPECS, reportFor = (name) => okReport(name), consumedPackNames = null, variantProjects = null } = {}) {
   const watchers = [];
   const builds = [];
+  const buildCalls = [];
   let intervalCallback = null;
   let intervalMs = null;
   let intervalCleared = 0;
 
   const service = createPackService({
     consumedPackNames,
+    ...(variantProjects ? { variantProjects } : {}),
     listSpecs: async () => specs,
     loadSpec: async (specPath) => ({ name: specPath, sources: [], skills: [] , specPath }),
     watchRootsForSpec: async (spec) => ROOTS[spec.specPath] || [],
-    build: async ({ name, specPath }) => {
+    build: async ({ name, specPath, projects }) => {
       builds.push(name);
-      return reportFor(name, specPath);
+      buildCalls.push({ name, projects });
+      return reportFor(name, specPath, projects);
     },
     createWatcher: ({ onChange }) => {
       const watcher = { dir: null, onChange, stopped: false };
@@ -65,7 +68,7 @@ function harness({ specs = SPECS, reportFor = (name) => okReport(name), consumed
   service.on('pack-updated', (payload) => updates.push(payload));
 
   return {
-    service, watchers, builds, updates,
+    service, watchers, builds, buildCalls, updates,
     fireWatch: (dir) => watchers.find((w) => w.dir === dir).onChange(),
     tickInterval: () => intervalCallback(),
     get intervalMs() { return intervalMs; },
@@ -406,4 +409,86 @@ test('a restart racing stop() installs no watcher into the emptied array', async
   // Every watcher ever created is closed: an fs.watch handle installed after teardown emptied the array
   // is one nothing would ever close.
   assert.equal(h.watchers.every((w) => w.stopped), true, `${h.watchers.filter((w) => !w.stopped).length} watchers left open`);
+});
+
+// ---- Per-project variants: derived packs are recorded and announced in their own right ----
+
+function groupReport(name, overrides = {}) {
+  return okReport(name, {
+    variants: [
+      okReport(`${name}-glissa-12345678`, { version: `v-${name}-a` }),
+      okReport(`${name}-other-87654321`, { version: `v-${name}-b`, unchanged: true }),
+    ],
+    ...overrides,
+  });
+}
+
+test('a derived pack gets its own version and its own pack-updated, like any other pack', async () => {
+  const h = harness({ consumedPackNames: () => ['alpha'], reportFor: (name) => groupReport(name) });
+  await h.service.start();
+
+  assert.deepEqual(h.service.getVersions(), {
+    alpha: 'v-alpha-1',
+    'alpha-glissa-12345678': 'v-alpha-a',
+    'alpha-other-87654321': 'v-alpha-b',
+  });
+  // The unchanged variant publishes nothing, exactly like an unchanged plain pack.
+  assert.deepEqual(h.updates.map((update) => update.name), ['alpha', 'alpha-glissa-12345678']);
+  await h.service.stop();
+});
+
+test('a failed variant is warned about and leaves its group build reported as ok', async () => {
+  const warnings = [];
+  const h = harness({
+    consumedPackNames: () => ['alpha'],
+    reportFor: (name) => groupReport(name, {
+      variants: [{ ...okReport(`${name}-glissa-12345678`), ok: false, errors: ['budget'] }],
+    }),
+  });
+  h.service.on('pack-updated', (update) => warnings.push(update.name));
+  await h.service.start();
+
+  assert.deepEqual(h.service.getVersions(), { alpha: 'v-alpha-1' });
+  assert.deepEqual(warnings, ['alpha']);
+  await h.service.stop();
+});
+
+test('the projects a build derives variants from are read live, per build', async () => {
+  let projects = [{ id: 'p1', name: 'glissa', path: '/repos/a/glissa', packs: ['alpha'] }];
+  const h = harness({ consumedPackNames: () => ['alpha'], variantProjects: () => projects });
+  await h.service.start();
+  assert.deepEqual(h.buildCalls[0].projects, projects);
+
+  projects = [];
+  h.fireWatch('/packs/sources/alpha');
+  await settle();
+  assert.deepEqual(h.buildCalls[h.buildCalls.length - 1].projects, []);
+  await h.service.stop();
+});
+
+test('a project moving path restarts the loops: the derived pack set moved even though the names did not', async () => {
+  let projects = [{ id: 'p1', name: 'glissa', path: '/repos/a/glissa', packs: ['alpha'] }];
+  const h = harness({ consumedPackNames: () => ['alpha'], variantProjects: () => projects });
+  await h.service.start();
+  h.builds.length = 0;
+
+  await h.service.restartIfConsumersChanged();
+  assert.deepEqual(h.builds, [], 'nothing moved, so nothing was rebuilt');
+
+  projects = [{ id: 'p1', name: 'glissa', path: '/repos/moved/glissa', packs: ['alpha'] }];
+  await h.service.restartIfConsumersChanged();
+  assert.deepEqual(h.builds, ['alpha'], 'the variant for the new path is built without a server restart');
+  await h.service.stop();
+});
+
+test('ensureBuilt derives variants from the SAVED config, which the in-memory one does not know yet', async () => {
+  const saved = [{ id: 'p1', name: 'glissa', path: '/repos/a/glissa', packs: ['alpha'] }];
+  const h = harness({ consumedPackNames: () => [], variantProjects: () => [] });
+  await h.service.start();
+
+  await h.service.ensureBuilt(['alpha'], { projects: saved });
+
+  assert.deepEqual(h.buildCalls.map((call) => call.name), ['alpha']);
+  assert.deepEqual(h.buildCalls[0].projects, saved);
+  await h.service.stop();
 });

@@ -255,7 +255,7 @@ test('an empty mill reports zeros rather than throwing', () => {
   assert.deepEqual(report.packs, []);
   assert.deepEqual(report.configWarnings, []);
   assert.deepEqual(report.totals, {
-    packCount: 0, builtCount: 0, unconsumed: 0, invalidSpecs: 0, staleDeliveries: 0, staleDistills: 0, totalReads: 0,
+    packCount: 0, variantCount: 0, builtCount: 0, unconsumed: 0, invalidSpecs: 0, staleDeliveries: 0, staleDistills: 0, totalReads: 0,
   });
   assert.equal(report.autoRebuild, false);
   assert.equal(report.watcherCount, null);
@@ -302,4 +302,78 @@ test('a manifest with no token estimate reports null rather than a confident zer
   assert.equal(report.packs[0].built.indexTokenEstimate, null);
   assert.equal(report.packs[0].built.budgetPct, null);
   assert.equal(report.packs[0].built.fileCount, 2, 'counts still read as counts');
+});
+
+// ---- Per-project variants: one row per derived pack, grouped under the spec it came from ----
+
+function variantInput(overrides = {}) {
+  const groupSpec = validSpec({ name: 'memory', perProjectVariants: true, sources: [{ path: '{{glissaHome}}/m/{{projectSlug}}.md', data: true }] });
+  return baseInput({
+    specs: [
+      { name: 'memory', spec: groupSpec, manifest: manifest({ name: 'memory' }), builtReason: null, distill: [] },
+      {
+        name: 'memory-glissa-12345678',
+        spec: groupSpec,
+        group: 'memory',
+        variantProject: { id: 'p1', label: 'glissa' },
+        manifest: manifest({ name: 'memory-glissa-12345678', version: OLD_VERSION }),
+        builtReason: null,
+        distill: [],
+      },
+    ],
+    consumers: { projects: [{ id: 'p1', name: 'glissa', packs: ['memory'] }] },
+    ...overrides,
+  });
+}
+
+test('a derived pack is its own row, naming the group it came from and the project it is for', () => {
+  const report = buildMillReport(variantInput());
+  const [group, variant] = report.packs;
+
+  assert.equal(group.group, null, 'a group is the base build, not a variant of itself');
+  assert.equal(variant.group, 'memory');
+  assert.equal(variant.projectId, 'p1');
+  assert.equal(variant.name, 'memory-glissa-12345678');
+  assert.equal(variant.built.version, OLD_VERSION);
+  assert.equal(report.totals.variantCount, 1);
+});
+
+test('a variant consumer is exactly its project, and the assignment stays on the group', () => {
+  const report = buildMillReport(variantInput());
+  const [group, variant] = report.packs;
+
+  assert.deepEqual(group.consumers.projects, ['glissa']);
+  assert.deepEqual(variant.consumers.projects, ['glissa']);
+  assert.deepEqual(variant.consumers.lanes, []);
+  assert.equal(variant.hasConsumers, true);
+  assert.deepEqual(report.projects, [{ id: 'p1', name: 'glissa', packs: ['memory'] }]);
+});
+
+test('a variant is not judged against its group name: it never counts as a spec a consumer may name', () => {
+  const report = buildMillReport(variantInput({
+    consumers: { projects: [{ id: 'p1', name: 'glissa', packs: ['memory-glissa-12345678'] }] },
+  }));
+  assert.equal(report.configWarnings.some((warning) => warning.includes('has no spec')), true);
+});
+
+test('a variant row is valid even though its name differs from the spec filename', () => {
+  const report = buildMillReport(variantInput());
+  assert.equal(report.packs[1].specValid, true);
+  assert.deepEqual(report.packs[1].specErrors, []);
+});
+
+test('a delivery of a variant is joined onto the variant row, not its group', () => {
+  const report = buildMillReport(variantInput({
+    sessionRows: [{
+      sessionId: 's1',
+      sessionName: 'glissa',
+      state: 'RUNNING',
+      packs: [{ name: 'memory-glissa-12345678', version: VERSION, reads: 2 }],
+    }],
+  }));
+  const [group, variant] = report.packs;
+  assert.deepEqual(group.deliveredTo, []);
+  assert.equal(variant.deliveredTo.length, 1);
+  assert.equal(variant.deliveredTo[0].stale, true, 'the delivered version is compared against the VARIANT build');
+  assert.equal(variant.totalReads, 2);
 });

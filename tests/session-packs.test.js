@@ -23,13 +23,14 @@ function fakePty(pid = 2147483646) {
 
 async function makeBuiltRoot(packs) {
   const builtRoot = await fsp.mkdtemp(path.join(os.tmpdir(), 'glissa-packs-'));
-  for (const [name, version] of Object.entries(packs)) {
+  for (const [name, value] of Object.entries(packs)) {
+    const { version, ...extra } = typeof value === 'string' ? { version: value } : value;
     const currentDir = path.join(builtRoot, name, 'current');
     await fsp.mkdir(currentDir, { recursive: true });
     await fsp.writeFile(path.join(currentDir, 'CLAUDE.md'), `# ${name}\n`, 'utf8');
     await fsp.writeFile(
       path.join(currentDir, 'manifest.json'),
-      JSON.stringify({ name, version, tokenEstimate: 10 }, null, 2),
+      JSON.stringify({ name, version, tokenEstimate: 10, ...extra }, null, 2),
       'utf8',
     );
   }
@@ -238,5 +239,85 @@ test('packs: "company-context" (not an array) is ignored entirely', async () => 
     assert.deepEqual(calls[0].args, []);
   } finally {
     s.destroy();
+  }
+});
+
+// ---- Per-project variants: this project's flattened pack, with the group as the fallback ----
+
+const SLUG = 'glissa-12345678';
+
+async function startWithPacks(builtRoot, options = {}) {
+  const calls = [];
+  const s = new Session({
+    id: 'variant',
+    name: 'variant',
+    path: process.cwd(),
+    packs: ['memory'],
+    packsBuiltRoot: builtRoot,
+    spawnCommand: { path: process.execPath, kind: 'exe' },
+    ptySpawn: spawnCapture(calls),
+    ...options,
+  });
+  await s.start();
+  return { s, calls, decisions: s.getDebugState().decisions.filter((d) => d.kind === 'pack') };
+}
+
+test('a project delivers ITS variant of a group pack, and the snapshot records the resolved name', async () => {
+  const builtRoot = await makeBuiltRoot({
+    memory: { version: 'v-base', perProjectVariants: true },
+    [`memory-${SLUG}`]: { version: 'v-mine', group: 'memory', projectId: 'p1', projectSlug: SLUG },
+  });
+  const { s, calls, decisions } = await startWithPacks(builtRoot, { packVariantSlug: SLUG });
+  try {
+    assert.deepEqual(calls[0].args, ['--add-dir', path.join(builtRoot, `memory-${SLUG}`, 'current')]);
+    assert.deepEqual(s.toSnapshot().packs, [{ name: `memory-${SLUG}`, version: 'v-mine', reads: 0 }]);
+    assert.deepEqual(decisions.map((d) => d.decision), ['delivered']);
+    assert.equal(decisions[0].name, `memory-${SLUG}`);
+  } finally {
+    s.destroy();
+    await fsp.rm(builtRoot, { recursive: true, force: true });
+  }
+});
+
+test('a project with no variant built yet falls back to the base pack, and says so in the trace', async () => {
+  const builtRoot = await makeBuiltRoot({ memory: { version: 'v-base', perProjectVariants: true } });
+  const { s, calls, decisions } = await startWithPacks(builtRoot, { packVariantSlug: SLUG });
+  try {
+    assert.deepEqual(calls[0].args, ['--add-dir', path.join(builtRoot, 'memory', 'current')]);
+    assert.deepEqual(s.toSnapshot().packs, [{ name: 'memory', version: 'v-base', reads: 0 }]);
+    assert.deepEqual(decisions.map((d) => d.decision), ['variant-fallback', 'delivered']);
+    assert.equal(decisions[0].name, 'memory');
+    assert.match(decisions[0].reason, /not built/);
+  } finally {
+    s.destroy();
+    await fsp.rm(builtRoot, { recursive: true, force: true });
+  }
+});
+
+test('a lane session, which has no project slug, is delivered the base pack with no fallback entry', async () => {
+  const builtRoot = await makeBuiltRoot({
+    memory: { version: 'v-base', perProjectVariants: true },
+    [`memory-${SLUG}`]: { version: 'v-mine', group: 'memory' },
+  });
+  const { s, calls, decisions } = await startWithPacks(builtRoot);
+  try {
+    assert.deepEqual(calls[0].args, ['--add-dir', path.join(builtRoot, 'memory', 'current')]);
+    assert.deepEqual(decisions.map((d) => d.decision), ['delivered']);
+  } finally {
+    s.destroy();
+    await fsp.rm(builtRoot, { recursive: true, force: true });
+  }
+});
+
+test('a plain pack is never probed for a variant, whatever slug the project carries', async () => {
+  const builtRoot = await makeBuiltRoot({ memory: 'v-plain' });
+  const { s, calls, decisions } = await startWithPacks(builtRoot, { packVariantSlug: SLUG });
+  try {
+    assert.deepEqual(calls[0].args, ['--add-dir', path.join(builtRoot, 'memory', 'current')]);
+    assert.deepEqual(decisions.map((d) => d.decision), ['delivered']);
+    assert.deepEqual(s.toSnapshot().packs, [{ name: 'memory', version: 'v-plain', reads: 0 }]);
+  } finally {
+    s.destroy();
+    await fsp.rm(builtRoot, { recursive: true, force: true });
   }
 });

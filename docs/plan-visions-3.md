@@ -537,6 +537,19 @@ made in the build:
   names `dist/current/MEMORY.md` and nothing under `projects/`, which honors the cross-project rule at its
   strongest: nothing project-tagged is in the pack at all. Per-project pack delivery is a follow-on, and
   needs the variant-versioning question answered first.
+- **AS BUILT (2026-08-23), the follow-on above is CLOSED: per-project variants exist and the invariant
+  survived.** The variant-versioning question is answered by not having a version dimension at all, which
+  is how PostHog's own context-mill flattens its skill variants: a spec may set `perProjectVariants: true`
+  and name `{{projectSlug}}` in a `data: true` source, and the mill then builds one INDEPENDENT top-level
+  pack per consuming project, `<group>-<projectSlug>`, each with its own version, manifest, rotation,
+  watcher coverage and `packVersions[name]` entry. The group name stays a real pack: it is the base build
+  (global layer only) and the fallback a project with no variant of its own is delivered. The staleness
+  chip, the Mill tab and `pack-updated` therefore needed no change, because nothing about one version per
+  pack NAME moved. The project slug is `memory-core`'s own `projectFileSlug(normalizeProjectTag(path))`,
+  imported rather than restated, so a variant resolves the same file `dist/current/projects/` publishes.
+  `packs/specs/memory.pack.json` now names both layers, and the cross-project rule became a build gate
+  beside the instruction-tier one: a delivered path carrying a FOREIGN project slug fails the build, and
+  the base build refuses any project slug at all.
 - **`data: true` is a source-level flag, not a memory special case.** It publishes a source's files under
   `data/<slug>/` and keeps them out of `.claude/rules/`; `{{glissaHome}}` (the config dir) may be named
   only by such a source, only anchoring the whole pattern, and only without a `..` segment. The build
@@ -589,6 +602,7 @@ embedding probe) was DROPPED, operator decision 2026-08-23. What is left:
 
 - **Non-CC pack delivery adapter**: reaches non-Claude harnesses once the agent-adapters
   plan ships its capability gating.
+- ~~**Per-project pack variants**~~: CLOSED 2026-08-23, see the as-built note under M16.
 
 ## Non-goals (v1)
 

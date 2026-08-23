@@ -8,6 +8,8 @@
 
 const path = require('node:path');
 
+const { loadConfigFile, resolveConfigPath } = require('./config-store');
+const { packVariantProjects } = require('./core/pack-core');
 const { buildPacks, defaultBuiltRoot, defaultSpecsDir, describePackSpec, listPackSpecs, readBuiltManifest } = require('./pack-builder');
 const { formatTimestamp, shortVersion } = require('./text-format');
 
@@ -27,8 +29,20 @@ function reportLine(report) {
   return `${name}ok    version ${shortVersion(report.version)}  files ${report.fileCount}  tokens ${report.tokenEstimate}/${report.budgetTokens}`;
 }
 
+/*
+ * The projects a group spec derives its per-project variants from. Best effort: an install with no
+ * config yet still builds every plain pack, and every group's base, which is what a manual build is for.
+ */
+function variantProjects() {
+  try {
+    return packVariantProjects(loadConfigFile(resolveConfigPath(), { exitOnError: false }).config);
+  } catch {
+    return [];
+  }
+}
+
 async function runBuild(name) {
-  const reports = await buildPacks({ name });
+  const reports = await buildPacks({ name, projects: variantProjects() });
   if (reports.length === 0) {
     console.log(`No pack specs in ${defaultSpecsDir()}.`);
     return 0;
