@@ -1,0 +1,665 @@
+<title>Glissa Architecture Review</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Spline+Sans+Mono:wght@400;500;600&family=Instrument+Sans:wght@400;500;600&display=swap">
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: light-dark(#f5f8f6, #0f1513);
+    --surface: light-dark(#ffffff, #161d1a);
+    --surface-2: light-dark(#eef2ef, #1d2622);
+    --ink: light-dark(#1b2420, #e3ebe6);
+    --ink-soft: light-dark(#4b5a53, #93a49b);
+    --line: light-dark(#d8e0db, #2a352f);
+    --accent: light-dark(#157a5e, #46c096);
+    --accent-soft: light-dark(#157a5e22, #46c09626);
+    --signal: light-dark(#b26a1d, #dfa257);
+    --signal-soft: light-dark(#b26a1d1f, #dfa25726);
+    --lane: light-dark(#3d5aa8, #8ba3e8);
+    --lane-soft: light-dark(#3d5aa81a, #8ba3e822);
+    --bad: light-dark(#b3383d, #e08084);
+    --bad-soft: light-dark(#b3383d1a, #e0808426);
+  }
+  :root[data-theme="light"] { color-scheme: light; }
+  :root[data-theme="dark"] { color-scheme: dark; }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "Instrument Sans", system-ui, sans-serif;
+    font-size: 16px;
+    line-height: 1.6;
+  }
+  .wrap { max-width: 1060px; margin: 0 auto; padding: 48px 24px 96px; }
+
+  .eyebrow {
+    font-family: "Spline Sans Mono", ui-monospace, monospace;
+    font-size: 12px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 10px;
+  }
+  h1 {
+    font-family: "Spline Sans Mono", ui-monospace, monospace;
+    font-weight: 600;
+    font-size: clamp(28px, 5vw, 40px);
+    line-height: 1.15;
+    margin: 0 0 14px;
+    text-wrap: balance;
+  }
+  h2 {
+    font-family: "Spline Sans Mono", ui-monospace, monospace;
+    font-weight: 600;
+    font-size: 20px;
+    margin: 72px 0 6px;
+    text-wrap: balance;
+  }
+  h2 + p.lede { margin-top: 0; }
+  p { max-width: 72ch; color: var(--ink); }
+  p.lede { color: var(--ink-soft); max-width: 78ch; }
+  code {
+    font-family: "Spline Sans Mono", ui-monospace, monospace;
+    font-size: 0.86em;
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 1px 5px;
+    white-space: nowrap;
+  }
+  a { color: var(--accent); }
+
+  .compare {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+    margin: 22px 0 10px;
+  }
+  @media (max-width: 820px) { .compare { grid-template-columns: 1fr; } }
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 14px;
+    overflow-x: auto;
+  }
+  .panel svg { max-width: 100%; height: auto; display: block; min-width: 380px; }
+  .chip {
+    font-family: "Spline Sans Mono", ui-monospace, monospace;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    border-radius: 4px;
+    padding: 2px 8px;
+    display: inline-block;
+    margin-bottom: 10px;
+  }
+  .chip.built { color: var(--ink-soft); background: var(--surface-2); border: 1px solid var(--line); }
+  .chip.ref { color: var(--accent); background: var(--accent-soft); }
+
+  ul.findings { padding-left: 0; list-style: none; max-width: 82ch; margin: 14px 0 8px; }
+  ul.findings li { margin: 8px 0; font-size: 14.5px; color: var(--ink-soft); padding-left: 0; }
+  ul.findings li strong { color: var(--ink); font-weight: 600; }
+  .v {
+    font-family: "Spline Sans Mono", ui-monospace, monospace;
+    font-size: 10.5px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    border-radius: 4px;
+    padding: 1px 7px;
+    margin-right: 8px;
+    white-space: nowrap;
+  }
+  .v.ok { color: var(--accent); background: var(--accent-soft); }
+  .v.consider { color: var(--lane); background: var(--lane-soft); }
+  .v.gap { color: var(--bad); background: var(--bad-soft); }
+
+  .sources {
+    font-size: 12.5px;
+    color: var(--ink-soft);
+    max-width: 82ch;
+    margin: 6px 0 0;
+    padding-top: 8px;
+    border-top: 1px dashed var(--line);
+  }
+  .sources a { color: var(--ink-soft); }
+
+  table { border-collapse: collapse; width: 100%; margin: 20px 0; font-size: 14.5px; }
+  .table-scroll { overflow-x: auto; }
+  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th {
+    font-family: "Spline Sans Mono", ui-monospace, monospace;
+    font-size: 12px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    font-weight: 500;
+  }
+  td { color: var(--ink-soft); }
+
+  .footline {
+    margin-top: 72px;
+    padding-top: 18px;
+    border-top: 1px solid var(--line);
+    font-family: "Spline Sans Mono", ui-monospace, monospace;
+    font-size: 12px;
+    color: var(--ink-soft);
+  }
+</style>
+
+<div class="wrap">
+  <p class="eyebrow">design review</p>
+  <h1>Glissa Architecture Review</h1>
+  <p class="lede">Each subsystem of Glissa compared against the established pattern for its problem class: event handling, pollers, webhook-grade signal ingestion, completion detection, notification delivery, state machines, local persistence, branch integration, and localhost security. The left diagram is what is built; the right is the reference shape from current practice. Verdicts are honest both ways: several Glissa designs already match the canon, and several "correct" patterns would be overkill for a single-process, single-operator tool. Sources are linked per section.</p>
+
+  <div class="table-scroll">
+  <table>
+    <tr><th>Verdict</th><th>Meaning</th></tr>
+    <tr><td><span class="v ok">matches</span></td><td>Already the best-practice shape, or a deliberate documented tradeoff that current practice endorses for this context.</td></tr>
+    <tr><td><span class="v consider">consider</span></td><td>A named pattern would improve robustness or simplicity; not broken today.</td></tr>
+    <tr><td><span class="v gap">gap</span></td><td>A real hole with a concrete failure mode the reference pattern closes.</td></tr>
+  </table>
+  </div>
+
+  <h2>1. Transport and fan-out</h2>
+  <p class="lede">Two WebSockets plus HTTP ingresses, with backpressure on the byte stream and a replay log on the control stream.</p>
+  <div class="compare">
+    <div class="panel">
+      <span class="chip built">as built</span>
+      <svg viewBox="0 0 440 240" role="img" aria-label="As built: browser tabs connect over data and control WebSockets; ws-sender applies bufferedAmount backpressure; the control replay log replays only what the snapshot cannot reconstruct; there is no heartbeat, so a half-open socket stays counted.">
+        <defs><marker id="t1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--ink)"/></marker></defs>
+        <g fill="none" stroke="var(--ink)" stroke-width="1.2">
+          <rect x="15" y="80" width="110" height="50" rx="7" stroke="var(--line)" fill="var(--surface-2)"/>
+          <text x="70" y="102" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="11.5" font-weight="600">browser tabs</text>
+          <text x="70" y="118" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10" font-family="Instrument Sans, sans-serif">snapshot on connect</text>
+          <rect x="220" y="25" width="200" height="56" rx="7" stroke="var(--accent)" fill="var(--surface)"/>
+          <text x="320" y="47" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="11.5" font-weight="600">data WS: ws-sender</text>
+          <text x="320" y="65" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10" font-family="Instrument Sans, sans-serif">bufferedAmount backpressure, offsets</text>
+          <rect x="220" y="100" width="200" height="56" rx="7" stroke="var(--line)" fill="var(--surface)"/>
+          <text x="320" y="122" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="11.5" font-weight="600">control WS: replay log</text>
+          <text x="320" y="140" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10" font-family="Instrument Sans, sans-serif">seq-stamped, snapshot-first retention</text>
+          <rect x="220" y="175" width="200" height="46" rx="7" stroke="var(--bad)" stroke-dasharray="5 4" fill="none"/>
+          <text x="320" y="194" text-anchor="middle" fill="var(--bad)" stroke="none" font-size="10.5" font-family="Spline Sans Mono, monospace">no ping/pong heartbeat</text>
+          <text x="320" y="210" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10" font-family="Instrument Sans, sans-serif">half-open socket stays counted</text>
+          <line x1="125" y1="93" x2="215" y2="55" marker-end="url(#t1)"/>
+          <line x1="125" y1="115" x2="215" y2="126" marker-end="url(#t1)"/>
+        </g>
+      </svg>
+    </div>
+    <div class="panel">
+      <span class="chip ref">reference</span>
+      <svg viewBox="0 0 440 240" role="img" aria-label="Reference: clients connect to a gateway sending a versioned, sequence-stamped envelope; reconnect gets snapshot plus deltas above the last sequence; a ping pong reaper with a liveness deadline removes zombie sockets.">
+        <defs><marker id="t2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"/></marker></defs>
+        <g fill="none" stroke="var(--ink)" stroke-width="1.2">
+          <rect x="15" y="90" width="110" height="50" rx="7" stroke="var(--line)" fill="var(--surface-2)"/>
+          <text x="70" y="119" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="11.5" font-weight="600">clients</text>
+          <rect x="220" y="25" width="200" height="60" rx="7" stroke="var(--accent)" fill="var(--surface)"/>
+          <text x="320" y="47" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="11.5" font-weight="600">versioned envelope</text>
+          <text x="320" y="65" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10" font-family="Instrument Sans, sans-serif">monotonic seq; snapshot + deltas</text>
+          <text x="320" y="78" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10" font-family="Instrument Sans, sans-serif">above client's last seq on resume</text>
+          <rect x="220" y="100" width="200" height="50" rx="7" stroke="var(--line)" fill="var(--surface)"/>
+          <text x="320" y="121" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="11.5" font-weight="600">per-class send policy</text>
+          <text x="320" y="138" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10" font-family="Instrument Sans, sans-serif">drop / coalesce / disconnect slow client</text>
+          <rect x="220" y="165" width="200" height="50" rx="7" stroke="var(--accent)" fill="var(--surface)"/>
+          <text x="320" y="186" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="11.5" font-weight="600">ping/pong reaper</text>
+          <text x="320" y="203" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10" font-family="Instrument Sans, sans-serif">liveness deadline evicts zombies</text>
+          <line x1="125" y1="105" x2="215" y2="60" stroke="var(--accent)" marker-end="url(#t2)"/>
+          <line x1="125" y1="125" x2="215" y2="125" stroke="var(--accent)" marker-end="url(#t2)"/>
+          <line x1="125" y1="138" x2="215" y2="188" stroke="var(--accent)" marker-end="url(#t2)"/>
+        </g>
+      </svg>
+    </div>
+  </div>
+  <ul class="findings">
+    <li><span class="v ok">matches</span><strong>Backpressure and replay retention are canonical.</strong> bufferedAmount gating on the byte stream, and a control replay log that retains only message types the connect snapshot cannot reconstruct, are exactly the published guidance.</li>
+    <li><span class="v gap">gap</span><strong>No heartbeat means presence lies.</strong> Per-connection focus suppression and the Telegram zero-connections gate both count connections; a half-open socket TCP has not noticed stays counted until timeout. For suppression that fails open (notification delivered anyway), but a zombie connection silently blocks the phone ping, which is the channel of last resort. Protocol ping/pong with a liveness deadline closes it.</li>
+    <li><span class="v consider">consider</span><strong>Envelope versioning.</strong> The dashboard is served by the same process, so skew is rare (a long-lived open tab across a server update is the case); a version field that tells an old tab to reload is cheap insurance.</li>
+  </ul>
+  <p class="sources">Sources: <a href="https://developer.mozilla.org/en-US/docs/Web/API/WebSocket/bufferedAmount">MDN bufferedAmount</a>, <a href="https://websocket.org/guides/heartbeat/">WebSocket heartbeats</a>, <a href="https://websocket.org/guides/reconnection/">reconnection and state sync</a></p>
+
+  <h2>2. Session lifecycle state machine</h2>
+  <p class="lede">One flat seven-state machine, table-driven, with several out-of-table flags riding beside it.</p>
+  <div class="compare">
+    <div class="panel">
+      <span class="chip built">as built</span>
+      <svg viewBox="0 0 440 240" role="img" aria-label="As built: a flat chain of seven states, with shadow flags for the gate hold, title latch, auto-rebase, and merge status floating outside the transition table.">
+        <defs><marker id="f1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--ink)"/></marker></defs>
+        <g fill="none" stroke="var(--ink)" stroke-width="1.2">
+          <rect x="15" y="30" width="410" height="52" rx="7" stroke="var(--line)" fill="var(--surface)"/>
+          <text x="220" y="52" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="10.5" font-weight="600">INIT - STARTING - RUNNING - WAITING - IDLE - DONE / FAILED</text>
+          <text x="220" y="70" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10" font-family="Instrument Sans, sans-serif">one flat table, explicit transitions</text>
+          <rect x="15" y="115" width="190" height="42" rx="7" stroke="var(--signal)" stroke-dasharray="5 4" fill="none"/>
+          <text x="110" y="133" text-anchor="middle" fill="var(--signal)" stroke="none" font-size="10" font-family="Spline Sans Mono, monospace">_gateHeldReady, _titleQuiet</text>
+          <text x="110" y="148" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10" font-family="Instrument Sans, sans-serif">completion flags beside the table</text>
+          <rect x="235" y="115" width="190" height="42" rx="7" stroke="var(--signal)" stroke-dasharray="5 4" fill="none"/>
+          <text x="330" y="133" text-anchor="middle" fill="var(--signal)" stroke="none" font-size="10" font-family="Spline Sans Mono, monospace">_autoRebasing, mergeStatus</text>
+          <text x="330" y="148" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10" font-family="Instrument Sans, sans-serif">worktree flags beside the table</text>
+          <rect x="15" y="180" width="410" height="42" rx="7" stroke="var(--line)" fill="var(--surface-2)"/>
+          <text x="220" y="198" text-anchor="middle" fill="var(--ink)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">FAILED is terminal: no restart policy, resume only at next boot</text>
+          <text x="220" y="213" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10" font-family="Instrument Sans, sans-serif">(a stale resume id deliberately fails once, no retry loop)</text>
+        </g>
+      </svg>
+    </div>
+    <div class="panel">
+      <span class="chip ref">reference</span>
+      <svg viewBox="0 0 440 240" role="img" aria-label="Reference: a Harel statechart with three parallel regions for process lifecycle, activity, and completion gate, under a supervisor with a restart policy and backoff.">
+        <g fill="none" stroke="var(--ink)" stroke-width="1.2">
+          <rect x="15" y="20" width="410" height="46" rx="7" stroke="var(--accent)" fill="var(--surface)"/>
+          <text x="220" y="39" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="11.5" font-weight="600">supervisor</text>
+          <text x="220" y="56" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10" font-family="Instrument Sans, sans-serif">restart policy with backoff + intensity limit (OTP one_for_one)</text>
+          <rect x="15" y="82" width="410" height="140" rx="7" stroke="var(--line)" fill="var(--surface)"/>
+          <text x="220" y="102" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="11" font-weight="600">session statechart: parallel regions</text>
+          <rect x="30" y="115" width="120" height="90" rx="6" stroke="var(--line)" fill="var(--surface-2)"/>
+          <text x="90" y="135" text-anchor="middle" fill="var(--ink)" stroke="none" font-size="10.5" font-family="Spline Sans Mono, monospace">process</text>
+          <text x="90" y="153" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="9.5" font-family="Instrument Sans, sans-serif">spawning / live /</text>
+          <text x="90" y="166" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="9.5" font-family="Instrument Sans, sans-serif">exited / failed</text>
+          <rect x="160" y="115" width="120" height="90" rx="6" stroke="var(--line)" fill="var(--surface-2)"/>
+          <text x="220" y="135" text-anchor="middle" fill="var(--ink)" stroke="none" font-size="10.5" font-family="Spline Sans Mono, monospace">activity</text>
+          <text x="220" y="153" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="9.5" font-family="Instrument Sans, sans-serif">working / waiting /</text>
+          <text x="220" y="166" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="9.5" font-family="Instrument Sans, sans-serif">idle</text>
+          <rect x="290" y="115" width="120" height="90" rx="6" stroke="var(--line)" fill="var(--surface-2)"/>
+          <text x="350" y="135" text-anchor="middle" fill="var(--ink)" stroke="none" font-size="10.5" font-family="Spline Sans Mono, monospace">gate</text>
+          <text x="350" y="153" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="9.5" font-family="Instrument Sans, sans-serif">open / holding /</text>
+          <text x="350" y="166" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="9.5" font-family="Instrument Sans, sans-serif">releasing</text>
+        </g>
+      </svg>
+    </div>
+  </div>
+  <ul class="findings">
+    <li><span class="v ok">matches</span><strong>Table-driven and small.</strong> Under roughly ten states, an explicit flat table auditable in one screen is the endorsed form; no library needed.</li>
+    <li><span class="v consider">consider</span><strong>The flags are unofficial parallel regions.</strong> <code>_gateHeldReady</code>, <code>_titleQuiet</code>, <code>_autoRebasing</code>, and <code>mergeStatus</code> are exactly the "flags shadowing states" smell that statecharts answer with orthogonal regions. The behavior is right today because pure arbiters guard it, but every new flag multiplies the informal cross product. Promoting gate and worktree status to named regions (even as two more small tables) would make the recorder and debug overlay states, not flags.</li>
+    <li><span class="v consider">consider</span><strong>No supervised restart.</strong> A PTY crash lands in terminal FAILED until the operator acts or the next boot. An OTP-style per-session restart policy (bounded retries, exponential backoff, give up into FAILED) would self-heal transient crashes without recreating a retry loop; the stale-resume-id case already proves the give-up path works.</li>
+  </ul>
+  <p class="sources">Sources: <a href="https://stately.ai/docs/parallel-states">Stately parallel states</a>, <a href="https://en.wikipedia.org/wiki/UML_state_machine">Harel statecharts</a>, <a href="https://www.erlang.org/doc/system/design_principles.html">OTP design principles</a></p>
+
+  <h2>3. Signal ingestion and the completion gate</h2>
+  <p class="lede">Hooks with no delivery ids, no upstream sequence, and no queryable ground truth, answered with receive-side sequencing, TTLs, and a re-validating release arbiter.</p>
+  <div class="compare">
+    <div class="panel">
+      <span class="chip built">as built</span>
+      <svg viewBox="0 0 440 250" role="img" aria-label="As built: three bookkeeping structures, a counted id map, declared task list, and idle name set, each with its own TTL class, feed one release arbiter that re-validates against live evidence and a quiet window.">
+        <defs><marker id="c1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--ink)"/></marker></defs>
+        <g fill="none" stroke="var(--ink)" stroke-width="1.2">
+          <rect x="15" y="20" width="180" height="40" rx="6" stroke="var(--line)" fill="var(--surface)"/>
+          <text x="105" y="37" text-anchor="middle" fill="var(--ink)" stroke="none" font-size="10.5" font-family="Spline Sans Mono, monospace">counted id map + TTL</text>
+          <text x="105" y="52" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="9.5" font-family="Instrument Sans, sans-serif">SubagentStart/Stop</text>
+          <rect x="15" y="70" width="180" height="40" rx="6" stroke="var(--line)" fill="var(--surface)"/>
+          <text x="105" y="87" text-anchor="middle" fill="var(--ink)" stroke="none" font-size="10.5" font-family="Spline Sans Mono, monospace">declared list, 3 TTL classes</text>
+          <text x="105" y="102" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="9.5" font-family="Instrument Sans, sans-serif">background_tasks per Stop</text>
+          <rect x="15" y="120" width="180" height="40" rx="6" stroke="var(--line)" fill="var(--surface)"/>
+          <text x="105" y="137" text-anchor="middle" fill="var(--ink)" stroke="none" font-size="10.5" font-family="Spline Sans Mono, monospace">idle name set + TTL</text>
+          <text x="105" y="152" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="9.5" font-family="Instrument Sans, sans-serif">TeammateIdle by name</text>
+          <rect x="245" y="55" width="180" height="80" rx="7" stroke="var(--accent)" fill="var(--surface)"/>
+          <text x="335" y="80" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="11" font-weight="600">decideGateRelease</text>
+          <text x="335" y="98" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="9.5" font-family="Instrument Sans, sans-serif">receive-seq ordering, re-validated</text>
+          <text x="335" y="111" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="9.5" font-family="Instrument Sans, sans-serif">vs live evidence, 10 s quiet window</text>
+          <rect x="245" y="165" width="180" height="46" rx="7" stroke="var(--line)" stroke-dasharray="5 4" fill="none"/>
+          <text x="335" y="184" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10" font-family="Spline Sans Mono, monospace">no reconciliation query</text>
+          <text x="335" y="199" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="9.5" font-family="Instrument Sans, sans-serif">upstream exposes no registry API</text>
+          <line x1="195" y1="40" x2="240" y2="75" marker-end="url(#c1)"/>
+          <line x1="195" y1="90" x2="240" y2="95" marker-end="url(#c1)"/>
+          <line x1="195" y1="140" x2="240" y2="115" marker-end="url(#c1)"/>
+        </g>
+      </svg>
+    </div>
+    <div class="panel">
+      <span class="chip ref">reference</span>
+      <svg viewBox="0 0 440 250" role="img" aria-label="Reference: one task registry keyed by id with status and last evidence, a heartbeat separate from progress, a zombie reaper past a heartbeat threshold, and quiescence declared when the registry is empty and the watermark is quiet.">
+        <defs><marker id="c2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"/></marker></defs>
+        <g fill="none" stroke="var(--ink)" stroke-width="1.2">
+          <rect x="15" y="30" width="190" height="70" rx="7" stroke="var(--accent)" fill="var(--surface)"/>
+          <text x="110" y="55" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="11" font-weight="600">task registry</text>
+          <text x="110" y="73" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="9.5" font-family="Instrument Sans, sans-serif">id: status, lastEvidence ts</text>
+          <text x="110" y="86" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="9.5" font-family="Instrument Sans, sans-serif">every signal upserts one row</text>
+          <rect x="15" y="130" width="190" height="56" rx="7" stroke="var(--line)" fill="var(--surface)"/>
+          <text x="110" y="152" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="11" font-weight="600">heartbeat</text>
+          <text x="110" y="170" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="9.5" font-family="Instrument Sans, sans-serif">liveness separate from progress</text>
+          <rect x="250" y="30" width="175" height="70" rx="7" stroke="var(--line)" fill="var(--surface)"/>
+          <text x="337" y="55" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="11" font-weight="600">zombie reaper</text>
+          <text x="337" y="73" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="9.5" font-family="Instrument Sans, sans-serif">running + no heartbeat past</text>
+          <text x="337" y="86" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="9.5" font-family="Instrument Sans, sans-serif">threshold = dead (Airflow)</text>
+          <rect x="250" y="130" width="175" height="56" rx="7" stroke="var(--accent)" fill="var(--surface)"/>
+          <text x="337" y="152" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="11" font-weight="600">quiescence</text>
+          <text x="337" y="170" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="9.5" font-family="Instrument Sans, sans-serif">registry empty + watermark quiet</text>
+          <line x1="205" y1="65" x2="245" y2="65" stroke="var(--accent)" marker-end="url(#c2)"/>
+          <line x1="110" y1="130" x2="110" y2="105" stroke="var(--accent)" marker-end="url(#c2)"/>
+          <line x1="337" y1="100" x2="337" y2="125" stroke="var(--accent)" marker-end="url(#c2)"/>
+        </g>
+      </svg>
+    </div>
+  </div>
+  <ul class="findings">
+    <li><span class="v ok">matches</span><strong>The heuristics are the endorsed fallback.</strong> Claude Code hooks carry no delivery id, no sequence, and no queryable task registry. The literature's advice for exactly that case is what Glissa does: stamp a receive-side sequence, treat time only as a bound, re-validate against fresh evidence before acting, and log every decision. The replay harness plus decision trace is textbook event-sourcing-lite.</li>
+    <li><span class="v consider">consider</span><strong>Three ledgers where one registry would do.</strong> The counted map, declared list, and idle name set are one logical registry (id, kind, status, last evidence) reconciled from three signal families. Unifying them would collapse four TTL classes into one zombie-reaper rule with per-kind thresholds and make <code>max(counted, declared)</code> a query instead of a formula.</li>
+    <li><span class="v consider">consider</span><strong>A heartbeat already exists and is not used for liveness.</strong> The statusLine callback fires per assistant/tool step during a live turn. Feeding its arrival times into the gate as a liveness signal (Temporal's heartbeat-vs-timeout split) would shrink dependence on the fixed quiet window: a turn that is visibly stepping cannot be complete. Limits: it never fires while idle or in headless sessions, so it can only hold a gate closed, never open one.</li>
+  </ul>
+  <p class="sources">Sources: <a href="https://docs.temporal.io/encyclopedia/detecting-activity-failures">Temporal failure detection</a>, <a href="https://airflow.apache.org/docs/apache-airflow/stable/core-concepts/tasks.html">Airflow zombie tasks</a>, <a href="https://docs.github.com/en/webhooks/using-webhooks/best-practices-for-using-webhooks">GitHub webhook practices</a>, <a href="https://nightlies.apache.org/flink/flink-docs-stable/docs/concepts/time/">Flink watermarks</a></p>
+
+  <h2>4. Worktree integration</h2>
+  <p class="lede">Eager event-driven rebase with guards and a SHA-pair cooldown; review-gated fast-forward merge back; rerere shared through the common gitdir.</p>
+  <div class="compare">
+    <div class="panel">
+      <span class="chip built">as built</span>
+      <svg viewBox="0 0 440 240" role="img" aria-label="As built: trunk movement reaches watchers, a guarded auto-rebase replays commits, a conflict arms a SHA-pair cooldown that only clears when a SHA moves, and merge back is operator review gated with no test gate.">
+        <defs><marker id="w2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--ink)"/></marker></defs>
+        <g fill="none" stroke="var(--ink)" stroke-width="1.2">
+          <rect x="15" y="25" width="180" height="46" rx="7" stroke="var(--line)" fill="var(--surface-2)"/>
+          <text x="105" y="45" text-anchor="middle" fill="var(--ink)" stroke="none" font-size="10.5" font-family="Spline Sans Mono, monospace">trunk moves</text>
+          <text x="105" y="61" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="9.5" font-family="Instrument Sans, sans-serif">reflog + gitdir watchers</text>
+          <rect x="245" y="25" width="180" height="56" rx="7" stroke="var(--accent)" fill="var(--surface)"/>
+          <text x="335" y="47" text-anchor="middle" fill="var(--ink)" stroke="none" font-size="10.5" font-family="Spline Sans Mono, monospace">guarded auto-rebase</text>
+          <text x="335" y="63" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="9.5" font-family="Instrument Sans, sans-serif">dirty/busy/WAITING refuse; rerere</text>
+          <rect x="245" y="105" width="180" height="52" rx="7" stroke="var(--signal)" stroke-dasharray="5 4" fill="none"/>
+          <text x="335" y="126" text-anchor="middle" fill="var(--signal)" stroke="none" font-size="10" font-family="Spline Sans Mono, monospace">conflict cooldown</text>
+          <text x="335" y="142" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="9.5" font-family="Instrument Sans, sans-serif">sha::sha; sibling resolution missed</text>
+          <rect x="15" y="170" width="410" height="48" rx="7" stroke="var(--line)" fill="var(--surface)"/>
+          <text x="220" y="190" text-anchor="middle" fill="var(--ink)" stroke="none" font-size="10.5" font-family="Spline Sans Mono, monospace">merge back: operator review, fast-forward only</text>
+          <text x="220" y="206" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="9.5" font-family="Instrument Sans, sans-serif">no automated test gate on the projected result</text>
+          <line x1="195" y1="48" x2="240" y2="48" marker-end="url(#w2)"/>
+          <line x1="335" y1="81" x2="335" y2="100" marker-end="url(#w2)"/>
+        </g>
+      </svg>
+    </div>
+    <div class="panel">
+      <span class="chip ref">reference</span>
+      <svg viewBox="0 0 440 240" role="img" aria-label="Reference merge queue: a candidate branch is speculatively rebased onto the projected trunk, checks run on the result, success merges and failure evicts; new resolution information such as a rerere cache write re-arms the retry immediately.">
+        <defs><marker id="w3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"/></marker></defs>
+        <g fill="none" stroke="var(--ink)" stroke-width="1.2">
+          <rect x="15" y="30" width="120" height="50" rx="7" stroke="var(--line)" fill="var(--surface-2)"/>
+          <text x="75" y="59" text-anchor="middle" fill="var(--ink)" stroke="none" font-size="10.5" font-family="Spline Sans Mono, monospace">candidate</text>
+          <rect x="170" y="30" width="130" height="56" rx="7" stroke="var(--accent)" fill="var(--surface)"/>
+          <text x="235" y="52" text-anchor="middle" fill="var(--ink)" stroke="none" font-size="10.5" font-family="Spline Sans Mono, monospace">speculative rebase</text>
+          <text x="235" y="68" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="9.5" font-family="Instrument Sans, sans-serif">onto projected trunk</text>
+          <rect x="330" y="30" width="95" height="56" rx="7" stroke="var(--accent)" fill="var(--surface)"/>
+          <text x="377" y="52" text-anchor="middle" fill="var(--ink)" stroke="none" font-size="10.5" font-family="Spline Sans Mono, monospace">checks</text>
+          <text x="377" y="68" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="9.5" font-family="Instrument Sans, sans-serif">tests gate merge</text>
+          <rect x="170" y="130" width="255" height="46" rx="7" stroke="var(--line)" fill="var(--surface)"/>
+          <text x="297" y="149" text-anchor="middle" fill="var(--ink)" stroke="none" font-size="10.5" font-family="Spline Sans Mono, monospace">fail = evict, retry on new information</text>
+          <text x="297" y="165" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="9.5" font-family="Instrument Sans, sans-serif">a recorded resolution (rr-cache write) re-arms now</text>
+          <rect x="15" y="130" width="120" height="46" rx="7" stroke="var(--line)" fill="var(--surface-2)"/>
+          <text x="75" y="149" text-anchor="middle" fill="var(--ink)" stroke="none" font-size="10.5" font-family="Spline Sans Mono, monospace">short-lived</text>
+          <text x="75" y="165" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="9.5" font-family="Instrument Sans, sans-serif">branches (DORA)</text>
+          <line x1="135" y1="55" x2="165" y2="55" stroke="var(--accent)" marker-end="url(#w3)"/>
+          <line x1="300" y1="55" x2="325" y2="55" stroke="var(--accent)" marker-end="url(#w3)"/>
+          <line x1="377" y1="86" x2="330" y2="125" stroke="var(--accent)" marker-end="url(#w3)"/>
+        </g>
+      </svg>
+    </div>
+  </div>
+  <ul class="findings">
+    <li><span class="v ok">matches</span><strong>Event-driven rebase and refusal to touch live work.</strong> Rebasing on trunk movement rather than at merge time is the merge-train insight, and the dirty/busy/WAITING refusals match "never rewrite under a live agent". rerere sharing via the common gitdir is standard git.</li>
+    <li><span class="v consider">consider</span><strong>Cooldown is time-shaped where the trigger is information-shaped.</strong> The documented accepted limitation (a sibling's recorded resolution does not clear the cooldown until a SHA moves) has a merge-queue-style fix: an rr-cache write is the "new information" event, and watching it re-arms the retry immediately instead of eventually.</li>
+    <li><span class="v consider">consider</span><strong>No check gate on the projected result.</strong> Merge queues run tests against the candidate as it would land. Running <code>npm test</code> (or the project's check) in the worktree after auto-rebase, surfacing red on the card before the operator clicks Merge, would carry that guarantee without blocking anything.</li>
+  </ul>
+  <p class="sources">Sources: <a href="https://github.blog/engineering/engineering-principles/how-github-uses-merge-queue-to-ship-hundreds-of-changes-every-day/">GitHub merge queue</a>, <a href="https://dora.dev/capabilities/trunk-based-development/">DORA trunk-based development</a>, <a href="https://git-scm.com/docs/git-rerere">git-rerere</a></p>
+
+  <h2>5. Notification delivery</h2>
+  <p class="lede">In-memory lifecycle entries, defer-not-drop suppression, browser notifications through an open tab, Telegram only at zero connections.</p>
+  <div class="compare">
+    <div class="panel">
+      <span class="chip built">as built</span>
+      <svg viewBox="0 0 440 240" role="img" aria-label="As built: a state change creates an in-memory entry, delivered over the control WebSocket to an open tab; with no tab open and Telegram off the notification is lost, and a server crash loses pending entries.">
+        <defs><marker id="n2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--ink)"/></marker></defs>
+        <g fill="none" stroke="var(--ink)" stroke-width="1.2">
+          <rect x="15" y="30" width="170" height="50" rx="7" stroke="var(--line)" fill="var(--surface-2)"/>
+          <text x="100" y="51" text-anchor="middle" fill="var(--ink)" stroke="none" font-size="10.5" font-family="Spline Sans Mono, monospace">state change</text>
+          <text x="100" y="68" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="9.5" font-family="Instrument Sans, sans-serif">once per work cycle</text>
+          <rect x="245" y="30" width="180" height="50" rx="7" stroke="var(--accent)" fill="var(--surface)"/>
+          <text x="335" y="51" text-anchor="middle" fill="var(--ink)" stroke="none" font-size="10.5" font-family="Spline Sans Mono, monospace">in-memory entry FSM</text>
+          <text x="335" y="68" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="9.5" font-family="Instrument Sans, sans-serif">suppression defers, never drops</text>
+          <rect x="15" y="115" width="410" height="44" rx="7" stroke="var(--line)" fill="var(--surface)"/>
+          <text x="220" y="133" text-anchor="middle" fill="var(--ink)" stroke="none" font-size="10.5" font-family="Spline Sans Mono, monospace">control WS to an OPEN TAB; Telegram only at zero connections</text>
+          <text x="220" y="150" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="9.5" font-family="Instrument Sans, sans-serif">cross-tab claim picks one raiser</text>
+          <rect x="15" y="178" width="410" height="44" rx="7" stroke="var(--bad)" stroke-dasharray="5 4" fill="none"/>
+          <text x="220" y="196" text-anchor="middle" fill="var(--bad)" stroke="none" font-size="10.5" font-family="Spline Sans Mono, monospace">no tab + Telegram off = lost; crash loses pending entries</text>
+          <text x="220" y="213" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="9.5" font-family="Instrument Sans, sans-serif">delivery is coupled to a viewer being present</text>
+          <line x1="185" y1="55" x2="240" y2="55" marker-end="url(#n2)"/>
+          <line x1="335" y1="80" x2="335" y2="110" marker-end="url(#n2)"/>
+        </g>
+      </svg>
+    </div>
+    <div class="panel">
+      <span class="chip ref">reference</span>
+      <svg viewBox="0 0 440 240" role="img" aria-label="Reference: the notification is persisted in the same transaction as the state change (outbox), a relay delivers at least once with dedup by id, a service worker push fires with no tab open, and unacknowledged notifications escalate up a channel ladder.">
+        <defs><marker id="n3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"/></marker></defs>
+        <g fill="none" stroke="var(--ink)" stroke-width="1.2">
+          <rect x="15" y="30" width="190" height="56" rx="7" stroke="var(--accent)" fill="var(--surface)"/>
+          <text x="110" y="52" text-anchor="middle" fill="var(--ink)" stroke="none" font-size="10.5" font-family="Spline Sans Mono, monospace">transactional outbox</text>
+          <text x="110" y="69" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="9.5" font-family="Instrument Sans, sans-serif">entry persisted WITH the state change</text>
+          <rect x="250" y="30" width="175" height="56" rx="7" stroke="var(--line)" fill="var(--surface)"/>
+          <text x="337" y="52" text-anchor="middle" fill="var(--ink)" stroke="none" font-size="10.5" font-family="Spline Sans Mono, monospace">relay, at-least-once</text>
+          <text x="337" y="69" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="9.5" font-family="Instrument Sans, sans-serif">retry until acked; dedup by id</text>
+          <rect x="15" y="120" width="410" height="44" rx="7" stroke="var(--accent)" fill="var(--surface)"/>
+          <text x="220" y="138" text-anchor="middle" fill="var(--ink)" stroke="none" font-size="10.5" font-family="Spline Sans Mono, monospace">service worker push: fires with NO tab open</text>
+          <text x="220" y="155" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="9.5" font-family="Instrument Sans, sans-serif">Push API + showNotification</text>
+          <rect x="15" y="180" width="410" height="42" rx="7" stroke="var(--line)" fill="var(--surface)"/>
+          <text x="220" y="198" text-anchor="middle" fill="var(--ink)" stroke="none" font-size="10.5" font-family="Spline Sans Mono, monospace">escalation ladder: in-app, push, phone; stop on ack</text>
+          <text x="220" y="213" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="9.5" font-family="Instrument Sans, sans-serif">PagerDuty shape, bundled to limit fatigue</text>
+          <line x1="205" y1="58" x2="245" y2="58" stroke="var(--accent)" marker-end="url(#n3)"/>
+          <line x1="337" y1="86" x2="337" y2="115" stroke="var(--accent)" marker-end="url(#n3)"/>
+        </g>
+      </svg>
+    </div>
+  </div>
+  <ul class="findings">
+    <li><span class="v ok">matches</span><strong>Defer-not-drop and presence gating are the right instincts.</strong> Suppression that parks instead of discarding, per-connection presence, and gating the phone channel on observed absence all match the published escalation guidance.</li>
+    <li><span class="v gap">gap</span><strong>Delivery requires a viewer.</strong> No open tab plus Telegram off means a completed session notifies nobody, silently. The standard fix needs no new channel: a service worker with a Push API subscription raises the same native notification with every tab closed. Caveat worth stating: browser push routes through the vendor push service, so it needs internet even for a localhost page; the durable-entry fallback below covers the offline case.</li>
+    <li><span class="v consider">consider</span><strong>Entries are not durable.</strong> A server restart loses parked and pending notifications; the state change and its notification are not written together. Persisting entries (one more reason for the single store in section 7) makes delivery survive the crash that most needs reporting.</li>
+    <li><span class="v consider">consider</span><strong>Escalation stops at delivery.</strong> The ladder shape (deliver, wait for ack, escalate) exists in the entry FSM but ends after one channel hop. Optional for a dev tool; the state machine is already shaped for it.</li>
+  </ul>
+  <p class="sources">Sources: <a href="https://docs.aws.amazon.com/prescriptive-guidance/latest/cloud-design-patterns/transactional-outbox.html">transactional outbox</a>, <a href="https://developer.mozilla.org/en-US/docs/Web/API/Push_API">Push API</a>, <a href="https://support.pagerduty.com/main/docs/escalation-policies">PagerDuty escalation</a></p>
+
+  <h2>6. Poller lanes (PR review, Radar)</h2>
+  <p class="lede">setInterval ticks with re-entrancy guards, hard timeouts, concurrency caps, and drain-on-stop.</p>
+  <div class="compare">
+    <div class="panel">
+      <span class="chip built">as built</span>
+      <svg viewBox="0 0 440 230" role="img" aria-label="As built: an unref'd setInterval tick behind a re-entrancy guard calls the API at full cadence even during failures, runs bounded concurrent jobs with hard timeouts, and drains in-flight work on stop.">
+        <defs><marker id="q1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--ink)"/></marker></defs>
+        <g fill="none" stroke="var(--ink)" stroke-width="1.2">
+          <rect x="15" y="30" width="180" height="56" rx="7" stroke="var(--accent)" fill="var(--surface)"/>
+          <text x="105" y="52" text-anchor="middle" fill="var(--ink)" stroke="none" font-size="10.5" font-family="Spline Sans Mono, monospace">setInterval + guard</text>
+          <text x="105" y="69" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="9.5" font-family="Instrument Sans, sans-serif">unref'd; async stop drains in-flight</text>
+          <rect x="245" y="30" width="180" height="56" rx="7" stroke="var(--line)" fill="var(--surface)"/>
+          <text x="335" y="52" text-anchor="middle" fill="var(--ink)" stroke="none" font-size="10.5" font-family="Spline Sans Mono, monospace">bounded jobs</text>
+          <text x="335" y="69" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="9.5" font-family="Instrument Sans, sans-serif">concurrency cap, hard timeouts</text>
+          <rect x="15" y="120" width="410" height="46" rx="7" stroke="var(--signal)" stroke-dasharray="5 4" fill="none"/>
+          <text x="220" y="139" text-anchor="middle" fill="var(--signal)" stroke="none" font-size="10.5" font-family="Spline Sans Mono, monospace">no backoff or jitter on API errors; no ETag conditionals</text>
+          <text x="220" y="156" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="9.5" font-family="Instrument Sans, sans-serif">a failing API is re-hit at full cadence every tick</text>
+          <line x1="195" y1="58" x2="240" y2="58" marker-end="url(#q1)"/>
+        </g>
+      </svg>
+    </div>
+    <div class="panel">
+      <span class="chip ref">reference</span>
+      <svg viewBox="0 0 440 230" role="img" aria-label="Reference: a self-scheduling timeout chain with full jitter backoff on errors, conditional requests with ETags where 304 responses are free, and Retry-After honored.">
+        <defs><marker id="q2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"/></marker></defs>
+        <g fill="none" stroke="var(--ink)" stroke-width="1.2">
+          <rect x="15" y="30" width="190" height="56" rx="7" stroke="var(--accent)" fill="var(--surface)"/>
+          <text x="110" y="52" text-anchor="middle" fill="var(--ink)" stroke="none" font-size="10.5" font-family="Spline Sans Mono, monospace">setTimeout chain</text>
+          <text x="110" y="69" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="9.5" font-family="Instrument Sans, sans-serif">next tick scheduled after work ends</text>
+          <rect x="250" y="30" width="175" height="56" rx="7" stroke="var(--accent)" fill="var(--surface)"/>
+          <text x="337" y="52" text-anchor="middle" fill="var(--ink)" stroke="none" font-size="10.5" font-family="Spline Sans Mono, monospace">full-jitter backoff</text>
+          <text x="337" y="69" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="9.5" font-family="Instrument Sans, sans-serif">random(0, base * 2^n); Retry-After</text>
+          <rect x="15" y="120" width="410" height="46" rx="7" stroke="var(--line)" fill="var(--surface)"/>
+          <text x="220" y="139" text-anchor="middle" fill="var(--ink)" stroke="none" font-size="10.5" font-family="Spline Sans Mono, monospace">conditional requests: If-None-Match + stored ETag</text>
+          <text x="220" y="156" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="9.5" font-family="Instrument Sans, sans-serif">304 responses do not count against the rate limit</text>
+          <line x1="205" y1="58" x2="245" y2="58" stroke="var(--accent)" marker-end="url(#q2)"/>
+        </g>
+      </svg>
+    </div>
+  </div>
+  <ul class="findings">
+    <li><span class="v ok">matches</span><strong>The lifecycle is textbook.</strong> Re-entrancy guard, unref'd timer, async stop that drains in-flight work, hard per-job timeouts with aborts, boot-time in-flight reset: this is the full checklist. Polling over webhooks is also correct here; a local tool has no public ingress.</li>
+    <li><span class="v consider">consider</span><strong>Errors deserve backoff.</strong> A gh or PostHog outage is re-polled at full cadence. Full-jitter exponential backoff plus honoring <code>Retry-After</code> is a small change to the shared lane-runner and covers every lane at once.</li>
+    <li><span class="v consider">consider</span><strong>ETags are free.</strong> <code>If-None-Match</code> makes an unchanged PR list cost zero rate limit. Minor at one operator's volume; cheap in the shared gh wrapper.</li>
+  </ul>
+  <p class="sources">Sources: <a href="https://docs.github.com/en/rest/using-the-rest-api/best-practices-for-using-the-rest-api">GitHub REST best practices</a>, <a href="https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/">AWS backoff and jitter</a></p>
+
+  <h2>7. Durable state</h2>
+  <p class="lede">Roughly ten sidecar JSON files beside the config, each with its own atomic-write, locking, and reload conventions.</p>
+  <div class="compare">
+    <div class="panel">
+      <span class="chip built">as built</span>
+      <svg viewBox="0 0 440 240" role="img" aria-label="As built: many sidecar JSON files, each with tmp plus rename writes, some with O_EXCL locks and watch plus interval reloads; no cross-file atomicity; append-shaped data rewrites the whole file.">
+        <g fill="none" stroke="var(--ink)" stroke-width="1.2">
+          <rect x="15" y="25" width="195" height="40" rx="6" stroke="var(--line)" fill="var(--surface)"/>
+          <text x="112" y="49" text-anchor="middle" fill="var(--ink)" stroke="none" font-size="10" font-family="Spline Sans Mono, monospace">usage-warehouse.json</text>
+          <rect x="230" y="25" width="195" height="40" rx="6" stroke="var(--line)" fill="var(--surface)"/>
+          <text x="327" y="49" text-anchor="middle" fill="var(--ink)" stroke="none" font-size="10" font-family="Spline Sans Mono, monospace">usage-lanes.json</text>
+          <rect x="15" y="75" width="195" height="40" rx="6" stroke="var(--line)" fill="var(--surface)"/>
+          <text x="112" y="99" text-anchor="middle" fill="var(--ink)" stroke="none" font-size="10" font-family="Spline Sans Mono, monospace">usage-budget-state.json</text>
+          <rect x="230" y="75" width="195" height="40" rx="6" stroke="var(--line)" fill="var(--surface)"/>
+          <text x="327" y="99" text-anchor="middle" fill="var(--ink)" stroke="none" font-size="10" font-family="Spline Sans Mono, monospace">pr-review-state.json</text>
+          <rect x="15" y="125" width="195" height="40" rx="6" stroke="var(--line)" fill="var(--surface)"/>
+          <text x="112" y="149" text-anchor="middle" fill="var(--ink)" stroke="none" font-size="10" font-family="Spline Sans Mono, monospace">pairings.json + lockfile</text>
+          <rect x="230" y="125" width="195" height="40" rx="6" stroke="var(--line)" fill="var(--surface)"/>
+          <text x="327" y="149" text-anchor="middle" fill="var(--ink)" stroke="none" font-size="10" font-family="Spline Sans Mono, monospace">visions-intent.json ...</text>
+          <rect x="15" y="180" width="410" height="42" rx="7" stroke="var(--signal)" stroke-dasharray="5 4" fill="none"/>
+          <text x="220" y="198" text-anchor="middle" fill="var(--signal)" stroke="none" font-size="10.5" font-family="Spline Sans Mono, monospace">each file: own tmp+rename, own locks, own reload</text>
+          <text x="220" y="214" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="9.5" font-family="Instrument Sans, sans-serif">no cross-file atomicity; whole-file rewrite per mutation</text>
+        </g>
+      </svg>
+    </div>
+    <div class="panel">
+      <span class="chip ref">reference</span>
+      <svg viewBox="0 0 440 240" role="img" aria-label="Reference: one embedded SQLite database in WAL mode holds the machine state as tables with transactions across them; config.json stays a hand-editable JSON file; recordings stay JSONL.">
+        <g fill="none" stroke="var(--ink)" stroke-width="1.2">
+          <rect x="15" y="30" width="260" height="150" rx="8" stroke="var(--accent)" fill="var(--surface)"/>
+          <text x="145" y="55" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="11.5" font-weight="600">glissa.db (SQLite, WAL)</text>
+          <text x="145" y="78" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10" font-family="Instrument Sans, sans-serif">usage_days, lanes, budgets,</text>
+          <text x="145" y="93" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10" font-family="Instrument Sans, sans-serif">pr_state, pairings, notifications</text>
+          <text x="145" y="116" text-anchor="middle" fill="var(--ink)" stroke="none" font-size="10" font-family="Spline Sans Mono, monospace">one transaction across tables</text>
+          <text x="145" y="134" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10" font-family="Instrument Sans, sans-serif">no hand-rolled locks, no whole-file</text>
+          <text x="145" y="148" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10" font-family="Instrument Sans, sans-serif">rewrites, readers never block writers</text>
+          <rect x="300" y="30" width="125" height="66" rx="7" stroke="var(--line)" fill="var(--surface-2)"/>
+          <text x="362" y="55" text-anchor="middle" fill="var(--ink)" stroke="none" font-size="10.5" font-family="Spline Sans Mono, monospace">config.json</text>
+          <text x="362" y="72" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="9.5" font-family="Instrument Sans, sans-serif">stays JSON:</text>
+          <text x="362" y="85" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="9.5" font-family="Instrument Sans, sans-serif">hand-edited</text>
+          <rect x="300" y="114" width="125" height="66" rx="7" stroke="var(--line)" fill="var(--surface-2)"/>
+          <text x="362" y="139" text-anchor="middle" fill="var(--ink)" stroke="none" font-size="10.5" font-family="Spline Sans Mono, monospace">recordings</text>
+          <text x="362" y="156" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="9.5" font-family="Instrument Sans, sans-serif">stay JSONL:</text>
+          <text x="362" y="169" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="9.5" font-family="Instrument Sans, sans-serif">append forensics</text>
+        </g>
+      </svg>
+    </div>
+  </div>
+  <ul class="findings">
+    <li><span class="v ok">matches</span><strong>The per-file discipline is careful.</strong> tmp+rename everywhere, deliberate corruption policies (auth fails closed, budgets fail noisy), and the complete-pass-only warehouse write are all sound choices within the files-as-store frame.</li>
+    <li><span class="v consider">consider</span><strong>The frame itself is the finding.</strong> SQLite's own documentation makes the case: one WAL-mode database replaces N independent write paths, gives cross-key transactions (the lane ledger and budget state cannot disagree after a crash), removes the O_EXCL lockfile machinery under <code>pairings.json</code>, and turns the warehouse's whole-file rewrite into row upserts. <code>node:sqlite</code> ships in Node 24, so this violates no dependency rule. Keep config.json (hand-edited) and recordings (append-only forensics) as files; those are exactly the documented exceptions.</li>
+    <li><span class="v gap">gap</span><strong>No cross-file recovery point.</strong> A crash between two sidecar writes leaves the set mutually inconsistent with no way to notice; each file recovers alone. This is the concrete failure the transactional store closes, and it is also what makes the notification outbox in section 5 possible.</li>
+  </ul>
+  <p class="sources">Sources: <a href="https://sqlite.org/appfileformat.html">SQLite as application file format</a>, <a href="https://sqlite.org/wal.html">SQLite WAL</a></p>
+
+  <h2>8. Context mill watchers</h2>
+  <p class="lede">Per-root debounced watchers for latency, a fifteen-minute sweep for correctness, content-hash versioning, atomic publish.</p>
+  <div class="compare">
+    <div class="panel">
+      <span class="chip built">as built</span>
+      <svg viewBox="0 0 440 200" role="img" aria-label="As built: debounced recursive watchers per source root give latency, a 15 minute re-entrancy guarded sweep gives correctness, builds are serialized on one promise chain, and identical versions publish nothing.">
+        <defs><marker id="pk1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--ink)"/></marker></defs>
+        <g fill="none" stroke="var(--ink)" stroke-width="1.2">
+          <rect x="15" y="30" width="190" height="52" rx="7" stroke="var(--line)" fill="var(--surface)"/>
+          <text x="110" y="51" text-anchor="middle" fill="var(--ink)" stroke="none" font-size="10.5" font-family="Spline Sans Mono, monospace">debounced fs.watch</text>
+          <text x="110" y="68" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="9.5" font-family="Instrument Sans, sans-serif">latency only, per source root</text>
+          <rect x="15" y="105" width="190" height="52" rx="7" stroke="var(--accent)" fill="var(--surface)"/>
+          <text x="110" y="126" text-anchor="middle" fill="var(--ink)" stroke="none" font-size="10.5" font-family="Spline Sans Mono, monospace">15 min sweep</text>
+          <text x="110" y="143" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="9.5" font-family="Instrument Sans, sans-serif">the correctness guarantee</text>
+          <rect x="250" y="65" width="175" height="66" rx="7" stroke="var(--line)" fill="var(--surface)"/>
+          <text x="337" y="90" text-anchor="middle" fill="var(--ink)" stroke="none" font-size="10.5" font-family="Spline Sans Mono, monospace">serialized build</text>
+          <text x="337" y="107" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="9.5" font-family="Instrument Sans, sans-serif">hash version; unchanged = no write</text>
+          <line x1="205" y1="56" x2="245" y2="85" marker-end="url(#pk1)"/>
+          <line x1="205" y1="131" x2="245" y2="110" marker-end="url(#pk1)"/>
+        </g>
+      </svg>
+    </div>
+    <div class="panel">
+      <span class="chip ref">reference</span>
+      <svg viewBox="0 0 440 200" role="img" aria-label="Reference: identical shape, plus write-finish stability before reading changed files and a max-wait ceiling on the debounce so a continuously churning tree still rebuilds.">
+        <defs><marker id="pk2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"/></marker></defs>
+        <g fill="none" stroke="var(--ink)" stroke-width="1.2">
+          <rect x="15" y="30" width="190" height="52" rx="7" stroke="var(--accent)" fill="var(--surface)"/>
+          <text x="110" y="51" text-anchor="middle" fill="var(--ink)" stroke="none" font-size="10.5" font-family="Spline Sans Mono, monospace">same watcher + sweep</text>
+          <text x="110" y="68" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="9.5" font-family="Instrument Sans, sans-serif">this shape IS the canon</text>
+          <rect x="15" y="105" width="190" height="52" rx="7" stroke="var(--line)" fill="var(--surface)"/>
+          <text x="110" y="126" text-anchor="middle" fill="var(--ink)" stroke="none" font-size="10.5" font-family="Spline Sans Mono, monospace">awaitWriteFinish</text>
+          <text x="110" y="143" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="9.5" font-family="Instrument Sans, sans-serif">size-stable before hashing</text>
+          <rect x="250" y="65" width="175" height="66" rx="7" stroke="var(--line)" fill="var(--surface)"/>
+          <text x="337" y="90" text-anchor="middle" fill="var(--ink)" stroke="none" font-size="10.5" font-family="Spline Sans Mono, monospace">max-wait ceiling</text>
+          <text x="337" y="107" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="9.5" font-family="Instrument Sans, sans-serif">churn cannot starve the rebuild</text>
+          <line x1="205" y1="56" x2="245" y2="85" stroke="var(--accent)" marker-end="url(#pk2)"/>
+        </g>
+      </svg>
+    </div>
+  </div>
+  <ul class="findings">
+    <li><span class="v ok">matches</span><strong>Watcher-for-latency, sweep-for-correctness is exactly the published pattern,</strong> as are ignore-before-register (the @parcel/watcher choice), serialized builds, and skip-identical-version publishes.</li>
+    <li><span class="v consider">consider</span><strong>Mid-write reads.</strong> An editor save emits events before the bytes settle; hashing a half-written file publishes a version that immediately re-publishes. Self-healing (the next event or sweep fixes it), but a size-stability wait before hashing removes the flap.</li>
+    <li><span class="v consider">consider</span><strong>Debounce needs a ceiling.</strong> A trailing-only debounce under continuous churn defers forever; the sweep bounds it at 15 minutes. A max-wait on the debounce itself would bound it at seconds.</li>
+  </ul>
+  <p class="sources">Sources: <a href="https://github.com/paulmillr/chokidar">chokidar (awaitWriteFinish)</a>, <a href="https://nodejs.org/api/fs.html#fspromiseswatchfilename-options">fs.watch caveats</a></p>
+
+  <h2>9. Localhost and remote security</h2>
+  <p class="lede">Loopback bind, Origin allow-list, per-session hook tokens, listener-port trust, hashed single-use pairing.</p>
+  <div class="compare">
+    <div class="panel">
+      <span class="chip built">as built</span>
+      <svg viewBox="0 0 440 230" role="img" aria-label="As built: loopback bind with an Origin allow-list and per-session hook tokens; trust derives from the listener port; the control WebSocket is unauthenticated for local processes and there is no Host header check.">
+        <g fill="none" stroke="var(--ink)" stroke-width="1.2">
+          <rect x="15" y="25" width="410" height="46" rx="7" stroke="var(--accent)" fill="var(--surface)"/>
+          <text x="220" y="44" text-anchor="middle" fill="var(--ink)" stroke="none" font-size="10.5" font-family="Spline Sans Mono, monospace">loopback bind + Origin allow-list + listener-port trust</text>
+          <text x="220" y="61" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="9.5" font-family="Instrument Sans, sans-serif">wider bind refused unless explicitly stated</text>
+          <rect x="15" y="85" width="410" height="46" rx="7" stroke="var(--accent)" fill="var(--surface)"/>
+          <text x="220" y="104" text-anchor="middle" fill="var(--ink)" stroke="none" font-size="10.5" font-family="Spline Sans Mono, monospace">hooks: per-session bearer token; pairing: hashed, single-use</text>
+          <text x="220" y="121" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="9.5" font-family="Instrument Sans, sans-serif">remote config unreachable from the control WS</text>
+          <rect x="15" y="145" width="410" height="66" rx="7" stroke="var(--signal)" stroke-dasharray="5 4" fill="none"/>
+          <text x="220" y="167" text-anchor="middle" fill="var(--signal)" stroke="none" font-size="10.5" font-family="Spline Sans Mono, monospace">control WS: no token (documented tradeoff)</text>
+          <text x="220" y="184" text-anchor="middle" fill="var(--signal)" stroke="none" font-size="10.5" font-family="Spline Sans Mono, monospace">no Host header allow-list</text>
+          <text x="220" y="201" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="9.5" font-family="Instrument Sans, sans-serif">any local process can spawn a permissionless session</text>
+        </g>
+      </svg>
+    </div>
+    <div class="panel">
+      <span class="chip ref">reference</span>
+      <svg viewBox="0 0 440 230" role="img" aria-label="Reference: three layers for a localhost daemon: Host header allow-list against DNS rebinding, Origin check on the WebSocket handshake against cross-site WebSocket hijacking, and an unguessable token a browser cannot supply automatically; pairing stays as built.">
+        <g fill="none" stroke="var(--ink)" stroke-width="1.2">
+          <rect x="15" y="25" width="410" height="50" rx="7" stroke="var(--accent)" fill="var(--surface)"/>
+          <text x="220" y="45" text-anchor="middle" fill="var(--ink)" stroke="none" font-size="10.5" font-family="Spline Sans Mono, monospace">1. Host allow-list: localhost + loopback literals only</text>
+          <text x="220" y="62" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="9.5" font-family="Instrument Sans, sans-serif">defeats DNS rebinding</text>
+          <rect x="15" y="87" width="410" height="50" rx="7" stroke="var(--accent)" fill="var(--surface)"/>
+          <text x="220" y="107" text-anchor="middle" fill="var(--ink)" stroke="none" font-size="10.5" font-family="Spline Sans Mono, monospace">2. Origin check on every WS handshake</text>
+          <text x="220" y="124" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="9.5" font-family="Instrument Sans, sans-serif">defeats cross-site WebSocket hijacking (WS skips CORS)</text>
+          <rect x="15" y="149" width="410" height="50" rx="7" stroke="var(--accent)" fill="var(--surface)"/>
+          <text x="220" y="169" text-anchor="middle" fill="var(--ink)" stroke="none" font-size="10.5" font-family="Spline Sans Mono, monospace">3. local token the browser cannot auto-supply</text>
+          <text x="220" y="186" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="9.5" font-family="Instrument Sans, sans-serif">defense in depth vs any same-machine process</text>
+        </g>
+      </svg>
+    </div>
+  </div>
+  <ul class="findings">
+    <li><span class="v ok">matches</span><strong>Most of the reference is already here.</strong> Listener-port trust (endorsed over IP/header trust), Origin allow-listing, refusing wider binds without an explicit flag, hashed single-use pairing with TTL, and keeping remote config off the settable-keys list are all current practice.</li>
+    <li><span class="v gap">gap</span><strong>No Host header validation.</strong> DNS rebinding makes an attacker's domain resolve to 127.0.0.1; the browser then treats the local server as same-origin, and the Origin header on plain HTTP requests can be absent. An allow-list of <code>localhost</code>/loopback literals on both listeners is a few lines in the request-trust core and closes the classic localhost-daemon attack.</li>
+    <li><span class="v consider">consider</span><strong>The tokenless control WS is documented, but the bar has moved.</strong> "Any local process can spawn a permissionless session" is accepted in AGENTS.md; the published guidance now treats a local unguessable token as the third layer even on single-user machines, because the control channel is RCE-grade. The dashboard is served by the same process, so it can receive the token with the page; cost is small.</li>
+  </ul>
+  <p class="sources">Sources: <a href="https://github.blog/security/application-security/localhost-dangers-cors-and-dns-rebinding/">GitHub: localhost dangers</a>, <a href="https://portswigger.net/web-security/websockets/cross-site-websocket-hijacking">CSWSH</a>, <a href="https://developer.chrome.com/blog/local-network-access">Chrome Local Network Access</a></p>
+
+  <h2>Summary</h2>
+  <div class="table-scroll">
+  <table>
+    <tr><th>Priority</th><th>Finding</th><th>Pattern</th></tr>
+    <tr><td><span class="v gap">gap</span></td><td>Notifications lost with no tab open and Telegram off; pending entries lost on crash.</td><td>Service worker Push API; transactional outbox.</td></tr>
+    <tr><td><span class="v gap">gap</span></td><td>No Host header allow-list on either listener (DNS rebinding).</td><td>Host validation in the request-trust core.</td></tr>
+    <tr><td><span class="v gap">gap</span></td><td>No WS heartbeat: zombie connections distort presence, blocking the Telegram gate.</td><td>ping/pong with a liveness deadline.</td></tr>
+    <tr><td><span class="v gap">gap</span></td><td>Ten sidecar state files with no cross-file atomicity.</td><td>One SQLite WAL database (node:sqlite, in Node 24); config and recordings stay files.</td></tr>
+    <tr><td><span class="v consider">consider</span></td><td>Gate bookkeeping split across three structures and four TTL classes.</td><td>One task registry + one zombie-reaper rule; statusLine cadence as a liveness heartbeat.</td></tr>
+    <tr><td><span class="v consider">consider</span></td><td>Poller lanes re-hit failing APIs at full cadence.</td><td>Full-jitter backoff + Retry-After + ETags in the shared lane runner.</td></tr>
+    <tr><td><span class="v consider">consider</span></td><td>Session flags (<code>_gateHeldReady</code>, <code>_titleQuiet</code>, merge status) shadow states.</td><td>Statechart parallel regions; supervised restart with backoff.</td></tr>
+    <tr><td><span class="v consider">consider</span></td><td>Rebase cooldown ignores sibling rerere resolutions; no check gate before merge back.</td><td>rr-cache write as the retry trigger; run tests on the projected result.</td></tr>
+    <tr><td><span class="v ok">matches</span></td><td>Pure cores + decision trace + replay harness; watcher-plus-sweep; poller lifecycle; backpressure and replay retention; pairing design.</td><td>Already the reference shape. Keep.</td></tr>
+  </table>
+  </div>
+
+  <p class="lede">The strongest overall property is one the reference patterns only approximate: nearly every decision in Glissa is a pure function with a recorded verdict and a replay harness behind it. Most of the gaps above are delivery-layer and durability concerns around that core, not flaws in it.</p>
+
+  <p class="footline">glissa / architecture review / 2026-08-22 / companion to architecture-overview.html / fonts load from Google Fonts when online, system fallbacks apply offline</p>
+</div>
