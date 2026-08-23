@@ -64,4 +64,4 @@ function createReplayLog({ maxEntries = 500, maxAgeMs = 5 * 60_000 } = {}) {
   return { stamp, entriesSince, currentSeq };
 }
 
-module.exports = { createReplayLog };
+module.exports = { createReplayLog, isReplayable, REPLAYABLE_EXACT };

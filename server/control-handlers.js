@@ -394,6 +394,9 @@ function registerControlHandlers(controlWss, deps) {
     // Latest built version per context pack (optional - {} in older callers/tests, which then just
     // means no card can be judged stale).
     getPackVersions = () => ({}),
+    // Identifies the running backend to the page, so a tab open across a server update reloads
+    // instead of talking to a build its bundle predates.
+    serverBuild = () => null,
     // Usage lane accessors (optional - undefined in older callers/tests, which then replay nothing and
     // refuse a report request).
     getUsageSessions = null,
@@ -451,7 +454,14 @@ function registerControlHandlers(controlWss, deps) {
     // packVersions rides the snapshot rather than a frame of its own: it is global (not per session),
     // and the snapshot is exactly what repairs a client's view on reconnect, which is why the
     // `pack-updated` broadcast needs no replay retention.
-    return { type: 'snapshot', sessions: list, packVersions: getPackVersions() };
+    //
+    // serverBuild rides it for the same reason. The dashboard is served by the same process, so the
+    // only skew case is a tab left open across a server update: it reconnects to a backend whose
+    // frames its bundle may not understand. The client compares this across reconnects and reloads on
+    // a change (public/app.js), which is cheap insurance against a silently half-broken dashboard.
+    return {
+      type: 'snapshot', sessions: list, packVersions: getPackVersions(), serverBuild: serverBuild(),
+    };
   }
 
   const SESSION_NAME_RE = /^[a-zA-Z0-9_\-. ()]{1,64}$/;

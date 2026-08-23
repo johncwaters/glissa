@@ -185,3 +185,43 @@ test('the per-connection snapshot has no seq, but a snapshot sent through broadc
   const broadcastSnapshot = replayLog.stamp({ type: 'snapshot', sessions: [] });
   assert.equal(typeof broadcastSnapshot.seq, 'number', 'a snapshot broadcast through stamp is numbered like any other broadcast');
 });
+
+// Envelope versioning (2026-08 review, section 1). The dashboard is served by the same process, so
+// the only skew case is a tab left open across a server update: it reconnects to a backend whose
+// frames its bundle may predate. The client reloads on a CHANGE (public/app.js noteServerBuild).
+test('the connect snapshot identifies the backend build it came from', () => {
+  const controlWss = new EventEmitter();
+  const sent = [];
+  const ws = { send: (s) => sent.push(JSON.parse(s)), on: () => {} };
+  registerControlHandlers(controlWss, {
+    sessions: new Map(),
+    config: { projects: [], teams: [] },
+    configStore: { save: (fn) => fn({ projects: [], teams: [] }), getSettings: () => ({}) },
+    applyConfigReload: () => {},
+    broadcastControl: () => {},
+    serverBuild: () => '0.22.0+deadbeef',
+  });
+  controlWss.emit('connection', ws);
+  assert.equal(sent[0].type, 'snapshot');
+  assert.equal(sent[0].serverBuild, '0.22.0+deadbeef');
+});
+
+test('a caller that declares no build sends null rather than omitting the field', () => {
+  const h = harnessSnapshot();
+  assert.equal(h.snapshot.serverBuild, null, 'an absent field would read as "unchanged" to the client');
+});
+
+function harnessSnapshot() {
+  const controlWss = new EventEmitter();
+  const sent = [];
+  const ws = { send: (s) => sent.push(JSON.parse(s)), on: () => {} };
+  registerControlHandlers(controlWss, {
+    sessions: new Map(),
+    config: { projects: [], teams: [] },
+    configStore: { save: (fn) => fn({ projects: [], teams: [] }), getSettings: () => ({}) },
+    applyConfigReload: () => {},
+    broadcastControl: () => {},
+  });
+  controlWss.emit('connection', ws);
+  return { snapshot: sent[0] };
+}

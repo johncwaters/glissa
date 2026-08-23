@@ -66,6 +66,8 @@ const { createLaneLedger } = require('./usage-lane-ledger');
 const { INTERACTIVE_LANE } = require('./core/usage-lane-core');
 const { normalizeRemoteConfig, validateRemoteConfig, decideBindHost } = require('./core/remote-config');
 const { createClientPresence } = require('./core/client-presence');
+const { decideControlSend } = require('./core/control-send-core');
+const { createHeartbeat } = require('./ws-heartbeat');
 const { normalizePackNames } = require('./core/pack-core');
 const { createPackService } = require('./pack-service');
 const {
@@ -328,6 +330,12 @@ function createBackend(httpServer, options = {}) {
   // READ the response (no CORS headers on it), so it never learns the token.
   const pageToken = crypto.randomBytes(32).toString('hex');
   const pageTokenBuffer = Buffer.from(pageToken, 'utf8');
+
+  // What the connect snapshot tells the page about which backend it is talking to. A tab left open
+  // across a server update reconnects to frames its bundle may predate, so the client reloads when
+  // this changes (public/app.js). The boot id is what makes a same-version restart, and a dev rebuild,
+  // visible at all.
+  const serverBuild = `${require('../package.json').version}+${crypto.randomBytes(4).toString('hex')}`;
 
   function tokenMatches(presented) {
     if (typeof presented !== 'string' || presented.length !== pageToken.length) return false;
@@ -729,13 +737,30 @@ function createBackend(httpServer, options = {}) {
   // recover exactly what it missed (see control-handlers.js connection handler).
   const controlReplayLog = createReplayLog();
 
+  /*
+   * The one place a control frame reaches a socket, so bufferedAmount is checked exactly once rather
+   * than at each of the dozen broadcast sites. Policy is pure (core/control-send-core.js): a backed-up
+   * socket drops only the periodic pushes whose successor repairs them, and a socket past the hard
+   * ceiling is closed so the client reconnects and rebuilds from a snapshot.
+   */
+  function sendControlFrame(client, payload, type) {
+    if (client.readyState !== 1) return;
+    const decision = decideControlSend({ bufferedAmount: client.bufferedAmount, type });
+    if (decision.action === 'drop') return;
+    if (decision.action === 'close') {
+      console.warn(`[control-ws] client past the buffer ceiling (${client.bufferedAmount} bytes) - closing so it reconnects`);
+      try { client.terminate(); } catch { /* already gone */ }
+      return;
+    }
+    client.send(payload);
+  }
+
   // Stamp a copy: lane runners cache msg for later replay, so stamping in place leaves a stale seq.
   function broadcastControl(msg) {
-    const payload = JSON.stringify(controlReplayLog.stamp({ ...msg }));
+    const stamped = controlReplayLog.stamp({ ...msg });
+    const payload = JSON.stringify(stamped);
     for (const client of controlWss.clients) {
-      if (client.readyState === 1) {
-        client.send(payload);
-      }
+      sendControlFrame(client, payload, stamped.type);
     }
   }
 
@@ -747,11 +772,11 @@ function createBackend(httpServer, options = {}) {
    * local, so behavior with remote mode off is unchanged.
    */
   function broadcastLocalControl(msg) {
-    const payload = JSON.stringify(controlReplayLog.stamp({ ...msg }));
+    const stamped = controlReplayLog.stamp({ ...msg });
+    const payload = JSON.stringify(stamped);
     for (const client of controlWss.clients) {
-      if (client.readyState !== 1) continue;
       if (client.glissaTrust === 'remote') continue;
-      client.send(payload);
+      sendControlFrame(client, payload, stamped.type);
     }
   }
 
@@ -910,6 +935,18 @@ function createBackend(httpServer, options = {}) {
       updateNotifySuppression();
     });
   });
+
+  /*
+   * Protocol ping/pong on both channels. Presence LIES without it: a half-open socket TCP has not
+   * noticed stays in the client set until the OS timeout, and while it does, the Telegram
+   * zero-connections gate is silently blocked - the channel of last resort, defeated by a connection
+   * nobody is on. Terminating a silent socket is what drops it out of clientPresence (via its 'close'
+   * event) and lets that gate open.
+   */
+  const heartbeat = createHeartbeat({ servers: [controlWss, dataWss] });
+  controlWss.on('connection', (ws) => heartbeat.track(ws));
+  dataWss.on('connection', (ws) => heartbeat.track(ws));
+  heartbeat.start();
 
   // --- Session management ---
   // Sessions are keyed by stable `id` (UUID), not mutable `name`.
@@ -1698,6 +1735,9 @@ function createBackend(httpServer, options = {}) {
     // Latest built version per pack, so a connecting client can tell which sessions were spawned
     // against an older one. Empty while auto-rebuild is off: nothing then knows a pack moved.
     getPackVersions: () => packService.getVersions(),
+    // Version plus a per-process boot id: a restart onto the SAME version still means new frames from
+    // a new process, and a dev rebuild does not bump the version at all.
+    serverBuild: () => serverBuild,
     // Usage lane: the small per-card payload is rebuilt live on connect, the large report is replayed
     // from its cache, and a report request is served on demand.
     getUsageSessions: () => usage.getSessionsMessage(),
@@ -2028,6 +2068,7 @@ function createBackend(httpServer, options = {}) {
       sess.destroy();
       if (sess._killReap) pendingReaps.push(sess._killReap);
     }
+    heartbeat.stop();
     controlWss.close();
     dataWss.close();
     return { reaps: pendingReaps, stoppers: stoppers.entries() };

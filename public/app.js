@@ -27,6 +27,7 @@ import { openConfirmDialog } from './session-card/modal.js';
 import { reconnectDataWs } from './session-card/terminal.js';
 import { showErrorToast } from './session-card/toast.js';
 import { forgetReviewSession, mergeSelectedSession, mountReviewSidebar, notifyWorktreeChanged, refreshReviewSidebar, resolveSelectedSession, resyncSelectedSession, setReviewBranchSync } from './sidebar/review-sidebar.js';
+import { decideReloadOnBuild } from './server-build-core.mjs';
 import { applyTheme } from './theme.js';
 import { getActiveView, getDismissedUpdate, getThemeId, isSoundEnabled, setActiveView, setDismissedUpdate, setSoundEnabled } from './ui-prefs.js';
 import { acknowledgeUsageAttention, applyPlanLimits, applyUsageReport, applyUsageSessions, mountUsageView, refreshUsageView, requestUsageReport, setUsageActivityCallback, setUsageRequestSender } from './usage-panel.js';
@@ -103,6 +104,16 @@ setConnectionStateCallback((state, label) => {
 });
 
 // ── Control message handlers ─────────────────────────────────
+
+// The backend the page is talking to, remembered across reconnects. The rule is pure
+// (server-build-core.mjs); this is the two-line shell that holds the value and does the reload.
+let knownServerBuild = null;
+
+function noteServerBuild(serverBuild) {
+  const decision = decideReloadOnBuild(knownServerBuild, serverBuild);
+  knownServerBuild = decision.knownBuild;
+  if (decision.reload) location.reload();
+}
 
 function handleSnapshot(sessions, packVersions) {
   // Before the per-session loop: the staleness chip compares each card's delivered pack versions
@@ -228,7 +239,7 @@ function requestUsageReportIfVisible() {
 }
 
 const messageHandlers = {
-  'snapshot':           (msg) => handleSnapshot(msg.sessions, msg.packVersions),
+  'snapshot':           (msg) => { noteServerBuild(msg.serverBuild); handleSnapshot(msg.sessions, msg.packVersions); },
   // A context pack finished rebuilding: every session still running an older version of it is now
   // stale. Nothing is done to the sessions themselves (see AGENTS.md "Context Packs").
   'pack-updated':       (msg) => notePackVersion(msg.name, msg.version),
