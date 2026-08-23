@@ -40,6 +40,13 @@ back into future work. Four kinds of remembered fact:
   touch; ingestion, backfill, distillation, projection, pack rebuild and delivery all run
   themselves from there. The remaining operator touches are inherently operator acts (an
   intent lock, `forget`, the rare locked-diff review), not maintenance.
+- **The storage SUBSTRATE is subordinate to the machine-wide store design pass**
+  (`docs/architecture-review.html`, section 7 disposition, 2026-08): the operator is open to
+  one `node:sqlite` WAL database beside config.json (no server process, no migration
+  framework, no incremental adoption) replacing the sidecar-JSON write paths, and the memory
+  lane is a COUNTED FIRST-CLASS TENANT of that decision so the shape is chosen once, not per
+  feature. This plan therefore separates the memory CONTRACT from its substrate; see Store
+  layout.
 
 ## Research summary (2026-08-22)
 
@@ -79,7 +86,33 @@ milestones resized to what the real code paths fire, and durable-store hygiene (
 
 ## Architecture
 
-### Store layout
+### Store contract vs substrate
+
+What every later milestone builds against is the CONTRACT, which survives either substrate
+outcome of the machine-wide store design pass:
+
+- The canon is append-only with monthly-boundary retention, every record carries the signed
+  trust fields, verification demotes rather than trusts, `forget` expunges with an audit
+  tombstone, and reads are deterministic.
+- The PROJECTION is plain markdown on disk, always. It is the agent-agnostic surface (the
+  hard requirement above), so it stays a file no matter where the canon lives.
+- All memory-core rules (trust ranks, lineage, locks, supersession, echo suppression, secret
+  gates, retrieval scoring) are pure and substrate-blind: they take records, not files.
+
+The substrate TODAY (M12, shipped) is files, as laid out below. If the design pass picks
+SQLite-primary, the canon segments become an append-only table and `tail-state.json`, the
+delivered-hash state, and the distill bookkeeping become rows in the ONE machine-wide
+`node:sqlite` database beside config.json, which is also what buys the cross-key recovery
+point the review names as the primary requirement: a memory write, its lane-ledger entry,
+and budget state can then agree after a crash by transaction instead of by luck. The
+`O_EXCL` canon lockfile and the watch-reload machinery M12 built for the CLI-vs-server race
+collapse into WAL in that world. Only `memory-store.js` (the IO shell) changes; the record
+HMAC survives as-is, because rows are as appendable by a local process as JSONL lines and
+the trust claim must not depend on the substrate. No incremental adoption: M13 to M16 build
+on the shipped file substrate, and the swap, if it comes, is the design pass's own
+milestone.
+
+### Store layout (file substrate, as shipped in M12)
 
 Everything lives under `configSiblingPath(configPath, 'memory')`, so a temp `GLISSA_CONFIG`
 never writes into the real `~/.glissa` (same rule as uploads, recordings, warehouse):
@@ -95,7 +128,6 @@ never writes into the real `~/.glissa` (same rule as uploads, recordings, wareho
   churn, or index WAL traffic.
 - `memory/tail-state.json`: the memory consumer's own durable ingestion offsets.
 - `memory/hmac-key`: store-minted signing secret, mode 0600, created on first enable.
-- `memory/index.sqlite`: OPTIONAL derived FTS5 cache (M17). Deletable at any time.
 
 Housekeeping shipped WITH M12, not after: `memory/` added to
 `ingest-fs-core.daemonWriteRules` ignores (or the store's own writes publish fs events and
@@ -332,9 +364,12 @@ watching it (M17 pack carrier) sees daily cadence, not per-append churn.
 
 In no committed order:
 
-- **Retrieval index**: `node:sqlite` FTS5 as a rebuildable derived cache; feature-detect at
-  construction (Node 22.16+ AND successful module load; Glissa's floor is Node 18, so
-  absence is normal, not degraded), single writer, delete-and-rebuild on any doubt.
+- **Retrieval index**: `node:sqlite` FTS5 as a rebuildable derived cache, feature-detected
+  (Node 22.16+ AND successful module load; Glissa's floor is Node 18, so absence is normal,
+  not degraded), delete-and-rebuild on any doubt. NOT a per-feature `index.sqlite`: the one
+  database beside config.json is the review disposition's hard constraint, so the FTS index
+  lands as tables in the machine-wide store if the design pass adopts it, and does not exist
+  before then.
 - **`rankCandidates` seam**: Ollama-if-present embedding probe, absent-by-default.
 - **Non-CC pack delivery adapter**: reaches non-Claude harnesses once the agent-adapters
   plan ships its capability gating.
