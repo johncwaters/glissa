@@ -2,57 +2,30 @@
 
 // OSC-0 title source: the DEGRADED fallback status signal.
 //
-// Claude Code emits an activity glyph as the first char of its OSC-0 title:
-//   - braille family U+2800..U+28FF or circle-halves U+25D0..U+25D3 => spinner ("working")
-//   - a known idle glyph (e.g. U+2733 EIGHT SPOKED ASTERISK) => idle/ready
-// Claude Code 2.1.228 changed the busy title spinner from braille to circle-halves.
-// See docs/postmortem-terminal-detection.md and .omc/probes/common-patterns.md.
+// The framing and the state latching here are agent-NEUTRAL; WHICH leading glyph means working or
+// idle is the adapter's title profile (session/adapters/claude-code.js), moved out of here in M1 of
+// docs/plan-agent-adapters.md. A source constructed without one gets the Claude Code profile.
 //
 // CONTRACT (honest fallback): this source emits ONLY `working` / `ready` / `unknown`.
 // It NEVER emits `awaiting-input`: the title cannot authoritatively tell "needs input"
 // from "finished". WAITING is the hook source's job. An unrecognized leading glyph is
 // reported as `unknown` (with a one-time warning), never silently treated as `ready`.
 //
-// Generic window titles are ignored. Claude ALWAYS leads its activity title with a
-// pictographic glyph (braille spinner or a symbol, all > U+007F). A title that leads
-// with a plain ASCII / text character is therefore NOT a Claude activity title: it is
-// a window title set by the spawn shell or OS (e.g. on Windows, Glissa spawns
-// `cmd.exe /c claude`, and cmd.exe sets the console title to "C:\...\cmd.exe"). Such
-// titles carry no Claude status and are dropped silently, never flagged as `unknown`,
-// since `unknown` is reserved for genuine new-glyph candidates worth triaging.
+// Generic window titles are ignored where the profile says so. Claude ALWAYS leads its activity
+// title with a pictographic glyph (all > U+007F), so a title leading with a plain ASCII character is
+// a window title set by the spawn shell or OS (e.g. `cmd.exe /c claude` setting "C:\...\cmd.exe").
+// Such titles carry no status and are dropped silently, never flagged as `unknown`, since `unknown`
+// is reserved for genuine new-glyph candidates worth triaging.
 
 const { EventEmitter } = require('node:events');
 
-const DEFAULT_STABILIZATION_MS = 1500;
-const BRAILLE_MIN = 0x2800;
-const BRAILLE_MAX = 0x28ff;
-// Only U+25D0/U+25D1 live-probed (CC 2.1.234); the other two circle-halves frames can only ever mean spinning.
-const KNOWN_SPINNER_CODEPOINTS = new Set([0x25d0, 0x25d1, 0x25d2, 0x25d3]);
+const claudeCode = require('../session/adapters/claude-code');
 
-// Known idle glyphs (extend as Step-0 probe confirms per Claude version).
-// U+2733 ✳ is the documented-by-observation idle glyph.
-const KNOWN_IDLE_CODEPOINTS = new Set([0x2733]);
+const DEFAULT_STABILIZATION_MS = 1500;
 
 const OSC_START = '\x1b]0;';
 const BEL = '\x07';
 const ST = '\x1b\\';
-
-function isBrailleChar(char) {
-  if (!char) return false;
-  const code = char.codePointAt(0);
-  return code >= BRAILLE_MIN && code <= BRAILLE_MAX;
-}
-
-function isSpinnerChar(char) {
-  if (!char) return false;
-  if (isBrailleChar(char)) return true;
-  return KNOWN_SPINNER_CODEPOINTS.has(char.codePointAt(0));
-}
-
-function isKnownIdleChar(char) {
-  if (!char) return false;
-  return KNOWN_IDLE_CODEPOINTS.has(char.codePointAt(0));
-}
 
 // Locate the next OSC-0 title in `buffer` at/after `fromIndex`.
 // Returns { start, end, next, title } or null when no complete title is present.
@@ -70,9 +43,10 @@ function findOscTitle(buffer, fromIndex) {
 }
 
 class OscTitleSource extends EventEmitter {
-  constructor({ stabilizationMs = DEFAULT_STABILIZATION_MS } = {}) {
+  constructor({ stabilizationMs = DEFAULT_STABILIZATION_MS, titleProfile = claudeCode.titleProfile } = {}) {
     super();
     this._stabilizationMs = stabilizationMs;
+    this._profile = titleProfile;
     this._hasSeenSpinner = false;
     this._lastKind = null; // 'working' | 'idle-pending' | 'ready' | 'unknown' | null
     this._lastChar = null;
@@ -102,7 +76,7 @@ class OscTitleSource extends EventEmitter {
     if (!trimmed) return; // cleared/empty title, ignore
     const char = String.fromCodePoint(trimmed.codePointAt(0));
 
-    if (isSpinnerChar(char)) {
+    if (this._profile.isSpinnerChar(char)) {
       this._hasSeenSpinner = true;
       this._lastChar = char;
       this._clearStabilization();
@@ -113,7 +87,7 @@ class OscTitleSource extends EventEmitter {
       return;
     }
 
-    if (isKnownIdleChar(char)) {
+    if (this._profile.isIdleChar(char)) {
       this._lastChar = char;
       // Only arm `ready` after we have actually seen the session work. A session
       // that opens directly on the idle glyph (never spun) must not report ready.
@@ -124,11 +98,7 @@ class OscTitleSource extends EventEmitter {
       return;
     }
 
-    // Plain ASCII / text leading char => generic shell-or-OS window title, not a
-    // Claude activity glyph (those are all > U+007F). Drop it silently: it has no
-    // Claude status and must not be mistaken for a new idle glyph. This is the
-    // common `cmd.exe /c claude` case where cmd sets the title to "C:\...\cmd.exe".
-    if (char.codePointAt(0) <= 0x7f) {
+    if (this._profile.dropsLeadingAscii && char.codePointAt(0) <= 0x7f) {
       return;
     }
 
@@ -143,7 +113,7 @@ class OscTitleSource extends EventEmitter {
         console.warn(
           `[osc-title-source] unknown leading title glyph U+${char.codePointAt(0).toString(16)} ` +
             `(${JSON.stringify(char)}), treating as 'unknown', not 'ready'. ` +
-            `If this is a new idle glyph, add it to KNOWN_IDLE_CODEPOINTS.`,
+            (this._profile.unknownGlyphHint || ''),
         );
       }
       this._emit('unknown', char);
@@ -220,9 +190,10 @@ function createOscTitleSource(opts) {
   return new OscTitleSource(opts);
 }
 
+// The glyph predicates moved to the Claude Code adapter; re-exported here for the pre-adapter pins.
 module.exports = {
   createOscTitleSource,
-  isBrailleChar,
-  isSpinnerChar,
-  isKnownIdleChar,
+  isBrailleChar: claudeCode.isBrailleChar,
+  isSpinnerChar: claudeCode.isSpinnerChar,
+  isKnownIdleChar: claudeCode.isKnownIdleChar,
 };

@@ -13,7 +13,7 @@ Pure cores seam-extracted from `sessions.js`: no fs, no git, no async, no Sessio
 | `state-machine.js` | `TRANSITIONS`, `GUARDS`, `ENTRY_HOOKS`, `EXIT_HOOKS` lifecycle tables for the session state machine (states defined in `shared/states.js`) |
 | `status-mapper.js` | Pure `mapSignalToEvent(signal, state, confidence, activeAgents)` -> event or null; `activeAgents > 0` suppresses `ready` -> `task_complete` |
 | `exit-transition.js` | Pure `decideExitTransition(state, exitCode, signal, receivedFirstOutput)` -> `{ event, detail }`: the real-PTY-exit decision extracted from `Session._handlePtyExit` |
-| `spawn-command.js` | `classifyClaudeKind`, `resolveClaudeCommand`, `buildSpawnCommand`, `CLAUDE_CMD`: resolve-then-branch spawn (direct `.exe` vs `cmd.exe /c` shim fallback) |
+| `spawn-command.js` | Agent-neutral resolve-then-branch spawn mechanics (direct `.exe` vs `cmd.exe /c` shim fallback) plus the Claude-bound shims `classifyClaudeKind`, `resolveClaudeCommand`, `buildSpawnCommand`; the command constant lives in the adapter registry cache |
 | `spawn-env.js` | Pure `buildSpawnEnv(baseEnv)`: the 6-var scrub (`CLAUDECODE`, `CLAUDE_CODE_CHILD_SESSION` etc.) + always-on `CLAUDE_CODE_NO_FLICKER`, optional PATH prepend, returns a copy |
 | `agent-tracker.js` | Live background sub-agent bookkeeping over a `Map<agent_id, ts>` with TTL prune; feeds the completion gate |
 | `gate-release.js` | Pure `decideGateRelease(...)` -> `cancel` / `gated` / `wait` / `release`: the ONE judge of whether a gate-held (deferred) `ready` may complete the card. Cancels any hold with a newer non-ready signal (by sequence, not clock), so a Stop held across a new turn can never fire |

@@ -8,6 +8,7 @@ const os = require('node:os');
 const { canonicalizePath, equalsIgnoringCaseOnWindows } = require('../shared/paths');
 const { isPlainObject } = require('./core/usage-number-core');
 const { writeJsonAtomicSync, writeTextAtomicSync } = require('./json-file');
+const { isKnownAgentId, listAgentIds } = require('../session/adapters');
 
 const DEFAULT_CONFIG = {
   port: 3000,
@@ -231,6 +232,11 @@ function validateConfig(candidate) {
       }
       if (typeof project.path !== 'string') errors.push(`projects[${index}].path must be a string`);
       if (project.id != null && typeof project.id !== 'string') errors.push(`projects[${index}].id must be a string`);
+      // Which agent CLI supervises this project's card. Absent = the default adapter; an unknown id
+      // is refused here (the reload path) rather than silently supervising with the wrong vocabulary.
+      if (project.agent != null && !isKnownAgentId(project.agent)) {
+        errors.push(`projects[${index}].agent must be one of: ${listAgentIds().join(', ')}`);
+      }
     });
   }
   if (candidate.port != null && (!Number.isInteger(candidate.port) || candidate.port < 1 || candidate.port > 65535)) {

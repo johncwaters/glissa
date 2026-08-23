@@ -28,6 +28,7 @@ const { pipeline } = require('node:stream');
 const express = require('express');
 const { WebSocketServer } = require('ws');
 const { Session } = require('../session/sessions');
+const { resolveAdapter } = require('../session/adapters');
 const { STATES } = require('../shared/states');
 const { isSameDirectoryPath } = require('../shared/paths');
 const { createConfigStore, generateProjectId, ensureProjectIds, DEFAULT_CONFIG } = require('./config-store');
@@ -434,6 +435,9 @@ function createBackend(httpServer, options = {}) {
       name: project.name,
       path: project.path,
       dangerouslySkipPermissions: projectSkipPerms(project),
+      // Which agent CLI supervises this card. Absent = claude-code; an unknown value warns and
+      // falls back to it, so a hand-edited typo costs a card its agent choice, never its boot.
+      agent: project.agent,
       replayBufferKB: cfg.replayBufferKB,
       hookRouter,
       getHookPort,
@@ -1687,7 +1691,9 @@ function createBackend(httpServer, options = {}) {
       // Packs are read at spawn, so an edited list only reaches the session through a recreate - the
       // same treatment permsChanged already gets for the same reason.
       const packsChanged = JSON.stringify(normalizePackNames(newP.packs).names) !== JSON.stringify(sess.packNames);
-      if (pathChanged || permsChanged || packsChanged) {
+      // The agent is a spawn-time input like packs: an edited value reaches the session only by recreate.
+      const agentChanged = resolveAdapter(newP.agent).id !== sess.agentId;
+      if (pathChanged || permsChanged || packsChanged || agentChanged) {
         modified.push(newP);
         continue;
       }

@@ -12,13 +12,8 @@ const { createWorktreeWatcher, readWorktreeGitdirPointer } = require("../detecti
 const { createIntegrationRefWatcher } = require("../detection/integration-ref-watch");
 const { createRerereWatcher } = require("../detection/rerere-watch");
 const { writeSessionSettings } = require("../detection/settings-injector");
-const {
-  classifyClaudeKind,
-  buildSpawnCommand,
-  CLAUDE_CMD,
-} = require("./core/spawn-command");
-const { buildSpawnEnv } = require("./core/spawn-env");
-const { buildAntiSlopArgs } = require("./core/anti-slop-prompt");
+const { classifyClaudeKind, buildSpawnCommand } = require("./core/spawn-command");
+const { DEFAULT_AGENT_ID, resolveAdapter, commandFor } = require("./adapters");
 const {
   TRANSITIONS,
   GUARDS,
@@ -180,9 +175,12 @@ class Session extends EventEmitter {
     // (config detectScheduledWakeups=false) drops the PostToolUse hook group at the source and
     // makes the session ignore the signals, so behavior is exactly as before.
     detectScheduledWakeups = true,
-    // Resolved claude command ({ path, kind }). Defaults to the module-load
-    // resolution; tests inject a stub to exercise the spawn branches deterministically.
-    spawnCommand = CLAUDE_CMD,
+    // Which agent CLI this session supervises (session/adapters). Absent = claude-code, the only
+    // adapter that exists; an unknown id warns and falls back to it rather than failing the spawn.
+    agent = DEFAULT_AGENT_ID,
+    // Resolved agent command ({ path, kind }). Null defers to the adapter registry's lazy cache at
+    // spawn; tests inject a stub to exercise the spawn branches deterministically.
+    spawnCommand = null,
     // Headless-lane spawn options (PR review, PostHog investigations). initialPrompt is appended as
     // the FINAL positional arg (proven safe as a single argv element on the direct-exe path by the
     // Phase-0 probe); extraClaudeArgs carries e.g. ["-p", "--model", "sonnet"]; ephemeral marks
@@ -372,6 +370,8 @@ class Session extends EventEmitter {
     this._detectScheduledWakeups = detectScheduledWakeups;
     this._wakeups = new Map();
     this._wakeupSeq = 0;
+    this._adapter = resolveAdapter(agent, { label: `session:${name}` });
+    this.agentId = this._adapter.id;
     this._spawnCommand = spawnCommand;
     this._initialPrompt = initialPrompt;
     this._extraClaudeArgs = Array.isArray(extraClaudeArgs) ? extraClaudeArgs : [];
@@ -440,7 +440,10 @@ class Session extends EventEmitter {
     this._worktreeCheckTimer = null;
     this._lastWorktreeSig = null;
 
-    this._titleSource = createOscTitleSource({ stabilizationMs: titleStabilizationMs });
+    this._titleSource = createOscTitleSource({
+      stabilizationMs: titleStabilizationMs,
+      titleProfile: this._adapter.titleProfile,
+    });
     this._statusSource = createStatusSource({
       sessionId: id,
       ...(statusConflictMs != null ? { conflictWindowMs: statusConflictMs } : {}),
@@ -2084,40 +2087,27 @@ class Session extends EventEmitter {
     // POSTing to Glissa's localhost server). No repo modification; no shell command.
     const settingsArgs = this._injectHooks();
 
-    // Prefer spawning the resolved claude .exe directly (node-pty -> CreateProcess).
-    // Fall back to `cmd.exe /c claude` only for .cmd/.bat/.ps1 shim installs or when
-    // resolution failed (see resolveClaudeCommand / buildSpawnCommand at module top).
-    const claudeArgs = this.dangerouslySkipPermissions
-      ? ["--dangerously-skip-permissions"]
-      : [];
-    // Resume a prior conversation (possibly from another worktree's project dir). Claude resolves the
-    // id across the repo's linked worktrees, so the session continues that thread in THIS worktree's cwd.
-    // Placed before any lane extraClaudeArgs / the initial-prompt positional (both null for user sessions).
+    // A headless lane passes extra flags (e.g. -p, --model <m>) then the prompt as the final
+    // positional; a resume id continues a prior conversation, which Claude resolves across the
+    // repo's linked worktrees so the thread picks up in THIS worktree's cwd. The adapter owns the
+    // flag spellings and their order (session/adapters/claude-code.js buildArgs).
     this._suppressResumeCapture = false;
-    if (this._resumeSessionId) {
-      claudeArgs.push("--resume", this._resumeSessionId);
-    }
-    // A headless lane passes extra flags (e.g. -p, --model <m>) then the prompt as the final positional.
-    // The positional is a single argv element on the direct-exe path (proven by the Phase-0 probe);
-    // on the cmd.exe shim fallback a very large/multiline prompt is subject to cmd parsing.
-    if (this._extraClaudeArgs.length > 0) {
-      claudeArgs.push(...this._extraClaudeArgs);
-    }
-    // Lever B: preventive anti-slop note (no-op unless antiSlopPrompt is on). Pushed before
-    // the initial-prompt positional so the prompt stays the final argv element.
-    const antiSlopArgs = buildAntiSlopArgs(this._antiSlopPrompt);
-    if (antiSlopArgs.length > 0) {
-      claudeArgs.push(...antiSlopArgs);
-    }
-    if (this._initialPrompt != null) {
-      claudeArgs.push(this._initialPrompt);
-    }
-    const { file, args } = buildSpawnCommand({
+    const agentArgs = this._adapter.buildArgs({
+      dangerouslySkipPermissions: this.dangerouslySkipPermissions,
+      resumeSessionId: this._resumeSessionId,
+      extraArgs: this._extraClaudeArgs,
+      antiSlopPrompt: this._antiSlopPrompt,
+      initialPrompt: this._initialPrompt,
+    });
+    // Prefer spawning the resolved agent .exe directly (node-pty -> CreateProcess). Fall back to
+    // `cmd.exe /c <agent>` only for .cmd/.bat/.ps1 shim installs or when resolution failed. The
+    // resolution itself is lazy and cached per agent id (session/adapters/index.js commandFor).
+    const { file, args } = this._adapter.buildSpawnCommand({
       platform: this._platform,
-      resolved: this._spawnCommand,
+      resolved: this._spawnCommand || commandFor(this._adapter),
       settingsArgs,
       packArgs: packDelivery.args,
-      claudeArgs,
+      agentArgs,
     });
 
     // Reuse the last browser-pushed size so a restart spawns at the card's real
@@ -2248,8 +2238,9 @@ class Session extends EventEmitter {
       this._hookRouter.register(this.id, {
         token: this._hookToken,
         onSignal: (raw) => this.ingestHookSignal(raw),
+        hooks: this._adapter.hooks,
       });
-      return ["--settings", this._settingsHandle.settingsPath];
+      return this._adapter.settingsArgs(this._settingsHandle.settingsPath);
     } catch (err) {
       console.warn(`[session:${this.name}] hook injection failed: ${err.message} - falling back to OSC title only`);
       this._cleanupHooks();
@@ -2288,7 +2279,7 @@ class Session extends EventEmitter {
         this._recordDecision({ kind: "pack", ts, name, decision: "skipped", reason: resolved.reason });
         continue;
       }
-      args.push("--add-dir", resolved.dir);
+      args.push(...this._adapter.addDirArgs(resolved.dir));
       // `dir` rides the delivered record so the read tracker can classify a path against it; it is
       // server-side only (toSnapshot rebuilds its entries without it).
       // The RESOLVED name is what is recorded, so the staleness chip compares this delivery against the
@@ -2322,7 +2313,7 @@ class Session extends EventEmitter {
   }
 
   _buildSpawnEnv(options) {
-    return buildSpawnEnv(process.env, this._spawnEnv, options);
+    return this._adapter.buildEnv(process.env, this._spawnEnv, options);
   }
 
   _handlePtyData(data) {
@@ -2788,5 +2779,9 @@ module.exports = {
   Session,
   buildSpawnCommand,
   classifyClaudeKind,
-  CLAUDE_CMD,
+  // A GETTER, not a value: resolving at module load made every require of this file pay a PATH
+  // lookup. The adapter registry caches it on first read (session/adapters/index.js).
+  get CLAUDE_CMD() {
+    return commandFor(DEFAULT_AGENT_ID);
+  },
 };

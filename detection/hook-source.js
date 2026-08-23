@@ -4,123 +4,30 @@
 // (injected via --settings at spawn) to Glissa's localhost server. A single
 // parameterized Express route `POST /hook/:glissaId/:event` dispatches here.
 //
+// The router is agent-NEUTRAL transport: the event vocabulary it translates with is the registered
+// session's adapter hook profile (session/adapters/claude-code.js), moved out of here in M1 of
+// docs/plan-agent-adapters.md. A registration that names none gets the Claude Code one.
+//
 // Security: localhost bind + origin guard are not enough (a local curl with no
 // Origin passes the guard). Each session has an unguessable bearer token baked into
 // the injected hook URLs; the router rejects any callback whose token does not match
 // the live session's token. Trust level == "can read this session's settings file"
 // == can read the PTY. See docs/postmortem-terminal-detection.md.
 
-function notificationType(payload) {
-  return String(payload && (payload.notification_type || payload.notificationType) || '').toLowerCase();
-}
+const claudeCode = require('../session/adapters/claude-code');
 
-// Confidence override for a mapped signal, or null for the source default ('high').
-// idle_prompt means "Claude is waiting for YOU", not "the turn finished": as a `ready`
-// it only confirms quiescence, so it is demoted to 'low' and the mapper completes it
-// from RUNNING only (same rule as the title fallback). Without this, an idle nudge on
-// a session that never ran a turn (fresh IDLE) or one parked at a prompt would fire a
-// false COMPLETE + "finished working" notification.
-function mapHookConfidence(event, payload) {
-  const e = String(event || '').toLowerCase();
-  if (e === 'notification' && notificationType(payload) === 'idle_prompt') return 'low';
-  return null;
-}
-
-// Advisory classification of an 'awaiting-input' signal's origin, surfaced as a card chip so the
-// dashboard shows WHAT the session is waiting on. Only meaningful when mapHookToSignal returned
-// 'awaiting-input' for this event/payload; null otherwise (never gates a transition).
-function mapHookPromptKind(event, payload) {
-  const e = String(event || '').toLowerCase();
-  if (e === 'permissionrequest') return 'permission';
-  if (e === 'notification') {
-    const t = notificationType(payload);
-    if (t === 'permission_prompt') return 'permission';
-    if (t.startsWith('elicitation')) return 'elicitation';
-  }
-  return null;
-}
-
-// Map a Claude Code hook event (+ payload) to a normalized StatusSource signal.
-// Returns null for events that should be ignored.
-function mapHookToSignal(event, payload) {
-  const e = String(event || '').toLowerCase();
-  switch (e) {
-    case 'sessionstart':
-      return 'session-start';
-    case 'sessionend':
-      return 'session-end';
-    case 'userpromptsubmit':
-      return 'resume';
-    case 'stop':
-      // Main-agent turn end only. NOT SubagentStop: a sub-agent (Task tool)
-      // finishing mid-turn must not mark the whole session COMPLETE. This `ready`
-      // is gated downstream on the live background sub-agent count (see below).
-      return 'ready';
-    case 'subagentstart':
-      // A background sub-agent (Task run_in_background / Ctrl+B) began. NOT a state
-      // transition: tracked as a live-count delta so a later main-agent Stop fired while
-      // it is still running does not falsely COMPLETE the card (see Session._trackSubagent
-      // and the activeAgents gate in session/core/status-mapper.js).
-      return 'subagent-start';
-    case 'subagentstop':
-      // A sub-agent finished. Drops the live count; never completes the session itself
-      // (the main agent's own Stop does that, gated on the count).
-      return 'subagent-stop';
-    case 'taskcreated':
-      // Background task registered (payload: task_id, teammate_name?). Tracking-only:
-      // maps teammate names to task ids and reactivates a previously idled id.
-      return 'task-created';
-    case 'taskcompleted':
-      // Background task finished (payload: task_id). Tracking-only: drains that id from
-      // the declared background_tasks gate without waiting for the next Stop.
-      return 'task-completed';
-    case 'teammateidle':
-      // A native-team teammate went idle (payload: teammate_name, NO task_id). Its task
-      // registry entry stays status:running until shutdown, so every later Stop keeps
-      // declaring it in background_tasks; this signal is the only way to know the entry
-      // no longer gates completion. Tracking-only.
-      return 'teammate-idle';
-    case 'permissionrequest':
-      return 'awaiting-input';
-    case 'posttooluse': {
-      // Scheduled-revival bookkeeping (subscribed with a ScheduleWakeup|CronCreate|CronDelete
-      // matcher; see settings-injector.WAKEUP_TOOL_MATCHER). Tracking-only signals, never
-      // transitions (Session._trackWakeup). The tool_name switch is defense in depth: if a
-      // Claude version ignores the matcher and floods every tool call, everything else maps
-      // to null (ignored-event).
-      const tool = String(payload?.tool_name || '');
-      if (tool === 'ScheduleWakeup') return 'wakeup-scheduled';
-      if (tool === 'CronCreate') return 'cron-created';
-      if (tool === 'CronDelete') return 'cron-deleted';
-      // Pack read telemetry, subscribed with its own Read matcher and only for a session that
-      // delivers context packs (settings-injector.PACK_READ_TOOL_MATCHER). Tracking-only like the
-      // wakeups above: never a transition, never confidence-bearing.
-      if (tool === 'Read') return 'pack-read';
-      return null;
-    }
-    case 'notification': {
-      // Only act on subtypes with a clear meaning; ignore the rest (e.g.
-      // auth_success) rather than firing a false WAITING.
-      const t = notificationType(payload);
-      if (t === 'idle_prompt') return 'ready';
-      if (t === 'permission_prompt' || t.startsWith('elicitation')) return 'awaiting-input';
-      return null;
-    }
-    default:
-      return null;
-  }
-}
+const { mapHookToSignal, mapHookConfidence, mapHookPromptKind } = claudeCode;
 
 class HookRouter {
   constructor() {
-    this._sessions = new Map(); // glissaId -> { token, onSignal }
+    this._sessions = new Map(); // glissaId -> { token, onSignal, hooks }
   }
 
-  register(glissaId, { token, onSignal }) {
+  register(glissaId, { token, onSignal, hooks = claudeCode.hooks }) {
     if (!glissaId || !token || typeof onSignal !== 'function') {
       throw new Error('HookRouter.register requires glissaId, token, onSignal');
     }
-    this._sessions.set(glissaId, { token, onSignal });
+    this._sessions.set(glissaId, { token, onSignal, hooks });
   }
 
   unregister(glissaId) {
@@ -137,12 +44,13 @@ class HookRouter {
     if (!token || token !== entry.token) {
       return { status: 403, signal: null, reason: 'bad-token' };
     }
-    const signal = mapHookToSignal(event, payload);
+    const hooks = entry.hooks || claudeCode.hooks;
+    const signal = hooks.mapSignal(event, payload);
     if (!signal) {
       return { status: 200, signal: null, reason: 'ignored-event' };
     }
-    const confidence = mapHookConfidence(event, payload);
-    const promptKind = signal === 'awaiting-input' ? mapHookPromptKind(event, payload) : null;
+    const confidence = hooks.mapConfidence(event, payload);
+    const promptKind = signal === 'awaiting-input' ? hooks.mapPromptKind(event, payload) : null;
     try {
       entry.onSignal({
         signal, source: 'hook',
