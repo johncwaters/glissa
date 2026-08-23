@@ -104,6 +104,10 @@ test('buildReviewPrompt carries the human-readable comment format rules', () => 
   assert.match(p, /<details><summary>Details<\/summary>/);
   assert.match(p, /Prompt for AI agents/);
   assert.match(p, /following the comment format above/);
+  assert.match(p, /Automated review \(glissa\)/, 'comment self-identifies as automated');
+  assert.match(p, /post NO comment at all/, 'zero-delta re-review stays silent');
+  assert.match(p, /Never praise/, 'summary bans praise filler');
+  assert.match(p, /Omit the block entirely when there are no findings/, 'AI-agents block is conditional');
 });
 
 test('buildReviewPrompt (conflict lane) includes checkout+rebase+push and forbids a guessed resolution', () => {
