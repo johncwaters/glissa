@@ -11,6 +11,7 @@ const USAGE = [
   'Commands:',
   '  forget <id|pattern>  Expunge a remembered record, or the matched text in every record',
   '  backfill             Read the gap since the last pass out of the local agent transcripts',
+  '  distill [--dry-run]  Rebuild the published projection from the canon with one headless pass',
 ].join('\n');
 
 function defaultMakeStore() {
@@ -98,11 +99,62 @@ async function runBackfill(makeStore, makeIngest) {
   }
 }
 
+// An operator running this command IS the authorization, so the lane's own enabled flag is bypassed
+// exactly the way `glissa pack distill` bypasses config.packDistiller.
+function defaultMakeDistiller(store) {
+  const { loadConfigFile, resolveConfigPath } = require('./config-store');
+  const { createMemoryDistiller } = require('./memory-distill');
+  const { resolveDistillConfig } = require('./core/memory-distill-core');
+  const loaded = loadConfigFile(resolveConfigPath(), { exitOnError: false });
+  const raw = loaded?.config?.memory ? loaded.config.memory.distill : null;
+  return createMemoryDistiller({
+    store,
+    config: { ...resolveDistillConfig(raw, { memoryEnabled: true }), enabled: true },
+  });
+}
+
+async function runDistill(makeStore, makeDistiller, { dryRun }) {
+  const store = makeStore();
+  const distiller = makeDistiller(store);
+  try {
+    const result = await distiller.runOnce({ dryRun, force: true });
+    if (result.status === 'locked') {
+      console.error('Another process holds the memory store lock, most likely a running Glissa. Nothing was written.');
+      return 1;
+    }
+    if (result.status === 'error') {
+      console.error(`The distill run did not finish: ${result.reason}.`);
+      return 1;
+    }
+    if (dryRun) {
+      console.log(`${result.records} record(s) would be distilled. Nothing was spawned.`);
+      return 0;
+    }
+    if (result.pending) {
+      console.log(`Held for review under ${store.pendingDir}: ${result.reason}.`);
+      return 1;
+    }
+    if (result.status === 'current') {
+      console.log('The published projection already said it. Nothing was written.');
+      return 0;
+    }
+    console.log(`Published ${result.published ? 'a new build' : 'nothing new'} at ${result.version}.`);
+    console.log(`Projection: ${store.projectionPath}`);
+    return 0;
+  } finally {
+    await distiller.stop();
+    await store.stop();
+  }
+}
+
 async function runMemoryCli(args, deps = {}) {
-  const { makeStore = defaultMakeStore, makeIngest = defaultMakeIngest } = deps;
+  const {
+    makeStore = defaultMakeStore, makeIngest = defaultMakeIngest, makeDistiller = defaultMakeDistiller,
+  } = deps;
   const command = args[0];
   if (command === 'forget') return runForget(args[1], makeStore);
   if (command === 'backfill') return runBackfill(makeStore, makeIngest);
+  if (command === 'distill') return runDistill(makeStore, makeDistiller, { dryRun: args.includes('--dry-run') });
   console.error(USAGE);
   return 1;
 }

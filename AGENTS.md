@@ -136,11 +136,13 @@ server/            # Backend runtime (Express + WS wiring, control plane, shared
   usage-pricing.js     # Claude model pricing loader: bundled LiteLLM snapshot, optional fetch, 24h disk cache, snapshot overlay
   spawn-gate.js        # Concurrent-spawn limiter (exports the shared createSerialQueue promise chain)
   json-file.js         # Atomic tmp+rename JSON/text writes (sync + async), the signature-gated chain-serialized state writer, and appendJsonLine (per-path serialized JSONL appends)
-  memory-store.js      # Visions memory store IO shell (M12 of docs/plan-visions-3.md): boot load with HMAC verify/demote, hmac-key mint (0600), serialized appends, forget (tombstone + reseal), debounced deterministic dist/ projection; constructed only when config.memory.enabled (file-only key, never control-WS settable)
-  memory-cli.js        # `glissa memory forget <id|pattern>` / `memory backfill` (the manual re-run of the M14 transcript backfill); in server/ for the files whitelist
+  memory-store.js      # Visions memory store IO shell (M12 of docs/plan-visions-3.md): boot load with HMAC verify/demote, hmac-key mint (0600), serialized appends, forget (tombstone + reseal), and THE projection writer: mill-style hash-versioned builds into dist/current with a dist/previous rotation, an unchanged-skip that rewrites only manifest.json, and the deterministic trivial renderer as the fallback the distill lane replaces. Constructed only when config.memory.enabled (file-only key, never control-WS settable)
+  memory-cli.js        # `glissa memory forget <id|pattern>` / `memory backfill` (the manual re-run of the M14 transcript backfill) / `memory distill [--dry-run]` (the manual M15 projection rebuild, refused while another process holds the canon lock); in server/ for the files whitelist
+  memory-distill.js    # Memory-distill lane IO shell (M15 of docs/plan-visions-3.md): one ephemeral headless `claude -p` per run (narrow allow, deny-list, hard timeout, scratch cwd), the result-file read, the verifier gates applied through the pure core, and the versioned publish or the dist-pending divert. Constructed only beside a memory store
+  core/memory-distill-core.js  # Its pure rules: resolveDistillConfig, the fenced canon prompt and its own contentMarker, the prompt budget refusal, claim validation (unresolvable ids, the implied-rank rule, project and kind mixing, high-entropy text), the net-new claim cap, the locked-diff report, the deterministic claim renderer, and decideDistillRun
   memory-ingest-wiring.js  # Memory ingest IO shell (M14 of docs/plan-visions-3.md): the agent-log source's second publish target, its own tail-state.json offsets, the per-tick write batching, and the budgeted resumable cold-start backfill. Constructed only beside a memory store, and it constructs the agent-log source itself when the ingest lane is off
   core/memory-ingest-core.js  # Its pure rules: which mapped agent-log event becomes which record kind (assistant text and tool calls are `knowledge`, user prompts are `prompt`), the `reported` trust stamp, echo dropping, the queue bound and per-tick batch plan, and the durable-offset decisions (cold start from the top, mismatch restarts at EOF)
-  core/memory-core.js  # Pure memory rules: record gates, trust ranks (operator > action > reported = model) with the fall-only lineage cap, lock rules, supersession/validTo, monthly-segment retention, canonical HMAC payload + sign/verify/demote, echo suppression, lexical retrieval, secret gates (reuses the ingest scrub) + high-entropy rejection, projection renderer, resolveMemoryConfig
+  core/memory-core.js  # Pure memory rules: record gates, trust ranks (operator > action > reported = model) with the fall-only lineage cap, lock rules, supersession/validTo, monthly-segment retention, canonical HMAC payload + sign/verify/demote, echo suppression, lexical retrieval, secret gates (reuses the ingest scrub) + high-entropy rejection, the projection renderer and its bullet parser, the canon watermark, planProjectionBuild (version hash + manifest), resolveMemoryConfig
   lane-runner.js       # Shared lane scaffolding: createLaneRunner (restart-on-config-change poller lifecycle) + createTickLoop (interval tick, re-entry guard, drain-on-stop, full-jitter error backoff)
   core/lane-backoff.js # Pure full-jitter backoff: the exponential ceiling, Retry-After in both RFC spellings, and the skip-this-tick test
   lane-log.js          # THE shared logger wrapper for every lane and lane source: createLaneLog({ prefix, logger, debugFlag }) -> note/warn/debugNote, with the throw-safe debug getter and the lane logging PRIVACY RULE stated once
@@ -510,6 +512,59 @@ Transcript ingestion is fan-out plumbing plus a scrub decision, not a new lane. 
 - **Re-ingesting a line is idempotent by construction.** A record's ts is the moment it describes, so its derived id is stable across passes and `memoryStore.append` refuses an id it already holds. That is what makes a backfill cut short by its budget safe to re-run. The backfill takes the store's canon lock for its pass, so a manual run beside a live server's is refused with a clear message rather than doubling the read.
 - **A transcript-supplied ts is untrusted input, and it is clamped.** It decides which monthly segment a record lands in, so a future-dated line would land in a segment `expiredSegmentKeys` can never prune and would head every recency ranking forever. `memory-core.clampObservedTs` keeps a ts inside `[now - retainDays, now + 5 min]` and stamps the clock otherwise. Accepted consequence: a clamped record's id is derived from the clock, so THAT record alone is not idempotent across passes.
 - **Two accepted limits, stated rather than hidden.** The id dedupe reads the in-memory record set, so a record `enforceKindCaps` evicted can be re-appended by a later backfill of the same bytes; keeping a durable evicted-id set would grow without bound and become a second source of truth for what the canon holds, so it is accepted, and the cap evicts it again. And the shape half of the feedback-loop exclusion catches `glissa-visions-*` and the temp-dir `glissa-wt-{pr-review,radar-fix}-*` workdirs, but both of those lanes pass a `worktreeBase` in production and their directory is then named after the REPO exactly like an operator's own session worktree; the usage-lane ledger is what excludes those, and the backfill additionally skips any transcript last written BEFORE the ledger's earliest entry, since nothing can vouch for its lane.
+
+### Long-Term Memory Distillation (M15, automatic with the memory store)
+
+The projection `memory/dist/` publishes is what any harness reads, and a dump of raw ingested records is
+not a memory. The distill lane turns the canon into standing claims. Plan and milestones in
+`docs/plan-visions-3.md`.
+
+- **Automatic once memory is on**, because the operator's rule for this system is one switch and no
+  maintenance: `config.memory.distill.enabled: false` is the kill switch, and memory off constructs no
+  lane at all. `intervalMinutes` (default 1440), `timeoutSeconds`, `maxNewClaims` and `quietMs` are its
+  other file-only keys. The loop LOOKS every 15 minutes and RUNS only when the canon moved since the last
+  distilled build, the interval has elapsed since it, and no append landed inside the quiet window, so a
+  tick skipped for a busy canon retries in minutes rather than tomorrow.
+- **`memory/dist/current/MEMORY.md` is the canonical direct-read path**, plus
+  `dist/current/projects/<slug>.md` per project. There is ONE projection writer (`memory-store.js`) and it
+  publishes mill-style: a tmp sibling, a `current/` to `previous/` rotation, an atomic rename in, and a
+  `manifest.json` carrying the version (sha256 of every published byte, stamp line included), `builtAt`,
+  the canon watermark and the verdict. A build whose version already matches rewrites only
+  `manifest.json`, so an unchanged projection costs no rotation and no new version.
+- **The trivial renderer is the FALLBACK, not a second writer.** It publishes through the same versioned
+  writer until a distilled build lands, so a fresh enable has an observable `dist/` before the lane has
+  ever run; after that an append leaves the distilled build alone. A `forget` forces its way through,
+  because expunged text may not sit in a published file until tomorrow's run, and that hands `dist/` back
+  to the fallback until the next distill.
+- **A verdict is never trusted on its own.** The session answers with structured CLAIMS, not markdown, and
+  Glissa renders the published bytes itself, so no remembered byte reaches a file except through the
+  renderer. Every line names the record ids it came from (`- [m-... m-...] (rank) text`), and the whole
+  result is refused as one rather than partially accepted: an unresolvable id, a claim mixing two projects
+  or two record kinds, a high-entropy token, or a rank a claim's sources do not carry all fail the run and
+  leave the published build untouched.
+- **The implied-rank rule, stated once.** Each bullet's rank label IS its implied rank. It may never
+  exceed the highest effective rank among the records it cites, and because a distillation is itself a
+  model claim, anything rendered ABOVE `model` has to cite exactly one record and copy its text verbatim.
+  That single rule is also what makes "a locked fact is copied verbatim" mechanical rather than hoped for.
+- **Net-new claims are capped** (`maxNewClaims`, default 20, counted against the normalized lines the
+  published build already carries). Over the cap is an ERROR, never a partial accept, because a run that
+  invents thirty facts at once is the failure this gate exists for.
+- **A diff touching a locked record is not published.** A rephrased, merged or DROPPED locked record sends
+  the whole proposed build to `memory/dist-pending/` (overwritten, never rotated, never delivered) with one
+  lane-log warning carrying counts only, so an operator can see what was proposed. `current/` is left byte
+  identical. The dashboard-side review surface is deliberately later; refusing the auto-publish is v1.
+- **A canon past the prompt budget is refused rather than sliced** (400 projectable records or 200000
+  rendered chars). Distilling a slice would silently drop every unshown record from the published
+  projection, and the fallback renderer is still publishing in that state, so `dist/` stays usable.
+- **Security.** The canon rides inside its own `contentMarker` fence, named as DATA, with its own marker
+  separate from the activity digest's. The session runs WITHOUT `--dangerously-skip-permissions`, with
+  `--allowedTools=Write` and a deny-list at least as strict as the Visions dispatch one (no Bash, no
+  Read/Glob/Grep, no network, no Task, and `git push`/`gh` named outright), in a fresh temp cwd holding
+  only its result file, never a repository. It is registered as the `memory-distill` ephemeral lane, so
+  its own transcript is excluded from ingestion by the same ledger rule every other lane uses and its
+  usage is attributed. Memory content never reaches a lane log, no `memory-*` control-WS message type
+  exists, and nothing the lane writes to the canon could exceed `model` rank (it writes none today: it
+  publishes the projection, and a supersession it proposes would be force-stamped `model` by the store).
 
 ### Security: Trust Boundary
 

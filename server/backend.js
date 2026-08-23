@@ -63,7 +63,9 @@ const { createIngestLane } = require('./ingest-wiring');
 const { resolveIngestConfig } = require('./core/ingest-core');
 const { createMemoryStore } = require('./memory-store');
 const { createMemoryIngest, earliestLaneEntryMs } = require('./memory-ingest-wiring');
+const { createMemoryDistillSpawn, createMemoryDistiller } = require('./memory-distill');
 const { resolveMemoryConfig } = require('./core/memory-core');
+const { resolveDistillConfig: resolveMemoryDistillConfig } = require('./core/memory-distill-core');
 const { createUsageWiring, resolveUsageConfig } = require('./usage-wiring');
 const { createLaneLedger } = require('./usage-lane-ledger');
 const { INTERACTIVE_LANE } = require('./core/usage-lane-core');
@@ -811,7 +813,7 @@ function createBackend(httpServer, options = {}) {
     let listenerMismatch = false;
     let orphanPty = false;
     let destroyedReachable = false;
-    for (const sess of [...sessions.values(), ...reviewSessions.values(), ...investigationSessions.values(), ...distillSessions.values(), ...visionsSessions.values()]) {
+    for (const sess of [...sessions.values(), ...reviewSessions.values(), ...investigationSessions.values(), ...distillSessions.values(), ...visionsSessions.values(), ...memoryDistillSessions.values()]) {
       const stats = sess.getHealthStats();
       stats.detection = sess.getDetectionStats();
       stats.ephemeral = !!sess.ephemeral;
@@ -1153,6 +1155,30 @@ function createBackend(httpServer, options = {}) {
       // How far back that exclusion can actually speak, so the backfill skips transcripts predating it.
       laneFloorMs: () => earliestLaneEntryMs(laneLedger),
       debug: () => configStore.getSettings().debugMode === true,
+    })
+    : null;
+
+  /*
+   * The memory-distill lane (M15): automatic once memory is on, since a projection nobody distills is a
+   * dump of raw records. `config.memory.distill.enabled: false` is the kill switch, and memory off
+   * constructs nothing at all.
+   */
+  const memoryDistillSessions = new Map();
+  const memoryDistiller = memoryStore
+    ? createMemoryDistiller({
+      store: memoryStore,
+      config: resolveMemoryDistillConfig(config.memory ? config.memory.distill : null, { memoryEnabled: true }),
+      logger: console,
+      debug: () => configStore.getSettings().debugMode === true,
+      spawnDistill: createMemoryDistillSpawn({
+        sessions: memoryDistillSessions,
+        closeSessionDataClients,
+        hookRouter,
+        getHookPort,
+        spawnGate,
+        recordLane,
+        replayBufferKB: config.replayBufferKB,
+      }),
     })
     : null;
 
@@ -1607,6 +1633,11 @@ function createBackend(httpServer, options = {}) {
   // Budgeted and resumable, so a year of transcripts costs one bounded pass per boot rather than a stall.
   if (memoryIngest) {
     memoryIngest.backfill().catch((err) => console.warn(`[memory-ingest] backfill failed: ${err.message}`));
+  }
+
+  // Its first tick lands during the backfill above, where the quiet window defers it; the loop retries.
+  if (memoryDistiller) {
+    memoryDistiller.start().catch((err) => console.warn(`[memory-distill] start failed: ${err.message}`));
   }
 
   // --- GitHub PR auto-review poller (opt-in; inert unless config.prReview.enabled) ---
@@ -2174,14 +2205,15 @@ function createBackend(httpServer, options = {}) {
     if (ingestLane) stoppers.add('ingest', () => ingestLane.stop());
     // Drops every mirrored buffer and its pending sweep timer; null whenever the lane is off.
     if (visionsLane) stoppers.add('visions', () => visionsLane.stop());
-    // Before the store: it drains its queued writes THROUGH that store.
+    // Before the store: they drain their queued writes THROUGH that store.
     if (memoryIngest) stoppers.add('memory-ingest', () => memoryIngest.stop());
+    if (memoryDistiller) stoppers.add('memory-distill', () => memoryDistiller.stop());
     // Drains the pending append and projection writes; null whenever memory is off.
     if (memoryStore) stoppers.add('memory-store', () => memoryStore.stop());
     // Not a lane, but the same rule: an outbox write still in flight is what makes a queued phone ping
     // survive the restart it was queued during.
     stoppers.add('telegram-outbox', () => telegramOutbox.idle());
-    for (const [, sess] of visionsSessions) {
+    for (const [, sess] of [...visionsSessions, ...memoryDistillSessions]) {
       sess.destroy();
       if (sess._killReap) pendingReaps.push(sess._killReap);
     }
@@ -2255,6 +2287,8 @@ function createBackend(httpServer, options = {}) {
     // The memory store (null when off), exposed for the same reason: a booted backend gives a test no
     // other way to observe that a default config constructed nothing.
     getMemoryStore: () => memoryStore,
+    // The memory-distill lane (null when off), same reason.
+    getMemoryDistiller: () => memoryDistiller,
     bindHost: bindDecision.host,
     remote: {
       enabled: remote.enabled,

@@ -12,6 +12,8 @@ const { runMemoryCli } = require('../server/memory-cli');
 function fakeStore(result) {
   return {
     distDir: '/tmp/glissa-memory-dist',
+    pendingDir: '/tmp/glissa-memory/dist-pending',
+    projectionPath: '/tmp/glissa-memory/dist/current/MEMORY.md',
     stopped: 0,
     forget: async () => result,
     stop: async function stop() { this.stopped += 1; },
@@ -28,7 +30,16 @@ function fakeIngest(result) {
   };
 }
 
-async function captureCli(args, store, ingest = null) {
+function fakeDistiller(result) {
+  return {
+    stopped: 0,
+    calls: [],
+    runOnce: async function runOnce(options) { this.calls.push(options); return result; },
+    stop: async function stop() { this.stopped += 1; },
+  };
+}
+
+async function captureCli(args, store, ingest = null, distiller = null) {
   const logged = [];
   const errored = [];
   const realLog = console.log;
@@ -36,7 +47,9 @@ async function captureCli(args, store, ingest = null) {
   console.log = (...parts) => logged.push(parts.join(' '));
   console.error = (...parts) => errored.push(parts.join(' '));
   try {
-    const code = await runMemoryCli(args, { makeStore: () => store, makeIngest: async () => ingest });
+    const code = await runMemoryCli(args, {
+      makeStore: () => store, makeIngest: async () => ingest, makeDistiller: () => distiller,
+    });
     return { code, logged, errored };
   } finally {
     console.log = realLog;
@@ -104,4 +117,48 @@ test('a backfill that hit its byte budget says it can be run again', async () =>
   const { code, logged } = await captureCli(['backfill'], fakeStore(null), ingest);
   assert.equal(code, 0);
   assert.ok(logged.some((line) => /run it again/.test(line)));
+});
+
+// --- distill -------------------------------------------------------------
+
+function distillReport(overrides) {
+  return {
+    status: 'published', reason: null, verdict: 'DISTILLED', published: true, version: 'abc123',
+    newClaims: 2, records: 7, pending: false, ...overrides,
+  };
+}
+
+test('a dry run reports what would be distilled and spawns nothing', async () => {
+  const distiller = fakeDistiller(distillReport({ status: 'stale', verdict: null, published: false, version: null }));
+  const { code, logged } = await captureCli(['distill', '--dry-run'], fakeStore(null), null, distiller);
+  assert.equal(code, 0);
+  assert.deepEqual(distiller.calls, [{ dryRun: true, force: true }]);
+  assert.match(logged[0], /7 record\(s\) would be distilled/);
+  assert.match(logged[0], /Nothing was spawned/);
+  assert.equal(distiller.stopped, 1);
+});
+
+test('a distill blocked by the canon lock says so instead of reporting a clean pass', async () => {
+  const distiller = fakeDistiller(distillReport({ status: 'locked', reason: 'another process holds the canon lock' }));
+  const { code, logged, errored } = await captureCli(['distill'], fakeStore(null), null, distiller);
+  assert.equal(code, 1);
+  assert.equal(logged.length, 0);
+  assert.match(errored[0], /lock/i);
+});
+
+test('a build held for locked review names the pending directory and fails the command', async () => {
+  const distiller = fakeDistiller(distillReport({
+    status: 'pending', pending: true, published: false, reason: 'a locked record would be re-rendered',
+  }));
+  const { code, logged } = await captureCli(['distill'], fakeStore(null), null, distiller);
+  assert.equal(code, 1);
+  assert.match(logged[0], /dist-pending/);
+});
+
+test('a published build names its version and the projection path', async () => {
+  const distiller = fakeDistiller(distillReport({}));
+  const { code, logged } = await captureCli(['distill'], fakeStore(null), null, distiller);
+  assert.equal(code, 0);
+  assert.match(logged[0], /abc123/);
+  assert.match(logged[1], /MEMORY\.md/);
 });

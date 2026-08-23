@@ -11,12 +11,14 @@ const { canonicalizePath } = require('../shared/paths');
 const { appendJsonLine, writeTextAtomic, writeTextAtomicSync } = require('./json-file');
 const { createLaneLog } = require('./lane-log');
 const core = require('./core/memory-core');
+const distillCore = require('./core/memory-distill-core');
 
 const MEMORY_DIR_NAME = 'memory';
 const HMAC_KEY_FILE = 'hmac-key';
 const DIST_DIR_NAME = 'dist';
-const PROJECTS_DIR_NAME = 'projects';
-const GLOBAL_PROJECTION_FILE = 'MEMORY.md';
+const CURRENT_DIR_NAME = 'current';
+const PREVIOUS_DIR_NAME = 'previous';
+const TMP_DIR_PREFIX = 'tmp-';
 const DEFAULT_PROJECTION_DEBOUNCE_MS = 500;
 const HMAC_KEY_BYTES = 32;
 const DIR_MODE = 0o700;
@@ -65,7 +67,9 @@ function createMemoryStore(deps = {}) {
 
   const log = createLaneLog({ prefix: '[memory]', logger, debugFlag: debug });
   const distDir = path.join(dir, DIST_DIR_NAME);
-  const projectsDir = path.join(distDir, PROJECTS_DIR_NAME);
+  const currentDir = path.join(distDir, CURRENT_DIR_NAME);
+  const previousDir = path.join(distDir, PREVIOUS_DIR_NAME);
+  const pendingDir = path.join(dir, distillCore.PENDING_DIR_NAME);
 
   let signingKey = null;
   let records = [];
@@ -74,6 +78,7 @@ function createMemoryStore(deps = {}) {
   let projectionChain = Promise.resolve();
   let projectionTimer = null;
   let projectionDirty = false;
+  let lastAppendAt = 0;
 
   function canonPath(segmentKey) {
     return path.join(dir, core.segmentFileName(segmentKey));
@@ -302,41 +307,132 @@ function createMemoryStore(deps = {}) {
     return next;
   }
 
-  async function writeProjection() {
-    projectionDirty = false;
-    const at = now();
-    const valid = core.selectValidRecords(records, { now: at });
-    await writeTextAtomic(path.join(distDir, GLOBAL_PROJECTION_FILE), core.renderProjection(valid, { project: null }), {
-      fsPromises, mkdir: true, mode: FILE_MODE,
-    });
-    const wanted = new Set();
-    for (const tag of core.projectTagsOf(valid)) {
-      const fileName = `${core.projectFileSlug(tag)}.md`;
-      wanted.add(fileName);
-      await writeTextAtomic(path.join(projectsDir, fileName), core.renderProjection(valid, { project: tag }), {
-        fsPromises, mkdir: true, mode: FILE_MODE,
-      });
+  async function writeOutputs(targetDir, outputs) {
+    for (const file of outputs) {
+      const destination = path.join(targetDir, file.relPath);
+      await fsPromises.mkdir(path.dirname(destination), { recursive: true, mode: DIR_MODE });
+      await fsPromises.writeFile(destination, file.content, { encoding: 'utf8', mode: FILE_MODE });
     }
-    await pruneStaleProjectFiles(wanted);
-    log.debugNote(() => `projection written: 1 global file, ${wanted.size} project file(s)`);
   }
 
-  // A forgotten project's file must not survive the records that justified it.
-  async function pruneStaleProjectFiles(wanted) {
-    let names = [];
+  async function clearStaleTmpDirs() {
+    let entries = [];
     try {
-      names = await fsPromises.readdir(projectsDir);
+      entries = await fsPromises.readdir(distDir, { withFileTypes: true });
     } catch {
       return;
     }
-    for (const name of names) {
-      if (!name.endsWith('.md') || wanted.has(name)) continue;
-      try {
-        await fsPromises.rm(path.join(projectsDir, name), { force: true });
-      } catch {
-        log.warn('could not prune a stale project projection');
-      }
+    for (const entry of entries) {
+      if (!entry.isDirectory() || !entry.name.startsWith(TMP_DIR_PREFIX)) continue;
+      await fsPromises.rm(path.join(distDir, entry.name), { recursive: true, force: true });
     }
+  }
+
+  async function readCurrentFile(relPath) {
+    try {
+      return await fsPromises.readFile(path.join(currentDir, relPath), 'utf8');
+    } catch {
+      return null;
+    }
+  }
+
+  async function readPublishedManifest() {
+    const raw = await readCurrentFile(core.PROJECTION_MANIFEST_FILE);
+    if (raw === null) return null;
+    try {
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+    } catch {
+      return null;
+    }
+  }
+
+  async function readPublishedDocuments(manifest) {
+    const documents = [];
+    for (const file of Array.isArray(manifest?.files) ? manifest.files : []) {
+      if (file.relPath === core.PROJECTION_MANIFEST_FILE) continue;
+      const text = await readCurrentFile(file.relPath);
+      if (text !== null) documents.push(text);
+    }
+    return documents;
+  }
+
+  /*
+   * The mill's publish, on the projection: tmp sibling, rotate current to previous, rename in. An
+   * unchanged version rewrites manifest.json alone, so a build whose bytes did not move still records
+   * the watermark it was measured at instead of re-running on every tick.
+   */
+  async function publishProjection({
+    files, source = 'trivial', verdict = null, distilledAt = null, recordCount = 0, claimCount = null,
+    watermark = null,
+  }) {
+    const plan = core.planProjectionBuild({
+      files, watermark, builtAt: now(), source, verdict, distilledAt, recordCount, claimCount,
+    });
+    const published = await readPublishedManifest();
+    if (published && published.version === plan.version) {
+      await writeTextAtomic(path.join(currentDir, core.PROJECTION_MANIFEST_FILE), `${JSON.stringify(plan.manifest, null, 2)}\n`, {
+        fsPromises, mkdir: true, mode: FILE_MODE,
+      });
+      return { published: false, unchanged: true, version: plan.version, manifest: plan.manifest };
+    }
+    await fsPromises.mkdir(distDir, { recursive: true, mode: DIR_MODE });
+    await clearStaleTmpDirs();
+    const tmpDir = path.join(distDir, `${TMP_DIR_PREFIX}${randomBytes(6).toString('hex')}`);
+    await fsPromises.mkdir(tmpDir, { recursive: true, mode: DIR_MODE });
+    await writeOutputs(tmpDir, plan.outputs);
+    const hasCurrent = await fsPromises.stat(currentDir).then(() => true, () => false);
+    if (hasCurrent) {
+      await fsPromises.rm(previousDir, { recursive: true, force: true });
+      await fsPromises.rename(currentDir, previousDir);
+    }
+    await fsPromises.rename(tmpDir, currentDir);
+    return { published: true, unchanged: false, version: plan.version, manifest: plan.manifest };
+  }
+
+  // The locked-diff holding pen: never rotated and never read by a delivery, so an operator reviews it.
+  async function publishPending({ files, watermark = null, recordCount = 0, claimCount = null }) {
+    const plan = core.planProjectionBuild({
+      files, watermark, builtAt: now(), source: 'distill', verdict: 'DISTILLED', recordCount, claimCount,
+    });
+    await fsPromises.rm(pendingDir, { recursive: true, force: true });
+    await fsPromises.mkdir(pendingDir, { recursive: true, mode: DIR_MODE });
+    await writeOutputs(pendingDir, plan.outputs);
+    return { version: plan.version, dir: pendingDir };
+  }
+
+  function trivialFiles(valid) {
+    const files = [{ relPath: core.GLOBAL_PROJECTION_FILE, content: core.renderProjection(valid, { project: null }) }];
+    for (const tag of core.projectTagsOf(valid)) {
+      files.push({
+        relPath: `${core.PROJECTS_DIR_NAME}/${core.projectFileSlug(tag)}.md`,
+        content: core.renderProjection(valid, { project: tag }),
+      });
+    }
+    return files;
+  }
+
+  /*
+   * The day-one renderer, and now the FALLBACK: once the distill lane has published, its build owns
+   * dist/ and an append must not overwrite it with raw records. A forget forces its way through, since
+   * expunged text may not survive in a published file until the next distill run.
+   */
+  async function writeProjection({ force = false } = {}) {
+    projectionDirty = false;
+    const valid = core.selectValidRecords(records, { now: now() });
+    const published = await readPublishedManifest();
+    if (!force && published && published.source === 'distill') {
+      log.debugNote(() => 'a distilled projection is published: the fallback renderer wrote nothing');
+      return { published: false, unchanged: true, skipped: true };
+    }
+    const outcome = await publishProjection({
+      files: trivialFiles(valid),
+      source: 'trivial',
+      watermark: core.canonWatermark(valid),
+      recordCount: valid.length,
+    });
+    log.debugNote(() => `projection ${outcome.published ? 'published' : 'unchanged'} at ${outcome.version.slice(0, 12)}`);
+    return outcome;
   }
 
   function scheduleProjection() {
@@ -344,7 +440,8 @@ function createMemoryStore(deps = {}) {
     if (projectionTimer) return;
     projectionTimer = setTimeoutFn(() => {
       projectionTimer = null;
-      projectionChain = writeProjection().catch(() => log.warn('projection write failed'));
+      // Queued like every other write: a distill publish rotating dist/ must never race this one.
+      projectionChain = queue(() => writeProjection()).catch(() => log.warn('projection write failed'));
     }, projectionDebounceMs);
     if (projectionTimer && typeof projectionTimer.unref === 'function') projectionTimer.unref();
   }
@@ -353,6 +450,7 @@ function createMemoryStore(deps = {}) {
     await appendJsonLine(canonPath(core.segmentKeyForTs(record.ts)), record, {
       fsPromises, mkdir: true, mode: FILE_MODE,
     });
+    lastAppendAt = now();
     records = core.applySupersessions([...records, record]);
     scheduleProjection();
   }
@@ -477,7 +575,7 @@ function createMemoryStore(deps = {}) {
       if (!built.ok) log.warn(`tombstone rejected: ${built.reason}`);
       if (projectionTimer) clearTimeoutFn(projectionTimer);
       projectionTimer = null;
-      await writeProjection();
+      await writeProjection({ force: true });
       const removed = removedIds.length + droppedLines;
       log.note(`forget removed ${removed}, redacted ${redactedIds.length}, across ${segments} segment(s)`);
       return {
@@ -627,17 +725,27 @@ function createMemoryStore(deps = {}) {
 
   return {
     append,
+    currentDir,
     deliveredHashes: () => deliveredHashes,
     dir,
     distDir,
     flushProjection,
     forget,
+    lastAppendAt: () => lastAppendAt,
     noteDelivered,
-    projectionPath: path.join(distDir, GLOBAL_PROJECTION_FILE),
+    pendingDir,
+    projectionPath: path.join(currentDir, core.GLOBAL_PROJECTION_FILE),
+    // Queued like every other write, so a distill publish and a fallback render can never interleave.
+    publishPending: (args) => queue(() => publishPending(args)),
+    publishProjection: (args) => queue(() => publishProjection(args)),
+    readPublishedDocuments,
+    readPublishedManifest,
     records: () => records.slice(),
     retrieve: (options) => core.retrieveMemories(records, { now: now(), ...options }),
     stats,
     stop,
+    validRecords: () => core.selectValidRecords(records, { now: now() }),
+    watermark: () => core.canonWatermark(core.selectValidRecords(records, { now: now() })),
     withCanonLock,
   };
 }

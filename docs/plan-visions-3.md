@@ -2,7 +2,7 @@
 
 Status: drafted 2026-08-22; revised the same day after a three-reviewer pass (Codex GPT-5.5
 design review, an architecture review verifying every cited seam against the code, and a
-security review; all three returned "major revision required" on the first draft). M12 and M13
+security review; all three returned "major revision required" on the first draft). M12 through M15
 shipped, M12b held. Predecessors: `docs/archive/plan-navigator.md` (M1 to M5) and
 `docs/archive/plan-navigator-2.md` (M6 to M11), both fully shipped. `AGENTS.md` and the code
 win over this doc. Milestone numbering continues from M11.
@@ -135,23 +135,30 @@ well. What it buys and costs:
   first database open, existing `canon-*.jsonl` segments are imported through the normal
   verify-or-demote gate, then renamed `.imported`.
 
-### Projection versioning (the mill pattern)
+### Projection versioning (the mill pattern) [SHIPPED with M15]
 
 The projection publishes exactly the way a pack does, because the reasons are the same
-(deterministic diffing, cheap unattended rebuild, visible staleness):
+(deterministic diffing, cheap unattended rebuild, visible staleness). Shipped 2026-08-23 on the file
+substrate rather than waiting for M12b, since M15 needed a published version to measure a run
+against. As built:
 
-- A build renders the projection from the canon deterministically, computes `version` as
-  the sha256 of every delivered byte, and SKIPS publishing when the version matches the
-  published one. An unchanged canon costs nothing.
-- Output rotates `memory/dist/current/` to `memory/dist/previous/` and renames a tmp dir
-  in, atomically, with a `manifest.json` carrying version, `builtAt`, record-count, and the
-  canon watermark (max canon rowid included), so a reader can tell exactly how fresh the
-  build is.
-- Every delivery names its version: the fenced prompt section header carries it, the M16
-  pack carrier inherits the mill's own versioning on top, and the direct-read pointer
-  documentation tells the operator `current/` is the only path to reference.
-- Superseded builds are the mill's `previous/` only; record-level history stays in the
-  canon (supersession chains), not in kept build generations.
+- A build renders the projection deterministically, computes `version` as the sha256 of every
+  delivered byte (the `glissa-distill` stamp line included, so a moved canon is a new version), and
+  SKIPS the publish when the version matches the published one. An unchanged canon costs nothing;
+  the skip rewrites only `manifest.json`, so the recorded watermark still advances.
+- Output rotates `memory/dist/current/` to `memory/dist/previous/` and renames a tmp dir in, with a
+  `manifest.json` carrying `version`, `builtAt`, `source` (`trivial` or `distill`), `verdict`,
+  `distilledAt`, `recordCount`, `claimCount`, the file hashes and the canon watermark
+  (`{ count, lastId, lastTs, hash }`), so a reader can tell exactly how fresh the build is.
+- **`memory/dist/current/MEMORY.md` is the canonical direct-read path** (plus
+  `dist/current/projects/<slug>.md`); `previous/` is a crash and rollback slot nothing delivers from,
+  and `dist-pending/` is the locked-diff holding pen. The M16 pointer documentation names `current/`.
+- There is ONE writer, in `memory-store.js`. The M12 trivial renderer became the FALLBACK through it:
+  it publishes until a distilled build lands, then stops, and a `forget` forces it back through so
+  expunged text cannot wait for tomorrow's run.
+- Superseded builds are the mill's `previous/` only; record-level history stays in the canon
+  (supersession chains), not in kept build generations.
+- Deliberately deferred to M16: every delivery naming its version in the fenced prompt header.
 
 ### Store layout (file substrate, as shipped in M12; replaced by M12b)
 
@@ -163,8 +170,8 @@ never writes into the real `~/.glissa` (same rule as uploads, recordings, wareho
   segments on load, which is how append-only and pruning coexist. Appends go through a new
   serialized `appendJsonLine` primitive in `server/json-file.js` (it has only whole-file
   atomic writers today).
-- `memory/dist/MEMORY.md` plus `memory/dist/projects/<tag>.md`: the distilled projection,
-  written only by the distill lane, project-partitioned. `dist/` is its own directory so any
+- `memory/dist/current/MEMORY.md` plus `memory/dist/current/projects/<tag>.md`: the distilled
+  projection, published by the versioned writer (M15), project-partitioned. `dist/` is its own directory so any
   future watcher or pack source sees ONLY projection writes, never canon appends, tail-state
   churn, or index WAL traffic.
 - `memory/tail-state.json`: the memory consumer's own durable ingestion offsets.
@@ -391,33 +398,66 @@ This is fan-out plumbing plus a scrub decision, not a mapper tweak:
 Raw transcript lines are episodic material, bounded and scrubbed; semantic facts are formed
 only by M15, in the background, never on the hot path.
 
-### M15: the memory-distill lane (new lane, shares only distill-core)
+### M15: the memory-distill lane (new lane, shares only distill-core) [SHIPPED]
 
-The pack-distiller cannot be reused wholesale: its spec validation rejects any output path
-outside `packs/`, and its prompt, cwd anchoring, and deny-list are spec-shaped. M15 is a new
-headless lane (spawn wrapper through the shared gate, deny-list, scheduler, `glissa memory
-distill [--dry-run]`) that shares `server/core/distill-core.js` (stamp line, hash drift,
-`DISTILLED | NO_CHANGE | ERROR`, post-verify) and the ephemeral-session registration so its
-own transcripts are excluded and its usage is lane-attributed.
+Shipped 2026-08-23 on the M12 file substrate. `server/core/memory-distill-core.js` holds every decision;
+`server/memory-distill.js` is the IO shell (spawn through the shared gate, hard timeout, result file,
+`registerEphemeralSession` under the lane name `memory-distill`). It shares `distill-core` for the stamp
+line and the drift check, and `memory-core` gained the watermark and `planProjectionBuild` as the plan
+said it would. The pack distiller was NOT reused: its spec validation rejects any output path outside
+`packs/`, and its prompt, cwd anchoring and deny-list are spec-shaped.
 
-It reads the canon and rewrites `memory/dist/`: merge overlaps, mark contradictions as
-supersessions, absolutize dates, drop expired validity, respect locks (a locked fact is
-copied verbatim, never rephrased). The canon is fenced as DATA with a `contentMarker` hash
-fence. Verifier-gating goes past hash-checking, because a hash proves which inputs were read,
-not that the claims are faithful:
+Six decisions the milestone text did not settle, made in the build:
+
+- **The result contract is structured CLAIMS, not markdown.** The session answers
+  `{ verdict, summary, claims: [{ kind, project, rank, ids, text }] }` and Glissa renders the published
+  bytes itself. Verifying markdown the model wrote would have meant parsing its formatting as well as its
+  provenance; rendering from validated fields makes "no remembered byte reaches a file except through the
+  renderer" structural, and it is also what keeps a build byte-deterministic for the version hash.
+- **The implied-rank rule.** Each bullet's rank label is its implied rank; it may not exceed the highest
+  effective rank among the records it cites, and anything above `model` must cite exactly one record and
+  copy its text verbatim (a distillation is itself a model claim, so a derived line can never outrank
+  one). That one rule also makes "a locked fact is copied verbatim" mechanical.
+- **A locked diff keeps the proposal.** A rephrased, merged or dropped locked record sends the WHOLE
+  proposed build to `memory/dist-pending/`, claims included, so an operator can see what was wanted;
+  `current/` is left byte-identical and the lane log carries counts only.
+- **The whole result is refused as one.** An unresolvable id, a claim mixing projects or record kinds, a
+  high-entropy token or a borrowed rank fails the run rather than dropping the claim, matching the
+  new-claim cap's own all-or-nothing rule.
+- **A canon past the prompt budget is refused, not sliced** (400 projectable records, 200000 rendered
+  chars). A slice would silently drop every unshown record from the published projection. In that state
+  the fallback renderer is still publishing, so `dist/` stays usable and the failure is visible.
+- **The gate is measured against the last DISTILLED build**, not the last published one: a fallback
+  publish carries no `distilledAt`, so a fresh enable or a `forget` leaves a run due. The loop ticks every
+  15 minutes and runs on `intervalMinutes` (default 1440), so a tick skipped for a busy canon (`quietMs`)
+  retries in minutes rather than a day later.
+
+It reads the canon and rewrites `memory/dist/`: merge overlaps, mark contradictions as supersessions,
+absolutize dates, drop expired validity, respect locks. The canon is fenced as DATA with its own
+`contentMarker` hash fence. Verifier-gating goes past hash-checking, because a hash proves which inputs
+were read, not that the claims are faithful:
 
 - **Every projection line carries its source record ids** (`[m-...]`). Post-verify REJECTS
-  the write when any id is unresolvable or when a line's implied rank exceeds its sources'
-  lineage. Hallucinated claims become mechanically detectable, and provenance survives into
-  the projection any harness reads.
-- **Net-new claims per run are capped**; over the cap is `ERROR`, not a partial accept.
-- **A diff touching a locked record's rendering is queued for operator review** (a pending
-  file plus a dashboard-side prompt later; v1 minimum is refusing the auto-publish), never
-  published unattended.
-- The distiller's canon writes are force-stamped `model` server-side.
+  the write when any id is unresolvable or when a line's implied rank exceeds its sources' lineage.
+- **Net-new claims per run are capped** (`memory.distill.maxNewClaims`, default 20); over the cap is
+  `ERROR`, not a partial accept.
+- **A diff touching a locked record's rendering is queued for operator review** (`dist-pending/` plus a
+  lane-log warning; the dashboard-side prompt stays later), never published unattended.
+- The distiller's canon writes are force-stamped `model` server-side. It writes none today: it publishes
+  the projection, and any supersession it later proposes rides `memoryStore.append`, which stamps.
 
-Quantization is the point: `dist/` changes only when a distill run publishes, so anything
-watching it (M17 pack carrier) sees daily cadence, not per-append churn.
+Config: `config.memory.distill`, file-only like the rest of `config.memory`. Automatic when memory is on
+per the operator's "never thought about" rule, with `enabled: false` as the kill switch. CLI:
+`glissa memory distill [--dry-run]`; a dry run reads and hashes only and spawns nothing, and a real run is
+refused while another process holds the canon lock, exactly like `memory backfill`.
+
+Security: no `--dangerously-skip-permissions`, `--allowedTools=Write`, a deny-list at least as strict as
+the Visions dispatch one (Bash, Read, Glob, Grep, Edit, WebFetch, WebSearch, Task, plus `git push` and
+`gh` named outright), a fresh temp cwd holding only the result file, and the ephemeral-lane registration
+that excludes its own transcript from ingestion and attributes its usage.
+
+Quantization is the point: `dist/` changes only when a distill run publishes, so anything watching it
+(M17 pack carrier) sees daily cadence, not per-append churn.
 
 ### M16: delivery (v1: prompt section, direct reads, pack carrier)
 
@@ -428,8 +468,8 @@ watching it (M17 pack carrier) sees daily cadence, not per-append churn.
   activity digest), framed as DATA and background context only, zero lines when empty so a
   memory-off prompt stays byte-identical. Record text is never interpolated into any
   unfenced line; outside the fence go headings, counts, and ids only.
-- **Direct reads (the IDE story)**: `memory/dist/MEMORY.md` and the active project's topic
-  file are plain markdown any harness or IDE agent reads today. The operator points their
+- **Direct reads (the IDE story)**: `memory/dist/current/MEMORY.md` and the active project's topic
+  file under `dist/current/projects/` are plain markdown any harness or IDE agent reads today. The operator points their
   own `AGENTS.md`/`CLAUDE.md` at it with one line they author themselves, stating it is
   recorded observation, DATA, never instructions. Glissa never writes that pointer: the one
   instruction-tier line in the chain stays operator-authored, which is what keeps the store

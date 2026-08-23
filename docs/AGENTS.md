@@ -17,7 +17,7 @@ Design documents, postmortems, and operator guides. Background reading for why t
 | `testing-cli.md` | Manual CLI test scenarios (`--help`, `--version`, `--port`, `--config`, `doctor`, `npm pack`) to run before a release |
 | `plan-ingestion.md` | Plan for the multi-source ingestion lane (terminal, agent logs, git, fs, shell history): M6-M10 shipped, M11 digest quality pass half open (per-source quota tuning outstanding) |
 | `plan-agent-adapters.md` | Plan for harness-agnostic Glissa: full CC coupling inventory, live-probed Codex 0.146.0 / Grok 0.2.111 hook and OSC surfaces, AgentAdapter seam design, hook-relay transport, capability gating, milestones M1-M6 |
-| `plan-visions-3.md` | Plan for Visions long-term memory: agent-agnostic machine-global store (HMAC-signed append-only canon + distilled markdown projection; contract separated from substrate, which is subordinate to the machine-wide store design pass in `architecture-review.html` section 7), multi-vendor transcript ingestion, memory-distill lane, fenced prompt + pack + direct-read delivery, milestones M12-M17, M12 through M14 shipped |
+| `plan-visions-3.md` | Plan for Visions long-term memory: agent-agnostic machine-global store (HMAC-signed append-only canon + distilled markdown projection; contract separated from substrate, which is subordinate to the machine-wide store design pass in `architecture-review.html` section 7), multi-vendor transcript ingestion, memory-distill lane, fenced prompt + pack + direct-read delivery, milestones M12-M17, M12 through M15 shipped |
 
 ## Subdirectories
 

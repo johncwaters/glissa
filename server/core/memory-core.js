@@ -4,6 +4,7 @@
 
 const crypto = require('node:crypto');
 
+const { buildStampLine } = require('./distill-core');
 const { scrubText } = require('./ingest-core');
 
 const MEMORY_KINDS = Object.freeze(['intent', 'feedback', 'knowledge', 'preference', 'prompt', 'tombstone']);
@@ -606,19 +607,68 @@ const KIND_HEADINGS = Object.freeze({
   feedback: 'Suggestion feedback',
 });
 
-// Brackets are reserved for the Glissa-authored prefix, so remembered text cannot forge a rank label.
-function projectionBullet(record) {
-  const text = record.text
+// Brackets are reserved for the Glissa-authored prefix, so remembered text cannot forge an id or a rank.
+function sanitizeProjectionText(text) {
+  return String(text || '')
     .replace(/\s+/g, ' ')
     .replace(/\[/g, '(')
     .replace(/\]/g, ')')
     .trim()
     .slice(0, MAX_PROJECTION_LINE_CHARS);
-  const lock = record.locked === true ? ' [locked]' : '';
-  return `- [${record.id}] (${effectiveRank(record)}${lock}) ${text}`;
 }
 
-// No clock and no build stamp, so the same records always render byte-identical markdown.
+function projectionBulletFrom({ ids, rank, locked = false, text }) {
+  const lock = locked === true ? ' [locked]' : '';
+  return `- [${(Array.isArray(ids) ? ids : []).join(' ')}] (${rank}${lock}) ${sanitizeProjectionText(text)}`;
+}
+
+function projectionBullet(record) {
+  return projectionBulletFrom({
+    ids: [record.id], rank: effectiveRank(record), locked: record.locked === true, text: record.text,
+  });
+}
+
+const PROJECTION_BULLET_RE = /^- \[([^\]]*)\] \(([a-z]+)( \[locked\])?\) (.*)$/;
+const RECORD_ID_RE = /^m-[0-9a-f]{16}$/;
+
+// The parse is what makes a published line auditable: no ids, no claim, whatever the markdown looks like.
+function parseProjectionBullet(line) {
+  const match = PROJECTION_BULLET_RE.exec(String(line || ''));
+  if (!match) return null;
+  const ids = match[1].split(' ').filter(Boolean);
+  if (ids.length === 0 || !ids.every((id) => RECORD_ID_RE.test(id))) return null;
+  if (!SOURCE_KINDS.includes(match[2])) return null;
+  return {
+    ids, rank: match[2], locked: Boolean(match[3]), text: match[4].trim(),
+  };
+}
+
+function parseProjectionBullets(text) {
+  const bullets = [];
+  for (const line of String(text || '').split('\n')) {
+    const parsed = parseProjectionBullet(line);
+    if (parsed) bullets.push(parsed);
+  }
+  return bullets;
+}
+
+// No clock and no build stamp, so the same bullets always render byte-identical markdown.
+function renderProjectionDocument(bulletsByKind, { project = null } = {}) {
+  const lines = [PROJECTION_HEADER, '', PROJECTION_NOTICE, ''];
+  if (project !== null) lines.push(`Project: ${project}`, '');
+  let wrote = 0;
+  for (const kind of PROJECTED_KINDS) {
+    const bucket = bulletsByKind.get(kind) || [];
+    if (bucket.length === 0) continue;
+    lines.push(`## ${KIND_HEADINGS[kind]}`, '');
+    for (const bullet of bucket) lines.push(bullet);
+    lines.push('');
+    wrote += bucket.length;
+  }
+  if (wrote === 0) lines.push(PROJECTION_EMPTY, '');
+  return lines.join('\n');
+}
+
 function renderProjection(records, { project = null } = {}) {
   const tag = normalizeProjectTag(project);
   const selected = (Array.isArray(records) ? records : []).filter((record) => {
@@ -626,20 +676,80 @@ function renderProjection(records, { project = null } = {}) {
     if (tag === null) return record.project === null;
     return record.project === tag;
   });
-  const lines = [PROJECTION_HEADER, '', PROJECTION_NOTICE, ''];
-  if (tag !== null) lines.push(`Project: ${tag}`, '');
-  let wrote = 0;
+  const bulletsByKind = new Map();
   for (const kind of PROJECTED_KINDS) {
     const bucket = selected.filter((record) => record.kind === kind);
-    if (bucket.length === 0) continue;
     bucket.sort((left, right) => compareRecords(right, left));
-    lines.push(`## ${KIND_HEADINGS[kind]}`, '');
-    for (const record of bucket) lines.push(projectionBullet(record));
-    lines.push('');
-    wrote += bucket.length;
+    bulletsByKind.set(kind, bucket.map(projectionBullet));
   }
-  if (wrote === 0) lines.push(PROJECTION_EMPTY, '');
-  return lines.join('\n');
+  return renderProjectionDocument(bulletsByKind, { project: tag });
+}
+
+const GLOBAL_PROJECTION_FILE = 'MEMORY.md';
+const PROJECTS_DIR_NAME = 'projects';
+const PROJECTION_MANIFEST_FILE = 'manifest.json';
+const PROJECTION_SOURCES = Object.freeze(['trivial', 'distill']);
+
+/**
+ * The canon watermark a build is measured against: enough to tell a moved canon from a still one, and
+ * enough for a reader to say how fresh a published projection is.
+ */
+function canonWatermark(records) {
+  const list = [...(Array.isArray(records) ? records : [])].sort(compareRecords);
+  const last = list.length > 0 ? list[list.length - 1] : null;
+  return {
+    count: list.length,
+    lastId: last ? last.id : null,
+    lastTs: last ? last.ts : null,
+    hash: sha256Hex(list.map((record) => `${record.id}:${record.validTo ?? ''}`).join('\n')),
+  };
+}
+
+function projectionStampSources(watermark) {
+  return [{ path: 'memory/canon', sha256: String(watermark?.hash || '') }];
+}
+
+function projectionFilePaths(tags) {
+  const paths = [GLOBAL_PROJECTION_FILE];
+  for (const tag of [...(Array.isArray(tags) ? tags : [])].sort()) {
+    paths.push(`${PROJECTS_DIR_NAME}/${projectFileSlug(tag)}.md`);
+  }
+  return paths;
+}
+
+/**
+ * One projection build, mill-style: every delivered byte hashed into `version`, the stamp line first so
+ * drift reads the same way it does for a distilled pack source, and manifest.json excluded from the
+ * version because it carries builtAt.
+ */
+function planProjectionBuild({
+  files = [], watermark = null, builtAt = 0, source = 'trivial', verdict = null, distilledAt = null,
+  recordCount = 0, claimCount = null,
+}) {
+  const stampLine = buildStampLine(projectionStampSources(watermark));
+  const stamped = files.map((file) => ({
+    relPath: file.relPath,
+    content: `${stampLine}\n\n${file.content}`,
+  }));
+  const fileRecords = stamped.map((file) => ({ relPath: file.relPath, sha256: sha256Hex(file.content) }));
+  const version = sha256Hex(fileRecords.map((file) => `${file.relPath}:${file.sha256}`).join('\n'));
+  const manifest = {
+    version,
+    builtAt,
+    source: PROJECTION_SOURCES.includes(source) ? source : 'trivial',
+    verdict,
+    distilledAt,
+    recordCount,
+    claimCount,
+    watermark,
+    files: fileRecords,
+  };
+  return {
+    version,
+    manifest,
+    stampLine,
+    outputs: [...stamped, { relPath: PROJECTION_MANIFEST_FILE, content: `${JSON.stringify(manifest, null, 2)}\n` }],
+  };
 }
 
 const FORGET_PLACEHOLDER = '[forgotten]';
@@ -699,6 +809,9 @@ module.exports = {
   DEFAULT_MEMORY_RETAIN_DAYS,
   DEFAULT_RETRIEVAL_LIMIT,
   FORGET_PLACEHOLDER,
+  GLOBAL_PROJECTION_FILE,
+  KIND_HEADINGS,
+  MAX_PROJECTION_LINE_CHARS,
   MAX_RECORDS_PER_KIND,
   MAX_OBSERVED_TS_SKEW_MS,
   MAX_RECORD_CHARS,
@@ -708,6 +821,8 @@ module.exports = {
   PROJECTED_KINDS,
   PROJECTION_EMPTY,
   PROJECTION_HEADER,
+  PROJECTION_MANIFEST_FILE,
+  PROJECTS_DIR_NAME,
   SIGNED_FIELDS,
   SOURCE_KINDS,
   SOURCE_VENDORS,
@@ -716,8 +831,10 @@ module.exports = {
   applySupersessions,
   buildMemoryRecord,
   canonicalSignaturePayload,
+  canonWatermark,
   capTextLineAligned,
   clampObservedTs,
+  compareRecords,
   computeLineage,
   decideForget,
   decideSupersession,
@@ -738,10 +855,18 @@ module.exports = {
   matchesForgetPattern,
   normalizeMemoryLine,
   normalizeProjectTag,
+  parseProjectionBullet,
+  parseProjectionBullets,
   parseSegmentFileName,
+  planProjectionBuild,
   projectFileSlug,
   projectTagsOf,
+  projectionBulletFrom,
+  projectionFilePaths,
+  projectionStampSources,
   renderProjection,
+  renderProjectionDocument,
+  sanitizeProjectionText,
   resolveMemoryConfig,
   retrieveMemories,
   scoreMemoryRecord,

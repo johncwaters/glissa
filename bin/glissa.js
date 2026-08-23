@@ -16,6 +16,7 @@ Commands:
   pack list         List context pack specs and their built versions
   memory forget <id|pattern>  Expunge a remembered record
   memory backfill   Re-run the cold-start transcript backfill
+  memory distill [--dry-run]  Rebuild the published projection from the canon
 
 Options:
   --name <label>    Label for the device being paired (with: pair)

@@ -172,12 +172,12 @@ test('the projection is written to dist/ only, grouped by kind and partitioned b
     await store.flushProjection();
 
     assert.deepEqual(readdirStable(dir).sort(), ['canon-202608.jsonl', 'dist', 'hmac-key']);
-    const global = fs.readFileSync(path.join(dir, 'dist', 'MEMORY.md'), 'utf8');
+    const global = fs.readFileSync(path.join(dir, 'dist', 'current', 'MEMORY.md'), 'utf8');
     assert.equal(global.includes('never write else statements'), true);
     assert.equal(global.includes('merge-gate.js'), false, 'a project fact never rides into the global file');
-    const projects = readdirStable(path.join(dir, 'dist', 'projects'));
+    const projects = readdirStable(path.join(dir, 'dist', 'current', 'projects'));
     assert.equal(projects.length, 1);
-    const projectText = fs.readFileSync(path.join(dir, 'dist', 'projects', projects[0]), 'utf8');
+    const projectText = fs.readFileSync(path.join(dir, 'dist', 'current', 'projects', projects[0]), 'utf8');
     assert.equal(projectText.includes('Codebase knowledge'), true);
     assert.equal(projectText.includes('merge-gate.js'), true);
     await store.stop();
@@ -193,17 +193,17 @@ test('the same records project byte-identical markdown across two runs', async (
     await store.append(knowledge('the worktree engine serializes every mutation'));
     await store.append(knowledge('the poller ticks every 15 minutes'));
     await store.flushProjection();
-    const first = fs.readFileSync(path.join(dir, 'dist', 'MEMORY.md'), 'utf8');
-    const firstProject = readdirStable(path.join(dir, 'dist', 'projects'))
-      .map((name) => fs.readFileSync(path.join(dir, 'dist', 'projects', name), 'utf8'));
+    const first = fs.readFileSync(path.join(dir, 'dist', 'current', 'MEMORY.md'), 'utf8');
+    const firstProject = readdirStable(path.join(dir, 'dist', 'current', 'projects'))
+      .map((name) => fs.readFileSync(path.join(dir, 'dist', 'current', 'projects', name), 'utf8'));
     await store.stop();
 
     const reopened = openStore(dir, { startAt: START + 5 * DAY });
     await reopened.flushProjection();
-    assert.equal(fs.readFileSync(path.join(dir, 'dist', 'MEMORY.md'), 'utf8'), first);
+    assert.equal(fs.readFileSync(path.join(dir, 'dist', 'current', 'MEMORY.md'), 'utf8'), first);
     assert.deepEqual(
-      readdirStable(path.join(dir, 'dist', 'projects'))
-        .map((name) => fs.readFileSync(path.join(dir, 'dist', 'projects', name), 'utf8')),
+      readdirStable(path.join(dir, 'dist', 'current', 'projects'))
+        .map((name) => fs.readFileSync(path.join(dir, 'dist', 'current', 'projects', name), 'utf8')),
       firstProject
     );
     await reopened.stop();
@@ -219,7 +219,7 @@ test('forget writes a tombstone, reseals the segment and refreshes the projectio
     const doomed = await store.append(knowledge('the staging deploy passphrase was pasted into the prompt'));
     await store.append(knowledge('the poller ticks every 15 minutes'));
     await store.flushProjection();
-    assert.equal(fs.readFileSync(path.join(dir, 'dist', 'projects', readdirStable(path.join(dir, 'dist', 'projects'))[0]), 'utf8').includes('passphrase'), true);
+    assert.equal(fs.readFileSync(path.join(dir, 'dist', 'current', 'projects', readdirStable(path.join(dir, 'dist', 'current', 'projects'))[0]), 'utf8').includes('passphrase'), true);
 
     const result = await store.forget(doomed.id);
     assert.deepEqual(
@@ -236,8 +236,8 @@ test('forget writes a tombstone, reseals the segment and refreshes the projectio
     assert.equal(tombstone.text.includes(doomed.id), true);
     assert.equal(tombstone.text.includes('passphrase'), false, 'the pattern IS the secret');
 
-    const projectFile = readdirStable(path.join(dir, 'dist', 'projects'))[0];
-    const projected = fs.readFileSync(path.join(dir, 'dist', 'projects', projectFile), 'utf8');
+    const projectFile = readdirStable(path.join(dir, 'dist', 'current', 'projects'))[0];
+    const projected = fs.readFileSync(path.join(dir, 'dist', 'current', 'projects', projectFile), 'utf8');
     assert.equal(projected.includes('passphrase'), false);
     assert.equal(projected.includes('the poller ticks every 15 minutes'), true);
     await store.stop();
@@ -310,9 +310,9 @@ test('stop() drains a debounced projection that never got its timer', async () =
       },
     });
     await store.append(knowledge('the merge gate lives in session/core/merge-gate.js'));
-    assert.equal(fs.existsSync(path.join(dir, 'dist', 'MEMORY.md')), false, 'nothing is projected before the debounce');
+    assert.equal(fs.existsSync(path.join(dir, 'dist', 'current', 'MEMORY.md')), false, 'nothing is projected before the debounce');
     await store.stop();
-    assert.equal(fs.existsSync(path.join(dir, 'dist', 'MEMORY.md')), true, 'the pending projection is drained, not dropped');
+    assert.equal(fs.existsSync(path.join(dir, 'dist', 'current', 'MEMORY.md')), true, 'the pending projection is drained, not dropped');
     assert.equal(timers.length, 1);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
@@ -337,7 +337,7 @@ test('a store that was stopped accepts no further writes', async () => {
 const SKIP_ON_WINDOWS = { skip: process.platform === 'win32' ? 'POSIX modes and uids only' : false };
 
 function projectionText(dir) {
-  const distDir = path.join(dir, 'dist');
+  const distDir = path.join(dir, 'dist', 'current');
   const parts = [fs.readFileSync(path.join(distDir, 'MEMORY.md'), 'utf8')];
   const projectsDir = path.join(distDir, 'projects');
   const names = fs.existsSync(projectsDir) ? readdirStable(projectsDir) : [];
@@ -601,7 +601,7 @@ test('the memory directory is 0700 and everything under it 0600', SKIP_ON_WINDOW
     assert.equal(fs.statSync(dir).mode & 0o777, 0o700);
     assert.equal(fs.statSync(path.join(dir, 'hmac-key')).mode & 0o777, 0o600);
     assert.equal(fs.statSync(path.join(dir, segmentFileName('202608'))).mode & 0o777, 0o600);
-    assert.equal(fs.statSync(path.join(dir, 'dist', 'MEMORY.md')).mode & 0o777, 0o600);
+    assert.equal(fs.statSync(path.join(dir, 'dist', 'current', 'MEMORY.md')).mode & 0o777, 0o600);
   } finally {
     fs.rmSync(parent, { recursive: true, force: true });
   }

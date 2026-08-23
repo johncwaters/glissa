@@ -399,6 +399,7 @@ module.exports = {
   HOUR_MS,
   activitySection,
   buildVisionsPrompt,
+  contentMarker,
   countLines,
   countRecentDispatches,
   createDispatchState,
