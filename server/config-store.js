@@ -348,12 +348,16 @@ function createConfigStore({ settingsDefaults } = {}) {
    *
    * Two exact-byte signatures replace it, and a reload is skipped only when it would genuinely change
    * nothing:
-   *   _lastWrittenContent - what save() just wrote. Its echo is not news. CLEARED the moment a reload
-   *     is applied, which is the only way memory can start disagreeing with it: without that, an
-   *     operator who hand-edits and then REVERTS to the previously-written bytes has the revert
-   *     silently dropped while memory still holds the edit.
+   *   _lastWrittenContent - what save() just wrote. Its echo is not news.
    *   _lastAppliedContent - what was last read and applied. One write is several fs events, so an
    *     identical re-read is a re-apply of state already live.
+   *
+   * NEITHER signature may outlive the state it describes, and each is invalidated by the other event:
+   * an applied reload clears _lastWrittenContent, and a save clears _lastAppliedContent. Both hold
+   * against the same failure, in mirror image - an operator who reverts the file (an editor undo) back
+   * to bytes that a stale signature still names has the revert silently dropped while memory holds
+   * something else, with no way to notice the two now disagree. Clearing fails toward one redundant
+   * no-op reload; keeping a stale signature fails toward a dropped edit, which is not recoverable.
    *
    * Deliberately NOT compared against JSON.stringify(config): save() mutates a freshly-read copy and
    * never writes the mutation back into the in-memory object (that is what makes a per-project field
@@ -403,6 +407,9 @@ function createConfigStore({ settingsDefaults } = {}) {
       // Stamped BEFORE the write: fs.watch can deliver the event while writeTextAtomicSync is still
       // returning, and a signature recorded afterwards would miss its own echo.
       _lastWrittenContent = nextContent;
+      // Live state has moved relative to whatever was last applied, so that signature no longer
+      // describes anything true. Leaving it would drop an operator's revert back to those bytes.
+      _lastAppliedContent = null;
       writeTextAtomicSync(configPath, nextContent);
     } catch (err) {
       console.warn('[config] Failed to write config.json:', err.code || err.message);
@@ -527,8 +534,7 @@ function createConfigStore({ settingsDefaults } = {}) {
         return;
       }
       _lastAppliedContent = data;
-      // The write signature no longer describes live state, and holding it would drop an operator's
-      // revert BACK to those bytes.
+      // Mirror of the clear in save(): the write signature no longer describes live state either.
       _lastWrittenContent = null;
       callback(newConfig);
       console.log('[config] Reloaded config.json');

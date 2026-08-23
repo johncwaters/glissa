@@ -506,3 +506,33 @@ test('phoneEscalationMs is a settable timeout key with the five-minute default',
     assert.equal(store.config.phoneEscalationMs, 0, 'and zero, which switches the rung off, survives');
   });
 });
+
+// The mirror of the revert case above, on the other signature. A save moves live state relative to
+// whatever was last APPLIED, so a signature still naming those older bytes made an operator's editor
+// undo back to them look like a re-apply of state already live: silently dropped, with memory holding
+// the saved state and the file holding the reverted one.
+test('reverting to bytes that were applied before a save still reloads', async () => {
+  await withStoreAsync({ projects: [] }, async (store, p) => {
+    const reloads = [];
+    const stop = store.watchForChanges((cfg) => { reloads.push(cfg); });
+    try {
+      const handEdited = JSON.stringify({
+        projects: [{ id: 'hand', name: 'h', path: 'C:/h' }], port: 4100,
+      }, null, 2);
+      fs.writeFileSync(p, handEdited, 'utf8');
+      await waitFor(() => reloads.length > 0, 'the hand-edit never reloaded');
+
+      // A dashboard settings save now writes something else and moves live state with it.
+      store.save((cfg) => { cfg.port = 4200; });
+      await sleep(1200);
+      assert.equal(reloads.length, 1, 'the save itself is still suppressed');
+
+      // Editor undo: back to exactly the bytes that were applied before that save.
+      fs.writeFileSync(p, handEdited, 'utf8');
+      await waitFor(() => reloads.length > 1, 'the revert was swallowed as a stale applied-signature');
+      assert.equal(reloads[reloads.length - 1].port, 4100, 'the reverted content is what was applied');
+    } finally {
+      stop();
+    }
+  });
+});
