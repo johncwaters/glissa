@@ -460,7 +460,7 @@ const MODEL_DIAGNOSTIC = { line: 1, message: 'The title is missing a concrete no
  * NOTHING here spawns claude; the real spawn is covered by tests/visions-dispatch.test.js.
  */
 function dispatchingConnection({
-  dispatch: overrides = {}, respond = null, contextDigest = null, contextSeq = null, scopePaths = null,
+  dispatch: overrides = {}, respond = null, contextDigest = null, contextSeq = null, scopePaths = null, debug = false,
 } = {}) {
   const calls = [];
   const dispatchConfig = { enabled: true, ...overrides };
@@ -471,7 +471,7 @@ function dispatchingConnection({
   };
   return {
     ...drivenConnection({
-      dispatchConfig, dispatch, contextDigest, contextSeq, scopePaths,
+      dispatchConfig, dispatch, contextDigest, contextSeq, scopePaths, debug,
     }),
     calls,
   };
@@ -725,7 +725,9 @@ test('a dispatch with no model diagnostics leaves the rule-only publish stream u
 
 test('model diagnostics publish and broadcast as a union after rule diagnostics', async (t) => {
   const { wiring, timers, broadcasts, sent, lsp } = dispatchingConnection({
-    respond: () => Promise.resolve({ verdict: 'NONE', comments: [], diagnostics: [MODEL_DIAGNOSTIC], reason: null }),
+    respond: () => Promise.resolve({
+      verdict: 'NONE', comments: [], diagnostics: [{ ...MODEL_DIAGNOSTIC, severity: 1 }], reason: null,
+    }),
   });
   t.after(() => wiring.stop());
 
@@ -736,9 +738,38 @@ test('model diagnostics publish and broadcast as a union after rule diagnostics'
   const published = sent.filter((message) => message.type === 'publishDiagnostics');
   assert.deepEqual(published.at(-1).params.diagnostics.map((diagnostic) => diagnostic.code), ['repeated-word', 'model']);
   assert.equal(published.at(-1).params.diagnostics[1].range.end.character, '# Title'.length);
+  assert.equal(published.at(-1).params.diagnostics[1].severity, 4);
   const findings = broadcasts.filter((message) => message.type === 'visions-findings');
   assert.deepEqual(findings.at(-1).diagnostics, published.at(-1).params.diagnostics);
   assert.deepEqual(wiring.documentsSnapshot()[0].diagnostics.map((diagnostic) => diagnostic.code), ['repeated-word', 'model']);
+});
+
+test('lint-domain model diagnostics are dropped with a debug count only', async (t) => {
+  const { wiring, timers, sent, notes, lsp } = dispatchingConnection({
+    debug: () => true,
+    respond: () => Promise.resolve({
+      verdict: 'NONE',
+      comments: [],
+      diagnostics: [
+        { line: 1, rule: 'no-unused-imports', message: 'Unused import.' },
+        { line: 3, message: 'The chosen type of migration conflicts with the rollback plan.' },
+      ],
+      reason: null,
+    }),
+  });
+  t.after(() => wiring.stop());
+
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  runSweepThenDispatch(timers);
+  await wiring.whenDispatchSettled();
+
+  const diagnostics = sent.filter((message) => message.type === 'publishDiagnostics').at(-1).params.diagnostics;
+  assert.deepEqual(diagnostics.map((diagnostic) => diagnostic.message), [
+    'Repeated word "with"',
+    'The chosen type of migration conflicts with the rollback plan.',
+  ]);
+  assert.ok(notes.some((line) => line.includes('dropped 1 model diagnostics in the toolchain domain')));
+  assert.equal(notes.some((line) => line.includes('Unused import')), false);
 });
 
 test('model diagnostics are replaced wholesale by each dispatch', async (t) => {

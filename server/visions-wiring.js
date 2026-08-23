@@ -9,7 +9,7 @@ const {
   applyDidChange, applyDidClose, applyDidOpen, createDocStore, detectBlankLineBoundary, formatRange, getDoc, listDocs, uriOfParams,
 } = require('./core/visions-buffer-core');
 const {
-  createDispatchState, decideDispatch, forgetUri, hashText, mergeDiagnostics, modelDiagnosticsToLsp, recordDispatch, resolveDispatchConfig,
+  createDispatchState, decideDispatch, forgetUri, hashText, mergeDiagnostics, recordDispatch, resolveDispatchConfig, sanitizeModelDiagnostics,
 } = require('./core/visions-dispatch-core');
 const { isUriInProjects } = require('./core/visions-scope-core');
 const {
@@ -264,7 +264,8 @@ function createVisionsWiring({
   }
 
   function recordModelDiagnostics(uri, result, doc) {
-    const diagnostics = modelDiagnosticsToLsp(result?.diagnostics, { text: doc?.text || '' });
+    const { diagnostics, lintDomainDropped } = sanitizeModelDiagnostics(result?.diagnostics, { text: doc?.text || '' });
+    if (lintDomainDropped > 0) debugNote(() => `dropped ${lintDomainDropped} model diagnostics in the toolchain domain`);
     const hadDiagnostics = modelDiagnosticsByUri.has(uri);
     if (diagnostics.length === 0) modelDiagnosticsByUri.delete(uri);
     if (diagnostics.length > 0) modelDiagnosticsByUri.set(uri, diagnostics);
