@@ -10,6 +10,7 @@ const { createOscTitleSource } = require("../detection/osc-title-source");
 const { createStatusSource } = require("../detection/status-source");
 const { createWorktreeWatcher, readWorktreeGitdirPointer } = require("../detection/worktree-watch");
 const { createIntegrationRefWatcher } = require("../detection/integration-ref-watch");
+const { createRerereWatcher } = require("../detection/rerere-watch");
 const { writeSessionSettings } = require("../detection/settings-injector");
 const {
   classifyClaudeKind,
@@ -29,7 +30,8 @@ const { decideExitTransition } = require("./core/exit-transition");
 const { buildMergePrompt } = require("./core/merge-prompt");
 const { createOutputRing } = require("./core/output-ring");
 const { decideSignatureDemotion, decideDiffSelfHeal } = require("./core/merge-gate");
-const { decideAutoRebase, AUTO_REBASE_STATES } = require("./core/rebase-gate");
+const { decideAutoRebase, decideRerereCooldownClear, AUTO_REBASE_STATES } = require("./core/rebase-gate");
+const { decidePostRebaseCheck } = require("./core/check-gate");
 const {
   parseLeftRightCount,
   decideBranchSyncState,
@@ -221,6 +223,12 @@ class Session extends EventEmitter {
     // (config worktreeAutoRebase). Read at construction like every other spawn-time option, so a
     // settings change applies to the next construction of this session, not to the live one.
     autoRebase = true,
+    // The advisory post-rebase check (2026-08 review, section 4). `worktreeCheck` is the injected IO
+    // shell (server/worktree-check.js) and is absent for every session that has no worktree to check;
+    // `checkCommand` is the operator's config-file string, resolved by the shell when it is null.
+    worktreeCheck = null,
+    checkCommand = null,
+    postRebaseCheck = true,
     // Master kill switch for the live cross-session review liveness: with it false the integration-ref
     // watcher is never started, so a branch move reaches this session only via the turn-end recheck.
     liveWorktreeReview = true,
@@ -400,6 +408,12 @@ class Session extends EventEmitter {
     this._gitWorkspace = gitWorkspace;
     this._integrationBranch = integrationBranch;
     this._autoRebase = autoRebase !== false;
+    this._worktreeCheck = worktreeCheck;
+    this._checkCommand = checkCommand;
+    this._postRebaseCheck = postRebaseCheck !== false;
+    // The last advisory check verdict, or null until one has run. Rides toSnapshot so a reconnecting
+    // dashboard sees it without a frame of its own.
+    this.checkStatus = null;
     this._liveWorktreeReview = liveWorktreeReview !== false;
     this._autoRebasing = false;    // re-entry mutex: one auto-rebase per session at a time
     this._rebaseConflictKey = null; // head::target the last auto-rebase conflicted on (see _maybeAutoRebase)
@@ -424,6 +438,7 @@ class Session extends EventEmitter {
     // broadcast; the debounce timer coalesces a write/turn-end burst into one recompute.
     this._worktreeWatcher = null;
     this._integrationWatcher = null;
+    this._rerereWatcher = null;
     this._worktreeCheckTimer = null;
     this._lastWorktreeSig = null;
 
@@ -1145,6 +1160,9 @@ class Session extends EventEmitter {
       pendingWakeup: this._pendingWakeup(),
       pendingPromptKind: this._pendingPromptKind,
       mergeStatus: this.mergeStatus,
+      // Advisory only: what the project's own check said about the worktree after the last unattended
+      // rebase. Never gates the merge (see session/core/check-gate.js).
+      checkStatus: this.checkStatus,
       worktreeNotice: this.worktreeNotice,
       effectiveBase: (this._effectiveBase || this._integrationBranch || null)
         ?.replace(/^[^/]+\//, "") ?? null,
@@ -1695,6 +1713,9 @@ class Session extends EventEmitter {
           kind: "rebase", ts: Date.now(), decision: "auto-rebased",
           from: sig.headSha || null, to: r.headSha || null, rerereReplayed: r.rerereReplayed === true,
         });
+        // Advisory, and deliberately NOT awaited inside the rebase mutex: the check can take minutes,
+        // and holding _autoRebasing for it would suppress the change funnel that whole time.
+        this._schedulePostRebaseCheck();
         return;
       }
       // 'rebase-failed' (a rebase that never started) is deliberately NOT cooled down: it is transient,
@@ -1714,6 +1735,76 @@ class Session extends EventEmitter {
       // so it owes it one recheck to re-establish the signature and the gate it may have skipped.
       this._scheduleWorktreeCheck();
     }
+  }
+
+  /*
+   * The advisory half of a merge queue's check gate (2026-08 review, section 4). A merge queue runs
+   * the project's tests against the candidate as it would land; Glissa's merge click is the operator's,
+   * so this runs the project's own check in the worktree right after an unattended rebase rewrote it
+   * and puts the answer on the card BEFORE that click. It never blocks the merge, and a red verdict
+   * changes no gate: it becomes load-bearing only the day the merge click itself is automated.
+   */
+  _schedulePostRebaseCheck() {
+    if (!this._worktreeCheck || !this.worktreeDir) return;
+    const resolved = this._worktreeCheck.resolve({
+      cwd: this.worktreeDir,
+      projectCheckCommand: this._checkCommand,
+    });
+    const verdict = decidePostRebaseCheck({
+      enabled: this._postRebaseCheck,
+      command: resolved.command,
+      teardownPending: this._teardownPending(),
+      destroyed: this._destroyed,
+    });
+    if (!verdict.run) return;
+    // Fire-and-forget: run() never rejects, and nothing downstream may wait on a check.
+    void this._runPostRebaseCheck(resolved);
+  }
+
+  async _runPostRebaseCheck({ command, source }) {
+    this._setCheckStatus({ status: "running", command, source, at: Date.now() });
+    const result = await this._worktreeCheck.run({ cwd: this.worktreeDir, command });
+    // The worktree may have been merged, discarded or destroyed while the check ran; a verdict about a
+    // tree that no longer exists is worse than no verdict.
+    if (this._destroyed || !this.worktreeDir) return;
+    this._recordDecision({
+      kind: "check", ts: Date.now(), decision: result.status, command, durationMs: result.durationMs,
+    });
+    this._setCheckStatus({
+      status: result.status,
+      command,
+      source,
+      at: Date.now(),
+      exitCode: result.exitCode,
+      durationMs: result.durationMs,
+      tail: result.tail || "",
+    });
+  }
+
+  _setCheckStatus(next) {
+    this.checkStatus = next;
+    this.emit("worktree-check", { id: this.id, check: next });
+  }
+
+  /*
+   * A resolution just landed in the shared rerere cache. The conflict cooldown is keyed on a sha pair
+   * and expires when one of them moves, which misses the case this exists for: a SIBLING session
+   * resolved the same conflict, so this worktree could now replay that resolution and finish, while
+   * nothing about this worktree changed. Treating the recorded resolution as the retry trigger is what
+   * makes that happen now rather than eventually.
+   */
+  _onRerereRecorded() {
+    const verdict = decideRerereCooldownClear({
+      enabled: this._autoRebase && Boolean(this._gitWorkspace && this._workspace),
+      hasCooldown: Boolean(this._rebaseConflictKey),
+      teardownPending: this._teardownPending(),
+    });
+    if (!verdict.clear) return;
+    this._recordDecision({
+      kind: "rebase", ts: Date.now(), decision: "cooldown-cleared", reason: verdict.reason,
+    });
+    this._rebaseConflictKey = null;
+    this._scheduleWorktreeCheck();
   }
 
   // Debounced entry for the IMMEDIATE triggers (fs.watch onChange + the `ready` turn-end). Collapses a
@@ -1750,11 +1841,19 @@ class Session extends EventEmitter {
       onChange,
     });
     this._integrationWatcher.start();
+    // The rr-cache lives in the SHARED gitdir, so a sibling's recorded resolution reaches this session
+    // through its own watcher; no registry, same shape as the integration-ref watch.
+    this._rerereWatcher = createRerereWatcher({
+      commonGitDir: this.commonGitDir,
+      onChange: () => this._onRerereRecorded(),
+    });
+    this._rerereWatcher.start();
   }
 
   _stopWorktreeWatcher() {
     this._worktreeWatcher = stopWatcher(this._worktreeWatcher);
     this._integrationWatcher = stopWatcher(this._integrationWatcher);
+    this._rerereWatcher = stopWatcher(this._rerereWatcher);
     this._clearTimer("_worktreeCheckTimer");
     this._lastWorktreeSig = null;
   }

@@ -17,6 +17,7 @@ import { buildCardDOM, closeDebugOverlay, isRenameInProgress, openDebugOverlay, 
 import { aggregateEl, container, sessionUIs } from './card-registry.js';
 import { openConfirmDialog } from './modal.js';
 import { readCountText, sinceNoticeCount, stalePackNames } from './pack-stale-core.mjs';
+import { checkChipText, checkDetailText, checkTone } from '../check-status-core.mjs';
 import { openResumeDialog } from './resume-dialog.js';
 // Load-bearing import: evaluating session-tick.js installs the shared 1s tick (elapsed clock +
 // working-heartbeat poll) at module load.
@@ -387,6 +388,20 @@ function applyPackStaleness(ui) {
     title: stale.length > 0
       ? `Rebuilt since this session started: ${stale.join(', ')}. Restart it to pick up the new context.\n${packReadsText(ui.packs)}`
       : '',
+  });
+}
+
+// The advisory post-rebase check verdict on the card (2026-08 review, section 4). Green or red before
+// the operator clicks Merge; it gates nothing, which the tooltip says out loud.
+export function setSessionCheck(sessionId, check) {
+  const ui = sessionUIs.get(sessionId);
+  if (!ui) return;
+  const text = checkChipText(check);
+  paintCardBadge(ui, '.check-badge', 'check', {
+    on: !!text,
+    value: checkTone(check) || '',
+    text: text || '',
+    title: text ? checkDetailText(check) : undefined,
   });
 }
 

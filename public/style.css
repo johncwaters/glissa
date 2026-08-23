@@ -562,6 +562,39 @@ body {
   display: inline-flex;
 }
 
+/* Advisory post-rebase check verdict. Hidden until the card carries data-check (toggled by
+   setSessionCheck on a session-check delta). Toned by the verdict rather than one fixed colour,
+   because green and red are the entire message; it gates nothing, which is why it is a chip and not a
+   blocking state. lowercase like the other measurement chips. */
+.check-badge {
+  display: none;
+  text-transform: none;
+  letter-spacing: 0.04em;
+  font-weight: 600;
+}
+
+.session-card[data-check] .check-badge {
+  display: inline-flex;
+}
+
+.session-card[data-check="good"] .check-badge {
+  color: var(--state-idle);
+  border: 1px solid color-mix(in oklab, var(--state-idle) 55%, transparent);
+  background: color-mix(in oklab, var(--state-idle) 14%, transparent);
+}
+
+.session-card[data-check="bad"] .check-badge {
+  color: var(--state-failed);
+  border: 1px solid color-mix(in oklab, var(--state-failed) 55%, transparent);
+  background: color-mix(in oklab, var(--state-failed) 14%, transparent);
+}
+
+.session-card[data-check="busy"] .check-badge {
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  background: transparent;
+}
+
 /* Conversation token spend + estimated cost. Hidden until the card carries data-usage (toggled live by
    setSessionUsage on a usage-sessions delta). Muted hairline rather than the accent tone the other
    informational chips wear: it is standing context on every running card, not a state change, and must
@@ -4315,6 +4348,18 @@ a.pr-title:hover {
 .review-branch-sync-text[data-sync-state="behind"] { color: var(--state-waiting); }
 .review-branch-sync-text[data-sync-state="diverged"] { color: var(--state-failed); }
 .review-branch-sync-text[data-stale="true"] { opacity: 0.7; }
+
+/* The advisory post-rebase check verdict, sharing the branch-sync row. Deliberately outside the merge
+   controls: it is a fact about the worktree, never a condition on the Merge button. */
+.review-check-status {
+  display: block;
+  margin-top: 4px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.review-check-status[data-check-tone="good"] { color: var(--state-idle); }
+.review-check-status[data-check-tone="bad"] { color: var(--state-failed); }
 
 /* Pinned control region between the title and the scrolling diff. Holds the status note, the action
    buttons (Merge always leads), and a why-disabled reason line, so the controls never scroll away with

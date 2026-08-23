@@ -68,6 +68,7 @@ const { createLaneLedger } = require('./usage-lane-ledger');
 const { INTERACTIVE_LANE } = require('./core/usage-lane-core');
 const { normalizeRemoteConfig, validateRemoteConfig, decideBindHost } = require('./core/remote-config');
 const { createClientPresence } = require('./core/client-presence');
+const { createWorktreeCheck } = require('./worktree-check');
 const { decideControlSend } = require('./core/control-send-core');
 const { createHeartbeat } = require('./ws-heartbeat');
 const { normalizePackNames } = require('./core/pack-core');
@@ -412,6 +413,13 @@ function createBackend(httpServer, options = {}) {
     return usageCfg.enabled && usageCfg.planLimits;
   }
 
+  // One check runner for every session: it holds no per-session state, only the spawn seam and the
+  // timeout. Absent config leaves it inert - resolve() returns no command for a project with neither a
+  // configured one nor a package.json test script, and nothing runs.
+  const worktreeCheck = createWorktreeCheck({
+    timeoutMs: (config.checkTimeoutSeconds || 300) * 1000,
+  });
+
   function makeSession(project, cfg) {
     const session = new Session({
       id: project.id,
@@ -429,6 +437,11 @@ function createBackend(httpServer, options = {}) {
       // Eager conflict avoidance (config kill switch). Like every other construction-time option, a
       // settings change reaches a session on its NEXT construction, not the live one.
       autoRebase: cfg.worktreeAutoRebase !== false,
+      // The advisory post-rebase check. The command is config-file only (never a control-WS settable
+      // key): it is arbitrary code running unattended in a worktree, so its provenance is the guard.
+      worktreeCheck,
+      checkCommand: project.checkCommand || cfg.checkCommand || null,
+      postRebaseCheck: cfg.worktreePostRebaseCheck !== false,
       // Master kill switch for the live cross-session review liveness (the integration-branch reflog
       // watcher each worktree session runs beside its own gitdir watch).
       liveWorktreeReview: cfg.liveWorktreeReview !== false,
@@ -1414,6 +1427,11 @@ function createBackend(httpServer, options = {}) {
 
     relay('sleep', 'session-sleep');
     relay('wake', 'session-wake');
+
+    // Advisory post-rebase check verdict -> control WS, so the card and the review sidebar say what the
+    // project's own check thought of the rewritten worktree BEFORE the operator clicks Merge. It gates
+    // nothing (session/core/check-gate.js), and it rides the snapshot too, so a reconnect repairs it.
+    relay('worktree-check', 'session-check');
 
     // Worktree lifecycle -> control WS, so the dashboard reflects the review/merge state and any
     // blocker (e.g. the integration branch missing) without re-fetching a full snapshot.

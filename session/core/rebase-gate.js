@@ -57,4 +57,24 @@ function decideAutoRebase({
   return { action: "rebase" };
 }
 
-module.exports = { decideAutoRebase, AUTO_REBASE_STATES };
+/**
+ * A resolution just landed in the shared rerere cache. Does that clear this session's conflict
+ * cooldown?
+ *
+ * The cooldown is time-shaped where the trigger is information-shaped: it expires when a sha moves,
+ * but the thing that makes a doomed rebase worth retrying is a RECORDED RESOLUTION, which a sibling
+ * session can produce without anything about this worktree changing. Clearing on that event is what
+ * lets the retry happen now instead of eventually.
+ *
+ * Nothing cooled down means nothing to clear: a resolution recorded while this session was never
+ * blocked is not news, and re-nudging the change funnel for it would be noise on every merge anyone
+ * in the repo performs.
+ */
+function decideRerereCooldownClear({ enabled, hasCooldown, teardownPending } = {}) {
+  if (!enabled) return { clear: false, reason: "disabled" };
+  if (teardownPending) return { clear: false, reason: "teardown" };
+  if (!hasCooldown) return { clear: false, reason: "no-cooldown" };
+  return { clear: true, reason: "rerere-recorded" };
+}
+
+module.exports = { decideAutoRebase, decideRerereCooldownClear, AUTO_REBASE_STATES };
