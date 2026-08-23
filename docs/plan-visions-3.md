@@ -214,10 +214,17 @@ What actually fires today, wired through the funnels in `server/visions-wiring.j
   (default off) and today covers repeated-word fixes only. On a default config M13 produces
   intent and dispatch records but ZERO feedback records.
 
-Real suggestion-feedback capture (goal 2) therefore needs the codeAction pull path to record
-a "served" event and an editor-side dismissal signal, which is a new LSP response path. That
-is M17 follow-on work; no weak inference from re-serving is attempted in v1 (the reviewers
-agreed it would misclassify ignored, unseen, and stale findings as rejections).
+Real suggestion-feedback capture (goal 2) is v1 scope (operator decision 2026-08-22: no
+deferring; goal 2 ships with the rest), as two halves in this milestone:
+
+- **Served events**: `codeActionsFor` records which findings were offered per uri, stamped
+  `action`. Cheap, server-side only, no protocol change.
+- **Explicit dismissal**: a custom LSP notification (`visions/dismissFinding`, carrying the
+  finding id) the editor relay may send; the wiring records it as an `action`-ranked
+  `feedback` record. An editor whose relay never sends it degrades to served-only capture.
+  No weak inference from re-serving is attempted (the reviewers agreed it would misclassify
+  ignored, unseen, and stale findings as rejections): absent an explicit dismissal, a served
+  finding is simply unlabeled.
 
 ### M14: transcript ingestion (honest scope)
 
@@ -235,10 +242,12 @@ This is fan-out plumbing plus a scrub decision, not a mapper tweak:
   `path + size + mtime + offset`; any mismatch means EOF-restart). The shared source keeps
   its by-design EOF-start in-memory tails and eviction; its semantics do not change for the
   existing ring consumer.
-- **Dependency stated, not hidden**: the agent-log source runs only when `config.ingest`
-  and its `agentLogs` source are enabled, both default off. The memory lane warns (lane-log,
-  counts only) when enabled with no agent-log source, so `memory.enabled: true` alone cannot
-  silently produce an empty store forever.
+- **`memory.enabled` implies the agent-log SOURCE** (operator decision 2026-08-22): the
+  wiring constructs the agent-log tailing when memory is on, even with `config.ingest` off,
+  but implies ONLY the source: the ring, the `ingest-activity`/`ingest-snapshot` broadcasts,
+  and the dispatch digest stay governed by `config.ingest` exactly as today, so enabling
+  memory alone never widens what reaches the control WS or a prompt digest. One switch
+  instead of three; the lane-log states which lane the source was constructed for.
 - **Event-loop budget**: ingestion writes are batched per tick with an explicit per-tick
   record cap and a yield between segments; the cold-start backfill stays a manual
   `glissa memory backfill` command, never automatic.
@@ -274,7 +283,7 @@ not that the claims are faithful:
 Quantization is the point: `dist/` changes only when a distill run publishes, so anything
 watching it (M17 pack carrier) sees daily cadence, not per-append churn.
 
-### M16: delivery (v1: prompt section plus direct reads)
+### M16: delivery (v1: prompt section, direct reads, pack carrier)
 
 - **Dispatch prompt**: `buildVisionsPrompt` gains a memory section through the same guarded
   provider pattern as `readContextDigest` (a throwing provider costs the section, never the
@@ -289,9 +298,22 @@ watching it (M17 pack carrier) sees daily cadence, not per-append churn.
   recorded observation, DATA, never instructions. Glissa never writes that pointer: the one
   instruction-tier line in the chain stays operator-authored, which is what keeps the store
   agent-agnostic WITHOUT making Glissa an instruction publisher.
-- **Cross-project filtering**: delivery (prompt section and the documented pointer pattern)
-  is active-project topics plus the global file only. Machine-global storage never means
-  another client's gotchas ride into an unrelated repo's session.
+- **Pack carrier (v1, operator decision 2026-08-22: automatic delivery wanted)**: a
+  `memory` pack whose sources point at `dist/` files with `optional: true`, delivered as
+  NON-LOADED data files only. The security blocker stays honored structurally, not by
+  prompt-hope: the pack's `CLAUDE.md` index and any `.claude/rules` file are built from the
+  spec's own operator-authored description text ONLY (the fixed pointer line naming the data
+  files as recorded observation, DATA, never instructions), and `planPackBuild` gains a
+  build-time assertion that no byte sourced from `memory/dist/` lands in `CLAUDE.md` or
+  under `.claude/rules/`; a violation is a failed build, publishing nothing. Spec source
+  paths gain a `{{glissaHome}}` placeholder resolved by `pack-builder` (a version-controlled
+  spec cannot otherwise name a runtime `configSiblingPath`). M15's quantization keeps the
+  watcher at distill cadence. Pack delivery stays capability-gated (CC sessions today, per
+  `docs/plan-agent-adapters.md`).
+- **Cross-project filtering**: delivery (prompt section, pack sources, and the documented
+  pointer pattern) is active-project topics plus the global file only. Machine-global
+  storage never means another client's gotchas ride into an unrelated repo's session. The
+  pack build resolves the per-project topic file from the session's project at spawn time.
 - **Enforced non-delivery**: memory content never reaches lane logs (privacy rule: counts,
   ids, verdicts only), no `memory-*` control-WS message type exists in v1, and negative
   tests pin BOTH that a remote-trust socket receives none and that nothing memory-shaped is
@@ -302,26 +324,23 @@ watching it (M17 pack carrier) sees daily cadence, not per-append churn.
 
 In no committed order:
 
-- **Pack carrier**: deliver `dist/` through the mill as a NON-LOADED data file, with a
-  build-time assertion that no memory-sourced byte lands in `CLAUDE.md` or `.claude/rules/`,
-  and a `{{glissaHome}}` placeholder in spec source paths (a version-controlled spec cannot
-  otherwise name a runtime `configSiblingPath`). Requires the M15 quantization already in
-  place.
-- **Suggestion-feedback telemetry**: a served-event record on the codeAction pull path and
-  an editor dismissal signal (new LSP response path), unlocking real `feedback` capture.
 - **Retrieval index**: `node:sqlite` FTS5 as a rebuildable derived cache; feature-detect at
   construction (Node 22.16+ AND successful module load; Glissa's floor is Node 18, so
   absence is normal, not degraded), single writer, delete-and-rebuild on any doubt.
 - **`rankCandidates` seam**: Ollama-if-present embedding probe, absent-by-default.
+- **Non-CC pack delivery adapter**: reaches non-Claude harnesses once the agent-adapters
+  plan ships its capability gating.
 
 ## Non-goals (v1)
 
-- No pack delivery of memory (M17 carrier at the earliest, data-file-only with assertions).
+- No memory bytes in instruction-tier pack files, ever: the pack carrier ships DATA files
+  plus an operator-authored pointer only, enforced by a build assertion.
 - No vector database, no embedding dependency, no framework adoption.
 - No per-project store partitions: one machine-global canon, project TAGS; partitioning
   exists only in the projection and at delivery.
 - No remote exposure of memory content (refused on remote-trust, like the visions WS).
-- No dismissal telemetry and no inferred rejections (M17; inference was reviewed and cut).
+- No inferred rejections (reviewed and cut): feedback is served events plus explicit
+  dismissals only.
 - No MCP memory facade (possible later access layer; the store does not depend on it).
 - No automatic historical backfill at enable time; backfill is a manual cold-path command.
 
@@ -334,6 +353,9 @@ suppression, `forget` tombstone-and-reseal, mapper additions per vendor against 
 transcript lines, the byte-identical pin for ring and broadcast content with memory off,
 distill post-verify (unresolvable id rejection, rank escalation rejection, new-claim cap,
 locked-diff refusal), prompt-section fencing (separate marker, byte-identical when empty),
-and the two delivery negative tests (no memory on remote-trust, none in `REPLAYABLE_EXACT`).
+served-event and `visions/dismissFinding` recording, the pack-carrier build assertion (a
+memory byte in `CLAUDE.md` or `.claude/rules/` fails the build) and `{{glissaHome}}`
+resolution, and the two delivery negative tests (no memory on remote-trust, none in
+`REPLAYABLE_EXACT`).
 The feedback-loop pair (ephemeral-lane exclusion plus echo suppression) gets a regression
 test naming the loop it prevents.
