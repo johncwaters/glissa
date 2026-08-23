@@ -41,12 +41,10 @@ back into future work. Four kinds of remembered fact:
   themselves from there. The remaining operator touches are inherently operator acts (an
   intent lock, `forget`, the rare locked-diff review), not maintenance.
 - **The storage SUBSTRATE is subordinate to the machine-wide store design pass**
-  (`docs/architecture-review.html`, section 7 disposition, 2026-08): the operator is open to
-  one `node:sqlite` WAL database beside config.json (no server process, no migration
-  framework, no incremental adoption) replacing the sidecar-JSON write paths, and the memory
-  lane is a COUNTED FIRST-CLASS TENANT of that decision so the shape is chosen once, not per
-  feature. This plan therefore separates the memory CONTRACT from its substrate; see Store
-  layout.
+  (`docs/architecture-review.html`, section 7 disposition, 2026-08), with the memory lane a
+  counted first-class tenant of that decision. This plan therefore separates the memory
+  CONTRACT from its substrate; the "Store contract vs substrate" section states the whole
+  disposition and the swap path once.
 
 ## Research summary (2026-08-22)
 
@@ -364,12 +362,9 @@ watching it (M17 pack carrier) sees daily cadence, not per-append churn.
 
 In no committed order:
 
-- **Retrieval index**: `node:sqlite` FTS5 as a rebuildable derived cache, feature-detected
-  (Node 22.16+ AND successful module load; Glissa's floor is Node 18, so absence is normal,
-  not degraded), delete-and-rebuild on any doubt. NOT a per-feature `index.sqlite`: the one
-  database beside config.json is the review disposition's hard constraint, so the FTS index
-  lands as tables in the machine-wide store if the design pass adopts it, and does not exist
-  before then.
+- **Retrieval index**: FTS5 tables in the machine-wide store, if the design pass ("Store
+  contract vs substrate") adopts it; no per-feature index file exists before then. Derived
+  and rebuildable from the canon, delete on any doubt.
 - **`rankCandidates` seam**: Ollama-if-present embedding probe, absent-by-default.
 - **Non-CC pack delivery adapter**: reaches non-Claude harnesses once the agent-adapters
   plan ships its capability gating.
