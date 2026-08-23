@@ -566,7 +566,10 @@ function createMemoryStore(deps = {}) {
       try {
         const at = new Date();
         fs.utimesSync(lockPath, at, at);
-      } catch {}
+      } catch (error) {
+        // A lock that vanished mid-pass means a second process may already be reading; codes only, never content.
+        log.debugNote(() => `canon lock refresh failed on ${lockPath}: ${error.code || 'unknown'}`);
+      }
     }, LOCK_REFRESH_MS);
     if (typeof refresh.unref === 'function') refresh.unref();
     try {

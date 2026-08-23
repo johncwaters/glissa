@@ -260,20 +260,26 @@ function mapCodexLine(line, ctx) {
  * held on the per-file vendor state and spent on the `turn_completed` line. Publishing per chunk is
  * exactly the per-token event the plan forbids.
  */
-function appendPending(vendorState, text) {
+const PENDING_TURN_FIELD = 'pendingText';
+const PENDING_PROMPT_FIELD = 'pendingUserText';
+
+/*
+ * The OPENING text is what the summary wants, so once there is enough of it the rest is not held. The
+ * budget is applied to the INCOMING chunk rather than checked after it landed: one chunk is one
+ * transcript line's text, and nothing bounds that below the tail's own catch-up read (256KB), so a
+ * bound checked afterwards would overshoot by a whole one of those. boundRaw is what does the cutting,
+ * so what it cuts is still line-aligned wherever the chunk holds a break.
+ *
+ * Returning only the named field is deliberate: spending one held stream drops the other, which is what
+ * keeps a prompt and the turn that answered it from ever being concatenated.
+ */
+function appendChunk(vendorState, text, field) {
   const addition = str(text);
-  const pendingText = typeof vendorState?.pendingText === 'string' ? vendorState.pendingText : '';
-  if (!addition) return { pendingText };
-  /*
-   * The OPENING text is what the summary wants, so once there is enough of it the rest is not held. The
-   * budget is applied to the INCOMING chunk rather than checked after it landed: one chunk is one
-   * transcript line's text, and nothing bounds that below the tail's own catch-up read (256KB), so a
-   * bound checked afterwards would overshoot by a whole one of those. boundRaw is what does the cutting,
-   * so what it cuts is still line-aligned wherever the chunk holds a break.
-   */
-  const remaining = MAX_RAW_CHARS - pendingText.length - 1;
-  if (remaining <= 0) return { pendingText };
-  return { pendingText: `${pendingText} ${boundRaw(addition, remaining)}` };
+  const held = typeof vendorState?.[field] === 'string' ? vendorState[field] : '';
+  if (!addition) return { [field]: held };
+  const remaining = MAX_RAW_CHARS - held.length - 1;
+  if (remaining <= 0) return { [field]: held };
+  return { [field]: `${held} ${boundRaw(addition, remaining)}` };
 }
 
 /*
@@ -283,19 +289,48 @@ function appendPending(vendorState, text) {
  */
 const GROK_TURN_BOUNDARIES = Object.freeze(['user_message_chunk', 'retry_state']);
 
-// Nothing marks the end of a chunked user message, so the first non-user update is what proves it complete.
-function appendPendingUser(vendorState, text) {
-  const addition = str(text);
-  const pendingUserText = typeof vendorState?.pendingUserText === 'string' ? vendorState.pendingUserText : '';
-  if (!addition) return { pendingUserText };
-  const remaining = MAX_RAW_CHARS - pendingUserText.length - 1;
-  if (remaining <= 0) return { pendingUserText };
-  return { pendingUserText: `${pendingUserText} ${boundRaw(addition, remaining)}` };
+/*
+ * The user-prompt half, kept OUT of the turn state machine below: nothing marks the end of a chunked user
+ * message, so the first update that is not another user chunk spends what was held. The state it hands
+ * back no longer carries the prompt, which is what makes the emit exactly once whatever kind follows.
+ */
+function takeGrokPrompt(vendorState, base) {
+  const held = str(vendorState?.[PENDING_PROMPT_FIELD]);
+  if (!held) return { events: [], vendorState };
+  const prompt = promptEvent({ ...base, text: held });
+  return {
+    events: prompt ? [prompt] : [],
+    vendorState: { [PENDING_TURN_FIELD]: str(vendorState?.[PENDING_TURN_FIELD]) || '' },
+  };
 }
 
 function grokToolName(update) {
   const meta = update._meta && typeof update._meta === 'object' ? update._meta['x.ai/tool'] : null;
   return str(meta?.name) || str(update.title) || 'tool';
+}
+
+// The turn and tool state machine, unchanged by the prompt feature: it never reads or writes a held prompt.
+function mapGrokTurn(kind, update, base, ctx) {
+  if (GROK_TURN_BOUNDARIES.includes(kind)) return result([], ctx.root, ctx.sessionId, null);
+  if (kind === 'agent_message_chunk') {
+    const next = appendChunk(ctx.vendorState, update.content?.text, PENDING_TURN_FIELD);
+    return result([], ctx.root, ctx.sessionId, next);
+  }
+  if (kind === 'turn_completed') {
+    const pending = str(ctx.vendorState?.[PENDING_TURN_FIELD]);
+    const stopReason = str(update.stop_reason);
+    const text = pending || `turn complete${stopReason ? ` (${stopReason})` : ''}`;
+    const turn = turnEvent({ ...base, text });
+    if (!turn) return result([], ctx.root, ctx.sessionId, null);
+    return result([turn], ctx.root, ctx.sessionId, null);
+  }
+  // tool_call is the call; tool_call_update is its streaming progress, and there are four of those per
+  // call in a live transcript.
+  if (kind === 'tool_call') {
+    const target = toolTarget(update.rawInput);
+    return result([toolEvent({ ...base, name: grokToolName(update), target })], ctx.root, ctx.sessionId, ctx.vendorState);
+  }
+  return null;
 }
 
 function mapGrokLine(line, ctx) {
@@ -306,32 +341,19 @@ function mapGrokLine(line, ctx) {
   const base = { ts, root: ctx.root, sessionId, vendor: 'grok' };
   const kind = str(update.sessionUpdate);
   if (kind === 'user_message_chunk' && ctx.includeUserPrompts) {
-    return result([], ctx.root, sessionId, appendPendingUser(ctx.vendorState, update.content?.text));
+    const next = appendChunk(ctx.vendorState, update.content?.text, PENDING_PROMPT_FIELD);
+    return result([], ctx.root, sessionId, next);
   }
-  const heldPrompt = str(ctx.vendorState?.pendingUserText);
-  const prompt = heldPrompt ? promptEvent({ ...base, text: heldPrompt }) : null;
-  const held = prompt ? [prompt] : [];
-  const carried = heldPrompt ? { pendingText: str(ctx.vendorState?.pendingText) || '' } : ctx.vendorState;
-  if (GROK_TURN_BOUNDARIES.includes(kind)) return result(held, ctx.root, sessionId, null);
-  if (kind === 'agent_message_chunk') {
-    return result(held, ctx.root, sessionId, appendPending(carried, update.content?.text));
+  const prompt = takeGrokPrompt(ctx.vendorState, base);
+  const turn = mapGrokTurn(kind, update, base, {
+    root: ctx.root, sessionId, vendorState: prompt.vendorState,
+  });
+  // A kind this mapper has no interest in still has to spend a held prompt, or the next kind would repeat it.
+  if (!turn) {
+    if (prompt.events.length === 0) return null;
+    return result(prompt.events, ctx.root, sessionId, prompt.vendorState);
   }
-  if (kind === 'turn_completed') {
-    const pending = str(carried?.pendingText);
-    const stopReason = str(update.stop_reason);
-    const text = pending || `turn complete${stopReason ? ` (${stopReason})` : ''}`;
-    const turn = turnEvent({ ...base, text });
-    if (!turn) return result(held, ctx.root, sessionId, null);
-    return result([...held, turn], ctx.root, sessionId, null);
-  }
-  // tool_call is the call; tool_call_update is its streaming progress, and there are four of those per
-  // call in a live transcript.
-  if (kind === 'tool_call') {
-    const target = toolTarget(update.rawInput);
-    return result([...held, toolEvent({ ...base, name: grokToolName(update), target })], ctx.root, sessionId, carried);
-  }
-  if (prompt) return result(held, ctx.root, sessionId, carried);
-  return null;
+  return result([...prompt.events, ...turn.events], turn.root, turn.sessionId, turn.vendorState);
 }
 
 // --- Dispatch -------------------------------------------------------------

@@ -1079,3 +1079,77 @@ test('a throwing target costs one warning, never the drain or the target beside 
     adapter.stop();
   }
 }));
+
+// Grok holds a chunked user message until something proves it complete, so the one rule worth pinning is
+// that spending it clears it: a tool call, then more agent chunks, must not re-emit the same prompt.
+test('a held Grok prompt is emitted exactly once, whatever kinds follow it', withHomes(async ({ grokSessions, env }) => {
+  const encodedCwd = encodeURIComponent('C:\\repo');
+  const dir = path.join(grokSessions, encodedCwd, '019fde0f-453b-72a3-bf55-d1fd726cb2ad');
+  fs.mkdirSync(dir, { recursive: true });
+  const filePath = path.join(dir, 'updates.jsonl');
+  fs.writeFileSync(filePath, '', 'utf8');
+
+  const consumed = [];
+  const adapter = createAgentLogIngest({
+    consumers: [{ name: 'memory', userPrompts: true, publish: (event) => consumed.push(event) }],
+    env,
+    ...inertTimers(),
+  });
+  try {
+    await adapter.start();
+    const line = (update) => `${JSON.stringify({
+      timestamp: Math.floor(Date.now() / 1000),
+      params: { sessionId: '019fde0f-453b-72a3-bf55-d1fd726cb2ad', update },
+    })}\n`;
+    append(filePath, line({ sessionUpdate: 'user_message_chunk', content: { type: 'text', text: 'fix the' } }));
+    append(filePath, line({ sessionUpdate: 'user_message_chunk', content: { type: 'text', text: 'spawn gate' } }));
+    append(filePath, line({ sessionUpdate: 'tool_call', title: 'Read', rawInput: { file_path: 'a.js' } }));
+    append(filePath, line({ sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: 'thinking' } }));
+    append(filePath, line({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Patched it.' } }));
+    append(filePath, line({ sessionUpdate: 'turn_completed', stop_reason: 'end_turn' }));
+    await adapter.poll();
+
+    const prompts = consumed.filter((event) => event.kind === 'agent-prompt');
+    assert.equal(prompts.length, 1, consumed.map((event) => event.summary).join(' | '));
+    assert.equal(prompts[0].summary, 'grok prompt: fix the spawn gate');
+    assert.deepEqual(
+      consumed.map((event) => event.kind),
+      ['agent-prompt', 'agent-tool', 'agent-turn'],
+      'the prompt is spent on the first update that is not another user chunk',
+    );
+    const turn = consumed.find((event) => event.kind === 'agent-turn');
+    assert.equal(turn.summary, 'grok: Patched it.', 'the prompt text never leaks into the turn summary');
+  } finally {
+    adapter.stop();
+  }
+}));
+
+test('a Grok prompt held across a turn boundary is spent there rather than carried into the next turn', withHomes(async ({ grokSessions, env }) => {
+  const dir = path.join(grokSessions, encodeURIComponent('C:\\repo'), 'sess-grok-boundary');
+  fs.mkdirSync(dir, { recursive: true });
+  const filePath = path.join(dir, 'updates.jsonl');
+  fs.writeFileSync(filePath, '', 'utf8');
+
+  const consumed = [];
+  const adapter = createAgentLogIngest({
+    consumers: [{ name: 'memory', userPrompts: true, publish: (event) => consumed.push(event) }],
+    env,
+    ...inertTimers(),
+  });
+  try {
+    await adapter.start();
+    const line = (update) => `${JSON.stringify({
+      timestamp: Math.floor(Date.now() / 1000),
+      params: { sessionId: 'sess-grok-boundary', update },
+    })}\n`;
+    append(filePath, line({ sessionUpdate: 'user_message_chunk', content: { type: 'text', text: 'first ask' } }));
+    append(filePath, line({ sessionUpdate: 'retry_state' }));
+    append(filePath, line({ sessionUpdate: 'turn_completed', stop_reason: 'end_turn' }));
+    await adapter.poll();
+
+    assert.deepEqual(consumed.map((event) => event.kind), ['agent-prompt', 'agent-turn']);
+    assert.equal(consumed[0].summary, 'grok prompt: first ask');
+  } finally {
+    adapter.stop();
+  }
+}));
