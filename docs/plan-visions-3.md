@@ -65,32 +65,12 @@ options, `node:sqlite`). Conclusions the design rests on:
 
 ## Review revisions (2026-08-22)
 
-The first draft failed review on five structural points, all folded in below:
-
-1. **Pack delivery dropped from v1.** The mill emits `CLAUDE.md` and `.claude/rules/*.md`,
-   which load as INSTRUCTIONS in `--dangerously-skip-permissions` sessions and cannot be
-   fenced; distilled transcript content in a rules file completes a laundering chain from any
-   web page an agent once read to standing instructions in every future session. It also
-   breaks the pack subsystem's stated invariant ("files the operator already controls").
-   Delivery is now the fenced dispatch-prompt section plus direct file reads (see M16); a
-   pack CARRIER for the projection, as a non-loaded data file with a build-time assertion
-   that no memory-sourced byte lands in `CLAUDE.md` or `.claude/rules/`, is an M17 follow-on.
-2. **The canon is a local attack surface, not just a file.** Any local process can append a
-   line claiming `source.kind: operator, locked: true` (same threat model the unauthenticated
-   control WS already concedes). Records are therefore HMAC-signed by the store, and trust
-   fields are server-stamped per write path, never read from input.
-3. **Trust laundering closed.** Transcript text is not `observed` (it contains third-party
-   and prior-model text), and a delivered memory quoted back by an interactive agent must not
-   re-enter at higher rank. Rank vocabulary reworked; lineage cap and echo suppression added.
-4. **Milestones resized to the real code.** `logFix` fires only on the `autoFix` push path
-   (default off, repeated-word only), so v1 feedback capture is rescoped; the agent-log
-   ingest source has EOF-start, in-memory tails and single-consumer publish by design, so
-   M14 names the real fan-out and offset work; the pack-distiller cannot write outside
-   `packs/` by validation, so M15 is a NEW lane sharing only `distill-core`.
-5. **Durable-store hygiene.** Append-only is reconciled with retention via monthly segments;
-   an expunge command exists (`glissa memory forget`); `memory/` joins `daemonWriteRules`
-   ignores AND `.gitignore` (dev-mode config siblings live in the repo checkout); the
-   projection lives in its own subdirectory so no watcher ever fires on canon appends.
+The first draft failed a three-reviewer pass on five structural points, each folded into the
+Architecture and Milestones sections below (which are the authority; this list is only the
+map): pack delivery dropped from v1 (instruction-tier, unfenceable), HMAC-signed canon with
+server-stamped trust fields, trust-rank rework with a lineage cap and echo suppression,
+milestones resized to what the real code paths fire, and durable-store hygiene (segments,
+`forget`, ignore lists).
 
 ## Architecture
 
@@ -147,7 +127,10 @@ the repo checkout, and durable memory must never become git-visible).
   writer stamps `operator` or `model` from which side of `commitIntent` fired; the ingestion
   consumer stamps `reported`; the distiller's own canon writes are force-stamped `model`.
   A record arriving by any other route has no valid signature and is demoted (below).
-- **`sig` is an HMAC** over `{id, ts, kind, source, text, locked}` keyed by `memory/hmac-key`,
+- **`sig` is an HMAC** over `{id, ts, kind, source, text, validFrom, validTo, supersedes,
+  lineage, locked}` (every field a trust decision reads; leaving `lineage` or the
+  supersession fields out would let an unsigned byte edit defeat the promotion cap the
+  signature exists to protect) keyed by `memory/hmac-key`,
   minted only by `server/memory-store.js`. Load-time verification DEMOTES an unsigned or
   mismatched record to `source.kind: model, locked: false` with a lane-log warning (counts
   only), never trusts it silently and never hard-fails the lane. This is what stops a local
