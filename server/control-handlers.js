@@ -942,21 +942,7 @@ function registerControlHandlers(controlWss, deps) {
     ws.send(JSON.stringify(report));
   }
 
-  /*
-   * Deliver (or stop delivering) ONE context pack to one project. A DEDICATED message rather than a
-   * widened update-settings whitelist: this is a field on one project record, not a settings key, and
-   * update-settings writes whole sanitized blocks that know nothing about projects[].
-   *
-   * A DELTA (`{ projectId, pack, deliver }`) rather than a whole-list replace, for two reasons. The
-   * current list is re-read inside the config write, so two dashboards toggling different packs cannot
-   * clobber each other with the snapshot each of them was rendered from. And only the name being ADDED
-   * is checked against the specs, so a project whose list already names a deleted spec stays editable
-   * instead of being frozen by its own ghost entry.
-   *
-   * Dashboard-equivalent, so no remote refusal (see the Radar actions above): the control WS can already
-   * create a permissionless session pointed anywhere, which is strictly more than choosing which local
-   * files one is handed.
-   */
+  // One pack delivery toggle per message; the delta-not-replace and trust rationale live in AGENTS.md.
   async function handleSetProjectPacks(msg, ws) {
     const reply = (payload) => replyTo(ws, msg, 'set-project-packs-result', { ok: false, error: null, ...payload });
     const projectId = typeof msg.projectId === 'string' ? msg.projectId.trim() : '';
@@ -999,10 +985,14 @@ function registerControlHandlers(controlWss, deps) {
     broadcastControl({ type: 'project-packs-updated', projectId, packs: outcome.packs });
     console.log(`[control] set-project-packs: ${project.name} ${msg.deliver ? '+' : '-'}${pack}`);
 
-    // BEFORE the reload, which recreates the session that resolves its packs at spawn. Consumer gating
-    // means a newly delivered pack has never been built, so a build that waits for the reload arrives
-    // after the spawn it exists for, and the session silently delivers nothing.
-    if (msg.deliver && ensurePacksBuilt) await ensurePacksBuilt([pack]);
+    // Built BEFORE the reload: the respawn resolves packs at spawn, and a first delivery is never yet built.
+    if (msg.deliver && ensurePacksBuilt) {
+      try {
+        await ensurePacksBuilt([pack]);
+      } catch (err) {
+        console.warn(`[control] set-project-packs: build of "${pack}" failed: ${err.message}`);
+      }
+    }
     applyConfigReload(freshConfig);
   }
 

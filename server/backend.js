@@ -190,13 +190,7 @@ function resolveVisionsScopePaths(projectIds, projects, warn = console.warn) {
 // config hand-edit can change only casing or a trailing separator, which must NOT count as a repo
 // change (misclassifying it would skip the adopt and reproduce the branch-in-use fallback); the
 // case-fold compare lives in shared/paths.js isSameDirectoryPath.
-/**
- * Whether a config reload that replaced a session's record should also (re)start it. A DORMANT card was
- * not running before the edit, so recreating it is a record update and nothing more: starting it would
- * spawn a Claude session, with that project's dangerouslySkipPermissions, that nobody asked for. Ticking
- * a Mill tab checkbox must never do that, and neither may saving config.json. Every other state was
- * already live, where recreate-and-restart is the documented hand-edit behavior.
- */
+// A DORMANT card was not running, so a record replace must not spawn it; live states keep recreate-and-restart.
 function shouldStartAfterModify(previousState) {
   return previousState !== STATES.DORMANT;
 }

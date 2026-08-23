@@ -122,7 +122,6 @@ function createMillWiring(deps = {}) {
     return rows;
   }
 
-
   async function buildReport() {
     const specs = [];
     for (const spec of await listPackSpecs({ specsDir: resolvedSpecsDir() })) {

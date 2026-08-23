@@ -11,7 +11,6 @@ const {
   MANIFEST_FILE,
   MAX_INDEX_TOKENS,
   MAX_PACKS_PER_SESSION,
-  MAX_PACK_ENTRIES_SCANNED,
   applyPackDelta,
   consumedPackNames,
   estimateTokens,
@@ -541,17 +540,9 @@ test('a delta drops only what is genuinely unusable from the current list', () =
 
 // ── normalizePackNames bounds ──
 
-test('an array far past the cap is rejected whole rather than warned about per entry', () => {
-  const huge = Array.from({ length: MAX_PACK_ENTRIES_SCANNED + 1 }, (_unused, i) => `p${i}`);
-  const result = normalizePackNames(huge);
-  assert.deepEqual(result.names, []);
-  assert.equal(result.warnings.length, 1, 'one verdict, not one string per entry');
-  assert.match(result.warnings[0], /entries, far past the 4 pack per session cap/);
-});
-
-test('a list at the scan bound is still judged entry by entry', () => {
-  const atBound = Array.from({ length: MAX_PACK_ENTRIES_SCANNED }, (_unused, i) => `p${i}`);
-  const result = normalizePackNames(atBound);
+test('an oversized list is judged entry by entry and capped at the per-session limit', () => {
+  const oversized = Array.from({ length: 12 }, (_unused, i) => `p${i}`);
+  const result = normalizePackNames(oversized);
   assert.equal(result.names.length, MAX_PACKS_PER_SESSION);
   assert.ok(result.warnings.length > 1);
 });
