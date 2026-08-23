@@ -1,0 +1,865 @@
+<title>Glissa Architecture</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Spline+Sans+Mono:wght@400;500;600&family=Instrument+Sans:wght@400;500;600&display=swap">
+<style>
+  :root {
+    --bg: #f5f8f6;
+    --surface: #ffffff;
+    --surface-2: #eef2ef;
+    --ink: #1b2420;
+    --ink-soft: #4b5a53;
+    --line: #d8e0db;
+    --accent: #157a5e;
+    --accent-soft: #157a5e22;
+    --signal: #b26a1d;
+    --signal-soft: #b26a1d1f;
+    --lane: #3d5aa8;
+    --lane-soft: #3d5aa81a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0f1513;
+      --surface: #161d1a;
+      --surface-2: #1d2622;
+      --ink: #e3ebe6;
+      --ink-soft: #93a49b;
+      --line: #2a352f;
+      --accent: #46c096;
+      --accent-soft: #46c09626;
+      --signal: #dfa257;
+      --signal-soft: #dfa25726;
+      --lane: #8ba3e8;
+      --lane-soft: #8ba3e822;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0f1513;
+    --surface: #161d1a;
+    --surface-2: #1d2622;
+    --ink: #e3ebe6;
+    --ink-soft: #93a49b;
+    --line: #2a352f;
+    --accent: #46c096;
+    --accent-soft: #46c09626;
+    --signal: #dfa257;
+    --signal-soft: #dfa25726;
+    --lane: #8ba3e8;
+    --lane-soft: #8ba3e822;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "Instrument Sans", system-ui, sans-serif;
+    font-size: 16px;
+    line-height: 1.6;
+  }
+  .wrap { max-width: 1000px; margin: 0 auto; padding: 48px 24px 96px; }
+
+  .eyebrow {
+    font-family: "Spline Sans Mono", ui-monospace, monospace;
+    font-size: 12px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 10px;
+  }
+  h1 {
+    font-family: "Spline Sans Mono", ui-monospace, monospace;
+    font-weight: 600;
+    font-size: clamp(28px, 5vw, 40px);
+    line-height: 1.15;
+    margin: 0 0 14px;
+    text-wrap: balance;
+  }
+  h2 {
+    font-family: "Spline Sans Mono", ui-monospace, monospace;
+    font-weight: 600;
+    font-size: 21px;
+    margin: 72px 0 6px;
+    text-wrap: balance;
+  }
+  h2 .when { vertical-align: 4px; margin-left: 10px; }
+  h2 + p.lede { margin-top: 0; }
+  p { max-width: 68ch; color: var(--ink); }
+  p.lede { color: var(--ink-soft); max-width: 76ch; }
+  code {
+    font-family: "Spline Sans Mono", ui-monospace, monospace;
+    font-size: 0.86em;
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 1px 5px;
+    white-space: nowrap;
+  }
+  .when {
+    font-family: "Spline Sans Mono", ui-monospace, monospace;
+    font-size: 11.5px;
+    font-weight: 400;
+    letter-spacing: 0;
+    text-transform: none;
+    color: var(--signal);
+    background: var(--signal-soft);
+    border-radius: 4px;
+    padding: 2px 8px;
+    display: inline-block;
+  }
+  .when.core { color: var(--accent); background: var(--accent-soft); }
+
+  figure { margin: 26px 0 8px; }
+  figure svg { max-width: 100%; height: auto; display: block; min-width: 700px; }
+  .fig-scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); padding: 18px 12px; }
+  figcaption { font-size: 13.5px; color: var(--ink-soft); margin-top: 10px; max-width: 80ch; }
+
+  table { border-collapse: collapse; width: 100%; margin: 20px 0; font-size: 14.5px; }
+  .table-scroll { overflow-x: auto; }
+  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th {
+    font-family: "Spline Sans Mono", ui-monospace, monospace;
+    font-size: 12px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    font-weight: 500;
+  }
+  td:first-child { white-space: nowrap; font-family: "Spline Sans Mono", ui-monospace, monospace; font-size: 13px; }
+  td { color: var(--ink-soft); }
+
+  ul { padding-left: 20px; color: var(--ink-soft); max-width: 76ch; }
+  li { margin: 6px 0; font-size: 15px; }
+  li strong { color: var(--ink); font-weight: 600; }
+
+  .footline {
+    margin-top: 72px;
+    padding-top: 18px;
+    border-top: 1px solid var(--line);
+    font-family: "Spline Sans Mono", ui-monospace, monospace;
+    font-size: 12px;
+    color: var(--ink-soft);
+  }
+</style>
+
+<div class="wrap">
+  <p class="eyebrow">architecture map</p>
+  <h1>Glissa Architecture</h1>
+  <p class="lede">Glissa is a lightweight Node.js background process that spawns and manages Claude Code sessions in real pseudo-terminals, streams their output to a browser dashboard over WebSockets, derives each session's status from structural signals (Claude Code hooks plus an OSC-0 title fallback, never screen scraping), and notifies the operator when a session needs attention. It binds to localhost only and runs as a single-user dev tool on the operator's machine.</p>
+
+  <h2>The big picture</h2>
+  <p class="lede">Three tiers: the browser dashboard, the Glissa server, and the Claude Code processes it manages. The server is a dumb pipe for terminal bytes and a smart broker for everything else.</p>
+
+  <figure>
+    <div class="fig-scroll">
+      <svg viewBox="0 0 920 470" role="img" aria-label="System overview: browser dashboard connects to the Glissa server over two WebSockets; the server spawns Claude Code sessions via node-pty; Claude Code reports back over HTTP hooks; background lanes run their own headless sessions.">
+        <defs>
+          <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="var(--ink)"/>
+          </marker>
+          <marker id="arrA" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"/>
+          </marker>
+          <marker id="arrS" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="var(--signal)"/>
+          </marker>
+        </defs>
+        <g fill="none" stroke="var(--ink)" stroke-width="1.3">
+
+          <rect x="20" y="60" width="200" height="270" rx="10" stroke="var(--line)" fill="var(--surface-2)"/>
+          <text x="120" y="88" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="13" font-weight="600">Browser dashboard</text>
+          <rect x="40" y="106" width="160" height="44" rx="6" stroke="var(--line)" fill="var(--surface)"/>
+          <text x="120" y="126" text-anchor="middle" fill="var(--ink)" stroke="none" font-size="12" font-family="Instrument Sans, sans-serif">Session cards</text>
+          <text x="120" y="141" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">xterm.js terminals</text>
+          <rect x="40" y="160" width="160" height="34" rx="6" stroke="var(--line)" fill="var(--surface)"/>
+          <text x="120" y="181" text-anchor="middle" fill="var(--ink)" stroke="none" font-size="12" font-family="Instrument Sans, sans-serif">Panels: Usage, PRs, Radar</text>
+          <rect x="40" y="204" width="160" height="34" rx="6" stroke="var(--line)" fill="var(--surface)"/>
+          <text x="120" y="225" text-anchor="middle" fill="var(--ink)" stroke="none" font-size="12" font-family="Instrument Sans, sans-serif">Review sidebar (diffs)</text>
+          <rect x="40" y="248" width="160" height="34" rx="6" stroke="var(--line)" fill="var(--surface)"/>
+          <text x="120" y="269" text-anchor="middle" fill="var(--ink)" stroke="none" font-size="12" font-family="Instrument Sans, sans-serif">Desktop + phone layouts</text>
+          <text x="120" y="316" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">native Web Notifications</text>
+
+          <rect x="330" y="20" width="300" height="420" rx="10" stroke="var(--accent)" fill="var(--surface)"/>
+          <text x="480" y="48" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="13" font-weight="600">Glissa server (Node, localhost)</text>
+          <rect x="350" y="66" width="260" height="36" rx="6" stroke="var(--line)" fill="var(--surface-2)"/>
+          <text x="480" y="88" text-anchor="middle" fill="var(--ink)" stroke="none" font-size="12" font-family="Instrument Sans, sans-serif">Express + WebSocket server</text>
+          <rect x="350" y="112" width="260" height="46" rx="6" stroke="var(--line)" fill="var(--surface-2)"/>
+          <text x="480" y="131" text-anchor="middle" fill="var(--ink)" stroke="none" font-size="12" font-family="Instrument Sans, sans-serif">Session manager</text>
+          <text x="480" y="147" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">lifecycle, timers, worktrees, recorder</text>
+          <rect x="350" y="168" width="260" height="46" rx="6" stroke="var(--line)" fill="var(--surface-2)"/>
+          <text x="480" y="187" text-anchor="middle" fill="var(--ink)" stroke="none" font-size="12" font-family="Instrument Sans, sans-serif">Status detection</text>
+          <text x="480" y="203" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">hook signals + OSC-0 title fallback</text>
+          <rect x="350" y="224" width="260" height="36" rx="6" stroke="var(--line)" fill="var(--surface-2)"/>
+          <text x="480" y="246" text-anchor="middle" fill="var(--ink)" stroke="none" font-size="12" font-family="Instrument Sans, sans-serif">Notification manager</text>
+          <rect x="350" y="270" width="260" height="46" rx="6" stroke="var(--line)" fill="var(--surface-2)"/>
+          <text x="480" y="289" text-anchor="middle" fill="var(--ink)" stroke="none" font-size="12" font-family="Instrument Sans, sans-serif">Background lanes</text>
+          <text x="480" y="305" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">PR review, Radar, usage, packs, visions</text>
+          <rect x="350" y="326" width="260" height="36" rx="6" stroke="var(--line)" fill="var(--surface-2)"/>
+          <text x="480" y="348" text-anchor="middle" fill="var(--ink)" stroke="none" font-size="12" font-family="Instrument Sans, sans-serif">Config store + pure cores</text>
+          <text x="480" y="386" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">state in ~/.glissa</text>
+          <text x="480" y="402" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">config, recordings, packs, ledgers</text>
+
+          <rect x="720" y="60" width="180" height="270" rx="10" stroke="var(--line)" fill="var(--surface-2)"/>
+          <text x="810" y="88" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="13" font-weight="600">Claude Code</text>
+          <rect x="738" y="106" width="144" height="56" rx="6" stroke="var(--line)" fill="var(--surface)"/>
+          <text x="810" y="128" text-anchor="middle" fill="var(--ink)" stroke="none" font-size="12" font-family="Instrument Sans, sans-serif">Interactive sessions</text>
+          <text x="810" y="144" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">one PTY per card</text>
+          <rect x="738" y="174" width="144" height="56" rx="6" stroke="var(--line)" fill="var(--surface)"/>
+          <text x="810" y="196" text-anchor="middle" fill="var(--ink)" stroke="none" font-size="12" font-family="Instrument Sans, sans-serif">Headless claude -p</text>
+          <text x="810" y="212" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">lane worker sessions</text>
+          <rect x="738" y="242" width="144" height="56" rx="6" stroke="var(--line)" fill="var(--surface)"/>
+          <text x="810" y="264" text-anchor="middle" fill="var(--ink)" stroke="none" font-size="12" font-family="Instrument Sans, sans-serif">Git worktrees</text>
+          <text x="810" y="280" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">isolation per session</text>
+
+          <line x1="220" y1="128" x2="330" y2="128" stroke="var(--accent)" marker-end="url(#arrA)" marker-start="url(#arrA)"/>
+          <text x="275" y="118" text-anchor="middle" fill="var(--accent)" stroke="none" font-size="10.5" font-family="Spline Sans Mono, monospace">data WS</text>
+          <text x="275" y="146" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10" font-family="Instrument Sans, sans-serif">raw PTY bytes</text>
+
+          <line x1="220" y1="221" x2="330" y2="221" stroke="var(--accent)" marker-end="url(#arrA)" marker-start="url(#arrA)"/>
+          <text x="275" y="211" text-anchor="middle" fill="var(--accent)" stroke="none" font-size="10.5" font-family="Spline Sans Mono, monospace">control WS</text>
+          <text x="275" y="239" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10" font-family="Instrument Sans, sans-serif">JSON: state, settings, kill</text>
+
+          <line x1="630" y1="128" x2="720" y2="128" marker-end="url(#arr)"/>
+          <text x="675" y="118" text-anchor="middle" fill="var(--ink)" stroke="none" font-size="10.5" font-family="Spline Sans Mono, monospace">pty.spawn</text>
+
+          <line x1="720" y1="200" x2="630" y2="200" stroke="var(--signal)" marker-end="url(#arrS)"/>
+          <text x="675" y="190" text-anchor="middle" fill="var(--signal)" stroke="none" font-size="10.5" font-family="Spline Sans Mono, monospace">HTTP hooks</text>
+          <text x="675" y="218" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10" font-family="Instrument Sans, sans-serif">Stop, prompt, agents</text>
+
+          <line x1="720" y1="290" x2="630" y2="290" marker-end="url(#arr)"/>
+          <text x="675" y="280" text-anchor="middle" fill="var(--ink)" stroke="none" font-size="10.5" font-family="Spline Sans Mono, monospace">PTY bytes</text>
+        </g>
+      </svg>
+    </div>
+    <figcaption>The server is the only stateful middle. Terminal bytes flow Claude to browser untouched; status flows through hooks; the browser drives everything through JSON control messages.</figcaption>
+  </figure>
+
+  <h2>How a session lives</h2>
+  <p class="lede">Each dashboard card is one <code>Session</code> object owning one PTY. Sessions move through a seven-state machine with explicit, table-driven transitions; every transition comes from a structural signal, never from parsing rendered terminal output.</p>
+
+  <figure>
+    <div class="fig-scroll">
+      <svg viewBox="0 0 940 240" role="img" aria-label="Session state machine: INITIALIZING to STARTING to RUNNING, RUNNING loops with WAITING on prompts, RUNNING settles to IDLE, IDLE closes to DONE, and any state can exit to FAILED on a PTY error.">
+        <defs>
+          <marker id="s1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="var(--ink)"/>
+          </marker>
+        </defs>
+        <g fill="none" stroke="var(--ink)" stroke-width="1.3">
+          <rect x="20" y="50" width="130" height="44" rx="8" stroke="var(--line)" fill="var(--surface-2)"/>
+          <text x="85" y="77" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="12" font-weight="600">INITIALIZING</text>
+          <rect x="215" y="50" width="110" height="44" rx="8" stroke="var(--line)" fill="var(--surface-2)"/>
+          <text x="270" y="77" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="12" font-weight="600">STARTING</text>
+          <rect x="395" y="50" width="110" height="44" rx="8" stroke="var(--accent)" fill="var(--surface)"/>
+          <text x="450" y="77" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="12" font-weight="600">RUNNING</text>
+          <rect x="575" y="50" width="90" height="44" rx="8" stroke="var(--line)" fill="var(--surface-2)"/>
+          <text x="620" y="77" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="12" font-weight="600">IDLE</text>
+          <rect x="735" y="50" width="90" height="44" rx="8" stroke="var(--line)" fill="var(--surface-2)"/>
+          <text x="780" y="77" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="12" font-weight="600">DONE</text>
+
+          <rect x="395" y="160" width="110" height="44" rx="8" stroke="var(--signal)" fill="var(--surface)"/>
+          <text x="450" y="187" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="12" font-weight="600">WAITING</text>
+          <rect x="735" y="160" width="90" height="44" rx="8" stroke="var(--line)" fill="var(--surface-2)"/>
+          <text x="780" y="187" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="12" font-weight="600">FAILED</text>
+
+          <line x1="150" y1="72" x2="210" y2="72" marker-end="url(#s1)"/>
+          <text x="180" y="63" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10" font-family="Spline Sans Mono, monospace">spawn</text>
+          <line x1="325" y1="72" x2="390" y2="72" marker-end="url(#s1)"/>
+          <text x="358" y="63" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10" font-family="Spline Sans Mono, monospace">output</text>
+          <line x1="505" y1="72" x2="570" y2="72" marker-end="url(#s1)"/>
+          <text x="538" y="63" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10" font-family="Spline Sans Mono, monospace">settled</text>
+          <line x1="665" y1="72" x2="730" y2="72" marker-end="url(#s1)"/>
+          <text x="698" y="63" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10" font-family="Spline Sans Mono, monospace">closed</text>
+
+          <line x1="430" y1="94" x2="430" y2="155" marker-end="url(#s1)"/>
+          <text x="418" y="130" text-anchor="end" fill="var(--ink-soft)" stroke="none" font-size="10" font-family="Spline Sans Mono, monospace">awaiting-input</text>
+          <line x1="470" y1="155" x2="470" y2="99" marker-end="url(#s1)"/>
+          <text x="482" y="130" text-anchor="start" fill="var(--ink-soft)" stroke="none" font-size="10" font-family="Spline Sans Mono, monospace">user answers</text>
+
+          <line x1="640" y1="182" x2="730" y2="182" marker-end="url(#s1)"/>
+          <text x="632" y="186" text-anchor="end" fill="var(--ink-soft)" stroke="none" font-size="10" font-family="Spline Sans Mono, monospace">any state, PTY error exit</text>
+        </g>
+      </svg>
+    </div>
+    <figcaption>The happy path runs left to right. "settled" means a Stop hook arrived and the completion gate cleared; WAITING is a permission prompt pausing a turn, answered by the operator.</figcaption>
+  </figure>
+
+  <ul>
+    <li><strong>Spawn.</strong> <code>pty.spawn</code> launches <code>claude</code> (resolved once at module load; <code>.exe</code> direct, shim installs via <code>cmd.exe /c</code>), through a process-wide spawn gate that serializes ConPTY creation. A per-session managed <code>--settings</code> file injects HTTP hooks, an optional statusLine relay, optional rtk compression, and context packs via <code>--add-dir</code>. The env is scrubbed before spawn.</li>
+    <li><strong>Crash safety.</strong> Every hook payload carries Claude's session id; Glissa persists it immediately, so after a crash or restart, boot auto-resume respawns previously active sessions with <code>--resume</code>. There is deliberately no shutdown flush.</li>
+    <li><strong>Forensics.</strong> An always-on JSONL recorder writes every hook payload, transition, and gate decision to <code>~/.glissa/recordings</code>; raw PTY bytes are opt-in.</li>
+    <li><strong>Pure cores.</strong> Every decision that matters (state transitions, gate releases, merge demotions, notification categories) is a pure function in <code>session/core/</code> with unit tests; <code>sessions.js</code> is the IO shell around them.</li>
+  </ul>
+
+  <h2>Status detection</h2>
+  <p class="lede">The core design bet: status is derived from machine-emitted signals, never from what the terminal looks like.</p>
+
+  <figure>
+    <div class="fig-scroll">
+      <svg viewBox="0 0 920 300" role="img" aria-label="Detection flow: Claude Code hooks and the OSC-0 window title both feed a status source, which merges them with hook precedence; the session state machine consumes the merged signal, gated by background-agent tracking; state changes drive the notification manager.">
+        <g fill="none" stroke="var(--ink)" stroke-width="1.3">
+          <rect x="20" y="40" width="190" height="70" rx="8" stroke="var(--signal)" fill="var(--surface)"/>
+          <text x="115" y="68" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="12.5" font-weight="600">Hooks (authoritative)</text>
+          <text x="115" y="88" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">Stop, UserPromptSubmit,</text>
+          <text x="115" y="102" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">Notification, Subagent*</text>
+
+          <rect x="20" y="180" width="190" height="70" rx="8" stroke="var(--line)" fill="var(--surface)"/>
+          <text x="115" y="208" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="12.5" font-weight="600">OSC-0 title (fallback)</text>
+          <text x="115" y="228" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">spinner glyph = working,</text>
+          <text x="115" y="242" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">idle glyph = ready</text>
+
+          <rect x="330" y="105" width="180" height="80" rx="8" stroke="var(--accent)" fill="var(--surface)"/>
+          <text x="420" y="135" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="12.5" font-weight="600">StatusSource</text>
+          <text x="420" y="155" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">merge, dedup, hold ready</text>
+          <text x="420" y="169" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">in a conflict window</text>
+
+          <rect x="620" y="105" width="180" height="80" rx="8" stroke="var(--line)" fill="var(--surface)"/>
+          <text x="710" y="130" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="12.5" font-weight="600">State machine</text>
+          <text x="710" y="150" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">signal x state matrix;</text>
+          <text x="710" y="164" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">completion gated while</text>
+          <text x="710" y="178" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">background agents live</text>
+
+          <rect x="620" y="230" width="180" height="50" rx="8" stroke="var(--line)" fill="var(--surface)"/>
+          <text x="710" y="252" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="12.5" font-weight="600">Notifications</text>
+          <text x="710" y="269" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">once per work cycle</text>
+
+          <line x1="210" y1="75" x2="325" y2="130" stroke="var(--signal)" marker-end="url(#arrS)"/>
+          <text x="262" y="88" text-anchor="middle" fill="var(--signal)" stroke="none" font-size="10.5" font-family="Spline Sans Mono, monospace">wins</text>
+          <line x1="210" y1="215" x2="325" y2="160" marker-end="url(#arr)"/>
+          <text x="262" y="212" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Spline Sans Mono, monospace">confirms only</text>
+          <line x1="510" y1="145" x2="615" y2="145" marker-end="url(#arr)"/>
+          <text x="562" y="136" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Spline Sans Mono, monospace">event</text>
+          <line x1="710" y1="185" x2="710" y2="225" marker-end="url(#arr)"/>
+          <text x="722" y="210" text-anchor="start" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Spline Sans Mono, monospace">state change</text>
+        </g>
+      </svg>
+    </div>
+    <figcaption>Hooks outrank the title glyph. The title fallback only ever says working, ready, or unknown: it can confirm quiescence, never complete a fresh session or answer a prompt.</figcaption>
+  </figure>
+
+  <ul>
+    <li><strong>Hooks</strong> POST to <code>POST /hook/:glissaId/:event</code> on the local server, authenticated by a per-session bearer token written into the managed settings file. The hook response is itself a channel: a <code>UserPromptSubmit</code> reply can inject a Glissa-authored pack-staleness notice into the turn.</li>
+    <li><strong>/clear and /compact are quiet:</strong> the TUI redraw flashes a fake spinner, so title signals are latched off until the next real prompt.</li>
+    <li><strong>The PTY data path parses nothing</strong> beyond scanning for OSC-0 title sequences.</li>
+  </ul>
+
+  <h2>The completion gate</h2>
+  <p class="lede">The hardest detection problem: a main-agent Stop while background sub-agents, teammates, or shell tasks still run must not mark the card complete. One pure arbiter judges every held release.</p>
+
+  <figure>
+    <div class="fig-scroll">
+      <svg viewBox="0 0 940 260" role="img" aria-label="Completion gate: subagent start and stop counts, declared background tasks, task and teammate lifecycle drains, and TTL prunes all feed the agent tracker; a Stop arriving while work is live is held; decideGateRelease weighs the count and live evidence and returns cancel, gated, wait, or release; only release completes the card.">
+        <defs>
+          <marker id="g1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="var(--ink)"/>
+          </marker>
+          <marker id="g1a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"/>
+          </marker>
+        </defs>
+        <g fill="none" stroke="var(--ink)" stroke-width="1.3">
+          <rect x="20" y="20" width="210" height="46" rx="8" stroke="var(--line)" fill="var(--surface)"/>
+          <text x="125" y="39" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="11.5" font-weight="600">SubagentStart / Stop</text>
+          <text x="125" y="56" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">counted agent ids</text>
+          <rect x="20" y="78" width="210" height="46" rx="8" stroke="var(--line)" fill="var(--surface)"/>
+          <text x="125" y="97" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="11.5" font-weight="600">background_tasks</text>
+          <text x="125" y="114" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">declared on every Stop</text>
+          <rect x="20" y="136" width="210" height="46" rx="8" stroke="var(--line)" fill="var(--surface)"/>
+          <text x="125" y="155" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="11.5" font-weight="600">Task* / TeammateIdle</text>
+          <text x="125" y="172" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">drains per id / per name</text>
+          <rect x="20" y="194" width="210" height="40" rx="8" stroke="var(--line)" fill="var(--surface)"/>
+          <text x="125" y="218" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="11.5" font-weight="600">TTL prunes per type</text>
+
+          <rect x="320" y="90" width="190" height="76" rx="8" stroke="var(--accent)" fill="var(--surface)"/>
+          <text x="415" y="118" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="12.5" font-weight="600">agent-tracker</text>
+          <text x="415" y="138" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">live count =</text>
+          <text x="415" y="152" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">max(counted, declared)</text>
+
+          <rect x="590" y="20" width="170" height="52" rx="8" stroke="var(--signal)" fill="var(--surface)"/>
+          <text x="675" y="41" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="12" font-weight="600">Stop while busy</text>
+          <text x="675" y="60" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">ready is held, not applied</text>
+
+          <rect x="590" y="110" width="190" height="70" rx="8" stroke="var(--accent)" fill="var(--surface)"/>
+          <text x="685" y="136" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="12" font-weight="600">decideGateRelease</text>
+          <text x="685" y="156" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">cancel / gated / wait / release,</text>
+          <text x="685" y="170" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">ordered by signal sequence</text>
+
+          <rect x="590" y="205" width="190" height="46" rx="8" stroke="var(--line)" fill="var(--surface-2)"/>
+          <text x="685" y="224" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="12" font-weight="600">card completes</text>
+          <text x="685" y="241" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">after a 10 s quiet window</text>
+
+          <line x1="230" y1="43" x2="315" y2="105" marker-end="url(#g1)"/>
+          <line x1="230" y1="101" x2="315" y2="120" marker-end="url(#g1)"/>
+          <line x1="230" y1="159" x2="315" y2="140" marker-end="url(#g1)"/>
+          <line x1="230" y1="214" x2="315" y2="155" marker-end="url(#g1)"/>
+
+          <line x1="510" y1="128" x2="585" y2="138" marker-end="url(#g1)"/>
+          <text x="548" y="122" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10" font-family="Spline Sans Mono, monospace">count</text>
+          <line x1="675" y1="72" x2="682" y2="105" marker-end="url(#g1)"/>
+          <line x1="685" y1="180" x2="685" y2="200" stroke="var(--accent)" marker-end="url(#g1a)"/>
+          <text x="697" y="195" text-anchor="start" fill="var(--accent)" stroke="none" font-size="10" font-family="Spline Sans Mono, monospace">release</text>
+        </g>
+      </svg>
+    </div>
+    <figcaption>Special cases the tracker knows: pending self-wakeups (type dream) never gate; hook-less shell and monitor tasks stop counting after a short TTL; idle teammates drain by name count; the release re-arms the title source so a still-spinning turn produces fresh evidence and cancels the hold.</figcaption>
+  </figure>
+
+  <h2>Worktrees: isolation, auto-rebase, merge back</h2>
+  <p class="lede">A session can run in its own git worktree so concurrent agents never collide in one checkout. <code>server/git-workspace.js</code> is the only module allowed to shell <code>git worktree</code>.</p>
+
+  <figure>
+    <div class="fig-scroll">
+      <svg viewBox="0 0 940 270" role="img" aria-label="Worktree flow: the session worktree forks from the integration branch at create; gitdir and reflog watchers nudge an auto-rebase decision when the branch moves; the shared rerere cache replays previously resolved conflicts; a review-approved merge fast-forwards the worktree back into the integration branch.">
+        <defs>
+          <marker id="w1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="var(--ink)"/>
+          </marker>
+          <marker id="w1a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"/>
+          </marker>
+        </defs>
+        <g fill="none" stroke="var(--ink)" stroke-width="1.3">
+          <rect x="20" y="30" width="210" height="56" rx="8" stroke="var(--line)" fill="var(--surface-2)"/>
+          <text x="125" y="53" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="12.5" font-weight="600">integration branch</text>
+          <text x="125" y="72" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">develop / main</text>
+
+          <rect x="620" y="30" width="220" height="56" rx="8" stroke="var(--accent)" fill="var(--surface)"/>
+          <text x="730" y="53" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="12.5" font-weight="600">session worktree</text>
+          <text x="730" y="72" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">glissa/session/&lt;id&gt;</text>
+
+          <line x1="230" y1="46" x2="615" y2="46" marker-end="url(#w1)"/>
+          <text x="422" y="38" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Spline Sans Mono, monospace">fork at create</text>
+          <line x1="615" y1="72" x2="230" y2="72" stroke="var(--accent)" marker-end="url(#w1a)"/>
+          <text x="422" y="88" text-anchor="middle" fill="var(--accent)" stroke="none" font-size="10.5" font-family="Spline Sans Mono, monospace">review approved: fast-forward merge back</text>
+
+          <rect x="300" y="160" width="200" height="60" rx="8" stroke="var(--line)" fill="var(--surface)"/>
+          <text x="400" y="184" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="12" font-weight="600">watchers</text>
+          <text x="400" y="203" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">gitdir + integration reflog</text>
+
+          <rect x="620" y="150" width="220" height="76" rx="8" stroke="var(--line)" fill="var(--surface)"/>
+          <text x="730" y="174" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="12" font-weight="600">eager auto-rebase</text>
+          <text x="730" y="193" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">decideAutoRebase guards: dirty,</text>
+          <text x="730" y="207" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">busy, WAITING, cooldown all refuse</text>
+
+          <rect x="20" y="160" width="210" height="60" rx="8" stroke="var(--line)" fill="var(--surface)"/>
+          <text x="125" y="184" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="12" font-weight="600">shared rerere cache</text>
+          <text x="125" y="203" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">resolve once, replay everywhere</text>
+
+          <line x1="500" y1="188" x2="615" y2="188" marker-end="url(#w1)"/>
+          <text x="558" y="180" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10" font-family="Spline Sans Mono, monospace">branch moved</text>
+          <line x1="230" y1="188" x2="295" y2="188" marker-end="url(#w1)"/>
+          <line x1="730" y1="150" x2="730" y2="91" marker-end="url(#w1)"/>
+          <text x="742" y="125" text-anchor="start" fill="var(--ink-soft)" stroke="none" font-size="10" font-family="Spline Sans Mono, monospace">replays commits</text>
+        </g>
+      </svg>
+    </div>
+    <figcaption>A conflict is never escalated: the failed rebase leaves the worktree untouched, arms a cooldown keyed on both SHAs, and the operator's eventual merge click hits the same conflict where the parked-worktree flow handles it. Uncommitted work is a hard refusal, never stashed.</figcaption>
+  </figure>
+
+  <h2>Notifications</h2>
+  <p class="lede">A lifecycle state machine decides who gets told, when, and where. Terminal categories fire once per work cycle, and a work cycle starts only on a user-driven RUNNING entry, so a self-waking orchestrator cannot spam completions.</p>
+
+  <figure>
+    <div class="fig-scroll">
+      <svg viewBox="0 0 940 270" role="img" aria-label="Notification flow: a state change is judged by decideNotification, creates an entry in the notification manager, passes per-connection focus suppression, and is delivered through the control WebSocket to the browser; OS toast and Telegram are fallback channels.">
+        <defs>
+          <marker id="n1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="var(--ink)"/>
+          </marker>
+        </defs>
+        <g fill="none" stroke="var(--ink)" stroke-width="1.3">
+          <rect x="20" y="95" width="150" height="56" rx="8" stroke="var(--line)" fill="var(--surface-2)"/>
+          <text x="95" y="118" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="12" font-weight="600">state change</text>
+          <text x="95" y="137" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">complete / waiting / failed</text>
+
+          <rect x="220" y="90" width="180" height="66" rx="8" stroke="var(--accent)" fill="var(--surface)"/>
+          <text x="310" y="114" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="12" font-weight="600">decideNotification</text>
+          <text x="310" y="133" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">once per work cycle;</text>
+          <text x="310" y="147" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">user_kill always silent</text>
+
+          <rect x="450" y="95" width="170" height="56" rx="8" stroke="var(--line)" fill="var(--surface)"/>
+          <text x="535" y="118" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="12" font-weight="600">entry lifecycle</text>
+          <text x="535" y="137" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">NotificationManager</text>
+
+          <rect x="680" y="20" width="230" height="62" rx="8" stroke="var(--signal)" fill="var(--surface)"/>
+          <text x="795" y="43" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="12" font-weight="600">focus suppression</text>
+          <text x="795" y="62" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">defers only while EVERY open</text>
+          <text x="795" y="76" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">connection reports focused</text>
+
+          <rect x="680" y="104" width="230" height="48" rx="8" stroke="var(--accent)" fill="var(--surface)"/>
+          <text x="795" y="124" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="12" font-weight="600">control WS notify</text>
+          <text x="795" y="142" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">browser Notification, one tab wins</text>
+
+          <rect x="680" y="164" width="230" height="40" rx="8" stroke="var(--line)" fill="var(--surface)"/>
+          <text x="795" y="188" text-anchor="middle" fill="var(--ink)" stroke="none" font-size="11.5" font-family="Instrument Sans, sans-serif">OS toast (opt-in fallback)</text>
+
+          <rect x="680" y="216" width="230" height="48" rx="8" stroke="var(--line)" fill="var(--surface)"/>
+          <text x="795" y="236" text-anchor="middle" fill="var(--ink)" stroke="none" font-size="11.5" font-family="Instrument Sans, sans-serif">Telegram (opt-in)</text>
+          <text x="795" y="252" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">only when zero connections open</text>
+
+          <line x1="170" y1="123" x2="215" y2="123" marker-end="url(#n1)"/>
+          <line x1="400" y1="123" x2="445" y2="123" marker-end="url(#n1)"/>
+          <line x1="620" y1="110" x2="675" y2="60" marker-end="url(#n1)"/>
+          <text x="640" y="76" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10" font-family="Spline Sans Mono, monospace">deliver?</text>
+          <line x1="620" y1="128" x2="675" y2="128" marker-end="url(#n1)"/>
+          <line x1="620" y1="140" x2="675" y2="184" marker-end="url(#n1)"/>
+          <line x1="620" y1="148" x2="675" y2="236" marker-end="url(#n1)"/>
+        </g>
+      </svg>
+    </div>
+    <figcaption>Suppression defers, never drops: a parked notification delivers when the suppressing condition clears. Suppression is per connection, so a dashboard left focused at the desk cannot mute a paired phone; a fresh connection counts as unfocused until it reports.</figcaption>
+  </figure>
+
+  <h2>PR auto-review lane <span class="when">opt-in, tick every 15 min</span></h2>
+  <p class="lede">Reviews the operator's own GitHub PRs with headless sessions and merges the clean ones unattended. The agent reviews; only the poller merges, behind a hard gate.</p>
+
+  <figure>
+    <div class="fig-scroll">
+      <svg viewBox="0 0 940 300" role="img" aria-label="PR review lane: a 15 minute tick lists and filters the operator's own PRs, plans reviews for new head SHAs, runs a clean PR in place and a conflicted PR in an isolated worktree, reads a result-file verdict, comments findings, and merges only through the poller's gate.">
+        <defs>
+          <marker id="p1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="var(--ink)"/>
+          </marker>
+          <marker id="p1a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"/>
+          </marker>
+        </defs>
+        <g fill="none" stroke="var(--ink)" stroke-width="1.3">
+          <rect x="20" y="20" width="120" height="48" rx="8" stroke="var(--line)" fill="var(--surface-2)"/>
+          <text x="80" y="48" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="12" font-weight="600">tick</text>
+
+          <rect x="190" y="20" width="200" height="56" rx="8" stroke="var(--line)" fill="var(--surface)"/>
+          <text x="290" y="43" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="12" font-weight="600">gh pr list + filter</text>
+          <text x="290" y="62" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">own, non-draft, non-fork</text>
+
+          <rect x="440" y="20" width="180" height="56" rx="8" stroke="var(--line)" fill="var(--surface)"/>
+          <text x="530" y="43" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="12" font-weight="600">plan reviews</text>
+          <text x="530" y="62" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">new head SHA only</text>
+
+          <rect x="190" y="130" width="200" height="64" rx="8" stroke="var(--accent)" fill="var(--surface)"/>
+          <text x="290" y="153" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="12" font-weight="600">clean PR: in place</text>
+          <text x="290" y="172" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">diff-only headless review,</text>
+          <text x="290" y="186" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">no checkout</text>
+
+          <rect x="440" y="130" width="180" height="64" rx="8" stroke="var(--signal)" fill="var(--surface)"/>
+          <text x="530" y="153" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="12" font-weight="600">conflicted: worktree</text>
+          <text x="530" y="172" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">checkout, rebase onto base,</text>
+          <text x="530" y="186" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">resolve, push</text>
+
+          <rect x="690" y="130" width="220" height="64" rx="8" stroke="var(--line)" fill="var(--surface)"/>
+          <text x="800" y="153" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="12" font-weight="600">result file verdict</text>
+          <text x="800" y="172" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">findings out as gh pr comment;</text>
+          <text x="800" y="186" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">missing / invalid = ERROR</text>
+
+          <rect x="690" y="220" width="220" height="70" rx="8" stroke="var(--accent)" fill="var(--surface)"/>
+          <text x="800" y="242" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="12" font-weight="600">merge gate (poller only)</text>
+          <text x="800" y="261" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">head unchanged + checks green</text>
+          <text x="800" y="275" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">+ no workflow files, then merge</text>
+
+          <line x1="140" y1="44" x2="185" y2="44" marker-end="url(#p1)"/>
+          <line x1="390" y1="44" x2="435" y2="44" marker-end="url(#p1)"/>
+          <line x1="500" y1="76" x2="320" y2="125" marker-end="url(#p1)"/>
+          <line x1="540" y1="76" x2="540" y2="125" marker-end="url(#p1)"/>
+          <polyline points="390,180 650,208 685,180" marker-end="url(#p1)"/>
+          <line x1="620" y1="150" x2="685" y2="150" marker-end="url(#p1)"/>
+          <line x1="800" y1="194" x2="800" y2="215" stroke="var(--accent)" marker-end="url(#p1a)"/>
+          <text x="812" y="210" text-anchor="start" fill="var(--accent)" stroke="none" font-size="10" font-family="Spline Sans Mono, monospace">clean</text>
+        </g>
+      </svg>
+    </div>
+    <figcaption>Both no-checks and unknown-workflow states fail closed: a CI-less repo or a transient gh error never auto-merges. Telegram pings fire on actionable transitions only. Inert unless both prReview and Telegram credentials are configured.</figcaption>
+  </figure>
+
+  <h2>Radar: PostHog monitoring and auto-fix <span class="when">opt-in poll loop</span></h2>
+  <p class="lede">Watches PostHog error tracking. A moved issue gets a diagnose-only investigation; with auto-fix on, a major issue (spiking, regressed, or new) gets a reproduce-then-fix agent.</p>
+
+  <figure>
+    <div class="fig-scroll">
+      <svg viewBox="0 0 940 290" role="img" aria-label="Radar lane: the PostHog poll detects a moved issue; decideJobMode picks investigation or, for a major issue with auto-fix enabled and a repo available, a fix job in an isolated worktree; the agent only commits; the server pushes the branch and opens the PR; the PR review lane may then pick it up.">
+        <defs>
+          <marker id="r1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="var(--ink)"/>
+          </marker>
+        </defs>
+        <g fill="none" stroke="var(--ink)" stroke-width="1.3">
+          <rect x="20" y="60" width="180" height="56" rx="8" stroke="var(--line)" fill="var(--surface-2)"/>
+          <text x="110" y="83" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="12" font-weight="600">PostHog poll</text>
+          <text x="110" y="102" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">issue moved?</text>
+
+          <rect x="250" y="55" width="190" height="66" rx="8" stroke="var(--accent)" fill="var(--surface)"/>
+          <text x="345" y="79" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="12" font-weight="600">decideJobMode</text>
+          <text x="345" y="98" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">major? autoFix on?</text>
+          <text x="345" y="112" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">repo available?</text>
+
+          <rect x="490" y="20" width="190" height="56" rx="8" stroke="var(--line)" fill="var(--surface)"/>
+          <text x="585" y="43" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="12" font-weight="600">investigate</text>
+          <text x="585" y="62" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">diagnose-only headless run</text>
+
+          <rect x="490" y="110" width="190" height="70" rx="8" stroke="var(--signal)" fill="var(--surface)"/>
+          <text x="585" y="133" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="12" font-weight="600">fix job (worktree)</text>
+          <text x="585" y="152" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">reproduce first, then patch;</text>
+          <text x="585" y="166" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">agent may only commit</text>
+
+          <rect x="730" y="110" width="190" height="70" rx="8" stroke="var(--accent)" fill="var(--surface)"/>
+          <text x="825" y="133" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="12" font-weight="600">server pushes</text>
+          <text x="825" y="152" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">git push + gh pr create,</text>
+          <text x="825" y="166" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">refuses workflow-file diffs</text>
+
+          <rect x="730" y="210" width="190" height="56" rx="8" stroke="var(--line)" fill="var(--surface-2)"/>
+          <text x="825" y="233" text-anchor="middle" fill="var(--ink)" stroke="none" font-size="11.5" font-family="Instrument Sans, sans-serif">PR review lane may pick it up</text>
+          <text x="825" y="250" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">agent-to-agent handoff, gated</text>
+
+          <line x1="200" y1="88" x2="245" y2="88" marker-end="url(#r1)"/>
+          <line x1="440" y1="72" x2="485" y2="52" marker-end="url(#r1)"/>
+          <text x="462" y="50" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10" font-family="Spline Sans Mono, monospace">minor</text>
+          <line x1="440" y1="104" x2="485" y2="136" marker-end="url(#r1)"/>
+          <text x="462" y="136" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10" font-family="Spline Sans Mono, monospace">major</text>
+          <line x1="680" y1="145" x2="725" y2="145" marker-end="url(#r1)"/>
+          <line x1="825" y1="180" x2="825" y2="205" marker-end="url(#r1)"/>
+        </g>
+      </svg>
+    </div>
+    <figcaption>Nothing in this lane merges. The agent's deny-list blocks git push and gh outright, so its whole reach is a commit inside a throwaway worktree; the server builds every argument itself and reports the honest branch state on any failure. FIXED pings the phone with the repro status and PR link.</figcaption>
+  </figure>
+
+  <h2>Usage tracking <span class="when core">on by default, 5 min scans</span></h2>
+  <p class="lede">Reports language-model tokens and estimated list-price cost from local transcript files (Claude, plus Codex and Grok CLI trees). Never parses PTY bytes or rendered output.</p>
+
+  <figure>
+    <div class="fig-scroll">
+      <svg viewBox="0 0 940 320" role="img" aria-label="Usage lane: Claude, Codex, and Grok transcripts, the statusLine relay, and the lane ledger feed an incremental scanner; pure cores compute blocks, pricing, budgets, and anomalies; results flow to the dashboard report, the durable warehouse, and once-per-period budget alerts.">
+        <defs>
+          <marker id="u1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="var(--ink)"/>
+          </marker>
+        </defs>
+        <g fill="none" stroke="var(--ink)" stroke-width="1.3">
+          <rect x="20" y="20" width="200" height="46" rx="8" stroke="var(--line)" fill="var(--surface)"/>
+          <text x="120" y="39" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="11.5" font-weight="600">Claude transcripts</text>
+          <text x="120" y="56" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">~/.claude JSONL</text>
+          <rect x="20" y="78" width="200" height="46" rx="8" stroke="var(--line)" fill="var(--surface)"/>
+          <text x="120" y="97" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="11.5" font-weight="600">Codex / Grok trees</text>
+          <text x="120" y="114" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">per-vendor parsers, own dedup</text>
+          <rect x="20" y="136" width="200" height="52" rx="8" stroke="var(--signal)" fill="var(--surface)"/>
+          <text x="120" y="155" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="11.5" font-weight="600">statusLine relay</text>
+          <text x="120" y="172" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">official plan limits, per turn</text>
+          <rect x="20" y="200" width="200" height="52" rx="8" stroke="var(--line)" fill="var(--surface)"/>
+          <text x="120" y="219" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="11.5" font-weight="600">lane ledger</text>
+          <text x="120" y="236" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">session id to spawning lane</text>
+
+          <rect x="300" y="90" width="180" height="76" rx="8" stroke="var(--accent)" fill="var(--surface)"/>
+          <text x="390" y="116" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="12" font-weight="600">usage-scanner</text>
+          <text x="390" y="136" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">incremental appended-byte</text>
+          <text x="390" y="150" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">reads, global dedup</text>
+
+          <rect x="540" y="90" width="180" height="76" rx="8" stroke="var(--line)" fill="var(--surface)"/>
+          <text x="630" y="116" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="12" font-weight="600">pure cores</text>
+          <text x="630" y="136" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">5h blocks, pricing tiers,</text>
+          <text x="630" y="150" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">budgets, anomaly, savings</text>
+
+          <rect x="770" y="70" width="150" height="66" rx="8" stroke="var(--accent)" fill="var(--surface)"/>
+          <text x="845" y="94" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="12" font-weight="600">usage report</text>
+          <text x="845" y="113" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">dashboard Usage tab,</text>
+          <text x="845" y="127" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">per-card chips</text>
+
+          <rect x="540" y="210" width="180" height="60" rx="8" stroke="var(--line)" fill="var(--surface-2)"/>
+          <text x="630" y="234" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="12" font-weight="600">warehouse</text>
+          <text x="630" y="253" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">day-by-model rollups, 365 d</text>
+
+          <rect x="770" y="210" width="150" height="60" rx="8" stroke="var(--signal)" fill="var(--surface)"/>
+          <text x="845" y="234" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="12" font-weight="600">budget alerts</text>
+          <text x="845" y="253" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">50/75/100, once per period</text>
+
+          <line x1="220" y1="43" x2="295" y2="105" marker-end="url(#u1)"/>
+          <line x1="220" y1="101" x2="295" y2="120" marker-end="url(#u1)"/>
+          <line x1="220" y1="162" x2="295" y2="140" marker-end="url(#u1)"/>
+          <line x1="220" y1="226" x2="295" y2="155" marker-end="url(#u1)"/>
+          <line x1="480" y1="128" x2="535" y2="128" marker-end="url(#u1)"/>
+          <line x1="720" y1="110" x2="765" y2="100" marker-end="url(#u1)"/>
+          <line x1="630" y1="166" x2="630" y2="205" marker-end="url(#u1)"/>
+          <text x="642" y="190" text-anchor="start" fill="var(--ink-soft)" stroke="none" font-size="10" font-family="Spline Sans Mono, monospace">complete pass only</text>
+          <line x1="720" y1="150" x2="765" y2="225" marker-end="url(#u1)"/>
+        </g>
+      </svg>
+    </div>
+    <figcaption>Live scan wins inside its coverage; the warehouse fills in days the deleted transcripts can no longer show, labelled as history. Lane attribution is exact (only sessions Glissa recorded spawning), so "the PR review lane cost $4.20 this week" is answerable. Costs are estimates, never bills.</figcaption>
+  </figure>
+
+  <h2>Context packs: the context mill <span class="when core">fs.watch + 15 min sweep</span></h2>
+  <p class="lede">A pack gathers local docs, house rules, and curated skills into a versioned, token-budgeted directory a session is pointed at with <code>--add-dir</code>. Deterministic by contract: same spec plus same content yields byte-identical output, so the version is a hash.</p>
+
+  <figure>
+    <div class="fig-scroll">
+      <svg viewBox="0 0 940 300" role="img" aria-label="Context mill: specs and sources feed the pure builder, which atomically publishes versioned pack directories; sessions receive packs at spawn via add-dir; watchers and a sweep rebuild on change; a rebuild broadcasts staleness to the dashboard and injects a notice into the next turn; read telemetry reports whether the agent opened the pack.">
+        <defs>
+          <marker id="k1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="var(--ink)"/>
+          </marker>
+          <marker id="k1s" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="var(--signal)"/>
+          </marker>
+        </defs>
+        <g fill="none" stroke="var(--ink)" stroke-width="1.3">
+          <rect x="20" y="30" width="190" height="64" rx="8" stroke="var(--line)" fill="var(--surface-2)"/>
+          <text x="115" y="54" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="12" font-weight="600">specs + sources</text>
+          <text x="115" y="73" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">packs/ in the install,</text>
+          <text x="115" y="86" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">local files only</text>
+
+          <rect x="270" y="30" width="190" height="64" rx="8" stroke="var(--accent)" fill="var(--surface)"/>
+          <text x="365" y="54" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="12" font-weight="600">pack builder</text>
+          <text x="365" y="73" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">pure plan, hard token budget,</text>
+          <text x="365" y="86" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">atomic publish</text>
+
+          <rect x="520" y="30" width="200" height="64" rx="8" stroke="var(--line)" fill="var(--surface)"/>
+          <text x="620" y="54" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="12" font-weight="600">built packs</text>
+          <text x="620" y="73" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">~/.glissa/packs/built/name/</text>
+          <text x="620" y="86" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">current/, hash-versioned</text>
+
+          <rect x="770" y="30" width="150" height="64" rx="8" stroke="var(--line)" fill="var(--surface)"/>
+          <text x="845" y="54" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="12" font-weight="600">session spawn</text>
+          <text x="845" y="73" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">--add-dir per pack;</text>
+          <text x="845" y="86" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">unbuilt pack is skipped</text>
+
+          <rect x="270" y="160" width="190" height="60" rx="8" stroke="var(--line)" fill="var(--surface)"/>
+          <text x="365" y="184" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="12" font-weight="600">watchers + sweep</text>
+          <text x="365" y="203" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">debounced fs.watch, 15 min net</text>
+
+          <rect x="520" y="160" width="200" height="76" rx="8" stroke="var(--signal)" fill="var(--surface)"/>
+          <text x="620" y="184" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="12" font-weight="600">staleness channel</text>
+          <text x="620" y="203" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">pack-updated broadcast (chip);</text>
+          <text x="620" y="217" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">Glissa-authored notice in the next</text>
+          <text x="620" y="231" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">UserPromptSubmit hook reply</text>
+
+          <rect x="770" y="160" width="150" height="60" rx="8" stroke="var(--line)" fill="var(--surface)"/>
+          <text x="845" y="184" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="12" font-weight="600">read telemetry</text>
+          <text x="845" y="203" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">did the agent open it?</text>
+
+          <line x1="210" y1="62" x2="265" y2="62" marker-end="url(#k1)"/>
+          <line x1="460" y1="62" x2="515" y2="62" marker-end="url(#k1)"/>
+          <line x1="720" y1="62" x2="765" y2="62" marker-end="url(#k1)"/>
+          <line x1="290" y1="160" x2="330" y2="99" marker-end="url(#k1)"/>
+          <text x="290" y="135" text-anchor="end" fill="var(--ink-soft)" stroke="none" font-size="10" font-family="Spline Sans Mono, monospace">rebuild on change</text>
+          <line x1="620" y1="99" x2="620" y2="155" stroke="var(--signal)" marker-end="url(#k1s)"/>
+          <text x="632" y="130" text-anchor="start" fill="var(--signal)" stroke="none" font-size="10" font-family="Spline Sans Mono, monospace">new version</text>
+          <line x1="845" y1="99" x2="845" y2="155" marker-end="url(#k1)"/>
+          <text x="857" y="130" text-anchor="start" fill="var(--ink-soft)" stroke="none" font-size="10" font-family="Spline Sans Mono, monospace">Read hooks</text>
+        </g>
+      </svg>
+    </div>
+    <figcaption>A rebuild that would republish the same version writes nothing. Skills in a delivered pack hot-reload mid-session; CLAUDE.md and rules reach only the next spawn, which is exactly the gap the staleness chip and the notice channel close. The notice is Glissa-authored text only, never pack content, so the live channel cannot become an injection relay. An opt-in distiller lane regenerates derived source files with headless sessions.</figcaption>
+  </figure>
+
+  <h2>Visions: live markdown co-editor <span class="when">opt-in, per keystroke</span></h2>
+  <p class="lede">An editor relay speaks LSP over stdio and connects to a dedicated <code>/visions</code> WebSocket. Glissa mirrors the open documents and answers in tiers, from instant lint rules to a gated headless model dispatch.</p>
+
+  <figure>
+    <div class="fig-scroll">
+      <svg viewBox="0 0 940 240" role="img" aria-label="Visions lane: the editor's LSP relay connects over the visions WebSocket; per-connection document buffers track versions; tier 1 pure rules return diagnostics and quick fixes instantly; a typed blank-line boundary can trigger a gated tier 3 dispatch, one ephemeral headless session whose results come back as comments, a raised hand, or model diagnostics.">
+        <defs>
+          <marker id="v1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="var(--ink)"/>
+          </marker>
+        </defs>
+        <g fill="none" stroke="var(--ink)" stroke-width="1.3">
+          <rect x="20" y="80" width="170" height="64" rx="8" stroke="var(--line)" fill="var(--surface-2)"/>
+          <text x="105" y="104" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="12" font-weight="600">editor (LSP relay)</text>
+          <text x="105" y="123" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">stdio framing, per project</text>
+
+          <rect x="250" y="84" width="150" height="56" rx="8" stroke="var(--accent)" fill="var(--surface)"/>
+          <text x="325" y="107" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="12" font-weight="600">/visions WS</text>
+          <text x="325" y="126" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">local listener only</text>
+
+          <rect x="460" y="80" width="180" height="64" rx="8" stroke="var(--line)" fill="var(--surface)"/>
+          <text x="550" y="104" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="12" font-weight="600">document buffers</text>
+          <text x="550" y="123" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">per connection, versioned</text>
+
+          <rect x="700" y="20" width="220" height="60" rx="8" stroke="var(--line)" fill="var(--surface)"/>
+          <text x="810" y="44" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="12" font-weight="600">tier 1 rules</text>
+          <text x="810" y="63" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">markdown lint, quick fixes, autoFix</text>
+
+          <rect x="700" y="120" width="220" height="84" rx="8" stroke="var(--signal)" fill="var(--surface)"/>
+          <text x="810" y="144" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="12" font-weight="600">tier 3 dispatch</text>
+          <text x="810" y="163" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">gated ephemeral claude -p;</text>
+          <text x="810" y="177" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">returns comments, a raised hand,</text>
+          <text x="810" y="191" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">model diagnostics, intent proposals</text>
+
+          <line x1="190" y1="112" x2="245" y2="112" marker-end="url(#v1)" marker-start="url(#v1)"/>
+          <line x1="400" y1="112" x2="455" y2="112" marker-end="url(#v1)"/>
+          <line x1="640" y1="96" x2="695" y2="56" marker-end="url(#v1)"/>
+          <text x="668" y="62" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10" font-family="Spline Sans Mono, monospace">debounced sweep</text>
+          <line x1="640" y1="128" x2="695" y2="156" marker-end="url(#v1)"/>
+          <text x="668" y="158" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10" font-family="Spline Sans Mono, monospace">blank-line pause</text>
+        </g>
+      </svg>
+    </div>
+    <figcaption>The dispatch prompt fences the buffer as data, runs with a narrow allow-list (never skip-permissions), and validates a strict result contract. A durable machine-wide intent (what is being built) persists beside the config, with operator corrections acting as a lock.</figcaption>
+  </figure>
+
+  <h2>Remote mode <span class="when">opt-in, config only</span></h2>
+  <p class="lede">Remote access is a second listener, not a wider bind. A pairing cookie is treated as RCE-grade access: the control WS can spawn a permissionless session in any directory.</p>
+
+  <figure>
+    <div class="fig-scroll">
+      <svg viewBox="0 0 940 220" role="img" aria-label="Remote mode: the local dashboard uses the unauthenticated local listener; a paired phone reaches a reverse proxy, which fronts a second loopback listener that requires a pairing cookie; both listeners share one Express app, and trust is derived from the listener port, never a header.">
+        <defs>
+          <marker id="m1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="var(--ink)"/>
+          </marker>
+        </defs>
+        <g fill="none" stroke="var(--ink)" stroke-width="1.3">
+          <rect x="20" y="130" width="140" height="52" rx="8" stroke="var(--line)" fill="var(--surface-2)"/>
+          <text x="90" y="152" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="12" font-weight="600">paired phone</text>
+          <text x="90" y="170" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">HttpOnly cookie</text>
+
+          <rect x="220" y="130" width="170" height="52" rx="8" stroke="var(--line)" fill="var(--surface)"/>
+          <text x="305" y="152" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="12" font-weight="600">reverse proxy</text>
+          <text x="305" y="170" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">e.g. tailscale serve</text>
+
+          <rect x="450" y="120" width="200" height="66" rx="8" stroke="var(--signal)" fill="var(--surface)"/>
+          <text x="550" y="144" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="12" font-weight="600">remote listener</text>
+          <text x="550" y="163" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">loopback; cookie required,</text>
+          <text x="550" y="177" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">only /pair/* open</text>
+
+          <rect x="450" y="30" width="200" height="52" rx="8" stroke="var(--line)" fill="var(--surface-2)"/>
+          <text x="550" y="52" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="12" font-weight="600">local listener</text>
+          <text x="550" y="70" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">127.0.0.1, unauthenticated</text>
+
+          <rect x="720" y="70" width="200" height="76" rx="8" stroke="var(--accent)" fill="var(--surface)"/>
+          <text x="820" y="96" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="12" font-weight="600">one Express app</text>
+          <text x="820" y="116" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">trust = listener port,</text>
+          <text x="820" y="130" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">never a header</text>
+
+          <line x1="160" y1="156" x2="215" y2="156" marker-end="url(#m1)"/>
+          <line x1="390" y1="156" x2="445" y2="156" marker-end="url(#m1)"/>
+          <line x1="650" y1="146" x2="715" y2="120" marker-end="url(#m1)"/>
+          <line x1="650" y1="60" x2="715" y2="90" marker-end="url(#m1)"/>
+        </g>
+      </svg>
+    </div>
+    <figcaption>Pairing: glissa pair mints a single-use URL with a 10 minute TTL; redemption sets an HttpOnly cookie; only hashes ever touch disk, and revocation propagates without a restart. Remote config is unreachable from the control WebSocket by design: config file or CLI only. Server-machine side effects refuse remote callers.</figcaption>
+  </figure>
+
+  <h2>When things happen</h2>
+  <div class="table-scroll">
+  <table>
+    <tr><th>Moment</th><th>What runs</th></tr>
+    <tr><td>boot</td><td>Config load, project id assignment, worktree reconciliation, then auto-resume of sessions whose <code>wasActive</code> marker survived, each through the spawn gate. Lane pollers wire up after.</td></tr>
+    <tr><td>spawn</td><td>Settings file written (hooks, statusLine, rtk hook), packs resolved to <code>--add-dir</code>, env scrubbed, PTY created, recorder armed.</td></tr>
+    <tr><td>per turn</td><td>Hook callbacks move the state machine; turn end triggers worktree diff recheck, post-turn hygiene checks, a debounced usage refresh, and possibly a notification.</td></tr>
+    <tr><td>continuous</td><td>fs watchers on worktree gitdirs, integration-branch reflog, pack sources, and the pairings file; xterm renders whatever bytes arrive.</td></tr>
+    <tr><td>intervals</td><td>PR poller (15 min), pack sweep (15 min), usage scans (5 min, dashboard-gated), TTL prunes on agent tracking.</td></tr>
+    <tr><td>shutdown</td><td>Signals route through one guarded handler that awaits PTY kill reaps (bounded 3 s) and exits. No config flush: persisted-at-hook-time state is the resume plan.</td></tr>
+  </table>
+  </div>
+
+  <h2>Where things live</h2>
+  <div class="table-scroll">
+  <table>
+    <tr><th>Location</th><th>Contents</th></tr>
+    <tr><td>repo install</td><td>Server code (CommonJS), frontend (ES modules bundled by Vite), pack specs and sources. Distributed as a GitHub install, never a registry package.</td></tr>
+    <tr><td>~/.glissa/</td><td>Runtime state: <code>config.json</code>, session recordings, built packs, usage warehouse and lane ledger, PR review state, pairing hashes, uploads, pricing cache.</td></tr>
+    <tr><td>pure cores</td><td><code>session/core/</code>, <code>server/core/</code>, and <code>*-core.mjs</code> in the frontend: every decision that matters is a pure function with unit tests; IO shells stay thin.</td></tr>
+    <tr><td>trust boundary</td><td>Localhost only. Both WebSockets are unauthenticated by design (single-user machine); the two HTTP write ingresses (hooks, image upload) carry per-session tokens or pairing cookies. Never bind 0.0.0.0.</td></tr>
+  </table>
+  </div>
+
+  <p class="footline">glissa / architecture overview / generated 2026-08-22</p>
+</div>

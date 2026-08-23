@@ -10,6 +10,7 @@ Design documents, postmortems, and operator guides. Background reading for why t
 
 | File | Description |
 |------|-------------|
+| `architecture-overview.html` | Architecture map (self-contained HTML page with inline SVG diagrams per subsystem, open in a browser): tiers, session lifecycle and state machine, detection flow, completion gate, worktree auto-rebase and merge, notification flow, PR review, Radar, usage, packs, Visions, remote mode, timing, storage |
 | `postmortem-terminal-detection.md` | Postmortem of the content-scraping detection era; rationale for the structural-signal rewrite and the signal x state matrix |
 | `distribution.md` | How Glissa ships: GitHub repo as source of truth, `claude-setup` provisioning for servers, `npm i -g github:johncwaters/glissa` for a standalone CLI, no registry publishing |
 | `testing-cli.md` | Manual CLI test scenarios (`--help`, `--version`, `--port`, `--config`, `doctor`, `npm pack`) to run before a release |
