@@ -33,6 +33,12 @@ Version-controlled input to the context mill: pack specs and the shared source m
 
 Every key is validated by `validatePackSpec` in `../server/core/pack-core.js`; unknown keys are a build error, not a silent no-op. A source sets exactly one of `path` (a file or a directory taken whole) or `glob` (`**`, `*`, `?`). Relative patterns resolve against this directory, so a spec reads the same from a repo checkout or a global install; absolute patterns are allowed. `optional: true` is allowed only on a source and means a missing match is skipped instead of failing the build, for derived files the distiller has not written yet. `budgetTokens` is a hard gate: over budget means no output at all.
 
+### Data sources and `{{glissaHome}}`
+
+A source may set `data: true`. Its files are published under `data/<slug>/` as plain files instead of being folded into `.claude/rules/`, and the index gets only a fixed pointer line naming them as recorded observation, never their content. That is the carrier for long-term memory (`docs/plan-visions-3.md`, M16), and two rules make it structural rather than a convention: a source pattern may name `{{glissaHome}}` (the directory `config.json` lives in, the one runtime path a version-controlled spec may name) only when it anchors the whole pattern, carries no `..` segment, and sets `data: true`; and a build FAILS, publishing nothing, when any line of a data file turns up in `CLAUDE.md` or under `.claude/rules/`.
+
+`specs/memory.pack.json` is the shipped example. It carries the GLOBAL projection file (`memory/dist/current/MEMORY.md`) and nothing under `projects/`: a pack is built once per name and delivered to every project that names it, so a per-project topic file in it would ride into an unrelated repo's session. Per-project memory reaches a session through the Visions dispatch prompt and the operator's own pointer line instead. Like every spec it is consumer-gated, so it costs nothing until a project delivers it.
+
 `distill` is optional. Each entry declares one derived output path under `packs/`, the local source files to summarize, and carbon-unit written `instructions`. The distiller writes only the output file, stamps line 1 with the source hashes, and reports `DISTILLED`, `NO_CHANGE`, or `ERROR` through its result file. The scheduled lane is gated by `config.packDistiller`; manual `glissa pack distill [name] [--dry-run]` is always allowed.
 
 ## For AI Agents

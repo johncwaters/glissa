@@ -1,6 +1,9 @@
 'use strict';
 
 // M13 of docs/plan-visions-3.md: every trust field is stamped from which funnel fired, never read from input.
+// M16 adds the read half: the lines one dispatch is handed, in the projection's own bullet shape.
+
+const { effectiveRank, projectionBulletFrom } = require('./memory-core');
 
 const MEMORY_VENDOR = 'glissa';
 const MAX_FINDING_ID_CHARS = 120;
@@ -211,7 +214,34 @@ function readDismissParams(params) {
   return { uri, id };
 }
 
+// Bounded twice: a dispatch prompt is a budget, and a record is capped but a retrieval set is not.
+const MAX_DELIVERED_RECORDS = 8;
+const MAX_DELIVERED_CHARS = 4000;
+
+/*
+ * The lines one dispatch is handed, rendered in the SAME bullet shape the projection publishes so a
+ * delivered line and its published twin normalize to one echo hash. Every line the caller registers
+ * with the store, which is what closes the loop against a session quoting its memory back at it.
+ */
+function memoryDeliveryLines(records, { maxRecords = MAX_DELIVERED_RECORDS, maxChars = MAX_DELIVERED_CHARS } = {}) {
+  const lines = [];
+  let used = 0;
+  for (const record of Array.isArray(records) ? records : []) {
+    if (lines.length >= maxRecords) break;
+    if (!record || typeof record.id !== 'string' || typeof record.text !== 'string') continue;
+    const line = projectionBulletFrom({
+      ids: [record.id], rank: effectiveRank(record), locked: record.locked === true, text: record.text,
+    });
+    if (used + line.length + 1 > maxChars) break;
+    used += line.length + 1;
+    lines.push(line);
+  }
+  return lines;
+}
+
 module.exports = {
+  MAX_DELIVERED_CHARS,
+  MAX_DELIVERED_RECORDS,
   MAX_FINDING_ID_CHARS,
   MAX_SERVED_KEYS,
   MEMORY_VENDOR,
@@ -223,6 +253,7 @@ module.exports = {
   fixFeedbackInput,
   intentMemoryInput,
   latestIntentHeads,
+  memoryDeliveryLines,
   projectTagFor,
   readDismissParams,
   sanitizeOneLine,

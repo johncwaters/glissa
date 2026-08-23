@@ -940,3 +940,56 @@ test('the digest sits above the standing findings, and below the intent it gives
   const bufferFenceAt = prompt.indexOf('<<<GLISSA-BUFFER-');
   assert.ok(intentAt < digestAt && digestAt < findingsAt && findingsAt < bufferFenceAt);
 });
+
+// M16 of docs/plan-visions-3.md: the memory section, in its own fence beside the activity digest.
+
+test('a prompt with no memory is byte-identical to one built before the section existed', () => {
+  const base = { uri: URI, text: '# Title\n', resultPath: '/tmp/r.json' };
+  const withoutMemory = buildVisionsPrompt(base);
+  assert.equal(buildVisionsPrompt({ ...base, memory: null }), withoutMemory);
+  assert.equal(buildVisionsPrompt({ ...base, memory: { text: '   ', count: 0 } }), withoutMemory);
+  assert.equal(withoutMemory.includes('Long-term memory'), false);
+});
+
+test('memory and activity never share a marker, so neither can close the other fence', () => {
+  const { activitySection, memorySection } = require('../server/core/visions-dispatch-core');
+  const text = 'the same bytes in both corpora';
+  const [, activityOpener] = activitySection(text);
+  const [, memoryOpener] = memorySection({ text, count: 1 });
+  assert.notEqual(activityOpener, memoryOpener);
+  assert.match(memoryOpener, /^<<<GLISSA-MEMORY-/);
+});
+
+test('the memory heading names the projection version and the count, and the records stay fenced', () => {
+  const { memorySection } = require('../server/core/visions-dispatch-core');
+  const version = 'a'.repeat(64);
+  const [heading, opener, body] = memorySection({
+    text: '- [m-0123456789abcdef] (reported) the gate lives in rebase-gate.js',
+    count: 1,
+    version,
+  });
+  assert.equal(heading.includes(`(projection ${'a'.repeat(12)}): 1 recorded observation(s).`), true);
+  assert.equal(heading.includes('rebase-gate.js'), false);
+  assert.equal(body.includes('rebase-gate.js'), true);
+  assert.match(opener, /^<<</);
+});
+
+test('a version that is not a projection hash is left out rather than printed', () => {
+  const { memorySection } = require('../server/core/visions-dispatch-core');
+  const [heading] = memorySection({ text: '- [m-0123456789abcdef] (model) something', count: 1, version: 'v2 ]]> ' });
+  assert.equal(heading.includes('projection'), false);
+});
+
+test('the memory section sits below the activity digest and above the standing findings', () => {
+  const prompt = buildVisionsPrompt({
+    uri: URI,
+    text: '# Title\n',
+    digest: 'Recent activity on this machine, newest first:\n- git 1m ago: fix the gate',
+    memory: { text: '- [m-0123456789abcdef] (reported) remembered', count: 1 },
+    resultPath: '/tmp/r.json',
+  });
+  const digestAt = prompt.indexOf('GLISSA-ACTIVITY-');
+  const memoryAt = prompt.indexOf('GLISSA-MEMORY-');
+  const findingsAt = prompt.indexOf('Standing tier 2 findings');
+  assert.ok(digestAt < memoryAt && memoryAt < findingsAt);
+});

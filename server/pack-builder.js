@@ -11,8 +11,8 @@ const fsp = require('node:fs/promises');
 const crypto = require('node:crypto');
 const path = require('node:path');
 
-const { glissaHomeDir } = require('./config-store');
-const { PACK_NAME_RE, isPackRelativePath, matchesGlob, planPackBuild, sha256, sourcePattern, validatePackSpec } = require('./core/pack-core');
+const { glissaHomeDir, resolveConfigPath } = require('./config-store');
+const { GLISSA_HOME_PLACEHOLDER, PACK_NAME_RE, isDataSource, isPackRelativePath, matchesGlob, planPackBuild, sha256, sourcePattern, validatePackSpec } = require('./core/pack-core');
 
 const SPEC_SUFFIX = '.pack.json';
 // Source patterns resolve against packs/, so a shared spec reads the same whether it runs from a repo
@@ -33,11 +33,51 @@ function defaultBuiltRoot() {
   return path.join(glissaHomeDir(), 'packs', 'built');
 }
 
+/*
+ * The one runtime path a version-controlled spec may name: `{{glissaHome}}` is the directory config.json
+ * lives in (docs/plan-visions-3.md, M16), which is where the memory projection and every other config
+ * sibling sits. Resolved lazily, so a spec that never names it never asks where the config is.
+ */
+function defaultGlissaHome() {
+  return path.dirname(resolveConfigPath());
+}
+
+function expandPlaceholders(pattern, glissaHome) {
+  if (!pattern.includes(GLISSA_HOME_PLACEHOLDER)) return pattern;
+  const home = toPosix(path.resolve(glissaHome || defaultGlissaHome()));
+  return pattern.split(GLISSA_HOME_PLACEHOLDER).join(home);
+}
+
 /** A pattern starting with `**` is a suffix matcher and stays as written; anything else is anchored to baseDir. */
-function resolvePattern(pattern, baseDir) {
+function resolvePattern(rawPattern, baseDir, glissaHome = null) {
+  const pattern = expandPlaceholders(rawPattern, glissaHome);
   if (pattern.startsWith('**')) return pattern;
   if (path.isAbsolute(pattern)) return toPosix(path.resolve(pattern));
   return toPosix(path.resolve(baseDir, pattern));
+}
+
+/*
+ * The resolved-path re-check under the placeholder, the same shape distillOutputPath applies to a
+ * distill output: spec validation already refuses a `..` segment, and this is the layer that holds
+ * whatever the resolution actually produced.
+ */
+function assertInsideGlissaHome(rawPattern, resolved, glissaHome) {
+  if (!rawPattern.includes(GLISSA_HOME_PLACEHOLDER)) return;
+  const home = path.resolve(glissaHome || defaultGlissaHome());
+  const relative = path.relative(home, resolved.replace(/\/+$/, ''));
+  if (relative && !relative.startsWith('..') && !path.isAbsolute(relative)) return;
+  throw new Error(`source pattern "${rawPattern}" resolves outside the Glissa config directory`);
+}
+
+/*
+ * Where a data file's delivered path is measured from: the pattern's glob-free root, or its parent when
+ * that root IS the one file matched. Never displayPath, whose fallback for a file outside packs/ is the
+ * absolute path, which would print the operator's home directory into the pack and the manifest.
+ */
+function dataBaseDir(resolvedPattern, isLiteral, matched) {
+  const rootPosix = toPosix(path.resolve(literalRoot(resolvedPattern).root));
+  if (isLiteral && matched.length === 1 && matched[0] === rootPosix) return path.dirname(rootPosix);
+  return rootPosix;
 }
 
 /** The deepest glob-free prefix of a pattern: where the walk starts, and whether there is a glob at all. */
@@ -102,11 +142,11 @@ async function walkFiles(rootDir, found = [], visitedRealDirs = new Set()) {
  * asks for these rather than re-deriving them, so the walk and the watch always agree on where a
  * pack's sources live. A root that does not exist yet is simply absent; the interval sweep covers it.
  */
-async function packWatchRoots(spec, { baseDir = DEFAULT_PACKS_DIR } = {}) {
+async function packWatchRoots(spec, { baseDir = DEFAULT_PACKS_DIR, glissaHome = null } = {}) {
   const roots = new Set();
   const addRoot = async (pattern) => {
     if (typeof pattern !== 'string' || pattern.length === 0) return;
-    const { root } = literalRoot(resolvePattern(pattern, baseDir));
+    const { root } = literalRoot(resolvePattern(pattern, baseDir, glissaHome));
     if (!root) return;
     const stats = await statOrNull(root);
     if (!stats) return;
@@ -134,20 +174,23 @@ async function candidatesFor(resolvedPattern) {
   return { candidates: [toPosix(path.resolve(root))], isLiteral };
 }
 
-async function readFilesForSource(source, sourceIndex, baseDir, { keepFullPath = false } = {}) {
-  const resolved = resolvePattern(sourcePattern(source), baseDir);
-  const excludes = (source.exclude || []).map((pattern) => resolvePattern(pattern, baseDir));
+async function readFilesForSource(source, sourceIndex, baseDir, { keepFullPath = false, glissaHome = null } = {}) {
+  const pattern = sourcePattern(source);
+  const resolved = resolvePattern(pattern, baseDir, glissaHome);
+  assertInsideGlissaHome(pattern, resolved, glissaHome);
+  const excludes = (source.exclude || []).map((entry) => resolvePattern(entry, baseDir, glissaHome));
   const { candidates, isLiteral } = await candidatesFor(resolved);
 
   const matched = candidates.filter((full) => {
     if (!isLiteral && !matchesGlob(resolved, full)) return false;
-    return !excludes.some((pattern) => matchesGlob(pattern, full));
+    return !excludes.some((entry) => matchesGlob(entry, full));
   });
 
+  const dataBase = isDataSource(source) ? dataBaseDir(resolved, isLiteral, matched) : null;
   const files = [];
   for (const full of matched) {
     const file = {
-      relPath: displayPath(full, baseDir),
+      relPath: dataBase ? toPosix(path.relative(dataBase, full)) : displayPath(full, baseDir),
       content: await fsp.readFile(full, 'utf8'),
       sourceIndex,
     };
@@ -158,8 +201,8 @@ async function readFilesForSource(source, sourceIndex, baseDir, { keepFullPath =
   return files;
 }
 
-async function readFilesForSkill(skill, skillIndex, baseDir) {
-  const root = resolvePattern(skill.dir, baseDir);
+async function readFilesForSkill(skill, skillIndex, baseDir, { glissaHome = null } = {}) {
+  const root = resolvePattern(skill.dir, baseDir, glissaHome);
   const files = [];
   for (const full of await walkFiles(root)) {
     files.push({
@@ -309,7 +352,7 @@ function failure(name, specPath, errors) {
  * @returns {Promise<{ok: boolean, name: string, specPath: string, errors: string[], version: string|null,
  *   fileCount: number, tokenEstimate: number, budgetTokens: number|null, currentDir: string|null}>}
  */
-async function buildPack({ specPath, baseDir = DEFAULT_PACKS_DIR, builtRoot = defaultBuiltRoot(), now = Date.now } = {}) {
+async function buildPack({ specPath, baseDir = DEFAULT_PACKS_DIR, builtRoot = defaultBuiltRoot(), glissaHome = null, now = Date.now } = {}) {
   const fallbackName = path.basename(specPath).replace(/\.pack\.json$/, '');
 
   let spec;
@@ -328,10 +371,10 @@ async function buildPack({ specPath, baseDir = DEFAULT_PACKS_DIR, builtRoot = de
   const files = [];
   try {
     for (const [index, source] of spec.sources.entries()) {
-      files.push(...(await readFilesForSource(source, index, baseDir)));
+      files.push(...(await readFilesForSource(source, index, baseDir, { glissaHome })));
     }
     for (const [index, skill] of (spec.skills || []).entries()) {
-      files.push(...(await readFilesForSkill(skill, index, baseDir)));
+      files.push(...(await readFilesForSkill(skill, index, baseDir, { glissaHome })));
     }
   } catch (err) {
     return failure(spec.name, specPath, [`could not read sources: ${err.message}`]);
@@ -360,7 +403,7 @@ async function buildPack({ specPath, baseDir = DEFAULT_PACKS_DIR, builtRoot = de
 }
 
 /** Build every spec, or just the named one. Reports per pack; never throws. */
-async function buildPacks({ name = null, specsDir = defaultSpecsDir(), baseDir = DEFAULT_PACKS_DIR, builtRoot = defaultBuiltRoot(), now = Date.now } = {}) {
+async function buildPacks({ name = null, specsDir = defaultSpecsDir(), baseDir = DEFAULT_PACKS_DIR, builtRoot = defaultBuiltRoot(), glissaHome = null, now = Date.now } = {}) {
   const specs = await listPackSpecs({ specsDir });
   const wanted = name ? specs.filter((spec) => spec.name === name) : specs;
   if (name && wanted.length === 0) {
@@ -368,7 +411,7 @@ async function buildPacks({ name = null, specsDir = defaultSpecsDir(), baseDir =
   }
   const reports = [];
   for (const spec of wanted) {
-    reports.push(await buildPack({ specPath: spec.specPath, baseDir, builtRoot, now }));
+    reports.push(await buildPack({ specPath: spec.specPath, baseDir, builtRoot, glissaHome, now }));
   }
   return reports;
 }
@@ -439,10 +482,12 @@ async function resolveBuiltPack(name, { builtRoot = defaultBuiltRoot() } = {}) {
 
 module.exports = {
   DEFAULT_PACKS_DIR,
+  GLISSA_HOME_PLACEHOLDER,
   SPEC_SUFFIX,
   buildPack,
   buildPacks,
   defaultBuiltRoot,
+  defaultGlissaHome,
   defaultSpecsDir,
   describePackSpec,
   distillOutputPath,

@@ -31,6 +31,7 @@ const {
   fixFeedbackInput,
   intentMemoryInput,
   latestIntentHeads,
+  memoryDeliveryLines,
   projectTagFor,
   readDismissParams,
   servedFeedbackInput,
@@ -61,6 +62,8 @@ const MAX_FRAME_BYTES = 2 * 1024 * 1024;
 const MARKDOWN_EXTENSIONS = ['.md', '.markdown'];
 // What one dispatch prompt will spend on recent activity, beside a buffer that can be far larger.
 const DIGEST_BUDGET_CHARS = 2000;
+// Top-K remembered records one dispatch prompt carries; the renderer caps the characters beside it.
+const MEMORY_DELIVERY_LIMIT = 8;
 const CODE_ACTION_METHOD = 'textDocument/codeAction';
 const APPLY_EDIT_METHOD = 'workspace/applyEdit';
 // An editor that never answers an applyEdit leaves a slot and a changelog line owed; this bounds both.
@@ -185,6 +188,8 @@ function createVisionsWiring({
    * boot and is null on a default config; every writer below is then a no-op and nothing is recorded.
    */
   getMemoryStore = null,
+  // How many remembered records one dispatch prompt may carry (docs/plan-visions-3.md, M16).
+  memoryDeliveryLimit = MEMORY_DELIVERY_LIMIT,
   intentStatePath = null,
   fsFns = fs,
   fsPromises = fsPromisesDefault,
@@ -533,6 +538,38 @@ function createVisionsWiring({
   }
 
   /*
+   * Long-term memory for this dispatch (docs/plan-visions-3.md, M16): top-K lexically relevant records
+   * for the ACTIVE project plus the global layer. Guarded exactly like the digest, so a store that
+   * throws costs this prompt its memory section and never the dispatch. Every delivered line is
+   * registered with the store, which is what lets the M14 consumer drop the same line coming back.
+   */
+  async function readMemorySection(uri, text) {
+    const store = memoryStoreOf();
+    if (!store || typeof store.retrieve !== 'function') return null;
+    try {
+      const records = store.retrieve({
+        query: text, project: projectTagForUri(uri), limit: memoryDeliveryLimit,
+      });
+      const lines = memoryDeliveryLines(records, { maxRecords: memoryDeliveryLimit });
+      if (lines.length === 0) return null;
+      const body = lines.join('\n');
+      if (typeof store.noteDelivered === 'function') store.noteDelivered(body);
+      // Counts and a version only: what was remembered is never what is logged.
+      debugNote(() => `memory: ${lines.length} record(s) delivered for ${uri}`);
+      return { text: body, count: lines.length, version: await readProjectionVersion(store) };
+    } catch (error) {
+      warn(`memory retrieval failed: ${String(error?.message || error)}`);
+      return null;
+    }
+  }
+
+  async function readProjectionVersion(store) {
+    if (typeof store.readPublishedManifest !== 'function') return null;
+    const manifest = await store.readPublishedManifest();
+    return typeof manifest?.version === 'string' ? manifest.version : null;
+  }
+
+  /*
    * The same contract as the digest and read on the same path: once per dispatch, guarded, and a
    * provider that throws costs this dispatch its movement signal rather than the dispatch itself. Null
    * whenever no lane is wired, which is what makes every gate decision identical to the pre-M7.5 one.
@@ -621,12 +658,15 @@ function createVisionsWiring({
       });
       let result = null;
       try {
+        // A lane with no store awaits nothing here, so a dispatch with memory off runs exactly as it did.
+        const memory = memoryStoreOf() ? await readMemorySection(uri, text) : null;
         result = await dispatch({
           uri,
           text,
           findings: findingsByUri.get(uri) || [],
           intent: intentTextFor(intentState, projectId),
           digest: readContextDigest(),
+          memory,
         });
       } catch (error) {
         warn(`dispatch for ${uri} threw: ${error.message}`);

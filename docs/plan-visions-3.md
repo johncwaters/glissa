@@ -2,7 +2,7 @@
 
 Status: drafted 2026-08-22; revised the same day after a three-reviewer pass (Codex GPT-5.5
 design review, an architecture review verifying every cited seam against the code, and a
-security review; all three returned "major revision required" on the first draft). M12 through M15
+security review; all three returned "major revision required" on the first draft). M12 through M16
 shipped, M12b held. Predecessors: `docs/archive/plan-navigator.md` (M1 to M5) and
 `docs/archive/plan-navigator-2.md` (M6 to M11), both fully shipped. `AGENTS.md` and the code
 win over this doc. Milestone numbering continues from M11.
@@ -459,7 +459,29 @@ that excludes its own transcript from ingestion and attributes its usage.
 Quantization is the point: `dist/` changes only when a distill run publishes, so anything watching it
 (M17 pack carrier) sees daily cadence, not per-append churn.
 
-### M16: delivery (v1: prompt section, direct reads, pack carrier)
+### M16: delivery (v1: prompt section, direct reads, pack carrier) [SHIPPED]
+
+Shipped 2026-08-23 on the M12 file substrate. Four decisions the milestone text below did not settle,
+made in the build:
+
+- **The pack carrier ships the GLOBAL layer only, and `{{projectSlug}}` was not built.** A pack is built
+  ONCE per name and delivered to every project that names it, so a per-project topic file inside it either
+  rides into an unrelated repo's session or forces per-project build variants. Variants would break the
+  single `packVersions[name]` the staleness chip, the Mill tab and `pack-updated` all rest on, for a layer
+  the other two channels already deliver project-scoped (retrieval by active project, and an
+  operator-authored pointer written in the repo it belongs to). `packs/specs/memory.pack.json` therefore
+  names `dist/current/MEMORY.md` and nothing under `projects/`, which honors the cross-project rule at its
+  strongest: nothing project-tagged is in the pack at all. Per-project pack delivery is a follow-on, and
+  needs the variant-versioning question answered first.
+- **`data: true` is a source-level flag, not a memory special case.** It publishes a source's files under
+  `data/<slug>/` and keeps them out of `.claude/rules/`; `{{glissaHome}}` (the config dir) may be named
+  only by such a source, only anchoring the whole pattern, and only without a `..` segment. The build
+  assertion is the second layer under that first one, and it is line-based: a data file's line of 12
+  characters or more appearing in `CLAUDE.md` or under `.claude/rules/` fails the build outright.
+- **The prompt section costs nothing when memory is off, including a microtask.** A lane with no store
+  awaits nothing on the dispatch path, so the pre-M16 timing is preserved as well as the pre-M16 bytes.
+- **Delivered lines are rendered in the projection's own bullet shape**, so a line delivered from the
+  canon and the same line read out of `dist/` normalize to one echo hash and one registry covers both.
 
 - **Dispatch prompt**: `buildVisionsPrompt` gains a memory section through the same guarded
   provider pattern as `readContextDigest` (a throwing provider costs the section, never the

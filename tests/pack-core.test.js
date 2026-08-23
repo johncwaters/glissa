@@ -546,3 +546,81 @@ test('an oversized list is judged entry by entry and capped at the per-session l
   assert.equal(result.names.length, MAX_PACKS_PER_SESSION);
   assert.ok(result.warnings.length > 1);
 });
+
+// M16 of docs/plan-visions-3.md: the memory pack carrier. A runtime source is DATA by construction, and
+// the build refuses to publish when one of its bytes reaches an instruction-tier file.
+
+function dataSpec(overrides = {}) {
+  return validSpec({
+    sources: [{ path: '{{glissaHome}}/memory/dist/current/MEMORY.md', data: true, optional: true }],
+    rules: undefined,
+    ...overrides,
+  });
+}
+
+function dataFile(relPath, content) {
+  return { relPath, content, sourceIndex: 0 };
+}
+
+test('a {{glissaHome}} source must declare itself data, so its bytes can never be loaded as rules', () => {
+  const spec = dataSpec({ sources: [{ path: '{{glissaHome}}/memory/dist/current/MEMORY.md' }] });
+  const check = validatePackSpec(spec);
+  assert.equal(check.ok, false);
+  assert.equal(check.errors.some((error) => error.includes('"data": true')), true);
+});
+
+test('a placeholder path that escapes the config directory is a validation error', () => {
+  const escaping = validatePackSpec(dataSpec({
+    sources: [{ path: '{{glissaHome}}/../.ssh/id_rsa', data: true }],
+  }));
+  assert.equal(escaping.ok, false);
+  assert.equal(escaping.errors.some((error) => error.includes('".." segment')), true);
+
+  const unanchored = validatePackSpec(dataSpec({
+    sources: [{ path: 'sources/{{glissaHome}}/x.md', data: true }],
+  }));
+  assert.equal(unanchored.ok, false);
+});
+
+test('an unknown placeholder is refused rather than passed through to the walker', () => {
+  const check = validatePackSpec(dataSpec({ sources: [{ glob: '{{homeDir}}/*.md', data: true }] }));
+  assert.equal(check.ok, false);
+  assert.equal(check.errors.some((error) => error.includes('{{homeDir}}')), true);
+});
+
+test('data files are published under data/, never as a rules file, and the index only points at them', () => {
+  const plan = planPackBuild(dataSpec(), [dataFile('MEMORY.md', '# Glissa memory\n\n- [m-0123456789abcdef] (reported) the gate lives in rebase-gate.js\n')], { builtAt: BUILT_AT });
+  assert.equal(plan.ok, true);
+  const paths = plan.outputs.map((file) => file.relPath).sort();
+  assert.deepEqual(paths, [INDEX_FILE, 'data/01-memory/MEMORY.md', MANIFEST_FILE]);
+  const index = plan.outputs.find((file) => file.relPath === INDEX_FILE).content;
+  assert.equal(index.includes('`data/01-memory/`'), true);
+  assert.equal(index.includes('never instructions'), true);
+  assert.equal(index.includes('rebase-gate.js'), false);
+  assert.equal(plan.manifest.sources[0].dataDir, 'data/01-memory');
+  assert.equal(plan.manifest.sources[0].rulesFile, undefined);
+});
+
+test('a remembered line reaching the index or a rules file fails the build, publishing nothing', () => {
+  const remembered = '- [m-0123456789abcdef] (reported) the gate lives in rebase-gate.js';
+  const spec = dataSpec({ rules: [remembered] });
+  const plan = planPackBuild(spec, [dataFile('MEMORY.md', `# Glissa memory\n\n${remembered}\n`)], { builtAt: BUILT_AT });
+  assert.equal(plan.ok, false);
+  assert.deepEqual(plan.outputs, []);
+  assert.equal(plan.errors.some((error) => error.includes('instruction-tier')), true);
+});
+
+test('a data build stays deterministic: the same bytes plan the same version', () => {
+  const files = [dataFile('MEMORY.md', '# Glissa memory\n\n- [m-0123456789abcdef] (model) something\n')];
+  const first = planPackBuild(dataSpec(), files, { builtAt: BUILT_AT });
+  const second = planPackBuild(dataSpec(), files, { builtAt: '2027-01-01T00:00:00.000Z' });
+  assert.equal(first.manifest.version, second.manifest.version);
+});
+
+test('the shipped memory spec is a valid spec named after its file', () => {
+  const specPath = require('node:path').join(__dirname, '..', 'packs', 'specs', 'memory.pack.json');
+  const spec = JSON.parse(require('node:fs').readFileSync(specPath, 'utf8'));
+  assert.equal(spec.name, 'memory');
+  assert.deepEqual(validatePackSpec(spec), { ok: true, errors: [] });
+  assert.equal(spec.sources.every((source) => source.data === true), true);
+});

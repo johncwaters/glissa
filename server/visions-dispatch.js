@@ -183,7 +183,7 @@ function createVisionsDispatcher({
     });
   }
 
-  return async function dispatch({ uri, text, findings = [], intent = '', digest = '' }) {
+  return async function dispatch({ uri, text, findings = [], intent = '', digest = '', memory = null }) {
     let workDir = null;
     try {
       workDir = await makeWorkDir();
@@ -197,7 +197,7 @@ function createVisionsDispatcher({
         id: idFor(uri),
         name: `visions ${uri}`,
         prompt: buildVisionsPrompt({
-          uri, text, findings, intent, digest, resultPath,
+          uri, text, findings, intent, digest, memory, resultPath,
         }),
         cwd: workDir,
         uri,

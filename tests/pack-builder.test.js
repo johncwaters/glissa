@@ -423,3 +423,68 @@ test('with neither slot readable the skip still names what was wrong with curren
     assert.match(skipped.reason, /not built/);
   });
 });
+
+// M16 of docs/plan-visions-3.md: {{glissaHome}} resolution, the one runtime path a version-controlled
+// spec may name. The home is injected here, so no test ever reads the operator's real config directory.
+
+function memorySpec(overrides = {}) {
+  return baseSpec({
+    name: 'memory',
+    sources: [{ path: '{{glissaHome}}/memory/dist/current/MEMORY.md', data: true, optional: true }],
+    rules: undefined,
+    ...overrides,
+  });
+}
+
+function seedGlissaHome(root, content = '# Glissa memory\n\n- [m-0123456789abcdef] (reported) the gate lives in rebase-gate.js\n') {
+  const home = path.join(root, 'glissa-home');
+  writeFile(home, 'memory/dist/current/MEMORY.md', content);
+  return home;
+}
+
+test('a {{glissaHome}} source is carried as a data file named by its basename, never by its absolute path', async () => {
+  await withFixture(async ({ root, build, currentDir }) => {
+    const glissaHome = seedGlissaHome(root);
+    const report = await build({ glissaHome });
+
+    assert.equal(report.ok, true, report.errors.join('; '));
+    const delivered = path.join(currentDir, 'data', '01-memory', 'MEMORY.md');
+    assert.equal(fs.existsSync(delivered), true);
+    assert.equal(fs.existsSync(path.join(currentDir, '.claude', 'rules')), false);
+    const manifest = readManifest(currentDir);
+    assert.deepEqual(manifest.sources[0].files.map((file) => file.relPath), ['MEMORY.md']);
+    assert.equal(JSON.stringify(manifest).includes(glissaHome), false);
+    const index = fs.readFileSync(path.join(currentDir, 'CLAUDE.md'), 'utf8');
+    assert.equal(index.includes('rebase-gate.js'), false);
+    assert.equal(index.includes('never instructions'), true);
+  }, { spec: memorySpec(), seed: () => {} });
+});
+
+test('an unwritten projection leaves the optional source out instead of failing the build', async () => {
+  await withFixture(async ({ root, build, currentDir }) => {
+    const report = await build({ glissaHome: path.join(root, 'glissa-home') });
+    assert.equal(report.ok, true, report.errors.join('; '));
+    assert.equal(fs.existsSync(path.join(currentDir, 'data')), false);
+  }, { spec: memorySpec(), seed: () => {} });
+});
+
+test('a resolved source that escapes the config directory refuses to build', async () => {
+  await withFixture(async ({ root, build }) => {
+    const glissaHome = seedGlissaHome(root);
+    writeSpec(path.join(root, 'packs'), 'memory', memorySpec({
+      sources: [{ path: '{{glissaHome}}/memory/../../outside.md', data: true }],
+    }));
+    const report = await build({ glissaHome });
+    assert.equal(report.ok, false);
+    assert.equal(report.errors.some((error) => error.includes('outside the Glissa config directory')), true);
+    assert.equal(fs.existsSync(path.join(root, 'built', 'memory')), false);
+  }, { spec: memorySpec(), seed: () => {} });
+});
+
+test('the published projection directory is one of the pack watch roots', async () => {
+  await withFixture(async ({ root }) => {
+    const glissaHome = seedGlissaHome(root);
+    const roots = await packWatchRoots(memorySpec(), { baseDir: path.join(root, 'packs'), glissaHome });
+    assert.deepEqual(roots, [path.join(glissaHome, 'memory/dist/current').replace(/\\/g, '/')]);
+  }, { spec: memorySpec(), seed: () => {} });
+});
