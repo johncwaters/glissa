@@ -709,14 +709,6 @@ function projectionStampSources(watermark) {
   return [{ path: 'memory/canon', sha256: String(watermark?.hash || '') }];
 }
 
-function projectionFilePaths(tags) {
-  const paths = [GLOBAL_PROJECTION_FILE];
-  for (const tag of [...(Array.isArray(tags) ? tags : [])].sort()) {
-    paths.push(`${PROJECTS_DIR_NAME}/${projectFileSlug(tag)}.md`);
-  }
-  return paths;
-}
-
 /**
  * One projection build, mill-style: every delivered byte hashed into `version`, the stamp line first so
  * drift reads the same way it does for a distilled pack source, and manifest.json excluded from the
@@ -862,7 +854,6 @@ module.exports = {
   projectFileSlug,
   projectTagsOf,
   projectionBulletFrom,
-  projectionFilePaths,
   projectionStampSources,
   renderProjection,
   renderProjectionDocument,

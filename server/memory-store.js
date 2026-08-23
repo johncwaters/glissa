@@ -440,7 +440,6 @@ function createMemoryStore(deps = {}) {
     if (projectionTimer) return;
     projectionTimer = setTimeoutFn(() => {
       projectionTimer = null;
-      // Queued like every other write: a distill publish rotating dist/ must never race this one.
       projectionChain = queue(() => writeProjection()).catch(() => log.warn('projection write failed'));
     }, projectionDebounceMs);
     if (projectionTimer && typeof projectionTimer.unref === 'function') projectionTimer.unref();

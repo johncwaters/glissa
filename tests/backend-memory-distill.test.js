@@ -28,11 +28,18 @@ async function bootWithConfig(memory) {
   const backend = createBackend(server, { staticDir: null });
   server.on('request', backend.app);
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  // Every stopper fires on the first call, so a test reading the names and the close() below share one.
+  let shutdownResult = null;
+  const shutdownOnce = () => {
+    shutdownResult = shutdownResult || backend.shutdown();
+    return shutdownResult;
+  };
   return {
     dir,
     backend,
+    shutdownOnce,
     async close() {
-      const outcome = backend.shutdown();
+      const outcome = shutdownOnce();
       await Promise.allSettled((outcome.stoppers || []).map((entry) => entry.promise));
       server.closeAllConnections();
       await new Promise((resolve) => server.close(resolve));
@@ -59,7 +66,7 @@ test('memory on constructs the lane and registers its shutdown stopper', async (
     const distiller = booted.backend.getMemoryDistiller();
     assert.notEqual(distiller, null);
     assert.equal(distiller.isEnabled(), true);
-    const names = booted.backend.shutdown().stoppers.map((entry) => entry.name);
+    const names = booted.shutdownOnce().stoppers.map((entry) => entry.name);
     assert.equal(names.includes('memory-distill'), true);
     assert.equal(names.indexOf('memory-distill') < names.indexOf('memory-store'), true, 'it publishes through the store');
   } finally {
