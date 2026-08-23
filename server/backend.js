@@ -38,6 +38,8 @@ const { NotificationManager } = require('../notifications/notification-manager')
 const { createNotifyGate, explainNotification } = require('../session/core/notify-gate');
 const { pickAutoResume } = require('../session/core/auto-resume');
 const { createTelegramChannel } = require('../notifications/channels/telegram');
+const { createTelegramOutbox } = require('../notifications/telegram-outbox');
+const { sendTelegramMessage } = require('./telegram-transport');
 const { createToastChannel } = require('../notifications/channels/toast');
 const { createWebNotificationChannel } = require('../notifications/channels/web-notification');
 const { createRecorder } = require('../session/session-recorder');
@@ -903,10 +905,30 @@ function createBackend(httpServer, options = {}) {
   // the web channel's broadcast would land on nobody. Registered unconditionally and gated per
   // delivery off live config (telegramNotifications + the telegram credentials the PR lane already
   // defines), so the toggle needs no restart and no re-registration. Absent key = never sends.
+  //
+  // Durable by the operator's 2026-08 ruling: a lost browser notification on restart is acceptable,
+  // a lost phone ping is not, because Telegram is the channel of last resort. Every ping it sends is
+  // recorded in the outbox BEFORE it is attempted and removed only on a confirmed send, so a crash
+  // mid-delivery replays it at the next boot rather than losing it. The credentials are read at send
+  // time, so a replayed entry uses whatever config the new process holds.
+  const telegramOutbox = createTelegramOutbox({
+    filePath: configSiblingPath(configStore.configPath, 'telegram-outbox.json'),
+    send: (entry) => {
+      const telegram = config.telegram || {};
+      if (!telegram.botToken || !telegram.chatId) return Promise.resolve({ ok: false });
+      return sendTelegramMessage({
+        botToken: telegram.botToken, chatId: telegram.chatId, text: entry.text, tag: 'channel:telegram',
+      });
+    },
+  });
   notificationManager.registerChannel('telegram', createTelegramChannel({
     getConfig: () => config,
     getConnectionCount: () => clientPresence.connectionCount(),
-  }));
+    outbox: telegramOutbox,
+  }), { offDashboard: true });
+  // Replay whatever a previous process queued but never confirmed. Fire-and-forget: it never rejects,
+  // and a boot must not wait on the network.
+  void telegramOutbox.replay();
 
   // --- Client presence (per-connection focus; drives suppression and the off-dashboard channel) ---
   // Bookkeeping and both decisions are pure (server/core/client-presence.js); this is the IO shell
@@ -2064,6 +2086,9 @@ function createBackend(httpServer, options = {}) {
     if (visionsLane) stoppers.add('visions', () => visionsLane.stop());
     // Drains the pending append and projection writes; null whenever memory is off.
     if (memoryStore) stoppers.add('memory-store', () => memoryStore.stop());
+    // Not a lane, but the same rule: an outbox write still in flight is what makes a queued phone ping
+    // survive the restart it was queued during.
+    stoppers.add('telegram-outbox', () => telegramOutbox.idle());
     for (const [, sess] of visionsSessions) {
       sess.destroy();
       if (sess._killReap) pendingReaps.push(sess._killReap);

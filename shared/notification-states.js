@@ -13,6 +13,11 @@ const NOTIFICATION_STATES = Object.freeze({
                                 // focused-but-unwatched still surfaces once the user is away.
   DELIVERED:    'DELIVERED',    // Notification sent via channel(s); escalation timer running (waiting only)
   ESCALATED:    'ESCALATED',   // Escalation timer fired, re-delivered via channels
+  ESCALATED_PHONE: 'ESCALATED_PHONE', // Still unacknowledged past the ladder's delay: re-delivered to
+                                // the OFF-DASHBOARD channels only, ignoring their usual
+                                // nobody-is-watching gate. The last rung: an operator who did not
+                                // react to the browser notification is reached on their phone even
+                                // with a dashboard open somewhere.
   ACKNOWLEDGED: 'ACKNOWLEDGED', // User interacted (dismissed, responded, or session left trigger state)
 });
 
@@ -44,12 +49,23 @@ const NOTIFICATION_TRANSITIONS = Object.freeze({
   [NOTIFICATION_STATES.DELIVERED]: {
     trigger:           NOTIFICATION_STATES.PENDING,
     escalation_tick:   NOTIFICATION_STATES.ESCALATED,
+    phone_escalation:  NOTIFICATION_STATES.ESCALATED_PHONE,
     acknowledge:       NOTIFICATION_STATES.ACKNOWLEDGED,
     session_destroyed: NOTIFICATION_STATES.IDLE,
   },
   [NOTIFICATION_STATES.ESCALATED]: {
     trigger:           NOTIFICATION_STATES.PENDING,
     escalation_tick:   NOTIFICATION_STATES.DELIVERED,   // Ping-pong back to DELIVERED
+    phone_escalation:  NOTIFICATION_STATES.ESCALATED_PHONE,
+    acknowledge:       NOTIFICATION_STATES.ACKNOWLEDGED,
+    session_destroyed: NOTIFICATION_STATES.IDLE,
+  },
+  // The phone rung fires ONCE per entry (the manager latches it), so there is no edge back to itself.
+  // escalation_tick returns a 'waiting' entry to its browser ping-pong: being reached on the phone
+  // does not end an escalation that exists because the agent is still blocked.
+  [NOTIFICATION_STATES.ESCALATED_PHONE]: {
+    trigger:           NOTIFICATION_STATES.PENDING,
+    escalation_tick:   NOTIFICATION_STATES.DELIVERED,
     acknowledge:       NOTIFICATION_STATES.ACKNOWLEDGED,
     session_destroyed: NOTIFICATION_STATES.IDLE,
   },

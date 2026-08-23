@@ -8,14 +8,19 @@ class NotificationManager extends EventEmitter {
    * @param {object} opts
    * @param {number} opts.escalationIntervalMs - Re-fire interval for WAITING notifications
    * @param {number} opts.debounceMs - Category debounce window
+   * @param {number} opts.phoneEscalationMs - How long an unacknowledged notification waits before the
+   *   ladder's last rung fires to the off-dashboard channels
    */
-  constructor({ escalationIntervalMs = 300000, debounceMs = 3000 } = {}) {
+  constructor({ escalationIntervalMs = 300000, debounceMs = 3000, phoneEscalationMs = 300000 } = {}) {
     super();
     this._entries = new Map();         // sessionName -> { state, category, message, timer }
-    this._channels = [];               // [{ name, fn }]
+    this._channels = [];               // [{ name, fn, offDashboard }]
     this._focusSuppressed = false;
     this._escalationIntervalMs = escalationIntervalMs;
     this._debounceMs = debounceMs;
+    // How long an unacknowledged notification waits before the ladder's last rung: the off-dashboard
+    // channels, ignoring their usual nobody-is-watching gate.
+    this._phoneEscalationMs = phoneEscalationMs;
     this._recentCategories = new Map(); // `${session}\0${category}` -> lastFireTimestamp (per-session)
   }
 
@@ -26,8 +31,14 @@ class NotificationManager extends EventEmitter {
     return entry ? entry.state : NS.IDLE;
   }
 
-  registerChannel(name, fn) {
-    this._channels.push({ name, fn });
+  /**
+   * @param {object} [opts]
+   * @param {boolean} [opts.offDashboard] this channel reaches the operator when no dashboard would.
+   *   Only these carry the ladder's last rung, so a phone escalation does not re-toast a browser that
+   *   already showed the notification once and was ignored.
+   */
+  registerChannel(name, fn, { offDashboard = false } = {}) {
+    this._channels.push({ name, fn, offDashboard });
   }
 
   setFocusSuppressed(val) {
@@ -62,14 +73,16 @@ class NotificationManager extends EventEmitter {
     this._transition(sessionName, 'acknowledge');
   }
 
-  updateSettings({ escalationIntervalMs, debounceMs }) {
+  updateSettings({ escalationIntervalMs, debounceMs, phoneEscalationMs }) {
     if (escalationIntervalMs != null) this._escalationIntervalMs = escalationIntervalMs;
     if (debounceMs != null) this._debounceMs = debounceMs;
+    if (phoneEscalationMs != null) this._phoneEscalationMs = phoneEscalationMs;
   }
 
   destroy() {
     for (const [, entry] of this._entries) {
       this._clearTimer(entry);
+      this._clearPhoneTimer(entry);
     }
     this._entries.clear();
     this._recentCategories.clear();
@@ -87,6 +100,10 @@ class NotificationManager extends EventEmitter {
         message: null,
         timer: null,
         escalationCount: 0,
+        // The ladder's last rung, armed on first delivery and latched once fired: an unacknowledged
+        // notification reaches the phone ONCE, not every escalation round.
+        phoneTimer: null,
+        phoneEscalated: false,
       });
     }
   }
@@ -128,6 +145,10 @@ class NotificationManager extends EventEmitter {
   _entryHook(sessionName, entry, state) {
     switch (state) {
       case NS.PENDING:
+        // A fresh trigger REPLACES a live entry, so the previous entry's phone rung must not fire
+        // against the new one: it re-arms below on delivery.
+        this._clearPhoneTimer(entry);
+        entry.phoneEscalated = false;
         // Transient decision state: check suppression, debounce, then deliver
         if (this._focusSuppressed) {
           this._transition(sessionName, 'suppressed');
@@ -155,6 +176,7 @@ class NotificationManager extends EventEmitter {
         if (entry.category === 'waiting') {
           this._armEscalation(sessionName, entry);
         }
+        this._armPhoneEscalation(sessionName, entry);
         break;
 
       case NS.ESCALATED:
@@ -165,15 +187,33 @@ class NotificationManager extends EventEmitter {
         this._armEscalation(sessionName, entry);
         break;
 
+      case NS.ESCALATED_PHONE:
+        /*
+         * The ladder's last rung. OFF-DASHBOARD channels only, and they are told to ignore their
+         * nobody-is-watching gate: the operator had a browser notification and did not act on it, so
+         * a dashboard being open somewhere is precisely what this rung disbelieves. Re-toasting the
+         * browser here would only repeat what was already ignored.
+         */
+        entry.phoneEscalated = true;
+        this._deliverViaChannels(sessionName, entry, { phoneEscalation: true }, (channel) => channel.offDashboard);
+        // A 'waiting' entry returns to its browser ping-pong: being reached on the phone does not end
+        // an escalation that exists because the agent is still blocked.
+        if (entry.category === 'waiting') {
+          this._armEscalation(sessionName, entry);
+        }
+        break;
+
       case NS.ACKNOWLEDGED:
         // Clear all timers, then auto-reset to IDLE
         this._clearTimer(entry);
+        this._clearPhoneTimer(entry);
         this._transition(sessionName, 'reset');
         break;
 
       case NS.IDLE:
         // Cleanup: remove entry from tracking map if coming from ACKNOWLEDGED
         this._clearTimer(entry);
+        this._clearPhoneTimer(entry);
         this._entries.delete(sessionName);
         break;
     }
@@ -186,21 +226,43 @@ class NotificationManager extends EventEmitter {
     }, this._escalationIntervalMs);
   }
 
+  /*
+   * Armed on the FIRST delivery of an entry and latched once fired, so an operator who never
+   * acknowledges gets one phone ping per notification rather than one per escalation round. It
+   * deliberately survives the DELIVERED/ESCALATED ping-pong (a 'waiting' entry crosses that boundary
+   * repeatedly and the rung is about the ENTRY, not the round), which is why it is cleared only on a
+   * fresh trigger, an acknowledgement, or teardown.
+   */
+  _armPhoneEscalation(sessionName, entry) {
+    if (entry.phoneEscalated) return;
+    if (entry.phoneTimer !== null) return;
+    if (!(this._phoneEscalationMs > 0)) return;
+    if (!this._channels.some((channel) => channel.offDashboard)) return;
+    entry.phoneTimer = setTimeout(() => {
+      entry.phoneTimer = null;
+      this._transition(sessionName, 'phone_escalation');
+    }, this._phoneEscalationMs);
+  }
+
   _exitHook(_sessionName, entry, state) {
-    // Belt and suspenders: clear timer on exit from DELIVERED or ESCALATED
-    if (state === NS.DELIVERED || state === NS.ESCALATED) {
+    // Belt and suspenders: clear timer on exit from DELIVERED, ESCALATED or ESCALATED_PHONE. The
+    // phone timer is deliberately NOT cleared here: it spans the whole entry, across every round of
+    // the DELIVERED/ESCALATED ping-pong.
+    if (state === NS.DELIVERED || state === NS.ESCALATED || state === NS.ESCALATED_PHONE) {
       this._clearTimer(entry);
     }
   }
 
   // -- Channel delivery --
 
-  _deliverViaChannels(sessionName, entry) {
+  _deliverViaChannels(sessionName, entry, extraContext = null, channelFilter = null) {
     const context = {
       escalationCount: entry.escalationCount,
       timestamp: Date.now(),
+      ...(extraContext || {}),
     };
     for (const channel of this._channels) {
+      if (channelFilter && !channelFilter(channel)) continue;
       try {
         channel.fn(sessionName, entry.category, entry.message, context);
       } catch (err) {
@@ -236,6 +298,13 @@ class NotificationManager extends EventEmitter {
     if (entry.timer !== null) {
       clearTimeout(entry.timer);
       entry.timer = null;
+    }
+  }
+
+  _clearPhoneTimer(entry) {
+    if (entry.phoneTimer != null) {
+      clearTimeout(entry.phoneTimer);
+      entry.phoneTimer = null;
     }
   }
 }

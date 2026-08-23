@@ -46,6 +46,8 @@ function defaultTransport(url, bodyObject) {
  * @param {string} opts.text plain text, no parse_mode - no markdown escaping surprises
  * @param {string} [opts.tag] log prefix identifying the calling lane
  * @param {Function} [opts.transport] injected for tests
+ * @returns {Promise<{ ok: boolean, error: string|null }>} never rejects. The durable outbox needs to
+ *   know whether a ping actually landed before it may forget it; the fire-and-forget callers ignore it.
  */
 async function sendTelegramMessage({ botToken, chatId, text, tag = 'telegram', transport }) {
   const send = transport || defaultTransport;
@@ -53,8 +55,11 @@ async function sendTelegramMessage({ botToken, chatId, text, tag = 'telegram', t
 
   try {
     await send(url, { chat_id: chatId, text });
+    return { ok: true, error: null };
   } catch (err) {
-    console.warn(`[${tag}] ${err?.message ? err.message : String(err)}`);
+    const message = err?.message ? err.message : String(err);
+    console.warn(`[${tag}] ${message}`);
+    return { ok: false, error: message };
   }
 }
 

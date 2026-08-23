@@ -23,11 +23,16 @@ const { decideOffDashboardDelivery } = require('../../server/core/client-presenc
  * @param {string} opts.botToken config.telegram.botToken (shared with the PR-review lane)
  * @param {string} opts.chatId config.telegram.chatId
  * @param {number} opts.connectionCount open control-WS connections right now
+ * @param {boolean} [opts.phoneEscalation] this is the notification ladder's last rung: the operator
+ *   was shown a browser notification and did not acknowledge it, so a dashboard being open somewhere
+ *   is exactly what this delivery disbelieves. Everything else about the gate still applies - it is
+ *   the AUDIENCE test that is bypassed, never the opt-in or the credentials.
  * @returns {{ send: boolean, reason: string }}
  */
-function decideTelegramNotification({ enabled, botToken, chatId, connectionCount }) {
+function decideTelegramNotification({ enabled, botToken, chatId, connectionCount, phoneEscalation = false }) {
   if (enabled !== true) return { send: false, reason: 'disabled' };
   if (!botToken || !chatId) return { send: false, reason: 'not-configured' };
+  if (phoneEscalation === true) return { send: true, reason: 'unacknowledged-escalation' };
   if (!decideOffDashboardDelivery(connectionCount)) return { send: false, reason: 'dashboard-open' };
   return { send: true, reason: 'no-dashboard-audience' };
 }
@@ -44,11 +49,12 @@ function formatTelegramText(sessionName, category, message) {
  * @param {object} deps
  * @param {() => object} deps.getConfig live config object (read per delivery, never captured)
  * @param {() => number} deps.getConnectionCount open control-WS connection count
+ * @param {object} [deps.outbox] durable at-least-once queue; absent means fire-and-forget as before
  * @param {Function} [deps.send] injected transport for tests
  * @returns {(sessionName: string, category: string, message: string, context: object) => void}
  */
-function createTelegramChannel({ getConfig, getConnectionCount, send = sendTelegramMessage }) {
-  return function telegramChannel(sessionName, category, message, _context) {
+function createTelegramChannel({ getConfig, getConnectionCount, outbox = null, send = sendTelegramMessage }) {
+  return function telegramChannel(sessionName, category, message, context) {
     const config = getConfig() || {};
     const telegram = config.telegram || {};
     const decision = decideTelegramNotification({
@@ -56,14 +62,25 @@ function createTelegramChannel({ getConfig, getConnectionCount, send = sendTeleg
       botToken: telegram.botToken,
       chatId: telegram.chatId,
       connectionCount: getConnectionCount(),
+      phoneEscalation: context?.phoneEscalation === true,
     });
     if (!decision.send) return;
+    const text = formatTelegramText(sessionName, category, message);
+    /*
+     * Through the outbox when there is one: the ping is recorded BEFORE it is attempted, so a crash
+     * mid-send replays it at the next boot instead of losing it. The credentials are read at SEND
+     * time, not queue time, so a replayed entry uses whatever config the new process holds.
+     */
+    if (outbox) {
+      void outbox.deliver(text);
+      return;
+    }
     // Not awaited: sendTelegramMessage swallows its own failures, and a channel must never make the
     // manager's delivery loop wait on the network.
     send({
       botToken: telegram.botToken,
       chatId: telegram.chatId,
-      text: formatTelegramText(sessionName, category, message),
+      text,
       tag: 'channel:telegram',
     });
   };
