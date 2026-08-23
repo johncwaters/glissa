@@ -42,14 +42,22 @@ function sleepSync(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
+// One retry plan for both loops below: null means rethrow, a number is the backoff before the next try.
+function renameRetryPlan(error, attempt) {
+  if (!isRetryableRename(error, attempt)) return null;
+  return renameRetryDelayMs(attempt);
+}
+
+// Two thin loops over that one plan, deliberately not unified: a shared driver would force the sync writers' callers async.
 function renameWithRetrySync(fsSync, tmpPath, filePath) {
   for (let attempt = 0; ; attempt += 1) {
     try {
       fsSync.renameSync(tmpPath, filePath);
       return;
     } catch (error) {
-      if (!isRetryableRename(error, attempt)) throw error;
-      sleepSync(renameRetryDelayMs(attempt));
+      const delayMs = renameRetryPlan(error, attempt);
+      if (delayMs === null) throw error;
+      sleepSync(delayMs);
     }
   }
 }
@@ -60,8 +68,9 @@ async function renameWithRetry(fsPromises, tmpPath, filePath) {
       await fsPromises.rename(tmpPath, filePath);
       return;
     } catch (error) {
-      if (!isRetryableRename(error, attempt)) throw error;
-      await new Promise((resolve) => { setTimeout(resolve, renameRetryDelayMs(attempt)); });
+      const delayMs = renameRetryPlan(error, attempt);
+      if (delayMs === null) throw error;
+      await new Promise((resolve) => { setTimeout(resolve, delayMs); });
     }
   }
 }

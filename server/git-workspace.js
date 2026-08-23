@@ -505,10 +505,7 @@ function createGitWorkspace(opts = {}) {
     await run(['worktree', 'prune'], projectPath);
   }
 
-  // The dirty-or-ahead probe every "does this worktree still hold work" reader shares: the marker's
-  // integration branch, `status --porcelain` in the worktree, and - only when that is clean - the
-  // ahead-count of its branch over that integration branch. Returns the raw {ok,out} results so each
-  // caller applies its own failure policy to them.
+  // THE shared dirty-or-ahead probe (marker-resolved integration branch, porcelain, ahead-count only when clean), returning raw {ok,out} so each caller applies its own failure policy.
   async function probeWorktreeWork({ projectPath, cwd, branch, integrationBranch }) {
     // The marker is the authority for THIS worktree's integration branch; the passed integrationBranch
     // is only the fallback for a worktree created before the marker existed.
@@ -522,11 +519,7 @@ function createGitWorkspace(opts = {}) {
     return { dirty, ahead, integrationBranch: resolvedIntegrationBranch };
   }
 
-  // The exit-time discard's never-destroy-work test: the SAME dirty-or-ahead rule the boot reconcile
-  // adopts a worktree on, but failing SAFE. Uncommitted-only was the whole defect - a session that
-  // COMMITTED and left a clean tree read as "no work", and discard's `git branch -D` then took the
-  // commit's last ref AND its reflog with it. A probe that could not run also reads as work: a false
-  // keep costs disk, a false discard costs commits. Read-only, so it skips the mutator queue.
+  // Exit-time never-destroy-work test: the boot reconcile's dirty-or-ahead rule failing SAFE (a probe that cannot run reads as work), because uncommitted-only once let discard's `git branch -D` take a committed-but-clean session's last ref and reflog.
   async function hasUnmergedWork({ projectPath, workspace, integrationBranch }) {
     if (!workspace || !workspace.isGit || !workspace.cwd || !workspace.branch) return true;
     const { dirty, ahead } = await probeWorktreeWork({

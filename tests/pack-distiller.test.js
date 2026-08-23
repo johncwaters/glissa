@@ -272,12 +272,7 @@ test('a hung session is aborted by the timeout and reported as an error', async 
   assert.equal(h.spawns[0].signal.aborted, true);
 });
 
-/*
- * A timeout resolves the VERDICT at once so a hung job cannot pin the lane, but the session it just
- * killed is still unwinding, and this lane's whole serialization promise is that no second distill
- * writes under packs/ while another one might be. So the result directory is released and the next
- * entry is started only after the aborted spawn settles (drainPending in server/ephemeral-session.js).
- */
+// The serialization promise: the result dir is released and the next entry started only after the aborted spawn settles (drainPending).
 test('a timed-out distill waits for the killed session before releasing its result file or starting the next entry', async () => {
   const h = harness({
     specByPath: {

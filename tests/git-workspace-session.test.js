@@ -497,7 +497,7 @@ test('hasUnmergedWork (real git): a committed but CLEAN worktree reports work (t
     assert.equal(git(['status', '--porcelain'], ws.cwd).trim(), '', 'committing leaves the tree clean');
 
     assert.equal(await gw.hasUnmergedWork({ projectPath: repo, workspace: ws, integrationBranch: 'develop' }), true,
-      'one commit develop does not have IS work');
+      'a commit the integration branch lacks IS work');
   } finally {
     fs.rmSync(repo, { recursive: true, force: true });
   }

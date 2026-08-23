@@ -1309,11 +1309,7 @@ class Session extends EventEmitter {
     this.off("exit", pending.onExit);
   }
 
-  // True when this worktree still holds work a discard would destroy: uncommitted changes (counting
-  // untracked new files, usually a feature session's whole deliverable) OR commits its branch has that
-  // the integration branch does not. git-workspace.js owns the rule, so this and the boot reconcile
-  // cannot disagree about what "has work" means, and so raw git stays out of here. An unreachable or
-  // throwing seam reports work: discard deletes the branch, which takes a commit's reflog with it.
+  // True when a discard would destroy work (uncommitted changes OR commits the integration branch lacks); git-workspace.js owns the rule, and an unreachable or throwing seam reads as work.
   async hasUnmergedWork() {
     if (!this.worktreeDir) return false;
     if (!this._gitWorkspace || !this._workspace) return true;

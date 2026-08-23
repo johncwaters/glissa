@@ -25,9 +25,7 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm test
-      # npm ci leaves node-pty's install scripts unrun (npm 11.17+ blocks them by default), so the
-      # documented Linux GLOBAL install, where they DO run and the native module compiles, is untested
-      # by the clone path above and can break while this leg stays green.
+      # npm ci blocks node-pty's install scripts (npm 11.17+ default), so only this leg tests the documented global install where they run and the native module compiles.
       - name: packaged global install
         if: matrix.os == 'ubuntu-latest'
         shell: bash

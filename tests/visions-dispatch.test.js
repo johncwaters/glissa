@@ -296,11 +296,7 @@ test('a hung session is aborted at the hard timeout and resolves ERROR, so the l
   assert.equal(fs.existsSync(workDirs[0]), false);
 });
 
-/*
- * The verdict is resolved the moment the timeout fires, but the work dir is the killed session's own
- * cwd: removing it under a live process leaks the directory on Windows (the handle blocks the remove)
- * and pulls the tree out from under a POSIX process still writing into it.
- */
+// The work dir is the killed session's own cwd: removing it under a live process leaks it on Windows and yanks it from a POSIX process still writing.
 test('a timed-out dispatch waits for the killed session before removing its work dir', async () => {
   let fire = null;
   let releaseSpawn = null;
