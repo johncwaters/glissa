@@ -931,7 +931,7 @@ function registerControlHandlers(controlWss, deps) {
    */
   function handleRequestMillReport(msg, ws) {
     if (!millReport) {
-      ws.send(JSON.stringify({ type: 'mill-report', requestId: msg.requestId || null, error: 'The context mill is not running' }));
+      ws.send(JSON.stringify({ type: 'mill-report', requestId: typeof msg.requestId === 'string' ? msg.requestId : null, error: 'The context mill is not running' }));
       return;
     }
     // The build is async, so the asking socket may be gone by the time it lands.
@@ -939,7 +939,6 @@ function registerControlHandlers(controlWss, deps) {
       if (ws.readyState === 1) ws.send(JSON.stringify(payload));
     });
   }
-
 
   function handleShutdown() {
     console.log('[control] Shutdown requested via UI');
