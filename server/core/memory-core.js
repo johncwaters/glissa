@@ -208,8 +208,6 @@ function normalizeProjectTag(raw) {
   return folded.slice(0, MAX_PROJECT_TAG_CHARS) || null;
 }
 
-// The hash tail is not decoration: two checkouts routinely share a basename, and one projection file
-// silently holding both projects' facts is exactly the cross-project leak delivery is filtered against.
 // The hash tail: two checkouts routinely share a basename, and one file holding both is a cross-project leak.
 function projectFileSlug(tag) {
   const value = String(tag || '');
