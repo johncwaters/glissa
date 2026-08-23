@@ -75,10 +75,6 @@ function servedFindingOf(fix) {
   return { id: `${code}@${line}:${characterOfFix(fix)}`, line };
 }
 
-function findingIdOf(fix) {
-  return servedFindingOf(fix).id;
-}
-
 function servedKey({ uri, version, id }) {
   const stamped = positiveInteger(version);
   return `${nonEmptyString(uri)}|${stamped === null ? 'none' : stamped}|${nonEmptyString(id)}`;
@@ -224,7 +220,6 @@ module.exports = {
   dismissFeedbackInput,
   dispatchMemoryInputs,
   displayLineOfFix,
-  findingIdOf,
   fixFeedbackInput,
   intentMemoryInput,
   latestIntentHeads,

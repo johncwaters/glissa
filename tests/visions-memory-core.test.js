@@ -8,7 +8,7 @@ const {
   createBoundedKeySet,
   dismissFeedbackInput,
   dispatchMemoryInputs,
-  findingIdOf,
+  servedFindingOf,
   fixFeedbackInput,
   intentMemoryInput,
   latestIntentHeads,
@@ -108,7 +108,7 @@ test('an applied fix is action-ranked feedback naming the rule and its 1-based l
 
 test('a served finding id is the rule plus its position, and its key spans uri and version', () => {
   const fix = { code: 'heading-skip', range: { start: { line: 6, character: 0 } } };
-  assert.equal(findingIdOf(fix), 'heading-skip@7:0');
+  assert.deepEqual(servedFindingOf(fix), { id: 'heading-skip@7:0', line: 7 });
   assert.equal(servedKey({ uri: 'file:///a.md', version: 3, id: 'x' }), 'file:///a.md|3|x');
   assert.equal(servedKey({ uri: 'file:///a.md', version: null, id: 'x' }), 'file:///a.md|none|x');
   assert.notEqual(
