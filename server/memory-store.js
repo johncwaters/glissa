@@ -29,6 +29,8 @@ const LOCK_RETRY_MS = 50;
 const LOCK_MAX_ATTEMPTS = 10;
 const LOCK_STALE_MS = 5000;
 const CANON_WATCH_DEBOUNCE_MS = 200;
+// The longest an unbroken event stream may defer the trailing refresh; without it a storm defers forever.
+const CANON_WATCH_MAX_WAIT_MS = 1000;
 
 function defaultMemoryDir() {
   const { resolveConfigPath } = require('./config-store');
@@ -463,8 +465,28 @@ function createMemoryStore(deps = {}) {
   function startCanonWatch() {
     let timer = null;
     let watcher = null;
+    let deferringSince = 0;
+
+    function stopWatch() {
+      clearTimeout(timer);
+      if (!watcher) return;
+      try {
+        watcher.close();
+      } catch {}
+      watcher = null;
+    }
+
+    // A removed watch target storms change events on Windows rather than erroring, so it ends the watch.
+    function closeIfCanonGone() {
+      if (fs.existsSync(canonicalizePath(dir))) return;
+      log.warn('the canon directory is gone: the watch is closed');
+      stopWatch();
+    }
 
     function refresh() {
+      deferringSince = 0;
+      closeIfCanonGone();
+      if (!watcher) return;
       queue(async () => {
         const outcome = await reloadFromDisk();
         if (!outcome.changed) return null;
@@ -480,19 +502,18 @@ function createMemoryStore(deps = {}) {
         clearTimeout(timer);
         timer = setTimeout(refresh, CANON_WATCH_DEBOUNCE_MS);
         if (typeof timer.unref === 'function') timer.unref();
+        const at = Date.now();
+        if (!deferringSince) deferringSince = at;
+        if (at - deferringSince < CANON_WATCH_MAX_WAIT_MS) return;
+        // An unbroken stream re-arms the debounce forever, so the vanished-target check gets its own beat.
+        deferringSince = at;
+        closeIfCanonGone();
       });
     } catch (error) {
       log.warn(`could not watch the canon directory: ${error.message}`);
     }
 
-    return function stopWatch() {
-      clearTimeout(timer);
-      if (!watcher) return;
-      try {
-        watcher.close();
-      } catch {}
-      watcher = null;
-    };
+    return stopWatch;
   }
 
   function flushProjection() {

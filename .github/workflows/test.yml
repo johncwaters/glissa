@@ -25,3 +25,16 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm test
+      # npm ci leaves node-pty's install scripts unrun (npm 11.17+ blocks them by default), so the
+      # documented Linux GLOBAL install, where they DO run and the native module compiles, is untested
+      # by the clone path above and can break while this leg stays green.
+      - name: packaged global install
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        run: |
+          TARBALL=$(npm pack | tail -1)
+          npx --yes npm@12 install -g "./$TARBALL" --dangerously-allow-all-scripts
+          glissa doctor > doctor.log
+          cat doctor.log
+          # doctor reports a broken native module and still exits 0, so this line is the real gate.
+          grep -q "loads OK" doctor.log

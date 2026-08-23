@@ -21,7 +21,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const {
-  awaitSessionExit, firstLine, raceWithAbort, registerEphemeralSession,
+  awaitSessionExit, drainPending, firstLine, raceWithAbort, registerEphemeralSession,
 } = require('./ephemeral-session');
 const {
   DEFAULT_TIMEOUT_SECONDS, MAX_HAND_CHARS, buildVisionsPrompt, countLines, sanitizeComments,
@@ -151,7 +151,7 @@ function createVisionsDispatcher({
   const { note, warn } = createLaneLog({ prefix: '[visions]', logger });
 
   function spawnWithTimeout({
-    id, name, prompt, cwd, uri, resultPath, lineCount,
+    id, name, prompt, cwd, uri, resultPath, lineCount, onPending = null,
   }) {
     const startedAt = nowFn();
     const elapsed = () => nowFn() - startedAt;
@@ -159,6 +159,7 @@ function createVisionsDispatcher({
       timeoutMs: timeoutSeconds * 1000,
       setTimeoutFn,
       clearTimeoutFn,
+      onPending,
       onTimeout: () => {
         warn(`dispatch for ${uri} timed out after ${elapsed()}ms`);
         return errorResult('dispatch timed out');
@@ -190,6 +191,7 @@ function createVisionsDispatcher({
       return errorResult(`no work dir: ${firstLine(error.message)}`);
     }
     const resultPath = path.join(workDir, RESULT_FILE);
+    let pendingSpawn = null;
     try {
       return await spawnWithTimeout({
         id: idFor(uri),
@@ -201,8 +203,11 @@ function createVisionsDispatcher({
         uri,
         resultPath,
         lineCount: countLines(text),
+        onPending: (promise) => { pendingSpawn = promise; },
       });
     } finally {
+      // A timeout resolves the verdict while the killed session still holds this dir as its cwd, and removing it under a live process leaks it on Windows.
+      await drainPending(pendingSpawn);
       await removeWorkDir(workDir);
     }
   };

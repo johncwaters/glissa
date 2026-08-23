@@ -21,9 +21,11 @@ function tempDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-memory-'));
 }
 
+const openedStores = [];
+
 function openStore(dir, overrides = {}) {
   let clock = overrides.startAt || START;
-  return createMemoryStore({
+  const store = createMemoryStore({
     dir,
     config: { ...resolveMemoryConfig(null), enabled: true, ...(overrides.config || {}) },
     logger: overrides.logger || QUIET,
@@ -31,6 +33,20 @@ function openStore(dir, overrides = {}) {
     projectionDebounceMs: 5,
     ...(overrides.extra || {}),
   });
+  openedStores.push(store);
+  return store;
+}
+
+// A store's canon fs.watch is ref'd, so a test throwing before its own (idempotent) stop() wedges the runner.
+test.afterEach(async () => {
+  for (const store of openedStores.splice(0)) {
+    await store.stop().catch(() => {});
+  }
+});
+
+// json-file.js writes `<target>.tmp.<pid>.<n>` beside its target, so a read racing a rename sees one.
+function readdirStable(dirPath) {
+  return fs.readdirSync(dirPath).filter((name) => !/\.tmp\.\d+\.\d+$/.test(name));
 }
 
 function readCanon(dir, key = '202608') {
@@ -155,11 +171,11 @@ test('the projection is written to dist/ only, grouped by kind and partitioned b
     });
     await store.flushProjection();
 
-    assert.deepEqual(fs.readdirSync(dir).sort(), ['canon-202608.jsonl', 'dist', 'hmac-key']);
+    assert.deepEqual(readdirStable(dir).sort(), ['canon-202608.jsonl', 'dist', 'hmac-key']);
     const global = fs.readFileSync(path.join(dir, 'dist', 'MEMORY.md'), 'utf8');
     assert.equal(global.includes('never write else statements'), true);
     assert.equal(global.includes('merge-gate.js'), false, 'a project fact never rides into the global file');
-    const projects = fs.readdirSync(path.join(dir, 'dist', 'projects'));
+    const projects = readdirStable(path.join(dir, 'dist', 'projects'));
     assert.equal(projects.length, 1);
     const projectText = fs.readFileSync(path.join(dir, 'dist', 'projects', projects[0]), 'utf8');
     assert.equal(projectText.includes('Codebase knowledge'), true);
@@ -178,7 +194,7 @@ test('the same records project byte-identical markdown across two runs', async (
     await store.append(knowledge('the poller ticks every 15 minutes'));
     await store.flushProjection();
     const first = fs.readFileSync(path.join(dir, 'dist', 'MEMORY.md'), 'utf8');
-    const firstProject = fs.readdirSync(path.join(dir, 'dist', 'projects'))
+    const firstProject = readdirStable(path.join(dir, 'dist', 'projects'))
       .map((name) => fs.readFileSync(path.join(dir, 'dist', 'projects', name), 'utf8'));
     await store.stop();
 
@@ -186,7 +202,7 @@ test('the same records project byte-identical markdown across two runs', async (
     await reopened.flushProjection();
     assert.equal(fs.readFileSync(path.join(dir, 'dist', 'MEMORY.md'), 'utf8'), first);
     assert.deepEqual(
-      fs.readdirSync(path.join(dir, 'dist', 'projects'))
+      readdirStable(path.join(dir, 'dist', 'projects'))
         .map((name) => fs.readFileSync(path.join(dir, 'dist', 'projects', name), 'utf8')),
       firstProject
     );
@@ -203,7 +219,7 @@ test('forget writes a tombstone, reseals the segment and refreshes the projectio
     const doomed = await store.append(knowledge('the staging deploy passphrase was pasted into the prompt'));
     await store.append(knowledge('the poller ticks every 15 minutes'));
     await store.flushProjection();
-    assert.equal(fs.readFileSync(path.join(dir, 'dist', 'projects', fs.readdirSync(path.join(dir, 'dist', 'projects'))[0]), 'utf8').includes('passphrase'), true);
+    assert.equal(fs.readFileSync(path.join(dir, 'dist', 'projects', readdirStable(path.join(dir, 'dist', 'projects'))[0]), 'utf8').includes('passphrase'), true);
 
     const result = await store.forget(doomed.id);
     assert.deepEqual(
@@ -220,7 +236,7 @@ test('forget writes a tombstone, reseals the segment and refreshes the projectio
     assert.equal(tombstone.text.includes(doomed.id), true);
     assert.equal(tombstone.text.includes('passphrase'), false, 'the pattern IS the secret');
 
-    const projectFile = fs.readdirSync(path.join(dir, 'dist', 'projects'))[0];
+    const projectFile = readdirStable(path.join(dir, 'dist', 'projects'))[0];
     const projected = fs.readFileSync(path.join(dir, 'dist', 'projects', projectFile), 'utf8');
     assert.equal(projected.includes('passphrase'), false);
     assert.equal(projected.includes('the poller ticks every 15 minutes'), true);
@@ -324,7 +340,7 @@ function projectionText(dir) {
   const distDir = path.join(dir, 'dist');
   const parts = [fs.readFileSync(path.join(distDir, 'MEMORY.md'), 'utf8')];
   const projectsDir = path.join(distDir, 'projects');
-  const names = fs.existsSync(projectsDir) ? fs.readdirSync(projectsDir) : [];
+  const names = fs.existsSync(projectsDir) ? readdirStable(projectsDir) : [];
   for (const name of names) parts.push(fs.readFileSync(path.join(projectsDir, name), 'utf8'));
   return parts.join('\n');
 }
@@ -526,6 +542,26 @@ test('a forget by another process reaches a live store before it reprojects the 
     await server.flushProjection();
     assert.equal(projectionText(dir).includes('passphrase'), false);
     await server.stop();
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// Windows answers a deleted watch target with an unbounded change-event storm (537k in 3s, measured), and
+// the ref'd handle behind it wedged the whole test runner rather than the one store that owned it.
+test('a canon directory removed under a live store closes the watch instead of storming', async () => {
+  const dir = tempDir();
+  try {
+    const store = openStore(dir);
+    await store.append(knowledge('the poller ticks every 15 minutes'));
+    await store.flushProjection();
+    fs.rmSync(dir, { recursive: true, force: true });
+
+    await waitFor(
+      () => !process.getActiveResourcesInfo().includes('FSEventWrap'),
+      'the watch over the vanished canon directory was never closed'
+    );
+    await store.stop();
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

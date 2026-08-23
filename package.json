@@ -20,6 +20,8 @@
     "server/",
     "packs/",
     "!packs/AGENTS.md",
+    "!packs/specs/glissa.pack.json",
+    "!packs/sources/glissa/",
     "session/",
     "notifications/",
     "detection/",

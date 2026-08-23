@@ -200,14 +200,31 @@ function writeSessionSettings({ glissaId, token, baseDir = DEFAULT_BASE_DIR, ...
   };
 }
 
-// Delete per-session settings dirs older than maxAgeMs (orphans from prior crashes).
-// Best-effort; skips locked/inaccessible entries.
+/*
+ * Delete per-session settings dirs older than maxAgeMs (orphans from prior crashes). Best-effort;
+ * skips locked/inaccessible entries. This runs at boot, before any write, and it deletes RECURSIVELY
+ * as the server account, so the base dir takes ensureOwnedDir's discipline without its side effects:
+ * a symlink pre-planted at the shared-/tmp path, or a dir owned by another user, sweeps NOTHING
+ * rather than being followed, and a missing one is created by the first write, never by the sweep.
+ * Entries inside it need no such check: a dirent is isDirectory() only for a real directory.
+ */
 function sweepOrphans(baseDir = DEFAULT_BASE_DIR, maxAgeMs = 24 * 60 * 60 * 1000) {
+  let baseStat;
+  try {
+    baseStat = fs.lstatSync(baseDir);
+  } catch {
+    return 0; // base dir doesn't exist yet
+  }
+  const ownedByUs = typeof process.getuid !== 'function' || baseStat.uid === process.getuid();
+  if (!baseStat.isDirectory() || !ownedByUs) {
+    console.warn(`[hooks] refusing to sweep ${baseDir}: not a directory this user owns`);
+    return 0;
+  }
   let entries;
   try {
     entries = fs.readdirSync(baseDir, { withFileTypes: true });
   } catch {
-    return 0; // base dir doesn't exist yet
+    return 0;
   }
   const cutoff = Date.now() - maxAgeMs;
   let removed = 0;

@@ -181,8 +181,9 @@ function resolveNpmGlobalPrefix(exec) {
   return null;
 }
 
+// npm 12 blocks rebuild scripts under its allowScripts policy (verified 12.0.2), hence the broad flag in the hint.
 function nodePtyRebuildHint(platform) {
-  if (platform === 'linux') return 'install build tools: sudo apt install build-essential python3; then rebuild: npm rebuild node-pty';
-  if (platform === 'win32') return 'install Visual Studio Build Tools, then rebuild: npm rebuild node-pty';
-  return 'install the native build tools for this platform, then rebuild: npm rebuild node-pty';
+  if (platform === 'linux') return 'install build tools: sudo apt install build-essential python3; then rebuild: npm rebuild node-pty --dangerously-allow-all-scripts (the flag is required on npm 12, unknown-but-harmless on older npm)';
+  if (platform === 'win32') return 'install Visual Studio Build Tools, then rebuild: npm rebuild node-pty --dangerously-allow-all-scripts (the flag is required on npm 12, unknown-but-harmless on older npm)';
+  return 'install the native build tools for this platform, then rebuild: npm rebuild node-pty --dangerously-allow-all-scripts';
 }

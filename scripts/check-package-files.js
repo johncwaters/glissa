@@ -3,6 +3,10 @@
 // ── Package files validator ─────────────────────────────────────
 // Traces all local require() calls from entry points (bin, main)
 // and verifies every required file is listed in package.json "files".
+// Then checks that every pack spec the tarball ships also ships the
+// sources it reads, since pack-core treats a zero-match source
+// pattern as a hard build error and the pack service retries it on
+// every watch fire and every sweep.
 //
 // Limitations:
 //   - Only detects string-literal requires: require('./foo')
@@ -142,6 +146,12 @@ for (const entry of filesArray) {
 
 function isCovered(filePath) {
   if (negatedPaths.has(filePath)) return false;
+
+  // A negated directory takes its whole subtree with it, the way npm reads it.
+  for (const negated of negatedPaths) {
+    if (negated.endsWith('/') && filePath.startsWith(negated)) return false;
+  }
+
   if (coveredFiles.has(filePath)) return true;
 
   // Check directory entries
@@ -175,4 +185,79 @@ if (missing.length > 0) {
   process.exit(1);
 }
 
+// ---------------------------------------------------------------------------
+// 5. A shipped pack spec must ship the sources it reads
+// ---------------------------------------------------------------------------
+
+const SPECS_DIR = 'packs/specs';
+const PACKS_DIR = 'packs';
+
+/** The deepest glob-free prefix of a source pattern: where pack-builder starts its walk. */
+function literalRoot(pattern) {
+  const literal = [];
+  for (const segment of pattern.split('/')) {
+    if (segment.includes('*') || segment.includes('?')) break;
+    literal.push(segment);
+  }
+  return literal.join('/');
+}
+
+function coversRoot(relRoot) {
+  return isCovered(relRoot) || isCovered(`${relRoot}/`);
+}
+
+function requiredPatternsOf(spec) {
+  const sources = Array.isArray(spec.sources) ? spec.sources : [];
+  const skills = Array.isArray(spec.skills) ? spec.skills : [];
+  return [
+    // An optional source is allowed to match nothing, so it cannot fail a build.
+    ...sources.filter((s) => s && !s.optional).map((s) => s.glob || s.path),
+    ...skills.map((s) => s?.dir),
+  ];
+}
+
+let specNames = [];
+try {
+  specNames = fs.readdirSync(path.join(ROOT, SPECS_DIR)).filter((n) => n.endsWith('.pack.json'));
+} catch {
+  specNames = [];
+}
+
+const packProblems = [];
+let checkedSpecs = 0;
+
+for (const name of specNames) {
+  const specRel = `${SPECS_DIR}/${name}`;
+  if (!isCovered(specRel)) continue;
+  checkedSpecs += 1;
+
+  let spec;
+  try {
+    spec = JSON.parse(fs.readFileSync(path.join(ROOT, specRel), 'utf8'));
+  } catch (err) {
+    packProblems.push(`${specRel}: cannot read spec (${err.message})`);
+    continue;
+  }
+
+  for (const pattern of requiredPatternsOf(spec)) {
+    if (typeof pattern !== 'string' || pattern.length === 0) continue;
+    if (path.isAbsolute(pattern)) continue;
+    const root = literalRoot(pattern);
+    if (!root) continue;
+    const relRoot = path.relative(ROOT, path.resolve(ROOT, PACKS_DIR, root)).replace(/\\/g, '/');
+    if (coversRoot(relRoot)) continue;
+    packProblems.push(`${specRel}: source "${pattern}" reads ${relRoot || '<repo root>'}, which the "files" array does not ship`);
+  }
+}
+
+if (packProblems.length > 0) {
+  console.error('ERROR: Pack specs in the tarball read sources the tarball does not carry:\n');
+  for (const problem of packProblems.sort()) {
+    console.error(`  - ${problem}`);
+  }
+  console.error('\nShip the sources, or exclude the spec from the "files" array in package.json.');
+  process.exit(1);
+}
+
 console.log(`OK: All ${requiredFiles.size} required files are covered by the "files" array.`);
+console.log(`OK: All ${checkedSpecs} shipped pack spec(s) have their sources in the tarball.`);

@@ -1201,9 +1201,10 @@ class Session extends EventEmitter {
     return true;
   }
 
-  // On a real PTY exit (DONE/FAILED) decide the review gate: a changed worktree becomes
-  // pending-review (the operator merges/discards); an unchanged one (chat/research) is discarded
-  // silently so it leaves no branch. Transient COMPLETE never reaches here (it has no PTY exit).
+  // On a real PTY exit (DONE/FAILED) decide the review gate: a worktree holding work (edited OR
+  // committed) becomes pending-review (the operator merges/discards); one holding nothing at all
+  // (chat/research) is discarded silently so it leaves no branch. Transient COMPLETE never reaches
+  // here (it has no PTY exit).
   //
   // A DESTROYED session's PTY exit is not the operator ending the work: it is a server shutdown or a
   // config-driven recreate, where the tree must SURVIVE so the next boot re-adopts it and auto-resume
@@ -1218,12 +1219,12 @@ class Session extends EventEmitter {
     this._setMergeStatus("pending-review");
   }
 
-  // Shared keep-if-dirty/discard-if-clean settle: discard the worktree (junction-safe) only when it has
-  // no uncommitted work, and report which way it went. Used by the exit settle above and the backend's
+  // Shared keep-if-unmerged/discard-if-empty settle: discard the worktree (junction-safe) only when it
+  // holds no work at all, and report which way it went. Used by the exit settle above and the backend's
   // config-modify carry-over, so both apply the same never-destroy-work test.
   async discardWorktreeIfClean() {
     if (!this.worktreeDir) return false;
-    if (await this.hasChanges()) return false; // unmerged work is never destroyed
+    if (await this.hasUnmergedWork()) return false; // unmerged work is never destroyed
     await this.discardWorktree();
     return true;
   }
@@ -1308,16 +1309,21 @@ class Session extends EventEmitter {
     this.off("exit", pending.onExit);
   }
 
-  // True when the worktree has any uncommitted change vs its base, COUNTING untracked new files
-  // (a feature session's deliverable is usually new files, which a plain `git diff` would miss).
-  // Async: this runs on every PTY exit; a sync git subprocess here stalls every other session's
-  // streaming. gitOut resolves "" on a git error, which keeps the old catch -> false semantics.
-  async hasChanges() {
+  // True when this worktree still holds work a discard would destroy: uncommitted changes (counting
+  // untracked new files, usually a feature session's whole deliverable) OR commits its branch has that
+  // the integration branch does not. git-workspace.js owns the rule, so this and the boot reconcile
+  // cannot disagree about what "has work" means, and so raw git stays out of here. An unreachable or
+  // throwing seam reports work: discard deletes the branch, which takes a commit's reflog with it.
+  async hasUnmergedWork() {
     if (!this.worktreeDir) return false;
-    const out = await gitOut(["status", "--porcelain"], {
-      cwd: this.worktreeDir, encoding: "utf8", timeout: 10000,
-    });
-    return out.trim().length > 0;
+    if (!this._gitWorkspace || !this._workspace) return true;
+    try {
+      return await this._gitWorkspace.hasUnmergedWork({
+        projectPath: this.path,
+        workspace: this._workspace,
+        integrationBranch: this._integrationBranch,
+      });
+    } catch { return true; }
   }
 
   // Two diffs the review sidebar draws a hard line between: COMMITTED changes (the commits a merge would
@@ -2467,13 +2473,19 @@ class Session extends EventEmitter {
     }
   }
 
+  // What every caller means by "alive" is the TREE, and off Windows the probe therefore targets the
+  // GROUP: node-pty's waitpid thread reaps the leader promptly, so a leader-only probe reports gone
+  // while the background bash tasks and MCP servers under it still hold handles in the worktree. On
+  // win32 there are no process groups and taskkill /T is what covers the tree, so it probes the pid.
   _isProcessAlive(pid) {
     const target = signalablePid(pid);
     if (target === null) return false;
+    const probeTarget = this._platform === "win32" ? target : -target;
     try {
-      this._signalProc(target, 0);
+      this._signalProc(probeTarget, 0);
       return true;
     } catch {
+      // EPERM (alive but unsignalable) is deliberately read as gone: stopping the poll is the safe direction.
       return false;
     }
   }

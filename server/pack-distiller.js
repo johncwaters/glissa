@@ -19,7 +19,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const {
-  awaitSessionExit, createJobResultFile, firstLine, raceWithAbort, readResultFile,
+  awaitSessionExit, createJobResultFile, drainPending, firstLine, raceWithAbort, readResultFile,
   registerEphemeralSession,
 } = require('./ephemeral-session');
 const { createSerialQueue } = require('./spawn-gate');
@@ -166,11 +166,12 @@ function createPackDistiller(deps = {}) {
     return { pack, output, status: 'error', verdict: null, reason: null, summary: '', ...overrides };
   }
 
-  function spawnWithTimeout(spawnArgs, resultPath) {
+  function spawnWithTimeout(spawnArgs, resultPath, { onPending = null } = {}) {
     return raceWithAbort({
       timeoutMs: timeoutSeconds * 1000,
       setTimeoutFn,
       clearTimeoutFn,
+      onPending,
       onTimeout: () => ({ verdict: 'ERROR', summary: 'distill timed out' }),
       onEmpty: () => ({ verdict: 'ERROR', summary: 'no verdict' }),
       start: (signal) => Promise.resolve(spawnDistill({ ...spawnArgs, signal }))
@@ -200,6 +201,7 @@ function createPackDistiller(deps = {}) {
     let result;
     // The prompt builder runs inside the try too, so a throw there cannot strand the directory.
     let resultFile = null;
+    let pendingSpawn = null;
     try {
       resultFile = await createResultFile(spec.name, index);
       const prompt = buildDistillPrompt({
@@ -214,8 +216,10 @@ function createPackDistiller(deps = {}) {
         name: `distill ${spec.name} ${entry.output}`,
         prompt,
         cwd,
-      }, resultFile.path);
+      }, resultFile.path, { onPending: (promise) => { pendingSpawn = promise; } });
     } finally {
+      // A timeout resolves the verdict while the killed session may still be writing under packs/, which the serial queue promises no second distill overlaps.
+      await drainPending(pendingSpawn);
       if (resultFile) await resultFile.cleanup();
     }
     if (result.verdict === 'ERROR') return base({ verdict: 'ERROR', reason: result.summary || 'distill failed' });

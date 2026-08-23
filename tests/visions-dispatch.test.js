@@ -296,6 +296,41 @@ test('a hung session is aborted at the hard timeout and resolves ERROR, so the l
   assert.equal(fs.existsSync(workDirs[0]), false);
 });
 
+/*
+ * The verdict is resolved the moment the timeout fires, but the work dir is the killed session's own
+ * cwd: removing it under a live process leaks the directory on Windows (the handle blocks the remove)
+ * and pulls the tree out from under a POSIX process still writing into it.
+ */
+test('a timed-out dispatch waits for the killed session before removing its work dir', async () => {
+  let fire = null;
+  let releaseSpawn = null;
+  // The removal is observed through the injected dep, not through existsSync: a real rm lands some
+  // ticks later either way, so only the CALL says whether it waited for the session.
+  const removals = [];
+  const { dispatch, workDirs } = dispatcherWithSpawn(
+    () => new Promise((resolve) => { releaseSpawn = resolve; }),
+    {
+      timeoutSeconds: 12,
+      setTimeoutFn: (fn) => { fire = fn; return { unref() { return this; } }; },
+      clearTimeoutFn: () => {},
+      removeWorkDir: async (dir) => { removals.push(dir); await fs.promises.rm(dir, { recursive: true, force: true }); },
+    },
+  );
+
+  const pending = dispatch({ uri: URI, text: TEXT });
+  await eventLoopTurn();
+  fire();
+  await eventLoopTurn();
+  assert.deepEqual(removals, [], 'the cwd outlives the verdict, not the process');
+
+  releaseSpawn();
+  assert.deepEqual(await pending, {
+    verdict: 'ERROR', comments: [], diagnostics: [], intent: null, hand: null, reason: 'dispatch timed out',
+  });
+  assert.deepEqual(removals, [workDirs[0]], 'and is removed once the session is gone');
+  assert.equal(fs.existsSync(workDirs[0]), false);
+});
+
 test('a dispatcher with no spawn injected refuses to be built', () => {
   assert.throws(() => createVisionsDispatcher({}), /requires spawnSession/);
 });

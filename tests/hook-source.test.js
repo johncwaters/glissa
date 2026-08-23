@@ -270,6 +270,63 @@ test('sweepOrphans removes stale dirs only', () => {
   try { fs.rmSync(baseDir, { recursive: true, force: true }); } catch {}
 });
 
+// The sweep runs at boot, before any write, and rmSync's recursively as the server account. On a
+// multi-user box the shared-/tmp base path is exactly what an attacker pre-plants, so a base dir that
+// is not a real directory this user owns must sweep NOTHING rather than being followed.
+
+function captureWarnings(fn) {
+  const warnings = [];
+  const realWarn = console.warn;
+  console.warn = (line) => warnings.push(String(line));
+  try { return { result: fn(), warnings }; }
+  finally { console.warn = realWarn; }
+}
+
+test('sweepOrphans on a missing base dir returns 0 and says nothing', () => {
+  const baseDir = path.join(os.tmpdir(), `glissa-sweep-absent-${Date.now()}`);
+  const { result, warnings } = captureWarnings(() => sweepOrphans(baseDir, 24 * 60 * 60 * 1000));
+  assert.equal(result, 0);
+  assert.equal(fs.existsSync(baseDir), false, 'the sweep never creates the dir; the first write does');
+  assert.deepEqual(warnings, [], 'a base dir that does not exist yet is the ordinary first-boot case');
+});
+
+test('sweepOrphans refuses a base dir that is a symlink, deleting nothing behind it', () => {
+  const realDir = path.join(os.tmpdir(), `glissa-sweep-target-${Date.now()}`);
+  const linkDir = path.join(os.tmpdir(), `glissa-sweep-link-${Date.now()}`);
+  const stale = writeSessionSettings({ port: 1, glissaId: 'stale', baseDir: realDir });
+  const old = Date.now() - 48 * 60 * 60 * 1000;
+  fs.utimesSync(stale.dir, new Date(old), new Date(old));
+  // A junction is the Windows shape of the same trick, and needs no privilege to create.
+  fs.symlinkSync(realDir, linkDir, process.platform === 'win32' ? 'junction' : 'dir');
+  try {
+    const { result, warnings } = captureWarnings(() => sweepOrphans(linkDir, 24 * 60 * 60 * 1000));
+    assert.equal(result, 0, 'a planted symlink is never followed');
+    assert.equal(fs.existsSync(stale.dir), true, 'and the tree behind it is untouched');
+    assert.equal(warnings.length, 1, 'the refusal is stated once');
+    assert.match(warnings[0], /refusing to sweep/);
+  } finally {
+    try { fs.unlinkSync(linkDir); } catch { fs.rmSync(linkDir, { recursive: true, force: true }); }
+    fs.rmSync(realDir, { recursive: true, force: true });
+  }
+});
+
+// Nothing here can chown a directory to another user, so the alien-owner case is asserted against a
+// real system directory this account does not own. Vacuous as root, where every dir IS ours.
+const alienUidSkip = process.platform === 'win32'
+  ? 'posix uids only'
+  : (process.getuid() === 0 ? 'running as root: no directory is owned by another user' : false);
+
+test('sweepOrphans refuses a base dir owned by another user', { skip: alienUidSkip }, () => {
+  const alienDir = ['/usr', '/root', '/'].find((dir) => {
+    try { return fs.lstatSync(dir).uid !== process.getuid(); } catch { return false; }
+  });
+  assert.ok(alienDir, 'expected at least one root-owned directory to exist');
+  const { result, warnings } = captureWarnings(() => sweepOrphans(alienDir, 24 * 60 * 60 * 1000));
+  assert.equal(result, 0);
+  assert.equal(warnings.length, 1, 'refused before the readdir, not merely empty of stale entries');
+  assert.match(warnings[0], /refusing to sweep/);
+});
+
 test('end-to-end: real HTTP POST through router validates token and dispatches', async () => {
   const r = new HookRouter();
   const got = [];

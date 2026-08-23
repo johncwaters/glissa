@@ -24,14 +24,58 @@ function writeOptions(mode, encoding) {
   return { encoding, mode };
 }
 
-function writeTextAtomicSync(filePath, content, { mode, encoding = 'utf8', mkdir = false } = {}) {
-  if (mkdir) fs.mkdirSync(path.dirname(filePath), { recursive: true });
+// Windows fails a rename onto a target a scanner still holds with a transient EPERM/EACCES/EBUSY.
+const RENAME_RETRY_CODES = new Set(['EPERM', 'EACCES', 'EBUSY']);
+const RENAME_ATTEMPTS = 5;
+
+function renameRetryDelayMs(attempt) {
+  return Math.min(10 * 2 ** attempt, 50);
+}
+
+function isRetryableRename(error, attempt) {
+  if (attempt >= RENAME_ATTEMPTS - 1) return false;
+  return RENAME_RETRY_CODES.has(error?.code);
+}
+
+// A real sleep, not a spin; every sync caller is a cold path and this runs only after a rename failed.
+function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function renameWithRetrySync(fsSync, tmpPath, filePath) {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      fsSync.renameSync(tmpPath, filePath);
+      return;
+    } catch (error) {
+      if (!isRetryableRename(error, attempt)) throw error;
+      sleepSync(renameRetryDelayMs(attempt));
+    }
+  }
+}
+
+async function renameWithRetry(fsPromises, tmpPath, filePath) {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await fsPromises.rename(tmpPath, filePath);
+      return;
+    } catch (error) {
+      if (!isRetryableRename(error, attempt)) throw error;
+      await new Promise((resolve) => { setTimeout(resolve, renameRetryDelayMs(attempt)); });
+    }
+  }
+}
+
+function writeTextAtomicSync(filePath, content, {
+  mode, encoding = 'utf8', mkdir = false, fsSync = fs,
+} = {}) {
+  if (mkdir) fsSync.mkdirSync(path.dirname(filePath), { recursive: true });
   const tmpPath = tmpPathFor(filePath);
-  fs.writeFileSync(tmpPath, content, writeOptions(mode, encoding));
+  fsSync.writeFileSync(tmpPath, content, writeOptions(mode, encoding));
   try {
-    fs.renameSync(tmpPath, filePath);
+    renameWithRetrySync(fsSync, tmpPath, filePath);
   } catch (error) {
-    fs.rmSync(tmpPath, { force: true });
+    fsSync.rmSync(tmpPath, { force: true });
     throw error;
   }
 }
@@ -47,7 +91,7 @@ async function writeTextAtomic(filePath, content, {
   const tmpPath = tmpPathFor(filePath);
   await fsPromises.writeFile(tmpPath, content, writeOptions(mode, encoding));
   try {
-    await fsPromises.rename(tmpPath, filePath);
+    await renameWithRetry(fsPromises, tmpPath, filePath);
   } catch (error) {
     try {
       await fsPromises.rm(tmpPath, { force: true });

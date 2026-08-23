@@ -42,6 +42,7 @@ Every key is validated by `validatePackSpec` in `../server/core/pack-core.js`; u
 - `sources/company-context/` is also read live by `tools/company-context/server.js` (the MCP server), so it is one source of truth, not a copy.
 - Adding a source that matches no file fails the build on purpose; fix the pattern rather than dropping the source.
 - These files ship in the npm tarball (`package.json` `files`), so keep them reference material, not scratch notes.
+- A spec whose sources reach OUTSIDE `packs/` (the `glissa` pack reads `../docs/*.md`) is repo-development context and must be excluded from the tarball, or a global install fails its build on every watch fire and every sweep. `scripts/check-package-files.js` enforces that: a shipped spec whose non-optional sources are not in the whitelist fails the release gate.
 
 ### Testing Requirements
 - `node --test tests/pack-core.test.js tests/pack-builder.test.js` covers the format and the builder; `glissa pack build` is the end-to-end check.

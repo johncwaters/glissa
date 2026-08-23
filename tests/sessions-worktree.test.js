@@ -69,9 +69,24 @@ function realWorktreeDir() {
 }
 
 function fakeGitWorkspace(opts = {}) {
-  const calls = { create: [], mergeBack: [], mergeKeep: [], discard: [], populate: [] };
+  const calls = { create: [], mergeBack: [], mergeKeep: [], discard: [], populate: [], hasUnmergedWork: [] };
+  // Models the git-workspace seam Session.hasUnmergedWork delegates to: work is a DIRTY tree or commits
+  // the integration branch does not have (the committed-but-clean case, which the old porcelain-only
+  // probe read as "no work" and discarded). Mutable, so a test flips it after start() the way a live
+  // session edits or commits mid-run. `probeFails` stands in for a git probe that could not run.
+  const work = {
+    dirty: opts.dirty === true,
+    aheadCount: opts.aheadCount || 0,
+    probeFails: opts.probeFails === true,
+  };
   return {
     calls,
+    work,
+    hasUnmergedWork(args) {
+      calls.hasUnmergedWork.push(args);
+      if (work.probeFails) throw new Error('probe boom');
+      return work.dirty || work.aheadCount > 0;
+    },
     // Sync no-op on purpose: the adopt path must tolerate a populate that does not return a promise.
     populate(args) { calls.populate.push(args); },
     create(args) {
@@ -1268,7 +1283,7 @@ test('finishAndMerge from COMPLETE ends the session, then merges + resets on exi
     assert.equal(s.state, STATES.DONE, 'killSession transitioned to DONE');
     assert.equal(gw.calls.mergeBack.length, 0, 'not merged yet (still settling)');
     // Simulate _handlePtyExit: worktree settles to pending-review, PTY cleared, exit emitted.
-    s.hasChanges = () => true;
+    gw.work.dirty = true;
     await s._settleWorktreeOnExit();
     s.ptyProcess = null;
     s.emit('exit', { exitCode: 0 });
@@ -1285,21 +1300,20 @@ test('_settleWorktreeOnExit: a changed worktree -> pending-review; an unchanged 
     const s = makeSession({ gitWorkspace: gw, integrationBranch: 'develop', ptySpawn: () => fakePty() });
     try {
       await s.start();
-      s.hasChanges = () => true; // stub the porcelain probe
-      s.state = STATES.DONE;     // simulate a real PTY exit
+      gw.work.dirty = true;  // uncommitted changes in the tree
+      s.state = STATES.DONE; // simulate a real PTY exit
       await s._settleWorktreeOnExit();
       assert.equal(s.mergeStatus, 'pending-review');
       assert.equal(s.worktreeDir, wt, 'worktree kept for review');
       assert.equal(gw.calls.discard.length, 0);
     } finally { s.destroy(); fs.rmSync(wt, { recursive: true, force: true }); }
   }
-  { // unchanged
+  { // unchanged: nothing edited AND nothing committed
     const wt = realWorktreeDir();
     const gw = fakeGitWorkspace({ worktreeDir: wt });
     const s = makeSession({ gitWorkspace: gw, integrationBranch: 'develop', ptySpawn: () => fakePty() });
     try {
       await s.start();
-      s.hasChanges = () => false;
       s.state = STATES.DONE;
       await s._settleWorktreeOnExit();
       assert.equal(s.mergeStatus, 'none');
@@ -1307,6 +1321,47 @@ test('_settleWorktreeOnExit: a changed worktree -> pending-review; an unchanged 
       assert.equal(gw.calls.discard.length, 1);
     } finally { s.destroy(); fs.rmSync(wt, { recursive: true, force: true }); }
   }
+});
+
+// THE data-loss regression. A session that COMMITS its work leaves a clean working tree, so the old
+// porcelain-only gate read it as "nothing here" and discarded - and discard runs `git branch -D`, which
+// takes the commit's last ref AND its reflog with it (recovery is `git fsck --lost-found`). The gate now
+// asks the git-workspace seam, which counts commits the integration branch does not have.
+test('_settleWorktreeOnExit: a COMMITTED but clean worktree is kept for review, never discarded', async () => {
+  const wt = realWorktreeDir();
+  const gw = fakeGitWorkspace({ worktreeDir: wt });
+  const s = makeSession({ gitWorkspace: gw, integrationBranch: 'develop', ptySpawn: () => fakePty() });
+  try {
+    await s.start();
+    gw.work.aheadCount = 1; // committed in the worktree: clean tree, one commit develop does not have
+    s.state = STATES.DONE;
+    await s._settleWorktreeOnExit();
+    assert.equal(gw.calls.discard.length, 0, 'the branch (and the commit) survives the exit');
+    assert.equal(s.worktreeDir, wt, 'worktree kept on disk');
+    assert.equal(s.mergeStatus, 'pending-review', 'lands in the same review gate a dirty tree gets');
+    assert.equal(gw.calls.hasUnmergedWork.length, 1, 'the ahead check is asked exactly once');
+    assert.deepEqual(gw.calls.hasUnmergedWork[0], {
+      projectPath: s.path,
+      workspace: s._workspace,
+      integrationBranch: 'develop',
+    }, 'the seam gets the repo, the workspace and the integration branch to compare against');
+  } finally { s.destroy(); fs.rmSync(wt, { recursive: true, force: true }); }
+});
+
+// Fail SAFE: a probe that cannot run says nothing about whether commits exist, and a false discard costs
+// commits while a false keep costs disk. An unreachable seam (a throw) must therefore keep the worktree.
+test('_settleWorktreeOnExit: a FAILING work probe keeps the worktree (never discards on a guess)', async () => {
+  const wt = realWorktreeDir();
+  const gw = fakeGitWorkspace({ worktreeDir: wt, probeFails: true });
+  const s = makeSession({ gitWorkspace: gw, integrationBranch: 'develop', ptySpawn: () => fakePty() });
+  try {
+    await s.start();
+    s.state = STATES.DONE;
+    await s._settleWorktreeOnExit();
+    assert.equal(gw.calls.discard.length, 0, 'nothing destroyed on an unreadable probe');
+    assert.equal(s.worktreeDir, wt);
+    assert.equal(s.mergeStatus, 'pending-review');
+  } finally { s.destroy(); fs.rmSync(wt, { recursive: true, force: true }); }
 });
 
 // --- teardown mutex: finishAndMerge and restart cannot race each other's queued exit handler ---
@@ -1451,7 +1506,7 @@ test('_handlePtyExit: settle completes before "exit" is emitted (changed tree)',
   const order = [];
   try {
     await s.start();
-    s.hasChanges = () => true;
+    gw.work.dirty = true;
     // Mark settle via the merge-status broadcast (pending-review fires inside _settleWorktreeOnExit).
     s.on('merge-status', (e) => { if (e.mergeStatus === 'pending-review') order.push('settle'); });
     s.on('exit', () => order.push('exit'));
@@ -1470,8 +1525,7 @@ test('_handlePtyExit: a rejecting settle still emits "exit" and clears the teard
   const s = makeSession({ gitWorkspace: gw, integrationBranch: 'develop', ptySpawn: () => fakePty() });
   try {
     await s.start();
-    // Force the settle path to reject (an unchanged tree calls discard; make it throw).
-    s.hasChanges = () => false;
+    // Force the settle path to reject (an empty tree calls discard; make it throw).
     s._gitWorkspace.discard = () => Promise.reject(new Error('settle boom'));
     let exited = false;
     s._finishing = true; // simulate a queued finish whose flag must still clear via its once-handler
@@ -1497,7 +1551,6 @@ test('_settleWorktreeOnExit: a DESTROYED session keeps its worktree untouched (s
     const s = makeSession({ gitWorkspace: gw, integrationBranch: 'develop', ptySpawn: () => fakePty() });
     try {
       await s.start();
-      s.hasChanges = () => false;
       s.state = STATES.DONE;
       s.destroy();
       await s._settleWorktreeOnExit();
@@ -1512,7 +1565,7 @@ test('_settleWorktreeOnExit: a DESTROYED session keeps its worktree untouched (s
     const s = makeSession({ gitWorkspace: gw, integrationBranch: 'develop', ptySpawn: () => fakePty() });
     try {
       await s.start();
-      s.hasChanges = () => true;
+      gw.work.dirty = true;
       s.state = STATES.DONE;
       s.destroy();
       await s._settleWorktreeOnExit();
@@ -1531,7 +1584,6 @@ test('_handlePtyExit after destroy(): tree kept, "exit" still emitted, kill reap
   const s = makeSession({ gitWorkspace: gw, integrationBranch: 'develop', ptySpawn: () => fakePty() });
   try {
     await s.start();
-    s.hasChanges = () => false;
     s.state = STATES.IDLE;
     s.destroy();
     // Registered AFTER destroy: destroy() drops every prior listener, and this asserts the emit itself

@@ -479,6 +479,74 @@ test('mergeBack (real git): a rebase conflict parks the branch and leaves develo
   }
 });
 
+// --- hasUnmergedWork: the never-destroy-work test the exit-time discard gates on ----------
+
+// The data-loss shape this seam exists for: the session COMMITTED, so the working tree is clean and the
+// old porcelain-only probe reported "nothing here". Discard then runs `git branch -D`, which drops the
+// commit's last ref and its reflog with it. dirty-or-ahead is the same rule the boot reconcile adopts on.
+test('hasUnmergedWork (real git): a committed but CLEAN worktree reports work (the branch -D hazard)', { skip: !GIT }, async () => {
+  const repo = initRepoOnDevelop();
+  try {
+    const gw = createGitWorkspace();
+    const ws = await gw.create({ projectPath: repo, teamId: 'session', label: 'ahead' });
+    assert.equal(await gw.hasUnmergedWork({ projectPath: repo, workspace: ws, integrationBranch: 'develop' }), false,
+      'a fresh worktree holds nothing: discardable');
+
+    fs.writeFileSync(path.join(ws.cwd, 'feature.js'), 'module.exports = 1;\n', 'utf8');
+    git(['add', '-A'], ws.cwd); git(['commit', '-m', 'session work'], ws.cwd);
+    assert.equal(git(['status', '--porcelain'], ws.cwd).trim(), '', 'committing leaves the tree clean');
+
+    assert.equal(await gw.hasUnmergedWork({ projectPath: repo, workspace: ws, integrationBranch: 'develop' }), true,
+      'one commit develop does not have IS work');
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test('hasUnmergedWork (real git): uncommitted changes report work; a merged-away branch does not', { skip: !GIT }, async () => {
+  const repo = initRepoOnDevelop();
+  try {
+    const gw = createGitWorkspace();
+    const ws = await gw.create({ projectPath: repo, teamId: 'session', label: 'dirty' });
+    fs.writeFileSync(path.join(ws.cwd, 'scratch.txt'), 'wip\n', 'utf8'); // untracked, never committed
+    assert.equal(await gw.hasUnmergedWork({ projectPath: repo, workspace: ws, integrationBranch: 'develop' }), true,
+      'an untracked new file counts: it is usually the whole deliverable');
+
+    fs.rmSync(path.join(ws.cwd, 'scratch.txt'));
+    fs.writeFileSync(path.join(ws.cwd, 'landed.js'), 'module.exports = 2;\n', 'utf8');
+    git(['add', '-A'], ws.cwd); git(['commit', '-m', 'work'], ws.cwd);
+    git(['merge', '--ff-only', ws.branch], repo); // the operator merged it out of band
+    assert.equal(await gw.hasUnmergedWork({ projectPath: repo, workspace: ws, integrationBranch: 'develop' }), false,
+      'work already on the integration branch is not work: the empty worktree may be discarded');
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+// Fail SAFE: an ahead-count that cannot run says nothing about whether commits exist. A false keep costs
+// disk; a false discard costs commits, so an unreadable probe reports work.
+test('hasUnmergedWork (real git): an unresolvable integration branch reports work (fails safe)', { skip: !GIT }, async () => {
+  const repo = initRepoOnDevelop();
+  try {
+    const gw = createGitWorkspace();
+    const ws = await gw.create({ projectPath: repo, teamId: 'session', label: 'safe' });
+    // The marker outranks the passed branch, so pointing it at a branch that does not exist is how a
+    // rev-list failure is reproduced without stubbing git.
+    git(['config', `branch.${ws.branch}.glissa-integration`, 'no-such-branch'], repo);
+    assert.equal(await gw.hasUnmergedWork({ projectPath: repo, workspace: ws, integrationBranch: 'develop' }), true,
+      'a failed rev-list keeps the worktree');
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test('hasUnmergedWork: an unusable workspace (no branch, not a repo) reports work rather than guessing', async () => {
+  const gw = createGitWorkspace({ git: () => { throw new Error('git must not be reached'); } });
+  assert.equal(await gw.hasUnmergedWork({ projectPath: 'C:/proj', workspace: null }), true);
+  assert.equal(await gw.hasUnmergedWork({ projectPath: 'C:/proj', workspace: { cwd: 'C:/wt', isGit: false, branch: 'b' } }), true);
+  assert.equal(await gw.hasUnmergedWork({ projectPath: 'C:/proj', workspace: { cwd: 'C:/wt', isGit: true } }), true);
+});
+
 // --- Junction-safe teardown (the node_modules-deletion hazard) ---------------------------
 
 test('discard is junction-safe: the real node_modules survives worktree teardown', { skip: !GIT || !WIN }, async () => {

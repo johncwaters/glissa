@@ -11,7 +11,7 @@ Maintainer scripts for cutting a release and validating the install tarball. Gli
 | File | Description |
 |------|-------------|
 | `release.js` | Release pipeline: pushes to GitHub, tags, creates the GitHub release. No registry publish. Run as `node scripts/release.js` |
-| `check-package-files.js` | Traces string-literal `require()` calls from the package entry points (bin, main) and verifies every required file is in `package.json` `files`; dynamic requires are not detected |
+| `check-package-files.js` | Traces string-literal `require()` calls from the package entry points (bin, main) and verifies every required file is in `package.json` `files`; dynamic requires are not detected. Also verifies every pack spec the tarball ships has its non-optional sources in the tarball, since `pack-core` fails a build on a zero-match source pattern and the pack service retries it forever |
 
 ## For AI Agents
 

@@ -505,6 +505,40 @@ function createGitWorkspace(opts = {}) {
     await run(['worktree', 'prune'], projectPath);
   }
 
+  // The dirty-or-ahead probe every "does this worktree still hold work" reader shares: the marker's
+  // integration branch, `status --porcelain` in the worktree, and - only when that is clean - the
+  // ahead-count of its branch over that integration branch. Returns the raw {ok,out} results so each
+  // caller applies its own failure policy to them.
+  async function probeWorktreeWork({ projectPath, cwd, branch, integrationBranch }) {
+    // The marker is the authority for THIS worktree's integration branch; the passed integrationBranch
+    // is only the fallback for a worktree created before the marker existed.
+    const marker = await run(['config', '--get', `branch.${branch}.glissa-integration`], projectPath);
+    const resolvedIntegrationBranch = markerFrom(marker) || integrationBranch;
+    // The ahead-count is only asked for when the working tree is clean: a dirty tree already holds work.
+    const dirty = await run(['status', '--porcelain'], cwd);
+    const ahead = !isDirtyResult(dirty) && resolvedIntegrationBranch
+      ? await run(['rev-list', '--count', `${resolvedIntegrationBranch}..${branch}`], projectPath)
+      : null;
+    return { dirty, ahead, integrationBranch: resolvedIntegrationBranch };
+  }
+
+  // The exit-time discard's never-destroy-work test: the SAME dirty-or-ahead rule the boot reconcile
+  // adopts a worktree on, but failing SAFE. Uncommitted-only was the whole defect - a session that
+  // COMMITTED and left a clean tree read as "no work", and discard's `git branch -D` then took the
+  // commit's last ref AND its reflog with it. A probe that could not run also reads as work: a false
+  // keep costs disk, a false discard costs commits. Read-only, so it skips the mutator queue.
+  async function hasUnmergedWork({ projectPath, workspace, integrationBranch }) {
+    if (!workspace || !workspace.isGit || !workspace.cwd || !workspace.branch) return true;
+    const { dirty, ahead } = await probeWorktreeWork({
+      projectPath, cwd: workspace.cwd, branch: workspace.branch,
+      integrationBranch: integrationBranch || workspace.base,
+    });
+    if (!dirty.ok) return true;
+    if (isDirtyResult(dirty)) return true;
+    if (!ahead || !ahead.ok) return true; // no integration branch to compare against, or rev-list failed
+    return hasWorkFrom(dirty, ahead);
+  }
+
   // List the SESSION worktrees (branch `glissa/session/<id>`) of a repo, each with its extracted session
   // id and whether it holds unmerged work.
   async function listSessionWorktrees({ projectPath, integrationBranch }) {
@@ -516,19 +550,11 @@ function createGitWorkspace(opts = {}) {
     for (const { cwd: wt, branch: name } of parseWorktreeBranches(listed.out)) {
       const id = sessionIdFromBranch(name);
       if (id === null) continue;
-      // The marker is the authority for THIS worktree's integration branch; the passed integrationBranch
-      // is only the fallback for a worktree created before the marker existed.
-      const marker = await run(['config', '--get', `branch.${name}.glissa-integration`], projectPath);
-      const resolvedIntegrationBranch = markerFrom(marker) || integrationBranch;
-      // The ahead-count is only asked for when the working tree is clean: a dirty tree already holds work.
-      const dirty = await run(['status', '--porcelain'], wt);
-      const ahead = !isDirtyResult(dirty) && resolvedIntegrationBranch
-        ? await run(['rev-list', '--count', `${resolvedIntegrationBranch}..${name}`], projectPath)
-        : null;
+      const probe = await probeWorktreeWork({ projectPath, cwd: wt, branch: name, integrationBranch });
       out.push({
         cwd: wt, branch: name, id,
-        hasWork: hasWorkFrom(dirty, ahead),
-        integrationBranch: resolvedIntegrationBranch,
+        hasWork: hasWorkFrom(probe.dirty, probe.ahead),
+        integrationBranch: probe.integrationBranch,
       });
     }
     return out;
@@ -569,7 +595,7 @@ function createGitWorkspace(opts = {}) {
     rebaseOnly: serialized(rebaseOnlyBody),
     populate: serialized(populateShare),
     removeWorktreeByPath: serialized(removeWorktreeByPathBody),
-    listSessionWorktrees, listWorktreeBranches,
+    listSessionWorktrees, listWorktreeBranches, hasUnmergedWork,
   };
 }
 

@@ -49,10 +49,12 @@ function harness({
   verdicts = ['DISTILLED'],
   onSpawn = null,
   hangForever = false,
+  hangUntilRelease = false,
   enabled = false,
   intervalHours = 24,
 } = {}) {
   const spawns = [];
+  const releases = [];
   const warnings = [];
   const intervals = [];
   const timeouts = [];
@@ -78,7 +80,10 @@ function harness({
       concurrent += 1;
       maxConcurrent = Math.max(maxConcurrent, concurrent);
       try {
-        if (hangForever) await new Promise(() => {});
+        // The real spawn resolves only once the destroyed PTY tree is reaped, so an aborted fake must
+        // settle too rather than hanging: that is what the caller's drain waits for.
+        if (hangForever) await new Promise((resolve) => { args.signal.addEventListener('abort', resolve, { once: true }); });
+        if (hangUntilRelease && spawns.length === 1) await new Promise((resolve) => { releases.push(resolve); });
         await new Promise((resolve) => setImmediate(resolve));
         if (onSpawn) onSpawn(files, args);
       } finally {
@@ -102,7 +107,17 @@ function harness({
     log: { log() {}, warn: (msg) => warnings.push(msg) },
   });
 
-  return { distiller, spawns, warnings, intervals, timeouts, files, removed, maxConcurrent: () => maxConcurrent };
+  return {
+    distiller,
+    spawns,
+    warnings,
+    intervals,
+    timeouts,
+    files,
+    removed,
+    maxConcurrent: () => maxConcurrent,
+    releaseHungSpawn: () => { for (const release of releases) release(); },
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -255,6 +270,46 @@ test('a hung session is aborted by the timeout and reported as an error', async 
   assert.equal(report.status, 'error');
   assert.match(report.reason, /timed out/);
   assert.equal(h.spawns[0].signal.aborted, true);
+});
+
+/*
+ * A timeout resolves the VERDICT at once so a hung job cannot pin the lane, but the session it just
+ * killed is still unwinding, and this lane's whole serialization promise is that no second distill
+ * writes under packs/ while another one might be. So the result directory is released and the next
+ * entry is started only after the aborted spawn settles (drainPending in server/ephemeral-session.js).
+ */
+test('a timed-out distill waits for the killed session before releasing its result file or starting the next entry', async () => {
+  const h = harness({
+    specByPath: {
+      '/specs/glissa.pack.json': specWithDistill({
+        distill: [
+          { output: 'sources/glissa/derived/one.md', sources: [{ path: '../AGENTS.md' }], instructions: 'one' },
+          { output: 'sources/glissa/derived/two.md', sources: [{ path: '../AGENTS.md' }], instructions: 'two' },
+        ],
+      }),
+    },
+    verdicts: ['DISTILLED', 'DISTILLED'],
+    hangUntilRelease: true,
+    onSpawn: (files, args) => { files[args.prompt.match(/\/packs\/\S+\.md/)[0]] = stampedFile(); },
+  });
+
+  const pass = h.distiller.runOnce();
+  await new Promise((resolve) => setImmediate(resolve));
+  h.timeouts[0].fn();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(h.spawns[0].signal.aborted, true, 'the hung session was told to stop');
+  assert.deepEqual(h.removed, [], 'the result directory outlives the verdict, not the process');
+  assert.equal(h.spawns.length, 1, 'the next entry has not started under the dying one');
+
+  h.releaseHungSpawn();
+  const reports = await pass;
+
+  assert.equal(h.spawns.length, 2);
+  assert.equal(h.maxConcurrent(), 1);
+  assert.deepEqual(h.removed, ['/tmp/glissa-0.json', '/tmp/glissa-1.json']);
+  assert.match(reports[0].reason, /timed out/);
+  assert.equal(reports[1].status, 'distilled');
 });
 
 // ---------------------------------------------------------------------------

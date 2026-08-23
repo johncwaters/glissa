@@ -23,19 +23,19 @@ My own always-on machines are provisioned by the [`claude-setup`](https://github
 
 ### Standalone CLI
 
-Requires npm 12 or newer (`npm --version` to check). npm 12 refuses git dependencies by default, so the install carries an explicit opt-in flag:
+Requires npm 12 or newer (`npm --version` to check). npm 12 refuses git dependencies by default, so the install carries an explicit opt-in flag. On Windows and macOS this is the whole command (node-pty ships prebuilds there, and `prepare` builds `dist/` during npm's git preparation regardless of the install-scripts policy):
 
 ```bash
 npm install -g github:johncwaters/glissa --allow-git=root
 ```
 
-On an older npm, run the same install through npm 12 without upgrading:
+On Linux, node-pty has no prebuilds and must compile through node-gyp at install time, which npm 12's default script-skipping prevents; add the broad scripts opt-in (and have the build toolchain from Requirements installed):
 
 ```bash
-npx npm@12 install -g github:johncwaters/glissa --allow-git=root
+npm install -g github:johncwaters/glissa --allow-git=root --dangerously-allow-all-scripts
 ```
 
-The npm 12 floor is hard, not advisory: npm 11 global installs from git specs are broken outright ([npm/cli#9406](https://github.com/npm/cli/issues/9406), the package lands as a link into npm's cache temp clone, which npm then deletes). npm 12 also skips the packages' install scripts by default and warns that it did. That is fine for the dashboard frontend because `prepare` builds `dist/` during packing, and node-pty has shipped prebuilds for Windows and macOS. On Linux, node-pty compiles through node-gyp at install time, so an install path that skips scripts breaks the native module until you run `npm rebuild node-pty`.
+On an older npm, run the same command through `npx npm@12 install -g ...` without upgrading. The npm 12 floor is hard, not advisory: npm 11 global installs from git specs are broken outright ([npm/cli#9406](https://github.com/npm/cli/issues/9406), the package lands as a link into npm's cache temp clone, which npm then deletes). The broad scripts flag on Linux is deliberate, all three alternatives verified against npm 12.0.2: the targeted `--allow-scripts node-pty` form FAILS the whole git-spec install (`EALLOWSCRIPTS`, the git-dep preparation runs as a project-scoped subprocess that refuses the flag), and a plain `npm rebuild node-pty` afterwards is blocked by the same allowScripts policy. A scripts-skipped Linux install is repaired in place with `cd "$(npm root -g)/glissa" && npm rebuild node-pty --dangerously-allow-all-scripts` (also verified), or by rerunning the install with the flag above. `glissa doctor` reports whether the native module loads.
 
 Or clone and run it in place:
 
@@ -186,7 +186,7 @@ This is a minimal starting example. The full key list (`integrationBranch`, `aut
 
 ## Requirements
 
-- **Node.js** >= 18
+- **Node.js** >= 18 to run Glissa (clone path). The standalone CLI install needs **Node.js >= 22.22.2**, because it goes through npm 12 and that is npm 12's own engine floor (`npx npm@12` fails the same check on an older Node). Distro-packaged Node is usually far older than either floor; use nodesource or nvm.
 - **Windows 11 or Linux**
 - **Claude Code CLI** installed and available on PATH
 - **Linux build tools for node-pty:** `sudo apt install build-essential python3`

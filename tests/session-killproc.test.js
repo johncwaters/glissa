@@ -257,6 +257,44 @@ test('a reap of an already-dead group resolves without waiting out a poll interv
   } finally { cleanup(s); }
 });
 
+// The reap's contract is the TREE, and node-pty's waitpid thread reaps the leader promptly, so a
+// probe of the LEADER pid reports gone while background bash tasks and MCP servers under it still
+// hold handles in the worktree the ephemeral lanes are about to discard. The probe is the group too.
+test('the liveness probe off Windows targets the process GROUP, not the leader pid', async () => {
+  const signals = [];
+  let living = true;
+  const s = makePosixSession({ signals, alive: () => living });
+  try {
+    await s.start();
+    s.kill();
+    const probes = signals.filter((x) => x.signal === 0);
+    assert.ok(probes.length > 0, 'the reap probed at least once');
+    assert.deepEqual([...new Set(probes.map((x) => x.pid))], [-FAKE_PID], 'every probe is the negative pid');
+    living = false;
+    await s._killReap;
+  } finally { cleanup(s); }
+});
+
+// Windows has no process groups: taskkill /T is what covers the tree there, so the probe stays the pid.
+test('the liveness probe on win32 targets the pid, since a negative one is not signallable there', async () => {
+  const signals = [];
+  const s = new Session({
+    id: 'win32-probe',
+    name: 'win32-probe',
+    path: process.cwd(),
+    spawnCommand: { path: process.execPath, kind: 'exe' },
+    platform: 'win32',
+    ptySpawn: () => fakePty(),
+    killProc: (_args, _opts, cb) => cb(null, '', ''),
+    signalProc: (pid, signal) => { signals.push({ pid, signal }); },
+  });
+  try {
+    await s.start();
+    assert.equal(s._isProcessAlive(FAKE_PID), true);
+    assert.deepEqual(signals, [{ pid: FAKE_PID, signal: 0 }]);
+  } finally { cleanup(s); }
+});
+
 // Negated, pid 0 is our OWN process group and pid 1 is every process this user can signal, so a pty
 // object with a missing or absurd pid must reach neither.
 test('a pid below 2 is never signalled, in either direction', async () => {
