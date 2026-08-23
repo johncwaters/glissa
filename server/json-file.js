@@ -60,6 +60,34 @@ async function writeJsonAtomic(filePath, value, options) {
   await writeTextAtomic(filePath, JSON.stringify(value, null, 2), options);
 }
 
+const appendChains = new Map();
+
+/**
+ * One JSON line onto the end of a file, serialized PER PATH: an append-only log is only append-only if
+ * two concurrent writers cannot interleave a partial line, and node's appendFile gives no such order.
+ */
+function appendJsonLine(filePath, value, {
+  fsPromises = fs.promises, mkdir = false, encoding = 'utf8', mode,
+} = {}) {
+  const line = `${JSON.stringify(value)}\n`;
+  const previous = appendChains.get(filePath) || Promise.resolve();
+  const next = previous.then(async () => {
+    if (mkdir) await fsPromises.mkdir(path.dirname(filePath), { recursive: true });
+    await fsPromises.appendFile(filePath, line, writeOptions(mode, encoding));
+  });
+  const settled = next.then(() => {}, () => {});
+  appendChains.set(filePath, settled);
+  settled.then(() => {
+    if (appendChains.get(filePath) === settled) appendChains.delete(filePath);
+  });
+  return next;
+}
+
+// What is still queued for one path, so a caller draining on shutdown can await it.
+function appendJsonLineIdle(filePath) {
+  return appendChains.get(filePath) || Promise.resolve();
+}
+
 /**
  * Signature-gated durable state writer: an unchanged payload writes nothing, every write is serialized
  * on one chain, and a failed write clears the signature so the next pass retries instead of believing
@@ -95,6 +123,8 @@ function createJsonStateWriter({ filePath, fsPromises = fs.promises, warn = () =
 }
 
 module.exports = {
+  appendJsonLine,
+  appendJsonLineIdle,
   createJsonStateWriter,
   writeJsonAtomic,
   writeJsonAtomicSync,

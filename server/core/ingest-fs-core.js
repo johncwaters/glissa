@@ -113,6 +113,7 @@ const DAEMON_CONFIG_SIBLINGS = Object.freeze([
   'update-check.json',
   'recordings',
   'uploads',
+  'memory',
 ]);
 
 // The states in which a session is a live checkout worth following. DORMANT has never started and

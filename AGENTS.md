@@ -130,7 +130,10 @@ server/            # Backend runtime (Express + WS wiring, control plane, shared
   usage-scanner.js     # Claude Code transcript scanner: project-dir resolution, JSONL walk, incremental offset reads, deduped entry store
   usage-pricing.js     # Claude model pricing loader: bundled LiteLLM snapshot, optional fetch, 24h disk cache, snapshot overlay
   spawn-gate.js        # Concurrent-spawn limiter (exports the shared createSerialQueue promise chain)
-  json-file.js         # Atomic tmp+rename JSON/text writes (sync + async) + the signature-gated chain-serialized state writer
+  json-file.js         # Atomic tmp+rename JSON/text writes (sync + async), the signature-gated chain-serialized state writer, and appendJsonLine (per-path serialized JSONL appends)
+  memory-store.js      # Visions memory store IO shell (M12 of docs/plan-visions-3.md): boot load with HMAC verify/demote, hmac-key mint (0600), serialized appends, forget (tombstone + reseal), debounced deterministic dist/ projection; constructed only when config.memory.enabled (file-only key, never control-WS settable)
+  memory-cli.js        # `glissa memory forget <id|pattern>` / `memory backfill` (stub until M14); in server/ for the files whitelist
+  core/memory-core.js  # Pure memory rules: record gates, trust ranks (operator > action > reported = model) with the fall-only lineage cap, lock rules, supersession/validTo, monthly-segment retention, canonical HMAC payload + sign/verify/demote, echo suppression, lexical retrieval, secret gates (reuses the ingest scrub) + high-entropy rejection, projection renderer, resolveMemoryConfig
   lane-runner.js       # Shared lane scaffolding: createLaneRunner (restart-on-config-change poller lifecycle) + createTickLoop (interval tick, re-entry guard, drain-on-stop)
   lane-log.js          # THE shared logger wrapper for every lane and lane source: createLaneLog({ prefix, logger, debugFlag }) -> note/warn/debugNote, with the throw-safe debug getter and the lane logging PRIVACY RULE stated once
   text-format.js       # Tiny shared CLI formatters (shortVersion, formatTimestamp)

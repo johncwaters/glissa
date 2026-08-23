@@ -14,6 +14,8 @@ Commands:
   pair --revoke <id>  Revoke a paired device
   pack build [name] Build one context pack, or every spec
   pack list         List context pack specs and their built versions
+  memory forget <id|pattern>  Expunge a remembered record
+  memory backfill   Re-run the cold-start transcript backfill
 
 Options:
   --name <label>    Label for the device being paired (with: pair)
@@ -60,11 +62,9 @@ if (args[0] === 'pair') {
   process.exit(runPairCli(args.slice(1)));
 }
 
-// Async, so it cannot process.exit inline the way `pair` does; the server boot is skipped instead.
-const isPackCommand = args[0] === 'pack';
-if (isPackCommand) {
-  const { runPackCli } = require('../server/pack-cli');
-  runPackCli(args.slice(1)).then(
+// Async, so they cannot process.exit inline the way `pair` does; the server boot is skipped instead.
+function runAsyncCommand(run) {
+  run.then(
     (code) => process.exit(code),
     (err) => {
       console.error(err?.message || String(err));
@@ -73,7 +73,19 @@ if (isPackCommand) {
   );
 }
 
-if (!isPackCommand) {
+const isPackCommand = args[0] === 'pack';
+if (isPackCommand) {
+  const { runPackCli } = require('../server/pack-cli');
+  runAsyncCommand(runPackCli(args.slice(1)));
+}
+
+const isMemoryCommand = args[0] === 'memory';
+if (isMemoryCommand) {
+  const { runMemoryCli } = require('../server/memory-cli');
+  runAsyncCommand(runMemoryCli(args.slice(1)));
+}
+
+if (!isPackCommand && !isMemoryCommand) {
   require('../server');
 }
 

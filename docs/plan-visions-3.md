@@ -132,10 +132,11 @@ the repo checkout, and durable memory must never become git-visible).
   writer stamps `operator` or `model` from which side of `commitIntent` fired; the ingestion
   consumer stamps `reported`; the distiller's own canon writes are force-stamped `model`.
   A record arriving by any other route has no valid signature and is demoted (below).
-- **`sig` is an HMAC** over `{id, ts, kind, source, text, validFrom, validTo, supersedes,
-  lineage, locked}` (every field a trust decision reads; leaving `lineage` or the
+- **`sig` is an HMAC** over `{id, ts, kind, layer, project, source, text, validFrom, validTo,
+  supersedes, lineage, locked}` (every field a trust decision reads; leaving `lineage` or the
   supersession fields out would let an unsigned byte edit defeat the promotion cap the
-  signature exists to protect) keyed by `memory/hmac-key`,
+  signature exists to protect, and leaving `project` out would let one retag a signed record
+  into another checkout's projection) keyed by `memory/hmac-key`,
   minted only by `server/memory-store.js`. Load-time verification DEMOTES an unsigned or
   mismatched record to `source.kind: model, locked: false` with a lane-log warning (counts
   only), never trusts it silently and never hard-fails the lane. This is what stops a local

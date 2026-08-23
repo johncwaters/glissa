@@ -59,6 +59,8 @@ const { resolveVisionsConfig } = require('./core/visions-dispatch-core');
 const { normalizeShapePath } = require('./core/visions-scope-core');
 const { createIngestLane } = require('./ingest-wiring');
 const { resolveIngestConfig } = require('./core/ingest-core');
+const { createMemoryStore } = require('./memory-store');
+const { resolveMemoryConfig } = require('./core/memory-core');
 const { createUsageWiring, resolveUsageConfig } = require('./usage-wiring');
 const { createLaneLedger } = require('./usage-lane-ledger');
 const { INTERACTIVE_LANE } = require('./core/usage-lane-core');
@@ -1038,6 +1040,22 @@ function createBackend(httpServer, options = {}) {
     })
     : null;
 
+  /*
+   * Long-term memory store (docs/plan-visions-3.md, M12): config-file only and DEFAULT OFF, because the
+   * lane durably persists distilled transcript content. Off constructs nothing: no object, no timer, no
+   * fs touch. The M13 writers and the M16 delivery hang off this handle.
+   */
+  const memoryConfig = resolveMemoryConfig(config.memory);
+  const memoryStore = memoryConfig.enabled
+    ? createMemoryStore({
+      dir: configSiblingPath(configStore.configPath, 'memory'),
+      config: memoryConfig,
+      logger: console,
+      // Same reason as the ingest and visions lanes: the setting moves, the store is built once.
+      debug: () => configStore.getSettings().debugMode === true,
+    })
+    : null;
+
   // Context-pack auto-rebuild (server/pack-service.js): watchers on each spec's source roots plus a
   // fallback sweep. Started at boot below unless config.packsAutoRebuild is false, stopped in
   // shutdown(). A published rebuild tells every dashboard the new version so a card whose session was
@@ -1920,6 +1938,8 @@ function createBackend(httpServer, options = {}) {
     if (ingestLane) ingestLane.stop();
     // Drops every mirrored buffer and its pending sweep timer; null whenever the lane is off.
     if (visionsLane) visionsLane.stop();
+    // Drains the pending append and projection writes; null whenever memory is off.
+    if (memoryStore) void memoryStore.stop();
     for (const [, sess] of visionsSessions) {
       sess.destroy();
       if (sess._killReap) pendingReaps.push(sess._killReap);
@@ -1988,6 +2008,9 @@ function createBackend(httpServer, options = {}) {
     // The ingest lane (null when off), exposed for the same reason: a booted backend gives a test no
     // other way to observe what a session tap put in the rings.
     getIngestLane: () => ingestLane,
+    // The memory store (null when off), exposed for the same reason: a booted backend gives a test no
+    // other way to observe that a default config constructed nothing.
+    getMemoryStore: () => memoryStore,
     bindHost: bindDecision.host,
     remote: {
       enabled: remote.enabled,
