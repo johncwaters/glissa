@@ -282,7 +282,12 @@ ENABLING memory, but on an enabled store a local process can still steer content
 sessions whose transcripts are ingested; that is inherent to the localhost trust boundary,
 and it is why nothing ingested can exceed `reported` rank.
 
-### M12b: database substrate and versioned projection (before M13)
+### M12b: database substrate and versioned projection (implementation ON HOLD)
+
+Held (operator decision 2026-08-22): implementing the SQLite substrate now would collide
+with the machine-wide store work in flight elsewhere. The decision stands (memory IS a DB
+tenant, projection IS mill-versioned); only the build waits for that work to land, and M13+
+proceed on the shipped file substrate until then.
 
 The swap described in "Store contract vs substrate", plus "Projection versioning", as one
 milestone: `memory-store.js` moves onto the machine-wide `node:sqlite` database (canon,
