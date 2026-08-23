@@ -2,8 +2,8 @@
 
 Status: drafted 2026-08-22; revised the same day after a three-reviewer pass (Codex GPT-5.5
 design review, an architecture review verifying every cited seam against the code, and a
-security review; all three returned "major revision required" on the first draft). Nothing
-shipped. Predecessors: `docs/archive/plan-navigator.md` (M1 to M5) and
+security review; all three returned "major revision required" on the first draft). M12 and M13
+shipped, M12b held. Predecessors: `docs/archive/plan-navigator.md` (M1 to M5) and
 `docs/archive/plan-navigator-2.md` (M6 to M11), both fully shipped. `AGENTS.md` and the code
 win over this doc. Milestone numbering continues from M11.
 
@@ -110,8 +110,8 @@ outcome of the machine-wide store design pass:
   gates, retrieval scoring) are pure and substrate-blind: they take records, not files.
 
 The substrate is the machine-wide `node:sqlite` database (operator decision 2026-08-22).
-M12 shipped on files; M12b swaps `memory-store.js` onto the database before M13 builds on
-it. What the swap buys and costs:
+M12 and M13 shipped on files while M12b is held, so the swap now has the M13 writers above it as
+well. What it buys and costs:
 
 - The canon becomes an append-only table (id, ts, kind, layer, project, source fields,
   text, validity, supersedes, lineage, locked, sig), with monthly retention as a keyed
@@ -304,7 +304,14 @@ transactional test, the projection determinism test becomes a version-stability 
 and the rotation. Security review gate applies again before commit (the trust kernel's IO
 changes substrate).
 
-### M13: Visions-surface writers (rescoped)
+### M13: Visions-surface writers (rescoped) [SHIPPED]
+
+Shipped 2026-08-23 on the M12 file substrate (M12b is on hold, so the writers were built against
+`memory-store.js` as it stands). The record shaping is pure, in `server/core/visions-memory-core.js`;
+`server/visions-wiring.js` takes the store as an injected `getMemoryStore` thunk (`backend.js`
+constructs it ABOVE the lane for that), every writer is a no-op without one, all writes ride one
+serialized chain, and a refused or throwing store costs a count or a warning, never the relay or the
+dispatch path. Intent records are `semantic`, everything else `episodic`.
 
 What actually fires today, wired through the funnels in `server/visions-wiring.js`:
 
@@ -330,6 +337,12 @@ deferring; goal 2 ships with the rest), as two halves in this milestone:
   No weak inference from re-serving is attempted (the reviewers agreed it would misclassify
   ignored, unseen, and stale findings as rejections): absent an explicit dismissal, a served
   finding is simply unlabeled.
+
+As shipped, three details the milestone text did not fix: a served finding has no id of its own, so
+its identity is the rule code plus its position and the dedupe key is that plus the uri and buffer
+version; only an APPLIED tier 1 fix is remembered, because the editor also refuses on a version race
+or a timeout and neither is an operator verdict; and the intent chain head per slot is seeded at
+first write from the loaded canon, so a restart continues the chain instead of forking a new one.
 
 ### M14: transcript ingestion (honest scope)
 

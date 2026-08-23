@@ -1150,6 +1150,23 @@ function createBackend(httpServer, options = {}) {
     : null;
 
   /*
+   * Long-term memory store (docs/plan-visions-3.md, M12): config-file only and DEFAULT OFF, because the
+   * lane durably persists distilled transcript content. Off constructs nothing: no object, no timer, no
+   * fs touch. It is constructed BEFORE the Visions lane because that lane's M13 writers take it as a
+   * dep; the M16 delivery hangs off the same handle.
+   */
+  const memoryConfig = resolveMemoryConfig(config.memory);
+  const memoryStore = memoryConfig.enabled
+    ? createMemoryStore({
+      dir: configSiblingPath(configStore.configPath, 'memory'),
+      config: memoryConfig,
+      logger: console,
+      // Same reason as the ingest and visions lanes: the setting moves, the store is built once.
+      debug: () => configStore.getSettings().debugMode === true,
+    })
+    : null;
+
+  /*
    * Visions lane: absent config constructs nothing (docs/archive/plan-navigator.md, "Wire and
    * trust"). The Settings dialog can persist config.visions, but this lane is constructed only at
    * boot, so changes take effect after server restart. Its tier 3 model dispatch is a second opt-in
@@ -1190,26 +1207,12 @@ function createBackend(httpServer, options = {}) {
       // the gate then decides exactly what it decided before M7.5.
       contextSeq: ingestLane ? ingestLane.latestSeq : null,
       scopeProjects: visionsScopeProjects,
+      // The M13 memory writers, inert on a default config because the store is then null.
+      getMemoryStore: () => memoryStore,
       // Every project the machine knows, so an intent slot for a DELETED project is dropped on load.
       knownProjectIds: (Array.isArray(config.projects) ? config.projects : [])
         .map((project) => project?.id)
         .filter((id) => typeof id === 'string' && id),
-    })
-    : null;
-
-  /*
-   * Long-term memory store (docs/plan-visions-3.md, M12): config-file only and DEFAULT OFF, because the
-   * lane durably persists distilled transcript content. Off constructs nothing: no object, no timer, no
-   * fs touch. The M13 writers and the M16 delivery hang off this handle.
-   */
-  const memoryConfig = resolveMemoryConfig(config.memory);
-  const memoryStore = memoryConfig.enabled
-    ? createMemoryStore({
-      dir: configSiblingPath(configStore.configPath, 'memory'),
-      config: memoryConfig,
-      logger: console,
-      // Same reason as the ingest and visions lanes: the setting moves, the store is built once.
-      debug: () => configStore.getSettings().debugMode === true,
     })
     : null;
 

@@ -24,6 +24,21 @@ const {
   pruneIntentProjects,
   reviveIntentState,
 } = require('./core/visions-intent-core');
+const {
+  createBoundedKeySet,
+  dismissFeedbackInput,
+  dispatchMemoryInputs,
+  displayLineOfFix,
+  findingIdOf,
+  fixFeedbackInput,
+  intentMemoryInput,
+  latestIntentHeads,
+  projectTagFor,
+  readDismissParams,
+  servedFeedbackInput,
+  servedKey,
+  slotKeyOf,
+} = require('./core/visions-memory-core');
 const { sweepMarkdownWithFixes } = require('./core/visions-rules-core');
 const {
   DEFAULT_FIX_LOG_MAX,
@@ -166,6 +181,11 @@ function createVisionsWiring({
   // Each entry is { id, path }: the id names the intent slot a uri's proposals land in, the path scopes it.
   scopeProjects = null,
   knownProjectIds = null,
+  /*
+   * Long-term memory (docs/plan-visions-3.md, M13). A thunk because the store is constructed once at
+   * boot and is null on a default config; every writer below is then a no-op and nothing is recorded.
+   */
+  getMemoryStore = null,
   intentStatePath = null,
   fsFns = fs,
   fsPromises = fsPromisesDefault,
@@ -240,6 +260,72 @@ function createVisionsWiring({
 
   function isUriInScope(uri) {
     return isUriInProjects(uri, scopePaths);
+  }
+
+  const memoryStoreOf = typeof getMemoryStore === 'function' ? getMemoryStore : () => null;
+  const servedFindingKeys = createBoundedKeySet();
+  const intentHeadByProject = new Map();
+  let intentHeadsSeeded = false;
+  // One chain for every memory write, so a supersession can never interleave with the record it names.
+  let memoryChain = Promise.resolve();
+
+  function queueMemoryWrite(work) {
+    const store = memoryStoreOf();
+    if (!store) return;
+    memoryChain = memoryChain.then(() => work(store)).catch((error) => warn(`memory write failed: ${error.message}`));
+  }
+
+  function projectTagForUri(uri) {
+    return projectTagFor(projectForUri(uri, scopeProjects), scopeProjects);
+  }
+
+  // Counts only: what was remembered is never what is logged.
+  function rememberRecords(inputs) {
+    const list = (Array.isArray(inputs) ? inputs : []).filter((input) => input !== null);
+    if (list.length === 0) return;
+    queueMemoryWrite(async (store) => {
+      let written = 0;
+      for (const input of list) {
+        const record = await store.append(input);
+        if (record) written += 1;
+      }
+      debugNote(() => `memory: ${written}/${list.length} record(s) written`);
+    });
+  }
+
+  // Seeded from the loaded canon, so a restart continues the intent chain instead of forking a new one.
+  function seedIntentHeads(store) {
+    if (intentHeadsSeeded) return;
+    intentHeadsSeeded = true;
+    if (typeof store.records !== 'function') return;
+    for (const [key, id] of latestIntentHeads(store.records())) intentHeadByProject.set(key, id);
+  }
+
+  function rememberIntent(text, projectTag) {
+    queueMemoryWrite(async (store) => {
+      seedIntentHeads(store);
+      const key = slotKeyOf(projectTag);
+      const record = await store.append(intentMemoryInput({
+        text, project: projectTag, supersedes: intentHeadByProject.get(key) || null,
+      }));
+      // A refused write leaves the chain naming a head no later record could resolve, so it starts over.
+      if (!record) intentHeadByProject.delete(key);
+      if (record) intentHeadByProject.set(key, record.id);
+    });
+  }
+
+  function rememberServedFindings(uri, fixes, version) {
+    if (!memoryStoreOf()) return;
+    const project = projectTagForUri(uri);
+    const inputs = [];
+    for (const fix of fixes) {
+      const id = findingIdOf(fix);
+      if (!servedFindingKeys.add(servedKey({ uri, version, id }))) continue;
+      inputs.push(servedFeedbackInput({
+        uri, project, id, line: displayLineOfFix(fix),
+      }));
+    }
+    rememberRecords(inputs);
   }
 
   function broadcastFindings(uri, diagnostics) {
@@ -354,6 +440,7 @@ function createVisionsWiring({
       uri, fix, applied, ts: nowFn(),
     });
     fixLog = appendFixLog(fixLog, entry, fixLogMax);
+    if (applied) rememberRecords([fixFeedbackInput({ uri, project: projectTagForUri(uri), fix })]);
     if (typeof broadcast !== 'function') return;
     broadcast({
       type: 'visions-fix', uri, fix: fixPayload(entry), ts: entry.ts,
@@ -389,6 +476,7 @@ function createVisionsWiring({
       intentStateWriter.write(payload, () => JSON.stringify(payload, null, 2));
     }
     broadcastIntent(projectId);
+    rememberIntent(intentSlotFor(intentState, projectId)?.text, projectTagFor(projectId, scopeProjects));
     return true;
   }
 
@@ -416,8 +504,13 @@ function createVisionsWiring({
       publishDiagnosticsFrame(send, uri, modelUpdate.diagnostics);
       recordFindings(uri, modelUpdate.diagnostics);
     }
-    recordComments(uri, result.verdict === 'COMMENTS' ? result.comments : []);
-    recordHand(uri, handFromResult(result));
+    const comments = result.verdict === 'COMMENTS' ? result.comments : [];
+    recordComments(uri, comments);
+    const hand = handFromResult(result);
+    recordHand(uri, hand);
+    rememberRecords(dispatchMemoryInputs({
+      uri, project: projectTagForUri(uri), comments, hand,
+    }));
     return true;
   }
 
@@ -605,7 +698,9 @@ function createVisionsWiring({
       if (!doc) return [];
       const entry = fixesByUri.get(uri);
       if (!isFixSetFresh(entry, hashFn(doc.text))) return [];
-      return buildCodeActions(filterFixesByRange(entry.fixes, params?.range), { uri, version: doc.version });
+      const offered = filterFixesByRange(entry.fixes, params?.range);
+      rememberServedFindings(uri, offered, doc.version);
+      return buildCodeActions(offered, { uri, version: doc.version });
     }
 
     // Answered, never dropped: the relay times an unanswered request out and the editor pays that wait.
@@ -744,6 +839,18 @@ function createVisionsWiring({
         dispatchSettled = runDispatch(uri, 'edit').catch((error) => warn(`dispatch loop failed: ${error.message}`));
         return null;
       },
+      // The one editor-driven refusal signal there is; absent it, a served finding is simply unlabeled.
+      'visions/dismissFinding': (params) => {
+        const dismissal = readDismissParams(params);
+        if (!dismissal || !isUriInScope(dismissal.uri)) {
+          debugNote(() => 'dropped a dismissal: unusable params or out of scope');
+          return null;
+        }
+        rememberRecords([dismissFeedbackInput({
+          uri: dismissal.uri, project: projectTagForUri(dismissal.uri), id: dismissal.id,
+        })]);
+        return null;
+      },
       // The carbon unit closed the buffer, so its findings are gone rather than merely unrefreshed.
       'textDocument/didClose': (params) => {
         const uri = uriOfParams(params);
@@ -870,6 +977,8 @@ function createVisionsWiring({
     getIntent: () => intentPayload(intentState),
     getIntentFor: (projectId = null) => intentSlotPayload(intentSlotFor(intentState, projectId)),
     whenIntentPersistenceIdle: () => (intentStateWriter ? intentStateWriter.idle() : Promise.resolve()),
+    // Settles once every queued memory write has landed, which is how a test waits for the writers.
+    whenMemoryIdle: () => memoryChain,
     // The movement signal the next gate will read, so a caller can see whether a lane is wired at all.
     latestContextSeq: readContextSeq,
     // Settles once the in-flight dispatch has been applied, which is how a test waits for the lane.
