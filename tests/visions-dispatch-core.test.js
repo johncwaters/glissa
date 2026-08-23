@@ -15,6 +15,7 @@ const {
   DEFAULT_TIMEOUT_SECONDS,
   HOUR_MS,
   buildVisionsPrompt,
+  contentMarker,
   countLines,
   countRecentDispatches,
   createDispatchState,
@@ -818,8 +819,18 @@ test('the prompt states the tier 3 role, fences the buffer as data, and names on
 test('the buffer markers are derived from the buffer, so no buffer can close its own fence', () => {
   const text = '# Title\n';
   const prompt = buildVisionsPrompt({ uri: URI, text, resultPath: '/tmp/r.json' });
-  const marker = `GLISSA-BUFFER-${hashText(text).toUpperCase()}`;
+  const marker = contentMarker('BUFFER', text);
   assert.ok(prompt.includes(`<<<${marker}\n${text}\n>>>${marker}`), 'the buffer sits between its own markers');
+});
+
+// A 32-bit marker is fixed-point constructible in ~2^32 offline evaluations by text an attacker writes.
+test('a fence marker is a sha256 digest, not the invertible 32-bit buffer hash', () => {
+  const text = '# Title\n';
+  const marker = contentMarker('BUFFER', text);
+  assert.match(marker, /^GLISSA-BUFFER-[0-9A-F]{16}$/);
+  assert.equal(marker.includes(hashText(text).toUpperCase()), false);
+  assert.equal(contentMarker('BUFFER', text), marker, 'same content, same marker');
+  assert.notEqual(contentMarker('BUFFER', `${text}x`), marker);
 });
 
 test('a document with no standing findings says so rather than leaving a blank list', () => {

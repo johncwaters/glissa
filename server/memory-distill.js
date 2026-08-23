@@ -10,6 +10,7 @@ const path = require('node:path');
 const {
   awaitSessionExit, drainPending, firstLine, raceWithAbort, registerEphemeralSession,
 } = require('./ephemeral-session');
+const { buildLanePermissions } = require('./core/lane-permissions-core');
 const { createLaneLog } = require('./lane-log');
 const { needsDistill } = require('./core/distill-core');
 const { createTickLoop } = require('./lane-runner');
@@ -18,24 +19,27 @@ const distillCore = require('./core/memory-distill-core');
 
 const LANE_NAME = 'memory-distill';
 const RESULT_FILE = 'memory-distill-result.json';
+// A stable prefix, not decoration: it is what ingest-agent-core recognizes as this lane's throwaway cwd.
+const WORK_DIR_PREFIX = 'glissa-memory-distill-';
 
 /*
  * The prompt embeds remembered text, so this session gets the least capability that still lets it write
- * its result file: no --dangerously-skip-permissions, Write pre-approved and nothing else, every other
- * verb denied, and a cwd that is a fresh empty temp dir rather than any repository.
+ * its result file: no --dangerously-skip-permissions, no allow list at all, every dangerous verb denied,
+ * and `defaultMode: acceptEdits` over a throwaway cwd, which is what actually confines the writes (see
+ * server/core/lane-permissions-core.js for the probes behind every clause of that).
+ *
+ * `Read` is deliberately NOT denied here, though a lane wants it to be: a bare Read deny refuses the
+ * Write tool as well, so it and the result-file contract cannot both exist. Reads go nowhere instead,
+ * because there is no shell, no network tool, and the only writable directory is the throwaway one.
  */
-const ALLOWED_TOOLS_ARG = '--allowedTools=Write';
-const MEMORY_DISTILL_DENY = {
-  deny: [
-    'Bash', 'Edit', 'NotebookEdit', 'Read', 'Glob', 'Grep', 'WebFetch', 'WebSearch', 'Task',
-    'Bash(git push:*)', 'Bash(gh:*)',
-  ],
-};
+const MEMORY_DISTILL_DENY_TOOLS = Object.freeze([
+  'Bash', 'Edit', 'NotebookEdit', 'WebFetch', 'WebSearch', 'Task', 'Bash(git push:*)', 'Bash(gh:*)',
+]);
 
-function writeStandaloneDenySettings() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-memory-distill-'));
+function writeStandaloneDenySettings(permissions) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), `${WORK_DIR_PREFIX}settings-`));
   const settingsPath = path.join(dir, 'settings.json');
-  fs.writeFileSync(settingsPath, JSON.stringify({ permissions: { deny: [...MEMORY_DISTILL_DENY.deny] } }, null, 2), 'utf8');
+  fs.writeFileSync(settingsPath, JSON.stringify({ permissions }, null, 2), 'utf8');
   return {
     args: ['--settings', settingsPath],
     cleanup() { try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best-effort */ } },
@@ -52,8 +56,9 @@ function createMemoryDistillSpawn({
 } = {}) {
   return async function spawnMemoryDistill({ id, name, prompt, cwd, model = null, signal = null }) {
     const { Session } = require('../session/sessions');
-    const standalone = hookRouter ? null : writeStandaloneDenySettings();
-    const extraClaudeArgs = ['-p', ALLOWED_TOOLS_ARG, ...(standalone ? standalone.args : [])];
+    const posture = buildLanePermissions({ denyTools: MEMORY_DISTILL_DENY_TOOLS });
+    const standalone = hookRouter ? null : writeStandaloneDenySettings(posture.permissions);
+    const extraClaudeArgs = ['-p', ...(standalone ? standalone.args : [])];
     if (model) extraClaudeArgs.push('--model', model);
     const sess = new Session({
       id,
@@ -63,7 +68,7 @@ function createMemoryDistillSpawn({
       extraClaudeArgs,
       initialPrompt: prompt,
       ephemeral: true,
-      settingsPermissions: MEMORY_DISTILL_DENY,
+      settingsPermissions: posture.permissions,
       replayBufferKB,
       hookRouter,
       getHookPort,
@@ -97,7 +102,7 @@ function createMemoryDistiller(deps = {}) {
     config = distillCore.resolveDistillConfig(null, { memoryEnabled: false }),
     spawnDistill = createMemoryDistillSpawn(),
     readResult = readDistillResultFile,
-    makeWorkDir = () => fsPromises.mkdtemp(path.join(os.tmpdir(), 'glissa-memory-distill-work-')),
+    makeWorkDir = () => fsPromises.mkdtemp(path.join(os.tmpdir(), `${WORK_DIR_PREFIX}work-`)),
     removeWorkDir = async (dir) => { try { await fsPromises.rm(dir, { recursive: true, force: true }); } catch { /* best-effort */ } },
     now = () => Date.now(),
     logger = console,
@@ -302,10 +307,10 @@ function createMemoryDistiller(deps = {}) {
 }
 
 module.exports = {
-  ALLOWED_TOOLS_ARG,
   LANE_NAME,
-  MEMORY_DISTILL_DENY,
+  MEMORY_DISTILL_DENY_TOOLS,
   RESULT_FILE,
+  WORK_DIR_PREFIX,
   createMemoryDistillSpawn,
   createMemoryDistiller,
   readDistillResultFile,

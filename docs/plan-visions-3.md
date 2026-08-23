@@ -451,10 +451,23 @@ per the operator's "never thought about" rule, with `enabled: false` as the kill
 `glissa memory distill [--dry-run]`; a dry run reads and hashes only and spawns nothing, and a real run is
 refused while another process holds the canon lock, exactly like `memory backfill`.
 
-Security: no `--dangerously-skip-permissions`, `--allowedTools=Write`, a deny-list at least as strict as
-the Visions dispatch one (Bash, Read, Glob, Grep, Edit, WebFetch, WebSearch, Task, plus `git push` and
-`gh` named outright), a fresh temp cwd holding only the result file, and the ephemeral-lane registration
-that excludes its own transcript from ingestion and attributes its usage.
+Security, revised 2026-08-23 after a security review returned BLOCK on the unscoped `--allowedTools=Write`
+and after live-probing the real CLI (2.1.241; every clause and its counter-example is in
+`server/core/lane-permissions-core.js` and the AGENTS.md section "Ephemeral Lane Write Boundaries"): no
+`--dangerously-skip-permissions` and NO allow list, since a bare `Write` allow is what unbounds the
+writes and nothing narrower grants the tool (both `Write(<dir>/**)` and `Edit(<dir>/**)` were probed and
+neither authorizes a Write); writes confined instead by `defaultMode: acceptEdits` in the managed
+settings file over a throwaway cwd, which auto-accepts edits there and refuses them anywhere else, and
+which overrides an operator's own `auto` mode so a rule decides rather than an LLM classifier; a
+deny-list of Bash, Edit, NotebookEdit, WebFetch, WebSearch, Task plus `git push` and `gh`, and
+deliberately NO path denies, which were probed and do not refuse a Write tool call at all; a cwd whose
+prefix (`glissa-memory-distill-`) is what `ingest-agent-core` recognizes, so a dropped session id cannot
+let the lane re-ingest its own canon-bearing transcript; and the ephemeral-lane registration that
+excludes its transcript and attributes its usage. Read, Glob and Grep are deliberately NOT denied: a bare
+`Read` deny refuses the Write tool as well (live-probed), so it and the result-file contract cannot both
+exist, and the first shipped version of this lane denied them and would have failed every real run.
+Claude Code separately refuses edits under its own home as "a sensitive file", which is what covers the
+settings.json hook-registration path.
 
 Quantization is the point: `dist/` changes only when a distill run publishes, so anything watching it
 (M17 pack carrier) sees daily cadence, not per-append churn.

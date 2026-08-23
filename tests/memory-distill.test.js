@@ -11,9 +11,10 @@ const os = require('node:os');
 const path = require('node:path');
 
 const { createMemoryStore } = require('../server/memory-store');
-const { createMemoryDistiller } = require('../server/memory-distill');
+const { MEMORY_DISTILL_DENY_TOOLS, WORK_DIR_PREFIX, createMemoryDistiller } = require('../server/memory-distill');
 const { resolveDistillConfig } = require('../server/core/memory-distill-core');
 const { resolveMemoryConfig } = require('../server/core/memory-core');
+const { isDispatchWorkdir } = require('../server/core/ingest-agent-core');
 
 const QUIET = { log() {}, warn() {} };
 const START = Date.UTC(2026, 7, 23, 12, 0, 0);
@@ -372,4 +373,70 @@ test('the lane is inert without a store and without its own enabled flag', async
   assert.equal((await none.runOnce()).status, 'disabled');
   await none.start();
   await none.stop();
+});
+
+test('the scratch cwd carries the prefix the ingest exclusion recognizes', async () => {
+  const dir = tempDir();
+  const clock = { at: START };
+  try {
+    const store = openStore(dir, clock);
+    const [first] = await seed(store, clock, ['the poller ticks every 15 minutes']);
+    clock.at += 2 * HOUR;
+    const lane = createMemoryDistiller({
+      store,
+      config: resolveDistillConfig(null, { memoryEnabled: true }),
+      logger: QUIET,
+      now: () => clock.at,
+      spawnDistill: async () => {},
+      readResult: async () => distilledResult([{
+        kind: 'knowledge', project: '/repos/glissa', rank: 'model', ids: [first.id], text: 'one claim',
+      }]),
+    });
+    // The default makeWorkDir is the one under test, so nothing is injected over it.
+    const report = await lane.runOnce();
+    assert.equal(report.status, 'published');
+    assert.equal(WORK_DIR_PREFIX, 'glissa-memory-distill-');
+    assert.equal(isDispatchWorkdir(path.join(os.tmpdir(), `${WORK_DIR_PREFIX}work-ab12`)), true);
+    // The first shipped version denied these and would have failed every real run: a bare Read deny
+    // refuses the Write tool, so the result file could never be written.
+    for (const tool of ['Read', 'Write', 'Glob', 'Grep']) {
+      assert.equal(MEMORY_DISTILL_DENY_TOOLS.includes(tool), false, tool);
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a poisoned manifest cannot walk the read out of the published build', async () => {
+  const dir = tempDir();
+  const clock = { at: START };
+  const warnings = [];
+  try {
+    const store = createMemoryStore({
+      dir,
+      config: { ...resolveMemoryConfig(null), enabled: true },
+      logger: { log() {}, warn: (line) => warnings.push(line) },
+      now: () => clock.at,
+      projectionDebounceMs: 1,
+      watchCanon: false,
+    });
+    openedStores.push(store);
+    await seed(store, clock, ['the poller ticks every 15 minutes']);
+    const manifestPath = path.join(dir, 'dist', 'current', 'manifest.json');
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+    manifest.files = [
+      { relPath: '../../../../etc/passwd', sha256: 'x' },
+      { relPath: 'nested/../../hmac-key', sha256: 'x' },
+      { relPath: path.join(dir, 'hmac-key'), sha256: 'x' },
+      ...manifest.files,
+    ];
+    fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf8');
+
+    const documents = await store.readPublishedDocuments(await store.readPublishedManifest());
+    assert.equal(documents.length, manifest.files.length - 3, 'only the contained files were read');
+    for (const document of documents) assert.equal(document.includes('root:'), false);
+    assert.equal(warnings.filter((line) => line.includes('outside the build')).length, 3);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });

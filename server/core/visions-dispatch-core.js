@@ -6,6 +6,8 @@
 
 'use strict';
 
+const crypto = require('node:crypto');
+
 const { positiveInt } = require('./ingest-number-core');
 const { MAX_INTENT_CHARS, sanitizeIntentText } = require('./visions-intent-core');
 
@@ -312,10 +314,16 @@ function findingLines(findings) {
 // A projection version is a server-computed sha256, so anything else is not one and is left out.
 const MEMORY_VERSION_RE = /^[0-9a-f]{8,64}$/;
 const MEMORY_VERSION_CHARS = 12;
+const MARKER_HASH_CHARS = 16;
 
-// Content-derived, so no fenced text can close its own fence and be read as instructions.
+/*
+ * Content-derived, so no fenced text can close its own fence and be read as instructions. sha256 and
+ * not the 32-bit hashText beside it: that one is invertible and fixed-point constructible in about 2^32
+ * offline evaluations, which is well inside reach for text an attacker gets to author.
+ */
 function contentMarker(prefix, text) {
-  return `GLISSA-${prefix}-${hashText(text).toUpperCase()}`;
+  const digest = crypto.createHash('sha256').update(String(text == null ? '' : text), 'utf8').digest('hex');
+  return `GLISSA-${prefix}-${digest.slice(0, MARKER_HASH_CHARS).toUpperCase()}`;
 }
 
 /*

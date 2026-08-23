@@ -35,13 +35,16 @@ const TOOL_TARGET_KEYS = Object.freeze([
  */
 /*
  * The lane markers, all of them: a visions dispatch runs in `glissa-visions-<hex>` (visions-dispatch.js
- * makeWorkDir) and the PR-review and Radar fix lanes run in `glissa-wt-<lane>-<hex>` (git-workspace.js
- * createBody). HONEST LIMIT: those two lanes pass a `worktreeBase` in production, and the directory is
+ * makeWorkDir), a memory distill in `glissa-memory-distill-<hex>` (memory-distill.js WORK_DIR_PREFIX,
+ * whose whole reason to be a stable prefix is this list), and the PR-review and Radar fix lanes run in
+ * `glissa-wt-<lane>-<hex>` (git-workspace.js createBody). HONEST LIMIT: those two lanes pass a `worktreeBase` in production, and the directory is
  * then named after the REPO exactly like an operator's own session worktree, so no shape rule can tell
  * them apart. The usage-lane ledger is what excludes those, which is why it is the primary mechanism and
  * this is the second layer.
  */
-const DISPATCH_WORKDIR_MARKERS = Object.freeze(['glissa-visions', 'glissa-wt-pr-review', 'glissa-wt-radar-fix']);
+const DISPATCH_WORKDIR_MARKERS = Object.freeze([
+  'glissa-visions', 'glissa-memory-distill', 'glissa-wt-pr-review', 'glissa-wt-radar-fix',
+]);
 const DISPATCH_WORKDIR_PATTERN = new RegExp(`(^|[\\\\/-])(${DISPATCH_WORKDIR_MARKERS.join('|')})-`, 'i');
 
 function isDispatchWorkdir(candidate) {

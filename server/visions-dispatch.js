@@ -4,14 +4,15 @@
  * Permissions posture, live-probed against the real CLI (2.x):
  *   - NO --dangerously-skip-permissions. The prompt embeds arbitrary buffer text, so the session gets
  *     the least capability that still lets it write its result file.
- *   - `--allowedTools=Write` pre-approves exactly one tool; every other tool needs an approval no
- *     headless session can be given.
- *   - The deny list below is the guard on top of that. Read is deliberately NOT denied: a deny rule
- *     covering a path blocks WRITING it too (probed: a `Read` deny made the result-file write fail),
- *     so denying reads and keeping the result contract are mutually exclusive with this plumbing.
- *   - Path-scoped allow rules do not narrow a file write (the CLI says only `Edit(path)` rules are
- *     matched by file permission checks, and neither form denied a write elsewhere), so the write
- *     boundary is the cwd this module hands the session: a fresh empty temp dir, never a repo.
+ *   - There is NO allow list. A bare `Write` allow is what unbounds the writes, and no narrower allow
+ *     grants the tool at all: both `Write(<dir>/**)` and `Edit(<dir>/**)` were probed and neither
+ *     authorizes a Write. What confines them is `defaultMode: acceptEdits` over the throwaway cwd this
+ *     module hands the session, which auto-accepts edits there and refuses them anywhere else.
+ *   - The deny list below is the guard on top of that. Read is deliberately NOT denied: a bare `Read`
+ *     deny refuses the Write tool too (probed), so denying reads and keeping the result contract are
+ *     mutually exclusive with this plumbing.
+ *   - Re-probed against 2.1.241; every clause and its counter-example is in
+ *     server/core/lane-permissions-core.js.
  */
 
 'use strict';
@@ -26,26 +27,19 @@ const {
 const {
   DEFAULT_TIMEOUT_SECONDS, MAX_HAND_CHARS, buildVisionsPrompt, countLines, sanitizeComments,
 } = require('./core/visions-dispatch-core');
+const { buildLanePermissions } = require('./core/lane-permissions-core');
 const { sanitizeIntentText } = require('./core/visions-intent-core');
 const { createLaneLog } = require('./lane-log');
 
 const RESULT_VERDICTS = new Set(['COMMENTS', 'NONE', 'ERROR']);
 const RESULT_FILE = 'visions-result.json';
 
-/*
- * The one tool the session is pre-approved for, and the only action the prompt asks it to take. The
- * `=` form is load-bearing: `--allowedTools` is VARIADIC, so the spaced form swallows the initial
- * prompt that follows it as another tool name and claude exits with "Input must be provided either
- * through stdin or as a prompt argument" (live-probed).
- */
-const VISIONS_ALLOWED_TOOLS = 'Write';
-const ALLOWED_TOOLS_ARG = `--allowedTools=${VISIONS_ALLOWED_TOOLS}`;
+// Verbs a visions never needs: no shell, no editing, no network, no sub-agents.
+const VISIONS_DENY_TOOLS = Object.freeze(['Bash', 'Edit', 'NotebookEdit', 'WebFetch', 'WebSearch', 'Task']);
 
-// Verbs a visions never needs: no shell, no editing, no network, no sub-agents. Bare tool names,
-// because a path-scoped rule here would also cover the result file (see the header).
-const VISIONS_DENY = {
-  deny: ['Bash', 'Edit', 'NotebookEdit', 'WebFetch', 'WebSearch', 'Task'],
-};
+function visionsPermissions() {
+  return buildLanePermissions({ denyTools: VISIONS_DENY_TOOLS });
+}
 
 function errorResult(reason) {
   return {
@@ -107,7 +101,8 @@ function createVisionsSpawn({
   return async function spawnVisionsSession({ id, name, prompt, cwd, model = null, signal = null }) {
     // Required here, not at module load: an inert lane must not pay for resolving `claude` on PATH.
     const { Session } = require('../session/sessions');
-    const extraClaudeArgs = ['-p', ALLOWED_TOOLS_ARG];
+    const posture = visionsPermissions();
+    const extraClaudeArgs = ['-p'];
     if (model) extraClaudeArgs.push('--model', model);
     const sess = new Session({
       id,
@@ -117,7 +112,7 @@ function createVisionsSpawn({
       extraClaudeArgs,
       initialPrompt: prompt,
       ephemeral: true,
-      settingsPermissions: VISIONS_DENY,
+      settingsPermissions: posture.permissions,
       replayBufferKB,
       hookRouter,
       getHookPort,
@@ -214,10 +209,9 @@ function createVisionsDispatcher({
 }
 
 module.exports = {
-  ALLOWED_TOOLS_ARG,
-  VISIONS_ALLOWED_TOOLS,
-  VISIONS_DENY,
+  VISIONS_DENY_TOOLS,
   RESULT_FILE,
+  visionsPermissions,
   createVisionsDispatcher,
   createVisionsSpawn,
   readCommentsResult,

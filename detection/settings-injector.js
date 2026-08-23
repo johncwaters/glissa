@@ -116,9 +116,11 @@ function buildStatuslineCommand({ relayPath = RELAY_PATH, postUrl, userCommand =
 }
 
 // Build the Claude Code settings object with HTTP hooks for one session. An optional
-// `permissions` ({ deny: [...] }) is merged in for the headless lanes - the PR-review and PostHog
-// deny-lists (efficacy under --dangerously-skip-permissions is why they are a guard, not the guard).
-// Omitted for ordinary user sessions, so their settings are byte-identical to before.
+// `permissions` ({ deny: [...], defaultMode }) is merged in for the headless lanes - the PR-review and
+// PostHog deny-lists (efficacy under --dangerously-skip-permissions is why they are a guard, not the
+// guard), plus the `acceptEdits` mode that is the actual write boundary for the two prompt-embedding
+// lanes (server/core/lane-permissions-core.js). A lane passing neither leaves the file as it was, so
+// ordinary user sessions stay byte-identical to before.
 function buildHookSettings({ port, glissaId, token, timeoutSec = DEFAULT_TIMEOUT_SEC, permissions = null, detectScheduledWakeups = true, packReadTelemetry = false, enableProjectMcp = false, rtkPath = null, planLimits = false, userSettingsPath = null, relayPath = RELAY_PATH }) {
   if (!port || !glissaId || !token) {
     throw new Error('buildHookSettings requires port, glissaId, token');
@@ -140,8 +142,12 @@ function buildHookSettings({ port, glissaId, token, timeoutSec = DEFAULT_TIMEOUT
     hooks.PreToolUse = [buildRtkHookEntry(rtkPath)];
   }
   const settings = { hooks };
-  if (permissions && Array.isArray(permissions.deny) && permissions.deny.length > 0) {
-    settings.permissions = { deny: permissions.deny.slice() };
+  const denyRules = permissions && Array.isArray(permissions.deny) ? permissions.deny.slice() : [];
+  const defaultMode = permissions && typeof permissions.defaultMode === 'string' ? permissions.defaultMode : null;
+  if (denyRules.length > 0 || defaultMode) {
+    settings.permissions = {};
+    if (denyRules.length > 0) settings.permissions.deny = denyRules;
+    if (defaultMode) settings.permissions.defaultMode = defaultMode;
   }
   // Headless (`-p`) sessions cannot answer the interactive "trust this .mcp.json server?" prompt, so a
   // project MCP server would otherwise never load. This flag pre-trusts every project-scoped server for

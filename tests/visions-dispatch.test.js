@@ -11,7 +11,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const {
-  ALLOWED_TOOLS_ARG, VISIONS_ALLOWED_TOOLS, VISIONS_DENY, RESULT_FILE, createVisionsDispatcher, readCommentsResult,
+  VISIONS_DENY_TOOLS, RESULT_FILE, createVisionsDispatcher, readCommentsResult, visionsPermissions,
 } = require('../server/visions-dispatch');
 
 const URI = 'file:///tmp/plan-visions.md';
@@ -334,17 +334,17 @@ test('a dispatcher with no spawn injected refuses to be built', () => {
 // --- The permissions posture, pinned ---
 
 /*
- * Probed against the real CLI before it was written down: `-p --allowedTools Write` with this deny
- * list completes the result-file write, while denying Read (or any rule covering the result path)
- * makes the write fail too. Changing either half is a security decision, so it costs a test edit.
+ * Probed against the real CLI (2.1.241) via the stream-json tool_result: neither `Write(<dir>/**)` nor
+ * `Edit(<dir>/**)` in an allow list grants the Write tool, a path deny does not refuse one, and a bare
+ * `Read` deny does. What bounds the writes is acceptEdits over the throwaway cwd. Changing any of it is
+ * a security decision, so it costs a test edit.
  */
-test('the lane spawns with one allowed tool, no shell, no network, and no skip-permissions', () => {
-  assert.equal(VISIONS_ALLOWED_TOOLS, 'Write');
-  // The `=` form, not a spaced one: --allowedTools is variadic and eats the prompt positional that
-  // follows it, and claude then exits with "Input must be provided ... when using --print".
-  assert.equal(ALLOWED_TOOLS_ARG, '--allowedTools=Write');
-  assert.deepEqual(VISIONS_DENY.deny, ['Bash', 'Edit', 'NotebookEdit', 'WebFetch', 'WebSearch', 'Task']);
+test('the lane bounds its writes with acceptEdits over its cwd, no allow list, no skip-permissions', () => {
+  const posture = visionsPermissions();
+  assert.equal(posture.permissions.defaultMode, 'acceptEdits');
+  assert.equal(Object.hasOwn(posture.permissions, 'allow'), false);
+  assert.deepEqual(VISIONS_DENY_TOOLS, ['Bash', 'Edit', 'NotebookEdit', 'WebFetch', 'WebSearch', 'Task']);
   for (const tool of ['Read', 'Write', 'Glob', 'Grep']) {
-    assert.equal(VISIONS_DENY.deny.includes(tool), false, `${tool} must not be denied: a deny covering the result path blocks writing it`);
+    assert.equal(posture.permissions.deny.includes(tool), false, `${tool} must not be denied: a bare deny of it refuses the result-file write`);
   }
 });

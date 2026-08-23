@@ -496,6 +496,17 @@ test('a dispatch workdir is recognized as a raw cwd, an encoded dir name, and a 
   assert.equal(isDispatchWorkdir(encodeURIComponent(workDir)), true, 'the Grok session directory name');
 });
 
+test('the memory-distill scratch dir is a dispatch workdir, so the lane cannot re-ingest its own canon', () => {
+  const workDir = '/tmp/glissa-memory-distill-work-Ab12/session.jsonl';
+  assert.equal(isDispatchWorkdir(workDir), true, 'the raw cwd a transcript line carries');
+  assert.equal(
+    isDispatchWorkdir('-tmp-glissa-memory-distill-work-Ab12'),
+    true,
+    'the Claude project directory name, every separator collapsed to one dash',
+  );
+  assert.equal(isDispatchWorkdir(encodeURIComponent('C:\\Temp\\glissa-memory-distill-Ab12')), true);
+});
+
 test('the shape rule is a segment match, so ordinary glissa paths are untouched', () => {
   for (const candidate of [
     'C:\\Users\\johnw\\Projects\\glissa',

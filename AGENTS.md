@@ -139,6 +139,7 @@ server/            # Backend runtime (Express + WS wiring, control plane, shared
   memory-store.js      # Visions memory store IO shell (M12 of docs/plan-visions-3.md): boot load with HMAC verify/demote, hmac-key mint (0600), serialized appends, forget (tombstone + reseal), and THE projection writer: mill-style hash-versioned builds into dist/current with a dist/previous rotation, an unchanged-skip that rewrites only manifest.json, and the deterministic trivial renderer as the fallback the distill lane replaces. Constructed only when config.memory.enabled (file-only key, never control-WS settable)
   memory-cli.js        # `glissa memory forget <id|pattern>` / `memory backfill` (the manual re-run of the M14 transcript backfill) / `memory distill [--dry-run]` (the manual M15 projection rebuild, refused while another process holds the canon lock); in server/ for the files whitelist
   memory-distill.js    # Memory-distill lane IO shell (M15 of docs/plan-visions-3.md): one ephemeral headless `claude -p` per run (narrow allow, deny-list, hard timeout, scratch cwd), the result-file read, the verifier gates applied through the pure core, and the versioned publish or the dist-pending divert. Constructed only beside a memory store
+  core/lane-permissions-core.js  # THE write boundary an ephemeral lane hands its headless session: `defaultMode: acceptEdits` with no allow list, which confines writes to the session's throwaway cwd. Its comment block carries the live probes (CC 2.1.241) for the four spellings that look like boundaries and are not, including the path denies an earlier revision wrongly relied on
   core/memory-distill-core.js  # Its pure rules: resolveDistillConfig, the fenced canon prompt and its own contentMarker, the prompt budget refusal, claim validation (unresolvable ids, the implied-rank rule, project and kind mixing, high-entropy text), the net-new claim cap, the locked-diff report, the deterministic claim renderer, and decideDistillRun
   memory-ingest-wiring.js  # Memory ingest IO shell (M14 of docs/plan-visions-3.md): the agent-log source's second publish target, its own tail-state.json offsets, the per-tick write batching, and the budgeted resumable cold-start backfill. Constructed only beside a memory store, and it constructs the agent-log source itself when the ingest lane is off
   core/memory-ingest-core.js  # Its pure rules: which mapped agent-log event becomes which record kind (assistant text and tool calls are `knowledge`, user prompts are `prompt`), the `reported` trust stamp, echo dropping, the queue bound and per-tick batch plan, and the durable-offset decisions (cold start from the top, mismatch restarts at EOF)
@@ -557,11 +558,12 @@ not a memory. The distill lane turns the canon into standing claims. Plan and mi
 - **A canon past the prompt budget is refused rather than sliced** (400 projectable records or 200000
   rendered chars). Distilling a slice would silently drop every unshown record from the published
   projection, and the fallback renderer is still publishing in that state, so `dist/` stays usable.
-- **Security.** The canon rides inside its own `contentMarker` fence, named as DATA, with its own marker
-  separate from the activity digest's. The session runs WITHOUT `--dangerously-skip-permissions`, with
-  `--allowedTools=Write` and a deny-list at least as strict as the Visions dispatch one (no Bash, no
-  Read/Glob/Grep, no network, no Task, and `git push`/`gh` named outright), in a fresh temp cwd holding
-  only its result file, never a repository. It is registered as the `memory-distill` ephemeral lane, so
+- **Security.** The canon rides inside its own `contentMarker` fence (a sha256 digest, not the 32-bit
+  buffer hash: that one is fixed-point constructible by text an attacker writes), named as DATA, with its
+  own marker separate from the activity digest's. The session runs WITHOUT
+  `--dangerously-skip-permissions` and with no allow list, its writes confined to a fresh temp cwd
+  holding only its result file (never a repository) by `defaultMode: acceptEdits`. See "Ephemeral Lane
+  Write Boundaries" for why that mechanism and not the rule shapes that merely look like one. It is registered as the `memory-distill` ephemeral lane, so
   its own transcript is excluded from ingestion by the same ledger rule every other lane uses and its
   usage is attributed. Memory content never reaches a lane log, no `memory-*` control-WS message type
   exists, and nothing the lane writes to the canon could exceed `model` rank (it writes none today: it
@@ -617,6 +619,39 @@ store as recorded observation. Plan and milestones in `docs/plan-visions-3.md`.
   and memory content never reaches a lane log (counts, ids and verdicts only). All four are pinned by
   `tests/memory-delivery-negative.test.js`, including that a remote-trust control socket is answered
   without a memory-shaped frame, so the guarantee cannot rot when a dashboard surface is added later.
+
+### Ephemeral Lane Write Boundaries
+
+Four plausible spellings of "this session may write only here" fail SILENTLY, so
+`server/core/lane-permissions-core.js` is the one place the working one is written down. Every clause
+was settled by live probes against the real CLI (2.1.241) reading the machine-readable `tool_result`
+and `permission_denials` of a `--output-format stream-json` run, never the model's narration of its own
+refusal (which is not evidence of a rule firing). Both prompt-embedding lanes (Visions dispatch, memory
+distill) build their posture from it.
+
+- **The boundary is `defaultMode: acceptEdits` plus the throwaway cwd, with NO allow list.** Under that
+  mode a Write inside the session's cwd is auto-accepted and one anywhere else is refused with "Claude
+  requested permissions to write to <path>, but you haven't granted it yet". Each lane's cwd is a fresh
+  temp dir holding only its result file, so the mode and the cwd together are what confine the writes.
+  The mode is set in the lane's managed settings file, which overrides the operator's own: an operator
+  running `defaultMode: auto` otherwise has an LLM classifier deciding these writes instead of a rule.
+- **No lane may grant a bare `Write` allow**, which is exactly what unbounds the writes, and nothing
+  narrower grants the tool: `Write(<dir>/**)` in an allow list is refused by the CLI by name ("not
+  matched by file permission checks - only Edit(path) rules are"), and `Edit(<dir>/**)` does not
+  authorize a Write either, that hint notwithstanding (probed: a Write INSIDE the allowed dir was still
+  refused for want of a grant).
+- **A path deny is NOT a write boundary.** With a bare `Write` allow present, both `Edit(<dir>/**)` and
+  `Write(<dir>/**)` denies were probed against a Write into that dir and the file was created both
+  times. An earlier revision of this section claimed those denies were load-bearing; they are not, and
+  no lane ships one, because a rule that reads as a boundary and is not one is worse than no rule.
+- **A bare `Read` deny refuses the Write tool** ("covered by Read deny rule ... Write tool refused"), so
+  denying reads and keeping a result-file contract are mutually exclusive. No lane may deny bare `Read`,
+  `Write`, `Glob` or `Grep`; reads go nowhere instead, because there is no shell, no network tool, and
+  the only writable directory is the throwaway one. A bare `Edit` deny does NOT block Write, which is
+  why the deny lists work as written.
+- **Claude Code refuses edits under its own home independently**, as "a sensitive file", which is what
+  covers the settings.json hook-registration path (code execution as the server account) whatever the
+  lane configures.
 
 ### Security: Trust Boundary
 

@@ -347,10 +347,21 @@ function createMemoryStore(deps = {}) {
     }
   }
 
+  // manifest.json is as writable as any other file here, so its paths are treated as untrusted input.
+  function isContainedRelPath(relPath) {
+    if (typeof relPath !== 'string' || !relPath) return false;
+    if (path.isAbsolute(relPath) || /^[A-Za-z]:/.test(relPath)) return false;
+    return !relPath.split(/[\\/]/).includes('..');
+  }
+
   async function readPublishedDocuments(manifest) {
     const documents = [];
     for (const file of Array.isArray(manifest?.files) ? manifest.files : []) {
       if (file.relPath === core.PROJECTION_MANIFEST_FILE) continue;
+      if (!isContainedRelPath(file.relPath)) {
+        log.warn('the published manifest names a file outside the build: it was skipped');
+        continue;
+      }
       const text = await readCurrentFile(file.relPath);
       if (text !== null) documents.push(text);
     }
