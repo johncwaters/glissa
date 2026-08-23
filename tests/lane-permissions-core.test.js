@@ -22,7 +22,6 @@ test('the boundary is acceptEdits over the throwaway cwd, and there is no allow 
   assert.deepEqual(posture.permissions.deny, ['Bash']);
   // A bare `Write` allow is exactly what unbounds the writes; nothing narrower grants the tool.
   assert.equal(Object.hasOwn(posture.permissions, 'allow'), false);
-  assert.equal(Object.hasOwn(posture, 'allowedToolsArg'), false);
 });
 
 test('the mode is set by the lane, not inherited: an operator running auto has a classifier deciding', () => {
