@@ -148,14 +148,17 @@ function decideWasActiveFlip(to, event, pendingRestart) {
   return null;
 }
 
-function resolveVisionsScopePaths(projectIds, projects, warn = console.warn) {
+// The id rides beside the path because scope and intent ownership are the same question asked twice:
+// which project does this uri belong to.
+function resolveVisionsScopeProjects(projectIds, projects, warn = console.warn) {
   if (!Array.isArray(projectIds) || projectIds.length === 0) return null;
   const projectsById = new Map();
   for (const project of Array.isArray(projects) ? projects : []) {
     if (!project || typeof project.id !== 'string') continue;
     projectsById.set(project.id, project);
   }
-  const scopePaths = [];
+  const scopeProjects = [];
+  const seenPaths = new Set();
   for (const projectId of projectIds) {
     const project = projectsById.get(projectId);
     if (!project) {
@@ -167,11 +170,12 @@ function resolveVisionsScopePaths(projectIds, projects, warn = console.warn) {
       warn(`[visions] configured project has no usable path: ${projectId}`);
       continue;
     }
-    if (scopePaths.includes(normalizedPath)) continue;
-    scopePaths.push(normalizedPath);
+    if (seenPaths.has(normalizedPath)) continue;
+    seenPaths.add(normalizedPath);
+    scopeProjects.push({ id: projectId, path: normalizedPath });
   }
-  if (scopePaths.length === 0) return null;
-  return scopePaths;
+  if (scopeProjects.length === 0) return null;
+  return scopeProjects;
 }
 
 // A config modify (path or permission change) replaces the Session OBJECT, but destroy() leaves the
@@ -1157,8 +1161,8 @@ function createBackend(httpServer, options = {}) {
    * that puts the lane on the usage ledger.
    */
   const visionsDispatchConfig = visionsConfig.dispatch;
-  const visionsScopePaths = visionsEnabled
-    ? resolveVisionsScopePaths(visionsConfig.projects, config.projects)
+  const visionsScopeProjects = visionsEnabled
+    ? resolveVisionsScopeProjects(visionsConfig.projects, config.projects)
     : null;
   const visionsSessions = new Map();
   const visionsLane = visionsEnabled
@@ -1187,7 +1191,11 @@ function createBackend(httpServer, options = {}) {
       // The movement signal beside it: new events, never aging timestamps. Null with no ingest lane, and
       // the gate then decides exactly what it decided before M7.5.
       contextSeq: ingestLane ? ingestLane.latestSeq : null,
-      scopePaths: visionsScopePaths,
+      scopeProjects: visionsScopeProjects,
+      // Every project the machine knows, so an intent slot for a DELETED project is dropped on load.
+      knownProjectIds: (Array.isArray(config.projects) ? config.projects : [])
+        .map((project) => project?.id)
+        .filter((id) => typeof id === 'string' && id),
     })
     : null;
 

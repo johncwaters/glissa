@@ -11,11 +11,16 @@ const {
 const {
   createDispatchState, decideDispatch, forgetUri, hashText, mergeDiagnostics, recordDispatch, resolveDispatchConfig, sanitizeModelDiagnostics,
 } = require('./core/visions-dispatch-core');
-const { isUriInProjects } = require('./core/visions-scope-core');
+const { isUriInProjects, projectForUri, scopePathsOf } = require('./core/visions-scope-core');
 const {
   applyModelIntent: mergeModelIntent,
   createIntentState,
   intentPayload,
+  intentSlotFor,
+  intentSlotPayload,
+  intentTextFor,
+  isEmptyIntent,
+  pruneIntentProjects,
   reviveIntentState,
 } = require('./core/visions-intent-core');
 const { sweepMarkdownWithFixes } = require('./core/visions-rules-core');
@@ -81,15 +86,22 @@ function readFrame(raw) {
   };
 }
 
-function shouldWarnForInvalidIntentFile(raw, revived) {
-  if (revived.text) return false;
-  const empty = createIntentState();
-  const isPersistedEmpty = raw && typeof raw === 'object' && !Array.isArray(raw)
-    && raw.text === empty.text && raw.source === empty.source && raw.ts === empty.ts;
-  return !isPersistedEmpty;
+function isPersistedEmptyIntentFile(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return false;
+  const byProject = raw.byProject;
+  const hasEmptyMap = byProject && typeof byProject === 'object' && !Array.isArray(byProject)
+    && Object.keys(byProject).length === 0;
+  return raw.global === null && hasEmptyMap;
 }
 
-function loadIntentState({ intentStatePath, fsFns, warn }) {
+function shouldWarnForInvalidIntentFile(raw, revived) {
+  if (!isEmptyIntent(revived)) return false;
+  return !isPersistedEmptyIntentFile(raw);
+}
+
+// The prune runs AFTER the warn decision: a file whose only statements belonged to deleted projects was
+// valid when it was written, and calling that invalid would put a warning on a routine deletion.
+function loadIntentState({ intentStatePath, fsFns, warn, knownProjectIds }) {
   if (!intentStatePath) return createIntentState();
   let rawText = '';
   try {
@@ -103,7 +115,7 @@ function loadIntentState({ intentStatePath, fsFns, warn }) {
     const parsed = JSON.parse(rawText);
     const revived = reviveIntentState(parsed);
     if (shouldWarnForInvalidIntentFile(parsed, revived)) warn('intent state invalid, starting empty');
-    return revived;
+    return pruneIntentProjects(revived, knownProjectIds);
   } catch (error) {
     warn(`intent state unreadable, starting empty: ${error.message}`);
     return createIntentState();
@@ -148,7 +160,9 @@ function createVisionsWiring({
   // The ingest lane's newest seq (docs/plan-ingestion.md, M7.5): the movement signal that lets the gate
   // see activity the buffer never showed. Absent means null, and the gate is then the pre-M7.5 one.
   contextSeq = null,
-  scopePaths = null,
+  // Each entry is { id, path }: the id names the intent slot a uri's proposals land in, the path scopes it.
+  scopeProjects = null,
+  knownProjectIds = null,
   intentStatePath = null,
   fsFns = fs,
   fsPromises = fsPromisesDefault,
@@ -186,11 +200,15 @@ function createVisionsWiring({
   let fixLog = [];
   let nextApplyEditId = 1;
   /*
-   * The intent model (docs/archive/plan-navigator.md, M5): ONE statement for the machine, not one per uri,
-   * because it says what the carbon unit is building rather than what a buffer contains. In memory
-   * only in v1, so a daemon restart starts from nothing.
+   * The intent model (docs/archive/plan-navigator.md, M5): one statement PER PROJECT, not one per uri,
+   * because it says what the carbon unit is building rather than what a buffer contains, and not every
+   * project is being built toward the same thing. A uri no configured project owns lands on the global
+   * slot, which is also what a project with no statement of its own reads.
    */
-  let intentState = loadIntentState({ intentStatePath, fsFns, warn });
+  const scopePaths = scopePathsOf(scopeProjects);
+  let intentState = loadIntentState({
+    intentStatePath, fsFns, warn, knownProjectIds,
+  });
   const intentStateWriter = intentStatePath
     ? createJsonStateWriter({
       filePath: intentStatePath,
@@ -355,26 +373,33 @@ function createVisionsWiring({
     }));
   }
 
-  function broadcastIntent() {
+  function broadcastIntent(projectId) {
     if (typeof broadcast !== 'function') return;
-    broadcast({ type: 'visions-intent', intent: intentPayload(intentState), ts: nowFn() });
+    broadcast({
+      type: 'visions-intent',
+      projectId: projectId || null,
+      intent: intentSlotPayload(intentSlotFor(intentState, projectId)),
+      ts: nowFn(),
+    });
   }
 
-  function commitIntent(merged) {
+  function commitIntent(merged, projectId) {
     if (!merged.changed) return false;
     intentState = merged.state;
     if (intentStateWriter) {
       const payload = intentPayload(intentState);
       intentStateWriter.write(payload, () => JSON.stringify(payload, null, 2));
     }
-    broadcastIntent();
+    broadcastIntent(projectId);
     return true;
   }
 
-  function applyModelIntent(text) {
-    const changed = commitIntent(mergeModelIntent(intentState, { text, now: nowFn() }));
-    if (changed) note(`intent model-set (${(intentState.text || '').length} chars)`);
-    return changed;
+  function applyModelIntent(text, projectId = null) {
+    const changed = commitIntent(mergeModelIntent(intentState, { text, now: nowFn(), projectId }), projectId);
+    if (!changed) return false;
+    const slot = intentSlotFor(intentState, projectId);
+    note(`intent model-set for ${projectId || 'all projects'} (${(slot ? slot.text : '').length} chars)`);
+    return true;
   }
 
   /*
@@ -478,6 +503,7 @@ function createVisionsWiring({
       if (!isMarkdownDoc(doc)) return;
       const text = typeof doc.text === 'string' ? doc.text : '';
       const textHash = hashFn(text);
+      const projectId = projectForUri(uri, scopeProjects);
       const seq = readContextSeq();
       const decision = decideDispatch({
         state: dispatchState,
@@ -506,7 +532,7 @@ function createVisionsWiring({
           uri,
           text,
           findings: findingsByUri.get(uri) || [],
-          intent: intentState.text,
+          intent: intentTextFor(intentState, projectId),
           digest: readContextDigest(),
         });
       } catch (error) {
@@ -521,7 +547,7 @@ function createVisionsWiring({
         return;
       }
       const recorded = applyDispatchResult(uri, result, getDoc(store, uri), send);
-      const intentMoved = applyModelIntent(result.intent);
+      const intentMoved = applyModelIntent(result.intent, projectId);
       if (!recorded) return;
       note(`dispatch for ${uri} applied: ${result.verdict}, ${(commentsByUri.get(uri) || []).length} comments, hand=${handsByUri.has(uri) ? 'yes' : 'no'}, intent-moved=${intentMoved ? 'yes' : 'no'}`);
     }
@@ -844,6 +870,7 @@ function createVisionsWiring({
     applyModelIntent,
     noteActivity,
     getIntent: () => intentPayload(intentState),
+    getIntentFor: (projectId = null) => intentSlotPayload(intentSlotFor(intentState, projectId)),
     whenIntentPersistenceIdle: () => (intentStateWriter ? intentStateWriter.idle() : Promise.resolve()),
     // The movement signal the next gate will read, so a caller can see whether a lane is wired at all.
     latestContextSeq: readContextSeq,

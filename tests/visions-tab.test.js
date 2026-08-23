@@ -137,13 +137,12 @@ test('a model intent proposal broadcasts and rides the snapshot repair', withVis
   const dashboard = await openRecordingSocket(dash, '/control');
   track(dashboard.ws);
   const firstSnapshot = await waitFor(dashboard.received, (msg) => msg.type === 'visions-snapshot');
-  assert.deepEqual(firstSnapshot.intent, {
-    text: '', source: null, ts: 0,
-  }, 'a fresh daemon believes nothing yet');
+  assert.deepEqual(firstSnapshot.intent, { global: null, byProject: {} }, 'a fresh daemon believes nothing yet');
 
   const lane = backend.getVisionsLane();
   assert.equal(lane.applyModelIntent('  rewriting the merge gate  '), true);
   const proposed = await waitFor(dashboard.received, (msg) => msg.type === 'visions-intent');
+  assert.equal(proposed.projectId, null, 'no project owns it, so it is the machine-wide slot');
   assert.deepEqual(proposed.intent, {
     text: 'rewriting the merge gate', source: 'model', ts: proposed.intent.ts,
   });
@@ -152,8 +151,9 @@ test('a model intent proposal broadcasts and rides the snapshot repair', withVis
   const reconnected = await openRecordingSocket(dash, '/control');
   track(reconnected.ws);
   const repaired = await waitFor(reconnected.received, (msg) => msg.type === 'visions-snapshot');
-  assert.equal(repaired.intent.text, 'rewriting the merge gate');
-  assert.equal(repaired.intent.source, 'model');
+  assert.equal(repaired.intent.global.text, 'rewriting the merge gate');
+  assert.equal(repaired.intent.global.source, 'model');
+  assert.deepEqual(repaired.intent.byProject, {});
 }));
 
 test('a control client connecting with the lane off is told nothing about the visions', async () => {

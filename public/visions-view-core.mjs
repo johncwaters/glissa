@@ -2,12 +2,18 @@ export const VISIONS_EMPTY_TEXT = 'No findings. Open a markdown file in a connec
 
 export const VISIONS_INTENT_EMPTY_TEXT = 'No intent yet. The visions proposes one after its first pass.';
 
+// The slot a uri no configured project owns lands in, and the fallback a project with none reads.
+export const VISIONS_INTENT_GLOBAL_LABEL = 'All projects';
+
 export function emptyIntent() {
   return { text: '', source: null, ts: 0 };
 }
 
-export function intentOfMessage(msg) {
-  const raw = msg?.intent;
+export function emptyIntentState() {
+  return { global: null, byProject: {} };
+}
+
+export function normalizeIntentSlot(raw) {
   if (!raw || typeof raw !== 'object') return emptyIntent();
   const text = typeof raw.text === 'string' ? raw.text : '';
   const ts = Number(raw.ts);
@@ -16,6 +22,70 @@ export function intentOfMessage(msg) {
     source: raw.source === 'model' ? raw.source : null,
     ts: Number.isFinite(ts) && ts > 0 ? ts : 0,
   };
+}
+
+function statedSlot(raw) {
+  const slot = normalizeIntentSlot(raw);
+  return slot.text ? slot : null;
+}
+
+// Tolerant of the pre-per-project flat shape: a tab that outlives a server update reads it as global.
+export function intentStateOfMessage(msg) {
+  const raw = msg?.intent;
+  if (!raw || typeof raw !== 'object') return emptyIntentState();
+  const isScoped = Object.hasOwn(raw, 'global') || Object.hasOwn(raw, 'byProject');
+  if (!isScoped) return { global: statedSlot(raw), byProject: {} };
+  const rawByProject = raw.byProject && typeof raw.byProject === 'object' ? raw.byProject : {};
+  const entries = [];
+  for (const [projectId, slotRaw] of Object.entries(rawByProject)) {
+    const slot = statedSlot(slotRaw);
+    if (!slot || !projectId) continue;
+    entries.push([projectId, slot]);
+  }
+  return { global: statedSlot(raw.global), byProject: Object.fromEntries(entries) };
+}
+
+// One slot moved. An empty statement is never broadcast, so it reads as nothing to apply rather than
+// as an instruction to blank the slot.
+export function applyIntentMessage(state, msg) {
+  const current = state || emptyIntentState();
+  const slot = statedSlot(msg?.intent);
+  if (!slot) return current;
+  const projectId = typeof msg?.projectId === 'string' && msg.projectId ? msg.projectId : null;
+  if (!projectId) return { global: slot, byProject: { ...current.byProject } };
+  return { global: current.global, byProject: { ...current.byProject, [projectId]: slot } };
+}
+
+export function intentProjectLabel(projectId, namesById = null) {
+  const name = namesById && typeof namesById.get === 'function' ? namesById.get(projectId) : null;
+  return typeof name === 'string' && name ? name : projectId;
+}
+
+/*
+ * Global first, then one row per project that has a statement. The global row is dropped once a project
+ * speaks for itself, except when nothing has been said anywhere: that row is then the empty state.
+ */
+export function intentRows(state, namesById = null, now = Date.now()) {
+  const current = state || emptyIntentState();
+  const projects = Object.entries(current.byProject || {})
+    .filter(([projectId, slot]) => projectId && slot && slot.text)
+    .map(([projectId, slot]) => ({
+      key: projectId,
+      label: intentProjectLabel(projectId, namesById),
+      text: slot.text,
+      hasText: true,
+      meta: intentMetaText(slot, now),
+    }))
+    .sort((left, right) => left.label.localeCompare(right.label));
+  const global = current.global?.text ? current.global : null;
+  if (!global && projects.length > 0) return projects;
+  return [{
+    key: 'global',
+    label: VISIONS_INTENT_GLOBAL_LABEL,
+    text: global ? global.text : VISIONS_INTENT_EMPTY_TEXT,
+    hasText: !!global,
+    meta: intentMetaText(global, now),
+  }, ...projects];
 }
 
 export function intentSourceText(intent) {
@@ -48,10 +118,12 @@ export function intentMetaText(intent, now = Date.now()) {
   return `${source}, ${age}`;
 }
 
-export function hasIntentChanged(previous, next) {
-  const before = previous || emptyIntent();
-  const after = next || emptyIntent();
-  return before.text !== after.text || before.source !== after.source;
+function intentSignature(state) {
+  return intentRows(state, null, 0).map((row) => `${row.key}\u0000${row.text}\u0000${row.hasText}`).join('\u0001');
+}
+
+export function hasIntentStateChanged(previous, next) {
+  return intentSignature(previous) !== intentSignature(next);
 }
 
 // LSP counts lines from zero; editors and carbon units count from one.

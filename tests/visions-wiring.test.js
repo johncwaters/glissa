@@ -22,6 +22,8 @@ const { createConfigStore, BOOLEAN_KEYS, STRING_KEYS, TIMEOUT_KEYS } = require('
 const { DIGEST_BUDGET_CHARS, createVisionsWiring, VISIONS_DEBOUNCE_MS } = require('../server/visions-wiring');
 
 const MARKDOWN_URI = 'file:///tmp/plan-visions.md';
+const PROJECT_ID = 'e1f4c0de-0000-4000-8000-000000000001';
+const OTHER_PROJECT_ID = 'e1f4c0de-0000-4000-8000-000000000002';
 const SCRIPT_URI = 'file:///tmp/app.js';
 const CLEAN_MARKDOWN = '# Title\n\nA line with nothing wrong.\n';
 const REPEATED_WORD_MARKDOWN = '# Title\n\nA line with with a repeat.\n';
@@ -212,7 +214,7 @@ test('intent lines name the source and the size, never the sentence', (t) => {
 
   wiring.applyModelIntent(statement);
   const intentLines = notes.filter((line) => line.includes('intent '));
-  assert.deepEqual(intentLines, [`[visions] intent model-set (${statement.length} chars)`]);
+  assert.deepEqual(intentLines, [`[visions] intent model-set for all projects (${statement.length} chars)`]);
   assert.equal(notes.some((line) => line.includes('nobody should find')), false);
 });
 
@@ -460,7 +462,7 @@ const MODEL_DIAGNOSTIC = { line: 1, message: 'The title is missing a concrete no
  * NOTHING here spawns claude; the real spawn is covered by tests/visions-dispatch.test.js.
  */
 function dispatchingConnection({
-  dispatch: overrides = {}, respond = null, contextDigest = null, contextSeq = null, scopePaths = null, debug = false,
+  dispatch: overrides = {}, respond = null, contextDigest = null, contextSeq = null, scopeProjects = null, debug = false,
 } = {}) {
   const calls = [];
   const dispatchConfig = { enabled: true, ...overrides };
@@ -471,7 +473,7 @@ function dispatchingConnection({
   };
   return {
     ...drivenConnection({
-      dispatchConfig, dispatch, contextDigest, contextSeq, scopePaths, debug,
+      dispatchConfig, dispatch, contextDigest, contextSeq, scopeProjects, debug,
     }),
     calls,
   };
@@ -503,7 +505,7 @@ test('a dispatch fires one quiet window after a sweep publishes, carrying the bu
 
 test('a scoped visions skips sweep and refuses dispatch for an out-of-scope document', async (t) => {
   const uri = 'file:///other/plan-visions.md';
-  const { wiring, timers, sent, calls, notes, lsp } = dispatchingConnection({ scopePaths: ['/tmp/project'] });
+  const { wiring, timers, sent, calls, notes, lsp } = dispatchingConnection({ scopeProjects: [{ id: PROJECT_ID, path: '/tmp/project' }] });
   t.after(() => wiring.stop());
 
   lsp('textDocument/didOpen', didOpenParams(uri, 'markdown', '# Title\n\nOutside'));
@@ -520,7 +522,7 @@ test('a scoped visions skips sweep and refuses dispatch for an out-of-scope docu
 });
 
 test('a scoped visions sweeps and dispatches an in-scope document normally', async (t) => {
-  const { wiring, timers, sent, calls, lsp } = dispatchingConnection({ scopePaths: ['/tmp'] });
+  const { wiring, timers, sent, calls, lsp } = dispatchingConnection({ scopeProjects: [{ id: PROJECT_ID, path: '/tmp' }] });
   t.after(() => wiring.stop());
 
   lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
@@ -1082,14 +1084,38 @@ test('a model proposal is broadcast once and joins the connect-time snapshot', (
   assert.equal(wiring.applyModelIntent('reviewing the visions plan, tightening scope'), true);
   assert.deepEqual(intentBroadcasts(broadcasts), [{
     type: 'visions-intent',
+    projectId: null,
     intent: {
       text: 'reviewing the visions plan, tightening scope', source: 'model', ts: FIXED_TS,
     },
     ts: FIXED_TS,
   }]);
   assert.deepEqual(wiring.snapshotMessage().intent, {
-    text: 'reviewing the visions plan, tightening scope', source: 'model', ts: FIXED_TS,
+    global: { text: 'reviewing the visions plan, tightening scope', source: 'model', ts: FIXED_TS },
+    byProject: {},
   });
+});
+
+test('a proposal for one project names it on the wire and leaves the others alone', (t) => {
+  const { wiring, broadcasts } = drivenConnection();
+  t.after(() => wiring.stop());
+
+  assert.equal(wiring.applyModelIntent('the machine-wide belief'), true);
+  assert.equal(wiring.applyModelIntent('what this repo is for', PROJECT_ID), true);
+
+  assert.deepEqual(intentBroadcasts(broadcasts).at(-1), {
+    type: 'visions-intent',
+    projectId: PROJECT_ID,
+    intent: {
+      text: 'what this repo is for', source: 'model', ts: FIXED_TS,
+    },
+    ts: FIXED_TS,
+  });
+  assert.deepEqual(wiring.snapshotMessage().intent, {
+    global: { text: 'the machine-wide belief', source: 'model', ts: FIXED_TS },
+    byProject: { [PROJECT_ID]: { text: 'what this repo is for', source: 'model', ts: FIXED_TS } },
+  });
+  assert.equal(wiring.getIntentFor(OTHER_PROJECT_ID).text, '', 'another project is untouched by it');
 });
 
 test('a proposal that changes nothing is not broadcast', (t) => {
@@ -1107,21 +1133,19 @@ test('a later model proposal replaces the standing statement', (t) => {
   t.after(() => wiring.stop());
 
   wiring.applyModelIntent('rewriting the merge gate, not the spawn path');
-  assert.deepEqual(wiring.getIntent(), {
+  assert.deepEqual(wiring.getIntentFor(), {
     text: 'rewriting the merge gate, not the spawn path', source: 'model', ts: FIXED_TS,
   });
 
   assert.equal(wiring.applyModelIntent('a plan doc about spawning'), true);
   assert.equal(intentBroadcasts(broadcasts).length, 2);
-  assert.equal(wiring.getIntent().text, 'a plan doc about spawning');
+  assert.equal(wiring.getIntentFor().text, 'a plan doc about spawning');
 });
 
 test('an empty lane still carries an intent field on its snapshot', (t) => {
   const { wiring } = drivenConnection();
   t.after(() => wiring.stop());
-  assert.deepEqual(wiring.snapshotMessage().intent, {
-    text: '', source: null, ts: 0,
-  });
+  assert.deepEqual(wiring.snapshotMessage().intent, { global: null, byProject: {} });
 });
 
 test('model intent persists on change only and revives on the next wiring', async (t) => {
@@ -1131,21 +1155,46 @@ test('model intent persists on change only and revives on the next wiring', asyn
   t.after(() => wiring.stop());
 
   assert.equal(wiring.applyModelIntent('  durable belief  '), true);
+  assert.equal(wiring.applyModelIntent('a belief about one repo', PROJECT_ID), true);
   await wiring.whenIntentPersistenceIdle();
-  assert.equal(counted.writes.length, 1);
+  assert.equal(counted.writes.length, 2);
   assert.deepEqual(JSON.parse(fs.readFileSync(intentStatePath, 'utf8')), {
-    text: 'durable belief', source: 'model', ts: FIXED_TS,
+    global: { text: 'durable belief', source: 'model', ts: FIXED_TS },
+    byProject: { [PROJECT_ID]: { text: 'a belief about one repo', source: 'model', ts: FIXED_TS } },
   });
 
   assert.equal(wiring.applyModelIntent('durable belief'), false);
   await wiring.whenIntentPersistenceIdle();
-  assert.equal(counted.writes.length, 1);
+  assert.equal(counted.writes.length, 2);
 
   const revived = drivenConnection({ intentStatePath });
   t.after(() => revived.wiring.stop());
-  assert.deepEqual(revived.wiring.getIntent(), {
+  assert.deepEqual(revived.wiring.getIntentFor(), {
     text: 'durable belief', source: 'model', ts: FIXED_TS,
   });
+  assert.deepEqual(revived.wiring.getIntentFor(PROJECT_ID), {
+    text: 'a belief about one repo', source: 'model', ts: FIXED_TS,
+  });
+});
+
+test('a project the config no longer knows loses its slot on the next load', async (t) => {
+  const intentStatePath = tempIntentStatePath(t);
+  fs.writeFileSync(intentStatePath, JSON.stringify({
+    global: { text: 'the global belief', source: 'model', ts: FIXED_TS },
+    byProject: {
+      [PROJECT_ID]: { text: 'still configured', source: 'model', ts: FIXED_TS },
+      [OTHER_PROJECT_ID]: { text: 'deleted project', source: 'model', ts: FIXED_TS },
+    },
+  }), 'utf8');
+
+  const { wiring, warnings } = drivenConnection({ intentStatePath, knownProjectIds: [PROJECT_ID] });
+  t.after(() => wiring.stop());
+
+  assert.deepEqual(wiring.getIntent(), {
+    global: { text: 'the global belief', source: 'model', ts: FIXED_TS },
+    byProject: { [PROJECT_ID]: { text: 'still configured', source: 'model', ts: FIXED_TS } },
+  });
+  assert.deepEqual(warnings, [], 'a deleted project is routine, not a corrupt file');
 });
 
 test('a legacy locked intent file revives with model ownership', async (t) => {
@@ -1153,15 +1202,23 @@ test('a legacy locked intent file revives with model ownership', async (t) => {
   fs.writeFileSync(intentStatePath, JSON.stringify({
     text: 'durable correction', source: 'operator', locked: true, ts: FIXED_TS,
   }), 'utf8');
-  const { wiring } = drivenConnection({ intentStatePath });
+  const counted = countingFsPromises();
+  const { wiring } = drivenConnection({ intentStatePath, fsPromises: counted.fsPromises });
   t.after(() => wiring.stop());
 
-  assert.deepEqual(wiring.getIntent(), {
+  assert.deepEqual(wiring.getIntentFor(), {
     text: 'durable correction', source: 'model', ts: FIXED_TS,
   });
   assert.equal(wiring.applyModelIntent('durable model belief'), true);
-  assert.deepEqual(wiring.getIntent(), {
+  assert.deepEqual(wiring.getIntentFor(), {
     text: 'durable model belief', source: 'model', ts: FIXED_TS,
+  });
+
+  // The next persist writes the per-project shape, so the flat file is read once and never rewritten.
+  await wiring.whenIntentPersistenceIdle();
+  assert.deepEqual(JSON.parse(fs.readFileSync(intentStatePath, 'utf8')), {
+    global: { text: 'durable model belief', source: 'model', ts: FIXED_TS },
+    byProject: {},
   });
 });
 
@@ -1175,7 +1232,8 @@ test('a model intent persists without a locked field', async (t) => {
   await wiring.whenIntentPersistenceIdle();
   assert.equal(counted.writes.length, 1);
   assert.deepEqual(JSON.parse(fs.readFileSync(intentStatePath, 'utf8')), {
-    text: 'durable model belief', source: 'model', ts: FIXED_TS,
+    global: { text: 'durable model belief', source: 'model', ts: FIXED_TS },
+    byProject: {},
   });
 });
 
@@ -1186,9 +1244,7 @@ test('a corrupt intent file starts empty and warns once', (t) => {
   const { wiring, warnings } = drivenConnection({ intentStatePath });
   t.after(() => wiring.stop());
 
-  assert.deepEqual(wiring.getIntent(), {
-    text: '', source: null, ts: 0,
-  });
+  assert.deepEqual(wiring.getIntent(), { global: null, byProject: {} });
   assert.equal(warnings.length, 1);
   assert.match(warnings[0], /intent state unreadable, starting empty/);
 });
@@ -1204,13 +1260,12 @@ test('without an intent path the lane keeps the same in-memory behavior and touc
   const { wiring, broadcasts, warnings } = drivenConnection({ fsFns, fsPromises });
   t.after(() => wiring.stop());
 
-  assert.deepEqual(wiring.snapshotMessage().intent, {
-    text: '', source: null, ts: 0,
-  });
+  assert.deepEqual(wiring.snapshotMessage().intent, { global: null, byProject: {} });
   assert.equal(wiring.applyModelIntent('memory only'), true);
   await wiring.whenIntentPersistenceIdle();
   assert.deepEqual(intentBroadcasts(broadcasts), [{
     type: 'visions-intent',
+    projectId: null,
     intent: {
       text: 'memory only', source: 'model', ts: FIXED_TS,
     },
@@ -1233,7 +1288,7 @@ test('the standing intent rides the dispatch, and the result updates it after th
   await wiring.whenDispatchSettled();
 
   assert.equal(calls[0].intent, 'an early guess', 'the prompt is built from what the lane currently believes');
-  assert.equal(wiring.getIntent().text, 'a plan doc for the visions intent model');
+  assert.equal(wiring.getIntentFor().text, 'a plan doc for the visions intent model');
   const order = broadcasts.filter((message) => ['visions-comments', 'visions-intent'].includes(message.type));
   assert.deepEqual(order.map((message) => message.type), ['visions-intent', 'visions-comments', 'visions-intent'],
     'the dispatch result lands comments first, then the belief it came with');
@@ -1255,10 +1310,54 @@ test('a dispatch intent result replaces the standing intent', async (t) => {
   await wiring.whenDispatchSettled();
 
   assert.equal(calls[0].intent, 'what I am actually doing');
-  assert.deepEqual(wiring.getIntent(), {
+  assert.deepEqual(wiring.getIntentFor(), {
     text: 'what the model would rather believe', source: 'model', ts: FIXED_TS,
   });
   assert.equal(intentBroadcasts(broadcasts).length, beforeDispatch + 1);
+});
+
+test('a dispatch on an owned uri reads and writes that project slot, falling back to global for the prompt', async (t) => {
+  const { wiring, timers, calls, broadcasts, lsp } = dispatchingConnection({
+    scopeProjects: [{ id: PROJECT_ID, path: '/tmp' }],
+    respond: () => Promise.resolve({
+      verdict: 'NONE', comments: [], intent: 'what this project is really for', reason: null,
+    }),
+  });
+  t.after(() => wiring.stop());
+
+  wiring.applyModelIntent('the machine-wide belief');
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  runSweepThenDispatch(timers);
+  await wiring.whenDispatchSettled();
+
+  assert.equal(calls[0].intent, 'the machine-wide belief', 'a project with no statement reads the global one');
+  assert.equal(wiring.getIntentFor(PROJECT_ID).text, 'what this project is really for');
+  assert.equal(wiring.getIntentFor().text, 'the machine-wide belief', 'the global slot is not overwritten by it');
+  assert.equal(intentBroadcasts(broadcasts).at(-1).projectId, PROJECT_ID);
+});
+
+test('a second dispatch on the same project reads the project statement, not the global one', async (t) => {
+  const { wiring, timers, calls, lsp, clock } = dispatchingConnection({
+    scopeProjects: [{ id: PROJECT_ID, path: '/tmp' }],
+    dispatch: { cooldownMs: 1 },
+    respond: (_args, count) => Promise.resolve({
+      verdict: 'NONE', comments: [], intent: count === 1 ? 'what this project is really for' : null, reason: null,
+    }),
+  });
+  t.after(() => wiring.stop());
+
+  wiring.applyModelIntent('the machine-wide belief');
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  runSweepThenDispatch(timers);
+  await wiring.whenDispatchSettled();
+
+  clock.now += 60000;
+  lsp('textDocument/didChange', didChangeParams(MARKDOWN_URI, 2, `${REPEATED_WORD_MARKDOWN}\nmore\n`));
+  runSweepThenDispatch(timers);
+  await wiring.whenDispatchSettled();
+
+  assert.equal(calls.length, 2);
+  assert.equal(calls[1].intent, 'what this project is really for');
 });
 
 test('a result with no intent field leaves the statement exactly as it was', async (t) => {
@@ -1272,7 +1371,7 @@ test('a result with no intent field leaves the statement exactly as it was', asy
   runSweepThenDispatch(timers);
   await wiring.whenDispatchSettled();
 
-  assert.equal(wiring.getIntent().text, 'still the current belief');
+  assert.equal(wiring.getIntentFor().text, 'still the current belief');
 });
 
 // The M3 lane, byte for byte: an absent config.visions.dispatch must cost nothing at all.
@@ -1924,7 +2023,7 @@ test('activity alone re-dispatches an untouched buffer, and the belief it comes 
 
   assert.equal(calls.length, 2, 'new events are what re-open a document nobody is editing');
   assert.equal(calls[1].text, REPEATED_WORD_MARKDOWN);
-  assert.equal(wiring.getIntent().text, 'wiring the ingest lane into the visions gate');
+  assert.equal(wiring.getIntentFor().text, 'wiring the ingest lane into the visions gate');
 });
 
 test('a poke with no new events behind it is refused, so an aging digest cannot buy a dispatch', async (t) => {

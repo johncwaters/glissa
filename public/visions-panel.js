@@ -5,7 +5,6 @@ import {
   INGEST_EMPTY_TEXT,
   VISIONS_EMPTY_TEXT,
   VISIONS_FIXES_EMPTY_TEXT,
-  VISIONS_INTENT_EMPTY_TEXT,
   activityAgeText,
   activityCountText,
   activityOverflowCount,
@@ -22,9 +21,10 @@ import {
   applyFixSnapshot,
   applyHandMessage,
   applyHandSnapshot,
+  applyIntentMessage,
   basenameOfUri,
   commentLineLabel,
-  emptyIntent,
+  emptyIntentState,
   findingLineLabel,
   fixCountText,
   fixLineLabel,
@@ -34,9 +34,9 @@ import {
   hasFindings,
   hasFix,
   hasHand,
-  hasIntentChanged,
-  intentMetaText,
-  intentOfMessage,
+  hasIntentStateChanged,
+  intentRows,
+  intentStateOfMessage,
   visionsHandText,
   visionsSections,
   sectionCountText,
@@ -48,7 +48,10 @@ import {
 let _findingsByUri = new Map();
 let _commentsByUri = new Map();
 let _handsByUri = new Map();
-let _intent = emptyIntent();
+let _intent = emptyIntentState();
+// Project names for the intent rows, from the same snapshot that builds the cards. An id nothing named
+// renders as the id rather than as a blank.
+let _projectNames = new Map();
 let _root = null;
 let _feed = null;
 let _intentUI = null;
@@ -67,25 +70,33 @@ let _unseen = false;
 
 function buildIntentBlock() {
   const section = el('section', 'visions-intent');
-  const head = el('div', 'visions-intent-head');
-  head.append(el('h2', 'visions-intent-title', 'Intent'));
-  const meta = el('span', 'visions-intent-meta');
-  head.append(meta);
-  section.append(head);
-
-  const statement = el('p', 'visions-intent-text');
-  section.append(statement);
-
-  _intentUI = { meta, statement };
+  section.append(el('h2', 'visions-intent-title', 'Intent'));
+  const list = el('div', 'visions-intent-list');
+  section.append(list);
+  _intentUI = { list };
   return section;
+}
+
+function buildIntentRow(row) {
+  const item = el('div', 'visions-intent-item');
+  const head = el('div', 'visions-intent-head');
+  // A project name comes from the operator's config: built as text, never markup.
+  head.append(el('span', 'visions-intent-scope', row.label), el('span', 'visions-intent-meta', row.meta));
+  const statement = el('p', 'visions-intent-text', row.text);
+  statement.classList.toggle('visions-intent-none', !row.hasText);
+  item.append(head, statement);
+  return item;
 }
 
 function renderIntent() {
   if (!_intentUI) return;
-  const { meta, statement } = _intentUI;
-  meta.textContent = intentMetaText(_intent);
-  statement.textContent = _intent.text || VISIONS_INTENT_EMPTY_TEXT;
-  statement.classList.toggle('visions-intent-none', !_intent.text);
+  _intentUI.list.replaceChildren(...intentRows(_intent, _projectNames).map(buildIntentRow));
+}
+
+// Fed by the connect snapshot, which is also where the cards get their names.
+export function setVisionsProjectNames(namesById) {
+  _projectNames = namesById instanceof Map ? namesById : new Map();
+  renderIntent();
 }
 
 function buildSection(section) {
@@ -331,10 +342,10 @@ export function applyVisionsHand(msg) {
 }
 
 export function applyVisionsIntent(msg) {
-  const next = intentOfMessage(msg);
-  const moved = hasIntentChanged(_intent, next);
+  const next = applyIntentMessage(_intent, msg);
+  const moved = hasIntentStateChanged(_intent, next);
   _intent = next;
-  noteArrival(moved && next.source === 'model' && !!next.text);
+  noteArrival(moved);
   renderIntent();
   refreshActivity();
 }
@@ -365,7 +376,7 @@ export function applyVisionsSnapshot(msg) {
   _findingsByUri = applyFindingsSnapshot(msg);
   _commentsByUri = applyCommentsSnapshot(msg);
   _handsByUri = applyHandSnapshot(msg);
-  _intent = intentOfMessage(msg);
+  _intent = intentStateOfMessage(msg);
   _fixEntries = applyFixSnapshot(msg);
   noteArrival(totalFindingCount(_findingsByUri) + totalCommentCount(_commentsByUri) + totalHandCount(_handsByUri) > 0);
   renderIntent();

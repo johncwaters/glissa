@@ -13,8 +13,9 @@ Give Visions long-term memory: a durable, machine-global store of what has been 
 sessions, ingested from local agent transcripts and from Visions' own surfaces, and delivered
 back into future work. Four kinds of remembered fact:
 
-1. **Intent evolution.** The history behind the single machine-wide intent statement: what
-   was being built and when it changed. Intent is model-maintained end to end (operator
+1. **Intent evolution.** The history behind the per-project intent statement (one slot per
+   project, plus a global slot for a uri no configured project owns): what was being built
+   and when it changed. Intent is model-maintained end to end (operator
    decision 2026-08-22: the manual correction and lock surface is REMOVED; a wrong intent is
    a program bug, fixed in the gate, prompt, or cadence, never by hand-editing the
    statement).
@@ -308,8 +309,10 @@ changes substrate).
 What actually fires today, wired through the funnels in `server/visions-wiring.js`:
 
 - `commitIntent` writes `intent` records, all stamped `model`: intent is model-maintained
-  with no operator surface, so its history is a chain of model proposals. The intent HISTORY
-  becomes durable; `visions-intent.json` stays the live head, unchanged.
+  with no operator surface, so its history is a chain of model proposals. The per-project
+  intent slot is the head of that link, so a record's `project` tag names the slot the
+  proposal landed in and a global-slot proposal carries none. The intent HISTORY becomes durable;
+  `visions-intent.json` stays the live head, unchanged.
 - `applyDispatchResult` writes tier 4 hands and dispatch comment facts, stamped `model`.
 - `logFix` writes `feedback` records where it fires. Honestly stated: `logFix` is reachable
   only from the `workspace/applyEdit` push path, which runs only under `visions.autoFix`

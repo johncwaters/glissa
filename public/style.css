@@ -3555,10 +3555,28 @@ a.pr-title:hover {
   background: var(--bg-surface);
 }
 
+.visions-intent-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.visions-intent-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
 .visions-intent-head {
   display: flex;
   align-items: baseline;
   gap: 10px;
+}
+
+.visions-intent-scope {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-head);
 }
 
 .visions-intent-title {
@@ -5368,6 +5386,7 @@ html[data-layout="phone"] .visions-intent { padding: 12px; }
 html[data-layout="phone"] .visions-intent-head,
 html[data-layout="phone"] .visions-doc-head,
 html[data-layout="phone"] .visions-activity-head { flex-wrap: wrap; gap: 4px 8px; }
+html[data-layout="phone"] .visions-intent-scope,
 html[data-layout="phone"] .visions-intent-title,
 html[data-layout="phone"] .visions-doc-name,
 html[data-layout="phone"] .visions-activity-title { font-size: 12px; }

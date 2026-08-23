@@ -7,6 +7,8 @@ const {
   pathOfFileUri,
   normalizeShapePath,
   isUriInProjects,
+  projectForUri,
+  scopePathsOf,
 } = require('../server/core/visions-scope-core');
 
 test('pathOfFileUri normalizes plain and percent-encoded file uris', () => {
@@ -57,4 +59,40 @@ test('isUriInProjects treats null and empty lists as unscoped', () => {
   assert.equal(isUriInProjects('untitled:Untitled-1', null), true);
   assert.equal(isUriInProjects('file:///any/path.md', []), true);
   assert.equal(isUriInProjects('untitled:Untitled-1', ['/a/b']), false);
+});
+
+test('projectForUri names the owning project id', () => {
+  const projects = [{ id: 'alpha', path: '/a/b' }, { id: 'beta', path: '/c' }];
+  assert.equal(projectForUri('file:///a/b/plan.md', projects), 'alpha');
+  assert.equal(projectForUri('file:///a/b', projects), 'alpha');
+  assert.equal(projectForUri('file:///c/deep/nested/plan.md', projects), 'beta');
+});
+
+test('projectForUri gives a nested root its own files, not the root above it', () => {
+  const projects = [{ id: 'outer', path: '/a' }, { id: 'inner', path: '/a/b/inner' }];
+  assert.equal(projectForUri('file:///a/b/inner/plan.md', projects), 'inner');
+  assert.equal(projectForUri('file:///a/b/plan.md', projects), 'outer');
+});
+
+test('projectForUri folds path shape the same way the scope check does', () => {
+  const projects = [{ id: 'win', path: 'C:\\Repo' }, { id: 'unc', path: '\\\\server\\share\\repo' }];
+  assert.equal(projectForUri('file:///c:/Repo/Sub/Doc.md', projects), 'win');
+  assert.equal(projectForUri('file://SERVER/Share/Repo/Doc.md', projects), 'unc');
+});
+
+test('projectForUri returns null for an unowned uri, an unconfigured lane and a junk entry', () => {
+  const projects = [{ id: 'alpha', path: '/a/b' }];
+  assert.equal(projectForUri('file:///elsewhere/plan.md', projects), null);
+  assert.equal(projectForUri('file:///a/bc/plan.md', projects), null);
+  assert.equal(projectForUri('untitled:Untitled-1', projects), null);
+  assert.equal(projectForUri('file:///a/b/plan.md', null), null);
+  assert.equal(projectForUri('file:///a/b/plan.md', []), null);
+  assert.equal(projectForUri('file:///a/b/plan.md', [{ path: '/a/b' }, { id: '', path: '/a/b' }]), null);
+});
+
+test('scopePathsOf drops the ids, dedupes and keeps null for an unscoped lane', () => {
+  assert.deepEqual(scopePathsOf([{ id: 'alpha', path: '/a/b' }, { id: 'beta', path: '/a/b/' }]), ['/a/b']);
+  assert.equal(scopePathsOf([]), null);
+  assert.equal(scopePathsOf(null), null);
+  assert.equal(scopePathsOf([{ id: 'alpha', path: '  ' }]), null);
 });

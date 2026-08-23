@@ -62,8 +62,38 @@ function isUriInProjects(uri, normalizedProjectPaths) {
   return normalizedProjectPaths.some((scopePath) => isWithin(scopePath, uriPath));
 }
 
+// Nested roots resolve to the DEEPEST one that contains the uri: a project checked out inside another
+// owns its own files, and the shallower root would otherwise claim every one of them.
+function projectForUri(uri, scopeProjects) {
+  if (!Array.isArray(scopeProjects) || scopeProjects.length === 0) return null;
+  const uriPath = pathOfFileUri(uri);
+  if (!uriPath) return null;
+  let owner = null;
+  for (const entry of scopeProjects) {
+    if (!entry || typeof entry.id !== 'string' || !entry.id) continue;
+    const scopePath = normalizeShapePath(entry.path);
+    if (!isWithin(scopePath, uriPath)) continue;
+    if (owner && owner.path.length >= scopePath.length) continue;
+    owner = { id: entry.id, path: scopePath };
+  }
+  return owner ? owner.id : null;
+}
+
+function scopePathsOf(scopeProjects) {
+  if (!Array.isArray(scopeProjects) || scopeProjects.length === 0) return null;
+  const paths = [];
+  for (const entry of scopeProjects) {
+    const scopePath = normalizeShapePath(entry?.path);
+    if (!scopePath || paths.includes(scopePath)) continue;
+    paths.push(scopePath);
+  }
+  return paths.length > 0 ? paths : null;
+}
+
 module.exports = {
   pathOfFileUri,
   normalizeShapePath,
   isUriInProjects,
+  projectForUri,
+  scopePathsOf,
 };

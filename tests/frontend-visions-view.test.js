@@ -238,20 +238,18 @@ test('comment lines are already 1-based, unlike the LSP ranges beside them', asy
 
 const NOW = 1700000000000;
 
-test('an intent message is normalized, and anything malformed reads as no intent', async () => {
-  const { emptyIntent, intentOfMessage } = await importCore();
-  assert.deepEqual(intentOfMessage({
-    intent: {
-      text: 'refactor of the spawn path', source: 'model', ts: NOW,
-    },
+test('an intent slot is normalized, and anything malformed reads as no intent', async () => {
+  const { emptyIntent, normalizeIntentSlot } = await importCore();
+  assert.deepEqual(normalizeIntentSlot({
+    text: 'refactor of the spawn path', source: 'model', ts: NOW,
   }), {
     text: 'refactor of the spawn path', source: 'model', ts: NOW,
   });
 
-  assert.deepEqual(intentOfMessage({}), emptyIntent());
-  assert.deepEqual(intentOfMessage({ intent: null }), emptyIntent());
-  assert.deepEqual(intentOfMessage({ intent: 'a bare string' }), emptyIntent());
-  assert.deepEqual(intentOfMessage({ intent: { text: 'x', source: 'somebody else', ts: 'soon' } }), {
+  assert.deepEqual(normalizeIntentSlot(undefined), emptyIntent());
+  assert.deepEqual(normalizeIntentSlot(null), emptyIntent());
+  assert.deepEqual(normalizeIntentSlot('a bare string'), emptyIntent());
+  assert.deepEqual(normalizeIntentSlot({ text: 'x', source: 'somebody else', ts: 'soon' }), {
     text: 'x', source: null, ts: 0,
   });
 });
@@ -282,16 +280,98 @@ test('the meta line joins the two, and says nothing at all when there is no stat
   assert.equal(intentMetaText(emptyIntent(), NOW), '');
 });
 
-test('only text or source moving counts as a change, so a repaint never fires on age alone', async () => {
-  const { emptyIntent, hasIntentChanged } = await importCore();
-  const standing = {
-    text: 'x', source: 'model', ts: NOW,
+const PROJECT = 'e1f4c0de-0000-4000-8000-000000000001';
+const OTHER_PROJECT = 'e1f4c0de-0000-4000-8000-000000000002';
+
+test('a snapshot carries the whole per-project state, and the legacy flat shape reads as global', async () => {
+  const { emptyIntentState, intentStateOfMessage } = await importCore();
+  assert.deepEqual(intentStateOfMessage({
+    intent: {
+      global: { text: 'the machine-wide belief', source: 'model', ts: NOW },
+      byProject: {
+        [PROJECT]: { text: 'this project only', source: 'model', ts: NOW },
+        [OTHER_PROJECT]: { text: '', source: 'model', ts: NOW },
+      },
+    },
+  }), {
+    global: { text: 'the machine-wide belief', source: 'model', ts: NOW },
+    byProject: { [PROJECT]: { text: 'this project only', source: 'model', ts: NOW } },
+  });
+
+  assert.deepEqual(intentStateOfMessage({ intent: { text: 'an older server', source: 'model', ts: NOW } }), {
+    global: { text: 'an older server', source: 'model', ts: NOW },
+    byProject: {},
+  });
+
+  for (const msg of [{}, { intent: null }, { intent: 'a bare string' }, { intent: { byProject: 7 } }]) {
+    assert.deepEqual(intentStateOfMessage(msg), emptyIntentState());
+  }
+});
+
+test('an intent delta lands in the slot it names and leaves the rest of the state alone', async () => {
+  const { applyIntentMessage, emptyIntentState } = await importCore();
+  const withGlobal = applyIntentMessage(emptyIntentState(), {
+    intent: { text: 'the machine-wide belief', source: 'model', ts: NOW },
+  });
+  assert.deepEqual(withGlobal.global, { text: 'the machine-wide belief', source: 'model', ts: NOW });
+
+  const withProject = applyIntentMessage(withGlobal, {
+    projectId: PROJECT,
+    intent: { text: 'this project only', source: 'model', ts: NOW },
+  });
+  assert.equal(withProject.global.text, 'the machine-wide belief');
+  assert.equal(withProject.byProject[PROJECT].text, 'this project only');
+
+  const junk = applyIntentMessage(withProject, { projectId: PROJECT, intent: { text: '', source: 'model' } });
+  assert.equal(junk, withProject, 'an empty statement is nothing to apply, never an instruction to blank one');
+});
+
+test('intent rows put the machine-wide statement first and name each project', async () => {
+  const { intentRows, VISIONS_INTENT_GLOBAL_LABEL } = await importCore();
+  const state = {
+    global: { text: 'the machine-wide belief', source: 'model', ts: NOW },
+    byProject: {
+      [OTHER_PROJECT]: { text: 'the other one', source: 'model', ts: NOW },
+      [PROJECT]: { text: 'this project only', source: 'model', ts: NOW },
+    },
   };
-  assert.equal(hasIntentChanged(standing, { ...standing, ts: NOW + 90000 }), false);
-  assert.equal(hasIntentChanged(standing, { ...standing, text: 'y' }), true);
-  assert.equal(hasIntentChanged(standing, { ...standing, source: null }), true);
-  assert.equal(hasIntentChanged(emptyIntent(), standing), true);
-  assert.equal(hasIntentChanged(null, emptyIntent()), false);
+  const names = new Map([[PROJECT, 'Alpha']]);
+  const rows = intentRows(state, names, NOW + 120000);
+  assert.deepEqual(rows.map((row) => row.label), [VISIONS_INTENT_GLOBAL_LABEL, 'Alpha', OTHER_PROJECT]);
+  assert.deepEqual(rows.map((row) => row.text), ['the machine-wide belief', 'this project only', 'the other one']);
+  assert.equal(rows[1].meta, 'proposed by visions, 2 minutes ago');
+  assert.equal(rows.every((row) => row.hasText), true);
+});
+
+test('the machine-wide row is the empty state, and steps aside once a project speaks', async () => {
+  const { emptyIntentState, intentRows, VISIONS_INTENT_EMPTY_TEXT } = await importCore();
+  const empty = intentRows(emptyIntentState(), null, NOW);
+  assert.equal(empty.length, 1);
+  assert.equal(empty[0].text, VISIONS_INTENT_EMPTY_TEXT);
+  assert.equal(empty[0].hasText, false);
+  assert.equal(empty[0].meta, '');
+
+  const scopedOnly = intentRows({
+    global: null,
+    byProject: { [PROJECT]: { text: 'this project only', source: 'model', ts: NOW } },
+  }, null, NOW);
+  assert.deepEqual(scopedOnly.map((row) => row.key), [PROJECT]);
+});
+
+test('a repaint fires when any slot moves, and never on age alone', async () => {
+  const { emptyIntentState, hasIntentStateChanged } = await importCore();
+  const state = {
+    global: { text: 'the machine-wide belief', source: 'model', ts: NOW },
+    byProject: { [PROJECT]: { text: 'this project only', source: 'model', ts: NOW } },
+  };
+  assert.equal(hasIntentStateChanged(state, {
+    global: { ...state.global, ts: NOW + 90000 },
+    byProject: { [PROJECT]: { ...state.byProject[PROJECT], ts: NOW + 90000 } },
+  }), false);
+  assert.equal(hasIntentStateChanged(state, { ...state, global: { ...state.global, text: 'moved' } }), true);
+  assert.equal(hasIntentStateChanged(state, { global: state.global, byProject: {} }), true);
+  assert.equal(hasIntentStateChanged(emptyIntentState(), state), true);
+  assert.equal(hasIntentStateChanged(null, emptyIntentState()), false);
 });
 
 // --- Tier 1 fix changelog (docs/archive/plan-navigator-2.md, M6) ---
