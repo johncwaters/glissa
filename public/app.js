@@ -261,6 +261,12 @@ const messageHandlers = {
   // rebuild is exactly what turns a delivery stale, which is what the dot exists to say.
   'pack-updated':       (msg) => { notePackVersion(msg.name, msg.version); requestMillReportSoon(); },
   'mill-report':        (msg) => applyMillReport(msg),
+  // A project's pack list changed from some dashboard. The Mill tab is a pull surface, so the broadcast
+  // says the report moved and every client fetches its own; the debounce coalesces a run of toggles.
+  'project-packs-updated': () => requestMillReportSoon(),
+  // The refusal path for that write. A rejected assignment left the checkbox disabled mid-round-trip, so
+  // the pull is what restores it to what the server actually holds.
+  'set-project-packs-result': (msg) => { if (!msg.ok) { showErrorToast(msg.error || 'Could not change pack delivery', { persist: true }); requestMillReport(); } },
   // The versions a spawn actually delivered, pushed as the session starts.
   'session-packs':      (msg) => setSessionPacks(msg.id, msg.packs),
   'state-change':       (msg) => handleStateChange(msg),

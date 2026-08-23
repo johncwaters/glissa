@@ -8,7 +8,7 @@
 // Everything here is derived on demand. The mill keeps no durable state of its own, so a report is
 // only ever as true as the moment it was built, and nothing in it is worth persisting.
 
-const { MAX_INDEX_TOKENS, normalizePackNames, validatePackSpec } = require('./pack-core');
+const { MAX_INDEX_TOKENS, MAX_PACKS_PER_SESSION, normalizePackNames, validatePackSpec } = require('./pack-core');
 const { isPlainObject, numberOrNull, safeNumber, stringOrNull } = require('./usage-number-core');
 
 // A pack delivering more files than this is a spec problem, not something a scrolling list fixes, so
@@ -100,25 +100,31 @@ function distillRowsFrom(entries) {
  * Every config key naming packs, normalized through the SAME rule a spawn applies, so the tab reports
  * the list that would actually be delivered rather than the one written down.
  */
-function resolveConsumers(consumers) {
+function resolveConsumers(sources) {
   const projectsByPack = new Map();
+  const projects = [];
+  const lanes = [];
   const warnings = [];
-  const collect = (label, raw) => {
-    const { names, warnings: found } = normalizePackNames(raw);
-    for (const warning of found) warnings.push(`${label}: ${warning}`);
-    return names;
-  };
 
-  for (const project of asArray(consumers?.projects)) {
-    const label = stringOrNull(project?.name) || 'project';
-    for (const name of collect(`project "${label}"`, project?.packs)) {
+  for (const source of asArray(sources)) {
+    const label = stringOrNull(source?.label) || 'project';
+    const { names, warnings: found } = normalizePackNames(source?.packs);
+    for (const warning of found) {
+      warnings.push(`${source?.kind === 'project' ? `project "${label}"` : label}: ${warning}`);
+    }
+    if (source?.kind !== 'project') {
+      lanes.push({ kind: String(source?.kind ?? ''), label, names });
+      continue;
+    }
+    // The id is what the Mill tab's assignment control addresses, and the normalized names are what a
+    // spawn would actually deliver, so a checkbox reflects delivery rather than what was written down.
+    projects.push({ id: stringOrNull(source?.id), name: label, packs: names });
+    for (const name of names) {
       if (!projectsByPack.has(name)) projectsByPack.set(name, []);
       projectsByPack.get(name).push(label);
     }
   }
-  const prReview = collect('prReview.packs', consumers?.prReview);
-  const posthog = collect('posthog.packs', consumers?.posthog);
-  return { projectsByPack, prReview, posthog, warnings };
+  return { projectsByPack, projects, lanes, warnings };
 }
 
 /** Packs a consumer names that no spec defines: a delivery that will silently be skipped at spawn. */
@@ -128,13 +134,11 @@ function unknownConsumerWarnings(consumers, knownNames) {
     if (knownNames.has(name)) continue;
     warnings.push(`project "${projects[0]}" names pack "${name}", which has no spec`);
   }
-  for (const name of consumers.prReview) {
-    if (knownNames.has(name)) continue;
-    warnings.push(`prReview.packs names pack "${name}", which has no spec`);
-  }
-  for (const name of consumers.posthog) {
-    if (knownNames.has(name)) continue;
-    warnings.push(`posthog.packs names pack "${name}", which has no spec`);
+  for (const lane of consumers.lanes) {
+    for (const name of lane.names) {
+      if (knownNames.has(name)) continue;
+      warnings.push(`${lane.label} names pack "${name}", which has no spec`);
+    }
   }
   return warnings;
 }
@@ -177,6 +181,12 @@ function buildPackRow(entry, { consumers, sessionRows }) {
   const { valid, errors } = specErrorsFor(entry || {});
   const built = builtFrom(manifest);
   const deliveredTo = deliveriesFor(name, sessionRows, built ? built.version : null);
+  const namedBy = {
+    projects: consumers.projectsByPack.get(name) || [],
+    // Which LANES name it, carried as the kinds pack-core enumerated rather than a fixed pair of
+    // booleans, so adding a pack-naming config key there reaches this row with no change here.
+    lanes: consumers.lanes.filter((lane) => lane.names.includes(name)).map((lane) => ({ kind: lane.kind, label: lane.label })),
+  };
   return {
     name,
     description: stringOrNull(spec?.description) || stringOrNull(manifest?.description) || '',
@@ -189,11 +199,10 @@ function buildPackRow(entry, { consumers, sessionRows }) {
     deliveredTo,
     totalReads: deliveredTo.reduce((total, delivery) => total + delivery.reads, 0),
     staleDeliveries: deliveredTo.filter((delivery) => delivery.stale === true).length,
-    consumers: {
-      projects: consumers.projectsByPack.get(name) || [],
-      prReview: consumers.prReview.includes(name),
-      posthog: consumers.posthog.includes(name),
-    },
+    consumers: namedBy,
+    // Nothing names it, so the mill deliberately neither builds nor watches it: an informational state,
+    // never an unbuilt-pack warning.
+    hasConsumers: namedBy.projects.length > 0 || namedBy.lanes.length > 0,
     distill: distillRowsFrom(entry?.distill),
   };
 }
@@ -202,6 +211,7 @@ function totalsFrom(packs) {
   return {
     packCount: packs.length,
     builtCount: packs.filter((pack) => pack.built !== null).length,
+    unconsumed: packs.filter((pack) => !pack.hasConsumers).length,
     invalidSpecs: packs.filter((pack) => !pack.specValid).length,
     staleDeliveries: packs.reduce((total, pack) => total + pack.staleDeliveries, 0),
     staleDistills: packs.reduce((total, pack) => total + pack.distill.filter((row) => row.stale === true).length, 0),
@@ -214,7 +224,7 @@ function totalsFrom(packs) {
  * decision about what those bytes MEAN is made here.
  */
 function buildMillReport(input) {
-  const consumers = resolveConsumers(input?.consumers);
+  const consumers = resolveConsumers(input?.consumerSources);
   const specs = asArray(input?.specs);
   const sessionRows = asArray(input?.sessionRows);
   const packs = specs.map((entry) => buildPackRow(entry, { consumers, sessionRows }));
@@ -226,6 +236,10 @@ function buildMillReport(input) {
     autoRebuild: input?.autoRebuild === true,
     distillerEnabled: input?.distillerEnabled === true,
     watcherCount: numberOrNull(input?.watcherCount),
+    // The assignment control's targets, and the cap it must refuse a fifth pack at. Shipped rather than
+    // restated in the browser, so the tab and the spawn cannot disagree about the ceiling.
+    projects: consumers.projects,
+    maxPacksPerProject: MAX_PACKS_PER_SESSION,
     packs,
     configWarnings: [...consumers.warnings, ...unknownConsumerWarnings(consumers, knownNames)],
     totals: totalsFrom(packs),

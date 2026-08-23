@@ -34,7 +34,7 @@ function pack(overrides = {}) {
     deliveredTo: [],
     totalReads: 0,
     staleDeliveries: 0,
-    consumers: { projects: [], prReview: false, posthog: false },
+    consumers: { projects: [], lanes: [] },
     distill: [],
     ...overrides,
   };
@@ -116,7 +116,7 @@ test('a pack nothing names is said out loud rather than left blank', async () =>
   const { consumerLine } = await importCore();
   assert.equal(consumerLine(pack()), 'Delivered to nothing: no project or lane names this pack.');
   assert.equal(
-    consumerLine(pack({ consumers: { projects: ['glissa', 'other'], prReview: true, posthog: false } })),
+    consumerLine(pack({ consumers: { projects: ['glissa', 'other'], lanes: [{ kind: 'prReview', label: 'prReview.packs' }] } })),
     'Delivered to projects: glissa, other, the PR review lane.',
   );
 });
@@ -170,4 +170,84 @@ test('an unmeasured token estimate is said out loud, never rendered as an empty 
   assert.equal(budgetLine(unmeasured), 'The manifest records no token estimate.');
   assert.equal(indexLine(unmeasured.built), '', 'an unmeasured index line is dropped rather than printed as zero');
   assert.equal(indexLine(pack().built), 'index 300 of 1.2k tokens, the always-loaded tier');
+});
+
+// ── Consumer gating and the assignment control ──
+
+test('an unbuilt pack nothing consumes reads as a plain fact, not as a warning', async () => {
+  const { builtLine, builtTone, deliveryEmptyText } = await importCore();
+  const unconsumed = pack({ built: null, builtReason: 'not built', hasConsumers: false });
+  assert.equal(builtLine(unconsumed), 'Not built: no consumers, so the mill neither builds nor watches it.');
+  assert.equal(builtTone(unconsumed), 'ok', 'a deliberate skip must not render as a problem');
+  assert.equal(deliveryEmptyText(unconsumed), 'Nothing is running it: no project or lane delivers this pack.');
+});
+
+test('an unbuilt pack something DOES consume keeps its warning', async () => {
+  const { builtLine, builtTone } = await importCore();
+  const consumed = pack({ built: null, builtReason: 'not built', hasConsumers: true });
+  assert.equal(builtLine(consumed), 'Not built: not built');
+  assert.equal(builtTone(consumed), 'warn');
+  assert.equal(builtTone(pack()), 'ok', 'a built pack is fine either way');
+});
+
+test('a zero-consumer pack is never an attention part', async () => {
+  const { millAttentionSignature } = await importCore();
+  const quiet = { packs: [pack({ built: null, builtReason: 'not built', hasConsumers: false })], configWarnings: [] };
+  assert.equal(millAttentionSignature(quiet), millAttentionSignature({ packs: [], configWarnings: [] }));
+});
+
+test('deliveryTargets marks the projects this pack is delivered to, and who is at the cap', async () => {
+  const { deliveryTargets } = await importCore();
+  const report = {
+    maxPacksPerProject: 4,
+    projects: [
+      { id: 'p1', name: 'glissa', packs: ['company-context'] },
+      { id: 'p2', name: 'other', packs: [] },
+      { id: 'p3', name: 'full', packs: ['a', 'b', 'c', 'd'] },
+      { id: 'p4', name: 'full-with-it', packs: ['company-context', 'b', 'c', 'd'] },
+    ],
+  };
+  const targets = deliveryTargets(report, pack());
+  assert.deepEqual(targets.map((t) => [t.id, t.checked, t.disabled]), [
+    ['p1', true, false],
+    ['p2', false, false],
+    ['p3', false, true],
+    ['p4', true, false],
+  ], 'a project at the cap can still DROP the pack it already delivers');
+});
+
+test('a project with no id is not an assignment target: nothing could address it', async () => {
+  const { deliveryTargets } = await importCore();
+  const targets = deliveryTargets({ maxPacksPerProject: 4, projects: [{ name: 'idless', packs: [] }] }, pack());
+  assert.deepEqual(targets, []);
+});
+
+test('a toggle sends a delta, not a list, so two dashboards cannot clobber each other', async () => {
+  const { packDeltaFor } = await importCore();
+  assert.deepEqual(packDeltaFor({ id: 'p1', checked: false }, 'company-context'),
+    { projectId: 'p1', pack: 'company-context', deliver: true });
+  assert.deepEqual(packDeltaFor({ id: 'p1', checked: true }, 'company-context'),
+    { projectId: 'p1', pack: 'company-context', deliver: false });
+});
+
+test('an unknown lane kind renders as its config label rather than vanishing', async () => {
+  const { consumerLine } = await importCore();
+  const line = consumerLine(pack({ consumers: { projects: [], lanes: [{ kind: 'future', label: 'future.packs' }] } }));
+  assert.equal(line, 'Delivered to future.packs.');
+});
+
+test('zero watchers reads as the nothing-consumed steady state, not as a health warning', async () => {
+  const { autoRebuildLine } = await importCore();
+  const quiet = { autoRebuild: true, watcherCount: 0, totals: { packCount: 3, unconsumed: 3 } };
+  assert.equal(autoRebuildLine(quiet), 'Auto rebuild is on. No pack is delivered anywhere, so there is nothing to watch.');
+
+  // Something IS delivered and still nothing is watched: that is the case this line exists to catch.
+  const stuck = { autoRebuild: true, watcherCount: 0, totals: { packCount: 3, unconsumed: 1 } };
+  assert.match(autoRebuildLine(stuck), /waiting on the fallback sweep/);
+});
+
+test('the assignment hint quotes the cap the server shipped, and says nothing without one', async () => {
+  const { deliverToCapHint } = await importCore();
+  assert.ok(deliverToCapHint({ maxPacksPerProject: 4 }).startsWith('Up to 4 packs per project.'));
+  assert.equal(deliverToCapHint({}), '');
 });

@@ -64,23 +64,50 @@ function writePackFixture(root) {
   return { specsDir, builtRoot, baseDir: path.join(root, 'packs') };
 }
 
-function withBackend(fn) {
+// Every side effect of the build loop, faked: this suite must never walk the operator's real packs/
+// tree, and BUILD_LOG is how a test sees which packs the loop was asked to build and in what order.
+const BUILD_LOG = [];
+
+function fakePackService() {
+  BUILD_LOG.length = 0;
+  return {
+    listSpecs: async () => [{ name: 'good', specPath: '/specs/good.pack.json' }],
+    loadSpec: async () => ({ name: 'good', sources: [], skills: [] }),
+    watchRootsForSpec: async () => [],
+    build: async ({ name }) => {
+      BUILD_LOG.push(name);
+      return { ok: true, name, version: 'v-good-1', unchanged: false, errors: [] };
+    },
+    createWatcher: () => ({ watch: () => false, stop: () => {} }),
+    setIntervalFn: () => ({ unref() {} }),
+    clearIntervalFn: () => {},
+  };
+}
+
+/*
+ * `packs` is the project's assigned list; `packServiceOptions` fakes the whole build loop when a test
+ * needs the service live (nothing here may walk or rebuild the operator's real packs/ tree, and no test
+ * may spawn a Claude session).
+ */
+function withBackend(fn, { packs = ['good', 'ghost'], packsAutoRebuild = false, packServiceOptions } = {}) {
   return async (t) => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-mill-'));
     const projectDir = path.join(tmpDir, 'project');
     fs.mkdirSync(projectDir);
     const fixture = writePackFixture(tmpDir);
 
+    const project = { id: SESSION_ID, name: 'mill probe', path: projectDir };
+    if (packs.length > 0) project.packs = packs;
     const cfgPath = path.join(tmpDir, 'config.json');
     fs.writeFileSync(cfgPath, JSON.stringify({
-      projects: [{ id: SESSION_ID, name: 'mill probe', path: projectDir, packs: ['good', 'ghost'] }],
+      projects: [project],
       teams: [],
       repoRoots: [],
       checkForUpdates: false,
       usage: { enabled: false },
-      // Off so the boot service never walks or rebuilds the operator's real packs/ tree: the mill
-      // report reads the injected fixture directly and needs no live service.
-      packsAutoRebuild: false,
+      // Off by default so the boot service never walks or rebuilds the operator's real packs/ tree: the
+      // mill report reads the injected fixture directly and needs no live service.
+      packsAutoRebuild,
     }, null, 2), 'utf8');
     const prevEnv = process.env.GLISSA_CONFIG;
     process.env.GLISSA_CONFIG = cfgPath;
@@ -89,14 +116,16 @@ function withBackend(fn) {
     const backend = createBackend(server, {
       staticDir: null,
       millWiringOptions: { specsDir: fixture.specsDir, builtRoot: fixture.builtRoot, baseDir: fixture.baseDir },
+      ...(packServiceOptions ? { packServiceOptions } : {}),
     });
     server.on('request', backend.app);
     await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
 
     try {
       const dash = await dashboardClient(server.address().port);
-      await fn(t, { dash });
+      await fn(t, { dash, cfgPath });
     } finally {
+      for (const socket of OPEN_SOCKETS.splice(0)) socket.terminate();
       backend.shutdown();
       server.closeAllConnections();
       await new Promise((resolve) => server.close(resolve));
@@ -107,8 +136,13 @@ function withBackend(fn) {
   };
 }
 
+// Sockets a test opened, so the harness can hang up on the ones a failing body never closed: server.close()
+// waits on an open connection, which turns an assertion failure into a whole-file timeout.
+const OPEN_SOCKETS = [];
+
 function openRecordingSocket(dash, pathAndSearch) {
   const ws = new WebSocket(dash.url(pathAndSearch), dash.options);
+  OPEN_SOCKETS.push(ws);
   const received = [];
   ws.on('message', (raw) => received.push(JSON.parse(raw.toString())));
   return new Promise((resolve, reject) => {
@@ -131,7 +165,7 @@ async function waitForMessage(received, matches, label) {
     if (hit) return hit;
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
-  throw new Error(`timed out waiting for ${label}`);
+  throw new Error(`timed out waiting for ${label}; saw ${received.map((m) => m.type).join(', ')}`);
 }
 
 const isMillReport = (m) => m.type === 'mill-report';
@@ -191,4 +225,75 @@ test('a control client with no prior request gets no mill report until it asks',
   await new Promise((resolve) => setTimeout(resolve, 200));
   assert.equal(client.received.filter(isMillReport).length, 0);
   await closeSocket(client.ws);
+}));
+
+test('the report carries the assignment targets the Deliver to control renders from', withBackend(async (_t, { dash }) => {
+  const asker = await openRecordingSocket(dash, '/control');
+  asker.ws.send(JSON.stringify({ type: 'request-mill-report', requestId: 'm1' }));
+  const report = await waitForMessage(asker.received, isMillReport, 'mill-report');
+
+  assert.deepEqual(report.projects, [{ id: SESSION_ID, name: 'mill probe', packs: ['good', 'ghost'] }]);
+  assert.equal(report.maxPacksPerProject, 4);
+  // 'broken' is a spec file nothing names, so it is skipped on purpose rather than reported as a problem.
+  assert.equal(report.packs.find((pack) => pack.name === 'broken').hasConsumers, false);
+  assert.equal(report.packs.find((pack) => pack.name === 'good').hasConsumers, true);
+  assert.equal(report.totals.unconsumed, 1);
+
+  await closeSocket(asker.ws);
+}));
+
+// MAJOR: the whole point of the feature is the FIRST delivery, and consumer gating guarantees that pack
+// has never been built. If the build waited for the reload, the recreated session would resolve its packs
+// at spawn and find nothing there.
+test('a first delivery builds the pack before the reload recreates the session', withBackend(async (_t, { dash, cfgPath }) => {
+  const asker = await openRecordingSocket(dash, '/control');
+
+  asker.ws.send(JSON.stringify({ type: 'set-project-packs', requestId: 's1', projectId: SESSION_ID, pack: 'good', deliver: true }));
+  const result = await waitForMessage(asker.received, (m) => m.type === 'set-project-packs-result', 'the ack');
+  assert.equal(result.ok, true, result.error || '');
+
+  await waitForMessage(asker.received, (m) => m.type === 'session-modified', 'the recreate');
+  // The pack had never been built (consumer gating skipped it), and it is built by the time the session
+  // that resolves its packs at spawn has been recreated. The exact build-then-reload ORDER is pinned
+  // deterministically in tests/control-project-packs.test.js, where both steps are observable.
+  assert.ok(BUILD_LOG.includes('good'), `expected a build of "good", got ${JSON.stringify(BUILD_LOG)}`);
+  assert.deepEqual(JSON.parse(fs.readFileSync(cfgPath, 'utf8')).projects[0].packs, ['good']);
+
+  await closeSocket(asker.ws);
+}, { packs: [], packsAutoRebuild: true, packServiceOptions: fakePackService() }));
+
+// MAJOR: ticking a checkbox must not spawn a permissionless Claude for a card that was not running.
+test('assigning a pack to a DORMANT project recreates its record without starting it', withBackend(async (_t, { dash }) => {
+  const asker = await openRecordingSocket(dash, '/control');
+
+  asker.ws.send(JSON.stringify({ type: 'set-project-packs', projectId: SESSION_ID, pack: 'good', deliver: true }));
+  const modified = await waitForMessage(asker.received, (m) => m.type === 'session-modified', 'the recreate');
+
+  assert.equal(modified.state, 'DORMANT');
+  // A spawn announces itself: start() emits a state-change synchronously, so a settle window with none
+  // of them is the proof that nothing was launched.
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  const launched = asker.received.filter((m) => m.type === 'state-change' && m.to !== 'DORMANT');
+  assert.deepEqual(launched, [], 'no session was started by a checkbox');
+
+  await closeSocket(asker.ws);
+}, { packs: [], packsAutoRebuild: true, packServiceOptions: fakePackService() }));
+
+test('a refused set-project-packs writes nothing and tells the asking socket why', withBackend(async (_t, { dash }) => {
+  const asker = await openRecordingSocket(dash, '/control');
+
+  asker.ws.send(JSON.stringify({ type: 'set-project-packs', requestId: 's1', projectId: SESSION_ID, pack: 'nosuchspec', deliver: true }));
+  const result = await waitForMessage(asker.received, (m) => m.type === 'set-project-packs-result', 'the refusal');
+
+  assert.equal(result.ok, false);
+  assert.equal(result.requestId, 's1');
+  assert.match(result.error, /No pack spec named "nosuchspec"/);
+
+  // Nothing moved: no reload, so no session-modified, and the report still reads the original list.
+  asker.ws.send(JSON.stringify({ type: 'request-mill-report', requestId: 'm2' }));
+  const report = await waitForMessage(asker.received, (m) => isMillReport(m) && m.requestId === 'm2', 'mill-report');
+  assert.deepEqual(report.projects[0].packs, ['good', 'ghost']);
+  assert.equal(asker.received.filter((m) => m.type === 'project-packs-updated').length, 0);
+
+  await closeSocket(asker.ws);
 }));

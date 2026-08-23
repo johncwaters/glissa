@@ -10,7 +10,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { carryWorktreeAcrossRecreate } = require('../server/backend');
+const { carryWorktreeAcrossRecreate, shouldStartAfterModify } = require('../server/backend');
+const { STATES } = require('../shared/states');
 
 function fakeOldSession({ path: projectPath = 'C:/proj', worktreeDir = 'C:/wts/proj-abc', workspace, killReap, hasChanges = false } = {}) {
   const calls = { settleChecks: 0, discard: 0 };
@@ -93,4 +94,20 @@ test('path changed: a rejecting kill reap still settles the carry without throwi
   const newSess = fakeNewSession('C:/new-proj');
   await assert.doesNotReject(() => carryWorktreeAcrossRecreate(oldSess, newSess));
   assert.equal(oldSess.calls.discard, 1, 'reap rejection is swallowed, discard still runs');
+});
+
+// ── shouldStartAfterModify ──
+// A config reload that replaced a session's record decides here whether to (re)start it. Ticking a Mill
+// tab checkbox goes through the same reload, so a DORMANT card must come back dormant rather than
+// spawning a Claude session (with that project's dangerouslySkipPermissions) nobody asked for.
+
+test('a DORMANT session is recreated without being started', () => {
+  assert.equal(shouldStartAfterModify(STATES.DORMANT), false);
+});
+
+test('every live state keeps the documented recreate-and-restart behavior', () => {
+  for (const state of Object.values(STATES)) {
+    if (state === STATES.DORMANT) continue;
+    assert.equal(shouldStartAfterModify(state), true, state);
+  }
 });

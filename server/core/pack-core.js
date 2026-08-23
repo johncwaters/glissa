@@ -31,6 +31,10 @@ const MAX_INDEX_TOKENS = 1200;
 // the second budget the per-pack one cannot see; the overflow is dropped, never a refused spawn.
 const MAX_PACKS_PER_SESSION = 4;
 
+// How far into a `packs` array normalization will read before rejecting it whole. Generous next to the
+// per-session cap, so every plausible hand edit is still judged entry by entry.
+const MAX_PACK_ENTRIES_SCANNED = 64;
+
 const MANIFEST_FILE = 'manifest.json';
 const INDEX_FILE = 'CLAUDE.md';
 const RULES_DIR = '.claude/rules';
@@ -238,6 +242,12 @@ function validatePackSpec(spec) {
 function normalizePackNames(value, { maxPacks = MAX_PACKS_PER_SESSION } = {}) {
   if (value == null) return { names: [], warnings: [] };
   if (!Array.isArray(value)) return { names: [], warnings: ['packs must be an array of pack names; ignoring it'] };
+  // One warning string per entry is the whole cost of reading this list, so an array far past the cap is
+  // rejected whole rather than scanned: at that length it is a malformed config or a hostile frame, not
+  // a pack list, and no per-entry verdict about it would be worth allocating.
+  if (value.length > MAX_PACK_ENTRIES_SCANNED) {
+    return { names: [], warnings: [`packs lists ${value.length} entries, far past the ${maxPacks} pack per session cap; ignoring it`] };
+  }
 
   const names = [];
   const warnings = [];
@@ -257,6 +267,71 @@ function normalizePackNames(value, { maxPacks = MAX_PACKS_PER_SESSION } = {}) {
     names.push(entry);
   }
   return { names, warnings };
+}
+
+// The ephemeral lanes that name packs, read once here so the gate and the Mill tab cannot enumerate a
+// different set of config keys. `label` is how a warning names the key; the display prose belongs to the
+// surface rendering it, not to a server core.
+const PACK_CONSUMER_LANES = Object.freeze([
+  { kind: 'prReview', label: 'prReview.packs', read: (config) => config?.prReview?.packs },
+  { kind: 'posthog', label: 'posthog.packs', read: (config) => config?.posthog?.packs },
+]);
+
+/**
+ * THE enumeration of everything that names packs: one row per project plus one per ephemeral lane. Both
+ * the mill's build gate and the Mill tab's attribution derive from this single list, so a future third
+ * pack-naming config key cannot reach one and miss the other.
+ *
+ * @returns {{ kind: string, id: string|null, label: string, packs: * }[]} raw lists, not yet normalized
+ */
+function packConsumerSources(config) {
+  const sources = [];
+  for (const project of Array.isArray(config?.projects) ? config.projects : []) {
+    sources.push({
+      kind: 'project',
+      id: typeof project?.id === 'string' ? project.id : null,
+      label: typeof project?.name === 'string' && project.name ? project.name : 'project',
+      packs: project?.packs,
+    });
+  }
+  for (const lane of PACK_CONSUMER_LANES) {
+    sources.push({ kind: lane.kind, id: null, label: lane.label, packs: lane.read(config) });
+  }
+  return sources;
+}
+
+/**
+ * Every pack name something would actually be spawned against. Normalized through the SAME rule a spawn
+ * applies, so a name a spawn would drop is not a consumer either, and a pack nobody names is one the
+ * mill need not build or watch.
+ *
+ * @returns {string[]} deduped and sorted, so it doubles as a change key
+ */
+function consumedPackNames(config) {
+  const names = new Set();
+  for (const source of packConsumerSources(config)) {
+    for (const name of normalizePackNames(source.packs).names) names.add(name);
+  }
+  return [...names].sort();
+}
+
+/**
+ * One project's pack list after a single delivery toggle. A DELTA rather than a whole-list replace for
+ * two reasons: the current list is re-read from the config being written, so two dashboards toggling
+ * different packs cannot clobber each other, and only the name being ADDED is ever checked against the
+ * specs, so a list already naming a deleted spec stays editable instead of being frozen by its own ghost.
+ *
+ * The cap is enforced here rather than by normalization, because silently dropping the entry an operator
+ * just ticked is the one outcome worse than refusing it.
+ */
+function applyPackDelta(currentPacks, packName, deliver, { maxPacks = MAX_PACKS_PER_SESSION } = {}) {
+  const { names } = normalizePackNames(currentPacks, { maxPacks: Number.POSITIVE_INFINITY });
+  if (deliver !== true) return { ok: true, packs: names.filter((name) => name !== packName) };
+  if (names.includes(packName)) return { ok: true, packs: names };
+  if (names.length >= maxPacks) {
+    return { ok: false, error: `a project may deliver at most ${maxPacks} packs` };
+  }
+  return { ok: true, packs: [...names, packName] };
 }
 
 function sourcePattern(source) {
@@ -475,8 +550,12 @@ module.exports = {
   MAX_INDEX_TOKENS,
   MAX_PACKS_PER_SESSION,
   PACK_NAME_RE,
+  MAX_PACK_ENTRIES_SCANNED,
+  applyPackDelta,
+  consumedPackNames,
   estimateTokens,
   isPackRelativePath,
+  packConsumerSources,
   matchesGlob,
   normalizePackNames,
   planPackBuild,

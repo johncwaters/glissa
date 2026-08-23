@@ -14,6 +14,11 @@
 //
 // A rebuild that actually published emits `pack-updated`; an unchanged one is silent, which is what
 // keeps the interval from broadcasting a heartbeat every 15 minutes.
+//
+// Both loops are CONSUMER-GATED: a spec no project and no lane names is never watched and never swept,
+// because building it would cost a source walk per sweep to publish bytes no spawn will ever deliver.
+// The consumer set is injected, so a project's pack list changing (from the Mill tab or a config.json
+// hand edit) restarts the loops instead of waiting for a server restart.
 
 const { EventEmitter } = require('node:events');
 
@@ -33,6 +38,9 @@ function createPackService(deps = {}) {
     watchRootsForSpec = (spec) => packWatchRoots(spec),
     build = ({ specPath }) => buildPack({ specPath }),
     createWatcher = createPackWatcher,
+    // Names something would actually be spawned against. null (the default) means "no filter", which
+    // is what an existing caller injecting nothing gets; the backend always supplies it.
+    consumedPackNames = null,
     setIntervalFn = setInterval,
     clearIntervalFn = clearInterval,
     sweepMinutes = DEFAULT_SWEEP_MINUTES,
@@ -48,9 +56,37 @@ function createPackService(deps = {}) {
   let sweepTimer = null;
   let sweepRunning = false;
   let stopped = false;
+  // Latched by stop() only, so a restart still queued when shutdown begins cannot bring the loops back.
+  let torndown = false;
   // Every rebuild runs through one chain, so a watch fire racing the sweep (or a second watch fire)
   // can never have two builds publishing the same pack dir at once.
   let buildChain = Promise.resolve();
+  // Restarts run through their own chain, so a second consumer change landing mid-drain queues behind
+  // the first rather than racing it over the same watchers and timer.
+  let restartChain = Promise.resolve();
+  let lastConsumerKey = null;
+
+  // null (no filter) is also the initial lastConsumerKey, so an unfiltered service never restarts.
+  function consumerKey() {
+    if (!consumedPackNames) return null;
+    return JSON.stringify(consumedNames());
+  }
+
+  function consumedNames() {
+    const names = consumedPackNames();
+    return Array.isArray(names) ? [...names].sort() : [];
+  }
+
+  // A Set of the names worth working on, or null when nothing is filtering.
+  function consumedSet() {
+    if (!consumedPackNames) return null;
+    return new Set(consumedNames());
+  }
+
+  function consumedSpecs(specs, consumed) {
+    if (!consumed) return specs;
+    return specs.filter((spec) => consumed.has(spec.name));
+  }
 
   async function runBuild(name, specPath) {
     if (stopped) return null;
@@ -74,6 +110,8 @@ function createPackService(deps = {}) {
     return buildChain;
   }
 
+  // Every await here is a window a teardown can land in, and a watcher installed after one has emptied
+  // the array is an fs.watch handle nothing will ever close.
   async function installWatchers({ name, specPath }) {
     let spec;
     try {
@@ -82,8 +120,10 @@ function createPackService(deps = {}) {
       log.warn(`[packs] ${name} has no watchable roots: ${err.message}`);
       return;
     }
+    if (stopped || torndown) return;
     const roots = await watchRootsForSpec(spec);
     for (const root of roots) {
+      if (stopped || torndown) return;
       const watcher = createWatcher({ onChange: () => { void queueBuild(name, specPath); }, debounceMs });
       if (!watcher.watch(root)) continue;
       watchers.push(watcher);
@@ -96,7 +136,8 @@ function createPackService(deps = {}) {
     if (sweepRunning || stopped) return;
     sweepRunning = true;
     try {
-      for (const spec of await listSpecs()) {
+      const consumed = consumedSet();
+      for (const spec of consumedSpecs(await listSpecs(), consumed)) {
         if (stopped) return;
         await queueBuild(spec.name, spec.specPath);
       }
@@ -105,25 +146,43 @@ function createPackService(deps = {}) {
     }
   }
 
-  async function start() {
+  async function startNow() {
+    if (torndown) return;
     stopped = false;
-    const specs = await listSpecs();
-    // No specs means no watchers and no timer: an install that never wrote a pack spec pays nothing.
-    if (specs.length === 0) return;
+    lastConsumerKey = consumerKey();
+    const specs = consumedSpecs(await listSpecs(), consumedSet());
+    // Nothing to build means no watchers and no timer: an install that never wrote a pack spec, and one
+    // whose specs nothing delivers, both pay nothing.
+    if (stopped || torndown || specs.length === 0) return;
     for (const spec of specs) await installWatchers(spec);
     // One pass up front, so a source edited while Glissa was down is already rebuilt before the first
     // session spawns against it.
     await sweep();
-    // stop() can land while that first sweep runs (a shutdown right after boot); installing the
-    // interval afterwards would leave a timer nothing ever clears.
-    if (stopped) return;
+    // A teardown can land while that first sweep runs (a shutdown right after boot, a settings save that
+    // re-gated the loops); installing the interval afterwards leaves a timer nothing ever clears.
+    if (stopped || torndown) return;
+    // Never assign over a live handle: whatever put one here is the timer nothing else holds a ref to.
+    if (sweepTimer) clearIntervalFn(sweepTimer);
     sweepTimer = setIntervalFn(() => { void sweep(); }, sweepMinutes * 60000);
     if (sweepTimer && typeof sweepTimer.unref === 'function') sweepTimer.unref();
   }
 
+  // Everything that installs or tears down watchers and the timer runs on ONE chain, boot included, so a
+  // settings save landing during the boot sweep queues behind it rather than racing it.
+  function runOnChain(task) {
+    restartChain = restartChain.then(task).catch((err) => {
+      log.warn(`[packs] ${err.message}`);
+    });
+    return restartChain;
+  }
+
+  function start() {
+    return runOnChain(startNow);
+  }
+
   // Async so shutdown (and any caller that reuses the same built root) can await the in-flight
   // rebuild: a build interrupted mid-publish would leave a tmp dir for the next build to sweep.
-  async function stop() {
+  async function teardown() {
     stopped = true;
     if (sweepTimer) clearIntervalFn(sweepTimer);
     sweepTimer = null;
@@ -132,8 +191,51 @@ function createPackService(deps = {}) {
     await buildChain.catch(() => {});
   }
 
+  // The latches go up FIRST and the queued work drains BEFORE teardown, so a restart that raced the
+  // shutdown cannot install watchers into an array teardown has already emptied and walked away from.
+  async function stop() {
+    torndown = true;
+    stopped = true;
+    await restartChain.catch(() => {});
+    await teardown();
+  }
+
+  /*
+   * The consumer set is what decides which specs are watched and swept, so a project gaining its first
+   * pack (or losing its last one) is what starts and stops that work. Same shape as a lane runner's
+   * restartIfConfigChanged: a no-op unless the set actually moved, and the drain-then-start is
+   * serialized so a second change queues rather than overlapping the first.
+   */
+  function restartIfConsumersChanged() {
+    const key = consumerKey();
+    if (key === lastConsumerKey) return restartChain;
+    lastConsumerKey = key;
+    return runOnChain(async () => {
+      if (torndown) return;
+      await teardown();
+      await startNow();
+    });
+  }
+
+  /*
+   * Build these packs NOW, ignoring the consumer filter. The one caller is an assignment that has been
+   * persisted but not yet reloaded: consumer gating guarantees a newly assigned pack has never been
+   * built, and a session resolves its packs at spawn, so a build that waits for the reload arrives after
+   * the spawn that needed it. Runs on the build chain, so it cannot publish under a concurrent rebuild.
+   */
+  async function ensureBuilt(names) {
+    if (torndown || stopped) return;
+    const wanted = new Set(Array.isArray(names) ? names : []);
+    if (wanted.size === 0) return;
+    for (const spec of (await listSpecs()).filter((entry) => wanted.has(entry.name))) {
+      await queueBuild(spec.name, spec.specPath);
+    }
+  }
+
   service.start = start;
   service.stop = stop;
+  service.restartIfConsumersChanged = restartIfConsumersChanged;
+  service.ensureBuilt = ensureBuilt;
   service.sweep = sweep;
   /** Latest built version per pack name, the staleness baseline the dashboard compares against. */
   service.getVersions = () => Object.fromEntries(versionsByName);

@@ -86,10 +86,19 @@ export function indexLine(built) {
   return `index ${used} of ${formatTokens(cap)} tokens, the always-loaded tier`;
 }
 
+// A pack nothing delivers is not built ON PURPOSE (the mill skips its watchers and its sweep), so it
+// reads as a plain fact rather than as the unbuilt-pack warning a consumed pack would earn.
 export function builtLine(pack) {
   const built = pack?.built;
-  if (!built) return pack?.builtReason ? `Not built: ${pack.builtReason}` : 'Not built.';
-  return `Version ${shortVersion(built.version)}, built ${formatBuiltAt(built.builtAt)}`;
+  if (built) return `Version ${shortVersion(built.version)}, built ${formatBuiltAt(built.builtAt)}`;
+  if (pack?.hasConsumers === false) return 'Not built: no consumers, so the mill neither builds nor watches it.';
+  return pack?.builtReason ? `Not built: ${pack.builtReason}` : 'Not built.';
+}
+
+export function builtTone(pack) {
+  if (pack?.built) return 'ok';
+  if (pack?.hasConsumers === false) return 'ok';
+  return 'warn';
 }
 
 export function contentLine(built) {
@@ -148,20 +157,85 @@ export function distillTone(row) {
   return 'warn';
 }
 
+// Display prose for the lane kinds pack-core enumerates. A kind with no entry here falls back to its
+// config label, so adding a pack-naming key server-side surfaces here rather than vanishing.
+const LANE_DISPLAY = { prReview: 'the PR review lane', posthog: 'the Radar lane' };
+
 export function consumerLine(pack) {
   const consumers = pack?.consumers || {};
   const projects = Array.isArray(consumers.projects) ? consumers.projects : [];
+  const lanes = Array.isArray(consumers.lanes) ? consumers.lanes : [];
   const parts = [];
   if (projects.length > 0) parts.push(`projects: ${projects.join(', ')}`);
-  if (consumers.prReview) parts.push('the PR review lane');
-  if (consumers.posthog) parts.push('the Radar lane');
+  for (const lane of lanes) parts.push(LANE_DISPLAY[lane?.kind] || String(lane?.label ?? 'a lane'));
   if (parts.length === 0) return 'Delivered to nothing: no project or lane names this pack.';
   return `Delivered to ${parts.join(', ')}.`;
 }
 
 export function deliveryEmptyText(pack) {
+  if (pack?.hasConsumers === false) return 'Nothing is running it: no project or lane delivers this pack.';
   if (!pack?.built) return 'Nothing is running it: the pack has never been built.';
   return 'No live session is running this pack.';
+}
+
+// ── Assignment (the "Deliver to" control) ──
+// Which packs a project's sessions are spawned against is a field on the project record, edited here and
+// persisted by `set-project-packs`. The ephemeral lanes' lists stay config-file only, so they render as
+// the read-only sentence consumerLine already writes.
+
+export const DELIVER_TO_TITLE = 'Deliver to';
+export const DELIVER_TO_EMPTY_TEXT = 'No projects yet, so there is nothing to deliver this pack to.';
+export const DELIVER_TO_CAP_NOTE = 'at its pack limit';
+
+function assignableProjects(report) {
+  return Array.isArray(report?.projects) ? report.projects : [];
+}
+
+function packCap(report) {
+  const max = Number(report?.maxPacksPerProject);
+  if (!Number.isFinite(max) || max <= 0) return Number.POSITIVE_INFINITY;
+  return max;
+}
+
+/**
+ * One assignment row per project: whether this pack is delivered to it, whether it still can be, and
+ * the project's current list (which is what the toggle sends back, since the message replaces the whole
+ * list rather than describing a delta).
+ */
+export function deliveryTargets(report, pack) {
+  const name = typeof pack?.name === 'string' ? pack.name : '';
+  const cap = packCap(report);
+  const targets = [];
+  for (const project of assignableProjects(report)) {
+    const id = typeof project?.id === 'string' ? project.id : '';
+    if (id === '') continue;
+    const packs = Array.isArray(project?.packs) ? project.packs : [];
+    const checked = packs.includes(name);
+    targets.push({
+      id,
+      name: typeof project?.name === 'string' ? project.name : id,
+      checked,
+      // A project already at the per-session cap can drop a pack but not take another.
+      disabled: !checked && packs.length >= cap,
+      packs,
+    });
+  }
+  return targets;
+}
+
+/**
+ * What one toggle asks the server for. A DELTA, not a list: the server re-reads the project's current
+ * packs inside its own write, so two dashboards toggling different packs cannot overwrite each other
+ * with the snapshot each was rendered from.
+ */
+export function packDeltaFor(target, packName) {
+  return { projectId: target?.id, pack: packName, deliver: target?.checked !== true };
+}
+
+export function deliverToCapHint(report) {
+  const cap = packCap(report);
+  if (!Number.isFinite(cap)) return '';
+  return `Up to ${cap} packs per project. A change takes effect on the session's next spawn.`;
 }
 
 export function totalsChips(report) {
@@ -169,6 +243,8 @@ export function totalsChips(report) {
   return [
     { label: 'packs', value: formatCount(totals.packCount ?? 0) },
     { label: 'built', value: formatCount(totals.builtCount ?? 0) },
+    // Informational, never toned: an unconsumed pack is skipped on purpose, not a problem to fix.
+    { label: 'no consumers', value: formatCount(totals.unconsumed ?? 0) },
     { label: 'invalid specs', value: formatCount(totals.invalidSpecs ?? 0), tone: Number(totals.invalidSpecs) > 0 ? 'crit' : null },
     { label: 'stale deliveries', value: formatCount(totals.staleDeliveries ?? 0), tone: Number(totals.staleDeliveries) > 0 ? 'warn' : null },
     { label: 'stale distills', value: formatCount(totals.staleDistills ?? 0), tone: Number(totals.staleDistills) > 0 ? 'warn' : null },
@@ -183,7 +259,19 @@ export function autoRebuildLine(report) {
   if (report.autoRebuild !== true) return 'Auto rebuild is off. A pack changes only when glissa pack build runs.';
   const watchers = report.watcherCount;
   if (typeof watchers !== 'number' || !Number.isFinite(watchers)) return 'Auto rebuild is on.';
-  return `Auto rebuild is on, watching ${formatCount(watchers)} source roots.`;
+  if (watchers > 0) return `Auto rebuild is on, watching ${formatCount(watchers)} source roots.`;
+  // Zero watchers has two meanings, and only one of them is a problem. With nothing delivered anywhere
+  // there is deliberately nothing to watch; with something delivered, every rebuild is waiting on the
+  // fallback sweep, which is the state this line was written to catch.
+  if (nothingIsConsumed(report)) return 'Auto rebuild is on. No pack is delivered anywhere, so there is nothing to watch.';
+  return 'Auto rebuild is on, but no source root is being watched: rebuilds are waiting on the fallback sweep.';
+}
+
+function nothingIsConsumed(report) {
+  const packCount = Number(report?.totals?.packCount);
+  const unconsumed = Number(report?.totals?.unconsumed);
+  if (!Number.isFinite(packCount) || !Number.isFinite(unconsumed)) return false;
+  return packCount > 0 && unconsumed === packCount;
 }
 
 export function distillerLine(report) {

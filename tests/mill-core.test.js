@@ -7,7 +7,21 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const { MAX_OUTPUT_ROWS, budgetPercent, buildMillReport, shortBuiltReason } = require('../server/core/mill-core');
-const { MAX_INDEX_TOKENS } = require('../server/core/pack-core');
+const { MAX_INDEX_TOKENS, MAX_PACKS_PER_SESSION, packConsumerSources } = require('../server/core/pack-core');
+
+// The report takes the SAME source enumeration the build gate reads, so the fixtures go through
+// pack-core rather than hand-building the shape: a config key added there reaches these tests for free.
+function sourcesFor({ projects = [], prReview = null, posthog = null } = {}) {
+  return packConsumerSources({
+    projects,
+    prReview: prReview ? { packs: prReview } : null,
+    posthog: posthog ? { packs: posthog } : null,
+  });
+}
+
+function laneKinds(pack) {
+  return (pack.consumers.lanes || []).map((lane) => lane.kind);
+}
 
 const VERSION = 'a'.repeat(64);
 const OLD_VERSION = 'b'.repeat(64);
@@ -43,6 +57,7 @@ function manifest(overrides = {}) {
 }
 
 function baseInput(overrides = {}) {
+  const { consumers, ...rest } = overrides;
   return {
     ts: 1700000000000,
     requestId: 'mill-1',
@@ -51,8 +66,8 @@ function baseInput(overrides = {}) {
     watcherCount: 3,
     specs: [{ name: 'company-context', spec: validSpec(), manifest: manifest(), builtReason: null, distill: [] }],
     sessionRows: [],
-    consumers: { projects: [], prReview: null, posthog: null },
-    ...overrides,
+    consumerSources: sourcesFor(consumers || {}),
+    ...rest,
   };
 }
 
@@ -171,8 +186,7 @@ test('consumers are normalized through the spawn rule, and every rejection is re
   }));
   const pack = report.packs[0];
   assert.deepEqual(pack.consumers.projects, ['glissa']);
-  assert.equal(pack.consumers.prReview, true);
-  assert.equal(pack.consumers.posthog, false);
+  assert.deepEqual(laneKinds(pack), ['prReview'], 'only the lanes that actually name it');
   assert.ok(report.configWarnings.some((w) => w.includes('project "glissa"') && w.includes('repeats')));
   assert.ok(report.configWarnings.some((w) => w.includes('project "other"') && w.includes('must be an array')));
   assert.ok(report.configWarnings.some((w) => w.includes('posthog.packs') && w.includes('not a valid pack name')));
@@ -184,6 +198,44 @@ test('a consumer naming a pack no spec defines is a warning, not a silent skip',
   }));
   assert.ok(report.configWarnings.some((w) => w === 'project "glissa" names pack "ghost", which has no spec'));
   assert.ok(report.configWarnings.some((w) => w === 'prReview.packs names pack "ghost", which has no spec'));
+});
+
+test('a pack no project and no lane names reports hasConsumers false and counts as unconsumed', () => {
+  const report = buildMillReport(baseInput({
+    consumers: { projects: [{ id: 'p1', name: 'glissa', packs: [] }], prReview: null, posthog: null },
+  }));
+  assert.equal(report.packs[0].hasConsumers, false, 'nothing delivers it, so the mill skips it on purpose');
+  assert.equal(report.totals.unconsumed, 1);
+});
+
+test('one consumer of any kind is enough for hasConsumers', () => {
+  for (const consumers of [
+    { projects: [{ id: 'p1', name: 'glissa', packs: ['company-context'] }], prReview: null, posthog: null },
+    { projects: [], prReview: ['company-context'], posthog: null },
+    { projects: [], prReview: null, posthog: ['company-context'] },
+  ]) {
+    const report = buildMillReport(baseInput({ consumers }));
+    assert.equal(report.packs[0].hasConsumers, true);
+    assert.equal(report.totals.unconsumed, 0);
+  }
+});
+
+test('the report carries each project id with the pack list a spawn would actually deliver', () => {
+  const report = buildMillReport(baseInput({
+    consumers: {
+      projects: [
+        { id: 'p1', name: 'glissa', packs: ['company-context', 'company-context', 'nope!'] },
+        { id: 'p2', name: 'other', packs: null },
+      ],
+      prReview: null,
+      posthog: null,
+    },
+  }));
+  assert.deepEqual(report.projects, [
+    { id: 'p1', name: 'glissa', packs: ['company-context'] },
+    { id: 'p2', name: 'other', packs: [] },
+  ], 'the duplicate and the malformed entry are dropped, exactly as the spawn would drop them');
+  assert.equal(report.maxPacksPerProject, MAX_PACKS_PER_SESSION, 'the cap ships so the tab cannot restate it wrong');
 });
 
 test('the outputs list is capped and the tail counted rather than shipped', () => {
@@ -203,10 +255,11 @@ test('an empty mill reports zeros rather than throwing', () => {
   assert.deepEqual(report.packs, []);
   assert.deepEqual(report.configWarnings, []);
   assert.deepEqual(report.totals, {
-    packCount: 0, builtCount: 0, invalidSpecs: 0, staleDeliveries: 0, staleDistills: 0, totalReads: 0,
+    packCount: 0, builtCount: 0, unconsumed: 0, invalidSpecs: 0, staleDeliveries: 0, staleDistills: 0, totalReads: 0,
   });
   assert.equal(report.autoRebuild, false);
   assert.equal(report.watcherCount, null);
+  assert.deepEqual(report.projects, []);
 });
 
 test('a spec whose name differs from its filename is invalid: the builder refuses it forever', () => {

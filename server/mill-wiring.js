@@ -13,6 +13,7 @@ const path = require('node:path');
 
 const { needsDistill } = require('./core/distill-core');
 const { buildMillReport } = require('./core/mill-core');
+const { packConsumerSources } = require('./core/pack-core');
 const { isPlainObject } = require('./core/usage-number-core');
 const {
   defaultBuiltRoot,
@@ -121,16 +122,6 @@ function createMillWiring(deps = {}) {
     return rows;
   }
 
-  function consumers() {
-    return {
-      projects: (Array.isArray(config.projects) ? config.projects : []).map((project) => ({
-        name: project?.name,
-        packs: project?.packs,
-      })),
-      prReview: config.prReview?.packs,
-      posthog: config.posthog?.packs,
-    };
-  }
 
   async function buildReport() {
     const specs = [];
@@ -145,7 +136,9 @@ function createMillWiring(deps = {}) {
       watcherCount: getWatcherCount(),
       specs,
       sessionRows: sessionRows(),
-      consumers: consumers(),
+      // The SAME enumeration the build gate reads, so the tab and the mill can never disagree about
+      // what counts as a consumer.
+      consumerSources: packConsumerSources(config),
     });
   }
 
@@ -183,8 +176,19 @@ function createMillWiring(deps = {}) {
     }
   }
 
+  /*
+   * The pack names a spec file actually defines. The control plane validates an assignment against
+   * this rather than against the built packs: a spec that has never been built is exactly what a first
+   * assignment is for, since assigning it is what makes the mill build it.
+   */
+  async function listPackNames() {
+    const specs = await listPackSpecs({ specsDir: resolvedSpecsDir() });
+    return specs.map((spec) => spec.name);
+  }
+
   return {
     requestReport,
+    listPackNames,
     getCachedReport: () => lastReport,
   };
 }

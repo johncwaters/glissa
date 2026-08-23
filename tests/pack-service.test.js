@@ -34,7 +34,7 @@ function okReport(name, overrides = {}) {
 
 // A fake service: fake watchers (recording the dir they claimed and their onChange), a fake interval,
 // and a build that returns whatever the test queued for that pack name.
-function harness({ specs = SPECS, reportFor = (name) => okReport(name) } = {}) {
+function harness({ specs = SPECS, reportFor = (name) => okReport(name), consumedPackNames = null } = {}) {
   const watchers = [];
   const builds = [];
   let intervalCallback = null;
@@ -42,6 +42,7 @@ function harness({ specs = SPECS, reportFor = (name) => okReport(name) } = {}) {
   let intervalCleared = 0;
 
   const service = createPackService({
+    consumedPackNames,
     listSpecs: async () => specs,
     loadSpec: async (specPath) => ({ name: specPath, sources: [], skills: [] , specPath }),
     watchRootsForSpec: async (spec) => ROOTS[spec.specPath] || [],
@@ -231,4 +232,178 @@ test('an install with no specs is fully inert: no watcher, no timer, no build', 
   assert.deepEqual(h.builds, []);
   assert.equal(h.hasInterval(), false);
   await h.service.stop();
+});
+
+// ── Consumer gating ──
+// A pack nothing would be spawned against costs a source walk per sweep to publish bytes no session
+// will ever be handed, so it is neither watched nor swept until something names it.
+
+test('a spec with no consumers gets no watcher and is skipped by the sweep', async () => {
+  const h = harness({ consumedPackNames: () => ['beta'] });
+  await h.service.start();
+
+  assert.deepEqual(h.watchers.map((w) => w.dir), ['/packs/sources/beta'], 'alpha is not watched');
+  assert.deepEqual(h.builds, ['beta'], 'the boot sweep built only the consumed pack');
+
+  h.builds.length = 0;
+  h.tickInterval();
+  await settle();
+  assert.deepEqual(h.builds, ['beta'], 'the interval sweep skips it too');
+  await h.service.stop();
+});
+
+test('with nothing consumed at all the service is as inert as an install with no specs', async () => {
+  const h = harness({ consumedPackNames: () => [] });
+  await h.service.start();
+
+  assert.deepEqual(h.watchers, []);
+  assert.deepEqual(h.builds, []);
+  assert.equal(h.hasInterval(), false, 'no timer either: there is nothing for a sweep to do');
+  await h.service.stop();
+});
+
+test('the first consumer of a pack starts watching it and builds it, with no server restart', async () => {
+  let consumed = [];
+  const h = harness({ consumedPackNames: () => consumed });
+  await h.service.start();
+  assert.deepEqual(h.builds, []);
+
+  consumed = ['alpha'];
+  await h.service.restartIfConsumersChanged();
+
+  assert.deepEqual(h.builds, ['alpha'], 'the next spawn finds a current build');
+  assert.deepEqual(h.watchers.filter((w) => !w.stopped).map((w) => w.dir),
+    ['/packs/sources/alpha', '/packs/skills/alpha-skill']);
+  assert.equal(h.hasInterval(), true, 'the fallback sweep is installed now that there is something to sweep');
+
+  h.builds.length = 0;
+  h.fireWatch('/packs/sources/alpha');
+  await settle();
+  assert.deepEqual(h.builds, ['alpha'], 'the fresh watcher rebuilds its own pack');
+  await h.service.stop();
+});
+
+test('losing the last consumer stops that pack watchers', async () => {
+  let consumed = ['alpha', 'beta'];
+  const h = harness({ consumedPackNames: () => consumed });
+  await h.service.start();
+  assert.equal(h.watchers.length, 3);
+
+  consumed = ['beta'];
+  await h.service.restartIfConsumersChanged();
+
+  assert.deepEqual(h.watchers.filter((w) => !w.stopped).map((w) => w.dir), ['/packs/sources/beta']);
+  await h.service.stop();
+});
+
+test('an unchanged consumer set never restarts the loops', async () => {
+  const h = harness({ consumedPackNames: () => ['alpha'] });
+  await h.service.start();
+  const watcherCount = h.watchers.length;
+  h.builds.length = 0;
+
+  await h.service.restartIfConsumersChanged();
+  await h.service.restartIfConsumersChanged();
+
+  assert.deepEqual(h.builds, [], 'an unrelated settings save must not rebuild anything');
+  assert.equal(h.watchers.length, watcherCount, 'nor churn the watchers');
+  await h.service.stop();
+});
+
+test('a consumer change queued after stop() cannot bring the loops back', async () => {
+  let consumed = [];
+  const h = harness({ consumedPackNames: () => consumed });
+  await h.service.start();
+  await h.service.stop();
+
+  consumed = ['alpha'];
+  await h.service.restartIfConsumersChanged();
+
+  assert.deepEqual(h.builds, []);
+  assert.deepEqual(h.watchers, []);
+});
+
+test('an unfiltered service is unaffected by the consumer gate', async () => {
+  const h = harness();
+  await h.service.start();
+  h.builds.length = 0;
+
+  await h.service.restartIfConsumersChanged();
+
+  assert.deepEqual(h.builds, [], 'no consumer source means nothing to compare, so nothing restarts');
+  assert.equal(h.watchers.length, 3, 'and every spec is still watched');
+  await h.service.stop();
+});
+
+test('ensureBuilt builds a pack the consumer filter would still skip', async () => {
+  // The assignment has been written to disk but not yet reloaded, so the in-memory consumer set does not
+  // name it yet. This is the ONLY window in which the filter must be ignored.
+  const h = harness({ consumedPackNames: () => [] });
+  await h.service.start();
+  assert.deepEqual(h.builds, []);
+
+  await h.service.ensureBuilt(['alpha']);
+
+  assert.deepEqual(h.builds, ['alpha']);
+  assert.equal(h.service.getVersions().alpha, 'v-alpha-1', 'the next spawn resolves a built pack');
+  await h.service.stop();
+});
+
+test('ensureBuilt ignores a name no spec defines, and an empty request costs nothing', async () => {
+  const h = harness({ consumedPackNames: () => [] });
+  await h.service.start();
+
+  await h.service.ensureBuilt(['ghost']);
+  await h.service.ensureBuilt([]);
+  await h.service.ensureBuilt(null);
+
+  assert.deepEqual(h.builds, []);
+  await h.service.stop();
+});
+
+test('ensureBuilt after stop() builds nothing', async () => {
+  const h = harness({ consumedPackNames: () => ['alpha'] });
+  await h.service.start();
+  await h.service.stop();
+  h.builds.length = 0;
+
+  await h.service.ensureBuilt(['alpha']);
+
+  assert.deepEqual(h.builds, []);
+});
+
+test('a consumer change racing the boot sweep queues behind it rather than orphaning its timer', async () => {
+  let consumed = ['alpha'];
+  const h = harness({
+    consumedPackNames: () => consumed,
+    reportFor: async (name) => { await new Promise((resolve) => setTimeout(resolve, 5)); return okReport(name); },
+  });
+
+  const started = h.service.start();
+  await flush();
+  consumed = ['alpha', 'beta'];
+  const restarted = h.service.restartIfConsumersChanged();
+  await started;
+  await restarted;
+
+  // One timer is live, and the restart cleared the boot one rather than assigning over it.
+  assert.equal(h.intervalCleared, 1, 'the boot interval was cleared by the restart, not leaked');
+  assert.equal(h.watchers.filter((w) => !w.stopped).length, 3, 'the restart reinstalled every watcher exactly once');
+  await h.service.stop();
+  assert.equal(h.intervalCleared, 2);
+});
+
+test('a restart racing stop() installs no watcher into the emptied array', async () => {
+  let consumed = ['alpha'];
+  const h = harness({ consumedPackNames: () => consumed });
+  await h.service.start();
+
+  consumed = ['alpha', 'beta'];
+  const restarted = h.service.restartIfConsumersChanged();
+  const stopping = h.service.stop();
+  await Promise.all([restarted, stopping]);
+
+  // Every watcher ever created is closed: an fs.watch handle installed after teardown emptied the array
+  // is one nothing would ever close.
+  assert.equal(h.watchers.every((w) => w.stopped), true, `${h.watchers.filter((w) => !w.stopped).length} watchers left open`);
 });

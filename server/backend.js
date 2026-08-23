@@ -70,7 +70,7 @@ const { normalizeRemoteConfig, validateRemoteConfig, decideBindHost } = require(
 const { createClientPresence } = require('./core/client-presence');
 const { decideControlSend } = require('./core/control-send-core');
 const { createHeartbeat } = require('./ws-heartbeat');
-const { normalizePackNames } = require('./core/pack-core');
+const { consumedPackNames, normalizePackNames } = require('./core/pack-core');
 const { createPackService } = require('./pack-service');
 const { createMillWiring } = require('./mill-wiring');
 const {
@@ -190,6 +190,17 @@ function resolveVisionsScopePaths(projectIds, projects, warn = console.warn) {
 // config hand-edit can change only casing or a trailing separator, which must NOT count as a repo
 // change (misclassifying it would skip the adopt and reproduce the branch-in-use fallback); the
 // case-fold compare lives in shared/paths.js isSameDirectoryPath.
+/**
+ * Whether a config reload that replaced a session's record should also (re)start it. A DORMANT card was
+ * not running before the edit, so recreating it is a record update and nothing more: starting it would
+ * spawn a Claude session, with that project's dangerouslySkipPermissions, that nobody asked for. Ticking
+ * a Mill tab checkbox must never do that, and neither may saving config.json. Every other state was
+ * already live, where recreate-and-restart is the documented hand-edit behavior.
+ */
+function shouldStartAfterModify(previousState) {
+  return previousState !== STATES.DORMANT;
+}
+
 function carryWorktreeAcrossRecreate(oldSess, newSess) {
   if (!oldSess || !oldSess.worktreeDir || !oldSess._workspace) return;
   if (isSameDirectoryPath(newSess.path, oldSess.path)) {
@@ -1207,7 +1218,12 @@ function createBackend(httpServer, options = {}) {
   // shutdown(). A published rebuild tells every dashboard the new version so a card whose session was
   // spawned against an older one can say so, and arms a next-turn notice on the live sessions running
   // on the old build (its skills hot-reload from the pack dir, its CLAUDE.md and rules do not).
-  const packService = createPackService();
+  // A spec nothing delivers is neither watched nor swept, and the projects' own lists are read live so
+  // assigning a pack from the Mill tab (or by hand) starts that work without a restart.
+  const packService = createPackService({
+    consumedPackNames: () => consumedPackNames(config),
+    ...(options.packServiceOptions || {}),
+  });
   packService.on('pack-updated', ({ name, version }) => {
     broadcastControl({ type: 'pack-updated', name, version });
     // Live channel: arm a next-turn notice on every session that SPAWNED against an older version of
@@ -1574,7 +1590,10 @@ function createBackend(httpServer, options = {}) {
   // --- Context-pack auto-rebuild (on by default; config.packsAutoRebuild is the kill switch) ---
   // Fire-and-forget like the other boot lanes: the first sweep walks every spec's sources and boot
   // must not wait on it. Inert with no specs (start() installs nothing and returns).
-  if (config.packsAutoRebuild !== false) {
+  // Snapshotted at boot because that is when this switch is documented to be read: a later reload
+  // moving it must not quietly install the watchers a boot-time false decided against.
+  const packsAutoRebuildEnabled = config.packsAutoRebuild !== false;
+  if (packsAutoRebuildEnabled) {
     packService.start().catch((err) => console.warn(`[packs] auto-rebuild failed to start: ${err.message}`));
   }
 
@@ -1672,6 +1691,7 @@ function createBackend(httpServer, options = {}) {
   function _modifyChangedSessions(modified, newConfig) {
     for (const project of modified) {
       const oldSess = sessions.get(project.id);
+      const wasDormant = !shouldStartAfterModify(oldSess.state);
       closeSessionDataClients(project.id);
       // INVARIANT: acknowledge BEFORE destroy - destroy() calls removeAllListeners()
       notificationManager.acknowledge(project.id);
@@ -1685,8 +1705,8 @@ function createBackend(httpServer, options = {}) {
       carryWorktreeAcrossRecreate(oldSess, newSess);
       // Broadcast BEFORE start() - see _addNewSessions for rationale.
       broadcastControl({ type: 'session-modified', id: project.id, session: project.name, path: project.path, state: newSess.state, skipPerms: !!newSess.dangerouslySkipPermissions, worktree: !!newSess.isWorktree, resumeSessionId: newSess.resumeSessionId || null });
-      newSess.start();
-      console.log(`[config] Modified session: ${project.name}`);
+      if (!wasDormant) newSess.start();
+      console.log(`[config] Modified session: ${project.name}${wasDormant ? ' (left dormant)' : ''}`);
     }
   }
 
@@ -1739,6 +1759,10 @@ function createBackend(httpServer, options = {}) {
     posthog.restartIfConfigChanged();
     // And for the usage lane: no-op unless this save changed config.usage.
     usage.restartIfConfigChanged();
+    // The mill watches and sweeps only what something delivers, so a project's pack list gaining its
+    // first consumer for a spec (or losing its last) is what starts and stops that work. applyConfigReload
+    // sets config.projects before delegating here, so both halves of the consumer set are already live.
+    if (packsAutoRebuildEnabled) packService.restartIfConsumersChanged();
   }
 
   // Restart/shutdown handlers live in server-lifecycle.js so the re-entry guard, the reap-before-exit
@@ -1803,6 +1827,11 @@ function createBackend(httpServer, options = {}) {
     getPlanLimits: () => usage.getPlanLimitsMessage(),
     // Context mill: assembled on demand, and the last one replayed to a connecting client.
     millReport: mill,
+    // Which pack names exist, so a Mill tab assignment is validated against the specs on disk.
+    listPackNames: () => mill.listPackNames(),
+    // Build a newly delivered pack before the assignment's reload recreates the session. Gated on the
+    // same switch as the loops: with auto-rebuild off, a pack is whatever `glissa pack build` last wrote.
+    ensurePacksBuilt: (names) => (packsAutoRebuildEnabled ? packService.ensureBuilt(names) : Promise.resolve()),
   });
 
   // Visions connect-time repair: findings are current state, so one snapshot beats replay retention (plan-limits precedent); registered after registerControlHandlers so the snapshot frame stays first
@@ -2249,5 +2278,5 @@ function mountDevRoutes(app) {
 
 module.exports = {
   createBackend, runAutoResume, persistSessionField, decideWasActiveFlip, carryWorktreeAcrossRecreate,
-  reconcileSessionWorktrees,
+  reconcileSessionWorktrees, shouldStartAfterModify,
 };

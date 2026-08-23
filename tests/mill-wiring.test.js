@@ -204,3 +204,45 @@ test('the cached report carries no requestId, so a connect replay answers nobody
   assert.equal(wiring.getCachedReport().requestId, null);
   assert.equal(wiring.getCachedReport().totals.packCount, 1);
 });
+
+test('listPackNames reports every spec on disk, including one that has never been built', async (t) => {
+  const fixture = writeFixture();
+  t.after(() => fs.rmSync(fixture.tmpDir, { recursive: true, force: true }));
+  writeSpec(fixture.specsDir, 'unbuilt', JSON.stringify({
+    name: 'unbuilt', sources: [{ path: 'sources/good' }], budgetTokens: 8000,
+  }));
+
+  const { wiring } = makeWiring(fixture);
+  // A first assignment is exactly what makes the mill build a pack, so validating against BUILT packs
+  // would refuse every pack it is worth assigning.
+  assert.deepEqual((await wiring.listPackNames()).sort(), ['good', 'unbuilt']);
+});
+
+test('the report carries the project ids the assignment control addresses', async (t) => {
+  const fixture = writeFixture();
+  t.after(() => fs.rmSync(fixture.tmpDir, { recursive: true, force: true }));
+
+  const { wiring } = makeWiring(fixture, {
+    config: { projects: [{ id: 'p1', name: 'glissa', packs: ['good'] }, { id: 'p2', name: 'other' }] },
+  });
+  const { replies, done } = pull(wiring, 'r1');
+  await done;
+
+  assert.deepEqual(replies[0].projects, [
+    { id: 'p1', name: 'glissa', packs: ['good'] },
+    { id: 'p2', name: 'other', packs: [] },
+  ]);
+  assert.equal(replies[0].packs[0].hasConsumers, true);
+});
+
+test('a spec no project and no lane names is reported as having no consumers', async (t) => {
+  const fixture = writeFixture();
+  t.after(() => fs.rmSync(fixture.tmpDir, { recursive: true, force: true }));
+
+  const { wiring } = makeWiring(fixture, { config: { projects: [{ id: 'p1', name: 'glissa' }] } });
+  const { replies, done } = pull(wiring, 'r1');
+  await done;
+
+  assert.equal(replies[0].packs[0].hasConsumers, false);
+  assert.equal(replies[0].totals.unconsumed, 1);
+});

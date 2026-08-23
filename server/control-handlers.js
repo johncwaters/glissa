@@ -7,6 +7,7 @@ const { STATES } = require('../shared/states');
 const { listRepoConversations } = require('../session/core/conversation-history');
 const { normalizeClientTrust } = require('./core/request-trust');
 const { isPlainObject } = require('./core/usage-number-core');
+const { PACK_NAME_RE, applyPackDelta } = require('./core/pack-core');
 const { readPosthogReport } = require('./posthog-report');
 const posthogCore = require('./core/posthog-core');
 const { getRtkPath } = require('../session/core/rtk-command');
@@ -406,6 +407,12 @@ function registerControlHandlers(controlWss, deps) {
     // Context mill report accessors (optional - undefined in older callers/tests, which then replay
     // nothing and refuse a report request).
     millReport = null,
+    // The pack names a spec file defines, so an assignment can be refused before it is persisted
+    // (optional - undefined in older callers/tests, which then refuse every assignment).
+    listPackNames = null,
+    // Builds a newly delivered pack before the reload recreates the session that resolves it (optional -
+    // undefined in older callers/tests, which then persist the assignment and build nothing).
+    ensurePacksBuilt = null,
     // Replay of transient broadcasts missed across a reconnect gap (optional - undefined in
     // older callers/tests; connect then behaves as before, snapshot-only).
     controlReplayLog = null,
@@ -936,6 +943,70 @@ function registerControlHandlers(controlWss, deps) {
   }
 
   /*
+   * Deliver (or stop delivering) ONE context pack to one project. A DEDICATED message rather than a
+   * widened update-settings whitelist: this is a field on one project record, not a settings key, and
+   * update-settings writes whole sanitized blocks that know nothing about projects[].
+   *
+   * A DELTA (`{ projectId, pack, deliver }`) rather than a whole-list replace, for two reasons. The
+   * current list is re-read inside the config write, so two dashboards toggling different packs cannot
+   * clobber each other with the snapshot each of them was rendered from. And only the name being ADDED
+   * is checked against the specs, so a project whose list already names a deleted spec stays editable
+   * instead of being frozen by its own ghost entry.
+   *
+   * Dashboard-equivalent, so no remote refusal (see the Radar actions above): the control WS can already
+   * create a permissionless session pointed anywhere, which is strictly more than choosing which local
+   * files one is handed.
+   */
+  async function handleSetProjectPacks(msg, ws) {
+    const reply = (payload) => replyTo(ws, msg, 'set-project-packs-result', { ok: false, error: null, ...payload });
+    const projectId = typeof msg.projectId === 'string' ? msg.projectId.trim() : '';
+    const project = (config.projects || []).find((p) => p.id === projectId);
+    if (!project) { reply({ error: 'Unknown project' }); return; }
+    const pack = typeof msg.pack === 'string' ? msg.pack.trim() : '';
+    if (!PACK_NAME_RE.test(pack)) { reply({ error: 'pack must be a pack name' }); return; }
+    if (typeof msg.deliver !== 'boolean') { reply({ error: 'deliver must be a boolean' }); return; }
+    // Only an ADD is checked against the specs. A removal must work even for a name whose spec is gone,
+    // which is exactly the list an operator most needs to be able to fix.
+    if (msg.deliver) {
+      if (!listPackNames) { reply({ error: 'The context mill is not running' }); return; }
+      const known = new Set(await listPackNames());
+      if (!known.has(pack)) { reply({ error: `No pack spec named "${pack}"` }); return; }
+    }
+
+    // The mutator cannot abort a save, so its verdict comes back out here and a refusal simply leaves
+    // the record untouched.
+    let outcome = null;
+    const freshConfig = configStore.save((cfg) => {
+      const record = (cfg.projects || []).find((p) => p.id === projectId);
+      if (!record) { outcome = { error: 'Unknown project' }; return; }
+      const next = applyPackDelta(record.packs, pack, msg.deliver);
+      if (!next.ok) { outcome = { error: next.error }; return; }
+      outcome = { packs: next.packs };
+      // An empty list REMOVES the key, so a project that delivers nothing reads exactly as one that
+      // never named a pack.
+      if (next.packs.length === 0) delete record.packs;
+      if (next.packs.length > 0) record.packs = next.packs;
+    });
+    if (!freshConfig) { reply({ error: 'Could not write config.json' }); return; }
+    // A save whose mutator refused still WROTE (the bytes are unchanged), so the refusal has to be
+    // reported here rather than read as success.
+    if (outcome?.error) { reply({ error: outcome.error }); return; }
+
+    // Answered before the reload: the write has already landed, and a throw further down must not leave
+    // the requester with no frame and a checkbox disabled forever.
+    reply({ ok: true, projectId, pack, deliver: msg.deliver, packs: outcome.packs });
+    // The Mill tab is a pull surface, so this says "your report is out of date" rather than carrying one.
+    broadcastControl({ type: 'project-packs-updated', projectId, packs: outcome.packs });
+    console.log(`[control] set-project-packs: ${project.name} ${msg.deliver ? '+' : '-'}${pack}`);
+
+    // BEFORE the reload, which recreates the session that resolves its packs at spawn. Consumer gating
+    // means a newly delivered pack has never been built, so a build that waits for the reload arrives
+    // after the spawn it exists for, and the session silently delivers nothing.
+    if (msg.deliver && ensurePacksBuilt) await ensurePacksBuilt([pack]);
+    applyConfigReload(freshConfig);
+  }
+
+  /*
    * The Mill tab's pull: one report per request, assembled on demand from the pack specs, their
    * manifests and the live sessions. Replied to the requesting socket only, like the usage report.
    */
@@ -985,6 +1056,7 @@ function registerControlHandlers(controlWss, deps) {
     'posthog-archive-investigation': handlePosthogArchiveInvestigation,
     'request-usage-report': handleRequestUsageReport,
     'request-mill-report': handleRequestMillReport,
+    'set-project-packs': handleSetProjectPacks,
     'kill':             (msg) => { const s = findSession(msg); if (s) s.killSession(); },
     'start-session':    (msg) => {
       const s = findSession(msg);

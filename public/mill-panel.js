@@ -12,6 +12,9 @@ import { createAttentionAck } from './attention-ack-core.mjs';
 import { buildPanelSection, buildStatChip, el, isPanelHidden } from './dom-helpers.js';
 import { getMillAttentionAck, setMillAttentionAck } from './ui-prefs.js';
 import {
+  DELIVER_TO_CAP_NOTE,
+  DELIVER_TO_EMPTY_TEXT,
+  DELIVER_TO_TITLE,
   MILL_EMPTY_TEXT,
   MILL_HINT,
   autoRebuildLine,
@@ -19,13 +22,16 @@ import {
   budgetPct,
   budgetTone,
   builtLine,
+  builtTone,
   configWarningsOf,
   consumerLine,
   contentLine,
+  deliverToCapHint,
   deliveryDetail,
   deliveryEmptyText,
   deliveryLabel,
   deliveryStaleText,
+  deliveryTargets,
   deliveryTone,
   distillText,
   distillTone,
@@ -35,6 +41,7 @@ import {
   isMillUnavailable,
   millAttentionSignature,
   millErrorLine,
+  packDeltaFor,
   shouldApplyMillReport,
   sortPackRows,
   specErrorLine,
@@ -128,6 +135,41 @@ function buildDeliveriesBlock(pack) {
   return wrap;
 }
 
+/*
+ * The one WRITE on this tab: which projects a pack is delivered to. A toggle sends one delta
+ * (`set-project-packs`), and the server's broadcast pulls a fresh report, which is what re-renders the
+ * boxes. The box is disabled while that round trip is out, so a double click cannot send two toggles
+ * for the same pack.
+ */
+function buildDeliverToBlock(pack) {
+  const wrap = el('div', 'mill-deliver');
+  wrap.append(el('p', 'mill-deliver-title', DELIVER_TO_TITLE));
+  const targets = deliveryTargets(_report, pack);
+  if (targets.length === 0) {
+    wrap.append(buildLine('mill-empty', DELIVER_TO_EMPTY_TEXT));
+    return wrap;
+  }
+  for (const target of targets) {
+    const row = el('label', 'mill-deliver-target');
+    const box = document.createElement('input');
+    box.type = 'checkbox';
+    box.className = 'mill-deliver-box';
+    box.checked = target.checked;
+    box.disabled = target.disabled;
+    box.addEventListener('change', () => {
+      box.disabled = true;
+      sendPackDelta(packDeltaFor(target, pack.name));
+    });
+    row.append(box);
+    row.append(el('span', 'mill-deliver-name', target.name));
+    if (target.disabled) row.append(el('span', 'mill-deliver-note', DELIVER_TO_CAP_NOTE));
+    wrap.append(row);
+  }
+  const hint = deliverToCapHint(_report);
+  if (hint) wrap.append(buildLine('mill-meta', hint));
+  return wrap;
+}
+
 function buildDistillBlock(pack) {
   if (pack.distill.length === 0) return null;
   const wrap = el('div', 'mill-distills');
@@ -157,7 +199,7 @@ function buildOutputsBlock(built) {
 function buildPackSection(pack) {
   const section = buildSection(pack.name, pack.description);
   if (!pack.specValid) section.append(buildLine('mill-warning', specErrorLine(pack)));
-  section.append(buildLine('mill-meta', builtLine(pack), pack.built ? 'ok' : 'warn'));
+  section.append(buildLine('mill-meta', builtLine(pack), builtTone(pack)));
   if (pack.built) section.append(buildBudgetBlock(pack));
   if (pack.built) section.append(buildLine('mill-meta', contentLine(pack.built)));
   section.append(buildDeliveriesBlock(pack));
@@ -166,6 +208,7 @@ function buildPackSection(pack) {
   const outputs = buildOutputsBlock(pack.built);
   if (outputs) section.append(outputs);
   section.append(buildLine('mill-meta', consumerLine(pack)));
+  section.append(buildDeliverToBlock(pack));
   return section;
 }
 
@@ -232,6 +275,12 @@ export function requestMillReport() {
   _requestSeq += 1;
   _latestRequestId = `mill-${_requestSeq}`;
   _sendRequest({ type: 'request-mill-report', requestId: _latestRequestId });
+}
+
+function sendPackDelta(delta) {
+  if (!_sendRequest) return;
+  _requestSeq += 1;
+  _sendRequest({ type: 'set-project-packs', requestId: `mill-set-${_requestSeq}`, ...delta });
 }
 
 export function mountMillView(parent) {

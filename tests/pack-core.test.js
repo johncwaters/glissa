@@ -11,10 +11,14 @@ const {
   MANIFEST_FILE,
   MAX_INDEX_TOKENS,
   MAX_PACKS_PER_SESSION,
+  MAX_PACK_ENTRIES_SCANNED,
+  applyPackDelta,
+  consumedPackNames,
   estimateTokens,
   isPackRelativePath,
   matchesGlob,
   normalizePackNames,
+  packConsumerSources,
   planPackBuild,
   sourceSlug,
   validatePackSpec,
@@ -449,4 +453,105 @@ test('isPackRelativePath accepts a plain relative path and nothing that escapes'
   for (const value of ['../brief.md', '/brief.md', 'C:/brief.md', '', null, 42, 'a/../../b.md']) {
     assert.equal(isPackRelativePath(value), false, String(value));
   }
+});
+
+// ── consumedPackNames ──
+// What the mill's watchers and sweep are gated on: a pack nothing here names is one no spawn would
+// ever be handed, so building it publishes bytes nobody reads.
+
+test('consumedPackNames unions the projects and both ephemeral lanes, deduped and sorted', () => {
+  assert.deepEqual(consumedPackNames({
+    projects: [{ packs: ['zeta', 'alpha'] }, { packs: ['alpha'] }, {}],
+    prReview: { packs: ['beta'] },
+    posthog: { packs: ['alpha'] },
+  }), ['alpha', 'beta', 'zeta']);
+});
+
+test('consumedPackNames drops what a spawn would drop, so the gate matches delivery', () => {
+  assert.deepEqual(consumedPackNames({
+    projects: [{ packs: ['../escape', 'good', 'good'] }, { packs: 'not-an-array' }],
+  }), ['good']);
+  assert.deepEqual(consumedPackNames({ projects: [{ packs: ['a', 'b', 'c', 'd', 'e'] }] }).length,
+    MAX_PACKS_PER_SESSION, 'a list over the per-session cap contributes only what would be delivered');
+});
+
+test('a config naming no packs at all consumes nothing', () => {
+  for (const config of [null, undefined, {}, { projects: [] }, { projects: [{ packs: [] }] }]) {
+    assert.deepEqual(consumedPackNames(config), []);
+  }
+});
+
+// ── packConsumerSources ──
+// THE enumeration of every config key that names packs. The build gate and the Mill tab both derive
+// from it, so a third key added here reaches both at once and can never reach only one.
+
+test('packConsumerSources lists one row per project plus one per lane', () => {
+  const sources = packConsumerSources({
+    projects: [{ id: 'p1', name: 'glissa', packs: ['a'] }, { path: 'C:/x' }],
+    prReview: { packs: ['b'] },
+    posthog: { packs: ['c'] },
+  });
+  assert.deepEqual(sources.map((s) => [s.kind, s.id, s.label]), [
+    ['project', 'p1', 'glissa'],
+    ['project', null, 'project'],
+    ['prReview', null, 'prReview.packs'],
+    ['posthog', null, 'posthog.packs'],
+  ]);
+});
+
+test('consumedPackNames is derived from that one enumeration', () => {
+  const config = { projects: [{ packs: ['zeta'] }], prReview: { packs: ['alpha'] }, posthog: { packs: ['zeta'] } };
+  const union = new Set();
+  for (const source of packConsumerSources(config)) {
+    for (const name of normalizePackNames(source.packs).names) union.add(name);
+  }
+  assert.deepEqual(consumedPackNames(config), [...union].sort());
+});
+
+// ── applyPackDelta ──
+
+test('a delta adds and removes against the list it is given', () => {
+  assert.deepEqual(applyPackDelta(['a'], 'b', true), { ok: true, packs: ['a', 'b'] });
+  assert.deepEqual(applyPackDelta(['a', 'b'], 'b', false), { ok: true, packs: ['a'] });
+  assert.deepEqual(applyPackDelta(null, 'b', true), { ok: true, packs: ['b'] });
+  assert.deepEqual(applyPackDelta(['a'], 'b', false), { ok: true, packs: ['a'] }, 'removing an absent pack is a no-op');
+});
+
+test('delivering a pack already on the list is idempotent, not a duplicate', () => {
+  assert.deepEqual(applyPackDelta(['a', 'b'], 'b', true), { ok: true, packs: ['a', 'b'] });
+});
+
+test('a delta past the cap is REFUSED, never silently dropped', () => {
+  const full = ['a', 'b', 'c', 'd'];
+  const result = applyPackDelta(full, 'e', true);
+  assert.equal(result.ok, false);
+  assert.match(result.error, /at most 4 packs/);
+  // Removing still works at the cap, which is how an operator gets out of it.
+  assert.deepEqual(applyPackDelta(full, 'a', false), { ok: true, packs: ['b', 'c', 'd'] });
+});
+
+test('a delta keeps an over-cap hand-edited list intact when removing from it', () => {
+  // normalizePackNames would drop the 5th entry; the delta must not silently delete what it did not touch.
+  assert.deepEqual(applyPackDelta(['a', 'b', 'c', 'd', 'e'], 'a', false), { ok: true, packs: ['b', 'c', 'd', 'e'] });
+});
+
+test('a delta drops only what is genuinely unusable from the current list', () => {
+  assert.deepEqual(applyPackDelta(['a', '../escape', 'a', 'b'], 'c', true), { ok: true, packs: ['a', 'b', 'c'] });
+});
+
+// ── normalizePackNames bounds ──
+
+test('an array far past the cap is rejected whole rather than warned about per entry', () => {
+  const huge = Array.from({ length: MAX_PACK_ENTRIES_SCANNED + 1 }, (_unused, i) => `p${i}`);
+  const result = normalizePackNames(huge);
+  assert.deepEqual(result.names, []);
+  assert.equal(result.warnings.length, 1, 'one verdict, not one string per entry');
+  assert.match(result.warnings[0], /entries, far past the 4 pack per session cap/);
+});
+
+test('a list at the scan bound is still judged entry by entry', () => {
+  const atBound = Array.from({ length: MAX_PACK_ENTRIES_SCANNED }, (_unused, i) => `p${i}`);
+  const result = normalizePackNames(atBound);
+  assert.equal(result.names.length, MAX_PACKS_PER_SESSION);
+  assert.ok(result.warnings.length > 1);
 });
