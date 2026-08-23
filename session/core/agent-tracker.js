@@ -223,6 +223,211 @@ function evictDepartedTeammateNames(idleTeammateNames, declaredTeammateIds, curr
   return currentTeammateIds;
 }
 
+/*
+ * THE TASK REGISTRY: one owner for every store behind "is background work still running".
+ *
+ * The 2026-08 architecture review counted FIVE separate ledgers in sessions.js (the counted agent
+ * map, the declared background_tasks snapshot, the idle task-id set, the idle teammate-name map, and
+ * the last snapshot's teammate ids) driving five expiry rules off three TTL constants, and named the
+ * unification the endorsed shape for the next change in this area. They are one logical registry
+ * reconciled from several signal families that each see a different slice of the same truth, so this
+ * holds them together, applies every TTL in ONE reaper, and turns max(counted, declared) into a query.
+ *
+ * STRUCTURAL ONLY. Every rule below is the previous code moved verbatim: the same guards, the same
+ * order, the same TTLs, the same clamps. The semantic question the review raised separately (whether
+ * orchestrator-only completion would be better) is evidence-gated and deliberately untouched here,
+ * and the existing detection tests are what prove nothing moved.
+ *
+ * The free functions above stay exported and are still the unit of testing for the arithmetic; this
+ * is the state that calls them.
+ */
+function createTaskRegistry({
+  agentTtlMs = DEFAULT_AGENT_TTL_MS,
+  shellTaskTtlMs = DEFAULT_SHELL_TASK_TTL_MS,
+  teammateTaskTtlMs = DEFAULT_TEAMMATE_TASK_TTL_MS,
+  now = Date.now,
+} = {}) {
+  // Live sub-agent ids from SubagentStart/Stop: agentId -> last-seen ts.
+  const countedAgents = new Map();
+  // The latest authoritative background_tasks declaration, and when it was declared.
+  let declaredEntries = null;
+  let declaredTs = 0;
+  // Task ids settled out-of-band by TaskCompleted, filtering the declaration.
+  const idleTaskIds = new Set();
+  // Teammates idle BY NAME (a TeammateIdle payload carries no id, and a declared entry cannot be
+  // matched to a name), subtracted from the declared teammate count: name -> ts, insertion-ordered.
+  const idleTeammateNames = new Map();
+  // The teammate ids in the last declaration, so a departed teammate can be spotted in the next one.
+  let declaredTeammateIds = new Set();
+  let breakdown = { counted: 0, declared: 0, idleNames: 0, idleTasks: 0 };
+
+  /*
+   * The ONE zombie reaper, applying the per-kind TTLs the five stores used to each apply for
+   * themselves. Counted ids age from their own SubagentStart; the idle-name records age on the same
+   * bound so a stale name cannot mask a future same-named teammate; the whole declaration ages from
+   * the Stop that declared it, so a snapshot whose refreshing Stop never came (hung task, dropped
+   * hook) stops suppressing completion instead of doing so forever. The per-ENTRY weak and teammate
+   * TTLs are applied at count time, since they are relative to that same declaration age.
+   */
+  function reap(at) {
+    pruneAgents(countedAgents, at, agentTtlMs);
+    pruneAgents(idleTeammateNames, at, agentTtlMs);
+    if (declaredEntries !== null && at - declaredTs >= agentTtlMs) {
+      declaredEntries = null;
+      declaredTs = 0;
+    }
+  }
+
+  return {
+    /** SubagentStart. Returns whether the live set actually changed. */
+    noteAgentStart(agentId, ts) {
+      return addAgent(countedAgents, agentId, ts);
+    },
+
+    /** SubagentStop. Returns whether the live set actually changed. */
+    noteAgentStop(agentId) {
+      return removeAgent(countedAgents, agentId);
+    },
+
+    /**
+     * Reconcile against an authoritative background_tasks array. A declaration of zero running
+     * entries also drains the counted map, which bounds a dropped SubagentStop immediately instead
+     * of waiting for the TTL.
+     */
+    reconcileDeclared(entries) {
+      declaredEntries = entries;
+      declaredTs = now();
+      const declaredIds = new Set(entries.map((e) => e.id).filter(Boolean));
+      for (const id of idleTaskIds) {
+        if (!declaredIds.has(id)) idleTaskIds.delete(id);
+      }
+      declaredTeammateIds = evictDepartedTeammateNames(idleTeammateNames, declaredTeammateIds, entries);
+      /*
+       * Deliberately no ageMs, no teammate TTL and no idle-name offset here. This snapshot is fresh
+       * (age 0), and this raw count only answers "did Claude declare zero": aging entries out could
+       * read a teammates-only declaration as zero and wipe the counted map out from under a
+       * still-running turn, and the idle-name offset is Glissa-side bookkeeping, not something Claude
+       * declared, so it must never be the reason a live counted agent_id is dropped.
+       */
+      const rawDeclaredActive = declaredActiveCount(entries, idleTaskIds);
+      if (rawDeclaredActive === 0 && countedAgents.size > 0) countedAgents.clear();
+    },
+
+    /** Drop the declaration (a new turn starts with no settled background snapshot). */
+    clearDeclared() {
+      if (declaredEntries === null) return false;
+      declaredEntries = null;
+      declaredTs = 0;
+      return true;
+    },
+
+    hasDeclared() {
+      return declaredEntries !== null;
+    },
+
+    /** TaskCreated: this id and/or name is working again. */
+    noteTaskCreated({ taskId, name }) {
+      if (name) idleTeammateNames.delete(name);
+      if (taskId) idleTaskIds.delete(taskId);
+    },
+
+    /**
+     * TaskCompleted. A payload carrying both an id and a name must drain by id ONLY: leaving the name
+     * behind would subtract it from a different, still-live teammate as well.
+     */
+    noteTaskCompleted({ taskId, name }) {
+      if (!taskId) return;
+      idleTaskIds.add(taskId);
+      // Task ids and subagent agent_ids can share a namespace; a no-op removal is harmless.
+      removeAgent(countedAgents, taskId);
+      if (name) idleTeammateNames.delete(name);
+    },
+
+    /** TeammateIdle: name only, recorded for the count-based subtraction. */
+    noteTeammateIdle(name, ts) {
+      idleTeammateNames.set(name, ts);
+    },
+
+    /**
+     * A SubagentStart whose agent_id embeds an idle teammate's name re-gates it. That is the ONLY
+     * re-gating signal for a teammate the lead wakes via mailbox: no TaskCreated ever fires for a
+     * named-agent teammate. The remainder after the prefix must be pure hex, or idle name "foo" would
+     * be falsely re-gated by a different teammate "foo-bar" starting.
+     */
+    regateByAgentId(agentId) {
+      if (typeof agentId !== 'string') return;
+      for (const name of idleTeammateNames.keys()) {
+        const prefix = `a${name}-`;
+        if (agentId.startsWith(prefix) && /^[0-9a-f]+$/i.test(agentId.slice(prefix.length))) {
+          idleTeammateNames.delete(name);
+        }
+      }
+    },
+
+    /**
+     * The query the whole registry exists to answer. Reaps first, then takes the larger of the two
+     * views: the declared count sees background Bash tasks and teammates that never fire a
+     * SubagentStart, and the counted map is fresher than a pre-drain Stop snapshot.
+     */
+    activeCount() {
+      const at = now();
+      reap(at);
+      const declared = declaredActiveCount(
+        declaredEntries, idleTaskIds, declaredEntries ? at - declaredTs : 0,
+        shellTaskTtlMs, idleTeammateNames.size, teammateTaskTtlMs,
+      );
+      breakdown = {
+        counted: countedAgents.size,
+        declared,
+        idleNames: idleTeammateNames.size,
+        idleTasks: idleTaskIds.size,
+      };
+      return Math.max(countedAgents.size, declared);
+    },
+
+    /** Which source gated a ready, for the decision trace. Describes the last activeCount(). */
+    getBreakdown() {
+      return breakdown;
+    },
+
+    /** How long until something currently gating could stop counting through TTL aging alone. */
+    msUntilNextDrain(at) {
+      return msUntilNextDrain({
+        countedAgents,
+        declaredEntries,
+        declaredTs,
+        idleIds: idleTaskIds,
+        now: at,
+        agentTtlMs,
+        weakTtlMs: shellTaskTtlMs,
+        teammateTtlMs: teammateTaskTtlMs,
+      });
+    },
+
+    /** Everything, on PTY exit/restart/destroy. Returns whether anything was being gated. */
+    clear() {
+      countedAgents.clear();
+      declaredEntries = null;
+      declaredTs = 0;
+      idleTaskIds.clear();
+      idleTeammateNames.clear();
+      declaredTeammateIds.clear();
+    },
+
+    /** Read-only views, for tests and the debug surface. */
+    inspect() {
+      return {
+        counted: new Map(countedAgents),
+        declared: declaredEntries,
+        declaredTs,
+        idleTaskIds: new Set(idleTaskIds),
+        idleTeammateNames: new Map(idleTeammateNames),
+        declaredTeammateIds: new Set(declaredTeammateIds),
+      };
+    },
+  };
+}
+
 module.exports = {
   addAgent,
   removeAgent,
@@ -231,6 +436,7 @@ module.exports = {
   declaredActiveCount,
   msUntilNextDrain,
   evictDepartedTeammateNames,
+  createTaskRegistry,
   DEFAULT_AGENT_TTL_MS,
   DEFAULT_SHELL_TASK_TTL_MS,
   DEFAULT_TEAMMATE_TASK_TTL_MS,
