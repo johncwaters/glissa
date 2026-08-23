@@ -103,11 +103,11 @@ test('the store logs counts and paths, never a remembered byte', async () => {
   const lines = [];
   const store = createMemoryStore({
     dir,
+    dbPath: path.join(dir, 'glissa.db'),
     config: { ...resolveMemoryConfig(null), enabled: true },
     logger: { log: (line) => lines.push(line), warn: (line) => lines.push(line) },
     debug: true,
     projectionDebounceMs: 5,
-    watchCanon: false,
   });
   try {
     await store.append({

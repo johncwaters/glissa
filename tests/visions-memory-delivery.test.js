@@ -91,11 +91,11 @@ async function withStore(fn, { seed = [] } = {}) {
   let clock = FIXED_TS;
   const store = createMemoryStore({
     dir,
+    dbPath: path.join(dir, 'glissa.db'),
     config: { ...resolveMemoryConfig(null), enabled: true },
     logger: QUIET,
     now: () => clock++,
     projectionDebounceMs: 5,
-    watchCanon: false,
   });
   try {
     for (const input of seed) await store.append(input);

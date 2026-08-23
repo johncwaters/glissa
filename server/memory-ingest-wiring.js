@@ -2,8 +2,9 @@
 
 /*
  * Memory ingest IO shell (docs/plan-visions-3.md, M14): the one consumer that turns agent-log events into
- * durable records. It owns its tail-state file, its per-tick write batching and its cold-start backfill;
- * every decision it makes comes from server/core/memory-ingest-core.js.
+ * durable records. Its per-tick write batching and its cold-start backfill live here; every decision it
+ * makes comes from server/core/memory-ingest-core.js, and its durable offsets live in the store's
+ * database beside the canon, so an offset and the records read at it agree by transaction (M12b).
  *
  * It is a TARGET of the agent-log source, never a second copy of it. With the ingest lane running, that
  * lane's source fans out to this consumer; with the ingest lane off, this shell constructs the same source
@@ -20,13 +21,12 @@ const {
   createAgentLogIngest, readCodexRoot, rootFromPath, sessionIdFromPath, transcriptRootCandidates,
 } = require('./ingest-agent-logs');
 const { INTERACTIVE_LANE } = require('./core/usage-lane-core');
+const { isBusyError } = require('./glissa-db');
 const { isDispatchWorkdir, mapAgentLine } = require('./core/ingest-agent-core');
 const { isUsageFile } = require('./core/usage-scan-core');
-const { createJsonStateWriter } = require('./json-file');
 const { createLaneLog } = require('./lane-log');
 const core = require('./core/memory-ingest-core');
 
-const TAIL_STATE_FILE = 'tail-state.json';
 // The usage scanner's budget shape: one pass reads at most this, and what it did not reach is resumable.
 const DEFAULT_BACKFILL_BYTE_BUDGET = 8 * 1024 * 1024;
 const DEFAULT_BACKFILL_CHUNK_BYTES = 512 * 1024;
@@ -51,7 +51,6 @@ function earliestLaneEntryMs(ledger) {
 
 function createMemoryIngest({
   store,
-  stateDir = store?.dir || null,
   logger = console,
   debug = false,
   env = process.env,
@@ -79,19 +78,21 @@ function createMemoryIngest({
 } = {}) {
   if (!store || typeof store.append !== 'function') throw new Error('createMemoryIngest requires a memory store');
   const log = createLaneLog({ prefix: '[memory-ingest]', logger, debugFlag: debug });
-  const statePath = stateDir ? path.join(stateDir, TAIL_STATE_FILE) : null;
-  const writer = statePath
-    ? createJsonStateWriter({
-      filePath: statePath, fsPromises, warn: (error) => log.warn(`tail state write failed: ${error.message}`),
-    })
-    : null;
+  const statePath = store.dbPath || null;
 
   const counts = {
-    seen: 0, queued: 0, written: 0, rejected: 0, dropped: 0, offsetsSkipped: 0, laneSkipped: 0,
+    seen: 0, queued: 0, written: 0, rejected: 0, dropped: 0, offsetsSkipped: 0, laneSkipped: 0, refused: 0,
   };
   let queued = [];
   // Offsets a queued batch has not written yet: committing early would lose those records on a crash.
   const pendingTails = new Map();
+  /*
+   * Transcripts whose records the SUBSTRATE refused, as opposed to records the write gates refused. Their
+   * offsets are frozen for the rest of this process: the durable offset stays at or before the lost range,
+   * so a later pass re-reads it, and committing any further offset for that file would step over the hole
+   * instead. A re-read is free, since a record's id is derived from its own bytes.
+   */
+  const holedPaths = new Set();
   let tailState = core.normalizeTailState(null);
   let loadPromise = null;
   let flushTimer = null;
@@ -99,21 +100,13 @@ function createMemoryIngest({
   let ownSource = null;
   let stopped = false;
 
+  // Starting empty costs the gap, never a duplicate: every unknown file restarts at end of file.
   function loadTailState() {
-    if (!statePath) return Promise.resolve(tailState);
     if (loadPromise) return loadPromise;
     loadPromise = (async () => {
-      let text = null;
       try {
-        text = await fsPromises.readFile(statePath, 'utf8');
-      } catch {
-        // No file yet is the ordinary first-run case, and an empty state means every tail starts at EOF.
-        return tailState;
-      }
-      try {
-        tailState = core.normalizeTailState(JSON.parse(text));
+        tailState = core.normalizeTailState(store.tailState());
       } catch (error) {
-        // Starting empty costs the gap, never a duplicate: every unknown file restarts at end of file.
         log.warn(`tail state unreadable, starting empty: ${error.message}`);
         tailState = core.normalizeTailState(null);
       }
@@ -123,28 +116,20 @@ function createMemoryIngest({
   }
 
   /*
-   * Under the canon lock, always. Two processes write this file (a live server's consumer and the
-   * `glissa memory backfill` CLI) and both write it WHOLE, so an unlocked last-writer-wins could move an
-   * offset forward over a range the loser had not read and lose that transcript range for good. The hold
-   * is one atomic write long, and it is `reentrant` so a write inside a backfill rides the lock that pass
-   * already holds. A write that cannot take the lock is SKIPPED, which costs a re-read and never a range.
+   * ONE row per transcript, in the same database the records land in, which is what retired the whole-file
+   * last-writer-wins race the lockfile existed for: a live server's consumer and a `glissa memory backfill`
+   * now write disjoint rows and SQLite arbitrates the rest. A refused write costs a re-read, never a range.
    */
-  function persistTailState() {
-    if (!writer) return Promise.resolve();
-    const payload = tailState;
-    return store.withCanonLock(
-      () => writer.write(payload, () => `${JSON.stringify(payload, null, 2)}\n`),
-      { reentrant: true },
-    ).then((held) => {
-      if (held.locked) return;
-      counts.offsetsSkipped += 1;
-      log.debugNote(() => `tail state write skipped: the canon lock was held (${statePath})`);
-    });
-  }
-
   function commitTail(tail) {
-    tailState = core.recordTailOffset(tailState, { ...tail, ts: nowFn() }, { maxEntries: maxTailEntries });
-    void persistTailState();
+    if (tail?.path && holedPaths.has(tail.path)) {
+      log.debugNote(() => `offset held back for ${tail.path}: an earlier range was never remembered`);
+      return;
+    }
+    const entry = { ...tail, ts: nowFn() };
+    tailState = core.recordTailOffset(tailState, entry, { maxEntries: maxTailEntries });
+    if (store.saveTailOffset(entry, { maxEntries: maxTailEntries })) return;
+    counts.offsetsSkipped += 1;
+    log.debugNote(() => `tail state write skipped for ${tail.path}`);
   }
 
   // --- The live consumer ----------------------------------------------------
@@ -190,13 +175,23 @@ function createMemoryIngest({
     while (queued.length > 0 && !stopped) {
       const batch = core.planIngestBatch(queued, { maxPerTick: maxRecordsPerTick });
       queued = batch.rest;
-      for (const input of batch.take) {
-        const written = await appendOne(input);
-        if (written) counts.written += 1;
-        if (!written) counts.rejected += 1;
-      }
+      const outcome = await appendBatch(batch.take);
+      counts.written += outcome.written;
+      counts.rejected += batch.take.length - outcome.written;
+      if (outcome.refused) holdOffsets(batch.take);
       settlePendingTails();
       await yieldTick();
+    }
+  }
+
+  // Named for what it protects: the range these records came from, which nothing remembered.
+  function holdOffsets(inputs) {
+    counts.refused += inputs.length;
+    for (const input of inputs) {
+      if (!input.tailPath || holedPaths.has(input.tailPath)) continue;
+      holedPaths.add(input.tailPath);
+      pendingTails.delete(input.tailPath);
+      log.warn(`the store refused a batch: offsets for that transcript are frozen until the next start`);
     }
   }
 
@@ -208,14 +203,20 @@ function createMemoryIngest({
     }
   }
 
-  // A rejected write is a count, never a throw: this rides the source's drain and the CLI's pass alike.
-  async function appendOne(input) {
-    const { tailPath, ...record } = input;
+  /*
+   * One transaction per tick, and a refused write is a count rather than a throw: this rides the source's
+   * drain and the CLI's pass alike. `refused` is the store saying its SUBSTRATE would not take these, which
+   * is not the same answer as the write gates refusing every record, and a throw is read the same way.
+   */
+  async function appendBatch(inputs) {
+    const records = inputs.map(({ tailPath, ...record }) => record);
     try {
-      return Boolean(await store.append(record));
+      const outcome = await store.appendMany(records);
+      const written = (Array.isArray(outcome?.records) ? outcome.records : []).filter(Boolean).length;
+      return { written, refused: outcome?.refused === true };
     } catch (error) {
       log.warn(`append failed: ${error.message}`);
-      return false;
+      return { written: 0, refused: true };
     }
   }
 
@@ -225,7 +226,6 @@ function createMemoryIngest({
     flushTimer = null;
     flushChain = flushChain.then(flushQueue).catch((error) => log.warn(`flush failed: ${error.message}`));
     await flushChain;
-    if (writer) await writer.idle();
   }
 
   // --- The implied source ---------------------------------------------------
@@ -388,15 +388,20 @@ function createMemoryIngest({
     }
   }
 
-  // Refuses to run beside another process doing the same job over the same tail-state file.
+  /*
+   * Safe beside a live server's own pass now that the offsets are rows: both read the same durable
+   * offsets and both write disjoint ones, so the pre-M12b refusal is gone. A database busy for the whole
+   * timeout is still reported as `locked`, which is what the operator is being told.
+   */
   async function backfill({ budgetBytes = backfillByteBudget } = {}) {
     if (stopped) return { ok: false, reason: 'stopped', files: 0, bytesRead: 0, partial: false };
-    const held = await store.withCanonLock(() => runBackfill(budgetBytes));
-    if (!held.locked) {
-      log.warn('another process holds the memory store lock: no backfill ran');
+    try {
+      return await runBackfill(budgetBytes);
+    } catch (error) {
+      if (!isBusyError(error)) throw error;
+      log.warn('the memory database is busy: no backfill ran');
       return { ok: false, reason: 'locked', files: 0, bytesRead: 0, partial: false };
     }
-    return held.result;
   }
 
   async function runBackfill(budgetBytes) {
@@ -426,8 +431,10 @@ function createMemoryIngest({
       partial = partial || outcome.partial;
       await yieldTick();
     }
-    if (gone.length > 0) tailState = core.tailStateForget(tailState, gone);
-    await persistTailState();
+    if (gone.length > 0) {
+      tailState = core.tailStateForget(tailState, gone);
+      store.forgetTails(gone);
+    }
     await whenIdle();
     log.note(
       `backfill read ${bytesRead} byte(s) across ${files} file(s): `
@@ -445,7 +452,6 @@ function createMemoryIngest({
     await whenIdle();
     settlePendingTails();
     stopped = true;
-    if (writer) await writer.idle();
   }
 
   return {
@@ -465,6 +471,5 @@ module.exports = {
   DEFAULT_BACKFILL_BYTE_BUDGET,
   earliestLaneEntryMs,
   DEFAULT_BACKFILL_CHUNK_BYTES,
-  TAIL_STATE_FILE,
   createMemoryIngest,
 };

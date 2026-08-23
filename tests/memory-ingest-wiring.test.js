@@ -54,24 +54,42 @@ function inertTimers() {
   };
 }
 
-// Accepts everything, remembers what it was handed, and answers the two seams the consumer reads.
+// Accepts everything, remembers what it was handed, and answers the seams the consumer reads.
 function fakeStore(dir) {
   const appended = [];
   const delivered = new Set();
+  const tails = new Map();
   return {
     appended,
     delivered,
     dir,
+    dbPath: path.join(dir, 'glissa.db'),
+    tails,
+    refuseTailWrites: false,
     append: async (input) => {
       appended.push(input);
       return { id: `m-${appended.length}` };
     },
-    deliveredHashes: () => delivered,
-    locks: [],
-    withCanonLock: async function withCanonLock(work, options = {}) {
-      this.locks.push(options.reentrant === true ? 'reentrant' : 'exclusive');
-      return { locked: true, result: await work() };
+    appendMany: async function appendMany(inputs) {
+      if (this.refuseAppends) return { records: inputs.map(() => null), refused: true };
+      return {
+        records: inputs.map((input) => {
+          appended.push(input);
+          return { id: `m-${appended.length}` };
+        }),
+        refused: false,
+      };
     },
+    refuseAppends: false,
+    deliveredHashes: () => delivered,
+    tailState: () => ({ files: Object.fromEntries(tails) }),
+    saveTailOffset: function saveTailOffset(entry) {
+      if (this.refuseTailWrites) return false;
+      const { path: filePath, ...rest } = entry;
+      tails.set(filePath, rest);
+      return true;
+    },
+    forgetTails: (paths) => { for (const filePath of paths) tails.delete(filePath); },
   };
 }
 
@@ -181,7 +199,7 @@ test('a line the store already delivered is not remembered again', withHomes(asy
 
 test('a store that rejects a write costs a count, never the drain', withHomes(async ({ projects, memoryDir, env, cleanups }) => {
   const store = fakeStore(memoryDir);
-  store.append = async () => { throw new Error('canon unwritable'); };
+  store.appendMany = async () => { throw new Error('canon unwritable'); };
   const warnings = [];
   const ingest = createMemoryIngest({ store, env, logger: { log: () => {}, warn: (line) => warnings.push(line) } });
   cleanups.push(() => ingest.stop());
@@ -196,13 +214,14 @@ test('a store that rejects a write costs a count, never the drain', withHomes(as
 
   assert.equal(source.isDisabled, false);
   assert.equal(ingest.stats().rejected, 1);
-  assert.equal(warnings.length, 1);
-  assert.equal(warnings[0].includes('still tailing'), false, 'remembered text never reaches a log line');
+  assert.equal(warnings.join('\n').includes('still tailing'), false, 'remembered text never reaches a log line');
 }));
 
-test('the tapped offset lands in tail-state.json beside the canon', withHomes(async ({ projects, memoryDir, env, cleanups }) => {
-  const store = fakeStore(memoryDir);
-  fs.mkdirSync(memoryDir, { recursive: true });
+// M12b: the offsets are rows in the same database the records land in, so a crash cannot leave one
+// ahead of the other.
+test('the tapped offset lands in the store beside the canon', withHomes(async ({ projects, memoryDir, env, cleanups }) => {
+  const store = realStore(memoryDir);
+  cleanups.push(() => store.stop());
   const ingest = createMemoryIngest({ store, env });
   cleanups.push(() => ingest.stop());
   const source = createAgentLogIngest({ consumers: [ingest.consumer], env, ...inertTimers() });
@@ -214,8 +233,8 @@ test('the tapped offset lands in tail-state.json beside the canon', withHomes(as
   await source.poll();
   await ingest.whenIdle();
 
-  const written = JSON.parse(fs.readFileSync(path.join(memoryDir, 'tail-state.json'), 'utf8'));
-  assert.equal(written.files[filePath].offset, fs.statSync(filePath).size);
+  assert.equal(store.tailState().files[filePath].offset, fs.statSync(filePath).size);
+  assert.equal(fs.existsSync(path.join(memoryDir, 'tail-state.json')), false, 'no file-era state file is written');
 }));
 
 // --- Backfill -------------------------------------------------------------
@@ -223,9 +242,9 @@ test('the tapped offset lands in tail-state.json beside the canon', withHomes(as
 function realStore(memoryDir) {
   return createMemoryStore({
     dir: memoryDir,
+    dbPath: path.join(memoryDir, 'glissa.db'),
     config: { ...resolveMemoryConfig(null), enabled: true },
     logger: { log: () => {}, warn: () => {} },
-    watchCanon: false,
   });
 }
 
@@ -284,50 +303,74 @@ test('re-running a completed backfill writes nothing new', withHomes(async ({ pr
   assert.equal(store.records().length, 1);
 }));
 
-test('a backfill refuses to run while another process holds the canon lock', withHomes(async ({ memoryDir, env, cleanups }) => {
+/*
+ * M12b: the pre-database refusal is gone. Two shells over one store read the same durable offsets and
+ * write disjoint rows, so a CLI backfill beside a live server's own pass now just works.
+ */
+test('a second backfill beside a live one runs instead of refusing, and remembers nothing twice', withHomes(async ({ projects, memoryDir, env, cleanups }) => {
+  seedTranscript(projects, {
+    lines: [
+      claudeAssistant({ text: 'first turn', ts: '2026-08-20T10:00:00.000Z' }),
+      claudeAssistant({ text: 'second turn', ts: '2026-08-20T10:01:00.000Z' }),
+    ],
+  });
   const store = realStore(memoryDir);
   cleanups.push(() => store.stop());
-  const lockPath = path.join(memoryDir, 'canon.lock');
-  fs.writeFileSync(lockPath, '', { flag: 'wx' });
-  cleanups.push(async () => fs.rmSync(lockPath, { force: true }));
-  const ingest = createMemoryIngest({ store, env });
-  cleanups.push(() => ingest.stop());
+  const live = createMemoryIngest({ store, env });
+  cleanups.push(() => live.stop());
+  const cli = createMemoryIngest({ store, env });
+  cleanups.push(() => cli.stop());
 
-  const result = await ingest.backfill();
-  assert.equal(result.ok, false);
-  assert.equal(result.reason, 'locked');
+  const [first, second] = await Promise.all([live.backfill(), cli.backfill()]);
+  assert.deepEqual([first.ok, second.ok], [true, true]);
+  assert.deepEqual([first.reason, second.reason], [null, null]);
+  const texts = store.records().map((record) => record.text);
+  assert.equal(new Set(texts).size, texts.length, 'the id derivation is what makes a double pass idempotent');
+  assert.deepEqual(texts.sort(), ['claude: first turn', 'claude: second turn']);
 }));
 
 // --- The tail-state write race --------------------------------------------
 
 /*
- * Two processes write this file WHOLE (a live server's consumer and the CLI backfill), so an unlocked
- * last-writer-wins could move an offset forward over a range the loser had not read. Every write goes
- * through the canon lock; the short ones piggyback on a pass that already holds it.
+ * Security review, 2026-08-23 (MEDIUM): a SQLITE_BUSY returned all-nulls, which reads exactly like the
+ * write gates refusing every record, so the offsets advanced past a range nothing remembered and no later
+ * pass ever re-read it. A substrate refusal now freezes that transcript's offsets for the process.
  */
-test('the live consumer writes its offsets under the canon lock', withHomes(async ({ projects, memoryDir, env, cleanups }) => {
+test('a batch the substrate refused freezes that transcript offset instead of stepping over it', withHomes(async ({ projects, memoryDir, env, cleanups }) => {
   const store = fakeStore(memoryDir);
   fs.mkdirSync(memoryDir, { recursive: true });
-  const ingest = createMemoryIngest({ store, env });
+  store.refuseAppends = true;
+  const warnings = [];
+  const ingest = createMemoryIngest({ store, env, logger: { log: () => {}, warn: (line) => warnings.push(line) } });
   cleanups.push(() => ingest.stop());
   const source = createAgentLogIngest({ consumers: [ingest.consumer], env, ...inertTimers() });
   cleanups.push(() => source.stop());
 
   const filePath = seedTranscript(projects, { lines: [] });
   await source.start();
-  fs.appendFileSync(filePath, claudeAssistant({ text: 'one turn' }), 'utf8');
+  fs.appendFileSync(filePath, claudeAssistant({ text: 'a refused turn' }), 'utf8');
   await source.poll();
   await ingest.whenIdle();
 
-  assert.ok(store.locks.length > 0, 'no tail-state write escaped the lock');
-  assert.ok(store.locks.every((kind) => kind === 'reentrant'), 'a short write piggybacks rather than blocking');
-  assert.ok(fs.existsSync(path.join(memoryDir, 'tail-state.json')));
+  assert.equal(store.appended.length, 0, 'nothing was remembered');
+  assert.equal(store.tails.size, 0, 'so no offset may claim that range was read');
+  assert.equal(ingest.stats().refused, 1);
+  assert.equal(warnings.some((line) => line.includes('a refused turn')), false, 'the text never reaches a log line');
+
+  // The database recovers, but this transcript's offsets stay frozen: a later one would step over the hole.
+  store.refuseAppends = false;
+  fs.appendFileSync(filePath, claudeAssistant({ text: 'a later turn that lands' }), 'utf8');
+  await source.poll();
+  await ingest.whenIdle();
+  assert.equal(store.appended.length, 1, 'the later record still lands');
+  assert.equal(store.tails.size, 0, 'and the durable offset still points before the lost range');
 }));
 
-test('a write that cannot take the lock is skipped, which costs a re-read and never a range', withHomes(async ({ projects, memoryDir, env, cleanups }) => {
+// A refused offset write costs a re-read of that range, never the range itself.
+test('an offset write the store refuses is skipped, and the record still lands', withHomes(async ({ projects, memoryDir, env, cleanups }) => {
   const store = fakeStore(memoryDir);
   fs.mkdirSync(memoryDir, { recursive: true });
-  store.withCanonLock = async () => ({ locked: false, result: null });
+  store.refuseTailWrites = true;
   const ingest = createMemoryIngest({ store, env });
   cleanups.push(() => ingest.stop());
   const source = createAgentLogIngest({ consumers: [ingest.consumer], env, ...inertTimers() });
@@ -341,7 +384,7 @@ test('a write that cannot take the lock is skipped, which costs a re-read and ne
 
   assert.equal(store.appended.length, 1, 'the record still landed');
   assert.ok(ingest.stats().offsetsSkipped > 0);
-  assert.equal(fs.existsSync(path.join(memoryDir, 'tail-state.json')), false);
+  assert.equal(store.tails.size, 0);
 }));
 
 // --- Backfill bounds and the lane floor -----------------------------------
@@ -428,9 +471,9 @@ test('a lane worktree caught by shape is excluded from the backfill too', withHo
 test('a secret past the old pre-cut is scrubbed rather than split mid-value', withHomes(async ({ projects, memoryDir, env, cleanups }) => {
   const store = createMemoryStore({
     dir: memoryDir,
+    dbPath: path.join(memoryDir, 'glissa.db'),
     config: { ...resolveMemoryConfig(null), enabled: true, maxRecordChars: 12000 },
     logger: { log: () => {}, warn: () => {} },
-    watchCanon: false,
   });
   cleanups.push(() => store.stop());
   const ingest = createMemoryIngest({ store, env });

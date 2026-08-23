@@ -32,7 +32,7 @@
     "shared/paths.js"
   ],
   "engines": {
-    "node": ">=18"
+    "node": ">=22.16.0"
   },
   "author": "John C. Waters <john@johncwaters.com>",
   "license": "MIT",

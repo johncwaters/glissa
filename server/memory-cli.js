@@ -18,16 +18,26 @@ function defaultMakeStore() {
   const { resolveConfigPath, loadConfigFile } = require('./config-store');
   const { createMemoryStore } = require('./memory-store');
   const { configSiblingPath } = require('./pairings-store');
+  const { DB_FILE_NAME } = require('./glissa-db');
   const { resolveMemoryConfig } = require('./core/memory-core');
+  const path = require('node:path');
   const configPath = resolveConfigPath();
   const loaded = loadConfigFile(configPath, { exitOnError: false });
   const resolved = resolveMemoryConfig(loaded?.config ? loaded.config.memory : null);
   return createMemoryStore({
     dir: configSiblingPath(configPath, 'memory'),
+    // The same machine-wide database the server opens, so a CLI pass beside it is one connection more.
+    dbPath: path.join(path.dirname(configPath), DB_FILE_NAME),
     // An operator running this command IS the authorization, exactly like `glissa pack distill`; the
     // enabled flag gates the automatic lane, not a deliberate expunge.
     config: { ...resolved, enabled: true },
   });
+}
+
+// The store is null when node:sqlite is unavailable, which is the one way the whole lane stays off.
+function reportNoStore() {
+  console.error('The memory store could not be opened: this Node build has no node:sqlite (needs 22.16+).');
+  return 1;
 }
 
 async function runForget(needle, makeStore) {
@@ -36,12 +46,13 @@ async function runForget(needle, makeStore) {
     return 1;
   }
   const store = makeStore();
+  if (!store) return reportNoStore();
   try {
     const result = await store.forget(needle);
-    // A held canon lock is not an empty search; reporting "nothing matched" told the operator their
+    // A busy database is not an empty search; reporting "nothing matched" told the operator their
     // secret was absent when it is still on disk.
     if (result && result.reason === 'locked') {
-      console.error('Another process holds the memory store lock. Nothing was written: retry in a moment.');
+      console.error('The memory database was busy for the whole timeout. Nothing was written: retry in a moment.');
       return 1;
     }
     if (!result || !result.ok) {
@@ -75,12 +86,12 @@ async function defaultMakeIngest(store) {
 
 async function runBackfill(makeStore, makeIngest) {
   const store = makeStore();
+  if (!store) return reportNoStore();
   const ingest = await makeIngest(store);
   try {
     const result = await ingest.backfill();
-    // A live server takes the same lock for its pass, and two passes over one tail-state file double-read.
     if (result.reason === 'locked') {
-      console.error('Another process holds the memory store lock, most likely a running Glissa. Nothing was read.');
+      console.error('The memory database was busy for the whole timeout. Nothing was read: retry in a moment.');
       return 1;
     }
     if (!result.ok) {
@@ -115,11 +126,12 @@ function defaultMakeDistiller(store) {
 
 async function runDistill(makeStore, makeDistiller, { dryRun }) {
   const store = makeStore();
+  if (!store) return reportNoStore();
   const distiller = makeDistiller(store);
   try {
     const result = await distiller.runOnce({ dryRun, force: true });
     if (result.status === 'locked') {
-      console.error('Another process holds the memory store lock, most likely a running Glissa. Nothing was written.');
+      console.error('The memory database was busy for the whole timeout. Nothing was written: retry in a moment.');
       return 1;
     }
     if (result.status === 'error') {

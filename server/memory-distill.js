@@ -12,6 +12,7 @@ const {
 } = require('./ephemeral-session');
 const { buildLanePermissions } = require('./core/lane-permissions-core');
 const { createLaneLog } = require('./lane-log');
+const { isBusyError } = require('./glissa-db');
 const { needsDistill } = require('./core/distill-core');
 const { createTickLoop } = require('./lane-runner');
 const core = require('./core/memory-core');
@@ -271,10 +272,10 @@ function createMemoryDistiller(deps = {}) {
           records: selection.records.length,
         });
       }
-      const held = await store.withCanonLock(() => distill({ valid, watermark }));
-      if (!held.locked) return report({ status: 'locked', reason: 'another process holds the canon lock' });
-      return held.result;
+      return await distill({ valid, watermark });
     } catch (error) {
+      // Reported as `locked` because that is what the operator is being told: another writer holds it.
+      if (isBusyError(error)) return report({ status: 'locked', reason: 'the memory database is busy' });
       return report({ status: 'error', reason: firstLine(error.message) });
     } finally {
       running = false;

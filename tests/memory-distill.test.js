@@ -35,11 +35,11 @@ function tempDir() {
 function openStore(dir, clock) {
   const store = createMemoryStore({
     dir,
+    dbPath: path.join(dir, 'glissa.db'),
     config: { ...resolveMemoryConfig(null), enabled: true },
     logger: QUIET,
     now: () => clock.at,
     projectionDebounceMs: 1,
-    watchCanon: false,
   });
   openedStores.push(store);
   return store;
@@ -414,11 +414,11 @@ test('a poisoned manifest cannot walk the read out of the published build', asyn
   try {
     const store = createMemoryStore({
       dir,
+      dbPath: path.join(dir, 'glissa.db'),
       config: { ...resolveMemoryConfig(null), enabled: true },
       logger: { log() {}, warn: (line) => warnings.push(line) },
       now: () => clock.at,
       projectionDebounceMs: 1,
-      watchCanon: false,
     });
     openedStores.push(store);
     await seed(store, clock, ['the poller ticks every 15 minutes']);

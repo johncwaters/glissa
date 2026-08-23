@@ -17,9 +17,13 @@ pairings-seen.json
 # Images uploaded from the phone (POST /upload/:sessionId). Same story: a dev run resolves the in-repo
 # config.json, so they land beside it and must never be swept into a commit by a `git add -A`.
 uploads/
-# Long-term memory canon, signing key and projection. Same story again: a dev run resolves the in-repo
+# Long-term memory signing key and projection. Same story again: a dev run resolves the in-repo
 # config.json, and durable remembered content must never become git-visible.
 /memory/
+# The machine-wide sqlite database (the memory canon lives in it). Same reason, same place.
+/glissa.db
+/glissa.db-wal
+/glissa.db-shm
 .pty-capture/
 # Runtime output (team runs, post-turn checker telemetry, etc). Not a deliverable.
 # Excludes the project pack (.glissa/pack/, .glissa/teams/*/pack/), which AGENTS.md documents as committed.

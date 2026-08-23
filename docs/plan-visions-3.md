@@ -3,7 +3,7 @@
 Status: drafted 2026-08-22; revised the same day after a three-reviewer pass (Codex GPT-5.5
 design review, an architecture review verifying every cited seam against the code, and a
 security review; all three returned "major revision required" on the first draft). M12 through M16
-shipped, M12b held. Predecessors: `docs/archive/plan-navigator.md` (M1 to M5) and
+shipped; M12b shipped 2026-08-23 with the FTS5 index of M17. Predecessors: `docs/archive/plan-navigator.md` (M1 to M5) and
 `docs/archive/plan-navigator-2.md` (M6 to M11), both fully shipped. `AGENTS.md` and the code
 win over this doc. Milestone numbering continues from M11.
 
@@ -63,18 +63,21 @@ Two passes fed this plan: a repo constraints sweep and an external survey of mem
 (mem0, Letta/MemGPT, Zep/Graphiti, LangMem, Cognee, Memori, MCP memory servers, local vector
 options, `node:sqlite`). Conclusions the design rests on:
 
-- **Layered hybrid won**: append-only JSONL canon (audit substrate, crash-safe, matches the
-  recorder/warehouse patterns), a distilled markdown projection for delivery (the portable,
-  vendor-neutral layer), and an OPTIONAL rebuildable `node:sqlite` FTS5 index as a derived
-  cache, deferred past v1. Framework adoption was rejected: every candidate violates the
-  no-deps rule, and the useful part is their schema ideas, which are reimplementable.
-- **`node:sqlite` ships FTS5 compiled in** since Node 22.16.0 (nodejs/node PR 57621), but the
-  module is not yet marked stable and Glissa's floor is Node 18, so the index can only ever be
-  feature-detected, optional, and rebuildable. Absent, retrieval is deterministic lexical
-  filtering over the canon and projection. Deferred to M17.
-- **No dependency-light local vector option survives the no-deps rule.** The only clean route
-  is an Ollama-if-present probe degrading to `{ available: false }` like the rtk savings lane.
-  Deferred to a `rankCandidates` seam; v1 retrieval is lexical.
+- **Layered hybrid won**: an append-only canon (audit substrate, crash-safe), a distilled
+  markdown projection for delivery (the portable, vendor-neutral layer), and a rebuildable
+  `node:sqlite` FTS5 index as a derived cache. Framework adoption was rejected: every candidate
+  violates the no-deps rule, and the useful part is their schema ideas, which are
+  reimplementable. As built (M12b): the canon is a table in the machine-wide database rather
+  than JSONL segments, and the FTS5 index landed with it rather than waiting for M17.
+- **`node:sqlite` ships FTS5 compiled in** since Node 22.16.0 (nodejs/node PR 57621). Operator
+  decision 2026-08-23: that version IS the engine floor (`engines.node` moved from `>=18`), and
+  the module is REQUIRED for the memory lane rather than optional. The store still
+  feature-detects it at construction and stays off with one warning without it; there is no file
+  fallback, because two substrates means two sets of bugs. The index remains derived and
+  rebuildable, and an unavailable one costs relevance rather than an answer.
+- **No dependency-light local vector option survives the no-deps rule.** The Ollama-if-present
+  `rankCandidates` seam was considered and DROPPED (operator decision 2026-08-23); ranking is
+  bm25 over the FTS5 index, folded into the pure lexical scoring as a bounded bonus.
 - **Schema ideas stolen from the frameworks**: bi-temporal validity (`validFrom`/`validTo`),
   supersession chains instead of overwrite, episodic vs semantic layers with background (never
   hot-path) formation, source-kind trust ranking, verifier-gated distillation, operator locks
@@ -109,31 +112,33 @@ outcome of the machine-wide store design pass:
 - All memory-core rules (trust ranks, lineage, locks, supersession, echo suppression, secret
   gates, retrieval scoring) are pure and substrate-blind: they take records, not files.
 
-The substrate is the machine-wide `node:sqlite` database (operator decision 2026-08-22).
-M12 and M13 shipped on files while M12b is held, so the swap now has the M13 writers above it as
-well. What it buys and costs:
+The substrate is the machine-wide `node:sqlite` database (operator decision 2026-08-22, shipped
+in M12b on 2026-08-23). M12 through M16 shipped on files first, so the swap had every writer
+above it when it landed. What it bought and cost:
 
 - The canon becomes an append-only table (id, ts, kind, layer, project, source fields,
   text, validity, supersedes, lineage, locked, sig), with monthly retention as a keyed
   DELETE instead of segment-file drops. The record HMAC survives unchanged: rows are as
   writable by a local process with file access as JSONL lines were, so the trust claim
   cannot lean on the substrate.
-- `tail-state.json`, the delivered-hash (echo suppression) state, and the distill
-  bookkeeping become tables in the same database, which is the cross-key recovery point the
-  review names as primary: a memory write and its bookkeeping agree after a crash by
+- `tail-state.json`, the delivered-hash (echo suppression) state, and the append watermark the
+  distill quiet window reads became tables in the same database, which is the cross-key recovery
+  point the review names as primary: a memory write and its bookkeeping agree after a crash by
   transaction, not by luck.
 - The `O_EXCL` canon lockfile and the fs.watch reload machinery M12 built for the
   CLI-vs-server race are DELETED: SQLite's own cross-process locking (WAL, busy_timeout)
   is the arbiter, and `forget` becomes one transaction (redact rows, insert tombstone,
   mark projection stale) that a concurrent server append cannot interleave with.
 - `node:sqlite` is REQUIRED for the memory lane: at construction the store feature-detects
-  the module (Node 22.16+; Glissa's floor is 18) and on absence the lane stays off with one
-  lane-log warning. No file fallback: two substrates means two sets of bugs.
+  the module and on absence `createMemoryStore` returns null, so the lane stays off with one
+  lane-log warning. No file fallback: two substrates means two sets of bugs. `engines.node` is
+  `>=22.16.0`, the FTS5 floor.
 - No migration framework: the schema is created idempotently at open (`CREATE TABLE IF NOT
   EXISTS`), `PRAGMA user_version` names the shape, and a future shape change is a read-old
-  write-new pass in code, not a framework. The M12 file canon migrates the same way: on
-  first database open, existing `canon-*.jsonl` segments are imported through the normal
-  verify-or-demote gate, then renamed `.imported`.
+  write-new pass in code, not a framework. There is NO migration of the M12 file canon
+  (operator decision 2026-08-23): the database starts empty, and existing `canon-*.jsonl`
+  segments are ignored and left untouched on disk. The import-through-verify-or-demote clause
+  this section used to carry is dead.
 
 ### Projection versioning (the mill pattern) [SHIPPED with M15]
 
@@ -160,27 +165,37 @@ against. As built:
   (supersession chains), not in kept build generations.
 - Deliberately deferred to M16: every delivery naming its version in the fenced prompt header.
 
-### Store layout (file substrate, as shipped in M12; replaced by M12b)
+### Store layout (as built after M12b)
 
-Everything lives under `configSiblingPath(configPath, 'memory')`, so a temp `GLISSA_CONFIG`
-never writes into the real `~/.glissa` (same rule as uploads, recordings, warehouse):
+The DURABLE state is rows in `glissa.db` beside the resolved config file; only the projection and
+the signing key are files, under `configSiblingPath(configPath, 'memory')`, so a temp
+`GLISSA_CONFIG` never writes into the real `~/.glissa` (same rule as uploads, recordings,
+warehouse):
 
-- `memory/canon-<YYYYMM>.jsonl`: the append-only canon, one segment per month. A record is
-  never rewritten in place; retention (`memoryRetainDays`, default 365) drops whole expired
-  segments on load, which is how append-only and pruning coexist. Appends go through a new
-  serialized `appendJsonLine` primitive in `server/json-file.js` (it has only whole-file
-  atomic writers today).
+- `glissa.db`, `memory_records`: the append-only canon, one row per record, carrying its
+  `segment_key` so retention (`memoryRetainDays`, default 365) stays the same monthly rule as a
+  keyed DELETE rather than a segment-file drop. A row is never rewritten in place except by
+  `forget`, and `validTo` is DERIVED from the supersession chain at read time, never stored back.
+- `memory_tail_state`, `memory_delivered_hashes`, `memory_meta`: the ingest offsets, the echo
+  suppression set, and the append watermark the distill quiet window reads. One row per
+  transcript rather than one whole-file write, which is what retired the tail-state race.
+- `memory_records_fts`: the derived FTS5 index. Rebuildable from `memory_records` at any time, and
+  a count that disagrees with the canon is answered by a rebuild at open rather than a repair.
 - `memory/dist/current/MEMORY.md` plus `memory/dist/current/projects/<tag>.md`: the distilled
   projection, published by the versioned writer (M15), project-partitioned. `dist/` is its own directory so any
   future watcher or pack source sees ONLY projection writes, never canon appends, tail-state
   churn, or index WAL traffic.
-- `memory/tail-state.json`: the memory consumer's own durable ingestion offsets.
 - `memory/hmac-key`: store-minted signing secret, mode 0600, created on first enable.
+
+The file-era layout M12 shipped (`memory/canon-<YYYYMM>.jsonl` segments, `memory/canon.lock`,
+`memory/tail-state.json`) is gone, and an install carrying those files boots empty and leaves them
+where they are.
 
 Housekeeping shipped WITH M12, not after: `memory/` added to
 `ingest-fs-core.daemonWriteRules` ignores (or the store's own writes publish fs events and
 poke the dispatch movement signal) and to `.gitignore` (in dev the config siblings live in
-the repo checkout, and durable memory must never become git-visible).
+the repo checkout, and durable memory must never become git-visible). M12b added `/glissa.db`
+and its WAL siblings to `.gitignore` for the same reason.
 
 ### Canon record shape
 
@@ -276,7 +291,8 @@ only through the stamped, post-verified distill path, never through transcript i
 
 `server/core/memory-core.js` (pure) plus `server/memory-store.js` (thin IO shell: sync load
 at boot with signature verification and segment prune, serialized appends, `stop()` drains).
-The `appendJsonLine` primitive lands in `server/json-file.js`. The `forget` CLI lands here.
+The `appendJsonLine` primitive lands in `server/json-file.js` (M12b moved the canon off it; it is
+still the shared JSONL append primitive). The `forget` CLI lands here.
 The ignore-list and `.gitignore` entries land here. And a TRIVIAL deterministic projection
 (dump valid canon records to `dist/` markdown, grouped by kind and project, no model
 involved) lands here too, so every later milestone has an observable surface and the IDE
@@ -290,31 +306,66 @@ ENABLING memory, but on an enabled store a local process can still steer content
 sessions whose transcripts are ingested; that is inherent to the localhost trust boundary,
 and it is why nothing ingested can exceed `reported` rank.
 
-### M12b: database substrate and versioned projection (implementation ON HOLD)
+### M12b: database substrate and the FTS5 retrieval index [SHIPPED]
 
-Held (operator decision 2026-08-22): implementing the SQLite substrate now would collide
-with the machine-wide store work in flight elsewhere. The decision stands (memory IS a DB
-tenant, projection IS mill-versioned); only the build waits for that work to land, and M13+
-proceed on the shipped file substrate until then.
+Shipped 2026-08-23. The versioned projection half of this milestone had already landed with M15
+(see "Projection versioning"), so what shipped here is the substrate swap plus the M17 index. As
+built:
 
-The swap described in "Store contract vs substrate", plus "Projection versioning", as one
-milestone: `memory-store.js` moves onto the machine-wide `node:sqlite` database (canon,
-tail-state, echo-hash, and distill-bookkeeping tables; schema idempotent at open; module
-feature-detected, lane off with a warning without it), the file-era lockfile and watch
-machinery is deleted, the one-time `.jsonl` import runs through verify-or-demote, `forget`
-becomes a single transaction, and the projection starts publishing hash-versioned
-current/previous builds with the unchanged-skip and manifest. `memory-core` gains only pure
-additions (projection build planning with version hash, watermark rules); every trust rule
-is untouched. Tests move with it: the cross-process forget race collapses into a
-transactional test, the projection determinism test becomes a version-stability test
-(same records, byte-identical build, same version), and a new test pins the unchanged-skip
-and the rotation. Security review gate applies again before commit (the trust kernel's IO
-changes substrate).
+- **`server/glissa-db.js`** is the machine-wide opener: feature detect, `journal_mode=WAL`,
+  `busy_timeout`, `PRAGMA user_version = 1`, a 0600 mode on the file, and `defaultDbPath()`
+  beside the resolved config file. Memory is its first tenant, so every table it owns is
+  prefixed `memory_`; **`server/memory-db.js`** holds that tenant's DDL, prepared statements and
+  row mapping, and nothing else. Every decision stayed in `server/core/memory-core.js`.
+- **Fresh start, no migration** (operator decision): the database opens empty and existing
+  `canon-*.jsonl` segments are ignored and left untouched, pinned by a test.
+- **`engines.node` is `>=22.16.0`**, the FTS5 floor. `node:sqlite` is required for the lane and
+  `createMemoryStore` returns null without it, one warning, no file fallback.
+- **The lockfile and the watch are deleted.** `canon.lock` (pid:nonce, stale re-read, the
+  reentrant `withCanonLock`), the `fs.watch` reload, and `tail-state.json` are all gone.
+  `forget` is ONE transaction (redact, remove, tombstone) that rolls back whole, and a live
+  store notices another process's commit through `PRAGMA data_version` on its next read rather
+  than by watching a directory. A `glissa memory backfill` beside a running server no longer
+  refuses; a database busy for the whole timeout is still reported to the operator as a refusal
+  rather than as a clean pass.
+- **Writes are batched.** The M14 consumer hands a whole tick's records to `appendMany`, which is
+  one transaction and one prepared INSERT per record, because the commit runs on the event loop
+  every session shares.
+- **The FTS5 index is derived and rebuildable.** `memory_records_fts` is refilled from the canon
+  by `rebuildSearchIndex()`, and a row count that disagrees with the canon triggers exactly that
+  at open. `retrieve()` asks it for bm25-ranked CANDIDATES and the pure rules still gate and rank
+  them: `retrieveMemories` gained an optional `matchedIds`, folded in as a bounded bonus, so with
+  no index the scoring is byte-identical to the lexical path. Query text is tokenized by the
+  existing pure tokenizer (`[a-z0-9]+` terms only) and each term is quoted, so remembered or
+  operator text can never carry an FTS5 operator. An unavailable index costs relevance, never an
+  answer: it falls back silently with one debug note.
+- **The Ollama `rankCandidates` seam was dropped** (operator decision), so M17 keeps only the
+  non-Claude pack delivery adapter.
+- **Security review, 2026-08-23, five findings closed before commit.** HIGH: a `forget` left the expunged
+  plaintext greppable in the database file, a regression against the file era's tmp+rename segment
+  rewrite. It takes three writes to undo, all verified necessary together: `PRAGMA secure_delete = ON`
+  zeroes the freed row, FTS5's own `'rebuild'` command frees the term data a DELETE only tombstones, and
+  `PRAGMA wal_checkpoint(TRUNCATE)` reclaims the frames the commit left. MEDIUM: `data_version` was
+  sampled AFTER the read and after the commit, so a commit landing in that window was stamped as
+  already-loaded and swallowed forever; it is now sampled before the read and inside the write
+  transaction. MEDIUM: a `SQLITE_BUSY` returned all-nulls, indistinguishable from the write gates
+  refusing every record, so the ingest advanced its offsets past a range nothing remembered; `appendMany`
+  now reports `refused` and that transcript's offsets freeze for the process. LOW: `forget` now drops
+  `dist/previous/` and `dist-pending/`, which held the pre-forget text. LOW: the database file is
+  pre-created 0600 rather than chmod'd after sqlite creates it 0666-and-umask (the WAL and SHM inherit
+  that mode).
+- Tests: `tests/memory-db.test.js` is new (schema idempotence, keyed month DELETE, index rebuild,
+  bounded tail and delivered-hash tables, rollback, `data_version`); `tests/memory-store.test.js`
+  moved to the substrate and gained the fresh-start pin, the transactional-forget pin, the
+  unchanged-skip and rotation pin, the version-stability pin, the no-sqlite pin and the FTS5
+  ranking and fallback pins, plus the security review's canary (a forgotten secret survives nowhere under
+  the store, database and WAL included) and its frozen-offset pin. The cross-process forget race test
+  collapsed into a `data_version` reload test.
 
 ### M13: Visions-surface writers (rescoped) [SHIPPED]
 
-Shipped 2026-08-23 on the M12 file substrate (M12b is on hold, so the writers were built against
-`memory-store.js` as it stands). The record shaping is pure, in `server/core/visions-memory-core.js`;
+Shipped 2026-08-23 on the M12 file substrate, which M12b moved under them the same day without
+touching a writer. The record shaping is pure, in `server/core/visions-memory-core.js`;
 `server/visions-wiring.js` takes the store as an injected `getMemoryStore` thunk (`backend.js`
 constructs it ABOVE the lane for that), every writer is a no-op without one, all writes ride one
 serialized chain, and a refused or throwing store costs a count or a warning, never the relay or the
@@ -379,7 +430,7 @@ This is fan-out plumbing plus a scrub decision, not a mapper tweak:
   the memory consumer. A machine with `config.ingest` on and `config.memory` off must
   produce byte-identical ring and broadcast content to today, pinned by test: without this,
   the mapper change would push operator prompt text onto the unauthenticated control WS.
-- **Durable offsets are the memory consumer's own state** (`memory/tail-state.json`, keyed
+- **Durable offsets are the memory consumer's own state** (`memory_tail_state` since M12b, keyed
   `path + size + mtime + offset`; any mismatch means EOF-restart). The shared source keeps
   its by-design EOF-start in-memory tails and eviction; its semantics do not change for the
   existing ring consumer.
@@ -449,7 +500,7 @@ were read, not that the claims are faithful:
 Config: `config.memory.distill`, file-only like the rest of `config.memory`. Automatic when memory is on
 per the operator's "never thought about" rule, with `enabled: false` as the kill switch. CLI:
 `glissa memory distill [--dry-run]`; a dry run reads and hashes only and spawns nothing, and a real run is
-refused while another process holds the canon lock, exactly like `memory backfill`.
+refused only when the database is busy for its whole timeout, exactly like `memory backfill`.
 
 Security, revised 2026-08-23 after a security review returned BLOCK on the unscoped `--allowedTools=Write`
 and after live-probing the real CLI (2.1.241; every clause and its counter-example is in
@@ -533,12 +584,9 @@ made in the build:
 
 ### M17: follow-ons (explicitly post-v1)
 
-In no committed order:
+The retrieval index shipped early, with M12b. The `rankCandidates` seam (an Ollama-if-present
+embedding probe) was DROPPED, operator decision 2026-08-23. What is left:
 
-- **Retrieval index**: FTS5 tables in the machine-wide store, if the design pass ("Store
-  contract vs substrate") adopts it; no per-feature index file exists before then. Derived
-  and rebuildable from the canon, delete on any doubt.
-- **`rankCandidates` seam**: Ollama-if-present embedding probe, absent-by-default.
 - **Non-CC pack delivery adapter**: reaches non-Claude harnesses once the agent-adapters
   plan ships its capability gating.
 

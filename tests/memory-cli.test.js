@@ -1,8 +1,8 @@
 'use strict';
 
-// `glissa memory` reporting. Two rules, both about not lying to the operator: a held canon lock must not
-// read as an empty search, and a backfill refused because a live server holds that lock must say so
-// rather than report a clean pass that never ran.
+// `glissa memory` reporting. Two rules, both about not lying to the operator: a write the database
+// refused must not read as an empty search, and a backfill that never ran must say so rather than report
+// a clean pass. The refusal is a busy database now (M12b), not the file-era canon lock.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -57,7 +57,7 @@ async function captureCli(args, store, ingest = null, distiller = null) {
   }
 }
 
-test('a forget blocked by the canon lock says so instead of reporting no match', async () => {
+test('a forget blocked by a busy database says so instead of reporting no match', async () => {
   const store = fakeStore({
     ok: false, reason: 'locked', removed: 0, redacted: 0, segments: 0, tombstoneId: null,
   });
@@ -65,7 +65,7 @@ test('a forget blocked by the canon lock says so instead of reporting no match',
   assert.equal(code, 1);
   assert.equal(logged.length, 0);
   assert.equal(errored.length, 1);
-  assert.match(errored[0], /lock/i);
+  assert.match(errored[0], /busy/i);
   assert.equal(errored[0].includes('No remembered record matched'), false);
   assert.equal(store.stopped, 1);
 });
@@ -92,13 +92,13 @@ test('a successful forget reports its counts and exits zero', async () => {
   assert.equal(store.stopped, 1);
 });
 
-test('a backfill blocked by the canon lock names the lock instead of reporting a clean pass', async () => {
+test('a backfill blocked by a busy database says so instead of reporting a clean pass', async () => {
   const ingest = fakeIngest({ ok: false, reason: 'locked', files: 0, bytesRead: 0, partial: false });
   const { code, logged, errored } = await captureCli(['backfill'], fakeStore(null), ingest);
   assert.equal(code, 1);
   assert.equal(logged.length, 0);
   assert.equal(errored.length, 1);
-  assert.match(errored[0], /lock/i);
+  assert.match(errored[0], /busy/i);
   assert.equal(ingest.stopped, 1);
 });
 
@@ -138,12 +138,12 @@ test('a dry run reports what would be distilled and spawns nothing', async () =>
   assert.equal(distiller.stopped, 1);
 });
 
-test('a distill blocked by the canon lock says so instead of reporting a clean pass', async () => {
-  const distiller = fakeDistiller(distillReport({ status: 'locked', reason: 'another process holds the canon lock' }));
+test('a distill blocked by a busy database says so instead of reporting a clean pass', async () => {
+  const distiller = fakeDistiller(distillReport({ status: 'locked', reason: 'the memory database is busy' }));
   const { code, logged, errored } = await captureCli(['distill'], fakeStore(null), null, distiller);
   assert.equal(code, 1);
   assert.equal(logged.length, 0);
-  assert.match(errored[0], /lock/i);
+  assert.match(errored[0], /busy/i);
 });
 
 test('a build held for locked review names the pending directory and fails the command', async () => {

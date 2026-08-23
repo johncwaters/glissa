@@ -1,14 +1,25 @@
 'use strict';
 
-// M12 of docs/plan-visions-3.md: the thin IO shell around server/core/memory-core.js. Every decision it
-// makes comes from that core; this file only reads, appends, projects and drains.
+/*
+ * M12 of docs/plan-visions-3.md, on the M12b substrate: the thin IO shell around
+ * server/core/memory-core.js. Every decision it makes comes from that core; this file only reads,
+ * appends, projects and drains.
+ *
+ * The canon lives in the machine-wide database (server/memory-db.js), which is what retired the O_EXCL
+ * lockfile and the fs.watch reload: SQLite arbitrates the CLI-vs-server race itself, and a write another
+ * connection committed is noticed by `PRAGMA data_version` rather than by watching a directory. The
+ * PROJECTION is still plain markdown on disk, published by the one mill-style versioned writer below.
+ *
+ * PRIVACY: remembered text never reaches a log line here. Counts, ids, paths and verdicts do.
+ */
 
 const nodeCrypto = require('node:crypto');
 const nodeFs = require('node:fs');
 const path = require('node:path');
 
-const { canonicalizePath } = require('../shared/paths');
-const { appendJsonLine, writeTextAtomic, writeTextAtomicSync } = require('./json-file');
+const { defaultDbPath, isBusyError } = require('./glissa-db');
+const { createMemoryDb } = require('./memory-db');
+const { writeTextAtomic, writeTextAtomicSync } = require('./json-file');
 const { createLaneLog } = require('./lane-log');
 const core = require('./core/memory-core');
 const distillCore = require('./core/memory-distill-core');
@@ -23,19 +34,10 @@ const DEFAULT_PROJECTION_DEBOUNCE_MS = 500;
 const HMAC_KEY_BYTES = 32;
 const DIR_MODE = 0o700;
 const FILE_MODE = 0o600;
-
-// Cross-process write lock over the canon, mirroring server/pairings-store.js: the `glissa memory
-// forget` CLI and a live server both rewrite these segments, and a rewrite is read-then-rename.
-const CANON_LOCK_FILE = 'canon.lock';
-const LOCK_RETRY_MS = 50;
-const LOCK_MAX_ATTEMPTS = 10;
-const LOCK_STALE_MS = 5000;
-// Comfortably inside LOCK_STALE_MS, so a long pass keeps a lock nobody may treat as abandoned.
-const LOCK_REFRESH_MS = 1500;
 const MAX_DELIVERED_HASHES = 2000;
-const CANON_WATCH_DEBOUNCE_MS = 200;
-// The longest an unbroken event stream may defer the trailing refresh; without it a storm defers forever.
-const CANON_WATCH_MAX_WAIT_MS = 1000;
+// The index narrows the field; the pure rules still rank it, so the candidate set is wider than the answer.
+const SEARCH_CANDIDATE_FACTOR = 10;
+const SEARCH_CANDIDATE_FLOOR = 100;
 
 function defaultMemoryDir() {
   const { resolveConfigPath } = require('./config-store');
@@ -43,15 +45,14 @@ function defaultMemoryDir() {
   return configSiblingPath(resolveConfigPath(), MEMORY_DIR_NAME);
 }
 
-// Its own timer, never the injected one (that pair belongs to the projection debounce, which tests
-// replace with a queue that never fires) and never unref'd: an awaited retry is work still in flight.
-function delay(ms) {
-  return new Promise((resolve) => { setTimeout(resolve, ms); });
-}
-
+/**
+ * @returns {object|null} null when `node:sqlite` is unavailable or the database cannot be opened, which
+ *   is how the lane stays off with one warning rather than falling back to a second substrate.
+ */
 function createMemoryStore(deps = {}) {
   const {
     dir = defaultMemoryDir(),
+    dbPath = defaultDbPath(),
     config = core.resolveMemoryConfig(null),
     fs = nodeFs,
     fsPromises = nodeFs.promises,
@@ -62,7 +63,8 @@ function createMemoryStore(deps = {}) {
     projectionDebounceMs = DEFAULT_PROJECTION_DEBOUNCE_MS,
     setTimeoutFn = setTimeout,
     clearTimeoutFn = clearTimeout,
-    watchCanon = true,
+    openDb = createMemoryDb,
+    busyTimeoutMs = undefined,
   } = deps;
 
   const log = createLaneLog({ prefix: '[memory]', logger, debugFlag: debug });
@@ -73,15 +75,21 @@ function createMemoryStore(deps = {}) {
 
   let signingKey = null;
   let records = [];
+  let cachedDataVersion = null;
+  let cachedLastAppendAt = 0;
   let stopped = false;
   let mutationChain = Promise.resolve();
   let projectionChain = Promise.resolve();
   let projectionTimer = null;
   let projectionDirty = false;
-  let lastAppendAt = 0;
 
-  function canonPath(segmentKey) {
-    return path.join(dir, core.segmentFileName(segmentKey));
+  let db = null;
+  try {
+    fs.mkdirSync(dir, { recursive: true, mode: DIR_MODE });
+    db = openDb({ dbPath, busyTimeoutMs });
+  } catch (error) {
+    log.warn(`the memory lane stays off: ${error.message}`);
+    return null;
   }
 
   // POSIX only: Windows reports no uid and no meaningful mode, so a planted key cannot be told apart
@@ -113,67 +121,19 @@ function createMemoryStore(deps = {}) {
     return minted;
   }
 
-  function segmentKeysFrom(names) {
-    const keys = [];
-    for (const name of Array.isArray(names) ? names : []) {
-      const key = core.parseSegmentFileName(name);
-      if (key) keys.push(key);
-    }
-    keys.sort();
-    return keys;
-  }
-
-  function segmentKeysOnDisk() {
-    try {
-      return segmentKeysFrom(fs.readdirSync(dir));
-    } catch {
-      return [];
-    }
-  }
-
-  async function segmentKeysOnDiskAsync() {
-    try {
-      return segmentKeysFrom(await fsPromises.readdir(dir));
-    } catch {
-      return [];
-    }
-  }
-
-  function readSegmentLines(segmentKey) {
-    try {
-      return fs.readFileSync(canonPath(segmentKey), 'utf8').split('\n');
-    } catch {
-      return [];
-    }
-  }
-
-  async function readSegmentLinesAsync(segmentKey) {
-    try {
-      return (await fsPromises.readFile(canonPath(segmentKey), 'utf8')).split('\n');
-    } catch {
-      return [];
-    }
-  }
-
-  function verifiedRecordFromLine(line) {
-    let parsed = null;
-    try {
-      parsed = JSON.parse(line);
-    } catch {
-      return null;
-    }
-    const shape = core.validateMemoryRecord(parsed, { maxChars: config.maxRecordChars });
+  // A row is trusted exactly as far as a canon LINE was: shape-checked, then verified or demoted.
+  function verifiedRecord(raw) {
+    const shape = core.validateMemoryRecord(raw, { maxChars: config.maxRecordChars });
     if (!shape.valid) return null;
     return core.verifyOrDemote(shape.record, signingKey);
   }
 
-  function assembleRecords(lines) {
+  function assembleRecords(rawRecords) {
     const loaded = [];
     let invalid = 0;
     let demoted = 0;
-    for (const line of lines) {
-      if (!line.trim()) continue;
-      const checked = verifiedRecordFromLine(line);
+    for (const raw of rawRecords) {
+      const checked = verifiedRecord(raw);
       if (!checked) {
         invalid += 1;
         continue;
@@ -187,117 +147,48 @@ function createMemoryStore(deps = {}) {
     };
   }
 
-  // Order-independent so an append and a reload of the same canon do not read as a change.
-  function recordsSignature(list) {
-    return JSON.stringify(
-      list
-        .map((record) => [record.id, record.text, record.validTo, record.source.kind, record.lineage, record.locked])
-        .sort()
-    );
-  }
-
-  // Boot only, a one-shot cold path: the whole canon is read once before the server serves anything.
-  function loadSync() {
-    fs.mkdirSync(dir, { recursive: true, mode: DIR_MODE });
-    signingKey = readOrMintSigningKey();
-    const at = now();
-    const keys = segmentKeysOnDisk();
-    const expired = new Set(core.expiredSegmentKeys(keys, { now: at, retainDays: config.retainDays }));
-    let droppedSegments = 0;
-    for (const key of expired) {
-      try {
-        fs.rmSync(canonPath(key), { force: true });
-        droppedSegments += 1;
-      } catch {
-        log.warn(`could not drop expired segment ${key}`);
-      }
-    }
-    const live = keys.filter((key) => !expired.has(key));
-    const lines = [];
-    for (const key of live) lines.push(...readSegmentLines(key));
-    const assembled = assembleRecords(lines);
+  /*
+   * The version is sampled BEFORE the read, never after: a commit landing between the two would
+   * otherwise be stamped as already-loaded and swallowed forever. Sampling first can only cost a
+   * redundant reload, which is the safe direction.
+   */
+  function refreshFromDb() {
+    cachedDataVersion = db.dataVersion();
+    const assembled = assembleRecords(db.listRecords());
     records = assembled.records;
-    log.note(
-      `loaded ${records.length} record(s) from ${live.length} segment(s): `
-      + `${droppedSegments} expired segment(s) dropped, ${assembled.dropped} over cap, `
-      + `${assembled.invalid} invalid, ${assembled.demoted} demoted`
-    );
-  }
-
-  // The async twin of loadSync, for the watcher and for the reseal: another process rewriting the canon
-  // under a live server must not leave it serving text that is no longer on disk.
-  async function reloadFromDisk() {
-    const lines = [];
-    for (const key of await segmentKeysOnDiskAsync()) lines.push(...await readSegmentLinesAsync(key));
-    const assembled = assembleRecords(lines);
-    const before = recordsSignature(records);
-    records = assembled.records;
-    return { changed: recordsSignature(records) !== before, ...assembled };
-  }
-
-  const lockPath = path.join(dir, CANON_LOCK_FILE);
-  let canonLockDepth = 0;
-
-  function readLockNonce() {
-    try {
-      return fs.readFileSync(lockPath, 'utf8');
-    } catch {
-      return null;
-    }
+    return assembled;
   }
 
   /*
-   * Real wall clock, not the injected now(): this is compared against a filesystem mtime. The nonce is
-   * what makes the removal safe under a race: two processes can both judge one lock stale, and without
-   * re-reading, the second unlink deletes the FRESH lock the first had just taken. Only the exact holder
-   * judged stale is removed, and a lock whose nonce or mtime moved in between is left alone.
+   * The whole cross-process story after the lockfile. `PRAGMA data_version` moves only when ANOTHER
+   * connection commits, so a `glissa memory forget` run against a live server is noticed on the next
+   * read instead of being watched for, and this store can never serve text another process expunged.
    */
-  function removeStaleLock() {
-    const nonce = readLockNonce();
-    if (nonce === null) return true;
-    let staleAtMs = 0;
+  function currentRecords() {
+    if (stopped) return records;
     try {
-      const stat = fs.statSync(lockPath);
-      if (Date.now() - stat.mtimeMs <= LOCK_STALE_MS) return false;
-      staleAtMs = stat.mtimeMs;
+      if (db.dataVersion() === cachedDataVersion) return records;
     } catch {
-      return true;
+      return records;
     }
-    try {
-      if (readLockNonce() !== nonce) return false;
-      if (fs.statSync(lockPath).mtimeMs !== staleAtMs) return false;
-      fs.unlinkSync(lockPath);
-      log.warn('removed a stale canon write lock left by an earlier process');
-      return true;
-    } catch {
-      return true;
-    }
+    const assembled = refreshFromDb();
+    log.note(`the canon changed under us: reloaded ${records.length} record(s), ${assembled.demoted} demoted`);
+    return records;
   }
 
-  async function acquireCanonLock() {
-    for (let attempt = 0; attempt < LOCK_MAX_ATTEMPTS; attempt += 1) {
-      try {
-        const handle = fs.openSync(lockPath, 'wx', FILE_MODE);
-        // The holder's identity, so a stale-lock removal can prove it is deleting the lock it judged.
-        fs.writeSync(handle, `${process.pid}:${randomBytes(8).toString('hex')}\n`);
-        fs.closeSync(handle);
-        return true;
-      } catch (error) {
-        if (error.code !== 'EEXIST') {
-          log.warn(`could not take the canon write lock: ${error.code || error.message}`);
-          return false;
-        }
-      }
-      if (removeStaleLock()) continue;
-      await delay(LOCK_RETRY_MS);
-    }
-    return false;
-  }
-
-  function releaseCanonLock() {
-    try {
-      fs.unlinkSync(lockPath);
-    } catch {}
+  // Boot only, a one-shot cold path: the whole canon is read once before the server serves anything.
+  function load() {
+    signingKey = readOrMintSigningKey();
+    const expired = core.expiredSegmentKeys(db.segmentKeys(), { now: now(), retainDays: config.retainDays });
+    const droppedRows = expired.length === 0 ? 0 : db.deleteSegments(expired);
+    db.ensureSearchIndex();
+    const assembled = refreshFromDb();
+    cachedLastAppendAt = db.lastAppendAt();
+    log.note(
+      `loaded ${records.length} record(s): ${expired.length} expired segment(s) dropped `
+      + `(${droppedRows} record(s)), ${assembled.dropped} over cap, `
+      + `${assembled.invalid} invalid, ${assembled.demoted} demoted`
+    );
   }
 
   function queue(work) {
@@ -430,7 +321,7 @@ function createMemoryStore(deps = {}) {
    */
   async function writeProjection({ force = false } = {}) {
     projectionDirty = false;
-    const valid = core.selectValidRecords(records, { now: now() });
+    const valid = core.selectValidRecords(currentRecords(), { now: now() });
     const published = await readPublishedManifest();
     if (!force && published && published.source === 'distill') {
       log.debugNote(() => 'a distilled projection is published: the fallback renderer wrote nothing');
@@ -456,15 +347,6 @@ function createMemoryStore(deps = {}) {
     if (projectionTimer && typeof projectionTimer.unref === 'function') projectionTimer.unref();
   }
 
-  async function appendSigned(record) {
-    await appendJsonLine(canonPath(core.segmentKeyForTs(record.ts)), record, {
-      fsPromises, mkdir: true, mode: FILE_MODE,
-    });
-    lastAppendAt = now();
-    records = core.applySupersessions([...records, record]);
-    scheduleProjection();
-  }
-
   // A supersession must carry its ancestry or the core refuses it; the store is the only place that can
   // resolve the superseded record's own rank, so a caller cannot skip the lineage cap by omission.
   function withResolvedAncestors(input) {
@@ -477,69 +359,131 @@ function createMemoryStore(deps = {}) {
   }
 
   // Trust fields come from the CALLING path, never from the remembered text.
-  function append(input) {
-    return queue(async () => {
-      const built = core.buildMemoryRecord(withResolvedAncestors(input), {
-        now: now(), maxChars: config.maxRecordChars, retainDays: config.retainDays,
-      });
-      if (!built.ok) {
-        log.debugNote(() => `record rejected: ${built.reason}`);
-        return null;
-      }
-      // The id is the moment plus the text, so a re-read of the same transcript bytes is idempotent.
-      if (records.some((record) => record.id === built.record.id)) {
-        log.debugNote(() => 'record already remembered');
-        return null;
-      }
-      const signed = core.withSignature(built.record, signingKey);
-      await appendSigned(signed);
-      return signed;
+  function buildForAppend(input) {
+    const built = core.buildMemoryRecord(withResolvedAncestors(input), {
+      now: now(), maxChars: config.maxRecordChars, retainDays: config.retainDays,
     });
+    if (!built.ok) {
+      log.debugNote(() => `record rejected: ${built.reason}`);
+      return null;
+    }
+    return core.withSignature(built.record, signingKey);
   }
 
   /*
-   * Planned against the SEGMENT FILE, never against the in-memory set: a line the kind cap evicted, or
-   * one written into a segment its ts does not name, is still text on disk that a later boot would
-   * project. Every surviving record is re-signed from its VERIFIED (so possibly demoted) self, so an
+   * One transaction per batch, because the M14 consumer hands this whole ticks' worth of records at once
+   * and every session on this machine shares the event loop the commit runs on. The id is the moment plus
+   * the text, so a re-read of the same transcript bytes is idempotent: the INSERT is ignored.
+   *
+   * `refused` separates a SUBSTRATE refusal from the gates refusing every record: they look identical in
+   * the returned array, and a caller that reads them as the same advances its durable offset past a range
+   * nothing remembered.
+   */
+  async function appendMany(inputs) {
+    const outcome = await queue(async () => {
+      const list = Array.isArray(inputs) ? inputs : [];
+      if (list.length === 0) return { records: [], refused: false };
+      currentRecords();
+      const observedBefore = cachedDataVersion;
+      const written = [];
+      let observedInside = observedBefore;
+      let stored = [];
+      try {
+        stored = db.transaction(() => {
+          const out = [];
+          for (const input of list) {
+            const signed = buildForAppend(input);
+            const accepted = signed !== null && db.insertRecord(signed);
+            if (!accepted) log.debugNote(() => (signed === null ? 'record rejected' : 'record already remembered'));
+            out.push(accepted ? signed : null);
+            if (accepted) written.push(signed);
+          }
+          if (written.length > 0) db.setLastAppendAt(now());
+          // Sampled under the write lock, so no other connection can commit between here and our COMMIT.
+          observedInside = db.dataVersion();
+          return out;
+        });
+      } catch (error) {
+        if (!isBusyError(error)) throw error;
+        log.warn('the memory database is busy: nothing was appended');
+        return { records: list.map(() => null), refused: true };
+      }
+      // A commit that landed between our last read and the transaction is one we never loaded.
+      if (observedInside !== observedBefore) refreshFromDb();
+      if (observedInside === observedBefore && written.length > 0) {
+        records = core.applySupersessions([...records, ...written]);
+        cachedDataVersion = observedInside;
+      }
+      if (written.length === 0) return { records: stored, refused: false };
+      cachedLastAppendAt = db.lastAppendAt();
+      scheduleProjection();
+      return { records: stored, refused: false };
+    });
+    if (!outcome) return { records: [], refused: false };
+    return outcome;
+  }
+
+  function append(input) {
+    return appendMany([input]).then((outcome) => outcome.records[0] || null);
+  }
+
+  /*
+   * The one sanctioned rewrite of an append-only canon, and ONE transaction: the redactions, the removals
+   * and the audit tombstone land together or not at all, so a concurrent append cannot interleave with a
+   * half-applied expunge. Every survivor is re-signed from its VERIFIED (so possibly demoted) self, so an
    * unsigned forgery cannot be laundered into a signed operator record by an operator running forget.
    */
-  async function rewriteSegmentForForget(segmentKey, matcher) {
-    const kept = [];
+  function runForget(matcher) {
     const removedIds = [];
     const redactedIds = [];
-    let droppedLines = 0;
-    for (const line of await readSegmentLinesAsync(segmentKey)) {
-      if (!line.trim()) continue;
-      const checked = verifiedRecordFromLine(line);
-      if (!checked && !core.matchesForgetPattern(line, matcher)) {
-        kept.push(line);
-        continue;
-      }
+    const segments = new Set();
+    let droppedRows = 0;
+    for (const raw of db.listRecords()) {
+      const checked = verifiedRecord(raw);
+      // A row too malformed to become a record still holds its bytes, so the expunge judges it RAW.
       if (!checked) {
-        droppedLines += 1;
+        if (!core.matchesForgetPattern(JSON.stringify(raw), matcher)) continue;
+        db.deleteRecord(raw.id);
+        segments.add(core.segmentKeyForTs(raw.ts));
+        droppedRows += 1;
         continue;
       }
       const verdict = core.decideForget(checked.record, matcher);
-      if (verdict.action === 'keep') {
-        kept.push(line);
-        continue;
-      }
+      if (verdict.action === 'keep') continue;
+      segments.add(core.segmentKeyForTs(checked.record.ts));
       if (verdict.action === 'remove') {
+        db.deleteRecord(checked.record.id);
         removedIds.push(checked.record.id);
         continue;
       }
+      db.updateRecordText(core.withSignature({ ...checked.record, text: verdict.text }, signingKey));
       redactedIds.push(checked.record.id);
-      kept.push(JSON.stringify(core.withSignature({ ...checked.record, text: verdict.text }, signingKey)));
     }
-    const changed = removedIds.length + redactedIds.length + droppedLines > 0;
-    if (!changed) return { changed, removedIds, redactedIds, droppedLines };
-    await writeTextAtomic(canonPath(segmentKey), kept.length === 0 ? '' : `${kept.join('\n')}\n`, {
-      fsPromises, mkdir: true, mode: FILE_MODE,
-    });
-    return { changed, removedIds, redactedIds, droppedLines };
+    if (removedIds.length + redactedIds.length + droppedRows === 0) return null;
+    const built = core.buildMemoryRecord({
+      kind: 'tombstone',
+      layer: 'episodic',
+      project: null,
+      source: { kind: 'operator', vendor: 'glissa', sessionId: null },
+      text: core.tombstoneText([...removedIds, ...redactedIds]),
+    }, { now: now(), maxChars: config.maxRecordChars });
+    let tombstoneId = null;
+    if (built.ok && db.insertRecord(core.withSignature(built.record, signingKey))) {
+      tombstoneId = built.record.id;
+      db.setLastAppendAt(now());
+    }
+    // Last inside the transaction: a deleted row's words survive in the index's segments until this runs.
+    db.scrubSearchIndex();
+    return {
+      removedIds,
+      redactedIds,
+      droppedRows,
+      tombstoneId,
+      segments: segments.size,
+      tombstoneReason: built.reason,
+    };
   }
 
-  // The one sanctioned rewrite of an append-only canon; the tombstone is the audit trail.
   function forget(idOrPattern) {
     return queue(async () => {
       const nothing = {
@@ -547,116 +491,48 @@ function createMemoryStore(deps = {}) {
       };
       const matcher = core.makeForgetMatcher(idOrPattern);
       if (!matcher) return nothing;
-      if (!await acquireCanonLock()) {
-        log.warn('another process holds the canon write lock: nothing was forgotten');
+      let outcome = null;
+      try {
+        outcome = db.transaction(() => runForget(matcher));
+      } catch (error) {
+        if (!isBusyError(error)) throw error;
+        // Reported as `locked` because that is what the operator is being told: another writer holds it.
+        log.warn('the memory database is busy: nothing was forgotten');
         return { ...nothing, reason: 'locked' };
       }
-      const removedIds = [];
-      const redactedIds = [];
-      let segments = 0;
-      let droppedLines = 0;
-      try {
-        for (const segmentKey of await segmentKeysOnDiskAsync()) {
-          const outcome = await rewriteSegmentForForget(segmentKey, matcher);
-          if (!outcome.changed) continue;
-          segments += 1;
-          droppedLines += outcome.droppedLines;
-          removedIds.push(...outcome.removedIds);
-          redactedIds.push(...outcome.redactedIds);
-        }
-      } finally {
-        releaseCanonLock();
-      }
-      if (segments === 0) return nothing;
-      await reloadFromDisk();
-      const built = core.buildMemoryRecord({
-        kind: 'tombstone',
-        layer: 'episodic',
-        project: null,
-        source: { kind: 'operator', vendor: 'glissa', sessionId: null },
-        text: core.tombstoneText([...removedIds, ...redactedIds]),
-      }, { now: now(), maxChars: config.maxRecordChars });
-      let tombstoneId = null;
-      if (built.ok) {
-        const signed = core.withSignature(built.record, signingKey);
-        await appendSigned(signed);
-        tombstoneId = signed.id;
-      }
-      if (!built.ok) log.warn(`tombstone rejected: ${built.reason}`);
+      if (!outcome) return nothing;
+      if (!outcome.tombstoneId) log.warn(`tombstone rejected: ${outcome.tombstoneReason || 'not written'}`);
+      // The committed expunge is still readable in the write-ahead log until the frames are reclaimed.
+      if (!db.checkpoint()) log.debugNote(() => 'wal checkpoint refused: expunged frames linger until close');
+      refreshFromDb();
+      cachedLastAppendAt = db.lastAppendAt();
       if (projectionTimer) clearTimeoutFn(projectionTimer);
       projectionTimer = null;
       await writeProjection({ force: true });
-      const removed = removedIds.length + droppedLines;
-      log.note(`forget removed ${removed}, redacted ${redactedIds.length}, across ${segments} segment(s)`);
+      await discardSupersededBuilds();
+      const removed = outcome.removedIds.length + outcome.droppedRows;
+      log.note(`forget removed ${removed}, redacted ${outcome.redactedIds.length}, across ${outcome.segments} segment(s)`);
       return {
         ok: true,
         reason: null,
         removed,
-        redacted: redactedIds.length,
-        segments,
-        tombstoneId,
+        redacted: outcome.redactedIds.length,
+        segments: outcome.segments,
+        tombstoneId: outcome.tombstoneId,
       };
     });
   }
 
   /*
-   * A `glissa memory forget` run against a LIVE server rewrites these files underneath it, and a server
-   * still holding the old set would append it straight back into dist/ on its next write. The debounce
-   * and the reload-then-compare mirror pairings-store.watch; verify-on-load already handles the trust
-   * side, so a canon another process edited cannot promote anything by being reloaded.
+   * The forget's own publish rotates the PRE-forget build into previous/, and a dist-pending/ build
+   * predates the expunge by construction, so both hold the text that was just expunged. Neither is
+   * delivered from, so dropping them costs a rollback slot and a review copy, not a projection.
    */
-  function startCanonWatch() {
-    let timer = null;
-    let watcher = null;
-    let deferringSince = 0;
-
-    function stopWatch() {
-      clearTimeout(timer);
-      if (!watcher) return;
-      try {
-        watcher.close();
-      } catch {}
-      watcher = null;
+  async function discardSupersededBuilds() {
+    for (const target of [previousDir, pendingDir]) {
+      await fsPromises.rm(target, { recursive: true, force: true })
+        .catch((error) => log.warn(`could not drop a superseded build: ${error.message}`));
     }
-
-    // A removed watch target storms change events on Windows rather than erroring, so it ends the watch.
-    function closeIfCanonGone() {
-      if (fs.existsSync(canonicalizePath(dir))) return;
-      log.warn('the canon directory is gone: the watch is closed');
-      stopWatch();
-    }
-
-    function refresh() {
-      deferringSince = 0;
-      closeIfCanonGone();
-      if (!watcher) return;
-      queue(async () => {
-        const outcome = await reloadFromDisk();
-        if (!outcome.changed) return null;
-        log.note(`the canon changed under us: reloaded ${records.length} record(s), ${outcome.demoted} demoted`);
-        await writeProjection();
-        return null;
-      }).catch(() => log.warn('reloading the canon failed'));
-    }
-
-    try {
-      watcher = fs.watch(canonicalizePath(dir), (_event, filename) => {
-        if (filename && !core.parseSegmentFileName(path.basename(String(filename)))) return;
-        clearTimeout(timer);
-        timer = setTimeout(refresh, CANON_WATCH_DEBOUNCE_MS);
-        if (typeof timer.unref === 'function') timer.unref();
-        const at = Date.now();
-        if (!deferringSince) deferringSince = at;
-        if (at - deferringSince < CANON_WATCH_MAX_WAIT_MS) return;
-        // An unbroken stream re-arms the debounce forever, so the vanished-target check gets its own beat.
-        deferringSince = at;
-        closeIfCanonGone();
-      });
-    } catch (error) {
-      log.warn(`could not watch the canon directory: ${error.message}`);
-    }
-
-    return stopWatch;
   }
 
   function flushProjection() {
@@ -668,80 +544,106 @@ function createMemoryStore(deps = {}) {
     });
   }
 
+  // Latched BEFORE the drain, so a write racing shutdown is refused rather than queued behind it.
   async function stop() {
+    if (stopped) return;
     stopped = true;
-    stopCanonWatch();
     if (projectionTimer) clearTimeoutFn(projectionTimer);
     projectionTimer = null;
     await mutationChain;
     await projectionChain;
-    if (!projectionDirty) return;
-    await writeProjection().catch(() => log.warn('projection write failed during shutdown'));
+    if (projectionDirty) await writeProjection().catch(() => log.warn('projection write failed during shutdown'));
+    try {
+      db.close();
+    } catch (error) {
+      log.warn(`closing the memory database failed: ${error.message}`);
+    }
   }
 
-  // Echo suppression's delivery half: M16 registers what it hands out, the ingest consumer drops those lines.
-  const deliveredHashes = new Set();
+  // One object rather than one per ingested event: this is read on the consumer's hot path.
+  const deliveredView = { has: (hash) => db.deliveredHas(hash) };
 
+  // Echo suppression's delivery half: M16 registers what it hands out, the ingest consumer drops those lines.
   function noteDelivered(text) {
-    for (const hash of core.deliveredLineHashes(text)) {
-      deliveredHashes.delete(hash);
-      deliveredHashes.add(hash);
+    const hashes = core.deliveredLineHashes(text);
+    if (hashes.length === 0) return db.deliveredCount();
+    try {
+      return db.noteDelivered(hashes, { maxHashes: MAX_DELIVERED_HASHES });
+    } catch (error) {
+      if (!isBusyError(error)) throw error;
+      log.debugNote(() => 'the delivered-hash write was refused: the database is busy');
+      return db.deliveredCount();
     }
-    while (deliveredHashes.size > MAX_DELIVERED_HASHES) {
-      const oldest = deliveredHashes.values().next().value;
-      deliveredHashes.delete(oldest);
+  }
+
+  // The index narrows the candidates; the pure rules gate and rank them, so an unavailable index costs
+  // relevance and never an answer.
+  function searchMatches(terms, limit) {
+    if (terms.length === 0) return null;
+    try {
+      return db.searchIds(terms, Math.max(SEARCH_CANDIDATE_FLOOR, limit * SEARCH_CANDIDATE_FACTOR));
+    } catch (error) {
+      log.debugNote(() => `the search index is unavailable: ${error.code || 'unknown'}`);
+      return null;
     }
-    return deliveredHashes.size;
+  }
+
+  function retrieve(options = {}) {
+    const list = currentRecords();
+    const limit = Number.isFinite(options.limit) ? options.limit : core.DEFAULT_RETRIEVAL_LIMIT;
+    const matchedIds = searchMatches(core.tokenizeQuery(options.query || ''), limit);
+    return core.retrieveMemories(list, { now: now(), ...options, matchedIds });
   }
 
   /*
-   * Held for a whole pass, mtime refreshed, so the staleness rule cannot hand the lock to a second copy.
-   * `reentrant` piggybacks on a hold this process already has, which is what lets a tail-state write
-   * inside a backfill take the same lock the backfill is holding without deadlocking on it. Only the
-   * short writes pass it: a long pass always takes a REAL lock, so it can never inherit one that a
-   * millisecond-long write is about to release.
+   * A refused offset write costs a re-read of that range, never the range itself, so nothing here throws:
+   * this runs inside the ingest source's drain, and an unwritable offset must not cost the records.
    */
-  async function withCanonLock(work, { reentrant = false } = {}) {
-    if (reentrant && canonLockDepth > 0) return { locked: true, result: await work() };
-    if (!await acquireCanonLock()) return { locked: false, result: null };
-    canonLockDepth += 1;
-    const refresh = setInterval(() => {
-      try {
-        const at = new Date();
-        fs.utimesSync(lockPath, at, at);
-      } catch (error) {
-        // A lock that vanished mid-pass means a second process may already be reading; codes only, never content.
-        log.debugNote(() => `canon lock refresh failed on ${lockPath}: ${error.code || 'unknown'}`);
-      }
-    }, LOCK_REFRESH_MS);
-    if (typeof refresh.unref === 'function') refresh.unref();
+  function saveTailOffset(entry, options) {
     try {
-      return { locked: true, result: await work() };
-    } finally {
-      canonLockDepth -= 1;
-      clearInterval(refresh);
-      releaseCanonLock();
+      db.saveTailOffset(entry, options);
+      return true;
+    } catch (error) {
+      if (isBusyError(error)) log.debugNote(() => 'a tail offset write was refused: the database is busy');
+      if (!isBusyError(error)) log.warn(`a tail offset write failed: ${error.message}`);
+      return false;
+    }
+  }
+
+  function forgetTails(paths) {
+    try {
+      db.forgetTails(paths);
+      return true;
+    } catch (error) {
+      log.warn(`forgetting ${paths.length} tail offset(s) failed: ${error.message}`);
+      return false;
     }
   }
 
   function stats() {
     const byKind = {};
-    for (const record of records) byKind[record.kind] = (byKind[record.kind] || 0) + 1;
-    return { dir, total: records.length, byKind };
+    for (const record of currentRecords()) byKind[record.kind] = (byKind[record.kind] || 0) + 1;
+    return { dir, dbPath, total: records.length, byKind };
   }
 
-  loadSync();
-  const stopCanonWatch = watchCanon ? startCanonWatch() : () => {};
+  load();
 
   return {
     append,
+    appendMany,
     currentDir,
-    deliveredHashes: () => deliveredHashes,
+    dbPath,
+    deliveredHashes: () => deliveredView,
     dir,
     distDir,
     flushProjection,
     forget,
-    lastAppendAt: () => lastAppendAt,
+    forgetTails,
+    lastAppendAt: () => {
+      if (stopped) return cachedLastAppendAt;
+      cachedLastAppendAt = db.lastAppendAt();
+      return cachedLastAppendAt;
+    },
     noteDelivered,
     pendingDir,
     projectionPath: path.join(currentDir, core.GLOBAL_PROJECTION_FILE),
@@ -750,13 +652,16 @@ function createMemoryStore(deps = {}) {
     publishProjection: (args) => queue(() => publishProjection(args)),
     readPublishedDocuments,
     readPublishedManifest,
-    records: () => records.slice(),
-    retrieve: (options) => core.retrieveMemories(records, { now: now(), ...options }),
+    rebuildSearchIndex: () => db.rebuildSearchIndex(),
+    records: () => currentRecords().slice(),
+    retrieve,
+    saveTailOffset,
+    search: (query, { limit = SEARCH_CANDIDATE_FLOOR } = {}) => searchMatches(core.tokenizeQuery(query), limit),
     stats,
     stop,
-    validRecords: () => core.selectValidRecords(records, { now: now() }),
-    watermark: () => core.canonWatermark(core.selectValidRecords(records, { now: now() })),
-    withCanonLock,
+    tailState: () => db.tailState(),
+    validRecords: () => core.selectValidRecords(currentRecords(), { now: now() }),
+    watermark: () => core.canonWatermark(core.selectValidRecords(currentRecords(), { now: now() })),
   };
 }
 

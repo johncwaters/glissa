@@ -62,6 +62,7 @@ const { normalizeShapePath } = require('./core/visions-scope-core');
 const { createIngestLane } = require('./ingest-wiring');
 const { resolveIngestConfig } = require('./core/ingest-core');
 const { createMemoryStore } = require('./memory-store');
+const { DB_FILE_NAME } = require('./glissa-db');
 const { createMemoryIngest, earliestLaneEntryMs } = require('./memory-ingest-wiring');
 const { createMemoryDistillSpawn, createMemoryDistiller } = require('./memory-distill');
 const { resolveMemoryConfig } = require('./core/memory-core');
@@ -1138,6 +1139,8 @@ function createBackend(httpServer, options = {}) {
   const memoryStore = memoryConfig.enabled
     ? createMemoryStore({
       dir: configSiblingPath(configStore.configPath, 'memory'),
+      // The machine-wide database, memory's first tenant. Null store = no node:sqlite = lane off (M12b).
+      dbPath: path.join(path.dirname(configStore.configPath), DB_FILE_NAME),
       config: memoryConfig,
       logger: console,
       // Same reason as the ingest and visions lanes: the setting moves, the store is built once.

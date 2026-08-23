@@ -576,18 +576,39 @@ function scoreMemoryRecord(record, {
   return score;
 }
 
+/*
+ * The substrate's ranked candidates, folded in as a bounded bonus rather than as the answer: an index
+ * ranks relevance better than a substring test, but the gates, the trust weight and the recency decay
+ * still belong to the pure rules. Absent (no index, no terms) the scoring is byte-identical to the
+ * lexical path, which is what makes the index droppable at any time.
+ */
+const MATCH_BONUS_BASE = 2;
+const MATCH_BONUS_SPAN = 2;
+
+function matchBonusById(matchedIds) {
+  const list = Array.isArray(matchedIds) ? matchedIds : [];
+  if (list.length === 0) return null;
+  const bonus = new Map();
+  list.forEach((id, index) => {
+    bonus.set(id, MATCH_BONUS_BASE + MATCH_BONUS_SPAN * (1 - index / list.length));
+  });
+  return bonus;
+}
+
 function retrieveMemories(records, {
   query = '', project = null, now = 0, limit = DEFAULT_RETRIEVAL_LIMIT,
-  halfLifeDays = DEFAULT_RECENCY_HALF_LIFE_DAYS,
+  halfLifeDays = DEFAULT_RECENCY_HALF_LIFE_DAYS, matchedIds = null,
 } = {}) {
   const at = finiteNumber(now) ?? 0;
   const tag = normalizeProjectTag(project);
   const terms = tokenizeQuery(query);
+  const bonusById = matchBonusById(matchedIds);
   const scored = [];
   for (const record of selectValidRecords(records, { now: at })) {
     if (!PROJECTED_KINDS.includes(record.kind)) continue;
     if (record.project && record.project !== tag) continue;
-    scored.push({ record, score: scoreMemoryRecord(record, { terms, project: tag, now: at, halfLifeDays }) });
+    const lexical = scoreMemoryRecord(record, { terms, project: tag, now: at, halfLifeDays });
+    scored.push({ record, score: lexical + (bonusById ? bonusById.get(record.id) || 0 : 0) });
   }
   scored.sort((left, right) => {
     if (right.score !== left.score) return right.score - left.score;
@@ -844,6 +865,7 @@ module.exports = {
   isValidAt,
   lowerTrustRank,
   makeForgetMatcher,
+  matchBonusById,
   matchesForgetPattern,
   normalizeMemoryLine,
   normalizeProjectTag,
