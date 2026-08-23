@@ -39,9 +39,7 @@ function dedupePathMatches(matches, platform = process.platform) {
   return unique;
 }
 
-// THE shared PATH-lookup for external binaries (claude here, rtk in rtk-command.js): `where` on
-// Windows, `which -a` on POSIX with a `command -v` fallback since minimal distros ship no `which`.
-// Never throws; a failed or empty lookup is []. Multi-match order is preserved (first match wins).
+// THE shared PATH-lookup (claude here, rtk in rtk-command.js): `where` on win32, `which -a` on POSIX with a `command -v` fallback since minimal distros ship no `which`; never throws, [] on failure, first match wins.
 function resolvePathCommandMatches(name, { platform, exec }) {
   const run = (command) => {
     const out = exec(command, {
@@ -72,10 +70,7 @@ function resolvePathCommandMatches(name, { platform, exec }) {
   }
 }
 
-// Resolve `claude` once at module load. On Windows we prefer spawning the resolved
-// .exe directly (node-pty -> CreateProcess), falling back to `cmd.exe /c claude` only
-// for .cmd/.bat/.ps1 shim installs or when resolution fails. Resolving here also
-// surfaces a Bun shim shadowing claude.exe in the boot log instead of at runtime.
+// Resolved once at module load, so a Bun shim shadowing claude.exe surfaces in the boot log instead of at runtime; the .exe/shim spawn split lives in buildSpawnCommand below.
 function resolveClaudeCommand({ platform = process.platform, exec = execSync } = {}) {
   const matches = resolvePathCommandMatches("claude", { platform, exec });
   if (matches.length === 0) {
