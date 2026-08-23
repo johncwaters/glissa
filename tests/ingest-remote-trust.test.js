@@ -25,7 +25,7 @@ const WebSocket = require('ws');
 
 const { createBackend } = require('../server/backend');
 const { createPairingsStore } = require('../server/pairings-store');
-const { dashboardClient, dashboardOrigin } = require('./helpers/dashboard-ws');
+const { dashboardClient } = require('./helpers/dashboard-ws');
 
 let tmpDir = null;
 let prevEnv = null;

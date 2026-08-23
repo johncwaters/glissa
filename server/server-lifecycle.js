@@ -39,7 +39,7 @@ function awaitStoppers(stoppers, { capMs = 3000, warn = console.warn, ...timerOp
       const summary = summarizeStopOutcomes(entries, outcome);
       if (summary.timedOut) warn(`[lifecycle] lane shutdown exceeded ${capMs}ms - exiting anyway`);
       for (const { name, reason } of summary.failed) {
-        warn(`[lifecycle] ${name} failed to stop cleanly: ${reason && reason.message ? reason.message : reason}`);
+        warn(`[lifecycle] ${name} failed to stop cleanly: ${reason?.message ? reason.message : reason}`);
       }
     });
 }

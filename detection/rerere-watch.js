@@ -65,7 +65,7 @@ function createRerereWatcher({ commonGitDir, onChange, debounceMs = 400 }) {
     inner.stop();
   }
 
-  return { start, stop, get active() { return inner.active || Boolean(outer && outer.active); } };
+  return { start, stop, get active() { return inner.active || Boolean(outer?.active); } };
 }
 
 module.exports = { createRerereWatcher, RR_CACHE_DIR };
