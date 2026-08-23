@@ -254,12 +254,10 @@ This is fan-out plumbing plus a scrub decision, not a mapper tweak:
   memory alone never widens what reaches the control WS or a prompt digest. One switch
   instead of three; the lane-log states which lane the source was constructed for.
 - **Event-loop budget**: ingestion writes are batched per tick with an explicit per-tick
-  record cap and a yield between segments. The cold-start backfill runs AUTOMATICALLY on
-  first enable as a background pass under the same byte budget and yields (the usage
-  scanner's budgeted-partial-pass pattern), resumable via the durable offsets; `glissa
-  memory backfill` remains as a manual re-run, not the primary path. The reviewer concern
-  was event-loop blocking, which the budget answers; requiring a manual command answered it
-  by friction instead, and the operating principle above rules that out.
+  record cap and a yield between segments. The cold-start backfill runs on first enable as
+  a background pass under the same byte budget (the usage scanner's budgeted-partial-pass
+  pattern), resumable via the durable offsets; `glissa memory backfill` is a manual re-run
+  path only.
 
 Raw transcript lines are episodic material, bounded and scrubbed; semantic facts are formed
 only by M15, in the background, never on the hot path.
