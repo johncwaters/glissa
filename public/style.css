@@ -451,6 +451,7 @@ body {
    below adds only its tone (warning vs informational) and default visibility.
    font-size 11px reads cleanly in the operator-console context. */
 .perms-badge,
+.agent-badge,
 .worktree-badge,
 .resume-badge,
 .post-turn-badge,
@@ -544,6 +545,22 @@ body {
 }
 
 .session-card[data-agents] .agents-badge {
+  display: inline-flex;
+}
+
+/* Which agent CLI this card supervises. Hidden until the card carries data-agent, which
+   setSessionAgent sets only for a NON-default agent: a Claude Code card is unchanged. Muted hairline
+   (mirrors .usage-badge) - it is standing identity, not a state change. */
+.agent-badge {
+  display: none;
+  text-transform: none;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  border: 1px solid var(--border-dim);
+  background: color-mix(in oklab, var(--bg) 60%, transparent);
+}
+
+.session-card[data-agent] .agent-badge {
   display: inline-flex;
 }
 
@@ -4395,6 +4412,7 @@ a.pr-title:hover {
 /* Compact every header tag uniformly so the strip stays quiet in the centered card.
    YOLO compacts with the rest: one size for the whole set beats singling it out. */
 .focus-center .session-card.focus-centered .perms-badge,
+.focus-center .session-card.focus-centered .agent-badge,
 .focus-center .session-card.focus-centered .worktree-badge,
 .focus-center .session-card.focus-centered .resume-badge,
 .focus-center .session-card.focus-centered .agents-badge,

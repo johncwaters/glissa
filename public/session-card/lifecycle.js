@@ -12,6 +12,7 @@ import { setSelectedId } from '../sidebar/selection.js';
 import { getSoundId, isSoundEnabled } from '../ui-prefs.js';
 import { sessionChipText, sessionChipTitle } from '../usage-view-core.mjs';
 import { setRunningActivity } from './activity.js';
+import { agentBadgeText } from './agent-core.mjs';
 import { computeAggregate } from './aggregate-core.mjs';
 import { buildCardDOM, closeDebugOverlay, isRenameInProgress, openDebugOverlay, setDebugMode, startInlineRename } from './card-dom.js';
 import { aggregateEl, container, sessionUIs } from './card-registry.js';
@@ -287,6 +288,16 @@ export function setSessionEffectiveBase(sessionId, base) {
   const ui = sessionUIs.get(sessionId);
   if (!ui) return;
   ui.effectiveBase = base;
+}
+
+// Name the agent CLI this card supervises, for any agent that is not the dashboard's default one
+// (agent-core.mjs holds that rule). Fixed for a session's lifetime, so it rides the snapshot rather
+// than a delta of its own.
+export function setSessionAgent(sessionId, agent) {
+  const ui = sessionUIs.get(sessionId);
+  if (!ui) return;
+  const text = agentBadgeText(agent);
+  paintCardBadge(ui, '.agent-badge', 'agent', { on: text !== '', value: text, text });
 }
 
 // Toggle the linked-worktree marker on an existing card without recreating it

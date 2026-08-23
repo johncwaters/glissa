@@ -178,6 +178,9 @@ class Session extends EventEmitter {
     // Which agent CLI this session supervises (session/adapters). Absent = claude-code, the only
     // adapter that exists; an unknown id warns and falls back to it rather than failing the spawn.
     agent = DEFAULT_AGENT_ID,
+    // Resolved adapter object, overriding the `agent` lookup. Mirrors the spawnCommand seam: tests
+    // build a capability-off agent with it while claude-code is still the only registered adapter.
+    adapter = null,
     // Resolved agent command ({ path, kind }). Null defers to the adapter registry's lazy cache at
     // spawn; tests inject a stub to exercise the spawn branches deterministically.
     spawnCommand = null,
@@ -300,6 +303,11 @@ class Session extends EventEmitter {
     this._lastRows = null;
     this._recorder = null; // Set via setRecorder() after construction
 
+    // Resolved first, because the capability gates below read it: every CC-only feature this session
+    // could run is asked of the adapter rather than assumed (M2 of docs/plan-agent-adapters.md).
+    this._adapter = adapter || resolveAdapter(agent, { label: `session:${name}` });
+    this.agentId = this._adapter.id;
+
     // -- Detection: structural signal sources --
     this._hookRouter = hookRouter;
     this._getHookPort = getHookPort;
@@ -316,7 +324,7 @@ class Session extends EventEmitter {
     // Live background sub-agents, keyed by Claude Code agent_id -> last-seen ts. Non-empty means
     // background work is still running after the main agent's Stop, which gates ready->task_complete
     // (see _onStatus / mapSignalToEvent). Lazily pruned by agentTtlMs; never drives a state transition.
-    this._detectBackgroundAgents = detectBackgroundAgents;
+    this._detectBackgroundAgents = detectBackgroundAgents && this._can("backgroundAgents");
     this._agentTtlMs = agentTtlMs;
     this._shellTaskTtlMs = shellTaskTtlMs;
     this._teammateTaskTtlMs = teammateTaskTtlMs;
@@ -370,19 +378,17 @@ class Session extends EventEmitter {
     this._detectScheduledWakeups = detectScheduledWakeups;
     this._wakeups = new Map();
     this._wakeupSeq = 0;
-    this._adapter = resolveAdapter(agent, { label: `session:${name}` });
-    this.agentId = this._adapter.id;
     this._spawnCommand = spawnCommand;
     this._initialPrompt = initialPrompt;
     this._extraClaudeArgs = Array.isArray(extraClaudeArgs) ? extraClaudeArgs : [];
     this._resumeSessionId = resumeSessionId || null;
     this._suppressResumeCapture = false;
-    this._antiSlopPrompt = !!antiSlopPrompt;
+    this._antiSlopPrompt = !!antiSlopPrompt && this._can("antiSlop");
     this.ephemeral = !!ephemeral;
     this._settingsPermissions = settingsPermissions;
     this._spawnEnv = spawnEnv;
     this._enableProjectMcp = !!enableProjectMcp;
-    this._rtkPath = rtkPath || null;
+    this._rtkPath = (this._can("rtk") && rtkPath) || null;
     // Configured pack names, and the versions actually delivered by the last spawn (empty until one
     // resolves; a configured-but-unbuilt pack never appears here, only in the decision trace).
     const packNames = normalizePackNames(packs);
@@ -399,7 +405,7 @@ class Session extends EventEmitter {
     // Consumption telemetry for those delivered packs: per-pack read counts, plus a since-notice
     // count armed the moment a staleness notice is taken (session/core/pack-read-tracker.js).
     this._packReadTelemetry = packReadTelemetry !== false;
-    this._planLimits = planLimits === true;
+    this._planLimits = planLimits === true && this._can("statusLine");
     this._packReads = packReadTracker.createPackReadState();
     this._ptySpawn = ptySpawn || ((file, args, opts) => pty.spawn(file, args, opts));
     // Async kill executor (taskkill). Default wraps execFile; the callback form keeps the call truly
@@ -459,6 +465,12 @@ class Session extends EventEmitter {
 
   setRecorder(recorder) {
     this._recorder = recorder;
+  }
+
+  // THE capability read. Every CC-only feature asks this rather than branching on the adapter id, and
+  // an undeclared capability is absent: an adapter earns a feature by claiming it, never by omission.
+  _can(capability) {
+    return this._adapter.capabilities?.[capability] === true;
   }
 
   // -- Private timer fields (one shape: replace any pending timer, null the field from inside the
@@ -702,8 +714,11 @@ class Session extends EventEmitter {
   // new: a collapsed repeat (an unchanged gate verdict re-evaluated on a TTL tick) already has a
   // line on disk.
   _recordDecision(entry) {
-    const outcome = pushDecision(this._decisionLog, entry);
-    if (outcome === "appended" && this._recorder) this._recorder.writeDecision(entry);
+    // The recording header already names the agent, and a Claude Code recording is pinned byte-identical
+    // apart from that one field, so only a non-default agent stamps its id on the entry itself.
+    const stamped = this.agentId === DEFAULT_AGENT_ID ? entry : { ...entry, agent: this.agentId };
+    const outcome = pushDecision(this._decisionLog, stamped);
+    if (outcome === "appended" && this._recorder) this._recorder.writeDecision(stamped);
   }
 
   // Push a decision the BACKEND made for this session (notification category + reason, and the
@@ -1017,6 +1032,7 @@ class Session extends EventEmitter {
   // this session actually SPAWNED against can arm a notice: a session that never delivered the pack
   // has no stale context to warn about. Returns whether this call armed one, for the caller's logs.
   notePackUpdate(name, version) {
+    if (!this._can("packNotice")) return false;
     if (typeof name !== "string" || typeof version !== "string" || version.length === 0) return false;
     const delivered = this._deliveredPacks.find((pack) => pack.name === name);
     if (!delivered) return false;
@@ -1032,6 +1048,9 @@ class Session extends EventEmitter {
   // route injects it into ONE UserPromptSubmit response), and re-armed only when a newer version
   // arrives through notePackUpdate - never once per turn for the same staleness.
   takePackNoticeContext() {
+    // Not redundant with the arming gate: this is the response boundary, so the guarantee that a
+    // non-Claude session's hook reply is `{ ok, reason }` and nothing else is checked where it is made.
+    if (!this._can("packNotice")) return null;
     if (!this._packNoticePending) return null;
     this._packNoticePending = false;
     const notice = buildPackNotice(this._deliveredPacks, this._latestPackVersions);
@@ -1072,6 +1091,7 @@ class Session extends EventEmitter {
       id: this.id,
       name: this.name,
       path: this.path,
+      agent: this.agentId,
       state: this.state,
       sleeping: this._sleeping,
       dangerouslySkipPermissions: this.dangerouslySkipPermissions,
@@ -2094,7 +2114,7 @@ class Session extends EventEmitter {
     this._suppressResumeCapture = false;
     const agentArgs = this._adapter.buildArgs({
       dangerouslySkipPermissions: this.dangerouslySkipPermissions,
-      resumeSessionId: this._resumeSessionId,
+      resumeSessionId: this._can("resume") ? this._resumeSessionId : null,
       extraArgs: this._extraClaudeArgs,
       antiSlopPrompt: this._antiSlopPrompt,
       initialPrompt: this._initialPrompt,
@@ -2146,6 +2166,7 @@ class Session extends EventEmitter {
 
     if (this._recorder) {
       this._recorder.writeHeader({
+        agent: this.agentId,
         hooksInjected: this._settingsHandle !== null,
         cols: spawnCols,
         rows: spawnRows,
@@ -2268,6 +2289,15 @@ class Session extends EventEmitter {
     this._clearPackNotice();
     packReadTracker.clearPackReads(this._packReads);
     if (this._packs.length === 0) return { args: [], packs: [] };
+    // An agent with no pack-delivery capability is handed nothing rather than a directory whose
+    // layout it does not read; the trace is what makes the silence visible on the card's debug overlay.
+    if (!this._can("packs")) {
+      const ts = Date.now();
+      for (const name of this._packs) {
+        this._recordDecision({ kind: "pack", ts, name, decision: "unsupported", reason: `agent ${this.agentId} does not deliver context packs` });
+      }
+      return { args: [], packs: [] };
+    }
 
     const builtRoot = this._packsBuiltRoot || defaultBuiltRoot();
     const args = [];

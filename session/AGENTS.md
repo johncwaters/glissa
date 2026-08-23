@@ -11,6 +11,7 @@ The session domain: the stateful Session class (lifecycle, PTY spawn/kill, timer
 |------|-------------|
 | `sessions.js` | Session class; consumes StatusSource, drives the 7-state machine, owns the background-work completion gate |
 | `session-recorder.js` | Always-on JSONL recorder of PTY data + signals; feeds `detection/replay.js` |
+| `hook-relay.js` | Standalone command-hook relay for a non-Claude agent CLI: stdin envelope to the local hook ingress, always exit 0; never required by the server (decisions in `core/hook-relay-core.js`) |
 | `core/` | Pure cores of a SEAM EXTRACTION from `sessions.js`: no IO, no Session import (see `core/AGENTS.md`) |
 
 ## For AI Agents

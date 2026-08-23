@@ -111,16 +111,20 @@ class SessionRecorder {
     }
   }
 
-  writeHeader(config) {
+  // The agent adapter this session supervises rides the header rather than the config bag, so a
+  // reader can tell which vocabulary the hooks below it are written in without parsing one.
+  writeHeader(config = {}) {
+    const { agent = null, ...rest } = config;
     this._write({
       type: 'header',
       version: 2,
       records: this._recordData ? 'full' : 'signals',
       session: this._name,
+      agent,
       startedAt: Date.now(),
-      config,
-      cols: config.cols || 80,
-      rows: config.rows || 24,
+      config: rest,
+      cols: rest.cols || 80,
+      rows: rest.rows || 24,
     });
   }
 

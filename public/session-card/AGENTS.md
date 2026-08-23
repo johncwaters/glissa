@@ -13,6 +13,7 @@ Session card modules, decomposed from the old monolithic session-card.js. Each s
 | `card-registry.js` | Shared state owner: `sessionUIs` Map + 2 DOM singletons |
 | `lifecycle.js` | `createSessionCard`, `removeSessionCard`, `applyState`, aggregate status wiring |
 | `aggregate-core.mjs` | Pure `computeAggregate` (used by lifecycle) |
+| `agent-core.mjs` | Pure `agentBadgeText(agent)`: which agent adapter id earns a card chip (never the default one) |
 | `card-dom.js` | Card builder, badge, inline rename, confirm dialog, debug overlay |
 | `terminal.js` | xterm.js setup, data WebSocket, OSC-52 clipboard, key handling (consults `focus-view/focus-shortcuts.mjs` for which Alt+keys bubble), phone soft-keyboard input takeover |
 | `ime-core.mjs` | Pure soft-keyboard edit to terminal bytes: shared-prefix diff of xterm's helper textarea, plus the inputType/keydown predicates the takeover in `terminal.js` gates on |

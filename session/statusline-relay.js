@@ -14,7 +14,7 @@ const { spawn } = require('../server/child-process-safe');
 const POST_TIMEOUT_MS = 1500;
 // Argv marker for "the operator had no statusLine of their own".
 const NO_CHAIN = '-';
-const LOOPBACK_HOSTS = new Set(['127.0.0.1', '::1', 'localhost']);
+const LOOPBACK_HOSTS = new Set(['127.0.0.1', '::1', '[::1]', 'localhost']);
 
 function readStdin(stream) {
   return new Promise((resolve) => {

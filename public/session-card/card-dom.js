@@ -29,6 +29,9 @@ export function setDebugMode(on) {
 // card carries its matching data-* attribute (set live by the setSessionX handlers in lifecycle.js),
 // so a delta never has to rebuild the header.
 const TAG_BADGES = [
+  // Which agent CLI the card supervises. Shown only for a non-default agent, so a Claude Code
+  // dashboard looks exactly as it did (session/adapters, and setSessionAgent in lifecycle.js).
+  { cls: 'agent-badge', title: 'Agent CLI this session supervises' },
   { cls: 'worktree-badge', text: 'worktree', title: 'Running in a linked git worktree', ariaLabel: 'Linked git worktree' },
   { cls: 'resume-badge', text: 'resumed', title: 'Resumes a saved conversation on next start', ariaLabel: 'Resumes a saved conversation' },
   { cls: 'post-turn-badge', ariaHidden: true },
@@ -116,7 +119,7 @@ export function buildCardDOM(sessionId, sessionName, initialState, options = {})
   // the RIGHT zone never reflow when the timer ticks. (Status is not shown here: it lives on the
   // Focus rail pill and the toolbar accent strip.)
   // The tags share one shrinkable, clipping strip so a narrow card sheds badges from the right instead
-  // of pushing the action cluster out of the box (eleven possible badges, and the actions must survive).
+  // of pushing the action cluster out of the box (twelve possible badges, and the actions must survive).
   const tags = el('div', 'session-card-tags');
   const tagChildren = TAG_BADGES.map((spec) => buildTagBadge(spec));
   if (permsBadge) tagChildren.push(permsBadge);

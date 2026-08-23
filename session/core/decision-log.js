@@ -9,11 +9,15 @@
 //   gate         one decideGateRelease verdict with its inputs
 //   notify       one explainNotification decision at a state entry
 //   notify-state one NotificationManager lifecycle hop
-//   pack         one context pack delivered as an --add-dir, skipped because it is not built, or a
+//   pack         one context pack delivered as an --add-dir, skipped because it is not built, refused
+//                because the session's agent does not deliver packs (decision: "unsupported"), or a
 //                staleness notice taken by a UserPromptSubmit hook response (decision: "notice")
 //   rebase       one eager auto-rebase onto a moved integration branch: "auto-rebased" (with the shas
 //                and whether rerere carried it), "conflict" (with the conflicting files), or
 //                "state-moved" (a turn started while the rebase was rewriting the worktree)
+//
+// Every entry may also carry `agent`, the id of the agent adapter the session supervises. It is
+// stamped only when that is NOT the default (claude-code), which the recording header already names.
 //
 // Collapse: the gate re-evaluates on every drain and every TTL tick, so an unchanged verdict would
 // bury the interesting entries within seconds. Consecutive gate entries with the same decision and
