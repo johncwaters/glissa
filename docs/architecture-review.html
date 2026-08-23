@@ -71,11 +71,11 @@
 
   .compare {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 14px;
     margin: 22px 0 10px;
   }
-  @media (max-width: 820px) { .compare { grid-template-columns: 1fr; } }
+  @media (max-width: 540px) { .compare { grid-template-columns: 1fr; } }
   .panel {
     background: var(--surface);
     border: 1px solid var(--line);
@@ -83,7 +83,7 @@
     padding: 14px;
     overflow-x: auto;
   }
-  .panel svg { max-width: 100%; height: auto; display: block; min-width: 380px; }
+  .panel svg { height: auto; display: block; width: 440px; max-width: none; }
   .chip {
     font-family: "Spline Sans Mono", ui-monospace, monospace;
     font-size: 11px;
