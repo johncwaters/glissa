@@ -3301,8 +3301,6 @@ a.pr-title:hover {
   gap: 22px;
 }
 
-/* The intent model sits above the feed because everything below it is downstream of being right. It is
-   the only writable thing in this view, so it gets a surface and the documents stay bare rows. */
 .visions-intent {
   display: flex;
   flex-direction: column;
@@ -3342,46 +3340,6 @@ a.pr-title:hover {
 .visions-intent-none {
   color: var(--text-muted);
   font-size: 11px;
-}
-
-.visions-intent-form {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.visions-intent-input {
-  flex: 1 1 auto;
-  min-width: 0;
-  padding: 5px 8px;
-  border: 1px solid var(--border-dim);
-  border-radius: 3px;
-  background: var(--bg);
-  color: var(--text);
-  font-family: var(--font-mono);
-  font-size: 12px;
-}
-
-.visions-intent-input:focus {
-  outline: none;
-  border-color: var(--border);
-}
-
-.visions-intent-submit {
-  flex: 0 0 auto;
-  padding: 5px 12px;
-  border: 1px solid var(--border-dim);
-  border-radius: 3px;
-  background: transparent;
-  color: var(--text-dim);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  cursor: pointer;
-}
-
-.visions-intent-submit:hover {
-  color: var(--text);
-  border-color: var(--border);
 }
 
 .visions-feed {
@@ -5147,8 +5105,6 @@ html[data-layout="phone"] .visions-activity-head { flex-wrap: wrap; gap: 4px 8px
 html[data-layout="phone"] .visions-intent-title,
 html[data-layout="phone"] .visions-doc-name,
 html[data-layout="phone"] .visions-activity-title { font-size: 12px; }
-html[data-layout="phone"] .visions-intent-form { flex-direction: column; align-items: stretch; }
-html[data-layout="phone"] .visions-intent-submit { min-height: 36px; }
 html[data-layout="phone"] .visions-doc { padding: 12px; }
 html[data-layout="phone"] .visions-finding { grid-template-columns: minmax(44px, auto) minmax(0, auto) minmax(0, 1fr); gap: 6px; }
 html[data-layout="phone"] .visions-activity-row { grid-template-columns: minmax(44px, auto) minmax(42px, auto) minmax(0, 1fr); gap: 6px; }

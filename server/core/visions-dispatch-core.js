@@ -306,7 +306,7 @@ function buildVisionsPrompt({
   // Context, not an instruction: an empty statement leaves the block out rather than saying "none".
   const workingIntent = sanitizeIntentText(intent, { maxChars: maxIntentChars });
   const intentLines = workingIntent
-    ? [`Current working intent (operator-corrected when locked): ${workingIntent}`, '']
+    ? [`Current working intent: ${workingIntent}`, '']
     : [];
   const lines = [
     'You are the Glissa visions: a pair-programming visions reading a live editor buffer at a pause in the typing.',

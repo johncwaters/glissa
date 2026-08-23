@@ -14,7 +14,6 @@ const {
 const { isUriInProjects } = require('./core/visions-scope-core');
 const {
   applyModelIntent: mergeModelIntent,
-  applyOperatorIntent: mergeOperatorIntent,
   createIntentState,
   intentPayload,
   reviveIntentState,
@@ -86,7 +85,7 @@ function shouldWarnForInvalidIntentFile(raw, revived) {
   if (revived.text) return false;
   const empty = createIntentState();
   const isPersistedEmpty = raw && typeof raw === 'object' && !Array.isArray(raw)
-    && raw.text === empty.text && raw.source === empty.source && raw.locked === empty.locked && raw.ts === empty.ts;
+    && raw.text === empty.text && raw.source === empty.source && raw.ts === empty.ts;
   return !isPersistedEmpty;
 }
 
@@ -360,8 +359,6 @@ function createVisionsWiring({
     broadcast({ type: 'visions-intent', intent: intentPayload(intentState), ts: nowFn() });
   }
 
-  // Every write goes through the pure merge, so the lock rule is enforced in one place and a merge
-  // that changes nothing costs no broadcast.
   function commitIntent(merged) {
     if (!merged.changed) return false;
     intentState = merged.state;
@@ -373,19 +370,9 @@ function createVisionsWiring({
     return true;
   }
 
-  // A model's updated belief. The merge, not this caller, is what keeps it off a locked statement.
   function applyModelIntent(text) {
     const changed = commitIntent(mergeModelIntent(intentState, { text, now: nowFn() }));
-    // The source and the size, never the sentence: a model-authored intent is derived from the buffer
-    // and the digest, so logging it verbatim would put buffer content in the log by the back door.
     if (changed) note(`intent model-set (${(intentState.text || '').length} chars)`);
-    return changed;
-  }
-
-  // The tab's correction. Empty text clears the statement and hands control back to the model.
-  function setOperatorIntent(text) {
-    const changed = commitIntent(mergeOperatorIntent(intentState, { text, now: nowFn() }));
-    if (changed) note(`intent operator-set (${(intentState.text || '').length} chars)`);
     return changed;
   }
 
@@ -533,7 +520,6 @@ function createVisionsWiring({
         return;
       }
       const recorded = applyDispatchResult(uri, result, getDoc(store, uri), send);
-      // After the comments, and through the merge: a locked operator intent survives this untouched.
       const intentMoved = applyModelIntent(result.intent);
       if (!recorded) return;
       note(`dispatch for ${uri} applied: ${result.verdict}, ${(commentsByUri.get(uri) || []).length} comments, hand=${handsByUri.has(uri) ? 'yes' : 'no'}, intent-moved=${intentMoved ? 'yes' : 'no'}`);
@@ -855,7 +841,6 @@ function createVisionsWiring({
     documentsSnapshot,
     snapshotMessage,
     applyModelIntent,
-    setOperatorIntent,
     noteActivity,
     getIntent: () => intentPayload(intentState),
     whenIntentPersistenceIdle: () => (intentStateWriter ? intentStateWriter.idle() : Promise.resolve()),

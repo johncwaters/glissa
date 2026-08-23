@@ -132,42 +132,28 @@ test('a sweep reaches every connected dashboard, and a later one is repaired by 
   assert.deepEqual(emptyRepair.documents, []);
 }));
 
-/*
- * The intent model's round trip (docs/archive/plan-navigator.md, M5), over the real control WS: a correction
- * goes up, the broadcast comes back to every dashboard, a model proposal (what a dispatch result feeds
- * in) is refused by the lock, and the next client's repair frame carries the statement that survived.
- * The dispatch itself is faked at the lane seam: no test in this repo spawns claude.
- */
-test('an operator correction locks the intent, survives a dispatch, and rides the snapshot repair', withVisionsBackend(async ({ base, backend, track }) => {
+test('a model intent proposal broadcasts and rides the snapshot repair', withVisionsBackend(async ({ base, backend, track }) => {
   const dashboard = await openRecordingSocket(`${base}/control`);
   track(dashboard.ws);
   const firstSnapshot = await waitFor(dashboard.received, (msg) => msg.type === 'visions-snapshot');
   assert.deepEqual(firstSnapshot.intent, {
-    text: '', source: null, locked: false, ts: 0,
+    text: '', source: null, ts: 0,
   }, 'a fresh daemon believes nothing yet');
 
-  dashboard.ws.send(JSON.stringify({ type: 'visions-set-intent', text: '  rewriting the merge gate  ' }));
-  const corrected = await waitFor(dashboard.received, (msg) => msg.type === 'visions-intent');
-  assert.equal(corrected.intent.text, 'rewriting the merge gate', 'trimmed by the merge, not by the tab');
-  assert.equal(corrected.intent.source, 'operator');
-  assert.equal(corrected.intent.locked, true);
-
-  // What a tier 3 result does when it lands: the lane's model-proposal path, which the lock outranks.
   const lane = backend.getVisionsLane();
-  assert.equal(lane.applyModelIntent('a plan doc about spawning'), false, 'the merge refuses it, so nothing is broadcast');
-  assert.equal(lane.getIntent().text, 'rewriting the merge gate');
+  assert.equal(lane.applyModelIntent('  rewriting the merge gate  '), true);
+  const proposed = await waitFor(dashboard.received, (msg) => msg.type === 'visions-intent');
+  assert.deepEqual(proposed.intent, {
+    text: 'rewriting the merge gate', source: 'model', ts: proposed.intent.ts,
+  });
+  assert.ok(Number.isFinite(proposed.intent.ts) && proposed.intent.ts > 0);
 
   const reconnected = await openRecordingSocket(`${base}/control`);
   track(reconnected.ws);
   const repaired = await waitFor(reconnected.received, (msg) => msg.type === 'visions-snapshot');
   assert.equal(repaired.intent.text, 'rewriting the merge gate');
-  assert.equal(repaired.intent.locked, true);
-
-  // And clearing it hands control back: the same model proposal now lands.
-  reconnected.ws.send(JSON.stringify({ type: 'visions-set-intent', text: '' }));
-  await waitFor(dashboard.received, (msg) => msg.type === 'visions-intent' && msg.intent.text === '');
-  assert.equal(lane.applyModelIntent('a plan doc about spawning'), true);
-  assert.equal(lane.getIntent().source, 'model');
+  assert.equal(repaired.intent.source, 'model');
+  assert.equal(Object.hasOwn(repaired.intent, 'locked'), false);
 }));
 
 test('a control client connecting with the lane off is told nothing about the visions', async () => {

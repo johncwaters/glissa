@@ -1,23 +1,11 @@
-// ── Visions view ───────────────────────────────────────────
-// What the Visions lane currently believes and currently sees: the intent model at the top (the one
-// statement of what is being built, correctable right there), then one section per open document that has
-// something to say: one row per tier 2 finding, one card per tier 3 model comment. Fed by four control-WS
-// messages, `visions-findings` and `visions-comments` (one uri each, pushed whenever a sweep publishes
-// or a dispatch lands, an empty array clearing that uri), `visions-intent` (the whole statement, pushed
-// whenever it moves) and `visions-snapshot` (the whole map plus the intent, sent to every client on
-// connect so a reconnect repairs rather than accumulates).
-//
-// The phone layout borrows this panel as its Visions screen. The grouping, ordering and wording live
-// in visions-view-core.mjs.
+// Visions view.
 
-import { sendControlMsg } from './control-ws.js';
 import { el, isPanelHidden } from './dom-helpers.js';
 import {
   INGEST_EMPTY_TEXT,
   VISIONS_EMPTY_TEXT,
   VISIONS_FIXES_EMPTY_TEXT,
   VISIONS_INTENT_EMPTY_TEXT,
-  VISIONS_INTENT_MAX_CHARS,
   activityAgeText,
   activityCountText,
   activityOverflowCount,
@@ -52,7 +40,6 @@ import {
   visionsHandText,
   visionsSections,
   sectionCountText,
-  shouldAdoptIntentText,
   totalCommentCount,
   totalFindingCount,
   totalHandCount,
@@ -64,11 +51,7 @@ let _handsByUri = new Map();
 let _intent = emptyIntent();
 let _root = null;
 let _feed = null;
-// The intent block's live nodes, built once: the field can hold a half-typed correction, so it is
-// updated in place rather than rebuilt under the operator.
 let _intentUI = null;
-// The statement the field last adopted, which is what tells a pristine field from a started draft.
-let _adoptedIntentText = '';
 let _activityCallback = null;
 // The ingest lane's cross-source timeline, newest first and already capped by the view core.
 let _activityEvents = [];
@@ -82,12 +65,6 @@ let _fixUI = null;
 // which is the whole point of the dot: it says "something arrived since you last looked".
 let _unseen = false;
 
-/*
- * The intent block: the statement, who set it and how old it is, and the one field that corrects it.
- * The button label is constant for the control's whole lifecycle (house convention), because the
- * action is always the same one; submitting an EMPTY field is the documented way to clear the
- * statement and hand control back to the model.
- */
 function buildIntentBlock() {
   const section = el('section', 'visions-intent');
   const head = el('div', 'visions-intent-head');
@@ -96,52 +73,19 @@ function buildIntentBlock() {
   head.append(meta);
   section.append(head);
 
-  // Model text and operator text alike: built as text, never markup.
   const statement = el('p', 'visions-intent-text');
   section.append(statement);
 
-  const form = el('form', 'visions-intent-form');
-  const input = el('input', 'visions-intent-input');
-  input.type = 'text';
-  input.maxLength = VISIONS_INTENT_MAX_CHARS;
-  input.placeholder = 'What are you building?';
-  input.setAttribute('aria-label', 'Working intent');
-  const submit = el('button', 'visions-intent-submit', 'Set intent');
-  submit.type = 'submit';
-  form.append(input, submit);
-  form.addEventListener('submit', (event) => {
-    event.preventDefault();
-    submitIntent();
-  });
-  section.append(form);
-
-  _intentUI = { meta, statement, input };
+  _intentUI = { meta, statement };
   return section;
-}
-
-// The server decides what the correction does; this only reports what was typed, empty included.
-function submitIntent() {
-  if (!_intentUI) return;
-  const text = _intentUI.input.value;
-  _adoptedIntentText = text;
-  sendControlMsg({ type: 'visions-set-intent', text });
 }
 
 function renderIntent() {
   if (!_intentUI) return;
-  const { meta, statement, input } = _intentUI;
+  const { meta, statement } = _intentUI;
   meta.textContent = intentMetaText(_intent);
   statement.textContent = _intent.text || VISIONS_INTENT_EMPTY_TEXT;
   statement.classList.toggle('visions-intent-none', !_intent.text);
-  const adopt = shouldAdoptIntentText({
-    focused: document.activeElement === input,
-    currentValue: input.value,
-    previousText: _adoptedIntentText,
-    nextText: _intent.text,
-  });
-  if (!adopt) return;
-  input.value = _intent.text;
-  _adoptedIntentText = _intent.text;
 }
 
 function buildSection(section) {
@@ -386,10 +330,6 @@ export function applyVisionsHand(msg) {
   refreshActivity();
 }
 
-/*
- * The intent model moved. A model proposal is visions output and raises the dot; the operator's own
- * correction is not news to the operator, so it does not.
- */
 export function applyVisionsIntent(msg) {
   const next = intentOfMessage(msg);
   const moved = hasIntentChanged(_intent, next);

@@ -238,7 +238,7 @@ test('a session that writes the result file yields its comments, and the work di
   });
 
   assert.equal(seen.length, 1);
-  assert.match(seen[0].prompt, /Current working intent \(operator-corrected when locked\): a plan doc about the spawn path/);
+  assert.match(seen[0].prompt, /Current working intent: a plan doc about the spawn path/);
   assert.equal(seen[0].id, `visions:${URI}`);
   assert.equal(seen[0].model, 'sonnet', 'the configured model reaches the spawn');
   assert.equal(seen[0].cwd, workDirs[0], 'the session runs in the throwaway dir, never a repo');

@@ -403,9 +403,6 @@ function registerControlHandlers(controlWss, deps) {
     // Replay of transient broadcasts missed across a reconnect gap (optional - undefined in
     // older callers/tests; connect then behaves as before, snapshot-only).
     controlReplayLog = null,
-    // Visions lane (optional - null whenever config.visions is absent or off, which is what makes
-    // the intent correction refuse instead of crashing).
-    visionsLane = null,
   } = deps;
 
   function buildSettingsPayload() {
@@ -925,25 +922,6 @@ function registerControlHandlers(controlWss, deps) {
     ws.send(JSON.stringify(report));
   }
 
-  /*
-   * The intent model's correction path (docs/archive/plan-navigator.md, M5): the Visions tab's one writable
-   * field. EMPTY text is meaningful (it clears the statement and hands control back to the model), so
-   * an absent `text` is a clear rather than an error. What the correction then DOES to the standing
-   * statement is decided by the merge in server/core/visions-intent-core.js, never here, and the
-   * lane broadcasts the result to every client itself.
-   */
-  function handleVisionsSetIntent(msg, ws) {
-    if (!visionsLane) {
-      sendError(ws, 'The visions lane is not running');
-      return;
-    }
-    if (msg.text != null && typeof msg.text !== 'string') {
-      sendError(ws, 'visions intent text must be a string');
-      return;
-    }
-    visionsLane.setOperatorIntent(typeof msg.text === 'string' ? msg.text : '');
-  }
-
   function handleShutdown() {
     console.log('[control] Shutdown requested via UI');
     broadcastControl({ type: 'shutting-down' });
@@ -978,7 +956,6 @@ function registerControlHandlers(controlWss, deps) {
     'posthog-issue-action': handlePosthogIssueAction,
     'posthog-archive-investigation': handlePosthogArchiveInvestigation,
     'request-usage-report': handleRequestUsageReport,
-    'visions-set-intent': handleVisionsSetIntent,
     'kill':             (msg) => { const s = findSession(msg); if (s) s.killSession(); },
     'start-session':    (msg) => {
       const s = findSession(msg);

@@ -796,7 +796,7 @@ test('the working intent rides the prompt as context, and the result contract as
     intent: '  blog post arguing X for audience Y  ',
     resultPath: '/tmp/r.json',
   });
-  assert.match(prompt, /Current working intent \(operator-corrected when locked\): blog post arguing X for audience Y/);
+  assert.match(prompt, /Current working intent: blog post arguing X for audience Y/);
   assert.match(prompt, /"intent":"what this document is being written for"/);
   assert.match(prompt, /The "intent" field is OPTIONAL/);
   assert.match(prompt, /at most 300 characters, naming what you believe/);
@@ -828,7 +828,7 @@ test('an over-long intent is capped before it reaches the prompt', () => {
   const prompt = buildVisionsPrompt({
     uri: URI, text: '# Title\n', intent: 'y'.repeat(500), resultPath: '/tmp/r.json',
   });
-  assert.ok(prompt.includes(`Current working intent (operator-corrected when locked): ${'y'.repeat(300)}\n`));
+  assert.ok(prompt.includes(`Current working intent: ${'y'.repeat(300)}\n`));
   assert.equal(prompt.includes('y'.repeat(301)), false);
 });
 

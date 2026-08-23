@@ -13,8 +13,11 @@ Give Visions long-term memory: a durable, machine-global store of what has been 
 sessions, ingested from local agent transcripts and from Visions' own surfaces, and delivered
 back into future work. Four kinds of remembered fact:
 
-1. **Intent evolution.** The history behind the single machine-wide intent statement: what was
-   being built, when it changed, which corrections the operator made.
+1. **Intent evolution.** The history behind the single machine-wide intent statement: what
+   was being built and when it changed. Intent is model-maintained end to end (operator
+   decision 2026-08-22: the manual correction and lock surface is REMOVED; a wrong intent is
+   a program bug, fixed in the gate, prompt, or cadence, never by hand-editing the
+   statement).
 2. **Suggestion feedback.** Which advisor output the operator applied vs refused, so the lane
    stops repeating rejected advice.
 3. **Codebase knowledge.** Distilled per-project facts observed across sessions: architecture
@@ -38,13 +41,20 @@ back into future work. Four kinds of remembered fact:
 - **Automatic after one switch** (operator decision 2026-08-22): the system should be
   automatic and almost never thought about. `memory.enabled: true` is the ONLY required
   touch; ingestion, backfill, distillation, projection, pack rebuild and delivery all run
-  themselves from there. The remaining operator touches are inherently operator acts (an
-  intent lock, `forget`, the rare locked-diff review), not maintenance.
-- **The storage SUBSTRATE is subordinate to the machine-wide store design pass**
-  (`docs/architecture-review.html`, section 7 disposition, 2026-08), with the memory lane a
-  counted first-class tenant of that decision. This plan therefore separates the memory
-  CONTRACT from its substrate; the "Store contract vs substrate" section states the whole
-  disposition and the swap path once.
+  themselves from there. The remaining operator touches are inherently operator acts
+  (`forget`, the rare locked-diff review), not maintenance. Intent has no operator touch at
+  all anymore.
+- **Memory lives in the database, not files** (operator decision 2026-08-22, superseding the
+  earlier wait-for-the-design-pass posture FOR MEMORY): the canon and the lane's operational
+  state are tables in the ONE machine-wide `node:sqlite` database beside config.json that
+  `docs/architecture-review.html` section 7 constrains (no server process, no migration
+  framework, nothing bloated). Memory is that database's first tenant; the design pass for
+  the other sidecar files inherits a store that already exists. The PROJECTION stays
+  markdown files, since it is the agent-agnostic read surface.
+- **Memory is versioned the way the context mill is** (operator decision 2026-08-22): the
+  projection publishes as deterministic, hash-versioned builds with current/previous
+  rotation and an unchanged-skip, and every delivery names the version it carried. See
+  "Projection versioning".
 
 ## Research summary (2026-08-22)
 
@@ -67,7 +77,8 @@ options, `node:sqlite`). Conclusions the design rests on:
 - **Schema ideas stolen from the frameworks**: bi-temporal validity (`validFrom`/`validTo`),
   supersession chains instead of overwrite, episodic vs semantic layers with background (never
   hot-path) formation, source-kind trust ranking, verifier-gated distillation, operator locks
-  (already in `visions-intent-core.js`).
+  (generic machinery in `memory-core`; the intent lock that inspired them was since removed
+  with the manual intent surface).
 - **Memory poisoning is a real attack class** (OWASP Agentic AI Top 10 ASI06, 2026). Reported
   relapse rate for conversation-only corrections is 100 percent: a correction must be a store
   mutation, never a prompt. Retrieved memory re-entering a prompt is untrusted data and gets
@@ -97,20 +108,51 @@ outcome of the machine-wide store design pass:
 - All memory-core rules (trust ranks, lineage, locks, supersession, echo suppression, secret
   gates, retrieval scoring) are pure and substrate-blind: they take records, not files.
 
-The substrate TODAY (M12, shipped) is files, as laid out below. If the design pass picks
-SQLite-primary, the canon segments become an append-only table and `tail-state.json`, the
-delivered-hash state, and the distill bookkeeping become rows in the ONE machine-wide
-`node:sqlite` database beside config.json, which is also what buys the cross-key recovery
-point the review names as the primary requirement: a memory write, its lane-ledger entry,
-and budget state can then agree after a crash by transaction instead of by luck. The
-`O_EXCL` canon lockfile and the watch-reload machinery M12 built for the CLI-vs-server race
-collapse into WAL in that world. Only `memory-store.js` (the IO shell) changes; the record
-HMAC survives as-is, because rows are as appendable by a local process as JSONL lines and
-the trust claim must not depend on the substrate. No incremental adoption: M13 to M16 build
-on the shipped file substrate, and the swap, if it comes, is the design pass's own
-milestone.
+The substrate is the machine-wide `node:sqlite` database (operator decision 2026-08-22).
+M12 shipped on files; M12b swaps `memory-store.js` onto the database before M13 builds on
+it. What the swap buys and costs:
 
-### Store layout (file substrate, as shipped in M12)
+- The canon becomes an append-only table (id, ts, kind, layer, project, source fields,
+  text, validity, supersedes, lineage, locked, sig), with monthly retention as a keyed
+  DELETE instead of segment-file drops. The record HMAC survives unchanged: rows are as
+  writable by a local process with file access as JSONL lines were, so the trust claim
+  cannot lean on the substrate.
+- `tail-state.json`, the delivered-hash (echo suppression) state, and the distill
+  bookkeeping become tables in the same database, which is the cross-key recovery point the
+  review names as primary: a memory write and its bookkeeping agree after a crash by
+  transaction, not by luck.
+- The `O_EXCL` canon lockfile and the fs.watch reload machinery M12 built for the
+  CLI-vs-server race are DELETED: SQLite's own cross-process locking (WAL, busy_timeout)
+  is the arbiter, and `forget` becomes one transaction (redact rows, insert tombstone,
+  mark projection stale) that a concurrent server append cannot interleave with.
+- `node:sqlite` is REQUIRED for the memory lane: at construction the store feature-detects
+  the module (Node 22.16+; Glissa's floor is 18) and on absence the lane stays off with one
+  lane-log warning. No file fallback: two substrates means two sets of bugs.
+- No migration framework: the schema is created idempotently at open (`CREATE TABLE IF NOT
+  EXISTS`), `PRAGMA user_version` names the shape, and a future shape change is a read-old
+  write-new pass in code, not a framework. The M12 file canon migrates the same way: on
+  first database open, existing `canon-*.jsonl` segments are imported through the normal
+  verify-or-demote gate, then renamed `.imported`.
+
+### Projection versioning (the mill pattern)
+
+The projection publishes exactly the way a pack does, because the reasons are the same
+(deterministic diffing, cheap unattended rebuild, visible staleness):
+
+- A build renders the projection from the canon deterministically, computes `version` as
+  the sha256 of every delivered byte, and SKIPS publishing when the version matches the
+  published one. An unchanged canon costs nothing.
+- Output rotates `memory/dist/current/` to `memory/dist/previous/` and renames a tmp dir
+  in, atomically, with a `manifest.json` carrying version, `builtAt`, record-count, and the
+  canon watermark (max canon rowid included), so a reader can tell exactly how fresh the
+  build is.
+- Every delivery names its version: the fenced prompt section header carries it, the M16
+  pack carrier inherits the mill's own versioning on top, and the direct-read pointer
+  documentation tells the operator `current/` is the only path to reference.
+- Superseded builds are the mill's `previous/` only; record-level history stays in the
+  canon (supersession chains), not in kept build generations.
+
+### Store layout (file substrate, as shipped in M12; replaced by M12b)
 
 Everything lives under `configSiblingPath(configPath, 'memory')`, so a temp `GLISSA_CONFIG`
 never writes into the real `~/.glissa` (same rule as uploads, recordings, warehouse):
@@ -152,7 +194,8 @@ the repo checkout, and durable memory must never become git-visible).
 }
 ```
 
-- **Trust ranks, highest first**: `operator` (an explicit correction, a lock, a `forget`),
+- **Trust ranks, highest first**: `operator` (a `forget`, or any future explicit operator
+  surface; intent has none),
   `action` (a fact derived from something the operator DID: applied an edit, answered a
   prompt), `reported` (transcript-derived text: what an agent said or read; contains
   third-party and prior-model content and is ranked accordingly), `model` (a distiller or
@@ -183,7 +226,9 @@ the repo checkout, and durable memory must never become git-visible).
 - Contradiction handling is a supersession chain plus `validTo`, never an in-place rewrite;
   decay is a ranking demotion at read time, not a deletion. Dates inside `text` are
   absolutized at write time. A `model` or `reported` record can never supersede a `locked`
-  record; only an operator mutation clears a lock (`applyModelIntent` generalized).
+  record; only an operator mutation clears a lock. Locks are generic store machinery with no
+  current producer (the intent lock was removed with the manual intent surface); they guard
+  whatever operator-authored records exist now or later.
 
 ### Write gates (every path in)
 
@@ -237,13 +282,29 @@ ENABLING memory, but on an enabled store a local process can still steer content
 sessions whose transcripts are ingested; that is inherent to the localhost trust boundary,
 and it is why nothing ingested can exceed `reported` rank.
 
+### M12b: database substrate and versioned projection (before M13)
+
+The swap described in "Store contract vs substrate", plus "Projection versioning", as one
+milestone: `memory-store.js` moves onto the machine-wide `node:sqlite` database (canon,
+tail-state, echo-hash, and distill-bookkeeping tables; schema idempotent at open; module
+feature-detected, lane off with a warning without it), the file-era lockfile and watch
+machinery is deleted, the one-time `.jsonl` import runs through verify-or-demote, `forget`
+becomes a single transaction, and the projection starts publishing hash-versioned
+current/previous builds with the unchanged-skip and manifest. `memory-core` gains only pure
+additions (projection build planning with version hash, watermark rules); every trust rule
+is untouched. Tests move with it: the cross-process forget race collapses into a
+transactional test, the projection determinism test becomes a version-stability test
+(same records, byte-identical build, same version), and a new test pins the unchanged-skip
+and the rotation. Security review gate applies again before commit (the trust kernel's IO
+changes substrate).
+
 ### M13: Visions-surface writers (rescoped)
 
 What actually fires today, wired through the funnels in `server/visions-wiring.js`:
 
-- `commitIntent` writes `intent` records: model proposals stamped `model`, operator
-  corrections stamped `operator` with `locked` mirrored. The intent HISTORY becomes durable;
-  `visions-intent.json` stays the live head, unchanged.
+- `commitIntent` writes `intent` records, all stamped `model`: intent is model-maintained
+  with no operator surface, so its history is a chain of model proposals. The intent HISTORY
+  becomes durable; `visions-intent.json` stays the live head, unchanged.
 - `applyDispatchResult` writes tier 4 hands and dispatch comment facts, stamped `model`.
 - `logFix` writes `feedback` records where it fires. Honestly stated: `logFix` is reachable
   only from the `workspace/applyEdit` push path, which runs only under `visions.autoFix`

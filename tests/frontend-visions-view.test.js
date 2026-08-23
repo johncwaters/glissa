@@ -242,23 +242,22 @@ test('an intent message is normalized, and anything malformed reads as no intent
   const { emptyIntent, intentOfMessage } = await importCore();
   assert.deepEqual(intentOfMessage({
     intent: {
-      text: 'refactor of the spawn path', source: 'operator', locked: true, ts: NOW,
+      text: 'refactor of the spawn path', source: 'model', locked: true, ts: NOW,
     },
   }), {
-    text: 'refactor of the spawn path', source: 'operator', locked: true, ts: NOW,
+    text: 'refactor of the spawn path', source: 'model', ts: NOW,
   });
 
   assert.deepEqual(intentOfMessage({}), emptyIntent());
   assert.deepEqual(intentOfMessage({ intent: null }), emptyIntent());
   assert.deepEqual(intentOfMessage({ intent: 'a bare string' }), emptyIntent());
   assert.deepEqual(intentOfMessage({ intent: { text: 'x', source: 'somebody else', ts: 'soon' } }), {
-    text: 'x', source: null, locked: false, ts: 0,
+    text: 'x', source: null, ts: 0,
   });
 });
 
-test('the source line says who owns the statement, in the second person', async () => {
+test('the source line credits the visions when a statement exists', async () => {
   const { intentSourceText } = await importCore();
-  assert.equal(intentSourceText({ text: 'x', source: 'operator' }), 'set by you');
   assert.equal(intentSourceText({ text: 'x', source: 'model' }), 'proposed by visions');
   assert.equal(intentSourceText({ text: '', source: 'model' }), '', 'no statement, nobody to credit');
 });
@@ -278,40 +277,21 @@ test('the age reads coarsely, because the question is minutes or days and never 
 
 test('the meta line joins the two, and says nothing at all when there is no statement', async () => {
   const { emptyIntent, intentMetaText } = await importCore();
-  assert.equal(intentMetaText({ text: 'x', source: 'operator', ts: NOW }, NOW + 120000), 'set by you, 2 minutes ago');
+  assert.equal(intentMetaText({ text: 'x', source: 'model', ts: NOW }, NOW + 120000), 'proposed by visions, 2 minutes ago');
   assert.equal(intentMetaText({ text: 'x', source: 'model', ts: 0 }, NOW), 'proposed by visions');
   assert.equal(intentMetaText(emptyIntent(), NOW), '');
 });
 
-test('only text, source or lock moving counts as a change, so a repaint never fires on age alone', async () => {
+test('only text or source moving counts as a change, so a repaint never fires on age alone', async () => {
   const { emptyIntent, hasIntentChanged } = await importCore();
   const standing = {
-    text: 'x', source: 'model', locked: false, ts: NOW,
+    text: 'x', source: 'model', ts: NOW,
   };
   assert.equal(hasIntentChanged(standing, { ...standing, ts: NOW + 90000 }), false);
   assert.equal(hasIntentChanged(standing, { ...standing, text: 'y' }), true);
-  assert.equal(hasIntentChanged(standing, { ...standing, source: 'operator', locked: true }), true);
+  assert.equal(hasIntentChanged(standing, { ...standing, source: null }), true);
   assert.equal(hasIntentChanged(emptyIntent(), standing), true);
   assert.equal(hasIntentChanged(null, emptyIntent()), false);
-});
-
-test('the correction field adopts the statement only when it holds no draft of its own', async () => {
-  const { shouldAdoptIntentText } = await importCore();
-  assert.equal(shouldAdoptIntentText({
-    focused: false, currentValue: '', previousText: '', nextText: 'a new belief',
-  }), true, 'a pristine field mirrors the statement, so a correction is an edit rather than a retype');
-
-  assert.equal(shouldAdoptIntentText({
-    focused: true, currentValue: '', previousText: '', nextText: 'a new belief',
-  }), false, 'never while the operator has the field');
-
-  assert.equal(shouldAdoptIntentText({
-    focused: false, currentValue: 'half a thought', previousText: '', nextText: 'a new belief',
-  }), false, 'a started draft is never eaten by a push');
-
-  assert.equal(shouldAdoptIntentText({
-    focused: false, currentValue: 'same', previousText: 'same', nextText: 'same',
-  }), false, 'nothing to adopt');
 });
 
 // --- Tier 1 fix changelog (docs/archive/plan-navigator-2.md, M6) ---
