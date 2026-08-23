@@ -488,3 +488,18 @@ test('the published projection directory is one of the pack watch roots', async 
     assert.deepEqual(roots, [path.join(glissaHome, 'memory/dist/current').replace(/\\/g, '/')]);
   }, { spec: memorySpec(), seed: () => {} });
 });
+
+test('a source whose root IS the config directory resolves as inside it', async () => {
+  await withFixture(async ({ root, build, currentDir }) => {
+    const glissaHome = seedGlissaHome(root);
+    writeSpec(path.join(root, 'packs'), 'memory', memorySpec({
+      sources: [{ path: '{{glissaHome}}/', data: true, optional: true }],
+    }));
+    const report = await build({ glissaHome });
+
+    assert.equal(report.ok, true, report.errors.join('; '));
+    const manifest = readManifest(currentDir);
+    assert.deepEqual(manifest.sources[0].files.map((file) => file.relPath), ['memory/dist/current/MEMORY.md']);
+    assert.equal(fs.existsSync(path.join(currentDir, 'data', '01-glissahome', 'memory/dist/current/MEMORY.md')), true);
+  }, { spec: memorySpec(), seed: () => {} });
+});

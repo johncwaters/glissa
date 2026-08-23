@@ -36,7 +36,9 @@ function defaultBuiltRoot() {
 /*
  * The one runtime path a version-controlled spec may name: `{{glissaHome}}` is the directory config.json
  * lives in (docs/plan-visions-3.md, M16), which is where the memory projection and every other config
- * sibling sits. Resolved lazily, so a spec that never names it never asks where the config is.
+ * sibling sits. THE single derivation, used by the server and the CLI alike: bin/glissa.js bridges
+ * --config into GLISSA_CONFIG before dispatching a pack command, so both resolve the same file. Lazy,
+ * so a spec that never names the placeholder never asks where the config is.
  */
 function defaultGlissaHome() {
   return path.dirname(resolveConfigPath());
@@ -64,8 +66,9 @@ function resolvePattern(rawPattern, baseDir, glissaHome = null) {
 function assertInsideGlissaHome(rawPattern, resolved, glissaHome) {
   if (!rawPattern.includes(GLISSA_HOME_PLACEHOLDER)) return;
   const home = path.resolve(glissaHome || defaultGlissaHome());
+  // An empty relative path is the config dir itself, which is inside it.
   const relative = path.relative(home, resolved.replace(/\/+$/, ''));
-  if (relative && !relative.startsWith('..') && !path.isAbsolute(relative)) return;
+  if (!relative.startsWith('..') && !path.isAbsolute(relative)) return;
   throw new Error(`source pattern "${rawPattern}" resolves outside the Glissa config directory`);
 }
 

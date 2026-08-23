@@ -75,7 +75,6 @@ const { decideControlSend } = require('./core/control-send-core');
 const { createHeartbeat } = require('./ws-heartbeat');
 const { consumedPackNames, normalizePackNames } = require('./core/pack-core');
 const { createPackService } = require('./pack-service');
-const { buildPack, packWatchRoots } = require('./pack-builder');
 const { createMillWiring } = require('./mill-wiring');
 const {
   DEFAULT_INTERVAL_HOURS, DEFAULT_TIMEOUT_SECONDS, createDistillSpawn, createPackDistiller,
@@ -1270,13 +1269,8 @@ function createBackend(httpServer, options = {}) {
   // on the old build (its skills hot-reload from the pack dir, its CLAUDE.md and rules do not).
   // A spec nothing delivers is neither watched nor swept, and the projects' own lists are read live so
   // assigning a pack from the Mill tab (or by hand) starts that work without a restart.
-  const configDir = path.dirname(configStore.configPath);
   const packService = createPackService({
     consumedPackNames: () => consumedPackNames(config),
-    // The resolved config dir, so a `{{glissaHome}}` source reads the same siblings the rest of the
-    // server does rather than re-resolving where config.json lives.
-    build: ({ specPath }) => buildPack({ specPath, glissaHome: configDir }),
-    watchRootsForSpec: (spec) => packWatchRoots(spec, { glissaHome: configDir }),
     ...(options.packServiceOptions || {}),
   });
   packService.on('pack-updated', ({ name, version }) => {

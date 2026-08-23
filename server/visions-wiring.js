@@ -30,6 +30,7 @@ const {
   dispatchMemoryInputs,
   fixFeedbackInput,
   intentMemoryInput,
+  MAX_DELIVERED_RECORDS,
   latestIntentHeads,
   memoryDeliveryLines,
   projectTagFor,
@@ -62,8 +63,6 @@ const MAX_FRAME_BYTES = 2 * 1024 * 1024;
 const MARKDOWN_EXTENSIONS = ['.md', '.markdown'];
 // What one dispatch prompt will spend on recent activity, beside a buffer that can be far larger.
 const DIGEST_BUDGET_CHARS = 2000;
-// Top-K remembered records one dispatch prompt carries; the renderer caps the characters beside it.
-const MEMORY_DELIVERY_LIMIT = 8;
 const CODE_ACTION_METHOD = 'textDocument/codeAction';
 const APPLY_EDIT_METHOD = 'workspace/applyEdit';
 // An editor that never answers an applyEdit leaves a slot and a changelog line owed; this bounds both.
@@ -189,7 +188,7 @@ function createVisionsWiring({
    */
   getMemoryStore = null,
   // How many remembered records one dispatch prompt may carry (docs/plan-visions-3.md, M16).
-  memoryDeliveryLimit = MEMORY_DELIVERY_LIMIT,
+  memoryDeliveryLimit = MAX_DELIVERED_RECORDS,
   intentStatePath = null,
   fsFns = fs,
   fsPromises = fsPromisesDefault,
