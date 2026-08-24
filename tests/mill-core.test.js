@@ -7,12 +7,12 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const { MAX_OUTPUT_ROWS, budgetPercent, buildMillReport, shortBuiltReason } = require('../server/core/mill-core');
-const { MAX_INDEX_TOKENS, MAX_PACKS_PER_SESSION, packConsumerSources } = require('../server/core/pack-core');
+const { MAX_INDEX_TOKENS, MAX_PACKS_PER_SESSION, packConsumerGroups } = require('../server/core/pack-core');
 
 // The report takes the SAME source enumeration the build gate reads, so the fixtures go through
 // pack-core rather than hand-building the shape: a config key added there reaches these tests for free.
 function sourcesFor({ projects = [], prReview = null, posthog = null } = {}) {
-  return packConsumerSources({
+  return packConsumerGroups({
     projects,
     prReview: prReview ? { packs: prReview } : null,
     posthog: posthog ? { packs: posthog } : null,
@@ -136,7 +136,7 @@ test('a delivery is stale only when the delivered version differs from a KNOWN b
     ],
   }));
   const pack = report.packs[0];
-  assert.deepEqual(pack.deliveredTo.map((d) => d.sessionId), ['s1', 's2']);
+  assert.deepEqual(pack.deliveredTo.map((d) => d.project), ['current', 'behind']);
   assert.equal(pack.deliveredTo[0].stale, false);
   assert.equal(pack.deliveredTo[1].stale, true);
   assert.equal(pack.deliveredTo[1].readsSinceNotice, 1);
@@ -145,6 +145,99 @@ test('a delivery is stale only when the delivered version differs from a KNOWN b
   assert.equal(pack.staleDeliveries, 1);
   assert.equal(report.totals.staleDeliveries, 1);
   assert.equal(report.totals.totalReads, 5);
+});
+
+// ---- Delivery rows are addressed per PROJECT, never per card ----
+
+const SIBLING_PROJECTS = [
+  { id: 'p1', name: 'glissa', path: 'C:/repo', packs: ['company-context'] },
+  { id: 'p2', name: 'glissa (2)', path: 'C:/repo', packs: ['company-context'] },
+  { id: 'p3', name: 'other', path: 'C:/other', packs: ['company-context'] },
+];
+
+test('two cards on one checkout are ONE delivery row, counted and summed', () => {
+  const report = buildMillReport(baseInput({
+    consumers: { projects: SIBLING_PROJECTS },
+    sessionRows: [
+      { sessionId: 's1', sessionName: 'glissa', path: 'C:/repo', state: 'running', packs: [{ name: 'company-context', version: VERSION, reads: 2 }] },
+      { sessionId: 's2', sessionName: 'glissa (2)', path: 'C:/repo', state: 'idle', packs: [{ name: 'company-context', version: OLD_VERSION, reads: 3, readsSinceNotice: 1 }] },
+      { sessionId: 's3', sessionName: 'other', path: 'C:/other', state: 'running', packs: [{ name: 'company-context', version: VERSION, reads: 1 }] },
+    ],
+  }));
+  const pack = report.packs[0];
+  assert.deepEqual(pack.deliveredTo.map((delivery) => delivery.project), ['glissa', 'other']);
+  const grouped = pack.deliveredTo[0];
+  assert.equal(grouped.sessionCount, 2);
+  assert.equal(grouped.reads, 5);
+  assert.equal(grouped.readsSinceNotice, 1);
+  assert.equal(grouped.state, null, 'two sessions in different states, so neither speaks for the project');
+  assert.equal(grouped.version, null);
+  assert.equal(grouped.stale, true, 'one session behind puts the project behind');
+  assert.equal(grouped.staleSessions, 1);
+  assert.equal(pack.staleDeliveries, 1, 'the total stays SESSIONS, which is what an operator restarts');
+  assert.equal(pack.totalReads, 6);
+});
+
+test('a grouped row keeps a state and a version its sessions agree on', () => {
+  const report = buildMillReport(baseInput({
+    consumers: { projects: SIBLING_PROJECTS },
+    sessionRows: [
+      { sessionId: 's1', sessionName: 'glissa', path: 'C:/repo', state: 'running', packs: [{ name: 'company-context', version: VERSION, reads: 1 }] },
+      { sessionId: 's2', sessionName: 'glissa (2)', path: 'C:/repo', state: 'running', packs: [{ name: 'company-context', version: VERSION, reads: 1 }] },
+    ],
+  }));
+  const grouped = report.packs[0].deliveredTo[0];
+  assert.equal(grouped.state, 'running');
+  assert.equal(grouped.version, VERSION);
+  assert.equal(grouped.stale, false);
+  assert.equal(grouped.staleSessions, 0);
+});
+
+test('the delivery row is named by the project record, not by whichever card happens to be live', () => {
+  const report = buildMillReport(baseInput({
+    consumers: { projects: SIBLING_PROJECTS },
+    sessionRows: [
+      { sessionId: 's2', sessionName: 'glissa (2)', path: 'C:/repo', state: 'running', packs: [{ name: 'company-context', version: VERSION, reads: 0 }] },
+    ],
+  }));
+  assert.equal(report.packs[0].deliveredTo[0].project, 'glissa');
+});
+
+test('a session whose path no project record names is still reported, under its own name', () => {
+  const report = buildMillReport(baseInput({
+    consumers: { projects: SIBLING_PROJECTS },
+    sessionRows: [
+      { sessionId: 's9', sessionName: 'ephemeral', path: 'C:/nowhere', state: 'running', packs: [{ name: 'company-context', version: VERSION, reads: 0 }] },
+    ],
+  }));
+  assert.equal(report.packs[0].deliveredTo[0].project, 'ephemeral');
+});
+
+test('a session path never reaches the report: the tab renders on a paired phone too', () => {
+  const report = buildMillReport(baseInput({
+    consumers: { projects: SIBLING_PROJECTS },
+    sessionRows: [
+      { sessionId: 's1', sessionName: 'glissa', path: '/home/x/repo', state: 'running', packs: [{ name: 'company-context', version: VERSION, reads: 0 }] },
+    ],
+  }));
+  assert.ok(!JSON.stringify(report).includes('/home/x/'), 'no server path survives into the wire shape');
+});
+
+test('sibling cards are one assignable project, with the packs either of them names', () => {
+  const report = buildMillReport(baseInput({
+    consumers: {
+      projects: [
+        { id: 'p1', name: 'glissa', path: 'C:/repo', packs: ['company-context'] },
+        { id: 'p2', name: 'glissa (2)', path: 'C:/repo', packs: ['house-rules'] },
+        { id: 'p3', name: 'other', path: 'C:/other', packs: [] },
+      ],
+    },
+  }));
+  assert.deepEqual(report.projects, [
+    { id: 'p1', name: 'glissa', packs: ['company-context', 'house-rules'] },
+    { id: 'p3', name: 'other', packs: [] },
+  ], 'the primary id addresses the whole project, and neither card is offered twice');
+  assert.deepEqual(report.packs[0].consumers.projects, ['glissa'], 'and it names the project once');
 });
 
 test('an unbuilt pack judges no delivery stale: an unknown version is not a mismatch', () => {

@@ -17,11 +17,13 @@ const {
   isPackRelativePath,
   matchesGlob,
   normalizePackNames,
+  packConsumerGroups,
   packConsumerSources,
   packVariantProjects,
   planPackBuild,
   planPackVariants,
   projectVariantSlug,
+  sameProjectRecords,
   sourceSlug,
   validatePackSpec,
   variantPackName,
@@ -510,6 +512,71 @@ test('consumedPackNames is derived from that one enumeration', () => {
     for (const name of normalizePackNames(source.packs).names) union.add(name);
   }
   assert.deepEqual(consumedPackNames(config), [...union].sort());
+});
+
+// ── packConsumerGroups ──
+// The same enumeration addressed per PROJECT: two config records may share one checkout, and a
+// delivery target is the checkout, never the card.
+
+function projectRows(config) {
+  return packConsumerGroups(config).filter((row) => row.kind === 'project');
+}
+
+test('two records on one path are ONE group: first id, first label, union of their packs', () => {
+  const groups = projectRows({
+    projects: [
+      { id: 'p1', name: 'glissa', path: 'C:/repo', packs: ['a'] },
+      { id: 'p2', name: 'glissa (2)', path: 'C:/repo', packs: ['b', 'a'] },
+    ],
+  });
+  assert.equal(groups.length, 1);
+  assert.equal(groups[0].id, 'p1', 'the primary id is the first record in config order');
+  assert.equal(groups[0].label, 'glissa');
+  assert.equal(groups[0].path, 'C:/repo');
+  assert.deepEqual(groups[0].recordIds, ['p1', 'p2'], 'the write path fans a delta over every member');
+  assert.deepEqual(groups[0].packs, ['a', 'b']);
+});
+
+test('distinct paths stay distinct, even sharing a basename', () => {
+  const groups = projectRows({
+    projects: [
+      { id: 'p1', name: 'glissa', path: 'C:/work/glissa', packs: ['a'] },
+      { id: 'p2', name: 'glissa fork', path: 'C:/forks/glissa', packs: ['b'] },
+    ],
+  });
+  assert.deepEqual(groups.map((group) => group.id), ['p1', 'p2'], 'a basename is not an identity');
+  assert.deepEqual(groups.map((group) => group.recordIds), [['p1'], ['p2']]);
+});
+
+test('a record with no usable path is its own group: nothing marks it as a sibling', () => {
+  const groups = projectRows({ projects: [{ id: 'p1', name: 'a' }, { id: 'p2', name: 'b', path: '' }] });
+  assert.deepEqual(groups.map((group) => group.id), ['p1', 'p2']);
+  assert.deepEqual(groups.map((group) => group.path), [null, null]);
+});
+
+test('a lone member keeps its raw packs value, so a malformed one still warns downstream', () => {
+  const groups = projectRows({ projects: [{ id: 'p1', name: 'a', path: 'C:/repo', packs: 'not-an-array' }] });
+  assert.equal(groups[0].packs, 'not-an-array');
+});
+
+test('the lane rows pass through the grouping untouched', () => {
+  const rows = packConsumerGroups({ projects: [], prReview: { packs: ['b'] }, posthog: { packs: ['c'] } });
+  assert.deepEqual(rows.map((row) => [row.kind, row.label]), [
+    ['prReview', 'prReview.packs'],
+    ['posthog', 'posthog.packs'],
+  ]);
+});
+
+test('sameProjectRecords names every card on one checkout, and only itself without a path', () => {
+  const records = [
+    { id: 'p1', path: 'C:/repo' },
+    { id: 'p2', path: 'C:/repo' },
+    { id: 'p3', path: 'C:/other' },
+    { id: 'p4' },
+  ];
+  assert.deepEqual(sameProjectRecords(records, records[0]).map((r) => r.id), ['p1', 'p2']);
+  assert.deepEqual(sameProjectRecords(records, records[2]).map((r) => r.id), ['p3']);
+  assert.deepEqual(sameProjectRecords(records, records[3]).map((r) => r.id), ['p4']);
 });
 
 // ── applyPackDelta ──

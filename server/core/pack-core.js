@@ -355,6 +355,18 @@ const PACK_CONSUMER_LANES = Object.freeze([
   { kind: 'posthog', label: 'posthog.packs', read: (config) => config?.posthog?.packs },
 ]);
 
+// A project IS its resolved path, so that is what identifies one; an unusable path identifies nothing.
+function projectPathKey(project) {
+  return typeof project?.path === 'string' && project.path ? project.path : null;
+}
+
+/** Every record delivering to the same checkout as `record`, which is at least `record` itself. */
+function sameProjectRecords(records, record) {
+  const key = projectPathKey(record);
+  if (key === null) return [record];
+  return (Array.isArray(records) ? records : []).filter((entry) => projectPathKey(entry) === key);
+}
+
 // THE one enumeration of everything that names packs; the build gate and the Mill tab both derive from it.
 function packConsumerSources(config) {
   const sources = [];
@@ -363,13 +375,59 @@ function packConsumerSources(config) {
       kind: 'project',
       id: typeof project?.id === 'string' ? project.id : null,
       label: typeof project?.name === 'string' && project.name ? project.name : 'project',
+      path: projectPathKey(project),
       packs: project?.packs,
     });
   }
   for (const lane of PACK_CONSUMER_LANES) {
-    sources.push({ kind: lane.kind, id: null, label: lane.label, packs: lane.read(config) });
+    sources.push({ kind: lane.kind, id: null, label: lane.label, path: null, packs: lane.read(config) });
   }
   return sources;
+}
+
+function mergePackEntries(current, extra) {
+  const merged = Array.isArray(current) ? [...current] : [];
+  for (const entry of Array.isArray(extra) ? extra : []) {
+    if (typeof entry === 'string' && merged.includes(entry)) continue;
+    merged.push(entry);
+  }
+  return merged;
+}
+
+/*
+ * The same enumeration addressed per PROJECT, which is a resolved path: two config records may share
+ * one checkout ("glissa" and "glissa (2)"), and delivery is a property of the files an agent opens,
+ * never of the card that opened them. Grouping is by exact path, never by slug or basename, which
+ * collide across checkouts. A pathless record is its own group: nothing says it is anyone's sibling.
+ * The primary `id` is the first record in config order, and `recordIds` is what the write path fans a
+ * delta back out over. A lone member keeps its raw `packs` value so a malformed one still warns.
+ */
+function packConsumerGroups(config) {
+  const rows = [];
+  const groupByPath = new Map();
+  for (const source of packConsumerSources(config)) {
+    if (source.kind !== 'project') {
+      rows.push(source);
+      continue;
+    }
+    const existing = source.path === null ? undefined : groupByPath.get(source.path);
+    if (existing) {
+      existing.packs = mergePackEntries(existing.packs, source.packs);
+      if (source.id !== null) existing.recordIds.push(source.id);
+      continue;
+    }
+    const group = {
+      kind: 'project',
+      id: source.id,
+      label: source.label,
+      path: source.path,
+      recordIds: source.id === null ? [] : [source.id],
+      packs: source.packs,
+    };
+    rows.push(group);
+    if (source.path !== null) groupByPath.set(source.path, group);
+  }
+  return rows;
 }
 
 // Normalized through the SAME rule a spawn applies; deduped and sorted, so it doubles as a change key.
@@ -820,6 +878,7 @@ module.exports = {
   estimateTokens,
   isDataSource,
   isPackRelativePath,
+  packConsumerGroups,
   packConsumerSources,
   packVariantProjects,
   matchesGlob,
@@ -828,6 +887,7 @@ module.exports = {
   planPackBuild,
   planPackVariants,
   projectVariantSlug,
+  sameProjectRecords,
   sha256,
   sourcePattern,
   sourceSlug,

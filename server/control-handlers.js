@@ -7,7 +7,7 @@ const { STATES } = require('../shared/states');
 const { listRepoConversations } = require('../session/core/conversation-history');
 const { normalizeClientTrust } = require('./core/request-trust');
 const { isPlainObject } = require('./core/usage-number-core');
-const { PACK_NAME_RE, applyPackDelta } = require('./core/pack-core');
+const { PACK_NAME_RE, applyPackDelta, sameProjectRecords } = require('./core/pack-core');
 const { readPosthogReport } = require('./posthog-report');
 const posthogCore = require('./core/posthog-core');
 const { getRtkPath } = require('../session/core/rtk-command');
@@ -983,15 +983,24 @@ function registerControlHandlers(controlWss, deps) {
     // the record untouched.
     let outcome = null;
     const freshConfig = configStore.save((cfg) => {
-      const record = (cfg.projects || []).find((p) => p.id === projectId);
+      const records = Array.isArray(cfg.projects) ? cfg.projects : [];
+      const record = records.find((p) => p.id === projectId);
       if (!record) { outcome = { error: 'Unknown project' }; return; }
-      const next = applyPackDelta(record.packs, pack, msg.deliver);
-      if (!next.ok) { outcome = { error: next.error }; return; }
-      outcome = { packs: next.packs };
-      // An empty list REMOVES the key, so a project that delivers nothing reads exactly as one that
-      // never named a pack.
-      if (next.packs.length === 0) delete record.packs;
-      if (next.packs.length > 0) record.packs = next.packs;
+      // Delivery is addressed per PROJECT: every card on this checkout moves together, or one project
+      // would deliver a pack to whichever of its cards happened to be ticked.
+      const planned = [];
+      for (const member of sameProjectRecords(records, record)) {
+        const next = applyPackDelta(member.packs, pack, msg.deliver);
+        if (!next.ok) { outcome = { error: next.error }; return; }
+        planned.push({ member, packs: next.packs });
+      }
+      outcome = { packs: planned.find((entry) => entry.member === record).packs };
+      for (const { member, packs } of planned) {
+        // An empty list REMOVES the key, so a project that delivers nothing reads exactly as one that
+        // never named a pack.
+        if (packs.length === 0) delete member.packs;
+        if (packs.length > 0) member.packs = packs;
+      }
     });
     if (!freshConfig) { reply({ error: 'Could not write config.json' }); return; }
     // A save whose mutator refused still WROTE (the bytes are unchanged), so the refusal has to be

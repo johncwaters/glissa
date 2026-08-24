@@ -154,6 +154,7 @@ Each entry is a rule, its why, and where it is pinned. Mechanism lives in the co
 - Per-project variants flatten into independent pack NAMES, so one version per pack still holds. A foreign project's slug in a delivered path fails the build.
 - Sources are local files only: pack bytes land in permissionless sessions, so the boundary stays at files the operator already controls.
 - Assignment is a DELTA message: the list is re-read inside the config write so two dashboards cannot clobber each other; only the added name is validated.
+- Delivery is addressed per PROJECT, which is its resolved path, never per card record: two records may share one checkout ("glissa", "glissa (2)"), and a per-record control offered the same project twice. One delta fans over every record on that path, refusing whole when any of them is at the cap, and the Mill's delivery rows count the sessions behind one project (`server/core/pack-core.js` packConsumerGroups, `tests/control-project-packs.test.js`).
 - A reload restarts a recreated session only if it was LIVE: starting a dormant card would spawn a session, with that project's permission setting, that nobody asked for.
 
 ### Long-Term Memory (plan: `docs/plan-visions-3.md`)

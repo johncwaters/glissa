@@ -56,26 +56,62 @@ function builtFrom(manifest) {
   };
 }
 
+function worstStale(current, next) {
+  if (current === true || next === true) return true;
+  if (current === null || next === null) return null;
+  return false;
+}
+
+function addedOrNull(current, next) {
+  if (current === null) return next;
+  if (next === null) return current;
+  return current + next;
+}
+
 /**
- * Which live sessions are running this pack, and whether each is running the current build. A
- * delivery is judged stale only when BOTH versions are known: a pack with no readable manifest is an
- * unknown, and calling that stale would put a warning on the one case nothing can be said about.
+ * Which live sessions are running this pack, ONE ROW PER PROJECT: two cards opened on one checkout are
+ * one delivery target, so they are counted rather than listed twice. A delivery is judged stale only
+ * when BOTH versions are known: a pack with no readable manifest is an unknown, and calling that stale
+ * would put a warning on the one case nothing can be said about. The path groups the rows and never
+ * reaches the report, a paired phone being a remote client on the far side of it.
  */
-function deliveriesFor(name, sessionRows, builtVersion) {
+function deliveriesFor(name, sessionRows, builtVersion, labelByPath = new Map()) {
   const deliveries = [];
-  for (const row of asArray(sessionRows)) {
+  const deliveryByKey = new Map();
+  for (const [index, row] of asArray(sessionRows).entries()) {
+    const projectPath = stringOrNull(row?.path);
+    const key = projectPath === null ? `session:${index}` : `path:${projectPath}`;
     for (const delivered of asArray(row?.packs)) {
       if (delivered?.name !== name) continue;
       const version = stringOrNull(delivered.version);
-      deliveries.push({
-        sessionId: stringOrNull(row.sessionId),
-        sessionName: stringOrNull(row.sessionName),
-        state: stringOrNull(row.state),
+      const state = stringOrNull(row.state);
+      const stale = version !== null && builtVersion !== null ? version !== builtVersion : null;
+      const reads = safeNumber(delivered.reads);
+      const readsSinceNotice = numberOrNull(delivered.readsSinceNotice);
+      const existing = deliveryByKey.get(key);
+      if (existing) {
+        existing.sessionCount += 1;
+        existing.state = existing.state === state ? state : null;
+        existing.version = existing.version === version ? version : null;
+        existing.reads += reads;
+        existing.readsSinceNotice = addedOrNull(existing.readsSinceNotice, readsSinceNotice);
+        existing.stale = worstStale(existing.stale, stale);
+        existing.staleSessions += stale === true ? 1 : 0;
+        continue;
+      }
+      const projectLabel = projectPath === null ? null : stringOrNull(labelByPath.get(projectPath));
+      const delivery = {
+        project: projectLabel || stringOrNull(row.sessionName) || 'session',
+        sessionCount: 1,
+        state,
         version,
-        reads: safeNumber(delivered.reads),
-        readsSinceNotice: numberOrNull(delivered.readsSinceNotice),
-        stale: version !== null && builtVersion !== null ? version !== builtVersion : null,
-      });
+        reads,
+        readsSinceNotice,
+        stale,
+        staleSessions: stale === true ? 1 : 0,
+      };
+      deliveryByKey.set(key, delivery);
+      deliveries.push(delivery);
     }
   }
   return deliveries;
@@ -98,10 +134,13 @@ function distillRowsFrom(entries) {
 
 /**
  * Every config key naming packs, normalized through the SAME rule a spawn applies, so the tab reports
- * the list that would actually be delivered rather than the one written down.
+ * the list that would actually be delivered rather than the one written down. A project row is one
+ * PROJECT (pack-core's `packConsumerGroups`), never one card, which is what the assignment control and
+ * the delivery rows are both addressed by.
  */
 function resolveConsumers(sources) {
   const projectsByPack = new Map();
+  const labelByPath = new Map();
   const projects = [];
   const lanes = [];
   const warnings = [];
@@ -119,12 +158,14 @@ function resolveConsumers(sources) {
     // The id is what the Mill tab's assignment control addresses, and the normalized names are what a
     // spawn would actually deliver, so a checkbox reflects delivery rather than what was written down.
     projects.push({ id: stringOrNull(source?.id), name: label, packs: names });
+    const projectPath = stringOrNull(source?.path);
+    if (projectPath !== null && !labelByPath.has(projectPath)) labelByPath.set(projectPath, label);
     for (const name of names) {
       if (!projectsByPack.has(name)) projectsByPack.set(name, []);
       projectsByPack.get(name).push(label);
     }
   }
-  return { projectsByPack, projects, lanes, warnings };
+  return { projectsByPack, labelByPath, projects, lanes, warnings };
 }
 
 /** Packs a consumer names that no spec defines: a delivery that will silently be skipped at spawn. */
@@ -181,7 +222,7 @@ function buildPackRow(entry, { consumers, sessionRows }) {
   const manifest = isPlainObject(entry?.manifest) ? entry.manifest : null;
   const { valid, errors } = specErrorsFor(entry || {});
   const built = builtFrom(manifest);
-  const deliveredTo = deliveriesFor(name, sessionRows, built ? built.version : null);
+  const deliveredTo = deliveriesFor(name, sessionRows, built ? built.version : null, consumers.labelByPath);
   const group = stringOrNull(entry?.group);
   // A variant's consumer is exactly the project it was derived for; nothing else may ever be handed it.
   const variantProject = group === null ? null : (entry?.variantProject || null);
@@ -210,7 +251,7 @@ function buildPackRow(entry, { consumers, sessionRows }) {
     builtReason: built ? null : shortBuiltReason(entry?.builtReason),
     deliveredTo,
     totalReads: deliveredTo.reduce((total, delivery) => total + delivery.reads, 0),
-    staleDeliveries: deliveredTo.filter((delivery) => delivery.stale === true).length,
+    staleDeliveries: deliveredTo.reduce((total, delivery) => total + delivery.staleSessions, 0),
     consumers: namedBy,
     // Nothing names it, so the mill deliberately neither builds nor watches it: an informational state,
     // never an unbuilt-pack warning.

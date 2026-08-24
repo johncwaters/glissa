@@ -145,11 +145,16 @@ export function specErrorLine(pack) {
   return `Spec is invalid: ${errors.join('; ')}`;
 }
 
+// A delivery row is one PROJECT, so sibling cards on one checkout are counted rather than listed
+// twice, and a count with no state means those sessions are not all in the same one.
 export function deliveryLabel(delivery) {
-  const name = typeof delivery?.sessionName === 'string' && delivery.sessionName ? delivery.sessionName : 'session';
+  const name = typeof delivery?.project === 'string' && delivery.project ? delivery.project : 'session';
   const state = typeof delivery?.state === 'string' && delivery.state ? delivery.state.toLowerCase() : '';
-  if (!state) return name;
-  return `${name} (${state})`;
+  const count = Number(delivery?.sessionCount);
+  const sessions = Number.isFinite(count) && count > 1 ? `${formatCount(count)} sessions` : '';
+  const parts = [sessions, state].filter((part) => part !== '');
+  if (parts.length === 0) return name;
+  return `${name} (${parts.join(', ')})`;
 }
 
 // Reads are the whole point of the telemetry: a delivered pack nothing ever opened cost context for
@@ -169,8 +174,12 @@ export function deliveryTone(delivery) {
 }
 
 export function deliveryStaleText(delivery) {
-  if (delivery?.stale === true) return 'stale';
-  return '';
+  if (delivery?.stale !== true) return '';
+  const stale = Number(delivery?.staleSessions);
+  const sessions = Number(delivery?.sessionCount);
+  if (!Number.isFinite(stale) || !Number.isFinite(sessions)) return 'stale';
+  if (sessions <= 1 || stale >= sessions || stale <= 0) return 'stale';
+  return `${formatCount(stale)} of ${formatCount(sessions)} stale`;
 }
 
 export function distillText(row) {

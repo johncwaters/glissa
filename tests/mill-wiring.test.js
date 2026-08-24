@@ -235,6 +235,36 @@ test('the report carries the project ids the assignment control addresses', asyn
   assert.equal(replies[0].packs[0].hasConsumers, true);
 });
 
+test('two cards on one checkout are offered once, and deliver as one project', async (t) => {
+  const fixture = writeFixture();
+  t.after(() => fs.rmSync(fixture.tmpDir, { recursive: true, force: true }));
+
+  const projectPath = path.join(fixture.tmpDir, 'checkout');
+  const { wiring } = makeWiring(fixture, {
+    config: {
+      projects: [
+        { id: 'p1', name: 'glissa', path: projectPath, packs: ['good'] },
+        { id: 'p2', name: 'glissa (2)', path: projectPath, packs: ['good'] },
+      ],
+    },
+    // The snapshot shape the Session class hands over, path included: it is what groups the rows.
+    listSessions: () => [
+      { id: 's1', name: 'glissa', path: projectPath, state: 'RUNNING', packs: [{ name: 'good', version: VERSION, reads: 2 }] },
+      { id: 's2', name: 'glissa (2)', path: projectPath, state: 'RUNNING', packs: [{ name: 'good', version: VERSION, reads: 1 }] },
+    ],
+  });
+  const { replies, done } = pull(wiring, 'r1');
+  await done;
+
+  assert.deepEqual(replies[0].projects, [{ id: 'p1', name: 'glissa', packs: ['good'] }]);
+  const good = replies[0].packs.find((pack) => pack.name === 'good');
+  assert.equal(good.deliveredTo.length, 1);
+  assert.equal(good.deliveredTo[0].project, 'glissa');
+  assert.equal(good.deliveredTo[0].sessionCount, 2);
+  assert.equal(good.deliveredTo[0].reads, 3);
+  assert.ok(!JSON.stringify(replies[0]).includes(fixture.tmpDir), 'no server path reaches the wire');
+});
+
 test('a spec no project and no lane names is reported as having no consumers', async (t) => {
   const fixture = writeFixture();
   t.after(() => fs.rmSync(fixture.tmpDir, { recursive: true, force: true }));

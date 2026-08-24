@@ -13,7 +13,7 @@ const path = require('node:path');
 
 const { needsDistill } = require('./core/distill-core');
 const { buildMillReport } = require('./core/mill-core');
-const { packConsumerSources, packVariantProjects, planPackVariants } = require('./core/pack-core');
+const { packConsumerGroups, packVariantProjects, planPackVariants } = require('./core/pack-core');
 const { isPlainObject } = require('./core/usage-number-core');
 const {
   defaultBuiltRoot,
@@ -115,6 +115,9 @@ function createMillWiring(deps = {}) {
       rows.push({
         sessionId: snapshot.id,
         sessionName: snapshot.name,
+        // The delivery rows are grouped by it and it never reaches the report: two cards on one
+        // checkout are one delivery target, and the operator's directory layout is not the tab's.
+        path: snapshot.path,
         state: snapshot.state,
         packs: snapshot.packs,
       });
@@ -167,8 +170,8 @@ function createMillWiring(deps = {}) {
       specs,
       sessionRows: sessionRows(),
       // The SAME enumeration the build gate reads, so the tab and the mill can never disagree about
-      // what counts as a consumer.
-      consumerSources: packConsumerSources(config),
+      // what counts as a consumer, addressed per project rather than per card.
+      consumerSources: packConsumerGroups(config),
     });
   }
 

@@ -222,6 +222,32 @@ test('a project with no id is not an assignment target: nothing could address it
   assert.deepEqual(targets, []);
 });
 
+test('the checkbox list is one row per project the server ships, so sibling cards appear once', async () => {
+  const { deliveryTargets } = await importCore();
+  // The server groups two records on one checkout into a single project row; the tab renders exactly
+  // what it is given, which is what stops a "glissa" and a "glissa (2)" box offering the same delivery.
+  const report = { maxPacksPerProject: 4, projects: [{ id: 'p1', name: 'glissa', packs: ['company-context'] }] };
+  assert.deepEqual(deliveryTargets(report, pack()).map((target) => [target.id, target.name]), [['p1', 'glissa']]);
+});
+
+test('a delivery row reads as one project, counting the cards behind it', async () => {
+  const { deliveryDetail, deliveryLabel, deliveryStaleText, deliveryTone } = await importCore();
+  const single = { project: 'glissa', sessionCount: 1, state: 'RUNNING', version: VERSION, reads: 3, readsSinceNotice: null, stale: false, staleSessions: 0 };
+  assert.equal(deliveryLabel(single), 'glissa (running)');
+  assert.equal(deliveryStaleText(single), '');
+  assert.equal(deliveryTone(single), 'ok');
+
+  const grouped = { project: 'glissa', sessionCount: 2, state: 'RUNNING', version: VERSION, reads: 5, readsSinceNotice: 2, stale: true, staleSessions: 1 };
+  assert.equal(deliveryLabel(grouped), 'glissa (2 sessions, running)');
+  assert.equal(deliveryDetail(grouped), '5 reads, 2 since stale notice, version abcdef012345');
+  assert.equal(deliveryStaleText(grouped), '1 of 2 stale');
+  assert.equal(deliveryTone(grouped), 'warn');
+
+  const mixed = { project: 'glissa', sessionCount: 2, state: null, version: null, reads: 0, readsSinceNotice: null, stale: true, staleSessions: 2 };
+  assert.equal(deliveryLabel(mixed), 'glissa (2 sessions)', 'no state is claimed while the sessions disagree');
+  assert.equal(deliveryStaleText(mixed), 'stale', 'every session behind is plainly stale');
+});
+
 test('a toggle sends a delta, not a list, so two dashboards cannot clobber each other', async () => {
   const { packDeltaFor } = await importCore();
   assert.deepEqual(packDeltaFor({ id: 'p1', checked: false }, 'company-context'),

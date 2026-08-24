@@ -150,6 +150,62 @@ test('delivering a pack twice is idempotent rather than a duplicate entry', asyn
   assert.equal(resultOf(h).ok, true);
 });
 
+// Delivery is addressed per PROJECT, and a project is a path: "glissa" and "glissa (2)" are two cards
+// on one checkout, and a tick on either has to move both or the tab offers a delivery it cannot keep.
+test('a delta on one card moves every card sharing that checkout', async () => {
+  const cfg = { projects: [project(), project({ id: 'p2', name: 'glissa (2)' }), project({ id: 'p3', name: 'other', path: 'C:/other' })] };
+  const h = harness(cfg);
+
+  await h.send({ type: 'set-project-packs', projectId: 'p2', pack: 'company-context', deliver: true });
+
+  assert.deepEqual(cfg.projects[0].packs, ['company-context']);
+  assert.deepEqual(cfg.projects[1].packs, ['company-context']);
+  assert.equal('packs' in cfg.projects[2], false, 'another checkout is untouched');
+  assert.deepEqual(resultOf(h).packs, ['company-context'], 'the addressed record is what the reply reports');
+});
+
+test('a removal on one card clears every card sharing that checkout', async () => {
+  const cfg = {
+    projects: [
+      project({ packs: ['company-context', 'house-rules'] }),
+      project({ id: 'p2', name: 'glissa (2)', packs: ['company-context'] }),
+    ],
+  };
+  const h = harness(cfg);
+
+  await h.send({ type: 'set-project-packs', projectId: 'p1', pack: 'company-context', deliver: false });
+
+  assert.deepEqual(cfg.projects[0].packs, ['house-rules']);
+  assert.equal('packs' in cfg.projects[1], false, 'an emptied list removes the key on the sibling too');
+});
+
+test('a sibling at the cap refuses the whole delta, leaving every record alone', async () => {
+  const cfg = {
+    projects: [
+      project({ packs: ['a', 'b'] }),
+      project({ id: 'p2', name: 'glissa (2)', packs: ['a', 'b', 'c', 'd'] }),
+    ],
+  };
+  const h = harness(cfg);
+
+  await h.send({ type: 'set-project-packs', projectId: 'p1', pack: 'e', deliver: true });
+
+  assert.deepEqual(cfg.projects[0].packs, ['a', 'b'], 'the addressed record is not written half way');
+  assert.deepEqual(cfg.projects[1].packs, ['a', 'b', 'c', 'd']);
+  assert.equal(h.reloads.length, 0);
+  assert.match(resultOf(h).error, /at most 4 packs/);
+});
+
+test('a record with no path is alone: nothing marks another record as its sibling', async () => {
+  const cfg = { projects: [project({ path: undefined }), project({ id: 'p2', name: 'other', path: undefined })] };
+  const h = harness(cfg);
+
+  await h.send({ type: 'set-project-packs', projectId: 'p1', pack: 'company-context', deliver: true });
+
+  assert.deepEqual(cfg.projects[0].packs, ['company-context']);
+  assert.equal('packs' in cfg.projects[1], false);
+});
+
 test('an unknown project changes nothing', async () => {
   const cfg = { projects: [project()] };
   const h = harness(cfg);
