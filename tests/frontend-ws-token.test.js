@@ -5,15 +5,12 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 
-// ws-token.js has a plain .js extension under this package's "type": "commonjs", so a normal import()
-// of the path would treat its `export` as CJS and choke. Load the source as a data: URL, which Node's
-// ESM loader always treats as a module. Same workaround as tests/frontend-client-trust.test.js.
+// data: URL import forces ESM despite the CJS package type; same as tests/frontend-client-trust.test.js.
 let freshModuleCounter = 0;
 
 function importWsToken() {
   const source = fs.readFileSync(path.join(__dirname, '..', 'public', 'ws-token.js'), 'utf8');
-  // Identical source means one cached module instance, so each test would inherit the previous
-  // test's cached token; the counter line gives every import its own module state.
+  // The counter line defeats the ESM module cache so tests do not share token state.
   freshModuleCounter += 1;
   const uniqueSource = `${source}\nconst freshModuleId = ${freshModuleCounter};\nexport { freshModuleId };\n`;
   const dataUrl = `data:text/javascript;base64,${Buffer.from(uniqueSource).toString('base64')}`;
