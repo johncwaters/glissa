@@ -578,12 +578,12 @@ export function refreshFocusRoster() {
     const next = order.find((o) => sessionUIs.has(o.id));
     if (next) { focusSession(next.id); return; } // focusSession re-syncs both scalars
   }
+  updateCenter();
   if (focusedId) {
     const ui = sessionUIs.get(focusedId);
     if (ui && ui.card.parentElement !== cardSlotEl) borrowToCenter(ui, focusedId);
   }
   updateRailHead();
-  updateCenter();
 }
 
 // ── One-key triage: the attention queue (Alt+W on the Focus tab, and the rail-head click) ──
@@ -711,6 +711,8 @@ function focusSession(id) {
   pillById.get(id)?.removeAttribute('data-unseen');
   // Drive the shared selection so the right review sidebar follows the focused session.
   setSelectedId(id);
+  // Before the borrow: the empty placeholder is a flex sibling, left up it shorts the synchronous fit.
+  updateCenter();
   borrowToCenter(sessionUIs.get(id), id);
   refreshFocusRoster();
 }

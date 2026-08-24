@@ -14,6 +14,7 @@ import { buildWebSocketUrl } from '../ws-url-core.mjs';
 import { withPageToken } from '../ws-token.js';
 import { noteSessionOutput } from './activity.js';
 import { sessionUIs } from './card-registry.js';
+import { decideFitAction } from './fit-core.mjs';
 import {
   bytesForBackwardDeletion,
   bytesForSoftKeyboardEdit,
@@ -154,6 +155,14 @@ export function sendTerminalInput(ui, data, options) {
 
 // ── Terminal setup ───────────────────────────────────────────
 
+// Same-size term.resize is xterm 6.0.0's public re-measure trigger; its own IntersectionObserver would
+// only re-measure a hidden-built card a frame after it becomes visible, one frame too late for this fit.
+function measureTerminalCell(ui) {
+  if (ui.fitAddon.proposeDimensions()) return true;
+  ui.term.resize(ui.term.cols, ui.term.rows);
+  return !!ui.fitAddon.proposeDimensions();
+}
+
 export function setupTerminal(termWrap, ui) {
   // Cell size is chosen once, at construction: xterm re-measures its whole grid on a font change, so
   // a live switch would reflow every buffer mid-session. A window resized across the breakpoint
@@ -182,11 +191,8 @@ export function setupTerminal(termWrap, ui) {
   ui.webglAddon = null;
   ui.needsWebGLReload = false;
 
-  // termWrap size → fit → push resize to PTY. RAF-coalesces burst fires
-  // (window resize, focus borrow). The explicit send below the fit
-  // covers the case where fit() proposes the same cols/rows xterm already
-  // has (no onResize event) but the PTY hasn't caught up yet - most often
-  // on first connect, where term starts at the default 80x24.
+  // termWrap size → fit → push resize to PTY. RAF-coalesces burst fires (window resize, focus borrow).
+  // What the fit owes afterwards (repaint, send, redraw) is decided by fit-core.
   let fitRafId = null;
   let lastSentCols = 0;
   let lastSentRows = 0;
@@ -201,18 +207,20 @@ export function setupTerminal(termWrap, ui) {
     // Skip fit when the card is off-screen (it lives in the hidden grid home until Focus borrows it
     // into the center); fitting a display:none card computes garbage dims. It gets a fresh fit on borrow.
     if (!ui.card.offsetParent) return;
-    ui.fitAddon.fit();
+    const measured = measureTerminalCell(ui);
+    if (measured) ui.fitAddon.fit();
     const { cols, rows } = ui.term;
-    const gridChanged = cols !== lastFittedCols || rows !== lastFittedRows;
-    if (gridChanged) {
+    const action = decideFitAction({
+      measured, cols, rows, lastFittedCols, lastFittedRows, lastSentCols, lastSentRows,
+    });
+    if (action.repaint) {
       lastFittedCols = cols;
       lastFittedRows = rows;
       forceTerminalRepaint(ui, { force: true });
     }
-    // A changed grid holds frames drawn for another geometry: send even at an unchanged PTY size, tagged redraw.
-    if (!gridChanged && cols === lastSentCols && rows === lastSentRows) return;
+    if (!action.send) return;
     if (ui.dataWs?.readyState !== WebSocket.OPEN) return;
-    ui.dataWs.send(JSON.stringify({ type: 'resize', cols, rows, redraw: gridChanged }));
+    ui.dataWs.send(JSON.stringify({ type: 'resize', cols, rows, redraw: action.redraw }));
     lastSentCols = cols;
     lastSentRows = rows;
     hasClaimedViewerSize = true;
