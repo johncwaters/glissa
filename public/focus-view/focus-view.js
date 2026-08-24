@@ -578,6 +578,7 @@ export function refreshFocusRoster() {
     const next = order.find((o) => sessionUIs.has(o.id));
     if (next) { focusSession(next.id); return; } // focusSession re-syncs both scalars
   }
+  // Center before borrow: the empty placeholder is a flex sibling, left up it shorts the borrow fit.
   updateCenter();
   if (focusedId) {
     const ui = sessionUIs.get(focusedId);
@@ -711,9 +712,6 @@ function focusSession(id) {
   pillById.get(id)?.removeAttribute('data-unseen');
   // Drive the shared selection so the right review sidebar follows the focused session.
   setSelectedId(id);
-  // Before the borrow: the empty placeholder is a flex sibling, left up it shorts the synchronous fit.
-  updateCenter();
-  borrowToCenter(sessionUIs.get(id), id);
   refreshFocusRoster();
 }
 
