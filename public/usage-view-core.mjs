@@ -13,7 +13,7 @@ export const NO_VALUE = '-';
 export const USAGE_CAVEAT = 'Costs are API list-price estimates. A Claude subscription does not bill per token, and only the Claude Code transcripts stored on this machine are counted.';
 export const USAGE_CAVEAT_SHORT = 'Estimated list prices, not a bill.';
 
-export const USAGE_DISABLED_HINT = 'Open Settings and its Usage tab to switch token tracking back on.';
+export const USAGE_DISABLED_HINT = 'Enable in Settings.';
 
 // ccusage's own warning threshold, applied to both the block so far and where it is projected to land.
 export const TOKEN_LIMIT_WARN_PCT = 80;

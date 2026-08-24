@@ -19,12 +19,10 @@ import {
   DEFAULT_SESSION_SORT,
   HEATMAP_DAY_LABELS,
   LANE_SCOPE_HINT,
-  NO_ANOMALY_LINE,
   PERIOD_VIEWS,
   PLAN_WINDOWS,
   RANGE_OPTIONS,
   SESSION_ROW_LIMIT,
-  USAGE_CAVEAT,
   USAGE_CAVEAT_SHORT,
   USAGE_DISABLED_HINT,
   anomalyLine,
@@ -67,7 +65,6 @@ import {
   modelRowPrefix,
   nextSortState,
   percentOfTotal,
-  periodHint,
   periodLabel,
   periodRows,
   planLimitAgeText,
@@ -81,10 +78,8 @@ import {
   reportDayKey,
   resetCountdownText,
   rtkSavingsTile,
-  savingsHint,
   scanLine,
   sessionRowLabel,
-  sessionOverflowText,
   shareBasis,
   shareLabel,
   shouldApplyUsageReport,
@@ -252,13 +247,13 @@ function buildShareCell(pct) {
 function paintReportAge() {
   if (!_reportAgeEl?.isConnected) return;
   const ts = Number(_report?.ts);
-  _reportAgeEl.textContent = Number.isFinite(ts) && ts > 0 ? `Report built ${formatAgo(ts)}.` : '';
+  _reportAgeEl.textContent = Number.isFinite(ts) && ts > 0 ? `Report ${formatAgo(ts)}` : '';
 }
 
 function paintSessionsTs() {
   if (!_sessionsTsEl?.isConnected) return;
   const ts = Number(_sessions?.ts);
-  _sessionsTsEl.textContent = Number.isFinite(ts) && ts > 0 ? `Session totals updated ${formatAgo(ts)}.` : '';
+  _sessionsTsEl.textContent = Number.isFinite(ts) && ts > 0 ? `Sessions ${formatAgo(ts)}` : '';
 }
 
 function pricingOf() {
@@ -330,28 +325,16 @@ function buildHeaderSection() {
   const section = buildSection('Usage', dayRangeLabel(_report?.daily || []));
   section.append(buildControls());
 
-  const caveat = el('p', 'usage-caveat', USAGE_CAVEAT_SHORT);
-  caveat.title = USAGE_CAVEAT;
-  section.append(caveat);
-
   _reportAgeEl = el('p', 'usage-meta', '');
   section.append(_reportAgeEl);
   paintReportAge();
   _ticker.onTick(paintReportAge);
-
-  _pricingEl = el('p', 'usage-meta', '');
-  section.append(_pricingEl);
-  paintPricing();
-  _ticker.onTick(paintPricing);
 
   const warning = usageWarningLine(_report);
   if (warning) section.append(el('p', 'usage-warning', warning));
 
   const missing = missingPricingLine(_report?.pricing?.missing);
   if (missing) section.append(el('p', 'usage-warning', missing));
-
-  const scan = scanLine(_report?.scan);
-  if (scan) section.append(el('p', 'usage-meta', scan));
   return section;
 }
 
@@ -412,7 +395,7 @@ function buildPlanWindow(spec, window) {
 function paintPlanAge() {
   if (!_planAgeEl?.isConnected) return;
   const age = planLimitAgeText(_planLimits?.ts);
-  _planAgeEl.textContent = age ? `Reported ${age}.` : '';
+  _planAgeEl.textContent = age ? `Plan ${age}` : '';
 }
 
 /*
@@ -464,7 +447,7 @@ function buildActiveBlockSection() {
   const claudeOnly = claudeOnlyHint(_report?.totals);
   const section = buildSection('Current block', claudeOnly ? `${hours}h window, ${claudeOnly}` : `${hours}h window`);
   if (!block) {
-    section.append(el('p', 'usage-empty', 'No block is active. The window opens again with the next turn.'));
+    section.append(el('p', 'usage-empty', 'No active block.'));
     return section;
   }
 
@@ -496,7 +479,8 @@ function buildActiveBlockSection() {
     projectionEl.dataset.tone = tone;
     section.append(projectionEl);
   }
-  section.append(buildAnomalyLine());
+  const anomalyLineEl = buildAnomalyLine();
+  if (anomalyLineEl) section.append(anomalyLineEl);
 
   const limit = tokenLimitLine(_report?.tokenLimit);
   if (!limit) return section;
@@ -525,7 +509,7 @@ function buildActiveBlockSection() {
  */
 function buildAnomalyLine() {
   const anomaly = _report?.anomaly;
-  if (!hasAnomaly(anomaly)) return el('p', 'usage-meta', NO_ANOMALY_LINE);
+  if (!hasAnomaly(anomaly)) return null;
   const line = el('p', 'usage-meta', anomalyLine(anomaly));
   line.dataset.tone = anomalyTone(anomaly);
   return line;
@@ -559,7 +543,8 @@ function buildBlockHistorySection() {
 function buildTotalsSection() {
   const totals = _report?.totals || {};
   const today = dailyRowForDay(_report?.daily, reportDayKey(_report));
-  const section = buildSection('Totals', _report?.tz ? `daily buckets in ${_report.tz}` : '');
+  const hint = [USAGE_CAVEAT_SHORT, _report?.tz ? `TZ ${_report.tz}` : ''].filter(Boolean).join(' ');
+  const section = buildSection('Totals', hint);
   const tone = blockAttentionTone(_report, _planLimits);
   const tiles = el('div', 'usage-tiles');
   tiles.append(buildTile('today', formatTokens(today?.tokens ?? 0), formatUsd(today?.costUSD ?? 0), tone).tile);
@@ -596,7 +581,7 @@ function buildTotalsSection() {
 function buildSavingsSection() {
   const savings = _report?.savings;
   if (!hasSavings(savings)) return null;
-  const section = buildSection('Savings', savingsHint(savings));
+  const section = buildSection('Savings', '');
   const tiles = el('div', 'usage-tiles');
   const rtk = rtkSavingsTile(savings);
   if (rtk) tiles.append(buildTile('rtk compression', rtk.value, rtk.sub).tile);
@@ -635,11 +620,11 @@ function buildDailySection() {
   const periodView = _periodView;
   const rows = sortDailyRows(periodRows(daily, periodView), _daySort);
   const columnLabel = PERIOD_VIEWS.find((view) => view.value === periodView)?.label || 'Day';
-  const hints = [periodHint(periodView), historyNote(daily)].filter(Boolean);
+  const hints = [historyNote(daily) ? 'history' : ''].filter(Boolean);
   const section = buildSection('Over time', hints.join(', '));
   section.append(buildPeriodSwitch());
   if (rows.length === 0) {
-    section.append(el('p', 'usage-empty', 'No usage recorded yet.'));
+    section.append(el('p', 'usage-empty', 'No usage.'));
     return section;
   }
   const heatmap = buildHeatmap(daily);
@@ -791,7 +776,7 @@ function buildModelsSection() {
   const basis = shareBasis(totals);
   const section = buildSection('By model', shareLabel(basis));
   if (rows.length === 0) {
-    section.append(el('p', 'usage-empty', 'No model usage recorded yet.'));
+    section.append(el('p', 'usage-empty', 'No models.'));
     return section;
   }
   const { wrap, body } = buildTable(
@@ -840,7 +825,7 @@ function buildSessionsSection() {
   const basis = shareBasis(totals);
   const section = buildSection('By session', shareLabel(basis));
   if (rows.length === 0) {
-    section.append(el('p', 'usage-empty', 'No session usage recorded yet.'));
+    section.append(el('p', 'usage-empty', 'No sessions.'));
     return section;
   }
   const { wrap, body } = buildTable(
@@ -882,7 +867,8 @@ function buildSessionsSection() {
 
 function buildSessionsOverflow(hiddenCount) {
   const wrap = el('div', 'usage-overflow');
-  const text = sessionOverflowText(hiddenCount);
+  const hidden = Number(hiddenCount);
+  const text = Number.isFinite(hidden) && hidden > 0 ? `${Math.round(hidden)} hidden` : '';
   if (text) wrap.append(el('p', 'usage-meta', text));
   const button = el('button', 'usage-toggle', 'All sessions');
   button.type = 'button';
@@ -906,10 +892,6 @@ function buildUnavailableSection() {
   section.append(el('p', 'usage-empty', usageErrorLine(_report)));
   section.append(el('p', 'usage-empty', USAGE_DISABLED_HINT));
   return section;
-}
-
-function buildFootnote() {
-  return el('p', 'usage-footnote', USAGE_CAVEAT);
 }
 
 function clearRefs() {
@@ -970,7 +952,7 @@ function buildBody() {
     return;
   }
   if (!_report) {
-    _root.append(el('p', 'usage-empty', 'Reading the local transcripts. The report lands on the next scan.'));
+    _root.append(el('p', 'usage-empty', 'Waiting for scan.'));
     return;
   }
   const lanes = buildLanesSection();
@@ -982,7 +964,6 @@ function buildBody() {
   const savings = buildSavingsSection();
   if (savings) _root.append(savings);
   _root.append(buildDailySection(), buildModelsSection(), buildSessionsSection());
-  _root.append(buildFootnote());
 }
 
 function refreshActivity() {
