@@ -78,18 +78,25 @@ test('an unknown session id is other, never inferred', () => {
   assert.equal(byLane.get(OTHER_LANE).sessions, 1);
 });
 
-// Codex and Grok are dispatched outside the Session class, so Glissa never spawned them and must not claim
-// them for any lane, including `other`'s cost.
-test('vendor entries are never lane attributed', () => {
-  const lanes = laneMapFromLedger([{ claudeSessionId: 'a', lane: 'pr-review', ts: 1 }]);
+// A supervised codex/grok card IS Glissa-spawned now (M5), so a vendor session recorded in the ledger
+// attributes to its lane; the composite key is what keeps a codex id from colliding with a claude one. A
+// vendor entry Glissa never recorded is `other`, exactly like a terminal claude run.
+test('vendor entries attribute by their own composite key, unrecorded ones are other', () => {
+  const lanes = laneMapFromLedger([
+    { vendor: 'claude', sessionId: 'a', lane: 'pr-review', ts: 1 },
+    { vendor: 'codex', sessionId: 'a', lane: INTERACTIVE_LANE, ts: 2 },
+  ]);
   const rows = laneRollup([
     entry({ sessionId: 'a', costUSD: 1 }),
-    entry({ sessionId: 'a', costUSD: 99, vendor: 'codex' }),
-    entry({ sessionId: 'g', costUSD: 99, vendor: 'grok' }),
+    // Same bare id 'a' as the claude one, but a different vendor: the composite key keeps them apart.
+    entry({ sessionId: 'a', costUSD: 4, vendor: 'codex' }),
+    entry({ sessionId: 'g', costUSD: 9, vendor: 'grok' }),
   ], lanes);
-  assert.equal(rows.length, 1);
-  assert.equal(rows[0].lane, 'pr-review');
-  assert.equal(rows[0].costUSD, 1);
+  const byLane = new Map(rows.map((row) => [row.lane, row]));
+  assert.equal(byLane.get('pr-review').costUSD, 1);
+  assert.equal(byLane.get(INTERACTIVE_LANE).costUSD, 4, 'the recorded codex session, not the claude one');
+  // The grok entry was never recorded, so it is other rather than excluded.
+  assert.equal(byLane.get(OTHER_LANE).costUSD, 9);
   // An explicit claude vendor still counts: absent and 'claude' mean the same thing.
   const withExplicit = laneRollup([entry({ sessionId: 'a', costUSD: 2, vendor: 'claude' })], lanes);
   assert.equal(withExplicit[0].costUSD, 2);
@@ -111,13 +118,15 @@ test('normalizeLedger: one lane per id, newest record wins, junk dropped', () =>
     { claudeSessionId: 'c', lane: '', ts: 5 },
     null,
   ]);
-  assert.deepEqual(normalized.map((e) => [e.claudeSessionId, e.lane]), [['b', 'posthog'], ['a', 'interactive']]);
+  assert.deepEqual(normalized.map((e) => [e.sessionId, e.lane]), [['b', 'posthog'], ['a', 'interactive']]);
   // An older record cannot overwrite a newer one whatever order it arrives in.
   const reversed = normalizeLedger([
     { claudeSessionId: 'a', lane: 'interactive', ts: 20 },
     { claudeSessionId: 'a', lane: 'pr-review', ts: 10 },
   ]);
   assert.equal(reversed[0].lane, 'interactive');
+  // Every normalized entry carries a vendor, defaulted to claude for a pre-M5 record.
+  assert.ok(normalized.every((e) => e.vendor === 'claude'));
 });
 
 test('pruneLedger drops entries past retention but keeps unstamped ones', () => {
@@ -126,7 +135,7 @@ test('pruneLedger drops entries past retention but keeps unstamped ones', () => 
     { claudeSessionId: 'stale', lane: 'pr-review', ts: NOW - 400 * DAY_MS },
     { claudeSessionId: 'unstamped', lane: 'posthog' },
   ], { now: NOW, retainDays: 365 });
-  const ids = kept.map((e) => e.claudeSessionId).sort();
+  const ids = kept.map((e) => e.sessionId).sort();
   assert.deepEqual(ids, ['fresh', 'unstamped'], 'losing an attribution is worse than keeping a stale one');
   // With no usable retention nothing is dropped: history is the unrecoverable thing here.
   assert.equal(pruneLedger([{ claudeSessionId: 'x', lane: 'y', ts: 1 }], {}).length, 1);
@@ -145,8 +154,9 @@ test('the ledger records a lane and persists it atomically', async () => {
 
   const stored = JSON.parse(await fs.readFile(ledgerPath, 'utf8'));
   assert.equal(stored.version, 1);
-  assert.deepEqual(stored.entries.map((e) => [e.claudeSessionId, e.lane]), [['claude-1', 'pr-review'], ['claude-2', INTERACTIVE_LANE]]);
-  assert.equal(ledger.laneMap().get('claude-1'), 'pr-review');
+  // The persisted shape is the M5 one: a vendor-stamped sessionId, never the pre-M5 claudeSessionId.
+  assert.deepEqual(stored.entries.map((e) => [e.vendor, e.sessionId, e.lane]), [['claude', 'claude-1', 'pr-review'], ['claude', 'claude-2', INTERACTIVE_LANE]]);
+  assert.equal(ledger.laneMap().get('claude:claude-1'), 'pr-review');
   // No tmp file left behind.
   assert.deepEqual(await fs.readdir(path.join(root, '.glissa')), ['usage-lanes.json']);
 });
@@ -160,7 +170,7 @@ test('a fresh ledger reads what a previous process wrote', async () => {
 
   const second = createLaneLedger({ ledgerPath, nowFn: () => NOW });
   await second.load();
-  assert.equal(second.laneMap().get('claude-1'), 'pack-distill');
+  assert.equal(second.laneMap().get('claude:claude-1'), 'pack-distill');
 });
 
 test('re-recording the same id and lane does not rewrite the file', async () => {
@@ -190,7 +200,41 @@ test('retention is applied on write, not just on read', async () => {
   ledger.record('new-one', 'posthog');
   await ledger.whenIdle();
   const stored = JSON.parse(await fs.readFile(ledgerPath, 'utf8'));
-  assert.deepEqual(stored.entries.map((e) => e.claudeSessionId).sort(), ['new-one', 'recent']);
+  assert.deepEqual(stored.entries.map((e) => e.sessionId).sort(), ['new-one', 'recent']);
+});
+
+// A pre-M5 ledger file keyed `claudeSessionId` with no vendor field must keep working: it reads as vendor
+// claude, and the next write re-persists it in the M5 shape. This is the migration path for every install
+// that ran the ledger before M5.
+test('an old-format ledger file round-trips as vendor claude', async () => {
+  const root = await makeTempRoot();
+  const ledgerPath = path.join(root, '.glissa', 'usage-lanes.json');
+  await fs.mkdir(path.dirname(ledgerPath), { recursive: true });
+  await fs.writeFile(ledgerPath, JSON.stringify({
+    version: 1,
+    entries: [
+      { claudeSessionId: 'old-1', lane: 'pr-review', ts: NOW - DAY_MS },
+      { claudeSessionId: 'old-2', lane: INTERACTIVE_LANE, ts: NOW - DAY_MS },
+    ],
+  }));
+  const ledger = createLaneLedger({ ledgerPath, nowFn: () => NOW, retainDays: 365 });
+  await ledger.load();
+  // Read side: the composite key is namespaced under claude.
+  assert.equal(ledger.laneMap().get('claude:old-1'), 'pr-review');
+  assert.equal(ledger.laneMap().get('claude:old-2'), INTERACTIVE_LANE);
+  // The snapshot is normalized to the M5 shape with a vendor.
+  assert.ok(ledger.snapshot().every((e) => e.vendor === 'claude' && typeof e.sessionId === 'string'));
+
+  // A fresh record rewrites the file in the M5 shape, and the migrated old entries persist beside it.
+  ledger.record('new-codex', INTERACTIVE_LANE, 'codex');
+  await ledger.whenIdle();
+  const stored = JSON.parse(await fs.readFile(ledgerPath, 'utf8'));
+  const byId = new Map(stored.entries.map((e) => [e.sessionId, e]));
+  assert.equal(byId.get('old-1').vendor, 'claude');
+  assert.equal(byId.get('new-codex').vendor, 'codex');
+  assert.ok(stored.entries.every((e) => e.claudeSessionId === undefined), 'no entry keeps the pre-M5 field');
+  // The codex record is namespaced away from a claude id of the same value.
+  assert.equal(ledger.laneMap().get('codex:new-codex'), INTERACTIVE_LANE);
 });
 
 test('a corrupt ledger starts empty, warns, and still records', async () => {
@@ -205,7 +249,7 @@ test('a corrupt ledger starts empty, warns, and still records', async () => {
   assert.ok(warnings.some((m) => m.includes('unreadable')), `warned: ${warnings.join(' | ')}`);
   ledger.record('claude-1', 'pr-review');
   await ledger.whenIdle();
-  assert.equal(ledger.laneMap().get('claude-1'), 'pr-review');
+  assert.equal(ledger.laneMap().get('claude:claude-1'), 'pr-review');
 });
 
 test('an unwritable ledger degrades to a warning and keeps working in memory', async () => {
@@ -221,7 +265,7 @@ test('an unwritable ledger degrades to a warning and keeps working in memory', a
   await ledger.whenIdle();
   assert.ok(warnings.some((m) => m.includes('write failed')), `warned: ${warnings.join(' | ')}`);
   // Attribution still works for this process; only durability was lost.
-  assert.equal(ledger.laneMap().get('claude-1'), 'pr-review');
+  assert.equal(ledger.laneMap().get('claude:claude-1'), 'pr-review');
 });
 
 test('no ledgerPath makes the whole feature inert', async () => {

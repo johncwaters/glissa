@@ -83,7 +83,8 @@ for (const source of ['startup', 'resume', 'clear', 'compact', 'fork']) {
     sessionStart(s, { session_id: id, source });
     assert.equal(s.resumeSessionId, id, 'mirrored into the live resume binding');
     assert.equal(events.length, 1, 'emitted claude-session-id once');
-    assert.deepEqual(events[0], { id, source });
+    // The event carries the M5 fields beside the back-compat `id`: vendor (claude here) plus sessionId.
+    assert.deepEqual(events[0], { id, source, vendor: 'claude', sessionId: id });
     s.destroy();
   });
 }

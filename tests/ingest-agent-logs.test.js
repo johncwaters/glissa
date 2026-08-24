@@ -356,7 +356,8 @@ test('a Grok session publishes its completed turn once, not its chunks', withHom
 
 test('layer 1, the ledger: a visions-lane transcript in an ordinary project dir is never opened', withHomes(async ({ projects, events, build }) => {
   const filePath = seedClaudeTranscript(projects, { dirName: 'C--repo', sessionId: 'visions-session' });
-  const adapter = build({ laneMap: () => new Map([['visions-session', 'visions']]) });
+  // laneMap() is keyed by the M5 vendor-namespaced composite <vendor>:<sessionId>; these are Claude transcripts.
+  const adapter = build({ laneMap: () => new Map([['claude:visions-session', 'visions']]) });
   await adapter.start();
   assert.equal(adapter.trackedCount, 0, 'a lane transcript costs not even a tail');
 
@@ -377,7 +378,7 @@ test('layer 1, the ledger: a record landing AFTER the sweep still stops the lane
   assert.equal(adapter.trackedCount, 1, 'nothing in the ledger yet, so the file is tailed');
 
   // The claude-session-id hook lands and the ledger learns which lane spawned this session.
-  lanes.set('late-lane', 'pr-review');
+  lanes.set('claude:late-lane', 'pr-review');
   append(filePath, claudeAssistant({ text: 'review output arriving after the sweep', sessionId: 'late-lane' }));
   await adapter.poll();
   assert.deepEqual(events, [], 'the per-line check is what covers the record landing late');
@@ -430,7 +431,7 @@ test('the shape rule is a segment match, so an ordinary project named after glis
 
 test('a session the ledger calls interactive is the operator working, and publishes normally', withHomes(async ({ projects, events, build }) => {
   const filePath = seedClaudeTranscript(projects, { sessionId: 'card-session' });
-  const adapter = build({ laneMap: () => new Map([['card-session', 'interactive']]) });
+  const adapter = build({ laneMap: () => new Map([['claude:card-session', 'interactive']]) });
   await adapter.start();
 
   append(filePath, claudeAssistant({ text: 'the operator running their own session', sessionId: 'card-session' }));
@@ -442,7 +443,7 @@ test('every ephemeral lane is excluded by the same rule, with no lane-name list 
   const lanes = new Map();
   const files = [];
   for (const lane of ['visions', 'pr-review', 'posthog', 'pack-distill']) {
-    lanes.set(`${lane}-session`, lane);
+    lanes.set(`claude:${lane}-session`, lane);
     files.push(seedClaudeTranscript(projects, { dirName: `C--lane-${lane}`, sessionId: `${lane}-session` }));
   }
   const operatorFile = seedClaudeTranscript(projects, { dirName: 'C--operator', sessionId: 'operator-session' });
@@ -1041,7 +1042,7 @@ test('the feedback-loop exclusion covers every target, not just the ring', withH
   const adapter = createAgentLogIngest({
     publish: (event) => ringEvents.push(event),
     consumers: [{ name: 'memory', userPrompts: true, publish: (event) => consumed.push(event) }],
-    laneMap: () => new Map([['sess-visions', 'visions']]),
+    laneMap: () => new Map([['claude:sess-visions', 'visions']]),
     env,
     ...inertTimers(),
   });

@@ -363,9 +363,11 @@ function createUsageWiring({
   }
 
   /*
-   * Per-card totals: each REAL session's live Claude session id mapped through the scanner's in-line
-   * sessionId attribution. A session with no captured id is skipped entirely (nothing identifies its
-   * transcript); one with an id but no entries yet reports zeros, so a stale chip clears.
+   * Per-card totals: each REAL session's live session id mapped through the scanner's per-session totals.
+   * The join is by the bare captured id (resumeSessionId), which is the card's own vendor session id: a
+   * Claude card joins Claude transcript entries, a supervised codex/grok card (M5) joins its own vendor
+   * entries the scanner keyed by the same id. A session with no captured id is skipped entirely (nothing
+   * identifies its transcript); one with an id but no entries yet reports zeros, so a stale chip clears.
    */
   function getSessionsMessage() {
     if (!scanner) return null;
@@ -373,14 +375,14 @@ function createUsageWiring({
     const rows = [];
     for (const [id, sess] of sessions) {
       if (sess.ephemeral) continue;
-      const claudeSessionId = sess.resumeSessionId;
-      if (!claudeSessionId) continue;
-      const bucket = totals.get(claudeSessionId) || { tokens: 0, costUSD: 0, lastTs: null };
+      const resumeId = sess.resumeSessionId;
+      if (!resumeId) continue;
+      const bucket = totals.get(resumeId) || { tokens: 0, costUSD: 0, lastTs: null };
       // Claude's own figure for this conversation when a statusLine callback has reported one. Kept
       // beside the scanner's estimate rather than replacing it: they are computed differently, and the
       // card labels which one it is showing.
-      const officialCostUSD = officialCostByClaudeId.has(claudeSessionId)
-        ? officialCostByClaudeId.get(claudeSessionId)
+      const officialCostUSD = officialCostByClaudeId.has(resumeId)
+        ? officialCostByClaudeId.get(resumeId)
         : null;
       rows.push({ id, tokens: bucket.tokens, costUSD: bucket.costUSD, lastTs: bucket.lastTs, officialCostUSD });
     }

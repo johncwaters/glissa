@@ -28,7 +28,7 @@ const { claudeProjectsDir } = require('../session/core/conversation-history');
 const {
   codexHomes, codexRootCandidates, codexSessionIdFromPath, grokHomes, grokRootCandidates, isUsageFile,
 } = require('./core/usage-scan-core');
-const { INTERACTIVE_LANE } = require('./core/usage-lane-core');
+const { INTERACTIVE_LANE, laneKey } = require('./core/usage-lane-core');
 const {
   MAX_CATCH_UP_BYTES, applyRead, canTrustCachedListing, createTailState, isActiveMtime, pickStaleByMtime,
   planRead,
@@ -387,9 +387,11 @@ function createAgentLogIngest({
    * lane, which runs in the operator's real project directory, from the operator's own work in that
    * same directory; isDispatchWorkdir is the independent second layer for when the ledger has not heard.
    */
-  function isEphemeralLane(lanes, sessionId) {
+  // The ledger map is keyed by the vendor-namespaced composite (M5), so the lookup builds the same key
+  // from this transcript's vendor and session id.
+  function isEphemeralLane(lanes, vendor, sessionId) {
     if (!lanes || !sessionId) return false;
-    const lane = lanes.get(sessionId);
+    const lane = lanes.get(laneKey(vendor, sessionId));
     if (!lane) return false;
     return lane !== INTERACTIVE_LANE;
   }
@@ -401,7 +403,7 @@ function createAgentLogIngest({
 
   async function trackFile(root, dir, filePath, stat, lanes) {
     const sessionId = sessionIdFromPath(root.vendor, dir, filePath);
-    if (isEphemeralLane(lanes, sessionId)) return;
+    if (isEphemeralLane(lanes, root.vendor, sessionId)) return;
     let scopeRoot = rootFromPath(root.vendor, dir);
     if (root.vendor === 'codex') scopeRoot = await readCodexRoot(filePath, fsPromises);
     if (!alive()) return;
@@ -613,7 +615,7 @@ function createAgentLogIngest({
       context.root = mapped.root;
       context.sessionId = mapped.sessionId;
       if (mapped.events.length === 0) continue;
-      if (isEphemeralLane(lanes, context.sessionId)) continue;
+      if (isEphemeralLane(lanes, context.vendor, context.sessionId)) continue;
       if (isDispatchWorkdir(context.root)) continue;
       for (const event of mapped.events) {
         /*

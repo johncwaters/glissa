@@ -169,7 +169,9 @@ function registerEphemeralSession({ map, id, sess, closeSessionDataClients, logP
    * session_id), which is what makes the lanes attributable at all.
    */
   if (typeof recordLane === 'function') {
-    sess.on('claude-session-id', ({ id: claudeSessionId }) => recordLane(claudeSessionId, logPrefix));
+    // Every ephemeral lane spawns Claude today, so vendor is claude; passed through rather than assumed so
+    // a future non-Claude lane records under its own namespace.
+    sess.on('claude-session-id', ({ id: claudeSessionId, vendor }) => recordLane(claudeSessionId, logPrefix, vendor));
   }
   sess.on('error', (err) => console.error(`[${logPrefix} ${name}] error: ${err.message}`));
   const removeFromMap = () => {

@@ -572,14 +572,17 @@ function createUsageScanner(deps = {}) {
     if (cachedSessionTotals && !isReportDirty) return cloneSessionTotals(cachedSessionTotals);
     const totalsBySession = new Map();
     for (const entry of entries) {
-      // Per-card attribution is by CLAUDE session id, so other vendors never reach a card chip.
-      if (!isClaudeEntry(entry)) continue;
-      if (!entry.inlineSessionId) continue;
-      const bucket = totalsBySession.get(entry.inlineSessionId) || { tokens: 0, costUSD: 0, lastTs: null };
+      // The per-card join key: a Claude card is joined by its in-line transcript session id, a supervised
+      // codex/grok card (M5) by the vendor session id its transcript carries. Both equal the card's
+      // resumeSessionId, so the wiring side joins by that bare id regardless of vendor. Collision across
+      // vendors is not a concern: every id here is a UUID.
+      const key = isClaudeEntry(entry) ? entry.inlineSessionId : entry.sessionId;
+      if (!key) continue;
+      const bucket = totalsBySession.get(key) || { tokens: 0, costUSD: 0, lastTs: null };
       bucket.tokens += totalTokensOf(entry);
       bucket.costUSD += Number.isFinite(entry.costUSD) ? entry.costUSD : 0;
       bucket.lastTs = Math.max(bucket.lastTs || 0, entry.timestampMs);
-      totalsBySession.set(entry.inlineSessionId, bucket);
+      totalsBySession.set(key, bucket);
     }
     cachedSessionTotals = totalsBySession;
     return cloneSessionTotals(cachedSessionTotals);

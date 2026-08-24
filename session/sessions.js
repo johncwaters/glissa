@@ -323,6 +323,9 @@ class Session extends EventEmitter {
     // could run is asked of the adapter rather than assumed (M2 of docs/plan-agent-adapters.md).
     this._adapter = adapter || resolveAdapter(agent, { label: `session:${name}` });
     this.agentId = this._adapter.id;
+    // The usage lane's vendor namespace for this agent (claude/codex/grok), never the adapter id. It
+    // rides the claude-session-id event and keys both the lane ledger and the per-card usage chip.
+    this.usageVendor = this._adapter.usageVendor || "claude";
     this.bypassHookTrust = bypassHookTrust === true;
     this._titleQuietFallbackMs = titleQuietFallbackMs;
     this._titleQuietFallbackTimer = null;
@@ -610,7 +613,10 @@ class Session extends EventEmitter {
     if (typeof id !== "string" || !RESUME_ID_RE.test(id)) return;
     if (id === this._resumeSessionId) return;
     this.setResumeConversation(id);
-    this.emit("claude-session-id", { id, source: source || null });
+    // Event name kept for wire/back-compat (M5 of docs/plan-agent-adapters.md); `id` stays the primary
+    // field every existing listener reads. `vendor` + `sessionId` generalize it so the lane ledger can
+    // namespace a codex/grok id away from a claude one that could otherwise collide.
+    this.emit("claude-session-id", { id, source: source || null, vendor: this.usageVendor, sessionId: id });
   }
 
   // Advisory pending-prompt-kind setter (see _pendingPromptKind above). Emits 'prompt-kind-change'

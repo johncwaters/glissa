@@ -297,6 +297,9 @@ function buildArgs({
 module.exports = {
   id: ID,
   label: "Codex CLI",
+  // The usage lane's vendor namespace (usage-scanner tags Codex transcript entries `codex`); the lane
+  // ledger's composite key and the per-card chip join both key on it, never on the adapter id.
+  usageVendor: "codex",
   commandName: COMMAND_NAME,
   envProfile,
   titleProfile,

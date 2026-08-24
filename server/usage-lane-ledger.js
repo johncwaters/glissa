@@ -1,11 +1,14 @@
 'use strict';
 
 /*
- * Durable Claude-session-id to Glissa-lane ledger: the IO shell around server/core/usage-lane-core.js.
+ * Durable session-id to Glissa-lane ledger: the IO shell around server/core/usage-lane-core.js.
  *
- * Written from the ONE place every Claude session id becomes known, the `claude-session-id` event a Session
- * emits when a hook payload carries it (live-verified to fire in headless `-p` too, so the ephemeral lanes
- * are attributable and not just the interactive cards). Read by the usage scanner when it builds byLane.
+ * Written from the ONE place a session id becomes known, the `claude-session-id` event a Session emits when
+ * a hook payload carries it (event name kept for wire/back-compat; the payload now carries { vendor,
+ * sessionId }). Live-verified to fire in headless `-p` too, so the ephemeral lanes are attributable and not
+ * just the interactive cards. Read by the usage scanner when it builds byLane. Entries are keyed by the
+ * vendor-namespaced composite so a codex session id cannot collide with a claude one; a pre-M5 file keyed
+ * `claudeSessionId` round-trips as vendor `claude` (usage-lane-core normalizeLedgerEntry).
  *
  * Deliberately not part of config.json: this is derived runtime state that can be rebuilt by observation,
  * and it grows per session rather than per project.
@@ -60,18 +63,19 @@ function createLaneLedger({
   }
 
   /*
-   * Record which lane spawned a Claude session. Fire and forget by design: this sits on the hook callback
-   * path, which must never wait on a disk write, and a lost record costs one session's attribution rather
-   * than any usage number.
+   * Record which lane spawned a session. Fire and forget by design: this sits on the hook callback path,
+   * which must never wait on a disk write, and a lost record costs one session's attribution rather than
+   * any usage number. `vendor` defaults to claude, so a pre-M5 caller (the ephemeral lanes, all Claude)
+   * records exactly as before.
    */
-  function record(claudeSessionId, lane) {
-    if (!ledgerPath || !claudeSessionId || !lane) return;
+  function record(sessionId, lane, vendor = 'claude') {
+    if (!ledgerPath || !sessionId || !lane) return;
     // Serialized so records apply in arrival order and whenIdle() has one chain to settle on.
     opsChain = opsChain.then(async () => {
       await load();
-      const existing = entries.find((entry) => entry.claudeSessionId === claudeSessionId);
+      const existing = entries.find((entry) => entry.sessionId === sessionId && entry.vendor === vendor);
       if (existing && existing.lane === lane) return;
-      entries = pruneLedger([...entries, { claudeSessionId, lane, ts: nowFn() }], { now: nowFn(), retainDays });
+      entries = pruneLedger([...entries, { vendor, sessionId, lane, ts: nowFn() }], { now: nowFn(), retainDays });
       await persist();
     }).catch((error) => warn(`record failed: ${error.message}`));
   }

@@ -1357,10 +1357,11 @@ function createBackend(httpServer, options = {}) {
     // Crash-safe capture of the live Claude session id (design A): persisted the moment the hook
     // fires, not at shutdown, so a hard kill of Glissa loses nothing. Unifies with the manual
     // Resume-dialog binding (control-handlers.js handleResumeConversation) - same config field.
-    sess.on('claude-session-id', ({ id }) => {
+    sess.on('claude-session-id', ({ id, vendor }) => {
       persistProjectField('resumeSessionId', id);
-      // A managed card is the operator working: the lane every other lane is measured against.
-      recordLane(id, INTERACTIVE_LANE);
+      // A managed card is the operator working: the lane every other lane is measured against. The vendor
+      // namespaces the ledger key so a codex card's id cannot collide with a claude card's.
+      recordLane(id, INTERACTIVE_LANE, vendor);
       // The card's usage totals are attributed through this id, so the mapping it just changed makes
       // the last usage-sessions payload wrong for this card.
       usage.refreshSessions();

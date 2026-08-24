@@ -222,6 +222,9 @@ function buildArgs({
 module.exports = {
   id: ID,
   label: "Claude Code",
+  // The usage lane's vendor namespace (usage-scanner / usage-lane-core), which is NOT the adapter id:
+  // the scanner tags Claude transcript entries `claude`, and the lane ledger's composite key joins on it.
+  usageVendor: "claude",
   commandName: COMMAND_NAME,
   envProfile,
   titleProfile,

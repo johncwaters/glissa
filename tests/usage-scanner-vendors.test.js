@@ -275,9 +275,14 @@ test('three vendors in one report: split totals, tagged models, and Claude-only 
   const blockTokens = report.blocks.reduce((sum, block) => sum + block.tokens, 0);
   assert.equal(blockTokens, 1100, 'blocks are Claude-only');
 
-  // Per-card chips are attributed by Claude session id, so no other vendor can reach one.
+  // Per-card chips are joined by the card's own session id, whatever its vendor (M5): a supervised codex
+  // or grok card reaches its own chip from its own transcript, keyed by the id that is also its
+  // resumeSessionId. Claude is keyed by the in-line transcript session id, the vendors by their session id.
   const totals = await scannerSessionTotals(root);
-  assert.deepEqual([...totals.keys()], ['claude-inline-1']);
+  assert.deepEqual(
+    [...totals.keys()].sort(),
+    ['019f43ea-76ac-7041-bd4b-6362e85f6630', 'claude-inline-1', 'grok-session-1'],
+  );
 });
 
 test('the vendor kill switches skip the walk entirely', async () => {
