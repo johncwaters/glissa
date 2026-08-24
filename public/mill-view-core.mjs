@@ -303,7 +303,7 @@ export function autoRebuildLine(report) {
   // there is deliberately nothing to watch; with something delivered, every rebuild is waiting on the
   // fallback sweep, which is the state this line was written to catch.
   if (nothingIsConsumed(report)) return 'auto rebuild on, no consumers';
-  return 'auto rebuild on, 0 watched roots, fallback sweep only';
+  return `auto rebuild on, ${formatCount(watchers)} watched roots, fallback sweep only`;
 }
 
 function nothingIsConsumed(report) {
