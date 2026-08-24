@@ -145,8 +145,6 @@ export function specErrorLine(pack) {
   return `Spec is invalid: ${errors.join('; ')}`;
 }
 
-// A delivery row is one PROJECT, so sibling cards on one checkout are counted rather than listed
-// twice, and a count with no state means those sessions are not all in the same one.
 export function deliveryLabel(delivery) {
   const name = typeof delivery?.project === 'string' && delivery.project ? delivery.project : 'session';
   const state = typeof delivery?.state === 'string' && delivery.state ? delivery.state.toLowerCase() : '';

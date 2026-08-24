@@ -394,14 +394,7 @@ function mergePackEntries(current, extra) {
   return merged;
 }
 
-/*
- * The same enumeration addressed per PROJECT, which is a resolved path: two config records may share
- * one checkout ("glissa" and "glissa (2)"), and delivery is a property of the files an agent opens,
- * never of the card that opened them. Grouping is by exact path, never by slug or basename, which
- * collide across checkouts. A pathless record is its own group: nothing says it is anyone's sibling.
- * The primary `id` is the first record in config order, and `recordIds` is what the write path fans a
- * delta back out over. A lone member keeps its raw `packs` value so a malformed one still warns.
- */
+// Grouped by exact path, never slug or basename: those collide across distinct checkouts.
 function packConsumerGroups(config) {
   const rows = [];
   const groupByPath = new Map();

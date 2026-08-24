@@ -68,13 +68,7 @@ function addedOrNull(current, next) {
   return current + next;
 }
 
-/**
- * Which live sessions are running this pack, ONE ROW PER PROJECT: two cards opened on one checkout are
- * one delivery target, so they are counted rather than listed twice. A delivery is judged stale only
- * when BOTH versions are known: a pack with no readable manifest is an unknown, and calling that stale
- * would put a warning on the one case nothing can be said about. The path groups the rows and never
- * reaches the report, a paired phone being a remote client on the far side of it.
- */
+// Stale needs BOTH versions known: an unreadable manifest is unknown, and unknown must not warn.
 function deliveriesFor(name, sessionRows, builtVersion, labelByPath = new Map()) {
   const deliveries = [];
   const deliveryByKey = new Map();
