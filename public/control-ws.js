@@ -4,7 +4,7 @@
 import { nextReconnectDelayMs } from './reconnect-backoff.mjs';
 import { decideLivenessAction } from './connection-liveness-core.mjs';
 import { buildWebSocketUrl } from './ws-url-core.mjs';
-import { loadPageToken, pageToken, withPageToken } from './ws-token.js';
+import { clearPageToken, loadPageToken, pageToken, withPageToken } from './ws-token.js';
 
 let controlWs = null;
 let controlRetryTimer = null;
@@ -84,8 +84,10 @@ export function connectControl() {
   const ws = new WebSocket(url);
   controlWs = ws;
   connectingSince = Date.now();
+  let hasEverOpened = false;
 
   ws.addEventListener('open', () => {
+    hasEverOpened = true;
     controlRetryAttempt = 0;
     if (_connectionStateCallback) _connectionStateCallback('connected', 'Connected');
   });
@@ -139,6 +141,8 @@ export function connectControl() {
       pending.reject(new Error('Connection closed'));
     }
     pendingRequests.clear();
+    // Never-opened socket was refused by a new per-process token from server restart; clear cache to refetch.
+    if (!hasEverOpened) clearPageToken();
     if (_connectionStateCallback) _connectionStateCallback('disconnected', 'Reconnecting');
     const retryDelayMs = nextReconnectDelayMs(controlRetryAttempt);
     controlRetryAttempt += 1;

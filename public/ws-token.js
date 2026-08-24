@@ -32,6 +32,11 @@ export function loadPageToken() {
   return inflight;
 }
 
+/** Drops the cached token so the next load refetches it: a restarted server mints a new one. */
+export function clearPageToken() {
+  token = '';
+}
+
 /** "/control?since=4" -> "/control?since=4&token=..."; a missing token leaves the target alone. */
 export function withPageToken(pathAndSearch) {
   if (!token) return pathAndSearch;

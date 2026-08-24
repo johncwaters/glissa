@@ -11,7 +11,7 @@ import { nextReconnectDelayMs } from '../reconnect-backoff.mjs';
 import { renderScheduler } from '../render-scheduler.mjs';
 import { getTerminalTheme } from '../theme.js';
 import { buildWebSocketUrl } from '../ws-url-core.mjs';
-import { withPageToken } from '../ws-token.js';
+import { clearPageToken, loadPageToken, withPageToken } from '../ws-token.js';
 import { noteSessionOutput } from './activity.js';
 import { sessionUIs } from './card-registry.js';
 import { decideFitAction } from './fit-core.mjs';
@@ -68,6 +68,7 @@ function connectDataWs(sessionId, ui, term) {
   const url = buildWebSocketUrl(location, withPageToken(`/terminals/${encodeURIComponent(sessionId)}`));
   const ws = new WebSocket(url);
   ui.dataWs = ws;
+  let hasEverOpened = false;
 
   // Inbound PTY bytes go through the global render scheduler (Option A:
   // callback-gated round-robin) so heavy multi-session output can't starve typing.
@@ -83,20 +84,24 @@ function connectDataWs(sessionId, ui, term) {
   ws.addEventListener('close', () => {
     // Only act if this ws is still the active one: guards concurrent reconnect races
     // and suppresses stale timers when the card is rebuilt under the same id (e.g. restart).
-    if (ui.dataWs === ws) {
-      renderScheduler.unregister(sessionId);
-      ui.dataWs = null;
-      const retryDelayMs = nextReconnectDelayMs(ui._dataWsRetryAttempt || 0);
-      ui._dataWsRetryAttempt = (ui._dataWsRetryAttempt || 0) + 1;
-      setTimeout(() => {
-        if (sessionUIs.get(sessionId) === ui) {
-          connectDataWs(sessionId, ui, term);
-        }
-      }, retryDelayMs);
-    }
+    if (ui.dataWs !== ws) return;
+    renderScheduler.unregister(sessionId);
+    ui.dataWs = null;
+    // Never-opened socket was refused by a new per-process token from server restart; clear cache to refetch.
+    if (!hasEverOpened) clearPageToken();
+    const retryDelayMs = nextReconnectDelayMs(ui._dataWsRetryAttempt || 0);
+    ui._dataWsRetryAttempt = (ui._dataWsRetryAttempt || 0) + 1;
+    setTimeout(() => {
+      if (sessionUIs.get(sessionId) !== ui) return;
+      void loadPageToken().catch(() => {}).then(() => {
+        if (sessionUIs.get(sessionId) !== ui) return;
+        connectDataWs(sessionId, ui, term);
+      });
+    }, retryDelayMs);
   });
 
   ws.addEventListener('open', () => {
+    hasEverOpened = true;
     ui._dataWsRetryAttempt = 0;
     // Full reset, not clear(), before the server's replay frame. The replay starts at whatever chunk
     // boundary the session ring still retains, so it can open mid-escape-sequence and it carries no
