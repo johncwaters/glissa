@@ -5489,10 +5489,6 @@ html[data-layout="phone"] .mill-outputs {
   min-width: 0;
 }
 
-html[data-layout="phone"] .mill-outputs {
-  overflow-x: auto;
-}
-
 html[data-layout="phone"] .mill-delivery,
 html[data-layout="phone"] .mill-distill,
 html[data-layout="phone"] .mill-output {

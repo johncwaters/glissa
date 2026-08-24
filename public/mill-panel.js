@@ -173,15 +173,19 @@ function buildDeliverToBlock(pack) {
   return wrap;
 }
 
+function titledSpan(className, text) {
+  const span = el('span', className, text);
+  span.title = text;
+  return span;
+}
+
 function buildDistillBlock(pack) {
   if (pack.distill.length === 0) return null;
   const wrap = el('div', 'mill-distills');
   for (const row of pack.distill) {
     const item = el('div', 'mill-distill');
-    const output = el('span', 'mill-distill-output', row.output);
-    output.title = row.output;
     item.dataset.tone = distillTone(row);
-    item.append(output);
+    item.append(titledSpan('mill-distill-output', row.output));
     item.append(el('span', 'mill-distill-status', distillText(row)));
     wrap.append(item);
   }
@@ -193,9 +197,7 @@ function buildOutputsBlock(built) {
   const wrap = el('div', 'mill-outputs');
   for (const output of built.outputs) {
     const item = el('div', 'mill-output');
-    const path = el('span', 'mill-output-path', output.relPath);
-    path.title = output.relPath;
-    item.append(path);
+    item.append(titledSpan('mill-output-path', output.relPath));
     item.append(el('span', 'mill-output-tokens', outputTokenLine(output)));
     wrap.append(item);
   }
