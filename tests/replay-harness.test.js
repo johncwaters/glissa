@@ -42,6 +42,39 @@ test('v2 fixture (conflict Stop+permission): awaiting-input dominates, no ready'
   assert.equal(c.ready || 0, 0, 'ready must be suppressed by conflict rule');
 });
 
+test('codex fixture (approval turn): the recorded sequence replays through the codex adapter', async () => {
+  // Cut from a real recording made by test/probe-codex-session.js against codex-cli 0.147.0: the boot
+  // spinner, one prompt, the PermissionRequest, the blinking Action Required title, and Stop.
+  const { version, agent, records } = load('v2-codex-approval-turn.jsonl');
+  assert.equal(version, 2);
+  assert.equal(agent, 'codex');
+  // The recording was made in a directory named `project`, which is what its idle title carries.
+  const { signals } = await replayDetection(records, { ...FAST, agent, titleContext: { cwdBasename: 'project' } });
+  const order = signals.map((s) => s.signal);
+  assert.ok(order.includes('resume'), 'UserPromptSubmit opens the work cycle');
+  const awaitingAt = order.indexOf('awaiting-input');
+  const readyAt = order.lastIndexOf('ready');
+  assert.ok(awaitingAt >= 0, 'the approval must reach the card');
+  assert.ok(readyAt > awaitingAt, 'the turn completes only AFTER the approval, never before');
+  assert.equal(signals[awaitingAt].source, 'hook', 'PermissionRequest wins the race against the title');
+});
+
+test('the same codex recording read with the Claude title glyphs loses the title tier, which is why replay is adapter-aware', async () => {
+  const { records } = load('v2-codex-approval-turn.jsonl');
+  // Hooks are dropped so the comparison is the TITLE tier alone; with them in, the authoritative
+  // signal arrives first and both readings look the same.
+  const titlesOnly = records.filter((r) => r.type === 'data');
+  const titleContext = { cwdBasename: 'project' };
+  const asCodex = await replayDetection(titlesOnly, { ...FAST, agent: 'codex', titleContext });
+  const asClaude = await replayDetection(titlesOnly, { ...FAST, agent: 'claude-code', titleContext });
+  const kinds = (r) => new Set(r.signals.map((s) => s.signal));
+  // Codex's idle title is the bare cwd basename and its awaiting-input title leads with '[', both of
+  // which the Claude profile drops as shell-written window titles: read with the wrong vocabulary the
+  // card sits WORKING through the approval and past the end of the turn.
+  assert.deepEqual([...kinds(asCodex)].sort(), ['awaiting-input', 'ready', 'working']);
+  assert.deepEqual([...kinds(asClaude)], ['working']);
+});
+
 test('real v1 recordings replay cleanly and never emit awaiting-input (title honest contract)', async () => {
   const v1files = fs.readdirSync(FIX).filter((f) => f.startsWith('v1-') && f.endsWith('.jsonl'));
   assert.ok(v1files.length >= 1, 'expected at least one v1 fixture');

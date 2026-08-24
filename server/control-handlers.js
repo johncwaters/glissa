@@ -11,11 +11,7 @@ const { PACK_NAME_RE, applyPackDelta } = require('./core/pack-core');
 const { readPosthogReport } = require('./posthog-report');
 const posthogCore = require('./core/posthog-core');
 const { getRtkPath } = require('../session/core/rtk-command');
-
-// A Claude session id is a UUID, but stay lenient (any safe id charset) so a non-UUID id is not
-// rejected. The charset itself is the guard: no path separators, dots, or whitespace can reach the
-// spawn arg or be persisted, so a hostile control message cannot inject flags or traverse paths.
-const RESUME_ID_RE = /^[A-Za-z0-9_-]{8,128}$/;
+const { RESUME_ID_RE } = require('../session/core/auto-resume');
 
 function scanRepoRoots(roots) {
   const results = [];

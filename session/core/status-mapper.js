@@ -30,7 +30,8 @@ function mapSignalToEvent(signal, state, confidence, activeAgents = 0) {
       }
       return null;
     case "awaiting-input":
-      // Needs the user. Authoritative-only (title never emits this).
+      // Needs the user. Hooks are the usual source; a title profile emits it only where the agent
+      // writes an explicit awaiting-input STATE (codex's Action Required), never as an inference.
       if (state === STATES.RUNNING || state === STATES.IDLE || state === STATES.COMPLETE) {
         return "prompt_detected";
       }

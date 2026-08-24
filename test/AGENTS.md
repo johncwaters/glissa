@@ -11,6 +11,7 @@ Manual smoke tests and harnesses run directly with `node`, separate from the aut
 | File | Description |
 |------|-------------|
 | `smoke-dormant-boot.js` | Boots the backend in-process, verifies dormant-by-default boot and the start-session control flow |
+| `probe-codex-session.js` | Live verification of the Codex adapter against a real `codex` binary: boots the backend on a throwaway config and drives one supervised session through spawn, working, awaiting-input, approval, complete and resume. Costs one real codex turn; leaves a recording the replay fixtures are cut from |
 | `container/Dockerfile` | node:24-bookworm image for the Linux-only remote-mode suite (`npm run test:container`) |
 | `container/remote-mode.sh` | Remote-mode integration assertions: two listeners, pairing lifecycle, revocation, Origin policy |
 | `container/ws-check.js` | WebSocket probe used by that script (cookie/Origin headers, waits for a control snapshot) |

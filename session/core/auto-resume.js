@@ -4,10 +4,18 @@
 // Claude conversation resumed. See .omc/plans/graceful-shutdown-auto-resume.md design C.
 // No IO, no Session import (matches the other session/core modules).
 
-// Shape Claude Code assigns its session ids in. Shared with the manual Resume dialog's
-// validation (server/control-handlers.js RESUME_ID_RE) so a captured id and an
-// operator-typed id are held to the same bar.
-const RESUME_ID_RE = /^[A-Za-z0-9_-]{8,128}$/;
+// THE session-id shape, for every agent and every entry point: the ids captured from hook payloads,
+// the ids the manual Resume dialog accepts, and the ids persisted to config.json. One definition, and
+// server/control-handlers.js imports it rather than restating it, because a hole patched in one copy
+// of a validator is a hole.
+//
+// The leading character MUST be alphanumeric. A captured id becomes a positional argument on the next
+// spawn (`--resume <id>` for Claude Code, `resume <id>` for codex), so an id that may start with `-`
+// is an argv-injection sink: a session that can reach its own hook ingress (GLISSA_HOOK_URL is in its
+// env by design) could POST a forged payload whose session_id is a FLAG, have it persisted, and get it
+// spawned as a flag on the next start. `--dangerously-bypass-approvals-and-sandbox` is 47 characters
+// of this charset. The rest of the charset is what keeps a path separator, a dot or whitespace out.
+const RESUME_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$/;
 
 // wasActive: the project had a live PTY when Glissa last shut down (crash or graceful).
 // resumeSessionId: the Claude conversation to resume; absent means no auto-spawn (no silent

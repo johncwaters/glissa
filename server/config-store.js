@@ -237,6 +237,12 @@ function validateConfig(candidate) {
       if (project.agent != null && !isKnownAgentId(project.agent)) {
         errors.push(`projects[${index}].agent must be one of: ${listAgentIds().join(', ')}`);
       }
+      // Opt-in to the supervised agent's hook-trust bypass (codex). File-only and default false: the
+      // bypass runs every hook the invocation loads, repository-supplied ones included, so it is a
+      // decision the operator makes per project rather than one a dashboard control can flip.
+      if (project.codexBypassHookTrust != null && typeof project.codexBypassHookTrust !== 'boolean') {
+        errors.push(`projects[${index}].codexBypassHookTrust must be a boolean`);
+      }
     });
   }
   if (candidate.port != null && (!Number.isInteger(candidate.port) || candidate.port < 1 || candidate.port > 65535)) {

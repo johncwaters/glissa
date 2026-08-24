@@ -33,19 +33,19 @@ function tmpHooksDir() {
 
 test('the registry exposes claude-code as the default and refuses an unknown id', () => {
   assert.equal(adapters.DEFAULT_AGENT_ID, 'claude-code');
-  assert.deepEqual(adapters.listAgentIds(), ['claude-code']);
+  assert.deepEqual(adapters.listAgentIds(), ['claude-code', 'codex']);
   assert.equal(adapters.isKnownAgentId('claude-code'), true);
-  assert.equal(adapters.isKnownAgentId('codex'), false);
-  assert.equal(adapters.getAdapter('codex'), null);
+  assert.equal(adapters.isKnownAgentId('gemini'), false);
+  assert.equal(adapters.getAdapter('gemini'), null);
   assert.equal(adapters.getAdapter(null), claudeCode);
 });
 
 test('an unknown agent id warns and falls back to the default rather than failing', () => {
   const warnings = [];
-  const adapter = adapters.resolveAdapter('grok', { warn: (m) => warnings.push(m), label: 'session:x' });
+  const adapter = adapters.resolveAdapter('gemini', { warn: (m) => warnings.push(m), label: 'session:x' });
   assert.equal(adapter, claudeCode);
   assert.equal(warnings.length, 1);
-  assert.match(warnings[0], /unknown agent "grok"/);
+  assert.match(warnings[0], /unknown agent "gemini"/);
 });
 
 test('claude-code declares every capability, since it is the reference implementation', () => {
@@ -252,12 +252,13 @@ test('the command registry resolves once per agent id and re-resolves after a re
   }
 });
 
-test('config accepts an absent or claude-code agent on a project and refuses anything else', () => {
+test('config accepts an absent or registered agent on a project and refuses anything else', () => {
   assert.equal(validateConfig({ projects: [{ path: '/a' }] }).ok, true);
   assert.equal(validateConfig({ projects: [{ path: '/a', agent: 'claude-code' }] }).ok, true);
-  const bad = validateConfig({ projects: [{ path: '/a', agent: 'codex' }] });
+  assert.equal(validateConfig({ projects: [{ path: '/a', agent: 'codex' }] }).ok, true);
+  const bad = validateConfig({ projects: [{ path: '/a', agent: 'gemini' }] });
   assert.equal(bad.ok, false);
-  assert.deepEqual(bad.errors, ['projects[0].agent must be one of: claude-code']);
+  assert.deepEqual(bad.errors, ['projects[0].agent must be one of: claude-code, codex']);
   const wrongType = validateConfig({ projects: [{ path: '/a', agent: 7 }] });
   assert.equal(wrongType.ok, false);
 });

@@ -11,9 +11,19 @@ const { createStatusSource } = require("../detection/status-source");
 const { createWorktreeWatcher, readWorktreeGitdirPointer } = require("../detection/worktree-watch");
 const { createIntegrationRefWatcher } = require("../detection/integration-ref-watch");
 const { createRerereWatcher } = require("../detection/rerere-watch");
-const { writeSessionSettings } = require("../detection/settings-injector");
+const { writeSessionSettings, generateToken } = require("../detection/settings-injector");
+const { HOOK_URL_ENV } = require("./core/hook-relay-core");
 const { classifyClaudeKind, buildSpawnCommand } = require("./core/spawn-command");
 const { DEFAULT_AGENT_ID, resolveAdapter, commandFor } = require("./adapters");
+
+// The one shape _injectHooks returns when nothing was wired, frozen so a caller cannot mutate the
+// shared empties into a live injection.
+const NO_HOOK_INJECTION = Object.freeze({ args: Object.freeze([]), env: Object.freeze({}) });
+
+// How far up the cwd's ancestry a project-scoped agent config is looked for (see
+// Session._findProjectAgentConfig). Deep enough for a worktree nested under a repo root, bounded so a
+// spawn cannot walk an arbitrarily deep tree.
+const MAX_PROJECT_CONFIG_DEPTH = 12;
 const {
   TRANSITIONS,
   GUARDS,
@@ -181,6 +191,11 @@ class Session extends EventEmitter {
     // Resolved adapter object, overriding the `agent` lookup. Mirrors the spawnCommand seam: tests
     // build a capability-off agent with it while claude-code is still the only registered adapter.
     adapter = null,
+    // Per-project opt-in to an agent's hook-trust bypass (codex `--dangerously-bypass-hook-trust`).
+    // Default OFF because the bypass is not scoped to Glissa's own hooks; see _decideHookTrustBypass.
+    bypassHookTrust = false,
+    // Deadline for the boot title-quiet latch when no hook ever arrives (see _armTitleQuietFallback).
+    titleQuietFallbackMs = 30000,
     // Resolved agent command ({ path, kind }). Null defers to the adapter registry's lazy cache at
     // spawn; tests inject a stub to exercise the spawn branches deterministically.
     spawnCommand = null,
@@ -308,6 +323,9 @@ class Session extends EventEmitter {
     // could run is asked of the adapter rather than assumed (M2 of docs/plan-agent-adapters.md).
     this._adapter = adapter || resolveAdapter(agent, { label: `session:${name}` });
     this.agentId = this._adapter.id;
+    this.bypassHookTrust = bypassHookTrust === true;
+    this._titleQuietFallbackMs = titleQuietFallbackMs;
+    this._titleQuietFallbackTimer = null;
 
     // -- Detection: structural signal sources --
     this._hookRouter = hookRouter;
@@ -1894,7 +1912,7 @@ class Session extends EventEmitter {
     return {
       lastSignal: this._lastSignal,
       hookSeen: this._hookSeen,
-      hooksInjected: this._settingsHandle !== null,
+      hooksInjected: this._hookToken !== null,
       titleState: this._titleSource.getState(),
     };
   }
@@ -2102,14 +2120,29 @@ class Session extends EventEmitter {
     this.emit("rebaseline");
     this._resetDetectionSources({ quiet: false });
 
+    // Hooks are wired BEFORE the env is built: a relay-based agent carries its ingress URL (bearer
+    // token included) in the spawn env, which is what keeps that token off a world-listable command
+    // line and makes an installed hook inert for the operator's own unsupervised runs.
+    const hookInjection = this._injectHooks();
+    const settingsArgs = hookInjection.args;
+    // An agent whose title spins through its own boot (codex) would otherwise open and close a fake
+    // work cycle before the operator typed anything, so its titles stay latched quiet until the first
+    // authoritative UserPromptSubmit clears the latch. Only with hooks wired, since nothing else
+    // would ever un-latch it and the title tier is all a hook-less session has.
+    this._titleQuiet = this._adapter.titleProfile.quietUntilFirstPrompt === true && this._hookToken !== null;
+    this._armTitleQuietFallback();
+    // The title tier reads codex's idle title by comparing it against the cwd basename, so the source
+    // is told which directory this spawn actually runs in (a worktree changes it).
+    this._titleSource.setContext({ cwdBasename: path.basename(this.effectiveCwd()) });
+    const spawnExtraEnv = Object.keys(hookInjection.env).length > 0
+      ? { ...(this._spawnEnv || {}), ...hookInjection.env }
+      : this._spawnEnv;
+
     const env = this._buildSpawnEnv({
       additionalDirsClaudeMd: packDelivery.packs.length > 0,
       prependPathDir: this._rtkPath ? path.dirname(this._rtkPath) : null,
+      extraEnv: spawnExtraEnv,
     });
-
-    // Inject Claude Code hooks via a per-session managed settings file (HTTP hooks
-    // POSTing to Glissa's localhost server). No repo modification; no shell command.
-    const settingsArgs = this._injectHooks();
 
     // A headless lane passes extra flags (e.g. -p, --model <m>) then the prompt as the final
     // positional; a resume id continues a prior conversation, which Claude resolves across the
@@ -2171,7 +2204,7 @@ class Session extends EventEmitter {
     if (this._recorder) {
       this._recorder.writeHeader({
         agent: this.agentId,
-        hooksInjected: this._settingsHandle !== null,
+        hooksInjected: this._hookToken !== null,
         cols: spawnCols,
         rows: spawnRows,
       });
@@ -2231,10 +2264,11 @@ class Session extends EventEmitter {
     this.kill();
   }
 
-  // Write the per-session hook settings file and register with the shared
-  // HookRouter. Returns the --settings arg array (empty when hooks unavailable).
+  // Wire this session's hook callbacks and register with the shared HookRouter. Returns
+  // { args, env }: the spawn argv group and the spawn env additions injection needs, both empty when
+  // hooks are unavailable, so a session degrades to the title tier rather than failing to start.
   _injectHooks() {
-    if (!this._hookRouter || !this._getHookPort) return [];
+    if (!this._hookRouter || !this._getHookPort) return NO_HOOK_INJECTION;
     let port;
     try {
       port = this._getHookPort();
@@ -2243,8 +2277,9 @@ class Session extends EventEmitter {
     }
     if (!port) {
       console.warn(`[session:${this.name}] hook injection skipped: HTTP listener port unavailable - hooks were not injected`);
-      return [];
+      return NO_HOOK_INJECTION;
     }
+    if (this._adapter.hooks.injection?.kind === "argv-config") return this._injectRelayHooks(port);
     try {
       this._settingsHandle = writeSessionSettings({
         port,
@@ -2265,11 +2300,112 @@ class Session extends EventEmitter {
         onSignal: (raw) => this.ingestHookSignal(raw),
         hooks: this._adapter.hooks,
       });
-      return this._adapter.settingsArgs(this._settingsHandle.settingsPath);
+      return { args: this._adapter.settingsArgs(this._settingsHandle.settingsPath), env: {} };
     } catch (err) {
       console.warn(`[session:${this.name}] hook injection failed: ${err.message} - falling back to OSC title only`);
       this._cleanupHooks();
-      return [];
+      return NO_HOOK_INJECTION;
+    }
+  }
+
+  /*
+   * Hooks wired is not hooks ARRIVING: codex silently skips an untrusted hook, so a session whose
+   * callbacks never come would sit title-quiet for its whole life and report nothing at all. The
+   * latch therefore has a deadline. It is generous on purpose (the boot noise it exists to swallow is
+   * over within seconds, so dropping it late costs nothing), and it only ever drops the latch, never
+   * re-arms it. A hook that does arrive clears the latch through the ordinary `resume` path.
+   */
+  _armTitleQuietFallback() {
+    this._clearTimer("_titleQuietFallbackTimer");
+    if (!this._titleQuiet) return;
+    this._armTimer("_titleQuietFallbackTimer", this._titleQuietFallbackMs, () => {
+      if (this._destroyed || !this._titleQuiet) return;
+      if (this._hookSeen) return; // hooks are flowing; the latch is doing its real job
+      console.warn(`[session:${this.name}] no hook callback within ${Math.round(this._titleQuietFallbackMs / 1000)}s - opening the title tier (detection is degraded)`);
+      this._titleQuiet = false;
+      this._recordDecision({ kind: "title-latch", ts: Date.now(), decision: "fallback-open", reason: "no hook callback before the deadline" });
+    }, { unref: true });
+  }
+
+  /*
+   * Whether this spawn may pass its agent's hook-trust bypass. Off unless the project opted in, and
+   * refused even then once a project-scoped agent config in the cwd's ancestry could contribute hooks
+   * of its own: the bypass turns review off for EVERY hook the invocation loads, and a repository (or
+   * the supervised agent, writing into its own workspace for the NEXT spawn) can put one there. The
+   * cost of refusing is the title tier for that session, which is what an untrusted install already
+   * gets, so the refusal is the cheap side of the trade.
+   */
+  _decideHookTrustBypass() {
+    if (!this.bypassHookTrust) return false;
+    const injection = this._adapter.hooks.injection || {};
+    const candidates = injection.projectConfigCandidates;
+    if (!Array.isArray(candidates) || candidates.length === 0) return true;
+    const found = this._findProjectAgentConfig(candidates, injection.mayContributeHooks);
+    if (!found) return true;
+    console.warn(`[session:${this.name}] hook-trust bypass refused: ${found} could contribute hooks Glissa did not write - falling back to OSC title only`);
+    this._recordDecision({ kind: "hook-trust", ts: Date.now(), decision: "bypass-refused", reason: "project agent config could contribute hooks" });
+    return false;
+  }
+
+  /*
+   * Walk the cwd's ancestry for a project-scoped agent config that could contribute hooks, returning
+   * the first path that could. A candidate is either PARSED (a general config file, which only counts
+   * when it declares hooks) or counted on PRESENCE alone (a dedicated hooks file, whose whole purpose
+   * at that path is declaring them). Sync on purpose: a one-shot cold path inside spawn, not one of the
+   * recurring paths every session shares an event loop over. Depth-bounded, and an unreadable file
+   * counts as a hit, since "cannot read it" is not "vouched for it".
+   */
+  _findProjectAgentConfig(candidates, mayContributeHooks) {
+    let dir = this.effectiveCwd();
+    for (let depth = 0; depth < MAX_PROJECT_CONFIG_DEPTH; depth += 1) {
+      for (const { relPath, presenceIsHit } of candidates) {
+        const candidate = path.join(dir, relPath);
+        if (presenceIsHit) {
+          if (fs.existsSync(candidate)) return candidate;
+          continue;
+        }
+        let text = null;
+        try {
+          text = fs.readFileSync(candidate, "utf8");
+        } catch (err) {
+          if (err.code !== "ENOENT" && err.code !== "ENOTDIR") return candidate;
+          continue;
+        }
+        if (typeof mayContributeHooks === "function" && mayContributeHooks(text)) return candidate;
+      }
+      const parent = path.dirname(dir);
+      if (parent === dir) return null;
+      dir = parent;
+    }
+    return null;
+  }
+
+  /*
+   * The relay form (codex today): the agent runs session/hook-relay.js as a command-type hook, so the
+   * subscription is argv and the ingress URL is env. The token is minted here rather than by a
+   * settings file, and it is the SAME per-session bearer the router validates, so the trust boundary
+   * is unchanged: the ingress, its token check and its body cap are byte-identical for both forms.
+   */
+  _injectRelayHooks(port) {
+    const args = this._adapter.hooks.injection.buildHookArgs({ bypassHookTrust: this._decideHookTrustBypass() });
+    if (!args) {
+      console.warn(`[session:${this.name}] hook injection skipped: the relay path cannot be expressed for ${this.agentId} - falling back to OSC title only`);
+      return NO_HOOK_INJECTION;
+    }
+    const token = generateToken();
+    const hookUrl = `http://127.0.0.1:${port}/hook/${encodeURIComponent(this.id)}?t=${encodeURIComponent(token)}`;
+    try {
+      this._hookToken = token;
+      this._hookRouter.register(this.id, {
+        token,
+        onSignal: (raw) => this.ingestHookSignal(raw),
+        hooks: this._adapter.hooks,
+      });
+      return { args, env: { [HOOK_URL_ENV]: hookUrl } };
+    } catch (err) {
+      console.warn(`[session:${this.name}] hook injection failed: ${err.message} - falling back to OSC title only`);
+      this._cleanupHooks();
+      return NO_HOOK_INJECTION;
     }
   }
 
@@ -2346,8 +2482,8 @@ class Session extends EventEmitter {
     return base;
   }
 
-  _buildSpawnEnv(options) {
-    return this._adapter.buildEnv(process.env, this._spawnEnv, options);
+  _buildSpawnEnv({ extraEnv = this._spawnEnv, ...options } = {}) {
+    return this._adapter.buildEnv(process.env, extraEnv, options);
   }
 
   _handlePtyData(data) {
@@ -2793,6 +2929,7 @@ class Session extends EventEmitter {
     this.kill();
 
     this._clearTimer("_killPollTimer");
+    this._clearTimer("_titleQuietFallbackTimer");
     // _killReapTimer is deliberately NOT cleared here: it is driving the reap a shutdown or an ephemeral
     // lane's worktree discard is about to await, and it settles itself inside the kill budget.
 

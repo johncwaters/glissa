@@ -438,6 +438,9 @@ function createBackend(httpServer, options = {}) {
       // Which agent CLI supervises this card. Absent = claude-code; an unknown value warns and
       // falls back to it, so a hand-edited typo costs a card its agent choice, never its boot.
       agent: project.agent,
+      // Config-file only, default false, and a spawn-time input like the agent itself: see
+      // sessions.js _decideHookTrustBypass for why this is not a dashboard control.
+      bypassHookTrust: project.codexBypassHookTrust === true,
       replayBufferKB: cfg.replayBufferKB,
       hookRouter,
       getHookPort,
@@ -1693,7 +1696,8 @@ function createBackend(httpServer, options = {}) {
       const packsChanged = JSON.stringify(normalizePackNames(newP.packs).names) !== JSON.stringify(sess.packNames);
       // The agent is a spawn-time input like packs: an edited value reaches the session only by recreate.
       const agentChanged = resolveAdapter(newP.agent).id !== sess.agentId;
-      if (pathChanged || permsChanged || packsChanged || agentChanged) {
+      const hookTrustChanged = (newP.codexBypassHookTrust === true) !== sess.bypassHookTrust;
+      if (pathChanged || permsChanged || packsChanged || agentChanged || hookTrustChanged) {
         modified.push(newP);
         continue;
       }

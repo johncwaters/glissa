@@ -48,8 +48,27 @@ test('pickAutoResume tolerates a non-array projects list', () => {
   assert.deepEqual(pickAutoResume(undefined, { autoResume: true }), []);
 });
 
-test('RESUME_ID_RE matches the shape control-handlers.js validates against', () => {
-  assert.ok(RESUME_ID_RE.test('4a3d4462-4cf7-4a23-8f00-ccec89a48ba5'));
+test('RESUME_ID_RE is THE session-id shape, imported by control-handlers rather than restated', () => {
+  assert.ok(RESUME_ID_RE.test('4a3d4462-4cf7-4a23-8f00-ccec89a48ba5'), 'a Claude Code id');
+  assert.ok(RESUME_ID_RE.test('01a030d4-6956-73c2-a74a-eedd17b6361d'), 'a codex id (UUIDv7, leading digit)');
   assert.ok(!RESUME_ID_RE.test('short'));
   assert.ok(!RESUME_ID_RE.test('has spaces in it 1234'));
+  // One definition or none: a validator patched in one of two copies is still a hole.
+  const controlHandlersSource = require('node:fs').readFileSync(
+    require('node:path').join(__dirname, '..', 'server', 'control-handlers.js'), 'utf8');
+  assert.equal(/const RESUME_ID_RE\s*=\s*\//.test(controlHandlersSource), false,
+    'control-handlers.js must import RESUME_ID_RE, not restate it');
+});
+
+test('a captured id can never be a FLAG: the leading character must be alphanumeric', () => {
+  // A supervised session has GLISSA_HOOK_URL in its env by design, so it can POST a forged hook
+  // payload to its own card. Its session_id is persisted and then spawned as a positional argument
+  // (`--resume <id>` / `resume <id>`), which makes a leading dash argv injection: this exact string
+  // would have turned the next spawn's sandbox and approvals off.
+  assert.equal(RESUME_ID_RE.test('--dangerously-bypass-approvals-and-sandbox'), false);
+  assert.equal(RESUME_ID_RE.test('--dangerously-skip-permissions'), false);
+  assert.equal(RESUME_ID_RE.test('-p'), false);
+  assert.equal(RESUME_ID_RE.test('-'.repeat(20)), false);
+  assert.equal(RESUME_ID_RE.test('_leading-underscore-id'), false);
+  assert.equal(RESUME_ID_RE.test(`a${'-'.repeat(127)}`), true, 'a dash is still legal after the first character');
 });

@@ -6,10 +6,14 @@
 // id so every session of that agent shares one lookup exactly as before.
 
 const claudeCode = require("./claude-code");
+const codex = require("./codex");
 
 const DEFAULT_AGENT_ID = claudeCode.id;
 
-const ADAPTERS = new Map([[claudeCode.id, claudeCode]]);
+const ADAPTERS = new Map([
+  [claudeCode.id, claudeCode],
+  [codex.id, codex],
+]);
 
 const resolvedCommands = new Map();
 

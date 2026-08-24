@@ -6,10 +6,11 @@
 // idle is the adapter's title profile (session/adapters/claude-code.js), moved out of here in M1 of
 // docs/plan-agent-adapters.md. A source constructed without one gets the Claude Code profile.
 //
-// CONTRACT (honest fallback): this source emits ONLY `working` / `ready` / `unknown`.
-// It NEVER emits `awaiting-input`: the title cannot authoritatively tell "needs input"
-// from "finished". WAITING is the hook source's job. An unrecognized leading glyph is
-// reported as `unknown` (with a one-time warning), never silently treated as `ready`.
+// CONTRACT (honest fallback): this source emits `working` / `ready` / `unknown`, and
+// `awaiting-input` ONLY for a profile whose agent writes an explicit awaiting-input title STATE
+// (codex's blinking "[ ! ] Action Required"). Claude Code has none, so its titles can never tell
+// "needs input" from "finished" and WAITING stays the hook source's job there. An unrecognized
+// leading glyph is reported as `unknown` (with a one-time warning), never silently treated as `ready`.
 //
 // Generic window titles are ignored where the profile says so. Claude ALWAYS leads its activity
 // title with a pictographic glyph (all > U+007F), so a title leading with a plain ASCII character is
@@ -47,8 +48,11 @@ class OscTitleSource extends EventEmitter {
     super();
     this._stabilizationMs = stabilizationMs;
     this._profile = titleProfile;
+    // What the profile needs about THIS session to read a title (codex compares the idle title
+    // against the cwd basename). Set by the session at every spawn, since a worktree changes it.
+    this._context = {};
     this._hasSeenSpinner = false;
-    this._lastKind = null; // 'working' | 'idle-pending' | 'ready' | 'unknown' | null
+    this._lastKind = null; // 'working' | 'idle-pending' | 'ready' | 'awaiting-input' | 'unknown' | null
     this._lastChar = null;
     this._stabilizationTimer = null;
     this._pending = '';
@@ -71,12 +75,27 @@ class OscTitleSource extends EventEmitter {
     if (cursor > 0) this._pending = this._pending.slice(cursor);
   }
 
+  // Which of working / ready / awaiting-input / ignore / unknown this title means. A profile may
+  // classify the WHOLE title (codex, whose idle and awaiting-input titles both lead with plain
+  // ASCII); one that only knows leading glyphs (Claude Code) is classified here from its predicates,
+  // in the order the pre-profile source applied them.
+  _classifyTitle(trimmed, char) {
+    if (this._profile.classifyTitle) return this._profile.classifyTitle(trimmed, this._context);
+    if (this._profile.isSpinnerChar(char)) return 'working';
+    if (this._profile.isIdleChar(char)) return 'ready';
+    if (this._profile.dropsLeadingAscii && char.codePointAt(0) <= 0x7f) return 'ignore';
+    return 'unknown';
+  }
+
   _processTitle(title) {
     const trimmed = title.replace(/^[\s\x00-\x1f]+/, '');
     if (!trimmed) return; // cleared/empty title, ignore
     const char = String.fromCodePoint(trimmed.codePointAt(0));
+    const kind = this._classifyTitle(trimmed, char);
 
-    if (this._profile.isSpinnerChar(char)) {
+    if (kind === 'ignore') return;
+
+    if (kind === 'working') {
       this._hasSeenSpinner = true;
       this._lastChar = char;
       this._clearStabilization();
@@ -87,7 +106,19 @@ class OscTitleSource extends EventEmitter {
       return;
     }
 
-    if (this._profile.isIdleChar(char)) {
+    if (kind === 'awaiting-input') {
+      // An explicit state the agent wrote, so it needs no stabilization and no spinner first; it
+      // also cancels a pending idle, which by definition described the moment before the prompt.
+      this._lastChar = char;
+      this._clearStabilization();
+      if (this._lastKind !== 'awaiting-input') {
+        this._lastKind = 'awaiting-input';
+        this._emit('awaiting-input', char);
+      }
+      return;
+    }
+
+    if (kind === 'ready') {
       this._lastChar = char;
       // Only arm `ready` after we have actually seen the session work. A session
       // that opens directly on the idle glyph (never spun) must not report ready.
@@ -95,10 +126,6 @@ class OscTitleSource extends EventEmitter {
         this._lastKind = 'idle-pending';
         this._armStabilization(char);
       }
-      return;
-    }
-
-    if (this._profile.dropsLeadingAscii && char.codePointAt(0) <= 0x7f) {
       return;
     }
 
@@ -159,6 +186,12 @@ class OscTitleSource extends EventEmitter {
     if (this._destroyed) return;
     if (this._lastKind !== 'working') return;
     this._lastKind = null;
+  }
+
+  // Merged, not replaced: a caller that knows one field must not blank the others.
+  setContext(context) {
+    if (this._destroyed || !context) return;
+    this._context = { ...this._context, ...context };
   }
 
   reset() {
