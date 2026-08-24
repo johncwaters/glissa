@@ -8,6 +8,7 @@ import { sendControlMsg, sendControlRequest } from './control-ws.js';
 import { ensureNotificationPermission, notificationPermission, notificationsSupported } from './notifications.js';
 import { el } from './dom-helpers.js';
 import { applyDialogAria, buildDialogShell, createModalOverlay } from './session-card/modal.js';
+import { DEFAULT_AGENT_ID, decideAgentPicker } from './session-card/agent-core.mjs';
 import { countSessionsByName, suggestSessionName } from './session-card/naming.js';
 import { SHORTCUT_GROUPS } from './shortcuts.mjs';
 import { applyTheme, getThemeList } from './theme.js';
@@ -30,6 +31,8 @@ export function createAddSessionDialog() {
   applyDialogAria(dialog, 'add-session-title');
 
   const pickerEl = dialog.querySelector('#add-session-picker');
+  const agentLabelEl = dialog.querySelector('#add-session-agent-label');
+  const agentSelectEl = dialog.querySelector('#add-session-agent');
   const advancedToggle = dialog.querySelector('#add-session-advanced-toggle');
   const advancedPanel = dialog.querySelector('#add-session-advanced');
   const nameInput = dialog.querySelector('#add-session-name');
@@ -90,12 +93,28 @@ export function createAddSessionDialog() {
     } catch { /* picker value not valid JSON - ignore */ }
   });
 
+  // Binary-gated: only resolvable agents offered, picker hidden if just one (decideAgentPicker).
+  let selectedAgentId = DEFAULT_AGENT_ID;
+  sendControlRequest('list-agents', {})
+    .then((msg) => {
+      const { show, options, selectedId } = decideAgentPicker(msg.agents || []);
+      selectedAgentId = selectedId;
+      if (!show) return;
+      agentSelectEl.innerHTML = '';
+      for (const opt of options) {
+        agentSelectEl.appendChild(option(opt.label, { value: opt.id, selected: opt.id === selectedId }));
+      }
+      agentLabelEl.hidden = false;
+    })
+    .catch(() => { /* probe failed - keep the default agent and no picker */ });
+  agentSelectEl.addEventListener('change', () => { selectedAgentId = agentSelectEl.value; });
+
   // Reset picker when user types manually in advanced fields
   nameInput.addEventListener('input', () => { pickerEl.selectedIndex = 0; });
   pathInput.addEventListener('input', () => { pickerEl.selectedIndex = 0; });
 
   // No confirm gate: YOLO is the default, so checking this box is the SAFE direction
-  // (it asks Claude for permission prompts). Nothing dangerous to acknowledge here.
+  // (it asks the agent for permission prompts). Nothing dangerous to acknowledge here.
 
   function submit() {
     const name = nameInput.value.trim();
@@ -110,6 +129,8 @@ export function createAddSessionDialog() {
     const msg = { type: 'add-session', name: suggestSessionName(name), path: projectPath };
     // Default is YOLO; only send the opt-out flag when the operator wants permission prompts.
     if (requirePermsCheckbox.checked) msg.dangerouslySkipPermissions = false;
+    // Only a non-default agent needs a field; a default choice keeps the message pre-picker-identical.
+    if (selectedAgentId && selectedAgentId !== DEFAULT_AGENT_ID) msg.agent = selectedAgentId;
     sendControlMsg(msg);
 
     close();

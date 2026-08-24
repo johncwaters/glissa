@@ -12,6 +12,7 @@ const { readPosthogReport } = require('./posthog-report');
 const posthogCore = require('./core/posthog-core');
 const { getRtkPath } = require('../session/core/rtk-command');
 const { RESUME_ID_RE } = require('../session/core/auto-resume');
+const { DEFAULT_AGENT_ID, isKnownAgentId, listAgentIds, getAdapter, commandFor } = require('../session/adapters');
 
 function scanRepoRoots(roots) {
   const results = [];
@@ -483,6 +484,12 @@ function registerControlHandlers(controlWss, deps) {
       return;
     }
 
+    const agent = typeof msg.agent === 'string' ? msg.agent.trim() : '';
+    if (agent && !isKnownAgentId(agent)) {
+      sendError(ws, `Unknown agent "${agent}"`);
+      return;
+    }
+
     // Check for duplicate name
     for (const [, sess] of sessions) {
       if (sess.name === name) {
@@ -505,6 +512,9 @@ function registerControlHandlers(controlWss, deps) {
     const skipPerms = msg.dangerouslySkipPermissions !== false; // default YOLO; false === opt-in to prompts
     const project = { id: generateProjectId(), name, path: resolvedPath };
     if (!skipPerms) project.dangerouslySkipPermissions = false; // persist the opt-out so reloads keep it
+    // Absent or default means the default adapter; persist only a non-default choice so a Claude Code
+    // project record is byte-identical to a pre-picker one.
+    if (agent && agent !== DEFAULT_AGENT_ID) project.agent = agent;
 
     const freshConfig = configStore.save(cfg => {
       cfg.projects.push(project);
@@ -761,6 +771,20 @@ function registerControlHandlers(controlWss, deps) {
       settings: updatedSettings,
     });
     console.log('[control] Settings updated via UI');
+  }
+
+  // Probes each registered adapter for a resolvable binary (cached per id by the adapter registry).
+  function handleListAgents(msg, ws) {
+    const agents = listAgentIds().map((id) => {
+      const adapter = getAdapter(id);
+      const resolved = commandFor(adapter);
+      return { id, label: adapter.label || id, resolvable: !!resolved?.path };
+    });
+    ws.send(JSON.stringify({
+      type: 'agents-listed',
+      requestId: msg.requestId || null,
+      agents,
+    }));
   }
 
   function handleScanRepoRoots(msg, ws) {
@@ -1038,6 +1062,7 @@ function registerControlHandlers(controlWss, deps) {
     'get-settings':     handleGetSettings,
     'update-settings':  handleUpdateSettings,
     'scan-repo-roots':  handleScanRepoRoots,
+    'list-agents':      handleListAgents,
     'get-posthog-report': handleGetPosthogReport,
     'posthog-open-session': handlePosthogOpenSession,
     'posthog-issue-action': handlePosthogIssueAction,

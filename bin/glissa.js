@@ -148,6 +148,21 @@ function runDoctor() {
     line('on PATH', onPath(pnpmBin, { pathEnv, platform }) ? 'yes' : 'NO');
   }
 
+  console.log('\nAgents');
+  // Per-agent binary resolution, so an operator sees which supervised CLIs the Add Session picker
+  // will offer and where each one resolves (session/adapters).
+  try {
+    const { listAgentIds, getAdapter, commandFor } = require('../session/adapters');
+    for (const id of listAgentIds()) {
+      const adapter = getAdapter(id);
+      const resolved = commandFor(adapter);
+      const where = resolved?.path ? resolved.path : 'not found on PATH';
+      line(`${id} (${adapter.label || id})`, where);
+    }
+  } catch (err) {
+    line('agents', `probe failed: ${(err?.message ? err.message : String(err)).split('\n')[0]}`);
+  }
+
   console.log('\nNative module');
   try {
     require('node-pty');

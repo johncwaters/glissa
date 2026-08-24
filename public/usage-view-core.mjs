@@ -285,7 +285,7 @@ const LANE_LABELS = Object.freeze({
   other: 'Other',
 });
 
-export const LANE_SCOPE_HINT = 'Claude sessions spawned by Glissa; terminal sessions count as other';
+export const LANE_SCOPE_HINT = 'Sessions spawned by Glissa; terminal sessions count as other';
 
 export function laneLabel(lane) {
   const key = typeof lane === 'string' ? lane.trim() : '';

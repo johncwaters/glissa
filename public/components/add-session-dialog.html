@@ -5,6 +5,10 @@
     <option value="" disabled selected>Scanning...</option>
   </select>
 </label>
+<label class="dialog-label" id="add-session-agent-label" hidden>
+  Agent
+  <select class="dialog-input" id="add-session-agent"></select>
+</label>
 <button type="button" class="dialog-advanced-toggle" id="add-session-advanced-toggle">Advanced options</button>
 <div class="dialog-advanced-panel" id="add-session-advanced" hidden>
   <label class="dialog-label">
@@ -19,7 +23,7 @@
 <label class="dialog-label dialog-checkbox-label" id="add-session-require-perms-label">
   <input type="checkbox" class="dialog-checkbox" id="add-session-require-perms">
   <span>Require permission prompts</span>
-  <span class="dialog-hint">Sessions run with <code>--dangerously-skip-permissions</code> by default. Check this to make Claude ask before file writes and shell commands.</span>
+  <span class="dialog-hint">Sessions run without permission prompts by default. Check this to make the agent ask before file writes and shell commands.</span>
 </label>
 <div class="dialog-error" id="add-session-error"></div>
 <div class="dialog-actions">
