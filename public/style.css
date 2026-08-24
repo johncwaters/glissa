@@ -5373,22 +5373,162 @@ html[data-layout="phone"] .usage-heatmap-cell { width: 13px; height: 13px; }
 html[data-layout="phone"] .usage-heatmap-day { line-height: 13px; }
 html[data-layout="phone"] .usage-plan-window .usage-meter { height: 8px; }
 
-/* ── Mill on a phone ──
-   Same treatment as Usage: grow the type, and let each row list wrap rather than pushing its detail
-   column off the right edge. */
-html[data-layout="phone"] .mill-view { padding: 14px 12px 24px; font-size: 13px; }
-html[data-layout="phone"] .mill-content { gap: 24px; }
-html[data-layout="phone"] .mill-section-title { font-size: 12px; }
+/* ── Mill on a phone ── */
+html[data-layout="phone"] .mill-view {
+  max-width: none;
+  padding: 12px 10px 24px;
+  overflow-x: hidden;
+  font-size: 12px;
+}
+
+html[data-layout="phone"] .mill-content {
+  width: 100%;
+  max-width: none;
+  gap: 12px;
+}
+
+html[data-layout="phone"] .mill-section {
+  min-width: 0;
+  gap: 7px;
+  padding: 10px;
+  border: 1px solid var(--border-dim);
+  border-radius: var(--radius);
+  background: color-mix(in oklab, var(--bg) 64%, transparent);
+}
+
+html[data-layout="phone"] .mill-section-head {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  padding-bottom: 6px;
+}
+
+html[data-layout="phone"] .mill-section-title {
+  font-size: 13px;
+  letter-spacing: 0.05em;
+  color: var(--text-head);
+}
+
+html[data-layout="phone"] .mill-section-hint {
+  font-size: 10px;
+  line-height: 1.25;
+}
+
+html[data-layout="phone"] .mill-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+html[data-layout="phone"] .mill-stat {
+  min-width: 0;
+  padding: 5px 6px;
+  border: 1px solid var(--border-dim);
+  border-radius: var(--radius);
+  background: color-mix(in oklab, var(--bg-surface) 54%, transparent);
+  white-space: normal;
+}
+
+html[data-layout="phone"] .mill-stat-value {
+  display: block;
+  font-size: 16px;
+  line-height: 1.1;
+}
+
+html[data-layout="phone"] .mill-stat-label {
+  display: block;
+  margin-left: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 8px;
+  line-height: 1.2;
+  letter-spacing: 0.03em;
+}
+
 html[data-layout="phone"] .mill-meta,
 html[data-layout="phone"] .mill-warning,
-html[data-layout="phone"] .mill-empty { font-size: 12px; }
+html[data-layout="phone"] .mill-empty {
+  max-width: 100%;
+  font-size: 11px;
+  line-height: 1.25;
+}
+
+html[data-layout="phone"] .mill-section > .mill-meta {
+  margin-top: -1px;
+}
+
+html[data-layout="phone"] .mill-warning {
+  padding: 5px 7px;
+  border: 1px solid color-mix(in oklab, var(--state-waiting) 45%, transparent);
+  border-radius: var(--radius);
+  background: color-mix(in oklab, var(--state-waiting) 10%, transparent);
+}
+
+html[data-layout="phone"] .mill-budget {
+  gap: 3px;
+}
+
+html[data-layout="phone"] .mill-budget-line {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+  line-height: 1.2;
+}
+
+html[data-layout="phone"] .mill-meter {
+  width: 100%;
+  height: 5px;
+}
+
+html[data-layout="phone"] .mill-deliveries,
+html[data-layout="phone"] .mill-distills,
+html[data-layout="phone"] .mill-outputs {
+  max-width: 100%;
+  min-width: 0;
+}
+
+html[data-layout="phone"] .mill-outputs {
+  overflow-x: auto;
+}
+
 html[data-layout="phone"] .mill-delivery,
 html[data-layout="phone"] .mill-distill,
-html[data-layout="phone"] .mill-output { font-size: 12px; }
+html[data-layout="phone"] .mill-output {
+  flex-wrap: nowrap;
+  gap: 8px;
+  min-width: 0;
+  padding: 5px 8px;
+  font-size: 10px;
+}
+
+html[data-layout="phone"] .mill-delivery-name,
+html[data-layout="phone"] .mill-distill-output,
+html[data-layout="phone"] .mill-output-path {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow-wrap: normal;
+}
+
 html[data-layout="phone"] .mill-delivery-detail,
 html[data-layout="phone"] .mill-distill-status,
-html[data-layout="phone"] .mill-output-tokens { margin-left: 0; }
-html[data-layout="phone"] .mill-meter { height: 8px; }
+html[data-layout="phone"] .mill-output-tokens {
+  flex: 0 0 auto;
+  margin-left: 0;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+html[data-layout="phone"] .mill-delivery-tag {
+  flex: 0 0 auto;
+  padding: 0 4px;
+  font-size: 8px;
+  letter-spacing: 0.04em;
+}
 /* A checkbox is a touch target on a phone, so the row and the box both grow. */
 html[data-layout="phone"] .mill-deliver-target { padding: 8px 2px; font-size: 13px; }
 html[data-layout="phone"] .mill-deliver-box { width: 18px; height: 18px; }

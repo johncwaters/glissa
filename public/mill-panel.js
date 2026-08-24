@@ -178,8 +178,10 @@ function buildDistillBlock(pack) {
   const wrap = el('div', 'mill-distills');
   for (const row of pack.distill) {
     const item = el('div', 'mill-distill');
+    const output = el('span', 'mill-distill-output', row.output);
+    output.title = row.output;
     item.dataset.tone = distillTone(row);
-    item.append(el('span', 'mill-distill-output', row.output));
+    item.append(output);
     item.append(el('span', 'mill-distill-status', distillText(row)));
     wrap.append(item);
   }
@@ -191,7 +193,9 @@ function buildOutputsBlock(built) {
   const wrap = el('div', 'mill-outputs');
   for (const output of built.outputs) {
     const item = el('div', 'mill-output');
-    item.append(el('span', 'mill-output-path', output.relPath));
+    const path = el('span', 'mill-output-path', output.relPath);
+    path.title = output.relPath;
+    item.append(path);
     item.append(el('span', 'mill-output-tokens', outputTokenLine(output)));
     wrap.append(item);
   }
