@@ -17,6 +17,7 @@ import {
   DELIVER_TO_TITLE,
   MILL_EMPTY_TEXT,
   MILL_HINT,
+  MILL_LOADING_TEXT,
   autoRebuildLine,
   budgetLine,
   budgetPct,
@@ -37,11 +38,12 @@ import {
   distillText,
   distillTone,
   distillerLine,
-  formatTokens,
   indexLine,
   isMillUnavailable,
   millAttentionSignature,
   millErrorLine,
+  moreOutputsLine,
+  outputTokenLine,
   packDeltaFor,
   shouldApplyMillReport,
   sortPackRows,
@@ -112,7 +114,7 @@ function buildBudgetBlock(pack) {
   const wrap = el('div', 'mill-budget');
   const pct = budgetPct(pack);
   const tone = budgetTone(pct);
-  wrap.append(buildLine('mill-meta', budgetLine(pack), tone));
+  wrap.append(buildLine('mill-budget-line', budgetLine(pack), tone));
   if (pct !== null) wrap.append(buildMeter(pct, tone, `${pack.name} token budget used`));
   wrap.append(buildLine('mill-meta', indexLine(pack.built)));
   return wrap;
@@ -190,15 +192,16 @@ function buildOutputsBlock(built) {
   for (const output of built.outputs) {
     const item = el('div', 'mill-output');
     item.append(el('span', 'mill-output-path', output.relPath));
-    item.append(el('span', 'mill-output-tokens', `${formatTokens(output.tokenEstimate)} tokens`));
+    item.append(el('span', 'mill-output-tokens', outputTokenLine(output)));
     wrap.append(item);
   }
-  if (built.moreOutputs > 0) wrap.append(buildLine('mill-meta', `and ${built.moreOutputs} more files`));
+  const moreOutputs = moreOutputsLine(built.moreOutputs);
+  if (moreOutputs) wrap.append(buildLine('mill-meta', moreOutputs));
   return wrap;
 }
 
 function buildPackSection(pack) {
-  const section = buildSection(pack.name, pack.description);
+  const section = buildSection(pack.name, '');
   const variant = variantNote(pack);
   if (variant) section.append(buildLine('mill-meta', variant));
   if (!pack.specValid) section.append(buildLine('mill-warning', specErrorLine(pack)));
@@ -225,7 +228,7 @@ function buildBody() {
   // A missing or failed report has no totals, so the chips above would each print a confident zero for
   // a mill nobody has read yet.
   if (!_report) {
-    _root.append(buildNoticeSection('Reading the pack specs. The report lands on the next pull.'));
+    _root.append(buildNoticeSection(MILL_LOADING_TEXT));
     return;
   }
   if (isMillUnavailable(_report)) {

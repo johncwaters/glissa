@@ -114,34 +114,34 @@ test('a drift check that could not run says so instead of claiming current or st
 
 test('a pack nothing names is said out loud rather than left blank', async () => {
   const { consumerLine } = await importCore();
-  assert.equal(consumerLine(pack()), 'Delivered to nothing: no project or lane names this pack.');
+  assert.equal(consumerLine(pack()), 'consumers: none');
   assert.equal(
     consumerLine(pack({ consumers: { projects: ['glissa', 'other'], lanes: [{ kind: 'prReview', label: 'prReview.packs' }] } })),
-    'Delivered to projects: glissa, other, the PR review lane.',
+    'consumers: projects glissa, other, the PR review lane',
   );
 });
 
 test('the built line falls back to the skip reason when a pack has no build', async () => {
   const { builtLine } = await importCore();
-  assert.equal(builtLine(pack()), 'Version abcdef012345, built 2026-08-20 10:00:00');
+  assert.equal(builtLine(pack()), 'abcdef012345 built 2026-08-20 10:00:00');
   assert.equal(builtLine(pack({ built: null, builtReason: 'not built (no dir)' })), 'Not built: not built (no dir)');
   assert.equal(builtLine(pack({ built: null, builtReason: null })), 'Not built.');
 });
 
 test('the budget line states the ratio, and says so when there is no budget to state', async () => {
   const { budgetLine } = await importCore();
-  assert.equal(budgetLine(pack()), '4k of 8k tokens, 50% of budget');
+  assert.equal(budgetLine(pack()), '4k / 8k tokens, 50%');
   const noBudget = pack();
   noBudget.built.budgetPct = null;
-  assert.equal(budgetLine(noBudget), '4k tokens, no budget declared');
+  assert.equal(budgetLine(noBudget), '4k tokens, no budget');
   assert.equal(budgetLine({ built: null }), '');
 });
 
 test('auto rebuild reports watcher coverage, because on with zero watchers is a different state', async () => {
   const { autoRebuildLine } = await importCore();
-  assert.equal(autoRebuildLine({ autoRebuild: true, watcherCount: 4 }), 'Auto rebuild is on, watching 4 source roots.');
-  assert.equal(autoRebuildLine({ autoRebuild: true, watcherCount: null }), 'Auto rebuild is on.');
-  assert.ok(autoRebuildLine({ autoRebuild: false }).startsWith('Auto rebuild is off.'));
+  assert.equal(autoRebuildLine({ autoRebuild: true, watcherCount: 4 }), 'auto rebuild on, 4 watched roots');
+  assert.equal(autoRebuildLine({ autoRebuild: true, watcherCount: null }), 'auto rebuild on');
+  assert.equal(autoRebuildLine({ autoRebuild: false }), 'auto rebuild off, glissa pack build only');
 });
 
 test('shouldApplyMillReport drops a superseded reply and keeps an unsolicited one', async () => {
@@ -157,7 +157,7 @@ test('an error report is recognized and rendered as its reason', async () => {
   const { isMillUnavailable, millErrorLine } = await importCore();
   assert.equal(isMillUnavailable({ error: null }), false);
   assert.equal(isMillUnavailable({ error: 'boom' }), true);
-  assert.equal(millErrorLine({ error: 'boom' }), 'The context mill report is unavailable: boom');
+  assert.equal(millErrorLine({ error: 'boom' }), 'mill unavailable: boom');
   assert.equal(millErrorLine({ error: null }), '');
 });
 
@@ -167,9 +167,9 @@ test('an unmeasured token estimate is said out loud, never rendered as an empty 
   unmeasured.built.tokenEstimate = null;
   unmeasured.built.budgetPct = null;
   unmeasured.built.indexTokenEstimate = null;
-  assert.equal(budgetLine(unmeasured), 'The manifest records no token estimate.');
+  assert.equal(budgetLine(unmeasured), 'tokens unknown');
   assert.equal(indexLine(unmeasured.built), '', 'an unmeasured index line is dropped rather than printed as zero');
-  assert.equal(indexLine(pack().built), 'index 300 of 1.2k tokens, the always-loaded tier');
+  assert.equal(indexLine(pack().built), 'index 300 / 1.2k tokens');
 });
 
 // ── Consumer gating and the assignment control ──
@@ -177,9 +177,9 @@ test('an unmeasured token estimate is said out loud, never rendered as an empty 
 test('an unbuilt pack nothing consumes reads as a plain fact, not as a warning', async () => {
   const { builtLine, builtTone, deliveryEmptyText } = await importCore();
   const unconsumed = pack({ built: null, builtReason: 'not built', hasConsumers: false });
-  assert.equal(builtLine(unconsumed), 'Not built: no consumers, so the mill neither builds nor watches it.');
+  assert.equal(builtLine(unconsumed), 'not built: no consumers');
   assert.equal(builtTone(unconsumed), 'ok', 'a deliberate skip must not render as a problem');
-  assert.equal(deliveryEmptyText(unconsumed), 'Nothing is running it: no project or lane delivers this pack.');
+  assert.equal(deliveryEmptyText(unconsumed), 'no consumers');
 });
 
 test('an unbuilt pack something DOES consume keeps its warning', async () => {
@@ -233,22 +233,22 @@ test('a toggle sends a delta, not a list, so two dashboards cannot clobber each 
 test('an unknown lane kind renders as its config label rather than vanishing', async () => {
   const { consumerLine } = await importCore();
   const line = consumerLine(pack({ consumers: { projects: [], lanes: [{ kind: 'future', label: 'future.packs' }] } }));
-  assert.equal(line, 'Delivered to future.packs.');
+  assert.equal(line, 'consumers: future.packs');
 });
 
 test('zero watchers reads as the nothing-consumed steady state, not as a health warning', async () => {
   const { autoRebuildLine } = await importCore();
   const quiet = { autoRebuild: true, watcherCount: 0, totals: { packCount: 3, unconsumed: 3 } };
-  assert.equal(autoRebuildLine(quiet), 'Auto rebuild is on. No pack is delivered anywhere, so there is nothing to watch.');
+  assert.equal(autoRebuildLine(quiet), 'auto rebuild on, no consumers');
 
   // Something IS delivered and still nothing is watched: that is the case this line exists to catch.
   const stuck = { autoRebuild: true, watcherCount: 0, totals: { packCount: 3, unconsumed: 1 } };
-  assert.match(autoRebuildLine(stuck), /waiting on the fallback sweep/);
+  assert.equal(autoRebuildLine(stuck), 'auto rebuild on, 0 watched roots, fallback sweep only');
 });
 
 test('the assignment hint quotes the cap the server shipped, and says nothing without one', async () => {
   const { deliverToCapHint } = await importCore();
-  assert.ok(deliverToCapHint({ maxPacksPerProject: 4 }).startsWith('Up to 4 packs per project.'));
+  assert.equal(deliverToCapHint({ maxPacksPerProject: 4 }), '4 packs max per project. Next spawn applies.');
   assert.equal(deliverToCapHint({}), '');
 });
 
@@ -272,7 +272,7 @@ test('a variant row says what it is; an ordinary pack says nothing extra', async
   const { variantNote } = await importCore();
   const note = variantNote(pack({ name: 'memory-glissa-12345678', group: 'memory', consumers: { projects: ['glissa'], lanes: [] } }));
   assert.match(note, /variant of "memory"/);
-  assert.match(note, /glissa/);
+  assert.match(note, /project glissa/);
   assert.equal(variantNote(pack()), '');
 });
 

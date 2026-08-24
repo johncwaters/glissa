@@ -14,7 +14,8 @@ import { NO_VALUE, formatCount, formatPercent, formatTokens } from './usage-view
 export const BUDGET_WARN_PCT = 90;
 
 export const MILL_EMPTY_TEXT = 'No pack specs found.';
-export const MILL_HINT = 'Assembled on demand from the pack specs, their published builds and the live sessions.';
+export const MILL_HINT = 'Specs, builds, delivery, drift.';
+export const MILL_LOADING_TEXT = 'Reading pack specs.';
 const VERSION_CHARS = 12;
 
 export function shortVersion(version) {
@@ -74,7 +75,7 @@ export function variantNote(pack) {
   if (!group) return '';
   const projects = Array.isArray(pack?.consumers?.projects) ? pack.consumers.projects : [];
   const project = projects.length > 0 ? projects[0] : 'its project';
-  return `Per-project variant of "${group}", built for ${project} and delivered in place of the base pack.`;
+  return `variant of "${group}", project ${project}`;
 }
 
 export function budgetPct(pack) {
@@ -96,11 +97,11 @@ function measured(value) {
 export function budgetLine(pack) {
   const built = pack?.built;
   if (!built) return '';
-  if (!measured(built.tokenEstimate)) return 'The manifest records no token estimate.';
+  if (!measured(built.tokenEstimate)) return 'tokens unknown';
   const pct = budgetPct(pack);
   const spent = formatTokens(built.tokenEstimate);
-  if (pct === null) return `${spent} tokens, no budget declared`;
-  return `${spent} of ${formatTokens(built.budgetTokens)} tokens, ${formatPercent(pct)} of budget`;
+  if (pct === null) return `${spent} tokens, no budget`;
+  return `${spent} / ${formatTokens(built.budgetTokens)} tokens, ${formatPercent(pct)}`;
 }
 
 export function indexLine(built) {
@@ -109,15 +110,15 @@ export function indexLine(built) {
   const cap = Number(built.indexTokenCap);
   const used = formatTokens(built.indexTokenEstimate);
   if (!Number.isFinite(cap) || cap <= 0) return `index ${used} tokens`;
-  return `index ${used} of ${formatTokens(cap)} tokens, the always-loaded tier`;
+  return `index ${used} / ${formatTokens(cap)} tokens`;
 }
 
 // A pack nothing delivers is not built ON PURPOSE (the mill skips its watchers and its sweep), so it
 // reads as a plain fact rather than as the unbuilt-pack warning a consumed pack would earn.
 export function builtLine(pack) {
   const built = pack?.built;
-  if (built) return `Version ${shortVersion(built.version)}, built ${formatBuiltAt(built.builtAt)}`;
-  if (pack?.hasConsumers === false) return 'Not built: no consumers, so the mill neither builds nor watches it.';
+  if (built) return `${shortVersion(built.version)} built ${formatBuiltAt(built.builtAt)}`;
+  if (pack?.hasConsumers === false) return 'not built: no consumers';
   return pack?.builtReason ? `Not built: ${pack.builtReason}` : 'Not built.';
 }
 
@@ -130,10 +131,10 @@ export function builtTone(pack) {
 export function contentLine(built) {
   if (!built) return '';
   return [
-    `${formatCount(built.fileCount)} source files`,
+    `${formatCount(built.fileCount)} files`,
     `${formatCount(built.ruleCount)} rules`,
     `${formatCount(built.skillCount)} skills`,
-    `${formatCount(built.outputs.length + built.moreOutputs)} delivered files`,
+    `${formatCount(built.outputs.length + built.moreOutputs)} outputs`,
   ].join(', ');
 }
 
@@ -157,7 +158,7 @@ export function deliveryDetail(delivery) {
   const parts = [`${formatCount(delivery?.reads ?? 0)} reads`];
   const sinceNotice = delivery?.readsSinceNotice;
   if (typeof sinceNotice === 'number' && Number.isFinite(sinceNotice)) {
-    parts.push(`${formatCount(sinceNotice)} since the staleness notice`);
+    parts.push(`${formatCount(sinceNotice)} since stale notice`);
   }
   parts.push(`version ${shortVersion(delivery?.version)}`);
   return parts.join(', ');
@@ -192,16 +193,16 @@ export function consumerLine(pack) {
   const projects = Array.isArray(consumers.projects) ? consumers.projects : [];
   const lanes = Array.isArray(consumers.lanes) ? consumers.lanes : [];
   const parts = [];
-  if (projects.length > 0) parts.push(`projects: ${projects.join(', ')}`);
+  if (projects.length > 0) parts.push(`projects ${projects.join(', ')}`);
   for (const lane of lanes) parts.push(LANE_DISPLAY[lane?.kind] || String(lane?.label ?? 'a lane'));
-  if (parts.length === 0) return 'Delivered to nothing: no project or lane names this pack.';
-  return `Delivered to ${parts.join(', ')}.`;
+  if (parts.length === 0) return 'consumers: none';
+  return `consumers: ${parts.join(', ')}`;
 }
 
 export function deliveryEmptyText(pack) {
-  if (pack?.hasConsumers === false) return 'Nothing is running it: no project or lane delivers this pack.';
-  if (!pack?.built) return 'Nothing is running it: the pack has never been built.';
-  return 'No live session is running this pack.';
+  if (pack?.hasConsumers === false) return 'no consumers';
+  if (!pack?.built) return 'no build';
+  return 'no live sessions';
 }
 
 // ── Assignment (the "Deliver to" control) ──
@@ -210,8 +211,8 @@ export function deliveryEmptyText(pack) {
 // the read-only sentence consumerLine already writes.
 
 export const DELIVER_TO_TITLE = 'Deliver to';
-export const DELIVER_TO_EMPTY_TEXT = 'No projects yet, so there is nothing to deliver this pack to.';
-export const DELIVER_TO_CAP_NOTE = 'at its pack limit';
+export const DELIVER_TO_EMPTY_TEXT = 'No projects.';
+export const DELIVER_TO_CAP_NOTE = 'at cap';
 
 function assignableProjects(report) {
   return Array.isArray(report?.projects) ? report.projects : [];
@@ -263,7 +264,17 @@ export function packDeltaFor(target, packName) {
 export function deliverToCapHint(report) {
   const cap = packCap(report);
   if (!Number.isFinite(cap)) return '';
-  return `Up to ${cap} packs per project. A change takes effect on the session's next spawn.`;
+  return `${cap} packs max per project. Next spawn applies.`;
+}
+
+export function outputTokenLine(output) {
+  return `${formatTokens(output?.tokenEstimate)} tokens`;
+}
+
+export function moreOutputsLine(count) {
+  const numeric = Number(count);
+  if (!Number.isFinite(numeric) || numeric <= 0) return '';
+  return `${formatCount(numeric)} more files`;
 }
 
 export function totalsChips(report) {
@@ -284,15 +295,15 @@ export function totalsChips(report) {
 // rebuild is waiting on the 15 minute sweep, which is a different surface from a mill that is off.
 export function autoRebuildLine(report) {
   if (!report) return '';
-  if (report.autoRebuild !== true) return 'Auto rebuild is off. A pack changes only when glissa pack build runs.';
+  if (report.autoRebuild !== true) return 'auto rebuild off, glissa pack build only';
   const watchers = report.watcherCount;
-  if (typeof watchers !== 'number' || !Number.isFinite(watchers)) return 'Auto rebuild is on.';
-  if (watchers > 0) return `Auto rebuild is on, watching ${formatCount(watchers)} source roots.`;
+  if (typeof watchers !== 'number' || !Number.isFinite(watchers)) return 'auto rebuild on';
+  if (watchers > 0) return `auto rebuild on, ${formatCount(watchers)} watched roots`;
   // Zero watchers has two meanings, and only one of them is a problem. With nothing delivered anywhere
   // there is deliberately nothing to watch; with something delivered, every rebuild is waiting on the
   // fallback sweep, which is the state this line was written to catch.
-  if (nothingIsConsumed(report)) return 'Auto rebuild is on. No pack is delivered anywhere, so there is nothing to watch.';
-  return 'Auto rebuild is on, but no source root is being watched: rebuilds are waiting on the fallback sweep.';
+  if (nothingIsConsumed(report)) return 'auto rebuild on, no consumers';
+  return 'auto rebuild on, 0 watched roots, fallback sweep only';
 }
 
 function nothingIsConsumed(report) {
@@ -303,8 +314,8 @@ function nothingIsConsumed(report) {
 }
 
 export function distillerLine(report) {
-  if (report?.distillerEnabled === true) return 'The distiller lane is on: drifted derived files are regenerated on its schedule.';
-  return 'The distiller lane is off. Drift is reported here; glissa pack distill regenerates.';
+  if (report?.distillerEnabled === true) return 'distiller on';
+  return 'distiller off, glissa pack distill regenerates';
 }
 
 export function isMillUnavailable(report) {
@@ -313,7 +324,7 @@ export function isMillUnavailable(report) {
 
 export function millErrorLine(report) {
   if (!isMillUnavailable(report)) return '';
-  return `The context mill report is unavailable: ${report.error}`;
+  return `mill unavailable: ${report.error}`;
 }
 
 export function configWarningsOf(report) {
@@ -346,4 +357,4 @@ export function shouldApplyMillReport(msg, latestRequestId) {
   return id === latestRequestId;
 }
 
-export { NO_VALUE, formatCount, formatPercent, formatTokens };
+export { NO_VALUE };
