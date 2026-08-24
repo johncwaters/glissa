@@ -4,6 +4,7 @@ const http = require('node:http');
 const { createBackend } = require('./server/backend');
 const { createLifecycle } = require('./server/server-lifecycle');
 const { decideBindHost } = require('./server/core/remote-config');
+const { buildTitleSequence, buildTitleClearSequence } = require('./server/core/terminal-title');
 
 // Which address the listeners bind. Loopback unless GLISSA_HOST says otherwise, and a non-loopback
 // GLISSA_HOST is REFUSED unless GLISSA_INSECURE_BIND=1 states the intent: Glissa's control WebSocket
@@ -35,6 +36,11 @@ try {
 const { shutdown, port, app } = backend;
 server.on('request', app);
 
+function writeTerminalTitle(sequence) {
+  if (!process.stdout.isTTY) return;
+  process.stdout.write(sequence);
+}
+
 // Single-instance guard. If another Glissa already holds the port, exit cleanly instead of crashing
 // with an unhandled listen error. This is the backstop against two backends running against the same
 // config.json + port (the per-process config self-write guard cannot dedup across processes, so two
@@ -49,7 +55,9 @@ server.on('error', (err) => {
 });
 
 server.listen(port, bind.host, () => {
-  console.log(`Glissa server listening on http://${bind.host}:${port}`);
+  const boundPort = server.address().port;
+  console.log(`Glissa server listening on http://${bind.host}:${boundPort}`);
+  writeTerminalTitle(buildTitleSequence(`glissa :${boundPort}`));
   if (bind.reason === 'insecure-bind') {
     console.warn(`WARNING: bound ${bind.host} with GLISSA_INSECURE_BIND=1 - this listener has NO authentication.`);
   }
@@ -90,7 +98,17 @@ if (!backend.remote.enabled) {
 // connection, so httpServer.close()'s callback alone would never fire and the process would hang
 // forever on SIGINT/SIGTERM/SIGBREAK/SIGHUP. createLifecycle owns the single re-entry guard, so no
 // local shuttingDown flag is needed here.
-const { requestShutdown } = createLifecycle({ shutdown, httpServer: server, extraServers: remoteServers });
+function exitWithClearedTerminalTitle(code) {
+  writeTerminalTitle(buildTitleClearSequence());
+  process.exit(code);
+}
+
+const { requestShutdown } = createLifecycle({
+  shutdown,
+  httpServer: server,
+  extraServers: remoteServers,
+  exit: exitWithClearedTerminalTitle,
+});
 
 function handleShutdownSignal(signal) {
   console.log(`\n${signal} received - shutting down...`);
