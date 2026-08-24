@@ -8,9 +8,6 @@ import { attentionSignature } from './attention-ack-core.mjs';
 
 export const NO_VALUE = '-';
 
-// The honesty line, in two lengths. The short one leads the panel so the numbers are above the fold;
-// the full one is the title on it and the footnote under the tables.
-export const USAGE_CAVEAT = 'Costs are API list-price estimates. A Claude subscription does not bill per token, and only the Claude Code transcripts stored on this machine are counted.';
 export const USAGE_CAVEAT_SHORT = 'Estimated list prices, not a bill.';
 
 export const USAGE_DISABLED_HINT = 'Enable in Settings.';
@@ -322,9 +319,6 @@ export function laneSessionsText(sessions) {
 // rtk counts compressed command output across the whole machine from its own records, while the cache
 // figure is Glissa's arithmetic over the same Claude model rows the cost estimate uses.
 
-export const SAVINGS_RTK_HINT = 'rtk figures are machine-wide, counted by the rtk CLI itself';
-export const SAVINGS_CACHE_HINT = 'cache savings estimate what those reads would have cost at uncached input list price, Claude only';
-
 export function rtkSavings(savings) {
   const rtk = savings?.rtk;
   if (!rtk || typeof rtk !== 'object' || rtk.available !== true) return null;
@@ -367,15 +361,6 @@ export function cacheSavingsTile(savings) {
     value: formatUsd(finiteNumber(cache.savedUSD) ?? 0),
     sub: `${sub}, a floor (${unpriced.length} unpriced ${noun})`,
   };
-}
-
-// Scope is the whole honesty of this section: one half counts work Glissa never did, the other prices
-// tokens against a list price nobody was billed.
-export function savingsHint(savings) {
-  const parts = [];
-  if (rtkSavings(savings)) parts.push(SAVINGS_RTK_HINT);
-  if (cacheSavings(savings)) parts.push(SAVINGS_CACHE_HINT);
-  return parts.join('; ');
 }
 
 // ── Spend budgets ──
@@ -1002,10 +987,10 @@ export function visibleSessionRows(sortedRows, expanded, limit = SESSION_ROW_LIM
   };
 }
 
-export function sessionOverflowText(hiddenCount, limit = SESSION_ROW_LIMIT) {
+export function sessionOverflowText(hiddenCount) {
   const hidden = Number(hiddenCount);
   if (!Number.isFinite(hidden) || hidden <= 0) return '';
-  return `Showing the top ${formatCount(limit)} sessions. ${formatCount(hidden)} more are hidden.`;
+  return `${formatCount(hidden)} hidden`;
 }
 
 export function sortModelRows(models, sort = DEFAULT_MODEL_SORT) {

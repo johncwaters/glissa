@@ -79,6 +79,7 @@ import {
   resetCountdownText,
   rtkSavingsTile,
   scanLine,
+  sessionOverflowText,
   sessionRowLabel,
   shareBasis,
   shareLabel,
@@ -127,7 +128,6 @@ const _attention = createAttentionAck({
 // advance a clock.
 let _reportAgeEl = null;
 let _sessionsTsEl = null;
-let _pricingEl = null;
 let _planAgeEl = null;
 let _blockElapsedEl = null;
 let _blockRemainingEl = null;
@@ -254,20 +254,6 @@ function paintSessionsTs() {
   if (!_sessionsTsEl?.isConnected) return;
   const ts = Number(_sessions?.ts);
   _sessionsTsEl.textContent = Number.isFinite(ts) && ts > 0 ? `Sessions ${formatAgo(ts)}` : '';
-}
-
-function pricingOf() {
-  if (_report?.pricing) return _report.pricing;
-  if (_sessions) return { source: _sessions.pricingSource };
-  return null;
-}
-
-function paintPricing() {
-  if (!_pricingEl?.isConnected) return;
-  const pricing = pricingOf();
-  const fetchedAt = Number(pricing?.fetchedAt);
-  const agoText = Number.isFinite(fetchedAt) && fetchedAt > 0 ? formatAgo(fetchedAt) : '';
-  _pricingEl.textContent = pricingSourceLine(pricing, agoText);
 }
 
 function paintBlockProgress() {
@@ -620,7 +606,7 @@ function buildDailySection() {
   const periodView = _periodView;
   const rows = sortDailyRows(periodRows(daily, periodView), _daySort);
   const columnLabel = PERIOD_VIEWS.find((view) => view.value === periodView)?.label || 'Day';
-  const hints = [historyNote(daily) ? 'history' : ''].filter(Boolean);
+  const hints = [historyNote(daily)].filter(Boolean);
   const section = buildSection('Over time', hints.join(', '));
   section.append(buildPeriodSwitch());
   if (rows.length === 0) {
@@ -867,8 +853,7 @@ function buildSessionsSection() {
 
 function buildSessionsOverflow(hiddenCount) {
   const wrap = el('div', 'usage-overflow');
-  const hidden = Number(hiddenCount);
-  const text = Number.isFinite(hidden) && hidden > 0 ? `${Math.round(hidden)} hidden` : '';
+  const text = sessionOverflowText(hiddenCount);
   if (text) wrap.append(el('p', 'usage-meta', text));
   const button = el('button', 'usage-toggle', 'All sessions');
   button.type = 'button';
@@ -897,7 +882,6 @@ function buildUnavailableSection() {
 function clearRefs() {
   _reportAgeEl = null;
   _sessionsTsEl = null;
-  _pricingEl = null;
   _planAgeEl = null;
   _blockElapsedEl = null;
   _blockRemainingEl = null;
@@ -1044,7 +1028,6 @@ export function applyUsageSessions(msg) {
   // rebuild of every table is not worth paying for.
   if (_report && !isUsageUnavailable(_report) && _sessionsTsEl?.isConnected) {
     paintSessionsTs();
-    paintPricing();
     return;
   }
   render();
@@ -1069,7 +1052,7 @@ export function applyUsageReport(msg) {
 // The Settings dialog's read-only Usage line: the pricing source and the last scan, sourced from the
 // same report the panel is showing rather than a second request.
 export function usageStatusLines() {
-  const pricing = pricingOf();
+  const pricing = _report?.pricing || (_sessions ? { source: _sessions.pricingSource } : null);
   const fetchedAt = Number(pricing?.fetchedAt);
   const agoText = Number.isFinite(fetchedAt) && fetchedAt > 0 ? formatAgo(fetchedAt) : '';
   const lines = [pricingSourceLine(pricing, agoText)];

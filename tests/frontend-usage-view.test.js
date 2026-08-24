@@ -371,7 +371,7 @@ test('visibleSessionRows: caps collapsed session rows and reports hidden count',
 });
 
 test('sessionOverflowText: only positive hidden counts produce copy', async () => {
-  const { SESSION_ROW_LIMIT, sessionOverflowText } = await importCore();
+  const { sessionOverflowText } = await importCore();
   const forbidden = [String.fromCharCode(0x2014), String.fromCharCode(0x2013), String.fromCharCode(0x2026)];
 
   assert.equal(sessionOverflowText(0), '');
@@ -379,8 +379,7 @@ test('sessionOverflowText: only positive hidden counts produce copy', async () =
   assert.equal(sessionOverflowText(Number.NaN), '');
 
   const text = sessionOverflowText(42);
-  assert.match(text, new RegExp(String(SESSION_ROW_LIMIT)));
-  assert.match(text, /42/);
+  assert.equal(text, '42 hidden');
   for (const glyph of forbidden) {
     assert.equal(text.includes(glyph), false);
   }
@@ -673,26 +672,13 @@ test('cacheSavingsTile: unpriced models turn the figure into a floor', async () 
   assert.equal(many.sub, '1.5M cache read tokens, a floor (2 unpriced models)');
 });
 
-test('savingsHint: each half states its own scope, and only when it is on the page', async () => {
-  const { savingsHint, SAVINGS_RTK_HINT, SAVINGS_CACHE_HINT } = await importCore();
-  const cache = { savedUSD: 2.7, cacheReadTokens: 1000, unpricedModels: [] };
-  assert.equal(savingsHint({ rtk: RTK_SAVINGS, cache }), `${SAVINGS_RTK_HINT}; ${SAVINGS_CACHE_HINT}`);
-  assert.equal(savingsHint({ rtk: RTK_SAVINGS, cache: null }), SAVINGS_RTK_HINT);
-  assert.equal(savingsHint({ rtk: { available: false }, cache }), SAVINGS_CACHE_HINT);
-  assert.equal(savingsHint({ rtk: { available: false }, cache: null }), '');
-  // The rtk figure counts work Glissa never did, so the scope has to be said out loud.
-  assert.match(SAVINGS_RTK_HINT, /machine-wide/);
-  assert.match(SAVINGS_CACHE_HINT, /Claude only/);
-});
-
 test('no produced string contains an em dash, en dash or ellipsis character', async () => {
   const core = await importCore();
   const forbidden = [String.fromCharCode(0x2014), String.fromCharCode(0x2013), String.fromCharCode(0x2026)];
   const numbers = [0, 1, 0.004, 999, 1000, 1250, 999950, 1234567.89, 1.5e9, -42, Number.NaN, Infinity, null, undefined];
   const now = 1_800_000_000_000;
 
-  const produced = [core.USAGE_CAVEAT, core.USAGE_CAVEAT_SHORT, core.USAGE_DISABLED_HINT, core.NO_VALUE];
-  produced.push(core.SAVINGS_RTK_HINT, core.SAVINGS_CACHE_HINT);
+  const produced = [core.USAGE_CAVEAT_SHORT, core.USAGE_DISABLED_HINT, core.NO_VALUE];
   for (const option of core.RANGE_OPTIONS) produced.push(option.label);
   for (const n of numbers) {
     const rtkTile = core.rtkSavingsTile({ rtk: { available: true, savedTokens: n, savingsPct: n, commands: n } });
