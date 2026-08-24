@@ -223,7 +223,7 @@ Each entry is a rule, its why, and where it is pinned. Mechanism lives in the co
 
 ## Platform and Runtime
 
-Windows 11 (Linux supported), Node v22.16.0 or later, developed on v24. CommonJS on the server, ES modules in the browser bundled by Vite.
+Windows 11 (Linux supported). Node floor and module split are stated under Working In This Directory.
 
 ## Dependencies
 
