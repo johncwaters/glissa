@@ -1,9 +1,8 @@
 // The phone Board: the landing screen, and the phone's answer to the question the whole product
 // exists for - which session needs a carbon unit right now.
 //
-// It is a plain vertical list of session rows, ordered attention-first (triage-core.mjs), each row a
-// 56px tap target that opens that session's Terminal screen. It renders from the SAME session registry
-// the desktop cards render from (session-card/card-registry sessionUIs) and is refreshed from the same
+// It mirrors the desktop rail's project groups while keeping each project's rows attention-first. It
+// renders from the SAME session registry the desktop cards render from and is refreshed from the same
 // control-WS handlers in app.js that refresh the desktop rail, so there is one state pipeline, not two.
 //
 // The phone top bar is part of this screen rather than a global chrome strip: the desktop .header does
@@ -14,9 +13,14 @@
 import { STATES } from '/shared/states.mjs';
 import { el, MERGE_TAGS, observeHeaderHeight, stateChip } from '../dom-helpers.js';
 import { attentionSummaryText, countSessionsNeedingAttention, orderRoster } from '../focus-view/attention-core.mjs';
+import { NO_PATH_KEY } from '../focus-view/roster-groups.mjs';
+import { emptyProjectKeys, forgetProject } from '../project-registry.js';
+import { quickAddSession, requestSessionRemoval } from '../session-actions.js';
 import { sessionUIs } from '../session-card/card-registry.js';
 import { onSessionTick, sessionElapsedText } from '../session-card/session-tick.js';
-import { orderSessionsForTriage } from './triage-core.mjs';
+import { groupSessionsForBoard } from './board-groups-core.mjs';
+
+const projectPathOf = (row) => row.ui.path;
 
 // createBoardScreen({ onSelectSession }) -> { el, topBarEl, refresh, getAttentionCount }
 // The shell adopts the desktop header controls into topBarEl on activation and gives them back on
@@ -34,17 +38,17 @@ export function createBoardScreen({ onSelectSession }) {
   attentionEl.setAttribute('role', 'status');
   attentionEl.setAttribute('aria-live', 'polite');
 
-  const listEl = el('div', 'phone-board-list');
-  listEl.setAttribute('role', 'list');
+  const groupsEl = el('div', 'phone-board-list');
 
   const emptyEl = el('div', 'phone-empty');
   emptyEl.innerHTML = '<p class="phone-empty-title"></p><p class="phone-empty-desc"></p>';
   const emptyTitleEl = emptyEl.querySelector('.phone-empty-title');
   const emptyDescEl = emptyEl.querySelector('.phone-empty-desc');
 
-  screen.append(topBar, attentionEl, listEl, emptyEl);
+  screen.append(topBar, attentionEl, groupsEl, emptyEl);
 
   const rowById = new Map();
+  const groupSectionByKey = new Map();
   let attentionCount = 0;
 
   observeHeaderHeight(topBar);
@@ -68,15 +72,42 @@ export function createBoardScreen({ onSelectSession }) {
       elapsed: row.querySelector('.phone-row-elapsed'),
     };
     row.addEventListener('click', () => onSelectSession?.(id));
-    // role=listitem on the button itself would REPLACE its button role, so a screen reader would
-    // announce a list item that gives no hint it is activatable. The item semantics ride a wrapper
-    // instead, keeping "list, N items" for triage while each row still announces as a button. The
-    // reconcile loop appends row._item, never the bare row (same shape as the rail's pill._row).
     const item = el('div', 'phone-row-item');
     item.setAttribute('role', 'listitem');
-    item.appendChild(row);
+    const removeButton = el('button', 'phone-row-remove', 'x');
+    removeButton.type = 'button';
+    removeButton.title = 'Remove session';
+    removeButton.setAttribute('aria-label', 'Remove session');
+    removeButton.addEventListener('click', (event) => {
+      event.stopPropagation();
+      requestSessionRemoval(id);
+    });
+    item.append(row, removeButton);
     row._item = item;
     return row;
+  }
+
+  function buildGroup(key) {
+    const section = el('section', 'phone-board-group');
+    section.dataset.key = key;
+    const header = el('div', 'phone-board-group-header');
+    const label = el('span', 'phone-board-group-label');
+    const count = el('span', 'phone-board-group-count');
+    const addButton = el('button', 'phone-board-group-add', '+');
+    addButton.type = 'button';
+    addButton.addEventListener('click', () => quickAddSession(section.dataset.path, section.dataset.label));
+    const forgetButton = el('button', 'phone-board-group-forget', 'x');
+    forgetButton.type = 'button';
+    forgetButton.addEventListener('click', () => {
+      forgetProject(section.dataset.path);
+      refresh();
+    });
+    const rows = el('div', 'phone-board-group-rows');
+    rows.setAttribute('role', 'list');
+    header.append(label, count, forgetButton, addButton);
+    section.append(header, rows);
+    section._refs = { header, label, count, addButton, forgetButton, rows };
+    return section;
   }
 
   function sessionName(ui) {
@@ -99,6 +130,30 @@ export function createBoardScreen({ onSelectSession }) {
     row._refs.merge.textContent = MERGE_TAGS[merge] || '';
     row._refs.elapsed.textContent = sessionElapsedText(ui);
     row.setAttribute('aria-label', `${name}, ${label}`);
+  }
+
+  function paintGroup(section, group) {
+    const { header, label, count, addButton, forgetButton, rows } = section._refs;
+    const isPathless = group.key === NO_PATH_KEY;
+    const isEmpty = group.rows.length === 0;
+    section.dataset.path = group.key;
+    section.dataset.label = group.label;
+    section.toggleAttribute('data-empty', isEmpty);
+    header.title = group.title;
+    label.textContent = group.label;
+    count.textContent = String(group.rows.length);
+    count.title = `${group.rows.length} ${group.rows.length === 1 ? 'session' : 'sessions'}`;
+    addButton.hidden = isPathless;
+    forgetButton.hidden = isPathless || !isEmpty;
+    if (!isPathless) {
+      addButton.title = `Add a session to ${group.label}`;
+      addButton.setAttribute('aria-label', `Add a session to ${group.label}`);
+    }
+    if (!isPathless && isEmpty) {
+      forgetButton.title = `Remove ${group.label} from the Board`;
+      forgetButton.setAttribute('aria-label', `Remove ${group.label} from the Board`);
+    }
+    rows.setAttribute('aria-label', `${group.label} sessions`);
   }
 
   // ── Announce-once bookkeeping (the desktop rail's data-unseen rule, kept out of the DOM) ──
@@ -133,7 +188,7 @@ export function createBoardScreen({ onSelectSession }) {
     unseenCompleteIds.delete(id);
   }
 
-  function currentRows() {
+  function currentOrderedRows() {
     const entries = [...sessionUIs.entries()].map(([id, ui]) => ({
       id,
       ui,
@@ -143,36 +198,55 @@ export function createBoardScreen({ onSelectSession }) {
     }));
     noteStateTransitions(entries);
     for (const entry of entries) entry.unseen = unseenCompleteIds.has(entry.id);
-    return orderSessionsForTriage(orderRoster(entries));
+    return orderRoster(entries);
   }
 
   function refresh() {
-    const rows = currentRows();
-    attentionCount = countSessionsNeedingAttention(rows);
+    const orderedRows = currentOrderedRows();
+    const boardGroups = groupSessionsForBoard(
+      orderedRows,
+      projectPathOf,
+      emptyProjectKeys(orderedRows, projectPathOf),
+    );
+    attentionCount = countSessionsNeedingAttention(orderedRows);
     attentionEl.textContent = attentionSummaryText(attentionCount);
     attentionEl.toggleAttribute('data-lit', attentionCount > 0);
 
-    const seen = new Set();
-    for (const entry of rows) {
-      seen.add(entry.id);
-      let row = rowById.get(entry.id);
-      if (!row) {
-        row = buildRow(entry.id);
-        rowById.set(entry.id, row);
+    const presentGroupKeys = new Set(boardGroups.order);
+    for (const group of boardGroups.groups) {
+      let section = groupSectionByKey.get(group.key);
+      if (!section) {
+        section = buildGroup(group.key);
+        groupSectionByKey.set(group.key, section);
       }
-      paintRow(row, entry);
-      listEl.appendChild(row._item); // re-append settles the attention-first order
+      paintGroup(section, group);
+      groupsEl.appendChild(section);
+      for (const entry of group.rows) {
+        let row = rowById.get(entry.id);
+        if (!row) {
+          row = buildRow(entry.id);
+          rowById.set(entry.id, row);
+        }
+        paintRow(row, entry);
+        section._refs.rows.appendChild(row._item);
+      }
     }
+    for (const [key, section] of [...groupSectionByKey]) {
+      if (presentGroupKeys.has(key)) continue;
+      section.remove();
+      groupSectionByKey.delete(key);
+    }
+    const seen = new Set(boardGroups.visibleIds);
     for (const [id, row] of [...rowById]) {
       if (seen.has(id)) continue;
       row._item.remove();
       rowById.delete(id);
     }
 
-    const hasSessions = rows.length > 0;
-    listEl.hidden = !hasSessions;
-    emptyEl.hidden = hasSessions;
-    if (hasSessions) return;
+    const hasGroups = boardGroups.groups.length > 0;
+    groupsEl.hidden = !hasGroups;
+    emptyEl.hidden = hasGroups;
+    if (hasGroups) return;
     emptyTitleEl.textContent = 'No sessions';
     emptyDescEl.textContent = 'Spawn a session to start watching.';
   }

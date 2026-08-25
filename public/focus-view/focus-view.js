@@ -15,12 +15,12 @@ import { STATES } from '/shared/states.mjs';
 import { borrowCard, getBorrowedCardId, releaseCard } from '../card-host.js';
 import { sendControlMsg } from '../control-ws.js';
 import { el, MERGE_TAGS, stateChip } from '../dom-helpers.js';
+import { emptyProjectKeys, forgetProject } from '../project-registry.js';
+import { quickAddSession, requestSessionRemoval } from '../session-actions.js';
 import { setActivityRenderer } from '../session-card/activity.js';
 import { sessionUIs } from '../session-card/card-registry.js';
-import { openConfirmDialog } from '../session-card/modal.js';
-import { suggestSessionName } from '../session-card/naming.js';
 import { setSelectedId } from '../sidebar/selection.js';
-import { getKeptProjects, getLastFocusedSessionId, getRailWidth, setKeptProjects, setLastFocusedSessionId, setRailWidth } from '../ui-prefs.js';
+import { getLastFocusedSessionId, getRailWidth, setLastFocusedSessionId, setRailWidth } from '../ui-prefs.js';
 import { attentionSummaryText, countSessionsNeedingAttention, needsAttention, orderRoster, pickAdjacent, pickNextAttention } from './attention-core.mjs';
 import { groupRoster, NO_PATH_KEY, visibleOrder } from './roster-groups.mjs';
 
@@ -53,18 +53,6 @@ const pillById = new Map();        // id -> rail pill element
 const groupListById = new Map();   // project key (path) -> its <div role=listbox> sublist element
 const groupHeaderById = new Map(); // project key (path) -> its header <div>
 
-// ── Known projects (kept-when-session-less) ──
-// Closing the last session of a project would drop it from the rail entirely (the rail is derived from
-// live sessions), forcing the operator to re-pick the folder in the Add Session dialog to spawn a fresh
-// one. Instead every project path Glissa has seen is remembered here; a known path with NO live session
-// renders as an empty group (header + "+" quick-add + a dismiss "×") until the operator adds a session
-// back or dismisses it with the "×". Membership (not a live/gone transition) drives the empty group, so
-// keep-detection is robust regardless of which view was active when the last session closed. Persisted
-// in ui-prefs because config.json no longer lists a removed session, so this Set is the only record an
-// empty group survives a reload on. noteKnownProjectPath (called from the session lifecycle in app.js,
-// independent of the Focus view) registers paths; forgetProject removes one.
-const knownProjectPaths = new Set(getKeptProjects());
-
 // railTabStopId is the rail's single roving / selected option, DECOUPLED from focusedId (which is
 // "which session is centered"). They coincide in steady state. paintPill derives tabIndex/aria-selected
 // from this scalar (not focusedId), so it SURVIVES the per-signal refreshFocusRoster repaint - the
@@ -96,44 +84,7 @@ function setRailTabStop(id) {
 // including the empty session-less project groups so keyboard nav and rendering share one source.
 function currentGroups() {
   const order = orderedSessions();
-  return groupRoster(order, (row) => row.ui.path, emptyProjectKeys(order));
-}
-
-// Register a project path so a later session-less state keeps it in the rail. Called from the session
-// lifecycle (app.js) so registration does not depend on the Focus view being active. Idempotent;
-// persists only when a genuinely new path is added. Falsy / pathless sessions are ignored (no spawnable
-// path to quick-add to), consistent with NO_PATH_KEY never being kept.
-export function noteKnownProjectPath(path) {
-  if (!path) return;
-  const p = String(path);
-  if (knownProjectPaths.has(p)) return;
-  knownProjectPaths.add(p);
-  setKeptProjects([...knownProjectPaths]);
-}
-
-// Known project paths that have NO live session right now -> the empty "kept" groups. Also notes every
-// live path (idempotent) so a path seen only via the rail is still remembered.
-function emptyProjectKeys(order) {
-  const live = new Set();
-  for (const { ui } of order) {
-    if (!ui.path) continue;
-    const p = String(ui.path);
-    live.add(p);
-    noteKnownProjectPath(p);
-  }
-  const empty = [];
-  for (const p of knownProjectPaths) {
-    if (!live.has(p)) empty.push(p);
-  }
-  return empty;
-}
-
-// Dismiss a kept session-less project from the rail (the empty header's "×"). Removing it from the known
-// set is permanent until the operator adds a session on that path again (which re-notes it).
-function forgetProject(path) {
-  if (!path) return;
-  if (knownProjectPaths.delete(String(path))) setKeptProjects([...knownProjectPaths]);
-  refreshFocusRoster();
+  return groupRoster(order, (row) => row.ui.path, emptyProjectKeys(order, (row) => row.ui.path));
 }
 
 // ── Quick-add (spawn another session on a project without opening the Add Session dialog) ──
@@ -152,7 +103,7 @@ function ensureGroup(group) {
       + '<span class="focus-rail-group-rule" aria-hidden="true"></span>';
     const add = el('button', 'focus-rail-group-add', '+');
     add.type = 'button';
-    add.addEventListener('click', () => quickAdd(header.dataset.path, header.dataset.label));
+    add.addEventListener('click', () => quickAddSession(header.dataset.path, header.dataset.label));
     header._addBtn = add;
     // Dismiss button for a KEPT session-less project: forgets its path so the empty header disappears.
     // Shown only while the group is empty (a populated project is retired by removing its sessions).
@@ -160,7 +111,10 @@ function ensureGroup(group) {
     // when "+" shifted with the "x", the rightmost slot became an accidental dismiss target.
     const forget = el('button', 'focus-rail-group-remove', '×');
     forget.type = 'button';
-    forget.addEventListener('click', () => forgetProject(header.dataset.path));
+    forget.addEventListener('click', () => {
+      forgetProject(header.dataset.path);
+      refreshFocusRoster();
+    });
     header._forgetBtn = forget;
     header.appendChild(forget);
     header.appendChild(add);
@@ -190,34 +144,6 @@ function ensureGroup(group) {
   header.toggleAttribute('data-empty', empty);
   list.setAttribute('aria-label', `${group.label} sessions`);
   return { header, list };
-}
-
-function quickAdd(path, label) {
-  if (!path) return;
-  sendControlMsg({ type: 'add-session', name: suggestSessionName(label), path });
-}
-
-// Remove a session from the rail (same teardown as the card overflow menu: config entry + PTY). A
-// CLEAN session (no unmerged worktree changes) is removed immediately with NO confirm - the operator
-// asked for one-click retire and there is nothing on disk to lose. Only an unmerged worktree
-// (pending-review / parked) still prompts, because removing it discards work. Backs both the pill's
-// hover "×" and the Delete/Backspace shortcut on the focused pill.
-function removeSession(id) {
-  const ui = sessionUIs.get(id);
-  if (!ui) return;
-  const merge = mergeStatusById.get(id) || 'none';
-  const unmerged = merge === 'pending-review' || merge === 'parked';
-  if (!unmerged) {
-    sendControlMsg({ type: 'remove-session', id });
-    return;
-  }
-  const name = sessionName(ui);
-  openConfirmDialog({
-    title: 'Remove Session',
-    message: `"${name}" has unmerged worktree changes that will be permanently discarded if you remove it. Merge or review them first to keep them. Remove anyway?`,
-    confirmLabel: 'Discard & Remove',
-    onConfirm: () => sendControlMsg({ type: 'remove-session', id }),
-  });
 }
 
 export function isFocusActive() { return active; }
@@ -351,7 +277,7 @@ function onRailKeydown(e) {
     const id = e.target?.dataset?.id;
     if (!id || pillById.get(id) !== e.target) return;
     e.preventDefault();
-    removeSession(id);
+    requestSessionRemoval(id, mergeStatusById.get(id));
     return;
   }
   if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
@@ -427,7 +353,7 @@ function buildPill(id) {
   // tabIndex -1 either way, so the rail's roving-tabstop nav is unchanged.
   if (!touchRail?.matches) removeBtn.setAttribute('aria-hidden', 'true');
   removeBtn.title = 'Remove session';
-  removeBtn.addEventListener('click', (e) => { e.stopPropagation(); removeSession(id); });
+  removeBtn.addEventListener('click', (e) => { e.stopPropagation(); requestSessionRemoval(id, mergeStatusById.get(id)); });
   row.append(pill, removeBtn);
   pill._row = row;
   return pill;
@@ -521,7 +447,7 @@ setActivityRenderer(renderPillActivity);
 export function refreshFocusRoster() {
   if (!active || !railEl) return;
   const order = orderedSessions();
-  const groups = groupRoster(order, (row) => row.ui.path, emptyProjectKeys(order));
+  const groups = groupRoster(order, (row) => row.ui.path, emptyProjectKeys(order, (row) => row.ui.path));
   const seen = new Set();
 
   // Build the desired id order for a list and re-append pills only if the order changed.
