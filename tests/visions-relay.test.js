@@ -457,6 +457,25 @@ test('an editor that errors on an applyEdit is reported to the daemon as a refus
   });
 });
 
+test('an over-cap applyEdit response still reaches the daemon', async () => {
+  await runRelayScenario(async ({ daemon, initialSocket, relay }) => {
+    initialSocket.send(JSON.stringify({
+      type: 'lsp-request', id: 'visions-fix-large', method: 'workspace/applyEdit', params: { edit: {} },
+    }));
+    const request = await relay.stdoutMessages.next('applyEdit not forwarded to the editor');
+    const oversizedDetail = 'x'.repeat(2 * 1024 * 1024);
+
+    await writeLspAsync(relay.child, {
+      jsonrpc: '2.0', id: request.id, result: { applied: true, oversizedDetail },
+    });
+
+    const answer = await daemon.messages.next('large applyEdit answer not routed back');
+    assert.deepEqual(answer, {
+      type: 'lsp-response', id: 'visions-fix-large', result: { applied: true, oversizedDetail },
+    });
+  });
+});
+
 test('shutdown and exit terminate the relay cleanly', async () => {
   await runRelayScenario(async ({ relay }) => {
     writeLsp(relay.child, { jsonrpc: '2.0', id: 9, method: 'shutdown', params: null });

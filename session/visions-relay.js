@@ -128,7 +128,9 @@ function sendWsFrame(ws, decision) {
 }
 
 function sendWsJson(ws, payload) {
-  return sendWsFrame(ws, decideDaemonFrame(payload));
+  if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+  ws.send(JSON.stringify(payload));
+  return true;
 }
 
 function createRelay({

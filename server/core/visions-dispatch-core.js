@@ -168,8 +168,8 @@ function decideDispatch({
   if (!config || config.enabled !== true) return { dispatch: false, gate: 'disabled', trigger: null };
   if (!uri) return { dispatch: false, gate: 'no-uri', trigger: null };
   if (inScope === false) return { dispatch: false, gate: 'out-of-scope', trigger: null };
-  if (typeof text === 'string' && text.trim().length === 0) return { dispatch: false, gate: 'empty-document', trigger: null };
-  if (typeof text !== 'string' && !textHash) return { dispatch: false, gate: 'empty-document', trigger: null };
+  const isBlank = typeof text === 'string' ? text.trim().length === 0 : !textHash;
+  if (isBlank) return { dispatch: false, gate: 'empty-document', trigger: null };
   if (inFlight) return { dispatch: false, gate: 'in-flight', trigger: null };
   const recordedHash = state.lastHashByUri.get(uri);
   const textStood = recordedHash === textHash;

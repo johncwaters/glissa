@@ -959,10 +959,11 @@ function createVisionsWiring({
         cancelSweep(uri);
         cancelDispatch(uri);
         const result = applyDidClose(store, params);
+        const isLastOwner = releaseUri(uri, connection);
         if (!result.applied) return result.reason;
         note(`didClose ${uri} (${listDocs(store).length} open)`);
         failPendingApplyEdits('the buffer closed', uri);
-        if (!releaseUri(uri, connection)) return null;
+        if (!isLastOwner) return null;
         clearUriState(uri);
         return null;
       },

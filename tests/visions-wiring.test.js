@@ -1087,6 +1087,23 @@ test('shared uri state survives until its last owner closes', async (t) => {
   assert.deepEqual(harness.wiring.documentsSnapshot(), []);
 });
 
+test('a duplicate didClose leaves no shared uri owner behind', (t) => {
+  const { wiring, connection, lsp } = drivenConnection();
+  t.after(() => wiring.stop());
+  const secondConnection = wiring.openConnection({ send: () => {} });
+  const secondLsp = (method, params) => secondConnection.handleFrame(JSON.stringify({ type: 'lsp', method, params }));
+
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', CLEAN_MARKDOWN));
+  secondLsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', CLEAN_MARKDOWN));
+  lsp('textDocument/didClose', { textDocument: { uri: MARKDOWN_URI } });
+  lsp('textDocument/didClose', { textDocument: { uri: MARKDOWN_URI } });
+  secondLsp('textDocument/didClose', { textDocument: { uri: MARKDOWN_URI } });
+
+  assert.deepEqual(wiring.documentsSnapshot(), []);
+  assert.equal(connection.docCount, 0);
+  assert.equal(secondConnection.docCount, 0);
+});
+
 test('a result that lands after its buffer closed is dropped rather than resurrecting a section', async (t) => {
   let release = null;
   const held = new Promise((resolve) => { release = resolve; });
