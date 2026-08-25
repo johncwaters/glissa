@@ -15,6 +15,7 @@ The job it serves is triage, per `PRODUCT.md`: scan the board, find the session 
 | `phone-shell.js` | Owns the screen container, the bottom nav, screen switching, nested More screens, history integration, visual-viewport sizing, and the activate/deactivate handoff with the desktop layout |
 | `board-screen.js` | The default screen: attention-first session rows + the phone top bar (which adopts the desktop header's connection chip, "+ Session", help, and hamburger) |
 | `terminal-screen.js` | One session's full-bleed terminal: back control, name, state badge, the card's adopted action cluster, and the touch key strip |
+| `board-groups-core.mjs` | Pure composition of desktop project grouping with phone attention ordering |
 | `triage-core.mjs` | Pure attention-first ORDER (`orderSessionsForTriage`) only. The "needs you" rule and its readout wording are shared with the desktop rail head in `../focus-view/attention-core.mjs` |
 | `mobile-key-strip.js` | Esc / Tab / Ctrl+C / arrows / Paste, the keys a soft keyboard cannot produce (catalog in `../mobile-keys.mjs`) |
 
@@ -34,12 +35,12 @@ Review, Radar, PRs, Usage and Visions have no phone-only module: each screen is 
 - `.mjs` files stay pure (no DOM, no window); they run under node:test too.
 
 ### Testing Requirements
-- `tests/frontend-phone-triage.test.js` (ordering + counts) and `tests/frontend-form-factor.test.js` (the layout decision). DOM behavior is verified manually; real-device rendering is not covered by the suite.
+- `tests/frontend-phone-triage.test.js` (ordering + counts), `tests/frontend-phone-board-groups.test.js` (Board project groups), and `tests/frontend-form-factor.test.js` (the layout decision). DOM behavior is verified manually; real-device rendering is not covered by the suite.
 
 ## Dependencies
 
 ### Internal
 - `../form-factor.js`, `../card-host.js`, `../dom-helpers.js`
-- `../session-card/` (registry, tick, terminal input, toast), `../sidebar/review-sidebar.js` + `selection.js`, `../focus-view/attention-core.mjs` (the alphabetical base order), `../ui-prefs.js`, `../control-ws.js`
+- `../project-registry.js`, `../session-actions.js`, `../session-card/` (registry, tick, terminal input, toast), `../sidebar/review-sidebar.js` + `selection.js`, `../focus-view/attention-core.mjs` (the alphabetical base order), `../ui-prefs.js`, `../control-ws.js`
 
 <!-- MANUAL: Any manually added notes below this line are preserved on regeneration -->

@@ -9,13 +9,14 @@ import { STATES } from '/shared/states.mjs';
 import { checkControlLiveness, connectControl, onControlMessage, sendControlMsg, sendControlRequest, setConnectionStateCallback } from './control-ws.js';
 import { applySettingsBroadcast, createAddSessionDialog, createSettingsDialog } from './dialogs.js';
 import { observeHeaderHeight, writeClipboardText } from './dom-helpers.js';
-import { activateFocusView, centerSessionQuietly, deactivateFocusView, focusAdjacentInRail, focusNextAttention, focusNthInRail, getFocusedSessionId, isFocusActive, mountFocusView, noteKnownProjectPath, refreshFocusRoster, restoreFocusedSession, setFocusMergeStatus } from './focus-view/focus-view.js';
+import { activateFocusView, centerSessionQuietly, deactivateFocusView, focusAdjacentInRail, focusNextAttention, focusNthInRail, getFocusedSessionId, isFocusActive, mountFocusView, refreshFocusRoster, restoreFocusedSession, setFocusMergeStatus } from './focus-view/focus-view.js';
 import { initFormFactor, isPhoneLayout, onLayoutChange } from './form-factor.js';
 import { applyHealthSnapshot, mountHealthMonitor } from './health-monitor.js';
 import { applyIngestActivity, applyIngestSnapshot, applyVisionsComments, applyVisionsFindings, applyVisionsFix, applyVisionsHand, applyVisionsIntent, applyVisionsSnapshot, mountVisionsView, refreshVisionsView, setVisionsActivityCallback, setVisionsProjectNames } from './visions-panel.js';
 import { acknowledgeMillAttention, applyMillReport, mountMillView, refreshMillView, requestMillReport, setMillActivityCallback, setMillRequestSender } from './mill-panel.js';
 import { initNotifications, showDesktopNotification } from './notifications.js';
 import { activatePhoneShell, deactivatePhoneShell, getPhoneSessionId, isPhoneScreenActive, isPhoneShellActive, mountPhoneShell, refreshPhoneBoard, setPhoneScreenAttention, showPhoneScreen } from './phone/phone-shell.js';
+import { noteKnownProjectPath } from './project-registry.js';
 import { acknowledgePrAttention, applyPrStatus, mountPrView, setPrActivityCallback } from './pr-panel.js';
 // Radar is a SECOND consumer of the health, update and PR feeds: it summarizes what needs the operator,
 // while the health footer, the update banner and the PRs tab keep rendering each feed in full.
