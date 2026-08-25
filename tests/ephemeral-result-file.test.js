@@ -14,7 +14,7 @@ const path = require('node:path');
 
 const ephemeralSession = require('../server/ephemeral-session');
 
-const { createJobResultFile, JOB_RESULT_FILENAME } = ephemeralSession;
+const { createJobResultFile, JOB_RESULT_FILENAME, readResultFile } = ephemeralSession;
 
 test('a job result file lives in its own fresh directory, named after the job', async () => {
   const file = await createJobResultFile('glissa-pr-owner-repo-42');
@@ -95,5 +95,36 @@ test('the result directory is owner-only', { skip: process.platform === 'win32' 
     assert.equal(mode, 0o700, 'mkdtemp mints a 0700 directory, so no other account can read the verdict');
   } finally {
     await file.cleanup();
+  }
+});
+
+test('result reader returns typed failures and keeps validation separate from allowed verdicts', () => {
+  const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-result-reader-'));
+  const resultPath = path.join(workDir, 'result.json');
+  try {
+    const missing = readResultFile(resultPath, new Set(['CLEAN']));
+    assert.deepEqual(missing, {
+      ok: false,
+      kind: 'missing',
+      reason: 'no result file',
+      verdict: 'ERROR',
+      summary: 'no result file',
+    });
+
+    fs.writeFileSync(resultPath, '{not json', 'utf8');
+    const malformed = readResultFile(resultPath, new Set(['CLEAN']));
+    assert.equal(malformed.kind, 'invalid-json');
+
+    fs.writeFileSync(resultPath, JSON.stringify({ verdict: 'UNLISTED' }), 'utf8');
+    const validated = readResultFile(resultPath, null, null, {
+      validate: (parsed) => ({ ok: true, verdict: parsed.verdict }),
+    });
+    assert.deepEqual(validated, { ok: true, verdict: 'UNLISTED' });
+    assert.throws(
+      () => readResultFile(resultPath, new Set(['CLEAN']), null, { validate: () => ({ ok: true }) }),
+      /allowed or validate/
+    );
+  } finally {
+    fs.rmSync(workDir, { recursive: true, force: true });
   }
 });

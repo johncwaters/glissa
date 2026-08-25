@@ -22,7 +22,6 @@ const { needsDistill } = require('./core/distill-core');
 const { buildLanePermissions } = require('./core/lane-permissions-core');
 const {
   MAX_DISTILL_RESULT_BYTES,
-  DISTILL_RESULT_VERDICT_SET,
   buildPackDistillPrompt,
   failedResult,
   decidePackDistillPromptSize,
@@ -47,11 +46,12 @@ function packDistillerPermissions() {
 }
 
 function readDistillResult(resultPath) {
-  const result = readResultFile(resultPath, DISTILL_RESULT_VERDICT_SET, null, {
+  const result = readResultFile(resultPath, null, null, {
     maxBytes: MAX_DISTILL_RESULT_BYTES,
     validate: validateDistillResult,
   });
-  if (result.summary === 'no result file') return failedResult();
+  if (result.ok === false && result.kind === 'missing') return failedResult();
+  if (result.ok === false) return failedResult(result.reason);
   return result;
 }
 

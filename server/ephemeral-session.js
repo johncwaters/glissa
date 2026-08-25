@@ -139,6 +139,8 @@ async function createJobResultFile(prefix) {
  * `decorate` adds the per-lane extra fields from the same parsed object.
  */
 function readResultFile(resultPath, allowed, decorate = null, { maxBytes = null, validate = null } = {}) {
+  if (allowed && validate) throw new TypeError('readResultFile accepts allowed or validate, not both');
+  const failedRead = (kind, reason) => ({ ok: false, kind, reason, verdict: 'ERROR', summary: reason });
   try {
     const fileDescriptor = fs.openSync(resultPath, 'r');
     const chunks = [];
@@ -150,7 +152,7 @@ function readResultFile(resultPath, allowed, decorate = null, { maxBytes = null,
         if (bytesRead === 0) break;
         totalBytesRead += bytesRead;
         if (maxBytes !== null && totalBytesRead > maxBytes) {
-          return { verdict: 'ERROR', summary: 'result file is too large' };
+          return failedRead('too-large', 'result file is too large');
         }
         chunks.push(Buffer.from(chunk.subarray(0, bytesRead)));
       }
@@ -161,16 +163,20 @@ function readResultFile(resultPath, allowed, decorate = null, { maxBytes = null,
     try {
       obj = JSON.parse(Buffer.concat(chunks).toString('utf8'));
     } catch {
-      return { verdict: 'ERROR', summary: 'invalid JSON in result file' };
+      return failedRead('invalid-json', 'invalid JSON in result file');
     }
-    if (validate) return validate(obj);
+    if (validate) {
+      const validated = validate(obj);
+      if (validated && validated.ok !== false) return validated;
+      return failedRead('rejected', validated?.summary || 'result file was rejected');
+    }
     const verdict = String(obj.verdict || '').toUpperCase();
-    if (!allowed.has(verdict)) return { verdict: 'ERROR', summary: 'invalid verdict in result file' };
+    if (!allowed || !allowed.has(verdict)) return failedRead('rejected', 'invalid verdict in result file');
     const result = { verdict, summary: String(obj.summary || '') };
     if (!decorate) return result;
     return { ...result, ...decorate(obj) };
   } catch {
-    return { verdict: 'ERROR', summary: 'no result file' };
+    return failedRead('missing', 'no result file');
   } finally {
     try { fs.rmSync(resultPath, { force: true }); } catch { /* best-effort */ }
   }

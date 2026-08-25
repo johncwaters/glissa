@@ -81,7 +81,6 @@ function buildPackDistillPrompt({ outputPath, sources, instructions, resultPath 
 }
 
 module.exports = {
-  DISTILL_RESULT_VERDICT_SET,
   MAX_DISTILL_PROMPT_BYTES,
   MAX_DISTILL_RESULT_BYTES,
   MAX_DISTILLED_CONTENT_CHARS,
