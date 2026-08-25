@@ -45,18 +45,21 @@ class HookRouter {
       return { status: 403, signal: null, reason: 'bad-token' };
     }
     const hooks = entry.hooks || claudeCode.hooks;
-    const signal = hooks.mapSignal(event, payload);
+    const mappedPayload = typeof hooks.mapPayload === 'function'
+      ? hooks.mapPayload(event, payload)
+      : payload;
+    const signal = hooks.mapSignal(event, mappedPayload);
     if (!signal) {
       return { status: 200, signal: null, reason: 'ignored-event' };
     }
-    const confidence = hooks.mapConfidence(event, payload);
-    const promptKind = signal === 'awaiting-input' ? hooks.mapPromptKind(event, payload) : null;
+    const confidence = hooks.mapConfidence(event, mappedPayload);
+    const promptKind = signal === 'awaiting-input' ? hooks.mapPromptKind(event, mappedPayload) : null;
     try {
       entry.onSignal({
         signal, source: 'hook',
         ...(confidence ? { confidence } : {}),
         ...(promptKind ? { promptKind } : {}),
-        ts: Date.now(), event, payload,
+        ts: Date.now(), event, payload: mappedPayload,
       });
     } catch (err) {
       console.warn(`[hook-source] onSignal threw for ${glissaId}: ${err.message}`);

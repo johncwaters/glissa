@@ -45,7 +45,7 @@ function isManagedHookGroup(group, event) {
   return isManagedCommand(handler.command, event);
 }
 
-function classifyGrokHooksFile(contents, { relayPath, events }) {
+function classifyGrokHooksFile(contents, { relayPath, events, managedEventSets = [] }) {
   if (contents == null) return "absent";
   const expected = renderGrokHooksFile({ relayPath, events });
   if (contents === expected) return "current";
@@ -56,8 +56,11 @@ function classifyGrokHooksFile(contents, { relayPath, events }) {
     return "foreign";
   }
   if (!hasOnlyKeys(parsed, ["hooks"])) return "foreign";
-  if (!hasOnlyKeys(parsed.hooks, events)) return "foreign";
-  for (const event of events) {
+  const actualEvents = Object.keys(parsed.hooks);
+  const hasManagedEventSet = hasOnlyKeys(parsed.hooks, events)
+    || managedEventSets.some((managedEvents) => hasOnlyKeys(parsed.hooks, managedEvents));
+  if (!hasManagedEventSet) return "foreign";
+  for (const event of actualEvents) {
     if (!isManagedHookGroup(parsed.hooks[event], event)) return "foreign";
   }
   return "managed-stale";

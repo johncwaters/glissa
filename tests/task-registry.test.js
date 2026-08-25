@@ -65,6 +65,13 @@ test('a TaskCompleted filters its id out of the declaration and out of the count
   assert.equal(registry.activeCount(), 1);
 });
 
+test('a forged SubagentStop cannot pre-drain a later authoritative declaration', () => {
+  const { registry } = makeRegistry();
+  registry.noteAgentStop('child-1');
+  registry.reconcileDeclared([{ id: 'child-1', type: 'subagent' }]);
+  assert.equal(registry.activeCount(), 1);
+});
+
 test('an idle teammate name drains one declared teammate, clamped to the teammate count', () => {
   const { registry } = makeRegistry();
   registry.reconcileDeclared([{ id: 't1', type: 'teammate' }, { id: 's1', type: 'subagent' }]);

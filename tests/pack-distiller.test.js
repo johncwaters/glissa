@@ -18,7 +18,9 @@ const {
   createPackDistiller,
   packDistillerPermissions,
   readDistillResult,
+  writeOutputNoFollow,
 } = require('../server/pack-distiller');
+const { distillOutputPath } = require('../server/pack-builder');
 const { buildStampLine, needsDistill } = require('../server/core/distill-core');
 const { buildLanePermissions } = require('../server/core/lane-permissions-core');
 const {
@@ -73,6 +75,7 @@ function harness({
   onSpawn = null,
   onWrite = null,
   writePromptOverride = null,
+  resolveOutputOverride = null,
   hangForever = false,
   hangUntilRelease = false,
   enabled = false,
@@ -100,7 +103,10 @@ function harness({
       return spec;
     },
     sourceHashes: async () => (typeof hashes === 'function' ? hashes() : hashes),
-    resolveOutput: (output) => (output.includes('..') ? null : `/packs/${output}`),
+    resolveOutput: (output) => {
+      if (resolveOutputOverride) return resolveOutputOverride(output);
+      return output.includes('..') ? null : `/packs/${output}`;
+    },
     readOutput: async (fullPath) => (fullPath in files ? files[fullPath] : null),
     writeOutput: async (fullPath, content) => {
       writes.push({ fullPath, content });
@@ -337,6 +343,39 @@ test('a throwing writer reports ERROR and leaves the output unwritten', async ()
   assert.deepEqual(h.files, {});
 });
 
+test('an ELOOP writer refusal is reported as an unsafe output path', async () => {
+  const error = new Error('too many symbolic links');
+  error.code = 'ELOOP';
+  const h = harness({ onWrite: () => { throw error; } });
+  const [report] = await h.distiller.runOnce();
+
+  assert.equal(report.status, 'error');
+  assert.equal(report.verdict, 'ERROR');
+  assert.equal(report.reason, 'output path became a symbolic link');
+});
+
+test('a final symlink planted after output resolution is refused without changing its target', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-pack-distiller-symlink-'));
+  const packsDirectory = path.join(root, 'packs');
+  const outputDirectory = path.join(packsDirectory, 'sources', 'demo');
+  const externalTarget = path.join(root, 'external.md');
+  const relativeOutput = path.join('sources', 'demo', 'brief.md');
+  try {
+    fs.mkdirSync(outputDirectory, { recursive: true });
+    fs.writeFileSync(externalTarget, 'outside\n', 'utf8');
+    const outputPath = await distillOutputPath(relativeOutput, { baseDir: packsDirectory });
+    fs.symlinkSync(externalTarget, outputPath, 'file');
+
+    await assert.rejects(
+      writeOutputNoFollow(outputPath, 'replacement\n'),
+      (error) => error.code === 'ELOOP',
+    );
+    assert.equal(fs.readFileSync(externalTarget, 'utf8'), 'outside\n');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('the post-write check rejects storage that changes Glissa rendered bytes', async () => {
   const h = harness({
     onWrite: (files, fullPath) => {
@@ -475,6 +514,27 @@ test('an output path that escapes the packs directory errors before any spawn', 
   assert.equal(report.status, 'error');
   assert.match(report.reason, /escapes the packs directory/);
   assert.equal(h.spawns.length, 0);
+});
+
+test('an output resolver error refuses the entry during either safety check', async () => {
+  const failure = new Error('permission denied');
+  failure.code = 'EACCES';
+  const firstCheck = harness({ resolveOutputOverride: async () => { throw failure; } });
+  const [firstReport] = await firstCheck.distiller.runOnce();
+  assert.match(firstReport.reason, /escapes the packs directory/);
+  assert.equal(firstCheck.spawns.length, 0);
+
+  let calls = 0;
+  const entryCheck = harness({
+    resolveOutputOverride: async (output) => {
+      calls += 1;
+      if (calls > 1) throw failure;
+      return `/packs/${output}`;
+    },
+  });
+  const [entryReport] = await entryCheck.distiller.runOnce();
+  assert.match(entryReport.reason, /escapes the packs directory/);
+  assert.equal(entryCheck.spawns.length, 0);
 });
 
 test('distill sources that matched no file error instead of distilling from nothing', async () => {

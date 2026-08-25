@@ -11,7 +11,22 @@ const { PACK_DIRECTIVE, renderPackPointerText } = require("../core/pack-pointer-
 const ID = "grok";
 const COMMAND_NAME = "grok";
 const RELAY_PATH = path.resolve(__dirname, "..", "hook-relay.js");
-const HOOK_EVENTS = ["UserPromptSubmit", "Stop", "StopFailure", "StopCancelled", "Notification"];
+const HOOK_EVENTS = [
+  "UserPromptSubmit",
+  "Stop",
+  "StopFailure",
+  "StopCancelled",
+  "Notification",
+  "SubagentStart",
+  "SubagentStop",
+];
+const MANAGED_HOOK_EVENT_SETS = [[
+  "UserPromptSubmit",
+  "Stop",
+  "StopFailure",
+  "StopCancelled",
+  "Notification",
+]];
 const ACTION_REQUIRED_MARKER = String.fromCodePoint(0x26a0);
 const BRAILLE_MIN = 0x2800;
 const BRAILLE_MAX = 0x28ff;
@@ -35,6 +50,26 @@ function isMainSessionPayload(payload) {
   return !payload?.subagentType && !payload?.subagent_type;
 }
 
+function mapBackgroundTask(task) {
+  if (!task || typeof task !== "object" || Array.isArray(task)) return task;
+  return {
+    ...task,
+    ...(typeof task.agentType === "string" ? { agent_type: task.agentType } : {}),
+  };
+}
+
+function mapHookPayload(_event, payload) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return payload;
+  return {
+    ...payload,
+    ...(typeof payload.subagentId === "string" ? { agent_id: payload.subagentId } : {}),
+    ...(typeof payload.subagentType === "string" ? { agent_type: payload.subagentType } : {}),
+    ...(Array.isArray(payload.backgroundTasks)
+      ? { background_tasks: payload.backgroundTasks.map(mapBackgroundTask) }
+      : {}),
+  };
+}
+
 function mayContributeHooks(configText) {
   if (typeof configText !== "string") return false;
   let settings;
@@ -48,8 +83,10 @@ function mayContributeHooks(configText) {
 }
 
 function mapHookToSignal(event, payload) {
-  if (!isMainSessionPayload(payload)) return null;
   const normalizedEvent = String(event || "").toLowerCase();
+  if (normalizedEvent === "subagentstart") return "subagent-start";
+  if (normalizedEvent === "subagentstop") return "subagent-stop";
+  if (!isMainSessionPayload(payload)) return null;
   switch (normalizedEvent) {
     case "sessionstart":
       return "session-start";
@@ -170,11 +207,16 @@ const hooks = {
   mapSignal: mapHookToSignal,
   mapConfidence: mapHookConfidence,
   mapPromptKind: mapHookPromptKind,
+  mapPayload: mapHookPayload,
   injection: {
     kind: "home-hooks-file",
     filePath: hooksFilePath,
     expectedContents: () => renderGrokHooksFile({ relayPath: RELAY_PATH, events: HOOK_EVENTS }),
-    classifyContents: (contents) => classifyGrokHooksFile(contents, { relayPath: RELAY_PATH, events: HOOK_EVENTS }),
+    classifyContents: (contents) => classifyGrokHooksFile(contents, {
+      relayPath: RELAY_PATH,
+      events: HOOK_EVENTS,
+      managedEventSets: MANAGED_HOOK_EVENT_SETS,
+    }),
     projectConfigCandidates: PROJECT_CONFIG_CANDIDATES,
     mayContributeHooks,
   },
@@ -201,8 +243,10 @@ module.exports = {
   buildArgs,
   renderPackArgs,
   packCarrier: "--rules index pointers",
+  packNoticeHookEvent: "Stop",
   packReadTelemetry: false,
   sessionIdOf,
+  mapHookPayload,
   mapHookToSignal,
   mapHookConfidence,
   mapHookPromptKind,
@@ -214,16 +258,17 @@ module.exports = {
   PROJECT_CONFIG_CANDIDATES,
   CLAUDE_COMPAT_HOOKS_ENV,
   HOOK_EVENTS,
+  MANAGED_HOOK_EVENT_SETS,
   RELAY_PATH,
   ACTION_REQUIRED_MARKER,
   PACK_DIRECTIVE,
   capabilities: {
     hooks: true,
     awaitingInput: true,
-    backgroundAgents: false,
+    backgroundAgents: true,
     resume: true,
     packs: true,
-    packNotice: false,
+    packNotice: true,
     statusLine: false,
     rtk: false,
     antiSlop: false,

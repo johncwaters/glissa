@@ -57,4 +57,17 @@ function buildPackNotice(deliveredPacks, latestVersions) {
   return notice.slice(0, MAX_NOTICE_CHARS - TRUNCATION_TAIL.length) + TRUNCATION_TAIL;
 }
 
-module.exports = { buildPackNotice, listStalePacks, MAX_LISTED_PACKS, MAX_NOTICE_CHARS };
+function shouldHoldTerminalStopForNotice({ event, signal, isNoticePending, packNoticeHookEvent }) {
+  if (!isNoticePending) return false;
+  if (signal !== "ready") return false;
+  if (String(packNoticeHookEvent || "").toLowerCase() !== "stop") return false;
+  return String(event || "").toLowerCase() === "stop";
+}
+
+module.exports = {
+  buildPackNotice,
+  listStalePacks,
+  shouldHoldTerminalStopForNotice,
+  MAX_LISTED_PACKS,
+  MAX_NOTICE_CHARS,
+};

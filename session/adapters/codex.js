@@ -114,9 +114,8 @@ function mapHookToSignal(event) {
     case "userpromptsubmit":
       return "resume";
     case "stop":
-      // Main-agent turn end. Codex declares no background-work field, and its SubagentStart/Stop
-      // firing conditions are unverified, so this `ready` reaches the completion gate ungated -
-      // which is exactly why the backgroundAgents capability is off (see capabilities below).
+      // Main-agent turn end. Codex 0.149.0 fired this while a spawned child was still running, but
+      // emitted no child hooks or background-work field, so the capability below keeps it ungated.
       return "ready";
     case "permissionrequest":
       // Codex's approval prompt, and the ONLY authoritative awaiting-input signal it has: there is
@@ -336,10 +335,7 @@ module.exports = {
   capabilities: {
     hooks: true,
     awaitingInput: true,
-    // OFF until a multi-agent codex turn is observed live. SubagentStart/SubagentStop are in the
-    // event table, but nothing has verified when they fire, and codex declares no background_tasks
-    // equivalent; a gate fed by unverified signals would hold cards WORKING forever, which is worse
-    // than completing one early.
+    // OFF: 0.149.0 spawned a real child but emitted only main Stop, with no background-work field.
     backgroundAgents: false,
     resume: true,
     packs: true,

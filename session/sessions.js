@@ -46,7 +46,7 @@ const {
 } = require("../server/core/branch-sync-core");
 const { normalizePackNames, variantPackName } = require("../server/core/pack-core");
 const { defaultBuiltRoot, resolveBuiltPack } = require("../server/pack-builder");
-const { buildPackNotice, listStalePacks } = require("./core/pack-notice");
+const { buildPackNotice, listStalePacks, shouldHoldTerminalStopForNotice } = require("./core/pack-notice");
 const packReadTracker = require("./core/pack-read-tracker");
 const agentTracker = require("./core/agent-tracker");
 const { decideGateRelease, DEFAULT_GATE_RELEASE_SETTLE_MS } = require("./core/gate-release");
@@ -425,7 +425,7 @@ class Session extends EventEmitter {
     this._packVariantSlug = typeof packVariantSlug === "string" && packVariantSlug ? packVariantSlug : null;
     this._deliveredPacks = [];
     // Live pack-notice channel: latest built version per pack the backend pushed after a rebuild, and
-    // whether the resulting staleness still owes this session one notice on its next UserPromptSubmit
+    // whether the resulting staleness still owes this session one notice on its adapter-declared
     // hook response (see notePackUpdate / takePackNoticeContext).
     this._latestPackVersions = new Map();
     this._packNoticePending = false;
@@ -599,6 +599,12 @@ class Session extends EventEmitter {
     if (raw && raw.signal === "ready" && raw.source === "hook") {
       this._applyBackgroundTasks(raw.payload);
     }
+    if (shouldHoldTerminalStopForNotice({
+      event: raw?.event,
+      signal: raw?.signal,
+      isNoticePending: this._packNoticePending,
+      packNoticeHookEvent: this.packNoticeHookEvent,
+    })) return;
     this._statusSource.ingest(raw);
   }
 
@@ -708,10 +714,12 @@ class Session extends EventEmitter {
         this._withAgentCount(() => this._tasks.regateByAgentId(agentId));
       }
     }
-    if (agentId) {
-      const changed = raw.signal === "subagent-start"
-        ? this._tasks.noteAgentStart(agentId, raw.ts || Date.now())
-        : this._tasks.noteAgentStop(agentId);
+    if (agentId && raw.signal === "subagent-start") {
+      const changed = this._tasks.noteAgentStart(agentId, raw.ts || Date.now());
+      if (changed) this._emitAgentsChange();
+    }
+    if (agentId && raw.signal === "subagent-stop") {
+      const changed = this._tasks.noteAgentStop(agentId);
       if (changed) this._emitAgentsChange();
     }
     // SubagentStop also carries `background_tasks` (v2.1.145+): reconcile even when the
@@ -1080,7 +1088,7 @@ class Session extends EventEmitter {
   }
 
   // The pack-staleness notice this session owes its next turn, or null. Consumed on read (the hook
-  // route injects it into ONE UserPromptSubmit response), and re-armed only when a newer version
+  // route injects it into ONE adapter-declared response), and re-armed only when a newer version
   // arrives through notePackUpdate - never once per turn for the same staleness.
   takePackNoticeContext() {
     // Not redundant with the arming gate: this is the response boundary, so the guarantee that a
@@ -1097,6 +1105,11 @@ class Session extends EventEmitter {
     packReadTracker.armNoticeCounter(this._packReads, ts);
     this._recordDecision({ kind: "pack", ts, decision: "notice", names });
     return notice;
+  }
+
+  get packNoticeHookEvent() {
+    if (!this._can("packNotice")) return null;
+    return this._adapter.packNoticeHookEvent || "UserPromptSubmit";
   }
 
   // Count one Read tool call against the delivered pack whose dir contains it. Tracking-only, and

@@ -55,6 +55,15 @@ function makeGrokSession(options = {}) {
   return { session, calls };
 }
 
+function loadGrokHookFixture() {
+  const fixturePath = path.join(__dirname, "fixtures", "v2-grok-background-subagent.jsonl");
+  return fs.readFileSync(fixturePath, "utf8")
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map((line) => JSON.parse(line))
+    .filter((record) => record.type === "hook");
+}
+
 async function withGrokHome(run) {
   const tempDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "glissa-grok-test-"));
   const grokHome = path.join(tempDirectory, ".grok");
@@ -76,10 +85,10 @@ test("the registry exposes the Grok adapter with the honest capability set", () 
   assert.deepEqual(grok.capabilities, {
     hooks: true,
     awaitingInput: true,
-    backgroundAgents: false,
+    backgroundAgents: true,
     resume: true,
     packs: true,
-    packNotice: false,
+    packNotice: true,
     statusLine: false,
     rtk: false,
     antiSlop: false,
@@ -151,8 +160,130 @@ test("the hook vocabulary maps turn outcomes without trusting nested sessions", 
   assert.equal(grok.mapHookPromptKind("Notification", { notificationType: "permission_prompt" }), "permission");
   assert.equal(grok.mapHookToSignal("Notification", { notificationType: "idle_prompt" }), "ready");
   assert.equal(grok.mapHookConfidence("Notification", { notificationType: "idle_prompt" }), "low");
+  assert.equal(grok.mapHookToSignal("SubagentStart", { subagentType: "general-purpose" }), "subagent-start");
+  assert.equal(grok.mapHookToSignal("SubagentStop", { subagentType: "general-purpose" }), "subagent-stop");
   assert.equal(grok.mapHookToSignal("StopFailure", { subagentType: "explore" }), null);
   assert.equal(grok.mapHookToSignal("StopFailure", { subagent_type: "explore" }), null);
+});
+
+test("camelCase background fields map into the shared tracker vocabulary", () => {
+  const payload = grok.mapHookPayload("Stop", {
+    subagentId: "child-1",
+    subagentType: "general-purpose",
+    backgroundTasks: [{
+      id: "child-1",
+      type: "subagent",
+      status: "running",
+      agentType: "general-purpose",
+    }],
+  });
+  assert.equal(payload.agent_id, "child-1");
+  assert.equal(payload.agent_type, "general-purpose");
+  assert.deepEqual(payload.background_tasks, [{
+    id: "child-1",
+    type: "subagent",
+    status: "running",
+    agentType: "general-purpose",
+    agent_type: "general-purpose",
+  }]);
+  assert.equal(payload.backgroundTasks[0].agentType, "general-purpose");
+});
+
+test("the live background-subagent fixture gates until a later Stop declares the drain", (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const records = loadGrokHookFixture();
+  const hookRouter = new HookRouter();
+  const { session } = makeGrokSession({
+    hookRouter,
+    statusConflictMs: 20,
+    statusDedupMs: 10,
+    gateReleaseSettleMs: 30,
+  });
+  session.state = "RUNNING";
+  hookRouter.register("grok-session", {
+    token: "fixture-token",
+    hooks: grok.hooks,
+    onSignal: (signal) => session.ingestHookSignal(signal),
+  });
+
+  const dispatch = (record) => hookRouter.handle({
+    glissaId: "grok-session",
+    token: "fixture-token",
+    event: record.event,
+    payload: record.payload,
+  });
+  dispatch(records[0]);
+  assert.equal(session.toSnapshot().activeAgents, 1);
+  dispatch(records[1]);
+  t.mock.timers.tick(40);
+  assert.equal(session.state, "RUNNING");
+  assert.equal(session.toSnapshot().activeAgents, 1);
+  dispatch(records[2]);
+  assert.equal(session.toSnapshot().activeAgents, 1);
+  dispatch(records[3]);
+  t.mock.timers.tick(40);
+  assert.equal(session.state, "COMPLETE");
+  assert.equal(session.toSnapshot().activeAgents, 0);
+  session.destroy();
+});
+
+test("the live fixture holds a notice-carrying Stop and completes once on the follow-up Stop", (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const records = loadGrokHookFixture();
+  const hookRouter = new HookRouter();
+  const { session } = makeGrokSession({ hookRouter, statusConflictMs: 20, statusDedupMs: 10 });
+  session.state = "RUNNING";
+  session._deliveredPacks = [{ name: "alpha", version: "v1" }];
+  assert.equal(session.notePackUpdate("alpha", "v2"), true);
+  const completes = [];
+  session.on("state-change", (event) => {
+    if (event.to === "COMPLETE") completes.push(event);
+  });
+  hookRouter.register("grok-session", {
+    token: "fixture-token",
+    hooks: grok.hooks,
+    onSignal: (signal) => session.ingestHookSignal(signal),
+  });
+  const dispatch = (record) => hookRouter.handle({
+    glissaId: "grok-session",
+    token: "fixture-token",
+    event: record.event,
+    payload: record.payload,
+  });
+
+  dispatch(records[3]);
+  t.mock.timers.tick(40);
+  assert.equal(session.state, "RUNNING");
+  assert.equal(completes.length, 0);
+  assert.match(session.takePackNoticeContext(), /Context pack updated/);
+  dispatch(records[4]);
+  t.mock.timers.tick(40);
+  assert.equal(session.state, "COMPLETE");
+  assert.equal(completes.length, 1);
+  session.destroy();
+});
+
+test("the live fixture completes a notice-less Stop immediately", (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const records = loadGrokHookFixture();
+  const hookRouter = new HookRouter();
+  const { session } = makeGrokSession({ hookRouter, statusConflictMs: 20, statusDedupMs: 10 });
+  session.state = "RUNNING";
+  hookRouter.register("grok-session", {
+    token: "fixture-token",
+    hooks: grok.hooks,
+    onSignal: (signal) => session.ingestHookSignal(signal),
+  });
+
+  hookRouter.handle({
+    glissaId: "grok-session",
+    token: "fixture-token",
+    event: records[3].event,
+    payload: records[3].payload,
+  });
+  t.mock.timers.tick(40);
+  assert.equal(session.state, "COMPLETE");
+  session.destroy();
 });
 
 test("Claude compatibility settings that can carry hooks are detected conservatively", () => {
@@ -173,7 +304,7 @@ test("the title tier recognizes only captured markers and never guesses ready", 
   assert.equal(grok.classifyTitle("C:\\Windows\\system32\\cmd.exe"), "ignore");
 });
 
-test("the setup core renders five env-inert hooks and distinguishes managed and foreign files", () => {
+test("the setup core renders seven env-inert hooks and distinguishes managed and foreign files", () => {
   const rendered = renderedHooks("/opt/glissa/session/hook-relay.js");
   const parsed = JSON.parse(rendered);
   assert.deepEqual(Object.keys(parsed.hooks), grok.HOOK_EVENTS);
@@ -186,6 +317,15 @@ test("the setup core renders five env-inert hooks and distinguishes managed and 
   assert.equal(classifyGrokHooksFile(rendered, {
     relayPath: "/new/glissa/session/hook-relay.js",
     events: grok.HOOK_EVENTS,
+  }), "managed-stale");
+  const priorManaged = renderGrokHooksFile({
+    relayPath: "/opt/glissa/session/hook-relay.js",
+    events: grok.MANAGED_HOOK_EVENT_SETS[0],
+  });
+  assert.equal(classifyGrokHooksFile(priorManaged, {
+    relayPath: "/opt/glissa/session/hook-relay.js",
+    events: grok.HOOK_EVENTS,
+    managedEventSets: grok.MANAGED_HOOK_EVENT_SETS,
   }), "managed-stale");
   assert.equal(classifyGrokHooksFile('{"hooks":{"Stop":[]}}', {
     relayPath: "/opt/glissa/session/hook-relay.js",
@@ -208,6 +348,12 @@ test("the setup command installs, refreshes managed bytes, and refuses a foreign
     assert.equal(runAgentSetupCli(["setup", "grok"], deps), 0);
     assert.equal(output.some((line) => line.includes("already current")), true);
     const target = path.join(grokHome, "hooks", "glissa.json");
+    fs.writeFileSync(target, renderGrokHooksFile({
+      relayPath: grok.RELAY_PATH,
+      events: grok.MANAGED_HOOK_EVENT_SETS[0],
+    }), "utf8");
+    assert.equal(runAgentSetupCli(["setup", "grok"], deps), 0);
+    assert.equal(inspectGrokAgentSetup({ env: process.env }).classification, "current");
     fs.writeFileSync(target, '{"hooks":{"Stop":[]}}', "utf8");
     assert.equal(runAgentSetupCli(["setup", "grok"], deps), 1);
     assert.equal(fs.readFileSync(target, "utf8"), '{"hooks":{"Stop":[]}}');

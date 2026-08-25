@@ -389,10 +389,21 @@ test('the trust bypass is off by default and rides the argv only when the projec
     'the hooks are still declared: an operator-seeded trusted_hash is a deliberate path to running them');
   optedOut.session.destroy();
 
-  const optedIn = makeCodexSession({ id: 'codex-opt', hookRouter, getHookPort, bypassHookTrust: true });
-  await optedIn.session.start();
-  assert.equal(optedIn.calls[0].args[0], '--dangerously-bypass-hook-trust');
-  optedIn.session.destroy();
+  const cleanProject = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-codex-clean-'));
+  try {
+    const optedIn = makeCodexSession({
+      id: 'codex-opt',
+      path: cleanProject,
+      hookRouter,
+      getHookPort,
+      bypassHookTrust: true,
+    });
+    await optedIn.session.start();
+    assert.equal(optedIn.calls[0].args[0], '--dangerously-bypass-hook-trust');
+    optedIn.session.destroy();
+  } finally {
+    fs.rmSync(cleanProject, { recursive: true, force: true });
+  }
 });
 
 // The bypass runs every hook the invocation loads, and codex loads project-scoped hooks from the

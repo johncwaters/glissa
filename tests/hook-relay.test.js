@@ -117,7 +117,7 @@ test('decideRelayPost: the whole verdict, refusal by refusal', () => {
   assert.equal(decideRelayPost().reason, 'no-hook-url');
 });
 
-test('decideHookStdout returns only the validated UserPromptSubmit injection object', () => {
+test('decideHookStdout returns only a validated bounded notice for the matching declared event', () => {
   const responseBody = JSON.stringify({
     ok: true,
     reason: 'ok',
@@ -128,6 +128,13 @@ test('decideHookStdout returns only the validated UserPromptSubmit injection obj
     hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: 'Read the updated pack.' },
   }));
   assert.equal(decideHookStdout('Stop', 200, responseBody), null);
+  const stopResponseBody = JSON.stringify({
+    hookSpecificOutput: { hookEventName: 'Stop', additionalContext: 'Read the updated pack.' },
+  });
+  assert.equal(decideHookStdout('Stop', 200, stopResponseBody), JSON.stringify({
+    hookSpecificOutput: { hookEventName: 'Stop', additionalContext: 'Read the updated pack.' },
+  }));
+  assert.equal(decideHookStdout('Notification', 200, stopResponseBody), null);
   assert.equal(decideHookStdout('UserPromptSubmit', 403, responseBody), null);
   assert.equal(decideHookStdout('UserPromptSubmit', 200, '{bad json'), null);
   assert.equal(decideHookStdout('UserPromptSubmit', 200, JSON.stringify({
@@ -145,7 +152,7 @@ test('decideHookStdout returns only the validated UserPromptSubmit injection obj
   assert.equal(decideHookStdout('UserPromptSubmit', 200, 'x'.repeat(MAX_RESPONSE_BYTES + 1)), null);
 });
 
-test('relay stdout is silent except for an accepted bounded UserPromptSubmit context', async () => {
+test('relay stdout carries accepted bounded context for UserPromptSubmit and Stop only', async () => {
   const acceptedBody = JSON.stringify({
     ok: true,
     hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: 'Pack alpha changed.' },
@@ -156,8 +163,17 @@ test('relay stdout is silent except for an accepted bounded UserPromptSubmit con
     hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: 'Pack alpha changed.' },
   })}\n`);
 
+  const stopBody = JSON.stringify({
+    ok: true,
+    hookSpecificOutput: { hookEventName: 'Stop', additionalContext: 'Pack alpha changed.' },
+  });
+  const acceptedStop = await relayResponse({ event: 'Stop', responseBody: stopBody });
+  assert.equal(acceptedStop.output, `${JSON.stringify({
+    hookSpecificOutput: { hookEventName: 'Stop', additionalContext: 'Pack alpha changed.' },
+  })}\n`);
+
   const silentCases = [
-    { event: 'Stop', responseBody: acceptedBody },
+    { event: 'Notification', responseBody: acceptedBody },
     { status: 403, responseBody: acceptedBody },
     { responseBody: '{bad json' },
     { responseBody: JSON.stringify({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit' } }) },

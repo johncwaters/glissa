@@ -37,6 +37,7 @@ const DEFAULT_INTERVAL_HOURS = 24;
 const DEFAULT_TIMEOUT_SECONDS = 900;
 const PACK_DISTILL_PROMPT_FILE = 'pack-distill-prompt.txt';
 const PACK_DISTILL_BOOTSTRAP_PROMPT = 'Read pack-distill-prompt.txt and follow all instructions in that file';
+const UNSAFE_OUTPUT_REASON = 'output path escapes the packs directory or cannot be safely inspected';
 const PACK_DISTILL_DENY_TOOLS = Object.freeze([
   'Bash', 'Edit', 'NotebookEdit', 'WebFetch', 'WebSearch', 'Task',
 ]);
@@ -52,6 +53,19 @@ function readDistillResult(resultPath) {
   });
   if (result.ok) return result;
   return failedResult(result.kind === 'missing' ? undefined : result.reason);
+}
+
+async function writeOutputNoFollow(fullPath, content) {
+  const flags = fs.constants.O_WRONLY
+    | fs.constants.O_CREAT
+    | fs.constants.O_TRUNC
+    | fs.constants.O_NOFOLLOW;
+  const handle = await fs.promises.open(fullPath, flags, 0o666);
+  try {
+    await handle.writeFile(content, 'utf8');
+  } finally {
+    await handle.close();
+  }
 }
 
 function writeStandaloneLaneSettings(permissions) {
@@ -112,7 +126,7 @@ function createPackDistiller(deps = {}) {
     readOutput = async (fullPath) => {
       try { return await fs.promises.readFile(fullPath, 'utf8'); } catch { return null; }
     },
-    writeOutput = (fullPath, content) => fs.promises.writeFile(fullPath, content, 'utf8'),
+    writeOutput = writeOutputNoFollow,
     writePrompt = (promptPath, content) => fs.promises.writeFile(promptPath, content, 'utf8'),
     spawnDistill = createDistillSpawn(),
     // Each distill gets a private result directory rather than a predictable name in shared temp (see
@@ -148,6 +162,14 @@ function createPackDistiller(deps = {}) {
     return { pack, output, status: 'error', verdict: null, reason: null, summary: '', ...overrides };
   }
 
+  async function safeResolveOutput(output) {
+    try {
+      return await resolveOutput(output);
+    } catch {
+      return null;
+    }
+  }
+
   function spawnWithTimeout(spawnArgs, resultPath, { onPending = null } = {}) {
     return raceWithAbort({
       timeoutMs: timeoutSeconds * 1000,
@@ -165,8 +187,8 @@ function createPackDistiller(deps = {}) {
   async function distillEntry(spec, entry, index, { dryRun }) {
     const base = (overrides) => report(spec.name, entry.output, overrides);
 
-    const outputPath = resolveOutput(entry.output);
-    if (!outputPath) return base({ reason: 'output path escapes the packs directory' });
+    const outputPath = await safeResolveOutput(entry.output);
+    if (!outputPath) return base({ reason: UNSAFE_OUTPUT_REASON });
 
     let hashes;
     try {
@@ -210,6 +232,7 @@ function createPackDistiller(deps = {}) {
     try {
       await writeOutput(outputPath, renderDistilledOutput({ sources: hashes, content: result.content }));
     } catch (err) {
+      if (err.code === 'ELOOP') return base({ verdict: 'ERROR', reason: 'output path became a symbolic link' });
       return base({ verdict: 'ERROR', reason: `could not write output: ${firstLine(err.message)}` });
     }
 
@@ -242,9 +265,9 @@ function createPackDistiller(deps = {}) {
       let hasEscapingOutput = false;
       for (const entry of entries) {
         if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
-        if (resolveOutput(entry.output)) continue;
+        if (await safeResolveOutput(entry.output)) continue;
         hasEscapingOutput = true;
-        reports.push(report(loaded.name || spec.name, entry.output, { reason: 'output path escapes the packs directory' }));
+        reports.push(report(loaded.name || spec.name, entry.output, { reason: UNSAFE_OUTPUT_REASON }));
       }
       if (hasEscapingOutput) continue;
 
@@ -314,4 +337,5 @@ module.exports = {
   createPackDistiller,
   packDistillerPermissions,
   readDistillResult,
+  writeOutputNoFollow,
 };

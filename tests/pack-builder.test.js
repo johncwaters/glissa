@@ -11,7 +11,7 @@ const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 
-const { buildPack, buildPacks, listPackSpecs, packWatchRoots, publishBuild, readBuiltManifest, resolveBuiltPack } = require('../server/pack-builder');
+const { buildPack, buildPacks, distillOutputPath, listPackSpecs, packWatchRoots, publishBuild, readBuiltManifest, resolveBuiltPack } = require('../server/pack-builder');
 
 function writeFile(root, relPath, content) {
   const full = path.join(root, relPath);
@@ -86,6 +86,38 @@ test('listPackSpecs finds every .pack.json and sorts it by name', async () => {
 test('listPackSpecs returns nothing for a missing specs dir rather than throwing', async () => {
   const specs = await listPackSpecs({ specsDir: path.join(os.tmpdir(), 'glissa-packs-does-not-exist') });
   assert.deepEqual(specs, []);
+});
+
+test('distillOutputPath refuses symlinks at the target and in every existing parent segment', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-distill-output-'));
+  const packsDir = path.join(root, 'packs');
+  const outsideDir = path.join(root, 'outside');
+  try {
+    fs.mkdirSync(path.join(packsDir, 'sources', 'demo'), { recursive: true });
+    fs.mkdirSync(outsideDir);
+    const relativeOutput = path.join('sources', 'demo', 'derived', 'brief.md');
+    const expectedOutput = path.join(packsDir, relativeOutput);
+    assert.equal(await distillOutputPath(relativeOutput, { baseDir: packsDir }), expectedOutput);
+
+    fs.symlinkSync(outsideDir, path.join(packsDir, 'sources', 'demo', 'derived'), 'dir');
+    assert.equal(await distillOutputPath(relativeOutput, { baseDir: packsDir }), null);
+    fs.rmSync(path.join(packsDir, 'sources', 'demo', 'derived'));
+
+    fs.mkdirSync(path.dirname(expectedOutput));
+    const outsideFile = writeFile(outsideDir, 'brief.md', 'outside\n');
+    fs.symlinkSync(outsideFile, expectedOutput, 'file');
+    assert.equal(await distillOutputPath(relativeOutput, { baseDir: packsDir }), null);
+    assert.equal(fs.readFileSync(outsideFile, 'utf8'), 'outside\n');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('distillOutputPath refuses a non-ENOENT lstat error instead of aborting the pass', async (t) => {
+  const refusal = new Error('permission denied');
+  refusal.code = 'EACCES';
+  t.mock.method(fsp, 'lstat', async () => { throw refusal; });
+  assert.equal(await distillOutputPath('sources/demo/brief.md', { baseDir: '/packs' }), null);
 });
 
 test('a build writes the pack layout under current/', async () => {

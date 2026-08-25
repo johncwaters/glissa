@@ -300,10 +300,10 @@ function reconcileSessionWorktrees({ projects, sessions, gitWorkspaceSync, integ
   }
 }
 
-// The one hook event whose response can inject context into the turn it answers. Case-insensitive to
-// match mapHookToSignal, which reads the same route parameter.
-function isUserPromptSubmitEvent(event) {
-  return String(event || '').toLowerCase() === 'userpromptsubmit';
+function isPackNoticeHookEvent(event, session) {
+  const declaredEvent = session?.packNoticeHookEvent;
+  if (!declaredEvent) return false;
+  return String(event || '').toLowerCase() === declaredEvent.toLowerCase();
 }
 
 // Telemetry, not a status signal: mapHookToSignal returns null for it (so HookRouter answers 200 with
@@ -565,8 +565,7 @@ function createBackend(httpServer, options = {}) {
       });
       // The managed statusLine relay's POST. Only an ACCEPTED callback is ingested (the token check is
       // HookRouter's, shared with every other event), the payload is normalized and dropped rather than
-      // stored or recorded, and the reply below stays the plain ok JSON: the injection shape is
-      // UserPromptSubmit-only.
+      // stored or recorded, and the reply below stays the plain ok JSON.
       if (out.status === 200 && isStatuslineEvent(req.params.event)) {
         usage.ingestStatusline(payload);
       }
@@ -575,17 +574,19 @@ function createBackend(httpServer, options = {}) {
       // threw a ReferenceError that the tolerate-catch above swallowed and EVERY hook payload arrived
       // as {} (dead session_id capture, dead background_tasks gate, dead Notification subtypes).
       const reply = { ok: out.status === 200, reason: out.reason };
-      // Live context-pack channel: a UserPromptSubmit reply MAY carry one Glissa-authored notice that
+      // Live context-pack channel: an adapter-declared hook reply MAY carry one Glissa-authored notice that
       // a pack this session spawned against has been rebuilt. Only this exact nesting with a matching
-      // hookEventName injects anything (verified on Claude Code 2.1.235), only UserPromptSubmit is a
-      // reliable per-turn injection point, and only an ACCEPTED callback may consume the notice, so a
-      // rejected token can never drain it. With nothing pending the body stays byte-identical to
-      // before the channel existed - pinned by tests/backend-pack-notice-hook.test.js.
-      const packNotice = out.status === 200 && isUserPromptSubmitEvent(req.params.event)
-        ? sessions.get(req.params.glissaId)?.takePackNoticeContext() || null
+      // hookEventName injects anything, and only an ACCEPTED callback may consume the notice, so a
+      // rejected token can never drain it. Tests pin the empty path byte-for-byte.
+      const hookSession = sessions.get(req.params.glissaId);
+      const packNotice = out.status === 200 && isPackNoticeHookEvent(req.params.event, hookSession)
+        ? hookSession.takePackNoticeContext() || null
         : null;
       if (packNotice) {
-        reply.hookSpecificOutput = { hookEventName: 'UserPromptSubmit', additionalContext: packNotice };
+        reply.hookSpecificOutput = {
+          hookEventName: hookSession.packNoticeHookEvent,
+          additionalContext: packNotice,
+        };
       }
       res.status(out.status).json(reply);
     });

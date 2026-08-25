@@ -7,7 +7,26 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { buildPackNotice, listStalePacks, MAX_LISTED_PACKS, MAX_NOTICE_CHARS } = require('../session/core/pack-notice');
+const {
+  buildPackNotice,
+  listStalePacks,
+  shouldHoldTerminalStopForNotice,
+  MAX_LISTED_PACKS,
+  MAX_NOTICE_CHARS,
+} = require('../session/core/pack-notice');
+
+test('only a terminal Stop that owes its response a notice stays running', () => {
+  const stopWithNotice = {
+    event: 'Stop',
+    signal: 'ready',
+    isNoticePending: true,
+    packNoticeHookEvent: 'Stop',
+  };
+  assert.equal(shouldHoldTerminalStopForNotice(stopWithNotice), true);
+  assert.equal(shouldHoldTerminalStopForNotice({ ...stopWithNotice, isNoticePending: false }), false);
+  assert.equal(shouldHoldTerminalStopForNotice({ ...stopWithNotice, packNoticeHookEvent: 'UserPromptSubmit' }), false);
+  assert.equal(shouldHoldTerminalStopForNotice({ ...stopWithNotice, signal: 'awaiting-input' }), false);
+});
 
 test('nothing stale yields no notice', () => {
   assert.equal(buildPackNotice([], {}), null, 'no delivered packs');

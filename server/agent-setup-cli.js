@@ -14,6 +14,7 @@ function setupInputs(env = process.env) {
     filePath: grok.hooksFilePath(env),
     relayPath: grok.RELAY_PATH,
     events: grok.HOOK_EVENTS,
+    managedEventSets: grok.MANAGED_HOOK_EVENT_SETS,
   };
 }
 

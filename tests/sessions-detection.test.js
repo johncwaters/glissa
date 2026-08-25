@@ -422,6 +422,19 @@ test('a duplicate SubagentStart does not double-count; an unknown SubagentStop i
   s.destroy();
 });
 
+test('a forged SubagentStop cannot pre-drain a later authoritative Stop declaration', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const s = makeSession(STATES.RUNNING);
+  hook(s, 'subagent-stop', { payload: { agent_id: 'future-agent' } });
+  hook(s, 'ready', {
+    payload: { background_tasks: [{ id: 'future-agent', type: 'subagent', status: 'running' }] },
+  });
+  t.mock.timers.tick(40);
+  assert.equal(s.state, STATES.RUNNING);
+  assert.equal(s.toSnapshot().activeAgents, 1);
+  s.destroy();
+});
+
 test('a SubagentStart with no agent_id is ignored (defensive)', (t) => {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   const s = makeSession(STATES.RUNNING);

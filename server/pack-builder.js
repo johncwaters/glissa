@@ -228,15 +228,27 @@ async function readFilesForSkill(skill, skillIndex, baseDir, { glissaHome = null
 }
 
 /**
- * Absolute path of a distill entry's output, or null when it would land outside the packs directory.
- * The spec validator already rejects an escaping `output`; this is the resolved-path re-check, because
- * the value names a file an LLM lane is about to write.
+ * Absolute path of a distill entry's output, or null when lexical escape or an existing symlink could
+ * redirect the lane's write outside the packs directory.
  */
-function distillOutputPath(output, { baseDir = DEFAULT_PACKS_DIR } = {}) {
+async function distillOutputPath(output, { baseDir = DEFAULT_PACKS_DIR } = {}) {
   if (!isPackRelativePath(output)) return null;
-  const full = path.resolve(baseDir, output);
-  const relative = path.relative(baseDir, full);
+  const resolvedBaseDir = path.resolve(baseDir);
+  const full = path.resolve(resolvedBaseDir, output);
+  const relative = path.relative(resolvedBaseDir, full);
   if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) return null;
+  let current = resolvedBaseDir;
+  for (const segment of relative.split(path.sep)) {
+    current = path.join(current, segment);
+    let stats;
+    try {
+      stats = await fsp.lstat(current);
+    } catch (error) {
+      if (error.code === 'ENOENT') return full;
+      return null;
+    }
+    if (stats.isSymbolicLink()) return null;
+  }
   return full;
 }
 

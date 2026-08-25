@@ -281,6 +281,7 @@ function createTaskRegistry({
   return {
     /** SubagentStart. Returns whether the live set actually changed. */
     noteAgentStart(agentId, ts) {
+      idleTaskIds.delete(agentId);
       return addAgent(countedAgents, agentId, ts);
     },
 

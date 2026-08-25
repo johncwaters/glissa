@@ -18,6 +18,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const { createBackend } = require('../server/backend');
+const grok = require('../session/adapters/grok');
 
 const SESSION_ID = 'pack-notice-session';
 
@@ -141,4 +142,22 @@ test('no other event carries the notice, even with one pending', async () => {
 
   const prompt = await (await postHook('UserPromptSubmit')).json();
   assert.ok(prompt.hookSpecificOutput, 'the notice was still waiting for the one event that can inject it');
+});
+
+test('an adapter can declare Stop as its notice delivery event', async () => {
+  const originalAdapter = session._adapter;
+  session._adapter = grok;
+  try {
+    pretendSpawnedWith([{ name: 'alpha', version: 'v1' }]);
+    session.notePackUpdate('alpha', 'v2');
+
+    const prompt = await postHook('UserPromptSubmit');
+    assert.equal(await prompt.text(), '{"ok":true,"reason":"ok"}');
+    const stop = await (await postHook('Stop')).json();
+    assert.deepEqual(Object.keys(stop.hookSpecificOutput), ['hookEventName', 'additionalContext']);
+    assert.equal(stop.hookSpecificOutput.hookEventName, 'Stop');
+    assert.match(stop.hookSpecificOutput.additionalContext, /Context pack updated/);
+  } finally {
+    session._adapter = originalAdapter;
+  }
 });

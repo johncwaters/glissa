@@ -72,7 +72,8 @@ function decideRelayPost({ env = {}, event = null, payloadBytes = 0 } = {}) {
 }
 
 function decideHookStdout(event, status, body) {
-  if (normalizeEvent(event) !== "userpromptsubmit") return null;
+  const normalizedEvent = normalizeEvent(event);
+  if (normalizedEvent !== "userpromptsubmit" && normalizedEvent !== "stop") return null;
   if (status !== 200) return null;
   const bodyBytes = Buffer.isBuffer(body) ? body.length : Buffer.byteLength(String(body || ""));
   if (bodyBytes === 0 || bodyBytes > MAX_RESPONSE_BYTES) return null;
@@ -84,13 +85,13 @@ function decideHookStdout(event, status, body) {
   }
   const hookSpecificOutput = parsed?.hookSpecificOutput;
   if (!hookSpecificOutput || Array.isArray(hookSpecificOutput)) return null;
-  if (hookSpecificOutput.hookEventName !== "UserPromptSubmit") return null;
+  if (normalizeEvent(hookSpecificOutput.hookEventName) !== normalizedEvent) return null;
   const additionalContext = hookSpecificOutput.additionalContext;
   if (typeof additionalContext !== "string") return null;
   if (additionalContext.length === 0 || additionalContext.length > MAX_ADDITIONAL_CONTEXT_CHARS) return null;
   return JSON.stringify({
     hookSpecificOutput: {
-      hookEventName: "UserPromptSubmit",
+      hookEventName: normalizedEvent === "stop" ? "Stop" : "UserPromptSubmit",
       additionalContext,
     },
   });

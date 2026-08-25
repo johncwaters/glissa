@@ -72,7 +72,7 @@ function createMillWiring(deps = {}) {
   async function distillStatus(entry) {
     const output = String(entry?.output ?? '');
     try {
-      const fullPath = distillOutputPath(output, { baseDir });
+      const fullPath = await distillOutputPath(output, { baseDir });
       if (!fullPath) return { output, stale: null, reason: 'output path resolves outside the packs directory' };
       const sources = await distillSourceHashes(entry, { baseDir });
       const verdict = needsDistill(sources, await readOutputFile(fullPath));
