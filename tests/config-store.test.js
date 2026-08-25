@@ -275,45 +275,62 @@ test('rtk is a settable top-level boolean', () => {
   });
 });
 
-test('getSettings: opt-in blocks are null when absent, echoed when set; projectChoices derives from projects', () => {
+test('getSettings resolves branchGc defaults while opt-in blocks stay null; projectChoices derives from projects', () => {
   withStore({ projects: [{ id: 'p1', name: 'proj-one', path: 'C:/p1' }] }, (store) => {
     const s = store.getSettings();
     assert.equal(s.prReview, null);
-    assert.equal(s.branchGc, null);
+    assert.deepEqual(s.branchGc, DEFAULT_CONFIG.branchGc);
     assert.equal(s.visions, null);
     assert.equal(s.telegram, null);
     assert.deepEqual(s.projectChoices, [{ id: 'p1', name: 'proj-one' }]);
 
     store.config.prReview = { enabled: true, projects: ['p1'] };
-    store.config.branchGc = { enabled: true, staleDays: 21 };
+    store.config.branchGc = { ...DEFAULT_CONFIG.branchGc, enabled: false, staleDays: 21 };
     store.config.visions = { enabled: true, dispatch: { enabled: false } };
     store.config.telegram = { botToken: 'tok', chatId: '123' };
     const s2 = store.getSettings();
     assert.deepEqual(s2.prReview, { enabled: true, projects: ['p1'] });
-    assert.deepEqual(s2.branchGc, { enabled: true, staleDays: 21 });
+    assert.deepEqual(s2.branchGc, { enabled: false, staleDays: 21, intervalMs: DEFAULT_CONFIG.branchGc.intervalMs });
     assert.deepEqual(s2.visions, { enabled: true, dispatch: { enabled: false } });
     assert.deepEqual(s2.telegram, { botToken: 'tok', chatId: '123' });
   });
 });
 
-test('applySettings passes opt-in blocks through only when present on the incoming config', () => {
+test('applySettings preserves branchGc defaults and merges partial overrides', () => {
   withStore({ projects: [] }, (store) => {
     store.applySettings({ cursorBlink: true });
     assert.equal(store.config.prReview, undefined, 'absent on the incoming config leaves it untouched');
-    assert.equal(store.config.branchGc, undefined);
+    assert.deepEqual(store.config.branchGc, DEFAULT_CONFIG.branchGc);
     assert.equal(store.config.visions, undefined);
     assert.equal(store.config.telegram, undefined);
 
     store.applySettings({
       prReview: { enabled: true },
-      branchGc: { enabled: true },
+      branchGc: { enabled: false },
       visions: { enabled: true },
       telegram: { botToken: 'x', chatId: 'y' },
     });
     assert.deepEqual(store.config.prReview, { enabled: true });
-    assert.deepEqual(store.config.branchGc, { enabled: true });
+    assert.deepEqual(store.config.branchGc, { ...DEFAULT_CONFIG.branchGc, enabled: false });
     assert.deepEqual(store.config.visions, { enabled: true });
     assert.deepEqual(store.config.telegram, { botToken: 'x', chatId: 'y' });
+  });
+});
+
+test('branchGc defaults survive a config save round trip', () => {
+  withStore({ projects: [] }, (store, configPath) => {
+    const saved = store.save((config) => { config.cursorBlink = true; });
+
+    assert.equal(saved.branchGc, undefined);
+    assert.deepEqual(store.config.branchGc, DEFAULT_CONFIG.branchGc);
+    assert.deepEqual(store.getSettings().branchGc, DEFAULT_CONFIG.branchGc);
+    assert.equal(JSON.parse(fs.readFileSync(configPath, 'utf8')).branchGc, undefined);
+  });
+});
+
+test('a partial branchGc config merges over the defaults', () => {
+  withStore({ branchGc: { enabled: false }, projects: [] }, (store) => {
+    assert.deepEqual(store.config.branchGc, { ...DEFAULT_CONFIG.branchGc, enabled: false });
   });
 });
 

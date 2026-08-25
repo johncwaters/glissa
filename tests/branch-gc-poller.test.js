@@ -129,6 +129,25 @@ test('git helpers normalize remote refs, retain unresolved protected names, and 
   assert.ok(calls.some(([args]) => args.join(' ') === 'push origin --delete glissa/session/abc'));
 });
 
+test('default config constructs and starts the lane poller', async () => {
+  let createCount = 0;
+  const wiring = createBranchGcWiring({
+    config: { projects: [] },
+    gitWorkspace: {},
+    createPoller: () => {
+      createCount += 1;
+      return { start: async () => {}, stop: async () => {} };
+    },
+  });
+
+  wiring.start();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(createCount, 1);
+  assert.equal(wiring.getStatus().configured, true);
+  await wiring.stop();
+});
+
 test('disabled config never constructs or starts the lane poller', async () => {
   let createCount = 0;
   const wiring = createBranchGcWiring({
