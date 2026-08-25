@@ -12,7 +12,8 @@ const path = require("node:path");
 // additionalDirsClaudeMd is the context-mill delivery flag: without it Claude Code loads only
 // skills and commands from an --add-dir, not the dir's CLAUDE.md or .claude/rules (live-verified on
 // 2.1.235). It is an explicit argument rather than an extraEnv entry so the decision lives here, and
-// it is set ONLY when a pack dir was actually added: a session with no packs keeps today's env.
+// it is set ONLY when a pack dir was actually added and scrubbed otherwise: a backend running inside
+// a pack-delivered Claude session would hand the inherited flag to every session it spawns.
 // prependPathDir lets rtk's bare `rtk <cmd>` rewrites resolve inside the spawned session.
 
 // A supervised agent must never inherit Glissa's own markers, whichever agent it is.
@@ -62,6 +63,7 @@ function buildAgentEnv(baseEnv, extraEnv, profile, { additionalDirsClaudeMd = fa
   for (const key of profile.scrub || []) delete env[key];
   for (const key of GLISSA_SCRUB_KEYS) delete env[key];
   Object.assign(env, profile.set || {});
+  if (profile.additionalDirsEnvVar) delete env[profile.additionalDirsEnvVar];
   if (additionalDirsClaudeMd && profile.additionalDirsEnvVar) env[profile.additionalDirsEnvVar] = "1";
   prependPathDir(env, pathDir);
   return env;

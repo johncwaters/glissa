@@ -86,6 +86,13 @@ test('CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD is set only when a pack dir w
   assert.equal(buildSpawnEnv(fullBase(), null, { additionalDirsClaudeMd: true })[KEY], '1');
 });
 
+test('an inherited pack flag is scrubbed when no pack dir was added', () => {
+  const KEY = 'CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD';
+  const inherited = { ...fullBase(), [KEY]: '1' };
+  assert.equal(KEY in buildSpawnEnv(inherited, null, { additionalDirsClaudeMd: false }), false);
+  assert.equal(buildSpawnEnv(inherited, null, { additionalDirsClaudeMd: true })[KEY], '1');
+});
+
 test('the pack flag lands on the copy, never on the source env', () => {
   const base = fullBase();
   buildSpawnEnv(base, null, { additionalDirsClaudeMd: true });
