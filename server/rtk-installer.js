@@ -11,6 +11,7 @@ const {
   installTargetPath,
   isRtkBinaryName,
   verifyDigest,
+  findEscapingArchiveMember,
 } = require('./core/rtk-install-core');
 
 const DOWNLOAD_TIMEOUT_MS = 60000;
@@ -63,6 +64,16 @@ async function findBinary(dir, platform) {
   return null;
 }
 
+async function moveIntoPlace(source, target) {
+  try {
+    await fsp.rename(source, target);
+  } catch (err) {
+    if (err?.code !== 'EXDEV') throw err;
+    await fsp.copyFile(source, target);
+    await fsp.unlink(source);
+  }
+}
+
 async function removeQuietly(target) {
   try {
     await fsp.rm(target, { recursive: true, force: true });
@@ -107,6 +118,9 @@ async function installRtk({
     const extractDir = path.join(stagingDir, 'extract');
     await fsp.mkdir(extractDir, { recursive: true });
     try {
+      const listing = await execFileImpl('tar', ['-tf', archivePath]);
+      const escaping = findEscapingArchiveMember(listing?.stdout ?? listing);
+      if (escaping) return { ok: false, reason: `extract refused: archive member escapes the staging dir: ${escaping}` };
       await execFileImpl('tar', ['-xf', archivePath, '-C', extractDir]);
     } catch (err) {
       const detail = err?.code === 'ENOENT' ? 'tar was not found on PATH' : (err?.message || String(err));
@@ -124,7 +138,7 @@ async function installRtk({
     await fsp.mkdir(path.dirname(target), { recursive: true });
     // Windows rename refuses an existing destination, so clear it first.
     await removeQuietly(target);
-    await fsp.rename(extracted, target);
+    await moveIntoPlace(extracted, target);
 
     log?.log?.(`[rtk] installed rtk ${asset.version} at ${target}`);
     return { ok: true, path: target, version: asset.version };

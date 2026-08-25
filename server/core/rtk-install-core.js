@@ -76,7 +76,18 @@ function isRtkBinaryName(name, platform) {
   return name.toLowerCase() === wanted;
 }
 
+function findEscapingArchiveMember(listingText) {
+  const members = String(listingText || '').split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  for (const member of members) {
+    const segments = member.split(/[\\/]+/);
+    if (segments.includes('..')) return member;
+    if (member.startsWith('/') || member.startsWith('\\') || /^[A-Za-z]:/.test(member)) return member;
+  }
+  return null;
+}
+
 module.exports = {
+  findEscapingArchiveMember,
   RTK_VERSION,
   RTK_RELEASE_BASE_URL,
   RTK_ASSETS,

@@ -13,6 +13,7 @@ const {
   verifyDigest,
   installTargetPath,
   isRtkBinaryName,
+  findEscapingArchiveMember,
 } = require('../server/core/rtk-install-core');
 
 const BASE = { rtkEnabled: true, resolvedPath: null, platform: 'linux', arch: 'x64', nowMs: 1_000_000 };
@@ -78,4 +79,12 @@ test('isRtkBinaryName matches the platform binary and nothing beside it', () => 
   assert.equal(isRtkBinaryName('rtk.exe', 'linux'), false);
   assert.equal(isRtkBinaryName('rtk.exe', 'win32'), true);
   assert.equal(isRtkBinaryName('README.md', 'linux'), false);
+});
+
+test('findEscapingArchiveMember flags parent-dir and absolute members and passes a nested rtk', () => {
+  assert.equal(findEscapingArchiveMember('./\n./rtk-0.45.0/\n./rtk-0.45.0/rtk\n'), null);
+  assert.equal(findEscapingArchiveMember('rtk\n../evil\n'), '../evil');
+  assert.equal(findEscapingArchiveMember('/usr/bin/rtk\n'), '/usr/bin/rtk');
+  assert.equal(findEscapingArchiveMember('C:\\Windows\\rtk.exe\n'), 'C:\\Windows\\rtk.exe');
+  assert.equal(findEscapingArchiveMember(''), null);
 });

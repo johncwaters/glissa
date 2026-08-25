@@ -159,3 +159,28 @@ test('installRtk refuses an archive whose rtk entry is a symlink and lands nothi
   assert.match(result.reason, /no rtk binary inside/);
   assert.equal(fs.existsSync(path.join(homeDir, '.glissa', 'bin', 'rtk')), false);
 });
+
+test('installRtk refuses an archive listing a member outside the staging dir before extracting', async (t) => {
+  const homeDir = await makeTempHome(t);
+  const fixture = await buildFixture(t);
+  let extracted = false;
+  const execFileImpl = async (_file, args) => {
+    if (args[0] === '-tf') return { stdout: './rtk\n../escape\n', stderr: '' };
+    extracted = true;
+    return { stdout: '', stderr: '' };
+  };
+
+  const result = await installRtk({
+    homeDir,
+    platform: 'linux',
+    arch: 'x64',
+    fetchImpl: fakeFetch(fixture.bytes),
+    execFileImpl,
+    asset: assetFor(fixture.sha256),
+  });
+
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /escapes the staging dir: \.\.\/escape/);
+  assert.equal(extracted, false);
+  assert.equal(fs.existsSync(path.join(homeDir, '.glissa', 'bin', 'rtk')), false);
+});
