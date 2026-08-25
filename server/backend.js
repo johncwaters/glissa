@@ -48,6 +48,8 @@ const { createWsSender } = require('./ws-sender');
 const { HookRouter } = require('../detection/hook-source');
 const { sweepOrphans } = require('../detection/settings-injector');
 const { getRtkPath } = require('../session/core/rtk-command');
+const { createRtkInstallWiring } = require('./rtk-install-wiring');
+const { buildSettingsPayload } = require('./settings-payload');
 const { checkForUpdate: defaultCheckForUpdate } = require('./update-check');
 const { shortSha } = require('./core/update-core');
 const { createSpawnGate } = require('./spawn-gate');
@@ -422,6 +424,18 @@ function createBackend(httpServer, options = {}) {
     }
     return null;
   }
+
+  // Self-install lane: with config.rtk on and nothing resolvable, Glissa fetches the pinned release into
+  // ~/.glissa/bin rather than leaving the setting silently inert.
+  const rtkInstall = createRtkInstallWiring({
+    config,
+    onStatusChange: (status) => {
+      broadcastControl({
+        type: 'settings-updated',
+        settings: buildSettingsPayload({ configStore, rtkInstallStatus: status }),
+      });
+    },
+  });
 
   // Both switches, in one place: the statusLine relay is part of the usage lane, so usage.enabled false
   // must leave nothing injected even with planLimits left at its default.
@@ -1664,6 +1678,8 @@ function createBackend(httpServer, options = {}) {
     memoryDistiller.start().catch((err) => console.warn(`[memory-distill] start failed: ${err.message}`));
   }
 
+  void rtkInstall.maybeInstall();
+
   branchGc.start();
 
   // --- GitHub PR auto-review poller (opt-in; inert unless config.prReview.enabled) ---
@@ -1852,6 +1868,8 @@ function createBackend(httpServer, options = {}) {
     // first consumer for a spec (or losing its last) is what starts and stops that work. applyConfigReload
     // sets config.projects before delegating here, so both halves of the consumer set are already live.
     if (packsAutoRebuildEnabled) packService.restartIfConsumersChanged();
+    // A save that just switched rtk on is the second install trigger (boot is the first).
+    void rtkInstall.maybeInstall();
   }
 
   // Restart/shutdown handlers live in server-lifecycle.js so the re-entry guard, the reap-before-exit
@@ -1882,6 +1900,7 @@ function createBackend(httpServer, options = {}) {
     configStore,
     broadcastControl,
     controlReplayLog,
+    getRtkInstallStatus: () => rtkInstall.getStatus(),
     generateProjectId,
     makeSession,
     wireSessionEvents,

@@ -7,7 +7,7 @@ import './tailwind.css';
 import { shouldShowServerAction } from '/shared/client-trust.mjs';
 import { STATES } from '/shared/states.mjs';
 import { checkControlLiveness, connectControl, onControlMessage, sendControlMsg, sendControlRequest, setConnectionStateCallback } from './control-ws.js';
-import { createAddSessionDialog, createSettingsDialog } from './dialogs.js';
+import { applySettingsBroadcast, createAddSessionDialog, createSettingsDialog } from './dialogs.js';
 import { observeHeaderHeight, writeClipboardText } from './dom-helpers.js';
 import { activateFocusView, centerSessionQuietly, deactivateFocusView, focusAdjacentInRail, focusNextAttention, focusNthInRail, getFocusedSessionId, isFocusActive, mountFocusView, noteKnownProjectPath, refreshFocusRoster, restoreFocusedSession, setFocusMergeStatus } from './focus-view/focus-view.js';
 import { initFormFactor, isPhoneLayout, onLayoutChange } from './form-factor.js';
@@ -298,7 +298,7 @@ const messageHandlers = {
   'update-available':   (msg) => { showUpdateBanner(msg); applyRadarUpdate(msg); },
   'error':              (msg) => showErrorToast(msg.message, { persist: true }),
   'session-error':      (msg) => showErrorToast(`${msg.session}: ${msg.message}`, { persist: true }),
-  'settings-updated':   (msg) => { if (msg.settings) applyTerminalSettings(msg.settings); },
+  'settings-updated':   (msg) => { if (msg.settings) { applyTerminalSettings(msg.settings); applySettingsBroadcast(msg.settings); } },
   'health-snapshot':    (msg) => { if (msg.stats) { applyHealthSnapshot(msg.stats); applyRadarHealth(msg.stats); } },
   'posthog-status':     (msg) => applyPosthogStatus(msg),
   'pr-status':          (msg) => { applyPrStatus(msg); applyRadarPrStatus(msg); },
