@@ -7,9 +7,30 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 
-const { PACK_DISTILL_DENY, createPackDistiller, readDistillResult } = require('../server/pack-distiller');
+const {
+  PACK_DISTILL_BOOTSTRAP_PROMPT,
+  PACK_DISTILL_DENY_TOOLS,
+  PACK_DISTILL_PROMPT_FILE,
+  createPackDistiller,
+  packDistillerPermissions,
+  readDistillResult,
+} = require('../server/pack-distiller');
 const { buildStampLine, needsDistill } = require('../server/core/distill-core');
+const { buildLanePermissions } = require('../server/core/lane-permissions-core');
+const {
+  MAX_DISTILL_PROMPT_BYTES,
+  MAX_DISTILL_RESULT_BYTES,
+  MAX_DISTILLED_CONTENT_CHARS,
+  buildPackDistillPrompt,
+  decidePackDistillPromptSize,
+  renderDistilledOutput,
+  validateDistillResult,
+} = require('../server/core/pack-distiller-core');
+const { withFakeSession } = require('./helpers/fake-session');
 
 const HASHES = [
   { path: 'AGENTS.md', fullPath: 'C:/repo/AGENTS.md', sha256: 'a'.repeat(64) },
@@ -47,7 +68,11 @@ function harness({
   hashes = HASHES,
   files = {},
   verdicts = ['DISTILLED'],
+  readResultOverride = null,
+  createResultFileOverride = null,
   onSpawn = null,
+  onWrite = null,
+  writePromptOverride = null,
   hangForever = false,
   hangUntilRelease = false,
   enabled = false,
@@ -61,6 +86,8 @@ function harness({
   let concurrent = 0;
   let maxConcurrent = 0;
   const removed = [];
+  const writes = [];
+  const promptWrites = [];
 
   const distiller = createPackDistiller({
     enabled,
@@ -75,6 +102,15 @@ function harness({
     sourceHashes: async () => (typeof hashes === 'function' ? hashes() : hashes),
     resolveOutput: (output) => (output.includes('..') ? null : `/packs/${output}`),
     readOutput: async (fullPath) => (fullPath in files ? files[fullPath] : null),
+    writeOutput: async (fullPath, content) => {
+      writes.push({ fullPath, content });
+      if (onWrite) return onWrite(files, fullPath, content);
+      files[fullPath] = content;
+    },
+    writePrompt: async (promptPath, content) => {
+      promptWrites.push({ promptPath, content });
+      if (writePromptOverride) await writePromptOverride(promptPath, content);
+    },
     spawnDistill: async (args) => {
       spawns.push(args);
       concurrent += 1;
@@ -93,12 +129,20 @@ function harness({
     // One dep carrying its own cleanup: the closure owns the directory, so nothing has to infer
     // ownership from the path (see createJobResultFile in server/ephemeral-session.js).
     createResultFile: (packName, index) => {
+      if (createResultFileOverride) return createResultFileOverride(packName, index);
       const resultPath = `/tmp/${packName}-${index}.json`;
       return { path: resultPath, cleanup: () => removed.push(resultPath) };
     },
     readResult: async () => {
+      if (readResultOverride) return readResultOverride();
       const verdict = verdicts.shift() || 'ERROR';
-      return { verdict, summary: `summary for ${verdict}` };
+      if (typeof verdict === 'object') return verdict;
+      return {
+        ok: true,
+        verdict,
+        summary: `summary for ${verdict}`,
+        content: verdict === 'ERROR' ? null : '# Brief\n\nDistilled body.',
+      };
     },
     setIntervalFn: (fn, ms) => { intervals.push({ fn, ms }); return { unref() { this.unrefed = true; } }; },
     clearIntervalFn: (handle) => { handle.cleared = true; },
@@ -114,6 +158,8 @@ function harness({
     intervals,
     timeouts,
     files,
+    writes,
+    promptWrites,
     removed,
     maxConcurrent: () => maxConcurrent,
     releaseHungSpawn: () => { for (const release of releases) release(); },
@@ -134,7 +180,7 @@ test('an output whose stamp matches its sources is current, and nothing is spawn
 });
 
 test('a missing output spawns one distill session and reports the written file', async () => {
-  const h = harness({ onSpawn: (files) => { files['/packs/sources/glissa/derived/brief.md'] = stampedFile(); } });
+  const h = harness();
   const [report] = await h.distiller.runOnce();
 
   assert.equal(h.spawns.length, 1);
@@ -147,7 +193,7 @@ test('a missing output spawns one distill session and reports the written file',
 // per entry per pass. It is minted INSIDE the guarded region and released in a finally, so the verdict
 // cannot decide whether it happens.
 test('every distill releases its result file, on a clean verdict and on ERROR alike', async () => {
-  const distilled = harness({ onSpawn: (files) => { files['/packs/sources/glissa/derived/brief.md'] = stampedFile(); } });
+  const distilled = harness();
   await distilled.distiller.runOnce();
   assert.deepEqual(distilled.removed, ['/tmp/glissa-0.json'], 'released after a DISTILLED verdict');
 
@@ -160,7 +206,6 @@ test('every distill releases its result file, on a clean verdict and on ERROR al
 test('an edited source spawns a distill even though the output exists', async () => {
   const h = harness({
     files: { '/packs/sources/glissa/derived/brief.md': stampedFile([{ path: 'AGENTS.md', sha256: 'f'.repeat(64) }]) },
-    onSpawn: (files) => { files['/packs/sources/glissa/derived/brief.md'] = stampedFile(); },
   });
   const [report] = await h.distiller.runOnce();
 
@@ -181,33 +226,100 @@ test('a dry run reports the drift and its reason, and spawns nothing', async () 
 // the spawned session
 // ---------------------------------------------------------------------------
 
-test('the spawn carries the resolved output path, the source paths, the instructions and the stamp', async () => {
-  const h = harness({ onSpawn: (files) => { files['/packs/sources/glissa/derived/brief.md'] = stampedFile(); } });
+test('the prompt file names the target as read-only context and the spawn runs from its directory', async () => {
+  const h = harness();
   await h.distiller.runOnce();
 
   const [spawn] = h.spawns;
-  assert.match(spawn.prompt, /\/packs\/sources\/glissa\/derived\/brief\.md/);
-  assert.match(spawn.prompt, /C:\/repo\/AGENTS\.md/);
-  assert.ok(spawn.prompt.includes('Write a one page architecture brief.'));
-  assert.ok(spawn.prompt.includes(buildStampLine(HASHES)), 'the exact stamp the verify step expects');
-  assert.match(spawn.prompt, /\/tmp\/glissa-0\.json/);
+  const [promptWrite] = h.promptWrites;
+  assert.equal(promptWrite.promptPath, `/tmp/${PACK_DISTILL_PROMPT_FILE}`);
+  assert.match(promptWrite.content, /\/packs\/sources\/glissa\/derived\/brief\.md/);
+  assert.match(promptWrite.content, /C:\/repo\/AGENTS\.md/);
+  assert.ok(promptWrite.content.includes('Write a one page architecture brief.'));
+  assert.equal(promptWrite.content.includes(buildStampLine(HASHES)), false);
+  assert.match(promptWrite.content, /Glissa alone writes that output file/);
+  assert.match(promptWrite.content, /\/tmp\/glissa-0\.json/);
+  assert.equal(spawn.cwd, '/tmp');
   assert.equal(spawn.id, 'pack-distill:glissa#0');
   assert.ok(spawn.signal, 'a timeout signal is always passed');
 });
 
-test('the deny-list blocks the outward verbs and writes outside packs/', () => {
-  const deny = PACK_DISTILL_DENY.deny;
-  for (const rule of ['Bash(git commit:*)', 'Bash(git push:*)', 'Bash(gh:*)', 'Write(server/**)', 'Edit(docs/**)', 'Write(packs/specs/**)', 'Write(*)']) {
-    assert.ok(deny.includes(rule), rule);
+test('hostile instructions stay byte-identical in the prompt file and never reach spawn arguments', async () => {
+  const hostileInstructions = 'Quote "this" and preserve %PATH% ^ & | < > plus \'single quotes\'.';
+  const spec = specWithDistill();
+  spec.distill[0].instructions = hostileInstructions;
+  const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-pack-distiller-hostile-'));
+  const resultPath = path.join(workDir, 'result.json');
+  try {
+    const h = harness({
+      specByPath: { '/specs/glissa.pack.json': spec },
+      createResultFileOverride: () => ({ path: resultPath, cleanup: async () => {} }),
+      writePromptOverride: (promptPath, content) => fs.promises.writeFile(promptPath, content, 'utf8'),
+    });
+    await h.distiller.runOnce();
+
+    const expectedPrompt = buildPackDistillPrompt({
+      outputPath: '/packs/sources/glissa/derived/brief.md',
+      sources: HASHES,
+      instructions: hostileInstructions,
+      resultPath,
+    });
+    assert.equal(fs.readFileSync(path.join(workDir, PACK_DISTILL_PROMPT_FILE), 'utf8'), expectedPrompt);
+    assert.equal(JSON.stringify(h.spawns).includes(hostileInstructions), false);
+    assert.doesNotMatch(PACK_DISTILL_BOOTSTRAP_PROMPT, /["'%^&|<>\r\n]/);
+  } finally {
+    fs.rmSync(workDir, { recursive: true, force: true });
   }
+});
+
+test('an oversized prompt fails before the prompt write and spawn boundaries', async () => {
+  const spec = specWithDistill();
+  spec.distill[0].instructions = 'x'.repeat(MAX_DISTILL_PROMPT_BYTES);
+  const h = harness({ specByPath: { '/specs/glissa.pack.json': spec } });
+  const [report] = await h.distiller.runOnce();
+
+  assert.equal(report.status, 'error');
+  assert.equal(report.reason, 'prompt-too-large');
+  assert.deepEqual(h.promptWrites, []);
+  assert.deepEqual(h.spawns, []);
+  assert.deepEqual(h.writes, []);
+});
+
+test('the distiller posture is the shared acceptEdits posture with no write-shaped rule', () => {
+  const posture = packDistillerPermissions();
+  assert.deepEqual(posture, buildLanePermissions({ denyTools: PACK_DISTILL_DENY_TOOLS }));
+  assert.deepEqual(posture.permissions, {
+    deny: ['Bash', 'Edit', 'NotebookEdit', 'WebFetch', 'WebSearch', 'Task'],
+    defaultMode: 'acceptEdits',
+  });
+  assert.equal(Object.hasOwn(posture.permissions, 'allow'), false);
+  for (const tool of ['Read', 'Write', 'Glob', 'Grep']) {
+    assert.equal(posture.permissions.deny.includes(tool), false);
+  }
+});
+
+test('the spawned Session receives the shared posture and never skips permissions', async () => {
+  await withFakeSession('../server/pack-distiller', async (distillerModule, constructed) => {
+    const controller = new AbortController();
+    controller.abort();
+    const spawn = distillerModule.createDistillSpawn({ hookRouter: {} });
+    await spawn({ id: 'distill:1', name: 'distill one', cwd: '/tmp/job', signal: controller.signal });
+
+    assert.equal(constructed.length, 1);
+    assert.equal(constructed[0].path, '/tmp/job');
+    assert.equal(constructed[0].dangerouslySkipPermissions, false);
+    assert.equal(constructed[0].initialPrompt, PACK_DISTILL_BOOTSTRAP_PROMPT);
+    assert.deepEqual(constructed[0].settingsPermissions, distillerModule.packDistillerPermissions().permissions);
+    assert.deepEqual(constructed[0].extraClaudeArgs, ['-p']);
+  });
 });
 
 // ---------------------------------------------------------------------------
 // verdicts are re-checked against the file on disk
 // ---------------------------------------------------------------------------
 
-test('a DISTILLED verdict with no file written is an ERROR, not a success', async () => {
-  const h = harness({ verdicts: ['DISTILLED'] });
+test('a successful result that cannot be written is an ERROR, not a success', async () => {
+  const h = harness({ onWrite: () => {} });
   const [report] = await h.distiller.runOnce();
 
   assert.equal(report.status, 'error');
@@ -215,10 +327,20 @@ test('a DISTILLED verdict with no file written is an ERROR, not a success', asyn
   assert.equal(h.warnings.length, 1);
 });
 
-test('a DISTILLED verdict whose written stamp does not match the sources is an ERROR', async () => {
+test('a throwing writer reports ERROR and leaves the output unwritten', async () => {
+  const h = harness({ onWrite: () => { throw new Error('disk full'); } });
+  const [report] = await h.distiller.runOnce();
+
+  assert.equal(report.status, 'error');
+  assert.equal(report.verdict, 'ERROR');
+  assert.match(report.reason, /could not write output: disk full/);
+  assert.deepEqual(h.files, {});
+});
+
+test('the post-write check rejects storage that changes Glissa rendered bytes', async () => {
   const h = harness({
-    onSpawn: (files) => {
-      files['/packs/sources/glissa/derived/brief.md'] = stampedFile([{ path: 'AGENTS.md', sha256: 'c'.repeat(64) }]);
+    onWrite: (files, fullPath) => {
+      files[fullPath] = stampedFile([{ path: 'AGENTS.md', sha256: 'c'.repeat(64) }]);
     },
   });
   const [report] = await h.distiller.runOnce();
@@ -227,9 +349,9 @@ test('a DISTILLED verdict whose written stamp does not match the sources is an E
   assert.match(report.reason, /sources changed/);
 });
 
-test('a DISTILLED verdict whose file carries no stamp at all is an ERROR', async () => {
+test('the post-write check rejects storage that drops Glissa stamp', async () => {
   const h = harness({
-    onSpawn: (files) => { files['/packs/sources/glissa/derived/brief.md'] = '# Brief\n\nno stamp\n'; },
+    onWrite: (files, fullPath) => { files[fullPath] = '# Brief\n\nno stamp\n'; },
   });
   const [report] = await h.distiller.runOnce();
 
@@ -238,14 +360,44 @@ test('a DISTILLED verdict whose file carries no stamp at all is an ERROR', async
 });
 
 test('a NO_CHANGE verdict is accepted once the stamp on disk is current', async () => {
-  const h = harness({
-    verdicts: ['NO_CHANGE'],
-    onSpawn: (files) => { files['/packs/sources/glissa/derived/brief.md'] = stampedFile(); },
-  });
+  const h = harness({ verdicts: ['NO_CHANGE'] });
   const [report] = await h.distiller.runOnce();
 
   assert.equal(report.status, 'distilled');
   assert.equal(report.verdict, 'NO_CHANGE');
+});
+
+test('Glissa renders the sole output from validated structured content', async () => {
+  const content = '# Agent body\r\n\r\nGenerated text.\r\n';
+  const h = harness({
+    verdicts: [{ ok: true, verdict: 'DISTILLED', summary: 'rendered', content }],
+  });
+  const [report] = await h.distiller.runOnce();
+  const expected = renderDistilledOutput({ sources: HASHES, content });
+
+  assert.equal(report.status, 'distilled');
+  assert.deepEqual(h.writes, [{
+    fullPath: '/packs/sources/glissa/derived/brief.md',
+    content: expected,
+  }]);
+  assert.equal(h.files['/packs/sources/glissa/derived/brief.md'], expected);
+});
+
+test('a malformed structured result fails the distill and writes nothing', async () => {
+  const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-pack-distiller-malformed-'));
+  const resultPath = path.join(workDir, 'result.json');
+  try {
+    fs.writeFileSync(resultPath, JSON.stringify({ verdict: 'DISTILLED', content: 42 }), 'utf8');
+    const h = harness({ readResultOverride: () => readDistillResult(resultPath) });
+    const [report] = await h.distiller.runOnce();
+
+    assert.equal(report.status, 'error');
+    assert.match(report.reason, /no distilled content/);
+    assert.deepEqual(h.writes, []);
+    assert.deepEqual(h.files, {});
+  } finally {
+    fs.rmSync(workDir, { recursive: true, force: true });
+  }
 });
 
 test('an ERROR verdict is reported once and never retried inside the pass', async () => {
@@ -285,7 +437,6 @@ test('a timed-out distill waits for the killed session before releasing its resu
     },
     verdicts: ['DISTILLED', 'DISTILLED'],
     hangUntilRelease: true,
-    onSpawn: (files, args) => { files[args.prompt.match(/\/packs\/\S+\.md/)[0]] = stampedFile(); },
   });
 
   const pass = h.distiller.runOnce();
@@ -389,7 +540,6 @@ test('two stale entries distill one at a time, never concurrently', async () => 
       }),
     },
     verdicts: ['DISTILLED', 'DISTILLED'],
-    onSpawn: (files, args) => { files[args.prompt.match(/\/packs\/\S+\.md/)[0]] = stampedFile(); },
   });
   const reports = await h.distiller.runOnce();
 
@@ -437,10 +587,14 @@ test('enabled: start() runs one pass immediately and arms an unref-ed interval',
 });
 
 test('the interval tick runs another pass, and is re-entrancy guarded', async () => {
+  let hashVersion = 0;
   const h = harness({
     enabled: true,
     verdicts: ['DISTILLED', 'DISTILLED', 'DISTILLED'],
-    hashes: () => HASHES,
+    hashes: () => [{
+      ...HASHES[0],
+      sha256: String(++hashVersion).padEnd(64, '0'),
+    }],
   });
   await h.distiller.start();
   assert.equal(h.spawns.length, 1, 'the boot pass');
@@ -471,10 +625,89 @@ test('stop() drains a distill that is already running', async () => {
 // the result file
 // ---------------------------------------------------------------------------
 
-test('readDistillResult treats a missing or invalid result file as ERROR', () => {
-  const missing = readDistillResult('/no/such/glissa-distill-result.json');
+test('readDistillResult treats a missing or invalid result file as ERROR', async () => {
+  const missing = await readDistillResult('/no/such/glissa-distill-result.json');
   assert.equal(missing.verdict, 'ERROR');
-  assert.match(missing.summary, /no result file/);
+  assert.match(missing.summary, /no readable result file/);
+
+  const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-pack-distiller-test-'));
+  const resultPath = path.join(workDir, 'result.json');
+  try {
+    fs.writeFileSync(resultPath, '{not json', 'utf8');
+    const malformed = await readDistillResult(resultPath);
+    assert.equal(malformed.verdict, 'ERROR');
+    assert.match(malformed.summary, /no readable result file/);
+  } finally {
+    fs.rmSync(workDir, { recursive: true, force: true });
+  }
+});
+
+test('an oversized result file fails before parsing and writes no pack output', async () => {
+  const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-pack-distiller-large-result-'));
+  const resultPath = path.join(workDir, 'result.json');
+  try {
+    fs.writeFileSync(resultPath, 'x'.repeat(MAX_DISTILL_RESULT_BYTES + 1), 'utf8');
+    const oversized = await readDistillResult(resultPath);
+    const h = harness({ readResultOverride: () => oversized });
+    const [report] = await h.distiller.runOnce();
+
+    assert.equal(report.status, 'error');
+    assert.equal(report.reason, 'result file is too large');
+    assert.deepEqual(h.writes, []);
+  } finally {
+    fs.rmSync(workDir, { recursive: true, force: true });
+  }
+});
+
+test('oversized distilled content fails pure validation and writes no pack output', async () => {
+  const oversized = validateDistillResult({
+    verdict: 'DISTILLED',
+    summary: 'done',
+    content: 'x'.repeat(MAX_DISTILLED_CONTENT_CHARS + 1),
+  });
+  const h = harness({ readResultOverride: () => oversized });
+  const [report] = await h.distiller.runOnce();
+
+  assert.equal(oversized.summary, 'distilled content is too large');
+  assert.equal(report.status, 'error');
+  assert.equal(report.reason, 'distilled content is too large');
+  assert.deepEqual(h.writes, []);
+});
+
+test('the pure result contract validates content before the renderer owns the stamp', () => {
+  const checked = validateDistillResult({
+    verdict: 'DISTILLED',
+    summary: 'done\nignored',
+    content: '# Brief\r\n\r\nBody',
+  });
+  assert.deepEqual(checked, {
+    ok: true,
+    verdict: 'DISTILLED',
+    summary: 'done',
+    content: '# Brief\r\n\r\nBody',
+  });
+  assert.equal(
+    renderDistilledOutput({ sources: HASHES, content: checked.content }),
+    `${buildStampLine(HASHES)}\n\n# Brief\n\nBody\n`
+  );
+});
+
+test('the prompt permits one structured result file and reserves target rendering for Glissa', () => {
+  const prompt = buildPackDistillPrompt({
+    outputPath: '/packs/derived.md',
+    sources: HASHES,
+    instructions: 'Condense the architecture.',
+    resultPath: '/tmp/job/result.json',
+  });
+  assert.match(prompt, /Write only \/tmp\/job\/result\.json/);
+  assert.match(prompt, /Do not write \/packs\/derived\.md/);
+  assert.match(prompt, /complete document body/);
+  assert.equal(prompt.includes(buildStampLine(HASHES)), false);
+  assert.deepEqual(decidePackDistillPromptSize(prompt), {
+    dispatch: true,
+    gate: null,
+    promptBytes: Buffer.byteLength(prompt),
+  });
 });
 
 test('the post-verify is the same drift check the lane started from', () => {

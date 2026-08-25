@@ -9,21 +9,25 @@
 // files on disk with no model in the content path. The pack service's watcher sees the written file
 // and rebuilds the pack on its own, so the two loops compose without knowing about each other.
 //
-// IO-FREE in the pr-poller sense: spec discovery, spec loading, hashing, reading the output, the spawn,
-// the timers and the result reader are all injected, and the defaults just point at the real thing.
-// Decisions (what the stamp says, whether it drifted, what the session is told) live in the pure
-// server/core/distill-core.js.
-
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
 const {
-  awaitSessionExit, createJobResultFile, drainPending, firstLine, raceWithAbort, readResultFile,
+  awaitSessionExit, createJobResultFile, drainPending, firstLine, raceWithAbort,
   registerEphemeralSession,
 } = require('./ephemeral-session');
 const { createSerialQueue } = require('./spawn-gate');
-const { buildDistillPrompt, buildStampLine, needsDistill } = require('./core/distill-core');
+const { needsDistill } = require('./core/distill-core');
+const { buildLanePermissions } = require('./core/lane-permissions-core');
+const {
+  MAX_DISTILL_RESULT_BYTES,
+  buildPackDistillPrompt,
+  failedResult,
+  decidePackDistillPromptSize,
+  renderDistilledOutput,
+  validateDistillResult,
+} = require('./core/pack-distiller-core');
 const { validatePackSpec } = require('./core/pack-core');
 const {
   distillOutputPath, distillSourceHashes, listPackSpecs, loadPackSpec,
@@ -31,78 +35,72 @@ const {
 
 const DEFAULT_INTERVAL_HOURS = 24;
 const DEFAULT_TIMEOUT_SECONDS = 900;
-// The install root: the directory carrying packs/, and the only cwd a distill session ever runs in.
-const INSTALL_ROOT = path.resolve(__dirname, '..');
+const PACK_DISTILL_PROMPT_FILE = 'pack-distill-prompt.txt';
+const PACK_DISTILL_BOOTSTRAP_PROMPT = 'Read pack-distill-prompt.txt and follow all instructions in that file';
+const PACK_DISTILL_DENY_TOOLS = Object.freeze([
+  'Bash', 'Edit', 'NotebookEdit', 'WebFetch', 'WebSearch', 'Task',
+]);
 
-// Belt-and-suspenders deny-list for the headless distill sessions (they run under
-// --dangerously-skip-permissions, so this is a guard, not the guard). The real guard is the prompt
-// contract plus the post-verify below: a verdict is only believed once the written file parses to a
-// stamp matching the sources that were read. The deny syntax cannot express "nothing outside packs/",
-// so the write denials name the install root's own directories one by one, plus its root files.
-const PACK_DISTILL_WRITE_DENY_DIRS = [
-  '.github', '.claude', 'bin', 'detection', 'docs', 'notifications', 'public', 'scripts', 'server',
-  'session', 'shared', 'tests', 'tools', 'packs/specs',
-];
-
-const PACK_DISTILL_DENY = {
-  deny: [
-    'Bash(git commit:*)',
-    'Bash(git push:*)',
-    'Bash(git checkout:*)',
-    'Bash(git rebase:*)',
-    'Bash(gh:*)',
-    'Bash(npm publish:*)',
-    'Edit(*)',
-    'Write(*)',
-    ...PACK_DISTILL_WRITE_DENY_DIRS.flatMap((dir) => [`Edit(${dir}/**)`, `Write(${dir}/**)`]),
-  ],
-};
-
-const RESULT_VERDICTS = new Set(['DISTILLED', 'NO_CHANGE', 'ERROR']);
-
-function readDistillResult(resultPath) {
-  return readResultFile(resultPath, RESULT_VERDICTS, (parsed) => ({ summary: firstLine(parsed.summary) }));
+function packDistillerPermissions() {
+  return buildLanePermissions({ denyTools: PACK_DISTILL_DENY_TOOLS });
 }
 
-// A Session only writes its `--settings` file when it has a hook router to point the hooks at, so the
-// CLI path (no server, no hook listener) would spawn with no deny-list at all. This writes the
-// permissions-only settings file for that case; the server lane gets the same deny-list through the
-// Session's own hook settings instead.
-function writeStandaloneDenySettings() {
+async function readDistillResult(resultPath) {
+  let resultHandle = null;
+  try {
+    resultHandle = await fs.promises.open(resultPath, 'r');
+    const boundedBytes = Buffer.alloc(MAX_DISTILL_RESULT_BYTES + 1);
+    let totalBytesRead = 0;
+    while (totalBytesRead < boundedBytes.length) {
+      const { bytesRead } = await resultHandle.read(
+        boundedBytes,
+        totalBytesRead,
+        boundedBytes.length - totalBytesRead,
+        totalBytesRead
+      );
+      if (bytesRead === 0) break;
+      totalBytesRead += bytesRead;
+    }
+    if (totalBytesRead > MAX_DISTILL_RESULT_BYTES) return failedResult('result file is too large');
+    const rawResult = boundedBytes.subarray(0, totalBytesRead).toString('utf8');
+    return validateDistillResult(JSON.parse(rawResult));
+  } catch {
+    return failedResult();
+  } finally {
+    if (resultHandle) await resultHandle.close().catch(() => {});
+  }
+}
+
+function writeStandaloneLaneSettings(permissions) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-distill-'));
   const settingsPath = path.join(dir, 'settings.json');
-  fs.writeFileSync(settingsPath, JSON.stringify({ permissions: { deny: [...PACK_DISTILL_DENY.deny] } }, null, 2), 'utf8');
+  fs.writeFileSync(settingsPath, JSON.stringify({ permissions }, null, 2), 'utf8');
   return {
     args: ['--settings', settingsPath],
     cleanup() { try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best-effort */ } },
   };
 }
 
-/**
- * The real spawn the distiller injects: one ephemeral headless `claude -p` session in the install
- * root, resolved when it exits. Never rejects. Used by the server lane (with the hook router, the
- * spawn gate and a lane map) and by the CLI (with none of them).
- */
 function createDistillSpawn({
   sessions = new Map(), closeSessionDataClients = () => {}, hookRouter = null, getHookPort = null,
   spawnGate = null, replayBufferKB = undefined,
   // Lane attribution: names this lane on the ledger when its headless session reports a Claude session id.
   recordLane = null,
 } = {}) {
-  return async function spawnDistill({ id, name, prompt, cwd, signal }) {
-    // Required here, not at module load: the Session class resolves `claude` on PATH when it loads,
-    // and `glissa pack distill --dry-run` spawns nothing and must not pay for that.
+  return async function spawnDistill({ id, name, cwd, signal }) {
+    // Lazy loading keeps dry runs from resolving Claude on PATH.
     const { Session } = require('../session/sessions');
-    const standalone = hookRouter ? null : writeStandaloneDenySettings();
+    const posture = packDistillerPermissions();
+    const standalone = hookRouter ? null : writeStandaloneLaneSettings(posture.permissions);
     const sess = new Session({
       id,
       name,
       path: cwd,
-      dangerouslySkipPermissions: true,
+      dangerouslySkipPermissions: false,
       extraClaudeArgs: standalone ? ['-p', ...standalone.args] : ['-p'],
-      initialPrompt: prompt,
+      initialPrompt: PACK_DISTILL_BOOTSTRAP_PROMPT,
       ephemeral: true,
-      settingsPermissions: PACK_DISTILL_DENY,
+      settingsPermissions: posture.permissions,
       replayBufferKB,
       hookRouter,
       getHookPort,
@@ -131,6 +129,8 @@ function createPackDistiller(deps = {}) {
     readOutput = async (fullPath) => {
       try { return await fs.promises.readFile(fullPath, 'utf8'); } catch { return null; }
     },
+    writeOutput = (fullPath, content) => fs.promises.writeFile(fullPath, content, 'utf8'),
+    writePrompt = (promptPath, content) => fs.promises.writeFile(promptPath, content, 'utf8'),
     spawnDistill = createDistillSpawn(),
     // Each distill gets a private result directory rather than a predictable name in shared temp (see
     // createJobResultFile). ONE dep, returning { path, cleanup }, because the cleanup closure is what
@@ -138,7 +138,6 @@ function createPackDistiller(deps = {}) {
     // parent is ours to delete, and an injected path would then take its directory down with it.
     createResultFile = (packName, index) => createJobResultFile(`glissa-distill-${packName}-${index}`),
     readResult = readDistillResult,
-    cwd = INSTALL_ROOT,
     intervalHours = DEFAULT_INTERVAL_HOURS,
     timeoutSeconds = DEFAULT_TIMEOUT_SECONDS,
     setIntervalFn = setInterval,
@@ -204,25 +203,32 @@ function createPackDistiller(deps = {}) {
     let pendingSpawn = null;
     try {
       resultFile = await createResultFile(spec.name, index);
-      const prompt = buildDistillPrompt({
+      const prompt = buildPackDistillPrompt({
         outputPath,
         sources: hashes,
         instructions: entry.instructions,
         resultPath: resultFile.path,
-        stampLine: buildStampLine(hashes),
       });
+      const promptSize = decidePackDistillPromptSize(prompt);
+      if (!promptSize.dispatch) return base({ verdict: 'ERROR', reason: promptSize.gate });
+      await writePrompt(path.join(path.dirname(resultFile.path), PACK_DISTILL_PROMPT_FILE), prompt);
       result = await spawnWithTimeout({
         id: `pack-distill:${spec.name}#${index}`,
         name: `distill ${spec.name} ${entry.output}`,
-        prompt,
-        cwd,
+        cwd: path.dirname(resultFile.path),
       }, resultFile.path, { onPending: (promise) => { pendingSpawn = promise; } });
     } finally {
-      // A timeout resolves the verdict while the killed session may still be writing under packs/, which the serial queue promises no second distill overlaps.
+      // Cleanup waits until an aborted session releases its private cwd.
       await drainPending(pendingSpawn);
       if (resultFile) await resultFile.cleanup();
     }
     if (result.verdict === 'ERROR') return base({ verdict: 'ERROR', reason: result.summary || 'distill failed' });
+
+    try {
+      await writeOutput(outputPath, renderDistilledOutput({ sources: hashes, content: result.content }));
+    } catch (err) {
+      return base({ verdict: 'ERROR', reason: `could not write output: ${firstLine(err.message)}` });
+    }
 
     // A verdict is a claim; the file on disk is the evidence. Re-running the same drift check against
     // what was actually written is what makes a lying or half-finished session an ERROR rather than a
@@ -304,8 +310,7 @@ function createPackDistiller(deps = {}) {
     await tick();
   }
 
-  // Async like the pack service's stop: a distill session may be mid-write under packs/, and shutdown
-  // must not race it (the pack watcher would rebuild from a half-written file).
+  // Shutdown waits for an output render already in flight.
   async function stop() {
     stopped = true;
     if (timer) clearIntervalFn(timer);
@@ -319,9 +324,11 @@ function createPackDistiller(deps = {}) {
 module.exports = {
   DEFAULT_INTERVAL_HOURS,
   DEFAULT_TIMEOUT_SECONDS,
-  INSTALL_ROOT,
-  PACK_DISTILL_DENY,
+  PACK_DISTILL_BOOTSTRAP_PROMPT,
+  PACK_DISTILL_DENY_TOOLS,
+  PACK_DISTILL_PROMPT_FILE,
   createDistillSpawn,
   createPackDistiller,
+  packDistillerPermissions,
   readDistillResult,
 };
