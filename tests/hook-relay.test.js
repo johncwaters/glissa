@@ -15,10 +15,13 @@ const { main } = require('../session/hook-relay');
 const {
   HOOK_URL_ENV,
   MAX_PAYLOAD_BYTES,
+  MAX_RESPONSE_BYTES,
+  MAX_ADDITIONAL_CONTEXT_CHARS,
   readHookUrl,
   normalizeEvent,
   resolveHookTarget,
   decideRelayPost,
+  decideHookStdout,
 } = require('../session/core/hook-relay-core');
 
 const BASE = 'http://127.0.0.1:41234/hook/sess-1?t=deadbeef';
@@ -27,20 +30,41 @@ function fakeStdin(text) {
   return Readable.from([Buffer.from(text, 'utf8')]);
 }
 
-function startIngress() {
+function startIngress({ status = 200, responseBody = JSON.stringify({ ok: true, reason: 'ok' }) } = {}) {
   const received = [];
   const server = http.createServer((req, res) => {
     let body = '';
     req.on('data', (c) => { body += c; });
     req.on('end', () => {
       received.push({ method: req.method, url: req.url, body, contentType: req.headers['content-type'] });
-      res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ ok: true, reason: 'ok' }));
+      res.writeHead(status, { 'content-type': 'application/json' });
+      res.end(responseBody);
     });
   });
   return new Promise((resolve) => {
     server.listen(0, '127.0.0.1', () => resolve({ server, received, port: server.address().port }));
   });
+}
+
+function captureStdout() {
+  let output = '';
+  return {
+    stream: { write: (chunk) => { output += String(chunk); return true; } },
+    read: () => output,
+  };
+}
+
+async function relayResponse({ event = 'UserPromptSubmit', status = 200, responseBody }) {
+  const { server, port } = await startIngress({ status, responseBody });
+  const stdout = captureStdout();
+  try {
+    const result = await main([event], fakeStdin('{}'), {
+      [HOOK_URL_ENV]: `http://127.0.0.1:${port}/hook/s?t=t`,
+    }, stdout.stream);
+    return { result, output: stdout.read() };
+  } finally {
+    server.close();
+  }
 }
 
 test('readHookUrl reads only the spawn-env variable, trimmed, and nothing else', () => {
@@ -91,6 +115,59 @@ test('decideRelayPost: the whole verdict, refusal by refusal', () => {
   assert.equal(decideRelayPost({ env, event: 'Stop', payloadBytes: -1 }).reason, 'bad-payload');
   assert.equal(decideRelayPost({ env: { [HOOK_URL_ENV]: 'http://8.8.8.8/hook/s' }, event: 'Stop' }).reason, 'not-loopback');
   assert.equal(decideRelayPost().reason, 'no-hook-url');
+});
+
+test('decideHookStdout returns only the validated UserPromptSubmit injection object', () => {
+  const responseBody = JSON.stringify({
+    ok: true,
+    reason: 'ok',
+    hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: 'Read the updated pack.' },
+    ignored: 'not forwarded',
+  });
+  assert.equal(decideHookStdout('UserPromptSubmit', 200, responseBody), JSON.stringify({
+    hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: 'Read the updated pack.' },
+  }));
+  assert.equal(decideHookStdout('Stop', 200, responseBody), null);
+  assert.equal(decideHookStdout('UserPromptSubmit', 403, responseBody), null);
+  assert.equal(decideHookStdout('UserPromptSubmit', 200, '{bad json'), null);
+  assert.equal(decideHookStdout('UserPromptSubmit', 200, JSON.stringify({
+    hookSpecificOutput: { hookEventName: 'Stop', additionalContext: 'x' },
+  })), null);
+  assert.equal(decideHookStdout('UserPromptSubmit', 200, JSON.stringify({
+    hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: 7 },
+  })), null);
+  assert.equal(decideHookStdout('UserPromptSubmit', 200, JSON.stringify({
+    hookSpecificOutput: {
+      hookEventName: 'UserPromptSubmit',
+      additionalContext: 'x'.repeat(MAX_ADDITIONAL_CONTEXT_CHARS + 1),
+    },
+  })), null);
+});
+
+test('relay stdout is silent except for an accepted bounded UserPromptSubmit context', async () => {
+  const acceptedBody = JSON.stringify({
+    ok: true,
+    hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: 'Pack alpha changed.' },
+  });
+  const accepted = await relayResponse({ responseBody: acceptedBody });
+  assert.equal(accepted.result.code, 0);
+  assert.equal(accepted.output, `${JSON.stringify({
+    hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: 'Pack alpha changed.' },
+  })}\n`);
+
+  const silentCases = [
+    { event: 'Stop', responseBody: acceptedBody },
+    { status: 403, responseBody: acceptedBody },
+    { responseBody: '{bad json' },
+    { responseBody: JSON.stringify({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit' } }) },
+    { responseBody: 'x'.repeat(MAX_RESPONSE_BYTES + 1), reason: 'response-too-large' },
+  ];
+  for (const silentCase of silentCases) {
+    const response = await relayResponse(silentCase);
+    assert.equal(response.result.code, 0);
+    assert.equal(response.output, '');
+    if (silentCase.reason) assert.equal(response.result.reason, silentCase.reason);
+  }
 });
 
 test('the relay POSTs the stdin bytes untouched to /hook/:glissaId/:event', async () => {

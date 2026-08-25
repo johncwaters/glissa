@@ -12,7 +12,11 @@
 
 const http = require('node:http');
 
-const { decideRelayPost } = require('./core/hook-relay-core');
+const {
+  MAX_RESPONSE_BYTES,
+  decideRelayPost,
+  decideHookStdout,
+} = require('./core/hook-relay-core');
 
 // Bounded hard: the agent is waiting on this process, and the payload is telemetry.
 const POST_TIMEOUT_MS = 1500;
@@ -38,16 +42,16 @@ function readStdin(stream) {
 function postPayload(url, body) {
   return new Promise((resolve) => {
     let settled = false;
-    const done = (reason) => {
+    const done = (response) => {
       if (settled) return;
       settled = true;
-      resolve(reason);
+      resolve(response);
     };
     let target = null;
     try {
       target = new URL(url);
     } catch {
-      done('bad-url');
+      done({ reason: 'bad-url', status: null, body: null });
       return;
     }
     try {
@@ -63,30 +67,56 @@ function postPayload(url, body) {
           },
         },
         (res) => {
-          res.resume();
-          res.on('end', () => done(`status-${res.statusCode}`));
-          res.on('error', () => done('response-error'));
+          const responseChunks = [];
+          let responseBytes = 0;
+          const declaredBytes = Number(res.headers['content-length']);
+          if (Number.isFinite(declaredBytes) && declaredBytes > MAX_RESPONSE_BYTES) {
+            res.destroy();
+            done({ reason: 'response-too-large', status: res.statusCode, body: null });
+            return;
+          }
+          res.on('data', (chunk) => {
+            if (settled) return;
+            const bytes = Buffer.from(chunk);
+            responseBytes += bytes.length;
+            if (responseBytes > MAX_RESPONSE_BYTES) {
+              res.destroy();
+              done({ reason: 'response-too-large', status: res.statusCode, body: null });
+              return;
+            }
+            responseChunks.push(bytes);
+          });
+          res.on('end', () => done({
+            reason: `status-${res.statusCode}`,
+            status: res.statusCode,
+            body: Buffer.concat(responseChunks),
+          }));
+          res.on('error', () => done({ reason: 'response-error', status: res.statusCode, body: null }));
         },
       );
-      req.on('error', () => done('request-error'));
+      req.on('error', () => done({ reason: 'request-error', status: null, body: null }));
       req.setTimeout(POST_TIMEOUT_MS, () => {
         req.destroy();
-        done('timeout');
+        done({ reason: 'timeout', status: null, body: null });
       });
       req.end(body);
     } catch {
-      done('request-throw');
+      done({ reason: 'request-throw', status: null, body: null });
     }
   });
 }
 
-async function main(argv = process.argv.slice(2), stdin = process.stdin, env = process.env) {
+async function main(argv = process.argv.slice(2), stdin = process.stdin, env = process.env, stdout = process.stdout) {
   const [event] = argv;
   const body = await readStdin(stdin);
   const verdict = decideRelayPost({ env, event, payloadBytes: body.length });
   if (!verdict.post) return { code: 0, reason: verdict.reason };
-  const outcome = await postPayload(verdict.url, body);
-  return { code: 0, reason: outcome };
+  const response = await postPayload(verdict.url, body);
+  const hookStdout = decideHookStdout(event, response.status, response.body);
+  if (hookStdout) {
+    try { stdout.write(`${hookStdout}\n`); } catch {}
+  }
+  return { code: 0, reason: response.reason };
 }
 
 if (require.main === module) {

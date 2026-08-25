@@ -196,6 +196,26 @@ test('a sibling at the cap refuses the whole delta, leaving every record alone',
   assert.match(resultOf(h).error, /at most 4 packs/);
 });
 
+test('codex cards on one checkout share fan-out and the strictest sibling cap', async () => {
+  const cfg = {
+    projects: [
+      project({ agent: 'codex', packs: ['a'] }),
+      project({ id: 'p2', name: 'glissa codex 2', agent: 'codex', packs: ['a', 'b', 'c', 'd'] }),
+    ],
+  };
+  const h = harness(cfg);
+
+  await h.send({ type: 'set-project-packs', projectId: 'p1', pack: 'e', deliver: true });
+  assert.deepEqual(cfg.projects.map((record) => record.packs), [['a'], ['a', 'b', 'c', 'd']]);
+  assert.match(resultOf(h).error, /at most 4 packs/);
+
+  h.sent.length = 0;
+  await h.send({ type: 'set-project-packs', projectId: 'p2', pack: 'a', deliver: false });
+  assert.equal('packs' in cfg.projects[0], false);
+  assert.deepEqual(cfg.projects[1].packs, ['b', 'c', 'd']);
+  assert.equal(resultOf(h).ok, true);
+});
+
 test('a record with no path is alone: nothing marks another record as its sibling', async () => {
   const cfg = { projects: [project({ path: undefined }), project({ id: 'p2', name: 'other', path: undefined })] };
   const h = harness(cfg);

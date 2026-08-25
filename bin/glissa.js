@@ -158,6 +158,8 @@ function runDoctor() {
       const resolved = commandFor(adapter);
       const where = resolved?.path ? resolved.path : 'not found on PATH';
       line(`${id} (${adapter.label || id})`, where);
+      line(`${id} pack carrier`, adapter.capabilities.packs ? adapter.packCarrier : 'unsupported');
+      if (adapter.packNoticeCaveat) line(`${id} pack notices`, adapter.packNoticeCaveat);
     }
   } catch (err) {
     line('agents', `probe failed: ${(err?.message ? err.message : String(err)).split('\n')[0]}`);

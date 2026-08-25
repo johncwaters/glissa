@@ -1125,11 +1125,12 @@ class Session extends EventEmitter {
       isWorktree: this.isWorktree,
       resumeSessionId: this._resumeSessionId,
       activeAgents: this._activeAgentCount(),
-      // Delivered packs plus what the agent has actually read of them. Built field by field, not
-      // spread: the resolved `dir` is a server-side absolute path a paired remote client has no use for.
+      // The resolved dir stays server-side because paired clients do not need local paths.
       packs: this._deliveredPacks.map((pack) => {
+        const entry = { name: pack.name, version: pack.version };
+        if (this._adapter.packReadTelemetry !== true) return entry;
         const stats = packReadTracker.packReadStats(this._packReads, pack.name);
-        const entry = { name: pack.name, version: pack.version, reads: stats.reads };
+        entry.reads = stats.reads;
         if (stats.readsSinceNotice !== null) entry.readsSinceNotice = stats.readsSinceNotice;
         return entry;
       }),
@@ -2426,27 +2427,25 @@ class Session extends EventEmitter {
     this._hookToken = null;
   }
 
-  // Resolve each configured context pack to the built `current` dir this spawn adds. A pack that was
-  // never built, or whose manifest is unreadable, is SKIPPED with a decision-trace entry: pack
-  // delivery is additive context, so it must never block a session from starting or guess at a dir.
-  // Returns the --add-dir args and the { name, version } records toSnapshot reports.
+  // Pack delivery is additive, so resolution and rendering failures never block spawn.
   async _resolvePacks() {
-    this._deliveredPacks = [];
     this._clearPackNotice();
     packReadTracker.clearPackReads(this._packReads);
-    if (this._packs.length === 0) return { args: [], packs: [] };
-    // An agent with no pack-delivery capability is handed nothing rather than a directory whose
-    // layout it does not read; the trace is what makes the silence visible on the card's debug overlay.
+    if (this._packs.length === 0) {
+      this._deliveredPacks = [];
+      return { args: [], packs: [] };
+    }
     if (!this._can("packs")) {
       const ts = Date.now();
       for (const name of this._packs) {
         this._recordDecision({ kind: "pack", ts, name, decision: "unsupported", reason: `agent ${this.agentId} does not deliver context packs` });
       }
+      this._deliveredPacks = [];
       return { args: [], packs: [] };
     }
 
     const builtRoot = this._packsBuiltRoot || defaultBuiltRoot();
-    const args = [];
+    const deliveredPacks = [];
     for (const name of this._packs) {
       const resolved = await this._resolvePackVariant(name, builtRoot);
       const ts = Date.now();
@@ -2455,15 +2454,23 @@ class Session extends EventEmitter {
         this._recordDecision({ kind: "pack", ts, name, decision: "skipped", reason: resolved.reason });
         continue;
       }
-      args.push(...this._adapter.addDirArgs(resolved.dir));
-      // `dir` rides the delivered record so the read tracker can classify a path against it; it is
-      // server-side only (toSnapshot rebuilds its entries without it).
-      // The RESOLVED name is what is recorded, so the staleness chip compares this delivery against the
-      // version of the pack that was actually handed over rather than its group's.
-      this._deliveredPacks.push({ name: resolved.name, version: resolved.version, dir: resolved.dir });
-      this._recordDecision({ kind: "pack", ts, name: resolved.name, decision: "delivered", version: resolved.version });
+      deliveredPacks.push({ name: resolved.name, version: resolved.version, dir: resolved.dir });
     }
-    return { args, packs: this._deliveredPacks };
+    const args = this._adapter.renderPackArgs(deliveredPacks);
+    if (!args) {
+      const ts = Date.now();
+      for (const pack of deliveredPacks) {
+        this._recordDecision({ kind: "pack", ts, name: pack.name, decision: "skipped", reason: `agent ${this.agentId} refused the pack carrier path` });
+      }
+      this._deliveredPacks = [];
+      return { args: [], packs: [] };
+    }
+    this._deliveredPacks = deliveredPacks;
+    const ts = Date.now();
+    for (const pack of deliveredPacks) {
+      this._recordDecision({ kind: "pack", ts, name: pack.name, decision: "delivered", version: pack.version });
+    }
+    return { args, packs: deliveredPacks };
   }
 
   /*

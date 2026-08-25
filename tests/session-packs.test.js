@@ -11,6 +11,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const { Session } = require('../session/sessions');
+const codex = require('../session/adapters/codex');
 
 const CLAUDE_MD_ENV = 'CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD';
 // The absence assertions below read the spawn env, which inherits process.env; a stray ambient value
@@ -319,5 +320,70 @@ test('a plain pack is never probed for a variant, whatever slug the project carr
   } finally {
     s.destroy();
     await fsp.rm(builtRoot, { recursive: true, force: true });
+  }
+});
+
+test('a codex session carries the resolved variant by index pointer without Claude pack flags', async () => {
+  const builtRoot = await makeBuiltRoot({
+    memory: { version: 'v-base', perProjectVariants: true },
+    [`memory-${SLUG}`]: { version: 'v-mine', group: 'memory', projectId: 'p1', projectSlug: SLUG },
+  });
+  const { s, calls, decisions } = await startWithPacks(builtRoot, { agent: 'codex', packVariantSlug: SLUG });
+  try {
+    const packDir = path.join(builtRoot, `memory-${SLUG}`, 'current');
+    const carrierArgs = codex.renderPackArgs([{ name: `memory-${SLUG}`, dir: packDir }]);
+    assert.deepEqual(calls[0].args, [...carrierArgs, '-c', 'check_for_update_on_startup=false']);
+    assert.equal(calls[0].args.includes('--add-dir'), false);
+    assert.equal(CLAUDE_MD_ENV in calls[0].opts.env, false);
+    assert.deepEqual(s.toSnapshot().packs, [{ name: `memory-${SLUG}`, version: 'v-mine' }]);
+    assert.equal(s.toSnapshot().packs[0].reads, undefined);
+    assert.deepEqual(decisions.map((decision) => decision.decision), ['delivered']);
+  } finally {
+    s.destroy();
+    await fsp.rm(builtRoot, { recursive: true, force: true });
+  }
+});
+
+test('a missing codex pack is skipped without a carrier token or Claude env flag', async () => {
+  const builtRoot = await makeBuiltRoot({});
+  const { s, calls, decisions } = await startWithPacks(builtRoot, { agent: 'codex' });
+  try {
+    assert.deepEqual(calls[0].args, ['-c', 'check_for_update_on_startup=false']);
+    assert.equal(CLAUDE_MD_ENV in calls[0].opts.env, false);
+    assert.deepEqual(s.toSnapshot().packs, []);
+    assert.deepEqual(decisions.map((decision) => decision.decision), ['skipped']);
+  } finally {
+    s.destroy();
+    await fsp.rm(builtRoot, { recursive: true, force: true });
+  }
+});
+
+test('a pack update between lookups still arms a notice before the delivered list swaps', async () => {
+  const s = new Session({
+    id: 'atomic-packs',
+    name: 'atomic-packs',
+    path: process.cwd(),
+    agent: 'codex',
+    packs: ['alpha', 'beta'],
+    spawnCommand: { path: process.execPath, kind: 'exe' },
+    ptySpawn: () => fakePty(),
+  });
+  const previousDeliveries = [
+    { name: 'alpha', version: 'v1', dir: '/packs/alpha/current' },
+    { name: 'beta', version: 'v1', dir: '/packs/beta/current' },
+  ];
+  s._deliveredPacks = previousDeliveries;
+  s._resolvePackVariant = async (name) => {
+    assert.equal(s._deliveredPacks, previousDeliveries);
+    if (name === 'beta') assert.equal(s.notePackUpdate('alpha', 'v2'), true);
+    return { name, version: 'v1', dir: `/packs/${name}/current` };
+  };
+  try {
+    const delivery = await s._resolvePacks();
+    assert.deepEqual(delivery.packs.map((pack) => pack.name), ['alpha', 'beta']);
+    assert.notEqual(s._deliveredPacks, previousDeliveries);
+    assert.match(s.takePackNoticeContext(), /"alpha" \(version v1 is now v2\)/);
+  } finally {
+    s.destroy();
   }
 });

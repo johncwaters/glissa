@@ -58,8 +58,8 @@ test('capabilities claim only what a live probe verified', () => {
     awaitingInput: true,
     backgroundAgents: false,
     resume: true,
-    packs: false,
-    packNotice: false,
+    packs: true,
+    packNotice: true,
     statusLine: false,
     rtk: false,
     antiSlop: false,
@@ -105,6 +105,35 @@ test('the anti-slop note never reaches a codex argv, even when a caller asks for
   const args = codex.buildArgs({ antiSlopPrompt: true, initialPrompt: 'x' });
   assert.equal(args.includes('--append-system-prompt'), false);
   assert.equal(args[args.length - 1], 'x');
+});
+
+test('renderPackArgs emits one developer_instructions token with ordered index pointers', () => {
+  const deliveries = [
+    { name: 'alpha', dir: '/home/carbon/.glissa/packs/built/alpha/current' },
+    { name: 'memory-project', dir: '/home/carbon/.glissa/packs/built/memory-project/current' },
+  ];
+  const args = codex.renderPackArgs(deliveries);
+  assert.deepEqual(args, [
+    '-c',
+    `developer_instructions='''${codex.PACK_DIRECTIVE}; alpha: /home/carbon/.glissa/packs/built/alpha/current/CLAUDE.md; memory-project: /home/carbon/.glissa/packs/built/memory-project/current/CLAUDE.md'''`,
+  ]);
+  assert.equal(args.filter((arg) => arg === '-c').length, 1);
+  assert.equal(args.includes('--add-dir'), false);
+  assert.equal(args.some((arg) => arg.includes('\n') || arg.includes('\r')), false);
+  assert.deepEqual(codex.renderPackArgs([]), []);
+});
+
+test('renderPackArgs refuses non-absolute or unsafe pack paths', () => {
+  for (const dir of [
+    'relative/current',
+    "/home/o'brien/packs/alpha/current",
+    '/home/carbon/packs/alpha;touch current',
+    '/home/carbon/packs/$(id)/current',
+    '/home/carbon/packs/alpha\ncurrent',
+  ]) {
+    assert.equal(codex.renderPackArgs([{ name: 'alpha', dir }]), null, dir);
+  }
+  assert.equal(codex.renderPackArgs([{ name: "alpha'", dir: '/packs/alpha/current' }]), null);
 });
 
 test('hook args subscribe exactly five events as TOML literal strings, and the trust bypass is opt-in', () => {

@@ -72,6 +72,17 @@ test('buildArgs keeps the pre-extraction order: perms, resume, lane flags, anti-
   assert.deepEqual(claudeCode.buildArgs(), [], 'a plain user session adds nothing');
 });
 
+test('renderPackArgs keeps the existing Claude --add-dir loop byte-identical', () => {
+  assert.deepEqual(claudeCode.renderPackArgs([
+    { name: 'alpha', dir: '/packs/alpha/current' },
+    { name: 'beta', dir: '/packs/beta/current' },
+  ]), [
+    '--add-dir', '/packs/alpha/current',
+    '--add-dir', '/packs/beta/current',
+  ]);
+  assert.deepEqual(claudeCode.renderPackArgs([]), []);
+});
+
 test('spawn argv for a fully featured session is byte-identical to the pre-extraction one', async () => {
   const hooksBaseDir = tmpHooksDir();
   const calls = [];

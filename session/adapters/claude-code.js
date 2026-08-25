@@ -201,6 +201,12 @@ function buildEnv(baseEnv, extraEnv, options) {
 const settingsArgs = (settingsPath) => ["--settings", settingsPath];
 const addDirArgs = (dir) => ["--add-dir", dir];
 
+function renderPackArgs(deliveries) {
+  const args = [];
+  for (const delivery of deliveries) args.push(...addDirArgs(delivery.dir));
+  return args;
+}
+
 // The argv the spawn form wraps, in the order Session.start() has always assembled it: the resume id
 // ahead of any lane flags, the anti-slop note ahead of the prompt, and the prompt LAST because it is
 // a positional.
@@ -235,6 +241,9 @@ module.exports = {
   buildArgs,
   settingsArgs,
   addDirArgs,
+  renderPackArgs,
+  packCarrier: "--add-dir directories",
+  packReadTelemetry: true,
   // Downstream code keys on these, never on the adapter id. Claude Code is the reference
   // implementation, so every one is true; a second adapter is what makes them load-bearing.
   capabilities: {

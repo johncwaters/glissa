@@ -15,6 +15,8 @@ const HOOK_URL_ENV = "GLISSA_HOOK_URL";
 // The ingress destroys a request body past this (the hook route in server/backend.js), so a larger
 // payload is dropped here rather than POSTed to be cut off mid-JSON.
 const MAX_PAYLOAD_BYTES = 65536;
+const MAX_RESPONSE_BYTES = 65536;
+const MAX_ADDITIONAL_CONTEXT_CHARS = 10000;
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "::1", "[::1]", "localhost"]);
 
@@ -69,11 +71,39 @@ function decideRelayPost({ env = {}, event = null, payloadBytes = 0 } = {}) {
   return { post: true, url: target.url, reason: "ok" };
 }
 
+function decideHookStdout(event, status, body) {
+  if (normalizeEvent(event) !== "userpromptsubmit") return null;
+  if (status !== 200) return null;
+  const bodyBytes = Buffer.isBuffer(body) ? body.length : Buffer.byteLength(String(body || ""));
+  if (bodyBytes === 0 || bodyBytes > MAX_RESPONSE_BYTES) return null;
+  let parsed = null;
+  try {
+    parsed = JSON.parse(String(body));
+  } catch {
+    return null;
+  }
+  const hookSpecificOutput = parsed?.hookSpecificOutput;
+  if (!hookSpecificOutput || Array.isArray(hookSpecificOutput)) return null;
+  if (hookSpecificOutput.hookEventName !== "UserPromptSubmit") return null;
+  const additionalContext = hookSpecificOutput.additionalContext;
+  if (typeof additionalContext !== "string") return null;
+  if (additionalContext.length === 0 || additionalContext.length > MAX_ADDITIONAL_CONTEXT_CHARS) return null;
+  return JSON.stringify({
+    hookSpecificOutput: {
+      hookEventName: "UserPromptSubmit",
+      additionalContext,
+    },
+  });
+}
+
 module.exports = {
   HOOK_URL_ENV,
   MAX_PAYLOAD_BYTES,
+  MAX_RESPONSE_BYTES,
+  MAX_ADDITIONAL_CONTEXT_CHARS,
   readHookUrl,
   normalizeEvent,
   resolveHookTarget,
   decideRelayPost,
+  decideHookStdout,
 };

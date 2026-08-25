@@ -188,11 +188,13 @@ function mayContributeHooks(configText) {
  * session to the title tier instead of emitting a command it cannot vouch for. The path is Glissa's
  * own `__dirname` in practice, which is why this is a guard rather than a live exposure.
  */
-const SAFE_RELAY_PATH_RE = /^[A-Za-z0-9_.:/\\ -]+$/;
+const SAFE_PATH_RE = /^[A-Za-z0-9_.:/\\ -]+$/;
+const SAFE_PACK_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+const PACK_DIRECTIVE = "Glissa context packs are available at these index files. Read each relevant CLAUDE.md before working:";
 
 function buildHookCommand(relayPath, event) {
   const raw = String(relayPath);
-  if (!SAFE_RELAY_PATH_RE.test(raw)) return null;
+  if (!SAFE_PATH_RE.test(raw)) return null;
   const forwardSlashed = raw.replace(/\\/g, "/");
   const quoted = /\s/.test(forwardSlashed) ? `"${forwardSlashed}"` : forwardSlashed;
   return `node ${quoted} ${event}`;
@@ -255,6 +257,21 @@ function buildEnv(baseEnv, extraEnv, options) {
   return buildAgentEnv(baseEnv, extraEnv, envProfile, options);
 }
 
+function renderPackArgs(deliveries) {
+  if (!Array.isArray(deliveries) || deliveries.length === 0) return [];
+  const lines = [];
+  for (const delivery of deliveries) {
+    if (!delivery || !SAFE_PACK_NAME_RE.test(delivery.name)) return null;
+    const packDir = String(delivery.dir || "");
+    const indexPath = path.join(packDir, "CLAUDE.md");
+    const isAbsolute = path.isAbsolute(packDir) || path.win32.isAbsolute(packDir);
+    if (!isAbsolute || !SAFE_PATH_RE.test(indexPath)) return null;
+    lines.push(`${delivery.name}: ${indexPath}`);
+  }
+  const instructions = [PACK_DIRECTIVE, ...lines].join("; ");
+  return ["-c", `developer_instructions='''${instructions}'''`];
+}
+
 /*
  * A supervised session must never self-update. With a managed install (the npm wrapper exports
  * CODEX_MANAGED_BY_NPM into the child) codex opens a BLOCKING startup prompt whose pre-selected item
@@ -308,6 +325,10 @@ module.exports = {
   buildSpawnCommand,
   buildEnv,
   buildArgs,
+  renderPackArgs,
+  packCarrier: "developer_instructions index pointers",
+  packNoticeCaveat: "staleness notices require trusted UserPromptSubmit hooks or the hook-trust bypass",
+  packReadTelemetry: false,
   buildHookArgs,
   buildHookCommand,
   mayContributeHooks,
@@ -321,6 +342,7 @@ module.exports = {
   TRUST_BYPASS_FLAG,
   SKIP_PERMISSIONS_ARGS,
   UPDATE_CHECK_ARGS,
+  PACK_DIRECTIVE,
   capabilities: {
     hooks: true,
     awaitingInput: true,
@@ -330,11 +352,8 @@ module.exports = {
     // than completing one early.
     backgroundAgents: false,
     resume: true,
-    // Claude Code only in this milestone: the pack output layout, the UserPromptSubmit
-    // additionalContext injection shape, the statusLine plan-limit relay, rtk's `hook claude` form
-    // and the anti-slop --append-system-prompt all have no verified codex equivalent.
-    packs: false,
-    packNotice: false,
+    packs: true,
+    packNotice: true,
     statusLine: false,
     rtk: false,
     antiSlop: false,

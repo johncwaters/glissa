@@ -17,6 +17,7 @@ const { createConfigStore, BOOLEAN_KEYS, STRING_KEYS, TIMEOUT_KEYS } = require('
 const { REPLAYABLE_EXACT, isReplayable } = require('../server/control-replay-core');
 const { createMemoryStore } = require('../server/memory-store');
 const { resolveMemoryConfig } = require('../server/core/memory-core');
+const codex = require('../session/adapters/codex');
 
 const SERVER_DIR = path.join(__dirname, '..', 'server');
 const REMEMBERED = 'the merge gate lives in session/core/merge-gate.js';
@@ -96,6 +97,16 @@ test('nothing memory-shaped is replayable, so no future surface can be replayed 
   assert.deepEqual([...REPLAYABLE_EXACT].filter((type) => type.includes('memory')), []);
   assert.equal(isReplayable('memory-report'), false);
   assert.equal(isReplayable('memory-updated'), false);
+});
+
+test('the codex memory carrier contains only the pack index path, never a remembered byte', () => {
+  const args = codex.renderPackArgs([{
+    name: 'memory-glissa',
+    dir: '/home/carbon/.glissa/packs/built/memory-glissa/current',
+  }]);
+  assert.equal(args.join('\n').includes(REMEMBERED), false);
+  assert.equal(args.join('\n').includes('/data/'), false);
+  assert.match(args[1], /memory-glissa: \/home\/carbon\/\.glissa\/packs\/built\/memory-glissa\/current\/CLAUDE\.md/);
 });
 
 test('the store logs counts and paths, never a remembered byte', async () => {
