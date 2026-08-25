@@ -10,12 +10,12 @@ export function decideFitAction({
   lastSentRows,
   repaintRequested = false,
 }) {
-  const noAction = { repaint: false, send: false, redraw: false };
+  const noAction = { repaint: false, send: false };
   if (!measured) return noAction;
 
   const fittedGridChanged = cols !== lastFittedCols || rows !== lastFittedRows;
   const sentGridChanged = cols !== lastSentCols || rows !== lastSentRows;
   const repaint = repaintRequested || fittedGridChanged;
   const send = repaintRequested || sentGridChanged;
-  return { repaint, send, redraw: send };
+  return { repaint, send };
 }

@@ -225,7 +225,7 @@ export function setupTerminal(termWrap, ui) {
     }
     if (!action.send) return;
     if (ui.dataWs?.readyState !== WebSocket.OPEN) return;
-    ui.dataWs.send(JSON.stringify({ type: 'resize', cols, rows, redraw: action.redraw }));
+    ui.dataWs.send(JSON.stringify({ type: 'resize', cols, rows, redraw: true }));
     lastSentCols = cols;
     lastSentRows = rows;
     hasClaimedViewerSize = true;
