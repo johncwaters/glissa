@@ -2410,6 +2410,20 @@ class Session extends EventEmitter {
 
   _injectHomeRelayHooks(port) {
     const injection = this._adapter.hooks.injection;
+    const contributingConfig = this._findProjectAgentConfig(
+      injection.projectConfigCandidates,
+      injection.mayContributeHooks,
+    );
+    if (contributingConfig) {
+      console.warn(`[session:${this.name}] home hook injection refused: ${contributingConfig} could contribute hooks Glissa did not write - falling back to OSC title only`);
+      this._recordDecision({
+        kind: "hook-trust",
+        ts: Date.now(),
+        decision: "injection-refused",
+        reason: "Claude compatibility settings could contribute hooks",
+      });
+      return NO_HOOK_INJECTION;
+    }
     let hooksPath = null;
     let contents = null;
     try {

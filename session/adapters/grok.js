@@ -5,7 +5,7 @@ const os = require("node:os");
 const path = require("node:path");
 
 const { buildAgentEnv } = require("../core/spawn-env");
-const { renderGrokHooksFile, classifyGrokHooksFile } = require("../../server/core/grok-agent-setup-core");
+const { renderGrokHooksFile, classifyGrokHooksFile } = require("../core/grok-hooks-file-core");
 
 const ID = "grok";
 const COMMAND_NAME = "grok";

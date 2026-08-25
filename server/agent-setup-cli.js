@@ -5,7 +5,7 @@ const crypto = require("node:crypto");
 const path = require("node:path");
 
 const grok = require("../session/adapters/grok");
-const { renderGrokHooksFile, classifyGrokHooksFile } = require("./core/grok-agent-setup-core");
+const { renderGrokHooksFile, classifyGrokHooksFile } = require("../session/core/grok-hooks-file-core");
 
 const USAGE = "Usage: glissa agent setup grok";
 

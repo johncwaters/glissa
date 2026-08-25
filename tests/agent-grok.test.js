@@ -20,7 +20,7 @@ const {
   ensureWritableHooksDirectory,
   replaceFileAtomically,
 } = require("../server/agent-setup-cli");
-const { renderGrokHooksFile, classifyGrokHooksFile } = require("../server/core/grok-agent-setup-core");
+const { renderGrokHooksFile, classifyGrokHooksFile } = require("../session/core/grok-hooks-file-core");
 
 const GROK_SESSION_ID = "0198f4f7-53d7-7d9b-a610-e0633d7c9061";
 
@@ -57,10 +57,11 @@ function makeGrokSession(options = {}) {
 
 async function withGrokHome(run) {
   const tempDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "glissa-grok-test-"));
+  const grokHome = path.join(tempDirectory, ".grok");
   const previousHome = process.env.GROK_HOME;
-  process.env.GROK_HOME = tempDirectory;
+  process.env.GROK_HOME = grokHome;
   try {
-    return await run(tempDirectory);
+    return await run(grokHome, tempDirectory);
   } finally {
     if (previousHome == null) delete process.env.GROK_HOME;
     if (previousHome != null) process.env.GROK_HOME = previousHome;
@@ -287,10 +288,12 @@ test("every installed relay command exits inert without the supervised spawn env
 });
 
 test("a validated home hook file mints a token and camelCase payloads capture the stable id", async () => {
-  await withGrokHome(async (grokHome) => {
+  await withGrokHome(async (grokHome, homeDirectory) => {
     writeHooks(grokHome);
+    const projectDirectory = path.join(homeDirectory, "project");
+    fs.mkdirSync(projectDirectory);
     const hookRouter = new HookRouter();
-    const { session, calls } = makeGrokSession({ hookRouter, getHookPort: () => 4321 });
+    const { session, calls } = makeGrokSession({ path: projectDirectory, hookRouter, getHookPort: () => 4321 });
     await session.start();
     assert.equal(calls[0].file, "/opt/grok/bin/grok-1.0.5");
     assert.deepEqual(calls[0].args, ["--no-auto-update"]);
@@ -309,19 +312,62 @@ test("a validated home hook file mints a token and camelCase payloads capture th
   });
 });
 
+test("Claude home settings refuse relay hooks only when they could contribute hooks", async () => {
+  await withGrokHome(async (grokHome, homeDirectory) => {
+    writeHooks(grokHome);
+    const projectDirectory = path.join(homeDirectory, "projects", "app");
+    const claudeDirectory = path.join(homeDirectory, ".claude");
+    fs.mkdirSync(projectDirectory, { recursive: true });
+    fs.mkdirSync(claudeDirectory);
+
+    for (const settingsName of ["settings.json", "settings.local.json"]) {
+      const settingsPath = path.join(claudeDirectory, settingsName);
+      fs.writeFileSync(settingsPath, '{"hooks":{"Stop":[]}}', "utf8");
+      const refused = makeGrokSession({
+        id: `grok-home-hooks-${settingsName}`,
+        path: projectDirectory,
+        hookRouter: new HookRouter(),
+        getHookPort: () => 4321,
+      });
+      await refused.session.start();
+      assert.equal(refused.session._hookToken, null);
+      assert.equal(refused.calls[0].env.GLISSA_HOOK_URL, undefined);
+      const refusal = refused.session.getDebugState().decisions.find((decision) => decision.decision === "injection-refused");
+      assert.equal(refusal.reason, "Claude compatibility settings could contribute hooks");
+      assert.equal(refusal.agent, "grok");
+      refused.session.destroy();
+      fs.rmSync(settingsPath);
+    }
+
+    fs.writeFileSync(path.join(claudeDirectory, "settings.json"), '{"permissions":{}}', "utf8");
+    const allowed = makeGrokSession({
+      id: "grok-home-benign",
+      path: projectDirectory,
+      hookRouter: new HookRouter(),
+      getHookPort: () => 4321,
+    });
+    await allowed.session.start();
+    assert.match(allowed.calls[0].env.GLISSA_HOOK_URL, /^http:\/\/127\.0\.0\.1:4321\/hook\/grok-home-benign\?t=[0-9a-f]{64}$/);
+    assert.notEqual(allowed.session._hookToken, null);
+    allowed.session.destroy();
+  });
+});
+
 test("a missing or foreign home hook file never mints a token", async () => {
-  await withGrokHome(async (grokHome) => {
+  await withGrokHome(async (grokHome, homeDirectory) => {
+    const projectDirectory = path.join(homeDirectory, "project");
+    fs.mkdirSync(projectDirectory);
     const warnings = [];
     const originalWarn = console.warn;
     console.warn = (...parts) => warnings.push(parts.join(" "));
     try {
-      const missing = makeGrokSession({ id: "grok-missing", hookRouter: new HookRouter(), getHookPort: () => 4321 });
+      const missing = makeGrokSession({ id: "grok-missing", path: projectDirectory, hookRouter: new HookRouter(), getHookPort: () => 4321 });
       await missing.session.start();
       assert.equal(missing.session._hookToken, null);
       assert.equal(missing.calls[0].env.GLISSA_HOOK_URL, undefined);
       missing.session.destroy();
       writeHooks(grokHome, '{"hooks":{"Stop":[]}}');
-      const foreign = makeGrokSession({ id: "grok-foreign", hookRouter: new HookRouter(), getHookPort: () => 4321 });
+      const foreign = makeGrokSession({ id: "grok-foreign", path: projectDirectory, hookRouter: new HookRouter(), getHookPort: () => 4321 });
       await foreign.session.start();
       assert.equal(foreign.session._hookToken, null);
       assert.equal(foreign.calls[0].env.GLISSA_HOOK_URL, undefined);

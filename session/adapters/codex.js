@@ -181,17 +181,6 @@ function mayContributeHooks(configText) {
   return HOOKS_DECLARATION_RE.test(configText);
 }
 
-/*
- * A hook command is one TOML LITERAL string (single quotes, no escapes) inside one `-c` value, which
- * keeps double quotes off the argv: on Windows a shim install spawns through `cmd.exe /c codex`, and
- * every double quote in a token is one more thing cmd's re-parse can mangle.
- *
- * Codex runs that command through a SHELL, not an argv split with quoting (live-verified: a command
- * of `touch A; touch B` ran both), so the path is held to a conservative charset rather than merely
- * escaped. `$(...)` and backticks interpolate even inside double quotes, and `;`, `&`, `|`, `>` need
- * no quotes at all, so anything outside the allow-list is refused and the caller degrades that
- * session to the title tier instead of emitting a command it cannot vouch for.
- */
 const SAFE_PACK_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const PACK_DIRECTIVE = "Glissa context packs are available at these index files. Read each relevant CLAUDE.md before working";
 
