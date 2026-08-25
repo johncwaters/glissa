@@ -1,20 +1,3 @@
-/*
- * Visions tier 3 dispatch: the IO half of docs/archive/plan-navigator.md M4.
- *
- * Permissions posture, live-probed against the real CLI (2.x):
- *   - NO --dangerously-skip-permissions. The prompt embeds arbitrary buffer text, so the session gets
- *     the least capability that still lets it write its result file.
- *   - There is NO allow list. A bare `Write` allow is what unbounds the writes, and no narrower allow
- *     grants the tool at all: both `Write(<dir>/**)` and `Edit(<dir>/**)` were probed and neither
- *     authorizes a Write. What confines them is `defaultMode: acceptEdits` over the throwaway cwd this
- *     module hands the session, which auto-accepts edits there and refuses them anywhere else.
- *   - The deny list below is the guard on top of that. Read is deliberately NOT denied: a bare `Read`
- *     deny refuses the Write tool too (probed), so denying reads and keeping the result contract are
- *     mutually exclusive with this plumbing.
- *   - Re-probed against 2.1.241; every clause and its counter-example is in
- *     server/core/lane-permissions-core.js.
- */
-
 'use strict';
 
 const fs = require('node:fs/promises');
@@ -25,14 +8,22 @@ const {
   awaitSessionExit, drainPending, firstLine, raceWithAbort, registerEphemeralSession,
 } = require('./ephemeral-session');
 const {
-  DEFAULT_TIMEOUT_SECONDS, MAX_HAND_CHARS, buildVisionsPrompt, countLines, sanitizeComments,
+  DEFAULT_TIMEOUT_SECONDS,
+  MAX_HAND_CHARS,
+  VISIONS_RESULT_FILE,
+  buildVisionsPrompt,
+  countLines,
+  decidePromptSize,
+  sanitizeComments,
 } = require('./core/visions-dispatch-core');
 const { buildLanePermissions } = require('./core/lane-permissions-core');
 const { sanitizeIntentText } = require('./core/visions-intent-core');
 const { createLaneLog } = require('./lane-log');
 
 const RESULT_VERDICTS = new Set(['COMMENTS', 'NONE', 'ERROR']);
-const RESULT_FILE = 'visions-result.json';
+const RESULT_FILE = VISIONS_RESULT_FILE;
+const PROMPT_FILE = 'visions-prompt.txt';
+const VISIONS_BOOTSTRAP_PROMPT = 'Read visions-prompt.txt and follow all instructions in that file';
 
 // Verbs a visions never needs: no shell, no editing, no network, no sub-agents.
 const VISIONS_DENY_TOOLS = Object.freeze(['Bash', 'Edit', 'NotebookEdit', 'WebFetch', 'WebSearch', 'Task']);
@@ -98,7 +89,7 @@ function createVisionsSpawn({
   sessions = new Map(), closeSessionDataClients = () => {}, hookRouter = null, getHookPort = null,
   spawnGate = null, replayBufferKB = undefined, recordLane = null,
 } = {}) {
-  return async function spawnVisionsSession({ id, name, prompt, cwd, model = null, signal = null }) {
+  return async function spawnVisionsSession({ id, name, cwd, model = null, signal = null }) {
     // Required here, not at module load: an inert lane must not pay for resolving `claude` on PATH.
     const { Session } = require('../session/sessions');
     const posture = visionsPermissions();
@@ -110,7 +101,7 @@ function createVisionsSpawn({
       path: cwd,
       dangerouslySkipPermissions: false,
       extraClaudeArgs,
-      initialPrompt: prompt,
+      initialPrompt: VISIONS_BOOTSTRAP_PROMPT,
       ephemeral: true,
       settingsPermissions: posture.permissions,
       replayBufferKB,
@@ -146,7 +137,7 @@ function createVisionsDispatcher({
   const { note, warn } = createLaneLog({ prefix: '[visions]', logger });
 
   function spawnWithTimeout({
-    id, name, prompt, cwd, uri, resultPath, lineCount, onPending = null,
+    id, name, cwd, uri, resultPath, lineCount, onPending = null,
   }) {
     const startedAt = nowFn();
     const elapsed = () => nowFn() - startedAt;
@@ -161,7 +152,7 @@ function createVisionsDispatcher({
       },
       onEmpty: () => errorResult('no verdict'),
       start: (signal) => Promise.resolve(spawnSession({
-        id, name, prompt, cwd, model, signal,
+        id, name, cwd, model, signal, initialPrompt: VISIONS_BOOTSTRAP_PROMPT,
       }))
         .then(async () => {
           if (signal.aborted) {
@@ -178,7 +169,7 @@ function createVisionsDispatcher({
     });
   }
 
-  return async function dispatch({ uri, text, findings = [], intent = '', digest = '', memory = null }) {
+  return async function dispatch({ uri, text, findings = [], intent = '', digest = '', memory = null, prompt = null }) {
     let workDir = null;
     try {
       workDir = await makeWorkDir();
@@ -188,18 +179,23 @@ function createVisionsDispatcher({
     const resultPath = path.join(workDir, RESULT_FILE);
     let pendingSpawn = null;
     try {
+      const generatedPrompt = typeof prompt === 'string'
+        ? prompt
+        : buildVisionsPrompt({ uri, text, findings, intent, digest, memory });
+      const sizeDecision = decidePromptSize(generatedPrompt);
+      if (!sizeDecision.dispatch) return errorResult(sizeDecision.gate);
+      await fs.writeFile(path.join(workDir, PROMPT_FILE), generatedPrompt, 'utf8');
       return await spawnWithTimeout({
         id: idFor(uri),
         name: `visions ${uri}`,
-        prompt: buildVisionsPrompt({
-          uri, text, findings, intent, digest, memory, resultPath,
-        }),
         cwd: workDir,
         uri,
         resultPath,
         lineCount: countLines(text),
         onPending: (promise) => { pendingSpawn = promise; },
       });
+    } catch (error) {
+      return errorResult(firstLine(error.message));
     } finally {
       // A timeout resolves the verdict while the killed session still holds this dir as its cwd, and removing it under a live process leaks it on Windows.
       await drainPending(pendingSpawn);
@@ -210,7 +206,9 @@ function createVisionsDispatcher({
 
 module.exports = {
   VISIONS_DENY_TOOLS,
+  PROMPT_FILE,
   RESULT_FILE,
+  VISIONS_BOOTSTRAP_PROMPT,
   visionsPermissions,
   createVisionsDispatcher,
   createVisionsSpawn,

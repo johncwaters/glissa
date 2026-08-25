@@ -9,7 +9,17 @@ const {
   applyDidChange, applyDidClose, applyDidOpen, createDocStore, detectBlankLineBoundary, formatRange, getDoc, listDocs, uriOfParams,
 } = require('./core/visions-buffer-core');
 const {
-  createDispatchState, decideDispatch, forgetUri, hashText, mergeDiagnostics, recordDispatch, resolveDispatchConfig, sanitizeModelDiagnostics,
+  buildVisionsPrompt,
+  createDispatchState,
+  decideDispatch,
+  decideDocumentSize,
+  decidePromptSize,
+  forgetUri,
+  hashText,
+  mergeDiagnostics,
+  recordDispatch,
+  resolveDispatchConfig,
+  sanitizeModelDiagnostics,
 } = require('./core/visions-dispatch-core');
 const { isUriInProjects, projectForUri, scopePathsOf } = require('./core/visions-scope-core');
 const {
@@ -194,6 +204,7 @@ function createVisionsWiring({
   fsPromises = fsPromisesDefault,
   digestBudgetChars = DIGEST_BUDGET_CHARS,
   hashFn = hashText,
+  buildPrompt = buildVisionsPrompt,
   // Per-keystroke chatter, off unless the operator turned debugMode on. Boolean or getter, and the
   // privacy rule every line here obeys lives with the helper in server/lane-log.js.
   debug = false,
@@ -649,23 +660,41 @@ function createVisionsWiring({
         noteGate(uri, decision);
         return;
       }
-      lastGateByUri.delete(uri);
-      // Recorded before the await, so the cooldown and the hourly budget count attempts, not successes.
+      const documentSizeDecision = decideDocumentSize(text, decision.trigger);
+      if (!documentSizeDecision.dispatch) {
+        noteGate(uri, documentSizeDecision);
+        return;
+      }
       dispatchInFlight = true;
-      recordDispatch(dispatchState, {
-        uri, textHash, now: nowFn(), contextSeq: seq, trigger: decision.trigger,
-      });
       let result = null;
       try {
-        // A lane with no store awaits nothing here, so a dispatch with memory off runs exactly as it did.
         const memory = memoryStoreOf() ? await readMemorySection(uri, text) : null;
+        const digest = readContextDigest();
+        const prompt = buildPrompt({
+          uri,
+          text,
+          findings: findingsByUri.get(uri) || [],
+          intent: intentTextFor(intentState, projectId),
+          digest,
+          memory,
+        });
+        const sizeDecision = decidePromptSize(prompt, decision.trigger);
+        if (!sizeDecision.dispatch) {
+          noteGate(uri, sizeDecision);
+          return;
+        }
+        lastGateByUri.delete(uri);
+        recordDispatch(dispatchState, {
+          uri, textHash, now: nowFn(), contextSeq: seq, trigger: decision.trigger,
+        });
         result = await dispatch({
           uri,
           text,
           findings: findingsByUri.get(uri) || [],
           intent: intentTextFor(intentState, projectId),
-          digest: readContextDigest(),
+          digest,
           memory,
+          prompt,
         });
       } catch (error) {
         warn(`dispatch for ${uri} threw: ${error.message}`);

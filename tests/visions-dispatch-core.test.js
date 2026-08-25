@@ -14,12 +14,15 @@ const {
   DEFAULT_QUIET_MS,
   DEFAULT_TIMEOUT_SECONDS,
   HOUR_MS,
+  MAX_PROMPT_BYTES,
   buildVisionsPrompt,
   contentMarker,
   countLines,
   countRecentDispatches,
   createDispatchState,
   decideDispatch,
+  decideDocumentSize,
+  decidePromptSize,
   forgetUri,
   hashText,
   mergeDiagnostics,
@@ -192,6 +195,31 @@ test('a dispatch while one is in flight is gated, never queued', () => {
     state, uri: URI, textHash: 'abc', now: NOW, config: enabledConfig(), inFlight: true,
   });
   assert.deepEqual(decision, { dispatch: false, gate: 'in-flight', trigger: null });
+});
+
+test('the prompt cap counts UTF-8 bytes and allows the exact boundary', () => {
+  assert.equal(MAX_PROMPT_BYTES, 512 * 1024);
+  assert.deepEqual(decidePromptSize('a'.repeat(MAX_PROMPT_BYTES), 'edit'), {
+    dispatch: true,
+    gate: null,
+    trigger: 'edit',
+    promptBytes: MAX_PROMPT_BYTES,
+  });
+  assert.deepEqual(decidePromptSize(`${'a'.repeat(MAX_PROMPT_BYTES - 1)}é`, 'activity'), {
+    dispatch: false,
+    gate: 'prompt-too-large',
+    trigger: 'activity',
+    promptBytes: MAX_PROMPT_BYTES + 1,
+  });
+});
+
+test('the raw document pre-check shares the prompt cap and refusal reason', () => {
+  assert.deepEqual(decideDocumentSize(`${'a'.repeat(MAX_PROMPT_BYTES - 1)}é`, 'activity'), {
+    dispatch: false,
+    gate: 'prompt-too-large',
+    trigger: 'activity',
+    promptBytes: MAX_PROMPT_BYTES + 1,
+  });
 });
 
 test('the same text is never dispatched twice, even long after the cooldown', () => {

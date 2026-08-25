@@ -19,6 +19,7 @@ const WebSocket = require('ws');
 
 const { createBackend } = require('../server/backend');
 const { createConfigStore, BOOLEAN_KEYS, STRING_KEYS, TIMEOUT_KEYS } = require('../server/config-store');
+const { MAX_PROMPT_BYTES } = require('../server/core/visions-dispatch-core');
 const { DIGEST_BUDGET_CHARS, createVisionsWiring, VISIONS_DEBOUNCE_MS } = require('../server/visions-wiring');
 
 const MARKDOWN_URI = 'file:///tmp/plan-visions.md';
@@ -685,6 +686,43 @@ test('the hourly budget is machine-wide: a second document is gated once it is s
   await wiring.whenDispatchSettled();
   assert.equal(calls.length, 1, 'a different document, but the same hour');
   assert.ok(notes.some((line) => line.includes('hour-cap')));
+});
+
+test('an oversized prompt spawns nothing and spends neither cooldown nor hourly budget', async (t) => {
+  const { wiring, timers, calls, notes, lsp } = dispatchingConnection({
+    dispatch: { cooldownMs: 300000, maxPerHour: 1 },
+  });
+  t.after(() => wiring.stop());
+
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', `# Title\n\n${'x'.repeat(MAX_PROMPT_BYTES)}\n`));
+  runSweepThenDispatch(timers);
+  await wiring.whenDispatchSettled();
+  assert.equal(calls.length, 0);
+  assert.ok(notes.some((line) => line.includes('prompt-too-large')));
+
+  lsp('textDocument/didChange', didChangeParams(MARKDOWN_URI, 2, REPEATED_WORD_MARKDOWN));
+  lsp('textDocument/didSave', { textDocument: { uri: MARKDOWN_URI } });
+  await wiring.whenDispatchSettled();
+  assert.equal(calls.length, 1, 'the same uri can immediately spend the only hourly slot');
+});
+
+test('an oversized document skips memory retrieval and prompt construction', async (t) => {
+  let memoryReads = 0;
+  let promptBuilds = 0;
+  const { wiring, timers, calls, lsp } = dispatchingConnection({
+    getMemoryStore: () => ({
+      retrieve: () => { memoryReads += 1; return []; },
+    }),
+    buildPrompt: () => { promptBuilds += 1; return ''; },
+  });
+  t.after(() => wiring.stop());
+
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', 'x'.repeat(MAX_PROMPT_BYTES + 1)));
+  runSweepThenDispatch(timers);
+  await wiring.whenDispatchSettled();
+  assert.equal(calls.length, 0);
+  assert.equal(memoryReads, 0);
+  assert.equal(promptBuilds, 0);
 });
 
 test('a COMMENTS result is broadcast for that uri and joins the connect-time snapshot', async (t) => {

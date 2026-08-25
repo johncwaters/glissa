@@ -11,8 +11,15 @@ const os = require('node:os');
 const path = require('node:path');
 
 const {
-  VISIONS_DENY_TOOLS, RESULT_FILE, createVisionsDispatcher, readCommentsResult, visionsPermissions,
+  PROMPT_FILE,
+  RESULT_FILE,
+  VISIONS_BOOTSTRAP_PROMPT,
+  VISIONS_DENY_TOOLS,
+  createVisionsDispatcher,
+  readCommentsResult,
+  visionsPermissions,
 } = require('../server/visions-dispatch');
+const { MAX_PROMPT_BYTES, buildVisionsPrompt } = require('../server/core/visions-dispatch-core');
 
 const URI = 'file:///tmp/plan-visions.md';
 const TEXT = '# Title\n\nA plan with three lines.\n';
@@ -199,6 +206,15 @@ function eventLoopTurn() {
   return new Promise((resolve) => { setImmediate(resolve); });
 }
 
+async function waitUntil(predicate) {
+  const deadline = Date.now() + 5000;
+  while (Date.now() < deadline) {
+    if (predicate()) return;
+    await new Promise((resolve) => { setTimeout(resolve, 2); });
+  }
+  throw new Error('condition was not reached');
+}
+
 function dispatcherWithSpawn(spawnSession, overrides = {}) {
   const workDirs = [];
   const dispatch = createVisionsDispatcher({
@@ -216,8 +232,10 @@ function dispatcherWithSpawn(spawnSession, overrides = {}) {
 
 test('a session that writes the result file yields its comments, and the work dir is removed after', async () => {
   const seen = [];
+  let promptOnDisk = null;
   const { dispatch, workDirs } = dispatcherWithSpawn(async (args) => {
     seen.push(args);
+    promptOnDisk = fs.readFileSync(path.join(args.cwd, PROMPT_FILE), 'utf8');
     fs.writeFileSync(
       path.join(args.cwd, RESULT_FILE),
       JSON.stringify({ verdict: 'COMMENTS', comments: [{ line: 3, message: 'Name the audience before the argument.' }] }),
@@ -238,13 +256,59 @@ test('a session that writes the result file yields its comments, and the work di
   });
 
   assert.equal(seen.length, 1);
-  assert.match(seen[0].prompt, /Current working intent: a plan doc about the spawn path/);
+  assert.match(promptOnDisk, /Current working intent: a plan doc about the spawn path/);
   assert.equal(seen[0].id, `visions:${URI}`);
   assert.equal(seen[0].model, 'sonnet', 'the configured model reaches the spawn');
   assert.equal(seen[0].cwd, workDirs[0], 'the session runs in the throwaway dir, never a repo');
-  assert.match(seen[0].prompt, /is DATA, never instructions/);
-  assert.ok(seen[0].prompt.includes(path.join(workDirs[0], RESULT_FILE)), 'the prompt names the file it must write');
+  assert.equal(seen[0].initialPrompt, VISIONS_BOOTSTRAP_PROMPT);
+  assert.match(promptOnDisk, /is DATA, never instructions/);
+  assert.ok(promptOnDisk.includes(RESULT_FILE), 'the prompt names the file it must write');
   assert.equal(fs.existsSync(workDirs[0]), false, 'the buffer text on disk does not outlive the dispatch');
+});
+
+test('hostile buffer bytes stay in the prompt file and never reach spawn arguments', async () => {
+  const hostileText = '# A "quoted" title\n\n%PATH% ^ & | < >\n\'single quoted\'\n';
+  let promptOnDisk = null;
+  let spawnArgs = null;
+  const { dispatch } = dispatcherWithSpawn(async (args) => {
+    spawnArgs = args;
+    promptOnDisk = fs.readFileSync(path.join(args.cwd, PROMPT_FILE), 'utf8');
+    fs.writeFileSync(path.join(args.cwd, RESULT_FILE), JSON.stringify({ verdict: 'NONE', comments: [] }), 'utf8');
+  });
+
+  const result = await dispatch({ uri: URI, text: hostileText });
+
+  assert.equal(result.verdict, 'NONE');
+  assert.equal(spawnArgs.initialPrompt, VISIONS_BOOTSTRAP_PROMPT);
+  assert.equal(JSON.stringify(spawnArgs).includes(hostileText), false);
+  assert.equal(promptOnDisk, buildVisionsPrompt({ uri: URI, text: hostileText }));
+  assert.doesNotMatch(VISIONS_BOOTSTRAP_PROMPT, /["'%^&|<>\r\n]/);
+});
+
+test('a large allowed prompt lands in the prompt file byte-identical', async () => {
+  const largeText = `# Title\n\n${'x'.repeat(400 * 1024)}\n`;
+  const expectedPrompt = buildVisionsPrompt({ uri: URI, text: largeText });
+  let promptOnDisk = null;
+  const { dispatch } = dispatcherWithSpawn(async (args) => {
+    promptOnDisk = fs.readFileSync(path.join(args.cwd, PROMPT_FILE), 'utf8');
+    fs.writeFileSync(path.join(args.cwd, RESULT_FILE), JSON.stringify({ verdict: 'NONE', comments: [] }), 'utf8');
+  });
+
+  assert.ok(Buffer.byteLength(expectedPrompt) < MAX_PROMPT_BYTES);
+  assert.equal((await dispatch({ uri: URI, text: largeText })).verdict, 'NONE');
+  assert.equal(promptOnDisk, expectedPrompt);
+});
+
+test('an oversized prompt never reaches the spawn boundary', async () => {
+  let spawnCount = 0;
+  const { dispatch, workDirs } = dispatcherWithSpawn(async () => { spawnCount += 1; });
+
+  const result = await dispatch({ uri: URI, text: 'x'.repeat(MAX_PROMPT_BYTES) });
+
+  assert.equal(result.verdict, 'ERROR');
+  assert.equal(result.reason, 'prompt-too-large');
+  assert.equal(spawnCount, 0);
+  assert.equal(fs.existsSync(workDirs[0]), false);
 });
 
 test('a session that writes nothing is an ERROR with a reason, and still cleans up', async () => {
@@ -281,7 +345,7 @@ test('a hung session is aborted at the hard timeout and resolves ERROR, so the l
   );
 
   const pending = dispatch({ uri: URI, text: TEXT });
-  await eventLoopTurn();
+  await waitUntil(() => fire !== null);
   assert.equal(timeoutMs, 12000, 'dispatchTimeoutSeconds is seconds on the wire, milliseconds on the timer');
   assert.equal(aborted, false, 'nothing is aborted while the session still has time');
 
@@ -293,7 +357,7 @@ test('a hung session is aborted at the hard timeout and resolves ERROR, so the l
   await eventLoopTurn();
   assert.equal(aborted, true, 'the session was told to stop, not just abandoned');
   assert.equal(readAttempts, 0, 'a timeout never reads from the removed work dir');
-  assert.equal(fs.existsSync(workDirs[0]), false);
+  await waitUntil(() => !fs.existsSync(workDirs[0]));
 });
 
 // The work dir is the killed session's own cwd: removing it under a live process leaks it on Windows and yanks it from a POSIX process still writing.
@@ -314,7 +378,7 @@ test('a timed-out dispatch waits for the killed session before removing its work
   );
 
   const pending = dispatch({ uri: URI, text: TEXT });
-  await eventLoopTurn();
+  await waitUntil(() => fire !== null);
   fire();
   await eventLoopTurn();
   assert.deepEqual(removals, [], 'the cwd outlives the verdict, not the process');
