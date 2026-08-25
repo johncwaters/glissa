@@ -1,5 +1,3 @@
-// A stored id the picker could not render must survive a save, or an unscoped-when-empty lane widens silently.
-
 export function unionProjectSelection({ checked = [], stored = [], rendered = [] } = {}) {
   const renderedIds = new Set(rendered);
   const selection = [...checked];

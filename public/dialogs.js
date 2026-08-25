@@ -616,11 +616,6 @@ export function createSettingsDialog(initialTab) {
       };
     }
 
-    /*
-     * Sent WITHOUT a hydrated spread, unlike the lanes above: the server merges these onto the stored
-     * block, so a file-only knob the Mill tab does not render survives a save, and echoing one back
-     * would be refused by the allow-list that keeps paths and record content off the wire.
-     */
     if (shouldSaveMill()) {
       settings.packDistiller = {
         enabled: packDistillerEnabledCheckbox.checked,

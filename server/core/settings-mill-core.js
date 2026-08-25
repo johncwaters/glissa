@@ -1,7 +1,5 @@
 'use strict';
 
-// Mill control-WS boundary: memory settable only via an allow-list of scalar toggles, everything else refused by name.
-
 const { isPlainObject } = require('./usage-number-core');
 const {
   MEMORY_RETAIN_DAY_RANGE,
@@ -36,8 +34,6 @@ const MEMORY_SPEC = Object.freeze({
   booleans: Object.freeze(['enabled']),
   integerRanges: Object.freeze({
     retainDays: MEMORY_RETAIN_DAY_RANGE,
-    // The legacy alias resolveMemoryConfig still prefers over retainDays, settable so a config that
-    // already carries it stays editable from the dialog instead of silently outranking it.
     memoryRetainDays: MEMORY_RETAIN_DAY_RANGE,
     maxRecordChars: MAX_RECORD_CHARS_RANGE,
     maxRecordsPerKind: MAX_RECORDS_PER_KIND_RANGE,
@@ -45,8 +41,6 @@ const MEMORY_SPEC = Object.freeze({
   blocks: Object.freeze({ distill: MEMORY_DISTILL_SPEC }),
 });
 
-// The lane clamps nothing (a falsy value falls back to its default), so these bounds are the wire's
-// own: a one-hour floor and a thirty-day ceiling are the values that could not possibly be meant.
 const PACK_DISTILLER_SPEC = Object.freeze({
   name: 'packDistiller',
   booleans: Object.freeze(['enabled']),
@@ -57,11 +51,6 @@ const PACK_DISTILLER_SPEC = Object.freeze({
   blocks: NO_BLOCKS,
 });
 
-/*
- * Only the gates cross the wire. Every source's ring bound, poll period and digest quota stays
- * file-only: they are the lane's load-bearing memory ceiling, not a preference, and `fs.roots` plus
- * `shellHistory.shells` name directories and files, which the allow-list refuses by construction.
- */
 const INGEST_SOURCES_SPEC = Object.freeze({
   name: 'ingest.sources',
   booleans: Object.freeze([]),
@@ -81,10 +70,6 @@ const INGEST_SPEC = Object.freeze({
   blocks: Object.freeze({ sources: INGEST_SOURCES_SPEC }),
 });
 
-/**
- * A settings block against its allow-list. Returns the first error message, or null when every key is
- * settable and well typed. A wrong type is REJECTED, never coerced, matching every other block here.
- */
 function validateMillBlock(block, spec) {
   if (block == null) return null;
   if (!isPlainObject(block)) return `${spec.name} must be an object`;
@@ -111,11 +96,6 @@ function validateMillBlock(block, spec) {
   return null;
 }
 
-/*
- * The mirror of mergeMillBlock for the way OUT: the stored block projected down to its allow-list, so
- * a file-only key (a watched root, a db path) is never echoed by the settings reply or its broadcast.
- * A block the operator never configured stays null, which is what keeps an untouched config identical.
- */
 function pickMillBlock(stored, spec) {
   if (!isPlainObject(stored)) return null;
   const out = {};
@@ -132,7 +112,6 @@ function pickMillBlock(stored, spec) {
   return out;
 }
 
-/** The stored block with the allow-listed keys of `incoming` written over it, everything else kept. */
 function mergeMillBlock(stored, incoming, spec) {
   const out = isPlainObject(stored) ? { ...stored } : {};
   if (!isPlainObject(incoming)) return out;
