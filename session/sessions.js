@@ -147,6 +147,10 @@ function detectLinkedWorktree(dir) {
   return readWorktreeGitdirPointer(dir) !== null;
 }
 
+function isOwnRemoteCopy(upstream, branch) {
+  return upstream.replace(/^[^/]+\//, "") === branch;
+}
+
 class Session extends EventEmitter {
   constructor({
     id,
@@ -1429,6 +1433,8 @@ class Session extends EventEmitter {
     return { committed, uncommitted, hasCommits };
   }
 
+  // A session branch pushed with `-u` tracks its OWN remote copy, which is no integration base: its
+  // merge-base with HEAD walks back to the pre-rebase fork and reports every develop commit since.
   // Resolve the best git base ref for diff computation. Tries HEAD@{upstream} first so a
   // session whose branch has an upstream (e.g. Claude Code ran `git push --set-upstream`)
   // uses the tracked remote ref rather than the globally configured _integrationBranch. Falls
@@ -1436,7 +1442,8 @@ class Session extends EventEmitter {
   // toSnapshot() can read a display-ready value synchronously.
   async _resolveEffectiveBase(opts) {
     const upstream = (await gitOut(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "HEAD@{upstream}"], opts)).trim();
-    if (upstream && !upstream.includes("@{")) {
+    const branch = (await gitOut(["rev-parse", "--abbrev-ref", "HEAD"], opts)).trim();
+    if (upstream && !upstream.includes("@{") && !isOwnRemoteCopy(upstream, branch)) {
       this._effectiveBase = upstream; // e.g. "origin/main"
       return upstream;
     }
