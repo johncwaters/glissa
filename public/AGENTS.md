@@ -28,6 +28,8 @@ The browser dashboard frontend: ES modules bundled by Vite (dev server with HMR 
 | `form-factor-core.mjs` | Pure `decideLayout({ coarse, narrowWidth })` -> `'phone' \| 'desktop'`: the one predicate choosing between the two first-class layouts |
 | `form-factor.js` | Its IO shell: evaluates the two media queries, stamps `<html data-layout>`, notifies subscribers on a live flip |
 | `card-host.js` | THE session-card re-parenting seam (`borrowCard` / `releaseCard`), single borrower GLOBALLY; shared by the Focus center and the phone Terminal screen |
+| `project-registry.js` | Project grouping registry shared by the desktop roster and phone Board |
+| `session-actions.js` | Shared session action entry points for dashboard surfaces |
 | `dom-helpers.js` | `el()` / `escapeHtml()` DOM utilities, `adoptElement()` / `releaseElement()` (move a live element and put it back), and the chrome the four tab panels share: `buildPanelSection()` / `buildStatChip()` (class prefix parameterized, so the per-panel CSS is unchanged), `projectsOf()` and `isPanelHidden()` |
 | `style.css` | Component styles, `[data-state]` rules, animations, `::before` pseudo-elements |
 | `tailwind.css` | Tailwind v4 entry: `@theme` block mapping colors, fonts, radii |
@@ -57,7 +59,7 @@ The browser dashboard frontend: ES modules bundled by Vite (dev server with HMR 
 - Section heads, stat chips, `projectsOf` and `isPanelHidden` come from `dom-helpers.js`; a new tab panel passes its class prefix rather than copying the builders.
 
 ### Testing Requirements
-- Pure `.mjs` cores have node:test coverage (`tests/frontend-*.test.js`, `shortcuts-core`, `render-scheduler`, `roster-groups-core`, `focus-shortcuts-core`); DOM modules are verified manually via `npm run dev`.
+- Pure `.mjs` cores have node:test coverage (`tests/frontend-*.test.js`, `shortcuts-core`, `render-scheduler`, `roster-groups-core`, `focus-shortcuts-core`, `board-groups-core`); DOM modules are verified manually via `npm run dev`.
 
 ### Common Patterns
 - Pure-core (`*.mjs`) + DOM-wrapper (`*.js`) pairs, mirroring the server's seam pattern.

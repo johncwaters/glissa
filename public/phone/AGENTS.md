@@ -35,12 +35,12 @@ Review, Radar, PRs, Usage and Visions have no phone-only module: each screen is 
 - `.mjs` files stay pure (no DOM, no window); they run under node:test too.
 
 ### Testing Requirements
-- `tests/frontend-phone-triage.test.js` (ordering + counts) and `tests/frontend-form-factor.test.js` (the layout decision). DOM behavior is verified manually; real-device rendering is not covered by the suite.
+- `tests/frontend-phone-triage.test.js` (ordering + counts), `tests/frontend-phone-board-groups.test.js` (Board project groups), and `tests/frontend-form-factor.test.js` (the layout decision). DOM behavior is verified manually; real-device rendering is not covered by the suite.
 
 ## Dependencies
 
 ### Internal
 - `../form-factor.js`, `../card-host.js`, `../dom-helpers.js`
-- `../session-card/` (registry, tick, terminal input, toast), `../sidebar/review-sidebar.js` + `selection.js`, `../focus-view/attention-core.mjs` (the alphabetical base order), `../ui-prefs.js`, `../control-ws.js`
+- `../project-registry.js`, `../session-actions.js`, `../session-card/` (registry, tick, terminal input, toast), `../sidebar/review-sidebar.js` + `selection.js`, `../focus-view/attention-core.mjs` (the alphabetical base order), `../ui-prefs.js`, `../control-ws.js`
 
 <!-- MANUAL: Any manually added notes below this line are preserved on regeneration -->

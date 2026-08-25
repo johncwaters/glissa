@@ -5188,7 +5188,7 @@ html[data-layout="phone"] .phone-row-item {
   border-bottom: 1px solid var(--border-dim);
 }
 
-html[data-layout="phone"] .phone-row {
+.phone-row {
   flex: 1 1 auto;
   display: flex;
   align-items: center;

@@ -213,6 +213,9 @@ export function createBoardScreen({ onSelectSession }) {
     attentionEl.toggleAttribute('data-lit', attentionCount > 0);
 
     const presentGroupKeys = new Set(boardGroups.order);
+    const groupOrderKey = boardGroups.order.join(',');
+    const groupOrderUnchanged = groupsEl._lastOrderKey === groupOrderKey
+      && groupsEl.childElementCount === boardGroups.groups.length;
     for (const group of boardGroups.groups) {
       let section = groupSectionByKey.get(group.key);
       if (!section) {
@@ -220,7 +223,10 @@ export function createBoardScreen({ onSelectSession }) {
         groupSectionByKey.set(group.key, section);
       }
       paintGroup(section, group);
-      groupsEl.appendChild(section);
+      if (!groupOrderUnchanged) groupsEl.appendChild(section);
+      const rowOrderKey = group.rows.map((entry) => entry.id).join(',');
+      const rowOrderUnchanged = section._refs.rows._lastOrderKey === rowOrderKey
+        && section._refs.rows.childElementCount === group.rows.length;
       for (const entry of group.rows) {
         let row = rowById.get(entry.id);
         if (!row) {
@@ -228,9 +234,11 @@ export function createBoardScreen({ onSelectSession }) {
           rowById.set(entry.id, row);
         }
         paintRow(row, entry);
-        section._refs.rows.appendChild(row._item);
+        if (!rowOrderUnchanged) section._refs.rows.appendChild(row._item);
       }
+      section._refs.rows._lastOrderKey = rowOrderKey;
     }
+    groupsEl._lastOrderKey = groupOrderKey;
     for (const [key, section] of [...groupSectionByKey]) {
       if (presentGroupKeys.has(key)) continue;
       section.remove();
