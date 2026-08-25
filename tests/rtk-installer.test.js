@@ -184,3 +184,32 @@ test('installRtk refuses an archive listing a member outside the staging dir bef
   assert.equal(extracted, false);
   assert.equal(fs.existsSync(path.join(homeDir, '.glissa', 'bin', 'rtk')), false);
 });
+
+test('installRtk completes through the copy path when the cross-device rename is refused', { skip: IS_WINDOWS }, async (t) => {
+  const homeDir = await makeTempHome(t);
+  const fixture = await buildFixture(t);
+  let refusedOnce = false;
+  const renameImpl = async (source, target) => {
+    if (!refusedOnce && !source.endsWith('.partial')) {
+      refusedOnce = true;
+      throw Object.assign(new Error('cross-device link'), { code: 'EXDEV' });
+    }
+    return fsp.rename(source, target);
+  };
+
+  const result = await installRtk({
+    homeDir,
+    platform: 'linux',
+    arch: 'x64',
+    fetchImpl: fakeFetch(fixture.bytes),
+    renameImpl,
+    asset: assetFor(fixture.sha256),
+  });
+
+  assert.equal(result.ok, true);
+  const target = path.join(homeDir, '.glissa', 'bin', 'rtk');
+  assert.equal(refusedOnce, true);
+  assert.equal(fs.existsSync(target), true);
+  assert.equal(fs.existsSync(`${target}.partial`), false);
+  assert.equal(await fsp.readFile(target, 'utf8'), '#!/bin/sh\necho "rtk 0.45.0"\n');
+});

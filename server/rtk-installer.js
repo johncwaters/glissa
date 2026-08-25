@@ -64,14 +64,22 @@ async function findBinary(dir, platform) {
   return null;
 }
 
-async function moveIntoPlace(source, target) {
+async function moveIntoPlace(source, target, renameImpl = fsp.rename) {
   try {
-    await fsp.rename(source, target);
+    await renameImpl(source, target);
+    return;
   } catch (err) {
     if (err?.code !== 'EXDEV') throw err;
-    await fsp.copyFile(source, target);
-    await fsp.unlink(source);
   }
+  const partial = `${target}.partial`;
+  try {
+    await fsp.copyFile(source, partial);
+    await renameImpl(partial, target);
+  } catch (err) {
+    await removeQuietly(partial);
+    throw err;
+  }
+  await fsp.unlink(source);
 }
 
 async function removeQuietly(target) {
@@ -88,6 +96,7 @@ async function installRtk({
   arch = process.arch,
   fetchImpl = globalThis.fetch,
   execFileImpl = execFileAsync,
+  renameImpl = fsp.rename,
   timeoutMs = DOWNLOAD_TIMEOUT_MS,
   log = console,
   asset = assetForPlatform(platform, arch),
@@ -119,7 +128,7 @@ async function installRtk({
     await fsp.mkdir(extractDir, { recursive: true });
     try {
       const listing = await execFileImpl('tar', ['-tf', archivePath]);
-      const escaping = findEscapingArchiveMember(listing?.stdout ?? listing);
+      const escaping = findEscapingArchiveMember(listing.stdout);
       if (escaping) return { ok: false, reason: `extract refused: archive member escapes the staging dir: ${escaping}` };
       await execFileImpl('tar', ['-xf', archivePath, '-C', extractDir]);
     } catch (err) {
@@ -138,7 +147,7 @@ async function installRtk({
     await fsp.mkdir(path.dirname(target), { recursive: true });
     // Windows rename refuses an existing destination, so clear it first.
     await removeQuietly(target);
-    await moveIntoPlace(extracted, target);
+    await moveIntoPlace(extracted, target, renameImpl);
 
     log?.log?.(`[rtk] installed rtk ${asset.version} at ${target}`);
     return { ok: true, path: target, version: asset.version };
