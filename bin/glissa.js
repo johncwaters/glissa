@@ -9,6 +9,7 @@ if (args.includes('--help') || args.includes('-h')) {
 
 Commands:
   doctor            Diagnose install / PATH issues and exit
+  agent setup grok  Install Glissa's env-inert Grok hook relay
   pair              Mint a single-use pairing link for a remote device
   pair --list       List paired devices
   pair --revoke <id>  Revoke a paired device
@@ -63,6 +64,12 @@ if (args[0] === 'pair') {
   process.exit(runPairCli(args.slice(1)));
 }
 
+const isAgentCommand = args[0] === 'agent';
+if (isAgentCommand) {
+  const { runAgentSetupCli } = require('../server/agent-setup-cli');
+  process.exit(runAgentSetupCli(args.slice(1)));
+}
+
 // Async, so they cannot process.exit inline the way `pair` does; the server boot is skipped instead.
 function runAsyncCommand(run) {
   run.then(
@@ -86,7 +93,7 @@ if (isMemoryCommand) {
   runAsyncCommand(runMemoryCli(args.slice(1)));
 }
 
-if (!isPackCommand && !isMemoryCommand) {
+if (!isPackCommand && !isMemoryCommand && !isAgentCommand) {
   require('../server');
 }
 
@@ -161,6 +168,9 @@ function runDoctor() {
       line(`${id} pack carrier`, adapter.capabilities.packs ? adapter.packCarrier : 'unsupported');
       if (adapter.packNoticeCaveat) line(`${id} pack notices`, adapter.packNoticeCaveat);
     }
+    const { inspectGrokAgentSetup } = require('../server/agent-setup-cli');
+    const grokSetup = inspectGrokAgentSetup();
+    line('grok hook setup', `${grokSetup.classification}: ${grokSetup.filePath}`);
   } catch (err) {
     line('agents', `probe failed: ${(err?.message ? err.message : String(err)).split('\n')[0]}`);
   }

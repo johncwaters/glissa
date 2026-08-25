@@ -7,12 +7,14 @@
 
 const claudeCode = require("./claude-code");
 const codex = require("./codex");
+const grok = require("./grok");
 
 const DEFAULT_AGENT_ID = claudeCode.id;
 
 const ADAPTERS = new Map([
   [claudeCode.id, claudeCode],
   [codex.id, codex],
+  [grok.id, grok],
 ]);
 
 const resolvedCommands = new Map();

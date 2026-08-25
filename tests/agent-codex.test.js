@@ -19,6 +19,7 @@ const { explainNotification, createNotifyGate } = require('../session/core/notif
 const { STATES } = require('../shared/states');
 const codex = require('../session/adapters/codex');
 const adapters = require('../session/adapters');
+const { buildHookCommand } = require('../session/core/hook-command-core');
 
 // A real codex session id, live-captured; UUIDv7 rather than the UUIDv4 Claude Code mints.
 const CODEX_SESSION_ID = '01a030d4-6956-73c2-a74a-eedd17b6361d';
@@ -163,6 +164,7 @@ test('hook args subscribe exactly five events as TOML literal strings, and the t
 });
 
 test('a relay path is forward-slashed, quoted only when it needs it, and held to a shell-safe charset', () => {
+  assert.equal(codex.buildHookCommand, buildHookCommand, 'the extracted builder is the adapter export, not a wrapper');
   assert.equal(codex.buildHookCommand('C:\\glissa\\session\\hook-relay.js', 'Stop'),
     'node C:/glissa/session/hook-relay.js Stop');
   assert.equal(codex.buildHookCommand('C:\\Program Files\\glissa\\hook-relay.js', 'Stop'),

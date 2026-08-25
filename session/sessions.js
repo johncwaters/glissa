@@ -560,7 +560,12 @@ class Session extends EventEmitter {
     // reliably fire SessionStart. Tracking-only background-agent signals returned above and are
     // deliberately excluded, since they can describe a different Claude session than the one
     // this card resumes (AGENTS.md, "Auto-Resume and Shutdown").
-    if (raw?.payload) this._captureClaudeSessionId(raw.payload.session_id, raw.payload.source);
+    if (raw?.payload) {
+      const sessionIdOf = typeof this._adapter.sessionIdOf === "function"
+        ? this._adapter.sessionIdOf
+        : (payload) => payload?.session_id;
+      this._captureClaudeSessionId(sessionIdOf(raw.payload), raw.payload.source);
+    }
     // /clear and /compact fire SessionEnd+SessionStart with NO UserPromptSubmit and no
     // Stop; the only movement they cause is TUI title noise. Reset the merged stream
     // (cancels a held ready from the pre-clear turn) and latch titles quiet until the
@@ -2287,6 +2292,7 @@ class Session extends EventEmitter {
       return NO_HOOK_INJECTION;
     }
     if (this._adapter.hooks.injection?.kind === "argv-config") return this._injectRelayHooks(port);
+    if (this._adapter.hooks.injection?.kind === "home-hooks-file") return this._injectHomeRelayHooks(port);
     try {
       this._settingsHandle = writeSessionSettings({
         port,
@@ -2399,6 +2405,30 @@ class Session extends EventEmitter {
       console.warn(`[session:${this.name}] hook injection skipped: the relay path cannot be expressed for ${this.agentId} - falling back to OSC title only`);
       return NO_HOOK_INJECTION;
     }
+    return this._registerRelayHooks(port, args);
+  }
+
+  _injectHomeRelayHooks(port) {
+    const injection = this._adapter.hooks.injection;
+    let hooksPath = null;
+    let contents = null;
+    try {
+      hooksPath = injection.filePath(process.env);
+      contents = fs.readFileSync(hooksPath, "utf8");
+    } catch (error) {
+      const reason = error.code === "ENOENT" ? "not installed" : error.message;
+      console.warn(`[session:${this.name}] Grok hook injection skipped: ${reason}; run "glissa agent setup grok"`);
+      return NO_HOOK_INJECTION;
+    }
+    const classification = injection.classifyContents(contents);
+    if (classification !== "current") {
+      console.warn(`[session:${this.name}] Grok hook injection skipped: ${hooksPath} is ${classification}; run "glissa agent setup grok"`);
+      return NO_HOOK_INJECTION;
+    }
+    return this._registerRelayHooks(port, []);
+  }
+
+  _registerRelayHooks(port, args) {
     const token = generateToken();
     const hookUrl = `http://127.0.0.1:${port}/hook/${encodeURIComponent(this.id)}?t=${encodeURIComponent(token)}`;
     try {

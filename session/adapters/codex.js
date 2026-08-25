@@ -11,6 +11,7 @@ const path = require("node:path");
 
 const { resolveAgentCommand, buildAgentSpawnCommand } = require("../core/spawn-command");
 const { buildAgentEnv } = require("../core/spawn-env");
+const { SAFE_PATH_RE, buildHookCommand } = require("../core/hook-command-core");
 
 const ID = "codex";
 const COMMAND_NAME = "codex";
@@ -131,6 +132,10 @@ function mapHookPromptKind(event) {
   return String(event || "").toLowerCase() === "permissionrequest" ? "permission" : null;
 }
 
+function sessionIdOf(payload) {
+  return payload?.session_id;
+}
+
 /*
  * Hook trust is persisted as `hooks.state."<source>:<event>:<group>:<index>".trusted_hash` and is read
  * from the config FILE only: seeding it through `-c` is ignored (live-probed both ways, 0.147.0), and
@@ -187,18 +192,8 @@ function mayContributeHooks(configText) {
  * no quotes at all, so anything outside the allow-list is refused and the caller degrades that
  * session to the title tier instead of emitting a command it cannot vouch for.
  */
-// This regex is the argv boundary for both the relay path and context-pack index paths.
-const SAFE_PATH_RE = /^[A-Za-z0-9_.:/\\ -]+$/;
 const SAFE_PACK_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const PACK_DIRECTIVE = "Glissa context packs are available at these index files. Read each relevant CLAUDE.md before working";
-
-function buildHookCommand(relayPath, event) {
-  const raw = String(relayPath);
-  if (!SAFE_PATH_RE.test(raw)) return null;
-  const forwardSlashed = raw.replace(/\\/g, "/");
-  const quoted = /\s/.test(forwardSlashed) ? `"${forwardSlashed}"` : forwardSlashed;
-  return `node ${quoted} ${event}`;
-}
 
 /*
  * One `-c hooks.<Event>=...` per subscribed event. This argv form is the only one `codex exec resume`
@@ -337,6 +332,7 @@ module.exports = {
   mapHookToSignal,
   mapHookConfidence,
   mapHookPromptKind,
+  sessionIdOf,
   HOOK_EVENTS,
   RELAY_PATH,
   TRUST_BYPASS_FLAG,

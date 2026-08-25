@@ -33,7 +33,7 @@ function tmpHooksDir() {
 
 test('the registry exposes claude-code as the default and refuses an unknown id', () => {
   assert.equal(adapters.DEFAULT_AGENT_ID, 'claude-code');
-  assert.deepEqual(adapters.listAgentIds(), ['claude-code', 'codex']);
+  assert.deepEqual(adapters.listAgentIds(), ['claude-code', 'codex', 'grok']);
   assert.equal(adapters.isKnownAgentId('claude-code'), true);
   assert.equal(adapters.isKnownAgentId('gemini'), false);
   assert.equal(adapters.getAdapter('gemini'), null);
@@ -269,7 +269,7 @@ test('config accepts an absent or registered agent on a project and refuses anyt
   assert.equal(validateConfig({ projects: [{ path: '/a', agent: 'codex' }] }).ok, true);
   const bad = validateConfig({ projects: [{ path: '/a', agent: 'gemini' }] });
   assert.equal(bad.ok, false);
-  assert.deepEqual(bad.errors, ['projects[0].agent must be one of: claude-code, codex']);
+  assert.deepEqual(bad.errors, ['projects[0].agent must be one of: claude-code, codex, grok']);
   const wrongType = validateConfig({ projects: [{ path: '/a', agent: 7 }] });
   assert.equal(wrongType.ok, false);
 });
