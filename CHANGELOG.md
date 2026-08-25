@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-08-25
+
+### Added
+
+- **First-class Codex CLI sessions**: Glissa now discovers installed agent adapters, offers an agent picker when more than one is available, and reports resolved binaries through `glissa doctor`. Codex sessions gain structural hook and title status detection, safe workspace permissions, resume support, context-pack delivery, per-vendor usage attribution, and an adapter badge.
+- **Grok Build sessions**: an opt-in `glissa agent setup grok` command installs a guarded home hook file for supervised Grok sessions, with status detection, resume, background-task completion gating, context-pack delivery, and Grok-specific usage attribution.
+- **Opt-in long-term memory**: Glissa can retain HMAC-signed knowledge, intent, feedback, and transcript records in a machine-wide SQLite store with FTS5 retrieval, automatic budgeted backfill across Claude, Codex, and Grok transcripts, retention controls, and secure forgetting that scrubs the row, search index, and WAL. This raises the Node floor to 22.16.0.
+- **Distilled memory delivery**: a bounded headless lane turns remembered records into verified global and per-project claims, diverts proposed changes to locked facts for review, and delivers relevant memory through fenced Visions prompts and data-only context packs while suppressing quoted-memory feedback loops.
+- **Mill dashboard**: a new desktop tab and phone screen report context-pack budgets, builds, versions, drift, outputs, watchers, consumers, and live delivery state without adding a polling timer.
+- **Per-project context-pack controls and variants**: Mill can assign packs to a checkout through delta-safe checkboxes, build and watch only packs with consumers, keep dormant sessions dormant during assignment, group duplicate session records by resolved project path, and derive independent project-specific variants with base-pack fallback.
+- **Automatic remote session-branch cleanup**: a default-on lane periodically removes remote `glissa/session/*` branches that are proven merged or orphaned beyond the staleness threshold, while protecting configured sessions and integration branches. Set `branchGc.enabled` to `false` to opt out.
+- **Managed rtk support for Codex**: when rtk is enabled but missing, Glissa downloads a pinned release into `~/.glissa/bin`, verifies its pinned SHA-256 digest, reports installation status in Settings and `glissa doctor`, and enables Codex command rewriting through a dedicated guarded hook relay.
+- **Native Linux and Pop!_OS support**: Glissa now handles POSIX process groups, worktree links, command resolution, secure config modes, ephemeral files, and session teardown natively, with Linux installation coverage added to CI and platform-specific notification fallback.
+- **Durable Telegram escalation**: Telegram notifications are queued before delivery and replayed after a crash until confirmed, while an unacknowledged terminal notification can escalate to Telegram even when a dashboard connection remains open.
+
+### Changed
+
+- **Navigator is now Visions**: the feature, configuration key, WebSocket route, LSP identity, files, and VS Code companion were renamed consistently to Visions.
+- **Project-aware Visions intent and diagnostics**: intent is persisted per stable project id, selected by the deepest matching project root, and shared correctly when multiple sessions use the same checkout. Model diagnostics are always low-severity hints and exclude syntax, type, formatting, and lint findings that belong to the real toolchain.
+- **Denser dashboard navigation and reporting**: desktop view tabs now use a centered segmented-pill control, the Mill phone screen uses bounded cards and compact grids, Usage and Mill copy is shorter while preserving provenance labels, and the Glissa server terminal tab identifies itself by port.
+- **Leaner bundled Glissa context pack**: the pack now delivers only its distilled brief and rules instead of repeating the raw source documents, reducing its budget from 12,000 to 6,000 tokens.
+- **Quieter automated PR reviews**: review comments identify themselves as automated, omit praise and empty re-review updates, avoid unconditional agent guidance, and keep finding summaries focused on actionable changes.
+
+### Fixed
+
+- **Dashboard reconnects after restarts and device wake**: control and terminal sockets now recover from server shutdowns, phone sleep, black-holed handshakes, half-open connections, stale page tokens, and cached sequence reuse; protocol heartbeats reap dead sockets, and a changed server build reloads the page into a fresh snapshot.
+- **Local dashboard trust boundary hardened**: browser connections now require an exact listener-port Origin and per-process page token, Host values are allow-listed, decoded pairing paths close traversal bypasses, and managed hook directories and files must have safe ownership, type, and permissions. Hook injection also falls back to title detection when project Claude settings could contribute untrusted hooks.
+- **Visions dispatches stay current and bounded**: blank documents spend no budget, edits arriving during a dispatch invalidate stale results, ERROR verdicts cannot carry findings or intent, oversized relay frames force a clean resync, shared documents clear only after their last editor closes, and prompts are read from capped files instead of riding process arguments.
+- **Context-pack publishing survives races and crashes**: per-pack locks serialize concurrent builders, stale locks are reclaimed atomically, interrupted rotation falls back to the previous good build, duplicate output paths fail before publishing, and lock-release failures no longer hide the original build error. Packless sessions also scrub inherited pack-discovery flags.
+- **Worktree review and cleanup are safer**: a session branch tracking its own remote copy no longer uses that copy as the review base, so the sidebar shows only the session's changes after a rebase. Discard now preserves committed-but-unmerged work, process-group checks catch background holders, and new rerere resolutions immediately retrigger cooled-down rebases.
+- **Background lanes shut down cleanly**: restart and shutdown now await every lane drain and killed PTY tree under named bounds before worktrees are discarded. PR Review and Radar state writes are serialized asynchronously, and PR polling uses jittered outage backoff.
+- **Session switching keeps visual continuity**: desktop switches no longer publish a temporary 80x24 terminal size or produce a large layout jump, and elapsed time in the current state survives a dashboard reload instead of resetting.
+- **External config edits are no longer swallowed**: content-signature suppression now distinguishes Glissa's own writes from later saves, reloads, and operator reversions, closing both timing-window cases that could silently leave disk and live state out of sync.
+- **Memory ingestion and distillation boundaries hardened**: transcript timestamps are clamped, backfill and live offsets cannot race, oversized lines stay intact through secret scrubbing, projected paths cannot escape their roots, and ephemeral memory lanes are confined to throwaway working directories with capped result files.
+
+### Removed
+
+- **Manual Visions intent correction**: the editable and lockable intent control is gone; intent is now maintained by the model, with incorrect intent treated as an upstream Visions defect instead of operator-managed state.
+
 ## [0.22.0] - 2026-08-22
 
 ### Added
