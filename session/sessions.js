@@ -1442,8 +1442,9 @@ class Session extends EventEmitter {
   // toSnapshot() can read a display-ready value synchronously.
   async _resolveEffectiveBase(opts) {
     const upstream = (await gitOut(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "HEAD@{upstream}"], opts)).trim();
-    const branch = (await gitOut(["rev-parse", "--abbrev-ref", "HEAD"], opts)).trim();
-    if (upstream && !upstream.includes("@{") && !isOwnRemoteCopy(upstream, branch)) {
+    const hasUpstream = Boolean(upstream) && !upstream.includes("@{");
+    const branch = hasUpstream ? (await gitOut(["rev-parse", "--abbrev-ref", "HEAD"], opts)).trim() : "";
+    if (hasUpstream && !isOwnRemoteCopy(upstream, branch)) {
       this._effectiveBase = upstream; // e.g. "origin/main"
       return upstream;
     }
