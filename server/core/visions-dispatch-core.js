@@ -196,10 +196,6 @@ function decidePromptSize(prompt, trigger = null) {
   return { dispatch: true, gate: null, trigger, promptBytes };
 }
 
-function decideDocumentSize(text, trigger = null) {
-  return decidePromptSize(text, trigger);
-}
-
 // Recorded when the dispatch STARTS, so a slow session cannot let a second one through behind it. The
 // trigger is the gate's own classification, handed back so the two can never disagree about the budget.
 function recordDispatch(state, {
@@ -459,7 +455,6 @@ module.exports = {
   countRecentDispatches,
   createDispatchState,
   decideDispatch,
-  decideDocumentSize,
   decidePromptSize,
   forgetUri,
   hashText,

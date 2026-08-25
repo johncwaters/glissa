@@ -21,7 +21,6 @@ const {
   countRecentDispatches,
   createDispatchState,
   decideDispatch,
-  decideDocumentSize,
   decidePromptSize,
   forgetUri,
   hashText,
@@ -206,15 +205,6 @@ test('the prompt cap counts UTF-8 bytes and allows the exact boundary', () => {
     promptBytes: MAX_PROMPT_BYTES,
   });
   assert.deepEqual(decidePromptSize(`${'a'.repeat(MAX_PROMPT_BYTES - 1)}é`, 'activity'), {
-    dispatch: false,
-    gate: 'prompt-too-large',
-    trigger: 'activity',
-    promptBytes: MAX_PROMPT_BYTES + 1,
-  });
-});
-
-test('the raw document pre-check shares the prompt cap and refusal reason', () => {
-  assert.deepEqual(decideDocumentSize(`${'a'.repeat(MAX_PROMPT_BYTES - 1)}é`, 'activity'), {
     dispatch: false,
     gate: 'prompt-too-large',
     trigger: 'activity',

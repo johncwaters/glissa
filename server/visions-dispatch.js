@@ -1,3 +1,20 @@
+/*
+ * Visions tier 3 dispatch: the IO half of docs/archive/plan-navigator.md M4.
+ *
+ * Permissions posture, live-probed against the real CLI (2.x):
+ *   - NO --dangerously-skip-permissions. The prompt file embeds arbitrary buffer text, so the session gets
+ *     the least capability that still lets it write its result file.
+ *   - There is NO allow list. A bare `Write` allow is what unbounds the writes, and no narrower allow
+ *     grants the tool at all: both `Write(<dir>/**)` and `Edit(<dir>/**)` were probed and neither
+ *     authorizes a Write. What confines them is `defaultMode: acceptEdits` over the throwaway cwd this
+ *     module hands the session, which auto-accepts edits there and refuses them anywhere else.
+ *   - The deny list below is the guard on top of that. Read is deliberately NOT denied: a bare `Read`
+ *     deny refuses the Write tool too (probed), so denying reads and keeping the result contract are
+ *     mutually exclusive with this plumbing.
+ *   - Re-probed against 2.1.241; every clause and its counter-example is in
+ *     server/core/lane-permissions-core.js.
+ */
+
 'use strict';
 
 const fs = require('node:fs/promises');

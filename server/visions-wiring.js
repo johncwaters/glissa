@@ -12,7 +12,6 @@ const {
   buildVisionsPrompt,
   createDispatchState,
   decideDispatch,
-  decideDocumentSize,
   decidePromptSize,
   forgetUri,
   hashText,
@@ -660,7 +659,7 @@ function createVisionsWiring({
         noteGate(uri, decision);
         return;
       }
-      const documentSizeDecision = decideDocumentSize(text, decision.trigger);
+      const documentSizeDecision = decidePromptSize(text, decision.trigger);
       if (!documentSizeDecision.dispatch) {
         noteGate(uri, documentSizeDecision);
         return;

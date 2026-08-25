@@ -464,6 +464,7 @@ const MODEL_DIAGNOSTIC = { line: 1, message: 'The title is missing a concrete no
  */
 function dispatchingConnection({
   dispatch: overrides = {}, respond = null, contextDigest = null, contextSeq = null, scopeProjects = null, debug = false,
+  ...wiringOptions
 } = {}) {
   const calls = [];
   const dispatchConfig = { enabled: true, ...overrides };
@@ -474,7 +475,7 @@ function dispatchingConnection({
   };
   return {
     ...drivenConnection({
-      dispatchConfig, dispatch, contextDigest, contextSeq, scopeProjects, debug,
+      dispatchConfig, dispatch, contextDigest, contextSeq, scopeProjects, debug, ...wiringOptions,
     }),
     calls,
   };
@@ -723,6 +724,29 @@ test('an oversized document skips memory retrieval and prompt construction', asy
   assert.equal(calls.length, 0);
   assert.equal(memoryReads, 0);
   assert.equal(promptBuilds, 0);
+});
+
+test('an assembled oversized prompt releases the dispatch gate without charging its budget', async (t) => {
+  const rawText = `# Title\n\nA line with with a repeat.\n${'x'.repeat(MAX_PROMPT_BYTES - 100)}`;
+  const { wiring, timers, calls, notes, lsp } = dispatchingConnection({
+    dispatch: { maxPerHour: 1 },
+    getMemoryStore: () => ({
+      retrieve: () => [{ id: 'memory-1', text: 'Keep the decision trace concise.', rank: 'model' }],
+    }),
+  });
+  t.after(() => wiring.stop());
+
+  wiring.applyModelIntent('Keep the implementation reviewable.');
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', rawText));
+  runSweepThenDispatch(timers);
+  await wiring.whenDispatchSettled();
+  assert.equal(calls.length, 0, 'the raw document fits, but its findings, intent, and memory push the prompt over the cap');
+  assert.ok(notes.some((line) => line.includes('prompt-too-large')));
+
+  lsp('textDocument/didChange', didChangeParams(MARKDOWN_URI, 2, REPEATED_WORD_MARKDOWN));
+  lsp('textDocument/didSave', { textDocument: { uri: MARKDOWN_URI } });
+  await wiring.whenDispatchSettled();
+  assert.equal(calls.length, 1, 'the rejected assembled prompt left no in-flight or budget state behind');
 });
 
 test('a COMMENTS result is broadcast for that uri and joins the connect-time snapshot', async (t) => {
