@@ -1,10 +1,5 @@
 'use strict';
 
-// The rtk relay's contract, driven through main() with a fake stdin, stdout and rtk runner: never
-// throw, never block a tool call, and emit nothing at all rather than a verdict the calling CLI would
-// reject. runRtk is exercised against a real child process so the stdin handoff and the non-zero-exit
-// path are pinned rather than assumed.
-
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -84,9 +79,6 @@ test('runRtk resolves the empty verdict when the binary does not exist', async (
   assert.equal(await runRtk(missing, Buffer.from(ENVELOPE, 'utf8')), '');
 });
 
-// The real spawn path: stdin reaches the child, a clean exit keeps its stdout and a non-zero one
-// discards it. POSIX-only because the stand-in has to be an executable image, and a Windows .cmd shim
-// is exactly the re-parse this repo spawns around rather than through.
 test('runRtk pipes the envelope to the child and keeps only a clean exit', { skip: process.platform === 'win32' }, async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-rtk-relay-'));
   const writeExecutable = (name, script) => {

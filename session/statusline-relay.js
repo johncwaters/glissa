@@ -1,5 +1,7 @@
 'use strict';
 
+const { readStdin } = require('./relay-stdin');
+
 // Managed statusLine relay, run standalone by Claude Code per assistant/tool step, never required by
 // the server. In PARALLEL (any delay is a visible TUI stall): fire-and-forget the stdin blob to the
 // local hook ingress, and chain the statusLine command the operator already had, since a per-session
@@ -15,22 +17,6 @@ const POST_TIMEOUT_MS = 1500;
 // Argv marker for "the operator had no statusLine of their own".
 const NO_CHAIN = '-';
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', '::1', '[::1]', 'localhost']);
-
-function readStdin(stream) {
-  return new Promise((resolve) => {
-    const chunks = [];
-    let done = false;
-    const finish = () => {
-      if (done) return;
-      done = true;
-      resolve(Buffer.concat(chunks).toString('utf8'));
-    };
-    stream.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
-    stream.on('end', finish);
-    stream.on('error', finish);
-    stream.on('close', finish);
-  });
-}
 
 // Never resolves to a rejection and never outlives POST_TIMEOUT_MS. The loopback check is a guard on
 // our own argv: this process only ever talks to the local Glissa.

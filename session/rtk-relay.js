@@ -1,27 +1,13 @@
 'use strict';
 
+const { readStdin } = require('./relay-stdin');
+
 const { spawn } = require('../server/child-process-safe');
 
 const { MAX_RTK_STDOUT_BYTES, RTK_PATH_ENV, normalizeRtkHookResponse } = require('./core/rtk-hook-core');
 
 // The agent's tool call blocks on this process and the rewrite is only an optimization.
 const RTK_TIMEOUT_MS = 3000;
-
-function readStdin(stream) {
-  return new Promise((resolve) => {
-    const chunks = [];
-    let done = false;
-    const finish = () => {
-      if (done) return;
-      done = true;
-      resolve(Buffer.concat(chunks));
-    };
-    stream.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
-    stream.on('end', finish);
-    stream.on('error', finish);
-    stream.on('close', finish);
-  });
-}
 
 function runRtk(rtkPath, body) {
   return new Promise((resolve) => {

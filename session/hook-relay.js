@@ -1,5 +1,7 @@
 'use strict';
 
+const { readStdin } = require('./relay-stdin');
+
 // Hook relay, run standalone by a non-Claude agent CLI as a command-type hook, never required by the
 // server (the session/statusline-relay.js mold). It reads the hook envelope from stdin, POSTs it
 // UNTOUCHED to Glissa's local ingress, and exits 0 whatever happened: a hook that fails must never
@@ -20,22 +22,6 @@ const {
 
 // Bounded hard: the agent is waiting on this process, and the payload is telemetry.
 const POST_TIMEOUT_MS = 1500;
-
-function readStdin(stream) {
-  return new Promise((resolve) => {
-    const chunks = [];
-    let done = false;
-    const finish = () => {
-      if (done) return;
-      done = true;
-      resolve(Buffer.concat(chunks));
-    };
-    stream.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
-    stream.on('end', finish);
-    stream.on('error', finish);
-    stream.on('close', finish);
-  });
-}
 
 // Never rejects and never outlives POST_TIMEOUT_MS. The body is the stdin bytes verbatim: translating
 // a vendor's field names is the adapter's job on the server side, where the session's vocabulary is known.

@@ -117,8 +117,6 @@ test('resolveRtkPath returns null when neither managed bin nor PATH resolves', (
   assert.equal(resolved, null);
 });
 
-// Live rtk 0.45.0 verdicts: it emits permissionDecision for some rewrites and omits it for others,
-// and codex runs the ORIGINAL command whenever an updatedInput arrives without one.
 test('a rewrite missing permissionDecision is completed with allow', () => {
   const raw = JSON.stringify({
     hookSpecificOutput: {
