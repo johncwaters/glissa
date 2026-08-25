@@ -78,7 +78,7 @@ test("the registry exposes the Grok adapter with the honest capability set", () 
     awaitingInput: true,
     backgroundAgents: false,
     resume: true,
-    packs: false,
+    packs: true,
     packNotice: false,
     statusLine: false,
     rtk: false,
@@ -123,6 +123,19 @@ test("spawn args disable updates, map approval bypass, resume by id, and keep th
   const env = grok.buildEnv({ PATH: "/bin", GROK_CLAUDE_HOOKS_ENABLED: "true" }, null, {});
   assert.equal(grok.CLAUDE_COMPAT_HOOKS_ENV, "GROK_CLAUDE_HOOKS_ENABLED");
   assert.equal(env.GROK_CLAUDE_HOOKS_ENABLED, "false");
+});
+
+test("pack delivery uses one --rules token with ordered index pointers", () => {
+  assert.deepEqual(grok.renderPackArgs([
+    { name: "alpha", dir: "/packs/alpha/current" },
+    { name: "memory-project", dir: "/packs/memory-project/current" },
+  ], "/packs"), [
+    "--rules",
+    `${grok.PACK_DIRECTIVE}; alpha: /packs/alpha/current/CLAUDE.md; memory-project: /packs/memory-project/current/CLAUDE.md`,
+  ]);
+  assert.deepEqual(grok.renderPackArgs([]), []);
+  assert.equal(grok.renderPackArgs([{ name: "alpha", dir: "relative/current" }], "/packs"), null);
+  assert.equal(grok.renderPackArgs([{ name: "alpha", dir: "/other/alpha/current" }], "/packs"), null);
 });
 
 test("the hook vocabulary maps turn outcomes without trusting nested sessions", () => {

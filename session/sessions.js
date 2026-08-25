@@ -2500,7 +2500,7 @@ class Session extends EventEmitter {
       }
       deliveredPacks.push({ name: resolved.name, version: resolved.version, dir: resolved.dir });
     }
-    const args = this._adapter.renderPackArgs(deliveredPacks);
+    const args = this._adapter.renderPackArgs(deliveredPacks, builtRoot);
     if (!args) {
       const ts = Date.now();
       for (const pack of deliveredPacks) {

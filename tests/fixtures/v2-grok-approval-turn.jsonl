@@ -1,0 +1,9 @@
+{"type":"header","version":2,"records":"full","session":"fixture-grok-approval","agent":"grok","startedAt":0,"config":{"hooksInjected":true,"cols":80,"rows":24},"cols":80,"rows":24}
+{"type":"data","ts":0,"data":"\u001b]0;grok\u0007","len":9}
+{"type":"hook","ts":1,"event":"userpromptsubmit","payload":{"hookEventName":"user_prompt_submit","sessionId":"018f1234-5678-7abc-8def-0123456789ab","cwd":"<grok-probe>/project","workspaceRoot":"<grok-probe>/project","promptId":"7645d251-14c9-4ee8-99f9-5caf03475ae2","permissionMode":"default","prompt":"<user_query>Run the shell command: touch ./grok-probe-approval.txt</user_query>"}}
+{"type":"data","ts":2,"data":"\u001b]0;\u2827 - Waiting for response... - grok\u0007","len":38}
+{"type":"data","ts":3,"data":"\u001b]0;\u26a0 Action Required - \u283c - Create grok-probe-approval.txt via touch... - grok\u0007","len":81}
+{"type":"hook","ts":4,"event":"notification","payload":{"hookEventName":"notification","sessionId":"018f1234-5678-7abc-8def-0123456789ab","cwd":"<grok-probe>/project","workspaceRoot":"<grok-probe>/project","permissionMode":"default","notificationType":"permission_prompt","message":"Tool permission requested","level":"info"}}
+{"type":"data","ts":5,"data":"\u001b]0;\u283c - Thinking - Run touch for grok-probe-approval.txt - grok\u0007","len":65}
+{"type":"hook","ts":6,"event":"stop","payload":{"hookEventName":"stop","sessionId":"018f1234-5678-7abc-8def-0123456789ab","cwd":"<grok-probe>/project","workspaceRoot":"<grok-probe>/project","promptId":"7645d251-14c9-4ee8-99f9-5caf03475ae2","permissionMode":"default","reason":"end_turn","stopHookActive":false,"lastAssistantMessage":"Created `./grok-probe-approval.txt` with `touch`. The command exited 0.","backgroundTasks":[],"sessionCrons":[]}}
+{"type":"data","ts":7,"data":"\u001b]0;Run touch for grok-probe-approval.txt - grok\u0007","len":50}

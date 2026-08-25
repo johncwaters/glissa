@@ -1,20 +1,10 @@
 'use strict';
 
-// Live verification of the Codex adapter (M3 of docs/plan-agent-adapters.md), run by hand against a
+// Live verification of Codex pack delivery, run by hand against a
 // REAL codex binary: node test/probe-codex-session.js
 //
-// It boots the real backend against a throwaway config (GLISSA_CONFIG), so the hook ingress, its
-// per-session token check, the relay, the adapter's argv and the state machine are the shipped ones
-// rather than fakes. It then drives one supervised session through the sequence M3 is accepted on:
-//
-//   spawn -> RUNNING (working) -> WAITING (awaiting-input) -> COMPLETE (ready) -> resume, same id
-//
-// The prompt asks codex for one shell command it cannot run unapproved, which is what produces the
-// PermissionRequest hook; the probe answers the approval by writing to the PTY, exactly as an
-// operator would from the dashboard.
-//
-// Costs one real codex turn. Requires codex on PATH and authenticated. The recording it leaves behind
-// is the raw material for tests/fixtures/v2-codex-*.jsonl.
+// It boots the real backend against a throwaway config, delivers one pack through the adapter's
+// developer_instructions carrier, asks for a sentinel, resumes the same session, and asks again.
 
 const fs = require('node:fs');
 const http = require('node:http');
@@ -24,7 +14,9 @@ const path = require('node:path');
 const { createBackend } = require('../server/backend');
 
 const SESSION_ID = 'codex-probe-session';
-const PROMPT = 'Run the shell command: touch ./codex-probe-approval.txt';
+const PACK_NAME = 'live-probe-pack';
+const SENTINEL_WORD = 'velvetquartz';
+const PROMPT = 'what sentinel word does the glissa context pack data file contain, answer with the word only';
 const STEP_TIMEOUT_MS = 90000;
 
 let passed = 0;
@@ -87,11 +79,15 @@ function makeProbeCodexHome(tmpDir, projectDir) {
 
 function writeProbeConfig(configPath, projectDir) {
   fs.writeFileSync(configPath, JSON.stringify({
-    // Approvals must stay ON: the permissionless spawn form silences PermissionRequest, which is the
-    // one awaiting-input signal codex has and the step this probe exists to exercise.
-    // codexBypassHookTrust is what lets codex run Glissa's relay hooks at all; the probe's temp project
-    // tree is empty, so nothing else can ride in on it. A real project opts in the same way, knowingly.
-    projects: [{ id: SESSION_ID, name: 'codex probe', path: projectDir, agent: 'codex', dangerouslySkipPermissions: false, codexBypassHookTrust: true }],
+    projects: [{
+      id: SESSION_ID,
+      name: 'codex probe',
+      path: projectDir,
+      agent: 'codex',
+      dangerouslySkipPermissions: false,
+      codexBypassHookTrust: true,
+      packs: [PACK_NAME],
+    }],
     teams: [],
     repoRoots: [],
     packsAutoRebuild: false,
@@ -102,12 +98,52 @@ function writeProbeConfig(configPath, projectDir) {
   }, null, 2), 'utf8');
 }
 
+function makeProbePack(tmpDir) {
+  const builtRoot = path.join(tmpDir, 'packs', 'built');
+  const currentDir = path.join(builtRoot, PACK_NAME, 'current');
+  const dataDir = path.join(currentDir, 'data');
+  fs.mkdirSync(dataDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(currentDir, 'CLAUDE.md'),
+    '# Glissa live probe pack\n\nFor sentinel questions, read `data/sentinel.txt`.\n',
+    'utf8',
+  );
+  fs.writeFileSync(path.join(dataDir, 'sentinel.txt'), `${SENTINEL_WORD}\n`, 'utf8');
+  fs.writeFileSync(
+    path.join(currentDir, 'manifest.json'),
+    JSON.stringify({ name: PACK_NAME, version: 'live-probe-v1', tokenEstimate: 20 }, null, 2),
+    'utf8',
+  );
+  return builtRoot;
+}
+
+function answerFrom(payload) {
+  const answer = payload?.last_assistant_message;
+  return typeof answer === 'string' ? answer.trim() : null;
+}
+
+function copySanitizedRecording(tmpDir) {
+  const recordingDir = path.join(tmpDir, 'recordings');
+  if (!fs.existsSync(recordingDir)) return null;
+  const recorded = fs.readdirSync(recordingDir);
+  if (recorded.length === 0) return null;
+  const source = path.join(recordingDir, recorded[0]);
+  const keepDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-codex-probe-out-'));
+  const keptRecording = path.join(keepDir, recorded[0]);
+  const sanitized = fs.readFileSync(source, 'utf8')
+    .split(tmpDir).join('<codex-probe>')
+    .split(os.homedir()).join('<home>');
+  fs.writeFileSync(keptRecording, sanitized, { encoding: 'utf8', mode: 0o600 });
+  return keptRecording;
+}
+
 async function main() {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-codex-probe-'));
   const projectDir = path.join(tmpDir, 'project');
   fs.mkdirSync(projectDir);
   const configPath = path.join(tmpDir, 'config.json');
   writeProbeConfig(configPath, projectDir);
+  const builtRoot = makeProbePack(tmpDir);
   process.env.GLISSA_CONFIG = configPath;
   process.env.CODEX_HOME = makeProbeCodexHome(tmpDir, projectDir);
 
@@ -118,12 +154,22 @@ async function main() {
 
   const session = backend.getSession(SESSION_ID);
   const hookEvents = [];
+  const answers = [];
   const titleSignals = [];
+  const spawnCalls = [];
+  session._packsBuiltRoot = builtRoot;
+  const spawnPty = session._ptySpawn;
+  session._ptySpawn = (file, args, options) => {
+    spawnCalls.push({ file, args: [...args], cwd: options.cwd });
+    return spawnPty(file, args, options);
+  };
   session.on('state-change', ({ from, to, event }) => console.log(`  [state] ${from} -> ${to} (${event})`));
 
   const originalIngest = session.ingestHookSignal.bind(session);
   session.ingestHookSignal = (raw) => {
     if (raw?.event) hookEvents.push(raw.event);
+    const answer = answerFrom(raw?.payload);
+    if (answer) answers.push(answer);
     return originalIngest(raw);
   };
   session._titleSource.on('signal', (s) => titleSignals.push(s.signal));
@@ -136,27 +182,14 @@ async function main() {
     await waitForState(session, ['RUNNING', 'IDLE'], 'first output');
     check('the session reached a live state after spawn', session.state !== 'DORMANT');
 
-    console.log('\nTurn:');
-    // The composer treats a fast burst as a paste, so the newline is a separate write.
+    console.log('\nPack turn:');
     await delay(6000);
     session.write(PROMPT);
     await delay(1500);
     session.write('\r');
-    await waitForState(session, ['WAITING'], 'the approval prompt');
-    check('PermissionRequest moved the card to WAITING', session.state === 'WAITING');
-    check('the prompt kind is reported as a permission', session._pendingPromptKind === 'permission');
-    // The Action Required title blinks at 1 Hz and the hook wins the race to WAITING, so the title
-    // half of the same fact is checked after a beat rather than in the same tick.
-    await delay(2500);
-    check('the title source saw the Action Required state', titleSignals.includes('awaiting-input'));
-
-    console.log('\nApproval:');
-    // "1. Yes, proceed (y)" is the approval prompt's own accelerator.
-    session.write('y');
     await waitForState(session, ['COMPLETE'], 'the turn to finish');
-    check('Stop completed the card', session.state === 'COMPLETE');
-    // The ingress lowercases the event into its route segment, so the recorded names are lowercase.
-    check('UserPromptSubmit and Stop both arrived', hookEvents.includes('userpromptsubmit') && hookEvents.includes('stop'));
+    check('the first turn answered with the data-file sentinel', answers.at(-1)?.toLowerCase() === SENTINEL_WORD);
+    console.log(`  [answer:first] ${answers.at(-1) || '(none)'}`);
 
     const capturedId = session._resumeSessionId;
     check('a codex session id was captured from the hook payloads', typeof capturedId === 'string' && capturedId.length > 0);
@@ -168,22 +201,26 @@ async function main() {
     // restart() is the dashboard's own path out of DONE, and it re-spawns with `codex resume <id>`.
     check('restart re-spawned the session', session.restart());
     await waitForState(session, ['RUNNING', 'IDLE'], 'the resumed session');
-    check('the resume kept the same codex session id (ids are stable across resume)', session._resumeSessionId === capturedId);
+    await delay(6000);
+    session.write(PROMPT);
+    await delay(1500);
+    session.write('\r');
+    await waitForState(session, ['COMPLETE'], 'the resumed pack turn to finish');
+    check('the resumed turn answered with the data-file sentinel', answers.at(-1)?.toLowerCase() === SENTINEL_WORD);
+    check('the resume kept the same codex session id', session._resumeSessionId === capturedId);
+    console.log(`  [answer:resume] ${answers.at(-1) || '(none)'}`);
     console.log(`  [ids]  captured=${capturedId} after-resume=${session._resumeSessionId}`);
+    for (const [index, call] of spawnCalls.entries()) {
+      console.log(`  [argv:${index + 1}] ${JSON.stringify([call.file, ...call.args])}`);
+    }
+    check('both spawns carried developer_instructions', spawnCalls.length === 2 && spawnCalls.every((call) => call.args.some((arg) => arg.startsWith('developer_instructions='))));
+    check('the second spawn used codex resume', spawnCalls[1]?.args.includes('resume') && spawnCalls[1]?.args.includes(capturedId));
 
     // Copied out before the cleanup below removes the temp tree; this is what a fixture is cut from.
     // A full capture is the session's whole PTY stream, so it goes into a private directory (mkdtemp
     // creates 0700, with no window at a wider mode) and the file itself is 0600. Modes are advisory on
     // Windows, where the ACL of a per-user temp dir is what carries this.
-    const recordingDir = path.join(tmpDir, 'recordings');
-    const recorded = fs.existsSync(recordingDir) ? fs.readdirSync(recordingDir) : [];
-    let keptRecording = '(none written)';
-    if (recorded.length > 0) {
-      const keepDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-codex-probe-out-'));
-      keptRecording = path.join(keepDir, recorded[0]);
-      fs.copyFileSync(path.join(recordingDir, recorded[0]), keptRecording);
-      fs.chmodSync(keptRecording, 0o600);
-    }
+    const keptRecording = copySanitizedRecording(tmpDir) || '(none written)';
     console.log(`\nRecording: ${keptRecording}`);
     console.log(`Hook events seen: ${[...new Set(hookEvents)].join(', ') || '(none)'}`);
     console.log(`Title signals seen: ${[...new Set(titleSignals)].join(', ') || '(none)'}`);

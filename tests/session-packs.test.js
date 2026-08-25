@@ -365,6 +365,7 @@ test('a pack update between lookups still arms a notice before the delivered lis
     path: process.cwd(),
     agent: 'codex',
     packs: ['alpha', 'beta'],
+    packsBuiltRoot: '/packs',
     spawnCommand: { path: process.execPath, kind: 'exe' },
     ptySpawn: () => fakePty(),
   });

@@ -11,6 +11,9 @@ const grok = require("../session/adapters/grok");
 
 const SESSION_ID = "grok-probe-session";
 const PROMPT = "Run the shell command: touch ./grok-probe-approval.txt";
+const PACK_NAME = "live-probe-pack";
+const SENTINEL_WORD = "amberlattice";
+const PACK_PROMPT = "what sentinel word does the glissa context pack data file contain, answer with the word only";
 const STEP_TIMEOUT_MS = 90000;
 const USAGE = "Usage: node test/probe-grok-session.js [--keep]\n--keep retains a sanitized copy of the full authenticated PTY transcript.";
 
@@ -73,6 +76,7 @@ function writeProbeConfig(configPath, projectDirectory) {
       path: projectDirectory,
       agent: "grok",
       dangerouslySkipPermissions: false,
+      packs: [PACK_NAME],
     }],
     teams: [],
     repoRoots: [],
@@ -81,6 +85,63 @@ function writeProbeConfig(configPath, projectDirectory) {
     worktreeAutoRebase: false,
     capture: { enabled: true },
   }, null, 2), "utf8");
+}
+
+function makeProbePack(tempDirectory) {
+  const builtRoot = path.join(tempDirectory, "packs", "built");
+  const currentDirectory = path.join(builtRoot, PACK_NAME, "current");
+  const dataDirectory = path.join(currentDirectory, "data");
+  fs.mkdirSync(dataDirectory, { recursive: true });
+  fs.writeFileSync(
+    path.join(currentDirectory, "CLAUDE.md"),
+    "# Glissa live probe pack\n\nFor sentinel questions, read `data/sentinel.txt`.\n",
+    "utf8",
+  );
+  fs.writeFileSync(path.join(dataDirectory, "sentinel.txt"), `${SENTINEL_WORD}\n`, "utf8");
+  fs.writeFileSync(
+    path.join(currentDirectory, "manifest.json"),
+    JSON.stringify({ name: PACK_NAME, version: "live-probe-v1", tokenEstimate: 20 }, null, 2),
+    "utf8",
+  );
+  return builtRoot;
+}
+
+function writeClaudeHookProbe(tempDirectory) {
+  const childHome = path.join(tempDirectory, "child-home");
+  const claudeDirectory = path.join(childHome, ".claude");
+  const hookScriptPath = path.join(tempDirectory, "claude-hook-probe.js");
+  const markerPath = path.join(tempDirectory, "claude-hook-fired.txt");
+  fs.mkdirSync(claudeDirectory, { recursive: true });
+  fs.writeFileSync(
+    hookScriptPath,
+    `"use strict"; require("node:fs").writeFileSync(${JSON.stringify(markerPath)}, "fired\\n", "utf8");\n`,
+    "utf8",
+  );
+  fs.writeFileSync(
+    path.join(claudeDirectory, "settings.json"),
+    JSON.stringify({
+      hooks: {
+        UserPromptSubmit: [{ hooks: [{ type: "command", command: `node ${hookScriptPath}` }] }],
+      },
+    }, null, 2),
+    "utf8",
+  );
+  return { childHome, markerPath };
+}
+
+function isUuidV7(value) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || ""));
+}
+
+function isWorkingTitle(title) {
+  const firstCharacter = String(title || "").charAt(0);
+  const codePoint = firstCharacter.codePointAt(0);
+  return codePoint >= 0x2800 && codePoint <= 0x28ff;
+}
+
+function answerFrom(payload) {
+  const answer = payload?.lastAssistantMessage;
+  return typeof answer === "string" ? answer.trim() : null;
 }
 
 function captureTitles(session, titles) {
@@ -136,6 +197,8 @@ async function main(args = process.argv.slice(2)) {
   fs.mkdirSync(projectDirectory);
   const configPath = path.join(tempDirectory, "config.json");
   writeProbeConfig(configPath, projectDirectory);
+  const builtRoot = makeProbePack(tempDirectory);
+  const claudeHookProbe = writeClaudeHookProbe(tempDirectory);
   process.env.GLISSA_CONFIG = configPath;
   process.env.GROK_HOME = makeProbeGrokHome(tempDirectory, resolvedBeforeIsolation.path);
   process.env.GROK_DEFAULT_SELECTED_PERMISSION = "allow_once";
@@ -148,11 +211,29 @@ async function main(args = process.argv.slice(2)) {
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const session = backend.getSession(SESSION_ID);
   const hookEvents = [];
+  const hookPayloads = [];
   const rawTitles = [];
-  session.on("state-change", ({ from, to, event }) => console.log(`  [state] ${from} -> ${to} (${event})`));
+  const stateChanges = [];
+  const spawnCalls = [];
+  let ptyOutput = "";
+  session._packsBuiltRoot = builtRoot;
+  session._spawnEnv = { ...(session._spawnEnv || {}), HOME: claudeHookProbe.childHome };
+  const spawnPty = session._ptySpawn;
+  session._ptySpawn = (file, spawnArgs, spawnOptions) => {
+    spawnCalls.push({ file, args: [...spawnArgs], cwd: spawnOptions.cwd, env: { ...spawnOptions.env } });
+    return spawnPty(file, spawnArgs, spawnOptions);
+  };
+  session.on("state-change", ({ from, to, event }) => {
+    stateChanges.push({ from, to, event });
+    console.log(`  [state] ${from} -> ${to} (${event})`);
+  });
+  session.on("data", (data) => {
+    ptyOutput = `${ptyOutput}${String(data)}`.slice(-65536);
+  });
   const originalIngest = session.ingestHookSignal.bind(session);
   session.ingestHookSignal = (raw) => {
     if (raw?.event) hookEvents.push(raw.event);
+    if (raw?.payload) hookPayloads.push({ event: raw.event, payload: raw.payload });
     return originalIngest(raw);
   };
   captureTitles(session, rawTitles);
@@ -163,34 +244,61 @@ async function main(args = process.argv.slice(2)) {
     await session.start();
     check("the spawn used the Grok adapter", session.agentId === "grok");
     check("the validated file minted a session token", typeof session._hookToken === "string");
-    await waitForState(session, ["RUNNING", "IDLE"], "first output");
+    await waitForState(session, ["IDLE"], "idle composer");
 
     console.log("\nTurn:");
+    const promptStateIndex = stateChanges.length;
     await delay(5000);
     session.write(PROMPT);
     await delay(1200);
     session.write("\r");
     await waitForState(session, ["WAITING"], "approval prompt");
+    check("the prompt moved the card to RUNNING", stateChanges.slice(promptStateIndex).some((change) => change.to === "RUNNING"));
     check("permission Notification moved the card to WAITING", session.state === "WAITING");
-    check("the hook child inherited GLISSA_HOOK_URL", hookEvents.includes("notification"));
 
     console.log("\nApproval:");
     session.write("\r");
     await waitForState(session, ["COMPLETE"], "turn completion");
     check("a turn-end hook completed the card", session.state === "COMPLETE");
+    check("the hook child inherited GLISSA_HOOK_URL", hookEvents.includes("notification") && hookEvents.includes("stop"));
     const capturedId = session._resumeSessionId;
-    check("the camelCase session id was captured", typeof capturedId === "string" && capturedId.length > 0);
+    const stopPayload = hookPayloads.findLast((entry) => entry.event === "stop" && entry.payload.reason === "end_turn");
+    check("Stop carried reason end_turn", stopPayload?.payload.reason === "end_turn");
+    check("the camelCase session id was a UUIDv7", isUuidV7(capturedId));
+    console.log(`  [hook:stop] reason=${stopPayload?.payload.reason || "none"} answer=${answerFrom(stopPayload?.payload) || "none"}`);
 
     console.log("\nResume:");
     session.kill();
     await waitForState(session, ["DONE", "FAILED"], "PTY reap");
     check("restart requested a resumed spawn", session.restart());
-    await waitForState(session, ["RUNNING", "IDLE"], "resumed session");
+    await waitForState(session, ["IDLE"], "resumed session");
+    await delay(5000);
+    session.write(PACK_PROMPT);
+    await delay(1200);
+    session.write("\r");
+    await waitForState(session, ["COMPLETE"], "resumed pack turn");
+    const resumedStopPayload = hookPayloads.findLast((entry) => entry.event === "stop" && entry.payload.reason === "end_turn");
+    const resumedAnswer = answerFrom(resumedStopPayload?.payload);
+    check("the --rules pointer let Grok read the pack data file", resumedAnswer?.toLowerCase() === SENTINEL_WORD);
     check("resume retained the same UUIDv7 id", session._resumeSessionId === capturedId);
+    check("GROK_CLAUDE_HOOKS_ENABLED=false stopped the Claude hook", !fs.existsSync(claudeHookProbe.markerPath));
+    check("the raw titles include a working shape", rawTitles.some(isWorkingTitle));
+    check("the raw titles include an action-required shape", rawTitles.some((title) => grok.classifyTitle(title) === "awaiting-input"));
+    check("the raw titles include an idle shape", rawTitles.some((title) => !isWorkingTitle(title) && grok.classifyTitle(title) === "unknown"));
+    console.log(`  [answer:pack] ${resumedAnswer || "none"}`);
+    console.log(`  [ids] captured=${capturedId} after-resume=${session._resumeSessionId}`);
+    console.log(`  [claude-hook-fired] ${fs.existsSync(claudeHookProbe.markerPath) ? "yes" : "no"}`);
+    for (const [index, call] of spawnCalls.entries()) {
+      console.log(`  [argv:${index + 1}] ${JSON.stringify([call.file, ...call.args])}`);
+    }
+    check("both spawns carried the --rules pointer", spawnCalls.length === 2 && spawnCalls.every((call) => call.args.includes("--rules")));
+    check("the resumed argv retained the UUIDv7 id", spawnCalls[1]?.args.includes("-r") && spawnCalls[1]?.args.includes(capturedId));
+    const authenticationLine = ptyOutput.split(/\r?\n/).find((line) => line.toLowerCase().includes("not authenticated"));
+    if (authenticationLine) throw new Error(authenticationLine);
     if (options.keep) keptRecording = copySanitizedRecording(tempDirectory);
     console.log(`\nRecording: ${keptRecording || "none written"}`);
     console.log(`Hook events: ${[...new Set(hookEvents)].join(", ") || "none"}`);
-    console.log(`Raw OSC titles: ${[...new Set(rawTitles)].join(" | ") || "none"}`);
+    console.log(`Raw OSC titles: ${JSON.stringify([...new Set(rawTitles)])}`);
   } finally {
     try {
       session.kill();

@@ -1,8 +1,8 @@
 # Plan: Codex pack delivery, Grok adapter (M4), and monitor-report hardening
 
-Status: drafted 2026-08-24 from three Codex GPT-5.6 research passes over the tree at `30bd4c6`
-(codex-cli 0.149.0 and Grok Build 1.0.5 probed locally, no credentialed turns run) plus an
-official-docs lookup. `AGENTS.md` and the code win over this doc. Milestone numbering continues
+Status: drafted 2026-08-24 from three Codex GPT-5.6 research passes over the tree at `30bd4c6`,
+then credentialed on Linux with codex-cli 0.149.0 and Grok Build 1.0.5 on 2026-08-25.
+`AGENTS.md` and the code win over this doc. Milestone numbering continues
 `docs/plan-agent-adapters.md` (M4, M6 open) and `docs/plan-visions-3.md` (M17 open).
 
 ## Part A: Codex pack and memory delivery (closes Visions M17 for Codex)
@@ -59,10 +59,9 @@ Tests: `tests/agent-codex.test.js` (capability flip, exact token, multi-pack ord
 `tests/memory-delivery-negative.test.js` (argv carries the index path only), relay stdout tests
 (accepted vs non-200, oversized, wrong event, malformed all silent), doctor tests.
 
-Open risks: whether a real Codex turn actually follows the pointer and reads the index
-(UNVERIFIED, needs one credentialed probe, added to `test/probe-codex-session.js`); resume
-carrying `developer_instructions` (UNVERIFIED); Windows shim reparse of the TOML literal
-(needs the hostile-path test on the `cmd.exe /c` form).
+Live evidence: both the fresh turn and `codex resume <id>` followed the same
+`developer_instructions` index pointer, read its data file, and answered `velvetquartz`.
+Windows shim reparse remains out of scope for the Linux probe.
 
 ## Part B: Grok adapter (agent-adapters M4) and Grok delivery
 
@@ -104,12 +103,12 @@ inert without `GLISSA_HOOK_URL` (negative test invokes every extracted command w
 and asserts exit 0, `reason: no-hook-url`, zero sockets). The shell-safe command builder moves out
 of `codex.js` into `session/core/hook-command-core.js` with a byte-identical pin.
 
-Packs on Grok: false in M4. Discovery walks `Agents.md`/`CLAUDE.md`/`AGENTS.md` per directory plus
+Packs on Grok: true after M4b live verification. Discovery walks `Agents.md`/`CLAUDE.md`/`AGENTS.md` per directory plus
 `.grok/rules`, `.claude/rules` and `$GROK_HOME/rules` (no size cap, no `GROK.md`), so every
 directory carrier means writing the repo or a global dir. `--rules <text>` is the Grok twin of
 Codex `developer_instructions` and can carry the same constant pointer string; enabling it waits on
-the live probe answering whether a Grok tool call can read `~/.glissa/packs` and whether the model
-follows the pointer. M4b: flip `packs` on the shared `renderPackArgs` seam once that is captured.
+the live probe confirmed a Grok tool call can read the external pack and follows the pointer.
+The captured answer was `amberlattice`; M4b uses one `--rules` token on the shared pointer seam.
 
 Change list: `session/adapters/grok.js`, `session/adapters/index.js`, `session/core/hook-command-core.js`,
 `session/sessions.js` (adapter `sessionIdOf(payload)` instead of hardcoded `payload.session_id`;
@@ -119,8 +118,9 @@ Change list: `session/adapters/grok.js`, `session/adapters/index.js`, `session/c
 `tests/fixtures/v2-grok-approval-turn.jsonl`, `test/probe-grok-session.js` (isolated `GROK_HOME`,
 credentials linked not copied, sanitized recording copied out, temp tree removed).
 
-Acceptance: live probe spawn, RUNNING, WAITING (approval), COMPLETE, id capture, `-r` resume with the
-same id, env inheritance into the hook child confirmed, raw OSC titles captured for the profile.
+Acceptance: live probe passed spawn, RUNNING, WAITING (approval), COMPLETE, UUIDv7 capture,
+`-r` resume with the same id, env inheritance into the hook child, Claude hook suppression,
+raw OSC title capture, and the `--rules` pack read.
 
 ## Part C: hardening from `docs/monitor-report-context-mill-visions.md`
 

@@ -11,7 +11,8 @@ const path = require("node:path");
 
 const { resolveAgentCommand, buildAgentSpawnCommand } = require("../core/spawn-command");
 const { buildAgentEnv } = require("../core/spawn-env");
-const { SAFE_PATH_RE, buildHookCommand } = require("../core/hook-command-core");
+const { buildHookCommand } = require("../core/hook-command-core");
+const { PACK_DIRECTIVE, renderPackPointerText } = require("../core/pack-pointer-core");
 
 const ID = "codex";
 const COMMAND_NAME = "codex";
@@ -181,9 +182,6 @@ function mayContributeHooks(configText) {
   return HOOKS_DECLARATION_RE.test(configText);
 }
 
-const SAFE_PACK_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
-const PACK_DIRECTIVE = "Glissa context packs are available at these index files. Read each relevant CLAUDE.md before working";
-
 /*
  * One `-c hooks.<Event>=...` per subscribed event. This argv form is the only one `codex exec resume`
  * accepts, and it writes nothing to the operator's codex config. The trust bypass leads the group only
@@ -241,19 +239,11 @@ function buildEnv(baseEnv, extraEnv, options) {
   return buildAgentEnv(baseEnv, extraEnv, envProfile, options);
 }
 
-function renderPackArgs(deliveries) {
-  if (!Array.isArray(deliveries) || deliveries.length === 0) return [];
-  const lines = [];
-  for (const delivery of deliveries) {
-    if (!delivery || !SAFE_PACK_NAME_RE.test(delivery.name)) return null;
-    const packDir = String(delivery.dir || "");
-    const indexPath = path.join(packDir, "CLAUDE.md");
-    const isAbsolute = path.isAbsolute(packDir) || path.win32.isAbsolute(packDir);
-    if (!isAbsolute || !SAFE_PATH_RE.test(indexPath)) return null;
-    lines.push(`${delivery.name}: ${indexPath}`);
-  }
-  const instructions = [PACK_DIRECTIVE, ...lines].join("; ");
-  return ["-c", `developer_instructions='''${instructions}'''`];
+function renderPackArgs(deliveries, builtRoot) {
+  const pointerText = renderPackPointerText(deliveries, builtRoot);
+  if (pointerText === "") return [];
+  if (pointerText == null) return null;
+  return ["-c", `developer_instructions='''${pointerText}'''`];
 }
 
 /*

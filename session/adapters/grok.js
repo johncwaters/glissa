@@ -6,6 +6,7 @@ const path = require("node:path");
 
 const { buildAgentEnv } = require("../core/spawn-env");
 const { renderGrokHooksFile, classifyGrokHooksFile } = require("../core/grok-hooks-file-core");
+const { PACK_DIRECTIVE, renderPackPointerText } = require("../core/pack-pointer-core");
 
 const ID = "grok";
 const COMMAND_NAME = "grok";
@@ -179,8 +180,11 @@ const hooks = {
   },
 };
 
-function renderPackArgs() {
-  return [];
+function renderPackArgs(deliveries, builtRoot) {
+  const pointerText = renderPackPointerText(deliveries, builtRoot);
+  if (pointerText === "") return [];
+  if (pointerText == null) return null;
+  return ["--rules", pointerText];
 }
 
 module.exports = {
@@ -196,6 +200,7 @@ module.exports = {
   buildEnv,
   buildArgs,
   renderPackArgs,
+  packCarrier: "--rules index pointers",
   packReadTelemetry: false,
   sessionIdOf,
   mapHookToSignal,
@@ -211,12 +216,13 @@ module.exports = {
   HOOK_EVENTS,
   RELAY_PATH,
   ACTION_REQUIRED_MARKER,
+  PACK_DIRECTIVE,
   capabilities: {
     hooks: true,
     awaitingInput: true,
     backgroundAgents: false,
     resume: true,
-    packs: false,
+    packs: true,
     packNotice: false,
     statusLine: false,
     rtk: false,

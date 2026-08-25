@@ -113,7 +113,7 @@ test('renderPackArgs emits one developer_instructions token with ordered index p
     { name: 'alpha', dir: '/home/carbon/.glissa/packs/built/alpha/current' },
     { name: 'memory-project', dir: '/home/carbon/.glissa/packs/built/memory-project/current' },
   ];
-  const args = codex.renderPackArgs(deliveries);
+  const args = codex.renderPackArgs(deliveries, '/home/carbon/.glissa/packs/built');
   assert.deepEqual(args, [
     '-c',
     `developer_instructions='''${codex.PACK_DIRECTIVE}; alpha: /home/carbon/.glissa/packs/built/alpha/current/CLAUDE.md; memory-project: /home/carbon/.glissa/packs/built/memory-project/current/CLAUDE.md'''`,
@@ -139,9 +139,10 @@ test('renderPackArgs refuses non-absolute or unsafe pack paths', () => {
     '/home/carbon/packs/$(id)/current',
     '/home/carbon/packs/alpha\ncurrent',
   ]) {
-    assert.equal(codex.renderPackArgs([{ name: 'alpha', dir }]), null, dir);
+    assert.equal(codex.renderPackArgs([{ name: 'alpha', dir }], '/packs'), null, dir);
   }
-  assert.equal(codex.renderPackArgs([{ name: "alpha'", dir: '/packs/alpha/current' }]), null);
+  assert.equal(codex.renderPackArgs([{ name: "alpha'", dir: '/packs/alpha/current' }], '/packs'), null);
+  assert.equal(codex.renderPackArgs([{ name: 'alpha', dir: '/other/alpha/current' }], '/packs'), null);
 });
 
 test('hook args subscribe exactly five events as TOML literal strings, and the trust bypass is opt-in', () => {

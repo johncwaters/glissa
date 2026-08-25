@@ -20,6 +20,7 @@ test('doctor reports each pack carrier and the codex hook-trust caveat', () => {
     assert.equal(result.status, 0, result.stderr);
     assert.match(result.stdout, /claude-code pack carrier\s+--add-dir directories/);
     assert.match(result.stdout, /codex pack carrier\s+developer_instructions index pointers/);
+    assert.match(result.stdout, /grok pack carrier\s+--rules index pointers/);
     assert.match(result.stdout, /codex pack notices\s+staleness notices require trusted UserPromptSubmit hooks or the hook-trust bypass/);
   } finally {
     fs.rmSync(npmPrefix, { recursive: true, force: true });

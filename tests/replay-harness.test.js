@@ -75,6 +75,21 @@ test('the same codex recording read with the Claude title glyphs loses the title
   assert.deepEqual([...kinds(asClaude)], ['working']);
 });
 
+test('grok fixture replays the live approval race from title WAITING to hook COMPLETE', async () => {
+  const { version, agent, records } = load('v2-grok-approval-turn.jsonl');
+  assert.equal(version, 2);
+  assert.equal(agent, 'grok');
+  const { signals } = await replayDetection(records, { ...FAST, agent });
+  const order = signals.map((signal) => signal.signal);
+  assert.ok(order.includes('resume'), 'UserPromptSubmit opens the work cycle');
+  const awaitingAt = order.indexOf('awaiting-input');
+  const readyAt = order.lastIndexOf('ready');
+  assert.ok(awaitingAt >= 0, 'the approval reaches the card');
+  assert.ok(readyAt > awaitingAt, 'Stop(end_turn) completes after approval');
+  assert.equal(signals[awaitingAt].source, 'title');
+  assert.equal(signals[readyAt].source, 'hook');
+});
+
 test('real v1 recordings replay cleanly and never emit awaiting-input (title honest contract)', async () => {
   const v1files = fs.readdirSync(FIX).filter((f) => f.startsWith('v1-') && f.endsWith('.jsonl'));
   assert.ok(v1files.length >= 1, 'expected at least one v1 fixture');
