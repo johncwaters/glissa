@@ -50,9 +50,8 @@ function readDistillResult(resultPath) {
     maxBytes: MAX_DISTILL_RESULT_BYTES,
     validate: validateDistillResult,
   });
-  if (result.ok === false && result.kind === 'missing') return failedResult();
-  if (result.ok === false) return failedResult(result.reason);
-  return result;
+  if (result.ok) return result;
+  return failedResult(result.kind === 'missing' ? undefined : result.reason);
 }
 
 function writeStandaloneLaneSettings(permissions) {
