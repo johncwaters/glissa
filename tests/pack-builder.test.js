@@ -397,11 +397,19 @@ test('a waiter keeps retrying after the prior lock wait while its live owner hol
   })}\n`, 'utf8');
 
   try {
-    const releaseTimer = setTimeout(() => {
-      fs.rmSync(lockPath, { force: true });
-    }, 5100);
-    const currentDir = await publishBuild(builtRoot, 'demo', [{ relPath: 'owner.txt', content: 'waited' }]);
-    clearTimeout(releaseTimer);
+    let nowMs = Date.now();
+    let sleepCount = 0;
+    const currentDir = await publishBuild(builtRoot, 'demo', [{ relPath: 'owner.txt', content: 'waited' }], {
+      now: () => nowMs,
+      sleep: async (ms) => {
+        assert.equal(ms, 20);
+        sleepCount += 1;
+        nowMs += ms;
+        if (sleepCount !== 2) return;
+        fs.rmSync(lockPath, { force: true });
+      },
+    });
+    assert.equal(sleepCount, 2);
     assert.equal(fs.readFileSync(path.join(currentDir, 'owner.txt'), 'utf8'), 'waited');
   } finally {
     fs.rmSync(builtRoot, { recursive: true, force: true });

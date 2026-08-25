@@ -334,13 +334,13 @@ async function readPublishLock(lockPath) {
   };
 }
 
-async function reclaimPublishLock(lockPath) {
+async function reclaimPublishLock(lockPath, { now = Date.now } = {}) {
   const observed = await readPublishLock(lockPath);
   if (!observed) return true;
   const shouldReclaim = shouldReclaimPackArtifact({
     timestampMs: observed.timestampMs,
     mtimeMs: observed.mtimeMs,
-    nowMs: Date.now(),
+    nowMs: now(),
     isOwnerAlive: processIsAlive(observed.pid),
     staleMs: PUBLISH_ARTIFACT_STALE_MS,
   });
@@ -365,11 +365,11 @@ function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function acquirePublishLock(packDir) {
+async function acquirePublishLock(packDir, { now = Date.now, sleep = wait } = {}) {
   const lockPath = path.join(packDir, PUBLISH_LOCK_FILE);
   while (true) {
     const token = crypto.randomBytes(12).toString('hex');
-    const record = { pid: process.pid, timestamp: Date.now(), token };
+    const record = { pid: process.pid, timestamp: now(), token };
     let handle;
     try {
       handle = await fsp.open(lockPath, 'wx', 0o600);
@@ -383,8 +383,8 @@ async function acquirePublishLock(packDir) {
       }
       if (err.code !== 'EEXIST') throw err;
     }
-    if (await reclaimPublishLock(lockPath)) continue;
-    await wait(PUBLISH_LOCK_RETRY_MS);
+    if (await reclaimPublishLock(lockPath, { now })) continue;
+    await sleep(PUBLISH_LOCK_RETRY_MS);
   }
 }
 
@@ -395,9 +395,7 @@ async function releasePublishLock({ lockPath, token }) {
     await fsp.unlink(lockPath);
   } catch (err) {
     if (err.code === 'ENOENT') return;
-    try {
-      console.error(`could not release publish lock ${lockPath}: ${err.message}`);
-    } catch {}
+    console.error(`could not release publish lock ${lockPath}: ${err.message}`);
   }
 }
 
@@ -413,10 +411,10 @@ async function releasePublishLock({ lockPath, token }) {
  * order below is deliberate - current is retired to previous BEFORE the tmp goes in - because it is
  * what makes that fallback point at the last good build rather than at nothing.
  */
-async function publishBuild(builtRoot, name, outputs) {
+async function publishBuild(builtRoot, name, outputs, { now = Date.now, sleep = wait } = {}) {
   const packDir = path.join(builtRoot, name);
   await fsp.mkdir(packDir, { recursive: true });
-  const lock = await acquirePublishLock(packDir);
+  const lock = await acquirePublishLock(packDir, { now, sleep });
   let tmpDir = null;
   try {
     await clearStaleTmpDirs(packDir);

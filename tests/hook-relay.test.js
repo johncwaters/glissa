@@ -54,25 +54,14 @@ function captureStdout() {
   };
 }
 
-async function relayResponse({ event = 'UserPromptSubmit', status = 200, responseBody }) {
+async function relayResponse({ event = 'UserPromptSubmit', status = 200, responseBody }, hookStdoutDecision) {
   const { server, port } = await startIngress({ status, responseBody });
   const stdout = captureStdout();
   try {
     const result = await main([event], fakeStdin('{}'), {
       [HOOK_URL_ENV]: `http://127.0.0.1:${port}/hook/s?t=t`,
-    }, stdout.stream);
+    }, stdout.stream, hookStdoutDecision);
     return { result, output: stdout.read() };
-  } finally {
-    server.close();
-  }
-}
-
-async function relayResponseWithDecision({ event = 'UserPromptSubmit', status = 200, responseBody }, hookStdoutDecision) {
-  const { server, port } = await startIngress({ status, responseBody });
-  try {
-    return await main([event], fakeStdin('{}'), {
-      [HOOK_URL_ENV]: `http://127.0.0.1:${port}/hook/s?t=t`,
-    }, captureStdout().stream, hookStdoutDecision);
   } finally {
     server.close();
   }
@@ -184,13 +173,13 @@ test('relay stdout is silent except for an accepted bounded UserPromptSubmit con
 
 test('an oversized response reaches decideHookStdout with only the overflow sentinel', async () => {
   let decisionInput = null;
-  const result = await relayResponseWithDecision({
+  const response = await relayResponse({
     responseBody: 'x'.repeat(MAX_RESPONSE_BYTES + 1),
   }, (event, status, body) => {
     decisionInput = { event, status, body };
     return null;
   });
-  assert.equal(result.reason, 'response-too-large');
+  assert.equal(response.result.reason, 'response-too-large');
   assert.deepEqual(decisionInput, { event: 'UserPromptSubmit', status: 200, body: null });
 });
 
