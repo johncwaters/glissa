@@ -142,6 +142,7 @@ test('decideHookStdout returns only the validated UserPromptSubmit injection obj
       additionalContext: 'x'.repeat(MAX_ADDITIONAL_CONTEXT_CHARS + 1),
     },
   })), null);
+  assert.equal(decideHookStdout('UserPromptSubmit', 200, 'x'.repeat(MAX_RESPONSE_BYTES + 1)), null);
 });
 
 test('relay stdout is silent except for an accepted bounded UserPromptSubmit context', async () => {

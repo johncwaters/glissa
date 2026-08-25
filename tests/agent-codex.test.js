@@ -115,7 +115,7 @@ test('renderPackArgs emits one developer_instructions token with ordered index p
   const args = codex.renderPackArgs(deliveries);
   assert.deepEqual(args, [
     '-c',
-    `developer_instructions='''${codex.PACK_DIRECTIVE}; alpha: /home/carbon/.glissa/packs/built/alpha/current/CLAUDE.md; memory-project: /home/carbon/.glissa/packs/built/memory-project/current/CLAUDE.md'''`,
+    "developer_instructions='''Glissa context packs are available at these index files. Read each relevant CLAUDE.md before working; alpha: /home/carbon/.glissa/packs/built/alpha/current/CLAUDE.md; memory-project: /home/carbon/.glissa/packs/built/memory-project/current/CLAUDE.md'''",
   ]);
   assert.equal(args.filter((arg) => arg === '-c').length, 1);
   assert.equal(args.includes('--add-dir'), false);

@@ -69,22 +69,18 @@ function postPayload(url, body) {
         (res) => {
           const responseChunks = [];
           let responseBytes = 0;
-          const declaredBytes = Number(res.headers['content-length']);
-          if (Number.isFinite(declaredBytes) && declaredBytes > MAX_RESPONSE_BYTES) {
-            res.destroy();
-            done({ reason: 'response-too-large', status: res.statusCode, body: null });
-            return;
-          }
           res.on('data', (chunk) => {
             if (settled) return;
             const bytes = Buffer.from(chunk);
-            responseBytes += bytes.length;
+            const remainingBytes = MAX_RESPONSE_BYTES + 1 - responseBytes;
+            const boundedBytes = bytes.subarray(0, remainingBytes);
+            responseBytes += boundedBytes.length;
+            responseChunks.push(boundedBytes);
             if (responseBytes > MAX_RESPONSE_BYTES) {
               res.destroy();
-              done({ reason: 'response-too-large', status: res.statusCode, body: null });
+              done({ reason: 'response-too-large', status: res.statusCode, body: Buffer.concat(responseChunks) });
               return;
             }
-            responseChunks.push(bytes);
           });
           res.on('end', () => done({
             reason: `status-${res.statusCode}`,

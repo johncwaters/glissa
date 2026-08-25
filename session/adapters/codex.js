@@ -185,12 +185,12 @@ function mayContributeHooks(configText) {
  * of `touch A; touch B` ran both), so the path is held to a conservative charset rather than merely
  * escaped. `$(...)` and backticks interpolate even inside double quotes, and `;`, `&`, `|`, `>` need
  * no quotes at all, so anything outside the allow-list is refused and the caller degrades that
- * session to the title tier instead of emitting a command it cannot vouch for. The path is Glissa's
- * own `__dirname` in practice, which is why this is a guard rather than a live exposure.
+ * session to the title tier instead of emitting a command it cannot vouch for.
  */
+// This regex is the argv boundary for both the relay path and context-pack index paths.
 const SAFE_PATH_RE = /^[A-Za-z0-9_.:/\\ -]+$/;
 const SAFE_PACK_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
-const PACK_DIRECTIVE = "Glissa context packs are available at these index files. Read each relevant CLAUDE.md before working:";
+const PACK_DIRECTIVE = "Glissa context packs are available at these index files. Read each relevant CLAUDE.md before working";
 
 function buildHookCommand(relayPath, event) {
   const raw = String(relayPath);
@@ -354,6 +354,7 @@ module.exports = {
     resume: true,
     packs: true,
     packNotice: true,
+    // Status lines, RTK, and anti-slop remain disabled because Codex support is unverified.
     statusLine: false,
     rtk: false,
     antiSlop: false,
