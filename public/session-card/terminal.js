@@ -95,7 +95,7 @@ function connectDataWs(sessionId, ui, term) {
       if (sessionUIs.get(sessionId) !== ui) return;
       void loadPageToken().catch(() => {}).then(() => {
         if (sessionUIs.get(sessionId) !== ui) return;
-        connectDataWs(sessionId, ui, term);
+        ui._applyFit?.({ repaintRequested: true });
       });
     }, retryDelayMs);
   });
@@ -196,8 +196,7 @@ export function setupTerminal(termWrap, ui) {
   ui.webglAddon = null;
   ui.needsWebGLReload = false;
 
-  // termWrap size → fit → push resize to PTY. RAF-coalesces burst fires (window resize, focus borrow).
-  // What the fit owes afterwards (repaint, send, redraw) is decided by fit-core.
+  // This is the only geometry path: visible fit, socket admission, browser repaint, then PTY resize.
   let fitRafId = null;
   let lastSentCols = 0;
   let lastSentRows = 0;
@@ -206,7 +205,7 @@ export function setupTerminal(termWrap, ui) {
   // Whether this card has told the server a size the PTY may still be wearing. A board-only phone or a
   // card that has never been visible has claimed nothing, so it has nothing to hand back.
   let hasClaimedViewerSize = false;
-  function applyFit() {
+  function applyFit({ repaintRequested = false } = {}) {
     fitRafId = null;
     if (!ui.fitAddon || !ui.term) return;
     // Skip fit when the card is off-screen (it lives in the hidden grid home until Focus borrows it
@@ -217,14 +216,17 @@ export function setupTerminal(termWrap, ui) {
     const { cols, rows } = ui.term;
     const action = decideFitAction({
       measured, cols, rows, lastFittedCols, lastFittedRows, lastSentCols, lastSentRows,
+      hasDataSocket: !!ui.dataWs,
+      isDataSocketOpen: ui.dataWs?.readyState === WebSocket.OPEN,
+      repaintRequested,
     });
     if (action.repaint) {
       lastFittedCols = cols;
       lastFittedRows = rows;
-      forceTerminalRepaint(ui, { force: true });
+      scheduleTerminalRepaint(ui);
     }
+    if (action.connect) ui._connectDataWs?.();
     if (!action.send) return;
-    if (ui.dataWs?.readyState !== WebSocket.OPEN) return;
     ui.dataWs.send(JSON.stringify({ type: 'resize', cols, rows, redraw: action.redraw }));
     lastSentCols = cols;
     lastSentRows = rows;
@@ -465,11 +467,10 @@ export function wireTerminalIO(ui, sessionId) {
 
   ui.term.onData((data) => { sendTerminalInput(ui, data); });
 
-  // Note: term.onResize is intentionally not wired - the ResizeObserver
-  // path in setupTerminal owns all "fit and notify server" duties via
-  // ui._applyFit, which both fits and pushes cols/rows to the PTY.
-
-  connectDataWs(sessionId, ui, ui.term);
+  ui._connectDataWs = () => {
+    if (ui.dataWs) return;
+    connectDataWs(sessionId, ui, ui.term);
+  };
 }
 
 // First-time terminal setup for cards that started life as DORMANT.
@@ -479,21 +480,16 @@ export function ensureTerminalSetup(ui, sessionId) {
   wireTerminalIO(ui, sessionId);
 }
 
-// Force a full-viewport repaint after a transition that re-parents the card DOM
-// (borrow into / release out of the Focus center). xterm only repaints rows it
-// marks dirty, so after a re-parent the WebGL canvas can keep stale glyphs in
-// quiescent rows (ghosts). Deferred one rAF so the card is on-screen when the
-// refresh runs - a refresh issued while still off-screen is suppressed by
-// xterm's _isPaused. Single in-flight rAF per card, mirroring the fit/scroll
-// coalescing in setupTerminal.
-//
-// `force` re-arms an already-pending repaint instead of collapsing into it. A caller that has just
-// made the card visible and re-fitted it knows the pending repaint was armed against the PREVIOUS
-// geometry, and the coalescing would otherwise silently drop the newer, better-informed request.
-export function forceTerminalRepaint(ui, { force = false } = {}) {
+export function activateTerminalViewer(ui, sessionId) {
+  if (!ui) return;
+  ensureTerminalSetup(ui, sessionId);
+  reacquireWebglIfEvicted(ui);
+  ui._applyFit?.({ repaintRequested: true });
+}
+
+function scheduleTerminalRepaint(ui) {
   if (!ui) return;
   if (ui._repaintRafId != null) {
-    if (!force) return;
     cancelAnimationFrame(ui._repaintRafId);
     ui._repaintRafId = null;
   }

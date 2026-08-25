@@ -1,6 +1,4 @@
-// `redraw` only on a CHANGED grid (stale buffer only the PTY nudge can repaint); an unchanged grid must
-// never ask, the nudge reflows the whole TUI, and an unmeasured fit (hidden card, default grid) publishes
-// nothing or it resizes the PTY to a size no viewer sees. Pinned by tests/frontend-fit-core.test.js.
+// A hidden terminal must neither connect nor publish its default grid because replay must follow a visible fit.
 
 export function decideFitAction({
   measured,
@@ -10,13 +8,20 @@ export function decideFitAction({
   lastFittedRows,
   lastSentCols,
   lastSentRows,
+  hasDataSocket,
+  isDataSocketOpen,
+  repaintRequested = false,
 }) {
-  if (!measured) return { repaint: false, send: false, redraw: false };
-  if (cols !== lastFittedCols || rows !== lastFittedRows) {
-    return { repaint: true, send: true, redraw: true };
-  }
+  const noAction = { repaint: false, connect: false, send: false, redraw: false };
+  if (!measured) return noAction;
+
+  const gridChanged = cols !== lastFittedCols || rows !== lastFittedRows;
+  const repaint = repaintRequested || gridChanged;
+  const connect = !hasDataSocket;
+  if (!isDataSocketOpen) return { repaint, connect, send: false, redraw: false };
+  if (gridChanged) return { repaint, connect, send: true, redraw: true };
   if (cols === lastSentCols && rows === lastSentRows) {
-    return { repaint: false, send: false, redraw: false };
+    return { repaint, connect, send: false, redraw: false };
   }
-  return { repaint: false, send: true, redraw: false };
+  return { repaint, connect, send: true, redraw: false };
 }

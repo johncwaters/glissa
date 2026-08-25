@@ -433,9 +433,7 @@ function buildPill(id) {
   return pill;
 }
 
-// Clicking a pill focuses its session into the center. A DORMANT session is also STARTED:
-// borrowToCenter has already wired the data WS via ensureTerminalSetup, so the spawning PTY's
-// output flows into the centered card.
+// Clicking a pill focuses its session into the center, whose visible fit admits the data connection.
 function onPillActivate(id) {
   const ui = sessionUIs.get(id);
   if (!ui) return;
