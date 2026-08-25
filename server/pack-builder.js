@@ -22,7 +22,6 @@ const SKIP_DIRS = new Set(['.git', 'node_modules']);
 const TMP_PREFIX = 'tmp-';
 const PUBLISH_LOCK_FILE = 'publish.lock';
 const PUBLISH_LOCK_RETRY_MS = 20;
-const PUBLISH_LOCK_WAIT_MS = 5000;
 const PUBLISH_ARTIFACT_STALE_MS = 5 * 60 * 1000;
 let publishLockReclaimCounter = 0;
 
@@ -290,9 +289,13 @@ async function clearStaleTmpDirs(packDir, nowMs = Date.now()) {
     return;
   }
   for (const entry of entries) {
+    const artifactPath = path.join(packDir, entry.name);
+    if (entry.isFile() && entry.name.startsWith(`${PUBLISH_LOCK_FILE}.reclaimed-`)) {
+      await fsp.rm(artifactPath, { force: true });
+      continue;
+    }
     if (!entry.isDirectory() || !entry.name.startsWith(TMP_PREFIX)) continue;
-    const tmpDir = path.join(packDir, entry.name);
-    const stats = await statOrNull(tmpDir);
+    const stats = await statOrNull(artifactPath);
     if (!stats) continue;
     const ownerPid = packTmpOwnerPid(entry.name);
     const shouldRemove = shouldReclaimPackArtifact({
@@ -303,7 +306,7 @@ async function clearStaleTmpDirs(packDir, nowMs = Date.now()) {
       staleMs: PUBLISH_ARTIFACT_STALE_MS,
     });
     if (!shouldRemove) continue;
-    await fsp.rm(tmpDir, { recursive: true, force: true });
+    await fsp.rm(artifactPath, { recursive: true, force: true });
   }
 }
 
@@ -364,8 +367,7 @@ function wait(ms) {
 
 async function acquirePublishLock(packDir) {
   const lockPath = path.join(packDir, PUBLISH_LOCK_FILE);
-  const deadlineMs = Date.now() + PUBLISH_LOCK_WAIT_MS;
-  while (Date.now() <= deadlineMs) {
+  while (true) {
     const token = crypto.randomBytes(12).toString('hex');
     const record = { pid: process.pid, timestamp: Date.now(), token };
     let handle;
@@ -384,17 +386,18 @@ async function acquirePublishLock(packDir) {
     if (await reclaimPublishLock(lockPath)) continue;
     await wait(PUBLISH_LOCK_RETRY_MS);
   }
-  throw new Error(`timed out waiting for publish lock ${lockPath}`);
 }
 
 async function releasePublishLock({ lockPath, token }) {
-  const current = await readPublishLock(lockPath);
-  if (!current || current.token !== token) return;
   try {
+    const current = await readPublishLock(lockPath);
+    if (!current || current.token !== token) return;
     await fsp.unlink(lockPath);
   } catch (err) {
     if (err.code === 'ENOENT') return;
-    throw err;
+    try {
+      console.error(`could not release publish lock ${lockPath}: ${err.message}`);
+    } catch {}
   }
 }
 

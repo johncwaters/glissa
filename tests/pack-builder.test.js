@@ -327,6 +327,18 @@ test('a stale tmp dir from a crashed build is swept before the next one', async 
   });
 });
 
+test('a reclaimed publish lock from a crashed cleanup is swept before the next build', async () => {
+  await withFixture(async ({ build, builtRoot }) => {
+    const reclaimed = path.join(builtRoot, 'demo', `publish.lock.reclaimed-${process.pid}-1`);
+    fs.mkdirSync(path.dirname(reclaimed), { recursive: true });
+    fs.writeFileSync(reclaimed, 'abandoned lock', 'utf8');
+
+    const report = await build();
+    assert.equal(report.ok, true, report.errors.join('; '));
+    assert.equal(fs.existsSync(reclaimed), false);
+  });
+});
+
 test('two publishers racing serialize cleanup and rotation', async () => {
   const builtRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-pack-publish-race-'));
   const firstOutputs = [
@@ -369,6 +381,62 @@ test('a publish lock owned by a dead process is reclaimed', async () => {
     assert.equal(fs.readFileSync(path.join(packDir, 'current', 'owner.txt'), 'utf8'), 'reclaimed');
     assert.equal(fs.existsSync(path.join(packDir, 'publish.lock')), false);
   } finally {
+    fs.rmSync(builtRoot, { recursive: true, force: true });
+  }
+});
+
+test('a waiter keeps retrying after the prior lock wait while its live owner holds the lock', async () => {
+  const builtRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-pack-live-lock-'));
+  const packDir = path.join(builtRoot, 'demo');
+  const lockPath = path.join(packDir, 'publish.lock');
+  fs.mkdirSync(packDir, { recursive: true });
+  fs.writeFileSync(lockPath, `${JSON.stringify({
+    pid: process.pid,
+    timestamp: Date.now(),
+    token: 'live-owner',
+  })}\n`, 'utf8');
+
+  try {
+    const releaseTimer = setTimeout(() => {
+      fs.rmSync(lockPath, { force: true });
+    }, 5100);
+    const currentDir = await publishBuild(builtRoot, 'demo', [{ relPath: 'owner.txt', content: 'waited' }]);
+    clearTimeout(releaseTimer);
+    assert.equal(fs.readFileSync(path.join(currentDir, 'owner.txt'), 'utf8'), 'waited');
+  } finally {
+    fs.rmSync(builtRoot, { recursive: true, force: true });
+  }
+});
+
+test('a publish failure survives a release failure', async () => {
+  const builtRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-pack-release-failure-'));
+  const packDir = path.join(builtRoot, 'demo');
+  const lockPath = path.join(packDir, 'publish.lock');
+  const originalRename = fsp.rename;
+  const originalUnlink = fsp.unlink;
+  const originalError = console.error;
+  const releaseErrors = [];
+  fsp.rename = async (source, destination) => {
+    if (destination === path.join(packDir, 'current')) throw new Error('rotation failed');
+    return originalRename(source, destination);
+  };
+  fsp.unlink = async (target) => {
+    if (target === lockPath) throw new Error('release failed');
+    return originalUnlink(target);
+  };
+  console.error = (message) => releaseErrors.push(message);
+
+  try {
+    await assert.rejects(
+      publishBuild(builtRoot, 'demo', [{ relPath: 'owner.txt', content: 'broken' }]),
+      /rotation failed/
+    );
+    assert.equal(releaseErrors.length, 1);
+    assert.match(releaseErrors[0], /release failed/);
+  } finally {
+    fsp.rename = originalRename;
+    fsp.unlink = originalUnlink;
+    console.error = originalError;
     fs.rmSync(builtRoot, { recursive: true, force: true });
   }
 });
