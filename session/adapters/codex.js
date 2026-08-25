@@ -19,8 +19,12 @@ const COMMAND_NAME = "codex";
 
 // The relay ships beside this file and is run by codex as a command-type hook (session/hook-relay.js).
 const RELAY_PATH = path.resolve(__dirname, "..", "hook-relay.js");
+// Its rtk sibling, subscribed separately and only when rtk is on (session/rtk-relay.js).
+const RTK_RELAY_PATH = path.resolve(__dirname, "..", "rtk-relay.js");
+const RTK_HOOK_EVENT = "PreToolUse";
+const RTK_TOOL_MATCHER = "Bash";
 
-// The five events Glissa subscribes. PreToolUse/PostToolUse are deliberately absent: a per-tool-call
+// The five events Glissa subscribes for DETECTION. PostToolUse is deliberately absent: a per-tool-call
 // callback is the pack-read-telemetry cost without pack-read telemetry's justification, and nothing
 // in the codex signal map needs one.
 const HOOK_EVENTS = ["SessionStart", "SessionEnd", "UserPromptSubmit", "Stop", "PermissionRequest"];
@@ -189,13 +193,23 @@ function mayContributeHooks(configText) {
  * `-c` hooks are silently skipped unless the operator seeded a matching `trusted_hash` themselves,
  * which is a deliberate path and the reason they are still passed.
  */
-function buildHookArgs({ relayPath = RELAY_PATH, events = HOOK_EVENTS, bypassHookTrust = false } = {}) {
+function buildHookArgs({
+  relayPath = RELAY_PATH,
+  events = HOOK_EVENTS,
+  bypassHookTrust = false,
+  rtkRewrites = false,
+  rtkRelayPath = RTK_RELAY_PATH,
+} = {}) {
   const args = bypassHookTrust ? [TRUST_BYPASS_FLAG] : [];
   for (const event of events) {
     const command = buildHookCommand(relayPath, event);
     if (!command) return null;
     args.push("-c", `hooks.${event}=[{hooks=[{type='command',command='${command}'}]}]`);
   }
+  if (!rtkRewrites) return args;
+  const rtkCommand = buildHookCommand(rtkRelayPath, RTK_HOOK_EVENT);
+  if (!rtkCommand) return args;
+  args.push("-c", `hooks.${RTK_HOOK_EVENT}=[{matcher='${RTK_TOOL_MATCHER}',hooks=[{type='command',command='${rtkCommand}'}]}]`);
   return args;
 }
 
@@ -314,6 +328,7 @@ module.exports = {
   sessionIdOf,
   HOOK_EVENTS,
   RELAY_PATH,
+  RTK_RELAY_PATH,
   TRUST_BYPASS_FLAG,
   SKIP_PERMISSIONS_ARGS,
   UPDATE_CHECK_ARGS,
@@ -329,9 +344,11 @@ module.exports = {
     resume: true,
     packs: true,
     packNotice: true,
-    // Status lines, RTK, and anti-slop remain disabled because Codex support is unverified.
+    // Status lines and anti-slop remain disabled because Codex support is unverified. rtk is ON:
+    // live-probed on codex-cli 0.149.0, the PreToolUse group fires and its rewrite is honoured once
+    // the verdict carries permissionDecision (session/core/rtk-hook-core.js).
     statusLine: false,
-    rtk: false,
+    rtk: true,
     antiSlop: false,
     // Codex has PreCompact/PostCompact, but no false work cycle has been observed to justify
     // porting the quiet handling speculatively.

@@ -13,6 +13,7 @@ const { createIntegrationRefWatcher } = require("../detection/integration-ref-wa
 const { createRerereWatcher } = require("../detection/rerere-watch");
 const { writeSessionSettings, generateToken } = require("../detection/settings-injector");
 const { HOOK_URL_ENV } = require("./core/hook-relay-core");
+const { RTK_PATH_ENV } = require("./core/rtk-hook-core");
 const { classifyClaudeKind, buildSpawnCommand } = require("./core/spawn-command");
 const { DEFAULT_AGENT_ID, resolveAdapter, commandFor } = require("./adapters");
 
@@ -2408,12 +2409,15 @@ class Session extends EventEmitter {
    * is unchanged: the ingress, its token check and its body cap are byte-identical for both forms.
    */
   _injectRelayHooks(port) {
-    const args = this._adapter.hooks.injection.buildHookArgs({ bypassHookTrust: this._decideHookTrustBypass() });
+    const args = this._adapter.hooks.injection.buildHookArgs({
+      bypassHookTrust: this._decideHookTrustBypass(),
+      rtkRewrites: this._rtkPath !== null,
+    });
     if (!args) {
       console.warn(`[session:${this.name}] hook injection skipped: the relay path cannot be expressed for ${this.agentId} - falling back to OSC title only`);
       return NO_HOOK_INJECTION;
     }
-    return this._registerRelayHooks(port, args);
+    return this._registerRelayHooks(port, args, this._rtkPath ? { [RTK_PATH_ENV]: this._rtkPath } : null);
   }
 
   _injectHomeRelayHooks(port) {
@@ -2450,7 +2454,7 @@ class Session extends EventEmitter {
     return this._registerRelayHooks(port, []);
   }
 
-  _registerRelayHooks(port, args) {
+  _registerRelayHooks(port, args, relayEnv = null) {
     const token = generateToken();
     const hookUrl = `http://127.0.0.1:${port}/hook/${encodeURIComponent(this.id)}?t=${encodeURIComponent(token)}`;
     try {
@@ -2460,7 +2464,7 @@ class Session extends EventEmitter {
         onSignal: (raw) => this.ingestHookSignal(raw),
         hooks: this._adapter.hooks,
       });
-      return { args, env: { [HOOK_URL_ENV]: hookUrl } };
+      return { args, env: { [HOOK_URL_ENV]: hookUrl, ...(relayEnv || {}) } };
     } catch (err) {
       console.warn(`[session:${this.name}] hook injection failed: ${err.message} - falling back to OSC title only`);
       this._cleanupHooks();

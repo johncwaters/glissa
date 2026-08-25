@@ -62,7 +62,7 @@ test('capabilities claim only what a live probe verified', () => {
     packs: true,
     packNotice: true,
     statusLine: false,
-    rtk: false,
+    rtk: true,
     antiSlop: false,
     compactQuiet: false,
     skipPermissionsFlag: true,
@@ -162,6 +162,26 @@ test('hook args subscribe exactly five events as TOML literal strings, and the t
   );
   assert.equal(values.some((v) => v.includes('"')), false, 'no double quotes reach a cmd.exe re-parse');
   assert.equal(args.filter((a) => a === '-c').length, 5);
+});
+
+test('rtk rewrites add one matched PreToolUse group, pointed at the rtk relay, and nothing when off', () => {
+  const off = codex.buildHookArgs({ relayPath: '/opt/glissa/session/hook-relay.js' });
+  assert.equal(off.some((a) => a.startsWith('hooks.PreToolUse')), false, 'off unless asked for');
+
+  const on = codex.buildHookArgs({ relayPath: '/opt/glissa/session/hook-relay.js', rtkRewrites: true });
+  assert.equal(on.filter((a) => a === '-c').length, 6, 'the five detection events plus rtk');
+  const rtkArg = on.filter((a) => a.startsWith('hooks.'))[5];
+  assert.equal(
+    rtkArg,
+    `hooks.PreToolUse=[{matcher='Bash',hooks=[{type='command',command='node ${codex.RTK_RELAY_PATH} PreToolUse'}]}]`,
+  );
+  assert.equal(rtkArg.includes('"'), false, 'no double quotes reach a cmd.exe re-parse');
+});
+
+test('an unexpressible rtk relay path costs the rewrites only, never the detection hooks', () => {
+  const args = codex.buildHookArgs({ rtkRewrites: true, rtkRelayPath: '/opt/g/$(id)/rtk-relay.js' });
+  assert.equal(args.filter((a) => a.startsWith('hooks.')).length, 5);
+  assert.equal(args.some((a) => a.startsWith('hooks.PreToolUse')), false);
 });
 
 test('a relay path is forward-slashed, quoted only when it needs it, and held to a shell-safe charset', () => {
@@ -283,6 +303,32 @@ test('a codex spawn carries the hook argv and the ingress URL in the env, never 
   assert.equal(args.some((a) => a.includes(session._hookToken)), false, 'the token stays off the argv');
   assert.equal(args.filter((a) => a.includes('hook-relay.js')).length, 5);
   session.destroy();
+});
+
+test('an rtk-enabled codex spawn carries the rewrite hook on argv and the binary in the env', async () => {
+  const rtkDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-codex-rtk-'));
+  const rtkPath = path.join(rtkDir, 'rtk');
+  fs.writeFileSync(rtkPath, '', 'utf8');
+  const { hookRouter, getHookPort } = hookRouterFor();
+  try {
+    const withRtk = makeCodexSession({ id: 'codex-rtk-on', hookRouter, getHookPort, rtkPath });
+    await withRtk.session.start();
+    const { args, env } = withRtk.calls[0];
+    assert.equal(args.filter((a) => a.startsWith('hooks.PreToolUse')).length, 1);
+    assert.equal(args.some((a) => a.includes('rtk-relay.js')), true);
+    assert.equal(env.GLISSA_RTK_PATH, rtkPath, 'the binary rides the env, never the command line');
+    assert.equal(args.some((a) => a.includes(rtkDir)), false);
+    assert.equal((env.PATH || env.Path || '').startsWith(rtkDir), true, 'bare `rtk <cmd>` resolves in the session');
+    withRtk.session.destroy();
+
+    const withoutRtk = makeCodexSession({ id: 'codex-rtk-off', hookRouter, getHookPort });
+    await withoutRtk.session.start();
+    assert.equal(withoutRtk.calls[0].args.some((a) => a.startsWith('hooks.PreToolUse')), false);
+    assert.equal('GLISSA_RTK_PATH' in withoutRtk.calls[0].env, false);
+    withoutRtk.session.destroy();
+  } finally {
+    fs.rmSync(rtkDir, { recursive: true, force: true });
+  }
 });
 
 test('a hook callback posted by the relay drives the codex session exactly as an HTTP hook drives a Claude one', async () => {

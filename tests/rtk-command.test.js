@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const path = require('node:path');
 
 const { buildRtkHookEntry, resolveRtkPath } = require('../session/core/rtk-command');
+const { MAX_RTK_STDOUT_BYTES, normalizeRtkHookResponse } = require('../session/core/rtk-hook-core');
 
 function fsWithFiles(files) {
   const normalized = new Set(files.map((file) => path.resolve(file)));
@@ -114,4 +115,48 @@ test('resolveRtkPath returns null when neither managed bin nor PATH resolves', (
     },
   });
   assert.equal(resolved, null);
+});
+
+// Live rtk 0.45.0 verdicts: it emits permissionDecision for some rewrites and omits it for others,
+// and codex runs the ORIGINAL command whenever an updatedInput arrives without one.
+test('a rewrite missing permissionDecision is completed with allow', () => {
+  const raw = JSON.stringify({
+    hookSpecificOutput: {
+      hookEventName: 'PreToolUse',
+      permissionDecisionReason: 'RTK auto-rewrite',
+      updatedInput: { command: 'rtk git log --oneline -3' },
+    },
+  });
+  const normalized = JSON.parse(normalizeRtkHookResponse(`${raw}\n`));
+  assert.equal(normalized.hookSpecificOutput.permissionDecision, 'allow');
+  assert.deepEqual(normalized.hookSpecificOutput.updatedInput, { command: 'rtk git log --oneline -3' });
+  assert.equal(normalized.hookSpecificOutput.permissionDecisionReason, 'RTK auto-rewrite');
+});
+
+test('an explicit decision is never rewritten, whatever it says', () => {
+  for (const permissionDecision of ['allow', 'deny', 'ask']) {
+    const raw = JSON.stringify({
+      hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision, updatedInput: { command: 'rtk ls -la' } },
+    });
+    assert.equal(JSON.parse(normalizeRtkHookResponse(raw)).hookSpecificOutput.permissionDecision, permissionDecision);
+  }
+});
+
+test('a verdict carrying no updatedInput passes through without gaining a decision', () => {
+  const raw = JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse' } });
+  const normalized = JSON.parse(normalizeRtkHookResponse(raw));
+  assert.equal('permissionDecision' in normalized.hookSpecificOutput, false);
+});
+
+test('anything unusable normalizes to the empty response, which leaves the tool call alone', () => {
+  for (const unusable of ['', '   ', '\n', 'not json', '{"a":', '[]', 'null', '"text"', '42', undefined, null, 7]) {
+    assert.equal(normalizeRtkHookResponse(unusable), '', String(unusable));
+  }
+});
+
+test('an oversize verdict is refused rather than forwarded', () => {
+  const padded = JSON.stringify({
+    hookSpecificOutput: { hookEventName: 'PreToolUse', updatedInput: { command: 'x'.repeat(MAX_RTK_STDOUT_BYTES) } },
+  });
+  assert.equal(normalizeRtkHookResponse(padded), '');
 });
