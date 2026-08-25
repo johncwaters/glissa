@@ -91,6 +91,26 @@ test('a missing, unparsable, non-object or unknown-verdict file is an ERROR, nev
   });
 });
 
+test('an ERROR verdict cannot carry result surfaces', async (t) => {
+  const claimed = tempFile(JSON.stringify({
+    verdict: 'ERROR',
+    comments: [{ line: 1, message: 'do not show this' }],
+    diagnostics: [{ line: 1, message: 'do not publish this' }],
+    intent: 'do not believe this',
+    hand: 'do not raise this',
+  }));
+  t.after(claimed.cleanup);
+
+  assert.deepEqual(await readCommentsResult(claimed.file, { lineCount: 4 }), {
+    verdict: 'ERROR',
+    comments: [],
+    diagnostics: [],
+    intent: null,
+    hand: null,
+    reason: 'session reported an error verdict',
+  });
+});
+
 // The size the caller logs comes from the read this already did, never from a second stat of the file.
 test('onBytesRead reports what was read without changing the result shape', async (t) => {
   const content = JSON.stringify({ verdict: 'NONE', comments: [] });

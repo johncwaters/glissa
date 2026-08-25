@@ -707,6 +707,26 @@ test('an oversized prompt spawns nothing and spends neither cooldown nor hourly 
   assert.equal(calls.length, 1, 'the same uri can immediately spend the only hourly slot');
 });
 
+test('empty and whitespace-only documents spawn nothing and spend no hourly slot', async (t) => {
+  const otherUri = 'file:///tmp/blank-visions.md';
+  const { wiring, timers, calls, notes, lsp } = dispatchingConnection({ dispatch: { maxPerHour: 1 } });
+  t.after(() => wiring.stop());
+
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', ''));
+  lsp('textDocument/didOpen', didOpenParams(otherUri, 'markdown', '  \n\t'));
+  runSweepThenDispatch(timers);
+  await wiring.whenDispatchSettled();
+  assert.equal(calls.length, 0);
+  assert.equal(notes.filter((line) => line.includes('empty-document')).length, 2);
+
+  lsp('textDocument/didClose', { textDocument: { uri: MARKDOWN_URI } });
+  lsp('textDocument/didClose', { textDocument: { uri: otherUri } });
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  runSweepThenDispatch(timers);
+  await wiring.whenDispatchSettled();
+  assert.equal(calls.length, 1);
+});
+
 test('an oversized document skips memory retrieval and prompt construction', async (t) => {
   let memoryReads = 0;
   let promptBuilds = 0;
@@ -1019,6 +1039,54 @@ test('didClose drops the comments with the findings and tells the tab about both
   assert.deepEqual(wiring.documentsSnapshot(), []);
 });
 
+test('shared uri state survives until its last owner closes', async (t) => {
+  const harness = dispatchingConnection({
+    dispatch: { cooldownMs: 300000 },
+    respond: () => Promise.resolve({
+      verdict: 'COMMENTS',
+      comments: [COMMENT],
+      hand: 'the document mixes two structures',
+      reason: null,
+    }),
+  });
+  t.after(() => harness.wiring.stop());
+  const secondSent = [];
+  const secondConnection = harness.wiring.openConnection({ send: (message) => secondSent.push(message) });
+  const secondLsp = (method, params) => secondConnection.handleFrame(JSON.stringify({ type: 'lsp', method, params }));
+
+  harness.lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  runSweepThenDispatch(harness.timers);
+  await harness.wiring.whenDispatchSettled();
+  secondLsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  runSweepThenDispatch(harness.timers);
+  await harness.wiring.whenDispatchSettled();
+
+  harness.lsp('textDocument/didClose', { textDocument: { uri: MARKDOWN_URI } });
+  const [document] = harness.wiring.documentsSnapshot();
+  assert.deepEqual(document.diagnostics.map((diagnostic) => diagnostic.code), ['repeated-word']);
+  assert.deepEqual(document.comments, [COMMENT]);
+  assert.equal(document.hand, 'the document mixes two structures');
+
+  sendRequest(secondConnection, 'shared-fix', 'textDocument/codeAction', {
+    textDocument: { uri: MARKDOWN_URI }, range: null,
+  });
+  const codeActions = secondSent.find((message) => message.type === 'lsp-response' && message.id === 'shared-fix');
+  assert.equal(codeActions.result.length, 1);
+
+  secondLsp('textDocument/didChange', didChangeParams(
+    MARKDOWN_URI,
+    2,
+    '# Title\n\nA changed line with with a repeat.\n',
+  ));
+  secondLsp('textDocument/didSave', { textDocument: { uri: MARKDOWN_URI } });
+  await harness.wiring.whenDispatchSettled();
+  assert.equal(harness.calls.length, 1);
+  assert.ok(harness.notes.some((line) => line.includes('cooldown')));
+
+  secondLsp('textDocument/didClose', { textDocument: { uri: MARKDOWN_URI } });
+  assert.deepEqual(harness.wiring.documentsSnapshot(), []);
+});
+
 test('a result that lands after its buffer closed is dropped rather than resurrecting a section', async (t) => {
   let release = null;
   const held = new Promise((resolve) => { release = resolve; });
@@ -1035,6 +1103,38 @@ test('a result that lands after its buffer closed is dropped rather than resurre
 
   assert.deepEqual(wiring.documentsSnapshot(), []);
   assert.equal(broadcasts.filter((message) => message.type === 'visions-comments' && message.comments.length > 0).length, 0);
+});
+
+test('an edit during dispatch drops comments diagnostics hand and intent', async (t) => {
+  let release = null;
+  const held = new Promise((resolve) => { release = resolve; });
+  const { wiring, timers, broadcasts, sent, notes, lsp } = dispatchingConnection({ respond: () => held });
+  t.after(() => wiring.stop());
+
+  wiring.applyModelIntent('the standing intent');
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  runSweepThenDispatch(timers);
+  const inFlight = wiring.whenDispatchSettled();
+  const surfaceCount = broadcasts.length;
+  const diagnosticFrameCount = sent.length;
+
+  lsp('textDocument/didChange', didChangeParams(MARKDOWN_URI, 2, CLEAN_MARKDOWN));
+  release({
+    verdict: 'COMMENTS',
+    comments: [COMMENT],
+    diagnostics: [MODEL_DIAGNOSTIC],
+    hand: 'a stale structural concern',
+    intent: 'a stale intent',
+    reason: null,
+  });
+  await inFlight;
+
+  assert.equal(broadcasts.length, surfaceCount);
+  assert.equal(sent.length, diagnosticFrameCount);
+  assert.equal(wiring.getIntentFor().text, 'the standing intent');
+  assert.equal(wiring.documentsSnapshot()[0].comments.length, 0);
+  assert.equal(wiring.documentsSnapshot()[0].hand, null);
+  assert.ok(notes.some((line) => line.includes('the buffer moved')));
 });
 
 test('a hand is broadcast only when it changes and joins the connect-time snapshot', async (t) => {
@@ -1387,6 +1487,24 @@ test('a dispatch intent result replaces the standing intent', async (t) => {
     text: 'what the model would rather believe', source: 'model', ts: FIXED_TS,
   });
   assert.equal(intentBroadcasts(broadcasts).length, beforeDispatch + 1);
+});
+
+test('an ERROR result cannot move the standing intent', async (t) => {
+  const { wiring, timers, broadcasts, lsp } = dispatchingConnection({
+    respond: () => Promise.resolve({
+      verdict: 'ERROR', comments: [], intent: 'an unaccepted belief', reason: 'session reported an error verdict',
+    }),
+  });
+  t.after(() => wiring.stop());
+
+  wiring.applyModelIntent('the accepted belief');
+  const beforeDispatch = intentBroadcasts(broadcasts).length;
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  runSweepThenDispatch(timers);
+  await wiring.whenDispatchSettled();
+
+  assert.equal(wiring.getIntentFor().text, 'the accepted belief');
+  assert.equal(intentBroadcasts(broadcasts).length, beforeDispatch);
 });
 
 test('a dispatch on an owned uri reads and writes that project slot, falling back to global for the prompt', async (t) => {

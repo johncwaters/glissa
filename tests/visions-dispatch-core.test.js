@@ -160,8 +160,9 @@ test('the activity quota is clamped strictly below the total budget', () => {
 
 test('a first look at a moved document passes every gate', () => {
   const state = createDispatchState();
+  const text = '# Title\n';
   assert.deepEqual(
-    decideDispatch({ state, uri: URI, textHash: hashText('# Title\n'), now: NOW, config: enabledConfig() }),
+    decideDispatch({ state, uri: URI, text, textHash: hashText(text), now: NOW, config: enabledConfig() }),
     { dispatch: true, gate: null, trigger: 'edit' },
   );
 });
@@ -172,11 +173,15 @@ test('the lane is disabled when the config says so, whatever else is true', () =
   assert.deepEqual(decision, { dispatch: false, gate: 'disabled', trigger: null });
 });
 
-test('an empty buffer and a missing uri are refused before anything else is considered', () => {
+test('empty and whitespace-only buffers spend no dispatch budget', () => {
   const state = createDispatchState();
   const config = enabledConfig();
-  assert.equal(decideDispatch({ state, uri: '', textHash: 'abc', now: NOW, config }).gate, 'no-uri');
-  assert.equal(decideDispatch({ state, uri: URI, textHash: '', now: NOW, config }).gate, 'empty-document');
+  for (const text of ['', '   \n\t']) {
+    assert.equal(hashText(text).length > 0, true);
+    assert.equal(decideDispatch({ state, uri: URI, text, textHash: hashText(text), now: NOW, config }).gate, 'empty-document');
+  }
+  assert.equal(state.dispatchTimes.length, 0);
+  assert.equal(state.lastAtByUri.size, 0);
 });
 
 test('out-of-scope sits after disabled and no-uri, before document-content gates', () => {

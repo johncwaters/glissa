@@ -14,13 +14,23 @@ const {
   applyDidOpen,
   createDocStore,
   formatRange,
+  getDoc,
   listDocs,
   uriOfParams,
 } = require('../server/core/visions-buffer-core');
+const {
+  MAX_DAEMON_FRAME_BYTES,
+  daemonMessage,
+  decideDaemonFrame,
+  decideMirrorSync,
+  planMirrorReplay,
+  replayDidOpenMessage,
+} = require('./core/visions-relay-core');
 
 const DEFAULT_PORTS = [5173, 3000];
 const INITIAL_RETRY_MS = 500;
 const MAX_RETRY_MS = 5000;
+const STABLE_CONNECTION_MS = 5000;
 const METHOD_NOT_FOUND = -32601;
 const MIRROR_METHODS = new Set(['textDocument/didOpen', 'textDocument/didChange', 'textDocument/didClose']);
 const FORWARDED_METHODS = new Set([...MIRROR_METHODS, 'textDocument/didSave']);
@@ -91,10 +101,6 @@ function editorNotification(method, params) {
   return { jsonrpc: '2.0', method, params };
 }
 
-function daemonMessage(method, params) {
-  return { type: 'lsp', method, params };
-}
-
 function daemonRequest(id, method, params) {
   return { type: 'lsp-request', id, method, params };
 }
@@ -114,21 +120,15 @@ function mirrorFailureDetail(update) {
   return '';
 }
 
-function replayDidOpenMessage(doc) {
-  return daemonMessage('textDocument/didOpen', {
-    textDocument: {
-      uri: doc.uri,
-      languageId: doc.languageId,
-      version: doc.version,
-      text: doc.text,
-    },
-  });
+function sendWsFrame(ws, decision) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+  if (!decision.send) return false;
+  ws.send(decision.serialized);
+  return true;
 }
 
 function sendWsJson(ws, payload) {
-  if (!ws || ws.readyState !== WebSocket.OPEN) return false;
-  ws.send(JSON.stringify(payload));
-  return true;
+  return sendWsFrame(ws, decideDaemonFrame(payload));
 }
 
 function createRelay({
@@ -143,6 +143,7 @@ function createRelay({
   let parserState = createParserState();
   let ws = null;
   let retryTimer = null;
+  let stableConnectionTimer = null;
   let retryMs = INITIAL_RETRY_MS;
   let nextPortIndex = 0;
   let isStopping = false;
@@ -150,6 +151,7 @@ function createRelay({
   const pendingCodeActionById = new Map();
   // Editor-facing id -> the daemon id it answers for, for the applyEdit direction.
   const applyEditDaemonIdByEditorId = new Map();
+  const unsyncedUris = new Set();
   let nextEditorRequestId = 1;
 
   // stdout carries the LSP protocol, so every line the relay says about itself goes to stderr.
@@ -173,6 +175,12 @@ function createRelay({
     retryTimer = null;
   }
 
+  function clearStableConnectionTimer() {
+    if (!stableConnectionTimer) return;
+    clearTimeout(stableConnectionTimer);
+    stableConnectionTimer = null;
+  }
+
   function scheduleReconnect(port) {
     if (isStopping || retryTimer) return;
     note(`lost the daemon on port ${port}; reconnecting in ${retryMs}ms`);
@@ -185,11 +193,19 @@ function createRelay({
   }
 
   function replayMirror() {
-    const docs = listDocs(docStore);
-    for (const doc of docs) {
-      sendWsJson(ws, replayDidOpenMessage(doc));
+    const replay = planMirrorReplay(listDocs(docStore));
+    for (const frame of replay.frames) {
+      ws.send(frame.serialized);
+      unsyncedUris.delete(frame.uri);
     }
-    return docs.length;
+    for (const skipped of replay.skipped) {
+      sendWsJson(ws, daemonMessage('textDocument/didClose', { textDocument: { uri: skipped.uri } }));
+      if (!unsyncedUris.has(skipped.uri)) {
+        note(`mirror unsynced uri=${skipped.uri}: ${skipped.frameBytes} bytes exceeds ${MAX_DAEMON_FRAME_BYTES}`);
+      }
+      unsyncedUris.add(skipped.uri);
+    }
+    return replay;
   }
 
   function connect() {
@@ -200,9 +216,15 @@ function createRelay({
 
     socket.on('open', () => {
       if (ws !== socket) return;
-      retryMs = INITIAL_RETRY_MS;
-      const replayed = replayMirror();
-      note(`connected to the daemon on port ${port} (replayed ${replayed} mirrored documents)`);
+      clearStableConnectionTimer();
+      stableConnectionTimer = setTimeout(() => {
+        if (ws !== socket) return;
+        retryMs = INITIAL_RETRY_MS;
+        stableConnectionTimer = null;
+      }, STABLE_CONNECTION_MS);
+      stableConnectionTimer.unref?.();
+      const replay = replayMirror();
+      note(`connected to the daemon on port ${port} (replayed ${replay.frames.length} mirrored documents, skipped ${replay.skipped.length})`);
     });
 
     socket.on('message', (data, isBinary) => {
@@ -214,6 +236,7 @@ function createRelay({
 
     socket.on('close', () => {
       if (ws === socket) ws = null;
+      clearStableConnectionTimer();
       // A daemon that went away answers nothing, so the editor gets the "no actions" answer now.
       failPendingCodeActions();
       applyEditDaemonIdByEditorId.clear();
@@ -266,6 +289,7 @@ function createRelay({
     isStopping = true;
     note(`shutting down (exit ${exitCode})`);
     clearRetryTimer();
+    clearStableConnectionTimer();
     stdin.pause();
     if (ws) ws.close();
     setImmediate(() => process.exit(exitCode));
@@ -297,10 +321,57 @@ function createRelay({
     return { applied: false, reason: 'not-buffer-method' };
   }
 
+  function sendMirrorNotification(method, params, mirrorUpdate) {
+    const uri = uriOfParams(params);
+    const originalMessage = daemonMessage(method, params);
+    if (!uri) return sendWsJson(ws, originalMessage);
+
+    const isUnsynced = unsyncedUris.has(uri);
+    if (!mirrorUpdate.applied && !isUnsynced) return sendWsJson(ws, originalMessage);
+    if (!mirrorUpdate.applied && method === 'textDocument/didClose') {
+      unsyncedUris.delete(uri);
+      return false;
+    }
+    if (!mirrorUpdate.applied) return false;
+
+    const originalFrame = decideDaemonFrame(originalMessage);
+    const shouldCheckFullOpen = method !== 'textDocument/didClose' && (isUnsynced || !originalFrame.send);
+    const doc = shouldCheckFullOpen ? getDoc(docStore, uri) : null;
+    const fullOpenMessage = doc ? replayDidOpenMessage(doc) : null;
+    const fullOpenFrame = fullOpenMessage ? decideDaemonFrame(fullOpenMessage) : null;
+    const syncPlan = decideMirrorSync({
+      method,
+      isUnsynced,
+      originalFrameFits: originalFrame.send,
+      fullFrameFits: fullOpenFrame?.send === true,
+    });
+
+    if (syncPlan.markUnsynced) unsyncedUris.add(uri);
+    if (syncPlan.shouldLog) {
+      note(`mirror unsynced uri=${uri}: ${originalFrame.frameBytes} bytes exceeds ${MAX_DAEMON_FRAME_BYTES}`);
+    }
+
+    let didSend = false;
+    for (const action of syncPlan.actions) {
+      if (action === 'original') didSend = sendWsFrame(ws, originalFrame) || didSend;
+      if (action === 'close') {
+        const closeMessage = daemonMessage('textDocument/didClose', { textDocument: { uri } });
+        didSend = sendWsJson(ws, closeMessage) || didSend;
+      }
+      if (action === 'full-open' && fullOpenFrame && sendWsFrame(ws, fullOpenFrame)) {
+        unsyncedUris.delete(uri);
+        didSend = true;
+      }
+    }
+    if (syncPlan.forgetUnsynced) unsyncedUris.delete(uri);
+    return didSend;
+  }
+
   function handleNotification(method, params) {
     if (MIRROR_METHODS.has(method)) {
       const mirrorUpdate = updateMirror(method, params);
       if (!mirrorUpdate.applied) note(`mirror update failed method=${method} uri=${uriOfParams(params) || '<unknown>'} reason=${mirrorUpdate.reason}${mirrorFailureDetail(mirrorUpdate)}`);
+      return sendMirrorNotification(method, params, mirrorUpdate);
     }
     if (FORWARDED_METHODS.has(method)) return sendWsJson(ws, daemonMessage(method, params));
     if (method === 'exit') return stop(0);
@@ -363,12 +434,16 @@ module.exports = {
   APPLY_EDIT_METHOD,
   CODE_ACTION_METHOD,
   CODE_ACTION_TIMEOUT_MS,
+  MAX_DAEMON_FRAME_BYTES,
+  STABLE_CONNECTION_MS,
   SYNC_KIND_INCREMENTAL,
   createRelay,
   daemonMessage,
+  decideDaemonFrame,
   initializeResult,
   methodNotFoundResponse,
   nextDelayMs,
+  planMirrorReplay,
   replayDidOpenMessage,
   resolvePortPlan,
 };

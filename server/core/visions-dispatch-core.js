@@ -163,12 +163,13 @@ function classifyTrigger({ textStood, hashRecorded, armedBy }) {
  * line about it, and every classified verdict carries the trigger the caller must record it under.
  */
 function decideDispatch({
-  state, uri, textHash, now, config, inFlight = false, contextSeq = null, armedBy = 'edit', inScope = true,
+  state, uri, text = null, textHash, now, config, inFlight = false, contextSeq = null, armedBy = 'edit', inScope = true,
 }) {
   if (!config || config.enabled !== true) return { dispatch: false, gate: 'disabled', trigger: null };
   if (!uri) return { dispatch: false, gate: 'no-uri', trigger: null };
   if (inScope === false) return { dispatch: false, gate: 'out-of-scope', trigger: null };
-  if (!textHash) return { dispatch: false, gate: 'empty-document', trigger: null };
+  if (typeof text === 'string' && text.trim().length === 0) return { dispatch: false, gate: 'empty-document', trigger: null };
+  if (typeof text !== 'string' && !textHash) return { dispatch: false, gate: 'empty-document', trigger: null };
   if (inFlight) return { dispatch: false, gate: 'in-flight', trigger: null };
   const recordedHash = state.lastHashByUri.get(uri);
   const textStood = recordedHash === textHash;

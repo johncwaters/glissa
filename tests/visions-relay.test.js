@@ -40,6 +40,7 @@ function createDeferredQueue() {
       if (value) return Promise.resolve(value);
       return withTimeout(new Promise((resolve) => waiters.push(resolve)), TEST_TIMEOUT_MS, label);
     },
+    get size() { return values.length; },
   };
 }
 
@@ -93,6 +94,28 @@ function startRelay(port) {
 
 function writeLsp(child, message) {
   child.stdin.write(serializeFrame(message));
+}
+
+function writeLspAsync(child, message) {
+  return new Promise((resolve, reject) => {
+    child.stdin.write(serializeFrame(message), (error) => {
+      if (error) return reject(error);
+      resolve();
+    });
+  });
+}
+
+function waitForStreamPattern(stream, pattern) {
+  let output = '';
+  return withTimeout(new Promise((resolve) => {
+    const onData = (chunk) => {
+      output += chunk.toString('utf8');
+      if (!pattern.test(output)) return;
+      stream.off('data', onData);
+      resolve(output);
+    };
+    stream.on('data', onData);
+  }), TEST_TIMEOUT_MS, `stream output did not match ${pattern}`);
 }
 
 async function closeRelay(child) {
@@ -167,6 +190,66 @@ test('didOpen and didChange are forwarded intact to the daemon', async () => {
   });
 });
 
+test('a refused didChange closes its mirror and a later shrink reopens the full document', async () => {
+  await runRelayScenario(async ({ daemon, relay }) => {
+    const uri = 'file:///resync.md';
+    writeLsp(relay.child, {
+      jsonrpc: '2.0',
+      method: 'textDocument/didOpen',
+      params: {
+        textDocument: { uri, languageId: 'markdown', version: 1, text: 'small' },
+      },
+    });
+    await daemon.messages.next('initial didOpen missing');
+
+    await writeLspAsync(relay.child, {
+      jsonrpc: '2.0',
+      method: 'textDocument/didChange',
+      params: {
+        textDocument: { uri, version: 2 },
+        contentChanges: [{ text: 'x'.repeat(2 * 1024 * 1024) }],
+      },
+    });
+    const close = await daemon.messages.next('didClose after refused didChange missing');
+    assert.deepEqual(close, {
+      type: 'lsp', method: 'textDocument/didClose', params: { textDocument: { uri } },
+    });
+
+    writeLsp(relay.child, {
+      jsonrpc: '2.0',
+      method: 'textDocument/didChange',
+      params: {
+        textDocument: { uri, version: 3 },
+        contentChanges: [{
+          range: {
+            start: { line: 0, character: 0 },
+            end: { line: 0, character: 0 },
+          },
+          text: 'y',
+        }],
+      },
+    });
+    writeLsp(relay.child, {
+      jsonrpc: '2.0',
+      method: 'textDocument/didChange',
+      params: {
+        textDocument: { uri, version: 4 },
+        contentChanges: [{ text: 'small again' }],
+      },
+    });
+
+    const reopen = await daemon.messages.next('full didOpen after shrink missing');
+    assert.deepEqual(reopen, {
+      type: 'lsp',
+      method: 'textDocument/didOpen',
+      params: {
+        textDocument: { uri, languageId: 'markdown', version: 4, text: 'small again' },
+      },
+    });
+    assert.equal(daemon.messages.size, 0);
+  });
+});
+
 test('publishDiagnostics from daemon is emitted as an LSP notification', async () => {
   await runRelayScenario(async ({ initialSocket, relay }) => {
     const params = {
@@ -223,6 +306,49 @@ test('reconnect replay sends current open document text', async () => {
       },
     });
   });
+});
+
+test('an over-cap mirrored document is not transmitted and does not reconnect-loop', async () => {
+  await runRelayScenario(async ({ daemon, relay }) => {
+    const oversizedText = 'x'.repeat(2 * 1024 * 1024);
+    await writeLspAsync(relay.child, {
+      jsonrpc: '2.0',
+      method: 'textDocument/didOpen',
+      params: {
+        textDocument: {
+          uri: 'file:///oversized.md', languageId: 'markdown', version: 1, text: oversizedText,
+        },
+      },
+    });
+    const close = await daemon.messages.next('didClose after refused didOpen missing');
+    assert.deepEqual(close, {
+      type: 'lsp',
+      method: 'textDocument/didClose',
+      params: { textDocument: { uri: 'file:///oversized.md' } },
+    });
+    await new Promise((resolve) => { setTimeout(resolve, 750); });
+
+    assert.equal(daemon.messages.size, 0);
+    assert.equal(daemon.connections.size, 0);
+    assert.equal(daemon.server.clients.size, 1);
+    assert.equal(relay.child.exitCode, null);
+  });
+});
+
+test('short-lived connections back off instead of resetting the retry delay on open', async () => {
+  const server = new WebSocket.WebSocketServer({ host: '127.0.0.1', port: 0 });
+  await once(server, 'listening');
+  server.on('connection', (socket) => socket.close());
+  const relay = startRelay(server.address().port);
+
+  try {
+    const output = await waitForStreamPattern(relay.child.stderr, /reconnecting in 500ms[\s\S]*reconnecting in 1000ms/);
+    assert.match(output, /reconnecting in 500ms/);
+    assert.match(output, /reconnecting in 1000ms/);
+  } finally {
+    await closeRelay(relay.child);
+    await new Promise((resolve) => server.close(resolve));
+  }
 });
 
 test('unknown request returns MethodNotFound', async () => {

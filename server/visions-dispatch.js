@@ -76,6 +76,7 @@ async function readCommentsResult(resultPath, { lineCount = 0, onBytesRead = nul
   if (!RESULT_VERDICTS.has(verdict)) {
     return errorResult('invalid verdict in result file');
   }
+  if (verdict === 'ERROR') return errorResult('session reported an error verdict');
   // Optional, and validated exactly like a comment message: a non-string or empty claim is simply not
   // an updated belief, so it is dropped rather than clearing the standing statement.
   const intent = sanitizeIntentText(parsed.intent) || null;

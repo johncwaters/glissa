@@ -226,6 +226,7 @@ function createVisionsWiring({
    */
   const commentsByUri = new Map();
   const handsByUri = new Map();
+  const openOwnersByUri = new Map();
   /*
    * Tier 1 fixes from the last sweep of each uri, stored WITH the text hash they were computed against.
    * A code action is offered only while that hash still describes the buffer, so a fix can never be
@@ -446,6 +447,32 @@ function createVisionsWiring({
     fixesByUri.set(uri, { fixes, textHash });
   }
 
+  function claimUri(uri, connection) {
+    if (!uri) return;
+    const owners = openOwnersByUri.get(uri) || new Set();
+    owners.add(connection);
+    openOwnersByUri.set(uri, owners);
+  }
+
+  function releaseUri(uri, connection) {
+    const owners = openOwnersByUri.get(uri);
+    if (!owners) return true;
+    owners.delete(connection);
+    if (owners.size > 0) return false;
+    openOwnersByUri.delete(uri);
+    return true;
+  }
+
+  function clearUriState(uri) {
+    dropModelDiagnostics(uri);
+    clearFindings(uri);
+    clearComments(uri);
+    clearHand(uri);
+    fixesByUri.delete(uri);
+    forgetUri(dispatchState, uri);
+    lastGateByUri.delete(uri);
+  }
+
   /*
    * One changelog line per fix the lane touched. A refusal is logged exactly as loudly as a success and
    * is never retried: the fix stays on offer through the pull half, which is where a carbon unit who
@@ -647,6 +674,7 @@ function createVisionsWiring({
       const decision = decideDispatch({
         state: dispatchState,
         uri,
+        text,
         textHash,
         now: nowFn(),
         config: dispatchSettings,
@@ -701,14 +729,18 @@ function createVisionsWiring({
         dispatchInFlight = false;
       }
       if (!result) return;
-      // The buffer can close while a session is thinking; its comments died with it.
-      if (closed || !getDoc(store, uri)) {
+      const currentDoc = getDoc(store, uri);
+      if (closed || !currentDoc) {
         note(`dropped a dispatch result for ${uri}: the buffer is gone`);
         return;
       }
-      const recorded = applyDispatchResult(uri, result, getDoc(store, uri), send);
-      const intentMoved = applyModelIntent(result.intent, projectId);
+      if (hashFn(currentDoc.text) !== textHash) {
+        note(`dropped a dispatch result for ${uri}: the buffer moved`);
+        return;
+      }
+      const recorded = applyDispatchResult(uri, result, currentDoc, send);
       if (!recorded) return;
+      const intentMoved = applyModelIntent(result.intent, projectId);
       note(`dispatch for ${uri} applied: ${result.verdict}, ${(commentsByUri.get(uri) || []).length} comments, hand=${handsByUri.has(uri) ? 'yes' : 'no'}, intent-moved=${intentMoved ? 'yes' : 'no'}`);
     }
 
@@ -871,6 +903,7 @@ function createVisionsWiring({
         const result = applyDidOpen(store, params);
         if (!result.applied) return result.reason;
         const uri = uriOfParams(params);
+        claimUri(uri, connection);
         const doc = uri ? getDoc(store, uri) : null;
         if (doc) note(`didOpen ${uri} (${doc.text.length} chars, ${listDocs(store).length} open)`);
         scheduleSweep(uri);
@@ -928,14 +961,9 @@ function createVisionsWiring({
         const result = applyDidClose(store, params);
         if (!result.applied) return result.reason;
         note(`didClose ${uri} (${listDocs(store).length} open)`);
-        dropModelDiagnostics(uri);
-        clearFindings(uri);
-        clearComments(uri);
-        clearHand(uri);
-        fixesByUri.delete(uri);
         failPendingApplyEdits('the buffer closed', uri);
-        forgetUri(dispatchState, uri);
-        lastGateByUri.delete(uri);
+        if (!releaseUri(uri, connection)) return null;
+        clearUriState(uri);
         return null;
       },
     };
@@ -968,7 +996,10 @@ function createVisionsWiring({
       dispatchTimersByUri.clear();
       failPendingApplyEdits('the relay disconnected');
       const dropped = listDocs(store);
-      for (const doc of dropped) applyDidClose(store, { textDocument: { uri: doc.uri } });
+      for (const doc of dropped) {
+        applyDidClose(store, { textDocument: { uri: doc.uri } });
+        if (releaseUri(doc.uri, connection)) clearUriState(doc.uri);
+      }
       connections.delete(connection);
       note(`connection closed: ${dropped.length} mirrored documents dropped, ${connections.size} connections remain`);
     }
