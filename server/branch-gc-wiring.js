@@ -10,7 +10,7 @@ function branchGcShouldStart(config) {
 }
 
 function branchGcCfgKey(config) {
-  return JSON.stringify(config.branchGc);
+  return JSON.stringify(config.branchGc ?? null);
 }
 
 function createBranchGcWiring({
