@@ -480,6 +480,7 @@ function createConfigStore({ settingsDefaults } = {}) {
       // Opt-in GitHub PR auto-review (see AGENTS.md). null when never configured, so a user who
       // never opens the PR Review tab gets a byte-identical config (not added to DEFAULT_CONFIG).
       prReview: config.prReview ? { ...config.prReview } : null,
+      branchGc: config.branchGc ? { ...config.branchGc } : null,
       visions: config.visions ? { ...config.visions } : null,
       // Opt-in PostHog monitoring lane (see AGENTS.md). Same null-when-unconfigured rule as
       // prReview, so a user who never enables it gets a byte-identical config.
@@ -528,6 +529,7 @@ function createConfigStore({ settingsDefaults } = {}) {
     if (newConfig.postTurnChecks != null) config.postTurnChecks = newConfig.postTurnChecks;
     if (newConfig.worktreeShare != null) config.worktreeShare = newConfig.worktreeShare;
     if (newConfig.prReview != null) config.prReview = newConfig.prReview;
+    if (newConfig.branchGc != null) config.branchGc = newConfig.branchGc;
     if (newConfig.visions != null) config.visions = newConfig.visions;
     if (newConfig.posthog != null) config.posthog = newConfig.posthog;
     if (newConfig.usage != null) config.usage = newConfig.usage;

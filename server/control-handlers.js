@@ -38,6 +38,7 @@ function scanRepoRoots(roots) {
 
 const PR_REVIEW_NUMERIC_KEYS = ['intervalMinutes', 'maxConcurrentReviews', 'reviewTimeoutSeconds'];
 const PR_REVIEW_MERGE_METHODS = new Set(['rebase', 'squash', 'merge']);
+const BRANCH_GC_NUMERIC_KEYS = ['staleDays', 'intervalMs'];
 const VISIONS_DISPATCH_NUMERIC_KEYS = ['quietMs', 'cooldownMs', 'maxPerHour', 'activityMaxPerHour', 'dispatchTimeoutSeconds'];
 const VISIONS_DISPATCH_NUMERIC_RANGES = {
   activityMaxPerHour: { min: 0, label: 'zero or more' },
@@ -210,6 +211,14 @@ const PR_REVIEW_SCHEMA = {
   ],
 };
 
+const BRANCH_GC_SCHEMA = {
+  name: 'branchGc',
+  rules: [
+    blockRules.booleans(['enabled']),
+    blockRules.positiveNumbers(BRANCH_GC_NUMERIC_KEYS),
+  ],
+};
+
 const VISIONS_DISPATCH_SCHEMA = {
   name: 'visions.dispatch',
   rules: [
@@ -269,6 +278,7 @@ const TELEGRAM_SCHEMA = {
 };
 
 const validatePrReview = (pr) => validateBlock(pr, PR_REVIEW_SCHEMA);
+const validateBranchGc = (branchGc) => validateBlock(branchGc, BRANCH_GC_SCHEMA);
 const validateVisions = (visions) => validateBlock(visions, VISIONS_SCHEMA);
 const validatePosthog = (ph) => validateBlock(ph, POSTHOG_SCHEMA);
 const validateUsage = (u) => validateBlock(u, USAGE_SCHEMA);
@@ -294,6 +304,13 @@ function sanitizePrReview(pr) {
   return sanitizeBlock(pr, {
     booleans: ['enabled'],
     verbatim: ['projects', 'intervalMinutes', 'mergeMethod', 'maxConcurrentReviews', 'reviewTimeoutSeconds'],
+  });
+}
+
+function sanitizeBranchGc(branchGc) {
+  return sanitizeBlock(branchGc, {
+    booleans: ['enabled'],
+    verbatim: BRANCH_GC_NUMERIC_KEYS,
   });
 }
 
@@ -706,6 +723,12 @@ function registerControlHandlers(controlWss, deps) {
       return;
     }
 
+    const branchGcError = validateBranchGc(s.branchGc);
+    if (branchGcError) {
+      sendError(ws, branchGcError, { type: 'settings-error', requestId: msg.requestId || null });
+      return;
+    }
+
     const visionsError = validateVisions(s.visions);
     if (visionsError) {
       sendError(ws, visionsError, { type: 'settings-error', requestId: msg.requestId || null });
@@ -747,6 +770,7 @@ function registerControlHandlers(controlWss, deps) {
       }
       if (s.repoRoots != null) cfg.repoRoots = s.repoRoots;
       if (s.prReview != null) cfg.prReview = sanitizePrReview(s.prReview);
+      if (s.branchGc != null) cfg.branchGc = sanitizeBranchGc(s.branchGc);
       if (s.visions != null) cfg.visions = sanitizeVisions(s.visions);
       if (s.posthog != null) cfg.posthog = sanitizePosthog(s.posthog);
       if (s.usage != null) cfg.usage = sanitizeUsage(s.usage);

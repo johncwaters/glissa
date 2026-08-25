@@ -55,6 +55,7 @@ const { spawn } = require('./child-process-safe');
 const { createGitWorkspace, createGitWorkspaceSync } = require('./git-workspace');
 const { runPostTurnChecks, resolveCheckConfig } = require('./post-turn-checker');
 const { createPrReviewWiring } = require('./pr-review-wiring');
+const { createBranchGcWiring } = require('./branch-gc-wiring');
 const { createPosthogWiring } = require('./posthog-wiring');
 const { createVisionsWiring } = require('./visions-wiring');
 const { createVisionsDispatcher, createVisionsSpawn } = require('./visions-dispatch');
@@ -1092,6 +1093,13 @@ function createBackend(httpServer, options = {}) {
   void laneLedger.load();
   const recordLane = laneLedger.record;
 
+  const branchGc = createBranchGcWiring({
+    config,
+    gitWorkspace,
+    broadcast: (msg) => broadcastControl(msg),
+    ...(options.branchGcWiringOptions || {}),
+  });
+
   const prReview = createPrReviewWiring({
     config, reviewSessions, closeSessionDataClients, hookRouter, getHookPort, spawnGate, gitWorkspace, recordLane,
     getProjectPathById, getProjectNameById,
@@ -1656,6 +1664,8 @@ function createBackend(httpServer, options = {}) {
     memoryDistiller.start().catch((err) => console.warn(`[memory-distill] start failed: ${err.message}`));
   }
 
+  branchGc.start();
+
   // --- GitHub PR auto-review poller (opt-in; inert unless config.prReview.enabled) ---
   prReview.startPoller();
 
@@ -1832,6 +1842,7 @@ function createBackend(httpServer, options = {}) {
     });
     // No-op unless this save actually changed config.prReview/telegram; the restart itself is
     // serialized and drains in-flight reviews (see pr-review-wiring.js).
+    branchGc.restartIfConfigChanged();
     prReview.restartIfConfigChanged();
     // Same gating for the PostHog lane: no-op unless this save changed config.posthog/telegram.
     posthog.restartIfConfigChanged();
@@ -2195,6 +2206,7 @@ function createBackend(httpServer, options = {}) {
       sess.destroy();
       if (sess._killReap) pendingReaps.push(sess._killReap);
     }
+    stoppers.add('branch-gc', () => branchGc.stop());
     // Blocks a restart still queued on the poller's restart chain (e.g. a settings save that raced
     // shutdown) from starting a fresh poller after the process has begun tearing down, and hands back
     // the in-flight drain (a review still discarding its worktree) for the coordinator to await.
