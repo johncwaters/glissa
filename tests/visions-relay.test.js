@@ -12,7 +12,9 @@ const {
   feedFrameBytes,
   serializeFrame,
 } = require('../server/core/visions-lsp-core');
-const { CODE_ACTION_TIMEOUT_MS, SYNC_KIND_INCREMENTAL } = require('../session/visions-relay');
+const {
+  CODE_ACTION_TIMEOUT_MS, SYNC_KIND_INCREMENTAL, sendWsFrame, sendWsJson,
+} = require('../session/visions-relay');
 
 const RELAY_PATH = path.join(__dirname, '..', 'session', 'visions-relay.js');
 const TEST_TIMEOUT_MS = 6000;
@@ -117,6 +119,15 @@ function waitForStreamPattern(stream, pattern) {
     stream.on('data', onData);
   }), TEST_TIMEOUT_MS, `stream output did not match ${pattern}`);
 }
+
+test('sendWsJson routes through the shared websocket frame guard', () => {
+  const sent = [];
+  const openSocket = { readyState: WebSocket.OPEN, send: (frame) => sent.push(frame) };
+
+  assert.equal(sendWsJson(openSocket, { type: 'lsp', method: 'textDocument/didSave' }), true);
+  assert.deepEqual(sent, ['{"type":"lsp","method":"textDocument/didSave"}']);
+  assert.equal(sendWsFrame({ readyState: WebSocket.CLOSED, send: () => { throw new Error('must not send'); } }, { send: true, serialized: 'ignored' }), false);
+});
 
 async function closeRelay(child) {
   if (child.exitCode !== null) return child.exitCode;

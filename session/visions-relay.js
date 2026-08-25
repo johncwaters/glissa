@@ -128,9 +128,7 @@ function sendWsFrame(ws, decision) {
 }
 
 function sendWsJson(ws, payload) {
-  if (!ws || ws.readyState !== WebSocket.OPEN) return false;
-  ws.send(JSON.stringify(payload));
-  return true;
+  return sendWsFrame(ws, { send: true, serialized: JSON.stringify(payload) });
 }
 
 function createRelay({
@@ -448,4 +446,6 @@ module.exports = {
   planMirrorReplay,
   replayDidOpenMessage,
   resolvePortPlan,
+  sendWsFrame,
+  sendWsJson,
 };

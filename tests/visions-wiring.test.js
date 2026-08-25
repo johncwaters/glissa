@@ -418,9 +418,7 @@ test('the snapshot accessor carries every uri that currently has findings', (t) 
   );
 });
 
-// The relay replays its open buffers on reconnect (docs/archive/plan-navigator.md, M1), so a dropped socket is a
-// gap in the feed, not news that the carbon unit closed anything.
-test('a relay disconnect keeps the findings the tab is showing', (t) => {
+test('a last relay disconnect clears the findings the tab is showing', (t) => {
   const { wiring, connection, timers, broadcasts, lsp } = drivenConnection();
   t.after(() => wiring.stop());
 
@@ -430,8 +428,8 @@ test('a relay disconnect keeps the findings the tab is showing', (t) => {
 
   connection.close();
   assert.equal(connection.docCount, 0, 'the mirrored buffer is gone with the socket');
-  assert.equal(broadcasts.length, afterSweep, 'but the tab is told nothing');
-  assert.deepEqual(findingSections(wiring).map((entry) => entry.uri), [MARKDOWN_URI]);
+  assert.equal(broadcasts.length, afterSweep + 1, 'the tab is told to clear the last owner section');
+  assert.deepEqual(findingSections(wiring), []);
 });
 
 test('a lane with no broadcast injected still sweeps and still tracks findings', (t) => {
@@ -1102,6 +1100,42 @@ test('a duplicate didClose leaves no shared uri owner behind', (t) => {
   assert.deepEqual(wiring.documentsSnapshot(), []);
   assert.equal(connection.docCount, 0);
   assert.equal(secondConnection.docCount, 0);
+});
+
+test('connection close clears shared uri state only when its owner is last', (t) => {
+  const { wiring, connection, timers, broadcasts, lsp } = drivenConnection();
+  t.after(() => wiring.stop());
+  const secondConnection = wiring.openConnection({ send: () => {} });
+  const secondLsp = (method, params) => secondConnection.handleFrame(JSON.stringify({ type: 'lsp', method, params }));
+
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  secondLsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  timers.runPending();
+  connection.close();
+
+  assert.deepEqual(findingSections(wiring).map((entry) => entry.uri), [MARKDOWN_URI], 'a non-last owner leaves the shared section standing');
+  assert.equal(broadcasts.filter((message) => message.type === 'visions-findings' && message.diagnostics.length === 0).length, 0);
+
+  secondConnection.close();
+
+  assert.deepEqual(findingSections(wiring), [], 'the last owner clears the shared section');
+  assert.equal(broadcasts.filter((message) => message.type === 'visions-findings' && message.diagnostics.length === 0).length, 1);
+});
+
+test('a second didClose after clearing shared uri state is tolerated', (t) => {
+  const { wiring, timers, broadcasts, warnings, lsp } = drivenConnection();
+  t.after(() => wiring.stop());
+
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  timers.runPending();
+  lsp('textDocument/didClose', { textDocument: { uri: MARKDOWN_URI } });
+  const clearBroadcasts = broadcasts.filter((message) => message.type === 'visions-findings' && message.diagnostics.length === 0);
+
+  lsp('textDocument/didClose', { textDocument: { uri: MARKDOWN_URI } });
+
+  assert.equal(clearBroadcasts.length, 1, 'the first close cleared the shared state');
+  assert.equal(broadcasts.filter((message) => message.type === 'visions-findings' && message.diagnostics.length === 0).length, 1);
+  assert.equal(warnings.at(-1), '[visions] ignored textDocument/didClose: unknown-uri');
 });
 
 test('a result that lands after its buffer closed is dropped rather than resurrecting a section', async (t) => {
