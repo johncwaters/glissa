@@ -4,6 +4,7 @@
 import { playAlertSound, SOUND_OPTIONS } from './alert-sound.js';
 import addSessionHTML from './components/add-session-dialog.html?raw';
 import settingsHTML from './components/settings-dialog.html?raw';
+import { unionProjectSelection } from './settings-projects-core.mjs';
 import { sendControlMsg, sendControlRequest } from './control-ws.js';
 import { ensureNotificationPermission, notificationPermission, notificationsSupported } from './notifications.js';
 import { el } from './dom-helpers.js';
@@ -244,12 +245,41 @@ export function createSettingsDialog(initialTab) {
   const visionsActivityMaxPerHourInput = dialog.querySelector('#settings-visions-activity-max-per-hour');
   const visionsDispatchTimeoutInput = dialog.querySelector('#settings-visions-dispatch-timeout');
   const visionsModelInput = dialog.querySelector('#settings-visions-model');
+  const visionsAutoFixCheckbox = dialog.querySelector('#settings-visions-auto-fix');
+  const visionsProjectsEl = dialog.querySelector('#settings-visions-projects');
+
+  const millPanel = dialog.querySelector('#settings-panel-mill');
+  const packsAutoRebuildCheckbox = dialog.querySelector('#settings-packs-auto-rebuild');
+  const packReadTelemetryCheckbox = dialog.querySelector('#settings-pack-read-telemetry');
+  const packDistillerEnabledCheckbox = dialog.querySelector('#settings-pack-distiller-enabled');
+  const packDistillerIntervalInput = dialog.querySelector('#settings-pack-distiller-interval');
+  const packDistillerTimeoutInput = dialog.querySelector('#settings-pack-distiller-timeout');
+  const memoryEnabledCheckbox = dialog.querySelector('#settings-memory-enabled');
+  const memoryRetainDaysInput = dialog.querySelector('#settings-memory-retain-days');
+  const memoryMaxRecordCharsInput = dialog.querySelector('#settings-memory-max-record-chars');
+  const memoryMaxRecordsPerKindInput = dialog.querySelector('#settings-memory-max-records-per-kind');
+  const memoryDistillEnabledCheckbox = dialog.querySelector('#settings-memory-distill-enabled');
+  const memoryDistillIntervalInput = dialog.querySelector('#settings-memory-distill-interval');
+  const memoryDistillTimeoutInput = dialog.querySelector('#settings-memory-distill-timeout');
+  const memoryDistillMaxClaimsInput = dialog.querySelector('#settings-memory-distill-max-claims');
+  const memoryDistillQuietMsInput = dialog.querySelector('#settings-memory-distill-quiet-ms');
+  const ingestEnabledCheckbox = dialog.querySelector('#settings-ingest-enabled');
+  const ingestSourcesEl = dialog.querySelector('#settings-ingest-sources');
 
   let visionsHydrated = null;
   let visionsTouched = false;
   visionsPanel.addEventListener('input', () => { visionsTouched = true; });
   visionsPanel.addEventListener('change', () => { visionsTouched = true; });
   const shouldSaveVisions = () => visionsTouched || visionsHydrated !== null;
+
+  let packDistillerHydrated = null;
+  let memoryHydrated = null;
+  let ingestHydrated = null;
+  let millTouched = false;
+  millPanel.addEventListener('input', () => { millTouched = true; });
+  millPanel.addEventListener('change', () => { millTouched = true; });
+  const shouldSaveMill = () => millTouched
+    || packDistillerHydrated !== null || memoryHydrated !== null || ingestHydrated !== null;
 
   const posthogPanel = dialog.querySelector('#settings-panel-posthog');
   const posthogEnabledCheckbox = dialog.querySelector('#settings-posthog-enabled');
@@ -453,6 +483,29 @@ export function createSettingsDialog(initialTab) {
     return [...prProjectsEl.querySelectorAll('input[type="checkbox"]:checked')].map((el) => el.dataset.projectId);
   }
 
+  function renderVisionsProjects(selected) {
+    const checked = new Set(selected || []);
+    visionsProjectsEl.innerHTML = '';
+    for (const proj of prProjectChoices) {
+      const label = el('label', 'dialog-label dialog-checkbox-label');
+      const input = el('input', 'dialog-checkbox');
+      input.type = 'checkbox';
+      input.dataset.projectId = proj.id;
+      input.checked = checked.has(proj.id);
+      label.appendChild(input);
+      label.appendChild(document.createTextNode(proj.name));
+      visionsProjectsEl.appendChild(label);
+    }
+  }
+
+  function checkedVisionsProjectIds() {
+    return unionProjectSelection({
+      checked: [...visionsProjectsEl.querySelectorAll('input[type="checkbox"]:checked')].map((el) => el.dataset.projectId),
+      stored: Array.isArray(visionsHydrated?.projects) ? visionsHydrated.projects : [],
+      rendered: prProjectChoices.map((proj) => proj.id),
+    });
+  }
+
   const POSTHOG_NUMERIC_INPUTS = () => [
     posthogIntervalInput, posthogMaxInvestigationsInput, posthogTimeoutInput,
     posthogMinUsersInput, posthogEscalationInput, posthogFixTimeoutInput,
@@ -465,12 +518,28 @@ export function createSettingsDialog(initialTab) {
     visionsActivityMaxPerHourInput, visionsDispatchTimeoutInput,
   ];
 
+  const MILL_NUMERIC_INPUTS = () => [
+    packDistillerIntervalInput, packDistillerTimeoutInput,
+    memoryRetainDaysInput, memoryMaxRecordCharsInput, memoryMaxRecordsPerKindInput,
+    memoryDistillIntervalInput, memoryDistillTimeoutInput,
+    memoryDistillMaxClaimsInput, memoryDistillQuietMsInput,
+  ];
+
+  const ingestSourceCheckboxes = () => [...ingestSourcesEl.querySelectorAll('input[data-ingest-source]')];
+
+  function checkedIngestSources() {
+    const sources = {};
+    for (const box of ingestSourceCheckboxes()) sources[box.dataset.ingestSource] = { enabled: box.checked };
+    return sources;
+  }
+
   // Each field's own min/max attributes are the bounds, so a field that legitimately accepts zero
   // (the spike cooldown, meaning never mute) does not need a second list to be exempted from.
   function validateTimeouts() {
     errorEl.textContent = '';
     const inputs = [replayBufferInput, prIntervalInput, prMaxReviewsInput, prTimeoutInput];
     if (shouldSaveVisions()) inputs.push(...VISIONS_NUMERIC_INPUTS());
+    if (shouldSaveMill()) inputs.push(...MILL_NUMERIC_INPUTS());
     if (shouldSavePosthog()) inputs.push(...POSTHOG_NUMERIC_INPUTS());
     if (shouldSaveUsage()) inputs.push(usageScanIntervalInput, usageRetainDaysInput);
     for (const input of inputs) {
@@ -508,6 +577,8 @@ export function createSettingsDialog(initialTab) {
       rtk: rtkCheckbox.checked,
       debugMode: debugModeCheckbox.checked,
       telegramNotifications: telegramNotificationsCheckbox.checked,
+      packsAutoRebuild: packsAutoRebuildCheckbox.checked,
+      packReadTelemetry: packReadTelemetryCheckbox.checked,
       repoRoots: repoRoots,
       prReview: {
         enabled: prEnabledCheckbox.checked,
@@ -530,6 +601,8 @@ export function createSettingsDialog(initialTab) {
       settings.visions = {
         ...(visionsHydrated || {}),
         enabled: visionsEnabledCheckbox.checked,
+        autoFix: visionsAutoFixCheckbox.checked,
+        projects: checkedVisionsProjectIds(),
         dispatch: {
           ...((visionsHydrated && typeof visionsHydrated.dispatch === 'object') ? visionsHydrated.dispatch : {}),
           enabled: visionsDispatchEnabledCheckbox.checked,
@@ -540,6 +613,40 @@ export function createSettingsDialog(initialTab) {
           dispatchTimeoutSeconds: Number(visionsDispatchTimeoutInput.value),
           model: visionsModelInput.value.trim(),
         },
+      };
+    }
+
+    /*
+     * Sent WITHOUT a hydrated spread, unlike the lanes above: the server merges these onto the stored
+     * block, so a file-only knob the Mill tab does not render survives a save, and echoing one back
+     * would be refused by the allow-list that keeps paths and record content off the wire.
+     */
+    if (shouldSaveMill()) {
+      settings.packDistiller = {
+        enabled: packDistillerEnabledCheckbox.checked,
+        intervalHours: Number(packDistillerIntervalInput.value),
+        timeoutSeconds: Number(packDistillerTimeoutInput.value),
+      };
+      settings.memory = {
+        enabled: memoryEnabledCheckbox.checked,
+        retainDays: Number(memoryRetainDaysInput.value),
+        maxRecordChars: Number(memoryMaxRecordCharsInput.value),
+        maxRecordsPerKind: Number(memoryMaxRecordsPerKindInput.value),
+        distill: {
+          enabled: memoryDistillEnabledCheckbox.checked,
+          intervalMinutes: Number(memoryDistillIntervalInput.value),
+          timeoutSeconds: Number(memoryDistillTimeoutInput.value),
+          maxNewClaims: Number(memoryDistillMaxClaimsInput.value),
+          quietMs: Number(memoryDistillQuietMsInput.value),
+        },
+      };
+      // The legacy alias outranks retainDays wherever it already exists, so it has to move with it.
+      if (memoryHydrated && memoryHydrated.memoryRetainDays != null) {
+        settings.memory.memoryRetainDays = settings.memory.retainDays;
+      }
+      settings.ingest = {
+        enabled: ingestEnabledCheckbox.checked,
+        sources: checkedIngestSources(),
       };
     }
 
@@ -639,6 +746,38 @@ export function createSettingsDialog(initialTab) {
       visionsActivityMaxPerHourInput.value = dispatch.activityMaxPerHour ?? 2;
       visionsDispatchTimeoutInput.value = dispatch.dispatchTimeoutSeconds ?? 180;
       visionsModelInput.value = dispatch.model ?? '';
+      visionsAutoFixCheckbox.checked = visions.autoFix === true;
+      renderVisionsProjects(visions.projects || []);
+
+      packsAutoRebuildCheckbox.checked = s.packsAutoRebuild !== false;
+      packReadTelemetryCheckbox.checked = s.packReadTelemetry !== false;
+      packDistillerHydrated = s.packDistiller && typeof s.packDistiller === 'object' ? s.packDistiller : null;
+      const distiller = packDistillerHydrated || {};
+      packDistillerEnabledCheckbox.checked = distiller.enabled === true;
+      packDistillerIntervalInput.value = distiller.intervalHours ?? 24;
+      packDistillerTimeoutInput.value = distiller.timeoutSeconds ?? 900;
+
+      memoryHydrated = s.memory && typeof s.memory === 'object' ? s.memory : null;
+      const memory = memoryHydrated || {};
+      const memoryDistill = memory.distill && typeof memory.distill === 'object' ? memory.distill : {};
+      memoryEnabledCheckbox.checked = memory.enabled === true;
+      memoryRetainDaysInput.value = memory.memoryRetainDays ?? memory.retainDays ?? 365;
+      memoryMaxRecordCharsInput.value = memory.maxRecordChars ?? 2000;
+      memoryMaxRecordsPerKindInput.value = memory.maxRecordsPerKind ?? 2000;
+      // Absent means on, matching how the lane reads the kill switch.
+      memoryDistillEnabledCheckbox.checked = memoryDistill.enabled !== false;
+      memoryDistillIntervalInput.value = memoryDistill.intervalMinutes ?? 1440;
+      memoryDistillTimeoutInput.value = memoryDistill.timeoutSeconds ?? 900;
+      memoryDistillMaxClaimsInput.value = memoryDistill.maxNewClaims ?? 20;
+      memoryDistillQuietMsInput.value = memoryDistill.quietMs ?? 60000;
+
+      ingestHydrated = s.ingest && typeof s.ingest === 'object' ? s.ingest : null;
+      const ingest = ingestHydrated || {};
+      const ingestSources = ingest.sources && typeof ingest.sources === 'object' ? ingest.sources : {};
+      ingestEnabledCheckbox.checked = ingest.enabled === true;
+      for (const box of ingestSourceCheckboxes()) {
+        box.checked = ingestSources[box.dataset.ingestSource]?.enabled === true;
+      }
 
       posthogHydrated = s.posthog && typeof s.posthog === 'object' ? s.posthog : null;
       const ph = posthogHydrated || {};

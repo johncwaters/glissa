@@ -176,7 +176,7 @@ Each entry is a rule, its why, and where it is pinned. Mechanism lives in the co
 - Net-new claims are capped and over the cap is an ERROR, a run inventing thirty facts at once being the failure this gate exists for. A canon past the prompt budget is refused rather than sliced, and a diff touching a LOCKED record is diverted to `dist-pending/`.
 - Echo suppression closes the loop: delivered line hashes are registered and matching transcript lines dropped, so a session quoting its memory back is not re-ingested as fresh fact.
 - One `contentMarker` PER untrusted corpus, so one fence cannot close another, and it is a sha256 digest rather than a cheap hash an attacker's text could fix-point.
-- Nothing memory-shaped is deliverable over the control WS: no `memory-*` type, `config.memory` never settable or echoed, nothing in replay retention, no memory content in a lane log (`tests/memory-delivery-negative.test.js`).
+- Only memory TOGGLES cross the control WS: settings are an allow-list of booleans and clamped ints, so no `memory-*` type, path, record or lane log line rides one, a knob being tunable where a filename would be a leak (`tests/memory-delivery-negative.test.js`).
 - The direct-read pointer line in a repo's own `AGENTS.md` stays operator-authored: it is the one instruction-tier link in the chain, which keeps the store agent-agnostic.
 
 ### Ephemeral Lane Write Boundaries
@@ -252,4 +252,4 @@ Dev: `vite`, `tailwindcss` v4 with `@tailwindcss/vite`.
 
 ## Parallel Agent Work
 
-Fanning out multiple agents over this repo: give each its own git worktree and integrate the lane back once it is clean, so concurrent lanes cannot collide in the working tree. A convention for editing Glissa, not a runtime feature.
+Fan out over this repo by giving each agent its own git worktree, integrated back once clean, so lanes cannot collide in the working tree. A convention, not a runtime feature.

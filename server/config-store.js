@@ -7,6 +7,9 @@ const os = require('node:os');
 
 const { canonicalizePath, equalsIgnoringCaseOnWindows } = require('../shared/paths');
 const { isPlainObject } = require('./core/usage-number-core');
+const {
+  INGEST_SPEC, MEMORY_SPEC, PACK_DISTILLER_SPEC, pickMillBlock,
+} = require('./core/settings-mill-core');
 const { writeJsonAtomicSync, writeTextAtomicSync } = require('./json-file');
 const { isKnownAgentId, listAgentIds } = require('../session/adapters');
 
@@ -146,11 +149,9 @@ const BOOLEAN_KEYS = [
   'checkForUpdates',
   'autoResume',
   'telegramNotifications',
-  // Validated and reloadable like its neighbours, but deliberately absent from getSettings: M3 ships
-  // no Settings-dialog control for it, and the service reads it once at boot anyway.
+  // Both surfaced on the Mill tab. The service reads packsAutoRebuild once at boot and a session
+  // reads packReadTelemetry once at spawn, so each applies from the next restart / next session.
   'packsAutoRebuild',
-  // Absent from getSettings for the same reason as packsAutoRebuild: the mill ships no Settings
-  // control, and a session reads this once at spawn.
   'packReadTelemetry',
   // Both worktree conflict-avoidance switches, absent from getSettings for the same reason
   // (precedent: usage.rtkSavings). Validated and reloadable; each takes effect on the next session
@@ -485,6 +486,8 @@ function createConfigStore({ settingsDefaults } = {}) {
       checkForUpdates: config.checkForUpdates ?? effectiveDefaults.checkForUpdates,
       autoResume: config.autoResume ?? effectiveDefaults.autoResume,
       telegramNotifications: config.telegramNotifications ?? effectiveDefaults.telegramNotifications,
+      packsAutoRebuild: config.packsAutoRebuild ?? effectiveDefaults.packsAutoRebuild,
+      packReadTelemetry: config.packReadTelemetry ?? effectiveDefaults.packReadTelemetry,
       integrationBranch: config.integrationBranch ?? effectiveDefaults.integrationBranch,
       worktreeRoot: config.worktreeRoot ?? effectiveDefaults.worktreeRoot,
       worktreeShare: config.worktreeShare ?? effectiveDefaults.worktreeShare,
@@ -501,6 +504,11 @@ function createConfigStore({ settingsDefaults } = {}) {
       // lanes an absent block means ENABLED with defaults, not off.
       usage: config.usage ? { ...config.usage } : null,
       telegram: config.telegram ? { ...config.telegram } : null,
+      // Projected through their allow-lists in BOTH directions: a file-only key (a watched root, a
+      // shell list) is no more echoable than it is settable.
+      packDistiller: pickMillBlock(config.packDistiller, PACK_DISTILLER_SPEC),
+      memory: pickMillBlock(config.memory, MEMORY_SPEC),
+      ingest: pickMillBlock(config.ingest, INGEST_SPEC),
       // Read-only helper for the PR Review tab's project picker; derived, never persisted back.
       projectChoices: (config.projects || []).map(p => ({ id: p.id, name: p.name })),
     };
@@ -546,6 +554,9 @@ function createConfigStore({ settingsDefaults } = {}) {
     if (newConfig.posthog != null) config.posthog = newConfig.posthog;
     if (newConfig.usage != null) config.usage = newConfig.usage;
     if (newConfig.telegram != null) config.telegram = newConfig.telegram;
+    if (newConfig.packDistiller != null) config.packDistiller = newConfig.packDistiller;
+    if (newConfig.memory != null) config.memory = newConfig.memory;
+    if (newConfig.ingest != null) config.ingest = newConfig.ingest;
     if (newConfig.port != null && newConfig.port !== config.port) {
       console.log(`[settings] Port changed to ${newConfig.port} - restart required to take effect`);
     }

@@ -8,6 +8,9 @@ const { listRepoConversations } = require('../session/core/conversation-history'
 const { normalizeClientTrust } = require('./core/request-trust');
 const { isPlainObject } = require('./core/usage-number-core');
 const { PACK_NAME_RE, applyPackDelta, sameProjectRecords } = require('./core/pack-core');
+const {
+  INGEST_SPEC, MEMORY_SPEC, PACK_DISTILLER_SPEC, mergeMillBlock, validateMillBlock,
+} = require('./core/settings-mill-core');
 const { readPosthogReport } = require('./posthog-report');
 const posthogCore = require('./core/posthog-core');
 const { buildSettingsPayload: buildSettingsPayloadFrom } = require('./settings-payload');
@@ -276,6 +279,12 @@ const TELEGRAM_SCHEMA = {
   name: 'telegram',
   rules: [blockRules.strings(['botToken', 'chatId'])],
 };
+
+/*
+ * The Mill blocks validate against an ALLOW-LIST instead of a rule list: memory is settable only as
+ * toggles, so an unrecognized key (a path, a record) has to be refused by name rather than dropped.
+ */
+const MILL_SPECS = [MEMORY_SPEC, PACK_DISTILLER_SPEC, INGEST_SPEC];
 
 const validatePrReview = (pr) => validateBlock(pr, PR_REVIEW_SCHEMA);
 const validateBranchGc = (branchGc) => validateBlock(branchGc, BRANCH_GC_SCHEMA);
@@ -755,6 +764,13 @@ function registerControlHandlers(controlWss, deps) {
       return;
     }
 
+    for (const spec of MILL_SPECS) {
+      const millError = validateMillBlock(s[spec.name], spec);
+      if (!millError) continue;
+      sendError(ws, millError, { type: 'settings-error', requestId: msg.requestId || null });
+      return;
+    }
+
     const freshConfig = configStore.save(cfg => {
       for (const key of TIMEOUT_KEYS) {
         if (s[key] != null) cfg[key] = s[key];
@@ -776,6 +792,10 @@ function registerControlHandlers(controlWss, deps) {
       if (s.visions != null) cfg.visions = sanitizeVisions(s.visions);
       if (s.posthog != null) cfg.posthog = sanitizePosthog(s.posthog);
       if (s.usage != null) cfg.usage = sanitizeUsage(s.usage);
+      for (const spec of MILL_SPECS) {
+        if (s[spec.name] == null) continue;
+        cfg[spec.name] = mergeMillBlock(cfg[spec.name], s[spec.name], spec);
+      }
       if (s.telegram != null) {
         cfg.telegram = {
           botToken: String(s.telegram.botToken || '').trim(),

@@ -1,9 +1,10 @@
 'use strict';
 
-// M16 of docs/plan-visions-3.md, "Enforced non-delivery": memory is a local, file-configured store whose
-// content reaches a session and nothing else. These are the negative pins, so the guarantee cannot rot
-// the day a dashboard surface is added: no memory-shaped control-WS message type exists at all, a
-// remote-trust socket is answered without one, none is replayable, and no lane logs remembered text.
+// M16 of docs/plan-visions-3.md, "Enforced non-delivery", as relaxed to toggles-only: memory is a local
+// store whose CONTENT reaches a session and nothing else, while its scalar knobs are dashboard settings
+// like any other lane's. These are the negative pins: no memory-shaped control-WS message type exists at
+// all, none is replayable, no lane logs remembered text, and the settings block accepts an allow-list of
+// booleans and clamped integers, refusing a path or a content-shaped key BY NAME.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -60,6 +61,15 @@ function withRealStore(cfg, fn) {
 }
 
 const LIVE_MEMORY = { enabled: true, distill: { enabled: false } };
+// Every file-only key the Mill lanes accept from config.json: a path, a watched root, a shell list.
+const FILE_ONLY = Object.freeze({
+  memory: { ...LIVE_MEMORY, dbPath: '/tmp/glissa-memory.db' },
+  ingest: {
+    enabled: true,
+    sources: { fs: { enabled: true, roots: ['/home/carbon/secrets'] }, shellHistory: { enabled: true, shells: ['zsh'] } },
+  },
+  packDistiller: { enabled: true, packsDir: '/home/carbon/.glissa/packs' },
+});
 
 test('no control-WS message type is memory-shaped, in any handler or broadcast', () => {
   const offenders = [];
@@ -74,7 +84,7 @@ test('no control-WS message type is memory-shaped, in any handler or broadcast',
   assert.deepEqual(offenders, []);
 });
 
-test('a remote-trust control socket is answered without a memory frame, and settings never echo the block', () => {
+test('a remote-trust control socket is answered without a memory frame, and the echo is toggles only', () => {
   withRealStore({ projects: [], teams: [], memory: LIVE_MEMORY }, (driver, store) => {
     driver.send({ type: 'get-settings' });
     driver.send({ type: 'request-mill-report' });
@@ -82,15 +92,78 @@ test('a remote-trust control socket is answered without a memory frame, and sett
     assert.equal(driver.sent.length > 0, true);
     const types = driver.sent.map((message) => message.type);
     assert.equal(types.some((type) => String(type).includes('memory')), false);
-    assert.equal(JSON.stringify(driver.sent).includes('memory'), false);
-    assert.equal('memory' in store.getSettings(), false);
+    const echoed = store.getSettings().memory;
+    assert.deepEqual(echoed, LIVE_MEMORY);
+    const { distill, ...scalars } = echoed;
+    for (const value of [...Object.values(scalars), ...Object.values(distill)]) {
+      assert.equal(typeof value === 'boolean' || typeof value === 'number', true);
+    }
   });
 });
 
-test('memory appears in none of the settable key lists, so the store stays file-configured', () => {
+// The way OUT is the same allow-list as the way in: a stored path is not echoable just because the
+// operator put it in config.json themselves.
+test('a file-only key of any Mill block is dropped from the settings echo', () => {
+  withRealStore({ projects: [], teams: [], ...FILE_ONLY }, (driver, store) => {
+    const settings = store.getSettings();
+    assert.equal('dbPath' in settings.memory, false);
+    assert.equal(settings.memory.enabled, true);
+    assert.equal('roots' in settings.ingest.sources.fs, false);
+    assert.equal('shells' in settings.ingest.sources.shellHistory, false);
+    assert.equal(settings.ingest.sources.fs.enabled, true);
+    assert.equal('packsDir' in settings.packDistiller, false);
+    assert.equal(settings.packDistiller.enabled, true);
+    driver.send({ type: 'get-settings' });
+    const replied = driver.sent.find((message) => message.type === 'settings');
+    assert.equal(JSON.stringify(replied).includes('/home/carbon/secrets'), false);
+    assert.equal(JSON.stringify(replied).includes('glissa-memory.db'), false);
+  });
+});
+
+test('memory is a block, never a scalar settings key, so no key list can carry a path into the config', () => {
   assert.equal(BOOLEAN_KEYS.includes('memory'), false);
   assert.equal(STRING_KEYS.includes('memory'), false);
   assert.equal(TIMEOUT_KEYS.includes('memory'), false);
+});
+
+test('a memory toggle is settable over the control WS and lands in the config', () => {
+  withRealStore({ projects: [], teams: [] }, (driver, store) => {
+    driver.send({ type: 'update-settings', settings: { memory: { enabled: true, retainDays: 90 } } });
+    const updated = driver.sent.find((message) => message.type === 'settings-updated');
+    assert.equal(updated.settings.memory.enabled, true);
+    assert.equal(store.config.memory.retainDays, 90);
+  });
+});
+
+// The load-bearing half of the relaxation: a knob crosses, a filename or a remembered byte does not.
+test('a path or content-shaped memory key is refused by name and nothing is written', () => {
+  for (const block of [{ dir: '/tmp/steal' }, { dbPath: '/tmp/steal.db' }, { text: REMEMBERED }]) {
+    withRealStore({ projects: [], teams: [] }, (driver, store) => {
+      driver.send({ type: 'update-settings', settings: { memory: { enabled: true, ...block } } });
+      const error = driver.sent.find((message) => message.type === 'settings-error');
+      assert.match(error.message, /^memory\.\w+ is not settable from the dashboard$/);
+      assert.equal(driver.sent.some((message) => message.type === 'settings-updated'), false);
+      assert.equal(store.config.memory, undefined);
+    });
+  }
+});
+
+test('an out-of-range memory toggle is refused rather than silently clamped by the resolver', () => {
+  withRealStore({ projects: [], teams: [] }, (driver, store) => {
+    driver.send({ type: 'update-settings', settings: { memory: { retainDays: 5 } } });
+    const error = driver.sent.find((message) => message.type === 'settings-error');
+    assert.equal(error.message, 'memory.retainDays must be an integer between 30 and 3650');
+    assert.equal(store.config.memory, undefined);
+  });
+});
+
+// A hand-set key the Mill tab does not render must survive a save, or the dialog silently unconfigures it.
+test('a settings save merges onto the stored memory block instead of replacing it', () => {
+  withRealStore({ projects: [], teams: [], memory: { enabled: false, futureKnob: 7 } }, (driver, store) => {
+    driver.send({ type: 'update-settings', settings: { memory: { enabled: true } } });
+    assert.equal(store.config.memory.enabled, true);
+    assert.equal(store.config.memory.futureKnob, 7);
+  });
 });
 
 test('nothing memory-shaped is replayable, so no future surface can be replayed onto a reconnect', () => {

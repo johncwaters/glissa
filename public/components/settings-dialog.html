@@ -7,6 +7,7 @@
   <button type="button" class="settings-tab" role="tab" id="settings-tab-telegram" aria-controls="settings-panel-telegram" aria-selected="false" data-tab="telegram" tabindex="-1">Telegram</button>
   <button type="button" class="settings-tab" role="tab" id="settings-tab-pr-review" aria-controls="settings-panel-pr-review" aria-selected="false" data-tab="pr-review" tabindex="-1">PR Review</button>
   <button type="button" class="settings-tab" role="tab" id="settings-tab-visions" aria-controls="settings-panel-visions" aria-selected="false" data-tab="visions" tabindex="-1">Visions</button>
+  <button type="button" class="settings-tab" role="tab" id="settings-tab-mill" aria-controls="settings-panel-mill" aria-selected="false" data-tab="mill" tabindex="-1">Mill</button>
   <button type="button" class="settings-tab" role="tab" id="settings-tab-posthog" aria-controls="settings-panel-posthog" aria-selected="false" data-tab="posthog" tabindex="-1">PostHog</button>
   <button type="button" class="settings-tab" role="tab" id="settings-tab-usage" aria-controls="settings-panel-usage" aria-selected="false" data-tab="usage" tabindex="-1">Usage</button>
   <button type="button" class="settings-tab" role="tab" id="settings-tab-shortcuts" aria-controls="settings-panel-shortcuts" aria-selected="false" data-tab="shortcuts" tabindex="-1">Shortcuts</button>
@@ -172,6 +173,103 @@
     <input type="text" class="dialog-input" id="settings-visions-model" placeholder="default" autocomplete="off" spellcheck="false">
     <span class="dialog-hint">Leave blank to use the configured Claude Code default.</span>
   </label>
+  <label class="dialog-label dialog-checkbox-label">
+    <input type="checkbox" class="dialog-checkbox" id="settings-visions-auto-fix">
+    Apply tier 1 fixes
+    <span class="dialog-hint">Lets Visions edit the buffer you are typing in without asking. Off unless explicitly opted into.</span>
+  </label>
+  <div class="settings-section">
+    <div class="settings-section-title">Projects</div>
+    <div class="settings-root-list" id="settings-visions-projects"></div>
+    <span class="dialog-hint">Leave every box clear to accept buffers from any project.</span>
+  </div>
+</div>
+
+<div class="settings-panel" id="settings-panel-mill" role="tabpanel" aria-labelledby="settings-tab-mill" data-panel="mill" hidden>
+  <label class="dialog-label dialog-checkbox-label">
+    <input type="checkbox" class="dialog-checkbox" id="settings-packs-auto-rebuild">
+    Rebuild packs automatically
+    <span class="dialog-hint">Watches each pack's sources plus a 15 minute sweep. Read once at boot, so changes take effect after server restart.</span>
+  </label>
+  <label class="dialog-label dialog-checkbox-label">
+    <input type="checkbox" class="dialog-checkbox" id="settings-pack-read-telemetry">
+    Count pack reads
+    <span class="dialog-hint">One extra hook per pack-delivering session, so the Mill can show whether a delivered pack is ever read. Applies to the next session start.</span>
+  </label>
+  <label class="dialog-label dialog-checkbox-label">
+    <input type="checkbox" class="dialog-checkbox" id="settings-pack-distiller-enabled">
+    Enable the pack distiller
+    <span class="dialog-hint">Scheduled headless sessions that rewrite a pack's derived sources when the sources they distill drift. Changes take effect after server restart.</span>
+  </label>
+  <div class="settings-timeout-grid">
+    <label class="dialog-label">
+      Distill interval (hours)
+      <input type="number" class="dialog-input" id="settings-pack-distiller-interval" min="1" max="720" step="1" autocomplete="off">
+    </label>
+    <label class="dialog-label">
+      Distill timeout (seconds)
+      <input type="number" class="dialog-input" id="settings-pack-distiller-timeout" min="60" max="7200" step="1" autocomplete="off">
+    </label>
+  </div>
+  <label class="dialog-label dialog-checkbox-label">
+    <input type="checkbox" class="dialog-checkbox" id="settings-memory-enabled">
+    Enable long-term memory
+    <span class="dialog-hint">Records what sessions learn into a local store and projects it into the memory pack. Changes take effect after server restart.</span>
+  </label>
+  <div class="settings-timeout-grid">
+    <label class="dialog-label">
+      Retain memory (days)
+      <input type="number" class="dialog-input" id="settings-memory-retain-days" min="30" max="3650" step="1" autocomplete="off">
+    </label>
+    <label class="dialog-label">
+      Max record characters
+      <input type="number" class="dialog-input" id="settings-memory-max-record-chars" min="200" max="20000" step="1" autocomplete="off">
+    </label>
+    <label class="dialog-label">
+      Max records per kind
+      <input type="number" class="dialog-input" id="settings-memory-max-records-per-kind" min="50" max="100000" step="1" autocomplete="off">
+    </label>
+  </div>
+  <label class="dialog-label dialog-checkbox-label">
+    <input type="checkbox" class="dialog-checkbox" id="settings-memory-distill-enabled">
+    Distill memory
+    <span class="dialog-hint">Turns raw records into a canon a session can read. On whenever memory is on; clearing this leaves the store collecting an undistilled dump.</span>
+  </label>
+  <div class="settings-timeout-grid">
+    <label class="dialog-label">
+      Distill interval (minutes)
+      <input type="number" class="dialog-input" id="settings-memory-distill-interval" min="15" max="20160" step="1" autocomplete="off">
+    </label>
+    <label class="dialog-label">
+      Distill timeout (seconds)
+      <input type="number" class="dialog-input" id="settings-memory-distill-timeout" min="60" max="7200" step="1" autocomplete="off">
+    </label>
+    <label class="dialog-label">
+      Max new claims per run
+      <input type="number" class="dialog-input" id="settings-memory-distill-max-claims" min="1" max="500" step="1" autocomplete="off">
+    </label>
+    <label class="dialog-label">
+      Append-quiet window (ms)
+      <input type="number" class="dialog-input" id="settings-memory-distill-quiet-ms" min="0" max="3600000" step="1" autocomplete="off">
+    </label>
+  </div>
+  <label class="dialog-label dialog-checkbox-label">
+    <input type="checkbox" class="dialog-checkbox" id="settings-ingest-enabled">
+    Enable machine context ingest
+    <span class="dialog-hint">The activity feed behind memory and Visions. Each source below needs this on as well. Changes take effect after server restart.</span>
+  </label>
+  <div class="settings-section">
+    <div class="settings-section-title">Sources</div>
+    <div class="settings-root-list" id="settings-ingest-sources">
+    <label class="dialog-label dialog-checkbox-label"><input type="checkbox" class="dialog-checkbox" data-ingest-source="terminal">Terminal output</label>
+    <label class="dialog-label dialog-checkbox-label"><input type="checkbox" class="dialog-checkbox" data-ingest-source="agentLogs">Agent logs</label>
+    <label class="dialog-label dialog-checkbox-label"><input type="checkbox" class="dialog-checkbox" data-ingest-source="git">Git activity</label>
+    <label class="dialog-label dialog-checkbox-label"><input type="checkbox" class="dialog-checkbox" data-ingest-source="fs">File changes</label>
+    <label class="dialog-label dialog-checkbox-label"><input type="checkbox" class="dialog-checkbox" data-ingest-source="shellHistory">Shell history</label>
+      <label class="dialog-label dialog-checkbox-label"><input type="checkbox" class="dialog-checkbox" data-ingest-source="editor">Editor events</label>
+    </div>
+  </div>
+  <span class="dialog-hint">Per-source ring sizes, poll periods and the watched-directory lists stay in config.json: they are the lane's memory ceiling and the paths it may read, not preferences.</span>
 </div>
 
 <div class="settings-panel" id="settings-panel-posthog" role="tabpanel" aria-labelledby="settings-tab-posthog" data-panel="posthog" hidden>
