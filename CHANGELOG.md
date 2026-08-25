@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.23.1] - 2026-08-25
+
+### Added
+
+- **Mill and Visions settings in the dashboard**: a new Mill settings tab exposes the pack distiller, long-term memory, memory distillation, and ingest gates, and the Visions tab gains project scoping and an auto-fix toggle, so these lanes are no longer configurable only by hand-editing `config.json`.
+
+### Changed
+
+- Memory settings cross the control WebSocket as an allow-list of booleans and clamped integers only; paths, record content, and unknown keys are refused by name on write and projected out on echo, and a dashboard save merges onto the stored block so file-only knobs survive.
+- A Visions project scope entry that the picker cannot render is preserved across an unrelated settings save instead of collapsing the scope to unrestricted.
+
 ## [0.23.0] - 2026-08-25
 
 ### Added
