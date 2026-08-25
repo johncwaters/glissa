@@ -22,7 +22,13 @@ import { openResumeDialog } from './resume-dialog.js';
 // Load-bearing import: evaluating session-tick.js installs the shared 1s tick (elapsed clock +
 // working-heartbeat poll) at module load.
 import { refreshElapsed } from './session-tick.js';
-import { ensureTerminalSetup, setTerminalCursorBlink, setupTerminal, wireTerminalIO } from './terminal.js';
+import {
+  cancelTerminalRepaint,
+  ensureTerminalSetup,
+  setTerminalCursorBlink,
+  setupTerminal,
+  wireTerminalIO,
+} from './terminal.js';
 import { releaseWebgl } from './webgl-pool.js';
 
 // ── Constants ────────────────────────────────────────────────
@@ -546,7 +552,7 @@ export function removeSessionCard(sessionId) {
   if (ui.abortController) ui.abortController.abort();
   if (ui.dataWs?.readyState <= WebSocket.OPEN) ui.dataWs.close();
   releaseWebgl(ui);
-  if (ui._repaintRafId != null) { cancelAnimationFrame(ui._repaintRafId); ui._repaintRafId = null; }
+  cancelTerminalRepaint(ui);
   if (ui.term) ui.term.dispose();
   // Null the disposed instance so still-pending RAF callbacks' `if (!ui.term)` guards actually skip it
   // (a disposed terminal is truthy, and refresh()/fit() on it throws inside the RAF).

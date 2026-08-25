@@ -24,6 +24,9 @@
       "tailwindDirectives": true
     }
   },
+  "javascript": {
+    "globals": ["__APP_VERSION__"]
+  },
   "linter": {
     "rules": {
       "suspicious": {
@@ -34,6 +37,7 @@
         "noDescendingSpecificity": "off"
       },
       "correctness": {
+        "noUndeclaredVariables": "error",
         "noUnusedVariables": {
           "level": "warn",
           "options": {

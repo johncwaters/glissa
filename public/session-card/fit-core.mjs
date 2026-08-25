@@ -1,4 +1,4 @@
-// A hidden terminal must neither connect nor publish its default grid because replay must follow a visible fit.
+// Hidden terminals may receive output, but only a visible measurement may publish viewer geometry.
 
 export function decideFitAction({
   measured,
@@ -8,20 +8,14 @@ export function decideFitAction({
   lastFittedRows,
   lastSentCols,
   lastSentRows,
-  hasDataSocket,
-  isDataSocketOpen,
   repaintRequested = false,
 }) {
-  const noAction = { repaint: false, connect: false, send: false, redraw: false };
+  const noAction = { repaint: false, send: false, redraw: false };
   if (!measured) return noAction;
 
-  const gridChanged = cols !== lastFittedCols || rows !== lastFittedRows;
-  const repaint = repaintRequested || gridChanged;
-  const connect = !hasDataSocket;
-  if (!isDataSocketOpen) return { repaint, connect, send: false, redraw: false };
-  if (gridChanged) return { repaint, connect, send: true, redraw: true };
-  if (cols === lastSentCols && rows === lastSentRows) {
-    return { repaint, connect, send: false, redraw: false };
-  }
-  return { repaint, connect, send: true, redraw: false };
+  const fittedGridChanged = cols !== lastFittedCols || rows !== lastFittedRows;
+  const sentGridChanged = cols !== lastSentCols || rows !== lastSentRows;
+  const repaint = repaintRequested || fittedGridChanged;
+  const send = repaintRequested || sentGridChanged;
+  return { repaint, send, redraw: send };
 }

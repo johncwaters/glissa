@@ -7,13 +7,11 @@ const assert = require('node:assert/strict');
 const importCore = () => import('../public/session-card/fit-core.mjs');
 
 const NEVER_FITTED = { lastFittedCols: 0, lastFittedRows: 0, lastSentCols: 0, lastSentRows: 0 };
-const NO_DATA_SOCKET = { hasDataSocket: false, isDataSocketOpen: false };
-const OPEN_DATA_SOCKET = { hasDataSocket: true, isDataSocketOpen: true };
 
 test('decideFitAction: an unmeasured fit publishes nothing', async () => {
   const { decideFitAction } = await importCore();
-  const out = decideFitAction({ measured: false, cols: 80, rows: 24, ...NEVER_FITTED, ...NO_DATA_SOCKET });
-  assert.deepEqual(out, { repaint: false, connect: false, send: false, redraw: false });
+  const out = decideFitAction({ measured: false, cols: 80, rows: 24, ...NEVER_FITTED });
+  assert.deepEqual(out, { repaint: false, send: false, redraw: false });
 });
 
 test('decideFitAction: an unmeasured fit publishes nothing even at a size already sent', async () => {
@@ -26,31 +24,17 @@ test('decideFitAction: an unmeasured fit publishes nothing even at a size alread
     lastFittedRows: 44,
     lastSentCols: 150,
     lastSentRows: 44,
-    ...NO_DATA_SOCKET,
   });
-  assert.deepEqual(out, { repaint: false, connect: false, send: false, redraw: false });
+  assert.deepEqual(out, { repaint: false, send: false, redraw: false });
 });
 
-test('decideFitAction: open ordering waits for fit, connects, then sends size after socket open', async () => {
+test('decideFitAction: the first visible fit publishes geometry with redraw', async () => {
   const { decideFitAction } = await importCore();
-  const hidden = decideFitAction({ measured: false, cols: 80, rows: 24, ...NEVER_FITTED, ...NO_DATA_SOCKET });
-  const fitted = decideFitAction({ measured: true, cols: 150, rows: 44, ...NEVER_FITTED, ...NO_DATA_SOCKET });
-  const opened = decideFitAction({
-    measured: true,
-    cols: 150,
-    rows: 44,
-    lastFittedCols: 150,
-    lastFittedRows: 44,
-    lastSentCols: 0,
-    lastSentRows: 0,
-    ...OPEN_DATA_SOCKET,
-  });
-  assert.deepEqual(hidden, { repaint: false, connect: false, send: false, redraw: false });
-  assert.deepEqual(fitted, { repaint: true, connect: true, send: false, redraw: false });
-  assert.deepEqual(opened, { repaint: false, connect: false, send: true, redraw: false });
+  const out = decideFitAction({ measured: true, cols: 150, rows: 44, ...NEVER_FITTED });
+  assert.deepEqual(out, { repaint: true, send: true, redraw: true });
 });
 
-test('decideFitAction: a re-borrow at the fitted size sends once without a redraw', async () => {
+test('decideFitAction: reveal at an unchanged grid requests browser and PTY repaint', async () => {
   const { decideFitAction } = await importCore();
   const out = decideFitAction({
     measured: true,
@@ -58,12 +42,11 @@ test('decideFitAction: a re-borrow at the fitted size sends once without a redra
     rows: 44,
     lastFittedCols: 150,
     lastFittedRows: 44,
-    lastSentCols: 0,
-    lastSentRows: 0,
+    lastSentCols: 150,
+    lastSentRows: 44,
     repaintRequested: true,
-    ...OPEN_DATA_SOCKET,
   });
-  assert.deepEqual(out, { repaint: true, connect: false, send: true, redraw: false });
+  assert.deepEqual(out, { repaint: true, send: true, redraw: true });
 });
 
 test('decideFitAction: a fit that changes nothing at all is silent', async () => {
@@ -76,9 +59,8 @@ test('decideFitAction: a fit that changes nothing at all is silent', async () =>
     lastFittedRows: 44,
     lastSentCols: 150,
     lastSentRows: 44,
-    ...OPEN_DATA_SOCKET,
   });
-  assert.deepEqual(out, { repaint: false, connect: false, send: false, redraw: false });
+  assert.deepEqual(out, { repaint: false, send: false, redraw: false });
 });
 
 test('decideFitAction: a change on either axis alone is a changed grid', async () => {
@@ -89,14 +71,27 @@ test('decideFitAction: a change on either axis alone is a changed grid', async (
     lastFittedRows: 44,
     lastSentCols: 150,
     lastSentRows: 44,
-    ...OPEN_DATA_SOCKET,
   };
   assert.deepEqual(
     decideFitAction({ ...base, cols: 149, rows: 44 }),
-    { repaint: true, connect: false, send: true, redraw: true },
+    { repaint: true, send: true, redraw: true },
   );
   assert.deepEqual(
     decideFitAction({ ...base, cols: 150, rows: 43 }),
-    { repaint: true, connect: false, send: true, redraw: true },
+    { repaint: true, send: true, redraw: true },
   );
+});
+
+test('decideFitAction: a viewer reclaim sends redraw when only the sent grid differs', async () => {
+  const { decideFitAction } = await importCore();
+  const out = decideFitAction({
+    measured: true,
+    cols: 150,
+    rows: 44,
+    lastFittedCols: 150,
+    lastFittedRows: 44,
+    lastSentCols: 0,
+    lastSentRows: 0,
+  });
+  assert.deepEqual(out, { repaint: false, send: true, redraw: true });
 });

@@ -24,7 +24,7 @@ import {
 import { osc8LinkHandler, registerUrlLinkProvider } from './terminal-links.js';
 import { showErrorToast } from './toast.js';
 import { wireTouchScroll } from './touch-scroll.js';
-import { tryLoadWebGL } from './webgl-pool.js';
+import { reacquireWebglIfEvicted, tryLoadWebGL } from './webgl-pool.js';
 
 // ── Constants ────────────────────────────────────────────────
 
@@ -95,7 +95,7 @@ function connectDataWs(sessionId, ui, term) {
       if (sessionUIs.get(sessionId) !== ui) return;
       void loadPageToken().catch(() => {}).then(() => {
         if (sessionUIs.get(sessionId) !== ui) return;
-        ui._applyFit?.({ repaintRequested: true });
+        connectDataWs(sessionId, ui, term);
       });
     }, retryDelayMs);
   });
@@ -196,7 +196,7 @@ export function setupTerminal(termWrap, ui) {
   ui.webglAddon = null;
   ui.needsWebGLReload = false;
 
-  // This is the only geometry path: visible fit, socket admission, browser repaint, then PTY resize.
+  // This is the only geometry path: visible fit, browser repaint, then PTY resize.
   let fitRafId = null;
   let lastSentCols = 0;
   let lastSentRows = 0;
@@ -216,8 +216,6 @@ export function setupTerminal(termWrap, ui) {
     const { cols, rows } = ui.term;
     const action = decideFitAction({
       measured, cols, rows, lastFittedCols, lastFittedRows, lastSentCols, lastSentRows,
-      hasDataSocket: !!ui.dataWs,
-      isDataSocketOpen: ui.dataWs?.readyState === WebSocket.OPEN,
       repaintRequested,
     });
     if (action.repaint) {
@@ -225,8 +223,8 @@ export function setupTerminal(termWrap, ui) {
       lastFittedRows = rows;
       scheduleTerminalRepaint(ui);
     }
-    if (action.connect) ui._connectDataWs?.();
     if (!action.send) return;
+    if (ui.dataWs?.readyState !== WebSocket.OPEN) return;
     ui.dataWs.send(JSON.stringify({ type: 'resize', cols, rows, redraw: action.redraw }));
     lastSentCols = cols;
     lastSentRows = rows;
@@ -467,10 +465,7 @@ export function wireTerminalIO(ui, sessionId) {
 
   ui.term.onData((data) => { sendTerminalInput(ui, data); });
 
-  ui._connectDataWs = () => {
-    if (ui.dataWs) return;
-    connectDataWs(sessionId, ui, ui.term);
-  };
+  connectDataWs(sessionId, ui, ui.term);
 }
 
 // First-time terminal setup for cards that started life as DORMANT.
@@ -498,4 +493,10 @@ function scheduleTerminalRepaint(ui) {
     if (!ui.term) return;
     ui.term.refresh(0, ui.term.rows - 1);
   });
+}
+
+export function cancelTerminalRepaint(ui) {
+  if (ui?._repaintRafId == null) return;
+  cancelAnimationFrame(ui._repaintRafId);
+  ui._repaintRafId = null;
 }
