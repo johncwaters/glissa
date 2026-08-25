@@ -19,11 +19,13 @@ const {
   normalizePackNames,
   packConsumerGroups,
   packConsumerSources,
+  packTmpOwnerPid,
   packVariantProjects,
   planPackBuild,
   planPackVariants,
   projectVariantSlug,
   sameProjectRecords,
+  shouldReclaimPackArtifact,
   sourceSlug,
   validatePackSpec,
   variantPackName,
@@ -176,6 +178,32 @@ test('sourceSlug names a rules file from the ordinal plus the last literal segme
   assert.equal(sourceSlug('*.md', 3), '04');
 });
 
+test('pack artifact ownership parses publisher temp dirs and reclaims only dead or old owners', () => {
+  assert.equal(packTmpOwnerPid('tmp-1234-aabbcc'), 1234);
+  assert.equal(packTmpOwnerPid('tmp-aabbcc'), null);
+  assert.equal(shouldReclaimPackArtifact({
+    timestampMs: 900,
+    mtimeMs: 800,
+    nowMs: 1000,
+    isOwnerAlive: true,
+    staleMs: 200,
+  }), false);
+  assert.equal(shouldReclaimPackArtifact({
+    timestampMs: 900,
+    mtimeMs: 800,
+    nowMs: 1000,
+    isOwnerAlive: false,
+    staleMs: 200,
+  }), true);
+  assert.equal(shouldReclaimPackArtifact({
+    timestampMs: null,
+    mtimeMs: 700,
+    nowMs: 1000,
+    isOwnerAlive: true,
+    staleMs: 200,
+  }), true);
+});
+
 // ---------------------------------------------------------------------------
 // planPackBuild
 // ---------------------------------------------------------------------------
@@ -319,6 +347,25 @@ test('skill files are copied under .claude/skills/<dir name>, keeping their tree
   assert.equal(outputByPath(plan, '.claude/skills/voice-style/references/tone.md').content, 'tone body');
   assert.match(outputByPath(plan, INDEX_FILE).content, /`\.claude\/skills\/voice-style`/);
   assert.equal(plan.manifest.skills[0].files.length, 2);
+});
+
+test('two skill dirs with the same basename cannot overwrite the same delivered path', () => {
+  const spec = validSpec({
+    skills: [{ dir: 'skills/alpha/shared' }, { dir: 'skills/beta/shared' }],
+  });
+  const plan = planPackBuild(spec, [
+    sourceFile('sources/demo/a.md', 'alpha'),
+    { relPath: 'SKILL.md', content: 'first skill', skillIndex: 0 },
+    { relPath: 'SKILL.md', content: 'second skill', skillIndex: 1 },
+  ], { builtAt: BUILT_AT });
+
+  assert.equal(plan.ok, false);
+  assert.deepEqual(plan.outputs, []);
+  assert.equal(plan.manifest, null);
+  assert.equal(plan.errors.length, 1);
+  assert.match(plan.errors[0], /\.claude\/skills\/shared\/SKILL\.md/);
+  assert.match(plan.errors[0], /skills\/alpha\/shared/);
+  assert.match(plan.errors[0], /skills\/beta\/shared/);
 });
 
 test('a declared skill dir with no files fails the build', () => {
@@ -897,4 +944,3 @@ test('a plain build is byte-identical to the pre-variant one: no variant fields,
   assert.equal(plan.manifest.projectSlug, undefined);
   assert.equal(plan.manifest.version, planPackBuild(spec, files, { builtAt: BUILT_AT, variant: null }).manifest.version);
 });
-

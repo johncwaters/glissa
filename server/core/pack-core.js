@@ -594,9 +594,37 @@ function skillName(dir) {
   return segments.length > 0 ? segments[segments.length - 1] : '';
 }
 
+function packTmpOwnerPid(name) {
+  const match = /^tmp-(\d+)-/.exec(String(name));
+  if (!match) return null;
+  const ownerPid = Number(match[1]);
+  return Number.isSafeInteger(ownerPid) && ownerPid > 0 ? ownerPid : null;
+}
+
+function shouldReclaimPackArtifact({ timestampMs, mtimeMs, nowMs, isOwnerAlive, staleMs }) {
+  if (isOwnerAlive === false) return true;
+  const artifactTimestampMs = Number.isFinite(timestampMs) ? timestampMs : mtimeMs;
+  if (!Number.isFinite(artifactTimestampMs)) return false;
+  return nowMs - artifactTimestampMs > staleMs;
+}
+
 function byRelPath(a, b) {
   if (a.relPath === b.relPath) return 0;
   return a.relPath < b.relPath ? -1 : 1;
+}
+
+function duplicateRelPathErrors(outputs) {
+  const firstOriginByRelPath = new Map();
+  const errors = [];
+  for (const output of outputs) {
+    const firstOrigin = firstOriginByRelPath.get(output.relPath);
+    if (firstOrigin) {
+      errors.push(`output path "${output.relPath}" is produced by both ${firstOrigin} and ${output.origin}`);
+      continue;
+    }
+    firstOriginByRelPath.set(output.relPath, output.origin);
+  }
+  return errors;
 }
 
 function buildRulesFile(pattern, files) {
@@ -784,19 +812,41 @@ function planPackBuild(spec, files, { builtAt, variant = null } = {}) {
   const skills = groupSkillFiles(spec, files, errors);
   if (errors.length > 0) return { ok: false, outputs: [], manifest: null, errors };
 
-  const outputs = [{ relPath: INDEX_FILE, content: buildIndexFile(spec, groups, skills) }];
+  const plannedOutputs = [{
+    relPath: INDEX_FILE,
+    content: buildIndexFile(spec, groups, skills),
+    origin: 'the pack index',
+  }];
   for (const group of groups) {
     if (!group.data) {
-      outputs.push({ relPath: group.relPath, content: group.content });
+      plannedOutputs.push({
+        relPath: group.relPath,
+        content: group.content,
+        origin: `sources[${group.index}] (${group.pattern})`,
+      });
       continue;
     }
-    for (const file of group.files) outputs.push({ relPath: `${group.relPath}/${file.relPath}`, content: file.content });
+    for (const file of group.files) {
+      plannedOutputs.push({
+        relPath: `${group.relPath}/${file.relPath}`,
+        content: file.content,
+        origin: `sources[${group.index}] (${group.pattern})`,
+      });
+    }
   }
   for (const skill of skills) {
     for (const file of skill.files) {
-      outputs.push({ relPath: `${SKILLS_DIR}/${skill.name}/${file.relPath}`, content: file.content });
+      plannedOutputs.push({
+        relPath: `${SKILLS_DIR}/${skill.name}/${file.relPath}`,
+        content: file.content,
+        origin: `skills[${skill.index}] (${skill.dir})`,
+      });
     }
   }
+  errors.push(...duplicateRelPathErrors(plannedOutputs));
+  if (errors.length > 0) return { ok: false, outputs: [], manifest: null, errors };
+
+  const outputs = plannedOutputs.map(({ relPath, content }) => ({ relPath, content }));
   outputs.sort(byRelPath);
 
   const outputRecords = outputs.map((file) => ({
@@ -876,12 +926,14 @@ module.exports = {
   packVariantProjects,
   matchesGlob,
   normalizePackNames,
+  packTmpOwnerPid,
   placeholderNames,
   planPackBuild,
   planPackVariants,
   projectVariantSlug,
   sameProjectRecords,
   sha256,
+  shouldReclaimPackArtifact,
   sourcePattern,
   sourceSlug,
   sourceUsesProjectSlug,

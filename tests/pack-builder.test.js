@@ -7,10 +7,11 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 
-const { buildPack, buildPacks, listPackSpecs, packWatchRoots, readBuiltManifest, resolveBuiltPack } = require('../server/pack-builder');
+const { buildPack, buildPacks, listPackSpecs, packWatchRoots, publishBuild, readBuiltManifest, resolveBuiltPack } = require('../server/pack-builder');
 
 function writeFile(root, relPath, content) {
   const full = path.join(root, relPath);
@@ -172,6 +173,49 @@ test('exclude patterns drop matched files from the walk', async () => {
   );
 });
 
+test('exclude patterns are anchored to an out-of-base source walk root', async () => {
+  await withFixture(
+    async ({ build, currentDir }) => {
+      const report = await build();
+      assert.equal(report.ok, true, report.errors.join('; '));
+      assert.deepEqual(
+        readManifest(currentDir).sources[0].files.map((file) => path.basename(file.relPath)),
+        ['keep.md']
+      );
+    },
+    {
+      spec: baseSpec({ sources: [{ glob: '../docs/*.md', exclude: ['**/plan-*.md'] }] }),
+      seed: (packsDir) => {
+        writeFile(path.dirname(packsDir), 'docs/keep.md', 'keep me\n');
+        writeFile(path.dirname(packsDir), 'docs/plan-hidden.md', 'exclude me\n');
+      },
+    }
+  );
+});
+
+test('a leading double star glob walks from the pack base and watches that base', async () => {
+  await withFixture(
+    async ({ build, currentDir, packsDir }) => {
+      const report = await build();
+      assert.equal(report.ok, true, report.errors.join('; '));
+      assert.deepEqual(
+        readManifest(currentDir).sources[0].files.map((file) => file.relPath),
+        ['sources/deep/one.md']
+      );
+      assert.deepEqual(await packWatchRoots(baseSpec({ sources: [{ glob: '**/*.md' }] }), {
+        baseDir: packsDir,
+      }), [packsDir.replace(/\\/g, '/')]);
+    },
+    {
+      spec: baseSpec({ sources: [{ glob: '**/*.md' }] }),
+      seed: (packsDir) => {
+        writeFile(packsDir, 'sources/deep/one.md', 'nested source\n');
+        writeFile(packsDir, 'sources/deep/two.txt', 'not markdown\n');
+      },
+    }
+  );
+});
+
 test('a literal directory source takes every file under it', async () => {
   await withFixture(
     async ({ build, currentDir }) => {
@@ -272,7 +316,7 @@ test('unreadable JSON is reported as a spec error, not an exception', async () =
 
 test('a stale tmp dir from a crashed build is swept before the next one', async () => {
   await withFixture(async ({ build, builtRoot }) => {
-    const stale = path.join(builtRoot, 'demo', 'tmp-deadbeef');
+    const stale = path.join(builtRoot, 'demo', 'tmp-2147483647-deadbeef');
     fs.mkdirSync(stale, { recursive: true });
     fs.writeFileSync(path.join(stale, 'junk.md'), 'junk', 'utf8');
 
@@ -281,6 +325,95 @@ test('a stale tmp dir from a crashed build is swept before the next one', async 
     assert.equal(fs.existsSync(stale), false);
     assert.deepEqual(fs.readdirSync(path.join(builtRoot, 'demo')).sort(), ['current']);
   });
+});
+
+test('two publishers racing serialize cleanup and rotation', async () => {
+  const builtRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-pack-publish-race-'));
+  const firstOutputs = [
+    { relPath: 'owner.txt', content: 'first' },
+    { relPath: 'payload.txt', content: 'a'.repeat(2 * 1024 * 1024) },
+  ];
+  const secondOutputs = [
+    { relPath: 'owner.txt', content: 'second' },
+    { relPath: 'payload.txt', content: 'b'.repeat(2 * 1024 * 1024) },
+  ];
+  try {
+    await Promise.all([
+      publishBuild(builtRoot, 'demo', firstOutputs),
+      publishBuild(builtRoot, 'demo', secondOutputs),
+    ]);
+
+    const packDir = path.join(builtRoot, 'demo');
+    const publishedOwners = ['current', 'previous']
+      .map((slot) => fs.readFileSync(path.join(packDir, slot, 'owner.txt'), 'utf8'))
+      .sort();
+    assert.deepEqual(publishedOwners, ['first', 'second']);
+    assert.equal(fs.existsSync(path.join(packDir, 'publish.lock')), false);
+    assert.equal(fs.readdirSync(packDir).some((name) => name.startsWith('tmp-')), false);
+  } finally {
+    fs.rmSync(builtRoot, { recursive: true, force: true });
+  }
+});
+
+test('a publish lock owned by a dead process is reclaimed', async () => {
+  const builtRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-pack-stale-lock-'));
+  const packDir = path.join(builtRoot, 'demo');
+  fs.mkdirSync(packDir, { recursive: true });
+  fs.writeFileSync(path.join(packDir, 'publish.lock'), `${JSON.stringify({
+    pid: 2147483647,
+    timestamp: Date.now(),
+    token: 'abandoned',
+  })}\n`, 'utf8');
+  try {
+    await publishBuild(builtRoot, 'demo', [{ relPath: 'owner.txt', content: 'reclaimed' }]);
+    assert.equal(fs.readFileSync(path.join(packDir, 'current', 'owner.txt'), 'utf8'), 'reclaimed');
+    assert.equal(fs.existsSync(path.join(packDir, 'publish.lock')), false);
+  } finally {
+    fs.rmSync(builtRoot, { recursive: true, force: true });
+  }
+});
+
+test('two publishers atomically contend to reclaim one stale lock', async () => {
+  const builtRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-pack-reclaim-race-'));
+  const packDir = path.join(builtRoot, 'demo');
+  const lockPath = path.join(packDir, 'publish.lock');
+  fs.mkdirSync(packDir, { recursive: true });
+  fs.writeFileSync(lockPath, `${JSON.stringify({
+    pid: 2147483647,
+    timestamp: Date.now(),
+    token: 'abandoned',
+  })}\n`, 'utf8');
+
+  const originalRename = fsp.rename;
+  const reclaimTargets = [];
+  let releaseFirstRename;
+  const secondRenameReached = new Promise((resolve) => {
+    releaseFirstRename = resolve;
+  });
+  fsp.rename = async (source, destination) => {
+    if (source !== lockPath) return originalRename(source, destination);
+    reclaimTargets.push(destination);
+    if (reclaimTargets.length === 1) await secondRenameReached;
+    if (reclaimTargets.length === 2) releaseFirstRename();
+    return originalRename(source, destination);
+  };
+
+  try {
+    await Promise.all([
+      publishBuild(builtRoot, 'demo', [{ relPath: 'owner.txt', content: 'first' }]),
+      publishBuild(builtRoot, 'demo', [{ relPath: 'owner.txt', content: 'second' }]),
+    ]);
+    const publishedOwners = ['current', 'previous']
+      .map((slot) => fs.readFileSync(path.join(packDir, slot, 'owner.txt'), 'utf8'))
+      .sort();
+    assert.deepEqual(publishedOwners, ['first', 'second']);
+    assert.equal(reclaimTargets.length, 2);
+    assert.equal(new Set(reclaimTargets).size, 2);
+    assert.equal(fs.readdirSync(packDir).some((name) => name.startsWith('publish.lock')), false);
+  } finally {
+    fsp.rename = originalRename;
+    fs.rmSync(builtRoot, { recursive: true, force: true });
+  }
 });
 
 test('buildPacks builds every spec, and one named spec on request', async () => {
@@ -293,6 +426,41 @@ test('buildPacks builds every spec, and one named spec on request', async () => 
 
     const one = await buildPacks({ name: 'demo', specsDir, baseDir: packsDir, builtRoot });
     assert.deepEqual(one.map((report) => report.name), ['demo']);
+  });
+});
+
+test('buildPacks reports one publish failure and continues with later specs', async () => {
+  await withFixture(async ({ packsDir, specsDir, builtRoot }) => {
+    writeSpec(packsDir, 'alpha', baseSpec({ name: 'alpha' }));
+    writeFile(builtRoot, 'alpha', 'blocks the pack directory');
+
+    const reports = await buildPacks({ specsDir, baseDir: packsDir, builtRoot });
+
+    assert.deepEqual(reports.map((report) => report.name), ['alpha', 'demo']);
+    assert.equal(reports[0].ok, false);
+    assert.equal(reports[0].errors.some((error) => error.includes('could not publish pack')), true);
+    assert.equal(reports[1].ok, true, reports[1].errors.join('; '));
+    assert.equal(fs.existsSync(path.join(builtRoot, 'demo', 'current')), true);
+  });
+});
+
+test('duplicate skill output paths fail without publishing a pack', async () => {
+  const spec = baseSpec({
+    skills: [{ dir: 'skills/alpha/shared' }, { dir: 'skills/beta/shared' }],
+  });
+  await withFixture(async ({ build, builtRoot }) => {
+    const report = await build();
+    assert.equal(report.ok, false);
+    assert.match(report.errors.join('; '), /skills\/alpha\/shared/);
+    assert.match(report.errors.join('; '), /skills\/beta\/shared/);
+    assert.equal(fs.existsSync(path.join(builtRoot, 'demo')), false);
+  }, {
+    spec,
+    seed: (packsDir) => {
+      writeFile(packsDir, 'sources/demo/one.md', 'source\n');
+      writeFile(packsDir, 'skills/alpha/shared/SKILL.md', 'first skill\n');
+      writeFile(packsDir, 'skills/beta/shared/SKILL.md', 'second skill\n');
+    },
   });
 });
 

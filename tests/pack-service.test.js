@@ -34,7 +34,13 @@ function okReport(name, overrides = {}) {
 
 // A fake service: fake watchers (recording the dir they claimed and their onChange), a fake interval,
 // and a build that returns whatever the test queued for that pack name.
-function harness({ specs = SPECS, reportFor = (name) => okReport(name), consumedPackNames = null, variantProjects = null } = {}) {
+function harness({
+  specs = SPECS,
+  reportFor = (name) => okReport(name),
+  consumedPackNames = null,
+  variantProjects = null,
+  rootsForSpec = (spec) => ROOTS[spec.specPath] || [],
+} = {}) {
   const watchers = [];
   const builds = [];
   const buildCalls = [];
@@ -47,7 +53,7 @@ function harness({ specs = SPECS, reportFor = (name) => okReport(name), consumed
     ...(variantProjects ? { variantProjects } : {}),
     listSpecs: async () => specs,
     loadSpec: async (specPath) => ({ name: specPath, sources: [], skills: [] , specPath }),
-    watchRootsForSpec: async (spec) => ROOTS[spec.specPath] || [],
+    watchRootsForSpec: async (spec) => rootsForSpec(spec),
     build: async ({ name, specPath, projects }) => {
       builds.push(name);
       buildCalls.push({ name, projects });
@@ -84,6 +90,26 @@ test('start installs one watcher per source root and builds every spec once', as
   assert.deepEqual(h.watchers.map((w) => w.dir), ['/packs/sources/alpha', '/packs/skills/alpha-skill', '/packs/sources/beta']);
   assert.deepEqual(h.builds, ['alpha', 'beta'], 'the boot sweep covers a source edited while Glissa was down');
   assert.equal(h.intervalMs, 15 * 60000);
+});
+
+test('a throwing watch root provider leaves the sweep timer armed and later specs active', async () => {
+  const h = harness({
+    rootsForSpec: (spec) => {
+      if (spec.specPath === '/specs/alpha.pack.json') throw new Error('root provider failed');
+      return ROOTS[spec.specPath] || [];
+    },
+  });
+
+  await assert.doesNotReject(h.service.start());
+
+  assert.equal(h.hasInterval(), true);
+  assert.deepEqual(h.watchers.map((watcher) => watcher.dir), ['/packs/sources/beta']);
+  assert.deepEqual(h.builds, ['alpha', 'beta']);
+  h.builds.length = 0;
+  h.tickInterval();
+  await settle();
+  assert.deepEqual(h.builds, ['alpha', 'beta']);
+  await h.service.stop();
 });
 
 test('a watch fire rebuilds only its own pack', async () => {

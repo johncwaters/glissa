@@ -133,20 +133,27 @@ function createPackService(deps = {}) {
   // the array is an fs.watch handle nothing will ever close.
   async function installWatchers({ name, specPath }) {
     let spec;
+    let roots;
     try {
       spec = await loadSpec(specPath);
+      roots = await watchRootsForSpec(spec);
     } catch (err) {
       log.warn(`[packs] ${name} has no watchable roots: ${err.message}`);
       return;
     }
     if (stopped || torndown) return;
-    const roots = await watchRootsForSpec(spec);
     for (const root of roots) {
       if (stopped || torndown) return;
       const watcher = createWatcher({ onChange: () => { void queueBuild(name, specPath); }, debounceMs });
       if (!watcher.watch(root)) continue;
       watchers.push(watcher);
     }
+  }
+
+  function armSweepTimer() {
+    if (sweepTimer) clearIntervalFn(sweepTimer);
+    sweepTimer = setIntervalFn(() => { void sweep(); }, sweepMinutes * 60000);
+    if (sweepTimer && typeof sweepTimer.unref === 'function') sweepTimer.unref();
   }
 
   // Rebuild every spec. Re-entrancy guarded like the pr-poller tick: a sweep that overruns its own
@@ -173,17 +180,11 @@ function createPackService(deps = {}) {
     // Nothing to build means no watchers and no timer: an install that never wrote a pack spec, and one
     // whose specs nothing delivers, both pay nothing.
     if (stopped || torndown || specs.length === 0) return;
+    armSweepTimer();
     for (const spec of specs) await installWatchers(spec);
     // One pass up front, so a source edited while Glissa was down is already rebuilt before the first
     // session spawns against it.
     await sweep();
-    // A teardown can land while that first sweep runs (a shutdown right after boot, a settings save that
-    // re-gated the loops); installing the interval afterwards leaves a timer nothing ever clears.
-    if (stopped || torndown) return;
-    // Never assign over a live handle: whatever put one here is the timer nothing else holds a ref to.
-    if (sweepTimer) clearIntervalFn(sweepTimer);
-    sweepTimer = setIntervalFn(() => { void sweep(); }, sweepMinutes * 60000);
-    if (sweepTimer && typeof sweepTimer.unref === 'function') sweepTimer.unref();
   }
 
   // Everything that installs or tears down watchers and the timer runs on ONE chain, boot included, so a

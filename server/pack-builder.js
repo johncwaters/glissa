@@ -12,7 +12,7 @@ const crypto = require('node:crypto');
 const path = require('node:path');
 
 const { glissaHomeDir, resolveConfigPath } = require('./config-store');
-const { GLISSA_HOME_PLACEHOLDER, PACK_NAME_RE, PROJECT_SLUG_PLACEHOLDER, isDataSource, isPackRelativePath, matchesGlob, planPackBuild, planPackVariants, sha256, sourcePattern, validatePackSpec } = require('./core/pack-core');
+const { GLISSA_HOME_PLACEHOLDER, PACK_NAME_RE, PROJECT_SLUG_PLACEHOLDER, isDataSource, isPackRelativePath, matchesGlob, packTmpOwnerPid, planPackBuild, planPackVariants, sha256, shouldReclaimPackArtifact, sourcePattern, validatePackSpec } = require('./core/pack-core');
 
 const SPEC_SUFFIX = '.pack.json';
 // Source patterns resolve against packs/, so a shared spec reads the same whether it runs from a repo
@@ -20,6 +20,11 @@ const SPEC_SUFFIX = '.pack.json';
 const DEFAULT_PACKS_DIR = path.join(__dirname, '..', 'packs');
 const SKIP_DIRS = new Set(['.git', 'node_modules']);
 const TMP_PREFIX = 'tmp-';
+const PUBLISH_LOCK_FILE = 'publish.lock';
+const PUBLISH_LOCK_RETRY_MS = 20;
+const PUBLISH_LOCK_WAIT_MS = 5000;
+const PUBLISH_ARTIFACT_STALE_MS = 5 * 60 * 1000;
+let publishLockReclaimCounter = 0;
 
 function toPosix(p) {
   return String(p).replace(/\\/g, '/');
@@ -55,10 +60,8 @@ function expandPlaceholders(pattern, glissaHome, projectSlug = null) {
   return expanded;
 }
 
-/** A pattern starting with `**` is a suffix matcher and stays as written; anything else is anchored to baseDir. */
 function resolvePattern(rawPattern, baseDir, glissaHome = null, projectSlug = null) {
   const pattern = expandPlaceholders(rawPattern, glissaHome, projectSlug);
-  if (pattern.startsWith('**')) return pattern;
   if (path.isAbsolute(pattern)) return toPosix(path.resolve(pattern));
   return toPosix(path.resolve(baseDir, pattern));
 }
@@ -188,7 +191,8 @@ async function readFilesForSource(source, sourceIndex, baseDir, { keepFullPath =
   const pattern = sourcePattern(source);
   const resolved = resolvePattern(pattern, baseDir, glissaHome);
   assertInsideGlissaHome(pattern, resolved, glissaHome);
-  const excludes = (source.exclude || []).map((entry) => resolvePattern(entry, baseDir, glissaHome));
+  const sourceRoot = literalRoot(resolved).root;
+  const excludes = (source.exclude || []).map((entry) => resolvePattern(entry, sourceRoot, glissaHome));
   const { candidates, isLiteral } = await candidatesFor(resolved);
 
   const matched = candidates.filter((full) => {
@@ -267,7 +271,18 @@ async function writeOutputs(targetDir, outputs) {
   }
 }
 
-async function clearStaleTmpDirs(packDir) {
+function processIsAlive(pid) {
+  if (!Number.isSafeInteger(pid) || pid <= 0) return null;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    if (err.code === 'ESRCH') return false;
+    return true;
+  }
+}
+
+async function clearStaleTmpDirs(packDir, nowMs = Date.now()) {
   let entries;
   try {
     entries = await fsp.readdir(packDir, { withFileTypes: true });
@@ -276,7 +291,110 @@ async function clearStaleTmpDirs(packDir) {
   }
   for (const entry of entries) {
     if (!entry.isDirectory() || !entry.name.startsWith(TMP_PREFIX)) continue;
-    await fsp.rm(path.join(packDir, entry.name), { recursive: true, force: true });
+    const tmpDir = path.join(packDir, entry.name);
+    const stats = await statOrNull(tmpDir);
+    if (!stats) continue;
+    const ownerPid = packTmpOwnerPid(entry.name);
+    const shouldRemove = shouldReclaimPackArtifact({
+      timestampMs: null,
+      mtimeMs: stats.mtimeMs,
+      nowMs,
+      isOwnerAlive: processIsAlive(ownerPid),
+      staleMs: PUBLISH_ARTIFACT_STALE_MS,
+    });
+    if (!shouldRemove) continue;
+    await fsp.rm(tmpDir, { recursive: true, force: true });
+  }
+}
+
+async function readPublishLock(lockPath) {
+  let raw;
+  let stats;
+  try {
+    [raw, stats] = await Promise.all([fsp.readFile(lockPath, 'utf8'), fsp.stat(lockPath)]);
+  } catch (err) {
+    if (err.code === 'ENOENT') return null;
+    throw err;
+  }
+  let record = null;
+  try {
+    record = JSON.parse(raw);
+  } catch {
+    record = null;
+  }
+  return {
+    raw,
+    mtimeMs: stats.mtimeMs,
+    pid: Number.isSafeInteger(record?.pid) ? record.pid : null,
+    timestampMs: Number.isFinite(record?.timestamp) ? record.timestamp : null,
+    token: typeof record?.token === 'string' ? record.token : null,
+  };
+}
+
+async function reclaimPublishLock(lockPath) {
+  const observed = await readPublishLock(lockPath);
+  if (!observed) return true;
+  const shouldReclaim = shouldReclaimPackArtifact({
+    timestampMs: observed.timestampMs,
+    mtimeMs: observed.mtimeMs,
+    nowMs: Date.now(),
+    isOwnerAlive: processIsAlive(observed.pid),
+    staleMs: PUBLISH_ARTIFACT_STALE_MS,
+  });
+  if (!shouldReclaim) return false;
+
+  const current = await readPublishLock(lockPath);
+  if (!current) return true;
+  if (current.raw !== observed.raw) return false;
+  publishLockReclaimCounter += 1;
+  const reclaimedLockPath = `${lockPath}.reclaimed-${process.pid}-${publishLockReclaimCounter}`;
+  try {
+    await fsp.rename(lockPath, reclaimedLockPath);
+  } catch (err) {
+    if (err.code === 'ENOENT') return false;
+    throw err;
+  }
+  await fsp.rm(reclaimedLockPath, { force: true });
+  return true;
+}
+
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function acquirePublishLock(packDir) {
+  const lockPath = path.join(packDir, PUBLISH_LOCK_FILE);
+  const deadlineMs = Date.now() + PUBLISH_LOCK_WAIT_MS;
+  while (Date.now() <= deadlineMs) {
+    const token = crypto.randomBytes(12).toString('hex');
+    const record = { pid: process.pid, timestamp: Date.now(), token };
+    let handle;
+    try {
+      handle = await fsp.open(lockPath, 'wx', 0o600);
+      await handle.writeFile(`${JSON.stringify(record)}\n`, 'utf8');
+      await handle.close();
+      return { lockPath, token };
+    } catch (err) {
+      if (handle) {
+        await handle.close().catch(() => {});
+        await fsp.rm(lockPath, { force: true });
+      }
+      if (err.code !== 'EEXIST') throw err;
+    }
+    if (await reclaimPublishLock(lockPath)) continue;
+    await wait(PUBLISH_LOCK_RETRY_MS);
+  }
+  throw new Error(`timed out waiting for publish lock ${lockPath}`);
+}
+
+async function releasePublishLock({ lockPath, token }) {
+  const current = await readPublishLock(lockPath);
+  if (!current || current.token !== token) return;
+  try {
+    await fsp.unlink(lockPath);
+  } catch (err) {
+    if (err.code === 'ENOENT') return;
+    throw err;
   }
 }
 
@@ -295,20 +413,29 @@ async function clearStaleTmpDirs(packDir) {
 async function publishBuild(builtRoot, name, outputs) {
   const packDir = path.join(builtRoot, name);
   await fsp.mkdir(packDir, { recursive: true });
-  await clearStaleTmpDirs(packDir);
+  const lock = await acquirePublishLock(packDir);
+  let tmpDir = null;
+  try {
+    await clearStaleTmpDirs(packDir);
+    tmpDir = path.join(packDir, `${TMP_PREFIX}${process.pid}-${crypto.randomBytes(6).toString('hex')}`);
+    await fsp.mkdir(tmpDir, { recursive: true });
+    await writeOutputs(tmpDir, outputs);
 
-  const tmpDir = path.join(packDir, `${TMP_PREFIX}${crypto.randomBytes(6).toString('hex')}`);
-  await fsp.mkdir(tmpDir, { recursive: true });
-  await writeOutputs(tmpDir, outputs);
-
-  const currentDir = path.join(packDir, 'current');
-  const previousDir = path.join(packDir, 'previous');
-  if (await pathExists(currentDir)) {
-    await fsp.rm(previousDir, { recursive: true, force: true });
-    await fsp.rename(currentDir, previousDir);
+    const currentDir = path.join(packDir, 'current');
+    const previousDir = path.join(packDir, 'previous');
+    if (await pathExists(currentDir)) {
+      await fsp.rm(previousDir, { recursive: true, force: true });
+      await fsp.rename(currentDir, previousDir);
+    }
+    await fsp.rename(tmpDir, currentDir);
+    return currentDir;
+  } finally {
+    try {
+      if (tmpDir) await fsp.rm(tmpDir, { recursive: true, force: true });
+    } finally {
+      await releasePublishLock(lock);
+    }
   }
-  await fsp.rename(tmpDir, currentDir);
-  return currentDir;
 }
 
 async function loadPackSpec(specPath) {
@@ -426,7 +553,11 @@ async function buildOnePack(entry, { specPath, baseDir, builtRoot, glissaHome, n
   const published = await readBuiltManifest(entry.name, { builtRoot });
   if (published && published.version === built.manifest.version) return { ...report, unchanged: true };
 
-  await publishBuild(builtRoot, entry.name, built.outputs);
+  try {
+    await publishBuild(builtRoot, entry.name, built.outputs);
+  } catch (err) {
+    return failure(entry.name, specPath, [`could not publish pack: ${err.message}`]);
+  }
   return report;
 }
 
@@ -439,10 +570,14 @@ async function buildPacks({ name = null, specsDir = defaultSpecsDir(), baseDir =
   }
   const reports = [];
   for (const spec of wanted) {
-    const report = await buildPack({ specPath: spec.specPath, baseDir, builtRoot, glissaHome, projects, now });
-    // Derived packs are reported beside their group: each one is its own pack, so a caller listing
-    // build results lists them rather than hiding them inside the group's row.
-    reports.push(report, ...report.variants);
+    try {
+      const report = await buildPack({ specPath: spec.specPath, baseDir, builtRoot, glissaHome, projects, now });
+      // Derived packs are reported beside their group: each one is its own pack, so a caller listing
+      // build results lists them rather than hiding them inside the group's row.
+      reports.push(report, ...report.variants);
+    } catch (err) {
+      reports.push(failure(spec.name, spec.specPath, [`build crashed: ${err.message}`]));
+    }
   }
   return reports;
 }
@@ -535,6 +670,7 @@ module.exports = {
   listPackSpecs,
   loadPackSpec,
   packWatchRoots,
+  publishBuild,
   readBuiltManifest,
   resolveBuiltPack,
 };
