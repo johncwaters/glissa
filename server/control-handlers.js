@@ -10,7 +10,7 @@ const { isPlainObject } = require('./core/usage-number-core');
 const { PACK_NAME_RE, applyPackDelta, sameProjectRecords } = require('./core/pack-core');
 const { readPosthogReport } = require('./posthog-report');
 const posthogCore = require('./core/posthog-core');
-const { getRtkPath } = require('../session/core/rtk-command');
+const { buildSettingsPayload: buildSettingsPayloadFrom } = require('./settings-payload');
 const { RESUME_ID_RE } = require('../session/core/auto-resume');
 const { DEFAULT_AGENT_ID, isKnownAgentId, listAgentIds, getAdapter, commandFor } = require('../session/adapters');
 
@@ -430,10 +430,12 @@ function registerControlHandlers(controlWss, deps) {
     // Replay of transient broadcasts missed across a reconnect gap (optional - undefined in
     // older callers/tests; connect then behaves as before, snapshot-only).
     controlReplayLog = null,
+    // Last rtk self-install outcome (optional - undefined in older callers/tests, which then report idle).
+    getRtkInstallStatus = () => null,
   } = deps;
 
   function buildSettingsPayload() {
-    return { ...configStore.getSettings(), rtkAvailable: !!getRtkPath() };
+    return buildSettingsPayloadFrom({ configStore, rtkInstallStatus: getRtkInstallStatus() });
   }
 
   /** Find a session by id (primary) with name fallback for legacy clients. */

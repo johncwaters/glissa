@@ -175,6 +175,15 @@ function runDoctor() {
     line('agents', `probe failed: ${(err?.message ? err.message : String(err)).split('\n')[0]}`);
   }
 
+  console.log('\nrtk');
+  try {
+    const { getRtkPath } = require('../session/core/rtk-command');
+    const rtkPath = getRtkPath();
+    line('rtk', rtkPath || 'not installed (Glissa installs it when the rtk setting is on)');
+  } catch (err) {
+    line('rtk', `probe failed: ${(err?.message ? err.message : String(err)).split('\n')[0]}`);
+  }
+
   console.log('\nNative module');
   try {
     require('node-pty');

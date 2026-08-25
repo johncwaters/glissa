@@ -75,6 +75,7 @@ Each entry is a rule, its why, and where it is pinned. Mechanism lives in the co
 - An adapter is TABLES and PURE FUNCTIONS: what varies between agent CLIs is vocabulary, and flags cannot express one (`docs/plan-agent-adapters.md`). `resolveCommand` is lazy and cached per id, or a `require` costs a PATH lookup.
 - Key on `capabilities`, never `adapter.id`, which rots once a third agent shares a behavior with the first. An UNDECLARED capability is absent (`tests/agent-capabilities.test.js`).
 - The Add Session agent picker and the card badge are adapter-driven and BINARY-GATED: `list-agents` probes each registered adapter's `resolveCommand` (cached per id), `decideAgentPicker` offers only the ones that resolve and hides itself for a single-agent install, and the badge shows a short label for a non-default agent only, so a Claude-Code-only machine looks unchanged (`public/session-card/agent-core.mjs`, `tests/frontend-agent-core.test.js`). `glissa doctor` prints the same per-agent resolution.
+- rtk is self-installed from a PINNED release with a PINNED sha256 into `~/.glissa/bin`, never "latest" and never a checksum fetched beside the binary, or one compromised release page swaps both halves (`server/core/rtk-install-core.js`).
 - A relay hook forwards the envelope UNTOUCHED and exits 0 whatever happened, since a hook that fails must never fail its turn. Field aliasing stays server-side.
 - The relay target rides `GLISSA_HOOK_URL` in the spawn env, never argv: a command line is readable by any local process, and an env target leaves an installed hooks file inert unsupervised.
 - Codex (`agent: "codex"`) reaches the hook tier: CC-shaped snake_case payloads mapped by a five-row table (`session/adapters/codex.js`, live-verified 0.149.0), hooks injected as `-c 'hooks.<Event>=...'` argv (the only form `exec resume` takes). Two honest gaps: no `Notification` event, so a prose question is indistinguishable from a finished turn, and `backgroundAgents: false`: a real child spawn produced only main Stop, with no background field or child hooks. statusLine and anti-slop are capability-off. rtk is ON, on its own `PreToolUse` group through `session/rtk-relay.js`: codex honours an `updatedInput` only beside `permissionDecision: allow` and rtk omits it for some rewrites, so the relay stamps it (`session/core/rtk-hook-core.js`).
@@ -114,9 +115,9 @@ Each entry is a rule, its why, and where it is pinned. Mechanism lives in the co
 - Which paths rerere replayed is deliberately unreported: git clears `MERGE_RR` as it resolves, so any list would be a guess, and a guess in a forensic trace is worse than a silence.
 - rerere config is seeded only when UNSET, an operator who disabled it meaning it. A rebase suppresses the change funnel while it runs, or the review gate self-heals to none mid-rebase.
 
-### Remote Branch GC (opt-in)
+### Remote Branch GC
 
-- Remote cleanup is confined to `glissa/session/`, protects every configured session id, and otherwise requires merge proof or orphan staleness, so unattended cleanup cannot become branch loss (`server/core/branch-gc-core.js`, `tests/branch-gc-core.test.js`).
+- Remote cleanup is default-on and opts out only through `branchGc.enabled: false`; it is confined to `glissa/session/`, protects every configured session id, and otherwise requires merge proof or orphan staleness, so unattended cleanup cannot become branch loss (`server/core/branch-gc-core.js`, `tests/branch-gc-core.test.js`).
 
 ### GitHub PR Auto-Review (opt-in)
 

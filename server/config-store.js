@@ -91,6 +91,11 @@ const DEFAULT_CONFIG = {
   // Enable git rerere per repo, so a conflict resolved once is replayed automatically on every later
   // rebase of every linked worktree. Read once when the worktree engine is built (server restart).
   worktreeRerere: true,
+  branchGc: {
+    enabled: true,
+    staleDays: 14,
+    intervalMs: 6 * 60 * 60 * 1000,
+  },
   repoRoots: [],
   // Deterministic post-turn auto-fix checks (see post-turn-checker.js). ON by
   // default: the runner's own DEFAULTS govern behavior even when this key is
@@ -316,7 +321,8 @@ function topLevelKeyCount(candidate) {
 function isSuspectedExternalWipe(candidate, currentConfig) {
   const currentKeyCount = topLevelKeyCount(currentConfig);
   if (currentKeyCount === 0) return false;
-  return topLevelKeyCount(candidate) * 2 < currentKeyCount;
+  const resolvedCandidate = { ...candidate, branchGc: resolveBranchGc(candidate.branchGc) };
+  return topLevelKeyCount(resolvedCandidate) * 2 < currentKeyCount;
 }
 
 function warnInvalidConfig(action, validation) {
@@ -337,6 +343,11 @@ function ensureProjectIds(projects) {
     }
   }
   return changed;
+}
+
+function resolveBranchGc(branchGc) {
+  if (!isPlainObject(branchGc)) return { ...DEFAULT_CONFIG.branchGc };
+  return { ...DEFAULT_CONFIG.branchGc, ...branchGc };
 }
 
 /**
@@ -364,6 +375,7 @@ function createConfigStore({ settingsDefaults } = {}) {
   const config = loadedConfig.config;
   writeBackupContent(`${configPath}.boot.bak`, loadedConfig.loadedContent);
   config.repoRoots = config.repoRoots || [];
+  config.branchGc = resolveBranchGc(config.branchGc);
 
   // Auto-assign stable IDs to any projects missing them
   if (Array.isArray(config.projects) && ensureProjectIds(config.projects)) {
@@ -480,7 +492,7 @@ function createConfigStore({ settingsDefaults } = {}) {
       // Opt-in GitHub PR auto-review (see AGENTS.md). null when never configured, so a user who
       // never opens the PR Review tab gets a byte-identical config (not added to DEFAULT_CONFIG).
       prReview: config.prReview ? { ...config.prReview } : null,
-      branchGc: config.branchGc ? { ...config.branchGc } : null,
+      branchGc: { ...config.branchGc },
       visions: config.visions ? { ...config.visions } : null,
       // Opt-in PostHog monitoring lane (see AGENTS.md). Same null-when-unconfigured rule as
       // prReview, so a user who never enables it gets a byte-identical config.
@@ -529,7 +541,7 @@ function createConfigStore({ settingsDefaults } = {}) {
     if (newConfig.postTurnChecks != null) config.postTurnChecks = newConfig.postTurnChecks;
     if (newConfig.worktreeShare != null) config.worktreeShare = newConfig.worktreeShare;
     if (newConfig.prReview != null) config.prReview = newConfig.prReview;
-    if (newConfig.branchGc != null) config.branchGc = newConfig.branchGc;
+    if (newConfig.branchGc != null) config.branchGc = resolveBranchGc(newConfig.branchGc);
     if (newConfig.visions != null) config.visions = newConfig.visions;
     if (newConfig.posthog != null) config.posthog = newConfig.posthog;
     if (newConfig.usage != null) config.usage = newConfig.usage;
@@ -562,6 +574,7 @@ function createConfigStore({ settingsDefaults } = {}) {
         console.warn('[config] Invalid JSON in config.json:', parseErr.message);
         return;
       }
+      newConfig.branchGc = resolveBranchGc(newConfig.branchGc);
       const validation = validateConfig(newConfig);
       if (!validation.ok) {
         warnInvalidConfig('reload config.json', validation);

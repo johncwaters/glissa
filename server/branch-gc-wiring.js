@@ -5,12 +5,12 @@ const { createLaneRunner } = require('./lane-runner');
 const { emptyLaneStatus } = require('./lane-status');
 
 function branchGcShouldStart(config) {
-  if (!config.branchGc || config.branchGc.enabled !== true) return { start: false, reason: null };
+  if (config.branchGc?.enabled === false) return { start: false, reason: null };
   return { start: true, reason: null };
 }
 
 function branchGcCfgKey(config) {
-  return JSON.stringify(config.branchGc || null);
+  return JSON.stringify(config.branchGc ?? null);
 }
 
 function createBranchGcWiring({
@@ -30,8 +30,8 @@ function createBranchGcWiring({
     createPoller: ({ onTickComplete }) => createPoller({
       gitWorkspace,
       getConfig: () => config,
-      staleDays: config.branchGc.staleDays || DEFAULT_STALE_DAYS,
-      intervalMs: config.branchGc.intervalMs || DEFAULT_INTERVAL_MS,
+      staleDays: config.branchGc?.staleDays ?? DEFAULT_STALE_DAYS,
+      intervalMs: config.branchGc?.intervalMs ?? DEFAULT_INTERVAL_MS,
       log,
       decisionTrace,
       onTickComplete,

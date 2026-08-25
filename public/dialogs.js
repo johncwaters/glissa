@@ -23,6 +23,13 @@ function option(text, { value, disabled = false, selected = false } = {}) {
   return opt;
 }
 
+let liveSettingsRtkSync = null;
+
+export function applySettingsBroadcast(settings) {
+  if (!settings) return;
+  liveSettingsRtkSync?.(settings);
+}
+
 // ── Add Session dialog ────────────────────────────────────────
 
 export function createAddSessionDialog() {
@@ -361,12 +368,29 @@ export function createSettingsDialog(initialTab) {
 
   let repoRoots = [];
   let rtkAvailable = false;
+  let rtkInstall = { status: 'idle' };
+
+  function rtkWarningText() {
+    if (!rtkCheckbox.checked || rtkAvailable) return '';
+    if (rtkInstall.status === 'installing') return 'No rtk binary found. Glissa is installing it into ~/.glissa/bin now.';
+    if (rtkInstall.status === 'failed') return `No rtk binary found. The last install attempt failed: ${rtkInstall.reason || 'unknown reason'}. Glissa retries on the next save.`;
+    return 'No rtk binary found. Glissa will install it into ~/.glissa/bin when you save.';
+  }
 
   function refreshRtkWarning() {
-    rtkWarning.textContent = rtkCheckbox.checked && !rtkAvailable
-      ? 'rtk binary not found at ~/.glissa/bin/rtk.exe'
-      : '';
+    rtkWarning.textContent = rtkWarningText();
   }
+
+  // An install finishes long after the save that started it, so the broadcast updates an open dialog.
+  liveSettingsRtkSync = (fresh) => {
+    if (!dialog.isConnected) {
+      liveSettingsRtkSync = null;
+      return;
+    }
+    rtkAvailable = !!fresh.rtkAvailable;
+    rtkInstall = fresh.rtkInstall || { status: 'idle' };
+    refreshRtkWarning();
+  };
   rtkCheckbox.addEventListener('change', refreshRtkWarning);
 
   function renderRootList() {
@@ -584,6 +608,7 @@ export function createSettingsDialog(initialTab) {
       autoResumeCheckbox.checked = s.autoResume !== false;
       rtkCheckbox.checked = !!s.rtk;
       rtkAvailable = !!s.rtkAvailable;
+      rtkInstall = s.rtkInstall || { status: 'idle' };
       refreshRtkWarning();
       debugModeCheckbox.checked = !!s.debugMode;
       repoRoots = Array.isArray(s.repoRoots) ? [...s.repoRoots] : [];

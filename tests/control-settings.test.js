@@ -146,6 +146,13 @@ test('branchGc rejects non-boolean enablement and non-positive numeric fields', 
   }
 });
 
+test('a settings save that omits branchGc preserves its existing opt-out', () => {
+  const h = harness({ branchGc: { enabled: false }, projects: [], teams: [] });
+  h.send({ type: 'update-settings', settings: { cursorBlink: true } });
+
+  assert.deepEqual(h.cfg.branchGc, { enabled: false });
+});
+
 test('empty telegram strings persist as-is (means unset), key is not deleted', () => {
   const h = harness({ projects: [], teams: [] });
   h.send({ type: 'update-settings', settings: { telegram: { botToken: '', chatId: '' } } });
