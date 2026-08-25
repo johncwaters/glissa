@@ -173,8 +173,7 @@ class Session extends EventEmitter {
     // so behavior is exactly as before. agentTtlMs bounds a dropped-SubagentStop leak.
     detectBackgroundAgents = true,
     agentTtlMs = agentTracker.DEFAULT_AGENT_TTL_MS,
-    // shell/monitor background_tasks entries never get a completion hook (no SubagentStop, no
-    // TaskCompleted/TeammateIdle), so past this long since the declaring Stop they stop gating.
+    // Bounds a lost shell/monitor task notification without cutting off normal external-agent runs.
     shellTaskTtlMs = agentTracker.DEFAULT_SHELL_TASK_TTL_MS,
     // A declared teammate entry is near-redundant with the counted SubagentStart/Stop map (real
     // teammate work is already tracked there); it only matters for a dropped SubagentStart, while

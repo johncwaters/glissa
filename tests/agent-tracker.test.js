@@ -13,6 +13,7 @@ const {
   declaredActiveCount,
   msUntilNextDrain,
   DEFAULT_AGENT_TTL_MS,
+  DEFAULT_SHELL_TASK_TTL_MS,
   DEFAULT_TEAMMATE_TASK_TTL_MS,
 } = require('../session/core/agent-tracker');
 
@@ -103,6 +104,12 @@ test('declaredActiveCount: a weak (shell/monitor) entry counts fresh and stops c
   assert.equal(declaredActiveCount(entries, idleIds, 100, 100), 1, 'the shell entry stops counting at the ttl boundary; the teammate still counts');
 });
 
+test('the default shell task TTL covers a forty-minute external agent run', () => {
+  const entries = [{ id: 'b1', type: 'shell' }];
+  assert.equal(declaredActiveCount(entries, new Set(), 40 * 60 * 1000), 1);
+  assert.equal(declaredActiveCount(entries, new Set(), DEFAULT_SHELL_TASK_TTL_MS), 0);
+});
+
 test('declaredActiveCount: dream entries never gate, alone or mixed with gating entries', () => {
   assert.equal(declaredActiveCount([{ id: 'd1', type: 'dream' }], new Set()), 0, 'a lone dream entry never gates');
   const mixed = [{ id: 'd1', type: 'dream' }, { id: 'b1', type: 'shell' }];
@@ -141,7 +148,7 @@ test('declaredActiveCount: a teammate entry counts fresh and stops counting past
 
 test('declaredActiveCount: an aged-out teammate does not absorb the idleNameCount clamp, leaving a shell entry counted', () => {
   const entries = [{ id: 't1', type: 'teammate' }, { id: 'b1', type: 'shell' }];
-  // ageMs=200 ages out the teammate (teammateTtlMs=100) but is well under the weak ttl (default 5min),
+  // ageMs=200 ages out the teammate (teammateTtlMs=100) but is well under the default weak ttl,
   // so the shell entry still counts. The aged-out teammate must not be in teammateCount, so the idle
   // name (which no longer matches any surviving teammate) cannot wrongly subtract from the shell entry.
   assert.equal(declaredActiveCount(entries, new Set(), 200, undefined, 1, 100), 1, 'the shell entry survives; the stale idle name has nothing to clamp against');
@@ -176,6 +183,18 @@ test('msUntilNextDrain: picks the sooner of a weak entry and a teammate entry in
     TTLS.weakTtlMs,
     'with a longer teammate ttl the weak entry becomes the next drain',
   );
+});
+
+test('msUntilNextDrain: a shell task can outlive the generic agent TTL', () => {
+  const now = 1000000;
+  const weakTtlMs = 60 * 60 * 1000;
+  assert.equal(msUntilNextDrain({
+    declaredEntries: [{ id: 'b1', type: 'shell' }],
+    declaredTs: now,
+    now,
+    ...TTLS,
+    weakTtlMs,
+  }), weakTtlMs);
 });
 
 test('msUntilNextDrain: an untyped declared entry only drains when the whole snapshot ages out', () => {

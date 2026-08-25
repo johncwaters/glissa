@@ -114,13 +114,13 @@ test('one reaper ages out a weak entry, a teammate entry, and a counted id on th
   advance(DEFAULT_TEAMMATE_TASK_TTL_MS);
   assert.equal(registry.activeCount(), 1, 'the teammate entry aged out; the shell entry and the counted id have not');
 
-  advance(DEFAULT_SHELL_TASK_TTL_MS);
-  assert.equal(registry.activeCount(), 1, 'the shell entry aged out, leaving the counted id');
-  assert.equal(registry.getBreakdown().declared, 0);
-  assert.equal(registry.getBreakdown().counted, 1);
+  advance(DEFAULT_AGENT_TTL_MS - DEFAULT_TEAMMATE_TASK_TTL_MS);
+  assert.equal(registry.activeCount(), 1, 'the counted id aged out, leaving the longer shell declaration');
+  assert.equal(registry.getBreakdown().declared, 1);
+  assert.equal(registry.getBreakdown().counted, 0);
 
-  advance(DEFAULT_AGENT_TTL_MS);
-  assert.equal(registry.activeCount(), 0, 'and the counted id ages out on its own bound');
+  advance(DEFAULT_SHELL_TASK_TTL_MS - DEFAULT_AGENT_TTL_MS);
+  assert.equal(registry.activeCount(), 0, 'the shell declaration ages out last');
 });
 
 test('a whole declaration whose refreshing Stop never came ages out', () => {
@@ -130,6 +130,17 @@ test('a whole declaration whose refreshing Stop never came ages out', () => {
   advance(DEFAULT_AGENT_TTL_MS);
   assert.equal(registry.activeCount(), 0);
   assert.equal(registry.hasDeclared(), false, 'the reaper drops it rather than suppressing forever');
+});
+
+test('a shell declaration outlives the generic agent TTL and drains at its own backstop', () => {
+  const { registry, advance } = makeRegistry({ agentTtlMs: 100, shellTaskTtlMs: 200 });
+  registry.reconcileDeclared([{ id: 'b1', type: 'shell' }]);
+  advance(100);
+  assert.equal(registry.activeCount(), 1);
+  assert.equal(registry.hasDeclared(), true);
+  advance(100);
+  assert.equal(registry.activeCount(), 0);
+  assert.equal(registry.hasDeclared(), false);
 });
 
 test('a stale idle-name record cannot mask a future same-named teammate forever', () => {

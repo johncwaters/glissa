@@ -84,9 +84,7 @@ function extractBackgroundTasks(payload) {
   return entries;
 }
 
-// background_tasks entry types that have NO completion hook at all (no SubagentStop, no
-// TaskCompleted/TeammateIdle ever fires for them), so counting-until-drained would pin a
-// card WORKING forever. Bounded instead by a TTL off the age of the declaring snapshot.
+// These entries resume the turn through a task notification, so the TTL only bounds a lost notice.
 const WEAK_TASK_TYPES = new Set(['shell', 'monitor']);
 
 // background_tasks entry types that must NEVER gate completion, at any age. A `dream` entry
@@ -95,10 +93,7 @@ const WEAK_TASK_TYPES = new Set(['shell', 'monitor']);
 // gate. Counting it would pin a self-pacing loop session WORKING for its entire sleep.
 const NON_GATING_TASK_TYPES = new Set(['dream']);
 
-// Default time a weak-typed entry (shell/monitor) keeps gating after the Stop that declared
-// it. Shorter than DEFAULT_AGENT_TTL_MS because there is no dropped-hook story here to bias
-// long for: the entry NEVER gets a completion hook, this TTL is the only way it ever drains.
-const DEFAULT_SHELL_TASK_TTL_MS = 5 * 60 * 1000;
+const DEFAULT_SHELL_TASK_TTL_MS = 60 * 60 * 1000;
 
 // Default time a declared teammate entry keeps gating after the Stop that declared it. A
 // teammate that is ACTUALLY working is already covered by the counted SubagentStart/Stop map;
@@ -108,9 +103,8 @@ const DEFAULT_SHELL_TASK_TTL_MS = 5 * 60 * 1000;
 // without a short TTL a declared teammate can pin a card WORKING for the full agent TTL. This
 // bounds that failure at seconds instead of 30 minutes.
 //
-// Accepted risk: unlike shell/monitor (WEAK_TASK_TYPES, which never get ANY completion hook,
-// hence their own 5-minute TTL as the only drain they ever get), a teammate DOES fire
-// SubagentStart/SubagentStop (live-verified against Claude Code 2.1.200). So this TTL only
+// Accepted risk: a teammate fires SubagentStart/SubagentStop (live-verified against Claude Code
+// 2.1.200). So this TTL only
 // matters when a SubagentStart hook was dropped AND the teammate is still genuinely working
 // past 90 seconds: the declared entry ages out and the card completes early while background
 // work continues. That failure is self-correcting, the still-working teammate's next hook
@@ -134,7 +128,7 @@ const DEFAULT_TEAMMATE_TASK_TTL_MS = 90 * 1000;
 // that teammate count so a stale/extra idle name can never mask a shell or subagent entry.
 function declaredActiveCount(
   entries, idleIds, ageMs = 0, weakTtlMs = DEFAULT_SHELL_TASK_TTL_MS, idleNameCount = 0,
-  teammateTtlMs = DEFAULT_TEAMMATE_TASK_TTL_MS,
+  teammateTtlMs = DEFAULT_TEAMMATE_TASK_TTL_MS, agentTtlMs = DEFAULT_AGENT_TTL_MS,
 ) {
   if (!entries) return 0;
   let n = 0;
@@ -144,18 +138,16 @@ function declaredActiveCount(
     if (WEAK_TASK_TYPES.has(e.type) && ageMs >= weakTtlMs) continue;
     if (NON_GATING_TASK_TYPES.has(e.type)) continue;
     if (e.type === 'teammate' && ageMs >= teammateTtlMs) continue;
+    if (!WEAK_TASK_TYPES.has(e.type) && e.type !== 'teammate' && ageMs >= agentTtlMs) continue;
     n++;
     if (e.type === 'teammate') teammateCount++;
   }
   return n - Math.min(idleNameCount, teammateCount);
 }
 
-// How long a declared entry of this type keeps gating, measured from the snapshot that declared
-// it. Capped by agentTtlMs because _activeAgentCount drops the WHOLE snapshot at that age, so no
-// entry can outlive it.
 function declaredEntryTtlMs(type, weakTtlMs, teammateTtlMs, agentTtlMs) {
-  if (WEAK_TASK_TYPES.has(type)) return Math.min(weakTtlMs, agentTtlMs);
-  if (type === 'teammate') return Math.min(teammateTtlMs, agentTtlMs);
+  if (WEAK_TASK_TYPES.has(type)) return weakTtlMs;
+  if (type === 'teammate') return teammateTtlMs;
   return agentTtlMs;
 }
 
@@ -272,10 +264,14 @@ function createTaskRegistry({
   function reap(at) {
     pruneAgents(countedAgents, at, agentTtlMs);
     pruneAgents(idleTeammateNames, at, agentTtlMs);
-    if (declaredEntries !== null && at - declaredTs >= agentTtlMs) {
-      declaredEntries = null;
-      declaredTs = 0;
-    }
+    if (declaredEntries === null) return;
+    const declaredTtlMs = declaredEntries.reduce((maxTtlMs, entry) => Math.max(
+      maxTtlMs,
+      declaredEntryTtlMs(entry.type, shellTaskTtlMs, teammateTaskTtlMs, agentTtlMs),
+    ), agentTtlMs);
+    if (at - declaredTs < declaredTtlMs) return;
+    declaredEntries = null;
+    declaredTs = 0;
   }
 
   return {
@@ -375,7 +371,7 @@ function createTaskRegistry({
       reap(at);
       const declared = declaredActiveCount(
         declaredEntries, idleTaskIds, declaredEntries ? at - declaredTs : 0,
-        shellTaskTtlMs, idleTeammateNames.size, teammateTaskTtlMs,
+        shellTaskTtlMs, idleTeammateNames.size, teammateTaskTtlMs, agentTtlMs,
       );
       breakdown = {
         counted: countedAgents.size,

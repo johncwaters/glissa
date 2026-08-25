@@ -972,7 +972,7 @@ test('a TeammateIdle recorded by name drains a gate-held ready without any furth
   s.destroy();
 });
 
-// --- Weak (shell/monitor) background_tasks TTL: no completion hook ever fires for these ---
+// --- Shell/monitor task-notification leak backstop ---
 
 test('a declared shell task stops gating past its TTL and the held ready is released', (t) => {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
@@ -982,7 +982,23 @@ test('a declared shell task stops gating past its TTL and the held ready is rele
   assert.equal(s.state, STATES.RUNNING, 'still gating before the ttl boundary');
   t.mock.timers.tick(250); // past ttl + the release timer epsilon
   t.mock.timers.tick(40); // settle window (the ttl-timer drain also waits it out)
-  assert.equal(s.state, STATES.COMPLETE, 'a shell task never gets a completion hook; the ttl releases the held ready');
+  assert.equal(s.state, STATES.COMPLETE, 'a lost task notification is bounded by the ttl');
+  s.destroy();
+});
+
+test('a forty-minute external agent remains gated until its task notification resumes the turn', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const s = makeSession(STATES.RUNNING, { gateReleaseSettleMs: 30 });
+  hook(s, 'ready', { payload: { background_tasks: [{ id: 'b1', type: 'shell', status: 'running' }] } });
+  t.mock.timers.tick(40 * 60 * 1000);
+  assert.equal(s.state, STATES.RUNNING);
+  assert.equal(s.toSnapshot().activeAgents, 1);
+  hook(s, 'resume', { payload: { prompt: '<task-notification><task-id>b1</task-id></task-notification>' } });
+  assert.equal(s.state, STATES.RUNNING);
+  assert.equal(s.toSnapshot().activeAgents, 0);
+  hook(s, 'ready', { payload: { background_tasks: [] } });
+  t.mock.timers.tick(40);
+  assert.equal(s.state, STATES.COMPLETE);
   s.destroy();
 });
 
@@ -1047,7 +1063,7 @@ test('an aged-out declared teammate does not let a leftover idle-by-name record 
   // Recorded by name before the teammate ages out; once it ages out there is no surviving teammate
   // entry left for this name to offset.
   hook(s, 'teammate-idle', { payload: { teammate_name: 'unmapped' } });
-  t.mock.timers.tick(120); // past teammateTaskTtlMs (100ms); well under the 5min shell ttl
+  t.mock.timers.tick(120); // past teammateTaskTtlMs (100ms); well under the shell ttl
   assert.equal(s.toSnapshot().activeAgents, 1, 'the teammate aged out on its own; the idle name has nothing left to clamp, so the shell entry still gates');
   assert.equal(s.state, STATES.RUNNING, 'the shell entry alone keeps the card gated');
   s.destroy();
