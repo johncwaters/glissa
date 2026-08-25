@@ -5,6 +5,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { execFileAsync, execFileSync } = require('../server/child-process-safe');
 const { createSerialQueue } = require('./spawn-gate');
+const { sessionIdFromBranch } = require('./core/branch-gc-core');
 
 const fsp = fs.promises;
 
@@ -39,11 +40,6 @@ function findWorktreeForBranch(porcelain, branch) {
   const hit = parseWorktreeBranches(porcelain).find((w) => w.branch === branch);
   return hit ? hit.cwd : null;
 }
-
-// The SESSION lane's branch namespace; other lanes (`glissa/pr-review/*`) are excluded by it.
-const SESSION_BRANCH_PREFIX = 'glissa/session/';
-const sessionIdFromBranch = (branch) =>
-  (branch.startsWith(SESSION_BRANCH_PREFIX) ? branch.slice(SESSION_BRANCH_PREFIX.length) : null);
 
 // The one statement of "this worktree holds UNMERGED work that must NOT be destroyed on a restart":
 // uncommitted changes in the worktree, or commits on its branch not yet on the integration branch (a
@@ -577,6 +573,71 @@ function createGitWorkspace(opts = {}) {
     return parseWorktreeBranches(listed.out);
   }
 
+  async function fetchOriginBody({ projectPath }) {
+    return run(['fetch', '--prune', 'origin'], projectPath);
+  }
+
+  async function listRemoteSessionBranches({ projectPath }) {
+    const listed = await run([
+      'for-each-ref',
+      'refs/remotes/origin/glissa/session/',
+      '--format=%(refname:short) %(objectname) %(committerdate:unix)',
+    ], projectPath);
+    if (!listed.ok) return listed;
+    const branches = [];
+    for (const line of listed.out.split(/\r?\n/)) {
+      if (!line) continue;
+      const [remoteName, tipSha, commitTimeSeconds] = line.trim().split(/\s+/);
+      const name = remoteName.startsWith('origin/') ? remoteName.slice('origin/'.length) : remoteName;
+      branches.push({
+        name,
+        tipSha,
+        tipCommitTimeMs: Number.parseInt(commitTimeSeconds, 10) * 1000,
+      });
+    }
+    return { ok: true, branches };
+  }
+
+  async function listIntegrationTips({ projectPath, integrationBranch }) {
+    const branchNames = [...new Set([integrationBranch, 'main', 'master'].filter(Boolean))];
+    const refNames = branchNames.flatMap((branchName) => [
+      `refs/remotes/origin/${branchName}`,
+      `refs/heads/${branchName}`,
+    ]);
+    const listed = await run([
+      'for-each-ref',
+      ...refNames,
+      '--format=%(refname) %(objectname)',
+    ], projectPath);
+    if (!listed.ok) return listed;
+    const shaByRef = new Map();
+    for (const line of listed.out.split(/\r?\n/)) {
+      if (!line) continue;
+      const [refName, sha] = line.trim().split(/\s+/);
+      if (refNames.includes(refName)) shaByRef.set(refName, sha);
+    }
+    const integrationTips = [];
+    for (const branch of branchNames) {
+      const sha = shaByRef.get(`refs/remotes/origin/${branch}`) || shaByRef.get(`refs/heads/${branch}`);
+      integrationTips.push({ branch, sha: sha || null });
+    }
+    return { ok: true, integrationTips };
+  }
+
+  async function isAncestor({ projectPath, ancestorSha, descendantSha }) {
+    try {
+      await git(['merge-base', '--is-ancestor', ancestorSha, descendantSha], projectPath);
+      return { ok: true, isAncestor: true };
+    } catch (err) {
+      if (err.code === 1) return { ok: true, isAncestor: false };
+      return { ...errResult(err), isAncestor: false };
+    }
+  }
+
+  async function deleteRemoteBranchBody({ projectPath, name }) {
+    return run(['push', 'origin', '--delete', name], projectPath);
+  }
+
   // Every ref/worktree-MUTATING method is the same shape: run its body on the serialize queue. populate
   // is the one whose inner half stays reachable unwrapped (createBody calls populateShare directly;
   // chaining from inside the queue would deadlock on a tail that includes the in-flight create).
@@ -588,7 +649,10 @@ function createGitWorkspace(opts = {}) {
     rebaseOnly: serialized(rebaseOnlyBody),
     populate: serialized(populateShare),
     removeWorktreeByPath: serialized(removeWorktreeByPathBody),
+    fetchOrigin: serialized(fetchOriginBody),
+    deleteRemoteBranch: serialized(deleteRemoteBranchBody),
     listSessionWorktrees, listWorktreeBranches, hasUnmergedWork,
+    listRemoteSessionBranches, listIntegrationTips, isAncestor,
   };
 }
 

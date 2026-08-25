@@ -21,6 +21,7 @@ function fakeConfigStore(cfg) {
     isUnchosenLaunchDefault: () => false, // no launch-default overlay in these fixtures
     getSettings: () => ({
       prReview: cfg.prReview || null,
+      branchGc: cfg.branchGc || null,
       visions: cfg.visions || null,
       posthog: cfg.posthog || null,
       telegram: cfg.telegram || null,
@@ -122,6 +123,27 @@ test('a stray projectChoices field in the payload is never persisted', () => {
 
   assert.deepEqual(h.cfg.prReview, { enabled: false });
   assert.equal(h.cfg.projectChoices, undefined, 'projectChoices is derived read-only, never written to cfg');
+});
+
+test('a valid branchGc payload is sanitized, persisted, and echoed', () => {
+  const h = harness({ projects: [], teams: [] });
+  h.send({
+    type: 'update-settings',
+    settings: { branchGc: { enabled: true, staleDays: 21, intervalMs: 3600000, unknown: 'drop' } },
+  });
+
+  assert.deepEqual(h.cfg.branchGc, { enabled: true, staleDays: 21, intervalMs: 3600000 });
+  const updated = h.sent.find((message) => message.type === 'settings-updated');
+  assert.deepEqual(updated.settings.branchGc, h.cfg.branchGc);
+});
+
+test('branchGc rejects non-boolean enablement and non-positive numeric fields', () => {
+  for (const branchGc of [{ enabled: 'yes' }, { staleDays: 0 }, { intervalMs: -1 }]) {
+    const h = harness({ projects: [], teams: [] });
+    h.send({ type: 'update-settings', settings: { branchGc } });
+    assert.ok(h.sent.some((message) => message.type === 'settings-error'));
+    assert.equal(h.cfg.branchGc, undefined);
+  }
 });
 
 test('empty telegram strings persist as-is (means unset), key is not deleted', () => {

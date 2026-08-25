@@ -1034,6 +1034,23 @@ function initStaleUpstream({ diverge = false, landFeat = false } = {}) {
   return repo;
 }
 
+test('_resolveEffectiveBase ignores an upstream that is the branch\'s own remote copy', { skip: !GIT }, async () => {
+  const repo = initRepoDevelopFeature();
+  git(['remote', 'add', 'origin', repo], repo);
+  const preRebaseSha = git(['rev-parse', 'develop'], repo).trim();
+  git(['update-ref', 'refs/remotes/origin/feat', preRebaseSha], repo);
+  git(['branch', '--set-upstream-to=origin/feat', 'feat'], repo);
+  advanceDevelop(repo);
+  git(['rebase', 'develop', 'feat'], repo);
+  const s = makeSession({ integrationBranch: 'develop' });
+  try {
+    s.worktreeDir = repo;
+    assert.equal(await s._resolveEffectiveBase({ cwd: repo }), 'develop');
+    const sig = await s._computeWorktreeSignature();
+    assert.equal(sig.ahead, '1');
+  } finally { s.destroy(); fs.rmSync(repo, { recursive: true, force: true }); }
+});
+
 test('_computeWorktreeSignature reports behind and rebaseInProgress', { skip: !GIT }, async () => {
   const repo = initRepoDevelopFeature(); // clean, feat 1 ahead of develop, on top of it
   const s = makeSession({ integrationBranch: 'develop' });

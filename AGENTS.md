@@ -114,6 +114,10 @@ Each entry is a rule, its why, and where it is pinned. Mechanism lives in the co
 - Which paths rerere replayed is deliberately unreported: git clears `MERGE_RR` as it resolves, so any list would be a guess, and a guess in a forensic trace is worse than a silence.
 - rerere config is seeded only when UNSET, an operator who disabled it meaning it. A rebase suppresses the change funnel while it runs, or the review gate self-heals to none mid-rebase.
 
+### Remote Branch GC (opt-in)
+
+- Remote cleanup is confined to `glissa/session/`, protects every configured session id, and otherwise requires merge proof or orphan staleness, so unattended cleanup cannot become branch loss (`server/core/branch-gc-core.js`, `tests/branch-gc-core.test.js`).
+
 ### GitHub PR Auto-Review (opt-in)
 
 - Inert unless both `config.prReview.enabled` and `config.telegram` are set. A clean PR is reviewed IN PLACE (diff only) so it coexists with a live session in the repo; a conflicting one gets a worktree, discarded on every exit path.
