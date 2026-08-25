@@ -72,15 +72,13 @@ function postPayload(url, body) {
           res.on('data', (chunk) => {
             if (settled) return;
             const bytes = Buffer.from(chunk);
-            const remainingBytes = MAX_RESPONSE_BYTES + 1 - responseBytes;
-            const boundedBytes = bytes.subarray(0, remainingBytes);
-            responseBytes += boundedBytes.length;
-            responseChunks.push(boundedBytes);
+            responseBytes += bytes.length;
             if (responseBytes > MAX_RESPONSE_BYTES) {
               res.destroy();
-              done({ reason: 'response-too-large', status: res.statusCode, body: Buffer.concat(responseChunks) });
+              done({ reason: 'response-too-large', status: res.statusCode, body: null });
               return;
             }
+            responseChunks.push(bytes);
           });
           res.on('end', () => done({
             reason: `status-${res.statusCode}`,
@@ -102,13 +100,19 @@ function postPayload(url, body) {
   });
 }
 
-async function main(argv = process.argv.slice(2), stdin = process.stdin, env = process.env, stdout = process.stdout) {
+async function main(
+  argv = process.argv.slice(2),
+  stdin = process.stdin,
+  env = process.env,
+  stdout = process.stdout,
+  hookStdoutDecision = decideHookStdout,
+) {
   const [event] = argv;
   const body = await readStdin(stdin);
   const verdict = decideRelayPost({ env, event, payloadBytes: body.length });
   if (!verdict.post) return { code: 0, reason: verdict.reason };
   const response = await postPayload(verdict.url, body);
-  const hookStdout = decideHookStdout(event, response.status, response.body);
+  const hookStdout = hookStdoutDecision(event, response.status, response.body);
   if (hookStdout) {
     try { stdout.write(`${hookStdout}\n`); } catch {}
   }

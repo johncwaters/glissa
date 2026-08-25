@@ -115,12 +115,19 @@ test('renderPackArgs emits one developer_instructions token with ordered index p
   const args = codex.renderPackArgs(deliveries);
   assert.deepEqual(args, [
     '-c',
-    "developer_instructions='''Glissa context packs are available at these index files. Read each relevant CLAUDE.md before working; alpha: /home/carbon/.glissa/packs/built/alpha/current/CLAUDE.md; memory-project: /home/carbon/.glissa/packs/built/memory-project/current/CLAUDE.md'''",
+    `developer_instructions='''${codex.PACK_DIRECTIVE}; alpha: /home/carbon/.glissa/packs/built/alpha/current/CLAUDE.md; memory-project: /home/carbon/.glissa/packs/built/memory-project/current/CLAUDE.md'''`,
   ]);
   assert.equal(args.filter((arg) => arg === '-c').length, 1);
   assert.equal(args.includes('--add-dir'), false);
   assert.equal(args.some((arg) => arg.includes('\n') || arg.includes('\r')), false);
   assert.deepEqual(codex.renderPackArgs([]), []);
+});
+
+test('PACK_DIRECTIVE has the deliberate exact text pin', () => {
+  assert.equal(
+    codex.PACK_DIRECTIVE,
+    'Glissa context packs are available at these index files. Read each relevant CLAUDE.md before working',
+  );
 });
 
 test('renderPackArgs refuses non-absolute or unsafe pack paths', () => {
