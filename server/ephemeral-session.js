@@ -11,6 +11,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const { awaitBounded } = require('./core/shutdown-core');
+const { firstLine } = require('./core/text-core');
 
 // The fixed name inside a job's private result directory: the directory is already unique, so the file
 // inside it carries no identity and never has to be told apart from anything.
@@ -20,10 +21,6 @@ const JOB_RESULT_FILENAME = 'result.json';
 // order as the lifecycle's own reap bound: long enough for a taskkill or a signalled group to settle,
 // short enough that a child which resists kill cannot pin a lane's concurrency slot.
 const ABORT_REAP_CAP_MS = 3000;
-
-function firstLine(text) {
-  return String(text == null ? '' : text).split(/\r?\n/)[0].trim();
-}
 
 /**
  * Wait for a seeded session to exit, honoring an AbortSignal (a lane's hard timeout) by destroying it.
@@ -141,9 +138,32 @@ async function createJobResultFile(prefix) {
  * crashed or confused session never masquerades as a finished job. The file is removed either way.
  * `decorate` adds the per-lane extra fields from the same parsed object.
  */
-function readResultFile(resultPath, allowed, decorate = null) {
+function readResultFile(resultPath, allowed, decorate = null, { maxBytes = null, validate = null } = {}) {
   try {
-    const obj = JSON.parse(fs.readFileSync(resultPath, 'utf8'));
+    const fileDescriptor = fs.openSync(resultPath, 'r');
+    const chunks = [];
+    const chunk = Buffer.allocUnsafe(64 * 1024);
+    let totalBytesRead = 0;
+    try {
+      while (true) {
+        const bytesRead = fs.readSync(fileDescriptor, chunk, 0, chunk.length, null);
+        if (bytesRead === 0) break;
+        totalBytesRead += bytesRead;
+        if (maxBytes !== null && totalBytesRead > maxBytes) {
+          return { verdict: 'ERROR', summary: 'result file is too large' };
+        }
+        chunks.push(Buffer.from(chunk.subarray(0, bytesRead)));
+      }
+    } finally {
+      fs.closeSync(fileDescriptor);
+    }
+    let obj = null;
+    try {
+      obj = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+    } catch {
+      return { verdict: 'ERROR', summary: 'invalid JSON in result file' };
+    }
+    if (validate) return validate(obj);
     const verdict = String(obj.verdict || '').toUpperCase();
     if (!allowed.has(verdict)) return { verdict: 'ERROR', summary: 'invalid verdict in result file' };
     const result = { verdict, summary: String(obj.summary || '') };

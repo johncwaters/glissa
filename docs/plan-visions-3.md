@@ -595,13 +595,12 @@ made in the build:
   in `REPLAYABLE_EXACT`, so the guarantee cannot rot when a dashboard surface is added
   later.
 
-### M17: follow-ons (explicitly post-v1)
+### M17: follow-ons (explicitly post-v1, Codex half SHIPPED 2026-08-24)
 
 The retrieval index shipped early, with M12b. The `rankCandidates` seam (an Ollama-if-present
 embedding probe) was DROPPED, operator decision 2026-08-23. What is left:
 
-- **Non-CC pack delivery adapter**: reaches non-Claude harnesses once the agent-adapters
-  plan ships its capability gating.
+- **Non-CC pack delivery adapter**: Codex shipped 2026-08-24; Grok waits on the packs probe.
 - ~~**Per-project pack variants**~~: CLOSED 2026-08-23, see the as-built note under M16.
 
 ## Non-goals (v1)

@@ -2,6 +2,8 @@
 
 Standing bug-watch report. Findings only, no fixes applied. Updated by the monitoring loop each pass.
 
+Resolution (2026-08-24): `docs/plan-agents-4-packs-hardening.md` records the shipped dispositions.
+
 - Last pass: 2026-08-22 (pass 1, full audit)
 - Baseline HEAD at audit: 204a9da (branch glissa/session/5290c049), recent scope commits reviewed through 6be6370, bf13fdb, 04820ad
 - Method: two independent opus audit agents (context mill, Visions lane), findings probe-confirmed where stated, all pack tests (142) and visions/ingest tests (225) passing

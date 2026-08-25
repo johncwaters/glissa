@@ -1,6 +1,6 @@
 # Plan: Agent adapters (harness-agnostic Glissa)
 
-Status: drafted 2026-08-21 from a full coupling sweep plus live probes of Codex CLI 0.146.0 and Grok CLI 0.2.111 on this machine. M1, M2 and M3 are shipped; M4 onward are not. The Codex column below is 0.146.0 evidence; where M3's re-probe on 0.147.0 contradicts it, the M3 as-built note wins. `AGENTS.md` and the code win over this doc, and superseded sections move to `docs/archive/` per convention.
+Status: drafted 2026-08-21 from a full coupling sweep plus live probes of Codex CLI 0.146.0 and Grok CLI 0.2.111 on this machine. M1 through M4 are shipped. The Codex column below is 0.146.0 evidence; where M3's re-probe on 0.147.0 contradicts it, the M3 as-built note wins. `AGENTS.md` and the code win over this doc, and superseded sections move to `docs/archive/` per convention.
 
 ## What this is
 
@@ -144,7 +144,7 @@ Corrected after the M3 security review (all six findings fixed in the same miles
 
 Not solved, and stated rather than hidden: a first spawn in a directory the operator has not trusted in codex blocks on codex's interactive trust prompt, and (like hook trust) that trust is readable only from a config file. This is the exact shape of the known Claude Code limitation (a spawn in an untrusted cwd blocks on the workspace-trust dialog), so it is documented, not worked around. `test/probe-codex-session.js` sidesteps it with a throwaway `CODEX_HOME` because a probe must be unattended; a production session does not, and must not.
 
-**M4: Grok adapter.** `session/adapters/grok.js`: direct exe spawn with args array, opt-in `glissa agent setup grok` installing the env-inert hooks file, relay reuse, camelCase field aliasing, `Stop` gated on `reason == "end_turn"`, `Notification(approval_required)` = awaiting-input, pinned `[ui.notifications]` title format + profile, UUIDv7 capture, `-r <id>` resume, `[compat.claude] hooks = false` for supervised sessions. Acceptance: same shape as M3 (live scripted probe, fixture, replay test), plus a test pinning that the installed hooks file is inert without `GLISSA_HOOK_URL`.
+**M4: Grok adapter. SHIPPED 2026-08-24.** The 1.0.5 correction uses `Notification(permission_prompt)`, maps `StopFailure` and `StopCancelled` to completion, treats `UserPromptSubmit` as observe-only, and leaves titles unpinnable and packs off until the live probe runs (`session/adapters/grok.js`, `tests/agent-grok.test.js`).
 
 **M5: identity and usage attribution. SHIPPED 2026-08-23 (Codex half; Grok waits for M4).** Generalize the `claude-session-id` event to carry `{ vendor, sessionId }` (event name kept for wire/back-compat, field added); lane ledger and `usage-lane-core` move to a vendor-namespaced composite key (matching the scanner's existing dedup namespacing); per-card usage chips join Codex/Grok sessions to their own vendor entries by session id (the scanner already parses both), with blocks/plan-limits sections still Claude-only and labelled as they are today. `RESUME_ID_RE` deduplicated into one core with per-adapter overrides. Acceptance: a supervised Codex card shows its own token/cost chip from the Codex transcript; ledger round-trips old-format files.
 

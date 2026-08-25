@@ -14,7 +14,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const {
-  awaitSessionExit, createJobResultFile, drainPending, firstLine, raceWithAbort,
+  awaitSessionExit, createJobResultFile, drainPending, firstLine, raceWithAbort, readResultFile,
   registerEphemeralSession,
 } = require('./ephemeral-session');
 const { createSerialQueue } = require('./spawn-gate');
@@ -22,6 +22,7 @@ const { needsDistill } = require('./core/distill-core');
 const { buildLanePermissions } = require('./core/lane-permissions-core');
 const {
   MAX_DISTILL_RESULT_BYTES,
+  DISTILL_RESULT_VERDICT_SET,
   buildPackDistillPrompt,
   failedResult,
   decidePackDistillPromptSize,
@@ -45,30 +46,13 @@ function packDistillerPermissions() {
   return buildLanePermissions({ denyTools: PACK_DISTILL_DENY_TOOLS });
 }
 
-async function readDistillResult(resultPath) {
-  let resultHandle = null;
-  try {
-    resultHandle = await fs.promises.open(resultPath, 'r');
-    const boundedBytes = Buffer.alloc(MAX_DISTILL_RESULT_BYTES + 1);
-    let totalBytesRead = 0;
-    while (totalBytesRead < boundedBytes.length) {
-      const { bytesRead } = await resultHandle.read(
-        boundedBytes,
-        totalBytesRead,
-        boundedBytes.length - totalBytesRead,
-        totalBytesRead
-      );
-      if (bytesRead === 0) break;
-      totalBytesRead += bytesRead;
-    }
-    if (totalBytesRead > MAX_DISTILL_RESULT_BYTES) return failedResult('result file is too large');
-    const rawResult = boundedBytes.subarray(0, totalBytesRead).toString('utf8');
-    return validateDistillResult(JSON.parse(rawResult));
-  } catch {
-    return failedResult();
-  } finally {
-    if (resultHandle) await resultHandle.close().catch(() => {});
-  }
+function readDistillResult(resultPath) {
+  const result = readResultFile(resultPath, DISTILL_RESULT_VERDICT_SET, null, {
+    maxBytes: MAX_DISTILL_RESULT_BYTES,
+    validate: validateDistillResult,
+  });
+  if (result.summary === 'no result file') return failedResult();
+  return result;
 }
 
 function writeStandaloneLaneSettings(permissions) {

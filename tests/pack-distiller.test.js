@@ -625,7 +625,7 @@ test('stop() drains a distill that is already running', async () => {
 // the result file
 // ---------------------------------------------------------------------------
 
-test('readDistillResult treats a missing or invalid result file as ERROR', async () => {
+test('readDistillResult distinguishes unreadable files from invalid JSON', async () => {
   const missing = await readDistillResult('/no/such/glissa-distill-result.json');
   assert.equal(missing.verdict, 'ERROR');
   assert.match(missing.summary, /no readable result file/);
@@ -636,7 +636,7 @@ test('readDistillResult treats a missing or invalid result file as ERROR', async
     fs.writeFileSync(resultPath, '{not json', 'utf8');
     const malformed = await readDistillResult(resultPath);
     assert.equal(malformed.verdict, 'ERROR');
-    assert.match(malformed.summary, /no readable result file/);
+    assert.match(malformed.summary, /invalid JSON/);
   } finally {
     fs.rmSync(workDir, { recursive: true, force: true });
   }
