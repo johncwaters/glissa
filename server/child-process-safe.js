@@ -32,33 +32,43 @@ const { promisify } = require("node:util");
 // Force windowsHide:true into a child_process options object. Merged LAST so it
 // always wins (no Glissa subprocess ever wants a window); a missing options
 // object becomes one.
+/** @param {unknown} options */
 function hide(options) {
-  return { ...(options || {}), windowsHide: true };
+  if (!options || typeof options !== 'object') return { windowsHide: true };
+  return { ...options, windowsHide: true };
 }
 
 // child_process accepts an optional (args, options, callback) trio after the
 // command. Split them out by type so every documented call form normalizes
 // before windowsHide is injected: array -> args, function -> callback, other
 // object -> options.
+/**
+ * @typedef {(error: import('node:child_process').ExecException | null, stdout: string | Buffer, stderr: string | Buffer) => void} ExecFileCallback
+ */
+
+/** @param {unknown[]} rest */
 function split(rest) {
+  /** @type {string[] | undefined} */
   let args;
+  /** @type {Record<string, unknown> | undefined} */
   let options;
+  /** @type {ExecFileCallback | undefined} */
   let callback;
   for (const v of rest) {
-    if (Array.isArray(v)) args = v;
-    else if (typeof v === "function") callback = v;
-    else if (v && typeof v === "object") options = v;
+    if (Array.isArray(v) && v.every((entry) => typeof entry === 'string')) args = v;
+    if (typeof v === "function") callback = /** @type {ExecFileCallback} */ (v);
+    if (v && typeof v === "object" && !Array.isArray(v)) {
+      options = /** @type {Record<string, unknown>} */ (v);
+    }
   }
   return { args, options, callback };
 }
 
+/** @param {string} file @param {...unknown} rest */
 function execFile(file, ...rest) {
   const { args, options, callback } = split(rest);
-  const call = [file];
-  if (args) call.push(args);
-  call.push(hide(options));
-  if (callback) call.push(callback);
-  return cp.execFile(...call);
+  const execOptions = /** @type {import('node:child_process').ExecFileOptions} */ (hide(options));
+  return cp.execFile(file, args, execOptions, callback);
 }
 
 // Preserve child_process.execFile's PROMISIFIED contract: resolve { stdout,
@@ -69,34 +79,36 @@ function execFile(file, ...rest) {
 execFile[promisify.custom] = (file, ...rest) =>
   new Promise((resolve, reject) => {
     const { args, options } = split(rest);
-    const call = [file];
-    if (args) call.push(args);
-    call.push(hide(options));
-    call.push((err, stdout, stderr) => {
+    const execOptions = /** @type {import('node:child_process').ExecFileOptions} */ (hide(options));
+    const callback = (err, stdout, stderr) => {
       if (err) {
         err.stdout = stdout;
         err.stderr = stderr;
         return reject(err);
       }
       resolve({ stdout, stderr });
-    });
-    cp.execFile(...call);
+    };
+    cp.execFile(file, args, execOptions, callback);
   });
 
 function execFileSync(file, ...rest) {
   const { args, options } = split(rest);
-  if (args) return cp.execFileSync(file, args, hide(options));
-  return cp.execFileSync(file, hide(options));
+  const execOptions = /** @type {import('node:child_process').ExecFileSyncOptions} */ (hide(options));
+  if (args) return cp.execFileSync(file, args, execOptions);
+  return cp.execFileSync(file, execOptions);
 }
 
+/** @param {string} command @param {import('node:child_process').ExecSyncOptions} [options] */
 function execSync(command, options) {
   return cp.execSync(command, hide(options));
 }
 
+/** @param {string} file @param {...unknown} rest */
 function spawn(file, ...rest) {
   const { args, options } = split(rest);
-  if (args) return cp.spawn(file, args, hide(options));
-  return cp.spawn(file, hide(options));
+  const spawnOptions = /** @type {import('node:child_process').SpawnOptions} */ (hide(options));
+  if (args) return cp.spawn(file, args, spawnOptions);
+  return cp.spawn(file, spawnOptions);
 }
 
 // The promisified form every async caller wants, built once here so no call site has to remember that

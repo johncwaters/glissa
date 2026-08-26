@@ -12,6 +12,9 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
+/** @typedef {{ mode?: number, encoding?: BufferEncoding, mkdir?: boolean, fsSync?: typeof fs }} SyncWriteOptions */
+/** @typedef {{ mode?: number, encoding?: BufferEncoding, mkdir?: boolean, fsPromises?: typeof fs.promises }} AsyncWriteOptions */
+
 let tmpCounter = 0;
 
 function tmpPathFor(filePath) {
@@ -19,6 +22,7 @@ function tmpPathFor(filePath) {
   return `${filePath}.tmp.${process.pid}.${tmpCounter}`;
 }
 
+/** @param {number | undefined} mode @param {BufferEncoding} encoding */
 function writeOptions(mode, encoding) {
   if (mode == null) return { encoding };
   return { encoding, mode };
@@ -75,6 +79,7 @@ async function renameWithRetry(fsPromises, tmpPath, filePath) {
   }
 }
 
+/** @param {string} filePath @param {string} content @param {SyncWriteOptions} [options] */
 function writeTextAtomicSync(filePath, content, {
   mode, encoding = 'utf8', mkdir = false, fsSync = fs,
 } = {}) {
@@ -89,10 +94,12 @@ function writeTextAtomicSync(filePath, content, {
   }
 }
 
+/** @param {string} filePath @param {unknown} value @param {SyncWriteOptions} [options] */
 function writeJsonAtomicSync(filePath, value, options) {
   writeTextAtomicSync(filePath, JSON.stringify(value, null, 2), options);
 }
 
+/** @param {string} filePath @param {string} content @param {AsyncWriteOptions} [options] */
 async function writeTextAtomic(filePath, content, {
   mode, encoding = 'utf8', mkdir = false, fsPromises = fs.promises,
 } = {}) {
@@ -109,15 +116,20 @@ async function writeTextAtomic(filePath, content, {
   }
 }
 
+/** @param {string} filePath @param {unknown} value @param {AsyncWriteOptions} [options] */
 async function writeJsonAtomic(filePath, value, options) {
   await writeTextAtomic(filePath, JSON.stringify(value, null, 2), options);
 }
 
+/** @type {Map<string, Promise<void>>} */
 const appendChains = new Map();
 
 /**
  * One JSON line onto the end of a file, serialized PER PATH: an append-only log is only append-only if
  * two concurrent writers cannot interleave a partial line, and node's appendFile gives no such order.
+ * @param {string} filePath
+ * @param {unknown} value
+ * @param {AsyncWriteOptions} [options]
  */
 function appendJsonLine(filePath, value, {
   fsPromises = fs.promises, mkdir = false, encoding = 'utf8', mode,
@@ -146,6 +158,9 @@ function appendJsonLineIdle(filePath) {
  * on one chain, and a failed write clears the signature so the next pass retries instead of believing
  * the file already holds what it never received.
  */
+/**
+ * @param {{ filePath: string, fsPromises?: typeof fs.promises, warn?: (error: unknown) => void }} options
+ */
 function createJsonStateWriter({ filePath, fsPromises = fs.promises, warn = () => {} }) {
   let signature = null;
   let writeChain = Promise.resolve();
@@ -159,6 +174,7 @@ function createJsonStateWriter({ filePath, fsPromises = fs.promises, warn = () =
     }
   }
 
+  /** @param {unknown} subject @param {() => string} buildPayload */
   async function write(subject, buildPayload) {
     const next = JSON.stringify(subject);
     if (next === signature) return;

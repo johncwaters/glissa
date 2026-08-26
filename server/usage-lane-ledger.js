@@ -35,7 +35,11 @@ function createLaneLedger({
 
   // tmp + rename, so a crash mid-write cannot leave a half-written ledger.
   const writer = ledgerPath
-    ? createJsonStateWriter({ filePath: ledgerPath, fsPromises, warn: (error) => warn(`write failed: ${error.message}`) })
+    ? createJsonStateWriter({
+      filePath: ledgerPath,
+      fsPromises,
+      warn: (error) => warn(`write failed: ${error instanceof Error ? error.message : String(error)}`),
+    })
     : null;
 
   function load() {

@@ -26,8 +26,8 @@ const WORKTREE_CHECK_DEBOUNCE_MS = 400;
 /**
  * @typedef {{ cwd: string, isGit: boolean, branch?: string | null, base?: string | null, baseSha?: string | null }} Workspace
  * @typedef {{ state: string, isDestroyed: boolean, isTeardownPending: boolean, hasLivePty: boolean }} SessionState
- * @typedef {{ create: Function, populate: Function, hasUnmergedWork: Function, discard: Function, mergeBack: Function, mergeKeep: Function, rebaseOnly: Function }} GitWorkspace
- * @typedef {{ state: () => SessionState, projectPath?: () => string, emit: (event: string, detail: object) => void, recordDecision: (entry: object) => void, pasteText: (text: string) => object }} SessionPort
+ * @typedef {{ create: (...args: unknown[]) => unknown, populate: (...args: unknown[]) => unknown, hasUnmergedWork: (...args: unknown[]) => unknown, discard: (...args: unknown[]) => unknown, mergeBack: (...args: unknown[]) => unknown, mergeKeep: (...args: unknown[]) => unknown, rebaseOnly: (...args: unknown[]) => Promise<{ ok?: boolean, rebased?: boolean, baseSha?: string, headSha?: string, rerereReplayed?: boolean, reason?: string, conflicts?: string[] }> }} GitWorkspace
+ * @typedef {{ state: () => SessionState, projectPath?: () => string, emit: (event: string, detail: Record<string, unknown>) => void, recordDecision: (entry: Record<string, unknown>) => void, pasteText: (text: string) => Record<string, unknown> }} SessionPort
  * @typedef {{ id: string, projectPath: string, integrationBranch?: string | null, gitWorkspace?: GitWorkspace | null, autoRebase?: boolean, liveWorktreeReview?: boolean, worktreeRoot?: string | null, worktreeShare?: string[] | null, port: SessionPort }} WorktreeLifecycleOptions
  */
 
@@ -152,7 +152,8 @@ function createSessionWorktreeLifecycle({
         stdio: ["ignore", "pipe", "pipe"],
         timeout: 10000,
       });
-      return path.resolve(lifecycleState.worktreeDir, output.trim());
+      const commonDir = Buffer.isBuffer(output) ? output.toString("utf8") : output;
+      return path.resolve(lifecycleState.worktreeDir, commonDir.trim());
     } catch {
       return null;
     }
@@ -262,7 +263,7 @@ function createSessionWorktreeLifecycle({
       if (workspace.branch && workspace.conflictPath && fs.existsSync(workspace.conflictPath)
           && !isSameDirectoryPath(workspace.conflictPath, currentProjectPath())) {
         try {
-          adoptWorktree({ worktreeDir: workspace.conflictPath, branch: workspace.branch });
+          adoptWorktree({ worktreeDir: workspace.conflictPath, branch: workspace.branch, base: integrationBranch });
           adopted = true;
         } catch (error) {
           console.warn(`[session ${id}] survivor adopt failed: ${error.message} - running in place`);
@@ -333,7 +334,7 @@ function createSessionWorktreeLifecycle({
   async function settleOnExit() {
     const session = port.state();
     if (session.isDestroyed || !gitWorkspace || !lifecycleState.workspace) return;
-    if (!RESTARTABLE_STATES.includes(session.state)) return;
+    if (!RESTARTABLE_STATES.some((state) => state === session.state)) return;
     if (await discardIfClean()) return;
     setMergeStatus("pending-review");
   }
@@ -406,7 +407,7 @@ function createSessionWorktreeLifecycle({
     return {
       branch: branch || null,
       upstream: null,
-      state: decideBranchSyncState({ hasUpstream: false }),
+      state: decideBranchSyncState({ hasUpstream: false, ahead: 0, behind: 0 }),
       ahead: 0,
       behind: 0,
       fetched: null,
@@ -535,7 +536,7 @@ function createSessionWorktreeLifecycle({
         targetBranch: integrationBranch,
       });
       const currentSession = port.state();
-      if (!AUTO_REBASE_STATES.includes(currentSession.state)) {
+      if (!AUTO_REBASE_STATES.some((state) => state === currentSession.state)) {
         port.recordDecision({ kind: "rebase", ts: Date.now(), decision: "state-moved", state: currentSession.state });
       }
       if (rebase?.ok && rebase.rebased) {
@@ -623,7 +624,7 @@ function createSessionWorktreeLifecycle({
     if (session.isDestroyed) return { merged: false, refused: true, reason: "destroyed" };
     if (!gitWorkspace || !lifecycleState.workspace) return { merged: false, refused: true, reason: "no-worktree" };
     const runningOverride = force && session.state === STATES.RUNNING;
-    if (!MERGEABLE_LIVE_STATES.includes(session.state) && !runningOverride) {
+    if (!MERGEABLE_LIVE_STATES.some((state) => state === session.state) && !runningOverride) {
       return { merged: false, refused: true, reason: "not-continuable" };
     }
     if (lifecycleState.mergeStatus === "merging") return { merged: false, refused: true, reason: "merge-in-progress" };

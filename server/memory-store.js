@@ -94,7 +94,7 @@ function createMemoryStore(deps = {}) {
     now = () => Date.now(),
     randomBytes = (size) => nodeCrypto.randomBytes(size),
     logger = console,
-    debug = false,
+    debug = /** @type {boolean | (() => boolean)} */ (false),
     projectionDebounceMs = DEFAULT_PROJECTION_DEBOUNCE_MS,
     setTimeoutFn = setTimeout,
     clearTimeoutFn = clearTimeout,

@@ -29,6 +29,7 @@ function reasonText(reason, target) {
 
 // Build the handoff prompt. `conflicts` is the list of conflicting files (empty for a non-content park
 // like a lost fast-forward). `branch`/`target`/`worktreeDir` describe the merge the agent must finish.
+/** @param {{ branch?: string, target?: string, reason?: string, conflicts?: string[], worktreeDir?: string }} [options] */
 function buildMergePrompt({ branch, target, reason, conflicts = [], worktreeDir } = {}) {
   const tgt = target || "the integration branch";
   const br = branch || "this session's branch";

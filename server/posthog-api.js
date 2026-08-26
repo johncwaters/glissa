@@ -107,10 +107,12 @@ function clampBaselineDays(value) {
   return Math.min(MAX_BASELINE_DAYS, Math.max(1, n));
 }
 
+/** @param {{ host?: string, apiKey?: string, fetchFn?: typeof fetch }} [options] */
 function createPosthogApi({ host, apiKey, fetchFn } = {}) {
   const base = String(host || '').replace(/\/+$/, '');
   const doFetch = fetchFn || ((url, init) => fetch(url, init));
 
+  /** @param {string} pathname @param {{ method?: string, body?: unknown }} [options] */
   async function request(pathname, { method = 'GET', body } = {}) {
     try {
       const res = await doFetch(`${base}${pathname}`, {

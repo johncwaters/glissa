@@ -174,11 +174,12 @@ const hooks = {
 };
 
 // -- Spawn ------------------------------------------------------------------
+/** @param {{ platform?: NodeJS.Platform, exec?: typeof execSync }} [options] */
 function resolveCommand({ platform, exec = execSync } = {}) {
   return resolveAgentCommand({
     name: COMMAND_NAME,
-    ...(platform ? { platform } : {}),
-    ...(exec ? { exec } : {}),
+    platform: platform || process.platform,
+    exec,
   });
 }
 

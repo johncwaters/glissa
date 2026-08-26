@@ -20,7 +20,9 @@ function resolveRtkPath({
   platform,
   exec,
   fsApi,
-} = {}) {
+} = /** @type {{ homeDir?: string, platform?: NodeJS.Platform,
+  exec?: (command: string, options: { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: number }) => string | Buffer,
+  fsApi?: { statSync: (path: string) => { isFile: () => boolean } } }} */ ({})) {
   const bundledCandidates = [
     path.join(homeDir, '.glissa', 'bin', 'rtk.exe'),
     path.join(homeDir, '.glissa', 'bin', 'rtk'),

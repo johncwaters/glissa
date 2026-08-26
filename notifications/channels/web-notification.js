@@ -15,8 +15,8 @@
  * use, so the browser is the most reliable notification surface available and
  * needs no install step, no PowerShell, and no AppUserModelID registration.
  *
- * @param {(msg: object) => void} broadcast - control-WS broadcast function
- * @returns {(sessionName: string, category: string, message: string, context: object) => void}
+ * @param {(msg: { type: string, session: string, category: string, message: string, escalationCount: number }) => void} broadcast - control-WS broadcast function
+ * @returns {(sessionName: string, category: string, message: string, context?: { escalationCount?: number }) => void}
  */
 function createWebNotificationChannel(broadcast) {
   return function webNotificationChannel(sessionName, category, message, context) {

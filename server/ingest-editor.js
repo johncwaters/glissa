@@ -5,6 +5,11 @@
 const { applyEditorNotification, createEditorState } = require('./core/ingest-editor-core');
 const { createLaneLog } = require('./lane-log');
 
+/**
+ * @param {{ publish?: (event: Record<string, unknown>) => unknown,
+ *   roots?: (() => string[]) | string[],
+ *   logger?: Console, nowFn?: () => number, debug?: boolean | (() => boolean) }} [options]
+ */
 function createEditorIngest({
   publish,
   roots = () => [],

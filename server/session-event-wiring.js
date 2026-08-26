@@ -8,8 +8,8 @@ const { runPostTurnChecks, resolveCheckConfig } = require('./post-turn-checker')
 
 /**
  * @typedef {object} SessionEventDependencies
- * @property {{ save: (mutator: (config: object) => void) => object|null }} configStore
- * @property {{ projects: object[], postTurnChecks?: object }} config
+ * @property {{ save: (mutator: (config: { projects: Array<Record<string, unknown>> }) => void) => Record<string, unknown>|null }} configStore
+ * @property {{ projects: Array<{ id?: string, postTurnChecks?: Record<string, unknown> }>, postTurnChecks?: Record<string, unknown> }} config
  * @property {(sessionId: string, lane: string, vendor: string) => void} recordLane
  * @property {{ refreshSessions: () => void, nudgeSession: () => void }} usage
  * @property {(message: object) => void} broadcastControl

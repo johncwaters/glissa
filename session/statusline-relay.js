@@ -26,7 +26,7 @@ function postPayload(url, body) {
     const done = () => {
       if (settled) return;
       settled = true;
-      resolve();
+      resolve(undefined);
     };
     let target = null;
     try {

@@ -26,7 +26,7 @@ function defaultTransport(url, bodyObject) {
         res.resume();
         res.on('end', () => {
           if (res.statusCode >= 200 && res.statusCode < 300) {
-            resolve();
+            resolve(undefined);
             return;
           }
           reject(new Error(`non-2xx status ${res.statusCode}`));
@@ -45,7 +45,7 @@ function defaultTransport(url, bodyObject) {
  * @param {string} opts.chatId
  * @param {string} opts.text plain text, no parse_mode - no markdown escaping surprises
  * @param {string} [opts.tag] log prefix identifying the calling lane
- * @param {Function} [opts.transport] injected for tests
+ * @param {(url: string, body: { chat_id: string, text: string }) => Promise<unknown>} [opts.transport] injected for tests
  * @returns {Promise<{ ok: boolean, error: string|null }>} never rejects. The durable outbox needs to
  *   know whether a ping actually landed before it may forget it; the fire-and-forget callers ignore it.
  */

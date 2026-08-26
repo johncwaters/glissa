@@ -53,13 +53,18 @@ function writeStandaloneDenySettings(permissions) {
  * The real spawn: one ephemeral headless session registered under this lane's name, which both excludes
  * its own transcript from ingestion and puts a `memory-distill` row on the usage ledger.
  */
+/**
+ * @param {{ sessions?: Map<string, unknown>, closeSessionDataClients?: (id: string) => void,
+ *   hookRouter?: unknown, getHookPort?: (() => number | null) | null, spawnGate?: unknown,
+ *   replayBufferKB?: number, recordLane?: ((...args: unknown[]) => unknown) | null }} [options]
+ */
 function createMemoryDistillSpawn({
   sessions = new Map(), closeSessionDataClients = () => {}, hookRouter = null, getHookPort = null,
   spawnGate = null, replayBufferKB = undefined, recordLane = null,
 } = {}) {
   return async function spawnMemoryDistill({ id, name, prompt, cwd, model = null, signal = null }) {
     const { Session } = require('../session/sessions');
-    const posture = buildLanePermissions({ denyTools: MEMORY_DISTILL_DENY_TOOLS });
+    const posture = buildLanePermissions({ denyTools: [...MEMORY_DISTILL_DENY_TOOLS] });
     const standalone = hookRouter ? null : writeStandaloneDenySettings(posture.permissions);
     const extraClaudeArgs = ['-p', ...(standalone ? standalone.args : [])];
     if (model) extraClaudeArgs.push('--model', model);
@@ -96,7 +101,15 @@ async function readDistillResultFile(resultPath) {
 }
 
 /**
- * @param {object} deps `store` is the memory store; every other side effect (the spawn, the work dir,
+ * @param {{ store?: NonNullable<ReturnType<typeof import('./memory-store').createMemoryStore>> | null,
+ *   config?: ReturnType<typeof distillCore.resolveDistillConfig>,
+ *   spawnDistill?: (options: { id: string, name: string, prompt: string, cwd: string, model?: string | null, signal?: AbortSignal | null }) => Promise<void>,
+ *   readResult?: (path: string) => Promise<Record<string, unknown> | null>,
+ *   makeWorkDir?: () => Promise<string>, removeWorkDir?: (dir: string) => Promise<void>,
+ *   now?: () => number, logger?: Console, debug?: boolean | (() => boolean),
+ *   setTimeoutFn?: typeof setTimeout, clearTimeoutFn?: typeof clearTimeout,
+ *   setIntervalFn?: typeof setInterval, clearIntervalFn?: typeof clearInterval,
+ *   checkIntervalMs?: number, idFor?: () => string }} [deps] `store` is the memory store; every other side effect (the spawn, the work dir,
  *   the clock, the timers) is injected so the lane is testable with no Claude on PATH.
  */
 function createMemoryDistiller(deps = {}) {

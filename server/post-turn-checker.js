@@ -16,6 +16,8 @@ const {
 
 const GIT_TIMEOUT_MS = 5000;
 
+/** @typedef {{ gitRoot?: (cwd: string | undefined) => Promise<string>, listChangedFiles?: (root: string) => Promise<string[]>, readFile?: (filePath: string) => Buffer, writeFile?: (filePath: string, content: string) => void, stat?: (filePath: string) => { size: number, mtimeMs: number } | null }} PostTurnDependencies */
+
 // Default config. resolveCheckConfig clones and overlays global + per-project on
 // top, so the feature is ON even when config.json has no postTurnChecks key.
 const DEFAULTS = Object.freeze({
@@ -141,6 +143,10 @@ async function listChangedFiles(root) {
 
 // THE RUNNER. Injectable deps (gitRoot/listChangedFiles/readFile/writeFile/stat)
 // make it unit-testable without real git/fs. Never throws.
+/**
+ * @param {{ cwd?: string, config?: ReturnType<typeof resolveCheckConfig>, sessionId?: string,
+ *   deps?: PostTurnDependencies }} [options]
+ */
 async function runPostTurnChecks({ cwd, config, sessionId, deps = {} } = {}) {
   const started = Date.now();
   const cfg = config || resolveCheckConfig();

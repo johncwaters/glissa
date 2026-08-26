@@ -34,6 +34,11 @@ function skip(reason) {
 // Verdict for one auto-rebase opportunity: { action: 'rebase' } or { action: 'skip', reason }.
 // `currentKey` / `lastConflictKey` are opaque strings the caller builds from whatever it wants the
 // cooldown keyed on; an equal, non-empty pair means the last attempt already hit this exact conflict.
+/**
+ * @param {{ enabled?: boolean, state?: string, mergeStatus?: string, dirty?: boolean,
+ *   behind?: string | number | null, rebaseInProgress?: boolean, teardownPending?: boolean,
+ *   currentKey?: string | null, lastConflictKey?: string | null }} [options]
+ */
 function decideAutoRebase({
   enabled,
   state,
@@ -49,7 +54,7 @@ function decideAutoRebase({
   if (teardownPending) return skip("teardown");
   if (mergeStatus === "merging") return skip("merging");
   if (mergeStatus === "parked") return skip("parked");
-  if (!AUTO_REBASE_STATES.includes(state)) return skip("busy");
+  if (!AUTO_REBASE_STATES.some((candidate) => candidate === state)) return skip("busy");
   if (rebaseInProgress) return skip("rebase-in-progress");
   if (dirty) return skip("dirty");
   if (isZeroCount(behind)) return skip("current");
@@ -70,6 +75,7 @@ function decideAutoRebase({
  * blocked is not news, and re-nudging the change funnel for it would be noise on every merge anyone
  * in the repo performs.
  */
+/** @param {{ enabled?: boolean, hasCooldown?: boolean, teardownPending?: boolean }} [options] */
 function decideRerereCooldownClear({ enabled, hasCooldown, teardownPending } = {}) {
   if (!enabled) return { clear: false, reason: "disabled" };
   if (teardownPending) return { clear: false, reason: "teardown" };

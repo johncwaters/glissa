@@ -3,18 +3,22 @@
 const { EventEmitter } = require('node:events');
 const { NOTIFICATION_STATES: NS, NOTIFICATION_TRANSITIONS } = require('../shared/notification-states');
 
+/** @returns {boolean} */
+function alwaysCanEscalate() {
+  return true;
+}
+
 class NotificationManager extends EventEmitter {
   /**
-   * @param {object} opts
-   * @param {number} opts.escalationIntervalMs - Re-fire interval for WAITING notifications
-   * @param {number} opts.debounceMs - Category debounce window
-   * @param {number} opts.phoneEscalationMs - How long an unacknowledged notification waits before the
+   * @param {{ escalationIntervalMs?: number, debounceMs?: number, phoneEscalationMs?: number }} [opts]
+   * How long an unacknowledged notification waits before the
    *   ladder's last rung fires to the off-dashboard channels
    */
   constructor({ escalationIntervalMs = 300000, debounceMs = 3000, phoneEscalationMs = 300000 } = {}) {
     super();
     this._entries = new Map();         // sessionName -> { state, category, message, timer }
-    this._channels = [];               // [{ name, fn, offDashboard }]
+    /** @type {Array<{ name: string, fn: (sessionName: string, category: string, message: string, context: Record<string, unknown>) => unknown, offDashboard: boolean, canEscalate: () => boolean }>} */
+    this._channels = [];
     this._focusSuppressed = false;
     this._escalationIntervalMs = escalationIntervalMs;
     this._debounceMs = debounceMs;
@@ -32,17 +36,19 @@ class NotificationManager extends EventEmitter {
   }
 
   /**
-   * @param {object} [opts]
-   * @param {boolean} [opts.offDashboard] this channel reaches the operator when no dashboard would.
+   * @param {string} name
+   * @param {(sessionName: string, category: string, message: string, context: Record<string, unknown>) => unknown} fn
+   * @param {{ offDashboard?: boolean, canEscalate?: () => boolean }} [opts]
+   * `offDashboard` marks a channel that reaches the operator when no dashboard would.
    *   Only these carry the ladder's last rung, so a phone escalation does not re-toast a browser that
    *   already showed the notification once and was ignored.
-   * @param {() => boolean} [opts.canEscalate] whether this channel WOULD deliver an escalation right
+   * `canEscalate` says whether this channel WOULD deliver an escalation right
    *   now, read live. The Telegram channel is registered unconditionally and decides per delivery, so
    *   without this the ladder armed a five-minute timer per notification on installs that have
    *   Telegram switched off or never configured - a timer that can only ever fire into a channel that
    *   drops it.
    */
-  registerChannel(name, fn, { offDashboard = false, canEscalate = () => true } = {}) {
+  registerChannel(name, fn, { offDashboard = false, canEscalate = alwaysCanEscalate } = {}) {
     this._channels.push({ name, fn, offDashboard, canEscalate });
   }
 

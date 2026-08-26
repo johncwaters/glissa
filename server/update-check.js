@@ -140,6 +140,11 @@ function writeCheckState(statePath, state) {
  * check is genuinely in flight (bounded by timeoutMs). The caller may pass its own abortController so a
  * shutdown cancels both the fetches and the git children (execFile takes the same signal).
  */
+/**
+ * @param {{ currentVersion?: string, fetchFn?: typeof fetch, timeoutMs?: number,
+ *   abortController?: AbortController, packageRoot?: string, runCommand?: typeof execFileAsync,
+ *   statePath?: string, ttlMs?: number, now?: number }} [options]
+ */
 async function checkForUpdate({
   currentVersion,
   fetchFn = fetch,

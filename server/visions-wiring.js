@@ -211,7 +211,7 @@ function createVisionsWiring({
   buildPrompt = buildVisionsPrompt,
   // Per-keystroke chatter, off unless the operator turned debugMode on. Boolean or getter, and the
   // privacy rule every line here obeys lives with the helper in server/lane-log.js.
-  debug = false,
+  debug = /** @type {boolean | (() => boolean)} */ (false),
 } = {}) {
   const wss = new WebSocketServer({ noServer: true, maxPayload });
   const connections = new Set();
@@ -253,7 +253,7 @@ function createVisionsWiring({
     ? createJsonStateWriter({
       filePath: intentStatePath,
       fsPromises,
-      warn: (error) => warn(`intent state write failed: ${error.message}`),
+      warn: (error) => warn(`intent state write failed: ${error instanceof Error ? error.message : String(error)}`),
     })
     : null;
   const dispatchSettings = resolveDispatchConfig(dispatchConfig);

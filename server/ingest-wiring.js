@@ -59,7 +59,7 @@ function createIngestLane({
   snapshotEventLimit = SNAPSHOT_EVENT_LIMIT,
   // Per-batch chatter, off unless the operator turned debugMode on. Boolean or getter, and the privacy
   // rule (which bites hardest here, since an event summary IS captured output) lives in server/lane-log.js.
-  debug = false,
+  debug = /** @type {boolean | (() => boolean)} */ (false),
 } = {}) {
   const resolved = config?.sources ? config : resolveIngestConfig(config);
   const store = createIngestStore(resolved);

@@ -973,7 +973,9 @@ function templateStubErrors(outputs) {
  *   the skill dir it came from (and then `relPath` is relative to that dir).
  * @param {{ builtAt: string, variant?: any, sourceRoots?: string[] }} options build stamp, supplied by the caller so
  *   this stays clock-free, plus the absolute roots the shell resolved the spec's patterns to.
- * @returns {{ ok: boolean, outputs: Array<{relPath: string, content: string}>, manifest: object|null, errors: string[] }}
+ * @returns {{ ok: boolean, outputs: Array<{relPath: string, content: string}>, manifest: {
+ *   version: string, tokenEstimate: number, budgetTokens: number, [key: string]: unknown }|null,
+ *   errors: string[] }}
  */
 function planPackBuild(spec, files, { builtAt, variant = null, sourceRoots = [] } = /** @type {any} */ ({})) {
   const specCheck = validatePackSpec(spec);

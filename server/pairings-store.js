@@ -41,6 +41,10 @@ const SNAPSHOT_RELOAD_MS = 30000;
 // Worst-case revocation propagation the operator is promised (pair-cli prints this number).
 const REVOCATION_PROPAGATION_SECONDS = Math.ceil(SNAPSHOT_RELOAD_MS / 1000);
 
+/** @typedef {{ tokenHash: string, name: string, createdAt: number, expiresAt: number, usedAt: number | null }} PendingPairing */
+/** @typedef {{ id: string, secretHash: string, name: string, createdAt: number, revokedAt: number | null }} PairedDevice */
+/** @typedef {{ version: number, pending: PendingPairing[], devices: PairedDevice[] }} PairingsDocument */
+
 // Cross-process write lock. The CLI and the server both write this file (mint/revoke vs redeem), and
 // the re-read inside save() only narrows the last-write-wins window, it does not close it: a CLI
 // revocation landing between the server's read and its rename would be lost. O_EXCL on a sidecar
@@ -94,6 +98,10 @@ function pairingsSignature(doc) {
   return JSON.stringify(safe);
 }
 
+/**
+ * @param {{ filePath?: string, now?: () => number, randomBytes?: (size: number) => Buffer,
+ *   warn?: (message: string) => void }} [options]
+ */
 function createPairingsStore({ filePath, now = Date.now, randomBytes, warn = console.warn } = {}) {
   const pairingsPath = filePath;
   let snapshot = emptyDoc();
@@ -169,6 +177,7 @@ function createPairingsStore({ filePath, now = Date.now, randomBytes, warn = con
    * redemption must not rewrite the file: an identical rewrite still fires the watch refresh on
    * every replay attempt).
    */
+  /** @param {(document: PairingsDocument) => void | false} mutator */
   function save(mutator) {
     try {
       ensureDir();
@@ -202,6 +211,7 @@ function createPairingsStore({ filePath, now = Date.now, randomBytes, warn = con
     }
   }
 
+  /** @param {{ name?: string, ttlMs?: number }} [options] */
   function mintPending({ name = '', ttlMs } = {}) {
     const minted = mintPairingToken({ now: now(), ttlMs, randomBytes });
     const written = save((doc) => {
@@ -358,6 +368,7 @@ function createPairingsStore({ filePath, now = Date.now, randomBytes, warn = con
  * request. Throttled to one write per device per interval and fire-and-forget - a failed write is
  * never surfaced.
  */
+/** @param {{ filePath?: string, throttleMs?: number, now?: () => number }} [options] */
 function createSeenStore({ filePath, throttleMs = 60000, now = Date.now } = {}) {
   const lastWriteByDevice = new Map();
   let pending = null;
@@ -374,7 +385,7 @@ function createSeenStore({ filePath, throttleMs = 60000, now = Date.now } = {}) 
 
   // Read once at construction (cold path) and keep the doc in memory: touch() runs on request
   // handling, where a sync read would block every session on the shared event loop.
-  const doc = readAll();
+  const doc = /** @type {Record<string, number>} */ (readAll());
 
   function touch(deviceId) {
     if (!deviceId) return;

@@ -154,6 +154,7 @@ function outcome(target) {
   return { id: target.id, label: target.label, filePath: target.filePath };
 }
 
+/** @param {{ invocation?: string | { command: string, args: string[] }, dryRun?: boolean, targets?: ReturnType<typeof editorTargets> | null } & Record<string, unknown>} [options] */
 function wireEditors({ invocation, dryRun = false, targets = null, ...detection } = {}) {
   const list = targets || editorTargets(detection);
   return list.map((target) => wireEditor(target, invocation, { dryRun }));

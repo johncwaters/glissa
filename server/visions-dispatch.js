@@ -46,7 +46,7 @@ const VISIONS_BOOTSTRAP_PROMPT = 'Read visions-prompt.txt and follow all instruc
 const VISIONS_DENY_TOOLS = Object.freeze(['Bash', 'Edit', 'NotebookEdit', 'WebFetch', 'WebSearch', 'Task']);
 
 function visionsPermissions() {
-  return buildLanePermissions({ denyTools: VISIONS_DENY_TOOLS });
+  return buildLanePermissions({ denyTools: [...VISIONS_DENY_TOOLS] });
 }
 
 function errorResult(reason) {
@@ -103,6 +103,11 @@ async function readCommentsResult(resultPath, { lineCount = 0, onBytesRead = nul
  * puts a `visions` row on the Usage tab's lane ledger with no ledger code of its own. Never
  * rejects on an abort; the caller has already resolved that race.
  */
+/**
+ * @param {{ sessions?: Map<string, unknown>, closeSessionDataClients?: (id: string) => void,
+ *   hookRouter?: unknown, getHookPort?: (() => number | null) | null, spawnGate?: unknown,
+ *   replayBufferKB?: number, recordLane?: ((...args: unknown[]) => unknown) | null }} [options]
+ */
 function createVisionsSpawn({
   sessions = new Map(), closeSessionDataClients = () => {}, hookRouter = null, getHookPort = null,
   spawnGate = null, replayBufferKB = undefined, recordLane = null,
@@ -136,6 +141,13 @@ function createVisionsSpawn({
  * One dispatch, end to end: a throwaway cwd, the prompt, the spawn, the timeout race, the result
  * file. Returns { verdict, comments, reason } and never throws, so the wiring's gate logic has a
  * single shape to handle.
+ */
+/**
+ * @param {{ spawnSession?: (options: { id: string, name: string, cwd: string, model?: string | null, signal?: AbortSignal | null, initialPrompt?: string }) => Promise<void>, timeoutSeconds?: number,
+ *   model?: string | null, logger?: Console, nowFn?: () => number,
+ *   setTimeoutFn?: typeof setTimeout, clearTimeoutFn?: typeof clearTimeout,
+ *   makeWorkDir?: () => Promise<string>, removeWorkDir?: (dir: string) => Promise<void>,
+ *   readResult?: typeof readCommentsResult, idFor?: (uri: string) => string }} [options]
  */
 function createVisionsDispatcher({
   spawnSession,

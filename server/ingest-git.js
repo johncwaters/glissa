@@ -46,6 +46,15 @@ function unrefTimer(timer) {
   return timer;
 }
 
+/**
+ * @param {{ publish?: (event: Record<string, unknown>) => unknown,
+ *   sourceConfig?: { debounceMs?: number, pollMs?: number }, reposProvider?: (() => string[]) | null,
+ *   logger?: Console, execFileFn?: typeof execFileAsync, createWatch?: typeof createWatchDebounce,
+ *   canonicalize?: (path: string) => string, nowFn?: () => number,
+ *   setIntervalFn?: typeof setInterval, clearIntervalFn?: typeof clearInterval,
+ *   setTimeoutFn?: typeof setTimeout, clearTimeoutFn?: typeof clearTimeout,
+ *   maxRepos?: number, gitTimeoutMs?: number, gitPath?: string }} [options]
+ */
 function createGitIngest({
   publish,
   sourceConfig = {},

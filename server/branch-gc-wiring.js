@@ -16,7 +16,7 @@ function branchGcCfgKey(config) {
 function createBranchGcWiring({
   config,
   gitWorkspace,
-  broadcast = () => {},
+  broadcast = /** @type {(message: Record<string, unknown>) => void} */ (() => {}),
   log = console,
   decisionTrace = (entry) => log.info(`[branch-gc] decision ${JSON.stringify(entry)}`),
   createPoller = createBranchGcPoller,

@@ -127,7 +127,8 @@ function prReviewPackNames(cfg) {
 
 function createPrReviewWiring({
   config, reviewSessions, closeSessionDataClients, hookRouter, getHookPort, spawnGate, gitWorkspace,
-  getProjectPathById, getProjectNameById = () => null, broadcast = () => {},
+  getProjectPathById, getProjectNameById = () => null,
+  broadcast = /** @type {(message: Record<string, unknown>) => void} */ (() => {}),
   // Lane attribution: names this lane on the ledger when its headless session reports a Claude session id.
   recordLane = null,
 }) {

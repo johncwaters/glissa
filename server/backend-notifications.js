@@ -16,12 +16,13 @@ const DEFAULT_PHONE_ESCALATION_MS = 300000;
 
 /**
  * @typedef {object} BackendNotificationDependencies
- * @property {object} config
+ * @property {{ phoneEscalationMs?: number, notifyDebounceMs?: number, osToast?: boolean,
+ *   telegramNotifications?: boolean, telegram?: { botToken?: string, chatId?: string } }} config
  * @property {{ configPath: string }} configStore
- * @property {Map<string, any>} sessions
- * @property {{ on: (event: string, listener: Function) => unknown }} controlWss
- * @property {{ on: (event: string, listener: Function) => unknown }} dataWss
- * @property {(message: object) => void} broadcastControl
+ * @property {Map<string, { toSnapshot: () => { activeAgents?: number }, recordNotifyDecision: (entry: Record<string, unknown>) => void }>} sessions
+ * @property {{ clients: Iterable<import('ws').WebSocket>, on: (event: string, listener: (socket: import('ws').WebSocket) => void) => unknown }} controlWss
+ * @property {{ clients: Iterable<import('ws').WebSocket>, on: (event: string, listener: (socket: import('ws').WebSocket) => void) => unknown }} dataWss
+ * @property {(message: Record<string, unknown>) => void} broadcastControl
  * @property {Pick<Console, 'warn'>} logger
  */
 

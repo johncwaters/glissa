@@ -17,6 +17,11 @@ const DEFAULT_GATE_RELEASE_SETTLE_MS = 10 * 1000;
 //   "gated"   background work is still live - keep holding, re-check on the next drain or TTL tick
 //   "wait"    eligible, but the quiet window has not elapsed - re-check in `waitMs`
 //   "release" fire the deferred completion now
+/**
+ * @param {{ heldState?: string, currentState?: string, activeAgents?: number, stashSeq?: number,
+ *   lastActivitySeq?: number, stashTs?: number, quietSince?: number, now?: number,
+ *   settleMs?: number }} [options]
+ */
 function decideGateRelease({
   heldState,
   currentState,

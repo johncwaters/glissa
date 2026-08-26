@@ -3,6 +3,7 @@
 const { createOutputRing } = require("./core/output-ring");
 const { STATES, RESTARTABLE_STATES } = require("../shared/states");
 
+/** @type {Set<string>} */
 const PASTE_READY_STATES = new Set([
   STATES.IDLE,
   STATES.RUNNING,
@@ -13,15 +14,15 @@ const PASTE_READY_STATES = new Set([
 /**
  * @typedef {object} SessionOutputOptions
  * @property {number} maxBytes
- * @property {() => string} getState
+ * @property {() => typeof STATES[keyof typeof STATES]} getState
  * @property {() => boolean} isDestroyed
  * @property {() => boolean} hasLivePty
  * @property {(text: string) => void} write
  * @property {() => void} start
  * @property {() => void} restart
- * @property {(event: string, listener: (...args: any[]) => void) => void} on
- * @property {(event: string, listener: (...args: any[]) => void) => void} once
- * @property {(event: string, listener: (...args: any[]) => void) => void} off
+ * @property {(event: string, listener: (...args: unknown[]) => void) => void} on
+ * @property {(event: string, listener: (...args: unknown[]) => void) => void} once
+ * @property {(event: string, listener: (...args: unknown[]) => void) => void} off
  */
 
 /** @param {SessionOutputOptions} options */
@@ -53,6 +54,7 @@ function createSessionOutput(options) {
     const stateBeforeWaiting = options.getState();
     if (options.hasLivePty() && PASTE_READY_STATES.has(stateBeforeWaiting)) return pasteText(text);
     clearPendingPaste();
+    /** @param {{ to: typeof STATES[keyof typeof STATES] }} change */
     const onStateChange = ({ to }) => {
       if (!PASTE_READY_STATES.has(to)) return;
       clearPendingPaste();
@@ -65,7 +67,7 @@ function createSessionOutput(options) {
     options.on("state-change", onStateChange);
     options.once("exit", onExit);
     if (stateBeforeWaiting === STATES.DORMANT) options.start();
-    if (RESTARTABLE_STATES.includes(stateBeforeWaiting)) options.restart();
+    if (RESTARTABLE_STATES.some((state) => state === stateBeforeWaiting)) options.restart();
     return { ok: true, deferred: true };
   }
 

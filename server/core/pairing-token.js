@@ -14,15 +14,21 @@ const crypto = require('node:crypto');
 const DEFAULT_TOKEN_TTL_MS = 10 * 60 * 1000;
 const DEFAULT_DEVICE_MAX_AGE_MS = 180 * 24 * 60 * 60 * 1000;
 
+/** @typedef {(size: number) => Buffer} RandomBytes */
+/** @typedef {{ usedAt?: number | null, expiresAt?: number }} RedeemableRecord */
+/** @typedef {{ revokedAt?: number | null, createdAt?: number }} DeviceRecord */
+
 function hashSecret(value) {
   return crypto.createHash('sha256').update(String(value), 'utf8').digest('hex');
 }
 
+/** @param {{ now?: number, ttlMs?: number, randomBytes?: RandomBytes }} [options] */
 function mintPairingToken({ now = Date.now(), ttlMs = DEFAULT_TOKEN_TTL_MS, randomBytes = crypto.randomBytes } = {}) {
   const token = Buffer.from(randomBytes(32)).toString('base64url');
   return { token, tokenHash: hashSecret(token), createdAt: now, expiresAt: now + ttlMs };
 }
 
+/** @param {{ record?: RedeemableRecord | null, now?: number }} options */
 function decideRedemption({ record, now = Date.now() }) {
   if (!record) return { ok: false, reason: 'unknown' };
   if (record.usedAt) return { ok: false, reason: 'used' };
@@ -30,6 +36,7 @@ function decideRedemption({ record, now = Date.now() }) {
   return { ok: true, reason: null };
 }
 
+/** @param {{ randomBytes?: RandomBytes }} [options] */
 function mintDeviceCredential({ randomBytes = crypto.randomBytes } = {}) {
   // base64url so neither half can contain the "." that separates them in the cookie value.
   const id = Buffer.from(randomBytes(8)).toString('base64url');
@@ -37,10 +44,8 @@ function mintDeviceCredential({ randomBytes = crypto.randomBytes } = {}) {
   return { id, secret, secretHash: hashSecret(secret), cookieValue: `${id}.${secret}` };
 }
 
-/**
- * @param {any} args
- */
-function decideDeviceAuth({ record, now = Date.now(), maxAgeMs = DEFAULT_DEVICE_MAX_AGE_MS, secretMatches } = /** @type {any} */ ({})) {
+/** @param {{ record?: DeviceRecord | null, now?: number, maxAgeMs?: number, secretMatches?: boolean }} [options] */
+function decideDeviceAuth({ record, now = Date.now(), maxAgeMs = DEFAULT_DEVICE_MAX_AGE_MS, secretMatches } = {}) {
   if (!record) return { ok: false, reason: 'unknown' };
   if (record.revokedAt) return { ok: false, reason: 'revoked' };
   if (typeof record.createdAt === 'number' && maxAgeMs > 0 && now - record.createdAt > maxAgeMs) {

@@ -408,7 +408,7 @@ function createPosthogWiring({
   // The git/gh shell-outs of the fix handoff, injected so a test can drive a failing push or a
   // refused pull request without a repository or a GitHub account.
   runCommand = runCli,
-  broadcast = () => {},
+  broadcast = /** @type {(message: Record<string, unknown>) => void} */ (() => {}),
   // Lane attribution: names this lane on the ledger when its headless session reports a Claude session id.
   recordLane = null,
 }) {
@@ -710,6 +710,7 @@ function createPosthogWiring({
    * what is a list edit. lastStatus can still be null here (archiving from a client that connected
    * before the first tick), so the patch seeds a minimal payload rather than dropping the update.
    */
+  /** @param {{ id?: string }} [options] */
   async function archiveInvestigation({ id } = {}) {
     const poller = runner.getPoller();
     if (!poller) return { ok: false, error: 'PostHog monitoring is not running' };

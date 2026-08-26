@@ -50,6 +50,16 @@ function earliestLaneEntryMs(ledger) {
   return earliest;
 }
 
+/**
+ * @param {{ store?: NonNullable<ReturnType<typeof import('./memory-store').createMemoryStore>>,
+ *   logger?: Console, debug?: boolean | (() => boolean), env?: NodeJS.ProcessEnv, fsPromises?: typeof nodeFs.promises,
+ *   laneMap?: (() => Map<string, string>) | null, laneFloorMs?: (() => number | null) | null,
+ *   nowFn?: () => number, setTimeoutFn?: typeof setTimeout, clearTimeoutFn?: typeof clearTimeout,
+ *   maxRecordsPerTick?: number, maxQueued?: number, maxTailEntries?: number,
+ *   backfillByteBudget?: number, backfillChunkBytes?: number, maxBackfillDirs?: number,
+ *   maxBackfillFiles?: number, vendors?: Record<string, boolean> | null,
+ *   knownProjects?: Array<Record<string, unknown>> | (() => Array<Record<string, unknown>>) }} [options]
+ */
 function createMemoryIngest({
   store,
   logger = console,

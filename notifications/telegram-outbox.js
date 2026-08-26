@@ -23,10 +23,19 @@ const {
 
 const OUTBOX_VERSION = 1;
 
+/** @typedef {{ id: string, text: string, queuedAt: number, attempts: number }} OutboxEntry */
+
 /**
  * @param {object} deps
  * @param {string} deps.filePath telegram-outbox.json beside the resolved config
- * @param {(entry: object) => Promise<{ok: boolean}>} deps.send performs one delivery
+ * @param {(entry: OutboxEntry) => Promise<{ok: boolean}>} deps.send performs one delivery
+ * @param {() => number} [deps.now]
+ * @param {number} [deps.maxEntries]
+ * @param {number} [deps.maxAttempts]
+ * @param {number} [deps.maxAgeMs]
+ * @param {(message: string) => void} [deps.warn]
+ * @param {(filePath: string, encoding: BufferEncoding) => string} [deps.readFileSync]
+ * @param {typeof writeJsonAtomic} [deps.writeJson]
  */
 function createTelegramOutbox({
   filePath,
@@ -38,7 +47,8 @@ function createTelegramOutbox({
   warn = console.warn,
   readFileSync = fs.readFileSync,
   writeJson = writeJsonAtomic,
-} = {}) {
+}) {
+  /** @type {OutboxEntry[]} */
   let entries = [];
   let writeChain = Promise.resolve();
   let loaded = false;
@@ -73,6 +83,7 @@ function createTelegramOutbox({
     await attempt(entry);
   }
 
+  /** @param {OutboxEntry} entry */
   async function attempt(entry) {
     let ok = false;
     try {

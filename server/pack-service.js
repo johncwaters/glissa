@@ -254,15 +254,15 @@ function createPackService(deps = {}) {
     }
   }
 
-  service.start = start;
-  service.stop = stop;
-  service.restartIfConsumersChanged = restartIfConsumersChanged;
-  service.ensureBuilt = ensureBuilt;
-  service.sweep = sweep;
-  /** Latest built version per pack name, the staleness baseline the dashboard compares against. */
-  service.getVersions = () => Object.fromEntries(versionsByName);
-  service._watcherCount = () => watchers.length;
-  return service;
+  return Object.assign(service, {
+    start,
+    stop,
+    restartIfConsumersChanged,
+    ensureBuilt,
+    sweep,
+    getVersions: () => Object.fromEntries(versionsByName),
+    _watcherCount: () => watchers.length,
+  });
 }
 
 module.exports = { createPackService, DEFAULT_SWEEP_MINUTES, DEFAULT_DEBOUNCE_MS };

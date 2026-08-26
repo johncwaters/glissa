@@ -40,7 +40,7 @@ const { normalizeShapePath } = require('./core/visions-scope-core');
 /**
  * @typedef {object} BackendLaneDependencies
  * @property {BackendLaneConfig} config
- * @property {{ configPath: string, config: BackendLaneConfig, getSettings: () => { debugMode?: boolean } }} configStore
+ * @property {{ configPath: string, config: BackendLaneConfig, getSettings: () => { debugMode?: boolean }, save: (mutator: (config: Record<string, unknown>) => void) => Record<string, unknown> | null }} configStore
  * @property {Map<string, BackendLaneSession>} sessions
  * @property {Map<string, BackendLaneSession>} reviewSessions
  * @property {Map<string, BackendLaneSession>} investigationSessions
@@ -51,7 +51,7 @@ const { normalizeShapePath } = require('./core/visions-scope-core');
  * @property {(message: Record<string, unknown>) => void} broadcastLocalControl
  * @property {{ clients: Set<import('ws').WebSocket>, on: (event: string, listener: (socket: import('ws').WebSocket) => void) => unknown }} controlWss
  * @property {BackendLaneOptions} options
- * @property {Pick<Console, 'log'|'warn'>} logger
+ * @property {Console} logger
  */
 
 function resolveVisionsScopeProjects(projectIds, projects, warn) {
@@ -117,7 +117,7 @@ function createBackendLanes(dependencies) {
   const branchGc = createBranchGcWiring({
     config,
     gitWorkspace,
-    broadcast: broadcastControl,
+    broadcast: (message) => broadcastControl(message),
     ...(options.branchGcWiringOptions || {}),
   });
   const prReview = createPrReviewWiring({
@@ -131,7 +131,7 @@ function createBackendLanes(dependencies) {
     recordLane,
     getProjectPathById,
     getProjectNameById,
-    broadcast: broadcastControl,
+    broadcast: (message) => broadcastControl(message),
   });
   const posthog = createPosthogWiring({
     config,
@@ -142,7 +142,7 @@ function createBackendLanes(dependencies) {
     spawnGate,
     recordLane,
     gitWorkspace,
-    broadcast: broadcastControl,
+    broadcast: (message) => broadcastControl(message),
   });
 
   let ingestConfig = resolveIngestConfig(config.ingest);
@@ -351,17 +351,17 @@ function createBackendLanes(dependencies) {
     }),
   });
   const packsAutoRebuildEnabled = config.packsAutoRebuild !== false;
-  const fixedLanes = new Map([
-    ['branch-gc', branchGc],
-    ['pr-review', prReview],
-    ['posthog', posthog],
-    ['pack-service', packService],
-    ['usage', usage],
-    ['pack-distiller', packDistiller],
-    ['memory-ingest', memoryIngest],
-    ['memory-distill', memoryDistiller],
-    ['memory-store', memoryStore],
-  ]);
+  /** @type {Map<string, unknown>} */
+  const fixedLanes = new Map();
+  fixedLanes.set('branch-gc', branchGc);
+  fixedLanes.set('pr-review', prReview);
+  fixedLanes.set('posthog', posthog);
+  fixedLanes.set('pack-service', packService);
+  fixedLanes.set('usage', usage);
+  fixedLanes.set('pack-distiller', packDistiller);
+  fixedLanes.set('memory-ingest', memoryIngest);
+  fixedLanes.set('memory-distill', memoryDistiller);
+  fixedLanes.set('memory-store', memoryStore);
 
   function current(name) {
     if (name === 'ingest') return ingestLane;

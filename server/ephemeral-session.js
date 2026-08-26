@@ -32,7 +32,7 @@ async function awaitSessionExit(sess, { signal = null, spawnGate = null, reapCap
   try {
     await new Promise((resolve, reject) => {
       let settled = false;
-      const done = () => { if (settled) return; settled = true; resolve(); };
+      const done = () => { if (settled) return; settled = true; resolve(undefined); };
       const fail = (error) => { if (settled) return; settled = true; reject(error); };
       sess.on('exit', done);
       sess.on('error', fail);

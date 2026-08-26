@@ -138,7 +138,8 @@ function createMillWiring(deps = {}) {
     const labelById = new Map(projects.map((project) => [project.id, project.name]));
     const rows = [];
     for (const build of planPackVariants(entry.spec, projects).builds) {
-      const projectSlug = build.variant?.projectSlug;
+      const variant = build.variant && typeof build.variant === 'object' ? build.variant : null;
+      const projectSlug = variant && 'projectSlug' in variant ? variant.projectSlug : null;
       if (!projectSlug) continue;
       const manifest = await readBuiltManifest(build.name, { builtRoot: resolvedBuiltRoot() });
       const resolved = manifest ? null : await resolveBuiltPack(build.name, { builtRoot: resolvedBuiltRoot() });
@@ -147,7 +148,10 @@ function createMillWiring(deps = {}) {
         spec: entry.spec,
         specError: entry.specError,
         group: entry.name,
-        variantProject: { id: build.variant.projectId, label: labelById.get(build.variant.projectId) || 'project' },
+        variantProject: {
+          id: 'projectId' in variant ? variant.projectId : null,
+          label: labelById.get('projectId' in variant ? variant.projectId : null) || 'project',
+        },
         manifest,
         builtReason: resolved ? resolved.reason : null,
         distill: [],

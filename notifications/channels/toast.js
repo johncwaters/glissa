@@ -12,10 +12,11 @@ function escapeForPowerShell(str) {
 
 function findBurntToastViaPowerShell() {
   try {
-    const result = execFileSync('powershell', [
+    const output = execFileSync('powershell', [
       '-NoProfile', '-Command',
       '(Get-Module -ListAvailable BurntToast | Select-Object -First 1).ModuleBase'
-    ], { encoding: 'utf8', timeout: 5000 }).trim();
+    ], { encoding: 'utf8', timeout: 5000 });
+    const result = Buffer.isBuffer(output) ? output.toString('utf8').trim() : output.trim();
     if (result && fs.statSync(result).isDirectory()) return result;
   } catch {
     // PowerShell unavailable or module not found

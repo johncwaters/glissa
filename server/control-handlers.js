@@ -181,6 +181,7 @@ async function runGitForConversationHistory(args, cwd) {
 // Single wire-format builder for every 'error'/'settings-error' reply, so all call sites agree on the
 // shape. `requestId` is omitted from the payload entirely when not passed (matches every call site that
 // never carried one), rather than defaulting to null, to keep the wire format byte-identical to before.
+/** @param {{ send: (payload: string) => void }} ws @param {string} message @param {{ type?: string, requestId?: string | null }} [options] */
 function sendError(ws, message, { type = 'error', requestId } = {}) {
   const payload = requestId !== undefined ? { type, requestId, message } : { type, message };
   ws.send(JSON.stringify(payload));

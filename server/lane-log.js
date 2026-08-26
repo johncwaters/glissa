@@ -15,7 +15,11 @@
  * is constructed once at boot. `debugNote` takes a THUNK, so a line that is not wanted costs no
  * interpolation on a path that runs at typing cadence.
  */
-function createLaneLog({ prefix, logger = console, debugFlag = false } = {}) {
+/**
+ * @param {{ prefix?: string, logger?: Pick<Console, 'log' | 'warn'> | null,
+ *   debugFlag?: boolean | (() => boolean) }} [options]
+ */
+function createLaneLog({ prefix = '', logger = console, debugFlag = false } = {}) {
   function note(message) {
     if (!logger || typeof logger.log !== 'function') return;
     logger.log(`${prefix} ${message}`);
@@ -36,6 +40,7 @@ function createLaneLog({ prefix, logger = console, debugFlag = false } = {}) {
     }
   }
 
+  /** @param {() => string} buildMessage */
   function debugNote(buildMessage) {
     if (!isDebug()) return;
     note(buildMessage());

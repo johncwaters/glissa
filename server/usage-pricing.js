@@ -23,6 +23,11 @@ const SNAPSHOT_FIELDS = Object.freeze([
   'fast_multiplier',
 ]);
 
+/**
+ * @param {{ fetchEnabled?: boolean, fsPromises?: typeof import('node:fs/promises'), fetchFn?: typeof fetch,
+ *   cachePath?: string, nowFn?: () => number, timeoutMs?: number,
+ *   logger?: Pick<Console, 'warn'> | null }} [options]
+ */
 async function loadPricing({
   fetchEnabled,
   fsPromises = require('node:fs/promises'),

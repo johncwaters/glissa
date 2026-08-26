@@ -147,7 +147,14 @@ async function listRepoConversations({
   git,
   fsMod,
   limit = 60,
-} = {}) {
+} = /** @type {{ repoPath?: string, projectsDir?: string,
+  git?: (args: string[], cwd: string) => Promise<string | Buffer>,
+  fsMod?: { openSync: (path: string, flags: string) => number,
+    fstatSync: (fd: number) => { size: number },
+    readSync: (fd: number, buffer: Buffer, offset: number, length: number, position: number) => number,
+    closeSync: (fd: number) => void, readdirSync: (path: string) => string[],
+    statSync: (path: string) => { isFile: () => boolean, mtimeMs: number } },
+  limit?: number }} */ ({})) {
   if (!repoPath) return [];
   const worktreePaths = await listRepoWorktreePaths(repoPath, git);
 

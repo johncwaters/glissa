@@ -168,6 +168,17 @@ function formatBudgetUsd(value) {
   return `$${number.toFixed(2)}`;
 }
 
+/**
+ * @param {{ config: { usage?: unknown, telegramNotifications?: boolean, telegram?: { botToken?: string, chatId?: string } },
+ *   sessions?: Map<string, Record<string, unknown>>, broadcast?: (message: Record<string, unknown>) => void,
+ *   controlClientCount?: () => number, warehousePath?: string | null, budgetStatePath?: string | null,
+ *   laneMap?: (() => Map<string, string>) | null, sendTelegram?: typeof sendTelegramMessage,
+ *   fsPromises?: typeof import('node:fs/promises'), createScanner?: typeof createUsageScanner,
+ *   loadPricingFn?: typeof loadPricing, execFileAsync?: typeof defaultExecFileAsync,
+ *   rtkPathFn?: () => string | null, scannerDeps?: Record<string, unknown>, nowFn?: () => number,
+ *   partialContinueMs?: number, setIntervalFn?: typeof setInterval,
+ *   clearIntervalFn?: typeof clearInterval, logger?: Console }} options
+ */
 function createUsageWiring({
   config,
   sessions = new Map(),
@@ -222,7 +233,7 @@ function createUsageWiring({
     ? createJsonStateWriter({
       filePath: budgetStatePath,
       fsPromises,
-      warn: (error) => warn(`budget state write failed: ${error.message}`),
+      warn: (error) => warn(`budget state write failed: ${error instanceof Error ? error.message : String(error)}`),
     })
     : null;
   let rtkSavingsCache = null;
@@ -571,6 +582,7 @@ function createUsageWiring({
    * `request-usage-report`. `force` re-reads every transcript from offset zero (the operator asking
    * for a hard refresh); the default pass is incremental.
    */
+  /** @param {{ days?: number, force?: boolean, requestId?: string | null }} [options] */
   async function requestReport({ days, force = false, requestId = null } = {}) {
     await start();
     if (!scanner) return unavailableReport(requestId, 'Usage tracking is disabled');

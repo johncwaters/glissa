@@ -44,7 +44,7 @@ const PACK_DISTILL_DENY_TOOLS = Object.freeze([
 ]);
 
 function packDistillerPermissions() {
-  return buildLanePermissions({ denyTools: PACK_DISTILL_DENY_TOOLS });
+  return buildLanePermissions({ denyTools: [...PACK_DISTILL_DENY_TOOLS] });
 }
 
 function readDistillResult(resultPath) {
@@ -79,8 +79,7 @@ async function writeOutputNoFollow(fullPath, content) {
       if (error.code !== 'ENOENT') throw error;
     }
     if (outputStats?.isSymbolicLink()) {
-      const error = new Error('output path became a symbolic link');
-      error.code = 'ELOOP';
+      const error = Object.assign(new Error('output path became a symbolic link'), { code: 'ELOOP' });
       throw error;
     }
     await fs.promises.rename(tempPath, fullPath);
@@ -100,6 +99,11 @@ function writeStandaloneLaneSettings(permissions) {
   };
 }
 
+/**
+ * @param {{ sessions?: Map<string, unknown>, closeSessionDataClients?: (id: string) => void,
+ *   hookRouter?: unknown, getHookPort?: (() => number | null) | null, spawnGate?: unknown,
+ *   replayBufferKB?: number, recordLane?: ((...args: unknown[]) => unknown) | null }} [options]
+ */
 function createDistillSpawn({
   sessions = new Map(), closeSessionDataClients = () => {}, hookRouter = null, getHookPort = null,
   spawnGate = null, replayBufferKB = undefined,
@@ -135,7 +139,17 @@ function createDistillSpawn({
 }
 
 /**
- * @param {object} deps every side effect, injected. Defaults point at the real builder, the real
+ * @param {{ enabled?: boolean, listSpecs?: typeof listPackSpecs, loadSpec?: typeof loadPackSpec,
+ *   sourceHashes?: typeof distillSourceHashes, resolveOutput?: typeof distillOutputPath,
+ *   readOutput?: (path: string) => Promise<string | null>,
+ *   writeOutput?: (path: string, content: string) => Promise<void>,
+ *   writePrompt?: (path: string, content: string) => Promise<void>,
+ *   spawnDistill?: (options: { id: string, name: string, cwd: string, signal?: AbortSignal | null }) => Promise<void>,
+ *   createResultFile?: (packName: string, index: number) => { path: string, cleanup: () => Promise<void> | void },
+ *   readResult?: (path: string) => Record<string, unknown>, intervalHours?: number,
+ *   timeoutSeconds?: number, setIntervalFn?: typeof setInterval,
+ *   clearIntervalFn?: typeof clearInterval, setTimeoutFn?: typeof setTimeout,
+ *   clearTimeoutFn?: typeof clearTimeout, log?: Console }} [deps] every side effect, injected. Defaults point at the real builder, the real
  *   spawn and the real timers, so `createPackDistiller({ enabled })` is the production wiring.
  */
 function createPackDistiller(deps = {}) {

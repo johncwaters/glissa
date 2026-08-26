@@ -615,8 +615,11 @@ function failure(name, specPath, errors) {
 /**
  * Build one pack from its spec file.
  *
+ * @param {{ specPath?: string, baseDir?: string, builtRoot?: string, glissaHome?: string | null,
+ *   projects?: Array<Record<string, unknown>>, now?: () => number }} [options]
  * @returns {Promise<{ok: boolean, name: string, specPath: string, errors: string[], version: string|null,
- *   fileCount: number, tokenEstimate: number, budgetTokens: number|null, currentDir: string|null}>}
+ *   fileCount: number, tokenEstimate: number, budgetTokens: number|null, currentDir: string|null,
+ *   variants: Array<Record<string, unknown>>, warnings: string[]}>}
  */
 async function buildPack({ specPath, baseDir = DEFAULT_PACKS_DIR, builtRoot = defaultBuiltRoot(), glissaHome = null, projects = [], now = Date.now } = {}) {
   const fallbackName = path.basename(specPath).replace(/\.pack\.json$/, '');
@@ -764,7 +767,7 @@ async function resolveCurrentDirectory(name, builtRoot) {
   return { dir: null, version: null, manifest: null, reason: `not built (no pointer at ${pointerPath})` };
 }
 
-/** The manifest of a pack's current build, or null when it has never been built. */
+/** @returns {Promise<({ version: string, projectSlug?: string, projectId?: string, [key: string]: unknown }) | null>} */
 async function readBuiltManifest(name, { builtRoot = defaultBuiltRoot() } = {}) {
   if (typeof name !== 'string' || !PACK_NAME_RE.test(name)) return null;
   const current = await resolveCurrentDirectory(name, builtRoot);
@@ -779,7 +782,7 @@ async function readBuiltManifest(name, { builtRoot = defaultBuiltRoot() } = {}) 
  * skip reason. Never throws and never guesses: an unbuilt or unreadable pack resolves to dir null.
  *
  * @returns {Promise<{name: string, dir: string|null, version: string|null, reason: string|null,
- *   manifest: object|null}>}
+ *   manifest: object|null, perProjectVariants: boolean, group: string|null}>}
  */
 async function resolveBuiltPack(name, { builtRoot = defaultBuiltRoot() } = {}) {
   const skip = (reason) => ({ name, dir: null, version: null, reason, manifest: null, perProjectVariants: false, group: null });

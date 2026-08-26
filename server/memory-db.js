@@ -121,6 +121,7 @@ function ensureSeqColumn(db) {
   return true;
 }
 
+/** @param {{ dbPath?: string, busyTimeoutMs?: number }} [options] */
 function createMemoryDb({ dbPath, busyTimeoutMs = undefined } = {}) {
   const db = openDatabase(dbPath, { busyTimeoutMs });
   ensureSeqColumn(db);

@@ -280,7 +280,7 @@ function resolveBranchGc(branchGc) {
 
 /**
  * @param {object} [opts]
- * @param {object} [opts.settingsDefaults] Per-launch overrides of DEFAULT_CONFIG used ONLY as the
+ * @param {Partial<typeof DEFAULT_CONFIG>} [opts.settingsDefaults] Per-launch overrides of DEFAULT_CONFIG used ONLY as the
  *   fallback for keys the config file omits (getSettings). Nothing is persisted, and an explicit
  *   key in config.json still wins. The dev server (vite.config.js) uses it to default debugMode on.
  *   Constraint: only overlay a key with NO direct server-side `config[key]` consumer. The overlay
@@ -315,6 +315,7 @@ function pickRedactedBlock(stored, allowedKeys, secretKeys) {
   return redacted;
 }
 
+/** @param {{ settingsDefaults?: Partial<typeof DEFAULT_CONFIG> }} [options] */
 function createConfigStore({ settingsDefaults } = {}) {
   const configPath = resolveConfigPath();
   const effectiveDefaults = { ...DEFAULT_CONFIG, ...(settingsDefaults || {}) };

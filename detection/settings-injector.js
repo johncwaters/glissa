@@ -171,6 +171,12 @@ function buildHookSettings({ port, glissaId, token, timeoutSec = DEFAULT_TIMEOUT
 
 // Write the per-session settings file. Returns { settingsPath, dir, token, cleanup }.
 // Everything this does not use itself is forwarded to buildHookSettings, which owns those defaults.
+/**
+ * @param {{ port: number, glissaId: string, token?: string, baseDir?: string,
+ *   timeoutSec?: number, permissions?: { deny?: string[], defaultMode?: string } | null,
+ *   detectScheduledWakeups?: boolean, enableProjectMcp?: boolean, rtkPath?: string | null,
+ *   planLimits?: boolean, userSettingsPath?: string | null, relayPath?: string }} options
+ */
 function writeSessionSettings({ glissaId, token, baseDir = DEFAULT_BASE_DIR, ...rest }) {
   const tok = token || generateToken();
   const dir = path.join(baseDir, safePathSegment(glissaId));

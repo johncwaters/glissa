@@ -16,6 +16,11 @@ const {
 } = require('./core/ingest-terminal-core');
 const { createLaneLog } = require('./lane-log');
 
+/**
+ * @param {{ publish?: (event: Record<string, unknown>) => unknown,
+ *   sourceConfig?: { flushMs?: number }, logger?: Console, nowFn?: () => number,
+ *   setTimeoutFn?: typeof setTimeout, clearTimeoutFn?: typeof clearTimeout }} [options]
+ */
 function createTerminalIngest({
   publish,
   sourceConfig = {},

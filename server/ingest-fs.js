@@ -44,6 +44,13 @@ function defaultLoadWatcher() {
   return require('@parcel/watcher');
 }
 
+/**
+ * @param {{ publish?: (event: Record<string, unknown>) => unknown,
+ *   sourceConfig?: { batchMs?: number, roots?: string[] }, configPath?: string | null,
+ *   logger?: Console, loadWatcher?: typeof defaultLoadWatcher, canonicalize?: (path: string) => string,
+ *   nowFn?: () => number, setTimeoutFn?: typeof setTimeout, clearTimeoutFn?: typeof clearTimeout,
+ *   maxRoots?: number }} [options]
+ */
 function createFsIngest({
   publish,
   sourceConfig = {},

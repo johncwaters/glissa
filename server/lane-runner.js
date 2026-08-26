@@ -13,7 +13,11 @@ const {
  */
 
 /**
- * @param {object} deps `tick` is the lane's tick body; `writeState` persists whatever the lane calls
+ * @param {{ tag: string, intervalMs: number,
+ *   tick: () => Promise<{ failed?: boolean, retryAfterMs?: number } | void>,
+ *   writeState?: () => Promise<void> | void, setIntervalFn?: typeof setInterval,
+ *   clearIntervalFn?: typeof clearInterval, backoffBaseMs?: number, backoffMaxMs?: number,
+ *   now?: () => number, random?: () => number, log?: Pick<Console, 'warn'> }} deps `tick` is the lane's tick body; `writeState` persists whatever the lane calls
  *   its state. Both are injected, so the loop stays IO-free like the pollers it serves.
  *
  * A tick body may report a failed poll by returning `{ failed: true, retryAfterMs? }`, which opens a
@@ -116,6 +120,12 @@ function createTickLoop({
  * Restarts are serialized through one promise chain so a stop-drain-start never overlaps a prior one,
  * and a settings save landing mid-drain just queues another restart on the chain, which coalesces
  * naturally. startPoller stays synchronous from its callers' perspective (it only appends to the chain).
+ */
+/**
+ * @param {{ tag: string, gate: () => { start: boolean, reason?: string }, cfgKey: () => string,
+ *   emptyStatus: () => Record<string, unknown>,
+ *   createPoller: (callbacks: { onTickComplete: (summary: Record<string, unknown>) => void }) => { start: () => Promise<void>, stop: () => Promise<void> },
+ *   broadcast?: (status: Record<string, unknown>) => void, beforeStop?: () => void }} options
  */
 function createLaneRunner({
   tag, gate, cfgKey, emptyStatus, createPoller, broadcast = () => {}, beforeStop = () => {},

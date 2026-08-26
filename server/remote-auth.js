@@ -22,6 +22,10 @@ const { classifyRequestOrigin, decideRequestAccess, normalizePathname } = requir
 
 const DEVICE_COOKIE_MAX_AGE_SECONDS = Math.floor(DEFAULT_DEVICE_MAX_AGE_MS / 1000);
 
+/** @typedef {{ id: string, secretHash: string, name: string, createdAt: number, revokedAt: number | null }} PairedDevice */
+/** @typedef {{ watch: (onChange: () => void) => () => void, findDevice: (id: string) => PairedDevice | null, redeem: (token: string, options: { fallbackName: string }) => { ok: boolean, reason: string | null, device: PairedDevice | null, cookieValue?: string } }} PairingsStore */
+/** @typedef {{ touch: (deviceId: string) => void }} SeenStore */
+
 function escapeHtml(str) {
   return String(str)
     .replace(/&/g, '&amp;')
@@ -61,8 +65,11 @@ function hashesMatch(a, b) {
 /**
  * @param {object} deps
  * @param {{ enabled: boolean, port: number|null, publicHost: string, allowedOrigins: string[] }} deps.remote
- * @param {object} deps.pairingsStore  createPairingsStore(...)
- * @param {object} [deps.seenStore]    createSeenStore(...), display-only lastSeenAt
+ * @param {PairingsStore} deps.pairingsStore  createPairingsStore(...)
+ * @param {SeenStore} [deps.seenStore]    createSeenStore(...), display-only lastSeenAt
+ * @param {() => number} [deps.now]
+ * @param {number} [deps.deviceMaxAgeMs]
+ * @param {(message: string) => void} [deps.log]
  */
 function createRemoteAuth({
   remote,
@@ -71,7 +78,7 @@ function createRemoteAuth({
   now = Date.now,
   deviceMaxAgeMs = DEFAULT_DEVICE_MAX_AGE_MS,
   log = console.log,
-} = {}) {
+}) {
   const remoteListenerPort = remote?.enabled ? remote.port : null;
   const stopWatch = pairingsStore.watch(() => {
     log('[remote] pairings.json changed - device list reloaded');

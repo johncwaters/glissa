@@ -143,6 +143,13 @@ async function unwireEverything() {
 
 // One run per transition of `visions.enabled`, and failure is a log line: an editor that could not be
 // wired must never be able to stop the lane it was for.
+/**
+ * @param {{ getConfig?: () => { visions?: { enabled?: boolean } },
+ *   configStore?: { configPath?: string, save: (mutator: (config: Record<string, unknown>) => void) => Record<string, unknown> | null } | null,
+ *   logger?: Console, debug?: boolean | (() => boolean), env?: NodeJS.ProcessEnv,
+ *   onConfigChanged?: (() => void | Promise<void>) | null,
+ *   wire?: typeof wireEverything, unwire?: typeof unwireEverything }} [options]
+ */
 function createVisionsSetup({
   getConfig, configStore = null, logger = console, debug = false, env = process.env,
   onConfigChanged = null, wire = wireEverything, unwire = unwireEverything,

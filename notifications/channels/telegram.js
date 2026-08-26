@@ -23,6 +23,8 @@ const { decideOffDashboardDelivery } = require('../../server/core/client-presenc
  * @param {string} opts.botToken config.telegram.botToken (shared with the PR-review lane)
  * @param {string} opts.chatId config.telegram.chatId
  * @param {number} opts.connectionCount open control-WS connections right now
+ * @param {string | null} [opts.category]
+ * @param {number} [opts.activeAgents]
  * @param {boolean} [opts.phoneEscalation] this is the notification ladder's last rung: the operator
  *   was shown a browser notification and did not acknowledge it, so a dashboard being open somewhere
  *   is exactly what this delivery disbelieves. Everything else about the gate still applies - it is
@@ -56,11 +58,12 @@ function formatTelegramText(sessionName, category, message) {
 
 /**
  * @param {object} deps
- * @param {() => object} deps.getConfig live config object (read per delivery, never captured)
+ * @param {() => { telegramNotifications?: boolean, telegram?: { botToken?: string, chatId?: string } }} deps.getConfig live config object (read per delivery, never captured)
  * @param {() => number} deps.getConnectionCount open control-WS connection count
- * @param {object} [deps.outbox] durable at-least-once queue; absent means fire-and-forget as before
- * @param {Function} [deps.send] injected transport for tests
- * @returns {(sessionName: string, category: string, message: string, context: object) => void}
+ * @param {(sessionId: string) => number} [deps.getActiveAgentCount]
+ * @param {{ deliver: (text: string) => Promise<void> }} [deps.outbox] durable at-least-once queue; absent means fire-and-forget as before
+ * @param {(message: { botToken: string, chatId: string, text: string, tag?: string }) => unknown} [deps.send] injected transport for tests
+ * @returns {(sessionName: string, category: string, message: string, context?: { phoneEscalation?: boolean }) => { send: boolean, reason: string }}
  */
 function createTelegramChannel({
   getConfig,

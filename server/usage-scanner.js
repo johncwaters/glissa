@@ -110,7 +110,7 @@ function createUsageScanner(deps = {}) {
     ? createJsonStateWriter({
       filePath: warehousePath,
       fsPromises,
-      warn: (error) => warn(logger, `usage warehouse write failed: ${error.message}`),
+      warn: (error) => warn(logger, `usage warehouse write failed: ${error instanceof Error ? error.message : String(error)}`),
     })
     : null;
 
@@ -531,6 +531,7 @@ function createUsageScanner(deps = {}) {
     return laneRollup(entriesWithinDays(entries, { now, retainDays: reportRetainDays }), lanes);
   }
 
+  /** @param {{ days?: number }} [options] */
   function buildReport({ days } = {}) {
     const reportRetainDays = days == null ? retainDays : days;
     const rollups = cachedRollupsForDays(days, reportRetainDays);

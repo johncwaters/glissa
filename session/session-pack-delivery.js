@@ -6,6 +6,7 @@ const { buildPackNotice, listStalePacks } = require("./core/pack-notice");
 
 /**
  * @typedef {{ name: string, version: string, dir?: string }} DeliveredPack
+ * @typedef {{ name?: string, version?: string, dir?: string, reason?: string, manifest?: Record<string, unknown>, perProjectVariants?: boolean }} PackResolution
  * @typedef {object} SessionPackDeliveryOptions
  * @property {unknown} configuredPacks
  * @property {string | null} builtRoot
@@ -17,7 +18,7 @@ const { buildPackNotice, listStalePacks } = require("./core/pack-notice");
  * @property {() => boolean} canNotify
  * @property {(packs: DeliveredPack[], builtRoot: string) => string[] | null} renderArgs
  * @property {(entry: Record<string, unknown>) => void} recordDecision
- * @property {(name: string, options: { builtRoot: string }) => Promise<Record<string, any>>} [resolvePack]
+ * @property {(name: string, options: { builtRoot: string }) => Promise<PackResolution>} [resolvePack]
  */
 
 /** @param {SessionPackDeliveryOptions} options */

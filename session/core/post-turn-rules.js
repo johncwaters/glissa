@@ -176,6 +176,7 @@ function globToRegExp(glob) {
 }
 
 // A path is in scope if it matches >=1 include glob and 0 exclude globs.
+/** @param {string} relPath @param {{ include?: string[], exclude?: string[] }} [options] */
 function shouldCheckPath(relPath, { include, exclude } = {}) {
   const p = String(relPath).replace(/\\/g, '/');
   const inc = include?.length ? include : ['**/*'];

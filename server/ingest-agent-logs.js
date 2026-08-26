@@ -133,6 +133,21 @@ function transcriptRootCandidates(env = process.env, wanted = {}, homeDir = os.h
   return candidates;
 }
 
+/**
+ * @param {{ publish?: ((event: Record<string, unknown>) => unknown) | null,
+ *   consumers?: Array<{ name?: string, publish: (event: Record<string, unknown>) => unknown,
+ *     noteTail?: (entry: Record<string, unknown>) => void, userPrompts?: boolean }>,
+ *   sourceConfig?: { pollMs?: number }, laneMap?: (() => Map<string, string>) | null,
+ *   logger?: Console, env?: NodeJS.ProcessEnv, homeDir?: string,
+ *   fsPromises?: typeof fsNode.promises, watchFn?: typeof fsNode.watch, nowFn?: () => number,
+ *   setIntervalFn?: typeof setInterval, clearIntervalFn?: typeof clearInterval,
+ *   setTimeoutFn?: typeof setTimeout, clearTimeoutFn?: typeof clearTimeout,
+ *   pollIntervalMs?: number, discoverIntervalMs?: number, activeWithinMs?: number,
+ *   maxActiveFiles?: number, maxTrackedFiles?: number, maxCachedDirs?: number,
+ *   maxWatchedDirs?: number, maxScanDirs?: number, maxStatsPerSweep?: number,
+ *   maxLinesPerDrain?: number, maxCatchUpBytes?: number,
+ *   vendors?: Record<string, boolean> | null }} [options]
+ */
 function createAgentLogIngest({
   publish = null,
   // The M14 fan-out: every target sees the MAPPED event, and user prompts reach only the targets that asked.

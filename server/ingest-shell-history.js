@@ -54,6 +54,16 @@ function unrefTimer(timer) {
   return timer;
 }
 
+/**
+ * @param {{ publish?: (event: Record<string, unknown>) => unknown,
+ *   sourceConfig?: { pollMs?: number, shells?: string[] }, logger?: Console,
+ *   env?: NodeJS.ProcessEnv, homeDir?: string, platform?: NodeJS.Platform,
+ *   fsPromises?: typeof fsNode.promises, watchFn?: typeof fsNode.watch, nowFn?: () => number,
+ *   setIntervalFn?: typeof setInterval, clearIntervalFn?: typeof clearInterval,
+ *   setTimeoutFn?: typeof setTimeout, clearTimeoutFn?: typeof clearTimeout,
+ *   discoverIntervalMs?: number, maxTrackedFiles?: number, maxCommandsPerDrain?: number,
+ *   maxCatchUpBytes?: number }} [options]
+ */
 function createShellHistoryIngest({
   publish,
   sourceConfig = {},
@@ -264,8 +274,8 @@ function createShellHistoryIngest({
   function installWatch(dir) {
     try {
       // Watched spelling only: an 8.3 short path aborts node in native code (shared/paths.js); `dir` keeps keying reachableDirs and tails.
-      const watcher = watchFn(canonicalizePath(dir), { persistent: false }, (eventType, filename) => {
-        onWatchEvent(eventType, filename);
+      const watcher = watchFn(canonicalizePath(dir), { persistent: false }, (eventType) => {
+        onWatchEvent(eventType);
       });
       if (watcher && typeof watcher.on === 'function') {
         watcher.on('error', () => closeWatcher(watcher));

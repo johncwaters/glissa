@@ -39,6 +39,7 @@ const IMMEDIATE = new Set(['working', 'awaiting-input', 'resume', 'session-start
 const ACTIVITY = new Set(['working', 'resume']);
 
 class StatusSource extends EventEmitter {
+  /** @param {{ sessionId?: string, conflictWindowMs?: number, dedupWindowMs?: number }} [options] */
   constructor({ sessionId, conflictWindowMs = DEFAULT_CONFLICT_WINDOW_MS, dedupWindowMs = DEFAULT_DEDUP_WINDOW_MS } = {}) {
     super();
     this._sessionId = sessionId;

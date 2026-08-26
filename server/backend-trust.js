@@ -15,9 +15,7 @@ const { createRemoteAuth } = require('./remote-auth');
  */
 
 function bootError(message) {
-  const error = new Error(message);
-  error.glissaBoot = true;
-  return error;
+  return Object.assign(new Error(message), { glissaBoot: true });
 }
 
 /** @param {BackendTrustDependencies} dependencies */
