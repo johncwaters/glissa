@@ -46,7 +46,7 @@ const VISIONS_BOOTSTRAP_PROMPT = 'Read visions-prompt.txt and follow all instruc
 const VISIONS_DENY_TOOLS = Object.freeze(['Bash', 'Edit', 'NotebookEdit', 'WebFetch', 'WebSearch', 'Task']);
 
 function visionsPermissions() {
-  return buildLanePermissions({ denyTools: [...VISIONS_DENY_TOOLS] });
+  return buildLanePermissions({ denyTools: VISIONS_DENY_TOOLS });
 }
 
 function errorResult(reason) {

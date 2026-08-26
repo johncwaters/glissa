@@ -141,6 +141,7 @@ function createMillWiring(deps = {}) {
       const variant = build.variant && typeof build.variant === 'object' ? build.variant : null;
       const projectSlug = variant && 'projectSlug' in variant ? variant.projectSlug : null;
       if (!projectSlug) continue;
+      const variantProjectId = 'projectId' in variant ? variant.projectId : null;
       const manifest = await readBuiltManifest(build.name, { builtRoot: resolvedBuiltRoot() });
       const resolved = manifest ? null : await resolveBuiltPack(build.name, { builtRoot: resolvedBuiltRoot() });
       rows.push({
@@ -149,8 +150,8 @@ function createMillWiring(deps = {}) {
         specError: entry.specError,
         group: entry.name,
         variantProject: {
-          id: 'projectId' in variant ? variant.projectId : null,
-          label: labelById.get('projectId' in variant ? variant.projectId : null) || 'project',
+          id: variantProjectId,
+          label: labelById.get(variantProjectId) || 'project',
         },
         manifest,
         builtReason: resolved ? resolved.reason : null,

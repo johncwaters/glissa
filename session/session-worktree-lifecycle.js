@@ -146,13 +146,12 @@ function createSessionWorktreeLifecycle({
   function resolveCommonGitDir() {
     if (!lifecycleState.worktreeDir) return null;
     try {
-      const output = execFileSync("git", ["rev-parse", "--git-common-dir"], {
+      const commonDir = execFileSync("git", ["rev-parse", "--git-common-dir"], {
         cwd: lifecycleState.worktreeDir,
         encoding: "utf8",
         stdio: ["ignore", "pipe", "pipe"],
         timeout: 10000,
       });
-      const commonDir = Buffer.isBuffer(output) ? output.toString("utf8") : output;
       return path.resolve(lifecycleState.worktreeDir, commonDir.trim());
     } catch {
       return null;
@@ -217,6 +216,10 @@ function createSessionWorktreeLifecycle({
     lifecycleState.rerereWatcher.start();
   }
 
+  /**
+   * @param {{ worktreeDir: string, branch: string, base?: string | null, baseSha?: string | null,
+   *   hasUnmergedWork?: boolean, watch?: boolean, emit?: boolean }} options
+   */
   function adoptWorktree({
     worktreeDir,
     branch,
@@ -334,7 +337,7 @@ function createSessionWorktreeLifecycle({
   async function settleOnExit() {
     const session = port.state();
     if (session.isDestroyed || !gitWorkspace || !lifecycleState.workspace) return;
-    if (!RESTARTABLE_STATES.some((state) => state === session.state)) return;
+    if (!RESTARTABLE_STATES.includes(session.state)) return;
     if (await discardIfClean()) return;
     setMergeStatus("pending-review");
   }
@@ -407,7 +410,7 @@ function createSessionWorktreeLifecycle({
     return {
       branch: branch || null,
       upstream: null,
-      state: decideBranchSyncState({ hasUpstream: false, ahead: 0, behind: 0 }),
+      state: decideBranchSyncState({ hasUpstream: false }),
       ahead: 0,
       behind: 0,
       fetched: null,
@@ -536,7 +539,7 @@ function createSessionWorktreeLifecycle({
         targetBranch: integrationBranch,
       });
       const currentSession = port.state();
-      if (!AUTO_REBASE_STATES.some((state) => state === currentSession.state)) {
+      if (!AUTO_REBASE_STATES.includes(currentSession.state)) {
         port.recordDecision({ kind: "rebase", ts: Date.now(), decision: "state-moved", state: currentSession.state });
       }
       if (rebase?.ok && rebase.rebased) {
@@ -624,7 +627,7 @@ function createSessionWorktreeLifecycle({
     if (session.isDestroyed) return { merged: false, refused: true, reason: "destroyed" };
     if (!gitWorkspace || !lifecycleState.workspace) return { merged: false, refused: true, reason: "no-worktree" };
     const runningOverride = force && session.state === STATES.RUNNING;
-    if (!MERGEABLE_LIVE_STATES.some((state) => state === session.state) && !runningOverride) {
+    if (!MERGEABLE_LIVE_STATES.includes(session.state) && !runningOverride) {
       return { merged: false, refused: true, reason: "not-continuable" };
     }
     if (lifecycleState.mergeStatus === "merging") return { merged: false, refused: true, reason: "merge-in-progress" };

@@ -44,7 +44,7 @@ const PACK_DISTILL_DENY_TOOLS = Object.freeze([
 ]);
 
 function packDistillerPermissions() {
-  return buildLanePermissions({ denyTools: [...PACK_DISTILL_DENY_TOOLS] });
+  return buildLanePermissions({ denyTools: PACK_DISTILL_DENY_TOOLS });
 }
 
 function readDistillResult(resultPath) {

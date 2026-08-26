@@ -11,11 +11,14 @@ const grok = require("./grok");
 
 const DEFAULT_AGENT_ID = claudeCode.id;
 
-/** @type {Map<string, typeof claudeCode | typeof codex | typeof grok>} */
-const ADAPTERS = new Map();
-ADAPTERS.set(claudeCode.id, claudeCode);
-ADAPTERS.set(codex.id, codex);
-ADAPTERS.set(grok.id, grok);
+/** @typedef {typeof claudeCode | typeof codex | typeof grok} Adapter */
+/** @type {Array<[string, Adapter]>} */
+const adapterEntries = [
+  [claudeCode.id, claudeCode],
+  [codex.id, codex],
+  [grok.id, grok],
+];
+const ADAPTERS = new Map(adapterEntries);
 
 const resolvedCommands = new Map();
 

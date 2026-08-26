@@ -3,11 +3,6 @@
 const { EventEmitter } = require('node:events');
 const { NOTIFICATION_STATES: NS, NOTIFICATION_TRANSITIONS } = require('../shared/notification-states');
 
-/** @returns {boolean} */
-function alwaysCanEscalate() {
-  return true;
-}
-
 class NotificationManager extends EventEmitter {
   /**
    * @param {{ escalationIntervalMs?: number, debounceMs?: number, phoneEscalationMs?: number }} [opts]
@@ -48,7 +43,7 @@ class NotificationManager extends EventEmitter {
    *   Telegram switched off or never configured - a timer that can only ever fire into a channel that
    *   drops it.
    */
-  registerChannel(name, fn, { offDashboard = false, canEscalate = alwaysCanEscalate } = {}) {
+  registerChannel(name, fn, { offDashboard = false, canEscalate = () => true } = {}) {
     this._channels.push({ name, fn, offDashboard, canEscalate });
   }
 

@@ -117,7 +117,7 @@ function createBackendLanes(dependencies) {
   const branchGc = createBranchGcWiring({
     config,
     gitWorkspace,
-    broadcast: (message) => broadcastControl(message),
+    broadcast: broadcastControl,
     ...(options.branchGcWiringOptions || {}),
   });
   const prReview = createPrReviewWiring({
@@ -131,7 +131,7 @@ function createBackendLanes(dependencies) {
     recordLane,
     getProjectPathById,
     getProjectNameById,
-    broadcast: (message) => broadcastControl(message),
+    broadcast: broadcastControl,
   });
   const posthog = createPosthogWiring({
     config,
@@ -142,7 +142,7 @@ function createBackendLanes(dependencies) {
     spawnGate,
     recordLane,
     gitWorkspace,
-    broadcast: (message) => broadcastControl(message),
+    broadcast: broadcastControl,
   });
 
   let ingestConfig = resolveIngestConfig(config.ingest);
@@ -351,17 +351,19 @@ function createBackendLanes(dependencies) {
     }),
   });
   const packsAutoRebuildEnabled = config.packsAutoRebuild !== false;
-  /** @type {Map<string, unknown>} */
-  const fixedLanes = new Map();
-  fixedLanes.set('branch-gc', branchGc);
-  fixedLanes.set('pr-review', prReview);
-  fixedLanes.set('posthog', posthog);
-  fixedLanes.set('pack-service', packService);
-  fixedLanes.set('usage', usage);
-  fixedLanes.set('pack-distiller', packDistiller);
-  fixedLanes.set('memory-ingest', memoryIngest);
-  fixedLanes.set('memory-distill', memoryDistiller);
-  fixedLanes.set('memory-store', memoryStore);
+  /** @type {Array<[string, unknown]>} */
+  const fixedLaneEntries = [
+    ['branch-gc', branchGc],
+    ['pr-review', prReview],
+    ['posthog', posthog],
+    ['pack-service', packService],
+    ['usage', usage],
+    ['pack-distiller', packDistiller],
+    ['memory-ingest', memoryIngest],
+    ['memory-distill', memoryDistiller],
+    ['memory-store', memoryStore],
+  ];
+  const fixedLanes = new Map(fixedLaneEntries);
 
   function current(name) {
     if (name === 'ingest') return ingestLane;

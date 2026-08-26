@@ -42,17 +42,16 @@ function dedupePathMatches(matches, platform = process.platform) {
 // THE shared PATH-lookup (claude here, rtk in rtk-command.js): `where` on win32, `which -a` on POSIX with a `command -v` fallback since minimal distros ship no `which`; never throws, [] on failure, first match wins.
 /**
  * @param {string} name
- * @param {{ platform: NodeJS.Platform, exec: (command: string, options: { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: number }) => string | Buffer }} options
+ * @param {{ platform: NodeJS.Platform, exec: (command: string, options: { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: number }) => string }} options
  */
 function resolvePathCommandMatches(name, { platform, exec }) {
   const run = (command) => {
-    const out = exec(command, {
+    const output = exec(command, {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
       timeout: 2000,
     });
-    const text = Buffer.isBuffer(out) ? out.toString('utf8') : out;
-    return dedupePathMatches(text.split(/\r?\n/).filter((s) => s.trim()), platform);
+    return dedupePathMatches(output.split(/\r?\n/).filter((line) => line.trim()), platform);
   };
   if (platform === "win32") {
     try {
@@ -80,7 +79,7 @@ function resolvePathCommandMatches(name, { platform, exec }) {
 // through the adapter registry's lazy cache (session/adapters/index.js), never at module load.
 /**
  * @param {{ name: string, platform?: NodeJS.Platform,
- *   exec?: (command: string, options: { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: number }) => string | Buffer }} options
+ *   exec?: (command: string, options: { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: number }) => string }} options
  */
 function resolveAgentCommand({ name, platform = process.platform, exec }) {
   if (typeof exec !== "function") throw new TypeError("resolveAgentCommand requires an exec function");

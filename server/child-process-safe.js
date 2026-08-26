@@ -91,6 +91,33 @@ execFile[promisify.custom] = (file, ...rest) =>
     cp.execFile(file, args, execOptions, callback);
   });
 
+/**
+ * @overload
+ * @param {string} file
+ * @param {import('node:child_process').ExecFileSyncOptionsWithStringEncoding} options
+ * @returns {string}
+ */
+/**
+ * @overload
+ * @param {string} file
+ * @param {readonly string[]} args
+ * @param {import('node:child_process').ExecFileSyncOptionsWithStringEncoding} options
+ * @returns {string}
+ */
+/**
+ * @overload
+ * @param {string} file
+ * @param {import('node:child_process').ExecFileSyncOptions} [options]
+ * @returns {string | Buffer}
+ */
+/**
+ * @overload
+ * @param {string} file
+ * @param {readonly string[]} args
+ * @param {import('node:child_process').ExecFileSyncOptions} [options]
+ * @returns {string | Buffer}
+ */
+/** @param {string} file @param {...unknown} rest @returns {string | Buffer} */
 function execFileSync(file, ...rest) {
   const { args, options } = split(rest);
   const execOptions = /** @type {import('node:child_process').ExecFileSyncOptions} */ (hide(options));
@@ -98,7 +125,19 @@ function execFileSync(file, ...rest) {
   return cp.execFileSync(file, execOptions);
 }
 
-/** @param {string} command @param {import('node:child_process').ExecSyncOptions} [options] */
+/**
+ * @overload
+ * @param {string} command
+ * @param {import('node:child_process').ExecSyncOptionsWithStringEncoding} options
+ * @returns {string}
+ */
+/**
+ * @overload
+ * @param {string} command
+ * @param {import('node:child_process').ExecSyncOptions} [options]
+ * @returns {string | Buffer}
+ */
+/** @param {string} command @param {import('node:child_process').ExecSyncOptions} [options] @returns {string | Buffer} */
 function execSync(command, options) {
   return cp.execSync(command, hide(options));
 }

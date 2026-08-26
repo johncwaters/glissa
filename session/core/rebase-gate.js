@@ -12,6 +12,7 @@ const { STATES } = require("../../shared/states");
 // turns, DONE and FAILED have no PTY at all, DORMANT never started one. WAITING is deliberately absent
 // even though the merge gate accepts it (MERGEABLE_LIVE_STATES): "Needs Input" is a permission prompt
 // PAUSING a turn, and the agent resumes into the very files a rebase would have rewritten underneath it.
+/** @type {ReadonlyArray<string>} */
 const AUTO_REBASE_STATES = Object.freeze([
   STATES.IDLE,
   STATES.COMPLETE,
@@ -54,7 +55,7 @@ function decideAutoRebase({
   if (teardownPending) return skip("teardown");
   if (mergeStatus === "merging") return skip("merging");
   if (mergeStatus === "parked") return skip("parked");
-  if (!AUTO_REBASE_STATES.some((candidate) => candidate === state)) return skip("busy");
+  if (!AUTO_REBASE_STATES.includes(state)) return skip("busy");
   if (rebaseInProgress) return skip("rebase-in-progress");
   if (dirty) return skip("dirty");
   if (isZeroCount(behind)) return skip("current");

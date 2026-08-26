@@ -10,6 +10,7 @@
 
 const https = require('node:https');
 
+/** @returns {Promise<void>} */
 function defaultTransport(url, bodyObject) {
   return new Promise((resolve, reject) => {
     const body = JSON.stringify(bodyObject);
@@ -26,7 +27,7 @@ function defaultTransport(url, bodyObject) {
         res.resume();
         res.on('end', () => {
           if (res.statusCode >= 200 && res.statusCode < 300) {
-            resolve(undefined);
+            resolve();
             return;
           }
           reject(new Error(`non-2xx status ${res.statusCode}`));

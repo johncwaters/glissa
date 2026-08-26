@@ -20,13 +20,14 @@ const LOOPBACK_HOSTS = new Set(['127.0.0.1', '::1', '[::1]', 'localhost']);
 
 // Never resolves to a rejection and never outlives POST_TIMEOUT_MS. The loopback check is a guard on
 // our own argv: this process only ever talks to the local Glissa.
+/** @returns {Promise<void>} */
 function postPayload(url, body) {
   return new Promise((resolve) => {
     let settled = false;
     const done = () => {
       if (settled) return;
       settled = true;
-      resolve(undefined);
+      resolve();
     };
     let target = null;
     try {

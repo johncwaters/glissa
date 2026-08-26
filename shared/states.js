@@ -50,6 +50,7 @@ const KILLABLE_STATES = Object.freeze([
   STATES.IDLE,
   STATES.COMPLETE,
 ]);
+/** @type {ReadonlyArray<string>} */
 const RESTARTABLE_STATES = Object.freeze([STATES.DONE, STATES.FAILED]);
 // A live-PTY session that is quiescent (parked between turns), so merging its worktree and rebasing it
 // underneath the session is safe. The single source of truth for the merge-as-you-go gate, shared by the
@@ -57,5 +58,6 @@ const RESTARTABLE_STATES = Object.freeze([STATES.DONE, STATES.FAILED]);
 // is excluded (the agent is actively editing mid-turn); WAITING belongs here, because "Needs Input" means
 // the agent handed control back and is waiting on the operator, NOT working. Dead-PTY states (DONE/FAILED)
 // go through the pending-review/discard gate instead.
+/** @type {ReadonlyArray<string>} */
 const MERGEABLE_LIVE_STATES = Object.freeze([STATES.WAITING, STATES.IDLE, STATES.COMPLETE]);
 module.exports = { STATES, BADGE_LABELS, STATE_GLYPHS, KILLABLE_STATES, RESTARTABLE_STATES, MERGEABLE_LIVE_STATES };

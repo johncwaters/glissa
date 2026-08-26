@@ -34,6 +34,7 @@ const ACCEPT_EDITS_MODE = 'acceptEdits';
  * One lane's permission posture. No allow list at all: a bare `Write` allow is exactly what unbounds
  * the writes, and nothing narrower grants the tool.
  */
+/** @param {{ denyTools?: readonly string[] }} [options] */
 function buildLanePermissions({ denyTools = [] } = {}) {
   return { permissions: { deny: [...denyTools], defaultMode: ACCEPT_EDITS_MODE } };
 }

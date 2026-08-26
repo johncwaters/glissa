@@ -30,9 +30,9 @@ const ABORT_REAP_CAP_MS = 3000;
 async function awaitSessionExit(sess, { signal = null, spawnGate = null, reapCapMs = ABORT_REAP_CAP_MS } = {}) {
   let onAbort = null;
   try {
-    await new Promise((resolve, reject) => {
+    await /** @type {Promise<void>} */ (new Promise((resolve, reject) => {
       let settled = false;
-      const done = () => { if (settled) return; settled = true; resolve(undefined); };
+      const done = () => { if (settled) return; settled = true; resolve(); };
       const fail = (error) => { if (settled) return; settled = true; reject(error); };
       sess.on('exit', done);
       sess.on('error', fail);
@@ -58,7 +58,7 @@ async function awaitSessionExit(sess, { signal = null, spawnGate = null, reapCap
       const run = () => (signal?.aborted ? undefined : sess.start());
       const started = spawnGate ? spawnGate.run(run) : Promise.resolve().then(run);
       started.catch(fail);
-    });
+    }));
   } finally {
     if (signal && onAbort) { try { signal.removeEventListener('abort', onAbort); } catch { /* noop */ } }
   }

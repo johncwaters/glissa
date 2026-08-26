@@ -25,6 +25,7 @@ function parseLeftRightCount(output) {
 // counts (there is nothing to compare against: a fresh local branch, or one whose upstream was never
 // configured). An upstream with missing/unparseable counts is 'unknown', a distinct state from
 // 'no-upstream' so a fetch failure on that path is still surfaced as stale by the UI.
+/** @param {{ hasUpstream: boolean, ahead?: number, behind?: number }} options */
 function decideBranchSyncState({ hasUpstream, ahead, behind }) {
   if (!hasUpstream) return 'no-upstream';
   if (!Number.isInteger(ahead) || !Number.isInteger(behind)) return 'unknown';

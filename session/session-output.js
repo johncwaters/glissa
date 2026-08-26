@@ -67,7 +67,7 @@ function createSessionOutput(options) {
     options.on("state-change", onStateChange);
     options.once("exit", onExit);
     if (stateBeforeWaiting === STATES.DORMANT) options.start();
-    if (RESTARTABLE_STATES.some((state) => state === stateBeforeWaiting)) options.restart();
+    if (RESTARTABLE_STATES.includes(stateBeforeWaiting)) options.restart();
     return { ok: true, deferred: true };
   }
 
