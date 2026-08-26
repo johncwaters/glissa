@@ -1,12 +1,9 @@
-/*
- * Editor markers for the ingest feed (docs/plan-ingestion.md, M6 Sources): open, save and close, never
- * content, which already lives in the Visions lane. The buffer text is the one thing this source must
- * not carry: it would put the document a dispatch is about into that same dispatch's DATA section.
- */
+// Markers only: buffer text here would put the document a dispatch is about into that dispatch's own
+// DATA section (docs/plan-ingestion.md, M6 Sources).
 
 'use strict';
 
-const { normalizeShapePath, pathOfFileUri } = require('./visions-scope-core');
+const { deepestRootFor, normalizeShapePath, pathOfFileUri } = require('./visions-scope-core');
 
 const SOURCE = 'editor';
 const KIND_BY_METHOD = Object.freeze({
@@ -20,35 +17,13 @@ function createEditorState() {
   return { openUris: new Set() };
 }
 
-function isWithin(root, candidate) {
-  if (!root || !candidate) return false;
-  if (candidate === root) return true;
-  return candidate.startsWith(root.endsWith('/') ? root : `${root}/`);
-}
-
-// Deepest containing root wins, the same rule projectForUri applies: a checkout inside another owns its
-// own files, and the shallower root would otherwise claim every one of them.
-function rootForPath(normalizedPath, roots) {
-  let owner = null;
-  for (const raw of Array.isArray(roots) ? roots : []) {
-    const root = normalizeShapePath(raw);
-    if (!isWithin(root, normalizedPath)) continue;
-    if (owner && owner.length >= root.length) continue;
-    owner = root;
-  }
-  return owner;
-}
-
 function relativeTo(root, normalizedPath) {
   if (!root || root === normalizedPath) return normalizedPath.split('/').pop() || normalizedPath;
   return normalizedPath.slice(root.length + 1);
 }
 
-/**
- * One notification against the standing open set, as `{ state, event }`. A relay replays every open
- * document each time it reconnects, so an open the state already holds publishes nothing; a close for a
- * uri that was never open publishes nothing either. A save always publishes: it is the operator acting.
- */
+// A relay replays every open document on each reconnect, so a repeat open is not an event; a save is,
+// every time, because it is the operator acting.
 function applyEditorNotification(state, { method, uri, roots = [], now = 0 } = {}) {
   const kind = KIND_BY_METHOD[method];
   if (!kind) return { state, event: null };
@@ -60,7 +35,7 @@ function applyEditorNotification(state, { method, uri, roots = [], now = 0 } = {
   if (kind === 'doc-open') state.openUris.add(uri);
   if (kind === 'doc-close') state.openUris.delete(uri);
 
-  const root = rootForPath(normalizedPath, roots);
+  const root = deepestRootFor(normalizedPath, roots);
   return {
     state,
     event: {
@@ -74,4 +49,4 @@ function applyEditorNotification(state, { method, uri, roots = [], now = 0 } = {
   };
 }
 
-module.exports = { SOURCE, applyEditorNotification, createEditorState, rootForPath };
+module.exports = { SOURCE, applyEditorNotification, createEditorState };

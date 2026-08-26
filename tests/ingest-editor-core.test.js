@@ -6,7 +6,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { applyEditorNotification, createEditorState, rootForPath } = require('../server/core/ingest-editor-core');
+const { applyEditorNotification, createEditorState } = require('../server/core/ingest-editor-core');
+const { deepestRootFor } = require('../server/core/visions-scope-core');
 
 const ROOTS = ['/home/op/Projects/glissa', '/home/op/Projects/glissa/vendor/inner'];
 const URI = 'file:///home/op/Projects/glissa/docs/plan.md';
@@ -45,9 +46,9 @@ test('a save always publishes, since it is the operator acting rather than a rel
 });
 
 test('the deepest containing root wins and a file under none is machine scope', () => {
-  assert.equal(rootForPath('/home/op/Projects/glissa/vendor/inner/x.md', ROOTS), '/home/op/Projects/glissa/vendor/inner');
-  assert.equal(rootForPath('/home/op/Projects/glissa/docs/x.md', ROOTS), '/home/op/Projects/glissa');
-  assert.equal(rootForPath('/tmp/x.md', ROOTS), null);
+  assert.equal(deepestRootFor('/home/op/Projects/glissa/vendor/inner/x.md', ROOTS), '/home/op/Projects/glissa/vendor/inner');
+  assert.equal(deepestRootFor('/home/op/Projects/glissa/docs/x.md', ROOTS), '/home/op/Projects/glissa');
+  assert.equal(deepestRootFor('/tmp/x.md', ROOTS), null);
 
   const state = createEditorState();
   const outside = applyEditorNotification(state, { method: 'textDocument/didSave', uri: 'file:///tmp/secret-project/notes.md', roots: ROOTS, now: 1 }).event;

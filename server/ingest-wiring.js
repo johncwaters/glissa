@@ -233,11 +233,7 @@ function createIngestLane({
     : null;
   if (shellHistory) adapters.push(shellHistory);
 
-  /*
-   * The editor source has no discovery of its own: the Visions relay is its only producer, and the lane
-   * hands it each notification through noteEditorEvent. With Visions off nothing ever calls it, which is
-   * why it costs nothing rather than needing a second gate.
-   */
+  // The Visions relay is this source's only producer, so with Visions off nothing ever calls it.
   const editorEnabled = resolved.enabled === true && resolved.sources.editor.enabled === true;
   const editorSource = editorEnabled
     ? createEditorIngest({

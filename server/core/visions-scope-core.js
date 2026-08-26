@@ -62,20 +62,27 @@ function isUriInProjects(uri, normalizedProjectPaths) {
   return normalizedProjectPaths.some((scopePath) => isWithin(scopePath, uriPath));
 }
 
-// Nested roots resolve to the DEEPEST one that contains the uri: a project checked out inside another
+// Nested roots resolve to the DEEPEST one that contains the path: a project checked out inside another
 // owns its own files, and the shallower root would otherwise claim every one of them.
+function deepestRootFor(normalizedPath, roots) {
+  let owner = null;
+  for (const raw of Array.isArray(roots) ? roots : []) {
+    const root = normalizeShapePath(raw);
+    if (!isWithin(root, normalizedPath)) continue;
+    if (owner && owner.length >= root.length) continue;
+    owner = root;
+  }
+  return owner;
+}
+
 function projectForUri(uri, scopeProjects) {
   if (!Array.isArray(scopeProjects) || scopeProjects.length === 0) return null;
   const uriPath = pathOfFileUri(uri);
   if (!uriPath) return null;
-  let owner = null;
-  for (const entry of scopeProjects) {
-    if (!entry || typeof entry.id !== 'string' || !entry.id) continue;
-    const scopePath = normalizeShapePath(entry.path);
-    if (!isWithin(scopePath, uriPath)) continue;
-    if (owner && owner.path.length >= scopePath.length) continue;
-    owner = { id: entry.id, path: scopePath };
-  }
+  const owned = scopeProjects.filter((entry) => entry && typeof entry.id === 'string' && entry.id);
+  const root = deepestRootFor(uriPath, owned.map((entry) => entry.path));
+  if (!root) return null;
+  const owner = owned.find((entry) => normalizeShapePath(entry.path) === root);
   return owner ? owner.id : null;
 }
 
@@ -91,6 +98,7 @@ function scopePathsOf(scopeProjects) {
 }
 
 module.exports = {
+  deepestRootFor,
   pathOfFileUri,
   normalizeShapePath,
   isUriInProjects,

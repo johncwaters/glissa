@@ -1,8 +1,4 @@
-/*
- * Editor ingest source, IO shell (docs/plan-ingestion.md, M6 Sources). It owns no watcher and no timer:
- * the Visions relay already carries every editor notification, so this source is a mapper the lane calls
- * with what that relay reported. It publishes MARKERS only, never buffer text.
- */
+// No watcher and no timer: the Visions relay already carries every notification this source maps.
 
 'use strict';
 
@@ -50,7 +46,7 @@ function createEditorIngest({
     state = createEditorState();
   }
 
-  return { name: 'editor', note, stop, get openCount() { return state.openUris.size; } };
+  return { name: 'editor', note, stop };
 }
 
 module.exports = { createEditorIngest };
