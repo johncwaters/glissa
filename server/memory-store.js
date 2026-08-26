@@ -40,13 +40,6 @@ const MAX_DELIVERED_HASHES = 2000;
 const SEARCH_CANDIDATE_FACTOR = 10;
 const SEARCH_CANDIDATE_FLOOR = 100;
 
-/**
- * `dir` and `dbPath` are REQUIRED: their old defaults resolved the operator's config, so a caller that
- * forgot them wrote remembered text into the live store instead of its own (audit 2026-08-25).
- *
- * @returns {object|null} null when `node:sqlite` is unavailable or the database cannot be opened, which
- *   is how the lane stays off with one warning rather than falling back to a second substrate.
- */
 function createMemoryStore(deps = {}) {
   const {
     dir,

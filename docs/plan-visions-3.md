@@ -313,8 +313,8 @@ Shipped 2026-08-23. The versioned projection half of this milestone had already 
 built:
 
 - **`server/glissa-db.js`** is the machine-wide opener: feature detect, `journal_mode=WAL`,
-  `busy_timeout`, `PRAGMA user_version = 1`, a 0600 mode on the file, and `defaultDbPath()`
-  beside the resolved config file. Memory is its first tenant, so every table it owns is
+  `busy_timeout`, `PRAGMA user_version = 1`, and a 0600 mode on the file. Callers pass an explicit
+  path beside the resolved config file. Memory is its first tenant, so every table it owns is
   prefixed `memory_`; **`server/memory-db.js`** holds that tenant's DDL, prepared statements and
   row mapping, and nothing else. Every decision stayed in `server/core/memory-core.js`.
 - **Fresh start, no migration** (operator decision): the database opens empty and existing

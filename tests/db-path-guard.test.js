@@ -1,11 +1,5 @@
 'use strict';
 
-/*
- * The refusal that stands between a test run and the operator's live database. A suite whose config
- * resolution fell through to ~/.glissa wrote 42 fixture records into the real memory store (audit
- * 2026-08-25); under `node --test` a home-directory database is never the intended target.
- */
-
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');

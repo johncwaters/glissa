@@ -1,10 +1,6 @@
 'use strict';
 
-/*
- * The pure rule behind the one refusal server/glissa-db.js makes: under `node --test`, a database
- * resolving under the operator's home directory is never the intended target. A suite that reached the
- * real config wrote 42 fixture records into the live memory store before this existed (audit 2026-08-25).
- */
+// Home database writes from a test can modify the operator's live memory store.
 
 const path = require('node:path');
 

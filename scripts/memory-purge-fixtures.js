@@ -1,28 +1,5 @@
 'use strict';
 
-/*
- * One-shot cleanup for a memory database a test suite wrote fixture records into (audit 2026-08-25,
- * 42 records in the operator's live store: bodies like "claude: turn 1", a project key of `c:/repo`,
- * source session ids `sess-1` and `s-1`). The leak itself is closed upstream by the required dbPath in
- * createMemoryStore and the home-directory refusal in server/core/db-path-guard.js; this only removes
- * what already landed.
- *
- * A record is a fixture when its source session id looks like `sess-<n>` / `s-<n>`, or when its project
- * key names a location that never existed here: not absolute, or with no existing parent directory. The
- * PARENT is what is judged rather than the directory itself, because a pruned worktree is a real project
- * whose memories must survive (the flat rule would have deleted 568 of the operator's 777 records). A
- * record with NO project is judged by the session rule alone, which is what keeps the pass idempotent:
- * the tombstones the expunge itself writes carry no project and must survive the next run.
- *
- * Ingest tail offsets for temp-directory transcripts that no longer exist are dropped in the same pass.
- *
- * Removal goes through store.forget(), so every removal is the sanctioned three-write expunge
- * (secure_delete at open, an FTS5 rebuild, a WAL truncate checkpoint) rather than a raw DELETE that would
- * leave the text greppable in the file.
- *
- * Usage: node scripts/memory-purge-fixtures.js <db-path> [--memory-dir <dir>] [--dry-run]
- */
-
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');

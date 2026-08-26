@@ -33,11 +33,6 @@ function isSqliteAvailable() {
   return loadSqlite() !== null;
 }
 
-/*
- * The ONE input that decides where the database lives: the resolved config file. Every caller states it
- * (backend, CLI, tests), so no code path can silently fall back to the operator's home directory, which
- * is how a test suite once wrote fixture records into the live memory store.
- */
 function dbPathForConfig(configPath) {
   if (typeof configPath !== 'string' || !configPath) throw new Error('dbPathForConfig needs a config file path');
   return path.join(path.dirname(configPath), DB_FILE_NAME);
