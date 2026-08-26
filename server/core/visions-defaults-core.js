@@ -11,6 +11,7 @@ const IMPLIED_INGEST = Object.freeze({
   sources: Object.freeze({
     fs: Object.freeze({ enabled: true }),
     git: Object.freeze({ enabled: true }),
+    editor: Object.freeze({ enabled: true }),
   }),
 });
 

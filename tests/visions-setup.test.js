@@ -73,5 +73,5 @@ test('what the operator already chose is never rewritten', () => {
 });
 
 test('the implied sources are movement only, never captured prose', () => {
-  assert.deepEqual(Object.keys(IMPLIED_INGEST.sources), ['fs', 'git']);
+  assert.deepEqual(Object.keys(IMPLIED_INGEST.sources), ['fs', 'git', 'editor']);
 });

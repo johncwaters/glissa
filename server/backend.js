@@ -1238,6 +1238,9 @@ function createBackend(httpServer, options = {}) {
       // tails of the same transcript files would ingest every line twice.
       agentLogConsumers: memoryIngest && !memoryIngest.source ? [memoryIngest.consumer] : [],
       repoRoots: gitRepoRoots,
+      // Editor events are labelled against the projects themselves, not the session checkouts the git and
+      // fs sources follow: a buffer is open in a project whether or not a session is running in it.
+      editorRoots: () => (Array.isArray(config.projects) ? config.projects : []).map((project) => project?.path).filter(Boolean),
       // The fs source ignores the state files the daemon writes beside this path. It matters most in a
       // dev checkout, where the resolved config file is the repo's own config.json and every
       // resumeSessionId save would otherwise look like project activity.
@@ -1299,6 +1302,8 @@ function createBackend(httpServer, options = {}) {
       scopeProjects: resolveVisionsScopeProjects(visionsConfig.projects, config.projects),
       // The M13 memory writers, inert on a default config because the store is then null.
       getMemoryStore: () => memoryStore,
+      // Late-bound like the digest above, and null-safe: with the ingest lane off nothing is reported.
+      onEditorEvent: (event) => ingestLane?.noteEditorEvent(event),
       // Every project the machine knows, so an intent slot for a DELETED project is dropped on load.
       knownProjectIds: (Array.isArray(config.projects) ? config.projects : [])
         .map((project) => project?.id)

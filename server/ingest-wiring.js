@@ -17,6 +17,7 @@ const {
 } = require('./core/ingest-core');
 const { deriveSessionRoots, isActiveSessionState } = require('./core/ingest-fs-core');
 const { createAgentLogIngest } = require('./ingest-agent-logs');
+const { createEditorIngest } = require('./ingest-editor');
 const { createFsIngest } = require('./ingest-fs');
 const { createGitIngest } = require('./ingest-git');
 const { createShellHistoryIngest } = require('./ingest-shell-history');
@@ -43,6 +44,8 @@ function createIngestLane({
   // The git watch-set rule lives with the caller that can see live sessions (server/backend.js), not
   // here: this lane only ever knows which directories it was handed.
   repoRoots = null,
+  // The project roots an editor event is labelled against, same shape and same reason as repoRoots.
+  editorRoots = () => [],
   // Told once per batch that carried events, so a consumer learns the machine moved without polling
   // (docs/plan-ingestion.md, M7.5). Absent by default, and then nothing is ever called.
   onActivity = null,
@@ -230,6 +233,23 @@ function createIngestLane({
     : null;
   if (shellHistory) adapters.push(shellHistory);
 
+  /*
+   * The editor source has no discovery of its own: the Visions relay is its only producer, and the lane
+   * hands it each notification through noteEditorEvent. With Visions off nothing ever calls it, which is
+   * why it costs nothing rather than needing a second gate.
+   */
+  const editorEnabled = resolved.enabled === true && resolved.sources.editor.enabled === true;
+  const editorSource = editorEnabled
+    ? createEditorIngest({
+      publish,
+      roots: editorRoots,
+      logger,
+      nowFn,
+      debug,
+    })
+    : null;
+  if (editorSource) adapters.push(editorSource);
+
   // Adapters that own their own discovery start themselves; the terminal source has nothing to start,
   // since its taps arrive one session at a time from wireSessionEvents.
   note(`lane started: ${sources.length > 0 ? sources.join(', ') : 'no sources enabled'}`);
@@ -318,10 +338,16 @@ function createIngestLane({
     note('lane stopped');
   }
 
+  function noteEditorEvent(notification) {
+    if (!editorSource) return null;
+    return editorSource.note(notification);
+  }
+
   return {
     publish,
     snapshotMessage,
     buildDigest,
+    noteEditorEvent,
     attachSessionTap,
     detachSessionTap,
     hasSessionTap,
@@ -344,6 +370,7 @@ function createIngestLane({
     get shellHistory() { return shellHistory; },
     get shellHistoryEnabled() { return shellHistoryEnabled; },
     get terminalEnabled() { return terminalEnabled; },
+    get editorEnabled() { return editorEnabled; },
     get tapCount() { return terminal ? terminal.tapCount : 0; },
     get pendingEventCount() { return pendingEvents.length; },
     get isStopped() { return stopped; },

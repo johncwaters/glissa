@@ -57,6 +57,7 @@ function withBackend(configExtras, fn, { backendOptions = null, seed = null } = 
     try {
       await fn({
         backend,
+        projectDir,
         seeded,
         dash: await dashboardClient(server.address().port),
         track: (ws) => { sockets.push(ws); return ws; },
@@ -463,6 +464,48 @@ test('a completed agent turn reaches the rings and the digest, and a lane sessio
   {
     seed: seedTranscripts,
     backendOptions: (seeded) => ({ ingestLaneOptions: { agentLogOptions: { env: seeded.env } } }),
+  },
+));
+
+test('an editor buffer opened through the Visions lane reaches the rings as a marker', withBackend(
+  {
+    ingest: { enabled: true, sources: { editor: { enabled: true } } },
+    visions: { enabled: true, dispatch: { enabled: false } },
+  },
+  async ({ backend, projectDir }) => {
+    const lane = backend.getIngestLane();
+    assert.equal(lane.editorEnabled, true);
+
+    const uri = `file://${projectDir.replace(/\\/g, '/')}/docs/plan.md`;
+    const connection = backend.getVisionsLane().openConnection({ send: () => {} });
+    connection.handleFrame(JSON.stringify({
+      type: 'lsp',
+      method: 'textDocument/didOpen',
+      params: { textDocument: { uri, languageId: 'markdown', version: 1, text: '# Plan\n' } },
+    }));
+    connection.handleFrame(JSON.stringify({ type: 'lsp', method: 'textDocument/didSave', params: { textDocument: { uri } } }));
+
+    const events = lane.recentEvents();
+    assert.deepEqual(events.map((event) => event.kind), ['doc-save', 'doc-open']);
+    assert.deepEqual(events.map((event) => event.summary), ['saved docs/plan.md', 'opened docs/plan.md']);
+    // The buffer text is what this source must never carry: it would ride into the next dispatch prompt.
+    assert.equal(events.some((event) => JSON.stringify(event).includes('# Plan')), false);
+    assert.equal(events[0].scope.root, projectDir);
+  },
+));
+
+test('with the editor source off a mirrored buffer publishes nothing', withBackend(
+  { ingest: INGEST_ON, visions: { enabled: true, dispatch: { enabled: false } } },
+  async ({ backend, projectDir }) => {
+    const lane = backend.getIngestLane();
+    assert.equal(lane.editorEnabled, false);
+    const connection = backend.getVisionsLane().openConnection({ send: () => {} });
+    connection.handleFrame(JSON.stringify({
+      type: 'lsp',
+      method: 'textDocument/didOpen',
+      params: { textDocument: { uri: `file://${projectDir.replace(/\\/g, '/')}/docs/plan.md`, languageId: 'markdown', version: 1, text: '# Plan\n' } },
+    }));
+    assert.deepEqual(lane.recentEvents(), []);
   },
 ));
 

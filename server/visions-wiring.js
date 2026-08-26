@@ -197,6 +197,9 @@ function createVisionsWiring({
    * boot and is null on a default config; every writer below is then a no-op and nothing is recorded.
    */
   getMemoryStore = null,
+  // The ingest lane's editor source (docs/plan-ingestion.md, M6 Sources). Absent by default, and the
+  // lane then reports nothing; it is handed markers only, never the buffer this lane holds.
+  onEditorEvent = null,
   // How many remembered records one dispatch prompt may carry (docs/plan-visions-3.md, M16).
   memoryDeliveryLimit = MAX_DELIVERED_RECORDS,
   intentStatePath = null,
@@ -281,6 +284,16 @@ function createVisionsWiring({
   }
 
   const memoryStoreOf = typeof getMemoryStore === 'function' ? getMemoryStore : () => null;
+
+  // A failing ingest lane must never break the editor channel it rode in on.
+  function reportEditorEvent(method, uri) {
+    if (typeof onEditorEvent !== 'function' || !uri) return;
+    try {
+      onEditorEvent({ method, uri });
+    } catch (error) {
+      warn(`editor ingest report failed: ${error.message}`);
+    }
+  }
   const servedFindingKeys = createBoundedKeySet();
   const intentHeadByProject = new Map();
   let intentHeadsSeeded = false;
@@ -920,6 +933,7 @@ function createVisionsWiring({
         const result = applyDidOpen(store, params);
         if (!result.applied) return result.reason;
         const uri = uriOfParams(params);
+        reportEditorEvent('textDocument/didOpen', uri);
         claimUri(uri, connection);
         const doc = uri ? getDoc(store, uri) : null;
         if (doc) note(`didOpen ${uri} (${doc.text.length} chars, ${listDocs(store).length} open)`);
@@ -951,6 +965,7 @@ function createVisionsWiring({
       'textDocument/didSave': (params) => {
         const uri = uriOfParams(params);
         if (!uri) return 'invalid-params';
+        reportEditorEvent('textDocument/didSave', uri);
         cancelSweep(uri);
         publishDiagnostics(uri, 'save');
         // A save is the boundary itself: it evaluates the same gate now rather than waiting it out.
@@ -978,6 +993,7 @@ function createVisionsWiring({
         const result = applyDidClose(store, params);
         const isLastOwner = releaseUri(uri, connection);
         if (!result.applied) return result.reason;
+        reportEditorEvent('textDocument/didClose', uri);
         note(`didClose ${uri} (${listDocs(store).length} open)`);
         failPendingApplyEdits('the buffer closed', uri);
         if (!isLastOwner) return null;
