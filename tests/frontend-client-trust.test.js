@@ -2,21 +2,9 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
-
 const cjs = require('../shared/client-trust');
 
-// client-trust.esm.js has a plain .js extension (Vite aliases /shared/client-trust.mjs to it for the
-// browser, and the no-build server serves it under that name), so this package's "type": "commonjs"
-// makes a normal import() of the path treat it as CJS and choke on `export`. Load its source as a
-// data: URL instead, which Node's ESM loader always treats as a module regardless of the origin
-// file's extension. Same workaround, same reason, as tests/states-parity.test.js.
-function importEsm() {
-  const source = fs.readFileSync(path.join(__dirname, '..', 'shared', 'client-trust.esm.js'), 'utf8');
-  const dataUrl = `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`;
-  return import(dataUrl);
-}
+const importEsm = () => import('../shared/client-trust.esm.mjs');
 
 test('normalizeClientTrust: only the literal remote label is remote', async () => {
   const { normalizeClientTrust } = await importEsm();

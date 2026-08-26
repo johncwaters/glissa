@@ -13,7 +13,8 @@ const path = require('node:path');
 const express = require('express');
 
 const { BROWSER_MODULES, BROWSER_MODULE_IDS } = require('../server/core/browser-modules-core');
-const { browserModulesVitePlugin, mountBrowserModuleRoutes, renderBrowserModule } = require('../server/browser-modules');
+const { browserModulesVitePlugin, renderBrowserModule } = require('../server/browser-modules');
+const { mountDevRoutes } = require('../server/backend-http');
 
 const repoRoot = path.join(__dirname, '..');
 const publicDir = path.join(repoRoot, 'public');
@@ -51,7 +52,7 @@ async function fetchModule(baseUrl, moduleId) {
 
 async function withDevRoutes(run) {
   const app = express();
-  mountBrowserModuleRoutes(app);
+  mountDevRoutes(app);
   const server = http.createServer(app);
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   try {
@@ -80,7 +81,7 @@ test('every declared browser module has a source file on disk', () => {
   }
 });
 
-test('the no-build server serves every declared browser module as javascript', async () => {
+test('the no-build server route table serves every declared browser module as javascript', async () => {
   await withDevRoutes(async (baseUrl) => {
     for (const entry of BROWSER_MODULES) {
       const served = await fetchModule(baseUrl, entry.id);

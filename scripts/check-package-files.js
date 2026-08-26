@@ -144,6 +144,18 @@ for (const entry of filesArray) {
   }
 }
 
+// A stale "files" entry ships nothing and reports nothing: npm silently drops missing paths.
+const staleFileEntries = filesArray
+  .filter((entry) => !entry.startsWith('!') && !entry.includes('*'))
+  .filter((entry) => !fs.existsSync(path.join(ROOT, entry)));
+
+if (staleFileEntries.length > 0) {
+  console.error('ERROR: package.json "files" entries name paths that do not exist:\n');
+  for (const entry of staleFileEntries) console.error(`  ${entry}`);
+  console.error('\nRemove or correct these entries in the "files" array.');
+  process.exit(1);
+}
+
 function isCovered(filePath) {
   if (negatedPaths.has(filePath)) return false;
 

@@ -7,80 +7,7 @@ import tailwindcss from '@tailwindcss/vite';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
 const pkg = require('./package.json');
-const { renderSharedCjsEsm } = require('./server/core/shared-cjs-esm-core');
-
-// The browser's ESM view of shared/states.js, generated from the CJS module rather than kept as a
-// hand-copied twin. Mirrors the /shared/states.mjs route in server/backend.js (the no-build path), and
-// works only because that module exports nothing but constants.
-const STATES_MODULE_ID = '/shared/states.mjs';
-const STATES_VIRTUAL_ID = '\0glissa:shared-states';
-const SETTINGS_RANGES_MODULE_ID = '/shared/settings-ranges.mjs';
-const SETTINGS_RANGES_VIRTUAL_ID = '\0glissa:shared-settings-ranges';
-
-function glissaSharedStatesPlugin() {
-  return {
-    name: 'glissa-shared-states',
-    enforce: 'pre',
-    resolveId(source) {
-      return source === STATES_MODULE_ID ? STATES_VIRTUAL_ID : null;
-    },
-    load(id) {
-      if (id !== STATES_VIRTUAL_ID) return null;
-      const states = require('./shared/states');
-      return Object.entries(states)
-        .map(([key, val]) => `export const ${key} = ${JSON.stringify(val)};`)
-        .join('\n');
-    },
-  };
-}
-
-function glissaSharedSettingsRangesPlugin() {
-  return {
-    name: 'glissa-shared-settings-ranges',
-    enforce: 'pre',
-    resolveId(source) {
-      return source === SETTINGS_RANGES_MODULE_ID ? SETTINGS_RANGES_VIRTUAL_ID : null;
-    },
-    load(id) {
-      if (id !== SETTINGS_RANGES_VIRTUAL_ID) return null;
-      const ranges = require('./shared/settings-ranges');
-      return Object.entries(ranges)
-        .map(([key, val]) => `export const ${key} = ${JSON.stringify(val)};`)
-        .join('\n');
-    },
-  };
-}
-
-const SHARED_CJS_MODULES = new Map([
-  ['/shared/control-messages.mjs', { virtualId: '\0glissa:control-messages', source: './shared/contracts/control-messages.js' }],
-  ['/shared/session.mjs', { virtualId: '\0glissa:session-contract', source: './shared/contracts/session.js' }],
-]);
-const SHARED_CJS_VIRTUAL_MODULES = new Map(
-  [...SHARED_CJS_MODULES.values()].map((entry) => [entry.virtualId, entry]),
-);
-
-function sharedContractSpecifier(specifier) {
-  if (specifier === 'zod') return 'zod';
-  if (specifier === './session') return '/shared/session.mjs';
-  if (specifier === '../states') return '/shared/states.mjs';
-  throw new Error(`Unsupported shared contract import ${specifier}`);
-}
-
-function glissaSharedCjsDevPlugin() {
-  return {
-    name: 'glissa-shared-cjs-dev',
-    enforce: 'pre',
-    resolveId(source) {
-      return SHARED_CJS_MODULES.get(source)?.virtualId || null;
-    },
-    load(id) {
-      const entry = SHARED_CJS_VIRTUAL_MODULES.get(id);
-      if (!entry) return null;
-      const source = require('node:fs').readFileSync(path.resolve(__dirname, entry.source), 'utf8');
-      return renderSharedCjsEsm(source, sharedContractSpecifier);
-    },
-  };
-}
+const { browserModulesVitePlugin } = require('./server/browser-modules');
 
 function glissaBackendPlugin() {
   let backend = null;
@@ -117,9 +44,7 @@ function glissaBackendPlugin() {
 export default defineConfig({
   plugins: [
     tailwindcss(),
-    glissaSharedStatesPlugin(),
-    glissaSharedSettingsRangesPlugin(),
-    glissaSharedCjsDevPlugin(),
+    browserModulesVitePlugin(),
     glissaBackendPlugin(),
   ],
 
@@ -130,12 +55,6 @@ export default defineConfig({
   },
 
   root: 'public',
-
-  resolve: {
-    alias: {
-      '/shared/client-trust.mjs': path.resolve(__dirname, 'shared/client-trust.esm.js'),
-    },
-  },
 
   publicDir: '../assets',
 

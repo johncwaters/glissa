@@ -267,7 +267,7 @@ notifications/
 detection/
 shared/states.js
 shared/client-trust.js
-shared/client-trust.esm.js
+shared/client-trust.esm.mjs
 shared/notification-states.js
 shared/paths.js
 package.json

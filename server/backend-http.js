@@ -6,7 +6,7 @@ const fsp = require('node:fs/promises');
 const path = require('node:path');
 const { pipeline } = require('node:stream');
 const express = require('express');
-const { renderSharedCjsEsm } = require('./core/shared-cjs-esm-core');
+const { mountBrowserModuleRoutes } = require('./browser-modules');
 const { decideHostAllowed } = require('./core/host-policy');
 const { decideOriginAllowed } = require('./core/origin-policy');
 const { configSiblingPath } = require('./pairings-store');
@@ -114,17 +114,6 @@ function receiveUpload({ req, res, sess, dir, filename, savedPath }) {
 }
 
 function mountDevRoutes(app) {
-  const sharedContractSources = new Map([
-    ['/shared/control-messages.mjs', path.join(__dirname, '..', 'shared/contracts/control-messages.js')],
-    ['/shared/session.mjs', path.join(__dirname, '..', 'shared/contracts/session.js')],
-  ]);
-  const sharedContractSpecifier = (specifier) => {
-    if (specifier === 'zod') return '/zod/index.js';
-    if (specifier === './session') return '/shared/session.mjs';
-    if (specifier === '../states') return '/shared/states.mjs';
-    throw new Error(`Unsupported shared contract import ${specifier}`);
-  };
-
   app.get('/xterm/xterm.css', (_req, res) => {
     res.sendFile(path.join(__dirname, '..', 'node_modules/@xterm/xterm/css/xterm.css'));
   });
@@ -142,38 +131,7 @@ function mountDevRoutes(app) {
   });
   app.use('/zod', express.static(path.join(__dirname, '..', 'node_modules/zod')));
 
-  for (const [route, sourcePath] of sharedContractSources) {
-    app.get(route, (_req, res) => {
-      const source = fs.readFileSync(sourcePath, 'utf8');
-      res.type('application/javascript');
-      res.send(renderSharedCjsEsm(source, sharedContractSpecifier));
-    });
-  }
-
-  app.get('/shared/states.mjs', (_req, res) => {
-    const states = require('../shared/states');
-    const lines = [];
-    for (const [key, value] of Object.entries(states)) {
-      lines.push(`export const ${key} = ${JSON.stringify(value)};`);
-    }
-    res.type('application/javascript');
-    res.send(lines.join('\n'));
-  });
-
-  app.get('/shared/settings-ranges.mjs', (_req, res) => {
-    const ranges = require('../shared/settings-ranges');
-    const lines = [];
-    for (const [key, value] of Object.entries(ranges)) {
-      lines.push(`export const ${key} = ${JSON.stringify(value)};`);
-    }
-    res.type('application/javascript');
-    res.send(lines.join('\n'));
-  });
-
-  app.get('/shared/client-trust.mjs', (_req, res) => {
-    res.type('application/javascript');
-    res.sendFile(path.join(__dirname, '..', 'shared/client-trust.esm.js'));
-  });
+  mountBrowserModuleRoutes(app);
 }
 
 /** @param {BackendHttpDependencies} dependencies */

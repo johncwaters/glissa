@@ -4,7 +4,7 @@
 # shared
 
 ## Purpose
-State constants used by BOTH the CommonJS server and the ESM browser bundle. Single source of truth for session and notification lifecycle states. The browser's `/shared/states.mjs` is GENERATED from `states.js` (the Vite plugin in `vite.config.js` for a build, the route in `server/backend.js` for the no-build path), so there is no ESM twin to keep in sync.
+State constants used by BOTH the CommonJS server and the ESM browser bundle. Single source of truth for session and notification lifecycle states. The browser's `/shared/states.mjs` is GENERATED from `states.js` by `server/browser-modules.js`, the one renderer behind both the Vite plugin and the no-build server route, so there is no ESM twin to keep in sync.
 
 ## Key Files
 
@@ -17,7 +17,7 @@ State constants used by BOTH the CommonJS server and the ESM browser bundle. Sin
 ## For AI Agents
 
 ### Working In This Directory
-- `states.js` may export CONSTANTS only: both `/shared/states.mjs` generators serialize its exports with `JSON.stringify`, so a function or class added here would silently break the browser bundle.
+- `states.js` may export CONSTANTS only: `renderConstantsModule` serializes its exports with `JSON.stringify`, so a function or class added here would silently break the browser bundle.
 - States are frozen string constants; transitions live in `session/core/state-machine.js` and `notification-manager.js`, never here.
 - `MERGEABLE_LIVE_STATES` is the merge-as-you-go gate shared by server and review sidebar; do not let the two copies drift.
 - Not everything here is browser-safe: `paths.js` touches the filesystem and is consumed only by server code. Keep new browser-facing constants in `states.js`.
