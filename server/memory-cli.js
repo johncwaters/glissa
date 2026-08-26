@@ -18,16 +18,15 @@ function defaultMakeStore() {
   const { resolveConfigPath, loadConfigFile } = require('./config-store');
   const { createMemoryStore } = require('./memory-store');
   const { configSiblingPath } = require('./pairings-store');
-  const { DB_FILE_NAME } = require('./glissa-db');
+  const { dbPathForConfig } = require('./glissa-db');
   const { resolveMemoryConfig } = require('./core/memory-core');
-  const path = require('node:path');
   const configPath = resolveConfigPath();
   const loaded = loadConfigFile(configPath, { exitOnError: false });
   const resolved = resolveMemoryConfig(loaded?.config ? loaded.config.memory : null);
   return createMemoryStore({
     dir: configSiblingPath(configPath, 'memory'),
     // The same machine-wide database the server opens, so a CLI pass beside it is one connection more.
-    dbPath: path.join(path.dirname(configPath), DB_FILE_NAME),
+    dbPath: dbPathForConfig(configPath),
     // An operator running this command IS the authorization, exactly like `glissa pack distill`; the
     // enabled flag gates the automatic lane, not a deliberate expunge.
     config: { ...resolved, enabled: true },

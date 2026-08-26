@@ -10,7 +10,10 @@
  */
 
 const nodeFs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
+
+const { decideDbOpenRefusal, homeDbRefusedError, underTestRunner } = require('./core/db-path-guard');
 
 // The shape every tenant's tables are created at. A future change is a read-old write-new pass in code.
 const SCHEMA_VERSION = 1;
@@ -30,9 +33,14 @@ function isSqliteAvailable() {
   return loadSqlite() !== null;
 }
 
-function defaultDbPath() {
-  const { resolveConfigPath } = require('./config-store');
-  return path.join(path.dirname(resolveConfigPath()), DB_FILE_NAME);
+/*
+ * The ONE input that decides where the database lives: the resolved config file. Every caller states it
+ * (backend, CLI, tests), so no code path can silently fall back to the operator's home directory, which
+ * is how a test suite once wrote fixture records into the live memory store.
+ */
+function dbPathForConfig(configPath) {
+  if (typeof configPath !== 'string' || !configPath) throw new Error('dbPathForConfig needs a config file path');
+  return path.join(path.dirname(configPath), DB_FILE_NAME);
 }
 
 // SQLITE_BUSY survives busy_timeout only when another writer held the lock for the whole window.
@@ -70,6 +78,14 @@ function restrictDbFileMode(dbPath, fs) {
 function openDatabase(dbPath, { busyTimeoutMs = DEFAULT_BUSY_TIMEOUT_MS, fs = nodeFs } = {}) {
   const sqlite = loadSqlite();
   if (!sqlite) throw new Error('node:sqlite is unavailable');
+  const refusal = decideDbOpenRefusal({
+    dbPath,
+    homeDir: os.homedir(),
+    tmpDir: os.tmpdir(),
+    isTestRunner: underTestRunner(process.env),
+  });
+  // Before the mkdir: a refused open must not so much as create the directory it declined to write in.
+  if (refusal) throw homeDbRefusedError(refusal);
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
   precreateDbFile(dbPath, fs);
   const db = new sqlite.DatabaseSync(dbPath);
@@ -112,7 +128,7 @@ module.exports = {
   SCHEMA_VERSION,
   applySchema,
   dataVersion,
-  defaultDbPath,
+  dbPathForConfig,
   isBusyError,
   isSqliteAvailable,
   openDatabase,

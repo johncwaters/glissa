@@ -17,7 +17,8 @@ const nodeCrypto = require('node:crypto');
 const nodeFs = require('node:fs');
 const path = require('node:path');
 
-const { defaultDbPath, isBusyError } = require('./glissa-db');
+const { isBusyError } = require('./glissa-db');
+const { HOME_DB_REFUSED_CODE } = require('./core/db-path-guard');
 const { createMemoryDb } = require('./memory-db');
 const { writeTextAtomic, writeTextAtomicSync } = require('./json-file');
 const { createLaneLog } = require('./lane-log');
@@ -39,20 +40,17 @@ const MAX_DELIVERED_HASHES = 2000;
 const SEARCH_CANDIDATE_FACTOR = 10;
 const SEARCH_CANDIDATE_FLOOR = 100;
 
-function defaultMemoryDir() {
-  const { resolveConfigPath } = require('./config-store');
-  const { configSiblingPath } = require('./pairings-store');
-  return configSiblingPath(resolveConfigPath(), MEMORY_DIR_NAME);
-}
-
 /**
+ * `dir` and `dbPath` are REQUIRED: their old defaults resolved the operator's config, so a caller that
+ * forgot them wrote remembered text into the live store instead of its own (audit 2026-08-25).
+ *
  * @returns {object|null} null when `node:sqlite` is unavailable or the database cannot be opened, which
  *   is how the lane stays off with one warning rather than falling back to a second substrate.
  */
 function createMemoryStore(deps = {}) {
   const {
-    dir = defaultMemoryDir(),
-    dbPath = defaultDbPath(),
+    dir,
+    dbPath,
     config = core.resolveMemoryConfig(null),
     fs = nodeFs,
     fsPromises = nodeFs.promises,
@@ -66,6 +64,9 @@ function createMemoryStore(deps = {}) {
     openDb = createMemoryDb,
     busyTimeoutMs = undefined,
   } = deps;
+
+  if (typeof dir !== 'string' || !dir) throw new Error('createMemoryStore needs an explicit dir');
+  if (typeof dbPath !== 'string' || !dbPath) throw new Error('createMemoryStore needs an explicit dbPath');
 
   const log = createLaneLog({ prefix: '[memory]', logger, debugFlag: debug });
   const distDir = path.join(dir, DIST_DIR_NAME);
@@ -88,6 +89,8 @@ function createMemoryStore(deps = {}) {
     fs.mkdirSync(dir, { recursive: true, mode: DIR_MODE });
     db = openDb({ dbPath, busyTimeoutMs });
   } catch (error) {
+    // Never softened into a silent lane-off: the guard fires only in a test, where it must be loud.
+    if (error && error.code === HOME_DB_REFUSED_CODE) throw error;
     log.warn(`the memory lane stays off: ${error.message}`);
     return null;
   }
@@ -631,6 +634,8 @@ function createMemoryStore(deps = {}) {
   return {
     append,
     appendMany,
+    // The third write of an expunge, exposed because a rebuild after one leaves fresh frames in the log.
+    checkpoint: () => db.checkpoint(),
     currentDir,
     dbPath,
     deliveredHashes: () => deliveredView,
@@ -665,4 +670,4 @@ function createMemoryStore(deps = {}) {
   };
 }
 
-module.exports = { createMemoryStore, defaultMemoryDir, MEMORY_DIR_NAME };
+module.exports = { createMemoryStore, MEMORY_DIR_NAME };
