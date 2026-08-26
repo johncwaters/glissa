@@ -28,13 +28,13 @@ test('decideFitAction: an unmeasured fit publishes nothing even at a size alread
   assert.deepEqual(out, { repaint: false, send: false });
 });
 
-test('decideFitAction: the first visible fit publishes geometry with redraw', async () => {
+test('decideFitAction: the first visible fit publishes geometry', async () => {
   const { decideFitAction } = await importCore();
   const out = decideFitAction({ measured: true, cols: 150, rows: 44, ...NEVER_FITTED });
   assert.deepEqual(out, { repaint: true, send: true });
 });
 
-test('decideFitAction: reveal at an unchanged grid requests browser and PTY repaint', async () => {
+test('decideFitAction: reveal at an unchanged grid requests a browser repaint and geometry publish', async () => {
   const { decideFitAction } = await importCore();
   const out = decideFitAction({
     measured: true,
@@ -82,7 +82,7 @@ test('decideFitAction: a change on either axis alone is a changed grid', async (
   );
 });
 
-test('decideFitAction: a viewer reclaim sends redraw when only the sent grid differs', async () => {
+test('decideFitAction: a viewer reclaim publishes geometry when only the sent grid differs', async () => {
   const { decideFitAction } = await importCore();
   const out = decideFitAction({
     measured: true,

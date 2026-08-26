@@ -51,8 +51,8 @@ async function openViewer() {
   return ws;
 }
 
-// A resize message produces one pty.resize (two with a redraw nudge), so the assertions poll for
-// the expected total rather than sleeping a fixed amount and hoping.
+// A resize message produces one pty.resize, so the assertions poll for the expected total rather than
+// sleeping a fixed amount and hoping.
 async function waitForResizeCount(expected) {
   const deadline = Date.now() + 3000;
   while (ptyResizes.length < expected && Date.now() < deadline) {
@@ -172,7 +172,7 @@ test('a repeated unview is a cheap no-op, not a re-apply', async () => {
   await closeViewer(desktop);
 });
 
-test('a same-size resize with redraw nudges the PTY one row to force a repaint', async () => {
+test('a same-size resize leaves the PTY untouched', async () => {
   attachFakePty();
   const phone = await openViewer();
 
@@ -180,18 +180,18 @@ test('a same-size resize with redraw nudges the PTY one row to force a repaint',
   await waitForResizeCount(1);
   assert.deepEqual(ptyResizes, [{ cols: 150, rows: 44 }]);
 
-  phone.send(JSON.stringify({ type: 'resize', cols: 150, rows: 44, redraw: true }));
-  await waitForResizeCount(3);
-  assert.deepEqual(ptyResizes.slice(1), [{ cols: 150, rows: 43 }, { cols: 150, rows: 44 }]);
+  phone.send(JSON.stringify({ type: 'resize', cols: 150, rows: 44 }));
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.deepEqual(ptyResizes, [{ cols: 150, rows: 44 }]);
 
   await closeViewer(phone);
 });
 
-test('a changed-size resize with redraw applies once, no nudge needed', async () => {
+test('a changed-size resize applies once', async () => {
   attachFakePty();
   const phone = await openViewer();
 
-  phone.send(JSON.stringify({ type: 'resize', cols: 150, rows: 46, redraw: true }));
+  phone.send(JSON.stringify({ type: 'resize', cols: 150, rows: 46 }));
   await waitForResizeCount(1);
   assert.deepEqual(ptyResizes, [{ cols: 150, rows: 46 }]);
 

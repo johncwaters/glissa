@@ -60,6 +60,21 @@ for (const state of [STATES.WAITING, STATES.IDLE, STATES.COMPLETE, STATES.RUNNIN
   });
 }
 
+test('resize() leaves the PTY alone when the dimensions are unchanged', async () => {
+  const resizes = [];
+  const s = await startedSession(resizes);
+  try {
+    s.resize(120, 40);
+    resizes.length = 0;
+
+    s.resize(120, 40);
+
+    assert.deepEqual(resizes, []);
+  } finally {
+    s.destroy();
+  }
+});
+
 // Regression: a restarted PTY must respawn at the last browser-pushed size, not
 // the 80x24 default. Otherwise Claude initializes its TUI at 80x24 and renders
 // cramped, since the lone post-reconnect resize races startup and is never

@@ -2676,7 +2676,7 @@ class Session extends EventEmitter {
     }
   }
 
-  resize(cols, rows, { redraw = false } = {}) {
+  resize(cols, rows) {
     const isUnchangedSize = this._lastCols === cols && this._lastRows === rows;
     // Remember the latest size so a restart respawns the PTY at this dimension
     // (see start()), rather than the 80x24 default that leaves Claude cramped.
@@ -2685,25 +2685,13 @@ class Session extends EventEmitter {
     if (this._recorder) {
       this._recorder.writeResize(cols, rows);
     }
+    if (isUnchangedSize || !this.ptyProcess) return;
     // Apply immediately, even when quiescent (IDLE/COMPLETE/WAITING), so Claude
-    // gets SIGWINCH and reflows to fit. The redraw is harmless under structural
-    // detection: the OSC-title source only reacts to the activity glyph (which a
-    // reflow does not change) and hooks are event-based, not output-based.
-    if (this.ptyProcess) {
-      // A same-size resize is an OS no-op (no SIGWINCH); nudge a row (or a col at one row) so the TUI repaints.
-      if (redraw && isUnchangedSize) {
-        try {
-          if (rows > 1) this.ptyProcess.resize(cols, rows - 1);
-          if (rows <= 1) this.ptyProcess.resize(cols + 1, rows);
-        } catch {
-          // A failed nudge must not block the real resize below.
-        }
-      }
-      try {
-        this.ptyProcess.resize(cols, rows);
-      } catch {
-        // PTY exited between our check and the resize call (Windows ConPTY race).
-      }
+    // gets SIGWINCH and reflows to fit.
+    try {
+      this.ptyProcess.resize(cols, rows);
+    } catch {
+      // PTY exited between our check and the resize call (Windows ConPTY race).
     }
   }
 
