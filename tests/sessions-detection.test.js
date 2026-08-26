@@ -665,7 +665,7 @@ test('repeated drain events do not extend the settle window (armed once)', (t) =
   assert.equal(s.state, STATES.RUNNING, 'suppressed while a1 is live');
   hook(s, 'subagent-stop', { payload: { agent_id: 'a1' } }); // drains to 0: arms the settle window
   t.mock.timers.tick(20); // 20ms into the 30ms window
-  s._emitAgentsChange(); // a second, redundant agents-change while already drained
+  s.backgroundTracking.emitAgentsChange(); // a second, redundant agents-change while already drained
   t.mock.timers.tick(20); // 40ms since the FIRST drain: past its 30ms window
   assert.equal(s.state, STATES.COMPLETE, 'the window was armed once at the first drain; the redundant emission did not push it out');
   s.destroy();

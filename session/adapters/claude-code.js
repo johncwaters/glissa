@@ -117,7 +117,7 @@ function mapHookToSignal(event, payload) {
     case "subagentstart":
       // A background sub-agent (Task run_in_background / Ctrl+B) began. NOT a state
       // transition: tracked as a live-count delta so a later main-agent Stop fired while
-      // it is still running does not falsely COMPLETE the card (see Session._trackSubagent
+      // it is still running does not falsely COMPLETE the card (see session-background-tracking.js
       // and the activeAgents gate in session/core/status-mapper.js).
       return "subagent-start";
     case "subagentstop":
@@ -143,7 +143,7 @@ function mapHookToSignal(event, payload) {
     case "posttooluse": {
       // Scheduled-revival bookkeeping (subscribed with a ScheduleWakeup|CronCreate|CronDelete
       // matcher; see settings-injector.WAKEUP_TOOL_MATCHER). Tracking-only signals, never
-      // transitions (Session._trackWakeup). The tool_name switch is defense in depth: if a
+      // transitions (session-background-tracking.js). The tool_name switch is defense in depth: if a
       // Claude version ignores the matcher and floods every tool call, everything else maps
       // to null (ignored-event).
       const tool = String(payload?.tool_name || "");

@@ -9,7 +9,8 @@ The session domain: the stateful Session class (lifecycle, PTY spawn/kill, timer
 
 | File | Description |
 |------|-------------|
-| `sessions.js` | Session class; consumes StatusSource, drives the 7-state machine, owns the background-work completion gate |
+| `sessions.js` | Session class; consumes StatusSource and drives the 7-state machine |
+| `session-background-tracking.js` | Stateful background-work, readiness-gate, and scheduled-wakeup collaborator |
 | `session-recorder.js` | Always-on JSONL recorder of PTY data + signals; feeds `detection/replay.js` |
 | `hook-relay.js` | Standalone command-hook relay for a non-Claude agent CLI: stdin envelope to the local hook ingress, always exit 0; never required by the server (decisions in `core/hook-relay-core.js`) |
 | `adapters/` | One adapter per supervised agent CLI (`claude-code.js`, `codex.js`) plus the registry and its lazy per-agent command cache; see root `AGENTS.md` ("Agent Adapters") |

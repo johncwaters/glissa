@@ -1,7 +1,7 @@
 "use strict";
 
 // Pure decision for the DEFERRED COMPLETION path: whether a gate-held `ready` may finally
-// fire (see sessions.js _stashGateHeldReady / _evaluateGateHeldReady). No IO, no Session import.
+// fire (see ../session-background-tracking.js). No IO, no Session import.
 //
 // The invariant: firing a hold is a completion claim made minutes after the Stop that produced
 // it, so it must be re-validated against live evidence at release time, never against a drained

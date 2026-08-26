@@ -151,7 +151,7 @@ test('cron lifecycle: CronCreate tracks by task id, CronDelete clears it', () =>
 test('one-shot self-expires at fireAt + grace via the lazy prune (invisible Esc-cancel bound)', () => {
   const s = makeSession(STATES.COMPLETE);
   // Inject a wakeup already past its grace directly through the tracker (the prune runs at read time).
-  wakeupTracker.addWakeup(s._wakeups, 'w-old', {
+  wakeupTracker.addWakeup(s.backgroundTracking.wakeups(), 'w-old', {
     kind: 'wakeup',
     fireAt: Date.now() - wakeupTracker.DEFAULT_WAKEUP_GRACE_MS - 1000,
     reason: 'stale',

@@ -373,7 +373,7 @@ test('the completion gate is off for codex: a would-be background signal changes
   const { hookRouter, getHookPort } = hookRouterFor();
   const { session } = makeCodexSession({ id: 'codex-gate', hookRouter, getHookPort, detectBackgroundAgents: true });
   assert.equal(session._can('backgroundAgents'), false);
-  assert.equal(session._detectBackgroundAgents, false);
+  assert.equal(session.backgroundTracking.isBackgroundAgentDetectionEnabled(), false);
   await session.start();
   hookRouter.handle({ glissaId: 'codex-gate', event: 'subagentstart', token: session._hooks.token(), payload: { agent_id: 'a1' } });
   assert.equal(session.toSnapshot().activeAgents, 0, 'codex declares no background work, so nothing may gate a Stop');

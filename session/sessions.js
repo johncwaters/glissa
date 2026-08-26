@@ -19,8 +19,7 @@ const { mapSignalToEvent } = require("./core/status-mapper");
 const { decideExitTransition } = require("./core/exit-transition");
 const { shouldHoldTerminalStopForNotice } = require("./core/pack-notice");
 const agentTracker = require("./core/agent-tracker");
-const { decideGateRelease, DEFAULT_GATE_RELEASE_SETTLE_MS } = require("./core/gate-release");
-const wakeupTracker = require("./core/wakeup-tracker");
+const { DEFAULT_GATE_RELEASE_SETTLE_MS } = require("./core/gate-release");
 const { RESUME_ID_RE } = require("./core/auto-resume");
 const { projectSessionSnapshots } = require("./core/snapshot-projection");
 const { createSessionObservability } = require("./session-observability");
@@ -28,6 +27,7 @@ const { createSessionOutput } = require("./session-output");
 const { createSessionPackDelivery } = require("./session-pack-delivery");
 const { createSessionHookLifecycle } = require("./session-hook-lifecycle");
 const { createSessionWorktreeLifecycle } = require("./session-worktree-lifecycle");
+const { createSessionBackgroundTracking } = require("./session-background-tracking");
 
 const KILL_POLL_INTERVAL_MS = 200;
 const KILL_MAX_WAIT_MS = 3000;
@@ -305,59 +305,28 @@ class Session extends EventEmitter {
     // mirrors activeAgents/pendingWakeup in that it NEVER gates a transition. Cleared on resume,
     // user_input, working, any transition leaving WAITING, /clear, and PTY exit/restart.
     this._pendingPromptKind = null;
-    // Live background sub-agents, keyed by Claude Code agent_id -> last-seen ts. Non-empty means
-    // background work is still running after the main agent's Stop, which gates ready->task_complete
-    // (see _onStatus / mapSignalToEvent). Lazily pruned by agentTtlMs; never drives a state transition.
-    this._detectBackgroundAgents = detectBackgroundAgents && this._can("backgroundAgents");
-    this._agentTtlMs = agentTtlMs;
-    this._shellTaskTtlMs = shellTaskTtlMs;
-    this._teammateTaskTtlMs = teammateTaskTtlMs;
-    this._gateReleaseSettleMs = gateReleaseSettleMs;
-    /*
-     * ONE registry for every store behind "is background work still running": the counted
-     * SubagentStart/Stop ids, the authoritative background_tasks declaration and its age, the task
-     * ids settled by TaskCompleted, the teammates idle by name, and the last snapshot's teammate ids.
-     * They are one logical registry reconciled from several signal families that each see a different
-     * slice of the same truth (the 2026-08 review counted them as five separate ledgers driving five
-     * expiry rules off three TTLs), so session/core/agent-tracker.js owns them together, applies every
-     * TTL in one reaper, and answers max(counted, declared) as a query.
-     */
-    this._tasks = agentTracker.createTaskRegistry({ agentTtlMs, shellTaskTtlMs, teammateTaskTtlMs });
-    // A main-agent `ready` suppressed by the activeAgents gate, held so the card can still
-    // complete when the background count later drains WITHOUT another Stop (idle teammate
-    // declared in background_tasks, dropped SubagentStop bounded only by the TTL). Without
-    // this latch the suppressed ready is gone forever and the card pins WORKING until some
-    // new signal happens to arrive. Cleared by any newer activity (working/resume/
-    // awaiting-input), any state change since the stash, /clear, and PTY exit/(re)start.
-    // Released in _evaluateGateHeldReady, which re-validates the hold against live evidence
-    // (session/core/gate-release.js) instead of trusting a drained count alone.
-    this._gateHeldReady = null;
-    this._gateHeldReadyTimer = null;
-    // When the hold was first observed free of background work, or null while it is still gating.
-    // Evaluations are event/TTL driven, so the first look that SEES the drain is what starts the
-    // settle window: carrying a timestamp from the last still-gated look released a held ready
-    // instantly at the drain, before the mailbox wake could disprove it (false COMPLETE, 2026-08-14).
-    this._gateQuietSince = null;
-    // Arrival order of the signals reaching _onStatus, and the sequence number of the last
-    // non-ready (activity) one. A hold stashed BEFORE that activity is stale: the main agent
-    // opened a new turn, so it must never complete the card (incident 2026-07-30; see
-    // session/core/gate-release.js). Sequence rather than clock: signals share milliseconds.
-    this._signalSeq = 0;
-    this._lastActivitySeq = 0;
-    // Components behind the last _activeAgentCount() result, so a trace entry can say WHICH source
-    // gated a ready (counted sub-agents vs a declared background_tasks snapshot) instead of a total.
-    this._agentBreakdown = { counted: 0, declared: 0, idleNames: 0, idleTasks: 0 };
     // True between a SessionStart(source: clear|compact) hook and the next real
     // UserPromptSubmit: the TUI redraw around /clear flashes a spinner + idle glyph in
     // the OSC title, which would otherwise open a fake work cycle (RUNNING) and close
     // it with a false COMPLETE ("finished working" on every /clear). While latched,
     // title signals are dropped; hooks still flow (they are authoritative).
     this._titleQuiet = false;
-    // Pending scheduled revivals, keyed by cron task id or a synthetic one-shot key. Advisory
-    // only (see _trackWakeup); lazily pruned (fireAt + grace / cron TTL); never a transition.
-    this._detectScheduledWakeups = detectScheduledWakeups;
-    this._wakeups = new Map();
-    this._wakeupSeq = 0;
+    this.backgroundTracking = createSessionBackgroundTracking({
+      detectBackgroundAgents: detectBackgroundAgents && this._can("backgroundAgents"),
+      agentTtlMs,
+      shellTaskTtlMs,
+      teammateTaskTtlMs,
+      gateReleaseSettleMs,
+      detectScheduledWakeups,
+      port: {
+        state: () => this.state,
+        isDestroyed: () => this._destroyed,
+        emit: (event, detail) => this.emit(event, detail),
+        recordDecision: (entry) => this._recordDecision(entry),
+        transition: (event, detail) => this.transition(event, detail),
+        resyncWorkingLatch: () => this._titleSource.resyncWorkingLatch(),
+      },
+    });
     this._spawnCommand = spawnCommand;
     this._initialPrompt = initialPrompt;
     /** @type {string[]} */
@@ -390,7 +359,7 @@ class Session extends EventEmitter {
       getHookPort,
       hooksBaseDir,
       settingsPermissions,
-      detectScheduledWakeups: this._detectScheduledWakeups,
+      detectScheduledWakeups,
       enableProjectMcp: !!enableProjectMcp,
       rtkPath: this._rtkPath,
       planLimits: this._planLimits,
@@ -495,7 +464,7 @@ class Session extends EventEmitter {
     // live set lets a main-agent Stop fired while a background sub-agent is still running avoid a
     // false COMPLETE (see _onStatus + the activeAgents gate in status-mapper.js).
     if (raw && (raw.signal === "subagent-start" || raw.signal === "subagent-stop")) {
-      this._trackSubagent(raw);
+      this.backgroundTracking.trackSubagent(raw);
       return;
     }
     // Task lifecycle is tracking-only too: TaskCreated/TaskCompleted/TeammateIdle drain (or
@@ -503,13 +472,13 @@ class Session extends EventEmitter {
     // the only signal that an idle-but-alive teammate (still declared status:running on every
     // Stop) has stopped gating completion.
     if (raw && (raw.signal === "task-created" || raw.signal === "task-completed" || raw.signal === "teammate-idle")) {
-      this._trackTaskLifecycle(raw);
+      this.backgroundTracking.trackTaskLifecycle(raw);
       return;
     }
     // Scheduled-revival lifecycle is likewise tracking-only: it must never reach the
     // StatusSource (a pending wakeup is metadata, not a state signal).
     if (raw && (raw.signal === "wakeup-scheduled" || raw.signal === "cron-created" || raw.signal === "cron-deleted")) {
-      this._trackWakeup(raw);
+      this.backgroundTracking.trackWakeup(raw);
       return;
     }
     // Keys off whichever main-agent hook arrives, never one event name: Claude Code does not
@@ -535,9 +504,9 @@ class Session extends EventEmitter {
       this._setPendingPromptKind(null);
       // Drop the held ready BEFORE the override clear: clearing may drain the count to 0,
       // and a stale ready must not fire COMPLETE on the very prompt that starts a new turn.
-      this._clearGateHeldReady();
-      this._tasks.resetTurnEvidence();
-      this._clearBgDeclared(); // a new turn starts with no settled background snapshot
+      this.backgroundTracking.clearGateHeldReady();
+      this.backgroundTracking.resetTurnEvidence();
+      this.backgroundTracking.clearBgDeclared(); // a new turn starts with no settled background snapshot
       // Only a hook ever produces "resume" (UserPromptSubmit; the title source cannot), so this
       // means exactly "authoritative user prompt". Emitted separately from the state-change this
       // signal may (or may not) cause: both "working" (title) and "resume" (hook) are IMMEDIATE
@@ -549,7 +518,7 @@ class Session extends EventEmitter {
     }
     // A main-agent Stop carries the authoritative background-work count (v2.1.145+).
     if (raw && raw.signal === "ready" && raw.source === "hook") {
-      this._applyBackgroundTasks(raw.payload);
+      this.backgroundTracking.applyBackgroundTasks(raw.payload);
     }
     if (shouldHoldTerminalStopForNotice({
       event: raw?.event,
@@ -567,8 +536,8 @@ class Session extends EventEmitter {
     const src = String(payload.source || "").toLowerCase();
     if (src !== "clear" && src !== "compact") return;
     this._resetDetectionSources({ quiet: true });
-    this._clearGateHeldReady();
-    this._tasks.resetTurnEvidence();
+    this.backgroundTracking.clearGateHeldReady();
+    this.backgroundTracking.resetTurnEvidence();
     this._setPendingPromptKind(null);
   }
 
@@ -589,111 +558,12 @@ class Session extends EventEmitter {
   }
 
   // Advisory pending-prompt-kind setter (see _pendingPromptKind above). Emits 'prompt-kind-change'
-  // only when the value actually changes, mirroring _emitAgentsChange/_emitWakeupChange.
+  // only when the value actually changes, mirroring the agent and wakeup change emitters.
   _setPendingPromptKind(kind) {
     const next = kind || null;
     if (next === this._pendingPromptKind) return;
     this._pendingPromptKind = next;
     this.emit("prompt-kind-change", { pendingPromptKind: next });
-  }
-
-  // Reconcile against an authoritative `background_tasks` payload array. A declaration of
-  // 0 running entries also drains the counted id map (bounds a dropped SubagentStop
-  // immediately instead of waiting for the TTL prune). The idle set is pruned to ids still
-  // declared: an id gone from Claude's registry no longer needs remembering. Absent field
-  // (older Claude) changes nothing.
-  _applyBackgroundTasks(payload) {
-    if (!this._detectBackgroundAgents) return;
-    const entries = agentTracker.extractBackgroundTasks(payload);
-    if (entries === null) return;
-    this._withAgentCount(() => this._reconcileDeclared(entries));
-  }
-
-  _reconcileDeclared(entries) {
-    this._tasks.reconcileDeclared(entries);
-  }
-
-  _clearBgDeclared() {
-    if (!this._tasks.hasDeclared()) return;
-    this._withAgentCount(() => this._tasks.clearDeclared());
-  }
-
-  // Apply one TaskCreated/TaskCompleted/TeammateIdle signal to the idle bookkeeping.
-  // Never a transition; a drain can release a gate-held ready via _emitAgentsChange.
-  _trackTaskLifecycle(raw) {
-    if (!this._detectBackgroundAgents) return;
-    this._withAgentCount(() => this._applyTaskLifecycle(raw));
-  }
-
-  _applyTaskLifecycle(raw) {
-    const p = raw.payload || {};
-    const taskId = typeof p.task_id === "string" && p.task_id ? p.task_id : null;
-    const name = typeof p.teammate_name === "string" ? p.teammate_name : "";
-    if (raw.signal === "task-created") {
-      // New background work: like subagent-start, it invalidates a held ready, and a
-      // reactivated teammate (new task) must gate again.
-      this._clearGateHeldReady();
-      this._tasks.noteTaskCreated({ taskId, name });
-      return;
-    }
-    if (raw.signal === "task-completed") {
-      this._tasks.noteTaskCompleted({ taskId, name });
-      return;
-    }
-    // teammate-idle: name only, no task_id, and a declared entry can NOT be matched to a name
-    // (its `description` is the spawn prompt, live-verified), so the idle is recorded BY NAME and
-    // subtracted from the declared teammate count, letting several simultaneous idle teammates each
-    // drain the gate by one. A nameless payload can never be re-gated (no a<name>- prefix match), so
-    // recording it would be a pure false-drain vector with no way back; ground truth says the payload
-    // always carries teammate_name, so drop it rather than guess a synthetic key.
-    if (!name) return;
-    this._tasks.noteTeammateIdle(name, Date.now());
-  }
-
-  // Apply one subagent-start/stop signal to the live set. Off (kill switch) or a payload with no
-  // agent_id is ignored, so the count stays 0 and behavior is exactly as before. Emits an
-  // 'agents-change' delta only when the live count actually changed.
-  _trackSubagent(raw) {
-    if (!this._detectBackgroundAgents) return;
-    const agentId = raw.payload?.agent_id;
-    if (raw.signal === "subagent-start") {
-      // Fresh background work is newer activity: a held ready from before it must not release
-      // when only the OLDER ids drain (subagent-start never reaches _onStatus's clearing path).
-      this._clearGateHeldReady();
-      // Teammate agent_ids embed the spawn name (live-captured: "a<name>-<hex>"). This is the
-      // only re-gating signal for a teammate the lead wakes via mailbox: no TaskCreated ever
-      // fires for a named-agent teammate (memory: named-agent-teammate-hook-sequence).
-      if (typeof agentId === "string") {
-        this._withAgentCount(() => this._tasks.regateByAgentId(agentId));
-      }
-    }
-    if (agentId && raw.signal === "subagent-start") {
-      const changed = this._tasks.noteAgentStart(agentId, raw.ts || Date.now());
-      if (changed) this._emitAgentsChange();
-    }
-    if (agentId && raw.signal === "subagent-stop") {
-      if (this._gateHeldReady) {
-        this._gateQuietSince = null;
-        this._evaluateGateHeldReady();
-      }
-      const changed = this._tasks.noteAgentStop(agentId);
-      if (changed) this._emitAgentsChange();
-    }
-    // SubagentStop also carries `background_tasks` (v2.1.145+): reconcile even when the
-    // id was missing/unknown, so a drain is authoritative rather than TTL-bounded.
-    if (raw.signal === "subagent-stop") this._applyBackgroundTasks(raw.payload);
-  }
-
-  // Pruned count of live background sub-agents. Lazy prune (no per-session timer) bounds a dropped
-  // SubagentStop. Returns 0 when detection is off so the gate is inert.
-  _activeAgentCount() {
-    if (!this._detectBackgroundAgents) {
-      this._agentBreakdown = { counted: 0, declared: 0, idleNames: 0, idleTasks: 0 };
-      return 0;
-    }
-    const active = this._tasks.activeCount();
-    this._agentBreakdown = this._tasks.getBreakdown();
-    return active;
   }
 
   /*
@@ -721,124 +591,6 @@ class Session extends EventEmitter {
     this._recordDecision(entry);
   }
 
-  _emitAgentsChange() {
-    // Internal event; the backend listener already has the session (id/name), so carry only the count.
-    this.emit("agents-change", { activeAgents: this._activeAgentCount() });
-    this._evaluateGateHeldReady();
-  }
-
-  // Run one piece of background-work bookkeeping and emit a single 'agents-change' delta only if
-  // the live count actually moved. Every mutator of the counted map, the declared snapshot and the
-  // idle sets goes through here, so the emit rule lives in one place.
-  _withAgentCount(mutate) {
-    const before = this._activeAgentCount();
-    mutate();
-    if (this._activeAgentCount() !== before) this._emitAgentsChange();
-  }
-
-  // Hold a main-agent ready that only the background-agent gate suppressed;
-  // decideGateRelease (session/core/gate-release.js) decides whether it may ever fire.
-  // The latch re-open makes "activity since the stash" observable at all, since the
-  // edge-triggered title source would otherwise never re-report a still-spinning title
-  // (full rationale: AGENTS.md, Background sub-agents / completion gate).
-  _stashGateHeldReady(s) {
-    const now = Date.now();
-    this._gateHeldReady = {
-      source: s.source,
-      signal: s.signal,
-      confidence: s.confidence,
-      state: this.state,
-      ts: now,
-      seq: this._signalSeq,
-    };
-    // Each hold's settle tracking starts clean; the first evaluation below observes the real count.
-    this._gateQuietSince = null;
-    this._titleSource.resyncWorkingLatch();
-    this._evaluateGateHeldReady();
-  }
-
-  _armGateTimer(ms) {
-    this._armTimer("_gateHeldReadyTimer", ms, () => this._evaluateGateHeldReady(), { unref: true });
-  }
-
-  // How long a still-gated hold should wait before re-checking. The TTLs it waits on age from
-  // their own timestamps (the declaring Stop, each SubagentStart), so a full interval measured
-  // from now bounded the stuck-WORKING window at up to 2x the TTL: a snapshot 60s into its 90s
-  // teammate TTL got a fresh 90s. Capped by the old full interval so this can only ever shorten
-  // the wait; msUntilNextDrain returns strictly positive values, so no floor is needed.
-  _gateRecheckMs(now) {
-    const fullInterval = Math.min(this._agentTtlMs, this._shellTaskTtlMs, this._teammateTaskTtlMs) + 50;
-    const remaining = this._tasks.msUntilNextDrain(now);
-    if (remaining === null) return fullInterval;
-    return Math.min(remaining + 50, fullInterval);
-  }
-
-  _clearGateHeldReady() {
-    this._gateHeldReady = null;
-    this._gateQuietSince = null;
-    this._clearTimer("_gateHeldReadyTimer");
-  }
-
-  // Re-validate the held ready and act on the verdict. Runs whenever the background count changes
-  // (a drain) and whenever the timer re-checks; the timer covers the TTL-only drain, where no
-  // further hook ever arrives and only the lazy prune in _activeAgentCount moves the count.
-  _evaluateGateHeldReady() {
-    const held = this._gateHeldReady;
-    if (!held || this._destroyed) return;
-    const now = Date.now();
-    const activeAgents = this._activeAgentCount();
-    // First look that sees the drain: the settle window runs from HERE, never from an earlier look.
-    if (activeAgents === 0 && this._gateQuietSince === null) this._gateQuietSince = now;
-    const { decision, waitMs } = decideGateRelease({
-      heldState: held.state,
-      currentState: this.state,
-      activeAgents,
-      stashSeq: held.seq,
-      lastActivitySeq: this._lastActivitySeq,
-      stashTs: held.ts,
-      quietSince: this._gateQuietSince || 0,
-      now,
-      settleMs: this._gateReleaseSettleMs,
-    });
-    // Recorded before acting, so a cancel/release leaves its evidence even though the branches
-    // below drop the hold the entry describes.
-    this._recordDecision({
-      ts: now,
-      kind: "gate",
-      decision,
-      waitMs,
-      active: activeAgents,
-      heldSeq: held.seq,
-      lastActivitySeq: this._lastActivitySeq,
-      quietMs: now - held.ts,
-    });
-    if (decision === "cancel") {
-      this._clearGateHeldReady();
-      return;
-    }
-    if (decision === "gated") {
-      // Still gating, so no quiet window has started yet; the look that sees the drain starts it.
-      this._gateQuietSince = null;
-      this._armGateTimer(this._gateRecheckMs(now));
-      return;
-    }
-    if (decision === "wait") {
-      this._armGateTimer(waitMs);
-      return;
-    }
-    const event = mapSignalToEvent(held.signal, this.state, held.confidence, 0);
-    this._clearGateHeldReady();
-    if (event) this.transition(event, { source: held.source, signal: held.signal, deferred: true });
-  }
-
-  // Drop all live ids + the declared snapshot + the task-lifecycle bookkeeping (PTY exit,
-  // (re)start). Emits a clearing delta only if something was live.
-  _clearAgents() {
-    const had = this._activeAgentCount() > 0;
-    this._tasks.clear();
-    if (had) this._emitAgentsChange();
-  }
-
   // Drop both signal sources back to a clean stream, and optionally latch the title source quiet or
   // clear the background-work bookkeeping with them. Called from a PTY (re)start, a PTY exit, /clear
   // and sleep. `quiet` omitted leaves the latch alone (sleep freezes state, it does not re-open a turn).
@@ -853,69 +605,12 @@ class Session extends EventEmitter {
   }
 
   // The full background-work reset a PTY start or exit needs. Order matters: a pending held ready
-  // must go FIRST, because _clearAgents emits an agents-change that would otherwise release it.
+  // must go FIRST, because clearAgents emits an agents-change that would otherwise release it.
   _clearDetectionTracking() {
-    this._clearGateHeldReady();
-    this._clearAgents();
-    this._clearWakeups();
+    this.backgroundTracking.clearGateHeldReady();
+    this.backgroundTracking.clearAgents();
+    this.backgroundTracking.clearWakeups();
     this._setPendingPromptKind(null);
-  }
-
-  // Apply one scheduled-revival signal to the pending-wakeup set. ADVISORY metadata only: a Stop
-  // with a pending wakeup IS a finished turn, so unlike activeAgents this NEVER gates a transition.
-  // Cancellation is invisible (Esc fires no hook, claude-code#58235), so entries are self-expiring
-  // via the lazy prune in _pendingWakeup. Payload field names are extracted defensively; the exact
-  // shapes are an open probe item (plan WS2 step 0) and a miss simply drops the signal.
-  _trackWakeup(raw) {
-    if (!this._detectScheduledWakeups) return;
-    const payload = raw.payload || {};
-    const ts = raw.ts || Date.now();
-    if (raw.signal === "wakeup-scheduled") {
-      const input = payload.tool_input || {};
-      const delaySec = Number(input.delaySeconds);
-      if (!Number.isFinite(delaySec) || delaySec <= 0) return;
-      const key = `w${++this._wakeupSeq}`; // collision-free synthetic key (one-shot, never re-referenced)
-      const reason = typeof input.reason === "string" && input.reason ? input.reason : null;
-      if (wakeupTracker.addWakeup(this._wakeups, key, { kind: "wakeup", fireAt: ts + delaySec * 1000, reason, ts })) {
-        this._emitWakeupChange();
-      }
-      return;
-    }
-    if (raw.signal === "cron-created") {
-      // No cron-expression parsing in v1: tracked without a fire time, bounded by the cron TTL.
-      // A synthetic-key fallback entry (id fields not yet pinned, plan WS2 step 0) can never be
-      // matched by its CronDelete; it is TTL/PTY-exit bound only. Advisory chip, acceptable.
-      const key = wakeupTracker.extractCronTaskId(payload) || `c${++this._wakeupSeq}`;
-      if (wakeupTracker.addWakeup(this._wakeups, key, { kind: "cron", fireAt: null, reason: null, ts })) {
-        this._emitWakeupChange();
-      }
-      return;
-    }
-    // cron-deleted
-    const key = wakeupTracker.extractCronTaskId(payload);
-    if (!key) return;
-    if (wakeupTracker.removeWakeup(this._wakeups, key)) this._emitWakeupChange();
-  }
-
-  // Pruned earliest pending revival, or null. Returns null when detection is off.
-  _pendingWakeup() {
-    if (!this._detectScheduledWakeups) return null;
-    wakeupTracker.pruneWakeups(this._wakeups, Date.now());
-    const e = wakeupTracker.earliestWakeup(this._wakeups);
-    if (!e) return null;
-    return { at: e.fireAt, kind: e.kind, reason: e.reason };
-  }
-
-  _emitWakeupChange() {
-    this.emit("wakeup-change", { pendingWakeup: this._pendingWakeup() });
-  }
-
-  // Drop all pending revivals (PTY exit, (re)start): scheduled tasks are session-scoped and die
-  // with the PTY. Emits a clearing delta only if something was pending.
-  _clearWakeups() {
-    if (this._wakeups.size === 0) return;
-    this._wakeups.clear();
-    this._emitWakeupChange();
   }
 
   _onStatus(s) {
@@ -924,8 +619,7 @@ class Session extends EventEmitter {
     // Any non-ready signal is proof the turn a held ready announced did not settle. Recorded as
     // arrival order so decideGateRelease is the ONE place that judges a hold stale (it cancels
     // any hold stashed before this); no separate eager-clear path to keep in sync.
-    this._signalSeq += 1;
-    if (s.signal !== "ready") this._lastActivitySeq = this._signalSeq;
+    const signalSeq = this.backgroundTracking.noteStatus(s.signal);
     // A working signal means the operator answered (or the agent resumed) - the prompt this
     // session was waiting on no longer applies.
     if (s.signal === "working") this._setPendingPromptKind(null);
@@ -933,16 +627,16 @@ class Session extends EventEmitter {
     // the _destroyed guard + _lastSignal write above, and the transition below. The detail
     // { source, signal } is uniform across every firing case (byte-identical to the prior
     // per-branch details), so it is assembled here rather than in the pure mapper.
-    const active = this._activeAgentCount();
+    const active = this.backgroundTracking.activeAgentCount();
     const eventWithoutGate = mapSignalToEvent(s.signal, this.state, s.confidence, 0);
     const orphanStopGate = s.signal === "ready" && s.source === "hook"
-      && this._tasks.hasOrphanStopEvidence() && !!eventWithoutGate;
+      && this.backgroundTracking.hasOrphanStopEvidence() && !!eventWithoutGate;
     const event = orphanStopGate
       ? null
       : mapSignalToEvent(s.signal, this.state, s.confidence, active);
     // A ready suppressed ONLY by the background-agent gate is held, not dropped: when the
     // count drains without another Stop (idle teammate, dropped SubagentStop) the drain
-    // releases it and the card still completes (see _evaluateGateHeldReady). Decided before
+    // releases it and the card still completes (see evaluateGateHeldReady). Decided before
     // the transition below, which cannot change the answer (a fired event rules the hold out)
     // but would move this.state under the second mapper call.
     const gateHeld = !event && s.signal === "ready" && (active > 0 || orphanStopGate)
@@ -954,15 +648,15 @@ class Session extends EventEmitter {
       source: s.source,
       confidence: s.confidence || null,
       state: this.state,
-      seq: this._signalSeq,
+      seq: signalSeq,
       active,
       orphanStop: orphanStopGate,
-      ...this._agentBreakdown,
+      ...this.backgroundTracking.agentBreakdown(),
       event: event || null,
       action: event ? "transition" : (gateHeld ? "gate-held" : "no-op"),
     });
     if (event) this.transition(event, { source: s.source, signal: s.signal });
-    if (gateHeld) this._stashGateHeldReady(s);
+    if (gateHeld) this.backgroundTracking.stashGateHeldReady(s);
     // A turn end (`ready`) is the precise moment a batch of edits/commits has settled, so refresh the
     // review diff right then (debounced). The signature dedup makes a no-change turn a cheap no-op.
     if (s.signal === "ready") this.worktreeLifecycle.scheduleCheck();
@@ -1150,8 +844,8 @@ class Session extends EventEmitter {
   }
 
   _projectSnapshots() {
-    const active = this._activeAgentCount();
-    const held = this._gateHeldReady;
+    const active = this.backgroundTracking.activeAgentCount();
+    const held = this.backgroundTracking.heldReady();
     return projectSessionSnapshots({
       id: this.id,
       name: this.name,
@@ -1166,7 +860,7 @@ class Session extends EventEmitter {
       resumeSessionId: this._resumeSessionId,
       activeAgents: active,
       packs: this._packDelivery.delivered(),
-      pendingWakeup: this._pendingWakeup(),
+      pendingWakeup: this.backgroundTracking.pendingWakeup(),
       pendingPromptKind: this._pendingPromptKind,
       mergeStatus: this.mergeStatus,
       worktreeNotice: this.worktreeNotice,
@@ -1174,9 +868,9 @@ class Session extends EventEmitter {
       auditLog: this.auditLog,
       detection: {
         ...this.getDetectionStats(),
-        agents: { ...this._agentBreakdown, active },
+        agents: { ...this.backgroundTracking.agentBreakdown(), active },
         gate: held
-          ? { heldForMs: Date.now() - held.ts, seq: held.seq, lastActivitySeq: this._lastActivitySeq }
+          ? { heldForMs: Date.now() - held.ts, seq: held.seq, lastActivitySeq: this.backgroundTracking.lastActivitySeq() }
           : null,
       },
       decisions: this._observability.decisionTail(15),
@@ -1953,7 +1647,7 @@ class Session extends EventEmitter {
     // _killReapTimer is deliberately NOT cleared here: it is driving the reap a shutdown or an ephemeral
     // lane's worktree discard is about to await, and it settles itself inside the kill budget.
 
-    this._clearGateHeldReady();
+    this.backgroundTracking.clearGateHeldReady();
     this._clearPackNotice();
 
     if (this._recorder) {
