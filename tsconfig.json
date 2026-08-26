@@ -10,6 +10,11 @@
     "skipLibCheck": true,
     "strict": false,
     "strictNullChecks": true,
+    "strictBindCallApply": true,
+    "noImplicitThis": true,
+    "alwaysStrict": true,
+    "strictPropertyInitialization": true,
+    "noImplicitReturns": true,
     "target": "ES2023",
     "types": ["node"]
   },

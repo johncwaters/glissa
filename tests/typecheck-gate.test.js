@@ -25,7 +25,17 @@ const SERVER_INCLUDE_GLOBS = [
 const PUBLIC_INCLUDE_GLOBS = ['public/**/*.js', 'public/**/*.mjs', 'public/**/*.d.ts'];
 
 // Turning any of these off makes tsc pass by checking less, not by the code being sound.
-const REQUIRED_OPTIONS = { allowJs: true, checkJs: true, noEmit: true, strictNullChecks: true };
+const REQUIRED_OPTIONS = {
+  allowJs: true,
+  checkJs: true,
+  noEmit: true,
+  strictNullChecks: true,
+  strictBindCallApply: true,
+  noImplicitThis: true,
+  alwaysStrict: true,
+  strictPropertyInitialization: true,
+  noImplicitReturns: true,
+};
 
 const CHECKED_TREES = ['server', 'session', 'detection', 'notifications', 'shared', 'public'];
 const SUPPRESSIONS = ['@ts-nocheck', '@ts-ignore', '@ts-expect-error'];

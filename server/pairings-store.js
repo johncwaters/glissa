@@ -178,7 +178,7 @@ function createPairingsStore({ filePath = defaultPairingsPath(), now = Date.now,
    * redemption must not rewrite the file: an identical rewrite still fires the watch refresh on
    * every replay attempt).
    */
-  /** @param {(document: PairingsDocument) => void | false} mutator */
+  /** @param {(document: PairingsDocument) => boolean} mutator - false to leave the file untouched */
   function save(mutator) {
     try {
       ensureDir();
@@ -197,7 +197,7 @@ function createPairingsStore({ filePath = defaultPairingsPath(), now = Date.now,
         warn('[pairings] Refusing to write over an unreadable pairings file');
         return null;
       }
-      if (mutator(doc) === false) {
+      if (!mutator(doc)) {
         snapshot = doc;
         return doc;
       }
@@ -224,6 +224,7 @@ function createPairingsStore({ filePath = defaultPairingsPath(), now = Date.now,
         expiresAt: minted.expiresAt,
         usedAt: null,
       });
+      return true;
     });
     if (!written) return null;
     return { token: minted.token, expiresAt: minted.expiresAt, name: String(name || '') };
@@ -256,6 +257,7 @@ function createPairingsStore({ filePath = defaultPairingsPath(), now = Date.now,
       };
       doc.devices.push(device);
       outcome = { ok: true, reason: null, device, cookieValue: credential.cookieValue };
+      return true;
     });
     if (!written) return { ok: false, reason: 'write-failed', device: null };
     return outcome;
@@ -278,6 +280,7 @@ function createPairingsStore({ filePath = defaultPairingsPath(), now = Date.now,
       if (!device) return false;
       found = true;
       device.revokedAt = now();
+      return true;
     });
     if (!written) return { ok: false, reason: 'write-failed' };
     if (!found) return { ok: false, reason: 'unknown' };
@@ -298,6 +301,7 @@ function createPairingsStore({ filePath = defaultPairingsPath(), now = Date.now,
       removed = doc.pending.length - kept.length;
       if (removed === 0) return false;
       doc.pending = kept;
+      return true;
     });
     return removed;
   }
