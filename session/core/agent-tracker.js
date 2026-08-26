@@ -241,6 +241,8 @@ function createTaskRegistry({
 } = {}) {
   // Live sub-agent ids from SubagentStart/Stop: agentId -> last-seen ts.
   const countedAgents = new Map();
+  const observedAgentIdsThisTurn = new Set();
+  const orphanAgentStops = new Map();
   // The latest authoritative background_tasks declaration, and when it was declared.
   let declaredEntries = null;
   let declaredTs = 0;
@@ -263,6 +265,7 @@ function createTaskRegistry({
    */
   function reap(at) {
     pruneAgents(countedAgents, at, agentTtlMs);
+    pruneAgents(orphanAgentStops, at, agentTtlMs);
     pruneAgents(idleTeammateNames, at, agentTtlMs);
     if (declaredEntries === null) return;
     const declaredTtlMs = declaredEntries.reduce((maxTtlMs, entry) => Math.max(
@@ -278,12 +281,32 @@ function createTaskRegistry({
     /** SubagentStart. Returns whether the live set actually changed. */
     noteAgentStart(agentId, ts) {
       idleTaskIds.delete(agentId);
+      if (agentId) observedAgentIdsThisTurn.add(agentId);
       return addAgent(countedAgents, agentId, ts);
     },
 
-    /** SubagentStop. Returns whether the live set actually changed. */
+    /** SubagentStop. An unknown id is turn-scoped evidence that its start hook was lost. */
     noteAgentStop(agentId) {
-      return removeAgent(countedAgents, agentId);
+      if (!agentId) return false;
+      const changed = removeAgent(countedAgents, agentId);
+      if (changed) {
+        observedAgentIdsThisTurn.add(agentId);
+        return true;
+      }
+      if (observedAgentIdsThisTurn.has(agentId)) return false;
+      observedAgentIdsThisTurn.add(agentId);
+      orphanAgentStops.set(agentId, now());
+      return false;
+    },
+
+    hasOrphanStopEvidence() {
+      reap(now());
+      return orphanAgentStops.size > 0;
+    },
+
+    resetTurnEvidence() {
+      observedAgentIdsThisTurn.clear();
+      orphanAgentStops.clear();
     },
 
     /**
@@ -407,6 +430,8 @@ function createTaskRegistry({
      */
     clear() {
       countedAgents.clear();
+      observedAgentIdsThisTurn.clear();
+      orphanAgentStops.clear();
       declaredEntries = null;
       declaredTs = 0;
       idleTaskIds.clear();
@@ -418,6 +443,8 @@ function createTaskRegistry({
     inspect() {
       return {
         counted: new Map(countedAgents),
+        observedAgentIdsThisTurn: new Set(observedAgentIdsThisTurn),
+        orphanAgentStops: new Map(orphanAgentStops),
         declared: declaredEntries,
         declaredTs,
         idleTaskIds: new Set(idleTaskIds),

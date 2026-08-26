@@ -39,6 +39,7 @@ const { NotificationManager } = require('../notifications/notification-manager')
 const { createNotifyGate, explainNotification } = require('../session/core/notify-gate');
 const { pickAutoResume } = require('../session/core/auto-resume');
 const { createTelegramChannel, decideTelegramNotification } = require('../notifications/channels/telegram');
+const { createTelegramCompletionDefer } = require('../notifications/telegram-completion-defer');
 const { createTelegramOutbox } = require('../notifications/telegram-outbox');
 const { sendTelegramMessage } = require('./telegram-transport');
 const { createToastChannel } = require('../notifications/channels/toast');
@@ -932,6 +933,7 @@ function createBackend(httpServer, options = {}) {
   const phoneEscalationMs = () => (
     config.phoneEscalationMs == null ? DEFAULT_PHONE_ESCALATION_MS : config.phoneEscalationMs
   );
+  const sessions = new Map();
   const notificationManager = new NotificationManager({
     escalationIntervalMs: ESCALATION_INTERVAL_MS,
     debounceMs: config.notifyDebounceMs || 3000,
@@ -968,11 +970,14 @@ function createBackend(httpServer, options = {}) {
       });
     },
   });
-  notificationManager.registerChannel('telegram', createTelegramChannel({
+  const sendTelegramNotification = createTelegramChannel({
     getConfig: () => config,
     getConnectionCount: () => clientPresence.connectionCount(),
+    getActiveAgentCount: (sessionId) => sessions.get(sessionId)?.toSnapshot().activeAgents || 0,
     outbox: telegramOutbox,
-  }), {
+  });
+  const telegramChannel = createTelegramCompletionDefer({ deliver: sendTelegramNotification });
+  notificationManager.registerChannel('telegram', telegramChannel, {
     offDashboard: true,
     // Read live, and through the SAME gate the delivery itself uses, so the ladder cannot arm a timer
     // for a channel that would drop what it fires. A zero connection count is passed because that
@@ -1032,7 +1037,6 @@ function createBackend(httpServer, options = {}) {
   // --- Session management ---
   // Sessions are keyed by stable `id` (UUID), not mutable `name`.
 
-  const sessions = new Map();
   // sessionId -> Map<ws, { cols, rows, resizeSeq } | null>. The keys are the health telemetry's
   // data-client count; the values carry each connection's last declared viewer size so a viewer that
   // stops looking can hand the PTY back to whoever is still watching (server/core/viewer-size-core.js).
@@ -1439,6 +1443,7 @@ function createBackend(httpServer, options = {}) {
     sess.on('post-turn-check', () => usage.nudgeSession());
 
     sess.on('state-change', ({ from, to, event, detail }) => {
+      telegramChannel.noteStateChange(sess.id);
       broadcastControl({
         type: 'state-change',
         id: sess.id,
@@ -1537,7 +1542,12 @@ function createBackend(httpServer, options = {}) {
     // Live background sub-agent count delta -> control WS, so the card shows "N agents" while a
     // background sub-agent keeps running after the main turn's Stop (instead of flipping to Complete).
     // Mirrors the session-git delta: a small targeted update, no full snapshot refetch.
-    relay('agents-change', 'session-agents');
+    sess.on('agents-change', (payload) => {
+      telegramChannel.recheck(sess.id);
+      broadcastControl({
+        ...payload, type: 'session-agents', id: sess.id, session: sess.name, timestamp: Date.now(),
+      });
+    });
 
     // Pending scheduled-revival delta -> control WS, so a COMPLETE/IDLE card can say
     // "sleeping until ~HH:MM" instead of looking finished while a wakeup is pending.
@@ -2218,6 +2228,7 @@ function createBackend(httpServer, options = {}) {
     if (updateRecheckInterval) clearInterval(updateRecheckInterval);
     // INVARIANT: destroy NotificationManager BEFORE sessions - clears all timers globally
     notificationManager.destroy();
+    telegramChannel.destroy();
     // Collect each session's in-flight PTY reap (set by kill() on every platform, see sessions.js: the
     // taskkill on win32, the bounded process-gone poll after a group SIGKILL off it) so the lifecycle
     // can await them before exit/respawn; a DORMANT session has no PTY and no reap.

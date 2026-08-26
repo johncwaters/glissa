@@ -29,9 +29,18 @@ const { decideOffDashboardDelivery } = require('../../server/core/client-presenc
  *   the AUDIENCE test that is bypassed, never the opt-in or the credentials.
  * @returns {{ send: boolean, reason: string }}
  */
-function decideTelegramNotification({ enabled, botToken, chatId, connectionCount, phoneEscalation = false }) {
+function decideTelegramNotification({
+  enabled,
+  botToken,
+  chatId,
+  connectionCount,
+  phoneEscalation = false,
+  category = null,
+  activeAgents = 0,
+}) {
   if (enabled !== true) return { send: false, reason: 'disabled' };
   if (!botToken || !chatId) return { send: false, reason: 'not-configured' };
+  if (category === 'complete' && activeAgents > 0) return { send: false, reason: 'active-agents' };
   if (phoneEscalation === true) return { send: true, reason: 'unacknowledged-escalation' };
   if (!decideOffDashboardDelivery(connectionCount)) return { send: false, reason: 'dashboard-open' };
   return { send: true, reason: 'no-dashboard-audience' };
@@ -53,19 +62,28 @@ function formatTelegramText(sessionName, category, message) {
  * @param {Function} [deps.send] injected transport for tests
  * @returns {(sessionName: string, category: string, message: string, context: object) => void}
  */
-function createTelegramChannel({ getConfig, getConnectionCount, outbox = null, send = sendTelegramMessage }) {
-  return function telegramChannel(sessionName, category, message, context) {
+function createTelegramChannel({
+  getConfig,
+  getConnectionCount,
+  getActiveAgentCount = () => 0,
+  outbox = null,
+  send = sendTelegramMessage,
+}) {
+  return function telegramChannel(sessionId, category, message, context) {
     const config = getConfig() || {};
     const telegram = config.telegram || {};
+    const activeAgents = category === 'complete' ? getActiveAgentCount(sessionId) : 0;
     const decision = decideTelegramNotification({
       enabled: config.telegramNotifications === true,
       botToken: telegram.botToken,
       chatId: telegram.chatId,
       connectionCount: getConnectionCount(),
       phoneEscalation: context?.phoneEscalation === true,
+      category,
+      activeAgents,
     });
-    if (!decision.send) return;
-    const text = formatTelegramText(sessionName, category, message);
+    if (!decision.send) return decision;
+    const text = formatTelegramText(sessionId, category, message);
     /*
      * Through the outbox when there is one: the ping is recorded BEFORE it is attempted, so a crash
      * mid-send replays it at the next boot instead of losing it. The credentials are read at SEND
@@ -73,7 +91,7 @@ function createTelegramChannel({ getConfig, getConnectionCount, outbox = null, s
      */
     if (outbox) {
       void outbox.deliver(text);
-      return;
+      return decision;
     }
     // Not awaited: sendTelegramMessage swallows its own failures, and a channel must never make the
     // manager's delivery loop wait on the network.
@@ -83,7 +101,12 @@ function createTelegramChannel({ getConfig, getConnectionCount, outbox = null, s
       text,
       tag: 'channel:telegram',
     });
+    return decision;
   };
 }
 
-module.exports = { createTelegramChannel, decideTelegramNotification, formatTelegramText };
+module.exports = {
+  createTelegramChannel,
+  decideTelegramNotification,
+  formatTelegramText,
+};

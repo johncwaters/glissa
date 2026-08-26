@@ -584,6 +584,7 @@ class Session extends EventEmitter {
       // Drop the held ready BEFORE the override clear: clearing may drain the count to 0,
       // and a stale ready must not fire COMPLETE on the very prompt that starts a new turn.
       this._clearGateHeldReady();
+      this._tasks.resetTurnEvidence();
       this._clearBgDeclared(); // a new turn starts with no settled background snapshot
       // Only a hook ever produces "resume" (UserPromptSubmit; the title source cannot), so this
       // means exactly "authoritative user prompt". Emitted separately from the state-change this
@@ -615,6 +616,7 @@ class Session extends EventEmitter {
     if (src !== "clear" && src !== "compact") return;
     this._resetDetectionSources({ quiet: true });
     this._clearGateHeldReady();
+    this._tasks.resetTurnEvidence();
     this._setPendingPromptKind(null);
   }
 
@@ -718,6 +720,10 @@ class Session extends EventEmitter {
       if (changed) this._emitAgentsChange();
     }
     if (agentId && raw.signal === "subagent-stop") {
+      if (this._gateHeldReady) {
+        this._gateQuietSince = null;
+        this._evaluateGateHeldReady();
+      }
       const changed = this._tasks.noteAgentStop(agentId);
       if (changed) this._emitAgentsChange();
     }
@@ -982,14 +988,19 @@ class Session extends EventEmitter {
     // { source, signal } is uniform across every firing case (byte-identical to the prior
     // per-branch details), so it is assembled here rather than in the pure mapper.
     const active = this._activeAgentCount();
-    const event = mapSignalToEvent(s.signal, this.state, s.confidence, active);
+    const eventWithoutGate = mapSignalToEvent(s.signal, this.state, s.confidence, 0);
+    const orphanStopGate = s.signal === "ready" && s.source === "hook"
+      && this._tasks.hasOrphanStopEvidence() && !!eventWithoutGate;
+    const event = orphanStopGate
+      ? null
+      : mapSignalToEvent(s.signal, this.state, s.confidence, active);
     // A ready suppressed ONLY by the background-agent gate is held, not dropped: when the
     // count drains without another Stop (idle teammate, dropped SubagentStop) the drain
     // releases it and the card still completes (see _evaluateGateHeldReady). Decided before
     // the transition below, which cannot change the answer (a fired event rules the hold out)
     // but would move this.state under the second mapper call.
-    const gateHeld = !event && s.signal === "ready" && active > 0
-      && !!mapSignalToEvent(s.signal, this.state, s.confidence, 0);
+    const gateHeld = !event && s.signal === "ready" && (active > 0 || orphanStopGate)
+      && !!eventWithoutGate;
     this._recordDecision({
       ts: Date.now(),
       kind: "signal",
@@ -999,6 +1010,7 @@ class Session extends EventEmitter {
       state: this.state,
       seq: this._signalSeq,
       active,
+      orphanStop: orphanStopGate,
       ...this._agentBreakdown,
       event: event || null,
       action: event ? "transition" : (gateHeld ? "gate-held" : "no-op"),

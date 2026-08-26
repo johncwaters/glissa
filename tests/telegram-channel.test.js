@@ -9,6 +9,7 @@ const assert = require('node:assert/strict');
 const {
   createTelegramChannel, decideTelegramNotification, formatTelegramText,
 } = require('../notifications/channels/telegram');
+const { createTelegramCompletionDefer } = require('../notifications/telegram-completion-defer');
 
 const CONFIGURED = { enabled: true, botToken: 'TOK', chatId: '123', connectionCount: 0 };
 
@@ -34,6 +35,18 @@ test('opted in, configured, and nobody connected is the one sending case', () =>
   const decision = decideTelegramNotification(CONFIGURED);
   assert.equal(decision.send, true);
   assert.equal(decision.reason, 'no-dashboard-audience');
+});
+
+test('a complete decision defers while the session still reports active agents', () => {
+  assert.deepEqual(
+    decideTelegramNotification({ ...CONFIGURED, category: 'complete', activeAgents: 1 }),
+    { send: false, reason: 'active-agents' },
+  );
+  assert.equal(
+    decideTelegramNotification({ ...CONFIGURED, category: 'waiting', activeAgents: 1 }).send,
+    true,
+    'the belt and braces gate is Telegram complete only',
+  );
 });
 
 test('the text mirrors the web notification: category plus the manager message', () => {
@@ -97,6 +110,48 @@ test('config is read per delivery, so the toggle needs no re-registration', () =
   channel('sess-id', 'complete', 'second', {});
   assert.equal(sent.length, 1);
   assert.equal(sent[0].text, 'complete: second');
+});
+
+test('a deferred complete rechecks the live agent count before sending', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const config = { telegramNotifications: true, telegram: { botToken: 'TOK', chatId: '123' } };
+  let activeAgents = 1;
+  const sent = [];
+  const sendTelegramNotification = createTelegramChannel({
+    getConfig: () => config,
+    getConnectionCount: () => 0,
+    getActiveAgentCount: () => activeAgents,
+    send: (payload) => { sent.push(payload); },
+  });
+  const channel = createTelegramCompletionDefer({ deliver: sendTelegramNotification, recheckMs: 25 });
+  channel('sess-id', 'complete', 'api finished working', {});
+  assert.equal(sent.length, 0);
+  t.mock.timers.tick(25);
+  assert.equal(sent.length, 0, 'the timer keeps deferring against the current count');
+  activeAgents = 0;
+  channel.recheck('sess-id');
+  assert.equal(sent.length, 1, 'an agent-count change can release without waiting for another timer');
+  channel.destroy();
+});
+
+test('a later session state change cancels a deferred complete', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const config = { telegramNotifications: true, telegram: { botToken: 'TOK', chatId: '123' } };
+  let activeAgents = 1;
+  const sent = [];
+  const sendTelegramNotification = createTelegramChannel({
+    getConfig: () => config,
+    getConnectionCount: () => 0,
+    getActiveAgentCount: () => activeAgents,
+    send: (payload) => { sent.push(payload); },
+  });
+  const channel = createTelegramCompletionDefer({ deliver: sendTelegramNotification, recheckMs: 25 });
+  channel('sess-id', 'complete', 'api finished working', {});
+  channel.noteStateChange('sess-id');
+  activeAgents = 0;
+  t.mock.timers.tick(30);
+  assert.equal(sent.length, 0);
+  channel.destroy();
 });
 
 test('a missing config object does not throw the delivery loop', () => {

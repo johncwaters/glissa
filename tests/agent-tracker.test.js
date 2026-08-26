@@ -12,10 +12,34 @@ const {
   extractBackgroundTasks,
   declaredActiveCount,
   msUntilNextDrain,
+  createTaskRegistry,
   DEFAULT_AGENT_TTL_MS,
   DEFAULT_SHELL_TASK_TTL_MS,
   DEFAULT_TEAMMATE_TASK_TTL_MS,
 } = require('../session/core/agent-tracker');
+
+test('an unknown SubagentStop leaves turn evidence that zero reconciliation cannot erase', () => {
+  let now = 1000;
+  const registry = createTaskRegistry({ now: () => now, agentTtlMs: 100 });
+  assert.equal(registry.noteAgentStop('lost-start'), false);
+  assert.equal(registry.hasOrphanStopEvidence(), true);
+  registry.reconcileDeclared([]);
+  assert.equal(registry.hasOrphanStopEvidence(), true);
+  registry.resetTurnEvidence();
+  assert.equal(registry.hasOrphanStopEvidence(), false);
+
+  registry.noteAgentStop('another-lost-start');
+  now += 100;
+  assert.equal(registry.hasOrphanStopEvidence(), false, 'the agent TTL bounds an abandoned turn');
+});
+
+test('a duplicate stop for an agent started this turn is not orphan evidence', () => {
+  const registry = createTaskRegistry({ now: () => 1000 });
+  registry.noteAgentStart('known', 1000);
+  registry.noteAgentStop('known');
+  registry.noteAgentStop('known');
+  assert.equal(registry.hasOrphanStopEvidence(), false);
+});
 
 test('addAgent adds a new id and reports the change; a duplicate is idempotent (count unchanged, ts refreshed)', () => {
   const m = new Map();

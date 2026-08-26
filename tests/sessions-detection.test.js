@@ -410,7 +410,7 @@ test('agents-change tracks the live count and toSnapshot carries activeAgents', 
   s.destroy();
 });
 
-test('a duplicate SubagentStart does not double-count; an unknown SubagentStop is a no-op', () => {
+test('a duplicate SubagentStart and orphan SubagentStop do not change the active count', () => {
   const s = makeSession(STATES.RUNNING);
   hook(s, 'subagent-start', { payload: { agent_id: 'a1' } });
   hook(s, 'subagent-start', { payload: { agent_id: 'a1' } }); // dup
@@ -470,16 +470,30 @@ test('background_tasks on Stop suppresses completion even with zero counted sub-
   s.destroy();
 });
 
-test('a later Stop with empty background_tasks completes (self-correcting drain)', (t) => {
+test('an empty Stop after an orphan SubagentStop is held for the quiet window', (t) => {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
-  const s = makeSession(STATES.RUNNING);
-  hook(s, 'ready', { payload: { background_tasks: [{ id: 'bash-1' }] } });
-  t.mock.timers.tick(40);
-  assert.equal(s.state, STATES.RUNNING);
-  hook(s, 'ready', { payload: { background_tasks: [] } }); // the resumed turn's Stop
-  t.mock.timers.tick(40);
-  assert.equal(s.state, STATES.COMPLETE);
+  const s = makeSession(STATES.RUNNING, { gateReleaseSettleMs: 30 });
+  hook(s, 'subagent-stop', { payload: { agent_id: 'lost-start', background_tasks: [] } });
+  hook(s, 'ready', { payload: { background_tasks: [] } });
+  t.mock.timers.tick(25);
+  assert.equal(s.state, STATES.RUNNING, 'the empty declaration cannot erase orphan evidence');
   assert.equal(s.toSnapshot().activeAgents, 0);
+  t.mock.timers.tick(29);
+  assert.equal(s.state, STATES.RUNNING, 'still held inside the quiet window');
+  t.mock.timers.tick(2);
+  assert.equal(s.state, STATES.COMPLETE, 'quiet structural evidence releases the held Stop');
+  s.destroy();
+});
+
+test('a Stop without background_tasks after an orphan SubagentStop is also held', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const s = makeSession(STATES.RUNNING, { gateReleaseSettleMs: 30 });
+  hook(s, 'subagent-stop', { payload: { agent_id: 'lost-start' } });
+  hook(s, 'ready', { payload: {} });
+  t.mock.timers.tick(25);
+  assert.equal(s.state, STATES.RUNNING);
+  t.mock.timers.tick(31);
+  assert.equal(s.state, STATES.COMPLETE);
   s.destroy();
 });
 
@@ -494,17 +508,41 @@ test('resume clears a stale background_tasks override (new turn, fresh snapshot)
   s.destroy();
 });
 
-test('SubagentStop with background_tasks:[] drains the counted map (dropped-Start/Stop recovery)', (t) => {
+test('a further orphan SubagentStop restarts the held Stop quiet window', (t) => {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
-  const s = makeSession(STATES.RUNNING);
-  hook(s, 'subagent-start', { payload: { agent_id: 'a1' } });
-  hook(s, 'subagent-start', { payload: { agent_id: 'a2' } });
-  assert.equal(s.toSnapshot().activeAgents, 2);
-  // a1's stop was dropped; a2's stop carries the authoritative empty count.
-  hook(s, 'subagent-stop', { payload: { agent_id: 'a2', background_tasks: [] } });
-  assert.equal(s.toSnapshot().activeAgents, 0, 'authoritative drain beats the TTL prune');
-  hook(s, 'ready');
-  t.mock.timers.tick(40);
+  const s = makeSession(STATES.RUNNING, { gateReleaseSettleMs: 30 });
+  hook(s, 'subagent-stop', { payload: { agent_id: 'lost-start-1', background_tasks: [] } });
+  hook(s, 'ready', { payload: { background_tasks: [] } });
+  t.mock.timers.tick(25);
+  t.mock.timers.tick(20);
+  hook(s, 'subagent-stop', { payload: { agent_id: 'lost-start-2', background_tasks: [] } });
+  t.mock.timers.tick(20);
+  assert.equal(s.state, STATES.RUNNING, 'new subagent evidence restarts the quiet window');
+  t.mock.timers.tick(11);
+  assert.equal(s.state, STATES.COMPLETE);
+  s.destroy();
+});
+
+test('UserPromptSubmit resets orphan SubagentStop evidence for the new turn', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const s = makeSession(STATES.RUNNING, { gateReleaseSettleMs: 30 });
+  hook(s, 'subagent-stop', { payload: { agent_id: 'lost-start' } });
+  hook(s, 'resume');
+  hook(s, 'ready', { payload: { background_tasks: [] } });
+  t.mock.timers.tick(25);
+  assert.equal(s.state, STATES.COMPLETE, 'the prior turn cannot hold the new turn Stop');
+  s.destroy();
+});
+
+test('SessionStart clear resets orphan SubagentStop evidence', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const s = makeSession(STATES.RUNNING, { gateReleaseSettleMs: 30 });
+  hook(s, 'subagent-stop', { payload: { agent_id: 'lost-start' } });
+  s.ingestHookSignal({
+    signal: 'session-start', source: 'hook', ts: Date.now(), payload: { source: 'clear' },
+  });
+  hook(s, 'ready', { payload: { background_tasks: [] } });
+  t.mock.timers.tick(25);
   assert.equal(s.state, STATES.COMPLETE);
   s.destroy();
 });
