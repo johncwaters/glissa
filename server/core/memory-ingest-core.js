@@ -9,7 +9,7 @@
  */
 
 const { PROMPT_KIND } = require('./ingest-agent-core');
-const { SOURCE_VENDORS, dropEchoedLines } = require('./memory-core');
+const { SOURCE_VENDORS, canonicalProjectPath, dropEchoedLines } = require('./memory-core');
 
 const AGENT_LOG_SOURCE = 'agentLogs';
 
@@ -36,14 +36,14 @@ function nonEmptyString(value) {
 }
 
 // A rootless event is dropped for the ring's own reason: machine scope lands in every project's retrieval.
-function memoryInputFromEvent(event, { deliveredHashes = null } = {}) {
+function memoryInputFromEvent(event, { deliveredHashes = null, knownProjects = [] } = {}) {
   if (!event || typeof event !== 'object' || Array.isArray(event)) return null;
   if (event.source !== AGENT_LOG_SOURCE) return null;
   const kind = RECORD_KIND_BY_EVENT_KIND[event.kind];
   if (!kind) return null;
   const vendor = SOURCE_VENDORS.includes(event.detail?.vendor) ? event.detail.vendor : null;
   if (!vendor) return null;
-  const project = nonEmptyString(event.scope?.root);
+  const project = canonicalProjectPath(nonEmptyString(event.scope?.root), knownProjects);
   if (!project) return null;
   const summary = typeof event.summary === 'string' ? event.summary : '';
   // Echo suppression: a session quoting its own delivered memory back must not re-ingest it.

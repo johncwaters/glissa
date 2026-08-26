@@ -75,6 +75,7 @@ function createMemoryIngest({
   maxBackfillDirs = DEFAULT_MAX_BACKFILL_DIRS,
   maxBackfillFiles = DEFAULT_MAX_BACKFILL_FILES,
   vendors = null,
+  knownProjects = [],
 } = {}) {
   if (!store || typeof store.append !== 'function') throw new Error('createMemoryIngest requires a memory store');
   const log = createLaneLog({ prefix: '[memory-ingest]', logger, debugFlag: debug });
@@ -136,7 +137,10 @@ function createMemoryIngest({
 
   function enqueue(event, tailPath) {
     counts.seen += 1;
-    const input = core.memoryInputFromEvent(event, { deliveredHashes: store.deliveredHashes?.() || null });
+    const input = core.memoryInputFromEvent(event, {
+      deliveredHashes: store.deliveredHashes?.() || null,
+      knownProjects,
+    });
     if (!input) return false;
     const outcome = core.enqueueIngestInput(queued, { ...input, tailPath }, { maxQueued });
     queued = outcome.queue;

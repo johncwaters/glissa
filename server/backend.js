@@ -1075,6 +1075,7 @@ function createBackend(httpServer, options = {}) {
   // rerere is enabled per repo the first time a worktree is created there, so a conflict resolved once
   // is replayed on every later rebase of every linked worktree (config kill switch, read once at boot).
   const gitWorkspace = createGitWorkspace({ rerere: config.worktreeRerere !== false });
+  const gitWorkspaceSync = createGitWorkspaceSync();
 
   // On-disk session worktrees from a prior run are reconciled AFTER the boot session loop below, so a
   // worktree holding unmerged work can be re-adopted onto its session instead of swept (see the
@@ -1178,6 +1179,9 @@ function createBackend(httpServer, options = {}) {
       dbPath: dbPathForConfig(configStore.configPath),
       config: memoryConfig,
       logger: console,
+      knownProjects: config.projects,
+      resolveProjectPath: (args) => gitWorkspace.resolveProjectPath(args),
+      resolveProjectPathSync: (args) => gitWorkspaceSync.resolveProjectPath(args),
       // Same reason as the ingest and visions lanes: the setting moves, the store is built once.
       debug: () => configStore.getSettings().debugMode === true,
     })
@@ -1192,6 +1196,7 @@ function createBackend(httpServer, options = {}) {
       laneMap: () => laneLedger.laneMap(),
       // How far back that exclusion can actually speak, so the backfill skips transcripts predating it.
       laneFloorMs: () => earliestLaneEntryMs(laneLedger),
+      knownProjects: config.projects,
       debug: () => configStore.getSettings().debugMode === true,
     })
     : null;
@@ -1647,7 +1652,7 @@ function createBackend(httpServer, options = {}) {
     reconcileSessionWorktrees({
       projects: config.projects,
       sessions,
-      gitWorkspaceSync: createGitWorkspaceSync(),
+      gitWorkspaceSync,
       integrationBranch: config.integrationBranch || 'develop',
     });
   } catch (err) {

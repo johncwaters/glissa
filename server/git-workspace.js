@@ -17,6 +17,30 @@ function errResult(err) {
   return { ok: false, out: String(err.stdout || '').trim(), err: String(err.stderr || err.message || '') };
 }
 
+function normalizedDirectoryPath(value) {
+  const posix = String(value || '').replace(/\\/g, '/').replace(/\/+$/, '');
+  const isWindowsPath = /^[A-Za-z]:\//.test(posix) || posix.startsWith('//');
+  return isWindowsPath ? posix.toLowerCase() : posix;
+}
+
+function absoluteGitDir(value, cwd) {
+  if (!value) return null;
+  if (path.isAbsolute(value) || /^[A-Za-z]:[\\/]/.test(value) || String(value).startsWith('\\\\')) {
+    return normalizedDirectoryPath(value);
+  }
+  return normalizedDirectoryPath(path.resolve(cwd, value));
+}
+
+function projectPaths(knownProjects) {
+  const paths = [];
+  for (const project of Array.isArray(knownProjects) ? knownProjects : []) {
+    const candidate = typeof project === 'string' ? project : project?.path;
+    if (typeof candidate !== 'string' || !candidate.trim() || paths.includes(candidate)) continue;
+    paths.push(candidate);
+  }
+  return paths;
+}
+
 // Pure parse of `git worktree list --porcelain`: returns { cwd, branch } for every worktree block that
 // carries a `branch refs/heads/...` line (a detached or bare worktree has none and is skipped). Shared
 // by findWorktreeForBranch and both listSessionWorktrees engines below.
@@ -96,6 +120,28 @@ function createGitWorkspace(opts = {}) {
   async function run(args, cwd, extra) {
     try { return okResult(await git(args, cwd, extra)); }
     catch (err) { return errResult(err); }
+  }
+  const commonGitDirByProject = new Map();
+
+  async function commonGitDir(cwd) {
+    const common = await run(['rev-parse', '--git-common-dir'], cwd);
+    if (!common.ok || !common.out) return null;
+    return absoluteGitDir(common.out, cwd);
+  }
+
+  async function resolveProjectPath({ cwd, knownProjects }) {
+    const sourceCommonGitDir = await commonGitDir(cwd);
+    if (!sourceCommonGitDir) return null;
+    for (const projectPath of projectPaths(knownProjects)) {
+      let configuredCommonGitDir = commonGitDirByProject.get(projectPath);
+      if (configuredCommonGitDir === undefined) {
+        configuredCommonGitDir = await commonGitDir(projectPath);
+        commonGitDirByProject.set(projectPath, configuredCommonGitDir);
+      }
+      if (configuredCommonGitDir !== sourceCommonGitDir) continue;
+      return projectPath;
+    }
+    return null;
   }
   function sanitize(s) { return String(s || '').replace(/[^\w.-]+/g, '-').replace(/^-+|-+$/g, ''); }
 
@@ -652,14 +698,14 @@ function createGitWorkspace(opts = {}) {
     fetchOrigin: serialized(fetchOriginBody),
     deleteRemoteBranch: serialized(deleteRemoteBranchBody),
     listSessionWorktrees, listWorktreeBranches, hasUnmergedWork,
-    listRemoteSessionBranches, listIntegrationTips, isAncestor,
+    listRemoteSessionBranches, listIntegrationTips, isAncestor, resolveProjectPath,
   };
 }
 
 // Synchronous sibling for the ONE-SHOT cold boot reconcile (backend.js), which runs once at server start
 // before any live session streams, so a blocking git call there steals no PTY time (MEMORY
-// single-event-loop-no-sync-git: one-shot cold paths may stay sync). It exposes ONLY the two methods that
-// path needs - listSessionWorktrees (read) + removeWorktreeByPath (junction-safe remove) - so the live
+// single-event-loop-no-sync-git: one-shot cold paths may stay sync). It exposes only boot reconciliation
+// plus the store-open project resolver, so the live
 // async engine is never reached from boot and the cold path never awaits. Logic mirrors the async engine
 // with execFileSync; no serialize queue is needed (single caller, single pass, no concurrency).
 function createGitWorkspaceSync(opts = {}) {
@@ -669,6 +715,28 @@ function createGitWorkspaceSync(opts = {}) {
   function run(args, cwd) {
     try { return okResult(git(args, cwd)); }
     catch (err) { return errResult(err); }
+  }
+  const commonGitDirByProject = new Map();
+
+  function commonGitDir(cwd) {
+    const common = run(['rev-parse', '--git-common-dir'], cwd);
+    if (!common.ok || !common.out) return null;
+    return absoluteGitDir(common.out, cwd);
+  }
+
+  function resolveProjectPath({ cwd, knownProjects }) {
+    const sourceCommonGitDir = commonGitDir(cwd);
+    if (!sourceCommonGitDir) return null;
+    for (const projectPath of projectPaths(knownProjects)) {
+      let configuredCommonGitDir = commonGitDirByProject.get(projectPath);
+      if (configuredCommonGitDir === undefined) {
+        configuredCommonGitDir = commonGitDir(projectPath);
+        commonGitDirByProject.set(projectPath, configuredCommonGitDir);
+      }
+      if (configuredCommonGitDir !== sourceCommonGitDir) continue;
+      return projectPath;
+    }
+    return null;
   }
 
   // The async engine's listSessionWorktrees, step for step, over the sync runner: same git calls in the
@@ -706,7 +774,7 @@ function createGitWorkspaceSync(opts = {}) {
     run(['worktree', 'prune'], projectPath);
   }
 
-  return { listSessionWorktrees, removeWorktreeByPath };
+  return { listSessionWorktrees, removeWorktreeByPath, resolveProjectPath };
 }
 
 // Remove every JUNCTION/symlink reparse point at the top level of a worktree WITHOUT touching its

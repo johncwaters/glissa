@@ -47,6 +47,14 @@ test('an assistant turn becomes an episodic knowledge record stamped reported', 
   assert.equal(input.fromUserPrompt, false);
 });
 
+test('the ingest mapper stamps a known project before the record reaches storage', () => {
+  const projectPath = 'C:\\Work\\Glissa';
+  const input = memoryInputFromEvent(event({
+    scope: { root: 'C:\\Work\\.glissa-worktrees\\Glissa-abc123', sessionId: 'sess-1' },
+  }), { knownProjects: [{ path: projectPath }] });
+  assert.equal(input.project, 'c:/work/glissa');
+});
+
 test('a tool call is knowledge too, and its ts rides the event', () => {
   const input = memoryInputFromEvent(event({ kind: 'agent-tool', summary: 'claude: Read a.js', ts: 42 }));
   assert.equal(input.kind, 'knowledge');

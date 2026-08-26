@@ -140,6 +140,27 @@ test('mergeBack (injected): committed-only rebase + ff-only merge when target is
   assert.ok(!cmds.some((c) => c.startsWith('fetch')), 'no ref-fetch when the target is checked out');
 });
 
+test('resolveProjectPath matches a custom linked worktree through the shared git common dir', async () => {
+  const calls = [];
+  const git = async (args, cwd) => {
+    calls.push({ args, cwd });
+    assert.deepEqual(args, ['rev-parse', '--git-common-dir']);
+    if (cwd === '/custom/worktrees/glissa-feature') return '/repos/glissa/.git';
+    if (cwd === '/repos/glissa') return '.git';
+    throw new Error('not a git checkout');
+  };
+  const workspace = createGitWorkspace({ git });
+  const knownProjects = [{ path: '/repos/glissa' }, { path: '/repos/other' }];
+
+  assert.equal(await workspace.resolveProjectPath({
+    cwd: '/custom/worktrees/glissa-feature', knownProjects,
+  }), '/repos/glissa');
+  assert.equal(await workspace.resolveProjectPath({
+    cwd: '/custom/worktrees/glissa-feature', knownProjects,
+  }), '/repos/glissa');
+  assert.equal(calls.filter((call) => call.cwd === '/repos/glissa').length, 1);
+});
+
 test('mergeBack (injected): updates the target ref via ff-only fetch when the target is NOT checked out', async () => {
   const cmds = [];
   const gw = createGitWorkspace({ git: fakeSessionGit(cmds, { ahead: '1', head: 'main' }) });

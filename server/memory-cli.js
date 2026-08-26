@@ -20,9 +20,13 @@ function defaultMakeStore() {
   const { configSiblingPath } = require('./pairings-store');
   const { dbPathForConfig } = require('./glissa-db');
   const { resolveMemoryConfig } = require('./core/memory-core');
+  const { createGitWorkspace, createGitWorkspaceSync } = require('./git-workspace');
   const configPath = resolveConfigPath();
   const loaded = loadConfigFile(configPath, { exitOnError: false });
   const resolved = resolveMemoryConfig(loaded?.config ? loaded.config.memory : null);
+  const knownProjects = loaded?.config?.projects || [];
+  const gitWorkspace = createGitWorkspace();
+  const gitWorkspaceSync = createGitWorkspaceSync();
   return createMemoryStore({
     dir: configSiblingPath(configPath, 'memory'),
     // The same machine-wide database the server opens, so a CLI pass beside it is one connection more.
@@ -30,6 +34,9 @@ function defaultMakeStore() {
     // An operator running this command IS the authorization, exactly like `glissa pack distill`; the
     // enabled flag gates the automatic lane, not a deliberate expunge.
     config: { ...resolved, enabled: true },
+    knownProjects,
+    resolveProjectPath: (args) => gitWorkspace.resolveProjectPath(args),
+    resolveProjectPathSync: (args) => gitWorkspaceSync.resolveProjectPath(args),
   });
 }
 
@@ -72,14 +79,17 @@ async function runForget(needle, makeStore) {
 async function defaultMakeIngest(store) {
   const { createMemoryIngest, earliestLaneEntryMs } = require('./memory-ingest-wiring');
   const { createLaneLedger } = require('./usage-lane-ledger');
-  const { resolveConfigPath } = require('./config-store');
+  const { loadConfigFile, resolveConfigPath } = require('./config-store');
   const { configSiblingPath } = require('./pairings-store');
-  const ledger = createLaneLedger({ ledgerPath: configSiblingPath(resolveConfigPath(), 'usage-lanes.json') });
+  const configPath = resolveConfigPath();
+  const loaded = loadConfigFile(configPath, { exitOnError: false });
+  const ledger = createLaneLedger({ ledgerPath: configSiblingPath(configPath, 'usage-lanes.json') });
   await ledger.load();
   return createMemoryIngest({
     store,
     laneMap: () => ledger.laneMap(),
     laneFloorMs: () => earliestLaneEntryMs(ledger),
+    knownProjects: loaded?.config?.projects || [],
   });
 }
 

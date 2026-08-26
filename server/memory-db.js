@@ -54,6 +54,8 @@ const SCHEMA = Object.freeze([
 ]);
 
 const LAST_APPEND_KEY = 'memory.lastAppendAt';
+const PROJECT_TAG_SCHEMA_KEY = 'memory.schema.projectTags';
+const PROJECT_TAG_SCHEMA_VERSION = 1;
 
 function recordToRow(record) {
   return {
@@ -109,6 +111,7 @@ function createMemoryDb({ dbPath, busyTimeoutMs = undefined } = {}) {
 
   const statements = {
     listRecords: db.prepare('SELECT * FROM memory_records ORDER BY ts, id'),
+    listProjectRecords: db.prepare('SELECT * FROM memory_records WHERE project IS NOT NULL ORDER BY ts, id'),
     hasRecord: db.prepare('SELECT 1 AS present FROM memory_records WHERE id = ?'),
     insertRecord: db.prepare(`INSERT OR IGNORE INTO memory_records (
       id, ts, segment_key, kind, layer, project, source_kind, source_vendor, source_session_id,
@@ -118,6 +121,7 @@ function createMemoryDb({ dbPath, busyTimeoutMs = undefined } = {}) {
       $body, $valid_from, $valid_to, $supersedes, $lineage, $locked, $sig
     )`),
     updateRecord: db.prepare('UPDATE memory_records SET body = ?, source_kind = ?, lineage = ?, locked = ?, sig = ? WHERE id = ?'),
+    updateRecordProject: db.prepare('UPDATE memory_records SET project = ?, sig = ? WHERE id = ?'),
     deleteRecord: db.prepare('DELETE FROM memory_records WHERE id = ?'),
     countRecords: db.prepare('SELECT count(*) AS total FROM memory_records'),
     segmentKeys: db.prepare('SELECT DISTINCT segment_key FROM memory_records'),
@@ -171,6 +175,25 @@ function createMemoryDb({ dbPath, busyTimeoutMs = undefined } = {}) {
   function deleteRecord(id) {
     statements.deleteRecord.run(id);
     statements.deleteFts.run(id);
+  }
+
+  function migrateProjectTags(migrateRecord) {
+    const current = Number(statements.readMeta.get(PROJECT_TAG_SCHEMA_KEY)?.value || 0);
+    if (current >= PROJECT_TAG_SCHEMA_VERSION) return { applied: false, examined: 0, remapped: 0 };
+    return transaction(() => {
+      let examined = 0;
+      let remapped = 0;
+      for (const row of statements.listProjectRecords.all()) {
+        examined += 1;
+        const record = rowToRecord(row);
+        const migrated = migrateRecord(record);
+        if (!migrated || migrated.project === record.project) continue;
+        statements.updateRecordProject.run(migrated.project, migrated.sig ?? null, record.id);
+        remapped += 1;
+      }
+      statements.writeMeta.run(PROJECT_TAG_SCHEMA_KEY, String(PROJECT_TAG_SCHEMA_VERSION));
+      return { applied: true, examined, remapped };
+    });
   }
 
   /*
@@ -313,6 +336,7 @@ function createMemoryDb({ dbPath, busyTimeoutMs = undefined } = {}) {
       return Number.isFinite(value) ? value : 0;
     },
     listRecords: () => statements.listRecords.all().map(rowToRecord),
+    migrateProjectTags,
     noteDelivered,
     rebuildSearchIndex,
     recordCount: () => Number(statements.countRecords.get().total),
@@ -329,6 +353,8 @@ function createMemoryDb({ dbPath, busyTimeoutMs = undefined } = {}) {
 
 module.exports = {
   LAST_APPEND_KEY,
+  PROJECT_TAG_SCHEMA_KEY,
+  PROJECT_TAG_SCHEMA_VERSION,
   SCHEMA,
   createMemoryDb,
   ftsMatchExpression,

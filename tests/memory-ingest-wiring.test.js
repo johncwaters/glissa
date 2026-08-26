@@ -239,12 +239,13 @@ test('the tapped offset lands in the store beside the canon', withHomes(async ({
 
 // --- Backfill -------------------------------------------------------------
 
-function realStore(memoryDir) {
+function realStore(memoryDir, extra = {}) {
   return createMemoryStore({
     dir: memoryDir,
     dbPath: path.join(memoryDir, 'glissa.db'),
     config: { ...resolveMemoryConfig(null), enabled: true },
     logger: { log: () => {}, warn: () => {} },
+    ...extra,
   });
 }
 
@@ -264,6 +265,22 @@ test('the backfill reads a transcript written while nothing was tailing', withHo
   assert.equal(result.ok, true);
   assert.equal(result.partial, false);
   assert.deepEqual(store.records().map((record) => record.text), ['claude: first turn', 'claude: second turn']);
+}));
+
+test('the ingest write path tags a worktree transcript with its configured project', withHomes(async ({ projects, memoryDir, env, cleanups }) => {
+  const projectPath = '/home/carbon/projects/glissa';
+  const worktreePath = '/home/carbon/projects/.glissa-worktrees/glissa-abc123';
+  seedTranscript(projects, {
+    lines: [claudeAssistant({ text: 'worktree fact', cwd: worktreePath, ts: '2026-08-20T10:00:00.000Z' })],
+  });
+  const store = realStore(memoryDir, { knownProjects: [{ path: projectPath }] });
+  cleanups.push(() => store.stop());
+  const ingest = createMemoryIngest({ store, env });
+  cleanups.push(() => ingest.stop());
+
+  await ingest.backfill();
+  assert.equal(store.records().length, 1);
+  assert.equal(store.records()[0].project, projectPath);
 }));
 
 test('a backfill cut short by its byte budget resumes without writing anything twice', withHomes(async ({ projects, memoryDir, env, cleanups }) => {

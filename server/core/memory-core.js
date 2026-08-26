@@ -215,6 +215,52 @@ function normalizeProjectTag(raw) {
   return folded.slice(0, MAX_PROJECT_TAG_CHARS) || null;
 }
 
+function configuredProjectTags(knownProjects) {
+  const tags = [];
+  for (const project of Array.isArray(knownProjects) ? knownProjects : []) {
+    const candidate = typeof project === 'string' ? project : project?.path;
+    const tag = normalizeProjectTag(candidate);
+    if (!tag || tags.includes(tag)) continue;
+    tags.push(tag);
+  }
+  return tags;
+}
+
+function projectPathParts(projectTag) {
+  const separator = projectTag.lastIndexOf('/');
+  if (separator < 0) return { parent: '', basename: projectTag };
+  return { parent: projectTag.slice(0, separator), basename: projectTag.slice(separator + 1) };
+}
+
+function canonicalProjectPath(cwd, knownProjects) {
+  const value = nonEmptyString(cwd);
+  const tag = normalizeProjectTag(value);
+  if (!tag) return null;
+  const projects = configuredProjectTags(knownProjects);
+  const exact = projects.find((project) => project === tag);
+  if (exact) return exact;
+
+  const claudeMarker = '/.claude/worktrees/';
+  const claudeMarkerAt = tag.indexOf(claudeMarker);
+  if (claudeMarkerAt >= 0) {
+    const repo = tag.slice(0, claudeMarkerAt);
+    const configuredRepo = projects.find((project) => project === repo);
+    if (configuredRepo) return configuredRepo;
+  }
+
+  const glissaMarker = '/.glissa-worktrees/';
+  const glissaMarkerAt = tag.indexOf(glissaMarker);
+  if (glissaMarkerAt < 0) return value;
+  const worktreeParent = tag.slice(0, glissaMarkerAt);
+  const slug = tag.slice(glissaMarkerAt + glissaMarker.length).split('/')[0];
+  const matches = projects.filter((project) => {
+    const parts = projectPathParts(project);
+    return parts.parent === worktreeParent && slug.startsWith(`${parts.basename}-`);
+  });
+  matches.sort((left, right) => projectPathParts(right).basename.length - projectPathParts(left).basename.length);
+  return matches[0] || value;
+}
+
 // The hash tail: two checkouts routinely share a basename, and one file holding both is a cross-project leak.
 function projectFileSlug(tag) {
   const value = String(tag || '');
@@ -848,6 +894,7 @@ module.exports = {
   applySupersessions,
   buildMemoryRecord,
   canonicalSignaturePayload,
+  canonicalProjectPath,
   canonWatermark,
   capTextLineAligned,
   clampObservedTs,

@@ -13,7 +13,10 @@ const { DatabaseSync } = require('node:sqlite');
 
 const { createMemoryStore } = require('../server/memory-store');
 const { createMemoryDb, recordToRow, rowToRecord } = require('../server/memory-db');
-const { resolveMemoryConfig, segmentFileName, withSignature } = require('../server/core/memory-core');
+const {
+  resolveMemoryConfig, segmentFileName, verifyRecordSignature, withSignature,
+} = require('../server/core/memory-core');
+const { projectVariantSlug } = require('../server/core/pack-core');
 
 const QUIET = { log() {}, warn() {} };
 const START = Date.UTC(2026, 7, 22, 12, 0, 0);
@@ -142,6 +145,24 @@ function knowledge(text, project = '/repos/glissa') {
   };
 }
 
+function durableRecord(overrides = {}) {
+  return {
+    id: 'm-1111111111111111',
+    ts: START,
+    kind: 'knowledge',
+    layer: 'semantic',
+    project: '/repos/glissa',
+    source: { kind: 'reported', vendor: 'claude', sessionId: 'sess-1' },
+    text: 'worktree memory reaches its configured project',
+    validFrom: START,
+    validTo: null,
+    supersedes: null,
+    lineage: 'reported',
+    locked: false,
+    ...overrides,
+  };
+}
+
 function readManifest(dir) {
   return JSON.parse(fs.readFileSync(path.join(dir, 'dist', 'current', 'manifest.json'), 'utf8'));
 }
@@ -165,6 +186,61 @@ test('a first enable mints a 0600 signing key and signs every appended record', 
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('store open remaps worktree project tags once and publishes the configured project variant', async () => {
+  const dir = tempDir();
+  const projectPath = '/home/carbon/projects/glissa';
+  const worktreePath = '/home/carbon/projects/.glissa-worktrees/glissa-abc123';
+  const signingKey = 'b'.repeat(64);
+  const tagged = withSignature(durableRecord({ project: worktreePath }), signingKey);
+  const tombstone = withSignature(durableRecord({
+    id: 'm-2222222222222222',
+    kind: 'tombstone',
+    layer: 'episodic',
+    project: null,
+    source: { kind: 'operator', vendor: 'glissa', sessionId: null },
+    text: 'forgotten memory records: m-0000000000000000',
+    lineage: 'operator',
+  }), signingKey);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'hmac-key'), `${signingKey}\n`, { mode: 0o600 });
+  const seededDb = createMemoryDb({ dbPath: dbPathFor(dir) });
+  seededDb.insertRecord(tagged);
+  seededDb.insertRecord(tombstone);
+  seededDb.close();
+
+  const firstLogs = [];
+  const first = openStore(dir, {
+    logger: { log: (line) => firstLogs.push(line), warn: (line) => firstLogs.push(line) },
+    extra: { knownProjects: [{ path: projectPath }] },
+  });
+  const migrated = first.records().find((record) => record.id === tagged.id);
+  assert.equal(migrated.project, projectPath);
+  assert.equal(migrated.id, tagged.id);
+  assert.equal(migrated.source.kind, tagged.source.kind);
+  assert.equal(verifyRecordSignature(migrated, signingKey), true);
+  assert.deepEqual(first.records().find((record) => record.id === tombstone.id), tombstone);
+  assert.equal(firstLogs.some((line) => line.includes('remapped 1 of 1 tagged record(s)')), true);
+
+  await first.flushProjection();
+  const variantFile = path.join(dir, 'dist', 'current', 'projects', `${projectVariantSlug(projectPath)}.md`);
+  assert.equal(fs.readFileSync(variantFile, 'utf8').includes(tagged.text), true);
+  await first.stop();
+
+  const secondLogs = [];
+  const second = openStore(dir, {
+    logger: { log: (line) => secondLogs.push(line), warn: (line) => secondLogs.push(line) },
+    extra: { knownProjects: [{ path: projectPath }] },
+  });
+  assert.equal(second.records().find((record) => record.id === tagged.id).project, projectPath);
+  assert.equal(secondLogs.some((line) => line.includes('project tag migration')), false);
+  withRawDb(dir, (raw) => {
+    const meta = raw.prepare('SELECT value FROM memory_meta WHERE key = ?').get('memory.schema.projectTags');
+    assert.equal(meta.value, '1');
+  });
+  await second.stop();
+  fs.rmSync(dir, { recursive: true, force: true });
 });
 
 test('a row hand-written by another local process is demoted on the next load', async () => {

@@ -56,6 +56,9 @@ function createMemoryStore(deps = {}) {
     clearTimeoutFn = clearTimeout,
     openDb = createMemoryDb,
     busyTimeoutMs = undefined,
+    knownProjects = [],
+    resolveProjectPath = null,
+    resolveProjectPathSync = null,
   } = deps;
 
   if (typeof dir !== 'string' || !dir) throw new Error('createMemoryStore needs an explicit dir');
@@ -76,6 +79,10 @@ function createMemoryStore(deps = {}) {
   let projectionChain = Promise.resolve();
   let projectionTimer = null;
   let projectionDirty = false;
+  const canonicalProjectCache = new Map();
+  const knownProjectTags = new Set((Array.isArray(knownProjects) ? knownProjects : [])
+    .map((project) => core.normalizeProjectTag(typeof project === 'string' ? project : project?.path))
+    .filter(Boolean));
 
   let db = null;
   try {
@@ -122,6 +129,54 @@ function createMemoryStore(deps = {}) {
     const shape = core.validateMemoryRecord(raw, { maxChars: config.maxRecordChars });
     if (!shape.valid) return null;
     return core.verifyOrDemote(shape.record, signingKey);
+  }
+
+  function configuredProjectPath(project) {
+    return core.canonicalProjectPath(project, knownProjects);
+  }
+
+  function needsGitProjectLookup(project, configured) {
+    if (!project || project !== configured) return false;
+    return !knownProjectTags.has(project);
+  }
+
+  function canonicalProjectPathSync(project) {
+    const normalized = core.normalizeProjectTag(project);
+    const configured = configuredProjectPath(normalized);
+    if (!needsGitProjectLookup(normalized, configured)) return configured;
+    if (canonicalProjectCache.has(normalized)) return canonicalProjectCache.get(normalized);
+    if (typeof resolveProjectPathSync !== 'function') return configured;
+    try {
+      const resolved = resolveProjectPathSync({ cwd: project, knownProjects });
+      const canonical = core.canonicalProjectPath(resolved, knownProjects) || configured;
+      canonicalProjectCache.set(normalized, canonical);
+      return canonical;
+    } catch {
+      canonicalProjectCache.set(normalized, configured);
+      return configured;
+    }
+  }
+
+  async function canonicalProjectPathForAppend(project) {
+    const normalized = core.normalizeProjectTag(project);
+    const configured = configuredProjectPath(normalized);
+    if (!needsGitProjectLookup(normalized, configured)) return configured;
+    if (canonicalProjectCache.has(normalized)) return canonicalProjectCache.get(normalized);
+    if (typeof resolveProjectPath !== 'function') return configured;
+    let canonical = configured;
+    try {
+      const resolved = await resolveProjectPath({ cwd: project, knownProjects });
+      canonical = core.canonicalProjectPath(resolved, knownProjects) || configured;
+    } catch {}
+    canonicalProjectCache.set(normalized, canonical);
+    return canonical;
+  }
+
+  async function canonicalizeInputProject(input) {
+    if (!input || typeof input !== 'object' || Array.isArray(input)) return input;
+    const project = await canonicalProjectPathForAppend(input.project);
+    if (project === input.project) return input;
+    return { ...input, project };
   }
 
   function assembleRecords(rawRecords) {
@@ -175,6 +230,16 @@ function createMemoryStore(deps = {}) {
   // Boot only, a one-shot cold path: the whole canon is read once before the server serves anything.
   function load() {
     signingKey = readOrMintSigningKey();
+    const projectTagMigration = db.migrateProjectTags((record) => {
+      const project = canonicalProjectPathSync(record.project);
+      if (project === record.project) return record;
+      const migrated = { ...record, project };
+      if (!core.verifyRecordSignature(record, signingKey)) return migrated;
+      return core.withSignature(migrated, signingKey);
+    });
+    if (projectTagMigration.applied) {
+      log.note(`project tag migration remapped ${projectTagMigration.remapped} of ${projectTagMigration.examined} tagged record(s)`);
+    }
     const expired = core.expiredSegmentKeys(db.segmentKeys(), { now: now(), retainDays: config.retainDays });
     const droppedRows = expired.length === 0 ? 0 : db.deleteSegments(expired);
     db.ensureSearchIndex();
@@ -379,6 +444,8 @@ function createMemoryStore(deps = {}) {
     const outcome = await queue(async () => {
       const list = Array.isArray(inputs) ? inputs : [];
       if (list.length === 0) return { records: [], refused: false };
+      const canonicalInputs = [];
+      for (const input of list) canonicalInputs.push(await canonicalizeInputProject(input));
       currentRecords();
       const observedBefore = cachedDataVersion;
       const written = [];
@@ -387,7 +454,7 @@ function createMemoryStore(deps = {}) {
       try {
         stored = db.transaction(() => {
           const out = [];
-          for (const input of list) {
+          for (const input of canonicalInputs) {
             const signed = buildForAppend(input);
             const accepted = signed !== null && db.insertRecord(signed);
             if (!accepted) log.debugNote(() => (signed === null ? 'record rejected' : 'record already remembered'));

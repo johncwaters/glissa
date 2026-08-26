@@ -17,6 +17,7 @@ const {
   absolutizeDates,
   applySupersessions,
   buildMemoryRecord,
+  canonicalProjectPath,
   computeLineage,
   decideForget,
   decideSupersession,
@@ -397,6 +398,43 @@ test('two checkouts sharing a basename get different projection files', () => {
   assert.notEqual(projectFileSlug('/repos/a/glissa'), projectFileSlug('/repos/b/glissa'));
   assert.equal(projectFileSlug('/repos/a/glissa'), projectFileSlug('/repos/a/glissa'));
   assert.match(projectFileSlug('/repos/a/glissa'), /^glissa-[0-9a-f]{8}$/);
+});
+
+test('canonicalProjectPath folds configured Claude and Glissa worktrees on POSIX paths', () => {
+  const projects = ['/home/carbon/projects/glissa', '/home/carbon/projects/glissa-tools'];
+  assert.equal(
+    canonicalProjectPath('/home/carbon/projects/glissa/.claude/worktrees/feature/src', projects),
+    '/home/carbon/projects/glissa',
+  );
+  assert.equal(
+    canonicalProjectPath('/home/carbon/projects/.glissa-worktrees/glissa-abc123/server', projects),
+    '/home/carbon/projects/glissa',
+  );
+  assert.equal(
+    canonicalProjectPath('/home/carbon/projects/.glissa-worktrees/glissa-tools-abc123', projects),
+    '/home/carbon/projects/glissa-tools',
+  );
+});
+
+test('canonicalProjectPath folds configured Claude and Glissa worktrees across Windows separators', () => {
+  const projects = ['C:\\Work\\Glissa', 'C:\\Work\\Glissa Tools'];
+  assert.equal(
+    canonicalProjectPath('C:\\Work\\Glissa\\.claude\\worktrees\\feature\\server', projects),
+    'c:/work/glissa',
+  );
+  assert.equal(
+    canonicalProjectPath('C:/Work/.glissa-worktrees/Glissa Tools-a1b2c3/public', projects),
+    'c:/work/glissa tools',
+  );
+});
+
+test('canonicalProjectPath gives exact configured paths priority and leaves unknown paths unchanged', () => {
+  const configuredWorktree = '/repos/glissa/.claude/worktrees/operator-kept';
+  const projects = ['/repos/glissa', configuredWorktree];
+  assert.equal(canonicalProjectPath(configuredWorktree, projects), configuredWorktree);
+  assert.equal(canonicalProjectPath('/repos/unknown/.claude/worktrees/feature', projects), '/repos/unknown/.claude/worktrees/feature');
+  assert.equal(canonicalProjectPath('/tmp/custom-worktree', projects), '/tmp/custom-worktree');
+  assert.equal(canonicalProjectPath('C:\\Other\\Repo', projects), 'C:\\Other\\Repo');
 });
 
 // --- Forget ---------------------------------------------------------------
