@@ -58,7 +58,7 @@ disagree, `AGENTS.md` wins and this file should be updated.
 
 ## Security boundary
 
-See `security.md`. In short: localhost-only, never bind `0.0.0.0`; preserve the per-session hook bearer-token check on `POST /hook/:glissaId/:event`.
+Glissa is localhost-only. Never bind `0.0.0.0`; preserve the per-session hook bearer-token check on `POST /hook/:glissaId/:event`.
 
 ## Parallel agent work
 

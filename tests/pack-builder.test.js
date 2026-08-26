@@ -287,6 +287,53 @@ test('a skill dir is copied into .claude/skills, keeping its tree', async () => 
   );
 });
 
+test('a memory directory cannot be delivered as a skill', async () => {
+  const spec = baseSpec({ skills: [{ dir: '{{glissaHome}}/memory/dist/current' }] });
+  await withFixture(async ({ root, build, builtRoot }) => {
+    const glissaHome = path.join(root, 'glissa-home');
+    writeFile(glissaHome, 'memory/dist/current/MEMORY.md', 'private memory\n');
+    const report = await build({ glissaHome });
+
+    assert.equal(report.ok, false);
+    assert.equal(report.errors.some((error) => error.includes('instruction-tier')), true);
+    assert.equal(fs.existsSync(path.join(builtRoot, 'demo')), false);
+  }, {
+    spec,
+    seed: (packsDir) => writeFile(packsDir, 'sources/demo/one.md', 'source\n'),
+  });
+});
+
+test('a skill directory cannot escape into and overwrite the rules tree', async () => {
+  const spec = baseSpec({
+    sources: [{ glob: 'sources/x/*.md' }],
+    skills: [{ dir: '..' }],
+  });
+  await withFixture(async ({ build, builtRoot }) => {
+    const report = await build();
+
+    assert.equal(report.ok, false);
+    assert.equal(fs.existsSync(path.join(builtRoot, 'demo')), false);
+  }, {
+    spec,
+    seed: (packsDir) => {
+      writeFile(packsDir, 'sources/x/one.md', 'source\n');
+      writeFile(path.dirname(packsDir), 'rules/01-x.md', 'overwrite\n');
+    },
+  });
+});
+
+test('an unfilled source template fails before publishing', async () => {
+  await withFixture(async ({ build, builtRoot }) => {
+    const report = await build();
+
+    assert.equal(report.ok, false);
+    assert.equal(report.errors.some((error) => error.includes('UNFILLED_TEMPLATE_STUB')), true);
+    assert.equal(fs.existsSync(path.join(builtRoot, 'demo')), false);
+  }, {
+    seed: (packsDir) => writeFile(packsDir, 'sources/demo/one.md', '# Pending\n\n> TODO add context\n'),
+  });
+});
+
 test('an over-budget pack fails and writes nothing at all', async () => {
   await withFixture(
     async ({ build, builtRoot }) => {
@@ -600,7 +647,7 @@ test('the repo proof pack builds from its own spec', async () => {
     assert.equal(report.ok, true, report.errors.join('; '));
     assert.ok(report.tokenEstimate <= report.budgetTokens);
     assert.ok(fs.existsSync(path.join(root, 'company-context', 'current', 'CLAUDE.md')));
-    assert.ok(fs.existsSync(path.join(root, 'company-context', 'current', '.claude', 'rules', '01-company-context.md')));
+    assert.ok(fs.existsSync(path.join(root, 'company-context', 'current', '.claude', 'rules', '01-conventions.md')));
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -913,6 +960,32 @@ test('a variant that would carry another project layer fails and publishes nothi
     const variant = report.variants.find((entry) => entry.name === `memory-${SLUG_A}`);
     assert.equal(variant.ok, false);
     assert.equal(variant.errors.some((error) => error.includes(SLUG_B)), true);
+    assert.equal(fs.existsSync(path.join(builtRoot, `memory-${SLUG_A}`, 'current')), false);
+  }, { spec, seed: () => {} });
+});
+
+test('a variant rejects a retired project layer selected by an exclude placeholder', async () => {
+  const retiredSlug = 'retired-12345678';
+  const spec = memorySpec({
+    perProjectVariants: true,
+    sources: [
+      { path: '{{glissaHome}}/memory/dist/current/MEMORY.md', data: true, optional: true },
+      {
+        glob: '{{glissaHome}}/memory/dist/current/projects/*.md',
+        exclude: ['{{glissaHome}}/memory/dist/current/projects/{{projectSlug}}.md'],
+        data: true,
+        optional: true,
+      },
+    ],
+  });
+  await withFixture(async ({ root, build, builtRoot }) => {
+    const glissaHome = seedGlissaHome(root);
+    writeFile(glissaHome, `memory/dist/current/projects/${retiredSlug}.md`, 'retired layer\n');
+    const report = await build({ glissaHome, projects: [VARIANT_PROJECTS[0]] });
+    const variant = report.variants.find((entry) => entry.name === `memory-${SLUG_A}`);
+
+    assert.equal(variant.ok, false);
+    assert.equal(variant.errors.some((error) => error.includes(retiredSlug) && error.includes(SLUG_A)), true);
     assert.equal(fs.existsSync(path.join(builtRoot, `memory-${SLUG_A}`, 'current')), false);
   }, { spec, seed: () => {} });
 });

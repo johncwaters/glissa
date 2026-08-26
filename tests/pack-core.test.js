@@ -112,6 +112,12 @@ test('exclude and skills entries are shape-checked', () => {
   assert.equal(validatePackSpec(validSpec({ skills: [{ dir: 'skills/voice' }] })).ok, true);
 });
 
+test('skill directories apply relative-path and placeholder validation', () => {
+  assert.equal(validatePackSpec(validSpec({ skills: [{ dir: '..' }] })).ok, false);
+  assert.equal(validatePackSpec(validSpec({ skills: [{ dir: '{{unknownHome}}/skills' }] })).ok, false);
+  assert.equal(validatePackSpec(validSpec({ skills: [{ dir: '{{glissaHome}}/memory/dist/current' }] })).ok, true);
+});
+
 // ---------------------------------------------------------------------------
 // matchesGlob
 // ---------------------------------------------------------------------------
@@ -366,6 +372,30 @@ test('two skill dirs with the same basename cannot overwrite the same delivered 
   assert.match(plan.errors[0], /\.claude\/skills\/shared\/SKILL\.md/);
   assert.match(plan.errors[0], /skills\/alpha\/shared/);
   assert.match(plan.errors[0], /skills\/beta\/shared/);
+});
+
+test('duplicate delivered paths are detected after normalization', () => {
+  const spec = validSpec({ skills: [{ dir: 'skills/voice-style' }] });
+  const plan = planPackBuild(spec, [
+    sourceFile('sources/demo/a.md', 'alpha'),
+    { relPath: '../../rules/01-demo.md', content: 'overwrite', skillIndex: 0 },
+  ], { builtAt: BUILT_AT });
+
+  assert.equal(plan.ok, false);
+  assert.deepEqual(plan.outputs, []);
+  assert.equal(plan.errors.some((error) => error.includes('.claude/rules/01-demo.md')), true);
+});
+
+test('a delivered path with an unfilled placeholder is rejected', () => {
+  const spec = validSpec({ skills: [{ dir: 'skills/voice-style' }] });
+  const plan = planPackBuild(spec, [
+    sourceFile('sources/demo/a.md', 'alpha'),
+    { relPath: '{{pending}}/SKILL.md', content: 'skill', skillIndex: 0 },
+  ], { builtAt: BUILT_AT });
+
+  assert.equal(plan.ok, false);
+  assert.deepEqual(plan.outputs, []);
+  assert.equal(plan.errors.some((error) => error.includes('unfilled placeholder')), true);
 });
 
 test('a declared skill dir with no files fails the build', () => {
@@ -729,6 +759,30 @@ test('a remembered line reaching the index or a rules file fails the build, publ
   assert.equal(plan.errors.some((error) => error.includes('instruction-tier')), true);
 });
 
+test('a short data line reaching the instruction tier fails the build', () => {
+  const plan = planPackBuild(
+    dataSpec({ rules: ['secret'] }),
+    [dataFile('MEMORY.md', 'secret\n')],
+    { builtAt: BUILT_AT }
+  );
+
+  assert.equal(plan.ok, false);
+  assert.deepEqual(plan.outputs, []);
+  assert.equal(plan.errors.some((error) => error.includes('instruction-tier')), true);
+});
+
+test('an unfilled template stub in any delivered source fails with a named error', () => {
+  const plan = planPackBuild(
+    validSpec(),
+    [sourceFile('sources/demo/a.md', '# Pending\n\n- [ ] TODO add guidance\n')],
+    { builtAt: BUILT_AT }
+  );
+
+  assert.equal(plan.ok, false);
+  assert.deepEqual(plan.outputs, []);
+  assert.equal(plan.errors.some((error) => error.includes('UNFILLED_TEMPLATE_STUB')), true);
+});
+
 test('a data build stays deterministic: the same bytes plan the same version', () => {
   const files = [dataFile('MEMORY.md', '# Glissa memory\n\n- [m-0123456789abcdef] (model) something\n')];
   const first = planPackBuild(dataSpec(), files, { builtAt: BUILT_AT });
@@ -902,6 +956,24 @@ test('a variant carrying another project layer fails the build, publishing nothi
 
   // The same source with only its own project's layer publishes exactly as it always did.
   assert.equal(planPackBuild(spec, [ours], { builtAt: BUILT_AT, variant }).ok, true);
+});
+
+test('a project-scoped source rejects an unknown project layer', () => {
+  const slug = projectVariantSlug('/repos/a/glissa');
+  const spec = validSpec({
+    perProjectVariants: true,
+    rules: undefined,
+    sources: [{ glob: 'projects/*.md', exclude: [`projects/{{projectSlug}}.md`], data: true }],
+  });
+  const variants = planPackVariants(spec, [project('p1', '/repos/a/glissa', ['demo'])]);
+  const variantBuild = variants.builds.find((build) => build.projectSlug === slug);
+  const retiredSlug = 'retired-12345678';
+  const files = [{ relPath: `${retiredSlug}.md`, sourcePath: `projects/${retiredSlug}.md`, content: 'retired\n', sourceIndex: 0 }];
+  const plan = planPackBuild(variantBuild.spec, files, { builtAt: BUILT_AT, variant: variantBuild.variant });
+
+  assert.equal(plan.ok, false);
+  assert.deepEqual(plan.outputs, []);
+  assert.equal(plan.errors.some((error) => error.includes(retiredSlug) && error.includes(slug)), true);
 });
 
 test('the base build refuses any project layer at all: it is the pack every consumer shares', () => {

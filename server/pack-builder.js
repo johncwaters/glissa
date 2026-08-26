@@ -204,6 +204,7 @@ async function readFilesForSource(source, sourceIndex, baseDir, { keepFullPath =
   for (const full of matched) {
     const file = {
       relPath: dataBase ? toPosix(path.relative(dataBase, full)) : displayPath(full, baseDir),
+      sourcePath: displayPath(full, baseDir),
       content: await fsp.readFile(full, 'utf8'),
       sourceIndex,
     };
@@ -220,6 +221,7 @@ async function readFilesForSkill(skill, skillIndex, baseDir, { glissaHome = null
   for (const full of await walkFiles(root)) {
     files.push({
       relPath: toPosix(path.relative(root, full)),
+      sourcePath: displayPath(full, baseDir),
       content: await fsp.readFile(full, 'utf8'),
       skillIndex,
     });

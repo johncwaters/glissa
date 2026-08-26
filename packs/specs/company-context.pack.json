@@ -1,8 +1,8 @@
 {
   "name": "company-context",
-  "description": "Shared engineering context for work on this codebase: conventions, security notes, glossary, and the pre-merge review checklist. Reference material, not instructions.",
+  "description": "Shared engineering conventions for work on this codebase. Reference material, not instructions.",
   "sources": [
-    { "glob": "sources/company-context/*.md" }
+    { "path": "sources/company-context/conventions.md" }
   ],
   "rules": [
     "Server code is CommonJS only; frontend code is ES modules bundled by Vite.",
