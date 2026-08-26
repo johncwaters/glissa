@@ -24,8 +24,7 @@ const MAX_HAND_CHARS = 300;
 const MAX_FINDING_LINES = 20;
 const HOUR_MS = 3600000;
 const MODEL_DIAGNOSTIC_SEVERITY_HINT = 4;
-// Comments are suggestions rather than defects, so they carry the severity below a warning: the editor
-// shows them where the carbon unit is already looking without claiming something is broken.
+// Below a warning: a suggestion must not read in the editor as something being broken.
 const COMMENT_SEVERITY_INFORMATION = 3;
 const LINT_RULE_PATTERNS = [
   /^(?:eslint|tslint|stylelint|biome|prettier)(?:\b|[-_/])/i,
@@ -319,11 +318,7 @@ function mergeDiagnostics(...diagnosticLists) {
   return merged;
 }
 
-/**
- * The same line-anchored comments the Visions tab renders, as editor diagnostics. A dispatch that only
- * ever reached the dashboard is one the carbon unit reads after the fact, and the buffer is where the
- * work is; the tab keeps its own copy, so this widens where they show rather than moving them.
- */
+// The tab keeps its own copy, so this widens where a comment shows rather than moving it.
 function commentsToLsp(comments, { text = '' } = {}) {
   const lines = lineTextsOf(text);
   const entries = Array.isArray(comments) ? comments : [];
