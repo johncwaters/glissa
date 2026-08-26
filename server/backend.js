@@ -1307,16 +1307,12 @@ function createBackend(httpServer, options = {}) {
   }
 
   // `memory.enabled` implies the SOURCE only, so with the ingest lane off the consumer builds its own.
-  // Idempotent by construction (memory-ingest-wiring.js returns the standing source), which is what lets
-  // a lane rebuild call it again without stacking a second tail of the same transcripts.
   function ensureMemorySource() {
     if (!memoryIngest || ingestLane?.agentLogsEnabled) return;
     memoryIngest.startOwnSource();
   }
 
-  // The taps a live session owes a standing ingest lane. Called when a session is wired and again for
-  // every session behind a rebuilt lane; the per-session listeners themselves are registered once, in
-  // wireSessionEvents, and read whichever lane is standing.
+  // Taps only: the per-session listeners are registered once, in wireSessionEvents, and read live.
   function tapIngestForSession(sess) {
     if (ingestLane?.terminalEnabled) ingestLane.attachSessionTap(sess);
     if (ingestLane?.fsEnabled) ingestLane.noteSessionRoots(sess);
