@@ -16,7 +16,7 @@
 //   Settings - the real Settings panel, re-parented in as a full screen
 //
 // Eight elements are BORROWED from the desktop DOM rather than rebuilt: the review sidebar, the Radar,
-// PRs, Usage, Mill and Visions panels, and the header controls the Board top bar adopts. Rebuilding any
+// PRs, Usage, Mill, Visions and Settings panels, and the header controls the Board top bar adopts. Rebuilding any
 // of them would mean a second state pipeline for the same facts.
 
 import { STATES } from '/shared/states.mjs';
