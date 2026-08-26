@@ -68,8 +68,7 @@
     "preview": "vite preview",
     "postinstall": "node scripts/postinstall-path-check.js",
     "prepare": "node scripts/prepare-build.js",
-    "release": "node scripts/release.js",
-    "typecheck:public": "tsc --project tsconfig.public.json"
+    "release": "node scripts/release.js"
   },
   "dependencies": {
     "@parcel/watcher": "^2.6.0",
