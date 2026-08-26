@@ -1,0 +1,67 @@
+'use strict';
+
+const test = require('node:test');
+const assert = require('node:assert/strict');
+
+const { DEFAULT_CONFIG } = require('../server/config-store');
+const { DASHBOARD_SETTING_PATHS } = require('../server/control-handlers');
+const { MEMORY_SPEC, PACK_DISTILLER_SPEC, INGEST_SPEC } = require('../server/core/settings-mill-core');
+const settingsRanges = require('../shared/settings-ranges');
+
+const loadMap = () => import('../public/settings-map.mjs');
+
+const DASHBOARD_SETTING_PATH_SET = new Set(DASHBOARD_SETTING_PATHS);
+const OPTION_CATALOGS = new Set(['sounds', 'themes']);
+
+function specAllows(spec, parts) {
+  if (parts.length === 0) return true;
+  const [key, ...remaining] = parts;
+  if (spec.booleans.includes(key) && remaining.length === 0) return true;
+  if (Object.hasOwn(spec.integerRanges, key) && remaining.length === 0) return true;
+  if (!Object.hasOwn(spec.blocks, key)) return false;
+  return specAllows(spec.blocks[key], remaining);
+}
+
+function pathIsKnown(path) {
+  if (path.startsWith('pref:')) return true;
+  const [topLevel, ...remaining] = path.split('.');
+  if (Object.hasOwn(DEFAULT_CONFIG, topLevel)) {
+    if (remaining.length === 0) return true;
+    let cursor = DEFAULT_CONFIG[topLevel];
+    for (const part of remaining) {
+      if (!cursor || typeof cursor !== 'object' || !Object.hasOwn(cursor, part)) return false;
+      cursor = cursor[part];
+    }
+    return true;
+  }
+  if (DASHBOARD_SETTING_PATH_SET.has(path)) return true;
+  const millSpec = { memory: MEMORY_SPEC, packDistiller: PACK_DISTILLER_SPEC, ingest: INGEST_SPEC }[topLevel];
+  return !!millSpec && specAllows(millSpec, remaining);
+}
+
+test('the map has unique ids, known paths, range-backed numbers and searchable keywords', async () => {
+  const { SETTINGS_MAP } = await loadMap();
+  const sectionIds = new Set();
+  const settingIds = new Set();
+  for (const section of SETTINGS_MAP) {
+    assert.equal(sectionIds.has(section.id), false, `duplicate section id ${section.id}`);
+    sectionIds.add(section.id);
+    for (const setting of section.settings) {
+      assert.equal(settingIds.has(setting.id), false, `duplicate setting id ${setting.id}`);
+      settingIds.add(setting.id);
+      assert.equal(pathIsKnown(setting.path), true, `unknown path ${setting.path}`);
+      assert.ok(Array.isArray(setting.keywords) && setting.keywords.length >= 2, `${setting.id} needs keywords`);
+      if (setting.control === 'number') assert.ok(settingsRanges[setting.range], `${setting.id} needs a shared range`);
+      if (setting.optionsFrom) assert.equal(OPTION_CATALOGS.has(setting.optionsFrom), true, `${setting.id} needs a known option catalog`);
+    }
+  }
+});
+test('the map never exposes remote and memory keys stay inside the dashboard allow-list', async () => {
+  const { SETTINGS_MAP } = await loadMap();
+  const settings = SETTINGS_MAP.flatMap((section) => section.settings);
+  assert.equal(settings.some((setting) => setting.path === 'remote' || setting.path.startsWith('remote.')), false);
+  for (const setting of settings.filter((entry) => entry.path.startsWith('memory.'))) {
+    assert.equal(specAllows(MEMORY_SPEC, setting.path.split('.').slice(1)), true, setting.path);
+  }
+  assert.equal(pathIsKnown('visions.dispatch.quietMS'), false);
+});

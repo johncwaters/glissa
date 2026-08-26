@@ -29,6 +29,7 @@
     "shared/client-trust.js",
     "shared/client-trust.esm.js",
     "shared/notification-states.js",
+    "shared/settings-ranges.js",
     "shared/paths.js"
   ],
   "engines": {

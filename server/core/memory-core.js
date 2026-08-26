@@ -3,6 +3,11 @@
 // M12 of docs/plan-visions-3.md: every long-term-memory decision lives here, so no IO shell holds one.
 
 const crypto = require('node:crypto');
+const {
+  MAX_RECORDS_PER_KIND_RANGE,
+  MAX_RECORD_CHARS_RANGE,
+  MEMORY_RETAIN_DAY_RANGE,
+} = require('../../shared/settings-ranges');
 
 const { buildStampLine } = require('./distill-core');
 const { scrubText } = require('./ingest-core');
@@ -21,11 +26,8 @@ const TRUST_RANK_VALUES = Object.freeze({
 });
 
 const DEFAULT_MEMORY_RETAIN_DAYS = 365;
-const MEMORY_RETAIN_DAY_RANGE = Object.freeze({ min: 30, max: 3650 });
 const MAX_RECORD_CHARS = 2000;
-const MAX_RECORD_CHARS_RANGE = Object.freeze({ min: 200, max: 20000 });
 const MAX_RECORDS_PER_KIND = 2000;
-const MAX_RECORDS_PER_KIND_RANGE = Object.freeze({ min: 50, max: 100000 });
 const MAX_PROJECT_TAG_CHARS = 200;
 const MAX_PROJECTION_LINE_CHARS = 600;
 const MAX_RETRIEVAL_TERMS = 24;

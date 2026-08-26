@@ -774,6 +774,10 @@ body {
 .btn-help:focus-visible,
 .settings-about-link:focus-visible,
 .btn-settings-add:focus-visible,
+.settings-view-nav-item:focus-visible,
+.settings-view-picker:focus-visible,
+.settings-view-input:focus-visible,
+.settings-view-checkbox:focus-visible,
 .dialog-advanced-toggle:focus-visible,
 .menu-item:focus-visible,
 .overflow-item:focus-visible,
@@ -1325,13 +1329,6 @@ body {
   text-decoration-thickness: 1px;
 }
 
-/* ── Settings dialog ────────────────────────────────────── */
-.dialog-settings {
-  width: 560px;
-  max-height: min(85dvh, 720px);
-  overflow: hidden;
-}
-
 .dialog-report {
   width: min(860px, calc(100vw - 32px));
 }
@@ -1371,68 +1368,7 @@ body {
   color: var(--state-failed);
 }
 
-/* [P2] Settings tab strip - replaces single-scroll section stack. Wraps at every width: the old
-   hidden-scrollbar overflow gave no hint that tabs past the dialog edge existed, so a newly added
-   tab was invisible until the operator happened to scroll a strip that did not look scrollable. */
-.settings-tabs {
-  display: flex;
-  flex-wrap: wrap;
-  flex-shrink: 0;
-  gap: 2px;
-  margin: -4px -4px 4px;
-  padding: 4px;
-  border-bottom: 1px solid var(--border);
-}
-
-.dialog-settings > .dialog-title,
-.dialog-settings > .settings-tabs,
-.dialog-settings > .dialog-error,
-.dialog-settings > .settings-actions {
-  flex-shrink: 0;
-}
-
-.settings-tab {
-  padding: 6px 12px;
-  border: none;
-  background: transparent;
-  color: var(--text-dim);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  cursor: pointer;
-  border-bottom: 2px solid transparent;
-  margin-bottom: -1px;
-  transition: color var(--transition-fast), border-color var(--transition-fast);
-  white-space: nowrap;
-}
-
-.settings-tab:hover {
-  color: var(--text);
-}
-
-.settings-tab[aria-selected="true"],
-.settings-tab.active {
-  color: var(--accent);
-  border-bottom-color: var(--accent);
-}
-
-.settings-panel {
-  display: flex;
-  flex-direction: column;
-  flex: 1 1 auto;
-  gap: 16px;
-  min-height: 0;
-  overflow-y: auto;
-  padding-right: 4px;
-}
-
-.settings-panel[hidden] {
-  display: none;
-}
-
-/* ── Shortcuts tab (read-only reference) ─────────────────── */
+/* ── Shortcuts reference ─────────────────────────────────── */
 /* Multi-column (not grid) so groups pack by height into two balanced columns instead of being
    locked to a row partner: a tall group no longer forces empty space beside a short one. */
 .shortcut-groups {
@@ -1612,10 +1548,6 @@ body {
   display: none;
 }
 
-.settings-actions {
-  margin-top: 8px;
-}
-
 .dialog-field-error {
   font-family: var(--font-mono);
   font-size: 10px;
@@ -1624,16 +1556,6 @@ body {
 
 .dialog-field-error:empty {
   display: none;
-}
-
-.settings-timeout-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
-  gap: 8px;
-}
-
-.settings-timeout-grid .dialog-input {
-  min-width: 0;
 }
 
 .settings-section {
@@ -1648,19 +1570,6 @@ body {
   font-weight: 600;
   color: var(--text);
   letter-spacing: 0.04em;
-}
-
-.settings-root-list {
-  max-height: 200px;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  border: 1px solid var(--border-dim);
-  border-radius: var(--radius);
-  padding: 6px;
-  background: var(--bg-surface);
-  min-height: 40px;
 }
 
 .settings-root-item {
@@ -4853,6 +4762,311 @@ a.pr-title:hover {
   padding: 4px 0;
 }
 
+/* ── Settings primary view ───────────────────────────────── */
+.settings-view {
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+.settings-view-shell {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  height: 100%;
+  min-height: 0;
+}
+
+.settings-view-nav {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 20px 12px;
+  border-right: 1px solid var(--border-dim);
+  background: var(--bg-header);
+}
+
+.settings-view-nav-group {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-bottom: 18px;
+}
+
+.settings-view-nav-label {
+  padding: 0 10px 6px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.settings-view-nav-item {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.settings-view-nav-item:hover {
+  color: var(--text-head);
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+}
+
+.settings-view-nav-item[aria-current="page"] {
+  border-color: color-mix(in oklab, var(--accent) 42%, var(--border));
+  color: var(--accent);
+  background: color-mix(in oklab, var(--accent) 8%, transparent);
+}
+
+.settings-view-picker {
+  display: none;
+}
+
+.settings-view-content {
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 28px clamp(20px, 5vw, 64px) 56px;
+}
+
+.settings-view-content > * {
+  width: min(100%, 820px);
+  margin-inline: auto;
+}
+
+.settings-view-section-header {
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--border-dim);
+}
+
+.settings-view-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.settings-view-section-title {
+  margin: 0;
+  color: var(--text-head);
+  font-family: var(--font-mono);
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.settings-view-level {
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.settings-view-section-description,
+.settings-view-setting-description {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.settings-view-section-description {
+  margin: 7px 0 0;
+}
+
+.settings-view-stack {
+  display: flex;
+  flex-direction: column;
+}
+
+.settings-view-setting {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 280px);
+  gap: 7px 24px;
+  padding: 20px 0;
+  border-bottom: 1px solid var(--border-dim);
+}
+
+.settings-view-setting-title {
+  margin: 0;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+
+.settings-view-setting-description {
+  grid-column: 1;
+  margin: 0;
+}
+
+.settings-view-setting > :nth-child(3) {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-self: start;
+}
+
+.settings-view-input {
+  width: 100%;
+  min-width: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  outline: none;
+  background: var(--bg-surface);
+  color: var(--text-head);
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+
+.settings-view-input:focus {
+  border-color: var(--accent);
+}
+
+.settings-view-toggle,
+.settings-view-project-choice {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.settings-view-checkbox {
+  accent-color: var(--accent);
+}
+
+.settings-view-toggle-state {
+  min-width: 2ch;
+}
+
+.settings-view-list,
+.settings-view-projects {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.settings-view-projects {
+  max-height: 180px;
+  overflow-y: auto;
+  padding: 8px;
+  border: 1px solid var(--border-dim);
+  border-radius: var(--radius);
+  background: var(--bg-surface);
+}
+
+.settings-view-warning {
+  grid-column: 1 / -1;
+  padding: 7px 10px;
+  border: 1px solid color-mix(in oklab, var(--state-waiting) 30%, transparent);
+  border-radius: var(--radius);
+  background: color-mix(in oklab, var(--state-waiting) 12%, transparent);
+  color: var(--state-waiting);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.settings-view-field-error,
+.settings-view-footer-error {
+  color: var(--state-failed);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.settings-view-field-error {
+  grid-column: 2;
+}
+
+.settings-view-footer {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 20px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-header);
+}
+
+.settings-view-footer-actions {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.settings-view-status-block {
+  margin-top: 20px;
+  padding: 12px;
+  border: 1px solid var(--border-dim);
+  border-radius: var(--radius);
+  background: var(--bg-surface);
+}
+
+.settings-view-shortcuts {
+  margin-top: 22px;
+  max-height: none;
+}
+
+[data-layout="phone"] .settings-view-shell {
+  display: flex;
+  flex-direction: column;
+}
+
+[data-layout="phone"] .settings-view-nav {
+  display: none;
+}
+
+[data-layout="phone"] .settings-view-picker {
+  display: block;
+  flex-shrink: 0;
+  margin: 12px 14px 0;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-surface);
+  color: var(--text-head);
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+
+[data-layout="phone"] .settings-view-content {
+  flex: 1;
+  padding: 18px 14px 52px;
+}
+
+[data-layout="phone"] .settings-view-setting {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+[data-layout="phone"] .settings-view-setting > :nth-child(3) {
+  align-self: stretch;
+}
+
+
 /* ── Advanced toggle in Add Session ─────────────────────── */
 .dialog-advanced-toggle {
   display: inline-flex;
@@ -4937,10 +5151,6 @@ a.pr-title:hover {
 /* Narrow viewport, ANY pointer: content that must wrap rather than push a panel past the edge. These
    are corrections to the desktop layout at a small window, not a layout of their own; the phone gets
    the Phone Layout section below instead. */
-@media (max-width: 768px) {
-  .dialog-settings { width: 100%; }
-}
-
 /* ── Touch input corrections ──────────────────────────────────
    Keyed on the POINTER, not the width: a hover-revealed affordance is broken on any touch device,
    including a large tablet, and a fine-pointer desktop matches none of this. */
@@ -4973,7 +5183,6 @@ a.pr-title:hover {
      the chrome does not visibly inflate on a tablet. Each inset is bounded by the neighbor gap, so no
      two hit areas overlap: an accidental tap can miss, but never hit the wrong control. */
   .btn-dialog,
-  .settings-tab,
   .review-btn,
   .header-tab { min-height: 44px; }
 

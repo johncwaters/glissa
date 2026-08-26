@@ -16,6 +16,30 @@ const posthogCore = require('./core/posthog-core');
 const { buildSettingsPayload: buildSettingsPayloadFrom } = require('./settings-payload');
 const { RESUME_ID_RE } = require('../session/core/auto-resume');
 const { DEFAULT_AGENT_ID, isKnownAgentId, listAgentIds, getAdapter, commandFor } = require('../session/adapters');
+const {
+  BRANCH_GC_INTERVAL_MS_RANGE,
+  BRANCH_GC_STALE_DAYS_RANGE,
+  POSTHOG_ESCALATION_RANGE,
+  POSTHOG_FIX_TIMEOUT_RANGE,
+  POSTHOG_INTERVAL_RANGE,
+  POSTHOG_INVESTIGATION_TIMEOUT_RANGE,
+  POSTHOG_MAX_CONCURRENT_RANGE,
+  POSTHOG_MIN_USERS_RANGE,
+  POSTHOG_RECURRENCE_WINDOW_RANGE,
+  POSTHOG_TRAFFIC_BASELINE_RANGE,
+  POSTHOG_TRAFFIC_COOLDOWN_RANGE,
+  POSTHOG_TRAFFIC_MIN_USERS_RANGE,
+  POSTHOG_TRAFFIC_MULTIPLIER_RANGE,
+  POSTHOG_TRANSIENT_RECURRENCE_RANGE,
+  PR_REVIEW_INTERVAL_RANGE,
+  PR_REVIEW_MAX_CONCURRENT_RANGE,
+  PR_REVIEW_TIMEOUT_RANGE,
+  VISIONS_ACTIVITY_MAX_PER_HOUR_RANGE,
+  VISIONS_COOLDOWN_MS_RANGE,
+  VISIONS_DISPATCH_TIMEOUT_RANGE,
+  VISIONS_MAX_PER_HOUR_RANGE,
+  VISIONS_QUIET_MS_RANGE,
+} = require('../shared/settings-ranges');
 
 function scanRepoRoots(roots) {
   const results = [];
@@ -39,14 +63,34 @@ function scanRepoRoots(roots) {
   return results;
 }
 
-const PR_REVIEW_NUMERIC_KEYS = ['intervalMinutes', 'maxConcurrentReviews', 'reviewTimeoutSeconds'];
+const PR_REVIEW_BOOLEAN_KEYS = Object.freeze(['enabled']);
+const PR_REVIEW_VALUE_KEYS = Object.freeze(['projects', 'mergeMethod']);
+const PR_REVIEW_NUMERIC_KEYS = Object.freeze(['intervalMinutes', 'maxConcurrentReviews', 'reviewTimeoutSeconds']);
+const PR_REVIEW_NUMERIC_RANGES = Object.freeze({
+  intervalMinutes: PR_REVIEW_INTERVAL_RANGE,
+  maxConcurrentReviews: PR_REVIEW_MAX_CONCURRENT_RANGE,
+  reviewTimeoutSeconds: PR_REVIEW_TIMEOUT_RANGE,
+});
 const PR_REVIEW_MERGE_METHODS = new Set(['rebase', 'squash', 'merge']);
-const BRANCH_GC_NUMERIC_KEYS = ['staleDays', 'intervalMs'];
-const VISIONS_DISPATCH_NUMERIC_KEYS = ['quietMs', 'cooldownMs', 'maxPerHour', 'activityMaxPerHour', 'dispatchTimeoutSeconds'];
-const VISIONS_DISPATCH_NUMERIC_RANGES = {
-  activityMaxPerHour: { min: 0, label: 'zero or more' },
-};
-const POSTHOG_NUMERIC_KEYS = [
+const BRANCH_GC_BOOLEAN_KEYS = Object.freeze(['enabled']);
+const BRANCH_GC_NUMERIC_KEYS = Object.freeze(['staleDays', 'intervalMs']);
+const BRANCH_GC_NUMERIC_RANGES = Object.freeze({
+  staleDays: BRANCH_GC_STALE_DAYS_RANGE,
+  intervalMs: BRANCH_GC_INTERVAL_MS_RANGE,
+});
+const VISIONS_BOOLEAN_KEYS = Object.freeze(['enabled', 'autoFix']);
+const VISIONS_VALUE_KEYS = Object.freeze(['projects']);
+const VISIONS_DISPATCH_BOOLEAN_KEYS = Object.freeze(['enabled']);
+const VISIONS_DISPATCH_STRING_KEYS = Object.freeze(['model']);
+const VISIONS_DISPATCH_NUMERIC_KEYS = Object.freeze(['quietMs', 'cooldownMs', 'maxPerHour', 'activityMaxPerHour', 'dispatchTimeoutSeconds']);
+const VISIONS_DISPATCH_NUMERIC_RANGES = Object.freeze({
+  quietMs: VISIONS_QUIET_MS_RANGE,
+  cooldownMs: VISIONS_COOLDOWN_MS_RANGE,
+  maxPerHour: VISIONS_MAX_PER_HOUR_RANGE,
+  activityMaxPerHour: VISIONS_ACTIVITY_MAX_PER_HOUR_RANGE,
+  dispatchTimeoutSeconds: VISIONS_DISPATCH_TIMEOUT_RANGE,
+});
+const POSTHOG_NUMERIC_KEYS = Object.freeze([
   'intervalMinutes',
   'maxConcurrentInvestigations',
   'investigationTimeoutSeconds',
@@ -59,29 +103,59 @@ const POSTHOG_NUMERIC_KEYS = [
   'trafficSpikeMinUsers',
   'trafficSpikeCooldownMinutes',
   'trafficSpikeBaselineDays',
-];
+]);
 // Listed keys override the default positive floor, allowing zero cooldown and capping baseline days.
-const POSTHOG_NUMERIC_RANGES = {
-  // A fix reproduces, repairs, runs a suite and opens a PR, so a one-minute floor is the only value
-  // that could not possibly be meant; the ceiling is six hours, past which a hung job is the bug.
-  fixTimeoutSeconds: { min: 60, max: 21600, label: 'between 60 and 21600' },
-  trafficSpikeMultiplier: { min: 1, label: 'at least 1' },
-  trafficSpikeMinUsers: { min: 1, label: 'at least 1' },
-  trafficSpikeCooldownMinutes: { min: 0, label: 'zero or more' },
-  trafficSpikeBaselineDays: { min: 1, max: 30, label: 'between 1 and 30' },
-};
+const POSTHOG_NUMERIC_RANGES = Object.freeze({
+  intervalMinutes: POSTHOG_INTERVAL_RANGE,
+  maxConcurrentInvestigations: POSTHOG_MAX_CONCURRENT_RANGE,
+  investigationTimeoutSeconds: POSTHOG_INVESTIGATION_TIMEOUT_RANGE,
+  fixTimeoutSeconds: POSTHOG_FIX_TIMEOUT_RANGE,
+  minUsersToInvestigate: POSTHOG_MIN_USERS_RANGE,
+  userEscalationThreshold: POSTHOG_ESCALATION_RANGE,
+  recurrenceWindowDays: POSTHOG_RECURRENCE_WINDOW_RANGE,
+  transientRecurrenceLimit: POSTHOG_TRANSIENT_RECURRENCE_RANGE,
+  trafficSpikeMultiplier: POSTHOG_TRAFFIC_MULTIPLIER_RANGE,
+  trafficSpikeMinUsers: POSTHOG_TRAFFIC_MIN_USERS_RANGE,
+  trafficSpikeCooldownMinutes: POSTHOG_TRAFFIC_COOLDOWN_RANGE,
+  trafficSpikeBaselineDays: POSTHOG_TRAFFIC_BASELINE_RANGE,
+});
 // `recurrenceDedupe` is the recurrence-dedupe kill switch and defaults to ON, so absence means
 // enabled; the poller reads it as `!== false`. allowStatusWrites/dailyDigest were validated and
 // persisted here while no module in the lane ever read them, which promised behavior (PostHog writes,
 // a digest) that does not exist; a key earns a place in this list when something consumes it.
 // `autoFix` is the auto-fix dispatch opt-in and defaults to OFF, so absence means diagnose-only.
-const POSTHOG_BOOLEAN_KEYS = ['enabled', 'recurrenceDedupe', 'trafficSpikeEnabled', 'autoFix'];
-const POSTHOG_STRING_KEYS = ['host', 'apiKey', 'repoPath'];
+const POSTHOG_BOOLEAN_KEYS = Object.freeze(['enabled', 'recurrenceDedupe', 'trafficSpikeEnabled', 'autoFix']);
+const POSTHOG_STRING_KEYS = Object.freeze(['host', 'apiKey', 'repoPath']);
+const POSTHOG_VALUE_KEYS = Object.freeze(['projects', 'projectMap']);
 
-const USAGE_BOOLEAN_KEYS = ['enabled', 'fetchPricing', 'planLimits', 'rtkSavings'];
+const USAGE_BOOLEAN_KEYS = Object.freeze(['enabled', 'fetchPricing', 'planLimits', 'rtkSavings']);
+const USAGE_VALUE_KEYS = Object.freeze(['costMode', 'extraProjectsDirs']);
+const TELEGRAM_STRING_KEYS = Object.freeze(['botToken', 'chatId']);
 // Ranges and modes come from the lane itself so the wire validator and resolveUsageConfig's fallback
 // logic cannot drift apart.
 const { USAGE_INTEGER_RANGES, USAGE_COST_MODES, USAGE_VENDOR_KEYS, USAGE_BUDGET_KEYS } = require('./usage-wiring');
+const DASHBOARD_SETTING_PATHS = Object.freeze([
+  ...PR_REVIEW_BOOLEAN_KEYS.map((key) => `prReview.${key}`),
+  ...PR_REVIEW_VALUE_KEYS.map((key) => `prReview.${key}`),
+  ...PR_REVIEW_NUMERIC_KEYS.map((key) => `prReview.${key}`),
+  ...BRANCH_GC_BOOLEAN_KEYS.map((key) => `branchGc.${key}`),
+  ...BRANCH_GC_NUMERIC_KEYS.map((key) => `branchGc.${key}`),
+  ...VISIONS_BOOLEAN_KEYS.map((key) => `visions.${key}`),
+  ...VISIONS_VALUE_KEYS.map((key) => `visions.${key}`),
+  ...VISIONS_DISPATCH_BOOLEAN_KEYS.map((key) => `visions.dispatch.${key}`),
+  ...VISIONS_DISPATCH_STRING_KEYS.map((key) => `visions.dispatch.${key}`),
+  ...VISIONS_DISPATCH_NUMERIC_KEYS.map((key) => `visions.dispatch.${key}`),
+  ...POSTHOG_BOOLEAN_KEYS.map((key) => `posthog.${key}`),
+  ...POSTHOG_STRING_KEYS.map((key) => `posthog.${key}`),
+  ...POSTHOG_VALUE_KEYS.map((key) => `posthog.${key}`),
+  ...POSTHOG_NUMERIC_KEYS.map((key) => `posthog.${key}`),
+  ...USAGE_BOOLEAN_KEYS.map((key) => `usage.${key}`),
+  ...Object.keys(USAGE_INTEGER_RANGES).map((key) => `usage.${key}`),
+  ...USAGE_VALUE_KEYS.map((key) => `usage.${key}`),
+  ...USAGE_VENDOR_KEYS.map((key) => `usage.vendors.${key}`),
+  ...USAGE_BUDGET_KEYS.map((key) => `usage.budget.${key}`),
+  ...TELEGRAM_STRING_KEYS.map((key) => `telegram.${key}`),
+]);
 // Max days a client may ask a usage report to cover, matching the retainDays ceiling.
 const USAGE_REPORT_MAX_DAYS = 3650;
 
@@ -141,7 +215,8 @@ const blockRules = {
         if (value <= 0) return `${name}.${key} must be a positive number`;
         continue;
       }
-      if (value < range.min) return `${name}.${key} must be ${range.label}`;
+      if (range.exclusiveMin && value <= range.min) return `${name}.${key} must be ${range.label}`;
+      if (!range.exclusiveMin && value < range.min) return `${name}.${key} must be ${range.label}`;
       if (range.max != null && value > range.max) return `${name}.${key} must be ${range.label}`;
     }
     return null;
@@ -203,11 +278,11 @@ const USAGE_BUDGET_SCHEMA = {
 const PR_REVIEW_SCHEMA = {
   name: 'prReview',
   rules: [
-    blockRules.booleans(['enabled']),
+    blockRules.booleans(PR_REVIEW_BOOLEAN_KEYS),
     (pr) => (pr.projects != null && (!Array.isArray(pr.projects) || !pr.projects.every(p => typeof p === 'string'))
       ? 'prReview.projects must be an array of strings'
       : null),
-    blockRules.positiveNumbers(PR_REVIEW_NUMERIC_KEYS),
+    blockRules.rangedNumbers(PR_REVIEW_NUMERIC_KEYS, PR_REVIEW_NUMERIC_RANGES),
     (pr) => (pr.mergeMethod != null && !PR_REVIEW_MERGE_METHODS.has(pr.mergeMethod)
       ? 'prReview.mergeMethod must be one of rebase, squash, merge'
       : null),
@@ -217,16 +292,16 @@ const PR_REVIEW_SCHEMA = {
 const BRANCH_GC_SCHEMA = {
   name: 'branchGc',
   rules: [
-    blockRules.booleans(['enabled']),
-    blockRules.positiveNumbers(BRANCH_GC_NUMERIC_KEYS),
+    blockRules.booleans(BRANCH_GC_BOOLEAN_KEYS),
+    blockRules.rangedNumbers(BRANCH_GC_NUMERIC_KEYS, BRANCH_GC_NUMERIC_RANGES),
   ],
 };
 
 const VISIONS_DISPATCH_SCHEMA = {
   name: 'visions.dispatch',
   rules: [
-    blockRules.booleans(['enabled']),
-    blockRules.strings(['model']),
+    blockRules.booleans(VISIONS_DISPATCH_BOOLEAN_KEYS),
+    blockRules.strings(VISIONS_DISPATCH_STRING_KEYS),
     blockRules.rangedNumbers(VISIONS_DISPATCH_NUMERIC_KEYS, VISIONS_DISPATCH_NUMERIC_RANGES),
   ],
 };
@@ -234,7 +309,7 @@ const VISIONS_DISPATCH_SCHEMA = {
 const VISIONS_SCHEMA = {
   name: 'visions',
   rules: [
-    blockRules.booleans(['enabled', 'autoFix']),
+    blockRules.booleans(VISIONS_BOOLEAN_KEYS),
     (visions) => (visions.projects != null && (!Array.isArray(visions.projects) || !visions.projects.every(p => typeof p === 'string'))
       ? 'visions.projects must be an array of strings'
       : null),
@@ -277,7 +352,7 @@ const USAGE_SCHEMA = {
 
 const TELEGRAM_SCHEMA = {
   name: 'telegram',
-  rules: [blockRules.strings(['botToken', 'chatId'])],
+  rules: [blockRules.strings(TELEGRAM_STRING_KEYS)],
 };
 
 /*
@@ -311,24 +386,24 @@ function sanitizeBlock(block, { booleans = [], trimmedStrings = [], verbatim = [
 
 function sanitizePrReview(pr) {
   return sanitizeBlock(pr, {
-    booleans: ['enabled'],
-    verbatim: ['projects', 'intervalMinutes', 'mergeMethod', 'maxConcurrentReviews', 'reviewTimeoutSeconds'],
+    booleans: PR_REVIEW_BOOLEAN_KEYS,
+    verbatim: [...PR_REVIEW_VALUE_KEYS, ...PR_REVIEW_NUMERIC_KEYS],
   });
 }
 
 function sanitizeBranchGc(branchGc) {
   return sanitizeBlock(branchGc, {
-    booleans: ['enabled'],
+    booleans: BRANCH_GC_BOOLEAN_KEYS,
     verbatim: BRANCH_GC_NUMERIC_KEYS,
   });
 }
 
 function sanitizeVisions(visions) {
-  const out = sanitizeBlock(visions, { booleans: ['enabled', 'autoFix'], verbatim: ['projects'] });
+  const out = sanitizeBlock(visions, { booleans: VISIONS_BOOLEAN_KEYS, verbatim: VISIONS_VALUE_KEYS });
   if (isPlainObject(visions.dispatch)) {
     const dispatch = sanitizeBlock(visions.dispatch, {
-      booleans: ['enabled'],
-      trimmedStrings: ['model'],
+      booleans: VISIONS_DISPATCH_BOOLEAN_KEYS,
+      trimmedStrings: VISIONS_DISPATCH_STRING_KEYS,
       verbatim: VISIONS_DISPATCH_NUMERIC_KEYS,
     });
     if (Object.keys(dispatch).length > 0) out.dispatch = dispatch;
@@ -1292,4 +1367,11 @@ function registerControlHandlers(controlWss, deps) {
   return { buildSnapshot };
 }
 
-module.exports = { registerControlHandlers };
+module.exports = {
+  BRANCH_GC_NUMERIC_RANGES,
+  DASHBOARD_SETTING_PATHS,
+  POSTHOG_NUMERIC_RANGES,
+  PR_REVIEW_NUMERIC_RANGES,
+  VISIONS_DISPATCH_NUMERIC_RANGES,
+  registerControlHandlers,
+};

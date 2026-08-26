@@ -2386,6 +2386,16 @@ function mountDevRoutes(app) {
     res.send(lines.join('\n'));
   });
 
+  app.get('/shared/settings-ranges.mjs', (_req, res) => {
+    const ranges = require('../shared/settings-ranges');
+    const lines = [];
+    for (const [key, val] of Object.entries(ranges)) {
+      lines.push(`export const ${key} = ${JSON.stringify(val)};`);
+    }
+    res.type('application/javascript');
+    res.send(lines.join('\n'));
+  });
+
   // Sent as a FILE, unlike the states route above: that one regenerates its module from a require()d
   // object, which works because states exports nothing but constants. This module exports functions,
   // and a required function cannot be serialized back into source, so the ESM twin ships as-is.

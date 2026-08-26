@@ -4,7 +4,7 @@
 # phone
 
 ## Purpose
-The phone layout: seven screens (Board, Terminal, Review, Radar, PRs, Usage, Visions) behind a bottom nav; Radar, PRs, Usage and Visions have no nav item of their own and live in the More sheet, rendered ONLY under `[data-layout="phone"]`. It is a first-class layout, not a narrowed desktop: the desktop shell is `display:none` on a phone, and the phone shell borrows the elements that own live state (the review sidebar, the Radar/PRs/Usage/Visions panels, the desktop header controls, a session's card) instead of rebuilding them.
+The phone layout: nine screens (Board, Terminal, Review, Radar, PRs, Usage, Mill, Visions, Settings) behind a bottom nav; Radar, PRs, Usage, Mill, Visions and Settings have no nav item of their own and live in the More sheet, rendered ONLY under `[data-layout="phone"]`. It is a first-class layout, not a narrowed desktop: the desktop shell is `display:none` on a phone, and the phone shell borrows the elements that own live state instead of rebuilding them.
 
 The job it serves is triage, per `PRODUCT.md`: scan the board, find the session that needs a carbon unit, open it, act, go back.
 
@@ -19,7 +19,7 @@ The job it serves is triage, per `PRODUCT.md`: scan the board, find the session 
 | `triage-core.mjs` | Pure attention-first ORDER (`orderSessionsForTriage`) only. The "needs you" rule and its readout wording are shared with the desktop rail head in `../focus-view/attention-core.mjs` |
 | `mobile-key-strip.js` | Esc / Tab / Ctrl+C / arrows / Paste, the keys a soft keyboard cannot produce (catalog in `../mobile-keys.mjs`) |
 
-Review, Radar, PRs, Usage and Visions have no phone-only module: each screen is a mount container that re-parents the real desktop panel in.
+Review, Radar, PRs, Usage, Mill, Visions and Settings have no phone-only module: each screen is a mount container that re-parents the real desktop panel in.
 
 ## For AI Agents
 

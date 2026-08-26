@@ -15,6 +15,7 @@
 'use strict';
 
 const path = require('node:path');
+const { USAGE_INTEGER_RANGES } = require('../shared/settings-ranges');
 const { createUsageScanner } = require('./usage-scanner');
 const { loadPricing } = require('./usage-pricing');
 const { execFileAsync: defaultExecFileAsync } = require('./child-process-safe');
@@ -95,12 +96,6 @@ function defaultRtkPath() {
 // wire validator enforces and the fallback resolver tolerates, so the two cannot drift apart.
 const USAGE_COST_MODES = Object.freeze(['auto', 'calculate', 'display']);
 const COST_MODES = new Set(USAGE_COST_MODES);
-const USAGE_INTEGER_RANGES = Object.freeze({
-  scanIntervalMinutes: { min: 1, max: 1440 },
-  retainDays: { min: 1, max: 3650 },
-  warehouseRetainDays: { min: 30, max: 3650 },
-  sessionBlockHours: { min: 1, max: 24 },
-});
 const INTEGER_RANGES = USAGE_INTEGER_RANGES;
 
 function integerWithin(value, { min, max }, fallback) {

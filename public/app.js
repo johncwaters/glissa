@@ -7,7 +7,7 @@ import './tailwind.css';
 import { shouldShowServerAction } from '/shared/client-trust.mjs';
 import { STATES } from '/shared/states.mjs';
 import { checkControlLiveness, connectControl, onControlMessage, sendControlMsg, sendControlRequest, setConnectionStateCallback } from './control-ws.js';
-import { applySettingsBroadcast, createAddSessionDialog, createSettingsDialog } from './dialogs.js';
+import { createAddSessionDialog } from './dialogs.js';
 import { observeHeaderHeight, writeClipboardText } from './dom-helpers.js';
 import { refreshFavicon } from './favicon.js';
 import { activateFocusView, centerSessionQuietly, deactivateFocusView, focusAdjacentInRail, focusNextAttention, focusNthInRail, getFocusedSessionId, isFocusActive, mountFocusView, refreshFocusRoster, restoreFocusedSession, setFocusMergeStatus } from './focus-view/focus-view.js';
@@ -29,6 +29,7 @@ import { applyState, applyTerminalSettings, createSessionCard, getSessionCount, 
 import { openConfirmDialog } from './session-card/modal.js';
 import { reconnectDataWs } from './session-card/terminal.js';
 import { showErrorToast } from './session-card/toast.js';
+import { activateSettingsSection, applySettingsBroadcast, mountSettingsView, refreshSettingsStatus } from './settings-panel.js';
 import { forgetReviewSession, mergeSelectedSession, mountReviewSidebar, notifyWorktreeChanged, refreshReviewSidebar, resolveSelectedSession, resyncSelectedSession, setReviewBranchSync } from './sidebar/review-sidebar.js';
 import { decideReloadOnBuild } from './server-build-core.mjs';
 import { applyTheme } from './theme.js';
@@ -94,6 +95,7 @@ setConnectionStateCallback((state, label) => {
       .then((msg) => {
         if (!msg.settings) return;
         applyTerminalSettings(msg.settings);
+        applySettingsBroadcast(msg.settings);
       })
       .catch(() => {});
     return;
@@ -309,7 +311,7 @@ const messageHandlers = {
   'posthog-status':     (msg) => applyPosthogStatus(msg),
   'pr-status':          (msg) => { applyPrStatus(msg); applyRadarPrStatus(msg); },
   'usage-sessions':     (msg) => { applyUsageSessionChips(msg.sessions); applyUsageSessions(msg); requestUsageReportIfVisible(); },
-  'usage-report':       (msg) => applyUsageReport(msg),
+  'usage-report':       (msg) => { applyUsageReport(msg); refreshSettingsStatus(); },
   // Official account rate limits from the managed statusLine relay (machine-wide, not per session).
   'plan-limits':        (msg) => applyPlanLimits(msg),
   // A budget threshold was crossed. A moment, not a state: deliberately absent from the control replay log
@@ -435,15 +437,20 @@ document.addEventListener('click', (e) => {
 
 observeHeaderHeight(document.querySelector('.header'));
 
+function openSettings(section) {
+  if (section) activateSettingsSection(section);
+  if (showPhoneScreen('settings')) return;
+  activateView('settings');
+}
+
 document.getElementById('btn-settings').addEventListener('click', () => {
   headerMenu.classList.remove('open');
   syncMenuAria();
-  createSettingsDialog();
+  openSettings();
 });
 
-// The header ? button (next to the menu) opens Settings straight to the Shortcuts tab.
 document.getElementById('btn-help').addEventListener('click', () => {
-  createSettingsDialog('shortcuts');
+  openSettings('browser-shortcuts');
 });
 
 // ── Primary view tabs (Focus / Radar / PRs / Usage / Mill / Visions) ────────
@@ -454,12 +461,14 @@ const viewPrsEl = document.getElementById('view-prs');
 const viewUsageEl = document.getElementById('view-usage');
 const viewMillEl = document.getElementById('view-mill');
 const viewVisionsEl = document.getElementById('view-visions');
+const viewSettingsEl = document.getElementById('view-settings');
 const tabFocus = document.getElementById('tab-focus');
 const tabRadar = document.getElementById('tab-radar');
 const tabPrs = document.getElementById('tab-prs');
 const tabUsage = document.getElementById('tab-usage');
 const tabMill = document.getElementById('tab-mill');
 const tabVisions = document.getElementById('tab-visions');
+const tabSettings = document.getElementById('tab-settings');
 const tabRadarActivityEl = document.getElementById('tab-radar-activity');
 const tabPrsActivityEl = document.getElementById('tab-prs-activity');
 const tabUsageActivityEl = document.getElementById('tab-usage-activity');
@@ -522,6 +531,8 @@ mountMillView(viewMillEl);
 // while another tab is active, and the dot has to say so from wherever the operator is.
 mountVisionsView(viewVisionsEl);
 
+mountSettingsView(viewSettingsEl);
+
 // Primary views in tab-strip order. Adding a view = adding an entry here (N-way, not a boolean).
 // Focus leads as the default landing view; the session-card grid (#sessions-container) stays mounted
 // off-screen as the canonical card home Focus borrows from - it is no longer a navigable view.
@@ -532,6 +543,7 @@ const VIEW_TABS = [
   { view: 'usage', tab: tabUsage, el: viewUsageEl },
   { view: 'mill', tab: tabMill, el: viewMillEl },
   { view: 'visions', tab: tabVisions, el: viewVisionsEl },
+  { view: 'settings', tab: tabSettings, el: viewSettingsEl },
 ];
 
 let _activeView = 'focus';
@@ -548,7 +560,7 @@ function acknowledgeViewAttention(view) {
   if (view === 'visions') refreshVisionsView();
 }
 
-function activateView(view) {
+function activateView(view, { section } = {}) {
   const prev = _activeView;
   _activeView = view;
   // Mirror the active view onto the body: terminal.js reads document.body.dataset.activeView to decide
@@ -578,6 +590,7 @@ function activateView(view) {
     refreshMillView();
     requestMillReport();
   }
+  if (view === 'settings' && section) activateSettingsSection(section);
   acknowledgeViewAttention(view);
 }
 
@@ -613,6 +626,7 @@ mountPhoneShell({
   usagePanelEl: viewUsageEl,
   millPanelEl: viewMillEl,
   visionsPanelEl: viewVisionsEl,
+  settingsPanelEl: viewSettingsEl,
   // Usage and Mill are the two screens that PULL rather than being pushed to, so each asks for a fresh
   // report the moment it becomes visible; every other screen ignores this.
   onScreenShown: (screenId) => {
@@ -806,7 +820,7 @@ document.addEventListener('keydown', (e) => {
   if (isTextEntryContext()) return;
   if (document.querySelector('.dialog-overlay')) return; // a dialog is already open
   e.preventDefault();
-  createSettingsDialog('shortcuts');
+  openSettings('browser-shortcuts');
 });
 
 // ── Window focus tracking (suppress server notifications when dashboard is visible) ──

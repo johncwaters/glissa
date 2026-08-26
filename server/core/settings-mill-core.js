@@ -2,16 +2,16 @@
 
 const { isPlainObject } = require('./usage-number-core');
 const {
-  MEMORY_RETAIN_DAY_RANGE,
+  INTERVAL_MINUTES_RANGE,
+  MAX_NEW_CLAIMS_RANGE,
   MAX_RECORD_CHARS_RANGE,
   MAX_RECORDS_PER_KIND_RANGE,
-} = require('./memory-core');
-const {
-  INTERVAL_MINUTES_RANGE,
-  TIMEOUT_SECONDS_RANGE,
-  MAX_NEW_CLAIMS_RANGE,
+  MEMORY_RETAIN_DAY_RANGE,
+  PACK_DISTILLER_INTERVAL_RANGE,
+  PACK_DISTILLER_TIMEOUT_RANGE,
   QUIET_MS_RANGE,
-} = require('./memory-distill-core');
+  TIMEOUT_SECONDS_RANGE,
+} = require('../../shared/settings-ranges');
 const { SOURCE_NAMES } = require('./ingest-core');
 
 const NO_BLOCKS = Object.freeze({});
@@ -45,8 +45,8 @@ const PACK_DISTILLER_SPEC = Object.freeze({
   name: 'packDistiller',
   booleans: Object.freeze(['enabled']),
   integerRanges: Object.freeze({
-    intervalHours: Object.freeze({ min: 1, max: 720 }),
-    timeoutSeconds: Object.freeze({ min: 60, max: 7200 }),
+    intervalHours: PACK_DISTILLER_INTERVAL_RANGE,
+    timeoutSeconds: PACK_DISTILLER_TIMEOUT_RANGE,
   }),
   blocks: NO_BLOCKS,
 });

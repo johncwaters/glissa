@@ -13,6 +13,8 @@ const pkg = require('./package.json');
 // works only because that module exports nothing but constants.
 const STATES_MODULE_ID = '/shared/states.mjs';
 const STATES_VIRTUAL_ID = '\0glissa:shared-states';
+const SETTINGS_RANGES_MODULE_ID = '/shared/settings-ranges.mjs';
+const SETTINGS_RANGES_VIRTUAL_ID = '\0glissa:shared-settings-ranges';
 
 function glissaSharedStatesPlugin() {
   return {
@@ -25,6 +27,23 @@ function glissaSharedStatesPlugin() {
       if (id !== STATES_VIRTUAL_ID) return null;
       const states = require('./shared/states');
       return Object.entries(states)
+        .map(([key, val]) => `export const ${key} = ${JSON.stringify(val)};`)
+        .join('\n');
+    },
+  };
+}
+
+function glissaSharedSettingsRangesPlugin() {
+  return {
+    name: 'glissa-shared-settings-ranges',
+    enforce: 'pre',
+    resolveId(source) {
+      return source === SETTINGS_RANGES_MODULE_ID ? SETTINGS_RANGES_VIRTUAL_ID : null;
+    },
+    load(id) {
+      if (id !== SETTINGS_RANGES_VIRTUAL_ID) return null;
+      const ranges = require('./shared/settings-ranges');
+      return Object.entries(ranges)
         .map(([key, val]) => `export const ${key} = ${JSON.stringify(val)};`)
         .join('\n');
     },
@@ -64,7 +83,7 @@ function glissaBackendPlugin() {
 }
 
 export default defineConfig({
-  plugins: [tailwindcss(), glissaSharedStatesPlugin(), glissaBackendPlugin()],
+  plugins: [tailwindcss(), glissaSharedStatesPlugin(), glissaSharedSettingsRangesPlugin(), glissaBackendPlugin()],
 
   // Bake the package version in at build time so the dashboard's help surface can show what is running.
   // Replaced as a string literal in both dev and the dist bundle; the browser never reads package.json.

@@ -242,11 +242,11 @@ The header overflow menu. An Ink Violet panel with a 1px lifted border, 4px radi
 - **Variants:** warning items recolor to Signal Amber, danger items to Signal Red, each tinting its own hover. A muted glyph uses a line-through to mark an off or disabled option.
 - **Divider:** a 1px Violet Border rule inset 8px from each edge.
 
-### Settings Dialog (tabbed)
-A 560px dialog that replaces a long scroll with a horizontal tab strip.
-- **Tabs:** 11px uppercase, 0.06em tracking, Muted Lavender at rest. The active tab takes orchid text and a 2px orchid bottom border that rides the strip's 1px divider. The strip scrolls horizontally with its scrollbar hidden.
-- **Panels:** stack with 16px gaps; inactive panels are `[hidden]`.
-- **Controls:** checkboxes use an orchid accent-color; hints are 10px Faint Lavender (the system forbids sub-10px). The warning hint is an amber tinted block with a full border (again, never a side-stripe); field errors are 10px Signal Red, hidden when empty.
+### Settings View
+A primary view with a 220px grouped sidebar and one scrolling section page.
+- **Navigation:** levels use 10px uppercase Faint Lavender labels; the selected section takes orchid text, a faint orchid wash and a full 1px border. On phone, one section select replaces the sidebar above the same content column.
+- **Content:** all settings in the selected section stack under anchored headings. The level tag stays beside the section title, and a sticky Save and Revert footer appears only for a dirty machine or lane section.
+- **Controls:** checkboxes use an orchid accent-color; hints are 10px Faint Lavender. Warnings use an amber tint with a full border; field and footer errors use 10px Signal Red.
 
 ## 6. Do's and Don'ts
 

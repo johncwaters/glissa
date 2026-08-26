@@ -2,6 +2,13 @@
 
 // M15 of docs/plan-visions-3.md: every memory-distill decision, so the lane shell holds none.
 
+const {
+  INTERVAL_MINUTES_RANGE,
+  MAX_NEW_CLAIMS_RANGE,
+  QUIET_MS_RANGE,
+  TIMEOUT_SECONDS_RANGE,
+} = require('../../shared/settings-ranges');
+
 const { contentMarker } = require('./visions-dispatch-core');
 const {
   KIND_HEADINGS, MAX_PROJECTION_LINE_CHARS, PROJECTED_KINDS, SOURCE_KINDS,
@@ -11,13 +18,9 @@ const {
 } = require('./memory-core');
 
 const DEFAULT_INTERVAL_MINUTES = 1440;
-const INTERVAL_MINUTES_RANGE = Object.freeze({ min: 15, max: 20160 });
 const DEFAULT_TIMEOUT_SECONDS = 900;
-const TIMEOUT_SECONDS_RANGE = Object.freeze({ min: 60, max: 7200 });
 const DEFAULT_MAX_NEW_CLAIMS = 20;
-const MAX_NEW_CLAIMS_RANGE = Object.freeze({ min: 1, max: 500 });
 const DEFAULT_QUIET_MS = 60000;
-const QUIET_MS_RANGE = Object.freeze({ min: 0, max: 3600000 });
 // How often the loop looks, as opposed to how often it distills: a tick skipped for a busy canon must
 // retry in minutes, not tomorrow.
 const CHECK_INTERVAL_MS = 15 * 60 * 1000;

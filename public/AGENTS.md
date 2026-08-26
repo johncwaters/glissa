@@ -4,7 +4,7 @@
 # public
 
 ## Purpose
-The browser dashboard frontend: ES modules bundled by Vite (dev server with HMR on 5173, production build to `dist/`). Renders session cards with xterm.js terminals, a Focus view, a review sidebar, the Usage tab, dialogs, themes, and notifications. The server is a dumb pipe; ALL ANSI rendering happens here.
+The browser dashboard frontend: ES modules bundled by Vite (dev server with HMR on 5173, production build to `dist/`). Renders session cards with xterm.js terminals, primary views including Settings, a review sidebar, dialogs, themes, and notifications. The server is a dumb pipe; ALL ANSI rendering happens here.
 
 ## Key Files
 
@@ -14,7 +14,8 @@ The browser dashboard frontend: ES modules bundled by Vite (dev server with HMR 
 | `app.js` | Thin boot entry: wires modules, owns the document-level Alt+key shortcut dispatch |
 | `control-ws.js` | Control WebSocket client: connection, reconnect, request/response |
 | `reconnect-backoff.mjs` | Pure `nextReconnectDelayMs(attempt, random)`: the ONE retry delay for both WS clients (500ms doubling to a 30s cap, jittered to 50-100%) |
-| `dialogs.js` | Add Session and Settings dialog factories (HTML imported `?raw` from `components/`) |
+| `dialogs.js` | Add Session and investigation-report dialog factories |
+| `settings-map.mjs` / `settings-view-core.mjs` / `settings-panel.js` | Declarative settings source, pure hydration and dirty-block rules, primary-view DOM shell |
 | `render-scheduler.mjs` | Global xterm WRITE scheduler: callback-gated round-robin with per-frame budget |
 | `notifications.js` | Native Web Notifications (browser routes to Windows Action Center); replaces the server-side toast path |
 | `notify-dedupe-core.mjs` | Pure cross-tab claim (short-TTL localStorage) so exactly one open tab raises each notification |
@@ -24,7 +25,7 @@ The browser dashboard frontend: ES modules bundled by Vite (dev server with HMR 
 | `usage-view-core.mjs` | Pure Usage tab formatting, sorting, caveat text, warning text, and per-card chip text |
 | `theme.js` | Theme definitions applied as CSS custom properties; terminal theme derived at runtime |
 | `ui-prefs.js` / `local-store.js` | THE localStorage home for UI state (sound, theme, active view, rail and sidebar widths), over quota-safe wrappers. Each key is declared once in `ui-prefs.js`'s `PREFS` table with its default and normalizer; the accessors are one line each. The review sidebar's width keeps its own storage key so an existing install's saved width survives |
-| `shortcuts.mjs` | Pure display catalog of keyboard shortcuts for the Settings dialog; handlers live in `app.js` and `session-card/terminal.js`, keep in sync |
+| `shortcuts.mjs` | Pure display catalog of keyboard shortcuts for the Settings view; handlers live in `app.js` and `session-card/terminal.js`, keep in sync |
 | `form-factor-core.mjs` | Pure `decideLayout({ coarse, narrowWidth })` -> `'phone' \| 'desktop'`: the one predicate choosing between the two first-class layouts |
 | `form-factor.js` | Its IO shell: evaluates the two media queries, stamps `<html data-layout>`, notifies subscribers on a live flip |
 | `card-host.js` | THE session-card re-parenting seam (`borrowCard` / `releaseCard`), single borrower GLOBALLY; shared by the Focus center and the phone Terminal screen |
@@ -41,7 +42,7 @@ The browser dashboard frontend: ES modules bundled by Vite (dev server with HMR 
 |-----------|---------|
 | `session-card/` | Session card modules: terminal, lifecycle, DOM, naming, WebGL pool (see `session-card/AGENTS.md`) |
 | `focus-view/` | Focus view: roster rail + centered card, attention queue (see `focus-view/AGENTS.md`) |
-| `phone/` | Phone layout: seven screens + bottom nav, rendered only under `[data-layout="phone"]` (see `phone/AGENTS.md`) |
+| `phone/` | Phone layout: nine screens + bottom nav, rendered only under `[data-layout="phone"]` (see `phone/AGENTS.md`) |
 | `sidebar/` | Review sidebar: diff rendering, selection, merge actions (see `sidebar/AGENTS.md`) |
 | `components/` | Static HTML fragments imported `?raw` (see `components/AGENTS.md`) |
 | `audio/` | Notification sound files (OGG) |

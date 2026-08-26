@@ -9,6 +9,7 @@ const {
 const { resolveMemoryConfig } = require('../server/core/memory-core');
 const { resolveDistillConfig } = require('../server/core/memory-distill-core');
 const { resolveIngestConfig } = require('../server/core/ingest-core');
+const settingsRanges = require('../shared/settings-ranges');
 
 test('an absent block is valid, so an untouched tab writes nothing', () => {
   for (const spec of [MEMORY_SPEC, PACK_DISTILLER_SPEC, INGEST_SPEC]) {
@@ -60,6 +61,9 @@ test('a wrong type is refused rather than coerced, so a string cannot enable a l
 });
 
 test('the wire bounds match the clamps each resolver would silently apply', () => {
+  assert.strictEqual(MEMORY_SPEC.integerRanges.retainDays, settingsRanges.MEMORY_RETAIN_DAY_RANGE);
+  assert.strictEqual(MEMORY_SPEC.blocks.distill.integerRanges.maxNewClaims, settingsRanges.MAX_NEW_CLAIMS_RANGE);
+  assert.strictEqual(PACK_DISTILLER_SPEC.integerRanges.intervalHours, settingsRanges.PACK_DISTILLER_INTERVAL_RANGE);
   assert.equal(
     validateMillBlock({ retainDays: 29 }, MEMORY_SPEC),
     'memory.retainDays must be an integer between 30 and 3650',

@@ -1,4 +1,4 @@
-// The phone layout's shell: eight screens, one visible at a time, behind a bottom nav.
+// The phone layout's shell: nine screens, one visible at a time, behind a bottom nav.
 //
 // This is a first-class layout, not a narrowed desktop. The desktop DOM (header, focus view, docked
 // sidebar) is not rendered at all under [data-layout="phone"]; the shell is only built the first time
@@ -13,8 +13,9 @@
 //   Usage    - the real Usage panel, re-parented in as a full screen
 //   Mill     - the real Mill panel, re-parented in as a full screen
 //   Visions - the real Visions panel, re-parented in as a full screen
+//   Settings - the real Settings panel, re-parented in as a full screen
 //
-// Seven elements are BORROWED from the desktop DOM rather than rebuilt: the review sidebar, the Radar,
+// Eight elements are BORROWED from the desktop DOM rather than rebuilt: the review sidebar, the Radar,
 // PRs, Usage, Mill and Visions panels, and the header controls the Board top bar adopts. Rebuilding any
 // of them would mean a second state pipeline for the same facts.
 
@@ -42,6 +43,7 @@ const SCREENS = Object.freeze([
   { id: 'usage', label: 'Usage', glyph: '◔', nested: true }, // part-filled circle: a consumption gauge
   { id: 'mill', label: 'Mill', glyph: '▦', nested: true }, // square with quadrants: assembled parts
   { id: 'visions', label: 'Visions', glyph: '◇', nested: true },
+  { id: 'settings', label: 'Settings', glyph: '@', nested: true },
 ]);
 let shellEl = null;
 const navButtonById = new Map();
@@ -60,6 +62,8 @@ let millMountEl = null;
 let millPanelEl = null;
 let visionsMountEl = null;
 let visionsPanelEl = null;
+let settingsMountEl = null;
+let settingsPanelEl = null;
 let moreButtonEl = null;
 let moreMenuEl = null;
 const menuButtonById = new Map();
@@ -234,6 +238,7 @@ function build() {
   usageMountEl = el('div', 'phone-usage');
   millMountEl = el('div', 'phone-mill');
   visionsMountEl = el('div', 'phone-visions');
+  settingsMountEl = el('div', 'phone-settings');
 
   const screens = el('div', 'phone-screens');
   const contentByScreenId = {
@@ -245,6 +250,7 @@ function build() {
     usage: usageMountEl,
     mill: millMountEl,
     visions: visionsMountEl,
+    settings: settingsMountEl,
   };
   for (const screen of SCREENS) {
     screens.appendChild(wrapScreen(screen.id, screen.label, contentByScreenId[screen.id]));
@@ -408,6 +414,7 @@ export function mountPhoneShell(options) {
   usagePanelEl = hooks.usagePanelEl || null;
   millPanelEl = hooks.millPanelEl || null;
   visionsPanelEl = hooks.visionsPanelEl || null;
+  settingsPanelEl = hooks.settingsPanelEl || null;
 }
 
 // `sessionId` is the session the desktop Focus center was holding, if any. It is pre-loaded into the
@@ -433,6 +440,8 @@ export function activatePhoneShell({ sessionId } = {}) {
   if (millPanelEl) millPanelEl.hidden = false;
   adoptElement(visionsPanelEl, visionsMountEl);
   if (visionsPanelEl) visionsPanelEl.hidden = false;
+  adoptElement(settingsPanelEl, settingsMountEl);
+  if (settingsPanelEl) settingsPanelEl.hidden = false;
   syncVisualViewport();
   if (sessionId) terminalScreen.show(sessionId);
   // Reconcile history BEFORE opening a screen, so the flag and the stack agree from the first tap.
@@ -453,6 +462,7 @@ export function deactivatePhoneShell() {
   releaseElement(usagePanelEl);
   releaseElement(millPanelEl);
   releaseElement(visionsPanelEl);
+  releaseElement(settingsPanelEl);
   for (const control of (hooks.headerControls || [])) releaseElement(control);
   setMoreMenuOpen(false);
   shellEl.hidden = true;
