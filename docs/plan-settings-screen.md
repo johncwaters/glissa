@@ -1,6 +1,6 @@
 # Plan: Settings Screen
 
-Status: proposal, 2026-08-25. Research only, nothing implemented.
+Status: shipped 2026-08-25, all four phases (commits 031e345, 8eef54c). Skipped for lack of wire data: Mill last-run status slots, Telegram test send.
 
 ## Why
 
