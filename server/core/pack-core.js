@@ -283,6 +283,21 @@ function validateDistillEntry(entry, index, errors) {
   }
 }
 
+function validateUniqueDistillOutputs(entries, errors) {
+  if (!Array.isArray(entries)) return;
+  const firstIndexByOutput = new Map();
+  for (const [index, entry] of entries.entries()) {
+    if (!isPlainObject(entry) || !isPackRelativePath(entry.output)) continue;
+    const outputKey = splitSegments(entry.output).join('/').toLowerCase();
+    const firstIndex = firstIndexByOutput.get(outputKey);
+    if (firstIndex !== undefined) {
+      errors.push(`distill[${index}].output duplicates distill[${firstIndex}].output "${entry.output}"`);
+      continue;
+    }
+    firstIndexByOutput.set(outputKey, index);
+  }
+}
+
 /** @returns {{ ok: boolean, errors: string[] }} */
 function validatePackSpec(spec) {
   const errors = [];
@@ -323,6 +338,7 @@ function validatePackSpec(spec) {
     for (const [index, skill] of spec.skills.entries()) validateSkill(skill, index, errors, { perProjectVariants });
   }
   validateOptionalArray(spec, 'distill', 'distill must be an array of { output, sources, instructions } objects', validateDistillEntry, errors);
+  validateUniqueDistillOutputs(spec.distill, errors);
 
   if (!Number.isInteger(spec.budgetTokens) || spec.budgetTokens <= 0) {
     errors.push('budgetTokens must be a positive integer');

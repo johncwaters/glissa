@@ -376,6 +376,36 @@ test('a final symlink planted after output resolution is refused without changin
   }
 });
 
+test('the output writer creates missing parent directories', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-pack-distiller-parent-'));
+  const outputPath = path.join(root, 'new', 'nested', 'brief.md');
+  try {
+    await writeOutputNoFollow(outputPath, 'derived\n');
+    assert.equal(fs.readFileSync(outputPath, 'utf8'), 'derived\n');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a failed output rename leaves the old derived source byte-identical', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-pack-distiller-rename-'));
+  const outputPath = path.join(root, 'brief.md');
+  fs.writeFileSync(outputPath, 'old bytes\n', 'utf8');
+  const originalRename = fs.promises.rename;
+  fs.promises.rename = async (source, destination) => {
+    if (destination === outputPath) throw new Error('simulated crash before replace');
+    return originalRename(source, destination);
+  };
+  try {
+    await assert.rejects(writeOutputNoFollow(outputPath, 'new bytes\n'), /simulated crash/);
+    assert.equal(fs.readFileSync(outputPath, 'utf8'), 'old bytes\n');
+    assert.deepEqual(fs.readdirSync(root), ['brief.md']);
+  } finally {
+    fs.promises.rename = originalRename;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('the post-write check rejects storage that changes Glissa rendered bytes', async () => {
   const h = harness({
     onWrite: (files, fullPath) => {

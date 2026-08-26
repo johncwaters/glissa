@@ -231,7 +231,7 @@ class Session extends EventEmitter {
     // interactive trust prompt it can never answer. Off by default; set by a headless lane that needs it.
     enableProjectMcp = false,
     rtkPath = null,
-    // Context packs delivered at spawn: names of built packs whose `current` dir becomes an
+    // Context packs delivered at spawn: names of built packs whose immutable version dir becomes an
     // --add-dir (see _resolvePacks and AGENTS.md "Context Packs"). Comes from the project record's
     // `packs` array, or from a headless lane's own pack config.
     packs = [],

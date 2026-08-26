@@ -37,8 +37,11 @@ function writeFixture() {
 
   const builtRoot = path.join(tmpDir, 'built');
   const currentDir = path.join(builtRoot, 'good', 'current');
+  const versionDir = path.join(builtRoot, 'good', 'versions', VERSION);
   fs.mkdirSync(currentDir, { recursive: true });
-  fs.writeFileSync(path.join(currentDir, 'manifest.json'), JSON.stringify({
+  fs.mkdirSync(versionDir, { recursive: true });
+  fs.writeFileSync(path.join(currentDir, 'version'), `${VERSION}\n`, 'utf8');
+  fs.writeFileSync(path.join(versionDir, 'manifest.json'), JSON.stringify({
     name: 'good',
     version: VERSION,
     builtAt: '2026-08-20T10:00:00.000Z',
@@ -51,7 +54,7 @@ function writeFixture() {
     outputs: [{ relPath: 'CLAUDE.md', tokenEstimate: 200 }],
   }), 'utf8');
 
-  return { tmpDir, packsDir, specsDir, builtRoot };
+  return { tmpDir, packsDir, specsDir, builtRoot, versionDir };
 }
 
 function makeWiring(fixture, overrides = {}) {
@@ -143,7 +146,7 @@ test('an unbuilt pack reports a short reason, not the built root it looked in', 
 test('a manifest that is present but unreadable reports so without naming the directory', async (t) => {
   const fixture = writeFixture();
   t.after(() => fs.rmSync(fixture.tmpDir, { recursive: true, force: true }));
-  fs.writeFileSync(path.join(fixture.builtRoot, 'good', 'current', 'manifest.json'), '{ broken', 'utf8');
+  fs.writeFileSync(path.join(fixture.versionDir, 'manifest.json'), '{ broken', 'utf8');
 
   const { wiring } = makeWiring(fixture);
   const { replies, done } = pull(wiring, 'r1');

@@ -497,6 +497,17 @@ test('a well-formed distill entry validates', () => {
   assert.deepEqual(validatePackSpec(validSpec({ distill: [distillEntry()] })), { ok: true, errors: [] });
 });
 
+test('two distill entries naming the same output are rejected with both indexes', () => {
+  const result = validatePackSpec(validSpec({
+    distill: [
+      distillEntry(),
+      distillEntry({ output: 'sources\\demo\\derived\\brief.md' }),
+    ],
+  }));
+  assert.equal(result.ok, false);
+  assert.equal(result.errors.includes('distill[1].output duplicates distill[0].output "sources\\demo\\derived\\brief.md"'), true);
+});
+
 test('a distill output that escapes the packs directory is rejected', () => {
   for (const output of ['../outside.md', 'a/../../outside.md', '/etc/passwd', 'C:/Windows/x.md', '\\\\server\\share.md', '']) {
     const result = validatePackSpec(validSpec({ distill: [distillEntry({ output })] }));

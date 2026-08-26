@@ -6,6 +6,26 @@ const { SAFE_PATH_RE } = require("./hook-command-core");
 const { PACK_NAME_RE } = require("../../server/core/pack-core");
 
 const PACK_DIRECTIVE = "Glissa context packs are available at these index files. Read each relevant CLAUDE.md before working";
+const CURRENT_POINTER_DIRECTORY = "current";
+const CURRENT_POINTER_FILE = "version";
+const VERSIONS_DIRECTORY = "versions";
+const PACK_VERSION_RE = /^[a-f0-9]{64}$/;
+
+function parsePackPointer(contents) {
+  if (typeof contents !== "string") return null;
+  const match = contents.match(/^([a-f0-9]{64})\r?\n?$/);
+  return match ? match[1] : null;
+}
+
+function renderPackPointer(version) {
+  if (typeof version !== "string" || !PACK_VERSION_RE.test(version)) return null;
+  return `${version}\n`;
+}
+
+function packVersionDirectory(packDirectory, version) {
+  if (typeof packDirectory !== "string" || !PACK_VERSION_RE.test(version)) return null;
+  return path.join(packDirectory, VERSIONS_DIRECTORY, version);
+}
 
 function isInsideBuiltRoot(packDirectory, builtRoot) {
   if (builtRoot == null) return true;
@@ -28,4 +48,14 @@ function renderPackPointerText(deliveries, builtRoot) {
   return [PACK_DIRECTIVE, ...pointers].join("; ");
 }
 
-module.exports = { PACK_DIRECTIVE, renderPackPointerText };
+module.exports = {
+  CURRENT_POINTER_DIRECTORY,
+  CURRENT_POINTER_FILE,
+  PACK_DIRECTIVE,
+  PACK_VERSION_RE,
+  VERSIONS_DIRECTORY,
+  packVersionDirectory,
+  parsePackPointer,
+  renderPackPointer,
+  renderPackPointerText,
+};

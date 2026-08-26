@@ -10,6 +10,7 @@
 // and rebuilds the pack on its own, so the two loops compose without knowing about each other.
 //
 const fs = require('node:fs');
+const crypto = require('node:crypto');
 const os = require('node:os');
 const path = require('node:path');
 
@@ -56,15 +57,36 @@ function readDistillResult(resultPath) {
 }
 
 async function writeOutputNoFollow(fullPath, content) {
+  const parentDir = path.dirname(fullPath);
+  await fs.promises.mkdir(parentDir, { recursive: true });
+  const tempPath = path.join(parentDir, `.${path.basename(fullPath)}.tmp-${process.pid}-${crypto.randomBytes(6).toString('hex')}`);
   const flags = fs.constants.O_WRONLY
     | fs.constants.O_CREAT
-    | fs.constants.O_TRUNC
+    | fs.constants.O_EXCL
     | fs.constants.O_NOFOLLOW;
-  const handle = await fs.promises.open(fullPath, flags, 0o666);
+  let handle = null;
   try {
+    handle = await fs.promises.open(tempPath, flags, 0o666);
     await handle.writeFile(content, 'utf8');
-  } finally {
+    await handle.sync();
     await handle.close();
+    handle = null;
+
+    let outputStats = null;
+    try {
+      outputStats = await fs.promises.lstat(fullPath);
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
+    if (outputStats?.isSymbolicLink()) {
+      const error = new Error('output path became a symbolic link');
+      error.code = 'ELOOP';
+      throw error;
+    }
+    await fs.promises.rename(tempPath, fullPath);
+  } finally {
+    if (handle) await handle.close().catch(() => {});
+    await fs.promises.rm(tempPath, { force: true }).catch(() => {});
   }
 }
 

@@ -6,6 +6,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
 const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
@@ -22,15 +23,27 @@ function fakePty(pid = 2147483646) {
   return { pid, onData() {}, onExit() {}, write() {}, resize() {}, kill() {} };
 }
 
+function fixtureVersion(label) {
+  return crypto.createHash('sha256').update(label).digest('hex');
+}
+
+function fixtureVersionDir(builtRoot, name, label) {
+  return path.join(builtRoot, name, 'versions', fixtureVersion(label));
+}
+
 async function makeBuiltRoot(packs) {
   const builtRoot = await fsp.mkdtemp(path.join(os.tmpdir(), 'glissa-packs-'));
   for (const [name, value] of Object.entries(packs)) {
-    const { version, ...extra } = typeof value === 'string' ? { version: value } : value;
+    const { version: versionLabel, ...extra } = typeof value === 'string' ? { version: value } : value;
+    const version = fixtureVersion(versionLabel);
     const currentDir = path.join(builtRoot, name, 'current');
+    const versionDir = path.join(builtRoot, name, 'versions', version);
     await fsp.mkdir(currentDir, { recursive: true });
-    await fsp.writeFile(path.join(currentDir, 'CLAUDE.md'), `# ${name}\n`, 'utf8');
+    await fsp.mkdir(versionDir, { recursive: true });
+    await fsp.writeFile(path.join(currentDir, 'version'), `${version}\n`, 'utf8');
+    await fsp.writeFile(path.join(versionDir, 'CLAUDE.md'), `# ${name}\n`, 'utf8');
     await fsp.writeFile(
-      path.join(currentDir, 'manifest.json'),
+      path.join(versionDir, 'manifest.json'),
       JSON.stringify({ name, version, tokenEstimate: 10, ...extra }, null, 2),
       'utf8',
     );
@@ -59,16 +72,16 @@ test('a built pack spawns as --add-dir, sets the CLAUDE.md env flag, and rides t
   });
   try {
     await s.start();
-    const packDir = path.join(builtRoot, 'company-context', 'current');
+    const packDir = fixtureVersionDir(builtRoot, 'company-context', 'v-abc');
     assert.deepEqual(calls[0].args, ['--add-dir', packDir]);
     assert.equal(calls[0].opts.env[CLAUDE_MD_ENV], '1');
     // `reads` rides every delivered entry from the start: 0 means "delivered and never opened",
     // which is exactly the measurable (see tests/session-pack-reads.test.js).
-    assert.deepEqual(s.toSnapshot().packs, [{ name: 'company-context', version: 'v-abc', reads: 0 }]);
+    assert.deepEqual(s.toSnapshot().packs, [{ name: 'company-context', version: fixtureVersion('v-abc'), reads: 0 }]);
     const delivered = s.getDebugState().decisions.filter((d) => d.kind === 'pack');
     assert.equal(delivered.length, 1);
     assert.equal(delivered[0].decision, 'delivered');
-    assert.equal(delivered[0].version, 'v-abc');
+    assert.equal(delivered[0].version, fixtureVersion('v-abc'));
   } finally {
     s.destroy();
     await fsp.rm(builtRoot, { recursive: true, force: true });
@@ -90,8 +103,8 @@ test('several built packs deliver in configured order, one --add-dir pair each',
   try {
     await s.start();
     assert.deepEqual(calls[0].args, [
-      '--add-dir', path.join(builtRoot, 'beta', 'current'),
-      '--add-dir', path.join(builtRoot, 'alpha', 'current'),
+      '--add-dir', fixtureVersionDir(builtRoot, 'beta', 'v2'),
+      '--add-dir', fixtureVersionDir(builtRoot, 'alpha', 'v1'),
     ]);
     assert.deepEqual(s.toSnapshot().packs.map((p) => p.name), ['beta', 'alpha']);
   } finally {
@@ -129,7 +142,10 @@ test('a configured but unbuilt pack is skipped: no --add-dir, no env flag, a rec
 
 test('a built dir with no manifest.json is skipped rather than guessed at', async () => {
   const builtRoot = await makeBuiltRoot({});
+  const version = fixtureVersion('half-built');
   await fsp.mkdir(path.join(builtRoot, 'half-built', 'current'), { recursive: true });
+  await fsp.mkdir(path.join(builtRoot, 'half-built', 'versions', version), { recursive: true });
+  await fsp.writeFile(path.join(builtRoot, 'half-built', 'current', 'version'), `${version}\n`, 'utf8');
   const calls = [];
   const s = new Session({
     id: 'half-built',
@@ -169,7 +185,7 @@ test('argv order: pack args sit ahead of the lane flags and the prompt stays the
   try {
     await s.start();
     assert.deepEqual(calls[0].args, [
-      '--add-dir', path.join(builtRoot, 'alpha', 'current'),
+      '--add-dir', fixtureVersionDir(builtRoot, 'alpha', 'v1'),
       '--dangerously-skip-permissions',
       '-p', '--model', 'sonnet',
       'SEED PROMPT',
@@ -217,7 +233,7 @@ test('a malformed packs list costs the bad entries, not the spawn', async () => 
   try {
     assert.deepEqual(s.packNames, ['alpha']);
     await s.start();
-    assert.deepEqual(calls[0].args, ['--add-dir', path.join(builtRoot, 'alpha', 'current')]);
+    assert.deepEqual(calls[0].args, ['--add-dir', fixtureVersionDir(builtRoot, 'alpha', 'v1')]);
   } finally {
     s.destroy();
     await fsp.rm(builtRoot, { recursive: true, force: true });
@@ -270,8 +286,8 @@ test('a project delivers ITS variant of a group pack, and the snapshot records t
   });
   const { s, calls, decisions } = await startWithPacks(builtRoot, { packVariantSlug: SLUG });
   try {
-    assert.deepEqual(calls[0].args, ['--add-dir', path.join(builtRoot, `memory-${SLUG}`, 'current')]);
-    assert.deepEqual(s.toSnapshot().packs, [{ name: `memory-${SLUG}`, version: 'v-mine', reads: 0 }]);
+    assert.deepEqual(calls[0].args, ['--add-dir', fixtureVersionDir(builtRoot, `memory-${SLUG}`, 'v-mine')]);
+    assert.deepEqual(s.toSnapshot().packs, [{ name: `memory-${SLUG}`, version: fixtureVersion('v-mine'), reads: 0 }]);
     assert.deepEqual(decisions.map((d) => d.decision), ['delivered']);
     assert.equal(decisions[0].name, `memory-${SLUG}`);
   } finally {
@@ -284,8 +300,8 @@ test('a project with no variant built yet falls back to the base pack, and says 
   const builtRoot = await makeBuiltRoot({ memory: { version: 'v-base', perProjectVariants: true } });
   const { s, calls, decisions } = await startWithPacks(builtRoot, { packVariantSlug: SLUG });
   try {
-    assert.deepEqual(calls[0].args, ['--add-dir', path.join(builtRoot, 'memory', 'current')]);
-    assert.deepEqual(s.toSnapshot().packs, [{ name: 'memory', version: 'v-base', reads: 0 }]);
+    assert.deepEqual(calls[0].args, ['--add-dir', fixtureVersionDir(builtRoot, 'memory', 'v-base')]);
+    assert.deepEqual(s.toSnapshot().packs, [{ name: 'memory', version: fixtureVersion('v-base'), reads: 0 }]);
     assert.deepEqual(decisions.map((d) => d.decision), ['variant-fallback', 'delivered']);
     assert.equal(decisions[0].name, 'memory');
     assert.match(decisions[0].reason, /not built/);
@@ -302,7 +318,7 @@ test('a lane session, which has no project slug, is delivered the base pack with
   });
   const { s, calls, decisions } = await startWithPacks(builtRoot);
   try {
-    assert.deepEqual(calls[0].args, ['--add-dir', path.join(builtRoot, 'memory', 'current')]);
+    assert.deepEqual(calls[0].args, ['--add-dir', fixtureVersionDir(builtRoot, 'memory', 'v-base')]);
     assert.deepEqual(decisions.map((d) => d.decision), ['delivered']);
   } finally {
     s.destroy();
@@ -314,9 +330,9 @@ test('a plain pack is never probed for a variant, whatever slug the project carr
   const builtRoot = await makeBuiltRoot({ memory: 'v-plain' });
   const { s, calls, decisions } = await startWithPacks(builtRoot, { packVariantSlug: SLUG });
   try {
-    assert.deepEqual(calls[0].args, ['--add-dir', path.join(builtRoot, 'memory', 'current')]);
+    assert.deepEqual(calls[0].args, ['--add-dir', fixtureVersionDir(builtRoot, 'memory', 'v-plain')]);
     assert.deepEqual(decisions.map((d) => d.decision), ['delivered']);
-    assert.deepEqual(s.toSnapshot().packs, [{ name: 'memory', version: 'v-plain', reads: 0 }]);
+    assert.deepEqual(s.toSnapshot().packs, [{ name: 'memory', version: fixtureVersion('v-plain'), reads: 0 }]);
   } finally {
     s.destroy();
     await fsp.rm(builtRoot, { recursive: true, force: true });
@@ -330,12 +346,12 @@ test('a codex session carries the resolved variant by index pointer without Clau
   });
   const { s, calls, decisions } = await startWithPacks(builtRoot, { agent: 'codex', packVariantSlug: SLUG });
   try {
-    const packDir = path.join(builtRoot, `memory-${SLUG}`, 'current');
+    const packDir = fixtureVersionDir(builtRoot, `memory-${SLUG}`, 'v-mine');
     const carrierArgs = codex.renderPackArgs([{ name: `memory-${SLUG}`, dir: packDir }]);
     assert.deepEqual(calls[0].args, [...carrierArgs, '-c', 'check_for_update_on_startup=false']);
     assert.equal(calls[0].args.includes('--add-dir'), false);
     assert.equal(CLAUDE_MD_ENV in calls[0].opts.env, false);
-    assert.deepEqual(s.toSnapshot().packs, [{ name: `memory-${SLUG}`, version: 'v-mine' }]);
+    assert.deepEqual(s.toSnapshot().packs, [{ name: `memory-${SLUG}`, version: fixtureVersion('v-mine') }]);
     assert.equal(s.toSnapshot().packs[0].reads, undefined);
     assert.deepEqual(decisions.map((decision) => decision.decision), ['delivered']);
   } finally {

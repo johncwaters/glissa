@@ -13,6 +13,15 @@ const path = require('node:path');
 
 const { glissaHomeDir, resolveConfigPath } = require('./config-store');
 const { GLISSA_HOME_PLACEHOLDER, PACK_NAME_RE, PROJECT_SLUG_PLACEHOLDER, isDataSource, isPackRelativePath, matchesGlob, packTmpOwnerPid, planPackBuild, planPackVariants, sha256, shouldReclaimPackArtifact, sourcePattern, validatePackSpec } = require('./core/pack-core');
+const {
+  CURRENT_POINTER_DIRECTORY,
+  CURRENT_POINTER_FILE,
+  PACK_VERSION_RE,
+  VERSIONS_DIRECTORY,
+  packVersionDirectory,
+  parsePackPointer,
+  renderPackPointer,
+} = require('../session/core/pack-pointer-core');
 
 const SPEC_SUFFIX = '.pack.json';
 // Source patterns resolve against packs/, so a shared spec reads the same whether it runs from a repo
@@ -23,6 +32,7 @@ const TMP_PREFIX = 'tmp-';
 const PUBLISH_LOCK_FILE = 'publish.lock';
 const PUBLISH_LOCK_RETRY_MS = 20;
 const PUBLISH_ARTIFACT_STALE_MS = 5 * 60 * 1000;
+const RETAINED_PACK_VERSIONS = 2;
 let publishLockReclaimCounter = 0;
 
 function toPosix(p) {
@@ -107,10 +117,6 @@ async function statOrNull(target) {
   } catch {
     return null;
   }
-}
-
-async function pathExists(target) {
-  return (await statOrNull(target)) !== null;
 }
 
 async function walkFiles(rootDir, found = [], visitedRealDirs = new Set()) {
@@ -277,10 +283,31 @@ async function distillSourceHashes(entry, { baseDir = DEFAULT_PACKS_DIR } = {}) 
 }
 
 async function writeOutputs(targetDir, outputs) {
+  const directories = new Set([targetDir]);
   for (const file of outputs) {
     const destination = path.join(targetDir, file.relPath);
-    await fsp.mkdir(path.dirname(destination), { recursive: true });
-    await fsp.writeFile(destination, file.content, 'utf8');
+    const destinationDir = path.dirname(destination);
+    await fsp.mkdir(destinationDir, { recursive: true });
+    directories.add(destinationDir);
+    const handle = await fsp.open(destination, 'wx', 0o666);
+    try {
+      await handle.writeFile(file.content, 'utf8');
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+  }
+  const deepestFirst = [...directories].sort((left, right) => right.length - left.length);
+  for (const directory of deepestFirst) await syncDirectory(directory);
+}
+
+async function syncDirectory(directory) {
+  if (process.platform === 'win32') return;
+  const handle = await fsp.open(directory, 'r');
+  try {
+    await handle.sync();
+  } finally {
+    await handle.close();
   }
 }
 
@@ -413,37 +440,92 @@ async function releasePublishLock({ lockPath, token }) {
   }
 }
 
-/*
- * Publish a finished build: write into a tmp sibling, rotate current to previous, then rename in.
- *
- * The rotation is TWO renames, so there is a window in which no `current/` exists at all - a crash
- * there used to leave the pack unresolvable, which "atomic publish" overstated (2026-08 review,
- * section 8). It cannot be collapsed into one visible swap: Windows cannot atomically replace a
- * non-empty directory by rename. What closes it is the other half of the review's suggestion, in
- * resolveBuiltPack: during that window `previous/` holds the last good build (this rename just put it
- * there), so a delivery that finds no `current/` falls back to it rather than skipping the pack. The
- * order below is deliberate - current is retired to previous BEFORE the tmp goes in - because it is
- * what makes that fallback point at the last good build rather than at nothing.
- */
-async function publishBuild(builtRoot, name, outputs, { now = Date.now, sleep = wait } = {}) {
+function versionForOutputs(outputs, requestedVersion) {
+  if (typeof requestedVersion === 'string' && PACK_VERSION_RE.test(requestedVersion)) return requestedVersion;
+  const records = [...outputs]
+    .map((file) => `${file.relPath}:${sha256(file.content)}`)
+    .sort();
+  return sha256(records.join('\n'));
+}
+
+async function writeCurrentPointer(packDir, version) {
+  const pointerText = renderPackPointer(version);
+  if (pointerText === null) throw new Error(`invalid pack version "${version}"`);
+  const currentDir = path.join(packDir, CURRENT_POINTER_DIRECTORY);
+  await fsp.mkdir(currentDir, { recursive: true });
+  const pointerPath = path.join(currentDir, CURRENT_POINTER_FILE);
+  const tempPath = path.join(currentDir, `${CURRENT_POINTER_FILE}.tmp-${process.pid}-${crypto.randomBytes(6).toString('hex')}`);
+  let handle = null;
+  try {
+    handle = await fsp.open(tempPath, 'wx', 0o600);
+    await handle.writeFile(pointerText, 'utf8');
+    await handle.sync();
+    await handle.close();
+    handle = null;
+    await fsp.rename(tempPath, pointerPath);
+  } finally {
+    if (handle) await handle.close().catch(() => {});
+    await fsp.rm(tempPath, { force: true }).catch(() => {});
+  }
+}
+
+async function garbageCollectVersions(packDir, pointedVersion, retain = RETAINED_PACK_VERSIONS) {
+  const versionsDir = path.join(packDir, VERSIONS_DIRECTORY);
+  let entries;
+  try {
+    entries = await fsp.readdir(versionsDir, { withFileTypes: true });
+  } catch (error) {
+    if (error.code === 'ENOENT') return;
+    throw error;
+  }
+  const versions = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !PACK_VERSION_RE.test(entry.name)) continue;
+    const stats = await statOrNull(path.join(versionsDir, entry.name));
+    if (!stats) continue;
+    versions.push({ name: entry.name, mtimeMs: stats.mtimeMs });
+  }
+  versions.sort((left, right) => right.mtimeMs - left.mtimeMs || left.name.localeCompare(right.name));
+  const kept = new Set([pointedVersion]);
+  for (const version of versions) {
+    if (kept.size >= Math.max(1, retain)) break;
+    kept.add(version.name);
+  }
+  for (const version of versions) {
+    if (kept.has(version.name)) continue;
+    await fsp.rm(path.join(versionsDir, version.name), { recursive: true, force: true });
+  }
+}
+
+// A plain pointer file works on Windows and Linux without symlink privileges.
+async function publishBuild(builtRoot, name, outputs, { now = Date.now, sleep = wait, version = null } = {}) {
   const packDir = path.join(builtRoot, name);
   await fsp.mkdir(packDir, { recursive: true });
   const lock = await acquirePublishLock(packDir, { now, sleep });
   let tmpDir = null;
   try {
     await clearStaleTmpDirs(packDir);
+    const publishedVersion = versionForOutputs(outputs, version);
+    const versionsDir = path.join(packDir, VERSIONS_DIRECTORY);
+    const versionDir = packVersionDirectory(packDir, publishedVersion);
+    await fsp.mkdir(versionsDir, { recursive: true });
     tmpDir = path.join(packDir, `${TMP_PREFIX}${process.pid}-${crypto.randomBytes(6).toString('hex')}`);
     await fsp.mkdir(tmpDir, { recursive: true });
     await writeOutputs(tmpDir, outputs);
-
-    const currentDir = path.join(packDir, 'current');
-    const previousDir = path.join(packDir, 'previous');
-    if (await pathExists(currentDir)) {
-      await fsp.rm(previousDir, { recursive: true, force: true });
-      await fsp.rename(currentDir, previousDir);
+    try {
+      await fsp.rename(tmpDir, versionDir);
+      tmpDir = null;
+    } catch (error) {
+      if (error.code !== 'EEXIST' && error.code !== 'ENOTEMPTY') throw error;
     }
-    await fsp.rename(tmpDir, currentDir);
-    return currentDir;
+    await syncDirectory(versionsDir);
+    await writeCurrentPointer(packDir, publishedVersion);
+    try {
+      await garbageCollectVersions(packDir, publishedVersion);
+    } catch (error) {
+      console.error(`could not remove old pack versions from ${packDir}: ${error.message}`);
+    }
+    return versionDir;
   } finally {
     try {
       if (tmpDir) await fsp.rm(tmpDir, { recursive: true, force: true });
@@ -559,17 +641,17 @@ async function buildOnePack(entry, { specPath, baseDir, builtRoot, glissaHome, n
     fileCount: built.outputs.length,
     tokenEstimate: built.manifest.tokenEstimate,
     budgetTokens: built.manifest.budgetTokens,
-    currentDir: path.join(builtRoot, entry.name, 'current'),
+    currentDir: packVersionDirectory(path.join(builtRoot, entry.name), built.manifest.version),
   });
 
   // Publish only a version the built dir does not already carry. The watch loop rebuilds on any write
   // under a source root, and Claude Code hot-reloads skills from a delivered pack dir, so rewriting
-  // identical bytes would poke every live session for nothing (and churn current/previous with it).
+  // identical bytes would poke every live session for nothing.
   const published = await readBuiltManifest(entry.name, { builtRoot });
   if (published && published.version === built.manifest.version) return { ...report, unchanged: true };
 
   try {
-    await publishBuild(builtRoot, entry.name, built.outputs);
+    await publishBuild(builtRoot, entry.name, built.outputs, { version: built.manifest.version });
   } catch (err) {
     return failure(entry.name, specPath, [`could not publish pack: ${err.message}`]);
   }
@@ -611,18 +693,55 @@ async function describePackSpec(specPath) {
   }
 }
 
-/** The manifest of a pack's current build, or null when it has never been built. */
-async function readBuiltManifest(name, { builtRoot = defaultBuiltRoot(), slot = 'current' } = {}) {
+async function readManifestFromDirectory(directory) {
   try {
-    const raw = await fsp.readFile(path.join(builtRoot, name, slot, 'manifest.json'), 'utf8');
+    const raw = await fsp.readFile(path.join(directory, 'manifest.json'), 'utf8');
     return JSON.parse(raw);
   } catch {
     return null;
   }
 }
 
+async function resolveCurrentDirectory(name, builtRoot) {
+  const packDir = path.join(builtRoot, name);
+  const currentDir = path.join(packDir, CURRENT_POINTER_DIRECTORY);
+  const pointerPath = path.join(currentDir, CURRENT_POINTER_FILE);
+  let rawPointer = null;
+  try {
+    rawPointer = await fsp.readFile(pointerPath, 'utf8');
+  } catch (error) {
+    if (error.code !== 'ENOENT' && error.code !== 'ENOTDIR') {
+      return { dir: null, version: null, reason: `current pointer unreadable at ${pointerPath}` };
+    }
+  }
+  if (rawPointer !== null) {
+    const version = parsePackPointer(rawPointer);
+    if (!version) return { dir: null, version: null, reason: `current pointer invalid at ${pointerPath}` };
+    const versionDir = packVersionDirectory(packDir, version);
+    const stats = await statOrNull(versionDir);
+    if (!stats?.isDirectory()) return { dir: null, version: null, reason: `pointed version missing at ${versionDir}` };
+    return { dir: versionDir, version, reason: null };
+  }
+
+  const legacyManifest = await readManifestFromDirectory(currentDir);
+  if (legacyManifest && typeof legacyManifest.version === 'string') {
+    return { dir: currentDir, version: legacyManifest.version, reason: null };
+  }
+  return { dir: null, version: null, reason: `not built (no pointer at ${pointerPath})` };
+}
+
+/** The manifest of a pack's current build, or null when it has never been built. */
+async function readBuiltManifest(name, { builtRoot = defaultBuiltRoot() } = {}) {
+  if (typeof name !== 'string' || !PACK_NAME_RE.test(name)) return null;
+  const current = await resolveCurrentDirectory(name, builtRoot);
+  if (!current.dir) return null;
+  const manifest = await readManifestFromDirectory(current.dir);
+  if (!manifest || manifest.version !== current.version) return null;
+  return manifest;
+}
+
 /**
- * Delivery view of one pack: the `current` dir a spawn may add plus the version it is running, or a
+ * Delivery view of one pack: its pointed immutable version dir plus the version it is running, or a
  * skip reason. Never throws and never guesses: an unbuilt or unreadable pack resolves to dir null.
  *
  * @returns {Promise<{name: string, dir: string|null, version: string|null, reason: string|null}>}
@@ -633,41 +752,20 @@ async function resolveBuiltPack(name, { builtRoot = defaultBuiltRoot() } = {}) {
   // though the caller normalizes: a `..` segment would resolve outside the built root.
   if (typeof name !== 'string' || !PACK_NAME_RE.test(name)) return skip('not a valid pack name');
 
-  /*
-   * `current` first, `previous` as the crash fallback. Publishing rotates through two renames, so a
-   * crash between them leaves no `current/` while `previous/` still holds the last good build; a
-   * delivery that skipped the pack there would silently cost a session its context over a window that
-   * is nobody's fault. Delivering the previous build instead is honest and self-healing: the next
-   * rebuild republishes `current/` and the staleness chip already reports the version gap.
-   */
-  const currentDir = path.join(builtRoot, name, 'current');
-  let firstRefusal = null;
-  for (const slot of ['current', 'previous']) {
-    const dir = path.join(builtRoot, name, slot);
-    const stats = await statOrNull(dir);
-    if (!stats || !stats.isDirectory()) {
-      firstRefusal = firstRefusal || `not built (no ${currentDir})`;
-      continue;
-    }
-    const manifest = await readBuiltManifest(name, { builtRoot, slot });
-    if (!manifest || typeof manifest.version !== 'string') {
-      firstRefusal = firstRefusal || `manifest.json missing or unreadable in ${dir}`;
-      continue;
-    }
-    return {
-      name,
-      dir,
-      version: manifest.version,
-      reason: null,
-      // A group's base build declares itself, which is what tells a spawn to look for this project's
-      // variant before settling for the base.
-      perProjectVariants: manifest.perProjectVariants === true,
-      group: typeof manifest.group === 'string' ? manifest.group : null,
-    };
+  const current = await resolveCurrentDirectory(name, builtRoot);
+  if (!current.dir) return skip(current.reason);
+  const manifest = await readManifestFromDirectory(current.dir);
+  if (!manifest || manifest.version !== current.version) {
+    return skip(`manifest.json missing, unreadable, or mismatched in ${current.dir}`);
   }
-  // The reason names what was wrong with `current`, which is what an operator is looking for: the
-  // previous slot is a crash fallback, not a thing they configured.
-  return skip(firstRefusal);
+  return {
+    name,
+    dir: current.dir,
+    version: manifest.version,
+    reason: null,
+    perProjectVariants: manifest.perProjectVariants === true,
+    group: typeof manifest.group === 'string' ? manifest.group : null,
+  };
 }
 
 module.exports = {

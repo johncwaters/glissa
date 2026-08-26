@@ -1,7 +1,7 @@
 'use strict';
 
 // The context mill's IO shell against a temp fixture: spec discovery, the source walk (globs,
-// excludes, nested dirs, skill dirs), the built layout, and the atomic current/previous rotation.
+// excludes, nested dirs, skill dirs), the built layout, and the atomic current pointer.
 // Never touches ~/.glissa or the repo's own packs/.
 
 const test = require('node:test');
@@ -22,6 +22,12 @@ function writeFile(root, relPath, content) {
 
 function writeSpec(packsDir, name, spec) {
   writeFile(packsDir, path.join('specs', `${name}.pack.json`), `${JSON.stringify(spec, null, 2)}\n`);
+}
+
+function currentVersionDir(builtRoot, name) {
+  const packDir = path.join(builtRoot, name);
+  const version = fs.readFileSync(path.join(packDir, 'current', 'version'), 'utf8').trim();
+  return path.join(packDir, 'versions', version);
 }
 
 function baseSpec(overrides = {}) {
@@ -60,8 +66,7 @@ async function withFixture(run, { spec = baseSpec(), seed = null } = {}) {
         builtRoot,
         ...options,
       }),
-      currentDir: path.join(builtRoot, spec.name, 'current'),
-      previousDir: path.join(builtRoot, spec.name, 'previous'),
+      currentDir: () => currentVersionDir(builtRoot, spec.name),
     };
     return await run(context);
   } finally {
@@ -120,17 +125,18 @@ test('distillOutputPath refuses a non-ENOENT lstat error instead of aborting the
   assert.equal(await distillOutputPath('sources/demo/brief.md', { baseDir: '/packs' }), null);
 });
 
-test('a build writes the pack layout under current/', async () => {
+test('a build writes the pack layout under its pointed version directory', async () => {
   await withFixture(async ({ build, currentDir }) => {
     const report = await build();
+    const versionDir = currentDir();
     assert.equal(report.ok, true, report.errors.join('; '));
-    assert.equal(report.currentDir, currentDir);
+    assert.equal(report.currentDir, versionDir);
 
-    assert.ok(fs.existsSync(path.join(currentDir, 'CLAUDE.md')));
-    assert.ok(fs.existsSync(path.join(currentDir, '.claude', 'rules', '01-demo.md')));
-    assert.ok(fs.existsSync(path.join(currentDir, 'manifest.json')));
+    assert.ok(fs.existsSync(path.join(versionDir, 'CLAUDE.md')));
+    assert.ok(fs.existsSync(path.join(versionDir, '.claude', 'rules', '01-demo.md')));
+    assert.ok(fs.existsSync(path.join(versionDir, 'manifest.json')));
 
-    const rules = fs.readFileSync(path.join(currentDir, '.claude', 'rules', '01-demo.md'), 'utf8');
+    const rules = fs.readFileSync(path.join(versionDir, '.claude', 'rules', '01-demo.md'), 'utf8');
     assert.match(rules, /first source/);
     assert.match(rules, /second source/);
   });
@@ -139,7 +145,7 @@ test('a build writes the pack layout under current/', async () => {
 test('the manifest records the sources that were walked, with hashes', async () => {
   await withFixture(async ({ build, currentDir }) => {
     const report = await build({ now: () => Date.parse('2026-08-19T00:00:00.000Z') });
-    const manifest = readManifest(currentDir);
+    const manifest = readManifest(currentDir());
 
     assert.equal(manifest.name, 'demo');
     assert.equal(manifest.version, report.version);
@@ -153,34 +159,36 @@ test('the manifest records the sources that were walked, with hashes', async () 
 });
 
 test('rebuilding unchanged sources publishes nothing at all', async () => {
-  await withFixture(async ({ build, currentDir, previousDir }) => {
+  await withFixture(async ({ build, currentDir }) => {
     const first = await build();
+    const firstDir = currentDir();
     assert.equal(first.unchanged, false);
-    const publishedAt = fs.statSync(path.join(currentDir, 'CLAUDE.md')).mtimeMs;
+    const publishedAt = fs.statSync(path.join(firstDir, 'CLAUDE.md')).mtimeMs;
 
     const second = await build();
     assert.equal(second.ok, true, second.errors.join('; '));
     assert.equal(second.unchanged, true);
     assert.equal(second.version, first.version);
-    assert.equal(second.currentDir, currentDir, 'an unchanged build still reports where the pack lives');
+    assert.equal(second.currentDir, firstDir, 'an unchanged build still reports where the pack lives');
     // The whole point of the skip: Claude Code hot-reloads skills out of a delivered pack dir, so a
     // rewrite of identical bytes would poke every live session.
-    assert.equal(fs.statSync(path.join(currentDir, 'CLAUDE.md')).mtimeMs, publishedAt);
-    assert.equal(fs.existsSync(previousDir), false, 'nothing was published, so nothing rotated');
+    assert.equal(fs.statSync(path.join(firstDir, 'CLAUDE.md')).mtimeMs, publishedAt);
   });
 });
 
-test('an edited source changes the version and leaves the old build in previous/', async () => {
-  await withFixture(async ({ build, packsDir, currentDir, previousDir }) => {
+test('an edited source changes the pointer and retains the old immutable version', async () => {
+  await withFixture(async ({ build, packsDir, currentDir }) => {
     const first = await build();
+    const firstDir = currentDir();
     writeFile(packsDir, 'sources/demo/one.md', '# One\n\nfirst source, edited\n');
     const second = await build();
+    const secondDir = currentDir();
 
     assert.equal(second.unchanged, false);
     assert.notEqual(second.version, first.version);
-    assert.equal(readManifest(previousDir).version, first.version);
-    assert.equal(readManifest(currentDir).version, second.version);
-    assert.match(fs.readFileSync(path.join(currentDir, '.claude', 'rules', '01-demo.md'), 'utf8'), /edited/);
+    assert.equal(readManifest(firstDir).version, first.version);
+    assert.equal(readManifest(secondDir).version, second.version);
+    assert.match(fs.readFileSync(path.join(secondDir, '.claude', 'rules', '01-demo.md'), 'utf8'), /edited/);
   });
 });
 
@@ -190,10 +198,11 @@ test('exclude patterns drop matched files from the walk', async () => {
       const report = await build();
       assert.equal(report.ok, true, report.errors.join('; '));
 
-      const manifest = readManifest(currentDir);
+      const versionDir = currentDir();
+      const manifest = readManifest(versionDir);
       const paths = manifest.sources[0].files.map((file) => file.relPath);
       assert.deepEqual(paths, ['sources/demo/keep.md']);
-      assert.doesNotMatch(fs.readFileSync(path.join(currentDir, '.claude', 'rules', '01-demo.md'), 'utf8'), /archived/);
+      assert.doesNotMatch(fs.readFileSync(path.join(versionDir, '.claude', 'rules', '01-demo.md'), 'utf8'), /archived/);
     },
     {
       spec: baseSpec({ sources: [{ glob: 'sources/demo/**/*.md', exclude: ['**/archive/**'] }] }),
@@ -211,7 +220,7 @@ test('exclude patterns are anchored to an out-of-base source walk root', async (
       const report = await build();
       assert.equal(report.ok, true, report.errors.join('; '));
       assert.deepEqual(
-        readManifest(currentDir).sources[0].files.map((file) => path.basename(file.relPath)),
+        readManifest(currentDir()).sources[0].files.map((file) => path.basename(file.relPath)),
         ['keep.md']
       );
     },
@@ -231,7 +240,7 @@ test('a leading double star glob walks from the pack base and watches that base'
       const report = await build();
       assert.equal(report.ok, true, report.errors.join('; '));
       assert.deepEqual(
-        readManifest(currentDir).sources[0].files.map((file) => file.relPath),
+        readManifest(currentDir()).sources[0].files.map((file) => file.relPath),
         ['sources/deep/one.md']
       );
       assert.deepEqual(await packWatchRoots(baseSpec({ sources: [{ glob: '**/*.md' }] }), {
@@ -254,7 +263,7 @@ test('a literal directory source takes every file under it', async () => {
       const report = await build();
       assert.equal(report.ok, true, report.errors.join('; '));
       assert.deepEqual(
-        readManifest(currentDir).sources[0].files.map((file) => file.relPath),
+        readManifest(currentDir()).sources[0].files.map((file) => file.relPath),
         ['sources/notes/a.md', 'sources/notes/deep/b.md']
       );
     },
@@ -273,8 +282,9 @@ test('a skill dir is copied into .claude/skills, keeping its tree', async () => 
     async ({ build, currentDir }) => {
       const report = await build();
       assert.equal(report.ok, true, report.errors.join('; '));
-      assert.equal(fs.readFileSync(path.join(currentDir, '.claude', 'skills', 'voice-style', 'SKILL.md'), 'utf8'), 'skill body\n');
-      assert.ok(fs.existsSync(path.join(currentDir, '.claude', 'skills', 'voice-style', 'references', 'tone.md')));
+      const versionDir = currentDir();
+      assert.equal(fs.readFileSync(path.join(versionDir, '.claude', 'skills', 'voice-style', 'SKILL.md'), 'utf8'), 'skill body\n');
+      assert.ok(fs.existsSync(path.join(versionDir, '.claude', 'skills', 'voice-style', 'references', 'tone.md')));
     },
     {
       spec: baseSpec({ skills: [{ dir: 'skills/voice-style' }] }),
@@ -356,8 +366,37 @@ test('a failed rebuild leaves the last good build in place', async () => {
     const bad = await build();
 
     assert.equal(bad.ok, false);
-    assert.equal(readManifest(currentDir).version, good.version);
+    assert.equal(readManifest(currentDir()).version, good.version);
     assert.ok(fs.existsSync(path.join(packsDir, 'specs', 'demo.pack.json')));
+  });
+});
+
+test('a write failure leaves the pointed build byte-identical', async () => {
+  await withFixture(async (ctx) => {
+    const first = await ctx.build();
+    const firstDir = ctx.currentDir();
+    const pointerPath = path.join(ctx.builtRoot, 'demo', 'current', 'version');
+    const pointerBefore = fs.readFileSync(pointerPath, 'utf8');
+    const indexBefore = fs.readFileSync(path.join(firstDir, 'CLAUDE.md'), 'utf8');
+    writeFile(ctx.packsDir, 'sources/demo/one.md', '# One\n\nchanged\n');
+    const originalOpen = fsp.open;
+    fsp.open = async (target, ...args) => {
+      if (String(target).includes(`${path.sep}tmp-`) && path.basename(target) === 'manifest.json') {
+        throw new Error('simulated mid-write failure');
+      }
+      return originalOpen(target, ...args);
+    };
+    try {
+      const failed = await ctx.build();
+      assert.equal(failed.ok, false);
+      assert.match(failed.errors.join('; '), /simulated mid-write failure/);
+    } finally {
+      fsp.open = originalOpen;
+    }
+    const resolved = await resolveBuiltPack('demo', { builtRoot: ctx.builtRoot });
+    assert.equal(resolved.version, first.version);
+    assert.equal(fs.readFileSync(pointerPath, 'utf8'), pointerBefore);
+    assert.equal(fs.readFileSync(path.join(resolved.dir, 'CLAUDE.md'), 'utf8'), indexBefore);
   });
 });
 
@@ -402,7 +441,7 @@ test('a stale tmp dir from a crashed build is swept before the next one', async 
     const report = await build();
     assert.equal(report.ok, true, report.errors.join('; '));
     assert.equal(fs.existsSync(stale), false);
-    assert.deepEqual(fs.readdirSync(path.join(builtRoot, 'demo')).sort(), ['current']);
+    assert.deepEqual(fs.readdirSync(path.join(builtRoot, 'demo')).sort(), ['current', 'versions']);
   });
 });
 
@@ -418,7 +457,7 @@ test('a reclaimed publish lock from a crashed cleanup is swept before the next b
   });
 });
 
-test('two publishers racing serialize cleanup and rotation', async () => {
+test('two publishers racing serialize cleanup and pointer flips', async () => {
   const builtRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-pack-publish-race-'));
   const firstOutputs = [
     { relPath: 'owner.txt', content: 'first' },
@@ -435,8 +474,8 @@ test('two publishers racing serialize cleanup and rotation', async () => {
     ]);
 
     const packDir = path.join(builtRoot, 'demo');
-    const publishedOwners = ['current', 'previous']
-      .map((slot) => fs.readFileSync(path.join(packDir, slot, 'owner.txt'), 'utf8'))
+    const publishedOwners = fs.readdirSync(path.join(packDir, 'versions'))
+      .map((version) => fs.readFileSync(path.join(packDir, 'versions', version, 'owner.txt'), 'utf8'))
       .sort();
     assert.deepEqual(publishedOwners, ['first', 'second']);
     assert.equal(fs.existsSync(path.join(packDir, 'publish.lock')), false);
@@ -457,7 +496,7 @@ test('a publish lock owned by a dead process is reclaimed', async () => {
   })}\n`, 'utf8');
   try {
     await publishBuild(builtRoot, 'demo', [{ relPath: 'owner.txt', content: 'reclaimed' }]);
-    assert.equal(fs.readFileSync(path.join(packDir, 'current', 'owner.txt'), 'utf8'), 'reclaimed');
+    assert.equal(fs.readFileSync(path.join(currentVersionDir(builtRoot, 'demo'), 'owner.txt'), 'utf8'), 'reclaimed');
     assert.equal(fs.existsSync(path.join(packDir, 'publish.lock')), false);
   } finally {
     fs.rmSync(builtRoot, { recursive: true, force: true });
@@ -504,7 +543,7 @@ test('a publish failure survives a release failure', async () => {
   const originalError = console.error;
   const releaseErrors = [];
   fsp.rename = async (source, destination) => {
-    if (destination === path.join(packDir, 'current')) throw new Error('rotation failed');
+    if (destination === path.join(packDir, 'current', 'version')) throw new Error('pointer flip failed');
     return originalRename(source, destination);
   };
   fsp.unlink = async (target) => {
@@ -516,7 +555,7 @@ test('a publish failure survives a release failure', async () => {
   try {
     await assert.rejects(
       publishBuild(builtRoot, 'demo', [{ relPath: 'owner.txt', content: 'broken' }]),
-      /rotation failed/
+      /pointer flip failed/
     );
     assert.equal(releaseErrors.length, 1);
     assert.match(releaseErrors[0], /release failed/);
@@ -558,8 +597,8 @@ test('two publishers atomically contend to reclaim one stale lock', async () => 
       publishBuild(builtRoot, 'demo', [{ relPath: 'owner.txt', content: 'first' }]),
       publishBuild(builtRoot, 'demo', [{ relPath: 'owner.txt', content: 'second' }]),
     ]);
-    const publishedOwners = ['current', 'previous']
-      .map((slot) => fs.readFileSync(path.join(packDir, slot, 'owner.txt'), 'utf8'))
+    const publishedOwners = fs.readdirSync(path.join(packDir, 'versions'))
+      .map((version) => fs.readFileSync(path.join(packDir, 'versions', version, 'owner.txt'), 'utf8'))
       .sort();
     assert.deepEqual(publishedOwners, ['first', 'second']);
     assert.equal(reclaimTargets.length, 2);
@@ -646,8 +685,8 @@ test('the repo proof pack builds from its own spec', async () => {
     });
     assert.equal(report.ok, true, report.errors.join('; '));
     assert.ok(report.tokenEstimate <= report.budgetTokens);
-    assert.ok(fs.existsSync(path.join(root, 'company-context', 'current', 'CLAUDE.md')));
-    assert.ok(fs.existsSync(path.join(root, 'company-context', 'current', '.claude', 'rules', '01-conventions.md')));
+    assert.ok(fs.existsSync(path.join(report.currentDir, 'CLAUDE.md')));
+    assert.ok(fs.existsSync(path.join(report.currentDir, '.claude', 'rules', '01-conventions.md')));
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -690,7 +729,7 @@ test('resolveBuiltPack reports the current dir and version of a built pack', asy
   await withFixture(async (ctx) => {
     const built = await ctx.build();
     const resolved = await resolveBuiltPack('demo', { builtRoot: ctx.builtRoot });
-    assert.equal(resolved.dir, ctx.currentDir);
+    assert.equal(resolved.dir, ctx.currentDir());
     assert.equal(resolved.version, built.version);
     assert.equal(resolved.reason, null);
   });
@@ -703,7 +742,7 @@ test('resolveBuiltPack skips an unbuilt pack, a manifest-less dir, and a path-es
     assert.match(unbuilt.reason, /not built/);
 
     await ctx.build();
-    fs.rmSync(path.join(ctx.currentDir, 'manifest.json'));
+    fs.rmSync(path.join(ctx.currentDir(), 'manifest.json'));
     const manifestless = await resolveBuiltPack('demo', { builtRoot: ctx.builtRoot });
     assert.equal(manifestless.dir, null);
     assert.match(manifestless.reason, /manifest\.json/);
@@ -714,36 +753,56 @@ test('resolveBuiltPack skips an unbuilt pack, a manifest-less dir, and a path-es
   });
 });
 
-// Publishing rotates through two renames, so a crash between them leaves no current/ at all - the
-// "atomic publish" claim overstated it (2026-08 review, section 8). What closes it is delivering the
-// PREVIOUS build in that window rather than skipping the pack, which would silently cost a session
-// its context over a window nobody caused.
-test('a crash mid-rotation still delivers the previous build', async () => {
+test('a crash after the version directory rename leaves the old pointer live', async () => {
   await withFixture(async (ctx) => {
-    await ctx.build();
+    const firstBuild = await ctx.build();
     const first = await resolveBuiltPack('demo', { builtRoot: ctx.builtRoot });
-    assert.equal(first.dir, ctx.currentDir);
-
-    // Exactly the state a crash between the two renames leaves behind.
-    const packDir = path.dirname(ctx.currentDir);
-    fs.renameSync(ctx.currentDir, path.join(packDir, 'previous'));
-
-    const fallback = await resolveBuiltPack('demo', { builtRoot: ctx.builtRoot });
-    assert.equal(fallback.dir, path.join(packDir, 'previous'));
-    assert.equal(fallback.version, first.version);
-    assert.equal(fallback.reason, null);
+    const packDir = path.join(ctx.builtRoot, 'demo');
+    const pointerPath = path.join(packDir, 'current', 'version');
+    const pointerBefore = fs.readFileSync(pointerPath, 'utf8');
+    writeFile(ctx.packsDir, 'sources/demo/one.md', '# One\n\nnew bytes\n');
+    const originalRename = fsp.rename;
+    fsp.rename = async (source, destination) => {
+      if (destination === pointerPath) throw new Error('simulated crash before pointer flip');
+      return originalRename(source, destination);
+    };
+    try {
+      const failed = await ctx.build();
+      assert.equal(failed.ok, false);
+    } finally {
+      fsp.rename = originalRename;
+    }
+    const stillCurrent = await resolveBuiltPack('demo', { builtRoot: ctx.builtRoot });
+    assert.equal(stillCurrent.dir, first.dir);
+    assert.equal(stillCurrent.version, firstBuild.version);
+    assert.equal(fs.readFileSync(pointerPath, 'utf8'), pointerBefore);
+    assert.equal(fs.readdirSync(path.join(packDir, 'versions')).length, 2);
   });
 });
 
-test('with neither slot readable the skip still names what was wrong with current', async () => {
+test('version GC retains two directories and never removes the pointed version', async () => {
+  await withFixture(async (ctx) => {
+    for (const content of ['first', 'second', 'third']) {
+      writeFile(ctx.packsDir, 'sources/demo/one.md', `# One\n\n${content}\n`);
+      const report = await ctx.build();
+      assert.equal(report.ok, true, report.errors.join('; '));
+    }
+    const packDir = path.join(ctx.builtRoot, 'demo');
+    const pointedVersion = fs.readFileSync(path.join(packDir, 'current', 'version'), 'utf8').trim();
+    const retainedVersions = fs.readdirSync(path.join(packDir, 'versions')).sort();
+    assert.equal(retainedVersions.length, 2);
+    assert.equal(retainedVersions.includes(pointedVersion), true);
+    assert.equal(fs.existsSync(path.join(packDir, 'versions', pointedVersion, 'manifest.json')), true);
+  });
+});
+
+test('a missing pointed version is refused without a previous fallback', async () => {
   await withFixture(async (ctx) => {
     await ctx.build();
-    const packDir = path.dirname(ctx.currentDir);
-    fs.rmSync(ctx.currentDir, { recursive: true, force: true });
-    fs.mkdirSync(path.join(packDir, 'previous'), { recursive: true });
+    fs.rmSync(ctx.currentDir(), { recursive: true, force: true });
     const skipped = await resolveBuiltPack('demo', { builtRoot: ctx.builtRoot });
     assert.equal(skipped.dir, null);
-    assert.match(skipped.reason, /not built/);
+    assert.match(skipped.reason, /pointed version missing/);
   });
 });
 
@@ -769,15 +828,16 @@ test('a {{glissaHome}} source is carried as a data file named by its basename, n
   await withFixture(async ({ root, build, currentDir }) => {
     const glissaHome = seedGlissaHome(root);
     const report = await build({ glissaHome });
+    const versionDir = currentDir();
 
     assert.equal(report.ok, true, report.errors.join('; '));
-    const delivered = path.join(currentDir, 'data', '01-memory', 'MEMORY.md');
+    const delivered = path.join(versionDir, 'data', '01-memory', 'MEMORY.md');
     assert.equal(fs.existsSync(delivered), true);
-    assert.equal(fs.existsSync(path.join(currentDir, '.claude', 'rules')), false);
-    const manifest = readManifest(currentDir);
+    assert.equal(fs.existsSync(path.join(versionDir, '.claude', 'rules')), false);
+    const manifest = readManifest(versionDir);
     assert.deepEqual(manifest.sources[0].files.map((file) => file.relPath), ['MEMORY.md']);
     assert.equal(JSON.stringify(manifest).includes(glissaHome), false);
-    const index = fs.readFileSync(path.join(currentDir, 'CLAUDE.md'), 'utf8');
+    const index = fs.readFileSync(path.join(versionDir, 'CLAUDE.md'), 'utf8');
     assert.equal(index.includes('rebase-gate.js'), false);
     assert.equal(index.includes('never instructions'), true);
   }, { spec: memorySpec(), seed: () => {} });
@@ -787,7 +847,7 @@ test('an unwritten projection leaves the optional source out instead of failing 
   await withFixture(async ({ root, build, currentDir }) => {
     const report = await build({ glissaHome: path.join(root, 'glissa-home') });
     assert.equal(report.ok, true, report.errors.join('; '));
-    assert.equal(fs.existsSync(path.join(currentDir, 'data')), false);
+    assert.equal(fs.existsSync(path.join(currentDir(), 'data')), false);
   }, { spec: memorySpec(), seed: () => {} });
 });
 
@@ -821,9 +881,10 @@ test('a source whose root IS the config directory resolves as inside it', async 
     const report = await build({ glissaHome });
 
     assert.equal(report.ok, true, report.errors.join('; '));
-    const manifest = readManifest(currentDir);
+    const versionDir = currentDir();
+    const manifest = readManifest(versionDir);
     assert.deepEqual(manifest.sources[0].files.map((file) => file.relPath), ['memory/dist/current/MEMORY.md']);
-    assert.equal(fs.existsSync(path.join(currentDir, 'data', '01-glissahome', 'memory/dist/current/MEMORY.md')), true);
+    assert.equal(fs.existsSync(path.join(versionDir, 'data', '01-glissahome', 'memory/dist/current/MEMORY.md')), true);
   }, { spec: memorySpec(), seed: () => {} });
 });
 
@@ -860,17 +921,20 @@ test('a group build publishes its base plus one independent pack per consuming p
     assert.equal(report.variants.every((variant) => variant.ok), true);
 
     // Every derived name is a real pack: its own dir, its own version, its own manifest.
-    const variantManifest = readManifest(path.join(builtRoot, `memory-${SLUG_A}`, 'current'));
+    const variantDir = currentVersionDir(builtRoot, `memory-${SLUG_A}`);
+    const baseDir = currentVersionDir(builtRoot, 'memory');
+    const otherVariantDir = currentVersionDir(builtRoot, `memory-${SLUG_B}`);
+    const variantManifest = readManifest(variantDir);
     assert.equal(variantManifest.name, `memory-${SLUG_A}`);
     assert.equal(variantManifest.group, 'memory');
     assert.equal(variantManifest.projectId, 'p1');
-    assert.notEqual(variantManifest.version, readManifest(path.join(builtRoot, 'memory', 'current')).version);
+    assert.notEqual(variantManifest.version, readManifest(baseDir).version);
 
     // The project layer rides its OWN variant and nothing else.
-    const ownLayer = path.join(builtRoot, `memory-${SLUG_A}`, 'current', 'data', `02-${SLUG_A}`, `${SLUG_A}.md`);
+    const ownLayer = path.join(variantDir, 'data', `02-${SLUG_A}`, `${SLUG_A}.md`);
     assert.equal(fs.existsSync(ownLayer), true);
-    assert.equal(fs.existsSync(path.join(builtRoot, 'memory', 'current', 'data', `02-${SLUG_A}`)), false);
-    assert.equal(fs.existsSync(path.join(builtRoot, `memory-${SLUG_B}`, 'current', 'data', `02-${SLUG_A}`)), false);
+    assert.equal(fs.existsSync(path.join(baseDir, 'data', `02-${SLUG_A}`)), false);
+    assert.equal(fs.existsSync(path.join(otherVariantDir, 'data', `02-${SLUG_A}`)), false);
   }, { spec: variantMemorySpec(), seed: () => {} });
 });
 
@@ -881,7 +945,7 @@ test('a project with no layer yet still gets a variant: a missing per-project so
 
     assert.equal(report.ok, true, report.errors.join('; '));
     assert.equal(report.variants.every((variant) => variant.ok), true, report.variants.map((v) => v.errors.join('; ')).join(' | '));
-    const manifest = readManifest(path.join(builtRoot, `memory-${SLUG_B}`, 'current'));
+    const manifest = readManifest(currentVersionDir(builtRoot, `memory-${SLUG_B}`));
     assert.deepEqual(manifest.sources.map((source) => source.dataDir), ['data/01-memory']);
   }, { spec: variantMemorySpec(), seed: () => {} });
 });
@@ -919,7 +983,7 @@ test('a rebuild that changes nothing republishes no variant either', async () =>
 
     assert.equal(again.unchanged, true);
     assert.equal(again.variants.every((variant) => variant.unchanged), true);
-    assert.equal(fs.existsSync(path.join(builtRoot, `memory-${SLUG_A}`, 'previous')), false);
+    assert.equal(fs.readdirSync(path.join(builtRoot, `memory-${SLUG_A}`, 'versions')).length, 1);
   }, { spec: variantMemorySpec(), seed: () => {} });
 });
 
